@@ -7,7 +7,7 @@ line() { printf '%s\n' "$out" | grep "$1" | head -n 1; }
 
 # Instalação nova: tudo no ar, linha e motor ainda por configurar.
 out="$(bash "$H" 2>&1)"; equal "instalação nova sem linha nem chave: sai com zero" 0 "$?"
-equal "uma linha por peça (9 peças)" 9 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
+equal "uma linha por peça (10 peças)" 10 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
 for piece in Painel Banco Asterisk "Worker de voz" Rotinas "Linha telefônica" "Motor de voz" "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
 contains "linha não cadastrada é aviso, não falha" "$(line 'Linha telefônica')" "aviso"
 contains "linha não cadastrada traz o detalhe" "$(line 'Linha telefônica')" "nenhuma linha cadastrada ainda"
@@ -41,6 +41,18 @@ printf '%s\n' 'panel|ok|respondendo' 'trunk|ok|registrado' 'engine|ok|gemini-liv
 echo 1 > "$FAKE_DIR/pg_isready_exit"; bash "$H" >/dev/null 2>&1; equal "banco sem aceitar conexão: código 1" 1 "$?"; echo 0 > "$FAKE_DIR/pg_isready_exit"
 echo 1 > "$FAKE_DIR/voice_exit"; out="$(bash "$H" 2>&1)"; equal "worker de voz mudo: código 1" 1 "$?"; echo 0 > "$FAKE_DIR/voice_exit"
 contains "worker de voz mudo é falha" "$(line 'Worker de voz')" "falha"
+
+# O Asterisk responde a comandos, mas o processo de voz não consegue falar com ele (ARI fechada):
+# nenhuma ligação é atendida. Isso é falha essencial, com a causa provável, e não um "ok".
+printf 'asterisk|fail|connect ECONNREFUSED 10.0.9.3:8088\n' > "$FAKE_DIR/voice_health"
+out="$(bash "$H" 2>&1)"; equal "voz sem conversar com o Asterisk: código 1" 1 "$?"
+contains "voz sem conversar com o Asterisk: diz que é falha" "$out" "falha  Controle da telefonia"
+contains "voz sem conversar com o Asterisk: mostra o motivo" "$out" "ECONNREFUSED"
+contains "voz sem conversar com o Asterisk: aponta a causa provável" "$out" "não leu a configuração"
+bash "$H" --essential >/dev/null 2>&1; equal "voz sem conversar com o Asterisk: reprova também no modo essencial" 1 "$?"
+printf 'asterisk|ok|PJSIP 20.20.1\n' > "$FAKE_DIR/voice_health"
+out="$(bash "$H" 2>&1)"; equal "voz conversando com o Asterisk: código 0" 0 "$?"
+contains "voz conversando com o Asterisk: diz ok" "$out" "ok     Controle da telefonia"
 printf '%s\n' postgres panel voice routines > "$FAKE_DIR/running"; bash "$H" >/dev/null 2>&1; equal "Asterisk parado: código 1" 1 "$?"
 printf '%s\n' postgres asterisk panel voice routines > "$FAKE_DIR/running"
 
@@ -60,7 +72,7 @@ lacks "tudo certo: nenhuma falha" "$out" "falha "
 json="$(bash "$H" --json 2>&1)"
 contains "json: código de saída" "$json" '{"exit_code":0,"checks":['
 contains "json: peça com estado e detalhe" "$json" '{"id":"trunk","name":"Linha telefônica","essential":false,"status":"ok","detail":"registrado"}'
-equal "json: nove peças" 9 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
+equal "json: dez peças" 10 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
 if command -v python3 >/dev/null 2>&1; then check "json: é JSON válido" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$json"; fi
 printf '%s\n' 'panel|ok|diz "aspas" e \barra' 'trunk|ok|x' 'engine|ok|y' > "$FAKE_DIR/panel_health"
 if command -v python3 >/dev/null 2>&1; then check "json: escapa aspas e barra" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(bash "$H" --json 2>&1)"; fi

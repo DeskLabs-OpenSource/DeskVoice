@@ -56,6 +56,18 @@ printf 'DESKVOICE_DOMAIN=arquivo.exemplo.com.br\ntouch %s/pwned\nPATH=/nada\n' "
 out="$(bash "$KIT/install.sh" --dry-run --yes --answers "$SANDBOX/answers.env" 2>&1)"
 contains "lê a resposta do arquivo" "$out" "https://arquivo.exemplo.com.br"
 refuse "arquivo de respostas não é executado" test -e "$SANDBOX/pwned"
+# Sem domínio, com 80/443 de outro proxy: por padrão o painel abre pelo IP (sem HTTPS, e avisa).
+# Quem não quer um login exposto na internet pede acesso só local e entra por túnel SSH.
+printf 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:*\nLISTEN 0 511 0.0.0.0:443 0.0.0.0:*\n' > "$FAKE_DIR/ss_tcp"
+out="$(DESKVOICE_DOMAIN="" bash "$KIT/install.sh" --dry-run --yes 2>&1)"; equal "sem domínio: simulação sai com zero" 0 "$?"
+contains "sem domínio: publica para fora" "$out" "0.0.0.0:3080"
+contains "sem domínio: avisa que não há HTTPS" "$out" "SEM HTTPS"
+out="$(DESKVOICE_DOMAIN="" DESKVOICE_PANEL_LOCAL_ONLY=yes bash "$KIT/install.sh" --dry-run --yes 2>&1)"; equal "só local: simulação sai com zero" 0 "$?"
+contains "só local: publica só na própria máquina" "$out" "127.0.0.1:3080"
+lacks "só local: não publica para fora" "$out" "0.0.0.0:3080"
+contains "só local: ensina o túnel" "$out" "ssh -L 3080:127.0.0.1:3080"
+out="$(DESKVOICE_DOMAIN="" DESKVOICE_PANEL_LOCAL_ONLY=talvez bash "$KIT/install.sh" --dry-run --yes 2>&1)"; equal "só local com valor estranho: recusa" 1 "$?"
+contains "só local com valor estranho: diz o que vale" "$out" "DESKVOICE_PANEL_LOCAL_ONLY"
 equal "nenhuma simulação alterou arquivo" "$before" "$(snapshot)"
 equal "nenhuma simulação mandou o Docker alterar nada" 0 "$(mutating_calls)"
 finish

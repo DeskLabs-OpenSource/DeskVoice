@@ -43,6 +43,22 @@ render_asterisk_config
 G="$D/asterisk/generated"
 contains "ari.conf recebe a senha da ARI" "$(cat "$G/ari.conf")" "password = $(env_get "$D/app.env" ARI_PASSWORD)"
 equal "pasta com a senha da ARI fechada para outros usuários" 700 "$(mode_of "$G")"
+
+# Servidor endurecido (umask 077): o repositório baixado e tudo o que o instalador escreve nascem
+# legíveis só pelo dono. O Asterisk roda com outro usuário dentro do contêiner, então todo arquivo
+# que ele monta precisa sair legível, qualquer que seja o umask. Achado na primeira instalação
+# real: o plano de discagem e a ARI não carregaram e a checagem dizia "ok".
+( umask 077
+  chmod 600 "$D/asterisk/extensions.conf" "$D/asterisk/http.conf"
+  rm -rf "$G"
+  source "$KIT/_common.sh"; render_asterisk_config )
+for f in extensions.conf http.conf ari.conf rtp.conf pjsip.conf; do
+  check "umask 077: $f existe na pasta montada" test -s "$G/$f"
+  equal "umask 077: $f legível pelo Asterisk" 644 "$(mode_of "$G/$f")"
+done
+equal "umask 077: a pasta continua fechada para outros usuários da VPS" 700 "$(mode_of "$G")"
+contains "o plano de discagem montado é o do repositório" "$(cat "$G/extensions.conf")" "Stasis(deskvoice,inbound)"
+lacks "o compose não monta mais arquivo direto do repositório" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/extensions.conf"
 contains "rtp.conf recebe o início da faixa" "$(cat "$G/rtp.conf")" "rtpstart=20000"
 contains "rtp.conf recebe o fim da faixa" "$(cat "$G/rtp.conf")" "rtpend=20200"
 contains "pjsip.conf anuncia o IP público no áudio" "$(cat "$G/pjsip.conf")" "external_media_address=198.51.100.7"
