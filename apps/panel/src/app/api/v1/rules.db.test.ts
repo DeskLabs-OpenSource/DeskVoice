@@ -344,7 +344,7 @@ describe("removing and correcting lines and numbers", () => {
     const trunk = await newTrunk("Com números");
     const numbers = [await newNumber(trunk, "(31) 3666-0001"), await newNumber(trunk, "(31) 3666-0002")];
     panel.voice.requests.length = 0;
-    panel.voice.respond = () => Response.json({ applied: true });
+    panel.voice.respond = () => Response.json({ applied: true, detail: "1 line(s) written, reloaded and listed by the telephony server.", skipped: [] });
 
     const refused = await call(deleteTrunk, { method: "DELETE", cookie: owner, params: { id: trunk } });
     expect([refused.status, refused.code]).toEqual([409, "trunk_has_numbers"]);
@@ -358,10 +358,36 @@ describe("removing and correcting lines and numbers", () => {
     for (const id of numbers) expect(listed).not.toContain(id);
 
     const removed = await call(deleteTrunk, { method: "DELETE", cookie: owner, params: { id: trunk } });
-    expect(removed.data).toEqual({ applied: true, detail: "" });
+    expect(removed.data).toEqual({ applied: true, detail: "1 line(s) written, reloaded and listed by the telephony server." });
     expect(await stored("select id from trunks where id = $1", [trunk])).toBeNull();
     // A linha saiu do banco: o processo de voz é chamado para tirá-la também do servidor de telefonia.
     expect(panel.voice.requests).toEqual([{ url: "http://voice.test/trunks/apply", body: { organizationId: org } }]);
+  });
+
+  it("does not claim a line was applied when the voice process says the telephony server did not load it", async () => {
+    // O processo de voz responde 200 nos dois casos; o que diz se carregou é o corpo.
+    const detail = "The lines were written, but the telephony server did not reload them: connect ECONNREFUSED";
+    panel.voice.respond = () => Response.json({ applied: false, detail, skipped: [] });
+
+    const created = await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Asterisk fora", host: "203.0.113.40", authMode: "ip" } });
+    expect(created.status).toBe(200);
+    expect(created.data).toMatchObject({ applied: false, detail });
+
+    const id = (created.data as { id: string }).id;
+    const checked = await call(checkTrunk, { method: "POST", cookie: owner, params: { id } });
+    const steps = (checked.data as { steps: Array<{ step: string; status: string; detail: string }> }).steps;
+    expect(steps[0]).toEqual({ step: "apply", status: "fail", detail });
+
+    panel.voice.respond = () => Response.json({ applied: true, detail: "1 line(s) written, reloaded and listed by the telephony server.", skipped: [] });
+    const renamed = await call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body: { name: "Asterisk de volta" } });
+    expect(renamed.data).toMatchObject({ applied: true });
+  });
+
+  it("treats an answer it cannot read as not applied", async () => {
+    panel.voice.respond = () => Response.json({ unexpected: true });
+    const created = await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Resposta estranha", host: "203.0.113.41", authMode: "ip" } });
+    expect(created.status).toBe(200);
+    expect((created.data as { applied: boolean }).applied).toBe(false);
   });
 
   it("an operator cannot remove or correct anything", async () => {
@@ -452,7 +478,7 @@ describe("voice process", () => {
     panel.voice.respond = (url) =>
       url.endsWith("/health")
         ? Response.json({ asterisk: { status: "ok", detail: "up" }, trunks: [{ id: trunk, status: "fail", detail: "401 Unauthorized" }] })
-        : Response.json({ applied: true });
+        : Response.json({ applied: true, detail: "1 line(s) written, reloaded and listed by the telephony server.", skipped: [] });
     const rejected = await call(checkTrunk, { method: "POST", cookie: owner, params: { id: trunk } });
     expect(rejected.data).toMatchObject({ status: "fail", steps: [{ status: "ok" }, { status: "ok" }, { step: "trunk", status: "fail", detail: "401 Unauthorized" }] });
     expect(await stored("select status, last_error, last_check_at from trunks where id = $1", [trunk])).toEqual({ status: "fail", last_error: "401 Unauthorized", last_check_at: NOW });
