@@ -61,7 +61,7 @@ Nenhum recurso exige SSH para ser ligado.
 | O que ter em mãos | Observação |
 |---|---|
 | Uma VPS Ubuntu 22.04 ou mais nova | A [VPS da HostGator](https://www.hostgator.com.br/52708-141-3-52.html), parceira do projeto, é a recomendada. Qualquer VPS com Docker serve, pelo mesmo comando. Sobre memória, só o que foi medido: a instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 400 MB. O menor tamanho em que a instalação cabe ainda não foi medido. As imagens publicadas são para processador x86_64 (amd64); em ARM a instalação constrói na própria máquina, com `--build` |
-| Um domínio apontado para a VPS | Opcional para testar. Sem domínio, o painel abre pelo IP e sem HTTPS |
+| Um domínio apontado para a VPS | Opcional para testar. Sem domínio não há HTTPS: o painel fica só dentro da VPS e você entra por túnel SSH (o instalador mostra o comando) |
 | Um tronco SIP com um número | Contratado com a operadora de telefonia de sua escolha. Autenticação por registro ou por IP |
 | Uma chave de IA de voz | Gemini (Google) ou OpenAI. Você paga o uso direto ao provedor |
 

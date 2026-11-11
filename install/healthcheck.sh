@@ -39,13 +39,16 @@ JS
 # Pede ao Caddy, de dentro da rede, o painel e o /voice-ws. Devolve `panel|<HTTP>` e
 # `voice|<HTTP>`; em erro de conexão, `erro <motivo>` no lugar do número. O serviço de voz
 # responde 426 a quem chega sem WebSocket: é a prova de que o caminho vai até ele.
+# Devolve também `agent|<HTTP>|<bytes do corpo>` para a rota do agente de atualização: quem a
+# recusa tem de ser o Caddy (404 de corpo vazio). Se o 404 vem com corpo, quem respondeu foi o
+# painel: o Caddy está rodando um Caddyfile antigo, sem a regra.
 #   entry_probe_js <http|https> <porta> <nome do site>
 entry_probe_js() {
   cat <<JS
 const m=require('$1');
-const hit=p=>new Promise(done=>{const q=m.request({host:'caddy',port:$2,path:p,servername:'$3',headers:{Host:'$3'},rejectUnauthorized:false,timeout:8000},r=>{r.resume();done(String(r.statusCode))});
+const hit=(p,size)=>new Promise(done=>{const q=m.request({host:'caddy',port:$2,path:p,servername:'$3',headers:{Host:'$3'},rejectUnauthorized:false,timeout:8000},r=>{let n=0;r.on('data',d=>n+=d.length).on('end',()=>done(r.statusCode+(size?'|'+n:'')))});
 q.on('timeout',()=>q.destroy(new Error('sem resposta em 8s')));q.on('error',e=>done('erro '+String(e.code||e.message).replace(/[\\n|]/g,' ')));q.end()});
-(async()=>{console.log('panel|'+await hit('/api/v1/system/health'));console.log('voice|'+await hit('/voice-ws'))})();
+(async()=>{console.log('panel|'+await hit('/api/v1/system/health'));console.log('voice|'+await hit('/voice-ws'));console.log('agent|'+await hit('/api/v1/system/agent',1))})();
 JS
 }
 label() { case "$1" in ok) echo ok ;; warn) echo aviso ;; *) echo falha ;; esac; }
@@ -113,22 +116,20 @@ if [ "$only_essential" = 0 ]; then
   # ── Entrada única: painel e voz do navegador pelo mesmo endereço ──
   # Pergunta de dentro da rede, ao Caddy, pelos dois caminhos. É a ligação que faltava:
   # "o painel abre e a voz não conecta" tem que aparecer aqui, não na tela de quem ligou.
-  entry_site="$(sed -n 's/.*CADDY_SITE: "\(.*\)".*/\1/p' "$PROXY_OVERRIDE" 2>/dev/null | head -n 1 || true)"
+  entry_at="$(entry_target)"; entry_lines=""
   entry_ports="$(sed -n 's/^ *- "\(.*\)"$/\1/p' "$PROXY_OVERRIDE" 2>/dev/null | tr '\n' ' ' || true)"
   if [ -f "$PROXY_OVERRIDE" ] && grep -q ':3000"' "$PROXY_OVERRIDE"; then
     add entry "Entrada única" 0 falha "esta instalação ainda publica painel e voz em duas portas (formato antigo): \"Falar com o agente\" não conecta. Rode: bash install/install.sh (mantém a mesma porta do painel)"
-  elif [ -z "$entry_site" ] || [ -z "$entry_ports" ]; then
+  elif [ -z "$entry_at" ] || [ -z "$entry_ports" ]; then
     add entry "Entrada única" 0 falha "o Caddy do DeskVoice não tem porta publicada: o painel não abre de fora. Rode: bash install/install.sh"
   elif ! running caddy; then
     add entry "Entrada única" 0 falha "o Caddy do DeskVoice não está rodando: o painel não abre de fora. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"
   elif ! running panel; then
     add entry "Entrada única" 0 aviso "não deu para conferir porque o painel não está rodando; resolva o painel primeiro"
   else
-    case "$entry_site" in
-      :*) entry_scheme=http; entry_port=80; entry_host=localhost ;;
-      *) entry_scheme=https; entry_port=443; entry_host="$entry_site" ;;
-    esac
-    entry_lines="$(dc exec -T panel node -e "$(entry_probe_js "$entry_scheme" "$entry_port" "$entry_host")" 2>/dev/null || true)"
+    entry_scheme="${entry_at%% *}"; entry_site="${entry_at##* }"
+    # shellcheck disable=SC2086  # entry_target devolve três palavras, de propósito
+    entry_lines="$(dc exec -T panel node -e "$(entry_probe_js $entry_at)" 2>/dev/null || true)"
     entry_panel="$(printf '%s\n' "$entry_lines" | awk -F'|' '$1 == "panel" { print $2; exit }')"
     entry_voice="$(printf '%s\n' "$entry_lines" | awk -F'|' '$1 == "voice" { print $2; exit }')"
     case "$entry_panel" in
@@ -169,7 +170,16 @@ if [ "$only_essential" = 0 ]; then
     cron) if [ -f "$CRON_DIR/$AGENT_UNIT" ]; then agent_sched="cron"; fi ;;
   esac
   agent_last="$(cat "$AGENT_STATE_DIR/last-ok" 2>/dev/null || true)"
-  if [ -z "$agent_sched" ]; then
+  # Pela entrada, a rota do agente tem de ser recusada pelo Caddy: 404 sem corpo.
+  agent_route="$(printf '%s\n' "$entry_lines" | awk -F'|' '$1 == "agent" { print $2 "|" $3; exit }')"
+  case "$agent_route" in
+    ""|"404|0"|erro*) agent_layer="" ;;   # sem resposta da entrada não há o que dizer aqui: a linha "Entrada única" já acusa
+    "404|"*) agent_layer="pela entrada, quem recusa a rota do agente é o PAINEL, e não o Caddy: o Caddy está rodando um Caddyfile antigo, de antes da atualização (o arquivo só é relido ao reiniciar). Reinicie o Caddy: docker restart deskvoice-caddy-1" ;;
+    *) agent_layer="pela entrada, a rota do agente respondeu HTTP ${agent_route%%|*} em vez de \"não existe\" (404): o Caddy não está aplicando a regra que a esconde da internet. Reinicie o Caddy: docker restart deskvoice-caddy-1  — e, se continuar, rode bash install/diagnose.sh" ;;
+  esac
+  if [ -n "$agent_layer" ]; then
+    add agent "Agente de atualização" 0 aviso "$agent_layer"
+  elif [ -z "$agent_sched" ]; then
     add agent "Agente de atualização" 0 aviso "não está agendado: a atualização pela tela não funciona (pelo terminal, sim). Rode: sudo bash install/agent.sh --install"
   elif [ -n "$(find "$AGENT_STATE_DIR/last-ok" -mmin -5 2>/dev/null)" ]; then
     add agent "Agente de atualização" 0 ok "agendado ($agent_sched); falou com o painel pela última vez em $agent_last"

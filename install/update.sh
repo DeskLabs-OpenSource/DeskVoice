@@ -194,6 +194,13 @@ for service in $APP_SERVICES; do docker rmi "$(image_ref "$service" rollback)" >
 # Instalação que veio de uma versão sem agente passa a tê-lo; nas outras, só confere.
 install_agent_schedule
 ok "Atualizado para $target, com todas as peças essenciais respondendo."
+# Pelo caminho de quem usa: a porta publicada. Não provoca volta (a regra da volta é a de cima,
+# pela entrada de dentro da rede), mas a atualização não termina calada sobre isso.
+probe_url="$(published_probe_url "$(env_get "$APP_ENV_FILE" PUBLIC_IP)")"
+reach="$(probe_published "$probe_url")"
+if [ "$reach" = 200 ]; then ok "O painel responde pela porta publicada ($probe_url)"
+elif [ -n "$reach" ]; then warn "As peças respondem, mas a porta publicada do painel (${probe_url:-nenhuma}) não respondeu daqui (resposta: $reach): confira se o painel abre no navegador e rode bash install/healthcheck.sh"
+else warn "Não conferi a porta publicada do painel: falta o comando curl nesta máquina. Confira se o painel abre no navegador."; fi
 info "Backup de antes da atualização: $backup_dir"
 info "Relatório completo: bash install/healthcheck.sh"
 }

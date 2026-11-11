@@ -14,14 +14,21 @@
 # o projeto não tiver nenhuma versão publicada, as imagens são construídas nesta máquina.
 #
 # Respostas aceitas (variável ou linha do arquivo):
-#   DESKVOICE_DOMAIN           domínio do painel; vazio = sem domínio por enquanto (usa o IP, sem HTTPS)
+#   DESKVOICE_DOMAIN           domínio do painel (HTTPS). Vazio = sem domínio por enquanto: o painel fica só
+#                              nesta VPS (127.0.0.1) e você entra por túnel SSH
 #   DESKVOICE_ORG_NAME         nome da empresa
 #   DESKVOICE_OWNER_NAME       seu nome
 #   DESKVOICE_OWNER_EMAIL      seu e-mail (é o login)
 #   DESKVOICE_OWNER_PASSWORD   sua senha do painel (10 caracteres ou mais)
 #   DESKVOICE_PUBLIC_IP        opcional: IP público, se a descoberta automática falhar
-#   DESKVOICE_PANEL_LOCAL_ONLY=yes  opcional, sem domínio e com 80/443 de outro proxy: o painel só abre
-#                              de dentro da VPS (acesso por túnel SSH), em vez de ficar na internet sem HTTPS
+#   DESKVOICE_PANEL_LOCAL_ONLY=yes   opcional, sem domínio: o painel só abre de dentro da VPS (túnel SSH). Já é
+#                              o padrão de instalação nova; serve para FECHAR uma instalação publicada por HTTP
+#   DESKVOICE_PANEL_PUBLIC_HTTP=yes  opcional, sem domínio: publica o painel na internet por HTTP, SEM HTTPS
+#                              (a senha trafega sem criptografia). Só para teste, e só pedindo de propósito
+#                              As duas só aceitam o valor yes, e só valem sem domínio: com outro valor, ou
+#                              numa instalação com domínio, o instalador para com erro em vez de ignorar
+#   DESKVOICE_PANEL_PORT       opcional: a porta local do painel (padrão: 3080 ou a seguinte livre). Só vale
+#                              quando o painel sai por uma porta local (sem domínio, ou 80/443 de outro proxy)
 #   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar
 #   DESKVOICE_RTP_START / DESKVOICE_RTP_END   opcional: outra faixa de portas de áudio
 #   DESKVOICE_VERSION          opcional: uma versão publicada específica (exemplo: 0.3.0), em vez da mais recente
@@ -35,7 +42,7 @@ while [ $# -gt 0 ]; do
     --force) FORCE=1 ;;
     --build) BUILD=1 ;;
     --answers) answers_file="${2:-}"; shift ;;
-    -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Veja as opções com: bash install/install.sh --help" ;;
   esac
   shift
@@ -49,7 +56,25 @@ if [ -n "$answers_file" ]; then
   done < "$answers_file"
 fi
 
+# Opções de exposição do painel: o valor é conferido aqui, em todo modo e antes de qualquer coisa
+# ser gravada. Se a opção tem efeito no modo desta máquina é conferido adiante, quando o modo é
+# conhecido (domínio, 80/443): opção sem efeito para com erro, nunca é ignorada em silêncio.
+for option in DESKVOICE_PANEL_LOCAL_ONLY DESKVOICE_PANEL_PUBLIC_HTTP; do
+  case "$(printenv "$option" || true)" in
+    ""|yes) ;;
+    *) die "O valor de $option ($(printenv "$option")) não vale." "O único valor aceito é yes, em minúsculas: $option=yes. Para ficar com o padrão, não defina a variável." ;;
+  esac
+done
+if [ -n "${DESKVOICE_PANEL_LOCAL_ONLY:-}" ] && [ -n "${DESKVOICE_PANEL_PUBLIC_HTTP:-}" ]; then
+  die "DESKVOICE_PANEL_LOCAL_ONLY=yes e DESKVOICE_PANEL_PUBLIC_HTTP=yes pedem coisas opostas (painel só nesta VPS, e painel na internet por HTTP)." "Escolha uma das duas e rode de novo."
+fi
+if [ -n "${DESKVOICE_PANEL_PORT:-}" ]; then
+  valid_port "$DESKVOICE_PANEL_PORT" >/dev/null || die "A porta do painel em DESKVOICE_PANEL_PORT ($DESKVOICE_PANEL_PORT) não vale." "Use um número de 1 a 65535, ou não defina a variável."
+fi
+
 SUDO=""; if [ "$(id -u)" != 0 ] && have sudo; then SUDO="sudo"; fi
+# Quem entra por SSH nesta máquina: é o nome que vai no comando do túnel.
+ssh_user="${SUDO_USER:-$(id -un)}"
 would() { info "[simulação] faria: $*"; }
 # Problema que impede uma instalação de verdade. Na simulação vira aviso, para o relatório ir até o fim.
 blocker() {
@@ -222,42 +247,34 @@ fi
 
 # 80 e 443: se já são de outro proxy, não brigamos por elas. O nosso Caddy sobe do mesmo jeito,
 # só com HTTP, numa porta local única: é por ela que entram o painel e a voz do navegador.
-busy80=0; busy443=0; own_caddy=0; proxy_mode=caddy; panel_port=""; panel_bind=""; proxy_holder=""
+busy80=0; busy443=0; own_caddy=0; proxy_mode=caddy; panel_port=""; panel_bind=""; proxy_holder=""; tcp_busy=""
 if ours_running caddy; then own_caddy="$(own_caddy_on_80 1)"; fi
 previous_entry="$(published_entry)"
+# Como o painel já estava publicado, se já estava: a reinstalação não muda a exposição sozinha.
+previous_exposure="$(published_exposure)"
 if have ss; then
   tcp_busy="$(tcp_ports_in_use)"
   printf '%s\n' "$tcp_busy" | grep -qx 80 && busy80=1
   printf '%s\n' "$tcp_busy" | grep -qx 443 && busy443=1
   proxy_mode="$(decide_proxy_mode "$busy80" "$busy443" "$own_caddy")"
 fi
+# A porta local do painel, para os modos em que ele sai por uma porta só (sem domínio, ou 80/443
+# de outro proxy). Reinstalação: mantém a que o proxy existente (ou o seu túnel) já conhece.
+panel_port="${DESKVOICE_PANEL_PORT:-}"
+if [ -z "$panel_port" ] && [ -n "$previous_entry" ]; then panel_port="${previous_entry#* }"; fi
+if [ -z "$panel_port" ]; then panel_port="$(printf '%s\n' "$tcp_busy" | pick_free_port 3080)"; fi
+valid_port "$panel_port" >/dev/null || die "A porta do painel ($panel_port) não vale." "Use um número de 1 a 65535 em DESKVOICE_PANEL_PORT."
 if [ "$proxy_mode" = external ]; then
-  panel_port="${DESKVOICE_PANEL_PORT:-}"
-  # Reinstalação: mantém a porta que o proxy existente (ou o seu túnel) já conhece.
-  if [ -z "$panel_port" ] && [ -n "$previous_entry" ]; then panel_port="${previous_entry#* }"; fi
-  if [ -z "$panel_port" ]; then panel_port="$(printf '%s\n' "$tcp_busy" | pick_free_port 3080)"; fi
-  valid_port "$panel_port" >/dev/null || die "A porta do painel ($panel_port) não vale." "Use um número de 1 a 65535 em DESKVOICE_PANEL_PORT."
   if have docker; then proxy_holder="$(docker ps --filter publish=80 --filter publish=443 --format '{{.Names}} ({{.Image}})' 2>/dev/null | grep -v '^deskvoice-' | head -n 1 || true)"; fi
   warn "As portas 80/443 já estão em uso${proxy_holder:+ por $proxy_holder}."
   info "Não vou disputar essas portas: o DeskVoice fica todo atrás de UMA porta local, a $panel_port"
   info "(painel e voz juntos). No fim eu mostro exatamente o que configurar no proxy que já existe."
 elif have ss; then
-  ok "Portas 80 e 443 disponíveis para o painel"
+  ok "Portas 80 e 443 disponíveis (o painel só as usa com domínio, para o HTTPS)"
 else
   warn "Não consegui conferir se as portas 80 e 443 estão livres (comando ss ausente). Se já houver um proxy nelas, o painel não sobe: instale o pacote iproute2 e rode de novo."
 fi
 
-ufw_rules="5060/udp ${rtp_start}:${rtp_end}/udp"
-[ "$proxy_mode" = caddy ] && ufw_rules="$ufw_rules 80/tcp 443/tcp"
-if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
-  warn "O firewall ufw está ativo. Regras necessárias:"
-  for rule in $ufw_rules; do info "    $SUDO ufw allow $rule"; done
-  if [ "$DRY_RUN" = 1 ]; then would "oferecer aplicar essas regras"
-  elif { [ "$ASSUME_YES" = 1 ] && [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; } || { [ "$ASSUME_YES" != 1 ] && confirm "Aplico essas regras agora?"; }; then
-    for rule in $ufw_rules; do $SUDO ufw allow "$rule" >/dev/null || die "Não consegui aplicar a regra $rule no ufw." "Rode à mão: $SUDO ufw allow $rule"; done
-    ok "Regras aplicadas no ufw"
-  else warn "Regras NÃO aplicadas. Sem elas a ligação pode ficar muda: rode os comandos acima."; fi
-fi
 dim "O que foi conferido é esta máquina. Não dá para provar daqui que o provedor deixa o áudio (UDP)"
 dim "passar: a prova final é a primeira ligação, pelo teste que fica na tela Linha do painel."
 
@@ -268,20 +285,24 @@ domain_or_empty() { [ -z "$1" ] || valid_domain "$1"; }
 export DESKVOICE_DOMAIN
 [ "$ASSUME_YES" = 1 ] || info "Domínio do painel (exemplo: voz.suaempresa.com.br). Sem domínio por enquanto? Só aperte Enter."
 ask domain DESKVOICE_DOMAIN "Domínio do painel" domain_or_empty
-if [ -z "$domain" ]; then
-  warn "Sem domínio: o painel abre pelo IP e SEM HTTPS (a senha trafega sem proteção). Serve para testar;"
-  info "para uso de verdade, aponte um domínio para $public_ip e rode o instalador de novo."
-elif have getent; then
+if [ -n "$domain" ] && have getent; then
   resolved="$(getent ahostsv4 "$domain" 2>/dev/null | awk 'NR == 1 { print $1 }' || true)"
   if [ -z "$resolved" ]; then warn "O domínio $domain ainda não aponta para lugar nenhum. Crie no seu provedor de domínio um registro A para $public_ip; o HTTPS só funciona depois disso."
   elif [ "$resolved" != "$public_ip" ]; then warn "O domínio $domain aponta para $resolved, e esta VPS é $public_ip. Se não for um proxy (como Cloudflare), corrija o registro A; o HTTPS depende disso."
   else ok "O domínio $domain aponta para esta VPS"; fi
 fi
 
-create_owner=1; org_name=""; owner_name=""; owner_email=""; owner_password=""
+# login_strict só vira 1 onde o dono é de fato criado, com esta senha: aí, se ela não entrar, é
+# defeito. Em qualquer outro caso o dono já existia e a senha pode ser outra: recusa é aviso.
+create_owner=1; login_strict=0; org_name=""; owner_name=""; owner_email=""; owner_password=""
 if ours_running postgres && owner_exists; then
   create_owner=0
   ok "Já existe um usuário dono nesta instalação: não vou criar outro nem pedir senha."
+  # Sem perguntar nada: se o e-mail e a senha vieram nas respostas, servem para conferir o login no
+  # fim. A senha pode ter sido trocada pelo painel depois, então recusa aqui é aviso, não erro.
+  if [ "$ASSUME_YES" = 1 ] && [ -n "${DESKVOICE_OWNER_EMAIL:-}" ] && [ -n "${DESKVOICE_OWNER_PASSWORD:-}" ]; then
+    owner_email="$DESKVOICE_OWNER_EMAIL"; owner_password="$DESKVOICE_OWNER_PASSWORD"
+  fi
 else
   ask org_name DESKVOICE_ORG_NAME "Nome da empresa" valid_name
   ask owner_name DESKVOICE_OWNER_NAME "Seu nome" valid_name
@@ -293,20 +314,72 @@ else
   fi
 fi
 
-if [ "$proxy_mode" = caddy ]; then
-  if [ -n "$domain" ]; then panel_domain="$domain"; public_url="https://$domain"
-  else panel_domain=":80"; public_url="http://$public_ip"; fi
+# Só a variável não exportada guarda a senha daqui em diante: nenhum processo filho a herda.
+unset DESKVOICE_OWNER_PASSWORD
+
+# ── Como o painel é publicado. Uma decisão só, e é dela que saem o arquivo de publicação, o
+#    endereço gravado e a mensagem final. ──
+#   domain  com domínio: HTTPS (nas 80/443, ou atrás do proxy que já existe)
+#   local   sem domínio: só em 127.0.0.1, numa porta local; entra-se por túnel SSH. É o padrão:
+#           sem domínio não há HTTPS, e a tela de entrada não vai para a internet sem conexão segura
+#   public  sem domínio: HTTP aberto pelo IP. Só pedindo de propósito, ou mantendo o que já estava
+exposure=""; kept_public=0
+if [ "$proxy_mode" = external ]; then mode_name="80/443 de outro proxy"; else mode_name="80/443 livres"; fi
+if [ -n "$domain" ]; then
+  if [ "$proxy_mode" = external ]; then why="o painel já fica só em 127.0.0.1, atrás do proxy que existe nesta máquina, que cuida do HTTPS"
+  else why="o painel precisa ser alcançado de fora nas portas 80/443, para o certificado do HTTPS"; fi
+  [ -z "${DESKVOICE_PANEL_LOCAL_ONLY:-}" ] || die "DESKVOICE_PANEL_LOCAL_ONLY=yes não tem efeito no modo desta instalação (com o domínio $domain, $mode_name): $why." "Tire a variável e rode de novo. Painel só local é o modo de quem está SEM domínio."
+  [ -z "${DESKVOICE_PANEL_PUBLIC_HTTP:-}" ] || die "DESKVOICE_PANEL_PUBLIC_HTTP=yes não tem efeito no modo desta instalação (com o domínio $domain, $mode_name): com domínio o painel abre por HTTPS." "Tire a variável e rode de novo."
+  exposure=domain
+elif [ -n "${DESKVOICE_PANEL_LOCAL_ONLY:-}" ]; then exposure=local
+elif [ -n "${DESKVOICE_PANEL_PUBLIC_HTTP:-}" ]; then exposure=public
+elif [ -n "$previous_exposure" ]; then
+  exposure="$previous_exposure"
+  if [ "$exposure" = public ]; then kept_public=1; fi
+elif [ "$ASSUME_YES" = 1 ]; then exposure=local
 else
-  local_only="${DESKVOICE_PANEL_LOCAL_ONLY:-}"
-  case "$local_only" in
-    "" ) # Reinstalação: quem já tinha fechado o painel para acesso local continua fechado.
-         if [ -z "$domain" ] && [ "${previous_entry%% *}" = "127.0.0.1" ]; then local_only=yes; else local_only=no; fi ;;
-    yes|no) ;;
-    *) die "O valor de DESKVOICE_PANEL_LOCAL_ONLY ($local_only) não vale." "Use DESKVOICE_PANEL_LOCAL_ONLY=yes para o painel só abrir de dentro da VPS, ou não defina a variável." ;;
-  esac
-  if [ -n "$domain" ]; then panel_domain="$domain"; public_url="https://$domain"; panel_bind="127.0.0.1"
-  elif [ "$local_only" = yes ]; then panel_domain="localhost"; public_url="http://localhost:$panel_port"; panel_bind="127.0.0.1"
-  else panel_domain="localhost"; public_url="http://$public_ip:$panel_port"; panel_bind="0.0.0.0"; fi
+  info "Sem domínio não há HTTPS. O padrão é o painel ficar só nesta VPS, e você entra por túnel SSH (eu mostro o comando no fim)."
+  info "A outra opção é publicar o painel na internet por HTTP: a senha trafega SEM CRIPTOGRAFIA, e qualquer um na rede no caminho pode lê-la."
+  if confirm "Publicar o painel na internet por HTTP mesmo assim? (Enter = não)"; then exposure=public; else exposure=local; fi
+fi
+if [ "$proxy_mode" = caddy ] && [ "$exposure" != local ]; then
+  # O Caddy fala direto nas 80/443: não há porta local.
+  entry_mode=caddy
+  if [ -n "$domain" ]; then why="com o domínio $domain"; else why="publicada por HTTP na porta 80"; fi
+  [ -z "${DESKVOICE_PANEL_PORT:-}" ] || die "DESKVOICE_PANEL_PORT=$DESKVOICE_PANEL_PORT não tem efeito no modo desta instalação ($mode_name, $why): o painel sai pelas portas 80/443, sem porta local." "Tire a variável e rode de novo."
+else
+  # Uma porta local única, com o Caddy só em HTTP atrás dela.
+  entry_mode=external
+fi
+case "$exposure" in
+  domain)
+    panel_domain="$domain"; public_url="https://$domain"; panel_bind="127.0.0.1" ;;
+  local)
+    panel_domain="localhost"; public_url="http://localhost:$panel_port"; panel_bind="127.0.0.1"
+    ok "Sem domínio: o painel fica só nesta VPS (127.0.0.1:$panel_port) e você entra por túnel SSH. A tela de entrada não vai para a internet sem conexão segura."
+    info "Para ter HTTPS, aponte um domínio para $public_ip e rode o instalador de novo, informando o domínio." ;;
+  public)
+    if [ "$entry_mode" = caddy ]; then panel_domain=":80"; public_url="http://$public_ip"
+    else panel_domain="localhost"; public_url="http://$public_ip:$panel_port"; panel_bind="0.0.0.0"; fi
+    if [ "$kept_public" = 1 ]; then
+      warn "ATENÇÃO: esta instalação já publicava o painel na internet por HTTP, SEM HTTPS ($public_url): a senha trafega sem criptografia."
+      warn "Mantive como estava, porque o instalador não muda a exposição de quem já instalou. Para fechar o painel e entrar por túnel SSH: DESKVOICE_PANEL_LOCAL_ONLY=yes bash install/install.sh"
+    else
+      warn "O painel vai ficar na internet por HTTP, SEM HTTPS ($public_url), porque você pediu: a senha trafega sem criptografia. Serve para testar."
+    fi
+    info "Para uso de verdade, aponte um domínio para $public_ip e rode o instalador de novo, informando o domínio." ;;
+esac
+
+ufw_rules="5060/udp ${rtp_start}:${rtp_end}/udp"
+[ "$entry_mode" = caddy ] && ufw_rules="$ufw_rules 80/tcp 443/tcp"
+if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
+  warn "O firewall ufw está ativo. Regras necessárias:"
+  for rule in $ufw_rules; do info "    $SUDO ufw allow $rule"; done
+  if [ "$DRY_RUN" = 1 ]; then would "oferecer aplicar essas regras"
+  elif { [ "$ASSUME_YES" = 1 ] && [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; } || { [ "$ASSUME_YES" != 1 ] && confirm "Aplico essas regras agora?"; }; then
+    for rule in $ufw_rules; do $SUDO ufw allow "$rule" >/dev/null || die "Não consegui aplicar a regra $rule no ufw." "Rode à mão: $SUDO ufw allow $rule"; done
+    ok "Regras aplicadas no ufw"
+  else warn "Regras NÃO aplicadas. Sem elas a ligação pode ficar muda: rode os comandos acima."; fi
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -314,16 +387,18 @@ step "4 de 5 · Instalando"
 if [ "$DRY_RUN" = 1 ]; then
   would "gravar deploy/.env, deploy/app.env e deploy/migrate.env (permissão 600), gerando só os segredos que ainda não existem"
   would "gerar deploy/asterisk/generated/{ari,rtp,pjsip}.conf com o IP $public_ip e a faixa ${rtp_start}-${rtp_end}"
-  if [ "$proxy_mode" = external ]; then would "subir o Caddy do DeskVoice só com HTTP em ${panel_bind}:${panel_port}, a única porta publicada: painel e voz do navegador entram por ela (arquivo deploy/docker-compose.override.yml)"
+  if [ "$entry_mode" = external ]; then would "subir o Caddy do DeskVoice só com HTTP em ${panel_bind}:${panel_port}, a única porta publicada: painel e voz do navegador entram por ela (arquivo deploy/docker-compose.override.yml)"
     if [ -n "$domain" ]; then would "pedir que o proxy existente encaminhe ${domain} inteiro para 127.0.0.1:${panel_port}, repassando WebSocket"
-    elif [ "$panel_bind" = "127.0.0.1" ]; then would "deixar o painel só para dentro da VPS; do seu computador: ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}"
+    elif [ "$exposure" = local ]; then would "deixar o painel só para dentro da VPS; do seu computador: ssh -L ${panel_port}:127.0.0.1:${panel_port} ${ssh_user}@${public_ip}"
     else would "avisar: pelo IP e sem HTTPS o navegador não libera o microfone; \"Falar com o agente\" pede domínio ou túnel"; fi
-  else would "subir o Caddy do DeskVoice nas portas 80/443 para ${panel_domain} (painel e voz do navegador pelo mesmo endereço)"; fi
+  elif [ -n "$domain" ]; then would "subir o Caddy do DeskVoice nas portas 80/443 para ${panel_domain} (painel e voz do navegador pelo mesmo endereço)"
+  else would "subir o Caddy do DeskVoice na porta 80, só com HTTP e aberto para a internet (painel e voz do navegador pelo mesmo endereço)"; fi
   if [ "$version" = "$LOCAL_VERSION" ]; then would "construir as imagens do DeskVoice nesta máquina e gravar a versão como \"$LOCAL_VERSION\""
   else would "baixar as imagens da versão ${version:-(a definir)} e gravar esse número em deploy/.env; se elas não baixarem, parar com erro, sem construir aqui"; fi
   would "subir o Postgres e aplicar as migrations"
   if [ "$create_owner" = 1 ]; then would "criar a empresa \"$org_name\" e o usuário dono $owner_email"; fi
   would "subir painel, voz, rotinas e Asterisk, e esperar todos responderem"
+  would "conferir que o endereço publicado responde e, com a senha do dono em mãos, entrar de verdade pela tela de entrada antes de dizer que está pronto"
   case "$(agent_scheduler)" in
     systemd) would "agendar o agente de atualização (timer do systemd $AGENT_UNIT.timer, uma passada por minuto): é ele que permite atualizar pela tela" ;;
     cron) would "agendar o agente de atualização (uma linha em $CRON_DIR/$AGENT_UNIT, uma passada por minuto): é ele que permite atualizar pela tela" ;;
@@ -337,7 +412,17 @@ write_env_files "$public_url" "$public_ip" "$panel_domain" "$rtp_start" "$rtp_en
 # Entrada única: só o Caddy publica porta. Reescreve por inteiro o arquivo de publicação (o de
 # uma versão antiga publicava painel e voz em duas portas), define quantos proxies o painel
 # conta até o endereço do visitante e tira VOICE_WEB_PUBLIC_PORT de quem já tinha instalado.
-apply_entry "$proxy_mode" "$domain" "$panel_bind" "$panel_port"
+apply_entry "$entry_mode" "$domain" "$panel_bind" "$panel_port"
+# O endereço sai do arquivo que acabou de ser gravado: é o que o Compose publica e o que a checagem
+# de saúde sonda. Atrás do proxy do operador o endereço de quem usa é o domínio, que depende de um
+# passo dele; o que dá para conferir daqui é a porta local.
+entry_url="$(published_address "$public_ip")"
+if [ "$exposure" = domain ] && [ "$entry_mode" = external ]; then announced_url="$public_url"
+else
+  announced_url="$entry_url"
+  [ "$announced_url" = "$public_url" ] || die "A publicação gravada dá o endereço '${announced_url:-nenhum}', e o decidido era '$public_url'." "Isso é um defeito do instalador, não seu: abra uma issue com esta mensagem. Nada foi iniciado."
+fi
+probe_url="$(published_probe_url "$public_ip")"
 ok "Segredos e configuração gravados em deploy/ (só o seu usuário lê)"
 render_asterisk_config
 ok "Configuração do Asterisk gerada"
@@ -376,8 +461,11 @@ if [ "$create_owner" = 1 ] && ! owner_exists; then
     || die "Não consegui criar o usuário dono." "Rode o instalador de novo. Se repetir: bash install/diagnose.sh"
   owner_exists || die "O comando de criar o usuário terminou, mas o usuário não está no banco." "Rode: bash install/diagnose.sh e peça ajuda com o arquivo gerado."
   ok "Empresa e usuário dono criados ($owner_email)"
+  login_strict=1
+elif [ "$create_owner" = 1 ]; then
+  # A instalação estava parada (ou sem os arquivos de ambiente) e o banco já tinha um dono.
+  ok "Já existe um usuário dono no banco desta instalação: não criei outro, e a senha dele não mudou."
 fi
-unset owner_password DESKVOICE_OWNER_PASSWORD
 
 info "Subindo painel, voz, rotinas e telefonia..."
 dc up -d --remove-orphans || die "O Docker não conseguiu subir os serviços." "Veja a mensagem acima; depois confira com bash install/healthcheck.sh e rode o instalador de novo."
@@ -404,33 +492,121 @@ if [ "$(printf '%s\n' "$entry_line" | awk '{ print $1 }')" = ok ]; then ok "Entr
 else
   warn "A entrada única ainda não respondeu como devia:"
   info "${entry_line:-(a checagem não devolveu a linha da entrada)}"
-  info "Pode ser só o tempo de o Caddy subir. Confira em um minuto: bash install/healthcheck.sh"
 fi
 
-# ═════════════════════════════════════════════════════════════════════════════
-step "5 de 5 · Pronto para configurar"
-printf '\n  %sPainel:%s %s\n  Login:  o e-mail e a senha que você definiu aqui\n' "$C_BLD" "$C_OFF" "$public_url"
-if [ "$proxy_mode" = external ]; then
-  if [ -n "$domain" ]; then
-    printf '\n  %sFalta um passo seu, no proxy que já existe nesta máquina%s%s:\n' "$C_BLD" "${proxy_holder:+ ($proxy_holder)}" "$C_OFF"
-    info "Encaminhe o domínio $domain INTEIRO para uma porta só: 127.0.0.1:${panel_port}. Painel e voz entram por ela."
-    info "O proxy precisa repassar conexões contínuas (WebSocket), senão o painel abre e \"Falar com o agente\" não conecta."
-    info "• Nginx instalado na máquina:   location / { proxy_pass http://127.0.0.1:${panel_port}; proxy_http_version 1.1; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection \"upgrade\"; proxy_set_header Host \$host; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; proxy_buffering off; }"
-    info "• Caddy instalado na máquina:   $domain { reverse_proxy 127.0.0.1:${panel_port} { flush_interval -1 } }   (WebSocket e X-Forwarded-For ele já repassa)"
-    info "• Proxy em contêiner (Traefik, Nginx Proxy Manager, Caddy): docker network connect deskvoice_internal <contêiner do proxy>  e aponte $domain para  http://deskvoice-caddy-1:80  com WebSocket ligado (X-Forwarded-For ele já envia). Se o contêiner do proxy for recriado, repita o comando."
-    info "Se o proxy antigo tinha uma regra separada para /voice-ws, apague-a: agora é tudo no mesmo destino."
-  elif [ "$panel_bind" = "127.0.0.1" ]; then
-    printf '\n  %sComo abrir o painel%s:\n' "$C_BLD" "$C_OFF"
-    info "O painel só abre de dentro desta VPS, como você pediu. Do seu computador, abra um túnel (uma porta só):"
-    info "    ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}"
-    info "e acesse http://localhost:${panel_port} enquanto o túnel estiver aberto. \"Falar com o agente\" funciona por ele."
+# ── A prova final, pelo caminho de quem usa: a porta publicada responde, e a tela de entrada
+#    aceita o usuário. Só depois disso o instalador diz "pronto". ──
+outside_down=0   # 1 = o endereço de fora (domínio em HTTPS) não abriu; a porta local responde
+reach=""   # 200 = respondeu; vazio = não deu para conferir (sem curl); outro = não respondeu
+if have curl; then
+  entry_wait="$timeout"; [ "$entry_wait" -le 90 ] || entry_wait=90; waited=0
+  while :; do
+    reach="$(probe_published "$probe_url")"
+    if [ "$reach" = 200 ] || [ "$waited" -ge "$entry_wait" ]; then break; fi
+    sleep 5; waited=$((waited + 5))
+  done
+  if [ "$reach" != 200 ] && [ "$exposure" = domain ] && [ "$entry_mode" = caddy ]; then
+    # Quem não respondeu foi o endereço DE FORA. O caso mais comum é o de quem instala com domínio
+    # pela primeira vez: o DNS ainda não aponta para cá (ou a VPS não alcança o próprio endereço
+    # público). Não é instalação quebrada: confere se o Caddy responde na porta 80 DESTA máquina
+    # (com domínio ele redireciona para o HTTPS; qualquer resposta serve) e segue, sem dar o
+    # endereço como certo. Só a porta local sem resposta é defeito de verdade.
+    local_reach="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: $domain" "http://127.0.0.1/api/v1/system/health" 2>/dev/null || true)"
+    case "$local_reach" in
+      ""|000) unset owner_password
+        die "Tudo foi instalado e as peças respondem, mas o Caddy do DeskVoice não responde nem na porta 80 desta máquina (e $announced_url não abriu; resposta: ${reach:-nenhuma}). Por isso não digo que está pronto, e o login não foi testado." "Veja o que o Caddy diz: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy  — confira com bash install/healthcheck.sh e rode o instalador de novo (nada se perde)." ;;
+    esac
+    outside_down=1
+    warn "O endereço $announced_url ainda NÃO abre (resposta daqui: ${reach:-nenhuma}). O Caddy responde na porta 80 desta máquina, então o que falta é de fora: o domínio, ou o certificado. Sigo, sem dar o endereço como certo."
+  elif [ "$reach" != 200 ]; then
+    unset owner_password
+    die "Tudo foi instalado e as peças respondem, mas a porta publicada do painel ($probe_url) não respondeu nesta máquina (resposta: ${reach:-nenhuma}). Por isso não digo que está pronto, e o login não foi testado." "Veja o que o Caddy diz: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy  — confira com bash install/healthcheck.sh e rode o instalador de novo (nada se perde)."
   else
-    printf '\n  %sSobre o acesso%s:\n' "$C_BLD" "$C_OFF"
-    info "Sem domínio, o painel ficou direto em $public_url (sem HTTPS). Libere a porta ${panel_port}/tcp no firewall."
-    info "Não quer o login exposto na internet? Rode de novo com DESKVOICE_PANEL_LOCAL_ONLY=yes e entre por túnel SSH."
-    info "Atenção: pelo IP e sem HTTPS o navegador não libera o microfone. \"Falar com o agente\" só funciona"
-    info "com domínio (HTTPS) ou por túnel SSH (ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}), abrindo http://localhost:${panel_port}."
+    ok "Endereço conferido: $probe_url respondeu nesta máquina, pela porta publicada"
   fi
+else
+  warn "Não conferi a porta publicada do painel: falta o comando curl nesta máquina. O login abaixo é testado por dentro, pelo Caddy."
+fi
+
+login_state=skipped
+if [ -n "$owner_password" ]; then
+  # Uma tentativa só (o painel limita tentativas por e-mail). E-mail e senha seguem pela entrada
+  # padrão: nunca em argumento de processo, nunca na tela.
+  login_result="$(try_login "$owner_email" "$owner_password")"
+  login_state="${login_result%%|*}"; login_detail="${login_result#*|}"
+fi
+unset owner_password
+# Com o endereço de fora sem abrir, o certificado pode não ter saído ainda, e aí nem por dentro a
+# sonda chega à tela de entrada. Isso é consequência do mesmo problema, e não outro defeito.
+if [ "$outside_down" = 1 ] && [ "$login_state" != ok ] && [ "$login_state" != rejected ] && [ "$login_state" != session ] && [ "$login_state" != limited ] && [ "$login_state" != skipped ]; then
+  warn "Login NÃO testado: sem o certificado do HTTPS, a tela de entrada ainda não responde nem por dentro (${login_result:-sem resposta da sonda}). Depois que o endereço abrir, entre pelo navegador."
+  login_state=untested
+fi
+login_fix="Troque a senha com: bash install/reset-password.sh ${owner_email:-<e-mail>}  — e entre em $announced_url. Se não entrar, rode bash install/diagnose.sh e peça ajuda com o arquivo."
+case "$login_state" in
+  ok) ok "Login conferido: entrei pela tela de entrada com o e-mail $owner_email e a senha informada, a sessão valeu, e saí" ;;
+  skipped) warn "Login NÃO testado: o usuário dono já existia e eu não tenho a senha dele. Se não lembrar a senha: bash install/reset-password.sh" ;;
+  limited) warn "Login NÃO testado: o painel está no limite de tentativas de entrada para $owner_email (várias senhas erradas nos últimos 15 minutos). Espere e entre pelo navegador." ;;
+  rejected)
+    if [ "$login_strict" = 1 ]; then
+      die "O usuário dono foi criado, mas a tela de entrada RECUSOU o e-mail e a senha que acabaram de ser definidos (HTTP $login_detail). A instalação subiu; o que não funciona é entrar." "$login_fix"
+    fi
+    warn "Login NÃO conferido: a tela de entrada recusou a senha informada para $owner_email. O usuário já existia, e a senha pode ter sido trocada depois. Se não lembrar: bash install/reset-password.sh $owner_email" ;;
+  untested) ;;
+  session) die "A tela de entrada aceitou o e-mail e a senha, mas a sessão não valeu na rota seguinte (HTTP $login_detail): quem entrar volta para a tela de login." "Rode bash install/diagnose.sh e abra uma issue com o arquivo, dizendo que o login foi aceito e a sessão não valeu." ;;
+  *) die "Não consegui chegar à tela de entrada pelo Caddy do DeskVoice para testar o login (${login_result:-sem resposta da sonda})." "Confira com bash install/healthcheck.sh (linha \"Entrada única\") e rode o instalador de novo. Se repetir: bash install/diagnose.sh" ;;
+esac
+
+# ═════════════════════════════════════════════════════════════════════════════
+if [ "$outside_down" = 1 ]; then step "5 de 5 · Instalado; o endereço ainda não abre"
+elif [ "$login_state" = ok ]; then step "5 de 5 · Pronto para configurar"
+else step "5 de 5 · Instalado, com o login ainda por conferir (aviso acima)"; fi
+if [ "$outside_down" = 1 ]; then
+  printf '\n  %sPainel:%s %s  (ainda NÃO abre: veja abaixo)\n  Login:  o e-mail e a senha que você definiu aqui\n' "$C_BLD" "$C_OFF" "$announced_url"
+  printf '\n  %sO que falta para o endereço abrir%s:\n' "$C_BLD" "$C_OFF"
+  info "A instalação terminou e as peças respondem nesta máquina. O que não respondeu foi o endereço de fora."
+  info "Causa mais provável: o domínio $domain ainda não aponta para $public_ip (registro A no provedor do domínio)."
+  info "Sem isso o certificado do HTTPS não sai. Depois de criar ou corrigir o registro, a propagação leva de minutos a algumas horas."
+  info "Outra causa: as portas 80 e 443 fechadas no firewall da VPS ou no painel do provedor; ou esta VPS não alcança o próprio"
+  info "endereço público, e nesse caso o painel pode já abrir do seu computador: teste $announced_url no navegador."
+  info "Não precisa instalar de novo. O Caddy tenta o certificado sozinho; para conferir: bash install/healthcheck.sh (linha \"Entrada única\")."
+  info "O motivo exato está em: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"
+else
+  printf '\n  %sPainel:%s %s\n  Login:  o e-mail e a senha que você definiu aqui\n' "$C_BLD" "$C_OFF" "$announced_url"
+fi
+if [ "$exposure" = domain ] && [ "$entry_mode" = external ]; then
+  info "Este endereço só vale depois do passo abaixo, no seu proxy: daqui eu conferi até a porta local 127.0.0.1:${panel_port}."
+elif [ "$exposure" = public ]; then
+  info "Conferido de dentro desta máquina. De fora, depende de a porta estar liberada no firewall da VPS e do provedor."
+fi
+tunnel_port="$panel_port"; tunnel_local="$panel_port"
+if [ "$entry_mode" = caddy ]; then tunnel_port=80; tunnel_local=8080; fi
+if [ "$exposure" = domain ] && [ "$entry_mode" = external ]; then
+  printf '\n  %sFalta um passo seu, no proxy que já existe nesta máquina%s%s:\n' "$C_BLD" "${proxy_holder:+ ($proxy_holder)}" "$C_OFF"
+  info "Encaminhe o domínio $domain INTEIRO para uma porta só: 127.0.0.1:${panel_port}. Painel e voz entram por ela."
+  info "O proxy precisa repassar conexões contínuas (WebSocket), senão o painel abre e \"Falar com o agente\" não conecta."
+  info "• Nginx instalado na máquina:   location / { proxy_pass http://127.0.0.1:${panel_port}; proxy_http_version 1.1; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection \"upgrade\"; proxy_set_header Host \$host; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; proxy_buffering off; }"
+  info "• Caddy instalado na máquina:   $domain { reverse_proxy 127.0.0.1:${panel_port} { flush_interval -1 } }   (WebSocket e X-Forwarded-For ele já repassa)"
+  info "• Proxy em contêiner (Traefik, Nginx Proxy Manager, Caddy): docker network connect deskvoice_internal <contêiner do proxy>  e aponte $domain para  http://deskvoice-caddy-1:80  com WebSocket ligado (X-Forwarded-For ele já envia). Se o contêiner do proxy for recriado, repita o comando."
+  info "Se o proxy antigo tinha uma regra separada para /voice-ws, apague-a: agora é tudo no mesmo destino."
+elif [ "$exposure" = local ]; then
+  printf '\n  %sComo abrir o painel%s:\n' "$C_BLD" "$C_OFF"
+  info "Sem domínio, o painel só abre de dentro desta VPS: a tela de entrada não fica na internet sem HTTPS."
+  info "Do seu computador, abra um túnel (uma porta só):"
+  info "    ssh -L ${panel_port}:127.0.0.1:${panel_port} ${ssh_user}@${public_ip}"
+  info "e acesse $announced_url enquanto o túnel estiver aberto. \"Falar com o agente\" funciona por ele."
+  info "Para ter HTTPS e abrir de qualquer lugar: aponte um domínio (registro A) para $public_ip e rode"
+  info "    DESKVOICE_DOMAIN=<seu domínio> bash install/install.sh"
+  info "Publicar por HTTP pelo IP, sem domínio, só pedindo de propósito (a senha trafega sem criptografia):"
+  info "    DESKVOICE_PANEL_PUBLIC_HTTP=yes bash install/install.sh"
+elif [ "$exposure" = public ]; then
+  printf '\n  %sSobre o acesso%s:\n' "$C_BLD" "$C_OFF"
+  info "Sem domínio, o painel ficou na internet em $announced_url, SEM HTTPS: a senha trafega sem criptografia."
+  if [ "$entry_mode" = external ]; then info "Libere a porta ${panel_port}/tcp no firewall."; fi
+  info "Para fechar o painel e entrar por túnel SSH: DESKVOICE_PANEL_LOCAL_ONLY=yes bash install/install.sh"
+  info "Para ter HTTPS: aponte um domínio para $public_ip e rode DESKVOICE_DOMAIN=<seu domínio> bash install/install.sh"
+  info "Atenção: pelo IP e sem HTTPS o navegador não libera o microfone. \"Falar com o agente\" só funciona"
+  info "com domínio (HTTPS) ou por túnel SSH (ssh -L ${tunnel_local}:127.0.0.1:${tunnel_port} ${ssh_user}@${public_ip}), abrindo http://localhost:${tunnel_local}."
 fi
 printf '\n  %sJá funciona:%s painel, banco, Asterisk esperando ligação, worker de voz e rotinas.\n' "$C_BLD" "$C_OFF"
 printf '  %sAinda não funciona, até você configurar no painel:%s atender ligação.\n' "$C_BLD" "$C_OFF"

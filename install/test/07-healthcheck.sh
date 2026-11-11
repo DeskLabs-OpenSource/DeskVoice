@@ -102,6 +102,19 @@ check "sem domínio a entrada é perguntada em HTTP" grep -q "exec -T panel node
 check "... na 80 de dentro" grep -q "host:'caddy',port:80,path:p" "$FAKE_DIR/calls.log"
 cp "$SANDBOX/override.ok" "$O"
 
+# A rota do agente, pela entrada, tem de ser recusada pelo Caddy (404 sem corpo). Se o 404 vem com
+# corpo, quem respondeu foi o painel: o Caddy ficou com o Caddyfile antigo (a ponte da 0.1.0).
+lacks "rota do agente recusada pelo Caddy: nenhum aviso de camada" "$(bash "$H" 2>&1 | grep 'Agente de atualização')" "Caddyfile antigo"
+printf 'panel|200\nvoice|426\nagent|404|52\n' > "$FAKE_DIR/entry_probe"
+out="$(bash "$H" 2>&1)"; equal "404 da rota do agente vindo do painel: é aviso, não falha (zero)" 0 "$?"
+contains "404 vindo do painel: a linha do agente vira aviso" "$(line 'Agente de atualização')" "aviso"
+contains "404 vindo do painel: diz que quem recusa é o painel" "$(line 'Agente de atualização')" "quem recusa a rota do agente é o PAINEL"
+contains "404 vindo do painel: manda reiniciar o Caddy" "$(line 'Agente de atualização')" "docker restart deskvoice-caddy-1"
+contains "404 vindo do painel: a entrada em si continua ok (não provoca volta de atualização)" "$(line 'Entrada única')" "ok"
+printf 'panel|200\nvoice|426\nagent|401|30\n' > "$FAKE_DIR/entry_probe"
+contains "rota do agente alcançável pela entrada: avisa com o código" "$(bash "$H" 2>&1 | grep 'Agente de atualização')" "respondeu HTTP 401"
+rm "$FAKE_DIR/entry_probe"
+
 # Tudo certo, e a saída para máquinas.
 out="$(bash "$H" 2>&1)"; equal "tudo configurado e no ar: zero" 0 "$?"
 lacks "tudo certo: nenhuma falha" "$out" "falha "
