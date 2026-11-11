@@ -26,9 +26,25 @@ quando precisa, transfere e deixa tarefas rodando depois que a chamada termina.
 
 ## Instalar
 
+> **Parceria de infraestrutura: HostGator.** O DeskVoice é gratuito, sem versão paga e sem recurso
+> travado. Quem sustenta o projeto é a parceria com a HostGator, e o kit de instalação foi feito
+> pensando na VPS dela: um comando, poucas perguntas, nenhuma variável para editar.
+>
+> **[Contratar a VPS da HostGator pelo link da parceria](https://www.hostgator.com.br/52708-141-3-52.html)**
+>
+> Usar esse link é o jeito de apoiar o projeto. Qualquer outra VPS com Docker funciona pelo mesmo
+> comando, sem nenhuma diferença de recurso.
+
 ### Na sua VPS
 
-Entre na VPS por SSH e rode:
+Entre na VPS por SSH e rode uma linha:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/install/get.sh | bash
+```
+
+Ela baixa o DeskVoice em `~/DeskVoice` e abre o instalador. Prefere ler antes de rodar? O mesmo
+resultado, passo a passo:
 
 ```bash
 git clone https://github.com/DeskLabs-OpenSource/DeskVoice.git && cd DeskVoice && bash install/install.sh
@@ -44,7 +60,7 @@ Nenhum recurso exige SSH para ser ligado.
 
 | O que ter em mãos | Observação |
 |---|---|
-| Uma VPS Ubuntu 22.04 ou mais nova | Recomendamos a [HostGator](https://www.hostgator.com.br/52708-141-3-52.html), parceira de infraestrutura do projeto (link de parceria). Qualquer VPS com Docker serve, pelo mesmo comando. O recomendado é 2 GB de memória ou mais |
+| Uma VPS Ubuntu 22.04 ou mais nova | A [VPS da HostGator](https://www.hostgator.com.br/52708-141-3-52.html), parceira do projeto, é a recomendada. Qualquer VPS com Docker serve, pelo mesmo comando. O recomendado é 2 GB de memória ou mais |
 | Um domínio apontado para a VPS | Opcional para testar. Sem domínio, o painel abre pelo IP e sem HTTPS |
 | Um tronco SIP com um número | Contratado com a operadora de telefonia de sua escolha. Autenticação por registro ou por IP |
 | Uma chave de IA de voz | Gemini (Google) ou OpenAI. Você paga o uso direto ao provedor |
