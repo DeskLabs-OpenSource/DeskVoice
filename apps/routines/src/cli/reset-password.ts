@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createDb, hashPassword, loadConfig, withSystem, type Db } from "@deskvoice/core";
 import { z } from "zod";
+import { cliArgs } from "./args";
 import { MIN_PASSWORD_LENGTH } from "./create-owner";
 
 const inputSchema = z.object({
@@ -38,7 +39,7 @@ export async function resetPassword(db: Db, input: ResetPasswordInput): Promise<
 }
 
 async function main(): Promise<void> {
-  const { values } = parseArgs({ options: { email: { type: "string" }, "password-stdin": { type: "boolean" } } });
+  const { values } = parseArgs({ args: cliArgs(), options: { email: { type: "string" }, "password-stdin": { type: "boolean" } } });
   if (!values.email || !values["password-stdin"]) {
     throw new Error("uso: reset-password --email <e-mail> --password-stdin  (a senha vem pela entrada padrão, nunca por argumento)");
   }

@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { createDb, hashPassword, loadConfig, systemClock, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
 import { z } from "zod";
+import { cliArgs } from "./args";
 import { ensureExpireApprovals } from "../routines/expire_approvals";
 
 export const MIN_PASSWORD_LENGTH = 10;
@@ -72,6 +73,7 @@ export async function createOwner(db: Db, input: OwnerInput, clock: Clock): Prom
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
+    args: cliArgs(),
     options: { email: { type: "string" }, name: { type: "string" }, organization: { type: "string" }, "password-stdin": { type: "boolean" } },
   });
   if (!values.email || !values.name || !values.organization || !values["password-stdin"]) {

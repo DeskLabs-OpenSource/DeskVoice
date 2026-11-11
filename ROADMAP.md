@@ -22,6 +22,8 @@ O trabalho em curso é fazer o que já existe aguentar o mundo real.
   coluna de "pega em" na fila de tarefas, mensagem gravada para motor de voz caído, isolamento
   que resista a injeção de SQL, limite de login que sobreviva a reinício.
 - Aviso de gravação antes da saudação (hoje sai logo depois).
+- Rotas do painel recusarem campo desconhecido em vez de ignorar (hoje um nome de campo errado
+  devolve "ok" sem gravar nada).
 
 ### A seguir: o agente faz mais, e o humano enxerga mais
 
