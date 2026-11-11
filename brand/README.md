@@ -51,5 +51,6 @@ curvas dentro do SVG: o arquivo não depende de fonte instalada.
 
 Os SVG saem de um script, `scripts/gerar-marca.mjs`, no
 [repositório do site](https://github.com/DeskLabs-OpenSource/deskvoice-site). Mudou a marca? Rode o
-script, confira o resultado e abra o PR aqui. O site guarda uma cópia, e um teste no CI dele
+script, confira o resultado e abra o PR aqui. Os dois PNG são renderizados no Chrome a partir dos SVG e de
+`scripts/capa.html`, no mesmo repositório; o comando está no fim do script. O site guarda uma cópia, e um teste no CI dele
 reprova se a cópia divergir desta pasta.
