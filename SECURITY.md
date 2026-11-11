@@ -83,20 +83,24 @@ Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em pr
 - **A cerca de SQL não lê o conteúdo das consultas.** Ela barra conexão direta com o Postgres e
   uso não listado de `withSystem`. Uma consulta errada dentro de `withOrg` ainda é barrada pelo
   banco (RLS), não pela cerca.
-- **O CI não instala o sistema numa máquina de verdade.** Instalador, atualização, backup e
-  restauração rodam contra um Docker simulado. Uma falha que só aparece com Docker real (permissão
-  de arquivo entre contêineres, por exemplo) passa pelo CI.
+- **O CI instala de verdade só o caminho mais simples.** O job `install` constrói as imagens e
+  sobe a instalação no runner, sem domínio, e confere uma passada do agente de atualização e o
+  que a entrada única deixa passar. Atualização entre versões, volta, backup e restauração
+  seguem rodando contra um Docker simulado: uma falha deles que só aparece com Docker real
+  (permissão de arquivo entre contêineres, por exemplo) passa pelo CI. Nenhuma atualização
+  pela tela rodou de ponta a ponta numa instalação real.
 - **Tarefa atrasada pode rodar duas vezes.** A recuperação de tarefa presa mede a idade pelo
   horário agendado, não pelo horário em que foi pega. As rotinas da fundação são seguras de
   repetir; rotina nova precisa ser também.
 - **O que o segredo do agente de atualização protege, e o que não.** A rota por onde o agente do
   servidor fala com o painel só responde a quem traz o segredo gerado pelo instalador, e não é
-  alcançável pela internet: o agente chama de dentro do contêiner do painel. O segredo protege
-  contra outro processo da rede interna do Docker (um contêiner do operador ligado a ela, por
-  exemplo) se passando pelo agente. O pior que alguém com o segredo consegue é anunciar uma
+  alcançável pela internet: o agente chama de dentro do contêiner do painel. O segredo fica em
+  `deploy/.env` e o Compose o entrega só ao painel; os processos de voz e de rotinas não o
+  recebem. Ele protege contra outro processo da rede interna do Docker (um contêiner do operador
+  ligado a ela, ou um processo de voz ou de rotinas comprometido) se passando pelo agente. O pior que alguém com o segredo consegue é anunciar uma
   versão falsa, marcar um pedido como concluído ou fazer um pedido pendente ser lido; ele não
   ganha execução no servidor, porque a rota só devolve um booleano. O segredo **não** protege
-  contra quem tem acesso ao servidor: essa pessoa lê `deploy/app.env` e já pode rodar o
+  contra quem tem acesso ao servidor: essa pessoa lê `deploy/.env` e já pode rodar o
   atualizador. E quem tem conta de dono ou administrador no painel, com a senha, consegue tirar
   o sistema do ar por alguns minutos pedindo uma atualização: é o recurso funcionando.
 - **A atualização pela tela confia no repositório.** O servidor atualiza para a maior tag

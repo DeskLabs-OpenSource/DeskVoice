@@ -70,7 +70,9 @@ jobs:
           images=false; install=false
           if [ "${code}" = true ]; then
             images="$(matches '^(Dockerfile|\.dockerignore|deploy/|packages/|apps/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/)')"
-            install="$(matches '^(install/|deploy/|Dockerfile|db/migrations/|\.github/workflows/)')"
+            # O job do instalador também sobe a instalação de verdade, com as imagens deste commit:
+            # mudança de código que quebra a subida (ou a rota do agente) é dele.
+            install="$(matches '^(install/|deploy/|Dockerfile|\.dockerignore|db/migrations/|packages/|apps/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/)')"
           fi
           { echo "code=${code}"; echo "images=${images}"; echo "install=${install}"; } >> "${GITHUB_OUTPUT}"
           {
@@ -263,7 +265,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.install == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Os testes do kit, mais a construção das três imagens e uma instalação de verdade no runner.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -276,13 +279,96 @@ jobs:
             exit 0
           fi
           bash install/test/run.sh
+      # Daqui em diante é Docker de verdade: o instalador constrói as imagens deste commit e sobe
+      # tudo no runner, sem domínio. É a única prova, no CI, de coisas que o Docker de mentira não
+      # vê: a conversa do agente de atualização com o painel e o que a entrada única deixa passar.
+      - name: Instalar de verdade no runner (imagens construídas aqui)
+        if: hashFiles('install/agent.sh') != ''
+        env:
+          DESKVOICE_DOMAIN: ""
+          DESKVOICE_ORG_NAME: Empresa do CI
+          DESKVOICE_OWNER_NAME: Pessoa do CI
+          DESKVOICE_OWNER_EMAIL: ci@example.test
+          # Endereço de documentação: o instalador não precisa consultar a internet para descobri-lo.
+          DESKVOICE_PUBLIC_IP: 203.0.113.10
+          DESKVOICE_HEALTH_TIMEOUT: "420"
+        run: |
+          set -euo pipefail
+          # Senha do dono gerada nesta execução e escondida do log: nenhum job lê segredo guardado.
+          DESKVOICE_OWNER_PASSWORD="ci-$(openssl rand -hex 16)"
+          echo "::add-mask::${DESKVOICE_OWNER_PASSWORD}"
+          export DESKVOICE_OWNER_PASSWORD
+          bash install/install.sh --yes --build
+          # Só para o log: o instalador já parou acima se uma peça essencial não respondeu.
+          NO_COLOR=1 bash install/healthcheck.sh || echo "a checagem de saúde acusou um item não essencial (acima)"
+      - name: O agente de atualização fala com o painel
+        if: hashFiles('install/agent.sh') != ''
+        run: |
+          set -euo pipefail
+          # Uma passada à mão. O timer que o instalador ligou pode estar no meio da dele (aí esta
+          # sai sem fazer nada, por causa da trava): por isso algumas tentativas.
+          for attempt in 1 2 3 4 5 6; do
+            bash install/agent.sh || echo "passada ${attempt} saiu com erro"
+            if [ -s deploy/agent/last-ok ]; then break; fi
+            sleep 5
+          done
+          if [ ! -s deploy/agent/last-ok ]; then
+            echo "::error::O agente não conseguiu falar com o painel (deploy/agent/last-ok não existe)."
+            exit 1
+          fi
+          echo "O painel ouviu o agente em $(cat deploy/agent/last-ok)." | tee -a "${GITHUB_STEP_SUMMARY}"
+          { NO_COLOR=1 bash install/healthcheck.sh || true; } | grep 'Agente de atualização' || true
+      - name: A rota do agente não existe para quem vem de fora
+        if: hashFiles('install/agent.sh') != ''
+        run: |
+          set -euo pipefail
+          token="$(sed -n 's/^UPDATE_AGENT_TOKEN=//p' deploy/.env)"
+          if [ -z "${token}" ]; then echo "::error::deploy/.env não tem o segredo do agente."; exit 1; fi
+          echo "::add-mask::${token}"
+          # A porta que o Caddy publicou nesta máquina: 80, ou a porta local se a 80 estava ocupada.
+          entry="$(sed -n 's/^ *- "\(.*\):80"$/\1/p' deploy/docker-compose.override.yml | head -n 1)"
+          port="${entry##*:}"
+          # Sem resposta, o curl escreve 000: a comparação abaixo é que reprova, com a mensagem.
+          status() { curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$@" || true; }
+          health="$(status "http://127.0.0.1:${port}/api/v1/system/health")"
+          outside="$(status -X POST -H 'content-type: application/json' -H "authorization: Bearer ${token}" -d '{"version":"local"}' "http://127.0.0.1:${port}/api/v1/system/agent")"
+          echo "pela entrada única (porta ${port}): saúde=${health} rota do agente=${outside}"
+          # A saúde em 200 prova que o 404 é da rota, e não de uma entrada que não responde.
+          if [ "${health}" != 200 ] || [ "${outside}" != 404 ]; then
+            echo "::error::Pela entrada única, esperava saúde=200 e rota do agente=404, mesmo com o segredo certo."
+            exit 1
+          fi
+          # De dentro do contêiner do painel, com o segredo certo: direto responde; com o cabeçalho
+          # que todo proxy acrescenta, não existe. O segredo vai pela entrada padrão.
+          # shellcheck source=/dev/null
+          source install/_common.sh
+          inside="$(printf '%s' "${token}" | dc exec -T panel node -e '
+            let t = ""; process.stdin.on("data", (d) => (t += d)).on("end", async () => {
+              const call = async (extra) => (await fetch("http://127.0.0.1:3000/api/v1/system/agent", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + t, ...extra }, body: JSON.stringify({ version: "local" }) })).status;
+              console.log("direto=" + (await call({})) + " por-proxy=" + (await call({ "x-forwarded-for": "203.0.113.9" })));
+            });')"
+          echo "de dentro do contêiner do painel: ${inside}"
+          if [ "${inside}" != "direto=200 por-proxy=404" ]; then
+            echo "::error::De dentro do painel, esperava direto=200 e por-proxy=404."
+            exit 1
+          fi
+      - name: O que estava no ar quando falhou
+        if: failure() && hashFiles('deploy/.env') != ''
+        run: |
+          # shellcheck source=/dev/null
+          source install/_common.sh; set +e; trap - ERR
+          NO_COLOR=1 bash install/healthcheck.sh
+          echo "--- deploy/agent/agent.log"; tail -n 30 deploy/agent/agent.log 2>/dev/null | mask_secrets
+          echo "--- painel e Caddy"; dc logs --no-color --tail 40 panel caddy 2>&1 | mask_secrets
       - uses: ./.github/actions/explain-failure
         if: failure()
         with:
           when-pr: >-
             Rode `bash install/test/run.sh`. Estes testes cobrem os validadores do instalador, a
-            atualização e o ciclo backup → restauração com conferência de contagens. Quem instala
-            é o usuário, numa VPS: o que quebra aqui quebra na casa de alguém.
+            atualização e o ciclo backup → restauração com conferência de contagens. Se o que
+            falhou foi um passo depois deles, é a instalação de verdade no runner: o passo "O que
+            estava no ar quando falhou" mostra a saúde de cada peça e os logs. Quem instala é o
+            usuário, numa VPS: o que quebra aqui quebra na casa de alguém.
 
   secrets:
     name: secrets

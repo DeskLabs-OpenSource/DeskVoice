@@ -11,7 +11,7 @@ REPO_DIR="$(cd "$KIT_DIR/.." && pwd)"
 DEPLOY_DIR="${DESKVOICE_DEPLOY_DIR:-$REPO_DIR/deploy}"
 BACKUP_DIR="${DESKVOICE_BACKUP_DIR:-$REPO_DIR/backups}"
 # Três arquivos, por menor privilégio: cada contêiner recebe só o que usa.
-ENV_FILE="$DEPLOY_DIR/.env"                 # o que o Compose interpola (e a senha do dono, só para o postgres)
+ENV_FILE="$DEPLOY_DIR/.env"                 # o que o Compose interpola (a senha do dono, só para o postgres; o segredo do agente, só para o painel)
 APP_ENV_FILE="$DEPLOY_DIR/app.env"          # painel, voz e rotinas; sem a senha do dono do banco
 MIGRATE_ENV_FILE="$DEPLOY_DIR/migrate.env"  # só o serviço migrate e a criação do primeiro usuário
 GENERATED_DIR="$DEPLOY_DIR/asterisk/generated"
@@ -105,13 +105,20 @@ env_set_if_missing() {  # nunca troca um segredo que já existe
 }
 
 # O segredo do agente de atualização (install/agent.sh): só com ele a rota do agente responde.
+# Mora em deploy/.env, o arquivo que o Compose interpola, e chega SÓ ao painel (o Compose o entrega
+# pelo `environment` desse serviço, como faz com a senha do banco para o Postgres). Voz e rotinas,
+# que recebem o app.env, não o conhecem.
 # Devolve 0 se acabou de criar (o painel precisa ser recriado para recebê-lo) e 1 se já existia.
 ensure_agent_token() {
-  [ -z "$(env_get "$APP_ENV_FILE" UPDATE_AGENT_TOKEN)" ] || return 1
-  env_set "$APP_ENV_FILE" UPDATE_AGENT_TOKEN "$(random_hex 32)"
+  local old
+  # Instalação feita por uma versão de desenvolvimento, que guardava o segredo no app.env: muda de lugar.
+  old="$(env_get "$APP_ENV_FILE" UPDATE_AGENT_TOKEN)"
+  if [ -n "$old" ]; then env_unset "$APP_ENV_FILE" UPDATE_AGENT_TOKEN; fi
+  [ -z "$(env_get "$ENV_FILE" UPDATE_AGENT_TOKEN)" ] || return 1
+  env_set "$ENV_FILE" UPDATE_AGENT_TOKEN "${old:-$(random_hex 32)}"
   # Rodando com sudo numa instalação de outro usuário, o arquivo regravado não pode virar do root:
   # o dono da instalação (e o agente, que roda como ele) deixaria de conseguir ler.
-  if [ "$(id -u)" = 0 ]; then chown "$(owner_of "$DEPLOY_DIR")" "$APP_ENV_FILE" 2>/dev/null || true; fi
+  if [ "$(id -u)" = 0 ]; then chown "$(owner_of "$DEPLOY_DIR")" "$ENV_FILE" 2>/dev/null || true; fi
 }
 
 # Grava os três arquivos de ambiente. Segredo que já existe fica como está; o resto é

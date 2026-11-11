@@ -11,7 +11,8 @@
 #
 # Os valores vêm de três arquivos gerados por `install/install.sh`, separados por menor
 # privilégio. Não há variável para preencher à mão: o que é escolha de quem opera fica no painel.
-#   .env         só o que o próprio Compose interpola (senha do Postgres, portas, versão)
+#   .env         só o que o próprio Compose interpola (senha do Postgres, portas, versão, e o
+#                segredo do agente de atualização, entregue só ao painel)
 #   app.env      o que painel, voz e rotinas recebem; não contém a senha do dono do banco
 #   migrate.env  credenciais do dono do schema; só o serviço `migrate` recebe
 #
@@ -69,6 +70,11 @@ services:
     <<: *app
     image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-panel:${DESKVOICE_VERSION:-dev}
     build: { context: .., target: panel, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
+    # O segredo do agente de atualização chega só a este serviço: vem do `.env`, que o Compose
+    # interpola, e não do `app.env`, que voz e rotinas também recebem. Vazio (instalação que ainda
+    # não tem o agente), a rota do agente não aceita ninguém.
+    environment:
+      UPDATE_AGENT_TOKEN: "${UPDATE_AGENT_TOKEN:-}"
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:

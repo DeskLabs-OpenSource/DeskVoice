@@ -40,7 +40,7 @@ if [ "$mode" = install ]; then
       cron) info "[simulação] faria: gravar $CRON_DIR/$AGENT_UNIT (uma passada por minuto, como $(owner_of "$REPO_DIR"))" ;;
       *) info "[simulação] esta máquina não tem systemd nem cron: não agendaria nada, e a atualização continuaria pelo terminal" ;;
     esac
-    if [ -z "$(env_get "$APP_ENV_FILE" UPDATE_AGENT_TOKEN)" ]; then info "[simulação] faria: gerar o segredo do agente em deploy/app.env e recriar o painel para ele recebê-lo"; fi
+    if [ -z "$(env_get "$ENV_FILE" UPDATE_AGENT_TOKEN)" ]; then info "[simulação] faria: gerar o segredo do agente em deploy/.env e recriar o painel para ele recebê-lo"; fi
     exit 0
   fi
   converge_agent
@@ -73,6 +73,10 @@ fail_pass() {
 # Duas passadas nunca se sobrepõem. Trava de pasta (o flock não existe em toda máquina); se o
 # processo que a criou morreu, ou ela tem mais de duas horas, é sobra e sai.
 # ponytail: há um instante entre criar a pasta e gravar o pid; com uma passada por minuto não colide.
+# Limite conhecido: trava com mais de 120 minutos é tratada como sobra MESMO com o processo vivo
+# (é a defesa contra um pid reaproveitado depois de reiniciar a máquina). Com o timer do systemd
+# isso não abre brecha, porque ele não começa outra passada enquanto a anterior roda. Com o cron,
+# uma atualização presa por mais de duas horas deixaria uma segunda passada entrar por cima dela.
 take_lock() {
   local pid
   if mkdir "$LOCK" 2>/dev/null; then echo $$ > "$LOCK/pid"; return 0; fi
@@ -171,8 +175,8 @@ with_deadline() {  # with_deadline <segundos> comando...
 # speak → escreve `update=true`, `update=false` ou `error=<motivo>`; devolve 0 só se o painel ouviu.
 speak() {
   local token outcome="" to="" failure_at="" failure_detail=""
-  token="$(env_get "$APP_ENV_FILE" UPDATE_AGENT_TOKEN)"
-  [ -n "$token" ] || { echo "error=falta o segredo do agente em deploy/app.env; rode: bash install/agent.sh --install"; return 1; }
+  token="$(env_get "$ENV_FILE" UPDATE_AGENT_TOKEN)"
+  [ -n "$token" ] || { echo "error=falta o segredo do agente em deploy/.env; rode: bash install/agent.sh --install"; return 1; }
   if [ -f "$PENDING" ]; then outcome="$(sed -n 1p "$PENDING")"; to="$(sed -n 2p "$PENDING")"; fi
   if [ -f "$FAILURE" ]; then failure_at="$(sed -n 1p "$FAILURE")"; failure_detail="$(sed -n 2p "$FAILURE")"; fi
   local code=0

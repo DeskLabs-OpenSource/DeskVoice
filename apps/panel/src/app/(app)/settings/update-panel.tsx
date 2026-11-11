@@ -131,7 +131,7 @@ export function UpdatePanel() {
         {running.updatable && agent && !agent.responding ? <Notice tone="warn">{fill(t.agentSilent, { when: when(agent.lastSeenAt) })}</Notice> : null}
         {agent?.responding ? <p className="text-muted">{fill(t.agentOk, { when: when(agent.lastSeenAt) })}</p> : null}
         {agent?.responding && agent.version !== running.version && !open ? <p className="text-muted">{fill(t.agentMismatch, { agent: agent.version, running: running.version })}</p> : null}
-        {agent?.lastFailureAt ? <p className="text-muted">{fill(t.agentFailure, { when: when(agent.lastFailureAt), detail: agent.lastFailureDetail ?? "" })}</p> : null}
+        {agent?.lastFailureAt && agent.lastFailureDetail ? <p className="text-muted">{fill(t.agentFailure, { when: when(agent.lastFailureAt), detail: agent.lastFailureDetail ?? "" })}</p> : null}
 
         {request ? (
           <Notice tone={STATUS_TONE[request.status]}>

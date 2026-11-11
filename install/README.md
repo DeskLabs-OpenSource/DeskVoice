@@ -139,7 +139,7 @@ no registro, e a passada termina.
 | O quê | Onde |
 |---|---|
 | Agendamento | Timer do systemd `deskvoice-agent.timer` (a cada minuto, com atraso aleatório de até 15 s), rodando como o dono da pasta. Sem systemd: `/etc/cron.d/deskvoice-agent`. Sem nenhum dos dois: o instalador avisa, e a tela mostra que o agente não está instalado |
-| Segredo | `UPDATE_AGENT_TOKEN`, em `deploy/app.env`, gerado pelo instalador |
+| Segredo | `UPDATE_AGENT_TOKEN`, em `deploy/.env`, gerado pelo instalador. O Compose o entrega só ao painel; voz e rotinas não o recebem |
 | Registro do que falhou | `deploy/agent/agent.log` (a cópia anterior em `agent.log.1`) |
 | Resultado ainda não entregue | `deploy/agent/pending-result`; vai na passada seguinte |
 | Ver se está passando | `bash install/healthcheck.sh` (linha "Agente de atualização": agendado ou não, e quando falou com o painel pela última vez) e, no painel, Configurações → Versão e atualização |
@@ -158,8 +158,8 @@ separados para cada contêiner receber só o que usa:
 
 | Arquivo | Quem recebe | O que tem |
 |---|---|---|
-| `deploy/.env` | O Compose (e o Postgres) | Senha do dono do banco, domínio, faixa de áudio, número da versão instalada |
-| `deploy/app.env` | Painel, voz e rotinas | Conexões de aplicação, chave de segredos, senha interna do Asterisk, endereço público, segredo do agente de atualização. Não tem a senha do dono do banco |
+| `deploy/.env` | O Compose (que entrega a senha só ao Postgres e o segredo do agente só ao painel) | Senha do dono do banco, domínio, faixa de áudio, número da versão instalada, segredo do agente de atualização |
+| `deploy/app.env` | Painel, voz e rotinas | Conexões de aplicação, chave de segredos, senha interna do Asterisk, endereço público. Não tem a senha do dono do banco nem o segredo do agente de atualização |
 | `deploy/migrate.env` | Só as migrations e a criação do primeiro usuário | Conexão do dono do banco e as senhas dos papéis de aplicação |
 
 Você não edita nenhum deles. Se um valor precisar mudar (IP novo, domínio novo), rode o

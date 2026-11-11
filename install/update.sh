@@ -89,6 +89,10 @@ confirm "Atualizar de $current para $target? (faço um backup antes; se algo fal
   || die "Atualização cancelada: nada foi alterado." "Quando quiser, rode de novo."
 
 step "Backup antes de mexer"
+# Na atualização pela tela, este backup tem de vir DEPOIS de o agente aceitar o pedido (o agente
+# só chama este script com o pedido já em `running`). Se a atualização voltar, o banco é
+# restaurado daqui: ele precisa conter o pedido em `running`, para o resultado que o agente
+# entrega depois encontrar o que fechar. Não mova o backup para antes da conversa com o painel.
 backup_dir="$(bash "$KIT_DIR/backup.sh" | tee /dev/stderr | tail -n 1)" \
   || die "O backup falhou, então a atualização NÃO começou. Nada foi alterado." "Resolva o problema do backup acima (bash install/backup.sh) e rode de novo."
 [ -f "$backup_dir/manifest.txt" ] || die "O backup não deixou manifesto em '$backup_dir'; sem backup conferido eu não atualizo." "Rode bash install/backup.sh e veja o erro."
@@ -126,6 +130,8 @@ roll_back() {  # roll_back "<o que falhou>"
   # O banco pode já ter recebido migrations da versão nova: volta ao estado do backup.
   bash "$KIT_DIR/restore.sh" --yes "$backup_dir" || problems="$problems a restauração do banco falhou;"
   dc up -d --remove-orphans >/dev/null 2>&1 || problems="$problems os serviços não subiram;"
+  # Como na ida: o Caddy que ficou de pé ainda lê o Caddyfile da versão de destino até reiniciar.
+  dc restart caddy >/dev/null 2>&1 || true
   if [ -z "$problems" ] && wait_healthy; then
     die "A atualização para $target não deu certo e foi desfeita: você está de volta na versão $current, com o banco do backup de antes da atualização ($backup_dir) e tudo respondendo." "Nada se perdeu além do que entrou durante a tentativa. Rode bash install/diagnose.sh e abra uma issue com o arquivo, dizendo que a atualização para $target voltou."
   fi

@@ -21,6 +21,7 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   PUBLIC_IP: "generated",
   // Senhas dos papéis `deskvoice_app` e `deskvoice_system`; só o comando de migrations as recebe.
   // Segredo do agente de atualização (`install/agent.sh`): só com ele a rota do agente responde.
+  // Fica em `deploy/.env` e o Compose o entrega só ao painel; voz e rotinas não o recebem.
   UPDATE_AGENT_TOKEN: "generated",
   APP_DB_PASSWORD: "generated",
   SYSTEM_DB_PASSWORD: "generated",

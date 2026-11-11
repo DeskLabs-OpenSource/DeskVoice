@@ -23,7 +23,7 @@ O painel **pede**; não executa. Quem atualiza é um agente pequeno do kit de in
 | Ninguém é atualizado para o que não confirmou | O pedido guarda a versão vista. Na passada do agente, **o painel compara** essa versão com a que o agente acabou de anunciar: se saiu outra, o pedido termina como `superseded` e a resposta é "não". O agente continua recebendo só o booleano **[construtor]** | `agentCheckIn` em `apps/panel/src/server/update.ts` |
 | Prazo na conversa | Cada chamada do agente ao painel tem 30 segundos. Estourou, é falha de comunicação: vai para o registro e a passada termina, liberando a trava | `with_deadline` em `install/agent.sh` |
 | Como o agente fala com o painel | De **dentro do contêiner do painel** (`docker compose exec`), direto na porta dele. A rota recusa qualquer pedido que tenha passado por proxy, e o Caddy responde 404 nela: para a internet a rota não existe | `install/agent.sh`, `deploy/Caddyfile` |
-| Como o agente se identifica | Segredo gerado pelo instalador (`UPDATE_AGENT_TOKEN`, em `deploy/app.env`), comparado em tempo constante. Vai pela entrada padrão, nunca na linha de comando | `apps/panel/src/server/update.ts` |
+| Como o agente se identifica | Segredo gerado pelo instalador (`UPDATE_AGENT_TOKEN`), comparado em tempo constante. Fica em `deploy/.env`, o arquivo que o Compose interpola, e chega **só ao painel** (pelo `environment` desse serviço, como a senha do banco chega só ao Postgres); voz e rotinas, que recebem o `app.env`, não o conhecem. Vai pela entrada padrão, nunca na linha de comando | `apps/panel/src/server/update.ts` |
 | Quem pede | Dono e administrador, com a senha conferida de novo e o mesmo limite de tentativas do login | `apps/panel/src/app/api/v1/system/update/route.ts` |
 | Um pedido por vez | Índice único parcial no banco, valendo para a instalação inteira | `db/migrations/20261111T190000_update_requests.sql` |
 | Todo pedido termina | Não pego em 15 minutos, ou aceito e não concluído em 30, vira `expired`, aparece na tela e libera o próximo. Um resultado que chega depois do prazo substitui o "venceu" pelo que de fato aconteceu | `expireStale` em `apps/panel/src/server/update.ts` |
@@ -64,12 +64,15 @@ O atualizador que roda numa atualização **a partir da 0.1.0** é o da 0.1.0, q
 | Webhook de fora (o GitHub avisa a instalação, ou um serviço central dispara) | Exigiria a instalação aceitar pedido vindo da internet e, para saber a quem avisar, um cadastro das instalações: telemetria. Também tiraria de quem administra a decisão de quando sair do ar |
 | O agente fala com o painel pela entrada pública (o Caddy) | A rota do agente ficaria exposta à internet, protegida só pelo segredo. Falando de dentro do contêiner, ela nem existe para quem está fora |
 | A versão confirmada viajar junto com o "sim", para o agente comparar | O agente passaria a receber um número de versão do painel, mesmo que só para comparar. Com a comparação no painel, a resposta segue sendo um booleano e o agente não tem o que interpretar |
+| O segredo do agente no `app.env` | Voz e rotinas também recebem esse arquivo. Um deles comprometido poderia se passar pelo agente: anunciar alvo falso ou segurar um pedido até vencer |
+| Um arquivo `panel.env` só para o painel | O Compose recusa subir quando um `env_file` não existe, e o atualizador da 0.1.0, que roda de memória, não o criaria: a primeira atualização a partir dela falharia. Pelo `.env` interpolado, segredo ausente é só vazio |
 | Guardar o pedido em arquivo, sem tabela | A tela não teria de onde ler o histórico, e "um por vez" viraria checagem em código |
 
 ## Consequências
 
 - A atualização pela tela depende de o agente estar agendado. Sem systemd e sem cron, não há agente, a tela diz isso e a atualização continua pelo terminal.
 - O agente passa a cada minuto e grava no banco a cada passada. É uma escrita pequena, por organização.
-- O segredo do agente protege a rota contra outro processo da rede interna do Docker. Não protege contra quem já tem acesso ao servidor: essa pessoa lê `deploy/app.env` e, de todo modo, já pode rodar o atualizador. Está em "Limites conhecidos".
+- O segredo do agente protege a rota contra outro processo da rede interna do Docker, inclusive um processo de voz ou de rotinas comprometido, que não o recebe. Não protege contra quem já tem acesso ao servidor: essa pessoa lê `deploy/.env` e, de todo modo, já pode rodar o atualizador.
+- A saída do atualizador e o texto da última falha do agente citam caminhos do servidor: a tela só os entrega a dono e administrador. Está em "Limites conhecidos".
 - Numa instalação com mais de uma organização, o dono ou administrador de qualquer uma pode pedir a atualização da instalação inteira, e todas recebem o aviso. A tela opera uma organização por instalação (registro `0006`); se isso mudar, "quem administra a instalação" precisa de um papel próprio.
 - A regra "o agente que roda é o da versão antiga" passa a valer para toda mudança no `agent.sh` e nas variáveis `DESKVOICE_UPDATE_*`: o que é novo entra opcional, e o que existe não muda de sentido.

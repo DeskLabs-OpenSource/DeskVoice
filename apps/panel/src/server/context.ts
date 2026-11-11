@@ -196,6 +196,11 @@ interface HandleOptions<S extends ZodType, R> {
   /** Rota que altera configuração: só `owner` e `admin`. */
   configure?: boolean;
   /**
+   * Roda antes de abrir a transação, já com a sessão, o papel e a entrada conferidos. É onde cabe
+   * uma consulta de rede de que a rota depende: destino lento não segura conexão do banco.
+   */
+  before?: (args: Base<z.output<S>>) => Promise<void>;
+  /**
    * Roda depois que a transação confirmou, fora dela. É onde se fala com o processo de voz: ele
    * lê o banco, então só enxerga o que já foi confirmado. O que devolver vira a resposta.
    */
@@ -216,6 +221,7 @@ export function handle<S extends ZodType = ZodType<undefined>, R = unknown>(
       // Id malformado nunca chega ao banco: para quem chama, é só um registro que não existe.
       if (params.id !== undefined && !UUID.test(params.id)) throw new ApiError(404, "not_found", "Not found.");
       const base: Base<z.output<S>> = { session, params, body: await parseBody(request, options.body), url: new URL(request.url), deps };
+      if (options.before) await options.before(base);
       const org = <T>(run: (q: OrgQuery) => Promise<T>): Promise<T> => withOrg(deps.db, session.organizationId, run);
       const result = await org((q) => fn({ ...base, q }));
       return success(options.after ? await options.after(result, { ...base, org }) : result);

@@ -72,4 +72,35 @@ cp "$KIT/update.sh" "$WORK/install/update.sh"
 out="$(bash "$WORK/install/update.sh" --resume --to 0.9.0 --yes 2>&1)"; equal "--resume solto: recusa" 1 "$?"
 contains "--resume solto: diz que é de uso interno" "$out" "uso interno"
 equal "--resume solto: não mexe na versão" 0.1.0 "$(env_get "$E" DESKVOICE_VERSION)"
+
+# ── 6. O atualizador de destino carrega, mas recusa o que recebeu (uma versão futura que passe a
+#       exigir algo que o atualizador anterior não entrega). O que acontece, registrado: o código
+#       fica na versão nova com as imagens antigas rodando; nada mais é tocado; o agente relata
+#       "não aplicada" com o motivo; e a rodada seguinte, já com o atualizador novo, converge. ──
+S="$DESKVOICE_DEPLOY_DIR/agent"
+said() { sed -n "${2}p" "$FAKE_DIR/agent_call.$1" 2>/dev/null; }
+agent_pass() { rm -f "$FAKE_DIR"/agent_call.*; echo 'update=true' > "$FAKE_DIR/agent_replies"; cp "$WORK/install/update.sh" "$FAKE_DIR/git_checkout/main/install/update.sh"; : > "$FAKE_DIR/calls.log"; bash "$WORK/install/agent.sh" 2>&1; }
+printf '%s\n' v0.5.0 v0.3.0 v0.2.0 v0.1.0 > "$FAKE_DIR/git_tags"
+version_tree v0.5.0
+# shellcheck disable=SC2016  # as variáveis são do script gerado, não deste
+sed -e 's/^  { \[ -n "\$current" \] \&\& /  { [ -n "${DESKVOICE_UPDATE_EXTRA:-}" ] \&\& [ -n "$current" ] \&\& /' \
+    -e 's/^      export DESKVOICE_UPDATE_FROM=/      export DESKVOICE_UPDATE_EXTRA=1 DESKVOICE_UPDATE_FROM=/' "$KIT/update.sh" > "$FAKE_DIR/git_checkout/v0.5.0/install/update.sh"
+check "o atualizador futuro exige algo novo na continuação" grep -q 'DESKVOICE_UPDATE_EXTRA:-' "$FAKE_DIR/git_checkout/v0.5.0/install/update.sh"
+check "o atualizador futuro entrega esse algo quando é ele quem passa a vez" grep -q 'export DESKVOICE_UPDATE_EXTRA=1' "$FAKE_DIR/git_checkout/v0.5.0/install/update.sh"
+out="$(agent_pass)"; equal "continuação recusada: a passada do agente termina" 0 "$?"
+equal "continuação recusada: a versão gravada não muda" 0.1.0 "$(env_get "$E" DESKVOICE_VERSION)"
+equal "continuação recusada: nenhuma imagem baixada" 0 "$(calls ' pull -q panel')"
+equal "continuação recusada: nenhuma migration" 0 "$(calls 'run --rm migrate')"
+equal "continuação recusada: nenhum serviço parado" 0 "$(calls ' stop panel')"
+check "continuação recusada: o código ficou na versão nova (as imagens que rodam são as antigas)" grep -q 'DESKVOICE_UPDATE_EXTRA' "$WORK/install/update.sh"
+check "continuação recusada: não fica calado, o agente relata" test -e "$FAKE_DIR/agent_call.2"
+equal "continuação recusada: relato de não aplicada, com o sistema de pé" rolled_back "$(said 2 4)"
+contains "continuação recusada: o relato leva o motivo" "$(sed 1,7d "$FAKE_DIR/agent_call.2")" "uso interno do atualizador"
+contains "continuação recusada: fica no registro do agente" "$(cat "$S/agent.log")" "atualização terminou: rolled_back (de 0.1.0 para 0.1.0"
+refuse "continuação recusada: nada pendente, nenhuma trava" test -e "$S/pending-result" -o -e "$S/lock"
+# A rodada seguinte: o atualizador no disco já é o novo, que entrega o que ele mesmo exige.
+out="$(agent_pass)"; equal "rodada seguinte: a passada termina" 0 "$?"
+equal "rodada seguinte: converge para a versão nova" 0.5.0 "$(env_get "$E" DESKVOICE_VERSION)"
+equal "rodada seguinte: relato de sucesso" succeeded "$(said 2 4)"
+equal "rodada seguinte: um backup e uma migration" "1 1" "$(calls ' pg_dump ') $(calls 'run --rm migrate')"
 finish

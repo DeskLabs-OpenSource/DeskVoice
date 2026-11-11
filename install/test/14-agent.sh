@@ -7,7 +7,7 @@ source "$KIT/_common.sh"; set +e; trap - ERR
 D="$DESKVOICE_DEPLOY_DIR"; E="$D/.env"; A="$D/app.env"; S="$D/agent"
 export DESKVOICE_HEALTH_TIMEOUT=0
 printf 'agents=3\ncalls=120\nusers=1\n' > "$FAKE_DIR/counts_backup"; cp "$FAKE_DIR/counts_backup" "$FAKE_DIR/counts_restore"
-token="$(env_get "$A" UPDATE_AGENT_TOKEN)"
+token="$(env_get "$E" UPDATE_AGENT_TOKEN)"
 agent() { bash "$KIT/agent.sh" "$@" 2>&1; }
 fresh() { rm -f "$FAKE_DIR"/agent_call.* "$FAKE_DIR/agent_replies"; : > "$FAKE_DIR/calls.log"; }
 said() { sed -n "${2}p" "$FAKE_DIR/agent_call.$1" 2>/dev/null; }   # said <chamada> <linha>
@@ -18,7 +18,14 @@ with_versions() { printf '%s\n' "$@" > "$FAKE_DIR/git_tags"; }
 # ── O segredo é do instalador ──
 check "o instalador gera o segredo do agente" test "${#token}" = 64
 ( source "$KIT/_common.sh"; write_env_files "https://voz.exemplo.com.br" 203.0.113.10 voz.exemplo.com.br 10000 10200 )
-equal "rodar o instalador de novo não troca o segredo" "$token" "$(env_get "$A" UPDATE_AGENT_TOKEN)"
+equal "rodar o instalador de novo não troca o segredo" "$token" "$(env_get "$E" UPDATE_AGENT_TOKEN)"
+lacks "o segredo fica fora do app.env, que voz e rotinas recebem" "$(cat "$A")" "UPDATE_AGENT_TOKEN"
+check "só o serviço do painel recebe o segredo no Compose" test "$(grep -c 'UPDATE_AGENT_TOKEN: ' "$REPO/deploy/docker-compose.yml")" = 1
+# Instalação de uma versão de desenvolvimento, com o segredo no app.env: ele muda de arquivo sem mudar de valor.
+env_unset "$E" UPDATE_AGENT_TOKEN; env_set "$A" UPDATE_AGENT_TOKEN "$token"
+( source "$KIT/_common.sh"; ensure_agent_token ) >/dev/null
+equal "segredo que estava no app.env passa para o .env, o mesmo" "$token" "$(env_get "$E" UPDATE_AGENT_TOKEN)"
+lacks "segredo que estava no app.env sai de lá" "$(cat "$A")" "UPDATE_AGENT_TOKEN"
 check "o segredo entra na lista do que nunca aparece em tela" test "$(printf 'x %s y\n' "$token" | mask_secrets)" = "x *** y"
 
 # ── Passada sem pedido: anuncia a versão e não executa nada ──

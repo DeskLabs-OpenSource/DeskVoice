@@ -270,6 +270,28 @@ describe("nobody is updated to a version they did not confirm", () => {
   });
 });
 
+describe("what an operator sees", () => {
+  it("shows the state to an operator without the updater output or the agent failure text, which name paths of the server", async () => {
+    const { org, owner } = await newOrg("update operator view");
+    const operator = await createUser(panel.app, org, "operator");
+    const admin = await createUser(panel.app, org, "admin");
+    await speak({ version: "0.1.0", target: "0.2.0", lastFailure: { at: "2026-03-01T14:58:00Z", detail: "não achei /home/ana/DeskVoice/deploy/.env" } });
+    await ask(owner.cookie);
+    await speak();
+    await speak({ version: "0.1.0", target: "0.2.0", result: { outcome: "rolled_back", detail: "Backup em /home/ana/DeskVoice/backups/x" } });
+    for (const cookie of [owner.cookie, admin.cookie]) {
+      const full = await state(cookie);
+      expect(full.request).toMatchObject({ status: "rolled_back", detail: "Backup em /home/ana/DeskVoice/backups/x" });
+      expect(full.agent?.lastFailureDetail).toBe("não achei /home/ana/DeskVoice/deploy/.env");
+    }
+    const limited = await call(readUpdate, { cookie: operator.cookie });
+    const seen = limited.data as State;
+    expect(seen.request).toMatchObject({ status: "rolled_back", detail: null });
+    expect(seen.agent).toMatchObject({ responding: true, lastFailureAt: "2026-03-01T14:58:00.000Z", lastFailureDetail: null });
+    expect(limited.text).not.toContain("/home/ana");
+  });
+});
+
 describe("the version screen", () => {
   const releases = [
     { tag_name: "v0.3.0-rc.1", draft: false, prerelease: true, body: "", published_at: "2026-03-01T00:00:00Z", html_url: "https://example.test/rc" },
