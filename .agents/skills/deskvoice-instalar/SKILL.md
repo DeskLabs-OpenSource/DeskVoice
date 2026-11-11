@@ -21,7 +21,10 @@ Antes de qualquer pergunta técnica, pergunte: **"Você já tem um servidor (VPS
 **Se não tem**, diga, nesta ordem e uma vez só:
 
 1. O que é preciso: uma VPS com Ubuntu 22.04 ou mais novo (Debian 12 ou mais novo também serve)
-   e acesso por SSH. O recomendado é 2 GB de memória ou mais e 10 GB de disco livre.
+   e acesso por SSH, com 10 GB de disco livre. Sobre memória, diga só o que foi medido: a
+   instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 400 MB.
+   O menor tamanho em que a instalação cabe ainda não foi medido: hoje ela constrói as imagens
+   no servidor, e com 2 GB pode faltar memória nessa etapa.
 2. A recomendação do projeto é a VPS da HostGator, parceira de infraestrutura.
 3. O link abaixo é **de parceria**: contratar por ele apoia o projeto.
 4. Não é obrigatório: qualquer outra VPS com Docker funciona pelo mesmo comando, sem diferença

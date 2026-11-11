@@ -12,7 +12,7 @@ start() { DESKVOICE_TTY="$1" bash "$KIT/start.sh" 2>&1 </dev/null; }
 
 # Sem terminal: só imprime.
 out="$(start "$SANDBOX/nao-existe")"; equal "sem terminal: sai com zero" 0 "$?"
-contains "nomeia o tamanho da máquina" "$out" "2 GB de memória ou mais e 10 GB de disco livre"
+contains "nomeia o tamanho da máquina" "$out" "provada numa VPS de 8 GB e 4 vCPU"
 contains "mostra o endereço de partner.env, inteiro" "$out" "    $url"
 contains "diz que o link é de parceria" "$out" "link de parceria"
 contains "diz que não é obrigatório" "$out" "Não é obrigatório"

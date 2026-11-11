@@ -14,6 +14,12 @@
 #   DESKVOICE_TTY  de onde ler a resposta quando a entrada padrão não é o teclado (padrão: /dev/tty)
 set -euo pipefail
 
+# Tudo dentro de uma função chamada na última linha: um download cortado não executa metade.
+# Lido fora da função: por `curl | bash` não há arquivo, e dentro de uma função o bash devolveria
+# um nome que não é caminho, o que faria o script ler um partner.env da pasta atual.
+self="${BASH_SOURCE[0]:-}"
+main() {
+
 raw="${DESKVOICE_RAW:-https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main}"
 tty="${DESKVOICE_TTY:-/dev/tty}"
 say() { printf '%s\n' "$*"; }
@@ -21,7 +27,6 @@ say() { printf '%s\n' "$*"; }
 # O endereço da parceira tem uma origem só, install/partner.env: ao lado deste arquivo quando há
 # uma cópia do repositório, baixado quando o script chegou por `curl | bash`. Um partner.env
 # que por acaso esteja na pasta atual nunca é lido.
-self="${BASH_SOURCE[0]:-}"
 if [ -n "$self" ] && [ -f "$(dirname "$self")/partner.env" ]; then
   data="$(cat "$(dirname "$self")/partner.env")"
 else
@@ -39,7 +44,9 @@ say "não instala, não coleta e não envia nada."
 say
 say "O que ter em mãos"
 say "  1. Uma VPS com Ubuntu 22.04 ou mais novo, ou Debian 12 ou mais novo, e acesso por SSH."
-say "     O recomendado é 2 GB de memória ou mais e 10 GB de disco livre."
+say "     Disco: 10 GB livres. Memória: a instalação foi provada numa VPS de 8 GB e 4 vCPU, e o"
+say "     DeskVoice parado usa cerca de 400 MB. O menor tamanho em que a instalação cabe ainda não"
+say "     foi medido: hoje ela constrói as imagens no servidor, e com 2 GB pode faltar memória."
 say "  2. Opcional: um domínio apontado para a VPS. Sem domínio, o painel abre pelo IP, sem HTTPS."
 say "  3. Para atender ligação de verdade: um tronco SIP com um número e uma chave de IA de voz"
 say "     (Gemini ou OpenAI). Sem eles dá para instalar e ver uma chamada simulada."
@@ -60,12 +67,12 @@ say "    curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVo
 say "  O passo a passo completo: docs/guides/primeira-ligacao.md, no repositório."
 
 # Abrir o navegador: só com o link conferido, só depois do texto acima, e só se a pessoa disser sim.
-[ -n "$url" ] || exit 0
+[ -n "$url" ] || return 0
 case "$(uname -s)" in Darwin) opener=open ;; *) opener=xdg-open ;; esac
-command -v "$opener" >/dev/null 2>&1 || exit 0
+command -v "$opener" >/dev/null 2>&1 || return 0
 if [ -t 0 ]; then ask=/dev/stdin
 elif [ -r "$tty" ] && : <"$tty" 2>/dev/null; then ask="$tty"
-else exit 0; fi
+else return 0; fi
 say
 printf 'Quer que eu abra agora no navegador o link de parceria da %s? Não é obrigatório. [s/N] ' "$name"
 answer=""; IFS= read -r answer <"$ask" || true
@@ -73,3 +80,5 @@ case "$answer" in
   s|S|sim|Sim|SIM) "$opener" "$url" || say "Não consegui abrir o navegador. O link está acima." ;;
   *) say "Não abri. O link está acima, se precisar." ;;
 esac
+}
+main "$@"
