@@ -11,15 +11,15 @@
 | Fila de merge | Configurada na regra do ramo. Nenhuma contribuição a atravessou: os PRs #2, #3 e #4 entraram por passagem de administrador | `gh run list`: nenhuma execução por `merge_group` |
 | Revisão por quem não escreveu | Exigida na regra. Nunca aconteceu | `gh pr list`: os três PRs com revisão pendente e merge do autor |
 | Acolhida (`welcome.yml`) | Disparou quatro vezes e o job foi pulado, porque os PRs eram do próprio repositório. Nunca comentou num PR de fork | `gh run list` |
-| Passo de atualização no CI | Pulado até existir a primeira versão | `.github/workflows/ci.yml:139-142` |
-| Corte de versão (`release.yml`) | O job de etiqueta roda a cada push na `main` e sai sem nada a marcar. Nenhuma versão foi cortada | `gh api .../releases`: 0 |
-| Publicação de imagens (`publish-image.yml`) | Nunca rodou | `gh run list` |
+| Passo de atualização no CI | Era pulado até existir a primeira versão. A 0.1.0 existe desde 2026-11-11; o passo ainda não rodou num PR depois dela | `.github/workflows/ci.yml` |
+| Corte de versão (`release.yml`) | O ato 2 rodou uma vez, na 0.1.0: reconheceu o merge do PR `release/0.1.0`, criou a tag anotada no commit da `main` e disparou a publicação. O ato 1 (o workflow abrir o PR) nunca rodou: o PR foi aberto à mão, com os mesmos passos, porque a organização não permitia que o Actions abrisse pull request | `gh run view 43082922051` |
+| Publicação de imagens (`publish-image.yml`) | Rodou uma vez, na 0.1.0: as três imagens amd64 foram construídas e publicadas. Reexecutar o workflow inteiro (que sobrescreveria a etiqueta) nunca aconteceu | `gh run view 43082962811` |
 | Imagens para arm64 | Não são publicadas. A publicação é só para amd64; em ARM a instalação constrói na própria máquina (`--build`), o que nunca foi exercitado numa máquina ARM | `publish-image.yml` |
 | Canal `stable` | Deixou de existir: o job de promoção saiu do workflow e a instalação descobre a versão pelas tags do repositório | `publish-image.yml` |
-| Release do GitHub publicada no fim da publicação das imagens | Nunca rodou. A release só nasce depois que as três imagens baixam sem credencial | `publish-image.yml`, job `release` |
-| Tag fora da `main` não publica | Nunca rodou num runner | `publish-image.yml`, job `probe` |
-| Nome da imagem lido da fonte única no workflow | Os passos que carregam `install/_common.sh` (`image_ref`, `version_of_tag`) foram rodados à mão, fora do GitHub, com `GITHUB_REF` de exemplo. Nunca rodaram num runner | `publish-image.yml:46`, `:93`, `:134`, `:159` |
-| Imagens publicadas baixam sem credencial | Nunca conferido: não há imagem. Um pacote novo no registro nasce privado, e torná-lo público é um passo manual. O job `verify-public` pergunta pelas imagens sem credencial e nunca rodou | `publish-image.yml:143-170` |
+| Release do GitHub publicada no fim da publicação das imagens | Rodou uma vez, na 0.1.0. Com os pacotes ainda privados o job foi pulado; depois de tornados públicos, a reexecução só dos jobs que falharam publicou a release | `gh release view v0.1.0` |
+| Tag fora da `main` não publica | O caminho que aceita rodou (a tag da 0.1.0 é de commit da `main`). O caminho que recusa nunca rodou num runner | `publish-image.yml`, job `probe` |
+| Nome da imagem lido da fonte única no workflow | Rodou num runner, na 0.1.0: as imagens saíram com o endereço de `deploy/images.env` e a etiqueta `0.1.0` | `gh run view 43082962811` |
+| Imagens publicadas baixam sem credencial | Provado na 0.1.0: o `verify-public` falhou com os pacotes privados, dizendo o conserto, e passou depois que o dono os tornou públicos. A VPS de teste baixou as três sem login | `gh run view 43082962811` |
 
 ## Instalação e operação
 
