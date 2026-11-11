@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-const sources = ["packages/*/src/**/*.test.ts", "packages/*/test/**/*.test.ts", "apps/voice/src/**/*.test.ts", "apps/routines/src/**/*.test.ts", "scripts/**/*.test.ts"];
+const sources = ["packages/*/src/**/*.test.ts", "packages/*/test/**/*.test.ts", "apps/voice/src/**/*.test.ts", "apps/routines/src/**/*.test.ts", "apps/panel/src/**/*.test.ts", "scripts/**/*.test.ts"];
 
 export default defineConfig({
   test: {
