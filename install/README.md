@@ -89,6 +89,11 @@ bash install/restore.sh backups/20261110-030000
 bash install/restore.sh latest --with-config   # traz também a configuração do backup (troca de VPS)
 ```
 
+**Trocando de VPS:** depois de `restore.sh latest --with-config` na máquina nova, rode
+`bash install/install.sh` de novo. A configuração restaurada traz o IP público da máquina antiga,
+e é o instalador que detecta o IP novo e regera os arquivos do Asterisk. Sem esse passo o painel
+abre e as ligações ficam mudas.
+
 Agendar todo dia às 3h: `crontab -e` e acrescente
 `0 3 * * * cd /caminho/DeskVoice && bash install/backup.sh`.
 

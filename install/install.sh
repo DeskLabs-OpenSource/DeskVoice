@@ -342,10 +342,13 @@ if [ "$proxy_mode" = external ]; then
 fi
 printf '\n  %sJá funciona:%s painel, banco, Asterisk esperando ligação, worker de voz e rotinas.\n' "$C_BLD" "$C_OFF"
 printf '  %sAinda não funciona, até você configurar no painel:%s atender ligação.\n' "$C_BLD" "$C_OFF"
-printf '\n  %sPróximos três passos, todos pela tela:%s\n' "$C_BLD" "$C_OFF"
+printf '\n  %sPara ver funcionando agora, sem chave nem operadora:%s na tela Chamadas, clique em "Simular uma chamada".\n' "$C_BLD" "$C_OFF"
+printf '\n  %sPróximos quatro passos para atender ligação de verdade, todos pela tela:%s\n' "$C_BLD" "$C_OFF"
 info "1. Configurações → Motor de voz: cole a chave do Gemini ou da OpenAI."
-info "2. Linha: cadastre o tronco SIP e o número que a operadora te passou."
-info "3. Faça a primeira ligação para o número e acompanhe na tela Chamadas. É ela que prova que o áudio passa."
+info "2. Agentes → Recepção: troque o motor de voz de \"Simulado\" para o que você configurou."
+info "   O agente de exemplo nasce no motor simulado, que serve para demonstração e não fala com ninguém."
+info "3. Linha: cadastre o tronco SIP e o número que a operadora te passou."
+info "4. Faça a primeira ligação para o número e acompanhe na tela Chamadas. É ela que prova que o áudio passa."
 printf '\n  Conferir a saúde:  bash install/healthcheck.sh\n  Pedir ajuda:       bash install/diagnose.sh   (gera um arquivo sem senhas para você enviar)\n'
 if partner_hint_allowed "$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"; then
   dim "VPS recomendada pelo projeto, se um dia for trocar: HostGator (https://www.hostgator.com.br/52708-141-3-52.html)"
