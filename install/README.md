@@ -3,6 +3,16 @@
 Tudo o que se faz na VPS passa por estes scripts. Nenhum deles pede para você editar arquivo à
 mão, e nenhum diz "pronto" sem conferir o resultado.
 
+## Em uma linha
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/install/get.sh | bash
+```
+
+`get.sh` baixa o DeskVoice em `~/DeskVoice` e abre o `install.sh`. Instala o `git` se faltar. Rodar
+de novo aproveita o que já está na pasta. O kit foi feito pensando na
+[VPS da HostGator](https://www.hostgator.com.br/52708-141-3-52.html), parceira do projeto, e funciona em qualquer VPS com Docker.
+
 ## Ordem de uso
 
 ```bash

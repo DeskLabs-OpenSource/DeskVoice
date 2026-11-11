@@ -29,9 +29,25 @@ it needs to, transfers the call, and leaves tasks running after the caller hangs
 
 ## Install
 
+> **Infrastructure partner: HostGator.** DeskVoice is free, with no paid version and no locked
+> feature. What sustains the project is the partnership with HostGator, and the install kit was
+> built with their VPS in mind: one command, a few questions, no variable to edit.
+>
+> **[Get the HostGator VPS through the partner link](https://www.hostgator.com.br/52708-141-3-52.html)**
+>
+> Using that link is how you support the project. Any other VPS with Docker works with the same
+> command, with no difference in features.
+
 ### On your VPS
 
-SSH into the server and run:
+SSH into the server and run one line:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/install/get.sh | bash
+```
+
+It downloads DeskVoice into `~/DeskVoice` and opens the installer. Prefer to read before you run?
+The same result, step by step:
 
 ```bash
 git clone https://github.com/DeskLabs-OpenSource/DeskVoice.git && cd DeskVoice && bash install/install.sh
@@ -47,7 +63,7 @@ agent. No feature requires SSH to be turned on.
 
 | What you need | Notes |
 |---|---|
-| A VPS running Ubuntu 22.04 or newer | We recommend [HostGator](https://www.hostgator.com.br/52708-141-3-52.html), the project's infrastructure partner (partner link). Any VPS with Docker works, with the same command. 2 GB of memory or more is recommended |
+| A VPS running Ubuntu 22.04 or newer | The [HostGator VPS](https://www.hostgator.com.br/52708-141-3-52.html), the project's partner, is the recommended one. Any VPS with Docker works, with the same command. 2 GB of memory or more is recommended |
 | A domain pointing to the VPS | Optional for testing. Without a domain, the panel opens by IP and without HTTPS |
 | A SIP trunk with a number | From the telephony carrier of your choice. Authentication by registration or by IP |
 | A voice AI key | Gemini (Google) or OpenAI. You pay the provider directly |
