@@ -3,10 +3,10 @@
 Português · [English](README.en.md) · [Español](README.es.md)
 
 <h1>
-  <picture>
+  <a href="https://deskvoice.com.br"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="brand/deskvoice-logo-dark.svg">
     <img src="brand/deskvoice-logo-light.svg" alt="DeskVoice" height="76">
-  </picture>
+  </picture></a>
 </h1>
 
 **Central telefônica open source operada por agentes de IA, instalada na sua VPS.**
@@ -14,6 +14,9 @@ Português · [English](README.en.md) · [Español](README.es.md)
 O agente atende a ligação, executa ferramentas durante a conversa, pede aprovação a um humano
 quando precisa, transfere e deixa tarefas rodando depois que a chamada termina.
 
+**[deskvoice.com.br](https://deskvoice.com.br)** · [Instalar](https://deskvoice.com.br/instalar) · [Guias](https://deskvoice.com.br/guias) · [Notas de versão](https://deskvoice.com.br/changelog)
+
+[![Site](https://img.shields.io/badge/site-deskvoice.com.br-a2552f)](https://deskvoice.com.br)
 [![CI](https://github.com/DeskLabs-OpenSource/DeskVoice/actions/workflows/ci.yml/badge.svg)](https://github.com/DeskLabs-OpenSource/DeskVoice/actions/workflows/ci.yml)
 [![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-green)](LICENSE)
 [![Node 22](https://img.shields.io/badge/Node-22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
