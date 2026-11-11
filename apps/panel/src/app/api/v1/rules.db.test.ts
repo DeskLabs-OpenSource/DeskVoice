@@ -219,6 +219,22 @@ describe("settings", () => {
     const hooks = await put("webhooks.allowed", [{ name: "crm", url: "https://crm.example.test/hook", token: "hook-token" }]);
     expect(hooks.data).toEqual({ key: "webhooks.allowed", value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: true } }] });
   });
+
+  it("keeps whatsapp.trust_caller_id as a plain boolean that starts unset, and an operator cannot change it", async () => {
+    const params = { key: "whatsapp.trust_caller_id" };
+    const put = (value: unknown, cookie = owner) => call(putSetting, { method: "PUT", cookie, params, body: { value } });
+    // Sem linha gravada a ferramenta lê como desligado: enviar para quem ligou pede confirmação.
+    expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: null });
+
+    for (const bad of ["true", 1, { enabled: true }]) expect((await put(bad)).code, JSON.stringify(bad)).toBe("validation_error");
+    expect((await put(true, operator.cookie)).status).toBe(403);
+    expect(await stored("select value from settings where key = $1", [params.key])).toBeNull();
+
+    expect((await put(true)).data).toEqual({ key: params.key, value: true });
+    expect(await stored("select value, secret from settings where key = $1", [params.key])).toEqual({ value: true, secret: false });
+    expect((await put(false)).data).toEqual({ key: params.key, value: false });
+    expect(await stored("select value from settings where key = $1", [params.key])).toEqual({ value: false });
+  });
 });
 
 describe("approvals", () => {

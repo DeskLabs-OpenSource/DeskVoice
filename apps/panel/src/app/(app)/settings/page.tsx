@@ -9,7 +9,7 @@ import ptBR, { type SettingsDictionary } from "../../../i18n/pt-BR/settings";
 import { useDict } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../ui/errors";
-import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, TextArea, TextInput } from "../../../ui/kit";
+import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import type { Engine, Setting } from "../../../ui/types";
 
@@ -77,10 +77,12 @@ export default function SettingsPage() {
   const engines = useApi<Engine[]>("/engines");
   const defaultEngine = useApi<Setting<string>>("/settings/engine.default");
   const connector = useApi<Setting<Connector>>("/settings/whatsapp.connector");
+  const trustCaller = useApi<Setting<boolean>>("/settings/whatsapp.trust_caller_id");
   const webhooks = useApi<Setting<Array<{ name: string; url: string; token: { configured: boolean } }>>>("/settings/webhooks.allowed");
   const recording = useApi<Setting<string>>("/settings/recording_notice.text");
   const saveDefault = useAction();
   const saveConnector = useAction();
+  const saveTrustCaller = useAction();
   const saveHooks = useAction();
   const saveRecording = useAction();
   const [whatsapp, setWhatsapp] = useState({ type: "deskcomm", url: "", token: "" });
@@ -176,6 +178,19 @@ export default function SettingsPage() {
             </div>
           ) : null}
         </form>
+        <div className="mt-5 grid gap-3 border-t border-line pt-5">
+          <h3 className="font-bold">{t.trustCallerTitle}</h3>
+          <p className="max-w-prose text-muted">{t.trustCallerLead}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Switch
+              label={t.trustCallerSwitch}
+              disabled={!canConfigure || saveTrustCaller.busy}
+              checked={trustCaller.data?.value === true}
+              onChange={(next) => void saveTrustCaller.run(() => put("whatsapp.trust_caller_id", next)).then(trustCaller.reload)}
+            />
+            <ActionStatus action={saveTrustCaller} />
+          </div>
+        </div>
       </Panel>
 
       <Panel title={t.webhooksTitle} description={t.webhooksLead}>

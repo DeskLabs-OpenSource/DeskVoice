@@ -87,6 +87,8 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
   const definitions: Record<string, Setting> = {
     "engine.default": plain(z.string().refine((id) => engines.some((engine) => engine.id === id), "unknown voice engine")),
     "whatsapp.connector": connector,
+    // Ausente vale `false`: o envio para quem ligou pede confirmação humana (o número exibido é forjável).
+    "whatsapp.trust_caller_id": plain(z.boolean()),
     "webhooks.allowed": webhooks,
     "recording_notice.text": plain(z.string().trim().min(1).max(500)),
     "network.public_ip": plain(z.ipv4()),
