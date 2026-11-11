@@ -56,6 +56,8 @@ const timeline: TimelineDictionary = {
   },
   reasons: {
     engine_not_configured: "El agente usa un motor de voz sin clave.",
+    engine_not_responding: "El proveedor del motor de voz no respondió a tiempo. Revisa el estado del proveedor y la clave en Configuración.",
+    process_restarted: "El proceso de voz se reinició en medio de la llamada.",
     no_agent: "Ningún agente atiende este número.",
     agent_disabled: "El agente de este número está apagado.",
     hangup: "Quien llamó colgó.",

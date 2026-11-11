@@ -56,6 +56,8 @@ const timeline: TimelineDictionary = {
   },
   reasons: {
     engine_not_configured: "The agent uses a voice engine with no key.",
+    engine_not_responding: "The voice engine provider did not answer in time. Check the provider status and the key in Settings.",
+    process_restarted: "The voice process restarted in the middle of the call.",
     no_agent: "No agent answers this number.",
     agent_disabled: "The agent of this number is turned off.",
     hangup: "The caller hung up.",
