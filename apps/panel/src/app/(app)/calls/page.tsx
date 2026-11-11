@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, CheckCircle, Circle, PhoneCall, Play } from "@phosphor-icons/react";
+import { ArrowRight, CheckCircle, Circle, Microphone, PhoneCall, Play } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -14,7 +14,7 @@ import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { useErrorText } from "../../../ui/errors";
 import { formatDateTime, formatDuration, formatMoney, formatPhone, secondsBetween } from "../../../ui/format";
-import { Badge, Button, EmptyState, Notice, PageHeader, Skeleton, type Tone } from "../../../ui/kit";
+import { Badge, Button, EmptyState, Notice, PageHeader, Skeleton, buttonClass, type Tone } from "../../../ui/kit";
 import { useLive, useNow } from "../../../ui/live";
 import type { Agent, Call, CallStatus, Engine, Trunk } from "../../../ui/types";
 
@@ -71,13 +71,25 @@ export default function CallsPage() {
 
   return (
     <>
-      <PageHeader title={t.title} lead={t.lead} actions={empty ? null : simulateButton("secondary")} />
+      <PageHeader
+        title={t.title}
+        lead={t.lead}
+        actions={
+          <>
+            <Link href="/calls/talk" className={buttonClass("primary")}>
+              <Microphone size={18} weight="duotone" aria-hidden />
+              {t.talk}
+            </Link>
+            {empty ? null : simulateButton("secondary")}
+          </>
+        }
+      />
       {error ? <Notice tone="fail">{error}</Notice> : null}
       {calls.error && !calls.data ? <Notice tone="fail">{errorText(calls.error)}</Notice> : null}
       {calls.data === undefined && !calls.error ? <Skeleton /> : null}
 
       {empty ? (
-        <EmptyState icon={<PhoneCall size={32} weight="duotone" aria-hidden />} title={t.empty.title} action={simulateButton("primary")}>
+        <EmptyState icon={<PhoneCall size={32} weight="duotone" aria-hidden />} title={t.empty.title} action={simulateButton("secondary")}>
           <p>{t.empty.body}</p>
           <ul className="mt-1 grid gap-1.5">
             {steps.map((step) => (

@@ -21,6 +21,7 @@ const server = await startVoiceServer({
   secretKey: config.secretKey,
   audioSocketPort: config.audioSocketPort,
   internalPort: Number(process.env.VOICE_INTERNAL_PORT ?? 8090),
+  webPort: Number(process.env.VOICE_WEB_PORT ?? 8091),
   internalToken: process.env.INTERNAL_TOKEN,
   trunksFile: process.env.ASTERISK_TRUNKS_FILE ?? DEFAULT_TRUNKS_FILE,
   publicIp: process.env.PUBLIC_IP ?? null,
@@ -31,7 +32,7 @@ const server = await startVoiceServer({
 // Sem Asterisk no ar o processo não morre: a escuta fica tentando, a saúde diz `fail` com o
 // motivo, e a chamada simulada funciona assim mesmo.
 ari.start();
-log("info", "voice process started", { audioSocketPort: server.audioSocketPort, internalPort: server.internalPort, engines: [...engines.keys()], tools: [...tools.keys()] });
+log("info", "voice process started", { audioSocketPort: server.audioSocketPort, internalPort: server.internalPort, webPort: server.webPort, engines: [...engines.keys()], tools: [...tools.keys()] });
 
 let stopping = false;
 async function shutdown(signal: string): Promise<void> {

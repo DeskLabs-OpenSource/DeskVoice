@@ -59,6 +59,22 @@ done
 equal "umask 077: a pasta continua fechada para outros usuários da VPS" 700 "$(mode_of "$G")"
 contains "o plano de discagem montado é o do repositório" "$(cat "$G/extensions.conf")" "Stasis(deskvoice,inbound)"
 lacks "o compose não monta mais arquivo direto do repositório" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/extensions.conf"
+
+# Sem o proxy do DeskVoice (80/443 de outro), o painel e a porta de voz do navegador saem em
+# portas locais. A porta de voz é a que recebe o áudio de "Falar com o agente".
+( source "$KIT/_common.sh"; write_proxy_override 127.0.0.1 3080 3081 )
+O="$D/docker-compose.override.yml"
+contains "publicação: painel na porta local" "$(cat "$O")" '"127.0.0.1:3080:3000"'
+contains "publicação: voz do navegador na porta seguinte" "$(cat "$O")" '"127.0.0.1:3081:8091"'
+equal "publicação: arquivo só do dono" 600 "$(mode_of "$O")"
+( cd "$D" && PATH="${PATH#"$TEST_DIR/fake:"}" python3 -c "import sys; t=open('docker-compose.override.yml').read(); sys.exit(0 if t.count('ports:')==2 and 'voice:' in t and 'panel:' in t else 1)" ); equal "publicação: os dois serviços têm portas" 0 "$?"
+# Painel aberto pelo IP (sem domínio): a porta de voz continua só local. Exposta, seria uma porta
+# aberta sem uso possível, porque fora de HTTPS e de localhost o navegador não libera o microfone.
+( source "$KIT/_common.sh"; write_proxy_override 0.0.0.0 3080 3081 )
+contains "painel aberto pelo IP: painel publicado para fora" "$(cat "$O")" '"0.0.0.0:3080:3000"'
+contains "painel aberto pelo IP: voz só para dentro da máquina" "$(cat "$O")" '"127.0.0.1:3081:8091"'
+lacks "painel aberto pelo IP: voz nunca exposta" "$(cat "$O")" '0.0.0.0:3081'
+contains "o Caddy do DeskVoice encaminha a voz do navegador" "$(cat "$REPO/deploy/Caddyfile")" "reverse_proxy voice:8091"
 contains "rtp.conf recebe o início da faixa" "$(cat "$G/rtp.conf")" "rtpstart=20000"
 contains "rtp.conf recebe o fim da faixa" "$(cat "$G/rtp.conf")" "rtpend=20200"
 contains "pjsip.conf anuncia o IP público no áudio" "$(cat "$G/pjsip.conf")" "external_media_address=198.51.100.7"

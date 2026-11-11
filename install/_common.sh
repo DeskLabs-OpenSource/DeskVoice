@@ -258,6 +258,29 @@ pick_free_port() {  # pick_free_port <primeira candidata> < lista de portas em u
   echo "$candidate"
 }
 
+# Sem o nosso Caddy, o painel e a porta de voz do navegador são publicados em portas locais.
+#   write_proxy_override <endereço do painel> <porta do painel> <porta da voz do navegador>
+# A porta de voz fica SEMPRE só para dentro da máquina: quem chega nela é o proxy que já existe
+# ou um túnel SSH. Exposta, seria uma porta aberta sem uso possível, porque fora de HTTPS e de
+# localhost o navegador não libera o microfone.
+write_proxy_override() {
+  local tmp
+  tmp="$(mktemp "$PROXY_OVERRIDE.XXXXXX")"
+  cat > "$tmp" <<OVERRIDE
+# Gerado pelo instalador: 80/443 já são de outro proxy nesta máquina.
+services:
+  panel:
+    ports:
+      - "$1:$2:3000"
+  # Porta por onde chega o áudio de "Falar com o agente" (WebSocket).
+  voice:
+    ports:
+      - "127.0.0.1:$3:8091"
+OVERRIDE
+  chmod 600 "$tmp"
+  mv "$tmp" "$PROXY_OVERRIDE"
+}
+
 # Quem publica o painel? `caddy` = o nosso Caddy pega 80/443; `external` = já existe um
 # proxy nessas portas e a gente não briga: o painel sai numa porta local.
 #   decide_proxy_mode <80 ocupada: 0|1> <443 ocupada: 0|1> <é o nosso Caddy: 0|1>

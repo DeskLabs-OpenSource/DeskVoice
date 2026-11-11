@@ -5,6 +5,7 @@ import { DELETE as deleteAgent, PATCH as patchAgent } from "./agents/[id]/route"
 import { POST as createAgent } from "./agents/route";
 import { POST as decide } from "./approvals/[id]/decide/route";
 import { POST as simulate } from "./calls/simulate/route";
+import { POST as webCall } from "./calls/web/route";
 import { DELETE as removeDoNotCall, GET as listDoNotCall, POST as addDoNotCall } from "./do-not-call/route";
 import { GET as listEngines } from "./engines/route";
 import { GET as getPolicy, PUT as putPolicy } from "./outbound-policy/route";
@@ -465,6 +466,47 @@ describe("voice process", () => {
     panel.voice.respond = () => Response.json({ code: "engine_not_configured", message: "No key." }, { status: 409 });
     const refused = await call(simulate, { method: "POST", cookie: owner, body: { agentId: agent } });
     expect([refused.status, refused.code]).toEqual([422, "engine_not_configured"]);
+  });
+
+  it("a browser call asks for an invitation in the name of the session and tells the browser where to connect", async () => {
+    const agent = await newAgent("Navegador");
+    panel.voice.requests.length = 0;
+    panel.voice.respond = () => Response.json({ callId: "22222222-2222-4222-8222-222222222222", token: "invite-token", expiresInSeconds: 60 });
+
+    const started = await call(webCall, { method: "POST", cookie: operator.cookie, body: { agentId: agent } });
+    expect(started.data).toEqual({ callId: "22222222-2222-4222-8222-222222222222", token: "invite-token", ws: { path: "/voice-ws" } });
+    expect(panel.voice.requests).toEqual([{ url: "http://voice.test/calls/web", body: { organizationId: org, agentId: agent, userId: operator.id } }]);
+
+    // Com proxy na frente o instalador grava a variável vazia; lixo também vale como "não definida".
+    for (const raw of ["", "   ", "abc", "0", "65536", "80.5", "-1", "8091x"]) {
+      panel.deps.voiceWebPublicPort = raw;
+      expect([raw, ((await call(webCall, { method: "POST", cookie: owner, body: { agentId: agent } })).data as { ws: unknown }).ws]).toEqual([raw, { path: "/voice-ws" }]);
+    }
+    for (const [raw, port] of [["8091", 8091], ["1", 1], ["65535", 65535]] as const) {
+      panel.deps.voiceWebPublicPort = raw;
+      expect(((await call(webCall, { method: "POST", cookie: owner, body: { agentId: agent } })).data as { ws: unknown }).ws).toEqual({ port });
+    }
+    panel.deps.voiceWebPublicPort = undefined;
+  });
+
+  it("a browser call passes on each refusal of the voice process with its own code, and says when it is down", async () => {
+    const agent = await newAgent("Recusado");
+    for (const code of ["agent_not_found", "agent_disabled", "engine_not_configured", "engine_simulated"]) {
+      panel.voice.respond = () => Response.json({ code, message: "refused" }, { status: 409 });
+      const refused = await call(webCall, { method: "POST", cookie: owner, body: { agentId: agent } });
+      expect([refused.status, refused.code]).toEqual([422, code]);
+    }
+    panel.voice.respond = () => {
+      throw new Error("connect ECONNREFUSED");
+    };
+    const down = await call(webCall, { method: "POST", cookie: owner, body: { agentId: agent } });
+    expect([down.status, down.code]).toEqual([502, "voice_unavailable"]);
+    // Resposta sem convite não chega ao navegador como se fosse uma chamada.
+    panel.voice.respond = () => Response.json({ callId: "x" });
+    expect((await call(webCall, { method: "POST", cookie: owner, body: { agentId: agent } })).code).toBe("voice_unavailable");
+
+    expect((await call(webCall, { method: "POST", body: { agentId: agent } })).status).toBe(401);
+    expect((await call(webCall, { method: "POST", cookie: owner, body: { agentId: "not-a-uuid" } })).code).toBe("validation_error");
   });
 
   it("tests a line step by step and records the outcome", async () => {

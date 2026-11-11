@@ -17,6 +17,8 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   // os dois saem de `install/_common.sh`.
   SYSTEM_DATABASE_URL: "generated",
   INTERNAL_TOKEN: "generated",
+  // Porta pública do áudio da chamada pelo navegador; o instalador grava vazia quando há proxy na frente.
+  VOICE_WEB_PUBLIC_PORT: "generated",
   // IP público da VPS, descoberto pelo instalador; vai no `from_domain` dos troncos gerados.
   PUBLIC_IP: "generated",
   // Senhas dos papéis `deskvoice_app` e `deskvoice_system`; só o comando de migrations as recebe.
@@ -35,6 +37,8 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   VOICE_INTERNAL_URL: "default",
   // Porta da API interna do processo de voz (8090) e arquivo de troncos que ele gera para o Asterisk.
   VOICE_INTERNAL_PORT: "default",
+  // Porta do WebSocket da chamada pelo navegador (8091); o proxy do painel a publica em /voice-ws.
+  VOICE_WEB_PORT: "default",
   ASTERISK_TRUNKS_FILE: "default",
   // Usuário e grupo do Asterisk dentro do contêiner dele (1000): dono do arquivo de troncos.
   ASTERISK_UID: "default",
