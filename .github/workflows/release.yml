@@ -11,7 +11,9 @@ name: release
 #
 # A tag só nasce de commit da main, e só do merge de um PR `release/*` deste repositório.
 #
-# SOBRE O TOKEN. Este workflow usa o GITHUB_TOKEN com permissão por job. O GitHub não dispara
+# SOBRE O TOKEN. O PR de release é aberto pela conta de robô do projeto, com o segredo
+# RELEASE_BOT_TOKEN (só conteúdo e pull requests deste repositório). Tudo o mais usa o
+# GITHUB_TOKEN com permissão por job. O GitHub não dispara
 # workflows para o que o GITHUB_TOKEN faz, e por isso há dois disparos explícitos abaixo (o `ci`
 # no ramo da release e o `publish-image` na tag). Também é preciso ligar, na organização,
 # "Allow GitHub Actions to create and approve pull requests".
@@ -79,6 +81,10 @@ jobs:
       - name: Abrir o PR de release
         env:
           GH_TOKEN: ${{ github.token }} # GITHUB APP: token do App
+          # Conta de robô do projeto. Só abre o PR: um PR aberto por uma conta de verdade recebe o
+          # evento `pull_request`, e o `ci` roda nele como em qualquer outro. Sem o segredo, o PR é
+          # aberto pelo GITHUB_TOKEN e o `ci` é disparado à mão no ramo, como antes.
+          BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
           VERSION: ${{ steps.cut.outputs.version }}
         run: |
           set -euo pipefail
@@ -99,9 +105,13 @@ jobs:
             echo "O merge deste PR cria a tag \`v${VERSION}\`, publica a release e as três imagens."
             echo "Algo errado? **Feche o PR** em vez de editar o número: corrija o fragmento na main e dispare o workflow de novo."
           } > "${RUNNER_TEMP}/body.md"
-          gh pr create --base main --head "${branch}" --title "Release ${VERSION}" --body-file "${RUNNER_TEMP}/body.md"
-          # Disparar: PR aberto pelo GITHUB_TOKEN não recebe o evento `pull_request`.
-          gh workflow run ci.yml --ref "${branch}"
+          if [ -n "${BOT_TOKEN}" ]; then
+            GH_TOKEN="${BOT_TOKEN}" gh pr create --base main --head "${branch}" --title "Release ${VERSION}" --body-file "${RUNNER_TEMP}/body.md"
+          else
+            gh pr create --base main --head "${branch}" --title "Release ${VERSION}" --body-file "${RUNNER_TEMP}/body.md"
+            # Disparar: PR aberto pelo GITHUB_TOKEN não recebe o evento `pull_request`.
+            gh workflow run ci.yml --ref "${branch}"
+          fi
 
   tag-release:
     name: tag-release
