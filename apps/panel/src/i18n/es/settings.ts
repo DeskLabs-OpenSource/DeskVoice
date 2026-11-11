@@ -12,6 +12,8 @@ const settings: SettingsDictionary = {
   keyNew: "Pega la clave nueva para cambiarla",
   keySave: "Guardar clave",
   keyRemove: "Quitar clave",
+  keyRemoveConfirm: "¿Quitar la clave de {engine}? Los agentes que usan este motor dejan de atender con IA hasta que se guarde una clave nueva. La clave quitada no se puede recuperar.",
+  keyRemoveYes: "Quitar la clave de {engine}",
   defaultEngine: "Motor por defecto",
   defaultEngineHint: "Viene seleccionado cuando creas un agente.",
   whatsappTitle: "Conector de WhatsApp",
@@ -25,6 +27,8 @@ const settings: SettingsDictionary = {
   tokenAgain: "Cambiaste la dirección o el tipo: escribe el token de nuevo. El token guardado vale solo para la dirección anterior.",
   saveConnector: "Guardar conector",
   removeConnector: "Quitar conector",
+  removeConnectorConfirm: "¿Quitar el conector de WhatsApp {url}? Los agentes dejan de enviar mensajes y avisos por WhatsApp, y el token guardado se borra.",
+  removeConnectorYes: "Quitar el conector",
   trustCallerTitle: "Enviar directo a quien llamó",
   trustCallerLead: "El número que aparece en una llamada puede falsificarse: alguien puede llamar fingiendo el número de otra persona y pedir que el agente le envíe un mensaje. Por eso, cuando el agente va a enviar un WhatsApp al número de quien llamó, una persona del equipo confirma antes el destino y el texto. Al activar esta opción, el envío a quien llamó sale directo, sin confirmación.",
   trustCallerSwitch: "Confiar en el número que aparece en la llamada",
@@ -36,6 +40,8 @@ const settings: SettingsDictionary = {
   hookTokenKept: "Token configurado",
   addHook: "Agregar webhook",
   removeHook: "Quitar {name}",
+  removeHookConfirm: "¿Quitar el webhook {name}? Cuando guardes la lista, los agentes dejan de poder llamar a esta dirección y su token se borra.",
+  removeHookYes: "Quitar {name}",
   saveHooks: "Guardar webhooks",
   hooksEmpty: "Ningún webhook registrado.",
   recordingTitle: "Aviso de grabación",
@@ -64,6 +70,11 @@ const settings: SettingsDictionary = {
   approvalDenied: "Negar (valor seguro)",
   approvalApproved: "Aprobar por omisión",
   approvalWarning: "Con esta elección, un pedido que nadie vio se trata como aprobado.",
+  inboundLimitTitle: "Llamadas recibidas al mismo tiempo",
+  inboundLimitLead: "Cuántas llamadas recibidas por la línea telefónica atienden los agentes al mismo tiempo. Por encima de eso, quien llama recibe señal de ocupado y el rechazo aparece en Llamadas. Cada llamada ya tiene tope de costo y de duración en el agente; este límite contiene el gasto sumado cuando llegan muchas juntas. Las llamadas por el navegador y las que hace el agente no entran en esta cuenta.",
+  inboundLimit: "Límite de llamadas simultáneas",
+  inboundLimitHint: "De 1 a 50. El valor de fábrica es 5.",
+  saveInboundLimit: "Guardar límite",
 };
 
 export default settings;

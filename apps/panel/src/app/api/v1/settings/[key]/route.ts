@@ -12,7 +12,7 @@ async function definitionOf(args: Pick<HandlerArgs<unknown>, "params">) {
 export const GET = handle({}, async (args) => {
   const { key, definition } = await definitionOf(args);
   const row = await args.q.one<{ value: unknown }>("select value from settings where key = $1", [key]);
-  return { key, value: row ? definition.view(row.value) : null };
+  return { key, value: row ? definition.view(row.value) : (definition.fallback ?? null) };
 });
 
 // `value: null` apaga a configuração (é como se remove uma chave de IA).

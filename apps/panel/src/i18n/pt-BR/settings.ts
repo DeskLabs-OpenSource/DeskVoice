@@ -10,6 +10,8 @@ const settings = {
   keyNew: "Cole a chave nova para trocar",
   keySave: "Salvar chave",
   keyRemove: "Remover chave",
+  keyRemoveConfirm: "Remover a chave de {engine}? Os agentes que usam este motor deixam de atender com IA até uma chave nova ser salva. A chave removida não pode ser recuperada.",
+  keyRemoveYes: "Remover a chave de {engine}",
   defaultEngine: "Motor padrão",
   defaultEngineHint: "Vem selecionado quando você cria um agente.",
   whatsappTitle: "Conector de WhatsApp",
@@ -23,6 +25,8 @@ const settings = {
   tokenAgain: "Você mudou o endereço ou o tipo: informe o token de novo. O token gravado vale só para o endereço anterior.",
   saveConnector: "Salvar conector",
   removeConnector: "Remover conector",
+  removeConnectorConfirm: "Remover o conector de WhatsApp {url}? Os agentes deixam de enviar mensagens e avisos por WhatsApp, e o token gravado é apagado.",
+  removeConnectorYes: "Remover o conector",
   trustCallerTitle: "Enviar direto para quem ligou",
   trustCallerLead: "O número exibido numa ligação pode ser forjado: alguém pode ligar fingindo o número de outra pessoa e pedir que o agente mande uma mensagem para ela. Por isso, quando o agente vai enviar um WhatsApp para o número de quem ligou, uma pessoa da equipe confirma o destino e o texto antes. Ligando esta opção, o envio para quem ligou sai direto, sem confirmação.",
   trustCallerSwitch: "Confiar no número exibido na ligação",
@@ -34,6 +38,8 @@ const settings = {
   hookTokenKept: "Token configurado",
   addHook: "Adicionar webhook",
   removeHook: "Remover {name}",
+  removeHookConfirm: "Remover o webhook {name}? Depois que você salvar a lista, os agentes deixam de poder chamar este endereço e o token dele é apagado.",
+  removeHookYes: "Remover {name}",
   saveHooks: "Salvar webhooks",
   hooksEmpty: "Nenhum webhook cadastrado.",
   recordingTitle: "Aviso de gravação",
@@ -62,6 +68,11 @@ const settings = {
   approvalDenied: "Negar (padrão seguro)",
   approvalApproved: "Aprovar por omissão",
   approvalWarning: "Com esta escolha, um pedido que ninguém viu é tratado como aprovado.",
+  inboundLimitTitle: "Ligações recebidas ao mesmo tempo",
+  inboundLimitLead: "Quantas ligações recebidas pela linha telefônica os agentes atendem ao mesmo tempo. Acima disso, quem liga recebe sinal de ocupado e a recusa aparece em Chamadas. Cada ligação já tem teto de custo e de duração no agente; este limite segura o gasto somado quando muitas chegam juntas. Chamadas pelo navegador e ligações feitas pelo agente não entram nesta conta.",
+  inboundLimit: "Limite de ligações simultâneas",
+  inboundLimitHint: "De 1 a 50. O valor de fábrica é 5.",
+  saveInboundLimit: "Salvar limite",
 };
 
 export default settings;
