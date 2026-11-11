@@ -28,7 +28,9 @@ export interface VoiceSessionEvents {
   toolCall(call: { id: string; name: string; args: unknown }): void;
   /** O usuário falou por cima: quem toca o áudio deve descartar o que ainda não saiu. */
   interrupted(): void;
+  /** Incremento desde o último `usage` (não é acumulado): quem mede custo soma os eventos. */
   usage(usage: Usage): void;
+  /** Seguido de `closed` quando é fatal; sozinho, a sessão continua. */
   error(error: Error): void;
   closed(reason: string): void;
 }
@@ -54,11 +56,18 @@ export interface EnginePricing {
   source: string;
 }
 
+export interface ConnectOptions {
+  /** Sobrepõe o modelo padrão do motor. */
+  model?: string;
+  /** Sobrepõe a URL do WebSocket do provedor (testes apontam para um servidor falso). */
+  baseUrl?: string;
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;
   /** Verdadeiro para motores que não precisam de chave (o simulado). */
   keyless?: boolean;
   pricing: EnginePricing;
-  connect(config: VoiceSessionConfig, apiKey: string): Promise<VoiceSession>;
+  connect(config: VoiceSessionConfig, apiKey: string, options?: ConnectOptions): Promise<VoiceSession>;
 }

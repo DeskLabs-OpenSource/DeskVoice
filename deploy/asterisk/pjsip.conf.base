@@ -1,0 +1,16 @@
+; Base do pjsip.conf. Os troncos NÃO são escritos aqui: o worker de voz gera
+; `pjsip_trunks.conf` a partir do que foi cadastrado no painel e recarrega o
+; módulo. Ninguém edita arquivo por SSH para ligar uma linha.
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+; Sem o IP público aqui o Asterisk anuncia o IP privado do contêiner no SDP:
+; a sinalização funciona e nenhum pacote de áudio volta.
+external_media_address=${PUBLIC_IP}
+external_signaling_address=${PUBLIC_IP}
+local_net=172.16.0.0/12
+local_net=10.0.0.0/8
+local_net=192.168.0.0/16
+
+#include generated/pjsip_trunks.conf

@@ -1,0 +1,202 @@
+/**
+ * Motor OpenAI Realtime, por WebSocket.
+ *
+ * Documentação oficial consultada em 2026-11-10:
+ *   - https://developers.openai.com/api/docs/api-reference/realtime  (URL, autenticação, session.update, formatos de áudio, vozes, eventos do cliente)
+ *   - https://developers.openai.com/api/reference/resources/realtime/server-events  (eventos do servidor e seus campos)
+ *   - https://developers.openai.com/api/docs/guides/realtime-conversations  (áudio, chamada de função, interrupção)
+ *   - https://developers.openai.com/api/docs/pricing  (preços)
+ *
+ * A API aceita G.711 μ-law (`audio/pcmu`, 8 kHz) na entrada e na saída: a ligação não é reamostrada.
+ *
+ * Não confirmado contra o servidor real (nenhuma chamada com chave foi feita):
+ *   - a taxa do `audio/pcmu` não aparece escrita na referência; G.711 é 8 kHz por definição;
+ *   - `gpt-4o-mini-transcribe` como modelo de transcrição da fala de quem ligou (está na lista aceita).
+ */
+import { z } from "zod";
+import { SessionEmitter } from "../emitter";
+import { openProviderSocket } from "../provider-socket";
+import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
+import type { VoiceEngine, VoiceSession } from "../types";
+
+const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
+const DEFAULT_MODEL = "gpt-realtime-2.1";
+const DEFAULT_VOICE = "marin";
+const AUDIO_FORMAT = { type: "audio/pcmu" };
+
+const serverEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("session.updated") }),
+  z.object({ type: z.literal("response.created") }),
+  z.object({ type: z.literal("response.output_audio.delta"), delta: z.string() }),
+  z.object({ type: z.literal("response.output_audio_transcript.done"), transcript: z.string() }),
+  z.object({ type: z.literal("conversation.item.input_audio_transcription.completed"), transcript: z.string() }),
+  z.object({
+    type: z.literal("response.function_call_arguments.done"),
+    call_id: z.string(),
+    name: z.string(),
+    arguments: z.string(),
+  }),
+  z.object({ type: z.literal("input_audio_buffer.speech_started") }),
+  z.object({
+    type: z.literal("response.done"),
+    response: z.object({
+      usage: z.object({ input_tokens: z.number().optional(), output_tokens: z.number().optional() }).nullish(),
+    }),
+  }),
+  z.object({ type: z.literal("error"), error: z.object({ message: z.string() }) }),
+]);
+
+function parseArguments(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    // Devolve o texto cru: a validação da ferramenta recusa e o modelo recebe o erro para corrigir.
+    return json;
+  }
+}
+
+const engine: VoiceEngine = {
+  id: "openai-realtime",
+  label: "OpenAI Realtime",
+  pricing: {
+    // US$ 32,00 e US$ 64,00 por milhão de tokens de áudio (entrada e saída) do gpt-realtime-2.1.
+    // Texto e entrada em cache custam menos; cobrar tudo como áudio superestima, nunca subestima.
+    centsPerMillionInputTokens: 3200,
+    centsPerMillionOutputTokens: 6400,
+    checkedOn: "2026-11-10",
+    source: "https://developers.openai.com/api/docs/pricing",
+  },
+
+  async connect(config, apiKey, options = {}) {
+    const emitter = new SessionEmitter();
+    let configured = false;
+    let responseActive = false;
+    const queuedResponses: object[] = [];
+
+    let sessionReady: () => void = () => undefined;
+    let sessionFailed: (error: Error) => void = () => undefined;
+    const ready = new Promise<void>((resolve, reject) => {
+      sessionReady = resolve;
+      sessionFailed = reject;
+    });
+
+    // A API recusa um `response.create` enquanto outra resposta está em curso; o pedido espera a vez.
+    const requestResponse = (response: object): void => {
+      if (responseActive) {
+        queuedResponses.push(response);
+        return;
+      }
+      responseActive = true;
+      socket.send({ type: "response.create", response });
+    };
+
+    const onMessage = (raw: unknown): void => {
+      const parsed = serverEvent.safeParse(raw);
+      if (!parsed.success) return;
+      const event = parsed.data;
+      switch (event.type) {
+        case "session.updated":
+          configured = true;
+          sessionReady();
+          break;
+        case "response.created":
+          responseActive = true;
+          break;
+        case "response.output_audio.delta":
+          emitter.emit("audio", ulawToPcm16(Buffer.from(event.delta, "base64")));
+          break;
+        case "response.output_audio_transcript.done":
+          if (event.transcript) emitter.emit("transcript", { speaker: "agent", text: event.transcript });
+          break;
+        case "conversation.item.input_audio_transcription.completed":
+          if (event.transcript.trim()) emitter.emit("transcript", { speaker: "user", text: event.transcript.trim() });
+          break;
+        case "response.function_call_arguments.done":
+          emitter.emit("toolCall", { id: event.call_id, name: event.name, args: parseArguments(event.arguments) });
+          break;
+        case "input_audio_buffer.speech_started":
+          // Emitido mesmo sem resposta em curso: o modelo gera mais rápido que o tempo real, então a
+          // ponte pode ainda estar tocando uma fala que, para a API, já terminou.
+          // ponytail: não envia `conversation.item.truncate` (exige saber quantos ms a ponte já tocou);
+          // o modelo fica achando que disse a fala inteira. Acrescentar se isso atrapalhar a conversa.
+          emitter.emit("interrupted");
+          break;
+        case "response.done": {
+          responseActive = false;
+          const usage = event.response.usage;
+          if (usage) emitter.emit("usage", { inputTokens: usage.input_tokens ?? 0, outputTokens: usage.output_tokens ?? 0 });
+          const next = queuedResponses.shift();
+          if (next) requestResponse(next);
+          break;
+        }
+        case "error": {
+          const error = new Error(`OpenAI Realtime: ${event.error.message}`);
+          // Sem isto, um `response.create` recusado deixaria a fila de falas presa para sempre.
+          responseActive = false;
+          if (configured) emitter.emit("error", error);
+          else sessionFailed(error);
+          break;
+        }
+      }
+    };
+
+    const socket = await openProviderSocket({
+      url: `${options.baseUrl ?? DEFAULT_BASE_URL}?model=${encodeURIComponent(options.model ?? DEFAULT_MODEL)}`,
+      headers: { Authorization: `Bearer ${apiKey}` },
+      label: "OpenAI Realtime",
+      emitter,
+      onMessage,
+      onClosed: () => sessionFailed(new Error("OpenAI Realtime: a conexão fechou antes de confirmar a sessão")),
+    });
+
+    socket.send({
+      type: "session.update",
+      session: {
+        type: "realtime",
+        // O idioma só existe como parâmetro na transcrição; a fala segue a instrução.
+        instructions: `${config.instructions}\n\nSpeak only in ${config.language}.`,
+        output_modalities: ["audio"],
+        audio: {
+          input: {
+            format: AUDIO_FORMAT,
+            transcription: { model: "gpt-4o-mini-transcribe", language: config.language.split("-")[0] },
+            turn_detection: { type: "server_vad", create_response: true, interrupt_response: true },
+          },
+          output: { format: AUDIO_FORMAT, voice: config.voiceId ?? DEFAULT_VOICE },
+        },
+        tools: config.tools.map((tool) => ({ type: "function", ...tool })),
+      },
+    });
+    try {
+      await ready;
+    } catch (error) {
+      await socket.close();
+      throw error;
+    }
+
+    const session: VoiceSession = {
+      on: (event, handler) => emitter.on(event, handler),
+      sendAudio(pcm16_8k) {
+        socket.send({ type: "input_audio_buffer.append", audio: pcm16ToUlaw(pcm16_8k).toString("base64") });
+      },
+      sendToolResult(id, result) {
+        socket.send({
+          type: "conversation.item.create",
+          item: { type: "function_call_output", call_id: id, output: JSON.stringify(result ?? null) },
+        });
+        requestResponse({});
+      },
+      say(text) {
+        requestResponse({
+          instructions: `Say exactly the following to the caller, in ${config.language}, without adding anything: "${text}"`,
+        });
+      },
+      close: () => socket.close(),
+    };
+
+    if (config.greeting) session.say(config.greeting);
+    return session;
+  },
+};
+
+export default engine;
