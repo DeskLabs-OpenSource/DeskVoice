@@ -25,5 +25,6 @@ case "$args" in
   *"select count(*) from users"*) answer users_count; exit 0 ;;
   *" logs "*) answer logs; exit 0 ;;
   *" run --rm migrate"*) drain; exit "$(cat "$FAKE_DIR/migrate_exit" 2>/dev/null || echo 0)" ;;
+  *"run reset-password"*) cat > "$FAKE_DIR/reset_stdin" 2>/dev/null || true; exit "$(cat "$FAKE_DIR/reset_exit" 2>/dev/null || echo 0)" ;;
   *) drain; exit 0 ;;
 esac

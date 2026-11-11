@@ -145,9 +145,13 @@ backup indicado. Gere o diagnóstico e peça ajuda.
 
 ### 5. Esqueci a senha do painel
 
-Nesta versão ainda não existe um comando de redefinição de senha neste kit. Abra uma issue
-pedindo ajuda, com o arquivo do `bash install/diagnose.sh`. Seus dados não correm risco: a senha
-só protege a entrada no painel.
+```bash
+bash install/reset-password.sh voce@empresa.com.br
+```
+
+O script pede a senha nova duas vezes, troca e encerra as sessões abertas dessa conta. Só
+funciona de dentro da VPS: quem tem acesso ao servidor já é dono da instalação. Se o e-mail não
+existir, ele diz isso e não altera nada.
 
 Não rode o instalador de novo esperando que ele troque a senha: ele vê que já existe um dono e
 não cria outro.

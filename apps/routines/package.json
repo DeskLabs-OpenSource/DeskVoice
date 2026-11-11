@@ -7,7 +7,8 @@
   "scripts": {
     "start": "tsx src/main.ts",
     "migrate": "tsx src/cli/migrate.ts",
-    "create-owner": "tsx src/cli/create-owner.ts"
+    "create-owner": "tsx src/cli/create-owner.ts",
+    "reset-password": "tsx src/cli/reset-password.ts"
   },
   "dependencies": {
     "@deskvoice/core": "workspace:^",

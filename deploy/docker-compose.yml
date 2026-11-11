@@ -42,7 +42,7 @@ services:
   migrate:
     <<: *app
     image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-routines:${DESKVOICE_VERSION:-stable}
-    build: { context: .., target: routines }
+    build: { context: .., target: routines, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
     restart: "no"
     # Único serviço com as credenciais do dono do schema.
     env_file: [app.env, migrate.env]
@@ -53,7 +53,7 @@ services:
   panel:
     <<: *app
     image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-panel:${DESKVOICE_VERSION:-stable}
-    build: { context: .., target: panel }
+    build: { context: .., target: panel, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:
@@ -65,7 +65,7 @@ services:
   voice:
     <<: *app
     image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-voice:${DESKVOICE_VERSION:-stable}
-    build: { context: .., target: voice }
+    build: { context: .., target: voice, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
     depends_on:
       migrate: { condition: service_completed_successfully }
       asterisk: { condition: service_healthy }
@@ -81,7 +81,7 @@ services:
   routines:
     <<: *app
     image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-routines:${DESKVOICE_VERSION:-stable}
-    build: { context: .., target: routines }
+    build: { context: .., target: routines, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
     depends_on:
       migrate: { condition: service_completed_successfully }
 
