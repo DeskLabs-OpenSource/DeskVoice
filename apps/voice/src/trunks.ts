@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { decryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import { messageOf, type Logger } from "./log";
+import { hostsOverlap, parseTrunkHost, type TrunkHost } from "./trunk-host";
 
 export const DEFAULT_TRUNKS_FILE = "/asterisk-generated/pjsip_trunks.conf";
 
@@ -16,12 +17,16 @@ export interface TrunkConfig {
   authMode: "register" | "ip";
   /** IP público da instalação, para o `from_domain`. */
   publicIp: string | null;
+  /**
+   * Desde quando esta linha usa este endereço. Entre linhas com o mesmo endereço, a mais antiga
+   * fica com ele; `id` desempata.
+   */
+  since: Date;
 }
 
 export type TrunkHealth = { id: string; status: "ok" | "warn" | "fail"; detail: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const HOST = /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?$/;
 const USERNAME = /^[A-Za-z0-9._+@-]{1,80}$/;
 const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
 // Caracteres de controle e separadores de linha: nenhum deles cabe numa linha do arquivo.
@@ -36,7 +41,8 @@ const hasControl = (text: string): boolean => [...text].some((char) => (char.cod
  */
 export function trunkProblem(trunk: TrunkConfig): string | null {
   if (!UUID.test(trunk.id)) return "the line id is not a uuid";
-  if (!HOST.test(trunk.host)) return "the host has characters that a server address cannot have";
+  const host = parseTrunkHost(trunk.host);
+  if (!host) return "the host is not a server name, an IP address or an address block";
   if (trunk.username !== null && !USERNAME.test(trunk.username)) return "the user has characters that a SIP user cannot have";
   if (trunk.password !== null) {
     if (trunk.password.length > 128 || hasControl(trunk.password)) return "the password has a line break or a control character, or is longer than 128 characters";
@@ -45,6 +51,7 @@ export function trunkProblem(trunk: TrunkConfig): string | null {
     if (trunk.password.startsWith(">") || trunk.password !== trunk.password.trim()) return "the password starts with '>' or has spaces at the edges, which the Asterisk file cannot represent";
   }
   if (trunk.authMode === "register" && (!trunk.username || !trunk.password)) return "a line that registers needs user and password";
+  if (trunk.authMode === "register" && host.uri === null) return "a line that registers needs the address of one server, not an address block";
   return null;
 }
 
@@ -57,7 +64,7 @@ const value = (text: string): string => text.replaceAll(";", "\\;");
  * leva o IP privado do contêiner e há provedor que derruba a ligação) e `ulaw`/`alaw`, que casam
  * com o AudioSocket sem transcodificar.
  */
-function renderTrunk(trunk: TrunkConfig, hostIsExclusive: boolean): string {
+function renderTrunk(trunk: TrunkConfig, host: TrunkHost, identify: boolean): string {
   const name = trunkEndpointName(trunk.id);
   const withAuth = trunk.username !== null && trunk.password !== null;
   const publicIp = trunk.publicIp !== null && IPV4.test(trunk.publicIp) ? trunk.publicIp : null;
@@ -79,13 +86,14 @@ function renderTrunk(trunk: TrunkConfig, hostIsExclusive: boolean): string {
     "",
     `[${name}]`,
     "type=aor",
-    `contact=sip:${trunk.host}`,
+    // Bloco de endereços não é destino: a linha só recebe.
+    ...(host.uri === null ? [] : [`contact=sip:${host.uri}`]),
     "qualify_frequency=30",
   ];
-  // Reconhecer a chamada recebida pelo endereço de origem só é seguro quando o endereço é de um
-  // tronco só. Com o host repetido, o Asterisk entregaria a chamada de uma organização ao tronco
-  // de outra.
-  if (hostIsExclusive) lines.push("", `[${name}-identify]`, "type=identify", `endpoint=${name}`, `match=${normalizeHost(trunk.host)}`);
+  // O `identify` casa a chamada recebida pelo endereço de origem. Só sai para endereço numérico
+  // (nome resolve para endereços que mudam) e só para a linha que é dona dele: com o endereço
+  // repetido, o Asterisk entregaria a chamada de uma organização ao tronco de outra.
+  if (identify && host.kind === "address") lines.push("", `[${name}-identify]`, "type=identify", `endpoint=${name}`, `match=${host.match}`);
   if (withAuth) {
     lines.push("", `[${name}-auth]`, "type=auth", "auth_type=userpass", `username=${value(trunk.username ?? "")}`, `password=${value(trunk.password ?? "")}`);
   }
@@ -96,8 +104,8 @@ function renderTrunk(trunk: TrunkConfig, hostIsExclusive: boolean): string {
       "type=registration",
       "transport=transport-udp",
       `outbound_auth=${name}-auth`,
-      `server_uri=sip:${trunk.host}`,
-      `client_uri=sip:${value(trunk.username ?? "")}@${trunk.host}`,
+      `server_uri=sip:${host.uri}`,
+      `client_uri=sip:${value(trunk.username ?? "")}@${host.uri}`,
       // O Asterisk põe um parâmetro `line` único no Contact do registro e casa a chamada recebida
       // com este endpoint por ele: é o que separa duas contas na mesma operadora.
       "line=yes",
@@ -108,42 +116,46 @@ function renderTrunk(trunk: TrunkConfig, hostIsExclusive: boolean): string {
   return lines.join("\n");
 }
 
-/** Host como chave de comparação: minúsculas, sem porta, sem ponto final. Nome é comparado como nome; nada de DNS aqui. */
-export const normalizeHost = (host: string): string =>
-  host
-    .trim()
-    .toLowerCase()
-    .replace(/:[0-9]+$/, "")
-    .replace(/[.]$/, "");
-
-// Não diz de quem é a outra linha: pode ser de outra organização.
+// Não diz de quem é a outra linha, nem qual é o endereço: pode ser de outra organização.
 export const SHARED_HOST_REASON =
   "this provider address is already used by another line of this installation, and a line recognized only by its address cannot share it; change this line to registration (user and password) to fix it";
+export const NAME_IN_IP_MODE_REASON =
+  "a line recognized by IP needs the numeric address of the provider (an IP or an address block), not a name; with a name, change this line to registration (user and password)";
 
 /**
- * O arquivo inteiro. Tronco com valor que não pode ser escrito fica de fora, com o motivo em `skipped`.
+ * O arquivo inteiro. Tronco que não pode ser escrito fica de fora, com o motivo em `skipped`.
  *
- * Tronco em modo `ip` só tem o endereço para ser reconhecido. Se outro tronco da instalação usa o
- * mesmo host, ele fica de fora (falha fechada): atender pelo tronco errado é pior que não atender.
+ * Endereço disputado fica com a linha que o usa há mais tempo, e nada muda para ela quando outra
+ * aparece: ninguém derruba a linha de ninguém cadastrando o mesmo endereço. A linha mais nova em
+ * modo `ip` só teria o endereço para ser reconhecida, então fica de fora (falha fechada); em modo
+ * `register` ela sai sem `identify` e é reconhecida pelo `line` do registro. Linha inválida por
+ * outro motivo não reivindica endereço.
  */
 export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped: Array<{ id: string; reason: string }> } {
   const skipped: Array<{ id: string; reason: string }> = [];
-  const sections: string[] = [];
-  const writable: TrunkConfig[] = [];
-  for (const trunk of [...trunks].sort((a, b) => a.id.localeCompare(b.id))) {
-    const reason = trunkProblem(trunk);
-    if (reason) skipped.push({ id: trunk.id, reason });
-    else writable.push(trunk);
+  const sections = new Map<string, string>();
+  const claimed: TrunkHost[] = [];
+  const oldestFirst = [...trunks].sort((a, b) => a.since.getTime() - b.since.getTime() || a.id.localeCompare(b.id));
+  for (const trunk of oldestFirst) {
+    const host = parseTrunkHost(trunk.host);
+    const reason = trunkProblem(trunk) ?? (trunk.authMode === "ip" && host?.kind === "name" ? NAME_IN_IP_MODE_REASON : null);
+    if (reason || !host) {
+      skipped.push({ id: trunk.id, reason: reason ?? "the host cannot be read" });
+      continue;
+    }
+    const taken = claimed.some((other) => hostsOverlap(other, host));
+    if (taken && trunk.authMode === "ip") {
+      skipped.push({ id: trunk.id, reason: SHARED_HOST_REASON });
+      continue;
+    }
+    if (!taken && host.kind === "address") claimed.push(host);
+    sections.set(trunk.id, renderTrunk(trunk, host, !taken));
   }
-  const hostUses = new Map<string, number>();
-  for (const trunk of writable) hostUses.set(normalizeHost(trunk.host), (hostUses.get(normalizeHost(trunk.host)) ?? 0) + 1);
-  for (const trunk of writable) {
-    const exclusive = hostUses.get(normalizeHost(trunk.host)) === 1;
-    if (!exclusive && trunk.authMode === "ip") skipped.push({ id: trunk.id, reason: SHARED_HOST_REASON });
-    else sections.push(renderTrunk(trunk, exclusive));
-  }
+  // O arquivo sai em ordem de id, estável: a antiguidade só decide quem fica com o endereço.
+  const ordered = [...sections.keys()].sort().map((id) => sections.get(id) ?? "");
+  skipped.sort((a, b) => a.id.localeCompare(b.id));
   const header = "; Gerado pelo DeskVoice a partir das linhas cadastradas no painel. Não edite: é reescrito a cada mudança.";
-  return { conf: `${[header, ...sections].join("\n\n")}\n`, skipped };
+  return { conf: `${[header, ...ordered].join("\n\n")}\n`, skipped };
 }
 
 /** Escrita atômica: o Asterisk nunca lê um arquivo pela metade. */
@@ -187,6 +199,39 @@ async function setStatus(deps: TrunksDeps, updates: TrunkHealth[]): Promise<void
 }
 
 /**
+ * Desde quando cada linha usa o endereço que tem hoje. `trunks` não guarda a data de criação, e
+ * ela nem bastaria: uma linha antiga que TROCA de host para o endereço de outra não pode passar
+ * na frente. Por isso a antiguidade é do par (linha, endereço), anotada num arquivo ao lado do
+ * de troncos na primeira vez que o par é visto.
+ *
+ * ponytail: se o volume do Asterisk for apagado, as datas recomeçam e a disputa cai no desempate
+ * por id. O lugar definitivo disso é uma coluna em `trunks`, gravada quando o host muda.
+ */
+async function claimDates(deps: TrunksDeps, rows: Array<{ id: string; host: string }>): Promise<Map<string, Date>> {
+  const file = `${deps.file}.claims.json`;
+  let known: Record<string, unknown> = {};
+  try {
+    known = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+  } catch (error) {
+    // Primeira execução (arquivo ausente) ou arquivo ilegível: todas as linhas contam a partir de agora.
+    deps.log("info", "trunk claim dates start from now", { reason: messageOf(error) });
+  }
+  const now = deps.clock.now();
+  const next: Record<string, string> = {};
+  const since = new Map<string, Date>();
+  for (const row of rows) {
+    const host = parseTrunkHost(row.host);
+    const key = `${row.id} ${host?.kind === "address" ? host.match : (host?.uri ?? "")}`;
+    const seen = typeof known[key] === "string" ? new Date(known[key]) : now;
+    const date = Number.isNaN(seen.getTime()) ? now : seen;
+    next[key] = date.toISOString();
+    since.set(row.id, date);
+  }
+  await writeFileAtomic(file, JSON.stringify(next));
+  return since;
+}
+
+/**
  * Regrava o arquivo de troncos com as linhas de todas as organizações e pede ao Asterisk para
  * recarregar o PJSIP. Sem Asterisk no ar o arquivo fica escrito e o resultado diz que falta recarregar.
  */
@@ -200,9 +245,11 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
   );
   const unreadable: Array<{ id: string; reason: string }> = [];
   const trunks: TrunkConfig[] = [];
+  const since = await claimDates(deps, rows);
   for (const row of rows) {
     try {
       trunks.push({
+        since: since.get(row.id) ?? deps.clock.now(),
         id: row.id,
         host: row.host.trim(),
         username: row.username?.trim() || null,
