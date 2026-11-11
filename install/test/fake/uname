@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# uname de mentira: os testes rodam em qualquer máquina (inclusive ARM), e a arquitetura que o
+# instalador enxerga é a de $FAKE_ARCH, x86_64 por padrão. O resto vai para o uname de verdade.
+if [ "${1:-}" = "-m" ]; then echo "${FAKE_ARCH:-x86_64}"; exit 0; fi
+for real in /usr/bin/uname /bin/uname; do if [ -x "$real" ]; then exec "$real" "$@"; fi; done
+exit 1

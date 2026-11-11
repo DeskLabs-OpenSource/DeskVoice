@@ -7,6 +7,11 @@ echo "git $*" >> "$FAKE_DIR/calls.log"
 [ -f "$FAKE_DIR/git_tags" ] || exit 1
 case " $* " in
   *" rev-parse --git-dir "*) echo .git ;;
+  # O commit em que o clone está. Por padrão é o da versão que o instalador pedir (como quem chegou
+  # pelo get.sh, ou foi levado pelo update.sh); com $FAKE_DIR/git_head é outro, como quem clonou à
+  # mão e ficou na ponta da main.
+  *" rev-parse HEAD "*) if [ -f "$FAKE_DIR/git_head" ]; then cat "$FAKE_DIR/git_head"; else echo commit-da-versao; fi ;;
+  *" rev-parse refs/tags/"*) echo commit-da-versao ;;
   *" rev-parse --verify "*) ref="${*: -1}"; grep -qx "${ref#refs/tags/}" "$FAKE_DIR/git_tags" ;;
   *" fetch "*) [ ! -f "$FAKE_DIR/git_fetch_fail" ] ;;
   *" tag --list "*) cat "$FAKE_DIR/git_tags" ;;

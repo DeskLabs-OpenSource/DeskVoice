@@ -14,8 +14,10 @@
 | Passo de atualização no CI | Pulado até existir a primeira versão | `.github/workflows/ci.yml:139-142` |
 | Corte de versão (`release.yml`) | O job de etiqueta roda a cada push na `main` e sai sem nada a marcar. Nenhuma versão foi cortada | `gh api .../releases`: 0 |
 | Publicação de imagens (`publish-image.yml`) | Nunca rodou | `gh run list` |
-| Imagens para arm64 | Declaradas no workflow que nunca rodou | `publish-image.yml:99` |
-| Promoção do canal `stable` | Nunca rodou. Nenhuma imagem `stable` foi publicada pelo CI. O kit não lê esse canal: a instalação descobre a versão pelas tags do repositório | idem |
+| Imagens para arm64 | Não são publicadas. A publicação é só para amd64; em ARM a instalação constrói na própria máquina (`--build`), o que nunca foi exercitado numa máquina ARM | `publish-image.yml` |
+| Canal `stable` | Deixou de existir: o job de promoção saiu do workflow e a instalação descobre a versão pelas tags do repositório | `publish-image.yml` |
+| Release do GitHub publicada no fim da publicação das imagens | Nunca rodou. A release só nasce depois que as três imagens baixam sem credencial | `publish-image.yml`, job `release` |
+| Tag fora da `main` não publica | Nunca rodou num runner | `publish-image.yml`, job `probe` |
 | Nome da imagem lido da fonte única no workflow | Os passos que carregam `install/_common.sh` (`image_ref`, `version_of_tag`) foram rodados à mão, fora do GitHub, com `GITHUB_REF` de exemplo. Nunca rodaram num runner | `publish-image.yml:46`, `:93`, `:134`, `:159` |
 | Imagens publicadas baixam sem credencial | Nunca conferido: não há imagem. Um pacote novo no registro nasce privado, e torná-lo público é um passo manual. O job `verify-public` pergunta pelas imagens sem credencial e nunca rodou | `publish-image.yml:143-170` |
 

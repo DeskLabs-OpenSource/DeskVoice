@@ -5,6 +5,7 @@
 #
 # Prefere ler antes de rodar? Faça o que este arquivo faz, à mão:
 #   git clone https://github.com/DeskLabs-OpenSource/DeskVoice.git && cd DeskVoice && bash install/install.sh
+# (se já houver versão publicada, o instalador diz o `git checkout` a fazer antes)
 #
 # Variáveis opcionais:
 #   DESKVOICE_DIR   pasta de destino (padrão: ~/DeskVoice)

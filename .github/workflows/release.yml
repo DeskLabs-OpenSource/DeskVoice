@@ -5,8 +5,9 @@ name: release
 #   Ato 1 (manual, "Run workflow"): lê os fragmentos de `.changes/`, calcula a versão pelo efeito
 #     que cada um declarou, monta a seção do CHANGELOG.md, apaga os fragmentos e abre o PR
 #     `release/X.Y.Z`. Major só com o input `major` marcado.
-#   Ato 2 (merge desse PR na main): cria a tag `vX.Y.Z` no commit da main, publica a release no
-#     GitHub e dispara a publicação das imagens.
+#   Ato 2 (merge desse PR na main): cria a tag `vX.Y.Z` no commit da main e dispara a publicação
+#     das imagens. A release do GitHub é publicada pelo publish-image, no fim, quando as imagens
+#     já baixam sem credencial.
 #
 # A tag só nasce de commit da main, e só do merge de um PR `release/*` deste repositório.
 #
@@ -39,8 +40,11 @@ on:
 permissions:
   contents: read
 
+# O grupo leva o commit: com um grupo só por evento, o GitHub guarda uma execução pendente e a mais
+# nova substitui a mais velha. O merge de uma release seguido de outro push na main podia ter a
+# execução do corte cancelada, e a seguinte não veria fragmento apagado: CHANGELOG sem tag, em silêncio.
 concurrency:
-  group: release-${{ github.event_name }}
+  group: release-${{ github.event_name }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -105,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write # cria a tag e a release
+      contents: write # cria a tag
       pull-requests: read # confere de que PR veio o commit
       actions: write # dispara o publish-image na tag
     steps:
@@ -145,21 +149,18 @@ jobs:
               ;;
           esac
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
-      - name: Criar a tag, a release e disparar as imagens
+      - name: Criar a tag e disparar as imagens
         if: steps.gate.outputs.version != ''
         env:
           GH_TOKEN: ${{ github.token }} # GITHUB APP: token do App
           VERSION: ${{ steps.gate.outputs.version }}
         run: |
           set -euo pipefail
-          pnpm exec tsx scripts/release.ts notes "${VERSION}" > "${RUNNER_TEMP}/notes.md"
-          title="v${VERSION}"
-          # "Exige ação do operador" é um campo à parte do número: aparece no título da release.
-          if grep -q '^### Requer atenção' "${RUNNER_TEMP}/notes.md"; then title="v${VERSION} (requer atenção antes de atualizar)"; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "v${VERSION}" -m "v${VERSION}" "${GITHUB_SHA}"
           git push origin "v${VERSION}"
-          gh release create "v${VERSION}" --verify-tag --title "${title}" --notes-file "${RUNNER_TEMP}/notes.md"
+          # A release do GitHub NÃO nasce aqui: nasce no fim do publish-image, depois que as imagens
+          # baixam sem credencial. "Release publicada" significa "instalável".
           # Disparar: tag empurrada pelo GITHUB_TOKEN não aciona o `on: push: tags` do publish-image.
           gh workflow run publish-image.yml --ref "v${VERSION}"

@@ -174,4 +174,18 @@ equal "atualizar sem versão publicada: a versão não muda" local "$(version)"
 with_versions; touch "$FAKE_DIR/git_fetch_fail"
 out="$(update)"; equal "atualizar com o git sem rede: sai com erro" 1 "$?"
 contains "atualizar com o git sem rede: diz o comando" "$out" "fetch --tags origin"
+# ── Código e imagens da mesma versão: clone na ponta da main não instala imagem de versão anterior ──
+rm -f "$FAKE_DIR/git_fetch_fail"; fresh; with_versions; echo commit-da-ponta-da-main > "$FAKE_DIR/git_head"
+out="$(install)"; equal "clone fora da versão: não instala" 1 "$?"
+contains "clone fora da versão: diz o checkout a fazer" "$out" "checkout v0.2.0 && bash install/install.sh"
+contains "clone fora da versão: lembra do --build para rodar a main de propósito" "$out" "--build"
+equal "clone fora da versão: nada foi baixado nem subiu" 0 "$(calls ' pull \| up -d')"
+out="$(install --build)"; equal "clone fora da versão, com --build: instala o código da pasta" 0 "$?"
+rm -f "$FAKE_DIR/git_head"
+
+# ── ARM: ainda não há imagem publicada; só construindo aqui ──
+fresh; with_versions
+out="$(FAKE_ARCH=aarch64 install)"; equal "ARM com versão publicada: não instala" 1 "$?"
+contains "ARM com versão publicada: diz que não há imagem e aponta o --build" "$out" "bash install/install.sh --build"
+equal "ARM com versão publicada: nada foi baixado" 0 "$(calls ' pull ')"
 finish
