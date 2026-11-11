@@ -36,8 +36,11 @@ export async function createNotification(app: Db, organizationId: string, channe
   return id;
 }
 
-/** Espera uma condição que depende do banco, sem dormir tempo fixo. */
-export async function until(condition: () => boolean | Promise<boolean>, what: string, timeoutMs = 5000): Promise<void> {
+/**
+ * Espera uma condição que depende do banco, sem dormir tempo fixo. O prazo só existe para o teste
+ * quebrado não ficar pendurado; é folgado porque o CI e a máquina de quem contribui variam muito.
+ */
+export async function until(condition: () => boolean | Promise<boolean>, what: string, timeoutMs = 30_000): Promise<void> {
   const deadline = performance.now() + timeoutMs;
   while (!(await condition())) {
     if (performance.now() > deadline) throw new Error(`Timed out waiting for ${what}`);

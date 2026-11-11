@@ -12,7 +12,8 @@ afterEach(async () => {
 
 const fixtureRoutine = (kind: string): string => `export default { kind: ${JSON.stringify(kind)}, async run() {} };`;
 
-describe("loadRoutines", () => {
+// Estes testes importam a árvore inteira do pacote a frio; em máquina carregada isso passa dos 5 s padrão.
+describe("loadRoutines", { timeout: 30_000 }, () => {
   it("descobre as rotinas da fundação", async () => {
     const routines = await loadRoutines();
     expect([...routines.keys()].sort()).toEqual(["deliver_notification", "deliver_webhook", "expire_approvals", "follow_up", "summarize_call"]);

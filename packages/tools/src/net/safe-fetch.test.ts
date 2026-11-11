@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeFetch, fakeLookup } from "../../test/helpers";
 import { isPublicAddress, safeFetch, UnsafeDestinationError } from "./safe-fetch";
 
@@ -117,5 +119,50 @@ describe("isPublicAddress", () => {
   it("separa público de interno", () => {
     expect(["8.8.8.8", "93.184.216.34", "172.32.0.1", "2001:4860:4860::8888"].map(isPublicAddress)).toEqual([true, true, true, true]);
     expect(["172.31.255.255", "224.0.0.1", "255.255.255.255", "::", "ff02::1", "not-an-ip"].map(isPublicAddress)).toEqual([false, false, false, false, false, false]);
+  });
+});
+
+// Sem `fetch` injetado: o caminho de produção, com o agente do undici, contra um servidor local.
+describe("safeFetch pelo undici (conexão presa ao endereço conferido)", () => {
+  let server: Server;
+  let port: number;
+  let hits = 0;
+
+  beforeAll(async () => {
+    server = createServer((_request, response) => {
+      hits += 1;
+      response.end("segredo interno");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    port = (server.address() as AddressInfo).port;
+  });
+  afterAll(async () => {
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  it("o servidor local responde a um cliente comum (o teste não passa por ele estar fora do ar)", async () => {
+    const before = hits;
+    expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).toBe("segredo interno");
+    expect(hits).toBe(before + 1);
+  });
+
+  it("recusa host que resolve para 127.0.0.1 antes de qualquer conexão chegar ao servidor", async () => {
+    const before = hits;
+    await expect(safeFetch(`http://internal.test:${port}/`, {}, { lookup: async () => ["127.0.0.1"] })).rejects.toThrow(UnsafeDestinationError);
+    expect(hits).toBe(before);
+  });
+
+  it("rebinding: DNS que responde público na conferência e privado na conexão não alcança o servidor local", async () => {
+    const before = hits;
+    const answers: string[][] = [];
+    const lookup = async (): Promise<string[]> => {
+      const answer = answers.length === 0 ? ["93.184.216.34"] : ["127.0.0.1"];
+      answers.push(answer);
+      return answer;
+    };
+    await expect(safeFetch(`http://rebind.test:${port}/`, {}, { lookup })).rejects.toThrow(UnsafeDestinationError);
+    // A segunda consulta é a do socket: prova que a recusa veio da guarda na conexão.
+    expect(answers).toEqual([["93.184.216.34"], ["127.0.0.1"]]);
+    expect(hits).toBe(before);
   });
 });

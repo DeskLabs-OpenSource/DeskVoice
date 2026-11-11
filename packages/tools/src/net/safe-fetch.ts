@@ -1,5 +1,6 @@
 import { lookup as dnsLookup } from "node:dns/promises";
-import { BlockList, isIP } from "node:net";
+import { BlockList, isIP, type LookupFunction } from "node:net";
+import { Agent, fetch as undiciFetch } from "undici";
 
 /** Resolve um nome para todos os IPs dele. Injetável: teste não consulta DNS de verdade. */
 export type HostLookup = (host: string) => Promise<string[]>;
@@ -100,16 +101,57 @@ async function readLimited(response: Response, maxBytes: number): Promise<{ body
 }
 
 /**
+ * `lookup` do socket: resolve o nome e só entrega à conexão endereços públicos. É aqui que a
+ * guarda vale de fato, porque este é o endereço em que a conexão é aberta; conferir antes e
+ * deixar o cliente resolver de novo abriria espaço para um DNS que troca a resposta (rebinding).
+ */
+function guardedLookup(lookup: HostLookup): LookupFunction {
+  return (hostname, options, callback) => {
+    lookup(hostname).then(
+      (addresses) => {
+        const safe = addresses.filter(isPublicAddress).map((address) => ({ address, family: isIP(address) }));
+        const first = safe[0];
+        if (!first) {
+          callback(new UnsafeDestinationError(`Host ${hostname} points to a non-public address`), "", 0);
+        } else if (options.all) {
+          callback(null, safe);
+        } else {
+          callback(null, first.address, first.family);
+        }
+      },
+      (error: unknown) => callback(error instanceof Error ? error : new Error(String(error)), "", 0),
+    );
+  };
+}
+
+type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string; redirect: "manual"; signal: AbortSignal }) => Promise<Response>;
+
+/**
  * `fetch` para destino que veio de configuração: só http/https, só endereço público, com tempo
- * limite e resposta limitada. Redirecionamento é seguido à mão para conferir cada salto.
+ * limite e resposta limitada. Redirecionamento é seguido à mão, e cada salto passa pela guarda.
  *
- * Teto conhecido: o IP é conferido antes de conectar e o `fetch` resolve o nome de novo, então um
- * DNS que troca a resposta entre as duas consultas (rebinding) ainda passa. Fechar isso pede fixar
- * o IP conferido na conexão (`undici.Agent` com `connect.lookup`).
+ * A conexão é presa ao endereço conferido: o agente do `undici` resolve o nome pelo
+ * `guardedLookup`, então não existe segunda resolução fora da guarda. A conferência anterior à
+ * conexão continua porque IP literal não passa por `lookup` nenhum.
+ * Com um `fetch` injetado (teste) não há agente: vale só a conferência anterior.
  */
 export async function safeFetch(target: string, request: SafeRequest = {}, options: SafeFetchOptions = {}): Promise<SafeResponse> {
-  const doFetch = options.fetch ?? fetch;
   const lookup = options.lookup ?? systemLookup;
+  const agent = options.fetch ? undefined : new Agent({ connect: { lookup: guardedLookup(lookup) } });
+  // O `Response` do undici tem a mesma forma do global nas partes usadas aqui.
+  const doFetch: Fetch = options.fetch ?? ((url, init) => undiciFetch(url, { ...init, dispatcher: agent }) as unknown as Promise<Response>);
+  try {
+    return await follow(target, request, doFetch, lookup, options);
+  } catch (error) {
+    // O undici embrulha a falha de conexão em "fetch failed"; quem chama precisa do motivo real.
+    if (error instanceof Error && error.cause instanceof UnsafeDestinationError) throw error.cause;
+    throw error;
+  } finally {
+    await agent?.destroy();
+  }
+}
+
+async function follow(target: string, request: SafeRequest, doFetch: Fetch, lookup: HostLookup, options: SafeFetchOptions): Promise<SafeResponse> {
   // Um prazo só para a operação inteira, saltos e leitura do corpo incluídos.
   const signal = AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS);
   let url = target;
