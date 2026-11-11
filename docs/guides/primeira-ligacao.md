@@ -83,7 +83,9 @@ O instalador trabalha em cinco etapas e diz em qual está:
 5. **Prova que você entra, e só então mostra o endereço do painel** e os próximos passos. Ele
    confere que a porta publicada responde e entra de verdade na tela de login com o e-mail e a
    senha que você acabou de definir. Se o login falhar, ele para e diz o que fazer, em vez de
-   dizer que está pronto.
+   dizer que está pronto. Se você informou um domínio que ainda não aponta para a VPS, ele não
+   falha: termina com "Instalado; o endereço ainda não abre" e diz o que falta. Não é preciso
+   instalar de novo; quando o registro do domínio propagar, o endereço abre.
 
 Você não inventa segredo técnico nenhum e não edita arquivo de configuração. Rodar o instalador
 de novo não quebra nada: ele retoma de onde parou e não troca um segredo que já existe.

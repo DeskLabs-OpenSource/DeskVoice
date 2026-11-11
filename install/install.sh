@@ -73,6 +73,8 @@ if [ -n "${DESKVOICE_PANEL_PORT:-}" ]; then
 fi
 
 SUDO=""; if [ "$(id -u)" != 0 ] && have sudo; then SUDO="sudo"; fi
+# Quem entra por SSH nesta máquina: é o nome que vai no comando do túnel.
+ssh_user="${SUDO_USER:-$(id -un)}"
 would() { info "[simulação] faria: $*"; }
 # Problema que impede uma instalação de verdade. Na simulação vira aviso, para o relatório ir até o fim.
 blocker() {
@@ -290,10 +292,11 @@ if [ -n "$domain" ] && have getent; then
   else ok "O domínio $domain aponta para esta VPS"; fi
 fi
 
-# login_strict=1: o dono é criado nesta execução, com esta senha; se ela não entrar, é defeito.
-create_owner=1; login_strict=1; org_name=""; owner_name=""; owner_email=""; owner_password=""
+# login_strict só vira 1 onde o dono é de fato criado, com esta senha: aí, se ela não entrar, é
+# defeito. Em qualquer outro caso o dono já existia e a senha pode ser outra: recusa é aviso.
+create_owner=1; login_strict=0; org_name=""; owner_name=""; owner_email=""; owner_password=""
 if ours_running postgres && owner_exists; then
-  create_owner=0; login_strict=0
+  create_owner=0
   ok "Já existe um usuário dono nesta instalação: não vou criar outro nem pedir senha."
   # Sem perguntar nada: se o e-mail e a senha vieram nas respostas, servem para conferir o login no
   # fim. A senha pode ter sido trocada pelo painel depois, então recusa aqui é aviso, não erro.
@@ -386,7 +389,7 @@ if [ "$DRY_RUN" = 1 ]; then
   would "gerar deploy/asterisk/generated/{ari,rtp,pjsip}.conf com o IP $public_ip e a faixa ${rtp_start}-${rtp_end}"
   if [ "$entry_mode" = external ]; then would "subir o Caddy do DeskVoice só com HTTP em ${panel_bind}:${panel_port}, a única porta publicada: painel e voz do navegador entram por ela (arquivo deploy/docker-compose.override.yml)"
     if [ -n "$domain" ]; then would "pedir que o proxy existente encaminhe ${domain} inteiro para 127.0.0.1:${panel_port}, repassando WebSocket"
-    elif [ "$exposure" = local ]; then would "deixar o painel só para dentro da VPS; do seu computador: ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}"
+    elif [ "$exposure" = local ]; then would "deixar o painel só para dentro da VPS; do seu computador: ssh -L ${panel_port}:127.0.0.1:${panel_port} ${ssh_user}@${public_ip}"
     else would "avisar: pelo IP e sem HTTPS o navegador não libera o microfone; \"Falar com o agente\" pede domínio ou túnel"; fi
   elif [ -n "$domain" ]; then would "subir o Caddy do DeskVoice nas portas 80/443 para ${panel_domain} (painel e voz do navegador pelo mesmo endereço)"
   else would "subir o Caddy do DeskVoice na porta 80, só com HTTP e aberto para a internet (painel e voz do navegador pelo mesmo endereço)"; fi
@@ -458,6 +461,10 @@ if [ "$create_owner" = 1 ] && ! owner_exists; then
     || die "Não consegui criar o usuário dono." "Rode o instalador de novo. Se repetir: bash install/diagnose.sh"
   owner_exists || die "O comando de criar o usuário terminou, mas o usuário não está no banco." "Rode: bash install/diagnose.sh e peça ajuda com o arquivo gerado."
   ok "Empresa e usuário dono criados ($owner_email)"
+  login_strict=1
+elif [ "$create_owner" = 1 ]; then
+  # A instalação estava parada (ou sem os arquivos de ambiente) e o banco já tinha um dono.
+  ok "Já existe um usuário dono no banco desta instalação: não criei outro, e a senha dele não mudou."
 fi
 
 info "Subindo painel, voz, rotinas e telefonia..."
@@ -489,6 +496,7 @@ fi
 
 # ── A prova final, pelo caminho de quem usa: a porta publicada responde, e a tela de entrada
 #    aceita o usuário. Só depois disso o instalador diz "pronto". ──
+outside_down=0   # 1 = o endereço de fora (domínio em HTTPS) não abriu; a porta local responde
 reach=""   # 200 = respondeu; vazio = não deu para conferir (sem curl); outro = não respondeu
 if have curl; then
   entry_wait="$timeout"; [ "$entry_wait" -le 90 ] || entry_wait=90; waited=0
@@ -497,14 +505,25 @@ if have curl; then
     if [ "$reach" = 200 ] || [ "$waited" -ge "$entry_wait" ]; then break; fi
     sleep 5; waited=$((waited + 5))
   done
-  if [ "$reach" != 200 ]; then
+  if [ "$reach" != 200 ] && [ "$exposure" = domain ] && [ "$entry_mode" = caddy ]; then
+    # Quem não respondeu foi o endereço DE FORA. O caso mais comum é o de quem instala com domínio
+    # pela primeira vez: o DNS ainda não aponta para cá (ou a VPS não alcança o próprio endereço
+    # público). Não é instalação quebrada: confere se o Caddy responde na porta 80 DESTA máquina
+    # (com domínio ele redireciona para o HTTPS; qualquer resposta serve) e segue, sem dar o
+    # endereço como certo. Só a porta local sem resposta é defeito de verdade.
+    local_reach="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: $domain" "http://127.0.0.1/api/v1/system/health" 2>/dev/null || true)"
+    case "$local_reach" in
+      ""|000) unset owner_password
+        die "Tudo foi instalado e as peças respondem, mas o Caddy do DeskVoice não responde nem na porta 80 desta máquina (e $announced_url não abriu; resposta: ${reach:-nenhuma}). Por isso não digo que está pronto, e o login não foi testado." "Veja o que o Caddy diz: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy  — confira com bash install/healthcheck.sh e rode o instalador de novo (nada se perde)." ;;
+    esac
+    outside_down=1
+    warn "O endereço $announced_url ainda NÃO abre (resposta daqui: ${reach:-nenhuma}). O Caddy responde na porta 80 desta máquina, então o que falta é de fora: o domínio, ou o certificado. Sigo, sem dar o endereço como certo."
+  elif [ "$reach" != 200 ]; then
     unset owner_password
-    if [ "$exposure" = domain ] && [ "$entry_mode" = caddy ]; then
-      die "Tudo foi instalado e as peças respondem, mas o endereço $announced_url não abriu daqui (resposta: ${reach:-nenhuma}). Por isso não digo que está pronto, e o login não foi testado." "Causa mais comum: o domínio $domain ainda não aponta para $public_ip, e sem isso o certificado do HTTPS não sai. Corrija o registro A no provedor do domínio, espere alguns minutos e rode o instalador de novo (nada se perde). O motivo exato está em: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"
-    fi
     die "Tudo foi instalado e as peças respondem, mas a porta publicada do painel ($probe_url) não respondeu nesta máquina (resposta: ${reach:-nenhuma}). Por isso não digo que está pronto, e o login não foi testado." "Veja o que o Caddy diz: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy  — confira com bash install/healthcheck.sh e rode o instalador de novo (nada se perde)."
+  else
+    ok "Endereço conferido: $probe_url respondeu nesta máquina, pela porta publicada"
   fi
-  ok "Endereço conferido: $probe_url respondeu nesta máquina, pela porta publicada"
 else
   warn "Não conferi a porta publicada do painel: falta o comando curl nesta máquina. O login abaixo é testado por dentro, pelo Caddy."
 fi
@@ -517,6 +536,12 @@ if [ -n "$owner_password" ]; then
   login_state="${login_result%%|*}"; login_detail="${login_result#*|}"
 fi
 unset owner_password
+# Com o endereço de fora sem abrir, o certificado pode não ter saído ainda, e aí nem por dentro a
+# sonda chega à tela de entrada. Isso é consequência do mesmo problema, e não outro defeito.
+if [ "$outside_down" = 1 ] && [ "$login_state" != ok ] && [ "$login_state" != rejected ] && [ "$login_state" != session ] && [ "$login_state" != limited ] && [ "$login_state" != skipped ]; then
+  warn "Login NÃO testado: sem o certificado do HTTPS, a tela de entrada ainda não responde nem por dentro (${login_result:-sem resposta da sonda}). Depois que o endereço abrir, entre pelo navegador."
+  login_state=untested
+fi
 login_fix="Troque a senha com: bash install/reset-password.sh ${owner_email:-<e-mail>}  — e entre em $announced_url. Se não entrar, rode bash install/diagnose.sh e peça ajuda com o arquivo."
 case "$login_state" in
   ok) ok "Login conferido: entrei pela tela de entrada com o e-mail $owner_email e a senha informada, a sessão valeu, e saí" ;;
@@ -527,14 +552,28 @@ case "$login_state" in
       die "O usuário dono foi criado, mas a tela de entrada RECUSOU o e-mail e a senha que acabaram de ser definidos (HTTP $login_detail). A instalação subiu; o que não funciona é entrar." "$login_fix"
     fi
     warn "Login NÃO conferido: a tela de entrada recusou a senha informada para $owner_email. O usuário já existia, e a senha pode ter sido trocada depois. Se não lembrar: bash install/reset-password.sh $owner_email" ;;
+  untested) ;;
   session) die "A tela de entrada aceitou o e-mail e a senha, mas a sessão não valeu na rota seguinte (HTTP $login_detail): quem entrar volta para a tela de login." "Rode bash install/diagnose.sh e abra uma issue com o arquivo, dizendo que o login foi aceito e a sessão não valeu." ;;
   *) die "Não consegui chegar à tela de entrada pelo Caddy do DeskVoice para testar o login (${login_result:-sem resposta da sonda})." "Confira com bash install/healthcheck.sh (linha \"Entrada única\") e rode o instalador de novo. Se repetir: bash install/diagnose.sh" ;;
 esac
 
 # ═════════════════════════════════════════════════════════════════════════════
-if [ "$login_state" = ok ]; then step "5 de 5 · Pronto para configurar"
+if [ "$outside_down" = 1 ]; then step "5 de 5 · Instalado; o endereço ainda não abre"
+elif [ "$login_state" = ok ]; then step "5 de 5 · Pronto para configurar"
 else step "5 de 5 · Instalado, com o login ainda por conferir (aviso acima)"; fi
-printf '\n  %sPainel:%s %s\n  Login:  o e-mail e a senha que você definiu aqui\n' "$C_BLD" "$C_OFF" "$announced_url"
+if [ "$outside_down" = 1 ]; then
+  printf '\n  %sPainel:%s %s  (ainda NÃO abre: veja abaixo)\n  Login:  o e-mail e a senha que você definiu aqui\n' "$C_BLD" "$C_OFF" "$announced_url"
+  printf '\n  %sO que falta para o endereço abrir%s:\n' "$C_BLD" "$C_OFF"
+  info "A instalação terminou e as peças respondem nesta máquina. O que não respondeu foi o endereço de fora."
+  info "Causa mais provável: o domínio $domain ainda não aponta para $public_ip (registro A no provedor do domínio)."
+  info "Sem isso o certificado do HTTPS não sai. Depois de criar ou corrigir o registro, a propagação leva de minutos a algumas horas."
+  info "Outra causa: as portas 80 e 443 fechadas no firewall da VPS ou no painel do provedor; ou esta VPS não alcança o próprio"
+  info "endereço público, e nesse caso o painel pode já abrir do seu computador: teste $announced_url no navegador."
+  info "Não precisa instalar de novo. O Caddy tenta o certificado sozinho; para conferir: bash install/healthcheck.sh (linha \"Entrada única\")."
+  info "O motivo exato está em: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"
+else
+  printf '\n  %sPainel:%s %s\n  Login:  o e-mail e a senha que você definiu aqui\n' "$C_BLD" "$C_OFF" "$announced_url"
+fi
 if [ "$exposure" = domain ] && [ "$entry_mode" = external ]; then
   info "Este endereço só vale depois do passo abaixo, no seu proxy: daqui eu conferi até a porta local 127.0.0.1:${panel_port}."
 elif [ "$exposure" = public ]; then
@@ -554,7 +593,7 @@ elif [ "$exposure" = local ]; then
   printf '\n  %sComo abrir o painel%s:\n' "$C_BLD" "$C_OFF"
   info "Sem domínio, o painel só abre de dentro desta VPS: a tela de entrada não fica na internet sem HTTPS."
   info "Do seu computador, abra um túnel (uma porta só):"
-  info "    ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}"
+  info "    ssh -L ${panel_port}:127.0.0.1:${panel_port} ${ssh_user}@${public_ip}"
   info "e acesse $announced_url enquanto o túnel estiver aberto. \"Falar com o agente\" funciona por ele."
   info "Para ter HTTPS e abrir de qualquer lugar: aponte um domínio (registro A) para $public_ip e rode"
   info "    DESKVOICE_DOMAIN=<seu domínio> bash install/install.sh"
@@ -567,7 +606,7 @@ elif [ "$exposure" = public ]; then
   info "Para fechar o painel e entrar por túnel SSH: DESKVOICE_PANEL_LOCAL_ONLY=yes bash install/install.sh"
   info "Para ter HTTPS: aponte um domínio para $public_ip e rode DESKVOICE_DOMAIN=<seu domínio> bash install/install.sh"
   info "Atenção: pelo IP e sem HTTPS o navegador não libera o microfone. \"Falar com o agente\" só funciona"
-  info "com domínio (HTTPS) ou por túnel SSH (ssh -L ${tunnel_local}:127.0.0.1:${tunnel_port} <usuário>@${public_ip}), abrindo http://localhost:${tunnel_local}."
+  info "com domínio (HTTPS) ou por túnel SSH (ssh -L ${tunnel_local}:127.0.0.1:${tunnel_port} ${ssh_user}@${public_ip}), abrindo http://localhost:${tunnel_local}."
 fi
 printf '\n  %sJá funciona:%s painel, banco, Asterisk esperando ligação, worker de voz e rotinas.\n' "$C_BLD" "$C_OFF"
 printf '  %sAinda não funciona, até você configurar no painel:%s atender ligação.\n' "$C_BLD" "$C_OFF"

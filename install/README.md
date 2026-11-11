@@ -103,8 +103,11 @@ No fim, ele confere duas coisas pelo caminho de quem usa: pede a rota de saúde 
 publicada** (com domínio, pelo próprio endereço em HTTPS) e faz **login de verdade** pela
 entrada única, com o e-mail e a senha que você acabou de definir, conferindo que a sessão vale
 e saindo em seguida. A senha vai pela entrada padrão: nunca aparece na tela nem em argumento
-de processo. Se o endereço não responde ou o login é recusado, a instalação para com o que
-falhou e o que fazer. Rodando de novo numa instalação que já tem dono, ele só testa o login se
+de processo. Se a porta local não responde ou o login do dono recém-criado é recusado, a
+instalação para com o que falhou e o que fazer. Com domínio, se o que não abre é o endereço de
+fora (o caso comum é o DNS ainda não apontar para a VPS), ela **não falha**: termina com o
+título "Instalado; o endereço ainda não abre", diz a causa provável e o que fazer, e não dá o
+endereço como certo. Rodando de novo numa instalação que já tem dono, ele só testa o login se
 a senha vier nas respostas (`--yes`); sem ela, diz "Login NÃO testado" em vez de fingir.
 
 #### Que versão é instalada
@@ -292,6 +295,9 @@ enquanto ele estiver aberto (o instalador mostra o comando com a porta e o IP ce
 ```bash
 ssh -L 3080:127.0.0.1:3080 usuario@ip-da-vps
 ```
+
+No fim da instalação o comando já vem preenchido, com o usuário que rodou o instalador, a
+porta e o IP desta VPS.
 
 É uma porta só. "Falar com o agente" funciona por esse mesmo túnel, e em `localhost` o
 navegador libera o microfone mesmo sem HTTPS. Pelo IP e sem HTTPS, não libera.

@@ -51,6 +51,7 @@ case "$args" in
   *"run create-owner"*) cat > "$FAKE_DIR/create_owner_stdin"; if [ -f "$FAKE_DIR/create_owner_fail" ]; then exit 1; fi; echo 1 > "$FAKE_DIR/users_count"; exit 0 ;;
   *" run --rm migrate"*) drain; exit "$(cat "$FAKE_DIR/migrate_exit" 2>/dev/null || echo 0)" ;;
   *"run reset-password"*) cat > "$FAKE_DIR/reset_stdin" 2>/dev/null || true; exit "$(cat "$FAKE_DIR/reset_exit" 2>/dev/null || echo 0)" ;;
-  *" up -d"*) if [ -f "$FAKE_DIR/entry_probe_after_up" ]; then cp "$FAKE_DIR/entry_probe_after_up" "$FAKE_DIR/entry_probe"; fi; drain; exit 0 ;;
+  # Instalação parada que volta a rodar: com $FAKE_DIR/running_after_up, o `up` põe os contêineres de pé.
+  *" up -d"*) if [ -f "$FAKE_DIR/running_after_up" ]; then cp "$FAKE_DIR/running_after_up" "$FAKE_DIR/running"; fi; if [ -f "$FAKE_DIR/entry_probe_after_up" ]; then cp "$FAKE_DIR/entry_probe_after_up" "$FAKE_DIR/entry_probe"; fi; drain; exit 0 ;;
   *) drain; exit 0 ;;
 esac

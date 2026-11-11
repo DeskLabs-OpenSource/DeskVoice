@@ -23,9 +23,11 @@ O defeito mostrou uma regra mais larga. Sem domínio não há HTTPS, e o padrão
 
 **Recomendação:** A. Quem instala sem domínio ainda está testando, e o custo de um túnel é pequeno perto do de uma senha lida no caminho. A opção B continua disponível, por pedido explícito.
 
-**Se o dono não responder em 14 dias, vale A.** É o caminho reversível: voltar ao comportamento antigo é trocar o padrão de uma variável, e nenhuma instalação existente muda nos dois sentidos.
+**Enquanto o dono não responde:** a versão que carrega o padrão novo só é cortada com a resposta dele. O merge pode acontecer antes, porque nenhuma instalação existente muda: reinstalar e atualizar mantêm a exposição que já estava. A é também o caminho reversível, porque voltar ao comportamento antigo é trocar o padrão de uma variável.
 
 **Não medido:** quantas pessoas desistem no passo do túnel. Nenhuma instalação por pessoa de fora do projeto aconteceu ainda. Também não foi medido se algum provedor de VPS bloqueia o encaminhamento de portas por SSH.
+
+**Pergunta em aberto, não medida:** a VPS parceira entrega algum nome com DNS pronto, apontado para a máquina? Se entregar, existe uma terceira via que esta decisão não considerou: HTTPS sem a pessoa ter um domínio próprio, o que tiraria o túnel do caminho de quem instala nela. Ninguém conferiu isso; a resposta pode mudar a recomendação.
 
 ## O que vale enquanto isso **[construtor]**
 
@@ -38,7 +40,7 @@ O defeito mostrou uma regra mais larga. Sem domínio não há HTTPS, e o padrão
 | Opção sem efeito | Com domínio, as duas opções param com erro que nomeia a opção e o modo: com as portas livres o painel precisa ser alcançado de fora para o certificado; atrás de outro proxy ele já fica só em `127.0.0.1`. `DESKVOICE_PANEL_PORT` para do mesmo jeito quando o painel sai pelas portas 80/443. As duas opções juntas também | idem |
 | Quem já instalou | Reinstalar e atualizar **não mudam a exposição**. Quem está publicado em HTTP continua, com um aviso em destaque e o comando para fechar (`DESKVOICE_PANEL_LOCAL_ONLY=yes bash install/install.sh`). Quem está local continua local, na mesma porta | `published_exposure` em `install/_common.sh`; `install/test/16-install-proves-entry.sh` |
 | O endereço anunciado é o testado | O endereço da mensagem final é lido do `docker-compose.override.yml` gravado, o mesmo arquivo que o Compose publica e que a checagem de saúde sonda. Antes de anunciar, o instalador pede a rota de saúde pela porta publicada | `published_address`, `published_probe_url` em `install/_common.sh` |
-| "Pronto" só depois de entrar | Com o dono recém-criado, o instalador faz login pela entrada única, confere que uma rota autenticada responde e sai. Login recusado ou endereço sem resposta param a instalação com o que falhou. Sem a senha em mãos (reinstalação), ele diz que não testou | `login_probe_js`, `try_login` em `install/_common.sh` |
+| "Pronto" só depois de entrar | Com o dono recém-criado, o instalador faz login pela entrada única, confere que uma rota autenticada responde e sai. Login recusado para o dono recém-criado ou porta local sem resposta param a instalação com o que falhou; endereço de fora que ainda não abre (domínio) termina com zero e título próprio, sem dar o endereço como certo. Sem a senha em mãos (reinstalação), ele diz que não testou | `login_probe_js`, `try_login` em `install/_common.sh` |
 
 ### Como o login é provado sem expor a senha **[construtor]**
 
@@ -57,7 +59,9 @@ A sonda roda dentro do contêiner do painel e fala com o Caddy, pelo mesmo camin
 ## Consequências
 
 - Instalação nova sem domínio deixa de abrir pelo IP. Quem seguia um tutorial antigo vai encontrar `http://localhost:3080` e um comando de túnel no lugar de `http://<IP>`. Os três READMEs, o guia da primeira ligação, o `install/start.sh` e a skill de instalação dizem o padrão novo.
-- A instalação com domínio cujo DNS ainda não aponta para a VPS passa a **terminar com erro**, dizendo que o endereço não abriu e que o login não foi testado. Antes ela avisava no meio e dizia "pronto" no fim. Nada se perde: rodar de novo retoma.
+- A instalação com domínio cujo endereço de fora ainda não abre (o DNS ainda não aponta para a VPS, ou a VPS não alcança o próprio endereço público) **termina com código zero**, com um título próprio, "Instalado; o endereço ainda não abre", em vez de "Pronto". É o estado mais comum de quem instala com domínio pela primeira vez, e um código de erro ali faria um assistente conduzindo a instalação entender "quebrou" e tentar de novo. A mensagem não dá o endereço como certo: diz a causa provável, o que fazer e que não é preciso instalar de novo. O login é testado por dentro mesmo assim (a sonda fala com o Caddy pela rede interna, sem conferir certificado); se o certificado ainda não saiu e a sonda não chega à tela de entrada, vira aviso. Parar com erro fica para o defeito de verdade: a porta **local** sem resposta (nesse modo, a 80 desta máquina), o login recusado para o dono recém-criado, ou a sessão que não vale.
+- O login recusado só é erro quando o dono foi criado nesta execução. Se o dono já estava no banco (reinstalação, ou instalação que estava parada), a senha das respostas pode não ser a dele: a recusa é aviso.
+- O comando do túnel sai com o usuário preenchido (`SUDO_USER`, ou o usuário que rodou o instalador).
 - A conferência da porta publicada é feita de dentro da própria VPS. Ela prova que o Compose publicou a porta e que o Caddy responde nela; não prova que o firewall do provedor deixa passar de fora. No modo aberto por HTTP a mensagem final diz isso.
 - No modo "80 e 443 de outro proxy, com domínio", o endereço público depende de um passo de quem opera o proxy. O instalador confere até a porta local e diz que foi até ali.
 - O job `install` do CI instala sem domínio: passa a exercitar o padrão local, lendo a porta do arquivo de publicação como já fazia.

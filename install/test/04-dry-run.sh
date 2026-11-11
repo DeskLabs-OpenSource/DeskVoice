@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # install.sh --dry-run: percorre tudo, decide tudo e não altera nada.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+unset SUDO_USER; U="$(id -un)"   # o nome que o instalador põe no comando do túnel
 
 export DESKVOICE_DOMAIN=voz.exemplo.com.br DESKVOICE_ORG_NAME="Clínica Exemplo" DESKVOICE_OWNER_NAME="Ana Exemplo"
 export DESKVOICE_OWNER_EMAIL=ana@exemplo.com.br DESKVOICE_OWNER_PASSWORD="senha-de-teste-123"
@@ -43,7 +44,7 @@ contains "sem domínio, 80/443 livres: o padrão publica só nesta máquina" "$o
 lacks "sem domínio, 80/443 livres: o padrão não usa a porta 80" "$out" "na porta 80, só com HTTP"
 contains "sem domínio: o endereço é o do túnel" "$out" "Endereço que o painel teria: http://localhost:3080"
 lacks "sem domínio: o padrão não anuncia o IP" "$out" "http://203.0.113.10"
-contains "sem domínio: ensina o túnel" "$out" "ssh -L 3080:127.0.0.1:3080 <usuário>@203.0.113.10"
+contains "sem domínio: ensina o túnel" "$out" "ssh -L 3080:127.0.0.1:3080 $U@203.0.113.10"
 contains "sem domínio: diz como ter HTTPS" "$out" "aponte um domínio para 203.0.113.10"
 contains "diz que vai provar o login antes de dizer pronto" "$out" "entrar de verdade pela tela de entrada"
 # Publicar por HTTP pelo IP só pedindo de propósito, e o risco é nomeado.
@@ -108,10 +109,27 @@ contains "só local com domínio (outro proxy): nomeia o modo" "$out" "com o dom
 out="$(DESKVOICE_DOMAIN="" DESKVOICE_PANEL_LOCAL_ONLY=yes bash "$KIT/install.sh" --dry-run --yes 2>&1)"; equal "só local: simulação sai com zero" 0 "$?"
 contains "só local: publica só na própria máquina" "$out" "127.0.0.1:3080"
 lacks "só local: não publica para fora" "$out" "0.0.0.0:3080"
-contains "só local: ensina o túnel com UMA porta" "$out" "ssh -L 3080:127.0.0.1:3080 <usuário>@"
+contains "só local: ensina o túnel com UMA porta" "$out" "ssh -L 3080:127.0.0.1:3080 $U@"
 lacks "só local: o túnel não pede segunda porta" "$out" "3081"
 out="$(DESKVOICE_DOMAIN="" DESKVOICE_PANEL_LOCAL_ONLY=talvez bash "$KIT/install.sh" --dry-run --yes 2>&1)"; equal "só local com valor estranho: recusa" 1 "$?"
 contains "só local com valor estranho: diz o que vale" "$out" "DESKVOICE_PANEL_LOCAL_ONLY"
+# Modo com perguntas (sem --yes), respostas pela entrada padrão: domínio, empresa, nome, e-mail
+# (Enter mantém o que veio nas variáveis), senha, senha de novo e, por fim, a pergunta nova.
+: > "$FAKE_DIR/ss_tcp"
+answers() { printf '\n\n\n\n%s\n%s\n%s\n' senha-de-teste-123 senha-de-teste-123 "$1"; }
+out="$(answers "" | DESKVOICE_DOMAIN="" bash "$KIT/install.sh" --dry-run 2>&1)"; equal "interativo, Enter na pergunta do HTTP: zero" 0 "$?"
+contains "interativo: a pergunta existe e nomeia o risco" "$out" "a senha trafega SEM CRIPTOGRAFIA"
+contains "interativo, Enter: fica só local" "$out" "só com HTTP em 127.0.0.1:3080"
+lacks "interativo, Enter: não publica a 80" "$out" "aberto para a internet"
+out="$(answers n | DESKVOICE_DOMAIN="" bash "$KIT/install.sh" --dry-run 2>&1)"
+contains "interativo, n: fica só local" "$out" "só com HTTP em 127.0.0.1:3080"
+out="$(answers s | DESKVOICE_DOMAIN="" bash "$KIT/install.sh" --dry-run 2>&1)"; equal "interativo, s na pergunta do HTTP: zero" 0 "$?"
+contains "interativo, s: publica por HTTP" "$out" "na porta 80, só com HTTP e aberto para a internet"
+contains "interativo, s: anuncia o IP" "$out" "Endereço que o painel teria: http://203.0.113.10"
+# Com domínio a pergunta não aparece.
+out="$(answers "" | bash "$KIT/install.sh" --dry-run 2>&1)"
+lacks "interativo com domínio: a pergunta do HTTP não aparece" "$out" "Publicar o painel na internet por HTTP"
+lacks "interativo: a senha não aparece" "$out" "senha-de-teste-123"
 equal "nenhuma simulação alterou arquivo" "$before" "$(snapshot)"
 equal "nenhuma simulação mandou o Docker alterar nada" 0 "$(mutating_calls)"
 finish

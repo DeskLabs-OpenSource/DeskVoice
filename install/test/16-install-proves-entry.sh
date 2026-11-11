@@ -3,9 +3,11 @@
 # publicar, lido do docker-compose.override.yml), as opções de exposição valendo em todo modo, o
 # padrão seguro sem domínio, a reinstalação que não muda a exposição, e o login de verdade no fim.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+unset SUDO_USER; U="$(id -un)"   # o nome que o instalador põe no comando do túnel
 source "$KIT/_common.sh"; set +e; trap - ERR
 D="$DESKVOICE_DEPLOY_DIR"; O="$D/docker-compose.override.yml"; A="$D/app.env"
 PW="senha-de-teste-123"
+OTHER_PW="${PW}-diferente"   # a senha que NÃO é a do dono: valor de teste, derivado, sem literal
 export DESKVOICE_ORG_NAME="Clínica Exemplo" DESKVOICE_OWNER_NAME="Ana Exemplo" DESKVOICE_OWNER_EMAIL=ana@exemplo.com.br DESKVOICE_OWNER_PASSWORD="$PW"
 export DESKVOICE_HEALTH_TIMEOUT=0
 : > "$FAKE_DIR/git_tags"
@@ -18,8 +20,9 @@ other_proxy() { printf 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:*\nLISTEN 0 511 0.0.0.0:
 # instalador ver uma máquina nova é não haver deploy/.env (aí nenhum contêiner é tido como nosso).
 printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"
 fresh() {
-  rm -f "$D/.env" "$A" "$D/migrate.env" "$O" "$FAKE_DIR/login_stdin" "$FAKE_DIR/login_probe" "$FAKE_DIR/host_probe" "$FAKE_DIR/create_owner_stdin"
+  rm -f "$D/.env" "$A" "$D/migrate.env" "$O" "$FAKE_DIR/login_stdin" "$FAKE_DIR/login_probe" "$FAKE_DIR/host_probe" "$FAKE_DIR/outside_probe" "$FAKE_DIR/running_after_up" "$FAKE_DIR/create_owner_stdin"
   echo 0 > "$FAKE_DIR/users_count"; : > "$FAKE_DIR/calls.log"
+  printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"
 }
 install() { bash "$KIT/install.sh" --yes --force 2>&1; }
 ports_published() { sed -n 's/^ *- "\(.*\)"$/\1/p' "$O" 2>/dev/null | tr '\n' ' '; }
@@ -35,7 +38,7 @@ lacks "livres, sem domínio, padrão: a 80 não é publicada" "$(cat "$O")" '"80
 equal "livres, sem domínio, padrão: anuncia o endereço do túnel" "http://localhost:3080" "$(announced "$out")"
 equal "livres, sem domínio, padrão: o endereço gravado é o anunciado" "http://localhost:3080" "$(env_get "$A" PUBLIC_URL)"
 equal "livres, sem domínio, padrão: confere a porta publicada" "http://127.0.0.1:3080" "$(probed)"
-contains "padrão sem domínio: ensina o túnel" "$out" "ssh -L 3080:127.0.0.1:3080 <usuário>@203.0.113.10"
+contains "padrão sem domínio: ensina o túnel" "$out" "ssh -L 3080:127.0.0.1:3080 $U@203.0.113.10"
 contains "padrão sem domínio: diz como apontar um domínio para ter HTTPS" "$out" "DESKVOICE_DOMAIN=<seu domínio> bash install/install.sh"
 contains "padrão sem domínio: diz como publicar por HTTP de propósito, com o risco" "$out" "DESKVOICE_PANEL_PUBLIC_HTTP=yes"
 # O login de verdade, com o usuário recém-criado.
@@ -172,8 +175,46 @@ contains "porta publicada sem resposta: diz qual" "$out" "http://127.0.0.1:3080)
 lacks "porta publicada sem resposta: não diz pronto" "$out" "Pronto"
 lacks "porta publicada sem resposta: não anuncia o painel" "$out" "Painel:"
 refuse "porta publicada sem resposta: nenhuma tentativa de login" test -e "$FAKE_DIR/login_stdin"
-fresh; printf 000 > "$FAKE_DIR/host_probe"
-out="$(DESKVOICE_DOMAIN=voz.exemplo.com.br install)"; equal "domínio que não abre: para com erro" 1 "$?"
-contains "domínio que não abre: diz a causa mais comum" "$out" "o domínio voz.exemplo.com.br ainda não aponta para 203.0.113.10"
-lacks "domínio que não abre: não diz pronto" "$out" "Pronto"
+
+# ── Com domínio, o endereço DE FORA não abre (DNS propagando, ou a VPS não alcança o próprio
+#    endereço): não é instalação quebrada. Termina com zero, sem dar o endereço como certo. ──
+fresh; printf 000 > "$FAKE_DIR/outside_probe"; printf 308 > "$FAKE_DIR/host_probe"   # a 80 local redireciona para o HTTPS
+out="$(DESKVOICE_DOMAIN=voz.exemplo.com.br install)"; equal "domínio que ainda não abre: termina com zero" 0 "$?"
+contains "domínio que ainda não abre: título próprio" "$out" "5 de 5 · Instalado; o endereço ainda não abre"
+lacks "domínio que ainda não abre: não diz pronto" "$out" "Pronto para configurar"
+contains "domínio que ainda não abre: não dá o endereço como certo" "$out" "Painel: https://voz.exemplo.com.br  (ainda NÃO abre"
+lacks "domínio que ainda não abre: não diz que conferiu o endereço" "$out" "Endereço conferido"
+contains "domínio que ainda não abre: diz a causa provável" "$out" "o domínio voz.exemplo.com.br ainda não aponta para 203.0.113.10"
+contains "domínio que ainda não abre: diz que não precisa instalar de novo" "$out" "Não precisa instalar de novo"
+contains "domínio que ainda não abre: mostra os próximos passos" "$out" "Próximos quatro passos"
+contains "domínio que ainda não abre: o login é feito por dentro mesmo assim" "$out" "Login conferido"
+check "domínio que ainda não abre: confere a porta 80 desta máquina" grep -q 'curl .*Host: voz.exemplo.com.br http://127.0.0.1/api/v1/system/health' "$FAKE_DIR/calls.log"
+# O certificado ainda não saiu, e nem por dentro a sonda chega: aviso, não erro.
+fresh; printf 000 > "$FAKE_DIR/outside_probe"; printf 308 > "$FAKE_DIR/host_probe"; echo 'unreachable|EPROTO' > "$FAKE_DIR/login_probe"
+out="$(DESKVOICE_DOMAIN=voz.exemplo.com.br install)"; equal "sem certificado, login inalcançável por dentro: termina com zero" 0 "$?"
+contains "sem certificado: diz que NÃO testou o login" "$out" "Login NÃO testado: sem o certificado do HTTPS"
+contains "sem certificado: título próprio" "$out" "Instalado; o endereço ainda não abre"
+# Senha recusada com dono recém-criado continua sendo defeito, com ou sem endereço de fora.
+fresh; printf 000 > "$FAKE_DIR/outside_probe"; printf 308 > "$FAKE_DIR/host_probe"; echo 'rejected|401' > "$FAKE_DIR/login_probe"
+out="$(DESKVOICE_DOMAIN=voz.exemplo.com.br install)"; equal "endereço de fora fechado e login recusado: para com erro" 1 "$?"
+# Com domínio e a porta LOCAL sem resposta: aí é defeito de verdade.
+fresh; printf 000 > "$FAKE_DIR/outside_probe"; printf 000 > "$FAKE_DIR/host_probe"
+out="$(DESKVOICE_DOMAIN=voz.exemplo.com.br install)"; equal "com domínio e a porta local sem resposta: para com erro" 1 "$?"
+contains "com domínio e a porta local sem resposta: diz qual" "$out" "não responde nem na porta 80 desta máquina"
+lacks "com domínio e a porta local sem resposta: não anuncia o painel" "$out" "Painel:"
+refuse "com domínio e a porta local sem resposta: nenhuma tentativa de login" test -e "$FAKE_DIR/login_stdin"
+
+# ── Instalação PARADA (contêineres derrubados) com dono no banco e outra senha nas respostas: o
+#    dono não é recriado, então a recusa da senha é aviso, e não "a senha que acabou de ser definida". ──
+free_ports; fresh
+out="$(DESKVOICE_DOMAIN="" install)"                      # instala
+: > "$FAKE_DIR/running"; printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running_after_up"   # derruba tudo
+rm -f "$FAKE_DIR/create_owner_stdin" "$FAKE_DIR/login_stdin"; echo 'rejected|401' > "$FAKE_DIR/login_probe"
+out="$(DESKVOICE_DOMAIN="" DESKVOICE_OWNER_PASSWORD="$OTHER_PW" install)"; equal "instalação parada, dono existente, senha diferente: termina com zero" 0 "$?"
+refuse "instalação parada: o dono não é recriado" test -e "$FAKE_DIR/create_owner_stdin"
+contains "instalação parada: diz que o dono já existia" "$out" "Já existe um usuário dono no banco desta instalação"
+contains "instalação parada, senha diferente: é aviso" "$out" "Login NÃO conferido"
+lacks "instalação parada, senha diferente: não acusa a senha recém-definida" "$out" "RECUSOU"
+lacks "instalação parada, senha diferente: não diz pronto" "$out" "Pronto para configurar"
+lacks "instalação parada: a senha informada não aparece" "$out" "outra-senha-456"
 finish

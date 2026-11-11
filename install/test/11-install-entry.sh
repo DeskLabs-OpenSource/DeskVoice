@@ -2,6 +2,7 @@
 # install.sh de verdade (com Docker de mentira): a publicação que ele grava em cada modo, a
 # reinstalação por cima de uma instalação de duas portas e as instruções finais, com UMA porta.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+unset SUDO_USER; U="$(id -un)"   # o nome que o instalador põe no comando do túnel
 source "$KIT/_common.sh"; set +e; trap - ERR
 D="$DESKVOICE_DEPLOY_DIR"; O="$D/docker-compose.override.yml"; A="$D/app.env"
 export DESKVOICE_ORG_NAME="Clínica Exemplo" DESKVOICE_OWNER_NAME="Ana Exemplo" DESKVOICE_OWNER_EMAIL=ana@exemplo.com.br DESKVOICE_OWNER_PASSWORD="senha-de-teste-123"
@@ -36,7 +37,7 @@ equal "reinstalar por túnel: 1 salto, Caddy sem confiar em cabeçalho" "1 127.0
 equal "reinstalar: segredo nenhum muda" "$secret_before" "$(env_get "$A" DESKVOICE_SECRET_KEY)"
 check "reinstalar: sobe tirando contêiner e porta que sobraram" grep -q "docker-compose.override.yml up -d --remove-orphans" "$FAKE_DIR/calls.log"
 check "reinstalar: baixa a imagem do Caddy" grep -q "pull -q postgres asterisk caddy" "$FAKE_DIR/calls.log"
-contains "túnel: uma porta só" "$out" "ssh -L 3080:127.0.0.1:3080 <usuário>@203.0.113.10"
+contains "túnel: uma porta só" "$out" "ssh -L 3080:127.0.0.1:3080 $U@203.0.113.10"
 lacks "túnel: nenhuma menção à segunda porta" "$out" "3081"
 lacks "túnel: nenhuma segunda regra -L" "$out" "-L 3080:127.0.0.1:3080 -L"
 contains "confere a entrada antes de anunciar o endereço" "$out" "Entrada única conferida"
@@ -66,7 +67,7 @@ env_set "$D/.env" PANEL_DOMAIN localhost   # resposta vazia mantém o domínio a
 out="$(DESKVOICE_DOMAIN="" DESKVOICE_PANEL_PUBLIC_HTTP=yes install)"; equal "aberto pelo IP: zero" 0 "$?"
 equal "aberto pelo IP: uma publicação" "0.0.0.0:3080:80 " "$(ports_published)"
 equal "aberto pelo IP: 1 salto" 1 "$(env_get "$A" TRUSTED_PROXY_HOPS)"
-contains "aberto pelo IP: avisa do microfone e ensina o túnel de uma porta" "$out" "ssh -L 3080:127.0.0.1:3080 <usuário>@203.0.113.10"
+contains "aberto pelo IP: avisa do microfone e ensina o túnel de uma porta" "$out" "ssh -L 3080:127.0.0.1:3080 $U@203.0.113.10"
 
 # ── 4. Máquina com 80/443 livres ──
 : > "$FAKE_DIR/ss_tcp"; rm "$O"
