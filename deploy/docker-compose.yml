@@ -14,6 +14,12 @@
 #   .env         só o que o próprio Compose interpola (senha do Postgres, portas, versão)
 #   app.env      o que painel, voz e rotinas recebem; não contém a senha do dono do banco
 #   migrate.env  credenciais do dono do schema; só o serviço `migrate` recebe
+#
+# O endereço das imagens do DeskVoice vem de `images.env`, a fonte única, que o kit passa ao
+# Compose junto com o `.env`. A versão é sempre um número (X.Y.Z), gravado pelo instalador, ou
+# `local` quando as imagens foram construídas na própria máquina. Sem o kit (`docker compose`
+# direto, para desenvolver), o nome cai em `localhost/...:dev`: não existe em registro nenhum,
+# então só se constrói.
 
 name: deskvoice
 
@@ -26,8 +32,11 @@ x-app: &app
     options: { max-size: "10m", max-file: "5" }
 
 services:
+  # Peça de terceiros, com versão exata e resumo: a instalação de amanhã baixa a mesma imagem de
+  # hoje. Trocar a versão de correção do Postgres 17 não pede migração de dados; a versão maior
+  # não se troca sem plano.
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine@sha256:e5d2edd28b1f8d40a0a6c0c9cdc545b19b56a0d5d88f94bc11a97d970d4700d0
     restart: unless-stopped
     environment:
       POSTGRES_USER: deskvoice
@@ -47,7 +56,7 @@ services:
   # instalar e atualizar passam pelo mesmo caminho de schema.
   migrate:
     <<: *app
-    image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-routines:${DESKVOICE_VERSION:-stable}
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-routines:${DESKVOICE_VERSION:-dev}
     build: { context: .., target: routines, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
     restart: "no"
     # Único serviço com as credenciais do dono do schema.
@@ -58,7 +67,7 @@ services:
 
   panel:
     <<: *app
-    image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-panel:${DESKVOICE_VERSION:-stable}
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-panel:${DESKVOICE_VERSION:-dev}
     build: { context: .., target: panel, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -70,7 +79,7 @@ services:
 
   voice:
     <<: *app
-    image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-voice:${DESKVOICE_VERSION:-stable}
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-voice:${DESKVOICE_VERSION:-dev}
     build: { context: .., target: voice, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -86,7 +95,7 @@ services:
 
   routines:
     <<: *app
-    image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-routines:${DESKVOICE_VERSION:-stable}
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-routines:${DESKVOICE_VERSION:-dev}
     build: { context: .., target: routines, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -122,7 +131,7 @@ services:
   # Sobe sempre, em todo modo de instalação. Onde escuta (CADDY_SITE), em quem confia
   # (CADDY_TRUSTED_PROXIES) e as portas publicadas vêm de docker-compose.override.yml.
   caddy:
-    image: caddy:2.11.9-alpine
+    image: caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
     restart: unless-stopped
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

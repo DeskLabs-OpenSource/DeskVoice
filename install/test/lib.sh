@@ -16,7 +16,7 @@ export PATH="$TEST_DIR/fake:$PATH"
 mkdir -p "$FAKE_DIR" "$DESKVOICE_DEPLOY_DIR"
 cp -R "$REPO/deploy/asterisk" "$DESKVOICE_DEPLOY_DIR/asterisk"
 rm -rf "$DESKVOICE_DEPLOY_DIR/asterisk/generated"
-cp "$REPO/deploy/docker-compose.yml" "$DESKVOICE_DEPLOY_DIR/"
+cp "$REPO/deploy/docker-compose.yml" "$REPO/deploy/images.env" "$DESKVOICE_DEPLOY_DIR/"
 echo 203.0.113.10 > "$FAKE_DIR/public_ip"
 echo 203.0.113.10 > "$FAKE_DIR/iface_ip"
 : > "$FAKE_DIR/calls.log"
@@ -46,6 +46,7 @@ mode_of() { if stat -c %a "$1" >/dev/null 2>&1; then stat -c %a "$1"; else stat 
 fake_install() {
   ( source "$KIT/_common.sh"
     write_env_files "https://voz.exemplo.com.br" 203.0.113.10 voz.exemplo.com.br 10000 10200
+    env_set "$ENV_FILE" DESKVOICE_VERSION 0.1.0
     apply_entry caddy voz.exemplo.com.br
     render_asterisk_config )
   printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"

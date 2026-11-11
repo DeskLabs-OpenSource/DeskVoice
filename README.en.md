@@ -63,7 +63,7 @@ agent. No feature requires SSH to be turned on.
 
 | What you need | Notes |
 |---|---|
-| A VPS running Ubuntu 22.04 or newer | The [HostGator VPS](https://www.hostgator.com.br/52708-141-3-52.html), the project's partner, is the recommended one. Any VPS with Docker works, with the same command. 2 GB of memory or more is recommended |
+| A VPS running Ubuntu 22.04 or newer | The [HostGator VPS](https://www.hostgator.com.br/52708-141-3-52.html), the project's partner, is the recommended one. Any VPS with Docker works, with the same command. On memory, only what was measured: the install was proven on a VPS with 8 GB and 4 vCPU, and DeskVoice at rest uses about 400 MB. The smallest size the install fits in has not been measured yet |
 | A domain pointing to the VPS | Optional for testing. Without a domain, the panel opens by IP and without HTTPS |
 | A SIP trunk with a number | From the telephony carrier of your choice. Authentication by registration or by IP |
 | A voice AI key | Gemini (Google) or OpenAI. You pay the provider directly |
@@ -112,6 +112,8 @@ proven yet, each capability below says how far the proof went:
 
 - **Proven in simulation:** covered by an end-to-end test with the simulated engine, which walks
   through a whole call with no carrier and no key.
+- **Proven on a real install:** it ran on 2026-11-11 on a test VPS, in the way and as far as the
+  row describes.
 - **Awaiting real-world proof:** implemented and tested against fake servers and a real Asterisk,
   but no call has been placed through a real carrier yet.
 
@@ -123,11 +125,17 @@ proven yet, each capability below says how far the proof went:
 | Work that continues after the call (summary, notices, follow-up tasks) | Proven in simulation |
 | Cost and duration ceiling per call | Proven in simulation |
 | Web panel in Portuguese, English and Spanish | Routes tested against a real database; screens checked in Portuguese |
+| Install on a VPS with the install kit | Proven on a real install, without a domain |
+| Panel and browser voice on the same address, Caddy's single entry point | Proven on a real install, without a domain |
+| Talk to the agent by voice from the "Talk to the agent" screen | Proven on a real install with the OpenAI Realtime engine, by a test client that plays the browser's role with recorded speech. Not yet from a browser with a microphone |
+| Panel with a domain and HTTPS | Awaiting real-world proof |
 | Answer an inbound call from a carrier line (SIP trunk) | Awaiting real-world proof |
 | Transfer the call to a person | Awaiting real-world proof (the Asterisk path was checked, without a carrier) |
-| Gemini Live and OpenAI Realtime voice engines | Awaiting real-world proof (tested against a fake server, without a key) |
+| OpenAI Realtime voice engine | Proven on a real install, in the "Talk to the agent" conversation described above |
+| Gemini Live voice engine | Awaiting real-world proof (tested against a fake server, without a key) |
 | Send WhatsApp during the call, through a connector | Awaiting real-world proof |
-| Installer, update, health check, backup and restore | Tested against a simulated Docker; backup and restore checked by hand on a real Postgres; VPS install awaiting real-world proof |
+| Call a webhook during the call | Awaiting real-world proof (without a real receiver) |
+| Update, health check, backup and restore | Tested against a simulated Docker; backup and restore checked by hand on a real Postgres |
 | Calls placed by the agent | Awaiting real-world proof, and off by default. See "Outbound calls" |
 
 If you place the first real call, tell us how it went in an issue: it is the most valuable

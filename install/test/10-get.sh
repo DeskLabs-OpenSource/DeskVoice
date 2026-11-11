@@ -46,4 +46,12 @@ out="$(cat "$KIT/get.sh" | PATH="$REAL_PATH" DESKVOICE_REPO="$SANDBOX/nao-existe
 contains "download falhou: diz o que fazer" "$out" "Confira a conexão"
 refuse "download falhou: não deixa instalador pela metade" test -f "$SANDBOX/falhou/install/install.sh"
 
+# Sem DESKVOICE_REF: o código fica na última versão publicada, e não na ponta da main.
+( cd "$origin" && "$real_git" tag v0.1.0 && "$real_git" tag v0.2.0-rc.1 && echo novo > depois-da-versao && "$real_git" add . && "$real_git" -c user.email=t@example.com -c user.name=t commit -qm depois ) >/dev/null 2>&1
+tagged="$SANDBOX/alvo-versao"
+out="$({ stream 2>/dev/null || true; } | PATH="$REAL_PATH" DESKVOICE_REPO="$origin" DESKVOICE_DIR="$tagged" bash -s -- --yes 2>&1)"; equal "sem ramo pedido: sai com zero" 0 "$?"
+contains "sem ramo pedido: diz a versão baixada" "$out" "Versão baixada: 0.1.0"
+check "sem ramo pedido: o código é o da versão, não o da ponta da main" test ! -e "$tagged/depois-da-versao"
+onmain="$SANDBOX/alvo-main"
+out="$(get "$onmain" --yes)"; check "com ramo pedido: fica na ponta do ramo" test -e "$onmain/depois-da-versao"
 finish

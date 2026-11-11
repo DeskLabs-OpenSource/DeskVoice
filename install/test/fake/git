@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
-# git de mentira: diz que a pasta não é um repositório, para nenhum teste tocar no git de verdade.
+# git de mentira: nenhum teste toca no git de verdade. Por padrão diz que a pasta não é um
+# repositório. Com $FAKE_DIR/git_tags, faz as vezes de um clone limpo no ramo main cujas tags são
+# as linhas desse arquivo, na ordem em que o git as devolveria (a maior primeiro); arquivo vazio
+# é clone sem nenhuma versão. $FAKE_DIR/git_fetch_fail simula a rede fora do ar.
 echo "git $*" >> "$FAKE_DIR/calls.log"
-exit 1
+[ -f "$FAKE_DIR/git_tags" ] || exit 1
+case " $* " in
+  *" rev-parse --git-dir "*) echo .git ;;
+  # O commit em que o clone está. Por padrão é o da versão que o instalador pedir (como quem chegou
+  # pelo get.sh, ou foi levado pelo update.sh); com $FAKE_DIR/git_head é outro, como quem clonou à
+  # mão e ficou na ponta da main.
+  *" rev-parse HEAD "*) if [ -f "$FAKE_DIR/git_head" ]; then cat "$FAKE_DIR/git_head"; else echo commit-da-versao; fi ;;
+  *" rev-parse refs/tags/"*) echo commit-da-versao ;;
+  *" rev-parse --verify "*) ref="${*: -1}"; grep -qx "${ref#refs/tags/}" "$FAKE_DIR/git_tags" ;;
+  *" fetch "*) [ ! -f "$FAKE_DIR/git_fetch_fail" ] ;;
+  *" tag --list "*) cat "$FAKE_DIR/git_tags" ;;
+  *" status --porcelain "*) ;;
+  *" symbolic-ref "*) echo main ;;
+  *" checkout "*) ;;
+  *) exit 1 ;;
+esac

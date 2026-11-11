@@ -23,8 +23,9 @@ Antes de qualquer pergunta técnica, pergunte: **"Você já tem um servidor (VPS
 1. O que é preciso: uma VPS com Ubuntu 22.04 ou mais novo (Debian 12 ou mais novo também serve)
    e acesso por SSH, com 10 GB de disco livre. Sobre memória, diga só o que foi medido: a
    instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 400 MB.
-   O menor tamanho em que a instalação cabe ainda não foi medido: hoje ela constrói as imagens
-   no servidor, e com 2 GB pode faltar memória nessa etapa.
+   O menor tamanho em que a instalação cabe ainda não foi medido: enquanto o projeto não tiver
+   uma versão publicada, ela constrói as imagens no servidor, e com 2 GB pode faltar memória
+   nessa etapa.
 2. A recomendação do projeto é a VPS da HostGator, parceira de infraestrutura.
 3. O link abaixo é **de parceria**: contratar por ele apoia o projeto.
 4. Não é obrigatório: qualquer outra VPS com Docker funciona pelo mesmo comando, sem diferença
@@ -110,6 +111,17 @@ Pode rodar de novo quantas vezes precisar: retoma de onde parou e não troca seg
 existe. O instalador gera os segredos, sobe os contêineres, aplica as migrations, cria o primeiro
 usuário e imprime o endereço do painel. Parou no meio? Leia a mensagem (ela diz o que fazer),
 resolva e rode de novo.
+
+O instalador instala a versão publicada mais recente e grava o número dela (aparece em
+`bash install/diagnose.sh`, na seção "Versões"). Dois casos para reconhecer:
+
+- **"O DeskVoice ainda não tem nenhuma versão publicada":** não é erro. As imagens são
+  construídas na própria VPS, o que leva alguns minutos e pede memória.
+- **"Não consegui baixar as imagens da versão X":** é erro, e o instalador não constrói no
+  lugar. A mensagem mostra a resposta do Docker e o comando para testar (`docker pull ...`).
+  Quase sempre é a rede da VPS, o registro fora do ar, ou uma versão que acabou de sair e ainda
+  está sendo publicada. Resolva e rode de novo. Não sugira `--build` a quem só quer usar: essa
+  opção é para quem desenvolve e constrói a partir do código da pasta.
 
 ## 4. Depois de instalar: a checagem de saúde
 

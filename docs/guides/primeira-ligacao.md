@@ -39,7 +39,7 @@ Se isso faz sentido para o seu caso, vale seguir para a instalação.
 
 | Item | Observação |
 |---|---|
-| Uma VPS com Ubuntu 22.04 ou mais novo | Recomendamos a [HostGator](https://www.hostgator.com.br/52708-141-3-52.html), parceira do projeto (link de parceria). Qualquer VPS com Docker funciona pelo mesmo caminho. O recomendado é 2 GB de memória ou mais e 10 GB de disco livre. Se faltar o Docker, o instalador pergunta e instala |
+| Uma VPS com Ubuntu 22.04 ou mais novo | Recomendamos a [HostGator](https://www.hostgator.com.br/52708-141-3-52.html), parceira do projeto (link de parceria). Qualquer VPS com Docker funciona pelo mesmo caminho. Tenha 10 GB de disco livre. Sobre memória, só o que foi medido: a instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 400 MB. O menor tamanho em que a instalação cabe ainda não foi medido. Se faltar o Docker, o instalador pergunta e instala |
 | Um domínio apontado para o IP da VPS | Opcional para testar. Sem domínio, o painel abre pelo IP e **sem HTTPS**, o que não serve para uso de verdade |
 | Acesso SSH à VPS | O endereço, a porta e a senha que a hospedagem enviou |
 | Um tronco SIP com um número | Contratado com uma operadora de telefonia. Você vai precisar do endereço do servidor, do usuário, da senha e de saber se a autenticação é por registro ou por IP |
@@ -76,8 +76,10 @@ O instalador trabalha em cinco etapas e diz em qual está:
    publica o painel numa porta local e mostra, no fim, o que configurar no proxy que já existe.
 3. **Faz algumas perguntas:** o domínio do painel, o nome da empresa, o seu nome, o seu e-mail
    (que vira o login) e uma senha de dez caracteres ou mais.
-4. **Instala:** gera os segredos, gera a configuração do Asterisk, sobe o banco, aplica a
-   estrutura, cria a empresa e o usuário dono e sobe o resto.
+4. **Instala:** gera os segredos, gera a configuração do Asterisk, baixa as imagens da versão
+   publicada mais recente e grava o número dela, sobe o banco, aplica a estrutura, cria a
+   empresa e o usuário dono e sobe o resto. Enquanto o projeto não tiver uma versão publicada,
+   as imagens são construídas na própria VPS, o que leva alguns minutos.
 5. **Mostra o endereço do painel** e os próximos passos.
 
 Você não inventa segredo técnico nenhum e não edita arquivo de configuração. Rodar o instalador

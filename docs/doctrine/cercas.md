@@ -86,6 +86,8 @@ A regra tem três consequências práticas:
 | `workflows-cancel-superseded-runs` | Um run de CI por PR: o novo cancela o anterior |
 | `welcome-does-not-checkout` | O workflow de acolhida, que roda com permissão do repositório, nunca baixa código de fork |
 | `partner-address-has-one-spelling` | Todo endereço do domínio da parceira é o de `install/partner.env`, e ele está no `AGENTS.md` e na skill de instalar |
+| `third-party-images-are-pinned` | Toda imagem de terceiros do Compose de produção (banco, Asterisk, Caddy) está fixada por resumo |
+| `image-name-has-one-source` | O endereço das imagens só está em `deploy/images.env`; o Compose, o kit e a publicação leem dali. A versão de uma instalação é um número, nunca um canal |
 
 A lista acima é um retrato da fundação. A verdade é a pasta `fences/`.
 
