@@ -176,10 +176,20 @@ describe("runner", () => {
     await withSystem(app, (q) => q.exec("delete from tasks where id = $1", [recent]));
   });
 
-  it("chama o seed de cada rotina uma vez ao subir", async () => {
-    let seeds = 0;
-    await start([{ kind: "recurring", run: async () => undefined, seed: async () => void seeds++ }]);
-    expect(seeds).toBe(1);
+  it("na partida apaga tarefa concluída há mais de 7 dias, e só ela", async () => {
+    const day = 86_400_000;
+    const oldDone = await enqueue("greet", new Date(t0.getTime() - 8 * day));
+    const recentDone = await enqueue("greet", new Date(t0.getTime() - 6 * day));
+    const oldFailed = await enqueue("greet", new Date(t0.getTime() - 8 * day));
+    await withSystem(app, (q) => q.exec("update tasks set status = 'done' where id = any($1)", [[oldDone, recentDone]]));
+    await withSystem(app, (q) => q.exec("update tasks set status = 'failed' where id = $1", [oldFailed]));
+
+    await start([{ kind: "greet", run: async () => undefined }]);
+
+    expect(await taskRow(oldDone)).toBeNull();
+    expect(await taskRow(recentDone)).toMatchObject({ status: "done" });
+    // Falha fica: é o registro do que precisa de atenção.
+    expect(await taskRow(oldFailed)).toMatchObject({ status: "failed" });
   });
 
   it("close não deixa timer vivo e o runner fechado não pega mais nada", async () => {

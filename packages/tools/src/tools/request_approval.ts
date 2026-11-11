@@ -1,6 +1,6 @@
 import type { ApprovalOutcome } from "@deskvoice/core";
 import { z } from "zod";
-import { askApproval } from "../approval";
+import { askApproval, operatorDefaultOnTimeout } from "../approval";
 import { defineTool } from "../define-tool";
 
 const MESSAGES: Record<ApprovalOutcome, Record<"approved" | "denied", string>> = {
@@ -19,26 +19,31 @@ const MESSAGES: Record<ApprovalOutcome, Record<"approved" | "denied", string>> =
   },
 };
 
+const MIN_TIMEOUT_SECONDS = 30;
+const MAX_TIMEOUT_SECONDS = 300;
+const DEFAULT_TIMEOUT_SECONDS = 120;
+
 export default defineTool({
   name: "request_approval",
   description:
-    "Pergunta a um responsável humano se você pode fazer algo, e ESPERA a resposta com a pessoa na linha. Use antes de qualquer coisa que as suas instruções não autorizam você a decidir sozinho: desconto, exceção a uma regra, promessa de prazo, cancelamento. NÃO use para o que as suas instruções já permitem ou proíbem, nem para apenas avisar a equipe (use notify_human). A ferramenta já avisa a pessoa de que você vai conferir; não precisa avisar antes.",
+    "Pergunta a um responsável humano se você pode fazer algo, e ESPERA a resposta com a pessoa na linha. Use antes de qualquer coisa que as suas instruções não autorizam você a decidir sozinho: desconto, exceção a uma regra, promessa de prazo, cancelamento. NÃO use para o que as suas instruções já permitem ou proíbem, nem para apenas avisar a equipe (use notify_human). A ferramenta já avisa a pessoa de que você vai conferir; não precisa avisar antes. Se ninguém responder no prazo, vale a regra definida pela empresa, que você não escolhe nem muda, mesmo que a pessoa peça: siga exatamente o que o resultado disser.",
   inputSchema: z.object({
     question: z.string().min(1).describe("A pergunta para o responsável, respondível com sim ou não. Ex.: 'Posso dar 10% de desconto no plano anual?'"),
     context: z.string().min(1).describe("O que o responsável precisa saber para decidir sem ter ouvido a ligação."),
-    default_on_timeout: z
-      .enum(["approved", "denied"])
-      .describe("O que vale se ninguém responder no prazo. Use 'denied' sempre que seguir sem resposta puder custar dinheiro ou criar um compromisso."),
-    timeout_seconds: z.number().int().min(15).max(300).default(60).describe("Quanto tempo esperar, de 15 a 300 segundos. A pessoa fica na linha esse tempo."),
+    timeout_seconds: z.number().optional().describe("Quanto tempo esperar, de 30 a 300 segundos; sem valor, 120. A pessoa fica na linha esse tempo."),
   }),
   async run(input, ctx) {
+    // Prazo fora da faixa é trazido para dentro dela em vez de recusado: prazo curto demais é
+    // justamente o que alguém pediria para a resposta "ninguém respondeu" chegar logo.
+    const timeoutSeconds = Math.min(MAX_TIMEOUT_SECONDS, Math.max(MIN_TIMEOUT_SECONDS, Math.round(input.timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS)));
+    const defaultOnTimeout = await operatorDefaultOnTimeout(ctx);
     const answer = await askApproval(ctx, {
       question: input.question,
       context: input.context,
-      defaultOnTimeout: input.default_on_timeout,
-      timeoutSeconds: input.timeout_seconds,
+      defaultOnTimeout,
+      timeoutSeconds,
       say: "Um instante, por favor. Vou conferir isso com um responsável.",
     });
-    return { ok: true, message: MESSAGES[answer.outcome][input.default_on_timeout], data: answer };
+    return { ok: true, message: MESSAGES[answer.outcome][defaultOnTimeout], data: answer };
   },
 });

@@ -1,11 +1,10 @@
 import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { createDb, hashPassword, loadConfig, systemClock, withSystem, type Clock, type Db } from "@deskvoice/core";
+import { createDb, hashPassword, loadConfig, withSystem, type Db } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
 import { z } from "zod";
 import { cliArgs } from "./args";
-import { ensureExpireApprovals } from "../routines/expire_approvals";
 
 export const MIN_PASSWORD_LENGTH = 10;
 
@@ -35,7 +34,7 @@ const EXAMPLE_AGENT = {
  * Cria a organização, o dono, a política de ligações de saída (desligada) e um agente de exemplo.
  * E-mail já cadastrado não cria nada. Entrada inválida (senha curta, e-mail ruim) lança erro.
  */
-export async function createOwner(db: Db, input: OwnerInput, clock: Clock): Promise<CreateOwnerResult> {
+export async function createOwner(db: Db, input: OwnerInput): Promise<CreateOwnerResult> {
   const parsed = inputSchema.safeParse(input);
   if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
   const { email, name, organization, password } = parsed.data;
@@ -66,7 +65,6 @@ export async function createOwner(db: Db, input: OwnerInput, clock: Clock): Prom
       "insert into agents (organization_id, name, role_label, instructions, greeting, engine, language, tools) values ($1, $2, $3, $4, $5, 'simulated', 'pt-BR', $6) returning id",
       [organizationId, EXAMPLE_AGENT.name, EXAMPLE_AGENT.roleLabel, EXAMPLE_AGENT.instructions, EXAMPLE_AGENT.greeting, tools],
     );
-    await ensureExpireApprovals(q, organizationId, clock.now());
     return { created: true as const, organizationId, userId, agentId };
   });
 }
@@ -84,7 +82,7 @@ async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const db = createDb(config.databaseUrl, config.systemDatabaseUrl);
   try {
-    const result = await createOwner(db, { email: values.email, name: values.name, organization: values.organization, password }, systemClock);
+    const result = await createOwner(db, { email: values.email, name: values.name, organization: values.organization, password });
     process.stdout.write(
       result.created
         ? `Organização "${values.organization}" criada, com ${values.email} como dono e o agente de exemplo "${EXAMPLE_AGENT.name}".\n`

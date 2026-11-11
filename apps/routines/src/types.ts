@@ -14,6 +14,4 @@ export interface Routine {
   kind: string;
   /** Lançar erro devolve a tarefa à fila (até o limite de tentativas). Precisa ser seguro repetir. */
   run(task: ClaimedTask, deps: RoutineDeps): Promise<void>;
-  /** Chamado uma vez quando o runner sobe. Rotina recorrente usa para garantir a própria tarefa. */
-  seed?(deps: RoutineDeps): Promise<void>;
 }

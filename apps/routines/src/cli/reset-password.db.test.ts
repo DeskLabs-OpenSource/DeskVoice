@@ -11,11 +11,9 @@ afterAll(async () => {
   await owner.close();
 });
 
-const clock = { now: () => t0 };
-
 async function newOwner(): Promise<{ email: string; userId: string; organizationId: string }> {
   const email = `dono-${randomUUID()}@example.com`;
-  const result = await createOwner(app, { email, name: "Rafa", organization: "Clínica Aurora", password: "senha-antiga-longa" }, clock);
+  const result = await createOwner(app, { email, name: "Rafa", organization: "Clínica Aurora", password: "senha-antiga-longa" });
   if (!result.created) throw new Error("expected the owner to be created");
   return { email, userId: result.userId, organizationId: result.organizationId };
 }

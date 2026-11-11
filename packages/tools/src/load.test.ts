@@ -38,10 +38,12 @@ describe("loadTools", { timeout: 30_000 }, () => {
     }
   });
 
-  it("campo com padrão não é obrigatório para o modelo", async () => {
+  it("campo opcional ou com padrão não é obrigatório para o modelo", async () => {
     const approval = (await loadTools()).get("request_approval");
-    expect(approval?.parameters.required).toEqual(["question", "context", "default_on_timeout"]);
-    expect(approval?.parameters.properties).toMatchObject({ timeout_seconds: { minimum: 15, maximum: 300, default: 60 } });
+    expect(approval?.parameters.required).toEqual(["question", "context"]);
+    // O que vale sem resposta é do operador: o modelo nem enxerga esse campo.
+    expect(Object.keys(approval?.parameters.properties as object)).toEqual(["question", "context", "timeout_seconds"]);
+    expect((await loadTools()).get("notify_human")?.parameters.required).toEqual(["message"]);
   });
 
   it("ferramenta nova é só um arquivo novo na pasta; arquivo de teste é ignorado", async () => {

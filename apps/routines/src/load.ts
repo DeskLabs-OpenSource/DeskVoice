@@ -8,7 +8,7 @@ const DEFAULT_DIR = fileURLToPath(new URL("./routines", import.meta.url));
 function isRoutine(value: unknown): value is Routine {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<Record<keyof Routine, unknown>>;
-  return typeof candidate.kind === "string" && candidate.kind !== "" && typeof candidate.run === "function" && (candidate.seed === undefined || typeof candidate.seed === "function");
+  return typeof candidate.kind === "string" && candidate.kind !== "" && typeof candidate.run === "function";
 }
 
 /**

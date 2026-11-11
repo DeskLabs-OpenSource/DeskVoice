@@ -19,6 +19,7 @@ export interface Runner {
 }
 
 const STALE_RUNNING_MINUTES = 10;
+const DONE_RETENTION_DAYS = 7;
 const RETRY_AFTER_ERROR_MS = 5000;
 // Maior atraso que `setTimeout` aceita; tarefa mais distante que isso só rearma o timer.
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -113,7 +114,10 @@ export async function startRunner(options: RunnerOptions): Promise<Runner> {
   );
   if (recovered > 0) log("info", "stale running tasks returned to the queue", { count: recovered });
 
-  for (const routine of routines.values()) await routine.seed?.(options);
+  // Faxina barata, uma vez por partida: tarefa concluída há mais de 7 dias não serve mais a
+  // ninguém. A idade é medida pelo `run_at`, que é o que a tabela guarda.
+  const purged = await withSystem(db, (q) => q.exec(`delete from tasks where status = 'done' and run_at < $1::timestamptz - make_interval(days => $2)`, [clock.now(), DONE_RETENTION_DAYS]));
+  if (purged > 0) log("info", "old finished tasks deleted", { count: purged });
 
   const stopListening = await listenTasks(db, wake, options.onFatal);
   wake();
