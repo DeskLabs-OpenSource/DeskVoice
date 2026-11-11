@@ -142,10 +142,24 @@ com `sudo ss -lunp | grep :5060`, pare esse programa e rode o instalador de novo
 
 ### 3. Ainda não tenho domínio
 
-Deixe a pergunta do domínio vazia. O painel abre pelo IP, sem HTTPS: serve para testar, não
-para uso de verdade, porque a senha trafega sem proteção. Quando tiver o domínio, crie um
-registro A apontando para o IP da VPS e rode `bash install/install.sh` de novo, informando o
-domínio. Nada do que você configurou no painel se perde.
+Sem domínio o painel abre pelo IP e **sem HTTPS**: a senha trafega sem proteção. Serve para testar.
+Quando tiver o domínio, aponte-o para a VPS e rode `bash install/install.sh` de novo.
+
+Se as portas 80 e 443 já são de outro proxy e você não quer um login exposto na internet, peça
+acesso só local:
+
+```bash
+DESKVOICE_PANEL_LOCAL_ONLY=yes bash install/install.sh
+```
+
+O painel passa a abrir só de dentro da VPS. Do seu computador, abra um túnel e use
+`http://localhost:3080` enquanto ele estiver aberto:
+
+```bash
+ssh -L 3080:127.0.0.1:3080 usuario@ip-da-vps
+```
+
+Rodar o instalador de novo mantém essa escolha.
 
 ### 4. A atualização voltou sozinha
 
@@ -170,6 +184,13 @@ existir, ele diz isso e não altera nada.
 
 Não rode o instalador de novo esperando que ele troque a senha: ele vê que já existe um dono e
 não cria outro.
+
+### 6. A checagem diz "Controle da telefonia: falha"
+
+O Asterisk está de pé, mas o processo de voz não consegue falar com ele, então nenhuma ligação é
+atendida. A causa mais comum é o Asterisk não ter lido a configuração. Rode `bash
+install/install.sh` de novo: ele regrava os arquivos com a permissão certa. Se continuar, veja
+`docker compose -f deploy/docker-compose.yml logs --tail 50 asterisk`.
 
 ## Testes do kit
 

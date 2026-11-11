@@ -15,6 +15,8 @@
 #   DESKVOICE_OWNER_EMAIL      seu e-mail (é o login)
 #   DESKVOICE_OWNER_PASSWORD   sua senha do painel (10 caracteres ou mais)
 #   DESKVOICE_PUBLIC_IP        opcional: IP público, se a descoberta automática falhar
+#   DESKVOICE_PANEL_LOCAL_ONLY=yes  opcional, sem domínio e com 80/443 de outro proxy: o painel só abre
+#                              de dentro da VPS (acesso por túnel SSH), em vez de ficar na internet sem HTTPS
 #   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar
 #   DESKVOICE_RTP_START / DESKVOICE_RTP_END   opcional: outra faixa de portas de áudio
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -243,7 +245,15 @@ if [ "$proxy_mode" = caddy ]; then
   else panel_domain=":80"; public_url="http://$public_ip"; fi
 else
   profiles=""
+  local_only="${DESKVOICE_PANEL_LOCAL_ONLY:-}"
+  case "$local_only" in
+    "" ) # Reinstalação: quem já tinha fechado o painel para acesso local continua fechado.
+         if [ -z "$domain" ] && [ -f "$PROXY_OVERRIDE" ] && grep -q '"127\.0\.0\.1:' "$PROXY_OVERRIDE"; then local_only=yes; else local_only=no; fi ;;
+    yes|no) ;;
+    *) die "O valor de DESKVOICE_PANEL_LOCAL_ONLY ($local_only) não vale." "Use DESKVOICE_PANEL_LOCAL_ONLY=yes para o painel só abrir de dentro da VPS, ou não defina a variável." ;;
+  esac
   if [ -n "$domain" ]; then panel_domain="$domain"; public_url="https://$domain"; panel_bind="127.0.0.1"
+  elif [ "$local_only" = yes ]; then panel_domain="localhost"; public_url="http://localhost:$panel_port"; panel_bind="127.0.0.1"
   else panel_domain="localhost"; public_url="http://$public_ip:$panel_port"; panel_bind="0.0.0.0"; fi
 fi
 
@@ -253,6 +263,7 @@ if [ "$DRY_RUN" = 1 ]; then
   would "gravar deploy/.env, deploy/app.env e deploy/migrate.env (permissão 600), gerando só os segredos que ainda não existem"
   would "gerar deploy/asterisk/generated/{ari,rtp,pjsip}.conf com o IP $public_ip e a faixa ${rtp_start}-${rtp_end}"
   if [ "$proxy_mode" = external ]; then would "publicar o painel em ${panel_bind}:${panel_port} (arquivo deploy/docker-compose.override.yml), sem subir o Caddy"
+    if [ -z "$domain" ] && [ "$panel_bind" = "127.0.0.1" ]; then would "deixar o painel só para dentro da VPS; do seu computador: ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}"; fi
   else would "subir o Caddy nas portas 80/443 para ${panel_domain}"; fi
   would "baixar as imagens (ou construir aqui, se a versão ainda não estiver publicada)"
   would "subir o Postgres e aplicar as migrations"
@@ -337,7 +348,14 @@ if [ "$proxy_mode" = external ]; then
     info "    2) aponte $domain para  http://deskvoice-panel-1:3000"
     info "    (se o contêiner do proxy for recriado, repita o passo 1)"
   else
-    info "Sem domínio, o painel ficou direto em $public_url (sem HTTPS). Libere a porta ${panel_port}/tcp no firewall."
+    if [ "$panel_bind" = "127.0.0.1" ]; then
+      info "O painel só abre de dentro desta VPS, como você pediu. Para usar do seu computador, abra um túnel:"
+      info "    ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}"
+      info "e acesse http://localhost:${panel_port} enquanto o túnel estiver aberto."
+    else
+      info "Sem domínio, o painel ficou direto em $public_url (sem HTTPS). Libere a porta ${panel_port}/tcp no firewall."
+      info "Não quer o login exposto na internet? Rode de novo com DESKVOICE_PANEL_LOCAL_ONLY=yes e entre por túnel SSH."
+    fi
   fi
 fi
 printf '\n  %sJá funciona:%s painel, banco, Asterisk esperando ligação, worker de voz e rotinas.\n' "$C_BLD" "$C_OFF"
