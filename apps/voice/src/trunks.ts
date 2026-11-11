@@ -57,9 +57,8 @@ const value = (text: string): string => text.replaceAll(";", "\\;");
  * leva o IP privado do contêiner e há provedor que derruba a ligação) e `ulaw`/`alaw`, que casam
  * com o AudioSocket sem transcodificar.
  */
-function renderTrunk(trunk: TrunkConfig): string {
+function renderTrunk(trunk: TrunkConfig, hostIsExclusive: boolean): string {
   const name = trunkEndpointName(trunk.id);
-  const hostOnly = trunk.host.replace(/:\d+$/, "");
   const withAuth = trunk.username !== null && trunk.password !== null;
   const publicIp = trunk.publicIp !== null && IPV4.test(trunk.publicIp) ? trunk.publicIp : null;
   const lines = [
@@ -82,12 +81,11 @@ function renderTrunk(trunk: TrunkConfig): string {
     "type=aor",
     `contact=sip:${trunk.host}`,
     "qualify_frequency=30",
-    "",
-    `[${name}-identify]`,
-    "type=identify",
-    `endpoint=${name}`,
-    `match=${hostOnly}`,
   ];
+  // Reconhecer a chamada recebida pelo endereço de origem só é seguro quando o endereço é de um
+  // tronco só. Com o host repetido, o Asterisk entregaria a chamada de uma organização ao tronco
+  // de outra.
+  if (hostIsExclusive) lines.push("", `[${name}-identify]`, "type=identify", `endpoint=${name}`, `match=${normalizeHost(trunk.host)}`);
   if (withAuth) {
     lines.push("", `[${name}-auth]`, "type=auth", "auth_type=userpass", `username=${value(trunk.username ?? "")}`, `password=${value(trunk.password ?? "")}`);
   }
@@ -100,20 +98,49 @@ function renderTrunk(trunk: TrunkConfig): string {
       `outbound_auth=${name}-auth`,
       `server_uri=sip:${trunk.host}`,
       `client_uri=sip:${value(trunk.username ?? "")}@${trunk.host}`,
+      // O Asterisk põe um parâmetro `line` único no Contact do registro e casa a chamada recebida
+      // com este endpoint por ele: é o que separa duas contas na mesma operadora.
+      "line=yes",
+      `endpoint=${name}`,
       "retry_interval=60",
     );
   }
   return lines.join("\n");
 }
 
-/** O arquivo inteiro. Tronco com valor que não pode ser escrito fica de fora, com o motivo em `skipped`. */
+/** Host como chave de comparação: minúsculas, sem porta, sem ponto final. Nome é comparado como nome; nada de DNS aqui. */
+export const normalizeHost = (host: string): string =>
+  host
+    .trim()
+    .toLowerCase()
+    .replace(/:[0-9]+$/, "")
+    .replace(/[.]$/, "");
+
+// Não diz de quem é a outra linha: pode ser de outra organização.
+export const SHARED_HOST_REASON =
+  "this provider address is already used by another line of this installation, and a line recognized only by its address cannot share it; change this line to registration (user and password) to fix it";
+
+/**
+ * O arquivo inteiro. Tronco com valor que não pode ser escrito fica de fora, com o motivo em `skipped`.
+ *
+ * Tronco em modo `ip` só tem o endereço para ser reconhecido. Se outro tronco da instalação usa o
+ * mesmo host, ele fica de fora (falha fechada): atender pelo tronco errado é pior que não atender.
+ */
 export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped: Array<{ id: string; reason: string }> } {
   const skipped: Array<{ id: string; reason: string }> = [];
   const sections: string[] = [];
+  const writable: TrunkConfig[] = [];
   for (const trunk of [...trunks].sort((a, b) => a.id.localeCompare(b.id))) {
     const reason = trunkProblem(trunk);
     if (reason) skipped.push({ id: trunk.id, reason });
-    else sections.push(renderTrunk(trunk));
+    else writable.push(trunk);
+  }
+  const hostUses = new Map<string, number>();
+  for (const trunk of writable) hostUses.set(normalizeHost(trunk.host), (hostUses.get(normalizeHost(trunk.host)) ?? 0) + 1);
+  for (const trunk of writable) {
+    const exclusive = hostUses.get(normalizeHost(trunk.host)) === 1;
+    if (!exclusive && trunk.authMode === "ip") skipped.push({ id: trunk.id, reason: SHARED_HOST_REASON });
+    else sections.push(renderTrunk(trunk, exclusive));
   }
   const header = "; Gerado pelo DeskVoice a partir das linhas cadastradas no painel. Não edite: é reescrito a cada mudança.";
   return { conf: `${[header, ...sections].join("\n\n")}\n`, skipped };
@@ -131,6 +158,8 @@ export async function writeFileAtomic(file: string, content: string): Promise<vo
     throw error;
   }
 }
+
+const LEFT_OUT = "This line was left out of the telephony configuration";
 
 export interface TrunksDeps {
   db: Db;
@@ -188,7 +217,7 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
   const { conf, skipped: invalid } = renderTrunksConf(trunks);
   const skipped = [...unreadable, ...invalid];
   await writeFileAtomic(deps.file, conf);
-  await setStatus(deps, skipped.map(({ id, reason }) => ({ id, status: "fail" as const, detail: `This line was left out of the telephony configuration: ${reason}.` })));
+  await setStatus(deps, skipped.map(({ id, reason }) => ({ id, status: "fail" as const, detail: `${LEFT_OUT}: ${reason}.` })));
   for (const { id, reason } of skipped) deps.log("error", "trunk left out of the generated configuration", { trunkId: id, reason });
 
   try {
@@ -196,7 +225,7 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
   } catch (error) {
     return { applied: false, detail: `The lines were written, but the telephony server did not reload them: ${messageOf(error)}`, skipped };
   }
-  return { applied: true, detail: `${trunks.length - invalid.length} line(s) loaded by the telephony server.`, skipped };
+  return { applied: true, detail: `${trunks.length - invalid.length} line(s) written and reloaded by the telephony server.`, skipped };
 }
 
 /**
@@ -207,7 +236,10 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
  * o registro aparece como `ok`. O conserto é ler o registro pela AMI, se isso enganar alguém.
  */
 export async function checkTrunks(deps: TrunksDeps): Promise<TrunkHealth[]> {
-  const ids = (await withSystem(deps.db, (q) => q.many<{ id: string }>("select id from trunks order by id"))).map((row) => row.id);
+  const rows = await withSystem(deps.db, (q) => q.many<{ id: string; last_error: string | null }>("select id, last_error from trunks order by id"));
+  const ids = rows.map((row) => row.id);
+  // Linha deixada de fora do arquivo continua mostrando o motivo, e não "não carregada".
+  const leftOut = new Map(rows.flatMap((row) => (row.last_error?.startsWith(LEFT_OUT) ? [[row.id, row.last_error] as const] : [])));
   let health: TrunkHealth[];
   try {
     const states = new Map((await deps.ari.listEndpoints("PJSIP")).map((endpoint) => [endpoint.resource, endpoint.state ?? "unknown"]));
@@ -215,7 +247,7 @@ export async function checkTrunks(deps: TrunksDeps): Promise<TrunkHealth[]> {
       const state = states.get(trunkEndpointName(id));
       if (state === "online") return { id, status: "ok", detail: "The provider answers." };
       if (state === "offline") return { id, status: "fail", detail: "The provider does not answer. Check the host, the user and the password, and whether the provider allows this server's IP." };
-      if (state === undefined) return { id, status: "fail", detail: "The telephony server has not loaded this line. Save the line again to apply it." };
+      if (state === undefined) return { id, status: "fail", detail: leftOut.get(id) ?? "The telephony server has not loaded this line. Save the line again to apply it." };
       return { id, status: "warn", detail: "The line is loaded, but the provider has not been checked yet. Try again in a minute." };
     });
   } catch (error) {

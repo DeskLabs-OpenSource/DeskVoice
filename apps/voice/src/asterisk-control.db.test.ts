@@ -73,11 +73,38 @@ describe("troncos", { timeout: 120_000 }, () => {
     expect(conf).toContain(`[trunk-${good}-registration]`);
     expect(conf).toContain("password=s3nha-boa\n");
     expect(conf).toContain(`[trunk-${good}]\ntype=endpoint`);
-    expect(conf.slice(conf.indexOf(`[trunk-${good}]`), conf.indexOf(`[trunk-${good}-identify]`))).toContain("from_domain=198.51.100.77");
+    expect(conf.slice(conf.indexOf(`[trunk-${good}]`), conf.indexOf(`[trunk-${good}-auth]`))).toContain("from_domain=198.51.100.77");
+    expect(conf).toContain(`line=yes\nendpoint=trunk-${good}\n`);
     expect(conf).not.toContain("hacker");
     expect(conf).not.toContain(evil);
     expect(await trunkRow(evil)).toMatchObject({ status: "fail", last_error: expect.stringContaining("left out") });
     expect((await trunkRow(good))?.status).toBe("unverified");
+  });
+
+  it("dois troncos por endereço no mesmo host, em organizações diferentes: nenhum é emitido e cada um vê o erro, sem nada do outro", async () => {
+    const first = await createOrganization(app, "trunks-shared-a");
+    const second = await createOrganization(app, "trunks-shared-b");
+    const options = { host: "198.51.100.99", username: null, password: null, authMode: "ip" as const };
+    const mine = await createTrunk(app, first, options);
+    const theirs = await createTrunk(app, second, { ...options, host: "198.51.100.99:5080" });
+    const ari = fakeAri();
+    const deps = trunksDeps(ari, path.join(scratch, "shared", "pjsip_trunks.conf"));
+    await applyTrunks(deps);
+
+    const conf = await readFile(deps.file, "utf8");
+    expect(conf).not.toContain(mine);
+    expect(conf).not.toContain(theirs);
+    expect(conf).not.toContain("198.51.100.99");
+    for (const [id, other, otherOrg] of [[mine, theirs, second], [theirs, mine, first]] as const) {
+      const row = await trunkRow(id);
+      expect(row).toMatchObject({ status: "fail", last_error: expect.stringMatching(/already used by another line of this installation.*registration/) });
+      expect(row?.last_error).not.toContain(other);
+      expect(row?.last_error).not.toContain(otherOrg);
+    }
+    // A conferência de saúde mantém o motivo, em vez de trocar por "não carregada".
+    const health = (await checkTrunks(deps)).find((trunk) => trunk.id === mine);
+    expect(health).toMatchObject({ status: "fail", detail: expect.stringContaining("already used by another line") });
+    expect((await trunkRow(mine))?.last_error).toContain("already used by another line");
   });
 
   it("sem Asterisk no ar o arquivo é escrito mesmo assim e o resultado diz que falta recarregar", async () => {
@@ -149,6 +176,31 @@ describe("ligação de saída", { timeout: 120_000 }, () => {
       { endpoint: `PJSIP/5531999998888@trunk-${trunkId}`, context: "deskvoice-audio", extension: "s", channelId: callId, callerId: "+553133334444", variables: { AUDIOSOCKET_UUID: callId } },
     ]);
     expect(expected).toEqual([{ callId, channelId: callId, organizationId, agentId, trunkId }]);
+  });
+
+  // Corrida: sem a trava na política, as duas transações contam zero e as duas ligam.
+  for (const [limit, code] of [["daily_cap_per_line", "daily_cap_reached"], ["max_attempts_per_contact", "attempts_exhausted"]] as const) {
+    it(`duas ligações em paralelo com ${limit} = 1: exatamente uma sai, a outra recebe ${code}`, async () => {
+      for (let round = 0; round < 5; round++) {
+        const { organizationId, ari, dial } = await scene(`outbound-race-${limit}-${round}`, "on");
+        await withSystem(app, (q) => q.exec(`update outbound_policy set ${limit} = 1 where organization_id = $1`, [organizationId]));
+        const results = await Promise.all([dial("+5531999998888"), dial("+5531999998888"), dial("+5531999998888")]);
+        expect(results.filter((result) => "callId" in result), `round ${round}`).toHaveLength(1);
+        expect(results.filter((result) => "code" in result).map((result) => ("code" in result ? result.code : ""))).toEqual([code, code]);
+        expect(ari.originated).toHaveLength(1);
+        expect((await callsOf(app, organizationId)).map((call) => call.status).sort()).toEqual(["refused", "refused", "ringing"]);
+      }
+    });
+  }
+
+  it("ligação que o Asterisk não consegue originar fica como falha e conta como tentativa", async () => {
+    const { organizationId, ari, dial } = await scene("outbound-failed-counts", "on");
+    await withSystem(app, (q) => q.exec("update outbound_policy set max_attempts_per_contact = 1 where organization_id = $1", [organizationId]));
+    ari.failing = true;
+    expect(await dial("+5531999998888")).toMatchObject({ code: "originate_failed" });
+    ari.failing = false;
+    expect(await dial("+5531999998888")).toMatchObject({ code: "attempts_exhausted" });
+    expect(ari.originated).toEqual([]);
   });
 
   it("número inválido, agente de outra organização e Asterisk fora do ar devolvem código, sem originar", async () => {

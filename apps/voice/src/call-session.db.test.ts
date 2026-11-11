@@ -210,7 +210,8 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
     const manual = manualEngine({ keyless: true });
     const { callId, transport, start, harness } = await scene("ceiling-duration", { engine: "manual", maxCallSeconds: 45, transferTo: "+5531988887777" }, manual);
     const session = start();
-    await waitFor(() => harness.timers.held().includes(45_000), "the duration timer");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    expect(harness.timers.held()).toContain(45_000);
     expect(manual.said).toEqual([]);
 
     expect(harness.timers.fire(45_000)).toBe(1);

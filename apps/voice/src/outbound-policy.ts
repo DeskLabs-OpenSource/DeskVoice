@@ -30,12 +30,16 @@ function localMinutes(at: Date, timeZone: string): number {
  * Toda ligação feita pelo agente passa por aqui antes de existir. As contagens leem `calls`:
  * recusa não conta como ligação feita.
  *
+ * Chame dentro da MESMA transação (`withOrg`) que cria a linha em `calls`: a leitura da política
+ * tranca a linha dela (`for update`) até a transação confirmar, então duas ligações da mesma
+ * organização conferem e gravam uma de cada vez, e o teto não é furado por corrida.
+ *
  * `lineE164` é o número da linha por onde a ligação vai sair (o `from_e164` da chamada). Sem ele,
  * o teto diário conta todas as ligações de saída da organização.
  */
 export async function checkOutboundAllowed(q: OrgQuery, toE164Input: string, clock: Clock, lineE164?: string | null): Promise<OutboundDecision> {
   const policy = await q.one<PolicyRow>(
-    "select enabled, daily_cap_per_line, window_start::text, window_end::text, max_attempts_per_contact, timezone from outbound_policy where organization_id = $1",
+    "select enabled, daily_cap_per_line, window_start::text, window_end::text, max_attempts_per_contact, timezone from outbound_policy where organization_id = $1 for update",
     [q.organizationId],
   );
   if (!policy?.enabled) return refuse("outbound_disabled", "Outbound calls are turned off for this organization.");

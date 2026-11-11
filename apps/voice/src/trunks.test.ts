@@ -2,7 +2,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { renderTrunksConf, trunkProblem, writeFileAtomic, type TrunkConfig } from "./trunks";
+import { normalizeHost, renderTrunksConf, SHARED_HOST_REASON, trunkProblem, writeFileAtomic, type TrunkConfig } from "./trunks";
 
 const A = "0a000000-0000-4000-8000-000000000001";
 const B = "0b000000-0000-4000-8000-000000000002";
@@ -56,6 +56,8 @@ transport=transport-udp
 outbound_auth=trunk-${A}-auth
 server_uri=sip:sip.operadora.example:5060
 client_uri=sip:conta100@sip.operadora.example:5060
+line=yes
+endpoint=trunk-${A}
 retry_interval=60
 `,
     });
@@ -107,6 +109,70 @@ retry_interval=60
       // Só o tronco bom está no arquivo, e nenhuma linha dele veio do ataque.
       expect(conf, JSON.stringify(attack)).toBe(renderTrunksConf([byIp]).conf);
     }
+  });
+
+  describe("o mesmo host em mais de um tronco", () => {
+    const C = "0c000000-0000-4000-8000-000000000003";
+    const section = (conf: string, name: string): string => conf.split("\n\n").find((block) => block.startsWith(`[${name}]\ntype=registration`) || block.startsWith(`[${name}]\ntype=identify`)) ?? "";
+
+    it("dois troncos register com o mesmo host (duas organizações na mesma operadora): nenhum identify por endereço, cada registro com line=yes e o endpoint próprio", () => {
+      const other: TrunkConfig = { ...register, id: C, host: "SIP.Operadora.Example", username: "conta999", password: "outra-senha" };
+      const { conf, skipped } = renderTrunksConf([register, other]);
+      expect(skipped).toEqual([]);
+      expect(conf).not.toMatch(/type=identify|match=/);
+      for (const id of [A, C]) {
+        const registration = section(conf, `trunk-${id}-registration`);
+        expect(registration).toContain("\nline=yes\n");
+        expect(registration).toContain(`\nendpoint=trunk-${id}\n`);
+        expect(registration.match(/endpoint=/g)).toHaveLength(1);
+      }
+    });
+
+    it("tronco register com host exclusivo tem os dois: line no registro e identify por endereço", () => {
+      const { conf } = renderTrunksConf([register, byIp]);
+      expect(section(conf, `trunk-${A}-registration`)).toContain(`line=yes\nendpoint=trunk-${A}`);
+      expect(section(conf, `trunk-${A}-identify`)).toContain(`endpoint=trunk-${A}\nmatch=sip.operadora.example`);
+    });
+
+    it("dois troncos ip com o mesmo host: nenhum é emitido, e os dois ficam com o erro", () => {
+      const twin: TrunkConfig = { ...byIp, id: C, host: "198.51.100.20:5080" };
+      const { conf, skipped } = renderTrunksConf([byIp, twin, register]);
+      expect(skipped).toEqual([{ id: B, reason: SHARED_HOST_REASON }, { id: C, reason: SHARED_HOST_REASON }]);
+      expect(conf).not.toContain(B);
+      expect(conf).not.toContain(C);
+      expect(conf).not.toContain("198.51.100.20");
+      expect(conf).toBe(renderTrunksConf([register]).conf);
+    });
+
+    it("um ip e um register no mesmo host: o ip não é emitido e o register sai sem identify", () => {
+      const sameHostIp: TrunkConfig = { ...byIp, id: C, host: "SIP.OPERADORA.EXAMPLE:5061" };
+      const { conf, skipped } = renderTrunksConf([register, sameHostIp]);
+      expect(skipped).toEqual([{ id: C, reason: SHARED_HOST_REASON }]);
+      expect(conf).not.toContain(C);
+      expect(conf).toContain(`[trunk-${A}-registration]`);
+      expect(conf).toContain("line=yes");
+      expect(conf).not.toMatch(/type=identify|match=/);
+    });
+
+    it("a mensagem de erro não revela nada do outro tronco", () => {
+      const twin: TrunkConfig = { ...byIp, id: C };
+      const { skipped } = renderTrunksConf([byIp, twin]);
+      const reason = skipped.find((entry) => entry.id === B)?.reason ?? "";
+      expect(reason).toMatch(/another line of this installation.*registration/);
+      // Nem id, nem endereço, nem menção a organização: o outro tronco pode ser de outra empresa.
+      expect(reason).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}|198[.]51|organi[sz]ation/i);
+    });
+
+    it("tronco que não pode ser escrito não conta como dono do host", () => {
+      const broken: TrunkConfig = { ...byIp, id: C, username: "tem espaço" };
+      const { conf, skipped } = renderTrunksConf([byIp, broken]);
+      expect(skipped.map((entry) => entry.id)).toEqual([C]);
+      expect(conf).toContain(`[trunk-${B}-identify]`);
+    });
+
+    it("compara o host em minúsculas, sem porta e sem ponto final", () => {
+      expect(["SIP.Example.com:5060", "sip.example.com.", " sip.example.com "].map(normalizeHost)).toEqual(["sip.example.com", "sip.example.com", "sip.example.com"]);
+    });
   });
 
   it("senha com símbolos legítimos entra numa linha só, com o ponto e vírgula escapado", () => {
