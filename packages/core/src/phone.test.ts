@@ -40,6 +40,29 @@ describe("toE164", () => {
     expect(toE164(input, "BR")).toBeNull();
   });
 
+  // Números de serviço não têm DDD. Sem eles não dá para cadastrar um 0800 como linha nem
+  // transferir uma ligação para a central de um fornecedor.
+  it.each([
+    ["0800 123 4567", "+558001234567"],
+    ["0800-123-4567", "+558001234567"],
+    ["08001234567", "+558001234567"],
+    ["+55 800 123 4567", "+558001234567"],
+    ["0300 123 4567", "+553001234567"],
+    ["4004-1234", "+5540041234"],
+    ["4004 1234", "+5540041234"],
+    ["3003-9876", "+5530039876"],
+    ["+55 4004 1234", "+5540041234"],
+  ])("normalizes the service number %j to %s", (input, expected) => {
+    expect(toE164(input, "BR")).toBe(expected);
+  });
+
+  it.each(["0800 123 456", "0800 123 45678", "0700 123 4567", "4005-1234", "4004-123", "4004-12345", "3003 12"])(
+    "rejects the malformed service number %j",
+    (input) => {
+      expect(toE164(input, "BR")).toBeNull();
+    },
+  );
+
   it("defaults to Brazil", () => {
     expect(toE164("(31) 99999-8888")).toBe("+5531999998888");
   });
