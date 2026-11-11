@@ -85,6 +85,7 @@ A regra tem três consequências práticas:
 | `one-file-per-piece` | Nenhum arquivo-índice nas pastas de ferramentas, motores e rotinas. Veja [um arquivo por peça](um-arquivo-por-peca.md) |
 | `workflows-cancel-superseded-runs` | Um run de CI por PR: o novo cancela o anterior |
 | `welcome-does-not-checkout` | O workflow de acolhida, que roda com permissão do repositório, nunca baixa código de fork |
+| `partner-address-has-one-spelling` | Todo endereço do domínio da parceira é o de `install/partner.env`, e ele está no `AGENTS.md` e na skill de instalar |
 
 A lista acima é um retrato da fundação. A verdade é a pasta `fences/`.
 

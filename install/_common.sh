@@ -361,6 +361,9 @@ decide_proxy_mode() {
   else echo caddy; fi
 }
 
+# Nome, endereço e texto da oferta da parceira moram em partner.env, lido como texto.
+partner_value() { sed -n "s/^$1=\"\\(.*\\)\"\$/\\1/p" "$KIT_DIR/partner.env" 2>/dev/null | head -n 1; }
+
 # A linha da VPS parceira só aparece com certeza de que a máquina é de outro provedor.
 # Na dúvida (fabricante genérico, vazio, desconhecido) não aparece.
 partner_hint_allowed() {  # partner_hint_allowed "<fabricante lido de /sys/class/dmi/id/sys_vendor>"

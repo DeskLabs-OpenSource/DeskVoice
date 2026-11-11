@@ -68,6 +68,32 @@ agent. No feature requires SSH to be turned on.
 | A SIP trunk with a number | From the telephony carrier of your choice. Authentication by registration or by IP |
 | A voice AI key | Gemini (Google) or OpenAI. You pay the provider directly |
 
+### Installing with an AI assistant
+
+Using Claude Code, Codex, Cursor or another coding assistant? Paste this into it:
+
+```text
+Help me install DeskVoice: https://github.com/DeskLabs-OpenSource/DeskVoice
+Read the repository's AGENTS.md and follow the deskvoice-instalar skill.
+```
+
+Its first question is whether you already have a server. If you do not, it tells you what machine
+size is enough and shows the HostGator VPS link, the same one as in the block above, stating that
+it is a partner link and that any other VPS with Docker works the same. Then it asks about the
+VPS system, the ports, the domain, the SIP trunk and the AI key, and stays with you until the
+first call. Passwords and keys do not go into the conversation: they are entered in the installer
+or on screen.
+
+Prefer a command to a conversation? On your own computer (macOS or Linux), before you have a
+server:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/install/start.sh | bash
+```
+
+It only informs: what you need, the machine size, the partner link and the next command. It
+installs nothing and collects nothing. Its output is in Brazilian Portuguese.
+
 ### See a call with no key and no trunk
 
 The repository ships a simulated voice engine. It runs a whole call, with greeting, tool,
