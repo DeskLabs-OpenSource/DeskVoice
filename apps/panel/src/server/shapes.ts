@@ -82,3 +82,7 @@ export const CALL_STATUSES = ["ringing", "in_progress", "transferred", "complete
 export async function requireAgent(q: OrgQuery, agentId: string): Promise<void> {
   if (!(await q.one("select 1 from agents where id = $1", [agentId]))) throw new ApiError(404, "not_found", "Agent not found.");
 }
+
+/** Mesma regra do comando que cria o primeiro dono (`create-owner`): no mínimo 10 caracteres. */
+export const newPassword = z.string().min(10).max(1000);
+export const roleName = z.enum(["owner", "admin", "operator"]);

@@ -28,14 +28,16 @@ export const POST = handlePublic({ body }, async ({ request, body, deps }) => {
 
   // Único uso de `withSystem` aqui: o e-mail é o que diz qual é a organização.
   const user = await withSystem(deps.db, (q) =>
-    q.one<{ id: string; organizationId: string; passwordHash: string; name: string; role: string }>(
-      `select id, organization_id as "organizationId", password_hash as "passwordHash", name, role from users where email = $1`,
+    q.one<{ id: string; organizationId: string; passwordHash: string; name: string; role: string; disabled: boolean }>(
+      `select id, organization_id as "organizationId", password_hash as "passwordHash", name, role, disabled_at is not null as disabled from users where email = $1`,
       [body.email],
     ),
   );
   decoyHash ??= hashPassword("decoy");
   const valid = await deps.verifyPassword(body.password, user?.passwordHash ?? (await decoyHash));
-  if (!user || !valid) {
+  // Conta desativada passa pela mesma conferência de senha e recebe a mesma resposta de senha
+  // errada: nem o tempo nem o texto dizem que a conta existe.
+  if (!user || !valid || user.disabled) {
     // A reserva fica: é ela que conta a falha. Uma mensagem só para e-mail e senha.
     throw new ApiError(401, "invalid_credentials", "E-mail or password is incorrect.");
   }

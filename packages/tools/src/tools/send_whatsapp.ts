@@ -69,7 +69,7 @@ async function lineOf(ctx: ToolContext): Promise<Line> {
 }
 
 async function isTeamNumber(ctx: ToolContext, e164: string): Promise<boolean> {
-  const users = await ctx.q.many<{ whatsapp_e164: string }>("select whatsapp_e164 from users where organization_id = $1 and whatsapp_e164 is not null", [ctx.organizationId]);
+  const users = await ctx.q.many<{ whatsapp_e164: string }>("select whatsapp_e164 from users where organization_id = $1 and whatsapp_e164 is not null and disabled_at is null", [ctx.organizationId]);
   return users.some((user) => toE164(user.whatsapp_e164) === e164);
 }
 

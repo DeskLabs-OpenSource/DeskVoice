@@ -139,14 +139,17 @@ export async function createSession(q: OrgQuery, user: { id: string; organizatio
   return token;
 }
 
-/** A sessão é achada pelo hash do token antes de se saber a organização: por isso `withSystem`. */
+/**
+ * A sessão é achada pelo hash do token antes de se saber a organização: por isso `withSystem`.
+ * Conferida no banco a cada requisição: sessão de pessoa desativada deixa de valer na hora.
+ */
 export async function findSession(deps: ServerDeps, token: string | undefined): Promise<Session | null> {
   if (!token) return null;
   return withSystem(deps.db, (q) =>
     q.one<Session>(
       `select s.id, s.user_id as "userId", s.organization_id as "organizationId", u.role, u.name, u.email
          from sessions s join users u on u.id = s.user_id and u.organization_id = s.organization_id
-        where s.token_hash = $1 and s.expires_at > $2`,
+        where s.token_hash = $1 and s.expires_at > $2 and u.disabled_at is null`,
       [hashToken(token), deps.clock.now()],
     ),
   );
@@ -222,11 +225,12 @@ export function handle<S extends ZodType = ZodType<undefined>, R = unknown>(
 /** Rota pública (login, saúde): mesma validação e mesmo envelope, sem sessão. */
 export function handlePublic<S extends ZodType = ZodType<undefined>>(
   options: { body?: S },
-  fn: (args: { request: Request; body: z.output<S>; deps: ServerDeps }) => Promise<unknown>,
-): (request: Request) => Promise<Response> {
-  return async (request) => {
+  fn: (args: { request: Request; body: z.output<S>; deps: ServerDeps; params: Record<string, string> }) => Promise<unknown>,
+): (request: Request, context?: RouteContext) => Promise<Response> {
+  return async (request, context) => {
     try {
-      return success(await fn({ request, body: await parseBody(request, options.body), deps: serverDeps() }));
+      const params = (await context?.params) ?? {};
+      return success(await fn({ request, body: await parseBody(request, options.body), deps: serverDeps(), params }));
     } catch (error) {
       return failure(error);
     }

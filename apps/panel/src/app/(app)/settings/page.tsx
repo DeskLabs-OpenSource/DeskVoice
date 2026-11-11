@@ -86,6 +86,8 @@ export default function SettingsPage() {
   const saveContact = useAction();
   const saveOnTimeout = useAction();
   const [contact, setContact] = useState({ name: "", phone: "", whatsapp: "" });
+  const savePassword = useAction();
+  const [password, setPassword] = useState({ current: "", next: "", repeat: "" });
   const saveDefault = useAction();
   const saveConnector = useAction();
   const saveTrustCaller = useAction();
@@ -141,6 +143,34 @@ export default function SettingsPage() {
               {t.saveContact}
             </Button>
             <ActionStatus action={saveContact} />
+          </div>
+        </form>
+      </Panel>
+
+      <Panel title={t.passwordTitle} description={t.passwordLead}>
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void savePassword.run(() => api("/auth/password", { body: { current: password.current, new: password.next } })).then((ok) => ok && setPassword({ current: "", next: "", repeat: "" }));
+          }}
+        >
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field label={t.passwordCurrent}>
+              <TextInput type="password" autoComplete="current-password" value={password.current} onChange={(event) => setPassword({ ...password, current: event.target.value })} required />
+            </Field>
+            <Field label={t.passwordNew} hint={t.passwordNewHint}>
+              <TextInput type="password" autoComplete="new-password" minLength={10} value={password.next} onChange={(event) => setPassword({ ...password, next: event.target.value })} required />
+            </Field>
+            <Field label={t.passwordRepeat} error={password.repeat !== "" && password.repeat !== password.next ? t.passwordMismatch : undefined}>
+              <TextInput type="password" autoComplete="new-password" minLength={10} value={password.repeat} onChange={(event) => setPassword({ ...password, repeat: event.target.value })} required />
+            </Field>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit" busy={savePassword.busy} disabled={password.repeat !== password.next}>
+              {t.savePassword}
+            </Button>
+            <ActionStatus action={savePassword} />
           </div>
         </form>
       </Panel>
