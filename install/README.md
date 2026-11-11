@@ -39,7 +39,7 @@ bash install/healthcheck.sh
 # 3. Backup (agende todo dia; veja abaixo)
 bash install/backup.sh
 
-# 4. Atualizar, quando sair versão nova
+# 4. Atualizar, quando sair versão nova: pelo painel (Configurações → Versão e atualização), ou
 bash install/update.sh
 
 # Se algo der errado e você for pedir ajuda
@@ -59,6 +59,7 @@ e número) e o agente. Nada disso é pedido no terminal.
 | `backup.sh` | Copia o banco, os três arquivos de ambiente e a configuração gerada do Asterisk para `backups/<data>/` | Restaura o dump num banco de rascunho e conta as linhas de cada tabela |
 | `restore.sh` | Substitui o banco por um backup. Pede que você digite `RESTAURAR` | Compara a contagem de cada tabela com o manifesto do backup, antes e depois de trocar o banco |
 | `update.sh` | Mostra versão atual e alvo, faz backup, troca a versão, baixa as imagens dela, aplica as migrations e confere a saúde. Nunca constrói imagem | Se as imagens não baixam, para sem alterar nada. Se uma peça essencial não responder, volta para a versão anterior e restaura o banco do backup |
+| `agent.sh` | O agente da atualização pela tela. Passa a cada minuto (o instalador agenda), anuncia ao painel a versão instalada, lê **um sim ou um não** e, se for sim, roda o `update.sh` e devolve o resultado. `--install` instala ou conserta o agendamento | Antes de anunciar, confere que esta pasta é a dona da instalação. Depois de aceitar um pedido, toda saída entrega um resultado; o que não deu para entregar fica guardado para a passada seguinte |
 | `diagnose.sh` | Gera um arquivo de texto para você enviar a quem for ajudar | Senhas, chaves e tokens saem como `***`; e-mails e telefones saem encurtados |
 | `test/run.sh` | Testes do próprio kit. Não precisam de Docker | Sai com erro se qualquer verificação falhar |
 
@@ -106,6 +107,46 @@ quem troca é o `update.sh`, que faz backup antes. Numa instalação antiga que 
 gravado (ou `local`), o instalador e o `update.sh` passam para o número da versão publicada
 assim que existir uma, sem mexer nos dados.
 
+### `update.sh`: quem atualiza é o atualizador da versão de destino
+
+O `update.sh` instalado decide o alvo, faz o backup e troca o código. Daí em diante quem roda é
+o `update.sh` **da versão que acabou de chegar** (ele é chamado com `--resume`, de uso interno).
+Assim, um passo que só existe na versão nova, como uma mudança de configuração ou o agendamento
+do agente, roda de fato. Antes de passar a vez, o atualizador confere que o novo carrega; se
+não, volta o código e nada mais foi tocado.
+
+A 0.1.0 é de antes desse mecanismo: quem atualiza a partir dela roda `bash install/update.sh`
+**uma segunda vez** depois de atualizar. Não há o que atualizar; é o atualizador novo gerando o
+segredo do agente, recriando o painel para ele recebê-lo e agendando o agente.
+
+### `agent.sh`: a atualização pela tela
+
+```bash
+bash install/agent.sh                      # uma passada (é o que o agendamento chama)
+sudo bash install/agent.sh --install       # instala ou conserta o agendamento
+bash install/agent.sh --install --dry-run  # só diz o que faria
+```
+
+O painel não tem acesso ao Docker do servidor: ele só registra o pedido de atualização. O
+agente passa a cada minuto, fala com o painel **de dentro do contêiner dele** (a rota do agente
+não é alcançável pela internet) e recebe um sim ou um não. Nunca um comando, nunca um número de
+versão: o alvo é a maior versão final publicada, que o próprio agente descobre (consulta o
+repositório no máximo a cada 10 minutos) e **anuncia** ao painel, para a tela nomear na
+confirmação a versão que de fato seria instalada. Com o sim, ele roda `update.sh --to` essa
+versão. Cada conversa com o painel tem prazo de 30 segundos: painel que não responde vira falha
+no registro, e a passada termina.
+
+| O quê | Onde |
+|---|---|
+| Agendamento | Timer do systemd `deskvoice-agent.timer` (a cada minuto, com atraso aleatório de até 15 s), rodando como o dono da pasta. Sem systemd: `/etc/cron.d/deskvoice-agent`. Sem nenhum dos dois: o instalador avisa, e a tela mostra que o agente não está instalado |
+| Segredo | `UPDATE_AGENT_TOKEN`, em `deploy/app.env`, gerado pelo instalador |
+| Registro do que falhou | `deploy/agent/agent.log` (a cópia anterior em `agent.log.1`) |
+| Resultado ainda não entregue | `deploy/agent/pending-result`; vai na passada seguinte |
+| Ver se está passando | `bash install/healthcheck.sh` (linha "Agente de atualização": agendado ou não, e quando falou com o painel pela última vez) e, no painel, Configurações → Versão e atualização |
+
+O agente recusa rodar se a instalação que está no ar foi criada a partir de outra pasta: um
+segundo clone do repositório na mesma máquina não atualiza a instalação de verdade.
+
 `--build` é para quem desenvolve. Imagem construída na VPS não é a que o projeto testou e
 publicou, e precisa ser reconstruída à mão a cada mudança.
 
@@ -118,7 +159,7 @@ separados para cada contêiner receber só o que usa:
 | Arquivo | Quem recebe | O que tem |
 |---|---|---|
 | `deploy/.env` | O Compose (e o Postgres) | Senha do dono do banco, domínio, faixa de áudio, número da versão instalada |
-| `deploy/app.env` | Painel, voz e rotinas | Conexões de aplicação, chave de segredos, senha interna do Asterisk, endereço público. Não tem a senha do dono do banco |
+| `deploy/app.env` | Painel, voz e rotinas | Conexões de aplicação, chave de segredos, senha interna do Asterisk, endereço público, segredo do agente de atualização. Não tem a senha do dono do banco |
 | `deploy/migrate.env` | Só as migrations e a criação do primeiro usuário | Conexão do dono do banco e as senhas dos papéis de aplicação |
 
 Você não edita nenhum deles. Se um valor precisar mudar (IP novo, domínio novo), rode o

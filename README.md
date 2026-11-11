@@ -136,6 +136,7 @@ provado, cada capacidade abaixo diz até onde a prova foi:
 | Enviar WhatsApp durante a chamada, por conector | Aguardando prova real |
 | Chamar um webhook durante a chamada | Aguardando prova real (sem um receptor de verdade) |
 | Atualização, checagem de saúde, backup e restauração | Testados com Docker simulado; backup e restauração conferidos à mão num Postgres real |
+| Atualizar pela tela (Configurações → Versão e atualização), por um agente do kit no servidor | Rotas testadas com banco real; agente e agendamento testados com Docker e systemd simulados. **Ainda sem prova numa instalação real** |
 | Ligações feitas pelo agente | Aguardando prova real, e desligado de fábrica. Veja "Ligações de saída", abaixo |
 
 Se você fizer a primeira ligação real, conte como foi numa issue: é a contribuição mais valiosa

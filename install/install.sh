@@ -324,6 +324,11 @@ if [ "$DRY_RUN" = 1 ]; then
   would "subir o Postgres e aplicar as migrations"
   if [ "$create_owner" = 1 ]; then would "criar a empresa \"$org_name\" e o usuário dono $owner_email"; fi
   would "subir painel, voz, rotinas e Asterisk, e esperar todos responderem"
+  case "$(agent_scheduler)" in
+    systemd) would "agendar o agente de atualização (timer do systemd $AGENT_UNIT.timer, uma passada por minuto): é ele que permite atualizar pela tela" ;;
+    cron) would "agendar o agente de atualização (uma linha em $CRON_DIR/$AGENT_UNIT, uma passada por minuto): é ele que permite atualizar pela tela" ;;
+    *) would "avisar que esta máquina não tem systemd nem cron: sem o agente agendado, a atualização fica só pelo terminal" ;;
+  esac
   printf '\n%sSimulação concluída: nada foi alterado.%s Endereço que o painel teria: %s\n' "$C_BLD" "$C_OFF" "$public_url"
   exit 0
 fi
@@ -391,6 +396,8 @@ until NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --essential >/dev/null 2>&1; do
   sleep 5; waited=$((waited + 5))
 done
 ok "Painel, banco, Asterisk, voz e rotinas respondendo"
+# O agente de atualização passa a cada minuto: é o que deixa o painel oferecer "atualizar".
+install_agent_schedule
 # A entrada única é o que você de fato abre: confere antes de anunciar o endereço.
 entry_line="$(NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" 2>/dev/null | grep 'Entrada única' || true)"
 if [ "$(printf '%s\n' "$entry_line" | awk '{ print $1 }')" = ok ]; then ok "Entrada única conferida: painel e voz do navegador respondem pelo mesmo endereço"

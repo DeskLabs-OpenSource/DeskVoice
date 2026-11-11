@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# systemctl de mentira: nenhum teste toca no systemd de verdade. Só registra o que seria feito.
+# `enable` liga o timer (um arquivo em $FAKE_DIR), e `is-enabled` responde por esse arquivo;
+# $FAKE_DIR/systemctl_fail faz o `enable` falhar.
+echo "systemctl $*" >> "$FAKE_DIR/calls.log"
+case " $* " in
+  *" is-enabled "*) [ -f "$FAKE_DIR/timer_enabled" ] ;;
+  *" enable "*) [ ! -f "$FAKE_DIR/systemctl_fail" ] && touch "$FAKE_DIR/timer_enabled" ;;
+esac

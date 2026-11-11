@@ -13,3 +13,4 @@ deploy/app.env
 deploy/migrate.env
 backups/
 coverage/
+deploy/agent/

@@ -1,0 +1,40 @@
+import type { UpdateDictionary } from "../pt-BR/update";
+
+const update: UpdateDictionary = {
+  title: "Versión y actualización",
+  lead: "La versión que este servidor está ejecutando y lo que cambia en la siguiente. La actualización hace una copia de seguridad antes y vuelve sola a la versión anterior si la nueva no responde.",
+  running: "En ejecución en este servidor",
+  published: "Más reciente publicada",
+  publishedNone: "Todavía no hay ninguna versión publicada",
+  publishedUnknown: "No fue posible consultar las versiones publicadas ahora. La versión en ejecución, arriba, se leyó de este servidor y sigue siendo válida. La consulta se repite en un minuto.",
+  upToDate: "Este servidor no encontró ninguna versión publicada más nueva que la instalada.",
+  notesMissing: "La versión {to} ya existe, y es a la que este servidor se actualizaría, pero sus notas todavía no están disponibles aquí (la página de la versión aún no se publicó, o la consulta falló ahora). El botón de actualizar aparece en cuanto las notas puedan leerse: nadie confirma sin ver qué cambia.",
+  notesTitle: "Qué cambia de la {from} a la {to}",
+  releaseOf: "Versión {version}",
+  attention: "Requiere atención",
+  agentOk: "El agente de actualización del servidor respondió por última vez el {when}.",
+  agentSilent: "El agente de actualización no responde desde el {when}. Una solicitud hecha ahora queda esperándolo y vence en 15 minutos. En el servidor, el motivo queda registrado en deploy/agent/agent.log.",
+  agentNever: "El agente de actualización todavía no habló con el panel: no está instalado en este servidor, o acaba de instalarse. Es él quien ejecuta la actualización solicitada aquí. Para instalarlo, ejecuta una vez en el servidor, en la carpeta de DeskVoice:",
+  agentFailure: "Última falla de comunicación que el agente registró, el {when}: {detail}",
+  agentMismatch: "El agente anunció la versión {agent}, y el panel está ejecutando la {running}. Si una actualización acaba de terminar, esto se corrige en un minuto.",
+  unsupported: "Este servidor ejecuta la versión \"{version}\", que no es una versión publicada: las imágenes se construyeron en él, o es una versión de prueba. La actualización desde el panel solo cambia una versión publicada por otra. Para actualizar, ejecuta en el servidor, en la carpeta de DeskVoice:",
+  start: "Actualizar a la {to}",
+  confirm: "¿Actualizar DeskVoice de la versión {from} a la {to}? El servidor hace una copia de seguridad de la base de datos antes de tocar nada. El sistema queda fuera de servicio unos minutos, y las llamadas en curso se cortan. Si la versión nueva no responde, el servidor vuelve solo a la {from}.",
+  password: "Tu contraseña",
+  passwordHint: "Pedimos la contraseña de nuevo porque esta acción deja el sistema fuera de servicio.",
+  confirmYes: "Actualizar de la {from} a la {to}",
+  status: {
+    requested: "Solicitud registrada el {when}. El agente del servidor comienza la actualización en menos de un minuto.",
+    running: "Actualización en curso desde el {when}. El panel queda fuera de servicio unos minutos; esta pantalla vuelve sola cuando responda.",
+    succeeded: "La actualización terminó el {when}: el servidor está en la versión {to}.",
+    nothing_to_do: "La solicitud terminó el {when} sin cambios: el servidor ya estaba en la versión publicada más reciente.",
+    rolled_back: "La actualización solicitada no se aplicó ({when}). El servidor sigue en la versión {from}, respondiendo. El motivo está en la salida del actualizador, abajo.",
+    failed: "La actualización falló el {when}, y el servidor puede no haber vuelto completo. Revisa la salida del actualizador, abajo, y comprueba el servidor con bash install/healthcheck.sh.",
+    expiredPickup: "La solicitud venció el {when}: el agente de actualización no la tomó en 15 minutos. No se cambió nada. Revisa arriba el estado del agente; ya se puede hacer otra solicitud.",
+    expiredRun: "La solicitud venció el {when}: el agente comenzó la actualización y no devolvió resultado en 30 minutos. Comprueba el servidor con bash install/healthcheck.sh. Ya se puede hacer otra solicitud.",
+    superseded: "La solicitud no se ejecutó ({when}): salió una versión más nueva después de hacerla, y la confirmación valía solo para la {to}. No se cambió nada. Lee las notas de la versión nueva y solicita de nuevo.",
+  },
+  detail: "Salida del actualizador",
+};
+
+export default update;

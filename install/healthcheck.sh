@@ -9,7 +9,7 @@
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
 # Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, Asterisk,
 # worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (linha, motor de voz,
-# entrada única, portas, disco).
+# entrada única, portas, disco). O agente de atualização nunca é falha: no máximo, aviso.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 as_json=0; only_essential=0
@@ -159,6 +159,24 @@ if [ "$only_essential" = 0 ]; then
     add udp "Portas UDP locais" 0 ok "5060/udp aberta nesta máquina, áudio em $rtp_start-$rtp_end/udp. Isto não prova que o provedor deixa passar: a prova é uma ligação"
   else
     add udp "Portas UDP locais" 0 falha "a porta 5060/udp não está aberta nesta máquina: a operadora não consegue entregar ligação"
+  fi
+
+  # ── Agente de atualização: é ele que deixa o painel oferecer "atualizar" ──
+  # Nunca é falha: sem ele a instalação funciona inteira, e a atualização continua pelo terminal.
+  agent_sched=""
+  case "$(agent_scheduler)" in
+    systemd) if [ -f "$SYSTEMD_DIR/$AGENT_UNIT.timer" ] && systemctl is-enabled --quiet "$AGENT_UNIT.timer" 2>/dev/null; then agent_sched="timer do systemd"; fi ;;
+    cron) if [ -f "$CRON_DIR/$AGENT_UNIT" ]; then agent_sched="cron"; fi ;;
+  esac
+  agent_last="$(cat "$AGENT_STATE_DIR/last-ok" 2>/dev/null || true)"
+  if [ -z "$agent_sched" ]; then
+    add agent "Agente de atualização" 0 aviso "não está agendado: a atualização pela tela não funciona (pelo terminal, sim). Rode: sudo bash install/agent.sh --install"
+  elif [ -n "$(find "$AGENT_STATE_DIR/last-ok" -mmin -5 2>/dev/null)" ]; then
+    add agent "Agente de atualização" 0 ok "agendado ($agent_sched); falou com o painel pela última vez em $agent_last"
+  elif [ -n "$agent_last" ]; then
+    add agent "Agente de atualização" 0 aviso "agendado ($agent_sched), mas não fala com o painel desde $agent_last. O motivo está em deploy/agent/agent.log"
+  else
+    add agent "Agente de atualização" 0 aviso "agendado ($agent_sched), mas ainda não falou com o painel. Espere um minuto; se continuar, veja deploy/agent/agent.log"
   fi
 
   # ── Disco ──

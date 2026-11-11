@@ -30,6 +30,9 @@ const factories: Record<string, Factory> = {
   outbound_policy: (organization_id) => ({ organization_id }),
   do_not_call: (organization_id) => ({ organization_id, e164: `+55${Math.floor(1e10 + Math.random() * 9e10)}` }),
   usage_ledger: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, engine: "simulated", at }),
+  // Encerrado de propósito: só cabe um pedido ABERTO na instalação inteira, e aqui há duas organizações.
+  update_requests: (organization_id, p) => ({ organization_id, requested_by: p.users?.id, status: "succeeded", from_version: "0.1.0", target_version: "0.2.0" }),
+  update_agent_status: (organization_id) => ({ organization_id, last_seen_at: at, announced_version: "0.1.0" }),
 };
 
 const UNSCOPED_TABLES = ["organizations", "schema_migrations"];

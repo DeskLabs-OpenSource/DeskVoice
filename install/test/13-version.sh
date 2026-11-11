@@ -48,6 +48,8 @@ check "o Compose recebe a fonte única" grep -q -- "--env-file $D/images.env --e
 fresh; with_versions
 out="$(install)"; equal "com versão publicada: instala" 0 "$?"
 equal "grava o número da versão mais recente" 0.2.0 "$(version)"
+check "a instalação agenda o agente de atualização" test -f "$DESKVOICE_SYSTEMD_DIR/deskvoice-agent.timer"
+check "a instalação gera o segredo do agente" test -n "$(env_get "$A" UPDATE_AGENT_TOKEN)"
 contains "diz qual versão instalou" "$out" "Versão: 0.2.0, a publicada mais recente"
 equal "baixa as imagens" 1 "$(calls ' pull -q panel voice routines')"
 equal "não constrói" 0 "$(calls ' build ')"

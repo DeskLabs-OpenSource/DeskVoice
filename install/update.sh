@@ -11,6 +11,14 @@
 #
 # O atualizador nunca constrói imagem: se a versão alvo não baixa, ele para antes de mexer em
 # qualquer coisa e diz o que fazer.
+#
+# Quem atualiza é o atualizador da versão de DESTINO. Este script (o da versão instalada) decide o
+# alvo, faz o backup, troca o código e então passa a vez ao update.sh que acabou de chegar, com
+# --resume. Assim, o que uma versão nova precisa fazer de diferente ao ser instalada (uma
+# migração de configuração, o agendamento do agente) roda de fato, em vez de ficar no script
+# antigo que já estava na memória. O que passa de um para o outro são as variáveis
+# DESKVOICE_UPDATE_*: quem as grava é sempre a versão ANTERIOR, então elas nunca mudam de nome
+# nem de sentido; variável nova entra com padrão.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 # Tudo dentro de uma função: o bash lê o arquivo aos poucos, e a troca de versão reescreve
@@ -18,11 +26,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 # shellcheck disable=SC2034  # ASSUME_YES é lida por confirm(), no _common.sh
 main() {
 
-target=""; ASSUME_YES=0
+target=""; ASSUME_YES=0; resume=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --to) target="${2:-}"; shift ;;
     --yes|-y) ASSUME_YES=1 ;;
+    # Uso interno: é como o atualizador da versão anterior passa a vez a este.
+    --resume) resume=1 ;;
     -h|--help) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Use --to <versão> e/ou --yes." ;;
   esac
@@ -32,6 +42,17 @@ require_install
 docker info >/dev/null 2>&1 || die "Não consegui falar com o Docker." "Confira se ele está rodando: sudo systemctl start docker"
 
 is_git=0; if is_clone; then is_git=1; fi
+previous_commit=""; backup_dir=""; entry_was_ok=0
+
+if [ "$resume" = 1 ]; then
+  # Continuação: o backup, a troca do código e as conferências já foram feitos pela versão anterior.
+  current="${DESKVOICE_UPDATE_FROM:-}"; previous_commit="${DESKVOICE_UPDATE_FROM_REF:-}"
+  backup_dir="${DESKVOICE_UPDATE_BACKUP:-}"; entry_was_ok="${DESKVOICE_UPDATE_ENTRY_WAS_OK:-0}"
+  target="$(version_of_tag "$target")"
+  { [ -n "$current" ] && is_version "$target" && [ -f "$backup_dir/manifest.txt" ]; } \
+    || die "--resume é de uso interno do atualizador e veio sem o que ele precisa (versão de origem, alvo e backup)." "Rode sem essa opção: bash install/update.sh"
+else
+
 # Pode ser um número, `local` (imagens construídas aqui) ou o que uma instalação de antes do
 # formato único gravou (um canal, ou o número com `v`). Qualquer coisa diferente do alvo converge.
 current="$(env_get "$ENV_FILE" DESKVOICE_VERSION)"
@@ -49,9 +70,13 @@ is_version "$target" || die "O nome de versão '$target' não vale." "Use o núm
 target_tag="$(tag_of_version "$target")"
 info "Atual: $current"
 info "Alvo:  $target"
-if [ "$current" = "$target" ]; then ok "Esta instalação já está na versão $target. Nada a fazer."; exit 0; fi
+if [ "$current" = "$target" ]; then
+  # Quem chegou a esta versão pelo atualizador de uma versão sem agente ganha o agente aqui.
+  converge_agent
+  ok "Esta instalação já está na versão $target. Nada a fazer."
+  exit 0
+fi
 
-previous_commit=""
 if [ "$is_git" = 1 ]; then
   [ -z "$(git -C "$REPO_DIR" status --porcelain --untracked-files=no)" ] \
     || die "Há arquivos do DeskVoice alterados à mão nesta pasta; atualizar por cima poderia perder essas mudanças." "Veja quais com: git status  — desfaça (git checkout -- <arquivo>) ou guarde uma cópia, e rode de novo."
@@ -72,6 +97,7 @@ backup_dir="$(bash "$KIT_DIR/backup.sh" | tee /dev/stderr | tail -n 1)" \
 for service in $APP_SERVICES; do
   docker tag "$(image_ref "$service" "$current")" "$(image_ref "$service" rollback)" 2>/dev/null || true
 done
+fi   # fim do que só a versão anterior faz
 
 apply_version() {  # apply_version <versão> <commit ou tag do código>
   if [ "$is_git" = 1 ] && [ -n "$2" ]; then git -C "$REPO_DIR" checkout --quiet "$2" || return 1; fi
@@ -106,10 +132,25 @@ roll_back() {  # roll_back "<o que falhou>"
   die "A atualização para $target falhou E a volta para $current não terminou bem:${problems:- a versão anterior não respondeu depois de voltar.}" "Seus dados estão no backup $backup_dir. Não rode mais nada: gere o diagnóstico (bash install/diagnose.sh) e peça ajuda."
 }
 
-entry_was_ok=0; if entry_ok; then entry_was_ok=1; fi
-
-step "Trocando para a versão $target"
-apply_version "$target" "${previous_commit:+refs/tags/$target_tag}" || roll_back "Não consegui trocar o código para a versão $target."
+if [ "$resume" = 0 ]; then
+  if entry_ok; then entry_was_ok=1; fi
+  step "Trocando para a versão $target"
+  if [ -n "$previous_commit" ]; then
+    git -C "$REPO_DIR" checkout --quiet "refs/tags/$target_tag" || die "Não consegui trocar o código para a versão $target. Nada foi alterado: a instalação segue na versão $current." "Veja o motivo com: git -C $REPO_DIR status  — e rode de novo."
+    # O código no disco agora é o da versão de destino: a vez passa ao atualizador dela. Antes,
+    # confere que ele ao menos carrega; se não, o código volta e nada mais foi tocado.
+    if grep -q 'DESKVOICE_UPDATE_FROM' "$KIT_DIR/update.sh" 2>/dev/null; then
+      if ! bash -n "$KIT_DIR/update.sh" || ! bash -n "$KIT_DIR/_common.sh"; then
+        git -C "$REPO_DIR" checkout --quiet "$previous_commit" || true
+        die "O atualizador da versão $target não carrega (erro de sintaxe acima). Nada foi alterado: a instalação segue na versão $current." "Abra uma issue dizendo a versão de origem e a de destino."
+      fi
+      export DESKVOICE_UPDATE_FROM="$current" DESKVOICE_UPDATE_FROM_REF="$previous_commit" DESKVOICE_UPDATE_BACKUP="$backup_dir" DESKVOICE_UPDATE_ENTRY_WAS_OK="$entry_was_ok"
+      exec bash "$KIT_DIR/update.sh" --resume --to "$target" --yes
+    fi
+    # Versão de destino anterior a este mecanismo: segue com o que está na memória, como antes.
+  fi
+fi
+env_set "$ENV_FILE" DESKVOICE_VERSION "$target"
 # As imagens vêm antes de qualquer outra mudança. Sem elas não há atualização, e construir aqui
 # não é saída: até este ponto só a versão foi trocada, então basta voltá-la. O banco e os
 # serviços não foram tocados.
@@ -127,6 +168,8 @@ render_asterisk_config
 converge_entry
 # O endereço das imagens deixou de ser gravado por instalação: a fonte única é deploy/images.env.
 env_unset "$ENV_FILE" DESKVOICE_IMAGE_PREFIX
+# O painel que vai subir já recebe o segredo do agente de atualização.
+ensure_agent_token || true
 
 step "Aplicando as mudanças no banco"
 # shellcheck disable=SC2086
@@ -136,9 +179,14 @@ ok "Banco atualizado"
 
 step "Subindo e conferindo"
 dc up -d --remove-orphans || roll_back "Os serviços da versão $target não subiram."
+# O Caddyfile é montado como arquivo, e a troca de versão o substitui por outro: o contêiner que
+# já estava de pé só passa a ler o novo ao reiniciar.
+dc restart caddy >/dev/null 2>&1 || true
 wait_healthy || roll_back "A versão $target subiu, mas nem toda peça essencial respondeu, ou o painel deixou de abrir pelo endereço que abria antes."
 
 for service in $APP_SERVICES; do docker rmi "$(image_ref "$service" rollback)" >/dev/null 2>&1 || true; done
+# Instalação que veio de uma versão sem agente passa a tê-lo; nas outras, só confere.
+install_agent_schedule
 ok "Atualizado para $target, com todas as peças essenciais respondendo."
 info "Backup de antes da atualização: $backup_dir"
 info "Relatório completo: bash install/healthcheck.sh"

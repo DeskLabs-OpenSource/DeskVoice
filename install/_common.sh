@@ -104,6 +104,16 @@ env_set_if_missing() {  # nunca troca um segredo que já existe
   [ -n "$(env_get "$1" "$2")" ] || env_set "$1" "$2" "$3"
 }
 
+# O segredo do agente de atualização (install/agent.sh): só com ele a rota do agente responde.
+# Devolve 0 se acabou de criar (o painel precisa ser recriado para recebê-lo) e 1 se já existia.
+ensure_agent_token() {
+  [ -z "$(env_get "$APP_ENV_FILE" UPDATE_AGENT_TOKEN)" ] || return 1
+  env_set "$APP_ENV_FILE" UPDATE_AGENT_TOKEN "$(random_hex 32)"
+  # Rodando com sudo numa instalação de outro usuário, o arquivo regravado não pode virar do root:
+  # o dono da instalação (e o agente, que roda como ele) deixaria de conseguir ler.
+  if [ "$(id -u)" = 0 ]; then chown "$(owner_of "$DEPLOY_DIR")" "$APP_ENV_FILE" 2>/dev/null || true; fi
+}
+
 # Grava os três arquivos de ambiente. Segredo que já existe fica como está; o resto é
 # regravado com o que foi decidido nesta execução.
 #   write_env_files <public_url> <public_ip> <panel_domain> <rtp_start> <rtp_end>
@@ -131,6 +141,7 @@ write_env_files() {
   env_set_if_missing "$APP_ENV_FILE" DESKVOICE_SECRET_KEY "$(random_base64_32)"
   env_set_if_missing "$APP_ENV_FILE" INTERNAL_TOKEN "$(random_hex 32)"
   env_set_if_missing "$APP_ENV_FILE" ARI_PASSWORD "$(random_hex 24)"
+  ensure_agent_token || true
   env_set "$APP_ENV_FILE" DATABASE_URL "postgres://deskvoice_app:${app}@postgres:5432/${DB_NAME}"
   env_set "$APP_ENV_FILE" SYSTEM_DATABASE_URL "$url_system"
   env_set "$APP_ENV_FILE" ARI_USERNAME deskvoice
@@ -452,10 +463,92 @@ compare_counts() {
   return "$status"
 }
 
+# ── Agente de atualização: o agendamento ─────────────────────────────────────
+# O agente (install/agent.sh) passa a cada minuto. Quem o chama é um timer do systemd; em máquina
+# sem systemd, uma linha em /etc/cron.d; sem nenhum dos dois, ninguém, e a tela diz "agente não
+# instalado". Tudo aqui pode rodar quantas vezes for: só grava o que mudou.
+AGENT_STATE_DIR="$DEPLOY_DIR/agent"   # trava, registro e resultado pendente do agente
+AGENT_UNIT="deskvoice-agent"
+# Os testes trocam estas pastas: nenhum teste toca no systemd nem no cron de verdade.
+SYSTEMD_DIR="${DESKVOICE_SYSTEMD_DIR:-/etc/systemd/system}"
+SYSTEMD_RUN_DIR="${DESKVOICE_SYSTEMD_RUN_DIR:-/run/systemd/system}"
+CRON_DIR="${DESKVOICE_CRON_DIR:-/etc/cron.d}"
+agent_scheduler() {  # → systemd | cron | none
+  if have systemctl && [ -d "$SYSTEMD_RUN_DIR" ]; then echo systemd
+  elif [ -d "$CRON_DIR" ]; then echo cron
+  else echo none; fi
+}
+owner_of() { if stat -c %U "$1" >/dev/null 2>&1; then stat -c %U "$1"; else stat -f %Su "$1"; fi; }
+# Grava um arquivo de sistema. Sem permissão na pasta, tenta o sudo SEM pedir senha: o agente
+# roda sem terminal, e uma pergunta ali travaria a atualização.
+root_install() {  # root_install <origem> <destino>
+  if [ -w "$(dirname "$2")" ]; then install -m 644 "$1" "$2"
+  elif have sudo; then sudo -n install -m 644 "$1" "$2"
+  else return 1; fi
+}
+root_systemctl() {
+  if [ "$(id -u)" = 0 ]; then systemctl "$@"
+  elif have sudo; then sudo -n systemctl "$@"
+  else return 1; fi
+}
+# Instala ou atualiza o agendamento do agente. Nunca derruba quem chamou: se não der, avisa e
+# diz o comando. Devolve sempre 0.
+install_agent_schedule() {
+  local kind user file tmp changed=0 manual="sudo bash $KIT_DIR/agent.sh --install"
+  kind="$(agent_scheduler)"
+  if [ "$kind" = none ]; then
+    warn "Esta máquina não tem systemd nem cron: o agente de atualização não foi agendado. A tela vai mostrar \"agente não instalado\", e a atualização continua pelo terminal: bash install/update.sh"
+    return 0
+  fi
+  # O caminho entra num arquivo de unidade e numa linha de cron, sem aspas.
+  case "$REPO_DIR" in *[!A-Za-z0-9_./-]*)
+    warn "O caminho desta instalação ($REPO_DIR) tem espaço ou caractere especial, e o agente de atualização não foi agendado. A atualização continua pelo terminal: bash install/update.sh"
+    return 0 ;;
+  esac
+  user="$(owner_of "$REPO_DIR")"
+  # Montado numa pasta temporária: a pasta de estado do agente é dele, e este passo pode rodar como root.
+  tmp="$(mktemp -d)"
+  if [ "$kind" = systemd ]; then
+    AGENT_USER="$user" AGENT_DIR="$REPO_DIR" TEMPLATE_VARS="AGENT_USER AGENT_DIR" render_template "$KIT_DIR/$AGENT_UNIT.service.tmpl" "$tmp/$AGENT_UNIT.service"
+    cp "$KIT_DIR/$AGENT_UNIT.timer" "$tmp/$AGENT_UNIT.timer"
+    for file in "$AGENT_UNIT.service" "$AGENT_UNIT.timer"; do
+      cmp -s "$tmp/$file" "$SYSTEMD_DIR/$file" && continue
+      root_install "$tmp/$file" "$SYSTEMD_DIR/$file" || { rm -rf "$tmp"; warn "Não consegui gravar $SYSTEMD_DIR/$file (precisa de administrador): o agente de atualização não foi agendado. Rode uma vez: $manual"; return 0; }
+      changed=1
+    done
+    rm -rf "$tmp"
+    if [ "$changed" = 1 ]; then root_systemctl daemon-reload || true; fi
+    if [ "$changed" = 1 ] || ! systemctl is-enabled --quiet "$AGENT_UNIT.timer" 2>/dev/null; then
+      root_systemctl enable --now "$AGENT_UNIT.timer" >/dev/null 2>&1 || { warn "Gravei o agendamento do agente de atualização, mas não consegui ligá-lo. Rode uma vez: $manual"; return 0; }
+    fi
+    ok "Agente de atualização agendado (systemd: $AGENT_UNIT.timer, a cada minuto, como $user)"
+  else
+    {
+      echo "# Gerado pelo instalador do DeskVoice. Não edite: rode bash install/agent.sh --install."
+      echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      echo "* * * * * $user bash $KIT_DIR/agent.sh --jitter >/dev/null 2>&1"
+    } > "$tmp/$AGENT_UNIT.cron"
+    if ! cmp -s "$tmp/$AGENT_UNIT.cron" "$CRON_DIR/$AGENT_UNIT"; then
+      root_install "$tmp/$AGENT_UNIT.cron" "$CRON_DIR/$AGENT_UNIT" || { rm -rf "$tmp"; warn "Não consegui gravar $CRON_DIR/$AGENT_UNIT (precisa de administrador): o agente de atualização não foi agendado. Rode uma vez: $manual"; return 0; }
+    fi
+    rm -rf "$tmp"
+    ok "Agente de atualização agendado (cron: $CRON_DIR/$AGENT_UNIT, a cada minuto, como $user)"
+  fi
+}
+# Deixa a instalação pronta para a atualização pela tela: o segredo (e o painel com ele) e o
+# agendamento. É o que leva o agente a quem instalou antes de ele existir.
+converge_agent() {
+  if ensure_agent_token && [ -n "$(dc ps -q --status running panel 2>/dev/null)" ]; then
+    info "Recriando só o painel, para ele receber o segredo do agente de atualização (o painel fica fora por alguns segundos)..."
+    dc up -d panel >/dev/null 2>&1 || warn "Não consegui recriar o painel. Rode: bash install/install.sh"
+  fi
+  install_agent_schedule
+}
+
 # ── Sem segredo na tela nem em arquivo ───────────────────────────────────────
 # Filtro: troca por *** o valor de todo segredo do .env e o que tiver cara de senha,
 # chave ou token; encurta e-mail e telefone, que são dado pessoal de quem ligou.
-SECRET_KEYS="POSTGRES_PASSWORD APP_DB_PASSWORD SYSTEM_DB_PASSWORD DESKVOICE_SECRET_KEY INTERNAL_TOKEN ARI_PASSWORD"
+SECRET_KEYS="POSTGRES_PASSWORD APP_DB_PASSWORD SYSTEM_DB_PASSWORD DESKVOICE_SECRET_KEY INTERNAL_TOKEN ARI_PASSWORD UPDATE_AGENT_TOKEN"
 mask_secrets() {  # ... | mask_secrets   (lê os segredos dos três arquivos de ambiente)
   local f key list=""
   for f in "$ENV_FILE" "$APP_ENV_FILE" "$MIGRATE_ENV_FILE"; do

@@ -23,6 +23,10 @@ export interface ServerDeps {
   voiceUrl: string;
   internalToken: string;
   trustedProxyHops: number;
+  /** A versão deste processo (`APP_VERSION`, gravada na imagem). A tela de versão lê daqui, nunca do banco. */
+  appVersion: string;
+  /** Segredo do agente de atualização, gerado pelo instalador. Vazio = nenhum agente é aceito. */
+  agentToken: string;
   /** Injetável para o teste contar quantas tentativas chegam a conferir a senha. */
   verifyPassword: typeof verifyPassword;
 }
@@ -49,6 +53,8 @@ export function serverDeps(): ServerDeps {
       voiceUrl: process.env.VOICE_INTERNAL_URL ?? "http://voice:8090",
       internalToken: process.env.INTERNAL_TOKEN ?? "",
       trustedProxyHops: trustedProxyHops(process.env),
+      appVersion: process.env.APP_VERSION ?? "dev",
+      agentToken: process.env.UPDATE_AGENT_TOKEN ?? "",
       verifyPassword,
     };
   }

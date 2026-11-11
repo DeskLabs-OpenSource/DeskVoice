@@ -136,6 +136,7 @@ proven yet, each capability below says how far the proof went:
 | Send WhatsApp during the call, through a connector | Awaiting real-world proof |
 | Call a webhook during the call | Awaiting real-world proof (without a real receiver) |
 | Update, health check, backup and restore | Tested against a simulated Docker; backup and restore checked by hand on a real Postgres |
+| Update from the panel (Settings → Version and update), through a kit agent on the server | Routes tested against a real database; agent and scheduling tested against a simulated Docker and systemd. **Not yet proven on a real installation** |
 | Calls placed by the agent | Awaiting real-world proof, and off by default. See "Outbound calls" |
 
 If you place the first real call, tell us how it went in an issue: it is the most valuable

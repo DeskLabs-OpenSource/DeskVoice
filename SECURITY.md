@@ -89,6 +89,20 @@ Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em pr
 - **Tarefa atrasada pode rodar duas vezes.** A recuperação de tarefa presa mede a idade pelo
   horário agendado, não pelo horário em que foi pega. As rotinas da fundação são seguras de
   repetir; rotina nova precisa ser também.
+- **O que o segredo do agente de atualização protege, e o que não.** A rota por onde o agente do
+  servidor fala com o painel só responde a quem traz o segredo gerado pelo instalador, e não é
+  alcançável pela internet: o agente chama de dentro do contêiner do painel. O segredo protege
+  contra outro processo da rede interna do Docker (um contêiner do operador ligado a ela, por
+  exemplo) se passando pelo agente. O pior que alguém com o segredo consegue é anunciar uma
+  versão falsa, marcar um pedido como concluído ou fazer um pedido pendente ser lido; ele não
+  ganha execução no servidor, porque a rota só devolve um booleano. O segredo **não** protege
+  contra quem tem acesso ao servidor: essa pessoa lê `deploy/app.env` e já pode rodar o
+  atualizador. E quem tem conta de dono ou administrador no painel, com a senha, consegue tirar
+  o sistema do ar por alguns minutos pedindo uma atualização: é o recurso funcionando.
+- **A atualização pela tela confia no repositório.** O servidor atualiza para a maior tag
+  publicada no repositório de onde foi clonado e baixa as imagens dessa versão. Quem controla o
+  repositório ou o registro de imagens controla o que a instalação passa a rodar, como já era
+  na atualização pelo terminal. As tags não têm assinatura conferida.
 - **Motor de voz caído não fala.** Quem está na linha ouve um sinal de aviso e é transferido ou
   desligado. Uma mensagem gravada é melhor e ainda não existe.
 - **Nada foi provado com operadora real.** A conversa inteira roda em simulação e a configuração

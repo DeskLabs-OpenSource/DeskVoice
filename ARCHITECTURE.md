@@ -41,7 +41,7 @@ São três processos Node sobre três pacotes, um Asterisk na borda e um Postgre
 | `apps/routines` | Consumidor da fila: resumo pós-chamada, entrega de avisos, tarefas de acompanhamento, expiração de aprovação |
 | `apps/panel` | Painel e API: entrar, agentes, linha telefônica, chamadas ao vivo, linha do tempo, aprovações, ligações de saída, custo |
 | `deploy/` | Compose, Caddy, modelos de configuração do Asterisk |
-| `install/` | Instalação, atualização, checagem de saúde, backup e restauração |
+| `install/` | Instalação, atualização, checagem de saúde, backup e restauração. Inclui o agente de atualização (`agent.sh`), o único processo do DeskVoice que roda fora de contêiner: passa a cada minuto, anuncia a versão ao painel e lê um sim ou um não. O painel pede a atualização; quem executa é ele ([registro 0010](docs/decisions/0010-atualizar-pela-tela.md)) |
 
 ## O caminho de uma ligação
 
@@ -111,6 +111,7 @@ Seis regras decidem onde cada coisa mora. Cada uma tem a sua doutrina.
 | Controle do Asterisk (ARI) | `apps/voice` comanda as chamadas | **Nunca.** Só na rede interna do Docker |
 | AudioSocket | Áudio entre o Asterisk e `apps/voice` | Não. Só na rede interna |
 | Postgres | Banco | Não. Só na rede interna |
+| Rota do agente de atualização (`/api/v1/system/agent`) | O agente do servidor anuncia a versão e lê o pedido | **Nunca.** O agente fala de dentro do contêiner do painel; o Caddy responde 404 nesse caminho, e o painel recusa pedido que veio por proxy |
 
 Segredos do operador, como a senha do tronco e a chave de IA, ficam cifrados em repouso com
 AES-256-GCM.
