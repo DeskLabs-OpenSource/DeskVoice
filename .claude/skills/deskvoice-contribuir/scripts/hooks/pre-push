@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# pre-push do contribuidor. A main recebe merge de PR revisado, pela fila de merge; nunca push
+# direto. O único outro efeito é um AVISO quando o ramo está atrasado em relação a origin/main.
+set -uo pipefail
+
+blocked=""
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main | refs/heads/master) blocked="$blocked $remote_ref" ;;
+  esac
+  # SHA zerado é remoção de ramo: não há o que medir.
+  case "${local_sha:-}" in "" | 0000000000000000000000000000000000000000) continue ;; esac
+  if git rev-parse -q --verify origin/main >/dev/null 2>&1; then
+    base="$(git merge-base origin/main "$local_sha" 2>/dev/null || true)"
+    if [ -n "$base" ]; then
+      behind="$(git rev-list --count "$base..origin/main" 2>/dev/null || echo 0)"
+      if [ "$behind" -gt 0 ]; then
+        echo "aviso: este ramo está $behind commit(s) atrás de origin/main. Não bloqueia: a fila de merge testa sobre a main do momento." >&2
+        echo "       Para ver o conflito agora, em vez de na fila: git fetch origin && git merge origin/main (nunca reset --hard)" >&2
+      fi
+    fi
+  fi
+done
+
+if [ -n "$blocked" ]; then
+  echo "pre-push BLOQUEADO:$blocked. A main não recebe push direto." >&2
+  echo "Abra um ramo (git switch -c fix/o-que-conserta) e um PR; o merge acontece pela revisão e pelo check ready." >&2
+  exit 1
+fi
+exit 0

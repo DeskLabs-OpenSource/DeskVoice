@@ -1,0 +1,9 @@
+name: no-concurrency
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo oi

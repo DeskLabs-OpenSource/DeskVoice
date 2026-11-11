@@ -1,0 +1,8 @@
+# Áreas em que um erro custa caro para quem já instalou. Mudança aqui pede revisão de mantenedor.
+# O resto do repositório não tem dono fixo de propósito: qualquer pessoa com permissão revisa.
+
+/.github/                         @DeskLabs-OpenSource/maintainers
+/db/migrations/                   @DeskLabs-OpenSource/maintainers
+/install/                         @DeskLabs-OpenSource/maintainers
+/packages/core/src/with-org.ts    @DeskLabs-OpenSource/maintainers
+/SECURITY.md                      @DeskLabs-OpenSource/maintainers

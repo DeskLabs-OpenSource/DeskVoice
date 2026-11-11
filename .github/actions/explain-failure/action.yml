@@ -1,0 +1,45 @@
+name: Explain failure
+description: Escreve no resumo do job se a causa provável é do PR ou da casa, e o que fazer.
+
+# Use como último passo, com `if: failure()`. A regra: se a preparação do ambiente (checkout,
+# instalação, serviço) falhou, a causa é da casa e quem contribui não tem nada a consertar.
+# Se a preparação passou e um passo de verificação falhou, a causa provável é a mudança.
+
+inputs:
+  setup-outcome:
+    description: "`steps.<id>.outcome` do passo de preparação (vazio quando o job não tem um)."
+    required: false
+    default: success
+  when-pr:
+    description: O que fazer quando a causa provável é a mudança.
+    required: true
+  when-house:
+    description: O que fazer quando a causa é da casa.
+    required: false
+    default: >-
+      Você não precisa mudar nada. Um mantenedor reexecuta o job; se a falha se repetir,
+      ela vira issue nossa. Se quiser, comente no PR pedindo a reexecução.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SETUP_OUTCOME: ${{ inputs.setup-outcome }}
+        WHEN_PR: ${{ inputs.when-pr }}
+        WHEN_HOUSE: ${{ inputs.when-house }}
+      run: |
+        {
+          if [ "${SETUP_OUTCOME}" = "success" ]; then
+            echo "### Causa provável: esta mudança"
+            echo
+            echo "${WHEN_PR}"
+          else
+            echo "### Causa provável: da casa (infraestrutura do CI), não do PR"
+            echo
+            echo "A preparação do ambiente falhou antes de qualquer verificação do seu código."
+            echo "${WHEN_HOUSE}"
+          fi
+          echo
+          echo "Como ler um CI vermelho: \`.agents/skills/deskvoice-contribuir/references/depois-do-pr.md\`."
+        } >> "${GITHUB_STEP_SUMMARY}"

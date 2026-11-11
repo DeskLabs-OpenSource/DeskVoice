@@ -1,0 +1,16 @@
+{
+  "$comment": "Hook de início de sessão do Claude Code: fala uma vez por dia, curto, e só em clone de contribuidor (ver .agents/skills/deskvoice-contribuir/scripts/hooks/session.sh). Para mantenedor, silêncio.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.agents/skills/deskvoice-contribuir/scripts/hooks/session.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

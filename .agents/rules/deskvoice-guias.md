@@ -1,0 +1,22 @@
+---
+trigger: always_on
+description: Guias do assistente do DeskVoice e quando usar cada um
+---
+
+Este repositório embute guias (skills em `.agents/skills/`) para situações recorrentes. Quando o pedido
+casar com uma linha da tabela, carregue a skill ANTES de agir: a pessoa pode não saber que ela existe.
+
+| Situação | Skill |
+|---|---|
+| Vai contribuir, corrigir um bug, abrir ou atualizar um PR, criar uma migration, resolver conflito com a main; ou o CI ficou vermelho e não se sabe de quem é a causa | `deskvoice-contribuir` |
+| Vai escrever ou revisar código aqui; "isso é permitido?", "por que essa regra existe?", "por que a cerca reprovou?" | `deskvoice-doutrina` |
+| Vai criar ou alterar uma ferramenta que o agente usa durante a chamada | `deskvoice-ferramenta` |
+| Vai adicionar ou alterar um motor de voz (provedor de IA de voz) | `deskvoice-motor-de-voz` |
+| Vai instalar numa VPS, ou a instalação falhou: painel não abre, tronco não registra, ligação muda | `deskvoice-instalar` |
+| Tem uma instalação rodando: configurar agente, linha e ligações de saída, ler a linha do tempo de uma chamada, custos, atualizar, backup, diagnóstico | `deskvoice-operar` |
+
+Antes da primeira contribuição num clone, rode
+`bash .agents/skills/deskvoice-contribuir/scripts/who-am-i.sh`: se a resposta começar com `mantenedor`,
+a skill `deskvoice-contribuir` fica quieta, a menos que seja pedida por nome.
+
+A autoridade sobre como escrever código neste repositório é o `AGENTS.md` da raiz.

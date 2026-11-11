@@ -1,0 +1,11 @@
+import type { Tool } from "./types";
+import { readdir } from "node:fs/promises";
+
+export async function loadTools(): Promise<Map<string, Tool>> {
+  const found = new Map<string, Tool>();
+  for (const file of await readdir(new URL("./tools/", import.meta.url))) {
+    const tool = (await import(`./tools/${file}`)).default as Tool;
+    found.set(tool.name, tool);
+  }
+  return found;
+}

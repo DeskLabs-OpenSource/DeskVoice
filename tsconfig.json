@@ -15,6 +15,6 @@
     "allowImportingTsExtensions": false,
     "resolveJsonModule": true
   },
-  "include": ["packages/*/src", "packages/*/test", "apps/voice/src", "apps/routines/src", "fences", "scripts", "vitest.config.ts"],
+  "include": ["packages/*/src", "packages/*/test", "apps/voice/src", "apps/routines/src", "fences", "scripts", ".github/scripts", "vitest.config.ts"],
   "exclude": ["node_modules", "apps/panel"]
 }

@@ -1,0 +1,68 @@
+name: welcome
+
+# Recebe quem abre o primeiro PR a partir de um fork. Só comenta: não mede, não julga mérito.
+#
+# `pull_request_target` roda com o token deste repositório, então este workflow NUNCA faz checkout
+# nem chama action de terceiros (cerca: fences/welcome-does-not-checkout.test.ts). Tudo o que vem
+# do PR entra por variável de ambiente, nunca interpolado no script.
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  welcome:
+    name: welcome
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comentar as boas-vindas
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          cat > "${body}" <<'MD'
+          <!-- deskvoice-welcome:v1 -->
+          Recebido, e obrigado por contribuir. Esta mensagem é automática e fala só do processo, não do seu PR.
+
+          **O que acontece agora**
+
+          - No primeiro PR de quem nunca contribuiu aqui, o GitHub segura os workflows até um mantenedor liberar. Enquanto isso o PR parece não ter check nenhum. É política do GitHub, não um erro seu.
+          - Quando rodarem, o único check que trava o merge é o `ready`. Se algum job ficar vermelho, o resumo dele diz se a causa provável é a sua mudança ou a nossa infraestrutura, e o que fazer.
+          - Uma pessoa responde aqui em **até 3 dias úteis**.
+
+          **O que é trabalho nosso, não seu**
+
+          - **Fragmento de changelog** (`.changes/`): se faltar, nós escrevemos, com o seu crédito.
+          - **Conflito com a `main`**: nós resolvemos, preservando os seus commits.
+          - **Carimbo de migration**: se colidir com outro PR aberto, nós renomeamos.
+
+          **Onde pedir ajuda**: comente aqui mesmo. Não feche o PR por achar que errou o lugar: PR de fork é exatamente como se contribui. Se você usa um assistente de código, peça a ele a skill `deskvoice-contribuir`.
+
+          ---
+
+          Received, and thank you for contributing. This message is automatic and is about the process, not about your PR.
+
+          **What happens now**
+
+          - On a first-time contributor's PR, GitHub holds the workflows until a maintainer approves them. Until then the PR looks like it has no checks. That is GitHub policy, not your mistake.
+          - Once they run, the only check that blocks merging is `ready`. If a job turns red, its summary says whether the likely cause is your change or our infrastructure, and what to do.
+          - A person replies here within **3 business days**.
+
+          **What is our job, not yours**
+
+          - **Changelog fragment** (`.changes/`): if it is missing, we write it and credit you.
+          - **Conflicts with `main`**: we resolve them and keep your commits.
+          - **Migration timestamp**: if it collides with another open PR, we rename it.
+
+          **Where to ask for help**: comment right here, in Portuguese or English. Please do not close the PR thinking you opened it in the wrong place: a PR from a fork is exactly how contributing works. If you use a coding assistant, ask it for the `deskvoice-contribuir` skill.
+          MD
+          gh api --method POST "repos/${REPO}/issues/${PR}/comments" -F "body=@${body}" --jq '.html_url'
