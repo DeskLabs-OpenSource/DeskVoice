@@ -1,0 +1,12 @@
+name: group-by-ref
+on: pull_request
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo oi

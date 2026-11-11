@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# pre-commit do contribuidor. Bloqueia só o que é caro de desfazer depois de publicado:
+# segredo no histórico e migration que vai colidir. O resto é papel do CI.
+set -uo pipefail
+
+# Num fork, `origin` é o fork do contribuidor e a main dele costuma estar parada; a referência
+# certa é a main do repositório principal (`upstream`). Em clone direto, `origin` já é o principal.
+if git rev-parse -q --verify upstream/main >/dev/null 2>&1; then main_ref=upstream/main; else main_ref=origin/main; fi
+
+fail=0
+MIGRATION_NAME='^db/migrations/[0-9]{8}T[0-9]{6}_[a-z0-9]+(_[a-z0-9]+)*\.sql$'
+
+# ── Segredo ──────────────────────────────────────────────────────────────────
+# Varredura simples, por formato conhecido. O CI roda o gitleaks, que é mais completo; este hook
+# existe para a chave não chegar a sair da sua máquina.
+env_files="$(git diff --cached --name-only --diff-filter=AM | grep -E '(^|/)\.env(\.|$)' | grep -v '\.env\.example$' || true)"
+if [ -n "$env_files" ]; then
+  echo "pre-commit BLOQUEADO: arquivo de ambiente no commit:" >&2
+  for file in $env_files; do echo "  $file" >&2; done
+  echo "  O .env guarda segredo gerado pelo instalador e nunca entra no repositório: git restore --staged <arquivo>" >&2
+  fail=1
+fi
+
+SECRET='-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,}|xox[baprs]-[A-Za-z0-9-]{20,}'
+# Só linhas ADICIONADAS; fixtures de cerca ficam de fora (são exemplos ruins de propósito).
+hits="$(git diff --cached -U0 --diff-filter=AM -- . ':(exclude)fences/__fixtures__' | grep -E '^\+[^+]' | grep -Ec -e "$SECRET" || true)"
+if [ "${hits:-0}" -gt 0 ]; then
+  echo "pre-commit BLOQUEADO: $hits linha(s) adicionada(s) com formato de segredo (chave privada, chave de IA, token)." >&2
+  echo "  Ver onde (o valor aparece na sua tela): git diff --cached | grep -nE -e '<padrão>' (padrões no topo deste hook)" >&2
+  echo "  Se é chave de verdade: REVOGUE-a no provedor e troque por um valor inventado. Chave de operador mora no banco, cifrada, e entra pela tela." >&2
+  echo "  Se é exemplo: use um valor que não tenha formato de chave (\"chave-de-exemplo\")." >&2
+  fail=1
+fi
+
+# ── Migration ────────────────────────────────────────────────────────────────
+added="$(git diff --cached --name-only --diff-filter=A -- db/migrations/ || true)"
+edited="$(git diff --cached --name-only --diff-filter=MDR -- db/migrations/ || true)"
+
+for file in $added; do
+  if ! echo "$file" | grep -Eq "$MIGRATION_NAME"; then
+    echo "pre-commit BLOQUEADO: $file está fora do padrão AAAAMMDDTHHMMSS_slug.sql." >&2
+    echo "  git mv \"$file\" \"db/migrations/\$(date -u +%Y%m%dT%H%M%S)_o_que_muda.sql\"" >&2
+    fail=1
+    continue
+  fi
+  stamp="$(basename "$file" | cut -d_ -f1)"
+  # Carimbo já usado por OUTRO arquivo: no índice, ou na main do repositório principal.
+  others="$( { git ls-files -- db/migrations/; git ls-tree -r --name-only "$main_ref" -- db/migrations/ 2>/dev/null; } | sort -u | grep "/${stamp}_" | grep -vxF "$file" || true)"
+  if [ -n "$others" ]; then
+    echo "pre-commit BLOQUEADO: o carimbo $stamp de $file já é usado por $(echo "$others" | head -n 1)." >&2
+    echo "  Gere um novo: git mv \"$file\" \"db/migrations/\$(date -u +%Y%m%dT%H%M%S)_${file#*_}\"" >&2
+    fail=1
+  fi
+done
+
+if git rev-parse -q --verify "$main_ref" >/dev/null 2>&1; then
+  for file in $edited; do
+    if git cat-file -e "$main_ref:$file" 2>/dev/null; then
+      echo "pre-commit BLOQUEADO: $file já está publicada na main e migration publicada nunca é editada, renomeada ou apagada." >&2
+      echo "  Desfaça (git restore --staged --worktree \"$file\") e corrija com uma migration NOVA, só para frente." >&2
+      fail=1
+    fi
+  done
+fi
+
+exit "$fail"

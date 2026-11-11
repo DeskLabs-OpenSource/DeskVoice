@@ -1,0 +1,7 @@
+# Gerados pelo instalador; nunca entram no repositório.
+.env
+app.env
+migrate.env
+*.before-restore
+docker-compose.override.yml
+asterisk/generated/

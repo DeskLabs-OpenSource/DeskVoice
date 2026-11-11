@@ -1,0 +1,165 @@
+name: release
+
+# A release tem dois atos, e nenhum deles digita o número da versão.
+#
+#   Ato 1 (manual, "Run workflow"): lê os fragmentos de `.changes/`, calcula a versão pelo efeito
+#     que cada um declarou, monta a seção do CHANGELOG.md, apaga os fragmentos e abre o PR
+#     `release/X.Y.Z`. Major só com o input `major` marcado.
+#   Ato 2 (merge desse PR na main): cria a tag `vX.Y.Z` no commit da main, publica a release no
+#     GitHub e dispara a publicação das imagens.
+#
+# A tag só nasce de commit da main, e só do merge de um PR `release/*` deste repositório.
+#
+# SOBRE O TOKEN. Este workflow usa o GITHUB_TOKEN com permissão por job. O GitHub não dispara
+# workflows para o que o GITHUB_TOKEN faz, e por isso há dois disparos explícitos abaixo (o `ci`
+# no ramo da release e o `publish-image` na tag). Também é preciso ligar, na organização,
+# "Allow GitHub Actions to create and approve pull requests".
+# Se a organização preferir um GitHub App (dispara os workflows sozinho e pode ser exceção na
+# proteção de branch), troque os pontos marcados com "GITHUB APP" por:
+#
+#   - uses: actions/create-github-app-token@<sha> # vN
+#     id: app
+#     with:
+#       app-id: ${{ secrets.RELEASE_APP_ID }}
+#       private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+#
+# e use `${{ steps.app.outputs.token }}` no lugar de `${{ github.token }}`; os dois passos
+# "Disparar" deixam de ser necessários.
+
+on:
+  workflow_dispatch:
+    inputs:
+      major:
+        description: "Cortar como MAJOR (só por decisão explícita do dono do projeto)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  open-release-pr:
+    name: open-release-pr
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # empurra o ramo release/X.Y.Z
+      pull-requests: write # abre o PR
+      actions: write # dispara o ci no ramo
+    steps:
+      - name: A release sai da main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Dispare este workflow a partir da main (veio de ${GITHUB_REF})."
+          exit 1
+      # GITHUB APP: gere o token aqui e passe-o em `token:` do checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - name: Calcular a versão e montar a seção do CHANGELOG
+        id: cut
+        env:
+          MAJOR: ${{ inputs.major }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "${MAJOR}" = "true" ]; then flags=(--major); fi
+          pnpm exec tsx scripts/release.ts cut "${flags[@]}" | tee "${RUNNER_TEMP}/cut.txt"
+          echo "version=$(pnpm exec tsx scripts/release.ts current)" >> "${GITHUB_OUTPUT}"
+      - name: Abrir o PR de release
+        env:
+          GH_TOKEN: ${{ github.token }} # GITHUB APP: token do App
+          VERSION: ${{ steps.cut.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="release/${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${branch}"
+          git add CHANGELOG.md .changes
+          git commit -m "chore(release): ${VERSION}"
+          git push origin "${branch}"
+          {
+            echo "Esta versão sai como **${VERSION}**. O número foi calculado a partir do efeito que cada mudança declarou em \`.changes/\`; ninguém digitou."
+            echo
+            echo '```'
+            cat "${RUNNER_TEMP}/cut.txt"
+            echo '```'
+            echo
+            echo "O merge deste PR cria a tag \`v${VERSION}\`, publica a release e as três imagens."
+            echo "Algo errado? **Feche o PR** em vez de editar o número: corrija o fragmento na main e dispare o workflow de novo."
+          } > "${RUNNER_TEMP}/body.md"
+          gh pr create --base main --head "${branch}" --title "Release ${VERSION}" --body-file "${RUNNER_TEMP}/body.md"
+          # Disparar: PR aberto pelo GITHUB_TOKEN não recebe o evento `pull_request`.
+          gh workflow run ci.yml --ref "${branch}"
+
+  tag-release:
+    name: tag-release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # cria a tag e a release
+      pull-requests: read # confere de que PR veio o commit
+      actions: write # dispara o publish-image na tag
+    steps:
+      # GITHUB APP: gere o token aqui e passe-o em `token:` do checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: Este push foi o merge de um PR de release?
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! version="$(pnpm exec tsx scripts/release.ts current 2>/dev/null)"; then
+            echo "CHANGELOG.md ainda não tem versão: nada a marcar."
+            exit 0
+          fi
+          removed="$(git diff --diff-filter=D --name-only HEAD^ HEAD -- .changes/ | grep -c '\.md$' || true)"
+          if git rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
+            echo "v${version} já existe: push comum, nada a marcar."
+            exit 0
+          fi
+          if [ "${removed}" -eq 0 ]; then
+            echo "::notice::O CHANGELOG anuncia ${version} sem tag, mas este push não consumiu fragmento: não é um corte de release."
+            exit 0
+          fi
+          # Um corte legítimo vem de um PR cujo ramo é release/<versão> deste repositório. Fork não conta.
+          origin="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq '[.[] | select(.head.repo.full_name == env.GITHUB_REPOSITORY) | .head.ref] | join(" ")')"
+          case " ${origin} " in
+            *" release/${version} "*) ;;
+            *)
+              echo "::error::Este commit apagou ${removed} fragmento(s) e anuncia ${version}, mas não veio de um PR release/${version} deste repositório (ramos de origem: ${origin:-nenhum})."
+              echo "::error::Tag NÃO criada. Uma release sai do workflow 'release' (Run workflow), nunca de um PR comum."
+              exit 1
+              ;;
+          esac
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+      - name: Criar a tag, a release e disparar as imagens
+        if: steps.gate.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }} # GITHUB APP: token do App
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          pnpm exec tsx scripts/release.ts notes "${VERSION}" > "${RUNNER_TEMP}/notes.md"
+          title="v${VERSION}"
+          # "Exige ação do operador" é um campo à parte do número: aparece no título da release.
+          if grep -q '^### Requer atenção' "${RUNNER_TEMP}/notes.md"; then title="v${VERSION} (requer atenção antes de atualizar)"; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "v${VERSION}" "${GITHUB_SHA}"
+          git push origin "v${VERSION}"
+          gh release create "v${VERSION}" --verify-tag --title "${title}" --notes-file "${RUNNER_TEMP}/notes.md"
+          # Disparar: tag empurrada pelo GITHUB_TOKEN não aciona o `on: push: tags` do publish-image.
+          gh workflow run publish-image.yml --ref "v${VERSION}"

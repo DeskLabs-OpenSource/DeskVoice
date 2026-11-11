@@ -1,0 +1,4 @@
+import { Pool } from "pg";
+
+const pool = new Pool();
+export const calls = () => pool.query("select * from calls");

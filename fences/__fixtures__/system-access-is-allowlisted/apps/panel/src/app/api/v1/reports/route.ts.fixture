@@ -1,0 +1,7 @@
+import { withSystem } from "@deskvoice/core";
+
+// Rota nova que lê todas as organizações: é exatamente o que a cerca precisa reprovar.
+export async function GET(): Promise<Response> {
+  const rows = await withSystem(db, (q) => q.many("select * from calls"));
+  return Response.json(rows);
+}

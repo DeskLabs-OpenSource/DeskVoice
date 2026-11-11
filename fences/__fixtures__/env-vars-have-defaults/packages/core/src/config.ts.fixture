@@ -1,0 +1,4 @@
+const schema = z.object({
+  DATABASE_URL: z.string(),
+  SCHEMA_ONLY_VAR: z.string(),
+});

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# git de mentira: diz que a pasta não é um repositório, para nenhum teste tocar no git de verdade.
+echo "git $*" >> "$FAKE_DIR/calls.log"
+exit 1

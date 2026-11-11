@@ -1,0 +1,12 @@
+name: no-cancel
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo oi

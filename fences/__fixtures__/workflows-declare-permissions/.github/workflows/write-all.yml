@@ -1,0 +1,8 @@
+name: write-all
+on: push
+permissions: write-all
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo oi

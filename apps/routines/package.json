@@ -1,0 +1,18 @@
+{
+  "name": "@deskvoice/routines",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "migrate": "tsx src/cli/migrate.ts",
+    "create-owner": "tsx src/cli/create-owner.ts",
+    "reset-password": "tsx src/cli/reset-password.ts"
+  },
+  "dependencies": {
+    "@deskvoice/core": "workspace:^",
+    "@deskvoice/tools": "workspace:^",
+    "zod": "^4.6.7"
+  }
+}

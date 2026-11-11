@@ -1,0 +1,5 @@
+export const databaseUrl = process.env.DATABASE_URL;
+export const flag = process.env.NEW_FEATURE_FLAG === "1";
+export const bracket = process.env["BRACKET_VAR"];
+const { DESTRUCTURED_VAR, DATABASE_URL: url } = process.env;
+export { DESTRUCTURED_VAR, url };

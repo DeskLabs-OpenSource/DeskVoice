@@ -1,0 +1,40 @@
+name: Ideia ou pedido
+description: Algo que o DeskVoice deveria fazer
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qual problema isto resolve, e para quem
+      description: Conte a situação real. "Minha clínica perde ligação fora do horário" ajuda mais que "adicionar agendamento".
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Como você imagina que funcionaria
+      description: Na tela e na ligação. Não precisa saber como se implementa.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: Como você resolve hoje
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Que tipo de peça parece ser
+      description: Ajuda a apontar o ponto de entrada no código. Na dúvida, deixe em branco.
+      options:
+        - Ferramenta que o agente usa na chamada
+        - Motor de voz
+        - Rotina depois da chamada
+        - Tela do painel
+        - Instalação e operação
+        - Não sei
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Quer implementar?
+      options:
+        - label: Posso abrir o PR (a skill `deskvoice-contribuir` guia o caminho)

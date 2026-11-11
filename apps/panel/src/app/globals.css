@@ -1,0 +1,246 @@
+@import "tailwindcss";
+@import "../design/tokens.css";
+
+/* Ponte token -> utilitário. A paleta padrão do Tailwind sai: cor só entra pelos tokens. */
+@theme inline {
+  --color-*: initial;
+  --color-bg: var(--dv-bg);
+  --color-surface: var(--dv-surface);
+  --color-sunken: var(--dv-sunken);
+  --color-line: var(--dv-line);
+  --color-line-strong: var(--dv-line-strong);
+  --color-ink: var(--dv-text);
+  --color-muted: var(--dv-muted);
+  --color-accent: var(--dv-accent);
+  --color-accent-strong: var(--dv-accent-strong);
+  --color-accent-soft: var(--dv-accent-soft);
+  --color-on-accent: var(--dv-on-accent);
+  --color-ok: var(--dv-ok);
+  --color-ok-soft: var(--dv-ok-soft);
+  --color-warn: var(--dv-warn);
+  --color-warn-soft: var(--dv-warn-soft);
+  --color-fail: var(--dv-fail);
+  --color-fail-soft: var(--dv-fail-soft);
+
+  --font-sans: var(--font-atkinson), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  --radius-xs: var(--dv-radius-xs);
+  --radius-sm: var(--dv-radius-sm);
+  --radius-md: var(--dv-radius-md);
+  --shadow-sm: var(--dv-shadow-sm);
+  --shadow-md: var(--dv-shadow-md);
+  --ease-out: var(--dv-ease-out);
+}
+
+html {
+  background: var(--dv-bg);
+  color: var(--dv-text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+body {
+  min-height: 100dvh;
+}
+:focus-visible {
+  outline: 2px solid var(--dv-accent);
+  outline-offset: 2px;
+  border-radius: var(--dv-radius-xs);
+}
+::selection {
+  background: var(--dv-accent-soft);
+}
+
+/* Dado (duração, custo, telefone, horário): mono, dígitos de largura igual. Em camada de
+   componente para que um utilitário de tamanho no mesmo elemento vença. */
+@layer components {
+  .data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.92em;
+    letter-spacing: -0.01em;
+  }
+}
+
+/* Entrada de página: sobe 8 px junto com o fade, uma vez. */
+.rise {
+  animation: dv-rise var(--dv-slow) var(--dv-ease-enter) both;
+}
+@keyframes dv-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* O pulso do que está vivo: um anel de cobre que se abre e some. */
+.live-dot {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--dv-radius-full);
+  background: var(--dv-accent);
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--dv-accent);
+  animation: dv-pulse var(--dv-pulse) var(--dv-ease-out) infinite;
+}
+@keyframes dv-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  70%,
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+/*
+ * A linha do tempo: um fio contínuo com os eventos presos nele. Em tela larga o fio corre pelo
+ * meio, quem ligou fala à esquerda e o agente à direita; no celular o fio encosta na margem.
+ */
+.thread {
+  --node: 28px;
+  position: relative;
+  display: grid;
+  row-gap: var(--dv-space-5);
+}
+.thread::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: calc(var(--node) / 2 - 1px);
+  width: 2px;
+  border-radius: 1px;
+  background: var(--dv-line-strong);
+}
+.thread[data-live="true"]::before {
+  background: linear-gradient(to bottom, var(--dv-line-strong) calc(100% - 96px), var(--dv-accent));
+}
+.thread-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--node) minmax(0, 1fr);
+  column-gap: var(--dv-space-3);
+  align-items: start;
+}
+.thread-node {
+  grid-column: 1;
+  grid-row: 1;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: var(--node);
+  height: var(--node);
+  border-radius: var(--dv-radius-full);
+  background: var(--dv-bg);
+  border: 2px solid var(--dv-line-strong);
+  color: var(--dv-muted);
+}
+.thread-node[data-tone="accent"] {
+  border-color: var(--dv-accent);
+  color: var(--dv-accent);
+  background: var(--dv-accent-soft);
+}
+.thread-node[data-tone="ok"] {
+  border-color: var(--dv-ok);
+  color: var(--dv-ok);
+}
+.thread-node[data-tone="fail"] {
+  border-color: var(--dv-fail);
+  color: var(--dv-fail);
+  background: var(--dv-fail-soft);
+}
+/* Fala não leva ícone: é um ponto pequeno no fio, para a conversa não disputar com os eventos. */
+.thread-node[data-tone="speech"] {
+  width: 10px;
+  height: 10px;
+  margin: calc((var(--node) - 10px) / 2);
+  border-width: 2px;
+}
+.thread-node[data-tone="speech-agent"] {
+  width: 10px;
+  height: 10px;
+  margin: calc((var(--node) - 10px) / 2);
+  border-color: var(--dv-text);
+  background: var(--dv-text);
+}
+.thread-body {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+.thread-time {
+  grid-column: 2;
+  grid-row: 2;
+  margin-top: var(--dv-space-1);
+  color: var(--dv-muted);
+}
+
+@media (min-width: 900px) {
+  .thread {
+    --node: 32px;
+  }
+  .thread::before {
+    left: calc(50% - 1px);
+  }
+  .thread-row {
+    grid-template-columns: minmax(0, 1fr) var(--node) minmax(0, 1fr);
+    column-gap: var(--dv-space-5);
+  }
+  .thread-node {
+    grid-column: 2;
+  }
+  .thread-body {
+    grid-column: 3;
+  }
+  .thread-time {
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: 6px;
+    text-align: right;
+  }
+  /* Quem ligou fica do outro lado do fio. */
+  .thread-row[data-side="left"] .thread-body {
+    grid-column: 1;
+    justify-self: end;
+  }
+  .thread-row[data-side="left"] .thread-time {
+    grid-column: 3;
+    text-align: left;
+  }
+}
+
+/* O mesmo fio fora da linha do tempo (tela de entrada): sempre encostado à esquerda. */
+.thread[data-layout="left"]::before {
+  left: calc(var(--node) / 2 - 1px);
+}
+.thread[data-layout="left"] .thread-node {
+  grid-column: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .live-dot::after {
+    animation: none;
+    opacity: 0.45;
+    transform: scale(1.9);
+  }
+}

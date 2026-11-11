@@ -1,0 +1,15 @@
+node_modules/
+.next/
+dist/
+.tsbuild/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+deploy/asterisk/generated/
+deploy/.env
+deploy/app.env
+deploy/migrate.env
+backups/
+coverage/

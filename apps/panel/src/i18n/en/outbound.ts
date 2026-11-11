@@ -1,0 +1,36 @@
+import type { OutboundDictionary } from "../pt-BR/outbound";
+
+const outbound: OutboundDictionary = {
+  title: "Outbound calls",
+  lead: "The rules for calls the agent places, instead of receiving.",
+  offTitle: "Outbound calls are off.",
+  onTitle: "Outbound calls are on.",
+  why: "They start off on purpose. A phone system that dials by itself can bother people who did not ask for contact, make the provider block your line and bring legal liability to you. So, before turning it on, DeskVoice asks you to state what the calls are for and on what basis.",
+  noMass: "DeskVoice does not import lists for mass dialing. Every outbound call starts from a conversation or a task.",
+  purpose: "Purpose",
+  purposeHint: "What the agent will call for. Example: confirm appointments booked by the patients themselves.",
+  legalBasis: "Legal basis",
+  legalBasisHint: "Why you may call these people. Example: consent given at sign-up, a contract in force.",
+  turnOn: "Turn outbound calls on",
+  turnOff: "Turn off",
+  saveDeclaration: "Save statement",
+  limitsTitle: "Limits",
+  limitsLead: "They apply to every agent. A call outside these limits is refused, and the reason shows on the timeline.",
+  dailyCap: "Daily cap per line",
+  windowStart: "Call from",
+  windowEnd: "Call until",
+  timezone: "Time zone",
+  attempts: "Attempts per person",
+  saveLimits: "Save limits",
+  dncTitle: "Do-not-call list",
+  dncLead: "Numbers the agent never dials. Whoever asks not to be called goes here.",
+  dncNumbers: "Numbers",
+  dncNumbersHint: "Paste one per line or separated by commas, in any format.",
+  dncReason: "Reason (optional)",
+  dncAdd: "Add to the list",
+  dncEmpty: "The list is empty.",
+  dncRemove: "Remove {number} from the list",
+  dncCount: "On the list: {n}",
+};
+
+export default outbound;
