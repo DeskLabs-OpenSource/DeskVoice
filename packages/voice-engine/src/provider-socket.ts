@@ -1,5 +1,14 @@
 import WebSocket from "ws";
 import type { SessionEmitter } from "./emitter";
+import { EngineTimeoutError, type ConnectOptions } from "./types";
+
+export const READY_TIMEOUT_MS = 10_000;
+
+const timer = (options: Pick<ConnectOptions, "schedule">, fn: () => void, delayMs: number): (() => void) => {
+  if (options.schedule) return options.schedule(fn, delayMs);
+  const handle = setTimeout(fn, delayMs);
+  return () => clearTimeout(handle);
+};
 
 export interface ProviderSocket {
   send(message: object): void;
@@ -15,6 +24,8 @@ interface ProviderSocketOptions {
   /** Recebe cada mensagem já decodificada de JSON; validar o formato é de quem chama. */
   onMessage(message: unknown): void;
   onClosed?(): void;
+  /** Prazo para a conexão abrir, e o agendador dele. */
+  timeout?: Pick<ConnectOptions, "readyTimeoutMs" | "schedule">;
 }
 
 /**
@@ -26,7 +37,17 @@ export function openProviderSocket(options: ProviderSocketOptions): Promise<Prov
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(options.url, { headers: options.headers });
     let opened = false;
+    let timedOut = false;
     let closedByClient = false;
+    // Sem prazo, um provedor que aceita a conexão TCP e não completa o handshake deixaria quem
+    // ligou em silêncio para sempre.
+    const timeoutMs = options.timeout?.readyTimeoutMs ?? READY_TIMEOUT_MS;
+    const cancelTimeout = timer(options.timeout ?? {}, () => {
+      if (opened) return;
+      timedOut = true;
+      ws.terminate();
+      reject(new EngineTimeoutError(`${label}: o provedor não respondeu em ${timeoutMs / 1000} s ao abrir a conexão`));
+    }, timeoutMs);
     let lastError: Error | undefined;
     let markClosed: () => void = () => undefined;
     const closed = new Promise<void>((done) => (markClosed = done));
@@ -46,6 +67,7 @@ export function openProviderSocket(options: ProviderSocketOptions): Promise<Prov
     };
 
     ws.on("open", () => {
+      cancelTimeout();
       opened = true;
       resolve(socket);
     });
@@ -63,6 +85,8 @@ export function openProviderSocket(options: ProviderSocketOptions): Promise<Prov
     });
     ws.on("close", (code, reason) => {
       markClosed();
+      cancelTimeout();
+      if (timedOut) return;
       const detail = [lastError?.message, `código ${code}`, reason.toString()].filter(Boolean).join("; ");
       if (!opened) {
         reject(new Error(`${label}: não foi possível conectar (${detail})`));
@@ -77,4 +101,31 @@ export function openProviderSocket(options: ProviderSocketOptions): Promise<Prov
       emitter.emit("closed", "socket_closed");
     });
   });
+}
+
+/**
+ * Espera o provedor confirmar a sessão, com prazo. Se ele aceitou a conexão e ficou mudo, a
+ * sessão é fechada (`error` + `closed`) e o `connect` rejeita com `EngineTimeoutError`.
+ */
+export async function awaitSessionReady(
+  ready: Promise<void>,
+  socket: ProviderSocket,
+  options: { label: string; emitter: SessionEmitter; timeout: Pick<ConnectOptions, "readyTimeoutMs" | "schedule"> },
+): Promise<void> {
+  const timeoutMs = options.timeout.readyTimeoutMs ?? READY_TIMEOUT_MS;
+  let cancel: () => void = () => undefined;
+  const expired = new Promise<never>((_, reject) => {
+    cancel = timer(options.timeout, () => reject(new EngineTimeoutError(`${options.label}: o provedor não confirmou a sessão em ${timeoutMs / 1000} s`)), timeoutMs);
+  });
+  try {
+    await Promise.race([ready, expired]);
+  } catch (error) {
+    if (error instanceof EngineTimeoutError) options.emitter.emit("error", error);
+    await socket.close();
+    throw error;
+  } finally {
+    cancel();
+    // A sessão que perdeu a corrida ainda pode rejeitar quando o socket fechar; já foi tratada.
+    ready.catch(() => undefined);
+  }
 }

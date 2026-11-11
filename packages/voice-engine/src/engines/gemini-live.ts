@@ -18,7 +18,7 @@
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
-import { openProviderSocket } from "../provider-socket";
+import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { resample } from "../resample";
 import type { VoiceEngine, VoiceSession } from "../types";
 
@@ -141,6 +141,7 @@ const engine: VoiceEngine = {
       emitter,
       onMessage,
       onClosed: () => setupFailed(new Error("Gemini Live: a conexão fechou antes de confirmar a sessão (chave ou modelo inválido?)")),
+      timeout: options,
     });
 
     socket.send({
@@ -168,7 +169,7 @@ const engine: VoiceEngine = {
         outputAudioTranscription: {},
       },
     });
-    await ready;
+    await awaitSessionReady(ready, socket, { label: "Gemini Live", emitter, timeout: options });
 
     const session: VoiceSession = {
       on: (event, handler) => emitter.on(event, handler),

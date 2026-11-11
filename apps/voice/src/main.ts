@@ -24,6 +24,8 @@ const server = await startVoiceServer({
   internalToken: process.env.INTERNAL_TOKEN,
   trunksFile: process.env.ASTERISK_TRUNKS_FILE ?? DEFAULT_TRUNKS_FILE,
   publicIp: process.env.PUBLIC_IP ?? null,
+  // A imagem do Asterisk roda como uid e gid 1000; o arquivo de troncos precisa ser dele.
+  trunksOwner: { uid: Number(process.env.ASTERISK_UID ?? 1000), gid: Number(process.env.ASTERISK_GID ?? 1000) },
   log,
 });
 // Sem Asterisk no ar o processo não morre: a escuta fica tentando, a saúde diz `fail` com o

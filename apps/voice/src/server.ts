@@ -10,6 +10,7 @@ import { handleInbound } from "./inbound";
 import { startInternalApi } from "./internal-api";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { startOutboundCall } from "./outbound";
+import { closeOrphanCalls } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
 import type { Schedule } from "./transport";
 import { applyTrunks, checkTrunks, type TrunksDeps } from "./trunks";
@@ -26,6 +27,8 @@ export interface VoiceServerDeps {
   internalToken: string | undefined;
   trunksFile: string;
   publicIp: string | null;
+  /** Usuário do Asterisk, que precisa ler o arquivo de troncos. Sem ele, o dono do arquivo não é trocado. */
+  trunksOwner?: { uid: number; gid: number };
   host?: string;
   schedule?: Schedule;
   /** Relógio monotônico da cadência de áudio, em ms. */
@@ -46,9 +49,11 @@ export interface VoiceServer {
 export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServer> {
   const { db, clock, ari } = deps;
   const log = deps.log ?? silentLogger;
+  // Antes de atender qualquer coisa: o que o processo anterior deixou aberto não é de ninguém.
+  await closeOrphanCalls(db, clock, log);
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
   const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log };
-  const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, log };
+  const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, log };
   const calls = new AsteriskCalls({ ari, db, clock, log });
   const sessions = new Set<CallSession>();
 

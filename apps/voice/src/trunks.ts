@@ -10,11 +10,12 @@
 // VPS (comando `create-owner`): quem pode provocar o conflito é quem administra o servidor.
 // Não existe precedência por antiguidade nem estado guardado ao lado do arquivo.
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, chown, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { decryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import { messageOf, type Logger } from "./log";
+import { realSchedule, type Schedule } from "./transport";
 import { hostsOverlap, parseTrunkHost, type TrunkHost } from "./trunk-host";
 
 export const DEFAULT_TRUNKS_FILE = "/asterisk-generated/pjsip_trunks.conf";
@@ -141,7 +142,7 @@ export const NAME_IN_IP_MODE_REASON =
  * Em qualquer grupo, linha em modo `register` sai normalmente, reconhecida pelo `line` do registro.
  * Linha inválida por outro motivo não entra em grupo nenhum.
  */
-export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped: Array<{ id: string; reason: string }> } {
+export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
   const skipped: Array<{ id: string; reason: string }> = [];
   const valid: Array<{ trunk: TrunkConfig; host: TrunkHost; group: number }> = [];
   for (const trunk of [...trunks].sort((a, b) => a.id.localeCompare(b.id))) {
@@ -168,26 +169,53 @@ export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped
   }
 
   const sections: string[] = [];
+  const emitted: string[] = [];
   for (const entry of valid) {
     const group = valid.filter((other) => other.group === entry.group);
     const oneOrganization = group.every((other) => other.trunk.organizationId === entry.trunk.organizationId);
     // `valid` está em ordem de id: o primeiro do grupo é o de menor id.
     const identify = oneOrganization && group[0] === entry;
     if (!identify && entry.trunk.authMode === "ip") skipped.push({ id: entry.trunk.id, reason: SHARED_HOST_REASON });
-    else sections.push(renderTrunk(entry.trunk, entry.host, identify));
+    else {
+      sections.push(renderTrunk(entry.trunk, entry.host, identify));
+      emitted.push(entry.trunk.id);
+    }
   }
   skipped.sort((a, b) => a.id.localeCompare(b.id));
   const header = "; Gerado pelo DeskVoice a partir das linhas cadastradas no painel. Não edite: é reescrito a cada mudança.";
-  return { conf: `${[header, ...sections].join(NL + NL)}${NL}`, skipped };
+  return { conf: `${[header, ...sections].join(NL + NL)}${NL}`, skipped, emitted };
 }
 
-/** Escrita atômica: o Asterisk nunca lê um arquivo pela metade. */
-export async function writeFileAtomic(file: string, content: string): Promise<void> {
+export interface FileOwner {
+  uid: number;
+  gid: number;
+}
+
+/**
+ * Escrita atômica: o Asterisk nunca lê um arquivo pela metade.
+ *
+ * Com `owner`, o arquivo é entregue a esse usuário e fica 0640. É o caso do arquivo de troncos:
+ * o processo de voz roda como root e o Asterisk como outro usuário, e um arquivo `root 0640` é
+ * ignorado em silêncio pelo `#tryinclude` (o recarregamento responde sucesso e nenhuma linha
+ * carrega). Se não der para trocar o dono (processo sem privilégio, como em desenvolvimento), o
+ * arquivo fica 0644: legível por todos é melhor que ilegível por quem precisa. Devolve o modo final.
+ */
+export async function writeFileAtomic(file: string, content: string, owner?: FileOwner): Promise<{ mode: number; chownError?: string }> {
   await mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, content, { mode: 0o640 });
+    let result: { mode: number; chownError?: string } = { mode: 0o640 };
+    if (owner) {
+      try {
+        await chown(temporary, owner.uid, owner.gid);
+      } catch (error) {
+        await chmod(temporary, 0o644);
+        result = { mode: 0o644, chownError: messageOf(error) };
+      }
+    }
     await rename(temporary, file);
+    return result;
   } catch (error) {
     await rm(temporary, { force: true });
     throw error;
@@ -206,8 +234,17 @@ export interface TrunksDeps {
   file: string;
   /** IP público da instalação (ambiente); a configuração `network.public_ip` da organização vem antes. */
   publicIp: string | null;
+  /** Usuário do Asterisk dentro do contêiner dele: o dono do arquivo de troncos. */
+  owner?: FileOwner;
+  schedule?: Schedule;
   log: Logger;
 }
+
+// Depois de recarregar, o Asterisk leva um instante para listar os endpoints novos.
+const LOAD_CHECKS = 5;
+const LOAD_CHECK_INTERVAL_MS = 400;
+const NOT_LOADED =
+  "The telephony server (Asterisk) reloaded but does not list this line. Probable cause: it cannot read the generated lines file (owner or permissions), or the file has a syntax error. Check the Asterisk log";
 
 async function setStatus(deps: TrunksDeps, updates: TrunkHealth[]): Promise<void> {
   if (updates.length === 0) return;
@@ -251,9 +288,12 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
       unreadable.push({ id: row.id, reason: `the saved password cannot be read (${messageOf(error)})` });
     }
   }
-  const { conf, skipped: invalid } = renderTrunksConf(trunks);
+  const { conf, skipped: invalid, emitted } = renderTrunksConf(trunks);
   const skipped = [...unreadable, ...invalid];
-  await writeFileAtomic(deps.file, conf);
+  const written = await writeFileAtomic(deps.file, conf, deps.owner);
+  if (written.chownError !== undefined) {
+    deps.log("error", "could not hand the lines file to the Asterisk user; left it readable by everyone (0644) instead", { file: deps.file, owner: deps.owner, error: written.chownError });
+  }
   await setStatus(deps, skipped.map(({ id, reason }) => ({ id, status: "fail" as const, detail: `${LEFT_OUT}: ${reason}.` })));
   for (const { id, reason } of skipped) deps.log("error", "trunk left out of the generated configuration", { trunkId: id, reason });
 
@@ -262,7 +302,25 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
   } catch (error) {
     return { applied: false, detail: `The lines were written, but the telephony server did not reload them: ${messageOf(error)}`, skipped };
   }
-  return { applied: true, detail: `${trunks.length - invalid.length} line(s) written and reloaded by the telephony server.`, skipped };
+
+  // "Recarregado" só vale quando o Asterisk lista de fato cada linha escrita: o recarregamento
+  // responde sucesso mesmo quando ele não conseguiu ler o arquivo.
+  let missing = emitted;
+  for (let attempt = 0; attempt < LOAD_CHECKS && missing.length > 0; attempt++) {
+    if (attempt > 0) await new Promise<void>((resolve) => void (deps.schedule ?? realSchedule)(resolve, LOAD_CHECK_INTERVAL_MS));
+    try {
+      const loaded = new Set((await deps.ari.listEndpoints("PJSIP")).map((endpoint) => endpoint.resource));
+      missing = emitted.filter((id) => !loaded.has(trunkEndpointName(id)));
+    } catch (error) {
+      return { applied: false, detail: `The lines were written, but the telephony server could not be asked whether it loaded them: ${messageOf(error)}`, skipped };
+    }
+  }
+  if (missing.length > 0) {
+    await setStatus(deps, missing.map((id) => ({ id, status: "fail" as const, detail: `${NOT_LOADED}.` })));
+    deps.log("error", "asterisk reloaded but does not list the written lines", { missing: missing.length, written: emitted.length, file: deps.file });
+    return { applied: false, detail: `${NOT_LOADED} (${missing.length} of ${emitted.length} line(s) missing).`.replace("this line", "the written lines"), skipped };
+  }
+  return { applied: true, detail: `${emitted.length} line(s) written, reloaded and listed by the telephony server.`, skipped };
 }
 
 /**
@@ -284,7 +342,7 @@ export async function checkTrunks(deps: TrunksDeps): Promise<TrunkHealth[]> {
       const state = states.get(trunkEndpointName(id));
       if (state === "online") return { id, status: "ok", detail: "The provider answers." };
       if (state === "offline") return { id, status: "fail", detail: "The provider does not answer. Check the host, the user and the password, and whether the provider allows this server's IP." };
-      if (state === undefined) return { id, status: "fail", detail: leftOut.get(id) ?? "The telephony server has not loaded this line. Save the line again to apply it." };
+      if (state === undefined) return { id, status: "fail", detail: leftOut.get(id) ?? `${NOT_LOADED}.` };
       return { id, status: "warn", detail: "The line is loaded, but the provider has not been checked yet. Try again in a minute." };
     });
   } catch (error) {

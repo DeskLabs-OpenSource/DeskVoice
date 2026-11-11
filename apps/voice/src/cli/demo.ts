@@ -25,6 +25,8 @@ function describeEvent(kind: string, payload: Record<string, unknown>): string {
       return "A ligação chegou";
     case "call_answered":
       return `O agente atendeu (motor ${text(payload.engine)})`;
+    case "recording_notice":
+      return `Aviso de gravação: ${text(payload.text)}`;
     case "transcript_user":
       return `Quem ligou: ${text(payload.text)}`;
     case "transcript_agent":

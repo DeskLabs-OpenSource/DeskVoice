@@ -5,7 +5,8 @@ import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting, tasksOf } from "../../../packages/tools/test/helpers";
-import { startCallSession, type CallSession } from "./call-session";
+import { EngineTimeoutError } from "@deskvoice/voice-engine";
+import { DEFAULT_RECORDING_NOTICE, startCallSession, type CallSession } from "./call-session";
 import {
   callOf,
   createAgent,
@@ -41,6 +42,8 @@ afterAll(async () => {
 async function scene(label: string, agent: AgentOptions, manual?: ManualEngine, direction: "inbound" | "outbound" = "inbound") {
   const organizationId = await createOrganization(app, label);
   const agentId = await createAgent(app, organizationId, agent);
+  // Um teste pode montar mais de uma cena: a escuta de aprovações da anterior não fica aberta.
+  await harness?.approvals.close();
   harness = await sessionHarness(app, manual ? [manual.engine] : [pricedSimulatedEngine(60)]);
   const callId = await createCall(app, organizationId, agentId, harness.clock.now(), direction);
   const transport = manualTransport();
@@ -59,10 +62,10 @@ describe("motor que cai no meio da chamada (Review Focus 1)", { timeout: 120_000
 
     const events = await eventsOf(app, callId);
     expect(events.map((event) => event.kind)).toEqual([
-      "call_started", "call_answered", "transcript_agent", "transcript_agent", "engine_failed", "transfer_started", "call_ended", "task_queued",
+      "call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "transfer_started", "call_ended", "task_queued",
     ]);
-    expect(events[4]?.payload).toEqual({ engine: "simulated", error: "OpenAI Realtime: a conexão caiu (código 1006)" });
-    expect(events[5]?.payload).toEqual({ to: "+5531988887777", reason: "engine_failed" });
+    expect(events[5]?.payload).toEqual({ engine: "simulated", error: "OpenAI Realtime: a conexão caiu (código 1006)" });
+    expect(events[6]?.payload).toEqual({ to: "+5531988887777", reason: "engine_failed" });
     expect(await callOf(app, callId)).toMatchObject({ status: "transferred", end_reason: "engine_failed" });
 
     // Quem está na linha não fica em silêncio: ouve o sinal de falha e é transferido.
@@ -82,7 +85,7 @@ describe("motor que cai no meio da chamada (Review Focus 1)", { timeout: 120_000
     const { organizationId, callId, transport, start } = await scene("engine-fail-hangup", { script });
     expect(await start().done).toMatchObject({ status: "failed", endReason: "engine_failed" });
 
-    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "transcript_agent", "engine_failed", "call_ended", "task_queued"]);
+    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "call_ended", "task_queued"]);
     expect(await callOf(app, callId)).toMatchObject({ status: "failed", end_reason: "engine_failed", ended_at: expect.any(Date) });
     expect(transport.transferredTo).toBeNull();
     expect(transport.hangups).toBe(1);
@@ -170,7 +173,7 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     const session = made.start();
     await waitFor(async () => (await kindsOf(app, made.callId)).includes("call_answered"), "the call to be answered");
     expect(manual.keys).toEqual(["sk-certa"]);
-    expect(manual.configs).toMatchObject([{ instructions: "Você atende a clínica.", greeting: "Bom dia.", language: "pt-BR" }]);
+    expect(manual.configs).toMatchObject([{ instructions: "Você atende a clínica.", greeting: `${DEFAULT_RECORDING_NOTICE} Bom dia.`, language: "pt-BR" }]);
     expect(manual.configs[0]?.tools.map((tool) => tool.name)).toEqual(["end_call", "notify_human"]);
     expect(made.harness.logs.some((entry) => entry.message.includes("not installed") && entry.fields?.tool === "nao_existe")).toBe(true);
 
@@ -199,9 +202,105 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     const session = made.start();
     await waitFor(() => manual.configs.length === 1, "the engine to connect");
     expect(manual.configs[0]?.greeting).toBeUndefined();
+    // Sem saudação, o aviso sai assim que a pessoa atende.
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_notice"), "the notice event");
+    expect(manual.said).toEqual([DEFAULT_RECORDING_NOTICE]);
     made.transport.callerHangup();
     await session.done;
     expect((await eventsOf(app, made.callId))[0]?.payload).toMatchObject({ direction: "outbound" });
+  });
+});
+
+describe("provedor de IA que não responde", { timeout: 120_000 }, () => {
+  it("connect que nunca volta: no prazo a chamada é recusada com evento, aviso de painel e sinal para quem está na linha", async () => {
+    const manual = manualEngine({ keyless: true, connectHangs: true });
+    const { organizationId, callId, transport, start, harness } = await scene("engine-hangs", { engine: "manual", greeting: "Bom dia.", transferTo: "+5531988887777" }, manual);
+    const session = start();
+    await waitFor(() => harness.timers.held().includes(15_000), "the connect deadline");
+    expect(await kindsOf(app, callId)).toEqual(["call_started"]);
+
+    expect(harness.timers.fire(15_000)).toBe(1);
+    expect(await session.done).toEqual({ status: "refused", endReason: "engine_not_responding", costCents: 0 });
+    const events = await eventsOf(app, callId);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_refused", "call_ended", "task_queued"]);
+    expect(events[1]?.payload).toEqual({ reason: "engine_not_responding", engine: "manual", detail: expect.stringContaining("did not answer in 15 s") });
+    expect(await callOf(app, callId)).toMatchObject({ status: "refused", end_reason: "engine_not_responding" });
+    expect(transport.sentBytes).toBe(failureTone().length);
+    expect(transport.hangups).toBe(1);
+    expect((await notificationsOf(app, organizationId))[0]?.body).toMatch(/provedor do motor de voz Motor de teste não respondeu/);
+    expect(harness.timers.held()).toEqual([]);
+  });
+
+  it("prazo do próprio motor (EngineTimeoutError): mesma recusa, com o que o motor disse", async () => {
+    const manual = manualEngine({ keyless: true, connectError: new EngineTimeoutError("Gemini Live: o provedor não confirmou a sessão em 10 s") });
+    const { callId, transport, start, harness } = await scene("engine-timeout", { engine: "manual" }, manual);
+    expect(await start().done).toMatchObject({ status: "refused", endReason: "engine_not_responding" });
+    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ reason: "engine_not_responding", detail: expect.stringContaining("não confirmou a sessão em 10 s") });
+    expect(transport.sentBytes).toBe(failureTone().length);
+    // O prazo da conversa foi cancelado: nada fica armado.
+    expect(harness.timers.held()).toEqual([]);
+  });
+});
+
+describe("aviso de gravação", { timeout: 120_000 }, () => {
+  const OPERATOR_TEXT = "Esta ligação pode ser gravada para a sua segurança.";
+  async function answered(label: string, setting?: unknown) {
+    const manual = manualEngine({ keyless: true });
+    const made = await scene(label, { engine: "manual", greeting: "Clínica Bem Viver, bom dia." }, manual);
+    if (setting !== undefined) await putSetting(app, made.organizationId, "recording_notice.text", setting, false);
+    const session = made.start();
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_notice"), "the notice event");
+    manual.emit("transcript", { speaker: "agent", text: manual.configs[0]?.greeting ?? "" });
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("transcript_agent"), "the opening transcript");
+    made.transport.callerHangup();
+    await session.done;
+    return { manual, events: await eventsOf(app, made.callId) };
+  }
+
+  it("instalação sem ajuste: fala o texto padrão, antes da saudação, e o evento vem entre o atendimento e a primeira fala", async () => {
+    const { manual, events } = await answered("notice-default");
+    expect(manual.configs[0]?.greeting).toBe(`${DEFAULT_RECORDING_NOTICE} Clínica Bem Viver, bom dia.`);
+    expect(manual.said).toEqual([]);
+    expect(events.slice(0, 4).map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "transcript_agent"]);
+    expect(events[2]?.payload).toEqual({ text: DEFAULT_RECORDING_NOTICE });
+    expect(DEFAULT_RECORDING_NOTICE).toBe("Esta ligação é atendida por uma assistente virtual e a conversa fica registrada.");
+  });
+
+  it("o texto do operador substitui o padrão", async () => {
+    const { manual, events } = await answered("notice-operator", `  ${OPERATOR_TEXT}  `);
+    expect(manual.configs[0]?.greeting).toBe(`${OPERATOR_TEXT} Clínica Bem Viver, bom dia.`);
+    expect(events[2]).toEqual({ kind: "recording_notice", payload: { text: OPERATOR_TEXT } });
+  });
+
+  it("texto em branco, ou que não é texto, volta ao padrão: o aviso nunca falta", async () => {
+    for (const [index, blank] of ["", "   ", null, 42].entries()) {
+      const { manual, events } = await answered(`notice-blank-${index}`, blank);
+      expect(manual.configs[0]?.greeting, JSON.stringify(blank)).toBe(`${DEFAULT_RECORDING_NOTICE} Clínica Bem Viver, bom dia.`);
+      expect(events[2]).toEqual({ kind: "recording_notice", payload: { text: DEFAULT_RECORDING_NOTICE } });
+    }
+  });
+
+  it("agente sem saudação: a abertura é só o aviso", async () => {
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("notice-no-greeting", { engine: "manual" }, manual);
+    const session = made.start();
+    await waitFor(() => manual.configs.length === 1, "the engine to connect");
+    expect(manual.configs[0]?.greeting).toBe(DEFAULT_RECORDING_NOTICE);
+    made.transport.callerHangup();
+    await session.done;
+  });
+
+  it("chamada de saída também avisa: sem saudação, o aviso sai por say assim que a pessoa atende", async () => {
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("notice-outbound", { engine: "manual", greeting: "Bom dia." }, manual, "outbound");
+    await putSetting(app, made.organizationId, "recording_notice.text", OPERATOR_TEXT, false);
+    const session = made.start();
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_notice"), "the notice event");
+    expect(manual.configs[0]?.greeting).toBeUndefined();
+    expect(manual.said).toEqual([OPERATOR_TEXT]);
+    made.transport.callerHangup();
+    await session.done;
+    expect((await eventsOf(app, made.callId)).slice(0, 3).map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice"]);
   });
 });
 
@@ -226,8 +325,8 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
 
     expect(harness.timers.fire(6000)).toBe(1);
     expect(await session.done).toMatchObject({ status: "completed", endReason: "max_duration" });
-    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "call_ended", "task_queued"]);
-    expect((await eventsOf(app, callId))[2]?.payload).toMatchObject({ status: "completed", reason: "max_duration" });
+    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "call_ended", "task_queued"]);
+    expect((await eventsOf(app, callId))[3]?.payload).toMatchObject({ status: "completed", reason: "max_duration" });
     expect(transport.hangups).toBe(1);
     expect(transport.transferredTo).toBeNull();
     expect(harness.timers.held()).toEqual([]);
@@ -253,9 +352,9 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
     expect(harness.timers.fire(6000)).toBe(1);
     expect(await session.done).toEqual({ status: "completed", endReason: "cost_ceiling", costCents: 160 });
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "cost_ceiling_reached", "call_ended", "task_queued"]);
-    expect(events[2]?.payload).toEqual({ costCents: 150, ceilingCents: 150 });
-    expect(events[3]?.payload).toEqual({ status: "completed", reason: "cost_ceiling", costCents: 160, seconds: 96 });
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "call_ended", "task_queued"]);
+    expect(events[3]?.payload).toEqual({ costCents: 150, ceilingCents: 150 });
+    expect(events[4]?.payload).toEqual({ status: "completed", reason: "cost_ceiling", costCents: 160, seconds: 96 });
     // O extrato tem uma linha por medição, e a soma dele é o custo da chamada.
     expect(await ledgerOf(app, callId)).toEqual([
       { engine: "manual", seconds: 6, input_tokens: 0, output_tokens: 0, cost_cents: 10 },
@@ -277,8 +376,8 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
     harness.timers.fire(6000);
     expect(await session.done).toEqual({ status: "transferred", endReason: "cost_ceiling", costCents: 102 });
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "cost_ceiling_reached", "transfer_started", "call_ended", "task_queued"]);
-    expect(events[3]?.payload).toEqual({ to: "+5531988887777", reason: "cost_ceiling" });
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "transfer_started", "call_ended", "task_queued"]);
+    expect(events[4]?.payload).toEqual({ to: "+5531988887777", reason: "cost_ceiling" });
     expect(transport.transferredTo).toBe("+5531988887777");
   });
 

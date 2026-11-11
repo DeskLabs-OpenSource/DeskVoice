@@ -36,6 +36,9 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   // Porta da API interna do processo de voz (8090) e arquivo de troncos que ele gera para o Asterisk.
   VOICE_INTERNAL_PORT: "default",
   ASTERISK_TRUNKS_FILE: "default",
+  // Usuário e grupo do Asterisk dentro do contêiner dele (1000): dono do arquivo de troncos.
+  ASTERISK_UID: "default",
+  ASTERISK_GID: "default",
   // Opcional: só o comando de migrations recebe a credencial do dono do schema.
   MIGRATION_DATABASE_URL: "default",
   // Definidas pela imagem (Dockerfile) e pelo Node; fora de contêiner valem os padrões.

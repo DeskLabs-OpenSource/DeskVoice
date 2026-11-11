@@ -1,6 +1,6 @@
 import { decryptSecret, enqueueTask, recordEvent, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { autoCommitOrgQuery, runTool, toSpec, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
-import { estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
+import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
@@ -69,6 +69,10 @@ interface AgentRow {
 
 export const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
 export const RECORDING_NOTICE_SETTING = "recording_notice.text";
+/** O aviso que vale quando o operador não escreveu o dele. Toda chamada começa por um aviso. */
+export const DEFAULT_RECORDING_NOTICE = "Esta ligação é atendida por uma assistente virtual e a conversa fica registrada.";
+// Além do prazo do próprio motor: nenhum `connect` segura quem ligou em silêncio por mais que isto.
+const CONNECT_TIMEOUT_MS = 15_000;
 
 // Tempo para a despedida ser gerada e chegar à fila de saída; o que estiver na fila ainda toca
 // até o fim antes de a ligação cair (`transport.hangup` espera).
@@ -272,7 +276,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const engineId = overrides?.engineId ?? agent.engine;
     engine = deps.engines.get(engineId);
     const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);
-    const recordingNotice = typeof notice?.value === "string" && notice.value.trim() !== "" ? notice.value.trim() : undefined;
+    // Sem texto do operador, ou com texto em branco, vale o padrão: o aviso nunca falta.
+    const recordingNotice = typeof notice?.value === "string" && notice.value.trim() !== "" ? notice.value.trim() : DEFAULT_RECORDING_NOTICE;
 
     const enabled = new Map<string, Tool>();
     for (const name of overrides?.tools ?? agent.tools) {
@@ -284,6 +289,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // Chave ausente ou inválida: a chamada não fica muda. É recusada com evento, aviso e sinal.
     let apiKey = "";
     let problem: string | undefined;
+    let reason: "engine_not_configured" | "engine_not_responding" = "engine_not_configured";
     if (!engine) {
       problem = `the voice engine "${engineId}" is not installed`;
     } else if (!engine.keyless) {
@@ -299,21 +305,37 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       }
     }
     if (engine && problem === undefined && !ending) {
+      const connecting = engine.connect(
+        {
+          instructions: overrides?.instructions ?? agent.instructions,
+          // O aviso vem antes de tudo, e os motores falam a abertura ao conectar: o aviso entra
+          // na frente da saudação. Lição do DeskcommCRM: na ligação recebida quem atende fala
+          // primeiro; na que nós fazemos, quem atende diz "alô" e o agente responde a isso, então
+          // não há saudação, e o aviso sai por `say` assim que a pessoa atende.
+          greeting: call.direction === "inbound" ? [recordingNotice, agent.greeting?.trim()].filter(Boolean).join(" ") : undefined,
+          voiceId: agent.voice_id ?? undefined,
+          language: agent.language,
+          tools: [...enabled.values()].map(toSpec),
+        },
+        apiKey,
+      );
+      let cancelDeadline: () => void = () => undefined;
+      const deadline = new Promise<never>((_, reject) => {
+        cancelDeadline = schedule(() => reject(new EngineTimeoutError(`the provider did not answer in ${CONNECT_TIMEOUT_MS / 1000} s`)), CONNECT_TIMEOUT_MS);
+      });
       try {
-        voice = await engine.connect(
-          {
-            instructions: overrides?.instructions ?? agent.instructions,
-            // Lição do DeskcommCRM: na ligação recebida quem atende fala primeiro; na que nós
-            // fazemos, quem atende diz "alô" e o agente responde a isso.
-            greeting: call.direction === "inbound" ? (agent.greeting ?? undefined) : undefined,
-            voiceId: agent.voice_id ?? undefined,
-            language: agent.language,
-            tools: [...enabled.values()].map(toSpec),
-          },
-          apiKey,
-        );
+        voice = await Promise.race([connecting, deadline]);
       } catch (error) {
-        problem = `the voice engine refused the session (${messageOf(error)})`;
+        if (error instanceof EngineTimeoutError) {
+          reason = "engine_not_responding";
+          problem = `the voice provider did not answer (${messageOf(error)})`;
+          // Se a sessão ainda abrir depois do prazo, ninguém vai usá-la.
+          connecting.then((late) => late.close(), () => undefined);
+        } else {
+          problem = `the voice engine refused the session (${messageOf(error)})`;
+        }
+      } finally {
+        cancelDeadline();
       }
     }
     if (ending) return void (await voice?.close());
@@ -321,10 +343,13 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const label = engine?.label ?? engineId;
       return finish({
         status: "refused",
-        endReason: "engine_not_configured",
+        endReason: reason,
         tone: true,
-        events: [["call_refused", { reason: "engine_not_configured", engine: engineId, detail: problem }]],
-        notice: `Uma ligação foi recusada porque o motor de voz ${label} do agente ${agent.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações, na seção do motor de voz, e faça uma chamada de teste.`,
+        events: [["call_refused", { reason, engine: engineId, detail: problem }]],
+        notice:
+          reason === "engine_not_responding"
+            ? `Uma ligação do agente ${agent.name} foi recusada porque o provedor do motor de voz ${label} não respondeu: ${problem}. Quem ligou ouviu o sinal de falha. Confira a situação do provedor e faça uma chamada de teste.`
+            : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${agent.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações, na seção do motor de voz, e faça uma chamada de teste.`,
       });
     }
 
@@ -368,9 +393,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const answered = [
       q.exec("update calls set status = 'in_progress', answered_at = $2, engine = $3 where id = $1", [callId, clock.now(), engineId]),
       event("call_answered", { engine: engineId }),
-      ...(recordingNotice ? [event("recording_notice", { text: recordingNotice })] : []),
+      event("recording_notice", { text: recordingNotice }),
     ];
-    if (recordingNotice) session.say(recordingNotice);
+    if (call.direction !== "inbound") session.say(recordingNotice);
     cancelTimers.push(schedule(() => wrapUp(FAREWELL.maxDuration, { status: "completed", endReason: "max_duration" }), agent.max_call_seconds * 1000));
     await Promise.all(answered);
   }

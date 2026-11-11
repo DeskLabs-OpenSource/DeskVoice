@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -23,6 +23,7 @@ describe("gerador de pjsip_trunks.conf", { timeout: 60_000 }, () => {
   it("modo register com nome no host: endpoint, aor, auth e registration com line; sem identify, porque nome não se compara", () => {
     expect(renderTrunksConf([register])).toEqual({
       skipped: [],
+      emitted: [A],
       conf: `; Gerado pelo DeskVoice a partir das linhas cadastradas no painel. Não edite: é reescrito a cada mudança.
 
 [trunk-${A}]
@@ -331,13 +332,30 @@ retry_interval=60
       expect(await readdir(path.dirname(file))).toEqual(["pjsip_trunks.conf"]);
     });
 
+    it("com dono: entrega o arquivo ao usuário pedido e mantém 0640; sem poder trocar o dono, cai para 0644 em vez de deixar ilegível", async () => {
+      const mode = async (file: string): Promise<string> => ((await stat(file)).mode & 0o777).toString(8);
+      const mine = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+      const owned = path.join(dir, "dono", "pjsip_trunks.conf");
+      expect(await writeFileAtomic(owned, "x")).toEqual({ mode: 0o640 });
+      expect(await writeFileAtomic(owned, "x", mine)).toEqual({ mode: 0o640 });
+      expect(await mode(owned)).toBe("640");
+      expect((await stat(owned)).uid).toBe(mine.uid);
+      // Quem não é root não consegue dar o arquivo a outro usuário (em CI que roda como root, consegue).
+      if (mine.uid !== 0) {
+        const fallback = path.join(dir, "dono", "sem-privilegio.conf");
+        expect(await writeFileAtomic(fallback, "x", { uid: 0, gid: 0 })).toEqual({ mode: 0o644, chownError: expect.any(String) });
+        expect(await mode(fallback)).toBe("644");
+      }
+      expect((await readdir(path.dirname(owned))).sort()).toEqual(["pjsip_trunks.conf", ...(mine.uid !== 0 ? ["sem-privilegio.conf"] : [])].sort());
+    });
+
     it("se a troca falha, o arquivo anterior fica intacto e o temporário é removido", async () => {
       // O destino é uma pasta com conteúdo: o rename falha depois de o temporário já estar escrito.
       const target = path.join(dir, "ocupado");
       await writeFileAtomic(path.join(target, "dentro.conf"), "conteúdo\n");
       await writeFile(path.join(dir, "vizinho.conf"), "intacto\n");
       await expect(writeFileAtomic(target, "novo\n")).rejects.toThrow();
-      expect((await readdir(dir)).sort()).toEqual(["generated", "ocupado", "vizinho.conf"]);
+      expect((await readdir(dir)).sort()).toEqual(["dono", "generated", "ocupado", "vizinho.conf"]);
       expect(await readFile(path.join(target, "dentro.conf"), "utf8")).toBe("conteúdo\n");
     });
   });

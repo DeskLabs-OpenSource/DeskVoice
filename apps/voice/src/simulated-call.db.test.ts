@@ -8,6 +8,7 @@ import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting, tasksOf } from "../../../packages/tools/test/helpers";
+import { DEFAULT_RECORDING_NOTICE } from "./call-session";
 import { startVoiceServer, type VoiceServer } from "./server";
 import {
   approvalsOf,
@@ -53,10 +54,10 @@ afterAll(async () => {
 const GREETING = "Clínica Bem Viver, bom dia. Como posso ajudar?";
 const NOTICE = "Esta ligação pode ser gravada.";
 const WAIT_LINE = "Um instante, por favor. Vou conferir isso com um responsável.";
-const approvalStep = (defaultOnTimeout: "approved" | "denied" = "denied") => ({
+const approvalStep = () => ({
   toolCall: {
     name: "request_approval",
-    args: { question: "Posso dar 10% de desconto no pacote?", context: "Cliente quer fechar o pacote de três sessões hoje.", default_on_timeout: defaultOnTimeout, timeout_seconds: 30 },
+    args: { question: "Posso dar 10% de desconto no pacote?", context: "Cliente quer fechar o pacote de três sessões hoje.", timeout_seconds: 30 },
   },
 });
 const SCRIPT: SimulatedScript = [
@@ -127,7 +128,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     const { ari, clock, organizationId, trunkId, callId, channelId, asterisk } = await incomingCall("e2e", { script: SCRIPT, transferTo: "+5531988887777" }, { "recording_notice.text": NOTICE });
     // Quem ligou fala depois de ouvir a saudação e o aviso (o motor simulado só conta o áudio que
     // chega quando o roteiro está esperando por ele).
-    const openingFrames = (simulatedSpeechMs(GREETING) + simulatedSpeechMs(NOTICE)) / 20;
+    const openingFrames = simulatedSpeechMs(`${NOTICE} ${GREETING}`) / 20;
     await waitFor(() => asterisk.frames.filter((frame) => frame.type === 0x10).length >= openingFrames, "the greeting and the notice to be heard");
     asterisk.sendAudio(1000);
 
@@ -149,8 +150,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
       "call_started",
       "call_answered",
       "recording_notice",
-      "transcript_agent", // saudação
-      "transcript_agent", // aviso de gravação
+      "transcript_agent", // abertura: o aviso de gravação e, depois, a saudação
       "transcript_user",
       "tool_called", // request_approval
       "approval_requested",
@@ -168,23 +168,23 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     const payloads = events.map((event) => event.payload);
     expect(payloads[0]).toEqual({ direction: "inbound", from: "+5531999998888", to: "+553133334444", agentId: expect.any(String) });
     expect(payloads[2]).toEqual({ text: NOTICE });
-    expect([payloads[3], payloads[4], payloads[5]]).toEqual([{ text: GREETING }, { text: NOTICE }, { text: "Quero remarcar e pedir um desconto." }]);
-    expect(payloads[9]).toEqual({ approvalId: approval.id, outcome: "approved", decision: "approved" });
-    expect(payloads[10]).toMatchObject({ name: "request_approval", ok: true });
-    expect(payloads[14]).toMatchObject({ to: "+5531988887777" });
+    expect([payloads[3], payloads[4]]).toEqual([{ text: `${NOTICE} ${GREETING}` }, { text: "Quero remarcar e pedir um desconto." }]);
+    expect(payloads[8]).toEqual({ approvalId: approval.id, outcome: "approved", decision: "approved" });
+    expect(payloads[9]).toMatchObject({ name: "request_approval", ok: true });
+    expect(payloads[13]).toMatchObject({ to: "+5531988887777" });
 
     // Custo: 1 s de quem ligou mais a fala do agente, a 60 centavos por minuto (1 centavo por segundo).
-    const spoken = [GREETING, NOTICE, WAIT_LINE, "Obrigada por aguardar.", "Vou transferir você para a recepção."].map(simulatedSpeechMs);
+    const spoken = [`${NOTICE} ${GREETING}`, WAIT_LINE, "Obrigada por aguardar.", "Vou transferir você para a recepção."].map(simulatedSpeechMs);
     const seconds = (1000 + spoken.reduce((sum, ms) => sum + ms, 0)) / 1000;
     const cost = Math.ceil(seconds);
     expect(cost).toBeGreaterThan(5);
-    expect(payloads[16]).toEqual({ status: "transferred", reason: "transferred", costCents: cost, seconds: Math.round(seconds) });
+    expect(payloads[15]).toEqual({ status: "transferred", reason: "transferred", costCents: cost, seconds: Math.round(seconds) });
     expect(await ledgerOf(app, callId)).toEqual([{ engine: "simulated", seconds: Math.round(seconds), input_tokens: 0, output_tokens: 0, cost_cents: cost }]);
     expect(await callOf(app, callId)).toMatchObject({ status: "transferred", end_reason: "transferred", engine: "simulated", cost_cents: cost, answered_at: expect.any(Date), ended_at: clock.now() });
 
     const tasks = (await tasksOf(app, organizationId)).filter((task) => task.kind === "summarize_call");
     expect(tasks).toMatchObject([{ kind: "summarize_call", payload: {}, status: "queued", call_id: callId }]);
-    expect(payloads[17]).toEqual({ taskId: tasks[0]?.id, kind: "summarize_call" });
+    expect(payloads[16]).toEqual({ taskId: tasks[0]?.id, kind: "summarize_call" });
 
     // A fala do agente chegou ao Asterisk, e a transferência fecha o AudioSocket sem derrubar o canal.
     await waitFor(() => asterisk.closed, "the AudioSocket to close");
@@ -225,11 +225,13 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
 
     const events = await eventsOf(app, callId);
     expect(events.map((event) => event.kind)).toEqual([
-      "call_started", "call_answered", "transcript_agent", "tool_called", "approval_requested", "transcript_agent",
+      "call_started", "call_answered", "recording_notice", "transcript_agent", "tool_called", "approval_requested", "transcript_agent",
       "approval_decided", "tool_result", "transcript_agent", "tool_called", "tool_result", "call_ended", "task_queued",
     ]);
-    expect(events[6]?.payload).toEqual({ approvalId: approval.id, outcome: "denied", decision: "denied" });
-    expect(events[7]?.payload.message).toMatch(/NEGOU/);
+    // Sem texto do operador, o aviso é o padrão, e vem na frente da saudação.
+    expect([events[2]?.payload, events[3]?.payload]).toEqual([{ text: DEFAULT_RECORDING_NOTICE }, { text: `${DEFAULT_RECORDING_NOTICE} ${GREETING}` }]);
+    expect(events[7]?.payload).toEqual({ approvalId: approval.id, outcome: "denied", decision: "denied" });
+    expect(events[8]?.payload.message).toMatch(/NEGOU/);
     expect(await callOf(app, callId)).toMatchObject({ status: "completed", end_reason: "end_call" });
 
     // Sem transferência pedida, o canal que volta do AudioSocket é desligado.
@@ -240,8 +242,9 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
   });
 
   it("aprovação sem resposta: vence no prazo, aplica o padrão e o agente segue", async () => {
-    const script: SimulatedScript = [approvalStep("approved"), { say: "Pode seguir com o desconto." }, { toolCall: { name: "end_call", args: { reason: "Concluído." } } }];
-    const { timers, clock, callId } = await incomingCall("e2e-expired", { script });
+    const script: SimulatedScript = [approvalStep(), { say: "Pode seguir com o desconto." }, { toolCall: { name: "end_call", args: { reason: "Concluído." } } }];
+    // O que vale sem resposta é escolha do operador, não do modelo.
+    const { timers, clock, callId } = await incomingCall("e2e-expired", { script }, { "approvals.default_on_timeout": "approved" });
     const approval = await pendingApproval(callId);
     await saidWaitLine(callId);
     expect(timers.held()).toContain(30_000);
@@ -270,11 +273,11 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
 
     const events = await eventsOf(app, callId);
     expect(events.map((event) => event.kind)).toEqual([
-      "call_started", "call_answered", "transcript_agent", "tool_called", "approval_requested", "transcript_agent", "tool_result", "call_ended", "task_queued",
+      "call_started", "call_answered", "recording_notice", "transcript_agent", "tool_called", "approval_requested", "transcript_agent", "tool_result", "call_ended", "task_queued",
     ]);
     // A ferramenta em espera foi solta, com o motivo para o operador, antes do fim da chamada.
-    expect(events[6]?.payload).toMatchObject({ name: "request_approval", ok: false, error: "The call ended before the tool finished" });
-    expect(events[7]?.payload).toMatchObject({ status: "completed", reason: "caller_hangup" });
+    expect(events[7]?.payload).toMatchObject({ name: "request_approval", ok: false, error: "The call ended before the tool finished" });
+    expect(events[8]?.payload).toMatchObject({ status: "completed", reason: "caller_hangup" });
     expect(await callOf(app, callId)).toMatchObject({ status: "completed", end_reason: "caller_hangup" });
     expect((await tasksOf(app, organizationId)).filter((task) => task.kind === "summarize_call")).toHaveLength(1);
     expect(await ledgerOf(app, callId)).toHaveLength(1);
@@ -282,7 +285,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     // O canal morre do lado do Asterisk; nada mais é gravado por causa disso.
     ari.emit({ type: "ChannelDestroyed", channel: { id: channelId }, cause_txt: "Normal Clearing" });
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(await kindsOf(app, callId)).toHaveLength(9);
+    expect(await kindsOf(app, callId)).toHaveLength(10);
   });
 
   it("fecha a conexão de áudio de uma chamada que ninguém espera", async () => {

@@ -15,7 +15,7 @@
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
-import { openProviderSocket } from "../provider-socket";
+import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
 import type { VoiceEngine, VoiceSession } from "../types";
 
@@ -147,6 +147,7 @@ const engine: VoiceEngine = {
       emitter,
       onMessage,
       onClosed: () => sessionFailed(new Error("OpenAI Realtime: a conexão fechou antes de confirmar a sessão")),
+      timeout: options,
     });
 
     socket.send({
@@ -167,12 +168,7 @@ const engine: VoiceEngine = {
         tools: config.tools.map((tool) => ({ type: "function", ...tool })),
       },
     });
-    try {
-      await ready;
-    } catch (error) {
-      await socket.close();
-      throw error;
-    }
+    await awaitSessionReady(ready, socket, { label: "OpenAI Realtime", emitter, timeout: options });
 
     const session: VoiceSession = {
       on: (event, handler) => emitter.on(event, handler),

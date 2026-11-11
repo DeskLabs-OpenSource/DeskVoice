@@ -63,9 +63,10 @@ describe("troncos", { timeout: 120_000 }, () => {
     await putSetting(app, organizationId, "network.public_ip", "198.51.100.77", false);
     const ari = fakeAri();
     const file = path.join(scratch, "apply", "pjsip_trunks.conf");
+    ari.loadsFile = file;
 
     const result = await applyTrunks(trunksDeps(ari, file));
-    expect(result.applied).toBe(true);
+    expect(result).toMatchObject({ applied: true, detail: expect.stringContaining("listed by the telephony server") });
     expect(result.skipped).toContainEqual({ id: evil, reason: expect.stringContaining("host") });
     expect(ari.log).toEqual(["reload res_pjsip.so"]);
 
@@ -95,7 +96,9 @@ describe("troncos", { timeout: 120_000 }, () => {
     const ipOnRegistered = await createTrunk(app, second, { ...options, host: "198.51.100.96" });
 
     const dir = path.join(scratch, "shared");
-    const deps = trunksDeps(fakeAri(), path.join(dir, "pjsip_trunks.conf"));
+    const ari = fakeAri();
+    const deps = trunksDeps(ari, path.join(dir, "pjsip_trunks.conf"));
+    ari.loadsFile = deps.file;
     await applyTrunks(deps);
     await applyTrunks(deps);
     const conf = await readFile(deps.file, "utf8");
@@ -125,6 +128,25 @@ describe("troncos", { timeout: 120_000 }, () => {
     expect(health).toMatchObject({ status: "fail", detail: expect.stringContaining("already used by another line") });
   });
 
+  it("recarregou mas o Asterisk não lista a linha (arquivo ilegível ou com erro): não diz que aplicou, e a linha fica com a causa provável", async () => {
+    const organizationId = await createOrganization(app, "trunks-unreadable");
+    const trunk = await createTrunk(app, organizationId, { host: "198.51.100.90" });
+    const ari = fakeAri(); // recarrega com sucesso, mas não lista endpoint nenhum
+    // Confere algumas vezes antes de desistir (o Asterisk leva um instante para listar); aqui, sem esperar.
+    const waits: number[] = [];
+    const deps: TrunksDeps = { ...trunksDeps(ari, path.join(scratch, "unreadable", "pjsip_trunks.conf")), schedule: (fn, delayMs) => (waits.push(delayMs), setImmediate(fn), () => undefined) };
+    const result = await applyTrunks(deps);
+    expect(waits).toEqual([400, 400, 400, 400]);
+    expect(ari.log).toEqual(["reload res_pjsip.so"]);
+    expect(result).toMatchObject({ applied: false, detail: expect.stringMatching(/does not list the written lines.*cannot read the generated lines file.*syntax error/) });
+    expect(await readFile(deps.file, "utf8")).toContain(`[trunk-${trunk}]`);
+    expect(await trunkRow(trunk)).toMatchObject({ status: "fail", last_error: expect.stringMatching(/does not list this line.*owner or permissions/) });
+
+    // Quando o Asterisk passa a ler o arquivo, a mesma aplicação diz que carregou.
+    ari.loadsFile = deps.file;
+    expect(await applyTrunks(deps)).toMatchObject({ applied: true });
+  });
+
   it("sem Asterisk no ar o arquivo é escrito mesmo assim e o resultado diz que falta recarregar", async () => {
     const ari = fakeAri();
     ari.failing = true;
@@ -148,7 +170,7 @@ describe("troncos", { timeout: 120_000 }, () => {
     expect(Object.fromEntries((await mine()).map((trunk) => [trunk.id, trunk.status]))).toEqual({ [online ?? ""]: "ok", [offline ?? ""]: "fail", [unknown ?? ""]: "warn", [missing ?? ""]: "fail" });
     expect(await trunkRow(online ?? "")).toMatchObject({ status: "ok", last_error: null, last_check_at: expect.any(Date) });
     expect(await trunkRow(offline ?? "")).toMatchObject({ status: "fail", last_error: expect.stringContaining("does not answer") });
-    expect(await trunkRow(missing ?? "")).toMatchObject({ status: "fail", last_error: expect.stringContaining("not loaded") });
+    expect(await trunkRow(missing ?? "")).toMatchObject({ status: "fail", last_error: expect.stringMatching(/does not list this line.*cannot read the generated lines file/) });
 
     ari.failing = true;
     expect((await mine()).map((trunk) => trunk.status)).toEqual(["fail", "fail", "fail", "fail"]);
@@ -268,7 +290,7 @@ describe("chamada simulada pela API interna", { timeout: 120_000 }, () => {
 
     const kinds = await kindsOf(app, callId);
     expect(kinds.filter((kind) => !kind.startsWith("transcript"))).toEqual([
-      "call_started", "call_answered", "tool_called", "human_notified", "tool_result", "tool_called", "approval_requested", "approval_decided", "tool_result",
+      "call_started", "call_answered", "recording_notice", "tool_called", "human_notified", "tool_result", "tool_called", "approval_requested", "approval_decided", "tool_result",
       "tool_called", "transfer_started", "tool_result", "call_ended", "task_queued",
     ]);
     expect(kinds.filter((kind) => kind === "transcript_user")).toHaveLength(1);

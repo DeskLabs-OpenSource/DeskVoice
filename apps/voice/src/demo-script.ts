@@ -3,7 +3,7 @@ import type { SimulatedScript } from "@deskvoice/voice-engine";
 /** As ferramentas que o roteiro usa. A chamada simulada as habilita, seja qual for a lista do agente. */
 export const DEMO_TOOLS = ["notify_human", "request_approval", "transfer_to_human", "end_call"];
 
-/** Quanto a aprovação da demonstração espera por alguém no painel antes de valer o padrão (negar). */
+/** Quanto a aprovação da demonstração espera por alguém no painel antes de valer o padrão do operador (negar, se ele não mudou). */
 export const DEMO_APPROVAL_TIMEOUT_SECONDS = 60;
 
 /**
@@ -11,7 +11,10 @@ export const DEMO_APPROVAL_TIMEOUT_SECONDS = 60;
  * produto faz. O motor simulado não ouve nem decide: ele segue estes passos, e as ferramentas
  * rodam de verdade (o aviso chega ao painel, a aprovação espera a decisão de uma pessoa).
  *
- * `greet`: fala a saudação do roteiro; falso quando o agente já tem a dele, que o motor fala antes.
+ * Antes do primeiro passo o motor fala a abertura que a conversa montou: o aviso de gravação e,
+ * se o agente tiver, a saudação dele.
+ *
+ * `greet`: fala a saudação do roteiro, depois do aviso; falso quando o agente já tem a dele.
  * `canTransfer`: o agente tem número de transferência; sem ele o roteiro termina em despedida.
  */
 export function demoScript(options: { greet: boolean; canTransfer: boolean }): SimulatedScript {
@@ -38,7 +41,6 @@ export function demoScript(options: { greet: boolean; canTransfer: boolean }): S
         args: {
           question: "Posso dar 10% de desconto no pacote de três sessões de limpeza de pele?",
           context: "Marina Duarte, cliente da clínica, quer fechar o pacote de três sessões hoje e pediu desconto. Ela está na linha aguardando a resposta.",
-          default_on_timeout: "denied",
           timeout_seconds: DEMO_APPROVAL_TIMEOUT_SECONDS,
         },
       },

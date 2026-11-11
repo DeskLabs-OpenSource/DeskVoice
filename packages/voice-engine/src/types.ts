@@ -61,7 +61,17 @@ export interface ConnectOptions {
   model?: string;
   /** Sobrepõe a URL do WebSocket do provedor (testes apontam para um servidor falso). */
   baseUrl?: string;
+  /** Prazo para a conexão abrir e, depois, para o provedor confirmar a sessão. Padrão: 10 s cada. */
+  readyTimeoutMs?: number;
+  /** Agendador do prazo (`setTimeout` por padrão). Devolve como cancelar. */
+  schedule?: (fn: () => void, delayMs: number) => () => void;
 }
+
+/**
+ * O provedor não respondeu no prazo ao abrir a sessão. Quem ligou já foi atendido: a chamada
+ * precisa sair do silêncio, então quem chama `connect` trata isto como recusa, e não espera.
+ */
+export class EngineTimeoutError extends Error {}
 
 export interface VoiceEngine {
   id: string;

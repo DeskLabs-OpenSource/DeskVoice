@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { encryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
 import { createSimulatedEngine, SIMULATED_PREFIX, type SimulatedScript, type VoiceEngine, type VoiceSession, type VoiceSessionConfig, type VoiceSessionEvents } from "@deskvoice/voice-engine";
@@ -165,6 +166,8 @@ export interface FakeAri extends AriClient {
   emit(event: AriEvent): void;
   connect(): void;
   endpoints: Array<{ resource: string; state?: string }>;
+  /** Como um Asterisk que consegue ler o arquivo de troncos: lista os endpoints que estão nele. */
+  loadsFile?: string;
   failing: boolean;
 }
 
@@ -190,7 +193,9 @@ export function fakeAri(): FakeAri {
     reloadModule: (name) => record(`reload ${name}`),
     async listEndpoints() {
       if (ari.failing) throw new Error("ARI is down");
-      return ari.endpoints;
+      if (ari.loadsFile === undefined) return ari.endpoints;
+      const conf = await readFile(ari.loadsFile, "utf8");
+      return [...conf.matchAll(/^\[(trunk-[0-9a-f-]{36})\]$\ntype=endpoint/gm)].map((match) => ({ resource: match[1] ?? "", state: "unknown" }));
     },
     status: () => (ari.failing ? { connected: false, detail: "ARI is down" } : { connected: true, detail: "Connected." }),
     onEvent: (handler) => void eventHandlers.push(handler),
@@ -254,7 +259,7 @@ export interface ManualEngine {
   emit<K extends keyof VoiceSessionEvents>(event: K, ...args: Parameters<VoiceSessionEvents[K]>): void;
 }
 
-export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string } = {}): ManualEngine {
+export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean } = {}): ManualEngine {
   const handlers = new Map<string, Array<(...args: never[]) => void>>();
   const manual: ManualEngine = {
     configs: [],
@@ -274,7 +279,9 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
       async connect(config, apiKey) {
         manual.configs.push(config);
         manual.keys.push(apiKey);
-        if (options.connectError) throw new Error(options.connectError);
+        if (options.connectError) throw typeof options.connectError === "string" ? new Error(options.connectError) : options.connectError;
+        // O provedor aceitou a conexão e ficou mudo: o `connect` nunca volta.
+        if (options.connectHangs) await new Promise(() => undefined);
         const session: VoiceSession = {
           on: (event, handler) => void handlers.set(event, [...(handlers.get(event) ?? []), handler as (...args: never[]) => void]),
           sendAudio: (pcm) => void (manual.audioBytes += pcm.length),
