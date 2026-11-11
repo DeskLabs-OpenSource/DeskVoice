@@ -3,6 +3,20 @@
 Tudo o que se faz na VPS passa por estes scripts. Nenhum deles pede para você editar arquivo à
 mão, e nenhum diz "pronto" sem conferir o resultado.
 
+## Antes de ter servidor
+
+Ainda não tem uma VPS? No seu computador (macOS ou Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/install/start.sh | bash
+```
+
+`start.sh` só informa: o que é preciso, o tamanho da máquina, o link da VPS parceira (dizendo que
+é de parceria e que não é obrigatório) e o comando seguinte. Não instala, não coleta e não envia
+nada. Num terminal, ele pergunta se você quer abrir o link no navegador e só abre com um "s".
+
+O nome, o endereço e o texto da oferta da parceira moram em `partner.env`. Os scripts leem dali.
+
 ## Em uma linha
 
 ```bash
@@ -39,6 +53,7 @@ e número) e o agente. Nada disso é pedido no terminal.
 
 | Script | O que faz | O que ele confere antes de dizer que deu certo |
 |---|---|---|
+| `start.sh` | Roda no seu computador, antes do servidor: diz o que é preciso e entrega o comando seguinte | Não altera nada. Só mostra o link da parceira se conseguiu ler o endereço de `partner.env` |
 | `install.sh` | Confere a máquina e a rede, faz poucas perguntas, gera os segredos, sobe tudo e cria o primeiro usuário. Pode ser rodado de novo: retoma de onde parou e nunca troca um segredo que já existe | Cada peça essencial respondendo (painel, banco, Asterisk, worker de voz, rotinas) |
 | `healthcheck.sh` | Uma linha por peça, com estado e detalhe. `--json` para monitoramento | Não resume: mostra qual peça está fora |
 | `backup.sh` | Copia o banco, os três arquivos de ambiente e a configuração gerada do Asterisk para `backups/<data>/` | Restaura o dump num banco de rascunho e conta as linhas de cada tabela |

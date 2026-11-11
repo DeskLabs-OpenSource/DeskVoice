@@ -68,6 +68,30 @@ Nenhum recurso exige SSH para ser ligado.
 O passo a passo completo, do zero à primeira chamada, está em
 [`docs/guides/primeira-ligacao.md`](docs/guides/primeira-ligacao.md).
 
+### Instalando com um assistente de IA
+
+Usa Claude Code, Codex, Cursor ou outro assistente de código? Cole isto nele:
+
+```text
+Me ajude a instalar o DeskVoice: https://github.com/DeskLabs-OpenSource/DeskVoice
+Leia o AGENTS.md do repositório e siga a skill deskvoice-instalar.
+```
+
+A primeira pergunta dele é se você já tem um servidor. Se não tiver, ele diz o tamanho de máquina
+que basta e mostra o link da VPS da HostGator, o mesmo do bloco acima, dizendo que é um link de
+parceria e que qualquer outra VPS com Docker funciona igual. Depois pergunta sobre o sistema da
+VPS, as portas, o domínio, o tronco SIP e a chave de IA, e acompanha até a primeira ligação.
+Senha e chave não vão para a conversa: entram pelo instalador ou pela tela.
+
+Prefere um comando a uma conversa? No seu computador (macOS ou Linux), antes de ter servidor:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/install/start.sh | bash
+```
+
+Ele só informa: o que é preciso, o tamanho da máquina, o link da parceria e o comando seguinte.
+Não instala nem coleta nada.
+
 ### Ver uma chamada sem chave nem tronco
 
 O repositório traz um motor de voz simulado. Ele roda uma chamada inteira, com saudação,

@@ -70,6 +70,32 @@ y el agente. Ninguna función exige SSH para activarse.
 | Un troncal SIP con un número | Contratado con la operadora de telefonía que elijas. Autenticación por registro o por IP |
 | Una clave de IA de voz | Gemini (Google) u OpenAI. Pagas el uso directamente al proveedor |
 
+### Instalar con un asistente de IA
+
+¿Usas Claude Code, Codex, Cursor u otro asistente de código? Pega esto en él:
+
+```text
+Ayúdame a instalar DeskVoice: https://github.com/DeskLabs-OpenSource/DeskVoice
+Lee el AGENTS.md del repositorio y sigue la skill deskvoice-instalar.
+```
+
+Su primera pregunta es si ya tienes un servidor. Si no lo tienes, te dice qué tamaño de máquina
+alcanza y muestra el enlace de la VPS de HostGator, el mismo del bloque de arriba, aclarando que
+es un enlace de la alianza y que cualquier otra VPS con Docker funciona igual. Después pregunta
+por el sistema de la VPS, los puertos, el dominio, el troncal SIP y la clave de IA, y te acompaña
+hasta la primera llamada. Las contraseñas y las claves no van a la conversación: se ingresan en
+el instalador o en la pantalla.
+
+¿Prefieres un comando a una conversación? En tu computadora (macOS o Linux), antes de tener
+servidor:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/install/start.sh | bash
+```
+
+Solo informa: qué necesitas, el tamaño de la máquina, el enlace de la alianza y el comando
+siguiente. No instala ni recopila nada. Su salida está en portugués de Brasil.
+
 ### Ver una llamada sin clave ni troncal
 
 El repositorio trae un motor de voz simulado. Ejecuta una llamada completa, con saludo,
