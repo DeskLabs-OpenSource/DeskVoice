@@ -9,7 +9,7 @@
 # Variáveis opcionais:
 #   DESKVOICE_DIR   pasta de destino (padrão: ~/DeskVoice)
 #   DESKVOICE_REPO  endereço do repositório (padrão: o oficial)
-#   DESKVOICE_REF   ramo ou versão a baixar (padrão: main)
+#   DESKVOICE_REF   ramo ou versão a baixar (padrão: a última versão publicada; sem nenhuma, a main)
 set -euo pipefail
 
 repo="${DESKVOICE_REPO:-https://github.com/DeskLabs-OpenSource/DeskVoice.git}"
@@ -38,6 +38,15 @@ elif [ -e "$dir" ]; then
 else
   say "Baixando o DeskVoice em $dir..."
   git clone --quiet --branch "$ref" "$repo" "$dir" || die "não consegui baixar o repositório." "Confira a conexão da VPS com a internet e rode de novo."
+  # Sem pedido explícito, o código fica na última versão publicada: é dela que o instalador baixa
+  # as imagens, e código da main com imagem de versão anterior é uma combinação que ninguém testou.
+  if [ -z "${DESKVOICE_REF:-}" ]; then
+    latest="$(git -C "$dir" tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+    if [ -n "$latest" ]; then
+      git -C "$dir" checkout --quiet "$latest" || die "não consegui ir para a versão $latest." "Apague a pasta $dir e rode de novo."
+      say "Versão baixada: ${latest#v}"
+    fi
+  fi
 fi
 
 [ -f "$dir/install/install.sh" ] || die "o instalador não está em $dir/install/install.sh." "Apague a pasta $dir e rode de novo."

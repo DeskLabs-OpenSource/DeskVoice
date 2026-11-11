@@ -7,6 +7,7 @@ D="$DESKVOICE_DEPLOY_DIR"; O="$D/docker-compose.override.yml"; A="$D/app.env"
 export DESKVOICE_ORG_NAME="Clínica Exemplo" DESKVOICE_OWNER_NAME="Ana Exemplo" DESKVOICE_OWNER_EMAIL=ana@exemplo.com.br DESKVOICE_OWNER_PASSWORD="senha-de-teste-123"
 export DESKVOICE_HEALTH_TIMEOUT=0
 echo 1 > "$FAKE_DIR/users_count"
+: > "$FAKE_DIR/git_tags"   # um clone do repositório, ainda sem nenhuma versão publicada
 printf 'asterisk|ok|PJSIP 20.20.1\n' > "$FAKE_DIR/voice_health"
 printf '%s\n' 'panel|ok|respondendo' 'trunk|warn|sem linha' 'engine|warn|sem chave' > "$FAKE_DIR/panel_health"
 other_proxy() { printf 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:*\nLISTEN 0 511 0.0.0.0:443 0.0.0.0:*\n%s' "${1:-}" > "$FAKE_DIR/ss_tcp"; }

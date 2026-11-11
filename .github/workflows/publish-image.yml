@@ -1,7 +1,12 @@
 name: publish-image
 
-# Em tag `vX.Y.Z`: constrói e publica uma imagem por processo, para amd64 e arm64, em
-# ghcr.io/desklabs-opensource/deskvoice-{panel,voice,routines}:X.Y.Z.
+# Em tag `vX.Y.Z`: constrói e publica uma imagem por processo, para amd64 e arm64, com a etiqueta
+# `X.Y.Z` (sem `v`), que é o mesmo número que a instalação grava.
+#
+# O endereço das imagens e a conversão entre a tag do git e a etiqueta da imagem NÃO estão
+# escritos aqui: vêm de deploy/images.env e de install/_common.sh (`image_ref`, `version_of_tag`),
+# os mesmos que o instalador e o atualizador usam. O que este workflow publica e o que a VPS pede
+# saem do mesmo lugar.
 #
 # `stable` só é promovido em tag de versão final, e só depois que as TRÊS imagens publicaram:
 # promover uma a uma deixaria, numa falha no meio, quem instala por `stable` com processos do
@@ -22,9 +27,6 @@ concurrency:
   group: publish-image-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  REGISTRY: ghcr.io/desklabs-opensource
-
 jobs:
   probe:
     name: probe
@@ -41,14 +43,16 @@ jobs:
       - name: Há o que publicar?
         id: probe
         run: |
-          set -euo pipefail
-          if [[ ! "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)(-[0-9A-Za-z.-]+)?$ ]]; then
+          source install/_common.sh
+          tag="${GITHUB_REF#refs/tags/}"
+          version="$(version_of_tag "${tag}")"
+          if [ "${tag}" = "${GITHUB_REF}" ] || [ "$(tag_of_version "${version}")" != "${tag}" ] || ! is_version "${version}"; then
             echo "::error::Imagem só se publica a partir de uma tag vX.Y.Z (veio de ${GITHUB_REF})."
             exit 1
           fi
-          echo "version=${BASH_REMATCH[1]}${BASH_REMATCH[2]}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
           # Pré-versão (v1.2.0-rc.1) publica com o próprio número e não mexe em `stable`.
-          if [ -z "${BASH_REMATCH[2]}" ]; then echo "stable=true" >> "${GITHUB_OUTPUT}"; else echo "stable=false" >> "${GITHUB_OUTPUT}"; fi
+          case "${version}" in *-*) echo "stable=false" >> "${GITHUB_OUTPUT}" ;; *) echo "stable=true" >> "${GITHUB_OUTPUT}" ;; esac
           if [ -f Dockerfile ]; then
             echo "dockerfile=true" >> "${GITHUB_OUTPUT}"
           else
@@ -80,18 +84,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+      - name: Nome da imagem, pela mesma função que o instalador usa
+        id: image
+        env:
+          PROCESS: ${{ matrix.process }}
+          VERSION: ${{ needs.probe.outputs.version }}
+        run: |
+          source install/_common.sh
+          echo "ref=$(image_ref "${PROCESS}" "${VERSION}")" >> "${GITHUB_OUTPUT}"
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: ${{ matrix.process }}
           platforms: linux/amd64,linux/arm64
           push: true
-          # Duas etiquetas para a mesma imagem: `X.Y.Z` e `vX.Y.Z`. O atualizador da VPS pede a
-          # versão com o `v` da tag git; sem a segunda etiqueta o pull falhava sempre e toda
-          # atualização construía a imagem na própria VPS.
-          tags: |
-            ${{ env.REGISTRY }}/deskvoice-${{ matrix.process }}:${{ needs.probe.outputs.version }}
-            ${{ env.REGISTRY }}/deskvoice-${{ matrix.process }}:v${{ needs.probe.outputs.version }}
+          # Uma etiqueta só, `X.Y.Z`: é o que a instalação grava e o que o atualizador pede.
+          tags: ${{ steps.image.outputs.ref }}
           build-args: |
             APP_VERSION=${{ needs.probe.outputs.version }}
           labels: |
@@ -110,6 +118,9 @@ jobs:
       contents: read
       packages: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -120,8 +131,40 @@ jobs:
         env:
           VERSION: ${{ needs.probe.outputs.version }}
         run: |
-          set -euo pipefail
-          for process in panel voice routines; do
-            docker buildx imagetools create --tag "${REGISTRY}/deskvoice-${process}:stable" "${REGISTRY}/deskvoice-${process}:${VERSION}"
+          source install/_common.sh
+          for process in ${APP_SERVICES}; do
+            docker buildx imagetools create --tag "$(image_ref "${process}" stable)" "$(image_ref "${process}" "${VERSION}")"
           done
           echo "stable = ${VERSION} em deskvoice-panel, deskvoice-voice e deskvoice-routines." >> "${GITHUB_STEP_SUMMARY}"
+
+  # Publicar não basta: a VPS de quem instala baixa sem credencial. Um pacote novo no registro
+  # nasce privado, e aí toda instalação para com "não consegui baixar as imagens". Este job não
+  # entra no registro: pergunta pelas imagens como a VPS pergunta, e diz o conserto se não as vê.
+  verify-public:
+    name: verify-public
+    needs: [probe, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: As três imagens baixam sem credencial?
+        env:
+          VERSION: ${{ needs.probe.outputs.version }}
+        run: |
+          source install/_common.sh
+          missing=0
+          for process in ${APP_SERVICES}; do
+            ref="$(image_ref "${process}" "${VERSION}")"
+            if docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
+              echo "ok: ${ref}" | tee -a "${GITHUB_STEP_SUMMARY}"
+            else
+              missing=1
+              echo "::error::${ref} foi publicada, mas não baixa sem credencial. Abra o pacote deskvoice-${process} na organização (Packages), em Package settings mude a visibilidade para Public, e reexecute só este job."
+            fi
+          done
+          exit "${missing}"

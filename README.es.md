@@ -65,7 +65,7 @@ y el agente. Ninguna función exige SSH para activarse.
 
 | Qué necesitas | Observación |
 |---|---|
-| Una VPS con Ubuntu 22.04 o más nuevo | La [VPS de HostGator](https://www.hostgator.com.br/52708-141-3-52.html), socia del proyecto, es la recomendada. Cualquier VPS con Docker sirve, con el mismo comando. Se recomiendan 2 GB de memoria o más |
+| Una VPS con Ubuntu 22.04 o más nuevo | La [VPS de HostGator](https://www.hostgator.com.br/52708-141-3-52.html), socia del proyecto, es la recomendada. Cualquier VPS con Docker sirve, con el mismo comando. Sobre memoria, solo lo que se midió: la instalación se probó en una VPS de 8 GB y 4 vCPU, y DeskVoice en reposo usa cerca de 400 MB. El menor tamaño en el que cabe la instalación todavía no se midió |
 | Un dominio apuntando a la VPS | Opcional para probar. Sin dominio, el panel abre por IP y sin HTTPS |
 | Un troncal SIP con un número | Contratado con la operadora de telefonía que elijas. Autenticación por registro o por IP |
 | Una clave de IA de voz | Gemini (Google) u OpenAI. Pagas el uso directamente al proveedor |
@@ -114,6 +114,8 @@ probó, cada capacidad dice hasta dónde llegó la prueba:
 
 - **Probado en simulación:** cubierto por una prueba de punta a punta con el motor simulado, que
   recorre la llamada completa sin operador y sin clave.
+- **Probado en una instalación real:** corrió el 11/11/2026 en una VPS de prueba, de la forma y
+  hasta el punto que describe la fila.
 - **Esperando prueba real:** implementado y probado contra servidores falsos y contra un Asterisk
   real, pero todavía sin una llamada hecha por un operador real.
 
@@ -125,11 +127,17 @@ probó, cada capacidad dice hasta dónde llegó la prueba:
 | Tareas que siguen después de la llamada (resumen, avisos, tareas de seguimiento) | Probado en simulación |
 | Tope de costo y de duración por llamada | Probado en simulación |
 | Panel web en portugués, inglés y español | Rutas probadas con base de datos real; pantallas revisadas en portugués |
+| Instalar en una VPS con el kit de instalación | Probado en una instalación real, sin dominio |
+| Panel y voz del navegador por la misma dirección, la entrada única de Caddy | Probado en una instalación real, sin dominio |
+| Conversar por voz con el agente desde la pantalla "Hablar con el agente" | Probado en una instalación real con el motor OpenAI Realtime, por un cliente de prueba que hace el papel del navegador con habla grabada. Todavía no desde un navegador con micrófono |
+| Panel con dominio y HTTPS | Esperando prueba real |
 | Atender una llamada entrante por una línea de operador (troncal SIP) | Esperando prueba real |
 | Transferir la llamada a una persona | Esperando prueba real (el camino en Asterisk se verificó, sin operador) |
-| Motores de voz Gemini Live y OpenAI Realtime | Esperando prueba real (probados contra servidor falso, sin clave) |
+| Motor de voz OpenAI Realtime | Probado en una instalación real, en la conversación por la pantalla "Hablar con el agente" descrita arriba |
+| Motor de voz Gemini Live | Esperando prueba real (probado contra servidor falso, sin clave) |
 | Enviar WhatsApp durante la llamada, por conector | Esperando prueba real |
-| Instalador, actualización, chequeo de salud, respaldo y restauración | Probados con Docker simulado; respaldo y restauración revisados a mano en un Postgres real; instalación en VPS esperando prueba real |
+| Llamar a un webhook durante la llamada | Esperando prueba real (sin un receptor real) |
+| Actualización, chequeo de salud, respaldo y restauración | Probados con Docker simulado; respaldo y restauración revisados a mano en un Postgres real |
 | Llamadas hechas por el agente | Esperando prueba real, y apagado de fábrica. Ver "Llamadas salientes" |
 
 Si usted hace la primera llamada real, cuente cómo fue en un issue: es la contribución más

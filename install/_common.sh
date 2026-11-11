@@ -111,8 +111,9 @@ write_env_files() {
   local pg app sys url_system
   # deploy/.env
   env_set_if_missing "$ENV_FILE" POSTGRES_PASSWORD "$(random_hex 24)"
-  env_set_if_missing "$ENV_FILE" DESKVOICE_VERSION "${DESKVOICE_VERSION:-stable}"
-  env_set_if_missing "$ENV_FILE" DESKVOICE_IMAGE_PREFIX "${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}"
+  # A versão não é gravada aqui: quem decide é o instalador (número publicado ou `local`) e o
+  # atualizador. O endereço das imagens saiu deste arquivo: a fonte única é deploy/images.env.
+  env_unset "$ENV_FILE" DESKVOICE_IMAGE_PREFIX
   env_set "$ENV_FILE" PANEL_DOMAIN "$3"
   env_set "$ENV_FILE" RTP_START "$4"
   env_set "$ENV_FILE" RTP_END "$5"
@@ -373,12 +374,43 @@ partner_hint_allowed() {  # partner_hint_allowed "<fabricante lido de /sys/class
   return 1
 }
 
+# ── Imagens e versão: uma fonte só ───────────────────────────────────────────
+# O endereço das imagens mora em deploy/images.env. O formato da versão é um só: X.Y.Z, sem `v`,
+# na etiqueta da imagem e em DESKVOICE_VERSION. A tag do git é vX.Y.Z, e version_of_tag e
+# tag_of_version são a única conversão entre as duas: o atualizador e o publish-image.yml usam
+# estas mesmas funções.
+IMAGES_FILE="$DEPLOY_DIR/images.env"
+# O que fica gravado quando as imagens foram construídas nesta máquina (antes da primeira versão
+# publicada, ou com --build). Não é canal: não existe imagem publicada com esta etiqueta.
+LOCAL_VERSION="local"
+version_of_tag() { printf '%s\n' "${1#v}"; }
+tag_of_version() { printf 'v%s\n' "$1"; }
+is_version() {  # 0 = número de versão no formato único (X.Y.Z, ou X.Y.Z-rc.1 para pré-versão)
+  local re='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+  [[ "$1" =~ $re ]]
+}
+image_prefix() { env_get "$IMAGES_FILE" DESKVOICE_IMAGE_PREFIX; }
+image_ref() {  # image_ref <panel|voice|routines> <versão> → o nome completo, igual ao do Compose
+  printf '%s/deskvoice-%s:%s\n' "$(image_prefix)" "$1" "$2"
+}
+
+# A versão publicada mais recente é a maior tag final do clone. O Compose e o kit vêm do mesmo
+# repositório, e a tag só nasce no CI, de um commit da main. Pré-versão não conta: só entra com
+# pedido explícito. Devolve X.Y.Z, ou nada enquanto não houver nenhuma versão.
+is_clone() { have git && git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; }
+fetch_versions() { git -C "$REPO_DIR" fetch --tags --quiet origin; }
+latest_version() {
+  local tag
+  tag="$(git -C "$REPO_DIR" tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+  if [ -n "$tag" ]; then version_of_tag "$tag"; fi
+}
+
 # ── Docker ───────────────────────────────────────────────────────────────────
 dc() {
   if [ -f "$PROXY_OVERRIDE" ]; then
-    docker compose --env-file "$ENV_FILE" -f "$DEPLOY_DIR/docker-compose.yml" -f "$PROXY_OVERRIDE" "$@"
+    docker compose --env-file "$IMAGES_FILE" --env-file "$ENV_FILE" -f "$DEPLOY_DIR/docker-compose.yml" -f "$PROXY_OVERRIDE" "$@"
   else
-    docker compose --env-file "$ENV_FILE" -f "$DEPLOY_DIR/docker-compose.yml" "$@"
+    docker compose --env-file "$IMAGES_FILE" --env-file "$ENV_FILE" -f "$DEPLOY_DIR/docker-compose.yml" "$@"
   fi
 }
 require_install() {
