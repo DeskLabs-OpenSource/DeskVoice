@@ -12,6 +12,12 @@ import { agentCheckIn, agentReport, isAgent } from "../../../../../server/update
  * Como se distingue: o servidor do Next preenche `X-Forwarded-For` com o endereço da conexão
  * quando o pedido chega sem ele. Na chamada direta do agente esse endereço é o da própria
  * máquina (loopback). Pedido que veio pelo Caddy traz o endereço de quem chamou, ou uma lista.
+ *
+ * Esta checagem NÃO é autenticação: um cabeçalho pode ser forjado por quem alcança a porta do
+ * painel. Quem autentica é o segredo, que só o painel e o agente conhecem. Ela é a terceira
+ * camada, atrás do Caddy (que responde 404 neste caminho) e de o painel não publicar porta em
+ * modo nenhum. Não confie nela sozinha, nem a use como modelo para outra rota.
+ *
  * A primeira instalação de verdade no CI mostrou que "o cabeçalho não existe" nunca acontece
  * com o servidor real: a regra antiga recusava o próprio agente.
  *
