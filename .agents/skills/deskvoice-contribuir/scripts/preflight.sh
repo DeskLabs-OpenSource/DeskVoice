@@ -5,7 +5,7 @@
 # Cada linha traz o estado e o comando que a produziu, para você conferir sem confiar em mim.
 #
 # Uso: bash .agents/skills/deskvoice-contribuir/scripts/preflight.sh
-#      (rode `git fetch origin` antes: o pré-voo compara com a origin/main que está no seu disco)
+#      (rode `git fetch upstream` num fork, ou `git fetch origin` em clone direto: o pré-voo compara com a main do repositório principal que está no seu disco)
 set -uo pipefail
 
 root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
@@ -23,13 +23,16 @@ cmd()  { printf '          $ %s\n' "$1"; }
 echo "Pré-voo do DeskVoice (só mede; nada foi alterado)"
 echo
 
-if ! git rev-parse -q --verify origin/main >/dev/null 2>&1; then
-  echo "NÃO MEDIDO: não existe origin/main neste clone. Rode: git fetch origin"
+# Num fork, `origin` é o fork do contribuidor e a main dele costuma estar parada; a referência
+# certa é a main do repositório principal (`upstream`). Em clone direto, `origin` já é o principal.
+if git rev-parse -q --verify upstream/main >/dev/null 2>&1; then main_ref=upstream/main; else main_ref=origin/main; fi
+if ! git rev-parse -q --verify "$main_ref" >/dev/null 2>&1; then
+  echo "NÃO MEDIDO: não existe $main_ref neste clone. Rode: git fetch ${main_ref%%/*}"
   exit 0
 fi
-base="$(git merge-base origin/main HEAD 2>/dev/null || true)"
+base="$(git merge-base "$main_ref" HEAD 2>/dev/null || true)"
 if [ -z "$base" ]; then
-  echo "NÃO MEDIDO: este ramo não tem ancestral comum com origin/main."
+  echo "NÃO MEDIDO: este ramo não tem ancestral comum com $main_ref."
   exit 0
 fi
 # O que o PR vai propor: commits do ramo mais o que ainda não foi commitado.
@@ -39,20 +42,20 @@ added_lines() { git diff "$base" -U0 -- "$@" | grep -E '^\+[^+]' || true; }
 
 echo "1. Ramo"
 branch="$(git branch --show-current)"
-behind="$(git rev-list --count "$base..origin/main")"
+behind="$(git rev-list --count "$base..$main_ref")"
 ahead="$(git rev-list --count "$base..HEAD")"
 case "$branch" in
   main | master) warn "você está em '$branch'. PR sai de um ramo com nome: git switch -c fix/o-que-conserta" ;;
   *) ok "ramo '$branch', $ahead commit(s) próprios" ;;
 esac
 if [ "$behind" -gt 0 ]; then
-  warn "$behind commit(s) atrás de origin/main. Traga a main: git merge origin/main (nunca reset --hard nem push --force)"
-  overlap="$(comm -12 <(git diff --name-only "$base" origin/main | sort) <(printf '%s\n' "$changed"))"
+  warn "$behind commit(s) atrás de $main_ref. Traga a main: git merge $main_ref (nunca reset --hard nem push --force)"
+  overlap="$(comm -12 <(git diff --name-only "$base" $main_ref | sort) <(printf '%s\n' "$changed"))"
   [ -n "$overlap" ] && warn "arquivos que a main também mudou (onde nasce conflito): $(echo "$overlap" | tr '\n' ' ')"
 else
-  ok "em dia com origin/main"
+  ok "em dia com $main_ref"
 fi
-cmd "git rev-list --count \$(git merge-base origin/main HEAD)..origin/main"
+cmd "git rev-list --count \$(git merge-base ${main_ref} HEAD)..${main_ref}"
 echo
 
 echo "2. Segredo no diff"
@@ -63,7 +66,7 @@ if [ "${secrets:-0}" -gt 0 ]; then warn "$secrets linha(s) nova(s) com formato d
 # O gitleaks é o que o CI roda; ele só enxerga o que já foi commitado.
 if command -v gitleaks >/dev/null 2>&1; then
   if gitleaks git --no-banner --redact --log-opts="$base..HEAD" . >/dev/null 2>&1; then ok "gitleaks não achou segredo nos commits do ramo"; else warn "o gitleaks achou algo nos commits do ramo: o job secrets do CI vai reprovar. Veja com o comando abaixo"; fi
-  cmd "gitleaks git --redact --log-opts=\"\$(git merge-base origin/main HEAD)..HEAD\" ."
+  cmd "gitleaks git --redact --log-opts=\"\$(git merge-base ${main_ref} HEAD)..HEAD\" ."
 else
   info "gitleaks não instalado: o CI roda a varredura completa nos commits"
 fi
@@ -97,11 +100,11 @@ if [ -z "$migrations" ]; then
   info "o diff não toca db/migrations"
 else
   for file in $migrations; do
-    if git cat-file -e "origin/main:$file" 2>/dev/null; then
+    if git cat-file -e "$main_ref:$file" 2>/dev/null; then
       warn "$file já está publicada na main: migration publicada nunca é editada. Corrija com uma nova"
     elif ! echo "$file" | grep -Eq '^db/migrations/[0-9]{8}T[0-9]{6}_[a-z0-9]+(_[a-z0-9]+)*\.sql$'; then
       warn "$file fora do padrão AAAAMMDDTHHMMSS_slug.sql"
-    elif git ls-tree -r --name-only origin/main -- db/migrations/ | grep -q "/$(basename "$file" | cut -d_ -f1)_"; then
+    elif git ls-tree -r --name-only $main_ref -- db/migrations/ | grep -q "/$(basename "$file" | cut -d_ -f1)_"; then
       warn "$file usa um carimbo que já existe na main: gere um novo com date -u +%Y%m%dT%H%M%S"
     else
       ok "$file (nome e carimbo livres na main; colisão com PR aberto é trabalho dos mantenedores)"

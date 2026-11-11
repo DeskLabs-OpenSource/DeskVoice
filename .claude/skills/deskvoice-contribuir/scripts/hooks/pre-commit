@@ -3,6 +3,10 @@
 # segredo no histórico e migration que vai colidir. O resto é papel do CI.
 set -uo pipefail
 
+# Num fork, `origin` é o fork do contribuidor e a main dele costuma estar parada; a referência
+# certa é a main do repositório principal (`upstream`). Em clone direto, `origin` já é o principal.
+if git rev-parse -q --verify upstream/main >/dev/null 2>&1; then main_ref=upstream/main; else main_ref=origin/main; fi
+
 fail=0
 MIGRATION_NAME='^db/migrations/[0-9]{8}T[0-9]{6}_[a-z0-9]+(_[a-z0-9]+)*\.sql$'
 
@@ -41,7 +45,7 @@ for file in $added; do
   fi
   stamp="$(basename "$file" | cut -d_ -f1)"
   # Carimbo já usado por OUTRO arquivo: no índice, ou na main do repositório principal.
-  others="$( { git ls-files -- db/migrations/; git ls-tree -r --name-only origin/main -- db/migrations/ 2>/dev/null; } | sort -u | grep "/${stamp}_" | grep -vxF "$file" || true)"
+  others="$( { git ls-files -- db/migrations/; git ls-tree -r --name-only "$main_ref" -- db/migrations/ 2>/dev/null; } | sort -u | grep "/${stamp}_" | grep -vxF "$file" || true)"
   if [ -n "$others" ]; then
     echo "pre-commit BLOQUEADO: o carimbo $stamp de $file já é usado por $(echo "$others" | head -n 1)." >&2
     echo "  Gere um novo: git mv \"$file\" \"db/migrations/\$(date -u +%Y%m%dT%H%M%S)_${file#*_}\"" >&2
@@ -49,9 +53,9 @@ for file in $added; do
   fi
 done
 
-if git rev-parse -q --verify origin/main >/dev/null 2>&1; then
+if git rev-parse -q --verify "$main_ref" >/dev/null 2>&1; then
   for file in $edited; do
-    if git cat-file -e "origin/main:$file" 2>/dev/null; then
+    if git cat-file -e "$main_ref:$file" 2>/dev/null; then
       echo "pre-commit BLOQUEADO: $file já está publicada na main e migration publicada nunca é editada, renomeada ou apagada." >&2
       echo "  Desfaça (git restore --staged --worktree \"$file\") e corrija com uma migration NOVA, só para frente." >&2
       fail=1
