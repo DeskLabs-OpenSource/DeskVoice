@@ -60,31 +60,38 @@ operadora. No seu computador:
 
 ```bash
 git clone https://github.com/DeskLabs-OpenSource/DeskVoice.git && cd DeskVoice
-pnpm install && pnpm demo
+pnpm install && pnpm demo   # precisa de Docker: sobe um Postgres descartável e o remove ao sair
 ```
 
 É o jeito mais rápido de entender o que o sistema faz antes de contratar qualquer coisa.
 
 ## O que ele faz hoje
 
-**Pronto** quer dizer: implementado e coberto por teste de ponta a ponta com o motor simulado.
-**Experimental** quer dizer: implementado, com pouca quilometragem em operadora e tronco reais.
+DeskVoice é uma fundação recém-lançada. Para ninguém instalar esperando o que ainda não foi
+provado, cada capacidade abaixo diz até onde a prova foi:
 
-| Capacidade | Estado |
+- **Provado em simulação:** coberto por teste de ponta a ponta com o motor simulado, que percorre a
+  chamada inteira sem operadora e sem chave.
+- **Aguardando prova real:** implementado e testado contra servidores falsos e contra um Asterisk
+  de verdade, mas ainda sem uma ligação feita por operadora real.
+
+| Capacidade | Até onde foi provado |
 |---|---|
-| Atender ligação recebida com um agente configurado no painel | Pronto |
-| Executar ferramentas durante a chamada (webhook, tarefa, encerrar) | Pronto |
-| Avisar um humano e pedir aprovação no meio da chamada, com prazo e resposta padrão se ninguém decidir | Pronto |
-| Transferir a ligação para uma pessoa | Pronto |
-| Linha do tempo de cada chamada, evento por evento, com custo | Pronto |
-| Tarefas depois que a ligação termina (resumo, aviso, webhook) | Pronto |
-| Teto de custo e de duração por chamada | Pronto |
-| Painel web em português, inglês e espanhol | Pronto |
-| Instalador, atualização, checagem de saúde, backup e restauração | Pronto |
-| Motor simulado para testes e demonstração | Pronto |
-| Motores de voz direta Gemini Live e OpenAI Realtime | Experimental |
-| Enviar WhatsApp durante a chamada, por conector (DeskcommCRM ou webhook) | Experimental |
-| Ligações feitas pelo agente | Experimental e desligado de fábrica. Veja "Ligações de saída", abaixo |
+| Conversa da chamada: saudação, falas, ferramentas, encerramento | Provado em simulação |
+| Avisar um humano e pedir aprovação no meio da chamada, com prazo e resposta padrão | Provado em simulação |
+| Linha do tempo de cada chamada, evento por evento, com custo | Provado em simulação |
+| Tarefas depois que a ligação termina (resumo, aviso, webhook) | Provado em simulação |
+| Teto de custo e de duração por chamada | Provado em simulação |
+| Painel web em português, inglês e espanhol | Rotas testadas com banco real; telas conferidas em português |
+| Atender ligação recebida por uma linha de operadora (tronco SIP) | Aguardando prova real |
+| Transferir a ligação para uma pessoa | Aguardando prova real (o caminho no Asterisk foi conferido, sem operadora) |
+| Motores de voz Gemini Live e OpenAI Realtime | Aguardando prova real (testados contra servidor falso, sem chave) |
+| Enviar WhatsApp durante a chamada, por conector | Aguardando prova real |
+| Instalador, atualização, checagem de saúde, backup e restauração | Backup e restauração provados em Postgres real; instalação em VPS aguardando prova real |
+| Ligações feitas pelo agente | Aguardando prova real, e desligado de fábrica. Veja "Ligações de saída", abaixo |
+
+Se você fizer a primeira ligação real, conte como foi numa issue: é a contribuição mais valiosa
+neste momento.
 
 O que **não** existe ainda: gravação de áudio (a fundação guarda a transcrição), várias empresas
 na mesma tela, construtor visual de fluxos, ligação pelo WhatsApp, URA por voz, filas de

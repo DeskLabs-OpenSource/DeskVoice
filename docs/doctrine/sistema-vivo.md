@@ -68,10 +68,10 @@ log morto.
 ### 5. Nada termina em silêncio
 
 Ao telefone, silêncio é o pior defeito: quem ligou não tem tela para ver o erro. Todo caminho de
-falha tem duas saídas obrigatórias: uma fala para quem está na linha e um evento para o painel.
+falha tem duas saídas obrigatórias: um sinal para quem está na linha e um evento para o painel.
 
-- **Motor de voz cai no meio da chamada:** a pessoa ouve um pedido de desculpa em texto fixo, a
-  chamada é transferida ou encerrada, e a linha do tempo mostra `engine_failed`.
+- **Motor de voz cai no meio da chamada:** a pessoa ouve um sinal de aviso (o motor caído não
+  consegue falar; uma desculpa gravada está no roadmap), a chamada é transferida ou encerrada, e a linha do tempo mostra `engine_failed`.
 - **Chave de IA ausente ou inválida:** a chamada é recusada com motivo, e o painel avisa.
 - **Ferramenta sem conector configurado:** devolve erro claro ao agente. Nunca finge que deu
   certo.

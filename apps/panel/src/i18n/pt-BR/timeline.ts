@@ -28,7 +28,7 @@ const timeline = {
     transfer_to: "Para {to}",
     transfer_completed: "Transferência concluída",
     engine_failed: "O motor de voz falhou",
-    engine_failed_body: "Quem estava na linha ouviu um pedido de desculpas em vez de silêncio. Confira a chave e a situação do provedor em Configurações.",
+    engine_failed_body: "Quem estava na linha ouviu um sinal de aviso e foi transferido ou desligado, sem ficar em silêncio. Confira a chave e a situação do provedor em Configurações.",
     call_refused: "Chamada recusada",
     cost_ceiling_reached: "Teto de custo atingido",
     cost_ceiling_body: "A chamada foi encerrada para não passar do limite definido no agente.",

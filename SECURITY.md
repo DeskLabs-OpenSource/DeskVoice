@@ -65,6 +65,26 @@ Se você alterar os arquivos de implantação, não acrescente publicação de p
 encontrar uma instalação padrão em que ele esteja acessível de fora, isso é uma vulnerabilidade:
 relate.
 
+## Limites conhecidos desta fundação
+
+Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em produção.
+
+- **Troca de organização por injeção de SQL.** O isolamento entre organizações é feito no banco
+  (RLS) a partir de um valor que a própria conexão define. Se um dia existir uma falha de injeção
+  de SQL numa consulta, quem a explorar e souber o identificador de outra organização consegue
+  trocar de organização. Hoje as consultas são parametrizadas e uma cerca reprova SQL fora de
+  `packages/core`. Fechar de vez pede outro desenho, e é uma frente aberta no roadmap.
+- **Limite de tentativas de login em memória.** Vale por processo do painel. Reiniciar o painel
+  zera a contagem.
+- **Tarefa atrasada pode rodar duas vezes.** A recuperação de tarefa presa mede a idade pelo
+  horário agendado, não pelo horário em que foi pega. As rotinas da fundação são seguras de
+  repetir; rotina nova precisa ser também.
+- **Motor de voz caído não fala.** Quem está na linha ouve um sinal de aviso e é transferido ou
+  desligado. Uma mensagem gravada é melhor e ainda não existe.
+- **Nada foi provado com operadora real.** A conversa inteira roda em simulação e a configuração
+  carrega num Asterisk de verdade, mas nenhuma ligação por tronco SIP foi feita. Veja a tabela
+  "O que ele faz hoje" no [README](README.md).
+
 ## Responsabilidade de quem hospeda
 
 Cada instalação é operada por quem a instalou. Atualizar o sistema, restringir o acesso SSH,

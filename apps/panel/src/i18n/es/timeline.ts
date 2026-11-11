@@ -30,7 +30,7 @@ const timeline: TimelineDictionary = {
     transfer_to: "A {to}",
     transfer_completed: "Transferencia completada",
     engine_failed: "El motor de voz falló",
-    engine_failed_body: "Quien estaba en la línea escuchó una disculpa en lugar de silencio. Revisa la clave y el estado del proveedor en Configuración.",
+    engine_failed_body: "Quien estaba en la línea escuchó un tono de aviso y fue transferido o desconectado, sin quedar en silencio. Revisa la clave y el estado del proveedor en Configuración.",
     call_refused: "Llamada rechazada",
     cost_ceiling_reached: "Tope de costo alcanzado",
     cost_ceiling_body: "La llamada se terminó para no pasar del límite definido en el agente.",

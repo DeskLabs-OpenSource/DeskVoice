@@ -140,7 +140,7 @@ Você precisa de Node 22, pnpm e, para os testes de banco, Docker.
 ```bash
 git clone https://github.com/DeskLabs-OpenSource/DeskVoice.git && cd DeskVoice
 pnpm install
-pnpm demo          # uma chamada inteira com o motor simulado
+pnpm demo          # uma chamada inteira com o motor simulado (precisa de Docker)
 pnpm verify        # o que o CI roda primeiro
 pnpm db:test:up    # sobe um Postgres descartável para os testes de banco
 pnpm test:db

@@ -115,7 +115,7 @@ que não informa uso não está pronto.
 ### 7. Fechar sempre avisando
 
 Toda sessão termina com `closed` e um motivo, inclusive quando o provedor derruba a conexão. É
-esse evento que faz o sistema falar o pedido de desculpa, transferir ou encerrar, e registrar a
+esse evento que faz o sistema tocar o sinal de aviso, transferir ou encerrar, e registrar a
 falha na linha do tempo. Um motor que morre calado deixa a ligação muda, que é o defeito que
 este projeto mais quer evitar.
 
@@ -165,7 +165,7 @@ E a lista do que o CI não vê:
 - [ ] Interromper o agente funciona.
 - [ ] `say` produz a fala pedida.
 - [ ] O custo aparece na linha do tempo e bate, aproximadamente, com o painel do provedor.
-- [ ] Derrubar a conexão no meio da chamada resulta em pedido de desculpa e em registro da
+- [ ] Derrubar a conexão no meio da chamada resulta em sinal de aviso e em registro da
       falha, e não em silêncio.
 - [ ] O português do Brasil soa natural. Diga no PR com que voz testou.
 - [ ] A fonte e a data do preço estão no PR.

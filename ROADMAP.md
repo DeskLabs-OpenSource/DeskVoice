@@ -15,6 +15,13 @@ O trabalho em curso é fazer o que já existe aguentar o mundo real.
 - Mensagens de erro do instalador e da checagem de saúde que digam o que fazer, e não só o que
   falhou.
 - Guias com telas reais, à medida que as telas estabilizam.
+- **A primeira ligação real.** Nada foi provado ainda com operadora de verdade: entrada por tronco
+  SIP, áudio ouvido, transferência atendida por uma pessoa. Quem fizer e relatar numa issue abre
+  o caminho para todos.
+- Dívidas conhecidas da fundação, listadas em [`SECURITY.md`](SECURITY.md) ("Limites conhecidos"):
+  coluna de "pega em" na fila de tarefas, mensagem gravada para motor de voz caído, isolamento
+  que resista a injeção de SQL, limite de login que sobreviva a reinício.
+- Aviso de gravação antes da saudação (hoje sai logo depois).
 
 ### A seguir: o agente faz mais, e o humano enxerga mais
 

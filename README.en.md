@@ -60,29 +60,36 @@ computer:
 
 ```bash
 git clone https://github.com/DeskLabs-OpenSource/DeskVoice.git && cd DeskVoice
-pnpm install && pnpm demo
+pnpm install && pnpm demo   # needs Docker: starts a throwaway Postgres and removes it on exit
 ```
 
 ## What it does today
 
-**Ready** means implemented and covered by an end-to-end test with the simulated engine.
-**Experimental** means implemented, with little mileage on real carriers and trunks.
+DeskVoice is a freshly launched foundation. So nobody installs it expecting what has not been
+proven yet, each capability below says how far the proof went:
 
-| Capability | Status |
+- **Proven in simulation:** covered by an end-to-end test with the simulated engine, which walks
+  through a whole call with no carrier and no key.
+- **Awaiting real-world proof:** implemented and tested against fake servers and a real Asterisk,
+  but no call has been placed through a real carrier yet.
+
+| Capability | How far it was proven |
 |---|---|
-| Answer an inbound call with an agent configured in the panel | Ready |
-| Run tools during the call (webhook, task, hang up) | Ready |
-| Notify a human and ask for approval mid-call, with a deadline and a default answer if nobody decides | Ready |
-| Transfer the call to a person | Ready |
-| A timeline for every call, event by event, with cost | Ready |
-| Tasks after the call ends (summary, notification, webhook) | Ready |
-| Cost and duration ceilings per call | Ready |
-| Web panel in Portuguese, English and Spanish | Ready |
-| Installer, update, health check, backup and restore | Ready |
-| Simulated engine for tests and demos | Ready |
-| Direct voice engines: Gemini Live and OpenAI Realtime | Experimental |
-| Send WhatsApp during the call, through a connector (DeskcommCRM or webhook) | Experimental |
-| Calls placed by the agent | Experimental and off by default. See "Outbound calls" |
+| Call conversation: greeting, turns, tools, hang-up | Proven in simulation |
+| Notify a human and ask for approval mid-call, with a deadline and a default answer | Proven in simulation |
+| Per-call timeline, event by event, with cost | Proven in simulation |
+| Work that continues after the call (summary, notice, webhook) | Proven in simulation |
+| Cost and duration ceiling per call | Proven in simulation |
+| Web panel in Portuguese, English and Spanish | Routes tested against a real database; screens checked in Portuguese |
+| Answer an inbound call from a carrier line (SIP trunk) | Awaiting real-world proof |
+| Transfer the call to a person | Awaiting real-world proof (the Asterisk path was checked, without a carrier) |
+| Gemini Live and OpenAI Realtime voice engines | Awaiting real-world proof (tested against a fake server, without a key) |
+| Send WhatsApp during the call, through a connector | Awaiting real-world proof |
+| Installer, update, health check, backup and restore | Backup and restore proven on real Postgres; VPS install awaiting real-world proof |
+| Calls placed by the agent | Awaiting real-world proof, and off by default. See "Outbound calls" |
+
+If you place the first real call, tell us how it went in an issue: it is the most valuable
+contribution right now.
 
 What does **not** exist yet: audio recording (the foundation stores the transcript), several
 companies on one screen, a visual flow builder, calls over WhatsApp, voice IVR, call queues.

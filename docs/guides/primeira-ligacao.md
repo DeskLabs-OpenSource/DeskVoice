@@ -16,11 +16,11 @@ o agente cumprimenta, a pessoa fala, o agente pede uma aprovação, alguém apro
 transferida e termina. Tudo o que o sistema faria numa chamada real acontece, menos a operadora
 e a conta do provedor.
 
-Você precisa de Node 22 e pnpm.
+Você precisa de Node 22, pnpm e Docker (a demonstração sobe um Postgres descartável e o remove ao sair).
 
 ```bash
 git clone https://github.com/DeskLabs-OpenSource/DeskVoice.git && cd DeskVoice
-pnpm install && pnpm demo
+pnpm install && pnpm demo   # precisa de Docker
 ```
 
 O que observar:
