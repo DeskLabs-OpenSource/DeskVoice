@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { hashPassword, withOrg, type Db } from "@deskvoice/core";
+import { hashPassword, verifyPassword, withOrg, type Db } from "@deskvoice/core";
 import { vi } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
-import { SESSION_COOKIE, createSession, setServerDeps, type Role, type RouteContext } from "../src/server/context";
+import { SESSION_COOKIE, createSession, setServerDeps, type Role, type RouteContext, type ServerDeps } from "../src/server/context";
 
 export { createOrganization, createCall } from "../../../packages/core/test/helpers";
 
@@ -13,7 +13,7 @@ export const NOW = new Date("2026-03-01T15:00:00.000Z");
 export const SECRET_KEY = Buffer.alloc(32, 7);
 
 /** Liga as rotas ao banco de teste, com relógio fixo e um processo de voz falso. */
-export function startPanel(): { app: Db; clock: { at: Date }; voice: { respond: FakeFetch; requests: Array<{ url: string; body: unknown }> }; close(): Promise<void> } {
+export function startPanel(): { app: Db; deps: ServerDeps; clock: { at: Date }; voice: { respond: FakeFetch; requests: Array<{ url: string; body: unknown }> }; close(): Promise<void> } {
   // A senha usa o scrypt de produção (64 MiB por conta); em máquina carregada cada um leva segundos.
   vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
   const { app, owner } = openTestDbs();
@@ -24,7 +24,7 @@ export function startPanel(): { app: Db; clock: { at: Date }; voice: { respond: 
     },
     requests: [],
   };
-  setServerDeps({
+  const deps: ServerDeps = {
     db: app,
     clock: { now: () => clock.at },
     secretKey: SECRET_KEY,
@@ -36,9 +36,13 @@ export function startPanel(): { app: Db; clock: { at: Date }; voice: { respond: 
     },
     voiceUrl: "http://voice.test",
     internalToken: "internal-test-token",
-  });
+    trustedProxyHops: 1,
+    verifyPassword,
+  };
+  setServerDeps(deps);
   return {
     app,
+    deps,
     clock,
     voice,
     async close() {

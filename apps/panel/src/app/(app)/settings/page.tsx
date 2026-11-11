@@ -95,6 +95,8 @@ export default function SettingsPage() {
   }, [webhooks.data]);
   useEffect(() => setNotice(recording.data?.value ?? ""), [recording.data]);
 
+  const savedConnector = connector.data?.value;
+  const connectorMoved = savedConnector != null && (savedConnector.url !== whatsapp.url || savedConnector.type !== whatsapp.type);
   if (engines.error && !engines.data) return <Notice tone="fail">{errorText(engines.error)}</Notice>;
   if (!engines.data) return <Skeleton lines={4} />;
   const setHook = (index: number, patch: Partial<Hook>): void => setHooks(hooks.map((hook, position) => (position === index ? { ...hook, ...patch } : hook)));
@@ -148,8 +150,8 @@ export default function SettingsPage() {
             <Field label={t.url}>
               <TextInput mono type="url" placeholder={URL_PREFIX} value={whatsapp.url} onChange={(event) => setWhatsapp({ ...whatsapp, url: event.target.value })} required />
             </Field>
-            <Field label={t.token} hint={connector.data?.value ? t.tokenKept : undefined}>
-              <TextInput mono type="password" autoComplete="off" value={whatsapp.token} onChange={(event) => setWhatsapp({ ...whatsapp, token: event.target.value })} required={!connector.data?.value} />
+            <Field label={t.token} hint={connectorMoved ? t.tokenAgain : savedConnector ? t.tokenKept : undefined}>
+              <TextInput mono type="password" autoComplete="off" value={whatsapp.token} onChange={(event) => setWhatsapp({ ...whatsapp, token: event.target.value })} required={!savedConnector || connectorMoved} />
             </Field>
           </fieldset>
           {canConfigure ? (
@@ -190,10 +192,10 @@ export default function SettingsPage() {
             {hooks.map((hook, index) => (
               <div key={index} className="grid items-end gap-3 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto]">
                 <Field label={t.hookName}>
-                  <TextInput value={hook.name} onChange={(event) => setHook(index, { name: event.target.value })} required maxLength={60} />
+                  <TextInput value={hook.name} onChange={(event) => setHook(index, { name: event.target.value, tokenKept: false })} required maxLength={60} />
                 </Field>
                 <Field label={t.hookUrl}>
-                  <TextInput mono type="url" placeholder={URL_PREFIX} value={hook.url} onChange={(event) => setHook(index, { url: event.target.value })} required />
+                  <TextInput mono type="url" placeholder={URL_PREFIX} value={hook.url} onChange={(event) => setHook(index, { url: event.target.value, tokenKept: false })} required />
                 </Field>
                 <Field label={t.hookToken}>
                   <TextInput mono type="password" autoComplete="off" placeholder={hook.tokenKept ? t.hookTokenKept : undefined} value={hook.token ?? ""} onChange={(event) => setHook(index, { token: event.target.value })} />

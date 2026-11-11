@@ -17,6 +17,7 @@ const line: LineDictionary = {
   username: "Usuario",
   password: "Contraseña",
   passwordKept: "Contraseña configurada. Deja en blanco para mantener la actual.",
+  passwordAgain: "Cambiaste la dirección o el usuario: escribe la contraseña de nuevo. La contraseña guardada vale solo para el proveedor anterior.",
   callerId: "Número mostrado",
   callerIdHint: "El número que ve quien recibe una llamada tuya.",
   saveLine: "Guardar línea",

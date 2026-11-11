@@ -15,6 +15,7 @@ const line = {
   username: "Usuário",
   password: "Senha",
   passwordKept: "Senha configurada. Deixe em branco para manter a atual.",
+  passwordAgain: "Você mudou o endereço ou o usuário: informe a senha de novo. A senha gravada vale só para o provedor anterior.",
   callerId: "Número exibido",
   callerIdHint: "O número que aparece para quem recebe uma ligação sua.",
   saveLine: "Salvar linha",

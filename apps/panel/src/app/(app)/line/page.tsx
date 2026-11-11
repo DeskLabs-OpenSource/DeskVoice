@@ -44,6 +44,8 @@ function TrunkForm({ trunk, t, onSaved }: { trunk: Trunk | null; t: LineDictiona
   const [applied, setApplied] = useState(true);
   const [result, setResult] = useState<CheckResult | null>(null);
   const set = (key: keyof typeof draft, value: string): void => setDraft((current) => ({ ...current, [key]: value }));
+  // Destino mudou: a senha gravada não acompanha (a API recusa), então a tela já pede a nova.
+  const moved = trunk !== null && trunk.secret.configured && (draft.host !== trunk.host || draft.username !== (trunk.username ?? ""));
   const status = result?.status ?? trunk?.status ?? "unverified";
   const statusLabel = Object.hasOwn(t.status, status) ? t.status[status as keyof typeof t.status] : t.status.unverified;
 
@@ -87,8 +89,8 @@ function TrunkForm({ trunk, t, onSaved }: { trunk: Trunk | null; t: LineDictiona
               <Field label={t.username}>
                 <TextInput mono value={draft.username} onChange={(event) => set("username", event.target.value)} autoComplete="off" />
               </Field>
-              <Field label={t.password} hint={trunk?.secret.configured ? t.passwordKept : undefined}>
-                <TextInput mono type="password" value={draft.password} onChange={(event) => set("password", event.target.value)} autoComplete="new-password" />
+              <Field label={t.password} hint={moved ? t.passwordAgain : trunk?.secret.configured ? t.passwordKept : undefined}>
+                <TextInput mono type="password" value={draft.password} onChange={(event) => set("password", event.target.value)} autoComplete="new-password" required={moved} />
               </Field>
             </>
           ) : null}

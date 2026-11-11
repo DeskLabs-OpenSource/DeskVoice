@@ -46,7 +46,7 @@ describe("login", () => {
 
   // Quatro das cinco falhas entram direto no limitador: cada tentativa real custa um scrypt.
   const failFourTimes = (key: string): void => {
-    for (let attempt = 0; attempt < 4; attempt += 1) loginLimiter.hit(key, panel.clock.at);
+    for (let attempt = 0; attempt < 4; attempt += 1) loginLimiter.take(key, panel.clock.at);
   };
 
   it("blocks the e-mail after five failures, even with the right password, until the window passes", async () => {
@@ -66,6 +66,43 @@ describe("login", () => {
     expect((await signIn("guess@example.test", "wrong", "192.0.2.50")).status).toBe(401);
     expect((await signIn(user.email, PASSWORD, "192.0.2.50")).status).toBe(429);
     expect((await signIn(user.email, PASSWORD, "192.0.2.51")).status).toBe(200);
+  });
+});
+
+describe("login limit under concurrency", () => {
+  // Verificador falso: conta quantas tentativas chegaram a conferir a senha, sem o custo do scrypt.
+  const countingVerifier = () => {
+    const real = panel.deps.verifyPassword;
+    const state = { calls: 0, restore: () => void (panel.deps.verifyPassword = real) };
+    panel.deps.verifyPassword = async () => {
+      state.calls += 1;
+      return false;
+    };
+    return state;
+  };
+
+  it("of twelve simultaneous wrong attempts on one e-mail, only five reach the password check", async () => {
+    const verifier = countingVerifier();
+    const results = await Promise.all(Array.from({ length: 12 }, (_, index) => signIn(user.email, "wrong", `198.51.100.${100 + index}`)));
+    verifier.restore();
+    expect(verifier.calls).toBe(5);
+    expect(results.map((result) => result.status).sort()).toEqual([...Array<number>(5).fill(401), ...Array<number>(7).fill(429)]);
+  });
+
+  it("a forged first item in x-forwarded-for does not buy a new IP", async () => {
+    const verifier = countingVerifier();
+    const results = await Promise.all(Array.from({ length: 9 }, (_, index) => signIn(`guess-${index}@example.test`, "wrong", `9.9.9.${index}, 192.0.2.77`)));
+    verifier.restore();
+    expect(verifier.calls).toBe(5);
+    expect(results.filter((result) => result.status === 429)).toHaveLength(4);
+  });
+
+  it("without a trusted address there is no shared IP key: strangers cannot lock everyone out", async () => {
+    const verifier = countingVerifier();
+    const request = (index: number) => call(login, { method: "POST", body: { email: `nobody-${index}@example.test`, password: "wrong" } });
+    const results = await Promise.all(Array.from({ length: 8 }, (_, index) => request(index)));
+    verifier.restore();
+    expect(results.map((result) => result.status)).toEqual(Array<number>(8).fill(401));
   });
 });
 

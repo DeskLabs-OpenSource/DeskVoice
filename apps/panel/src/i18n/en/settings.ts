@@ -22,6 +22,7 @@ const settings: SettingsDictionary = {
   url: "Address",
   token: "Token",
   tokenKept: "Token configured. Leave blank to keep the current one.",
+  tokenAgain: "You changed the address or the type: enter the token again. The stored token is only valid for the previous address.",
   saveConnector: "Save connector",
   removeConnector: "Remove connector",
   webhooksTitle: "Allowed webhooks",

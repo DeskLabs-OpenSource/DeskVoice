@@ -96,10 +96,88 @@ describe("secrets", () => {
     expect(saved.data).toEqual({ key: params.key, value: { type: "webhook", url: "https://hooks.example.test/wa", token: { configured: true } } });
     expect(saved.text).not.toContain(token);
 
-    await call(putSetting, { method: "PUT", cookie: owner, params, body: { value: { type: "deskcomm", url: "https://crm.example.test" } } });
-    const row = await stored<{ type: string; token: string }>("select value from settings where key = $1", [params.key]);
-    expect(row?.value?.type).toBe("deskcomm");
-    expect(decryptSecret(row?.value?.token ?? "", SECRET_KEY)).toBe(token);
+    // Mesmo endereço e mesmo tipo, sem token: o gravado continua.
+    const same = await call(putSetting, { method: "PUT", cookie: owner, params, body: { value: { type: "webhook", url: "https://hooks.example.test/wa" } } });
+    expect(same.status).toBe(200);
+    const row = () => stored<{ type: string; url: string; token: string }>("select value from settings where key = $1", [params.key]);
+    expect(decryptSecret((await row())?.value?.token ?? "", SECRET_KEY)).toBe(token);
+  });
+
+  it("never carries the WhatsApp token to another address or another connector type", async () => {
+    const params = { key: "whatsapp.connector" };
+    const token = "connector-token-stays-home";
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie: owner, params, body: { value } });
+    await put({ type: "webhook", url: "https://hooks.example.test/wa", token });
+    const before = await stored<unknown>("select value from settings where key = $1", [params.key]);
+
+    for (const value of [{ type: "webhook", url: "https://attacker.example.test/collect" }, { type: "deskcomm", url: "https://hooks.example.test/wa" }]) {
+      const moved = await put(value);
+      expect([moved.status, moved.code]).toEqual([400, "token_required"]);
+    }
+    expect(await stored<unknown>("select value from settings where key = $1", [params.key])).toEqual(before);
+
+    const replaced = await put({ type: "webhook", url: "https://new.example.test/wa", token: "brand-new-token" });
+    expect(replaced.status).toBe(200);
+    const row = await stored<{ url: string; token: string }>("select value from settings where key = $1", [params.key]);
+    expect([row?.value?.url, decryptSecret(row?.value?.token ?? "", SECRET_KEY)]).toEqual(["https://new.example.test/wa", "brand-new-token"]);
+  });
+
+  it("keeps a webhook token only for the item whose name and address are both unchanged", async () => {
+    const params = { key: "webhooks.allowed" };
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie: owner, params, body: { value } });
+    const tokens = async (): Promise<Record<string, string | undefined>> => {
+      const row = await stored<Array<{ name: string; token?: string }>>("select value from settings where key = $1", [params.key]);
+      return Object.fromEntries((row?.value ?? []).map((hook) => [hook.name, hook.token === undefined ? undefined : decryptSecret(hook.token, SECRET_KEY)]));
+    };
+    const original = [
+      { name: "crm", url: "https://crm.example.test/hook", token: "crm-token" },
+      { name: "erp", url: "https://erp.example.test/hook", token: "erp-token" },
+      { name: "agenda", url: "https://agenda.example.test/hook", token: "agenda-token" },
+    ];
+    await put(original);
+
+    const changed = await put([
+      { name: "crm", url: "https://crm.example.test/hook" }, // igual: mantém
+      { name: "erp", url: "https://attacker.example.test/collect" }, // endereço trocado, mesmo nome: perde
+      { name: "agenda-renamed", url: "https://agenda.example.test/hook" }, // renomeado, mesmo endereço: perde
+    ]);
+    expect(changed.data).toEqual({
+      key: params.key,
+      value: [
+        { name: "crm", url: "https://crm.example.test/hook", token: { configured: true } },
+        { name: "erp", url: "https://attacker.example.test/collect", token: { configured: false } },
+        { name: "agenda-renamed", url: "https://agenda.example.test/hook", token: { configured: false } },
+      ],
+    });
+    expect(await tokens()).toEqual({ crm: "crm-token", erp: undefined, "agenda-renamed": undefined });
+    expect(changed.text).not.toMatch(/crm-token|erp-token|agenda-token/);
+  });
+
+  it("does not send the stored line password to a different provider address or user", async () => {
+    const password = "trunk-password-stays-home";
+    const created = await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Segura", host: "sip.example.test", username: "5531", password, authMode: "register" } });
+    const id = (created.data as { id: string }).id;
+    const row = () => stored<string | null>("select name, host, username, auth_mode, secret_enc from trunks where id = $1", [id]);
+    const patch = (body: unknown) => call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body });
+    const before = await row();
+
+    for (const body of [{ host: "attacker.example.test" }, { username: "someone-else" }]) {
+      const refused = await patch(body);
+      expect([refused.status, refused.code]).toEqual([400, "password_required"]);
+    }
+    expect(await row()).toEqual(before);
+
+    // Só o nome: o destino é o mesmo, a senha fica.
+    expect((await patch({ name: "Segura 2", host: "sip.example.test" })).status).toBe(200);
+    expect(decryptSecret((await row())?.secret_enc ?? "", SECRET_KEY)).toBe(password);
+
+    expect((await patch({ host: "sip2.example.test", password: "new-password" })).status).toBe(200);
+    const moved = await row();
+    expect([moved?.host, decryptSecret(moved?.secret_enc ?? "", SECRET_KEY)]).toEqual(["sip2.example.test", "new-password"]);
+
+    // Autenticação por IP não tem senha: a antiga é apagada, não reaproveitada.
+    expect((await patch({ authMode: "ip", host: "sip3.example.test" })).data).toMatchObject({ secret: { configured: false } });
+    expect((await row())?.secret_enc).toBeNull();
   });
 
   it("stores the line password encrypted and answers only that it is configured", async () => {

@@ -1,5 +1,6 @@
 import { encryptSecret } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
+import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
 /**
@@ -36,18 +37,20 @@ const secretText = setting<string>({
 });
 
 const httpUrl = z.url({ protocol: /^https?$/ });
-const storedToken = z.object({ token: z.string() });
+const storedConnector = z.object({ type: z.string(), url: z.string(), token: z.string() });
 const storedHooks = z.array(z.object({ name: z.string(), url: z.string(), token: z.string().optional() }));
 
 // Token em branco numa alteração mantém o que já estava gravado: a tela nunca recebe o valor
-// para devolver, então "não mexi" precisa ser representável.
+// para devolver, então "não mexi" precisa ser representável. Mas só para o MESMO destino: o token
+// foi dado a um endereço, e mantê-lo ao trocar a URL o entregaria a quem responde no endereço novo.
 const connector = setting<{ type: "deskcomm" | "webhook"; url: string; token?: string }>({
   schema: z.object({ type: z.enum(["deskcomm", "webhook"]), url: httpUrl, token: z.string().trim().min(1).max(500).optional() }),
   secret: true,
   store(value, key, previous) {
-    const kept = storedToken.safeParse(previous);
-    const token = value.token ? encryptSecret(value.token, key) : kept.success ? kept.data.token : undefined;
-    if (token === undefined) throw new z.ZodError([{ code: "custom", path: ["token"], message: "is required", input: undefined }]);
+    const kept = storedConnector.safeParse(previous);
+    const sameDestination = kept.success && kept.data.type === value.type && kept.data.url === value.url;
+    const token = value.token ? encryptSecret(value.token, key) : sameDestination ? kept.data.token : undefined;
+    if (token === undefined) throw new ApiError(400, "token_required", "When the connector address or type changes, enter the token again.");
     return { type: value.type, url: value.url, token };
   },
   view(stored) {
@@ -64,9 +67,11 @@ const webhooks = setting<Array<{ name: string; url: string; token?: string }>>({
   secret: true,
   store(value, key, previous) {
     const kept = storedHooks.safeParse(previous);
-    const before = new Map((kept.success ? kept.data : []).map((hook) => [hook.name, hook.token]));
+    // Por item, com nome E endereço iguais. Endereço novo (ou item renomeado) sem token fica sem
+    // token: é opcional aqui, e o antigo nunca é copiado para outro destino.
+    const before = kept.success ? kept.data : [];
     return value.map((hook) => {
-      const token = hook.token ? encryptSecret(hook.token, key) : before.get(hook.name);
+      const token = hook.token ? encryptSecret(hook.token, key) : before.find((old) => old.name === hook.name && old.url === hook.url)?.token;
       return { name: hook.name, url: hook.url, ...(token !== undefined && { token }) };
     });
   },

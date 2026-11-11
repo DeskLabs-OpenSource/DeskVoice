@@ -1,5 +1,6 @@
-import { hashPassword, verifyPassword, withOrg, withSystem } from "@deskvoice/core";
+import { hashPassword, withOrg, withSystem } from "@deskvoice/core";
 import { z } from "zod";
+import { UNKNOWN_IP, clientIp } from "../../../../../server/client-ip";
 import { ApiError, Reply, createSession, handlePublic, sessionCookie } from "../../../../../server/context";
 import { loginLimiter } from "../../../../../server/rate-limit";
 
@@ -11,10 +12,18 @@ let decoyHash: Promise<string> | undefined;
 
 export const POST = handlePublic({ body }, async ({ request, body, deps }) => {
   const now = deps.clock.now();
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const keys = [`email:${body.email}`, `ip:${ip}`];
-  if (keys.some((key) => loginLimiter.blocked(key, now))) {
-    throw new ApiError(429, "too_many_attempts", "Too many sign-in attempts. Wait a few minutes and try again.");
+  const ip = clientIp(request.headers.get("x-forwarded-for"), deps.trustedProxyHops);
+  // Sem IP confiável não há chave por IP: uma chave "unknown" dividida por todo mundo deixaria
+  // cinco erros de um estranho trancarem a entrada da instalação inteira. Fica o limite por e-mail.
+  const keys = [`email:${body.email}`, ...(ip === UNKNOWN_IP ? [] : [`ip:${ip}`])];
+  // Reserva antes de qualquer `await`: de N pedidos simultâneos, só os que cabem no limite seguem.
+  const taken: string[] = [];
+  for (const key of keys) {
+    if (!loginLimiter.take(key, now)) {
+      for (const reserved of taken) loginLimiter.release(reserved, now);
+      throw new ApiError(429, "too_many_attempts", "Too many sign-in attempts. Wait a few minutes and try again.");
+    }
+    taken.push(key);
   }
 
   // Único uso de `withSystem` aqui: o e-mail é o que diz qual é a organização.
@@ -25,13 +34,14 @@ export const POST = handlePublic({ body }, async ({ request, body, deps }) => {
     ),
   );
   decoyHash ??= hashPassword("decoy");
-  const valid = await verifyPassword(body.password, user?.passwordHash ?? (await decoyHash));
+  const valid = await deps.verifyPassword(body.password, user?.passwordHash ?? (await decoyHash));
   if (!user || !valid) {
-    for (const key of keys) loginLimiter.hit(key, now);
-    // Uma mensagem só para e-mail e senha: não confirma se o e-mail existe.
+    // A reserva fica: é ela que conta a falha. Uma mensagem só para e-mail e senha.
     throw new ApiError(401, "invalid_credentials", "E-mail or password is incorrect.");
   }
-  loginLimiter.clear(keys[0] ?? "");
+  // Entrou: o e-mail volta a zero e o IP recebe de volta a tentativa deste pedido.
+  loginLimiter.clear(`email:${body.email}`);
+  if (ip !== UNKNOWN_IP) loginLimiter.release(`ip:${ip}`, now);
 
   const token = await withOrg(deps.db, user.organizationId, (q) => createSession(q, user, now));
   return new Reply({ name: user.name, email: body.email, role: user.role }, { "set-cookie": sessionCookie(token, deps) });

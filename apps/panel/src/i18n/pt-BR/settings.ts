@@ -20,6 +20,7 @@ const settings = {
   url: "Endereço",
   token: "Token",
   tokenKept: "Token configurado. Deixe em branco para manter o atual.",
+  tokenAgain: "Você mudou o endereço ou o tipo: informe o token de novo. O token gravado vale só para o endereço anterior.",
   saveConnector: "Salvar conector",
   removeConnector: "Remover conector",
   webhooksTitle: "Webhooks permitidos",

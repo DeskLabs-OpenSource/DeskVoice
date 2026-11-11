@@ -67,6 +67,8 @@ const common = {
     already_decided: "Outra pessoa já respondeu este pedido.",
     approval_expired: "O prazo para responder acabou. O agente seguiu com o padrão do pedido.",
     purpose_required: "Para ligar, declare a finalidade e a base legal das ligações.",
+    password_required: "Ao mudar o provedor ou o usuário, informe a senha de novo.",
+    token_required: "Ao mudar o endereço ou o tipo do conector, informe o token de novo.",
     invalid_numbers: "Estes números não foram reconhecidos como telefone. Nenhum foi adicionado:",
     number_already_registered: "Este número já está cadastrado.",
     unknown_setting: "Esta configuração não existe nesta versão.",

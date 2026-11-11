@@ -17,6 +17,8 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   // os dois saem de `install/_common.sh`.
   SYSTEM_DATABASE_URL: "generated",
   INTERNAL_TOKEN: "generated",
+  // IP público da VPS, descoberto pelo instalador; vai no `from_domain` dos troncos gerados.
+  PUBLIC_IP: "generated",
   // Senhas dos papéis `deskvoice_app` e `deskvoice_system`; só o comando de migrations as recebe.
   APP_DB_PASSWORD: "generated",
   SYSTEM_DB_PASSWORD: "generated",
@@ -28,7 +30,12 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   RTP_START: "default",
   RTP_END: "default",
   PANEL_PORT: "default",
+  // Proxies confiáveis à frente do painel (padrão 1, o Caddy da instalação): decide de onde ler o IP do cliente.
+  TRUSTED_PROXY_HOPS: "default",
   VOICE_INTERNAL_URL: "default",
+  // Porta da API interna do processo de voz (8090) e arquivo de troncos que ele gera para o Asterisk.
+  VOICE_INTERNAL_PORT: "default",
+  ASTERISK_TRUNKS_FILE: "default",
   // Opcional: só o comando de migrations recebe a credencial do dono do schema.
   MIGRATION_DATABASE_URL: "default",
   // Definidas pela imagem (Dockerfile) e pelo Node; fora de contêiner valem os padrões.

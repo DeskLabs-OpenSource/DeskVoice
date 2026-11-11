@@ -69,6 +69,8 @@ const common: CommonDictionary = {
     already_decided: "Otra persona ya respondió este pedido.",
     approval_expired: "El plazo para responder terminó. El agente siguió con el valor por defecto del pedido.",
     purpose_required: "Para activarlas, declara la finalidad y la base legal de las llamadas.",
+    password_required: "Al cambiar el proveedor o el usuario, escribe la contraseña de nuevo.",
+    token_required: "Al cambiar la dirección o el tipo del conector, escribe el token de nuevo.",
     invalid_numbers: "Estos números no fueron reconocidos como teléfono. No se agregó ninguno:",
     number_already_registered: "Este número ya está registrado.",
     unknown_setting: "Esta configuración no existe en esta versión.",

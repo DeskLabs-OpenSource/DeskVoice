@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { createDb, hashToken, loadConfig, systemClock, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { createDb, hashToken, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import type { z, ZodType } from "zod";
+import { trustedProxyHops } from "./client-ip";
 
 export type Role = "owner" | "admin" | "operator";
 
@@ -21,6 +22,9 @@ export interface ServerDeps {
   fetch: typeof fetch;
   voiceUrl: string;
   internalToken: string;
+  trustedProxyHops: number;
+  /** Injetável para o teste contar quantas tentativas chegam a conferir a senha. */
+  verifyPassword: typeof verifyPassword;
 }
 
 export const SESSION_COOKIE = "dv_session";
@@ -44,6 +48,8 @@ export function serverDeps(): ServerDeps {
       fetch: (input, init) => fetch(input, init),
       voiceUrl: process.env.VOICE_INTERNAL_URL ?? "http://voice:8090",
       internalToken: process.env.INTERNAL_TOKEN ?? "",
+      trustedProxyHops: trustedProxyHops(process.env),
+      verifyPassword,
     };
   }
   return store.__deskvoicePanelDeps;
