@@ -2,6 +2,7 @@ import { toE164, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError } from "./context";
 import { listEngines } from "./pieces";
+import { isTrunkHost } from "./trunk-host";
 
 /** Telefone digitado livremente; sai em E.164 ou reprova a validação. */
 export const phone = z.string().transform((value, ctx) => {
@@ -64,7 +65,7 @@ export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode",
 // nem de caractere que abra seção ou comentário ali.
 const trunkFields = z.object({
   name: z.string().trim().min(1).max(80),
-  host: z.string().trim().regex(/^[a-zA-Z0-9.-]{1,253}(:\d{1,5})?$/, "must be a host name or IP, optionally with :port"),
+  host: z.string().trim().refine(isTrunkHost, "must be a host name or IP (optionally with :port), an IPv6 address or a CIDR block"),
   username: z.union([z.null(), z.literal("").transform(() => null), z.string().regex(/^[^\s;[\]]{1,80}$/, "cannot contain spaces, ';' or brackets")]),
   password: z.string().regex(/^[^\r\n]{1,200}$/, "cannot be empty or contain line breaks"),
   authMode: z.enum(["register", "ip"]),

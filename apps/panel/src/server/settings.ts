@@ -90,6 +90,9 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     // Ausente vale `false`: o envio para quem ligou pede confirmação humana (o número exibido é forjável).
     "whatsapp.trust_caller_id": plain(z.boolean()),
     "webhooks.allowed": webhooks,
+    // O que vale quando ninguém responde a um pedido de aprovação. Ausente vale `denied`: é escolha
+    // do operador, não do modelo de IA.
+    "approvals.default_on_timeout": plain(z.enum(["denied", "approved"])),
     "recording_notice.text": plain(z.string().trim().min(1).max(500)),
     "network.public_ip": plain(z.ipv4()),
   };

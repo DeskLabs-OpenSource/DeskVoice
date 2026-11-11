@@ -73,6 +73,7 @@ const common: CommonDictionary = {
     token_required: "When the connector address or type changes, enter the token again.",
     invalid_numbers: "These were not recognized as phone numbers. None was added:",
     number_already_registered: "This number is already registered.",
+    trunk_has_numbers: "This line still has numbers attached to it. Remove the numbers before removing the line.",
     unknown_setting: "This setting does not exist in this version.",
     outbound_disabled: "Outbound calls are off. Turn them on in Outbound calls.",
     outside_window: "Outside the hours allowed for outbound calls.",

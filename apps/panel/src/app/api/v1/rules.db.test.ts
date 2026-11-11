@@ -8,12 +8,14 @@ import { POST as simulate } from "./calls/simulate/route";
 import { DELETE as removeDoNotCall, GET as listDoNotCall, POST as addDoNotCall } from "./do-not-call/route";
 import { GET as listEngines } from "./engines/route";
 import { GET as getPolicy, PUT as putPolicy } from "./outbound-policy/route";
-import { POST as createNumber } from "./phone-numbers/route";
+import { GET as getMe, PATCH as patchMe } from "./auth/me/route";
+import { DELETE as deleteNumber, PATCH as patchNumber } from "./phone-numbers/[id]/route";
+import { GET as listNumbers, POST as createNumber } from "./phone-numbers/route";
 import { GET as getSetting, PUT as putSetting } from "./settings/[key]/route";
 import { GET as costs } from "./system/costs/route";
 import { GET as health } from "./system/health/route";
 import { POST as checkTrunk } from "./trunks/[id]/check/route";
-import { PATCH as patchTrunk } from "./trunks/[id]/route";
+import { DELETE as deleteTrunk, PATCH as patchTrunk } from "./trunks/[id]/route";
 import { GET as listTrunks, POST as createTrunk } from "./trunks/route";
 
 const panel = startPanel();
@@ -312,6 +314,107 @@ describe("phone numbers", () => {
     expect([repeated.status, repeated.code]).toEqual([400, "number_already_registered"]);
     const noTrunk = await call(createNumber, { method: "POST", cookie: owner, body: { number: "(31) 3222-1101" } });
     expect(noTrunk.code).toBe("validation_error");
+  });
+});
+
+describe("removing and correcting lines and numbers", () => {
+  const newTrunk = async (name: string): Promise<string> =>
+    ((await call(createTrunk, { method: "POST", cookie: owner, body: { name, host: "sip.example.test", authMode: "ip" } })).data as { id: string }).id;
+  const newNumber = async (trunkId: string, number: string): Promise<string> =>
+    ((await call(createNumber, { method: "POST", cookie: owner, body: { trunkId, number } })).data as { id: string }).id;
+
+  it("corrects a mistyped number, keeps the agent, and refuses a number that already exists", async () => {
+    const trunk = await newTrunk("Correção");
+    const agent = await newAgent("Atende");
+    const id = await newNumber(trunk, "(31) 3555-0001");
+    await newNumber(trunk, "(31) 3555-0002");
+    await call(patchNumber, { method: "PATCH", cookie: owner, params: { id }, body: { agentId: agent } });
+
+    const fixed = await call(patchNumber, { method: "PATCH", cookie: owner, params: { id }, body: { number: "31 3555-0009" } });
+    expect(fixed.data).toMatchObject({ id, e164: "+553135550009", agentId: agent });
+
+    const repeated = await call(patchNumber, { method: "PATCH", cookie: owner, params: { id }, body: { number: "(31) 3555-0002" } });
+    expect([repeated.status, repeated.code]).toEqual([400, "number_already_registered"]);
+    const invalid = await call(patchNumber, { method: "PATCH", cookie: owner, params: { id }, body: { number: "abc" } });
+    expect(invalid.code).toBe("validation_error");
+    expect(await stored("select e164, agent_id from phone_numbers where id = $1", [id])).toEqual({ e164: "+553135550009", agent_id: agent });
+  });
+
+  it("refuses to remove a line that still has numbers, saying how many, then removes it once they are gone", async () => {
+    const trunk = await newTrunk("Com números");
+    const numbers = [await newNumber(trunk, "(31) 3666-0001"), await newNumber(trunk, "(31) 3666-0002")];
+    panel.voice.requests.length = 0;
+    panel.voice.respond = () => Response.json({ applied: true });
+
+    const refused = await call(deleteTrunk, { method: "DELETE", cookie: owner, params: { id: trunk } });
+    expect([refused.status, refused.code]).toEqual([409, "trunk_has_numbers"]);
+    expect(refused.message).toContain("2 number");
+    expect(await stored("select id from trunks where id = $1", [trunk])).toEqual({ id: trunk });
+    expect(panel.voice.requests).toEqual([]);
+
+    for (const id of numbers) expect((await call(deleteNumber, { method: "DELETE", cookie: owner, params: { id } })).status).toBe(200);
+    expect((await call(deleteNumber, { method: "DELETE", cookie: owner, params: { id: numbers[0] ?? "" } })).status).toBe(404);
+    const listed = (await call(listNumbers, { cookie: owner })).text;
+    for (const id of numbers) expect(listed).not.toContain(id);
+
+    const removed = await call(deleteTrunk, { method: "DELETE", cookie: owner, params: { id: trunk } });
+    expect(removed.data).toEqual({ applied: true, detail: "" });
+    expect(await stored("select id from trunks where id = $1", [trunk])).toBeNull();
+    // A linha saiu do banco: o processo de voz é chamado para tirá-la também do servidor de telefonia.
+    expect(panel.voice.requests).toEqual([{ url: "http://voice.test/trunks/apply", body: { organizationId: org } }]);
+  });
+
+  it("an operator cannot remove or correct anything", async () => {
+    const trunk = await newTrunk("Guardada");
+    const number = await newNumber(trunk, "(31) 3777-0001");
+    const as = { cookie: operator.cookie };
+    const attempts = await Promise.all([
+      call(deleteNumber, { ...as, method: "DELETE", params: { id: number } }),
+      call(patchNumber, { ...as, method: "PATCH", params: { id: number }, body: { number: "(31) 3777-0002" } }),
+      call(deleteTrunk, { ...as, method: "DELETE", params: { id: trunk } }),
+    ]);
+    for (const result of attempts) expect([result.status, result.code]).toEqual([403, "forbidden"]);
+    expect(await stored("select e164 from phone_numbers where id = $1", [number])).toEqual({ e164: "+553137770001" });
+  });
+
+  it("accepts the provider addresses the voice process supports and refuses anything that could break the configuration", async () => {
+    const create = (host: string) => call(createTrunk, { method: "POST", cookie: owner, body: { name: "Host", host, authMode: "ip" } });
+    for (const host of ["203.0.113.0/24", "[2001:db8::1]:5060", "2001:db8::1", "sip.example.test:5060"]) expect([host, (await create(host)).status]).toEqual([host, 200]);
+    for (const host of ["sip.example.test;x", "[evil]", "sip.example.test\n[evil]", "203.0.113.0/99"]) expect([host, (await create(host)).code]).toEqual([host, "validation_error"]);
+  });
+});
+
+describe("my contact", () => {
+  it("stores phone and WhatsApp normalized, for any role, and only for the signed-in user", async () => {
+    const before = await call(getMe, { cookie: operator.cookie });
+    expect(before.data).toMatchObject({ role: "operator", phone: null, whatsapp: null });
+
+    const saved = await call(patchMe, { method: "PATCH", cookie: operator.cookie, body: { name: "  Ana Operadora ", phone: "(31) 98888-1111", whatsapp: "031988882222" } });
+    expect(saved.data).toEqual({ name: "Ana Operadora", email: operator.email, role: "operator", phone: "+5531988881111", whatsapp: "+5531988882222" });
+    expect((await call(getMe, { cookie: operator.cookie })).data).toEqual(saved.data);
+    expect(await stored("select phone_e164, whatsapp_e164 from users where id = $1", [operator.id])).toEqual({ phone_e164: "+5531988881111", whatsapp_e164: "+5531988882222" });
+    // O dono, na mesma organização, não foi tocado.
+    expect((await call(getMe, { cookie: owner })).data).toMatchObject({ phone: null, whatsapp: null, name: "Test owner" });
+
+    const invalid = await call(patchMe, { method: "PATCH", cookie: operator.cookie, body: { whatsapp: "abc" } });
+    expect([invalid.status, invalid.code]).toEqual([400, "validation_error"]);
+
+    // Vazio apaga; campo ausente fica como está; papel e e-mail não entram.
+    const cleared = await call(patchMe, { method: "PATCH", cookie: operator.cookie, body: { whatsapp: "", role: "owner", email: "x@example.test" } });
+    expect(cleared.data).toMatchObject({ name: "Ana Operadora", email: operator.email, role: "operator", phone: "+5531988881111", whatsapp: null });
+    expect((await call(patchMe, { method: "PATCH", body: { name: "X" } })).status).toBe(401);
+  });
+});
+
+describe("approval default", () => {
+  it("is the operator's choice, limited to denied or approved", async () => {
+    const params = { key: "approvals.default_on_timeout" };
+    expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: null });
+    const put = (value: unknown, cookie = owner) => call(putSetting, { method: "PUT", cookie, params, body: { value } });
+    expect((await put("maybe")).code).toBe("validation_error");
+    expect((await put("approved", operator.cookie)).status).toBe(403);
+    expect((await put("approved")).data).toEqual({ key: params.key, value: "approved" });
+    expect(await stored("select value, secret from settings where key = $1", [params.key])).toEqual({ value: "approved", secret: false });
   });
 });
 

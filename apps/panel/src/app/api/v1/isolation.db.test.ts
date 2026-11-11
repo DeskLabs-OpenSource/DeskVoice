@@ -11,10 +11,10 @@ import { POST as outbound } from "./calls/outbound/route";
 import { GET as listCalls } from "./calls/route";
 import { POST as simulate } from "./calls/simulate/route";
 import { POST as readNotification } from "./notifications/[id]/read/route";
-import { PATCH as patchNumber } from "./phone-numbers/[id]/route";
+import { DELETE as deleteNumber, PATCH as patchNumber } from "./phone-numbers/[id]/route";
 import { POST as createNumber } from "./phone-numbers/route";
 import { POST as checkTrunk } from "./trunks/[id]/check/route";
-import { PATCH as patchTrunk } from "./trunks/[id]/route";
+import { DELETE as deleteTrunk, PATCH as patchTrunk } from "./trunks/[id]/route";
 
 const panel = startPanel();
 let orgB: string;
@@ -56,7 +56,7 @@ const snapshot = () =>
     agent: await q.one("select name, enabled from agents where id = $1", [theirs.agent]),
     approval: await q.one("select status, decided_by from approvals where id = $1", [theirs.approval]),
     trunk: await q.one("select name, host, status from trunks where id = $1", [theirs.trunk]),
-    number: await q.one("select agent_id from phone_numbers where id = $1", [theirs.number]),
+    number: await q.one("select agent_id, e164 from phone_numbers where id = $1", [theirs.number]),
     notification: await q.one("select read_at from notifications where id = $1", [theirs.notification]),
     numbers: await q.many("select e164 from phone_numbers"),
   }));
@@ -75,6 +75,9 @@ describe("a user of organization A, through every route that takes an id", () =>
       ["PATCH trunk", call(patchTrunk, { ...as, method: "PATCH", params: { id: theirs.trunk }, body: { host: "evil.example.test" } })],
       ["check trunk", call(checkTrunk, { ...as, method: "POST", params: { id: theirs.trunk } })],
       ["PATCH number", call(patchNumber, { ...as, method: "PATCH", params: { id: theirs.number }, body: { agentId: mine.agent } })],
+      ["correct their number", call(patchNumber, { ...as, method: "PATCH", params: { id: theirs.number }, body: { number: "(31) 97777-0000" } })],
+      ["DELETE number", call(deleteNumber, { ...as, method: "DELETE", params: { id: theirs.number } })],
+      ["DELETE trunk", call(deleteTrunk, { ...as, method: "DELETE", params: { id: theirs.trunk } })],
       ["read notification", call(readNotification, { ...as, method: "POST", params: { id: theirs.notification } })],
       ["simulate with their agent", call(simulate, { ...as, method: "POST", body: { agentId: theirs.agent } })],
       ["outbound with their agent", call(outbound, { ...as, method: "POST", body: { agentId: theirs.agent, toE164: "(31) 99999-8888" } })],

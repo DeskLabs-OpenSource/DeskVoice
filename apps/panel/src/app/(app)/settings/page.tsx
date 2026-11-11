@@ -9,9 +9,10 @@ import ptBR, { type SettingsDictionary } from "../../../i18n/pt-BR/settings";
 import { useDict } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../ui/errors";
+import { formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
-import type { Engine, Setting } from "../../../ui/types";
+import type { Engine, Me, Setting } from "../../../ui/types";
 
 // Igual em todo idioma: não é frase, é o começo de um endereço.
 const URL_PREFIX = "https://";
@@ -80,6 +81,11 @@ export default function SettingsPage() {
   const trustCaller = useApi<Setting<boolean>>("/settings/whatsapp.trust_caller_id");
   const webhooks = useApi<Setting<Array<{ name: string; url: string; token: { configured: boolean } }>>>("/settings/webhooks.allowed");
   const recording = useApi<Setting<string>>("/settings/recording_notice.text");
+  const me = useApi<Me>("/auth/me");
+  const onTimeout = useApi<Setting<"denied" | "approved">>("/settings/approvals.default_on_timeout");
+  const saveContact = useAction();
+  const saveOnTimeout = useAction();
+  const [contact, setContact] = useState({ name: "", phone: "", whatsapp: "" });
   const saveDefault = useAction();
   const saveConnector = useAction();
   const saveTrustCaller = useAction();
@@ -96,6 +102,9 @@ export default function SettingsPage() {
     if (webhooks.data) setHooks((webhooks.data.value ?? []).map((hook) => ({ name: hook.name, url: hook.url, tokenKept: hook.token.configured })));
   }, [webhooks.data]);
   useEffect(() => setNotice(recording.data?.value ?? ""), [recording.data]);
+  useEffect(() => {
+    if (me.data) setContact({ name: me.data.name, phone: formatPhone(me.data.phone), whatsapp: formatPhone(me.data.whatsapp) });
+  }, [me.data]);
 
   const savedConnector = connector.data?.value;
   const connectorMoved = savedConnector != null && (savedConnector.url !== whatsapp.url || savedConnector.type !== whatsapp.type);
@@ -106,7 +115,54 @@ export default function SettingsPage() {
   return (
     <>
       <PageHeader title={t.title} lead={t.lead} />
+
+      {/* O próprio contato qualquer papel edita: é para onde vão os avisos fora do painel. */}
+      <Panel title={t.contactTitle} description={t.contactLead}>
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveContact.run(() => api("/auth/me", { method: "PATCH", body: contact })).then(me.reload);
+          }}
+        >
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field label={t.contactName}>
+              <TextInput value={contact.name} onChange={(event) => setContact({ ...contact, name: event.target.value })} required maxLength={120} autoComplete="name" />
+            </Field>
+            <Field label={t.contactPhone}>
+              <TextInput mono type="tel" value={contact.phone} onChange={(event) => setContact({ ...contact, phone: event.target.value })} autoComplete="tel" />
+            </Field>
+            <Field label={t.contactWhatsapp} hint={t.contactHint}>
+              <TextInput mono type="tel" value={contact.whatsapp} onChange={(event) => setContact({ ...contact, whatsapp: event.target.value })} />
+            </Field>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit" variant="primary" busy={saveContact.busy} disabled={!me.data}>
+              {t.saveContact}
+            </Button>
+            <ActionStatus action={saveContact} />
+          </div>
+        </form>
+      </Panel>
+
       <ReadOnlyNotice />
+
+      <Panel title={t.approvalTitle} description={t.approvalLead}>
+        <div className="grid max-w-md gap-3">
+          <Field label={t.approvalChoice}>
+            <Select
+              disabled={!canConfigure}
+              value={onTimeout.data?.value ?? "denied"}
+              onChange={(event) => void saveOnTimeout.run(() => put("approvals.default_on_timeout", event.target.value)).then(onTimeout.reload)}
+            >
+              <option value="denied">{t.approvalDenied}</option>
+              <option value="approved">{t.approvalApproved}</option>
+            </Select>
+          </Field>
+          {onTimeout.data?.value === "approved" ? <Notice tone="warn">{t.approvalWarning}</Notice> : null}
+          <ActionStatus action={saveOnTimeout} />
+        </div>
+      </Panel>
 
       <Panel title={t.enginesTitle} description={t.enginesLead}>
         <ul className="grid">

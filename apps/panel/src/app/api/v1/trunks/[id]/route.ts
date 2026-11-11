@@ -35,3 +35,19 @@ export const PATCH = handle(
     );
   },
 );
+
+// Os números caem junto com a linha no banco (cascade), e número que some sem ninguém pedir é
+// chamada que para de ser atendida. Por isso a linha só sai depois que os números dela saíram.
+export const DELETE = handle(
+  {
+    configure: true,
+    after: (_deleted, { deps, session }) => applyTrunks(deps, session.organizationId),
+  },
+  async ({ q, params }) => {
+    const numbers = await q.one<{ total: number }>("select count(*)::int as total from phone_numbers where trunk_id = $1", [params.id]);
+    const total = numbers?.total ?? 0;
+    if (total > 0) throw new ApiError(409, "trunk_has_numbers", `This line still has ${total} number(s). Remove or move them before removing the line.`);
+    if ((await q.exec("delete from trunks where id = $1", [params.id])) === 0) throw notFound();
+    return null;
+  },
+);

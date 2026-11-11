@@ -28,9 +28,9 @@ const line = {
   helpTitle: "A ligação conecta, mas fica muda?",
   helpBody: "Quase sempre é rede, e não o agente. Confira duas coisas:",
   helpUdp: "As portas UDP de áudio (10000 a 10200) e a porta 5060 precisam estar abertas no firewall do servidor e no painel da empresa de hospedagem.",
-  helpIp: "O IP público abaixo precisa ser o IP real do servidor. Com o IP errado, o áudio é enviado para outro lugar e ninguém escuta nada.",
-  publicIp: "IP público do servidor",
-  publicIpHint: "Exemplo: 203.0.113.10. Em branco, o DeskVoice usa o IP que o instalador detectou.",
+  helpIp: "O IP público do servidor precisa estar certo na instalação. O endereço usado para o áudio é o que o instalador detectou; para trocá-lo, rode o instalador de novo na VPS.",
+  publicIp: "IP com que a linha se identifica para o provedor",
+  publicIpHint: "Este campo só ajusta como a linha se identifica para o provedor. Ele não muda o endereço do áudio e não resolve ligação muda. Exemplo: 203.0.113.10. Em branco, vale o IP que o instalador detectou.",
   saveIp: "Salvar IP",
   numbersTitle: "Números",
   numbersLead: "Cada número da linha é atendido por um agente.",
@@ -42,6 +42,15 @@ const line = {
   answeredBy: "Quem atende",
   nobody: "Ninguém: a chamada é recusada com aviso",
   addNumber: "Adicionar número",
+  removeLine: "Remover linha",
+  removeLineConfirm: "Remover a linha {name}? O servidor de telefonia deixa de usar esta conexão. Essa ação não pode ser desfeita.",
+  removeLineYes: "Remover {name}",
+  lineHasNumbers: "Esta linha ainda tem números ligados a ela: {n}. Remova esses números antes de remover a linha.",
+  editNumber: "Corrigir o número {number}",
+  saveNumber: "Salvar número",
+  removeNumber: "Remover o número {number}",
+  removeNumberConfirm: "Remover o número {number}? As chamadas para ele deixam de ser atendidas. Essa ação não pode ser desfeita.",
+  removeNumberYes: "Remover {number}",
 };
 
 export default line;

@@ -71,6 +71,7 @@ const common = {
     token_required: "Ao mudar o endereço ou o tipo do conector, informe o token de novo.",
     invalid_numbers: "Estes números não foram reconhecidos como telefone. Nenhum foi adicionado:",
     number_already_registered: "Este número já está cadastrado.",
+    trunk_has_numbers: "Esta linha ainda tem números ligados a ela. Remova os números antes de remover a linha.",
     unknown_setting: "Esta configuração não existe nesta versão.",
     outbound_disabled: "As ligações de saída estão desligadas. Ligue em Ligações de saída.",
     outside_window: "Fora do horário permitido para ligações de saída.",

@@ -30,9 +30,9 @@ const line: LineDictionary = {
   helpTitle: "¿La llamada conecta pero queda muda?",
   helpBody: "Casi siempre es la red, no el agente. Revisa dos cosas:",
   helpUdp: "Los puertos UDP de audio (10000 a 10200) y el puerto 5060 deben estar abiertos en el firewall del servidor y en el panel de la empresa de hosting.",
-  helpIp: "La IP pública de abajo debe ser la IP real del servidor. Con la IP equivocada, el audio se envía a otro lugar y nadie escucha nada.",
-  publicIp: "IP pública del servidor",
-  publicIpHint: "Ejemplo: 203.0.113.10. En blanco, DeskVoice usa la IP que el instalador detectó.",
+  helpIp: "La IP pública del servidor debe estar correcta en la instalación. La dirección usada para el audio es la que el instalador detectó; para cambiarla, ejecuta el instalador de nuevo en la VPS.",
+  publicIp: "IP con la que la línea se identifica ante el proveedor",
+  publicIpHint: "Este campo solo ajusta cómo la línea se identifica ante el proveedor. No cambia la dirección del audio ni resuelve una llamada muda. Ejemplo: 203.0.113.10. En blanco, vale la IP que el instalador detectó.",
   saveIp: "Guardar IP",
   numbersTitle: "Números",
   numbersLead: "Cada número de la línea es atendido por un agente.",
@@ -44,6 +44,15 @@ const line: LineDictionary = {
   answeredBy: "Quién atiende",
   nobody: "Nadie: la llamada se rechaza con aviso",
   addNumber: "Agregar número",
+  removeLine: "Quitar línea",
+  removeLineConfirm: "¿Quitar la línea {name}? El servidor de telefonía deja de usar esta conexión. Esta acción no se puede deshacer.",
+  removeLineYes: "Quitar {name}",
+  lineHasNumbers: "Esta línea todavía tiene números ligados a ella: {n}. Quita esos números antes de quitar la línea.",
+  editNumber: "Corregir el número {number}",
+  saveNumber: "Guardar número",
+  removeNumber: "Quitar el número {number}",
+  removeNumberConfirm: "¿Quitar el número {number}? Las llamadas a él dejan de ser atendidas. Esta acción no se puede deshacer.",
+  removeNumberYes: "Quitar {number}",
 };
 
 export default line;

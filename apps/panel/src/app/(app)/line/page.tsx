@@ -1,10 +1,13 @@
 "use client";
 
-import { CheckCircle, MinusCircle, Plus, Pulse, Warning, XCircle } from "@phosphor-icons/react";
+import { CheckCircle, MinusCircle, PencilSimple, Plus, Pulse, Trash, Warning, XCircle } from "@phosphor-icons/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import enCommon from "../../../i18n/en/common";
 import en from "../../../i18n/en/line";
+import esCommon from "../../../i18n/es/common";
 import es from "../../../i18n/es/line";
 import { fill } from "../../../i18n/locales";
+import ptBRCommon from "../../../i18n/pt-BR/common";
 import ptBR, { type LineDictionary } from "../../../i18n/pt-BR/line";
 import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
@@ -28,11 +31,92 @@ const STEP_ICON: Record<StepStatus, ReactNode> = {
   skipped: <MinusCircle size={20} weight="duotone" className="text-muted" aria-hidden />,
 };
 
-function TrunkForm({ trunk, t, onSaved }: { trunk: Trunk | null; t: LineDictionary; onSaved(): void }) {
+const ICON_BUTTON = "grid size-9 cursor-pointer place-items-center rounded-xs text-muted hover:bg-sunken";
+
+/** Um número da linha: troca quem atende, corrige o número digitado errado e remove, com confirmação. */
+function NumberRow({ entry, trunkName, t, cancel, agentOptions, onChanged }: { entry: PhoneNumber; trunkName: string; t: LineDictionary; cancel: string; agentOptions: ReactNode; onChanged(): void }) {
+  const canConfigure = useCanConfigure();
+  const action = useAction();
+  const [mode, setMode] = useState<"view" | "edit" | "remove">("view");
+  const [number, setNumber] = useState("");
+  const pretty = formatPhone(entry.e164);
+  const run = (task: () => Promise<unknown>): void =>
+    void action.run(task).then((ok) => {
+      if (ok) setMode("view");
+      onChanged();
+    });
+
+  return (
+    <li className="grid gap-3 border-b border-line py-3 first:pt-0 last:border-b-0">
+      <div className="grid items-center gap-x-4 gap-y-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
+        <span className="data text-[1.07rem]">{pretty}</span>
+        <span className="text-muted">{trunkName}</span>
+        <Select aria-label={t.answeredBy} disabled={!canConfigure} value={entry.agentId ?? ""} onChange={(event) => run(() => api(`/phone-numbers/${entry.id}`, { method: "PATCH", body: { agentId: event.target.value || null } }))}>
+          {agentOptions}
+        </Select>
+        {canConfigure ? (
+          <div className="flex gap-1">
+            <button
+              type="button"
+              aria-label={fill(t.editNumber, { number: pretty })}
+              className={`${ICON_BUTTON} hover:text-ink`}
+              onClick={() => {
+                setNumber(pretty);
+                setMode(mode === "edit" ? "view" : "edit");
+              }}
+            >
+              <PencilSimple size={18} weight="duotone" aria-hidden />
+            </button>
+            <button type="button" aria-label={fill(t.removeNumber, { number: pretty })} className={`${ICON_BUTTON} hover:text-fail`} onClick={() => setMode(mode === "remove" ? "view" : "remove")}>
+              <Trash size={18} weight="duotone" aria-hidden />
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {mode === "edit" ? (
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            run(() => api(`/phone-numbers/${entry.id}`, { method: "PATCH", body: { number } }));
+          }}
+        >
+          <Field label={t.number} hint={t.numberHint}>
+            <TextInput mono type="tel" value={number} onChange={(event) => setNumber(event.target.value)} required autoFocus />
+          </Field>
+          <Button type="submit" busy={action.busy} className="mb-[1.6rem]">
+            {t.saveNumber}
+          </Button>
+          <Button variant="ghost" className="mb-[1.6rem]" onClick={() => setMode("view")}>
+            {cancel}
+          </Button>
+        </form>
+      ) : null}
+      {mode === "remove" ? (
+        <Notice tone="fail">
+          <p>{fill(t.removeNumberConfirm, { number: pretty })}</p>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <Button variant="danger" busy={action.busy} onClick={() => run(() => api(`/phone-numbers/${entry.id}`, { method: "DELETE" }))}>
+              {fill(t.removeNumberYes, { number: pretty })}
+            </Button>
+            <Button variant="ghost" onClick={() => setMode("view")}>
+              {cancel}
+            </Button>
+          </div>
+        </Notice>
+      ) : null}
+      {action.error ? <Notice tone="fail">{action.error}</Notice> : null}
+    </li>
+  );
+}
+
+function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk | null; t: LineDictionary; cancel: string; numbersCount: number; onSaved(): void }) {
   const locale = useLocale();
   const canConfigure = useCanConfigure();
   const save = useAction();
   const test = useAction();
+  const remove = useAction();
+  const [confirming, setConfirming] = useState(false);
   const [draft, setDraft] = useState({
     name: trunk?.name ?? "",
     host: trunk?.host ?? "",
@@ -123,8 +207,30 @@ function TrunkForm({ trunk, t, onSaved }: { trunk: Trunk | null; t: LineDictiona
             ) : null}
             <ActionStatus action={save} />
             {test.error ? <ActionStatus action={test} /> : null}
-            {trunk?.lastCheckAt && !result ? <span className="ml-auto text-[0.87rem] text-muted">{fill(t.lastCheck, { when: formatDateTime(trunk.lastCheckAt, locale) })}</span> : null}
+            {trunk?.lastCheckAt && !result ? <span className="text-[0.87rem] text-muted">{fill(t.lastCheck, { when: formatDateTime(trunk.lastCheckAt, locale) })}</span> : null}
+            {trunk && !confirming ? (
+              <Button variant="ghost" className="ml-auto" icon={<Trash size={18} weight="duotone" aria-hidden />} onClick={() => setConfirming(true)}>
+                {t.removeLine}
+              </Button>
+            ) : null}
           </div>
+        ) : null}
+        {trunk && confirming ? (
+          // Com números ligados a API recusa; a tela já diz quantos são em vez de oferecer o botão.
+          <Notice tone={numbersCount > 0 ? "warn" : "fail"}>
+            <p>{numbersCount > 0 ? fill(t.lineHasNumbers, { n: numbersCount }) : fill(t.removeLineConfirm, { name: trunk.name })}</p>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {numbersCount === 0 ? (
+                <Button variant="danger" busy={remove.busy} onClick={() => void remove.run(() => api(`/trunks/${trunk.id}`, { method: "DELETE" })).then((ok) => ok && onSaved())}>
+                  {fill(t.removeLineYes, { name: trunk.name })}
+                </Button>
+              ) : null}
+              <Button variant="ghost" onClick={() => setConfirming(false)}>
+                {cancel}
+              </Button>
+            </div>
+            {remove.error ? <p className="text-fail">{remove.error}</p> : null}
+          </Notice>
         ) : null}
       </form>
     </Panel>
@@ -133,6 +239,7 @@ function TrunkForm({ trunk, t, onSaved }: { trunk: Trunk | null; t: LineDictiona
 
 export default function LinePage() {
   const t = useDict(ptBR, en, es);
+  const cancel = useDict(ptBRCommon, enCommon, esCommon).actions.cancel;
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
   const trunks = useApi<Trunk[]>("/trunks");
@@ -144,7 +251,6 @@ export default function LinePage() {
   const [newNumber, setNewNumber] = useState({ number: "", trunkId: "", agentId: "" });
   const saveIp = useAction();
   const addNumber = useAction();
-  const assign = useAction();
   useEffect(() => setIp(publicIp.data?.value ?? ""), [publicIp.data]);
 
   const list = trunks.data ?? [];
@@ -168,13 +274,15 @@ export default function LinePage() {
       {!trunks.data && !trunks.error ? <Skeleton /> : null}
 
       {list.map((trunk) => (
-        <TrunkForm key={trunk.id} trunk={trunk} t={t} onSaved={trunks.reload} />
+        <TrunkForm key={trunk.id} trunk={trunk} t={t} cancel={cancel} numbersCount={numbers.data?.filter((entry) => entry.trunkId === trunk.id).length ?? 0} onSaved={trunks.reload} />
       ))}
       {trunks.data && (list.length === 0 || adding) ? (
         <TrunkForm
           key={`new-${list.length}`}
           trunk={null}
           t={t}
+          cancel={cancel}
+          numbersCount={0}
           onSaved={() => {
             setAdding(false);
             trunks.reload();
@@ -193,22 +301,10 @@ export default function LinePage() {
           {numbers.data?.length ? (
             <ul className="grid">
               {numbers.data.map((entry) => (
-                <li key={entry.id} className="grid items-center gap-x-4 gap-y-1.5 border-b border-line py-3 first:pt-0 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
-                  <span className="data text-[1.07rem]">{formatPhone(entry.e164)}</span>
-                  <span className="text-muted">{list.find((trunk) => trunk.id === entry.trunkId)?.name}</span>
-                  <Select
-                    aria-label={t.answeredBy}
-                    disabled={!canConfigure}
-                    value={entry.agentId ?? ""}
-                    onChange={(event) => void assign.run(() => api(`/phone-numbers/${entry.id}`, { method: "PATCH", body: { agentId: event.target.value || null } })).then(numbers.reload)}
-                  >
-                    {agentOptions}
-                  </Select>
-                </li>
+                <NumberRow key={entry.id} entry={entry} trunkName={list.find((trunk) => trunk.id === entry.trunkId)?.name ?? ""} t={t} cancel={cancel} agentOptions={agentOptions} onChanged={numbers.reload} />
               ))}
             </ul>
           ) : null}
-          {assign.error ? <Notice tone="fail">{assign.error}</Notice> : null}
 
           {canConfigure && list.length > 0 ? (
             <form

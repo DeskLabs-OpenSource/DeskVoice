@@ -30,9 +30,9 @@ const line: LineDictionary = {
   helpTitle: "The call connects but there is no sound?",
   helpBody: "It is almost always the network, not the agent. Check two things:",
   helpUdp: "The UDP audio ports (10000 to 10200) and port 5060 must be open in the server firewall and in the hosting company's panel.",
-  helpIp: "The public IP below must be the real IP of the server. With the wrong IP, the audio is sent somewhere else and nobody hears anything.",
-  publicIp: "Public IP of the server",
-  publicIpHint: "Example: 203.0.113.10. When blank, DeskVoice uses the IP the installer detected.",
+  helpIp: "The public IP of the server must be right in the installation. The address used for audio is the one the installer detected; to change it, run the installer again on the VPS.",
+  publicIp: "IP the line identifies itself with to the provider",
+  publicIpHint: "This field only adjusts how the line identifies itself to the provider. It does not change the audio address and does not fix a silent call. Example: 203.0.113.10. When blank, the IP the installer detected is used.",
   saveIp: "Save IP",
   numbersTitle: "Numbers",
   numbersLead: "Each number of the line is answered by an agent.",
@@ -44,6 +44,15 @@ const line: LineDictionary = {
   answeredBy: "Answered by",
   nobody: "Nobody: the call is refused with a notice",
   addNumber: "Add number",
+  removeLine: "Remove line",
+  removeLineConfirm: "Remove the line {name}? The telephony server stops using this connection. This cannot be undone.",
+  removeLineYes: "Remove {name}",
+  lineHasNumbers: "This line still has numbers attached to it: {n}. Remove those numbers before removing the line.",
+  editNumber: "Correct the number {number}",
+  saveNumber: "Save number",
+  removeNumber: "Remove the number {number}",
+  removeNumberConfirm: "Remove the number {number}? Calls to it stop being answered. This cannot be undone.",
+  removeNumberYes: "Remove {number}",
 };
 
 export default line;

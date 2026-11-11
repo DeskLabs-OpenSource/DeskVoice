@@ -3,6 +3,8 @@ export interface Me {
   name: string;
   email: string;
   role: Role;
+  phone?: string | null;
+  whatsapp?: string | null;
 }
 
 export interface Agent {
