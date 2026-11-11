@@ -86,7 +86,12 @@ jobs:
           target: ${{ matrix.process }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.REGISTRY }}/deskvoice-${{ matrix.process }}:${{ needs.probe.outputs.version }}
+          # Duas etiquetas para a mesma imagem: `X.Y.Z` e `vX.Y.Z`. O atualizador da VPS pede a
+          # versão com o `v` da tag git; sem a segunda etiqueta o pull falhava sempre e toda
+          # atualização construía a imagem na própria VPS.
+          tags: |
+            ${{ env.REGISTRY }}/deskvoice-${{ matrix.process }}:${{ needs.probe.outputs.version }}
+            ${{ env.REGISTRY }}/deskvoice-${{ matrix.process }}:v${{ needs.probe.outputs.version }}
           build-args: |
             APP_VERSION=${{ needs.probe.outputs.version }}
           labels: |

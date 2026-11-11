@@ -167,6 +167,21 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # A chamada simulada grava eventos, aprovação e tarefas: precisa de Postgres de verdade.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: deskvoice_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d deskvoice_test"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      # Senha de um banco descartável que só existe dentro deste job; não é segredo.
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/deskvoice_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -174,15 +189,16 @@ jobs:
       - uses: ./.github/actions/setup
         id: setup
       - name: Chamada simulada de ponta a ponta
-        run: pnpm vitest run --project unit apps/voice --passWithNoTests
+        run: pnpm vitest run --project db apps/voice/src/simulated-call.db.test.ts
       - uses: ./.github/actions/explain-failure
         if: failure()
         with:
           setup-outcome: ${{ steps.setup.outcome }}
           when-pr: >-
-            Rode `pnpm vitest run --project unit apps/voice`. Este teste atende uma ligação com o
-            motor simulado, do toque ao fim: se ele quebrou, a mudança alterou o caminho de uma
-            chamada (sequência de eventos, ferramenta, transferência ou custo).
+            Rode `pnpm vitest run --project db apps/voice/src/simulated-call.db.test.ts` (pede
+            Docker). Este teste atende uma ligação com o motor simulado, do toque ao fim: se ele
+            quebrou, a mudança alterou o caminho de uma chamada (sequência de eventos, ferramenta,
+            aprovação, transferência ou custo).
 
   build:
     name: build
