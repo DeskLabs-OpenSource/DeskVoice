@@ -30,6 +30,13 @@
 		reverse_proxy voice:8091
 	}
 
+	# A rota do agente de atualização não é para a internet: o agente (install/agent.sh) fala de
+	# dentro do contêiner do painel, sem passar por aqui. Quem pedir por este endereço recebe
+	# "não existe". O painel recusa de novo por conta própria qualquer pedido que veio por proxy.
+	handle /api/v1/system/agent* {
+		respond 404
+	}
+
 	handle {
 		reverse_proxy panel:3000 {
 			# O painel usa eventos enviados pelo servidor (SSE) para a tela ao vivo.

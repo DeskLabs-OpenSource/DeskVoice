@@ -12,8 +12,10 @@ export FAKE_DIR="$SANDBOX/fake"
 export DESKVOICE_DEPLOY_DIR="$SANDBOX/deploy"
 export DESKVOICE_BACKUP_DIR="$SANDBOX/backups"
 export NO_COLOR=1
+# O agendamento do agente vai para pastas do teste: nada aqui toca no systemd nem no cron da máquina.
+export DESKVOICE_SYSTEMD_DIR="$SANDBOX/systemd" DESKVOICE_SYSTEMD_RUN_DIR="$SANDBOX/systemd-run" DESKVOICE_CRON_DIR="$SANDBOX/cron.d"
 export PATH="$TEST_DIR/fake:$PATH"
-mkdir -p "$FAKE_DIR" "$DESKVOICE_DEPLOY_DIR"
+mkdir -p "$FAKE_DIR" "$DESKVOICE_DEPLOY_DIR" "$DESKVOICE_SYSTEMD_DIR" "$DESKVOICE_SYSTEMD_RUN_DIR"
 cp -R "$REPO/deploy/asterisk" "$DESKVOICE_DEPLOY_DIR/asterisk"
 rm -rf "$DESKVOICE_DEPLOY_DIR/asterisk/generated"
 cp "$REPO/deploy/docker-compose.yml" "$REPO/deploy/images.env" "$DESKVOICE_DEPLOY_DIR/"

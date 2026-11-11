@@ -1,0 +1,40 @@
+import type { UpdateDictionary } from "../pt-BR/update";
+
+const update: UpdateDictionary = {
+  title: "Version and update",
+  lead: "The version this server is running and what changes in the next one. The update makes a backup first and goes back to the previous version by itself if the new one does not respond.",
+  running: "Running on this server",
+  published: "Latest published",
+  publishedNone: "No version published yet",
+  publishedUnknown: "The published versions could not be checked right now. The running version, above, was read from this server and still holds. The check is repeated in a minute.",
+  upToDate: "This server found no published version newer than the installed one.",
+  notesMissing: "Version {to} already exists, and it is the one this server would update to, but its notes are not available here yet (the release page has not been published, or the check failed just now). The update button appears as soon as the notes can be read: nobody confirms without seeing what changes.",
+  notesTitle: "What changes from {from} to {to}",
+  releaseOf: "Version {version}",
+  attention: "Requires attention",
+  agentOk: "The update agent on the server last responded on {when}.",
+  agentSilent: "The update agent has not responded since {when}. A request made now waits for it and expires in 15 minutes. On the server, the reason is recorded in deploy/agent/agent.log.",
+  agentNever: "The update agent has not talked to the panel yet: it is not installed on this server, or it was just installed. It is the agent that runs the update requested here. To install it, run once on the server, in the DeskVoice folder:",
+  agentFailure: "Last communication failure the agent recorded, on {when}: {detail}",
+  agentMismatch: "The agent announced version {agent}, and the panel is running {running}. If an update has just finished, this settles in a minute.",
+  unsupported: "This server runs version \"{version}\", which is not a published version: the images were built on it, or it is a test version. Updating from the panel only replaces one published version with another. To update, run on the server, in the DeskVoice folder:",
+  start: "Update to {to}",
+  confirm: "Update DeskVoice from version {from} to {to}? The server backs up the database before touching anything. The system is offline for a few minutes, and calls in progress drop. If the new version does not respond, the server goes back to {from} by itself.",
+  password: "Your password",
+  passwordHint: "We ask for the password again because this action takes the system offline.",
+  confirmYes: "Update from {from} to {to}",
+  status: {
+    requested: "Request recorded on {when}. The agent on the server starts the update within a minute.",
+    running: "Update in progress since {when}. The panel is offline for a few minutes; this screen comes back by itself when it responds.",
+    succeeded: "The update finished on {when}: the server is on version {to}.",
+    nothing_to_do: "The request finished on {when} with no change: the server was already on the latest published version.",
+    rolled_back: "The requested update was not applied ({when}). The server remains on version {from}, responding. The reason is in the updater output, below.",
+    failed: "The update failed on {when}, and the server may not have come back whole. See the updater output, below, and check the server with bash install/healthcheck.sh.",
+    expiredPickup: "The request expired on {when}: the update agent did not pick it up in 15 minutes. Nothing was changed. See the agent status above; another request can already be made.",
+    expiredRun: "The request expired on {when}: the agent started the update and returned no result in 30 minutes. Check the server with bash install/healthcheck.sh. Another request can already be made.",
+    superseded: "The request was not carried out ({when}): a newer version came out after it was made, and the confirmation was only for {to}. Nothing was changed. Read the notes of the new version and ask again.",
+  },
+  detail: "Updater output",
+};
+
+export default update;

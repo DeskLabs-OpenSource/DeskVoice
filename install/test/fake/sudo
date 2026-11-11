@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# sudo de mentira: nenhum teste pede privilégio de verdade. Registra e roda o comando como está;
+# com $FAKE_DIR/sudo_fail, recusa (como o sudo que pediria senha e não tem terminal).
+echo "sudo $*" >> "$FAKE_DIR/calls.log"
+if [ "${1:-}" = "-n" ]; then shift; fi
+if [ -f "$FAKE_DIR/sudo_fail" ]; then exit 1; fi
+exec "$@"

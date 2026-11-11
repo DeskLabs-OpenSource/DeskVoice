@@ -1,0 +1,13 @@
+# Gerado pelo instalador do DeskVoice. Não edite: rode bash install/agent.sh --install.
+[Unit]
+Description=DeskVoice: agente de atualização (anuncia a versão e atende ao pedido feito pela tela)
+After=docker.service
+
+[Service]
+Type=oneshot
+User=${AGENT_USER}
+WorkingDirectory=${AGENT_DIR}
+ExecStart=/usr/bin/env bash ${AGENT_DIR}/install/agent.sh
+# Sem prazo de propósito: uma atualização leva minutos, e interrompê-la no meio é pior do que
+# esperar. Enquanto esta passada não termina, o timer não começa outra.
+TimeoutStartSec=infinity

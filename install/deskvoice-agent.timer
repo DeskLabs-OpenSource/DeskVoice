@@ -1,0 +1,11 @@
+# Gerado pelo instalador do DeskVoice. Não edite: rode bash install/agent.sh --install.
+[Unit]
+Description=DeskVoice: passada do agente de atualização, a cada minuto
+
+[Timer]
+OnCalendar=minutely
+RandomizedDelaySec=15s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
