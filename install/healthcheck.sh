@@ -132,13 +132,14 @@ if [ "$only_essential" = 0 ]; then
     entry_panel="$(printf '%s\n' "$entry_lines" | awk -F'|' '$1 == "panel" { print $2; exit }')"
     entry_voice="$(printf '%s\n' "$entry_lines" | awk -F'|' '$1 == "voice" { print $2; exit }')"
     case "$entry_panel" in
-      [1-4][0-9][0-9])
+      200)
         case "$entry_voice" in
           426|400) add entry "Entrada única" 0 ok "painel e voz do navegador respondem pelo mesmo endereço (publicado em: ${entry_ports% })" ;;
           502|503|504) add entry "Entrada única" 0 falha "o painel responde, mas /voice-ws não chega ao serviço de voz (HTTP $entry_voice): \"Falar com o agente\" não conecta. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 voice" ;;
           [1-5][0-9][0-9]) add entry "Entrada única" 0 falha "o painel responde, mas /voice-ws não foi entregue ao serviço de voz (veio HTTP $entry_voice em vez de um pedido de WebSocket): \"Falar com o agente\" não conecta. Rode: bash install/install.sh" ;;
           *) add entry "Entrada única" 0 falha "o painel responde, mas /voice-ws não respondeu (${entry_voice:-sem saída}): \"Falar com o agente\" não conecta" ;;
         esac ;;
+      [1-4][0-9][0-9]) add entry "Entrada única" 0 falha "o Caddy do DeskVoice respondeu, mas não entregou o pedido ao painel (HTTP $entry_panel em vez de 200): o endereço configurado no Caddy não é o que está sendo usado. Rode: bash install/install.sh" ;;
       5[0-9][0-9]) add entry "Entrada única" 0 falha "o Caddy do DeskVoice não alcança o painel (HTTP $entry_panel). Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy" ;;
       *)
         if [ "$entry_scheme" = https ]; then add entry "Entrada única" 0 falha "o Caddy não respondeu em HTTPS para $entry_site (${entry_panel:-sem saída}). Causa mais comum: o certificado ainda não saiu porque o domínio não aponta para esta VPS. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"

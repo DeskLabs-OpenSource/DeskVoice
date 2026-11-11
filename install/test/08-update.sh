@@ -52,6 +52,18 @@ contains "migration falhou: diz o que aconteceu e onde está" "$out" "foi desfei
 contains "migration falhou: aponta o backup usado" "$out" "$DESKVOICE_BACKUP_DIR/"
 echo 0 > "$FAKE_DIR/migrate_exit"
 
+# Entrada única respondia antes e parou depois (peças essenciais de pé): conta como regressão e volta.
+# O Docker de mentira responde ok até a subida da versão nova, e 404 a partir dela.
+cat > "$FAKE_DIR/entry_probe_after_up" <<'PROBE'
+panel|404
+voice|404
+PROBE
+out="$(bash "$KIT/update.sh" --to v0.3.0 --yes 2>&1)"; equal "entrada quebrou na atualização: sai com erro" 1 "$?"
+equal "entrada quebrou: volta a versão anterior" v0.2.0 "$(env_get "$E" DESKVOICE_VERSION)"
+contains "entrada quebrou: diz que o painel deixou de abrir" "$out" "deixou de abrir pelo endereço que abria antes"
+lacks "entrada quebrou: não diz atualizado" "$out" "Atualizado para"
+rm -f "$FAKE_DIR/entry_probe_after_up" "$FAKE_DIR/entry_probe"
+
 # Instalação de antes da entrada única: a atualização converge a publicação sozinha.
 O="$DESKVOICE_DEPLOY_DIR/docker-compose.override.yml"; A="$DESKVOICE_DEPLOY_DIR/app.env"
 printf 'services:\n  panel:\n    ports:\n      - "127.0.0.1:3080:3000"\n  voice:\n    ports:\n      - "127.0.0.1:3081:8091"\n' > "$O"

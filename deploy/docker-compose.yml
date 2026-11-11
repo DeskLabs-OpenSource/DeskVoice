@@ -122,7 +122,7 @@ services:
   # Sobe sempre, em todo modo de instalação. Onde escuta (CADDY_SITE), em quem confia
   # (CADDY_TRUSTED_PROXIES) e as portas publicadas vêm de docker-compose.override.yml.
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.11.9-alpine
     restart: unless-stopped
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

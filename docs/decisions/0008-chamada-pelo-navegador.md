@@ -42,11 +42,16 @@ O que vale agora:
   o Caddy confia só em vizinho de rede privada e o painel conta 2 saltos. Limite conhecido
   desse segundo modo: um proxy do operador que repasse o cabeçalho do visitante sem
   acrescentar o endereço real, ou um processo local falando direto com a porta única, consegue
-  escolher o endereço que o painel lê.
+  escolher o endereço que o painel lê. "Vizinho de rede privada" inclui qualquer contêiner da
+  rede interna do DeskVoice, e não só o proxy do operador. Por túnel, todos os visitantes
+  chegam com o mesmo endereço: cinco erros de login de um trancam os outros do mesmo túnel por
+  alguns minutos.
 - **A checagem de saúde passou a conferir a entrada** pelos dois caminhos (linha "Entrada
   única"). O limite conhecido "a checagem de saúde não confere se o proxy encaminha
   `/voice-ws`", listado em Consequências, fica reduzido a: ela confere o Caddy do DeskVoice, e
-  não o proxy que o operador colocou na frente.
+  não o proxy que o operador colocou na frente. A linha não é peça essencial, mas o
+  atualizador a trata como regressão: se respondia antes da atualização e parou depois, ele
+  volta para a versão anterior.
 - **A tela diz o que falta.** Conexão que não abre, ou cai antes de a conversa começar, deixou
   de mandar conferir a internet: diz que o serviço de voz não foi alcançado no mesmo endereço
   e aponta o repasse de WebSocket e o `bash install/healthcheck.sh`.
