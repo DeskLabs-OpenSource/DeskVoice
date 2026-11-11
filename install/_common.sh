@@ -316,6 +316,94 @@ published_entry() {
   [ -f "$PROXY_OVERRIDE" ] || return 0
   sed -n -e 's/.*"\([0-9.]*\):\([0-9][0-9]*\):80".*/\1 \2/p' -e 's/.*"\([0-9.]*\):\([0-9][0-9]*\):3000".*/\1 \2/p' "$PROXY_OVERRIDE" | head -n 1
 }
+# Sem domínio, como o painel está publicado hoje: `local` (só em 127.0.0.1, por túnel) ou `public`
+# (HTTP aberto, na 80 ou numa porta). Nada = ainda não há publicação. É o que a reinstalação
+# consulta para NÃO mudar a exposição de quem já instalou sem que a pessoa peça.
+published_exposure() {
+  local entry
+  entry="$(published_entry)"
+  if [ -n "$entry" ]; then
+    if [ "${entry%% *}" = "127.0.0.1" ]; then echo local; else echo public; fi
+  elif [ -f "$PROXY_OVERRIDE" ]; then
+    if grep -q '"80:80"' "$PROXY_OVERRIDE"; then echo public; fi
+  elif [ -n "$(env_get "$ENV_FILE" PANEL_DOMAIN)" ]; then echo public   # instalação de antes do arquivo de publicação
+  fi
+}
+# O endereço que a publicação GRAVADA dá a quem abre o painel. Lê o mesmo arquivo que o Compose
+# publica e que a checagem de saúde sonda: o que o instalador anuncia no fim sai daqui, e não de
+# uma conta feita à parte.
+#   published_address <ip público>  →  https://<domínio> | http://localhost:<porta> | http://<ip>[:<porta>]
+published_address() {
+  local site entry
+  site="$(sed -n 's/.*CADDY_SITE: "\(.*\)".*/\1/p' "$PROXY_OVERRIDE" 2>/dev/null | head -n 1 || true)"
+  case "$site" in ""|:*) ;; *) echo "https://$site"; return 0 ;; esac
+  entry="$(published_entry)"
+  if [ -n "$entry" ]; then
+    if [ "${entry%% *}" = "127.0.0.1" ]; then echo "http://localhost:${entry#* }"; else echo "http://$1:${entry#* }"; fi
+  elif grep -q '"80:80"' "$PROXY_OVERRIDE" 2>/dev/null; then echo "http://$1"
+  fi
+}
+# Por onde se fala com o Caddy de dentro da rede dos contêineres, a partir da publicação gravada.
+#   entry_target  →  "<http|https> <porta de dentro> <nome do site>", ou nada sem publicação
+entry_target() {
+  local site
+  site="$(sed -n 's/.*CADDY_SITE: "\(.*\)".*/\1/p' "$PROXY_OVERRIDE" 2>/dev/null | head -n 1 || true)"
+  case "$site" in "") ;; :*) echo "http 80 localhost" ;; *) echo "https 443 $site" ;; esac
+}
+# Entra de verdade pela entrada única, como a pessoa vai entrar: POST no login, uma rota que só
+# responde com sessão e, no fim, sai (não fica sessão aberta). Roda de dentro do contêiner do
+# painel, falando com o Caddy. Lê da ENTRADA PADRÃO "e-mail<quebra de linha>senha": a senha nunca
+# vai em argumento de processo. Escreve uma linha:
+#   ok|200 · rejected|<HTTP> (e-mail ou senha recusados) · limited|429 (limite de tentativas)
+#   session|<HTTP> (entrou, e a sessão não valeu) · unreachable|<motivo> (não chegou ao painel)
+#   login_probe_js <http|https> <porta> <nome do site>
+login_probe_js() {
+  cat <<JS
+const m=require('$1');let s='';process.stdin.on('data',d=>s+=d).on('end',async()=>{
+const i=s.indexOf('\\n'),email=s.slice(0,i).trim().toLowerCase(),password=s.slice(i+1);
+const call=(method,path,headers,body)=>new Promise(done=>{const q=m.request({host:'caddy',port:$2,path,method,servername:'$3',headers:{Host:'$3',...headers},rejectUnauthorized:false,timeout:15000},r=>{let b='';r.on('data',d=>b+=d).on('end',()=>done({status:r.statusCode,cookie:(r.headers['set-cookie']||[]).map(c=>c.split(';')[0]).join('; '),body:b}))});
+q.on('timeout',()=>q.destroy(new Error('sem resposta em 15s')));q.on('error',e=>done({status:0,error:String(e.code||e.message).replace(/[\\n|]/g,' ')}));if(body)q.write(body);q.end()});
+const sent=JSON.stringify({email,password});
+const login=await call('POST','/api/v1/auth/login',{'content-type':'application/json','content-length':Buffer.byteLength(sent)},sent);
+if(login.status===0)return console.log('unreachable|'+login.error);
+if(login.status===429)return console.log('limited|429');
+if(login.status===400||login.status===401)return console.log('rejected|'+login.status);
+if(login.status!==200||!login.cookie)return console.log('unreachable|HTTP '+login.status);
+const me=await call('GET','/api/v1/auth/me',{cookie:login.cookie});
+let who='';try{who=String(JSON.parse(me.body).data.email).toLowerCase()}catch(e){who=''}
+await call('POST','/api/v1/auth/logout',{cookie:login.cookie});
+console.log(me.status===200&&who===email?'ok|200':'session|'+me.status)});
+JS
+}
+# Uma tentativa de login pela entrada única, com a sonda acima. Devolve a linha dela (vazia se a
+# sonda não rodou). Uma tentativa só por chamada: o painel limita tentativas por e-mail.
+#   try_login <e-mail> <senha>
+try_login() {
+  local target
+  target="$(entry_target)"
+  [ -n "$target" ] || return 0
+  # shellcheck disable=SC2086  # entry_target devolve três palavras, de propósito
+  printf '%s\n%s' "$1" "$2" | dc exec -T panel node -e "$(login_probe_js $target)" 2>/dev/null | tail -n 1 || true
+}
+# Onde a porta publicada responde, vista de dentro desta máquina: em 127.0.0.1 (publicada só
+# local ou aberta, tanto faz); com HTTPS, pelo próprio domínio, como quem abre o navegador.
+#   published_probe_url <ip público>  →  endereço, ou nada sem publicação
+published_probe_url() {
+  local url
+  url="$(published_address "$1")"
+  case "$url" in
+    https://*) echo "$url" ;;
+    http://*:*) echo "http://127.0.0.1:${url##*:}" ;;
+    http://*) echo "http://127.0.0.1" ;;
+  esac
+}
+# Pede a rota de saúde pela porta publicada. Devolve o código HTTP (000 sem resposta), ou nada
+# se esta máquina não tem curl.
+#   probe_published <endereço de published_probe_url>
+probe_published() {
+  have curl || return 0
+  curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$1/api/v1/system/health" 2>/dev/null || true
+}
 # O nosso Caddy é quem está nas portas 80/443? (1 = sim.) Rodando com o arquivo atual publicando
 # a 80, ou rodando numa instalação antiga, de antes de o arquivo existir nesse modo.
 own_caddy_on_80() {  # own_caddy_on_80 <o Caddy do DeskVoice está rodando: 0|1>
@@ -542,6 +630,18 @@ install_agent_schedule() {
     ok "Agente de atualização agendado (cron: $CRON_DIR/$AGENT_UNIT, a cada minuto, como $user)"
   fi
 }
+# O Caddyfile é montado como arquivo. Quando a troca de versão o substitui no disco, o contêiner
+# que já estava de pé continua com o antigo até reiniciar: quem veio da 0.1.0 (cujo atualizador
+# não reiniciava o Caddy) ficava sem a regra que recusa a rota do agente. Compara o CONTEÚDO que
+# o contêiner tem montado com o do disco (a data do arquivo não serve: depois de um checkout ela
+# é a do checkout) e reinicia só se forem diferentes. Pode rodar quantas vezes for.
+converge_caddy() {
+  [ -n "$(dc ps -q --status running caddy 2>/dev/null)" ] || return 0
+  [ -f "$DEPLOY_DIR/Caddyfile" ] || return 0
+  if dc exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null | cmp -s - "$DEPLOY_DIR/Caddyfile"; then return 0; fi
+  info "Reiniciando o Caddy, para ele ler o Caddyfile desta versão (o painel fica fora por alguns segundos)..."
+  dc restart caddy >/dev/null 2>&1 || warn "Não consegui reiniciar o Caddy. Rode: docker restart deskvoice-caddy-1"
+}
 # Deixa a instalação pronta para a atualização pela tela: o segredo (e o painel com ele) e o
 # agendamento. É o que leva o agente a quem instalou antes de ele existir.
 converge_agent() {
@@ -549,6 +649,7 @@ converge_agent() {
     info "Recriando só o painel, para ele receber o segredo do agente de atualização (o painel fica fora por alguns segundos)..."
     dc up -d panel >/dev/null 2>&1 || warn "Não consegui recriar o painel. Rode: bash install/install.sh"
   fi
+  converge_caddy
   install_agent_schedule
 }
 

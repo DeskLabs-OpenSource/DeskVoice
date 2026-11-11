@@ -40,7 +40,7 @@ Se isso faz sentido para o seu caso, vale seguir para a instalação.
 | Item | Observação |
 |---|---|
 | Uma VPS com Ubuntu 22.04 ou mais novo | Recomendamos a [HostGator](https://www.hostgator.com.br/52708-141-3-52.html), parceira do projeto (link de parceria). Qualquer VPS com Docker funciona pelo mesmo caminho. Tenha 10 GB de disco livre. Sobre memória, só o que foi medido: a instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 400 MB. O menor tamanho em que a instalação cabe ainda não foi medido. As imagens publicadas são para processador x86_64 (amd64); em ARM a instalação constrói na própria máquina, com `--build`. Se faltar o Docker, o instalador pergunta e instala |
-| Um domínio apontado para o IP da VPS | Opcional para testar. Sem domínio, o painel abre pelo IP e **sem HTTPS**, o que não serve para uso de verdade |
+| Um domínio apontado para o IP da VPS | Opcional para testar. Sem domínio não há HTTPS: o painel fica só dentro da VPS, e você entra por um túnel SSH que o instalador ensina. Para uso de verdade, tenha o domínio |
 | Acesso SSH à VPS | O endereço, a porta e a senha que a hospedagem enviou |
 | Um tronco SIP com um número | Contratado com uma operadora de telefonia. Você vai precisar do endereço do servidor, do usuário, da senha e de saber se a autenticação é por registro ou por IP |
 | Uma chave de IA de voz | Do Gemini (Google) ou da OpenAI |
@@ -80,7 +80,12 @@ O instalador trabalha em cinco etapas e diz em qual está:
    publicada mais recente e grava o número dela, sobe o banco, aplica a estrutura, cria a
    empresa e o usuário dono e sobe o resto. Enquanto o projeto não tiver uma versão publicada,
    as imagens são construídas na própria VPS, o que leva alguns minutos.
-5. **Mostra o endereço do painel** e os próximos passos.
+5. **Prova que você entra, e só então mostra o endereço do painel** e os próximos passos. Ele
+   confere que a porta publicada responde e entra de verdade na tela de login com o e-mail e a
+   senha que você acabou de definir. Se o login falhar, ele para e diz o que fazer, em vez de
+   dizer que está pronto. Se você informou um domínio que ainda não aponta para a VPS, ele não
+   falha: termina com "Instalado; o endereço ainda não abre" e diz o que falta. Não é preciso
+   instalar de novo; quando o registro do domínio propagar, o endereço abre.
 
 Você não inventa segredo técnico nenhum e não edita arquivo de configuração. Rodar o instalador
 de novo não quebra nada: ele retoma de onde parou e não troca um segredo que já existe.
@@ -91,6 +96,13 @@ plano sem alterar nada.
 ### 3. Entre no painel
 
 Abra o endereço que o instalador mostrou e entre com o e-mail e a senha que você definiu.
+
+Sem domínio, o endereço é `http://localhost:3080` e só abre por um túnel SSH: no **seu
+computador**, rode o comando `ssh -L ...` que o instalador mostrou no fim e deixe esse terminal
+aberto enquanto usa o painel. É assim de propósito: sem domínio não há HTTPS, e a tela de login
+não fica na internet com a senha trafegando sem criptografia. Quando tiver um domínio apontado
+para a VPS, rode `bash install/install.sh` de novo e informe o domínio: o painel passa a abrir
+por HTTPS, de qualquer lugar.
 
 ### 4. Informe a chave de IA
 

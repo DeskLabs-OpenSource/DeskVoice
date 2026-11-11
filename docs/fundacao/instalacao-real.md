@@ -63,7 +63,52 @@ A instalação real aconteceu depois da publicação (item 13.5 da conformidade)
 
 ## O que continua sem prova depois da 0.1.0
 
-- Instalação do zero, de verdade, pelo comando de uma linha contra uma versão publicada, numa máquina limpa. Só a simulação e a atualização foram exercitadas.
+- Instalação do zero, de verdade, pelo comando de uma linha contra uma versão publicada, numa máquina limpa. Só a simulação e a atualização foram exercitadas. (Depois da 0.2.0 a instalação do zero contra a 0.1.0 aconteceu, numa segunda VPS compartilhada: ver "Depois da 0.2.0". Máquina limpa continua sem prova.)
 - Conversa por voz depois da atualização para a 0.1.0.
 - A volta automática do `update.sh` numa VPS.
 - Instalação em processador ARM, que só existe construindo na própria máquina.
+
+## Depois da 0.2.0 (2026-11-11)
+
+Registrado a partir do que informou quem conduziu as instalações e a versão. Quem escreveu esta seção não esteve nas máquinas, e não há captura guardada no repositório.
+
+### Instalação do zero numa segunda VPS, contra a 0.1.0
+
+| Campo | Valor |
+|---|---|
+| Máquina | Segunda VPS de teste: Ubuntu 22.04, x86_64, 8 GB, compartilhada |
+| Caminho | O comando de uma linha (`install/get.sh`), contra a versão 0.1.0 |
+| Tempo | 67 segundos do `curl` até tudo respondendo |
+| O que se observou | O clone ficou na tag; as três imagens baixaram sem login; a checagem de saúde mostrou todas as peças em ok |
+| Memória | Cerca de 320 MiB somando os seis contêineres, com o sistema **parado**, sem chamada. Não é o tamanho mínimo de máquina: esse continua sem medida |
+
+Defeito achado nessa instalação: a máquina tinha as portas 80 e 443 livres e não tinha domínio, e a opção de painel só local (`DESKVOICE_PANEL_LOCAL_ONLY`) foi **ignorada em silêncio**. O valor passado, `1`, nem foi validado nesse modo. O Caddy publicou `0.0.0.0:80` e o instalador anunciou `http://<IP>`. A opção só existia para o caso de as portas 80 e 443 serem de outro proxy. A correção (a opção vale em todo modo, valor inválido e opção sem efeito param com erro, e sem domínio o padrão passa a ser só local) está no ramo `fix/instalador-confere-o-que-anuncia`, provada só com o Docker de mentira dos testes do kit: ver [`nao-exercitado.md`](nao-exercitado.md).
+
+### A versão 0.2.0
+
+| O que rodou | O que se observou |
+|---|---|
+| Ato 1 do `release.yml` | Rodou pelo workflow pela primeira vez e abriu o PR de versão |
+| Verificações do PR de versão | As verificações do evento de PR ficaram em `action_required`. O `ready` verde veio do `ci` disparado no ramo, anexado ao commit |
+| Publicação | Inteira, sem intervenção: os pacotes seguiram públicos e a release nasceu sozinha |
+
+### A ponte da 0.1.0, nas duas VPS de teste
+
+Nas duas máquinas, `bash install/update.sh --yes` duas vezes, como a nota da 0.2.0 pede a quem está na 0.1.0.
+
+| Rodada | O que se observou |
+|---|---|
+| 1 | Backup, imagens 0.2.0 e a migration nova |
+| 2 | Recriou o painel e agendou o timer do systemd. O agente falou com o painel em menos de dois minutos, e a checagem de saúde mostrou "Agente de atualização: ok" |
+
+Defeito achado na ponte: pela entrada única, o 404 da rota do agente vinha do **painel** (resposta em JSON), e não do Caddy, porque o Caddy não tinha sido reiniciado e seguia com o Caddyfile antigo. Depois de reiniciar o Caddy à mão, o 404 passou a vir do Caddy (corpo vazio). A rota continuava recusada nos dois casos; o que faltava era a camada da frente. A correção (a segunda rodada reinicia o Caddy quando o Caddyfile que ele tem montado não é o do disco, e a checagem de saúde avisa quando quem recusa é o painel) está no mesmo ramo, também provada só com o Docker de mentira.
+
+### O que continua sem prova depois da 0.2.0
+
+- O agente de atualização ouvindo um "sim" do painel e atualizando.
+- A passagem de vez do `update.sh` com `--resume`. A ponte não a exercita, porque a 0.1.0 não a tem.
+- A volta automática do `update.sh` numa VPS.
+- A tela de atualização num navegador.
+- Conversa por voz depois das atualizações.
+- Instalação numa máquina limpa: a segunda VPS também é compartilhada.
+

@@ -12,7 +12,9 @@ position() { grep -n -- "$1" "$FAKE_DIR/calls.log" | head -n 1 | cut -d: -f1; }
 # Atualização que dá certo, numa instalação que veio de uma versão sem agente de atualização.
 A="$DESKVOICE_DEPLOY_DIR/app.env"; env_unset "$E" UPDATE_AGENT_TOKEN
 : > "$FAKE_DIR/calls.log"
+published_before="$(cat "$DESKVOICE_DEPLOY_DIR/docker-compose.override.yml")"
 out="$(bash "$KIT/update.sh" --to 0.2.0 --yes 2>&1)"; equal "atualização saudável sai com zero" 0 "$?"
+equal "a atualização não muda o que está publicado" "$published_before" "$(cat "$DESKVOICE_DEPLOY_DIR/docker-compose.override.yml")"
 contains "mostra a versão atual" "$out" "Atual: 0.1.0"
 contains "mostra a versão alvo" "$out" "Alvo:  0.2.0"
 equal "grava a versão nova" 0.2.0 "$(env_get "$E" DESKVOICE_VERSION)"
@@ -20,6 +22,7 @@ check "o backup vem antes das migrations" test "$(position ' pg_dump ')" -lt "$(
 check "as migrations vêm antes de subir" test "$(position 'run --rm migrate')" -lt "$(position ' up -d')"
 equal "fez exatamente um backup" 1 "$(ls "$DESKVOICE_BACKUP_DIR"/*/manifest.txt | wc -l | tr -d ' ')"
 contains "diz que conferiu as peças" "$out" "todas as peças essenciais respondendo"
+contains "confere a porta publicada, pelo caminho de quem usa" "$out" "O painel responde pela porta publicada (https://voz.exemplo.com.br)"
 check "quem veio de versão sem agente ganha o segredo antes de o painel subir" test "$(grep -n 'UPDATE_AGENT_TOKEN' "$E" | wc -l | tr -d ' ')" = 1
 lacks "o segredo do agente não vai para o arquivo que voz e rotinas recebem" "$(cat "$A")" "UPDATE_AGENT_TOKEN"
 equal "atualização boa: reinicia o Caddy uma vez, para ele ler o Caddyfile novo" 1 "$(grep -c ' restart caddy$' "$FAKE_DIR/calls.log")"
@@ -41,6 +44,17 @@ equal "mesma versão, sem agente: não faz backup nem migration" 0 "$(grep -cE '
 out="$(bash "$KIT/update.sh" --to 0.2.0 --yes 2>&1)"
 equal "mesma versão, já com agente: não recria o painel" 0 "$(grep -c ' up -d panel$' "$FAKE_DIR/calls.log")"
 equal "mesma versão, já com agente: não mexe no systemd de novo" 0 "$(grep -cE '^systemctl (daemon-reload|enable)' "$FAKE_DIR/calls.log")"
+equal "mesma versão, Caddy com o Caddyfile do disco: não reinicia" 0 "$(grep -c ' restart caddy$' "$FAKE_DIR/calls.log")"
+# A ponte da 0.1.0: o atualizador antigo trocou o Caddyfile no disco e não reiniciou o Caddy, que
+# segue com o arquivo antigo montado. A segunda rodada compara o conteúdo e reinicia.
+grep -v 'system/agent' "$DESKVOICE_DEPLOY_DIR/Caddyfile" > "$FAKE_DIR/caddy_mounted"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.2.0 --yes 2>&1)"; equal "segunda rodada com Caddy desatualizado: zero" 0 "$?"
+check "segunda rodada: compara o Caddyfile montado no contêiner" grep -q 'exec -T caddy cat /etc/caddy/Caddyfile' "$FAKE_DIR/calls.log"
+equal "segunda rodada: reinicia o Caddy que ficou com o Caddyfile antigo" 1 "$(grep -c ' restart caddy$' "$FAKE_DIR/calls.log")"
+contains "segunda rodada: diz que reiniciou o Caddy" "$out" "Reiniciando o Caddy"
+rm "$FAKE_DIR/caddy_mounted"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.2.0 --yes 2>&1)"
+equal "depois de reiniciado: não reinicia de novo" 0 "$(grep -c ' restart caddy$' "$FAKE_DIR/calls.log")"
 
 # Sem backup não há atualização.
 touch "$FAKE_DIR/pg_dump_fail"; : > "$FAKE_DIR/calls.log"

@@ -48,7 +48,8 @@ say "     Disco: 10 GB livres. Memória: a instalação foi provada numa VPS de 
 say "     DeskVoice parado usa cerca de 400 MB. O menor tamanho em que a instalação cabe ainda não"
 say "     foi medido: enquanto o projeto não tiver uma versão publicada, ela constrói as imagens no"
 say "     servidor, e com 2 GB pode faltar memória nessa etapa."
-say "  2. Opcional: um domínio apontado para a VPS. Sem domínio, o painel abre pelo IP, sem HTTPS."
+say "  2. Opcional: um domínio apontado para a VPS. Sem domínio não há HTTPS: o painel fica só dentro"
+say "     da VPS e você entra por túnel SSH, com o comando que o instalador mostra no fim."
 say "  3. Para atender ligação de verdade: um tronco SIP com um número e uma chave de IA de voz"
 say "     (Gemini ou OpenAI). Sem eles dá para instalar e ver uma chamada simulada."
 say

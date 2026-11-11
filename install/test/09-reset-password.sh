@@ -14,6 +14,21 @@ contains "passa o e-mail" "$(cat "$FAKE_DIR/calls.log")" "--email dono@empresa.c
 equal "a senha chega pela entrada padrão" "senha-nova-bem-longa" "$(cat "$FAKE_DIR/reset_stdin")"
 lacks "a senha não aparece nos argumentos" "$(cat "$FAKE_DIR/calls.log")" "senha-nova-bem-longa"
 lacks "a senha não aparece na saída" "$out" "senha-nova-bem-longa"
+# Só diz que trocou depois de entrar com a senha nova pela tela de entrada.
+contains "confere a senha nova entrando de verdade" "$out" "Senha trocada e conferida"
+equal "o login de conferência recebe e-mail e senha pela entrada padrão" "dono@empresa.com.br|senha-nova-bem-longa" "$(tr '\n' '|' < "$FAKE_DIR/login_stdin")"
+echo 'rejected|401' > "$FAKE_DIR/login_probe"
+out="$(DESKVOICE_RESET_PASSWORD='senha-nova-bem-longa' bash "$KIT/reset-password.sh" dono@empresa.com.br 2>&1)"
+equal "senha nova que não entra: sai com erro" 1 "$?"
+lacks "senha nova que não entra: não diz que trocou" "$out" "Senha trocada"
+echo 'limited|429' > "$FAKE_DIR/login_probe"
+out="$(DESKVOICE_RESET_PASSWORD='senha-nova-bem-longa' bash "$KIT/reset-password.sh" dono@empresa.com.br 2>&1)"
+equal "conta no limite de tentativas: termina" 0 "$?"
+contains "conta no limite de tentativas: diz que NÃO testou e por quê" "$out" "NÃO testei o login: o painel está no limite de tentativas"
+echo 'unreachable|ECONNREFUSED' > "$FAKE_DIR/login_probe"
+out="$(DESKVOICE_RESET_PASSWORD='senha-nova-bem-longa' bash "$KIT/reset-password.sh" dono@empresa.com.br 2>&1)"
+contains "painel inalcançável: diz que NÃO testou" "$out" "NÃO testei o login: não cheguei à tela de entrada"
+rm "$FAKE_DIR/login_probe"
 
 # E-mail que não existe: o comando sai com 2.
 echo 2 > "$FAKE_DIR/reset_exit"

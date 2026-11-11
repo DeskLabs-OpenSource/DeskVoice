@@ -298,7 +298,21 @@ jobs:
           DESKVOICE_OWNER_PASSWORD="ci-$(openssl rand -hex 16)"
           echo "::add-mask::${DESKVOICE_OWNER_PASSWORD}"
           export DESKVOICE_OWNER_PASSWORD
-          bash install/install.sh --yes --build
+          # O instalador só termina com zero depois de conferir a porta publicada e de entrar de
+          # verdade pela tela de login com o dono que acabou de criar: se o login falhar, o passo
+          # falha aqui. A saída fica guardada para o passo seguinte conferir que o login foi testado.
+          bash install/install.sh --yes --build 2>&1 | tee "${RUNNER_TEMP}/install.log"
+          if ! grep -q 'Login conferido' "${RUNNER_TEMP}/install.log"; then
+            echo "::error::O instalador terminou sem dizer que conferiu o login do dono recém-criado."
+            exit 1
+          fi
+          # Sem domínio, o padrão é o painel só nesta máquina: nenhuma porta web aberta para fora.
+          published="$(sed -n 's/^ *- "\(.*\)"$/\1/p' deploy/docker-compose.override.yml | tr '\n' ' ')"
+          echo "publicado: ${published}"
+          case "${published}" in
+            "127.0.0.1:"*":80 ") ;;
+            *) echo "::error::Sem domínio, esperava uma única publicação em 127.0.0.1; o arquivo publica: ${published}"; exit 1 ;;
+          esac
           # Só para o log: o instalador já parou acima se uma peça essencial não respondeu.
           NO_COLOR=1 bash install/healthcheck.sh || echo "a checagem de saúde acusou um item não essencial (acima)"
       - name: O agente de atualização fala com o painel
@@ -325,7 +339,7 @@ jobs:
           token="$(sed -n 's/^UPDATE_AGENT_TOKEN=//p' deploy/.env)"
           if [ -z "${token}" ]; then echo "::error::deploy/.env não tem o segredo do agente."; exit 1; fi
           echo "::add-mask::${token}"
-          # A porta que o Caddy publicou nesta máquina: 80, ou a porta local se a 80 estava ocupada.
+          # A porta que o Caddy publicou nesta máquina: sem domínio, uma porta local em 127.0.0.1.
           entry="$(sed -n 's/^ *- "\(.*\):80"$/\1/p' deploy/docker-compose.override.yml | head -n 1)"
           port="${entry##*:}"
           # Sem resposta, o curl escreve 000: a comparação abaixo é que reprova, com a mensagem.

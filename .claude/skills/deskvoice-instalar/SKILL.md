@@ -71,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/
 |---|---|
 | A VPS é Ubuntu 22.04+ ou Debian 12+? Tem acesso root por SSH? | É o que o instalador suporta (`--force` segue em outro sistema, por conta e risco) |
 | Já roda outra coisa nas portas 80 e 443 (outro site, outro painel)? | Se sim, o painel sobe em outra porta e a pessoa aponta o proxy que já tem |
-| Tem domínio apontado para a VPS? | Sem domínio, o painel abre pelo IP, sem HTTPS, até ter um |
+| Tem domínio apontado para a VPS? | Sem domínio não há HTTPS: o painel fica só dentro da VPS (`127.0.0.1`) e a pessoa entra por túnel SSH, com o comando que o instalador mostra no fim. Publicar por HTTP pelo IP só pedindo de propósito (`DESKVOICE_PANEL_PUBLIC_HTTP=yes`), e a senha trafega sem criptografia: não sugira para uso de verdade |
 | Já contratou o tronco SIP? Tem servidor, usuário, senha e sabe se autentica por **registro** ou por **IP**? | Sem tronco só há chamada simulada |
 | Tem chave do Gemini ou da OpenAI? | Sem chave o agente recusa a ligação (e avisa na tela) |
 | A hospedagem tem firewall próprio no painel dela, além do da VPS? | É a causa mais comum de ligação muda |
@@ -137,7 +137,8 @@ Estados: `ok`, `aviso` (falta configurar; não é defeito) e `falha` (quebrado).
 |---|---|
 | Banco | O contêiner do Postgres não subiu ou está sem disco. O detalhe traz o comando de log |
 | Asterisk | O contêiner não subiu ou não responde. Costuma ser a porta 5060 ocupada por outro serviço |
-| Painel | Não responde por dentro do contêiner: log do `panel`. Responde por dentro e não abre no navegador: portas 80 e 443, DNS do domínio ou proxy |
+| Painel | Não responde por dentro do contêiner: log do `panel`. Responde por dentro e não abre no navegador: sem domínio, falta o túnel SSH (o painel só abre em `localhost`); com domínio, portas 80 e 443, DNS do domínio ou proxy |
+| Agente de atualização | `aviso` dizendo que quem recusa a rota do agente é o painel, e não o Caddy: o Caddy ficou com a configuração antiga depois de uma atualização. `docker restart deskvoice-caddy-1` resolve |
 | Worker de voz, rotinas | Contêiner parado: log do processo. Quase sempre é o banco fora |
 | Linha (tronco) | `aviso` = ainda não cadastrou a linha na tela. `falha` = cadastrada e não registra: usuário, senha, modo (registro ou IP), ou a operadora não liberou o IP |
 | Motor de voz | `aviso` = falta a chave na tela. `falha` = chave recusada pelo provedor |
