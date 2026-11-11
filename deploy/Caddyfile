@@ -1,7 +1,15 @@
 {$PANEL_DOMAIN:localhost} {
 	encode zstd gzip
-	reverse_proxy panel:3000 {
-		# O painel usa eventos enviados pelo servidor (SSE) para a tela ao vivo.
-		flush_interval -1
+
+	# "Falar com o agente": o áudio do navegador vai direto ao processo de voz, por WebSocket.
+	handle /voice-ws* {
+		reverse_proxy voice:8091
+	}
+
+	handle {
+		reverse_proxy panel:3000 {
+			# O painel usa eventos enviados pelo servidor (SSE) para a tela ao vivo.
+			flush_interval -1
+		}
 	}
 }
