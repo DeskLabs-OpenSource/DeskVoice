@@ -67,6 +67,17 @@ describe("the agent route", () => {
   it("does not exist for a request that came through a proxy, even with the right secret", async () => {
     const result = await speak({ version: "0.1.0" }, { authorization: `Bearer ${AGENT_TOKEN}`, "x-forwarded-for": "203.0.113.9" });
     expect(refusal(result)).toEqual([404, "not_found"]);
+    // Um proxy de confiança repassa a lista inteira: loopback forjado no começo não vale.
+    for (const forged of ["127.0.0.1, 203.0.113.9", "203.0.113.9, 127.0.0.1", "10.0.0.5", ""]) {
+      expect(refusal(await speak({ version: "0.1.0" }, { authorization: `Bearer ${AGENT_TOKEN}`, "x-forwarded-for": forged }))).toEqual([404, "not_found"]);
+    }
+  });
+
+  it("hears the agent as the real server delivers it: the header filled with this machine's own address", async () => {
+    // O servidor do Next preenche X-Forwarded-For com o endereço da conexão quando ele não vem.
+    for (const loopback of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+      expect((await speak({ version: "0.1.0" }, { authorization: `Bearer ${AGENT_TOKEN}`, "x-forwarded-for": loopback })).data).toEqual({ update: false });
+    }
   });
 
   it("answers one boolean and nothing else, with or without a request waiting", async () => {
