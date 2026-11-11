@@ -8,9 +8,10 @@ import { NAME_IN_IP_MODE_REASON, renderTrunksConf, SHARED_HOST_REASON, trunkProb
 const A = "0a000000-0000-4000-8000-000000000001";
 const B = "0b000000-0000-4000-8000-000000000002";
 const C = "0c000000-0000-4000-8000-000000000003";
-const day = (n: number): Date => new Date(Date.UTC(2030, 4, n));
-const register: TrunkConfig = { id: A, host: "sip.operadora.example:5060", username: "conta100", password: "s3nha;com#simbolos[]", authMode: "register", publicIp: "203.0.113.10", since: day(1) };
-const byIp: TrunkConfig = { id: B, host: "198.51.100.20", username: null, password: null, authMode: "ip", publicIp: null, since: day(1) };
+const ORG1 = "10000000-0000-4000-8000-00000000000a";
+const ORG2 = "20000000-0000-4000-8000-00000000000b";
+const register: TrunkConfig = { id: A, host: "sip.operadora.example:5060", username: "conta100", password: "s3nha;com#simbolos[]", authMode: "register", publicIp: "203.0.113.10", organizationId: ORG1 };
+const byIp: TrunkConfig = { id: B, host: "198.51.100.20", username: null, password: null, authMode: "ip", publicIp: null, organizationId: ORG1 };
 
 /** Nomes das seções do arquivo, como o Asterisk as leria: toda linha que começa com `[`. */
 const sections = (conf: string): string[] => conf.split("\n").filter((line) => line.trimStart().startsWith("["));
@@ -111,25 +112,69 @@ retry_interval=60
     expect(renderTrunksConf([register, byIp]).conf).toBe(conf);
   });
 
-  describe("o mesmo endereço em mais de um tronco", () => {
-    const newer: TrunkConfig = { ...byIp, id: A, since: day(2) };
+  describe("endereços que se sobrepõem", () => {
+    const elsewhere = (trunk: TrunkConfig, id = C): TrunkConfig => ({ ...trunk, id, organizationId: ORG2 });
 
-    it("dois ip no mesmo IP, em organizações diferentes: só o mais antigo é emitido, e o trecho dele é idêntico ao de antes de o segundo existir", () => {
-      const alone = renderTrunksConf([byIp]);
-      // O mais novo tem o id menor: quem decide é a antiguidade, não a ordem do arquivo.
-      const both = renderTrunksConf([newer, byIp]);
-      expect(both.skipped).toEqual([{ id: A, reason: SHARED_HOST_REASON }]);
-      expect(both.conf).not.toContain(A);
-      expect(blocksOf(both.conf, B)).toBe(blocksOf(alone.conf, B));
-      expect(both.conf).toBe(alone.conf);
-      expect(identifies(both.conf)).toEqual(["match=198.51.100.20"]);
+    it("dois ip no mesmo endereço em organizações diferentes: nenhum é emitido, os dois ficam com o erro", () => {
+      const { conf, skipped } = renderTrunksConf([byIp, elsewhere(byIp), register]);
+      expect(skipped).toEqual([{ id: B, reason: SHARED_HOST_REASON }, { id: C, reason: SHARED_HOST_REASON }]);
+      expect(conf).toBe(renderTrunksConf([register]).conf);
+      expect(identifies(conf)).toEqual([]);
     });
 
-    it("com a mesma antiguidade, o id desempata, sempre do mesmo jeito", () => {
-      const twin: TrunkConfig = { ...byIp, id: C };
-      for (const input of [[byIp, twin], [twin, byIp]]) {
-        expect(renderTrunksConf(input).skipped).toEqual([{ id: C, reason: SHARED_HOST_REASON }]);
+    it("dois ip no mesmo endereço na MESMA organização: o de menor id sai com identify, o outro fica de fora", () => {
+      for (const input of [[byIp, { ...byIp, id: C }], [{ ...byIp, id: C }, byIp]]) {
+        const { conf, skipped } = renderTrunksConf(input);
+        expect(skipped).toEqual([{ id: C, reason: SHARED_HOST_REASON }]);
+        expect(conf).toBe(renderTrunksConf([byIp]).conf);
+        expect(identifies(conf)).toEqual(["match=198.51.100.20"]);
       }
+    });
+
+    it("register e ip em organizações diferentes no mesmo endereço: o register sai sem identify, o ip não sai", () => {
+      const owner: TrunkConfig = { ...register, host: "198.51.100.30" };
+      const { conf, skipped } = renderTrunksConf([owner, elsewhere({ ...byIp, host: "198.51.100.30:5080" })]);
+      expect(skipped).toEqual([{ id: C, reason: SHARED_HOST_REASON }]);
+      expect(conf).not.toContain(C);
+      expect(identifies(conf)).toEqual([]);
+      expect(blocksOf(conf, A)).toContain(`line=yes\nendpoint=trunk-${A}\n`);
+    });
+
+    it("dois register em organizações diferentes no mesmo IP: os dois saem, cada um com line e endpoint próprios, nenhum com identify", () => {
+      const first: TrunkConfig = { ...register, host: "198.51.100.30" };
+      const second = elsewhere({ ...register, host: "198.51.100.30", username: "conta999", password: "outra-senha" });
+      const { conf, skipped } = renderTrunksConf([first, second]);
+      expect(skipped).toEqual([]);
+      expect(identifies(conf)).toEqual([]);
+      for (const id of [A, C]) {
+        expect(blocksOf(conf, id)).toContain(`line=yes\nendpoint=trunk-${id}\n`);
+        expect(blocksOf(conf, id).match(/\nendpoint=/g)).toHaveLength(1);
+      }
+    });
+
+    it("register e ip na mesma organização no mesmo endereço: o de menor id fica com o identify", () => {
+      const sameOrgIp: TrunkConfig = { ...byIp, id: C, host: "198.51.100.30" };
+      const { conf, skipped } = renderTrunksConf([{ ...register, host: "198.51.100.30" }, sameOrgIp]);
+      expect(skipped).toEqual([{ id: C, reason: SHARED_HOST_REASON }]);
+      expect(identifies(conf)).toEqual(["match=198.51.100.30"]);
+      expect(blocksOf(conf, A)).toContain("type=identify");
+    });
+
+    it("bloco de uma organização sobreposto ao IP de outra: vale a regra de organizações diferentes", () => {
+      for (const [mine, theirs] of [["203.0.113.0/24", "203.0.113.7"], ["203.0.113.7", "203.0.113.0/24"], ["203.0.113.0/24", "203.0.113.128/25"]]) {
+        const { conf, skipped } = renderTrunksConf([{ ...byIp, host: mine ?? "" }, elsewhere({ ...byIp, host: theirs ?? "" })]);
+        expect(skipped.map((entry) => entry.id), `${mine} x ${theirs}`).toEqual([B, C]);
+        expect(identifies(conf)).toEqual([]);
+      }
+    });
+
+    it("um bloco liga endereços que não se tocam: o grupo inteiro segue a regra", () => {
+      // Dois IPs da ORG1, que sozinhos não conflitam, e um bloco da ORG2 que contém os dois.
+      const second: TrunkConfig = { ...byIp, id: A, host: "198.51.100.21" };
+      expect(renderTrunksConf([byIp, second]).skipped).toEqual([]);
+      const { conf, skipped } = renderTrunksConf([byIp, second, elsewhere({ ...byIp, host: "198.51.100.0/24" })]);
+      expect(skipped.map((entry) => entry.id)).toEqual([A, B, C]);
+      expect(identifies(conf)).toEqual([]);
     });
 
     it("grafias diferentes do mesmo endereço são o mesmo endereço", () => {
@@ -140,20 +185,17 @@ retry_interval=60
         ["203.0.113.5:5060", "203.0.113.5:5080"],
         ["2001:db8::1", "2001:0DB8:0000:0000:0000:0000:0000:0001"],
         ["2001:db8::1", "[2001:db8:0:0::1]:5060"],
-        ["203.0.113.0/24", "203.0.113.7"],
-        ["203.0.113.7", "203.0.113.0/24"],
-        ["203.0.113.0/24", "203.0.113.128/25"],
         ["2001:db8::/32", "2001:db8:ffff::1"],
         ["::ffff:203.0.113.0/120", "203.0.113.200"],
       ];
-      for (const [older, younger] of same) {
-        const { conf, skipped } = renderTrunksConf([{ ...byIp, host: older }, { ...byIp, id: C, host: younger, since: day(2) }]);
-        expect(skipped, `${older} x ${younger}`).toEqual([{ id: C, reason: SHARED_HOST_REASON }]);
-        expect(identifies(conf)).toHaveLength(1);
+      for (const [first, second] of same) {
+        const { conf, skipped } = renderTrunksConf([{ ...byIp, host: first }, elsewhere({ ...byIp, host: second })]);
+        expect(skipped.map((entry) => entry.id), `${first} x ${second}`).toEqual([B, C]);
+        expect(identifies(conf)).toEqual([]);
       }
     });
 
-    it("endereços diferentes não se confundem", () => {
+    it("endereços diferentes não se confundem, nem entre organizações", () => {
       const different: Array<[string, string]> = [
         ["192.168.1.10", "192.168.1.100"],
         ["203.0.113.0/24", "203.0.114.1"],
@@ -162,7 +204,7 @@ retry_interval=60
         ["203.0.113.5", "::203.0.113.5"],
       ];
       for (const [first, second] of different) {
-        const { conf, skipped } = renderTrunksConf([{ ...byIp, host: first }, { ...byIp, id: C, host: second, since: day(2) }]);
+        const { conf, skipped } = renderTrunksConf([{ ...byIp, host: first }, elsewhere({ ...byIp, host: second })]);
         expect(skipped, `${first} x ${second}`).toEqual([]);
         expect(identifies(conf)).toHaveLength(2);
       }
@@ -178,52 +220,31 @@ retry_interval=60
       expect(written("2001:DB8:0:0:8:FFFF::/80")).toEqual(["match=2001:db8:0:0:8::/80"]);
     });
 
-    it("register mais novo num endereço que já tem dono: sai normalmente, com line e endpoint, só sem identify; o dono não muda", () => {
-      const owner: TrunkConfig = { ...register, host: "198.51.100.30" };
-      const alone = renderTrunksConf([owner]);
-      const late: TrunkConfig = { ...register, id: C, host: "198.51.100.30:5060", username: "conta999", password: "outra-senha", since: day(2) };
-      const both = renderTrunksConf([late, owner]);
-      expect(both.skipped).toEqual([]);
-      expect(blocksOf(both.conf, A)).toBe(blocksOf(alone.conf, A));
-      expect(identifies(both.conf)).toEqual(["match=198.51.100.30"]);
-      expect(blocksOf(both.conf, C)).toContain(`line=yes\nendpoint=trunk-${C}\n`);
-      expect(blocksOf(both.conf, C)).not.toContain("identify");
-    });
-
-    it("um ip mais novo no endereço de um register: o ip não é emitido, o register segue com o identify", () => {
-      const owner: TrunkConfig = { ...register, host: "198.51.100.30" };
-      const { conf, skipped } = renderTrunksConf([owner, { ...byIp, id: C, host: "198.51.100.30", since: day(2) }]);
-      expect(skipped).toEqual([{ id: C, reason: SHARED_HOST_REASON }]);
-      expect(conf).toBe(renderTrunksConf([owner]).conf);
-    });
-
-    it("dois register com o mesmo nome de host (duas contas na mesma operadora): nenhum identify, cada registro com line e o endpoint próprio", () => {
-      const other: TrunkConfig = { ...register, id: C, host: "SIP.Operadora.Example", username: "conta999", password: "outra-senha" };
+    it("dois register com o mesmo nome de host: nome não forma grupo; nenhum identify, cada registro com line e endpoint", () => {
+      const other = elsewhere({ ...register, host: "SIP.Operadora.Example", username: "conta999", password: "outra-senha" });
       const { conf, skipped } = renderTrunksConf([register, other]);
       expect(skipped).toEqual([]);
       expect(conf).not.toMatch(/type=identify|match=/);
-      for (const id of [A, C]) {
-        expect(blocksOf(conf, id)).toContain(`line=yes\nendpoint=trunk-${id}\n`);
-        expect(blocksOf(conf, id).match(/\nendpoint=/g)).toHaveLength(1);
-      }
+      for (const id of [A, C]) expect(blocksOf(conf, id)).toContain(`line=yes\nendpoint=trunk-${id}\n`);
     });
 
     it("as mensagens de erro não revelam nada do outro tronco", () => {
-      const { skipped } = renderTrunksConf([byIp, { ...byIp, id: C, host: "198.51.100.0/24", since: day(2) }, { ...byIp, id: A, host: "provedor.example", since: day(3) }]);
-      expect(skipped.map((entry) => entry.id)).toEqual([A, C]);
+      const { skipped } = renderTrunksConf([byIp, elsewhere({ ...byIp, host: "198.51.100.0/24" })]);
+      expect(skipped.map((entry) => entry.id)).toEqual([B, C]);
       for (const { reason } of skipped) {
-        // Nem id, nem endereço, nem nome, nem menção a organização: o outro pode ser de outra empresa.
-        expect(reason).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}|198\.51|\d+\.\d+\.\d+|provedor|organi[sz]ation/i);
+        // Nem id, nem endereço, nem nome, nem organização: o outro tronco é de outra empresa.
+        expect(reason).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}|198[.]51|[0-9]+[.][0-9]+[.][0-9]+|organi[sz]ation/i);
+        expect(reason).toMatch(/another line of this installation.*registration/);
       }
-      expect(skipped[1]?.reason).toMatch(/another line of this installation.*registration/);
     });
 
-    it("tronco que não pode ser escrito não reivindica endereço, mesmo sendo o mais antigo", () => {
-      const broken: TrunkConfig = { ...byIp, id: C, username: "tem espaço", since: day(0) };
-      const nameInIp: TrunkConfig = { ...byIp, id: A, host: "provedor.example", since: day(0) };
+    it("tronco que não pode ser escrito não entra em grupo: não tira o identify de ninguém", () => {
+      const broken = elsewhere({ ...byIp, username: "tem espaço" });
+      const nameInIp = elsewhere({ ...byIp, host: "provedor.example" }, A);
       const { conf, skipped } = renderTrunksConf([byIp, broken, nameInIp]);
       expect(skipped.map((entry) => entry.id)).toEqual([A, C]);
       expect(conf).toBe(renderTrunksConf([byIp]).conf);
+      expect(identifies(conf)).toEqual(["match=198.51.100.20"]);
     });
   });
 

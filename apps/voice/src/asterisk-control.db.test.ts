@@ -1,6 +1,6 @@
 // Troncos aplicados a partir do banco, situação lida da ARI, ligação de saída e chamada simulada
 // pela API interna.
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { withSystem } from "@deskvoice/core";
@@ -81,54 +81,48 @@ describe("troncos", { timeout: 120_000 }, () => {
     expect((await trunkRow(good))?.status).toBe("unverified");
   });
 
-  it("endereço disputado entre organizações: fica com a linha que chegou primeiro, que não muda em nada; a mais nova fica de fora, com o erro e sem nada da outra", async () => {
+  it("endereço repetido: entre organizações ninguém em modo ip é emitido; dentro da mesma organização, só o de menor id; e nada de estado ao lado do arquivo", async () => {
     const first = await createOrganization(app, "trunks-shared-a");
     const second = await createOrganization(app, "trunks-shared-b");
     const options = { username: null, password: null, authMode: "ip" as const };
-    const clock = fakeClock();
-    const deps = trunksDeps(fakeAri(), path.join(scratch, "shared", "pjsip_trunks.conf"), clock);
-    const blocksOf = (conf: string, id: string): string => conf.split("\n\n").map((block) => block.trim()).filter((block) => block.startsWith(`[trunk-${id}`)).join("\n\n");
+    const mine = await createTrunk(app, first, { ...options, host: "198.51.100.99" });
+    // Outra organização, o mesmo endereço em outra grafia.
+    const theirs = await createTrunk(app, second, { ...options, host: "198.051.100.099:5080" });
+    // Na mesma organização, duas linhas no mesmo endereço.
+    const twins = [await createTrunk(app, first, { ...options, host: "198.51.100.98" }), await createTrunk(app, first, { ...options, host: "198.51.100.98" })].sort();
+    // Registro de uma organização no endereço da linha por IP de outra.
+    const registered = await createTrunk(app, first, { host: "198.51.100.96" });
+    const ipOnRegistered = await createTrunk(app, second, { ...options, host: "198.51.100.96" });
 
-    const owner = await createTrunk(app, first, { ...options, host: "198.51.100.99" });
+    const dir = path.join(scratch, "shared");
+    const deps = trunksDeps(fakeAri(), path.join(dir, "pjsip_trunks.conf"));
     await applyTrunks(deps);
-    const before = blocksOf(await readFile(deps.file, "utf8"), owner);
-    expect(before).toContain("match=198.51.100.99");
-
-    // Depois, outra organização cadastra o mesmo endereço, em outra grafia.
-    clock.advance(60_000);
-    const late = await createTrunk(app, second, { ...options, host: "198.051.100.099:5080" });
     await applyTrunks(deps);
     const conf = await readFile(deps.file, "utf8");
-    expect(blocksOf(conf, owner)).toBe(before);
-    expect(conf).not.toContain(late);
-    expect((await trunkRow(owner))?.status).toBe("unverified");
-    const row = await trunkRow(late);
-    expect(row).toMatchObject({ status: "fail", last_error: expect.stringMatching(/already used by another line of this installation.*registration/) });
-    for (const secret of [owner, first, "198.51", "Operadora"]) expect(row?.last_error).not.toContain(secret);
+    expect(await readdir(dir)).toEqual(["pjsip_trunks.conf"]);
 
-    // Reaplicar (o processo reiniciou) não inverte quem é o dono.
-    clock.advance(60_000);
-    await applyTrunks(deps);
-    expect(blocksOf(await readFile(deps.file, "utf8"), owner)).toBe(before);
-    expect((await trunkRow(late))?.status).toBe("fail");
+    for (const [id, other, otherOrg] of [[mine, theirs, second], [theirs, mine, first]] as const) {
+      expect(conf).not.toContain(id);
+      const row = await trunkRow(id);
+      expect(row).toMatchObject({ status: "fail", last_error: expect.stringMatching(/already used by another line of this installation.*registration/) });
+      for (const secret of [other, otherOrg, "198.51", "Operadora"]) expect(row?.last_error).not.toContain(secret);
+    }
+    expect(conf).not.toContain("198.51.100.99");
+
+    expect(conf).toContain(`[trunk-${twins[0]}-identify]`);
+    expect(conf).not.toContain(twins[1] ?? "");
+    expect((await trunkRow(twins[0] ?? ""))?.status).toBe("unverified");
+    expect((await trunkRow(twins[1] ?? ""))?.status).toBe("fail");
+
+    expect(conf).toContain(`[trunk-${registered}-registration]`);
+    expect(conf).toContain(`line=yes\nendpoint=trunk-${registered}\n`);
+    expect(conf).not.toContain(`[trunk-${registered}-identify]`);
+    expect(conf).not.toContain(ipOnRegistered);
+    expect((await trunkRow(ipOnRegistered))?.status).toBe("fail");
 
     // A conferência de saúde mantém o motivo, em vez de trocar por "não carregada".
-    const health = (await checkTrunks(deps)).find((trunk) => trunk.id === late);
+    const health = (await checkTrunks(deps)).find((trunk) => trunk.id === mine);
     expect(health).toMatchObject({ status: "fail", detail: expect.stringContaining("already used by another line") });
-
-    // Linha antiga que TROCA de host para o endereço de outra não passa na frente dela.
-    const hijacker = await createTrunk(app, second, { ...options, host: "198.51.100.98" });
-    await applyTrunks(deps);
-    clock.advance(60_000);
-    const fresh = await createTrunk(app, first, { ...options, host: "198.51.100.97" });
-    await applyTrunks(deps);
-    clock.advance(60_000);
-    await withSystem(app, (q) => q.exec("update trunks set host = '198.51.100.97' where id = $1", [hijacker]));
-    await applyTrunks(deps);
-    const after = await readFile(deps.file, "utf8");
-    expect(blocksOf(after, fresh)).toContain("match=198.51.100.97");
-    expect(after).not.toContain(hijacker);
-    expect((await trunkRow(hijacker))?.last_error).toContain("already used by another line");
   });
 
   it("sem Asterisk no ar o arquivo é escrito mesmo assim e o resultado diz que falta recarregar", async () => {
