@@ -263,6 +263,11 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 write_env_files "$public_url" "$public_ip" "$panel_domain" "$rtp_start" "$rtp_end" "$profiles"
+# O painel só acredita no endereço informado por um proxy quando há de fato um proxy nosso na
+# frente dele: o Caddy da instalação, ou um proxy local (painel preso a 127.0.0.1). Exposto
+# direto, qualquer visitante escreveria o próprio "endereço" e escaparia do limite de login.
+if [ "$proxy_mode" = external ] && [ -z "$domain" ]; then trusted_hops=0; else trusted_hops=1; fi
+env_set "$APP_ENV_FILE" TRUSTED_PROXY_HOPS "$trusted_hops"
 ok "Segredos e configuração gravados em deploy/ (só o seu usuário lê)"
 render_asterisk_config
 ok "Configuração do Asterisk gerada"
@@ -325,7 +330,7 @@ if [ "$proxy_mode" = external ]; then
   printf '\n  %sFalta um passo seu, no proxy que já existe nesta máquina%s%s:\n' "$C_BLD" "${proxy_holder:+ ($proxy_holder)}" "$C_OFF"
   if [ -n "$domain" ]; then
     info "Encaminhe o domínio $domain para o painel, sem guardar a resposta em buffer (a tela ao vivo usa SSE)."
-    info "• Nginx instalado na máquina:   proxy_pass http://127.0.0.1:${panel_port};  proxy_buffering off;  proxy_set_header Host \$host;"
+    info "• Nginx instalado na máquina:   proxy_pass http://127.0.0.1:${panel_port};  proxy_buffering off;  proxy_set_header Host \$host;  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;"
     info "• Caddy instalado na máquina:   $domain { reverse_proxy 127.0.0.1:${panel_port} { flush_interval -1 } }"
     info "• Proxy em contêiner (Traefik, Nginx Proxy Manager, Caddy): ele não enxerga 127.0.0.1 desta máquina."
     info "    1) docker network connect deskvoice_internal <nome do contêiner do proxy>"

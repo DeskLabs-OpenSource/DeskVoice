@@ -27,7 +27,7 @@ describe("clientIp", () => {
 
 describe("trustedProxyHops", () => {
   it("defaults to one proxy and distrusts a malformed value", () => {
-    expect(trustedProxyHops({})).toBe(1);
+    expect(trustedProxyHops({})).toBe(0);
     expect(trustedProxyHops({ TRUSTED_PROXY_HOPS: "2" })).toBe(2);
     expect(trustedProxyHops({ TRUSTED_PROXY_HOPS: "0" })).toBe(0);
     expect(trustedProxyHops({ TRUSTED_PROXY_HOPS: "many" })).toBe(0);

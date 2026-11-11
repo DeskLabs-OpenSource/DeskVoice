@@ -30,7 +30,7 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   RTP_START: "default",
   RTP_END: "default",
   PANEL_PORT: "default",
-  // Proxies confiáveis à frente do painel (padrão 1, o Caddy da instalação): decide de onde ler o IP do cliente.
+  // Proxies confiáveis à frente do painel (padrão 0; o instalador grava 1 quando há proxy nosso na frente): decide de onde ler o IP do cliente.
   TRUSTED_PROXY_HOPS: "default",
   VOICE_INTERNAL_URL: "default",
   // Porta da API interna do processo de voz (8090) e arquivo de troncos que ele gera para o Asterisk.

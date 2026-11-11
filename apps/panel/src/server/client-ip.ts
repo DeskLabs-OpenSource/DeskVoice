@@ -2,9 +2,15 @@ import { isIP } from "node:net";
 
 export const UNKNOWN_IP = "unknown";
 
-/** Quantos proxies confiáveis ficam à frente do painel. Padrão 1: o Caddy da própria instalação. */
+/**
+ * Quantos proxies confiáveis ficam à frente do painel.
+ *
+ * Padrão 0: sem saber que há um proxy nosso na frente, o cabeçalho é de quem chamou e não vale
+ * nada. O instalador grava 1 quando sobe o Caddy da instalação ou quando o painel só é alcançável
+ * por um proxy local; painel exposto direto fica em 0.
+ */
 export function trustedProxyHops(env: Record<string, string | undefined>): number {
-  const raw = env.TRUSTED_PROXY_HOPS ?? "1";
+  const raw = env.TRUSTED_PROXY_HOPS ?? "0";
   // Valor que não é um inteiro pequeno vira 0: na dúvida, não confiar em cabeçalho nenhum.
   return /^\d$/.test(raw) ? Number(raw) : 0;
 }
