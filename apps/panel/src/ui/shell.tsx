@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, ChartBar, CircleHalf, GearSix, Headset, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, Waveform } from "@phosphor-icons/react";
+import { Bell, ChartBar, CircleHalf, GearSix, Headset, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UsersThree, Waveform } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -33,6 +33,7 @@ const NAV = [
   { href: "/line", key: "line", icon: PlugsConnected },
   { href: "/outbound", key: "outbound", icon: PhoneOutgoing },
   { href: "/costs", key: "costs", icon: ChartBar },
+  { href: "/team", key: "team", icon: UsersThree },
   { href: "/settings", key: "settings", icon: GearSix },
 ] as const;
 
@@ -206,7 +207,8 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
 
   const nav = (
     <nav aria-label={t.shell.mainNav} className="flex gap-1 overflow-x-auto lg:grid lg:overflow-visible">
-      {NAV.map(({ href, key, icon: Icon }) => {
+      {/* Equipe só aparece para quem pode gerir: operador não vê a porta. */}
+      {NAV.filter((item) => item.key !== "team" || me.role !== "operator").map(({ href, key, icon: Icon }) => {
         const active = pathname === href || pathname.startsWith(`${href}/`);
         return (
           <Link

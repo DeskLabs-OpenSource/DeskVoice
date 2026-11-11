@@ -76,6 +76,12 @@ export async function createUser(app: Db, organizationId: string, role: Role): P
   });
 }
 
+/** Mais uma sessão para a mesma pessoa (outro aparelho). */
+export async function openSession(app: Db, organizationId: string, userId: string): Promise<string> {
+  const token = await withOrg(app, organizationId, (q) => createSession(q, { id: userId, organizationId }, NOW));
+  return `${SESSION_COOKIE}=${token}`;
+}
+
 export async function insert(app: Db, organizationId: string, sql: string, params: unknown[]): Promise<string> {
   const row = await withOrg(app, organizationId, (q) => q.one<{ id: string }>(sql, params));
   if (!row) throw new Error("fixture insert returned nothing");
@@ -95,9 +101,9 @@ export interface Result {
 /** Chama o manipulador da rota direto, como o Next chamaria. */
 export async function call(
   handler: Handler | ((request: Request) => Promise<Response>),
-  options: { method?: string; cookie?: string; body?: unknown; params?: Record<string, string>; query?: string; headers?: Record<string, string> } = {},
+  options: { method?: string; cookie?: string; body?: unknown; params?: Record<string, string>; query?: string; headers?: Record<string, string>; origin?: string } = {},
 ): Promise<Result> {
-  const request = new Request(`https://panel.test/api/v1/x${options.query ?? ""}`, {
+  const request = new Request(`${options.origin ?? "https://panel.test"}/api/v1/x${options.query ?? ""}`, {
     method: options.method ?? "GET",
     headers: { ...(options.cookie && { cookie: options.cookie }), ...(options.body !== undefined && { "content-type": "application/json" }), ...options.headers },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
