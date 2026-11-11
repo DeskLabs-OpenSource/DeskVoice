@@ -23,6 +23,8 @@ export interface CallSessionInput {
   callId: string;
   agentId: string;
   transport: CallTransport;
+  /** O que mais `call_started` deve dizer sobre a origem (a chamada pelo navegador diz o canal e quem ligou). */
+  started?: Record<string, unknown>;
   /** A chamada simulada troca o motor, as instruções e as ferramentas do agente pelas do roteiro. */
   overrides?: { engineId?: string; instructions?: string; tools?: string[] };
 }
@@ -270,7 +272,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (!agent || !call) throw new Error(`Agent ${agentId} or call ${callId} not found in organization ${organizationId}`);
     const { transfer_to_e164: transferTo } = agent;
 
-    await event("call_started", { direction: call.direction, from: call.from_e164, to: call.to_e164, agentId });
+    await event("call_started", { direction: call.direction, from: call.from_e164, to: call.to_e164, agentId, ...input.started });
     transport.onHangup(() => void finish({ status: "completed", endReason: "caller_hangup", callerGone: true }));
 
     const engineId = overrides?.engineId ?? agent.engine;

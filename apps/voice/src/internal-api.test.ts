@@ -13,10 +13,11 @@ afterEach(async () => {
 async function api(token: string | undefined, overrides: Partial<InternalApiHandlers> = {}) {
   const calls: Array<[string, unknown]> = [];
   const handlers: InternalApiHandlers = {
-    health: async () => ({ asterisk: { status: "fail", detail: "Asterisk is not reachable." }, trunks: [{ id: "t1", status: "ok", detail: "The provider answers." }] }),
+    health: async () => ({ asterisk: { status: "fail", detail: "Asterisk is not reachable." }, web: { status: "ok", detail: "Listening." }, trunks: [{ id: "t1", status: "ok", detail: "The provider answers." }] }),
     applyTrunks: async (input) => (calls.push(["applyTrunks", input]), { applied: true }),
     outbound: async (input) => (calls.push(["outbound", input]), { callId: "call-1" }),
     simulate: async (input) => (calls.push(["simulate", input]), { callId: "call-2" }),
+    web: async (input) => (calls.push(["web", input]), { callId: "call-3", token: "tok", expiresInSeconds: 60 }),
     ...overrides,
   };
   const server = await startInternalApi({ port: 0, host: "127.0.0.1", token, handlers });
@@ -60,7 +61,7 @@ describe("API interna", { timeout: 60_000 }, () => {
     const { request } = await api("segredo-interno");
     expect(await request("GET", "/health")).toEqual({
       status: 200,
-      body: { asterisk: { status: "fail", detail: "Asterisk is not reachable." }, trunks: [{ id: "t1", status: "ok", detail: "The provider answers." }] },
+      body: { asterisk: { status: "fail", detail: "Asterisk is not reachable." }, web: { status: "ok", detail: "Listening." }, trunks: [{ id: "t1", status: "ok", detail: "The provider answers." }] },
     });
   });
 
@@ -116,5 +117,23 @@ describe("API interna", { timeout: 60_000 }, () => {
     const failed = await request("POST", "/calls/simulate", { token, body: { organizationId: ORG, agentId: AGENT } });
     expect(failed.status).toBe(500);
     expect(JSON.stringify(failed.body)).not.toMatch(/ECONNREFUSED|10\.0\.0\.7/);
+  });
+
+  it("POST /calls/web: exige o token interno, valida o corpo, devolve o token da chamada e repassa a recusa como 409", async () => {
+    const USER = "0c000000-0000-4000-8000-000000000003";
+    const body = { organizationId: ORG, agentId: AGENT, userId: USER };
+    const { request, calls } = await api("segredo-interno");
+    expect((await request("POST", "/calls/web", { body })).status).toBe(401);
+    expect((await request("POST", "/calls/web", { token: "errado", body })).status).toBe(401);
+    for (const bad of [{ organizationId: ORG, agentId: AGENT }, { ...body, userId: "eu" }, { ...body, extra: 1 }]) {
+      expect((await request("POST", "/calls/web", { token: "segredo-interno", body: bad })).status).toBe(400);
+    }
+    expect(calls).toEqual([]);
+    expect(await request("POST", "/calls/web", { token: "segredo-interno", body })).toEqual({ status: 200, body: { callId: "call-3", token: "tok", expiresInSeconds: 60 } });
+    expect(calls).toEqual([["web", body]]);
+    await close?.();
+
+    const refusing = await api("segredo-interno", { web: async () => ({ code: "engine_simulated", message: "Change the agent's voice engine." }) });
+    expect(await refusing.request("POST", "/calls/web", { token: "segredo-interno", body })).toEqual({ status: 409, body: { code: "engine_simulated", message: "Change the agent's voice engine." } });
   });
 });

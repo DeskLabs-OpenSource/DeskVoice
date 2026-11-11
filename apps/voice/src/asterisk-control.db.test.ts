@@ -272,7 +272,7 @@ describe("chamada simulada pela API interna", { timeout: 120_000 }, () => {
     ari.failing = true; // sem Asterisk: a simulação não depende dele
     server = await startVoiceServer({
       db: app, clock, engines: new Map([["simulated", createSimulatedEngine()]]), tools: await loadTools(), ari, secretKey,
-      audioSocketPort: 0, internalPort: 0, internalToken: "token-de-teste", trunksFile: path.join(scratch, "simulate.conf"), publicIp: null, host: "127.0.0.1",
+      audioSocketPort: 0, internalPort: 0, webPort: 0, internalToken: "token-de-teste", trunksFile: path.join(scratch, "simulate.conf"), publicIp: null, host: "127.0.0.1",
       schedule: timers.schedule, now: timers.now,
     });
     const post = (body: object) =>

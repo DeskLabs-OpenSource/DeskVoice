@@ -14,6 +14,7 @@ import { closeOrphanCalls } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
 import type { Schedule } from "./transport";
 import { applyTrunks, checkTrunks, type TrunksDeps } from "./trunks";
+import { startWebCalls } from "./web-calls";
 
 export interface VoiceServerDeps {
   db: Db;
@@ -24,6 +25,8 @@ export interface VoiceServerDeps {
   secretKey: Buffer;
   audioSocketPort: number;
   internalPort: number;
+  /** Porta do WebSocket público da chamada pelo navegador. */
+  webPort: number;
   internalToken: string | undefined;
   trunksFile: string;
   publicIp: string | null;
@@ -39,6 +42,7 @@ export interface VoiceServerDeps {
 export interface VoiceServer {
   audioSocketPort: number;
   internalPort: number;
+  webPort: number;
   /** As chamadas do Asterisk em curso; `inbound.ts` e `outbound.ts` registram nelas. */
   calls: AsteriskCalls;
   /** Encerra as chamadas em curso de forma limpa e solta portas e escutas. */
@@ -109,6 +113,9 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   ari.onConnected(reapply);
   reapply();
 
+  // Não depende do Asterisk: a chamada pelo navegador funciona com a telefonia fora do ar.
+  const webCalls = await startWebCalls({ db, clock, session: sessionDeps, port: deps.webPort, host: deps.host, schedule: deps.schedule, now: deps.now, log, onSession: track });
+
   const api = await startInternalApi({
     port: deps.internalPort,
     host: deps.host,
@@ -117,11 +124,12 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     handlers: {
       async health() {
         const status = ari.status();
-        return { asterisk: { status: status.connected ? "ok" : "fail", detail: status.detail }, trunks: await checkTrunks(trunksDeps) };
+        return { asterisk: { status: status.connected ? "ok" : "fail", detail: status.detail }, web: webCalls.health(), trunks: await checkTrunks(trunksDeps) };
       },
       // O arquivo é um só para a instalação: aplicar a linha de uma organização regrava todas.
       applyTrunks: () => applyTrunks(trunksDeps),
       outbound: (input) => startOutboundCall({ db, ari, clock, calls, log }, input),
+      web: (input) => webCalls.request(input),
       async simulate(input) {
         const started = await startSimulatedCall(sessionDeps, input);
         if (!("callId" in started)) return started;
@@ -134,6 +142,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   return {
     audioSocketPort: audioSocket.port,
     internalPort: api.port,
+    webPort: webCalls.port,
     calls,
     async close() {
       ari.close();
@@ -141,6 +150,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
       for (const session of sessions) session.stop("shutdown");
       await Promise.all([...sessions].map((session) => session.done));
       await audioSocket.close();
+      await webCalls.close();
       await approvals.close();
     },
   };

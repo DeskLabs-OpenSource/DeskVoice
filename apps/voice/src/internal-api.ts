@@ -7,6 +7,8 @@ import type { TrunkHealth } from "./trunks";
 
 export interface VoiceHealth {
   asterisk: { status: "ok" | "warn" | "fail"; detail: string };
+  /** O WebSocket da chamada pelo navegador. */
+  web: { status: "ok" | "warn" | "fail"; detail: string };
   trunks: TrunkHealth[];
 }
 
@@ -17,6 +19,8 @@ export interface InternalApiHandlers {
   applyTrunks(input: { organizationId: string }): Promise<object>;
   outbound(input: { organizationId: string; agentId: string; toE164: string }): Promise<{ callId: string } | Refusal>;
   simulate(input: { organizationId: string; agentId: string }): Promise<{ callId: string } | Refusal>;
+  /** Chamada pelo navegador: cria a chamada e o token de uso único que abre o WebSocket dela. */
+  web(input: { organizationId: string; agentId: string; userId: string }): Promise<{ callId: string; token: string; expiresInSeconds: number } | Refusal>;
 }
 
 export interface InternalApiOptions {
@@ -32,6 +36,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 const organization = z.strictObject({ organizationId: z.uuid() });
 const outbound = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), toE164: z.string().min(1).max(40) });
 const simulate = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid() });
+const web = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), userId: z.uuid() });
 
 class HttpError extends Error {
   constructor(
@@ -89,6 +94,10 @@ export function startInternalApi(options: InternalApiOptions): Promise<{ port: n
     if (key === "POST /trunks/apply") return { status: 200, body: await handlers.applyTrunks(await readJson(request, organization)) };
     if (key === "POST /calls/outbound" || key === "POST /calls/simulate") {
       const result = key === "POST /calls/outbound" ? await handlers.outbound(await readJson(request, outbound)) : await handlers.simulate(await readJson(request, simulate));
+      return { status: "callId" in result ? 200 : 409, body: result };
+    }
+    if (key === "POST /calls/web") {
+      const result = await handlers.web(await readJson(request, web));
       return { status: "callId" in result ? 200 : 409, body: result };
     }
     throw new HttpError(404, "not_found", `No route for ${key}.`);

@@ -98,7 +98,7 @@ async function incomingCall(label: string, agent: AgentOptions, settings: Record
     ari,
     secretKey,
     audioSocketPort: 0,
-    internalPort: 0,
+    internalPort: 0, webPort: 0,
     internalToken: "token-de-teste",
     trunksFile: path.join(scratch, `${organizationId}.conf`),
     publicIp: "203.0.113.10",
@@ -303,7 +303,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     await createPhoneNumber(app, organizationId, trunkId, "+553133334444", agentId);
     const ari = fakeAri();
     server = await startVoiceServer({
-      db: app, clock: fakeClock(), engines: new Map(), tools: new Map(), ari, secretKey, audioSocketPort: 0, internalPort: 0, internalToken: undefined,
+      db: app, clock: fakeClock(), engines: new Map(), tools: new Map(), ari, secretKey, audioSocketPort: 0, internalPort: 0, webPort: 0, internalToken: undefined,
       trunksFile: path.join(scratch, `${organizationId}.conf`), publicIp: null, host: "127.0.0.1",
     });
     ari.emit({ type: "StasisStart", args: ["inbound"], channel: { id: "canal-x", name: `PJSIP/trunk-${trunkId}-0000000a`, dialplan: { exten: "s" } } });
