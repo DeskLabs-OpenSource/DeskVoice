@@ -52,6 +52,8 @@ const talk: TalkDictionary = {
     engine_simulated: "This agent uses the simulated engine, which does not hold a conversation. Change the engine in Agents.",
     too_many_web_calls: "There are already three browser calls at the same time in this company. End one of them, or wait a minute, and call again.",
     voice_unavailable: "The voice service did not answer. See in the health indicator, in the menu, what is stopped, and call again.",
+    voice_unreachable:
+      "The panel opened, but it could not reach the voice service at this same address. If you run your own proxy in front of DeskVoice, it must pass persistent connections (WebSocket) through to DeskVoice. On the server, run bash install/healthcheck.sh and read the \"Entrada única\" line.",
     connection_lost: "The connection to the voice service dropped. Check your internet and call again.",
     session_expired: "The time to start the call ran out. Call again.",
   },

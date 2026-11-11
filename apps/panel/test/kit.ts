@@ -37,7 +37,6 @@ export function startPanel(): { app: Db; deps: ServerDeps; clock: { at: Date }; 
     voiceUrl: "http://voice.test",
     internalToken: "internal-test-token",
     trustedProxyHops: 1,
-    voiceWebPublicPort: undefined,
     verifyPassword,
   };
   setServerDeps(deps);

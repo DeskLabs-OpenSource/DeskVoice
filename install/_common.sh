@@ -15,7 +15,8 @@ ENV_FILE="$DEPLOY_DIR/.env"                 # o que o Compose interpola (e a sen
 APP_ENV_FILE="$DEPLOY_DIR/app.env"          # painel, voz e rotinas; sem a senha do dono do banco
 MIGRATE_ENV_FILE="$DEPLOY_DIR/migrate.env"  # só o serviço migrate e a criação do primeiro usuário
 GENERATED_DIR="$DEPLOY_DIR/asterisk/generated"
-# Só existe quando 80/443 já são de outro proxy: publica o painel numa porta local.
+# Gravado pelo instalador em todo modo: diz onde o Caddy (a entrada única) escuta e que
+# portas publica. É o único lugar em que uma porta web é publicada.
 PROXY_OVERRIDE="$DEPLOY_DIR/docker-compose.override.yml"
 DB_USER="deskvoice"
 DB_NAME="deskvoice"
@@ -91,13 +92,21 @@ env_set() {  # env_set <arquivo> <CHAVE> <valor>: troca ou acrescenta; arquivo s
   chmod 600 "$tmp"
   mv "$tmp" "$file"
 }
+env_unset() {  # env_unset <arquivo> <CHAVE>: tira a chave, se existir
+  local file="$1" tmp
+  [ -f "$file" ] || return 0
+  tmp="$(mktemp "$file.XXXXXX")"
+  ENV_KEY="$2" awk 'index($0, ENVIRON["ENV_KEY"] "=") != 1' "$file" > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$file"
+}
 env_set_if_missing() {  # nunca troca um segredo que já existe
   [ -n "$(env_get "$1" "$2")" ] || env_set "$1" "$2" "$3"
 }
 
 # Grava os três arquivos de ambiente. Segredo que já existe fica como está; o resto é
 # regravado com o que foi decidido nesta execução.
-#   write_env_files <public_url> <public_ip> <panel_domain> <rtp_start> <rtp_end> <profiles>
+#   write_env_files <public_url> <public_ip> <panel_domain> <rtp_start> <rtp_end>
 write_env_files() {
   local pg app sys url_system
   # deploy/.env
@@ -107,7 +116,8 @@ write_env_files() {
   env_set "$ENV_FILE" PANEL_DOMAIN "$3"
   env_set "$ENV_FILE" RTP_START "$4"
   env_set "$ENV_FILE" RTP_END "$5"
-  env_set "$ENV_FILE" COMPOSE_PROFILES "$6"
+  # O Caddy deixou de ser perfil opcional: a chave de instalações antigas sai.
+  env_unset "$ENV_FILE" COMPOSE_PROFILES
   # deploy/migrate.env
   env_set_if_missing "$MIGRATE_ENV_FILE" APP_DB_PASSWORD "$(random_hex 24)"
   env_set_if_missing "$MIGRATE_ENV_FILE" SYSTEM_DB_PASSWORD "$(random_hex 24)"
@@ -258,32 +268,93 @@ pick_free_port() {  # pick_free_port <primeira candidata> < lista de portas em u
   echo "$candidate"
 }
 
-# Sem o nosso Caddy, o painel e a porta de voz do navegador são publicados em portas locais.
-#   write_proxy_override <endereço do painel> <porta do painel> <porta da voz do navegador>
-# A porta de voz fica SEMPRE só para dentro da máquina: quem chega nela é o proxy que já existe
-# ou um túnel SSH. Exposta, seria uma porta aberta sem uso possível, porque fora de HTTPS e de
-# localhost o navegador não libera o microfone.
+# Grava a publicação da entrada única. Só o Caddy ganha porta; painel e voz, nunca.
+#   write_proxy_override <site do Caddy> <em quem o Caddy confia> <publicação>...
+# Cada publicação é uma linha de `ports` do Compose: "80:80", "127.0.0.1:3080:80".
+# O arquivo é reescrito por inteiro: o que uma versão antiga publicava (painel e voz em duas
+# portas) some na reinstalação, e o `up` seguinte recria os contêineres sem a porta antiga.
 write_proxy_override() {
-  local tmp
+  local tmp site="$1" trusted="$2" port
+  shift 2
   tmp="$(mktemp "$PROXY_OVERRIDE.XXXXXX")"
-  cat > "$tmp" <<OVERRIDE
-# Gerado pelo instalador: 80/443 já são de outro proxy nesta máquina.
-services:
-  panel:
-    ports:
-      - "$1:$2:3000"
-  # Porta por onde chega o áudio de "Falar com o agente" (WebSocket).
-  voice:
-    ports:
-      - "127.0.0.1:$3:8091"
-OVERRIDE
+  {
+    echo "# Gerado pelo instalador. Não edite: rode bash install/install.sh para mudar."
+    echo "services:"
+    echo "  caddy:"
+    echo "    environment:"
+    echo "      CADDY_SITE: \"$site\""
+    echo "      CADDY_TRUSTED_PROXIES: \"$trusted\""
+    echo "    ports:"
+    for port in "$@"; do echo "      - \"$port\""; done
+  } > "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$PROXY_OVERRIDE"
 }
+# O que o arquivo de publicação diz hoje, para a reinstalação manter a porta que o proxy do
+# operador (ou o túnel) já conhece. Lê o formato atual (Caddy, porta 80 de dentro) e o antigo
+# (painel direto, porta 3000 de dentro). Devolve "<endereço> <porta>" ou nada.
+published_entry() {
+  [ -f "$PROXY_OVERRIDE" ] || return 0
+  sed -n -e 's/.*"\([0-9.]*\):\([0-9][0-9]*\):80".*/\1 \2/p' -e 's/.*"\([0-9.]*\):\([0-9][0-9]*\):3000".*/\1 \2/p' "$PROXY_OVERRIDE" | head -n 1
+}
+# O nosso Caddy é quem está nas portas 80/443? (1 = sim.) Rodando com o arquivo atual publicando
+# a 80, ou rodando numa instalação antiga, de antes de o arquivo existir nesse modo.
+own_caddy_on_80() {  # own_caddy_on_80 <o Caddy do DeskVoice está rodando: 0|1>
+  [ "$1" = 1 ] || { echo 0; return 0; }
+  if [ ! -f "$PROXY_OVERRIDE" ] || grep -q '"80:80"' "$PROXY_OVERRIDE"; then echo 1; else echo 0; fi
+}
 
-# Quem publica o painel? `caddy` = o nosso Caddy pega 80/443; `external` = já existe um
-# proxy nessas portas e a gente não briga: o painel sai numa porta local.
-#   decide_proxy_mode <80 ocupada: 0|1> <443 ocupada: 0|1> <é o nosso Caddy: 0|1>
+# Aplica a entrada única de um modo: grava a publicação do Caddy, o número de saltos que o
+# painel conta e tira o que a versão de duas portas deixou. Usada pelo instalador (com o que
+# ele acabou de decidir) e pela atualização (com o que a instalação já tinha).
+#   apply_entry <caddy|external> <domínio ou vazio> [<endereço local> <porta local>]
+apply_entry() {
+  local mode="$1" domain="$2" has_domain=0 trust hops
+  if [ -n "$domain" ]; then has_domain=1; fi
+  trust="$(trust_for_mode "$mode" "$has_domain")"; hops="${trust%% *}"; trust="${trust#* }"
+  if [ "$mode" = external ]; then write_proxy_override ":80" "$trust" "$3:$4:80"
+  elif [ "$has_domain" = 1 ]; then write_proxy_override "$domain" "$trust" "80:80" "443:443"
+  else write_proxy_override ":80" "$trust" "80:80"; fi
+  env_set "$APP_ENV_FILE" TRUSTED_PROXY_HOPS "$hops"
+  # A segunda porta acabou: o navegador usa sempre /voice-ws no endereço do painel.
+  env_unset "$APP_ENV_FILE" VOICE_WEB_PUBLIC_PORT
+}
+# Instalação feita antes da entrada única: passa para o formato atual sem perguntar nada,
+# mantendo o endereço e a porta que o proxy do operador (ou o túnel) já conhece.
+# Não faz nada em instalação que já está no formato atual.
+converge_entry() {
+  local domain entry
+  domain="$(env_get "$ENV_FILE" PANEL_DOMAIN)"
+  case "$domain" in :80|localhost) domain="" ;; esac
+  if [ ! -f "$PROXY_OVERRIDE" ]; then apply_entry caddy "$domain"
+  elif grep -q ':3000"' "$PROXY_OVERRIDE"; then
+    entry="$(published_entry)"
+    apply_entry external "$domain" "${entry%% *}" "${entry#* }"
+  fi
+  env_unset "$ENV_FILE" COMPOSE_PROFILES
+}
+
+# Quantos proxies o painel conta até chegar ao endereço do visitante (TRUSTED_PROXY_HOPS), e
+# em quem o Caddy confia (CADDY_TRUSTED_PROXIES). Sempre há o nosso Caddy na frente do painel.
+#   trust_for_mode <caddy|external> <tem domínio: 0|1>  →  "<saltos> <confiança do Caddy>"
+#
+# - Caddy recebendo o visitante direto (80/443, ou a porta local sem domínio, aberta ou por
+#   túnel): 1 salto. O Caddy não confia em ninguém, descarta o X-Forwarded-For que chegar e
+#   escreve o endereço real da conexão. Por túnel esse endereço é o da própria máquina, igual
+#   para todos: o limite de login fica único em vez de por visitante, e ninguém o forja.
+# - Caddy atrás do proxy do operador (modo externo com domínio; a porta só abre em 127.0.0.1):
+#   2 saltos. O Caddy confia só em vizinho de rede privada e ACRESCENTA o endereço dele; o
+#   painel lê o segundo item do fim, que foi escrito pelo proxy do operador. Preferido a
+#   "1 salto com o Caddy calculando o cliente" porque é posicional e falha fechado: se a cadeia
+#   vier mais curta que o esperado (conexão que não passou pelo proxy), o painel lê
+#   "desconhecido" em vez de aceitar um valor escrito pelo visitante.
+trust_for_mode() {
+  if [ "$1" = external ] && [ "$2" = 1 ]; then echo "2 private_ranges"; else echo "1 127.0.0.1/32"; fi
+}
+
+# Onde o nosso Caddy escuta? `caddy` = nas portas 80/443; `external` = já existe um proxy
+# nessas portas e a gente não briga: o nosso Caddy sai numa porta local única.
+#   decide_proxy_mode <80 ocupada: 0|1> <443 ocupada: 0|1> <quem ocupa é o nosso Caddy: 0|1>
 decide_proxy_mode() {
   if [ "$3" = 1 ]; then echo caddy
   elif [ "$1" = 1 ] || [ "$2" = 1 ]; then echo external

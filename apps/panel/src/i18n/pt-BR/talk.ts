@@ -50,6 +50,8 @@ const talk = {
     engine_simulated: "Este agente usa o motor simulado, que não conversa. Troque o motor em Agentes.",
     too_many_web_calls: "Já há três chamadas pelo navegador ao mesmo tempo nesta empresa. Encerre uma delas, ou espere um minuto, e ligue de novo.",
     voice_unavailable: "O serviço de voz não respondeu. Veja no indicador de saúde, no menu, o que está parado, e ligue de novo.",
+    voice_unreachable:
+      "O painel abriu, mas não alcançou o serviço de voz neste mesmo endereço. Se há um proxy seu na frente do DeskVoice, ele precisa repassar conexões contínuas (WebSocket) para o DeskVoice. Na VPS, rode bash install/healthcheck.sh e veja a linha \"Entrada única\".",
     connection_lost: "A conexão com o serviço de voz caiu. Confira sua internet e ligue de novo.",
     session_expired: "O tempo para começar a chamada acabou. Ligue de novo.",
   },

@@ -1,7 +1,31 @@
-{$PANEL_DOMAIN:localhost} {
+# Entrada única do DeskVoice: painel e voz do navegador saem pelo mesmo endereço, em todo modo
+# de instalação. O que muda de um modo para outro vem do arquivo que o instalador grava
+# (deploy/docker-compose.override.yml): onde este Caddy escuta e em quem ele confia.
+#
+#   CADDY_SITE             domínio (HTTPS automático nas portas 80/443) ou `:80` (só HTTP: sem
+#                          domínio, ou atrás do proxy que já existe na máquina, que cuida do HTTPS)
+#   CADDY_TRUSTED_PROXIES  de quem este Caddy aceita o cabeçalho X-Forwarded-For
+{
+	servers {
+		# Quem fala com este Caddy sem estar nesta lista tem o X-Forwarded-For DESCARTADO e
+		# trocado pelo endereço real da conexão: visitante nenhum escolhe o próprio "endereço"
+		# para escapar do limite de tentativas de login.
+		#
+		# Padrão: só o próprio contêiner (ninguém de fora chega por ali), ou seja, ninguém.
+		# Atrás do proxy do operador o instalador grava `private_ranges`: o vizinho imediato,
+		# na rede privada desta máquina, passa a ser ouvido, e este Caddy acrescenta o endereço
+		# dele no fim da lista. O painel então lê o segundo item contado do fim
+		# (TRUSTED_PROXY_HOPS=2), que é o que o proxy do operador escreveu.
+		trusted_proxies static {$CADDY_TRUSTED_PROXIES:127.0.0.1/32}
+	}
+}
+
+{$CADDY_SITE::80} {
 	encode zstd gzip
 
-	# "Falar com o agente": o áudio do navegador vai direto ao processo de voz, por WebSocket.
+	# "Falar com o agente": o áudio do navegador vai ao processo de voz por WebSocket, na mesma
+	# origem do painel. O Caddy repassa a troca de protocolo sozinho, desde que quem estiver na
+	# frente dele (proxy do operador) também repasse os cabeçalhos Upgrade e Connection.
 	handle /voice-ws* {
 		reverse_proxy voice:8091
 	}
