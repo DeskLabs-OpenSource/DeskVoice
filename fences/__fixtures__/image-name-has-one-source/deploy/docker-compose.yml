@@ -1,0 +1,12 @@
+services:
+  postgres:
+    image: postgres:17.0-alpine
+  panel:
+    image: ${DESKVOICE_IMAGE_PREFIX:-registro.example/projeto}/deskvoice-panel:${DESKVOICE_VERSION:-stable}
+    build: { context: .., target: panel }
+  voice:
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-voz:${DESKVOICE_VERSION:-dev}
+    build: { context: .., target: voice }
+  routines:
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-routines:${DESKVOICE_VERSION:-dev}
+    build: { context: .., target: routines }

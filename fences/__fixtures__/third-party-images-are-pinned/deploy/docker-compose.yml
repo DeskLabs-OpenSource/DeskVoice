@@ -1,0 +1,10 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+  panel:
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-panel:${DESKVOICE_VERSION:-dev}
+    build: { context: .., target: panel }
+  asterisk:
+    image: ${ASTERISK_IMAGE:-terceiro/asterisk@sha256:0000000000000000000000000000000000000000000000000000000000000000}
+  caddy:
+    image: caddy:2.11.9-alpine

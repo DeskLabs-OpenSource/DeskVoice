@@ -110,7 +110,7 @@ Perguntas comuns, e onde está a resposta:
 |---|---|---|
 | Ver a saúde | `bash install/healthcheck.sh` | Uma linha por peça; `aviso` é configuração faltando, `falha` é quebrado |
 | Backup | `bash install/backup.sh` | Só diz "concluído" depois de restaurar o dump num rascunho e contar as linhas. Guarde cópia fora da VPS |
-| Atualizar | `bash install/update.sh` | Faz backup, troca a versão, aplica as migrations e confere a saúde; se não ficar saudável, volta sozinho. Leia antes as notas da versão: se o título diz "requer atenção", há algo a fazer |
+| Atualizar | `bash install/update.sh` | Faz backup, troca a versão, aplica as migrations e confere a saúde; se não ficar saudável, volta sozinho. Vai para a versão publicada mais recente, ou para a de `--to 0.3.0`. Nunca constrói imagem: se a versão não baixa, para antes de mexer em qualquer coisa e diz o comando para testar. Leia antes as notas da versão: se o título diz "requer atenção", há algo a fazer |
 | Restaurar | `bash install/restore.sh latest` | **Substitui o banco atual.** Confere as contagens antes de trocar. Mudando de VPS: `--with-config` |
 | Pedir ajuda | `bash install/diagnose.sh` | Gera um arquivo sem segredos para anexar numa issue |
 

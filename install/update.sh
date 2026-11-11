@@ -2,12 +2,15 @@
 # Atualiza o DeskVoice. Nunca roda sem backup, e desfaz tudo se a versão nova não ficar saudável.
 #
 #   bash install/update.sh                atualiza para a versão publicada mais recente
-#   bash install/update.sh --to v0.3.0    atualiza para uma versão específica
+#   bash install/update.sh --to 0.3.0     atualiza para uma versão específica
 #   --yes                                 não pede confirmação
 #
 # Ordem: mostra versão atual e alvo → backup conferido → troca a versão → migrations →
 # checagem de saúde. Se alguma peça essencial não responder, volta para a versão anterior
 # e restaura o banco do backup, dizendo o que aconteceu.
+#
+# O atualizador nunca constrói imagem: se a versão alvo não baixa, ele para antes de mexer em
+# qualquer coisa e diz o que fazer.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 # Tudo dentro de uma função: o bash lê o arquivo aos poucos, e a troca de versão reescreve
@@ -20,7 +23,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --to) target="${2:-}"; shift ;;
     --yes|-y) ASSUME_YES=1 ;;
-    -h|--help) sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Use --to <versão> e/ou --yes." ;;
   esac
   shift
@@ -28,18 +31,22 @@ done
 require_install
 docker info >/dev/null 2>&1 || die "Não consegui falar com o Docker." "Confira se ele está rodando: sudo systemctl start docker"
 
-is_git=0; if have git && git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then is_git=1; fi
+is_git=0; if is_clone; then is_git=1; fi
+# Pode ser um número, `local` (imagens construídas aqui) ou o que uma instalação de antes do
+# formato único gravou (um canal, ou o número com `v`). Qualquer coisa diferente do alvo converge.
 current="$(env_get "$ENV_FILE" DESKVOICE_VERSION)"
-prefix="$(env_get "$ENV_FILE" DESKVOICE_IMAGE_PREFIX)"
 
 step "Versões"
 if [ -z "$target" ]; then
   [ "$is_git" = 1 ] || die "Não sei qual é a versão mais recente: esta pasta não é um clone do repositório." "Diga a versão: bash install/update.sh --to <versão>"
-  git -C "$REPO_DIR" fetch --tags --quiet origin || die "Não consegui consultar as versões publicadas." "Confira a internet da VPS (git fetch) ou diga a versão: bash install/update.sh --to <versão>"
-  target="$(git -C "$REPO_DIR" tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
+  fetch_versions || die "Não consegui consultar as versões publicadas." "Confira a internet da VPS (git -C $REPO_DIR fetch --tags origin) ou diga a versão: bash install/update.sh --to <versão>"
+  target="$(latest_version)"
   [ -n "$target" ] || die "Ainda não há nenhuma versão publicada para atualizar." "Quando houver, rode de novo; ou diga a versão: bash install/update.sh --to <versão>"
 fi
-case "$target" in *[!A-Za-z0-9._-]*|'') die "O nome de versão '$target' não vale." "Use algo como v0.3.0." ;; esac
+# Aceita o número (0.3.0) e a tag do git (v0.3.0); daqui em diante é sempre o número.
+target="$(version_of_tag "$target")"
+is_version "$target" || die "O nome de versão '$target' não vale." "Use o número da versão, como 0.3.0."
+target_tag="$(tag_of_version "$target")"
 info "Atual: $current"
 info "Alvo:  $target"
 if [ "$current" = "$target" ]; then ok "Esta instalação já está na versão $target. Nada a fazer."; exit 0; fi
@@ -50,8 +57,8 @@ if [ "$is_git" = 1 ]; then
     || die "Há arquivos do DeskVoice alterados à mão nesta pasta; atualizar por cima poderia perder essas mudanças." "Veja quais com: git status  — desfaça (git checkout -- <arquivo>) ou guarde uma cópia, e rode de novo."
   previous_commit="$(git -C "$REPO_DIR" symbolic-ref -q --short HEAD || git -C "$REPO_DIR" rev-parse HEAD)"
   git -C "$REPO_DIR" fetch --tags --quiet origin || warn "Não consegui buscar as versões no GitHub; sigo com o que já está nesta máquina."
-  git -C "$REPO_DIR" rev-parse --verify --quiet "refs/tags/$target" >/dev/null \
-    || die "A versão $target não existe no repositório." "Veja as versões com: git tag --list  — e rode de novo com --to <versão>."
+  git -C "$REPO_DIR" rev-parse --verify --quiet "refs/tags/$target_tag" >/dev/null \
+    || die "A versão $target não existe no repositório (procurei a tag $target_tag)." "Veja as versões com: git tag --list  — e rode de novo com --to <versão>."
 fi
 confirm "Atualizar de $current para $target? (faço um backup antes; se algo falhar, volto sozinho)" \
   || die "Atualização cancelada: nada foi alterado." "Quando quiser, rode de novo."
@@ -61,9 +68,9 @@ backup_dir="$(bash "$KIT_DIR/backup.sh" | tee /dev/stderr | tail -n 1)" \
   || die "O backup falhou, então a atualização NÃO começou. Nada foi alterado." "Resolva o problema do backup acima (bash install/backup.sh) e rode de novo."
 [ -f "$backup_dir/manifest.txt" ] || die "O backup não deixou manifesto em '$backup_dir'; sem backup conferido eu não atualizo." "Rode bash install/backup.sh e veja o erro."
 
-# Guarda as imagens atuais com outro nome: se o alvo usar o mesmo nome (ex.: stable), dá para voltar.
+# Guarda as imagens atuais com outro nome, para a volta não depender de baixar nem de reconstruir.
 for service in $APP_SERVICES; do
-  docker tag "$prefix/deskvoice-$service:$current" "$prefix/deskvoice-$service:rollback" 2>/dev/null || true
+  docker tag "$(image_ref "$service" "$current")" "$(image_ref "$service" rollback)" 2>/dev/null || true
 done
 
 apply_version() {  # apply_version <versão> <commit ou tag do código>
@@ -88,7 +95,7 @@ roll_back() {  # roll_back "<o que falhou>"
   local problems=""
   apply_version "$current" "$previous_commit" || problems="$problems não consegui voltar o código para $previous_commit;"
   for service in $APP_SERVICES; do
-    docker tag "$prefix/deskvoice-$service:rollback" "$prefix/deskvoice-$service:$current" 2>/dev/null || true
+    docker tag "$(image_ref "$service" rollback)" "$(image_ref "$service" "$current")" 2>/dev/null || true
   done
   # O banco pode já ter recebido migrations da versão nova: volta ao estado do backup.
   bash "$KIT_DIR/restore.sh" --yes "$backup_dir" || problems="$problems a restauração do banco falhou;"
@@ -102,18 +109,24 @@ roll_back() {  # roll_back "<o que falhou>"
 entry_was_ok=0; if entry_ok; then entry_was_ok=1; fi
 
 step "Trocando para a versão $target"
-apply_version "$target" "${previous_commit:+refs/tags/$target}" || roll_back "Não consegui trocar o código para a versão $target."
+apply_version "$target" "${previous_commit:+refs/tags/$target_tag}" || roll_back "Não consegui trocar o código para a versão $target."
+# As imagens vêm antes de qualquer outra mudança. Sem elas não há atualização, e construir aqui
+# não é saída: até este ponto só a versão foi trocada, então basta voltá-la. O banco e os
+# serviços não foram tocados.
+# shellcheck disable=SC2086
+if pull_output="$(dc pull -q $APP_SERVICES 2>&1)"; then ok "Imagens da versão $target baixadas"
+else
+  printf '%s\n' "$pull_output" | tail -n 5 | sed 's/^/    /' >&2
+  apply_version "$current" "$previous_commit" \
+    || die "Não consegui baixar as imagens da versão $target, e também não consegui voltar o código para $previous_commit." "Os serviços seguem rodando na versão anterior e o banco não foi tocado. Rode: git -C $REPO_DIR checkout $previous_commit  — e depois bash install/diagnose.sh para pedir ajuda."
+  die "Não consegui baixar as imagens da versão $target (resposta do Docker acima). Nada foi alterado: a instalação segue na versão $current, e o banco não foi tocado." "Causas prováveis: a internet da VPS ou o ghcr.io fora do ar; ou a versão acabou de sair e as imagens ainda estão sendo publicadas (espere alguns minutos). Teste com: docker pull $(image_ref panel "$target")  — e rode bash install/update.sh de novo."
+fi
 render_asterisk_config
 # Instalação de antes da entrada única: o Caddy passa a ser a única porta publicada, na mesma
 # porta que o painel já usava. Em instalação já no formato atual, não muda nada.
 converge_entry
-# shellcheck disable=SC2086
-if dc pull -q $APP_SERVICES >/dev/null 2>&1; then ok "Imagens da versão $target baixadas"
-else
-  warn "A versão $target não tem imagem publicada. Construindo aqui: leva alguns minutos."
-  # shellcheck disable=SC2086
-  dc build $APP_SERVICES || roll_back "A construção das imagens da versão $target falhou."
-fi
+# O endereço das imagens deixou de ser gravado por instalação: a fonte única é deploy/images.env.
+env_unset "$ENV_FILE" DESKVOICE_IMAGE_PREFIX
 
 step "Aplicando as mudanças no banco"
 # shellcheck disable=SC2086
@@ -125,7 +138,7 @@ step "Subindo e conferindo"
 dc up -d --remove-orphans || roll_back "Os serviços da versão $target não subiram."
 wait_healthy || roll_back "A versão $target subiu, mas nem toda peça essencial respondeu, ou o painel deixou de abrir pelo endereço que abria antes."
 
-for service in $APP_SERVICES; do docker rmi "$prefix/deskvoice-$service:rollback" >/dev/null 2>&1 || true; done
+for service in $APP_SERVICES; do docker rmi "$(image_ref "$service" rollback)" >/dev/null 2>&1 || true; done
 ok "Atualizado para $target, com todas as peças essenciais respondendo."
 info "Backup de antes da atualização: $backup_dir"
 info "Relatório completo: bash install/healthcheck.sh"

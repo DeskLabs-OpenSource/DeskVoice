@@ -7,6 +7,11 @@
 #   bash install/install.sh --yes           não pergunta: lê as respostas de variáveis DESKVOICE_*
 #   bash install/install.sh --yes --answers respostas.env   ... ou de um arquivo CHAVE=valor
 #   --force                                 segue mesmo em sistema que não é Ubuntu 22.04+/Debian 12+
+#   --build                                 para quem desenvolve: constrói as imagens nesta máquina, a partir
+#                                           do código desta pasta, em vez de baixar a versão publicada
+#
+# A versão instalada é a publicada mais recente, e o número fica gravado em deploy/.env. Enquanto
+# o projeto não tiver nenhuma versão publicada, as imagens são construídas nesta máquina.
 #
 # Respostas aceitas (variável ou linha do arquivo):
 #   DESKVOICE_DOMAIN           domínio do painel; vazio = sem domínio por enquanto (usa o IP, sem HTTPS)
@@ -19,16 +24,18 @@
 #                              de dentro da VPS (acesso por túnel SSH), em vez de ficar na internet sem HTTPS
 #   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar
 #   DESKVOICE_RTP_START / DESKVOICE_RTP_END   opcional: outra faixa de portas de áudio
+#   DESKVOICE_VERSION          opcional: uma versão publicada específica (exemplo: 0.3.0), em vez da mais recente
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
-ASSUME_YES=0; DRY_RUN=0; FORCE=0; answers_file=""
+ASSUME_YES=0; DRY_RUN=0; FORCE=0; BUILD=0; answers_file=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes|-y) ASSUME_YES=1 ;;
     --dry-run) DRY_RUN=1 ;;
     --force) FORCE=1 ;;
+    --build) BUILD=1 ;;
     --answers) answers_file="${2:-}"; shift ;;
-    -h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Veja as opções com: bash install/install.sh --help" ;;
   esac
   shift
@@ -90,13 +97,13 @@ else blocker "Este sistema (${os_id:-$(uname -s)} ${os_version}) não é Ubuntu 
 
 arch="$(uname -m)"
 if arch_supported "$arch"; then ok "Processador: $arch"
-else blocker "O processador desta máquina ($arch) não tem imagem do DeskVoice." "use uma VPS x86_64 (amd64) ou ARM de 64 bits (arm64)"; fi
+else blocker "O processador desta máquina ($arch) não tem imagem do DeskVoice." "use uma VPS x86_64 (amd64); em ARM de 64 bits (arm64) só construindo aqui, com --build"; fi
 
 if [ -r /proc/meminfo ]; then
   ram_mb="$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)"
-  if [ "$ram_mb" -lt 1900 ]; then warn "Memória: ${ram_mb} MB. Abaixo de 2 GB o sistema sobe, mas pode travar com ligações ao mesmo tempo."
+  if [ "$ram_mb" -lt 1900 ]; then warn "Memória: ${ram_mb} MB. Abaixo de 2 GB pode faltar memória se as imagens forem construídas nesta máquina. O menor tamanho em que a instalação cabe ainda não foi medido: ela foi provada numa VPS de 8 GB."
   else ok "Memória: ${ram_mb} MB"; fi
-else warn "Não consegui ler a memória desta máquina (o recomendado é 2 GB ou mais)."; fi
+else warn "Não consegui ler a memória desta máquina. O menor tamanho em que a instalação cabe ainda não foi medido: ela foi provada numa VPS de 8 GB."; fi
 disk_mb="$(df -Pm "$REPO_DIR" | awk 'NR == 2 { print $4 }')"
 if [ "$disk_mb" -lt 10240 ]; then warn "Disco: $((disk_mb / 1024)) GB livres. Abaixo de 10 GB pode faltar espaço para as imagens e os backups."
 else ok "Disco: $((disk_mb / 1024)) GB livres"; fi
@@ -118,6 +125,51 @@ if have docker; then
     blocker "Seu usuário não consegue falar com o Docker (ou o serviço do Docker está parado)." "rode: $SUDO systemctl start docker ; $SUDO usermod -aG docker $(id -un)  — depois saia do terminal, entre de novo e repita o instalador"
   else ok "Docker e compose: $(docker compose version --short 2>/dev/null || echo ok)"; fi
 fi
+
+# Que versão esta instalação roda: um número (imagem publicada, nunca construída aqui) ou
+# `local` (construída nesta máquina). Nunca um canal: etiqueta móvel não diz o que está rodando.
+recorded="$(version_of_tag "$(env_get "$ENV_FILE" DESKVOICE_VERSION)")"
+version=""
+if [ "$BUILD" = 1 ]; then
+  version="$LOCAL_VERSION"
+  ok "Versão: as imagens serão construídas nesta máquina, a partir do código desta pasta (--build)"
+elif [ -n "${DESKVOICE_VERSION:-}" ]; then
+  version="$(version_of_tag "$DESKVOICE_VERSION")"
+  is_version "$version" || die "A versão pedida em DESKVOICE_VERSION ($DESKVOICE_VERSION) não vale." "Use o número de uma versão publicada, como 0.3.0."
+  ok "Versão: $version (pedida em DESKVOICE_VERSION)"
+elif is_version "$recorded"; then
+  # Rodar o instalador de novo não troca de versão: isso é trabalho do update.sh, que faz backup.
+  version="$recorded"
+  ok "Versão: $version (a que esta instalação já usa; para trocar, bash install/update.sh)"
+elif ! is_clone; then
+  blocker "Não sei qual é a versão publicada mais recente: esta pasta não é um clone do repositório (ou falta o git)." "diga a versão: DESKVOICE_VERSION=<número> bash install/install.sh  — ou baixe pelo comando de uma linha do README, que clona o repositório"
+else
+  # A simulação não busca nada: lê as versões que o clone já conhece.
+  if [ "$DRY_RUN" != 1 ]; then
+    fetch_versions || die "Não consegui consultar as versões publicadas do DeskVoice (o git não alcançou o repositório)." "Confira a internet da VPS com: git -C $REPO_DIR fetch --tags origin  — e rode o instalador de novo. Se você já sabe a versão: DESKVOICE_VERSION=<número> bash install/install.sh"
+  fi
+  version="$(latest_version)"
+  if [ -n "$version" ]; then ok "Versão: $version, a publicada mais recente"
+  else
+    version="$LOCAL_VERSION"
+    warn "O DeskVoice ainda não tem nenhuma versão publicada: as imagens serão construídas nesta máquina. Leva alguns minutos e usa bastante processador e memória."
+  fi
+fi
+# Imagem publicada só combina com o código da mesma versão: Compose, Caddyfile e kit da ponta da
+# main com imagem de versão anterior é uma combinação que ninguém testou. Quem instala pelo
+# comando de uma linha já chega na tag; quem clonou à mão pode estar na main.
+if is_version "$version" && is_clone && [ "$DRY_RUN" != 1 ]; then
+  tag="$(tag_of_version "$version")"
+  if [ "$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null)" != "$(git -C "$REPO_DIR" rev-parse "refs/tags/$tag^{commit}" 2>/dev/null)" ]; then
+    blocker "O código desta pasta não é o da versão $version, que é a que seria instalada." "vá para a versão e rode de novo: git -C $REPO_DIR checkout $tag && bash install/install.sh  — ou, para rodar o código desta pasta de propósito, construa aqui: bash install/install.sh --build"
+  fi
+fi
+# As imagens publicadas são para x86_64. Em ARM a instalação existe, mas construindo aqui.
+if is_version "$version"; then
+  case "$arch" in aarch64|arm64) blocker "Ainda não há imagem publicada do DeskVoice para processador ARM ($arch)." "use uma VPS x86_64, ou construa nesta máquina: bash install/install.sh --build" ;; esac
+fi
+# O Compose dá preferência à variável do terminal sobre o arquivo: as duas têm de dizer o mesmo.
+export DESKVOICE_VERSION="$version"
 
 # ═════════════════════════════════════════════════════════════════════════════
 step "2 de 5 · Conferindo a rede (é aqui que ligação fica muda)"
@@ -267,7 +319,8 @@ if [ "$DRY_RUN" = 1 ]; then
     elif [ "$panel_bind" = "127.0.0.1" ]; then would "deixar o painel só para dentro da VPS; do seu computador: ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}"
     else would "avisar: pelo IP e sem HTTPS o navegador não libera o microfone; \"Falar com o agente\" pede domínio ou túnel"; fi
   else would "subir o Caddy do DeskVoice nas portas 80/443 para ${panel_domain} (painel e voz do navegador pelo mesmo endereço)"; fi
-  would "baixar as imagens (ou construir aqui, se a versão ainda não estiver publicada)"
+  if [ "$version" = "$LOCAL_VERSION" ]; then would "construir as imagens do DeskVoice nesta máquina e gravar a versão como \"$LOCAL_VERSION\""
+  else would "baixar as imagens da versão ${version:-(a definir)} e gravar esse número em deploy/.env; se elas não baixarem, parar com erro, sem construir aqui"; fi
   would "subir o Postgres e aplicar as migrations"
   if [ "$create_owner" = 1 ]; then would "criar a empresa \"$org_name\" e o usuário dono $owner_email"; fi
   would "subir painel, voz, rotinas e Asterisk, e esperar todos responderem"
@@ -287,15 +340,22 @@ ok "Configuração do Asterisk gerada"
 info "Baixando as imagens de apoio (banco, telefonia)..."
 # shellcheck disable=SC2086
 dc pull -q postgres asterisk caddy \
-  || die "Não consegui baixar as imagens do banco e do Asterisk." "Quase sempre é a internet da VPS ou o Docker Hub fora do ar. Teste: docker pull postgres:17-alpine  — e rode o instalador de novo."
+  || die "Não consegui baixar as imagens do banco, do Asterisk e do Caddy." "Quase sempre é a internet da VPS ou o Docker Hub fora do ar. Teste: docker pull hello-world  — e rode o instalador de novo."
 # shellcheck disable=SC2086
-if dc pull -q $APP_SERVICES >/dev/null 2>&1; then ok "Imagens do DeskVoice baixadas"
-else
-  warn "A versão $(env_get "$ENV_FILE" DESKVOICE_VERSION) ainda não tem imagem publicada. Vou construir aqui mesmo: leva alguns minutos e usa bastante processador."
-  # shellcheck disable=SC2086
-  dc build $APP_SERVICES || die "A construção das imagens falhou." "Veja a mensagem acima. Causas comuns: disco cheio (df -h) ou pouca memória. Depois rode o instalador de novo."
+if [ "$version" = "$LOCAL_VERSION" ]; then
+  # Só dois casos chegam aqui: o projeto ainda não tem versão publicada, ou você pediu --build.
+  info "Construindo as imagens do DeskVoice nesta máquina..."
+  dc build $APP_SERVICES || die "A construção das imagens falhou." "Veja a mensagem acima. Causas comuns: disco cheio (df -h) ou pouca memória (free -m). Depois rode o instalador de novo."
   ok "Imagens construídas nesta máquina"
+elif pull_output="$(dc pull -q $APP_SERVICES 2>&1)"; then ok "Imagens do DeskVoice $version baixadas"
+else
+  # Versão publicada sem imagem é erro, e não motivo para construir aqui: imagem construída na
+  # VPS não é a que foi testada, e nenhuma atualização a troca depois.
+  printf '%s\n' "$pull_output" | tail -n 5 | sed 's/^/    /' >&2
+  die "Não consegui baixar as imagens da versão $version (resposta do Docker acima). Nada foi instalado nem alterado no que já estava rodando." "Causas prováveis: a internet da VPS ou o ghcr.io fora do ar; ou a versão acabou de sair e as imagens ainda estão sendo publicadas (espere alguns minutos). Teste com: docker pull $(image_ref panel "$version")  — e rode o instalador de novo. Para construir nesta máquina de propósito, a partir do código desta pasta: bash install/install.sh --build"
 fi
+# Só agora, com as imagens em mãos, a versão é gravada.
+env_set "$ENV_FILE" DESKVOICE_VERSION "$version"
 
 info "Subindo o banco..."
 dc up -d --wait postgres || { show_logs postgres; die "O banco (Postgres) não ficou pronto." "Veja o log acima. Causa comum: disco cheio (df -h). Depois rode o instalador de novo."; }

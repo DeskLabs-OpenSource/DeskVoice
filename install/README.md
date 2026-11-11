@@ -54,11 +54,11 @@ e número) e o agente. Nada disso é pedido no terminal.
 | Script | O que faz | O que ele confere antes de dizer que deu certo |
 |---|---|---|
 | `start.sh` | Roda no seu computador, antes do servidor: diz o que é preciso e entrega o comando seguinte | Não altera nada. Só mostra o link da parceira se conseguiu ler o endereço de `partner.env` |
-| `install.sh` | Confere a máquina e a rede, faz poucas perguntas, gera os segredos, sobe tudo e cria o primeiro usuário. Pode ser rodado de novo: retoma de onde parou e nunca troca um segredo que já existe | Cada peça essencial respondendo (painel, banco, Asterisk, worker de voz, rotinas) |
+| `install.sh` | Confere a máquina e a rede, faz poucas perguntas, gera os segredos, baixa as imagens da versão publicada mais recente, sobe tudo e cria o primeiro usuário. Pode ser rodado de novo: retoma de onde parou e nunca troca um segredo que já existe | Cada peça essencial respondendo (painel, banco, Asterisk, worker de voz, rotinas) |
 | `healthcheck.sh` | Uma linha por peça, com estado e detalhe. `--json` para monitoramento | Não resume: mostra qual peça está fora |
 | `backup.sh` | Copia o banco, os três arquivos de ambiente e a configuração gerada do Asterisk para `backups/<data>/` | Restaura o dump num banco de rascunho e conta as linhas de cada tabela |
 | `restore.sh` | Substitui o banco por um backup. Pede que você digite `RESTAURAR` | Compara a contagem de cada tabela com o manifesto do backup, antes e depois de trocar o banco |
-| `update.sh` | Mostra versão atual e alvo, faz backup, troca a versão, aplica as migrations e confere a saúde | Se uma peça essencial não responder, volta para a versão anterior e restaura o banco do backup |
+| `update.sh` | Mostra versão atual e alvo, faz backup, troca a versão, baixa as imagens dela, aplica as migrations e confere a saúde. Nunca constrói imagem | Se as imagens não baixam, para sem alterar nada. Se uma peça essencial não responder, volta para a versão anterior e restaura o banco do backup |
 | `diagnose.sh` | Gera um arquivo de texto para você enviar a quem for ajudar | Senhas, chaves e tokens saem como `***`; e-mails e telefones saem encurtados |
 | `test/run.sh` | Testes do próprio kit. Não precisam de Docker | Sai com erro se qualquer verificação falhar |
 
@@ -69,6 +69,7 @@ bash install/install.sh               # pergunta o que precisa
 bash install/install.sh --dry-run     # mostra o que faria, sem alterar nada
 bash install/install.sh --yes         # não pergunta; lê as respostas de variáveis
 bash install/install.sh --yes --answers respostas.env
+bash install/install.sh --build       # para quem desenvolve: constrói as imagens a partir do código desta pasta
 ```
 
 Respostas para o modo `--yes` (variável de ambiente ou linha `CHAVE=valor` do arquivo):
@@ -81,15 +82,42 @@ Respostas para o modo `--yes` (variável de ambiente ou linha `CHAVE=valor` do a
 | `DESKVOICE_PUBLIC_IP` | Só se a descoberta automática do IP falhar |
 | `DESKVOICE_APPLY_UFW=yes` | Aplica as regras no firewall `ufw` sem perguntar |
 | `DESKVOICE_RTP_START`, `DESKVOICE_RTP_END` | Outra faixa de portas de áudio (padrão 10000 a 10200) |
+| `DESKVOICE_VERSION` | Uma versão publicada específica (exemplo: `0.3.0`), em vez da mais recente |
 
 Se usar um arquivo de respostas com a senha, apague-o depois da instalação.
+
+#### Que versão é instalada
+
+O instalador descobre a versão publicada mais recente pelas tags do repositório que você baixou
+(a maior tag `vX.Y.Z`), baixa as imagens dessa versão e grava o **número** em `deploy/.env`
+(`DESKVOICE_VERSION=X.Y.Z`, sem o `v`). Ele nunca grava um canal como "a mais recente": assim a
+instalação sabe o que está rodando, e duas instalações com o mesmo número rodam as mesmas imagens.
+
+| Situação | O que o instalador faz |
+|---|---|
+| Existe versão publicada e as imagens baixam | Instala essa versão e grava o número |
+| Existe versão publicada e as imagens **não** baixam | Para com erro, mostra a resposta do Docker e o comando para testar. Não constrói no lugar |
+| O projeto ainda não tem nenhuma versão publicada | Constrói as imagens nesta máquina e grava `local`. Leva alguns minutos e usa bastante memória |
+| Você passou `--build` | Constrói a partir do código desta pasta e grava `local`, haja ou não versão publicada |
+| Não consegue consultar as versões (sem rede para o `git`, ou a pasta não é um clone) | Para com erro e diz o comando: conferir a rede, ou informar `DESKVOICE_VERSION` |
+
+Rodar o instalador de novo numa instalação que já tem um número gravado **não troca de versão**:
+quem troca é o `update.sh`, que faz backup antes. Numa instalação antiga que ainda tem `stable`
+gravado (ou `local`), o instalador e o `update.sh` passam para o número da versão publicada
+assim que existir uma, sem mexer nos dados.
+
+`--build` é para quem desenvolve. Imagem construída na VPS não é a que o projeto testou e
+publicou, e precisa ser reconstruída à mão a cada mudança.
+
+O endereço das imagens mora num arquivo só, `deploy/images.env`, que vem com o repositório. O
+Compose, este kit e a publicação das imagens leem dali; nada disso é gravado por instalação.
 
 O instalador grava três arquivos em `deploy/`, todos legíveis só pelo seu usuário. Estão
 separados para cada contêiner receber só o que usa:
 
 | Arquivo | Quem recebe | O que tem |
 |---|---|---|
-| `deploy/.env` | O Compose (e o Postgres) | Senha do dono do banco, domínio, faixa de áudio, versão |
+| `deploy/.env` | O Compose (e o Postgres) | Senha do dono do banco, domínio, faixa de áudio, número da versão instalada |
 | `deploy/app.env` | Painel, voz e rotinas | Conexões de aplicação, chave de segredos, senha interna do Asterisk, endereço público. Não tem a senha do dono do banco |
 | `deploy/migrate.env` | Só as migrations e a criação do primeiro usuário | Conexão do dono do banco e as senhas dos papéis de aplicação |
 
@@ -219,6 +247,9 @@ versão anterior.
 Se a mensagem disser que a volta não terminou bem, não rode mais nada: seus dados estão no
 backup indicado. Gere o diagnóstico e peça ajuda.
 
+Se a mensagem disser que não conseguiu **baixar as imagens**, nada foi alterado: a instalação
+segue na versão em que estava, com o banco intocado. Veja o problema 8.
+
 ### 5. Esqueci a senha do painel
 
 ```bash
@@ -254,6 +285,20 @@ do painel. Alguém no caminho não repassou essa conexão.
 4. Por túnel SSH, confira se o túnel é para a porta do painel que o instalador mostrou. Não
    existe mais segunda porta para abrir.
 
+### 8. O instalador (ou a atualização) não conseguiu baixar as imagens
+
+A mensagem traz a resposta do Docker e um comando `docker pull ...` para testar. As causas, da
+mais comum para a menos:
+
+1. A VPS está sem acesso ao registro das imagens (`ghcr.io`). Rode o `docker pull` indicado: se
+   ele também falha, é rede ou o registro fora do ar. Tente de novo em alguns minutos.
+2. A versão acabou de sair e as imagens ainda estão sendo publicadas. Espere alguns minutos.
+3. O `docker pull` responde "denied" ou "unauthorized": a imagem existe e não está pública. Isso
+   é defeito da publicação, e não da sua VPS: abra uma issue.
+
+O kit não constrói as imagens na VPS para contornar: uma imagem construída ali não é a que foi
+testada, e nenhuma atualização a trocaria depois. Nada é alterado até as imagens baixarem.
+
 ## Testes do kit
 
 ```bash
@@ -262,4 +307,6 @@ bash install/test/run.sh backup   # só os arquivos com "backup" no nome
 ```
 
 Os testes usam um `docker` de mentira (em `install/test/fake/`) que só registra as chamadas, e
-pastas temporárias. Não sobem contêiner, não falam com a internet e não tocam no git.
+pastas temporárias, e um `git` de mentira que faz as vezes de um clone com as versões que o teste
+escolhe. Não sobem contêiner, não falam com a internet e não tocam no git de verdade (só o
+teste do `get.sh` clona, e de um repositório local criado por ele).
