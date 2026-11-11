@@ -11,6 +11,7 @@ type FakeFetch = (url: string, init: RequestInit) => Response | Promise<Response
 
 export const NOW = new Date("2026-03-01T15:00:00.000Z");
 export const SECRET_KEY = Buffer.alloc(32, 7);
+export const AGENT_TOKEN = "agent-test-token";
 
 /** Liga as rotas ao banco de teste, com relógio fixo e um processo de voz falso. */
 export function startPanel(): { app: Db; deps: ServerDeps; clock: { at: Date }; voice: { respond: FakeFetch; requests: Array<{ url: string; body: unknown }> }; close(): Promise<void> } {
@@ -37,6 +38,8 @@ export function startPanel(): { app: Db; deps: ServerDeps; clock: { at: Date }; 
     voiceUrl: "http://voice.test",
     internalToken: "internal-test-token",
     trustedProxyHops: 1,
+    appVersion: "0.1.0",
+    agentToken: AGENT_TOKEN,
     verifyPassword,
   };
   setServerDeps(deps);

@@ -13,10 +13,15 @@ case " $* " in
   *" rev-parse HEAD "*) if [ -f "$FAKE_DIR/git_head" ]; then cat "$FAKE_DIR/git_head"; else echo commit-da-versao; fi ;;
   *" rev-parse refs/tags/"*) echo commit-da-versao ;;
   *" rev-parse --verify "*) ref="${*: -1}"; grep -qx "${ref#refs/tags/}" "$FAKE_DIR/git_tags" ;;
-  *" fetch "*) [ ! -f "$FAKE_DIR/git_fetch_fail" ] ;;
+  # Com $FAKE_DIR/git_tags_after_fetch, a consulta traz versões novas (uma tag publicada no meio).
+  *" fetch "*) [ ! -f "$FAKE_DIR/git_fetch_fail" ] || exit 1; if [ -f "$FAKE_DIR/git_tags_after_fetch" ]; then mv "$FAKE_DIR/git_tags_after_fetch" "$FAKE_DIR/git_tags"; fi ;;
   *" tag --list "*) cat "$FAKE_DIR/git_tags" ;;
   *" status --porcelain "*) ;;
   *" symbolic-ref "*) echo main ;;
-  *" checkout "*) ;;
+  # Trocar o código: se o teste preparou $FAKE_DIR/git_checkout/<ref> e disse onde fica a cópia
+  # de trabalho ($FAKE_GIT_WORKTREE), os arquivos de lá vão por cima dela, como numa troca de versão.
+  *" checkout "*)
+    ref="${*: -1}"; ref="${ref##*/}"
+    if [ -n "${FAKE_GIT_WORKTREE:-}" ] && [ -d "$FAKE_DIR/git_checkout/$ref" ]; then cp -R "$FAKE_DIR/git_checkout/$ref/." "$FAKE_GIT_WORKTREE/"; fi ;;
   *) exit 1 ;;
 esac

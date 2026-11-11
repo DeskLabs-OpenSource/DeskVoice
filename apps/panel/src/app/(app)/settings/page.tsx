@@ -16,6 +16,7 @@ import { formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import type { Engine, Me, Setting } from "../../../ui/types";
+import { UpdatePanel } from "./update-panel";
 
 // Igual em todo idioma: não é frase, é o começo de um endereço.
 const URL_PREFIX = "https://";
@@ -436,6 +437,8 @@ export default function SettingsPage() {
           ) : null}
         </form>
       </Panel>
+
+      <UpdatePanel />
     </>
   );
 }
