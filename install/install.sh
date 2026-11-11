@@ -375,6 +375,9 @@ info "   O agente de exemplo nasce no motor simulado, que serve para demonstraç
 info "3. Linha: cadastre o tronco SIP e o número que a operadora te passou."
 info "4. Faça a primeira ligação para o número e acompanhe na tela Chamadas. É ela que prova que o áudio passa."
 printf '\n  Conferir a saúde:  bash install/healthcheck.sh\n  Pedir ajuda:       bash install/diagnose.sh   (gera um arquivo sem senhas para você enviar)\n'
-if partner_hint_allowed "$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"; then
-  dim "VPS recomendada pelo projeto, se um dia for trocar: HostGator (https://www.hostgator.com.br/52708-141-3-52.html)"
+# Quem chegou aqui já tem servidor: nenhuma oferta. No máximo uma linha, e só com certeza de que a
+# máquina é de outro provedor. O endereço vem de partner.env.
+partner_url="$(partner_value PARTNER_URL)"
+if [ -n "$partner_url" ] && partner_hint_allowed "$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"; then
+  dim "Se um dia for trocar de VPS: a recomendada pelo projeto é a da $(partner_value PARTNER_NAME), por link de parceria, que apoia o projeto: $partner_url"
 fi

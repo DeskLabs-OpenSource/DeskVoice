@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# xdg-open de mentira: nenhum teste abre navegador. Só registra o que seria aberto.
+echo "abrir $*" >> "$FAKE_DIR/calls.log"
