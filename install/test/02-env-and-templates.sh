@@ -4,9 +4,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 source "$KIT/_common.sh"; set +e; trap - ERR
 D="$DESKVOICE_DEPLOY_DIR"
 
-write_env_files "https://voz.exemplo.com.br" 203.0.113.10 voz.exemplo.com.br 10000 10200 caddy
+write_env_files "https://voz.exemplo.com.br" 203.0.113.10 voz.exemplo.com.br 10000 10200
 keys() { sed 's/=.*//' "$1" | sort | tr '\n' ' '; }
-equal "campos do .env" "COMPOSE_PROFILES DESKVOICE_IMAGE_PREFIX DESKVOICE_VERSION PANEL_DOMAIN POSTGRES_PASSWORD RTP_END RTP_START " "$(keys "$D/.env")"
+equal "campos do .env" "DESKVOICE_IMAGE_PREFIX DESKVOICE_VERSION PANEL_DOMAIN POSTGRES_PASSWORD RTP_END RTP_START " "$(keys "$D/.env")"
 equal "campos do app.env" "ARI_PASSWORD ARI_USERNAME DATABASE_URL DESKVOICE_SECRET_KEY INTERNAL_TOKEN PUBLIC_IP PUBLIC_URL SYSTEM_DATABASE_URL " "$(keys "$D/app.env")"
 equal "campos do migrate.env" "APP_DB_PASSWORD MIGRATION_DATABASE_URL SYSTEM_DATABASE_URL SYSTEM_DB_PASSWORD " "$(keys "$D/migrate.env")"
 for f in .env app.env migrate.env; do equal "permissão 600 em $f" 600 "$(mode_of "$D/$f")"; done
@@ -25,13 +25,14 @@ check "três senhas de banco diferentes entre si" test "$owner_pw" != "$app_pw" 
 
 # Segunda execução, com respostas diferentes: segredo nenhum muda; configuração muda.
 before="$(grep -hE '^(POSTGRES_PASSWORD|APP_DB_PASSWORD|SYSTEM_DB_PASSWORD|DESKVOICE_SECRET_KEY|INTERNAL_TOKEN|ARI_PASSWORD)=' "$D/.env" "$D/app.env" "$D/migrate.env")"
-write_env_files "http://198.51.100.7" 198.51.100.7 ":80" 20000 20200 ""
+env_set "$D/.env" COMPOSE_PROFILES caddy
+write_env_files "http://198.51.100.7" 198.51.100.7 ":80" 20000 20200
 after="$(grep -hE '^(POSTGRES_PASSWORD|APP_DB_PASSWORD|SYSTEM_DB_PASSWORD|DESKVOICE_SECRET_KEY|INTERNAL_TOKEN|ARI_PASSWORD)=' "$D/.env" "$D/app.env" "$D/migrate.env")"
 equal "segunda execução não troca nenhum segredo" "$before" "$after"
 equal "segunda execução mantém seis segredos" 6 "$(printf '%s\n' "$after" | wc -l | tr -d ' ')"
 equal "segunda execução atualiza o IP" 198.51.100.7 "$(env_get "$D/app.env" PUBLIC_IP)"
 equal "segunda execução atualiza a faixa" 20000 "$(env_get "$D/.env" RTP_START)"
-equal "perfil vazio fica vazio" "" "$(env_get "$D/.env" COMPOSE_PROFILES)"
+lacks "COMPOSE_PROFILES de instalação antiga é removido" "$(cat "$D/.env")" "COMPOSE_PROFILES"
 equal "nenhuma chave duplicada" "" "$(cat "$D/.env" "$D/app.env" | sed 's/=.*//' | sort | uniq -d)"
 for f in .env app.env migrate.env; do equal "permissão 600 mantida em $f" 600 "$(mode_of "$D/$f")"; done
 
@@ -60,21 +61,76 @@ equal "umask 077: a pasta continua fechada para outros usuários da VPS" 700 "$(
 contains "o plano de discagem montado é o do repositório" "$(cat "$G/extensions.conf")" "Stasis(deskvoice,inbound)"
 lacks "o compose não monta mais arquivo direto do repositório" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/extensions.conf"
 
-# Sem o proxy do DeskVoice (80/443 de outro), o painel e a porta de voz do navegador saem em
-# portas locais. A porta de voz é a que recebe o áudio de "Falar com o agente".
-( source "$KIT/_common.sh"; write_proxy_override 127.0.0.1 3080 3081 )
+# ── Entrada única: só o Caddy do DeskVoice publica porta, nos dois modos ──
 O="$D/docker-compose.override.yml"
-contains "publicação: painel na porta local" "$(cat "$O")" '"127.0.0.1:3080:3000"'
-contains "publicação: voz do navegador na porta seguinte" "$(cat "$O")" '"127.0.0.1:3081:8091"'
+services_with_ports() { awk '/^  [a-z-]+:/ { s = $1 } /^    ports:/ { print s }' "$1" | tr -d ':' | tr '\n' ' '; }
+equal "compose base: só o Asterisk publica porta (o Caddy recebe as dele do instalador)" "asterisk " "$(services_with_ports "$REPO/deploy/docker-compose.yml")"
+lacks "compose base: o Caddy não é mais opcional" "$(cat "$REPO/deploy/docker-compose.yml")" "profiles:"
+contains "o Caddy encaminha a voz do navegador" "$(cat "$REPO/deploy/Caddyfile")" "reverse_proxy voice:8091"
+contains "o Caddy encaminha o resto ao painel" "$(cat "$REPO/deploy/Caddyfile")" "reverse_proxy panel:3000"
+hops() { env_get "$D/app.env" TRUSTED_PROXY_HOPS; }
+ports_published() { sed -n 's/^ *- "\(.*\)"$/\1/p' "$O" | tr '\n' ' '; }
+setting() { sed -n "s/.*$1: \"\(.*\)\".*/\1/p" "$O"; }
+
+apply_entry caddy voz.exemplo.com.br
+equal "80/443 livres, com domínio: publica 80 e 443" "80:80 443:443 " "$(ports_published)"
+equal "80/443 livres, com domínio: o Caddy atende o domínio (HTTPS automático)" voz.exemplo.com.br "$(setting CADDY_SITE)"
+equal "80/443 livres, com domínio: o Caddy não confia em ninguém de fora" "127.0.0.1/32" "$(setting CADDY_TRUSTED_PROXIES)"
+equal "80/443 livres, com domínio: painel conta 1 salto" 1 "$(hops)"
+equal "só o Caddy tem porta" "caddy " "$(services_with_ports "$O")"
+lacks "painel nunca publica porta" "$(cat "$O")" "3000"
+lacks "voz nunca publica porta" "$(cat "$O")" "8091"
 equal "publicação: arquivo só do dono" 600 "$(mode_of "$O")"
-( cd "$D" && PATH="${PATH#"$TEST_DIR/fake:"}" python3 -c "import sys; t=open('docker-compose.override.yml').read(); sys.exit(0 if t.count('ports:')==2 and 'voice:' in t and 'panel:' in t else 1)" ); equal "publicação: os dois serviços têm portas" 0 "$?"
-# Painel aberto pelo IP (sem domínio): a porta de voz continua só local. Exposta, seria uma porta
-# aberta sem uso possível, porque fora de HTTPS e de localhost o navegador não libera o microfone.
-( source "$KIT/_common.sh"; write_proxy_override 0.0.0.0 3080 3081 )
-contains "painel aberto pelo IP: painel publicado para fora" "$(cat "$O")" '"0.0.0.0:3080:3000"'
-contains "painel aberto pelo IP: voz só para dentro da máquina" "$(cat "$O")" '"127.0.0.1:3081:8091"'
-lacks "painel aberto pelo IP: voz nunca exposta" "$(cat "$O")" '0.0.0.0:3081'
-contains "o Caddy do DeskVoice encaminha a voz do navegador" "$(cat "$REPO/deploy/Caddyfile")" "reverse_proxy voice:8091"
+
+apply_entry caddy ""
+equal "80/443 livres, sem domínio: só HTTP na 80" "80:80 " "$(ports_published)"
+equal "80/443 livres, sem domínio: site :80" ":80" "$(setting CADDY_SITE)"
+equal "80/443 livres, sem domínio: 1 salto" 1 "$(hops)"
+
+apply_entry external voz.exemplo.com.br 127.0.0.1 3080
+equal "atrás do proxy do operador: UMA porta local, só para dentro da máquina" "127.0.0.1:3080:80 " "$(ports_published)"
+equal "atrás do proxy do operador: só HTTP (o HTTPS é do proxy do operador)" ":80" "$(setting CADDY_SITE)"
+equal "atrás do proxy do operador: o Caddy ouve só vizinho de rede privada" private_ranges "$(setting CADDY_TRUSTED_PROXIES)"
+equal "atrás do proxy do operador: painel conta 2 saltos" 2 "$(hops)"
+equal "atrás do proxy do operador: só o Caddy tem porta" "caddy " "$(services_with_ports "$O")"
+
+apply_entry external "" 0.0.0.0 3080
+equal "sem domínio, aberto pelo IP: uma porta" "0.0.0.0:3080:80 " "$(ports_published)"
+equal "sem domínio, aberto pelo IP: Caddy recebe o visitante direto, não confia em cabeçalho" "127.0.0.1/32" "$(setting CADDY_TRUSTED_PROXIES)"
+equal "sem domínio, aberto pelo IP: 1 salto" 1 "$(hops)"
+apply_entry external "" 127.0.0.1 3080
+equal "sem domínio, por túnel: uma porta só para dentro" "127.0.0.1:3080:80 " "$(ports_published)"
+equal "sem domínio, por túnel: não confia em cabeçalho (o lado seguro)" "127.0.0.1/32" "$(setting CADDY_TRUSTED_PROXIES)"
+equal "sem domínio, por túnel: 1 salto" 1 "$(hops)"
+equal "TRUSTED_PROXY_HOPS aparece uma vez só" 1 "$(grep -c '^TRUSTED_PROXY_HOPS=' "$D/app.env")"
+
+# ── Instalação antiga (painel e voz em duas portas) converge sem perguntar nada ──
+legacy_two_ports() {  # legacy_two_ports <endereço do painel>
+  printf '# Gerado pelo instalador: 80/443 já são de outro proxy nesta máquina.\nservices:\n  panel:\n    ports:\n      - "%s:3080:3000"\n  voice:\n    ports:\n      - "127.0.0.1:3081:8091"\n' "$1" > "$O"
+  env_set "$D/app.env" VOICE_WEB_PUBLIC_PORT 3081; env_set "$D/app.env" TRUSTED_PROXY_HOPS 0; env_set "$D/.env" COMPOSE_PROFILES ""
+}
+legacy_two_ports 127.0.0.1; env_set "$D/.env" PANEL_DOMAIN localhost
+equal "formato antigo: lê o endereço e a porta do painel" "127.0.0.1 3080" "$(published_entry)"
+converge_entry
+equal "antiga, por túnel: o Caddy assume a MESMA porta do painel" "127.0.0.1:3080:80 " "$(ports_published)"
+lacks "antiga: a porta de voz 3081 some" "$(cat "$O")" "3081"
+equal "antiga: só o Caddy tem porta" "caddy " "$(services_with_ports "$O")"
+lacks "antiga: VOICE_WEB_PUBLIC_PORT sai do app.env" "$(cat "$D/app.env")" "VOICE_WEB_PUBLIC_PORT"
+lacks "antiga: COMPOSE_PROFILES sai do .env" "$(cat "$D/.env")" "COMPOSE_PROFILES"
+equal "antiga, por túnel: 1 salto" 1 "$(hops)"
+before_again="$(cat "$O" "$D/app.env" "$D/.env")"; converge_entry
+equal "convergir de novo não muda nada" "$before_again" "$(cat "$O" "$D/app.env" "$D/.env")"
+legacy_two_ports 0.0.0.0; converge_entry
+equal "antiga, aberta pelo IP: continua aberta, na mesma porta" "0.0.0.0:3080:80 " "$(ports_published)"
+legacy_two_ports 127.0.0.1; env_set "$D/.env" PANEL_DOMAIN voz.exemplo.com.br; converge_entry
+equal "antiga, com domínio e proxy do operador: mesma porta" "127.0.0.1:3080:80 " "$(ports_published)"
+equal "antiga, com domínio e proxy do operador: 2 saltos" 2 "$(hops)"
+rm "$O"; env_set "$D/.env" COMPOSE_PROFILES caddy; converge_entry
+equal "antiga, com o Caddy nas 80/443 (sem arquivo): passa a publicar 80 e 443" "80:80 443:443 " "$(ports_published)"
+equal "antiga, com o Caddy nas 80/443: atende o domínio" voz.exemplo.com.br "$(setting CADDY_SITE)"
+rm "$O"; env_set "$D/.env" PANEL_DOMAIN ":80"; converge_entry
+equal "antiga, Caddy sem domínio: só a 80" "80:80 " "$(ports_published)"
+equal "formato atual: published_entry lê a porta do Caddy" "127.0.0.1 3080" "$(apply_entry external "" 127.0.0.1 3080; published_entry)"
 contains "rtp.conf recebe o início da faixa" "$(cat "$G/rtp.conf")" "rtpstart=20000"
 contains "rtp.conf recebe o fim da faixa" "$(cat "$G/rtp.conf")" "rtpend=20200"
 contains "pjsip.conf anuncia o IP público no áudio" "$(cat "$G/pjsip.conf")" "external_media_address=198.51.100.7"

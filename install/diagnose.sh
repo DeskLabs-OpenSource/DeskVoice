@@ -54,7 +54,7 @@ collect() {
   for f in "$ENV_FILE" "$APP_ENV_FILE" "$MIGRATE_ENV_FILE"; do
     echo "--- $(basename "$f")"; env_keys "$f"
   done
-  if [ -f "$PROXY_OVERRIDE" ]; then echo "--- docker-compose.override.yml (painel em porta local)"; cat "$PROXY_OVERRIDE"; fi
+  if [ -f "$PROXY_OVERRIDE" ]; then echo "--- docker-compose.override.yml (onde a entrada única é publicada)"; cat "$PROXY_OVERRIDE"; fi
 
   section "Rede"
   echo "IP público configurado: $(env_get "$APP_ENV_FILE" PUBLIC_IP)"

@@ -45,9 +45,10 @@ mode_of() { if stat -c %a "$1" >/dev/null 2>&1; then stat -c %a "$1"; else stat 
 # Uma instalação de mentira, já "feita": os três arquivos de ambiente e os do Asterisk.
 fake_install() {
   ( source "$KIT/_common.sh"
-    write_env_files "https://voz.exemplo.com.br" 203.0.113.10 voz.exemplo.com.br 10000 10200 caddy
+    write_env_files "https://voz.exemplo.com.br" 203.0.113.10 voz.exemplo.com.br 10000 10200
+    apply_entry caddy voz.exemplo.com.br
     render_asterisk_config )
-  printf '%s\n' postgres asterisk panel voice routines > "$FAKE_DIR/running"
+  printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"
   printf '%s\n' 'panel|ok|respondendo' 'trunk|warn|nenhuma linha cadastrada ainda' 'engine|warn|nenhuma chave de motor de voz configurada' > "$FAKE_DIR/panel_health"
   echo 0 > "$FAKE_DIR/pg_isready_exit"
   printf 'asterisk|ok|PJSIP 20.20.1\n' > "$FAKE_DIR/voice_health"

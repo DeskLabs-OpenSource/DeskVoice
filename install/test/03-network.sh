@@ -27,6 +27,20 @@ equal "80 ocupada por outro: proxy externo" external "$(decide_proxy_mode 1 0 0)
 equal "443 ocupada por outro: proxy externo" external "$(decide_proxy_mode 0 1 0)"
 equal "as duas ocupadas por outro: proxy externo" external "$(decide_proxy_mode 1 1 0)"
 equal "ocupadas pelo nosso Caddy (reinstalação): continua Caddy" caddy "$(decide_proxy_mode 1 1 1)"
+# Reinstalação: o nosso Caddy rodando só conta como dono das 80/443 se é ali que ele está publicado.
+D="$DESKVOICE_DEPLOY_DIR"; mkdir -p "$D"
+equal "nosso Caddy parado: não é dono das 80/443" 0 "$(own_caddy_on_80 0)"
+equal "nosso Caddy rodando, instalação antiga sem arquivo: é dono das 80/443" 1 "$(own_caddy_on_80 1)"
+write_proxy_override voz.exemplo.com.br 127.0.0.1/32 80:80 443:443
+equal "nosso Caddy rodando e publicado na 80: é dono" 1 "$(own_caddy_on_80 1)"
+write_proxy_override :80 private_ranges 127.0.0.1:3080:80
+equal "nosso Caddy rodando numa porta local: as 80/443 são de OUTRO proxy" 0 "$(own_caddy_on_80 1)"
+equal "... e a reinstalação continua no modo externo" external "$(decide_proxy_mode 1 1 "$(own_caddy_on_80 1)")"
+rm "$D/docker-compose.override.yml"
+equal "confiança: Caddy nas 80/443 com domínio" "1 127.0.0.1/32" "$(trust_for_mode caddy 1)"
+equal "confiança: Caddy nas 80/443 sem domínio" "1 127.0.0.1/32" "$(trust_for_mode caddy 0)"
+equal "confiança: atrás do proxy do operador (com domínio)" "2 private_ranges" "$(trust_for_mode external 1)"
+equal "confiança: porta local sem domínio (aberta ou túnel)" "1 127.0.0.1/32" "$(trust_for_mode external 0)"
 equal "porta local livre: a primeira candidata" 3080 "$(printf '80\n443\n' | pick_free_port 3080)"
 equal "porta local ocupada: pula para a próxima livre" 3082 "$(printf '80\n3080\n3081\n' | pick_free_port 3080)"
 

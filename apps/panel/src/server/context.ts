@@ -23,8 +23,6 @@ export interface ServerDeps {
   voiceUrl: string;
   internalToken: string;
   trustedProxyHops: number;
-  /** `VOICE_WEB_PUBLIC_PORT` como veio do ambiente; quem interpreta é `voiceSocketTarget`. */
-  voiceWebPublicPort: string | undefined;
   /** Injetável para o teste contar quantas tentativas chegam a conferir a senha. */
   verifyPassword: typeof verifyPassword;
 }
@@ -51,7 +49,6 @@ export function serverDeps(): ServerDeps {
       voiceUrl: process.env.VOICE_INTERNAL_URL ?? "http://voice:8090",
       internalToken: process.env.INTERNAL_TOKEN ?? "",
       trustedProxyHops: trustedProxyHops(process.env),
-      voiceWebPublicPort: process.env.VOICE_WEB_PUBLIC_PORT,
       verifyPassword,
     };
   }

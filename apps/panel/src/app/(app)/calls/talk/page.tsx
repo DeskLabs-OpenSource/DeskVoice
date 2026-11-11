@@ -102,7 +102,9 @@ export default function TalkPage() {
         onMeter: setMeter,
         onEnded: (end) => {
           voice.current = null;
-          if ("problem" in end) setProblem(end.problem);
+          // Cair antes de a conversa começar não é a internet de quem ligou: o painel abriu e o
+          // serviço de voz não foi alcançado no mesmo endereço. Depois de começar, é conexão.
+          if ("problem" in end) setProblem(end.problem === "connection_lost" && !answered.current ? "voice_unreachable" : end.problem);
           setSpan((current) => (current ? { ...current, to: Date.now() } : current));
           // Caiu antes de o agente atender: não houve chamada para resumir, volta ao começo com o motivo.
           setPhase(answered.current ? "ended" : "idle");

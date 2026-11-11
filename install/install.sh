@@ -168,9 +168,11 @@ else
   ok "Portas 5060/udp e ${rtp_start}-${rtp_end}/udp livres nesta máquina"
 fi
 
-# 80 e 443: se já são de outro proxy, não brigamos por elas.
-busy80=0; busy443=0; own_caddy=0; proxy_mode=caddy; panel_port=""; proxy_holder=""
-if ours_running caddy; then own_caddy=1; fi
+# 80 e 443: se já são de outro proxy, não brigamos por elas. O nosso Caddy sobe do mesmo jeito,
+# só com HTTP, numa porta local única: é por ela que entram o painel e a voz do navegador.
+busy80=0; busy443=0; own_caddy=0; proxy_mode=caddy; panel_port=""; panel_bind=""; proxy_holder=""
+if ours_running caddy; then own_caddy="$(own_caddy_on_80 1)"; fi
+previous_entry="$(published_entry)"
 if have ss; then
   tcp_busy="$(tcp_ports_in_use)"
   printf '%s\n' "$tcp_busy" | grep -qx 80 && busy80=1
@@ -179,18 +181,14 @@ if have ss; then
 fi
 if [ "$proxy_mode" = external ]; then
   panel_port="${DESKVOICE_PANEL_PORT:-}"
-  # Reinstalação: mantém a porta que o proxy existente já conhece.
-  if [ -z "$panel_port" ] && [ -f "$PROXY_OVERRIDE" ]; then panel_port="$(sed -n 's/.*:\([0-9]*\):3000".*/\1/p' "$PROXY_OVERRIDE" | head -n 1)"; fi
+  # Reinstalação: mantém a porta que o proxy existente (ou o seu túnel) já conhece.
+  if [ -z "$panel_port" ] && [ -n "$previous_entry" ]; then panel_port="${previous_entry#* }"; fi
   if [ -z "$panel_port" ]; then panel_port="$(printf '%s\n' "$tcp_busy" | pick_free_port 3080)"; fi
   valid_port "$panel_port" >/dev/null || die "A porta do painel ($panel_port) não vale." "Use um número de 1 a 65535 em DESKVOICE_PANEL_PORT."
-  # Segunda porta local: por ela chega o áudio de "Falar com o agente". Reinstalação mantém a mesma.
-  voice_port=""
-  if [ -f "$PROXY_OVERRIDE" ]; then voice_port="$(sed -n 's/.*:\([0-9]*\):8091".*/\1/p' "$PROXY_OVERRIDE" | head -n 1)"; fi
-  if [ -z "$voice_port" ]; then voice_port="$(printf '%s\n%s\n' "$tcp_busy" "$panel_port" | pick_free_port $((panel_port + 1)))"; fi
   if have docker; then proxy_holder="$(docker ps --filter publish=80 --filter publish=443 --format '{{.Names}} ({{.Image}})' 2>/dev/null | grep -v '^deskvoice-' | head -n 1 || true)"; fi
   warn "As portas 80/443 já estão em uso${proxy_holder:+ por $proxy_holder}."
-  info "Não vou disputar essas portas: o DeskVoice sobe sem o proxy dele e o painel fica na porta"
-  info "local $panel_port. No fim eu mostro exatamente o que configurar no proxy que já existe."
+  info "Não vou disputar essas portas: o DeskVoice fica todo atrás de UMA porta local, a $panel_port"
+  info "(painel e voz juntos). No fim eu mostro exatamente o que configurar no proxy que já existe."
 elif have ss; then
   ok "Portas 80 e 443 disponíveis para o painel"
 else
@@ -244,15 +242,13 @@ else
 fi
 
 if [ "$proxy_mode" = caddy ]; then
-  profiles=caddy
   if [ -n "$domain" ]; then panel_domain="$domain"; public_url="https://$domain"
   else panel_domain=":80"; public_url="http://$public_ip"; fi
 else
-  profiles=""
   local_only="${DESKVOICE_PANEL_LOCAL_ONLY:-}"
   case "$local_only" in
     "" ) # Reinstalação: quem já tinha fechado o painel para acesso local continua fechado.
-         if [ -z "$domain" ] && [ -f "$PROXY_OVERRIDE" ] && grep -q '"127\.0\.0\.1:' "$PROXY_OVERRIDE"; then local_only=yes; else local_only=no; fi ;;
+         if [ -z "$domain" ] && [ "${previous_entry%% *}" = "127.0.0.1" ]; then local_only=yes; else local_only=no; fi ;;
     yes|no) ;;
     *) die "O valor de DESKVOICE_PANEL_LOCAL_ONLY ($local_only) não vale." "Use DESKVOICE_PANEL_LOCAL_ONLY=yes para o painel só abrir de dentro da VPS, ou não defina a variável." ;;
   esac
@@ -266,12 +262,11 @@ step "4 de 5 · Instalando"
 if [ "$DRY_RUN" = 1 ]; then
   would "gravar deploy/.env, deploy/app.env e deploy/migrate.env (permissão 600), gerando só os segredos que ainda não existem"
   would "gerar deploy/asterisk/generated/{ari,rtp,pjsip}.conf com o IP $public_ip e a faixa ${rtp_start}-${rtp_end}"
-  if [ "$proxy_mode" = external ]; then would "publicar o painel em ${panel_bind}:${panel_port} (arquivo deploy/docker-compose.override.yml), sem subir o Caddy"
-    would "publicar a voz do navegador em 127.0.0.1:${voice_port}, só para dentro da máquina (por onde chega o áudio de \"Falar com o agente\")"
-    if [ -n "$domain" ]; then would "pedir que o proxy existente encaminhe ${domain}/voice-ws para 127.0.0.1:${voice_port}"
-    elif [ "$panel_bind" = "127.0.0.1" ]; then would "deixar o painel só para dentro da VPS; do seu computador: ssh -L ${panel_port}:127.0.0.1:${panel_port} -L ${voice_port}:127.0.0.1:${voice_port} <usuário>@${public_ip}"
+  if [ "$proxy_mode" = external ]; then would "subir o Caddy do DeskVoice só com HTTP em ${panel_bind}:${panel_port}, a única porta publicada: painel e voz do navegador entram por ela (arquivo deploy/docker-compose.override.yml)"
+    if [ -n "$domain" ]; then would "pedir que o proxy existente encaminhe ${domain} inteiro para 127.0.0.1:${panel_port}, repassando WebSocket"
+    elif [ "$panel_bind" = "127.0.0.1" ]; then would "deixar o painel só para dentro da VPS; do seu computador: ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}"
     else would "avisar: pelo IP e sem HTTPS o navegador não libera o microfone; \"Falar com o agente\" pede domínio ou túnel"; fi
-  else would "subir o Caddy nas portas 80/443 para ${panel_domain}"; fi
+  else would "subir o Caddy do DeskVoice nas portas 80/443 para ${panel_domain} (painel e voz do navegador pelo mesmo endereço)"; fi
   would "baixar as imagens (ou construir aqui, se a versão ainda não estiver publicada)"
   would "subir o Postgres e aplicar as migrations"
   if [ "$create_owner" = 1 ]; then would "criar a empresa \"$org_name\" e o usuário dono $owner_email"; fi
@@ -280,26 +275,18 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-write_env_files "$public_url" "$public_ip" "$panel_domain" "$rtp_start" "$rtp_end" "$profiles"
-# O painel só acredita no endereço informado por um proxy quando há de fato um proxy nosso na
-# frente dele: o Caddy da instalação, ou um proxy local (painel preso a 127.0.0.1). Exposto
-# direto, qualquer visitante escreveria o próprio "endereço" e escaparia do limite de login.
-if [ "$proxy_mode" = external ] && [ -z "$domain" ]; then trusted_hops=0; else trusted_hops=1; fi
-env_set "$APP_ENV_FILE" TRUSTED_PROXY_HOPS "$trusted_hops"
-# Onde o navegador encontra a porta de voz. Com proxy na frente (o nosso Caddy ou um proxy com
-# domínio) é o caminho /voice-ws na mesma origem, e a variável fica vazia. Sem proxy, é uma porta.
-if [ "$proxy_mode" = external ] && [ -z "$domain" ]; then env_set "$APP_ENV_FILE" VOICE_WEB_PUBLIC_PORT "$voice_port"
-else env_set "$APP_ENV_FILE" VOICE_WEB_PUBLIC_PORT ""; fi
+write_env_files "$public_url" "$public_ip" "$panel_domain" "$rtp_start" "$rtp_end"
+# Entrada única: só o Caddy publica porta. Reescreve por inteiro o arquivo de publicação (o de
+# uma versão antiga publicava painel e voz em duas portas), define quantos proxies o painel
+# conta até o endereço do visitante e tira VOICE_WEB_PUBLIC_PORT de quem já tinha instalado.
+apply_entry "$proxy_mode" "$domain" "$panel_bind" "$panel_port"
 ok "Segredos e configuração gravados em deploy/ (só o seu usuário lê)"
 render_asterisk_config
 ok "Configuração do Asterisk gerada"
-if [ "$proxy_mode" = external ]; then
-  write_proxy_override "$panel_bind" "$panel_port" "$voice_port"
-elif [ -f "$PROXY_OVERRIDE" ]; then rm -f "$PROXY_OVERRIDE"; fi
 
 info "Baixando as imagens de apoio (banco, telefonia)..."
 # shellcheck disable=SC2086
-dc pull -q postgres asterisk ${profiles} \
+dc pull -q postgres asterisk caddy \
   || die "Não consegui baixar as imagens do banco e do Asterisk." "Quase sempre é a internet da VPS ou o Docker Hub fora do ar. Teste: docker pull postgres:17-alpine  — e rode o instalador de novo."
 # shellcheck disable=SC2086
 if dc pull -q $APP_SERVICES >/dev/null 2>&1; then ok "Imagens do DeskVoice baixadas"
@@ -344,35 +331,38 @@ until NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --essential >/dev/null 2>&1; do
   sleep 5; waited=$((waited + 5))
 done
 ok "Painel, banco, Asterisk, voz e rotinas respondendo"
+# A entrada única é o que você de fato abre: confere antes de anunciar o endereço.
+entry_line="$(NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" 2>/dev/null | grep 'Entrada única' || true)"
+if [ "$(printf '%s\n' "$entry_line" | awk '{ print $1 }')" = ok ]; then ok "Entrada única conferida: painel e voz do navegador respondem pelo mesmo endereço"
+else
+  warn "A entrada única ainda não respondeu como devia:"
+  info "${entry_line:-(a checagem não devolveu a linha da entrada)}"
+  info "Pode ser só o tempo de o Caddy subir. Confira em um minuto: bash install/healthcheck.sh"
+fi
 
 # ═════════════════════════════════════════════════════════════════════════════
 step "5 de 5 · Pronto para configurar"
 printf '\n  %sPainel:%s %s\n  Login:  o e-mail e a senha que você definiu aqui\n' "$C_BLD" "$C_OFF" "$public_url"
 if [ "$proxy_mode" = external ]; then
-  printf '\n  %sFalta um passo seu, no proxy que já existe nesta máquina%s%s:\n' "$C_BLD" "${proxy_holder:+ ($proxy_holder)}" "$C_OFF"
   if [ -n "$domain" ]; then
-    info "Encaminhe o domínio $domain para o painel, sem guardar a resposta em buffer (a tela ao vivo usa SSE)."
-    info "• Nginx instalado na máquina:   proxy_pass http://127.0.0.1:${panel_port};  proxy_buffering off;  proxy_set_header Host \$host;  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;"
-    info "• Caddy instalado na máquina:   $domain { reverse_proxy 127.0.0.1:${panel_port} { flush_interval -1 } }"
-    info "• Proxy em contêiner (Traefik, Nginx Proxy Manager, Caddy): ele não enxerga 127.0.0.1 desta máquina."
-    info "    1) docker network connect deskvoice_internal <nome do contêiner do proxy>"
-    info "    2) aponte $domain para  http://deskvoice-panel-1:3000"
-    info "    (se o contêiner do proxy for recriado, repita o passo 1)"
-    info "E encaminhe ${domain}/voice-ws para a porta de voz, que leva o áudio de \"Falar com o agente\" (é WebSocket):"
-    info "• Nginx:  location /voice-ws { proxy_pass http://127.0.0.1:${voice_port}; proxy_http_version 1.1; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection \"upgrade\"; }"
-    info "• Caddy:  handle /voice-ws* { reverse_proxy 127.0.0.1:${voice_port} }   (antes do reverse_proxy do painel)"
-    info "• Proxy em contêiner: aponte ${domain}/voice-ws para  http://deskvoice-voice-1:8091"
+    printf '\n  %sFalta um passo seu, no proxy que já existe nesta máquina%s%s:\n' "$C_BLD" "${proxy_holder:+ ($proxy_holder)}" "$C_OFF"
+    info "Encaminhe o domínio $domain INTEIRO para uma porta só: 127.0.0.1:${panel_port}. Painel e voz entram por ela."
+    info "O proxy precisa repassar conexões contínuas (WebSocket), senão o painel abre e \"Falar com o agente\" não conecta."
+    info "• Nginx instalado na máquina:   location / { proxy_pass http://127.0.0.1:${panel_port}; proxy_http_version 1.1; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection \"upgrade\"; proxy_set_header Host \$host; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; proxy_buffering off; }"
+    info "• Caddy instalado na máquina:   $domain { reverse_proxy 127.0.0.1:${panel_port} { flush_interval -1 } }   (WebSocket e X-Forwarded-For ele já repassa)"
+    info "• Proxy em contêiner (Traefik, Nginx Proxy Manager, Caddy): docker network connect deskvoice_internal <contêiner do proxy>  e aponte $domain para  http://deskvoice-caddy-1:80  com WebSocket ligado (X-Forwarded-For ele já envia). Se o contêiner do proxy for recriado, repita o comando."
+    info "Se o proxy antigo tinha uma regra separada para /voice-ws, apague-a: agora é tudo no mesmo destino."
+  elif [ "$panel_bind" = "127.0.0.1" ]; then
+    printf '\n  %sComo abrir o painel%s:\n' "$C_BLD" "$C_OFF"
+    info "O painel só abre de dentro desta VPS, como você pediu. Do seu computador, abra um túnel (uma porta só):"
+    info "    ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}"
+    info "e acesse http://localhost:${panel_port} enquanto o túnel estiver aberto. \"Falar com o agente\" funciona por ele."
   else
-    if [ "$panel_bind" = "127.0.0.1" ]; then
-      info "O painel só abre de dentro desta VPS, como você pediu. Para usar do seu computador, abra um túnel:"
-      info "    ssh -L ${panel_port}:127.0.0.1:${panel_port} -L ${voice_port}:127.0.0.1:${voice_port} <usuário>@${public_ip}"
-      info "e acesse http://localhost:${panel_port} enquanto o túnel estiver aberto."
-    else
-      info "Sem domínio, o painel ficou direto em $public_url (sem HTTPS). Libere a porta ${panel_port}/tcp no firewall."
-      info "Não quer o login exposto na internet? Rode de novo com DESKVOICE_PANEL_LOCAL_ONLY=yes e entre por túnel SSH."
-      info "Atenção: pelo IP e sem HTTPS o navegador não libera o microfone. \"Falar com o agente\" só funciona"
-      info "com domínio (HTTPS) ou por túnel SSH, abrindo o painel em http://localhost:${panel_port}."
-    fi
+    printf '\n  %sSobre o acesso%s:\n' "$C_BLD" "$C_OFF"
+    info "Sem domínio, o painel ficou direto em $public_url (sem HTTPS). Libere a porta ${panel_port}/tcp no firewall."
+    info "Não quer o login exposto na internet? Rode de novo com DESKVOICE_PANEL_LOCAL_ONLY=yes e entre por túnel SSH."
+    info "Atenção: pelo IP e sem HTTPS o navegador não libera o microfone. \"Falar com o agente\" só funciona"
+    info "com domínio (HTTPS) ou por túnel SSH (ssh -L ${panel_port}:127.0.0.1:${panel_port} <usuário>@${public_ip}), abrindo http://localhost:${panel_port}."
   fi
 fi
 printf '\n  %sJá funciona:%s painel, banco, Asterisk esperando ligação, worker de voz e rotinas.\n' "$C_BLD" "$C_OFF"

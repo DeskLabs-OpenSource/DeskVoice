@@ -70,9 +70,13 @@ apply_version() {  # apply_version <versão> <commit ou tag do código>
   if [ "$is_git" = 1 ] && [ -n "$2" ]; then git -C "$REPO_DIR" checkout --quiet "$2" || return 1; fi
   env_set "$ENV_FILE" DESKVOICE_VERSION "$1"
 }
+# A entrada única não é peça essencial em termos absolutos (certificado que ainda não saiu daria
+# volta falsa). Mas se ela respondia ANTES da atualização e parou DEPOIS, a atualização quebrou o
+# caminho de quem usa o painel: conta como falha e volta.
+entry_ok() { NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --json 2>/dev/null | grep -q '"id":"entry"[^}]*"status":"ok"'; }
 wait_healthy() {
   local waited=0 timeout="${DESKVOICE_HEALTH_TIMEOUT:-240}"
-  until NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --essential >/dev/null 2>&1; do
+  until NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --essential >/dev/null 2>&1 && { [ "$entry_was_ok" = 0 ] || entry_ok; }; do
     [ "$waited" -lt "$timeout" ] || return 1
     sleep 5; waited=$((waited + 5))
   done
@@ -95,9 +99,14 @@ roll_back() {  # roll_back "<o que falhou>"
   die "A atualização para $target falhou E a volta para $current não terminou bem:${problems:- a versão anterior não respondeu depois de voltar.}" "Seus dados estão no backup $backup_dir. Não rode mais nada: gere o diagnóstico (bash install/diagnose.sh) e peça ajuda."
 }
 
+entry_was_ok=0; if entry_ok; then entry_was_ok=1; fi
+
 step "Trocando para a versão $target"
 apply_version "$target" "${previous_commit:+refs/tags/$target}" || roll_back "Não consegui trocar o código para a versão $target."
 render_asterisk_config
+# Instalação de antes da entrada única: o Caddy passa a ser a única porta publicada, na mesma
+# porta que o painel já usava. Em instalação já no formato atual, não muda nada.
+converge_entry
 # shellcheck disable=SC2086
 if dc pull -q $APP_SERVICES >/dev/null 2>&1; then ok "Imagens da versão $target baixadas"
 else
@@ -114,7 +123,7 @@ ok "Banco atualizado"
 
 step "Subindo e conferindo"
 dc up -d --remove-orphans || roll_back "Os serviços da versão $target não subiram."
-wait_healthy || roll_back "A versão $target subiu, mas nem toda peça essencial respondeu."
+wait_healthy || roll_back "A versão $target subiu, mas nem toda peça essencial respondeu, ou o painel deixou de abrir pelo endereço que abria antes."
 
 for service in $APP_SERVICES; do docker rmi "$prefix/deskvoice-$service:rollback" >/dev/null 2>&1 || true; done
 ok "Atualizado para $target, com todas as peças essenciais respondendo."
