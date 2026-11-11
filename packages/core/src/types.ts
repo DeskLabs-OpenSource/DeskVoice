@@ -1,0 +1,73 @@
+import type { Pool, QueryResultRow } from "pg";
+
+/** Relógio injetável. Código de produto nunca chama `new Date()` direto: recebe um `Clock`. */
+export interface Clock {
+  now(): Date;
+}
+
+export interface Db {
+  /** Pool do papel de aplicação (`deskvoice_app`), sujeito a RLS. */
+  pool: Pool;
+  close(): Promise<void>;
+}
+
+/**
+ * Consulta presa a uma organização. Só existe dentro de `withOrg` (ou de `withSystem`,
+ * para o punhado de operações que atravessam organizações: login, fila, roteamento de chamada).
+ */
+export interface OrgQuery {
+  organizationId: string;
+  many<T extends QueryResultRow = QueryResultRow>(sql: string, params?: unknown[]): Promise<T[]>;
+  one<T extends QueryResultRow = QueryResultRow>(sql: string, params?: unknown[]): Promise<T | null>;
+  exec(sql: string, params?: unknown[]): Promise<number>;
+}
+
+export const CALL_EVENT_KINDS = [
+  "call_started",
+  "call_answered",
+  "recording_notice",
+  "transcript_user",
+  "transcript_agent",
+  "tool_called",
+  "tool_result",
+  "approval_requested",
+  "approval_decided",
+  "human_notified",
+  "transfer_started",
+  "transfer_completed",
+  "engine_failed",
+  "call_refused",
+  "cost_ceiling_reached",
+  "call_ended",
+  "task_queued",
+  "task_finished",
+] as const;
+
+export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];
+
+export type CallStatus = "ringing" | "in_progress" | "transferred" | "completed" | "failed" | "refused";
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
+export type ApprovalOutcome = Exclude<ApprovalStatus, "pending">;
+
+export interface ClaimedTask {
+  id: string;
+  organizationId: string;
+  callId: string | null;
+  kind: string;
+  payload: Record<string, unknown>;
+  attempts: number;
+}
+
+export interface Config {
+  databaseUrl: string;
+  /** Conexão do dono do schema; só o executor de migrations usa. */
+  migrationDatabaseUrl: string;
+  secretKey: Buffer;
+  publicUrl: string;
+  ariUrl: string;
+  ariApp: string;
+  ariUsername: string;
+  ariPassword: string;
+  audioSocketPort: number;
+  panelPort: number;
+}

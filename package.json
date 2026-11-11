@@ -1,0 +1,33 @@
+{
+  "name": "deskvoice",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "scripts": {
+    "verify": "pnpm lint && pnpm typecheck && pnpm fences && pnpm test",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "fences": "vitest run --project fences",
+    "test": "vitest run --project unit",
+    "test:db": "vitest run --project db",
+    "db:test:up": "bash scripts/test-db.sh up",
+    "db:test:down": "bash scripts/test-db.sh down",
+    "skills:sync": "tsx scripts/sync-skills.ts",
+    "release:check": "tsx scripts/release.ts check"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.2",
+    "eslint": "^10.14.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
+  }
+}
