@@ -2,9 +2,12 @@
 
 import { Plus, X } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
+import commonEn from "../../../i18n/en/common";
 import en from "../../../i18n/en/settings";
+import commonEs from "../../../i18n/es/common";
 import es from "../../../i18n/es/settings";
 import { fill } from "../../../i18n/locales";
+import commonPtBR from "../../../i18n/pt-BR/common";
 import ptBR, { type SettingsDictionary } from "../../../i18n/pt-BR/settings";
 import { useDict } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
@@ -19,14 +22,18 @@ const URL_PREFIX = "https://";
 const put = (key: string, value: unknown): Promise<unknown> => api(`/settings/${key}`, { method: "PUT", body: { value } });
 
 /** Chave de um motor: a tela só sabe se existe. Para trocar, cola-se a nova. */
-function EngineKey({ engine, t, onChanged }: { engine: Engine; t: SettingsDictionary; onChanged(): void }) {
+function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: SettingsDictionary; cancel: string; onChanged(): void }) {
   const canConfigure = useCanConfigure();
   const save = useAction();
   const [key, setKey] = useState("");
+  const [confirming, setConfirming] = useState(false);
   const settingKey = `engine.${engine.id}.api_key`;
   const change = (value: string | null): void => {
     void save.run(() => put(settingKey, value)).then((ok) => {
-      if (ok) setKey("");
+      if (ok) {
+        setKey("");
+        setConfirming(false);
+      }
       onChanged();
     });
   };
@@ -48,13 +55,26 @@ function EngineKey({ engine, t, onChanged }: { engine: Engine; t: SettingsDictio
           <Button type="submit" busy={save.busy}>
             {t.keySave}
           </Button>
-          {engine.keyConfigured ? (
-            <Button variant="ghost" onClick={() => change(null)}>
+          {engine.keyConfigured && !confirming ? (
+            <Button variant="ghost" onClick={() => setConfirming(true)}>
               {t.keyRemove}
             </Button>
           ) : null}
           <ActionStatus action={save} />
         </form>
+      ) : null}
+      {canConfigure && engine.keyConfigured && confirming ? (
+        <Notice tone="fail">
+          <p>{fill(t.keyRemoveConfirm, { engine: engine.label })}</p>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <Button variant="danger" busy={save.busy} onClick={() => change(null)}>
+              {fill(t.keyRemoveYes, { engine: engine.label })}
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirming(false)}>
+              {cancel}
+            </Button>
+          </div>
+        </Notice>
       ) : null}
     </li>
   );
@@ -73,6 +93,7 @@ interface Hook {
 
 export default function SettingsPage() {
   const t = useDict(ptBR, en, es);
+  const common = useDict(commonPtBR, commonEn, commonEs);
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
   const engines = useApi<Engine[]>("/engines");
@@ -96,6 +117,12 @@ export default function SettingsPage() {
   const [whatsapp, setWhatsapp] = useState({ type: "deskcomm", url: "", token: "" });
   const [hooks, setHooks] = useState<Hook[]>([]);
   const [notice, setNotice] = useState("");
+  const inboundLimit = useApi<Setting<number>>("/settings/inbound.max_concurrent_calls");
+  const saveInboundLimit = useAction();
+  const [limit, setLimit] = useState("");
+  // Remoções que esperam confirmação: o botão só abre o pedido, nunca remove.
+  const [removingConnector, setRemovingConnector] = useState(false);
+  const [removingHook, setRemovingHook] = useState<number | null>(null);
 
   useEffect(() => {
     if (connector.data?.value) setWhatsapp({ type: connector.data.value.type, url: connector.data.value.url, token: "" });
@@ -105,6 +132,9 @@ export default function SettingsPage() {
   }, [webhooks.data]);
   useEffect(() => setNotice(recording.data?.value ?? ""), [recording.data]);
   useEffect(() => {
+    if (inboundLimit.data?.value != null) setLimit(String(inboundLimit.data.value));
+  }, [inboundLimit.data]);
+  useEffect(() => {
     if (me.data) setContact({ name: me.data.name, phone: formatPhone(me.data.phone), whatsapp: formatPhone(me.data.whatsapp) });
   }, [me.data]);
 
@@ -113,6 +143,10 @@ export default function SettingsPage() {
   if (engines.error && !engines.data) return <Notice tone="fail">{errorText(engines.error)}</Notice>;
   if (!engines.data) return <Skeleton lines={4} />;
   const setHook = (index: number, patch: Partial<Hook>): void => setHooks(hooks.map((hook, position) => (position === index ? { ...hook, ...patch } : hook)));
+  const dropHook = (index: number): void => {
+    setHooks(hooks.filter((_, position) => position !== index));
+    setRemovingHook(null);
+  };
 
   return (
     <>
@@ -197,7 +231,7 @@ export default function SettingsPage() {
       <Panel title={t.enginesTitle} description={t.enginesLead}>
         <ul className="grid">
           {engines.data.map((engine) => (
-            <EngineKey key={engine.id} engine={engine} t={t} onChanged={engines.reload} />
+            <EngineKey key={engine.id} engine={engine} t={t} cancel={common.actions.cancel} onChanged={engines.reload} />
           ))}
         </ul>
         <div className="mt-5 grid max-w-md gap-3 border-t border-line pt-5">
@@ -217,6 +251,28 @@ export default function SettingsPage() {
           </Field>
           <ActionStatus action={saveDefault} />
         </div>
+      </Panel>
+
+      <Panel title={t.inboundLimitTitle} description={t.inboundLimitLead}>
+        <form
+          className="grid max-w-md gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveInboundLimit.run(() => put("inbound.max_concurrent_calls", Number(limit))).then(inboundLimit.reload);
+          }}
+        >
+          <Field label={t.inboundLimit} hint={t.inboundLimitHint}>
+            <TextInput mono type="number" min={1} max={50} step={1} disabled={!canConfigure} value={limit} onChange={(event) => setLimit(event.target.value)} required />
+          </Field>
+          {canConfigure ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="submit" busy={saveInboundLimit.busy}>
+                {t.saveInboundLimit}
+              </Button>
+              <ActionStatus action={saveInboundLimit} />
+            </div>
+          ) : null}
+        </form>
       </Panel>
 
       <Panel title={t.whatsappTitle} description={t.whatsappLead}>
@@ -247,21 +303,38 @@ export default function SettingsPage() {
               <Button type="submit" busy={saveConnector.busy}>
                 {t.saveConnector}
               </Button>
-              {connector.data?.value ? (
-                <Button
-                  variant="ghost"
-                  onClick={() =>
-                    void saveConnector.run(() => put("whatsapp.connector", null)).then(() => {
-                      setWhatsapp({ type: "deskcomm", url: "", token: "" });
-                      connector.reload();
-                    })
-                  }
-                >
+              {savedConnector && !removingConnector ? (
+                <Button variant="ghost" onClick={() => setRemovingConnector(true)}>
                   {t.removeConnector}
                 </Button>
               ) : null}
               <ActionStatus action={saveConnector} />
             </div>
+          ) : null}
+          {canConfigure && savedConnector && removingConnector ? (
+            <Notice tone="fail">
+              <p>{fill(t.removeConnectorConfirm, { url: savedConnector.url })}</p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <Button
+                  variant="danger"
+                  busy={saveConnector.busy}
+                  onClick={() =>
+                    void saveConnector.run(() => put("whatsapp.connector", null)).then((ok) => {
+                      if (ok) {
+                        setWhatsapp({ type: "deskcomm", url: "", token: "" });
+                        setRemovingConnector(false);
+                      }
+                      connector.reload();
+                    })
+                  }
+                >
+                  {t.removeConnectorYes}
+                </Button>
+                <Button variant="ghost" onClick={() => setRemovingConnector(false)}>
+                  {common.actions.cancel}
+                </Button>
+              </div>
+            </Notice>
           ) : null}
         </form>
         <div className="mt-5 grid gap-3 border-t border-line pt-5">
@@ -291,24 +364,40 @@ export default function SettingsPage() {
           {hooks.length === 0 ? <p className="text-muted">{t.hooksEmpty}</p> : null}
           <fieldset disabled={!canConfigure} className="grid gap-4">
             {hooks.map((hook, index) => (
-              <div key={index} className="grid items-end gap-3 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto]">
-                <Field label={t.hookName}>
-                  <TextInput value={hook.name} onChange={(event) => setHook(index, { name: event.target.value, tokenKept: false })} required maxLength={60} />
-                </Field>
-                <Field label={t.hookUrl}>
-                  <TextInput mono type="url" placeholder={URL_PREFIX} value={hook.url} onChange={(event) => setHook(index, { url: event.target.value, tokenKept: false })} required />
-                </Field>
-                <Field label={t.hookToken}>
-                  <TextInput mono type="password" autoComplete="off" placeholder={hook.tokenKept ? t.hookTokenKept : undefined} value={hook.token ?? ""} onChange={(event) => setHook(index, { token: event.target.value })} />
-                </Field>
-                <button
-                  type="button"
-                  aria-label={fill(t.removeHook, { name: hook.name })}
-                  className="grid size-10 cursor-pointer place-items-center rounded-xs text-muted hover:bg-sunken hover:text-fail"
-                  onClick={() => setHooks(hooks.filter((_, position) => position !== index))}
-                >
-                  <X size={16} weight="bold" aria-hidden />
-                </button>
+              <div key={index} className="grid gap-3">
+                <div className="grid items-end gap-3 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto]">
+                  <Field label={t.hookName}>
+                    <TextInput value={hook.name} onChange={(event) => setHook(index, { name: event.target.value, tokenKept: false })} required maxLength={60} />
+                  </Field>
+                  <Field label={t.hookUrl}>
+                    <TextInput mono type="url" placeholder={URL_PREFIX} value={hook.url} onChange={(event) => setHook(index, { url: event.target.value, tokenKept: false })} required />
+                  </Field>
+                  <Field label={t.hookToken}>
+                    <TextInput mono type="password" autoComplete="off" placeholder={hook.tokenKept ? t.hookTokenKept : undefined} value={hook.token ?? ""} onChange={(event) => setHook(index, { token: event.target.value })} />
+                  </Field>
+                  <button
+                    type="button"
+                    aria-label={fill(t.removeHook, { name: hook.name })}
+                    className="grid size-10 cursor-pointer place-items-center rounded-xs text-muted hover:bg-sunken hover:text-fail"
+                    // Linha em branco não tem o que perder; o resto pede confirmação com o nome.
+                    onClick={() => (hook.name === "" && hook.url === "" ? dropHook(index) : setRemovingHook(removingHook === index ? null : index))}
+                  >
+                    <X size={16} weight="bold" aria-hidden />
+                  </button>
+                </div>
+                {removingHook === index ? (
+                  <Notice tone="fail">
+                    <p>{fill(t.removeHookConfirm, { name: hook.name || hook.url })}</p>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      <Button variant="danger" onClick={() => dropHook(index)}>
+                        {fill(t.removeHookYes, { name: hook.name || hook.url })}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setRemovingHook(null)}>
+                        {common.actions.cancel}
+                      </Button>
+                    </div>
+                  </Notice>
+                ) : null}
               </div>
             ))}
           </fieldset>

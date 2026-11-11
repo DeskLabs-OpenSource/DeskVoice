@@ -60,6 +60,7 @@ const timeline: TimelineDictionary = {
     process_restarted: "The voice process restarted in the middle of the call.",
     no_agent: "No agent answers this number.",
     agent_disabled: "The agent of this number is turned off.",
+    inbound_limit_reached: "The limit of simultaneous incoming calls was reached. The caller got a busy signal. The limit is adjusted in Settings.",
     hangup: "The caller hung up.",
     caller_hangup: "The caller hung up.",
     agent_ended: "The agent ended the conversation.",

@@ -92,6 +92,13 @@ Eles existem para o caso ruim: uma ligação que fica aberta, alguém que resolv
 hora com o agente, um defeito. Ajuste os dois para o tamanho normal do seu atendimento, com
 folga.
 
+Esses dois limites valem por chamada. Para o gasto somado, a organização tem um limite de
+**ligações recebidas ao mesmo tempo**, em Configurações: de 1 a 50, e 5 de fábrica. Acima dele,
+quem liga recebe sinal de ocupado antes de qualquer gasto com IA, e a recusa aparece em Chamadas
+com o motivo. O pior caso de gasto simultâneo passa a ser o teto por chamada vezes esse limite.
+Chamadas pelo navegador têm um limite próprio, de 3 por organização, e as ligações feitas pelo
+agente têm o teto diário de Ligações de saída.
+
 Além disso, defina um limite de gasto **na conta do provedor de IA**. É a proteção que não
 depende do DeskVoice.
 

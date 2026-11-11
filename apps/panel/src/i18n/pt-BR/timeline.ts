@@ -60,6 +60,7 @@ const timeline = {
     process_restarted: "O processo de voz reiniciou no meio da chamada.",
     no_agent: "Nenhum agente atende este número.",
     agent_disabled: "O agente deste número está desligado.",
+    inbound_limit_reached: "O limite de ligações recebidas ao mesmo tempo foi atingido. Quem ligou recebeu sinal de ocupado. O limite se ajusta em Configurações.",
     hangup: "Quem ligou desligou.",
     caller_hangup: "Quem ligou desligou.",
     agent_ended: "O agente encerrou a conversa.",

@@ -12,6 +12,8 @@ const settings: SettingsDictionary = {
   keyNew: "Paste the new key to replace it",
   keySave: "Save key",
   keyRemove: "Remove key",
+  keyRemoveConfirm: "Remove the {engine} key? Agents on this engine stop answering with AI until a new key is saved. The removed key cannot be recovered.",
+  keyRemoveYes: "Remove the {engine} key",
   defaultEngine: "Default engine",
   defaultEngineHint: "Comes selected when you create an agent.",
   whatsappTitle: "WhatsApp connector",
@@ -25,6 +27,8 @@ const settings: SettingsDictionary = {
   tokenAgain: "You changed the address or the type: enter the token again. The stored token is only valid for the previous address.",
   saveConnector: "Save connector",
   removeConnector: "Remove connector",
+  removeConnectorConfirm: "Remove the WhatsApp connector {url}? Agents stop sending WhatsApp messages and notices, and the stored token is erased.",
+  removeConnectorYes: "Remove the connector",
   trustCallerTitle: "Send straight to the caller",
   trustCallerLead: "The number shown on a call can be spoofed: someone can call pretending to be another person's number and ask the agent to message them. That is why, when the agent is about to send a WhatsApp to the caller's number, someone on the team confirms the destination and the text first. Turning this on makes messages to the caller go out straight away, with no confirmation.",
   trustCallerSwitch: "Trust the number shown on the call",
@@ -36,6 +40,8 @@ const settings: SettingsDictionary = {
   hookTokenKept: "Token configured",
   addHook: "Add webhook",
   removeHook: "Remove {name}",
+  removeHookConfirm: "Remove the webhook {name}? Once you save the list, agents can no longer call this address and its token is erased.",
+  removeHookYes: "Remove {name}",
   saveHooks: "Save webhooks",
   hooksEmpty: "No webhook registered.",
   recordingTitle: "Recording notice",
@@ -64,6 +70,11 @@ const settings: SettingsDictionary = {
   approvalDenied: "Deny (safe default)",
   approvalApproved: "Approve by default",
   approvalWarning: "With this choice, a request nobody saw is treated as approved.",
+  inboundLimitTitle: "Simultaneous incoming calls",
+  inboundLimitLead: "How many calls received on the phone line the agents answer at the same time. Above that, the caller gets a busy signal and the refusal shows up in Calls. Each call already has a cost and a duration ceiling on the agent; this limit holds the combined spending when many arrive together. Browser calls and calls made by the agent do not count here.",
+  inboundLimit: "Simultaneous call limit",
+  inboundLimitHint: "From 1 to 50. The factory value is 5.",
+  saveInboundLimit: "Save limit",
 };
 
 export default settings;
