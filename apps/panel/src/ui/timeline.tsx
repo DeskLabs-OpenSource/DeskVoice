@@ -99,7 +99,7 @@ export function Timeline({ events, live, agentName }: { events: CallEvent[]; liv
           tone: failed ? "fail" : "neutral",
           icon: Wrench,
           body: (
-            <Card tone={failed ? "fail" : undefined} title={<>{e.tool} <span className="data font-medium">{text(p.name)}</span></>}>
+            <Card tone={failed ? "fail" : undefined} title={<>{e.tool} <span className="font-medium">{t.names[text(p.name)] ?? text(p.name)}</span></>}>
               <p className={failed ? "text-fail" : "text-muted"}>{outcome ? text(outcome.payload.message) : e.tool_running}</p>
               {text(outcome?.payload.error) ? <p className="text-[0.87rem] text-muted">{e.tool_operator_detail}: <span className="data">{text(outcome?.payload.error)}</span></p> : null}
               {hasArgs ? (
@@ -181,10 +181,10 @@ export function Timeline({ events, live, agentName }: { events: CallEvent[]; liv
       case "call_ended":
         return { ...base, tone: "neutral", icon: PhoneX, body: <Quiet><span className="font-bold text-ink">{e.call_ended}</span>{reason(p.reason) ? ` · ${reason(p.reason)}` : ""}</Quiet> };
       case "task_queued":
-        return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{e.task_queued}{text(p.title) || text(p.kind) ? `: ${text(p.title) || text(p.kind)}` : ""}</Quiet> };
+        return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{e.task_queued}{text(p.title) || text(p.kind) ? `: ${text(p.title) || (t.names[text(p.kind)] ?? text(p.kind))}` : ""}</Quiet> };
       case "task_finished": {
         const failed = p.outcome === "failed" || text(p.error) !== "";
-        return { ...base, tone: failed ? "fail" : "ok", icon: failed ? XCircle : CheckCircle, body: <Quiet>{failed ? e.task_failed : e.task_finished}{text(p.kind) ? `: ${text(p.kind)}` : ""}</Quiet> };
+        return { ...base, tone: failed ? "fail" : "ok", icon: failed ? XCircle : CheckCircle, body: <Quiet>{failed ? e.task_failed : e.task_finished}{text(p.kind) ? `: ${t.names[text(p.kind)] ?? text(p.kind)}` : ""}</Quiet> };
       }
       default:
         return { ...base, tone: "neutral", body: <Quiet>{e.unknown} <span className="data">{event.kind}</span></Quiet> };

@@ -9,6 +9,22 @@ const timeline = {
   empty: "Nenhum evento registrado nesta chamada ainda.",
   notFound: "Esta chamada não existe ou foi apagada.",
   speakers: { user: "Quem ligou", agent: "Agente" },
+  // Nome legível das ferramentas e tarefas da fundação. Peça nova sem nome aqui aparece com o nome
+  // técnico: ninguém precisa editar este arquivo para registrar uma peça.
+  names: {
+    end_call: "Encerrar a chamada",
+    transfer_to_human: "Transferir para uma pessoa",
+    notify_human: "Avisar a equipe",
+    request_approval: "Pedir aprovação",
+    send_whatsapp: "Enviar WhatsApp",
+    call_webhook: "Chamar um sistema externo",
+    create_task: "Deixar uma tarefa",
+    summarize_call: "Resumo da chamada",
+    deliver_notification: "Entrega de aviso",
+    deliver_webhook: "Envio a um sistema externo",
+    follow_up: "Tarefa de acompanhamento",
+    expire_approvals: "Conferência de pedidos vencidos",
+  } as Record<string, string>,
   events: {
     call_started: "A ligação chegou",
     call_started_outbound: "O agente iniciou a ligação",
