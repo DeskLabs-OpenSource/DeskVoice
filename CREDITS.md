@@ -56,6 +56,12 @@ São serviços de terceiros, contratados por quem instala, com termos próprios.
 
 A HostGator é a parceira de infraestrutura do projeto.
 
+## Marca
+
+O nome na marca é composto em [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/),
+do Braille Institute, sob a SIL Open Font License 1.1, e está convertido em curvas nos arquivos de
+[`brand/`](brand/README.md). É a mesma fonte do painel.
+
 ## Pessoas
 
 Quem contribui com o DeskVoice mantém a autoria do que escreveu e é nomeado nas notas de cada
