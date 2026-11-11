@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { hashPassword, hashToken, verifyPassword } from "./password";
 
-describe("password", () => {
+// O custo do scrypt é alto de propósito (64 MiB por hash); com a máquina ocupada por outras
+// suítes, quatro derivações passam dos 5 s padrão.
+describe("password", { timeout: 60_000 }, () => {
   it("verifies the right password and refuses the wrong one", async () => {
     const hash = await hashPassword("correta-cavalo-bateria");
     expect(hash).toMatch(/^scrypt:\d+:\d+:\d+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/);

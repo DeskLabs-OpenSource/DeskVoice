@@ -242,26 +242,32 @@ describe("isolation of organizations", () => {
 });
 
 describe("phone numbers", () => {
-  it("lets a number belong to one organization only, without telling the loser whose it is", async () => {
+  it("cannot be attached to a trunk of another organization", async () => {
+    await expect(
+      withOrg(app, orgB, (q) =>
+        q.exec("insert into phone_numbers (organization_id, trunk_id, e164) values ($1, $2, '+5531900000001')", [orgB, rowsA.trunks?.id]),
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+    await expect(
+      withOrg(app, orgB, (q) => q.exec("update phone_numbers set trunk_id = $1 where id = $2", [rowsA.trunks?.id, rowsB.phone_numbers?.id])),
+    ).rejects.toMatchObject({ code: "23503" });
+  });
+
+  it("always has a trunk", async () => {
+    await expect(
+      withOrg(app, orgB, (q) => q.exec("insert into phone_numbers (organization_id, e164) values ($1, '+5531900000002')", [orgB])),
+    ).rejects.toMatchObject({ code: "23502" });
+  });
+
+  it("cannot be reserved by another organization: the same number may exist in both", async () => {
     const taken = String(rowsA.phone_numbers?.e164);
-    const attempt = withOrg(app, orgB, (q) =>
-      q.exec("insert into phone_numbers (organization_id, trunk_id, e164) values ($1, $2, $3)", [orgB, rowsB.trunks?.id, taken]),
-    );
-    const error: unknown = await attempt.then(
-      () => undefined,
-      (reason: unknown) => reason,
-    );
-    expect(error).toMatchObject({ code: "23505", constraint: "phone_numbers_e164_key" });
-
-    // O erro só repete o número que a própria B digitou: nada da linha da A aparece nele.
-    const text = JSON.stringify(error, Object.getOwnPropertyNames(error ?? {}));
-    for (const secret of [orgA, rowsA.phone_numbers?.id, rowsA.trunks?.id, rowsA.agents?.id]) {
-      expect(text).not.toContain(String(secret));
-    }
-    await withOrg(app, orgB, async (q) => expect(await count(q, "phone_numbers", "e164 = $1", [taken])).toBe(0));
-
-    const routed = await withSystem(app, (q) => q.many<{ organization_id: string }>("select organization_id from phone_numbers where e164 = $1", [taken]));
-    expect(routed).toEqual([{ organization_id: orgA }]);
+    await withOrg(app, orgB, async (q) => {
+      expect(await q.exec("insert into phone_numbers (organization_id, trunk_id, e164) values ($1, $2, $3)", [orgB, rowsB.trunks?.id, taken])).toBe(1);
+      expect(await count(q, "phone_numbers", "e164 = $1", [taken])).toBe(1);
+    });
+    await expect(
+      withOrg(app, orgB, (q) => q.exec("insert into phone_numbers (organization_id, trunk_id, e164) values ($1, $2, $3)", [orgB, rowsB.trunks?.id, taken])),
+    ).rejects.toMatchObject({ code: "23505" });
   });
 });
 

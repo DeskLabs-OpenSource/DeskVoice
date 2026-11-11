@@ -108,9 +108,12 @@ create table phone_numbers (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations (id),
   trunk_id uuid not null,
-  -- Único na instalação inteira: um número físico só roteia para uma organização.
-  e164 text not null unique,
+  e164 text not null,
   agent_id uuid,
+  -- Único por organização, não na instalação: unicidade global deixaria uma organização reservar
+  -- o número de outra. A chamada recebida é roteada pelo tronco por onde chegou (que tem dona) e
+  -- só então pelo número, dentro dessa organização.
+  unique (organization_id, e164),
   foreign key (organization_id, trunk_id) references trunks (organization_id, id) on delete cascade,
   foreign key (organization_id, agent_id) references agents (organization_id, id) on delete set null (agent_id)
 );
