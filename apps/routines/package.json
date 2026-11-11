@@ -5,7 +5,9 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "start": "tsx src/main.ts"
+    "start": "tsx src/main.ts",
+    "migrate": "tsx src/cli/migrate.ts",
+    "create-owner": "tsx src/cli/create-owner.ts"
   },
   "dependencies": {
     "@deskvoice/core": "workspace:^",
