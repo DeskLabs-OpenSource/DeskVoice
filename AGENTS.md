@@ -73,8 +73,9 @@ São as regras de forma do desenho da fundação. Cada uma tem uma cerca ou um t
    pare: a lista não deveria existir. Lei: [`um-arquivo-por-peca.md`](docs/doctrine/um-arquivo-por-peca.md).
 3. **Toda tabela tem `organization_id uuid not null`**, exceto `organizations` e
    `schema_migrations`.
-4. **Todo acesso a dado de produto passa por `withOrg`.** SQL cru fora de `packages/core` é
-   reprovado. Lei: [`isolamento.md`](docs/doctrine/isolamento.md).
+4. **Todo acesso a dado de produto passa por `withOrg`.** Fora de `packages/core`, uma cerca
+   reprova conexão direta com o Postgres, e outra só aceita `withSystem` (o acesso que atravessa
+   organizações) em arquivo listado com motivo em `fences/system-access-allowlist.ts`. Lei: [`isolamento.md`](docs/doctrine/isolamento.md).
 5. **Um ponto de escrita por entidade.** Evento de chamada se grava com `recordEvent`. Tarefa
    se enfileira com `enqueueTask`. Não escreva nessas tabelas por outro caminho.
 6. **Fila por notificação.** Quem consome tarefa acorda por `listenTasks` e reivindica com
@@ -113,7 +114,7 @@ situação, e não só a regra.
 | 5 | Ligar recurso por variável de ambiente ou por arquivo editado na VPS | No Deskcomm, conectar o tronco exigia editar arquivo por SSH. Aqui: configuração pela tela, e uma cerca reprova variável sem padrão |
 | 6 | Depender de serviço de nuvem para o sistema subir, ou consultar fila em laço curto | Cota e lentidão do banco na nuvem foram a reclamação operacional mais repetida. Aqui: Postgres na VPS e fila por notificação |
 | 7 | Dizer "sucesso" sem conferir | Backup e restauração diziam "sucesso" sem comparar nada. Aqui: a restauração confere contagens, e a checagem de saúde nunca resume tudo em um "ok" |
-| 8 | Mudar o atualizador sem rodá-lo contra um banco com dados | O atualizador do Deskcomm nunca era testado. Aqui: a atualização roda no CI |
+| 8 | Mudar o atualizador sem rodá-lo contra um banco com dados | O atualizador do Deskcomm nunca era testado. Aqui: o CI aplica as migrations novas sobre um banco da última versão com dados, e o script de atualização tem testes com Docker simulado. Atualização de ponta a ponta numa instalação real ainda não roda no CI |
 | 9 | Trabalhar no checkout principal, ou rodar comando destrutivo com caminho relativo | Um agente apagou o checkout principal. Aqui: worktree descartável e caminho absoluto conferido. Lei: [`operacao-de-agentes.md`](docs/doctrine/operacao-de-agentes.md) |
 | 10 | Colocar segredo ou dado pessoal real no repositório, em teste, exemplo ou log | Já aconteceu. Aqui: varredura de segredo no CI e no hook desde o primeiro commit. Use dados inventados |
 | 11 | Criar cerca, trava ou exceção sem dono, motivo e data de revisão | Travas sobreviviam ao motivo que as criou. Lei: [`cercas.md`](docs/doctrine/cercas.md) |

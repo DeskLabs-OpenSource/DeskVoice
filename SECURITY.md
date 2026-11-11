@@ -76,6 +76,16 @@ Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em pr
   `packages/core`. Fechar de vez pede outro desenho, e é uma frente aberta no roadmap.
 - **Limite de tentativas de login em memória.** Vale por processo do painel. Reiniciar o painel
   zera a contagem.
+- **Quem sabe o e-mail de um usuário consegue trancá-lo fora por alguns minutos.** Cinco senhas
+  erradas bloqueiam novas tentativas para aquele e-mail por um tempo, inclusive as do dono. É o
+  preço de limitar tentativa por e-mail; a saída de emergência é `bash install/reset-password.sh`,
+  de dentro da VPS.
+- **A cerca de SQL não lê o conteúdo das consultas.** Ela barra conexão direta com o Postgres e
+  uso não listado de `withSystem`. Uma consulta errada dentro de `withOrg` ainda é barrada pelo
+  banco (RLS), não pela cerca.
+- **O CI não instala o sistema numa máquina de verdade.** Instalador, atualização, backup e
+  restauração rodam contra um Docker simulado. Uma falha que só aparece com Docker real (permissão
+  de arquivo entre contêineres, por exemplo) passa pelo CI.
 - **Tarefa atrasada pode rodar duas vezes.** A recuperação de tarefa presa mede a idade pelo
   horário agendado, não pelo horário em que foi pega. As rotinas da fundação são seguras de
   repetir; rotina nova precisa ser também.

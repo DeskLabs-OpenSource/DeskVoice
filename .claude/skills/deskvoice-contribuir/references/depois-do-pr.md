@@ -30,7 +30,7 @@ gh run view <id-do-run> --log-failed
 |---|---|---|
 | `verify` | sempre | `pnpm verify` |
 | `secrets` | sempre | `gitleaks git --redact --log-opts="$(git merge-base origin/main HEAD)..HEAD" .` |
-| `db` | diff toca código | `pnpm db:test:up && pnpm test:db` |
+| `db` | diff toca código | `pnpm test:db` (sobe e remove sozinho um Postgres descartável; pede Docker) |
 | `simulated-call` | diff toca código | `pnpm vitest run --project unit apps/voice` |
 | `build` | diff toca código | `pnpm --filter ./apps/panel build` |
 | `images` | diff toca código de imagem | `docker build --target panel .` (e `voice`, `routines`) |

@@ -142,8 +142,7 @@ git clone https://github.com/DeskLabs-OpenSource/DeskVoice.git && cd DeskVoice
 pnpm install
 pnpm demo          # uma chamada inteira com o motor simulado (precisa de Docker)
 pnpm verify        # o que o CI roda primeiro
-pnpm db:test:up    # sobe um Postgres descartável para os testes de banco
-pnpm test:db
+pnpm test:db       # sobe sozinho um Postgres descartável (precisa de Docker) e o remove ao fim
 ```
 
 Você não precisa de tronco SIP nem de chave de IA para contribuir. O motor simulado executa um

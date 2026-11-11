@@ -38,7 +38,7 @@ São três processos Node sobre três pacotes, um Asterisk na borda e um Postgre
 | `packages/voice-engine` | Interface `VoiceEngine`, os motores `simulated`, `gemini-live` e `openai-realtime`, conversão de áudio |
 | `packages/tools` | Interface `Tool`, descoberta por pasta, ferramentas da fundação |
 | `apps/voice` | Controle do Asterisk (ARI), servidor AudioSocket, ciclo de vida da chamada, política de saída, medição de custo |
-| `apps/routines` | Consumidor da fila: resumo pós-chamada, avisos, webhooks, expiração de aprovação |
+| `apps/routines` | Consumidor da fila: resumo pós-chamada, entrega de avisos, tarefas de acompanhamento, expiração de aprovação |
 | `apps/panel` | Painel e API: entrar, agentes, linha telefônica, chamadas ao vivo, linha do tempo, aprovações, ligações de saída, custo |
 | `deploy/` | Compose, Caddy, modelos de configuração do Asterisk |
 | `install/` | Instalação, atualização, checagem de saúde, backup e restauração |
@@ -66,8 +66,8 @@ Do toque ao pós-chamada. Entre parênteses, o evento que cada passo grava em `c
 7. **Ferramenta.** Quando o modelo pede uma ferramenta, `apps/voice` valida a entrada, executa e
    devolve o resultado ao modelo, com o que ele deve dizer a quem está na linha (`tool_called`,
    `tool_result`).
-8. **Humano no meio.** `notify_human` avisa uma pessoa pelo painel, por WhatsApp ou por webhook
-   (`human_notified`). `request_approval` cria um pedido com prazo e resposta padrão, e a chamada
+8. **Humano no meio.** `notify_human` avisa a equipe pelo painel e, quando há conector e a pessoa
+   cadastrou o próprio WhatsApp, também por WhatsApp (`human_notified`). `request_approval` cria um pedido com prazo e resposta padrão, e a chamada
    espera (`approval_requested`). A decisão tomada na tela libera a chamada
    (`approval_decided`). Sem decisão no prazo, o pedido expira e vale a resposta padrão.
 9. **Transferência.** `transfer_to_human` passa a ligação para uma pessoa (`transfer_started`,
@@ -76,7 +76,8 @@ Do toque ao pós-chamada. Entre parênteses, o evento que cada passo grava em `c
     atingir a duração máxima ou o teto de custo do agente, a chamada é encerrada
     (`cost_ceiling_reached`).
 11. **Falha do motor.** Se a sessão com o provedor cai no meio da conversa, quem ligou ouve um
-    pedido de desculpa em texto fixo, e a chamada é transferida ou encerrada (`engine_failed`).
+    sinal de aviso (o motor caído não consegue falar), e a chamada é transferida ou encerrada
+    (`engine_failed`).
 12. **Fim.** A chamada fecha com estado e motivo (`call_ended`), e o resumo pós-chamada entra na
     fila (`task_queued`).
 13. **Pós-chamada.** O Postgres notifica `apps/routines`, que reivindica a tarefa, executa, tenta

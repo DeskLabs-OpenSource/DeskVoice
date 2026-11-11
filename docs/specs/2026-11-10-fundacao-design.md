@@ -128,11 +128,11 @@ Os contratos exatos (tabelas, interfaces, eventos, rotas, variáveis) estão no 
 | PR bom vermelho por causa alheia | Check de PR só mede o diff; estado acumulado é check da `main`; teste sem relógio real, porta fixa ou fuso |
 | Colisão de migration e de arquivo-índice | Carimbo de tempo; um arquivo por peça; fila de merge |
 | Baseline e migrations divergentes | Um caminho de schema; teste de atualização a partir da última release |
-| Atualizador nunca testado | `update.sh` roda no CI contra banco com dados |
+| Atualizador nunca testado | O CI aplica as migrations novas sobre um banco da última versão com dados; `update.sh` tem testes com Docker simulado. Atualização real de ponta a ponta no CI fica para depois |
 | Dependência do Supabase na nuvem | Postgres na VPS; fila por notificação |
 | Isolamento entre empresas furado | `organization_id` desde o primeiro dia; camada única; teste gerado |
 | Variável de ambiente manual para ligar recurso | Configuração pela tela; cerca que reprova variável sem padrão |
-| Backup e restore que diziam "sucesso" sem conferir | `restore.sh` confere contagens; restore testado no CI |
+| Backup e restore que diziam "sucesso" sem conferir | `restore.sh` confere contagens; a lógica é testada no CI com Docker simulado e foi conferida à mão num Postgres real |
 | Agente apagou o checkout principal | Doutrina: agente trabalha em worktree; comando destrutivo com caminho absoluto conferido |
 | Dono como gargalo de decisão | `GOVERNANCE.md` com regras de produto; todo pedido de decisão traz o padrão que vale sem resposta |
 | Segredo e dado pessoal no repositório | Varredura de segredo no CI e no hook desde o primeiro commit |

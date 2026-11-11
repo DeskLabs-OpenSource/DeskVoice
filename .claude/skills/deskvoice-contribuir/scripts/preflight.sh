@@ -112,7 +112,7 @@ else
   done
   info "migration nova pede: organization_id em tabela nova, e pnpm test:db verde (pede Docker)"
 fi
-cmd "pnpm fences && pnpm db:test:up && pnpm test:db"
+cmd "pnpm fences && pnpm test:db"
 echo
 
 echo "6. Notas de versão"

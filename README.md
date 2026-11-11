@@ -80,14 +80,14 @@ provado, cada capacidade abaixo diz até onde a prova foi:
 | Conversa da chamada: saudação, falas, ferramentas, encerramento | Provado em simulação |
 | Avisar um humano e pedir aprovação no meio da chamada, com prazo e resposta padrão | Provado em simulação |
 | Linha do tempo de cada chamada, evento por evento, com custo | Provado em simulação |
-| Tarefas depois que a ligação termina (resumo, aviso, webhook) | Provado em simulação |
+| Tarefas depois que a ligação termina (resumo, avisos, tarefas de acompanhamento) | Provado em simulação |
 | Teto de custo e de duração por chamada | Provado em simulação |
 | Painel web em português, inglês e espanhol | Rotas testadas com banco real; telas conferidas em português |
 | Atender ligação recebida por uma linha de operadora (tronco SIP) | Aguardando prova real |
 | Transferir a ligação para uma pessoa | Aguardando prova real (o caminho no Asterisk foi conferido, sem operadora) |
 | Motores de voz Gemini Live e OpenAI Realtime | Aguardando prova real (testados contra servidor falso, sem chave) |
 | Enviar WhatsApp durante a chamada, por conector | Aguardando prova real |
-| Instalador, atualização, checagem de saúde, backup e restauração | Backup e restauração provados em Postgres real; instalação em VPS aguardando prova real |
+| Instalador, atualização, checagem de saúde, backup e restauração | Testados com Docker simulado; backup e restauração conferidos à mão num Postgres real; instalação em VPS aguardando prova real |
 | Ligações feitas pelo agente | Aguardando prova real, e desligado de fábrica. Veja "Ligações de saída", abaixo |
 
 Se você fizer a primeira ligação real, conte como foi numa issue: é a contribuição mais valiosa

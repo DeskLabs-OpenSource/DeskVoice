@@ -78,14 +78,14 @@ proven yet, each capability below says how far the proof went:
 | Call conversation: greeting, turns, tools, hang-up | Proven in simulation |
 | Notify a human and ask for approval mid-call, with a deadline and a default answer | Proven in simulation |
 | Per-call timeline, event by event, with cost | Proven in simulation |
-| Work that continues after the call (summary, notice, webhook) | Proven in simulation |
+| Work that continues after the call (summary, notices, follow-up tasks) | Proven in simulation |
 | Cost and duration ceiling per call | Proven in simulation |
 | Web panel in Portuguese, English and Spanish | Routes tested against a real database; screens checked in Portuguese |
 | Answer an inbound call from a carrier line (SIP trunk) | Awaiting real-world proof |
 | Transfer the call to a person | Awaiting real-world proof (the Asterisk path was checked, without a carrier) |
 | Gemini Live and OpenAI Realtime voice engines | Awaiting real-world proof (tested against a fake server, without a key) |
 | Send WhatsApp during the call, through a connector | Awaiting real-world proof |
-| Installer, update, health check, backup and restore | Backup and restore proven on real Postgres; VPS install awaiting real-world proof |
+| Installer, update, health check, backup and restore | Tested against a simulated Docker; backup and restore checked by hand on a real Postgres; VPS install awaiting real-world proof |
 | Calls placed by the agent | Awaiting real-world proof, and off by default. See "Outbound calls" |
 
 If you place the first real call, tell us how it went in an issue: it is the most valuable

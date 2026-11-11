@@ -145,7 +145,6 @@ git clone https://github.com/DeskLabs-OpenSource/DeskVoice.git && cd DeskVoice
 pnpm install
 pnpm demo          # a whole call with the simulated engine
 pnpm verify        # what CI runs first
-pnpm db:test:up    # starts a disposable Postgres for the database tests
 pnpm test:db
 ```
 

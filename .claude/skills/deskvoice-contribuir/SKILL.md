@@ -88,7 +88,7 @@ Depois rode o que o CI roda, inteiro, e leia o rodapé:
 
 ```bash
 pnpm verify                        # lint, tipos, cercas, testes de unidade
-pnpm db:test:up && pnpm test:db    # se tocou em banco (pede Docker); pnpm db:test:down ao fim
+pnpm test:db    # se tocou em banco (pede Docker; sobe e remove sozinho um Postgres descartável)
 ```
 
 Cerca vermelha diz na própria mensagem o que fazer. `pnpm fences` sozinho roda em segundos.
