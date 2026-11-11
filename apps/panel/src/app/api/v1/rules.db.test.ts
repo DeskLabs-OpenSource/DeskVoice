@@ -476,17 +476,6 @@ describe("voice process", () => {
     const started = await call(webCall, { method: "POST", cookie: operator.cookie, body: { agentId: agent } });
     expect(started.data).toEqual({ callId: "22222222-2222-4222-8222-222222222222", token: "invite-token", ws: { path: "/voice-ws" } });
     expect(panel.voice.requests).toEqual([{ url: "http://voice.test/calls/web", body: { organizationId: org, agentId: agent, userId: operator.id } }]);
-
-    // Com proxy na frente o instalador grava a variável vazia; lixo também vale como "não definida".
-    for (const raw of ["", "   ", "abc", "0", "65536", "80.5", "-1", "8091x"]) {
-      panel.deps.voiceWebPublicPort = raw;
-      expect([raw, ((await call(webCall, { method: "POST", cookie: owner, body: { agentId: agent } })).data as { ws: unknown }).ws]).toEqual([raw, { path: "/voice-ws" }]);
-    }
-    for (const [raw, port] of [["8091", 8091], ["1", 1], ["65535", 65535]] as const) {
-      panel.deps.voiceWebPublicPort = raw;
-      expect(((await call(webCall, { method: "POST", cookie: owner, body: { agentId: agent } })).data as { ws: unknown }).ws).toEqual({ port });
-    }
-    panel.deps.voiceWebPublicPort = undefined;
   });
 
   it("a browser call passes on each refusal of the voice process with its own code, and says when it is down", async () => {

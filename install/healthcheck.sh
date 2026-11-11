@@ -8,7 +8,8 @@
 #
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
 # Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, Asterisk,
-# worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (linha, motor de voz, portas, disco).
+# worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (linha, motor de voz,
+# entrada única, portas, disco).
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 as_json=0; only_essential=0
@@ -33,6 +34,18 @@ probe_js() {
 fetch('$1',{signal:AbortSignal.timeout(8000)}).then(async r=>{const j=await r.json().catch(()=>null);const d=(j&&j.data)||{};
 for(const k of [$2]){const p=d[k]||{};console.log(k+'|'+(p.status||'fail')+'|'+String(p.detail||('sem resposta para '+k+' (HTTP '+r.status+')')).replace(/[\\n|]/g,' '))}
 }).catch(e=>{console.log('unreachable|fail|'+String(e.message).replace(/[\\n|]/g,' '))})
+JS
+}
+# Pede ao Caddy, de dentro da rede, o painel e o /voice-ws. Devolve `panel|<HTTP>` e
+# `voice|<HTTP>`; em erro de conexão, `erro <motivo>` no lugar do número. O serviço de voz
+# responde 426 a quem chega sem WebSocket: é a prova de que o caminho vai até ele.
+#   entry_probe_js <http|https> <porta> <nome do site>
+entry_probe_js() {
+  cat <<JS
+const m=require('$1');
+const hit=p=>new Promise(done=>{const q=m.request({host:'caddy',port:$2,path:p,servername:'$3',headers:{Host:'$3'},rejectUnauthorized:false,timeout:8000},r=>{r.resume();done(String(r.statusCode))});
+q.on('timeout',()=>q.destroy(new Error('sem resposta em 8s')));q.on('error',e=>done('erro '+String(e.code||e.message).replace(/[\\n|]/g,' ')));q.end()});
+(async()=>{console.log('panel|'+await hit('/api/v1/system/health'));console.log('voice|'+await hit('/voice-ws'))})();
 JS
 }
 label() { case "$1" in ok) echo ok ;; warn) echo aviso ;; *) echo falha ;; esac; }
@@ -96,6 +109,42 @@ if [ "$only_essential" = 0 ]; then
     if [ -n "$(piece "$id" 1)" ]; then add "$id" "$name" 0 "$(label "$(piece "$id" 2)")" "$(piece "$id" 3)"
     else add "$id" "$name" 0 aviso "não deu para consultar porque o painel não respondeu; resolva o painel primeiro"; fi
   done
+
+  # ── Entrada única: painel e voz do navegador pelo mesmo endereço ──
+  # Pergunta de dentro da rede, ao Caddy, pelos dois caminhos. É a ligação que faltava:
+  # "o painel abre e a voz não conecta" tem que aparecer aqui, não na tela de quem ligou.
+  entry_site="$(sed -n 's/.*CADDY_SITE: "\(.*\)".*/\1/p' "$PROXY_OVERRIDE" 2>/dev/null | head -n 1 || true)"
+  entry_ports="$(sed -n 's/^ *- "\(.*\)"$/\1/p' "$PROXY_OVERRIDE" 2>/dev/null | tr '\n' ' ' || true)"
+  if [ -f "$PROXY_OVERRIDE" ] && grep -q ':3000"' "$PROXY_OVERRIDE"; then
+    add entry "Entrada única" 0 falha "esta instalação ainda publica painel e voz em duas portas (formato antigo): \"Falar com o agente\" não conecta. Rode: bash install/install.sh (mantém a mesma porta do painel)"
+  elif [ -z "$entry_site" ] || [ -z "$entry_ports" ]; then
+    add entry "Entrada única" 0 falha "o Caddy do DeskVoice não tem porta publicada: o painel não abre de fora. Rode: bash install/install.sh"
+  elif ! running caddy; then
+    add entry "Entrada única" 0 falha "o Caddy do DeskVoice não está rodando: o painel não abre de fora. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"
+  elif ! running panel; then
+    add entry "Entrada única" 0 aviso "não deu para conferir porque o painel não está rodando; resolva o painel primeiro"
+  else
+    case "$entry_site" in
+      :*) entry_scheme=http; entry_port=80; entry_host=localhost ;;
+      *) entry_scheme=https; entry_port=443; entry_host="$entry_site" ;;
+    esac
+    entry_lines="$(dc exec -T panel node -e "$(entry_probe_js "$entry_scheme" "$entry_port" "$entry_host")" 2>/dev/null || true)"
+    entry_panel="$(printf '%s\n' "$entry_lines" | awk -F'|' '$1 == "panel" { print $2; exit }')"
+    entry_voice="$(printf '%s\n' "$entry_lines" | awk -F'|' '$1 == "voice" { print $2; exit }')"
+    case "$entry_panel" in
+      [1-4][0-9][0-9])
+        case "$entry_voice" in
+          426|400) add entry "Entrada única" 0 ok "painel e voz do navegador respondem pelo mesmo endereço (publicado em: ${entry_ports% })" ;;
+          502|503|504) add entry "Entrada única" 0 falha "o painel responde, mas /voice-ws não chega ao serviço de voz (HTTP $entry_voice): \"Falar com o agente\" não conecta. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 voice" ;;
+          [1-5][0-9][0-9]) add entry "Entrada única" 0 falha "o painel responde, mas /voice-ws não foi entregue ao serviço de voz (veio HTTP $entry_voice em vez de um pedido de WebSocket): \"Falar com o agente\" não conecta. Rode: bash install/install.sh" ;;
+          *) add entry "Entrada única" 0 falha "o painel responde, mas /voice-ws não respondeu (${entry_voice:-sem saída}): \"Falar com o agente\" não conecta" ;;
+        esac ;;
+      5[0-9][0-9]) add entry "Entrada única" 0 falha "o Caddy do DeskVoice não alcança o painel (HTTP $entry_panel). Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy" ;;
+      *)
+        if [ "$entry_scheme" = https ]; then add entry "Entrada única" 0 falha "o Caddy não respondeu em HTTPS para $entry_site (${entry_panel:-sem saída}). Causa mais comum: o certificado ainda não saiu porque o domínio não aponta para esta VPS. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"
+        else add entry "Entrada única" 0 falha "o Caddy do DeskVoice não respondeu (${entry_panel:-sem saída}). Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"; fi ;;
+    esac
+  fi
 
   # ── Portas UDP na máquina ──
   rtp_start="$(env_get "$ENV_FILE" RTP_START)"; rtp_end="$(env_get "$ENV_FILE" RTP_END)"

@@ -81,13 +81,30 @@ separados para cada contêiner receber só o que usa:
 Você não edita nenhum deles. Se um valor precisar mudar (IP novo, domínio novo), rode o
 instalador de novo.
 
+Há um quarto arquivo gerado, `deploy/docker-compose.override.yml`: é o único lugar em que uma
+porta web é publicada. O painel e a voz do navegador entram sempre por um endereço só, o do
+Caddy do DeskVoice:
+
+| Situação da máquina | Onde o Caddy do DeskVoice escuta |
+|---|---|
+| Portas 80 e 443 livres, com domínio | 80 e 443, com HTTPS automático |
+| Portas 80 e 443 livres, sem domínio | 80, só HTTP |
+| 80 e 443 já de outro proxy | Uma porta local única (a partir da 3080), só HTTP. O proxy que já existe, ou um túnel SSH, aponta para ela e para mais nada |
+
+O painel e o processo de voz nunca publicam porta própria.
+
 ### `healthcheck.sh`
 
 Estados: `ok`, `aviso` (falta configurar, não é defeito) e `falha` (quebrado). Linha telefônica
 ainda não cadastrada é `aviso`; linha cadastrada que a operadora recusa é `falha`.
 
+A linha "Entrada única" pergunta ao Caddy do DeskVoice, de dentro, pelos dois caminhos: o
+painel e o `/voice-ws` (por onde vai o áudio de "Falar com o agente"). Se o painel responde e a
+voz não, é `falha`, com a causa. Ela não enxerga o proxy que você colocou na frente: confere
+até a porta do DeskVoice.
+
 Código de saída: `0` sem falha, `1` se falhou peça essencial (painel, banco, Asterisk, worker
-de voz, rotinas), `2` se falhou outra (linha, motor de voz, portas, disco).
+de voz, rotinas), `2` se falhou outra (linha, motor de voz, entrada única, portas, disco).
 
 ### `backup.sh` e `restore.sh`
 
@@ -114,7 +131,7 @@ A restauração primeiro monta o backup num banco ao lado e compara as contagens
 toma o lugar do banco atual. Se alguma tabela divergir, o script diz qual, e o banco atual fica
 como estava.
 
-## Os cinco problemas mais prováveis
+## Os problemas mais prováveis
 
 ### 1. A ligação conecta e fica muda
 
@@ -132,10 +149,22 @@ passar.
 
 ### 2. As portas 80 e 443 já estão ocupadas
 
-Já existe outro proxy na máquina (Traefik, Nginx, outro Caddy). O instalador percebe, não
-disputa as portas, publica o painel numa porta local e imprime o que configurar no proxy que já
-existe. Para ver as instruções de novo, rode `bash install/install.sh` outra vez; ele mantém a
-mesma porta.
+Já existe outro proxy na máquina (Traefik, Nginx, outro Caddy). O instalador percebe e não
+disputa as portas: o DeskVoice inteiro (painel e voz do navegador) fica atrás de **uma porta
+local só**, a partir da 3080, e o instalador imprime a linha exata para o proxy que já existe.
+Para ver as instruções de novo, rode `bash install/install.sh` outra vez; ele mantém a mesma
+porta.
+
+O seu proxy encaminha o domínio inteiro para essa porta. Duas coisas ele precisa repassar,
+e as linhas que o instalador imprime já trazem as duas:
+
+- **conexões contínuas (WebSocket):** sem isso o painel abre e "Falar com o agente" não conecta.
+  No Nginx são os cabeçalhos `Upgrade` e `Connection`, com `proxy_http_version 1.1`;
+- **o endereço de quem acessa (`X-Forwarded-For`):** é com ele que o limite de tentativas de
+  login separa uma pessoa da outra.
+
+Se o seu proxy tinha uma regra separada para `/voice-ws` apontando para outra porta (era assim
+até a versão anterior), apague-a. Agora é tudo no mesmo destino.
 
 Se quem ocupa é a porta `5060/udp` ou a faixa de áudio, é outro programa de telefonia. Descubra
 com `sudo ss -lunp | grep :5060`, pare esse programa e rode o instalador de novo.
@@ -158,6 +187,9 @@ O painel passa a abrir só de dentro da VPS. Do seu computador, abra um túnel e
 ```bash
 ssh -L 3080:127.0.0.1:3080 usuario@ip-da-vps
 ```
+
+É uma porta só. "Falar com o agente" funciona por esse mesmo túnel, e em `localhost` o
+navegador libera o microfone mesmo sem HTTPS. Pelo IP e sem HTTPS, não libera.
 
 Rodar o instalador de novo mantém essa escolha.
 
@@ -191,6 +223,21 @@ O Asterisk está de pé, mas o processo de voz não consegue falar com ele, ent�
 atendida. A causa mais comum é o Asterisk não ter lido a configuração. Rode `bash
 install/install.sh` de novo: ele regrava os arquivos com a permissão certa. Se continuar, veja
 `docker compose -f deploy/docker-compose.yml logs --tail 50 asterisk`.
+
+### 7. O painel abre e "Falar com o agente" não conecta
+
+A tela diz que o painel abriu mas não alcançou o serviço de voz no mesmo endereço. O áudio do
+navegador vai por uma conexão contínua (WebSocket) no caminho `/voice-ws`, pelo mesmo endereço
+do painel. Alguém no caminho não repassou essa conexão.
+
+1. Rode `bash install/healthcheck.sh` e leia a linha "Entrada única".
+2. Se ela diz **falha**, o problema está dentro do DeskVoice e o conserto está escrito na linha.
+   "Formato antigo" ou "não tem porta publicada" se resolvem com `bash install/install.sh`.
+3. Se ela diz **ok**, o DeskVoice está entregando painel e voz na porta dele, e quem não repassa
+   é o que está na frente: o seu proxy. Confira nele o repasse de WebSocket (problema 2, acima)
+   e se o domínio inteiro aponta para a porta única, sem regra separada para `/voice-ws`.
+4. Por túnel SSH, confira se o túnel é para a porta do painel que o instalador mostrou. Não
+   existe mais segunda porta para abrir.
 
 ## Testes do kit
 

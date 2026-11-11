@@ -1,7 +1,13 @@
 # DeskVoice: uma VPS, um comando.
 #
-# Quem publica porta para a internet: só o Caddy (80/443) e o Asterisk (SIP e RTP, UDP).
-# Postgres, painel, voz, rotinas e a ARI do Asterisk ficam na rede interna.
+# Quem publica porta no host: só o Caddy (a entrada única do painel e da voz do navegador) e o
+# Asterisk (SIP e RTP, UDP). Postgres, painel, voz, rotinas e a ARI do Asterisk ficam na rede
+# interna, e painel e voz NUNCA publicam porta: tudo o que é web entra pelo Caddy.
+#
+# As portas do Caddy não estão neste arquivo. O instalador as grava em
+# `docker-compose.override.yml`, porque dependem da máquina: 80/443 quando estão livres, ou
+# uma porta local única quando já são de outro proxy. Sem esse arquivo o Caddy sobe sem porta
+# publicada: nada fica exposto por engano.
 #
 # Os valores vêm de três arquivos gerados por `install/install.sh`, separados por menor
 # privilégio. Não há variável para preencher à mão: o que é escolha de quem opera fica no painel.
@@ -113,15 +119,11 @@ services:
     networks: [internal]
     logging: *logging
 
+  # Sobe sempre, em todo modo de instalação. Onde escuta (CADDY_SITE), em quem confia
+  # (CADDY_TRUSTED_PROXIES) e as portas publicadas vêm de docker-compose.override.yml.
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    profiles: ["caddy"]
-    environment:
-      PANEL_DOMAIN: ${PANEL_DOMAIN:-localhost}
-    ports:
-      - "80:80"
-      - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

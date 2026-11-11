@@ -98,6 +98,9 @@ roll_back() {  # roll_back "<o que falhou>"
 step "Trocando para a versão $target"
 apply_version "$target" "${previous_commit:+refs/tags/$target}" || roll_back "Não consegui trocar o código para a versão $target."
 render_asterisk_config
+# Instalação de antes da entrada única: o Caddy passa a ser a única porta publicada, na mesma
+# porta que o painel já usava. Em instalação já no formato atual, não muda nada.
+converge_entry
 # shellcheck disable=SC2086
 if dc pull -q $APP_SERVICES >/dev/null 2>&1; then ok "Imagens da versão $target baixadas"
 else
