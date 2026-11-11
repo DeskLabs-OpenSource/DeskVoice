@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
 # curl de mentira: nenhum teste fala com a internet. Devolve o IP de $FAKE_DIR/public_ip.
+# A conferência da porta publicada (rota de saúde) fica registrada em calls.log e responde o
+# código de $FAKE_DIR/host_probe; sem o arquivo, 200.
+case "$*" in
+  *"/api/v1/system/health"*) echo "curl $*" >> "$FAKE_DIR/calls.log"; cat "$FAKE_DIR/host_probe" 2>/dev/null || printf 200; exit 0 ;;
+esac
 cat "$FAKE_DIR/public_ip" 2>/dev/null

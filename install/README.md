@@ -77,7 +77,10 @@ Respostas para o modo `--yes` (variável de ambiente ou linha `CHAVE=valor` do a
 
 | Variável | Para quê |
 |---|---|
-| `DESKVOICE_DOMAIN` | Domínio do painel. Vazio = sem domínio por enquanto |
+| `DESKVOICE_DOMAIN` | Domínio do painel (HTTPS). Vazio = sem domínio por enquanto: o painel fica só dentro da VPS, por túnel SSH |
+| `DESKVOICE_PANEL_LOCAL_ONLY=yes` | Sem domínio: o painel só abre de dentro da VPS. Já é o padrão de instalação nova; serve para fechar uma instalação que estava publicada por HTTP |
+| `DESKVOICE_PANEL_PUBLIC_HTTP=yes` | Sem domínio: publica o painel na internet por HTTP, sem HTTPS. A senha trafega sem criptografia. Só para teste, e só pedindo de propósito |
+| `DESKVOICE_PANEL_PORT` | A porta local do painel (padrão: 3080, ou a seguinte livre), quando ele sai por uma porta local |
 | `DESKVOICE_ORG_NAME` | Nome da empresa |
 | `DESKVOICE_OWNER_NAME`, `DESKVOICE_OWNER_EMAIL`, `DESKVOICE_OWNER_PASSWORD` | O primeiro usuário (dono). Senha com 10 caracteres ou mais |
 | `DESKVOICE_PUBLIC_IP` | Só se a descoberta automática do IP falhar |
@@ -86,6 +89,23 @@ Respostas para o modo `--yes` (variável de ambiente ou linha `CHAVE=valor` do a
 | `DESKVOICE_VERSION` | Uma versão publicada específica (exemplo: `0.3.0`), em vez da mais recente |
 
 Se usar um arquivo de respostas com a senha, apague-o depois da instalação.
+
+`DESKVOICE_PANEL_LOCAL_ONLY` e `DESKVOICE_PANEL_PUBLIC_HTTP` aceitam um valor só, `yes`, em
+minúsculas. Qualquer outro (`1`, `true`, `sim`, `no`) para a instalação com erro, antes de
+gravar qualquer coisa; para ficar com o padrão, não defina a variável. O instalador também para
+com erro se a opção não tem efeito no modo da sua máquina, em vez de ignorá-la: as duas só
+valem **sem domínio** (com domínio o painel abre por HTTPS), e `DESKVOICE_PANEL_PORT` só vale
+quando o painel sai por uma porta local.
+
+#### O instalador só diz "pronto" depois de entrar
+
+No fim, ele confere duas coisas pelo caminho de quem usa: pede a rota de saúde pela **porta
+publicada** (com domínio, pelo próprio endereço em HTTPS) e faz **login de verdade** pela
+entrada única, com o e-mail e a senha que você acabou de definir, conferindo que a sessão vale
+e saindo em seguida. A senha vai pela entrada padrão: nunca aparece na tela nem em argumento
+de processo. Se o endereço não responde ou o login é recusado, a instalação para com o que
+falhou e o que fazer. Rodando de novo numa instalação que já tem dono, ele só testa o login se
+a senha vier nas respostas (`--yes`); sem ela, diz "Login NÃO testado" em vez de fingir.
 
 #### Que versão é instalada
 
@@ -172,8 +192,12 @@ Caddy do DeskVoice:
 | Situação da máquina | Onde o Caddy do DeskVoice escuta |
 |---|---|
 | Portas 80 e 443 livres, com domínio | 80 e 443, com HTTPS automático |
-| Portas 80 e 443 livres, sem domínio | 80, só HTTP |
-| 80 e 443 já de outro proxy | Uma porta local única (a partir da 3080), só HTTP. O proxy que já existe, ou um túnel SSH, aponta para ela e para mais nada |
+| Sem domínio (com as portas 80 e 443 livres ou não) | Uma porta local única (a partir da 3080), só em `127.0.0.1` e só HTTP. Você entra por túnel SSH |
+| Sem domínio, com `DESKVOICE_PANEL_PUBLIC_HTTP=yes` | 80, só HTTP, aberto para a internet; ou a porta local aberta para fora, se 80 e 443 já são de outro proxy |
+| 80 e 443 já de outro proxy, com domínio | A mesma porta local única, só em `127.0.0.1`. O proxy que já existe aponta para ela e para mais nada |
+
+O endereço que o instalador anuncia no fim é lido deste arquivo, o mesmo que o Compose publica
+e que a checagem de saúde sonda.
 
 O painel e o processo de voz nunca publicam porta própria.
 
@@ -186,6 +210,12 @@ A linha "Entrada única" pergunta ao Caddy do DeskVoice, de dentro, pelos dois c
 painel e o `/voice-ws` (por onde vai o áudio de "Falar com o agente"). Se o painel responde e a
 voz não, é `falha`, com a causa. Ela não enxerga o proxy que você colocou na frente: confere
 até a porta do DeskVoice.
+
+A mesma sonda pede a rota do agente de atualização, que para a internet não existe. Quem tem de
+recusá-la é o Caddy (404 sem corpo). Se o 404 vem do painel, a linha "Agente de atualização"
+vira `aviso`: o Caddy está rodando a configuração de antes da atualização (o arquivo só é
+relido ao reiniciar). Resolve com `docker restart deskvoice-caddy-1`; rodar `bash
+install/update.sh` também reinicia o Caddy quando o arquivo que ele tem montado não é o do disco.
 
 Código de saída: `0` sem falha, `1` se falhou peça essencial (painel, banco, Asterisk, worker
 de voz, rotinas), `2` se falhou outra (linha, motor de voz, entrada única, portas, disco).
@@ -255,18 +285,9 @@ com `sudo ss -lunp | grep :5060`, pare esse programa e rode o instalador de novo
 
 ### 3. Ainda não tenho domínio
 
-Sem domínio o painel abre pelo IP e **sem HTTPS**: a senha trafega sem proteção. Serve para testar.
-Quando tiver o domínio, aponte-o para a VPS e rode `bash install/install.sh` de novo.
-
-Se as portas 80 e 443 já são de outro proxy e você não quer um login exposto na internet, peça
-acesso só local:
-
-```bash
-DESKVOICE_PANEL_LOCAL_ONLY=yes bash install/install.sh
-```
-
-O painel passa a abrir só de dentro da VPS. Do seu computador, abra um túnel e use
-`http://localhost:3080` enquanto ele estiver aberto:
+Sem domínio não há HTTPS, então o instalador **não publica a tela de login na internet**: o
+painel abre só de dentro da VPS. Do seu computador, abra um túnel e use `http://localhost:3080`
+enquanto ele estiver aberto (o instalador mostra o comando com a porta e o IP certos):
 
 ```bash
 ssh -L 3080:127.0.0.1:3080 usuario@ip-da-vps
@@ -275,7 +296,29 @@ ssh -L 3080:127.0.0.1:3080 usuario@ip-da-vps
 É uma porta só. "Falar com o agente" funciona por esse mesmo túnel, e em `localhost` o
 navegador libera o microfone mesmo sem HTTPS. Pelo IP e sem HTTPS, não libera.
 
-Rodar o instalador de novo mantém essa escolha.
+Quando tiver o domínio, aponte-o para a VPS (registro A) e rode de novo, informando o domínio:
+o painel passa a abrir por HTTPS, de qualquer lugar.
+
+```bash
+DESKVOICE_DOMAIN=voz.suaempresa.com.br bash install/install.sh
+```
+
+Quer mesmo o painel aberto pelo IP, por HTTP, sem domínio? É um pedido explícito, e a senha
+trafega **sem criptografia**; serve para um teste rápido, não para uso de verdade:
+
+```bash
+DESKVOICE_PANEL_PUBLIC_HTTP=yes bash install/install.sh
+```
+
+**Instalou antes desta mudança e o painel já abre pelo IP, por HTTP?** Rodar o instalador ou o
+atualizador de novo **não muda isso**: a exposição de quem já instalou só muda a pedido. O
+instalador avisa com destaque e mostra o comando para fechar o painel e passar ao túnel:
+
+```bash
+DESKVOICE_PANEL_LOCAL_ONLY=yes bash install/install.sh
+```
+
+Rodar o instalador de novo mantém a escolha feita, e a porta.
 
 ### 4. A atualização voltou sozinha
 
@@ -297,9 +340,12 @@ segue na versão em que estava, com o banco intocado. Veja o problema 8.
 bash install/reset-password.sh voce@empresa.com.br
 ```
 
-O script pede a senha nova duas vezes, troca e encerra as sessões abertas dessa conta. Só
-funciona de dentro da VPS: quem tem acesso ao servidor já é dono da instalação. Se o e-mail não
-existir, ele diz isso e não altera nada.
+O script pede a senha nova duas vezes, troca, encerra as sessões abertas dessa conta e **entra
+com a senha nova** pela tela de login antes de dizer que trocou. Só funciona de dentro da VPS:
+quem tem acesso ao servidor já é dono da instalação. Se o e-mail não existir, ele diz isso e
+não altera nada. Se você errou a senha várias vezes antes de chegar aqui, o painel segura novas
+tentativas para esse e-mail por até 15 minutos: o script troca a senha, diz que não conseguiu
+testar e pede para esperar.
 
 Não rode o instalador de novo esperando que ele troque a senha: ele vê que já existe um dono e
 não cria outro.

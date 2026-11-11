@@ -63,7 +63,7 @@ contains "manda apagar a regra antiga de /voice-ws" "$out" "regra separada para 
 
 # ── 3. Sem domínio, aberto pelo IP ──
 env_set "$D/.env" PANEL_DOMAIN localhost   # resposta vazia mantém o domínio anterior; aqui a máquina nunca teve
-out="$(DESKVOICE_DOMAIN="" DESKVOICE_PANEL_LOCAL_ONLY=no install)"; equal "aberto pelo IP: zero" 0 "$?"
+out="$(DESKVOICE_DOMAIN="" DESKVOICE_PANEL_PUBLIC_HTTP=yes install)"; equal "aberto pelo IP: zero" 0 "$?"
 equal "aberto pelo IP: uma publicação" "0.0.0.0:3080:80 " "$(ports_published)"
 equal "aberto pelo IP: 1 salto" 1 "$(env_get "$A" TRUSTED_PROXY_HOPS)"
 contains "aberto pelo IP: avisa do microfone e ensina o túnel de uma porta" "$out" "ssh -L 3080:127.0.0.1:3080 <usuário>@203.0.113.10"
