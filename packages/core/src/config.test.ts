@@ -5,6 +5,7 @@ import { loadConfig } from "./config";
 const key = randomBytes(32);
 const base = {
   DATABASE_URL: "postgres://deskvoice_app:app-secret@postgres:5432/deskvoice",
+  SYSTEM_DATABASE_URL: "postgres://deskvoice_system:system-secret@postgres:5432/deskvoice",
   DESKVOICE_SECRET_KEY: key.toString("base64"),
   PUBLIC_URL: "https://voz.example.com",
   ARI_PASSWORD: "ari-secret",
@@ -14,7 +15,8 @@ describe("loadConfig", () => {
   it("applies the documented defaults", () => {
     expect(loadConfig(base)).toEqual({
       databaseUrl: base.DATABASE_URL,
-      migrationDatabaseUrl: base.DATABASE_URL,
+      systemDatabaseUrl: base.SYSTEM_DATABASE_URL,
+      migrationDatabaseUrl: undefined,
       secretKey: key,
       publicUrl: "https://voz.example.com",
       ariUrl: "http://asterisk:8088",
@@ -46,12 +48,12 @@ describe("loadConfig", () => {
     });
   });
 
-  it("derives the owner connection from POSTGRES_PASSWORD", () => {
-    const config = loadConfig({ ...base, POSTGRES_PASSWORD: "p@ss/word" });
-    const url = new URL(config.migrationDatabaseUrl);
-    expect(url.username).toBe("postgres");
-    expect(decodeURIComponent(url.password)).toBe("p@ss/word");
-    expect(`${url.host}${url.pathname}`).toBe("postgres:5432/deskvoice");
+  it("never builds the owner connection on its own, even with POSTGRES_PASSWORD around", () => {
+    expect(loadConfig({ ...base, POSTGRES_PASSWORD: "owner-secret" }).migrationDatabaseUrl).toBeUndefined();
+  });
+
+  it("does not fall back to the application connection for the system role", () => {
+    expect(() => loadConfig({ ...base, SYSTEM_DATABASE_URL: "" })).toThrow(/SYSTEM_DATABASE_URL is missing/);
   });
 
   it("accepts the secret key in hex", () => {
@@ -62,14 +64,14 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...base, PANEL_PORT: "", ARI_APP: "" })).toMatchObject({ panelPort: 3000, ariApp: "deskvoice" });
   });
 
-  it.each(["DATABASE_URL", "DESKVOICE_SECRET_KEY", "PUBLIC_URL", "ARI_PASSWORD"] as const)("names %s when it is missing", (name) => {
+  it.each(["DATABASE_URL", "SYSTEM_DATABASE_URL", "DESKVOICE_SECRET_KEY", "PUBLIC_URL", "ARI_PASSWORD"] as const)("names %s when it is missing", (name) => {
     const env: Record<string, string> = { ...base };
     delete env[name];
     expect(() => loadConfig(env)).toThrow(new RegExp(`${name} is missing`));
   });
 
   it("names every missing variable at once", () => {
-    expect(() => loadConfig({})).toThrow(/DATABASE_URL.*DESKVOICE_SECRET_KEY.*PUBLIC_URL.*ARI_PASSWORD/s);
+    expect(() => loadConfig({})).toThrow(/DATABASE_URL.*SYSTEM_DATABASE_URL.*DESKVOICE_SECRET_KEY.*PUBLIC_URL.*ARI_PASSWORD/s);
   });
 
   it("names the variable with an invalid value, without echoing secrets", () => {

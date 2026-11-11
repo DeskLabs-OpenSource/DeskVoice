@@ -1,13 +1,29 @@
 import { Pool } from "pg";
 import type { Db } from "./types";
 
-export function createDb(url: string): Db {
+/**
+ * `url` é a conexão do papel de aplicação, sujeita a RLS. `systemUrl` é a do papel de sistema;
+ * sem ela o `Db` serve para tudo menos `withSystem` e a fila.
+ */
+export function createDb(url: string, systemUrl?: string): Db {
+  const pool = openPool(url);
+  const systemPool = systemUrl === undefined ? undefined : openPool(systemUrl);
+  return {
+    pool,
+    systemPool,
+    async close() {
+      await Promise.all([pool.end(), systemPool?.end()]);
+    },
+  };
+}
+
+function openPool(url: string): Pool {
   const pool = new Pool({ connectionString: url });
   // Conexão ociosa que cai (banco reiniciou) emite `error` no pool, e evento `error` sem ouvinte
   // derruba o processo. O pool já descarta essa conexão; a falha real, se houver, aparece na
   // próxima consulta, para quem pode tratá-la.
   pool.on("error", () => undefined);
-  return { pool, close: () => pool.end() };
+  return pool;
 }
 
 /**

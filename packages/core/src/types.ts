@@ -8,6 +8,8 @@ export interface Clock {
 export interface Db {
   /** Pool do papel de aplicação (`deskvoice_app`), sujeito a RLS. */
   pool: Pool;
+  /** Pool do papel de sistema (`deskvoice_system`), que atravessa organizações. Só `withSystem` usa. */
+  systemPool?: Pool;
   close(): Promise<void>;
 }
 
@@ -60,8 +62,10 @@ export interface ClaimedTask {
 
 export interface Config {
   databaseUrl: string;
-  /** Conexão do dono do schema; só o executor de migrations usa. */
-  migrationDatabaseUrl: string;
+  /** Conexão do papel de sistema (`deskvoice_system`); alimenta `withSystem` e a fila. */
+  systemDatabaseUrl: string;
+  /** Conexão do dono do schema; só o comando de migrations a recebe. */
+  migrationDatabaseUrl?: string;
   secretKey: Buffer;
   publicUrl: string;
   ariUrl: string;

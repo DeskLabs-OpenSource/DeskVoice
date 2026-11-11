@@ -3,14 +3,17 @@
 # Quem publica porta para a internet: só o Caddy (80/443) e o Asterisk (SIP e RTP, UDP).
 # Postgres, painel, voz, rotinas e a ARI do Asterisk ficam na rede interna.
 #
-# Os valores vêm de `deploy/.env`, gerado por `install/install.sh`. Não há variável para
-# preencher à mão: o que é escolha de quem opera fica no painel.
+# Os valores vêm de três arquivos gerados por `install/install.sh`, separados por menor
+# privilégio. Não há variável para preencher à mão: o que é escolha de quem opera fica no painel.
+#   .env         só o que o próprio Compose interpola (senha do Postgres, portas, versão)
+#   app.env      o que painel, voz e rotinas recebem; não contém a senha do dono do banco
+#   migrate.env  credenciais do dono do schema; só o serviço `migrate` recebe
 
 name: deskvoice
 
 x-app: &app
   restart: unless-stopped
-  env_file: .env
+  env_file: app.env
   networks: [internal]
   logging: &logging
     driver: json-file
@@ -41,6 +44,8 @@ services:
     image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-routines:${DESKVOICE_VERSION:-stable}
     build: { context: .., target: routines }
     restart: "no"
+    # Único serviço com as credenciais do dono do schema.
+    env_file: [app.env, migrate.env]
     command: ["pnpm", "--filter", "@deskvoice/routines", "run", "migrate"]
     depends_on:
       postgres: { condition: service_healthy }

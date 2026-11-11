@@ -3,17 +3,24 @@
 create extension if not exists pgcrypto;
 create extension if not exists citext;
 
--- Papel de aplicação: sem superusuário e sem BYPASSRLS, para que as policies valham de verdade.
--- A senha é definida fora daqui, pelo instalador.
+-- Dois papéis, com senhas definidas fora daqui, pelo instalador:
+--   deskvoice_app     sem BYPASSRLS: tudo o que faz passa pelas policies de organização.
+--   deskvoice_system  com BYPASSRLS: só para o que atravessa organizações (login por e-mail,
+--                     fila, roteamento da chamada). É um login separado de propósito: o papel de
+--                     aplicação não é membro dele e não tem como virar ele dentro de uma sessão,
+--                     então SQL injetado numa consulta de organização não alcança as outras.
 do $$
 begin
   if not exists (select from pg_roles where rolname = 'deskvoice_app') then
-    create role deskvoice_app login nosuperuser nobypassrls nocreatedb nocreaterole;
+    create role deskvoice_app login nosuperuser nobypassrls nocreatedb nocreaterole noinherit;
+  end if;
+  if not exists (select from pg_roles where rolname = 'deskvoice_system') then
+    create role deskvoice_system login nosuperuser bypassrls nocreatedb nocreaterole;
   end if;
 end
 $$;
 
-grant usage on schema public to deskvoice_app;
+grant usage on schema public to deskvoice_app, deskvoice_system;
 
 -- ---------------------------------------------------------------------------------------------
 -- Tabelas
@@ -101,14 +108,12 @@ create table phone_numbers (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations (id),
   trunk_id uuid not null,
-  e164 text not null,
+  -- Único na instalação inteira: um número físico só roteia para uma organização.
+  e164 text not null unique,
   agent_id uuid,
-  unique (organization_id, e164),
   foreign key (organization_id, trunk_id) references trunks (organization_id, id) on delete cascade,
   foreign key (organization_id, agent_id) references agents (organization_id, id) on delete set null (agent_id)
 );
--- Roteamento da chamada recebida: acha a organização pelo número discado.
-create index phone_numbers_e164_idx on phone_numbers (e164);
 create index phone_numbers_trunk_idx on phone_numbers (organization_id, trunk_id);
 create index phone_numbers_agent_idx on phone_numbers (organization_id, agent_id);
 
@@ -235,9 +240,10 @@ create index usage_ledger_call_idx on usage_ledger (organization_id, call_id);
 -- ---------------------------------------------------------------------------------------------
 -- Isolamento por organização
 --
--- A linha passa quando pertence à organização da transação (`withOrg`) ou quando a transação
--- se declarou de sistema (`withSystem`). O nullif existe porque uma configuração local volta a
--- ser texto vazio na conexão reaproveitada do pool, e ''::uuid seria erro em vez de "nenhuma".
+-- A linha só passa quando pertence à organização da transação (`withOrg`). Não existe variável
+-- de sessão que abra as outras: quem atravessa organizações é o papel deskvoice_system.
+-- O nullif existe porque uma configuração local volta a ser texto vazio na conexão reaproveitada
+-- do pool, e ''::uuid seria erro em vez de "nenhuma".
 -- ---------------------------------------------------------------------------------------------
 
 do $$
@@ -255,18 +261,16 @@ begin
     execute format('alter table %I force row level security', t);
     execute format(
       'create policy organization_isolation on %I
-         using (%I = nullif(current_setting(''app.organization_id'', true), '''')::uuid
-                or current_setting(''app.system'', true) = ''on'')
-         with check (%I = nullif(current_setting(''app.organization_id'', true), '''')::uuid
-                or current_setting(''app.system'', true) = ''on'')',
+         using (%I = nullif(current_setting(''app.organization_id'', true), '''')::uuid)
+         with check (%I = nullif(current_setting(''app.organization_id'', true), '''')::uuid)',
       t, org_column, org_column
     );
-    execute format('grant select, insert, update, delete on %I to deskvoice_app', t);
+    execute format('grant select, insert, update, delete on %I to deskvoice_app, deskvoice_system', t);
   end loop;
 end
 $$;
 
-grant usage, select on sequence call_events_id_seq to deskvoice_app;
+grant usage, select on sequence call_events_id_seq to deskvoice_app, deskvoice_system;
 
 -- ---------------------------------------------------------------------------------------------
 -- Notificações: a fila e a tela acordam por LISTEN, sem polling.

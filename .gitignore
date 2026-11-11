@@ -9,5 +9,7 @@ dist/
 !.env.example
 deploy/asterisk/generated/
 deploy/.env
+deploy/app.env
+deploy/migrate.env
 backups/
 coverage/

@@ -9,9 +9,15 @@ function requireEnv(name: string): string {
   return value;
 }
 
-/** `app` é o papel de aplicação, sujeito a RLS; `owner` é o dono do schema e enxerga tudo. */
+/**
+ * `app` tem os dois pools do produto: aplicação (sujeito a RLS) e sistema (`withSystem`).
+ * `owner` é o dono do schema e enxerga tudo.
+ */
 export function openTestDbs(): { app: Db; owner: Db } {
-  return { app: createDb(requireEnv("TEST_DATABASE_URL")), owner: createDb(requireEnv("TEST_MIGRATION_DATABASE_URL")) };
+  return {
+    app: createDb(requireEnv("TEST_DATABASE_URL"), requireEnv("TEST_SYSTEM_DATABASE_URL")),
+    owner: createDb(requireEnv("TEST_MIGRATION_DATABASE_URL")),
+  };
 }
 
 /** Cada arquivo de teste trabalha em organizações próprias, para não depender dos dados dos outros. */

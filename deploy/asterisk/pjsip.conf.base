@@ -13,4 +13,6 @@ local_net=172.16.0.0/12
 local_net=10.0.0.0/8
 local_net=192.168.0.0/16
 
-#include generated/pjsip_trunks.conf
+; `#tryinclude`, e não `#include`: na primeira subida o worker ainda não escreveu o
+; arquivo de troncos, e um `#include` de arquivo ausente derruba a carga do pjsip inteiro.
+#tryinclude generated/pjsip_trunks.conf

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { OrgQuery } from "../src/types";
+import { createDb } from "../src/db";
 import { withOrg, withSystem } from "../src/with-org";
 import { createOrganization, openTestDbs } from "./helpers";
 
@@ -128,8 +129,36 @@ describe("schema", () => {
     expect(unprotected).toEqual([]);
   });
 
-  it("keeps the migration ledger out of reach of the application role", async () => {
+  it("keeps the migration ledger out of reach of the application and system roles", async () => {
     await expect(app.pool.query("select 1 from schema_migrations")).rejects.toMatchObject({ code: "42501" });
+    await expect(withSystem(app, (q) => q.many("select 1 from schema_migrations"))).rejects.toMatchObject({ code: "42501" });
+  });
+
+  it("has a separate system role that bypasses RLS without being superuser", async () => {
+    const role = await withSystem(app, (q) =>
+      q.one("select current_user::text as name, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb from pg_roles where rolname = current_user"),
+    );
+    expect(role).toEqual({ name: "deskvoice_system", rolsuper: false, rolbypassrls: true, rolcreaterole: false, rolcreatedb: false });
+  });
+
+  it("does not make the application role a member of any role", async () => {
+    const memberships = await owner.pool.query(
+      "select roleid::regrole::text as role from pg_auth_members where member = 'deskvoice_app'::regrole",
+    );
+    expect(memberships.rows).toEqual([]);
+  });
+
+  it("has no policy that reads a session switch other than the organization id", async () => {
+    const policies = await owner.pool.query<{ tablename: string; qual: string; with_check: string }>(
+      "select tablename::text, qual, with_check from pg_policies where schemaname = 'public'",
+    );
+    expect(policies.rows.length).toBe(scoped.length + 1);
+    for (const policy of policies.rows) {
+      const column = policy.tablename === "organizations" ? "id" : "organization_id";
+      const expected = `(${column} = (NULLIF(current_setting('app.organization_id'::text, true), ''::text))::uuid)`;
+      expect(policy.qual, policy.tablename).toBe(expected);
+      expect(policy.with_check, policy.tablename).toBe(expected);
+    }
   });
 
   it("has a factory for every table with organization_id, and no stale factory", () => {
@@ -212,6 +241,30 @@ describe("isolation of organizations", () => {
   });
 });
 
+describe("phone numbers", () => {
+  it("lets a number belong to one organization only, without telling the loser whose it is", async () => {
+    const taken = String(rowsA.phone_numbers?.e164);
+    const attempt = withOrg(app, orgB, (q) =>
+      q.exec("insert into phone_numbers (organization_id, trunk_id, e164) values ($1, $2, $3)", [orgB, rowsB.trunks?.id, taken]),
+    );
+    const error: unknown = await attempt.then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect(error).toMatchObject({ code: "23505", constraint: "phone_numbers_e164_key" });
+
+    // O erro só repete o número que a própria B digitou: nada da linha da A aparece nele.
+    const text = JSON.stringify(error, Object.getOwnPropertyNames(error ?? {}));
+    for (const secret of [orgA, rowsA.phone_numbers?.id, rowsA.trunks?.id, rowsA.agents?.id]) {
+      expect(text).not.toContain(String(secret));
+    }
+    await withOrg(app, orgB, async (q) => expect(await count(q, "phone_numbers", "e164 = $1", [taken])).toBe(0));
+
+    const routed = await withSystem(app, (q) => q.many<{ organization_id: string }>("select organization_id from phone_numbers where e164 = $1", [taken]));
+    expect(routed).toEqual([{ organization_id: orgA }]);
+  });
+});
+
 describe("withOrg and withSystem", () => {
   it("reads nothing outside a scoped transaction, even on a reused connection", async () => {
     await withOrg(app, orgA, (q) => q.many("select 1"));
@@ -226,9 +279,39 @@ describe("withOrg and withSystem", () => {
     expect(seen.map((row) => row.id).sort()).toEqual([orgA, orgB].sort());
   });
 
-  it("does not leak system scope into the next transaction on the same connection", async () => {
-    await withSystem(app, (q) => q.many("select 1"));
-    await withOrg(app, orgB, async (q) => expect(await count(q, "users", "organization_id = $1", [orgA])).toBe(0));
+  it("gives no access to organization A when organization B turns on app.system", async () => {
+    await withOrg(app, orgB, async (q) => {
+      await q.many("select set_config('app.system', 'on', true)");
+      for (const { name } of scoped) {
+        expect(await count(q, name, "organization_id = $1", [orgA]), name).toBe(0);
+        expect(await q.exec(`delete from ${ident(name)} where organization_id = $1`, [orgA]), name).toBe(0);
+      }
+      expect(await count(q, "organizations", "id = $1", [orgA])).toBe(0);
+    });
+    await withOrg(app, orgA, async (q) => {
+      for (const { name } of scoped) expect(await count(q, name, "true", []), name).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("does not let the application role become the system role", async () => {
+    await expect(withOrg(app, orgB, (q) => q.exec("set local role deskvoice_system"))).rejects.toMatchObject({ code: "42501" });
+    await expect(withOrg(app, orgB, (q) => q.exec("set local session authorization deskvoice_system"))).rejects.toMatchObject({ code: "42501" });
+    // Desligar row_security não abre nada: para quem não tem BYPASSRLS a consulta passa a ser recusada.
+    await expect(
+      withOrg(app, orgB, async (q) => {
+        await q.exec("set local row_security = off");
+        return count(q, "users", "organization_id = $1", [orgA]);
+      }),
+    ).rejects.toMatchObject({ code: "42501" });
+  });
+
+  it("refuses withSystem on a Db created without the system connection", async () => {
+    const appOnly = createDb(process.env.TEST_DATABASE_URL ?? "");
+    try {
+      await expect(withSystem(appOnly, (q) => q.many("select 1"))).rejects.toThrow(/no system pool/);
+    } finally {
+      await appOnly.close();
+    }
   });
 
   it("rolls back when the callback throws and commits when it returns", async () => {

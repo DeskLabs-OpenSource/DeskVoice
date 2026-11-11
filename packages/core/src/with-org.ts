@@ -1,4 +1,4 @@
-import type { PoolClient, QueryResultRow } from "pg";
+import type { Pool, PoolClient, QueryResultRow } from "pg";
 import type { Db, OrgQuery } from "./types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -9,25 +9,29 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 export function withOrg<T>(db: Db, organizationId: string, fn: (q: OrgQuery) => Promise<T>): Promise<T> {
   if (!UUID.test(organizationId)) return Promise.reject(new Error(`withOrg: invalid organization id ${JSON.stringify(organizationId)}`));
-  return scoped(db, "app.organization_id", organizationId, organizationId, fn);
+  return transaction(db.pool, organizationId, fn);
 }
 
 /**
- * Transação que atravessa organizações. Só para o que não tem como saber a organização antes de
- * consultar: login por e-mail, fila de tarefas, roteamento da chamada pelo número discado.
- * `q.organizationId` vem vazio; toda gravação precisa informar a organização da linha.
+ * Transação que atravessa organizações, pelo papel de sistema (`db.systemPool`). Só para o que
+ * não tem como saber a organização antes de consultar: login por e-mail, fila de tarefas,
+ * roteamento da chamada pelo número discado. Nunca passe para dentro dela SQL montado com texto
+ * de fora. `q.organizationId` vem vazio; toda gravação precisa informar a organização da linha.
  */
 export function withSystem<T>(db: Db, fn: (q: OrgQuery) => Promise<T>): Promise<T> {
-  return scoped(db, "app.system", "on", "", fn);
+  if (!db.systemPool) {
+    return Promise.reject(new Error("withSystem: this Db has no system pool. Create it with createDb(url, systemUrl) (SYSTEM_DATABASE_URL)."));
+  }
+  return transaction(db.systemPool, "", fn);
 }
 
-async function scoped<T>(db: Db, setting: string, value: string, organizationId: string, fn: (q: OrgQuery) => Promise<T>): Promise<T> {
-  const client = await db.pool.connect();
+async function transaction<T>(pool: Pool, organizationId: string, fn: (q: OrgQuery) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
   let broken: Error | undefined;
   try {
     await client.query("begin");
     // Terceiro argumento `true`: vale só nesta transação, então não vaza para o próximo uso da conexão.
-    await client.query("select set_config($1, $2, true)", [setting, value]);
+    if (organizationId !== "") await client.query("select set_config('app.organization_id', $1, true)", [organizationId]);
     const result = await fn(orgQuery(client, organizationId));
     await client.query("commit");
     return result;
