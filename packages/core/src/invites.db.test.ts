@@ -10,10 +10,19 @@ const now = new Date("2026-03-01T15:00:00.000Z");
 const later = new Date(now.getTime() + 7 * 86_400_000);
 let orgA: string;
 let orgB: string;
+const creators = new Map<string, string>();
+
+async function member(organizationId: string): Promise<string> {
+  const row = await withOrg(app, organizationId, (q) =>
+    q.one<{ id: string }>("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, 'Quem convida', 'x', 'admin') returning id", [organizationId, `${randomUUID()}@example.test`]),
+  );
+  return row?.id ?? "";
+}
 
 beforeAll(async () => {
   orgA = await createOrganization(app, "Invites A");
   orgB = await createOrganization(app, "Invites B");
+  for (const org of [orgA, orgB]) creators.set(org, await member(org));
 });
 afterAll(async () => {
   await app.close();
@@ -22,12 +31,12 @@ afterAll(async () => {
 
 async function invite(organizationId: string, overrides: Record<string, unknown> = {}): Promise<{ token: string; email: string; id: string }> {
   const token = `token-${randomUUID()}`;
-  const row = { email: `${randomUUID()}@example.test`, name: "Convidada", role: "operator", expires_at: later, accepted_at: null, revoked_at: null, ...overrides };
+  const row = { email: `${randomUUID()}@example.test`, name: "Convidada", role: "operator", expires_at: later, accepted_at: null, revoked_at: null, created_by: creators.get(organizationId), ...overrides };
   const id = await withOrg(app, organizationId, async (q) => {
     const inserted = await q.one<{ id: string }>(
-      `insert into invites (organization_id, email, name, role, token_hash, expires_at, accepted_at, revoked_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
-      [organizationId, row.email, row.name, row.role, hashToken(token), row.expires_at, row.accepted_at, row.revoked_at],
+      `insert into invites (organization_id, email, name, role, token_hash, expires_at, accepted_at, revoked_at, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+      [organizationId, row.email, row.name, row.role, hashToken(token), row.expires_at, row.accepted_at, row.revoked_at, row.created_by],
     );
     return inserted?.id ?? "";
   });
@@ -104,5 +113,33 @@ describe("acceptInvite", () => {
     await acceptInvite(app, token, { name: "De A", passwordHash: "h" }, now);
     expect(await usersWith(email)).toEqual([expect.objectContaining({ organization_id: orgA })]);
     expect(await withOrg(app, orgB, (q) => q.many("select id from users where email = $1", [email]))).toEqual([]);
+  });
+});
+
+describe("an invite is only as good as whoever created it", () => {
+  // O estado é montado direto no banco, SEM revogar o convite: é a prova de que a recusa vem do
+  // core, e não só da revogação que o painel faz ao desativar ou remover a pessoa.
+  it("refuses the invite of a disabled creator, and of a creator who no longer exists", async () => {
+    const disabledCreator = await member(orgA);
+    const removedCreator = await member(orgA);
+    const fromDisabled = await invite(orgA, { created_by: disabledCreator, role: "owner" });
+    const fromRemoved = await invite(orgA, { created_by: removedCreator });
+    const untouched = await invite(orgA);
+    expect(await findInviteByToken(app, fromDisabled.token, now)).not.toBeNull();
+
+    await withOrg(app, orgA, (q) => q.exec("update users set disabled_at = $2 where id = $1", [disabledCreator, now]));
+    // A chave estrangeira zera `created_by` em vez de apagar o convite ou barrar a remoção.
+    await withOrg(app, orgA, (q) => q.exec("delete from users where id = $1", [removedCreator]));
+    expect(await inviteRow(fromRemoved.id)).toEqual({ accepted_at: null, accepted_user_id: null, revoked_at: null });
+
+    for (const dead of [fromDisabled, fromRemoved]) {
+      expect(await findInviteByToken(app, dead.token, now)).toBeNull();
+      expect(await acceptInvite(app, dead.token, { name: "Volta", passwordHash: "h" }, now)).toEqual({ ok: false, reason: "invalid" });
+      expect(await usersWith(dead.email)).toEqual([]);
+      expect(await inviteRow(dead.id)).toMatchObject({ accepted_at: null });
+    }
+    // Convite de outra pessoa, na mesma organização, não é afetado.
+    expect(await findInviteByToken(app, untouched.token, now)).not.toBeNull();
+    expect((await acceptInvite(app, untouched.token, { name: "Entra", passwordHash: "h" }, now)).ok).toBe(true);
   });
 });

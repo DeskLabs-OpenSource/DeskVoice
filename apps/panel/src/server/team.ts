@@ -45,3 +45,12 @@ export async function requireAnotherOwner(q: OrgQuery, member: TeamMember): Prom
     throw new ApiError(409, "last_owner", "This is the only active owner. Make another person an owner first.");
   }
 }
+
+/**
+ * Revoga os convites pendentes que a pessoa criou. Chamar na mesma transação em que ela é
+ * desativada ou removida: quem sai da equipe não deixa uma porta aberta para voltar (um convite
+ * feito para si mesmo, com outro e-mail). Reativar a pessoa não desfaz isto.
+ */
+export async function revokeInvitesCreatedBy(q: OrgQuery, userId: string, now: Date): Promise<void> {
+  await q.exec("update invites set revoked_at = $2 where created_by = $1 and accepted_at is null and revoked_at is null", [userId, now]);
+}

@@ -1,4 +1,4 @@
-import { hashToken, withOrg } from "@deskvoice/core";
+import { findInviteByToken, hashToken, withOrg } from "@deskvoice/core";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, openSession, startPanel } from "../../../../test/kit";
 import { loginLimiter } from "../../../server/rate-limit";
@@ -254,6 +254,68 @@ describe("invites", () => {
     const blockedAccept = await call(acceptInvite, { method: "POST", params: { token: created.token }, headers: from("192.0.2.201"), body: { name: "X", password: "a-long-enough-password" } });
     expect(refusal(blockedAccept)).toEqual([429, "too_many_attempts"]);
     expect((await call(readInvite, { params: { token: created.token }, headers: from("192.0.2.202") })).status).toBe(200);
+  });
+});
+
+describe("an invite does not outlive whoever created it", () => {
+  const accept = (token: string) => call(acceptInvite, { method: "POST", params: { token }, body: { name: "Volta", password: "a-long-enough-password" } });
+  const isDead = async (org: string, created: { token: string; id: string; email: string }): Promise<void> => {
+    expect(refusal(await call(readInvite, { params: { token: created.token } }))).toEqual([404, "invite_invalid"]);
+    expect(refusal(await accept(created.token))).toEqual([404, "invite_invalid"]);
+    expect(await findInviteByToken(panel.app, created.token, panel.clock.at)).toBeNull();
+    expect(await stored(org, "select revoked_at is not null as revoked, accepted_at from invites where id = $1", [created.id])).toEqual({ revoked: true, accepted_at: null });
+    expect(await stored(org, "select id from users where email = $1", [created.email])).toBeNull();
+  };
+
+  it("disabling a person revokes the invites they created, others stay, and reactivating does not bring them back", async () => {
+    const { org, owner } = await newOrg("team invite creator disabled");
+    const admin = await createUser(panel.app, org, "admin");
+    const backdoor = await newInvite(admin.cookie, "admin");
+    const fromOwner = await newInvite(owner.cookie);
+    expect((await call(readInvite, { params: { token: backdoor.token } })).status).toBe(200);
+
+    await patch(owner.cookie, admin.id, { disabled: true });
+    await isDead(org, backdoor);
+    expect((await call(readInvite, { params: { token: fromOwner.token } })).status).toBe(200);
+    expect(((await call(team, { cookie: owner.cookie })).data as { invites: Array<{ id: string }> }).invites.map((entry) => entry.id)).toEqual([fromOwner.id]);
+
+    await patch(owner.cookie, admin.id, { disabled: false });
+    await isDead(org, backdoor);
+  });
+
+  it("removing a person revokes the invites they created, without failing", async () => {
+    const { org, owner } = await newOrg("team invite creator removed");
+    const admin = await createUser(panel.app, org, "admin");
+    const backdoor = await newInvite(admin.cookie, "operator");
+    const fromOwner = await newInvite(owner.cookie);
+
+    expect((await remove(owner.cookie, admin.id)).status).toBe(200);
+    await isDead(org, backdoor);
+    expect(await stored(org, "select created_by from invites where id = $1", [backdoor.id])).toEqual({ created_by: null });
+    expect((await accept(fromOwner.token)).status).toBe(200);
+  });
+});
+
+describe("re-inviting follows the same rule as every other change", () => {
+  it("an admin cannot knock down a pending owner invite by re-inviting the e-mail; an owner can", async () => {
+    const { org, owner } = await newOrg("team reinvite owner");
+    const admin = await createUser(panel.app, org, "admin");
+    const forOwner = await newInvite(owner.cookie, "owner");
+
+    for (const role of ["operator", "admin"]) {
+      const attempt = await newInvite(admin.cookie, role, forOwner.email);
+      expect(refusal(attempt.result)).toEqual([403, "cannot_manage_owner"]);
+    }
+    expect(refusal(await call(revokeInvite, { method: "DELETE", cookie: admin.cookie, params: { id: forOwner.id } }))).toEqual([403, "cannot_manage_owner"]);
+    expect((await call(readInvite, { params: { token: forOwner.token } })).data).toMatchObject({ role: "owner" });
+    expect(await withOrg(panel.app, org, (q) => q.many("select id from invites where email = $1 and revoked_at is null", [forOwner.email]))).toEqual([{ id: forOwner.id }]);
+
+    const again = await newInvite(owner.cookie, "operator", forOwner.email);
+    expect(again.result.status).toBe(200);
+    expect((await call(readInvite, { params: { token: forOwner.token } })).status).toBe(404);
+    expect((await call(readInvite, { params: { token: again.token } })).data).toMatchObject({ role: "operator" });
+    // Sobre um convite que ele pode gerir, o administrador reconvida normalmente.
+    expect((await newInvite(admin.cookie, "admin", forOwner.email)).result.status).toBe(200);
   });
 });
 

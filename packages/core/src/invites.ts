@@ -15,17 +15,24 @@ export type AcceptInviteResult = { ok: true; userId: string; organizationId: str
 // Quem aceita um convite ainda não tem sessão: a organização só se descobre pelo token. Por isso
 // estas duas funções atravessam organizações (papel de sistema) e moram aqui, com teste, em vez
 // de espalhadas no painel. A busca é sempre pelo resumo do token; o token em claro só existe no link.
+//
+// Um convite só vale enquanto quem o criou está ativo na equipe. Sem isso, a pessoa cria um
+// convite para si mesma, é desativada e volta pelo link. O painel já revoga os convites ao
+// desativar ou remover alguém; a condição aqui é a defesa que vale mesmo se um caminho novo
+// esquecer de revogar. Criador removido deixa `created_by` nulo, e nulo também não vale.
+const CREATOR_IS_ACTIVE = `exists (select from users c where c.organization_id = i.organization_id and c.id = i.created_by and c.disabled_at is null)`;
 
 /**
- * O convite que este token abre, ou `null`. Inexistente, vencido, já aceito e revogado dão a
- * mesma resposta: quem tenta adivinhar um token não aprende nada sobre o que existe.
+ * O convite que este token abre, ou `null`. Inexistente, vencido, já aceito, revogado e de
+ * criador que saiu da equipe dão a mesma resposta: quem tenta adivinhar um token não aprende
+ * nada sobre o que existe.
  */
 export function findInviteByToken(db: Db, token: string, now: Date): Promise<InviteSummary | null> {
   return withSystem(db, (q) =>
     q.one<InviteSummary>(
       `select i.organization_id as "organizationId", o.name as "organizationName", i.email::text as email, i.name, i.role
          from invites i join organizations o on o.id = i.organization_id
-        where i.token_hash = $1 and i.accepted_at is null and i.revoked_at is null and i.expires_at > $2`,
+        where i.token_hash = $1 and i.accepted_at is null and i.revoked_at is null and i.expires_at > $2 and ${CREATOR_IS_ACTIVE}`,
       [hashToken(token), now],
     ),
   );
@@ -42,8 +49,8 @@ export async function acceptInvite(db: Db, token: string, account: { name: strin
   try {
     return await withSystem(db, async (q) => {
       const invite = await q.one<{ id: string; organizationId: string; email: string; role: string }>(
-        `update invites set accepted_at = $2
-          where token_hash = $1 and accepted_at is null and revoked_at is null and expires_at > $2
+        `update invites i set accepted_at = $2
+          where token_hash = $1 and accepted_at is null and revoked_at is null and expires_at > $2 and ${CREATOR_IS_ACTIVE}
           returning id, organization_id as "organizationId", email::text as email, role`,
         [hashToken(token), now],
       );
