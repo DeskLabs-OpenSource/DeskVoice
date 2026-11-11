@@ -23,7 +23,7 @@ const timeline: TimelineDictionary = {
     deliver_notification: "Notice delivery",
     deliver_webhook: "Delivery to an external system",
     follow_up: "Follow-up task",
-    expire_approvals: "Expired request check",
+    expire_approval: "Expired request check",
   },
   events: {
     call_started: "The call came in",

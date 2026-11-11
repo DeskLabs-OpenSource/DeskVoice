@@ -23,7 +23,7 @@ const timeline = {
     deliver_notification: "Entrega de aviso",
     deliver_webhook: "Envio a um sistema externo",
     follow_up: "Tarefa de acompanhamento",
-    expire_approvals: "Conferência de pedidos vencidos",
+    expire_approval: "Conferência de pedidos vencidos",
   } as Record<string, string>,
   events: {
     call_started: "A ligação chegou",

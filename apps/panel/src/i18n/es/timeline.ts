@@ -23,7 +23,7 @@ const timeline: TimelineDictionary = {
     deliver_notification: "Entrega de aviso",
     deliver_webhook: "Envío a un sistema externo",
     follow_up: "Tarea de seguimiento",
-    expire_approvals: "Revisión de pedidos vencidos",
+    expire_approval: "Revisión de pedidos vencidos",
   },
   events: {
     call_started: "Entró la llamada",
