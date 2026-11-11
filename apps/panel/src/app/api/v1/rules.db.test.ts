@@ -223,6 +223,20 @@ describe("settings", () => {
     expect(hooks.data).toEqual({ key: "webhooks.allowed", value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: true } }] });
   });
 
+  it("keeps inbound.max_concurrent_calls as a whole number from 1 to 50 that shows the factory value until saved", async () => {
+    const params = { key: "inbound.max_concurrent_calls" };
+    const put = (value: unknown, cookie = owner) => call(putSetting, { method: "PUT", cookie, params, body: { value } });
+    expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: 5 });
+
+    for (const bad of [0, 51, 2.5, -1, "5", true]) expect((await put(bad)).code, JSON.stringify(bad)).toBe("validation_error");
+    expect((await put(10, operator.cookie)).status).toBe(403);
+    expect(await stored("select value from settings where key = $1", [params.key])).toBeNull();
+
+    for (const good of [1, 50, 12]) expect((await put(good)).data).toEqual({ key: params.key, value: good });
+    expect(await stored("select value, secret from settings where key = $1", [params.key])).toEqual({ value: 12, secret: false });
+    expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: 12 });
+  });
+
   it("keeps whatsapp.trust_caller_id as a plain boolean that starts unset, and an operator cannot change it", async () => {
     const params = { key: "whatsapp.trust_caller_id" };
     const put = (value: unknown, cookie = owner) => call(putSetting, { method: "PUT", cookie, params, body: { value } });

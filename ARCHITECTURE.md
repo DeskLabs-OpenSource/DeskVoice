@@ -53,7 +53,9 @@ Do toque ao pós-chamada. Entre parênteses, o evento que cada passo grava em `c
    número chamado aponta para um agente. Nasce o registro da chamada (`call_started`).
 3. **Recusa com motivo.** Se o agente não tem motor de voz configurado ou a chave é inválida, a
    chamada não fica muda: é recusada com o motivo `engine_not_configured` e o painel recebe um
-   aviso (`call_refused`).
+   aviso (`call_refused`). Antes disso, na entrada, a chamada que passa do limite de ligações
+   recebidas ao mesmo tempo da organização recebe sinal de ocupado, com o motivo
+   `inbound_limit_reached`.
 4. **Atendimento.** O áudio passa a trafegar entre o Asterisk e `apps/voice` por AudioSocket: uma
    conexão TCP com PCM16 mono a 8 kHz, em quadros de 20 ms (`call_answered`).
 5. **Sessão com o motor.** `apps/voice` abre uma sessão no motor de voz do agente, com as

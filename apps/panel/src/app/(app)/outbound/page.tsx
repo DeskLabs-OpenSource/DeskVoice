@@ -2,9 +2,12 @@
 
 import { PhoneOutgoing, ShieldCheck, X } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
+import commonEn from "../../../i18n/en/common";
 import en from "../../../i18n/en/outbound";
+import commonEs from "../../../i18n/es/common";
 import es from "../../../i18n/es/outbound";
 import { fill } from "../../../i18n/locales";
+import commonPtBR from "../../../i18n/pt-BR/common";
 import ptBR from "../../../i18n/pt-BR/outbound";
 import { useDict } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
@@ -21,6 +24,7 @@ interface Blocked {
 
 export default function OutboundPage() {
   const t = useDict(ptBR, en, es);
+  const common = useDict(commonPtBR, commonEn, commonEs);
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
   const policy = useApi<OutboundPolicy>("/outbound-policy");
@@ -31,6 +35,8 @@ export default function OutboundPage() {
   const limits = useAction();
   const add = useAction();
   const remove = useAction();
+  // O número cuja remoção espera confirmação: o botão da linha só abre o pedido, nunca remove.
+  const [removing, setRemoving] = useState<string | null>(null);
   useEffect(() => {
     if (policy.data) setDraft(policy.data);
   }, [policy.data]);
@@ -162,22 +168,49 @@ export default function OutboundPage() {
             <div className="grid gap-2">
               <p className="text-[0.87rem] font-bold text-muted">{fill(t.dncCount, { n: blocked.data.length })}</p>
               <ul className="grid gap-x-8 sm:grid-cols-2">
-                {blocked.data.map((entry) => (
-                  <li key={entry.e164} className="flex items-center gap-3 border-b border-line py-2">
-                    <span className="data">{formatPhone(entry.e164)}</span>
-                    <span className="mr-auto truncate text-[0.87rem] text-muted">{entry.reason}</span>
-                    {canConfigure ? (
-                      <button
-                        type="button"
-                        aria-label={fill(t.dncRemove, { number: formatPhone(entry.e164) })}
-                        className="grid size-8 cursor-pointer place-items-center rounded-xs text-muted hover:bg-sunken hover:text-fail"
-                        onClick={() => void remove.run(() => api("/do-not-call", { method: "DELETE", body: { number: entry.e164 } })).then(blocked.reload)}
-                      >
-                        <X size={16} weight="bold" aria-hidden />
-                      </button>
-                    ) : null}
-                  </li>
-                ))}
+                {blocked.data.map((entry) => {
+                  const pretty = formatPhone(entry.e164);
+                  return (
+                    <li key={entry.e164} className="grid gap-2 border-b border-line py-2">
+                      <div className="flex items-center gap-3">
+                        <span className="data">{pretty}</span>
+                        <span className="mr-auto truncate text-[0.87rem] text-muted">{entry.reason}</span>
+                        {canConfigure ? (
+                          <button
+                            type="button"
+                            aria-label={fill(t.dncRemove, { number: pretty })}
+                            className="grid size-8 cursor-pointer place-items-center rounded-xs text-muted hover:bg-sunken hover:text-fail"
+                            onClick={() => setRemoving(removing === entry.e164 ? null : entry.e164)}
+                          >
+                            <X size={16} weight="bold" aria-hidden />
+                          </button>
+                        ) : null}
+                      </div>
+                      {canConfigure && removing === entry.e164 ? (
+                        <Notice tone="fail">
+                          <p>{fill(t.dncRemoveConfirm, { number: pretty })}</p>
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            <Button
+                              variant="danger"
+                              busy={remove.busy}
+                              onClick={() =>
+                                void remove.run(() => api("/do-not-call", { method: "DELETE", body: { number: entry.e164 } })).then((ok) => {
+                                  if (ok) setRemoving(null);
+                                  blocked.reload();
+                                })
+                              }
+                            >
+                              {fill(t.dncRemoveYes, { number: pretty })}
+                            </Button>
+                            <Button variant="ghost" onClick={() => setRemoving(null)}>
+                              {common.actions.cancel}
+                            </Button>
+                          </div>
+                        </Notice>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ) : null}

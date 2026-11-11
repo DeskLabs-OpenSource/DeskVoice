@@ -68,6 +68,8 @@ describe("cliente ARI", { timeout: 60_000 }, () => {
     await client.originate({ endpoint: dialString("+5531999998888", "t1"), context: "deskvoice-audio", extension: "s", channelId: "call-1", callerId: "+553133334444", variables: { AUDIOSOCKET_UUID: "call-1" } });
     await client.reloadModule("res_pjsip.so");
     expect(await client.listEndpoints("PJSIP")).toEqual([{ resource: "trunk-a", state: "online" }]);
+    await client.hangup("chan-1");
+    await client.hangup("chan-1", "busy");
 
     expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
       "POST /ari/channels/chan%201/variable?variable=AUDIOSOCKET_UUID&value=abc",
@@ -75,6 +77,8 @@ describe("cliente ARI", { timeout: 60_000 }, () => {
       "POST /ari/channels",
       "PUT /ari/asterisk/modules/res_pjsip.so",
       "GET /ari/endpoints/PJSIP",
+      "DELETE /ari/channels/chan-1",
+      "DELETE /ari/channels/chan-1?reason=busy",
     ]);
     expect(requests[0]?.authorization).toBe(`Basic ${Buffer.from("deskvoice:s3nha").toString("base64")}`);
     expect(requests[1]?.body).toEqual({ context: "deskvoice-audio", extension: "s", priority: 1 });

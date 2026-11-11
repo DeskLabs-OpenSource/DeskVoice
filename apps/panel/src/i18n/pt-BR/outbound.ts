@@ -28,6 +28,8 @@ const outbound = {
   dncAdd: "Adicionar à lista",
   dncEmpty: "A lista está vazia.",
   dncRemove: "Remover {number} da lista",
+  dncRemoveConfirm: "Remover {number} da lista de não ligar? Essa pessoa pediu para não receber ligações. Fora da lista, o agente volta a poder ligar para ela.",
+  dncRemoveYes: "Remover {number}",
   dncCount: "Na lista: {n}",
 };
 

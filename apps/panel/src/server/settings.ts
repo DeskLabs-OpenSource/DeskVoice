@@ -1,4 +1,4 @@
-import { encryptSecret } from "@deskvoice/core";
+import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
@@ -16,6 +16,8 @@ interface SettingDefinition<T> {
 
 export interface Setting {
   secret: boolean;
+  /** O que vale sem nada gravado, quando a tela precisa mostrar o valor em vigor. */
+  fallback?: unknown;
   /** Valida a entrada (lança `ZodError`) e devolve o que gravar. */
   store(input: unknown, key: Buffer, previous: unknown): unknown;
   view(stored: unknown): unknown;
@@ -95,6 +97,8 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     "approvals.default_on_timeout": plain(z.enum(["denied", "approved"])),
     "recording_notice.text": plain(z.string().trim().min(1).max(500)),
     "network.public_ip": plain(z.ipv4()),
+    // Ligações recebidas pela operadora ao mesmo tempo. Ausente vale o teto de fábrica.
+    [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },
   };
   // Uma chave por motor que pede chave: motor novo na pasta ganha a configuração sem editar aqui.
   for (const engine of engines) if (!engine.keyless) definitions[engineKeySetting(engine.id)] = secretText;

@@ -60,6 +60,7 @@ const timeline: TimelineDictionary = {
     process_restarted: "El proceso de voz se reinició en medio de la llamada.",
     no_agent: "Ningún agente atiende este número.",
     agent_disabled: "El agente de este número está apagado.",
+    inbound_limit_reached: "Se alcanzó el límite de llamadas recibidas al mismo tiempo. Quien llamó recibió señal de ocupado. El límite se ajusta en Configuración.",
     hangup: "Quien llamó colgó.",
     caller_hangup: "Quien llamó colgó.",
     agent_ended: "El agente terminó la conversación.",

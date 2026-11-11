@@ -30,6 +30,8 @@ const outbound: OutboundDictionary = {
   dncAdd: "Agregar a la lista",
   dncEmpty: "La lista está vacía.",
   dncRemove: "Quitar {number} de la lista",
+  dncRemoveConfirm: "¿Quitar {number} de la lista de no llamar? Esta persona pidió no recibir llamadas. Fuera de la lista, el agente puede volver a llamarla.",
+  dncRemoveYes: "Quitar {number}",
   dncCount: "En la lista: {n}",
 };
 

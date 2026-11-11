@@ -47,7 +47,8 @@ export interface OriginateParams {
 }
 
 export interface AriClient {
-  hangup(channelId: string): Promise<void>;
+  /** `busy` faz quem ligou receber sinal de ocupado em vez de um desligamento comum. */
+  hangup(channelId: string, reason?: "busy"): Promise<void>;
   setVariable(channelId: string, name: string, value: string): Promise<void>;
   /** Devolve ao dialplan um canal que está na Stasis. */
   continueDialplan(channelId: string, context: string, extension: string, priority?: number): Promise<void>;
@@ -153,9 +154,9 @@ export function createAriClient(options: AriClientOptions): AriClient {
   }
 
   return {
-    async hangup(channelId) {
+    async hangup(channelId, reason) {
       try {
-        await request("DELETE", `/channels/${encodeURIComponent(channelId)}`);
+        await request("DELETE", `/channels/${encodeURIComponent(channelId)}`, reason ? { reason } : {});
       } catch (error) {
         // Canal que já não existe está desligado: era o que se queria.
         if (!(error instanceof AriError && error.status === 404)) throw error;
