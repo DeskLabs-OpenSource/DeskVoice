@@ -17,6 +17,7 @@ const unique = (prefix: string): string => `${prefix}-${randomUUID()}`;
 const factories: Record<string, Factory> = {
   users: (organization_id) => ({ organization_id, email: `${unique("user")}@example.com`, name: "User", password_hash: "x", role: "owner" }),
   sessions: (organization_id, p) => ({ organization_id, user_id: p.users?.id, token_hash: unique("token"), expires_at: at }),
+  invites: (organization_id, p) => ({ organization_id, email: `${unique("invite")}@example.com`, name: "Invited", role: "operator", token_hash: unique("invite-token"), expires_at: at, created_by: p.users?.id }),
   settings: (organization_id) => ({ organization_id, key: unique("key"), value: { on: true } }),
   trunks: (organization_id) => ({ organization_id, name: "Trunk", host: "sip.example.com", auth_mode: "register" }),
   agents: (organization_id) => ({ organization_id, name: "Agent", engine: "simulated" }),

@@ -1,3 +1,4 @@
+import { withOrg } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
 import { createFixture, createUser, eventsOf, notificationsOf, putWhatsAppConnector, tasksOf } from "../../test/helpers";
@@ -43,6 +44,20 @@ describe("notify_human", () => {
     const tasks = await tasksOf(app, ctx.organizationId);
     expect(tasks.map((task) => task.kind)).toEqual(["deliver_notification", "deliver_notification", "deliver_notification"]);
     expect(tasks.map((task) => task.payload.notificationId).sort()).toEqual(notifications.map((notification) => notification.id).sort());
+  });
+
+  it("quem foi desativado não recebe mais os avisos da equipe", async () => {
+    // Quem saiu da empresa não pode continuar recebendo, no próprio WhatsApp, avisos de chamada
+    // com dados de quem ligou.
+    const ctx = await createFixture(app, "notify desativado");
+    await putWhatsAppConnector(app, ctx.organizationId);
+    await createUser(app, ctx.organizationId, "+5531988887777");
+    const gone = await createUser(app, ctx.organizationId, "+5531977776666");
+    await withOrg(app, ctx.organizationId, (q) => q.exec("update users set disabled_at = now() where id = $1", [gone]));
+
+    await runTool(notifyHuman, { message: "Cliente pediu retorno.", urgency: "normal" }, ctx);
+    const targets = (await notificationsOf(app, ctx.organizationId)).filter((n) => n.channel === "whatsapp").map((n) => n.target);
+    expect(targets).toEqual(["+5531988887777"]);
   });
 
   it("com conector mas ninguém com WhatsApp cadastrado, fica só no painel", async () => {
