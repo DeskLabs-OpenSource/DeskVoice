@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# ss de mentira: devolve as portas em escuta que o teste escreveu em $FAKE_DIR.
+case "$1" in *u*) cat "$FAKE_DIR/ss_udp" 2>/dev/null ;; *) cat "$FAKE_DIR/ss_tcp" 2>/dev/null ;; esac
+exit 0

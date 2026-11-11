@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# curl de mentira: nenhum teste fala com a internet. Devolve o IP de $FAKE_DIR/public_ip.
+cat "$FAKE_DIR/public_ip" 2>/dev/null

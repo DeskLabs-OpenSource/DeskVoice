@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Docker de mentira para os testes: registra cada chamada em $FAKE_DIR/calls.log e
+# responde a partir de arquivos em $FAKE_DIR. Nunca fala com um Docker de verdade.
+echo "$*" >> "$FAKE_DIR/calls.log"
+args=" $* "
+last="${*: -1}"
+answer() { if [ -f "$FAKE_DIR/$1" ]; then cat "$FAKE_DIR/$1"; fi; }
+drain() { if [ ! -t 0 ]; then cat >/dev/null 2>&1 || true; fi; }
+case "$args" in
+  " info "*|" compose version "*|" --version "*) echo "fake"; exit 0 ;;
+  *" ps -q "*) if grep -qx "$last" "$FAKE_DIR/running" 2>/dev/null; then echo "cid-$last"; fi; exit 0 ;;
+  *" ps "*) answer ps_output; exit 0 ;;
+  *" pg_isready "*) exit "$(cat "$FAKE_DIR/pg_isready_exit" 2>/dev/null || echo 0)" ;;
+  *"core show uptime"*) echo "System uptime: 3 minutes"; exit 0 ;;
+  *" exec -T panel node "*) answer panel_health; exit 0 ;;
+  *" exec -T voice node "*) exit "$(cat "$FAKE_DIR/voice_exit" 2>/dev/null || echo 0)" ;;
+  *" pg_dump "*) if [ -f "$FAKE_DIR/pg_dump_fail" ]; then exit 1; fi; printf 'FAKE-DUMP-%s' "$(answer dump_seed)"; exit 0 ;;
+  *" pg_restore "*) drain; exit "$(cat "$FAKE_DIR/pg_restore_exit" 2>/dev/null || echo 0)" ;;
+  *"count(*) as c"*)
+    case "$args" in
+      *" -d deskvoice_verify_"*) answer counts_backup ;;
+      *" -d deskvoice_restore "*) answer counts_restore ;;
+      *) if [ -f "$FAKE_DIR/counts_live" ]; then cat "$FAKE_DIR/counts_live"; else answer counts_restore; fi ;;
+    esac; exit 0 ;;
+  *"select count(*) from users"*) answer users_count; exit 0 ;;
+  *" logs "*) answer logs; exit 0 ;;
+  *" run --rm migrate"*) drain; exit "$(cat "$FAKE_DIR/migrate_exit" 2>/dev/null || echo 0)" ;;
+  *) drain; exit 0 ;;
+esac
