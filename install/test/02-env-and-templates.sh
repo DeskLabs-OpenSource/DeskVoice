@@ -42,6 +42,7 @@ equal "env_set preserva caracteres especiais" 'a\b&c|d$e "f"' "$(env_get "$D/x.e
 render_asterisk_config
 G="$D/asterisk/generated"
 contains "ari.conf recebe a senha da ARI" "$(cat "$G/ari.conf")" "password = $(env_get "$D/app.env" ARI_PASSWORD)"
+equal "pasta com a senha da ARI fechada para outros usuários" 700 "$(mode_of "$G")"
 contains "rtp.conf recebe o início da faixa" "$(cat "$G/rtp.conf")" "rtpstart=20000"
 contains "rtp.conf recebe o fim da faixa" "$(cat "$G/rtp.conf")" "rtpend=20200"
 contains "pjsip.conf anuncia o IP público no áudio" "$(cat "$G/pjsip.conf")" "external_media_address=198.51.100.7"

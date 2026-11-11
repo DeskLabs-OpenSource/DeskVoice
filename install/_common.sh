@@ -149,7 +149,8 @@ render_template() {  # render_template <modelo> <destino>; os valores vêm do am
         line = out line
       }
       print line }' "$src" > "$tmp"
-  # 644: o Asterisk lê estes arquivos com o usuário dele, de dentro do contêiner.
+  # 644 no arquivo, 700 na pasta (ver render_asterisk_config): dentro do contêiner o
+  # Asterisk lê com o usuário dele; na VPS, ninguém além do dono entra na pasta.
   chmod 644 "$tmp"
   mv "$tmp" "$dst"
 }
@@ -157,6 +158,11 @@ render_asterisk_config() {
   ARI_PASSWORD="$(env_get "$APP_ENV_FILE" ARI_PASSWORD)" PUBLIC_IP="$(env_get "$APP_ENV_FILE" PUBLIC_IP)" \
   RTP_START="$(env_get "$ENV_FILE" RTP_START)" RTP_END="$(env_get "$ENV_FILE" RTP_END)"
   export ARI_PASSWORD PUBLIC_IP RTP_START RTP_END
+  # ari.conf guarda a senha de controle das chamadas. O contêiner monta cada arquivo
+  # direto (a permissão da pasta não o afeta), então fechar a pasta protege a senha de
+  # outros usuários da VPS sem depender do número de usuário que o Asterisk usa.
+  mkdir -p "$GENERATED_DIR"
+  chmod 700 "$GENERATED_DIR"
   render_template "$DEPLOY_DIR/asterisk/ari.conf.tmpl" "$GENERATED_DIR/ari.conf"
   render_template "$DEPLOY_DIR/asterisk/rtp.conf.tmpl" "$GENERATED_DIR/rtp.conf"
   render_template "$DEPLOY_DIR/asterisk/pjsip.conf.base" "$GENERATED_DIR/pjsip.conf"
