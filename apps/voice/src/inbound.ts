@@ -19,6 +19,8 @@ type Refusal = "no_agent" | "agent_disabled" | "inbound_limit_reached";
 
 // Estourar o teto costuma vir em rajada: um aviso por janela basta. Cada recusa continua no histórico.
 const LIMIT_NOTICE_EVERY_MS = 10 * 60 * 1000;
+// Folga sobre o tempo máximo de chamada antes de considerar presa uma linha "em andamento".
+const STUCK_CALL_SLACK_SECONDS = 120;
 
 const NOTICE: Record<Refusal, (dialed: string, limit: number) => string> = {
   no_agent: (dialed) => `Uma ligação para ${dialed} foi recusada porque nenhum agente atende esse número. Escolha o agente do número em Linha telefônica.`,
@@ -67,9 +69,15 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
       limit = inboundLimitOf(stored?.value);
       // Só as recebidas pela operadora: a chamada pelo navegador também é `inbound`, mas nasce sem
       // número de destino e tem o teto dela (`web-calls.ts`).
+      // E só as que ainda podem estar vivas: nenhuma chamada dura mais que o maior tempo máximo dos
+      // agentes da organização. Linha mais velha que isso ficou presa (o processo caiu no meio, ou
+      // o fim do canal não chegou) e não pode segurar vaga, senão cinco linhas presas dariam
+      // ocupado a toda ligação até alguém reiniciar o processo de voz.
+      const longest = await q.one<{ seconds: number }>("select coalesce(max(max_call_seconds), 600)::int as seconds from agents where organization_id = $1", [route.organizationId]);
+      const alive = new Date(clock.now().getTime() - ((longest?.seconds ?? 600) + STUCK_CALL_SLACK_SECONDS) * 1000);
       const active = await q.one<{ count: number }>(
-        "select count(*)::int as count from calls where organization_id = $1 and direction = 'inbound' and to_e164 is not null and status in ('ringing', 'in_progress')",
-        [route.organizationId],
+        "select count(*)::int as count from calls where organization_id = $1 and direction = 'inbound' and to_e164 is not null and status in ('ringing', 'in_progress') and started_at > $2",
+        [route.organizationId, alive],
       );
       if ((active?.count ?? 0) >= limit) refusal = "inbound_limit_reached";
     }

@@ -180,6 +180,20 @@ describe("teto de ligações recebidas ao mesmo tempo", { timeout: 120_000 }, ()
     expect((await receive(incoming(trunkId))).ari.log).toEqual(BUSY);
   });
 
+  it("chamada presa além do tempo máximo dos agentes não segura vaga", async () => {
+    const { organizationId, trunkId } = await line("inbound-limit-stuck");
+    await setLimit(organizationId, 1);
+    const clock = fakeClock();
+    expect((await receive(incoming(trunkId), clock)).ari.log.at(-1)).toBe(ACCEPTED);
+    const [first] = await callsOf(app, organizationId);
+    await withSystem(app, (q) => q.exec("update calls set status = 'in_progress' where id = $1", [first?.id]));
+
+    clock.advance((600 + 119) * 1000); // tempo máximo de fábrica do agente mais a folga, menos um segundo
+    expect((await receive(incoming(trunkId), clock)).ari.log).toEqual(BUSY);
+    clock.advance(2000);
+    expect((await receive(incoming(trunkId), clock)).ari.log.at(-1)).toBe(ACCEPTED);
+  });
+
   it("chamada que termina libera a vaga, em andamento continua ocupando", async () => {
     const { organizationId, trunkId } = await line("inbound-limit-release");
     await setLimit(organizationId, 1);
