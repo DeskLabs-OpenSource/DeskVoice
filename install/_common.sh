@@ -163,6 +163,12 @@ render_asterisk_config() {
   # outros usuários da VPS sem depender do número de usuário que o Asterisk usa.
   mkdir -p "$GENERATED_DIR"
   chmod 700 "$GENERATED_DIR"
+  # TUDO o que o Asterisk monta sai desta pasta, com permissão definida aqui. Montar arquivo direto
+  # do repositório fazia a instalação depender do umask de quem baixou: num servidor endurecido
+  # (umask 077) o plano de discagem e a ARI ficavam ilegíveis para o Asterisk, que subia "saudável"
+  # e não atendia nada.
+  render_template "$DEPLOY_DIR/asterisk/extensions.conf" "$GENERATED_DIR/extensions.conf"
+  render_template "$DEPLOY_DIR/asterisk/http.conf" "$GENERATED_DIR/http.conf"
   render_template "$DEPLOY_DIR/asterisk/ari.conf.tmpl" "$GENERATED_DIR/ari.conf"
   render_template "$DEPLOY_DIR/asterisk/rtp.conf.tmpl" "$GENERATED_DIR/rtp.conf"
   render_template "$DEPLOY_DIR/asterisk/pjsip.conf.base" "$GENERATED_DIR/pjsip.conf"

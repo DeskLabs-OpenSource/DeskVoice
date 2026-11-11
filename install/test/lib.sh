@@ -50,6 +50,7 @@ fake_install() {
   printf '%s\n' postgres asterisk panel voice routines > "$FAKE_DIR/running"
   printf '%s\n' 'panel|ok|respondendo' 'trunk|warn|nenhuma linha cadastrada ainda' 'engine|warn|nenhuma chave de motor de voz configurada' > "$FAKE_DIR/panel_health"
   echo 0 > "$FAKE_DIR/pg_isready_exit"
+  printf 'asterisk|ok|PJSIP 20.20.1\n' > "$FAKE_DIR/voice_health"
   printf 'UNCONN 0 0 0.0.0.0:5060 0.0.0.0:*\n' > "$FAKE_DIR/ss_udp"
 }
 finish() {

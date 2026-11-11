@@ -97,8 +97,10 @@ services:
       # Faixa de RTP: precisa ser idêntica à de asterisk/generated/rtp.conf.
       - "${RTP_START:-10000}-${RTP_END:-10200}:${RTP_START:-10000}-${RTP_END:-10200}/udp"
     volumes:
-      - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
-      - ./asterisk/http.conf:/etc/asterisk/http.conf:ro
+      # Tudo sai de asterisk/generated, que o instalador escreve com a permissão certa: o Asterisk
+      # lê com outro usuário, e arquivo montado direto do repositório herdava o umask de quem baixou.
+      - ./asterisk/generated/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/generated/http.conf:/etc/asterisk/http.conf:ro
       - ./asterisk/generated/ari.conf:/etc/asterisk/ari.conf:ro
       - ./asterisk/generated/rtp.conf:/etc/asterisk/rtp.conf:ro
       - ./asterisk/generated/pjsip.conf:/etc/asterisk/pjsip.conf:ro

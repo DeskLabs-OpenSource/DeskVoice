@@ -8,7 +8,7 @@
 #
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
 # Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, Asterisk,
-# worker de voz, rotinas); 2 = falhou outra peça (linha, motor de voz, portas, disco).
+# worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (linha, motor de voz, portas, disco).
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 as_json=0; only_essential=0
@@ -72,8 +72,17 @@ fi
 # ── Worker de voz e rotinas ──
 if ! running voice; then
   add voice "Worker de voz" 1 falha "o contêiner de voz não está rodando; nenhuma ligação é atendida. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 voice"
-elif dc exec -T voice node -e "fetch('http://127.0.0.1:8090/health',{signal:AbortSignal.timeout(8000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+elif voice_line="$(dc exec -T voice node -e "fetch('http://127.0.0.1:8090/health',{signal:AbortSignal.timeout(8000)}).then(async r=>{if(!r.ok)process.exit(1);const j=await r.json().catch(()=>({}));const a=j.asterisk||{};console.log('asterisk|'+(a.status||'fail')+'|'+String(a.detail||'sem detalhe').replace(/[\\n|]/g,' '))}).catch(()=>process.exit(1))" 2>/dev/null)"; then
   add voice "Worker de voz" 1 ok "respondendo"
+  # O Asterisk responder a comandos não basta: é por esta conexão que a ligação chega ao agente.
+  # Sem ela o Asterisk fica de pé e nenhuma chamada é atendida.
+  ari_status="$(printf '%s\n' "$voice_line" | awk -F'|' '$1 == "asterisk" { print $2; exit }')"
+  ari_detail="$(printf '%s\n' "$voice_line" | awk -F'|' '$1 == "asterisk" { print $3; exit }')"
+  if [ "$ari_status" = ok ]; then
+    add telephony "Controle da telefonia" 1 ok "o processo de voz está conectado ao Asterisk${ari_detail:+ ($ari_detail)}"
+  else
+    add telephony "Controle da telefonia" 1 falha "o processo de voz não consegue falar com o Asterisk (${ari_detail:-sem resposta}). Causa mais comum: o Asterisk não leu a configuração. Rode de novo: bash install/install.sh. Se continuar: docker compose -f deploy/docker-compose.yml logs --tail 50 asterisk"
+  fi
 else
   add voice "Worker de voz" 1 falha "o worker de voz está rodando mas não responde; costuma ser falta de conexão com o Asterisk"
 fi
