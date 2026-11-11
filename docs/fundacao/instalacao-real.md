@@ -47,6 +47,11 @@ Registrado por quem conduziu a instalação (a sessão que constrói o DeskVoice
 | 14:44, depois do PR #4 | `git pull` e instalador de novo | Painel em `127.0.0.1:3080` e voz do navegador em `127.0.0.1:3081`; de fora, pela internet, nenhuma das duas responde |
 | 14:45 | Conversa por voz com o motor OpenAI Realtime, por um cliente de teste que faz o papel do navegador com fala gravada | Fala em português entendida e transcrita, ferramenta `notify_human` acionada, 67 s, custo estimado de 33 centavos de dólar |
 
+| por volta de 17:10, depois do PR #7 | Backup, `git pull` e instalador de novo, com a instalação em duas portas | A instalação passou para a entrada única: só o Caddy publica porta (`127.0.0.1:3080`), painel e voz deixaram de publicar. `healthcheck.sh` com a linha "Entrada única: ok". Dados preservados |
+| por volta de 17:20 | Conversa por voz pela entrada única, pelo mesmo cliente de teste, através de um túnel SSH para a porta única | Aviso de gravação, saudação, fala em português entendida e respondida; 17 centavos de dólar. O cliente de teste não foi guardado no repositório |
+| 19:10, depois da versão 0.1.0 | `git pull` (a `main` era o commit da tag) e `bash install/update.sh --yes`, com a instalação em `stable` e imagens construídas na própria VPS | Primeira atualização entre versões. Backup conferido, as três imagens `0.1.0` baixadas do registro sem login, migrations, subida, saída 0. Depois: `DESKVOICE_VERSION=0.1.0`, a cópia do endereço das imagens saiu do `.env`, contêineres nas imagens publicadas, Postgres 17.11 e Caddy 2.11.9, todas as peças da saúde em ok, agente, usuário e nove chamadas preservados. Compose 5.1.4 |
+| por volta de 19:20 | Comando de uma linha (`get.sh`) em simulação (`--yes --dry-run`), numa pasta separada da mesma VPS | O clone ficou na tag `v0.1.0`; o instalador reconheceu a 0.1.0 como a publicada mais recente e disse que baixaria as imagens dela, sem construir. Nada foi alterado na instalação viva |
+
 Então rodar o instalador uma segunda vez **foi** exercitado, três vezes, numa instalação com dados. O que continua sem prova está na lista acima.
 
 Correção sobre a causa do defeito de permissão: o `umask 077` não era da máquina. Veio do comando de quem instalava, que restringiu as permissões para proteger o arquivo da senha, e o instalador herdou. Um servidor endurecido teria o mesmo efeito, mas essa instalação não prova como é o padrão da VPS do parceiro.
@@ -55,3 +60,10 @@ Correção sobre a causa do defeito de permissão: o `umask 077` não era da má
 
 O repositório ficou público em 2026-11-11 às 12:09 UTC. A correção do defeito entrou às 13:47 UTC.
 A instalação real aconteceu depois da publicação (item 13.5 da conformidade).
+
+## O que continua sem prova depois da 0.1.0
+
+- Instalação do zero, de verdade, pelo comando de uma linha contra uma versão publicada, numa máquina limpa. Só a simulação e a atualização foram exercitadas.
+- Conversa por voz depois da atualização para a 0.1.0.
+- A volta automática do `update.sh` numa VPS.
+- Instalação em processador ARM, que só existe construindo na própria máquina.
