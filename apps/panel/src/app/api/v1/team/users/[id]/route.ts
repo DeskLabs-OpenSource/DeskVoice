@@ -24,6 +24,9 @@ export const PATCH = handle({ body: z.object({ role: roleName.optional(), disabl
   if (disabled) {
     await q.exec("delete from sessions where user_id = $1", [member.id]);
     await revokeInvitesCreatedBy(q, member.id, deps.clock.now());
+  } else if (role !== member.role) {
+    // Papel novo: caem os convites que a pessoa criou e que, com ele, não poderia mais emitir.
+    await revokeInvitesCreatedBy(q, member.id, deps.clock.now(), role);
   }
   return person;
 });

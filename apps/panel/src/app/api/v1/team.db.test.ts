@@ -296,6 +296,45 @@ describe("an invite does not outlive whoever created it", () => {
   });
 });
 
+describe("an invite does not outlive the role of whoever created it", () => {
+  const alive = async (token: string): Promise<boolean> => (await call(readInvite, { params: { token } })).status === 200;
+  const revoked = async (org: string, id: string) => (await stored(org, "select revoked_at is not null as revoked from invites where id = $1", [id]))?.revoked;
+
+  it("demoted to admin loses the owner invites and keeps the rest; demoted to operator loses all; the links die on the public routes", async () => {
+    const { org, owner } = await newOrg("team invite creator demoted");
+    const second = await createUser(panel.app, org, "owner");
+    const forOwner = await newInvite(second.cookie, "owner");
+    const forAdmin = await newInvite(second.cookie, "admin");
+    const forOperator = await newInvite(second.cookie, "operator");
+    const fromOther = await newInvite(owner.cookie, "owner");
+
+    await patch(owner.cookie, second.id, { role: "admin" });
+    expect([await alive(forOwner.token), await alive(forAdmin.token), await alive(forOperator.token), await alive(fromOther.token)]).toEqual([false, true, true, true]);
+    expect([await revoked(org, forOwner.id), await revoked(org, forAdmin.id), await revoked(org, forOperator.id)]).toEqual([true, false, false]);
+    const backdoor = await call(acceptInvite, { method: "POST", params: { token: forOwner.token }, body: { name: "Dono", password: "a-long-enough-password" } });
+    expect(refusal(backdoor)).toEqual([404, "invite_invalid"]);
+    expect(await stored(org, "select id from users where email = $1", [forOwner.email])).toBeNull();
+
+    await patch(owner.cookie, second.id, { role: "operator" });
+    expect([await alive(forAdmin.token), await alive(forOperator.token), await alive(fromOther.token)]).toEqual([false, false, true]);
+    expect([await revoked(org, forAdmin.id), await revoked(org, forOperator.id)]).toEqual([true, true]);
+
+    // Promover de volta não ressuscita o que foi revogado.
+    await patch(owner.cookie, second.id, { role: "owner" });
+    expect([await alive(forOwner.token), await alive(forAdmin.token), await alive(forOperator.token)]).toEqual([false, false, false]);
+  });
+
+  it("a promotion revokes nothing", async () => {
+    const { org, owner } = await newOrg("team invite creator promoted");
+    const admin = await createUser(panel.app, org, "admin");
+    const forAdmin = await newInvite(admin.cookie, "admin");
+    const forOperator = await newInvite(admin.cookie, "operator");
+    await patch(owner.cookie, admin.id, { role: "owner" });
+    expect([await alive(forAdmin.token), await alive(forOperator.token)]).toEqual([true, true]);
+    expect([await revoked(org, forAdmin.id), await revoked(org, forOperator.id)]).toEqual([false, false]);
+  });
+});
+
 describe("re-inviting follows the same rule as every other change", () => {
   it("an admin cannot knock down a pending owner invite by re-inviting the e-mail; an owner can", async () => {
     const { org, owner } = await newOrg("team reinvite owner");

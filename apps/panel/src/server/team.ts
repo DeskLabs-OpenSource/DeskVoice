@@ -1,4 +1,4 @@
-import type { OrgQuery } from "@deskvoice/core";
+import { TEAM_ROLES, canManageRole, type OrgQuery } from "@deskvoice/core";
 import { ApiError, notFound, type Role, type Session } from "./context";
 
 export interface TeamMember {
@@ -25,9 +25,13 @@ export async function loadMember(q: OrgQuery, id: string | undefined): Promise<T
   return member;
 }
 
-/** Só um dono mexe em dono, ou cria um: administrador gere administradores e operadores. */
+/**
+ * Quem faz o pedido precisa gerir todos os papéis envolvidos (o atual e o novo da pessoa, o do
+ * convite que existe e o do que vai ser criado). A regra em si é `canManageRole`, do core: aqui
+ * ela só vira erro. Na prática: só um dono mexe em dono, ou cria um.
+ */
 export function requireOwnerToManage(session: Session, ...roles: Array<Role | undefined>): void {
-  if (session.role !== "owner" && roles.includes("owner")) {
+  if (roles.some((role) => role !== undefined && !canManageRole(session.role, role))) {
     throw new ApiError(403, "cannot_manage_owner", "Only an owner can invite, change, disable or remove an owner.");
   }
 }
@@ -47,10 +51,16 @@ export async function requireAnotherOwner(q: OrgQuery, member: TeamMember): Prom
 }
 
 /**
- * Revoga os convites pendentes que a pessoa criou. Chamar na mesma transação em que ela é
- * desativada ou removida: quem sai da equipe não deixa uma porta aberta para voltar (um convite
- * feito para si mesmo, com outro e-mail). Reativar a pessoa não desfaz isto.
+ * Revoga os convites pendentes que a pessoa criou e que ela não poderia mais emitir. Chamar na
+ * mesma transação em que ela é desativada, removida ou muda de papel: quem sai da equipe (ou
+ * perde poder) não deixa para trás uma porta aberta com o poder antigo. Reativar ou promover de
+ * volta não desfaz isto.
+ *
+ * Sem `roleNow` (desativada ou removida) caem todos. Com `roleNow`, caem os convites de papéis
+ * que esse papel não gere, pela mesma `canManageRole`: rebaixada a administrador perde os de
+ * dono; a operador, todos; promovida, nenhum.
  */
-export async function revokeInvitesCreatedBy(q: OrgQuery, userId: string, now: Date): Promise<void> {
-  await q.exec("update invites set revoked_at = $2 where created_by = $1 and accepted_at is null and revoked_at is null", [userId, now]);
+export async function revokeInvitesCreatedBy(q: OrgQuery, userId: string, now: Date, roleNow?: Role): Promise<void> {
+  const lost = TEAM_ROLES.filter((role) => roleNow === undefined || !canManageRole(roleNow, role));
+  await q.exec("update invites set revoked_at = $2 where created_by = $1 and accepted_at is null and revoked_at is null and role = any($3)", [userId, now, lost]);
 }

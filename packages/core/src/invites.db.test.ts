@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createOrganization, openTestDbs } from "../test/helpers";
-import { acceptInvite, findInviteByToken } from "./invites";
+import { TEAM_ROLES, acceptInvite, canManageRole, findInviteByToken } from "./invites";
 import { hashToken } from "./password";
 import { withOrg } from "./with-org";
 
@@ -12,9 +12,9 @@ let orgA: string;
 let orgB: string;
 const creators = new Map<string, string>();
 
-async function member(organizationId: string): Promise<string> {
+async function member(organizationId: string, role = "owner"): Promise<string> {
   const row = await withOrg(app, organizationId, (q) =>
-    q.one<{ id: string }>("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, 'Quem convida', 'x', 'admin') returning id", [organizationId, `${randomUUID()}@example.test`]),
+    q.one<{ id: string }>("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, 'Quem convida', 'x', $3) returning id", [organizationId, `${randomUUID()}@example.test`, role]),
   );
   return row?.id ?? "";
 }
@@ -141,5 +141,40 @@ describe("an invite is only as good as whoever created it", () => {
     // Convite de outra pessoa, na mesma organização, não é afetado.
     expect(await findInviteByToken(app, untouched.token, now)).not.toBeNull();
     expect((await acceptInvite(app, untouched.token, { name: "Entra", passwordHash: "h" }, now)).ok).toBe(true);
+  });
+});
+
+describe("an invite is only as good as the role of whoever created it", () => {
+  it("the query agrees with canManageRole on all nine pairs of creator role and invite role", async () => {
+    const pairs = TEAM_ROLES.flatMap((creatorRole) => TEAM_ROLES.map((inviteRole) => ({ creatorRole, inviteRole })));
+    expect(pairs).toHaveLength(9);
+    for (const { creatorRole, inviteRole } of pairs) {
+      const created = await invite(orgA, { created_by: await member(orgA, creatorRole), role: inviteRole });
+      const expected = canManageRole(creatorRole, inviteRole);
+      const found = (await findInviteByToken(app, created.token, now)) !== null;
+      const accepted = (await acceptInvite(app, created.token, { name: "Par", passwordHash: "h" }, now)).ok;
+      expect({ creatorRole, inviteRole, found, accepted }).toEqual({ creatorRole, inviteRole, found: expected, accepted: expected });
+    }
+    // A regra em si: dono gere todos, administrador não gere dono, operador não gere ninguém.
+    expect(TEAM_ROLES.map((actor) => TEAM_ROLES.filter((target) => canManageRole(actor, target)))).toEqual([["owner", "admin", "operator"], ["admin", "operator"], []]);
+  });
+
+  // Estado montado direto no banco, SEM revogar: a recusa vem do core, não da revogação do painel.
+  it("refuses an owner invite whose creator has since been demoted, and keeps the ones the creator still manages", async () => {
+    const creator = await member(orgA, "owner");
+    const forOwner = await invite(orgA, { created_by: creator, role: "owner" });
+    const forOperator = await invite(orgA, { created_by: creator, role: "operator" });
+    expect(await findInviteByToken(app, forOwner.token, now)).not.toBeNull();
+
+    await withOrg(app, orgA, (q) => q.exec("update users set role = 'admin' where id = $1", [creator]));
+    expect(await inviteRow(forOwner.id)).toEqual({ accepted_at: null, accepted_user_id: null, revoked_at: null });
+    expect(await findInviteByToken(app, forOwner.token, now)).toBeNull();
+    expect(await acceptInvite(app, forOwner.token, { name: "Dono pela porta dos fundos", passwordHash: "h" }, now)).toEqual({ ok: false, reason: "invalid" });
+    expect(await usersWith(forOwner.email)).toEqual([]);
+    expect(await findInviteByToken(app, forOperator.token, now)).not.toBeNull();
+
+    await withOrg(app, orgA, (q) => q.exec("update users set role = 'operator' where id = $1", [creator]));
+    expect(await findInviteByToken(app, forOperator.token, now)).toBeNull();
+    expect(await acceptInvite(app, forOperator.token, { name: "X", passwordHash: "h" }, now)).toEqual({ ok: false, reason: "invalid" });
   });
 });

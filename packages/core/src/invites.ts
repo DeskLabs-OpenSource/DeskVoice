@@ -2,12 +2,24 @@ import { hashToken } from "./password";
 import type { Db } from "./types";
 import { withSystem } from "./with-org";
 
+export const TEAM_ROLES = ["owner", "admin", "operator"] as const;
+export type TeamRole = (typeof TEAM_ROLES)[number];
+
+/**
+ * Quem gere quem na equipe: a única fonte dessa regra. Dono gere todos; administrador gere
+ * administrador e operador; operador não gere ninguém. "Gerir" vale para convidar, alterar,
+ * desativar e remover, e também para manter vivo um convite já criado.
+ */
+export function canManageRole(actor: TeamRole, target: TeamRole): boolean {
+  return actor === "owner" || (actor === "admin" && target !== "owner");
+}
+
 export interface InviteSummary {
   organizationId: string;
   organizationName: string;
   email: string;
   name: string;
-  role: "owner" | "admin" | "operator";
+  role: TeamRole;
 }
 
 export type AcceptInviteResult = { ok: true; userId: string; organizationId: string } | { ok: false; reason: "invalid" | "email_taken" };
@@ -20,7 +32,14 @@ export type AcceptInviteResult = { ok: true; userId: string; organizationId: str
 // convite para si mesma, é desativada e volta pelo link. O painel já revoga os convites ao
 // desativar ou remover alguém; a condição aqui é a defesa que vale mesmo se um caminho novo
 // esquecer de revogar. Criador removido deixa `created_by` nulo, e nulo também não vale.
-const CREATOR_IS_ACTIVE = `exists (select from users c where c.organization_id = i.organization_id and c.id = i.created_by and c.disabled_at is null)`;
+//
+// E só vale enquanto o papel ATUAL do criador ainda gere o papel do convite: um dono que convidou
+// outro dono e foi rebaixado não deixa para trás um convite que hoje não poderia emitir.
+// A expressão abaixo é `canManageRole` escrita em SQL; o teste dos nove pares de papel compara as
+// duas, para que nunca divirjam.
+const CREATOR_STILL_MANAGES = `exists (select from users c
+   where c.organization_id = i.organization_id and c.id = i.created_by and c.disabled_at is null
+     and (c.role = 'owner' or (c.role = 'admin' and i.role <> 'owner')))`;
 
 /**
  * O convite que este token abre, ou `null`. Inexistente, vencido, já aceito, revogado e de
@@ -32,7 +51,7 @@ export function findInviteByToken(db: Db, token: string, now: Date): Promise<Inv
     q.one<InviteSummary>(
       `select i.organization_id as "organizationId", o.name as "organizationName", i.email::text as email, i.name, i.role
          from invites i join organizations o on o.id = i.organization_id
-        where i.token_hash = $1 and i.accepted_at is null and i.revoked_at is null and i.expires_at > $2 and ${CREATOR_IS_ACTIVE}`,
+        where i.token_hash = $1 and i.accepted_at is null and i.revoked_at is null and i.expires_at > $2 and ${CREATOR_STILL_MANAGES}`,
       [hashToken(token), now],
     ),
   );
@@ -50,7 +69,7 @@ export async function acceptInvite(db: Db, token: string, account: { name: strin
     return await withSystem(db, async (q) => {
       const invite = await q.one<{ id: string; organizationId: string; email: string; role: string }>(
         `update invites i set accepted_at = $2
-          where token_hash = $1 and accepted_at is null and revoked_at is null and expires_at > $2 and ${CREATOR_IS_ACTIVE}
+          where token_hash = $1 and accepted_at is null and revoked_at is null and expires_at > $2 and ${CREATOR_STILL_MANAGES}
           returning id, organization_id as "organizationId", email::text as email, role`,
         [hashToken(token), now],
       );
