@@ -11,7 +11,8 @@ export async function notifyHumans(ctx: ToolContext, body: string, options: { wh
   const targets: { channel: "panel" | "whatsapp"; target: string | null }[] = [{ channel: "panel", target: null }];
   if (options.whatsapp && (await hasWhatsAppConnector(ctx.q))) {
     const users = await ctx.q.many<{ whatsapp_e164: string }>(
-      "select distinct whatsapp_e164 from users where organization_id = $1 and whatsapp_e164 is not null order by whatsapp_e164",
+      // Só quem está ativo: quem foi desativado saiu da equipe e não recebe mais dados de chamada.
+      "select distinct whatsapp_e164 from users where organization_id = $1 and whatsapp_e164 is not null and disabled_at is null order by whatsapp_e164",
       [ctx.organizationId],
     );
     for (const user of users) targets.push({ channel: "whatsapp", target: user.whatsapp_e164 });

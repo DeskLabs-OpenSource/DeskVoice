@@ -1,4 +1,4 @@
-import { withSystem, type ApprovalOutcome } from "@deskvoice/core";
+import { withOrg, withSystem, type ApprovalOutcome } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
 import { createFixture, createUser, eventsOf, fakeFetch, fakeLookup, putSetting, notificationsOf, putWhatsAppConnector, secretKey, t0, type FakeContext } from "../../test/helpers";
@@ -81,6 +81,17 @@ describe("send_whatsapp", () => {
     const net = fakeFetch();
     expect(await runTool(tool(net), { to: "31 98888-7777", text: "Cliente aguardando retorno." }, ctx)).toMatchObject({ ok: true, data: { to: "+5531988887777" } });
     expect(net.requests).toHaveLength(1);
+  });
+
+  it("o número de quem foi desativado deixa de contar como equipe", async () => {
+    const ctx = await fixture("whatsapp desativado");
+    const gone = await createUser(app, ctx.organizationId, "+5531988887777");
+    await withOrg(app, ctx.organizationId, (q) => q.exec("update users set disabled_at = now() where id = $1", [gone]));
+    const net = fakeFetch();
+    const result = await runTool(tool(net), { to: "31 98888-7777", text: "Cliente aguardando retorno." }, ctx);
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/só posso enviar para o número desta ligação ou para a equipe/);
+    expect(net.requests).toHaveLength(0);
   });
 
   it("recusa número de terceiro, mesmo sendo da equipe de OUTRA organização, e orienta o modelo", async () => {
