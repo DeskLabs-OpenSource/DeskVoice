@@ -267,7 +267,7 @@ if [ "$DRY_RUN" = 1 ]; then
   would "gravar deploy/.env, deploy/app.env e deploy/migrate.env (permissão 600), gerando só os segredos que ainda não existem"
   would "gerar deploy/asterisk/generated/{ari,rtp,pjsip}.conf com o IP $public_ip e a faixa ${rtp_start}-${rtp_end}"
   if [ "$proxy_mode" = external ]; then would "publicar o painel em ${panel_bind}:${panel_port} (arquivo deploy/docker-compose.override.yml), sem subir o Caddy"
-    would "publicar a voz do navegador em ${panel_bind}:${voice_port} (por onde chega o áudio de \"Falar com o agente\")"
+    would "publicar a voz do navegador em 127.0.0.1:${voice_port}, só para dentro da máquina (por onde chega o áudio de \"Falar com o agente\")"
     if [ -n "$domain" ]; then would "pedir que o proxy existente encaminhe ${domain}/voice-ws para 127.0.0.1:${voice_port}"
     elif [ "$panel_bind" = "127.0.0.1" ]; then would "deixar o painel só para dentro da VPS; do seu computador: ssh -L ${panel_port}:127.0.0.1:${panel_port} -L ${voice_port}:127.0.0.1:${voice_port} <usuário>@${public_ip}"
     else would "avisar: pelo IP e sem HTTPS o navegador não libera o microfone; \"Falar com o agente\" pede domínio ou túnel"; fi

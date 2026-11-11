@@ -337,8 +337,10 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     const made = await scene("web-interrupt", { engine: "manual" });
     const { callId, client } = await call(made);
     await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    // A fala e a interrupção chegam no mesmo instante, sem ceder a vez ao agendador. Esperar
+    // "algum áudio" antes de interromper era uma corrida: numa máquina rápida a fala inteira já
+    // tinha saído, e não sobrava nada pendente para descartar.
     made.manual.emit("audio", Buffer.alloc(320 * 500, 1));
-    await waitFor(() => client.audioBytes > 0, "some speech");
     made.manual.emit("interrupted");
     await waitFor(() => typesOf(client).includes("clear"), "the clear message");
     const delivered = client.audioBytes;
@@ -349,6 +351,36 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     made.manual.emit("audio", Buffer.alloc(320, 2));
     await waitFor(() => client.audioBytes === delivered + 320, "the next speech");
     expect(typesOf(client)).toEqual(["ready", "clear"]);
+  });
+
+  it("teto de chamadas pelo navegador ao mesmo tempo, por organização: a que passa do teto é recusada e a vaga volta quando uma termina", async () => {
+    const made = await scene("web-cap", { engine: "manual" });
+    const otherOrganization = await createOrganization(app, "web-cap-other");
+    const otherAgent = await createAgent(app, otherOrganization, { engine: "manual" });
+    const ask = () => made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER });
+
+    const first = await call(made);
+    const second = await ask();
+    const third = await ask();
+    expect([second.status, third.status]).toEqual([200, 200]);
+
+    const refused = await ask();
+    expect(refused).toEqual({ status: 409, body: { code: "too_many_web_calls", message: expect.stringMatching(/3 .*at the same time/) } });
+    // Recusada não cria chamada.
+    const rows = await withSystem(app, (q) => q.many("select 1 from calls where organization_id = $1", [made.organizationId]));
+    expect(rows).toHaveLength(3);
+    // O teto é por organização: a outra não é afetada.
+    expect((await made.post({ organizationId: otherOrganization, agentId: otherAgent, userId: USER })).status).toBe(200);
+
+    // Uma chamada termina: a vaga volta.
+    first.client.socket.send(JSON.stringify({ type: "hangup" }));
+    await ended(first.callId);
+    expect((await ask()).status).toBe(200);
+    expect((await ask()).status).toBe(409);
+
+    // Um pedido que nunca conectou também devolve a vaga quando o prazo vence.
+    expect(made.timers.fire(60_000)).toBeGreaterThan(0);
+    await waitFor(async () => (await ask()).status === 200, "a slot to come back after the token expired");
   });
 
   it("transferência: fica registrada como sempre e a tela recebe ended com status transferred", async () => {

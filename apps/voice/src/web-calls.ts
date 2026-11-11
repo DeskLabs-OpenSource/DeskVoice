@@ -20,7 +20,13 @@ const CLOSE_BAD_REQUEST = 4400;
 const CLOSE_UNAUTHORIZED = 4401;
 const PATHS = new Set(["/voice-ws", "/"]);
 
-export type WebCallRefusalCode = "agent_not_found" | "agent_disabled" | "engine_not_configured" | "engine_simulated";
+export type WebCallRefusalCode = "agent_not_found" | "agent_disabled" | "engine_not_configured" | "engine_simulated" | "too_many_web_calls";
+/**
+ * Chamadas pelo navegador ao mesmo tempo, por organização (as que esperam a conexão contam).
+ * Cada chamada já tem teto de custo e de duração; sem este, um laço na tela abriria chamadas sem
+ * fim e o gasto somado não teria limite.
+ */
+export const MAX_WEB_CALLS_PER_ORGANIZATION = 3;
 export type WebCallRequest = { callId: string; token: string; expiresInSeconds: number } | { code: WebCallRefusalCode; message: string };
 
 export interface WebCallsDeps {
@@ -52,6 +58,13 @@ interface Pending {
   agentId: string;
   userId: string;
   cancelExpiry: () => void;
+  slot: Slot;
+}
+
+/** Uma vaga no teto de chamadas simultâneas da organização. Devolvida uma vez só. */
+interface Slot {
+  organizationId: string;
+  released: boolean;
 }
 
 const digestOf = (token: string): Buffer => createHash("sha256").update(token).digest();
@@ -70,6 +83,21 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
   const schedule = deps.schedule ?? realSchedule;
   const now = deps.now ?? (() => performance.now());
   const pending = new Set<Pending>();
+  // Vagas ocupadas por organização: pedidos esperando a conexão mais chamadas em andamento.
+  const occupied = new Map<string, number>();
+  const reserve = (organizationId: string): Slot | null => {
+    const used = occupied.get(organizationId) ?? 0;
+    if (used >= MAX_WEB_CALLS_PER_ORGANIZATION) return null;
+    occupied.set(organizationId, used + 1);
+    return { organizationId, released: false };
+  };
+  const release = (slot: Slot): void => {
+    if (slot.released) return;
+    slot.released = true;
+    const left = (occupied.get(slot.organizationId) ?? 1) - 1;
+    if (left > 0) occupied.set(slot.organizationId, left);
+    else occupied.delete(slot.organizationId);
+  };
 
   /** Gasta o token: devolve a chamada dele e o apaga. Depois disso ele não vale mais. */
   function redeem(token: string | null): Pending | null {
@@ -89,6 +117,7 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
 
   /** A tela pediu a chamada e nunca conectou: ela não fica "tocando" para sempre. */
   async function neverConnected(entry: Pending): Promise<void> {
+    release(entry.slot);
     await withOrg(db, entry.organizationId, async (q) => {
       const closed = await q.exec("update calls set status = 'failed', end_reason = 'web_never_connected', ended_at = $2 where id = $1 and status = 'ringing'", [entry.callId, clock.now()]);
       if (closed === 1) await recordEvent(q, entry.callId, "call_ended", { status: "failed", reason: "web_never_connected", channel: "web" }, clock.now());
@@ -160,7 +189,7 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
       started: { channel: "web", userId: entry.userId },
     });
     deps.onSession(session);
-    void session.done.then((outcome) => transport.end(outcome.status, outcome.endReason));
+    void session.done.then((outcome) => transport.end(outcome.status, outcome.endReason)).finally(() => release(entry.slot));
     socket.send(JSON.stringify({ type: "ready", callId: entry.callId }));
   });
 
@@ -169,6 +198,11 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
 
     async request(input) {
       const { engines } = deps.session;
+      // Reserva a vaga antes de qualquer espera: dois pedidos simultâneos não passam os dois pelo teto.
+      const slot = reserve(input.organizationId);
+      if (!slot) {
+        return { code: "too_many_web_calls", message: `This organization already has ${MAX_WEB_CALLS_PER_ORGANIZATION} browser calls at the same time. End one of them, or wait a minute, and call again.` };
+      }
       const prepared = await withOrg(db, input.organizationId, async (q): Promise<{ callId: string } | { code: WebCallRefusalCode; message: string }> => {
         const agent = await q.one<{ enabled: boolean; engine: string }>("select enabled, engine from agents where id = $1", [input.agentId]);
         if (!agent) return { code: "agent_not_found", message: "This agent does not exist in this organization." };
@@ -189,8 +223,15 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
         );
         if (!call) throw new Error("Web call was not created");
         return { callId: call.id };
+      }).catch((error: unknown) => {
+        // O banco falhou antes de existir chamada: a vaga reservada não pode ficar presa.
+        release(slot);
+        throw error;
       });
-      if (!("callId" in prepared)) return prepared;
+      if (!("callId" in prepared)) {
+        release(slot);
+        return prepared;
+      }
 
       const token = randomBytes(32).toString("base64url");
       const entry: Pending = {
@@ -201,6 +242,7 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
         agentId: input.agentId,
         userId: input.userId,
         cancelExpiry: () => undefined,
+        slot,
       };
       entry.cancelExpiry = schedule(() => expire(entry), WEB_TOKEN_TTL_SECONDS * 1000);
       pending.add(entry);

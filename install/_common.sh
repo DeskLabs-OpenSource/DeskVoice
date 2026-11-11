@@ -259,7 +259,10 @@ pick_free_port() {  # pick_free_port <primeira candidata> < lista de portas em u
 }
 
 # Sem o nosso Caddy, o painel e a porta de voz do navegador são publicados em portas locais.
-#   write_proxy_override <endereço> <porta do painel> <porta da voz do navegador>
+#   write_proxy_override <endereço do painel> <porta do painel> <porta da voz do navegador>
+# A porta de voz fica SEMPRE só para dentro da máquina: quem chega nela é o proxy que já existe
+# ou um túnel SSH. Exposta, seria uma porta aberta sem uso possível, porque fora de HTTPS e de
+# localhost o navegador não libera o microfone.
 write_proxy_override() {
   local tmp
   tmp="$(mktemp "$PROXY_OVERRIDE.XXXXXX")"
@@ -272,7 +275,7 @@ services:
   # Porta por onde chega o áudio de "Falar com o agente" (WebSocket).
   voice:
     ports:
-      - "$1:$3:8091"
+      - "127.0.0.1:$3:8091"
 OVERRIDE
   chmod 600 "$tmp"
   mv "$tmp" "$PROXY_OVERRIDE"

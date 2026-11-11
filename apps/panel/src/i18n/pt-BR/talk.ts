@@ -48,6 +48,7 @@ const talk = {
     agent_disabled: "Este agente está desligado. Ligue o agente em Agentes.",
     engine_not_configured: "O motor de voz deste agente não tem chave cadastrada. Cadastre a chave em Configurações.",
     engine_simulated: "Este agente usa o motor simulado, que não conversa. Troque o motor em Agentes.",
+    too_many_web_calls: "Já há três chamadas pelo navegador ao mesmo tempo nesta empresa. Encerre uma delas, ou espere um minuto, e ligue de novo.",
     voice_unavailable: "O serviço de voz não respondeu. Veja no indicador de saúde, no menu, o que está parado, e ligue de novo.",
     connection_lost: "A conexão com o serviço de voz caiu. Confira sua internet e ligue de novo.",
     session_expired: "O tempo para começar a chamada acabou. Ligue de novo.",

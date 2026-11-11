@@ -68,6 +68,12 @@ contains "publicação: painel na porta local" "$(cat "$O")" '"127.0.0.1:3080:30
 contains "publicação: voz do navegador na porta seguinte" "$(cat "$O")" '"127.0.0.1:3081:8091"'
 equal "publicação: arquivo só do dono" 600 "$(mode_of "$O")"
 ( cd "$D" && PATH="${PATH#"$TEST_DIR/fake:"}" python3 -c "import sys; t=open('docker-compose.override.yml').read(); sys.exit(0 if t.count('ports:')==2 and 'voice:' in t and 'panel:' in t else 1)" ); equal "publicação: os dois serviços têm portas" 0 "$?"
+# Painel aberto pelo IP (sem domínio): a porta de voz continua só local. Exposta, seria uma porta
+# aberta sem uso possível, porque fora de HTTPS e de localhost o navegador não libera o microfone.
+( source "$KIT/_common.sh"; write_proxy_override 0.0.0.0 3080 3081 )
+contains "painel aberto pelo IP: painel publicado para fora" "$(cat "$O")" '"0.0.0.0:3080:3000"'
+contains "painel aberto pelo IP: voz só para dentro da máquina" "$(cat "$O")" '"127.0.0.1:3081:8091"'
+lacks "painel aberto pelo IP: voz nunca exposta" "$(cat "$O")" '0.0.0.0:3081'
 contains "o Caddy do DeskVoice encaminha a voz do navegador" "$(cat "$REPO/deploy/Caddyfile")" "reverse_proxy voice:8091"
 contains "rtp.conf recebe o início da faixa" "$(cat "$G/rtp.conf")" "rtpstart=20000"
 contains "rtp.conf recebe o fim da faixa" "$(cat "$G/rtp.conf")" "rtpend=20200"
