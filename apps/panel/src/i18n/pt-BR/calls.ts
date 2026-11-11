@@ -2,6 +2,7 @@ const calls = {
   title: "Chamadas",
   lead: "O que os seus agentes estão atendendo agora e o que já atenderam.",
   simulate: "Simular uma chamada",
+  talk: "Falar com o agente",
   liveTitle: "Agora",
   liveNone: "Nenhuma chamada em andamento.",
   follow: "Acompanhar",

@@ -10,6 +10,7 @@ import { GET as getCall } from "./calls/[id]/route";
 import { POST as outbound } from "./calls/outbound/route";
 import { GET as listCalls } from "./calls/route";
 import { POST as simulate } from "./calls/simulate/route";
+import { POST as webCall } from "./calls/web/route";
 import { POST as readNotification } from "./notifications/[id]/read/route";
 import { DELETE as deleteNumber, PATCH as patchNumber } from "./phone-numbers/[id]/route";
 import { POST as createNumber } from "./phone-numbers/route";
@@ -80,6 +81,7 @@ describe("a user of organization A, through every route that takes an id", () =>
       ["DELETE trunk", call(deleteTrunk, { ...as, method: "DELETE", params: { id: theirs.trunk } })],
       ["read notification", call(readNotification, { ...as, method: "POST", params: { id: theirs.notification } })],
       ["simulate with their agent", call(simulate, { ...as, method: "POST", body: { agentId: theirs.agent } })],
+      ["browser call with their agent", call(webCall, { ...as, method: "POST", body: { agentId: theirs.agent } })],
       ["outbound with their agent", call(outbound, { ...as, method: "POST", body: { agentId: theirs.agent, toE164: "(31) 99999-8888" } })],
       ["number on their trunk", call(createNumber, { ...as, method: "POST", body: { trunkId: theirs.trunk, number: "(31) 98888-7777" } })],
       ["their agent on my number", call(createNumber, { ...as, method: "POST", body: { trunkId: mine.trunk, number: "(31) 98888-7777", agentId: theirs.agent } })],

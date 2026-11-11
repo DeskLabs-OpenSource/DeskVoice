@@ -4,6 +4,7 @@ const calls: CallsDictionary = {
   title: "Llamadas",
   lead: "Lo que tus agentes están atendiendo ahora y lo que ya atendieron.",
   simulate: "Simular una llamada",
+  talk: "Hablar con el agente",
   liveTitle: "Ahora",
   liveNone: "Ninguna llamada en curso.",
   follow: "Seguir",

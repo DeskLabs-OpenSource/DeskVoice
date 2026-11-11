@@ -40,3 +40,16 @@ export async function voiceRequest<T>(deps: ServerDeps, method: "GET" | "POST", 
   if (!parsed.success) throw new ApiError(502, "voice_unavailable", "The voice process sent an answer the panel does not understand.");
   return parsed.data;
 }
+
+export const webCallSchema = z.object({ callId: z.string(), token: z.string().min(1) });
+
+/**
+ * Onde o navegador conecta o áudio da chamada. Com proxy na frente (o padrão), é no mesmo
+ * endereço do painel e o proxy encaminha `/voice-ws`. Sem proxy, o instalador grava em
+ * `VOICE_WEB_PUBLIC_PORT` a porta em que o processo de voz foi publicado, no mesmo host.
+ * Vazio, ausente ou qualquer coisa que não seja uma porta vale como "não definida".
+ */
+export function voiceSocketTarget(publicPort: string | undefined): { path: string } | { port: number } {
+  const port = /^\d{1,5}$/.test(publicPort ?? "") ? Number(publicPort) : 0;
+  return port >= 1 && port <= 65535 ? { port } : { path: "/voice-ws" };
+}

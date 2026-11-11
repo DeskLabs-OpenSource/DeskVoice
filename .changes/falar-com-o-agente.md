@@ -1,0 +1,11 @@
+---
+impact: operator_action
+section: added
+title: Falar com o agente pelo navegador
+---
+
+Na tela Chamadas há um botão novo, "Falar com o agente": você conversa por voz com um agente direto do navegador, sem linha telefônica, vendo o cronômetro e a transcrição ao vivo. É uma chamada como as outras: usa as ferramentas, pede aprovação, respeita o teto de custo e deixa o resumo no histórico. O agente precisa de um motor de voz real, com a chave cadastrada em Configurações; o motor simulado não conversa. O navegador só libera o microfone em HTTPS ou em `localhost`. Crédito: @melgarafael
+
+## Requer atenção
+
+Depois de atualizar, rode `bash install/install.sh` de novo: ele publica a porta por onde o áudio do navegador chega. Quem usa um proxy próprio com domínio precisa encaminhar `/voice-ws` para essa porta; o instalador mostra a linha exata no fim.
