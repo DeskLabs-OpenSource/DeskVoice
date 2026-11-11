@@ -1,0 +1,3 @@
+import { Pool } from "pg";
+
+export const ping = (pool: Pool) => pool.query("select 1");

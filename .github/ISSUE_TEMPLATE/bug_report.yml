@@ -1,0 +1,74 @@
+name: Bug
+description: Algo quebrou ou não funciona como documentado
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por relatar. Para **falha de segurança**, não abra issue: use o [relato privado](https://github.com/DeskLabs-OpenSource/DeskVoice/security/advisories/new).
+        Antes de colar qualquer coisa, tire números de telefone reais, senhas de tronco e chaves de IA.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: O que aconteceu, e o que você esperava
+      placeholder: Liguei para a linha, o agente atendeu e ficou mudo depois da saudação. Esperava que ele respondesse.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passos para reproduzir
+      placeholder: |
+        1. Agente X com a ferramenta Y ligada
+        2. Ligar para o número da linha
+        3. Dizer "..."
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versão do DeskVoice
+      description: Aparece no rodapé do painel. Se instalou do código, o resultado de `git rev-parse --short HEAD`.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Como instalou
+      options:
+        - install.sh numa VPS
+        - Docker Compose à mão
+        - Do código, para desenvolver
+        - Outro (conte abaixo)
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Motor de voz
+      options:
+        - Gemini Live
+        - OpenAI Realtime
+        - Simulado
+        - Outro (conte abaixo)
+        - Não se aplica
+    validations:
+      required: true
+  - type: input
+    id: trunk
+    attributes:
+      label: Tronco
+      description: Operadora ou provedor SIP e o modo de autenticação (registro ou IP). Sem usuário nem senha.
+      placeholder: Operadora X, por registro
+  - type: textarea
+    id: healthcheck
+    attributes:
+      label: Saída do install/healthcheck.sh
+      description: Rode `bash install/healthcheck.sh` na VPS e cole a saída inteira. Ela separa painel, banco, Asterisk, tronco e motor de voz.
+      render: shell
+  - type: textarea
+    id: extra
+    attributes:
+      label: Mais contexto
+      description: Linha do tempo da chamada (tela Chamadas), captura de tela, sistema operacional da VPS.

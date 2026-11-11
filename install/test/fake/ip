@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# ip de mentira: a placa de rede tem o endereço escrito em $FAKE_DIR/iface_ip.
+echo "1.1.1.1 via 10.0.0.1 dev eth0 src $(cat "$FAKE_DIR/iface_ip" 2>/dev/null) uid 0"

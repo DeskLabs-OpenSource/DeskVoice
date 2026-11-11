@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# pre-push do contribuidor. A main recebe merge de PR revisado, pela fila de merge; nunca push
+# direto. O único outro efeito é um AVISO quando o ramo está atrasado em relação à main do repositório principal.
+set -uo pipefail
+
+# Num fork, `origin` é o fork do contribuidor e a main dele costuma estar parada; a referência
+# certa é a main do repositório principal (`upstream`). Em clone direto, `origin` já é o principal.
+if git rev-parse -q --verify upstream/main >/dev/null 2>&1; then main_ref=upstream/main; else main_ref=origin/main; fi
+# Em fork, empurrar a main para o PRÓPRIO fork é só sincronizar a cópia: não é push na main do
+# projeto. O bloqueio vale para o repositório principal.
+remote_url="${2:-}"
+is_fork_remote=0
+if git rev-parse -q --verify upstream/main >/dev/null 2>&1 && [ "${1:-}" != "upstream" ]; then
+  upstream_url="$(git remote get-url upstream 2>/dev/null || true)"
+  [ -n "$upstream_url" ] && [ "$remote_url" != "$upstream_url" ] && is_fork_remote=1
+fi
+
+blocked=""
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main | refs/heads/master) [ "$is_fork_remote" = 1 ] || blocked="$blocked $remote_ref" ;;
+  esac
+  # SHA zerado é remoção de ramo: não há o que medir.
+  case "${local_sha:-}" in "" | 0000000000000000000000000000000000000000) continue ;; esac
+  if git rev-parse -q --verify "$main_ref" >/dev/null 2>&1; then
+    base="$(git merge-base "$main_ref" "$local_sha" 2>/dev/null || true)"
+    if [ -n "$base" ]; then
+      behind="$(git rev-list --count "$base..$main_ref" 2>/dev/null || echo 0)"
+      if [ "$behind" -gt 0 ]; then
+        echo "aviso: este ramo está $behind commit(s) atrás de $main_ref. Não bloqueia: a fila de merge testa sobre a main do momento." >&2
+        echo "       Para ver o conflito agora, em vez de na fila: git fetch ${main_ref%%/*} && git merge $main_ref (nunca reset --hard)" >&2
+      fi
+    fi
+  fi
+done
+
+if [ -n "$blocked" ]; then
+  echo "pre-push BLOQUEADO:$blocked. A main não recebe push direto." >&2
+  echo "Abra um ramo (git switch -c fix/o-que-conserta) e um PR; o merge acontece pela revisão e pelo check ready." >&2
+  exit 1
+fi
+exit 0

@@ -1,0 +1,74 @@
+/*
+ * Tokens semânticos do DeskVoice. Componentes só usam estes nomes, nunca valor literal.
+ *
+ * Família do DeskcommCRM (calma, neutros quentes puxados para o verde da paleta sage), com um
+ * acento próprio: cobre. O cobre é reservado para o que está VIVO (chamada em andamento, pedido
+ * esperando resposta) e para a ação principal da tela. Se tudo é cobre, nada está vivo.
+ *
+ * Claro e escuro saem da mesma declaração com `light-dark()`: o tema segue o sistema e
+ * `data-theme` no <html> força um dos dois. Contraste de texto conferido em AA nos dois temas.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Superfícies */
+  --dv-bg: light-dark(#f6f7f2, #14160f);
+  --dv-surface: light-dark(#ffffff, #1c1e17);
+  --dv-sunken: light-dark(#eef0e8, #23261d);
+  --dv-line: light-dark(#dde1d5, #33372b);
+  --dv-line-strong: light-dark(#c2c8b6, #4a4f3f);
+
+  /* Texto */
+  --dv-text: light-dark(#1b1e17, #f1f3ea);
+  --dv-muted: light-dark(#575d4f, #a5aa98);
+
+  /* Acento: cobre */
+  --dv-accent: light-dark(#a2552f, #dd8f63);
+  --dv-accent-strong: light-dark(#874524, #e9a783);
+  --dv-accent-soft: light-dark(#f6e8de, #36241a);
+  --dv-on-accent: light-dark(#ffffff, #1d120b);
+
+  /* Estados */
+  --dv-ok: light-dark(#47744b, #8fb386);
+  --dv-ok-soft: light-dark(#e5eee2, #253024);
+  --dv-warn: light-dark(#8a5d18, #d39a5b);
+  --dv-warn-soft: light-dark(#f5ecd9, #33291a);
+  --dv-fail: light-dark(#a3463a, #d98878);
+  --dv-fail-soft: light-dark(#f7e5e1, #38211d);
+
+  /* Espaço: base 4 px */
+  --dv-space-1: 4px;
+  --dv-space-2: 8px;
+  --dv-space-3: 12px;
+  --dv-space-4: 16px;
+  --dv-space-5: 20px;
+  --dv-space-6: 24px;
+  --dv-space-8: 32px;
+  --dv-space-12: 48px;
+
+  /* Raio: sobe só quando o componente é hierarquicamente maior */
+  --dv-radius-xs: 4px;
+  --dv-radius-sm: 8px;
+  --dv-radius-md: 12px;
+  --dv-radius-full: 9999px;
+
+  /* Sombra na cor do texto neutro, nunca preto puro. Só para o que flutua. */
+  --dv-shadow-sm: 0 1px 2px 0 light-dark(rgb(27 30 23 / 0.05), rgb(0 0 0 / 0.3));
+  --dv-shadow-md: 0 6px 16px -4px light-dark(rgb(27 30 23 / 0.1), rgb(0 0 0 / 0.5)), 0 2px 4px -1px light-dark(rgb(27 30 23 / 0.05), rgb(0 0 0 / 0.3));
+
+  /* Movimento */
+  --dv-fast: 120ms;
+  --dv-base: 200ms;
+  --dv-slow: 320ms;
+  --dv-ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --dv-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Respiração do que está vivo: lenta o bastante para não virar alarme. */
+  --dv-pulse: 2.4s;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}

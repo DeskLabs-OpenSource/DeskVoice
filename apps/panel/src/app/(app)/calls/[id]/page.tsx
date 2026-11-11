@@ -1,0 +1,103 @@
+"use client";
+
+import { ArrowLeft } from "@phosphor-icons/react";
+import Link from "next/link";
+import { use } from "react";
+import enCommon from "../../../../i18n/en/common";
+import en from "../../../../i18n/en/timeline";
+import esCommon from "../../../../i18n/es/common";
+import es from "../../../../i18n/es/timeline";
+import { fill } from "../../../../i18n/locales";
+import ptBRCommon from "../../../../i18n/pt-BR/common";
+import ptBR from "../../../../i18n/pt-BR/timeline";
+import { useDict, useLocale } from "../../../../i18n/provider";
+import { useApi } from "../../../../ui/api";
+import { useErrorText } from "../../../../ui/errors";
+import { formatDateTime, formatDuration, formatMoney, formatPhone, secondsBetween } from "../../../../ui/format";
+import { Badge, Notice, Skeleton, type Tone } from "../../../../ui/kit";
+import { useLive, useNow } from "../../../../ui/live";
+import { Timeline } from "../../../../ui/timeline";
+import type { Call, CallEvent, CallStatus, Engine } from "../../../../ui/types";
+
+const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
+
+export default function CallPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const t = useDict(ptBR, en, es);
+  const common = useDict(ptBRCommon, enCommon, esCommon);
+  const locale = useLocale();
+  const errorText = useErrorText();
+  const now = useNow();
+  const call = useApi<Call>(`/calls/${id}`);
+  const events = useApi<CallEvent[]>(`/calls/${id}/events`);
+  const engines = useApi<Engine[]>("/engines");
+  useLive((signal) => {
+    if (signal.callId !== id) return;
+    call.reload();
+    events.reload();
+  });
+
+  const back = (
+    <Link href="/calls" className="inline-flex items-center gap-1.5 justify-self-start text-[0.93rem] font-bold text-muted hover:text-ink">
+      <ArrowLeft size={16} weight="bold" aria-hidden />
+      {t.back}
+    </Link>
+  );
+  if (call.error && !call.data) {
+    return (
+      <>
+        {back}
+        <Notice tone="fail">{call.error.code === "not_found" ? t.notFound : errorText(call.error)}</Notice>
+      </>
+    );
+  }
+  if (!call.data) return <Skeleton lines={5} />;
+
+  const data = call.data;
+  const live = data.status === "ringing" || data.status === "in_progress";
+  const seconds = secondsBetween(data.answeredAt ?? data.startedAt, data.endedAt ?? now);
+  const facts: Array<[string, string, boolean]> = [
+    [t.facts.agent, data.agentName ?? common.noAgent, false],
+    [t.facts.engine, engines.data?.find((engine) => engine.id === data.engine)?.label ?? data.engine ?? "", false],
+    [t.facts.duration, formatDuration(seconds), true],
+    [t.facts.cost, formatMoney(data.costCents, locale), true],
+    [t.facts.started, formatDateTime(data.startedAt, locale), true],
+  ];
+
+  return (
+    <>
+      <header className="grid gap-5">
+        {back}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <h1 className="data text-[1.75rem] leading-tight font-medium tracking-[-0.02em]">{formatPhone(data.direction === "outbound" ? data.to : data.from) || common.unknownCaller}</h1>
+          <Badge tone={STATUS_TONE[data.status]} live={live}>
+            {common.callStatus[data.status]}
+          </Badge>
+          <span className="text-muted">{t.direction[data.direction]}</span>
+        </div>
+        {/* Métricas em linha, separadas por fio: sem grade de cartões. */}
+        <dl className="grid grid-cols-2 gap-4 border-y border-line py-4 sm:flex sm:flex-wrap">
+          {facts.map(([label, value, mono]) => (
+            <div key={label} className="grid min-w-[9rem] gap-0.5 border-line sm:pr-6 sm:not-last:mr-6 sm:not-last:border-r">
+              <dt className="text-[0.8rem] font-bold text-muted">{label}</dt>
+              <dd className={`${mono ? "data" : ""} ${live && label === t.facts.duration ? "text-accent-strong" : ""}`}>
+                {value}
+                {label === t.facts.cost && data.costCeilingCents ? <span className="ml-2 font-sans text-[0.8rem] text-muted">{fill(t.facts.ceiling, { value: formatMoney(data.costCeilingCents, locale) })}</span> : null}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </header>
+
+      {data.summary || !live ? (
+        <section className="grid max-w-[72ch] gap-1.5">
+          <h2 className="text-[0.8rem] font-bold text-muted">{t.summaryTitle}</h2>
+          <p className={data.summary ? "text-[1.07rem] leading-relaxed whitespace-pre-line" : "text-muted"}>{data.summary ?? t.summaryPending}</p>
+        </section>
+      ) : null}
+
+      {events.error && !events.data ? <Notice tone="fail">{errorText(events.error)}</Notice> : null}
+      {events.data ? <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} /> : <Skeleton lines={4} />}
+    </>
+  );
+}

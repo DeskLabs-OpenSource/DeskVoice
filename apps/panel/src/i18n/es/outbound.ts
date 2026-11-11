@@ -1,0 +1,36 @@
+import type { OutboundDictionary } from "../pt-BR/outbound";
+
+const outbound: OutboundDictionary = {
+  title: "Llamadas salientes",
+  lead: "Las reglas de las llamadas que el agente hace, en lugar de recibir.",
+  offTitle: "Las llamadas salientes están desactivadas.",
+  onTitle: "Las llamadas salientes están activadas.",
+  why: "Nacen desactivadas a propósito. Una central que marca sola puede molestar a quien no pidió contacto, hacer que el proveedor bloquee tu línea y traerte responsabilidad legal. Por eso, antes de activarlas, DeskVoice te pide declarar para qué vas a usar las llamadas y con qué base.",
+  noMass: "DeskVoice no importa listas para marcación masiva. Cada llamada saliente nace de una conversación o de una tarea.",
+  purpose: "Finalidad",
+  purposeHint: "Para qué va a llamar el agente. Ejemplo: confirmar citas agendadas por los propios pacientes.",
+  legalBasis: "Base legal",
+  legalBasisHint: "Por qué puedes llamar a estas personas. Ejemplo: consentimiento dado en el registro, contrato vigente.",
+  turnOn: "Activar las llamadas salientes",
+  turnOff: "Desactivar",
+  saveDeclaration: "Guardar declaración",
+  limitsTitle: "Límites",
+  limitsLead: "Valen para todos los agentes. Una llamada fuera de estos límites se rechaza, y el motivo aparece en la línea de tiempo.",
+  dailyCap: "Tope diario por línea",
+  windowStart: "Llamar desde",
+  windowEnd: "Llamar hasta",
+  timezone: "Zona horaria",
+  attempts: "Intentos por persona",
+  saveLimits: "Guardar límites",
+  dncTitle: "Lista de no llamar",
+  dncLead: "Números que el agente nunca marca. Quien pide no recibir llamadas entra aquí.",
+  dncNumbers: "Números",
+  dncNumbersHint: "Pega uno por línea o separados por coma, en cualquier formato.",
+  dncReason: "Motivo (opcional)",
+  dncAdd: "Agregar a la lista",
+  dncEmpty: "La lista está vacía.",
+  dncRemove: "Quitar {number} de la lista",
+  dncCount: "En la lista: {n}",
+};
+
+export default outbound;

@@ -1,0 +1,14 @@
+name: welcome
+on:
+  pull_request_target:
+    types: [opened]
+permissions: {}
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: someone/comment-action@v1
+      - uses: ./.github/actions/setup
+      - uses: actions/github-script@v7
+      - run: echo oi

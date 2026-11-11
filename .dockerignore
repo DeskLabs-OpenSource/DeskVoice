@@ -1,0 +1,11 @@
+**/node_modules
+**/.next
+.git
+.tsbuild
+deploy/.env
+deploy/asterisk/generated
+backups
+docs
+*.md
+deploy/app.env
+deploy/migrate.env

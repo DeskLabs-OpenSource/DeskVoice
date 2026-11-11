@@ -1,0 +1,31 @@
+name: Setup
+description: Node pela .nvmrc, pnpm pelo campo packageManager, cache do store e instalação congelada.
+
+# Por que corepack e não uma action de terceiros para o pnpm: no Deskcomm o instalador do pnpm
+# (um `npm install` sem cache) chegou a levar 7 minutos e estourava o teto do job. O corepack já
+# vem no Node 22, lê a versão exata de `packageManager` e é uma dependência a menos para fixar.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .nvmrc
+
+    - name: Ativar o pnpm do packageManager
+      id: pnpm
+      shell: bash
+      run: |
+        corepack enable
+        echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pnpm.outputs.store }}
+        key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Instalar dependências
+      shell: bash
+      run: pnpm install --frozen-lockfile

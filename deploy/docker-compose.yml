@@ -1,0 +1,139 @@
+# DeskVoice: uma VPS, um comando.
+#
+# Quem publica porta para a internet: só o Caddy (80/443) e o Asterisk (SIP e RTP, UDP).
+# Postgres, painel, voz, rotinas e a ARI do Asterisk ficam na rede interna.
+#
+# Os valores vêm de três arquivos gerados por `install/install.sh`, separados por menor
+# privilégio. Não há variável para preencher à mão: o que é escolha de quem opera fica no painel.
+#   .env         só o que o próprio Compose interpola (senha do Postgres, portas, versão)
+#   app.env      o que painel, voz e rotinas recebem; não contém a senha do dono do banco
+#   migrate.env  credenciais do dono do schema; só o serviço `migrate` recebe
+
+name: deskvoice
+
+x-app: &app
+  restart: unless-stopped
+  env_file: app.env
+  networks: [internal]
+  logging: &logging
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: deskvoice
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: deskvoice
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deskvoice -d deskvoice"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+    logging: *logging
+
+  # Aplica as migrations e sai. Os processos só sobem depois que ele termina bem:
+  # instalar e atualizar passam pelo mesmo caminho de schema.
+  migrate:
+    <<: *app
+    image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-routines:${DESKVOICE_VERSION:-stable}
+    build: { context: .., target: routines, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
+    restart: "no"
+    # Único serviço com as credenciais do dono do schema.
+    env_file: [app.env, migrate.env]
+    command: ["pnpm", "--filter", "@deskvoice/routines", "run", "migrate"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  panel:
+    <<: *app
+    image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-panel:${DESKVOICE_VERSION:-stable}
+    build: { context: .., target: panel, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/system/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  voice:
+    <<: *app
+    image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-voice:${DESKVOICE_VERSION:-stable}
+    build: { context: .., target: voice, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      asterisk: { condition: service_healthy }
+    volumes:
+      # O worker escreve aqui os troncos cadastrados no painel; o Asterisk lê.
+      - asterisk-generated:/asterisk-generated
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  routines:
+    <<: *app
+    image: ${DESKVOICE_IMAGE_PREFIX:-ghcr.io/desklabs-opensource}/deskvoice-routines:${DESKVOICE_VERSION:-stable}
+    build: { context: .., target: routines, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  # Asterisk é peça de terceiros: referenciada, nunca republicada. Fixada por digest
+  # porque neste registro nem as tags de versão são imutáveis (medido no DeskcommCRM).
+  asterisk:
+    image: ${ASTERISK_IMAGE:-andrius/asterisk@sha256:927d4c98777149c3380c4f8d0e82b1b1ba9e7b38528f86c1e1593d5a25032f27}
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      # Só UDP. A ARI (8088) é o controle total das chamadas e nunca sai da rede interna.
+      - "5060:5060/udp"
+      # Faixa de RTP: precisa ser idêntica à de asterisk/generated/rtp.conf.
+      - "${RTP_START:-10000}-${RTP_END:-10200}:${RTP_START:-10000}-${RTP_END:-10200}/udp"
+    volumes:
+      - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/http.conf:/etc/asterisk/http.conf:ro
+      - ./asterisk/generated/ari.conf:/etc/asterisk/ari.conf:ro
+      - ./asterisk/generated/rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ./asterisk/generated/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - asterisk-generated:/etc/asterisk/generated
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show uptime"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+    logging: *logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["caddy"]
+    environment:
+      PANEL_DOMAIN: ${PANEL_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      panel: { condition: service_healthy }
+    networks: [internal]
+    logging: *logging
+
+networks:
+  internal:
+
+volumes:
+  postgres-data:
+  asterisk-generated:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,16 @@
+import { t } from "../../i18n";
+
+export default function CallsPage({ total, ready }: { total: number; ready: boolean }) {
+  const items: Array<string> = [];
+  // <p>Comentário não é tela</p>
+  return (
+    <main>
+      <h1>Chamadas ao vivo</h1>
+      <span>{total} em andamento</span>
+      <input placeholder="Buscar por número" className="w-full px-2" type="search" />
+      <p>{t("calls.empty")}</p>
+      <strong>DeskVoice</strong>
+      <small>{ready && items.length > 0 ? total : 0}</small>
+    </main>
+  );
+}

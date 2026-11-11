@@ -1,0 +1,4 @@
+import { it } from "vitest";
+
+// dono: tarde demais, o cabeçalho abre o arquivo
+it("nada", () => {});

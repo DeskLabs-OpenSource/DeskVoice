@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Perguntas e ideias
+    url: https://github.com/DeskLabs-OpenSource/DeskVoice/discussions
+    about: Dúvida de instalação, ideia ainda sem forma e relato de uso vão melhor em Discussions.
+  - name: Vulnerabilidade de segurança
+    url: https://github.com/DeskLabs-OpenSource/DeskVoice/security/advisories/new
+    about: Relato privado. Nunca abra issue pública para falha de segurança.

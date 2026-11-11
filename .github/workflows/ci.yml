@@ -1,0 +1,360 @@
+name: ci
+
+# O que este workflow garante, e de que erro medido no Deskcomm cada parte nasceu:
+#
+# - UM run por PR: o push novo cancela o anterior (a fila do Deskcomm entupiu no teto de jobs).
+# - O PR só é medido pelo próprio diff. Estado acumulado (cerca vencida, por exemplo) é check da
+#   `main` e num PR só avisa.
+# - Cada job diz, quando falha, se a causa provável é do PR ou da casa.
+# - `ready` é o ÚNICO check exigido na proteção da main (scripts/github/apply-ruleset.sh). Job novo
+#   entra em `needs` do `ready`, nunca na proteção de branch.
+# - Nenhum job lê segredo: PR de fork roda exatamente o mesmo que PR interno.
+#
+# `workflow_dispatch` existe por um motivo só: o PR de release é aberto pelo GITHUB_TOKEN, e o
+# GitHub não dispara `pull_request` para PR aberto por ele. O release.yml dispara este workflow
+# no ramo `release/X.Y.Z`, e o check `ready` cai no mesmo commit.
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.paths.outputs.code }}
+      images: ${{ steps.paths.outputs.images }}
+      install: ${{ steps.paths.outputs.install }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decidir o que roda pelo caminho alterado
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "${EVENT}" in
+            pull_request) base="${PR_BASE}" ;;
+            merge_group)  base="${QUEUE_BASE}" ;;
+            push)         base="${PUSH_BEFORE}" ;;
+            *)            base="" ;;
+          esac
+          # Sem base confiável (disparo manual, primeiro push), roda tudo: errar para mais é seguro.
+          if [ -z "${base}" ] || ! files="$(git diff --name-only "${base}...HEAD" 2>/dev/null)"; then
+            echo "sem base para comparar: roda tudo" | tee -a "${GITHUB_STEP_SUMMARY}"
+            { echo "code=true"; echo "images=true"; echo "install=true"; } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          docs='^(docs/|\.changes/|\.agents/|\.claude/skills/|\.cursor/|\.codex/|[^/]+\.md$|LICENSE$|\.github/ISSUE_TEMPLATE/|\.github/PULL_REQUEST_TEMPLATE\.md$|\.github/CODEOWNERS$)'
+          # Here-string, não pipe: `grep -q` sai cedo e, com pipefail, um pipe quebrado viraria "não casou".
+          matches() { if grep -Eq "$1" <<< "${files}"; then echo true; else echo false; fi; }
+          if [ -n "${files}" ] && grep -Evq "${docs}" <<< "${files}"; then code=true; else code=false; fi
+          images=false; install=false
+          if [ "${code}" = true ]; then
+            images="$(matches '^(Dockerfile|\.dockerignore|deploy/|packages/|apps/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/)')"
+            install="$(matches '^(install/|deploy/|Dockerfile|db/migrations/|\.github/workflows/)')"
+          fi
+          { echo "code=${code}"; echo "images=${images}"; echo "install=${install}"; } >> "${GITHUB_OUTPUT}"
+          {
+            echo "| o que | roda |"; echo "|---|---|"
+            echo "| lint, tipos, cercas, testes, segredos | sempre |"
+            echo "| banco, chamada simulada, build do painel | ${code} |"
+            echo "| imagens | ${images} |"
+            echo "| instalador | ${install} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        id: setup
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm fences
+      - run: pnpm test
+      - uses: ./.github/actions/explain-failure
+        if: failure()
+        with:
+          setup-outcome: ${{ steps.setup.outcome }}
+          when-pr: >-
+            Rode `pnpm verify` na sua máquina: é a mesma sequência (lint, tipos, cercas, testes).
+            Cerca vermelha traz na própria mensagem o que fazer para consertar.
+
+  db:
+    name: db
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: deskvoice_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d deskvoice_test"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      # Senha de um banco descartável que só existe dentro deste job; não é segredo.
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/deskvoice_test
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # o passo de atualização precisa das tags
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        id: setup
+      - name: Instalação nova (todas as migrations num banco vazio)
+        run: pnpm test:db
+      - name: Atualização a partir da última versão publicada
+        run: |
+          set -euo pipefail
+          last="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+          if [ -z "${last}" ]; then
+            echo "Teste de atualização PULADO: ainda não existe tag de versão, então não há instalação antiga para atualizar. Passa a rodar sozinho a partir da primeira release." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          previous="${RUNNER_TEMP}/previous"
+          mkdir -p "${previous}"
+          git archive "${last}" db/migrations | tar -x -C "${previous}"
+          createdb -h 127.0.0.1 -U postgres deskvoice_upgrade
+          pnpm exec tsx .github/scripts/upgrade-from-last-release.ts \
+            "postgres://postgres:postgres@127.0.0.1:5432/deskvoice_upgrade" \
+            "${previous}/db/migrations" db/migrations
+          echo "Atualização a partir de ${last}: ok." >> "${GITHUB_STEP_SUMMARY}"
+      - uses: ./.github/actions/explain-failure
+        if: failure()
+        with:
+          setup-outcome: ${{ steps.setup.outcome }}
+          when-pr: >-
+            Reproduza com `pnpm db:test:up` (pede Docker) e `pnpm test:db`. Se quem falhou foi o
+            passo de atualização: migration publicada nunca é editada (corrija com uma migration
+            nova) e toda migration precisa funcionar sobre um banco que já tem dados.
+          when-house: >-
+            Você não precisa mudar nada: o Postgres do job ou a instalação de dependências não
+            subiu. Um mantenedor reexecuta o job.
+
+  simulated-call:
+    name: simulated-call
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # A chamada simulada grava eventos, aprovação e tarefas: precisa de Postgres de verdade.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: deskvoice_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d deskvoice_test"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      # Senha de um banco descartável que só existe dentro deste job; não é segredo.
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/deskvoice_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        id: setup
+      - name: Chamada simulada de ponta a ponta
+        run: pnpm vitest run --project db apps/voice/src/simulated-call.db.test.ts
+      - uses: ./.github/actions/explain-failure
+        if: failure()
+        with:
+          setup-outcome: ${{ steps.setup.outcome }}
+          when-pr: >-
+            Rode `pnpm vitest run --project db apps/voice/src/simulated-call.db.test.ts` (pede
+            Docker). Este teste atende uma ligação com o motor simulado, do toque ao fim: se ele
+            quebrou, a mudança alterou o caminho de uma chamada (sequência de eventos, ferramenta,
+            aprovação, transferência ou custo).
+
+  build:
+    name: build
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: O painel ainda não existe
+        if: hashFiles('apps/panel/package.json') == ''
+        run: echo "Build PULADO - apps/panel ainda não existe neste commit." >> "${GITHUB_STEP_SUMMARY}"
+      - uses: ./.github/actions/setup
+        id: setup
+        if: hashFiles('apps/panel/package.json') != ''
+      - name: Build do painel
+        if: hashFiles('apps/panel/package.json') != ''
+        run: pnpm --filter ./apps/panel build
+      - uses: ./.github/actions/explain-failure
+        if: failure()
+        with:
+          setup-outcome: ${{ steps.setup.outcome }}
+          when-pr: >-
+            Rode `pnpm --filter ./apps/panel build`. O build do Next.js pega o que o typecheck da
+            raiz não vê: import de servidor em componente de cliente, página sem export padrão,
+            variável lida em tempo de build.
+
+  images:
+    name: images
+    needs: [changes]
+    if: needs.changes.outputs.images == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Construir as três imagens, sem publicar
+        id: docker
+        run: |
+          set -euo pipefail
+          if [ ! -f Dockerfile ]; then
+            echo "Imagens PULADAS: ainda não há Dockerfile neste commit." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          for target in panel voice routines; do
+            docker build --target "${target}" --build-arg APP_VERSION=ci -t "deskvoice-${target}:ci" .
+          done
+      - uses: ./.github/actions/explain-failure
+        if: failure()
+        with:
+          when-pr: >-
+            Rode `docker build --target panel .` (e `voice`, `routines`). O que costuma quebrar:
+            arquivo novo que o Dockerfile não copia, dependência fora do `pnpm-lock.yaml`, ou um
+            alvo renomeado. Se a falha foi ao baixar a imagem base, a causa é da casa: peça a
+            reexecução.
+
+  install:
+    name: install
+    needs: [changes]
+    if: needs.changes.outputs.install == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Testes do instalador
+        run: |
+          set -euo pipefail
+          if [ ! -f install/test/run.sh ]; then
+            echo "Instalador PULADO: install/test/run.sh ainda não existe neste commit." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          bash install/test/run.sh
+      - uses: ./.github/actions/explain-failure
+        if: failure()
+        with:
+          when-pr: >-
+            Rode `bash install/test/run.sh`. Estes testes cobrem os validadores do instalador, a
+            atualização e o ciclo backup → restauração com conferência de contagens. Quem instala
+            é o usuário, numa VPS: o que quebra aqui quebra na casa de alguém.
+
+  secrets:
+    name: secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Instalar o gitleaks (versão e hash fixos)
+        id: tool
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          # O binário, e não a action oficial: ela exige licença paga para organizações.
+          curl -fsSL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check --strict
+          mkdir -p "${RUNNER_TEMP}/bin"
+          tar -xzf gitleaks.tar.gz -C "${RUNNER_TEMP}/bin" gitleaks
+          rm gitleaks.tar.gz
+      - name: Varrer segredo nos commits desta mudança
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "${EVENT}" in
+            pull_request) base="${PR_BASE}" ;;
+            merge_group)  base="${QUEUE_BASE}" ;;
+            push)         base="${PUSH_BEFORE}" ;;
+            *)            base="$(git merge-base origin/main HEAD 2>/dev/null || true)" ;;
+          esac
+          if [ -n "${base}" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then range="${base}..HEAD"; else range="-1 HEAD"; fi
+          echo "varrendo: ${range}"
+          "${RUNNER_TEMP}/bin/gitleaks" git --no-banner --redact --log-opts="${range}" .
+      - uses: ./.github/actions/explain-failure
+        if: failure()
+        with:
+          setup-outcome: ${{ steps.tool.outcome }}
+          when-pr: >-
+            Um commit desta mudança carrega algo com cara de segredo (o log acima diz o arquivo e
+            a linha, sem repetir o valor). Se é real: REVOGUE a chave agora, antes de qualquer
+            outra coisa, porque ela já está pública; depois troque por um valor inventado e
+            reescreva o commit. Se é exemplo: use um valor que não pareça chave de verdade.
+
+  ready:
+    name: ready
+    if: always()
+    needs: [changes, verify, db, simulated-call, build, images, install, secrets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Todos os necessários passaram ou foram pulados por caminho?
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "${NEEDS}" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # `skipped` só vale para o que o job `changes` decide pular. Os três que rodam sempre
+          # precisam de `success`: um `changes` que falha pula todo o resto e não pode sair verde.
+          failed="$(echo "${NEEDS}" | jq -r '
+            [ to_entries[]
+              | select(.value.result != "success"
+                       and (.value.result != "skipped" or (.key | IN("changes", "verify", "secrets"))))
+              | "\(.key) (\(.value.result))" ] | join(", ")')"
+          if [ -n "${failed}" ]; then
+            echo "Não está pronto: ${failed}. Abra o job vermelho: o resumo dele diz de quem é a causa provável e o que fazer." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "Pronto: tudo o que este diff precisava rodar passou." >> "${GITHUB_STEP_SUMMARY}"
