@@ -29,7 +29,7 @@ termina.
 
 ---
 
-> **Estado del proyecto: en uso, con versiones publicadas.** La instalación, la actualización desde
+> **Estado del proyecto: con versiones publicadas.** La instalación, la actualización desde
 > el panel, el respaldo, la restauración y la vuelta automática de una actualización fallida ya
 > corrieron en una VPS real, y un colaborador ya hizo llamadas reales con el motor OpenAI Realtime.
 > Lo que está probado, lo que es experimental y lo que todavía es un plan están separados en "Qué
@@ -145,7 +145,7 @@ no se probó, cada capacidad dice hasta dónde llegó la prueba:
 | Panel con dominio y HTTPS | Esperando prueba real |
 | Atender una llamada entrante por una línea de operador (troncal SIP) | Esperando prueba real |
 | Transferir la llamada a una persona | Esperando prueba real (el camino en Asterisk se verificó, sin operador) |
-| Motor de voz OpenAI Realtime | Probado en una instalación real, en la conversación por la pantalla "Hablar con el agente" descrita arriba. Un colaborador hizo llamadas reales con él en una instalación propia, y el costo estimado por DeskVoice coincidió con la factura de OpenAI ([#94](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/94)) |
+| Motor de voz OpenAI Realtime | Probado en una instalación real, en la conversación por la pantalla "Hablar con el agente" descrita arriba. Un colaborador hizo llamadas reales con él en una instalación propia, y, con la corrección del costo ([#94](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/94)), la estimación de DeskVoice coincidió con la factura de OpenAI. Esa corrección está en `main` y sale en la primera versión publicada después de la 0.5.0; hasta entonces, la estimación de OpenAI queda por encima de la factura |
 | Motor de voz Gemini Live | Esperando prueba real (probado contra servidor falso, sin clave) |
 | Enviar WhatsApp durante la llamada, por conector | Esperando prueba real |
 | Conectar un WhatsApp por código QR (Configuración → WhatsApp) y enviar por él los avisos y los mensajes del agente | El servicio no viene instalado: se instala desde la pantalla, y cuesta cerca de 323 MiB de memoria sin número conectado y 3,2 GB en disco (medido en la 0.3.0, el 12/11/2026). Rutas probadas con base de datos real y con un servicio de WhatsApp falso; instalar y quitar por el agente, con Docker simulado. **Aún sin prueba con un número real:** no se leyó ningún código QR y no salió ningún mensaje. Es un cliente no oficial de WhatsApp; mira la [guía](docs/guides/whatsapp-por-qr-code.md) (en portugués) |
@@ -297,10 +297,11 @@ código, están en [`ROADMAP.md`](ROADMAP.md).
 ## Quién lo construye
 
 DeskVoice fue creado por Rafael Melgaço ([@melgarafael](https://www.youtube.com/@melgarafael)) y
-se construye en público, con la comunidad. En las primeras versiones ya entraron contribuciones
-de fuera: cercas, seguridad y los derechos de quien llama (plazo de conservación y exportación), de
-[webtecnica](https://github.com/webtecnica); el costo de OpenAI verificado contra la factura, la despedida antes de colgar y
-la grabación de las llamadas, de [aliffstefano](https://github.com/aliffstefano). DeskcommCRM, de donde viene la forma de contribuir
+se construye en público, con la comunidad. Ya hay contribuciones de fuera: las cercas y la
+seguridad de [webtecnica](https://github.com/webtecnica) están en las versiones publicadas. Están en `main` y salen en la
+próxima versión los derechos de quien llama (plazo de conservación y exportación), también de
+webtecnica, y el costo de OpenAI verificado contra la factura, la despedida antes de colgar y la
+grabación de las llamadas, de [aliffstefano](https://github.com/aliffstefano). DeskcommCRM, de donde viene la forma de contribuir
 usada aquí, recibió PRs de más de 250 personas.
 
 El crédito es regla, no cortesía: quien contribuye conserva la autoría de sus commits y aparece

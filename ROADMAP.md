@@ -16,7 +16,7 @@ O trabalho em curso é fazer o que já existe aguentar o mundo real.
   falhou.
 - Guias com telas reais, à medida que as telas estabilizam.
 - **A primeira ligação por operadora com registro público.** Um contribuidor já fez ligações reais
-  com o motor OpenAI Realtime, e o custo estimado bateu com a fatura. Falta o registro de uma
+  com o motor OpenAI Realtime numa instalação própria. Falta o registro de uma
   entrada por tronco SIP, com o áudio ouvido e uma transferência atendida por uma pessoa. Quem
   fizer e relatar numa issue abre o caminho para todos.
 - Dívidas conhecidas da fundação, listadas em [`SECURITY.md`](SECURITY.md) ("Limites conhecidos"):

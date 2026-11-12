@@ -28,7 +28,7 @@ it needs to, transfers the call, and leaves tasks running after the caller hangs
 
 ---
 
-> **Project status: in use, with published releases.** Installing, updating from the panel,
+> **Project status: with published releases.** Installing, updating from the panel,
 > backup, restore and the automatic rollback of a failed update have run on a real VPS, and a
 > contributor has placed real calls with the OpenAI Realtime engine. What is proven, what is
 > experimental and what is still a plan are kept apart in "What it does today". Nothing on the
@@ -143,7 +143,7 @@ proven yet, each capability below says how far the proof went:
 | Panel with a domain and HTTPS | Awaiting real-world proof |
 | Answer an inbound call from a carrier line (SIP trunk) | Awaiting real-world proof |
 | Transfer the call to a person | Awaiting real-world proof (the Asterisk path was checked, without a carrier) |
-| OpenAI Realtime voice engine | Proven on a real install, in the "Talk to the agent" conversation described above. A contributor placed real calls with it on their own install, and the cost DeskVoice estimated matched the OpenAI invoice ([#94](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/94)) |
+| OpenAI Realtime voice engine | Proven on a real install, in the "Talk to the agent" conversation described above. A contributor placed real calls with it on their own install, and, with the cost fix ([#94](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/94)), DeskVoice's estimate matched the OpenAI invoice. That fix is on `main` and ships in the first release published after 0.5.0; until then, the OpenAI estimate runs above the invoice |
 | Gemini Live voice engine | Awaiting real-world proof (tested against a fake server, without a key) |
 | Send WhatsApp during the call, through a connector | Awaiting real-world proof |
 | Connect a WhatsApp number by QR code (Settings → WhatsApp) and send the agent's notices and messages through it | The service does not come installed: you install it from the screen, and it costs about 323 MiB of memory with no number connected and 3.2 GB of disk (measured on 0.3.0, November 12, 2026). Routes tested with a real database and a fake WhatsApp service; installing and removing through the agent, with a simulated Docker. **Not yet proven with a real number:** no QR code was scanned and no message went out. It is an unofficial WhatsApp client; see the [guide](docs/guides/whatsapp-por-qr-code.md) (in Portuguese) |
@@ -291,10 +291,11 @@ code, are in [`ROADMAP.md`](ROADMAP.md).
 ## Who builds it
 
 DeskVoice was created by Rafael Melgaço ([@melgarafael](https://www.youtube.com/@melgarafael))
-and is built in public, with the community. Outside contributions are already in the first
-releases: fences, security and the rights of callers (retention period and export), from
-[webtecnica](https://github.com/webtecnica); the OpenAI cost checked against the invoice, the farewell before hanging up and
-call recording, from [aliffstefano](https://github.com/aliffstefano). DeskcommCRM, where the contribution workflow used
+and is built in public, with the community. There are already outside contributions: the fences
+and security work from [webtecnica](https://github.com/webtecnica) are in the published releases. On `main`, shipping in
+the next release, are the rights of callers (retention period and export), also from webtecnica,
+and the OpenAI cost checked against the invoice, the farewell before hanging up and call
+recording, from [aliffstefano](https://github.com/aliffstefano). DeskcommCRM, where the contribution workflow used
 here comes from, has received PRs from more than 250 people.
 
 Credit is a rule, not a courtesy: contributors keep authorship of their commits and are named
