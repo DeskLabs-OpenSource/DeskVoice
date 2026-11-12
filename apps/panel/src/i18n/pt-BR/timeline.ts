@@ -52,6 +52,7 @@ const timeline = {
     task_queued: "Tarefa deixada para depois da chamada",
     task_finished: "Tarefa concluída",
     task_failed: "Tarefa não concluída",
+    transcript_purged: "Texto apagado pelo prazo de guarda da transcrição.",
     unknown: "Evento",
   },
   reasons: {

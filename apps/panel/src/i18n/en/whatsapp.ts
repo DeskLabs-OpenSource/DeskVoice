@@ -53,6 +53,7 @@ const whatsapp: WhatsAppDictionary = {
   since: "Connected since {when}.",
   sendTest: "Send test message",
   testHint: "The test message goes to your own WhatsApp, the one in My contact, at the top of this page.",
+  testHintConnector: "The test message goes to your own WhatsApp, the one in My contact, through the connector configured in this installation. If the connector refuses it, this page says why.",
   testSent: "Test message sent to {to}. Check your phone.",
   disconnect: "Disconnect",
   disconnectConfirm: "Disconnect {phone}? Notices and messages by WhatsApp stop going out until a number is connected again, and coming back means scanning the QR code once more.",

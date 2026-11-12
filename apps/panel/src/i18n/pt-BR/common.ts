@@ -76,6 +76,7 @@ const common = {
     whatsapp_not_connected: "O WhatsApp não está conectado. Conecte o número em Configurações antes de enviar.",
     whatsapp_number_not_found: "O seu número cadastrado não tem WhatsApp. Confira o número em Meu contato.",
     whatsapp_contact_required: "Cadastre o seu WhatsApp em Meu contato, no começo desta página, para receber a mensagem de teste.",
+    whatsapp_connector_refused: "O conector de WhatsApp configurado recusou a mensagem de teste. Confira o endereço e o token do conector; o detalhe técnico fica no registro do painel.",
     whatsapp_connected: "Há um número de WhatsApp conectado por QR Code. Desconecte o número antes de salvar outro conector ou de remover o serviço.",
     connector_replace_required: "Já existe um conector de WhatsApp configurado. Confirme a substituição para conectar.",
     invalid_numbers: "Estes números não foram reconhecidos como telefone. Nenhum foi adicionado:",
