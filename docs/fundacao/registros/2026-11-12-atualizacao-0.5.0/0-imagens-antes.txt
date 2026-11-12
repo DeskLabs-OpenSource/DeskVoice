@@ -1,0 +1,6 @@
+ghcr.io/desklabs-opensource/deskvoice-panel:0.4.0 bfa703d27b0c
+ghcr.io/desklabs-opensource/deskvoice-routines:0.4.0 f636618bbedf
+ghcr.io/desklabs-opensource/deskvoice-voice:0.4.0 fc135cfa2c7d
+ghcr.io/desklabs-opensource/deskvoice-panel:0.3.0 4f0fdd0efede
+ghcr.io/desklabs-opensource/deskvoice-voice:0.3.0 a73b8f696e65
+ghcr.io/desklabs-opensource/deskvoice-routines:0.3.0 39adc73dd430
