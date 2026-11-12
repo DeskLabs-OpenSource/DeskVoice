@@ -304,6 +304,28 @@ describe("aviso de gravação", { timeout: 120_000 }, () => {
   });
 });
 
+describe("encerrar com despedida", { timeout: 120_000 }, () => {
+  it("end_call com farewell: o modelo recebe a despedida para falar uma vez, e só depois a ligação cai", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("end-farewell", { engine: "manual", tools: ["end_call"] }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("toolCall", { id: "t1", name: "end_call", args: { reason: "A cliente se despediu.", farewell: "Foi um prazer, Jéssica! Tenha um ótimo dia." } });
+    // A despedida vai no resultado da ferramenta, e o modelo a fala uma vez só: o sistema não a pede de novo.
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    expect(manual.toolResults[0]?.result).toMatchObject({ ok: true, message: expect.stringContaining('"Foi um prazer, Jéssica! Tenha um ótimo dia."') });
+    expect(manual.said).toEqual([]);
+    // Ainda falando a despedida: a ligação não caiu.
+    expect(transport.hangups).toBe(0);
+    expect((await callOf(app, callId)).status).toBe("in_progress");
+
+    expect(harness.timers.fire(6000)).toBe(1);
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "end_call" });
+    expect(transport.hangups).toBe(1);
+  });
+});
+
 describe("tetos da chamada", { timeout: 120_000 }, () => {
   it("duração máxima: o agente se despede e a chamada termina, com o motivo", async () => {
     const manual = manualEngine({ keyless: true });

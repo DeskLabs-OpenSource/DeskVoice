@@ -133,6 +133,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let ending = false;
   let wrappingUp = false;
   let requestedEnd: Ending | undefined;
+  let requestedFarewell: string | undefined;
   let costCents = 0;
   const usage = { seconds: 0, inputTokens: 0, outputTokens: 0 };
   const cancelTimers: Array<() => void> = [];
@@ -175,10 +176,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   }
 
   /** O agente se despede e a chamada termina logo depois. */
-  function wrapUp(farewell: string, end: Ending): void {
+  function wrapUp(farewell: string | null, end: Ending): void {
     if (ending || wrappingUp) return;
     wrappingUp = true;
-    voice?.say(farewell);
+    // Sem texto: o modelo já vai falar a despedida (o resultado da ferramenta pediu), e só se espera.
+    if (farewell) voice?.say(farewell);
     cancelTimers.push(schedule(() => void finish(end), FAREWELL_MS));
   }
 
@@ -225,8 +227,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       async transfer(toE164) {
         requestedEnd ??= { status: "transferred", endReason: "transferred", transferTo: toE164 };
       },
-      async hangup() {
+      async hangup(farewell) {
         requestedEnd ??= { status: "completed", endReason: "end_call" };
+        requestedFarewell ??= farewell;
       },
     },
     say(text) {
@@ -260,7 +263,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       result = { ok: false, message: TOOL_CRASH_MESSAGE };
     }
     if (!ending) voice?.sendToolResult(call.id, result);
-    if (requestedEnd) void finish(requestedEnd);
+    // Com despedida, a ligação só cai depois de ela ser falada: sem isso o modelo às vezes encerrava
+    // calado, e a pessoa ouvia a ligação cair na cara dela. Quem fala é o próprio modelo, ao receber
+    // o resultado do end_call (que traz a despedida); pedir a fala de novo aqui a repetia.
+    if (requestedEnd && requestedFarewell) wrapUp(null, requestedEnd);
+    else if (requestedEnd) void finish(requestedEnd);
   }
 
   async function run(): Promise<void> {
