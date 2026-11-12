@@ -1,0 +1,6 @@
+deskvoice-asterisk-1 446ac62ef725 927d4c987771 Up 2 hours (healthy)
+deskvoice-caddy-1 0618b62771ea caddy:2.11.9-alpine Up 59 minutes
+deskvoice-panel-1 c9804889f048 ghcr.io/desklabs-opensource/deskvoice-panel:0.4.0 Up 15 seconds (healthy)
+deskvoice-postgres-1 a6eab4241a2a postgres:17.11-alpine Up 2 hours (healthy)
+deskvoice-routines-1 29bc9532fb31 ghcr.io/desklabs-opensource/deskvoice-routines:0.4.0 Up 15 seconds
+deskvoice-voice-1 446bc5d79fff ghcr.io/desklabs-opensource/deskvoice-voice:0.4.0 Up 15 seconds (healthy)

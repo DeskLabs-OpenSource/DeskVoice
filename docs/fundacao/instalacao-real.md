@@ -190,3 +190,67 @@ Defeitos achados aqui, com conserto em PR próprio:
 - **A frase contrária da janela de 10 minutos.**
 - **O número de memória antigo na tela do WhatsApp.** A tela diz "O DeskVoice inteiro, sem ele, usa cerca de 320 MB".
 - **O mascaramento da saída, que trocou `routines` por `***`.** A linha `@deskvoice/routines@0.0.0` parecia um e-mail.
+
+## Instalador duas vezes, backup e restauração, troca de senha (2026-11-12)
+
+Na VPS da parceira, na 0.4.0 instalada pela tela, sem linha nem motor. As saídas inteiras estão em [`registros/2026-11-12-provas-destrutivas/`](registros/2026-11-12-provas-destrutivas/), com o IP trocado. Os números "N-…-contagens.txt" são organizações, usuários, chamadas e eventos de chamada.
+
+| Prova | O que se observou |
+|---|---|
+| Instalador duas vezes seguidas, na mesma versão (11.3) | `install.sh --yes` duas vezes, saída 0 nas duas. Os três arquivos de ambiente têm o mesmo `sha256` antes e depois, ou seja, nenhum segredo foi regerado. Os contêineres são os mesmos (mesmos IDs, nenhum recriado). As contagens não mudaram (1, 1, 1, 25). Nas duas rodadas o instalador avisou "Login NÃO testado: o usuário dono já existia e eu não tenho a senha dele", que é o comportamento declarado |
+| Backup (11.8) | `backup.sh` restaurou o dump num banco de rascunho, contou 20 tabelas e só então disse "Backup concluído e conferido" |
+| Restauração sem mudança | `restore.sh latest --yes`: "Restaurado… com as contagens conferidas", saída 0. As contagens são as mesmas de antes |
+| Restauração com mudança | Depois do backup, uma chamada simulada pelo painel levou o banco a 2 chamadas e 50 eventos. `restore.sh` com o backup anterior voltou o banco a 1 chamada e 25 eventos, saída 0 ([`5-antes-da-restauracao.txt`](registros/2026-11-12-provas-destrutivas/5-antes-da-restauracao.txt)) |
+| Troca de senha pelo kit (6.5) | `reset-password.sh` com a senha nova pela variável: "Senha… trocada. Sessões encerradas: 1" e "Senha trocada e conferida: entrei pela tela de entrada com a senha nova". A senha nova não aparece na saída: o `grep` por ela deu zero |
+| Saúde | `healthcheck.sh` saiu com 0 depois de cada etapa |
+
+O que não prova:
+
+- **Restauração em outro servidor** (`--with-config`): não rodou.
+- **Restauração depois de uma migration nova:** não rodou. O backup e a restauração são da mesma versão.
+- **Desempenho com banco grande:** o banco tem 84 KB de dump.
+
+## Segunda atualização pela tela: 0.4.0 → 0.5.0, com a passagem de vez e a limpeza (2026-11-12)
+
+Na mesma VPS, pelo botão, sem tocar no terminal do servidor durante a atualização. O disco e as imagens foram medidos pelo terminal, só lendo, antes do clique e depois. Saídas em [`registros/2026-11-12-atualizacao-0.5.0/`](registros/2026-11-12-atualizacao-0.5.0/).
+
+| O que | Antes | Depois |
+|---|---|---|
+| Versão | 0.4.0 | 0.5.0 |
+| Imagens do DeskVoice | 0.4.0 e 0.3.0 | 0.5.0 e 0.4.0 |
+| `docker system df`, imagens | 3,857 GB (1,98 GB que se podia liberar) | 2,915 GB (96 MB que se podia liberar) |
+
+- **Passagem de vez com `--resume`, provada.** A saída mostrada na tela traz "O atualizador da versão 0.5.0 assumiu a atualização a partir da 0.4.0". Essa linha só é impressa pelo atualizador de destino depois de receber a vez ([`saida-do-atualizador-na-tela.txt`](registros/2026-11-12-atualizacao-0.5.0/saida-do-atualizador-na-tela.txt)).
+- **Limpeza de imagens com `docker rmi` real, provada.** "Imagens de versões antigas do DeskVoice removidas": as três da 0.3.0. "A imagem da versão 0.4.0 fica, para voltar a ela sem internet." A lista de imagens depois confirma ([`1-imagens-depois.txt`](registros/2026-11-12-atualizacao-0.5.0/1-imagens-depois.txt)).
+- **Tempo:** `agent.log` com o pedido aceito às 16:04:06Z e "succeeded (de 0.4.0 para 0.5.0)" às 16:05:04Z, 58 s.
+- **A tela nova:** termina com "Este servidor está na versão publicada mais recente", sem a contradição da 0.4.0. O bloco do WhatsApp já mostra os números medidos (323 MiB, 380 MiB).
+- **O `last-update.log` não existe, como esperado:** quem executou foi o agente da 0.4.0, que não o grava. A tela não aponta o arquivo.
+- **Saúde:** `healthcheck.sh` saiu com 0.
+
+O que continua sem prova:
+
+- **O `last-update.log`:** só nasce na atualização seguinte, 0.5.0 → próxima.
+- **A máscara nova sobre a saída real:** o trecho mostrado na tela começa depois da linha do `routines`.
+- **A volta automática numa máquina real:** nenhuma atualização falhou.
+
+## Ensaio da volta automática numa máquina real (2026-11-12)
+
+Na VPS da parceira, pelo terminal, com um roteiro guardado em [`registros/2026-11-12-ensaio-da-volta/ensaio-volta.sh.txt`](registros/2026-11-12-ensaio-da-volta/ensaio-volta.sh.txt). A versão "doente" não existe publicada. A falha foi induzida de fora: um laço derrubava o contêiner do painel sempre que ele aparecia na imagem da 0.5.0. O prazo da saúde foi baixado para 60 s (`DESKVOICE_HEALTH_TIMEOUT=60`), mas não chegou a contar: o painel caiu enquanto o Compose ainda subia as peças, e a volta partiu do passo anterior à espera da saúde.
+
+| Passo | O que se observou |
+|---|---|
+| 1. Descer da 0.5.0 para a 0.4.0 (`update.sh --to 0.4.0`) | Saída 0, com backup, as três imagens da 0.4.0 e as peças respondendo. O banco tem a migration da 0.5.0 (a coluna `output_kept`), e a 0.4.0 rodou com ela. Descer não é caminho anunciado: aqui funcionou porque a migration só acrescenta uma coluna |
+| 2. Subir para a 0.5.0 com o painel derrubado | O laço derrubou o painel 0.5.0 às 16:08:26Z. O Compose acusou "dependency panel failed to start", e o atualizador disse "Os serviços da versão 0.5.0 não subiram". Em seguida mostrou a saúde (painel em falha) e "Voltando para a versão 0.4.0", voltou o código e as imagens, restaurou o banco do backup feito antes da tentativa ("contagens conferidas") e terminou com "A atualização para 0.5.0 não deu certo e foi desfeita: você está de volta na versão 0.4.0… e tudo respondendo". A saída foi 1, como deve ser numa volta ([`2-subir-com-falha.txt`](registros/2026-11-12-ensaio-da-volta/2-subir-com-falha.txt)) |
+| Depois da volta | Versão 0.4.0, as três imagens da 0.4.0 rodando, contagens iguais às de antes (1 chamada, 25 eventos) e `healthcheck.sh` com saída 0 |
+| 3. Subir de novo, sem sabotagem | Saída 0, com "O atualizador da versão 0.5.0 assumiu a atualização a partir da 0.4.0". A máquina terminou na 0.5.0, onde estava, com a saúde em 0 |
+
+O que isto prova:
+
+- o caminho inteiro da volta numa máquina real, disparado por "os serviços não subiram": código, imagens com a etiqueta `rollback`, restauração do banco e as peças de volta respondendo, com a mensagem certa.
+- **Não prova a volta disparada pelo prazo da saúde** (`wait_healthy` esgotado com as peças de pé). O código da volta é o mesmo, mas esse gatilho não rodou aqui.
+
+O que isto não prova:
+
+- **Uma versão publicada que de fato falhe.** A falha foi induzida de fora, num contêiner. Uma migration quebrada, por exemplo, não foi exercitada.
+- **A volta disparada pela tela.** Este ensaio rodou pelo terminal. A tela mostrando "voltou" ainda não foi vista.
+- **Descer de versão** continua sem promessa: funcionou aqui por causa da forma da migration.

@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./waha": "./src/connectors/waha.ts"
+    "./waha": "./src/connectors/waha.ts",
+    "./whatsapp": "./src/connectors/whatsapp.ts"
   },
   "dependencies": {
     "@deskvoice/core": "workspace:^",

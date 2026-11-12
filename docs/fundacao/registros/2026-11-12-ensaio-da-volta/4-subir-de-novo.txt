@@ -1,0 +1,64 @@
+
+▶ Copiando o banco
+  ✓ dump gravado (84K)
+
+▶ Conferindo se o backup abre
+  ✓ restaurado num banco de rascunho: 20 tabelas contadas
+
+▶ Guardando a configuração
+  ✓ Backup concluído e conferido: /root/DeskVoice/backups/20261112-130854
+/root/DeskVoice/backups/20261112-130854
+
+▶ Trocando para a versão 0.5.0
+  ✓ Imagens da versão 0.5.0 baixadas
+
+▶ Aplicando as mudanças no banco
+ Container deskvoice-postgres-1 Running 
+ Container deskvoice-postgres-1 Waiting 
+ Container deskvoice-postgres-1 Healthy 
+ Container deskvoice-migrate-run-b0a3012b1c87 Creating 
+ Container deskvoice-migrate-run-b0a3012b1c87 Created 
+
+> @deskvoice/routines@0.0.0 migrate /app/apps/routines
+> tsx src/cli/migrate.ts
+
+Nenhuma migration nova: o banco já estava em dia.
+Senha do papel deskvoice_app definida.
+Senha do papel deskvoice_system definida.
+  ✓ Banco atualizado
+
+▶ Subindo e conferindo
+ Container deskvoice-asterisk-1 Running 
+ Container deskvoice-caddy-1 Running 
+ Container deskvoice-postgres-1 Running 
+ Container deskvoice-migrate-1 Recreate 
+ Container deskvoice-migrate-1 Recreated 
+ Container deskvoice-voice-1 Recreate 
+ Container deskvoice-panel-1 Recreate 
+ Container deskvoice-routines-1 Recreate 
+ Container deskvoice-panel-1 Recreated 
+ Container deskvoice-routines-1 Recreated 
+ Container deskvoice-voice-1 Recreated 
+ Container deskvoice-asterisk-1 Waiting 
+ Container deskvoice-postgres-1 Waiting 
+ Container deskvoice-postgres-1 Healthy 
+ Container deskvoice-migrate-1 Starting 
+ Container deskvoice-asterisk-1 Healthy 
+ Container deskvoice-migrate-1 Started 
+ Container deskvoice-migrate-1 Waiting 
+ Container deskvoice-migrate-1 Exited 
+ Container deskvoice-panel-1 Starting 
+ Container deskvoice-routines-1 Starting 
+ Container deskvoice-voice-1 Starting 
+ Container deskvoice-panel-1 Started 
+ Container deskvoice-panel-1 Waiting 
+ Container deskvoice-routines-1 Started 
+ Container deskvoice-voice-1 Started 
+ Container deskvoice-panel-1 Healthy 
+  ✓ Agente de atualização agendado (systemd: deskvoice-agent.timer, a cada minuto, como root)
+  ✓ Atualizado para 0.5.0, com todas as peças essenciais respondendo.
+  ✓ O painel responde pela porta publicada (http://127.0.0.1:3080)
+  O atualizador da versão 0.5.0 assumiu a atualização a partir da 0.4.0.
+  Backup de antes da atualização: /root/DeskVoice/backups/20261112-130854
+  Relatório completo: bash install/healthcheck.sh
+saída: 0

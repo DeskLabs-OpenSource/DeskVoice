@@ -47,6 +47,14 @@ export const CALL_EVENT_KINDS = [
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];
 
+/**
+ * O que acontece na organização fora de uma chamada e precisa ficar registrado
+ * (`organization_events`). Fechado como o da chamada: acontecimento novo entra aqui.
+ */
+export const ORG_EVENT_KINDS = ["transcript_retention_changed", "transcripts_purged", "caller_data_exported"] as const;
+
+export type OrgEventKind = (typeof ORG_EVENT_KINDS)[number];
+
 export type CallStatus = "ringing" | "in_progress" | "transferred" | "completed" | "failed" | "refused";
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
 export type ApprovalOutcome = Exclude<ApprovalStatus, "pending">;

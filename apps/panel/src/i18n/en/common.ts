@@ -78,6 +78,7 @@ const common: CommonDictionary = {
     whatsapp_not_connected: "WhatsApp is not connected. Connect the number in Settings before sending.",
     whatsapp_number_not_found: "Your saved number is not on WhatsApp. Check the number in My contact.",
     whatsapp_contact_required: "Save your WhatsApp in My contact, at the top of this page, to receive the test message.",
+    whatsapp_connector_refused: "The configured WhatsApp connector refused the test message. Check the connector address and token; the technical detail is in the panel log.",
     whatsapp_connected: "A WhatsApp number is connected by QR code. Disconnect the number before saving another connector or removing the service.",
     connector_replace_required: "A WhatsApp connector is already configured. Confirm the replacement to connect.",
     invalid_numbers: "These were not recognized as phone numbers. None was added:",

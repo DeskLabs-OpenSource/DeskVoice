@@ -1,4 +1,5 @@
 import { safeFetch, type SafeFetchOptions, type SafeResponse } from "../net/safe-fetch";
+import { connectorBody, connectorHeaders } from "./http-request";
 import type { HttpConnector, WhatsAppMessage } from "./whatsapp";
 
 /**
@@ -10,13 +11,6 @@ import type { HttpConnector, WhatsAppMessage } from "./whatsapp";
  * contrato, só este arquivo muda.
  */
 export function sendViaDeskcomm(connector: HttpConnector, message: WhatsAppMessage, net: SafeFetchOptions): Promise<SafeResponse> {
-  return safeFetch(
-    connector.url,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${connector.token}` },
-      body: JSON.stringify({ to: message.to, text: message.text, callId: message.callId ?? null }),
-    },
-    net,
-  );
+  const body = connectorBody(message);
+  return safeFetch(connector.url, { method: "POST", headers: connectorHeaders(connector.token, message), body }, net);
 }

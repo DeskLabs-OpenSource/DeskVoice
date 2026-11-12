@@ -35,6 +35,8 @@ export function startPanel(): { app: Db; deps: ServerDeps; clock: { at: Date }; 
       voice.requests.push({ url, body: typeof init.body === "string" ? JSON.parse(init.body) : undefined });
       return voice.respond(url, init);
     },
+    // Todo nome resolve para um endereço público: o envio por conector passa pelo guarda de rede.
+    lookup: async () => ["93.184.216.34"],
     voiceUrl: "http://voice.test",
     internalToken: "internal-test-token",
     trustedProxyHops: 1,

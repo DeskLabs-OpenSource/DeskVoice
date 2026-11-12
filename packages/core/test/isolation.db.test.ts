@@ -34,10 +34,21 @@ const factories: Record<string, Factory> = {
   update_requests: (organization_id, p) => ({ organization_id, requested_by: p.users?.id, status: "succeeded", from_version: "0.1.0", target_version: "0.2.0" }),
   update_agent_status: (organization_id) => ({ organization_id, last_seen_at: at, announced_version: "0.1.0" }),
   whatsapp_sessions: (organization_id) => ({ organization_id, session_name: unique("session") }),
+  organization_events: (organization_id, p) => ({ organization_id, at, kind: "isolation_probe", actor_user_id: p.users?.id, payload: {} }),
 };
 
 const UNSCOPED_TABLES = ["organizations", "schema_migrations"];
 const RLS_VIOLATION = "42501";
+
+// Tabelas só de acréscimo: os papéis de aplicação e de sistema leem e inserem, e nunca alteram nem
+// apagam. Para elas, os testes de isolamento abaixo conferem a recusa da permissão no lugar da
+// alteração; todas as outras continuam provando que a dona altera e apaga as próprias linhas.
+// Entrada nova precisa de motivo, e o teste de schema reprova lista que não bate com as permissões.
+const APPEND_ONLY_TABLES: Record<string, string> = {
+  organization_events: "auditoria dos direitos de quem ligou (registro 0014): registro que se reescreve não prova nada",
+};
+const isAppendOnly = (table: string): boolean => Object.hasOwn(APPEND_ONLY_TABLES, table);
+const PERMISSION_DENIED = { code: "42501", message: expect.stringMatching(/permission denied/) };
 
 const { app, owner } = openTestDbs();
 
@@ -166,6 +177,24 @@ describe("schema", () => {
     }
   });
 
+  it("grants change and delete on every table with organization_id except the append-only ones, which only read and insert", async () => {
+    expect(Object.keys(APPEND_ONLY_TABLES).filter((name) => !scoped.some((t) => t.name === name))).toEqual([]);
+    for (const [name, reason] of Object.entries(APPEND_ONLY_TABLES)) expect(reason.trim(), name).not.toBe("");
+    const privileges = await owner.pool.query<{ name: string; role: string; can_select: boolean; can_insert: boolean; can_update: boolean; can_delete: boolean }>(
+      `select t.name, r.role,
+              has_table_privilege(r.role, format('public.%I', t.name), 'select') as can_select,
+              has_table_privilege(r.role, format('public.%I', t.name), 'insert') as can_insert,
+              has_table_privilege(r.role, format('public.%I', t.name), 'update') as can_update,
+              has_table_privilege(r.role, format('public.%I', t.name), 'delete') as can_delete
+         from unnest($1::text[]) as t(name), unnest(array['deskvoice_app', 'deskvoice_system']) as r(role)`,
+      [scoped.map((t) => t.name)],
+    );
+    for (const row of privileges.rows) {
+      const changes = !isAppendOnly(row.name);
+      expect([row.can_select, row.can_insert, row.can_update, row.can_delete], `${row.name} as ${row.role}`).toEqual([true, true, changes, changes]);
+    }
+  });
+
   it("has a factory for every table with organization_id, and no stale factory", () => {
     expect(scoped.map((t) => t.name).filter((name) => !(name in factories))).toEqual([]);
     expect(Object.keys(factories).filter((name) => !scoped.some((t) => t.name === name))).toEqual([]);
@@ -176,10 +205,10 @@ describe.each(scoped.map((t) => t.name))("isolation of %s", (table) => {
   it("lets the owning organization read and change its own row", async () => {
     factoryFor(table);
     const { where, params } = byPk(table, rowsA[table] ?? {});
-    await withOrg(app, orgA, async (q) => {
-      expect(await count(q, table, where, params)).toBe(1);
-      expect(await q.exec(`update ${ident(table)} set organization_id = organization_id where ${where}`, params)).toBe(1);
-    });
+    const change = (q: OrgQuery) => q.exec(`update ${ident(table)} set organization_id = organization_id where ${where}`, params);
+    await withOrg(app, orgA, async (q) => expect(await count(q, table, where, params)).toBe(1));
+    if (isAppendOnly(table)) await expect(withOrg(app, orgA, change)).rejects.toMatchObject(PERMISSION_DENIED);
+    else await withOrg(app, orgA, async (q) => expect(await change(q)).toBe(1));
   });
 
   it("hides the row of organization A from organization B", async () => {
@@ -197,14 +226,14 @@ describe.each(scoped.map((t) => t.name))("isolation of %s", (table) => {
     factoryFor(table);
     const row = rowsA[table] ?? {};
     const { where, params } = byPk(table, row);
-    await withOrg(app, orgB, async (q) => {
-      expect(await q.exec(`update ${ident(table)} set organization_id = organization_id where ${where}`, params)).toBe(0);
-    });
     // Tentativa de sequestro: trazer a linha de A para B.
     const steal = byPk(table, row, 2);
-    await withOrg(app, orgB, async (q) => {
-      expect(await q.exec(`update ${ident(table)} set organization_id = $1 where ${steal.where}`, [orgB, ...steal.params])).toBe(0);
-    });
+    const touch = (q: OrgQuery) => q.exec(`update ${ident(table)} set organization_id = organization_id where ${where}`, params);
+    const take = (q: OrgQuery) => q.exec(`update ${ident(table)} set organization_id = $1 where ${steal.where}`, [orgB, ...steal.params]);
+    for (const attempt of [touch, take]) {
+      if (isAppendOnly(table)) await expect(withOrg(app, orgB, attempt)).rejects.toMatchObject(PERMISSION_DENIED);
+      else await withOrg(app, orgB, async (q) => expect(await attempt(q)).toBe(0));
+    }
     await withOrg(app, orgA, async (q) => expect(await count(q, table, where, params)).toBe(1));
   });
 
@@ -213,16 +242,18 @@ describe.each(scoped.map((t) => t.name))("isolation of %s", (table) => {
     const { where, params } = byPk(table, row, 2);
     await expect(
       withOrg(app, orgB, (q) => q.exec(`update ${ident(table)} set organization_id = $1 where ${where}`, [orgA, ...params])),
-    ).rejects.toMatchObject({ code: RLS_VIOLATION });
+    ).rejects.toMatchObject(isAppendOnly(table) ? PERMISSION_DENIED : { code: RLS_VIOLATION });
   });
 
   it("does not let organization B delete the row of organization A", async () => {
     factoryFor(table);
     const { where, params } = byPk(table, rowsA[table] ?? {});
-    await withOrg(app, orgB, async (q) => {
-      expect(await q.exec(`delete from ${ident(table)} where ${where}`, params)).toBe(0);
-      expect(await q.exec(`delete from ${ident(table)} where organization_id = $1`, [orgA])).toBe(0);
-    });
+    const byKey = (q: OrgQuery) => q.exec(`delete from ${ident(table)} where ${where}`, params);
+    const byOrg = (q: OrgQuery) => q.exec(`delete from ${ident(table)} where organization_id = $1`, [orgA]);
+    for (const attempt of [byKey, byOrg]) {
+      if (isAppendOnly(table)) await expect(withOrg(app, orgB, attempt)).rejects.toMatchObject(PERMISSION_DENIED);
+      else await withOrg(app, orgB, async (q) => expect(await attempt(q)).toBe(0));
+    }
     await withOrg(app, orgA, async (q) => expect(await count(q, table, where, params)).toBe(1));
   });
 
@@ -295,7 +326,8 @@ describe("withOrg and withSystem", () => {
       await q.many("select set_config('app.system', 'on', true)");
       for (const { name } of scoped) {
         expect(await count(q, name, "organization_id = $1", [orgA]), name).toBe(0);
-        expect(await q.exec(`delete from ${ident(name)} where organization_id = $1`, [orgA]), name).toBe(0);
+        // Tabela só de acréscimo recusa qualquer delete pela permissão; a recusa é provada acima.
+        if (!isAppendOnly(name)) expect(await q.exec(`delete from ${ident(name)} where organization_id = $1`, [orgA]), name).toBe(0);
       }
       expect(await count(q, "organizations", "id = $1", [orgA])).toBe(0);
     });

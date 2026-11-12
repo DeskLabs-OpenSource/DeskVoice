@@ -1,0 +1,124 @@
+
+▶ Copiando o banco
+  ✓ dump gravado (84K)
+
+▶ Conferindo se o backup abre
+  ✓ restaurado num banco de rascunho: 20 tabelas contadas
+
+▶ Guardando a configuração
+  ✓ Backup concluído e conferido: /root/DeskVoice/backups/20261112-130816
+/root/DeskVoice/backups/20261112-130816
+
+▶ Trocando para a versão 0.5.0
+  ✓ Imagens da versão 0.5.0 baixadas
+
+▶ Aplicando as mudanças no banco
+ Container deskvoice-postgres-1 Running 
+ Container deskvoice-postgres-1 Waiting 
+ Container deskvoice-postgres-1 Healthy 
+ Container deskvoice-migrate-run-f4fe24fbef79 Creating 
+ Container deskvoice-migrate-run-f4fe24fbef79 Created 
+
+> @deskvoice/routines@0.0.0 migrate /app/apps/routines
+> tsx src/cli/migrate.ts
+
+Nenhuma migration nova: o banco já estava em dia.
+Senha do papel deskvoice_app definida.
+Senha do papel deskvoice_system definida.
+  ✓ Banco atualizado
+
+▶ Subindo e conferindo
+ Container deskvoice-asterisk-1 Running 
+ Container deskvoice-caddy-1 Running 
+ Container deskvoice-postgres-1 Running 
+ Container deskvoice-migrate-1 Recreate 
+ Container deskvoice-migrate-1 Recreated 
+ Container deskvoice-routines-1 Recreate 
+ Container deskvoice-panel-1 Recreate 
+ Container deskvoice-voice-1 Recreate 
+ Container deskvoice-panel-1 Recreated 
+ Container deskvoice-routines-1 Recreated 
+ Container deskvoice-voice-1 Recreated 
+ Container deskvoice-postgres-1 Waiting 
+ Container deskvoice-asterisk-1 Waiting 
+ Container deskvoice-postgres-1 Healthy 
+ Container deskvoice-migrate-1 Starting 
+ Container deskvoice-asterisk-1 Healthy 
+ Container deskvoice-migrate-1 Started 
+ Container deskvoice-migrate-1 Waiting 
+ Container deskvoice-migrate-1 Exited 
+ Container deskvoice-panel-1 Starting 
+ Container deskvoice-voice-1 Starting 
+ Container deskvoice-routines-1 Starting 
+ Container deskvoice-panel-1 Started 
+ Container deskvoice-panel-1 Waiting 
+ Container deskvoice-voice-1 Started 
+ Container deskvoice-routines-1 Started 
+ Container deskvoice-panel-1 Error dependency panel failed to start
+dependency failed to start: container deskvoice-panel-1 exited (143)
+  ✗ Os serviços da versão 0.5.0 não subiram.
+
+▶ Voltando para a versão 0.4.0
+    ok     Banco              Postgres aceitando conexões
+    ok     Asterisk           System uptime: 2 hours, 36 minutes, 48 seconds
+    falha  Painel             o contêiner do painel não está rodando. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 panel
+    aviso  Painel → banco   não deu para consultar porque o painel não respondeu; resolva o painel primeiro
+    ok     Worker de voz      respondendo
+    ok     Controle da telefonia o processo de voz está conectado ao Asterisk (Connected.)
+    ok     Rotinas            processo rodando
+  
+    Há peça essencial fora do ar. Para pedir ajuda com tudo junto: bash install/diagnose.sh
+
+▶ Conferindo o arquivo do backup
+  ✓ arquivo íntegro (sha256 confere)
+
+▶ Parando painel, voz e rotinas
+ Container deskvoice-panel-1 Stopping 
+ Container deskvoice-voice-1 Stopping 
+ Container deskvoice-routines-1 Stopping 
+ Container deskvoice-panel-1 Stopped 
+ Container deskvoice-routines-1 Stopped 
+ Container deskvoice-voice-1 Stopped 
+
+▶ Restaurando num banco ao lado
+
+▶ Comparando as contagens com o manifesto
+  ✓ todas as 20 tabelas com a mesma contagem do backup
+
+▶ Trocando o banco
+
+▶ Religando os serviços
+ Container deskvoice-caddy-1 Running 
+ Container deskvoice-postgres-1 Running 
+ Container deskvoice-asterisk-1 Running 
+ Container deskvoice-migrate-1 Recreate 
+ Container deskvoice-migrate-1 Recreated 
+ Container deskvoice-panel-1 Recreate 
+ Container deskvoice-voice-1 Recreate 
+ Container deskvoice-routines-1 Recreate 
+ Container deskvoice-routines-1 Recreated 
+ Container deskvoice-panel-1 Recreated 
+ Container deskvoice-voice-1 Recreated 
+ Container deskvoice-postgres-1 Waiting 
+ Container deskvoice-asterisk-1 Waiting 
+ Container deskvoice-postgres-1 Healthy 
+ Container deskvoice-migrate-1 Starting 
+ Container deskvoice-asterisk-1 Healthy 
+ Container deskvoice-migrate-1 Started 
+ Container deskvoice-migrate-1 Waiting 
+ Container deskvoice-migrate-1 Exited 
+ Container deskvoice-panel-1 Starting 
+ Container deskvoice-voice-1 Starting 
+ Container deskvoice-routines-1 Starting 
+ Container deskvoice-panel-1 Started 
+ Container deskvoice-panel-1 Waiting 
+ Container deskvoice-voice-1 Started 
+ Container deskvoice-routines-1 Started 
+ Container deskvoice-panel-1 Healthy 
+  ✓ Restaurado: o banco agora é o do backup de 2026-11-12T16:08:17Z, com as contagens conferidas.
+  Confira o sistema com: bash install/healthcheck.sh
+
+✗ A atualização para 0.5.0 não deu certo e foi desfeita: você está de volta na versão 0.4.0, com o banco do backup de antes da atualização (/root/DeskVoice/backups/20261112-130816) e tudo respondendo.
+  O que fazer: Nada se perdeu além do que entrou durante a tentativa. Rode bash install/diagnose.sh e abra uma issue com o arquivo, dizendo que a atualização para 0.5.0 voltou.
+  Se precisar de ajuda, rode: bash install/diagnose.sh
+saída: 1
