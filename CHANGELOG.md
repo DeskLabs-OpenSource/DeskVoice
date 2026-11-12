@@ -3,6 +3,41 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.6.0] - 2026-11-12
+
+### Adicionado
+
+- **Exportar pela tela os dados que a organização guarda sobre um telefone** Quando uma pessoa pede o que a central guarda sobre ela, dono ou administrador informa o telefone em Configurações, em "Dados de uma pessoa que ligou", e baixa um arquivo com as chamadas desse número, os eventos delas e a entrada na lista de não ligar. O arquivo só traz o que é da organização de quem pede, nunca de outra empresa da mesma instalação. Cada exportação fica registrada na tela, com quem exportou, de qual telefone e quando. Nada a configurar em instalações existentes. Crédito: @webtecnica, @melgarafael.
+- **As chamadas podem ser gravadas em áudio, com a gravação desligada de fábrica** A instalação agora sabe gravar o áudio de cada chamada num arquivo WAV estéreo, com quem ligou num canal e o agente no outro, e tocá-lo na tela da chamada. A gravação vem desligada: quem atualiza continua sem gravar até um dono ou administrador ligar em Configurações, em "Gravação das chamadas", e cada organização decide a sua. A tela diz o custo em disco, cerca de 1,9 MB por minuto de chamada, pela conta do formato, e avisa quando não há prazo de guarda e o disco cresce sem limite. O áudio vai para o disco durante a chamada, sem ficar em memória, e com menos de 1 GiB livre a chamada segue sem gravar, com o motivo na linha do tempo. Ligar ou desligar fica no registro da mesma tela e não apaga nada: as gravações já feitas seguem o prazo de guarda das conversas e saem junto com o texto. A exportação dos dados de quem ligou passa a dizer, em cada chamada, se há gravação; o áudio não vai no arquivo. Os backups de hoje não incluem as gravações. Os arquivos ficam num volume novo do Compose, que a atualização cria sozinha. Crédito: @aliffstefano.
+- **Ligação pelo WhatsApp, primeira parte - instalar o serviço e conectar o número pela tela** Em Configurações, o bloco "Ligação pelo WhatsApp" instala o serviço (o WaCalls, um cliente não oficial do WhatsApp) e conecta o número da empresa lendo um QR Code, como mais um aparelho do WhatsApp. A tela mostra o número conectado, avisa quando ele cai e quando é o mesmo número já conectado para mensagens, e a saúde do sistema ganha a linha "Ligação pelo WhatsApp". O serviço vem desligado: nada é baixado sem o pedido de um dono ou administrador. Nesta versão nenhuma ligação é atendida pelo agente; isso chega na próxima. O WhatsApp pode bloquear o número: use um número dedicado. Nada a fazer em instalações existentes: o atualizador gera as chaves do serviço sozinho. Crédito: @melgarafael.
+- **O motor de voz declara onde o áudio é processado, e a tela mostra** A tela de Configurações mostrava o motor de voz e o preço, mas não dizia para onde o áudio da
+  chamada vai. Agora cada motor declara provedor e lugar de processamento, e a tela exibe a
+  declaração com a fonte — inclusive quando a resposta honesta é "o provedor não declara o país".
+  Nada a fazer em instalações existentes: é informação, não configuração. Crédito: @webtecnica.
+- **Prazo de guarda da transcrição, por organização, em Configurações** Dono ou administrador define em Configurações, em "Prazo de guarda das conversas", por quantos dias a transcrição de cada ligação fica guardada, com mínimo de 30. Depois do prazo, o texto de cada fala é trocado por um marcador, uma vez por dia; a chamada, o resumo e o resto da linha do tempo continuam. O que sai não volta, e os backups já feitos continuam com o texto até serem descartados. Cada mudança do prazo e cada expurgo ficam registrados na mesma tela. Nada a fazer em instalações existentes: sem prazo preenchido, a transcrição continua guardada para sempre, como antes. Crédito: @webtecnica, @melgarafael.
+
+### Alterado
+
+- **A voz do agente se escolhe numa lista, com as vozes de cada motor** Na tela do agente, o campo Voz era um texto livre: era preciso saber o nome exato da voz no provedor. Agora é uma lista com as vozes do motor escolhido (as 30 do Gemini Live, com o descritor oficial de cada uma, como "Warm" ou "Firm", e as 10 do OpenAI Realtime, com as duas que a OpenAI recomenda marcadas), mais "Padrão do motor", que mostra qual voz é essa. Trocar de motor volta a voz para o padrão, porque o nome de uma voz não existe no outro. Um agente com voz fora da lista continua com ela, marcada como tal. Crédito: @aliffstefano.
+- **A saudação aponta o exemplo de aviso de IA do guia de conformidade** A dica do campo `Saudação` passou a indicar o exemplo de aviso de IA que está no guia de
+  conformidade, nos três idiomas. O texto do agente continua sendo decisão de quem opera, e o
+  aviso segue opcional: nada muda em instalações existentes. Crédito: @webtecnica.
+
+### Corrigido
+
+- **O aviso pelo WhatsApp leva uma chave de repetição, para o reenvio não duplicar a mensagem** A entrega do aviso é uma tarefa de fila com três tentativas: quando o destino recebia a mensagem mas a
+  resposta se perdia no caminho, a tentativa seguinte mandava o mesmo texto outra vez. Agora cada envio
+  vai com a chave de repetição igual ao id do próprio aviso, e quem recebe pode devolver o mesmo recibo
+  em vez de mandar duas vezes. Vale para os conectores de endereço do operador; o número conectado por QR Code não muda. Nada a fazer em instalações existentes. Crédito: @webtecnica.
+- **O custo estimado das chamadas com OpenAI Realtime bate com a fatura** O custo de cada chamada com o motor OpenAI Realtime era estimado cobrando todo token de entrada como áudio novo, a US$ 32 por milhão. Só que a cada resposta a OpenAI reconta a conversa inteira, e quase tudo isso vem do cache (US$ 0,40 por milhão) ou é texto, como as instruções do agente (US$ 4). Numa ligação real de dois minutos, o painel mostrou US$ 1,31 e a fatura foi de cerca de US$ 0,20, e o teto de custo do agente derrubou a ligação no meio. Agora a estimativa separa áudio, texto e cache com os preços da página da OpenAI. Gemini Live não muda. Crédito: @aliffstefano.
+- **O agente se despede antes de desligar, em vez de cair na cara de quem ligou** Ao encerrar a ligação, o agente às vezes chamava a ferramenta de encerrar sem ter falado nada, e quem ligou ouvia a ligação cair no meio do "pode ser". Agora a ferramenta recebe a despedida: o agente a fala uma vez e só então a ligação cai. Crédito: @aliffstefano.
+- **A mensagem de teste passou a provar o conector configurado, não só o QR Code** Quem configurava um conector de endereço do operador (DeskcommCRM ou webhook) não tinha como saber se
+  ele funcionava antes da primeira ligação real: o botão de teste mandava a mensagem pelo número
+  conectado por QR Code, e sem número conectado o botão nem aparecia na tela. Agora o teste sai pelo
+  conector configurado, pelo mesmo caminho do aviso de ligação, e quando o destino recusa a tela diz
+  que foi o conector — em vez de um erro sem nome. Nada a fazer em instalações existentes: o número
+  conectado por QR Code continua sendo testado como antes. Crédito: @webtecnica.
+
 ## [0.5.0] - 2026-11-12
 
 ### Adicionado
