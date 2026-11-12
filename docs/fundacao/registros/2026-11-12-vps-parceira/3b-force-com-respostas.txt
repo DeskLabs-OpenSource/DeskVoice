@@ -1,0 +1,143 @@
+
+▶ 1 de 5 · Conferindo a máquina
+  ⚠ Sistema almalinux 9.8: não é testado. Seguindo porque você pediu com --force.
+  ✓ Processador: x86_64
+  ✓ Memória: 11699 MB
+  ✓ Disco: 278 GB livres
+  ✓ Docker e compose: 5.7.1
+  ✓ Versão: 0.3.0, a publicada mais recente
+
+▶ 2 de 5 · Conferindo a rede (é aqui que ligação fica muda)
+  ✓ IP público <IP-da-VPS>, direto na placa de rede desta máquina
+  ✓ Portas 5060/udp e 10000-10200/udp livres nesta máquina
+  ✓ Portas 80 e 443 disponíveis (o painel só as usa com domínio, para o HTTPS)
+  O que foi conferido é esta máquina. Não dá para provar daqui que o provedor deixa o áudio (UDP)
+  passar: a prova final é a primeira ligação, pelo teste que fica na tela Linha do painel.
+
+▶ 3 de 5 · Algumas perguntas
+  ✓ Sem domínio: o painel fica só nesta VPS (127.0.0.1:3080) e você entra por túnel SSH. A tela de entrada não vai para a internet sem conexão segura.
+  Para ter HTTPS, aponte um domínio para <IP-da-VPS> e rode o instalador de novo, informando o domínio.
+
+▶ 4 de 5 · Instalando
+  ✓ Segredos e configuração gravados em deploy/ (só o seu usuário lê)
+  ✓ Configuração do Asterisk gerada
+  Baixando as imagens de apoio (banco, telefonia)...
+ Image postgres:17.11-alpine@sha256:e5d2edd28b1f8d40a0a6c0c9cdc545b19b56a0d5d88f94bc11a97d970d4700d0 Pulling 
+ Image andrius/asterisk@sha256:927d4c98777149c3380c4f8d0e82b1b1ba9e7b38528f86c1e1593d5a25032f27 Pulling 
+ Image caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee Pulling 
+ Image andrius/asterisk@sha256:927d4c98777149c3380c4f8d0e82b1b1ba9e7b38528f86c1e1593d5a25032f27 Pulled 
+ Image caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee Pulled 
+ Image postgres:17.11-alpine@sha256:e5d2edd28b1f8d40a0a6c0c9cdc545b19b56a0d5d88f94bc11a97d970d4700d0 Pulled 
+  ✓ Imagens do DeskVoice 0.3.0 baixadas
+  Subindo o banco...
+ Network deskvoice_internal Creating 
+ Volume deskvoice_postgres-data Creating 
+ Volume deskvoice_postgres-data Created 
+ Network deskvoice_internal Created 
+ Container deskvoice-postgres-1 Creating 
+ Container deskvoice-postgres-1 Created 
+ Container deskvoice-postgres-1 Starting 
+ Container deskvoice-postgres-1 Started 
+ Container deskvoice-postgres-1 Waiting 
+ Container deskvoice-postgres-1 Healthy 
+  ✓ Banco no ar
+  Aplicando a estrutura do banco...
+ Container deskvoice-postgres-1 Running 
+ Container deskvoice-postgres-1 Waiting 
+ Container deskvoice-postgres-1 Healthy 
+ Container deskvoice-migrate-run-426deeaec936 Creating 
+ Container deskvoice-migrate-run-426deeaec936 Created 
+
+> @deskvoice/routines@0.0.0 migrate /app/apps/routines
+> tsx src/cli/migrate.ts
+
+Migrations aplicadas (4):
+  20261110T230000_foundation.sql
+  20261111T150700_team_invites.sql
+  20261111T190000_update_requests.sql
+  20261112T000550_whatsapp_sessions.sql
+Senha do papel deskvoice_app definida.
+Senha do papel deskvoice_system definida.
+  ✓ Estrutura do banco aplicada
+ Container deskvoice-postgres-1 Running 
+ Container deskvoice-postgres-1 Waiting 
+ Container deskvoice-postgres-1 Healthy 
+ Container deskvoice-migrate-run-6ff8d13a3793 Creating 
+ Container deskvoice-migrate-run-6ff8d13a3793 Created 
+  ✓ Empresa e usuário dono criados (dono@deskvoice.test)
+  Subindo painel, voz, rotinas e telefonia...
+ Container deskvoice-postgres-1 Running 
+ Volume deskvoice_asterisk-generated Creating 
+ Container deskvoice-migrate-1 Creating 
+ Volume deskvoice_caddy-data Creating 
+ Volume deskvoice_caddy-config Creating 
+ Volume deskvoice_asterisk-generated Created 
+ Container deskvoice-asterisk-1 Creating 
+ Volume deskvoice_caddy-config Created 
+ Volume deskvoice_caddy-data Created 
+ Container deskvoice-migrate-1 Created 
+ Container deskvoice-panel-1 Creating 
+ Container deskvoice-routines-1 Creating 
+ Container deskvoice-asterisk-1 Created 
+ Container deskvoice-voice-1 Creating 
+ Container deskvoice-panel-1 Created 
+ Container deskvoice-caddy-1 Creating 
+ Container deskvoice-routines-1 Created 
+ Container deskvoice-voice-1 Created 
+ Container deskvoice-caddy-1 Created 
+ Container deskvoice-asterisk-1 Starting 
+ Container deskvoice-postgres-1 Waiting 
+ Container deskvoice-postgres-1 Healthy 
+ Container deskvoice-migrate-1 Starting 
+ Container deskvoice-asterisk-1 Started 
+ Container deskvoice-asterisk-1 Waiting 
+ Container deskvoice-migrate-1 Started 
+ Container deskvoice-migrate-1 Waiting 
+ Container deskvoice-migrate-1 Exited 
+ Container deskvoice-panel-1 Starting 
+ Container deskvoice-routines-1 Starting 
+ Container deskvoice-panel-1 Started 
+ Container deskvoice-panel-1 Waiting 
+ Container deskvoice-routines-1 Started 
+ Container deskvoice-asterisk-1 Healthy 
+ Container deskvoice-voice-1 Starting 
+ Container deskvoice-voice-1 Started 
+ Container deskvoice-panel-1 Healthy 
+ Container deskvoice-caddy-1 Starting 
+ Container deskvoice-caddy-1 Started 
+  Esperando cada peça responder (até 240s)...
+  ✓ Painel, banco, Asterisk, voz e rotinas respondendo
+  ✓ Agente de atualização agendado (systemd: deskvoice-agent.timer, a cada minuto, como root)
+  ✓ Entrada única conferida: painel e voz do navegador respondem pelo mesmo endereço
+  ✓ Endereço conferido: http://127.0.0.1:3080 respondeu nesta máquina, pela porta publicada
+  ✓ Login conferido: entrei pela tela de entrada com o e-mail dono@deskvoice.test e a senha informada, a sessão valeu, e saí
+
+▶ 5 de 5 · Pronto para configurar
+
+  Painel: http://localhost:3080
+  Login:  o e-mail e a senha que você definiu aqui
+
+  Como abrir o painel:
+  Sem domínio, o painel só abre de dentro desta VPS: a tela de entrada não fica na internet sem HTTPS.
+  Do seu computador, abra um túnel (uma porta só):
+      ssh -L 3080:127.0.0.1:3080 root@<IP-da-VPS>
+  e acesse http://localhost:3080 enquanto o túnel estiver aberto. "Falar com o agente" funciona por ele.
+  Para ter HTTPS e abrir de qualquer lugar: aponte um domínio (registro A) para <IP-da-VPS> e rode
+      DESKVOICE_DOMAIN=<seu domínio> bash install/install.sh
+  Publicar por HTTP pelo IP, sem domínio, só pedindo de propósito (a senha trafega sem criptografia):
+      DESKVOICE_PANEL_PUBLIC_HTTP=yes bash install/install.sh
+
+  Já funciona: painel, banco, Asterisk esperando ligação, worker de voz e rotinas.
+  Ainda não funciona, até você configurar no painel: atender ligação.
+
+  Para ver funcionando agora, sem chave nem operadora: na tela Chamadas, clique em "Simular uma chamada".
+
+  Próximos quatro passos para atender ligação de verdade, todos pela tela:
+  1. Configurações → Motor de voz: cole a chave do Gemini ou da OpenAI.
+  2. Agentes → Recepção: troque o motor de voz de "Simulado" para o que você configurou.
+     O agente de exemplo nasce no motor simulado, que serve para demonstração e não fala com ninguém.
+  3. Linha: cadastre o tronco SIP e o número que a operadora te passou.
+  4. Faça a primeira ligação para o número e acompanhe na tela Chamadas. É ela que prova que o áudio passa.
+
+  Conferir a saúde:  bash install/healthcheck.sh
+  Pedir ajuda:       bash install/diagnose.sh   (gera um arquivo sem senhas para você enviar)

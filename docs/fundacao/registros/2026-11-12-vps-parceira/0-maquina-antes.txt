@@ -1,0 +1,19 @@
+Thu Nov 12 12:37:40 PM UTC 2026
+NAME="AlmaLinux"
+VERSION="9.8 (Olive Jaguar)"
+ID="almalinux"
+ID_LIKE="rhel centos fedora"
+x86_64
+4
+               total        used        free      shared  buff/cache   available
+Mem:           11699         452       10880          12         642       11246
+Swap:              0           0           0
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda3       295G  3.7G  279G   2% /
+/usr/bin/git
+Docker version 29.9.3, build 5457199
+inactive
+bash: line 1: ufw: command not found
+iptables: No chain/target/match by that name.
+inactive
+Disabled
