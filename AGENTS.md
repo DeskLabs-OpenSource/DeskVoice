@@ -153,7 +153,7 @@ situação, e não só a regra.
 | 13 | Deixar uma decisão de produto esperando o dono sem dizer o que vale se ele não responder | O dono virou gargalo. Aqui: [`GOVERNANCE.md`](GOVERNANCE.md) tem regras de produto, e todo pedido de decisão traz o padrão |
 | 14 | Entregar capacidade que não devolve resultado ao resto do sistema | O agente de voz do Deskcomm não devolvia o desfecho da ligação, e a ligação não entrava no limite de gasto. Aqui: toda peça tem duas conexões e todo custo é medido. Lei: [`sistema-vivo.md`](docs/doctrine/sistema-vivo.md) |
 
-Dois antipadrões não vêm de erro do Deskcomm. Vêm dos antiobjetivos da fundação, e valem igual:
+Dois antipadrões não vêm de erro do Deskcomm. Vêm dos [antiobjetivos da fundação](docs/specs/2026-11-10-fundacao-design.md#antiobjetivos), que dizem quem guarda cada um, e valem igual:
 
 | Nº | Não faça | Por quê |
 |---|---|---|
