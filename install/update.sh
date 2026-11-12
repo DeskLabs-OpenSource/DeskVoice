@@ -266,6 +266,9 @@ if [ "$reach" = 200 ]; then ok "O painel responde pela porta publicada ($probe_u
 elif [ -n "$reach" ]; then warn "As peças respondem, mas a porta publicada do painel (${probe_url:-nenhuma}) não respondeu daqui (resposta: $reach): confira se o painel abre no navegador e rode bash install/healthcheck.sh"
 else warn "Não conferi a porta publicada do painel: falta o comando curl nesta máquina. Confira se o painel abre no navegador."; fi
 remove_old_images || warn "A limpeza das imagens antigas parou no meio; a atualização está completa."
+# Perto do fim de propósito: a tela mostra só o fim da saída, e esta linha é a prova de que quem
+# terminou foi o atualizador da versão de destino, e não o que estava instalado.
+if [ "$resume" = 1 ]; then info "O atualizador da versão $target assumiu a atualização a partir da $current."; fi
 info "Backup de antes da atualização: $backup_dir"
 info "Relatório completo: bash install/healthcheck.sh"
 }

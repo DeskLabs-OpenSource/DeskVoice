@@ -37,6 +37,7 @@ equal "um backup só, feito antes da troca" 1 "$(calls ' pg_dump ')"
 check "o backup vem antes da troca do código" test "$(grep -n ' pg_dump ' "$FAKE_DIR/calls.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n '^git .* checkout ' "$FAKE_DIR/calls.log" | head -n 1 | cut -d: -f1)"
 equal "as migrations rodam uma vez" 1 "$(calls 'run --rm migrate')"
 contains "a saída é uma só, do começo ao fim" "$out" "Atual: 0.1.0"
+contains "a saída diz que o atualizador da versão de destino assumiu" "$out" "O atualizador da versão 0.2.0 assumiu a atualização a partir da 0.1.0."
 
 # ── 2. O atualizador de destino não carrega: nada é tocado, e o código volta ──
 printf '%s\n' v0.3.0 v0.2.0 v0.1.0 > "$FAKE_DIR/git_tags"
