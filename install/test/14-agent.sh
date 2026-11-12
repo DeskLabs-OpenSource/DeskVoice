@@ -93,6 +93,10 @@ equal "resultado: funcionou" succeeded "$(said 2 4)"
 equal "resultado: para qual versão foi" 0.2.0 "$(said 2 5)"
 contains "resultado: leva a saída do atualizador" "$(sed 1,7d "$FAKE_DIR/agent_call.2")" "Atualizado para 0.2.0"
 refuse "resultado entregue não fica pendente" test -e "$S/pending-result"
+contains "a saída inteira fica no servidor" "$(cat "$S/last-update.log")" "Atualizado para 0.2.0"
+equal "só o dono lê a saída guardada" 600 "$(mode_of "$S/last-update.log")"
+equal "o resultado diz que a saída inteira ficou guardada" 1 "$(said 2 13)"
+refuse "entregue: a marca da saída guardada sai junto" test -e "$S/pending-result.kept"
 refuse "a trava sai no fim" test -e "$S/lock"
 contains "a atualização fica no registro" "$(cat "$S/agent.log")" "atualização terminou: succeeded (de 0.1.0 para 0.2.0"
 
@@ -142,6 +146,16 @@ detail="$(sed 1,7d "$FAKE_DIR/agent_call.2")"
 contains "imagem não baixa: diz por quê" "$detail" "Não consegui baixar as imagens da versão 0.3.0"
 lacks "o resultado não leva o segredo do agente" "$detail" "$token"
 lacks "o resultado não leva a senha do banco" "$detail" "$(env_get "$E" POSTGRES_PASSWORD)"
+kept="$(cat "$S/last-update.log")"
+contains "a saída guardada diz por quê" "$kept" "Não consegui baixar as imagens da versão 0.3.0"
+lacks "a saída guardada não leva o segredo do agente" "$kept" "$token"
+lacks "a saída guardada não leva a senha do banco" "$kept" "$(env_get "$E" POSTGRES_PASSWORD)"
+# Quatro atualizações até aqui: ficam as três últimas, a mais nova sem número.
+contains "a anterior vai para .1" "$(cat "$S/last-update.log.1")" "Atualizado para 0.3.0"
+contains "a de antes dela vai para .2" "$(cat "$S/last-update.log.2")" "Não há versão mais nova que a 0.2.0"
+refuse "nunca mais que três" test -e "$S/last-update.log.3"
+equal "a .1 segue só para o dono" 600 "$(mode_of "$S/last-update.log.1")"
+equal "a .2 segue só para o dono" 600 "$(mode_of "$S/last-update.log.2")"
 rm "$FAKE_DIR/pull_fail"
 
 echo 1 > "$FAKE_DIR/migrate_exit"
@@ -182,6 +196,7 @@ out="$(bash "$K/agent.sh" 2>&1)"; equal "interrompido (TERM): sai com o código 
 equal "interrompido (TERM): mesmo assim fala de novo com o painel" 2 "$(calls_made)"
 equal "interrompido (TERM): reporta falha" failed "$(said 2 4)"
 contains "interrompido (TERM): diz que parou no meio" "$(sed 1,7d "$FAKE_DIR/agent_call.2")" "parou antes de terminar"
+equal "interrompido (TERM): não diz que guardou uma saída que não houve" "" "$(said 2 13)"
 refuse "interrompido (TERM): a trava sai" test -e "$S/lock"
 
 # Morto sem chance de reagir (ou a máquina reiniciou): quem reporta é a passada seguinte.
@@ -194,6 +209,7 @@ fresh
 out="$(agent)"; equal "passada seguinte ao KILL: assume a trava que sobrou e termina" 0 "$?"
 equal "passada seguinte ao KILL: reporta falha" failed "$(said 1 4)"
 contains "passada seguinte ao KILL: diz que parou no meio" "$(sed 1,7d "$FAKE_DIR/agent_call.1")" "parou antes de terminar"
+equal "passada seguinte ao KILL: não diz que guardou uma saída que não houve" "" "$(said 1 13)"
 
 # ── Duas passadas não se sobrepõem ──
 fresh; mkdir -p "$S/lock"; echo $$ > "$S/lock/pid"   # este teste está vivo: a trava vale

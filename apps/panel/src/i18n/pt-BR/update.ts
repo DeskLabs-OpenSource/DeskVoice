@@ -6,6 +6,8 @@ const update = {
   publishedNone: "Nenhuma versão publicada ainda",
   publishedUnknown: "Não foi possível consultar as versões publicadas agora. A versão em execução, acima, foi lida deste servidor e continua valendo. A consulta é refeita em um minuto.",
   upToDate: "Este servidor não encontrou versão publicada mais nova que a instalada.",
+  atLatest: "Este servidor está na versão publicada mais recente.",
+  unseen: "A {version} já foi publicada, mas este servidor ainda não a viu. Ele confere as versões publicadas a cada 10 minutos; quando a vir, a atualização para ela aparece aqui.",
   notesMissing: "A versão {to} já existe, e é para ela que este servidor atualizaria, mas as notas dela ainda não estão disponíveis aqui (a página da versão ainda não foi publicada, ou a consulta falhou agora). O botão de atualizar aparece assim que as notas puderem ser lidas: ninguém confirma sem ver o que muda.",
   notesTitle: "O que muda da {from} para a {to}",
   releaseOf: "Versão {version}",
@@ -33,6 +35,7 @@ const update = {
     superseded: "O pedido não foi executado ({when}): saiu uma versão mais nova depois que ele foi feito, e a confirmação valia só para a {to}. Nada foi alterado. Leia as notas da versão nova e peça de novo.",
   },
   detail: "Saída do atualizador",
+  outputKept: "A saída inteira desta atualização ficou guardada no servidor, neste arquivo da pasta do DeskVoice:",
 };
 
 export default update;

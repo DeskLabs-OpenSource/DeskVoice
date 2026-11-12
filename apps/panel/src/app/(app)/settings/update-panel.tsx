@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import commonEn from "../../../i18n/en/common";
 import en from "../../../i18n/en/update";
 import commonEs from "../../../i18n/es/common";
@@ -11,12 +11,13 @@ import ptBR from "../../../i18n/pt-BR/update";
 import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { useAction, useErrorText } from "../../../ui/errors";
-import { formatDateTime } from "../../../ui/format";
+import { formatDateTime, splitInlineCode } from "../../../ui/format";
 import { Button, Field, Notice, Panel, Skeleton, TextInput, type Tone } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 
-// Iguais em todo idioma: são comandos, não frases.
+// Iguais em todo idioma: são comandos e caminhos, não frases.
 const INSTALL_AGENT = "sudo bash install/agent.sh --install";
+const UPDATE_LOG = "deploy/agent/last-update.log";
 const UPDATE_LOCAL = "git pull && bash install/install.sh --build";
 const POLL_MS = 5000;
 
@@ -35,10 +36,10 @@ type Status = "requested" | "running" | "succeeded" | "nothing_to_do" | "rolled_
 interface UpdateState {
   running: { version: string; updatable: boolean };
   agent: { lastSeenAt: string; version: string; targetVersion: string | null; responding: boolean; lastFailureAt: string | null; lastFailureDetail: string | null } | null;
-  request: { status: Status; fromVersion: string; targetVersion: string; toVersion: string | null; detail: string | null; requestedAt: string; acceptedAt: string | null; finishedAt: string | null } | null;
+  request: { status: Status; fromVersion: string; targetVersion: string; toVersion: string | null; detail: string | null; outputKept: boolean; requestedAt: string; acceptedAt: string | null; finishedAt: string | null } | null;
   published: { ok: true; latest: string | null; newer: Release[] } | { ok: false };
   /** O que o SERVIDOR executaria: a versão que o agente anunciou, e as notas até ela. */
-  offer: { target: string | null; notesReady: boolean; releases: Release[] };
+  offer: { target: string | null; notesReady: boolean; releases: Release[]; unseen: boolean };
 }
 
 const STATUS_TONE: Record<Status, Exclude<Tone, "accent">> = {
@@ -52,12 +53,22 @@ const STATUS_TONE: Record<Status, Exclude<Tone, "accent">> = {
   superseded: "warn",
 };
 
+/** O texto da nota, com o código em linha (entre crases) como `<code>`. Nunca HTML da nota. */
+function NoteText({ text }: { text: string }) {
+  return splitInlineCode(text).map((piece, index) => (piece.code ? <code key={index} className="data">{piece.text}</code> : <Fragment key={index}>{piece.text}</Fragment>));
+}
+
 function Items({ items }: { items: NoteItem[] }) {
   return (
     <ul className="grid gap-2">
       {items.map((item, index) => (
         <li key={index} className="max-w-prose">
-          {item.title ? <strong>{item.title}</strong> : null} {item.text}
+          {item.title ? (
+            <strong>
+              <NoteText text={item.title} />
+            </strong>
+          ) : null}{" "}
+          <NoteText text={item.text} />
         </li>
       ))}
     </ul>
@@ -136,6 +147,11 @@ export function UpdatePanel() {
         {request ? (
           <Notice tone={STATUS_TONE[request.status]}>
             <p>{statusText()}</p>
+            {request.outputKept ? (
+              <p>
+                {t.outputKept} <code className="data">{UPDATE_LOG}</code>
+              </p>
+            ) : null}
             {request.detail ? (
               <details>
                 <summary className="cursor-pointer font-bold">{t.detail}</summary>
@@ -145,7 +161,8 @@ export function UpdatePanel() {
           </Notice>
         ) : null}
 
-        {running.updatable && agent?.responding && !target && !open ? <p className="text-muted">{t.upToDate}</p> : null}
+        {running.updatable && agent?.responding && !open && offer.unseen && latest ? <p className="text-muted">{fill(t.unseen, { version: latest })}</p> : null}
+        {running.updatable && agent?.responding && !open && !offer.unseen && !target ? <p className="text-muted">{latest ? t.atLatest : t.upToDate}</p> : null}
         {running.updatable && target && !offer.notesReady ? <Notice tone="warn">{fill(t.notesMissing, { to: target })}</Notice> : null}
 
         {offer.releases.length > 0 && target ? (

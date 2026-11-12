@@ -21,7 +21,9 @@ Em **Configurações → Versão e atualização**:
    volta sozinha.
 4. No fim, a tela diz o resultado: atualizou, não havia o que atualizar, **não foi aplicada**
    (o servidor segue na versão anterior, respondendo) ou **falhou**. Nos dois últimos casos, a
-   saída do atualizador fica na tela, sem senhas.
+   saída do atualizador fica na tela, sem senhas. A tela mostra o fim dela; a saída inteira, com a
+   mesma máscara, fica no servidor em `deploy/agent/last-update.log` (as duas anteriores em
+   `last-update.log.1` e `.2`), e só o dono do arquivo a lê.
 
 Operador vê o bloco e não pode pedir.
 

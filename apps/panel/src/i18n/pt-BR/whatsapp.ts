@@ -4,7 +4,7 @@ const whatsapp = {
   unavailable: "Este servidor ainda não tem a chave do serviço de WhatsApp. Isso acontece quando a atualização foi feita por um atualizador antigo. Rode no servidor, uma vez:",
   serviceAbsent: "O serviço de WhatsApp não está instalado neste servidor.",
   serviceCost:
-    "Ele é uma peça à parte, que só é baixada e ligada se você pedir. Custa cerca de 360 MB de memória com o serviço parado e 3,2 GB em disco, medidos em 11/11/2026 numa VPS de 8 GB. Com um número conectado o uso de memória ainda não foi medido; o teto é de 1280 MB. O DeskVoice inteiro, sem ele, usa cerca de 320 MB.",
+    "Ele é uma peça à parte, que só é baixada e ligada se você pedir. Custa cerca de 323 MiB de memória sem número conectado e 3,2 GB em disco, medidos na versão 0.3.0 em 12/11/2026, numa VPS de 8 GB. Com um número conectado o uso de memória ainda não foi medido; o teto é de 1280 MB. O DeskVoice inteiro, sem ele e parado, usa cerca de 380 MiB na mesma medida.",
   installService: "Instalar o serviço de WhatsApp",
   servicePreparing: "Preparando o serviço: o servidor está baixando o WhatsApp. Leva alguns minutos, e esta tela acompanha.",
   serviceFailed: {
@@ -21,7 +21,7 @@ const whatsapp = {
   serviceRemoving: "Removendo o serviço de WhatsApp do servidor. Leva até um minuto.",
   removeService: "Remover o serviço de WhatsApp",
   removeServiceConfirm:
-    "Remover o serviço de WhatsApp deste servidor? Nenhum número fica conectado, os avisos e as mensagens por WhatsApp deixam de sair, e cerca de 360 MB de memória e 3,2 GB de disco são liberados. Se um número já foi conectado aqui, confira no celular dele, em Dispositivos conectados, se este aparelho saiu, e remova-o se ainda estiver lá. Para voltar, é só instalar de novo.",
+    "Remover o serviço de WhatsApp deste servidor? Nenhum número fica conectado, os avisos e as mensagens por WhatsApp deixam de sair, e cerca de 323 MiB de memória e 3,2 GB de disco são liberados. Se um número já foi conectado aqui, confira no celular dele, em Dispositivos conectados, se este aparelho saiu, e remova-o se ainda estiver lá. Para voltar, é só instalar de novo.",
   removeServiceYes: "Remover o serviço de WhatsApp",
   agentNever: "O agente deste servidor, que é quem instala e remove o serviço, ainda não falou com o painel. Sem ele, o pedido fica esperando. Para executar agora, rode no servidor:",
   agentSilent: "O agente deste servidor, que é quem instala e remove o serviço, não está respondendo. O pedido fica esperando até ele voltar. Para executar agora, rode no servidor:",
