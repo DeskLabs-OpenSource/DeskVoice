@@ -8,7 +8,11 @@ export const GET = handle({}, async ({ q }) => {
   return (await listEngines()).map((engine) => ({
     id: engine.id,
     label: engine.label,
+    provider: engine.provider,
+    processingLocation: engine.processingLocation,
     requiresKey: !engine.keyless,
+    voices: engine.voices ?? [],
+    defaultVoice: engine.defaultVoice ?? null,
     keyConfigured: byKey.has(engineKeySetting(engine.id)),
     keyCheck: readKeyCheck(byKey.get(keyCheckSetting(engine.id))),
     priceCheckedOn: engine.pricing.checkedOn,

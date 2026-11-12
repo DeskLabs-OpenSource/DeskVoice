@@ -126,9 +126,41 @@ export interface KeyCheckOptions {
   schedule?: (fn: () => void, delayMs: number) => () => void;
 }
 
+/** Uma voz do provedor. `style` é o descritor que a documentação dele usa ("Warm", "Bright"). */
+export interface EngineVoice {
+  id: string;
+  style?: string;
+  /** O provedor recomenda esta voz. A tela escreve o rótulo no idioma dela. */
+  recommended?: boolean;
+}
+
+/** De onde veio uma declaração do provedor, como `pricing.checkedOn`: endereço e dia conferido. */
+export interface LocationSource {
+  url: string;
+  /** `AAAA-MM-DD`. */
+  checkedOn: string;
+}
+
+/**
+ * Onde o áudio é processado. País só existe com fonte: o tipo não deixa declarar um sem a outra.
+ * `undeclared` é o provedor que não publica o lugar, e isso precisa aparecer na tela, porque
+ * silêncio ali se confunde com garantia.
+ */
+export type ProcessingLocation =
+  | { kind: "this-server" }
+  | { kind: "undeclared" }
+  | { kind: "country"; country: string; source: LocationSource };
+
 export interface VoiceEngine {
   id: string;
   label: string;
+  /** Quem processa o áudio: `google`, `openai`, ou `none` (o motor simulado roda aqui mesmo). */
+  provider: string;
+  processingLocation: ProcessingLocation;
+  /** As vozes que a tela oferece. */
+  voices?: readonly EngineVoice[];
+  /** A voz usada quando o agente não escolheu nenhuma. */
+  defaultVoice?: string;
   /** Verdadeiro para motores que não precisam de chave (o simulado). */
   keyless?: boolean;
   pricing: EnginePricing;
