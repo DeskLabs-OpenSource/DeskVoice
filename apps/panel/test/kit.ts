@@ -40,6 +40,7 @@ export function startPanel(): { app: Db; deps: ServerDeps; clock: { at: Date }; 
     trustedProxyHops: 1,
     appVersion: "0.1.0",
     agentToken: AGENT_TOKEN,
+    waha: { apiKey: "" },
     verifyPassword,
   };
   setServerDeps(deps);

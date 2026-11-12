@@ -1,6 +1,6 @@
 ---
 name: deskvoice-operar
-description: 'Operar uma instalação do DeskVoice que já está rodando: configurar um agente, a linha telefônica e as regras de ligação de saída; ler a linha do tempo de uma chamada; entender e limitar custos; atualizar, fazer backup, restaurar e diagnosticar. Use quando a pessoa perguntar "como configuro o agente", "como escrevo as instruções", "por que o agente transferiu", "o que aconteceu nessa ligação", "quanto custou", "como ligo as ligações de saída", "como atualizo", "como faço backup", "o agente não está usando a ferramenta".'
+description: 'Operar uma instalação do DeskVoice que já está rodando: configurar um agente, a linha telefônica e as regras de ligação de saída; ler a linha do tempo de uma chamada; entender e limitar custos; conectar um WhatsApp por QR Code; atualizar, fazer backup, restaurar e diagnosticar. Use quando a pessoa perguntar "como configuro o agente", "como escrevo as instruções", "por que o agente transferiu", "o que aconteceu nessa ligação", "quanto custou", "como ligo as ligações de saída", "como atualizo", "como faço backup", "o agente não está usando a ferramenta", "como conecto o WhatsApp", "o WhatsApp caiu", "o QR Code não aparece".'
 ---
 
 # Operar o DeskVoice
@@ -104,7 +104,60 @@ Perguntas comuns, e onde está a resposta:
   menor, e transferir cedo o que o agente não resolve.
 - Guia: [`custos.md`](../../../docs/guides/custos.md).
 
-## 6. Manter a instalação (na VPS, na pasta do projeto)
+## 6. WhatsApp por QR Code (tela Configurações → WhatsApp)
+
+O agente avisa a equipe e escreve para quem está na ligação por um número de WhatsApp conectado
+por QR Code. Só dono e administrador veem o bloco. **Ainda sem prova com um número real**: trate
+a primeira conexão como teste.
+
+**O serviço não vem instalado.** Ele custa cerca de 360 MB de memória parado e 3,2 GB em disco
+(medido em 11/11/2026 numa VPS de 8 GB; com um número conectado ainda não foi medido), mais que
+o DeskVoice inteiro. Diga o custo antes de mandar instalar, e não instale em quem não vai usar.
+
+Antes de conectar, diga o risco à pessoa, sem amenizar: é um **cliente não oficial** do WhatsApp
+(o WAHA), o número **pode ser bloqueado**, e por isso tem de ser um **número dedicado**, nunca o
+pessoal nem o principal da empresa.
+
+| Passo | O que acontece |
+|---|---|
+| Instalar o serviço | Botão "Instalar o serviço de WhatsApp". O painel só registra o pedido; o agente do servidor (o da atualização pela tela) baixa e sobe o serviço em alguns minutos, e a tela acompanha |
+| Conectar | A tela mostra o QR Code. No celular do número: WhatsApp → Dispositivos conectados → Conectar dispositivo. O código é trocado sozinho (60 s o primeiro, 20 s os seguintes, até 6); venceu, "Gerar novo código" |
+| Já havia conector externo | A tela avisa que ele será substituído e pede a confirmação. O token gravado é apagado |
+| Conectado | A tela mostra o número e desde quando. "Enviar mensagem de teste" manda para o WhatsApp de quem está logado, o de "Meu contato" |
+| Desconectar | Pede confirmação nomeando o número. O aparelho some de "Dispositivos conectados", e para voltar é preciso ler o QR Code de novo |
+| Remover o serviço | Só aparece sem número conectado. Em até um minuto libera a memória e apaga do disco a imagem do serviço (3,2 GB), e só ela. O pareamento antigo fica guardado, sem uso: reinstalar pede o QR Code de novo. Peça à pessoa para conferir no celular do número, em Dispositivos conectados, se o aparelho saiu |
+
+Quando algo não sai:
+
+| O que a pessoa vê | Causa | O que fazer |
+|---|---|---|
+| "A conexão caiu" | O aparelho foi removido no celular, ou o WhatsApp encerrou a sessão | Conectar de novo; pode pedir QR Code |
+| "A sessão está parada" | O serviço reiniciou e não retomou | Conectar de novo; não pede QR Code |
+| "O serviço não tem mais os dados" | Backup restaurado em outra VPS: o pareamento não entra no backup | Conectar de novo e ler o QR Code |
+| "Preparando o serviço" que não termina, com aviso de que o agente não fala ou não responde | Quem instala é o agente, e ele não está passando | No servidor: `bash install/agent.sh` executa o pedido na hora; `sudo bash install/agent.sh --install` devolve o agendamento |
+| "O servidor não tem espaço em disco", com quanto falta | O agente exige 5 GB livres antes de baixar; nada foi baixado | Liberar espaço (`backups/`) ou aumentar o disco; ele confere de novo em cerca de 10 minutos |
+| Aviso de pouca memória com o serviço de pé | Ao instalar havia menos memória disponível que o teto do serviço (1280 MB) | Não impede o uso; acompanhar, e remover o serviço se o servidor apertar |
+| "Os arquivos não saíram do disco" depois de remover | Outra coisa no servidor usa a mesma imagem | O servidor tenta de novo a cada minuto; na hora: `bash install/agent.sh`. Nunca mande rodar `docker image prune` ou `docker system prune`: apaga imagem de outros sistemas |
+| "O servidor não conseguiu baixar o serviço" | Internet, Docker Hub fora ou no limite de downloads, ou disco cheio | `df -h`; o servidor tenta de novo sozinho em cerca de 10 minutos; registro em `deploy/agent/agent.log` |
+| "Este servidor ainda não tem a chave do serviço" | Atualizado por um atualizador antigo | `bash install/update.sh` uma vez |
+| "O serviço de WhatsApp não respondeu" | O contêiner `waha` parou | `bash install/healthcheck.sh`, linha "WhatsApp"; log: `docker compose -f deploy/docker-compose.yml --profile whatsapp logs --tail 50 waha` |
+| Mensagem não chegou, tela diz conectado | O destino não tem WhatsApp, ou o WhatsApp restringiu o número | Linha do tempo da chamada, evento `tool_result`. Com o número restrito, **não** desconecte nem reconecte: pare de escrever para contatos novos e espere |
+
+Limites para dizer com clareza:
+
+- A tela só percebe a queda quando alguém a abre. Com a tela fechada, o envio falha com o motivo
+  na linha do tempo, sem alerta.
+- Um número por organização. O WAHA é o da própria instalação; não dá para apontar para outro.
+- Não oriente ninguém a mandar mensagem para lista, nem a escrever primeiro para desconhecidos:
+  é o que bloqueia o número, e disparo em massa não entra no DeskVoice.
+- Se o serviço não responder à consulta do endereço do número, a mensagem sai mesmo assim, para
+  o número como ele é, e a linha do tempo diz que o endereço não foi conferido.
+- Um aviso por WhatsApp que falha aparece na linha do tempo da chamada como tarefa que falhou; o
+  motivo não aparece na tela nesta versão.
+
+Guia: [`whatsapp-por-qr-code.md`](../../../docs/guides/whatsapp-por-qr-code.md).
+
+## 7. Manter a instalação (na VPS, na pasta do projeto)
 
 | Tarefa | Comando | O que saber |
 |---|---|---|
@@ -113,7 +166,7 @@ Perguntas comuns, e onde está a resposta:
 | Atualizar pela tela | Configurações → Versão e atualização | Mostra a versão em execução, a mais recente publicada e as notas entre as duas. Dono ou administrador clica em atualizar e confirma com a senha; o sistema sai do ar por alguns minutos e **as chamadas em andamento caem**. Quem executa é o agente do servidor, que lê do painel só um sim ou não. A versão nomeada na confirmação é a que o servidor anunciou; enquanto as notas dela não estiverem publicadas, a tela não oferece o botão, e se sair outra versão entre a confirmação e a execução o pedido termina sem alterar nada ("saiu uma versão mais nova": é só pedir de novo). A tela diz o resultado: atualizou, não foi aplicada (segue na versão anterior) ou falhou, com a saída do atualizador. Se a tela disser que o agente não está instalado ou não responde, ou que a instalação é `local`, ela mostra o comando; o registro do agente fica em `deploy/agent/agent.log`, e `bash install/healthcheck.sh` tem a linha "Agente de atualização". Um pedido parado vence sozinho (15 minutos sem o agente pegar, 30 sem resultado) e outro pode ser feito. Guia: [`atualizar.md`](../../../docs/guides/atualizar.md) |
 | Atualizar pelo terminal | `bash install/update.sh` | Faz backup, troca a versão, aplica as migrations e confere a saúde; se não ficar saudável, volta sozinho. Vai para a versão publicada mais recente, ou para a de `--to 0.3.0`. Nunca constrói imagem: se a versão não baixa, para antes de mexer em qualquer coisa e diz o comando para testar. Leia antes as notas da versão: se o título diz "requer atenção", há algo a fazer. Quem veio da 0.1.0 roda uma segunda vez depois de atualizar: é ela que instala o agente da atualização pela tela |
 | Agente de atualização | `sudo bash install/agent.sh --install` | Instala ou conserta o agendamento do agente (timer do systemd `deskvoice-agent.timer`; sem systemd, cron). `--dry-run` só diz o que faria. O instalador e o `update.sh` já fazem isso sozinhos |
-| Restaurar | `bash install/restore.sh latest` | **Substitui o banco atual.** Confere as contagens antes de trocar. Mudando de VPS: `--with-config` |
+| Restaurar | `bash install/restore.sh latest` | **Substitui o banco atual.** Confere as contagens antes de trocar. Mudando de VPS: `--with-config`. O pareamento do WhatsApp não vem no backup: em outra VPS, leia o QR Code de novo |
 | Pedir ajuda | `bash install/diagnose.sh` | Gera um arquivo sem segredos para anexar numa issue |
 
 Antes de restaurar, confirme com a pessoa, nomeando o que será substituído.

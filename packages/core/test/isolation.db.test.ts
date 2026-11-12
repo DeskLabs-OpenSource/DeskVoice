@@ -33,6 +33,7 @@ const factories: Record<string, Factory> = {
   // Encerrado de propósito: só cabe um pedido ABERTO na instalação inteira, e aqui há duas organizações.
   update_requests: (organization_id, p) => ({ organization_id, requested_by: p.users?.id, status: "succeeded", from_version: "0.1.0", target_version: "0.2.0" }),
   update_agent_status: (organization_id) => ({ organization_id, last_seen_at: at, announced_version: "0.1.0" }),
+  whatsapp_sessions: (organization_id) => ({ organization_id, session_name: unique("session") }),
 };
 
 const UNSCOPED_TABLES = ["organizations", "schema_migrations"];

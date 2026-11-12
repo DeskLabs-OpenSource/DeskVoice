@@ -24,6 +24,12 @@ describe("safeFetch", () => {
     ["link-local IPv6", "http://[fe80::1]/hook"],
     ["IPv4 embutido em IPv6", "http://[::ffff:127.0.0.1]/hook"],
     ["IPv4 privado embutido em IPv6", "http://[::ffff:10.0.0.1]/hook"],
+    ["NAT64 de uso local", "http://[64:ff9b:1::a00:1]/hook"],
+    ["6to4 com IPv4 embutido", "http://[2002:7f00:1::]/hook"],
+    ["Teredo com IPv4 embutido", "http://[2001:0:7f00:1::]/hook"],
+    ["IPv4 traduzido (SIIT)", "http://[::ffff:0:10.0.0.1]/hook"],
+    ["site-local antigo", "http://[fec0::1]/hook"],
+    ["prefixo de descarte", "http://[100::1]/hook"],
   ])("recusa %s sem abrir conexão", async (_label, url) => {
     await expect(safeFetch(url, {}, { fetch: neverFetch, lookup: fakeLookup() })).rejects.toThrow(UnsafeDestinationError);
   });
@@ -118,7 +124,11 @@ describe("safeFetch", () => {
 describe("isPublicAddress", () => {
   it("separa público de interno", () => {
     expect(["8.8.8.8", "93.184.216.34", "172.32.0.1", "2001:4860:4860::8888"].map(isPublicAddress)).toEqual([true, true, true, true]);
-    expect(["172.31.255.255", "224.0.0.1", "255.255.255.255", "::", "ff02::1", "not-an-ip"].map(isPublicAddress)).toEqual([false, false, false, false, false, false]);
+    // As faixas que embutem ou imitam endereço interno são recusadas; o vizinho imediato de cada
+    // uma continua público, para a lista não engolir mais do que diz.
+    expect(["::ffff:0:10.0.0.1", "::ffff:0:8.8.8.8", "fec0::1", "feff:ffff::1", "100::1", "100:0:0:0:ffff::1"].map(isPublicAddress)).toEqual([false, false, false, false, false, false]);
+    expect(["::fffe:0:10.0.0.1", "100:0:0:1::1", "64:ff9b:2::1", "2003::1", "2001:1::1"].map(isPublicAddress)).toEqual([true, true, true, true, true]);
+    expect(["172.31.255.255", "224.0.0.1", "255.255.255.255", "::", "ff02::1", "not-an-ip", "64:ff9b:1::a00:1", "2002:7f00:1::", "2001:0:7f00:1::"].map(isPublicAddress)).toEqual([false, false, false, false, false, false, false, false, false]);
   });
 });
 

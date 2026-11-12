@@ -19,11 +19,12 @@ export const GET = handle({}, async (args) => {
 export const PUT = handle({ body: z.object({ value: z.unknown() }), configure: true }, async (args) => {
   const { key, definition } = await definitionOf(args);
   const { q, body, deps } = args;
+  const previous = await q.one<{ value: unknown }>("select value from settings where key = $1", [key]);
+  definition.guard?.(previous?.value ?? null);
   if (body.value === null || body.value === undefined) {
     await q.exec("delete from settings where key = $1", [key]);
     return { key, value: null };
   }
-  const previous = await q.one<{ value: unknown }>("select value from settings where key = $1", [key]);
   let stored: unknown;
   try {
     stored = definition.store(body.value, deps.secretKey, previous?.value ?? null);

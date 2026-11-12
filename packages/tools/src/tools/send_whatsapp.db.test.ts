@@ -1,12 +1,16 @@
 import { withOrg, withSystem, type ApprovalOutcome } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
+import { startFakeWaha } from "../../test/fake-waha";
 import { createFixture, createUser, eventsOf, fakeFetch, fakeLookup, putSetting, notificationsOf, putWhatsAppConnector, secretKey, t0, type FakeContext } from "../../test/helpers";
 import { runTool } from "../run-tool";
+import { wahaSessionName } from "../connectors/waha";
 import { createSendWhatsApp } from "./send_whatsapp";
 
 const { app, owner } = openTestDbs();
+const waha = await startFakeWaha();
 afterAll(async () => {
+  await waha.stop();
   await app.close();
   await owner.close();
 });
@@ -299,3 +303,86 @@ describe("send_whatsapp", () => {
     });
   });
 });
+
+describe("send_whatsapp pelo número conectado por QR Code (conector waha)", () => {
+  const net = fakeFetch();
+  const wahaTool = createSendWhatsApp({ fetch: net.fetch, lookup: fakeLookup(), secretKey: () => secretKey, waha: waha.options });
+  /** Chamada de CALLER, com o conector `waha` gravado e a sessão da organização conectada. */
+  async function connected(label: string, options: { trust?: boolean; onWait?: Wait; stored?: unknown } = {}): Promise<FakeContext> {
+    const ctx = await fixture(label, { connector: null, trust: options.trust, onWait: options.onWait });
+    await putSetting(app, ctx.organizationId, "whatsapp.connector", options.stored ?? { type: "waha" }, false);
+    waha.connect(wahaSessionName(ctx.organizationId), "553133330000");
+    waha.contacts.set("5531999998888", "553199998888@c.us");
+    waha.sent.length = 0;
+    return ctx;
+  }
+
+  it("confere o número, envia para o endereço canônico pela sessão da organização e não toca conector externo", async () => {
+    const ctx = await connected("waha envia", { trust: true });
+    expect(await runTool(wahaTool, { text: "Seu horário é amanhã às 10h." }, ctx)).toMatchObject({ ok: true, data: { to: CALLER } });
+    expect(waha.sent).toEqual([{ session: wahaSessionName(ctx.organizationId), chatId: "553199998888@c.us", text: "Seu horário é amanhã às 10h." }]);
+    expect(net.requests).toEqual([]);
+  });
+
+  it("ignora endereço gravado no conector: o WAHA é o da instalação, nunca o que o operador escreveu", async () => {
+    const ctx = await connected("waha url forjada", { trust: true, stored: { type: "waha", url: "https://evil.example.com", token: "x" } });
+    expect((await runTool(wahaTool, { text: "Oi" }, ctx)).ok).toBe(true);
+    expect(waha.sent).toHaveLength(1);
+    expect(net.requests).toEqual([]);
+  });
+
+  it("mantém a confirmação humana do número exibido: negado, nada sai", async () => {
+    const ctx = await connected("waha confirma", { onWait: humanDecides("denied") });
+    const result = await runTool(wahaTool, { text: "Seu código é 4812." }, ctx);
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/não autorizou o envio/);
+    expect(waha.sent).toEqual([]);
+  });
+
+  it("mantém as regras de destino e o teto de 5 por ligação", async () => {
+    const ctx = await connected("waha limites", { trust: true });
+    expect((await runTool(wahaTool, { to: "+5511912345678", text: "terceiro" }, ctx)).message).toMatch(/só posso enviar para o número desta ligação ou para a equipe/);
+    for (let sent = 1; sent <= 5; sent++) expect((await runTool(wahaTool, { text: `mensagem ${sent}` }, ctx)).ok).toBe(true);
+    expect((await runTool(wahaTool, { text: "mensagem 6" }, ctx)).message).toMatch(/limite de 5 mensagens por ligação/);
+    expect(waha.sent).toHaveLength(5);
+  });
+
+  it("número que não existe no WhatsApp vira recusa clara na linha do tempo, sem envio e sem contar no limite", async () => {
+    const ctx = await connected("waha sem whatsapp", { trust: true });
+    waha.contacts.clear();
+    const result = await runTool(wahaTool, { text: "Oi" }, ctx);
+    expect(result).toEqual({ ok: false, message: expect.stringContaining(`O número ${CALLER} não tem WhatsApp, e nada foi enviado.`) as string });
+    expect((await eventsOf(app, ctx.callId)).at(-1)?.payload).toMatchObject({ name: "send_whatsapp", ok: false, message: result.message });
+    expect(waha.sent).toEqual([]);
+  });
+
+  it("sessão que não está conectada: o envio falha com o motivo na linha do tempo, sem tentar reconectar", async () => {
+    const ctx = await connected("waha caiu", { trust: true });
+    const session = waha.sessions.get(wahaSessionName(ctx.organizationId));
+    if (session) session.status = "FAILED";
+    waha.requests.length = 0;
+    const result = await runTool(wahaTool, { text: "Oi" }, ctx);
+    expect(result).toEqual({ ok: false, message: expect.stringMatching(/^Não consegui concluir/) as string });
+    expect((await eventsOf(app, ctx.callId)).at(-1)?.payload.error).toBe("The WhatsApp number of this installation is not connected (session is FAILED): connect it in Settings");
+    expect(waha.requests.map((request) => request.method)).toEqual(["GET"]);
+    expect(waha.sent).toEqual([]);
+  });
+
+  it("consulta de endereço indisponível não derruba o envio: a mensagem sai e a linha do tempo diz que o endereço não foi conferido", async () => {
+    const ctx = await connected("waha sem consulta", { trust: true });
+    waha.override("GET /api/contacts/check-exists", { status: 400, body: { message: "Enable NOWEB store" } });
+    const result = await runTool(wahaTool, { text: "Oi" }, ctx);
+    waha.override("GET /api/contacts/check-exists", undefined);
+    expect(result).toMatchObject({ ok: true, data: { to: CALLER, addressVerified: false } });
+    expect(waha.sent).toEqual([{ session: wahaSessionName(ctx.organizationId), chatId: "5531999998888@c.us", text: "Oi" }]);
+    expect((await eventsOf(app, ctx.callId)).at(-1)?.payload.message).toMatch(/não confirmou o endereço deste número/);
+  });
+
+  it("sem a chave da instalação, falha dizendo isso em vez de enviar", async () => {
+    const ctx = await connected("waha sem chave", { trust: true });
+    const result = await runTool(createSendWhatsApp({ secretKey: () => secretKey, waha: { apiKey: "" } }), { text: "Oi" }, ctx);
+    expect(result.ok).toBe(false);
+    expect((await eventsOf(app, ctx.callId)).at(-1)?.payload.error).toMatch(/has no WAHA key/);
+  });
+});
+

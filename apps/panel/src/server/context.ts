@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createDb, hashToken, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { wahaFromEnv, type WahaOptions } from "@deskvoice/tools/waha";
 import type { z, ZodType } from "zod";
 import { trustedProxyHops } from "./client-ip";
 
@@ -27,6 +28,8 @@ export interface ServerDeps {
   appVersion: string;
   /** Segredo do agente de atualização, gerado pelo instalador. Vazio = nenhum agente é aceito. */
   agentToken: string;
+  /** Acesso ao WAHA da instalação. Chave vazia = o WhatsApp por QR Code não existe neste servidor. */
+  waha: WahaOptions;
   /** Injetável para o teste contar quantas tentativas chegam a conferir a senha. */
   verifyPassword: typeof verifyPassword;
 }
@@ -55,6 +58,7 @@ export function serverDeps(): ServerDeps {
       trustedProxyHops: trustedProxyHops(process.env),
       appVersion: process.env.APP_VERSION ?? "dev",
       agentToken: process.env.UPDATE_AGENT_TOKEN ?? "",
+      waha: wahaFromEnv(),
       verifyPassword,
     };
   }

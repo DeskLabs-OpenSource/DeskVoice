@@ -27,6 +27,8 @@ beforeEach(async () => {
   panel.voice.requests.length = 0;
   // O índice de "um pedido aberto" vale para a instalação inteira: cada teste começa sem nenhum.
   await withSystem(panel.app, (q) => q.exec("delete from update_requests"));
+  // O segundo booleano também é da instalação inteira: nenhuma organização de outro arquivo de teste quer o serviço.
+  await withSystem(panel.app, (q) => q.exec("update whatsapp_sessions set service_wanted = false"));
 });
 afterAll(() => panel.close());
 
@@ -76,18 +78,18 @@ describe("the agent route", () => {
   it("hears the agent as the real server delivers it: the header filled with this machine's own address", async () => {
     // O servidor do Next preenche X-Forwarded-For com o endereço da conexão quando ele não vem.
     for (const loopback of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
-      expect((await speak({ version: "0.1.0" }, { authorization: `Bearer ${AGENT_TOKEN}`, "x-forwarded-for": loopback })).data).toEqual({ update: false });
+      expect((await speak({ version: "0.1.0" }, { authorization: `Bearer ${AGENT_TOKEN}`, "x-forwarded-for": loopback })).data).toEqual({ update: false, whatsapp: false });
     }
   });
 
-  it("answers one boolean and nothing else, with or without a request waiting", async () => {
+  it("answers the two booleans and nothing else, with or without a request waiting", async () => {
     const { owner } = await newOrg("update boolean");
-    expect((await speak()).data).toEqual({ update: false });
+    expect((await speak()).data).toEqual({ update: false, whatsapp: false });
     await ask(owner.cookie);
     const accepted = await speak();
-    expect(accepted.data).toEqual({ update: true });
-    expect(JSON.parse(accepted.text)).toEqual({ ok: true, data: { update: true } });
-    expect((await speak()).data).toEqual({ update: false });
+    expect(accepted.data).toEqual({ update: true, whatsapp: false });
+    expect(JSON.parse(accepted.text)).toEqual({ ok: true, data: { update: true, whatsapp: false } });
+    expect((await speak()).data).toEqual({ update: false, whatsapp: false });
   });
 
   it("records when the agent last spoke, the version it announced and its last communication failure", async () => {
@@ -138,7 +140,7 @@ describe("who can ask for an update", () => {
     for (let attempt = 0; attempt < 5; attempt++) expect(refusal(await ask(owner.cookie, { password: "not the password", target: "0.2.0" }))).toEqual([400, "wrong_password"]);
     expect(refusal(await ask(owner.cookie))).toEqual([429, "too_many_attempts"]);
     expect((await state(owner.cookie)).request).toBeNull();
-    expect((await speak()).data).toEqual({ update: false });
+    expect((await speak()).data).toEqual({ update: false, whatsapp: false });
   });
 
   it("refuses when the running version is not a published one, and says so on the screen", async () => {
@@ -170,7 +172,7 @@ describe("one request at a time, and every request ends", () => {
     await speak();
     expect((await state(owner.cookie)).request).toMatchObject({ status: "running", fromVersion: "0.1.0", toVersion: null });
     later(4);
-    expect((await speak({ version: "0.2.0", result: { outcome: "succeeded", toVersion: "0.2.0", detail: "Atualizado para 0.2.0" } })).data).toEqual({ update: false });
+    expect((await speak({ version: "0.2.0", result: { outcome: "succeeded", toVersion: "0.2.0", detail: "Atualizado para 0.2.0" } })).data).toEqual({ update: false, whatsapp: false });
     expect((await state(owner.cookie)).request).toMatchObject({ status: "succeeded", toVersion: "0.2.0", detail: "Atualizado para 0.2.0", finishedAt: panel.clock.at.toISOString() });
     const bodies = (await notices(org)).map((notice) => notice.body);
     expect(bodies).toHaveLength(2);
@@ -194,7 +196,7 @@ describe("one request at a time, and every request ends", () => {
     expect((await state(owner.cookie)).request).toMatchObject({ status: "expired", acceptedAt: null, finishedAt: panel.clock.at.toISOString() });
     expect((await notices(org)).map((notice) => notice.body)).toEqual([expect.stringContaining("venceu")]);
     // O agente que voltar depois não executa um pedido vencido.
-    expect((await speak()).data).toEqual({ update: false });
+    expect((await speak()).data).toEqual({ update: false, whatsapp: false });
     expect((await ask(owner.cookie)).status).toBe(200);
   });
 
@@ -263,20 +265,20 @@ describe("nobody is updated to a version they did not confirm", () => {
     const { org, owner } = await newOrg("update superseded");
     await ask(owner.cookie);
     const answer = await speak({ version: "0.1.0", target: "0.3.0" });
-    expect(answer.data).toEqual({ update: false });
+    expect(answer.data).toEqual({ update: false, whatsapp: false });
     expect((await state(owner.cookie)).request).toMatchObject({ status: "superseded", targetVersion: "0.2.0", acceptedAt: null, finishedAt: panel.clock.at.toISOString() });
     expect((await notices(org)).map((notice) => notice.body)).toEqual([expect.stringContaining("versão mais nova")]);
     // Nada ficou aberto: o agente segue ouvindo "não", e outro pedido pode ser feito para a versão nova.
-    expect((await speak({ version: "0.1.0", target: "0.3.0" })).data).toEqual({ update: false });
+    expect((await speak({ version: "0.1.0", target: "0.3.0" })).data).toEqual({ update: false, whatsapp: false });
     publish(release("0.3.0"), release("0.2.0"));
     expect((await ask(owner.cookie, { password: PASSWORD, target: "0.3.0" })).status).toBe(200);
-    expect((await speak({ version: "0.1.0", target: "0.3.0" })).data).toEqual({ update: true });
+    expect((await speak({ version: "0.1.0", target: "0.3.0" })).data).toEqual({ update: true, whatsapp: false });
   });
 
   it("ends the request with nothing to do when the server got there by another path", async () => {
     const { owner } = await newOrg("update already there");
     await ask(owner.cookie);
-    expect((await speak({ version: "0.2.0" })).data).toEqual({ update: false });
+    expect((await speak({ version: "0.2.0" })).data).toEqual({ update: false, whatsapp: false });
     expect((await state(owner.cookie)).request).toMatchObject({ status: "nothing_to_do", acceptedAt: null });
   });
 });

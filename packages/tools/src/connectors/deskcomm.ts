@@ -1,5 +1,5 @@
 import { safeFetch, type SafeFetchOptions, type SafeResponse } from "../net/safe-fetch";
-import type { WhatsAppConnector, WhatsAppMessage } from "./whatsapp";
+import type { HttpConnector, WhatsAppMessage } from "./whatsapp";
 
 /**
  * Envio pelo DeskcommCRM.
@@ -9,7 +9,7 @@ import type { WhatsAppConnector, WhatsAppMessage } from "./whatsapp";
  * que o operador cadastrou, e nenhum endpoint do Deskcomm é presumido aqui. Confirmado o
  * contrato, só este arquivo muda.
  */
-export function sendViaDeskcomm(connector: WhatsAppConnector, message: WhatsAppMessage, net: SafeFetchOptions): Promise<SafeResponse> {
+export function sendViaDeskcomm(connector: HttpConnector, message: WhatsAppMessage, net: SafeFetchOptions): Promise<SafeResponse> {
   return safeFetch(
     connector.url,
     {

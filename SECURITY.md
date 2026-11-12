@@ -103,6 +103,50 @@ Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em pr
   contra quem tem acesso ao servidor: essa pessoa lê `deploy/.env` e já pode rodar o
   atualizador. E quem tem conta de dono ou administrador no painel, com a senha, consegue tirar
   o sistema do ar por alguns minutos pedindo uma atualização: é o recurso funcionando.
+- **O WhatsApp por QR Code usa um cliente não oficial.** O número conectado em Configurações é
+  mantido pelo [WAHA](https://github.com/devlikeapro/waha), que fala com o WhatsApp como um
+  aparelho conectado, e não pela API oficial da Meta. O WhatsApp pode restringir ou bloquear o
+  número, sem aviso; use um número dedicado. O pareamento (a credencial do aparelho) fica no
+  volume `waha-sessions` da VPS, sem cifra própria: quem tem acesso ao servidor ou a esse volume
+  envia e lê como o número. Ele não entra no backup, e continua no disco depois que o serviço
+  é removido pela tela (o painel tenta desfazer o pareamento antes; confira no telefone, em
+  Dispositivos conectados). O serviço só existe na instalação que o pediu (Configurações →
+  WhatsApp); quem o baixa, sobe e remove é o agente do servidor, que recebe do painel só um sim
+  ou não. O contêiner do WAHA roda como o usuário padrão da imagem (root dentro do contêiner),
+  só na rede interna, sem porta publicada, com o painel e a documentação da API dele desligados. A imagem é de terceiros, fixada por resumo: uma
+  falha de segurança nela chega à instalação até a versão ser trocada aqui.
+- **O que a chave do WAHA protege, e o que não.** A chave (`WAHA_API_KEY`, em `deploy/.env`) é
+  gerada pelo instalador e entregue a painel, voz e rotinas, os três processos que falam com o
+  WAHA; o contêiner do WAHA guarda só o hash dela. Ela protege o número contra outro contêiner
+  ligado à rede interna do Docker. **Não** separa os três processos entre si: um processo de
+  painel, de voz ou de rotinas comprometido usa a chave para enviar mensagem a qualquer número
+  pelo WhatsApp conectado (as regras de destino, a confirmação humana e o teto por ligação são
+  da ferramenta, não do WAHA), para ler o QR Code de uma conexão em andamento, para parar ou
+  desfazer a conexão e, como o WAHA atende a instalação inteira, para agir na sessão de qualquer
+  organização dela. O WAHA não entrega as mensagens recebidas a ninguém nesta versão (nenhum
+  webhook, e estados, grupos, canais e difusão são ignorados), mas quem tem a chave pode pedir a
+  ele o que a API oferece. O endereço do WAHA é fixo no código: nenhuma configuração do operador
+  faz o DeskVoice mandar a chave para outro lugar. A chave não protege contra quem tem acesso ao
+  servidor.
+- **A queda do WhatsApp só é percebida com a tela aberta.** Nesta versão o WAHA não avisa o
+  painel. Uma sessão que caiu aparece na próxima visita a Configurações; até lá, cada envio falha
+  com o motivo na linha do tempo da chamada, e o aviso por WhatsApp para a equipe fica marcado
+  como falho, sem alerta no painel.
+- **O que o segundo sim ou não do agente permite.** A rota do agente responde dois booleanos:
+  há atualização pedida, e esta instalação quer o serviço de WhatsApp. Quem tem conta de dono ou
+  administrador no painel, ou quem consegue escrever no banco do painel, consegue fazer o
+  servidor baixar e subir o WAHA (a imagem é a que o kit da instalação fixa, nunca uma vinda do
+  painel), gastando cerca de 3,2 GB de disco e 360 MB de memória, ou tirar o serviço do ar. Não
+  consegue escolher imagem, comando ou endereço, nem apagar o pareamento do número. Também não
+  consegue encher o disco: o agente confere o espaço antes de baixar (5 GB livres) e, sem ele,
+  não baixa. Pouca memória não bloqueia, só avisa: numa VPS pequena o serviço pode disputar
+  memória com o resto, até o teto de 1280 MB. A regra para qualquer campo novo nessa resposta
+  está no registro `0010`.
+- **Mensagem enviada sem conferir o endereço do número.** Antes de enviar pelo número conectado,
+  o DeskVoice pergunta ao WhatsApp o endereço certo do destino. Se o WAHA recusar essa consulta
+  em si, a mensagem sai para o número como ele é, e a ressalva fica registrada (na linha do tempo
+  da chamada, ou no aviso). No Brasil isso pode significar mensagem que não chega, quando o
+  WhatsApp guarda o número sem o nono dígito.
 - **A atualização pela tela confia no repositório.** O servidor atualiza para a maior tag
   publicada no repositório de onde foi clonado e baixa as imagens dessa versão. Quem controla o
   repositório ou o registro de imagens controla o que a instalação passa a rodar, como já era
