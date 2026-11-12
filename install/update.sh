@@ -151,6 +151,39 @@ roll_back() {  # roll_back "<o que falhou>"
   fi
   die "A atualização para $target falhou E a volta para $current não terminou bem:${problems:- a versão anterior não respondeu depois de voltar.}" "Seus dados estão no backup $backup_dir. Não rode mais nada: gere o diagnóstico (bash install/diagnose.sh) e peça ajuda."
 }
+# Cada versão deixa no servidor cerca de 2 GB de imagens que mais nada usa. Só roda depois de tudo
+# responder e de a etiqueta `rollback` sair: a volta desta execução usa aquela etiqueta, e não
+# estas. Ficam a versão que roda e a de onde se acabou de sair, para descer sem internet. A
+# `local`, construída nesta máquina, sai mesmo sendo a de onde se saiu: a instalação passou a rodar
+# a imagem publicada. Só as três imagens do DeskVoice, por nome exato, e `docker rmi` sem força:
+# ele recusa imagem que algum contêiner usa, e essa recusa é a trava. Nunca `prune`. Falha é aviso.
+remove_old_images() {
+  local service repo tags tag ref removed="" local_removed=0
+  for service in $APP_SERVICES; do
+    repo="$(image_repo "$service")"
+    if ! tags="$(docker image ls --format '{{.Tag}}' "$repo" 2>/dev/null)"; then
+      warn "Não consegui listar as imagens antigas de $repo: as que houver ficam no disco."; continue
+    fi
+    for tag in $tags; do
+      if [ "$tag" = "$target" ] || [ "$tag" = "<none>" ]; then continue; fi
+      if [ "$tag" = "$current" ] && [ "$current" != "$LOCAL_VERSION" ]; then continue; fi
+      ref="$(image_ref "$service" "$tag")"
+      if docker rmi "$ref" >/dev/null 2>&1; then
+        removed="$removed $ref"
+        if [ "$tag" = "$LOCAL_VERSION" ]; then local_removed=1; fi
+      else
+        warn "Não consegui remover a imagem antiga $ref; a atualização está completa, ela só ocupa espaço. Veja se algum contêiner a usa: docker ps -a --filter ancestor=$ref"
+      fi
+    done
+  done
+  [ -n "$removed" ] || return 0
+  ok "Imagens de versões antigas do DeskVoice removidas, para liberar disco:"
+  for ref in $removed; do info "  $ref"; done
+  if [ "$current" != "$LOCAL_VERSION" ]; then info "A imagem da versão $current fica, para voltar a ela sem internet."; fi
+  if [ "$local_removed" = 1 ]; then
+    info "A imagem construída nesta máquina (local) saiu: a instalação roda agora a imagem publicada da versão $target. A local só volta construindo de novo: bash install/install.sh --build"
+  fi
+}
 
 if [ "$resume" = 0 ]; then
   if entry_ok; then entry_was_ok=1; fi
@@ -232,6 +265,7 @@ reach="$(probe_published "$probe_url")"
 if [ "$reach" = 200 ]; then ok "O painel responde pela porta publicada ($probe_url)"
 elif [ -n "$reach" ]; then warn "As peças respondem, mas a porta publicada do painel (${probe_url:-nenhuma}) não respondeu daqui (resposta: $reach): confira se o painel abre no navegador e rode bash install/healthcheck.sh"
 else warn "Não conferi a porta publicada do painel: falta o comando curl nesta máquina. Confira se o painel abre no navegador."; fi
+remove_old_images || warn "A limpeza das imagens antigas parou no meio; a atualização está completa."
 info "Backup de antes da atualização: $backup_dir"
 info "Relatório completo: bash install/healthcheck.sh"
 }

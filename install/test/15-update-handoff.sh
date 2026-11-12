@@ -103,4 +103,16 @@ out="$(agent_pass)"; equal "rodada seguinte: a passada termina" 0 "$?"
 equal "rodada seguinte: converge para a versão nova" 0.5.0 "$(env_get "$E" DESKVOICE_VERSION)"
 equal "rodada seguinte: relato de sucesso" succeeded "$(said 2 4)"
 equal "rodada seguinte: um backup e uma migration" "1 1" "$(calls ' pg_dump ') $(calls 'run --rm migrate')"
+
+# ── 7. A limpeza das imagens antigas é do atualizador de destino: a primeira atualização para a
+#       versão que a traz já limpa, mesmo vindo de um atualizador que não a conhece. ──
+images_of() { local v s; for v in "$@"; do for s in $APP_SERVICES; do image_ref "$s" "$v"; done; done; }
+grep -v '^remove_old_images ' "$KIT/update.sh" > "$WORK/install/update.sh"
+refuse "o atualizador instalado não conhece a limpeza" grep -q '^remove_old_images ' "$WORK/install/update.sh"
+printf '%s\n' v0.6.0 v0.5.0 v0.3.0 v0.2.0 v0.1.0 > "$FAKE_DIR/git_tags"
+version_tree v0.6.0; cp "$KIT/update.sh" "$FAKE_DIR/git_checkout/v0.6.0/install/update.sh"
+images_of 0.1.0 0.5.0 0.6.0 > "$FAKE_DIR/images"
+out="$(update)"; equal "limpeza na passagem de vez: zero" 0 "$?"
+equal "limpeza na passagem de vez: chega à versão nova" 0.6.0 "$(env_get "$E" DESKVOICE_VERSION)"
+equal "limpeza na passagem de vez: o atualizador de destino remove a mais velha" "$(images_of 0.5.0 0.6.0)" "$(cat "$FAKE_DIR/images")"
 finish
