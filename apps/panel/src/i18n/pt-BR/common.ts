@@ -37,8 +37,6 @@ const common = {
     attention: "Pedem atenção: {n}",
     checking: "Conferindo o sistema.",
     unreachable: "Não foi possível conferir o sistema.",
-    parts: { panel: "Painel", database: "Banco de dados", asterisk: "Servidor de telefonia", trunk: "Linha telefônica", engine: "Motor de voz" },
-    status: { ok: "funcionando", warn: "atenção", fail: "com falha" },
   },
   callStatus: {
     ringing: "Chamando",

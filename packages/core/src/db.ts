@@ -71,3 +71,17 @@ export async function listen(
     client.release(true);
   };
 }
+
+/**
+ * Quantas conexões escutam `channel` agora, neste banco. Cada escuta de `listen` segura uma
+ * conexão cuja última consulta é o próprio `listen <canal>`, e o Postgres mostra esse texto em
+ * `pg_stat_activity` para quem conecta com o mesmo papel: por isso a consulta vai pelo pool de
+ * aplicação, o mesmo de `listen`. Com outro papel o texto vem oculto e a contagem daria zero.
+ */
+export async function countListeners(db: Db, channel: string): Promise<number> {
+  const { rows } = await db.pool.query<{ n: number }>(
+    "select count(*)::int as n from pg_stat_activity where datname = current_database() and backend_type = 'client backend' and query = $1",
+    [`listen ${channel}`],
+  );
+  return rows[0]?.n ?? 0;
+}

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createCall, createOrganization, openTestDbs, waitFor } from "../test/helpers";
-import { claimTask, completeTask, enqueueTask, failTask, listenTasks, MAX_TASK_ATTEMPTS } from "./queue";
+import { claimTask, completeTask, enqueueTask, failTask, listenTasks, MAX_TASK_ATTEMPTS, queueHealth } from "./queue";
 import { withOrg } from "./with-org";
 
 const { app, owner } = openTestDbs();
@@ -139,5 +139,32 @@ describe("queue", () => {
     await waitFor(() => wakes >= 1, "the tasks notification");
     await stop();
     expect(wakes).toBe(1);
+  });
+
+  it("health counts the processes listening to the queue, and stops counting the one that left", async () => {
+    // Em série com os outros arquivos, e cada um fecha as próprias escutas: a conta parte de zero.
+    expect((await queueHealth(app, t0)).listeners).toBe(0);
+    const stop = await listenTasks(app, () => undefined);
+    expect((await queueHealth(app, t0)).listeners).toBe(1);
+    await stop();
+    // A conexão é destruída ao parar; o Postgres tira a sessão da lista em instantes.
+    const deadline = performance.now() + 5000;
+    while ((await queueHealth(app, t0)).listeners !== 0 && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await queueHealth(app, t0)).listeners).toBe(0);
+  });
+
+  it("health reports since when the oldest due task waits, ignoring future, running and finished ones", async () => {
+    expect((await queueHealth(app, t0)).oldestDueAt).toBeNull();
+    await enqueue("later", plus(60_000));
+    expect((await queueHealth(app, t0)).oldestDueAt).toBeNull();
+    const done = await enqueue("done", plus(-120_000));
+    await claimTask(app, plus(-120_000));
+    await completeTask(app, done);
+    const waiting = plus(-60_000);
+    await enqueue("waiting", waiting);
+    await enqueue("newer", plus(-1000));
+    expect((await queueHealth(app, t0)).oldestDueAt).toEqual(waiting);
+    await claimTask(app, t0);
+    expect((await queueHealth(app, t0)).oldestDueAt).toEqual(plus(-1000));
   });
 });
