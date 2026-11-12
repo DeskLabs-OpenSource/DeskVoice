@@ -18,7 +18,7 @@ const agents: AgentsDictionary = {
   roleHint: "Aparece solo en el panel. Ejemplo: Recepción, Cobranza.",
   conversation: "Conversación",
   greeting: "Saludo",
-  greetingHint: "La primera frase que el agente dice al atender.",
+  greetingHint: "La primera frase que dice el agente al atender. Para avisar que la persona habla con una IA, el guía de conformidad tiene un ejemplo.",
   instructions: "Instrucciones",
   instructionsHint: "Di quién es el agente, qué resuelve solo y cuándo debe llamar a una persona.",
   voice: "Voz",
