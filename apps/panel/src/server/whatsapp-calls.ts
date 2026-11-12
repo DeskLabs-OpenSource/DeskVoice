@@ -2,7 +2,6 @@ import type { OrgQuery } from "@deskvoice/core";
 import { encode } from "uqr";
 import { z } from "zod";
 import { ApiError, type ServerDeps, type Session } from "./context";
-import { requireAgent } from "./shapes";
 import { readServiceView, type ServiceView } from "./update";
 import { voiceRequest } from "./voice";
 import { notice, type ConnectionStatus, type Org } from "./whatsapp";
@@ -211,10 +210,10 @@ export async function disconnectCalls(deps: ServerDeps, org: Org, session: Sessi
 
 /**
  * Escolhe o agente que atende as ligações pelo WhatsApp, ou nenhum. Vale da ligação seguinte em
- * diante; a que está em curso segue com quem a atendeu.
+ * diante; a que está em curso segue com quem a atendeu. Agente de outra organização é barrado pela
+ * chave estrangeira composta com a organização, que vira 404.
  */
 export async function chooseCallsAgent(q: OrgQuery, session: Session, agentId: string | null, now: Date): Promise<void> {
-  if (agentId) await requireAgent(q, agentId);
   await q.exec(
     `insert into whatsapp_call_sessions (organization_id, session_name, agent_id, updated_at) values ($1, $2, $3, $4)
      on conflict (organization_id) do update set agent_id = excluded.agent_id, updated_at = excluded.updated_at`,
