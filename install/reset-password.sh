@@ -38,8 +38,8 @@ status=0
 printf '%s' "$new_password" | dc run --rm -T migrate pnpm --filter @deskvoice/routines run reset-password -- \
     --email "$email" --password-stdin || status=$?
 # Só diz que trocou depois de entrar com a senha nova, pela tela de entrada (uma tentativa; a
-# senha segue pela entrada padrão). Quem estava bloqueado por tentativas erradas segue bloqueado
-# por até 15 minutos: aí não há como testar, e a mensagem diz isso.
+# senha segue pela entrada padrão). Se o painel ainda segura tentativas para o e-mail (até 15
+# minutos naquele endereço, até uma hora no e-mail inteiro), não há como testar, e a mensagem diz isso.
 login=""
 if [ "$status" = 0 ]; then login="$(try_login "$email" "$new_password")"; fi
 unset new_password DESKVOICE_RESET_PASSWORD
@@ -49,7 +49,7 @@ case "$status" in
     case "${login%%|*}" in
       ok) ok "Senha trocada e conferida: entrei pela tela de entrada com a senha nova. Quem estava com o painel aberto nessa conta precisa entrar de novo." ;;
       rejected|session) die "O comando de troca terminou sem erro, mas a tela de entrada não aceitou a senha nova para $email ($login)." "Rode de novo. Se repetir: bash install/diagnose.sh e peça ajuda com o arquivo." ;;
-      limited) warn "Senha trocada no banco, mas NÃO testei o login: o painel está no limite de tentativas de entrada para $email (várias senhas erradas nos últimos 15 minutos). Espere esse tempo e entre com a senha nova." ;;
+      limited) warn "Senha trocada no banco, mas NÃO testei o login: o painel está no limite de tentativas de entrada para $email (senhas erradas recentes: o painel segura o endereço de onde vieram por até 15 minutos, e o e-mail inteiro por até uma hora quando vieram muitas, de vários lugares). Espere esse tempo e entre com a senha nova." ;;
       *) warn "Senha trocada no banco, mas NÃO testei o login: não cheguei à tela de entrada pelo Caddy do DeskVoice (${login:-sem resposta}). Confira com: bash install/healthcheck.sh" ;;
     esac ;;
   2) die "Não existe usuário com o e-mail $email nesta instalação." "Confira o e-mail. Nada foi alterado." ;;

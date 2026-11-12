@@ -588,7 +588,7 @@ login_fix="Troque a senha com: bash install/reset-password.sh ${owner_email:-<e-
 case "$login_state" in
   ok) ok "Login conferido: entrei pela tela de entrada com o e-mail $owner_email e a senha informada, a sessão valeu, e saí" ;;
   skipped) warn "Login NÃO testado: o usuário dono já existia e eu não tenho a senha dele. Se não lembrar a senha: bash install/reset-password.sh" ;;
-  limited) warn "Login NÃO testado: o painel está no limite de tentativas de entrada para $owner_email (várias senhas erradas nos últimos 15 minutos). Espere e entre pelo navegador." ;;
+  limited) warn "Login NÃO testado: o painel está no limite de tentativas de entrada para $owner_email (senhas erradas recentes: o painel segura o endereço de onde vieram por até 15 minutos, e o e-mail inteiro por até uma hora quando vieram muitas, de vários lugares). Espere e entre pelo navegador." ;;
   rejected)
     if [ "$login_strict" = 1 ]; then
       die "O usuário dono foi criado, mas a tela de entrada RECUSOU o e-mail e a senha que acabaram de ser definidos (HTTP $login_detail). A instalação subiu; o que não funciona é entrar." "$login_fix"
