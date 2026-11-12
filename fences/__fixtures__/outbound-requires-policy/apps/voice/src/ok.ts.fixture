@@ -1,0 +1,12 @@
+// Fixture da cerca outbound-requires-policy: o caminho correto — a política é conferida no mesmo
+// arquivo que origina a chamada. A cerca tem de aceitar este arquivo.
+import { checkOutboundAllowed } from "./outbound-policy";
+
+export async function allowed(
+  ari: { originate(params: { endpoint: string }): Promise<void> },
+  policy: Parameters<typeof checkOutboundAllowed>[0],
+): Promise<void> {
+  const verdict = await checkOutboundAllowed(policy);
+  if (!verdict.allowed) return;
+  await ari.originate({ endpoint: "PJSIP/5511999998888@trunk" });
+}
