@@ -11,7 +11,8 @@
  *   - https://developers.openai.com/api/reference/resources/models/methods/retrieve  (`GET /v1/models/{model}`,
  *     `Authorization: Bearer`; devolve `id`, `object: "model"`, `created`, `owned_by`. Só lê, não gera nada)
  *   - https://developers.openai.com/api/docs/guides/error-codes  (401 chave inválida ou revogada, 403 país não
- *     atendido, 429 que é limite de pedidos OU falta de crédito/teto de gasto, pelo `error.code`, 5xx do lado deles)
+ *     atendido, 429 que é limite de pedidos OU falta de crédito/teto de gasto, pelo `error.code`, 5xx do lado deles).
+ *     O 403 de país não atendido não é defeito da chave: trocar a chave não resolve, então tem resultado próprio.
  *   A página do modelo não cita preço; nenhuma página de preço lista essa chamada.
  *
  * A API aceita G.711 μ-law (`audio/pcmu`, 8 kHz) na entrada e na saída: a ligação não é reamostrada.
@@ -27,7 +28,7 @@ import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
-import type { VoiceEngine, VoiceSession } from "../types";
+import type { KeyCheckResult, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
 const DEFAULT_API_URL = "https://api.openai.com/v1";
@@ -71,6 +72,12 @@ const providerError = z.object({ error: z.object({ code: z.string().nullish(), t
 const isBillingError = (body: unknown): boolean => {
   const error = providerError.safeParse(body).data?.error;
   return BILLING_CODES.has(error?.code ?? "") || BILLING_CODES.has(error?.type ?? "");
+};
+const isRegionError = (body: unknown): boolean => providerError.safeParse(body).data?.error.code === "unsupported_country_region_territory";
+const classifyError = (status: number, body: unknown): KeyCheckResult | undefined => {
+  if (status === 429 && isBillingError(body)) return "no_credit";
+  if (status === 403 && isRegionError(body)) return "region_unavailable";
+  return undefined;
 };
 
 function parseArguments(json: string): unknown {
@@ -229,7 +236,7 @@ const engine: VoiceEngine = {
         headers: { Authorization: `Bearer ${apiKey}` },
         model,
         accepted: modelResource,
-        classify: (status, body) => (status === 429 && isBillingError(body) ? "no_credit" : undefined),
+        classify: classifyError,
       },
       options,
     );

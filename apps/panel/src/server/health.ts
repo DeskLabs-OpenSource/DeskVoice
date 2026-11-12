@@ -101,6 +101,8 @@ const KEY_CHECK_LINE: Record<KeyCheckView["result"], "fail" | "warn" | "ok"> = {
   rejected: "fail",
   model_unavailable: "fail",
   no_credit: "fail",
+  // Falha, e não aviso: a ligação com esse motor é recusada do mesmo jeito, e não passa sozinha.
+  region_unavailable: "fail",
   rate_limited: "warn",
   unreachable: "warn",
   unexpected_response: "warn",
@@ -120,12 +122,23 @@ export function engineLine(engines: EngineKeys | null): HealthCheck {
   const failed = engines.checks.find(({ check }) => KEY_CHECK_LINE[check.result] === "fail");
   if (failed?.check.result === "rejected") return fail("engine_key_rejected", params(failed));
   if (failed?.check.result === "model_unavailable") return fail("engine_model_unavailable", params(failed));
+  if (failed?.check.result === "region_unavailable") return fail("engine_region_unavailable", params(failed));
   if (failed) return fail("engine_no_credit", params(failed));
   const inconclusive = engines.checks.find(({ check }) => KEY_CHECK_LINE[check.result] === "warn");
   if (inconclusive) return warn("engine_check_inconclusive", params(inconclusive));
   const oldest = engines.checks.toSorted((a, b) => a.check.checkedAt.localeCompare(b.check.checkedAt))[0];
   if (!oldest || engines.checks.length < engines.keys) return ok("engine_ok");
   return ok("engine_key_accepted", params(oldest));
+}
+
+/**
+ * A linha do motor para quem não tem sessão: a rota é pública e soma a instalação inteira, então
+ * diz o estado e o que fazer, mas não o provedor, o modelo nem a data, que são de uma organização.
+ */
+export function anonymousEngineLine(line: HealthCheck): HealthCheck {
+  if (line.reason === "engine_key_accepted") return ok("engine_ok");
+  if (!("engine" in line.params)) return line;
+  return line.status === "fail" ? fail("engine_key_problem") : warn("engine_key_problem");
 }
 
 /**

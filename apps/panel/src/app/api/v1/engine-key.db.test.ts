@@ -103,22 +103,51 @@ describe("engine key test", () => {
     expect([line.status, line.reason]).toEqual(["fail", "engine_key_rejected"]);
     expect(line.params).toMatchObject({ engine: "OpenAI Realtime" });
     expect(line.detail).toMatch(/foi recusada pelo provedor.*Cadastre uma chave válida/);
-    // Sem sessão, a rota pública diz o estado e o que fazer, mas não o provedor nem o modelo.
-    const outside = await engineLine();
-    expect([outside.status, outside.reason]).toEqual(["fail", "engine_key_rejected"]);
-    expect(JSON.stringify(outside)).not.toMatch(/OpenAI|gpt-/);
-    expect(outside.detail).toMatch(/foi recusada pelo provedor.*Cadastre uma chave válida/);
 
     // Outra chave entra: o resultado da anterior some antes mesmo do teste novo.
     provider = { status: 429, body: { error: { code: "credit_balance_exhausted", type: "insufficient_quota" } } };
     expect(((await save(owner, `${KEY}-2`)).data as { check: unknown }).check).toMatchObject({ result: "no_credit" });
-    expect((await engineLine()).reason).toBe("engine_no_credit");
+    expect((await engineLine(owner)).reason).toBe("engine_no_credit");
 
     await save(owner, null);
     const left = await withOrg(panel.app, org, (q) => q.many<{ key: string }>("select key from settings where key like 'engine.openai-realtime.%'"));
     expect(left).toEqual([]);
-    line = await engineLine();
-    expect(line.reason).not.toMatch(/^engine_(key_rejected|no_credit)$/);
+    line = await engineLine(owner);
+    expect([line.status, line.reason]).toEqual(["warn", "engine_none"]);
+  });
+
+  it("the engine line is the session's organization only; without a session it is the sum, with no provider, model or date", async () => {
+    const a = await setup("key org A");
+    const b = await setup("key org B");
+    provider = { status: 401, body: { error: { code: "invalid_api_key" } } };
+    expect(((await save(a.owner, KEY)).data as { check: unknown }).check).toMatchObject({ result: "rejected" });
+    // Nada da A aparece para a B: nem o resultado, nem o provedor, o modelo ou a data do teste.
+    const leaksFrom = (line: unknown): string[] => [/rejected/, /OpenAI/i, /gpt-/, /gemini/i, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/].filter((pattern) => pattern.test(JSON.stringify(line))).map(String);
+
+    let seenByB = await engineLine(b.owner);
+    expect([seenByB.status, seenByB.reason]).toEqual(["warn", "engine_none"]);
+    expect(leaksFrom(seenByB)).toEqual([]);
+
+    // A rota pública soma a instalação: diz que há problema e onde ver, sem detalhe de organização.
+    const report = await call(health);
+    const outside = (report.data as { engine: { status: string; reason: string; detail: string; params: unknown } }).engine;
+    expect([outside.status, outside.reason, outside.params]).toEqual(["fail", "engine_key_problem", {}]);
+    expect(outside.detail).toBe("o último teste da chave de um motor de voz não deu certo: as ligações com esse motor podem ser recusadas. Veja o resultado no painel, em Configurações → Motores de voz");
+    expect(leaksFrom(report.data)).toEqual([]);
+
+    // Com a chave dela aceita, a B vê a dela, e ainda não a da A.
+    provider = { status: 200, body: { id: "gpt-realtime-2.1", object: "model" } };
+    await save(b.owner, `${KEY}-b`);
+    seenByB = await engineLine(b.owner);
+    expect([seenByB.status, seenByB.reason, seenByB.params]).toEqual(["ok", "engine_key_accepted", { engine: "OpenAI Realtime", when: NOW.toISOString(), model: "gpt-realtime-2.1" }]);
+    expect((await engineLine(a.owner)).reason).toBe("engine_key_rejected");
+    // Sem sessão, a falha da A continua decidindo a soma, ainda sem detalhe. (Aceita vira `engine_ok`
+    // sem data: o teste de unidade cobre, porque aqui a soma inclui o que outros arquivos gravaram.)
+    const after = await call(health);
+    expect((after.data as { engine: { reason: string } }).engine.reason).toBe("engine_key_problem");
+    expect(leaksFrom(after.data)).toEqual([]);
+    await save(a.owner, null);
+    await save(b.owner, null);
   });
 
   it("a result never lands on a key other than the one tested", async () => {

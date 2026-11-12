@@ -23,6 +23,7 @@ const settings: SettingsDictionary = {
     rejected: "el proveedor rechazó la clave. Revisa que se haya copiado entera y que no esté revocada, o genera una nueva en el sitio del proveedor.",
     model_unavailable: "la clave es válida, pero no da acceso al modelo {model}, que usa este motor. Revisa en el sitio del proveedor si la cuenta tiene acceso a él.",
     no_credit: "la clave es válida, pero el proveedor dice que la cuenta no tiene crédito o alcanzó su tope de gasto. Agrega crédito o sube el tope en el sitio del proveedor.",
+    region_unavailable: "el proveedor no atiende el país o la región de este servidor. Cambiar la clave no lo resuelve: usa otro motor de voz, o un servidor en un país atendido.",
     rate_limited: "el proveedor pidió esperar (límite de solicitudes de la cuenta). Vuelve a probar en unos minutos.",
     unreachable: "el proveedor no respondió en 10 segundos, o está caído. Revisa que el servidor tenga acceso a internet y vuelve a probar.",
     unexpected_response: "el proveedor respondió algo que DeskVoice no reconoce. Vuelve a probar; si sigue, abre un issue en el repositorio.",

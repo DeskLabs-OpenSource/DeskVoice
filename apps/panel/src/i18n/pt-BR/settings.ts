@@ -23,6 +23,7 @@ const settings = {
     rejected: "o provedor recusou a chave. Confira se ela foi copiada inteira e se não foi revogada, ou gere uma nova no site do provedor.",
     model_unavailable: "a chave vale, mas não dá acesso ao modelo {model}, que este motor usa. Confira no site do provedor se a conta tem acesso a ele.",
     no_credit: "a chave vale, mas o provedor diz que falta crédito ou que o teto de gasto da conta foi atingido. Adicione crédito ou aumente o teto no site do provedor.",
+    region_unavailable: "o provedor não atende o país ou a região deste servidor. Trocar a chave não resolve: use outro motor de voz, ou um servidor em país atendido.",
     rate_limited: "o provedor pediu para esperar (limite de pedidos da conta). Teste de novo em alguns minutos.",
     unreachable: "o provedor não respondeu em 10 segundos, ou está fora do ar. Confira se o servidor tem acesso à internet e teste de novo.",
     unexpected_response: "o provedor respondeu algo que o DeskVoice não reconhece. Teste de novo; se continuar, abra uma issue no repositório.",

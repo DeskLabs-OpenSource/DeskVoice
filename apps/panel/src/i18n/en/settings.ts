@@ -23,6 +23,7 @@ const settings: SettingsDictionary = {
     rejected: "the provider rejected the key. Check that it was copied whole and was not revoked, or create a new one on the provider's site.",
     model_unavailable: "the key is valid, but it has no access to the model {model}, which this engine uses. Check on the provider's site whether the account has access to it.",
     no_credit: "the key is valid, but the provider says the account is out of credit or hit its spending limit. Add credit or raise the limit on the provider's site.",
+    region_unavailable: "the provider does not serve this server's country or region. A new key will not fix it: use another voice engine, or a server in a supported country.",
     rate_limited: "the provider asked to wait (the account's request limit). Test again in a few minutes.",
     unreachable: "the provider did not answer within 10 seconds, or is down. Check that the server can reach the internet and test again.",
     unexpected_response: "the provider answered something DeskVoice does not recognize. Test again; if it keeps happening, open an issue in the repository.",

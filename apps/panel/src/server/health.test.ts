@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import en from "../i18n/en/health";
 import es from "../i18n/es/health";
 import ptBR from "../i18n/pt-BR/health";
-import { agentLine, databaseLine, engineLine, healthReport, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappLine, type EngineKeys, type HealthCheck } from "./health";
+import { agentLine, anonymousEngineLine, databaseLine, engineLine, healthReport, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappLine, type EngineKeys, type HealthCheck } from "./health";
 import type { KeyCheckView } from "./engine-key";
 import type { VoiceHealth } from "./voice";
 import type { WhatsAppView } from "./whatsapp";
@@ -111,6 +111,7 @@ describe("panel, voice and the lines that ask the voice process", () => {
         engineLine(keys(1, [tested("no_credit")])),
         engineLine(keys(1, [tested("unreachable")])),
         engineLine(keys(2, [tested("rate_limited"), tested("rejected")])),
+        engineLine(keys(1, [tested("region_unavailable")])),
       ].map(brief),
     ).toEqual([
       "ok engine_key_accepted",
@@ -120,14 +121,28 @@ describe("panel, voice and the lines that ask the voice process", () => {
       "fail engine_no_credit",
       "warn engine_check_inconclusive",
       "fail engine_key_rejected",
+      "fail engine_region_unavailable",
     ]);
     const rejected = engineLine(keys(1, [tested("rejected")]));
     expect(rejected.action).toBe("engine_key_rejected");
     expect(rejected.params).toEqual({ engine: "Gemini Live (Google)", when: "2026-03-01T14:00:00.000Z", model: "modelo-x" });
     // A frase do terminal (`install/healthcheck.sh` só lê esta) já diz o que fazer.
     expect(healthReport({ engine: rejected }).checks[0]?.detail).toMatch(/^a chave de Gemini Live \(Google\) foi recusada .*Cadastre uma chave válida em Configurações/);
+    expect(engineLine(keys(1, [tested("region_unavailable")])).action).toBe("engine_region_unavailable");
     // Duas chaves aceitas: vale a data do teste mais antigo.
     expect(engineLine(keys(2, [tested("accepted", "2026-03-01T14:00:00.000Z"), tested("accepted", "2026-02-01T10:00:00.000Z")])).params.when).toBe("2026-02-01T10:00:00.000Z");
+  });
+});
+
+describe("the public voice engine line", () => {
+  it("keeps the state and what to do, never the provider, the model or the date", () => {
+    const tested = (result: KeyCheckView["result"]) => engineLine(keys(1, [{ engine: "OpenAI Realtime", check: { result, model: "gpt-realtime-2.1", checkedAt: "2026-03-01T14:00:00.000Z" } }]));
+    const lines = (["rejected", "model_unavailable", "no_credit", "region_unavailable", "unreachable", "accepted"] as const).map((result) => anonymousEngineLine(tested(result)));
+    expect(lines.map(brief)).toEqual(["fail engine_key_problem", "fail engine_key_problem", "fail engine_key_problem", "fail engine_key_problem", "warn engine_key_problem", "ok engine_ok"]);
+    for (const line of lines) expect(line.params).toEqual({});
+    expect(lines[0]?.action).toBe("engine_key_problem");
+    // O que não tem detalhe de organização passa como está.
+    expect([anonymousEngineLine(engineLine(keys(0))), anonymousEngineLine(engineLine(null)), anonymousEngineLine(engineLine(keys(1)))].map(brief)).toEqual(["warn engine_none", "warn needs_database", "ok engine_ok"]);
   });
 });
 

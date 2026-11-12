@@ -28,6 +28,7 @@ const KEY_CHECK_TONE: Record<KeyCheckResult, "ok" | "warn" | "fail" | "neutral">
   rejected: "fail",
   model_unavailable: "fail",
   no_credit: "fail",
+  region_unavailable: "fail",
   rate_limited: "warn",
   unreachable: "warn",
   unexpected_response: "warn",

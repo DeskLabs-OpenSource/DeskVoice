@@ -86,6 +86,8 @@ export const KEY_CHECK_RESULTS = [
   "model_unavailable",
   /** O provedor disse que falta crédito ou que o limite de gasto da conta foi atingido. */
   "no_credit",
+  /** O provedor não atende o país, a região ou o território de onde o servidor fala com ele. */
+  "region_unavailable",
   /** O provedor pediu para esperar (limite de pedidos). */
   "rate_limited",
   /** Sem resposta no prazo, sem rede, ou erro do lado do provedor (5xx). */

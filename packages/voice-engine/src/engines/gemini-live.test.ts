@@ -172,6 +172,8 @@ describe("gemini-live: teste da chave (contrato com servidor HTTP falso)", () =>
   it.each([
     ["401", "rejected", { status: 401, body: { error: { code: "authentication", message: "bad key" } } }],
     ["403", "rejected", { status: 403, body: { error: { code: 403, status: "PERMISSION_DENIED" } } }],
+    // O código de região é da OpenAI: no Gemini, 403 continua sendo chave recusada.
+    ["403 com o código de região da OpenAI", "rejected", { status: 403, body: { error: { code: "unsupported_country_region_territory" } } }],
     ["400 com API_KEY_INVALID (forma antiga)", "rejected", { status: 400, body: { error: { code: 400, details: [{ "@type": "x", reason: "API_KEY_INVALID" }] } } }],
     ["404", "model_unavailable", { status: 404, body: { error: { code: "model_not_found" } } }],
     ["402", "no_credit", { status: 402, body: { error: { code: "payment_required" } } }],

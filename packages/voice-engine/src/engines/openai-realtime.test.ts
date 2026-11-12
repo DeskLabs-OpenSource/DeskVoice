@@ -171,7 +171,8 @@ describe("openai-realtime: teste da chave (contrato com servidor HTTP falso)", (
 
   it.each([
     ["401", "rejected", { status: 401, body: { error: { code: "invalid_api_key", type: "invalid_request_error" } } }],
-    ["403", "rejected", { status: 403, body: { error: { code: "unsupported_country_region_territory" } } }],
+    ["403 de região não atendida", "region_unavailable", { status: 403, body: { error: { code: "unsupported_country_region_territory", type: "request_forbidden" } } }],
+    ["403 sem código de região", "rejected", { status: 403, body: { error: { code: "invalid_api_key" } } }],
     ["404", "model_unavailable", { status: 404, body: { error: { code: "model_not_found" } } }],
     ["429 por limite de pedidos", "rate_limited", { status: 429, body: { error: { code: "rate_limit_exceeded", type: "requests" } } }],
     ["429 sem crédito", "no_credit", { status: 429, body: { error: { code: "credit_balance_exhausted", type: "insufficient_quota" } } }],
