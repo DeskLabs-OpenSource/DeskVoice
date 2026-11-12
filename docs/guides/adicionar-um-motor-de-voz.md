@@ -26,6 +26,10 @@ de começar.
 interface VoiceEngine {
   id: string;            // identificador gravado no agente e na chamada
   label: string;         // nome mostrado na tela
+  provider: string;      // quem processa o áudio: "google", "openai"; "none" se nada sai do servidor
+  processingLocation: ProcessingLocation;
+  voices?: readonly EngineVoice[];  // as vozes que a tela do agente oferece
+  defaultVoice?: string; // a voz usada quando o agente não escolheu nenhuma; precisa estar em voices
   pricing: EnginePricing;
   connect(config: VoiceSessionConfig, apiKey: string): Promise<VoiceSession>;
 }
@@ -127,6 +131,27 @@ informado para estimar o custo da chamada.
 - Use o preço público do provedor, e diga no PR a fonte e a data em que consultou.
 - Preço muda. Deixe um comentário no arquivo com a data da última conferência.
 - Não invente número. Se o provedor não publica preço para o modelo, diga isso no PR.
+
+## Onde o áudio é processado
+
+A tela de Configurações diz ao operador para onde vai o áudio da chamada. Cada motor declara isso
+em `processingLocation`:
+
+- `{ kind: "this-server" }`: nada sai da instalação (o motor simulado);
+- `{ kind: "undeclared" }`: o provedor não publica o lugar de processamento. A tela diz isso, em
+  vez de ficar calada;
+- `{ kind: "country", country, source: { url, checkedOn } }`: o país que o provedor declara, com
+  o endereço da declaração e o dia em que você conferiu. País sem fonte não compila.
+
+Não escreva um país porque é provável. Se o provedor não declara, o motor é `undeclared`.
+
+## Vozes
+
+`voices` é a lista que a tela do agente oferece, e `defaultVoice` a que vale quando o agente não
+escolhe. Use o nome exato do provedor no `id`. Em `style`, só o descritor que a documentação do
+provedor usa, no idioma dela ("Warm", "Firm"); se ele recomenda uma voz, marque
+`recommended: true`, e a tela escreve o rótulo no idioma do operador. Diga no PR a página e a
+data em que conferiu a lista.
 
 ## O teste de contrato
 

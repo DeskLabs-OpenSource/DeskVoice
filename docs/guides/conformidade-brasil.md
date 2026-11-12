@@ -57,6 +57,28 @@ tela; veja [Guardar e apagar](#guardar-e-apagar).
 Considere dizer isso na saudação. Além de ser uma prática transparente, evita a frustração de
 quem descobre no meio da conversa. Se existe obrigação legal de informar no seu setor, confira.
 
+Textos de partida, para copiar e adaptar ao seu negócio:
+
+```text
+pt-BR: "Olá, aqui é a Lia, assistente virtual da Clínica Aurora. Esta conversa é atendida por
+uma inteligência artificial e pode ser registrada para melhorar o atendimento."
+
+en: "Hello, this is Lia, the virtual assistant at Aurora Clinic. This call is handled by an
+artificial intelligence and may be recorded to improve the service."
+
+es: "Hola, soy Lia, la asistente virtual de la Clínica Aurora. Esta llamada es atendida por
+una inteligencia artificial y puede quedar registrada para mejorar el servicio."
+```
+
+Duas ressalvas, para não vender demais nem de menos:
+
+- **A LGPD não traz um dever geral de anunciar IA na fala.** O que ela cobra é informação no
+  momento do tratamento (art. 9º) e, quando há transferência internacional, informação sobre
+  ela — o que está na seção 4 deste guia. Alguns setores têm regra própria de atendimento
+  automatizado; confira a sua.
+- **O aviso não substitui a política de privacidade.** Dizer "é uma IA" na saudação não informa
+  finalidade, base legal nem retenção: só evita a surpresa de quem descobre no meio da conversa.
+
 ### 3. Dados sensíveis
 
 Clínicas, escritórios de advocacia e serviços financeiros lidam com dados que têm proteção
@@ -66,6 +88,34 @@ adicional. Antes de pôr um agente para atender nesses ramos:
 - lembre que a conversa passa pelo provedor de IA que você contratou, sob os termos dele. Leia
   esses termos, em especial sobre retenção e uso dos dados;
 - os dados da instalação ficam na sua VPS. O DeskVoice não envia telemetria.
+
+### 4. O que sai do país, e para onde
+
+Se você atende em nome de outra empresa — clínica, escritório, financeira — a primeira pergunta
+do contrato costuma ser esta: *onde ficam os dados?* A resposta tem duas partes, e elas não se
+confundem.
+
+| O que | Para onde | Como sabemos |
+|---|---|---|
+| Áudio e transcrição da chamada, motor `gemini-live` | Google — o provedor **não publica** a lista de países de processamento da Gemini Developer API | pedido oficial em aberto no fórum do Google (02/11/2026); quem precisa de região usa Vertex AI, com região explícita |
+| Áudio e transcrição da chamada, motor `openai-realtime` | OpenAI — depende do **projeto/região** escolhidos na conta (há data residency nos Estados Unidos, na Europa, no Reino Unido, no Japão, entre outros) | documentação da OpenAI sobre os seus dados, consultada em 12/11/2026 |
+| Chamada com o motor `simulated` | **Nada sai**: roda neste servidor | código do motor |
+| Áudio da ligação telefônica | a operadora do tronco SIP que você contratou, como em qualquer ligação | a configuração do tronco |
+| Mensagem por WhatsApp pelo número conectado por QR Code (WAHA) | os servidores do WhatsApp, da Meta; o serviço roda na sua VPS, mas a mensagem sai por eles | a tela WhatsApp, em Configurações |
+| Mensagem pelo conector de endereço (DeskcommCRM ou webhook do operador) | o endereço que você cadastrou, e de lá para onde aquele sistema mandar | a tela WhatsApp, em Configurações |
+| O que o agente manda a um webhook permitido (`call_webhook`) e os avisos por webhook | os endereços da lista de webhooks permitidos | "Webhooks permitidos", em Configurações |
+| Banco e transcrições | a sua VPS, no país do contrato dela | a instalação |
+
+Três cuidados, e o primeiro é o que mais se erra:
+
+1. **Transferência internacional é regulada** — Resolução CD/ANPD nº 19/2024; entre os caminhos
+   estão as cláusulas-padrão contratuais. Qual usar é decisão de quem opera, com o advogado
+   dela; não é escolha do DeskVoice.
+2. **"Servidor no Brasil" não é argumento sozinho**: o banco pode estar no Brasil e o áudio sair
+   para fora do mesmo jeito. As duas informações são independentes.
+3. **Não prometa região que o provedor não declara.** Informação sem fonte e sem data envelhece
+   calada, e o contrato continua valendo. Se você precisa de região garantida, contrate o
+   provedor por um caminho que a declare por escrito.
 
 ## Ligações de saída
 

@@ -12,7 +12,7 @@ import ptBR, { type SettingsDictionary } from "../../../i18n/pt-BR/settings";
 import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../ui/errors";
-import { formatDateTime, formatPhone } from "../../../ui/format";
+import { formatDateTime, formatDay, formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import type { Engine, KeyCheck, KeyCheckResult, Me, Setting } from "../../../ui/types";
@@ -54,6 +54,8 @@ function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: Settin
   // A gravação testa a chave nova; `check: null` diz que o limite de testes adiou o teste.
   const [testPostponed, setTestPostponed] = useState(false);
   const settingKey = `engine.${engine.id}.api_key`;
+  const location = engine.processingLocation;
+  const locale = useLocale();
   const change = (value: string | null): void => {
     setTestPostponed(false);
     void save.run(async () => setTestPostponed((await api<{ check?: unknown }>(`/settings/${settingKey}`, { method: "PUT", body: { value } })).check === null)).then((ok) => {
@@ -70,6 +72,21 @@ function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: Settin
         <span className="font-bold">{engine.label}</span>
         {engine.requiresKey ? <Badge tone={engine.keyConfigured ? "ok" : "warn"}>{engine.keyConfigured ? t.keyConfigured : t.keyMissing}</Badge> : <Badge>{t.keyNotNeeded}</Badge>}
       </div>
+      {/* Onde o áudio vai: país declarado com fonte, "neste servidor", ou "não declara". */}
+      <p className="text-muted">
+        {fill(t.engineWhere, {
+          where:
+            location.kind === "this-server" ? t.engineHere : location.kind === "undeclared" ? t.engineUnknown : `${location.country} (${engine.provider})`,
+        })}
+        {location.kind === "country" ? (
+          <>
+            {" · "}
+            <a className="underline" href={location.source.url} target="_blank" rel="noreferrer">
+              {fill(t.engineSourceChecked, { date: formatDay(location.source.checkedOn, locale) })}
+            </a>
+          </>
+        ) : null}
+      </p>
       {engine.requiresKey && canConfigure ? (
         <form
           className="flex flex-wrap items-center gap-2"

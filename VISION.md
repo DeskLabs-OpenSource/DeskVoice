@@ -114,6 +114,9 @@ Mesmo funcionando, o projeto teria falhado se:
 - o custo de uma chamada não aparecesse ou não respeitasse teto;
 - o sistema facilitasse disparo em massa.
 
+Cada um desses fracassos tem um teste, uma cerca ou a revisão guardando: a lista com o caminho de
+cada guarda está no [desenho da fundação](docs/specs/2026-11-10-fundacao-design.md#antiobjetivos).
+
 ## Como falamos
 
 1. **Palavra-chave primeiro, jargão depois.** "Central telefônica", "agente de IA", "open

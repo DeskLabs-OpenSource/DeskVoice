@@ -15,6 +15,12 @@ ou se o `id` repetir. Não há lista para editar.
 interface VoiceEngine {
   id: string;            // "gemini-live": é o valor gravado em agents.engine
   label: string;         // nome mostrado no painel
+  provider: string;      // quem processa o áudio: "google", "openai"; "none" se nada sai do servidor
+  // Onde o áudio é processado. País só com fonte; provedor que não publica é "undeclared", nunca um palpite.
+  processingLocation: { kind: "this-server" } | { kind: "undeclared" }
+    | { kind: "country"; country: string; source: { url: string; checkedOn: string } };
+  voices?: readonly { id: string; style?: string; recommended?: boolean }[];  // nome exato no provedor;
+  defaultVoice?: string; // style só com o descritor da documentação dele; a tela escreve "recomendada"
   keyless?: boolean;     // true só para motor que não precisa de chave (o simulado)
   pricing: EnginePricing;
   connect(config: VoiceSessionConfig, apiKey: string): Promise<VoiceSession>;

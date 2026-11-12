@@ -217,8 +217,8 @@ export function WhatsAppPanel({ onChanged }: { onChanged(): void }) {
 
         {up && data.status === "qr" ? (
           <div className="grid gap-4 md:grid-cols-[auto_minmax(0,1fr)] md:items-start">
-            {/* Fundo branco fixo, fora dos tokens: a câmera precisa do contraste do código também no tema escuro. */}
-            <div className="grid place-items-center rounded-sm border border-line p-3" style={{ width: QR_SIZE, height: QR_SIZE, background: "#fff", color: "#333" }}>
+            {/* Fundo claro nos dois temas (token fixo): a câmera precisa do contraste do código também no tema escuro. */}
+            <div className="grid place-items-center rounded-sm border border-line bg-qr-surface p-3 text-qr-ink" style={{ width: QR_SIZE, height: QR_SIZE }}>
               {data.qr ? <img src={data.qr} alt={t.qrAlt} width={QR_SIZE - 24} height={QR_SIZE - 24} /> : <span className="text-center text-[0.87rem]">{t.qrBetween}</span>}
             </div>
             <div className="grid gap-3">
