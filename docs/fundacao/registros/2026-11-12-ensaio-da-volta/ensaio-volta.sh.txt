@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Ensaio da volta automática, 12/11/2026, na vps-deskvoice. Destrutivo dentro do DeskVoice.
+set -u
+D=/root/ensaio-volta; mkdir -p "$D"; cd /root/DeskVoice
+q() { docker exec deskvoice-postgres-1 psql -U deskvoice -d deskvoice -Atc "select (select count(*) from calls),(select count(*) from call_events),(select count(*) from schema_migrations)" 2>&1; }
+img() { docker ps --format "{{.Names}} {{.Image}}" | grep deskvoice | sort; }
+echo "antes: $(grep ^DESKVOICE_VERSION deploy/.env) contagens=$(q)" > "$D/0-estado.txt"; img >> "$D/0-estado.txt"
+# 1. Descer para a 0.4.0 pelo terminal.
+bash install/update.sh --to 0.4.0 --yes > "$D/1-descer-para-0.4.0.txt" 2>&1; echo "saída: $?" >> "$D/1-descer-para-0.4.0.txt"
+echo "depois de descer: $(grep ^DESKVOICE_VERSION deploy/.env) contagens=$(q)" > "$D/1-estado.txt"; img >> "$D/1-estado.txt"
+grep -q "DESKVOICE_VERSION=0.4.0" deploy/.env || { echo "não desceu; paro aqui" > "$D/FIM"; exit 0; }
+# 2. Subir para a 0.5.0 com o painel novo derrubado de propósito, e ver a volta.
+( end=$((SECONDS+420)); while [ $SECONDS -lt $end ]; do if docker ps --format "{{.Names}} {{.Image}}" | grep -q "^deskvoice-panel-1 .*:0.5.0$"; then docker stop -t 1 deskvoice-panel-1 >/dev/null 2>&1 && echo "$(date -u +%H:%M:%S) derrubei o painel 0.5.0" >> "$D/2-sabotador.txt"; fi; sleep 2; done ) &
+SAB=$!
+DESKVOICE_HEALTH_TIMEOUT=60 bash install/update.sh --to 0.5.0 --yes > "$D/2-subir-com-falha.txt" 2>&1; echo "saída: $?" >> "$D/2-subir-com-falha.txt"
+kill "$SAB" 2>/dev/null; wait "$SAB" 2>/dev/null
+echo "depois da volta: $(grep ^DESKVOICE_VERSION deploy/.env) contagens=$(q)" > "$D/2-estado.txt"; img >> "$D/2-estado.txt"
+bash install/healthcheck.sh > "$D/3-saude-depois-da-volta.txt" 2>&1; echo "saída: $?" >> "$D/3-saude-depois-da-volta.txt"
+# 3. Subir de novo para a 0.5.0, agora sem sabotagem, para a máquina terminar onde estava.
+bash install/update.sh --to 0.5.0 --yes > "$D/4-subir-de-novo.txt" 2>&1; echo "saída: $?" >> "$D/4-subir-de-novo.txt"
+echo "final: $(grep ^DESKVOICE_VERSION deploy/.env) contagens=$(q)" > "$D/4-estado.txt"; img >> "$D/4-estado.txt"
+bash install/healthcheck.sh > "$D/5-saude-final.txt" 2>&1; echo "saída: $?" >> "$D/5-saude-final.txt"
+echo FIM > "$D/FIM"
