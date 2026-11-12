@@ -34,6 +34,7 @@ O trabalho em curso é fazer o que já existe aguentar o mundo real.
 - Transferência assistida, em que o agente apresenta o caso antes de passar a ligação.
 - Painel de supervisão ao vivo.
 - Filas e horário de atendimento.
+- Ligação pelo WhatsApp, atendida pelo agente, por meio do WaCalls. Opcional e desligada de fábrica.
 
 ### Depois
 
@@ -44,7 +45,6 @@ O trabalho em curso é fazer o que já existe aguentar o mundo real.
 
 ### Fora do horizonte por enquanto
 
-- **Ligação pelo WhatsApp.** Não há caminho estável para instalação própria.
 - **Construtor visual de fluxos.** O agente é configurado por instruções e ferramentas.
 - **Qualquer coisa que facilite disparo em massa.** Não é adiamento. É regra de produto, escrita
   em [`GOVERNANCE.md`](GOVERNANCE.md).
@@ -66,6 +66,7 @@ Tamanhos: **P** cabe em um PR pequeno. **M** pede alguns PRs ou um PR com teste 
 | Ferramenta de CRM | M | Identificar quem ligou e registrar o que foi combinado | Interface `Tool`. Guia: [adicionar uma ferramenta](docs/guides/adicionar-uma-ferramenta.md) |
 | Ferramenta de pagamento | M | Enviar um link de cobrança enquanto a pessoa está na linha | Interface `Tool`, com `request_approval` quando houver valor envolvido |
 | Conector com o DeskcommCRM | G | Ligação e CRM conversando para quem usa os dois | Ferramenta `send_whatsapp` e a configuração `whatsapp.connector` em `packages/tools`. Contexto na [decisão 0001](docs/decisions/0001-fronteira-com-o-deskcomm.md) |
+| Ligação pelo WhatsApp | G | Muita gente liga para a empresa pelo WhatsApp, e não pelo número fixo. O [WaCalls](https://github.com/JotaDev66/WaCalls) (MIT) já faz essa ponte numa instalação própria, e o DeskcommCRM o usa. Ele pareia a conta por QR Code como mais um aparelho vinculado, fora da API oficial: há risco de bloqueio do número, então o recurso entra opcional, desligado de fábrica, e com as mesmas regras das ligações de saída | Entrada de chamadas e o servidor de áudio em `apps/voice`; a conexão por QR Code em `apps/panel/src/server/whatsapp.ts`. Começa por um pedido de decisão, no formato do [`GOVERNANCE.md`](GOVERNANCE.md), e pela [spec do Deskcomm](https://github.com/melgarafael/DeskcommCRM/blob/main/docs/specs/18-spec-voice-calls-wacalls.md) |
 | Gravação com retenção configurável | G | Auditoria e treinamento. Pede decisão sobre por quanto tempo guardar e quem pode ouvir | Servidor AudioSocket em `apps/voice`. Começa por um pedido de decisão, no formato do [`GOVERNANCE.md`](GOVERNANCE.md) |
 | Filas e horário de atendimento | M | Fora do horário e com todos ocupados são os dois momentos em que mais se perde ligação | Entrada de chamadas em `apps/voice`. Telas de agente e de linha em `apps/panel` |
 | URA por voz | M | Encaminhar para o agente certo antes de a conversa começar | Entrada de chamadas em `apps/voice`. O protocolo AudioSocket já entrega os dígitos teclados |
