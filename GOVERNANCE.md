@@ -133,8 +133,9 @@ pelo GitHub, o caminho real é este:
 
 - **O merge não passa pela fila.** A conta do mantenedor faz o merge por cima da regra do ramo
   (`--admin`), depois que a verificação `ready` do CI fecha verde no head do PR.
-- **Quem revisa é uma sessão de agente distinta da que escreveu**, que lê o diff sem o contexto
-  de quem o escreveu e dá um veredito. Desde 12/11/2026, esse parecer fica num comentário do
+- **Quem revisa é uma sessão de agente distinta da que escreveu**, que não tem o contexto de
+  trabalho de quem escreveu: recebe o pedido com o que o autor diz do PR, confere contra o
+  código e dá um veredito. Desde 12/11/2026, esse parecer fica num comentário do
   próprio PR, com o cabeçalho "Parecer de revisão (sessão distinta da que escreveu)", o head
   lido e o veredito. Como a conta é a mesma que abre os PRs, o GitHub não conta o comentário
   como aprovação.
