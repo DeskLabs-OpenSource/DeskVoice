@@ -2,7 +2,8 @@
 PUT /api/v1/privacy/recording {"enabled":true}            -> 200 {"enabled":true}
 POST /api/v1/calls/simulate {agentId}                       -> chamada 89d71e9a-8305-409f-b242-a74eabd53b2b
 durante a chamada, no volume deskvoice_recordings:          <org>/<chamada>.wav.part, 1,7 MB
-chamada: startedAt 2026-11-12T22:18:35.060Z  endedAt 2026-11-12T22:19:39.180Z (64,1 s), status completed
+chamada: startedAt 2026-11-12T22:18:35.060Z  endedAt 2026-11-12T22:19:39.180Z (64,1 s), status completed, endReason end_call
+         (o agente encerrou; a simulada do painel não chama callerHangup, então o corte do #110 não entra neste caso)
 arquivo final:                                              -rw-r----- 2412524 bytes  <org>/<chamada>.wav
 GET /api/v1/calls/<chamada>/recording (seguindo o 308)     -> 200 audio/wav 2412524 bytes
 file:                                                       RIFF WAVE, Microsoft PCM, 16 bit, stereo 8000 Hz
