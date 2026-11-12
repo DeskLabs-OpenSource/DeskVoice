@@ -1,5 +1,5 @@
 import { enqueueTask, withOrg, type OrgQuery } from "@deskvoice/core";
-import { loadWhatsAppConnector, sendWhatsApp } from "@deskvoice/tools";
+import { loadWhatsAppConnector, sendWhatsApp } from "@deskvoice/tools/whatsapp";
 import { WahaError, sendViaWaha, wahaEnsureSession, wahaGetQr, wahaGetSession, wahaLogoutSession, wahaSessionName, wahaStartSession, wahaStopSession, type WahaSession } from "@deskvoice/tools/waha";
 import { z } from "zod";
 import en from "../i18n/en/whatsapp";
