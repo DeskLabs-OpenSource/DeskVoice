@@ -16,7 +16,7 @@ const agents = {
   roleHint: "Aparece só no painel. Exemplo: Recepção, Cobrança.",
   conversation: "Conversa",
   greeting: "Saudação",
-  greetingHint: "A primeira frase que o agente diz ao atender.",
+  greetingHint: "A primeira frase que o agente diz ao atender. Para avisar que a pessoa fala com uma IA, há um exemplo no guia de conformidade.",
   instructions: "Instruções",
   instructionsHint: "Diga quem o agente é, o que ele resolve sozinho e quando deve chamar uma pessoa.",
   voice: "Voz",
