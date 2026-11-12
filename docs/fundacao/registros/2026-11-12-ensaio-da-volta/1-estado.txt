@@ -1,0 +1,7 @@
+depois de descer: DESKVOICE_VERSION=0.4.0 contagens=1|25|5
+deskvoice-asterisk-1 927d4c987771
+deskvoice-caddy-1 caddy:2.11.9-alpine
+deskvoice-panel-1 ghcr.io/desklabs-opensource/deskvoice-panel:0.4.0
+deskvoice-postgres-1 postgres:17.11-alpine
+deskvoice-routines-1 ghcr.io/desklabs-opensource/deskvoice-routines:0.4.0
+deskvoice-voice-1 ghcr.io/desklabs-opensource/deskvoice-voice:0.4.0
