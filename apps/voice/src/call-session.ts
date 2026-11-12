@@ -1,4 +1,4 @@
-import { decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { autoCommitOrgQuery, runTool, toSpec, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
 import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
@@ -17,7 +17,7 @@ export interface CallSessionDeps {
   approvals: ApprovalWaiter;
   schedule?: Schedule;
   log?: Logger;
-  /** Pasta das gravações (`RECORDINGS_DIR`). Sem ela, a chamada não é gravada. */
+  /** Pasta das gravações (`RECORDINGS_DIR`). Sem ela, ou com a gravação desligada na organização, a chamada não é gravada. */
   recordingsDir?: string;
 }
 
@@ -298,6 +298,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);
     // Sem texto do operador, ou com texto em branco, vale o padrão: o aviso nunca falta.
     const recordingNotice = typeof notice?.value === "string" && notice.value.trim() !== "" ? notice.value.trim() : DEFAULT_RECORDING_NOTICE;
+    // Gravação desligada de fábrica (registro 0016): só grava a organização que ligou. Lida uma vez,
+    // no começo: ligar ou desligar no meio não muda a chamada em curso.
+    const recording = deps.recordingsDir ? await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALL_RECORDING_SETTING]) : null;
+    const recordsCall = callRecordingOf(recording?.value);
 
     const enabled = new Map<string, Tool>();
     for (const name of overrides?.tools ?? agent.tools) {
@@ -377,7 +381,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // handlers e os primeiros eventos precisam estar na fila antes da primeira fala.
     const session = voice;
     const engineLabel = engine.label;
-    if (deps.recordingsDir) recorder = createRecorder(() => clock.now().getTime());
+    if (recordsCall) recorder = createRecorder(() => clock.now().getTime());
     session.on("audio", (pcm) => {
       if (ending) return;
       transport.sendAudio(pcm);

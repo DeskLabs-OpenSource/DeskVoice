@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { DEFAULT_RECORDINGS_DIR, recordingPath, withOrg } from "@deskvoice/core";
+import { recordingPath, withOrg } from "@deskvoice/core";
 import { failure, notFound, requireSession, serverDeps } from "../../../../../../server/context";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -14,7 +14,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (!UUID.test(id)) throw notFound();
     const call = await withOrg(deps.db, session.organizationId, (q) => q.one("select id from calls where id = $1", [id]));
     if (!call) throw notFound();
-    const file = recordingPath(process.env.RECORDINGS_DIR ?? DEFAULT_RECORDINGS_DIR, session.organizationId, id);
+    const file = recordingPath(deps.recordingsDir, session.organizationId, id);
     const wav = await readFile(file).catch(() => null);
     if (!wav) throw notFound();
     return new Response(new Uint8Array(wav), { headers: { "content-type": "audio/wav", "content-length": String(wav.length), "cache-control": "private, no-store" } });

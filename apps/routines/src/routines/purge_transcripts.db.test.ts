@@ -57,7 +57,9 @@ describe("purge_transcripts", () => {
     ]);
   });
 
-  it("apaga as gravações de áudio que passaram do prazo, só da organização, e conta no mesmo evento", async () => {
+  // A organização não tem a gravação ligada: desligar não apaga o que já foi gravado, e o que ficou
+  // segue o prazo (registro 0016).
+  it("apaga as gravações de áudio que passaram do prazo, mesmo com a gravação desligada, só da organização, e conta no mesmo evento", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
     try {
       const org = await createOrganization(app, "purge recordings");

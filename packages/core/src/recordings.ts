@@ -4,6 +4,13 @@ import path from "node:path";
 /** Pasta das gravações de chamada: a voz grava, o painel lê e as rotinas apagam pelo prazo de guarda. */
 export const DEFAULT_RECORDINGS_DIR = "/recordings";
 
+/**
+ * Gravação ligada, por organização (chave `calls.recording_enabled` em `settings`, registro 0016).
+ * Ausente é desligada, de fábrica: quem atualiza não passa a gravar sem decidir. Só `true` liga.
+ */
+export const CALL_RECORDING_SETTING = "calls.recording_enabled";
+export const callRecordingOf = (stored: unknown): boolean => stored === true;
+
 /** Onde fica a gravação de uma chamada: uma pasta por organização, um WAV por chamada. */
 export function recordingPath(dir: string, organizationId: string, callId: string): string {
   return path.join(dir, organizationId, `${callId}.wav`);

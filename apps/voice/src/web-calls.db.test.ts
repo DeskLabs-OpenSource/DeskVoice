@@ -160,6 +160,8 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
       { toolCall: { name: "end_call", args: { reason: "A cliente se despediu." } } },
     ];
     const made = await scene("web-e2e", { script });
+    // A gravação vem desligada (registro 0016); esta organização a ligou.
+    await withSystem(app, (q) => q.exec("insert into settings (organization_id, key, value, secret) values ($1, 'calls.recording_enabled', 'true', false)", [made.organizationId]));
     const { status, body } = await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER });
     expect(status).toBe(200);
     expect(body).toEqual({ callId: expect.any(String), token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), expiresInSeconds: 60 });
