@@ -17,9 +17,12 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  // Uma nova tentativa no CI, onde o navegador divide o runner com a instalação inteira. O que só
-  // passa na segunda sai marcado como "flaky" no relatório: é aviso, e não silêncio.
+  // Uma nova tentativa no CI, onde o navegador divide o runner com a instalação inteira, para o log
+  // mostrar se a falha é estável. Mas o teste que só passa na segunda REPROVA o job: um teste de
+  // tela instável numa instalação de verdade costuma ser corrida no produto (a tela antes do dado),
+  // e o relatório só sobe em falha, então "flaky" verde seria silêncio.
   retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: !!process.env.CI,
   timeout: 60_000,
   expect: { timeout: 15_000 },
   reporter: process.env.CI ? [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]] : [["list"]],

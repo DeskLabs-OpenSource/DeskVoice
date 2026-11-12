@@ -152,6 +152,9 @@ portas e segredos são seus, inventados na hora):
 8. `DESKVOICE_E2E_URL=http://127.0.0.1:<porta> pnpm test:e2e`, com `DESKVOICE_E2E_EMAIL` e
    `DESKVOICE_E2E_PASSWORD` do passo 4. Falhou? O rastro de cada passo fica em
    `apps/panel/test/e2e/test-results/`: `pnpm --filter ./apps/panel exec playwright show-trace <arquivo>`.
+   O teste de Configurações supõe uma instalação feita pelo instalador, que sempre gera a
+   `WAHA_API_KEY`: contra um painel sem essa chave, o bloco WhatsApp aparece como "indisponível", e
+   não "não instalado", e o teste falha.
 
 Pare tudo ao terminar (`pg_ctl -D <tmp>/pg stop`) e apague a pasta temporária.
 
