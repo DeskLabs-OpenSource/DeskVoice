@@ -33,6 +33,10 @@ function record(session: VoiceSession): string[] {
 afterEach(() => setSimulatedScript(undefined));
 
 describe("motor simulado", () => {
+  it("não pede chave: o teste responde isso sem rede", async () => {
+    expect(await defaultEngine.checkKey("qualquer")).toEqual({ result: "not_needed" });
+  });
+
   it("executa o roteiro completo: say, expectUserAudio, toolCall que bloqueia, fail", async () => {
     const scheduler = manualScheduler();
     const engine = createSimulatedEngine({ schedule: scheduler.schedule });

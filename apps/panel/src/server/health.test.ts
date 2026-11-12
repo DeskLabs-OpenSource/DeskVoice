@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import en from "../i18n/en/health";
 import es from "../i18n/es/health";
 import ptBR from "../i18n/pt-BR/health";
-import { agentLine, databaseLine, engineLine, healthReport, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappLine, type HealthCheck } from "./health";
+import { agentLine, databaseLine, engineLine, healthReport, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappLine, type EngineKeys, type HealthCheck } from "./health";
+import type { KeyCheckView } from "./engine-key";
 import type { VoiceHealth } from "./voice";
 import type { WhatsAppView } from "./whatsapp";
 
@@ -27,6 +28,7 @@ const view = (service: WhatsAppView["service"], status: WhatsAppView["status"] =
   replaces: null,
 });
 const brief = (line: HealthCheck): string => `${line.status} ${line.reason}`;
+const keys = (count: number, checks: EngineKeys["checks"] = []): EngineKeys => ({ keys: count, checks });
 
 describe("routines line", () => {
   const queue = (oldestDueAt: Date | null, listeners = 1) => routinesLine({ listeners, oldestDueAt }, now);
@@ -95,17 +97,47 @@ describe("panel, voice and the lines that ask the voice process", () => {
       "warn needs_voice",
     ]);
     expect(trunkLine(voice("ok", ["fail", "ok"])).params).toEqual({ down: 1, total: 2 });
-    expect([engineLine(1), engineLine(0), engineLine(null)].map(brief)).toEqual(["ok engine_ok", "warn engine_none", "warn needs_database"]);
+    expect([engineLine(keys(1)), engineLine(keys(0)), engineLine(null)].map(brief)).toEqual(["ok engine_ok", "warn engine_none", "warn needs_database"]);
+  });
+
+  it("voice engine uses the last stored key test: rejected is a failure with what to do; never tested stays as before", () => {
+    const tested = (result: KeyCheckView["result"], at = "2026-03-01T14:00:00.000Z") => ({ engine: "Gemini Live (Google)", check: { result, model: "modelo-x", checkedAt: at } });
+    expect(
+      [
+        engineLine(keys(1, [tested("accepted")])),
+        engineLine(keys(2, [tested("accepted")])),
+        engineLine(keys(1, [tested("rejected")])),
+        engineLine(keys(2, [tested("accepted"), tested("model_unavailable")])),
+        engineLine(keys(1, [tested("no_credit")])),
+        engineLine(keys(1, [tested("unreachable")])),
+        engineLine(keys(2, [tested("rate_limited"), tested("rejected")])),
+      ].map(brief),
+    ).toEqual([
+      "ok engine_key_accepted",
+      "ok engine_ok",
+      "fail engine_key_rejected",
+      "fail engine_model_unavailable",
+      "fail engine_no_credit",
+      "warn engine_check_inconclusive",
+      "fail engine_key_rejected",
+    ]);
+    const rejected = engineLine(keys(1, [tested("rejected")]));
+    expect(rejected.action).toBe("engine_key_rejected");
+    expect(rejected.params).toEqual({ engine: "Gemini Live (Google)", when: "2026-03-01T14:00:00.000Z", model: "modelo-x" });
+    // A frase do terminal (`install/healthcheck.sh` só lê esta) já diz o que fazer.
+    expect(healthReport({ engine: rejected }).checks[0]?.detail).toMatch(/^a chave de Gemini Live \(Google\) foi recusada .*Cadastre uma chave válida em Configurações/);
+    // Duas chaves aceitas: vale a data do teste mais antigo.
+    expect(engineLine(keys(2, [tested("accepted", "2026-03-01T14:00:00.000Z"), tested("accepted", "2026-02-01T10:00:00.000Z")])).params.when).toBe("2026-02-01T10:00:00.000Z");
   });
 });
 
 describe("the report", () => {
   it("orders the lines from the outside in, whatever order they were measured in, and names the worst state", () => {
-    const report = healthReport({ engine: engineLine(0), routines: routinesLine({ listeners: 0, oldestDueAt: null }, now), database: databaseLine(true), panel: { status: "ok", reason: "panel_ok", params: {}, action: null } });
+    const report = healthReport({ engine: engineLine(keys(0)), routines: routinesLine({ listeners: 0, oldestDueAt: null }, now), database: databaseLine(true), panel: { status: "ok", reason: "panel_ok", params: {}, action: null } });
     expect(report.checks.map((line) => line.id)).toEqual(["panel", "database", "routines", "engine"]);
     expect(report.worst).toBe("fail");
-    expect(healthReport({ engine: engineLine(0) }).worst).toBe("warn");
-    expect(healthReport({ engine: engineLine(1) }).worst).toBe("ok");
+    expect(healthReport({ engine: engineLine(keys(0)) }).worst).toBe("warn");
+    expect(healthReport({ engine: engineLine(keys(1)) }).worst).toBe("ok");
   });
 
   it("gives the terminal the pt-BR sentence, with the values filled in", () => {

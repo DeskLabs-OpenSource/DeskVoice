@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pcm16ToUlaw } from "../resample";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
-import type { VoiceSessionConfig } from "../types";
+import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
+import type { KeyCheckOptions, VoiceSessionConfig } from "../types";
 import engine from "./openai-realtime";
 
 const config: VoiceSessionConfig = {
@@ -150,5 +151,44 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     await Promise.all([session.close(), session.close()]);
     await session.close();
     expect(order).toEqual(["closed client"]);
+  });
+});
+
+describe("openai-realtime: teste da chave (contrato com servidor HTTP falso)", () => {
+  let http: Awaited<ReturnType<typeof startFakeHttp>>;
+  beforeEach(async () => {
+    http = await startFakeHttp();
+  });
+  afterEach(() => http.stop());
+  const check = (options: KeyCheckOptions = {}) => engine.checkKey("sk-de-teste", { baseUrl: http.url, ...options });
+
+  it("lê o modelo da sessão de voz com a chave no cabeçalho Authorization", async () => {
+    http.respond({ status: 200, body: { id: "gpt-realtime-2.1", object: "model", created: 1, owned_by: "system" } });
+    expect(await check()).toEqual({ result: "accepted", model: "gpt-realtime-2.1" });
+    expect(http.requests).toHaveLength(1);
+    expect(http.requests[0]).toMatchObject({ method: "GET", url: "/models/gpt-realtime-2.1", headers: { authorization: "Bearer sk-de-teste" } });
+  });
+
+  it.each([
+    ["401", "rejected", { status: 401, body: { error: { code: "invalid_api_key", type: "invalid_request_error" } } }],
+    ["403", "rejected", { status: 403, body: { error: { code: "unsupported_country_region_territory" } } }],
+    ["404", "model_unavailable", { status: 404, body: { error: { code: "model_not_found" } } }],
+    ["429 por limite de pedidos", "rate_limited", { status: 429, body: { error: { code: "rate_limit_exceeded", type: "requests" } } }],
+    ["429 sem crédito", "no_credit", { status: 429, body: { error: { code: "credit_balance_exhausted", type: "insufficient_quota" } } }],
+    ["429 com teto de gasto", "no_credit", { status: 429, body: { error: { code: "project_spend_limit_exceeded" } } }],
+    ["429 de cota (só o tipo)", "no_credit", { status: 429, body: { error: { code: null, type: "insufficient_quota" } } }],
+    ["500", "unreachable", { status: 500, body: { error: { code: "server_error" } } }],
+    ["400", "unexpected_response", { status: 400, body: { error: { code: "invalid_value" } } }],
+    ["200 fora do formato", "unexpected_response", { status: 200, body: { id: "x", object: "list" } }],
+  ] as const)("%s vira %s", async (_, result, reply) => {
+    http.respond(reply);
+    expect(await check({ model: "modelo-x" })).toEqual({ result, model: "modelo-x" });
+  });
+
+  it("sem resposta no prazo, ou sem servidor, é provedor fora do ar", async () => {
+    http.respond({ status: 200, hang: true });
+    expect((await check({ schedule: expireAtOnce })).result).toBe("unreachable");
+    await http.stop();
+    expect((await check()).result).toBe("unreachable");
   });
 });

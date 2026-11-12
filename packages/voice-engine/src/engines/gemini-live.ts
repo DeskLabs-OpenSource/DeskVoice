@@ -10,7 +10,17 @@
  *   - https://ai.google.dev/gemini-api/docs/speech-generation  (lista de vozes)
  *   - https://ai.google.dev/gemini-api/docs/pricing  (preços)
  *
+ * Teste da chave (`checkKey`), consultado em 2026-11-12 (ai.google.dev redireciona para aistudio.google.com):
+ *   - https://ai.google.dev/api/models  (`GET /v1beta/models/{model}`: lê os dados do modelo, não gera nada)
+ *   - https://ai.google.dev/gemini-api/docs/api-key  (a chave vai no cabeçalho `x-goog-api-key`)
+ *   - https://ai.google.dev/gemini-api/docs/api-errors  (401 chave inválida, 402 crédito pré-pago esgotado,
+ *     403 sem permissão ou chave bloqueada, 404 modelo inexistente, 429 limite, 5xx do lado do Google)
+ *   A página de modelos não diz se ler um modelo é cobrado; nenhuma página de preço lista essa chamada.
+ *
  * Não confirmado contra o servidor real (nenhuma chamada com chave foi feita):
+ *   - o código de uma chave inválida na API de modelos: a página de erros diz 401, e a forma antiga
+ *     da API respondia 400 com `API_KEY_INVALID`; as duas são tratadas como chave recusada;
+ *   - se a leitura do modelo confere crédito (402) ou só a chave: a resposta "aceita" não promete crédito;
  *   - `responseModalities`/`speechConfig` vão dentro de `setup.generationConfig`, como na referência da
  *     API; o exemplo do guia de WebSocket mostra `responseModalities` direto em `setup`;
  *   - `inputAudioTranscription.languageCodes` (está na referência; os guias só mostram `{}`);
@@ -20,10 +30,12 @@ import { z } from "zod";
 import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { resample } from "../resample";
+import { checkKeyOverHttp } from "../key-check";
 import type { VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+const DEFAULT_API_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_MODEL = "gemini-3.8-live";
 const DEFAULT_VOICE = "Sulafat";
 const BRIDGE_HZ = 8000;
@@ -55,6 +67,14 @@ const serverMessage = z.object({
     .object({ promptTokenCount: z.number().optional(), responseTokenCount: z.number().optional() })
     .optional(),
 });
+
+// O modelo lido: o recurso devolve o próprio nome. A forma antiga da API recusava a chave com 400 e
+// o motivo `API_KEY_INVALID` nos detalhes.
+const modelResource = z.object({ name: z.string().startsWith("models/") });
+const errorDetails = z.object({ error: z.object({ details: z.array(z.unknown()) }) });
+const invalidKeyDetail = z.object({ reason: z.literal("API_KEY_INVALID") });
+const saysInvalidKey = (body: unknown): boolean =>
+  errorDetails.safeParse(body).data?.error.details.some((detail) => invalidKeyDetail.safeParse(detail).success) ?? false;
 
 function literalSpeech(text: string, language: string): string {
   return `Say exactly the following to the caller, in ${language}, without adding anything: "${text}"`;
@@ -198,6 +218,21 @@ const engine: VoiceEngine = {
 
     if (config.greeting) session.say(config.greeting);
     return session;
+  },
+
+  checkKey(apiKey, options = {}) {
+    const model = options.model ?? DEFAULT_MODEL;
+    return checkKeyOverHttp(
+      {
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(model)}`,
+        // No cabeçalho, e não na URL como no WebSocket: endereço de pedido costuma ir para log de proxy.
+        headers: { "x-goog-api-key": apiKey },
+        model,
+        accepted: modelResource,
+        classify: (status, body) => (status === 400 && saysInvalidKey(body) ? "rejected" : undefined),
+      },
+      options,
+    );
   },
 };
 

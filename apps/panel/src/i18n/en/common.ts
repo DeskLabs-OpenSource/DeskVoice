@@ -65,6 +65,8 @@ const common: CommonDictionary = {
     too_many_attempts: "Too many sign-in attempts. Wait a few minutes and try again.",
     voice_unavailable: "The voice process did not answer. See in the health indicator, in the menu, what is stopped. What you saved is still saved.",
     engine_not_configured: "This agent uses a voice engine with no key. Add the key in Settings.",
+    engine_key_missing: "This engine has no saved key. Paste the key and save it before testing.",
+    too_many_key_checks: "Too many tests of this engine's key in a short time. Wait a few minutes and test again.",
     already_decided: "Someone else already answered this request.",
     approval_expired: "The time to answer has run out. The agent went on with the default of the request.",
     purpose_required: "To turn it on, state the purpose and the legal basis of the calls.",

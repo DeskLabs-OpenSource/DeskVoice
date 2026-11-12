@@ -22,6 +22,14 @@ contains "linha quebrada é falha" "$(line 'Linha telefônica')" "falha "
 contains "linha quebrada traz o motivo" "$(line 'Linha telefônica')" "registro recusado pela operadora (401)"
 bash "$H" --essential >/dev/null 2>&1; equal "linha quebrada não derruba a checagem essencial" 0 "$?"
 
+# Chave do motor recusada no último teste (o painel guarda o resultado; a checagem não testa): falha
+# com o que fazer, e sem derrubar a checagem essencial.
+printf '%s\n' 'panel|ok|respondendo' 'trunk|ok|registrado' 'engine|fail|a chave de Gemini Live (Google) foi recusada pelo provedor no teste de 2026-11-12T10:00:00.000Z: as ligações com este motor são recusadas. Cadastre uma chave válida em Configurações → Motores de voz' > "$FAKE_DIR/panel_health"
+out="$(bash "$H" 2>&1)"; equal "chave recusada: código 2" 2 "$?"
+contains "chave recusada é falha" "$(line 'Motor de voz')" "falha "
+contains "chave recusada diz o que fazer" "$(line 'Motor de voz')" "Cadastre uma chave válida em Configurações"
+bash "$H" --essential >/dev/null 2>&1; equal "chave recusada não derruba a checagem essencial" 0 "$?"
+
 # Painel fora: essencial.
 printf '%s\n' postgres asterisk voice routines caddy > "$FAKE_DIR/running"
 out="$(bash "$H" 2>&1)"; equal "painel parado: código 1" 1 "$?"

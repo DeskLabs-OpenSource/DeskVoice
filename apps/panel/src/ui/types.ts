@@ -1,4 +1,5 @@
 // Só tipos: o compilador os apaga, e nada do servidor chega ao navegador.
+import type { KeyCheckView } from "../server/engine-key";
 import type { HealthLine, HealthStatus } from "../server/health";
 export type Role = "owner" | "admin" | "operator";
 export interface Me {
@@ -87,11 +88,16 @@ export interface PhoneNumber {
   agentName?: string | null;
 }
 
+export type KeyCheck = KeyCheckView;
+export type KeyCheckResult = KeyCheckView["result"];
+
 export interface Engine {
   id: string;
   label: string;
   requiresKey: boolean;
   keyConfigured: boolean;
+  /** O último teste da chave em vigor; `null` se ela nunca foi testada. */
+  keyCheck: KeyCheck | null;
   priceCheckedOn: string;
   priceSource: string;
 }

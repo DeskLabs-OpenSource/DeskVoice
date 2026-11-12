@@ -9,13 +9,13 @@ import es from "../../../i18n/es/settings";
 import { fill } from "../../../i18n/locales";
 import commonPtBR from "../../../i18n/pt-BR/common";
 import ptBR, { type SettingsDictionary } from "../../../i18n/pt-BR/settings";
-import { useDict } from "../../../i18n/provider";
+import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../ui/errors";
-import { formatPhone } from "../../../ui/format";
+import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
-import type { Engine, Me, Setting } from "../../../ui/types";
+import type { Engine, KeyCheck, KeyCheckResult, Me, Setting } from "../../../ui/types";
 import { UpdatePanel } from "./update-panel";
 import { WhatsAppPanel } from "./whatsapp-panel";
 
@@ -23,15 +23,38 @@ import { WhatsAppPanel } from "./whatsapp-panel";
 const URL_PREFIX = "https://";
 const put = (key: string, value: unknown): Promise<unknown> => api(`/settings/${key}`, { method: "PUT", body: { value } });
 
-/** Chave de um motor: a tela só sabe se existe. Para trocar, cola-se a nova. */
+const KEY_CHECK_TONE: Record<KeyCheckResult, "ok" | "warn" | "fail" | "neutral"> = {
+  accepted: "ok",
+  rejected: "fail",
+  model_unavailable: "fail",
+  no_credit: "fail",
+  rate_limited: "warn",
+  unreachable: "warn",
+  unexpected_response: "warn",
+  not_needed: "neutral",
+};
+
+/** O último teste da chave em vigor, ou que ela ainda não foi testada. */
+function KeyCheckStatus({ check, t }: { check: KeyCheck | null; t: SettingsDictionary }) {
+  const locale = useLocale();
+  if (!check) return <p className="text-sm text-muted">{t.keyNeverTested}</p>;
+  const result = fill(t.keyResults[check.result], { model: check.model ?? "" });
+  return <Notice tone={KEY_CHECK_TONE[check.result]}>{fill(t.keyTested, { when: formatDateTime(check.checkedAt, locale), result })}</Notice>;
+}
+
+/** Chave de um motor: a tela só sabe se existe e o resultado do último teste. Para trocar, cola-se a nova. */
 function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: SettingsDictionary; cancel: string; onChanged(): void }) {
   const canConfigure = useCanConfigure();
   const save = useAction();
+  const test = useAction();
   const [key, setKey] = useState("");
   const [confirming, setConfirming] = useState(false);
+  // A gravação testa a chave nova; `check: null` diz que o limite de testes adiou o teste.
+  const [testPostponed, setTestPostponed] = useState(false);
   const settingKey = `engine.${engine.id}.api_key`;
   const change = (value: string | null): void => {
-    void save.run(() => put(settingKey, value)).then((ok) => {
+    setTestPostponed(false);
+    void save.run(async () => setTestPostponed((await api<{ check?: unknown }>(`/settings/${settingKey}`, { method: "PUT", body: { value } })).check === null)).then((ok) => {
       if (ok) {
         setKey("");
         setConfirming(false);
@@ -57,6 +80,11 @@ function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: Settin
           <Button type="submit" busy={save.busy}>
             {t.keySave}
           </Button>
+          {engine.keyConfigured ? (
+            <Button variant="secondary" busy={test.busy} onClick={() => void test.run(() => api(`/engines/${engine.id}/key-check`, { method: "POST" })).then(onChanged)}>
+              {t.keyTest}
+            </Button>
+          ) : null}
           {engine.keyConfigured && !confirming ? (
             <Button variant="ghost" onClick={() => setConfirming(true)}>
               {t.keyRemove}
@@ -65,6 +93,9 @@ function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: Settin
           <ActionStatus action={save} />
         </form>
       ) : null}
+      {engine.requiresKey && engine.keyConfigured ? <KeyCheckStatus check={engine.keyCheck} t={t} /> : null}
+      {testPostponed ? <Notice tone="warn">{t.keySavedNotTested}</Notice> : null}
+      {test.error ? <Notice tone="fail">{test.error}</Notice> : null}
       {canConfigure && engine.keyConfigured && confirming ? (
         <Notice tone="fail">
           <p>{fill(t.keyRemoveConfirm, { engine: engine.label })}</p>

@@ -1,5 +1,6 @@
 import { fill } from "../i18n/locales";
 import ptBR, { type HealthAction, type HealthReason } from "../i18n/pt-BR/health";
+import type { KeyCheckView } from "./engine-key";
 import { AGENT_SILENT_MINUTES } from "./update";
 import type { VoiceHealth } from "./voice";
 import type { WhatsAppView } from "./whatsapp";
@@ -89,10 +90,42 @@ export function trunkLine(voice: VoiceHealth | null): HealthCheck {
   return voice.trunks.some((line) => line.status === "fail") ? fail("trunk_down", { down, total }) : warn("trunk_down", { down, total });
 }
 
-/** `null`: o banco não respondeu. */
-export function engineLine(keys: number | null): HealthCheck {
-  if (keys === null) return warn("needs_database");
-  return keys > 0 ? ok("engine_ok") : warn("engine_none");
+export interface EngineKeys {
+  /** Quantas chaves de motor estão salvas. */
+  keys: number;
+  /** O último teste de cada chave testada (o teste some quando a chave muda), com o nome do motor. */
+  checks: Array<{ engine: string; check: KeyCheckView }>;
+}
+
+const KEY_CHECK_LINE: Record<KeyCheckView["result"], "fail" | "warn" | "ok"> = {
+  rejected: "fail",
+  model_unavailable: "fail",
+  no_credit: "fail",
+  rate_limited: "warn",
+  unreachable: "warn",
+  unexpected_response: "warn",
+  accepted: "ok",
+  not_needed: "ok",
+};
+
+/**
+ * `null`: o banco não respondeu. Usa o último teste guardado de cada chave, e nunca testa: a
+ * conferência roda a cada minuto em cada aba aberta. A pior chave decide; chave nunca testada vale
+ * como antes do teste existir (cadastrada é `ok`).
+ */
+export function engineLine(engines: EngineKeys | null): HealthCheck {
+  if (engines === null) return warn("needs_database");
+  if (engines.keys === 0) return warn("engine_none");
+  const params = ({ engine, check }: EngineKeys["checks"][number]): Params => ({ engine, when: check.checkedAt, model: check.model ?? "" });
+  const failed = engines.checks.find(({ check }) => KEY_CHECK_LINE[check.result] === "fail");
+  if (failed?.check.result === "rejected") return fail("engine_key_rejected", params(failed));
+  if (failed?.check.result === "model_unavailable") return fail("engine_model_unavailable", params(failed));
+  if (failed) return fail("engine_no_credit", params(failed));
+  const inconclusive = engines.checks.find(({ check }) => KEY_CHECK_LINE[check.result] === "warn");
+  if (inconclusive) return warn("engine_check_inconclusive", params(inconclusive));
+  const oldest = engines.checks.toSorted((a, b) => a.check.checkedAt.localeCompare(b.check.checkedAt))[0];
+  if (!oldest || engines.checks.length < engines.keys) return ok("engine_ok");
+  return ok("engine_key_accepted", params(oldest));
 }
 
 /**

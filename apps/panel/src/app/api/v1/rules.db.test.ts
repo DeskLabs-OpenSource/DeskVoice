@@ -77,8 +77,9 @@ describe("secrets", () => {
     const saved = await call(putSetting, { method: "PUT", cookie: owner, params, body: { value: key } });
     const read = await call(getSetting, { cookie: owner, params });
     const engines = await call(listEngines, { cookie: owner });
-    expect(saved.data).toEqual({ key: params.key, value: { configured: true } });
-    expect(read.data).toEqual(saved.data);
+    // Gravar testa a chave; aqui o provedor não responde (o `fetch` do teste recusa tudo).
+    expect(saved.data).toEqual({ key: params.key, value: { configured: true }, check: expect.objectContaining({ result: "unreachable" }) });
+    expect(read.data).toEqual({ key: params.key, value: { configured: true } });
     for (const response of [saved, read, engines]) expect(response.text).not.toContain(key);
     expect(engines.data).toContainEqual(expect.objectContaining({ id: "openai-realtime", requiresKey: true, keyConfigured: true }));
     expect(engines.data).toContainEqual(expect.objectContaining({ id: "simulated", requiresKey: false }));

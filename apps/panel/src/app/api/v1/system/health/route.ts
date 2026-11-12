@@ -1,6 +1,8 @@
 import { queueHealth, withOrg, withSystem, type OrgQuery } from "@deskvoice/core";
 import { ApiError, SESSION_COOKIE, findSession, handlePublic, readCookie } from "../../../../../server/context";
-import { agentLine, databaseLine, engineLine, healthReport, panelLine, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappLine, type HealthCheck, type HealthId } from "../../../../../server/health";
+import { keyCheckSetting, readKeyCheck } from "../../../../../server/engine-key";
+import { agentLine, databaseLine, engineLine, healthReport, panelLine, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappLine, type EngineKeys, type HealthCheck, type HealthId } from "../../../../../server/health";
+import { listEngines } from "../../../../../server/pieces";
 import { voiceHealthSchema, voiceRequest, type VoiceHealth } from "../../../../../server/voice";
 import { observe, type WhatsAppView } from "../../../../../server/whatsapp";
 
@@ -18,10 +20,20 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
   const now = deps.clock.now();
   const lines: Partial<Record<HealthId, HealthCheck>> = { panel: panelLine() };
 
-  let engineKeys: number | null = null;
+  const labels = new Map((await listEngines()).map((engine) => [keyCheckSetting(engine.id), engine.label]));
+  let engineKeys: EngineKeys | null = null;
   try {
-    const row = await withSystem(deps.db, (q) => q.one<{ keys: number }>("select count(*)::int as keys from settings where secret and key like 'engine.%.api_key'"));
-    engineKeys = row?.keys ?? 0;
+    // Só o código do último teste de cada chave: a chave mesma nunca sai do banco por aqui.
+    const rows = await withSystem(deps.db, (q) =>
+      q.many<{ key: string; value: unknown }>("select key, case when secret then null else value end as value from settings where key like 'engine.%.api_key' or key like 'engine.%.key_check'"),
+    );
+    engineKeys = {
+      keys: rows.filter((row) => row.key.endsWith(".api_key")).length,
+      checks: rows.flatMap((row) => {
+        const check = readKeyCheck(row.value);
+        return check ? [{ engine: labels.get(row.key) ?? row.key, check }] : [];
+      }),
+    };
   } catch (error) {
     // A falha do banco é a própria linha do banco: o resto da conferência segue sem ele.
     process.stderr.write(`[panel] health: the database did not answer: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -61,7 +73,11 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
   }
 
   lines.trunk = trunkLine(voice);
-  lines.engine = engineLine(engineKeys);
+  const engine = engineLine(engineKeys);
+  // Sem sessão, a linha do motor diz o estado, a data e o que fazer, mas não qual provedor nem
+  // qual modelo: é configuração da instalação, e a rota é pública. O `healthcheck.sh` só precisa do
+  // estado e da frase.
+  lines.engine = session || !("engine" in engine.params) ? engine : { ...engine, params: { ...engine.params, engine: "voz", model: "configurado" } };
   const report = healthReport(lines);
   return { ...report, ...Object.fromEntries(report.checks.map((line) => [line.id, line])) };
 });

@@ -12,6 +12,22 @@ const settings = {
   keyRemove: "Remover chave",
   keyRemoveConfirm: "Remover a chave de {engine}? Os agentes que usam este motor deixam de atender com IA até uma chave nova ser salva. A chave removida não pode ser recuperada.",
   keyRemoveYes: "Remover a chave de {engine}",
+  keyTest: "Testar a chave",
+  keyNeverTested: "Chave ainda não testada.",
+  /** `{when}` é a data do teste, formatada no idioma da tela; `{result}`, uma frase de `keyResults`. */
+  keyTested: "Testada em {when}: {result}",
+  keySavedNotTested: "Chave salva. O teste ficou para daqui a alguns minutos: o limite de testes deste motor foi atingido.",
+  /** O teste só lê os dados do modelo no provedor: não abre sessão de voz e não gasta. */
+  keyResults: {
+    accepted: "aceita, com acesso ao modelo {model}. O teste não confere crédito: ele só lê os dados do modelo, sem gastar.",
+    rejected: "o provedor recusou a chave. Confira se ela foi copiada inteira e se não foi revogada, ou gere uma nova no site do provedor.",
+    model_unavailable: "a chave vale, mas não dá acesso ao modelo {model}, que este motor usa. Confira no site do provedor se a conta tem acesso a ele.",
+    no_credit: "a chave vale, mas o provedor diz que falta crédito ou que o teto de gasto da conta foi atingido. Adicione crédito ou aumente o teto no site do provedor.",
+    rate_limited: "o provedor pediu para esperar (limite de pedidos da conta). Teste de novo em alguns minutos.",
+    unreachable: "o provedor não respondeu em 10 segundos, ou está fora do ar. Confira se o servidor tem acesso à internet e teste de novo.",
+    unexpected_response: "o provedor respondeu algo que o DeskVoice não reconhece. Teste de novo; se continuar, abra uma issue no repositório.",
+    not_needed: "este motor não pede chave.",
+  },
   defaultEngine: "Motor padrão",
   defaultEngineHint: "Vem selecionado quando você cria um agente.",
   whatsappTitle: "Conector externo de WhatsApp",
