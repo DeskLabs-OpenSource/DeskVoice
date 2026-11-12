@@ -71,19 +71,20 @@ jobs:
             echo "Publicação PULADA: esta tag ainda não tem Dockerfile na raiz." | tee -a "${GITHUB_STEP_SUMMARY}"
           fi
 
+  # As três imagens num job só, no mesmo construtor, uma depois da outra. Voz e rotinas saem do
+  # mesmo estágio `base` (dependências instaladas, pacotes do núcleo): construídas em jobs
+  # separados, cada uma refazia esse estágio e as camadas saíam com resumos diferentes, e a VPS
+  # guardava as duas cópias (cerca de 900 MB a mais na 0.3.0). Aqui o estágio sai uma vez e as
+  # duas imagens dividem as camadas. O `verify-public` confere isso.
   build:
-    name: build (${{ matrix.process }})
+    name: build
     needs: [probe]
     if: needs.probe.outputs.dockerfile == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        process: [panel, voice, routines]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,22 +95,53 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Nome da imagem, pela mesma função que o instalador usa
+      - name: Nomes das imagens, pela mesma função que o instalador usa
         id: image
         env:
-          PROCESS: ${{ matrix.process }}
           VERSION: ${{ needs.probe.outputs.version }}
         run: |
           source install/_common.sh
-          echo "ref=$(image_ref "${PROCESS}" "${VERSION}")" >> "${GITHUB_OUTPUT}"
+          for process in ${APP_SERVICES}; do
+            echo "${process}=$(image_ref "${process}" "${VERSION}")" >> "${GITHUB_OUTPUT}"
+          done
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          target: ${{ matrix.process }}
+          target: voice
           platforms: linux/amd64
           push: true
           # Uma etiqueta só, `X.Y.Z`: é o que a instalação grava e o que o atualizador pede.
-          tags: ${{ steps.image.outputs.ref }}
+          tags: ${{ steps.image.outputs.voice }}
+          build-args: |
+            APP_VERSION=${{ needs.probe.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.probe.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: routines
+          platforms: linux/amd64
+          push: true
+          # Uma etiqueta só, `X.Y.Z`: é o que a instalação grava e o que o atualizador pede.
+          tags: ${{ steps.image.outputs.routines }}
+          build-args: |
+            APP_VERSION=${{ needs.probe.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.probe.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: panel
+          platforms: linux/amd64
+          push: true
+          # Uma etiqueta só, `X.Y.Z`: é o que a instalação grava e o que o atualizador pede.
+          tags: ${{ steps.image.outputs.panel }}
           build-args: |
             APP_VERSION=${{ needs.probe.outputs.version }}
           labels: |
@@ -149,6 +181,22 @@ jobs:
             fi
           done
           exit "${missing}"
+      # Aviso, e não erro: camada repetida custa disco, não quebra instalação, e não segura a
+      # versão. Voz e rotinas só diferem no último passo (`COPY apps/<processo>`); se diferem
+      # antes disso, o estágio `base` foi construído duas vezes.
+      - name: Voz e rotinas dividem as camadas da base?
+        env:
+          VERSION: ${{ needs.probe.outputs.version }}
+        run: |
+          source install/_common.sh
+          layers() { docker buildx imagetools inspect --format '{{json .Image}}' "$(image_ref "$1" "${VERSION}")" | jq -c '.rootfs.diff_ids'; }
+          voice="$(layers voice)"; routines="$(layers routines)"
+          read -r total shared < <(jq -rn --argjson a "${voice}" --argjson b "${routines}" \
+            '[([$a, $b] | map(length) | max), ([range(0; [$a, $b] | map(length) | min)] | map(select($a[.] == $b[.])) | length)] | @tsv')
+          echo "Voz e rotinas: ${shared} de ${total} camadas iguais." | tee -a "${GITHUB_STEP_SUMMARY}"
+          if [ "${shared}" -lt "$((total - 1))" ]; then
+            echo "::warning::Voz e rotinas dividem só ${shared} de ${total} camadas: o estágio base foi construído mais de uma vez, e a VPS guarda as duas cópias."
+          fi
 
   # Só agora a versão aparece como release: as imagens existem e baixam sem credencial.
   release:
