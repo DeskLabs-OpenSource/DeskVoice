@@ -5,6 +5,7 @@ import { createAriClient } from "./ari";
 import { createLogger, messageOf } from "./log";
 import { startVoiceServer } from "./server";
 import { DEFAULT_TRUNKS_FILE } from "./trunks";
+import { wacallsFromEnv } from "./wacalls-client";
 
 const log = createLogger(systemClock);
 const config = loadConfig(process.env);
@@ -25,6 +26,7 @@ const server = await startVoiceServer({
   internalToken: process.env.INTERNAL_TOKEN,
   trunksFile: process.env.ASTERISK_TRUNKS_FILE ?? DEFAULT_TRUNKS_FILE,
   publicIp: process.env.PUBLIC_IP ?? null,
+  wacalls: wacallsFromEnv(),
   // A imagem do Asterisk roda como uid e gid 1000; o arquivo de troncos precisa ser dele.
   trunksOwner: { uid: Number(process.env.ASTERISK_UID ?? 1000), gid: Number(process.env.ASTERISK_GID ?? 1000) },
   log,

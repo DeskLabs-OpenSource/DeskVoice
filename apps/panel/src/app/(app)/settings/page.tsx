@@ -18,6 +18,7 @@ import { useCanConfigure } from "../../../ui/me";
 import type { Engine, KeyCheck, KeyCheckResult, Me, Setting } from "../../../ui/types";
 import { PrivacyPanel } from "./privacy-panel";
 import { UpdatePanel } from "./update-panel";
+import { WhatsAppCallsPanel } from "./whatsapp-calls-panel";
 import { WhatsAppPanel } from "./whatsapp-panel";
 
 // Igual em todo idioma: não é frase, é o começo de um endereço.
@@ -393,6 +394,8 @@ export default function SettingsPage() {
           </div>
         </div>
       </Panel>
+
+      <WhatsAppCallsPanel />
 
       <Panel title={t.webhooksTitle} description={t.webhooksLead}>
         <form

@@ -1,16 +1,17 @@
 import { queueHealth, withOrg, withSystem, type OrgQuery } from "@deskvoice/core";
 import { ApiError, SESSION_COOKIE, findSession, handlePublic, readCookie, type Session } from "../../../../../server/context";
 import { keyCheckSetting, readKeyCheck } from "../../../../../server/engine-key";
-import { agentLine, anonymousEngineLine, databaseLine, engineLine, healthReport, panelLine, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappLine, type EngineKeys, type HealthCheck, type HealthId } from "../../../../../server/health";
+import { agentLine, anonymousEngineLine, databaseLine, engineLine, healthReport, panelLine, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappCallsLine, whatsappLine, type EngineKeys, type HealthCheck, type HealthId } from "../../../../../server/health";
 import { listEngines } from "../../../../../server/pieces";
 import { voiceHealthSchema, voiceRequest, type VoiceHealth } from "../../../../../server/voice";
 import { observe, type WhatsAppView } from "../../../../../server/whatsapp";
+import { observeCalls, type WhatsAppCallsView } from "../../../../../server/whatsapp-calls";
 
 /**
  * Pública: o instalador e o `healthcheck.sh` chamam sem sessão. Sem sessão, só as peças da
  * instalação, com estado e um motivo, nunca endereço, nome de linha ou conteúdo de configuração. É
  * também o motivo de usar `withSystem`: sem sessão não há organização para abrir `withOrg`. Com
- * sessão (a tela), entram as linhas que são da organização: o agente de atualização e o WhatsApp,
+ * sessão (a tela), entram as linhas que são da organização: o agente de atualização, o WhatsApp e a ligação pelo WhatsApp,
  * e o motor de voz passa a ser lido só da organização da sessão, com provedor, modelo e data.
  *
  * Devolve `checks` (na ordem de depuração), `worst`, e cada linha também pela chave do id: é por
@@ -77,10 +78,20 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
       whatsapp = "down";
     }
     lines.whatsapp = whatsappLine(whatsapp);
+    let calls: WhatsAppCallsView | "down";
+    try {
+      calls = await observeCalls(deps, org, session.organizationId, { withQr: false });
+    } catch (error) {
+      // O processo de voz ou o WaCalls não responderam.
+      if (!(error instanceof ApiError)) throw error;
+      calls = "down";
+    }
+    lines.whatsapp_calls = whatsappCallsLine(calls);
   } else if (!database && token) {
     // Sem banco não se confere a sessão: para a tela, as linhas da organização dizem por que faltam.
     lines.agent = agentLine(null, now);
     lines.whatsapp = whatsappLine(null);
+    lines.whatsapp_calls = whatsappCallsLine(null);
   }
 
   lines.trunk = trunkLine(voice);

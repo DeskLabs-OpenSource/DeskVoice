@@ -377,7 +377,7 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
     await nobodyWants();
     const { owner } = await bareOrg("svc default");
     expect(await state(owner.cookie)).toMatchObject({ available: true, service: "absent", serviceReason: null, agent: "responding", status: "disconnected", qr: null });
-    expect(await answer({ state: "absent" })).toEqual({ update: false, whatsapp: false });
+    expect(await answer({ state: "absent" })).toEqual({ update: false, whatsapp: false, whatsappCalls: false });
     expect(waha.requests).toEqual([]);
   });
 
@@ -393,15 +393,15 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
     await nobodyWants();
     const { org, owner } = await bareOrg("svc install");
     expect((await wantService(owner.cookie, true)).data).toMatchObject({ service: "preparing", agent: "responding" });
-    expect(await answer({ state: "absent" })).toEqual({ update: false, whatsapp: true });
+    expect(await answer({ state: "absent" })).toEqual({ update: false, whatsapp: true, whatsappCalls: false });
     expect((await state(owner.cookie)).service).toBe("preparing");
 
     panel.clock.at = new Date(NOW.getTime() + 30_000);
-    expect(await answer({ state: "failed", reason: "pull_failed" })).toEqual({ update: false, whatsapp: true });
+    expect(await answer({ state: "failed", reason: "pull_failed" })).toEqual({ update: false, whatsapp: true, whatsappCalls: false });
     expect(await state(owner.cookie)).toMatchObject({ service: "failed", serviceReason: "pull_failed" });
 
     panel.clock.at = new Date(NOW.getTime() + 60_000);
-    expect(await answer({ state: "running" })).toEqual({ update: false, whatsapp: true });
+    expect(await answer({ state: "running" })).toEqual({ update: false, whatsapp: true, whatsappCalls: false });
     await answer({ state: "running" });
     expect(await state(owner.cookie)).toMatchObject({ service: "running", serviceReason: null, status: "disconnected" });
     expect(await allNotices(org)).toEqual([
@@ -413,13 +413,13 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
     expect(waha.requests.map((request) => request.method)).toEqual(["GET"]);
   });
 
-  it("answers the agent with the two booleans and nothing else, whatever the report says about WhatsApp", async () => {
+  it("answers the agent with the booleans and nothing else, whatever the report says about WhatsApp", async () => {
     await nobodyWants();
     const { owner } = await bareOrg("svc contract");
     await wantService(owner.cookie, true);
     for (const report of [{ state: "running" }, { state: "dancing" }, { state: "failed", reason: "rm -rf /" }, "running", { image: "evil/waha:latest", command: "up" }, undefined]) {
       const result = await agentSays(report);
-      expect(JSON.parse(result.text), JSON.stringify(report)).toEqual({ ok: true, data: { update: false, whatsapp: true } });
+      expect(JSON.parse(result.text), JSON.stringify(report)).toEqual({ ok: true, data: { update: false, whatsapp: true, whatsappCalls: false } });
     }
     // Relato que o painel não entende vale como "o agente não contou": nunca vira estado inventado.
     expect(await state(owner.cookie)).toMatchObject({ service: "preparing", serviceReason: null });
@@ -446,7 +446,7 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
     scan(session);
     await state(owner.cookie);
     expect(refusal(await wantService(owner.cookie, false))).toEqual([409, "whatsapp_connected"]);
-    expect(await answer({ state: "running" })).toEqual({ update: false, whatsapp: true });
+    expect(await answer({ state: "running" })).toEqual({ update: false, whatsapp: true, whatsappCalls: false });
 
     // A conexão caiu: o conector `waha` ficou gravado. Remover o serviço o leva junto.
     const live = waha.sessions.get(session);
@@ -460,10 +460,10 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
     // número voltaria conectado numa reinstalação.
     expect(wahaCalls()).toEqual([`POST /api/sessions/${session}/logout`, `POST /api/sessions/${session}/stop`]);
     expect(waha.sessions.get(session)).toMatchObject({ status: "STOPPED", me: null });
-    expect(await answer({ state: "running" })).toEqual({ update: false, whatsapp: false });
+    expect(await answer({ state: "running" })).toEqual({ update: false, whatsapp: false, whatsappCalls: false });
     expect((await state(owner.cookie)).service).toBe("removing");
     panel.clock.at = new Date(NOW.getTime() + 180_000);
-    expect(await answer({ state: "absent" })).toEqual({ update: false, whatsapp: false });
+    expect(await answer({ state: "absent" })).toEqual({ update: false, whatsapp: false, whatsappCalls: false });
     expect(await state(owner.cookie)).toMatchObject({ service: "absent", status: "disconnected" });
     expect((await allNotices(org)).slice(-2)).toEqual([
       "Test owner pediu a remoção do serviço de WhatsApp deste servidor. O número fica desconectado, e a memória e o disco são liberados em instantes.",
@@ -481,7 +481,7 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
     await nobodyWants();
     const { owner } = await bareOrg("svc no disk");
     await wantService(owner.cookie, true);
-    expect(await answer({ state: "failed", reason: "no_disk", freeDiskMb: 4000, neededDiskMb: 5120 })).toEqual({ update: false, whatsapp: true });
+    expect(await answer({ state: "failed", reason: "no_disk", freeDiskMb: 4000, neededDiskMb: 5120 })).toEqual({ update: false, whatsapp: true, whatsappCalls: false });
     expect(await state(owner.cookie)).toMatchObject({ service: "failed", serviceReason: "no_disk", disk: { freeMb: 4000, neededMb: 5120 }, serviceWarning: null });
     // Número que não é número, ou fora de um estado de falta de disco, não chega à tela.
     await answer({ state: "failed", reason: "no_disk", freeDiskMb: "4000; rm -rf /", neededDiskMb: -1 });
@@ -513,7 +513,7 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
     const a = await bareOrg("svc two a");
     const b = await bareOrg("svc two b");
     await wantService(a.owner.cookie, true);
-    expect(await answer()).toEqual({ update: false, whatsapp: true });
+    expect(await answer()).toEqual({ update: false, whatsapp: true, whatsappCalls: false });
     expect((await state(b.owner.cookie)).service).toBe("absent");
     expect((await state(a.owner.cookie)).service).toBe("preparing");
   });

@@ -25,6 +25,8 @@ const COMMANDS: Partial<Record<HealthAction, string[]>> = {
   agent_never: ["sudo bash install/agent.sh --install"],
   whatsapp_service_down: [compose("--profile whatsapp logs --tail 50 waha")],
   whatsapp_unavailable: ["bash install/update.sh"],
+  whatsapp_calls_service_down: [compose("--profile whatsapp-calls logs --tail 50 wacalls")],
+  whatsapp_calls_unavailable: ["bash install/update.sh"],
 };
 
 const DOT = { ok: "bg-ok", warn: "bg-warn", fail: "bg-fail" } as const;

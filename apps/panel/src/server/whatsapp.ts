@@ -7,7 +7,7 @@ import es from "../i18n/es/whatsapp";
 import type { Locale } from "../i18n/locales";
 import ptBR from "../i18n/pt-BR/whatsapp";
 import { ApiError, type ServerDeps, type Session } from "./context";
-import { AGENT_SILENT_MINUTES } from "./update";
+import { readServiceView, type ServiceView } from "./update";
 
 /**
  * WhatsApp por QR Code. O painel é o único que fala com o WAHA em nome da tela: o navegador nunca
@@ -25,28 +25,13 @@ export const CONNECTOR_KEY = "whatsapp.connector";
 // A mensagem de teste sai no idioma da tela de quem clicou.
 const TEST_MESSAGE: Record<Locale, string> = { "pt-BR": ptBR.testMessage, en: en.testMessage, es: es.testMessage };
 
-/**
- * O serviço no servidor: `absent` (não pedido), `preparing` (pedido; o agente ainda não o subiu),
- * `running`, `failed` (o agente tentou e não conseguiu) e `removing` (não é mais querido e ainda
- * está de pé).
- */
-export type ServiceState = "absent" | "preparing" | "running" | "failed" | "removing";
 export type ConnectionStatus = "disconnected" | "starting" | "qr" | "connected" | "failed";
 /** Por que está em `failed`: o estado do WAHA, a sessão sumida, ou o QR Code que ninguém leu. */
 export type Failure = "FAILED" | "STOPPED" | "missing" | "qr_expired";
 
-export interface WhatsAppView {
+export interface WhatsAppView extends ServiceView {
   /** `false`: esta instalação não tem a chave do serviço (atualizada por um atualizador antigo, ou ambiente de desenvolvimento). */
   available: boolean;
-  service: ServiceState;
-  /** Só em `failed`: o código que o agente contou. */
-  serviceReason: string | null;
-  /** Aviso que acompanha o estado: `low_memory` (instalado com pouca memória) ou `image_kept` (removido; a imagem ficou no disco). */
-  serviceWarning: string | null;
-  /** Só com `serviceReason: "no_disk"`: quanto havia e quanto o serviço pede, em MB. */
-  disk: { freeMb: number; neededMb: number } | null;
-  /** O agente do servidor, que é quem instala e remove o serviço: falando, calado, ou nunca falou. */
-  agent: "responding" | "silent" | "never";
   status: ConnectionStatus;
   failure: Failure | null;
   phone: string | null;
@@ -63,16 +48,11 @@ interface Row {
   phone: string | null;
   connectedAt: Date | null;
 }
-export interface Stored {
+export interface Stored extends ServiceView {
   row: Row | null;
   replaces: WhatsAppView["replaces"];
-  service: ServiceState;
-  serviceReason: string | null;
-  serviceWarning: string | null;
-  disk: WhatsAppView["disk"];
-  agent: WhatsAppView["agent"];
 }
-type Org = <T>(fn: (q: OrgQuery) => Promise<T>) => Promise<T>;
+export type Org = <T>(fn: (q: OrgQuery) => Promise<T>) => Promise<T>;
 
 const ROW = `status, failure, phone_e164 as phone, connected_at as "connectedAt"`;
 const httpConnector = z.object({ type: z.enum(["deskcomm", "webhook"]), url: z.string() });
@@ -81,22 +61,10 @@ export async function readStored(q: OrgQuery, now: Date): Promise<Stored> {
   const row = await q.one<Row & { wanted: boolean }>(`select ${ROW}, service_wanted as wanted from whatsapp_sessions`);
   const setting = await q.one<{ value: unknown }>("select value from settings where key = $1", [CONNECTOR_KEY]);
   const other = httpConnector.safeParse(setting?.value);
-  // O que o agente contou na última fala. A mesma linha vale para toda organização da instalação.
-  const told = await q.one<{ lastSeenAt: Date; service: string | null; reason: string | null; warning: string | null; freeMb: number | null; neededMb: number | null }>(
-    `select last_seen_at as "lastSeenAt", whatsapp_service as service, whatsapp_service_reason as reason, whatsapp_service_warning as warning,
-            whatsapp_service_free_mb as "freeMb", whatsapp_service_needed_mb as "neededMb" from update_agent_status`,
-  );
-  const wanted = row?.wanted ?? false;
-  const service: ServiceState = wanted ? (told?.service === "running" ? "running" : told?.service === "failed" ? "failed" : "preparing") : told?.service === "running" ? "removing" : "absent";
   return {
     row,
     replaces: other.success ? { type: other.data.type, url: other.data.url } : null,
-    service,
-    serviceReason: service === "failed" ? (told?.reason ?? null) : null,
-    // Cada aviso só faz sentido no seu estado: pouca memória com o serviço de pé, imagem que ficou com ele fora.
-    serviceWarning: (service === "running" && told?.warning === "low_memory") || (service === "absent" && told?.warning === "image_kept") ? told.warning : null,
-    disk: service === "failed" && told?.reason === "no_disk" && told.freeMb !== null && told.neededMb !== null ? { freeMb: told.freeMb, neededMb: told.neededMb } : null,
-    agent: !told ? "never" : now.getTime() - told.lastSeenAt.getTime() > AGENT_SILENT_MINUTES * 60_000 ? "silent" : "responding",
+    ...(await readServiceView(q, "whatsapp", row?.wanted ?? false, now)),
   };
 }
 
@@ -128,7 +96,8 @@ async function waha<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-async function notice(q: OrgQuery, now: Date, body: string): Promise<void> {
+/** Aviso no painel da organização, entregue pela fila. */
+export async function notice(q: OrgQuery, now: Date, body: string): Promise<void> {
   const row = await q.one<{ id: string }>("insert into notifications (organization_id, channel, body, created_at) values ($1, 'panel', $2, $3) returning id", [q.organizationId, body, now]);
   if (row) await enqueueTask(q, { kind: "deliver_notification", payload: { notificationId: row.id }, runAt: now });
 }
