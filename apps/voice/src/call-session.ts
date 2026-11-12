@@ -1,9 +1,10 @@
-import { decryptSecret, enqueueTask, recordEvent, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { autoCommitOrgQuery, runTool, toSpec, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
 import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
+import { createRecorder, saveRecording, type Recorder } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
 
 export interface CallSessionDeps {
@@ -16,6 +17,8 @@ export interface CallSessionDeps {
   approvals: ApprovalWaiter;
   schedule?: Schedule;
   log?: Logger;
+  /** Pasta das gravações (`RECORDINGS_DIR`). Sem ela, a chamada não é gravada. */
+  recordingsDir?: string;
 }
 
 export interface CallSessionInput {
@@ -131,6 +134,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let voice: VoiceSession | undefined;
   let lastEngineError: Error | undefined;
   let ending = false;
+  let recorder: Recorder | undefined;
   let wrappingUp = false;
   let requestedEnd: Ending | undefined;
   let requestedFarewell: string | undefined;
@@ -171,6 +175,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       else await transport.hangup();
     } catch (error) {
       log("error", "could not release the telephony side", { error: messageOf(error) });
+    }
+    const wav = recorder?.wav();
+    if (wav && deps.recordingsDir) {
+      await saveRecording(recordingPath(deps.recordingsDir, organizationId, callId), wav).catch(logFailure("could not save the call recording"));
     }
     resolveDone({ status: end.status, endReason: end.endReason, costCents });
   }
@@ -369,10 +377,16 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // handlers e os primeiros eventos precisam estar na fila antes da primeira fala.
     const session = voice;
     const engineLabel = engine.label;
+    if (deps.recordingsDir) recorder = createRecorder(() => clock.now().getTime());
     session.on("audio", (pcm) => {
-      if (!ending) transport.sendAudio(pcm);
+      if (ending) return;
+      transport.sendAudio(pcm);
+      recorder?.agent(pcm);
     });
-    session.on("interrupted", () => transport.clearAudio());
+    session.on("interrupted", () => {
+      transport.clearAudio();
+      recorder?.clear();
+    });
     session.on("transcript", (turn) => void event(turn.speaker === "user" ? "transcript_user" : "transcript_agent", { text: turn.text }).catch(logFailure("could not record a transcript")));
     session.on("toolCall", (toolCall) => {
       const running: Promise<void> = handleToolCall(enabled, toolCall).finally(() => toolsRunning.delete(running));
@@ -400,6 +414,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       });
     });
     transport.onAudio((pcm) => {
+      recorder?.caller(pcm);
       if (!ending && !wrappingUp) session.sendAudio(pcm);
     });
     const answered = [
