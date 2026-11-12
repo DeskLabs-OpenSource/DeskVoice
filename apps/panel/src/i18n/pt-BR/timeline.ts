@@ -5,6 +5,8 @@ const timeline = {
   facts: { agent: "Agente", engine: "Motor de voz", duration: "Duração", cost: "Custo estimado", ceiling: "teto de {value}", started: "Início", direction: "Sentido" },
   direction: { inbound: "Recebida", outbound: "Feita pelo agente" },
   summaryTitle: "Resumo da chamada",
+  recordingTitle: "Gravação da chamada",
+  recordingMissing: "Esta chamada não tem gravação.",
   summaryPending: "O resumo é escrito depois que a chamada termina.",
   empty: "Nenhum evento registrado nesta chamada ainda.",
   notFound: "Esta chamada não existe ou foi apagada.",

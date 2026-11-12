@@ -7,6 +7,8 @@ const timeline: TimelineDictionary = {
   facts: { agent: "Agent", engine: "Voice engine", duration: "Duration", cost: "Estimated cost", ceiling: "ceiling of {value}", started: "Started", direction: "Direction" },
   direction: { inbound: "Received", outbound: "Placed by the agent" },
   summaryTitle: "Call summary",
+  recordingTitle: "Call recording",
+  recordingMissing: "This call has no recording.",
   summaryPending: "The summary is written after the call ends.",
   empty: "No event recorded in this call yet.",
   notFound: "This call does not exist or was deleted.",

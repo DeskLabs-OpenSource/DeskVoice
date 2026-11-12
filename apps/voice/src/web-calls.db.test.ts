@@ -1,9 +1,9 @@
 // Chamada pelo navegador, de ponta a ponta: a API interna entrega o token, um cliente WebSocket de
 // verdade faz o papel da tela, o motor segue um roteiro e o banco é real.
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { withSystem } from "@deskvoice/core";
+import { recordingPath, withSystem } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
 import { createSimulatedEngine, type SimulatedScript, type VoiceEngine } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -88,6 +88,7 @@ async function scene(label: string, agent: AgentOptions): Promise<Scene> {
     webPort: 0,
     internalToken: TOKEN,
     trunksFile: path.join(scratch, `${organizationId}.conf`),
+    recordingsDir: path.join(scratch, "recordings"),
     publicIp: null,
     host: "127.0.0.1",
     schedule: timers.schedule,
@@ -223,6 +224,13 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect((await ledgerOf(app, callId)).map((row) => row.cost_cents)).toEqual([cost]);
     expect(events[16]?.payload).toMatchObject({ status: "completed", reason: "end_call", costCents: cost });
     expect((await tasksOf(app, made.organizationId)).filter((task) => task.kind === "summarize_call" && task.call_id === callId)).toHaveLength(1);
+
+    // A conversa ficou gravada: WAV estéreo 8 kHz, com a fala do agente inteira no canal direito.
+    const wav = await waitFor(() => readFile(recordingPath(path.join(scratch, "recordings"), made.organizationId, callId)).catch(() => undefined), "the recording");
+    expect(wav.subarray(0, 4).toString()).toBe("RIFF");
+    expect(wav.readUInt16LE(22)).toBe(2);
+    expect(wav.readUInt32LE(24)).toBe(8000);
+    expect(wav.readUInt32LE(40) / 4).toBeGreaterThanOrEqual((spokenMs / 20) * 160);
 
     const health = (await (await fetch(`http://127.0.0.1:${server?.internalPort}/health`)).json()) as Record<string, { status: string; detail: string }>;
     expect(health.web).toEqual({ status: "ok", detail: expect.stringContaining(String(server?.webPort)) });

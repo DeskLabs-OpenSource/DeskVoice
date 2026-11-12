@@ -29,6 +29,8 @@ export interface VoiceServerDeps {
   webPort: number;
   internalToken: string | undefined;
   trunksFile: string;
+  /** Pasta das gravações. Sem ela, nenhuma chamada é gravada. */
+  recordingsDir?: string;
   publicIp: string | null;
   /** Usuário do Asterisk, que precisa ler o arquivo de troncos. Sem ele, o dono do arquivo não é trocado. */
   trunksOwner?: { uid: number; gid: number };
@@ -56,7 +58,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   // Antes de atender qualquer coisa: o que o processo anterior deixou aberto não é de ninguém.
   await closeOrphanCalls(db, clock, log);
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
-  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log };
+  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir };
   const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, log };
   const calls = new AsteriskCalls({ ari, db, clock, log });
   const sessions = new Set<CallSession>();
