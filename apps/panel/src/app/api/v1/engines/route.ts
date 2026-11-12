@@ -8,6 +8,9 @@ export const GET = handle({}, async ({ q }) => {
   return (await listEngines()).map((engine) => ({
     id: engine.id,
     label: engine.label,
+    provedor: engine.provedor,
+    paisDeProcessamento: engine.paisDeProcessamento,
+    fonteDoPais: engine.fonteDoPais,
     requiresKey: !engine.keyless,
     keyConfigured: byKey.has(engineKeySetting(engine.id)),
     keyCheck: readKeyCheck(byKey.get(keyCheckSetting(engine.id))),

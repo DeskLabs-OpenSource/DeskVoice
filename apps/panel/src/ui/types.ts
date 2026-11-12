@@ -94,6 +94,11 @@ export type KeyCheckResult = KeyCheckView["result"];
 export interface Engine {
   id: string;
   label: string;
+  /** Quem processa o áudio. */
+  provedor: string;
+  /** Onde o áudio é processado; `neste-servidor` e `desconhecido` são respostas válidas. */
+  paisDeProcessamento: string;
+  fonteDoPais: { url: string; consultadoEm: string } | null;
   requiresKey: boolean;
   keyConfigured: boolean;
   /** O último teste da chave em vigor; `null` se ela nunca foi testada. */

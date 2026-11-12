@@ -70,6 +70,18 @@ function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: Settin
         <span className="font-bold">{engine.label}</span>
         {engine.requiresKey ? <Badge tone={engine.keyConfigured ? "ok" : "warn"}>{engine.keyConfigured ? t.keyConfigured : t.keyMissing}</Badge> : <Badge>{t.keyNotNeeded}</Badge>}
       </div>
+      {/* Onde o áudio vai: país declarado com fonte, "neste servidor", ou "não declara". */}
+      <p className="text-muted">
+        {fill(t.engineWhere, {
+          where:
+            engine.paisDeProcessamento === "neste-servidor"
+              ? t.engineHere
+              : engine.paisDeProcessamento === "desconhecido"
+                ? t.engineUnknown
+                : `${engine.paisDeProcessamento} (${engine.provedor})`,
+        })}
+        {engine.fonteDoPais ? ` · fonte consultada em ${engine.fonteDoPais.consultadoEm}` : null}
+      </p>
       {engine.requiresKey && canConfigure ? (
         <form
           className="flex flex-wrap items-center gap-2"

@@ -274,6 +274,9 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
     engine: {
       id: options.id ?? "manual",
       label: "Motor de teste",
+      provedor: "teste",
+      paisDeProcessamento: "neste-servidor",
+      fonteDoPais: null,
       keyless: options.keyless ?? false,
       pricing: { centsPerMinute: options.centsPerMinute ?? 100, checkedOn: "2030-05-10", source: "teste" },
       async connect(config, apiKey) {
