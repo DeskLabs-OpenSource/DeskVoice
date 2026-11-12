@@ -2,9 +2,12 @@ import type { WhatsAppCallsDictionary } from "../pt-BR/whatsapp-calls";
 
 const whatsappCalls: WhatsAppCallsDictionary = {
   title: "WhatsApp calls",
-  lead: "Connect the company number by reading a QR code, as one more WhatsApp device. It is through it that the agent will answer whoever calls on WhatsApp.",
-  nextVersion:
-    "In this version the service only connects the number. Answering calls with the agent arrives in the next version; until then, whoever calls on WhatsApp is answered as today, on the phone.",
+  lead: "Connect the company number by reading a QR code, as one more WhatsApp device. The chosen agent answers right away whoever calls that number on WhatsApp.",
+  howItWorks:
+    "The agent answers as soon as the call arrives, with the same recording notice and the same cost and duration limits as calls through the carrier, and the call counts toward the same limit of incoming calls at the same time. This channel has no transfer to a person: when someone asks to talk to the team, the agent offers to take a message.",
+  answeredBy: "Answered by",
+  nobody: "Nobody: calls ring only on the phone",
+  noAgent: "No agent answers this number. WhatsApp calls keep ringing only on the phone until you choose one.",
   unavailable: "The voice process of this server does not have the key of the WhatsApp calls service yet. This happens when the update was made by an old updater. Run on the server, once:",
   serviceAbsent: "The WhatsApp calls service is not installed on this server.",
   serviceCost:

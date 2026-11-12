@@ -1,8 +1,11 @@
 const whatsappCalls = {
   title: "Ligação pelo WhatsApp",
-  lead: "Conecte o número da empresa lendo um QR Code, como mais um aparelho do WhatsApp. É por ele que o agente vai atender quem liga pelo WhatsApp.",
-  nextVersion:
-    "Nesta versão o serviço só conecta o número. O atendimento das ligações pelo agente chega na próxima versão; até lá, quem liga pelo WhatsApp é atendido como hoje, pelo celular.",
+  lead: "Conecte o número da empresa lendo um QR Code, como mais um aparelho do WhatsApp. O agente escolhido atende na hora quem liga pelo WhatsApp para esse número.",
+  howItWorks:
+    "O agente atende assim que a ligação chega, com o mesmo aviso de gravação e os mesmos limites de custo e de duração das ligações pela operadora, e a ligação conta no mesmo limite de ligações recebidas ao mesmo tempo. Neste canal não há transferência para uma pessoa: quando alguém pede para falar com a equipe, o agente oferece deixar um recado.",
+  answeredBy: "Quem atende",
+  nobody: "Ninguém: as ligações tocam só no celular",
+  noAgent: "Nenhum agente atende este número. As ligações pelo WhatsApp continuam tocando só no celular até você escolher um.",
   unavailable: "O processo de voz deste servidor ainda não tem a chave do serviço de ligação pelo WhatsApp. Isso acontece quando a atualização foi feita por um atualizador antigo. Rode no servidor, uma vez:",
   serviceAbsent: "O serviço de ligação pelo WhatsApp não está instalado neste servidor.",
   serviceCost:

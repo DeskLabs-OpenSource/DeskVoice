@@ -2,13 +2,14 @@ import type { OrgQuery } from "@deskvoice/core";
 import { encode } from "uqr";
 import { z } from "zod";
 import { ApiError, type ServerDeps, type Session } from "./context";
+import { requireAgent } from "./shapes";
 import { readServiceView, type ServiceView } from "./update";
 import { voiceRequest } from "./voice";
 import { notice, type ConnectionStatus, type Org } from "./whatsapp";
 
 /**
- * Ligação pelo WhatsApp (WaCalls), fatia 1: instalar o serviço, conectar o número por QR Code,
- * desconectar e remover. Nenhuma ligação é atendida ainda.
+ * Ligação pelo WhatsApp (WaCalls): instalar o serviço, conectar o número por QR Code, escolher o
+ * agente que atende, desconectar e remover. Quem atende as ligações é o processo de voz.
  *
  * O painel nunca fala com o WaCalls: pede ao processo de voz, que é o único com o token dele
  * (`apps/voice/src/whatsapp-calls.ts`). O navegador recebe só o estado e a imagem do QR Code.
@@ -27,6 +28,8 @@ export interface WhatsAppCallsView extends ServiceView {
   failure: CallsFailure | null;
   phone: string | null;
   connectedAt: Date | null;
+  /** O agente que atende as ligações. Nulo: ninguém atende, e elas seguem tocando no celular. */
+  agentId: string | null;
   /** A imagem do QR Code, pronta para um `<img>`. Só em `qr`. */
   qr: string | null;
   /** O número conectado para mensagens (WhatsApp por QR Code), para a tela dizer quando é o mesmo aparelho. */
@@ -38,13 +41,14 @@ interface Row {
   failure: CallsFailure | null;
   phone: string | null;
   connectedAt: Date | null;
+  agentId: string | null;
 }
 export interface CallsStored extends ServiceView {
   row: Row | null;
   messagesPhone: string | null;
 }
 
-const ROW = `status, failure, phone_e164 as phone, connected_at as "connectedAt"`;
+const ROW = `status, failure, phone_e164 as phone, connected_at as "connectedAt", agent_id as "agentId"`;
 
 /** O nome da sessão no WaCalls; o processo de voz usa o mesmo (`wacallsSessionName`). */
 const sessionName = (organizationId: string): string => `deskvoice_${organizationId}`;
@@ -78,6 +82,7 @@ const view = (stored: CallsStored, available: boolean, qr: string | null = null)
   failure: stored.row?.failure ?? null,
   phone: stored.row?.phone ?? null,
   connectedAt: stored.row?.connectedAt ?? null,
+  agentId: stored.row?.agentId ?? null,
   qr,
   messagesPhone: stored.messagesPhone,
 });
@@ -129,7 +134,13 @@ async function record(q: OrgQuery, now: Date, state: VoiceState): Promise<Row | 
   );
   const number = phone ? ` ${phone}` : "";
   if (next.status === "connected") {
-    await notice(q, now, `Ligação pelo WhatsApp: número${number} conectado. O atendimento das ligações pelo agente chega na próxima versão; por enquanto elas continuam tocando no celular.`);
+    await notice(
+      q,
+      now,
+      before.agentId
+        ? `Ligação pelo WhatsApp: número${number} conectado. O agente escolhido atende as ligações pelo WhatsApp a partir de agora.`
+        : `Ligação pelo WhatsApp: número${number} conectado. Escolha em Configurações o agente que atende; até lá, as ligações continuam tocando no celular.`,
+    );
   } else if (next.status === "failed" && before.status === "connected") {
     await notice(
       q,
@@ -196,6 +207,19 @@ export async function disconnectCalls(deps: ServerDeps, org: Org, session: Sessi
     }
     return view(await readCallsStored(q, now), true);
   });
+}
+
+/**
+ * Escolhe o agente que atende as ligações pelo WhatsApp, ou nenhum. Vale da ligação seguinte em
+ * diante; a que está em curso segue com quem a atendeu.
+ */
+export async function chooseCallsAgent(q: OrgQuery, session: Session, agentId: string | null, now: Date): Promise<void> {
+  if (agentId) await requireAgent(q, agentId);
+  await q.exec(
+    `insert into whatsapp_call_sessions (organization_id, session_name, agent_id, updated_at) values ($1, $2, $3, $4)
+     on conflict (organization_id) do update set agent_id = excluded.agent_id, updated_at = excluded.updated_at`,
+    [q.organizationId, sessionName(session.organizationId), agentId, now],
+  );
 }
 
 function assertRemovable(row: Row | null): void {

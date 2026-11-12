@@ -5,13 +5,13 @@ import { silentLogger } from "../../../../../voice/src/log";
 import { WACALLS_TOKEN, startFakeWacalls } from "../../../../../voice/src/testing/fake-wacalls";
 import { manualTime } from "../../../../../voice/src/testing/helpers";
 import { createWhatsAppCalls } from "../../../../../voice/src/whatsapp-calls";
-import { AGENT_TOKEN, NOW, call, createOrganization, createUser, startPanel } from "../../../../test/kit";
+import { AGENT_TOKEN, NOW, call, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
 import type { WhatsAppCallsView } from "../../../server/whatsapp-calls";
 import { POST as agent } from "./system/agent/route";
 import { GET as health } from "./system/health/route";
 import { POST as connect } from "./whatsapp-calls/connect/route";
 import { POST as disconnect } from "./whatsapp-calls/disconnect/route";
-import { GET as read } from "./whatsapp-calls/route";
+import { PATCH as choose, GET as read } from "./whatsapp-calls/route";
 import { POST as service } from "./whatsapp-calls/service/route";
 
 /**
@@ -175,9 +175,34 @@ describe("pairing the number by QR code", () => {
     wacalls.scan(sessionOf(org), "5531988887777");
     for (let i = 0; i < 3; i += 1) expect(await state(owner.cookie)).toMatchObject({ status: "connected", phone: "+5531988887777", connectedAt: NOW.toISOString(), qr: null });
     const connectedNotices = (await notices(org)).filter((body) => body.includes("conectado."));
-    expect(connectedNotices).toEqual(["Ligação pelo WhatsApp: número +5531988887777 conectado. O atendimento das ligações pelo agente chega na próxima versão; por enquanto elas continuam tocando no celular."]);
-    expect(await healthLine(owner.cookie)).toMatchObject({ status: "ok", reason: "whatsapp_calls_connected" });
+    expect(connectedNotices).toEqual(["Ligação pelo WhatsApp: número +5531988887777 conectado. Escolha em Configurações o agente que atende; até lá, as ligações continuam tocando no celular."]);
+    // Conectado sem agente: ninguém atende, e a saúde diz isso.
+    expect(await healthLine(owner.cookie)).toMatchObject({ status: "warn", reason: "whatsapp_calls_no_agent" });
     expect(await withOrg(panel.app, org, (q) => q.one("select wacalls_session_id as id from whatsapp_call_sessions"))).toEqual({ id: sessionOf(org).id });
+  });
+
+  it("the owner chooses the agent that answers: the health line turns ok, and nobody again turns it back to a warning", async () => {
+    const { org, owner } = await upOrg("calls agent");
+    await start(owner.cookie);
+    wacalls.scan(sessionOf(org), "5531988887777");
+    expect(await state(owner.cookie)).toMatchObject({ status: "connected", agentId: null });
+    const agentId = await insert(panel.app, org, "insert into agents (organization_id, name, engine) values ($1, 'Recepção', 'simulated') returning id", [org]);
+    const chosen = await call(choose, { method: "PATCH", cookie: owner.cookie, body: { agentId } });
+    expect(chosen.data).toMatchObject({ status: "connected", agentId });
+    expect(await healthLine(owner.cookie)).toMatchObject({ status: "ok", reason: "whatsapp_calls_connected" });
+    expect((await call(choose, { method: "PATCH", cookie: owner.cookie, body: { agentId: null } })).data).toMatchObject({ agentId: null });
+    expect(await healthLine(owner.cookie)).toMatchObject({ status: "warn", reason: "whatsapp_calls_no_agent" });
+  });
+
+  it("an agent from another organization cannot be chosen, and an operator cannot choose at all", async () => {
+    const { org, owner } = await upOrg("calls agent guard");
+    const other = await createOrganization(panel.app, "calls agent guard other");
+    const foreign = await insert(panel.app, other, "insert into agents (organization_id, name, engine) values ($1, 'Outra', 'simulated') returning id", [other]);
+    expect(refusal(await call(choose, { method: "PATCH", cookie: owner.cookie, body: { agentId: foreign } }))).toEqual([404, "not_found"]);
+    const operator = await createUser(panel.app, org, "operator");
+    const own = await insert(panel.app, org, "insert into agents (organization_id, name, engine) values ($1, 'Recepção', 'simulated') returning id", [org]);
+    expect(refusal(await call(choose, { method: "PATCH", cookie: operator.cookie, body: { agentId: own } }))).toEqual([403, "forbidden"]);
+    expect(await withOrg(panel.app, org, (q) => q.one("select agent_id from whatsapp_call_sessions"))).toEqual({ agent_id: null });
   });
 
   it("the same number connected for messages is named on the screen, so the person knows the risk is shared", async () => {

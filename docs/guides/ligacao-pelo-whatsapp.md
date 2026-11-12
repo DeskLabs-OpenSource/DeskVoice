@@ -1,9 +1,10 @@
 # Conectar o número à ligação pelo WhatsApp
 
 A ligação pelo WhatsApp faz o agente atender quem liga para a empresa pelo WhatsApp, com as mesmas
-ferramentas, aviso de gravação e tetos da ligação pelo telefone. **Nesta versão só a primeira parte
-existe:** instalar o serviço e conectar o número. O atendimento pelo agente chega na próxima versão;
-até lá, quem liga pelo WhatsApp é atendido como hoje, pelo celular.
+ferramentas, aviso de gravação e tetos da ligação pelo telefone. Instale o serviço, conecte o número
+e escolha o agente que atende. Em Chamadas, a ligação pelo WhatsApp aparece como uma ligação
+recebida, com o número de quem ligou; o canal "WhatsApp" na lista e na linha do tempo vem na versão
+seguinte.
 
 O desenho completo, com o que se sabe e o que não se sabe, está em
 [`docs/specs/2026-11-12-ligacao-pelo-whatsapp.md`](../specs/2026-11-12-ligacao-pelo-whatsapp.md).
@@ -51,6 +52,28 @@ de voz, com um token que o instalador gerou e ninguém digita.
 
 O código é trocado sozinho e vale poucos minutos. Se ninguém o ler a tempo, a tela diz e oferece
 "Gerar novo código": a tentativa anterior é apagada e outra começa.
+
+## O agente que atende
+
+Com o número conectado, escolha em "Quem atende" o agente das ligações pelo WhatsApp. Sem agente
+escolhido, nada é atendido, e a checagem de saúde avisa.
+
+- O agente atende assim que a ligação chega (decisão do dono em 12/11/2026). O celular da empresa
+  toca e para.
+- O aviso de gravação sai antes da saudação, como no telefone, e valem os tetos de custo e de duração
+  do agente.
+- A ligação pelo WhatsApp conta no mesmo limite de ligações recebidas ao mesmo tempo das que chegam
+  pela operadora (Configurações).
+- **Não atendida pelo agente** (nenhum agente escolhido, agente desligado ou limite atingido): ela
+  continua tocando no celular e nos aparelhos de quem trabalha, a recusa aparece em Chamadas, e o
+  painel recebe um aviso. O DeskVoice nunca recusa a ligação no WhatsApp.
+- **Não há transferência** neste canal: quando alguém pede para falar com a equipe, o agente oferece
+  deixar um recado (`notify_human`). O número de transferência do agente não vale aqui.
+- **Motor sem chave ou que cai no meio:** quem ligou ouve o sinal de falha (três bipes), a ligação
+  cai, e o painel recebe o aviso, como no telefone.
+
+O áudio é o do resto do DeskVoice, 8 kHz: o WhatsApp entrega 16 kHz, e a voz fica com qualidade de
+telefone fixo.
 
 ## Quando o número cai
 
