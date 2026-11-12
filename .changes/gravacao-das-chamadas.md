@@ -1,7 +1,7 @@
 ---
 impact: new_capability
 section: added
-title: Cada chamada fica gravada em áudio e se ouve na tela da chamada
+title: As chamadas podem ser gravadas em áudio, com a gravação desligada de fábrica
 ---
 
-Ao terminar, cada chamada vira um arquivo WAV estéreo: quem ligou num canal, o agente no outro, cada um no tempo em que falou (o que o agente não chegou a falar, porque a pessoa interrompeu, não entra). Na tela da chamada aparece "Gravação da chamada", com o player; só quem é da organização dona da chamada ouve. A gravação segue o prazo de guarda das conversas, em Configurações: quando a transcrição de uma ligação sai pelo prazo, o áudio dela sai junto, e a contagem entra no mesmo registro. Sem prazo preenchido, a gravação fica guardada, como a transcrição. Os arquivos ficam num volume novo do Compose, criado sozinho na atualização. Crédito: @aliffstefano.
+A instalação agora sabe gravar o áudio de cada chamada num arquivo WAV estéreo, com quem ligou num canal e o agente no outro, e tocá-lo na tela da chamada. A gravação vem desligada: quem atualiza continua sem gravar até um dono ou administrador ligar em Configurações, em "Gravação das chamadas", e cada organização decide a sua. A tela diz o custo em disco, cerca de 1,9 MB por minuto de chamada, pela conta do formato. Ligar ou desligar fica no registro da mesma tela e não apaga nada: as gravações já feitas seguem o prazo de guarda das conversas e saem junto com o texto. A exportação dos dados de quem ligou passa a dizer, em cada chamada, se há gravação; o áudio não vai no arquivo. Os backups de hoje não incluem as gravações. Os arquivos ficam num volume novo do Compose, que a atualização cria sozinha. Crédito: @aliffstefano.

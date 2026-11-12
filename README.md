@@ -151,9 +151,8 @@ provado, cada capacidade abaixo diz até onde a prova foi:
 Se você fizer a primeira ligação real, conte como foi numa issue: é a contribuição mais valiosa
 neste momento.
 
-O que **não** existe ainda: gravação de áudio (a fundação guarda a transcrição), várias empresas
-na mesma tela, construtor visual de fluxos, ligação pelo WhatsApp, URA por voz, filas de
-atendimento. Parte disso está no [roadmap](ROADMAP.md), aberta para a comunidade.
+O que **não** existe ainda: várias empresas na mesma tela, construtor visual de fluxos, ligação
+pelo WhatsApp, URA por voz, filas de atendimento. Parte disso está no [roadmap](ROADMAP.md), aberta para a comunidade.
 
 ## Como funciona
 
@@ -286,7 +285,7 @@ e fim: [adicionar uma ferramenta](docs/guides/adicionar-uma-ferramenta.md) ou
 O horizonte e as frentes abertas para a comunidade, cada uma com tamanho e ponto de entrada no
 código, estão em [`ROADMAP.md`](ROADMAP.md). Entre as frentes: motor de voz em pipeline
 (transcrição, modelo de texto e síntese), ferramentas de agenda, CRM e pagamento, conector com o
-DeskcommCRM, gravação com retenção configurável e painel de supervisão ao vivo.
+DeskcommCRM e painel de supervisão ao vivo.
 
 ## Quem constrói
 
