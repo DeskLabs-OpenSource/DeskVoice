@@ -148,6 +148,8 @@ Se você instala o DeskVoice para clientes:
 - **Não venda conformidade.** Você entrega controles e orientação sobre onde conferir.
 - **Deixe por escrito**, na entrega, quem é o responsável pela operação e pela lista de não
   ligar.
+- **Saiba entregar o que é da pessoa:** [entregar os dados de uma pessoa](entrega-de-dados.md) mostra
+  como exportar o que a instalação guarda sobre um telefone, quando alguém pedir.
 - **Mantenha as contas no nome do cliente:** número, tronco, provedor de IA.
 
 Mais em [ganhar dinheiro implementando](ganhar-dinheiro-implementando.md).
