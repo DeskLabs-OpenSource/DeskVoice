@@ -1,8 +1,8 @@
 # 0011: Sem domínio, o painel não vai para a internet sem conexão segura
 
-- **Estado:** proposta, valendo pelo padrão abaixo enquanto o dono não decide
+- **Estado:** aceita em 2026-11-12, opção A
 - **Data:** 2026-11-11
-- **Quem decidiu:** ninguém ainda. O padrão do instalador é regra de produto com efeito em quem instala, e isso é do dono (`GOVERNANCE.md`). O item marcado **[dono]** é o pedido de decisão; o resto, marcado **[construtor]**, são escolhas de desenho abertas à revisão dele.
+- **Quem decidiu:** o dono do projeto, em 2026-11-12, antes do corte da 0.3.0, que é a primeira versão com esse padrão. A pergunta foi: "sem domínio, o painel fica só dentro do servidor e é preciso um túnel SSH para abri-lo; quem já instalou não muda; você aprova esse padrão?". A resposta foi sim. Os itens marcados **[construtor]** são escolhas de desenho, e continuam abertos à revisão.
 - **Origem:** método da Fábrica, `manual/11-instalacao.md` (regras 3, 13 e 20) e itens 11.5, 11.16, 11.22 e 11.25 da conformidade.
 
 ## Contexto
@@ -23,7 +23,7 @@ O defeito mostrou uma regra mais larga. Sem domínio não há HTTPS, e o padrão
 
 **Recomendação:** A. Quem instala sem domínio ainda está testando, e o custo de um túnel é pequeno perto do de uma senha lida no caminho. A opção B continua disponível, por pedido explícito.
 
-**Enquanto o dono não responde:** a versão que carrega o padrão novo só é cortada com a resposta dele. O merge pode acontecer antes, porque nenhuma instalação existente muda: reinstalar e atualizar mantêm a exposição que já estava. A é também o caminho reversível, porque voltar ao comportamento antigo é trocar o padrão de uma variável.
+**Resposta do dono (2026-11-12):** A. A 0.3.0 saiu com esse padrão. O que segue continua valendo: nenhuma instalação existente muda, porque reinstalar e atualizar mantêm a exposição que já estava. A também é o caminho reversível, porque voltar ao comportamento antigo é trocar o padrão de uma variável.
 
 **Não medido:** quantas pessoas desistem no passo do túnel. Nenhuma instalação por pessoa de fora do projeto aconteceu ainda. Também não foi medido se algum provedor de VPS bloqueia o encaminhamento de portas por SSH.
 
