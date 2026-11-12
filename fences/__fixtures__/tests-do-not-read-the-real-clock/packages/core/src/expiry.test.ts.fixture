@@ -1,0 +1,12 @@
+import { describe, expect, it } from "vitest";
+
+describe("expiry", () => {
+  it("expira uma hora depois de agora", () => {
+    const expiresAt = new Date();
+    expect(expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("aceita uma data fixa escrita por extenso", () => {
+    expect(new Date("2030-05-10T12:00:00Z").getTime()).toBe(1899028800000);
+  });
+});
