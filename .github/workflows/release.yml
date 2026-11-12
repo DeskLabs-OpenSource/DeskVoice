@@ -5,9 +5,9 @@ name: release
 #   Ato 1 (manual, "Run workflow"): lê os fragmentos de `.changes/`, calcula a versão pelo efeito
 #     que cada um declarou, monta a seção do CHANGELOG.md, apaga os fragmentos e abre o PR
 #     `release/X.Y.Z`. Major só com o input `major` marcado.
-#   Ato 2 (merge desse PR na main): cria a tag `vX.Y.Z` no commit da main e dispara a publicação
-#     das imagens. A release do GitHub é publicada pelo publish-image, no fim, quando as imagens
-#     já baixam sem credencial.
+#   Ato 2 (merge desse PR na main): cria a tag `vX.Y.Z` no commit da main que trouxe a versão ao
+#     CHANGELOG (com merge, squash ou rebase) e dispara a publicação das imagens. A release do
+#     GitHub é publicada pelo publish-image, no fim, quando as imagens já baixam sem credencial.
 #
 # A tag só nasce de commit da main, e só do merge de um PR `release/*` deste repositório.
 #
@@ -128,48 +128,41 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup
-      - name: Este push foi o merge de um PR de release?
+      # Roda a cada push na main e decide pelo histórico, não pelo último push: a tag vai no commit
+      # que trouxe a versão ao CHANGELOG (merge, squash ou rebase), e só se ele apagou fragmentos e
+      # veio de um PR release/<versão> deste repositório. Versão já marcada não é marcada de novo.
+      # Por isso a reexecução e o push seguinte que chega antes do corte terminar dão no mesmo
+      # commit. A lógica e os testes estão em scripts/release/tag-target.ts.
+      - name: Qual commit trouxe a versão, e ele é de um PR de versão?
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if ! version="$(pnpm exec tsx scripts/release.ts current 2>/dev/null)"; then
-            echo "CHANGELOG.md ainda não tem versão: nada a marcar."
-            exit 0
-          fi
-          removed="$(git diff --diff-filter=D --name-only HEAD^ HEAD -- .changes/ | grep -c '\.md$' || true)"
-          if git rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
-            echo "v${version} já existe: push comum, nada a marcar."
-            exit 0
-          fi
-          if [ "${removed}" -eq 0 ]; then
-            echo "::notice::O CHANGELOG anuncia ${version} sem tag, mas este push não consumiu fragmento: não é um corte de release."
-            exit 0
-          fi
-          # Um corte legítimo vem de um PR cujo ramo é release/<versão> deste repositório. Fork não conta.
-          origin="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
-            --jq '[.[] | select(.head.repo.full_name == env.GITHUB_REPOSITORY) | .head.ref] | join(" ")')"
-          case " ${origin} " in
-            *" release/${version} "*) ;;
-            *)
-              echo "::error::Este commit apagou ${removed} fragmento(s) e anuncia ${version}, mas não veio de um PR release/${version} deste repositório (ramos de origem: ${origin:-nenhum})."
-              echo "::error::Tag NÃO criada. Uma release sai do workflow 'release' (Run workflow), nunca de um PR comum."
-              exit 1
-              ;;
-          esac
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          pnpm exec tsx scripts/release.ts tag-target "${GITHUB_SHA}" | tee "${RUNNER_TEMP}/gate.txt"
+          grep -E '^(version|commit)=' "${RUNNER_TEMP}/gate.txt" >> "${GITHUB_OUTPUT}" || true
       - name: Criar a tag e disparar as imagens
         if: steps.gate.outputs.version != ''
         env:
           GH_TOKEN: ${{ github.token }} # GITHUB APP: token do App
           VERSION: ${{ steps.gate.outputs.version }}
+          COMMIT: ${{ steps.gate.outputs.commit }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${VERSION}" -m "v${VERSION}" "${GITHUB_SHA}"
-          git push origin "v${VERSION}"
+          git tag -a "v${VERSION}" -m "v${VERSION}" "${COMMIT}"
+          if ! git push origin "v${VERSION}"; then
+            # Duas execuções (o merge da versão e o push logo depois) podem chegar juntas ao mesmo
+            # commit. Quem empurrou primeiro dispara as imagens; a outra só confere que é o mesmo.
+            remote="$(git ls-remote origin "refs/tags/v${VERSION}^{}" | cut -f1)"
+            if [ "${remote}" = "${COMMIT}" ]; then
+              echo "v${VERSION} já foi criada por outra execução no mesmo commit: nada a fazer."
+              exit 0
+            fi
+            echo "::error::Não consegui empurrar v${VERSION} para ${COMMIT} (no remoto ela aponta para ${remote:-nada})."
+            exit 1
+          fi
           # A release do GitHub NÃO nasce aqui: nasce no fim do publish-image, depois que as imagens
           # baixam sem credencial. "Release publicada" significa "instalável".
           # Disparar: tag empurrada pelo GITHUB_TOKEN não aciona o `on: push: tags` do publish-image.

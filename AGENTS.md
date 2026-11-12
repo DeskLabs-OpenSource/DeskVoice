@@ -197,7 +197,7 @@ Rode `pnpm verify` e, se tocou em banco, `pnpm test:db`. Isso cobre:
 - cerca sem dono, motivo ou data de revisão;
 - endereço da parceira escrito diferente do de `install/partner.env`;
 - endereço das imagens repetido fora de `deploy/images.env`, ou canal no lugar do número da versão;
-- imagem de terceiros sem resumo fixo no Compose de produção;
+- imagem de terceiros sem resumo fixo no Compose de produção, na base de um `Dockerfile` ou num job do CI;
 - fragmento de versão inválido;
 - instalação nova e atualização a partir da última versão;
 - a chamada simulada de ponta a ponta;
