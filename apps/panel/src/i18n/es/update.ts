@@ -8,6 +8,8 @@ const update: UpdateDictionary = {
   publishedNone: "Todavía no hay ninguna versión publicada",
   publishedUnknown: "No fue posible consultar las versiones publicadas ahora. La versión en ejecución, arriba, se leyó de este servidor y sigue siendo válida. La consulta se repite en un minuto.",
   upToDate: "Este servidor no encontró ninguna versión publicada más nueva que la instalada.",
+  atLatest: "Este servidor está en la versión publicada más reciente.",
+  unseen: "La {version} ya se publicó, pero este servidor todavía no la vio. Revisa las versiones publicadas cada 10 minutos; cuando la vea, la actualización a ella aparece aquí.",
   notesMissing: "La versión {to} ya existe, y es a la que este servidor se actualizaría, pero sus notas todavía no están disponibles aquí (la página de la versión aún no se publicó, o la consulta falló ahora). El botón de actualizar aparece en cuanto las notas puedan leerse: nadie confirma sin ver qué cambia.",
   notesTitle: "Qué cambia de la {from} a la {to}",
   releaseOf: "Versión {version}",
@@ -35,6 +37,7 @@ const update: UpdateDictionary = {
     superseded: "La solicitud no se ejecutó ({when}): salió una versión más nueva después de hacerla, y la confirmación valía solo para la {to}. No se cambió nada. Lee las notas de la versión nueva y solicita de nuevo.",
   },
   detail: "Salida del actualizador",
+  outputKept: "La salida completa de esta actualización quedó guardada en el servidor, en este archivo de la carpeta de DeskVoice:",
 };
 
 export default update;

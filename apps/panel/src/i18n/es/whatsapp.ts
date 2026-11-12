@@ -6,7 +6,7 @@ const whatsapp: WhatsAppDictionary = {
   unavailable: "Este servidor todavía no tiene la clave del servicio de WhatsApp. Esto ocurre cuando la actualización la hizo un actualizador antiguo. Ejecuta en el servidor, una vez:",
   serviceAbsent: "El servicio de WhatsApp no está instalado en este servidor.",
   serviceCost:
-    "Es una pieza aparte, que solo se descarga y se enciende si lo pides. Cuesta cerca de 360 MB de memoria con el servicio en reposo y 3,2 GB en disco, medidos el 11/11/2026 en una VPS de 8 GB. Con un número conectado el uso de memoria aún no se midió; el techo es de 1280 MB. DeskVoice entero, sin él, usa cerca de 320 MB.",
+    "Es una pieza aparte, que solo se descarga y se enciende si lo pides. Cuesta cerca de 323 MiB de memoria sin ningún número conectado y 3,2 GB en disco, medidos en la versión 0.3.0 el 12/11/2026, en una VPS de 8 GB. Con un número conectado el uso de memoria aún no se midió; el techo es de 1280 MB. DeskVoice entero, sin él y en reposo, usa cerca de 380 MiB en la misma medición.",
   installService: "Instalar el servicio de WhatsApp",
   servicePreparing: "Preparando el servicio: el servidor está descargando WhatsApp. Tarda unos minutos, y esta pantalla lo acompaña.",
   serviceFailed: {
@@ -23,7 +23,7 @@ const whatsapp: WhatsAppDictionary = {
   serviceRemoving: "Quitando el servicio de WhatsApp del servidor. Tarda hasta un minuto.",
   removeService: "Quitar el servicio de WhatsApp",
   removeServiceConfirm:
-    "¿Quitar el servicio de WhatsApp de este servidor? Ningún número queda conectado, los avisos y los mensajes por WhatsApp dejan de salir, y se liberan cerca de 360 MB de memoria y 3,2 GB de disco. Si alguna vez se conectó un número aquí, revisa en su celular, en Dispositivos vinculados, si este dispositivo salió, y quítalo si sigue ahí. Para volver, basta instalarlo de nuevo.",
+    "¿Quitar el servicio de WhatsApp de este servidor? Ningún número queda conectado, los avisos y los mensajes por WhatsApp dejan de salir, y se liberan cerca de 323 MiB de memoria y 3,2 GB de disco. Si alguna vez se conectó un número aquí, revisa en su celular, en Dispositivos vinculados, si este dispositivo salió, y quítalo si sigue ahí. Para volver, basta instalarlo de nuevo.",
   removeServiceYes: "Quitar el servicio de WhatsApp",
   agentNever: "El agente de este servidor, que es quien instala y quita el servicio, todavía no habló con el panel. Sin él, el pedido queda esperando. Para ejecutarlo ahora, ejecuta en el servidor:",
   agentSilent: "El agente de este servidor, que es quien instala y quita el servicio, no está respondiendo. El pedido queda esperando hasta que vuelva. Para ejecutarlo ahora, ejecuta en el servidor:",

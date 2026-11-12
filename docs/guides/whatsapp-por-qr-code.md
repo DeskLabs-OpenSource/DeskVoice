@@ -8,9 +8,9 @@ de dentro da instalação.
 **O serviço não vem instalado.** Ele custa mais que o DeskVoice inteiro, então só existe no
 servidor de quem pede. Você o instala pela tela, e remove quando quiser.
 
-| O que o serviço custa | Medido em 11/11/2026, numa VPS de 8 GB |
+| O que o serviço custa | Medido na 0.3.0, em 12/11/2026, numa VPS de 8 GB |
 |---|---|
-| Memória, com o serviço parado (sem número conectado) | cerca de 360 MB (o DeskVoice inteiro usa cerca de 320 MB) |
+| Memória, com o serviço parado (sem número conectado) | cerca de 323 MiB (o DeskVoice inteiro, parado e sem ele, usa cerca de 380 MiB) |
 | Memória, com um número conectado | **ainda não medido**. O teto é de 1280 MB |
 | Disco | 3,2 GB |
 | Para baixar e subir | menos de um minuto naquela VPS; a tela fala em alguns minutos |
@@ -150,7 +150,7 @@ download tem esse prazo por passada do agente, e continua de onde parou na passa
 | Assunto | O que vale |
 |---|---|
 | Serviço | `waha`, no `deploy/docker-compose.yml`, num perfil: só existe depois de instalado pela tela. Só na rede interna do Docker, sem porta publicada, com o painel e a documentação da API dele desligados |
-| Memória | Cerca de 360 MB parado (medido). Com um número conectado, **ainda não medido**. Teto de 1280 MB (`mem_limit`) |
+| Memória | Cerca de 323 MiB sem número conectado (medido na 0.3.0). Com um número conectado, **ainda não medido**. Teto de 1280 MB (`mem_limit`) |
 | Disco | 3,2 GB (medido) |
 | Saúde | `bash install/healthcheck.sh`, linha "WhatsApp": "não instalado" é o estado normal e nunca é falha. Instalado, diz se o serviço responde. Qual número está conectado, só a tela diz |
 | Log | `docker compose -f deploy/docker-compose.yml --profile whatsapp logs --tail 50 waha`. O que o agente fez: `deploy/agent/agent.log` |

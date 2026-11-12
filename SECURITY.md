@@ -144,7 +144,7 @@ Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em pr
   há atualização pedida, e esta instalação quer o serviço de WhatsApp. Quem tem conta de dono ou
   administrador no painel, ou quem consegue escrever no banco do painel, consegue fazer o
   servidor baixar e subir o WAHA (a imagem é a que o kit da instalação fixa, nunca uma vinda do
-  painel), gastando cerca de 3,2 GB de disco e 360 MB de memória, ou tirar o serviço do ar. Não
+  painel), gastando cerca de 3,2 GB de disco e 323 MiB de memória (medidos na 0.3.0), ou tirar o serviço do ar. Não
   consegue escolher imagem, comando ou endereço, nem apagar o pareamento do número. Também não
   consegue encher o disco: o agente confere o espaço antes de baixar (5 GB livres) e, sem ele,
   não baixa. Pouca memória não bloqueia, só avisa: numa VPS pequena o serviço pode disputar

@@ -49,9 +49,9 @@ const refusal = (result: { status: number; code: string | undefined }) => [resul
 interface State {
   running: { version: string; updatable: boolean };
   agent: { lastSeenAt: string; version: string; targetVersion: string | null; responding: boolean; lastFailureAt: string | null; lastFailureDetail: string | null } | null;
-  request: { status: string; fromVersion: string; targetVersion: string; toVersion: string | null; detail: string | null; acceptedAt: string | null; finishedAt: string | null } | null;
+  request: { status: string; fromVersion: string; targetVersion: string; toVersion: string | null; detail: string | null; outputKept: boolean; acceptedAt: string | null; finishedAt: string | null } | null;
   published: { ok: true; latest: string | null; newer: Array<{ version: string; attention: Array<{ title: string; text: string }>; sections: unknown[] }> } | { ok: false };
-  offer: { target: string | null; notesReady: boolean; releases: Array<{ version: string }> };
+  offer: { target: string | null; notesReady: boolean; releases: Array<{ version: string }>; unseen: boolean };
 }
 const state = async (cookie: string): Promise<State> => (await call(readUpdate, { cookie })).data as State;
 const notices = (org: string) => withOrg(panel.app, org, (q) => q.many<{ body: string }>("select body from notifications where channel = 'panel' order by created_at, id"));
@@ -172,8 +172,8 @@ describe("one request at a time, and every request ends", () => {
     await speak();
     expect((await state(owner.cookie)).request).toMatchObject({ status: "running", fromVersion: "0.1.0", toVersion: null });
     later(4);
-    expect((await speak({ version: "0.2.0", result: { outcome: "succeeded", toVersion: "0.2.0", detail: "Atualizado para 0.2.0" } })).data).toEqual({ update: false, whatsapp: false });
-    expect((await state(owner.cookie)).request).toMatchObject({ status: "succeeded", toVersion: "0.2.0", detail: "Atualizado para 0.2.0", finishedAt: panel.clock.at.toISOString() });
+    expect((await speak({ version: "0.2.0", result: { outcome: "succeeded", toVersion: "0.2.0", outputKept: true, detail: "Atualizado para 0.2.0" } })).data).toEqual({ update: false, whatsapp: false });
+    expect((await state(owner.cookie)).request).toMatchObject({ status: "succeeded", toVersion: "0.2.0", detail: "Atualizado para 0.2.0", outputKept: true, finishedAt: panel.clock.at.toISOString() });
     const bodies = (await notices(org)).map((notice) => notice.body);
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toContain("começou");
@@ -184,7 +184,8 @@ describe("one request at a time, and every request ends", () => {
     expect((await ask(owner.cookie, { password: PASSWORD, target: "0.3.0" })).status).toBe(200);
     await speak({ version: "0.2.0", target: "0.3.0" });
     await speak({ version: "0.2.0", target: "0.3.0", result: { outcome: "rolled_back", detail: "As migrations da versão 0.3.0 falharam." } });
-    expect((await state(owner.cookie)).request).toMatchObject({ status: "rolled_back", detail: "As migrations da versão 0.3.0 falharam." });
+    // O agente de uma versão anterior não manda o campo: a tela não aponta um arquivo que ele não guardou.
+    expect((await state(owner.cookie)).request).toMatchObject({ status: "rolled_back", detail: "As migrations da versão 0.3.0 falharam.", outputKept: false });
   });
 
   it("expires a request the agent never picked up, visibly, and frees the next one", async () => {
@@ -235,6 +236,8 @@ describe("nobody is updated to a version they did not confirm", () => {
     expect(seen.offer.target).toBe("0.2.0");
     expect(seen.offer.notesReady).toBe(true);
     expect(seen.offer.releases.map((item) => item.version)).toEqual(["0.2.0"]);
+    // E a tela diz que a 0.3.0 existe e o servidor ainda não a viu, em vez de calar sobre ela.
+    expect(seen.offer.unseen).toBe(true);
     await ask(owner.cookie);
     expect((await state(owner.cookie)).request).toMatchObject({ status: "requested", targetVersion: "0.2.0" });
   });
@@ -243,7 +246,7 @@ describe("nobody is updated to a version they did not confirm", () => {
     const { owner } = await newOrg("update no notes");
     await speak({ version: "0.1.0", target: "0.3.0" });
     const seen = await state(owner.cookie);
-    expect(seen.offer).toEqual({ target: "0.3.0", notesReady: false, releases: [expect.objectContaining({ version: "0.2.0" })] });
+    expect(seen.offer).toEqual({ target: "0.3.0", notesReady: false, releases: [expect.objectContaining({ version: "0.2.0" })], unseen: false });
     expect(refusal(await ask(owner.cookie, { password: PASSWORD, target: "0.3.0" }))).toEqual([409, "update_notes_missing"]);
     publish();
     panel.voice.respond = offline;
@@ -350,6 +353,27 @@ describe("the version screen", () => {
     expect(after.published).toMatchObject({ ok: true, latest: "0.2.0", newer: [] });
   });
 
+  it("tells a version the server has not seen yet apart from being on the latest one", async () => {
+    // A 0.2.0 saiu na lista pública, e o agente ainda não consultou as tags: não anunciou alvo.
+    const { owner } = await newOrg("update not seen yet");
+    await speak({ version: "0.1.0" });
+    const before = await state(owner.cookie);
+    expect(before.published).toMatchObject({ ok: true, latest: "0.2.0" });
+    expect(before.offer).toMatchObject({ target: null, unseen: true });
+    // O agente viu: o alvo é a mais recente, e não há mais o que ele não tenha visto.
+    await speak({ version: "0.1.0", target: "0.2.0" });
+    expect((await state(owner.cookie)).offer).toMatchObject({ target: "0.2.0", unseen: false });
+    // O agente já atualizou e anuncia a 0.2.0, e o painel antigo ainda responde: ele não "deixou de ver".
+    await speak({ version: "0.2.0" });
+    expect((await state(owner.cookie)).offer).toMatchObject({ target: null, unseen: false });
+    // Depois da atualização: instalada igual à mais recente, sem alvo. É "está na mais recente".
+    panel.deps.appVersion = "0.2.0";
+    await speak({ version: "0.2.0" });
+    const after = await state(owner.cookie);
+    expect(after.published).toMatchObject({ ok: true, latest: "0.2.0" });
+    expect(after.offer).toMatchObject({ target: null, unseen: false });
+  });
+
   it("says it could not check when the public source does not answer, and still shows the running version", async () => {
     const { owner } = await newOrg("update offline");
     panel.voice.respond = offline;
@@ -357,7 +381,7 @@ describe("the version screen", () => {
     const seen = await state(owner.cookie);
     expect(seen.published).toEqual({ ok: false });
     expect(seen.running.version).toBe("0.1.0");
-    expect(seen.offer).toEqual({ target: "0.2.0", notesReady: false, releases: [] });
+    expect(seen.offer).toEqual({ target: "0.2.0", notesReady: false, releases: [], unseen: false });
     panel.voice.respond = () => Response.json({ message: "not the expected shape" });
     clearReleaseCache();
     expect((await state(owner.cookie)).published).toEqual({ ok: false });

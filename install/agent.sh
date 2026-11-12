@@ -18,6 +18,8 @@
 # painel antes. A imagem do WhatsApp é a que o Compose e o kit desta instalação fixam.
 #
 # O registro do que deu errado fica em deploy/agent/agent.log (e a cópia anterior em agent.log.1).
+# A saída inteira de cada atualização fica em deploy/agent/last-update.log (e as duas anteriores
+# em last-update.log.1 e .2).
 #
 # Regra para quem altera este arquivo: o agente que roda numa atualização é o da versão ANTERIOR.
 # Tudo o que uma versão nova precisar fazer de diferente cabe no update.sh dela, não aqui.
@@ -32,7 +34,7 @@ while [ $# -gt 0 ]; do
     --install) mode=install ;;
     --dry-run) dry_run=1 ;;
     --jitter) jitter=1 ;;
-    -h|--help) sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Use --install, --install --dry-run ou nenhuma opção." ;;
   esac
   shift
@@ -59,6 +61,8 @@ PENDING="$AGENT_STATE_DIR/pending-result"   # linha 1: desfecho; linha 2: versã
 FAILURE="$AGENT_STATE_DIR/last-failure"     # linha 1: quando; linha 2: o que falhou
 LAST_OK="$AGENT_STATE_DIR/last-ok"          # quando o painel ouviu pela última vez (o healthcheck lê)
 LAST_FETCH="$AGENT_STATE_DIR/last-fetch"    # quando as versões publicadas foram consultadas
+UPDATE_LOG="$AGENT_STATE_DIR/last-update.log"  # a saída inteira das três últimas atualizações: esta, .1 e .2
+KEPT="$PENDING.kept"                        # existe = a saída inteira do resultado pendente ficou em $UPDATE_LOG
 DEADLINE="${DESKVOICE_AGENT_DEADLINE:-30}"  # segundos de espera por uma resposta do painel
 WA_FAILURE="$AGENT_STATE_DIR/whatsapp-failure"  # linha 1: código da última falha ao ligar ou desligar o serviço de WhatsApp; linha 2: MB livres, em no_disk
 WA_WARNING="$AGENT_STATE_DIR/whatsapp-warning"  # código do aviso que acompanha o estado (pouca memória; imagem que não saiu do disco)
@@ -73,6 +77,15 @@ stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 note() {
   if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 524288 ]; then mv -f "$LOG" "$LOG.1"; fi
   printf '%s %s\n' "$(stamp)" "$*" >> "$LOG"
+}
+# A saída inteira do atualizador fica no servidor (o painel recebe só o fim dela), com a mesma
+# máscara do que vai para a tela e só o dono lê. Guarda as três últimas: a mais nova sem número.
+keep_update_output() {  # keep_update_output <saída>
+  ( umask 077; printf '%s\n' "$1" | mask_secrets > "$UPDATE_LOG.tmp" ) || return 1
+  chmod 600 "$UPDATE_LOG.tmp" || return 1
+  if [ -f "$UPDATE_LOG.1" ]; then mv -f "$UPDATE_LOG.1" "$UPDATE_LOG.2"; fi
+  if [ -f "$UPDATE_LOG" ]; then mv -f "$UPDATE_LOG" "$UPDATE_LOG.1"; fi
+  mv -f "$UPDATE_LOG.tmp" "$UPDATE_LOG"
 }
 # Falha de comunicação: fica no registro e vai ao painel na próxima passada que der certo.
 fail_pass() {
@@ -108,7 +121,7 @@ on_exit() {
   local code=$?
   trap - EXIT
   if [ "$report_on_exit" = 1 ] && [ -f "$PENDING" ]; then
-    if speak >/dev/null 2>&1; then rm -f "$PENDING"; else note "não consegui entregar o resultado agora; ele segue em $PENDING e vai na próxima passada"; fi
+    if speak >/dev/null 2>&1; then rm -f "$PENDING" "$KEPT"; else note "não consegui entregar o resultado agora; ele segue em $PENDING e vai na próxima passada"; fi
   fi
   rm -rf "$LOCK"
   exit "$code"
@@ -145,10 +158,10 @@ fi
 # pela entrada padrão, nunca na linha de comando (que aparece na lista de processos).
 # shellcheck disable=SC2016  # é JavaScript, não bash: nada aqui deve ser expandido
 SPEAK_JS='let s="";process.stdin.on("data",d=>s+=d).on("end",async()=>{
-const [token,version,target,outcome,toVersion,failureAt,failureDetail,wa,waReason,waWarning,waFree,waNeed,...rest]=s.split("\n");
+const [token,version,target,outcome,toVersion,failureAt,failureDetail,wa,waReason,waWarning,waFree,waNeed,kept,...rest]=s.split("\n");
 const body={version,target};
 if(wa)body.whatsapp={state:wa,...(waReason&&{reason:waReason}),...(waWarning&&{warning:waWarning}),...(waFree&&{freeDiskMb:Number(waFree),neededDiskMb:Number(waNeed)})};
-if(outcome)body.result={outcome,...(toVersion&&{toVersion}),detail:rest.join("\n")};
+if(outcome)body.result={outcome,...(toVersion&&{toVersion}),...(kept&&{outputKept:true}),detail:rest.join("\n")};
 if(failureAt)body.lastFailure={at:failureAt,detail:failureDetail};
 try{const r=await fetch("http://127.0.0.1:3000/api/v1/system/agent",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
 const j=await r.json().catch(()=>null);
@@ -158,7 +171,8 @@ catch(e){console.log("error="+String(e&&e.message).replace(/\n/g," "));process.e
 # Para qual versão este servidor iria agora: a maior versão final publicada, se for diferente da
 # instalada. O agente a ANUNCIA (a tela mostra e a pessoa confirma essa) e, se o painel disser
 # sim, é para ela que ele vai. Nada disso vem do painel. A consulta ao repositório é feita no
-# máximo a cada 10 minutos; entre uma e outra vale o que o clone já conhece.
+# máximo a cada 10 minutos; entre uma e outra vale o que o clone já conhece. A tela de versão cita
+# esse intervalo (`unseen`, em apps/panel/src/i18n/*/update.ts): mudou aqui, mude lá.
 target=""
 discover_target() {
   local installed latest
@@ -267,10 +281,11 @@ converge_whatsapp() {  # converge_whatsapp <true|false|unknown>
 # speak → escreve `update=<true|false> whatsapp=<true|false|unknown>` ou `error=<motivo>`; devolve
 # 0 só se o painel ouviu.
 speak() {
-  local token outcome="" to="" failure_at="" failure_detail="" wa wa_reason="" wa_warning="" wa_free="" wa_need=""
+  local token outcome="" to="" kept="" failure_at="" failure_detail="" wa wa_reason="" wa_warning="" wa_free="" wa_need=""
   token="$(env_get "$ENV_FILE" UPDATE_AGENT_TOKEN)"
   [ -n "$token" ] || { echo "error=falta o segredo do agente em deploy/.env; rode: bash install/agent.sh --install"; return 1; }
   if [ -f "$PENDING" ]; then outcome="$(sed -n 1p "$PENDING")"; to="$(sed -n 2p "$PENDING")"; fi
+  if [ -n "$outcome" ] && [ -f "$KEPT" ]; then kept=1; fi
   if [ -f "$FAILURE" ]; then failure_at="$(sed -n 1p "$FAILURE")"; failure_detail="$(sed -n 2p "$FAILURE")"; fi
   wa="$(whatsapp_state)"
   case "$wa" in "failed "*) wa_reason="${wa#failed }"; wa=failed ;; esac
@@ -278,7 +293,7 @@ speak() {
   if [ "$wa_reason" = no_disk ]; then wa_free="$(sed -n 2p "$WA_FAILURE")"; wa_need="$WAHA_DISK_NEEDED_MB"; fi
   local code=0
   {
-    printf '%s\n' "$token" "$(env_get "$ENV_FILE" DESKVOICE_VERSION)" "$target" "$outcome" "$to" "$failure_at" "$failure_detail" "$wa" "$wa_reason" "$wa_warning" "$wa_free" "$wa_need"
+    printf '%s\n' "$token" "$(env_get "$ENV_FILE" DESKVOICE_VERSION)" "$target" "$outcome" "$to" "$failure_at" "$failure_detail" "$wa" "$wa_reason" "$wa_warning" "$wa_free" "$wa_need" "$kept"
     if [ -f "$PENDING" ]; then sed 1,2d "$PENDING"; fi
   } | with_deadline "$DEADLINE" dc exec -T panel node -e "$SPEAK_JS" 2>/dev/null || code=$?
   if [ "$code" = 124 ]; then echo "error=o painel não respondeu em ${DEADLINE}s"; fi
@@ -295,7 +310,7 @@ while [ "$turn" -lt 2 ]; do
   discover_target
   answer="$(speak)" || { reason="${answer#error=}"; fail_pass "não consegui falar com o painel (${reason:-o contêiner do painel não respondeu})"; }
   # O painel ouviu: o que estava pendente foi entregue.
-  rm -f "$PENDING" "$FAILURE"
+  rm -f "$PENDING" "$KEPT" "$FAILURE"
   stamp > "$LAST_OK"
   # O segundo sim ou não. Painel de uma versão que não o manda vale como "não sei": nada muda.
   wa_want=unknown
@@ -313,6 +328,7 @@ while [ "$turn" -lt 2 ]; do
   # Daqui em diante o painel espera um resultado. O de "parou no meio" é gravado ANTES de começar:
   # se este processo for morto ou a máquina reiniciar, é ele que a próxima passada entrega.
   before="$(env_get "$ENV_FILE" DESKVOICE_VERSION)"
+  rm -f "$KEPT"
   printf 'failed\n\n%s\n' "O agente parou antes de terminar a atualização (o processo foi interrompido ou o servidor reiniciou). Confira no servidor: bash install/healthcheck.sh" > "$PENDING"
   report_on_exit=1
   note "pedido de atualização aceito; versão instalada: $before"
@@ -329,11 +345,14 @@ while [ "$turn" -lt 2 ]; do
   elif [ "$after" = "$before" ] && NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --essential >/dev/null 2>&1; then outcome=rolled_back
   else outcome=failed; fi
   to=""; if [ "$outcome" = succeeded ]; then to="$after"; fi
+  kept=0
+  if keep_update_output "$output"; then kept=1; else note "não consegui guardar a saída inteira da atualização em $UPDATE_LOG"; fi
   {
     printf '%s\n%s\n' "$outcome" "$to"
     printf '%s\n' "$output" | grep -v '^[[:space:]]*$' | tail -n 40 | mask_secrets | tail -c 6000
   } > "$PENDING.tmp"
   mv -f "$PENDING.tmp" "$PENDING"
+  if [ "$kept" = 1 ]; then : > "$KEPT"; fi
   note "atualização terminou: $outcome (de $before para $after; update.sh saiu com $code)"
 done
 }
