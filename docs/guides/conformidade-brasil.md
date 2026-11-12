@@ -216,7 +216,8 @@ organização. Só dono ou administrador muda.
 administrador, e vem desligada. Ligar vale a partir da próxima chamada. Desligar não apaga as
 gravações já feitas: elas seguem o prazo de guarda acima, e sem prazo ficam para sempre. Cada
 minuto de chamada ocupa cerca de 1,9 MB no disco; é a conta do formato (dois canais, 8 kHz, 16
-bits), e não uma medição.
+bits), e não uma medição. Sem prazo, o disco cresce sem limite, e a tela avisa. Com menos de 1 GiB
+livre, a chamada segue sem gravar, e a linha do tempo dela diz isso.
 
 Quatro lugares guardam dado tirado da conversa, e **o prazo só alcança os dois primeiros**:
 
