@@ -3,6 +3,8 @@
 //   fonte única dos dois temas, e ninguém a vê: o `#fff` do QR Code do WhatsApp entrou assim no
 //   PR #25 (medição de 12/11, itens 4.2 e 4.3). Cor nova vira token, e a tela usa o nome.
 // revisar em: 2027-05-12
+// Teto conhecido: só lê .ts e .tsx. Cor escrita num .css fora de tokens.css, ou por nome (`white`),
+// passa por esta cerca e fica com a revisão.
 import { describe, it, expect } from "vitest";
 import { REPO_ROOT, expectClean, fixture, listFiles, read } from "./_lib";
 
