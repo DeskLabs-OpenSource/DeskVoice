@@ -95,6 +95,9 @@ export interface Engine {
   id: string;
   label: string;
   requiresKey: boolean;
+  /** Vozes do provedor; vazia quando o motor não oferece escolha (o simulado). */
+  voices: Array<{ id: string; style?: string }>;
+  defaultVoice: string | null;
   keyConfigured: boolean;
   /** O último teste da chave em vigor; `null` se ela nunca foi testada. */
   keyCheck: KeyCheck | null;
