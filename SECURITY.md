@@ -81,7 +81,8 @@ Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em pr
   próprio endereço, e o dono entra de outro lugar. Dois casos ainda trancam o dono. Com muitos
   endereços, 50 falhas na mesma hora contra um e-mail recusam esse e-mail de qualquer lugar até
   a mais antiga sair da janela de uma hora; cada endereço dá no máximo 20 falhas por hora a um
-  e-mail, então isso pede pelo menos 3 endereços errando a hora inteira. E quando todo mundo
+  e-mail, então isso pede pelo menos 3 endereços errando a hora inteira (em IPv6, "endereço"
+  é o bloco /64: endereços do mesmo /64 contam como um só). E quando todo mundo
   chega com o mesmo endereço (túnel SSH, que é o padrão sem domínio, ou um proxy que não repassa
   o endereço de quem chamou), o par vira "e-mail" de novo: 5 falhas bloqueiam aquele e-mail para
   todos por 15 minutos, e 20 falhas em quaisquer contas bloqueiam a entrada de todos. A saída de

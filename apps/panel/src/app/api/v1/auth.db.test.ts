@@ -84,6 +84,14 @@ describe("login limit", () => {
     expect((await signIn(user.email, PASSWORD, "198.51.100.1")).status).toBe(200);
   });
 
+  it("IPv6 counts by its /64: five failures from five addresses of one block lock the block, not the owner elsewhere", async () => {
+    const block = Array.from({ length: 5 }, (_, index) => `2001:db8:aa:bb:${index + 1}::9`);
+    expect(await fail(user.email, block)).toEqual(Array<number>(5).fill(401));
+
+    expect((await signIn(user.email, PASSWORD, "2001:db8:aa:bb:ffff::1")).status).toBe(429);
+    expect((await signIn(user.email, PASSWORD, "2001:db8:aa:bc::1")).status).toBe(200);
+  });
+
   it("the refusal does not say whether the account exists", async () => {
     await fail(user.email, fiveTimes("198.51.100.2"));
     await fail("nobody@example.test", fiveTimes("198.51.100.2"));

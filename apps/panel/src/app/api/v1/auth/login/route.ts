@@ -1,6 +1,6 @@
 import { hashPassword, withOrg, withSystem } from "@deskvoice/core";
 import { z } from "zod";
-import { UNKNOWN_IP, clientIp } from "../../../../../server/client-ip";
+import { UNKNOWN_IP, addressBucket, clientIp } from "../../../../../server/client-ip";
 import { ApiError, Reply, createSession, handlePublic, sessionCookie } from "../../../../../server/context";
 import { loginLimiter } from "../../../../../server/rate-limit";
 
@@ -19,12 +19,15 @@ const PAIR_LIMIT: RateLimit = { max: 5, windowMs: 15 * 60 * 1000 };
 const ADDRESS_LIMIT: RateLimit = { max: 20, windowMs: 15 * 60 * 1000 };
 // E-mail, de qualquer endereço: 50 em uma hora, contra quem distribui a tentativa por muitos
 // endereços. Como cada endereço dá no máximo 20 por hora a um e-mail, chegar a 50 pede pelo menos
-// 3 endereços a hora inteira (10 de uma vez); enquanto o teto está cheio, o dono também espera.
+// 3 endereços a hora inteira (10 de uma vez; em IPv6, blocos /64); enquanto o teto está cheio, o
+// dono também espera.
 const ACCOUNT_LIMIT: RateLimit = { max: 50, windowMs: 60 * 60 * 1000 };
 
 export const POST = handlePublic({ body }, async ({ request, body, deps }) => {
   const now = deps.clock.now();
-  const ip = clientIp(request.headers.get("x-forwarded-for"), deps.trustedProxyHops);
+  // O endereço como o limite o conta: IPv6 pelo /64, para quem tem um bloco inteiro não ganhar um
+  // "endereço" novo a cada tentativa.
+  const ip = addressBucket(clientIp(request.headers.get("x-forwarded-for"), deps.trustedProxyHops));
   // O bloqueio conta pelo par e-mail + endereço: errar a senha de alguém tranca só o endereço de
   // quem errou, para aquele e-mail, e o dono entra de outro lugar. Sem IP confiável o par vira
   // "e-mail + unknown", ou seja, o limite por e-mail de antes. Não há chave "ip:unknown": dividida
