@@ -79,6 +79,36 @@ describe("recordOrgEvent", () => {
   it("refuses a kind outside the vocabulary", async () => {
     await expect(withOrg(app, org, (q) => recordOrgEvent(q, "made_up" as OrgEventKind, {}, at))).rejects.toThrow(/made_up/);
   });
+
+  it("is append-only: neither the application nor the system role changes or deletes a record, but removing the author still clears it", async () => {
+    const audited = await createOrganization(app, "events append-only");
+    const author = await withOrg(app, audited, async (q) => {
+      const row = await q.one<{ id: string }>("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, 'Autora', 'x', 'admin') returning id", [
+        audited,
+        `author-${audited}@example.test`,
+      ]);
+      const id = row?.id ?? "";
+      await recordOrgEvent(q, "caller_data_exported", { phone: "+5531999998888", calls: 1, events: 2, doNotCall: false }, at, id);
+      return id;
+    });
+    const recorded = async () =>
+      (await owner.pool.query("select actor_user_id, payload from organization_events where organization_id = $1", [audited])).rows;
+    const denied = { code: "42501", message: expect.stringMatching(/permission denied/) };
+
+    for (const attempt of [
+      "update organization_events set payload = '{}'",
+      "update organization_events set actor_user_id = null",
+      "delete from organization_events",
+    ]) {
+      await expect(withOrg(app, audited, (q) => q.exec(attempt)), attempt).rejects.toMatchObject(denied);
+      await expect(withSystem(app, (q) => q.exec(`${attempt} where organization_id = $1`, [audited])), `${attempt} (system)`).rejects.toMatchObject(denied);
+    }
+    expect(await recorded()).toEqual([{ actor_user_id: author, payload: { phone: "+5531999998888", calls: 1, events: 2, doNotCall: false } }]);
+
+    // A ação da chave estrangeira roda como dona da tabela: apagar a pessoa limpa o autor e mantém o registro.
+    expect(await withOrg(app, audited, (q) => q.exec("delete from users where id = $1", [author]))).toBe(1);
+    expect(await recorded()).toEqual([{ actor_user_id: null, payload: { phone: "+5531999998888", calls: 1, events: 2, doNotCall: false } }]);
+  });
 });
 
 describe("purgeTranscripts", () => {

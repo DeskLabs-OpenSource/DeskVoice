@@ -23,5 +23,8 @@ alter table organization_events force row level security;
 create policy organization_isolation on organization_events
   using (organization_id = nullif(current_setting('app.organization_id', true), '')::uuid)
   with check (organization_id = nullif(current_setting('app.organization_id', true), '')::uuid);
-grant select, insert, update, delete on organization_events to deskvoice_app, deskvoice_system;
+-- Só de acréscimo: é auditoria, e registro que se reescreve não prova nada. Nenhum dos dois papéis
+-- altera nem apaga linha daqui. O `on delete set null` do autor continua valendo, porque a ação da
+-- chave estrangeira roda como dona da tabela, e não como quem apagou o usuário.
+grant select, insert on organization_events to deskvoice_app, deskvoice_system;
 grant usage, select on sequence organization_events_id_seq to deskvoice_app, deskvoice_system;
