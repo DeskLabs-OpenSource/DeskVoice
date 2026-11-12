@@ -1,4 +1,5 @@
-import { enqueueTask, type OrgQuery } from "@deskvoice/core";
+import { enqueueTask, withOrg, type OrgQuery } from "@deskvoice/core";
+import { loadWhatsAppConnector, sendWhatsApp } from "@deskvoice/tools/whatsapp";
 import { WahaError, sendViaWaha, wahaEnsureSession, wahaGetQr, wahaGetSession, wahaLogoutSession, wahaSessionName, wahaStartSession, wahaStopSession, type WahaSession } from "@deskvoice/tools/waha";
 import { z } from "zod";
 import en from "../i18n/en/whatsapp";
@@ -321,9 +322,24 @@ async function setServiceWanted(q: OrgQuery, session: Session, wanted: boolean, 
   );
 }
 
-/** Mensagem de teste para o WhatsApp de quem está logado. Passa pelo mesmo caminho do envio do agente. */
+/**
+ * Mensagem de teste para o WhatsApp de quem está logado. Sai pelo conector configurado — o mesmo
+ * caminho do envio de aviso — e cai no número conectado por QR
+ * Code quando é ele o conector.
+ */
 export async function sendTest(deps: ServerDeps, session: Session, to: string | null, locale: Locale): Promise<{ to: string; addressVerified: boolean }> {
   if (!to) throw new ApiError(400, "whatsapp_contact_required", "Save your own WhatsApp number in My contact first.");
-  const { addressVerified } = await waha(() => sendViaWaha(deps.waha, wahaSessionName(session.organizationId), { to, text: TEST_MESSAGE[locale] }));
+  const text = TEST_MESSAGE[locale];
+  const connector = await withOrg(deps.db, session.organizationId, (q) => loadWhatsAppConnector(q, deps.secretKey));
+  if (connector !== null && connector.type !== "waha") {
+    try {
+      const { addressVerified } = await sendWhatsApp(connector, { to, text }, { fetch: deps.fetch, lookup: deps.lookup });
+      return { to, addressVerified };
+    } catch (error) {
+      // Recusa do destino é frase da tela; o detalhe técnico vai junto e fica no log.
+      throw new ApiError(502, "whatsapp_connector_refused", error instanceof Error ? error.message : String(error));
+    }
+  }
+  const { addressVerified } = await waha(() => sendViaWaha(deps.waha, wahaSessionName(session.organizationId), { to, text }));
   return { to, addressVerified };
 }

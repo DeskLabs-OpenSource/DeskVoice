@@ -38,7 +38,7 @@ São três processos Node sobre três pacotes, um Asterisk na borda e um Postgre
 | `packages/voice-engine` | Interface `VoiceEngine`, os motores `simulated`, `gemini-live` e `openai-realtime`, conversão de áudio |
 | `packages/tools` | Interface `Tool`, descoberta por pasta, ferramentas da fundação |
 | `apps/voice` | Controle do Asterisk (ARI), servidor AudioSocket, ciclo de vida da chamada, política de saída, medição de custo |
-| `apps/routines` | Consumidor da fila: resumo pós-chamada, entrega de avisos, tarefas de acompanhamento, expiração de aprovação |
+| `apps/routines` | Consumidor da fila: resumo pós-chamada, entrega de avisos, tarefas de acompanhamento, expiração de aprovação, prazo de guarda da transcrição |
 | `apps/panel` | Painel e API: entrar, agentes, linha telefônica, chamadas ao vivo, linha do tempo, aprovações, ligações de saída, custo |
 | `deploy/` | Compose, Caddy, modelos de configuração do Asterisk |
 | WAHA (serviço `waha`) | Peça de terceiros que mantém a sessão do WhatsApp conectado por QR Code. Fica num perfil do Compose e **só existe na instalação que o pediu** em Configurações → WhatsApp (sem número conectado, custa cerca de 323 MiB de memória e 3,2 GB em disco, quase o mesmo que os cerca de 380 MiB do DeskVoice inteiro parado; medidos na 0.3.0, em 12/11/2026). O painel grava o pedido; quem baixa a imagem, sobe e remove o contêiner é o agente do kit, que lê do painel um segundo sim ou não e conta o estado do serviço na fala seguinte ([registro 0010](docs/decisions/0010-atualizar-pela-tela.md)). Quem fala com ele são o painel (conectar, QR Code, estado, mensagem de teste), a voz (`send_whatsapp`) e as rotinas (entrega de avisos), por um cliente só, `packages/tools/src/connectors/waha.ts`, num endereço fixo da rede interna. Ele não chama ninguém: nesta versão não há webhook, e o painel percebe "conectou" e "caiu" comparando o estado a cada consulta da tela ([registro 0012](docs/decisions/0012-whatsapp-por-qr-code.md)) |
@@ -100,7 +100,7 @@ Seis regras decidem onde cada coisa mora. Cada uma tem a sua doutrina.
 | Uma camada de autorização | Todo dado de produto passa por `withOrg`, com teste de isolamento gerado para toda tabela | [`isolamento.md`](docs/doctrine/isolamento.md) |
 | Fila por notificação | O banco avisa quando há tarefa. Não há polling de intervalo curto | [`sistema-vivo.md`](docs/doctrine/sistema-vivo.md) |
 | Configuração tem tela | O `.env` só guarda o que o instalador gera | [`cercas.md`](docs/doctrine/cercas.md) |
-| Tudo tem log | `call_events` é a linha do tempo da chamada e a fonte da tela | [`sistema-vivo.md`](docs/doctrine/sistema-vivo.md) |
+| Tudo tem log | `call_events` é a linha do tempo da chamada e a fonte da tela; o que acontece fora de uma chamada vai para `organization_events` | [`sistema-vivo.md`](docs/doctrine/sistema-vivo.md) |
 
 ## O que fica exposto na VPS
 

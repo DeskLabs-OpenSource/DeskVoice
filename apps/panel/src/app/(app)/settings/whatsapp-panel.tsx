@@ -233,13 +233,16 @@ export function WhatsAppPanel({ onChanged }: { onChanged(): void }) {
           </div>
         ) : null}
 
-        {up && data.status === "connected" ? (
+        {/* O teste vale para os dois conectores: número conectado por QR Code e endereço do operador. */}
+        {up && (data.status === "connected" || data.replaces !== null) ? (
           <>
-            <div className="grid gap-1">
-              <p className={data.phone ? "data text-[1.2rem]" : undefined}>{data.phone ? fill(t.connectedNumber, { phone }) : t.connectedUnknown}</p>
-              {data.connectedAt ? <p className="text-muted">{fill(t.since, { when: formatDateTime(data.connectedAt, locale) })}</p> : null}
-            </div>
-            {confirming === "disconnect" ? (
+            {data.status === "connected" ? (
+              <div className="grid gap-1">
+                <p className={data.phone ? "data text-[1.2rem]" : undefined}>{data.phone ? fill(t.connectedNumber, { phone }) : t.connectedUnknown}</p>
+                {data.connectedAt ? <p className="text-muted">{fill(t.since, { when: formatDateTime(data.connectedAt, locale) })}</p> : null}
+              </div>
+            ) : null}
+            {data.status === "connected" && confirming === "disconnect" ? (
               <Notice tone="fail">
                 <p>{fill(t.disconnectConfirm, { phone })}</p>
                 <div className="mt-1 flex flex-wrap gap-2">
@@ -263,16 +266,18 @@ export function WhatsAppPanel({ onChanged }: { onChanged(): void }) {
                   >
                     {t.sendTest}
                   </Button>
-                  <Button variant="ghost" onClick={() => setConfirming("disconnect")}>
-                    {t.disconnect}
-                  </Button>
+                  {data.status === "connected" ? (
+                    <Button variant="ghost" onClick={() => setConfirming("disconnect")}>
+                      {t.disconnect}
+                    </Button>
+                  ) : null}
                 </div>
                 {tested ? (
                   <span role="status" className={tested.addressVerified ? "text-ok" : "text-warn"}>
                     {fill(tested.addressVerified ? t.testSent : t.testUnverified, { to: formatPhone(tested.to) })}
                   </span>
                 ) : (
-                  <p className="text-muted">{t.testHint}</p>
+                  <p className="text-muted">{data.replaces ? t.testHintConnector : t.testHint}</p>
                 )}
                 {test.error ? <Notice tone="fail">{test.error}</Notice> : null}
               </div>

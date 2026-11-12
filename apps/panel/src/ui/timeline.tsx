@@ -76,7 +76,7 @@ export function Timeline({ events, live, agentName }: { events: CallEvent[]; liv
           body: (
             <div className={`grid max-w-[46ch] gap-0.5 rounded-md px-4 py-2.5 ${user ? "bg-sunken" : "border border-line bg-surface"}`}>
               {previous !== event.kind ? <span className="text-[0.8rem] font-bold text-muted">{user ? t.speakers.user : agentName || t.speakers.agent}</span> : null}
-              <p className="leading-relaxed">{text(p.text)}</p>
+              {p.purged === true ? <p className="text-muted italic">{e.transcript_purged}</p> : <p className="leading-relaxed">{text(p.text)}</p>}
             </div>
           ),
         };
