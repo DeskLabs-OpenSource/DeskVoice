@@ -1,0 +1,2 @@
+depois da chamada nova: 2|50
+depois de restaurar: 1|25

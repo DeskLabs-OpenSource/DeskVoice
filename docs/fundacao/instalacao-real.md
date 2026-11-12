@@ -190,3 +190,22 @@ Defeitos achados aqui, com conserto em PR próprio:
 - **A frase contrária da janela de 10 minutos.**
 - **O número de memória antigo na tela do WhatsApp.** A tela diz "O DeskVoice inteiro, sem ele, usa cerca de 320 MB".
 - **O mascaramento da saída, que trocou `routines` por `***`.** A linha `@deskvoice/routines@0.0.0` parecia um e-mail.
+
+## Instalador duas vezes, backup e restauração, troca de senha (2026-11-12)
+
+Na VPS da parceira, na 0.4.0 instalada pela tela, sem linha nem motor. As saídas inteiras estão em [`registros/2026-11-12-provas-destrutivas/`](registros/2026-11-12-provas-destrutivas/), com o IP trocado. Os números "N-…-contagens.txt" são organizações, usuários, chamadas e eventos de chamada.
+
+| Prova | O que se observou |
+|---|---|
+| Instalador duas vezes seguidas, na mesma versão (11.3) | `install.sh --yes` duas vezes, saída 0 nas duas. Os três arquivos de ambiente têm o mesmo `sha256` antes e depois, ou seja, nenhum segredo foi regerado. Os contêineres são os mesmos (mesmos IDs, nenhum recriado). As contagens não mudaram (1, 1, 1, 25). Nas duas rodadas o instalador avisou "Login NÃO testado: o usuário dono já existia e eu não tenho a senha dele", que é o comportamento declarado |
+| Backup (11.8) | `backup.sh` restaurou o dump num banco de rascunho, contou 20 tabelas e só então disse "Backup concluído e conferido" |
+| Restauração sem mudança | `restore.sh latest --yes`: "Restaurado… com as contagens conferidas", saída 0. As contagens são as mesmas de antes |
+| Restauração com mudança | Depois do backup, uma chamada simulada pelo painel levou o banco a 2 chamadas e 50 eventos. `restore.sh` com o backup anterior voltou o banco a 1 chamada e 25 eventos, saída 0 ([`5-antes-da-restauracao.txt`](registros/2026-11-12-provas-destrutivas/5-antes-da-restauracao.txt)) |
+| Troca de senha pelo kit (6.5) | `reset-password.sh` com a senha nova pela variável: "Senha… trocada. Sessões encerradas: 1" e "Senha trocada e conferida: entrei pela tela de entrada com a senha nova". A senha nova não aparece na saída: o `grep` por ela deu zero |
+| Saúde | `healthcheck.sh` saiu com 0 depois de cada etapa |
+
+O que não prova:
+
+- **Restauração em outro servidor** (`--with-config`): não rodou.
+- **Restauração depois de uma migration nova:** não rodou. O backup e a restauração são da mesma versão.
+- **Desempenho com banco grande:** o banco tem 84 KB de dump.
