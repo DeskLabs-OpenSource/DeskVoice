@@ -56,9 +56,15 @@ for (const [network, prefix] of [
 for (const [network, prefix] of [
   ["::", 96],
   ["64:ff9b::", 96],
+  // A faixa de uso local do NAT64 (RFC 8215) embute IPv4 como a global acima: `64:ff9b:1::a00:1`
+  // chega em `10.0.0.1` numa rede IPv6-only com NAT64.
+  ["64:ff9b:1::", 48],
   ["fc00::", 7],
   ["fe80::", 10],
   ["ff00::", 8],
+  // 6to4 (RFC 3056) e Teredo (RFC 4380) carregam o IPv4 de destino dentro do próprio endereço.
+  ["2002::", 16],
+  ["2001::", 32],
 ] as const) {
   blocked.addSubnet(network, prefix, "ipv6");
 }

@@ -1,0 +1,21 @@
+import { describe, it } from "vitest";
+
+describe("serve", () => {
+  it("abre na porta que o sistema der", () => {
+    server.listen(0, "127.0.0.1");
+  });
+
+  it("abre sempre na 3000", () => {
+    server.listen(3000);
+  });
+
+  it("abre sempre na 8080, com o objeto na linha seguinte", () => {
+    server.listen({
+      port: 8080,
+    });
+  });
+
+  it("aceita porta vinda de variável", () => {
+    server.listen(chosen);
+  });
+});
