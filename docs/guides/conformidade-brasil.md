@@ -139,6 +139,40 @@ O que reduz esse padrão, além dos controles do sistema:
   automático são recusados pelo projeto. Veja a
   [doutrina de ligações de saída](../doctrine/ligacoes-de-saida.md).
 
+## Guardar e apagar
+
+A transcrição da conversa é dado pessoal, e fica no banco até alguém apagá-la. **Não existe expurgo
+automático** no DeskVoice: não há prazo embutido e nenhuma rotina que apague sozinha. Quem responde
+pelos dados é você, e o prazo é decisão sua — a LGPD não fixa um número.
+
+Para aplicar um prazo, o comando é `install/expurgar-transcricoes.sh`. Sem `--confirmar` ele só
+conta, e é assim que se começa:
+
+```console
+$ bash install/expurgar-transcricoes.sh --dias 90
+  Prazo: 90 dia(s).
+  Transcrições de 412 conversa(s) passariam do prazo.
+  Nada foi apagado.
+
+$ bash install/expurgar-transcricoes.sh --dias 90 --confirmar
+  ✓ Expurgadas 412 transcrição(ões) de conversas com mais de 90 dia(s).
+  ✓ Conferido: não restou transcrição antiga.
+```
+
+O expurgo tira o texto e deixa um marcador no lugar: a chamada, o horário e o registro de que houve
+transcrição continuam, e o resto da linha do tempo não é tocado — resumo, custo, eventos de
+ferramenta e a lista de não ligar ficam como estão. O comando confere o resultado antes de dizer que
+terminou, e rodar de novo não reconta o que já foi expurgado.
+
+Agendar é opcional, e é escolha de quem opera:
+
+```console
+0 4 1 * * cd /caminho/DeskVoice && bash install/expurgar-transcricoes.sh --dias 90 --confirmar
+```
+
+Expurgar não é backup: o que saiu não volta. Se você precisa do histórico da conversa para uma
+disputa, resolva isso antes de rodar.
+
 ## Para implementadores
 
 Se você instala o DeskVoice para clientes:
