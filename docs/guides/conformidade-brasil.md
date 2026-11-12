@@ -60,13 +60,13 @@ quem descobre no meio da conversa. Se existe obrigação legal de informar no se
 Textos de partida, para copiar e adaptar ao seu negócio:
 
 ```text
-pt-BR: "Olá! Aqui é a Lia, assistente virtual da Clínica Aurora. Esta conversa é atendida por
+pt-BR: "Olá, aqui é a Lia, assistente virtual da Clínica Aurora. Esta conversa é atendida por
 uma inteligência artificial e pode ser registrada para melhorar o atendimento."
 
-en: "Hello! This is Lia, the virtual assistant at Aurora Clinic. This call is handled by an
+en: "Hello, this is Lia, the virtual assistant at Aurora Clinic. This call is handled by an
 artificial intelligence and may be recorded to improve the service."
 
-es: "¡Hola! Soy Lia, la asistente virtual de la Clínica Aurora. Esta llamada es atendida por
+es: "Hola, soy Lia, la asistente virtual de la Clínica Aurora. Esta llamada es atendida por
 una inteligencia artificial y puede quedar registrada para mejorar el servicio."
 ```
 
@@ -100,7 +100,7 @@ confundem.
 | Áudio e transcrição da chamada, motor `gemini-live` | Google — o provedor **não publica** a lista de países de processamento da Gemini Developer API | pedido oficial em aberto no fórum do Google (02/11/2026); quem precisa de região usa Vertex AI, com região explícita |
 | Áudio e transcrição da chamada, motor `openai-realtime` | OpenAI — depende do **projeto/região** escolhidos na conta (há data residency nos Estados Unidos, na Europa, no Reino Unido, no Japão, entre outros) | documentação da OpenAI sobre os seus dados, consultada em 12/11/2026 |
 | Chamada com o motor `simulated` | **Nada sai**: roda neste servidor | código do motor |
-| Banco, transcrições e gravações | a sua VPS, no país do contrato dela | a instalação |
+| Banco e transcrições | a sua VPS, no país do contrato dela | a instalação |
 
 Três cuidados, e o primeiro é o que mais se erra:
 
@@ -109,9 +109,9 @@ Três cuidados, e o primeiro é o que mais se erra:
    dela; não é escolha do DeskVoice.
 2. **"Servidor no Brasil" não é argumento sozinho**: o banco pode estar no Brasil e o áudio sair
    para fora do mesmo jeito. As duas informações são independentes.
-3. **Não prometa região que o provedor não declara.** É por isso que a tela de Configurações →
-   motor diz "o provedor não declara o país" em vez de escrever um país: informação sem fonte e
-   sem data envelhece calada, e o contrato continua valendo.
+3. **Não prometa região que o provedor não declara.** Informação sem fonte e sem data envelhece
+   calada, e o contrato continua valendo. Se você precisa de região garantida, contrate o
+   provedor por um caminho que a declare por escrito.
 
 ## Ligações de saída
 
