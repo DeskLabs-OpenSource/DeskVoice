@@ -2,7 +2,7 @@ import { withOrg, withSystem, type ApprovalOutcome } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
 import { startFakeWaha } from "../../test/fake-waha";
-import { createFixture, createUser, eventsOf, fakeFetch, fakeLookup, putSetting, notificationsOf, putWhatsAppConnector, secretKey, t0, type FakeContext } from "../../test/helpers";
+import { createFixture, createUser, eventsOf, fakeFetch, fakeLookup, putSetting, notificationsOf, putWhatsAppConnector, secretKey, t0, type FakeContext, assinada, semAssinatura } from "../../test/helpers";
 import { runTool } from "../run-tool";
 import { wahaSessionName } from "../connectors/waha";
 import { createSendWhatsApp } from "./send_whatsapp";
@@ -51,7 +51,7 @@ describe("send_whatsapp", () => {
     const result = await runTool(tool(net), { text: "Seu horário é amanhã às 10h." }, ctx);
 
     expect(result).toMatchObject({ ok: true, data: { to: CALLER } });
-    expect(net.requests).toEqual([
+    expect(net.requests.map((r) => ({ ...r, headers: semAssinatura(r.headers) }))).toEqual([
       {
         url: "https://wa.example.com/send",
         method: "POST",
@@ -59,6 +59,7 @@ describe("send_whatsapp", () => {
         body: { to: CALLER, text: "Seu horário é amanhã às 10h.", callId: ctx.callId },
       },
     ]);
+    expect(net.requests.every(assinada)).toBe(true);
   });
 
   it("em chamada feita pelo agente, envia direto para o número chamado, sem confirmação, mesmo com trust_caller_id desligado", async () => {

@@ -4,7 +4,7 @@ import { secretKey } from "../../../packages/tools/test/helpers";
 import type { RoutineDeps } from "../src/types";
 
 export { createCall, createOrganization, openTestDbs } from "../../../packages/core/test/helpers";
-export { createUser, eventsOf, fakeFetch, fakeLookup, notificationsOf, putSetting, putWhatsAppConnector, secretKey, tasksOf } from "../../../packages/tools/test/helpers";
+export { createUser, eventsOf, fakeFetch, fakeLookup, notificationsOf, putSetting, putWhatsAppConnector, secretKey, tasksOf, assinada, semAssinatura } from "../../../packages/tools/test/helpers";
 
 // As rotinas vivem em 2031: o que enfileiram nunca fica elegível para os testes da fila (2001)
 // nem do runner (2003).

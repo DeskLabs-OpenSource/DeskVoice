@@ -130,3 +130,15 @@ export const fakeLookup =
   (table: Record<string, string[]> = {}) =>
   async (host: string): Promise<string[]> =>
     table[host] ?? ["93.184.216.34"];
+
+/**
+ * Tira os headers da assinatura (`x-deskvoice-timestamp` e `x-deskvoice-signature`): o instante muda
+ * a cada envio, então quem compara a requisição inteira não pode fixá-los. Os demais headers
+ * continuam comparados por igualdade.
+ */
+export const semAssinatura = (headers: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.entries(headers).filter(([nome]) => !nome.startsWith("x-deskvoice-")));
+
+/** A assinatura está presente e no formato `sha256=<64 hex>`, qualquer que seja o segredo do teste. */
+export const assinada = (request: RecordedRequest): boolean =>
+  /^sha256=[0-9a-f]{64}$/.test(request.headers["x-deskvoice-signature"] ?? "");

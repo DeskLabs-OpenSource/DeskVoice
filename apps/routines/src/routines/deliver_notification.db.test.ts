@@ -2,7 +2,7 @@ import { encryptSecret, withSystem } from "@deskvoice/core";
 import { wahaSessionName } from "@deskvoice/tools";
 import { afterAll, describe, expect, it } from "vitest";
 import { startFakeWaha } from "../../../../packages/tools/test/fake-waha";
-import { createCall, createNotification, createOrganization, depsFor, fakeFetch, fakeLookup, openTestDbs, putSetting, putWhatsAppConnector, secretKey, t0, task } from "../../test/helpers";
+import { createCall, createNotification, createOrganization, depsFor, fakeFetch, fakeLookup, openTestDbs, putSetting, putWhatsAppConnector, secretKey, t0, task, assinada, semAssinatura } from "../../test/helpers";
 import deliverNotification from "./deliver_notification";
 
 const { app, owner } = openTestDbs();
@@ -34,9 +34,10 @@ describe("deliver_notification", () => {
     const id = await createNotification(app, org, "whatsapp", "+5531988887777", callId);
     const net = fakeFetch();
     await run(org, id, net);
-    expect(net.requests).toEqual([
-      { url: "https://wa.example.com/send", method: "POST", headers: { authorization: "Bearer wa-token", "content-type": "application/json" }, body: { to: "+5531988887777", text: "Cliente pediu retorno.", callId } },
+    expect(net.requests.map((r) => ({ ...r, headers: semAssinatura(r.headers) }))).toEqual([
+      { url: "https://wa.example.com/send", method: "POST", headers: { authorization: "Bearer wa-token", "content-type": "application/json", "idempotency-key": id }, body: { to: "+5531988887777", text: "Cliente pediu retorno.", callId } },
     ]);
+    expect(net.requests.every(assinada)).toBe(true);
     expect(await rowOf(id)).toEqual({ status: "sent", error: null });
   });
 
@@ -46,9 +47,10 @@ describe("deliver_notification", () => {
     const id = await createNotification(app, org, "webhook", "alertas");
     const net = fakeFetch();
     await run(org, id, net);
-    expect(net.requests).toEqual([
+    expect(net.requests.map((r) => ({ ...r, headers: semAssinatura(r.headers) }))).toEqual([
       { url: "https://alerts.example.com/in", method: "POST", headers: { authorization: "Bearer hook-token", "content-type": "application/json" }, body: { notificationId: id, callId: null, body: "Cliente pediu retorno." } },
     ]);
+    // Este é o webhook de alerta (`webhooks.allowed`), outro caminho: não assina.
     expect(await rowOf(id)).toEqual({ status: "sent", error: null });
   });
 
