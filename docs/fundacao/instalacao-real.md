@@ -235,18 +235,19 @@ O que continua sem prova:
 
 ## Ensaio da volta automática numa máquina real (2026-11-12)
 
-Na VPS da parceira, pelo terminal, com um roteiro guardado em [`registros/2026-11-12-ensaio-da-volta/ensaio-volta.sh.txt`](registros/2026-11-12-ensaio-da-volta/ensaio-volta.sh.txt). A versão "doente" não existe publicada. A falha foi induzida de fora: enquanto o atualizador esperava a saúde, um laço derrubava o contêiner do painel sempre que ele aparecia na imagem da 0.5.0. O prazo da saúde foi baixado para 60 s (`DESKVOICE_HEALTH_TIMEOUT=60`).
+Na VPS da parceira, pelo terminal, com um roteiro guardado em [`registros/2026-11-12-ensaio-da-volta/ensaio-volta.sh.txt`](registros/2026-11-12-ensaio-da-volta/ensaio-volta.sh.txt). A versão "doente" não existe publicada. A falha foi induzida de fora: um laço derrubava o contêiner do painel sempre que ele aparecia na imagem da 0.5.0. O prazo da saúde foi baixado para 60 s (`DESKVOICE_HEALTH_TIMEOUT=60`), mas não chegou a contar: o painel caiu enquanto o Compose ainda subia as peças, e a volta partiu do passo anterior à espera da saúde.
 
 | Passo | O que se observou |
 |---|---|
 | 1. Descer da 0.5.0 para a 0.4.0 (`update.sh --to 0.4.0`) | Saída 0, com backup, as três imagens da 0.4.0 e as peças respondendo. O banco tem a migration da 0.5.0 (a coluna `output_kept`), e a 0.4.0 rodou com ela. Descer não é caminho anunciado: aqui funcionou porque a migration só acrescenta uma coluna |
-| 2. Subir para a 0.5.0 com o painel derrubado | O laço derrubou o painel 0.5.0 às 16:08:26Z. O atualizador mostrou a saúde e "Voltando para a versão 0.4.0", voltou o código e as imagens, restaurou o banco do backup feito antes da tentativa ("contagens conferidas") e terminou com "A atualização para 0.5.0 não deu certo e foi desfeita: você está de volta na versão 0.4.0… e tudo respondendo". A saída foi 1, como deve ser numa volta ([`2-subir-com-falha.txt`](registros/2026-11-12-ensaio-da-volta/2-subir-com-falha.txt)) |
+| 2. Subir para a 0.5.0 com o painel derrubado | O laço derrubou o painel 0.5.0 às 16:08:26Z. O Compose acusou "dependency panel failed to start", e o atualizador disse "Os serviços da versão 0.5.0 não subiram". Em seguida mostrou a saúde (painel em falha) e "Voltando para a versão 0.4.0", voltou o código e as imagens, restaurou o banco do backup feito antes da tentativa ("contagens conferidas") e terminou com "A atualização para 0.5.0 não deu certo e foi desfeita: você está de volta na versão 0.4.0… e tudo respondendo". A saída foi 1, como deve ser numa volta ([`2-subir-com-falha.txt`](registros/2026-11-12-ensaio-da-volta/2-subir-com-falha.txt)) |
 | Depois da volta | Versão 0.4.0, as três imagens da 0.4.0 rodando, contagens iguais às de antes (1 chamada, 25 eventos) e `healthcheck.sh` com saída 0 |
 | 3. Subir de novo, sem sabotagem | Saída 0, com "O atualizador da versão 0.5.0 assumiu a atualização a partir da 0.4.0". A máquina terminou na 0.5.0, onde estava, com a saúde em 0 |
 
 O que isto prova:
 
-- o caminho inteiro da volta numa máquina real: código, imagens com a etiqueta `rollback`, restauração do banco e as peças de volta respondendo, com a mensagem certa.
+- o caminho inteiro da volta numa máquina real, disparado por "os serviços não subiram": código, imagens com a etiqueta `rollback`, restauração do banco e as peças de volta respondendo, com a mensagem certa.
+- **Não prova a volta disparada pelo prazo da saúde** (`wait_healthy` esgotado com as peças de pé). O código da volta é o mesmo, mas esse gatilho não rodou aqui.
 
 O que isto não prova:
 
