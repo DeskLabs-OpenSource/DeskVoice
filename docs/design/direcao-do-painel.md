@@ -71,8 +71,8 @@ Ela é um token como os outros, e só serve para isso.
 
 ## Validação do dono
 
-A direção acima está escrita, mas o dono do projeto não a validou. Até aqui ela foi decisão do
-construtor. Pedido de decisão, no formato do [`GOVERNANCE.md`](../../GOVERNANCE.md):
+A direção acima foi escrita pelo construtor e validada pelo dono do projeto em 12/11/2026 (a
+resposta está no fim desta seção). Pedido de decisão, no formato do [`GOVERNANCE.md`](../../GOVERNANCE.md):
 
 ### Decisão: a direção visual do painel, como está escrita neste documento, vale como a direção do projeto?
 
@@ -101,4 +101,4 @@ trocar a direção depois é trocar tokens e telas, sem tocar em dado.
 A direção não foi testada com quem opera o painel. O contraste foi calculado, não medido em tela.
 
 #### Resposta do dono
-<!-- O dono escreve aqui: "Validado em AAAA-MM-DD" ou o que muda. -->
+**[dono] Validado em 2026-11-12: opção A.** Resposta literal, no chat do maestro de PRs, às 15h15: "Pode seguir sua recomendação nas decisoes em aberto". A recomendação deste pedido era A. A direção escrita acima é a direção do projeto, e mudar de direção pede um pedido de decisão novo.
