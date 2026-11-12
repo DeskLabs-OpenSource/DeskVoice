@@ -39,8 +39,6 @@ const common: CommonDictionary = {
     attention: "Need attention: {n}",
     checking: "Checking the system.",
     unreachable: "Could not check the system.",
-    parts: { panel: "Panel", database: "Database", asterisk: "Telephony server", trunk: "Phone line", engine: "Voice engine" },
-    status: { ok: "working", warn: "attention", fail: "failing" },
   },
   callStatus: {
     ringing: "Ringing",

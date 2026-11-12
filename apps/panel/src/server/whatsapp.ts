@@ -167,8 +167,15 @@ async function record(q: OrgQuery, now: Date, session: WahaSession | null): Prom
   return after;
 }
 
-/** O estado para a tela. Com uma conexão em curso, pergunta ao WAHA e grava o que mudou. */
-export async function observe(deps: ServerDeps, org: Org, organizationId: string): Promise<WhatsAppView> {
+/**
+ * O estado para a tela. Com uma conexão em curso, pergunta ao WAHA e grava o que mudou: é essa
+ * gravação que gera o aviso "o WhatsApp caiu" mesmo com Configurações fechada.
+ *
+ * `withQr: false` é a leitura da saúde, que roda em toda aba aberta a cada minuto: ela não busca a
+ * imagem do QR Code, que só a tela de Configurações mostra.
+ */
+export async function observe(deps: ServerDeps, org: Org, organizationId: string, options: { withQr?: boolean } = {}): Promise<WhatsAppView> {
+  const withQr = options.withQr ?? true;
   const stored = await org((q) => readStored(q, deps.clock.now()));
   if (!deps.waha.apiKey) return view(stored, false);
   // Sem o serviço de pé não há WAHA, e sem pedido nenhum não existe sessão nele: não há o que perguntar.
@@ -190,7 +197,7 @@ export async function observe(deps: ServerDeps, org: Org, organizationId: string
   }
   const row = await org((q) => record(q, deps.clock.now(), session));
   let qr: string | null = null;
-  if (row?.status === "qr") {
+  if (withQr && row?.status === "qr") {
     try {
       qr = `data:image/png;base64,${await wahaGetQr(deps.waha, name)}`;
     } catch (error) {

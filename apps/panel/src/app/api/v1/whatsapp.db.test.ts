@@ -6,6 +6,7 @@ import { AGENT_TOKEN, NOW, call, createOrganization, createUser, startPanel } fr
 import type { WhatsAppView } from "../../../server/whatsapp";
 import { GET as readSetting, PUT as writeSetting } from "./settings/[key]/route";
 import { POST as agent } from "./system/agent/route";
+import { GET as health } from "./system/health/route";
 import { POST as connect } from "./whatsapp/connect/route";
 import { POST as disconnect } from "./whatsapp/disconnect/route";
 import { GET as read } from "./whatsapp/route";
@@ -131,6 +132,18 @@ describe("connecting by QR code", () => {
     expect((await state(owner.cookie)).available).toBe(false);
     expect(refusal(await start(owner.cookie))).toEqual([409, "whatsapp_unavailable"]);
     expect(await connector(org)).toBeNull();
+  });
+
+  it("the health check, which every open tab reads each minute, asks the WAHA for the state but never fetches the QR image", async () => {
+    const { owner, session } = await newOrg("wa health no qr");
+    expect((await start(owner.cookie)).data).toMatchObject({ status: "qr" });
+    waha.requests.length = 0;
+    const result = await call(health, { cookie: owner.cookie });
+    expect(result.status).toBe(200);
+    expect(wahaCalls().some((request) => request.includes(`/sessions/${session}`))).toBe(true);
+    expect(wahaCalls().filter((request) => request.includes("/auth/qr"))).toEqual([]);
+    // A tela de Configurações continua trazendo a imagem.
+    expect((await state(owner.cookie)).qr).toBe(`data:image/png;base64,${QR_PNG}`);
   });
 
   it("creates the session, makes the connected number the connector and serves the QR code from the panel itself", async () => {

@@ -1,3 +1,5 @@
+// Só tipos: o compilador os apaga, e nada do servidor chega ao navegador.
+import type { HealthLine, HealthStatus } from "../server/health";
 export type Role = "owner" | "admin" | "operator";
 export interface Me {
   name: string;
@@ -99,8 +101,11 @@ export interface ToolInfo {
   description: string;
 }
 
-export type HealthStatus = "ok" | "warn" | "fail";
-export type Health = Record<"panel" | "database" | "asterisk" | "trunk" | "engine", { status: HealthStatus; detail: string }>;
+export type { HealthLine, HealthStatus };
+export interface HealthReport {
+  worst: HealthStatus;
+  checks: HealthLine[];
+}
 
 export interface PanelNotification {
   id: string;
