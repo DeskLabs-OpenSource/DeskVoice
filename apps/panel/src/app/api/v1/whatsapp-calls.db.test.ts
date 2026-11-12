@@ -66,7 +66,13 @@ const start = (cookie: string) => call(connect, { method: "POST", cookie, body: 
 const refusal = (result: { status: number; code: string | undefined }) => [result.status, result.code];
 const notices = async (org: string): Promise<string[]> =>
   (await withOrg(panel.app, org, (q) => q.many<{ body: string }>("select body from notifications where channel = 'panel' order by created_at, id"))).map((row) => row.body);
-const nobodyWants = () => withSystem(panel.app, (q) => q.exec("update whatsapp_call_sessions set service_wanted = false"));
+// O banco é um só entre os arquivos de teste: o pedido do WAHA que outro arquivo deixou também sai,
+// para a resposta do agente ser conferida inteira.
+const nobodyWants = () =>
+  withSystem(panel.app, async (q) => {
+    await q.exec("update whatsapp_call_sessions set service_wanted = false");
+    await q.exec("update whatsapp_sessions set service_wanted = false");
+  });
 const sessionOf = (org: string) => {
   const found = wacalls.byName(`deskvoice_${org}`);
   if (!found) throw new Error("no WaCalls session for the organization");
