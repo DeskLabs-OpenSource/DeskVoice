@@ -23,10 +23,27 @@ updates:
 
   # A base das imagens (FROM no Dockerfile) é fixada por versão e resumo; sem quem a atualize, ela
   # congela as correções de segurança do Node e do Alpine. O Dependabot troca etiqueta e resumo
-  # juntos. As imagens do deploy/docker-compose.yml (Postgres, Caddy, Asterisk, WAHA) e do CI não
-  # entram aqui: sobem à mão, com o resumo conferido no registro.
+  # juntos. As imagens do CI sobem à mão, com o resumo conferido no registro.
   - package-ecosystem: docker
     directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+    # O projeto está no Node 22 (.nvmrc e engines). Trocar de versão maior do Node é decisão, com
+    # PR próprio que mexe nos dois juntos, e não uma atualização de base.
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+
+  # As imagens de terceiros do deploy/docker-compose.yml, fixadas por versão e resumo. Postgres e
+  # Caddy estão escritos por extenso; Asterisk e WAHA vêm dentro de ${VAR:-imagem@sha256:…}, e não
+  # se sabe se o Dependabot enxerga imagem dentro de interpolação. Conferir na primeira execução
+  # (Insights → Dependency graph → Dependabot); a que ele não enxergar continua subindo à mão.
+  # O Asterisk está fixado só por resumo, sem etiqueta: sem etiqueta não há "versão mais nova", e
+  # ele sobe à mão mesmo que o Dependabot o enxergue.
+  - package-ecosystem: docker-compose
+    directory: /deploy
     schedule:
       interval: weekly
     commit-message:
