@@ -1,0 +1,21 @@
+
+▶ 1 de 5 · Conferindo a máquina
+  ⚠ Sistema almalinux 9.8: não é testado. Seguindo porque você pediu com --force.
+  ✓ Processador: x86_64
+  ✓ Memória: 11699 MB
+  ✓ Disco: 278 GB livres
+  ✓ Docker e compose: 5.7.1
+  ✓ Versão: 0.3.0, a publicada mais recente
+
+▶ 2 de 5 · Conferindo a rede (é aqui que ligação fica muda)
+  ✓ IP público <IP-da-VPS>, direto na placa de rede desta máquina
+  ✓ Portas 5060/udp e 10000-10200/udp livres nesta máquina
+  ✓ Portas 80 e 443 disponíveis (o painel só as usa com domínio, para o HTTPS)
+  O que foi conferido é esta máquina. Não dá para provar daqui que o provedor deixa o áudio (UDP)
+  passar: a prova final é a primeira ligação, pelo teste que fica na tela Linha do painel.
+
+▶ 3 de 5 · Algumas perguntas
+
+✗ A resposta em DESKVOICE_ORG_NAME não vale: o nome ficou vazio ou tem espaço sobrando no começo ou no fim.
+  O que fazer: Corrija o valor de DESKVOICE_ORG_NAME e rode de novo.
+  Se precisar de ajuda, rode: bash install/diagnose.sh

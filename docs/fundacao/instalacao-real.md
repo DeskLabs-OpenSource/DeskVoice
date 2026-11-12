@@ -127,3 +127,28 @@ Defeito achado na ponte: pela entrada única, o 404 da rota do agente vinha do *
 - Conversa por voz depois das atualizações.
 - Instalação numa máquina limpa: a segunda VPS também é compartilhada.
 
+
+## Na VPS da parceira, com AlmaLinux (2026-11-12)
+
+Uma VPS cedida pela HostGator, parceira de infraestrutura do projeto, dedicada ao DeskVoice e sem nenhum outro sistema. Quem conduziu foi a sessão que mantém o projeto, por SSH. As saídas estão guardadas, inteiras, em [`registros/2026-11-12-vps-parceira/`](registros/2026-11-12-vps-parceira/), com o IP trocado por `<IP-da-VPS>`.
+
+| Campo | Valor |
+|---|---|
+| Máquina antes de qualquer coisa | AlmaLinux 9.8, x86_64, 4 vCPU, 12 GB de memória, 295 GB de disco (3,7 GB usados). Já vinha com `docker-ce` 29.9.3, git e Compose v5, mas com o serviço do Docker desligado. Sem `ufw`, `firewalld` inativo, SELinux Disabled ([`0-maquina-antes.txt`](registros/2026-11-12-vps-parceira/0-maquina-antes.txt)) |
+| Por que AlmaLinux | Quem compra VPS na HostGator escolhe o sistema e recebe Ubuntu. Esta máquina foi cedida pela HostGator já pronta, com AlmaLinux, segundo o dono do projeto. Ele decidiu que o DeskVoice deve ser compatível com AlmaLinux também |
+
+| Rodada | O que se observou |
+|---|---|
+| 1. A linha única do README, `curl … get.sh \| bash -s -- --yes` | O `get.sh` clonou na 0.3.0. O instalador parou no passo 1: "Este sistema (almalinux 9.8) não é Ubuntu 22.04+ nem Debian 12+". Nada foi instalado ([`1-linha-unica.txt`](registros/2026-11-12-vps-parceira/1-linha-unica.txt)) |
+| 2. `bash install/install.sh --force --yes` | Parou: o usuário não conseguia falar com o Docker, porque o serviço estava parado ([`2-force-docker-parado.txt`](registros/2026-11-12-vps-parceira/2-force-docker-parado.txt)) |
+| Passo à mão | `systemctl enable --now docker`, feito pela sessão. Não fica na saída de nenhuma rodada |
+| 3a. `--force --yes` de novo | Passos 1 e 2 em ok (Docker e Compose, versão 0.3.0, IP público na placa, portas livres). Parou nas perguntas: sem terminal, `DESKVOICE_ORG_NAME` vazio ([`3a-force-sem-respostas.txt`](registros/2026-11-12-vps-parceira/3a-force-sem-respostas.txt)) |
+| 3b. `--force --yes` com `DESKVOICE_ORG_NAME` e `DESKVOICE_OWNER_*` | Instalação inteira contra as imagens publicadas da 0.3.0: migrations, dono criado, peças respondendo, agente agendado, entrada única e login conferidos. Painel só local, em `127.0.0.1:3080`, porque não há domínio ([`3b-force-com-respostas.txt`](registros/2026-11-12-vps-parceira/3b-force-com-respostas.txt)). A senha do dono foi gerada no servidor e não aparece em nenhuma saída |
+| Saúde | `install/healthcheck.sh` saiu com 0. Avisos esperados: nenhuma linha, nenhum motor, e o agente de atualização ainda sem falar com o painel no primeiro minuto ([`4-healthcheck.txt`](registros/2026-11-12-vps-parceira/4-healthcheck.txt)) |
+
+O que isto prova e o que não prova:
+
+- Prova que a 0.3.0 publicada roda em AlmaLinux 9.8 numa VPS da parceira, desde que o serviço do Docker seja ligado à mão e o instalador rode com `--force`.
+- Não prova a linha única sem nenhuma intervenção nesse sistema. Ela parou no passo 1, e o conserto (aceitar AlmaLinux e ligar o Docker parado) vem num PR próprio, que só se prova rodando de novo numa máquina dessas.
+- Não prova `firewalld` ativo nem SELinux em Enforcing, porque a máquina não tinha nenhum dos dois.
+- Não prova ligação: não há linha nem motor configurados.
