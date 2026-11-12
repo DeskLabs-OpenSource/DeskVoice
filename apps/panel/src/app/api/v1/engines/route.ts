@@ -8,9 +8,8 @@ export const GET = handle({}, async ({ q }) => {
   return (await listEngines()).map((engine) => ({
     id: engine.id,
     label: engine.label,
-    provedor: engine.provedor,
-    paisDeProcessamento: engine.paisDeProcessamento,
-    fonteDoPais: engine.fonteDoPais,
+    provider: engine.provider,
+    processingLocation: engine.processingLocation,
     requiresKey: !engine.keyless,
     voices: engine.voices ?? [],
     defaultVoice: engine.defaultVoice ?? null,

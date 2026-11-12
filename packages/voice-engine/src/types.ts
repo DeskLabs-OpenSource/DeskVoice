@@ -126,25 +126,37 @@ export interface KeyCheckOptions {
   schedule?: (fn: () => void, delayMs: number) => () => void;
 }
 
-/** Uma voz do provedor, com o descritor que a documentação dele usa ("Warm", "Bright"). */
+/** Uma voz do provedor. `style` é o descritor que a documentação dele usa ("Warm", "Bright"). */
 export interface EngineVoice {
   id: string;
   style?: string;
+  /** O provedor recomenda esta voz. A tela escreve o rótulo no idioma dela. */
+  recommended?: boolean;
 }
+
+/** De onde veio uma declaração do provedor, como `pricing.checkedOn`: endereço e dia conferido. */
+export interface LocationSource {
+  url: string;
+  /** `AAAA-MM-DD`. */
+  checkedOn: string;
+}
+
+/**
+ * Onde o áudio é processado. País só existe com fonte: o tipo não deixa declarar um sem a outra.
+ * `undeclared` é o provedor que não publica o lugar, e isso precisa aparecer na tela, porque
+ * silêncio ali se confunde com garantia.
+ */
+export type ProcessingLocation =
+  | { kind: "this-server" }
+  | { kind: "undeclared" }
+  | { kind: "country"; country: string; source: LocationSource };
 
 export interface VoiceEngine {
   id: string;
   label: string;
-  /** Quem processa o áudio: `google`, `openai`, ou `nenhum` (o motor simulado roda aqui mesmo). */
-  provedor: string;
-  /**
-   * Onde o áudio é processado, quando o provedor declara. `neste-servidor` é o motor simulado;
-   * `desconhecido` é o provedor que não publica o lugar de processamento — e isso precisa aparecer
-   * na tela, porque silêncio ali se confunde com garantia.
-   */
-  paisDeProcessamento: string | "neste-servidor" | "desconhecido";
-  /** De onde veio a declaração. Fora de `neste-servidor`/`desconhecido`, país sem fonte não vale. */
-  fonteDoPais: { url: string; consultadoEm: string } | null;
+  /** Quem processa o áudio: `google`, `openai`, ou `none` (o motor simulado roda aqui mesmo). */
+  provider: string;
+  processingLocation: ProcessingLocation;
   /** As vozes que a tela oferece. */
   voices?: readonly EngineVoice[];
   /** A voz usada quando o agente não escolheu nenhuma. */

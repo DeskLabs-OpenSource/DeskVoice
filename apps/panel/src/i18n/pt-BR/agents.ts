@@ -29,6 +29,7 @@ const agents = {
   voiceDefault: "Padrão do motor ({voice})",
   voiceDefaultNone: "Padrão do motor",
   voiceCustom: "{voice} (fora da lista do motor)",
+  voiceRecommended: "recomendada pelo provedor",
   language: "Idioma da conversa",
   tools: "Ferramentas",
   toolsLead: "O que este agente pode fazer durante a ligação.",

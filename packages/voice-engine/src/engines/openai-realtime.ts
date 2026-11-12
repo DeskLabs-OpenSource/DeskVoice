@@ -37,8 +37,8 @@ const DEFAULT_VOICE = "marin";
 // Vozes do Realtime, conferidas em 2026-11-12 (developers.openai.com, guia de conversas Realtime).
 // A documentação recomenda marin e cedar pela qualidade; ela não descreve o estilo de cada uma.
 const VOICES = [
-  { id: "marin", style: "Recommended" },
-  { id: "cedar", style: "Recommended" },
+  { id: "marin", recommended: true },
+  { id: "cedar", recommended: true },
   { id: "alloy" },
   { id: "ash" },
   { id: "ballad" },
@@ -143,13 +143,12 @@ export function usageOf(usage: RealtimeUsage): Usage {
 const engine: VoiceEngine = {
   id: "openai-realtime",
   label: "OpenAI Realtime",
-  provedor: "openai",
+  provider: "openai",
   // A OpenAI documenta data residency por projeto/região (Estados Unidos, Europa, Reino Unido,
   // Japão, entre outros) — não um país fixo por provedor. Como a instalação usa a API padrão, sem
   // projeto regional escolhido pelo operador, o lugar de processamento depende da conta dele.
   // Fonte: developers.openai.com/api/docs/guides/your-data (consultado em 12/11/2026).
-  paisDeProcessamento: "desconhecido",
-  fonteDoPais: null,
+  processingLocation: { kind: "undeclared" },
   voices: VOICES,
   defaultVoice: DEFAULT_VOICE,
   pricing: {

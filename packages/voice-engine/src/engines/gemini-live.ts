@@ -117,13 +117,12 @@ function literalSpeech(text: string, language: string): string {
 const engine: VoiceEngine = {
   id: "gemini-live",
   label: "Gemini Live (Google)",
-  provedor: "google",
+  provider: "google",
   // A Gemini Developer API não publica a lista de países onde o áudio é processado: há pedido
   // oficial em aberto no fórum do Google (discuss.ai.google.dev/t/…/195090, 02/11/2026), e a
   // resposta para quem precisa de região é usar Vertex AI com `europe-west1` e semelhantes.
   // Enquanto não houver declaração, o honesto é dizer que não se sabe.
-  paisDeProcessamento: "desconhecido",
-  fonteDoPais: null,
+  processingLocation: { kind: "undeclared" },
   voices: VOICES,
   defaultVoice: DEFAULT_VOICE,
   pricing: {

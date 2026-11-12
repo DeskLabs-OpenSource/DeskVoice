@@ -31,6 +31,7 @@ const agents: AgentsDictionary = {
   voiceDefault: "Por defecto del motor ({voice})",
   voiceDefaultNone: "Por defecto del motor",
   voiceCustom: "{voice} (fuera de la lista del motor)",
+  voiceRecommended: "recomendada por el proveedor",
   language: "Idioma de la conversación",
   tools: "Herramientas",
   toolsLead: "Lo que este agente puede hacer durante la llamada.",

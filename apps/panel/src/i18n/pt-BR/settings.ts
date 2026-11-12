@@ -10,6 +10,8 @@ const settings = {
   engineWhere: "Onde o áudio é processado: {where}.",
   engineHere: "neste servidor — nada sai da instalação",
   engineUnknown: "o provedor não declara o país; consulte a política dele",
+  /** `{date}` é o dia em que a fonte foi conferida, formatado no idioma da tela. */
+  engineSourceChecked: "fonte consultada em {date}",
   keyNew: "Cole a chave nova para trocar",
   keySave: "Salvar chave",
   keyRemove: "Remover chave",

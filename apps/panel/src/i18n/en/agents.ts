@@ -31,6 +31,7 @@ const agents: AgentsDictionary = {
   voiceDefault: "Engine default ({voice})",
   voiceDefaultNone: "Engine default",
   voiceCustom: "{voice} (not in the engine's list)",
+  voiceRecommended: "recommended by the provider",
   language: "Conversation language",
   tools: "Tools",
   toolsLead: "What this agent can do during the call.",

@@ -1,4 +1,5 @@
 // Só tipos: o compilador os apaga, e nada do servidor chega ao navegador.
+import type { EngineVoice, ProcessingLocation } from "@deskvoice/voice-engine";
 import type { KeyCheckView } from "../server/engine-key";
 import type { HealthLine, HealthStatus } from "../server/health";
 export type Role = "owner" | "admin" | "operator";
@@ -95,13 +96,11 @@ export interface Engine {
   id: string;
   label: string;
   /** Quem processa o áudio. */
-  provedor: string;
-  /** Onde o áudio é processado; `neste-servidor` e `desconhecido` são respostas válidas. */
-  paisDeProcessamento: string;
-  fonteDoPais: { url: string; consultadoEm: string } | null;
+  provider: string;
+  processingLocation: ProcessingLocation;
   requiresKey: boolean;
   /** Vozes do provedor; vazia quando o motor não oferece escolha (o simulado). */
-  voices: Array<{ id: string; style?: string }>;
+  voices: EngineVoice[];
   defaultVoice: string | null;
   keyConfigured: boolean;
   /** O último teste da chave em vigor; `null` se ela nunca foi testada. */

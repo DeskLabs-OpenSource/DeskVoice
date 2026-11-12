@@ -182,7 +182,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 <option value="">{engine?.defaultVoice ? fill(t.voiceDefault, { voice: engine.defaultVoice }) : t.voiceDefaultNone}</option>
                 {engine?.voices.map((voice) => (
                   <option key={voice.id} value={voice.id}>
-                    {voice.style ? `${voice.id} · ${voice.style}` : voice.id}
+                    {[voice.id, voice.style, voice.recommended ? t.voiceRecommended : null].filter(Boolean).join(" · ")}
                   </option>
                 ))}
                 {draft.voiceId && !engine?.voices.some((voice) => voice.id === draft.voiceId) ? <option value={draft.voiceId}>{fill(t.voiceCustom, { voice: draft.voiceId })}</option> : null}

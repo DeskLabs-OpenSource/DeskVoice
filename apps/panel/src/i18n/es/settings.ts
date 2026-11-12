@@ -12,6 +12,7 @@ const settings: SettingsDictionary = {
   engineWhere: "Dónde se procesa el audio: {where}.",
   engineHere: "en este servidor — nada sale de la instalación",
   engineUnknown: "el proveedor no declara el país; consulta su política",
+  engineSourceChecked: "fuente consultada el {date}",
   keyNew: "Pega la clave nueva para cambiarla",
   keySave: "Guardar clave",
   keyRemove: "Quitar clave",
