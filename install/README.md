@@ -87,6 +87,7 @@ Respostas para o modo `--yes` (variável de ambiente ou linha `CHAVE=valor` do a
 | `DESKVOICE_APPLY_UFW=yes` | Aplica as regras no firewall `ufw` sem perguntar. Só aceita `yes`: outro valor para com erro. Com o `ufw` inativo, não tem efeito, e o instalador diz |
 | `DESKVOICE_RTP_START`, `DESKVOICE_RTP_END` | Outra faixa de portas de áudio (padrão 10000 a 10200) |
 | `DESKVOICE_VERSION` | Uma versão publicada específica (exemplo: `0.3.0`), em vez da mais recente. Junto de `--build`, que constrói o código desta pasta, para com erro |
+| `DESKVOICE_ADOPT=yes` (ou `--adopt`) | Esta pasta adota a instalação desta máquina, feita a partir de uma pasta que não existe mais. Ver abaixo, em "Pasta movida" |
 
 Se usar um arquivo de respostas com a senha, apague-o depois da instalação.
 
@@ -175,6 +176,15 @@ para `install.sh` (também com `--dry-run`), `update.sh`, `restore.sh`, `backup.
 contêineres. Se já há um DeskVoice nesta máquina (rodando ou parado) e ele foi instalado de outra
 pasta, o script para antes de tocar em qualquer coisa e diz qual pasta é a dona e o comando a rodar
 de lá. Máquina sem nenhum contêiner do DeskVoice é instalação nova, e segue normal.
+
+**Pasta movida.** Se a pasta dona não existe mais (a instalação foi movida, ou passou para outro
+usuário), o script diz isso, em vez de mandar para ela. Para a pasta nova assumir a instalação sem
+perder os dados: copie `deploy/.env`, `deploy/app.env` e `deploy/migrate.env` da pasta antiga (ou
+do backup dela) para a nova e rode `DESKVOICE_ADOPT=yes bash install/install.sh`. Sem esses três
+arquivos o instalador para: os segredos seriam outros, e o banco que já existe recusaria a
+conexão. Com eles, tira os contêineres criados pela pasta antiga e os recria a partir da nova; os
+volumes, onde ficam os dados, têm o nome fixo do projeto e são os mesmos. Com a pasta dona ainda
+existindo, a opção para com erro: duas pastas mandariam nos mesmos contêineres.
 
 `--build` é para quem desenvolve. Imagem construída na VPS não é a que o projeto testou e
 publicou, e precisa ser reconstruída à mão a cada mudança.

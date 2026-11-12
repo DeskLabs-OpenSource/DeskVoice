@@ -20,6 +20,8 @@ case "$args" in
   *" ps -a --filter label=com.docker.compose.project=deskvoice "*)
     if [ -f "$FAKE_DIR/project_dir" ]; then cat "$FAKE_DIR/project_dir"
     elif [ -s "$FAKE_DIR/running" ]; then echo "$DESKVOICE_DEPLOY_DIR"; fi; exit 0 ;;
+  # Tirar os contêineres do projeto: os que o `up` seguinte criar levam o rótulo da pasta do teste.
+  *" down "*) rm -f "$FAKE_DIR/project_dir"; exit 0 ;;
   *" ps -q "*) if grep -qx "$last" "$FAKE_DIR/running" 2>/dev/null; then echo "cid-$last"; fi; exit 0 ;;
   *" ps "*) answer ps_output; exit 0 ;;
   *" pg_isready "*) exit "$(cat "$FAKE_DIR/pg_isready_exit" 2>/dev/null || echo 0)" ;;

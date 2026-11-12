@@ -623,7 +623,10 @@ EOF
 refuse_foreign_install() {
   local other
   other="$(foreign_install_dir)"
-  [ -z "$other" ] || die "O DeskVoice desta máquina foi instalado a partir de outra pasta ($other), e este comando está em $DEPLOY_DIR. Rodar daqui mandaria na instalação de lá: segredos novos, outra versão ou outro banco. Nada foi alterado." "Rode o comando a partir da pasta da instalação: cd $(dirname "$other") && bash install/$(basename "$0")"
+  [ -n "$other" ] || return 0
+  # Pasta que não existe mais (instalação movida, ou outro usuário): mandar para ela não tem saída.
+  [ -d "$other" ] || die "O DeskVoice desta máquina foi instalado a partir de $other, que não existe mais (a pasta foi movida ou apagada), e este comando está em $DEPLOY_DIR. Nada foi alterado." "Para esta pasta passar a ser a da instalação, sem perder os dados: copie deploy/.env, deploy/app.env e deploy/migrate.env da pasta antiga (ou do backup dela) para $DEPLOY_DIR e rode: DESKVOICE_ADOPT=yes bash $KIT_DIR/install.sh"
+  die "O DeskVoice desta máquina foi instalado a partir de outra pasta ($other), e este comando está em $DEPLOY_DIR. Rodar daqui mandaria na instalação de lá: segredos novos, outra versão ou outro banco. Nada foi alterado." "Rode o comando a partir da pasta da instalação: cd $(dirname "$other") && bash install/$(basename "$0")"
 }
 require_install() {
   local f
@@ -785,7 +788,7 @@ converge_asterisk() {
   done
   if [ -n "$stale" ]; then restart_asterisk "o contêiner ainda lê a versão antiga de $stale, e recarregar não alcança o arquivo novo"; return 0; fi
   [ -s "$ASTERISK_PENDING" ] || { rm -f "$ASTERISK_PENDING"; return 0; }
-  for f in $(sort -u "$ASTERISK_PENDING"); do modules="$modules $(asterisk_module_of "$f")"; done
+  while read -r f; do modules="$modules $(asterisk_module_of "$f")"; done < <(sort -u "$ASTERISK_PENDING")
   out="$(dc exec -T asterisk asterisk -rx "module reload$modules" 2>&1 || true)"
   wanted="$(echo "$modules" | wc -w | tr -d ' ')"
   reloaded="$(printf '%s\n' "$out" | grep -c 'reloaded successfully' || true)"
