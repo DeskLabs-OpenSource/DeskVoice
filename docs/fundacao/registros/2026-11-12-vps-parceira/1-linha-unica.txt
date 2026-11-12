@@ -1,0 +1,8 @@
+Baixando o DeskVoice em /root/DeskVoice...
+Versão baixada: 0.3.0
+
+▶ 1 de 5 · Conferindo a máquina
+
+✗ Este sistema (almalinux 9.8) não é Ubuntu 22.04+ nem Debian 12+, onde o DeskVoice é testado.
+  O que fazer: use uma VPS Ubuntu 22.04 ou mais nova; para tentar assim mesmo, rode de novo com --force
+  Se precisar de ajuda, rode: bash install/diagnose.sh

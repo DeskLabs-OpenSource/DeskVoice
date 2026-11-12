@@ -139,11 +139,11 @@ Uma VPS cedida pela HostGator, parceira de infraestrutura do projeto, dedicada a
 
 | Rodada | O que se observou |
 |---|---|
-| 1. A linha única do README, `curl … get.sh \| bash -s -- --yes` | O `get.sh` clonou na 0.3.0. O instalador parou no passo 1: "Este sistema (almalinux 9.8) não é Ubuntu 22.04+ nem Debian 12+". Nada foi instalado ([`1-linha-unica.log`](registros/2026-11-12-vps-parceira/1-linha-unica.log)) |
-| 2. `bash install/install.sh --force --yes` | Parou: o usuário não conseguia falar com o Docker, porque o serviço estava parado ([`2-force-docker-parado.log`](registros/2026-11-12-vps-parceira/2-force-docker-parado.log)) |
+| 1. A linha única do README, `curl … get.sh \| bash -s -- --yes` | O `get.sh` clonou na 0.3.0. O instalador parou no passo 1: "Este sistema (almalinux 9.8) não é Ubuntu 22.04+ nem Debian 12+". Nada foi instalado ([`1-linha-unica.txt`](registros/2026-11-12-vps-parceira/1-linha-unica.txt)) |
+| 2. `bash install/install.sh --force --yes` | Parou: o usuário não conseguia falar com o Docker, porque o serviço estava parado ([`2-force-docker-parado.txt`](registros/2026-11-12-vps-parceira/2-force-docker-parado.txt)) |
 | Passo à mão | `systemctl enable --now docker`, feito pela sessão. Não fica na saída de nenhuma rodada |
-| 3a. `--force --yes` de novo | Passos 1 e 2 em ok (Docker e Compose, versão 0.3.0, IP público na placa, portas livres). Parou nas perguntas: sem terminal, `DESKVOICE_ORG_NAME` vazio ([`3a-force-sem-respostas.log`](registros/2026-11-12-vps-parceira/3a-force-sem-respostas.log)) |
-| 3b. `--force --yes` com `DESKVOICE_ORG_NAME` e `DESKVOICE_OWNER_*` | Instalação inteira contra as imagens publicadas da 0.3.0: migrations, dono criado, peças respondendo, agente agendado, entrada única e login conferidos. Painel só local, em `127.0.0.1:3080`, porque não há domínio ([`3b-force-com-respostas.log`](registros/2026-11-12-vps-parceira/3b-force-com-respostas.log)). A senha do dono foi gerada no servidor e não aparece em nenhuma saída |
+| 3a. `--force --yes` de novo | Passos 1 e 2 em ok (Docker e Compose, versão 0.3.0, IP público na placa, portas livres). Parou nas perguntas: sem terminal, `DESKVOICE_ORG_NAME` vazio ([`3a-force-sem-respostas.txt`](registros/2026-11-12-vps-parceira/3a-force-sem-respostas.txt)) |
+| 3b. `--force --yes` com `DESKVOICE_ORG_NAME` e `DESKVOICE_OWNER_*` | Instalação inteira contra as imagens publicadas da 0.3.0: migrations, dono criado, peças respondendo, agente agendado, entrada única e login conferidos. Painel só local, em `127.0.0.1:3080`, porque não há domínio ([`3b-force-com-respostas.txt`](registros/2026-11-12-vps-parceira/3b-force-com-respostas.txt)). A senha do dono foi gerada no servidor e não aparece em nenhuma saída |
 | Saúde | `install/healthcheck.sh` saiu com 0. Avisos esperados: nenhuma linha, nenhum motor, e o agente de atualização ainda sem falar com o painel no primeiro minuto ([`4-healthcheck.txt`](registros/2026-11-12-vps-parceira/4-healthcheck.txt)) |
 
 O que isto prova e o que não prova:
