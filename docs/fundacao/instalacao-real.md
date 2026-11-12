@@ -254,3 +254,23 @@ O que isto não prova:
 - **Uma versão publicada que de fato falhe.** A falha foi induzida de fora, num contêiner. Uma migration quebrada, por exemplo, não foi exercitada.
 - **A volta disparada pela tela.** Este ensaio rodou pelo terminal. A tela mostrando "voltou" ainda não foi vista.
 - **Descer de versão** continua sem promessa: funcionou aqui por causa da forma da migration.
+
+## A 0.6.0 na VPS da parceira: atualização, gravação e o serviço da ligação pelo WhatsApp (2026-11-12)
+
+Nesta rodada, tudo foi feito **pela API do painel**, com sessão de dono, porque a extensão do navegador desconectou. A API usada é a mesma das telas: o botão "Atualizar", os blocos de Configurações. As duas atualizações anteriores já provaram o clique na tela. Saídas em [`registros/2026-11-12-0.6.0/`](registros/2026-11-12-0.6.0/).
+
+| O que | O que se observou |
+|---|---|
+| Atualização 0.5.0 → 0.6.0 (POST `/system/update` com a senha) | Pedido às 22:04:09Z, "succeeded" às 22:04:57Z, 48 s ([`agent.log.txt`](registros/2026-11-12-0.6.0/agent.log.txt)). Migrations: `organization_events` e `whatsapp_call_sessions`. O volume `deskvoice_recordings` foi criado na atualização. A 0.4.0 saiu do disco e a 0.5.0 ficou. `healthcheck.sh` saiu com 0, já com a linha "Ligação pelo WhatsApp" |
+| Saída inteira guardada (12.21) | `deploy/agent/last-update.log` nasceu nesta atualização, com permissão 600, e o pedido ficou com `outputKept: true`. A máscara nova não tocou em `@deskvoice/routines@0.0.0`. A linha "O atualizador da versão 0.6.0 assumiu a atualização a partir da 0.5.0" está lá ([`last-update.log.txt`](registros/2026-11-12-0.6.0/last-update.log.txt)) |
+| Gravação ligada, numa chamada simulada | O áudio foi para o disco durante a chamada (`.wav.part`, 1,7 MB). O arquivo final tem 2,4 MB, PCM16 estéreo a 8 kHz, e o painel o entrega pela rota da chamada. A memória do processo de voz ficou estável, de 118,4 a 120,1 MiB ([`gravacao-medida.txt`](registros/2026-11-12-0.6.0/gravacao-medida.txt)). O WAV tem 75 s contra 64 s de chamada. A diferença é a fila que o transporte simulado não espera tocar (#111). O defeito real, quando quem ligou desliga com fala na fila, foi consertado no #110 |
+| Serviço da ligação pelo WhatsApp (POST `/whatsapp-calls/service`) | O agente subiu `deskvoice-wacalls-1` em 2 s, sem porta publicada, com 8,4 MiB parado |
+| Conectar o número (POST `/whatsapp-calls/connect`) | A sessão `deskvoice_<id da organização>` foi criada no WaCalls, e em 6 s o painel tinha o QR em SVG. O evento real do QR chega, e esse era o ponto não verificado do #106. Sem leitura, o QR venceu, e o painel mostrou `qr_expired` |
+
+Antes de instalar o serviço do produto, o WaCalls de ensaio (contêiner, volume e porta UDP 7881) foi removido às 22:05:41Z.
+
+O que não prova:
+
+- **O pareamento com um número de verdade.** Ninguém leu o QR.
+- **O clique na tela nesta versão.** Foi pela API.
+- **A gravação com fala humana.** O WAV não foi ouvido.

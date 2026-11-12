@@ -1,0 +1,19 @@
+# Gravação das chamadas (#102) na 0.6.0, vps-deskvoice, 12/11/2026. Feito pela API do painel, sessão de dono.
+PUT /api/v1/privacy/recording {"enabled":true}            -> 200 {"enabled":true}
+POST /api/v1/calls/simulate {agentId}                       -> chamada 89d71e9a-8305-409f-b242-a74eabd53b2b
+durante a chamada, no volume deskvoice_recordings:          <org>/<chamada>.wav.part, 1,7 MB
+chamada: startedAt 2026-11-12T22:18:35.060Z  endedAt 2026-11-12T22:19:39.180Z (64,1 s), status completed
+arquivo final:                                              -rw-r----- 2412524 bytes  <org>/<chamada>.wav
+GET /api/v1/calls/<chamada>/recording (seguindo o 308)     -> 200 audio/wav 2412524 bytes
+file:                                                       RIFF WAVE, Microsoft PCM, 16 bit, stereo 8000 Hz
+afinfo:                                                     2 ch, 8000 Hz, Int16, 75,39 s
+memória do contêiner voice (docker stats):                  antes 118,4 MiB, no meio 119,9 MiB, depois 120,1 MiB
+
+volume por janela de 5 s (RMS):
+   0- 25 s  quem ligou 0  agente 1414 (392 na última janela)
+  25- 60 s  quem ligou 0  agente 0
+  60- 75 s  quem ligou 0  agente 603, 1414, 1414
+
+A fala do agente depois de 64 s é a fila que o transporte SIMULADO não espera tocar (#111). Numa ligação real em
+que o agente encerra, ela toca antes de desligar. O defeito real (quem ligou desliga com fala na fila) foi
+consertado no #110. Prova pela chamada simulada não vale para o fim da gravação.
