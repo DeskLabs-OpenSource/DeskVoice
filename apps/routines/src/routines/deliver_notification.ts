@@ -31,7 +31,11 @@ async function prepare(q: OrgQuery, notification: NotificationRow, deps: Routine
     const connector = await loadWhatsAppConnector(q, deps.secretKey);
     if (!connector) throw new Error("WhatsApp connector is not configured (setting whatsapp.connector)");
     return async () => {
-      const { addressVerified } = await sendWhatsApp(connector, { to: target, text: notification.body, callId: notification.call_id }, deps);
+      const { addressVerified } = await sendWhatsApp(
+        connector,
+        { to: target, text: notification.body, callId: notification.call_id, idempotencyKey: notification.id },
+        deps,
+      );
       return addressVerified ? null : UNVERIFIED_ADDRESS;
     };
   }
