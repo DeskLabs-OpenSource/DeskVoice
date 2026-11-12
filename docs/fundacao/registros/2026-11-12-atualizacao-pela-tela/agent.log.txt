@@ -1,0 +1,2 @@
+2026-11-12T14:49:15Z pedido de atualização aceito; versão instalada: 0.3.0
+2026-11-12T14:50:21Z atualização terminou: succeeded (de 0.3.0 para 0.4.0; update.sh saiu com 0)
