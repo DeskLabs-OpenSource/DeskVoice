@@ -38,7 +38,7 @@
 | Menor tamanho de máquina em que a instalação cabe | Não medido. A instalação foi provada em VPS de 8 GB. Na instalação com imagens publicadas (0.1.0, segunda VPS), o sistema **parado**, sem chamada, usava cerca de 320 MiB somando os seis contêineres. Isso é memória em repouso, e não tamanho mínimo de máquina |
 | Atualizador (`update.sh`) | Atualizou instalações reais: a primeira atualização entre versões e, nas duas VPS de teste, a ponte da 0.1.0 para a 0.2.0 (`update.sh --yes` duas vezes; rodada 1 com backup, imagens 0.2.0 e migration nova; rodada 2 recriou o painel e agendou o timer do systemd), em [`instalacao-real.md`](instalacao-real.md). A passagem de vez com `--resume` nunca rodou numa máquina real: a ponte não a exercita, porque a 0.1.0 não a tem |
 | Agente de atualização | Nas duas VPS de teste, falou com o painel em menos de dois minutos depois da segunda rodada, e a saúde mostrou "Agente de atualização: ok". Ouvir um "sim" do painel e atualizar: nunca |
-| Tela de atualização | Nunca aberta num navegador |
+| Tela de atualização | Aberta por navegador só pelo teste de tela de Configurações, que confere que o bloco carrega e mostra a versão em execução. O botão de atualizar nunca foi clicado num navegador |
 | Reinício do Caddy na segunda rodada do `update.sh`, e o aviso da saúde quando quem recusa a rota do agente é o painel | Testados só com o Docker de mentira. O defeito que os originou foi visto nas VPS de teste e corrigido à mão, reiniciando o Caddy |
 | `DESKVOICE_PANEL_LOCAL_ONLY` com as portas 80 e 443 livres; padrão só local sem domínio; `DESKVOICE_PANEL_PUBLIC_HTTP` | Testados só com o Docker de mentira. Na instalação real em que a opção foi passada, ela foi ignorada (o defeito que originou a correção) |
 | Login de verdade no fim do instalador, e depois do `reset-password.sh` | A sonda foi exercitada contra um servidor de mentira e os scripts com o Docker de mentira. Nunca contra um painel real |
@@ -64,5 +64,6 @@
 | Medição de custo com motor real | Não há registro do custo mostrado na tela para a conversa real |
 | Envio de WhatsApp por conector | Nunca com um conector real |
 | Webhook para um receptor real | Nunca |
-| Painel em inglês e em espanhol | O README diz que as telas foram conferidas em português |
+| Painel em inglês e em espanhol | O README diz que as telas foram conferidas em português. Os testes de tela rodam só em pt-BR |
+| Testes de tela (`apps/panel/test/e2e`) | Guardam entrar, configurar (blocos de uma instalação nova e o limite de ligações recebidas), simular uma chamada, convidar e revogar um convite, e a confirmação antes de tirar um número da lista de não ligar. Em 2026-11-12 rodaram numa máquina de desenvolvimento, sem Docker (painel construído com `next start`, processo de voz e Postgres temporário), e cada um ficou vermelho com uma sabotagem própria. No CI rodam pela primeira vez no PR que os trouxe, no job `install`. Sem guarda de tela continuam: as outras confirmações de apagar (agente, linha, número, chave de motor, conector, webhook, pessoa da equipe), aceitar um convite pelo link, trocar a senha, "Falar com o agente" (pede microfone), instalar ou conectar o WhatsApp e atualizar pela tela |
 | Mais de uma organização na mesma instalação | Só em teste de banco |

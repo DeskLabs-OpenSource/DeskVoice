@@ -13,4 +13,6 @@ deploy/app.env
 deploy/migrate.env
 backups/
 coverage/
+test-results/
+playwright-report/
 deploy/agent/

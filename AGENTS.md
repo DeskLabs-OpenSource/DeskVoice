@@ -84,6 +84,7 @@ compartilhados". Mudou um contrato? Mude lá primeiro.
 | `pnpm verify` | Lint, tipos, cercas e testes. Rode antes de abrir PR |
 | `pnpm test` | Testes de unidade |
 | `pnpm test:db` | Testes que usam Postgres real. Pede Docker |
+| `pnpm test:e2e` | Testes de tela: dirigem o Chromium contra um painel no ar (`DESKVOICE_E2E_URL`, `DESKVOICE_E2E_EMAIL`, `DESKVOICE_E2E_PASSWORD`). Moram em `apps/panel/test/e2e`. Não rode contra uma instalação em uso: eles criam convites, chamadas simuladas e números na lista de não ligar |
 | `pnpm fences` | Só as cercas. É o que mais reprova PR, e é rápido |
 | `pnpm typecheck` | Tipos |
 | `pnpm lint` | ESLint |
@@ -201,6 +202,9 @@ Rode `pnpm verify` e, se tocou em banco, `pnpm test:db`. Isso cobre:
 - fragmento de versão inválido;
 - instalação nova e atualização a partir da última versão;
 - a chamada simulada de ponta a ponta;
+- os caminhos de primeira impressão no navegador, contra a instalação de verdade: entrar, configurar,
+  simular uma chamada, convidar alguém e a confirmação antes de revogar um convite ou de tirar um
+  número da lista de não ligar;
 - construção das imagens e o instalador;
 - segredo no diff.
 

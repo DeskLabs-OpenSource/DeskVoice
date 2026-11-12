@@ -11,7 +11,9 @@ import { parse } from "yaml";
 
 export const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 
-const SKIPPED_DIRS = new Set(["node_modules", ".git", ".next", "dist", ".tsbuild", "coverage", "backups", "__fixtures__"]);
+// Saída gerada fica de fora: o relatório dos testes de tela (`playwright-report`) é uma página de
+// meio megabyte em base64, que uma busca por regex varre em tempo quadrático.
+const SKIPPED_DIRS = new Set(["node_modules", ".git", ".next", "dist", ".tsbuild", "coverage", "test-results", "playwright-report", "backups", "__fixtures__"]);
 
 /** Arquivos sob `dir`, recursivo, como caminhos relativos a `root` com `/`. Pasta ausente devolve lista vazia. */
 export function listFiles(root: string, dir: string, keep: (file: string) => boolean = () => true): string[] {
