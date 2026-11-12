@@ -8,14 +8,14 @@
 #   bash install/agent.sh --install       instala ou atualiza o agendamento (systemd, ou cron)
 #   bash install/agent.sh --install --dry-run   só diz o que faria
 #
-# Junto vem um segundo sim ou não: se esta instalação quer o serviço de WhatsApp. O agente
-# converge a cada passada: com sim e o serviço fora, baixa a imagem e sobe só ele; com não e o
-# serviço de pé, para e remove o contêiner (o volume com o pareamento fica). O estado do serviço
-# vai ao painel na fala seguinte.
+# Junto vêm mais dois sim ou não, um por serviço opcional: se esta instalação quer o serviço de
+# WhatsApp (WAHA) e se quer o de ligação pelo WhatsApp (WaCalls). O agente converge a cada passada:
+# com sim e o serviço fora, baixa a imagem e sobe só ele; com não e o serviço de pé, para e remove o
+# contêiner (o volume com o pareamento fica). O estado de cada serviço vai ao painel na fala seguinte.
 #
 # O que o agente NUNCA recebe do painel: um comando, um número de versão, um endereço, uma imagem.
 # Para qual versão ir, ele mesmo descobre nas versões publicadas no repositório, e anuncia ao
-# painel antes. A imagem do WhatsApp é a que o Compose e o kit desta instalação fixam.
+# painel antes. As imagens dos serviços são as que o Compose e o kit desta instalação fixam.
 #
 # O registro do que deu errado fica em deploy/agent/agent.log (e a cópia anterior em agent.log.1).
 # A saída inteira de cada atualização fica em deploy/agent/last-update.log (e as duas anteriores
@@ -66,7 +66,9 @@ KEPT="$PENDING.kept"                        # existe = a saída inteira do resul
 DEADLINE="${DESKVOICE_AGENT_DEADLINE:-30}"  # segundos de espera por uma resposta do painel
 WA_FAILURE="$AGENT_STATE_DIR/whatsapp-failure"  # linha 1: código da última falha ao ligar ou desligar o serviço de WhatsApp; linha 2: MB livres, em no_disk
 WA_WARNING="$AGENT_STATE_DIR/whatsapp-warning"  # código do aviso que acompanha o estado (pouca memória; imagem que não saiu do disco)
-# Prazo do download da imagem dentro de uma passada. Menor que os 15 minutos em que um pedido de
+WC_FAILURE="$AGENT_STATE_DIR/whatsapp-calls-failure"  # o mesmo, para o serviço de ligação pelo WhatsApp
+WC_WARNING="$AGENT_STATE_DIR/whatsapp-calls-warning"
+# Prazo do download de uma imagem de serviço dentro de uma passada. Menor que os 15 minutos em que um pedido de
 # atualização vence sem ser pego: download lento para, a passada termina (e ouve o painel), e a
 # seguinte continua de onde parou, porque o Docker guarda as camadas já baixadas.
 WA_PULL_DEADLINE="${DESKVOICE_WHATSAPP_PULL_DEADLINE:-600}"
@@ -158,14 +160,17 @@ fi
 # pela entrada padrão, nunca na linha de comando (que aparece na lista de processos).
 # shellcheck disable=SC2016  # é JavaScript, não bash: nada aqui deve ser expandido
 SPEAK_JS='let s="";process.stdin.on("data",d=>s+=d).on("end",async()=>{
-const [token,version,target,outcome,toVersion,failureAt,failureDetail,wa,waReason,waWarning,waFree,waNeed,kept,...rest]=s.split("\n");
+const [token,version,target,outcome,toVersion,failureAt,failureDetail,wa,waReason,waWarning,waFree,waNeed,wc,wcReason,wcWarning,wcFree,wcNeed,kept,...rest]=s.split("\n");
 const body={version,target};
-if(wa)body.whatsapp={state:wa,...(waReason&&{reason:waReason}),...(waWarning&&{warning:waWarning}),...(waFree&&{freeDiskMb:Number(waFree),neededDiskMb:Number(waNeed)})};
+const service=(state,reason,warning,free,need)=>({state,...(reason&&{reason}),...(warning&&{warning}),...(free&&{freeDiskMb:Number(free),neededDiskMb:Number(need)})});
+if(wa)body.whatsapp=service(wa,waReason,waWarning,waFree,waNeed);
+if(wc)body.whatsappCalls=service(wc,wcReason,wcWarning,wcFree,wcNeed);
 if(outcome)body.result={outcome,...(toVersion&&{toVersion}),...(kept&&{outputKept:true}),detail:rest.join("\n")};
 if(failureAt)body.lastFailure={at:failureAt,detail:failureDetail};
 try{const r=await fetch("http://127.0.0.1:3000/api/v1/system/agent",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
 const j=await r.json().catch(()=>null);
-if(r.ok&&j&&j.ok===true&&j.data&&typeof j.data.update==="boolean"){console.log("update="+j.data.update+" whatsapp="+(j.data.whatsapp===true?"true":j.data.whatsapp===false?"false":"unknown"));return}
+const yes=(v)=>v===true?"true":v===false?"false":"unknown";
+if(r.ok&&j&&j.ok===true&&j.data&&typeof j.data.update==="boolean"){console.log("update="+j.data.update+" whatsapp="+yes(j.data.whatsapp)+" whatsappCalls="+yes(j.data.whatsappCalls));return}
 console.log("error=o painel respondeu HTTP "+r.status+" "+String((j&&j.error&&j.error.code)||""));process.exitCode=1}
 catch(e){console.log("error="+String(e&&e.message).replace(/\n/g," "));process.exitCode=1}})'
 # Para qual versão este servidor iria agora: a maior versão final publicada, se for diferente da
@@ -199,101 +204,125 @@ with_deadline() {  # with_deadline <segundos> comando...
   if [ -e "$hit" ]; then rm -f "$hit"; code=124; fi
   return "$code"
 }
-# ── Serviço de WhatsApp ──
-# O perfil vai explícito: o serviço pode ainda não estar ligado nesta instalação.
-dcw() { dc --profile whatsapp "$@"; }
-whatsapp_running() { [ -n "$(dcw ps -q --status running waha 2>/dev/null)" ]; }
+# ── Serviços opcionais ──
+# Dois, cada um com nome próprio e um campo próprio na resposta do painel (registro 0010): o WhatsApp
+# por QR Code (WAHA) e a ligação pelo WhatsApp (WaCalls). O que é de cada um está em `svc`; o que o
+# agente faz com eles é o mesmo. O perfil vai explícito: o serviço pode ainda não estar ligado.
+svc() {  # svc <waha|wacalls>
+  case "$1" in
+    waha) SVC=waha; SVC_PROFILE=whatsapp; SVC_MARK=DESKVOICE_WHATSAPP; SVC_LABEL="serviço de WhatsApp"
+          SVC_DISK="$WAHA_DISK_NEEDED_MB"; SVC_MEMORY="$WAHA_MEMORY_CEILING_MB"; SVC_FAILURE="$WA_FAILURE"; SVC_WARNING="$WA_WARNING" ;;
+    wacalls) SVC=wacalls; SVC_PROFILE=whatsapp-calls; SVC_MARK=DESKVOICE_WHATSAPP_CALLS; SVC_LABEL="serviço de ligação pelo WhatsApp"
+          SVC_DISK="$WACALLS_DISK_NEEDED_MB"; SVC_MEMORY="$WACALLS_MEMORY_CEILING_MB"; SVC_FAILURE="$WC_FAILURE"; SVC_WARNING="$WC_WARNING" ;;
+  esac
+}
+dcs() { dc --profile "$SVC_PROFILE" "$@"; }
+svc_running() { [ -n "$(dcs ps -q --status running "$SVC" 2>/dev/null)" ]; }
+svc_enabled() { [ "$(env_get "$ENV_FILE" "$SVC_MARK")" = on ]; }
+svc_keys() { if [ "$SVC" = waha ]; then ensure_waha; else ensure_wacalls; fi; }
+svc_image_ref() { if [ "$SVC" = waha ]; then waha_image_ref; else wacalls_image_ref; fi; }
 # O que o agente conta ao painel, em códigos fechados: `running`, `failed <código>` ou `absent`.
-whatsapp_state() {
-  if whatsapp_running; then echo running
-  elif [ -s "$WA_FAILURE" ]; then echo "failed $(head -n 1 "$WA_FAILURE")"
+service_state() {  # service_state <waha|wacalls>
+  svc "$1"
+  if svc_running; then echo running
+  elif [ -s "$SVC_FAILURE" ]; then echo "failed $(head -n 1 "$SVC_FAILURE")"
   else echo absent; fi
 }
-whatsapp_failed() { printf '%s\n%s\n' "$1" "${3:-}" > "$WA_FAILURE"; note "serviço de WhatsApp: $1 ($2)"; }
+service_failed() { printf '%s\n%s\n' "$1" "${3:-}" > "$SVC_FAILURE"; note "$SVC_LABEL: $1 ($2)"; }
 # Tira do disco a imagem FIXADA desta instalação, e só ela: um `prune` apagaria imagem de outros
 # sistemas da mesma máquina. Imagem que não sai (outra coisa usando) não é falha do pedido: vira
 # aviso, e cada passada tenta de novo.
-remove_whatsapp_image() {  # devolve 0 se algo mudou (a imagem saiu, ou o aviso é novo) e 1 se não
+remove_service_image() {  # devolve 0 se algo mudou (a imagem saiu, ou o aviso é novo) e 1 se não
   local ref
-  ref="$(waha_image_ref)"
+  ref="$(svc_image_ref)"
   if [ -z "$ref" ] || ! docker image inspect "$ref" >/dev/null 2>&1; then
-    if [ "$(cat "$WA_WARNING" 2>/dev/null)" = image_kept ]; then rm -f "$WA_WARNING"; return 0; fi
+    if [ "$(cat "$SVC_WARNING" 2>/dev/null)" = image_kept ]; then rm -f "$SVC_WARNING"; return 0; fi
     return 1
   fi
-  if docker image rm "$ref" >/dev/null 2>&1; then rm -f "$WA_WARNING"; note "imagem do serviço de WhatsApp removida do disco ($ref)"; return 0; fi
-  if [ "$(cat "$WA_WARNING" 2>/dev/null)" = image_kept ]; then return 1; fi
-  echo image_kept > "$WA_WARNING"
-  note "a imagem do serviço de WhatsApp não saiu do disco ($ref): outra coisa a usa. Cada passada tenta de novo; para tentar agora: bash install/agent.sh"
+  if docker image rm "$ref" >/dev/null 2>&1; then rm -f "$SVC_WARNING"; note "imagem do $SVC_LABEL removida do disco ($ref)"; return 0; fi
+  if [ "$(cat "$SVC_WARNING" 2>/dev/null)" = image_kept ]; then return 1; fi
+  echo image_kept > "$SVC_WARNING"
+  note "a imagem do $SVC_LABEL não saiu do disco ($ref): outra coisa a usa. Cada passada tenta de novo; para tentar agora: bash install/agent.sh"
   return 0
 }
 # Leva o serviço ao que o painel disse. Só `true` liga e só `false` desliga: qualquer outra coisa
 # (painel de versão sem o campo, resposta estranha) não muda nada. Devolve 0 se mexeu em algo, para
 # a passada contar o estado novo ao painel na volta seguinte.
-converge_whatsapp() {  # converge_whatsapp <true|false|unknown>
+converge_service() {  # converge_service <waha|wacalls> <true|false|unknown>
   local created=1 free memory pull
-  case "$1" in
+  svc "$1"
+  case "$2" in
     true)
-      if whatsapp_running; then rm -f "$WA_FAILURE"; return 1; fi
-      # Falhou há pouco: não repete um download de gigabytes a cada minuto.
-      if [ -n "$(find "$WA_FAILURE" -mmin -10 2>/dev/null)" ]; then return 1; fi
+      if svc_running; then rm -f "$SVC_FAILURE"; return 1; fi
+      # Falhou há pouco: não repete o download a cada minuto.
+      if [ -n "$(find "$SVC_FAILURE" -mmin -10 2>/dev/null)" ]; then return 1; fi
       # O custo é conferido aqui, antes de baixar: um clique na tela não pode encher o disco e
       # derrubar o banco. Sem espaço, nada é baixado. Pouca memória não bloqueia: vira aviso.
       free="$(docker_free_mb)"
       case "$free" in ''|*[!0-9]*) free="" ;; esac
-      if [ -n "$free" ] && [ "$free" -lt "$WAHA_DISK_NEEDED_MB" ]; then
-        whatsapp_failed no_disk "há $free MB livres e o serviço pede $WAHA_DISK_NEEDED_MB; nada foi baixado; nova conferência em 10 minutos" "$free"; return 0
+      if [ -n "$free" ] && [ "$free" -lt "$SVC_DISK" ]; then
+        service_failed no_disk "há $free MB livres e o serviço pede $SVC_DISK; nada foi baixado; nova conferência em 10 minutos" "$free"; return 0
       fi
       memory="$(available_memory_mb)"
-      if [ -n "$memory" ] && [ "$memory" -lt "$WAHA_MEMORY_CEILING_MB" ]; then
-        echo low_memory > "$WA_WARNING"; note "há $memory MB de memória disponível, menos que o teto do serviço de WhatsApp ($WAHA_MEMORY_CEILING_MB MB): instalo assim mesmo, com aviso"
-      else rm -f "$WA_WARNING"; fi
-      note "o painel pediu o serviço de WhatsApp: baixando a imagem e subindo o serviço"
-      if ensure_waha; then created=0; fi
-      pull=0; with_deadline "$WA_PULL_DEADLINE" dcw pull -q waha >/dev/null 2>&1 </dev/null || pull=$?
+      if [ -n "$memory" ] && [ "$memory" -lt "$SVC_MEMORY" ]; then
+        echo low_memory > "$SVC_WARNING"; note "há $memory MB de memória disponível, menos que o teto do $SVC_LABEL ($SVC_MEMORY MB): instalo assim mesmo, com aviso"
+      else rm -f "$SVC_WARNING"; fi
+      note "o painel pediu o $SVC_LABEL: baixando a imagem e subindo o serviço"
+      if svc_keys; then created=0; fi
+      pull=0; with_deadline "$WA_PULL_DEADLINE" dcs pull -q "$SVC" >/dev/null 2>&1 </dev/null || pull=$?
       # Estourou o prazo: não é falha. A passada termina para ouvir o painel, e a seguinte continua.
-      if [ "$pull" = 124 ]; then note "o download da imagem do serviço de WhatsApp passou de ${WA_PULL_DEADLINE}s; continuo na próxima passada"; return 0; fi
-      if [ "$pull" != 0 ]; then whatsapp_failed pull_failed "a imagem não baixou; nova tentativa em 10 minutos"; return 0; fi
-      env_set "$ENV_FILE" DESKVOICE_WHATSAPP on
-      # Instalação que ainda não tinha a chave: painel, voz e rotinas sobem de novo para recebê-la.
-      if [ "$created" = 0 ]; then dc up -d >/dev/null 2>&1 || { whatsapp_failed start_failed "o serviço não subiu"; return 0; }
-      else dc up -d waha >/dev/null 2>&1 || { whatsapp_failed start_failed "o serviço não subiu"; return 0; }; fi
-      rm -f "$WA_FAILURE"; note "serviço de WhatsApp no ar"
+      if [ "$pull" = 124 ]; then note "o download da imagem do $SVC_LABEL passou de ${WA_PULL_DEADLINE}s; continuo na próxima passada"; return 0; fi
+      if [ "$pull" != 0 ]; then service_failed pull_failed "a imagem não baixou; nova tentativa em 10 minutos"; return 0; fi
+      env_set "$ENV_FILE" "$SVC_MARK" on
+      # Instalação que ainda não tinha a chave: quem a recebe sobe de novo para recebê-la.
+      if [ "$created" = 0 ]; then dc up -d >/dev/null 2>&1 || { service_failed start_failed "o serviço não subiu"; return 0; }
+      else dc up -d "$SVC" >/dev/null 2>&1 || { service_failed start_failed "o serviço não subiu"; return 0; }; fi
+      rm -f "$SVC_FAILURE"; note "$SVC_LABEL no ar"
       return 0 ;;
     false)
-      if ! whatsapp_enabled && [ -z "$(dcw ps -aq waha 2>/dev/null)" ]; then
-        rm -f "$WA_FAILURE"
+      if ! svc_enabled && [ -z "$(dcs ps -aq "$SVC" 2>/dev/null)" ]; then
+        rm -f "$SVC_FAILURE"
         # Sem contêiner: sobra conferir se a imagem ainda está no disco (pedido de instalação
         # desfeito no meio do download, ou imagem que não saiu da outra vez).
-        if [ "$(cat "$WA_WARNING" 2>/dev/null)" = low_memory ]; then rm -f "$WA_WARNING"; fi
-        if remove_whatsapp_image; then return 0; fi
+        if [ "$(cat "$SVC_WARNING" 2>/dev/null)" = low_memory ]; then rm -f "$SVC_WARNING"; fi
+        if remove_service_image; then return 0; fi
         return 1
       fi
-      note "o painel não quer mais o serviço de WhatsApp: parando e removendo o contêiner e a imagem (o volume com o pareamento fica)"
-      if ! dcw rm -sf waha >/dev/null 2>&1; then whatsapp_failed remove_failed "o contêiner não saiu"; return 0; fi
-      env_unset "$ENV_FILE" DESKVOICE_WHATSAPP
-      rm -f "$WA_FAILURE" "$WA_WARNING"; note "serviço de WhatsApp removido"
-      remove_whatsapp_image || true
+      note "o painel não quer mais o $SVC_LABEL: parando e removendo o contêiner e a imagem (o volume com o pareamento fica)"
+      if ! dcs rm -sf "$SVC" >/dev/null 2>&1; then service_failed remove_failed "o contêiner não saiu"; return 0; fi
+      env_unset "$ENV_FILE" "$SVC_MARK"
+      rm -f "$SVC_FAILURE" "$SVC_WARNING"; note "$SVC_LABEL removido"
+      remove_service_image || true
       return 0 ;;
   esac
   return 1
 }
+# O relato de um serviço para a fala: cinco linhas (estado, código, aviso, MB livres, MB exigidos).
+service_report() {  # service_report <waha|wacalls>
+  local state reason="" warning="" free="" need=""
+  svc "$1"
+  state="$(service_state "$1")"
+  case "$state" in "failed "*) reason="${state#failed }"; state=failed ;; esac
+  if [ -s "$SVC_WARNING" ]; then warning="$(head -n 1 "$SVC_WARNING")"; fi
+  if [ "$reason" = no_disk ]; then free="$(sed -n 2p "$SVC_FAILURE")"; need="$SVC_DISK"; fi
+  printf '%s\n' "$state" "$reason" "$warning" "$free" "$need"
+}
 
-# speak → escreve `update=<true|false> whatsapp=<true|false|unknown>` ou `error=<motivo>`; devolve
-# 0 só se o painel ouviu.
+# speak → escreve `update=<true|false> whatsapp=<true|false|unknown> whatsappCalls=<true|false|unknown>`
+# ou `error=<motivo>`; devolve 0 só se o painel ouviu.
 speak() {
-  local token outcome="" to="" kept="" failure_at="" failure_detail="" wa wa_reason="" wa_warning="" wa_free="" wa_need=""
+  local token outcome="" to="" kept="" failure_at="" failure_detail=""
   token="$(env_get "$ENV_FILE" UPDATE_AGENT_TOKEN)"
   [ -n "$token" ] || { echo "error=falta o segredo do agente em deploy/.env; rode: bash install/agent.sh --install"; return 1; }
   if [ -f "$PENDING" ]; then outcome="$(sed -n 1p "$PENDING")"; to="$(sed -n 2p "$PENDING")"; fi
   if [ -n "$outcome" ] && [ -f "$KEPT" ]; then kept=1; fi
   if [ -f "$FAILURE" ]; then failure_at="$(sed -n 1p "$FAILURE")"; failure_detail="$(sed -n 2p "$FAILURE")"; fi
-  wa="$(whatsapp_state)"
-  case "$wa" in "failed "*) wa_reason="${wa#failed }"; wa=failed ;; esac
-  if [ -s "$WA_WARNING" ]; then wa_warning="$(head -n 1 "$WA_WARNING")"; fi
-  if [ "$wa_reason" = no_disk ]; then wa_free="$(sed -n 2p "$WA_FAILURE")"; wa_need="$WAHA_DISK_NEEDED_MB"; fi
   local code=0
   {
-    printf '%s\n' "$token" "$(env_get "$ENV_FILE" DESKVOICE_VERSION)" "$target" "$outcome" "$to" "$failure_at" "$failure_detail" "$wa" "$wa_reason" "$wa_warning" "$wa_free" "$wa_need" "$kept"
+    printf '%s\n' "$token" "$(env_get "$ENV_FILE" DESKVOICE_VERSION)" "$target" "$outcome" "$to" "$failure_at" "$failure_detail"
+    service_report waha
+    service_report wacalls
+    printf '%s\n' "$kept"
     if [ -f "$PENDING" ]; then sed 1,2d "$PENDING"; fi
   } | with_deadline "$DEADLINE" dc exec -T panel node -e "$SPEAK_JS" 2>/dev/null || code=$?
   if [ "$code" = 124 ]; then echo "error=o painel não respondeu em ${DEADLINE}s"; fi
@@ -312,14 +341,22 @@ while [ "$turn" -lt 2 ]; do
   # O painel ouviu: o que estava pendente foi entregue.
   rm -f "$PENDING" "$KEPT" "$FAILURE"
   stamp > "$LAST_OK"
-  # O segundo sim ou não. Painel de uma versão que não o manda vale como "não sei": nada muda.
-  wa_want=unknown
+  # Os sim ou não dos serviços. Painel de uma versão que não manda um deles vale como "não sei":
+  # nada muda. Lidos de trás para a frente: cada um sai da linha antes do anterior ser lido.
+  wc_want=unknown; wa_want=unknown
+  case "$answer" in *" whatsappCalls="*) wc_want="${answer##* whatsappCalls=}"; answer="${answer%% whatsappCalls=*}" ;; esac
   case "$answer" in *" whatsapp="*) wa_want="${answer##* whatsapp=}"; answer="${answer%% whatsapp=*}" ;; esac
+  case "$wc_want" in true|false) ;; *) wc_want=unknown ;; esac
   case "$wa_want" in true|false) ;; *) wa_want=unknown ;; esac
   case "$answer" in
-    # Sem atualização a fazer, converge o serviço de WhatsApp. Se mexeu, a volta seguinte conta ao
+    # Sem atualização a fazer, converge os serviços. Se mexeu em algum, a volta seguinte conta ao
     # painel como ficou (e lê a resposta como em qualquer passada).
-    update=false) if converge_whatsapp "$wa_want"; then continue; fi; exit 0 ;;
+    update=false)
+      moved=1
+      if converge_service waha "$wa_want"; then moved=0; fi
+      if converge_service wacalls "$wc_want"; then moved=0; fi
+      if [ "$moved" = 0 ]; then continue; fi
+      exit 0 ;;
     update=true) ;;
     *) fail_pass "o painel respondeu algo que não é um sim nem um não (${answer:-vazio}); nada foi executado" ;;
   esac

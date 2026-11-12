@@ -26,6 +26,9 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   // Chave com que painel, voz e rotinas falam com o WAHA da instalação (WhatsApp por QR Code). Fica
   // em `deploy/.env`, e o Compose a entrega só a esses três serviços; o WAHA recebe só o hash.
   WAHA_API_KEY: "generated",
+  // Token com que o processo de voz fala com o WaCalls (ligação pelo WhatsApp). Fica em `deploy/.env`,
+  // e o Compose o entrega só à voz e ao `wacalls`; o painel nunca o recebe.
+  WACALLS_API_TOKEN: "generated",
   APP_DB_PASSWORD: "generated",
   SYSTEM_DB_PASSWORD: "generated",
 
@@ -44,6 +47,8 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   // Porta do WebSocket da chamada pelo navegador (8091), só na rede interna; o Caddy do DeskVoice a entrega em /voice-ws.
   VOICE_WEB_PORT: "default",
   ASTERISK_TRUNKS_FILE: "default",
+  // Pasta das gravações de chamada (/recordings): a voz grava, o painel lê e as rotinas apagam pelo prazo de guarda.
+  RECORDINGS_DIR: "default",
   // Usuário e grupo do Asterisk dentro do contêiner dele (1000): dono do arquivo de troncos.
   ASTERISK_UID: "default",
   ASTERISK_GID: "default",

@@ -1,6 +1,9 @@
 // A conversa sobre um transporte nas mãos do teste: falhas do motor (Review Focus 1 e 2), teto de
 // duração e teto de custo.
-import { encryptSecret } from "@deskvoice/core";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { encryptSecret, recordingPath } from "@deskvoice/core";
 import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
@@ -301,6 +304,54 @@ describe("aviso de gravação", { timeout: 120_000 }, () => {
     made.transport.callerHangup();
     await session.done;
     expect((await eventsOf(app, made.callId)).slice(0, 3).map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice"]);
+  });
+});
+
+describe("gravação do áudio, por organização (registro 0016)", { timeout: 120_000 }, () => {
+  /** Uma chamada curta com fala dos dois lados, e onde a gravação dela ficaria. */
+  async function talk(label: string, recording?: unknown, minFreeBytes?: number) {
+    const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
+    const manual = manualEngine({ keyless: true });
+    const made = await scene(label, { engine: "manual", greeting: "Bom dia." }, manual);
+    if (recording !== undefined) await putSetting(app, made.organizationId, "calls.recording_enabled", recording, false);
+    const session = startCallSession({ ...made.harness.deps, recordingsDir: dir, recordingMinFreeBytes: minFreeBytes }, { organizationId: made.organizationId, callId: made.callId, agentId: made.agentId, transport: made.transport });
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_notice"), "the notice event");
+    made.transport.callerAudio(200);
+    manual.emit("audio", Buffer.alloc(320, 1));
+    made.transport.callerHangup();
+    await session.done;
+    return { dir, callId: made.callId, file: recordingPath(dir, made.organizationId, made.callId), cleanup: () => rm(dir, { recursive: true, force: true }) };
+  }
+
+  it("desligada de fábrica: sem a chave, ou com outro valor que não true, nada é gravado", async () => {
+    for (const [index, value] of [undefined, false, "true", 1].entries()) {
+      const { dir, cleanup } = await talk(`recording-off-${index}`, value);
+      expect(await readdir(dir), JSON.stringify(value)).toEqual([]);
+      await cleanup();
+    }
+  });
+
+  it("ligada na organização: a chamada vira um WAV estéreo na pasta dela", async () => {
+    const { file, callId, cleanup } = await talk("recording-on", true);
+    const wav = await readFile(file);
+    expect(wav.subarray(0, 4).toString()).toBe("RIFF");
+    expect(wav.readUInt16LE(22)).toBe(2);
+    expect(wav.readUInt32LE(40)).toBe(wav.length - 44);
+    expect(await readdir(path.dirname(file))).toEqual([path.basename(file)]); // sem .part
+    expect(await kindsOf(app, callId)).not.toContain("recording_skipped");
+    await cleanup();
+  });
+
+  it("sem espaço livre acima do piso: a chamada segue sem gravar, e a linha do tempo diz por quê", async () => {
+    const { dir, callId, cleanup } = await talk("recording-low-disk", true, Number.MAX_SAFE_INTEGER);
+    expect(await readdir(dir)).toEqual([]);
+    const events = await eventsOf(app, callId);
+    const skipped = events.find((event) => event.kind === "recording_skipped");
+    expect(skipped?.payload).toEqual({ reason: "low_disk", freeBytes: expect.any(Number), minFreeBytes: Number.MAX_SAFE_INTEGER });
+    // A conversa aconteceu e terminou como qualquer outra.
+    expect(events.map((event) => event.kind)).toEqual(expect.arrayContaining(["call_answered", "recording_notice", "call_ended"]));
+    expect(await callOf(app, callId)).toMatchObject({ status: "completed", end_reason: "caller_hangup" });
+    await cleanup();
   });
 });
 

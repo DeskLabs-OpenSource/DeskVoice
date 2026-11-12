@@ -10,11 +10,14 @@ import { handleInbound } from "./inbound";
 import { startInternalApi } from "./internal-api";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { startOutboundCall } from "./outbound";
+import { removePartialRecordings } from "./recording";
 import { closeOrphanCalls } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
-import type { Schedule } from "./transport";
+import { realSchedule, type Schedule } from "./transport";
 import { applyTrunks, checkTrunks, type TrunksDeps } from "./trunks";
+import type { WacallsOptions } from "./wacalls-client";
 import { startWebCalls } from "./web-calls";
+import { createWhatsAppCalls } from "./whatsapp-calls";
 
 export interface VoiceServerDeps {
   db: Db;
@@ -29,11 +32,15 @@ export interface VoiceServerDeps {
   webPort: number;
   internalToken: string | undefined;
   trunksFile: string;
+  /** Pasta das gravações. Sem ela, nenhuma chamada é gravada. */
+  recordingsDir?: string;
   publicIp: string | null;
   /** Usuário do Asterisk, que precisa ler o arquivo de troncos. Sem ele, o dono do arquivo não é trocado. */
   trunksOwner?: { uid: number; gid: number };
   host?: string;
   schedule?: Schedule;
+  /** Acesso ao WaCalls da instalação (ligação pelo WhatsApp). Sem token, o recurso não existe aqui. */
+  wacalls?: WacallsOptions;
   /** Relógio monotônico da cadência de áudio, em ms. */
   now?: () => number;
   log?: Logger;
@@ -55,8 +62,16 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   const log = deps.log ?? silentLogger;
   // Antes de atender qualquer coisa: o que o processo anterior deixou aberto não é de ninguém.
   await closeOrphanCalls(db, clock, log);
+  // A gravação que um processo caído deixou pela metade (`.part`) não fecha mais: sai daqui.
+  if (deps.recordingsDir) {
+    const removed = await removePartialRecordings(deps.recordingsDir).catch((error: unknown) => {
+      log("error", "could not remove partial recordings", { error: messageOf(error) });
+      return 0;
+    });
+    if (removed > 0) log("info", "removed partial recordings left by a previous process", { removed });
+  }
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
-  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log };
+  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir };
   const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, log };
   const calls = new AsteriskCalls({ ari, db, clock, log });
   const sessions = new Set<CallSession>();
@@ -114,6 +129,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   reapply();
 
   // Não depende do Asterisk: a chamada pelo navegador funciona com a telefonia fora do ar.
+  const whatsappCalls = createWhatsAppCalls(deps.wacalls ?? { token: "" }, { schedule: deps.schedule ?? realSchedule, log });
+
   const webCalls = await startWebCalls({ db, clock, session: sessionDeps, port: deps.webPort, host: deps.host, schedule: deps.schedule, now: deps.now, log, onSession: track });
 
   const api = await startInternalApi({
@@ -130,6 +147,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
       applyTrunks: () => applyTrunks(trunksDeps),
       outbound: (input) => startOutboundCall({ db, ari, clock, calls, log }, input),
       web: (input) => webCalls.request(input),
+      whatsappCalls,
       async simulate(input) {
         const started = await startSimulatedCall(sessionDeps, input);
         if (!("callId" in started)) return started;
@@ -146,6 +164,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     calls,
     async close() {
       ari.close();
+      whatsappCalls.close();
       await api.close();
       for (const session of sessions) session.stop("shutdown");
       await Promise.all([...sessions].map((session) => session.done));

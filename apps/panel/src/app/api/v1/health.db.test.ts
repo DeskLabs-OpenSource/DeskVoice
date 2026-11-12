@@ -85,7 +85,7 @@ describe("system health", () => {
     const owner = await createUser(panel.app, org, "owner");
     await routinesRunning();
     let report = await read(owner.cookie);
-    expect(report.checks.map((check) => check.id)).toEqual(["panel", "database", "voice", "telephony", "routines", "agent", "trunk", "engine", "whatsapp"]);
+    expect(report.checks.map((check) => check.id)).toEqual(["panel", "database", "voice", "telephony", "routines", "agent", "trunk", "engine", "whatsapp", "whatsapp_calls"]);
     // A fala do agente é copiada para as organizações que existem quando ele fala: esta é nova.
     expect(line(report, "agent")).toBe("warn agent_never");
 

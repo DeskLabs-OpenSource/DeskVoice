@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { createDb, hashToken, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { DEFAULT_RECORDINGS_DIR, createDb, hashToken, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { wahaFromEnv, type WahaOptions } from "@deskvoice/tools/waha";
 import type { z, ZodType } from "zod";
 import { trustedProxyHops } from "./client-ip";
@@ -34,6 +34,8 @@ export interface ServerDeps {
   waha: WahaOptions;
   /** Injetável para o teste contar quantas tentativas chegam a conferir a senha. */
   verifyPassword: typeof verifyPassword;
+  /** Pasta das gravações (`RECORDINGS_DIR`), montada só para leitura: a tela toca e a exportação diz se há. */
+  recordingsDir: string;
 }
 
 export const SESSION_COOKIE = "dv_session";
@@ -62,6 +64,7 @@ export function serverDeps(): ServerDeps {
       agentToken: process.env.UPDATE_AGENT_TOKEN ?? "",
       waha: wahaFromEnv(),
       verifyPassword,
+      recordingsDir: process.env.RECORDINGS_DIR ?? DEFAULT_RECORDINGS_DIR,
     };
   }
   return store.__deskvoicePanelDeps;

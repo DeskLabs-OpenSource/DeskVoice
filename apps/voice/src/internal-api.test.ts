@@ -18,6 +18,11 @@ async function api(token: string | undefined, overrides: Partial<InternalApiHand
     outbound: async (input) => (calls.push(["outbound", input]), { callId: "call-1" }),
     simulate: async (input) => (calls.push(["simulate", input]), { callId: "call-2" }),
     web: async (input) => (calls.push(["web", input]), { callId: "call-3", token: "tok", expiresInSeconds: 60 }),
+    whatsappCalls: {
+      state: async (input) => (calls.push(["whatsappCalls.state", input]), { session: null }),
+      connect: async (input) => (calls.push(["whatsappCalls.connect", input]), { code: "wacalls_unreachable", message: "down" }),
+      disconnect: async (input) => (calls.push(["whatsappCalls.disconnect", input]), { session: null }),
+    },
     ...overrides,
   };
   const server = await startInternalApi({ port: 0, host: "127.0.0.1", token, handlers });

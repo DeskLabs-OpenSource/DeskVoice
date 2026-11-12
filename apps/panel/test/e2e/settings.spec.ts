@@ -3,6 +3,7 @@ import common from "../../src/i18n/pt-BR/common";
 import settings from "../../src/i18n/pt-BR/settings";
 import update from "../../src/i18n/pt-BR/update";
 import whatsapp from "../../src/i18n/pt-BR/whatsapp";
+import whatsappCalls from "../../src/i18n/pt-BR/whatsapp-calls";
 import { signIn } from "./session";
 
 test("configurar: os blocos de uma instalação nova aparecem, e o limite de ligações recebidas persiste", async ({ page }) => {
@@ -20,6 +21,10 @@ test("configurar: os blocos de uma instalação nova aparecem, e o limite de lig
   await expect(page.getByRole("heading", { name: whatsapp.title, exact: true })).toBeVisible();
   await expect(page.getByText(whatsapp.serviceAbsent, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: whatsapp.installService, exact: true })).toBeVisible();
+  // Ligação pelo WhatsApp: também opcional, também não vem instalada.
+  await expect(page.getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeVisible();
+  await expect(page.getByText(whatsappCalls.serviceAbsent, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: whatsappCalls.installService, exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: settings.inboundLimitTitle, exact: true })).toBeVisible();
 
   const limit = page.getByLabel(settings.inboundLimit);

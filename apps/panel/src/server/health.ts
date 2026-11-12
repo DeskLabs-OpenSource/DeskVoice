@@ -4,6 +4,7 @@ import type { KeyCheckView } from "./engine-key";
 import { AGENT_SILENT_MINUTES } from "./update";
 import type { VoiceHealth } from "./voice";
 import type { WhatsAppView } from "./whatsapp";
+import type { WhatsAppCallsView } from "./whatsapp-calls";
 
 /**
  * A saúde que o painel confere de dentro: uma função por linha, cada uma pura sobre o que a rota
@@ -13,7 +14,7 @@ import type { WhatsAppView } from "./whatsapp";
  * isso é uma lista escrita aqui, e não descoberta por pasta. Linha nova é peça nova do sistema
  * (contêiner, ligação), que já pede mudança no Compose e no `install/healthcheck.sh`.
  */
-export const HEALTH_ORDER = ["panel", "database", "voice", "telephony", "routines", "agent", "trunk", "engine", "whatsapp"] as const;
+export const HEALTH_ORDER = ["panel", "database", "voice", "telephony", "routines", "agent", "trunk", "engine", "whatsapp", "whatsapp_calls"] as const;
 export type HealthId = (typeof HEALTH_ORDER)[number];
 export type HealthStatus = "ok" | "warn" | "fail";
 type Params = Record<string, string | number>;
@@ -155,6 +156,22 @@ export function whatsappLine(view: WhatsAppView | "down" | null): HealthCheck {
   if (view.service === "failed") return warn("whatsapp_service_failed");
   if (view.status === "connected") return ok("whatsapp_connected");
   return view.status === "failed" ? warn("whatsapp_dropped") : warn("whatsapp_no_number");
+}
+
+/**
+ * A ligação pelo WhatsApp, no mesmo molde: não instalado é o padrão e é `ok`; instalado e sem
+ * resposta, sem número, ou com o número desconectado é aviso, porque o resto segue sem ele.
+ * `"down"`: o processo de voz ou o WaCalls não responderam; `null`: o banco não respondeu.
+ */
+export function whatsappCallsLine(view: WhatsAppCallsView | "down" | null): HealthCheck {
+  if (!view) return warn("needs_database");
+  if (view === "down") return warn("whatsapp_calls_service_down");
+  if (view.service === "absent" || view.service === "removing") return ok("whatsapp_calls_absent");
+  if (!view.available) return warn("whatsapp_calls_unavailable");
+  if (view.service === "preparing") return ok("whatsapp_calls_preparing");
+  if (view.service === "failed") return warn("whatsapp_calls_service_failed");
+  if (view.status === "connected") return ok("whatsapp_calls_connected");
+  return view.status === "failed" ? warn("whatsapp_calls_dropped") : warn("whatsapp_calls_no_number");
 }
 
 /** As linhas na ordem de depuração e o pior estado entre elas. Linha ausente (sem sessão) fica de fora. */

@@ -28,9 +28,11 @@ it needs to, transfers the call, and leaves tasks running after the caller hangs
 
 ---
 
-> **Project status: a foundation under construction.** What is ready, what is experimental and
-> what is still a plan are kept apart in "What it does today". Nothing on the roadmap has a
-> promised date.
+> **Project status: with published releases.** Installing, updating from the panel,
+> backup, restore and the automatic rollback of a failed update have run on a real VPS, and a
+> contributor has placed real calls with the OpenAI Realtime engine. What is proven, what is
+> experimental and what is still a plan are kept apart in "What it does today". Nothing on the
+> roadmap has a promised date.
 >
 > This page is a translation of [`README.md`](README.md). Most of the deeper documentation is
 > written in Brazilian Portuguese. Translations are an open front in the roadmap.
@@ -115,13 +117,15 @@ pnpm install && pnpm demo   # needs Docker: starts a throwaway Postgres and remo
 
 ## What it does today
 
-DeskVoice is a freshly launched foundation. So nobody installs it expecting what has not been
+DeskVoice has published releases since 2026-11-11, and what changes in each one is in
+[`CHANGELOG.md`](CHANGELOG.md) (in Portuguese). So nobody installs it expecting what has not been
 proven yet, each capability below says how far the proof went:
 
 - **Proven in simulation:** covered by an end-to-end test with the simulated engine, which walks
   through a whole call with no carrier and no key.
-- **Proven on a real install:** it ran on 2026-11-11 on a test VPS, in the way and as far as the
-  row describes.
+- **Proven on a real install:** it ran on a real VPS (the test ones, on 2026-11-11, or the
+  partner's dedicated one, on 2026-11-12), in the way and as far as the row describes. Each proof,
+  with its saved output, is in [`docs/fundacao/instalacao-real.md`](docs/fundacao/instalacao-real.md) (in Portuguese).
 - **Awaiting real-world proof:** implemented and tested against fake servers and a real Asterisk,
   but no call has been placed through a real carrier yet.
 
@@ -133,26 +137,29 @@ proven yet, each capability below says how far the proof went:
 | Work that continues after the call (summary, notices, follow-up tasks) | Proven in simulation |
 | Cost and duration ceiling per call | Proven in simulation |
 | Web panel in Portuguese, English and Spanish | Routes tested against a real database; screens checked in Portuguese |
-| Install on a VPS with the install kit | Proven on a real install, without a domain |
+| Install on a VPS with the install kit | Proven on a real install, without a domain: Ubuntu 22.04 on two test VPSs and AlmaLinux 9 on the partner's VPS (there, before the installer started the Docker service on its own, with the service started by hand). Debian and Rocky Linux not yet proven |
 | Panel and browser voice on the same address, Caddy's single entry point | Proven on a real install, without a domain |
 | Talk to the agent by voice from the "Talk to the agent" screen | Proven on a real install with the OpenAI Realtime engine, by a test client that plays the browser's role with recorded speech. Not yet from a browser with a microphone |
 | Panel with a domain and HTTPS | Awaiting real-world proof |
 | Answer an inbound call from a carrier line (SIP trunk) | Awaiting real-world proof |
 | Transfer the call to a person | Awaiting real-world proof (the Asterisk path was checked, without a carrier) |
-| OpenAI Realtime voice engine | Proven on a real install, in the "Talk to the agent" conversation described above |
+| OpenAI Realtime voice engine | Proven on a real install, in the "Talk to the agent" conversation described above. A contributor placed real calls with it on their own install, and, with the cost fix ([#94](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/94)), DeskVoice's estimate matched the OpenAI invoice. That fix is on `main` and ships in the first release published after 0.5.0; until then, the OpenAI estimate runs above the invoice |
 | Gemini Live voice engine | Awaiting real-world proof (tested against a fake server, without a key) |
 | Send WhatsApp during the call, through a connector | Awaiting real-world proof |
 | Connect a WhatsApp number by QR code (Settings → WhatsApp) and send the agent's notices and messages through it | The service does not come installed: you install it from the screen, and it costs about 323 MiB of memory with no number connected and 3.2 GB of disk (measured on 0.3.0, November 12, 2026). Routes tested with a real database and a fake WhatsApp service; installing and removing through the agent, with a simulated Docker. **Not yet proven with a real number:** no QR code was scanned and no message went out. It is an unofficial WhatsApp client; see the [guide](docs/guides/whatsapp-por-qr-code.md) (in Portuguese) |
+| Connect the number to WhatsApp calls (Settings → WhatsApp calls), the first part of the capability | The service (WaCalls) does not come installed: you install it from the screen; memory and disk not measured yet. Routes tested with a real database and a fake WaCalls, through the real voice process; installing and removing through the agent, with a simulated Docker. **Not yet proven with a real number**, and no call is answered yet. Unofficial WhatsApp client; see the [guide](docs/guides/ligacao-pelo-whatsapp.md) (in Portuguese) |
 | Call a webhook during the call | Awaiting real-world proof (without a real receiver) |
-| Update, health check, backup and restore | Tested against a simulated Docker; backup and restore checked by hand on a real Postgres |
-| Update from the panel (Settings → Version and update), through a kit agent on the server | Routes tested against a real database; agent and scheduling tested against a simulated Docker and systemd. **Not yet proven on a real installation** |
+| Update, health check, backup and restore | Proven on a real install, on the partner's VPS: installer run twice without regenerating secrets, backup checked, a restore that brings back the backup's row counts, and the automatic rollback of a failed update. Restoring on another server, or across versions with a new migration, not yet proven |
+| Update from the panel (Settings → Version and update), through a kit agent on the server | Proven on a real install: twice on the partner's VPS (0.3.0 → 0.4.0 and 0.4.0 → 0.5.0), with nobody at the server's terminal, including the hand-off to the new version's updater and the removal of old images |
+| Record the call audio, off by default and turned on from the panel (Settings → Call recording) | Tested against a real database and on a browser call, in an end-to-end test. Not yet proven on a real install. Reaches installs in the first release published after 0.5.0 |
+| Transcript retention period and export of what the organization keeps about a phone number (Settings) | Tested against a real database and checked on screen, on a panel against a throwaway database. Not yet proven on a real install. Reaches installs in the first release published after 0.5.0 |
 | Calls placed by the agent | Awaiting real-world proof, and off by default. See "Outbound calls" |
 
-If you place the first real call, tell us how it went in an issue: it is the most valuable
-contribution right now.
+If you answer a call through a carrier line, tell us how it went in an issue: inbound calls over
+a SIP trunk have no public record yet, and that is the most valuable contribution right now.
 
-What does **not** exist yet: audio recording (the foundation stores the transcript), several
-companies on one screen, a visual flow builder, calls over WhatsApp, voice IVR, call queues.
+What does **not** exist yet: several
+companies on one screen, a visual flow builder, answering calls over WhatsApp, voice IVR, call queues.
 Part of this is on the [roadmap](ROADMAP.md), open to the community.
 
 ## How it works
@@ -285,7 +292,11 @@ code, are in [`ROADMAP.md`](ROADMAP.md).
 ## Who builds it
 
 DeskVoice was created by Rafael Melgaço ([@melgarafael](https://www.youtube.com/@melgarafael))
-and is built in public, with the community. DeskcommCRM, where the contribution workflow used
+and is built in public, with the community. There are already outside contributions: the fences
+and security work from [webtecnica](https://github.com/webtecnica) are in the published releases. On `main`, shipping in
+the next release, are the rights of callers (retention period and export), also from webtecnica,
+and the OpenAI cost checked against the invoice, the farewell before hanging up and call
+recording, from [aliffstefano](https://github.com/aliffstefano). DeskcommCRM, where the contribution workflow used
 here comes from, has received PRs from more than 250 people.
 
 Credit is a rule, not a courtesy: contributors keep authorship of their commits and are named

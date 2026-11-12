@@ -42,14 +42,17 @@ tem risco zero. Três pontos:
 
 ### 1. A conversa é registrada
 
-A fundação do DeskVoice **não grava o áudio**. Ela guarda a **transcrição** da conversa e os
-eventos da chamada. Transcrição de conversa com uma pessoa identificável é dado pessoal.
+O DeskVoice guarda a **transcrição** da conversa e os eventos da chamada. A **gravação do áudio**
+existe, mas vem **desligada de fábrica**: só grava a organização em que um dono ou administrador a
+ligar, em Configurações, em "Gravação das chamadas". Transcrição e gravação de conversa com uma
+pessoa identificável são dado pessoal; a voz, mais ainda.
 
 O que o sistema faz: a chamada começa com um aviso de que a conversa é registrada, e o aviso
 fica marcado na linha do tempo.
 
-O que cabe a você: garantir que o texto do aviso corresponde ao que você faz com o dado, e
-definir por quanto tempo guarda as transcrições e quem tem acesso a elas. O prazo se ajusta na
+O que cabe a você: decidir se grava o áudio, garantir que o texto do aviso corresponde ao que você
+faz com o dado (se grava, que o aviso diga isso), e definir por quanto tempo guarda as transcrições
+e as gravações e quem tem acesso a elas. O prazo se ajusta na
 tela; veja [Guardar e apagar](#guardar-e-apagar).
 
 ### 2. A pessoa está falando com uma IA
@@ -104,7 +107,7 @@ confundem.
 | Mensagem por WhatsApp pelo número conectado por QR Code (WAHA) | os servidores do WhatsApp, da Meta; o serviço roda na sua VPS, mas a mensagem sai por eles | a tela WhatsApp, em Configurações |
 | Mensagem pelo conector de endereço (DeskcommCRM ou webhook do operador) | o endereço que você cadastrou, e de lá para onde aquele sistema mandar | a tela WhatsApp, em Configurações |
 | O que o agente manda a um webhook permitido (`call_webhook`) e os avisos por webhook | os endereços da lista de webhooks permitidos | "Webhooks permitidos", em Configurações |
-| Banco e transcrições | a sua VPS, no país do contrato dela | a instalação |
+| Banco, transcrições e gravações (quando ligadas) | a sua VPS, no país do contrato dela | a instalação |
 
 Três cuidados, e o primeiro é o que mais se erra:
 
@@ -204,22 +207,37 @@ organização. Só dono ou administrador muda.
 - Depois do prazo, o texto de cada fala é trocado por um marcador. A chamada, o horário, o resumo e
   o resto da linha do tempo continuam, e a linha do tempo diz que ali houve uma fala apagada.
 - A troca roda logo que o prazo é gravado e, daí em diante, uma vez por dia.
+- **A gravação do áudio sai junto.** Quando a gravação está ligada, o arquivo de cada chamada
+  mais antiga que o prazo é apagado na mesma passagem, e o registro conta quantos saíram.
 - **O que sai não volta**, nem pelo painel nem pelo servidor. A tela pede confirmação antes de
   gravar um prazo que apaga.
 
-Três lugares guardam dado tirado da conversa, e **o prazo só alcança o primeiro**:
+**A gravação** fica em "Gravação das chamadas", na mesma tela, por organização, só por dono ou
+administrador, e vem desligada. Ligar vale a partir da próxima chamada. Desligar não apaga as
+gravações já feitas: elas seguem o prazo de guarda acima, e sem prazo ficam para sempre. Cada
+minuto de chamada ocupa cerca de 1,9 MB no disco; é a conta do formato (dois canais, 8 kHz, 16
+bits), e não uma medição. Sem prazo, o disco cresce sem limite, e a tela avisa. Com menos de 1 GiB
+livre, a chamada segue sem gravar, e a linha do tempo dela diz isso.
+
+Quatro lugares guardam dado tirado da conversa, e **o prazo só alcança os dois primeiros**:
 
 - **a transcrição**, nos eventos da chamada: sai com o prazo;
+- **a gravação do áudio**, quando ligada: sai com o prazo;
 - **o resumo da chamada**, escrito a partir da conversa: fica;
 - **os argumentos das ferramentas** que o agente usou, por exemplo o texto de uma mensagem enviada
   por WhatsApp: ficam na linha do tempo.
 
-E **os backups** (`install/backup.sh` guarda os 14 mais recentes) levam tudo isso junto, até serem
-descartados. Apagar do banco não apaga dos backups que já existem.
+E **os backups** (`install/backup.sh` guarda os 14 mais recentes) levam o banco junto, até serem
+descartados. Apagar do banco não apaga dos backups que já existem. **Os backups de hoje não incluem
+as gravações**: o áudio fica só no volume `recordings` da VPS. Restaurar um backup em outro
+servidor traz as chamadas sem o áudio, e um disco perdido leva as gravações junto.
 
 **A entrega dos dados de uma pessoa** fica na mesma tela, em "Dados de uma pessoa que ligou". Informe
 o telefone e sai um arquivo com as chamadas desse número na sua organização, os eventos delas e a
-entrada na lista de não ligar. A fala que já saiu pelo prazo aparece como apagada. Duas limitações
+entrada na lista de não ligar. A fala que já saiu pelo prazo aparece como apagada. Cada chamada diz
+se tem gravação (`recording`), mas **o áudio não vai no arquivo**: ele fica no player da tela de cada
+chamada, e embutido no arquivo de texto o faria crescer cerca de 2,5 MB por minuto de conversa.
+Se a pessoa pediu também a voz dela, a entrega do áudio é feita à parte, chamada por chamada. Duas limitações
 que valem dizer a quem pediu:
 
 1. **A busca é pelo número.** Se a mesma pessoa ligou de outro telefone, exporte cada número.
@@ -228,12 +246,13 @@ que valem dizer a quem pediu:
 
 O arquivo é dado pessoal fora do banco: entregue pelo canal combinado e apague a cópia depois.
 
-**Tudo fica registrado** na mesma tela: quem mudou o prazo e de quanto para quanto, quantas falas
-saíram pelo prazo e quem exportou os dados de qual telefone, e quando. O registro de exportação
+**Tudo fica registrado** na mesma tela: quem mudou o prazo e de quanto para quanto, quem ligou ou
+desligou a gravação, quantas falas e gravações saíram pelo prazo e quem exportou os dados de qual telefone, e quando. O registro de exportação
 guarda o telefone, e não sai com o prazo da transcrição: é ele que mostra, depois, que o pedido foi
 atendido.
 
-O porquê desse desenho está na [decisão 0014](../decisions/0014-direitos-de-quem-ligou-pela-tela.md).
+O porquê desse desenho está nas decisões [0014](../decisions/0014-direitos-de-quem-ligou-pela-tela.md)
+e [0016](../decisions/0016-gravacao-desligada-de-fabrica.md).
 
 ## Para implementadores
 

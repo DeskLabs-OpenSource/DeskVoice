@@ -1,4 +1,4 @@
-import { createDb, loadConfig, systemClock } from "@deskvoice/core";
+import { DEFAULT_RECORDINGS_DIR, createDb, loadConfig, systemClock } from "@deskvoice/core";
 import { loadRoutines } from "./load";
 import { createLogger } from "./log";
 import { startRunner } from "./runner";
@@ -12,6 +12,7 @@ const runner = await startRunner({
   db,
   clock: systemClock,
   secretKey: config.secretKey,
+  recordingsDir: process.env.RECORDINGS_DIR ?? DEFAULT_RECORDINGS_DIR,
   routines,
   log,
   onFatal: (error) => {

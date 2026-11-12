@@ -73,8 +73,8 @@ info "Alvo:  $target"
 if [ "$current" = "$target" ]; then
   # Quem chegou a esta versão pelo atualizador de uma versão sem agente ganha o agente aqui.
   converge_agent
-  # E quem chegou a ela sem a chave do WhatsApp por QR Code ganha a chave.
-  converge_waha
+  # E quem chegou a ela sem as chaves dos serviços de WhatsApp ganha as chaves.
+  converge_whatsapp_keys
   ok "Esta instalação já está na versão $target. Nada a fazer."
   exit 0
 fi
@@ -206,8 +206,9 @@ fi
 env_set "$ENV_FILE" DESKVOICE_VERSION "$target"
 # Quem vem de uma versão sem o WhatsApp por QR Code ganha aqui a chave que painel, voz e rotinas
 # vão receber (o serviço em si só sobe se alguém o instalar pela tela). Em ARM, é este passo que
-# diz ao Compose qual é a imagem do WAHA.
+# diz ao Compose qual é a imagem do WAHA. O mesmo para as chaves da ligação pelo WhatsApp (WaCalls).
 ensure_waha || true
+ensure_wacalls || true
 # As imagens vêm antes de qualquer outra mudança. Sem elas não há atualização, e construir aqui
 # não é saída: até este ponto só a versão foi trocada, então basta voltá-la. O banco e os
 # serviços não foram tocados.
@@ -228,6 +229,13 @@ if whatsapp_enabled && ! pull_output="$(dc pull -q waha 2>&1)"; then
   apply_version "$current" "$previous_commit" \
     || die "Não consegui baixar a imagem do serviço de WhatsApp (WAHA), e também não consegui voltar o código para $previous_commit." "Os serviços seguem rodando na versão anterior e o banco não foi tocado. Rode: git -C $REPO_DIR checkout $previous_commit  — e depois bash install/diagnose.sh para pedir ajuda."
   die "Não consegui baixar a imagem do serviço de WhatsApp (WAHA), que esta instalação usa (resposta do Docker acima). Nada foi alterado: a instalação segue na versão $current, e o banco não foi tocado." "Causas prováveis: a internet da VPS, o Docker Hub fora do ar ou o limite de downloads dele (espere uma hora). Confira também o espaço em disco (df -h): a imagem ocupa cerca de 3,2 GB. Depois rode bash install/update.sh de novo."
+fi
+# O mesmo para a ligação pelo WhatsApp (WaCalls), que vem do ghcr.io.
+if whatsapp_calls_enabled && ! pull_output="$(dc pull -q wacalls 2>&1)"; then
+  printf '%s\n' "$pull_output" | tail -n 5 | sed 's/^/    /' >&2
+  apply_version "$current" "$previous_commit" \
+    || die "Não consegui baixar a imagem do serviço de ligação pelo WhatsApp (WaCalls), e também não consegui voltar o código para $previous_commit." "Os serviços seguem rodando na versão anterior e o banco não foi tocado. Rode: git -C $REPO_DIR checkout $previous_commit  — e depois bash install/diagnose.sh para pedir ajuda."
+  die "Não consegui baixar a imagem do serviço de ligação pelo WhatsApp (WaCalls), que esta instalação usa (resposta do Docker acima). Nada foi alterado: a instalação segue na versão $current, e o banco não foi tocado." "Causas prováveis: a internet da VPS ou o ghcr.io fora do ar. Depois rode bash install/update.sh de novo."
 fi
 render_asterisk_config
 # Instalação de antes da entrada única: o Caddy passa a ser a única porta publicada, na mesma

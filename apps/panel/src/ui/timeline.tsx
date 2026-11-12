@@ -176,6 +176,21 @@ export function Timeline({ events, live, agentName }: { events: CallEvent[]; liv
         };
       case "call_refused":
         return { ...base, tone: "fail", icon: PhoneX, body: <Card tone="fail" title={e.call_refused}><p className="text-muted">{reason(p.reason)}</p></Card> };
+      case "recording_skipped": {
+        const mb = (value: unknown): string => Math.floor(Number(value) / 1e6).toLocaleString(locale);
+        const lowDisk = p.reason === "low_disk";
+        return {
+          ...base,
+          tone: "fail",
+          icon: RecordIcon,
+          body: (
+            <Card tone="fail" title={e.recording_skipped}>
+              <p className="text-muted">{lowDisk ? fill(e.recording_skipped_low_disk, { free: mb(p.freeBytes), min: mb(p.minFreeBytes) }) : e.recording_skipped_unavailable}</p>
+              {!lowDisk && text(p.error) ? <p className="data text-[0.87rem] text-muted">{text(p.error)}</p> : null}
+            </Card>
+          ),
+        };
+      }
       case "cost_ceiling_reached":
         return { ...base, tone: "fail", icon: Coins, body: <Card tone="fail" title={e.cost_ceiling_reached}><p className="text-muted">{e.cost_ceiling_body}</p></Card> };
       case "call_ended":

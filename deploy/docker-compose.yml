@@ -1,8 +1,9 @@
 # DeskVoice: uma VPS, um comando.
 #
 # Quem publica porta no host: só o Caddy (a entrada única do painel e da voz do navegador) e o
-# Asterisk (SIP e RTP, UDP). Postgres, painel, voz, rotinas, o WAHA (WhatsApp) e a ARI do Asterisk
-# ficam na rede interna, e painel e voz NUNCA publicam porta: tudo o que é web entra pelo Caddy.
+# Asterisk (SIP e RTP, UDP). Postgres, painel, voz, rotinas, o WAHA (WhatsApp), o WaCalls (ligação
+# pelo WhatsApp) e a ARI do Asterisk ficam na rede interna, e painel e voz NUNCA publicam porta:
+# tudo o que é web entra pelo Caddy.
 #
 # As portas do Caddy não estão neste arquivo. O instalador as grava em
 # `docker-compose.override.yml`, porque dependem da máquina: 80/443 quando estão livres, ou
@@ -13,7 +14,8 @@
 # privilégio. Não há variável para preencher à mão: o que é escolha de quem opera fica no painel.
 #   .env         só o que o próprio Compose interpola (senha do Postgres, portas, versão, o
 #                segredo do agente de atualização, entregue só ao painel, a chave do WAHA,
-#                entregue a painel, voz e rotinas, e a marca de que o WhatsApp foi instalado pela tela)
+#                entregue a painel, voz e rotinas, as chaves do WaCalls, entregues só a ele e à
+#                voz, e as marcas de que cada serviço de WhatsApp foi instalado pela tela)
 #   app.env      o que painel, voz e rotinas recebem; não contém a senha do dono do banco
 #   migrate.env  credenciais do dono do schema; só o serviço `migrate` recebe
 #
@@ -81,6 +83,9 @@ services:
       WAHA_API_KEY: "${WAHA_API_KEY:-}"
     depends_on:
       migrate: { condition: service_completed_successfully }
+    volumes:
+      # Gravações das chamadas: a voz grava, o painel toca na tela da chamada.
+      - recordings:/recordings:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/system/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -91,15 +96,18 @@ services:
     <<: *app
     image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-voice:${DESKVOICE_VERSION:-dev}
     build: { context: .., target: voice, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
-    # A ferramenta `send_whatsapp` roda neste processo, durante a ligação.
+    # A ferramenta `send_whatsapp` roda neste processo, durante a ligação. E só este processo fala
+    # com o WaCalls (ligação pelo WhatsApp): o token dele não chega ao painel nem às rotinas.
     environment:
       WAHA_API_KEY: "${WAHA_API_KEY:-}"
+      WACALLS_API_TOKEN: "${WACALLS_API_TOKEN:-}"
     depends_on:
       migrate: { condition: service_completed_successfully }
       asterisk: { condition: service_healthy }
     volumes:
       # O worker escreve aqui os troncos cadastrados no painel; o Asterisk lê.
       - asterisk-generated:/asterisk-generated
+      - recordings:/recordings
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -113,6 +121,9 @@ services:
     # A entrega dos avisos por WhatsApp (`deliver_notification`) roda neste processo.
     environment:
       WAHA_API_KEY: "${WAHA_API_KEY:-}"
+    volumes:
+      # O prazo de guarda (`purge_transcripts`) apaga também as gravações antigas.
+      - recordings:/recordings
     depends_on:
       migrate: { condition: service_completed_successfully }
 
@@ -174,6 +185,44 @@ services:
     networks: [internal]
     logging: *logging
 
+  # Ligação pelo WhatsApp: o WaCalls (github.com/JotaDev66/WaCalls, MIT) conecta o número como mais
+  # um aparelho vinculado e entrega as ligações. Peça de terceiros: referenciada, nunca republicada,
+  # fixada por resumo. Não há versão publicada: só o canal `develop` tem imagem e autenticação, e o
+  # resumo é o da imagem desse canal criada em 27/07/2026 (commit d16a076), a mesma que o DeskcommCRM
+  # fixa. Índice multiarquitetura (amd64 e arm64): uma referência serve às duas.
+  #
+  # Só na rede interna, sem porta publicada: quem fala com ele é o processo de voz, com o token.
+  # A API escuta em 8080 dentro da rede; `/healthz` é a única rota sem token.
+  #
+  # Porta UDP do áudio: nenhuma, e de propósito. O DeskcommCRM publica uma porque lá o par WebRTC é o
+  # navegador de quem atende, fora da máquina. Aqui o par vai ser o processo de voz, na mesma rede
+  # interna, e a perna até o WhatsApp é de saída. Nesta versão não há áudio nenhum (o serviço só
+  # conecta o número); se a prova da próxima fatia mostrar que o WaCalls precisa de porta fixa, o
+  # caminho é WACALLS_WEBRTC_UDP_PORT sem publicá-la (desenho, seção 4.3).
+  #
+  # Fica num perfil: NÃO sobe nem é baixado por padrão. Quem liga o perfil é o agente do kit
+  # (install/agent.sh), quando um dono ou administrador pede pela tela; a marca fica em deploy/.env
+  # (DESKVOICE_WHATSAPP_CALLS=on). Memória e disco com o serviço de pé ainda NÃO foram medidos.
+  wacalls:
+    profiles: ["whatsapp-calls"]
+    image: ghcr.io/jotadev66/wacalls@sha256:9ff52ef9455cf42125a911c38bb8c855f0cc205516cada2054e5c05546909022
+    restart: unless-stopped
+    # Teto, e não medição: é o que o DeskcommCRM usa com a mesma imagem. Sem teto, um serviço que
+    # cresce leva a máquina inteira; com ele, cai só quem estourou e o `restart` o traz de volta.
+    mem_limit: 256m
+    environment:
+      # O serviço não sobe sem administrador. Usuário e senha são gerados pelo instalador e nunca
+      # mostrados: ninguém entra na tela do WaCalls, que nem é alcançável de fora.
+      WACALLS_ADMIN_USER: "${WACALLS_ADMIN_USER:-}"
+      WACALLS_ADMIN_PASSWORD: "${WACALLS_ADMIN_PASSWORD:-}"
+      # O token com que o processo de voz fala com ele, sempre no cabeçalho.
+      WACALLS_API_TOKEN: "${WACALLS_API_TOKEN:-}"
+    volumes:
+      # O pareamento do número. Perder este volume obriga a ler o QR Code de novo. Não entra no backup.
+      - wacalls-data:/data
+    networks: [internal]
+    logging: *logging
+
   # Asterisk é peça de terceiros: referenciada, nunca republicada. Fixada por digest
   # porque neste registro nem as tags de versão são imutáveis (medido no DeskcommCRM).
   asterisk:
@@ -222,6 +271,8 @@ networks:
 volumes:
   postgres-data:
   waha-sessions:
+  wacalls-data:
   asterisk-generated:
+  recordings:
   caddy-data:
   caddy-config:

@@ -15,9 +15,10 @@ O trabalho em curso é fazer o que já existe aguentar o mundo real.
 - Mensagens de erro do instalador e da checagem de saúde que digam o que fazer, e não só o que
   falhou.
 - Guias com telas reais, à medida que as telas estabilizam.
-- **A primeira ligação real.** Nada foi provado ainda com operadora de verdade: entrada por tronco
-  SIP, áudio ouvido, transferência atendida por uma pessoa. Quem fizer e relatar numa issue abre
-  o caminho para todos.
+- **A primeira ligação por operadora com registro público.** Um contribuidor já fez ligações reais
+  com o motor OpenAI Realtime numa instalação própria. Falta o registro de uma
+  entrada por tronco SIP, com o áudio ouvido e uma transferência atendida por uma pessoa. Quem
+  fizer e relatar numa issue abre o caminho para todos.
 - Dívidas conhecidas da fundação, listadas em [`SECURITY.md`](SECURITY.md) ("Limites conhecidos"):
   coluna de "pega em" na fila de tarefas, mensagem gravada para motor de voz caído, isolamento
   que resista a injeção de SQL, limite de login que sobreviva a reinício.
@@ -38,10 +39,9 @@ O trabalho em curso é fazer o que já existe aguentar o mundo real.
 
 ### Depois
 
-- Gravação de áudio com retenção configurável.
 - URA por voz.
 - Várias empresas operadas na mesma tela. O banco já nasce pronto para isso.
-- Site com guias e curso, em repositório separado.
+- Curso no [site](https://deskvoice.com.br), que já está no ar com os guias.
 
 ### Fora do horizonte por enquanto
 
@@ -66,8 +66,7 @@ Tamanhos: **P** cabe em um PR pequeno. **M** pede alguns PRs ou um PR com teste 
 | Ferramenta de CRM | M | Identificar quem ligou e registrar o que foi combinado | Interface `Tool`. Guia: [adicionar uma ferramenta](docs/guides/adicionar-uma-ferramenta.md) |
 | Ferramenta de pagamento | M | Enviar um link de cobrança enquanto a pessoa está na linha | Interface `Tool`, com `request_approval` quando houver valor envolvido |
 | Conector com o DeskcommCRM | G | Ligação e CRM conversando para quem usa os dois | Ferramenta `send_whatsapp` e a configuração `whatsapp.connector` em `packages/tools`. Contexto na [decisão 0001](docs/decisions/0001-fronteira-com-o-deskcomm.md) |
-| Ligação pelo WhatsApp | G | Muita gente liga para a empresa pelo WhatsApp, e não pelo número fixo. O [WaCalls](https://github.com/JotaDev66/WaCalls) (MIT) já faz essa ponte numa instalação própria, e o DeskcommCRM o usa. Ele pareia a conta por QR Code como mais um aparelho vinculado, fora da API oficial: há risco de bloqueio do número, então o recurso entra opcional, desligado de fábrica, e com as mesmas regras das ligações de saída | Entrada de chamadas e o servidor de áudio em `apps/voice`; a conexão por QR Code em `apps/panel/src/server/whatsapp.ts`. Começa por um pedido de decisão, no formato do [`GOVERNANCE.md`](GOVERNANCE.md), e pela [spec do Deskcomm](https://github.com/melgarafael/DeskcommCRM/blob/main/docs/specs/18-spec-voice-calls-wacalls.md) |
-| Gravação com retenção configurável | G | Auditoria e treinamento. Pede decisão sobre por quanto tempo guardar e quem pode ouvir | Servidor AudioSocket em `apps/voice`. Começa por um pedido de decisão, no formato do [`GOVERNANCE.md`](GOVERNANCE.md) |
+| Ligação pelo WhatsApp | G | Muita gente liga para a empresa pelo WhatsApp, e não pelo número fixo. O [WaCalls](https://github.com/JotaDev66/WaCalls) (MIT) já faz essa ponte numa instalação própria, e o DeskcommCRM o usa. Ele pareia a conta por QR Code como mais um aparelho vinculado, fora da API oficial: há risco de bloqueio do número, então o recurso entra opcional, desligado de fábrica, e com as mesmas regras das ligações de saída | Entrada de chamadas e o servidor de áudio em `apps/voice`; a conexão por QR Code em `apps/panel/src/server/whatsapp.ts`. O desenho está em [`docs/specs/2026-11-12-ligacao-pelo-whatsapp.md`](docs/specs/2026-11-12-ligacao-pelo-whatsapp.md), com os pedidos de decisão que vêm antes da primeira fatia |
 | Filas e horário de atendimento | M | Fora do horário e com todos ocupados são os dois momentos em que mais se perde ligação | Entrada de chamadas em `apps/voice`. Telas de agente e de linha em `apps/panel` |
 | URA por voz | M | Encaminhar para o agente certo antes de a conversa começar | Entrada de chamadas em `apps/voice`. O protocolo AudioSocket já entrega os dígitos teclados |
 | Transferência assistida | M | Quem recebe a ligação já sabe do que se trata | Ferramenta `transfer_to_human` em `packages/tools` e a parte de telefonia do contexto da ferramenta |
@@ -77,7 +76,7 @@ Tamanhos: **P** cabe em um PR pequeno. **M** pede alguns PRs ou um PR com teste 
 | Ferramentas carregadas de fora do repositório | G | Ferramenta de nicho não entra no núcleo, e hoje só existe mantendo um fork | Descoberta por pasta em `packages/tools`. Pede desenho antes |
 | Traduções | P | A tela nasce em português, inglês e espanhol, e os documentos ainda não acompanham tudo | Dicionários em `apps/panel/src/i18n/` e os documentos da raiz |
 | Bancada de latência e qualidade em pt-BR | M | Escolher motor por medida, e não por impressão | `packages/voice-engine`, com o motor simulado como referência de roteiro |
-| Site com guias | G | Quem não programa precisa de um lugar para aprender | Começa pelos textos em `docs/guides/`. O site vai para um repositório separado |
+| Guias e curso no site | M | Quem não programa precisa de um lugar para aprender. O site está no ar, só em português, e os guias dele vêm das skills | Os textos em `docs/guides/` e o repositório do site, [`deskvoice-site`](https://github.com/DeskLabs-OpenSource/deskvoice-site) |
 
 ## Como uma frente entra aqui
 

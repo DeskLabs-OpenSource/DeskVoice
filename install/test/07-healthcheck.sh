@@ -7,7 +7,7 @@ line() { printf '%s\n' "$out" | grep "$1" | head -n 1; }
 
 # Instalação nova: tudo no ar, linha e motor ainda por configurar.
 out="$(bash "$H" 2>&1)"; equal "instalação nova sem linha nem chave: sai com zero" 0 "$?"
-equal "uma linha por peça (15 peças)" 15 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
+equal "uma linha por peça (16 peças)" 16 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
 for piece in Painel Banco "Painel → banco" Asterisk "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
 contains "linha não cadastrada é aviso, não falha" "$(line 'Linha telefônica')" "aviso"
 contains "linha não cadastrada traz o detalhe" "$(line 'Linha telefônica')" "nenhuma linha cadastrada ainda"
@@ -157,7 +157,7 @@ lacks "tudo certo: nenhuma falha" "$out" "falha "
 json="$(bash "$H" --json 2>&1)"
 contains "json: código de saída" "$json" '{"exit_code":0,"checks":['
 contains "json: peça com estado e detalhe" "$json" '{"id":"trunk","name":"Linha telefônica","essential":false,"status":"ok","detail":"registrado"}'
-equal "json: quinze peças" 15 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
+equal "json: dezesseis peças" 16 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
 if command -v python3 >/dev/null 2>&1; then check "json: é JSON válido" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$json"; fi
 printf '%s\n' 'panel|ok|diz "aspas" e \barra' 'trunk|ok|x' 'engine|ok|y' > "$FAKE_DIR/panel_health"
 if command -v python3 >/dev/null 2>&1; then check "json: escapa aspas e barra" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(bash "$H" --json 2>&1)"; fi

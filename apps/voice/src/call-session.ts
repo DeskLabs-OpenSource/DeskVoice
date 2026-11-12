@@ -1,9 +1,10 @@
-import { decryptSecret, enqueueTask, recordEvent, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { autoCommitOrgQuery, runTool, toSpec, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
 import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
+import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
 
 export interface CallSessionDeps {
@@ -16,6 +17,10 @@ export interface CallSessionDeps {
   approvals: ApprovalWaiter;
   schedule?: Schedule;
   log?: Logger;
+  /** Pasta das gravações (`RECORDINGS_DIR`). Sem ela, ou com a gravação desligada na organização, a chamada não é gravada. */
+  recordingsDir?: string;
+  /** Espaço livre mínimo na pasta para gravar (padrão `MIN_FREE_BYTES_TO_RECORD`). */
+  recordingMinFreeBytes?: number;
 }
 
 export interface CallSessionInput {
@@ -131,6 +136,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let voice: VoiceSession | undefined;
   let lastEngineError: Error | undefined;
   let ending = false;
+  let recorder: Recording | undefined;
   let wrappingUp = false;
   let requestedEnd: Ending | undefined;
   let requestedFarewell: string | undefined;
@@ -172,7 +178,29 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     } catch (error) {
       log("error", "could not release the telephony side", { error: messageOf(error) });
     }
+    // Fecha o arquivo em qualquer caminho de fim: com áudio vira `.wav`; sem, ou com falha, o `.part` some.
+    await recorder?.finish().catch(logFailure("could not save the call recording"));
     resolveDone({ status: end.status, endReason: end.endReason, costCents });
+  }
+
+  /**
+   * Abre a gravação, se houver espaço. Sem espaço, ou se a pasta falhar, a chamada segue sem
+   * gravar, e a linha do tempo diz por quê: quem ligou e o painel nunca ficam sem resposta.
+   */
+  async function openRecording(dir: string): Promise<void> {
+    const minFreeBytes = deps.recordingMinFreeBytes ?? MIN_FREE_BYTES_TO_RECORD;
+    let opened: Recording;
+    try {
+      const free = await freeBytes(dir);
+      if (free < minFreeBytes) return void (await event("recording_skipped", { reason: "low_disk", freeBytes: free, minFreeBytes }));
+      opened = await startRecording(recordingPath(dir, organizationId, callId), () => clock.now().getTime());
+    } catch (error) {
+      log("error", "could not start the call recording", { error: messageOf(error) });
+      return void (await event("recording_skipped", { reason: "unavailable", error: messageOf(error) }));
+    }
+    // A chamada pode ter terminado enquanto o arquivo abria: fecha já, e o `.part` vazio some.
+    if (ending) await opened.finish();
+    else recorder = opened;
   }
 
   /** O agente se despede e a chamada termina logo depois. */
@@ -290,6 +318,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);
     // Sem texto do operador, ou com texto em branco, vale o padrão: o aviso nunca falta.
     const recordingNotice = typeof notice?.value === "string" && notice.value.trim() !== "" ? notice.value.trim() : DEFAULT_RECORDING_NOTICE;
+    // Gravação desligada de fábrica (registro 0016): só grava a organização que ligou. Lida uma vez,
+    // no começo: ligar ou desligar no meio não muda a chamada em curso.
+    const recording = deps.recordingsDir ? await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALL_RECORDING_SETTING]) : null;
+    // O arquivo abre antes do motor: depois que ele conecta, nada pode esperar (ver abaixo).
+    if (deps.recordingsDir && callRecordingOf(recording?.value)) await openRecording(deps.recordingsDir);
 
     const enabled = new Map<string, Tool>();
     for (const name of overrides?.tools ?? agent.tools) {
@@ -370,9 +403,14 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const session = voice;
     const engineLabel = engine.label;
     session.on("audio", (pcm) => {
-      if (!ending) transport.sendAudio(pcm);
+      if (ending) return;
+      transport.sendAudio(pcm);
+      recorder?.agent(pcm);
     });
-    session.on("interrupted", () => transport.clearAudio());
+    session.on("interrupted", () => {
+      transport.clearAudio();
+      recorder?.clear();
+    });
     session.on("transcript", (turn) => void event(turn.speaker === "user" ? "transcript_user" : "transcript_agent", { text: turn.text }).catch(logFailure("could not record a transcript")));
     session.on("toolCall", (toolCall) => {
       const running: Promise<void> = handleToolCall(enabled, toolCall).finally(() => toolsRunning.delete(running));
@@ -400,6 +438,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       });
     });
     transport.onAudio((pcm) => {
+      recorder?.caller(pcm);
       if (!ending && !wrappingUp) session.sendAudio(pcm);
     });
     const answered = [

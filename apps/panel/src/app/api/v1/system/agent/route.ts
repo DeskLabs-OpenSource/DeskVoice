@@ -21,9 +21,10 @@ import { agentCheckIn, agentReport, isAgent } from "../../../../../server/update
  * A primeira instalação de verdade no CI mostrou que "o cabeçalho não existe" nunca acontece
  * com o servidor real: a regra antiga recusava o próprio agente.
  *
- * A resposta é `{ update: boolean, whatsapp: boolean }` e mais nada: há atualização pedida, e
- * esta instalação quer o serviço de WhatsApp. Um painel capaz de mandar comando, versão, imagem
- * ou endereço ao servidor seria uma porta de administração remota. Os campos são copiados um a
+ * A resposta é `{ update: boolean, whatsapp: boolean, whatsappCalls: boolean }` e mais nada: há
+ * atualização pedida, esta instalação quer o serviço de WhatsApp, e quer o de ligação pelo WhatsApp
+ * (registro 0010, "A regra de entrada de um campo novo"). Um painel capaz de mandar comando, versão,
+ * imagem ou endereço ao servidor seria uma porta de administração remota. Os campos são copiados um a
  * um, de propósito: o que `agentCheckIn` passar a devolver não vaza para o servidor por engano.
  */
 export const POST = handlePublic({}, async ({ request, deps }) => {
@@ -31,8 +32,8 @@ export const POST = handlePublic({}, async ({ request, deps }) => {
   if (!isAgent(request, deps)) throw new ApiError(401, "unauthenticated", "The agent secret is missing or wrong.");
   const report = agentReport.safeParse(await request.json().catch(() => null));
   if (!report.success) throw new ApiError(400, "validation_error", "The agent report is malformed.");
-  const { update, whatsapp } = await agentCheckIn(deps, report.data);
-  return { update: update === true, whatsapp: whatsapp === true };
+  const { update, whatsapp, whatsappCalls } = await agentCheckIn(deps, report.data);
+  return { update: update === true, whatsapp: whatsapp === true, whatsappCalls: whatsappCalls === true };
 });
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);

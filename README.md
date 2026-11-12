@@ -28,9 +28,11 @@ quando precisa, transfere e deixa tarefas rodando depois que a chamada termina.
 
 ---
 
-> **Estado do projeto: fundação em construção.** O que está pronto, o que é experimental e o que
-> ainda é plano estão separados na seção "O que ele faz hoje". Não há data
-> prometida para nada do roadmap.
+> **Estado do projeto: com versões publicadas.** A instalação, a atualização pela tela, o
+> backup, a restauração e a volta automática de uma atualização que falhou já rodaram numa VPS
+> real, e um contribuidor já fez ligações reais com o motor OpenAI Realtime. O que está provado, o
+> que é experimental e o que ainda é plano estão separados na seção "O que ele faz hoje". Não há
+> data prometida para nada do roadmap.
 
 ## Instalar
 
@@ -115,13 +117,15 @@ pnpm install && pnpm demo   # precisa de Docker: sobe um Postgres descartável e
 
 ## O que ele faz hoje
 
-DeskVoice é uma fundação recém-lançada. Para ninguém instalar esperando o que ainda não foi
-provado, cada capacidade abaixo diz até onde a prova foi:
+O DeskVoice publica versões desde 11/11/2026, e o que muda em cada uma está no
+[`CHANGELOG.md`](CHANGELOG.md). Para ninguém instalar esperando o que ainda não foi provado, cada
+capacidade abaixo diz até onde a prova foi:
 
 - **Provado em simulação:** coberto por teste de ponta a ponta com o motor simulado, que percorre a
   chamada inteira sem operadora e sem chave.
-- **Provado numa instalação real:** rodou em 11/11/2026 numa VPS de teste, do jeito e até o ponto
-  que a linha descreve.
+- **Provado numa instalação real:** rodou numa VPS de verdade (as de teste, em 11/11/2026, ou a
+  dedicada da parceira, em 12/11/2026), do jeito e até o ponto que a linha descreve. Cada prova,
+  com as saídas guardadas, está em [`docs/fundacao/instalacao-real.md`](docs/fundacao/instalacao-real.md).
 - **Aguardando prova real:** implementado e testado contra servidores falsos e contra um Asterisk
   de verdade, mas ainda sem uma ligação feita por operadora real.
 
@@ -133,27 +137,29 @@ provado, cada capacidade abaixo diz até onde a prova foi:
 | Tarefas depois que a ligação termina (resumo, avisos, tarefas de acompanhamento) | Provado em simulação |
 | Teto de custo e de duração por chamada | Provado em simulação |
 | Painel web em português, inglês e espanhol | Rotas testadas com banco real; telas conferidas em português |
-| Instalar numa VPS pelo kit de instalação | Provado numa instalação real, sem domínio |
+| Instalar numa VPS pelo kit de instalação | Provado numa instalação real, sem domínio: Ubuntu 22.04 em duas VPS de teste e AlmaLinux 9 na VPS da parceira (lá, antes de o instalador ligar o Docker sozinho, com o serviço ligado à mão). Debian e Rocky Linux ainda sem prova |
 | Painel e voz do navegador pelo mesmo endereço, a entrada única do Caddy | Provado numa instalação real, sem domínio |
 | Conversar por voz com o agente pela tela "Falar com o agente" | Provado numa instalação real com o motor OpenAI Realtime, por um cliente de teste que faz o papel do navegador com fala gravada. Ainda não por um navegador com microfone |
 | Painel com domínio e HTTPS | Aguardando prova real |
 | Atender ligação recebida por uma linha de operadora (tronco SIP) | Aguardando prova real |
 | Transferir a ligação para uma pessoa | Aguardando prova real (o caminho no Asterisk foi conferido, sem operadora) |
-| Motor de voz OpenAI Realtime | Provado numa instalação real, na conversa pela tela "Falar com o agente" descrita acima |
+| Motor de voz OpenAI Realtime | Provado numa instalação real, na conversa pela tela "Falar com o agente" descrita acima. Um contribuidor fez ligações reais com ele numa instalação própria, e, com a correção do custo ([#94](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/94)), a estimativa do DeskVoice bateu com a fatura da OpenAI. Essa correção está na `main` e sai na primeira versão publicada depois da 0.5.0; até lá, a estimativa da OpenAI fica acima da fatura |
 | Motor de voz Gemini Live | Aguardando prova real (testado contra servidor falso, sem chave) |
 | Enviar WhatsApp durante a chamada, por conector | Aguardando prova real |
 | Conectar um WhatsApp por QR Code (Configurações → WhatsApp) e enviar por ele os avisos e as mensagens do agente | O serviço não vem instalado: instala-se pela tela, e custa cerca de 323 MiB de memória sem número conectado e 3,2 GB em disco (medido na 0.3.0, em 12/11/2026). Rotas testadas com banco real e com um serviço de WhatsApp falso; instalar e remover pelo agente, com Docker simulado. **Ainda sem prova com um número real:** nenhum QR Code foi lido e nenhuma mensagem saiu. É um cliente não oficial do WhatsApp; veja o [guia](docs/guides/whatsapp-por-qr-code.md) |
+| Conectar o número à ligação pelo WhatsApp (Configurações → Ligação pelo WhatsApp), primeira parte da capacidade | O serviço (WaCalls) não vem instalado: instala-se pela tela; memória e disco ainda não medidos. Rotas testadas com banco real e um WaCalls falso, pelo processo de voz de verdade; instalar e remover pelo agente, com Docker simulado. **Ainda sem prova com um número real**, e nenhuma ligação é atendida ainda. Cliente não oficial do WhatsApp; veja o [guia](docs/guides/ligacao-pelo-whatsapp.md) |
 | Chamar um webhook durante a chamada | Aguardando prova real (sem um receptor de verdade) |
-| Atualização, checagem de saúde, backup e restauração | Testados com Docker simulado; backup e restauração conferidos à mão num Postgres real |
-| Atualizar pela tela (Configurações → Versão e atualização), por um agente do kit no servidor | Rotas testadas com banco real; agente e agendamento testados com Docker e systemd simulados. **Ainda sem prova numa instalação real** |
+| Atualização, checagem de saúde, backup e restauração | Provado numa instalação real, na VPS da parceira: instalador rodado duas vezes sem regerar segredo, backup conferido, restauração que devolve as contagens do backup e a volta automática de uma atualização que falhou. Restaurar em outro servidor, ou entre versões com migration nova, ainda sem prova |
+| Atualizar pela tela (Configurações → Versão e atualização), por um agente do kit no servidor | Provado numa instalação real: duas vezes na VPS da parceira (0.3.0 → 0.4.0 e 0.4.0 → 0.5.0), sem ninguém no terminal do servidor, com a passagem para o atualizador da versão nova e a remoção das imagens antigas |
+| Gravar o áudio da chamada, desligado de fábrica e ligado pela tela (Configurações → Gravação das chamadas) | Testado com banco real e numa chamada pelo navegador, em teste de ponta a ponta. Ainda sem prova numa instalação real. Chega a quem instala na primeira versão publicada depois da 0.5.0 |
+| Prazo de guarda da transcrição e exportação do que a organização guarda sobre um telefone (Configurações) | Testado com banco real e conferido na tela, num painel contra um banco descartável. Ainda sem prova numa instalação real. Chega a quem instala na primeira versão publicada depois da 0.5.0 |
 | Ligações feitas pelo agente | Aguardando prova real, e desligado de fábrica. Veja "Ligações de saída", abaixo |
 
-Se você fizer a primeira ligação real, conte como foi numa issue: é a contribuição mais valiosa
-neste momento.
+Se você atender uma ligação por uma linha de operadora, conte como foi numa issue: a entrada por
+tronco SIP ainda não tem registro público, e é a contribuição mais valiosa neste momento.
 
-O que **não** existe ainda: gravação de áudio (a fundação guarda a transcrição), várias empresas
-na mesma tela, construtor visual de fluxos, ligação pelo WhatsApp, URA por voz, filas de
-atendimento. Parte disso está no [roadmap](ROADMAP.md), aberta para a comunidade.
+O que **não** existe ainda: várias empresas na mesma tela, construtor visual de fluxos, atender a
+ligação pelo WhatsApp, URA por voz, filas de atendimento. Parte disso está no [roadmap](ROADMAP.md), aberta para a comunidade.
 
 ## Como funciona
 
@@ -286,12 +292,16 @@ e fim: [adicionar uma ferramenta](docs/guides/adicionar-uma-ferramenta.md) ou
 O horizonte e as frentes abertas para a comunidade, cada uma com tamanho e ponto de entrada no
 código, estão em [`ROADMAP.md`](ROADMAP.md). Entre as frentes: motor de voz em pipeline
 (transcrição, modelo de texto e síntese), ferramentas de agenda, CRM e pagamento, conector com o
-DeskcommCRM, gravação com retenção configurável e painel de supervisão ao vivo.
+DeskcommCRM e painel de supervisão ao vivo.
 
 ## Quem constrói
 
 O DeskVoice foi criado por Rafael Melgaço ([@melgarafael](https://www.youtube.com/@melgarafael)) e
-é construído em público, com a comunidade. O DeskcommCRM, de onde vem a fábrica de contribuição
+é construído em público, com a comunidade. Já há contribuições de fora: as cercas e a
+segurança de [webtecnica](https://github.com/webtecnica) estão nas versões publicadas. Estão na `main` e saem na próxima
+versão os direitos de quem ligou (prazo de guarda e exportação), também de webtecnica, e o custo da
+OpenAI conferido contra a fatura, a despedida antes de desligar e a gravação das chamadas, de
+[aliffstefano](https://github.com/aliffstefano). O DeskcommCRM, de onde vem a fábrica de contribuição
 usada aqui, recebeu PRs de mais de 250 pessoas.
 
 Crédito é regra, não cortesia: quem contribui mantém a autoria do commit e tem o nome nas notas
