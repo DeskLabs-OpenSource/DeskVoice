@@ -253,7 +253,7 @@ describe("test message", () => {
     expect(waha.sent).toEqual([]);
   });
 
-  it("goes through the operator connector, with the same signature as a notice", async () => {
+  it("goes through the operator connector, the same path as a notice", async () => {
     const { org, owner } = await bareOrg("wa test connector");
     const phone = "+5531999998888";
     await setWhatsapp(org, owner.id, phone);
