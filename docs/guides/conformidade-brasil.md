@@ -139,6 +139,29 @@ O que reduz esse padrão, além dos controles do sistema:
   automático são recusados pelo projeto. Veja a
   [doutrina de ligações de saída](../doctrine/ligacoes-de-saida.md).
 
+## Guardar e apagar
+
+A transcrição da conversa é dado pessoal, e hoje fica no banco até alguém apagá-la. **Não existe
+expurgo automático** no DeskVoice: não há prazo embutido e nenhuma rotina que apague sozinha. Quem
+responde pelos dados é você, e o prazo é decisão sua. A LGPD não fixa um número.
+
+Três lugares guardam dado tirado da conversa, e não só a transcrição:
+
+- **a transcrição**, nos eventos da chamada;
+- **o resumo da chamada**, que é escrito a partir da conversa;
+- **os argumentos das ferramentas** que o agente usou, por exemplo o texto de uma mensagem enviada
+  por WhatsApp, que ficam na linha do tempo.
+
+E **os backups** (`install/backup.sh` guarda os 14 mais recentes) levam tudo isso junto, até serem
+descartados. Apagar do banco não apaga dos backups que já existem.
+
+Hoje também não há tela nem comando para entregar a uma pessoa o que a instalação guarda sobre ela.
+O pedido dela se atende à mão.
+
+O projeto decidiu, em 12/11/2026, que o prazo de guarda e a entrega dos dados de uma pessoa virão
+pela tela, por organização e com registro de quem fez. Até essa versão sair, vale o que está escrito
+acima.
+
 ## Para implementadores
 
 Se você instala o DeskVoice para clientes:
