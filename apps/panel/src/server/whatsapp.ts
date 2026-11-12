@@ -1,5 +1,5 @@
 import { enqueueTask, withOrg, type OrgQuery } from "@deskvoice/core";
-import { loadWhatsAppConnector, sendWhatsApp } from "@deskvoice/tools";
+import { loadWhatsAppConnector, sendWhatsApp } from "@deskvoice/tools/whatsapp";
 import { WahaError, sendViaWaha, wahaEnsureSession, wahaGetQr, wahaGetSession, wahaLogoutSession, wahaSessionName, wahaStartSession, wahaStopSession, type WahaSession } from "@deskvoice/tools/waha";
 import { z } from "zod";
 import en from "../i18n/en/whatsapp";
@@ -324,7 +324,7 @@ async function setServiceWanted(q: OrgQuery, session: Session, wanted: boolean, 
 
 /**
  * Mensagem de teste para o WhatsApp de quem está logado. Sai pelo conector configurado — o mesmo
- * caminho do envio de aviso, com assinatura e chave de repetição — e cai no número conectado por QR
+ * caminho do envio de aviso — e cai no número conectado por QR
  * Code quando é ele o conector.
  */
 export async function sendTest(deps: ServerDeps, session: Session, to: string | null, locale: Locale): Promise<{ to: string; addressVerified: boolean }> {
