@@ -4,6 +4,8 @@
 #   scripts/test-db.sh down  remove o contêiner
 # DESKVOICE_TEST_DB_CONTAINER troca o nome do contêiner (execuções paralelas não colidem).
 set -euo pipefail
+# Git Bash no Windows reescreve /var/lib/... como C:/Program Files/Git/var/... e o Docker recusa.
+export MSYS_NO_PATHCONV=1
 
 name="${DESKVOICE_TEST_DB_CONTAINER:-deskvoice-test-db}"
 
