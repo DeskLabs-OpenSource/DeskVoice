@@ -66,6 +66,30 @@ adicional. Antes de pôr um agente para atender nesses ramos:
   esses termos, em especial sobre retenção e uso dos dados;
 - os dados da instalação ficam na sua VPS. O DeskVoice não envia telemetria.
 
+### 4. O que sai do país, e para onde
+
+Se você atende em nome de outra empresa — clínica, escritório, financeira — a primeira pergunta
+do contrato costuma ser esta: *onde ficam os dados?* A resposta tem duas partes, e elas não se
+confundem.
+
+| O que | Para onde | Como sabemos |
+|---|---|---|
+| Áudio e transcrição da chamada, motor `gemini-live` | Google — o provedor **não publica** a lista de países de processamento da Gemini Developer API | pedido oficial em aberto no fórum do Google (02/11/2026); quem precisa de região usa Vertex AI, com região explícita |
+| Áudio e transcrição da chamada, motor `openai-realtime` | OpenAI — depende do **projeto/região** escolhidos na conta (há data residency nos Estados Unidos, na Europa, no Reino Unido, no Japão, entre outros) | documentação da OpenAI sobre os seus dados, consultada em 12/11/2026 |
+| Chamada com o motor `simulated` | **Nada sai**: roda neste servidor | código do motor |
+| Banco, transcrições e gravações | a sua VPS, no país do contrato dela | a instalação |
+
+Três cuidados, e o primeiro é o que mais se erra:
+
+1. **Transferência internacional é regulada** — Resolução CD/ANPD nº 19/2024; entre os caminhos
+   estão as cláusulas-padrão contratuais. Qual usar é decisão de quem opera, com o advogado
+   dela; não é escolha do DeskVoice.
+2. **"Servidor no Brasil" não é argumento sozinho**: o banco pode estar no Brasil e o áudio sair
+   para fora do mesmo jeito. As duas informações são independentes.
+3. **Não prometa região que o provedor não declara.** É por isso que a tela de Configurações →
+   motor diz "o provedor não declara o país" em vez de escrever um país: informação sem fonte e
+   sem data envelhece calada, e o contrato continua valendo.
+
 ## Ligações de saída
 
 É aqui que mora o risco maior.
