@@ -1,4 +1,7 @@
-import { withSystem } from "@deskvoice/core";
+import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { recordingPath, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { createCall, createOrganization, depsFor, openTestDbs, putSetting, t0, task, tasksOf } from "../../test/helpers";
 import purgeTranscripts from "./purge_transcripts";
@@ -52,6 +55,38 @@ describe("purge_transcripts", () => {
     expect((await tasksOf(app, org)).map(({ kind, status, run_at }) => ({ kind, status, run_at }))).toEqual([
       { kind: "purge_transcripts", status: "queued", run_at: new Date(t0.getTime() + DAY_MS) },
     ]);
+  });
+
+  // A organização não tem a gravação ligada: desligar não apaga o que já foi gravado, e o que ficou
+  // segue o prazo (registro 0016).
+  it("apaga as gravações de áudio que passaram do prazo, mesmo com a gravação desligada, só da organização, e conta no mesmo evento", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
+    try {
+      const org = await createOrganization(app, "purge recordings");
+      const other = await createOrganization(app, "purge recordings other");
+      await putSetting(app, org, "transcripts.retention_days", 30, false);
+      const wav = async (organizationId: string, callId: string, age: number): Promise<string> => {
+        const file = recordingPath(dir, organizationId, callId);
+        await mkdir(path.dirname(file), { recursive: true });
+        await writeFile(file, "RIFF");
+        await utimes(file, daysAgo(age), daysAgo(age));
+        return file;
+      };
+      await wav(org, "11111111-1111-4111-8111-111111111111", 31);
+      await wav(org, "22222222-2222-4222-8222-222222222222", 29);
+      await wav(other, "33333333-3333-4333-8333-333333333333", 60);
+
+      await purgeTranscripts.run(task(org, "purge_transcripts"), { ...depsFor(app), recordingsDir: dir });
+
+      // Saiu só a gravação velha desta organização; a recente e a de outra empresa ficam.
+      expect(await readdir(path.join(dir, org))).toEqual(["22222222-2222-4222-8222-222222222222.wav"]);
+      expect(await readdir(path.join(dir, other))).toEqual(["33333333-3333-4333-8333-333333333333.wav"]);
+      expect(await orgEventsOf(org)).toEqual([
+        { kind: "transcripts_purged", actor_user_id: null, payload: { count: 0, recordings: 1, retentionDays: 30, before: daysAgo(30).toISOString() } },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("rodar de novo não reconta, não grava evento e não abre uma segunda corrente", async () => {

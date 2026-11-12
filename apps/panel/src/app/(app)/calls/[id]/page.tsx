@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from "@phosphor-icons/react";
 import Link from "next/link";
-import { use } from "react";
+import { use, useState } from "react";
 import enCommon from "../../../../i18n/en/common";
 import en from "../../../../i18n/en/timeline";
 import esCommon from "../../../../i18n/es/common";
@@ -96,8 +96,21 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
         </section>
       ) : null}
 
+      {!live ? <Recording id={id} title={t.recordingTitle} missing={t.recordingMissing} /> : null}
+
       {events.error && !events.data ? <Notice tone="fail">{errorText(events.error)}</Notice> : null}
       {events.data ? <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} /> : <Skeleton lines={4} />}
     </>
+  );
+}
+
+/** A gravação da chamada, quando existe. Sem arquivo (chamada antiga, ou gravação desligada), diz isso. */
+function Recording({ id, title, missing }: { id: string; title: string; missing: string }) {
+  const [absent, setAbsent] = useState(false);
+  return (
+    <section className="grid max-w-[72ch] gap-1.5">
+      <h2 className="text-[0.8rem] font-bold text-muted">{title}</h2>
+      {absent ? <p className="text-muted">{missing}</p> : <audio controls preload="metadata" src={`/api/v1/calls/${id}/recording`} onError={() => setAbsent(true)} className="w-full" />}
+    </section>
   );
 }

@@ -7,6 +7,8 @@ export interface RoutineDeps extends WhatsAppDeps {
   clock: Clock;
   /** Decifra os segredos de `settings`. */
   secretKey: Buffer;
+  /** Pasta das gravações, para o prazo de guarda. Sem ela, as gravações não são apagadas por aqui. */
+  recordingsDir?: string;
 }
 
 export interface Routine {
