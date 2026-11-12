@@ -1,4 +1,3 @@
-import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { fakeFetch, fakeLookup } from "../../test/helpers";
 import { sendWhatsApp, type WhatsAppConnector, type WhatsAppMessage } from "./whatsapp";
@@ -7,10 +6,6 @@ const TOKEN = "token-do-conector";
 const DESKCOMM: WhatsAppConnector = { type: "deskcomm", url: "https://crm.example.test/api/v1/messages", token: TOKEN };
 const WEBHOOK: WhatsAppConnector = { type: "webhook", url: "https://hooks.example.test/aviso", token: TOKEN };
 
-/** A mesma conta que quem recebe faz: HMAC-SHA256 de `<instante>.<corpo>`, com o token como chave. */
-const esperada = (timestamp: string, body: string): string =>
-  `sha256=${createHmac("sha256", TOKEN).update(`${timestamp}.${body}`).digest("hex")}`;
-
 function enviar(connector: WhatsAppConnector, message: WhatsAppMessage, status = 200) {
   const net = fakeFetch(() => new Response("{}", { status }));
   const run = sendWhatsApp(connector, message, { fetch: net.fetch, lookup: fakeLookup() });
@@ -18,7 +13,7 @@ function enviar(connector: WhatsAppConnector, message: WhatsAppMessage, status =
 }
 
 describe("conector HTTP", () => {
-  it("manda número, texto e chamada, com o corpo assinado", async () => {
+  it("manda número, texto e chamada, com o token", async () => {
     const message = { to: "+5511900000000", text: "Sua remarcação ficou para sexta.", callId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" };
     const { net, run } = enviar(DESKCOMM, message);
     await run;
@@ -27,13 +22,7 @@ describe("conector HTTP", () => {
     expect(request?.url).toBe(DESKCOMM.url);
     expect(request?.method).toBe("POST");
     expect(request?.body).toEqual(message);
-    expect(request?.headers.authorization).toBe(`Bearer ${TOKEN}`);
-
-    const timestamp = request?.headers["x-deskvoice-timestamp"] ?? "";
-    expect(timestamp).toMatch(/^\d+$/);
-    expect(request?.headers["x-deskvoice-signature"]).toBe(
-      esperada(timestamp, JSON.stringify({ to: message.to, text: message.text, callId: message.callId })),
-    );
+    expect(request?.headers).toEqual({ authorization: `Bearer ${TOKEN}`, "content-type": "application/json" });
   });
 
   it("manda Idempotency-Key quando o aviso tem id, e não manda quando não tem", async () => {
@@ -55,7 +44,6 @@ describe("conector HTTP", () => {
     expect(request?.body).toEqual({ to: "+5511900000000", text: "Oi", callId: null });
     expect(request?.headers.authorization).toBe(`Bearer ${TOKEN}`);
     expect(request?.headers["idempotency-key"]).toBe("8a7b6c5d-0000-4000-8000-000000000002");
-    expect(request?.headers["x-deskvoice-signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
   });
 
   it("recusa destino que responde fora de 2xx", async () => {

@@ -1,7 +1,7 @@
 import { decryptSecret, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
 import { safeFetch, type SafeFetchOptions, type SafeResponse } from "../net/safe-fetch";
-import { connectorBody, connectorHeaders } from "./signed-request";
+import { connectorBody, connectorHeaders } from "./http-request";
 import { readSetting } from "../settings";
 import { sendViaDeskcomm } from "./deskcomm";
 import { sendViaWaha, wahaFromEnv, wahaSessionName, type WahaOptions } from "./waha";
@@ -67,5 +67,5 @@ export async function sendWhatsApp(connector: WhatsAppConnector, message: WhatsA
 
 function sendViaWebhook(connector: HttpConnector, message: WhatsAppMessage, net: SafeFetchOptions): Promise<SafeResponse> {
   const body = connectorBody(message);
-  return safeFetch(connector.url, { method: "POST", headers: connectorHeaders(connector.token, body, message), body }, net);
+  return safeFetch(connector.url, { method: "POST", headers: connectorHeaders(connector.token, message), body }, net);
 }

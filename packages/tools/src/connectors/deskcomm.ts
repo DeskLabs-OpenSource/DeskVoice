@@ -1,5 +1,5 @@
 import { safeFetch, type SafeFetchOptions, type SafeResponse } from "../net/safe-fetch";
-import { connectorBody, connectorHeaders } from "./signed-request";
+import { connectorBody, connectorHeaders } from "./http-request";
 import type { HttpConnector, WhatsAppMessage } from "./whatsapp";
 
 /**
@@ -12,5 +12,5 @@ import type { HttpConnector, WhatsAppMessage } from "./whatsapp";
  */
 export function sendViaDeskcomm(connector: HttpConnector, message: WhatsAppMessage, net: SafeFetchOptions): Promise<SafeResponse> {
   const body = connectorBody(message);
-  return safeFetch(connector.url, { method: "POST", headers: connectorHeaders(connector.token, body, message), body }, net);
+  return safeFetch(connector.url, { method: "POST", headers: connectorHeaders(connector.token, message), body }, net);
 }

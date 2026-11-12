@@ -35,7 +35,7 @@ describe("deliver_notification", () => {
     const net = fakeFetch();
     await run(org, id, net);
     expect(net.requests).toEqual([
-      { url: "https://wa.example.com/send", method: "POST", headers: { authorization: "Bearer wa-token", "content-type": "application/json" }, body: { to: "+5531988887777", text: "Cliente pediu retorno.", callId } },
+      { url: "https://wa.example.com/send", method: "POST", headers: { authorization: "Bearer wa-token", "content-type": "application/json", "idempotency-key": id }, body: { to: "+5531988887777", text: "Cliente pediu retorno.", callId } },
     ]);
     expect(await rowOf(id)).toEqual({ status: "sent", error: null });
   });
