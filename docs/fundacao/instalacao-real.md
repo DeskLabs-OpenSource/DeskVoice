@@ -152,3 +152,41 @@ O que isto prova e o que não prova:
 - Não prova a linha única sem nenhuma intervenção nesse sistema. Ela parou no passo 1, e o conserto (aceitar AlmaLinux e ligar o Docker parado) vem num PR próprio, que só se prova rodando de novo numa máquina dessas.
 - Não prova `firewalld` ativo nem SELinux em Enforcing, porque a máquina não tinha nenhum dos dois.
 - Não prova ligação: não há linha nem motor configurados.
+
+## Primeira atualização pela tela: 0.3.0 → 0.4.0, na VPS da parceira (2026-11-12)
+
+Na mesma VPS dedicada, a instalação estava na 0.3.0 publicada. Ninguém tocou no terminal do servidor durante a atualização. A sessão que mantém o projeto entrou no painel por túnel SSH, com um navegador dirigido por ela, e clicou. Do lado do servidor, só leu. As capturas e as saídas estão em [`registros/2026-11-12-atualizacao-pela-tela/`](registros/2026-11-12-atualizacao-pela-tela/).
+
+| Momento (-03) | O que se observou |
+|---|---|
+| 11:45 | Configurações → "Versão e atualização" mostrava "Em execução 0.3.0", "Mais recente publicada 0.4.0" e, embaixo, "Este servidor não encontrou versão publicada mais nova que a instalada", sem botão ([`1-antes-sem-botao.jpg`](registros/2026-11-12-atualizacao-pela-tela/1-antes-sem-botao.jpg)). **Defeito:** o agente do servidor só consulta as tags a cada 10 minutos, e a última consulta (11:38) foi segundos antes de a tag `v0.4.0` existir. A tela disse duas coisas contrárias sobre a mesma versão |
+| 11:48 | O agente consultou de novo e viu a tag. A tela passou a mostrar "O que muda da 0.3.0 para a 0.4.0" e o botão "Atualizar para a 0.4.0" ([`2-botao-depois-da-consulta.jpg`](registros/2026-11-12-atualizacao-pela-tela/2-botao-depois-da-consulta.jpg)) |
+| 11:49 | O clique abriu a confirmação dentro da página, nomeando as duas versões, dizendo que o sistema sai do ar e pedindo a senha de novo ([`3-confirmacao-com-senha.jpg`](registros/2026-11-12-atualizacao-pela-tela/3-confirmacao-com-senha.jpg)). Confirmado: "Pedido registrado em 12 de nov., 11:49. O agente do servidor começa a atualização em até um minuto" ([`4-pedido-registrado.jpg`](registros/2026-11-12-atualizacao-pela-tela/4-pedido-registrado.jpg)) |
+| 11:49:15 a 11:50:21 | `agent.log`: "pedido de atualização aceito; versão instalada: 0.3.0", e 66 s depois "atualização terminou: succeeded (de 0.3.0 para 0.4.0; update.sh saiu com 0)" ([`agent.log.txt`](registros/2026-11-12-atualizacao-pela-tela/agent.log.txt)) |
+| 11:59 | A tela: "A atualização terminou em 12 de nov., 11:50: o servidor está na versão 0.4.0", com a saída do atualizador ([`5-terminou.jpg`](registros/2026-11-12-atualizacao-pela-tela/5-terminou.jpg), [`6-saida-do-atualizador-na-tela.txt`](registros/2026-11-12-atualizacao-pela-tela/6-saida-do-atualizador-na-tela.txt)) |
+
+Depois, conferido pelo terminal, só lendo:
+
+- **Versão:** pasta em `v0.4.0` e `.env` com `DESKVOICE_VERSION=0.4.0`. Painel, voz e rotinas nas imagens publicadas `0.4.0`.
+- **Asterisk:** não reiniciou, com uptime de 1 h 28 min. A 0.4.0 não muda nenhum arquivo de configuração dele.
+- **Saúde:** `healthcheck.sh` saiu com 0, com os avisos esperados (sem linha, sem motor).
+- **Backup:** em `backups/20261112-114915`.
+- **Imagens:** ficaram as da 0.4.0 e as da 0.3.0, que é a de onde se saiu. Não havia versão mais velha nesta máquina, então a limpeza não tinha o que remover.
+
+O que isto prova:
+
+- o caminho inteiro do botão numa máquina real: o pedido com a senha, o agente aceitando, o `update.sh` com backup, migrations e saúde, e o resultado de volta na tela;
+- que a atualização entre duas versões publicadas terminou sem intervenção.
+
+O que isto não prova:
+
+- **A passagem de vez com `--resume`.** A tela mostra só o fim da saída. As linhas que diriam que o atualizador da 0.3.0 passou a vez ao da 0.4.0 não aparecem, e a saída inteira não ficou guardada no servidor.
+- **A remoção de imagem antiga pelo `docker rmi` real.** Nesta máquina não havia o que remover.
+- **A volta automática.** A atualização não falhou.
+- **O espaço em disco antes e depois.** `docker system df` não foi medido antes do clique.
+
+Defeitos achados aqui, com conserto em PR próprio:
+
+- **A frase contrária da janela de 10 minutos.**
+- **O número de memória antigo na tela do WhatsApp.** A tela diz "O DeskVoice inteiro, sem ele, usa cerca de 320 MB".
+- **O mascaramento da saída, que trocou `routines` por `***`.** A linha `@deskvoice/routines@0.0.0` parecia um e-mail.
