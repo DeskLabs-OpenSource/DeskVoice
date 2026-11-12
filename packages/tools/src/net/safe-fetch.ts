@@ -65,6 +65,14 @@ for (const [network, prefix] of [
   // 6to4 (RFC 3056) e Teredo (RFC 4380) carregam o IPv4 de destino dentro do próprio endereço.
   ["2002::", 16],
   ["2001::", 32],
+  // IPv4 traduzido (SIIT, RFC 7915): `::ffff:0:a.b.c.d` embute IPv4 como o mapeado, com um zero a
+  // mais, e não cai na conferência de IPv4 que a `BlockList` faz para `::ffff:a.b.c.d`.
+  ["::ffff:0:0:0", 96],
+  // Site-local antigo (RFC 3879): fora de uso, mas ainda roteado dentro de redes que o mantêm, e
+  // não está dentro de `fc00::/7`.
+  ["fec0::", 10],
+  // Prefixo de descarte (RFC 6666): nunca é um destino de verdade.
+  ["100::", 64],
 ] as const) {
   blocked.addSubnet(network, prefix, "ipv6");
 }
