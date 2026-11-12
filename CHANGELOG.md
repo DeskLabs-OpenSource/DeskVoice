@@ -3,6 +3,23 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.5.0] - 2026-11-12
+
+### Adicionado
+
+- **A saída inteira de cada atualização fica guardada no servidor** O painel mostra só o fim da saída do atualizador. Agora o agente do servidor guarda a saída inteira de cada atualização em `deploy/agent/last-update.log`, na pasta do DeskVoice, com as mesmas senhas e e-mails escondidos que a tela esconde, e só o dono do arquivo o lê. Ficam as três últimas: a mais nova nesse arquivo e as duas anteriores em `last-update.log.1` e `last-update.log.2`. A tela, no resultado da atualização, aponta o arquivo. Quem executa uma atualização é o agente da versão que estava instalada, então a atualização que traz esta versão ainda não guarda o arquivo, e a tela não o aponta; as seguintes guardam. Crédito: @melgarafael.
+
+### Alterado
+
+- **A saída da atualização diz que o atualizador da versão nova assumiu** Numa atualização, o atualizador da versão instalada troca o código e passa a vez ao da versão nova, que termina o trabalho. Agora, perto do fim da saída, que é o trecho que a tela de atualização mostra, aparece uma linha como "O atualizador da versão 0.5.0 assumiu a atualização a partir da 0.4.0". Ela é a prova de que quem terminou foi o atualizador novo, e não o antigo. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A saída do atualizador não esconde mais nome de pacote como se fosse e-mail** A máscara que esconde e-mail na saída do atualizador e no arquivo de diagnóstico trocava também nomes de pacote com versão: a linha `> @deskvoice/routines@0.0.0 migrate` aparecia como `> @deskvoice/***@0.0.0 migrate`. Agora só é tratado como e-mail o que termina num domínio de letras, como `empresa.com.br`, e o e-mail de verdade continua escondido. Crédito: @melgarafael.
+- **O custo do WhatsApp na tela usa a medida mais recente** O bloco WhatsApp, em Configurações, dizia que o DeskVoice inteiro usa cerca de 320 MB e que o serviço de WhatsApp custa cerca de 360 MB, números de medidas anteriores, de 11/11/2026. Agora ele diz o medido na 0.3.0, em 12/11/2026, numa VPS de 8 GB: cerca de 323 MiB para o serviço de WhatsApp sem número conectado, e cerca de 380 MiB para o resto do DeskVoice parado. Os guias e o README dizem o mesmo. Crédito: @melgarafael.
+- **As notas da versão mostram os comandos sem as crases** Em Configurações, em Versão e atualização, o trecho "O que muda" mostrava as crases das notas como texto, por exemplo em volta de `systemctl enable --now docker`. Agora o que está entre crases aparece como comando, em letra de código, e uma crase sem par continua como texto. Nada das notas vira HTML. Crédito: @melgarafael.
+- **A tela de atualização diz quando o servidor ainda não viu a versão nova** Em Configurações, em Versão e atualização, logo depois de sair uma versão a tela mostrava a versão nova como a mais recente publicada e, embaixo, que o servidor não tinha encontrado versão mais nova, sem botão. As duas coisas eram verdade ao mesmo tempo: a lista de versões é lida na hora, e o servidor só confere as versões publicadas a cada 10 minutos. Agora a tela diz que a versão já foi publicada e que o servidor ainda não a viu, e o botão aparece quando ele a vir. Depois de atualizar, com a instalada igual à mais recente, a tela diz só que o servidor está na versão publicada mais recente. Crédito: @melgarafael.
+
 ## [0.4.0] - 2026-11-12
 
 ### Adicionado
