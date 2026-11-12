@@ -28,7 +28,11 @@
 | Peça | Situação |
 |---|---|
 | Instalação por perguntas no terminal | Só o modo sem perguntas rodou numa máquina real |
-| Instalação em servidor recém-criado | Nunca. As duas instalações reais foram em máquinas compartilhadas |
+| Instalação em servidor recém-criado | Em 2026-11-12, numa VPS dedicada cedida pela parceira, com AlmaLinux 9.8. A linha única parou no passo 1 (o sistema não era aceito); a 0.3.0 só instalou com `--force` e com o Docker ligado à mão ([`instalacao-real.md`](instalacao-real.md)). A linha única sem intervenção, numa máquina limpa, ainda não rodou |
+| AlmaLinux 9: aceito, e o Docker parado ligado pelo instalador | Na mesma VPS, com o Docker desligado de propósito, o instalador do ramo do PR #51 aceitou o sistema e ligou o serviço sozinho; parou depois na guarda de versão, como devia. O resto da instalação por esse caminho não rodou |
+| AlmaLinux e Rocky sem Docker: instalação pelo `get.docker.com` | Nunca rodou. O script foi só lido (12/11, `SCRIPT_COMMIT_SHA=8ad27bd`): ele trata `alma` e `rocky` pelo repositório do Docker com `dnf`. Conferir na reinstalação limpa da VPS |
+| Rocky Linux 9 | Nenhuma instalação |
+| `firewalld` ativo e SELinux em Enforcing | Nunca numa máquina. O instalador só avisa, e o aviso diz que o caminho não foi provado |
 | Instalação em VPS de outro provedor | Nunca |
 | O caminho do `install.sh` que grava, sobe e cria o usuário | Rodou nas instalações reais. O CI passou a instalar de verdade no runner (job `install` de `.github/workflows/ci.yml`: constrói as imagens do commit com `--build` e sobe tudo, sem domínio). Os testes do kit o executam com o Docker de mentira (`install/test/11-install-entry.sh`, `13-version.sh`, `16-install-proves-entry.sh`) |
 | Instalar baixando imagem publicada | Saiu desta lista: em 2026-11-11, instalação do zero pelo comando de uma linha contra a 0.1.0, numa segunda VPS (Ubuntu 22.04, x86_64, 8 GB, compartilhada). 67 segundos do `curl` até tudo respondendo; clone na tag; três imagens baixadas sem login; saúde com todas as peças em ok |

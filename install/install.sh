@@ -6,7 +6,7 @@
 #   bash install/install.sh --dry-run       mostra o que faria, sem alterar nada
 #   bash install/install.sh --yes           não pergunta: lê as respostas de variáveis DESKVOICE_*
 #   bash install/install.sh --yes --answers respostas.env   ... ou de um arquivo CHAVE=valor
-#   --force                                 segue mesmo em sistema que não é Ubuntu 22.04+/Debian 12+
+#   --force                                 segue mesmo em sistema fora da lista aceita (o passo 1 a mostra)
 #   --build                                 para quem desenvolve: constrói as imagens nesta máquina, a partir
 #                                           do código desta pasta, em vez de baixar a versão publicada
 #
@@ -98,6 +98,9 @@ else
 fi
 
 SUDO=""; if [ "$(id -u)" != 0 ] && have sudo; then SUDO="sudo"; fi
+# Como se instala um pacote nesta máquina, para as mensagens de conserto: dnf no AlmaLinux e no Rocky.
+pkg_install="${SUDO:+$SUDO }apt-get update && ${SUDO:+$SUDO }apt-get install -y"
+if ! have apt-get && have dnf; then pkg_install="${SUDO:+$SUDO }dnf install -y"; fi
 # Quem entra por SSH nesta máquina: é o nome que vai no comando do túnel.
 ssh_user="${SUDO_USER:-$(id -un)}"
 would() { info "[simulação] faria: $*"; }
@@ -143,7 +146,7 @@ if [ -r /etc/os-release ]; then
 fi
 if os_supported "$os_id" "$os_version"; then ok "Sistema: $os_id $os_version"
 elif [ "$FORCE" = 1 ]; then warn "Sistema ${os_id:-desconhecido} ${os_version}: não é testado. Seguindo porque você pediu com --force."
-else blocker "Este sistema (${os_id:-$(uname -s)} ${os_version}) não é Ubuntu 22.04+ nem Debian 12+, onde o DeskVoice é testado." "use uma VPS Ubuntu 22.04 ou mais nova; para tentar assim mesmo, rode de novo com --force"; fi
+else blocker "Este sistema (${os_id:-$(uname -s)} ${os_version}) não está entre os aceitos: $SUPPORTED_SYSTEMS." "use uma VPS com um deles; para tentar assim mesmo, rode de novo com --force"; fi
 
 arch="$(uname -m)"
 if arch_supported "$arch"; then ok "Processador: $arch"
@@ -162,18 +165,34 @@ if ! have docker; then
   warn "O Docker não está instalado."
   if [ "$DRY_RUN" = 1 ]; then would "instalar o Docker pelo script oficial (https://get.docker.com), depois de perguntar"
   elif confirm "Posso instalar o Docker agora, pelo script oficial (get.docker.com)?"; then
-    have curl || die "Preciso do curl para baixar o instalador do Docker." "Rode: $SUDO apt-get update && $SUDO apt-get install -y curl  e depois o instalador de novo."
-    curl -fsSL https://get.docker.com | $SUDO sh || die "A instalação do Docker falhou." "Veja a mensagem acima. O guia oficial é https://docs.docker.com/engine/install/ubuntu/ . Depois rode o instalador de novo."
+    have curl || die "Preciso do curl para baixar o instalador do Docker." "Rode: $pkg_install curl  e depois o instalador de novo."
+    curl -fsSL https://get.docker.com | $SUDO sh || die "A instalação do Docker falhou." "Veja a mensagem acima. O guia oficial é https://docs.docker.com/engine/install/ . Depois rode o instalador de novo."
     have docker || die "O instalador do Docker terminou, mas o comando docker não apareceu." "Saia do terminal, entre de novo e rode o instalador outra vez."
     ok "Docker instalado"
-  else die "Sem o Docker não dá para instalar." "Instale pelo guia https://docs.docker.com/engine/install/ubuntu/ e rode o instalador de novo."; fi
+  else die "Sem o Docker não dá para instalar." "Instale pelo guia https://docs.docker.com/engine/install/ e rode o instalador de novo."; fi
 fi
+# O Docker instalado com o serviço desligado (assim veio o docker-ce de uma VPS AlmaLinux em
+# 12/11/2026): com systemd e permissão de administrador, liga o serviço e confere de novo.
+start_docker_service() {
+  [ "$(agent_scheduler)" = systemd ] || return 1
+  [ "$(id -u)" = 0 ] || [ -n "$SUDO" ] || return 1
+  if [ "$DRY_RUN" = 1 ]; then would "ligar o serviço do Docker, que não respondeu (${SUDO:+$SUDO }systemctl enable --now docker), e conferir de novo"; return 0; fi
+  info "O Docker não respondeu. Ligando o serviço dele: ${SUDO:+$SUDO }systemctl enable --now docker"
+  $SUDO systemctl enable --now docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
 if have docker; then
   if ! docker compose version >/dev/null 2>&1; then
-    blocker "O Docker está instalado, mas falta o plugin compose." "rode: $SUDO apt-get install -y docker-compose-plugin"
-  elif ! docker info >/dev/null 2>&1; then
+    blocker "O Docker está instalado, mas falta o plugin compose." "rode: $pkg_install docker-compose-plugin"
+  elif ! docker info >/dev/null 2>&1 && ! start_docker_service; then
     blocker "Seu usuário não consegue falar com o Docker (ou o serviço do Docker está parado)." "rode: $SUDO systemctl start docker ; $SUDO usermod -aG docker $(id -un)  — depois saia do terminal, entre de novo e repita o instalador"
   else ok "Docker e compose: $(docker compose version --short 2>/dev/null || echo ok)"; fi
+fi
+# SELinux: ele só barra o que os contêineres montam quando o sistema está em Enforcing E o daemon do
+# Docker roda com selinux-enabled (o docker-ce vem com isso desligado). Nenhuma instalação foi provada
+# assim, e o kit não põe rótulo nas montagens: avisa e segue.
+if have getenforce && [ "$(getenforce 2>/dev/null || true)" = Enforcing ] \
+  && docker info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q 'name=selinux'; then
+  warn "O SELinux está em modo Enforcing e o Docker roda com ele ligado. O DeskVoice nesse modo não foi provado: se um serviço não subir ou não ler a configuração montada, comece o diagnóstico pelo SELinux."
 fi
 
 # Que versão esta instalação roda: um número (imagem publicada, nunca construída aqui) ou
@@ -407,6 +426,14 @@ if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
   else warn "Regras NÃO aplicadas. Sem elas a ligação pode ficar muda: rode os comandos acima."; fi
 elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; then
   info "DESKVOICE_APPLY_UFW=yes não teve efeito: o firewall ufw não está ativo nesta máquina, e não há regra a aplicar."
+fi
+# firewalld (o firewall do AlmaLinux e do Rocky): só avisa. O Docker cria a zona dele no firewalld
+# e encaminha as portas publicadas por fora das outras zonas (docs.docker.com, "Integration with
+# firewalld"), então um comando firewall-cmd aqui seria receita sem prova. Nenhuma máquina com
+# firewalld ativo foi medida; quem mede é a ligação, de fora.
+if have firewall-cmd && [ "$($SUDO firewall-cmd --state 2>/dev/null || true)" = running ]; then
+  warn "O firewall firewalld está ativo. O DeskVoice com o firewalld ativo não foi provado: nenhuma instalação mediu se as portas 5060/udp e ${rtp_start}-${rtp_end}/udp chegam aos contêineres."
+  info "A prova é de fora: a primeira ligação e o teste da tela Linha do painel. Se a ligação não completar ou ficar muda, comece o diagnóstico pelo firewalld."
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════

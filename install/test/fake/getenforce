@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# getenforce de mentira: o modo do SELinux é o de $FAKE_DIR/selinux_mode, Disabled sem ele.
+if [ -f "$FAKE_DIR/selinux_mode" ]; then cat "$FAKE_DIR/selinux_mode"; else echo Disabled; fi
