@@ -150,6 +150,30 @@ Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em pr
   não baixa. Pouca memória não bloqueia, só avisa: numa VPS pequena o serviço pode disputar
   memória com o resto, até o teto de 1280 MB. A regra para qualquer campo novo nessa resposta
   está no registro `0010`.
+- **A ligação pelo WhatsApp usa um cliente não oficial.** O número conectado em Configurações →
+  Ligação pelo WhatsApp fica no [WaCalls](https://github.com/JotaDev66/WaCalls), que entra como
+  mais um aparelho vinculado e implementa a chamada do WhatsApp por engenharia reversa, sem a API
+  oficial da Meta. Os termos do WhatsApp proíbem acesso automatizado e preveem suspender a conta:
+  o número pode ser bloqueado, sem aviso, e se for o mesmo do WhatsApp por QR Code, mensagens e
+  ligações param juntas. Use um número dedicado. A imagem é a do canal `develop` dos autores,
+  fixada por resumo; não há versão publicada, e uma falha de segurança nela chega à instalação até
+  o resumo ser trocado aqui. O pareamento fica no volume `wacalls-data`, sem cifra própria: quem
+  tem acesso ao servidor ou a esse volume age como o aparelho. Ele não entra no backup e fica no
+  disco depois que o serviço é removido (o painel tenta desfazer a sessão antes; confira no
+  telefone, em Dispositivos conectados). Nesta versão nenhuma ligação é atendida: o serviço só
+  conecta o número.
+- **O que o token do WaCalls protege, e o que não.** O token (`WACALLS_API_TOKEN`) e o usuário e a
+  senha do administrador do WaCalls são gerados pelo instalador em `deploy/.env` e nunca
+  mostrados. O token chega só ao processo de voz e ao contêiner do WaCalls; o painel pede ao
+  processo de voz e nunca o recebe. Ele vai sempre no cabeçalho, nunca no endereço (o WaCalls
+  também aceita `?access_token=`, e o DeskVoice não usa essa forma). O contêiner não publica porta
+  nenhuma, nem TCP nem UDP. O token protege o número contra outro contêiner na rede interna; **não**
+  protege contra um processo de voz comprometido, que com ele vê o QR Code de uma conexão em
+  andamento, desfaz a conexão de qualquer organização da instalação e, quando o atendimento
+  existir, atende ou origina ligações. Também não protege contra quem tem acesso ao servidor.
+  O terceiro sim ou não da rota do agente (`whatsappCalls`) segue a mesma regra do segundo: o pior
+  que o painel consegue é fazer o servidor baixar e subir o WaCalls que o kit fixou (o agente
+  confere 1,2 GB livres antes), ou tirá-lo do ar.
 - **Mensagem enviada sem conferir o endereço do número.** Antes de enviar pelo número conectado,
   o DeskVoice pergunta ao WhatsApp o endereço certo do destino. Se o WAHA recusar essa consulta
   em si, a mensagem sai para o número como ele é, e a ressalva fica registrada (na linha do tempo

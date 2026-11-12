@@ -386,9 +386,12 @@ registro de imagens.
 ## 10. Pedidos de decisão ao dono
 
 Cada um vira uma issue no formato do `GOVERNANCE.md`. O trabalho das fatias 1 a 3 não espera nenhum
-deles, exceto onde está dito.
+deles, exceto onde está dito. Os seis foram respondidos pelo dono em 12/11/2026, cada um com a
+recomendação; a resposta está no começo de cada decisão.
 
 ### Decisão: a ligação de saída pelo WhatsApp entra?
+
+**Respondida pelo dono em 12/11/2026: C (a ligação de saída não entra agora).** Nas palavras dele: "Pode seguir sua recomendação nas decisões em aberto".
 
 **Quem decide:** dono do projeto
 **O que está parado esperando:** só a fatia 4
@@ -414,6 +417,8 @@ volta na `main`). Taxa de bloqueio de qualquer tipo.
 
 ### Decisão: o mesmo número pode estar no WaCalls e no WAHA ao mesmo tempo?
 
+**Respondida pelo dono em 12/11/2026: A (pode, com o aviso da seção 7 na tela).** Nas palavras dele: "Pode seguir sua recomendação nas decisões em aberto".
+
 **Quem decide:** dono do projeto
 **O que está parado esperando:** o texto da tela na fatia 1
 
@@ -434,6 +439,8 @@ faz.
 Se dois aparelhos não oficiais no mesmo número aumentam o risco de bloqueio em relação a um.
 
 ### Decisão: o aviso de gravação vale também na ligação pelo WhatsApp?
+
+**Respondida pelo dono em 12/11/2026: A (vale, igual ao telefone).** Nas palavras dele: "Pode seguir sua recomendação nas decisões em aberto".
 
 **Quem decide:** dono do projeto
 **O que está parado esperando:** nada; o padrão já é o comportamento do código
@@ -456,6 +463,8 @@ Nada; o comportamento foi conferido no código.
 
 ### Decisão: o agente atende na hora, ou deixa tocar antes no celular?
 
+**Respondida pelo dono em 12/11/2026: A (atende na hora).** Nas palavras dele: "Pode seguir sua recomendação nas decisões em aberto".
+
 **Quem decide:** dono do projeto
 **O que está parado esperando:** nada na fatia 2; o padrão é atender na hora
 
@@ -476,6 +485,8 @@ O que acontece no celular quando um aparelho vinculado atende (o `develop` diz p
 outros, `48d04ac`; não foi visto).
 
 ### Decisão: de qual imagem do WaCalls o DeskVoice depende?
+
+**Respondida pelo dono em 12/11/2026: A (a imagem dos autores, canal `develop`, fixada por resumo).** Nas palavras dele: "Pode seguir sua recomendação nas decisões em aberto".
 
 **Quem decide:** dono do projeto
 **O que está parado esperando:** a fatia 1, só se o pareamento falhar com a imagem de julho
@@ -498,6 +509,8 @@ A enquanto parear e falar; B só se a fatia 1 provar que a imagem de julho não 
 Se a imagem de julho ainda pareia um número hoje.
 
 ### Decisão: transferir a ligação do WhatsApp para uma pessoa, pelo tronco?
+
+**Respondida pelo dono em 12/11/2026: A (sem transferência neste canal; o agente oferece recado).** Nas palavras dele: "Pode seguir sua recomendação nas decisões em aberto".
 
 **Quem decide:** dono do projeto
 **O que está parado esperando:** nada nas fatias 1 a 4

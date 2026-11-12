@@ -147,6 +147,7 @@ capacidade abaixo diz até onde a prova foi:
 | Motor de voz Gemini Live | Aguardando prova real (testado contra servidor falso, sem chave) |
 | Enviar WhatsApp durante a chamada, por conector | Aguardando prova real |
 | Conectar um WhatsApp por QR Code (Configurações → WhatsApp) e enviar por ele os avisos e as mensagens do agente | O serviço não vem instalado: instala-se pela tela, e custa cerca de 323 MiB de memória sem número conectado e 3,2 GB em disco (medido na 0.3.0, em 12/11/2026). Rotas testadas com banco real e com um serviço de WhatsApp falso; instalar e remover pelo agente, com Docker simulado. **Ainda sem prova com um número real:** nenhum QR Code foi lido e nenhuma mensagem saiu. É um cliente não oficial do WhatsApp; veja o [guia](docs/guides/whatsapp-por-qr-code.md) |
+| Conectar o número à ligação pelo WhatsApp (Configurações → Ligação pelo WhatsApp), primeira parte da capacidade | O serviço (WaCalls) não vem instalado: instala-se pela tela; memória e disco ainda não medidos. Rotas testadas com banco real e um WaCalls falso, pelo processo de voz de verdade; instalar e remover pelo agente, com Docker simulado. **Ainda sem prova com um número real**, e nenhuma ligação é atendida ainda. Cliente não oficial do WhatsApp; veja o [guia](docs/guides/ligacao-pelo-whatsapp.md) |
 | Chamar um webhook durante a chamada | Aguardando prova real (sem um receptor de verdade) |
 | Atualização, checagem de saúde, backup e restauração | Provado numa instalação real, na VPS da parceira: instalador rodado duas vezes sem regerar segredo, backup conferido, restauração que devolve as contagens do backup e a volta automática de uma atualização que falhou. Restaurar em outro servidor, ou entre versões com migration nova, ainda sem prova |
 | Atualizar pela tela (Configurações → Versão e atualização), por um agente do kit no servidor | Provado numa instalação real: duas vezes na VPS da parceira (0.3.0 → 0.4.0 e 0.4.0 → 0.5.0), sem ninguém no terminal do servidor, com a passagem para o atualizador da versão nova e a remoção das imagens antigas |
@@ -157,8 +158,8 @@ capacidade abaixo diz até onde a prova foi:
 Se você atender uma ligação por uma linha de operadora, conte como foi numa issue: a entrada por
 tronco SIP ainda não tem registro público, e é a contribuição mais valiosa neste momento.
 
-O que **não** existe ainda: várias empresas na mesma tela, construtor visual de fluxos, ligação
-pelo WhatsApp, URA por voz, filas de atendimento. Parte disso está no [roadmap](ROADMAP.md), aberta para a comunidade.
+O que **não** existe ainda: várias empresas na mesma tela, construtor visual de fluxos, atender a
+ligação pelo WhatsApp, URA por voz, filas de atendimento. Parte disso está no [roadmap](ROADMAP.md), aberta para a comunidade.
 
 ## Como funciona
 

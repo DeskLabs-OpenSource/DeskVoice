@@ -339,6 +339,26 @@ jobs:
           if docker compose --env-file deploy/images.env --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml config --services | grep -qx waha; then
             echo "::error::O serviço de WhatsApp aparece sem o perfil: ele subiria em toda instalação."; exit 1
           fi
+      # O mesmo para a ligação pelo WhatsApp (WaCalls): válido com o perfil, imagem fixada por resumo,
+      # nenhuma porta publicada e nada sem o perfil.
+      - name: O Compose é válido com o perfil da ligação pelo WhatsApp
+        if: hashFiles('install/agent.sh') != ''
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file deploy/images.env --env-file deploy/.env --profile whatsapp-calls -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml)
+          "${compose[@]}" config -q
+          image="$("${compose[@]}" config --format json | jq -r '.services.wacalls.image')"
+          echo "imagem do serviço de ligação pelo WhatsApp: ${image}"
+          case "${image}" in
+            ghcr.io/jotadev66/wacalls@sha256:????????????????????????????????????????????????????????????????) ;;
+            *) echo "::error::A imagem do serviço de ligação pelo WhatsApp não está fixada por resumo: ${image}"; exit 1 ;;
+          esac
+          if [ "$("${compose[@]}" config --format json | jq '.services.wacalls.ports // [] | length')" != 0 ]; then
+            echo "::error::O serviço de ligação pelo WhatsApp publica porta: a API dele ficaria fora da rede interna."; exit 1
+          fi
+          if docker compose --env-file deploy/images.env --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml config --services | grep -qx wacalls; then
+            echo "::error::O serviço de ligação pelo WhatsApp aparece sem o perfil: ele subiria em toda instalação."; exit 1
+          fi
       - name: O agente de atualização fala com o painel
         if: hashFiles('install/agent.sh') != ''
         run: |

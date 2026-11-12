@@ -26,6 +26,9 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   // Chave com que painel, voz e rotinas falam com o WAHA da instalação (WhatsApp por QR Code). Fica
   // em `deploy/.env`, e o Compose a entrega só a esses três serviços; o WAHA recebe só o hash.
   WAHA_API_KEY: "generated",
+  // Token com que o processo de voz fala com o WaCalls (ligação pelo WhatsApp). Fica em `deploy/.env`,
+  // e o Compose o entrega só à voz e ao `wacalls`; o painel nunca o recebe.
+  WACALLS_API_TOKEN: "generated",
   APP_DB_PASSWORD: "generated",
   SYSTEM_DB_PASSWORD: "generated",
 

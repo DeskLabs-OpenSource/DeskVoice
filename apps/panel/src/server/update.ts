@@ -6,8 +6,9 @@ import type { ServerDeps } from "./context";
 /**
  * Atualizar pela tela. O painel roda em contêiner e nunca toca no Docker da máquina: ele só
  * registra o pedido. Quem atualiza é o agente do kit (`install/agent.sh`), que passa a cada
- * minuto, anuncia a versão instalada e recebe de volta dois booleanos: se há atualização pedida, e
- * se esta instalação quer o serviço de WhatsApp. Nenhum dos dois é comando, versão, imagem ou endereço.
+ * minuto, anuncia a versão instalada e recebe de volta três booleanos: se há atualização pedida, se
+ * esta instalação quer o serviço de WhatsApp, e se quer o de ligação pelo WhatsApp. Nenhum deles é
+ * comando, versão, imagem ou endereço.
  *
  * A atualização é da instalação, não de uma organização. Por isso o que está aqui usa
  * `withSystem`: ouvir o agente e vencer pedido parado valem para todas.
@@ -29,6 +30,57 @@ export const WHATSAPP_SERVICE_REASONS = ["no_disk", "pull_failed", "start_failed
 /** O que acompanha o estado sem ser falha: instalado com pouca memória; removido, mas a imagem ficou no disco. */
 export const WHATSAPP_SERVICE_WARNINGS = ["low_memory", "image_kept"] as const;
 const megabytes = z.number().int().min(0).max(100_000_000);
+
+/** O relato de um serviço opcional. Códigos fora da lista valem como ausentes. */
+const serviceReport = z
+  .object({
+    state: z.enum(WHATSAPP_SERVICE_STATES),
+    reason: z.enum(WHATSAPP_SERVICE_REASONS).optional().catch(undefined),
+    warning: z.enum(WHATSAPP_SERVICE_WARNINGS).optional().catch(undefined),
+    // Só números: quanto havia de disco e quanto o serviço pede, quando faltou espaço.
+    freeDiskMb: megabytes.optional().catch(undefined),
+    neededDiskMb: megabytes.optional().catch(undefined),
+  })
+  .optional()
+  .catch(undefined);
+
+/**
+ * Um serviço opcional da instalação (WhatsApp por QR Code, ligação pelo WhatsApp), como a tela o vê:
+ * `absent` (não pedido), `preparing` (pedido; o agente ainda não o subiu), `running`, `failed` (o
+ * agente tentou e não conseguiu) e `removing` (não é mais querido e ainda está de pé).
+ */
+export type ServiceState = "absent" | "preparing" | "running" | "failed" | "removing";
+export interface ServiceView {
+  service: ServiceState;
+  /** Só em `failed`: o código que o agente contou. */
+  serviceReason: string | null;
+  /** Aviso que acompanha o estado: `low_memory` (instalado com pouca memória) ou `image_kept` (removido; a imagem ficou no disco). */
+  serviceWarning: string | null;
+  /** Só com `serviceReason: "no_disk"`: quanto havia e quanto o serviço pede, em MB. */
+  disk: { freeMb: number; neededMb: number } | null;
+  /** O agente do servidor, que é quem instala e remove o serviço: falando, calado, ou nunca falou. */
+  agent: "responding" | "silent" | "never";
+}
+/** As colunas do relato de um serviço em `update_agent_status`: `whatsapp` ou `whatsapp_calls`. */
+type ServiceColumn = "whatsapp" | "whatsapp_calls";
+
+/** O que o pedido da organização e a última fala do agente dizem do serviço, juntos. */
+export async function readServiceView(q: OrgQuery, column: ServiceColumn, wanted: boolean, now: Date): Promise<ServiceView> {
+  // O que o agente contou na última fala. A mesma linha vale para toda organização da instalação.
+  const told = await q.one<{ lastSeenAt: Date; service: string | null; reason: string | null; warning: string | null; freeMb: number | null; neededMb: number | null }>(
+    `select last_seen_at as "lastSeenAt", ${column}_service as service, ${column}_service_reason as reason, ${column}_service_warning as warning,
+            ${column}_service_free_mb as "freeMb", ${column}_service_needed_mb as "neededMb" from update_agent_status`,
+  );
+  const service: ServiceState = wanted ? (told?.service === "running" ? "running" : told?.service === "failed" ? "failed" : "preparing") : told?.service === "running" ? "removing" : "absent";
+  return {
+    service,
+    serviceReason: service === "failed" ? (told?.reason ?? null) : null,
+    // Cada aviso só faz sentido no seu estado: pouca memória com o serviço de pé, imagem que ficou com ele fora.
+    serviceWarning: (service === "running" && told?.warning === "low_memory") || (service === "absent" && told?.warning === "image_kept") ? told.warning : null,
+    disk: service === "failed" && told?.reason === "no_disk" && told.freeMb !== null && told.neededMb !== null ? { freeMb: told.freeMb, neededMb: told.neededMb } : null,
+    agent: !told ? "never" : now.getTime() - told.lastSeenAt.getTime() > AGENT_SILENT_MINUTES * 60_000 ? "silent" : "responding",
+  };
+}
 
 const DETAIL_MAX = 8000;
 const short = (max: number) => z.string().transform((value) => value.slice(0, max));
@@ -58,17 +110,9 @@ export const agentReport = z.object({
    * versão que não cuida do serviço. Valor que este painel não conhece vale como ausente: um
    * relato do WhatsApp nunca pode fazer o relato da atualização ser recusado.
    */
-  whatsapp: z
-    .object({
-      state: z.enum(WHATSAPP_SERVICE_STATES),
-      reason: z.enum(WHATSAPP_SERVICE_REASONS).optional().catch(undefined),
-      warning: z.enum(WHATSAPP_SERVICE_WARNINGS).optional().catch(undefined),
-      // Só números: quanto havia de disco e quanto o serviço pede, quando faltou espaço.
-      freeDiskMb: megabytes.optional().catch(undefined),
-      neededDiskMb: megabytes.optional().catch(undefined),
-    })
-    .optional()
-    .catch(undefined),
+  whatsapp: serviceReport,
+  /** O mesmo, para o serviço de ligação pelo WhatsApp (WaCalls). Ausente = agente anterior a ele. */
+  whatsappCalls: serviceReport,
 });
 export type AgentReport = z.output<typeof agentReport>;
 
@@ -96,11 +140,23 @@ interface Notice {
   body: string;
 }
 
-const WHATSAPP_SERVICE_NOTICE = {
-  running: "O serviço de WhatsApp está instalado neste servidor. Conecte um número em Configurações.",
-  failed: "O servidor não conseguiu instalar ou remover o serviço de WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações.",
-  absent: "O serviço de WhatsApp foi removido deste servidor.",
+const SERVICE_NOTICE: Record<"whatsapp" | "whatsappCalls", Record<(typeof WHATSAPP_SERVICE_STATES)[number], string>> = {
+  whatsapp: {
+    running: "O serviço de WhatsApp está instalado neste servidor. Conecte um número em Configurações.",
+    failed: "O servidor não conseguiu instalar ou remover o serviço de WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações.",
+    absent: "O serviço de WhatsApp foi removido deste servidor.",
+  },
+  whatsappCalls: {
+    running: "O serviço de ligação pelo WhatsApp está instalado neste servidor. Conecte um número em Configurações.",
+    failed: "O servidor não conseguiu instalar ou remover o serviço de ligação pelo WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações.",
+    absent: "O serviço de ligação pelo WhatsApp foi removido deste servidor.",
+  },
 };
+/** Onde mora o pedido de cada serviço, e o prefixo das colunas do relato do agente. */
+const SERVICES = [
+  { key: "whatsapp", table: "whatsapp_sessions", column: "whatsapp" },
+  { key: "whatsappCalls", table: "whatsapp_call_sessions", column: "whatsapp_calls" },
+] as const;
 
 /** Vence os pedidos parados, de qualquer organização. Devolve os avisos a deixar no painel. */
 async function expireStale(q: OrgQuery, now: Date): Promise<Notice[]> {
@@ -135,35 +191,43 @@ export async function expireStaleUpdates(deps: ServerDeps): Promise<void> {
 
 /**
  * Uma passada do agente: grava que ele falou, fecha o pedido com o resultado que ele trouxe e
- * diz se há pedido esperando e se o serviço de WhatsApp é querido. A resposta são só os dois
+ * diz se há pedido esperando e se cada serviço opcional é querido. A resposta são só os três
  * booleanos: nada do que o painel devolve é comando, versão, imagem ou endereço. Para qual versão
- * ir, o agente descobre sozinho, nas tags do repositório; a imagem do WhatsApp é a do Compose dele.
+ * ir, o agente descobre sozinho, nas tags do repositório; as imagens dos serviços são as do Compose dele.
  */
-export async function agentCheckIn(deps: ServerDeps, report: AgentReport): Promise<{ update: boolean; whatsapp: boolean }> {
+export async function agentCheckIn(deps: ServerDeps, report: AgentReport): Promise<{ update: boolean; whatsapp: boolean; whatsappCalls: boolean }> {
   const now = deps.clock.now();
   const failureAt = report.lastFailure ? new Date(report.lastFailure.at) : null;
   const target = report.target || null;
   const outcome = await withSystem(deps.db, async (q) => {
     const notices: Notice[] = [];
-    // O serviço de WhatsApp é da instalação: basta uma organização querer. É o segundo booleano.
-    const wanted = (await q.one<{ wanted: boolean }>("select exists (select 1 from whatsapp_sessions where service_wanted) as wanted"))?.wanted ?? false;
-    const before = await q.one<{ service: string | null }>("select whatsapp_service as service from update_agent_status limit 1");
-    const service = report.whatsapp?.state ?? null;
-    const reason = (service === "failed" && report.whatsapp?.reason) || null;
-    const noDisk = reason === "no_disk";
-    // Só o que mudou vira aviso, e "fora" só é notícia para quem tinha o serviço de pé.
-    if (service !== null && service !== (before?.service ?? null) && (service !== "absent" || before?.service === "running")) notices.push({ body: WHATSAPP_SERVICE_NOTICE[service] });
+    // Cada serviço opcional é da instalação: basta uma organização querer. São os booleanos depois do primeiro.
+    const wanted = { whatsapp: false, whatsappCalls: false };
+    const told: unknown[] = [];
+    for (const { key, table, column } of SERVICES) {
+      wanted[key] = (await q.one<{ wanted: boolean }>(`select exists (select 1 from ${table} where service_wanted) as wanted`))?.wanted ?? false;
+      const before = await q.one<{ service: string | null }>(`select ${column}_service as service from update_agent_status limit 1`);
+      const service = report[key]?.state ?? null;
+      const reason = (service === "failed" && report[key]?.reason) || null;
+      const noDisk = reason === "no_disk";
+      // Só o que mudou vira aviso, e "fora" só é notícia para quem tinha o serviço de pé.
+      if (service !== null && service !== (before?.service ?? null) && (service !== "absent" || before?.service === "running")) notices.push({ body: SERVICE_NOTICE[key][service] });
+      told.push(service, reason, report[key]?.warning ?? null, noDisk ? (report[key]?.freeDiskMb ?? null) : null, noDisk ? (report[key]?.neededDiskMb ?? null) : null);
+    }
     await q.exec(
       `insert into update_agent_status (organization_id, last_seen_at, announced_version, last_failure_at, last_failure_detail, target_version, whatsapp_service, whatsapp_service_reason,
-                                        whatsapp_service_warning, whatsapp_service_free_mb, whatsapp_service_needed_mb)
-       select id, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 from organizations
+                                        whatsapp_service_warning, whatsapp_service_free_mb, whatsapp_service_needed_mb, whatsapp_calls_service, whatsapp_calls_service_reason,
+                                        whatsapp_calls_service_warning, whatsapp_calls_service_free_mb, whatsapp_calls_service_needed_mb)
+       select id, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15 from organizations
        on conflict (organization_id) do update set last_seen_at = excluded.last_seen_at, announced_version = excluded.announced_version,
          target_version = excluded.target_version, whatsapp_service = excluded.whatsapp_service, whatsapp_service_reason = excluded.whatsapp_service_reason,
          whatsapp_service_warning = excluded.whatsapp_service_warning, whatsapp_service_free_mb = excluded.whatsapp_service_free_mb,
-         whatsapp_service_needed_mb = excluded.whatsapp_service_needed_mb,
+         whatsapp_service_needed_mb = excluded.whatsapp_service_needed_mb, whatsapp_calls_service = excluded.whatsapp_calls_service,
+         whatsapp_calls_service_reason = excluded.whatsapp_calls_service_reason, whatsapp_calls_service_warning = excluded.whatsapp_calls_service_warning,
+         whatsapp_calls_service_free_mb = excluded.whatsapp_calls_service_free_mb, whatsapp_calls_service_needed_mb = excluded.whatsapp_calls_service_needed_mb,
          last_failure_at = coalesce(excluded.last_failure_at, update_agent_status.last_failure_at),
          last_failure_detail = coalesce(excluded.last_failure_detail, update_agent_status.last_failure_detail)`,
-      [now, report.version, failureAt && (Number.isNaN(failureAt.getTime()) ? now : failureAt), report.lastFailure?.detail ?? null, target, service, reason, report.whatsapp?.warning ?? null, noDisk ? (report.whatsapp?.freeDiskMb ?? null) : null, noDisk ? (report.whatsapp?.neededDiskMb ?? null) : null],
+      [now, report.version, failureAt && (Number.isNaN(failureAt.getTime()) ? now : failureAt), report.lastFailure?.detail ?? null, target, ...told],
     );
 
     if (report.result) {
@@ -189,11 +253,11 @@ export async function agentCheckIn(deps: ServerDeps, report: AgentReport): Promi
     for (const { status } of outdated) notices.push({ body: FINISHED[status]("") });
     const accepted = await q.exec("update update_requests set status = 'running', accepted_at = $1 where status = 'requested'", [now]);
     if (accepted > 0) notices.push({ body: STARTED });
-    return { update: accepted > 0, whatsapp: wanted, notices };
+    return { update: accepted > 0, ...wanted, notices };
   });
   // O pedido já foi aceito: um aviso que não entrou não pode custar a resposta ao agente.
   await leaveNotices(deps, outcome.notices).catch((error: unknown) => {
     process.stderr.write(`[panel] could not leave the update notice: ${error instanceof Error ? error.message : String(error)}\n`);
   });
-  return { update: outcome.update, whatsapp: outcome.whatsapp };
+  return { update: outcome.update, whatsapp: outcome.whatsapp, whatsappCalls: outcome.whatsappCalls };
 }

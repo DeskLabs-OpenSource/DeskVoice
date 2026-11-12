@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { z, type ZodType } from "zod";
 import { messageOf, silentLogger, type Logger } from "./log";
 import type { TrunkHealth } from "./trunks";
+import type { WhatsAppCallsHandlers } from "./whatsapp-calls";
 
 export interface VoiceHealth {
   asterisk: { status: "ok" | "warn" | "fail"; detail: string };
@@ -21,6 +22,8 @@ export interface InternalApiHandlers {
   simulate(input: { organizationId: string; agentId: string }): Promise<{ callId: string } | Refusal>;
   /** Chamada pelo navegador: cria a chamada e o token de uso único que abre o WebSocket dela. */
   web(input: { organizationId: string; agentId: string; userId: string }): Promise<{ callId: string; token: string; expiresInSeconds: number } | Refusal>;
+  /** Ligação pelo WhatsApp: o estado do número no WaCalls, conectar por QR Code e desconectar. */
+  whatsappCalls: WhatsAppCallsHandlers;
 }
 
 export interface InternalApiOptions {
@@ -95,6 +98,11 @@ export function startInternalApi(options: InternalApiOptions): Promise<{ port: n
     if (key === "POST /calls/outbound" || key === "POST /calls/simulate") {
       const result = key === "POST /calls/outbound" ? await handlers.outbound(await readJson(request, outbound)) : await handlers.simulate(await readJson(request, simulate));
       return { status: "callId" in result ? 200 : 409, body: result };
+    }
+    const whatsappCalls = /^POST \/whatsapp-calls\/(state|connect|disconnect)$/.exec(key)?.[1] as keyof WhatsAppCallsHandlers | undefined;
+    if (whatsappCalls) {
+      const result = await handlers.whatsappCalls[whatsappCalls](await readJson(request, organization));
+      return { status: "session" in result ? 200 : 409, body: result };
     }
     if (key === "POST /calls/web") {
       const result = await handlers.web(await readJson(request, web));

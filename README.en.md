@@ -147,6 +147,7 @@ proven yet, each capability below says how far the proof went:
 | Gemini Live voice engine | Awaiting real-world proof (tested against a fake server, without a key) |
 | Send WhatsApp during the call, through a connector | Awaiting real-world proof |
 | Connect a WhatsApp number by QR code (Settings → WhatsApp) and send the agent's notices and messages through it | The service does not come installed: you install it from the screen, and it costs about 323 MiB of memory with no number connected and 3.2 GB of disk (measured on 0.3.0, November 12, 2026). Routes tested with a real database and a fake WhatsApp service; installing and removing through the agent, with a simulated Docker. **Not yet proven with a real number:** no QR code was scanned and no message went out. It is an unofficial WhatsApp client; see the [guide](docs/guides/whatsapp-por-qr-code.md) (in Portuguese) |
+| Connect the number to WhatsApp calls (Settings → WhatsApp calls), the first part of the capability | The service (WaCalls) does not come installed: you install it from the screen; memory and disk not measured yet. Routes tested with a real database and a fake WaCalls, through the real voice process; installing and removing through the agent, with a simulated Docker. **Not yet proven with a real number**, and no call is answered yet. Unofficial WhatsApp client; see the [guide](docs/guides/ligacao-pelo-whatsapp.md) (in Portuguese) |
 | Call a webhook during the call | Awaiting real-world proof (without a real receiver) |
 | Update, health check, backup and restore | Proven on a real install, on the partner's VPS: installer run twice without regenerating secrets, backup checked, a restore that brings back the backup's row counts, and the automatic rollback of a failed update. Restoring on another server, or across versions with a new migration, not yet proven |
 | Update from the panel (Settings → Version and update), through a kit agent on the server | Proven on a real install: twice on the partner's VPS (0.3.0 → 0.4.0 and 0.4.0 → 0.5.0), with nobody at the server's terminal, including the hand-off to the new version's updater and the removal of old images |
@@ -158,7 +159,7 @@ If you answer a call through a carrier line, tell us how it went in an issue: in
 a SIP trunk have no public record yet, and that is the most valuable contribution right now.
 
 What does **not** exist yet: several
-companies on one screen, a visual flow builder, calls over WhatsApp, voice IVR, call queues.
+companies on one screen, a visual flow builder, answering calls over WhatsApp, voice IVR, call queues.
 Part of this is on the [roadmap](ROADMAP.md), open to the community.
 
 ## How it works

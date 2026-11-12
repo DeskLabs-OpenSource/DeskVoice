@@ -34,7 +34,7 @@ equal "só painel, voz e rotinas recebem a chave em texto puro" "panel voice rou
 contains "o WAHA recebe o hash, com o prefixo que o faz comparar por hash" "$(cat "$C")" 'WAHA_API_KEY: "sha512:${WAHA_API_KEY_SHA512:-}"'
 waha_block="$(awk '/^  waha:/ { on = 1; next } on && /^  [a-z-]+:/ { on = 0 } on' "$C")"
 contains "o WAHA fica num perfil: não sobe por padrão" "$waha_block" 'profiles: ["whatsapp"]'
-equal "é o único serviço em perfil" 1 "$(grep -c 'profiles:' "$C")"
+equal "só os dois serviços de WhatsApp ficam em perfil" 2 "$(grep -c 'profiles:' "$C")"
 lacks "o WAHA não publica porta" "$waha_block" "ports:"
 lacks "o WAHA não lê o app.env" "$waha_block" "env_file"
 contains "o WAHA tem teto de memória" "$waha_block" "mem_limit: 1280m"
@@ -243,11 +243,11 @@ if command -v node >/dev/null 2>&1; then
   reads() {  # reads <data da resposta, em JavaScript> → a linha que o agente leria
     printf 'tok\n0.3.0\n\n\n\n\n\nfailed\nno_disk\nlow_memory\n4000\n5120\n' | node -e "globalThis.fetch=async(u,o)=>{process.stderr.write(o.body);return{ok:true,status:200,json:async()=>({ok:true,data:$1})}};$speak_js" 2>"$SANDBOX/sent"
   }
-  equal "JS: dois booleanos" "update=false whatsapp=true" "$(reads '{update:false,whatsapp:true}')"
-  equal "JS: não explícito" "update=true whatsapp=false" "$(reads '{update:true,whatsapp:false}')"
-  equal "JS: painel antigo, sem o campo, vale como não sei" "update=false whatsapp=unknown" "$(reads '{update:false}')"
-  equal "JS: texto no lugar do booleano não liga" "update=false whatsapp=unknown" "$(reads '{update:false,whatsapp:"true"}')"
-  equal "JS: objeto no lugar do booleano não liga" "update=false whatsapp=unknown" "$(reads '{update:false,whatsapp:{image:"evil"}}')"
+  equal "JS: dois booleanos" "update=false whatsapp=true whatsappCalls=unknown" "$(reads '{update:false,whatsapp:true}')"
+  equal "JS: não explícito" "update=true whatsapp=false whatsappCalls=unknown" "$(reads '{update:true,whatsapp:false}')"
+  equal "JS: painel antigo, sem o campo, vale como não sei" "update=false whatsapp=unknown whatsappCalls=unknown" "$(reads '{update:false}')"
+  equal "JS: texto no lugar do booleano não liga" "update=false whatsapp=unknown whatsappCalls=unknown" "$(reads '{update:false,whatsapp:"true"}')"
+  equal "JS: objeto no lugar do booleano não liga" "update=false whatsapp=unknown whatsappCalls=unknown" "$(reads '{update:false,whatsapp:{image:"evil"}}')"
   contains "JS: o estado do serviço vai no relato, em código fechado" "$(cat "$SANDBOX/sent")" '"whatsapp":{"state":"failed","reason":"no_disk","warning":"low_memory","freeDiskMb":4000,"neededDiskMb":5120}'
 fi
 
@@ -255,5 +255,5 @@ fi
 backup="$(bash "$KIT/backup.sh" 2>/dev/null | tail -n 1)"
 contains "o backup leva a chave, dentro do .env" "$(cat "$backup/env")" "WAHA_API_KEY="
 equal "o backup não tem nada do volume de sessões" "" "$(find "$backup" -iname '*waha*' -o -iname '*session*')"
-contains "o backup.sh diz que o pareamento não entra" "$(bash "$KIT/backup.sh" --help)" "NÃO entra no backup"
+contains "o backup.sh diz que o pareamento não entra" "$(bash "$KIT/backup.sh" --help)" "NÃO entram no backup"
 finish

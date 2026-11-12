@@ -13,9 +13,11 @@ import { startOutboundCall } from "./outbound";
 import { removePartialRecordings } from "./recording";
 import { closeOrphanCalls } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
-import type { Schedule } from "./transport";
+import { realSchedule, type Schedule } from "./transport";
 import { applyTrunks, checkTrunks, type TrunksDeps } from "./trunks";
+import type { WacallsOptions } from "./wacalls-client";
 import { startWebCalls } from "./web-calls";
+import { createWhatsAppCalls } from "./whatsapp-calls";
 
 export interface VoiceServerDeps {
   db: Db;
@@ -37,6 +39,8 @@ export interface VoiceServerDeps {
   trunksOwner?: { uid: number; gid: number };
   host?: string;
   schedule?: Schedule;
+  /** Acesso ao WaCalls da instalação (ligação pelo WhatsApp). Sem token, o recurso não existe aqui. */
+  wacalls?: WacallsOptions;
   /** Relógio monotônico da cadência de áudio, em ms. */
   now?: () => number;
   log?: Logger;
@@ -125,6 +129,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   reapply();
 
   // Não depende do Asterisk: a chamada pelo navegador funciona com a telefonia fora do ar.
+  const whatsappCalls = createWhatsAppCalls(deps.wacalls ?? { token: "" }, { schedule: deps.schedule ?? realSchedule, log });
+
   const webCalls = await startWebCalls({ db, clock, session: sessionDeps, port: deps.webPort, host: deps.host, schedule: deps.schedule, now: deps.now, log, onSession: track });
 
   const api = await startInternalApi({
@@ -141,6 +147,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
       applyTrunks: () => applyTrunks(trunksDeps),
       outbound: (input) => startOutboundCall({ db, ari, clock, calls, log }, input),
       web: (input) => webCalls.request(input),
+      whatsappCalls,
       async simulate(input) {
         const started = await startSimulatedCall(sessionDeps, input);
         if (!("callId" in started)) return started;
@@ -157,6 +164,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     calls,
     async close() {
       ari.close();
+      whatsappCalls.close();
       await api.close();
       for (const session of sessions) session.stop("shutdown");
       await Promise.all([...sessions].map((session) => session.done));

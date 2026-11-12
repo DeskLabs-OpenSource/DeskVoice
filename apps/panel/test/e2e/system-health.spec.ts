@@ -31,6 +31,7 @@ test("saúde do sistema: cada peça e cada ligação aparecem, na ordem de depur
   await expect(line(page, "telephony")).toContainText(health.reasons.telephony_ok);
   // Instalação nova: WhatsApp não instalado é o padrão; sem chave de motor, o motor pede atenção e diz o que fazer.
   await expect(line(page, "whatsapp")).toContainText(health.reasons.whatsapp_absent);
+  await expect(line(page, "whatsapp_calls")).toContainText(health.reasons.whatsapp_calls_absent);
   await expect(line(page, "engine")).toContainText(health.reasons.engine_none);
   await expect(line(page, "engine")).toContainText(health.actions.engine_none);
 
