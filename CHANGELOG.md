@@ -3,6 +3,36 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.4.0] - 2026-11-12
+
+### Adicionado
+
+- **O instalador aceita AlmaLinux 9 e Rocky Linux 9** Além de Ubuntu 22.04+ e Debian 12+, o instalador passa a aceitar AlmaLinux 9+ e Rocky Linux 9+
+  sem `--force`, e as mensagens dele mostram a lista inteira. Quando o Docker está instalado e com o
+  serviço desligado, como veio numa VPS AlmaLinux da parceira, o instalador liga o serviço
+  (`systemctl enable --now docker`) e diz isso na tela. Sem `git`, o comando de uma linha o instala
+  pelo `dnf` quando não há `apt-get`. Com o `firewalld` ativo, ou com o SELinux em `Enforcing` e o
+  Docker rodando com ele ligado, o instalador avisa que esse caminho não foi provado e segue. O
+  AlmaLinux 9 foi instalado numa VPS em 12/11/2026 com o serviço do Docker ligado à mão; a ligação
+  automática ainda não rodou numa máquina real, e o Rocky Linux 9 não foi provado. Nada a fazer em
+  instalações existentes. Crédito: @melgarafael.
+
+### Alterado
+
+- **As imagens de voz e de rotinas passam a dividir a mesma base, e cada versão ocupa cerca de 900 MB a menos no servidor** Os processos de voz e de rotinas saem da mesma base (as dependências e os pacotes do núcleo), mas até a 0.3.0 cada imagem era montada separadamente, e a base saía duas vezes, com marcações diferentes: o servidor baixava e guardava as duas cópias. Na 0.3.0, as duas dividiam 5 de 18 camadas. A partir desta versão as três imagens são montadas juntas, e voz e rotinas diferem só no último passo. Quem atualiza baixa menos, e cada versão ocupa menos disco. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A atualização deixa de acumular no disco as imagens das versões antigas** Cada atualização deixava no servidor as imagens da versão anterior a ela, cerca de 2 GB por
+  versão. Agora, depois que tudo responde, a atualização remove as imagens do DeskVoice que não
+  são nem a versão nova nem a de onde se acabou de sair, que fica para voltar a ela sem internet,
+  e diz quais removeu. A imagem construída no próprio servidor (`local`) sai quando a instalação
+  passa a rodar a imagem publicada; quem instalou com `--build` e segue assim não perde nada.
+  Imagem que algum contêiner ainda usa fica, com um aviso, e as imagens de terceiros (banco,
+  telefonia, entrada, WhatsApp) não são tocadas. Quem limpa é o atualizador da versão nova, então
+  a limpeza já acontece na atualização que leva a esta versão. Nada a fazer em instalações
+  existentes. Crédito: @melgarafael.
+
 ## [0.3.0] - 2026-11-12
 
 ### Adicionado
