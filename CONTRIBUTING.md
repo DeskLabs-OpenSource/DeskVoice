@@ -171,6 +171,9 @@ de um pacote) é decisão do mantenedor, num PR próprio que diz o que muda para
 instalação e como o kit faz a passagem. A do Postgres, por exemplo, exige converter os arquivos do
 banco antes de a imagem nova subir.
 
+Versão maior por segurança: o alerta de vulnerabilidade continua aparecendo na aba Security do
+repositório, que é outro mecanismo, e o PR é do mantenedor.
+
 ## Onde pedir ajuda
 
 - **Dúvida sobre como contribuir:** [GitHub Discussions](https://github.com/DeskLabs-OpenSource/DeskVoice/discussions). A resposta fica registrada para quem vier depois.

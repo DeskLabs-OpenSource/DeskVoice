@@ -174,6 +174,9 @@ of a package) is the maintainer's decision, in its own PR that says what changes
 already have an installation and how the kit makes the move. Postgres, for example, needs the
 database files converted before the new image starts.
 
+Major version for security: the vulnerability alert still shows up in the repository's Security
+tab, which is a separate mechanism, and the PR is the maintainer's.
+
 ## Where to ask for help
 
 - **Questions about contributing:** [GitHub Discussions](https://github.com/DeskLabs-OpenSource/DeskVoice/discussions). The answer stays on record for whoever comes next.
