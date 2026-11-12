@@ -59,7 +59,7 @@ export function decideTag(history: ReleaseHistory, head: string): TagDecision {
   if (!branches.includes(`release/${version}`)) {
     return {
       action: "refuse",
-      reason: `O commit ${commit} apagou ${removed} fragmento(s) e trouxe ${version}, mas não veio de um PR release/${version} deste repositório (ramos de origem: ${branches.join(" ") || "nenhum"}). Tag NÃO criada: uma release sai do workflow 'release' (Run workflow), nunca de um PR comum.`,
+      reason: `O commit ${commit} apagou ${removed} fragmento(s) e trouxe ${version}, mas não veio de um PR release/${version} deste repositório (ramos de origem: ${branches.join(" ") || "nenhum"}). Tag NÃO criada: uma release sai do workflow 'release' (Run workflow), nunca de um PR comum. Para sair deste estado: reverta o commit ${commit} (os fragmentos voltam e o CHANGELOG perde a versão) e corte pelo workflow 'release'. Não crie a etiqueta à mão.`,
     };
   }
   return { action: "tag", version, commit };

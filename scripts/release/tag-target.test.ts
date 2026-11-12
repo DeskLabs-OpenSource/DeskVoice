@@ -110,6 +110,17 @@ describe("decideTag", () => {
     expect(decide(root, release, { [release]: ["feature/qualquer"] })).toMatchObject({ action: "refuse" });
     expect(decide(root, release, { [release]: ["release/0.3.0"] })).toMatchObject({ action: "refuse" });
     expect(decide(root, release)).toMatchObject({ action: "refuse" });
+    expect(decide(root, release, { [release]: ["feature/qualquer"] })).toMatchObject({ reason: expect.stringContaining(`reverta o commit ${release}`) as string });
+  });
+
+  it("depois de reverter o corte feito à mão, a decisão volta a ser não marcar nada", () => {
+    const { root, cut, commit, git } = repo();
+    cut("0.2.0", "0.1.0");
+    const rogue = commit("feat: corte feito à mão");
+    git("revert", "--no-edit", rogue);
+    const reverted = git("rev-parse", "HEAD");
+
+    expect(decide(root, reverted, { [rogue]: ["feature/qualquer"] })).toMatchObject({ action: "skip" });
   });
 
   it("não marca versão escrita no CHANGELOG sem consumir fragmento", () => {

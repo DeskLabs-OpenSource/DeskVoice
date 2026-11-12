@@ -132,7 +132,8 @@ jobs:
       # que trouxe a versão ao CHANGELOG (merge, squash ou rebase), e só se ele apagou fragmentos e
       # veio de um PR release/<versão> deste repositório. Versão já marcada não é marcada de novo.
       # Por isso a reexecução e o push seguinte que chega antes do corte terminar dão no mesmo
-      # commit. A lógica e os testes estão em scripts/release/tag-target.ts.
+      # commit. Como o publish-image constrói a etiqueta, as imagens são exatamente o código desse
+      # commit, mesmo com pushes depois dele. A lógica e os testes estão em scripts/release/tag-target.ts.
       - name: Qual commit trouxe a versão, e ele é de um PR de versão?
         id: gate
         env:
