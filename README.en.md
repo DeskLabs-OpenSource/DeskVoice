@@ -2,7 +2,12 @@
 
 [Português](README.md) · English · [Español](README.es.md)
 
-# DeskVoice
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/deskvoice-logo-dark.svg">
+    <img src="brand/deskvoice-logo-light.svg" alt="DeskVoice" height="76">
+  </picture>
+</h1>
 
 **An open source phone system run by AI agents, installed on your own VPS.**
 

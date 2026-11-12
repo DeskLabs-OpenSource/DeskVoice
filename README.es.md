@@ -2,7 +2,12 @@
 
 [Português](README.md) · [English](README.en.md) · Español
 
-# DeskVoice
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/deskvoice-logo-dark.svg">
+    <img src="brand/deskvoice-logo-light.svg" alt="DeskVoice" height="76">
+  </picture>
+</h1>
 
 **Central telefónica open source operada por agentes de IA, instalada en tu VPS.**
 
