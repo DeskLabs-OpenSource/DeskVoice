@@ -27,6 +27,26 @@ curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/
 de novo aproveita o que já está na pasta. O kit foi feito pensando na
 [VPS da HostGator](https://www.hostgator.com.br/52708-141-3-52.html), parceira do projeto, e funciona em qualquer VPS com Docker.
 
+## Sistemas aceitos
+
+Ubuntu 22.04 ou mais novo, Debian 12 ou mais novo, AlmaLinux 9 ou mais novo e Rocky Linux 9 ou
+mais novo. Em outro sistema o instalador para no passo 1 e diz a lista; `--force` segue assim
+mesmo, por sua conta. O que foi provado em cada um:
+
+- **Ubuntu**: é o sistema em que a instalação foi provada e o que a VPS da parceira entrega.
+- **AlmaLinux 9**: instalado numa VPS da parceira em 12/11/2026 (AlmaLinux 9.8), com o serviço do
+  Docker ligado à mão (`systemctl enable --now docker`), porque ele veio instalado e desligado.
+  Agora o instalador liga esse serviço sozinho quando o encontra parado; essa correção ainda não
+  rodou numa máquina real.
+- **Rocky Linux 9**: aceito por ser da mesma família do AlmaLinux, e não provado.
+- **RHEL**: fora da lista até uma instalação provar. Ele pede assinatura ativa para o `dnf`
+  baixar pacotes, um passo que ninguém mediu.
+
+Sem Docker, o instalador oferece o script oficial (`get.docker.com`), que também atende AlmaLinux
+e Rocky Linux. Com o `firewalld` ativo, ou com o SELinux em `Enforcing` e o Docker rodando com ele
+ligado, o instalador avisa e segue: nenhum dos dois casos foi provado, e a prova é a primeira
+ligação e o teste da tela Linha.
+
 ## Ordem de uso
 
 ```bash

@@ -22,13 +22,17 @@ die() { printf 'Não deu para continuar: %s\n  O que fazer: %s\n' "$1" "$2" >&2;
 
 if ! command -v git >/dev/null 2>&1; then
   say "O git não está instalado. Vou instalar (é o único programa necessário antes do instalador)."
-  if command -v apt-get >/dev/null 2>&1; then
-    if [ "$(id -u)" = 0 ]; then apt-get update -qq && apt-get install -y -qq git
-    elif command -v sudo >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y -qq git
-    else die "preciso de permissão de administrador para instalar o git." "Entre como root ou instale o git e rode de novo."; fi
-  else
-    die "não sei instalar o git neste sistema." "Instale o git pelo gerenciador de pacotes do seu sistema e rode de novo."
+  # apt-get no Ubuntu e no Debian; dnf no AlmaLinux e no Rocky Linux.
+  if command -v apt-get >/dev/null 2>&1; then manager=apt-get
+  elif command -v dnf >/dev/null 2>&1; then manager=dnf
+  else die "não sei instalar o git neste sistema." "Instale o git pelo gerenciador de pacotes do seu sistema e rode de novo."; fi
+  as_root=""
+  if [ "$(id -u)" != 0 ]; then
+    command -v sudo >/dev/null 2>&1 || die "preciso de permissão de administrador para instalar o git." "Entre como root ou instale o git e rode de novo."
+    as_root="sudo"
   fi
+  if [ "$manager" = apt-get ]; then $as_root apt-get update -qq && $as_root apt-get install -y -qq git
+  else $as_root dnf install -y -q git; fi
   command -v git >/dev/null 2>&1 || die "o git não ficou disponível depois da instalação." "Instale o git à mão e rode de novo."
 fi
 

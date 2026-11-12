@@ -20,7 +20,8 @@ Antes de qualquer pergunta técnica, pergunte: **"Você já tem um servidor (VPS
 
 **Se não tem**, diga, nesta ordem e uma vez só:
 
-1. O que é preciso: uma VPS com Ubuntu 22.04 ou mais novo (Debian 12 ou mais novo também serve)
+1. O que é preciso: uma VPS com Ubuntu 22.04 ou mais novo (Debian 12+, AlmaLinux 9+ e Rocky
+   Linux 9+ também servem; o que foi provado em cada um está em `install/README.md`, "Sistemas aceitos")
    e acesso por SSH, com 10 GB de disco livre. Sobre memória, diga só o que foi medido: a
    instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 380 MiB de memória e ocupa cerca de 2,7 GB de disco (medidos na 0.3.0, sem o WhatsApp).
    O menor tamanho em que a instalação cabe ainda não foi medido; ela baixa as imagens prontas
@@ -68,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/
 
 | Pergunta | Por quê |
 |---|---|
-| A VPS é Ubuntu 22.04+ ou Debian 12+? Tem acesso root por SSH? | É o que o instalador suporta (`--force` segue em outro sistema, por conta e risco) |
+| A VPS é Ubuntu 22.04+, Debian 12+, AlmaLinux 9+ ou Rocky Linux 9+? Tem acesso root por SSH? | É o que o instalador aceita (`--force` segue em outro sistema, por conta e risco). O AlmaLinux 9 foi instalado em 12/11/2026 com o serviço do Docker ligado à mão; o instalador agora liga sozinho, e isso ainda não rodou numa máquina real. O Rocky Linux 9 não foi provado. Com `firewalld` ativo ou SELinux em `Enforcing`, o instalador avisa que não foi provado: a prova é a primeira ligação e o teste da tela Linha |
 | Já roda outra coisa nas portas 80 e 443 (outro site, outro painel)? | Se sim, o painel sobe em outra porta e a pessoa aponta o proxy que já tem |
 | Tem domínio apontado para a VPS? | Sem domínio não há HTTPS: o painel fica só dentro da VPS (`127.0.0.1`) e a pessoa entra por túnel SSH, com o comando que o instalador mostra no fim. Publicar por HTTP pelo IP só pedindo de propósito (`DESKVOICE_PANEL_PUBLIC_HTTP=yes`), e a senha trafega sem criptografia: não sugira para uso de verdade |
 | Já contratou o tronco SIP? Tem servidor, usuário, senha e sabe se autentica por **registro** ou por **IP**? | Sem tronco só há chamada simulada |

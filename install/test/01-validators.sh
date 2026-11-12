@@ -31,6 +31,13 @@ check "Ubuntu 24.04" os_supported ubuntu 24.04
 check "Debian 12" os_supported debian 12
 refuse "Ubuntu 20.04" os_supported ubuntu 20.04
 refuse "Debian 11" os_supported debian 11
+check "AlmaLinux 9.8" os_supported almalinux 9.8
+check "Rocky Linux 9.4" os_supported rocky 9.4
+check "AlmaLinux 10" os_supported almalinux 10.0
+refuse "AlmaLinux 8" os_supported almalinux 8.10
+refuse "Rocky Linux 8" os_supported rocky 8.9
+refuse "RHEL 9: fora até uma instalação provar" os_supported rhel 9.4
+for v in Ubuntu Debian AlmaLinux "Rocky Linux"; do contains "a lista de sistemas cita $v" "$SUPPORTED_SYSTEMS" "$v"; done
 refuse "CentOS" os_supported centos 9
 refuse "sem os-release" os_supported "" ""
 for v in x86_64 amd64 aarch64 arm64; do check "arquitetura $v" arch_supported "$v"; done

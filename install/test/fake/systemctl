@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # systemctl de mentira: nenhum teste toca no systemd de verdade. Só registra o que seria feito.
 # `enable` liga o timer (um arquivo em $FAKE_DIR), e `is-enabled` responde por esse arquivo;
-# $FAKE_DIR/systemctl_fail faz o `enable` falhar.
+# $FAKE_DIR/systemctl_fail faz o `enable` falhar (do timer e do Docker).
 echo "systemctl $*" >> "$FAKE_DIR/calls.log"
 case " $* " in
+  # Ligar o serviço do Docker: o daemon passa a responder, salvo $FAKE_DIR/systemctl_fail.
+  *" enable --now docker "*) [ ! -f "$FAKE_DIR/systemctl_fail" ] && rm -f "$FAKE_DIR/docker_down" ;;
   *" is-enabled "*) [ -f "$FAKE_DIR/timer_enabled" ] ;;
   *" enable "*) [ ! -f "$FAKE_DIR/systemctl_fail" ] && touch "$FAKE_DIR/timer_enabled" ;;
 esac
