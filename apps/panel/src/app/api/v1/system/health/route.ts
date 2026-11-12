@@ -47,7 +47,7 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
     lines.agent = agentLine({ lastSeenAt: agent?.lastSeenAt ?? null }, now);
     let whatsapp: WhatsAppView | "down";
     try {
-      whatsapp = await observe(deps, org, session.organizationId);
+      whatsapp = await observe(deps, org, session.organizationId, { withQr: false });
     } catch (error) {
       // O WAHA não respondeu: é o que esta linha existe para dizer.
       if (!(error instanceof ApiError)) throw error;

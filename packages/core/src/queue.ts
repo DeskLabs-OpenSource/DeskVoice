@@ -72,6 +72,12 @@ export function listenTasks(db: Db, onWake: () => void, onError?: (error: Error)
  * O que a saúde mede na fila, para a instalação inteira: quantos processos a escutam agora (o de
  * rotinas segura uma escuta enquanto vive) e desde quando espera a tarefa vencida mais antiga que
  * ninguém pegou. Com a fila sendo consumida, tarefa vencida é reivindicada em instantes.
+ *
+ * Só o processo de rotinas escuta `tasks` (o painel escuta `call_events`; a voz, `approvals`), então
+ * uma escuta aqui é ele vivo e conectado. O caso que um batimento pegaria e isto não: o processo
+ * vivo, escutando e travado numa rotina. Como ele executa uma tarefa por vez, a próxima vencida
+ * fica esperando, e em 10 minutos a saúde falha. Teto conhecido: uma rotina travada sem nenhuma
+ * outra tarefa vencida atrás dela não aparece, porque não atrasa ninguém.
  */
 export async function queueHealth(db: Db, now: Date): Promise<{ listeners: number; oldestDueAt: Date | null }> {
   const listeners = await countListeners(db, TASKS_CHANNEL);
