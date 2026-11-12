@@ -97,6 +97,24 @@ out="$(bash "$KIT/update.sh" --to 0.3.0 --yes 2>&1)"; equal "entrada quebrou na 
 equal "entrada quebrou: volta a versão anterior" 0.2.0 "$(env_get "$E" DESKVOICE_VERSION)"
 contains "entrada quebrou: diz que o painel deixou de abrir" "$out" "deixou de abrir pelo endereço que abria antes"
 lacks "entrada quebrou: não diz atualizado" "$out" "Atualizado para"
+
+# O mesmo, com uma peça NÃO essencial em falha antes e depois (uma linha que a operadora recusa:
+# a checagem sai com 2). A entrada que respondia e parou ainda provoca a volta: a regra olha a
+# linha da entrada, e não o código de saída da checagem.
+rm -f "$FAKE_DIR/entry_probe"
+printf '%s\n' 'panel|ok|respondendo' 'trunk|fail|registro recusado pela operadora (401)' 'engine|ok|gemini-live' > "$FAKE_DIR/panel_health"
+bash "$KIT/healthcheck.sh" >/dev/null 2>&1; equal "linha recusada: a checagem sai com 2 antes da atualização" 2 "$?"
+out="$(bash "$KIT/update.sh" --to 0.3.0 --yes 2>&1)"; equal "linha recusada e entrada quebrou: sai com erro" 1 "$?"
+equal "linha recusada e entrada quebrou: volta a versão anterior" 0.2.0 "$(env_get "$E" DESKVOICE_VERSION)"
+contains "linha recusada e entrada quebrou: diz que o painel deixou de abrir" "$out" "deixou de abrir pelo endereço que abria antes"
+# E o contrário: a mesma peça não essencial em falha, com a entrada respondendo antes e depois.
+# A checagem sai com 2 o tempo todo, e isso NÃO provoca volta.
+rm -f "$FAKE_DIR/entry_probe_after_up" "$FAKE_DIR/entry_probe"
+out="$(bash "$KIT/update.sh" --to 0.3.0 --yes 2>&1)"; equal "linha recusada e entrada ok: a atualização termina bem" 0 "$?"
+equal "linha recusada e entrada ok: fica na versão nova, sem volta" 0.3.0 "$(env_get "$E" DESKVOICE_VERSION)"
+lacks "linha recusada e entrada ok: não diz que voltou" "$out" "Voltando para a versão"
+bash "$KIT/healthcheck.sh" >/dev/null 2>&1; equal "linha recusada: a checagem segue saindo com 2 depois" 2 "$?"
+printf '%s\n' 'panel|ok|respondendo' 'trunk|warn|nenhuma linha cadastrada ainda' 'engine|warn|nenhuma chave de motor de voz configurada' > "$FAKE_DIR/panel_health"
 rm -f "$FAKE_DIR/entry_probe_after_up" "$FAKE_DIR/entry_probe"
 
 # Instalação de antes da entrada única: a atualização converge a publicação sozinha.

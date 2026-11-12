@@ -315,6 +315,25 @@ jobs:
           esac
           # Só para o log: o instalador já parou acima se uma peça essencial não respondeu.
           NO_COLOR=1 bash install/healthcheck.sh || echo "a checagem de saúde acusou um item não essencial (acima)"
+      # O serviço de WhatsApp fica num perfil e não sobe aqui (a imagem ocupa 3 GB). O que dá para
+      # conferir sem baixá-la: o Compose é válido COM o perfil, usando os arquivos de ambiente que
+      # esta instalação gerou, e a imagem que ele resolve está fixada por resumo.
+      - name: O Compose é válido com o perfil do WhatsApp
+        if: hashFiles('install/agent.sh') != ''
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file deploy/images.env --env-file deploy/.env --profile whatsapp -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml)
+          "${compose[@]}" config -q
+          image="$("${compose[@]}" config --format json | jq -r '.services.waha.image')"
+          echo "imagem do serviço de WhatsApp: ${image}"
+          case "${image}" in
+            devlikeapro/waha:*@sha256:????????????????????????????????????????????????????????????????) ;;
+            *) echo "::error::A imagem do serviço de WhatsApp não está fixada por etiqueta e resumo: ${image}"; exit 1 ;;
+          esac
+          # Sem o perfil, o serviço não existe: é o padrão de toda instalação.
+          if docker compose --env-file deploy/images.env --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml config --services | grep -qx waha; then
+            echo "::error::O serviço de WhatsApp aparece sem o perfil: ele subiria em toda instalação."; exit 1
+          fi
       - name: O agente de atualização fala com o painel
         if: hashFiles('install/agent.sh') != ''
         run: |

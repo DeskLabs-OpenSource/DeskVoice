@@ -23,6 +23,9 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   // Segredo do agente de atualização (`install/agent.sh`): só com ele a rota do agente responde.
   // Fica em `deploy/.env` e o Compose o entrega só ao painel; voz e rotinas não o recebem.
   UPDATE_AGENT_TOKEN: "generated",
+  // Chave com que painel, voz e rotinas falam com o WAHA da instalação (WhatsApp por QR Code). Fica
+  // em `deploy/.env`, e o Compose a entrega só a esses três serviços; o WAHA recebe só o hash.
+  WAHA_API_KEY: "generated",
   APP_DB_PASSWORD: "generated",
   SYSTEM_DB_PASSWORD: "generated",
 

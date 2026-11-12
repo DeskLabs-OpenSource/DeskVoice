@@ -163,6 +163,7 @@ no registro, e a passada termina.
 |---|---|
 | Agendamento | Timer do systemd `deskvoice-agent.timer` (a cada minuto, com atraso aleatório de até 15 s), rodando como o dono da pasta. Sem systemd: `/etc/cron.d/deskvoice-agent`. Sem nenhum dos dois: o instalador avisa, e a tela mostra que o agente não está instalado |
 | Segredo | `UPDATE_AGENT_TOKEN`, em `deploy/.env`, gerado pelo instalador. O Compose o entrega só ao painel; voz e rotinas não o recebem |
+| Serviço de WhatsApp | A mesma conversa traz um segundo sim ou não: a instalação quer o serviço de WhatsApp. Com sim e o serviço fora, o agente baixa a imagem que o Compose fixa e sobe só o `waha`; com não e o serviço de pé, para e remove o contêiner (o volume com o pareamento fica). Antes de baixar ele confere o disco (5 GB livres onde o Docker guarda as imagens; sem isso não baixa) e a memória (abaixo de 1280 MB disponíveis, instala e avisa). O download tem prazo de 10 minutos por passada e continua na seguinte. Ao remover, apaga também a imagem fixada, e só ela; se ela não sai, vira aviso e cada passada tenta de novo. Falha fica em `deploy/agent/whatsapp-failure`, aviso em `deploy/agent/whatsapp-warning`, e a tentativa seguinte a uma falha é em 10 minutos. Executar o pedido na hora, sem esperar o agendamento: `bash install/agent.sh` |
 | Registro do que falhou | `deploy/agent/agent.log` (a cópia anterior em `agent.log.1`) |
 | Resultado ainda não entregue | `deploy/agent/pending-result`; vai na passada seguinte |
 | Ver se está passando | `bash install/healthcheck.sh` (linha "Agente de atualização": agendado ou não, e quando falou com o painel pela última vez) e, no painel, Configurações → Versão e atualização |
@@ -181,7 +182,7 @@ separados para cada contêiner receber só o que usa:
 
 | Arquivo | Quem recebe | O que tem |
 |---|---|---|
-| `deploy/.env` | O Compose (que entrega a senha só ao Postgres e o segredo do agente só ao painel) | Senha do dono do banco, domínio, faixa de áudio, número da versão instalada, segredo do agente de atualização |
+| `deploy/.env` | O Compose (que entrega a senha só ao Postgres, o segredo do agente só ao painel e a chave do WAHA a painel, voz e rotinas) | Senha do dono do banco, domínio, faixa de áudio, número da versão instalada, segredo do agente de atualização, chave do WAHA (o WhatsApp por QR Code) e o hash dela, que é o que o contêiner do WAHA recebe. Em ARM, também a imagem do WAHA dessa arquitetura. `DESKVOICE_WHATSAPP=on` quando o serviço de WhatsApp foi instalado pela tela (quem grava é o agente) |
 | `deploy/app.env` | Painel, voz e rotinas | Conexões de aplicação, chave de segredos, senha interna do Asterisk, endereço público. Não tem a senha do dono do banco nem o segredo do agente de atualização |
 | `deploy/migrate.env` | Só as migrations e a criação do primeiro usuário | Conexão do dono do banco e as senhas dos papéis de aplicação |
 
@@ -220,8 +221,14 @@ vira `aviso`: o Caddy está rodando a configuração de antes da atualização (
 relido ao reiniciar). Resolve com `docker restart deskvoice-caddy-1`; rodar `bash
 install/update.sh` também reinicia o Caddy quando o arquivo que ele tem montado não é o do disco.
 
+A linha "WhatsApp" fala do serviço do WhatsApp por QR Code (o contêiner `waha`), que só existe
+na instalação que o pediu pela tela. "Não instalado" é o estado normal, e é `ok`. Instalado, a
+linha diz se ele está de pé e responde ao painel; parado é `falha`, mas nunca de peça essencial:
+não provoca a volta de uma atualização. Ela não diz se há um número conectado: isso é a tela, em
+Configurações → WhatsApp.
+
 Código de saída: `0` sem falha, `1` se falhou peça essencial (painel, banco, Asterisk, worker
-de voz, rotinas), `2` se falhou outra (linha, motor de voz, entrada única, portas, disco).
+de voz, rotinas), `2` se falhou outra (linha, motor de voz, entrada única, WhatsApp, portas, disco).
 
 ### `backup.sh` e `restore.sh`
 
@@ -243,6 +250,10 @@ Agendar todo dia às 3h: `crontab -e` e acrescente
 
 O backup fica na mesma máquina. Copie a pasta `backups/` para outro lugar de tempos em tempos:
 se o disco da VPS se perder, o backup vai junto.
+
+O backup **não** leva o pareamento do WhatsApp por QR Code (o volume `waha-sessions`): é a
+credencial viva de um aparelho conectado. Restaurando na mesma VPS, o número segue conectado.
+Em outra VPS, a tela diz que os dados da conexão não existem mais e pede para ler o QR Code de novo.
 
 A restauração primeiro monta o backup num banco ao lado e compara as contagens. Só depois ele
 toma o lugar do banco atual. Se alguma tabela divergir, o script diz qual, e o banco atual fica
@@ -388,6 +399,11 @@ mais comum para a menos:
 2. A versão acabou de sair e as imagens ainda estão sendo publicadas. Espere alguns minutos.
 3. O `docker pull` responde "denied" ou "unauthorized": a imagem existe e não está pública. Isso
    é defeito da publicação, e não da sua VPS: abra uma issue.
+
+Se a mensagem fala da imagem do serviço de WhatsApp (WAHA), o registro é outro, o Docker Hub:
+rede, o Docker Hub fora do ar ou o limite de downloads dele, que se renova em algumas horas.
+Confira também o disco (`df -h`): essa imagem ocupa cerca de 3,2 GB. Isso só acontece na
+instalação que ligou o WhatsApp pela tela; nas outras a atualização não baixa essa imagem.
 
 O kit não constrói as imagens na VPS para contornar: uma imagem construída ali não é a que foi
 testada, e nenhuma atualização a trocaria depois. Nada é alterado até as imagens baixarem.

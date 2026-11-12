@@ -1,8 +1,8 @@
 # DeskVoice: uma VPS, um comando.
 #
 # Quem publica porta no host: só o Caddy (a entrada única do painel e da voz do navegador) e o
-# Asterisk (SIP e RTP, UDP). Postgres, painel, voz, rotinas e a ARI do Asterisk ficam na rede
-# interna, e painel e voz NUNCA publicam porta: tudo o que é web entra pelo Caddy.
+# Asterisk (SIP e RTP, UDP). Postgres, painel, voz, rotinas, o WAHA (WhatsApp) e a ARI do Asterisk
+# ficam na rede interna, e painel e voz NUNCA publicam porta: tudo o que é web entra pelo Caddy.
 #
 # As portas do Caddy não estão neste arquivo. O instalador as grava em
 # `docker-compose.override.yml`, porque dependem da máquina: 80/443 quando estão livres, ou
@@ -11,8 +11,9 @@
 #
 # Os valores vêm de três arquivos gerados por `install/install.sh`, separados por menor
 # privilégio. Não há variável para preencher à mão: o que é escolha de quem opera fica no painel.
-#   .env         só o que o próprio Compose interpola (senha do Postgres, portas, versão, e o
-#                segredo do agente de atualização, entregue só ao painel)
+#   .env         só o que o próprio Compose interpola (senha do Postgres, portas, versão, o
+#                segredo do agente de atualização, entregue só ao painel, a chave do WAHA,
+#                entregue a painel, voz e rotinas, e a marca de que o WhatsApp foi instalado pela tela)
 #   app.env      o que painel, voz e rotinas recebem; não contém a senha do dono do banco
 #   migrate.env  credenciais do dono do schema; só o serviço `migrate` recebe
 #
@@ -73,8 +74,11 @@ services:
     # O segredo do agente de atualização chega só a este serviço: vem do `.env`, que o Compose
     # interpola, e não do `app.env`, que voz e rotinas também recebem. Vazio (instalação que ainda
     # não tem o agente), a rota do agente não aceita ninguém.
+    # A chave do WAHA também vem do `.env`: chega a painel, voz e rotinas, que são os três que
+    # falam com ele, e não ao `migrate`, que só usa o `app.env`.
     environment:
       UPDATE_AGENT_TOKEN: "${UPDATE_AGENT_TOKEN:-}"
+      WAHA_API_KEY: "${WAHA_API_KEY:-}"
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:
@@ -87,6 +91,9 @@ services:
     <<: *app
     image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-voice:${DESKVOICE_VERSION:-dev}
     build: { context: .., target: voice, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
+    # A ferramenta `send_whatsapp` roda neste processo, durante a ligação.
+    environment:
+      WAHA_API_KEY: "${WAHA_API_KEY:-}"
     depends_on:
       migrate: { condition: service_completed_successfully }
       asterisk: { condition: service_healthy }
@@ -103,8 +110,69 @@ services:
     <<: *app
     image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-routines:${DESKVOICE_VERSION:-dev}
     build: { context: .., target: routines, args: { APP_VERSION: "${DESKVOICE_VERSION:-dev}" } }
+    # A entrega dos avisos por WhatsApp (`deliver_notification`) roda neste processo.
+    environment:
+      WAHA_API_KEY: "${WAHA_API_KEY:-}"
     depends_on:
       migrate: { condition: service_completed_successfully }
+
+  # WhatsApp por QR Code: o WAHA (github.com/devlikeapro/waha, Apache-2.0) mantém a sessão do
+  # número conectado em Configurações. Peça de terceiros: referenciada, nunca republicada, com
+  # versão exata e resumo. A etiqueta `noweb-*` é a imagem sem navegador, e só existe para amd64;
+  # em ARM o instalador grava WAHA_IMAGE com a etiqueta `noweb-arm-*` da mesma versão.
+  #
+  # Só na rede interna, sem porta publicada: quem fala com ele são painel, voz e rotinas. O painel
+  # consulta o estado; nesta versão o WAHA não chama ninguém (nenhum webhook configurado).
+  #
+  # Fica num perfil: NÃO sobe nem é baixado por padrão. Medido em 11/11/2026 numa VPS de 8 GB, com
+  # esta imagem e sem sessão nenhuma: 3,19 GB em disco e 363 MiB de memória parado (431 MiB logo
+  # ao subir), contra cerca de 320 MiB do DeskVoice inteiro. Subir sempre dobraria a memória de
+  # quem nunca vai usar WhatsApp. Quem liga o perfil é o agente do kit (install/agent.sh), quando
+  # um dono ou administrador pede pela tela; a marca fica em deploy/.env (DESKVOICE_WHATSAPP=on).
+  waha:
+    profiles: ["whatsapp"]
+    image: ${WAHA_IMAGE:-devlikeapro/waha:noweb-2026.10.1@sha256:0d64cce14a922f61bb9a620474086d1f5695f2522e7e1088704e6eca3a085d0c}
+    restart: unless-stopped
+    # Teto, e não reserva: 1280m é o que o DeskcommCRM usa, onde o pico medido foi de 893 MiB com
+    # uma sessão em uso. Aqui, parado, usa 363 MiB (medido); com um número conectado ainda NÃO foi
+    # medido. Sem teto, um serviço que cresce leva a máquina inteira; com ele, cai só quem estourou
+    # e o `restart` o traz de volta.
+    mem_limit: 1280m
+    environment:
+      # O contêiner só conhece o hash da chave: com o prefixo `sha512:` o WAHA faz o hash do
+      # `X-Api-Key` recebido e compara. O texto puro fica com quem chama. Sem chave (instalação que
+      # ainda não passou pelo instalador desta versão) o valor é `sha512:` e nenhuma chave confere.
+      WAHA_API_KEY: "sha512:${WAHA_API_KEY_SHA512:-}"
+      # O nome é WHATSAPP_DEFAULT_ENGINE. Com o nome errado o WAHA cai no motor com navegador
+      # (WEBJS), que esta imagem nem tem. NOWEB fala direto com o WhatsApp, sem Chromium.
+      WHATSAPP_DEFAULT_ENGINE: NOWEB
+      # Nem painel nem documentação da API do WAHA: nada dele é tela neste produto.
+      WAHA_DASHBOARD_ENABLED: "false"
+      WHATSAPP_SWAGGER_ENABLED: "false"
+      # Depois de reiniciar, o WAHA retoma as sessões que estavam rodando, sem pedir QR Code de
+      # novo. É o padrão dele; fica escrito para não depender disso. (A outra variável,
+      # WHATSAPP_RESTART_ALL_SESSIONS, iniciaria também a sessão que alguém desconectou de propósito.)
+      WAHA_WORKER_RESTART_SESSIONS: "true"
+      # O QR Code não vai para o log do contêiner: quem lê o log não pareia o número.
+      WAHA_PRINT_QR: "false"
+      # Padrão das sessões: não processar nem guardar estados, grupos, canais e listas de difusão.
+      # O painel também pede isso ao criar a sessão.
+      WAHA_SESSION_CONFIG_IGNORE_STATUS: "true"
+      WAHA_SESSION_CONFIG_IGNORE_GROUPS: "true"
+      WAHA_SESSION_CONFIG_IGNORE_CHANNELS: "true"
+      WAHA_SESSION_CONFIG_IGNORE_BROADCAST: "true"
+    volumes:
+      # O pareamento do número. Perder este volume obriga a ler o QR Code de novo.
+      - waha-sessions:/app/.sessions
+    healthcheck:
+      # `/ping` responde 200 sem chave (medido). A imagem traz o Node.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/ping').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [internal]
+    logging: *logging
 
   # Asterisk é peça de terceiros: referenciada, nunca republicada. Fixada por digest
   # porque neste registro nem as tags de versão são imutáveis (medido no DeskcommCRM).
@@ -153,6 +221,7 @@ networks:
 
 volumes:
   postgres-data:
+  waha-sessions:
   asterisk-generated:
   caddy-data:
   caddy-config:

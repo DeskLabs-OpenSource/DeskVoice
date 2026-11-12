@@ -142,6 +142,7 @@ Estados: `ok`, `aviso` (falta configurar; não é defeito) e `falha` (quebrado).
 | Worker de voz, rotinas | Contêiner parado: log do processo. Quase sempre é o banco fora |
 | Linha (tronco) | `aviso` = ainda não cadastrou a linha na tela. `falha` = cadastrada e não registra: usuário, senha, modo (registro ou IP), ou a operadora não liberou o IP |
 | Motor de voz | `aviso` = falta a chave na tela. `falha` = chave recusada pelo provedor |
+| WhatsApp | "Não instalado" é o normal e é `ok`: o serviço só existe em quem o instalou pela tela (Configurações → WhatsApp). `falha` = foi instalado e o contêiner `waha` parou ou não responde: `docker compose -f deploy/docker-compose.yml --profile whatsapp logs --tail 50 waha`. Sem a chave dele, rode `bash install/update.sh`. A linha não diz se há número conectado: isso é a tela |
 | Portas, disco | O detalhe diz qual porta ou quanto espaço |
 
 `aviso` em linha e em motor logo após instalar é o esperado: os dois se configuram **no painel**.

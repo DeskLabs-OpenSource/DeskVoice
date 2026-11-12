@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# df de mentira: com $FAKE_DIR/df_free_mb, responde esse tanto de MB livres (no formato de `df -Pm`),
+# para os testes do espaço em disco não dependerem da máquina. Sem o arquivo, vai para o df de verdade.
+if [ -f "${FAKE_DIR:-/nonexistent}/df_free_mb" ]; then
+  printf 'Filesystem 1048576-blocks Used Available Capacity Mounted on\n/dev/fake 100000 1 %s 1%% /\n' "$(cat "$FAKE_DIR/df_free_mb")"
+  exit 0
+fi
+for real in /bin/df /usr/bin/df; do if [ -x "$real" ]; then exec "$real" "$@"; fi; done
+exit 1

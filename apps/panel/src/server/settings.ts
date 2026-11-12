@@ -21,6 +21,8 @@ export interface Setting {
   /** Valida a entrada (lança `ZodError`) e devolve o que gravar. */
   store(input: unknown, key: Buffer, previous: unknown): unknown;
   view(stored: unknown): unknown;
+  /** Recusa (lançando `ApiError`) trocar ou apagar o valor gravado por esta rota. */
+  guard?(previous: unknown): void;
 }
 
 const setting = <T>(definition: SettingDefinition<T>): Setting => ({
@@ -45,7 +47,15 @@ const storedHooks = z.array(z.object({ name: z.string(), url: z.string(), token:
 // Token em branco numa alteração mantém o que já estava gravado: a tela nunca recebe o valor
 // para devolver, então "não mexi" precisa ser representável. Mas só para o MESMO destino: o token
 // foi dado a um endereço, e mantê-lo ao trocar a URL o entregaria a quem responde no endereço novo.
-const connector = setting<{ type: "deskcomm" | "webhook"; url: string; token?: string }>({
+// O tipo `waha` (número conectado por QR Code) não se grava nem se apaga por aqui: ele entra ao
+// conectar e sai ao desconectar, em Configurações > WhatsApp. Trocar o conector por baixo deixaria
+// um número pareado e sem uso, e a tela dizendo "conectado" enquanto o envio sai por outro lugar.
+const isWaha = (stored: unknown): boolean => z.object({ type: z.literal("waha") }).safeParse(stored).success;
+const connector: Setting = {
+  guard(previous) {
+    if (isWaha(previous)) throw new ApiError(409, "whatsapp_connected", "A WhatsApp number is connected by QR code: disconnect it before saving another connector.");
+  },
+  ...setting<{ type: "deskcomm" | "webhook"; url: string; token?: string }>({
   schema: z.object({ type: z.enum(["deskcomm", "webhook"]), url: httpUrl, token: z.string().trim().min(1).max(500).optional() }),
   secret: true,
   store(value, key, previous) {
@@ -56,10 +66,12 @@ const connector = setting<{ type: "deskcomm" | "webhook"; url: string; token?: s
     return { type: value.type, url: value.url, token };
   },
   view(stored) {
+    if (isWaha(stored)) return { type: "waha" };
     const parsed = z.object({ type: z.string(), url: z.string() }).safeParse(stored);
     return parsed.success ? { type: parsed.data.type, url: parsed.data.url, token: CONFIGURED } : null;
   },
-});
+  }),
+};
 
 const webhooks = setting<Array<{ name: string; url: string; token?: string }>>({
   schema: z

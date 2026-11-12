@@ -1,6 +1,7 @@
 import { toE164 } from "@deskvoice/core";
 import { z } from "zod";
 import { askApproval } from "../approval";
+import { WahaError } from "../connectors/waha";
 import { loadWhatsAppConnector, sendWhatsApp } from "../connectors/whatsapp";
 import { defineTool } from "../define-tool";
 import { configSecretKey, type ToolDeps } from "../deps";
@@ -145,9 +146,19 @@ export function createSendWhatsApp(deps: ToolDeps = {}) {
           }
         }
 
-        await sendWhatsApp(connector, { to, text: input.text, callId: ctx.callId }, deps);
+        let addressVerified: boolean;
+        try {
+          ({ addressVerified } = await sendWhatsApp(connector, { to, text: input.text, callId: ctx.callId }, deps));
+        } catch (error) {
+          // Número sem WhatsApp tem uma fala própria para quem está na linha. As outras falhas (sessão
+          // desconectada, WAHA fora do ar) seguem para o `runTool`, que grava o motivo no evento.
+          if (!(error instanceof WahaError && error.code === "number_not_on_whatsapp")) throw error;
+          return refused(`O número ${to} não tem WhatsApp, e nada foi enviado. Diga isso à pessoa, passe a informação por voz e, se ela tiver outro número, anote para a equipe (create_task).`);
+        }
         sends.sent += 1;
-        return { ok: true, message: "Mensagem enviada por WhatsApp. Diga à pessoa que a mensagem foi enviada e peça que confira.", data: { to } };
+        // Fica na linha do tempo, para quem opera: a mensagem saiu sem o WhatsApp confirmar o endereço.
+        const unverified = addressVerified ? "" : " (O serviço de WhatsApp não confirmou o endereço deste número antes do envio; a mensagem foi para o número como ele é.)";
+        return { ok: true, message: `Mensagem enviada por WhatsApp. Diga à pessoa que a mensagem foi enviada e peça que confira.${unverified}`, data: { to, addressVerified } };
       }),
   });
 }
