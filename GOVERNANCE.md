@@ -126,6 +126,28 @@ Regras do pedido:
 - Quem escreveu o PR não é quem o aprova. Vale para pessoa e para agente.
 - Versão maior só sai por decisão explícita do dono.
 
+### Como está hoje, com um mantenedor só
+
+A regra acima é a meta. Até que haja um segundo mantenedor, ou uma conta de revisão que aprove
+pelo GitHub, o caminho real é este:
+
+- **O merge não passa pela fila.** A conta do mantenedor faz o merge por cima da regra do ramo
+  (`--admin`), depois que a verificação `ready` do CI fecha verde no head do PR.
+- **Quem revisa é uma sessão de agente distinta da que escreveu**, que não tem o contexto de
+  trabalho de quem escreveu: recebe o pedido com o que o autor diz do PR, confere contra o
+  código e dá um veredito. Desde 12/11/2026, esse parecer fica num comentário do
+  próprio PR, com o cabeçalho "Parecer de revisão (sessão distinta da que escreveu)", o head
+  lido e o veredito. Como a conta é a mesma que abre os PRs, o GitHub não conta o comentário
+  como aprovação.
+- **Antes de 12/11/2026, a revisão por sessão distinta existiu, mas o rastro ficou fora do PR**,
+  na conversa entre as sessões. Os pareceres desse período não foram republicados: comentários
+  datados depois do merge não provariam revisão antes dele.
+- **Achado de segurança ainda aberto não vai no comentário.** No PR ficam o resumo e o
+  veredito; o detalhe segue por canal privado até a correção.
+- **Para a regra virar a meta,** falta uma de duas coisas: um segundo mantenedor, ou a conta de
+  robô do projeto aprovar pelo GitHub. Com isso, saem o merge por cima da regra e a passagem do
+  administrador na regra do ramo. As duas são decisão do dono.
+
 ## Avisos de segurança
 
 - Vulnerabilidade se relata em privado, como descrito em [`SECURITY.md`](SECURITY.md).
