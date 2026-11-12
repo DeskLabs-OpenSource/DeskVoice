@@ -3,6 +3,9 @@
 //   pediu para ser ligado. Teto, janela de horário e lista de não ligar moram todos em
 //   `checkOutboundAllowed`; um caminho novo que chame `.originate(` direto passa pelo review sem
 //   ninguém notar e a política deixa de valer só naquele caminho.
+// teto: a cerca prova que o arquivo que origina também cita `checkOutboundAllowed`, e não a ordem.
+//   Um `.originate(` antes da checagem, ou por outro caminho no mesmo arquivo, passa; isso fica
+//   com a revisão.
 // revisar em: 2027-05-12
 import { describe, it, expect } from "vitest";
 import { REPO_ROOT, expectClean, fixture, isSource, isTest, listFiles, read } from "./_lib";

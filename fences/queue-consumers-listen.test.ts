@@ -2,6 +2,9 @@
 // motivo: a regra 6 do AGENTS.md diz que quem consome tarefa acorda por `listenTasks` e reivindica
 //   com `claimTask`. Um consumidor que só reivindica vira laço de espera: a fila é consultada sem
 //   parar, e a tarefa nova espera até o próximo ciclo. O código funciona e ninguém percebe.
+// teto: a cerca prova que quem reivindica também importa `listenTasks`, e não a ausência de laço.
+//   Um arquivo que importe os dois e ainda chame `claimTask` num `setInterval` passa; isso fica com
+//   a revisão.
 // revisar em: 2027-05-12
 import { describe, it, expect } from "vitest";
 import { REPO_ROOT, expectClean, fixture, isSource, isTest, listFiles, read } from "./_lib";

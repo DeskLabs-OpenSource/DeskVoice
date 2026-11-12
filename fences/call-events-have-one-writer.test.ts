@@ -2,6 +2,9 @@
 // motivo: a regra 8 do AGENTS.md diz que o que acontece numa chamada vira `call_events` com um tipo
 //   do vocabulário. O tipo só é validado dentro de `recordEvent`; um insert direto na tabela grava
 //   qualquer texto e a linha do tempo da chamada passa a ter evento que nenhuma tela conhece.
+// teto: só `insert into call_events` com o nome sem esquema, em código de `apps/` e `packages/`.
+//   `update`/`delete`, `public.call_events` e SQL em `db/queries/` ou `install/` passam; isso fica
+//   com a revisão.
 // revisar em: 2027-05-12
 import { describe, it, expect } from "vitest";
 import { REPO_ROOT, exists, expectClean, fixture, isSource, isTest, listFiles, read } from "./_lib";
