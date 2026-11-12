@@ -60,6 +60,13 @@ O DeskVoice é construído sobre [Node.js](https://nodejs.org),
 versões, é o que está declarado nos arquivos `package.json` do repositório, e cada biblioteca
 segue sob a licença dos seus autores.
 
+## Fontes do painel
+
+O painel usa [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/), do Braille
+Institute, e [IBM Plex Mono](https://github.com/IBM/plex), da IBM, as duas sob a SIL Open Font
+License 1.1. Os arquivos ficam em `apps/panel/src/app/fonts/`, com a licença de cada uma ao lado.
+São o subconjunto latino publicado pelo [Fontsource](https://fontsource.org) 5.3.0, sem alteração.
+
 ## Provedores de IA
 
 Os motores de voz direta usam as interfaces Gemini Live, do Google, e Realtime, da OpenAI.

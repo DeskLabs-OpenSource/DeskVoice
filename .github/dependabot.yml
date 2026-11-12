@@ -10,6 +10,11 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    # Versão maior é decisão, com PR próprio que diz o que muda (CONTRIBUTING, "Versão maior de
+    # dependência"): pode subir o piso do Node (engines >=22) sem ninguém perceber.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # As actions são fixadas por SHA com a versão em comentário; o Dependabot atualiza os dois.
   - package-ecosystem: github-actions
@@ -34,7 +39,7 @@ updates:
     # PR próprio que mexe nos dois juntos, e não uma atualização de base.
     ignore:
       - dependency-name: node
-        update-types: [version-update:semver-major]
+        update-types: ["version-update:semver-major"]
 
   # As imagens de terceiros do deploy/docker-compose.yml, fixadas por versão e resumo. Postgres e
   # Caddy estão escritos por extenso; Asterisk e WAHA vêm dentro de ${VAR:-imagem@sha256:…}, e não
@@ -48,3 +53,9 @@ updates:
       interval: weekly
     commit-message:
       prefix: chore(deps)
+    # Versão maior do Postgres muda o formato dos arquivos do banco: a instalação existente não sobe
+    # com a imagem nova sem uma conversão (pg_upgrade, ou dump e restauração) feita pelo kit. Do
+    # Caddy e do WAHA, também é decisão. Ver CONTRIBUTING, "Versão maior de dependência".
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
