@@ -60,7 +60,10 @@ describe("queue", () => {
   it("defaults run_at to the moment of enqueueing", async () => {
     const id = await withOrg(app, org, (q) => enqueueTask(q, { kind: "now", payload: {} }));
     const row = await taskRow(id);
-    expect(Math.abs((row?.run_at as Date).getTime() - Date.now())).toBeLessThan(60_000);
+    // O padrão vem do relógio do BANCO (o insert usa `now()`), então a conferência é contra ele:
+    // comparar com o relógio desta máquina amarraria o teste ao dia em que o CI roda.
+    const { rows } = await owner.pool.query<{ now: Date }>("select now() as now");
+    expect(Math.abs((row?.run_at as Date).getTime() - (rows[0]?.now.getTime() ?? 0))).toBeLessThan(60_000);
     await owner.pool.query("delete from tasks where id = $1", [id]);
   });
 

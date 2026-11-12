@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { findInviteByToken, hashToken, withOrg } from "@deskvoice/core";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, openSession, startPanel } from "../../../../test/kit";
@@ -31,8 +32,9 @@ const signIn = (email: string, password: string) => call(login, { method: "POST"
 const refusal = (result: { status: number; code: string | undefined }) => [result.status, result.code];
 const stored = (org: string, sql: string, params: unknown[]) => withOrg(panel.app, org, (q) => q.one(sql, params));
 
-let counter = 0;
-async function newInvite(cookie: string, role = "operator", email = `invited-${++counter}-${Date.now()}@example.test`) {
+// E-mail único por execução: `users.email` é único na instalação inteira e o banco pode ficar de pé
+// entre execuções (`pnpm db:test:up`), então contador — que recomeça em 1 a cada processo — colide.
+async function newInvite(cookie: string, role = "operator", email = `invited-${randomUUID()}@example.test`) {
   const result = await call(invite, { method: "POST", cookie, body: { email, name: "Pessoa Convidada", role } });
   const data = result.data as { id: string; link: string } | undefined;
   return { result, email, id: data?.id ?? "", link: data?.link ?? "", token: data?.link.split("/invite/")[1] ?? "" };
@@ -224,7 +226,7 @@ describe("invites", () => {
 
   it("inviting the same e-mail again kills the previous link, and an e-mail already on the team is refused", async () => {
     const { owner } = await newOrg("team reinvite");
-    const first = await newInvite(owner.cookie, "operator", "again@example.test".replace("again", `again-${Date.now()}`));
+    const first = await newInvite(owner.cookie, "operator", `again-${randomUUID()}@example.test`);
     const second = await newInvite(owner.cookie, "admin", first.email.toUpperCase());
     expect(second.result.status).toBe(200);
     expect((await call(readInvite, { params: { token: first.token } })).status).toBe(404);
@@ -239,7 +241,7 @@ describe("invites", () => {
 
   it("builds the link on the public address, or on the address the person is using when it is another one", async () => {
     const { owner } = await newOrg("team link host");
-    const direct = await call(invite, { method: "POST", cookie: owner.cookie, origin: "http://203.0.113.10:3000", body: { email: `host-${Date.now()}@example.test`, name: "X", role: "operator" } });
+    const direct = await call(invite, { method: "POST", cookie: owner.cookie, origin: "http://203.0.113.10:3000", body: { email: `host-${randomUUID()}@example.test`, name: "X", role: "operator" } });
     expect((direct.data as { link: string }).link).toMatch(/^http:\/\/203\.0\.113\.10:3000\/invite\//);
   });
 
