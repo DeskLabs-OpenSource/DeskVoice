@@ -71,7 +71,7 @@ agent. No feature requires SSH to be turned on.
 
 | What you need | Notes |
 |---|---|
-| A VPS running Ubuntu 22.04 or newer | The [HostGator VPS](https://www.hostgator.com.br/52708-141-3-52.html), the project's partner, is the recommended one. Any VPS with Docker works, with the same command. On memory, only what was measured: the install was proven on a VPS with 8 GB and 4 vCPU, and DeskVoice at rest uses about 400 MB. The smallest size the install fits in has not been measured yet. The published images are for x86_64 (amd64) processors; on ARM the install builds on the machine itself, with `--build` ([why](docs/decisions/0013-imagens-so-amd64.md)) |
+| A VPS running Ubuntu 22.04 or newer | The [HostGator VPS](https://www.hostgator.com.br/52708-141-3-52.html), the project's partner, is the recommended one. Any VPS with Docker works, with the same command. On memory, only what was measured: the install was proven on a VPS with 8 GB and 4 vCPU, and DeskVoice at rest uses about 380 MiB of memory and takes about 2.7 GB of disk (measured on 0.3.0, without WhatsApp). The smallest size the install fits in has not been measured yet. The published images are for x86_64 (amd64) processors; on ARM the install builds on the machine itself, with `--build` ([why](docs/decisions/0013-imagens-so-amd64.md)) |
 | A domain pointing to the VPS | Optional for testing. Without a domain there is no HTTPS: the panel stays inside the VPS and you reach it through an SSH tunnel (the installer shows the command) |
 | A SIP trunk with a number | From the telephony carrier of your choice. Authentication by registration or by IP |
 | A voice AI key | Gemini (Google) or OpenAI. You pay the provider directly |
