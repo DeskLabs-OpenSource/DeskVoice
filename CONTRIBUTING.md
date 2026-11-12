@@ -107,8 +107,10 @@ Três tarefas são dos mantenedores, e não suas. Não segure o PR por causa del
 | Conflito com a `main` | A `main` anda rápido. Trazer o seu ramo até ela é trabalho de quem faz o merge |
 | Carimbo de tempo da migration | Se outra migration entrou antes da sua, o carimbo é ajustado na fila. Não renomeie por conta própria depois de aberto o PR |
 
-Quando um mantenedor precisa empurrar um ajuste no seu ramo, ele avisa no PR antes, e o faz como
-commit novo. Os seus commits ficam como estão.
+Se a revisão acha algo a ajustar, quem ajusta somos nós. Você não recebe pedido de correção.
+Abrimos um PR nosso com os seus commits como estão, você como autor de cada um, e o ajuste num
+commit à parte, por cima. O seu PR recebe a etiqueta "corrigindo" com o link para o nosso e fecha
+quando ele entra, dizendo o que entrou e com que crédito.
 
 Não fala inglês ou espanhol e precisou criar uma frase de tela? Mande em português e diga no PR.
 A tradução é trabalho de minutos para quem revisa.
@@ -127,8 +129,8 @@ Passou do prazo? Comente no PR ou na issue. Cobrar é legítimo, e o silêncio �
 - **A autoria é preservada.** O que você escreveu entra com você como autor. Quando um
   mantenedor termina ou ajusta o seu trabalho, você continua como autor ou coautor do commit.
 - **O seu nome vai nas notas da versão** em que a mudança sai.
-- **PR não se reescreve por fora.** Um mantenedor não fecha o seu PR para reabrir o mesmo
-  trabalho no nome dele.
+- **O seu trabalho não muda de nome.** Quando o ajuste vem num PR nosso, ele leva os seus commits
+  com você como autor, e o seu PR só fecha depois que o nosso entra, apontando para ele.
 - **Ideia também tem autor.** Se o seu relato ou a sua sugestão originou a mudança, a nota diz.
 
 Se o crédito sair errado, avise. Corrigir tem prioridade.

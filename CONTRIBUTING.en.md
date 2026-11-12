@@ -109,8 +109,10 @@ Three tasks belong to the maintainers, not to you. Do not hold your PR because o
 | Conflicts with `main` | `main` moves fast. Bringing your branch up to it is the job of whoever merges |
 | The migration timestamp | If another migration landed before yours, the timestamp is adjusted in the queue. Do not rename it yourself once the PR is open |
 
-When a maintainer needs to push a fix to your branch, they say so in the PR first, and do it as
-a new commit. Your commits stay as they are.
+If review finds something to adjust, we adjust it. You do not get asked for fixes. We open a PR of
+ours with your commits as they are, you as the author of each one, and the adjustment in a
+separate commit on top. Your PR gets the "corrigindo" label with a link to ours, and closes when
+ours lands, saying what went in and with what credit.
 
 Added a screen sentence and do not write Portuguese or Spanish? Send what you have and say so in
 the PR. Translation is a few minutes of work for the reviewer.
@@ -130,8 +132,8 @@ failure.
 - **Authorship is preserved.** What you wrote goes in with you as the author. When a maintainer
   finishes or adjusts your work, you remain author or co-author of the commit.
 - **Your name goes in the release notes** of the version that ships the change.
-- **A PR is not rewritten from outside.** A maintainer does not close your PR to reopen the
-  same work under their own name.
+- **Your work keeps your name.** When the adjustment comes in a PR of ours, it carries your
+  commits with you as the author, and your PR only closes after ours lands, pointing to it.
 - **Ideas have authors too.** If your report or suggestion led to the change, the note says so.
 
 If credit comes out wrong, tell us. Fixing it has priority.
