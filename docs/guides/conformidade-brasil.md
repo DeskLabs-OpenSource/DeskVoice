@@ -100,6 +100,10 @@ confundem.
 | Áudio e transcrição da chamada, motor `gemini-live` | Google — o provedor **não publica** a lista de países de processamento da Gemini Developer API | pedido oficial em aberto no fórum do Google (02/11/2026); quem precisa de região usa Vertex AI, com região explícita |
 | Áudio e transcrição da chamada, motor `openai-realtime` | OpenAI — depende do **projeto/região** escolhidos na conta (há data residency nos Estados Unidos, na Europa, no Reino Unido, no Japão, entre outros) | documentação da OpenAI sobre os seus dados, consultada em 12/11/2026 |
 | Chamada com o motor `simulated` | **Nada sai**: roda neste servidor | código do motor |
+| Áudio da ligação telefônica | a operadora do tronco SIP que você contratou, como em qualquer ligação | a configuração do tronco |
+| Mensagem por WhatsApp pelo número conectado por QR Code (WAHA) | os servidores do WhatsApp, da Meta; o serviço roda na sua VPS, mas a mensagem sai por eles | a tela WhatsApp, em Configurações |
+| Mensagem pelo conector de endereço (DeskcommCRM ou webhook do operador) | o endereço que você cadastrou, e de lá para onde aquele sistema mandar | a tela WhatsApp, em Configurações |
+| O que o agente manda a um webhook permitido (`call_webhook`) e os avisos por webhook | os endereços da lista de webhooks permitidos | "Webhooks permitidos", em Configurações |
 | Banco e transcrições | a sua VPS, no país do contrato dela | a instalação |
 
 Três cuidados, e o primeiro é o que mais se erra:
