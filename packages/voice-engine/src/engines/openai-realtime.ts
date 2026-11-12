@@ -7,19 +7,31 @@
  *   - https://developers.openai.com/api/docs/guides/realtime-conversations  (áudio, chamada de função, interrupção)
  *   - https://developers.openai.com/api/docs/pricing  (preços)
  *
+ * Teste da chave (`checkKey`), consultado em 2026-11-12:
+ *   - https://developers.openai.com/api/reference/resources/models/methods/retrieve  (`GET /v1/models/{model}`,
+ *     `Authorization: Bearer`; devolve `id`, `object: "model"`, `created`, `owned_by`. Só lê, não gera nada)
+ *   - https://developers.openai.com/api/docs/guides/error-codes  (401 chave inválida ou revogada, 403 país não
+ *     atendido, 429 que é limite de pedidos OU falta de crédito/teto de gasto, pelo `error.code`, 5xx do lado deles).
+ *     O 403 de país não atendido não é defeito da chave: trocar a chave não resolve, então tem resultado próprio.
+ *   A página do modelo não cita preço; nenhuma página de preço lista essa chamada.
+ *
  * A API aceita G.711 μ-law (`audio/pcmu`, 8 kHz) na entrada e na saída: a ligação não é reamostrada.
  *
  * Não confirmado contra o servidor real (nenhuma chamada com chave foi feita):
  *   - a taxa do `audio/pcmu` não aparece escrita na referência; G.711 é 8 kHz por definição;
- *   - `gpt-4o-mini-transcribe` como modelo de transcrição da fala de quem ligou (está na lista aceita).
+ *   - `gpt-4o-mini-transcribe` como modelo de transcrição da fala de quem ligou (está na lista aceita);
+ *   - que a leitura do modelo responda 404 a uma chave sem acesso a ele (a página de erros não lista 404);
+ *   - se a leitura do modelo chega a conferir crédito: a resposta "aceita" não promete crédito.
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
-import type { VoiceEngine, VoiceSession } from "../types";
+import { checkKeyOverHttp } from "../key-check";
+import type { KeyCheckResult, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
+const DEFAULT_API_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-realtime-2.1";
 const DEFAULT_VOICE = "marin";
 const AUDIO_FORMAT = { type: "audio/pcmu" };
@@ -45,6 +57,28 @@ const serverEvent = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("error"), error: z.object({ message: z.string() }) }),
 ]);
+
+const modelResource = z.object({ id: z.string(), object: z.literal("model") });
+// 429 nem sempre é "espere": estes códigos (e o tipo `insufficient_quota`) dizem que falta crédito ou
+// que um teto de gasto foi atingido, e repetir não resolve.
+const BILLING_CODES = new Set([
+  "credit_balance_exhausted",
+  "organization_spend_limit_exceeded",
+  "project_spend_limit_exceeded",
+  "organization_usage_limit_exceeded",
+  "insufficient_quota",
+]);
+const providerError = z.object({ error: z.object({ code: z.string().nullish(), type: z.string().nullish() }) });
+const isBillingError = (body: unknown): boolean => {
+  const error = providerError.safeParse(body).data?.error;
+  return BILLING_CODES.has(error?.code ?? "") || BILLING_CODES.has(error?.type ?? "");
+};
+const isRegionError = (body: unknown): boolean => providerError.safeParse(body).data?.error.code === "unsupported_country_region_territory";
+const classifyError = (status: number, body: unknown): KeyCheckResult | undefined => {
+  if (status === 429 && isBillingError(body)) return "no_credit";
+  if (status === 403 && isRegionError(body)) return "region_unavailable";
+  return undefined;
+};
 
 function parseArguments(json: string): unknown {
   try {
@@ -192,6 +226,20 @@ const engine: VoiceEngine = {
 
     if (config.greeting) session.say(config.greeting);
     return session;
+  },
+
+  checkKey(apiKey, options = {}) {
+    const model = options.model ?? DEFAULT_MODEL;
+    return checkKeyOverHttp(
+      {
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(model)}`,
+        headers: { Authorization: `Bearer ${apiKey}` },
+        model,
+        accepted: modelResource,
+        classify: classifyError,
+      },
+      options,
+    );
   },
 };
 

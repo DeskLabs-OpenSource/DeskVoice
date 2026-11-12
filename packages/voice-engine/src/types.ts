@@ -73,6 +73,50 @@ export interface ConnectOptions {
  */
 export class EngineTimeoutError extends Error {}
 
+/**
+ * O resultado do teste de uma chave, num vocabulário fechado: a tela e a saúde traduzem o código,
+ * e nunca repassam o texto do provedor.
+ */
+export const KEY_CHECK_RESULTS = [
+  /** A chave foi aceita e dá acesso ao modelo que o motor usa. */
+  "accepted",
+  /** O provedor recusou a chave (inválida, revogada ou sem permissão). */
+  "rejected",
+  /** A chave foi aceita, mas o modelo que o motor usa não existe para ela. */
+  "model_unavailable",
+  /** O provedor disse que falta crédito ou que o limite de gasto da conta foi atingido. */
+  "no_credit",
+  /** O provedor não atende o país, a região ou o território de onde o servidor fala com ele. */
+  "region_unavailable",
+  /** O provedor pediu para esperar (limite de pedidos). */
+  "rate_limited",
+  /** Sem resposta no prazo, sem rede, ou erro do lado do provedor (5xx). */
+  "unreachable",
+  /** O provedor respondeu algo que não é o que a documentação descreve. */
+  "unexpected_response",
+  /** O motor não usa chave. */
+  "not_needed",
+] as const;
+export type KeyCheckResult = (typeof KEY_CHECK_RESULTS)[number];
+
+export interface KeyCheck {
+  result: KeyCheckResult;
+  /** O modelo conferido (o mesmo que `connect` abre). Ausente no motor sem chave. */
+  model?: string;
+}
+
+export interface KeyCheckOptions {
+  /** Sobrepõe o modelo padrão do motor. */
+  model?: string;
+  /** Sobrepõe a URL da API HTTP do provedor (testes apontam para um servidor falso). */
+  baseUrl?: string;
+  fetch?: typeof fetch;
+  /** Prazo da resposta. Padrão: 10 s. */
+  timeoutMs?: number;
+  /** Agendador do prazo (`setTimeout` por padrão). Devolve como cancelar. */
+  schedule?: (fn: () => void, delayMs: number) => () => void;
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;
@@ -80,4 +124,9 @@ export interface VoiceEngine {
   keyless?: boolean;
   pricing: EnginePricing;
   connect(config: VoiceSessionConfig, apiKey: string, options?: ConnectOptions): Promise<VoiceSession>;
+  /**
+   * Confere a chave sem abrir sessão de voz e sem gastar: a chamada mais barata do provedor que
+   * prova que a chave vale e alcança o modelo de `connect`. Nunca lança, nunca registra a chave.
+   */
+  checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
 }

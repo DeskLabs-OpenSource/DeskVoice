@@ -1,5 +1,6 @@
 import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
+import type { VoiceEngine } from "@deskvoice/voice-engine";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -23,6 +24,8 @@ export interface Setting {
   view(stored: unknown): unknown;
   /** Recusa (lançando `ApiError`) trocar ou apagar o valor gravado por esta rota. */
   guard?(previous: unknown): void;
+  /** A chave de um motor: ao gravar, ela é testada, e o teste da chave anterior deixa de valer. */
+  engine?: VoiceEngine;
 }
 
 const setting = <T>(definition: SettingDefinition<T>): Setting => ({
@@ -113,6 +116,6 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },
   };
   // Uma chave por motor que pede chave: motor novo na pasta ganha a configuração sem editar aqui.
-  for (const engine of engines) if (!engine.keyless) definitions[engineKeySetting(engine.id)] = secretText;
+  for (const engine of engines) if (!engine.keyless) definitions[engineKeySetting(engine.id)] = { ...secretText, engine };
   return Object.hasOwn(definitions, key) ? definitions[key] : undefined;
 }
