@@ -1,0 +1,9 @@
+// Fixture da cerca queue-consumers-listen: reivindica tarefa sem acordar por `listenTasks` — o laço
+// de espera que a regra 6 proíbe. Copiado sem o sufixo `.fixture`, o `check` o enxerga como produto.
+import { claimTask } from "@deskvoice/core";
+
+export async function laco(db: never): Promise<void> {
+  for (let task = await claimTask(db, new Date()); task !== null; task = await claimTask(db, new Date())) {
+    await Promise.resolve(task);
+  }
+}
