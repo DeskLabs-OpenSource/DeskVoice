@@ -84,6 +84,21 @@ Registrado a partir do que informou quem conduziu as instalações e a versão. 
 
 Defeito achado nessa instalação: a máquina tinha as portas 80 e 443 livres e não tinha domínio, e a opção de painel só local (`DESKVOICE_PANEL_LOCAL_ONLY`) foi **ignorada em silêncio**. O valor passado, `1`, nem foi validado nesse modo. O Caddy publicou `0.0.0.0:80` e o instalador anunciou `http://<IP>`. A opção só existia para o caso de as portas 80 e 443 serem de outro proxy. A correção (a opção vale em todo modo, valor inválido e opção sem efeito param com erro, e sem domínio o padrão passa a ser só local) está no ramo `fix/instalador-confere-o-que-anuncia`, provada só com o Docker de mentira dos testes do kit: ver [`nao-exercitado.md`](nao-exercitado.md).
 
+### Memória e disco na 0.3.0 (vps-teste, 2026-11-12)
+
+Medido por quem conduziu a atualização, com `docker stats --no-stream` e `docker system df -v`. A saída não ficou guardada no repositório.
+
+| Campo | Valor |
+|---|---|
+| Máquina | VPS de teste: x86_64, 8 GB. Na mesma máquina rodam outros sistemas, que não entraram na conta |
+| Momento | 11:49 UTC, 8 minutos depois de `update.sh --to 0.3.0` subir as peças. Sistema **parado**: sem chamada, sem linha e sem motor configurados |
+| Memória, sem o WhatsApp | Cerca de 380 MiB nos seis contêineres: voz 109, rotinas 99, banco 66, painel 58, Caddy 32, Asterisk 15 |
+| Memória do WhatsApp | Cerca de 323 MiB no serviço instalado, sem número conectado |
+| Disco, uma versão | Cerca de 2,7 GB em espaço único (sem contar duas vezes as camadas compartilhadas). São três imagens do DeskVoice (painel 95 MB, voz 943 MB, rotinas 942 MB, mais 239 MB de base comum), mais Postgres 411 MB, Asterisk 79 MB, Caddy e o banco (67 MB). O serviço do WhatsApp, quando instalado, ocupa mais 3,2 GB |
+| Acúmulo | Imagens de versões antigas ficam no disco: esta máquina guardava 0.1.0, 0.2.0 e uma construída localmente, cerca de 2 GB únicos cada. Voz e rotinas publicadas não dividem as camadas que vêm do mesmo estágio de construção, porque cada uma é construída num job do CI |
+
+Os cerca de 320 MiB de 11/11 foram medidos na 0.2.0, noutra máquina e com seis contêineres. A diferença para a medida de hoje não foi investigada.
+
 ### A versão 0.2.0
 
 | O que rodou | O que se observou |

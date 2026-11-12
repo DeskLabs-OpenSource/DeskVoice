@@ -22,7 +22,7 @@ Antes de qualquer pergunta técnica, pergunte: **"Você já tem um servidor (VPS
 
 1. O que é preciso: uma VPS com Ubuntu 22.04 ou mais novo (Debian 12 ou mais novo também serve)
    e acesso por SSH, com 10 GB de disco livre. Sobre memória, diga só o que foi medido: a
-   instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 400 MB.
+   instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 380 MiB de memória e ocupa cerca de 2,7 GB de disco (medidos na 0.3.0, sem o WhatsApp).
    O menor tamanho em que a instalação cabe ainda não foi medido; ela baixa as imagens prontas
    da versão publicada, sem construí-las no servidor.
 2. A recomendação do projeto é a VPS da HostGator, parceira de infraestrutura.
