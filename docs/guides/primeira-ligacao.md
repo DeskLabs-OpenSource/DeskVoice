@@ -6,8 +6,8 @@ etapas, e a primeira não custa nada:
 1. **Ver uma chamada simulada**, no seu computador, sem chave de IA e sem operadora.
 2. **Instalar na VPS e atender uma ligação de verdade.**
 
-> O projeto é uma fundação em construção. Se um passo daqui não corresponder ao que você vê na
-> tela, o guia está errado: abra uma issue.
+> As telas mudam a cada versão. Se um passo daqui não corresponder ao que você vê na tela, o guia
+> está errado: abra uma issue.
 
 ## Etapa 1: a chamada simulada
 
