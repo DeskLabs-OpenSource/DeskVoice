@@ -53,6 +53,7 @@ const whatsapp: WhatsAppDictionary = {
   since: "Conectado desde {when}.",
   sendTest: "Enviar mensaje de prueba",
   testHint: "El mensaje de prueba va a tu WhatsApp, el que está en Mi contacto, al comienzo de esta página.",
+  testHintConnector: "El mensaje de prueba va a tu WhatsApp, el que está en Mi contacto, por el conector configurado en esta instalación. Si el conector lo rechaza, esta página dice por qué.",
   testSent: "Mensaje de prueba enviado a {to}. Revisa tu celular.",
   disconnect: "Desconectar",
   disconnectConfirm: "¿Desconectar {phone}? Los avisos y los mensajes por WhatsApp dejan de salir hasta que se conecte un número de nuevo, y para volver habrá que leer el código QR otra vez.",

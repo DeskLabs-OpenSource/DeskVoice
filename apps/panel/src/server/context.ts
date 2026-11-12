@@ -21,6 +21,8 @@ export interface ServerDeps {
   secretKey: Buffer;
   publicUrl: string;
   fetch: typeof fetch;
+  /** Resolvedor de nomes do envio por conector. Em teste, todo nome resolve para um endereço público. */
+  lookup?: (host: string) => Promise<string[]>;
   voiceUrl: string;
   internalToken: string;
   trustedProxyHops: number;

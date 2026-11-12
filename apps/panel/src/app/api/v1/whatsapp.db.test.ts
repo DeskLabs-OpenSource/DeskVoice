@@ -252,6 +252,50 @@ describe("test message", () => {
     expect(refusal(await call(sendTest, { method: "POST", cookie: owner.cookie, body: {} }))).toEqual([409, "whatsapp_not_connected"]);
     expect(waha.sent).toEqual([]);
   });
+
+  it("goes through the operator connector, with the same signature as a notice", async () => {
+    const { org, owner } = await bareOrg("wa test connector");
+    const phone = "+5531999998888";
+    await setWhatsapp(org, owner.id, phone);
+    await call(writeSetting, { method: "PUT", cookie: owner.cookie, params: { key: "whatsapp.connector" }, body: { value: { type: "webhook", url: "https://wa.example.com/send", token: "hook-token" } } });
+
+    const sent: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = [];
+    const before = panel.deps.fetch;
+    // O `safeFetch` monta o envio com `Headers`: normalizar deixa os nomes em minúsculas, como no fio.
+    const headers = (init: RequestInit): Record<string, string> => Object.fromEntries(new Headers(init.headers).entries());
+    panel.deps.fetch = async (input, init = {}) => {
+      sent.push({ url: String(input), headers: headers(init), body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return new Response("{}", { status: 200 });
+    };
+    try {
+      expect((await call(sendTest, { method: "POST", cookie: owner.cookie, body: {} })).data).toEqual({ to: phone, addressVerified: true });
+    } finally {
+      panel.deps.fetch = before;
+    }
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.url).toBe("https://wa.example.com/send");
+    expect(sent[0]?.body).toMatchObject({ to: phone, callId: null });
+    expect(String(sent[0]?.body.text)).toContain("Mensagem de teste do DeskVoice");
+    expect(sent[0]?.headers.authorization).toBe("Bearer hook-token");
+    // Com conector de endereço, o número conectado por QR Code não é usado.
+    expect(waha.sent).toEqual([]);
+  });
+
+  it("says the connector refused, instead of a nameless server error", async () => {
+    const { org, owner } = await bareOrg("wa test connector refuses");
+    await setWhatsapp(org, owner.id, "+5531999998888");
+    await call(writeSetting, { method: "PUT", cookie: owner.cookie, params: { key: "whatsapp.connector" }, body: { value: { type: "deskcomm", url: "https://crm.example.test/send", token: "hook-token" } } });
+
+    const before = panel.deps.fetch;
+    panel.deps.fetch = async () => new Response("no", { status: 500 });
+    try {
+      expect(refusal(await call(sendTest, { method: "POST", cookie: owner.cookie, body: {} }))).toEqual([502, "whatsapp_connector_refused"]);
+    } finally {
+      panel.deps.fetch = before;
+    }
+    expect(waha.sent).toEqual([]);
+  });
 });
 
 describe("disconnecting and failing", () => {
