@@ -32,3 +32,20 @@ export function clientIp(forwardedFor: string | null, hops: number): string {
   const candidate = items[items.length - hops];
   return candidate !== undefined && isIP(candidate) !== 0 ? candidate : UNKNOWN_IP;
 }
+
+/**
+ * O endereço como o limite de tentativas o conta. IPv4 conta inteiro. IPv6 conta pelo prefixo /64:
+ * quem tem uma VPS costuma receber um /64 inteiro, e contar o endereço inteiro daria a essa pessoa
+ * 2^64 "endereços" de graça para fugir do limite. IPv4 escrito como IPv6 (`::ffff:a.b.c.d`) conta
+ * como o IPv4. Qualquer coisa que não seja endereço volta como veio (é o caso de `unknown`).
+ */
+export function addressBucket(ip: string): string {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
+  if (mapped?.[1] && isIP(mapped[1]) === 4) return mapped[1];
+  if (isIP(ip) !== 6) return ip;
+  const [head = "", tail = ""] = ip.toLowerCase().split("%")[0]!.split("::");
+  const left = head ? head.split(":") : [];
+  const right = ip.includes("::") ? (tail ? tail.split(":") : []) : [];
+  const groups = ip.includes("::") ? [...left, ...Array<string>(8 - left.length - right.length).fill("0"), ...right] : left;
+  return `${groups.slice(0, 4).map((group) => group.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
