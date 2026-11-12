@@ -12,7 +12,7 @@ import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus, useAction, useErrorText } from "../../../ui/errors";
 import { formatDateTime, formatPhone } from "../../../ui/format";
-import { Button, Field, Notice, Panel, Skeleton, TextInput } from "../../../ui/kit";
+import { Button, Field, Notice, Panel, Skeleton, Switch, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 
 type Kind = keyof PrivacyDictionary["history"];
@@ -25,6 +25,7 @@ interface Entry {
 }
 interface Privacy {
   retentionDays: number | null;
+  recording: boolean;
   minDays: number;
   maxDays: number;
   history: Entry[];
@@ -46,10 +47,14 @@ function describe(entry: Entry, t: PrivacyDictionary): string {
   switch (entry.kind) {
     case "transcript_retention_changed":
       return fill(t.history.transcript_retention_changed, { who, from: span(p.from), to: span(p.to) });
-    case "transcripts_purged":
-      return fill(t.history.transcripts_purged, { days: numberOf(p.retentionDays), count: numberOf(p.count) });
+    case "transcripts_purged": {
+      const line = fill(t.history.transcripts_purged, { days: numberOf(p.retentionDays), count: numberOf(p.count) });
+      return numberOf(p.recordings) > 0 ? `${line} ${fill(t.purgedRecordings, { count: numberOf(p.recordings) })}` : line;
+    }
     case "caller_data_exported":
       return fill(t.history.caller_data_exported, { who, phone: formatPhone(typeof p.phone === "string" ? p.phone : ""), calls: numberOf(p.calls), events: numberOf(p.events) });
+    case "call_recording_changed":
+      return fill(t.history.call_recording_changed, { who, state: p.to === true ? t.recordingStates.on : t.recordingStates.off });
   }
 }
 
@@ -64,9 +69,9 @@ function download(result: Exported, t: PrivacyDictionary): void {
 }
 
 /**
- * Os direitos de quem ligou, pela tela (registro 0014): o prazo de guarda da transcrição e a
- * exportação do que a organização guarda sobre um telefone, com o registro de cada um. Só dono ou
- * administrador; para o operador a seção não aparece.
+ * Os direitos de quem ligou, pela tela (registros 0014 e 0016): a gravação do áudio, o prazo de
+ * guarda da transcrição e a exportação do que a organização guarda sobre um telefone, com o
+ * registro de cada um. Só dono ou administrador; para o operador a seção não aparece.
  */
 export function PrivacyPanel() {
   const t = useDict(ptBR, en, es);
@@ -76,6 +81,7 @@ export function PrivacyPanel() {
   const canConfigure = useCanConfigure();
   const state = useApi<Privacy>(canConfigure ? "/privacy" : null);
   const save = useAction();
+  const recorder = useAction();
   const exporter = useAction();
   const [days, setDays] = useState("");
   // O prazo que espera confirmação: gravar um prazo que apaga só abre o pedido.
@@ -90,7 +96,7 @@ export function PrivacyPanel() {
   if (!canConfigure) return null;
   if (state.error && !state.data) return <Notice tone="fail">{errorText(state.error)}</Notice>;
   if (!state.data) return <Skeleton lines={2} />;
-  const { retentionDays: current, minDays, maxDays, history } = state.data;
+  const { retentionDays: current, recording, minDays, maxDays, history } = state.data;
 
   const store = (next: number | null): void =>
     void save.run(() => api("/privacy/retention", { method: "PUT", body: { days: next } })).then((ok) => {
@@ -98,8 +104,24 @@ export function PrivacyPanel() {
       state.reload();
     });
 
+  // Ligar e desligar não apagam nada (o que já foi gravado segue o prazo): sem confirmação.
+  const setRecording = (enabled: boolean): void =>
+    void recorder.run(() => api("/privacy/recording", { method: "PUT", body: { enabled } })).then(state.reload);
+
   return (
     <>
+      <Panel title={t.recordingTitle} description={t.recordingLead}>
+        <div className="grid max-w-xl gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Switch checked={recording} onChange={setRecording} label={t.recordingSwitch} disabled={recorder.busy} />
+            <ActionStatus action={recorder} />
+          </div>
+          <p>{t.recordingDisk}</p>
+          {recording && current === null ? <Notice tone="warn">{t.recordingForever}</Notice> : null}
+          <Notice>{t.recordingKeeps}</Notice>
+        </div>
+      </Panel>
+
       <Panel title={t.retentionTitle} description={t.retentionLead}>
         <form
           className="grid max-w-xl gap-4"

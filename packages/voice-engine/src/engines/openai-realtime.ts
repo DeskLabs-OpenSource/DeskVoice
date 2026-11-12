@@ -28,13 +28,43 @@ import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
-import type { KeyCheckResult, VoiceEngine, VoiceSession } from "../types";
+import type { KeyCheckResult, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
 const DEFAULT_API_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-realtime-2.1";
 const DEFAULT_VOICE = "marin";
+// Vozes do Realtime, conferidas em 2026-11-12 (developers.openai.com, guia de conversas Realtime).
+// A documentação recomenda marin e cedar pela qualidade; ela não descreve o estilo de cada uma.
+const VOICES = [
+  { id: "marin", recommended: true },
+  { id: "cedar", recommended: true },
+  { id: "alloy" },
+  { id: "ash" },
+  { id: "ballad" },
+  { id: "coral" },
+  { id: "echo" },
+  { id: "sage" },
+  { id: "shimmer" },
+  { id: "verse" },
+] as const;
 const AUDIO_FORMAT = { type: "audio/pcmu" };
+
+const responseDoneUsage = z
+  .object({
+    input_tokens: z.number().optional(),
+    output_tokens: z.number().optional(),
+    input_token_details: z
+      .object({
+        text_tokens: z.number().optional(),
+        audio_tokens: z.number().optional(),
+        cached_tokens: z.number().optional(),
+        cached_tokens_details: z.object({ text_tokens: z.number().optional(), audio_tokens: z.number().optional() }).nullish(),
+      })
+      .nullish(),
+    output_token_details: z.object({ text_tokens: z.number().optional(), audio_tokens: z.number().optional() }).nullish(),
+  })
+  .nullish();
 
 const serverEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.updated") }),
@@ -52,7 +82,7 @@ const serverEvent = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("response.done"),
     response: z.object({
-      usage: z.object({ input_tokens: z.number().optional(), output_tokens: z.number().optional() }).nullish(),
+      usage: responseDoneUsage,
     }),
   }),
   z.object({ type: z.literal("error"), error: z.object({ message: z.string() }) }),
@@ -89,15 +119,48 @@ function parseArguments(json: string): unknown {
   }
 }
 
+type RealtimeUsage = NonNullable<z.infer<typeof responseDoneUsage>>;
+
+/**
+ * O uso de uma resposta, separado como a OpenAI cobra. Sem o detalhe (formato antigo), tudo vai no
+ * preço cheio de áudio: superestima, nunca subestima.
+ */
+export function usageOf(usage: RealtimeUsage): Usage {
+  const input = usage.input_token_details;
+  const output = usage.output_token_details;
+  if (!input || !output) return { inputTokens: usage.input_tokens ?? 0, outputTokens: usage.output_tokens ?? 0 };
+  const cachedText = input.cached_tokens_details?.text_tokens ?? 0;
+  const cachedAudio = input.cached_tokens_details?.audio_tokens ?? 0;
+  return {
+    inputTokens: Math.max(0, (input.audio_tokens ?? 0) - cachedAudio),
+    textInputTokens: Math.max(0, (input.text_tokens ?? 0) - cachedText),
+    cachedInputTokens: input.cached_tokens ?? cachedText + cachedAudio,
+    outputTokens: output.audio_tokens ?? 0,
+    textOutputTokens: output.text_tokens ?? 0,
+  };
+}
+
 const engine: VoiceEngine = {
   id: "openai-realtime",
   label: "OpenAI Realtime",
+  provider: "openai",
+  // A OpenAI documenta data residency por projeto/região (Estados Unidos, Europa, Reino Unido,
+  // Japão, entre outros) — não um país fixo por provedor. Como a instalação usa a API padrão, sem
+  // projeto regional escolhido pelo operador, o lugar de processamento depende da conta dele.
+  // Fonte: developers.openai.com/api/docs/guides/your-data (consultado em 12/11/2026).
+  processingLocation: { kind: "undeclared" },
+  voices: VOICES,
+  defaultVoice: DEFAULT_VOICE,
   pricing: {
-    // US$ 32,00 e US$ 64,00 por milhão de tokens de áudio (entrada e saída) do gpt-realtime-2.1.
-    // Texto e entrada em cache custam menos; cobrar tudo como áudio superestima, nunca subestima.
+    // gpt-realtime-2.1, por milhão de tokens: áudio US$ 32 (entrada) e US$ 64 (saída); texto US$ 4
+    // e US$ 24; entrada em cache US$ 0,40. Cada resposta reconta a conversa inteira como entrada, e
+    // quase toda ela vem do cache: cobrar tudo como áudio novo dava seis vezes o valor da fatura.
     centsPerMillionInputTokens: 3200,
     centsPerMillionOutputTokens: 6400,
-    checkedOn: "2026-11-10",
+    centsPerMillionTextInputTokens: 400,
+    centsPerMillionCachedInputTokens: 40,
+    centsPerMillionTextOutputTokens: 2400,
+    checkedOn: "2026-11-12",
     source: "https://developers.openai.com/api/docs/pricing",
   },
 
@@ -158,7 +221,7 @@ const engine: VoiceEngine = {
         case "response.done": {
           responseActive = false;
           const usage = event.response.usage;
-          if (usage) emitter.emit("usage", { inputTokens: usage.input_tokens ?? 0, outputTokens: usage.output_tokens ?? 0 });
+          if (usage) emitter.emit("usage", usageOf(usage));
           const next = queuedResponses.shift();
           if (next) requestResponse(next);
           break;

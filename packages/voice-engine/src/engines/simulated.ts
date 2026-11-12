@@ -175,6 +175,9 @@ export function createSimulatedEngine(options: { schedule?: Schedule } = {}): Vo
   return {
     id: "simulated",
     label: "Simulado (sem chave)",
+    provider: "none",
+    // Roda neste processo: não chama provedor, então o áudio não sai da instalação.
+    processingLocation: { kind: "this-server" },
     keyless: true,
     pricing: { centsPerMinute: 0, checkedOn: "2026-11-10", source: "motor simulado: não chama provedor, não tem custo" },
     async connect(config) {

@@ -3,7 +3,8 @@ import { pcm16ToUlaw } from "../resample";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
 import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
 import type { KeyCheckOptions, VoiceSessionConfig } from "../types";
-import engine from "./openai-realtime";
+import { estimateCostCents } from "../pricing";
+import engine, { usageOf } from "./openai-realtime";
 
 const config: VoiceSessionConfig = {
   instructions: "Você atende a clínica.",
@@ -43,6 +44,23 @@ describe("openai-realtime (contrato com servidor falso)", () => {
         tools: [{ type: "function", name: "end_call", description: "Encerra a ligação", parameters: { type: "object" } }],
       },
     });
+  });
+
+  it("custo separa áudio, texto e cache, como a OpenAI cobra", () => {
+    // Uma resposta no meio da conversa: o prompt e a conversa anterior voltam como entrada, quase tudo em cache.
+    const usage = usageOf({
+      input_tokens: 9000,
+      output_tokens: 300,
+      input_token_details: { text_tokens: 3000, audio_tokens: 6000, cached_tokens: 8000, cached_tokens_details: { text_tokens: 2800, audio_tokens: 5200 } },
+      output_token_details: { text_tokens: 60, audio_tokens: 240 },
+    });
+    expect(usage).toEqual({ inputTokens: 800, textInputTokens: 200, cachedInputTokens: 8000, outputTokens: 240, textOutputTokens: 60 });
+    // 800×32 + 200×4 + 8000×0,40 + 240×64 + 60×24 por milhão = US$ 0,0472: 5 centavos, e não os 31
+    // de cobrar toda a entrada como áudio novo.
+    expect(estimateCostCents(engine.pricing, usage)).toBe(5);
+    expect(estimateCostCents(engine.pricing, { inputTokens: 9000, outputTokens: 300 })).toBe(31);
+    // Sem o detalhe, tudo vai no preço cheio de áudio.
+    expect(usageOf({ input_tokens: 9000, output_tokens: 300 })).toEqual({ inputTokens: 9000, outputTokens: 300 });
   });
 
   it("usa o modelo padrão e faz o agente falar primeiro", async () => {

@@ -1,7 +1,10 @@
-import { withOrg } from "@deskvoice/core";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { recordingPath, withOrg } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { NOW, call, createCall, createOrganization, createUser, startPanel } from "../../../../test/kit";
 import { POST as exportRecord } from "./privacy/export/route";
+import { PUT as putRecording } from "./privacy/recording/route";
 import { PUT as putRetention } from "./privacy/retention/route";
 import { GET as privacy } from "./privacy/route";
 import { PUT as putSetting } from "./settings/[key]/route";
@@ -11,6 +14,7 @@ afterAll(() => panel.close());
 
 const PHONE = "+5531999998888";
 const setDays = (cookie: string, days: unknown) => call(putRetention, { method: "PUT", cookie, body: { days } });
+const setRecording = (cookie: string, enabled: unknown) => call(putRecording, { method: "PUT", cookie, body: { enabled } });
 const exportPhone = (cookie: string, phone: string) => call(exportRecord, { method: "POST", cookie, body: { phone } });
 const refusal = (result: { status: number; code: string | undefined }) => [result.status, result.code];
 const read = <T>(org: string, sql: string, params: unknown[] = []) => withOrg(panel.app, org, (q) => q.many<T & Record<string, unknown>>(sql, params));
@@ -18,6 +22,7 @@ const orgEvents = (org: string) => read<{ kind: string; actor_user_id: string | 
 
 interface Privacy {
   retentionDays: number | null;
+  recording: boolean;
   history: Array<{ kind: string; actorName: string | null; payload: Record<string, unknown> }>;
 }
 
@@ -38,15 +43,70 @@ async function seedCaller(org: string): Promise<string> {
 }
 
 describe("who exercises the rights of the caller", () => {
-  it("an operator neither reads, changes the retention, nor exports", async () => {
+  it("an operator neither reads, changes the retention, turns recording on, nor exports", async () => {
     const org = await createOrganization(panel.app, "privacy operator");
     const operator = await createUser(panel.app, org, "operator");
     await seedCaller(org);
-    for (const result of [await call(privacy, { cookie: operator.cookie }), await setDays(operator.cookie, 30), await exportPhone(operator.cookie, PHONE)]) {
+    for (const result of [await call(privacy, { cookie: operator.cookie }), await setDays(operator.cookie, 30), await setRecording(operator.cookie, true), await exportPhone(operator.cookie, PHONE)]) {
       expect(refusal(result)).toEqual([403, "forbidden"]);
     }
-    expect(await read(org, "select value from settings where key = 'transcripts.retention_days'")).toEqual([]);
+    expect(await read(org, "select key from settings where key in ('transcripts.retention_days', 'calls.recording_enabled')")).toEqual([]);
     expect(await orgEvents(org)).toEqual([]);
+  });
+});
+
+/** Um WAV de mentira no lugar onde a voz grava a chamada. */
+async function recordingFor(org: string, callId: string): Promise<string> {
+  const file = recordingPath(panel.deps.recordingsDir, org, callId);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, "RIFF");
+  return file;
+}
+
+describe("call recording", () => {
+  it("is off by default, only takes a boolean, and every change is recorded with who made it", async () => {
+    const org = await createOrganization(panel.app, "privacy recording");
+    const owner = await createUser(panel.app, org, "owner");
+    const admin = await createUser(panel.app, org, "admin");
+    expect((await call(privacy, { cookie: owner.cookie })).data).toMatchObject({ recording: false });
+
+    for (const enabled of ["true", 1, null, undefined]) expect(refusal(await setRecording(owner.cookie, enabled))).toEqual([400, "validation_error"]);
+    // Desligar o que já está desligado não é mudança.
+    expect((await setRecording(owner.cookie, false)).data).toEqual({ enabled: false });
+    expect(await orgEvents(org)).toEqual([]);
+
+    expect((await setRecording(admin.cookie, true)).data).toEqual({ enabled: true });
+    expect(await read(org, "select value from settings where key = 'calls.recording_enabled'")).toEqual([{ value: true }]);
+    expect((await call(privacy, { cookie: owner.cookie })).data).toMatchObject({ recording: true });
+    await setRecording(owner.cookie, true);
+    expect((await setRecording(owner.cookie, false)).data).toEqual({ enabled: false });
+    expect(await read(org, "select value from settings where key = 'calls.recording_enabled'")).toEqual([]);
+
+    expect(await orgEvents(org)).toEqual([
+      { kind: "call_recording_changed", actor_user_id: admin.id, payload: { from: false, to: true } },
+      { kind: "call_recording_changed", actor_user_id: owner.id, payload: { from: true, to: false } },
+    ]);
+    const shown = (await call(privacy, { cookie: owner.cookie })).data as Privacy;
+    expect(shown.history.map((entry) => [entry.kind, entry.actorName])).toEqual([
+      ["call_recording_changed", "Test owner"],
+      ["call_recording_changed", "Test admin"],
+    ]);
+  });
+
+  it("turning it off keeps the recordings already made: they leave only by the retention period", async () => {
+    const org = await createOrganization(panel.app, "privacy recording off keeps");
+    const owner = await createUser(panel.app, org, "owner");
+    await setRecording(owner.cookie, true);
+    const file = await recordingFor(org, await createCall(panel.app, org, NOW));
+    await setRecording(owner.cookie, false);
+    expect(await readdir(path.dirname(file))).toEqual([path.basename(file)]);
+  });
+
+  it("is not reachable through the generic settings route, which would skip the record", async () => {
+    const org = await createOrganization(panel.app, "privacy recording settings route");
+    const owner = await createUser(panel.app, org, "owner");
+    const result = await call(putSetting, { method: "PUT", cookie: owner.cookie, params: { key: "calls.recording_enabled" }, body: { value: true } });
+    expect(refusal(result)).toEqual([400, "unknown_setting"]);
   });
 });
 
@@ -108,7 +168,7 @@ describe("exporting what the organization keeps about a phone", () => {
       ["event", "transcript_agent"],
       ["do_not_call", null],
     ]);
-    expect(lines[0]).toMatchObject({ call: callId, from: PHONE, summary: "Pediu retorno." });
+    expect(lines[0]).toMatchObject({ call: callId, from: PHONE, summary: "Pediu retorno.", recording: false });
     expect(lines[2]).toMatchObject({ payload: { purged: true } });
     expect(data.content).not.toContain(foreignCall);
 
@@ -116,6 +176,23 @@ describe("exporting what the organization keeps about a phone", () => {
     expect(await orgEvents(theirs)).toEqual([]);
     const shown = (await call(privacy, { cookie: admin.cookie })).data as Privacy;
     expect(shown.history).toMatchObject([{ kind: "caller_data_exported", actorName: "Test admin", payload: { phone: PHONE } }]);
+  });
+
+  it("says, per call, whether there is a recording, without the audio", async () => {
+    const org = await createOrganization(panel.app, "privacy export recording");
+    const owner = await createUser(panel.app, org, "owner");
+    const recorded = await seedCaller(org);
+    const silent = await createCall(panel.app, org, new Date(NOW.getTime() + 60_000));
+    await withOrg(panel.app, org, (q) => q.exec("update calls set from_e164 = $2 where id = $1", [silent, PHONE]));
+    await recordingFor(org, recorded);
+
+    const data = (await exportPhone(owner.cookie, PHONE)).data as { content: string };
+    const calls = data.content.trimEnd().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.type === "call");
+    expect(calls.map((line) => [line.call, line.recording])).toEqual([
+      [recorded, true],
+      [silent, false],
+    ]);
+    expect(data.content).not.toContain("RIFF");
   });
 
   it("records the lookup even when nothing is found, and refuses what is not a phone", async () => {

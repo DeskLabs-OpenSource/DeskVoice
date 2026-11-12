@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { hashPassword, verifyPassword, withOrg, type Db } from "@deskvoice/core";
 import { vi } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
@@ -44,6 +47,7 @@ export function startPanel(): { app: Db; deps: ServerDeps; clock: { at: Date }; 
     agentToken: AGENT_TOKEN,
     waha: { apiKey: "" },
     verifyPassword,
+    recordingsDir: mkdtempSync(path.join(tmpdir(), "deskvoice-panel-recordings-")),
   };
   setServerDeps(deps);
   return {
@@ -53,6 +57,7 @@ export function startPanel(): { app: Db; deps: ServerDeps; clock: { at: Date }; 
     voice,
     async close() {
       setServerDeps(undefined);
+      rmSync(deps.recordingsDir, { recursive: true, force: true });
       await app.close();
       await owner.close();
     },

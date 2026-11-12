@@ -160,7 +160,16 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         <Panel title={t.voice}>
           <div className="grid gap-4 md:grid-cols-3">
             <Field label={t.engine}>
-              <Select value={draft.engine} onChange={(event) => set("engine", event.target.value)} required>
+              <Select
+                value={draft.engine}
+                onChange={(event) => {
+                  const next = engines.data?.find((candidate) => candidate.id === event.target.value);
+                  set("engine", event.target.value);
+                  // A voz de um motor não existe no outro: trocar de motor volta para a voz padrão.
+                  if (!next?.voices.some((voice) => voice.id === draft.voiceId)) set("voiceId", "");
+                }}
+                required
+              >
                 {engines.data?.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
@@ -169,7 +178,15 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               </Select>
             </Field>
             <Field label={t.voiceId} hint={t.voiceHint}>
-              <TextInput value={draft.voiceId} onChange={(event) => set("voiceId", event.target.value)} maxLength={80} />
+              <Select value={draft.voiceId} onChange={(event) => set("voiceId", event.target.value)}>
+                <option value="">{engine?.defaultVoice ? fill(t.voiceDefault, { voice: engine.defaultVoice }) : t.voiceDefaultNone}</option>
+                {engine?.voices.map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {[voice.id, voice.style, voice.recommended ? t.voiceRecommended : null].filter(Boolean).join(" · ")}
+                  </option>
+                ))}
+                {draft.voiceId && !engine?.voices.some((voice) => voice.id === draft.voiceId) ? <option value={draft.voiceId}>{fill(t.voiceCustom, { voice: draft.voiceId })}</option> : null}
+              </Select>
             </Field>
             <Field label={t.language}>
               <TextInput mono value={draft.language} onChange={(event) => set("language", event.target.value)} required maxLength={20} />

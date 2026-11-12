@@ -1,4 +1,5 @@
-import { recordOrgEvent } from "@deskvoice/core";
+import { access } from "node:fs/promises";
+import { recordOrgEvent, recordingPath } from "@deskvoice/core";
 import { z } from "zod";
 import { handle } from "../../../../../server/context";
 import { phone } from "../../../../../server/shapes";
@@ -7,7 +8,9 @@ import { phone } from "../../../../../server/shapes";
 // é origem ou destino, os eventos delas (a fala expurgada sai com o marcador `{ "purged": true }`)
 // e a entrada na lista de não ligar. Base: a consulta de @webtecnica no PR #66. Sem filtro de
 // organização à mão: `withOrg` só deixa ver a da sessão, e é isso que impede a ficha de levar o
-// que a pessoa disse a outra empresa da mesma instalação.
+// que a pessoa disse a outra empresa da mesma instalação. Cada chamada diz se tem gravação
+// (`recording`), sem o áudio: ele sai pela tela da chamada, e embutido em base64 faria o arquivo
+// de texto crescer cerca de 2,5 MB por minuto de conversa (registro 0016).
 const RECORD_SQL = `
   with record as (
     select c.started_at as sort_at, c.id as call_id, 0 as rank, 0::bigint as seq,
@@ -40,6 +43,10 @@ type Line = { type: "call" | "event" | "do_not_call" } & Record<string, unknown>
 export const POST = handle({ body: z.object({ phone }), configure: true }, async ({ q, body, session, deps }) => {
   const now = deps.clock.now();
   const lines = (await q.many<{ line: Line }>(RECORD_SQL, [body.phone])).map((row) => row.line);
+  // O que vale é o arquivo no disco, e não se a gravação estava ligada: o prazo de guarda já pode tê-lo apagado.
+  for (const line of lines) {
+    if (line.type === "call") line.recording = await access(recordingPath(deps.recordingsDir, q.organizationId, String(line.call))).then(() => true, () => false);
+  }
   const count = (type: Line["type"]): number => lines.filter((line) => line.type === type).length;
   const counts = { calls: count("call"), events: count("event"), doNotCall: count("do_not_call") > 0 };
   await recordOrgEvent(q, "caller_data_exported", { phone: body.phone, ...counts }, now, session.userId);

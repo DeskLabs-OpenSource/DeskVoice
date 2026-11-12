@@ -47,6 +47,8 @@ export const ENV_ALLOWLIST: Record<string, "generated" | "default"> = {
   // Porta do WebSocket da chamada pelo navegador (8091), só na rede interna; o Caddy do DeskVoice a entrega em /voice-ws.
   VOICE_WEB_PORT: "default",
   ASTERISK_TRUNKS_FILE: "default",
+  // Pasta das gravações de chamada (/recordings): a voz grava, o painel lê e as rotinas apagam pelo prazo de guarda.
+  RECORDINGS_DIR: "default",
   // Usuário e grupo do Asterisk dentro do contêiner dele (1000): dono do arquivo de troncos.
   ASTERISK_UID: "default",
   ASTERISK_GID: "default",

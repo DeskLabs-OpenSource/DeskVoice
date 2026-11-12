@@ -83,6 +83,9 @@ services:
       WAHA_API_KEY: "${WAHA_API_KEY:-}"
     depends_on:
       migrate: { condition: service_completed_successfully }
+    volumes:
+      # Gravações das chamadas: a voz grava, o painel toca na tela da chamada.
+      - recordings:/recordings:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/system/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -104,6 +107,7 @@ services:
     volumes:
       # O worker escreve aqui os troncos cadastrados no painel; o Asterisk lê.
       - asterisk-generated:/asterisk-generated
+      - recordings:/recordings
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -117,6 +121,9 @@ services:
     # A entrega dos avisos por WhatsApp (`deliver_notification`) roda neste processo.
     environment:
       WAHA_API_KEY: "${WAHA_API_KEY:-}"
+    volumes:
+      # O prazo de guarda (`purge_transcripts`) apaga também as gravações antigas.
+      - recordings:/recordings
     depends_on:
       migrate: { condition: service_completed_successfully }
 
@@ -266,5 +273,6 @@ volumes:
   waha-sessions:
   wacalls-data:
   asterisk-generated:
+  recordings:
   caddy-data:
   caddy-config:
