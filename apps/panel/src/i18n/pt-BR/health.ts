@@ -1,0 +1,86 @@
+const health = {
+  title: "Saúde do sistema",
+  lead: "Cada peça da instalação e cada ligação entre elas, na ordem de quem procura um defeito: de fora para dentro. Nenhuma linha resume as outras.",
+  recheck: "Conferir de novo",
+  unreachable: "O painel não respondeu à conferência. Se ele abriu esta tela, a falha é na rede entre o navegador e o servidor, ou o painel acabou de reiniciar. Tente de novo em instantes.",
+  worst: {
+    ok: "Tudo funcionando: cada peça e cada ligação respondeu.",
+    warn: "O sistema está no ar. Pedem atenção: {names}.",
+    fail: "Com falha: {names}. Comece por aí: o que está abaixo dela pode depender dela.",
+  },
+  whatToDo: "O que fazer",
+  askAdmin: "Peça a um dono ou administrador para conferir: a tela dele mostra o que fazer.",
+  lines: {
+    panel: "Painel",
+    database: "Painel ↔ banco de dados",
+    voice: "Painel ↔ processo de voz",
+    telephony: "Processo de voz ↔ Asterisk",
+    routines: "Rotinas ↔ fila de tarefas",
+    agent: "Agente de atualização",
+    trunk: "Linha telefônica",
+    engine: "Motor de voz",
+    whatsapp: "WhatsApp",
+  },
+  status: { ok: "funcionando", warn: "atenção", fail: "com falha" },
+  /** O que a linha está dizendo agora. `{when}` é uma data, formatada no idioma da tela. */
+  reasons: {
+    panel_ok: "respondendo",
+    database_ok: "respondendo",
+    database_down: "o banco não respondeu ao painel",
+    voice_ok: "respondendo",
+    voice_down: "o processo de voz não respondeu ao painel: nenhuma ligação é atendida",
+    telephony_ok: "o processo de voz está conectado ao Asterisk",
+    telephony_down: "o processo de voz está de pé, mas não consegue falar com o Asterisk: nenhuma ligação chega ao agente",
+    routines_ok: "o processo de rotinas está conectado ao banco, e a fila está em dia",
+    routines_not_listening: "nenhum processo de rotinas está conectado ao banco esperando tarefas: resumos, avisos e o vencimento das aprovações ficam parados",
+    routines_late: "a fila está atrasada: a tarefa mais antiga espera desde {when}",
+    routines_stuck: "o processo de rotinas está conectado, mas não consome a fila: há tarefa esperando desde {when}",
+    agent_ok: "falou com o painel pela última vez em {when}",
+    agent_silent: "não fala com o painel desde {when}",
+    agent_never: "não instalado: nunca falou com o painel",
+    trunk_ok: "linha conectada",
+    trunk_none: "nenhuma linha cadastrada",
+    trunk_down: "{down} de {total} linha(s) com problema",
+    engine_ok: "chave de motor de voz cadastrada",
+    engine_none: "nenhum motor de voz configurado",
+    whatsapp_absent: "serviço não instalado neste servidor (é o padrão)",
+    whatsapp_preparing: "instalação pedida: o servidor sobe o serviço em alguns minutos",
+    whatsapp_connected: "um número conectado",
+    whatsapp_no_number: "serviço instalado, nenhum número conectado",
+    whatsapp_dropped: "o número desconectou: avisos e mensagens por WhatsApp não saem",
+    whatsapp_service_failed: "o servidor não conseguiu instalar ou remover o serviço de WhatsApp",
+    whatsapp_service_down: "o serviço de WhatsApp está instalado e não responde ao painel",
+    whatsapp_unavailable: "o serviço de WhatsApp foi pedido, mas esta instalação não tem a chave dele",
+    needs_database: "não deu para conferir porque o banco não respondeu; resolva o banco primeiro",
+    needs_voice: "não deu para conferir porque o processo de voz não respondeu; resolva o processo de voz primeiro",
+  },
+  /**
+   * O que fazer. Toda linha em falha tem um (o tipo cobra); aviso tem quando há um passo claro.
+   * O comando de terminal, quando há, aparece logo abaixo, igual em todo idioma.
+   */
+  actions: {
+    database_down: "Confira no servidor se o Postgres está de pé e se há disco livre. A checagem de saúde mostra as duas coisas:",
+    voice_down: "Confira no servidor o processo de voz. A checagem de saúde diz se o contêiner está parado; os registros dele dizem por quê:",
+    telephony_down: "A causa mais comum é o Asterisk não ter lido a configuração. Rode o instalador de novo no servidor, na pasta do DeskVoice; ele mantém o que já existe:",
+    routines_not_listening: "O processo de rotinas parou ou perdeu a conexão com o banco. Reinicie-o no servidor, na pasta do DeskVoice; se ele cair de novo, os registros dizem por quê:",
+    routines_late: "Costuma se resolver sozinho em instantes, quando muitas tarefas chegam juntas. Se a data acima não mudar, confira os registros das rotinas no servidor:",
+    routines_stuck: "O processo está preso numa tarefa. Reinicie as rotinas no servidor; o que estava na fila é retomado:",
+    agent_silent: "Sem ele a atualização pela tela espera, e pelo terminal continua funcionando. O motivo fica no servidor, em deploy/agent/agent.log.",
+    agent_never: "É ele que faz a atualização pedida pela tela. Para instalar, rode uma vez no servidor, na pasta do DeskVoice:",
+    trunk_none: "Cadastre a linha da operadora em Linha telefônica.",
+    trunk_down: "Abra Linha telefônica: cada linha mostra o próprio estado e o motivo.",
+    engine_none: "Cadastre a chave de um motor de voz em Configurações. Sem ela só o motor simulado atende.",
+    whatsapp_no_number: "Conecte um número em Configurações → WhatsApp.",
+    whatsapp_dropped: "Conecte o número de novo em Configurações → WhatsApp.",
+    whatsapp_service_failed: "O servidor tenta de novo em alguns minutos. O motivo está em Configurações → WhatsApp.",
+    whatsapp_service_down: "Veja os registros do serviço no servidor:",
+    whatsapp_unavailable: "Rode o atualizador no servidor: ele gera a chave que falta.",
+    needs_database: "Resolva a linha do banco de dados, acima.",
+    needs_voice: "Resolva a linha do processo de voz, acima.",
+  },
+};
+
+export default health;
+export type HealthDictionary = typeof health;
+export type HealthReason = keyof HealthDictionary["reasons"];
+export type HealthAction = keyof HealthDictionary["actions"];

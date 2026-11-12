@@ -535,7 +535,8 @@ describe("voice process", () => {
     expect(result.data).toMatchObject({
       panel: { status: "ok" },
       database: { status: "ok" },
-      asterisk: { status: "ok" },
+      voice: { status: "ok" },
+      telephony: { status: "ok" },
       trunk: { status: "warn", detail: "nenhuma linha cadastrada" },
     });
     expect(result.text).not.toContain("10.0.0.5");
@@ -543,7 +544,8 @@ describe("voice process", () => {
     panel.voice.respond = () => {
       throw new Error("connect ECONNREFUSED");
     };
-    expect((await call(health)).data).toMatchObject({ database: { status: "ok" }, asterisk: { status: "fail" }, trunk: { status: "fail" } });
+    // A voz caiu: falha é dela; o que se pergunta a ela diz que não deu para conferir, e por quê.
+    expect((await call(health)).data).toMatchObject({ database: { status: "ok" }, voice: { status: "fail" }, telephony: { status: "warn", reason: "needs_voice" }, trunk: { status: "warn", reason: "needs_voice" } });
   });
 });
 

@@ -17,7 +17,7 @@ import { APPROVALS_CHANGED, ApprovalCard, isWaiting } from "./approval";
 import { formatDateTime } from "./format";
 import { useLive, useNow } from "./live";
 import { MeContext } from "./me";
-import type { Approval, Health, HealthStatus, Me, PanelNotification } from "./types";
+import type { Approval, HealthReport, HealthStatus, Me, PanelNotification } from "./types";
 
 type Theme = "light" | "dark" | undefined;
 
@@ -83,38 +83,29 @@ export function LocaleSelect() {
   );
 }
 
-function HealthIndicator({ align }: { align: string }) {
+/** O resumo da saúde, sempre à vista; é também a porta da tela "Saúde do sistema", com cada linha. */
+function HealthIndicator() {
   const t = useDict(ptBR, en, es).health;
-  const { data, error, reload } = useApi<Health>("/system/health");
-  const ref = useDismiss();
+  const pathname = usePathname();
+  const { data, error, reload } = useApi<HealthReport>("/system/health");
   useEffect(() => {
     const timer = setInterval(reload, 60_000);
     return () => clearInterval(timer);
   }, [reload]);
 
-  const parts = data ? (Object.keys(t.parts) as Array<keyof Health>).map((part) => ({ part, ...data[part] })) : [];
-  const troubled = parts.filter((entry) => entry.status !== "ok");
-  const worst: HealthStatus = troubled.some((entry) => entry.status === "fail") || (error && !data) ? "fail" : troubled.length > 0 ? "warn" : "ok";
-  const summary = !data ? (error ? t.unreachable : t.checking) : troubled.length === 0 ? t.allOk : fill(t.attention, { n: troubled.length });
+  const troubled = (data?.checks ?? []).filter((line) => line.status !== "ok").length;
+  const worst: HealthStatus = error && !data ? "fail" : (data?.worst ?? "ok");
+  const summary = !data ? (error ? t.unreachable : t.checking) : troubled === 0 ? t.allOk : fill(t.attention, { n: troubled });
 
   return (
-    <details ref={ref} className="relative">
-      <summary className="flex h-9 cursor-pointer list-none items-center gap-2 rounded-xs px-2 text-[0.87rem] text-muted hover:bg-sunken hover:text-ink [&::-webkit-details-marker]:hidden">
-        <span className={`size-2 shrink-0 rounded-full ${data || error ? DOT[worst] : "bg-line-strong"}`} aria-hidden />
-        <span className="truncate">{summary}</span>
-      </summary>
-      <ul className={`${POPOVER} ${align} grid gap-0.5`}>
-        {parts.map((entry) => (
-          <li key={entry.part} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2.5 rounded-xs px-2 py-1.5">
-            <span className={`mt-[7px] size-2 rounded-full ${DOT[entry.status]}`} aria-hidden />
-            <span className="font-bold">
-              {t.parts[entry.part]} <span className="font-normal text-muted">· {t.status[entry.status]}</span>
-            </span>
-            <span className="col-start-2 text-[0.87rem] text-muted">{entry.detail}</span>
-          </li>
-        ))}
-      </ul>
-    </details>
+    <Link
+      href="/health"
+      aria-current={pathname === "/health" ? "page" : undefined}
+      className="flex h-9 min-w-0 items-center gap-2 rounded-xs px-2 text-[0.87rem] text-muted hover:bg-sunken hover:text-ink aria-[current=page]:bg-sunken aria-[current=page]:text-ink"
+    >
+      <span className={`size-2 shrink-0 rounded-full ${data || error ? DOT[worst] : "bg-line-strong"}`} aria-hidden />
+      <span className="truncate">{summary}</span>
+    </Link>
   );
 }
 
@@ -259,7 +250,7 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
         </div>
         {nav}
         <div className="mt-auto grid gap-3">
-          <HealthIndicator align="bottom-full left-0 mb-2" />
+          <HealthIndicator />
           <div className="border-t border-line pt-3 pl-2">{account}</div>
         </div>
         </div>
@@ -270,7 +261,7 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
           <div className="mr-auto">
             <Brand />
           </div>
-          <HealthIndicator align="right-0" />
+          <HealthIndicator />
           <NotificationBell align="right-0" />
         </div>
         {nav}
