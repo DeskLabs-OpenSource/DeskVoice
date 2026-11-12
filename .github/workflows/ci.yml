@@ -265,8 +265,9 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.install == 'true'
     runs-on: ubuntu-latest
-    # Os testes do kit, mais a construção das três imagens e uma instalação de verdade no runner.
-    timeout-minutes: 40
+    # Os testes do kit, a construção das três imagens, uma instalação de verdade no runner e os
+    # testes de tela contra ela.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -298,6 +299,10 @@ jobs:
           DESKVOICE_OWNER_PASSWORD="ci-$(openssl rand -hex 16)"
           echo "::add-mask::${DESKVOICE_OWNER_PASSWORD}"
           export DESKVOICE_OWNER_PASSWORD
+          # Os testes de tela, no fim do job, leem a senha deste arquivo: ela não vira variável de
+          # ambiente para os outros passos nem para as ações de terceiros.
+          install -m 600 /dev/null "${RUNNER_TEMP}/owner-password"
+          printf '%s' "${DESKVOICE_OWNER_PASSWORD}" > "${RUNNER_TEMP}/owner-password"
           # O instalador só termina com zero depois de conferir a porta publicada e de entrar de
           # verdade pela tela de login com o dono que acabou de criar: se o login falhar, o passo
           # falha aqui. A saída fica guardada para o passo seguinte conferir que o login foi testado.
@@ -385,6 +390,45 @@ jobs:
             echo "::error::De dentro do painel, esperava direto=200 e por-proxy=404."
             exit 1
           fi
+      # Testes de tela (apps/panel/test/e2e): o Chromium entra pela porta que o Caddy publicou, no
+      # sistema que este job acabou de subir, com o dono que o instalador criou. Entrar, configurar,
+      # simular uma chamada, convidar e as confirmações antes de apagar. Não sobe nada de novo.
+      - uses: ./.github/actions/setup
+        if: hashFiles('install/agent.sh') != ''
+      - name: Versão do Playwright
+        id: playwright
+        if: hashFiles('install/agent.sh') != ''
+        run: echo "version=$(node -p "require('./apps/panel/package.json').devDependencies['@playwright/test']")" >> "${GITHUB_OUTPUT}"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: hashFiles('install/agent.sh') != ''
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - name: Testes de tela pela entrada única
+        if: hashFiles('install/agent.sh') != ''
+        env:
+          # O mesmo e-mail do dono criado no passo de instalação.
+          DESKVOICE_E2E_EMAIL: ci@example.test
+        run: |
+          set -euo pipefail
+          # Com o navegador no cache, só as bibliotecas do sistema são instaladas.
+          pnpm --filter ./apps/panel exec playwright install --with-deps --only-shell chromium
+          entry="$(sed -n 's/^ *- "\(.*\):80"$/\1/p' deploy/docker-compose.override.yml | head -n 1)"
+          export DESKVOICE_E2E_URL="http://127.0.0.1:${entry##*:}"
+          DESKVOICE_E2E_PASSWORD="$(cat "${RUNNER_TEMP}/owner-password")"
+          export DESKVOICE_E2E_PASSWORD
+          echo "painel em ${DESKVOICE_E2E_URL}"
+          pnpm test:e2e
+      # O rastro mostra cada passo, a tela e as respostas da API. Ele carrega a senha do dono desta
+      # instalação, que só existiu neste runner e morre com ele.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() && hashFiles('apps/panel/test/e2e/test-results/**') != ''
+        with:
+          name: testes-de-tela
+          path: |
+            apps/panel/test/e2e/test-results/
+            apps/panel/test/e2e/playwright-report/
+          retention-days: 7
       - name: O que estava no ar quando falhou
         if: failure() && hashFiles('deploy/.env') != ''
         run: |
@@ -401,7 +445,10 @@ jobs:
             atualização e o ciclo backup → restauração com conferência de contagens. Se o que
             falhou foi um passo depois deles, é a instalação de verdade no runner: o passo "O que
             estava no ar quando falhou" mostra a saúde de cada peça e os logs. Quem instala é o
-            usuário, numa VPS: o que quebra aqui quebra na casa de alguém.
+            usuário, numa VPS: o que quebra aqui quebra na casa de alguém. Se quem falhou foi
+            "Testes de tela", baixe o artefato `testes-de-tela` (relatório e rastro de cada passo,
+            com a tela) e rode na sua máquina `pnpm test:e2e` contra um painel no ar; o passo a
+            passo está na skill `deskvoice-contribuir`.
 
   secrets:
     name: secrets
