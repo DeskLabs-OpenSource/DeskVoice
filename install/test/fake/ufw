@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# ufw de mentira: ativo só com $FAKE_DIR/ufw_active. Registra cada regra aplicada.
+echo "ufw $*" >> "$FAKE_DIR/calls.log"
+case "${1:-}" in
+  status) if [ -f "$FAKE_DIR/ufw_active" ]; then echo "Status: active"; else echo "Status: inactive"; fi ;;
+  allow) echo "Rule added" ;;
+esac

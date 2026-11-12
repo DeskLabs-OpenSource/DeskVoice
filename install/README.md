@@ -54,7 +54,7 @@ e número) e o agente. Nada disso é pedido no terminal.
 | Script | O que faz | O que ele confere antes de dizer que deu certo |
 |---|---|---|
 | `start.sh` | Roda no seu computador, antes do servidor: diz o que é preciso e entrega o comando seguinte | Não altera nada. Só mostra o link da parceira se conseguiu ler o endereço de `partner.env` |
-| `install.sh` | Confere a máquina e a rede, faz poucas perguntas, gera os segredos, baixa as imagens da versão publicada mais recente, sobe tudo e cria o primeiro usuário. Pode ser rodado de novo: retoma de onde parou e nunca troca um segredo que já existe | Cada peça essencial respondendo (painel, banco, Asterisk, worker de voz, rotinas) |
+| `install.sh` | Confere a máquina e a rede, faz poucas perguntas, gera os segredos, baixa as imagens da versão publicada mais recente, sobe tudo e cria o primeiro usuário. Pode ser rodado de novo: retoma de onde parou e nunca troca um segredo que já existe | Cada peça essencial respondendo (painel, banco, painel → banco, Asterisk, worker de voz, controle da telefonia, rotinas) |
 | `healthcheck.sh` | Uma linha por peça, com estado e detalhe. `--json` para monitoramento | Não resume: mostra qual peça está fora |
 | `backup.sh` | Copia o banco, os três arquivos de ambiente e a configuração gerada do Asterisk para `backups/<data>/` | Restaura o dump num banco de rascunho e conta as linhas de cada tabela |
 | `restore.sh` | Substitui o banco por um backup. Pede que você digite `RESTAURAR` | Compara a contagem de cada tabela com o manifesto do backup, antes e depois de trocar o banco |
@@ -84,9 +84,10 @@ Respostas para o modo `--yes` (variável de ambiente ou linha `CHAVE=valor` do a
 | `DESKVOICE_ORG_NAME` | Nome da empresa |
 | `DESKVOICE_OWNER_NAME`, `DESKVOICE_OWNER_EMAIL`, `DESKVOICE_OWNER_PASSWORD` | O primeiro usuário (dono). Senha com 10 caracteres ou mais |
 | `DESKVOICE_PUBLIC_IP` | Só se a descoberta automática do IP falhar |
-| `DESKVOICE_APPLY_UFW=yes` | Aplica as regras no firewall `ufw` sem perguntar |
+| `DESKVOICE_APPLY_UFW=yes` | Aplica as regras no firewall `ufw` sem perguntar. Só aceita `yes`: outro valor para com erro. Com o `ufw` inativo, não tem efeito, e o instalador diz |
 | `DESKVOICE_RTP_START`, `DESKVOICE_RTP_END` | Outra faixa de portas de áudio (padrão 10000 a 10200) |
-| `DESKVOICE_VERSION` | Uma versão publicada específica (exemplo: `0.3.0`), em vez da mais recente |
+| `DESKVOICE_VERSION` | Uma versão publicada específica (exemplo: `0.3.0`), em vez da mais recente. Junto de `--build`, que constrói o código desta pasta, para com erro |
+| `DESKVOICE_ADOPT=yes` (ou `--adopt`) | Esta pasta adota a instalação desta máquina, feita a partir de uma pasta que não existe mais. Ver abaixo, em "Pasta movida" |
 
 Se usar um arquivo de respostas com a senha, apague-o depois da instalação.
 
@@ -169,7 +170,21 @@ no registro, e a passada termina.
 | Ver se está passando | `bash install/healthcheck.sh` (linha "Agente de atualização": agendado ou não, e quando falou com o painel pela última vez) e, no painel, Configurações → Versão e atualização |
 
 O agente recusa rodar se a instalação que está no ar foi criada a partir de outra pasta: um
-segundo clone do repositório na mesma máquina não atualiza a instalação de verdade.
+segundo clone do repositório na mesma máquina não atualiza a instalação de verdade. O mesmo vale
+para `install.sh` (também com `--dry-run`), `update.sh`, `restore.sh`, `backup.sh` e
+`healthcheck.sh`: o projeto do Compose tem nome fixo, então todo clone manda nos mesmos
+contêineres. Se já há um DeskVoice nesta máquina (rodando ou parado) e ele foi instalado de outra
+pasta, o script para antes de tocar em qualquer coisa e diz qual pasta é a dona e o comando a rodar
+de lá. Máquina sem nenhum contêiner do DeskVoice é instalação nova, e segue normal.
+
+**Pasta movida.** Se a pasta dona não existe mais (a instalação foi movida, ou passou para outro
+usuário), o script diz isso, em vez de mandar para ela. Para a pasta nova assumir a instalação sem
+perder os dados: copie `deploy/.env`, `deploy/app.env` e `deploy/migrate.env` da pasta antiga (ou
+do backup dela) para a nova e rode `DESKVOICE_ADOPT=yes bash install/install.sh`. Sem esses três
+arquivos o instalador para: os segredos seriam outros, e o banco que já existe recusaria a
+conexão. Com eles, tira os contêineres criados pela pasta antiga e os recria a partir da nova; os
+volumes, onde ficam os dados, têm o nome fixo do projeto e são os mesmos. Com a pasta dona ainda
+existindo, a opção para com erro: duas pastas mandariam nos mesmos contêineres.
 
 `--build` é para quem desenvolve. Imagem construída na VPS não é a que o projeto testou e
 publicou, e precisa ser reconstruída à mão a cada mudança.
@@ -220,6 +235,9 @@ recusá-la é o Caddy (404 sem corpo). Se o 404 vem do painel, a linha "Agente d
 vira `aviso`: o Caddy está rodando a configuração de antes da atualização (o arquivo só é
 relido ao reiniciar). Resolve com `docker restart deskvoice-caddy-1`; rodar `bash
 install/update.sh` também reinicia o Caddy quando o arquivo que ele tem montado não é o do disco.
+A atualização (na ida e na volta) e o instalador fazem o mesmo com os cinco arquivos que o
+Asterisk monta: reiniciam o Asterisk só quando algum é diferente do disco, porque o reinício
+derruba as ligações em andamento.
 
 A linha "WhatsApp" fala do serviço do WhatsApp por QR Code (o contêiner `waha`), que só existe
 na instalação que o pediu pela tela. "Não instalado" é o estado normal, e é `ok`. Instalado, a
@@ -227,8 +245,17 @@ linha diz se ele está de pé e responde ao painel; parado é `falha`, mas nunca
 não provoca a volta de uma atualização. Ela não diz se há um número conectado: isso é a tela, em
 Configurações → WhatsApp.
 
-Código de saída: `0` sem falha, `1` se falhou peça essencial (painel, banco, Asterisk, worker
-de voz, rotinas), `2` se falhou outra (linha, motor de voz, entrada única, WhatsApp, portas, disco).
+Duas linhas vêm da rota de saúde do painel, que as responde sem sessão. "Painel → banco" diz se
+o painel entra no banco (o Postgres aceitar conexão, na linha "Banco", não prova isso): é peça
+essencial. "Rotinas → fila" diz se o processo de rotinas está conectado ao banco esperando
+tarefas e se a fila anda: é `falha` não essencial, e não provoca a volta de uma atualização. Sem
+ele as ligações seguem atendidas, e resumos e avisos esperam na fila até ele voltar; a volta
+restauraria o banco do backup por um defeito que pode ser de antes da atualização. O processo
+de rotinas parado continua sendo peça essencial, na linha "Rotinas".
+
+Código de saída: `0` sem falha, `1` se falhou peça essencial (painel, banco, painel → banco,
+Asterisk, worker de voz, controle da telefonia, rotinas), `2` se falhou outra (rotinas → fila,
+linha, motor de voz, entrada única, WhatsApp, portas, disco).
 
 ### `backup.sh` e `restore.sh`
 

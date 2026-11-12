@@ -390,6 +390,51 @@ jobs:
             echo "::error::De dentro do painel, esperava direto=200 e por-proxy=404."
             exit 1
           fi
+      # A atualização regrava a configuração do Asterisk e a recarrega sem reiniciá-lo (reiniciar
+      # derruba as ligações). O Docker de mentira dos testes do kit não prova que o Asterisk 20 de
+      # verdade aceita recarregar os cinco módulos, nem que a ARI do processo de voz sobrevive. Aqui,
+      # pelo caminho de uma versão nova: os cinco modelos mudam (uma linha de comentário),
+      # render_asterisk_config regrava no lugar e anota o pendente, e converge_asterisk recarrega.
+      - name: A configuração do Asterisk recarrega sem reiniciá-lo
+        if: hashFiles('install/agent.sh') != ''
+        run: |
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          source install/_common.sh
+          state() { docker inspect -f '{{.Id}} {{.RestartCount}} {{.State.StartedAt}}' "$(dc ps -q asterisk)"; }
+          before="$(state)"; since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          for f in extensions.conf http.conf ari.conf.tmpl rtp.conf.tmpl pjsip.conf.base; do
+            printf '; ci %s: comentário de uma versão nova\n' "${GITHUB_RUN_ID}" >> "deploy/asterisk/${f}"
+          done
+          render_asterisk_config
+          git checkout -- deploy/asterisk
+          echo "anotado para recarregar: $(sort -u "${ASTERISK_PENDING}" | tr '\n' ' ')"
+          out="$(converge_asterisk 2>&1)"
+          printf '%s\n' "${out}" | tee "${RUNNER_TEMP}/asterisk-reload.log"
+          # Uma desconexão da ARI aparece no log da voz em instantes; a reconexão leva até segundos.
+          sleep 15
+          after="$(state)"
+          telephony="$(NO_COLOR=1 bash install/healthcheck.sh --json 2>/dev/null | jq -r '.checks[] | select(.id == "telephony") | .status + " " + .detail' || true)"
+          # Lido antes de contar: um `docker compose logs` que falha não pode virar "zero desconexões".
+          voice_log="$(dc logs --no-color --since "${since}" voice)"
+          dropped="$(printf '%s\n' "${voice_log}" | grep -c 'ari events disconnected' || true)"
+          echo "antes:  ${before}"; echo "depois: ${after}"; echo "controle da telefonia: ${telephony}"; echo "desconexões da ARI no log da voz: ${dropped}"
+          problems=""
+          # A frase só sai quando os cinco módulos responderam "reloaded successfully" ao Asterisk de verdade.
+          case "${out}" in
+            *"Asterisk com a configuração desta versão (ari.conf extensions.conf http.conf pjsip.conf rtp.conf), recarregada sem derrubar ligações"*) ;;
+            *) problems="${problems} a saída do converge_asterisk não diz que os cinco arquivos foram recarregados;" ;;
+          esac
+          [ "${before}" = "${after}" ] || problems="${problems} o contêiner do Asterisk foi reiniciado ou recriado;"
+          case "${telephony}" in ok\ *) ;; *) problems="${problems} a linha 'Controle da telefonia' da saúde não está ok;" ;; esac
+          [ "${dropped}" = 0 ] || problems="${problems} a ARI do processo de voz caiu durante a recarga;"
+          if [ -n "${problems}" ]; then
+            echo "::error::Recarregar a configuração do Asterisk:${problems}"
+            echo "--- Asterisk"; dc logs --no-color --tail 60 asterisk 2>&1 | mask_secrets
+            echo "--- voz, desde a recarga"; printf '%s\n' "${voice_log}" | mask_secrets
+            exit 1
+          fi
+          echo "A configuração do Asterisk recarregou os cinco módulos sem reiniciá-lo, e a ARI da voz seguiu conectada." | tee -a "${GITHUB_STEP_SUMMARY}"
       # Testes de tela (apps/panel/test/e2e): o Chromium entra pela porta que o Caddy publicou, no
       # sistema que este job acabou de subir, com o dono que o instalador criou. Entrar, configurar,
       # simular uma chamada, convidar e as confirmações antes de apagar. Não sobe nada de novo.
@@ -437,6 +482,8 @@ jobs:
           NO_COLOR=1 bash install/healthcheck.sh
           echo "--- deploy/agent/agent.log"; tail -n 30 deploy/agent/agent.log 2>/dev/null | mask_secrets
           echo "--- painel e Caddy"; dc logs --no-color --tail 40 panel caddy 2>&1 | mask_secrets
+          echo "--- recarga da configuração do Asterisk"; cat "${RUNNER_TEMP}/asterisk-reload.log" 2>/dev/null
+          echo "--- Asterisk e voz"; dc logs --no-color --tail 40 asterisk voice 2>&1 | mask_secrets
       - uses: ./.github/actions/explain-failure
         if: failure()
         with:

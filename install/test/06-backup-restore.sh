@@ -102,7 +102,7 @@ rm "$FAKE_DIR/counts_live"
 : > "$FAKE_DIR/calls.log"
 out="$(echo "sim" | bash "$KIT/restore.sh" "$dir" 2>&1)"; equal "confirmação errada cancela" 1 "$?"
 contains "confirmação errada: diz que nada mudou" "$out" "nada foi alterado"
-equal "confirmação errada: nada foi executado no Docker" 0 "$(wc -l < "$FAKE_DIR/calls.log" | tr -d ' ')"
+equal "confirmação errada: nada foi executado no Docker (só a pergunta de quem é a instalação)" 0 "$(grep -vc 'ps -a --filter label=com.docker.compose.project=deskvoice' "$FAKE_DIR/calls.log")"
 check "confirmação digitada certa restaura" bash -c "echo RESTAURAR | bash '$KIT/restore.sh' '$dir'"
 check "latest acha o backup mais recente" bash "$KIT/restore.sh" --yes latest
 
@@ -110,7 +110,7 @@ cp -R "$dir" "$SANDBOX/tampered"; echo "lixo" >> "$SANDBOX/tampered/db.dump"
 : > "$FAKE_DIR/calls.log"
 out="$(bash "$KIT/restore.sh" --yes "$SANDBOX/tampered" 2>&1)"; equal "dump alterado depois do backup é recusado" 1 "$?"
 contains "dump alterado: diz o motivo" "$out" "não bate com o manifesto"
-equal "dump alterado: nada foi executado no Docker" 0 "$(wc -l < "$FAKE_DIR/calls.log" | tr -d ' ')"
+equal "dump alterado: nada foi executado no Docker (só a pergunta de quem é a instalação)" 0 "$(grep -vc 'ps -a --filter label=com.docker.compose.project=deskvoice' "$FAKE_DIR/calls.log")"
 
 cp -R "$dir" "$SANDBOX/otherkey"; env_set "$SANDBOX/otherkey/app.env" DESKVOICE_SECRET_KEY "outra-chave-de-outra-vps"
 out="$(bash "$KIT/restore.sh" --yes "$SANDBOX/otherkey" 2>&1)"; equal "backup de outra chave sem --with-config é recusado" 1 "$?"

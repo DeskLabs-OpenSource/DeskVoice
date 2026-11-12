@@ -14,6 +14,14 @@ case "$args" in
   *" rm -sf waha "*) if [ -f "$FAKE_DIR/waha_rm_fail" ]; then exit 1; fi; grep -vx waha "$FAKE_DIR/running" > "$FAKE_DIR/running.next" 2>/dev/null; mv "$FAKE_DIR/running.next" "$FAKE_DIR/running"; exit 0 ;;
   # Subir só o WAHA: passa a rodar, salvo $FAKE_DIR/waha_up_fail.
   *" up -d waha "*) if [ -f "$FAKE_DIR/waha_up_fail" ]; then exit 1; fi; grep -qx waha "$FAKE_DIR/running" 2>/dev/null || echo waha >> "$FAKE_DIR/running"; exit 0 ;;
+  # De que pasta o Compose subiu os contêineres do projeto (o rótulo working_dir de cada um): o que
+  # estiver em $FAKE_DIR/project_dir (outra pasta); sem ele, a pasta do teste, se há contêiner na
+  # lista de rodando; lista vazia é máquina sem instalação.
+  *" ps -a --filter label=com.docker.compose.project=deskvoice "*)
+    if [ -f "$FAKE_DIR/project_dir" ]; then cat "$FAKE_DIR/project_dir"
+    elif [ -s "$FAKE_DIR/running" ]; then echo "$DESKVOICE_DEPLOY_DIR"; fi; exit 0 ;;
+  # Tirar os contêineres do projeto: os que o `up` seguinte criar levam o rótulo da pasta do teste.
+  *" down "*) rm -f "$FAKE_DIR/project_dir"; exit 0 ;;
   *" ps -q "*) if grep -qx "$last" "$FAKE_DIR/running" 2>/dev/null; then echo "cid-$last"; fi; exit 0 ;;
   *" ps "*) answer ps_output; exit 0 ;;
   *" pg_isready "*) exit "$(cat "$FAKE_DIR/pg_isready_exit" 2>/dev/null || echo 0)" ;;
@@ -26,6 +34,15 @@ case "$args" in
   *" exec -T panel node "*"auth/login"*) cat > "$FAKE_DIR/login_stdin"; if [ -f "$FAKE_DIR/login_probe" ]; then cat "$FAKE_DIR/login_probe"; else echo 'ok|200'; fi; exit 0 ;;
   # O Caddyfile que o contêiner do Caddy tem montado: por padrão, igual ao do disco.
   *" exec -T caddy cat "*) if [ -f "$FAKE_DIR/caddy_mounted" ]; then cat "$FAKE_DIR/caddy_mounted"; else cat "$DESKVOICE_DEPLOY_DIR/Caddyfile" 2>/dev/null; fi; exit 0 ;;
+  # Os arquivos que o contêiner do Asterisk tem montados: os de $FAKE_DIR/asterisk_mounted/; sem
+  # eles, os do disco. Reiniciar o Asterisk monta de novo o que está no disco.
+  *" exec -T asterisk cat "*) f="$(basename "$last")"; if [ -f "$FAKE_DIR/asterisk_mounted/$f" ]; then cat "$FAKE_DIR/asterisk_mounted/$f"; else cat "$DESKVOICE_DEPLOY_DIR/asterisk/generated/$f" 2>/dev/null; fi; exit 0 ;;
+  # Recarregar módulos do Asterisk: cada um "reloaded successfully", salvo $FAKE_DIR/asterisk_reload_fail.
+  *" exec -T asterisk asterisk -rx module reload "*)
+    all="$*"; for m in ${all##*module reload }; do
+      if [ -f "$FAKE_DIR/asterisk_reload_fail" ]; then echo "The module '$m' reported a reload failure"; else echo "Module '$m' reloaded successfully."; fi
+    done; exit 0 ;;
+  *" restart asterisk "*) if [ -d "$FAKE_DIR/asterisk_mounted" ]; then cp "$DESKVOICE_DEPLOY_DIR/asterisk/generated/"*.conf "$FAKE_DIR/asterisk_mounted/"; fi; exit 0 ;;
   # A conversa do agente de atualização com o painel. Cada chamada guarda o que recebeu pela
   # entrada padrão em agent_call.<n>. A resposta vem da primeira linha de $FAKE_DIR/agent_replies
   # (consumida a cada chamada; com `!` na frente, a chamada falha); sem o arquivo, "não há pedido".
@@ -38,8 +55,6 @@ case "$args" in
       reply="$(head -n 1 "$FAKE_DIR/agent_replies")"; sed 1d "$FAKE_DIR/agent_replies" > "$FAKE_DIR/agent_replies.next"; mv "$FAKE_DIR/agent_replies.next" "$FAKE_DIR/agent_replies"
     fi
     case "$reply" in "!"*) echo "${reply#!}"; exit 1 ;; *) echo "$reply"; exit 0 ;; esac ;;
-  # De que pasta o Compose subiu o contêiner: por padrão, a do teste.
-  " inspect "*) if [ -f "$FAKE_DIR/project_dir" ]; then cat "$FAKE_DIR/project_dir"; else echo "$DESKVOICE_DEPLOY_DIR"; fi; exit 0 ;;
   # A sonda do serviço de WhatsApp, feita a partir do painel: responde, salvo $FAKE_DIR/waha_down.
   *" exec -T panel node "*"waha:3000/ping"*) if [ -f "$FAKE_DIR/waha_down" ]; then exit 1; fi; exit 0 ;;
   *" exec -T panel node "*) answer panel_health; exit 0 ;;

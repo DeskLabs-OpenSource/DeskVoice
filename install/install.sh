@@ -29,9 +29,14 @@
 #                              numa instalação com domínio, o instalador para com erro em vez de ignorar
 #   DESKVOICE_PANEL_PORT       opcional: a porta local do painel (padrão: 3080 ou a seguinte livre). Só vale
 #                              quando o painel sai por uma porta local (sem domínio, ou 80/443 de outro proxy)
-#   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar
+#   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar. Só aceita yes; com o
+#                              ufw inativo, não tem efeito, e o instalador diz
 #   DESKVOICE_RTP_START / DESKVOICE_RTP_END   opcional: outra faixa de portas de áudio
-#   DESKVOICE_VERSION          opcional: uma versão publicada específica (exemplo: 0.3.0), em vez da mais recente
+#   DESKVOICE_VERSION          opcional: uma versão publicada específica (exemplo: 0.3.0), em vez da mais recente.
+#                              Não combina com --build, que constrói o código desta pasta: as duas juntas param com erro
+#   DESKVOICE_ADOPT=yes (ou --adopt)  esta pasta passa a ser a da instalação desta máquina, que foi feita a partir
+#                              de uma pasta que não existe mais (movida ou de outro usuário). Os dados ficam; antes,
+#                              copie para cá os três arquivos de ambiente de deploy/ da pasta antiga
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 ASSUME_YES=0; DRY_RUN=0; FORCE=0; BUILD=0; answers_file=""
@@ -41,8 +46,9 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1 ;;
     --force) FORCE=1 ;;
     --build) BUILD=1 ;;
+    --adopt) DESKVOICE_ADOPT=yes ;;
     --answers) answers_file="${2:-}"; shift ;;
-    -h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,39p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Veja as opções com: bash install/install.sh --help" ;;
   esac
   shift
@@ -59,7 +65,7 @@ fi
 # Opções de exposição do painel: o valor é conferido aqui, em todo modo e antes de qualquer coisa
 # ser gravada. Se a opção tem efeito no modo desta máquina é conferido adiante, quando o modo é
 # conhecido (domínio, 80/443): opção sem efeito para com erro, nunca é ignorada em silêncio.
-for option in DESKVOICE_PANEL_LOCAL_ONLY DESKVOICE_PANEL_PUBLIC_HTTP; do
+for option in DESKVOICE_PANEL_LOCAL_ONLY DESKVOICE_PANEL_PUBLIC_HTTP DESKVOICE_APPLY_UFW DESKVOICE_ADOPT; do
   case "$(printenv "$option" || true)" in
     ""|yes) ;;
     *) die "O valor de $option ($(printenv "$option")) não vale." "O único valor aceito é yes, em minúsculas: $option=yes. Para ficar com o padrão, não defina a variável." ;;
@@ -70,6 +76,25 @@ if [ -n "${DESKVOICE_PANEL_LOCAL_ONLY:-}" ] && [ -n "${DESKVOICE_PANEL_PUBLIC_HT
 fi
 if [ -n "${DESKVOICE_PANEL_PORT:-}" ]; then
   valid_port "$DESKVOICE_PANEL_PORT" >/dev/null || die "A porta do painel em DESKVOICE_PANEL_PORT ($DESKVOICE_PANEL_PORT) não vale." "Use um número de 1 a 65535, ou não defina a variável."
+fi
+if [ "$BUILD" = 1 ] && [ -n "${DESKVOICE_VERSION:-}" ]; then
+  die "DESKVOICE_VERSION=$DESKVOICE_VERSION e --build pedem coisas diferentes: a primeira, as imagens publicadas dessa versão; a segunda, imagens construídas nesta máquina a partir do código desta pasta." "Escolha um dos dois e rode de novo: tire a variável para construir aqui, ou tire o --build para instalar a versão publicada."
+fi
+# Antes de qualquer coisa: se já há um DeskVoice nesta máquina, ele tem de ser o desta pasta. A
+# exceção é a adoção, pedida de propósito, quando a pasta dona não existe mais.
+adopt_from=""
+if [ -z "${DESKVOICE_ADOPT:-}" ]; then refuse_foreign_install
+else
+  adopt_from="$(foreign_install_dir)"
+  [ -n "$adopt_from" ] || die "DESKVOICE_ADOPT=yes serve para esta pasta adotar uma instalação feita a partir de uma pasta que não existe mais, e não é o caso: ou não há DeskVoice nesta máquina, ou ele já é o desta pasta." "Rode sem a opção: bash install/install.sh"
+  # Com a dona viva, as duas pastas passariam a mandar nos mesmos contêineres.
+  [ ! -d "$adopt_from" ] || die "A instalação desta máquina pertence a $adopt_from, que existe: adotá-la daqui deixaria duas pastas mandando nos mesmos contêineres. Nada foi alterado." "Rode a partir de lá: cd $(dirname "$adopt_from") && bash install/install.sh"
+  # Os segredos estão nestes arquivos, e a senha do banco está gravada no volume: com segredos
+  # gerados de novo aqui, o painel e as migrations não entram no banco que já existe.
+  for f in "$ENV_FILE" "$APP_ENV_FILE" "$MIGRATE_ENV_FILE"; do
+    [ -f "$f" ] || die "Para adotar a instalação, $f tem de existir nesta pasta, e não existe. Ele precisa ser o da pasta antiga ($adopt_from): com segredos novos, o banco que já existe recusa a conexão. Nada foi alterado." "Copie deploy/.env, deploy/app.env e deploy/migrate.env da pasta antiga (ou do backup dela, ou de onde você a moveu) para $DEPLOY_DIR e rode de novo: DESKVOICE_ADOPT=yes bash install/install.sh"
+  done
+  ok "Adoção: esta pasta passa a ser a da instalação que foi feita a partir de $adopt_from, que não existe mais"
 fi
 
 SUDO=""; if [ "$(id -u)" != 0 ] && have sudo; then SUDO="sudo"; fi
@@ -376,10 +401,12 @@ if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
   warn "O firewall ufw está ativo. Regras necessárias:"
   for rule in $ufw_rules; do info "    $SUDO ufw allow $rule"; done
   if [ "$DRY_RUN" = 1 ]; then would "oferecer aplicar essas regras"
-  elif { [ "$ASSUME_YES" = 1 ] && [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; } || { [ "$ASSUME_YES" != 1 ] && confirm "Aplico essas regras agora?"; }; then
+  elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ] || { [ "$ASSUME_YES" != 1 ] && confirm "Aplico essas regras agora?"; }; then
     for rule in $ufw_rules; do $SUDO ufw allow "$rule" >/dev/null || die "Não consegui aplicar a regra $rule no ufw." "Rode à mão: $SUDO ufw allow $rule"; done
     ok "Regras aplicadas no ufw"
   else warn "Regras NÃO aplicadas. Sem elas a ligação pode ficar muda: rode os comandos acima."; fi
+elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; then
+  info "DESKVOICE_APPLY_UFW=yes não teve efeito: o firewall ufw não está ativo nesta máquina, e não há regra a aplicar."
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -395,6 +422,7 @@ if [ "$DRY_RUN" = 1 ]; then
   else would "subir o Caddy do DeskVoice na porta 80, só com HTTP e aberto para a internet (painel e voz do navegador pelo mesmo endereço)"; fi
   if [ "$version" = "$LOCAL_VERSION" ]; then would "construir as imagens do DeskVoice nesta máquina e gravar a versão como \"$LOCAL_VERSION\""
   else would "baixar as imagens da versão ${version:-(a definir)} e gravar esse número em deploy/.env; se elas não baixarem, parar com erro, sem construir aqui"; fi
+  if [ -n "$adopt_from" ]; then would "tirar os contêineres criados pela pasta antiga ($adopt_from) e recriá-los a partir desta, com os mesmos volumes (os dados ficam)"; fi
   would "subir o Postgres e aplicar as migrations"
   if [ "$create_owner" = 1 ]; then would "criar a empresa \"$org_name\" e o usuário dono $owner_email"; fi
   would "subir painel, voz, rotinas e Asterisk, e esperar todos responderem"
@@ -447,6 +475,15 @@ fi
 # Só agora, com as imagens em mãos, a versão é gravada.
 env_set "$ENV_FILE" DESKVOICE_VERSION "$version"
 
+if [ -n "$adopt_from" ]; then
+  # Os contêineres guardam a pasta de onde foram criados (e, nela, os arquivos montados): só
+  # recriados daqui passam a ser desta pasta. O Compose não recria um contêiner cuja configuração
+  # não mudou (o do banco), então todos saem antes. Os dados ficam nos volumes do projeto, cujo nome
+  # vem do nome fixo do projeto (`name: deskvoice` no docker-compose.yml), e não da pasta: `down`
+  # sem -v não os apaga, e os contêineres de daqui os encontram.
+  info "Tirando os contêineres criados pela pasta antiga, para recriá-los a partir desta (os dados ficam)..."
+  dc down --remove-orphans || die "Não consegui tirar os contêineres criados pela pasta antiga." "Veja a mensagem acima e rode de novo: DESKVOICE_ADOPT=yes bash install/install.sh"
+fi
 info "Subindo o banco..."
 dc up -d --wait postgres || { show_logs postgres; die "O banco (Postgres) não ficou pronto." "Veja o log acima. Causa comum: disco cheio (df -h). Depois rode o instalador de novo."; }
 ok "Banco no ar"
@@ -469,6 +506,11 @@ fi
 
 info "Subindo painel, voz, rotinas e telefonia..."
 dc up -d --remove-orphans || die "O Docker não conseguiu subir os serviços." "Veja a mensagem acima; depois confira com bash install/healthcheck.sh e rode o instalador de novo."
+# Reinstalação (ou `git pull` seguido do instalador, em instalação construída aqui): o Caddy e o
+# Asterisk que já estavam de pé seguem com a configuração antiga. O Caddy reinicia se o Caddyfile
+# mudou; o Asterisk recarrega o que mudou (ver converge_asterisk).
+converge_caddy
+converge_asterisk
 
 timeout="${DESKVOICE_HEALTH_TIMEOUT:-240}"; waited=0
 info "Esperando cada peça responder (até ${timeout}s)..."

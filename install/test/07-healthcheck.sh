@@ -7,8 +7,8 @@ line() { printf '%s\n' "$out" | grep "$1" | head -n 1; }
 
 # Instalação nova: tudo no ar, linha e motor ainda por configurar.
 out="$(bash "$H" 2>&1)"; equal "instalação nova sem linha nem chave: sai com zero" 0 "$?"
-equal "uma linha por peça (13 peças)" 13 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
-for piece in Painel Banco Asterisk "Worker de voz" Rotinas "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
+equal "uma linha por peça (15 peças)" 15 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
+for piece in Painel Banco "Painel → banco" Asterisk "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
 contains "linha não cadastrada é aviso, não falha" "$(line 'Linha telefônica')" "aviso"
 contains "linha não cadastrada traz o detalhe" "$(line 'Linha telefônica')" "nenhuma linha cadastrada ainda"
 contains "motor sem chave é aviso, não falha" "$(line 'Motor de voz')" "aviso"
@@ -36,6 +36,33 @@ echo 'unreachable|fail|connect ECONNREFUSED 127.0.0.1:3000' > "$FAKE_DIR/panel_h
 out="$(bash "$H" 2>&1)"; equal "painel mudo: código 1" 1 "$?"
 contains "painel mudo traz o erro" "$(line 'Painel')" "ECONNREFUSED"
 printf '%s\n' 'panel|ok|respondendo' 'trunk|ok|registrado' 'engine|ok|gemini-live' > "$FAKE_DIR/panel_health"
+
+# Painel → banco e rotinas → fila: o kit lê as duas da rota de saúde do painel, como lê a linha e o motor.
+ok_lines() { printf '%s\n' 'panel|ok|respondendo' 'database|ok|respondendo' 'routines|ok|em dia' 'trunk|ok|registrado' 'engine|ok|gemini-live'; }
+: > "$FAKE_DIR/calls.log"; ok_lines > "$FAKE_DIR/panel_health"
+out="$(bash "$H" 2>&1)"; equal "painel e rotinas conectados: zero" 0 "$?"
+check "pede à rota de saúde as linhas database e routines" grep -q "'panel','database','routines','trunk','engine'" "$FAKE_DIR/calls.log"
+contains "painel → banco ok" "$(line 'Painel → banco')" "ok"
+contains "rotinas → fila ok" "$(line 'Rotinas → fila')" "ok"
+ok_lines | sed 's/^database|ok|respondendo$/database|fail|o banco não respondeu ao painel/' > "$FAKE_DIR/panel_health"
+out="$(bash "$H" 2>&1)"; equal "painel sem chegar ao banco (Postgres aceitando conexão): código 1" 1 "$?"
+contains "painel sem chegar ao banco: é falha" "$(line 'Painel → banco')" "falha "
+contains "painel sem chegar ao banco: diz o motivo" "$(line 'Painel → banco')" "o banco não respondeu ao painel"
+contains "painel sem chegar ao banco: o Postgres em si segue ok" "$(line 'Banco')" "ok"
+bash "$H" --essential >/dev/null 2>&1; equal "painel sem chegar ao banco: reprova no modo essencial (provoca a volta da atualização)" 1 "$?"
+ok_lines | sed 's/^routines|ok|em dia$/routines|fail|nenhum processo de rotinas está conectado ao banco esperando tarefas/' > "$FAKE_DIR/panel_health"
+out="$(bash "$H" 2>&1)"; equal "rotinas sem escutar a fila: código 2" 2 "$?"
+contains "rotinas sem escutar a fila: é falha" "$(line 'Rotinas → fila')" "falha "
+contains "rotinas sem escutar a fila: diz o motivo" "$(line 'Rotinas → fila')" "nenhum processo de rotinas está conectado"
+contains "rotinas sem escutar a fila: o processo em si segue ok" "$(line 'Rotinas ')" "ok"
+bash "$H" --essential >/dev/null 2>&1; equal "rotinas sem escutar a fila: não reprova no modo essencial (não provoca volta)" 0 "$?"
+ok_lines | sed 's/^routines|ok|em dia$/routines|warn|a fila está atrasada/' > "$FAKE_DIR/panel_health"
+contains "fila atrasada é aviso" "$(bash "$H" 2>&1 | grep 'Rotinas → fila')" "aviso"
+echo 'unreachable|fail|connect ECONNREFUSED 127.0.0.1:3000' > "$FAKE_DIR/panel_health"
+out="$(bash "$H" 2>&1)"
+contains "painel mudo: painel → banco não consultado" "$(line 'Painel → banco')" "não deu para consultar"
+contains "painel mudo: rotinas → fila não consultado" "$(line 'Rotinas → fila')" "não deu para consultar"
+ok_lines > "$FAKE_DIR/panel_health"
 
 # Cada peça essencial, uma a uma.
 echo 1 > "$FAKE_DIR/pg_isready_exit"; bash "$H" >/dev/null 2>&1; equal "banco sem aceitar conexão: código 1" 1 "$?"; echo 0 > "$FAKE_DIR/pg_isready_exit"
@@ -121,7 +148,7 @@ lacks "tudo certo: nenhuma falha" "$out" "falha "
 json="$(bash "$H" --json 2>&1)"
 contains "json: código de saída" "$json" '{"exit_code":0,"checks":['
 contains "json: peça com estado e detalhe" "$json" '{"id":"trunk","name":"Linha telefônica","essential":false,"status":"ok","detail":"registrado"}'
-equal "json: treze peças" 13 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
+equal "json: quinze peças" 15 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
 if command -v python3 >/dev/null 2>&1; then check "json: é JSON válido" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$json"; fi
 printf '%s\n' 'panel|ok|diz "aspas" e \barra' 'trunk|ok|x' 'engine|ok|y' > "$FAKE_DIR/panel_health"
 if command -v python3 >/dev/null 2>&1; then check "json: escapa aspas e barra" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(bash "$H" --json 2>&1)"; fi

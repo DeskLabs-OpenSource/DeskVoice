@@ -236,7 +236,14 @@ render_template() {  # render_template <modelo> <destino>; os valores vêm do am
   # 644 no arquivo, 700 na pasta (ver render_asterisk_config): dentro do contêiner o
   # Asterisk lê com o usuário dele; na VPS, ninguém além do dono entra na pasta.
   chmod 644 "$tmp"
-  mv "$tmp" "$dst"
+  # Arquivo que já existe é reescrito NO LUGAR, e só se mudou. O Compose monta cada arquivo do
+  # Asterisk um a um, e um arquivo montado assim fica preso ao inode que existia quando o contêiner
+  # subiu: trocado por renomeação, o contêiner seguiria lendo o antigo, e recarregar não adiantaria.
+  # ponytail: a escrita no lugar não é atômica; o arquivo novo já está inteiro em $tmp antes, e se
+  # ela falhar (disco cheio) a renomeação abaixo ainda deixa o disco certo, e converge_asterisk vê o
+  # contêiner com o arquivo antigo e reinicia.
+  if [ -f "$dst" ] && { cmp -s "$tmp" "$dst" || cat "$tmp" > "$dst" 2>/dev/null; }; then rm -f "$tmp"
+  else mv "$tmp" "$dst"; fi
 }
 render_asterisk_config() {
   ARI_PASSWORD="$(env_get "$APP_ENV_FILE" ARI_PASSWORD)" PUBLIC_IP="$(env_get "$APP_ENV_FILE" PUBLIC_IP)" \
@@ -251,12 +258,22 @@ render_asterisk_config() {
   # do repositório fazia a instalação depender do umask de quem baixou: num servidor endurecido
   # (umask 077) o plano de discagem e a ARI ficavam ilegíveis para o Asterisk, que subia "saudável"
   # e não atendia nada.
-  render_template "$DEPLOY_DIR/asterisk/extensions.conf" "$GENERATED_DIR/extensions.conf"
-  render_template "$DEPLOY_DIR/asterisk/http.conf" "$GENERATED_DIR/http.conf"
-  render_template "$DEPLOY_DIR/asterisk/ari.conf.tmpl" "$GENERATED_DIR/ari.conf"
-  render_template "$DEPLOY_DIR/asterisk/rtp.conf.tmpl" "$GENERATED_DIR/rtp.conf"
-  render_template "$DEPLOY_DIR/asterisk/pjsip.conf.base" "$GENERATED_DIR/pjsip.conf"
+  render_asterisk_file extensions.conf extensions.conf
+  render_asterisk_file http.conf http.conf
+  render_asterisk_file ari.conf.tmpl ari.conf
+  render_asterisk_file rtp.conf.tmpl rtp.conf
+  render_asterisk_file pjsip.conf.base pjsip.conf
   unset ARI_PASSWORD
+}
+# O que mudou num arquivo que o Asterisk já tinha fica anotado em ASTERISK_PENDING, para
+# converge_asterisk recarregar depois que os contêineres sobem. Arquivo novo (instalação nova)
+# não: o Asterisk que sobe pela primeira vez já lê o que está no disco.
+ASTERISK_PENDING="$GENERATED_DIR/.reload-pending"
+render_asterisk_file() {  # render_asterisk_file <modelo em deploy/asterisk> <arquivo em generated>
+  local dst="$GENERATED_DIR/$2" before=""
+  if [ -f "$dst" ]; then before="$(cksum < "$dst")"; fi
+  render_template "$DEPLOY_DIR/asterisk/$1" "$dst"
+  if [ -n "$before" ] && [ "$before" != "$(cksum < "$dst")" ]; then echo "$2" >> "$ASTERISK_PENDING"; fi
 }
 
 # ── Validadores: devolvem 0 se vale; senão escrevem o motivo e devolvem 1 ─────
@@ -581,8 +598,40 @@ dc() {
     docker compose --env-file "$IMAGES_FILE" --env-file "$ENV_FILE" $profile -f "$DEPLOY_DIR/docker-compose.yml" "$@"
   fi
 }
+# O projeto do Compose tem nome fixo (`name: deskvoice` no docker-compose.yml): toda pasta com o
+# kit manda nos MESMOS contêineres. Um segundo clone (ou uma cópia antiga) geraria segredos novos,
+# ou trocaria a versão e o banco da instalação de outra pasta.
+# Devolve a pasta deploy/ dona da instalação desta máquina, se ela NÃO é a desta pasta. Vazio: não
+# há contêiner do DeskVoice (instalação nova), ou a dona é esta pasta, ou o Docker não respondeu
+# (aí o próprio script para adiante, por não conseguir falar com ele). Conta contêiner parado: uma
+# instalação parada também tem dona.
+foreign_install_dir() {
+  local dirs dir mine theirs
+  have docker || return 0
+  dirs="$(docker ps -a --filter label=com.docker.compose.project=deskvoice --format '{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null)" || return 0
+  [ -n "$dirs" ] || return 0
+  mine="$(cd "$DEPLOY_DIR" 2>/dev/null && pwd -P)"
+  while IFS= read -r dir; do
+    # Rótulo vazio ou pasta que não existe mais também não é esta pasta.
+    theirs="$(cd "$dir" 2>/dev/null && pwd -P || true)"
+    if [ -z "$theirs" ] || [ "$theirs" != "$mine" ]; then echo "${dir:-uma pasta que o Docker não informou}"; return 0; fi
+  done <<EOF
+$(printf '%s\n' "$dirs" | sort -u)
+EOF
+}
+# Para o script antes de ele tocar em qualquer coisa, se a instalação desta máquina é de outra pasta.
+refuse_foreign_install() {
+  local other
+  other="$(foreign_install_dir)"
+  [ -n "$other" ] || return 0
+  # Pasta que não existe mais (instalação movida, ou outro usuário): mandar para ela não tem saída.
+  [ -d "$other" ] || die "O DeskVoice desta máquina foi instalado a partir de $other, que não existe mais (a pasta foi movida ou apagada), e este comando está em $DEPLOY_DIR. Nada foi alterado." "Para esta pasta passar a ser a da instalação, sem perder os dados: copie deploy/.env, deploy/app.env e deploy/migrate.env da pasta antiga (ou do backup dela) para $DEPLOY_DIR e rode: DESKVOICE_ADOPT=yes bash $KIT_DIR/install.sh"
+  die "O DeskVoice desta máquina foi instalado a partir de outra pasta ($other), e este comando está em $DEPLOY_DIR. Rodar daqui mandaria na instalação de lá: segredos novos, outra versão ou outro banco. Nada foi alterado." "Rode o comando a partir da pasta da instalação: cd $(dirname "$other") && bash install/$(basename "$0")"
+}
 require_install() {
   local f
+  # Antes dos arquivos: num segundo clone eles faltam, e "rode o instalador" seria o conselho errado.
+  refuse_foreign_install
   for f in "$ENV_FILE" "$APP_ENV_FILE" "$MIGRATE_ENV_FILE"; do
     [ -f "$f" ] || die "Não achei $f: o DeskVoice ainda não foi instalado nesta pasta (ou a instalação parou no meio)." "Rode: bash install/install.sh"
   done
@@ -692,17 +741,63 @@ install_agent_schedule() {
     ok "Agente de atualização agendado (cron: $CRON_DIR/$AGENT_UNIT, a cada minuto, como $user)"
   fi
 }
-# O Caddyfile é montado como arquivo. Quando a troca de versão o substitui no disco, o contêiner
-# que já estava de pé continua com o antigo até reiniciar: quem veio da 0.1.0 (cujo atualizador
-# não reiniciava o Caddy) ficava sem a regra que recusa a rota do agente. Compara o CONTEÚDO que
-# o contêiner tem montado com o do disco (a data do arquivo não serve: depois de um checkout ela
-# é a do checkout) e reinicia só se forem diferentes. Pode rodar quantas vezes for.
+# Arquivo de configuração montado como arquivo único: quando a troca de versão (ou a volta) o
+# regrava no disco, o contêiner que já estava de pé pode continuar com o antigo. Quem veio da 0.1.0
+# (cujo atualizador não reiniciava o Caddy) ficava sem a regra que recusa a rota do agente. Compara
+# o CONTEÚDO que o contêiner lê com o do disco (a data do arquivo não serve: depois de um checkout
+# ela é a do checkout).
+#   mount_differs <serviço> <caminho no contêiner> <arquivo no disco>  →  0 se diferem
+mount_differs() { ! dc exec -T "$1" cat "$2" 2>/dev/null | cmp -s - "$3"; }
+# O Caddy reinicia só se o Caddyfile que ele lê não é o do disco. Pode rodar quantas vezes for.
 converge_caddy() {
   [ -n "$(dc ps -q --status running caddy 2>/dev/null)" ] || return 0
   [ -f "$DEPLOY_DIR/Caddyfile" ] || return 0
-  if dc exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null | cmp -s - "$DEPLOY_DIR/Caddyfile"; then return 0; fi
+  mount_differs caddy /etc/caddy/Caddyfile "$DEPLOY_DIR/Caddyfile" || return 0
   info "Reiniciando o Caddy, para ele ler o Caddyfile desta versão (o painel fica fora por alguns segundos)..."
   dc restart caddy >/dev/null 2>&1 || warn "Não consegui reiniciar o Caddy. Rode: docker restart deskvoice-caddy-1"
+}
+# Os cinco arquivos que render_asterisk_config grava e o Compose monta um a um. Reiniciar o Asterisk
+# derruba as ligações em andamento; recarregar o módulo de cada arquivo, não. Então:
+#   - o contêiner ainda lê um arquivo diferente do disco (ficou preso ao inode de antes de uma
+#     troca por renomeação, como fazia o kit até esta versão): recarregar relê o antigo, e só
+#     reiniciar resolve;
+#   - senão, o que render_asterisk_config anotou como mudado é recarregado, módulo a módulo
+#     (`module reload` diz o resultado de cada um; `core reload` não diz nada). Se algum não
+#     recarregar, reinicia, dizendo por quê.
+# Teto conhecido (código do Asterisk 20, res/res_pjsip/config_transport.c): com allow_reload=no, o
+# padrão, recarregar o transporte do PJSIP não aplica protocolo, bind, TLS, TCP, ToS e CoS. O
+# modelo do kit não muda nenhum deles por instalação; uma versão que mudar precisa reiniciar.
+asterisk_module_of() {
+  case "$1" in
+    extensions.conf) echo pbx_config ;; http.conf) echo http ;; ari.conf) echo res_ari ;;
+    rtp.conf) echo res_rtp_asterisk ;; pjsip.conf) echo res_pjsip ;;
+  esac
+}
+restart_asterisk() {  # restart_asterisk "<por quê>"
+  info "Reiniciando o Asterisk: $1. Ligações em andamento caem, e as novas ficam sem atendimento por alguns segundos..."
+  if dc restart asterisk >/dev/null 2>&1; then rm -f "$ASTERISK_PENDING"
+  else warn "Não consegui reiniciar o Asterisk. Rode: docker restart deskvoice-asterisk-1"; fi
+}
+converge_asterisk() {
+  local f stale="" modules="" out wanted reloaded
+  # Parado, ele lê o que está no disco quando subir.
+  if [ -z "$(dc ps -q --status running asterisk 2>/dev/null)" ]; then rm -f "$ASTERISK_PENDING"; return 0; fi
+  for f in extensions http ari rtp pjsip; do
+    [ -f "$GENERATED_DIR/$f.conf" ] || continue
+    if mount_differs asterisk "/etc/asterisk/$f.conf" "$GENERATED_DIR/$f.conf"; then stale="$f.conf"; break; fi
+  done
+  if [ -n "$stale" ]; then restart_asterisk "o contêiner ainda lê a versão antiga de $stale, e recarregar não alcança o arquivo novo"; return 0; fi
+  [ -s "$ASTERISK_PENDING" ] || { rm -f "$ASTERISK_PENDING"; return 0; }
+  while read -r f; do modules="$modules $(asterisk_module_of "$f")"; done < <(sort -u "$ASTERISK_PENDING")
+  out="$(dc exec -T asterisk asterisk -rx "module reload$modules" 2>&1 || true)"
+  wanted="$(echo "$modules" | wc -w | tr -d ' ')"
+  reloaded="$(printf '%s\n' "$out" | grep -c 'reloaded successfully' || true)"
+  if [ "$reloaded" = "$wanted" ]; then
+    ok "Asterisk com a configuração desta versão ($(sort -u "$ASTERISK_PENDING" | tr '\n' ' ' | sed 's/ $//')), recarregada sem derrubar ligações"
+    rm -f "$ASTERISK_PENDING"
+  else
+    restart_asterisk "recarregar a configuração não deu certo ($(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200))"
+  fi
 }
 # Deixa a instalação pronta para a atualização pela tela: o segredo (e o painel com ele) e o
 # agendamento. É o que leva o agente a quem instalou antes de ele existir.
