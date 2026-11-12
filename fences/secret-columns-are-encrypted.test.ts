@@ -20,9 +20,8 @@ function check(root: string): string[] {
   const violations: string[] = [];
   for (const file of listFiles(root, MIGRATIONS, isSql)) {
     for (const line of code(read(root, file)).split("\n")) {
-      const match = COLUMN.exec(line);
-      if (!match) continue;
-      const [, column] = match;
+      const column = COLUMN.exec(line)?.[1];
+      if (!column) continue;
       if (SECRET.test(column) && !PROTECTED.test(column)) {
         violations.push(`${file}: coluna \`${column}\` guarda segredo sem \`_enc\` nem \`_hash\``);
       }
