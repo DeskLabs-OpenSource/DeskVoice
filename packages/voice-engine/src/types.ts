@@ -17,8 +17,13 @@ export interface VoiceSessionConfig {
 
 export interface Usage {
   seconds?: number;
+  /** Tokens de entrada no preço cheio (áudio, quando o motor separa; todos, quando não separa). */
   inputTokens?: number;
   outputTokens?: number;
+  /** Quando o motor separa: entrada de texto (instruções, resultados de ferramenta), entrada em cache e saída de texto. */
+  textInputTokens?: number;
+  cachedInputTokens?: number;
+  textOutputTokens?: number;
 }
 
 export interface VoiceSessionEvents {
@@ -51,6 +56,10 @@ export interface EnginePricing {
   /** Centavos de dólar por milhão de tokens de áudio. */
   centsPerMillionInputTokens?: number;
   centsPerMillionOutputTokens?: number;
+  /** Preços menores que o provedor cobra por texto e por entrada em cache. Sem eles, vale o preço cheio. */
+  centsPerMillionTextInputTokens?: number;
+  centsPerMillionCachedInputTokens?: number;
+  centsPerMillionTextOutputTokens?: number;
   /** Data em que o preço foi conferido na página do provedor (AAAA-MM-DD). */
   checkedOn: string;
   source: string;

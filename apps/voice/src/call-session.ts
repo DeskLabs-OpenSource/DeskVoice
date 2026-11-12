@@ -134,7 +134,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let wrappingUp = false;
   let requestedEnd: Ending | undefined;
   let costCents = 0;
-  const usage = { seconds: 0, inputTokens: 0, outputTokens: 0 };
+  const usage = { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 };
   const cancelTimers: Array<() => void> = [];
   const toolsRunning = new Set<Promise<void>>();
   const callEnded = new AbortController();
@@ -187,6 +187,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     usage.seconds += increment.seconds ?? 0;
     usage.inputTokens += increment.inputTokens ?? 0;
     usage.outputTokens += increment.outputTokens ?? 0;
+    usage.textInputTokens += increment.textInputTokens ?? 0;
+    usage.cachedInputTokens += increment.cachedInputTokens ?? 0;
+    usage.textOutputTokens += increment.textOutputTokens ?? 0;
     // `usage` é incremento: o custo sai do total somado, e cada linha do extrato leva a diferença.
     // Assim a soma do extrato é sempre o custo da chamada, apesar do arredondamento.
     const total = estimateCostCents(engine.pricing, usage);
@@ -204,7 +207,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     }
     await q.exec(
       "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, at) values ($1, $2, $3, $4, $5, $6, $7, $8)",
-      [organizationId, callId, engine.id, Math.round(increment.seconds ?? 0), increment.inputTokens ?? 0, increment.outputTokens ?? 0, delta, clock.now()],
+      [organizationId, callId, engine.id, Math.round(increment.seconds ?? 0), (increment.inputTokens ?? 0) + (increment.textInputTokens ?? 0) + (increment.cachedInputTokens ?? 0), (increment.outputTokens ?? 0) + (increment.textOutputTokens ?? 0), delta, clock.now()],
     );
     await q.exec("update calls set cost_cents = $2 where id = $1", [callId, total]);
     if (reached) {
