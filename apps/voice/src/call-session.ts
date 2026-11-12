@@ -4,7 +4,7 @@ import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, ty
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
-import { createRecorder, saveRecording, type Recorder } from "./recording";
+import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
 
 export interface CallSessionDeps {
@@ -19,6 +19,8 @@ export interface CallSessionDeps {
   log?: Logger;
   /** Pasta das gravações (`RECORDINGS_DIR`). Sem ela, ou com a gravação desligada na organização, a chamada não é gravada. */
   recordingsDir?: string;
+  /** Espaço livre mínimo na pasta para gravar (padrão `MIN_FREE_BYTES_TO_RECORD`). */
+  recordingMinFreeBytes?: number;
 }
 
 export interface CallSessionInput {
@@ -134,7 +136,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let voice: VoiceSession | undefined;
   let lastEngineError: Error | undefined;
   let ending = false;
-  let recorder: Recorder | undefined;
+  let recorder: Recording | undefined;
   let wrappingUp = false;
   let requestedEnd: Ending | undefined;
   let requestedFarewell: string | undefined;
@@ -176,11 +178,29 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     } catch (error) {
       log("error", "could not release the telephony side", { error: messageOf(error) });
     }
-    const wav = recorder?.wav();
-    if (wav && deps.recordingsDir) {
-      await saveRecording(recordingPath(deps.recordingsDir, organizationId, callId), wav).catch(logFailure("could not save the call recording"));
-    }
+    // Fecha o arquivo em qualquer caminho de fim: com áudio vira `.wav`; sem, ou com falha, o `.part` some.
+    await recorder?.finish().catch(logFailure("could not save the call recording"));
     resolveDone({ status: end.status, endReason: end.endReason, costCents });
+  }
+
+  /**
+   * Abre a gravação, se houver espaço. Sem espaço, ou se a pasta falhar, a chamada segue sem
+   * gravar, e a linha do tempo diz por quê: quem ligou e o painel nunca ficam sem resposta.
+   */
+  async function openRecording(dir: string): Promise<void> {
+    const minFreeBytes = deps.recordingMinFreeBytes ?? MIN_FREE_BYTES_TO_RECORD;
+    let opened: Recording;
+    try {
+      const free = await freeBytes(dir);
+      if (free < minFreeBytes) return void (await event("recording_skipped", { reason: "low_disk", freeBytes: free, minFreeBytes }));
+      opened = await startRecording(recordingPath(dir, organizationId, callId), () => clock.now().getTime());
+    } catch (error) {
+      log("error", "could not start the call recording", { error: messageOf(error) });
+      return void (await event("recording_skipped", { reason: "unavailable", error: messageOf(error) }));
+    }
+    // A chamada pode ter terminado enquanto o arquivo abria: fecha já, e o `.part` vazio some.
+    if (ending) await opened.finish();
+    else recorder = opened;
   }
 
   /** O agente se despede e a chamada termina logo depois. */
@@ -301,7 +321,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // Gravação desligada de fábrica (registro 0016): só grava a organização que ligou. Lida uma vez,
     // no começo: ligar ou desligar no meio não muda a chamada em curso.
     const recording = deps.recordingsDir ? await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALL_RECORDING_SETTING]) : null;
-    const recordsCall = callRecordingOf(recording?.value);
+    // O arquivo abre antes do motor: depois que ele conecta, nada pode esperar (ver abaixo).
+    if (deps.recordingsDir && callRecordingOf(recording?.value)) await openRecording(deps.recordingsDir);
 
     const enabled = new Map<string, Tool>();
     for (const name of overrides?.tools ?? agent.tools) {
@@ -381,7 +402,6 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // handlers e os primeiros eventos precisam estar na fila antes da primeira fala.
     const session = voice;
     const engineLabel = engine.label;
-    if (recordsCall) recorder = createRecorder(() => clock.now().getTime());
     session.on("audio", (pcm) => {
       if (ending) return;
       transport.sendAudio(pcm);

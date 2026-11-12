@@ -10,6 +10,7 @@ import { handleInbound } from "./inbound";
 import { startInternalApi } from "./internal-api";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { startOutboundCall } from "./outbound";
+import { removePartialRecordings } from "./recording";
 import { closeOrphanCalls } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
 import type { Schedule } from "./transport";
@@ -57,6 +58,14 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   const log = deps.log ?? silentLogger;
   // Antes de atender qualquer coisa: o que o processo anterior deixou aberto não é de ninguém.
   await closeOrphanCalls(db, clock, log);
+  // A gravação que um processo caído deixou pela metade (`.part`) não fecha mais: sai daqui.
+  if (deps.recordingsDir) {
+    const removed = await removePartialRecordings(deps.recordingsDir).catch((error: unknown) => {
+      log("error", "could not remove partial recordings", { error: messageOf(error) });
+      return 0;
+    });
+    if (removed > 0) log("info", "removed partial recordings left by a previous process", { removed });
+  }
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
   const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir };
   const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, log };

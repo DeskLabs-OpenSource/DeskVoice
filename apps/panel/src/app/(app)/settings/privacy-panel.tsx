@@ -117,6 +117,7 @@ export function PrivacyPanel() {
             <ActionStatus action={recorder} />
           </div>
           <p>{t.recordingDisk}</p>
+          {recording && current === null ? <Notice tone="warn">{t.recordingForever}</Notice> : null}
           <Notice>{t.recordingKeeps}</Notice>
         </div>
       </Panel>
