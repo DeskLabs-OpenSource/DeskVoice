@@ -57,6 +57,28 @@ tela; veja [Guardar e apagar](#guardar-e-apagar).
 Considere dizer isso na saudação. Além de ser uma prática transparente, evita a frustração de
 quem descobre no meio da conversa. Se existe obrigação legal de informar no seu setor, confira.
 
+Textos de partida, para copiar e adaptar ao seu negócio:
+
+```text
+pt-BR: "Olá! Aqui é a Lia, assistente virtual da Clínica Aurora. Esta conversa é atendida por
+uma inteligência artificial e pode ser registrada para melhorar o atendimento."
+
+en: "Hello! This is Lia, the virtual assistant at Aurora Clinic. This call is handled by an
+artificial intelligence and may be recorded to improve the service."
+
+es: "¡Hola! Soy Lia, la asistente virtual de la Clínica Aurora. Esta llamada es atendida por
+una inteligencia artificial y puede quedar registrada para mejorar el servicio."
+```
+
+Duas ressalvas, para não vender demais nem de menos:
+
+- **A LGPD não traz um dever geral de anunciar IA na fala.** O que ela cobra é informação no
+  momento do tratamento (art. 9º) e, quando há transferência internacional, informação sobre
+  ela — o que está na seção 4 deste guia. Alguns setores têm regra própria de atendimento
+  automatizado; confira a sua.
+- **O aviso não substitui a política de privacidade.** Dizer "é uma IA" na saudação não informa
+  finalidade, base legal nem retenção: só evita a surpresa de quem descobre no meio da conversa.
+
 ### 3. Dados sensíveis
 
 Clínicas, escritórios de advocacia e serviços financeiros lidam com dados que têm proteção
