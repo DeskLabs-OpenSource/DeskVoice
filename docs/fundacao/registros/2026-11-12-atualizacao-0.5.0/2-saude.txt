@@ -1,0 +1,15 @@
+  ok     Banco              Postgres aceitando conexões
+  ok     Asterisk           System uptime: 2 hours, 33 minutes, 35 seconds
+  ok     Painel             respondendo
+  ok     Painel → banco   respondendo
+  ok     Worker de voz      respondendo
+  ok     Controle da telefonia o processo de voz está conectado ao Asterisk (Connected.)
+  ok     Rotinas            processo rodando
+  ok     Rotinas → fila   o processo de rotinas está conectado ao banco, e a fila está em dia
+  aviso  Linha telefônica  nenhuma linha cadastrada
+  aviso  Motor de voz       nenhum motor de voz configurado
+  ok     Entrada única     painel e voz do navegador respondem pelo mesmo endereço (publicado em: 127.0.0.1:3080:80)
+  ok     WhatsApp           serviço não instalado nesta máquina (é o padrão). Para conectar um número, instale-o pela tela: Configurações → WhatsApp
+  ok     Portas UDP locais  5060/udp aberta nesta máquina, áudio em 10000-10200/udp. Isto não prova que o provedor deixa passar: a prova é uma ligação
+  ok     Agente de atualização agendado (timer do systemd); falou com o painel pela última vez em 2026-11-12T16:05:13Z
+  ok     Disco              275 GB livres

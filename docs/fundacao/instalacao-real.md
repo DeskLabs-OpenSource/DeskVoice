@@ -209,3 +209,26 @@ O que não prova:
 - **Restauração em outro servidor** (`--with-config`): não rodou.
 - **Restauração depois de uma migration nova:** não rodou. O backup e a restauração são da mesma versão.
 - **Desempenho com banco grande:** o banco tem 84 KB de dump.
+
+## Segunda atualização pela tela: 0.4.0 → 0.5.0, com a passagem de vez e a limpeza (2026-11-12)
+
+Na mesma VPS, pelo botão, sem tocar no terminal do servidor durante a atualização. O disco e as imagens foram medidos pelo terminal, só lendo, antes do clique e depois. Saídas em [`registros/2026-11-12-atualizacao-0.5.0/`](registros/2026-11-12-atualizacao-0.5.0/).
+
+| O que | Antes | Depois |
+|---|---|---|
+| Versão | 0.4.0 | 0.5.0 |
+| Imagens do DeskVoice | 0.4.0 e 0.3.0 | 0.5.0 e 0.4.0 |
+| `docker system df`, imagens | 3,857 GB (1,98 GB que se podia liberar) | 2,915 GB (96 MB que se podia liberar) |
+
+- **Passagem de vez com `--resume`, provada.** A saída mostrada na tela traz "O atualizador da versão 0.5.0 assumiu a atualização a partir da 0.4.0". Essa linha só é impressa pelo atualizador de destino depois de receber a vez ([`saida-do-atualizador-na-tela.txt`](registros/2026-11-12-atualizacao-0.5.0/saida-do-atualizador-na-tela.txt)).
+- **Limpeza de imagens com `docker rmi` real, provada.** "Imagens de versões antigas do DeskVoice removidas": as três da 0.3.0. "A imagem da versão 0.4.0 fica, para voltar a ela sem internet." A lista de imagens depois confirma ([`1-imagens-depois.txt`](registros/2026-11-12-atualizacao-0.5.0/1-imagens-depois.txt)).
+- **Tempo:** `agent.log` com o pedido aceito às 16:04:06Z e "succeeded (de 0.4.0 para 0.5.0)" às 16:05:04Z, 58 s.
+- **A tela nova:** termina com "Este servidor está na versão publicada mais recente", sem a contradição da 0.4.0. O bloco do WhatsApp já mostra os números medidos (323 MiB, 380 MiB).
+- **O `last-update.log` não existe, como esperado:** quem executou foi o agente da 0.4.0, que não o grava. A tela não aponta o arquivo.
+- **Saúde:** `healthcheck.sh` saiu com 0.
+
+O que continua sem prova:
+
+- **O `last-update.log`:** só nasce na atualização seguinte, 0.5.0 → próxima.
+- **A máscara nova sobre a saída real:** o trecho mostrado na tela começa depois da linha do `routines`.
+- **A volta automática numa máquina real:** nenhuma atualização falhou.
