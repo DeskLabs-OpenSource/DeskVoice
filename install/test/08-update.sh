@@ -199,6 +199,54 @@ equal "mesma configuração: não reinicia" 0 "$(restarts)"
 rm -rf "$FAKE_DIR/git_tags" "$FAKE_DIR/git_checkout" "$FAKE_DIR/asterisk_mounted"; unset FAKE_GIT_WORKTREE
 cp "$ASTERISK_MODEL.original" "$ASTERISK_MODEL"; : > "$FAKE_DIR/calls.log"
 
+# ── Imagens antigas: com tudo respondendo, saem as do DeskVoice que nem a versão nova nem a de onde
+#    se saiu usam. Só por nome exato, com `rmi` sem força, e nunca `prune`. ──
+images_of() { local v s; for v in "$@"; do for s in $APP_SERVICES; do image_ref "$s" "$v"; done; done; }
+removed() { grep '^rmi ' "$FAKE_DIR/calls.log" | grep -v ':rollback$' | sed 's/^rmi //'; }
+forced() { grep -cE '^(rmi|image rm) (.* )?(-f|--force)( |$)' "$FAKE_DIR/calls.log"; }
+# A (0.8.0, a instalada) para B (0.10.0), com Z (0.1.0) mais velha e uma imagem de terceiros.
+{ images_of 0.1.0 0.8.0 0.10.0; echo postgres:17.11-alpine; } > "$FAKE_DIR/images"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.10.0 --yes 2>&1)"; equal "limpeza: a atualização sai com zero" 0 "$?"
+equal "limpeza: remove só as três imagens da versão mais velha" "$(images_of 0.1.0)" "$(removed)"
+equal "limpeza: ficam a versão nova, a anterior e a de terceiros" "$(images_of 0.8.0 0.10.0; echo postgres:17.11-alpine)" "$(cat "$FAKE_DIR/images")"
+equal "limpeza: nunca chama prune" 0 "$(grep -c 'prune' "$FAKE_DIR/calls.log")"
+equal "limpeza: nunca força a remoção" 0 "$(forced)"
+equal "limpeza: lista só as três imagens do DeskVoice, pelo nome" "$(for s in $APP_SERVICES; do echo "image ls --format {{.Tag}} $(image_repo "$s")"; done)" "$(grep '^image ls' "$FAKE_DIR/calls.log")"
+check "limpeza: vem depois de a etiqueta rollback sair" test "$(grep -n ':rollback$' "$FAKE_DIR/calls.log" | grep ':rmi ' | tail -n 1 | cut -d: -f1)" -lt "$(position "^rmi $(image_ref panel 0.1.0)")"
+contains "limpeza: nomeia cada imagem removida" "$out" "$(image_ref routines 0.1.0)"
+contains "limpeza: diz que a anterior fica" "$out" "A imagem da versão 0.8.0 fica, para voltar a ela sem internet"
+# O `rmi` recusa uma (contêiner usando): aviso, e a atualização termina bem.
+images_of 0.9.0 0.10.0 0.11.0 > "$FAKE_DIR/images"; image_ref panel 0.9.0 > "$FAKE_DIR/rmi_busy"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.11.0 --yes 2>&1)"; equal "rmi recusado: a atualização sai com zero" 0 "$?"
+equal "rmi recusado: fica na versão nova" 0.11.0 "$(env_get "$E" DESKVOICE_VERSION)"
+contains "rmi recusado: avisa, nomeando a imagem" "$out" "Não consegui remover a imagem antiga $(image_ref panel 0.9.0)"
+contains "rmi recusado: diz que terminou" "$out" "Atualizado para 0.11.0"
+equal "rmi recusado: as outras saem assim mesmo" "$(image_ref panel 0.9.0; images_of 0.10.0 0.11.0)" "$(cat "$FAKE_DIR/images")"
+lacks "rmi recusado: não tenta forçar" "$out" "--force"
+equal "rmi recusado: nem força" 0 "$(forced)"
+rm "$FAKE_DIR/rmi_busy"
+# A atualização volta: nada é removido.
+images_of 0.1.0 0.11.0 0.12.0 > "$FAKE_DIR/images"; images_before="$(cat "$FAKE_DIR/images")"
+printf '%s\n' postgres asterisk voice routines caddy > "$FAKE_DIR/running"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.12.0 --yes 2>&1)"; equal "limpeza, versão doente: sai com erro" 1 "$?"
+equal "limpeza, versão doente: nenhuma imagem removida" "" "$(removed)"
+equal "limpeza, versão doente: as imagens seguem todas" "$images_before" "$(cat "$FAKE_DIR/images")"
+printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"
+# Instalação em `local` (construída aqui) que passa para a publicada: a local sai, dizendo como volta.
+env_set "$E" DESKVOICE_VERSION local; images_of local 0.13.0 > "$FAKE_DIR/images"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.13.0 --yes 2>&1)"; equal "local para publicada: zero" 0 "$?"
+equal "local para publicada: remove a local" "$(images_of local)" "$(removed)"
+equal "local para publicada: fica a publicada" "$(images_of 0.13.0)" "$(cat "$FAKE_DIR/images")"
+contains "local para publicada: diz que a local só volta construindo" "$out" "A local só volta construindo de novo: bash install/install.sh --build"
+lacks "local para publicada: não promete que a local fica" "$out" "A imagem da versão local fica"
+# Instalação que continua em `local` (em ARM não há imagem publicada para baixar): nada sai.
+env_set "$E" DESKVOICE_VERSION local; images_of local > "$FAKE_DIR/images"; touch "$FAKE_DIR/pull_fail"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.14.0 --yes 2>&1)"; equal "continua em local: a atualização não acontece" 1 "$?"
+equal "continua em local: a versão segue local" local "$(env_get "$E" DESKVOICE_VERSION)"
+equal "continua em local: nenhuma imagem removida" "" "$(removed)"
+equal "continua em local: a local segue no disco" "$(images_of local)" "$(cat "$FAKE_DIR/images")"
+rm "$FAKE_DIR/pull_fail" "$FAKE_DIR/images"; : > "$FAKE_DIR/calls.log"
+
 out="$(bash "$KIT/update.sh" --yes 2>&1)"; equal "sem --to e sem repositório git: recusa" 1 "$?"
 contains "sem --to: diz como informar a versão" "$out" "--to <versão>"
 refuse "nome de versão com caractere estranho é recusado" bash "$KIT/update.sh" --yes --to 'v1;rm -rf x'

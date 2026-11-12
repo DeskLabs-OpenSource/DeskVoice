@@ -568,8 +568,11 @@ is_version() {  # 0 = número de versão no formato único (X.Y.Z, ou X.Y.Z-rc.1
   [[ "$1" =~ $re ]]
 }
 image_prefix() { env_get "$IMAGES_FILE" DESKVOICE_IMAGE_PREFIX; }
+image_repo() {  # image_repo <panel|voice|routines> → o nome sem a etiqueta
+  printf '%s/deskvoice-%s\n' "$(image_prefix)" "$1"
+}
 image_ref() {  # image_ref <panel|voice|routines> <versão> → o nome completo, igual ao do Compose
-  printf '%s/deskvoice-%s:%s\n' "$(image_prefix)" "$1" "$2"
+  printf '%s:%s\n' "$(image_repo "$1")" "$2"
 }
 
 # A versão publicada mais recente é a maior tag final do clone. O Compose e o kit vêm do mesmo
