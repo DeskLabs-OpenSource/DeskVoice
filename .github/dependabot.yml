@@ -30,6 +30,11 @@ updates:
       interval: weekly
     commit-message:
       prefix: chore(deps)
+    # O projeto está no Node 22 (.nvmrc e engines). Trocar de versão maior do Node é decisão, com
+    # PR próprio que mexe nos dois juntos, e não uma atualização de base.
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
 
   # As imagens de terceiros do deploy/docker-compose.yml, fixadas por versão e resumo. Postgres e
   # Caddy estão escritos por extenso; Asterisk e WAHA vêm dentro de ${VAR:-imagem@sha256:…}, e não
