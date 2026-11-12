@@ -133,6 +133,9 @@ roll_back() {  # roll_back "<o que falhou>"
   NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --essential 2>&1 | sed 's/^/  /' >&2 || true
   local problems=""
   apply_version "$current" "$previous_commit" || problems="$problems não consegui voltar o código para $previous_commit;"
+  # A configuração do Asterisk volta a ser a dos modelos da versão anterior (em subshell: uma falha
+  # aqui entra na lista de problemas, sem interromper a volta).
+  ( render_asterisk_config ) >/dev/null 2>&1 || problems="$problems não consegui regerar a configuração do Asterisk da versão $current;"
   for service in $APP_SERVICES; do
     docker tag "$(image_ref "$service" rollback)" "$(image_ref "$service" "$current")" 2>/dev/null || true
   done
@@ -141,6 +144,8 @@ roll_back() {  # roll_back "<o que falhou>"
   dc up -d --remove-orphans >/dev/null 2>&1 || problems="$problems os serviços não subiram;"
   # Como na ida: o Caddy que ficou de pé ainda lê o Caddyfile da versão de destino até reiniciar.
   dc restart caddy >/dev/null 2>&1 || true
+  # E o Asterisk volta a usar a configuração da versão anterior, regerada acima.
+  converge_asterisk
   if [ -z "$problems" ] && wait_healthy; then
     die "A atualização para $target não deu certo e foi desfeita: você está de volta na versão $current, com o banco do backup de antes da atualização ($backup_dir) e tudo respondendo." "Nada se perdeu além do que entrou durante a tentativa. Rode bash install/diagnose.sh e abra uma issue com o arquivo, dizendo que a atualização para $target voltou."
   fi
@@ -211,6 +216,9 @@ dc up -d --remove-orphans || roll_back "Os serviços da versão $target não sub
 # O Caddyfile é montado como arquivo, e a troca de versão o substitui por outro: o contêiner que
 # já estava de pé só passa a ler o novo ao reiniciar.
 dc restart caddy >/dev/null 2>&1 || true
+# Os arquivos do Asterisk regravados acima: o que mudou é recarregado, sem derrubar ligação em
+# andamento. Reinicia só se recarregar não basta (ver converge_asterisk).
+converge_asterisk
 wait_healthy || roll_back "A versão $target subiu, mas nem toda peça essencial respondeu, ou o painel deixou de abrir pelo endereço que abria antes."
 
 for service in $APP_SERVICES; do docker rmi "$(image_ref "$service" rollback)" >/dev/null 2>&1 || true; done

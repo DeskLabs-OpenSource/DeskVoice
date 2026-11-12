@@ -78,8 +78,7 @@ O instalador trabalha em cinco etapas e diz em qual está:
    (que vira o login) e uma senha de dez caracteres ou mais.
 4. **Instala:** gera os segredos, gera a configuração do Asterisk, baixa as imagens da versão
    publicada mais recente e grava o número dela, sobe o banco, aplica a estrutura, cria a
-   empresa e o usuário dono e sobe o resto. Enquanto o projeto não tiver uma versão publicada,
-   as imagens são construídas na própria VPS, o que leva alguns minutos.
+   empresa e o usuário dono e sobe o resto. Nada é construído na VPS: as imagens vêm prontas.
 5. **Prova que você entra, e só então mostra o endereço do painel** e os próximos passos. Ele
    confere que a porta publicada responde e entra de verdade na tela de login com o e-mail e a
    senha que você acabou de definir. Se o login falhar, ele para e diz o que fazer, em vez de

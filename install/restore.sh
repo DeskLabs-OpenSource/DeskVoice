@@ -126,5 +126,7 @@ admin "drop database if exists $old with (force)" || warn "Ficou uma cópia do b
 
 step "Religando os serviços"
 dc up -d >/dev/null || die "O banco foi restaurado e conferido, mas os serviços não subiram." "Rode: bash install/healthcheck.sh"
+# A configuração do backup regravou os arquivos do Asterisk: o que mudou é recarregado.
+if [ "$with_config" = 1 ]; then converge_asterisk; fi
 ok "Restaurado: o banco agora é o do backup de $(env_get "$manifest" created_at), com as contagens conferidas."
 info "Confira o sistema com: bash install/healthcheck.sh"

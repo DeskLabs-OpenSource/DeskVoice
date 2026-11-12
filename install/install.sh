@@ -29,9 +29,11 @@
 #                              numa instalação com domínio, o instalador para com erro em vez de ignorar
 #   DESKVOICE_PANEL_PORT       opcional: a porta local do painel (padrão: 3080 ou a seguinte livre). Só vale
 #                              quando o painel sai por uma porta local (sem domínio, ou 80/443 de outro proxy)
-#   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar
+#   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar. Só aceita yes; com o
+#                              ufw inativo, não tem efeito, e o instalador diz
 #   DESKVOICE_RTP_START / DESKVOICE_RTP_END   opcional: outra faixa de portas de áudio
-#   DESKVOICE_VERSION          opcional: uma versão publicada específica (exemplo: 0.3.0), em vez da mais recente
+#   DESKVOICE_VERSION          opcional: uma versão publicada específica (exemplo: 0.3.0), em vez da mais recente.
+#                              Não combina com --build, que constrói o código desta pasta: as duas juntas param com erro
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 ASSUME_YES=0; DRY_RUN=0; FORCE=0; BUILD=0; answers_file=""
@@ -42,7 +44,7 @@ while [ $# -gt 0 ]; do
     --force) FORCE=1 ;;
     --build) BUILD=1 ;;
     --answers) answers_file="${2:-}"; shift ;;
-    -h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Veja as opções com: bash install/install.sh --help" ;;
   esac
   shift
@@ -59,7 +61,7 @@ fi
 # Opções de exposição do painel: o valor é conferido aqui, em todo modo e antes de qualquer coisa
 # ser gravada. Se a opção tem efeito no modo desta máquina é conferido adiante, quando o modo é
 # conhecido (domínio, 80/443): opção sem efeito para com erro, nunca é ignorada em silêncio.
-for option in DESKVOICE_PANEL_LOCAL_ONLY DESKVOICE_PANEL_PUBLIC_HTTP; do
+for option in DESKVOICE_PANEL_LOCAL_ONLY DESKVOICE_PANEL_PUBLIC_HTTP DESKVOICE_APPLY_UFW; do
   case "$(printenv "$option" || true)" in
     ""|yes) ;;
     *) die "O valor de $option ($(printenv "$option")) não vale." "O único valor aceito é yes, em minúsculas: $option=yes. Para ficar com o padrão, não defina a variável." ;;
@@ -71,6 +73,11 @@ fi
 if [ -n "${DESKVOICE_PANEL_PORT:-}" ]; then
   valid_port "$DESKVOICE_PANEL_PORT" >/dev/null || die "A porta do painel em DESKVOICE_PANEL_PORT ($DESKVOICE_PANEL_PORT) não vale." "Use um número de 1 a 65535, ou não defina a variável."
 fi
+if [ "$BUILD" = 1 ] && [ -n "${DESKVOICE_VERSION:-}" ]; then
+  die "DESKVOICE_VERSION=$DESKVOICE_VERSION e --build pedem coisas diferentes: a primeira, as imagens publicadas dessa versão; a segunda, imagens construídas nesta máquina a partir do código desta pasta." "Escolha um dos dois e rode de novo: tire a variável para construir aqui, ou tire o --build para instalar a versão publicada."
+fi
+# Antes de qualquer coisa: se já há um DeskVoice nesta máquina, ele tem de ser o desta pasta.
+refuse_foreign_install
 
 SUDO=""; if [ "$(id -u)" != 0 ] && have sudo; then SUDO="sudo"; fi
 # Quem entra por SSH nesta máquina: é o nome que vai no comando do túnel.
@@ -376,10 +383,12 @@ if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
   warn "O firewall ufw está ativo. Regras necessárias:"
   for rule in $ufw_rules; do info "    $SUDO ufw allow $rule"; done
   if [ "$DRY_RUN" = 1 ]; then would "oferecer aplicar essas regras"
-  elif { [ "$ASSUME_YES" = 1 ] && [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; } || { [ "$ASSUME_YES" != 1 ] && confirm "Aplico essas regras agora?"; }; then
+  elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ] || { [ "$ASSUME_YES" != 1 ] && confirm "Aplico essas regras agora?"; }; then
     for rule in $ufw_rules; do $SUDO ufw allow "$rule" >/dev/null || die "Não consegui aplicar a regra $rule no ufw." "Rode à mão: $SUDO ufw allow $rule"; done
     ok "Regras aplicadas no ufw"
   else warn "Regras NÃO aplicadas. Sem elas a ligação pode ficar muda: rode os comandos acima."; fi
+elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; then
+  info "DESKVOICE_APPLY_UFW=yes não teve efeito: o firewall ufw não está ativo nesta máquina, e não há regra a aplicar."
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -469,6 +478,11 @@ fi
 
 info "Subindo painel, voz, rotinas e telefonia..."
 dc up -d --remove-orphans || die "O Docker não conseguiu subir os serviços." "Veja a mensagem acima; depois confira com bash install/healthcheck.sh e rode o instalador de novo."
+# Reinstalação (ou `git pull` seguido do instalador, em instalação construída aqui): o Caddy e o
+# Asterisk que já estavam de pé seguem com a configuração antiga. O Caddy reinicia se o Caddyfile
+# mudou; o Asterisk recarrega o que mudou (ver converge_asterisk).
+converge_caddy
+converge_asterisk
 
 timeout="${DESKVOICE_HEALTH_TIMEOUT:-240}"; waited=0
 info "Esperando cada peça responder (até ${timeout}s)..."

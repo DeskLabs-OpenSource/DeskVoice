@@ -130,6 +130,15 @@ contains "interativo, s: anuncia o IP" "$out" "Endereço que o painel teria: htt
 out="$(answers "" | bash "$KIT/install.sh" --dry-run 2>&1)"
 lacks "interativo com domínio: a pergunta do HTTP não aparece" "$out" "Publicar o painel na internet por HTTP"
 lacks "interativo: a senha não aparece" "$out" "senha-de-teste-123"
+# DESKVOICE_APPLY_UFW e DESKVOICE_VERSION com --build: conferidos também na simulação.
+for bad in 1 sim talvez YES; do
+  out="$(DESKVOICE_APPLY_UFW="$bad" bash "$KIT/install.sh" --dry-run --yes 2>&1)"; equal "ufw: o valor '$bad' é recusado, e não ignorado" 1 "$?"
+  contains "ufw, valor '$bad': diz o valor aceito" "$out" "DESKVOICE_APPLY_UFW=yes"
+done
+out="$(DESKVOICE_APPLY_UFW=yes bash "$KIT/install.sh" --dry-run --yes 2>&1)"; equal "ufw inativo e yes: simulação sai com zero" 0 "$?"
+contains "ufw inativo e yes: diz que a opção não tem efeito" "$out" "DESKVOICE_APPLY_UFW=yes não teve efeito: o firewall ufw não está ativo"
+out="$(DESKVOICE_VERSION=0.2.0 bash "$KIT/install.sh" --dry-run --yes --build 2>&1)"; equal "versão com --build na simulação: recusa" 1 "$?"
+contains "versão com --build na simulação: nomeia as duas" "$out" "DESKVOICE_VERSION=0.2.0 e --build"
 equal "nenhuma simulação alterou arquivo" "$before" "$(snapshot)"
 equal "nenhuma simulação mandou o Docker alterar nada" 0 "$(mutating_calls)"
 finish
