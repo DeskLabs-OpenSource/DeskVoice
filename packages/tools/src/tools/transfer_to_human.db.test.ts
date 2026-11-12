@@ -40,4 +40,15 @@ describe("transfer_to_human", () => {
     expect(await notificationsOf(app, ctx.organizationId)).toEqual([]);
     expect((await eventsOf(app, ctx.callId)).map((event) => event.kind)).toEqual(["tool_called", "tool_result"]);
   });
+
+  it("no canal que não transfere (WhatsApp) responde ao modelo para oferecer recado, sem evento de transferência", async () => {
+    const ctx = await createFixture(app, "transfer no whatsapp", { transferTo: "+5531999998888", canTransfer: false });
+    const result = await runTool(transferToHuman, args, ctx);
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/não há como transferir/);
+    expect(result.message).toContain("notify_human");
+    expect(ctx.transfers).toEqual([]);
+    expect(await notificationsOf(app, ctx.organizationId)).toEqual([]);
+    expect((await eventsOf(app, ctx.callId)).map((event) => event.kind)).toEqual(["tool_called", "tool_result"]);
+  });
 });

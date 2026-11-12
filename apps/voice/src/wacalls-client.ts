@@ -62,6 +62,11 @@ export const wacallsFromEnv = (): WacallsOptions => ({ token: process.env.WACALL
  */
 export const wacallsSessionName = (organizationId: string): string => `deskvoice_${organizationId}`;
 
+/** O inverso de `wacallsSessionName`: a organização dona da sessão, ou `null` se o nome não é nosso. */
+export function organizationOfSession(name: string | null | undefined): string | null {
+  return /^deskvoice_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(name ?? "")?.[1]?.toLowerCase() ?? null;
+}
+
 const sessionSchema = z.object({
   id: z.string().min(1),
   name: z.string(),
@@ -89,6 +94,8 @@ export const isPaired = (session: WacallsSession): boolean => session.paired ===
 interface Call {
   method?: string;
   body?: unknown;
+  /** `X-Client-Id`: o dono da ligação no WaCalls. */
+  clientId?: string;
   /** Códigos HTTP que, nesta chamada, significam "já está assim". */
   tolerate?: number[];
 }
@@ -98,8 +105,8 @@ function authorized(options: WacallsOptions): Record<string, string> {
   return { Authorization: `Bearer ${options.token}` };
 }
 
-async function call<T>(options: WacallsOptions, path: string, schema: z.ZodType<T>, { method = "GET", body, tolerate = [] }: Call = {}): Promise<T | null> {
-  const headers = authorized(options);
+async function call<T>(options: WacallsOptions, path: string, schema: z.ZodType<T>, { method = "GET", body, clientId, tolerate = [] }: Call = {}): Promise<T | null> {
+  const headers = { ...authorized(options), ...(clientId && { "X-Client-Id": clientId }) };
   let response: Response;
   let text: string;
   try {
@@ -160,7 +167,37 @@ export async function wacallsDeleteSession(options: WacallsOptions, id: string):
   await call(options, sessionPath(id), anything, { method: "DELETE", tolerate: [404] });
 }
 
-/** O que interessa do SSE nesta fatia: o estado do pareamento de cada sessão. */
+const callPath = (sessionId: string, callId: string): string => `${sessionPath(sessionId)}/calls/${encodeURIComponent(callId)}`;
+const answerSchema = z.object({ sdp_answer: z.string().min(1) });
+
+/**
+ * Entrega a oferta SDP do par WebRTC desta ponta e devolve a resposta do WaCalls, já com os
+ * candidatos (ele espera a coleta terminar antes de responder: `bridge.go`). Uma oferta nova para a
+ * mesma ligação substitui e fecha a perna anterior.
+ */
+export async function wacallsAttachPeer(options: WacallsOptions, sessionId: string, callId: string, clientId: string, sdpOffer: string): Promise<string> {
+  const answered = await call(options, `${callPath(sessionId, callId)}/webrtc`, answerSchema, { method: "POST", body: { sdp_offer: sdpOffer }, clientId });
+  if (!answered) throw new WacallsError("invalid_response", "WaCalls answered the WebRTC offer with nothing");
+  return answered.sdp_answer;
+}
+
+/**
+ * Atende. `clientId` vira o dono da ligação, e um dono só segura uma ligação ativa (409): por isso
+ * cada ligação leva um id próprio, ou a segunda simultânea seria recusada.
+ */
+export async function wacallsAcceptCall(options: WacallsOptions, sessionId: string, callId: string, clientId: string): Promise<void> {
+  await call(options, `${callPath(sessionId, callId)}/accept`, anything, { method: "POST", body: {}, clientId });
+}
+
+/** Desliga. A sessão que já não existe não tem ligação para desligar. */
+export async function wacallsEndCall(options: WacallsOptions, sessionId: string, callId: string): Promise<void> {
+  await call(options, callPath(sessionId, callId), anything, { method: "DELETE", tolerate: [404] });
+}
+
+/**
+ * O que interessa do SSE: o estado do pareamento de cada sessão e o ciclo de uma ligação. Formatos
+ * lidos em `internal/app/events/broker.go:118-140` e `callregistry.go:62-66, 138-140`.
+ */
 const authStateSchema = z.object({
   type: z.literal("auth-state"),
   sessionId: z.string().min(1),
@@ -169,6 +206,15 @@ const authStateSchema = z.object({
   paired: z.boolean().nullish(),
 });
 export type WacallsAuthState = z.output<typeof authStateSchema>;
+const eventSchema = z.discriminatedUnion("type", [
+  authStateSchema,
+  /** Uma ligação recebida começou a tocar. `peer` é o JID de quem liga (`@s.whatsapp.net` ou `@lid`). */
+  z.object({ type: z.literal("incoming"), sessionId: z.string().min(1), id: z.string().min(1), peer: z.string() }),
+  /** `starting`, `ringing`, `connected` (áudio com o WhatsApp de pé), `reconnecting`, `ended`. */
+  z.object({ type: z.literal("call-status"), sessionId: z.string().min(1), id: z.string().min(1), status: z.string() }),
+  z.object({ type: z.literal("call-ended"), id: z.string().min(1), reason: z.string().nullish() }),
+]);
+export type WacallsEvent = z.output<typeof eventSchema>;
 
 export interface WacallsEvents {
   /** Resolve quando a conexão está aberta (na primeira vez, ou na volta de uma queda). */
@@ -181,11 +227,11 @@ const RETRY_MAX_MS = 30_000;
 
 /**
  * Mantém o SSE do WaCalls (`GET /api/events`) aberto, com o token no cabeçalho, e volta a abrir
- * depois de uma queda com espera crescente (1 s, 2 s, 4 s... até 30 s). Evento fora da forma é
- * ignorado; o que não é `auth-state` não interessa a esta fatia. O registro diz só quando a
- * conexão cai e quando volta, nunca a cada tentativa.
+ * depois de uma queda com espera crescente (1 s, 2 s, 4 s... até 30 s). Evento fora da forma, ou
+ * de um tipo que não interessa, é ignorado. O registro diz só quando a conexão cai e quando volta,
+ * nunca a cada tentativa.
  */
-export function listenWacalls(options: WacallsOptions, onAuthState: (event: WacallsAuthState) => void, deps: { schedule?: Schedule; log?: Logger } = {}): WacallsEvents {
+export function listenWacalls(options: WacallsOptions, onEvent: (event: WacallsEvent) => void, deps: { schedule?: Schedule; log?: Logger } = {}): WacallsEvents {
   const schedule = deps.schedule ?? realSchedule;
   const log = deps.log ?? silentLogger;
   let stopped = false;
@@ -206,15 +252,16 @@ export function listenWacalls(options: WacallsOptions, onAuthState: (event: Waca
   };
 
   const dispatch = (line: string): void => {
-    if (!line.startsWith("data:")) return;
+    // Parada é parada: o que ainda estiver chegando por uma conexão que demora a fechar não vale.
+    if (stopped || !line.startsWith("data:")) return;
     let raw: unknown;
     try {
       raw = JSON.parse(line.slice(5).trim());
     } catch {
       return;
     }
-    const event = authStateSchema.safeParse(raw);
-    if (event.success) onAuthState(event.data);
+    const event = eventSchema.safeParse(raw);
+    if (event.success) onEvent(event.data);
   };
 
   async function connect(): Promise<void> {

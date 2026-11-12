@@ -1,27 +1,39 @@
-import type { Logger } from "./log";
+import { recordEvent, toE164, withOrg, type Clock, type Db } from "@deskvoice/core";
+import type { PeerConfig } from "werift";
+import { startCallSession, type CallSession, type CallSessionDeps } from "./call-session";
+import { inboundLimitReached, limitNoticedLately } from "./inbound";
+import { messageOf, type Logger } from "./log";
+import { panelNotice } from "./panel-notice";
 import type { Schedule } from "./transport";
 import {
   WacallsError,
   isPaired,
   listenWacalls,
+  organizationOfSession,
   phoneOfJid,
+  wacallsAcceptCall,
+  wacallsAttachPeer,
+  wacallsEndCall,
   wacallsCreateSession,
   wacallsDeleteSession,
   wacallsListSessions,
   wacallsLogoutSession,
   wacallsSessionName,
+  type WacallsEvent,
   type WacallsEvents,
   type WacallsOptions,
   type WacallsSession,
 } from "./wacalls-client";
+import { openWhatsAppTransport, type WhatsAppTransport } from "./whatsapp-transport";
 
 /**
- * A ligação pelo WhatsApp, do lado do processo de voz. Nesta fatia: conectar o número por QR Code,
- * dizer o estado e desconectar. Nenhuma ligação é atendida ainda.
+ * A ligação pelo WhatsApp, do lado do processo de voz: conectar o número por QR Code, dizer o estado,
+ * desconectar e atender as ligações recebidas.
  *
- * Este processo não grava nada no banco: ele diz ao painel o que o WaCalls diz agora, e o painel
- * compara com o que tinha gravado e avisa, como faz com o WAHA. O QR Code só chega pelo SSE, então
- * é aqui que ele fica guardado, em memória, por sessão do WaCalls; o painel o pede pela API interna.
+ * O pareamento não grava nada no banco: este processo diz ao painel o que o WaCalls diz agora, e o
+ * painel compara com o que tinha gravado e avisa, como faz com o WAHA. O QR Code só chega pelo SSE,
+ * então é aqui que ele fica guardado, em memória, por sessão do WaCalls; o painel o pede pela API
+ * interna. A ligação recebida, sim, vira linha em `calls`, como a que chega pela operadora.
  */
 export type WhatsAppCallsStatus = "starting" | "qr" | "connected" | "logged_out";
 export interface WhatsAppCallsState {
@@ -45,7 +57,27 @@ interface Pairing {
   ended: boolean;
 }
 
-export function createWhatsAppCalls(options: WacallsOptions, deps: { schedule: Schedule; log: Logger }): WhatsAppCallsHandlers & { close(): void } {
+/** O que é preciso para atender. Sem isto (os testes do pareamento), nenhuma ligação é atendida. */
+export interface WhatsAppAnswerDeps {
+  db: Db;
+  clock: Clock;
+  /** Relógio monotônico em ms, para a cadência do áudio. */
+  now: () => number;
+  session: CallSessionDeps;
+  /** Cada conversa iniciada, para o processo encerrá-la ao sair. */
+  onSession(session: CallSession): void;
+  /** Só para teste: o par WebRTC falso escuta no loopback. */
+  peerConfig?: Partial<PeerConfig>;
+}
+
+export interface WhatsAppCalls extends WhatsAppCallsHandlers {
+  /** Passa a ouvir o WaCalls já (na partida, quando alguma organização pediu o serviço). */
+  listen(): void;
+  close(): void;
+}
+
+export function createWhatsAppCalls(options: WacallsOptions, deps: { schedule: Schedule; log: Logger; answer?: WhatsAppAnswerDeps }): WhatsAppCalls {
+  const answering = deps.answer ? createAnswering(options, deps.answer, deps.schedule, deps.log) : null;
   // Por id de sessão do WaCalls, de toda organização: o SSE é um só para a instalação. Quem lê só
   // recebe o da própria organização, porque a sessão é achada pelo nome com o id dela.
   const pairing = new Map<string, Pairing>();
@@ -57,6 +89,7 @@ export function createWhatsAppCalls(options: WacallsOptions, deps: { schedule: S
     events ??= listenWacalls(
       options,
       (event) => {
+        if (event.type !== "auth-state") return answering?.onEvent(event);
         if (event.paired) pairing.delete(event.sessionId);
         else if (event.state === "logged_out") pairing.set(event.sessionId, { qr: null, ended: true });
         else if (event.qr) pairing.set(event.sessionId, { qr: event.qr, ended: false });
@@ -134,8 +167,165 @@ export function createWhatsAppCalls(options: WacallsOptions, deps: { schedule: S
         return { session: null };
       }),
 
+    listen() {
+      if (options.token) listening();
+    },
+
     close() {
       events?.stop();
+    },
+  };
+}
+
+type Refusal = "no_agent" | "agent_disabled" | "inbound_limit_reached";
+
+const NOTICE: Record<Refusal, (from: string, to: string, limit: number) => string> = {
+  no_agent: (from, to) =>
+    `Uma ligação pelo WhatsApp de ${from} para ${to} não foi atendida pelo agente porque nenhum agente atende esse número. Ela continuou tocando no celular. Escolha o agente em Configurações, em Ligação pelo WhatsApp.`,
+  agent_disabled: (from, to) =>
+    `Uma ligação pelo WhatsApp de ${from} para ${to} não foi atendida pelo agente porque o agente desse número está desligado. Ela continuou tocando no celular. Ligue o agente ou escolha outro em Configurações, em Ligação pelo WhatsApp.`,
+  inbound_limit_reached: (from, to, limit) =>
+    `Uma ligação pelo WhatsApp de ${from} para ${to} não foi atendida pelo agente porque já havia ${limit} ligações recebidas em andamento, pela operadora e pelo WhatsApp, o limite definido em Configurações. Ela continuou tocando no celular. Outras pelo mesmo motivo nos próximos 10 minutos aparecem só em Chamadas.`,
+};
+
+/** O que este processo sabe de uma ligação do WaCalls que ele está atendendo. */
+interface Live {
+  transport: WhatsAppTransport | null;
+  /** O WaCalls disse que ela acabou antes de o atendimento terminar. */
+  ended: boolean;
+}
+
+/**
+ * Atende as ligações recebidas pelo WhatsApp. O agente atende na hora (decisão 4A do desenho).
+ *
+ * A organização sai do nome da sessão no WaCalls (`deskvoice_<id da organização>`), que só este
+ * processo cria, com o token: nada é procurado atravessando organizações. Agente ausente ou
+ * desligado, ou teto de recebidas atingido: a chamada fica recusada na linha do tempo, o painel
+ * recebe o aviso, e o WaCalls não é tocado. A ligação continua tocando no celular e nos aparelhos
+ * de quem trabalha (recusar pelo aparelho vinculado poderia encerrá-la em todos; não medido).
+ *
+ * Atendendo: primeiro a troca de SDP, depois o atendimento, como o DeskcommCRM. Se o WaCalls recusar
+ * uma das duas, nada foi atendido, e a ligação segue tocando no celular.
+ */
+function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, schedule: Schedule, log: Logger) {
+  const { db, clock } = deps;
+  const live = new Map<string, Live>();
+
+  /** A ligação que este processo criou e não chegou à conversa: fecha a linha, para ela não segurar vaga no teto. */
+  async function closeUnanswered(organizationId: string, callId: string, reason: string, notice?: string): Promise<void> {
+    await withOrg(db, organizationId, async (q) => {
+      const closed = await q.exec("update calls set status = 'failed', end_reason = $2, ended_at = $3 where id = $1 and status = 'ringing'", [callId, reason, clock.now()]);
+      if (closed === 1) await recordEvent(q, callId, "call_ended", { status: "failed", reason, channel: "whatsapp" }, clock.now());
+      if (notice) await panelNotice(q, clock, callId, notice);
+    });
+  }
+
+  /** Resolve `true` quando a conversa começou: dali em diante, quem tira a ligação de `live` é o fim dela. */
+  async function take(event: { sessionId: string; id: string; peer: string }, entry: Live): Promise<boolean> {
+    const session = (await wacallsListSessions(options)).find((candidate) => candidate.id === event.sessionId);
+    const organizationId = organizationOfSession(session?.name);
+    // O número conectado é o destino: é por ele que a ligação conta no teto das recebidas.
+    const to = phoneOfJid(session?.jid);
+    if (!organizationId || !to) {
+      log("error", "WhatsApp call on a session this installation did not create, or without its number; not answering", { wacallsSession: event.sessionId });
+      return false;
+    }
+    const callerPhone = phoneOfJid(event.peer);
+    const from = callerPhone ? toE164(callerPhone) : null;
+
+    const outcome = await withOrg(db, organizationId, async (q) => {
+      const chosen = await q.one<{ agent_id: string | null }>("select agent_id from whatsapp_call_sessions");
+      const agentId = chosen?.agent_id ?? null;
+      const agent = agentId ? await q.one<{ enabled: boolean }>("select enabled from agents where id = $1", [agentId]) : null;
+      let refusal: Refusal | null = !agent ? "no_agent" : !agent.enabled ? "agent_disabled" : null;
+      let limit = 0;
+      if (!refusal) {
+        const checked = await inboundLimitReached(q, clock);
+        limit = checked.limit;
+        if (checked.reached) refusal = "inbound_limit_reached";
+      }
+      const call = await q.one<{ id: string }>(
+        `insert into calls (organization_id, agent_id, direction, from_e164, to_e164, status, end_reason, started_at, ended_at)
+         values ($1, $2, 'inbound', $3, $4, $5, $6, $7, $8) returning id`,
+        [organizationId, agentId, from, to, refusal ? "refused" : "ringing", refusal, clock.now(), refusal ? clock.now() : null],
+      );
+      if (!call) throw new Error("WhatsApp call was not created");
+      if (refusal) {
+        const overLimit = refusal === "inbound_limit_reached";
+        await recordEvent(q, call.id, "call_refused", { reason: refusal, from, to, channel: "whatsapp", ...(overLimit && { limit }) }, clock.now());
+        if (!(overLimit && (await limitNoticedLately(q, clock)))) await panelNotice(q, clock, call.id, NOTICE[refusal](from ?? "um número que o WhatsApp não informou", to, limit));
+      }
+      return { callId: call.id, agentId, refusal };
+    });
+    if (outcome.refusal || !outcome.agentId) {
+      log("info", "WhatsApp call not answered", { callId: outcome.callId, reason: outcome.refusal });
+      return false;
+    }
+    const { callId, agentId } = outcome;
+
+    // Um dono por ligação no WaCalls: com um id só para o processo, a segunda ligação ao mesmo tempo
+    // receberia 409 (`handlers_call.go:113-116`).
+    const clientId = `deskvoice-call-${callId}`;
+    let answered = false;
+    let transport: WhatsAppTransport;
+    try {
+      transport = await openWhatsAppTransport(
+        {
+          exchange: (offer) => wacallsAttachPeer(options, event.sessionId, event.id, clientId, offer),
+          // Sem atendimento não há o que desligar: a ligação segue tocando no celular.
+          end: async () => {
+            if (answered) await wacallsEndCall(options, event.sessionId, event.id);
+          },
+        },
+        { schedule, now: deps.now, log, peerConfig: deps.peerConfig },
+      );
+      entry.transport = transport;
+      if (entry.ended) throw new Error("the caller hung up before the call was answered");
+      await wacallsAcceptCall(options, event.sessionId, event.id, clientId);
+      answered = true;
+    } catch (error) {
+      await entry.transport?.close();
+      const detail = messageOf(error);
+      log("error", "could not answer a WhatsApp call", { callId, error: detail });
+      await closeUnanswered(
+        organizationId,
+        callId,
+        entry.ended ? "caller_hangup" : "whatsapp_answer_failed",
+        entry.ended ? undefined : `Uma ligação pelo WhatsApp de ${from ?? "um número que o WhatsApp não informou"} não pôde ser atendida pelo agente: ${detail}. Ela continuou tocando no celular. Confira a linha Ligação pelo WhatsApp em Saúde.`,
+      );
+      return false;
+    }
+    const conversation = startCallSession(deps.session, { organizationId, callId, agentId, transport, started: { channel: "whatsapp" } });
+    deps.onSession(conversation);
+    void conversation.done.finally(() => live.delete(event.id));
+    return true;
+  }
+
+  return {
+    onEvent(event: Exclude<WacallsEvent, { type: "auth-state" }>): void {
+      if (event.type === "incoming") {
+        // O mesmo `incoming` duas vezes não vira duas chamadas.
+        if (live.has(event.id)) return;
+        const entry: Live = { transport: null, ended: false };
+        live.set(event.id, entry);
+        take(event, entry).then(
+          (started) => {
+            if (!started) live.delete(event.id);
+          },
+          (error: unknown) => {
+            live.delete(event.id);
+            log("error", "could not handle a WhatsApp call", { wacallsCall: event.id, error: messageOf(error) });
+          },
+        );
+        return;
+      }
+      const entry = live.get(event.id);
+      if (!entry) return;
+      if (event.type === "call-status" && event.status === "connected") entry.transport?.mediaConnected();
+      if (event.type === "call-ended" || (event.type === "call-status" && event.status === "ended")) {
+        entry.ended = true;
+        entry.transport?.remoteEnded();
+      }
     },
   };
 }

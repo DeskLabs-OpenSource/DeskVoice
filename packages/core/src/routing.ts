@@ -40,3 +40,12 @@ export async function resolveInboundRoute(db: Db, trunkId: string, dialedE164: s
     return { organizationId: trunk.organization_id, trunkId, phoneNumberId: number?.id ?? null, agentId: number?.agent_id ?? null };
   });
 }
+
+/**
+ * Alguma organização pediu o serviço de ligação pelo WhatsApp. O processo de voz pergunta isto na
+ * partida, para ouvir o WaCalls desde já: é por ele que as ligações chegam. Só um sim ou não, sem
+ * dado de organização nenhuma.
+ */
+export async function whatsappCallsWanted(db: Db): Promise<boolean> {
+  return withSystem(db, async (q) => (await q.one("select 1 as wanted from whatsapp_call_sessions where service_wanted limit 1")) !== null);
+}

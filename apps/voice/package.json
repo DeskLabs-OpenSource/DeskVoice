@@ -11,6 +11,7 @@
     "@deskvoice/core": "workspace:^",
     "@deskvoice/tools": "workspace:^",
     "@deskvoice/voice-engine": "workspace:^",
+    "werift": "0.27.0",
     "ws": "^8.22.2",
     "zod": "^4.6.7"
   }

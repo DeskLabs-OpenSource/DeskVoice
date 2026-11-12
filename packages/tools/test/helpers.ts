@@ -31,7 +31,7 @@ export async function createAgent(app: Db, organizationId: string, transferTo: s
 export async function createFixture(
   app: Db,
   label: string,
-  options: { transferTo?: string; onWait?: (approvalId: string, ctx: FakeContext) => Promise<ApprovalOutcome> } = {},
+  options: { transferTo?: string; canTransfer?: boolean; onWait?: (approvalId: string, ctx: FakeContext) => Promise<ApprovalOutcome> } = {},
 ): Promise<FakeContext> {
   const organizationId = await createOrganization(app, label);
   const agentId = await createAgent(app, organizationId, options.transferTo ?? null);
@@ -51,6 +51,7 @@ export async function createFixture(
       now = new Date(now.getTime() + ms);
     },
     telephony: {
+      canTransfer: options.canTransfer ?? true,
       transfer: async (to) => {
         ctx.transfers.push(to);
       },

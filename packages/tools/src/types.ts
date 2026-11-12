@@ -8,6 +8,8 @@ export interface ToolContext {
   q: OrgQuery;
   clock: Clock;
   telephony: {
+    /** `false`: o canal desta chamada não tem para onde transferir (a ligação pelo WhatsApp). */
+    canTransfer: boolean;
     transfer(toE164: string): Promise<void>;
     /** Com `farewell`, o agente fala a despedida e só então a ligação cai. */
     hangup(farewell?: string): Promise<void>;
