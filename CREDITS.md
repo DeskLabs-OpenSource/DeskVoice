@@ -26,6 +26,19 @@ Do uso do WAHA no DeskcommCRM vieram, como lição e não como código:
   falhou e conferir o endereço do número antes de enviar. O cliente do DeskVoice
   (`packages/tools/src/connectors/waha.ts`) foi escrito do zero a partir da documentação do WAHA.
 
+Do uso do WaCalls no DeskcommCRM (spec 18 e `lib/wacalls/` de lá) vieram, também como lição e não
+como código, as regras da ligação pelo WhatsApp:
+
+- **O que o pareamento precisa para não quebrar em silêncio.** Nunca chamar a rota de re-parear
+  (`POST /sessions/{id}/pair`), que deixa as chamadas presas ao cliente antigo: parear de novo é
+  apagar e criar. Reconhecer a sessão pelo nome, com o id inteiro da organização, porque o primeiro
+  QR Code sai antes de a criação devolver o id. `logged_out` é código vencido ou aparelho
+  desvinculado; `paired: false` com um QR Code novo não é. Sair da sessão antes de apagá-la. Um
+  dono por chamada, a troca de SDP que substitui a anterior, o nono dígito e o retrato do
+  `call-list` a cada reconexão estão no desenho (`docs/specs/2026-11-12-ligacao-pelo-whatsapp.md`,
+  seção 8) para as próximas fatias. O cliente do DeskVoice (`apps/voice/src/wacalls-client.ts`)
+  foi escrito do zero, a partir do contrato que o desenho leu no código do WaCalls.
+
 Da fábrica do DeskcommCRM vieram a contribuição guiada por skills, o lançamento por fragmentos,
 a forma do instalador e as doutrinas de sistema vivo, versionamento e ação destrutiva, aqui
 reescritas para telefonia.
@@ -43,10 +56,17 @@ embutido nem modificado.
 | [PostgreSQL](https://www.postgresql.org) | Banco de dados e fila | PostgreSQL License |
 | [Caddy](https://caddyserver.com) | Publica o painel com HTTPS | Apache 2.0 |
 | [WAHA](https://github.com/devlikeapro/waha) | Mantém a sessão do WhatsApp conectado por QR Code e envia as mensagens. Cliente não oficial do WhatsApp | Apache 2.0 |
+| [WaCalls](https://github.com/JotaDev66/WaCalls) | Conecta o número como aparelho vinculado para a ligação pelo WhatsApp. Cliente não oficial do WhatsApp | MIT |
 
 Sobre o WAHA: a imagem publicada pelos autores (`devlikeapro/waha`) é referenciada pelo Compose,
 com versão e resumo fixos, e nunca republicada. O DeskVoice fala com ele pela API HTTP. O WAHA
 não é afiliado ao WhatsApp nem à Meta, e o DeskVoice não é afiliado ao WAHA.
+
+Sobre o WaCalls: a imagem publicada pelos autores (`ghcr.io/jotadev66/wacalls`, canal `develop`) é
+referenciada pelo Compose, fixada por resumo, e nunca republicada. O DeskVoice fala com ele pela API
+HTTP e pelo SSE, só a partir do processo de voz. O WaCalls, de JotaDev66 e Joseph Fernandes, traz o
+codec MLow sob a licença MIT de origem e usa a biblioteca `whatsmeow` (MPL-2.0). Ele não é afiliado
+ao WhatsApp nem à Meta, e o DeskVoice não é afiliado ao WaCalls.
 
 Sobre o Asterisk: o DeskVoice conversa com ele por interfaces de rede (ARI e AudioSocket) e não
 contém código do Asterisk. O Asterisk continua sob a licença dele, e o DeskVoice sob MIT. O

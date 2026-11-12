@@ -17,7 +17,7 @@ O painel **pede**; não executa. Quem atualiza é um agente pequeno do kit de in
 | Tema | O que vale | Onde está |
 |---|---|---|
 | Quem executa | `install/agent.sh`, agendado pelo instalador para passar a cada minuto (timer do systemd; sem systemd, uma linha em `/etc/cron.d`) | `install/agent.sh`, `install_agent_schedule` em `install/_common.sh` |
-| O que passa do painel para o servidor | **Dois booleanos.** A resposta da rota do agente é `{ update: true \| false, whatsapp: true \| false }` e mais nada. O segundo entrou com o WhatsApp por QR Code ([registro 0012](0012-whatsapp-por-qr-code.md)): "esta instalação quer o serviço de WhatsApp" | `apps/panel/src/app/api/v1/system/agent/route.ts` |
+| O que passa do painel para o servidor | **Três booleanos.** A resposta da rota do agente é `{ update: true \| false, whatsapp: true \| false, whatsappCalls: true \| false }` e mais nada. O segundo entrou com o WhatsApp por QR Code ([registro 0012](0012-whatsapp-por-qr-code.md)): "esta instalação quer o serviço de WhatsApp". O terceiro, com a ligação pelo WhatsApp (abaixo) | `apps/panel/src/app/api/v1/system/agent/route.ts` |
 | Para qual versão | O painel não diz. O agente descobre a maior versão final nas tags do repositório (consulta no máximo a cada 10 minutos), **anuncia** essa versão ao painel a cada passada e, quando o painel diz sim, vai para ela com `update.sh --to` | `discover_target` em `install/agent.sh` |
 | A pessoa confirma a versão que o servidor executaria | A tela nomeia, no botão e na confirmação, a versão anunciada pelo agente, e mostra as notas das versões até ela. Sem a página dessa versão na lista pública, a tela diz que a versão existe e não oferece o botão; a rota recusa do mesmo jeito | `apps/panel/src/app/api/v1/system/update/route.ts` |
 | Ninguém é atualizado para o que não confirmou | O pedido guarda a versão vista. Na passada do agente, **o painel compara** essa versão com a que o agente acabou de anunciar: se saiu outra, o pedido termina como `superseded` e a resposta é "não". O agente continua recebendo só o booleano **[construtor]** | `agentCheckIn` em `apps/panel/src/server/update.ts` |
@@ -77,6 +77,19 @@ O agente responde, na fala seguinte, o estado do serviço em códigos fechados: 
 **Compatibilidade, conferida.** O agente da 0.2.0 lê só `data.update` e ignora o resto: o JavaScript dele (`git show v0.2.0:install/agent.sh`) foi executado contra uma resposta com os dois campos e devolveu `update=false`. O painel manda o campo novo sempre. No sentido contrário, um painel antigo não manda `whatsapp`, e o agente novo lê isso como "não sei": não liga nem desliga nada.
 
 **Atualização e WhatsApp pedidos na mesma fala:** a atualização vai primeiro. O serviço converge na volta que entrega o resultado dela, ou na passada seguinte.
+
+### O terceiro campo: `whatsappCalls` **[construtor]**
+
+Entrou com a ligação pelo WhatsApp ([desenho](../specs/2026-11-12-ligacao-pelo-whatsapp.md), seção 6): "esta instalação quer o serviço de ligação pelo WhatsApp" (o WaCalls). Com nome próprio, e não como item de uma lista, pela regra acima.
+
+| | Condição | Como o `whatsappCalls` cumpre |
+|---|---|---|
+| a | Booleano de estado desejado | "Esta instalação quer o serviço de ligação pelo WhatsApp." O agente converge a cada passada; repetir o valor não faz nada |
+| b | A ação inteira está no kit | `converge_service wacalls` em `install/agent.sh`, a mesma função do WAHA; a imagem é a que o Compose fixa por resumo (`ghcr.io/jotadev66/wacalls@sha256:…`), e as chaves são geradas por `ensure_wacalls` |
+| c | Reversível, sem apagar dado | Desligar remove o contêiner e a imagem fixada; o volume `wacalls-data`, com o pareamento, fica |
+| d | O agente confere o custo antes | 1,2 GB livres antes do download (imagem de 18,5 MB comprimidos, cerca de 68 MB descompactada, mais 1 GB de folga); memória abaixo do teto de 256 MB vira aviso |
+
+O relato volta em `whatsappCalls`, com os mesmos códigos do `whatsapp`. Os dois serviços são independentes: um sim para um não sobe o outro, e cada um tem o seu registro de falha no servidor. **Compatibilidade:** o agente anterior não lê o campo novo (o JavaScript dele só olha `update` e `whatsapp`); o agente novo lê a falta dele, num painel antigo, como "não sei".
 
 ## O que não existe, e por quê
 

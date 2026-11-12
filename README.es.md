@@ -145,6 +145,7 @@ probó, cada capacidad dice hasta dónde llegó la prueba:
 | Motor de voz Gemini Live | Esperando prueba real (probado contra servidor falso, sin clave) |
 | Enviar WhatsApp durante la llamada, por conector | Esperando prueba real |
 | Conectar un WhatsApp por código QR (Configuración → WhatsApp) y enviar por él los avisos y los mensajes del agente | El servicio no viene instalado: se instala desde la pantalla, y cuesta cerca de 323 MiB de memoria sin número conectado y 3,2 GB en disco (medido en la 0.3.0, el 12/11/2026). Rutas probadas con base de datos real y con un servicio de WhatsApp falso; instalar y quitar por el agente, con Docker simulado. **Aún sin prueba con un número real:** no se leyó ningún código QR y no salió ningún mensaje. Es un cliente no oficial de WhatsApp; mira la [guía](docs/guides/whatsapp-por-qr-code.md) (en portugués) |
+| Conectar el número a las llamadas por WhatsApp (Configuración → Llamadas por WhatsApp), primera parte de la capacidad | El servicio (WaCalls) no viene instalado: se instala desde la pantalla; memoria y disco aún no medidos. Rutas probadas con base de datos real y un WaCalls falso, por el proceso de voz real; instalar y quitar por el agente, con Docker simulado. **Aún sin prueba con un número real**, y ninguna llamada se atiende todavía. Cliente no oficial de WhatsApp; mira la [guía](docs/guides/ligacao-pelo-whatsapp.md) (en portugués) |
 | Llamar a un webhook durante la llamada | Esperando prueba real (sin un receptor real) |
 | Actualización, chequeo de salud, respaldo y restauración | Probados con Docker simulado; respaldo y restauración revisados a mano en un Postgres real |
 | Actualizar desde el panel (Configuración → Versión y actualización), mediante un agente del kit en el servidor | Rutas probadas con base de datos real; agente y programación probados con Docker y systemd simulados. **Todavía sin prueba en una instalación real** |
@@ -154,7 +155,7 @@ Si usted hace la primera llamada real, cuente cómo fue en un issue: es la contr
 valiosa en este momento.
 
 Lo que **no** existe todavía: grabación de audio (la base guarda la transcripción), varias
-empresas en la misma pantalla, constructor visual de flujos, llamadas por WhatsApp, IVR por voz,
+empresas en la misma pantalla, constructor visual de flujos, atender las llamadas por WhatsApp, IVR por voz,
 colas de atención. Parte de esto está en el [roadmap](ROADMAP.md), abierto a la comunidad.
 
 ## Cómo funciona

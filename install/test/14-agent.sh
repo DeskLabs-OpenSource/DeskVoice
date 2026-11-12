@@ -95,7 +95,7 @@ contains "resultado: leva a saída do atualizador" "$(sed 1,7d "$FAKE_DIR/agent_
 refuse "resultado entregue não fica pendente" test -e "$S/pending-result"
 contains "a saída inteira fica no servidor" "$(cat "$S/last-update.log")" "Atualizado para 0.2.0"
 equal "só o dono lê a saída guardada" 600 "$(mode_of "$S/last-update.log")"
-equal "o resultado diz que a saída inteira ficou guardada" 1 "$(said 2 13)"
+equal "o resultado diz que a saída inteira ficou guardada" 1 "$(said 2 18)"
 refuse "entregue: a marca da saída guardada sai junto" test -e "$S/pending-result.kept"
 refuse "a trava sai no fim" test -e "$S/lock"
 contains "a atualização fica no registro" "$(cat "$S/agent.log")" "atualização terminou: succeeded (de 0.1.0 para 0.2.0"
@@ -196,7 +196,7 @@ out="$(bash "$K/agent.sh" 2>&1)"; equal "interrompido (TERM): sai com o código 
 equal "interrompido (TERM): mesmo assim fala de novo com o painel" 2 "$(calls_made)"
 equal "interrompido (TERM): reporta falha" failed "$(said 2 4)"
 contains "interrompido (TERM): diz que parou no meio" "$(sed 1,7d "$FAKE_DIR/agent_call.2")" "parou antes de terminar"
-equal "interrompido (TERM): não diz que guardou uma saída que não houve" "" "$(said 2 13)"
+equal "interrompido (TERM): não diz que guardou uma saída que não houve" "" "$(said 2 18)"
 refuse "interrompido (TERM): a trava sai" test -e "$S/lock"
 
 # Morto sem chance de reagir (ou a máquina reiniciou): quem reporta é a passada seguinte.
@@ -209,7 +209,7 @@ fresh
 out="$(agent)"; equal "passada seguinte ao KILL: assume a trava que sobrou e termina" 0 "$?"
 equal "passada seguinte ao KILL: reporta falha" failed "$(said 1 4)"
 contains "passada seguinte ao KILL: diz que parou no meio" "$(sed 1,7d "$FAKE_DIR/agent_call.1")" "parou antes de terminar"
-equal "passada seguinte ao KILL: não diz que guardou uma saída que não houve" "" "$(said 1 13)"
+equal "passada seguinte ao KILL: não diz que guardou uma saída que não houve" "" "$(said 1 18)"
 
 # ── Duas passadas não se sobrepõem ──
 fresh; mkdir -p "$S/lock"; echo $$ > "$S/lock/pid"   # este teste está vivo: a trava vale

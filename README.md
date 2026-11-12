@@ -143,6 +143,7 @@ provado, cada capacidade abaixo diz até onde a prova foi:
 | Motor de voz Gemini Live | Aguardando prova real (testado contra servidor falso, sem chave) |
 | Enviar WhatsApp durante a chamada, por conector | Aguardando prova real |
 | Conectar um WhatsApp por QR Code (Configurações → WhatsApp) e enviar por ele os avisos e as mensagens do agente | O serviço não vem instalado: instala-se pela tela, e custa cerca de 323 MiB de memória sem número conectado e 3,2 GB em disco (medido na 0.3.0, em 12/11/2026). Rotas testadas com banco real e com um serviço de WhatsApp falso; instalar e remover pelo agente, com Docker simulado. **Ainda sem prova com um número real:** nenhum QR Code foi lido e nenhuma mensagem saiu. É um cliente não oficial do WhatsApp; veja o [guia](docs/guides/whatsapp-por-qr-code.md) |
+| Conectar o número à ligação pelo WhatsApp (Configurações → Ligação pelo WhatsApp), primeira parte da capacidade | O serviço (WaCalls) não vem instalado: instala-se pela tela; memória e disco ainda não medidos. Rotas testadas com banco real e um WaCalls falso, pelo processo de voz de verdade; instalar e remover pelo agente, com Docker simulado. **Ainda sem prova com um número real**, e nenhuma ligação é atendida ainda. Cliente não oficial do WhatsApp; veja o [guia](docs/guides/ligacao-pelo-whatsapp.md) |
 | Chamar um webhook durante a chamada | Aguardando prova real (sem um receptor de verdade) |
 | Atualização, checagem de saúde, backup e restauração | Testados com Docker simulado; backup e restauração conferidos à mão num Postgres real |
 | Atualizar pela tela (Configurações → Versão e atualização), por um agente do kit no servidor | Rotas testadas com banco real; agente e agendamento testados com Docker e systemd simulados. **Ainda sem prova numa instalação real** |
@@ -152,7 +153,7 @@ Se você fizer a primeira ligação real, conte como foi numa issue: é a contri
 neste momento.
 
 O que **não** existe ainda: gravação de áudio (a fundação guarda a transcrição), várias empresas
-na mesma tela, construtor visual de fluxos, ligação pelo WhatsApp, URA por voz, filas de
+na mesma tela, construtor visual de fluxos, atender a ligação pelo WhatsApp, URA por voz, filas de
 atendimento. Parte disso está no [roadmap](ROADMAP.md), aberta para a comunidade.
 
 ## Como funciona

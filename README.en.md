@@ -143,6 +143,7 @@ proven yet, each capability below says how far the proof went:
 | Gemini Live voice engine | Awaiting real-world proof (tested against a fake server, without a key) |
 | Send WhatsApp during the call, through a connector | Awaiting real-world proof |
 | Connect a WhatsApp number by QR code (Settings → WhatsApp) and send the agent's notices and messages through it | The service does not come installed: you install it from the screen, and it costs about 323 MiB of memory with no number connected and 3.2 GB of disk (measured on 0.3.0, November 12, 2026). Routes tested with a real database and a fake WhatsApp service; installing and removing through the agent, with a simulated Docker. **Not yet proven with a real number:** no QR code was scanned and no message went out. It is an unofficial WhatsApp client; see the [guide](docs/guides/whatsapp-por-qr-code.md) (in Portuguese) |
+| Connect the number to WhatsApp calls (Settings → WhatsApp calls), the first part of the capability | The service (WaCalls) does not come installed: you install it from the screen; memory and disk not measured yet. Routes tested with a real database and a fake WaCalls, through the real voice process; installing and removing through the agent, with a simulated Docker. **Not yet proven with a real number**, and no call is answered yet. Unofficial WhatsApp client; see the [guide](docs/guides/ligacao-pelo-whatsapp.md) (in Portuguese) |
 | Call a webhook during the call | Awaiting real-world proof (without a real receiver) |
 | Update, health check, backup and restore | Tested against a simulated Docker; backup and restore checked by hand on a real Postgres |
 | Update from the panel (Settings → Version and update), through a kit agent on the server | Routes tested against a real database; agent and scheduling tested against a simulated Docker and systemd. **Not yet proven on a real installation** |
@@ -152,7 +153,7 @@ If you place the first real call, tell us how it went in an issue: it is the mos
 contribution right now.
 
 What does **not** exist yet: audio recording (the foundation stores the transcript), several
-companies on one screen, a visual flow builder, calls over WhatsApp, voice IVR, call queues.
+companies on one screen, a visual flow builder, answering calls over WhatsApp, voice IVR, call queues.
 Part of this is on the [roadmap](ROADMAP.md), open to the community.
 
 ## How it works

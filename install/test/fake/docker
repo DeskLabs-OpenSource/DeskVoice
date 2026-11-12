@@ -13,10 +13,10 @@ case "$args" in
   " compose version "*|" --version "*) echo "fake"; exit 0 ;;
   # Contêiner que existe, rodando ou parado: aqui, o que está na lista de rodando.
   *" ps -aq "*) if grep -qx "$last" "$FAKE_DIR/running" 2>/dev/null; then echo "cid-$last"; fi; exit 0 ;;
-  # Remover o contêiner do WAHA: sai da lista, salvo $FAKE_DIR/waha_rm_fail.
-  *" rm -sf waha "*) if [ -f "$FAKE_DIR/waha_rm_fail" ]; then exit 1; fi; grep -vx waha "$FAKE_DIR/running" > "$FAKE_DIR/running.next" 2>/dev/null; mv "$FAKE_DIR/running.next" "$FAKE_DIR/running"; exit 0 ;;
-  # Subir só o WAHA: passa a rodar, salvo $FAKE_DIR/waha_up_fail.
-  *" up -d waha "*) if [ -f "$FAKE_DIR/waha_up_fail" ]; then exit 1; fi; grep -qx waha "$FAKE_DIR/running" 2>/dev/null || echo waha >> "$FAKE_DIR/running"; exit 0 ;;
+  # Remover o contêiner de um serviço opcional (waha, wacalls): sai da lista, salvo $FAKE_DIR/<serviço>_rm_fail.
+  *" rm -sf waha "*|*" rm -sf wacalls "*) if [ -f "$FAKE_DIR/${last}_rm_fail" ]; then exit 1; fi; grep -vx "$last" "$FAKE_DIR/running" > "$FAKE_DIR/running.next" 2>/dev/null; mv "$FAKE_DIR/running.next" "$FAKE_DIR/running"; exit 0 ;;
+  # Subir só um serviço opcional: passa a rodar, salvo $FAKE_DIR/<serviço>_up_fail.
+  *" up -d waha "*|*" up -d wacalls "*) if [ -f "$FAKE_DIR/${last}_up_fail" ]; then exit 1; fi; grep -qx "$last" "$FAKE_DIR/running" 2>/dev/null || echo "$last" >> "$FAKE_DIR/running"; exit 0 ;;
   # De que pasta o Compose subiu os contêineres do projeto (o rótulo working_dir de cada um): o que
   # estiver em $FAKE_DIR/project_dir (outra pasta); sem ele, a pasta do teste, se há contêiner na
   # lista de rodando; lista vazia é máquina sem instalação.
@@ -60,6 +60,8 @@ case "$args" in
     case "$reply" in "!"*) echo "${reply#!}"; exit 1 ;; *) echo "$reply"; exit 0 ;; esac ;;
   # A sonda do serviço de WhatsApp, feita a partir do painel: responde, salvo $FAKE_DIR/waha_down.
   *" exec -T panel node "*"waha:3000/ping"*) if [ -f "$FAKE_DIR/waha_down" ]; then exit 1; fi; exit 0 ;;
+  # A sonda do serviço de ligação pelo WhatsApp, feita a partir da voz: responde, salvo $FAKE_DIR/wacalls_down.
+  *" exec -T voice node "*"wacalls:8080/healthz"*) if [ -f "$FAKE_DIR/wacalls_down" ]; then exit 1; fi; exit 0 ;;
   *" exec -T panel node "*) answer panel_health; exit 0 ;;
   *" exec -T voice node "*) answer voice_health; exit "$(cat "$FAKE_DIR/voice_exit" 2>/dev/null || echo 0)" ;;
   *" pg_dump "*) if [ -f "$FAKE_DIR/pg_dump_fail" ]; then exit 1; fi; printf 'FAKE-DUMP-%s' "$(answer dump_seed)"; exit 0 ;;
@@ -72,11 +74,16 @@ case "$args" in
     esac; exit 0 ;;
   *"select count(*) from users"*) answer users_count; exit 0 ;;
   *" pull -q panel "*) if [ -f "$FAKE_DIR/pull_fail" ]; then echo "Error response from daemon: manifest unknown" >&2; cat "$FAKE_DIR/pull_fail" >&2; exit 1; fi; exit 0 ;;
-  # Baixar a imagem do WAHA: passa a existir no disco. Com waha_pull_hang, o download não termina.
-  *" pull -q waha "*) if [ -f "$FAKE_DIR/waha_pull_hang" ]; then exec sleep 60; fi; if [ -f "$FAKE_DIR/waha_pull_fail" ]; then echo "Error response from daemon: toomanyrequests" >&2; exit 1; fi; echo "$last" > "$FAKE_DIR/waha_image"; exit 0 ;;
-  # A imagem do WAHA no disco: existe se foi baixada; sai com `image rm`, salvo waha_image_busy.
-  " image inspect "*) [ -f "$FAKE_DIR/waha_image" ]; exit $? ;;
-  " image rm "*) if [ -f "$FAKE_DIR/waha_image_busy" ]; then echo "conflict: image is being used" >&2; exit 1; fi; rm -f "$FAKE_DIR/waha_image"; exit 0 ;;
+  # Baixar a imagem de um serviço opcional: passa a existir no disco ($FAKE_DIR/<serviço>_image).
+  # Com <serviço>_pull_hang, o download não termina; com <serviço>_pull_fail, falha.
+  *" pull -q waha "*|*" pull -q wacalls "*) if [ -f "$FAKE_DIR/${last}_pull_hang" ]; then exec sleep 60; fi; if [ -f "$FAKE_DIR/${last}_pull_fail" ]; then echo "Error response from daemon: toomanyrequests" >&2; exit 1; fi; echo "$last" > "$FAKE_DIR/${last}_image"; exit 0 ;;
+  # A imagem no disco: existe se foi baixada; sai com `image rm`, salvo <serviço>_image_busy. O
+  # serviço sai da referência (`.../wacalls@sha256:...` é o WaCalls; o resto, o WAHA).
+  " image inspect "*|" image rm "*) case "$last" in *wacalls*) svc=wacalls ;; *) svc=waha ;; esac
+    case "$args" in
+      " image inspect "*) [ -f "$FAKE_DIR/${svc}_image" ]; exit $? ;;
+      *) if [ -f "$FAKE_DIR/${svc}_image_busy" ]; then echo "conflict: image is being used" >&2; exit 1; fi; rm -f "$FAKE_DIR/${svc}_image"; exit 0 ;;
+    esac ;;
   # As imagens no disco: uma referência completa (nome:etiqueta) por linha em $FAKE_DIR/images.
   # Listar por nome devolve as etiquetas dele; `rmi` tira a linha, salvo as referências listadas em
   # $FAKE_DIR/rmi_busy (imagem em uso por um contêiner, que o `rmi` sem força recusa).
