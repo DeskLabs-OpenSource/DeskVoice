@@ -1,0 +1,41 @@
+Images space usage:
+
+REPOSITORY                                       TAG       IMAGE ID       CREATED             SIZE      SHARED SIZE   UNIQUE SIZE   CONTAINERS
+ghcr.io/desklabs-opensource/deskvoice-panel      0.4.0     bfa703d27b0c   About an hour ago   334MB     239.1MB       94.85MB       1
+ghcr.io/desklabs-opensource/deskvoice-routines   0.4.0     f636618bbedf   About an hour ago   1.18GB    1.181GB       257.5kB       2
+ghcr.io/desklabs-opensource/deskvoice-voice      0.4.0     fc135cfa2c7d   About an hour ago   1.18GB    1.181GB       588.9kB       1
+ghcr.io/desklabs-opensource/deskvoice-panel      0.3.0     4f0fdd0efede   4 hours ago         334MB     239.1MB       94.83MB       0
+ghcr.io/desklabs-opensource/deskvoice-voice      0.3.0     a73b8f696e65   4 hours ago         1.18GB    239.1MB       942.6MB       0
+ghcr.io/desklabs-opensource/deskvoice-routines   0.3.0     39adc73dd430   4 hours ago         1.18GB    239.1MB       942.3MB       0
+<none>                                           <none>    0bbb055bda67   6 days ago          92MB      12.94MB       79.07MB       1
+<none>                                           <none>    e5d2edd28b1f   6 days ago          424MB     12.94MB       410.9MB       1
+<none>                                           <none>    927d4c987771   8 weeks ago         110MB     34B           110.2MB       1
+
+Containers space usage:
+
+CONTAINER ID   IMAGE                                                  COMMAND                  LOCAL VOLUMES   SIZE      CREATED             STATUS                     NAMES
+446bc5d79fff   ghcr.io/desklabs-opensource/deskvoice-voice:0.4.0      "docker-entrypoint.s…"   1               463kB     About an hour ago   Up 4 minutes (healthy)     deskvoice-voice-1
+29bc9532fb31   ghcr.io/desklabs-opensource/deskvoice-routines:0.4.0   "docker-entrypoint.s…"   0               201kB     About an hour ago   Up 4 minutes               deskvoice-routines-1
+c9804889f048   ghcr.io/desklabs-opensource/deskvoice-panel:0.4.0      "docker-entrypoint.s…"   0               4.1kB     About an hour ago   Up 4 minutes (healthy)     deskvoice-panel-1
+f8420b24e0ca   ghcr.io/desklabs-opensource/deskvoice-routines:0.4.0   "docker-entrypoint.s…"   0               81.9kB    About an hour ago   Exited (0) 4 minutes ago   deskvoice-migrate-1
+0618b62771ea   caddy:2.11.9-alpine                                    "caddy run --config …"   2               4.1kB     3 hours ago         Up About an hour           deskvoice-caddy-1
+446ac62ef725   927d4c987771                                           "/usr/local/bin/entr…"   7               57.3kB    3 hours ago         Up 2 hours (healthy)       deskvoice-asterisk-1
+a6eab4241a2a   postgres:17.11-alpine                                  "docker-entrypoint.s…"   1               20.5kB    3 hours ago         Up 2 hours (healthy)       deskvoice-postgres-1
+
+Local Volumes space usage:
+
+VOLUME NAME                                                        LINKS     SIZE
+e311cd002cedc99ca71232e161086f18216cf2715ed33eac136f20294a5b1d1c   1         0B
+e3aa3554eb27c4bc9d1b4fdd2223c507eb07ad15ba9200060d42cd4d5ea02b02   1         7.156kB
+7b89d7320600a9e2abc9f5bd9ee3163262b2ecea3a55750da57ba204495cf6aa   1         883.1kB
+deskvoice_postgres-data                                            1         66.7MB
+f27f75fbe2917d8f507685e4a44bb20890f048c93329d7654d49d66ab84f2985   1         0B
+13ab7868f12e131f11eee31f04dfd1c75a740560252292d1b7851735402fc5dc   1         0B
+c5baf351ea18cfcfbe5e135a678af39a45a73d556151efe2aeade7ede27e0851   1         15.21kB
+deskvoice_asterisk-generated                                       2         109B
+deskvoice_caddy-config                                             1         731B
+deskvoice_caddy-data                                               1         143B
+
+Build cache usage: 0B
+
+CACHE ID   CACHE TYPE   SIZE      CREATED   LAST USED   USAGE     SHARED

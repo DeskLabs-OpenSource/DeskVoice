@@ -1,0 +1,9 @@
+-- Fixture da cerca phones-are-e164: `phone` cru na tabela, e a coluna normalizada que a cerca
+-- tem de aceitar.
+create table leads (
+  id uuid primary key,
+  phone text,
+  phone_e164 text,
+  whatsapp_service text
+);
+alter table leads add column caller_phone text;

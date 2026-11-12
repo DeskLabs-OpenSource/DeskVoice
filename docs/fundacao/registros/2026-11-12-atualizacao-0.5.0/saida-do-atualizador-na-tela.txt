@@ -1,0 +1,46 @@
+# Texto do bloco "Saída do atualizador" (Configurações → Versão e atualização), copiado da tela às 13:06 de
+# 12/11/2026 (-03), depois da atualização 0.4.0 → 0.5.0 pelo botão. A tela mostra o fim da saída.
+A atualização terminou em 12 de nov., 13:05: o servidor está na versão 0.5.0.
+
+✓ Banco atualizado
+▶ Subindo e conferindo
+Container deskvoice-postgres-1 Running
+Container deskvoice-asterisk-1 Running
+Container deskvoice-caddy-1 Running
+Container deskvoice-migrate-1 Recreate
+Container deskvoice-migrate-1 Recreated
+Container deskvoice-panel-1 Recreate
+Container deskvoice-voice-1 Recreate
+Container deskvoice-routines-1 Recreate
+Container deskvoice-panel-1 Recreated
+Container deskvoice-routines-1 Recreated
+Container deskvoice-voice-1 Recreated
+Container deskvoice-asterisk-1 Waiting
+Container deskvoice-postgres-1 Waiting
+Container deskvoice-postgres-1 Healthy
+Container deskvoice-migrate-1 Starting
+Container deskvoice-asterisk-1 Healthy
+Container deskvoice-migrate-1 Started
+Container deskvoice-migrate-1 Waiting
+Container deskvoice-migrate-1 Exited
+Container deskvoice-panel-1 Starting
+Container deskvoice-voice-1 Starting
+Container deskvoice-routines-1 Starting
+Container deskvoice-panel-1 Started
+Container deskvoice-panel-1 Waiting
+Container deskvoice-routines-1 Started
+Container deskvoice-voice-1 Started
+Container deskvoice-panel-1 Healthy
+✓ Agente de atualização agendado (systemd: deskvoice-agent.timer, a cada minuto, como root)
+✓ Atualizado para 0.5.0, com todas as peças essenciais respondendo.
+✓ O painel responde pela porta publicada (http://127.0.0.1:3080)
+✓ Imagens de versões antigas do DeskVoice removidas, para liberar disco:
+ghcr.io/desklabs-opensource/deskvoice-panel:0.3.0
+ghcr.io/desklabs-opensource/deskvoice-voice:0.3.0
+ghcr.io/desklabs-opensource/deskvoice-routines:0.3.0
+A imagem da versão 0.4.0 fica, para voltar a ela sem internet.
+O atualizador da versão 0.5.0 assumiu a atualização a partir da 0.4.0.
+Backup de antes da atualização: /root/DeskVoice/backups/20261112-130407
+Relatório completo: bash install/healthcheck.sh
+
+Este servidor está na versão publicada mais recente.
