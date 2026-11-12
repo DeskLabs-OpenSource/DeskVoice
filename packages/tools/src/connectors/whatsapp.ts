@@ -1,6 +1,7 @@
 import { decryptSecret, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
 import { safeFetch, type SafeFetchOptions, type SafeResponse } from "../net/safe-fetch";
+import { connectorBody, connectorHeaders } from "./signed-request";
 import { readSetting } from "../settings";
 import { sendViaDeskcomm } from "./deskcomm";
 import { sendViaWaha, wahaFromEnv, wahaSessionName, type WahaOptions } from "./waha";
@@ -34,6 +35,8 @@ export interface WhatsAppMessage {
   to: string;
   text: string;
   callId?: string | null;
+  /** Chave de repetição segura (`Idempotency-Key`) nos conectores HTTP. */
+  idempotencyKey?: string;
 }
 
 export async function hasWhatsAppConnector(q: OrgQuery): Promise<boolean> {
@@ -63,13 +66,6 @@ export async function sendWhatsApp(connector: WhatsAppConnector, message: WhatsA
 }
 
 function sendViaWebhook(connector: HttpConnector, message: WhatsAppMessage, net: SafeFetchOptions): Promise<SafeResponse> {
-  return safeFetch(
-    connector.url,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${connector.token}` },
-      body: JSON.stringify({ to: message.to, text: message.text, callId: message.callId ?? null }),
-    },
-    net,
-  );
+  const body = connectorBody(message);
+  return safeFetch(connector.url, { method: "POST", headers: connectorHeaders(connector.token, body, message), body }, net);
 }
