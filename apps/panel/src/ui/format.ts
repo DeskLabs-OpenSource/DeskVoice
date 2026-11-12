@@ -34,3 +34,19 @@ export function formatDay(day: string, locale: Locale): string {
 }
 
 export const secondsBetween = (fromIso: string, to: number | string): number => (new Date(to).getTime() - new Date(fromIso).getTime()) / 1000;
+
+/**
+ * "rode `x` agora" -> texto, código, texto: a crase das notas de versão vira `<code>` na tela.
+ * Só texto entra e sai, nada vira HTML. Crase sem par, ou par vazio, fica como texto.
+ */
+export function splitInlineCode(text: string): Array<{ code: boolean; text: string }> {
+  const pieces: Array<{ code: boolean; text: string }> = [];
+  let last = 0;
+  for (const match of text.matchAll(/`([^`]+)`/g)) {
+    if (match.index > last) pieces.push({ code: false, text: text.slice(last, match.index) });
+    pieces.push({ code: true, text: match[1] ?? "" });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) pieces.push({ code: false, text: text.slice(last) });
+  return pieces;
+}

@@ -20,7 +20,7 @@ export const RUN_MINUTES = 30;
 /** O agente passa a cada minuto; calado por mais que isto, a tela diz que ele não responde. */
 export const AGENT_SILENT_MINUTES = 5;
 
-export const REQUEST_COLUMNS = `id, status, from_version as "fromVersion", target_version as "targetVersion", to_version as "toVersion", detail,
+export const REQUEST_COLUMNS = `id, status, from_version as "fromVersion", target_version as "targetVersion", to_version as "toVersion", detail, output_kept as "outputKept",
   requested_at as "requestedAt", accepted_at as "acceptedAt", finished_at as "finishedAt"`;
 
 export const WHATSAPP_SERVICE_STATES = ["absent", "running", "failed"] as const;
@@ -47,6 +47,8 @@ export const agentReport = z.object({
     .object({
       outcome: z.enum(["succeeded", "nothing_to_do", "rolled_back", "failed"]),
       toVersion: short(40).optional(),
+      /** O agente guardou a saída inteira no servidor, em deploy/agent/last-update.log. Ausente = não guardou. */
+      outputKept: z.boolean().optional(),
       detail: z.string().default("").transform((value) => value.slice(-DETAIL_MAX)),
     })
     .optional(),
@@ -168,9 +170,9 @@ export async function agentCheckIn(deps: ServerDeps, report: AgentReport): Promi
       // O resultado é do último pedido que o agente aceitou. Se ele já tinha vencido, vale o que
       // de fato aconteceu: uma atualização que terminou depois do prazo não fica como "venceu".
       const closed = await q.exec(
-        `update update_requests set status = $1, finished_at = $2, to_version = $3, detail = $4
+        `update update_requests set status = $1, finished_at = $2, to_version = $3, detail = $4, output_kept = $5
           where id = (select id from update_requests where accepted_at is not null and status in ('running', 'expired') order by accepted_at desc limit 1)`,
-        [report.result.outcome, now, report.result.toVersion ?? null, report.result.detail],
+        [report.result.outcome, now, report.result.toVersion ?? null, report.result.detail, report.result.outputKept ?? false],
       );
       if (closed > 0) notices.push({ body: FINISHED[report.result.outcome](report.result.toVersion ?? report.version) });
     }

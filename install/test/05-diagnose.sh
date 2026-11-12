@@ -29,6 +29,11 @@ for pair in "senha do dono do banco|$pg" "senha do papel da aplicação|$app" "s
 done
 contains "mantém o que não é segredo" "$report" "linha inofensiva que precisa continuar legível 2026-11-10 22:00:01"
 contains "mantém o domínio do e-mail para dar contexto" "$report" "***@empresa.com.br"
+equal "mascara e-mail de verdade" "de ***@empresa.com" "$(printf 'de ana@empresa.com\n' | mask_secrets)"
+equal "mascara e-mail com subdomínio" "de ***@mail.empresa.com.br" "$(printf 'de ana.lima@mail.empresa.com.br\n' | mask_secrets)"
+equal "mascara a@b.com.br" "***@b.com.br" "$(printf 'a@b.com.br\n' | mask_secrets)"
+equal "deixa intacto pacote@1.2.3" "> pacote@1.2.3 migrate" "$(printf '> pacote@1.2.3 migrate\n' | mask_secrets)"
+equal "deixa intacto o nome do pacote na saída do pnpm" "> @deskvoice/routines@0.0.0 migrate" "$(printf '> @deskvoice/routines@0.0.0 migrate\n' | mask_secrets)"
 contains "lista os três arquivos de ambiente" "$report" "--- migrate.env"
 contains "mostra valor que não é segredo" "$report" "PANEL_DOMAIN=voz.exemplo.com.br"
 contains "mostra o nome da variável secreta sem o valor" "$report" "POSTGRES_PASSWORD=***"

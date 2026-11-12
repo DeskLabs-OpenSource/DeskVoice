@@ -6,7 +6,7 @@ const whatsapp: WhatsAppDictionary = {
   unavailable: "This server does not have the key of the WhatsApp service yet. This happens when the update was done by an old updater. Run on the server, once:",
   serviceAbsent: "The WhatsApp service is not installed on this server.",
   serviceCost:
-    "It is a separate piece, downloaded and turned on only if you ask. It costs about 360 MB of memory with the service idle and 3.2 GB of disk, measured on 11/11/2026 on an 8 GB VPS. Memory use with a number connected has not been measured yet; the ceiling is 1280 MB. The whole of DeskVoice, without it, uses about 320 MB.",
+    "It is a separate piece, downloaded and turned on only if you ask. It costs about 323 MiB of memory with no number connected and 3.2 GB of disk, measured on version 0.3.0 on November 12, 2026, on an 8 GB VPS. Memory use with a number connected has not been measured yet; the ceiling is 1280 MB. The whole of DeskVoice, without it and idle, uses about 380 MiB in the same measurement.",
   installService: "Install the WhatsApp service",
   servicePreparing: "Preparing the service: the server is downloading WhatsApp. It takes a few minutes, and this screen follows along.",
   serviceFailed: {
@@ -23,7 +23,7 @@ const whatsapp: WhatsAppDictionary = {
   serviceRemoving: "Removing the WhatsApp service from the server. It takes up to a minute.",
   removeService: "Remove the WhatsApp service",
   removeServiceConfirm:
-    "Remove the WhatsApp service from this server? No number stays connected, notices and messages by WhatsApp stop going out, and about 360 MB of memory and 3.2 GB of disk are freed. If a number was ever connected here, check on its phone, under Linked devices, whether this device is gone, and remove it if it is still there. To come back, just install it again.",
+    "Remove the WhatsApp service from this server? No number stays connected, notices and messages by WhatsApp stop going out, and about 323 MiB of memory and 3.2 GB of disk are freed. If a number was ever connected here, check on its phone, under Linked devices, whether this device is gone, and remove it if it is still there. To come back, just install it again.",
   removeServiceYes: "Remove the WhatsApp service",
   agentNever: "The agent of this server, which is what installs and removes the service, has not talked to the panel yet. Without it, the request keeps waiting. To run it now, run on the server:",
   agentSilent: "The agent of this server, which is what installs and removes the service, is not responding. The request keeps waiting until it comes back. To run it now, run on the server:",

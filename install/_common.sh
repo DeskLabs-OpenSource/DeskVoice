@@ -833,7 +833,8 @@ converge_waha() {
 
 # ── Sem segredo na tela nem em arquivo ───────────────────────────────────────
 # Filtro: troca por *** o valor de todo segredo do .env e o que tiver cara de senha,
-# chave ou token; encurta e-mail e telefone, que são dado pessoal de quem ligou.
+# chave ou token; encurta e-mail e telefone, que são dado pessoal de quem ligou. E-mail é o que
+# termina num rótulo de letras (o TLD): `pacote@1.2.3`, na saída do pnpm, não é e-mail.
 SECRET_KEYS="POSTGRES_PASSWORD APP_DB_PASSWORD SYSTEM_DB_PASSWORD DESKVOICE_SECRET_KEY INTERNAL_TOKEN ARI_PASSWORD UPDATE_AGENT_TOKEN WAHA_API_KEY"
 mask_secrets() {  # ... | mask_secrets   (lê os segredos dos três arquivos de ambiente)
   local f key list=""
@@ -854,7 +855,7 @@ mask_secrets() {  # ... | mask_secrets   (lê os segredos dos três arquivos de 
       -e 's#(://[^:/@[:space:]]+):[^@[:space:]]+@#\1:***@#g' \
       -e 's#(([Pp]assword|PASSWORD|[Ss]enha|SENHA|[Ss]ecret|SECRET|[Tt]oken|TOKEN|[Aa]pi[_-]?[Kk]ey|API_KEY|SECRET_KEY)[A-Za-z_]*"?[[:space:]]*[=:][[:space:]]*"?)[^[:space:]",}]+#\1***#g' \
       -e 's#(Bearer|Basic) [A-Za-z0-9._~+/=-]+#\1 ***#g' \
-      -e 's#[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.[A-Za-z0-9.-]+)#***@\1#g' \
+      -e 's#[A-Za-z0-9._%+-]+@(([A-Za-z0-9-]+\.)+[A-Za-z]{2,})#***@\1#g' \
       -e 's#(^|[^0-9.])(\+?[0-9]{4})[0-9]{4,9}([0-9]{2})([^0-9.]|$)#\1\2****\3\4#g'
 }
 
