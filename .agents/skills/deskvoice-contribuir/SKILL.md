@@ -122,6 +122,47 @@ aparece na linha do tempo, a falha tem uma fala para quem ligou, e o custo foi m
 
 Não conseguiu provar em tela? Diga no PR o que provou e o que ficou faltando. É o combinado.
 
+### Os testes de tela
+
+`apps/panel/test/e2e` guarda os caminhos de primeira impressão: entrar, configurar, simular uma
+chamada, convidar alguém e as confirmações antes de apagar. O CI os roda no job `install`, contra
+a instalação que ele acabou de subir. Mudou uma dessas telas? Rode-os antes do PR. Eles não sobem
+nada: apontam para um painel no ar, e criam dados nele (nunca use uma instalação em uso).
+
+Sem Docker, um painel descartável sobe assim (Postgres 17 do Homebrew; tudo numa pasta temporária;
+portas e segredos são seus, inventados na hora):
+
+1. `initdb -D <tmp>/pg -U postgres --auth=trust --no-locale`, acrescente `lc_messages = 'C'` ao
+   `postgresql.conf`, suba com `pg_ctl -D <tmp>/pg -o "-p <porta> -k '' -c listen_addresses=127.0.0.1" start`
+   e crie o banco com `createdb`.
+2. Migrations e papéis: `MIGRATION_DATABASE_URL=postgres://postgres@127.0.0.1:<porta>/<banco>`,
+   `APP_DB_PASSWORD` e `SYSTEM_DB_PASSWORD` definidas, `pnpm --filter @deskvoice/routines run migrate`.
+3. As variáveis do produto: `DATABASE_URL` e `SYSTEM_DATABASE_URL` com os papéis `deskvoice_app` e
+   `deskvoice_system`, `DESKVOICE_SECRET_KEY` (`openssl rand -hex 32`), `ARI_PASSWORD`,
+   `INTERNAL_TOKEN`, `WAHA_API_KEY` (qualquer valor: sem ela o bloco de WhatsApp mostra outro
+   estado), `PUBLIC_URL` e `VOICE_INTERNAL_URL`, `VOICE_INTERNAL_PORT`, `VOICE_WEB_PORT`,
+   `AUDIOSOCKET_PORT` em portas livres e `ASTERISK_TRUNKS_FILE` na pasta temporária.
+4. O dono: `printf '%s' "$DESKVOICE_E2E_PASSWORD" | pnpm --filter @deskvoice/routines run create-owner -- --email "$DESKVOICE_E2E_EMAIL" --name "Pessoa" --organization "Empresa" --password-stdin`.
+5. A voz: `pnpm --filter @deskvoice/voice start` (sem Asterisk ela fica tentando a conexão, e a
+   chamada simulada funciona assim mesmo).
+6. O painel **construído**: `pnpm --filter ./apps/panel build`, e na pasta `apps/panel`,
+   `npx next start -H 127.0.0.1 -p <porta>`. Com `next dev` as páginas recarregaram sozinhas em
+   laço em 2026-11-12, e os testes falharam por isso, não pelo painel.
+7. Uma vez por máquina: `pnpm --filter ./apps/panel exec playwright install --only-shell chromium`.
+8. `DESKVOICE_E2E_URL=http://127.0.0.1:<porta> pnpm test:e2e`, com `DESKVOICE_E2E_EMAIL` e
+   `DESKVOICE_E2E_PASSWORD` do passo 4. Falhou? O rastro de cada passo fica em
+   `apps/panel/test/e2e/test-results/`: `pnpm --filter ./apps/panel exec playwright show-trace <arquivo>`.
+   O teste de Configurações supõe uma instalação feita pelo instalador, que sempre gera a
+   `WAHA_API_KEY`: contra um painel sem essa chave, o bloco WhatsApp aparece como "indisponível", e
+   não "não instalado", e o teste falha.
+
+Pare tudo ao terminar (`pg_ctl -D <tmp>/pg stop`) e apague a pasta temporária.
+
+Teste novo de tela segue a mesma régua dos outros: seletor por papel e rótulo (`getByRole`,
+`getByLabel`) com o texto importado do dicionário pt-BR, espera por estado e nunca por tempo, e
+cada teste cria o que usa. E sabote: tire a confirmação, ou faça o "Salvo." aparecer sem gravar, e
+veja o teste ficar vermelho.
+
 ## Passo 7: o fragmento de versão (não o CHANGELOG)
 
 Quem opera uma instalação percebe a mudança? Escreva `.changes/<slug>.md`:
