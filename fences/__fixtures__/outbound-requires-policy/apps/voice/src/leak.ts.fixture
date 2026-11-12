@@ -1,0 +1,6 @@
+// Fixture da cerca outbound-requires-policy: este arquivo origina chamada sem passar por
+// `checkOutboundAllowed`. Ele é copiado sem o sufixo `.fixture`, então o `check` o enxerga como
+// código de produto.
+export async function leak(ari: { originate(params: { endpoint: string }): Promise<void> }): Promise<void> {
+  await ari.originate({ endpoint: "PJSIP/5511999998888@trunk" });
+}
