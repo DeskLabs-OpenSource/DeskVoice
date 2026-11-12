@@ -1,0 +1,10 @@
+
+▶ 1 de 5 · Conferindo a máquina
+  ⚠ Sistema almalinux 9.8: não é testado. Seguindo porque você pediu com --force.
+  ✓ Processador: x86_64
+  ✓ Memória: 11699 MB
+  ✓ Disco: 278 GB livres
+
+✗ Seu usuário não consegue falar com o Docker (ou o serviço do Docker está parado).
+  O que fazer: rode:  systemctl start docker ;  usermod -aG docker root  — depois saia do terminal, entre de novo e repita o instalador
+  Se precisar de ajuda, rode: bash install/diagnose.sh
