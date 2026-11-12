@@ -126,6 +126,12 @@ export interface KeyCheckOptions {
   schedule?: (fn: () => void, delayMs: number) => () => void;
 }
 
+/** Uma voz do provedor, com o descritor que a documentação dele usa ("Warm", "Bright"). */
+export interface EngineVoice {
+  id: string;
+  style?: string;
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;
@@ -139,6 +145,10 @@ export interface VoiceEngine {
   paisDeProcessamento: string | "neste-servidor" | "desconhecido";
   /** De onde veio a declaração. Fora de `neste-servidor`/`desconhecido`, país sem fonte não vale. */
   fonteDoPais: { url: string; consultadoEm: string } | null;
+  /** As vozes que a tela oferece. */
+  voices?: readonly EngineVoice[];
+  /** A voz usada quando o agente não escolheu nenhuma. */
+  defaultVoice?: string;
   /** Verdadeiro para motores que não precisam de chave (o simulado). */
   keyless?: boolean;
   pricing: EnginePricing;

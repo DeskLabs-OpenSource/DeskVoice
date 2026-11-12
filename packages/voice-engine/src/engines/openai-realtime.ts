@@ -34,6 +34,20 @@ const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
 const DEFAULT_API_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-realtime-2.1";
 const DEFAULT_VOICE = "marin";
+// Vozes do Realtime, conferidas em 2026-11-12 (developers.openai.com, guia de conversas Realtime).
+// A documentação recomenda marin e cedar pela qualidade; ela não descreve o estilo de cada uma.
+const VOICES = [
+  { id: "marin", style: "Recommended" },
+  { id: "cedar", style: "Recommended" },
+  { id: "alloy" },
+  { id: "ash" },
+  { id: "ballad" },
+  { id: "coral" },
+  { id: "echo" },
+  { id: "sage" },
+  { id: "shimmer" },
+  { id: "verse" },
+] as const;
 const AUDIO_FORMAT = { type: "audio/pcmu" };
 
 const responseDoneUsage = z
@@ -136,6 +150,8 @@ const engine: VoiceEngine = {
   // Fonte: developers.openai.com/api/docs/guides/your-data (consultado em 12/11/2026).
   paisDeProcessamento: "desconhecido",
   fonteDoPais: null,
+  voices: VOICES,
+  defaultVoice: DEFAULT_VOICE,
   pricing: {
     // gpt-realtime-2.1, por milhão de tokens: áudio US$ 32 (entrada) e US$ 64 (saída); texto US$ 4
     // e US$ 24; entrada em cache US$ 0,40. Cada resposta reconta a conversa inteira como entrada, e

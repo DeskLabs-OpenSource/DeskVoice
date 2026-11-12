@@ -38,6 +38,40 @@ const DEFAULT_BASE_URL =
 const DEFAULT_API_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_MODEL = "gemini-3.8-live";
 const DEFAULT_VOICE = "Sulafat";
+// As 30 vozes prontas, com o descritor oficial. Conferido em 2026-11-12 na página de síntese de voz
+// (aistudio.google.com/docs/speech-generation); a página da Live API não lista as vozes dela.
+const VOICES = [
+  { id: "Zephyr", style: "Bright" },
+  { id: "Puck", style: "Upbeat" },
+  { id: "Charon", style: "Informative" },
+  { id: "Kore", style: "Firm" },
+  { id: "Fenrir", style: "Excitable" },
+  { id: "Leda", style: "Youthful" },
+  { id: "Orus", style: "Firm" },
+  { id: "Aoede", style: "Breezy" },
+  { id: "Callirrhoe", style: "Easy-going" },
+  { id: "Autonoe", style: "Bright" },
+  { id: "Enceladus", style: "Breathy" },
+  { id: "Iapetus", style: "Clear" },
+  { id: "Umbriel", style: "Easy-going" },
+  { id: "Algieba", style: "Smooth" },
+  { id: "Despina", style: "Smooth" },
+  { id: "Erinome", style: "Clear" },
+  { id: "Algenib", style: "Gravelly" },
+  { id: "Rasalgethi", style: "Informative" },
+  { id: "Laomedeia", style: "Upbeat" },
+  { id: "Achernar", style: "Soft" },
+  { id: "Alnilam", style: "Firm" },
+  { id: "Schedar", style: "Even" },
+  { id: "Gacrux", style: "Mature" },
+  { id: "Pulcherrima", style: "Forward" },
+  { id: "Achird", style: "Friendly" },
+  { id: "Zubenelgenubi", style: "Casual" },
+  { id: "Vindemiatrix", style: "Gentle" },
+  { id: "Sadachbia", style: "Lively" },
+  { id: "Sadaltager", style: "Knowledgeable" },
+  { id: "Sulafat", style: "Warm" },
+] as const;
 const BRIDGE_HZ = 8000;
 const INPUT_HZ = 16000;
 const DEFAULT_OUTPUT_HZ = 24000;
@@ -90,6 +124,8 @@ const engine: VoiceEngine = {
   // Enquanto não houver declaração, o honesto é dizer que não se sabe.
   paisDeProcessamento: "desconhecido",
   fonteDoPais: null,
+  voices: VOICES,
+  defaultVoice: DEFAULT_VOICE,
   pricing: {
     // US$ 3,00 e US$ 12,00 por milhão de tokens de áudio (entrada e saída) do gemini-3.8-live.
     // O prompt de texto custa menos (US$ 0,75); cobrar tudo como áudio superestima um pouco, nunca subestima.

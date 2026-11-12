@@ -83,6 +83,9 @@ describe("secrets", () => {
     for (const response of [saved, read, engines]) expect(response.text).not.toContain(key);
     expect(engines.data).toContainEqual(expect.objectContaining({ id: "openai-realtime", requiresKey: true, keyConfigured: true }));
     expect(engines.data).toContainEqual(expect.objectContaining({ id: "simulated", requiresKey: false }));
+    // A tela escolhe a voz pela lista do motor; o simulado não oferece escolha.
+    expect(engines.data).toContainEqual(expect.objectContaining({ id: "openai-realtime", defaultVoice: "marin", voices: expect.arrayContaining([{ id: "cedar", style: "Recommended" }]) }));
+    expect(engines.data).toContainEqual(expect.objectContaining({ id: "simulated", voices: [], defaultVoice: null }));
 
     const row = await stored<unknown>("select value, secret from settings where key = $1", [params.key]);
     expect(row?.secret).toBe(true);

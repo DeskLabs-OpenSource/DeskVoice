@@ -12,6 +12,8 @@ export const GET = handle({}, async ({ q }) => {
     paisDeProcessamento: engine.paisDeProcessamento,
     fonteDoPais: engine.fonteDoPais,
     requiresKey: !engine.keyless,
+    voices: engine.voices ?? [],
+    defaultVoice: engine.defaultVoice ?? null,
     keyConfigured: byKey.has(engineKeySetting(engine.id)),
     keyCheck: readKeyCheck(byKey.get(keyCheckSetting(engine.id))),
     priceCheckedOn: engine.pricing.checkedOn,
