@@ -23,9 +23,8 @@ Antes de qualquer pergunta técnica, pergunte: **"Você já tem um servidor (VPS
 1. O que é preciso: uma VPS com Ubuntu 22.04 ou mais novo (Debian 12 ou mais novo também serve)
    e acesso por SSH, com 10 GB de disco livre. Sobre memória, diga só o que foi medido: a
    instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 400 MB.
-   O menor tamanho em que a instalação cabe ainda não foi medido: enquanto o projeto não tiver
-   uma versão publicada, ela constrói as imagens no servidor, e com 2 GB pode faltar memória
-   nessa etapa.
+   O menor tamanho em que a instalação cabe ainda não foi medido; ela baixa as imagens prontas
+   da versão publicada, sem construí-las no servidor.
 2. A recomendação do projeto é a VPS da HostGator, parceira de infraestrutura.
 3. O link abaixo é **de parceria**: contratar por ele apoia o projeto.
 4. Não é obrigatório: qualquer outra VPS com Docker funciona pelo mesmo comando, sem diferença
@@ -115,8 +114,10 @@ resolva e rode de novo.
 O instalador instala a versão publicada mais recente e grava o número dela (aparece em
 `bash install/diagnose.sh`, na seção "Versões"). Dois casos para reconhecer:
 
-- **"O DeskVoice ainda não tem nenhuma versão publicada":** não é erro. As imagens são
-  construídas na própria VPS, o que leva alguns minutos e pede memória.
+- **"O DeskVoice ainda não tem nenhuma versão publicada":** já há versões publicadas, então só
+  aparece num clone cujo repositório de origem não tem as tags de versão (um fork, por exemplo).
+  Não é erro: as imagens são construídas na própria VPS, o que leva alguns minutos e pede
+  memória. Para instalar a versão publicada, clone o repositório oficial.
 - **"Não consegui baixar as imagens da versão X":** é erro, e o instalador não constrói no
   lugar. A mensagem mostra a resposta do Docker e o comando para testar (`docker pull ...`).
   Quase sempre é a rede da VPS, o registro fora do ar, ou uma versão que acabou de sair e ainda

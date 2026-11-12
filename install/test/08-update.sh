@@ -26,6 +26,8 @@ contains "confere a porta publicada, pelo caminho de quem usa" "$out" "O painel 
 check "quem veio de versão sem agente ganha o segredo antes de o painel subir" test "$(grep -n 'UPDATE_AGENT_TOKEN' "$E" | wc -l | tr -d ' ')" = 1
 lacks "o segredo do agente não vai para o arquivo que voz e rotinas recebem" "$(cat "$A")" "UPDATE_AGENT_TOKEN"
 equal "atualização boa: reinicia o Caddy uma vez, para ele ler o Caddyfile novo" 1 "$(grep -c ' restart caddy$' "$FAKE_DIR/calls.log")"
+equal "atualização boa, sem arquivo do Asterisk diferente: não o reinicia (derrubaria ligações)" 0 "$(grep -c ' restart asterisk$' "$FAKE_DIR/calls.log")"
+equal "atualização boa, sem arquivo do Asterisk diferente: nem o recarrega" 0 "$(grep -c 'asterisk -rx module reload' "$FAKE_DIR/calls.log")"
 check "quem veio de versão sem agente ganha o agendamento" test -f "$DESKVOICE_SYSTEMD_DIR/deskvoice-agent.service"
 contains "diz que agendou o agente" "$out" "Agente de atualização agendado"
 secret_before="$(env_get "$E" POSTGRES_PASSWORD)"
@@ -127,6 +129,75 @@ lacks "atualização: painel deixa de publicar porta" "$(cat "$O")" ":3000"
 lacks "atualização: voz deixa de publicar porta" "$(cat "$O")" "8091"
 lacks "atualização: VOICE_WEB_PUBLIC_PORT sai" "$(cat "$A")" "VOICE_WEB_PUBLIC_PORT"
 equal "atualização: 1 salto por túnel" 1 "$(env_get "$A" TRUSTED_PROXY_HOPS)"
+
+# ── O Asterisk monta cinco arquivos um a um: a atualização os regrava, e ele precisa passar a usar
+#    a configuração nova sem derrubar ligação. Com um clone (git de mentira) cuja versão de destino
+#    traz um modelo do Asterisk diferente. ──
+ASTERISK_MODEL="$DESKVOICE_DEPLOY_DIR/asterisk/extensions.conf"; GEN="$DESKVOICE_DEPLOY_DIR/asterisk/generated"
+model_of() { mkdir -p "$FAKE_DIR/git_checkout/$1/deploy/asterisk"; { cat "$ASTERISK_MODEL.original"; echo "; modelo da $1"; } > "$FAKE_DIR/git_checkout/$1/deploy/asterisk/extensions.conf"; }
+restarts() { grep -c ' restart asterisk$' "$FAKE_DIR/calls.log"; }
+reloads() { grep -c 'exec -T asterisk asterisk -rx module reload' "$FAKE_DIR/calls.log"; }
+inode() { ls -i "$1" | awk '{ print $1 }'; }
+cp "$ASTERISK_MODEL" "$ASTERISK_MODEL.original"
+export FAKE_GIT_WORKTREE="$SANDBOX"
+# Antes de cada atualização, "onde o clone está" (main, no git de mentira) é o modelo instalado.
+mkdir -p "$FAKE_DIR/git_checkout/main/deploy/asterisk"; cp "$ASTERISK_MODEL" "$FAKE_DIR/git_checkout/main/deploy/asterisk/extensions.conf"
+printf '%s\n' v0.9.0 v0.8.0 v0.7.0 v0.6.0 v0.5.0 v0.4.0 > "$FAKE_DIR/git_tags"; for v in v0.5.0 v0.6.0 v0.7.0 v0.8.0 v0.9.0; do model_of "$v"; done
+installed() { cp "$FAKE_DIR/git_checkout/$1/deploy/asterisk/extensions.conf" "$FAKE_DIR/git_checkout/main/deploy/asterisk/extensions.conf"; }
+inode_before="$(inode "$GEN/extensions.conf")"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.5.0 --yes 2>&1)"; equal "modelo do Asterisk mudou: a atualização termina bem" 0 "$?"
+equal "modelo do Asterisk mudou: o arquivo é regravado no lugar (o contêiner monta o arquivo, preso ao inode)" "$inode_before" "$(inode "$GEN/extensions.conf")"
+contains "modelo do Asterisk mudou: o disco tem o modelo novo" "$(cat "$GEN/extensions.conf")" "; modelo da v0.5.0"
+equal "modelo do Asterisk mudou: recarrega uma vez" 1 "$(reloads)"
+equal "... só o módulo do arquivo que mudou (o plano de discagem)" 1 "$(grep -c 'asterisk -rx module reload pbx_config$' "$FAKE_DIR/calls.log")"
+equal "modelo do Asterisk mudou: não reinicia o Asterisk (ligações em andamento seguem)" 0 "$(restarts)"
+check "modelo do Asterisk mudou: recarrega depois de subir a versão nova" test "$(grep -n 'module reload' "$FAKE_DIR/calls.log" | cut -d: -f1)" -gt "$(position ' up -d --remove-orphans')"
+contains "modelo do Asterisk mudou: diz que recarregou sem derrubar ligações" "$out" "recarregada sem derrubar ligações"
+refuse "modelo do Asterisk mudou: nada fica pendente" test -e "$GEN/.reload-pending"
+installed v0.5.0
+# A versão nova sobe doente: a volta regera a configuração da versão anterior e recarrega de novo.
+printf '%s\n' postgres asterisk voice routines caddy > "$FAKE_DIR/running"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.6.0 --yes 2>&1)"; equal "modelo mudou e a versão subiu doente: sai com erro" 1 "$?"
+equal "modelo mudou e a versão voltou: recarrega na ida e de novo na volta" 2 "$(reloads)"
+equal "modelo mudou e a versão voltou: não reinicia o Asterisk" 0 "$(restarts)"
+check "na volta, recarrega depois de restaurar o banco" test "$(grep -n 'module reload' "$FAKE_DIR/calls.log" | tail -n 1 | cut -d: -f1)" -gt "$(position 'alter database deskvoice_restore rename to deskvoice')"
+lacks "na volta, o disco tem de novo a configuração da versão anterior" "$(cat "$GEN/extensions.conf")" "; modelo da v0.6.0"
+contains "... gerada do modelo dela" "$(cat "$GEN/extensions.conf")" "; modelo da v0.5.0"
+equal "na volta, o arquivo segue o mesmo inode que o contêiner montou" "$inode_before" "$(inode "$GEN/extensions.conf")"
+printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"
+# O Asterisk não recarrega: aí sim reinicia, dizendo por quê.
+touch "$FAKE_DIR/asterisk_reload_fail"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.7.0 --yes 2>&1)"; equal "recarregar falhou: a atualização termina bem" 0 "$?"
+equal "recarregar falhou: tenta recarregar antes" 1 "$(reloads)"
+equal "recarregar falhou: reinicia o Asterisk uma vez" 1 "$(restarts)"
+contains "recarregar falhou: diz por que reinicia, com a resposta do Asterisk" "$out" "recarregar a configuração não deu certo (The module 'pbx_config' reported a reload failure"
+contains "recarregar falhou: diz que ligações em andamento caem" "$out" "Ligações em andamento caem"
+refuse "recarregar falhou e reiniciou: nada fica pendente" test -e "$GEN/.reload-pending"
+rm "$FAKE_DIR/asterisk_reload_fail"; installed v0.7.0
+# Instalação que o kit anterior regravou por renomeação: o contêiner ficou preso ao arquivo antigo, e
+# recarregar releria o antigo. Reinicia, uma vez, dizendo por quê; e não recarrega à toa.
+mkdir -p "$FAKE_DIR/asterisk_mounted"; cp "$GEN"/*.conf "$FAKE_DIR/asterisk_mounted/"; echo "; de antes" >> "$FAKE_DIR/asterisk_mounted/rtp.conf"
+: > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.8.0 --yes 2>&1)"; equal "contêiner preso ao arquivo antigo: a atualização termina bem" 0 "$?"
+equal "contêiner preso ao arquivo antigo: reinicia o Asterisk uma vez" 1 "$(restarts)"
+equal "contêiner preso ao arquivo antigo: não recarrega (releria o antigo)" 0 "$(reloads)"
+contains "contêiner preso ao arquivo antigo: diz por quê" "$out" "o contêiner ainda lê a versão antiga de"
+contains "contêiner preso ao arquivo antigo: depois do reinício lê o arquivo novo" "$(cat "$FAKE_DIR/asterisk_mounted/extensions.conf")" "; modelo da v0.8.0"
+installed v0.8.0
+# A migration falha antes de qualquer subida: a volta regera o que o Asterisk já usava. Nenhum reinício.
+echo 1 > "$FAKE_DIR/migrate_exit"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.0 --yes 2>&1)"; equal "modelo mudou e a migration falhou: sai com erro" 1 "$?"
+contains "modelo mudou e a migration falhou: voltou" "$out" "foi desfeita: você está de volta na versão 0.8.0"
+equal "modelo mudou e a migration falhou: o Asterisk não é reiniciado" 0 "$(restarts)"
+contains "modelo mudou e a migration falhou: o Asterisk lê a configuração da versão anterior" "$(cat "$FAKE_DIR/asterisk_mounted/extensions.conf")" "; modelo da v0.8.0"
+echo 0 > "$FAKE_DIR/migrate_exit"
+# Nada mudou na configuração: nem recarrega nem reinicia.
+: > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.8.0 --yes 2>&1)"
+equal "mesma configuração: não recarrega" 0 "$(reloads)"
+equal "mesma configuração: não reinicia" 0 "$(restarts)"
+rm -rf "$FAKE_DIR/git_tags" "$FAKE_DIR/git_checkout" "$FAKE_DIR/asterisk_mounted"; unset FAKE_GIT_WORKTREE
+cp "$ASTERISK_MODEL.original" "$ASTERISK_MODEL"; : > "$FAKE_DIR/calls.log"
 
 out="$(bash "$KIT/update.sh" --yes 2>&1)"; equal "sem --to e sem repositório git: recusa" 1 "$?"
 contains "sem --to: diz como informar a versão" "$out" "--to <versão>"

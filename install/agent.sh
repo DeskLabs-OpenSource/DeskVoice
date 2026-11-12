@@ -131,9 +131,9 @@ if [ -z "$not_owner" ]; then
     panel_id="$(dc ps -q --status running panel 2>/dev/null | head -n 1 || true)"
     if [ -z "$panel_id" ]; then not_owner="o painel não está rodando, então não há a quem anunciar a versão"
     else
-      project_dir="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$panel_id" 2>/dev/null || true)"
-      if [ -z "$project_dir" ] || [ "$(cd "$project_dir" 2>/dev/null && pwd -P)" != "$(cd "$DEPLOY_DIR" && pwd -P)" ]; then
-        not_owner="o DeskVoice que roda nesta máquina foi instalado a partir de ${project_dir:-outra pasta}, e este agente está em $DEPLOY_DIR; ele não mexe na instalação de outra pasta"
+      project_dir="$(foreign_install_dir)"
+      if [ -n "$project_dir" ]; then
+        not_owner="o DeskVoice que roda nesta máquina foi instalado a partir de $project_dir, e este agente está em $DEPLOY_DIR; ele não mexe na instalação de outra pasta"
       fi
     fi
   fi

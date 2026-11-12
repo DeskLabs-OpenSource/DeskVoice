@@ -7,9 +7,10 @@
 #   bash install/healthcheck.sh --essential  só as peças sem as quais nada funciona
 #
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
-# Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, Asterisk,
-# worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (linha, motor de voz,
-# entrada única, WhatsApp, portas, disco). O agente de atualização nunca é falha: no máximo, aviso.
+# Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, painel → banco,
+# Asterisk, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
+# linha, motor de voz, entrada única, WhatsApp, portas, disco). O agente de atualização nunca é
+# falha: no máximo, aviso.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 as_json=0; only_essential=0
@@ -29,10 +30,12 @@ add() { RESULTS="$RESULTS$1|$2|$3|$4|$(printf '%s' "$5" | tr '\n|' '  ')"$'\n'; 
 running() { [ -n "$(dc ps -q --status running "$1" 2>/dev/null)" ]; }
 # Pergunta de DENTRO do contêiner: a rota não é publicada sem passar pelo proxy.
 # Com prazo: painel que aceita a conexão e não responde não pode travar a checagem.
+# Linha que falta numa resposta 200 é aviso, não falha: é um painel de versão anterior à linha
+# (a checagem de uma versão rodando contra o painel de outra, numa volta sem git), e não defeito.
 probe_js() {
   cat <<JS
 fetch('$1',{signal:AbortSignal.timeout(8000)}).then(async r=>{const j=await r.json().catch(()=>null);const d=(j&&j.data)||{};
-for(const k of [$2]){const p=d[k]||{};console.log(k+'|'+(p.status||'fail')+'|'+String(p.detail||('sem resposta para '+k+' (HTTP '+r.status+')')).replace(/[\\n|]/g,' '))}
+for(const k of [$2]){const p=d[k]||{};const old=r.ok&&j&&!p.status;console.log(k+'|'+(p.status||(old?'warn':'fail'))+'|'+String(p.detail||(old?'o painel desta versão não informa esta linha':'sem resposta para '+k+' (HTTP '+r.status+')')).replace(/[\\n|]/g,' '))}
 }).catch(e=>{console.log('unreachable|fail|'+String(e.message).replace(/[\\n|]/g,' '))})
 JS
 }
@@ -71,12 +74,19 @@ else
   add asterisk "Asterisk" 1 falha "o Asterisk está rodando mas não responde a comandos"
 fi
 
-# ── Painel (e, por ele, linha telefônica e motor de voz) ──
+# ── Painel (e, por ele, as ligações painel → banco e rotinas → fila, a linha telefônica e o motor
+#    de voz). A rota responde essas linhas sem sessão. ──
 panel_lines=""
 if running panel; then
-  panel_lines="$(dc exec -T panel node -e "$(probe_js http://127.0.0.1:3000/api/v1/system/health "'panel','trunk','engine'")" 2>/dev/null || true)"
+  panel_lines="$(dc exec -T panel node -e "$(probe_js http://127.0.0.1:3000/api/v1/system/health "'panel','database','routines','trunk','engine'")" 2>/dev/null || true)"
 fi
 piece() { printf '%s\n' "$panel_lines" | awk -F'|' -v k="$1" -v f="$2" '$1 == k { print $f; exit }'; }
+# Uma linha que quem sabe é o painel. Sem resposta dele, aviso: a linha "Painel" já acusa a falha.
+#   from_panel <id> <nome> <essencial: 0|1> <chave na rota de saúde>
+from_panel() {
+  if [ -n "$(piece "$4" 1)" ]; then add "$1" "$2" "$3" "$(label "$(piece "$4" 2)")" "$(piece "$4" 3)"
+  else add "$1" "$2" "$3" aviso "não deu para consultar porque o painel não respondeu; resolva o painel primeiro"; fi
+}
 if ! running panel; then
   add panel "Painel" 1 falha "o contêiner do painel não está rodando. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 panel"
 elif [ -z "$panel_lines" ] || [ -n "$(piece unreachable 1)" ]; then
@@ -84,6 +94,9 @@ elif [ -z "$panel_lines" ] || [ -n "$(piece unreachable 1)" ]; then
 else
   add panel "Painel" 1 "$(label "$(piece panel 2)")" "$(piece panel 3)"
 fi
+# O Postgres aceitar conexão (linha "Banco") não prova que o painel entra nele: a senha do papel da
+# aplicação, que as migrations redefinem, ou a rede podem estar erradas. Sem isso não há nem login.
+from_panel panel_database "Painel → banco" 1 database
 
 # ── Worker de voz e rotinas ──
 if ! running voice; then
@@ -106,12 +119,16 @@ if running routines; then add routines "Rotinas" 1 ok "processo rodando"
 else add routines "Rotinas" 1 falha "o contêiner de rotinas não está rodando; resumos e avisos pós-chamada ficam parados"; fi
 
 if [ "$only_essential" = 0 ]; then
+  # ── Rotinas → fila: o processo de rotinas escuta a fila no banco, e a fila anda. Não é essencial
+  #    (e por isso não provoca a volta da atualização): sem ele as ligações seguem sendo atendidas,
+  #    e o que ele faria (resumos, avisos) espera na fila, gravada no banco, até ele voltar. A volta
+  #    restauraria o banco do backup, perdendo o que entrou durante a tentativa, para um defeito que
+  #    pode ser anterior à atualização: a fila atrasada mede o que esperou, de antes dela também.
+  #    O processo de rotinas parado continua sendo falha essencial, na linha "Rotinas". ──
+  from_panel routines_queue "Rotinas → fila" 0 routines
   # ── Linha telefônica e motor de voz: quem sabe é o painel ──
-  for pair in "trunk|Linha telefônica" "engine|Motor de voz"; do
-    id="${pair%%|*}"; name="${pair#*|}"
-    if [ -n "$(piece "$id" 1)" ]; then add "$id" "$name" 0 "$(label "$(piece "$id" 2)")" "$(piece "$id" 3)"
-    else add "$id" "$name" 0 aviso "não deu para consultar porque o painel não respondeu; resolva o painel primeiro"; fi
-  done
+  from_panel trunk "Linha telefônica" 0 trunk
+  from_panel engine "Motor de voz" 0 engine
 
   # ── Entrada única: painel e voz do navegador pelo mesmo endereço ──
   # Pergunta de dentro da rede, ao Caddy, pelos dois caminhos. É a ligação que faltava:

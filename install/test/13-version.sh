@@ -75,6 +75,26 @@ equal "--build: grava local" local "$(version)"
 equal "--build: constrói" 1 "$(calls ' build panel voice routines')"
 equal "--build: não baixa as imagens do DeskVoice" 0 "$(calls ' pull -q panel')"
 rm "$FAKE_DIR/pull_fail"
+# Uma versão pedida junto de --build: uma das duas seria ignorada. Para antes de gravar qualquer coisa.
+fresh; out="$(DESKVOICE_VERSION=0.2.0 install --build)"; equal "versão pedida com --build: recusa" 1 "$?"
+contains "versão pedida com --build: nomeia as duas" "$out" "DESKVOICE_VERSION=0.2.0 e --build pedem coisas diferentes"
+refuse "versão pedida com --build: não grava nada" test -e "$E"
+equal "versão pedida com --build: não pede nada ao Docker além de quem é a instalação" 0 "$(grep -vc 'ps -a --filter label=' "$FAKE_DIR/calls.log")"
+
+# ── Firewall: DESKVOICE_APPLY_UFW só vale com yes, conferido antes de gravar qualquer coisa ──
+fresh; out="$(DESKVOICE_APPLY_UFW=talvez install)"; equal "ufw com valor errado: recusa" 1 "$?"
+contains "ufw com valor errado: diz o valor aceito" "$out" "DESKVOICE_APPLY_UFW=yes"
+refuse "ufw com valor errado: não grava nada" test -e "$E"
+touch "$FAKE_DIR/ufw_active"
+out="$(DESKVOICE_APPLY_UFW=yes install)"; equal "ufw ativo e yes: instala" 0 "$?"
+equal "ufw ativo e yes: aplica as regras de telefonia" 1 "$(calls '^ufw allow 5060/udp')"
+contains "ufw ativo e yes: diz que aplicou" "$out" "Regras aplicadas no ufw"
+out="$(install)"; equal "ufw ativo, sem a opção e sem terminal: instala" 0 "$?"
+equal "ufw ativo, sem a opção: não aplica nada" 0 "$(calls '^ufw allow')"
+contains "ufw ativo, sem a opção: diz que não aplicou" "$out" "Regras NÃO aplicadas"
+rm "$FAKE_DIR/ufw_active"
+out="$(DESKVOICE_APPLY_UFW=yes install)"; equal "ufw inativo e yes: instala" 0 "$?"
+contains "ufw inativo e yes: diz que a opção não teve efeito" "$out" "DESKVOICE_APPLY_UFW=yes não teve efeito"
 
 # ── Falha ao descobrir a versão: erro com o comando, nunca um canal calado ──
 fresh; with_versions; touch "$FAKE_DIR/git_fetch_fail"
