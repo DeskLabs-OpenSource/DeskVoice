@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# firewall-cmd de mentira: o firewalld está ativo só com $FAKE_DIR/firewalld_active. Registra cada chamada.
+echo "firewall-cmd $*" >> "$FAKE_DIR/calls.log"
+case "${1:-}" in
+  --state) if [ -f "$FAKE_DIR/firewalld_active" ]; then echo running; else echo "not running"; exit 252; fi ;;
+esac

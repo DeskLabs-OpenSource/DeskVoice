@@ -54,4 +54,24 @@ contains "sem ramo pedido: diz a versão baixada" "$out" "Versão baixada: 0.1.0
 check "sem ramo pedido: o código é o da versão, não o da ponta da main" test ! -e "$tagged/depois-da-versao"
 onmain="$SANDBOX/alvo-main"
 out="$(get "$onmain" --yes)"; check "com ramo pedido: fica na ponta do ramo" test -e "$onmain/depois-da-versao"
+
+# Sem git, num sistema com dnf e sem apt-get (AlmaLinux, Rocky): instala o git pelo dnf.
+# Um PATH só com o que o get.sh usa; o dnf de mentira "instala" um git que chama o de verdade.
+nogit="$SANDBOX/sem-git"; mkdir -p "$nogit"
+for tool in bash env id cat wc tr grep head; do ln -s "$(PATH="$REAL_PATH" command -v "$tool")" "$nogit/$tool"; done
+cp "$TEST_DIR/fake/sudo" "$nogit/sudo"
+cat > "$nogit/dnf" <<DNF
+#!$(PATH="$REAL_PATH" command -v bash)
+echo "dnf \$*" >> "$FAKE_DIR/calls.log"
+printf '#!/bin/sh\nPATH="%s" exec "%s" "\$@"\n' "$REAL_PATH" "$real_git" > "$nogit/git"; $(PATH="$REAL_PATH" command -v chmod) +x "$nogit/git"
+DNF
+chmod +x "$nogit/dnf"
+: > "$FAKE_DIR/calls.log"
+out="$({ stream 2>/dev/null || true; } | PATH="$nogit" DESKVOICE_REPO="$origin" DESKVOICE_REF=main DESKVOICE_DIR="$SANDBOX/alvo-dnf" "$nogit/bash" -s -- --yes 2>&1)"
+equal "sem git, com dnf: sai com zero" 0 "$?"
+contains "sem git, com dnf: avisa que vai instalar o git" "$out" "O git não está instalado"
+equal "sem git, com dnf: instala pelo dnf" 1 "$(grep -c '^dnf install -y -q git$' "$FAKE_DIR/calls.log")"
+if [ "$(id -u)" != 0 ]; then equal "sem git, com dnf, sem ser root: pelo sudo" 1 "$(grep -c '^sudo dnf install -y -q git$' "$FAKE_DIR/calls.log")"; fi
+check "sem git, com dnf: clona e chama o instalador" test -f "$SANDBOX/alvo-dnf/install/install.sh"
+contains "sem git, com dnf: chama o instalador" "$out" "INSTALADOR args=[--yes]"
 finish

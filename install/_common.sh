@@ -333,10 +333,18 @@ valid_name() {
 }
 
 # ── Sistema e rede: decisões puras, para o teste simular sem depender da máquina ──
+# Os sistemas aceitos, numa frase só: é a que as mensagens do kit mostram. Muda junto com os_supported.
+# O RHEL fica de fora até alguém instalar nele: pede assinatura ativa para o dnf baixar pacotes, um
+# passo que nenhuma instalação provou. Quem quiser tentar usa --force, como em qualquer outro sistema.
+SUPPORTED_SYSTEMS="Ubuntu 22.04+, Debian 12+, AlmaLinux 9+ ou Rocky Linux 9+"
 os_supported() {  # os_supported <ID do os-release> <VERSION_ID>
   local major="${2%%.*}"
   case "$major" in ''|*[!0-9]*) return 1 ;; esac
-  case "$1" in ubuntu) [ "$major" -ge 22 ] ;; debian) [ "$major" -ge 12 ] ;; *) return 1 ;; esac
+  case "$1" in
+    ubuntu) [ "$major" -ge 22 ] ;; debian) [ "$major" -ge 12 ] ;;
+    almalinux|rocky) [ "$major" -ge 9 ] ;;
+    *) return 1 ;;
+  esac
 }
 arch_supported() { case "$1" in x86_64|amd64|aarch64|arm64) return 0 ;; *) return 1 ;; esac; }
 

@@ -43,7 +43,9 @@ say "O DeskVoice é instalado num servidor (VPS), não neste computador. Este ro
 say "não instala, não coleta e não envia nada."
 say
 say "O que ter em mãos"
-say "  1. Uma VPS com Ubuntu 22.04 ou mais novo, ou Debian 12 ou mais novo, e acesso por SSH."
+say "  1. Uma VPS com Ubuntu 22.04 ou mais novo e acesso por SSH. Também servem Debian 12+,"
+say "     AlmaLinux 9+ e Rocky Linux 9+ (o AlmaLinux 9 foi instalado com um passo à mão, que o"
+say "     instalador agora faz sozinho, ainda sem prova numa máquina real; o Rocky não foi provado)."
 say "     Disco: 10 GB livres. Memória: a instalação foi provada numa VPS de 8 GB e 4 vCPU, e o"
 say "     DeskVoice parado usa cerca de 380 MiB de memória e ocupa cerca de 2,7 GB de disco (medidos"
 say "     na 0.3.0, sem o WhatsApp). O menor tamanho em que a instalação cabe ainda não foi medido;"
