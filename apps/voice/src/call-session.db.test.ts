@@ -342,6 +342,25 @@ describe("gravação do áudio, por organização (registro 0016)", { timeout: 1
     await cleanup();
   });
 
+  it("a fala do agente que não chegou a tocar antes do fim não entra na gravação (issue #109)", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("recording-cut-at-end", { engine: "manual", greeting: "Bom dia." }, manual);
+    await putSetting(app, made.organizationId, "calls.recording_enabled", true, false);
+    const session = startCallSession({ ...made.harness.deps, recordingsDir: dir }, { organizationId: made.organizationId, callId: made.callId, agentId: made.agentId, transport: made.transport });
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_notice"), "the notice event");
+    // O motor manda 20 s de fala de uma vez, mais rápido que o tempo real; a ligação cai aos 5 s.
+    manual.emit("audio", Buffer.alloc(20 * 8000 * 2, 1));
+    made.harness.clock.advance(5000);
+    made.transport.callerHangup();
+    await session.done;
+    const wav = await readFile(recordingPath(dir, made.organizationId, made.callId));
+    const seconds = wav.readUInt32LE(40) / (8000 * 2 * 2); // PCM16 estéreo a 8 kHz
+    expect(seconds).toBeGreaterThan(4.5);
+    expect(seconds).toBeLessThan(5.5);
+    await rm(dir, { recursive: true, force: true });
+  });
+
   it("sem espaço livre acima do piso: a chamada segue sem gravar, e a linha do tempo diz por quê", async () => {
     const { dir, callId, cleanup } = await talk("recording-low-disk", true, Number.MAX_SAFE_INTEGER);
     expect(await readdir(dir)).toEqual([]);

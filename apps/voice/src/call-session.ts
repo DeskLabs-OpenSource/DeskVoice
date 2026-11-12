@@ -169,6 +169,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     } catch (error) {
       log("error", "could not record the end of the call", { error: messageOf(error) });
     }
+    // A fala do agente que ainda estava na fila não toca mais: a ligação cai agora. Ela sai da
+    // gravação, que é prova do que quem ligou ouviu (issue #109).
+    recorder?.clear();
     // A telefonia é solta mesmo se o banco falhou acima: ninguém fica preso na linha.
     try {
       if (end.tone && !end.callerGone) transport.sendAudio(failureTone());
