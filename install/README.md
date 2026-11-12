@@ -311,6 +311,12 @@ O backup **não** leva o pareamento do WhatsApp por QR Code (o volume `waha-sess
 credencial viva de um aparelho conectado. Restaurando na mesma VPS, o número segue conectado.
 Em outra VPS, a tela diz que os dados da conexão não existem mais e pede para ler o QR Code de novo.
 
+O backup também **não** leva as gravações das chamadas (o volume `recordings`), quando a gravação
+está ligada em Configurações. O áudio é o dado mais pesado e mais sensível da instalação, e cada
+um dos backups guardados levaria uma cópia inteira dele. Restaurando em outra VPS, as chamadas
+voltam com a transcrição e sem o áudio. Se você precisa guardar o áudio, copie o volume para fora
+da máquina, e lembre que o prazo de guarda não apaga as cópias que você fizer.
+
 A restauração primeiro monta o backup num banco ao lado e compara as contagens. Só depois ele
 toma o lugar do banco atual. Se alguma tabela divergir, o script diz qual, e o banco atual fica
 como estava.
