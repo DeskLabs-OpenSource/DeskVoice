@@ -139,6 +139,15 @@ Assim, um passo que só existe na versão nova, como uma mudança de configuraç
 do agente, roda de fato. Antes de passar a vez, o atualizador confere que o novo carrega; se
 não, volta o código e nada mais foi tocado.
 
+Com tudo respondendo, o `update.sh` remove as imagens do DeskVoice (painel, voz e rotinas) que
+não são nem a versão nova nem a de onde se acabou de sair, que fica para voltar a ela sem
+internet. A `local`, construída na máquina, sai quando a instalação passa a rodar a imagem
+publicada; quem fica em `local` não perde nada. Ele remove pelo nome exato, sem forçar: imagem
+que algum contêiner usa fica, com um aviso, e a atualização termina bem. Imagens de terceiros
+(Postgres, Caddy, Asterisk, WAHA) ficam fora: ele não as toca. Como quem limpa é o atualizador
+da versão de destino, a limpeza já roda na primeira atualização para a versão que a traz (vindo
+da 0.1.0, que não passa a vez, só na atualização seguinte para outra versão).
+
 A 0.1.0 é de antes desse mecanismo: quem atualiza a partir dela roda `bash install/update.sh`
 **uma segunda vez** depois de atualizar. Não há o que atualizar; é o atualizador novo gerando o
 segredo do agente, recriando o painel para ele recebê-lo e agendando o agente.
