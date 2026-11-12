@@ -60,6 +60,8 @@ Só o dono e os administradores veem o bloco.
 | A tela diz | O que é | O que fazer |
 |---|---|---|
 | O agente ainda não falou com o painel, ou não está respondendo | Quem instala o serviço é o agente, e ele não está passando | Rode no servidor `bash install/agent.sh` (executa o pedido na hora). Para ele voltar a passar sozinho: `sudo bash install/agent.sh --install` |
+| O servidor não tem espaço em disco, com quanto falta | O agente confere o disco antes de baixar e exige 5 GB livres. Nada foi baixado | Libere espaço (backups antigos em `backups/`) ou aumente o disco. Ele confere de novo em cerca de 10 minutos |
+| Aviso de pouca memória, com o serviço de pé | Ao instalar, o servidor tinha menos memória disponível que o teto do serviço (1280 MB). Não impede o uso | Acompanhe o servidor; se faltar memória, remova o serviço ou aumente a VPS |
 | O servidor não conseguiu baixar o serviço | Internet do servidor, o Docker Hub fora do ar ou o limite de downloads dele, ou disco cheio | Confira o disco (`df -h`). O servidor tenta de novo sozinho em cerca de 10 minutos |
 | O servidor baixou o serviço, mas ele não subiu | Costuma ser falta de memória ou de disco | `docker compose -f deploy/docker-compose.yml --profile whatsapp logs --tail 50 waha` |
 | Este servidor ainda não tem a chave do serviço | A atualização foi feita por um atualizador antigo | Rode `bash install/update.sh` no servidor, uma vez |
@@ -129,9 +131,19 @@ conector externo, desconecte o número antes.
 
 Sem número conectado, o bloco mostra **Remover o serviço de WhatsApp**. A confirmação diz o que
 acontece: nenhum número fica conectado, os avisos por WhatsApp deixam de sair e a memória é
-liberada. O agente para e remove o contêiner em até um minuto. Os arquivos baixados e o
-pareamento antigo continuam no disco; para liberar o disco também, no servidor:
-`docker image prune -a` (apaga toda imagem sem uso, não só esta).
+liberada. O agente para e remove o contêiner em até um minuto, e depois apaga do disco a imagem
+do serviço (3,2 GB), e só ela.
+
+- **Se a tela disser que os arquivos não saíram do disco:** outra coisa no servidor usa a mesma
+  imagem. O servidor tenta de novo a cada minuto; para tentar na hora, `bash install/agent.sh`.
+- **Confira o telefone.** Antes de remover, o painel tenta desfazer o pareamento. Se um número já
+  foi conectado aqui, abra no celular dele **Dispositivos conectados** e remova este aparelho, se
+  ele ainda estiver na lista.
+- O pareamento antigo fica guardado no servidor (um volume do Docker), sem uso. Ao instalar de
+  novo, o número **não** volta conectado sozinho: é preciso ler o QR Code.
+
+Enquanto o serviço é baixado, uma atualização pedida pela tela espera no máximo 10 minutos: o
+download tem esse prazo por passada do agente, e continua de onde parou na passada seguinte.
 
 ## Na VPS
 

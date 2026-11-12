@@ -102,10 +102,27 @@ describe("who can use the WhatsApp block", () => {
 });
 
 describe("connecting by QR code", () => {
-  it("before anyone connects, no session exists in WAHA and the panel does not even ask", async () => {
-    const { owner } = await newOrg("wa idle");
-    expect(await state(owner.cookie)).toEqual({ available: true, service: "running", serviceReason: null, agent: "responding", status: "disconnected", failure: null, phone: null, connectedAt: null, qr: null, replaces: null });
-    expect(waha.requests).toEqual([]);
+  it("before anyone connects, no session exists in WAHA: the panel only looks, and creates nothing", async () => {
+    const { owner, session } = await newOrg("wa idle");
+    expect(await state(owner.cookie)).toEqual({
+      available: true, service: "running", serviceReason: null, serviceWarning: null, disk: null, agent: "responding",
+      status: "disconnected", failure: null, phone: null, connectedAt: null, qr: null, replaces: null,
+    });
+    expect(wahaCalls()).toEqual([`GET /api/sessions/${session}`]);
+    expect(waha.sessions.has(session)).toBe(false);
+  });
+
+  it("a session that WAHA resumed while the panel says disconnected is undone, instead of a number sending without the screen saying so", async () => {
+    const { org, owner, session } = await newOrg("wa stray");
+    // O pareamento mora num volume que sobrevive à remoção do serviço: reinstalado, o WAHA retoma.
+    waha.connect(session, "553133330000");
+    expect(await state(owner.cookie)).toMatchObject({ status: "disconnected", phone: null });
+    expect(wahaCalls()).toEqual([`GET /api/sessions/${session}`, `POST /api/sessions/${session}/logout`, `POST /api/sessions/${session}/stop`]);
+    expect(waha.sessions.get(session)).toMatchObject({ status: "STOPPED", me: null });
+    expect(await connector(org)).toBeNull();
+    waha.requests.length = 0;
+    await state(owner.cookie);
+    expect(wahaCalls()).toEqual([`GET /api/sessions/${session}`]);
   });
 
   it("says the service is not available on an installation without the WAHA key, and refuses to connect", async () => {
@@ -148,6 +165,7 @@ describe("connecting by QR code", () => {
     await call(writeSetting, { method: "PUT", cookie: owner.cookie, params: { key: "whatsapp.connector" }, body: { value: { type: "webhook", url: "https://wa.example.com/send", token: "old-token" } } });
     expect((await state(owner.cookie)).replaces).toEqual({ type: "webhook", url: "https://wa.example.com/send" });
 
+    waha.requests.length = 0;
     expect(refusal(await start(owner.cookie))).toEqual([409, "connector_replace_required"]);
     expect(waha.requests).toEqual([]);
     expect((await connector(org))?.value).toMatchObject({ type: "webhook" });
@@ -233,10 +251,10 @@ describe("disconnecting and failing", () => {
     expect(waha.sessions.get(session)).toMatchObject({ status: "STOPPED", me: null });
     expect(await connector(org)).toBeNull();
     expect((await notices(org)).at(-1)).toBe("WhatsApp +553133330000 desconectado por Test owner. Os avisos e as mensagens por WhatsApp não saem até um número ser conectado de novo.");
-    // Desconectado, o painel volta a não perguntar nada ao WAHA.
+    // Desconectado, o painel só confere que a sessão segue parada.
     waha.requests.length = 0;
     expect((await state(owner.cookie)).status).toBe("disconnected");
-    expect(waha.requests).toEqual([]);
+    expect(wahaCalls()).toEqual([`GET /api/sessions/${session}`]);
   });
 
   it("a session that dropped shows as failed with the reason and a notice; connecting again starts from scratch", async () => {
@@ -334,7 +352,8 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
       "O servidor não conseguiu instalar ou remover o serviço de WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações.",
       "O serviço de WhatsApp está instalado neste servidor. Conecte um número em Configurações.",
     ]);
-    expect(waha.requests).toEqual([]);
+    // Enquanto o serviço não estava de pé nada foi perguntado ao WAHA; de pé, o painel só olha.
+    expect(waha.requests.map((request) => request.method)).toEqual(["GET"]);
   });
 
   it("answers the agent with the two booleans and nothing else, whatever the report says about WhatsApp", async () => {
@@ -380,16 +399,56 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
     waha.requests.length = 0;
     expect((await wantService(owner.cookie, false)).data).toMatchObject({ service: "removing", status: "disconnected", phone: null, failure: null });
     expect(await connector(org)).toBeNull();
-    expect(waha.requests).toEqual([]);
+    // Antes de remover, o pareamento que sobrou no WAHA é desfeito: o volume fica, e sem isso o
+    // número voltaria conectado numa reinstalação.
+    expect(wahaCalls()).toEqual([`POST /api/sessions/${session}/logout`, `POST /api/sessions/${session}/stop`]);
+    expect(waha.sessions.get(session)).toMatchObject({ status: "STOPPED", me: null });
     expect(await answer({ state: "running" })).toEqual({ update: false, whatsapp: false });
     expect((await state(owner.cookie)).service).toBe("removing");
     panel.clock.at = new Date(NOW.getTime() + 180_000);
     expect(await answer({ state: "absent" })).toEqual({ update: false, whatsapp: false });
     expect(await state(owner.cookie)).toMatchObject({ service: "absent", status: "disconnected" });
     expect((await allNotices(org)).slice(-2)).toEqual([
-      "Test owner pediu a remoção do serviço de WhatsApp deste servidor. O número fica desconectado e a memória é liberada em instantes.",
+      "Test owner pediu a remoção do serviço de WhatsApp deste servidor. O número fica desconectado, e a memória e o disco são liberados em instantes.",
       "O serviço de WhatsApp foi removido deste servidor.",
     ]);
+  });
+
+  it("removing still goes through when WAHA does not answer the logout: it is best effort", async () => {
+    const { owner } = await newOrg("svc remove down");
+    panel.deps.waha = { apiKey: WAHA_KEY, baseUrl: "http://127.0.0.1:1" };
+    expect((await wantService(owner.cookie, false)).data).toMatchObject({ service: "removing", status: "disconnected" });
+  });
+
+  it("no disk: the screen gets the closed code and how much there is and how much it takes, as numbers only", async () => {
+    await nobodyWants();
+    const { owner } = await bareOrg("svc no disk");
+    await wantService(owner.cookie, true);
+    expect(await answer({ state: "failed", reason: "no_disk", freeDiskMb: 4000, neededDiskMb: 5120 })).toEqual({ update: false, whatsapp: true });
+    expect(await state(owner.cookie)).toMatchObject({ service: "failed", serviceReason: "no_disk", disk: { freeMb: 4000, neededMb: 5120 }, serviceWarning: null });
+    // Número que não é número, ou fora de um estado de falta de disco, não chega à tela.
+    await answer({ state: "failed", reason: "no_disk", freeDiskMb: "4000; rm -rf /", neededDiskMb: -1 });
+    expect(await state(owner.cookie)).toMatchObject({ service: "failed", serviceReason: "no_disk", disk: null });
+    await answer({ state: "failed", reason: "pull_failed", freeDiskMb: 4000, neededDiskMb: 5120 });
+    expect(await state(owner.cookie)).toMatchObject({ serviceReason: "pull_failed", disk: null });
+  });
+
+  it("warnings ride along with the state they belong to: low memory with the service up, image kept with it gone", async () => {
+    await nobodyWants();
+    const { owner } = await bareOrg("svc warnings");
+    await wantService(owner.cookie, true);
+    await answer({ state: "absent", warning: "low_memory" });
+    expect(await state(owner.cookie)).toMatchObject({ service: "preparing", serviceWarning: null });
+    await answer({ state: "running", warning: "low_memory" });
+    expect(await state(owner.cookie)).toMatchObject({ service: "running", serviceWarning: "low_memory" });
+    await answer({ state: "running", warning: "buy more ram at evil.example" });
+    expect(await state(owner.cookie)).toMatchObject({ service: "running", serviceWarning: null });
+
+    await wantService(owner.cookie, false);
+    await answer({ state: "absent", warning: "image_kept" });
+    expect(await state(owner.cookie)).toMatchObject({ service: "absent", serviceWarning: "image_kept" });
+    await answer({ state: "absent" });
+    expect(await state(owner.cookie)).toMatchObject({ service: "absent", serviceWarning: null });
   });
 
   it("one organization that wants it is enough for the installation, and an agent that does not tell the service state changes nothing", async () => {

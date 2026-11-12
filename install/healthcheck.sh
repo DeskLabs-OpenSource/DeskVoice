@@ -208,7 +208,7 @@ if [ "$only_essential" = 0 ]; then
   fi
 
   # ── Disco ──
-  free_mb="$(df -Pm "$DEPLOY_DIR" | awk 'NR == 2 { print $4 }')"
+  free_mb="$(free_disk_mb "$DEPLOY_DIR")"
   if [ "$free_mb" -lt 1024 ]; then add disk "Disco" 0 falha "só ${free_mb} MB livres: o banco pode parar de gravar. Apague backups antigos em backups/ ou aumente o disco"
   elif [ "$free_mb" -lt 5120 ]; then add disk "Disco" 0 aviso "${free_mb} MB livres: pouco espaço para backups e atualização"
   else add disk "Disco" 0 ok "$((free_mb / 1024)) GB livres"; fi

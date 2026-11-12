@@ -57,9 +57,22 @@ Ele continua sendo um sim ou não, e não um comando, pelos mesmos motivos do pr
 | Algo no lugar do booleano (texto, objeto, lista) | O agente só age com `true` ou `false` exatos. Qualquer outra coisa vale como "não sei", e nada muda |
 | Apagar o pareamento do número | Não há como: remover o serviço tira o contêiner, e o volume fica |
 
-O pior que um painel comprometido consegue com o segundo booleano é fazer o servidor baixar e subir o WAHA que o próprio kit fixou, gastando disco e memória, ou tirar o serviço do ar. Não ganha execução no servidor.
+O pior que um painel comprometido consegue com o segundo booleano é fazer o servidor baixar e subir o WAHA que o próprio kit fixou, gastando disco e memória, ou tirar o serviço do ar. Não ganha execução no servidor. E não enche o disco: antes de baixar, o agente confere se há espaço para a imagem com folga (5 GB livres para uma imagem de 3,2 GB) e, sem espaço, não baixa nada e conta `no_disk`. Pouca memória não bloqueia: vira aviso na tela.
 
-O agente responde, na fala seguinte, o estado do serviço em códigos fechados (`absent`, `running`, `failed` com `pull_failed`, `start_failed` ou `remove_failed`). O painel grava; um código que ele não conhece vale como "o agente não contou", e nunca faz o relato da atualização ser recusado.
+### A regra de entrada de um campo novo na resposta do agente
+
+A resposta da rota do agente é a única coisa que sai do painel para o servidor. Cada campo a mais é uma capacidade a mais de quem controla o painel. Um campo novo só entra se cumprir as quatro condições:
+
+| | Condição | Como o `whatsapp` cumpre |
+|---|---|---|
+| a | É um **booleano de estado desejado**: diz como a instalação quer estar, não o que fazer agora | "Esta instalação quer o serviço de WhatsApp." O agente converge a cada passada, e repetir o mesmo valor não faz nada |
+| b | A **ação inteira está escrita no kit**: qual serviço, qual imagem, qual comando. Nada disso vem do painel | `converge_whatsapp` em `install/agent.sh`; a imagem é a que o Compose desta instalação fixa por resumo |
+| c | É **reversível e não apaga dado** | Desligar remove o contêiner e a imagem fixada; o volume com o pareamento fica. Ligar de novo traz tudo de volta |
+| d | **O próprio agente confere o custo antes de agir**, porque o painel pode estar errado ou comprometido | Espaço em disco conferido antes do download; memória conferida e avisada |
+
+O que **não entra**, mesmo cumprindo a letra de alguma delas: uma lista de "serviços opcionais", um nome de serviço, um mapa de opções. Uma lista é um canal de comando com outro nome: quem a preenche escolhe o que o servidor executa, e cada item novo passa sem esta conversa. Serviço novo, campo novo, com nome próprio, decisão registrada e as quatro condições conferidas.
+
+O agente responde, na fala seguinte, o estado do serviço em códigos fechados: `absent`, `running`, ou `failed` com `no_disk`, `pull_failed`, `start_failed` ou `remove_failed`; um aviso (`low_memory`, `image_kept`); e, em `no_disk`, dois números (MB livres e MB exigidos). O painel grava; um código que ele não conhece vale como "o agente não contou", e nunca faz o relato da atualização ser recusado.
 
 **Compatibilidade, conferida.** O agente da 0.2.0 lê só `data.update` e ignora o resto: o JavaScript dele (`git show v0.2.0:install/agent.sh`) foi executado contra uma resposta com os dois campos e devolveu `update=false`. O painel manda o campo novo sempre. No sentido contrário, um painel antigo não manda `whatsapp`, e o agente novo lê isso como "não sei": não liga nem desliga nada.
 

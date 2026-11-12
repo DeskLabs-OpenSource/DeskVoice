@@ -54,7 +54,11 @@ case "$args" in
     esac; exit 0 ;;
   *"select count(*) from users"*) answer users_count; exit 0 ;;
   *" pull -q panel "*) if [ -f "$FAKE_DIR/pull_fail" ]; then echo "Error response from daemon: manifest unknown" >&2; cat "$FAKE_DIR/pull_fail" >&2; exit 1; fi; exit 0 ;;
-  *" pull -q waha "*) if [ -f "$FAKE_DIR/waha_pull_fail" ]; then echo "Error response from daemon: toomanyrequests" >&2; exit 1; fi; exit 0 ;;
+  # Baixar a imagem do WAHA: passa a existir no disco. Com waha_pull_hang, o download não termina.
+  *" pull -q waha "*) if [ -f "$FAKE_DIR/waha_pull_hang" ]; then exec sleep 60; fi; if [ -f "$FAKE_DIR/waha_pull_fail" ]; then echo "Error response from daemon: toomanyrequests" >&2; exit 1; fi; echo "$last" > "$FAKE_DIR/waha_image"; exit 0 ;;
+  # A imagem do WAHA no disco: existe se foi baixada; sai com `image rm`, salvo waha_image_busy.
+  " image inspect "*) [ -f "$FAKE_DIR/waha_image" ]; exit $? ;;
+  " image rm "*) if [ -f "$FAKE_DIR/waha_image_busy" ]; then echo "conflict: image is being used" >&2; exit 1; fi; rm -f "$FAKE_DIR/waha_image"; exit 0 ;;
   *" logs "*) answer logs; exit 0 ;;
   # Criar o dono: guarda a senha que veio pela entrada padrão e passa a existir um usuário.
   *"run create-owner"*) cat > "$FAKE_DIR/create_owner_stdin"; if [ -f "$FAKE_DIR/create_owner_fail" ]; then exit 1; fi; echo 1 > "$FAKE_DIR/users_count"; exit 0 ;;

@@ -125,7 +125,7 @@ pessoal nem o principal da empresa.
 | Já havia conector externo | A tela avisa que ele será substituído e pede a confirmação. O token gravado é apagado |
 | Conectado | A tela mostra o número e desde quando. "Enviar mensagem de teste" manda para o WhatsApp de quem está logado, o de "Meu contato" |
 | Desconectar | Pede confirmação nomeando o número. O aparelho some de "Dispositivos conectados", e para voltar é preciso ler o QR Code de novo |
-| Remover o serviço | Só aparece sem número conectado. Libera a memória em até um minuto; os arquivos baixados e o pareamento antigo ficam no disco |
+| Remover o serviço | Só aparece sem número conectado. Em até um minuto libera a memória e apaga do disco a imagem do serviço (3,2 GB), e só ela. O pareamento antigo fica guardado, sem uso: reinstalar pede o QR Code de novo. Peça à pessoa para conferir no celular do número, em Dispositivos conectados, se o aparelho saiu |
 
 Quando algo não sai:
 
@@ -135,6 +135,9 @@ Quando algo não sai:
 | "A sessão está parada" | O serviço reiniciou e não retomou | Conectar de novo; não pede QR Code |
 | "O serviço não tem mais os dados" | Backup restaurado em outra VPS: o pareamento não entra no backup | Conectar de novo e ler o QR Code |
 | "Preparando o serviço" que não termina, com aviso de que o agente não fala ou não responde | Quem instala é o agente, e ele não está passando | No servidor: `bash install/agent.sh` executa o pedido na hora; `sudo bash install/agent.sh --install` devolve o agendamento |
+| "O servidor não tem espaço em disco", com quanto falta | O agente exige 5 GB livres antes de baixar; nada foi baixado | Liberar espaço (`backups/`) ou aumentar o disco; ele confere de novo em cerca de 10 minutos |
+| Aviso de pouca memória com o serviço de pé | Ao instalar havia menos memória disponível que o teto do serviço (1280 MB) | Não impede o uso; acompanhar, e remover o serviço se o servidor apertar |
+| "Os arquivos não saíram do disco" depois de remover | Outra coisa no servidor usa a mesma imagem | O servidor tenta de novo a cada minuto; na hora: `bash install/agent.sh`. Nunca mande rodar `docker image prune` ou `docker system prune`: apaga imagem de outros sistemas |
 | "O servidor não conseguiu baixar o serviço" | Internet, Docker Hub fora ou no limite de downloads, ou disco cheio | `df -h`; o servidor tenta de novo sozinho em cerca de 10 minutos; registro em `deploy/agent/agent.log` |
 | "Este servidor ainda não tem a chave do serviço" | Atualizado por um atualizador antigo | `bash install/update.sh` uma vez |
 | "O serviço de WhatsApp não respondeu" | O contêiner `waha` parou | `bash install/healthcheck.sh`, linha "WhatsApp"; log: `docker compose -f deploy/docker-compose.yml --profile whatsapp logs --tail 50 waha` |

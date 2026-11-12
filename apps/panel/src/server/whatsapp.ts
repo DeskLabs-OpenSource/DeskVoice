@@ -40,6 +40,10 @@ export interface WhatsAppView {
   service: ServiceState;
   /** Só em `failed`: o código que o agente contou. */
   serviceReason: string | null;
+  /** Aviso que acompanha o estado: `low_memory` (instalado com pouca memória) ou `image_kept` (removido; a imagem ficou no disco). */
+  serviceWarning: string | null;
+  /** Só com `serviceReason: "no_disk"`: quanto havia e quanto o serviço pede, em MB. */
+  disk: { freeMb: number; neededMb: number } | null;
   /** O agente do servidor, que é quem instala e remove o serviço: falando, calado, ou nunca falou. */
   agent: "responding" | "silent" | "never";
   status: ConnectionStatus;
@@ -63,6 +67,8 @@ export interface Stored {
   replaces: WhatsAppView["replaces"];
   service: ServiceState;
   serviceReason: string | null;
+  serviceWarning: string | null;
+  disk: WhatsAppView["disk"];
   agent: WhatsAppView["agent"];
 }
 type Org = <T>(fn: (q: OrgQuery) => Promise<T>) => Promise<T>;
@@ -75,8 +81,9 @@ export async function readStored(q: OrgQuery, now: Date): Promise<Stored> {
   const setting = await q.one<{ value: unknown }>("select value from settings where key = $1", [CONNECTOR_KEY]);
   const other = httpConnector.safeParse(setting?.value);
   // O que o agente contou na última fala. A mesma linha vale para toda organização da instalação.
-  const told = await q.one<{ lastSeenAt: Date; service: string | null; reason: string | null }>(
-    `select last_seen_at as "lastSeenAt", whatsapp_service as service, whatsapp_service_reason as reason from update_agent_status`,
+  const told = await q.one<{ lastSeenAt: Date; service: string | null; reason: string | null; warning: string | null; freeMb: number | null; neededMb: number | null }>(
+    `select last_seen_at as "lastSeenAt", whatsapp_service as service, whatsapp_service_reason as reason, whatsapp_service_warning as warning,
+            whatsapp_service_free_mb as "freeMb", whatsapp_service_needed_mb as "neededMb" from update_agent_status`,
   );
   const wanted = row?.wanted ?? false;
   const service: ServiceState = wanted ? (told?.service === "running" ? "running" : told?.service === "failed" ? "failed" : "preparing") : told?.service === "running" ? "removing" : "absent";
@@ -85,6 +92,9 @@ export async function readStored(q: OrgQuery, now: Date): Promise<Stored> {
     replaces: other.success ? { type: other.data.type, url: other.data.url } : null,
     service,
     serviceReason: service === "failed" ? (told?.reason ?? null) : null,
+    // Cada aviso só faz sentido no seu estado: pouca memória com o serviço de pé, imagem que ficou com ele fora.
+    serviceWarning: (service === "running" && told?.warning === "low_memory") || (service === "absent" && told?.warning === "image_kept") ? told.warning : null,
+    disk: service === "failed" && told?.reason === "no_disk" && told.freeMb !== null && told.neededMb !== null ? { freeMb: told.freeMb, neededMb: told.neededMb } : null,
     agent: !told ? "never" : now.getTime() - told.lastSeenAt.getTime() > AGENT_SILENT_MINUTES * 60_000 ? "silent" : "responding",
   };
 }
@@ -93,6 +103,8 @@ const view = (stored: Stored, available: boolean, qr: string | null = null): Wha
   available,
   service: stored.service,
   serviceReason: stored.serviceReason,
+  serviceWarning: stored.serviceWarning,
+  disk: stored.disk,
   agent: stored.agent,
   status: stored.row?.status ?? "disconnected",
   failure: stored.row?.failure ?? null,
@@ -159,11 +171,23 @@ async function record(q: OrgQuery, now: Date, session: WahaSession | null): Prom
 export async function observe(deps: ServerDeps, org: Org, organizationId: string): Promise<WhatsAppView> {
   const stored = await org((q) => readStored(q, deps.clock.now()));
   if (!deps.waha.apiKey) return view(stored, false);
-  // Sem o serviço de pé não há WAHA; sem conexão pedida não existe sessão nele. Nos dois casos
-  // não há o que perguntar.
-  if (stored.service !== "running" || !stored.row || stored.row.status === "disconnected") return view(stored, true);
+  // Sem o serviço de pé não há WAHA, e sem pedido nenhum não existe sessão nele: não há o que perguntar.
+  if (stored.service !== "running" || !stored.row) return view(stored, true);
   const name = wahaSessionName(organizationId);
   const session = await waha(() => wahaGetSession(deps.waha, name));
+  if (stored.row.status === "disconnected") {
+    // O banco diz "desconectado", mas quem sabe é o WAHA. O pareamento mora num volume que
+    // sobrevive à remoção do serviço: reinstalado, o WAHA pode retomar uma sessão antiga, e um
+    // número ficaria conectado sem a tela dizer. Vale o que a pessoa pediu (desconectar): a sessão
+    // que sobrou é desfeita, e a tela continua dizendo a verdade.
+    if (session && session.status !== "STOPPED") {
+      await waha(async () => {
+        await wahaLogoutSession(deps.waha, name);
+        await wahaStopSession(deps.waha, name);
+      });
+    }
+    return view(stored, true);
+  }
   const row = await org((q) => record(q, deps.clock.now(), session));
   let qr: string | null = null;
   if (row?.status === "qr") {
@@ -233,15 +257,44 @@ export async function disconnect(deps: ServerDeps, org: Org, session: Session): 
 }
 
 /**
+ * O pedido de instalar ou remover, como a rota o executa. Antes de remover, tenta desfazer o
+ * pareamento que ainda exista no WAHA (uma conexão caída deixa o aparelho em "Dispositivos
+ * conectados" no telefone, e o pareamento no volume, que fica). É melhor esforço: com o WAHA fora
+ * do ar a remoção segue, e a tela pede para conferir o telefone.
+ */
+export async function changeService(deps: ServerDeps, org: Org, session: Session, wanted: boolean): Promise<WhatsAppView> {
+  if (!wanted) {
+    const stored = await org((q) => readStored(q, deps.clock.now()));
+    assertRemovable(stored.row);
+    if (stored.service === "running" && stored.row && deps.waha.apiKey) {
+      const name = wahaSessionName(session.organizationId);
+      try {
+        await wahaLogoutSession(deps.waha, name);
+        await wahaStopSession(deps.waha, name);
+      } catch (error) {
+        if (!(error instanceof WahaError)) throw error;
+        process.stderr.write(`[panel] could not log the WhatsApp session out before removing the service: ${error.message}\n`);
+      }
+    }
+  }
+  await org((q) => setServiceWanted(q, session, wanted, deps.clock.now()));
+  return observe(deps, org, session.organizationId);
+}
+
+function assertRemovable(row: Row | null): void {
+  if (row && (row.status === "connected" || row.status === "qr" || row.status === "starting")) {
+    throw new ApiError(409, "whatsapp_connected", "A WhatsApp number is connected or connecting: disconnect it before removing the service.");
+  }
+}
+
+/**
  * Pede ou dispensa o serviço de WhatsApp neste servidor. Aqui só se grava a vontade: quem baixa a
  * imagem, sobe e remove o contêiner é o agente, na passada seguinte. Remover só vale sem número
  * conectado, e leva junto o conector `waha` que uma conexão caída tenha deixado.
  */
-export async function setServiceWanted(q: OrgQuery, session: Session, wanted: boolean, now: Date): Promise<void> {
+async function setServiceWanted(q: OrgQuery, session: Session, wanted: boolean, now: Date): Promise<void> {
   const row = await q.one<Row>(`select ${ROW} from whatsapp_sessions for update`);
-  if (!wanted && row && (row.status === "connected" || row.status === "qr" || row.status === "starting")) {
-    throw new ApiError(409, "whatsapp_connected", "A WhatsApp number is connected or connecting: disconnect it before removing the service.");
-  }
+  if (!wanted) assertRemovable(row);
   await q.exec(
     `insert into whatsapp_sessions (organization_id, session_name, service_wanted, updated_at) values ($1, $2, $3, $4)
      on conflict (organization_id) do update set service_wanted = excluded.service_wanted, updated_at = excluded.updated_at,
@@ -257,7 +310,7 @@ export async function setServiceWanted(q: OrgQuery, session: Session, wanted: bo
     now,
     wanted
       ? `${session.name} pediu a instalação do serviço de WhatsApp neste servidor. O servidor baixa e sobe o serviço em alguns minutos.`
-      : `${session.name} pediu a remoção do serviço de WhatsApp deste servidor. O número fica desconectado e a memória é liberada em instantes.`,
+      : `${session.name} pediu a remoção do serviço de WhatsApp deste servidor. O número fica desconectado, e a memória e o disco são liberados em instantes.`,
   );
 }
 

@@ -37,4 +37,9 @@ grant select, insert, update, delete on whatsapp_sessions to deskvoice_app, desk
 -- resto desta tabela, a mesma linha é gravada para cada organização.
 alter table update_agent_status
   add column whatsapp_service text check (whatsapp_service in ('absent', 'running', 'failed')),
-  add column whatsapp_service_reason text;
+  add column whatsapp_service_reason text,
+  -- Aviso que acompanha o estado (pouca memória ao instalar; imagem que não saiu do disco ao remover)
+  -- e, quando faltou disco, quanto havia e quanto o serviço pede, em MB.
+  add column whatsapp_service_warning text,
+  add column whatsapp_service_free_mb integer,
+  add column whatsapp_service_needed_mb integer;

@@ -136,6 +136,30 @@ ensure_agent_token() {
 # A imagem do WAHA sem navegador é publicada com uma etiqueta por arquitetura. A de amd64 é o padrão
 # do Compose; em ARM, WAHA_IMAGE aponta para esta, da MESMA versão (um teste do kit confere).
 WAHA_IMAGE_ARM64="devlikeapro/waha:noweb-arm-2026.10.1@sha256:fce6ae58ba819221521b2673704ef9e6d87f98571d67daec62eb737edd77c2c9"
+# O que o serviço custa, para o agente conferir ANTES de baixar. A imagem ocupa 3,19 GB (medido em
+# 11/11/2026); durante o download o Docker guarda também as camadas comprimidas (cerca de 0,76 GB);
+# e sobra 1 GB, abaixo do qual a checagem de saúde já acusa o disco e o banco pode parar de gravar.
+# 3,19 + 0,76 + 1 ≈ 5 GB. A memória é o teto do serviço no Compose (mem_limit: 1280m).
+WAHA_DISK_NEEDED_MB=5120
+WAHA_MEMORY_CEILING_MB=1280
+MEMINFO_FILE="${DESKVOICE_MEMINFO:-/proc/meminfo}"   # os testes trocam
+free_disk_mb() { df -Pm "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'; }   # MB livres no disco da pasta
+# Onde o Docker guarda as imagens (pode ser outro disco). Sem resposta, vale o disco da instalação.
+docker_free_mb() {
+  local root
+  root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"
+  if [ -z "$root" ] || [ ! -d "$root" ]; then root="$DEPLOY_DIR"; fi
+  free_disk_mb "$root"
+}
+available_memory_mb() { awk '/^MemAvailable:/ { print int($2 / 1024) }' "$MEMINFO_FILE" 2>/dev/null || true; }
+# A imagem do WAHA que ESTA instalação usa, na forma que o Docker guarda quando ela é baixada por
+# resumo: `repositório@sha256:...`. Sai do Compose (ou de WAHA_IMAGE, em ARM), nunca de fora.
+waha_image_ref() {
+  local ref
+  ref="$(env_get "$ENV_FILE" WAHA_IMAGE)"
+  if [ -z "$ref" ]; then ref="$(sed -n 's/.*WAHA_IMAGE:-\(.*\)}$/\1/p' "$DEPLOY_DIR/docker-compose.yml" | head -n 1)"; fi
+  case "$ref" in *@sha256:*) printf '%s@%s\n' "${ref%%:*}" "${ref##*@}" ;; esac
+}
 ensure_waha() {
   local key hash created=1
   key="$(env_get "$ENV_FILE" WAHA_API_KEY)"

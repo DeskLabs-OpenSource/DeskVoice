@@ -109,7 +109,8 @@ Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em pr
   número, sem aviso; use um número dedicado. O pareamento (a credencial do aparelho) fica no
   volume `waha-sessions` da VPS, sem cifra própria: quem tem acesso ao servidor ou a esse volume
   envia e lê como o número. Ele não entra no backup, e continua no disco depois que o serviço
-  é removido pela tela. O serviço só existe na instalação que o pediu (Configurações →
+  é removido pela tela (o painel tenta desfazer o pareamento antes; confira no telefone, em
+  Dispositivos conectados). O serviço só existe na instalação que o pediu (Configurações →
   WhatsApp); quem o baixa, sobe e remove é o agente do servidor, que recebe do painel só um sim
   ou não. O contêiner do WAHA roda como o usuário padrão da imagem (root dentro do contêiner),
   só na rede interna, sem porta publicada, com o painel e a documentação da API dele desligados. A imagem é de terceiros, fixada por resumo: uma
@@ -136,7 +137,11 @@ Preferimos dizer o que ainda não está fechado a deixar alguém descobrir em pr
   administrador no painel, ou quem consegue escrever no banco do painel, consegue fazer o
   servidor baixar e subir o WAHA (a imagem é a que o kit da instalação fixa, nunca uma vinda do
   painel), gastando cerca de 3,2 GB de disco e 360 MB de memória, ou tirar o serviço do ar. Não
-  consegue escolher imagem, comando ou endereço, nem apagar o pareamento do número.
+  consegue escolher imagem, comando ou endereço, nem apagar o pareamento do número. Também não
+  consegue encher o disco: o agente confere o espaço antes de baixar (5 GB livres) e, sem ele,
+  não baixa. Pouca memória não bloqueia, só avisa: numa VPS pequena o serviço pode disputar
+  memória com o resto, até o teto de 1280 MB. A regra para qualquer campo novo nessa resposta
+  está no registro `0010`.
 - **Mensagem enviada sem conferir o endereço do número.** Antes de enviar pelo número conectado,
   o DeskVoice pergunta ao WhatsApp o endereço certo do destino. Se o WAHA recusar essa consulta
   em si, a mensagem sai para o número como ele é, e a ressalva fica registrada (na linha do tempo

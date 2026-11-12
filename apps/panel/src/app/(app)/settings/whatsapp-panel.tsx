@@ -28,11 +28,15 @@ const QR_SIZE = 264;
 // Iguais em todo idioma: são comandos, não frases.
 const RUN_AGENT = "bash install/agent.sh";
 const RUN_UPDATE = "bash install/update.sh";
+/** MB em GB com uma casa, no formato do idioma. */
+const gigabytes = (megabytes: number, locale: string): string => (megabytes / 1024).toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 interface WhatsAppState {
   available: boolean;
   service: "absent" | "preparing" | "running" | "failed" | "removing";
-  serviceReason: "pull_failed" | "start_failed" | "remove_failed" | null;
+  serviceReason: "no_disk" | "pull_failed" | "start_failed" | "remove_failed" | null;
+  serviceWarning: "low_memory" | "image_kept" | null;
+  disk: { freeMb: number; neededMb: number } | null;
   agent: "responding" | "silent" | "never";
   status: "disconnected" | "starting" | "qr" | "connected" | "failed";
   failure: "FAILED" | "STOPPED" | "missing" | "qr_expired" | null;
@@ -83,6 +87,7 @@ export function WhatsAppPanel({ onChanged }: { onChanged(): void }) {
   };
   const connect = (): void => (data.replaces && confirming !== "replace" ? setConfirming("replace") : run("/whatsapp/connect", { replace: data.replaces !== null }));
   const phone = data.phone ? formatPhone(data.phone) : t.thisNumber;
+  const gb = (megabytes: number): string => gigabytes(megabytes, locale);
   const risk = (
     <Notice tone="warn">
       <strong>{t.riskTitle}</strong>
@@ -151,6 +156,12 @@ export function WhatsAppPanel({ onChanged }: { onChanged(): void }) {
               <p className="font-bold">{t.serviceAbsent}</p>
               <p className="text-muted">{t.serviceCost}</p>
             </div>
+            {data.serviceWarning === "image_kept" ? (
+              <Notice tone="warn">
+                <p className="max-w-prose">{t.imageKept}</p>
+                <code className="data">{RUN_AGENT}</code>
+              </Notice>
+            ) : null}
             {risk}
             <div className="flex flex-wrap items-center gap-3">
               <Button variant="primary" busy={act.busy} onClick={() => run("/whatsapp/service", { wanted: true })}>
@@ -171,7 +182,7 @@ export function WhatsAppPanel({ onChanged }: { onChanged(): void }) {
         {data.available && data.service === "failed" ? (
           <>
             <Notice tone="fail">
-              <p className="max-w-prose">{t.serviceFailed[data.serviceReason ?? "unknown"]}</p>
+              <p className="max-w-prose">{data.disk ? fill(t.noDisk, { free: gb(data.disk.freeMb), needed: gb(data.disk.neededMb), missing: gb(data.disk.neededMb - data.disk.freeMb) }) : t.serviceFailed[data.serviceReason ?? "unknown"]}</p>
               <p className="max-w-prose">{t.serviceRetry}</p>
             </Notice>
             {agent}
@@ -185,6 +196,8 @@ export function WhatsAppPanel({ onChanged }: { onChanged(): void }) {
             {agent}
           </>
         ) : null}
+
+        {up && data.serviceWarning === "low_memory" ? <Notice tone="warn">{t.lowMemory}</Notice> : null}
 
         {up && data.status === "disconnected" ? (
           <>

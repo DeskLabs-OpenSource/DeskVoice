@@ -25,7 +25,10 @@ export const REQUEST_COLUMNS = `id, status, from_version as "fromVersion", targe
 
 export const WHATSAPP_SERVICE_STATES = ["absent", "running", "failed"] as const;
 /** Por que ligar ou desligar o serviço falhou: a imagem não baixou, o serviço não subiu, o contêiner não saiu. */
-export const WHATSAPP_SERVICE_REASONS = ["pull_failed", "start_failed", "remove_failed"] as const;
+export const WHATSAPP_SERVICE_REASONS = ["no_disk", "pull_failed", "start_failed", "remove_failed"] as const;
+/** O que acompanha o estado sem ser falha: instalado com pouca memória; removido, mas a imagem ficou no disco. */
+export const WHATSAPP_SERVICE_WARNINGS = ["low_memory", "image_kept"] as const;
+const megabytes = z.number().int().min(0).max(100_000_000);
 
 const DETAIL_MAX = 8000;
 const short = (max: number) => z.string().transform((value) => value.slice(0, max));
@@ -54,7 +57,14 @@ export const agentReport = z.object({
    * relato do WhatsApp nunca pode fazer o relato da atualização ser recusado.
    */
   whatsapp: z
-    .object({ state: z.enum(WHATSAPP_SERVICE_STATES), reason: z.enum(WHATSAPP_SERVICE_REASONS).optional().catch(undefined) })
+    .object({
+      state: z.enum(WHATSAPP_SERVICE_STATES),
+      reason: z.enum(WHATSAPP_SERVICE_REASONS).optional().catch(undefined),
+      warning: z.enum(WHATSAPP_SERVICE_WARNINGS).optional().catch(undefined),
+      // Só números: quanto havia de disco e quanto o serviço pede, quando faltou espaço.
+      freeDiskMb: megabytes.optional().catch(undefined),
+      neededDiskMb: megabytes.optional().catch(undefined),
+    })
     .optional()
     .catch(undefined),
 });
@@ -137,16 +147,21 @@ export async function agentCheckIn(deps: ServerDeps, report: AgentReport): Promi
     const wanted = (await q.one<{ wanted: boolean }>("select exists (select 1 from whatsapp_sessions where service_wanted) as wanted"))?.wanted ?? false;
     const before = await q.one<{ service: string | null }>("select whatsapp_service as service from update_agent_status limit 1");
     const service = report.whatsapp?.state ?? null;
+    const reason = (service === "failed" && report.whatsapp?.reason) || null;
+    const noDisk = reason === "no_disk";
     // Só o que mudou vira aviso, e "fora" só é notícia para quem tinha o serviço de pé.
     if (service !== null && service !== (before?.service ?? null) && (service !== "absent" || before?.service === "running")) notices.push({ body: WHATSAPP_SERVICE_NOTICE[service] });
     await q.exec(
-      `insert into update_agent_status (organization_id, last_seen_at, announced_version, last_failure_at, last_failure_detail, target_version, whatsapp_service, whatsapp_service_reason)
-       select id, $1, $2, $3, $4, $5, $6, $7 from organizations
+      `insert into update_agent_status (organization_id, last_seen_at, announced_version, last_failure_at, last_failure_detail, target_version, whatsapp_service, whatsapp_service_reason,
+                                        whatsapp_service_warning, whatsapp_service_free_mb, whatsapp_service_needed_mb)
+       select id, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 from organizations
        on conflict (organization_id) do update set last_seen_at = excluded.last_seen_at, announced_version = excluded.announced_version,
          target_version = excluded.target_version, whatsapp_service = excluded.whatsapp_service, whatsapp_service_reason = excluded.whatsapp_service_reason,
+         whatsapp_service_warning = excluded.whatsapp_service_warning, whatsapp_service_free_mb = excluded.whatsapp_service_free_mb,
+         whatsapp_service_needed_mb = excluded.whatsapp_service_needed_mb,
          last_failure_at = coalesce(excluded.last_failure_at, update_agent_status.last_failure_at),
          last_failure_detail = coalesce(excluded.last_failure_detail, update_agent_status.last_failure_detail)`,
-      [now, report.version, failureAt && (Number.isNaN(failureAt.getTime()) ? now : failureAt), report.lastFailure?.detail ?? null, target, service, (service === "failed" && report.whatsapp?.reason) || null],
+      [now, report.version, failureAt && (Number.isNaN(failureAt.getTime()) ? now : failureAt), report.lastFailure?.detail ?? null, target, service, reason, report.whatsapp?.warning ?? null, noDisk ? (report.whatsapp?.freeDiskMb ?? null) : null, noDisk ? (report.whatsapp?.neededDiskMb ?? null) : null],
     );
 
     if (report.result) {
