@@ -3,10 +3,10 @@
 [Português](README.md) · English · [Español](README.es.md)
 
 <h1>
-  <picture>
+  <a href="https://deskvoice.com.br"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="brand/deskvoice-logo-dark.svg">
     <img src="brand/deskvoice-logo-light.svg" alt="DeskVoice" height="76">
-  </picture>
+  </picture></a>
 </h1>
 
 **An open source phone system run by AI agents, installed on your own VPS.**
@@ -14,6 +14,9 @@
 The agent answers the call, runs tools during the conversation, asks a human for approval when
 it needs to, transfers the call, and leaves tasks running after the caller hangs up.
 
+**[deskvoice.com.br](https://deskvoice.com.br)** (in Portuguese) · [Install](https://deskvoice.com.br/instalar) · [Guides](https://deskvoice.com.br/guias) · [Release notes](https://deskvoice.com.br/changelog)
+
+[![Website](https://img.shields.io/badge/website-deskvoice.com.br-a2552f)](https://deskvoice.com.br)
 [![CI](https://github.com/DeskLabs-OpenSource/DeskVoice/actions/workflows/ci.yml/badge.svg)](https://github.com/DeskLabs-OpenSource/DeskVoice/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Node 22](https://img.shields.io/badge/Node-22-339933?logo=node.js&logoColor=white)](https://nodejs.org)
