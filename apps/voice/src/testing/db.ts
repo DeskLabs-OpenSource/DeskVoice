@@ -291,6 +291,7 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
         };
         return session;
       },
+      checkKey: async () => ({ result: "accepted" }),
     },
   };
   return manual;

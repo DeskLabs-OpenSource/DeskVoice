@@ -107,6 +107,14 @@ por HTTPS, de qualquer lugar.
 
 Em Configurações, no motor de voz, cole a chave do Gemini ou da OpenAI. Ela é guardada cifrada.
 
+Teste a chave antes de ligar. Ao salvar, o painel já testa e diz o resultado; depois, o botão
+**Testar a chave**, ao lado dela, testa de novo. O teste não abre sessão de voz e não gasta: ele só
+lê, no provedor, os dados do modelo que o motor usa. A resposta diz o que falta do lado de lá: chave
+recusada (copiada pela metade, revogada ou de outra conta), chave sem acesso ao modelo, falta de
+crédito ou teto de gasto atingido, limite de pedidos, ou provedor sem resposta. Uma chave aceita
+não garante crédito: o provedor só confere isso quando a ligação começa. O resultado fica guardado,
+e a tela de saúde e o `install/healthcheck.sh` mostram a chave recusada como falha.
+
 ### 5. Cadastre a linha
 
 Na tela Linha, informe os dados do tronco e o número que a operadora passou. O painel gera a

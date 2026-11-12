@@ -63,6 +63,8 @@ const common = {
     too_many_attempts: "Muitas tentativas de entrada. Espere alguns minutos e tente de novo.",
     voice_unavailable: "O processo de voz não respondeu. Veja no indicador de saúde, no menu, o que está parado. O que você salvou continua salvo.",
     engine_not_configured: "Este agente usa um motor de voz sem chave cadastrada. Cadastre a chave em Configurações.",
+    engine_key_missing: "Este motor não tem chave salva. Cole a chave e salve antes de testar.",
+    too_many_key_checks: "Muitos testes da chave deste motor em pouco tempo. Espere alguns minutos e teste de novo.",
     already_decided: "Outra pessoa já respondeu este pedido.",
     approval_expired: "O prazo para responder acabou. O agente seguiu com o padrão do pedido.",
     purpose_required: "Para ligar, declare a finalidade e a base legal das ligações.",

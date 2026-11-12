@@ -22,6 +22,15 @@ contains "linha quebrada é falha" "$(line 'Linha telefônica')" "falha "
 contains "linha quebrada traz o motivo" "$(line 'Linha telefônica')" "registro recusado pela operadora (401)"
 bash "$H" --essential >/dev/null 2>&1; equal "linha quebrada não derruba a checagem essencial" 0 "$?"
 
+# Chave do motor recusada no último teste (o painel guarda o resultado; a checagem não testa): falha,
+# sem derrubar a checagem essencial. Sem sessão o painel não diz qual motor, modelo nem data.
+printf '%s\n' 'panel|ok|respondendo' 'trunk|ok|registrado' 'engine|fail|o último teste da chave de um motor de voz não deu certo: as ligações com esse motor podem ser recusadas. Veja o resultado no painel, em Configurações → Motores de voz' > "$FAKE_DIR/panel_health"
+out="$(bash "$H" 2>&1)"; equal "chave recusada: código 2" 2 "$?"
+contains "chave recusada é falha" "$(line 'Motor de voz')" "falha "
+contains "chave recusada traz o motivo" "$(line 'Motor de voz')" "o último teste da chave de um motor de voz não deu certo"
+contains "chave recusada diz onde ver" "$(line 'Motor de voz')" "Configurações → Motores de voz"
+bash "$H" --essential >/dev/null 2>&1; equal "chave recusada não derruba a checagem essencial" 0 "$?"
+
 # Painel fora: essencial.
 printf '%s\n' postgres asterisk voice routines caddy > "$FAKE_DIR/running"
 out="$(bash "$H" 2>&1)"; equal "painel parado: código 1" 1 "$?"

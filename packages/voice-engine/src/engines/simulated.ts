@@ -180,6 +180,9 @@ export function createSimulatedEngine(options: { schedule?: Schedule } = {}): Vo
     async connect(config) {
       return new SimulatedSession(resolveScript(config), schedule);
     },
+    async checkKey() {
+      return { result: "not_needed" };
+    },
   };
 }
 

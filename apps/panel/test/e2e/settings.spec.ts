@@ -34,3 +34,25 @@ test("configurar: os blocos de uma instalação nova aparecem, e o limite de lig
   await page.reload();
   await expect(page.getByLabel(settings.inboundLimit)).toHaveValue(next);
 });
+
+// Item 8.10 da régua: o teste da chave do motor, provado sem chave real. Nenhum pedido sai para um
+// provedor: o motor simulado responde que não pede chave, e um motor sem chave salva é recusado
+// antes de qualquer rede.
+test("testar a chave: o motor simulado não pede chave, e um motor sem chave salva não chega a testar", async ({ page }) => {
+  await signIn(page);
+  const simulated = await page.request.post("/api/v1/engines/simulated/key-check");
+  expect(simulated.status()).toBe(200);
+  expect(((await simulated.json()) as { data: { result: string } }).data.result).toBe("not_needed");
+
+  const engines = ((await (await page.request.get("/api/v1/engines")).json()) as { data: Array<{ id: string; requiresKey: boolean; keyConfigured: boolean }> }).data;
+  const withoutKey = engines.find((engine) => engine.requiresKey && !engine.keyConfigured);
+  test.skip(!withoutKey, "every engine on this installation already has a key");
+  const missing = await page.request.post(`/api/v1/engines/${withoutKey?.id}/key-check`);
+  expect(missing.status()).toBe(409);
+  expect(((await missing.json()) as { error: { code: string } }).error.code).toBe("engine_key_missing");
+
+  // Na tela: sem chave salva não há o que testar, então o botão não aparece.
+  await page.goto("/settings");
+  await expect(page.getByText(settings.keyMissing, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: settings.keyTest, exact: true })).toHaveCount(0);
+});

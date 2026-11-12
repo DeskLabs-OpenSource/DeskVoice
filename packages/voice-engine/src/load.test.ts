@@ -16,6 +16,7 @@ export default {
   label: "Motor de fixture",
   pricing: { checkedOn: "2026-11-10", source: "fixture" },
   async connect() { throw new Error("fixture"); },
+  async checkKey() { return { result: "not_needed" }; },
 };
 `;
 

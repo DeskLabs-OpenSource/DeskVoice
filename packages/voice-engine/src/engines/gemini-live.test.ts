@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
-import type { VoiceSessionConfig } from "../types";
+import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
+import type { KeyCheckOptions, VoiceSessionConfig } from "../types";
 import engine from "./gemini-live";
 
 const config: VoiceSessionConfig = {
@@ -149,5 +150,47 @@ describe("gemini-live (contrato com servidor falso)", () => {
     await expect(connecting).rejects.toThrow(/antes de confirmar a sessão/);
     await fake.stop();
     await expect(engine.connect(config, "k", { baseUrl: fake.url })).rejects.toThrow(/não foi possível conectar/);
+  });
+});
+
+describe("gemini-live: teste da chave (contrato com servidor HTTP falso)", () => {
+  let http: Awaited<ReturnType<typeof startFakeHttp>>;
+  beforeEach(async () => {
+    http = await startFakeHttp();
+  });
+  afterEach(() => http.stop());
+  const check = (options: KeyCheckOptions = {}) => engine.checkKey("chave-de-teste", { baseUrl: http.url, ...options });
+
+  it("lê o modelo da sessão de voz com a chave no cabeçalho, nunca na URL", async () => {
+    http.respond({ status: 200, body: { name: "models/gemini-3.8-live", version: "001" } });
+    expect(await check()).toEqual({ result: "accepted", model: "gemini-3.8-live" });
+    expect(http.requests).toHaveLength(1);
+    expect(http.requests[0]).toMatchObject({ method: "GET", url: "/models/gemini-3.8-live", headers: { "x-goog-api-key": "chave-de-teste" } });
+    expect(http.requests[0]?.url).not.toContain("chave-de-teste");
+  });
+
+  it.each([
+    ["401", "rejected", { status: 401, body: { error: { code: "authentication", message: "bad key" } } }],
+    ["403", "rejected", { status: 403, body: { error: { code: 403, status: "PERMISSION_DENIED" } } }],
+    // O código de região é da OpenAI: no Gemini, 403 continua sendo chave recusada.
+    ["403 com o código de região da OpenAI", "rejected", { status: 403, body: { error: { code: "unsupported_country_region_territory" } } }],
+    ["400 com API_KEY_INVALID (forma antiga)", "rejected", { status: 400, body: { error: { code: 400, details: [{ "@type": "x", reason: "API_KEY_INVALID" }] } } }],
+    ["404", "model_unavailable", { status: 404, body: { error: { code: "model_not_found" } } }],
+    ["402", "no_credit", { status: 402, body: { error: { code: "payment_required" } } }],
+    ["429", "rate_limited", { status: 429, body: { error: { code: "rate_limit_exceeded" } } }],
+    ["503", "unreachable", { status: 503, body: "<html>indisponível</html>" }],
+    ["400 sem motivo de chave", "unexpected_response", { status: 400, body: { error: { code: "invalid_request" } } }],
+    ["200 fora do formato", "unexpected_response", { status: 200, body: { models: [] } }],
+    ["200 que não é JSON", "unexpected_response", { status: 200, body: "ok" }],
+  ] as const)("%s vira %s", async (_, result, reply) => {
+    http.respond(reply);
+    expect(await check({ model: "modelo-x" })).toEqual({ result, model: "modelo-x" });
+  });
+
+  it("sem resposta no prazo, ou sem servidor, é provedor fora do ar", async () => {
+    http.respond({ status: 200, hang: true });
+    expect((await check({ schedule: expireAtOnce })).result).toBe("unreachable");
+    await http.stop();
+    expect((await check()).result).toBe("unreachable");
   });
 });

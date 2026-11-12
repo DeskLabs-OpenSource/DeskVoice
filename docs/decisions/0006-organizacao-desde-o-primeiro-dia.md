@@ -54,6 +54,13 @@ A lei completa está na [doutrina de isolamento](../doctrine/isolamento.md).
   cerca reprova o atalho.
 - **As poucas operações que atravessam organizações** (entrar, reivindicar tarefa, achar o dono
   de um número chamado) precisam de porta própria, revisada com cuidado.
+- **A rota pública de saúde soma as organizações, sem detalhe** (2026-11-12, item 7.8 da medição
+  de [12/11](../fundacao/conformidade-2026-11-12.md)). O instalador e o `install/healthcheck.sh`
+  leem a rota sem sessão, e precisam saber se a instalação tem chave de motor e se algum teste de
+  chave falhou. Sem sessão, a linha do motor diz só o estado da soma (`engine_key_problem`, ou
+  `engine_ok`), sem provedor, modelo nem data, que são de uma organização. Com sessão, chave e teste
+  são lidos só da organização da sessão, por `withOrg`. A linha da operadora continua somada e com
+  a contagem de linhas caídas, que é a outra metade do item 7.8, ainda aberta.
 
 ## Nota sobre a outra "organização"
 

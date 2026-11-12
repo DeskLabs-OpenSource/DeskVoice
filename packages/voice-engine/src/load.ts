@@ -12,7 +12,8 @@ function isVoiceEngine(value: unknown): value is VoiceEngine {
     typeof candidate.id === "string" &&
     typeof candidate.label === "string" &&
     typeof candidate.pricing === "object" &&
-    typeof candidate.connect === "function"
+    typeof candidate.connect === "function" &&
+    typeof candidate.checkKey === "function"
   );
 }
 

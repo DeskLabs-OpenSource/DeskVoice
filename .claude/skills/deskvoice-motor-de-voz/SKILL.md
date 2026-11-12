@@ -18,6 +18,8 @@ interface VoiceEngine {
   keyless?: boolean;     // true só para motor que não precisa de chave (o simulado)
   pricing: EnginePricing;
   connect(config: VoiceSessionConfig, apiKey: string): Promise<VoiceSession>;
+  // Confere a chave sem abrir sessão e sem gastar (ex.: GET do modelo na API HTTP). Nunca lança.
+  checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
 }
 interface VoiceSessionConfig { instructions: string; greeting?: string; voiceId?: string; language: string; tools: ToolSpec[] }
 interface VoiceSession {
@@ -58,6 +60,10 @@ Confira no arquivo antes de escrever: se este resumo divergir, vale o arquivo.
 - **Mensagem do provedor é entrada externa**: valide com zod. Mensagem fora do formato é ignorada
   sem derrubar a sessão.
 - **A chave vem por parâmetro** (`apiKey`). O motor não lê variável de ambiente nem banco.
+- **`checkKey` não gasta nem abre sessão de voz.** Use a chamada mais barata que prova a chave e
+  o acesso ao modelo de `connect` (os dois motores leem o modelo com `checkKeyOverHttp`, de
+  `../key-check`), e traduza a resposta para o vocabulário fechado de `KeyCheckResult`. Motor sem
+  chave devolve `not_needed`. Cite a página da documentação e a data, como no preço.
 - **Nada olha o relógio.**
 
 Para WebSocket, reutilize o que já existe: `SessionEmitter` (`../emitter`) entrega os eventos, e
@@ -108,7 +114,9 @@ chamada à internet, nenhuma chave real. Cubra, como os vizinhos:
 7. mensagem fora do formato é ignorada;
 8. queda do socket vira `error` seguido de `closed`;
 9. `close()` duas vezes não gera erro;
-10. conexão recusada rejeita o `connect`.
+10. conexão recusada rejeita o `connect`;
+11. `checkKey` contra um servidor HTTP falso (`../testing/fake-http`): cada resultado do
+    vocabulário, a chave no cabeçalho certo e o tempo limite.
 
 ```bash
 pnpm vitest run --project unit packages/voice-engine
