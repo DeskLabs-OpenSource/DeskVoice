@@ -16,6 +16,7 @@ import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import type { Engine, KeyCheck, KeyCheckResult, Me, Setting } from "../../../ui/types";
+import { PrivacyPanel } from "./privacy-panel";
 import { UpdatePanel } from "./update-panel";
 import { WhatsAppPanel } from "./whatsapp-panel";
 
@@ -477,6 +478,8 @@ export default function SettingsPage() {
           ) : null}
         </form>
       </Panel>
+
+      <PrivacyPanel />
 
       <UpdatePanel />
     </>

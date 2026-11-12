@@ -49,7 +49,8 @@ O que o sistema faz: a chamada começa com um aviso de que a conversa é registr
 fica marcado na linha do tempo.
 
 O que cabe a você: garantir que o texto do aviso corresponde ao que você faz com o dado, e
-definir por quanto tempo guarda as transcrições e quem tem acesso a elas.
+definir por quanto tempo guarda as transcrições e quem tem acesso a elas. O prazo se ajusta na
+tela; veja [Guardar e apagar](#guardar-e-apagar).
 
 ### 2. A pessoa está falando com uma IA
 
@@ -138,6 +139,51 @@ O que reduz esse padrão, além dos controles do sistema:
 - **Não faz disparo em massa**, e não vai fazer. Importação de lista para discagem e discador
   automático são recusados pelo projeto. Veja a
   [doutrina de ligações de saída](../doctrine/ligacoes-de-saida.md).
+
+## Guardar e apagar
+
+A transcrição da conversa é dado pessoal. Quanto tempo ela fica é decisão de quem responde pelos
+dados, e a LGPD não fixa um número. O DeskVoice dá o controle; o prazo é seu.
+
+**O prazo de guarda** fica em Configurações, em "Prazo de guarda das conversas", e vale por
+organização. Só dono ou administrador muda.
+
+- **Vazio guarda para sempre.** É assim que toda instalação começa, e é como era antes de o prazo
+  existir.
+- **Preenchido, é um número de dias**, de 30 a 3650. O piso de 30 dias protege a conversa recente.
+- Depois do prazo, o texto de cada fala é trocado por um marcador. A chamada, o horário, o resumo e
+  o resto da linha do tempo continuam, e a linha do tempo diz que ali houve uma fala apagada.
+- A troca roda logo que o prazo é gravado e, daí em diante, uma vez por dia.
+- **O que sai não volta**, nem pelo painel nem pelo servidor. A tela pede confirmação antes de
+  gravar um prazo que apaga.
+
+Três lugares guardam dado tirado da conversa, e **o prazo só alcança o primeiro**:
+
+- **a transcrição**, nos eventos da chamada: sai com o prazo;
+- **o resumo da chamada**, escrito a partir da conversa: fica;
+- **os argumentos das ferramentas** que o agente usou, por exemplo o texto de uma mensagem enviada
+  por WhatsApp: ficam na linha do tempo.
+
+E **os backups** (`install/backup.sh` guarda os 14 mais recentes) levam tudo isso junto, até serem
+descartados. Apagar do banco não apaga dos backups que já existem.
+
+**A entrega dos dados de uma pessoa** fica na mesma tela, em "Dados de uma pessoa que ligou". Informe
+o telefone e sai um arquivo com as chamadas desse número na sua organização, os eventos delas e a
+entrada na lista de não ligar. A fala que já saiu pelo prazo aparece como apagada. Duas limitações
+que valem dizer a quem pediu:
+
+1. **A busca é pelo número.** Se a mesma pessoa ligou de outro telefone, exporte cada número.
+2. **Só sai o que é da sua organização.** Numa instalação com várias empresas, o que a pessoa disse
+   a outra empresa não vai no arquivo.
+
+O arquivo é dado pessoal fora do banco: entregue pelo canal combinado e apague a cópia depois.
+
+**Tudo fica registrado** na mesma tela: quem mudou o prazo e de quanto para quanto, quantas falas
+saíram pelo prazo e quem exportou os dados de qual telefone, e quando. O registro de exportação
+guarda o telefone, e não sai com o prazo da transcrição: é ele que mostra, depois, que o pedido foi
+atendido.
+
+O porquê desse desenho está na [decisão 0014](../decisions/0014-direitos-de-quem-ligou-pela-tela.md).
 
 ## Para implementadores
 

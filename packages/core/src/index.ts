@@ -9,6 +9,7 @@ export * from "./migrate";
 export * from "./password";
 export * from "./phone";
 export * from "./queue";
+export * from "./retention";
 export * from "./routing";
 export * from "./secrets";
 export * from "./with-org";

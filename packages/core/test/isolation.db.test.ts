@@ -34,6 +34,7 @@ const factories: Record<string, Factory> = {
   update_requests: (organization_id, p) => ({ organization_id, requested_by: p.users?.id, status: "succeeded", from_version: "0.1.0", target_version: "0.2.0" }),
   update_agent_status: (organization_id) => ({ organization_id, last_seen_at: at, announced_version: "0.1.0" }),
   whatsapp_sessions: (organization_id) => ({ organization_id, session_name: unique("session") }),
+  organization_events: (organization_id, p) => ({ organization_id, at, kind: "isolation_probe", actor_user_id: p.users?.id, payload: {} }),
 };
 
 const UNSCOPED_TABLES = ["organizations", "schema_migrations"];

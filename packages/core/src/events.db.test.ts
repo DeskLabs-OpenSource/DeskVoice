@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createCall, createOrganization, openTestDbs, waitFor } from "../test/helpers";
 import { listen } from "./db";
-import { recordEvent } from "./events";
-import type { CallEventKind } from "./types";
+import { purgeTranscripts, recordEvent, recordOrgEvent } from "./events";
+import type { CallEventKind, OrgEventKind } from "./types";
 import { withOrg, withSystem } from "./with-org";
 
 const { app, owner } = openTestDbs();
@@ -66,6 +66,49 @@ describe("recordEvent", () => {
     await expect(withOrg(app, otherOrg, (q) => recordEvent(q, callId, "call_ended", {}, at))).rejects.toThrow(/not found/);
     await expect(withOrg(app, org, (q) => recordEvent(q, "00000000-0000-4000-8000-000000000000", "call_ended", {}, at))).rejects.toThrow(/not found/);
     expect((await eventsOf(callId)).length).toBe(before);
+  });
+});
+
+describe("recordOrgEvent", () => {
+  it("stores the event in the organization of the transaction, with who did it", async () => {
+    await withOrg(app, org, (q) => recordOrgEvent(q, "transcript_retention_changed", { from: null, to: 30 }, at));
+    const rows = (await owner.pool.query("select organization_id, at, kind, actor_user_id, payload from organization_events where organization_id = $1", [org])).rows;
+    expect(rows).toEqual([{ organization_id: org, at, kind: "transcript_retention_changed", actor_user_id: null, payload: { from: null, to: 30 } }]);
+  });
+
+  it("refuses a kind outside the vocabulary", async () => {
+    await expect(withOrg(app, org, (q) => recordOrgEvent(q, "made_up" as OrgEventKind, {}, at))).rejects.toThrow(/made_up/);
+  });
+});
+
+describe("purgeTranscripts", () => {
+  it("only runs inside withOrg: a system transaction would reach every organization", async () => {
+    await expect(withSystem(app, (q) => purgeTranscripts(q, at))).rejects.toThrow(/withOrg/);
+  });
+
+  it("swaps the text of older speech for the marker, in this organization only, and does not count it twice", async () => {
+    const mine = await createCall(app, org, at);
+    const theirs = await createCall(app, otherOrg, at);
+    const older = new Date(at.getTime() - 1);
+    await withSystem(app, async (q) => {
+      for (const [organization, call, kind, when] of [
+        [org, mine, "transcript_user", older],
+        [org, mine, "transcript_agent", at],
+        [org, mine, "recording_notice", older],
+        [otherOrg, theirs, "transcript_user", older],
+      ] as const) {
+        await q.exec("insert into call_events (organization_id, call_id, at, kind, payload) values ($1, $2, $3, $4, $5)", [organization, call, when, kind, JSON.stringify({ text: "Olá." })]);
+      }
+    });
+
+    expect(await withOrg(app, org, (q) => purgeTranscripts(q, at))).toBe(1);
+    expect(await withOrg(app, org, (q) => purgeTranscripts(q, at))).toBe(0);
+    expect((await eventsOf(mine)).map((row) => [row.kind, row.payload])).toEqual([
+      ["transcript_user", { purged: true }],
+      ["transcript_agent", { text: "Olá." }],
+      ["recording_notice", { text: "Olá." }],
+    ]);
+    expect((await eventsOf(theirs)).map((row) => row.payload)).toEqual([{ text: "Olá." }]);
   });
 });
 

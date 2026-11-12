@@ -52,6 +52,7 @@ const timeline: TimelineDictionary = {
     task_queued: "Task left for after the call",
     task_finished: "Task completed",
     task_failed: "Task not completed",
+    transcript_purged: "Text deleted by the transcript retention period.",
     unknown: "Event",
   },
   reasons: {
