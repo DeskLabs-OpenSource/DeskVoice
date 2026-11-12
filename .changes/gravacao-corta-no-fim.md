@@ -1,7 +1,7 @@
 ---
 impact: nothing_changes
 section: fixed
-title: A gravação para no fim da chamada, sem a fala do agente que quem ligou não chegou a ouvir
+title: Quando quem ligou desliga com o agente ainda falando, a gravação para ali
 ---
 
-O motor de voz manda a fala do agente mais rápido do que ela toca, e a gravação a guardava inteira assim que chegava. Quando a chamada terminava com fala ainda na fila (quem ligou desligou, ou a chamada caiu), essa fala, que ninguém ouviu, entrava no fim do arquivo: numa chamada medida na 0.6.0, de 64 s, o arquivo tinha 75 s, com 11 s de agente depois do fim. Agora a gravação corta a fala do agente no momento em que a chamada termina, como já fazia quando quem ligou interrompia. **Gravações feitas na 0.6.0 podem ter esse trecho a mais no fim**: a fala do agente que está depois do horário de fim da chamada, na linha do tempo, não foi ouvida por quem ligou. A gravação vem desligada de fábrica; só quem a ligou tem arquivos assim. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+O motor de voz manda a fala do agente mais rápido do que ela toca. Quando quem ligou desligava no meio de uma fala do agente, a gravação guardava também o resto dessa fala, que não chegou a tocar para ninguém, depois do horário de fim da chamada. Agora, nesse caso, a gravação corta a fala do agente no momento em que quem ligou desligou, como já fazia quando quem ligou interrompia. Quando é o agente que encerra a chamada, ou ela é transferida, nada muda: a telefonia toca a fala inteira antes de soltar a linha, e a gravação a guarda inteira. **Gravações feitas na 0.6.0 em que quem ligou desligou com o agente falando podem ter esse trecho a mais no fim**, depois do horário de fim da chamada na linha do tempo. A gravação vem desligada de fábrica. Nada a fazer em instalações existentes. Crédito: @melgarafael.

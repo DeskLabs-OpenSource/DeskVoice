@@ -342,7 +342,7 @@ describe("gravação do áudio, por organização (registro 0016)", { timeout: 1
     await cleanup();
   });
 
-  it("a fala do agente que não chegou a tocar antes do fim não entra na gravação (issue #109)", async () => {
+  it("quem ligou desliga com fala na fila: o que não tocou não entra na gravação (issue #109)", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
     const manual = manualEngine({ keyless: true });
     const made = await scene("recording-cut-at-end", { engine: "manual", greeting: "Bom dia." }, manual);
@@ -358,6 +358,25 @@ describe("gravação do áudio, por organização (registro 0016)", { timeout: 1
     const seconds = wav.readUInt32LE(40) / (8000 * 2 * 2); // PCM16 estéreo a 8 kHz
     expect(seconds).toBeGreaterThan(4.5);
     expect(seconds).toBeLessThan(5.5);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("o agente encerra com fala na fila: a gravação guarda a fala inteira, que o transporte toca antes de desligar", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("recording-agent-ends", { engine: "manual", greeting: "Bom dia.", tools: ["end_call"] }, manual);
+    await putSetting(app, made.organizationId, "calls.recording_enabled", true, false);
+    const session = startCallSession({ ...made.harness.deps, recordingsDir: dir }, { organizationId: made.organizationId, callId: made.callId, agentId: made.agentId, transport: made.transport });
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_notice"), "the notice event");
+    // 20 s de despedida de uma vez; o relógio anda 5 s e a ligação é encerrada pelo agente.
+    manual.emit("audio", Buffer.alloc(20 * 8000 * 2, 1));
+    manual.emit("toolCall", { id: "t1", name: "end_call", args: { reason: "Fim.", farewell: "Até logo." } });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    made.harness.clock.advance(5000);
+    made.harness.timers.fire(6000);
+    await session.done;
+    const wav = await readFile(recordingPath(dir, made.organizationId, made.callId));
+    expect(wav.readUInt32LE(40) / (8000 * 2 * 2)).toBeGreaterThan(19.5);
     await rm(dir, { recursive: true, force: true });
   });
 
