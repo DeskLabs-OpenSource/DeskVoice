@@ -1,0 +1,11 @@
+
+▶ Copiando o banco
+  ✓ dump gravado (84K)
+
+▶ Conferindo se o backup abre
+  ✓ restaurado num banco de rascunho: 20 tabelas contadas
+
+▶ Guardando a configuração
+  ✓ Backup concluído e conferido: /root/DeskVoice/backups/20261112-124911
+/root/DeskVoice/backups/20261112-124911
+saída: 0
