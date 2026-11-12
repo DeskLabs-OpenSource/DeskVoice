@@ -1,7 +1,7 @@
 # Um Dockerfile, três alvos: panel, voice, routines.
 # Os workers rodam TypeScript direto com tsx; o painel é compilado pelo Next.
 
-FROM node:22-alpine AS base
+FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS base
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -35,7 +35,7 @@ COPY apps/panel ./apps/panel
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter @deskvoice/panel build
 
-FROM node:22-alpine AS panel
+FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS panel
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 COPY --from=panel-build /app/apps/panel/.next/standalone ./

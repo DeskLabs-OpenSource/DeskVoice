@@ -14,7 +14,7 @@ case "${1:-}" in
     docker run -d --name "$name" \
       -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=deskvoice_test \
       -p 127.0.0.1::5432 --tmpfs /var/lib/postgresql/data \
-      postgres:17-alpine >/dev/null
+      postgres:17.11-alpine@sha256:e5d2edd28b1f8d40a0a6c0c9cdc545b19b56a0d5d88f94bc11a97d970d4700d0 >/dev/null
     # Por TCP de propósito: durante a inicialização a imagem sobe um servidor provisório que
     # só escuta no socket local, e ele não conta como pronto.
     for _ in $(seq 1 120); do

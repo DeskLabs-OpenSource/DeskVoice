@@ -71,7 +71,7 @@ agent. No feature requires SSH to be turned on.
 
 | What you need | Notes |
 |---|---|
-| A VPS running Ubuntu 22.04 or newer | The [HostGator VPS](https://www.hostgator.com.br/52708-141-3-52.html), the project's partner, is the recommended one. Any VPS with Docker works, with the same command. On memory, only what was measured: the install was proven on a VPS with 8 GB and 4 vCPU, and DeskVoice at rest uses about 400 MB. The smallest size the install fits in has not been measured yet. The published images are for x86_64 (amd64) processors; on ARM the install builds on the machine itself, with `--build` |
+| A VPS running Ubuntu 22.04 or newer | The [HostGator VPS](https://www.hostgator.com.br/52708-141-3-52.html), the project's partner, is the recommended one. Any VPS with Docker works, with the same command. On memory, only what was measured: the install was proven on a VPS with 8 GB and 4 vCPU, and DeskVoice at rest uses about 400 MB. The smallest size the install fits in has not been measured yet. The published images are for x86_64 (amd64) processors; on ARM the install builds on the machine itself, with `--build` ([why](docs/decisions/0013-imagens-so-amd64.md)) |
 | A domain pointing to the VPS | Optional for testing. Without a domain there is no HTTPS: the panel stays inside the VPS and you reach it through an SSH tunnel (the installer shows the command) |
 | A SIP trunk with a number | From the telephony carrier of your choice. Authentication by registration or by IP |
 | A voice AI key | Gemini (Google) or OpenAI. You pay the provider directly |
@@ -231,6 +231,38 @@ and telemarketing regulation is changing. DeskVoice was not built for mass diali
 accept contributions that make it easier. Whoever operates the installation is responsible for
 how it is used. If you operate outside Brazil, check the rules of your own country. See
 [`docs/guides/conformidade-brasil.md`](docs/guides/conformidade-brasil.md).
+
+## Contacts the install makes on its own
+
+DeskVoice has no telemetry: no usage, call or install data goes to the project. These are all
+the outside contacts the install makes without you asking:
+
+| Who | With whom | When | What it sends |
+|---|---|---|---|
+| Panel | GitHub's public releases API (`api.github.com/repos/DeskLabs-OpenSource/DeskVoice/releases`) | When someone opens Settings or confirms an update. The answer is kept for 10 minutes (1 minute if the lookup failed) | A read request with no credential and no body, with two fixed headers, the same on every install: `accept: application/vnd.github+json` and `user-agent: deskvoice-panel`. No version, address or identifier of the install |
+| Update agent | The repository on GitHub, through `git fetch --tags` | The agent runs every minute and looks up versions at most every 10 minutes, when the install is on a published version and came from a clone of the repository | git's request to fetch the tags, with no credential. git identifies itself with its own version (`git/2.x`); nothing about the install goes along |
+| Caddy, only with a domain | The certificate authority Caddy uses (Let's Encrypt, by default) | On install and then, on its own, to renew the certificate before it expires | The domain, to prove it points to the VPS. DeskVoice sets no e-mail in that request |
+
+When you ask for it, the install also talks to the outside:
+
+- **Installing and updating** (from the terminal or the screen) downloads the code from GitHub and
+  the images: DeskVoice's on `ghcr.io` (panel, voice and routines) and third-party ones on Docker
+  Hub (Postgres, Caddy, Asterisk). Docker identifies itself as in any image download (its version,
+  the kernel's and the architecture); DeskVoice adds nothing.
+- **Installing without giving the IP** (`DESKVOICE_PUBLIC_IP`): the installer finds the VPS public
+  IP by asking `api.ipify.org`, `ifconfig.me` and `icanhazip.com`, one at a time, until one
+  answers. The request carries nothing; the service sees the VPS IP, which is the answer.
+  `install/diagnose.sh` makes the same lookup.
+- **Installing without Docker:** after asking, the installer downloads the official script from
+  `get.docker.com`.
+- **Installing WhatsApp from the screen:** the agent downloads the WAHA image from Docker Hub, and
+  tries again every 10 minutes if the download fails.
+- **Building on the machine itself** (`--build`): downloads the Node base from Docker Hub, pnpm and
+  the packages from the npm registry.
+
+In use, DeskVoice talks to what you configured: the voice AI provider (Google or OpenAI) during
+calls, with your key; the SIP trunk carrier; WhatsApp, through WAHA, if you connected it; and the
+addresses of the tools and webhooks you registered.
 
 ## Contributing
 

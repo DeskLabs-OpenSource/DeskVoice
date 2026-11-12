@@ -1,0 +1,19 @@
+name: ci
+on: push
+permissions:
+  contents: read
+jobs:
+  db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+      cache:
+        image: redis:7.4.1-alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    steps:
+      - run: "true"
+  build:
+    runs-on: ubuntu-latest
+    container: node:22
+    steps:
+      - run: "true"

@@ -113,7 +113,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17.11-alpine@sha256:e5d2edd28b1f8d40a0a6c0c9cdc545b19b56a0d5d88f94bc11a97d970d4700d0
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: deskvoice_test
@@ -172,7 +172,7 @@ jobs:
     # A chamada simulada grava eventos, aprovação e tarefas: precisa de Postgres de verdade.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17.11-alpine@sha256:e5d2edd28b1f8d40a0a6c0c9cdc545b19b56a0d5d88f94bc11a97d970d4700d0
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: deskvoice_test
