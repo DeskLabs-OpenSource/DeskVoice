@@ -9,7 +9,8 @@ export interface ToolContext {
   clock: Clock;
   telephony: {
     transfer(toE164: string): Promise<void>;
-    hangup(): Promise<void>;
+    /** Com `farewell`, o agente fala a despedida e só então a ligação cai. */
+    hangup(farewell?: string): Promise<void>;
   };
   /** Faz o agente dizer algo enquanto a ferramenta trabalha ("um instante, estou conferindo"). */
   say(text: string): void;
