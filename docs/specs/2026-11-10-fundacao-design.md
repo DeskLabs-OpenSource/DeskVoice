@@ -58,11 +58,16 @@ telefonia vira sistema.
 
 Seria um fracasso, mesmo funcionando, se:
 
-- o agente ficasse mudo sem avisar ninguém na tela;
-- alguma capacidade exigisse SSH para ligar;
-- a instalação dissesse "pronto" com a ligação muda;
-- o custo de uma chamada não aparecesse ou não respeitasse teto;
-- a fundação facilitasse disparo em massa.
+| Antiobjetivo | Quem guarda |
+|---|---|
+| o agente ficasse mudo sem avisar ninguém na tela | [`apps/voice/src/call-session.db.test.ts`](../../apps/voice/src/call-session.db.test.ts), blocos "motor que cai no meio da chamada", "motor sem chave ao atender" e "provedor de IA que não responde": cada falha grava evento, avisa no painel e dá um sinal para quem está na linha |
+| alguma capacidade exigisse SSH para ligar | Cerca [`env-vars-have-defaults`](../../fences/env-vars-have-defaults.test.ts) (variável nova sem padrão nem geração pelo instalador). Que a capacidade tenha tela: revisão ("Tem tela?" no [`AGENTS.md`](../../AGENTS.md)) |
+| a instalação dissesse "pronto" com a ligação muda | [`install/test/07-healthcheck.sh`](../../install/test/07-healthcheck.sh) ("faixa divergente explica a ligação muda"): a checagem de saúde reprova a faixa de áudio publicada diferente da do Asterisk, e nunca diz que o áudio passa, porque a prova é uma ligação. A ligação de verdade por um tronco: revisão, fora do CI |
+| o custo de uma chamada não aparecesse ou não respeitasse teto | Teto: [`apps/voice/src/call-session.db.test.ts`](../../apps/voice/src/call-session.db.test.ts), bloco "tetos da chamada". Custo registrado: [`apps/voice/src/simulated-call.db.test.ts`](../../apps/voice/src/simulated-call.db.test.ts), "chamada de ponta a ponta" (o custo no fim da chamada e o extrato). O custo na tela: revisão |
+| a fundação facilitasse disparo em massa | [`apps/voice/src/outbound-policy.db.test.ts`](../../apps/voice/src/outbound-policy.db.test.ts) (desligada por padrão, lista de não ligar, janela, teto diário, tentativas) e a cerca [`outbound-requires-policy`](../../fences/outbound-requires-policy.test.ts) (quem origina chamada passa por `checkOutboundAllowed`). Importar lista para discagem ou afrouxar teto: revisão |
+
+Removeu ou renomeou um desses guardas? Atualize a coluna na mesma mudança: a cerca de links reprova
+o caminho que deixou de existir, mas não o bloco de teste renomeado.
 
 ## Arquitetura
 
