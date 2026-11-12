@@ -185,6 +185,8 @@ jobs:
       # versão. Voz e rotinas só diferem no último passo (`COPY apps/<processo>`); se diferem
       # antes disso, o estágio `base` foi construído duas vezes.
       - name: Voz e rotinas dividem as camadas da base?
+        # Se o formato do `imagetools inspect` mudar, este passo falha sozinho e não segura a versão.
+        continue-on-error: true
         env:
           VERSION: ${{ needs.probe.outputs.version }}
         run: |
