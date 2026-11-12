@@ -11,7 +11,7 @@ REPO_DIR="$(cd "$KIT_DIR/.." && pwd)"
 DEPLOY_DIR="${DESKVOICE_DEPLOY_DIR:-$REPO_DIR/deploy}"
 BACKUP_DIR="${DESKVOICE_BACKUP_DIR:-$REPO_DIR/backups}"
 # Três arquivos, por menor privilégio: cada contêiner recebe só o que usa.
-ENV_FILE="$DEPLOY_DIR/.env"                 # o que o Compose interpola (a senha do dono, só para o postgres; o segredo do agente, só para o painel)
+ENV_FILE="$DEPLOY_DIR/.env"                 # o que o Compose interpola (a senha do dono, só para o postgres; o segredo do agente, só para o painel; a chave do WAHA, para painel, voz e rotinas)
 APP_ENV_FILE="$DEPLOY_DIR/app.env"          # painel, voz e rotinas; sem a senha do dono do banco
 MIGRATE_ENV_FILE="$DEPLOY_DIR/migrate.env"  # só o serviço migrate e a criação do primeiro usuário
 GENERATED_DIR="$DEPLOY_DIR/asterisk/generated"
@@ -69,6 +69,11 @@ random_base64_32() {  # 32 bytes em base64: o formato de DESKVOICE_SECRET_KEY
   if have openssl; then openssl rand -base64 32
   else head -c 32 /dev/urandom | base64 | tr -d '\n'; fi
 }
+sha512_of_text() {  # sha512_of_text <texto> → o hash em hexadecimal
+  if have sha512sum; then printf '%s' "$1" | sha512sum | awk '{print $1}'
+  elif have shasum; then printf '%s' "$1" | shasum -a 512 | awk '{print $1}'
+  else printf '%s' "$1" | openssl dgst -sha512 | awk '{print $NF}'; fi
+}
 sha256_of() {
   if have sha256sum; then sha256sum "$1" | awk '{print $1}'
   else shasum -a 256 "$1" | awk '{print $1}'; fi
@@ -121,6 +126,31 @@ ensure_agent_token() {
   if [ "$(id -u)" = 0 ]; then chown "$(owner_of "$DEPLOY_DIR")" "$ENV_FILE" 2>/dev/null || true; fi
 }
 
+# WhatsApp por QR Code: a chave com que painel, voz e rotinas falam com o WAHA, o serviço que a
+# instalação liga pela tela (ver whatsapp_enabled). Mora em deploy/.env e o Compose a entrega só a esses três serviços, pelo `environment`
+# de cada um. O contêiner do WAHA recebe só o hash (WAHA_API_KEY_SHA512): quem lê o ambiente dele
+# não aprende a chave. Pode rodar quantas vezes for; a chave que já existe nunca é trocada.
+# Devolve 0 se acabou de criar a chave (os serviços precisam ser recriados para recebê-la) e 1 se
+# ela já existia.
+#
+# A imagem do WAHA sem navegador é publicada com uma etiqueta por arquitetura. A de amd64 é o padrão
+# do Compose; em ARM, WAHA_IMAGE aponta para esta, da MESMA versão (um teste do kit confere).
+WAHA_IMAGE_ARM64="devlikeapro/waha:noweb-arm-2026.10.1@sha256:fce6ae58ba819221521b2673704ef9e6d87f98571d67daec62eb737edd77c2c9"
+ensure_waha() {
+  local key hash created=1
+  key="$(env_get "$ENV_FILE" WAHA_API_KEY)"
+  if [ -z "$key" ]; then key="$(random_hex 32)"; env_set "$ENV_FILE" WAHA_API_KEY "$key"; created=0; fi
+  hash="$(sha512_of_text "$key")"
+  if [ "$(env_get "$ENV_FILE" WAHA_API_KEY_SHA512)" != "$hash" ]; then env_set "$ENV_FILE" WAHA_API_KEY_SHA512 "$hash"; fi
+  case "$(uname -m)" in
+    aarch64|arm64) if [ "$(env_get "$ENV_FILE" WAHA_IMAGE)" != "$WAHA_IMAGE_ARM64" ]; then env_set "$ENV_FILE" WAHA_IMAGE "$WAHA_IMAGE_ARM64"; fi ;;
+    *) if [ -n "$(env_get "$ENV_FILE" WAHA_IMAGE)" ]; then env_unset "$ENV_FILE" WAHA_IMAGE; fi ;;
+  esac
+  # Como no segredo do agente: regravado com sudo, o arquivo não pode virar do root.
+  if [ "$(id -u)" = 0 ]; then chown "$(owner_of "$DEPLOY_DIR")" "$ENV_FILE" 2>/dev/null || true; fi
+  return "$created"
+}
+
 # Grava os três arquivos de ambiente. Segredo que já existe fica como está; o resto é
 # regravado com o que foi decidido nesta execução.
 #   write_env_files <public_url> <public_ip> <panel_domain> <rtp_start> <rtp_end>
@@ -149,6 +179,7 @@ write_env_files() {
   env_set_if_missing "$APP_ENV_FILE" INTERNAL_TOKEN "$(random_hex 32)"
   env_set_if_missing "$APP_ENV_FILE" ARI_PASSWORD "$(random_hex 24)"
   ensure_agent_token || true
+  ensure_waha || true
   env_set "$APP_ENV_FILE" DATABASE_URL "postgres://deskvoice_app:${app}@postgres:5432/${DB_NAME}"
   env_set "$APP_ENV_FILE" SYSTEM_DATABASE_URL "$url_system"
   env_set "$APP_ENV_FILE" ARI_USERNAME deskvoice
@@ -512,11 +543,18 @@ latest_version() {
 }
 
 # ── Docker ───────────────────────────────────────────────────────────────────
+# O serviço de WhatsApp (WAHA) fica num perfil do Compose e só existe na instalação que o pediu
+# pela tela. Quem liga e desliga é o agente (install/agent.sh), que grava DESKVOICE_WHATSAPP=on em
+# deploy/.env; com a marca, TODO comando do kit enxerga o serviço (subir, baixar, reiniciar).
+whatsapp_enabled() { [ "$(env_get "$ENV_FILE" DESKVOICE_WHATSAPP)" = on ]; }
 dc() {
+  local profile=""
+  if whatsapp_enabled; then profile="--profile whatsapp"; fi
+  # shellcheck disable=SC2086  # vazio ou duas palavras, de propósito
   if [ -f "$PROXY_OVERRIDE" ]; then
-    docker compose --env-file "$IMAGES_FILE" --env-file "$ENV_FILE" -f "$DEPLOY_DIR/docker-compose.yml" -f "$PROXY_OVERRIDE" "$@"
+    docker compose --env-file "$IMAGES_FILE" --env-file "$ENV_FILE" $profile -f "$DEPLOY_DIR/docker-compose.yml" -f "$PROXY_OVERRIDE" "$@"
   else
-    docker compose --env-file "$IMAGES_FILE" --env-file "$ENV_FILE" -f "$DEPLOY_DIR/docker-compose.yml" "$@"
+    docker compose --env-file "$IMAGES_FILE" --env-file "$ENV_FILE" $profile -f "$DEPLOY_DIR/docker-compose.yml" "$@"
   fi
 }
 require_install() {
@@ -653,10 +691,20 @@ converge_agent() {
   install_agent_schedule
 }
 
+# A chave do WAHA nasce em toda instalação (é uma linha no .env), para o serviço poder ser ligado
+# pela tela sem recriar ninguém. Quem chegou a esta versão por um atualizador antigo, que não a
+# gerou, ganha a chave aqui, e painel, voz e rotinas são recriados para recebê-la.
+converge_waha() {
+  if ensure_waha && [ -n "$(dc ps -q --status running panel 2>/dev/null)" ]; then
+    info "Recriando painel, voz e rotinas, para receberem a chave do serviço de WhatsApp (ficam fora por alguns segundos)..."
+    dc up -d >/dev/null 2>&1 || warn "Não consegui recriar os serviços. Rode: bash install/install.sh"
+  fi
+}
+
 # ── Sem segredo na tela nem em arquivo ───────────────────────────────────────
 # Filtro: troca por *** o valor de todo segredo do .env e o que tiver cara de senha,
 # chave ou token; encurta e-mail e telefone, que são dado pessoal de quem ligou.
-SECRET_KEYS="POSTGRES_PASSWORD APP_DB_PASSWORD SYSTEM_DB_PASSWORD DESKVOICE_SECRET_KEY INTERNAL_TOKEN ARI_PASSWORD UPDATE_AGENT_TOKEN"
+SECRET_KEYS="POSTGRES_PASSWORD APP_DB_PASSWORD SYSTEM_DB_PASSWORD DESKVOICE_SECRET_KEY INTERNAL_TOKEN ARI_PASSWORD UPDATE_AGENT_TOKEN WAHA_API_KEY"
 mask_secrets() {  # ... | mask_secrets   (lê os segredos dos três arquivos de ambiente)
   local f key list=""
   for f in "$ENV_FILE" "$APP_ENV_FILE" "$MIGRATE_ENV_FILE"; do

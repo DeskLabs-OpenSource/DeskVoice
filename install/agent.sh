@@ -8,8 +8,14 @@
 #   bash install/agent.sh --install       instala ou atualiza o agendamento (systemd, ou cron)
 #   bash install/agent.sh --install --dry-run   só diz o que faria
 #
-# O que o agente NUNCA recebe do painel: um comando, um número de versão, um endereço. Para qual
-# versão ir, ele mesmo descobre nas versões publicadas no repositório, e anuncia ao painel antes.
+# Junto vem um segundo sim ou não: se esta instalação quer o serviço de WhatsApp. O agente
+# converge a cada passada: com sim e o serviço fora, baixa a imagem e sobe só ele; com não e o
+# serviço de pé, para e remove o contêiner (o volume com o pareamento fica). O estado do serviço
+# vai ao painel na fala seguinte.
+#
+# O que o agente NUNCA recebe do painel: um comando, um número de versão, um endereço, uma imagem.
+# Para qual versão ir, ele mesmo descobre nas versões publicadas no repositório, e anuncia ao
+# painel antes. A imagem do WhatsApp é a que o Compose e o kit desta instalação fixam.
 #
 # O registro do que deu errado fica em deploy/agent/agent.log (e a cópia anterior em agent.log.1).
 #
@@ -26,7 +32,7 @@ while [ $# -gt 0 ]; do
     --install) mode=install ;;
     --dry-run) dry_run=1 ;;
     --jitter) jitter=1 ;;
-    -h|--help) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Use --install, --install --dry-run ou nenhuma opção." ;;
   esac
   shift
@@ -54,6 +60,7 @@ FAILURE="$AGENT_STATE_DIR/last-failure"     # linha 1: quando; linha 2: o que fa
 LAST_OK="$AGENT_STATE_DIR/last-ok"          # quando o painel ouviu pela última vez (o healthcheck lê)
 LAST_FETCH="$AGENT_STATE_DIR/last-fetch"    # quando as versões publicadas foram consultadas
 DEADLINE="${DESKVOICE_AGENT_DEADLINE:-30}"  # segundos de espera por uma resposta do painel
+WA_FAILURE="$AGENT_STATE_DIR/whatsapp-failure"  # código da última falha ao ligar ou desligar o serviço de WhatsApp
 ( umask 077; mkdir -p "$AGENT_STATE_DIR" )
 
 stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -133,13 +140,14 @@ fi
 # pela entrada padrão, nunca na linha de comando (que aparece na lista de processos).
 # shellcheck disable=SC2016  # é JavaScript, não bash: nada aqui deve ser expandido
 SPEAK_JS='let s="";process.stdin.on("data",d=>s+=d).on("end",async()=>{
-const [token,version,target,outcome,toVersion,failureAt,failureDetail,...rest]=s.split("\n");
+const [token,version,target,outcome,toVersion,failureAt,failureDetail,wa,waReason,...rest]=s.split("\n");
 const body={version,target};
+if(wa)body.whatsapp={state:wa,...(waReason&&{reason:waReason})};
 if(outcome)body.result={outcome,...(toVersion&&{toVersion}),detail:rest.join("\n")};
 if(failureAt)body.lastFailure={at:failureAt,detail:failureDetail};
 try{const r=await fetch("http://127.0.0.1:3000/api/v1/system/agent",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
 const j=await r.json().catch(()=>null);
-if(r.ok&&j&&j.ok===true&&j.data&&typeof j.data.update==="boolean"){console.log("update="+j.data.update);return}
+if(r.ok&&j&&j.ok===true&&j.data&&typeof j.data.update==="boolean"){console.log("update="+j.data.update+" whatsapp="+(j.data.whatsapp===true?"true":j.data.whatsapp===false?"false":"unknown"));return}
 console.log("error=o painel respondeu HTTP "+r.status+" "+String((j&&j.error&&j.error.code)||""));process.exitCode=1}
 catch(e){console.log("error="+String(e&&e.message).replace(/\n/g," "));process.exitCode=1}})'
 # Para qual versão este servidor iria agora: a maior versão final publicada, se for diferente da
@@ -172,16 +180,60 @@ with_deadline() {  # with_deadline <segundos> comando...
   if [ -e "$hit" ]; then rm -f "$hit"; code=124; fi
   return "$code"
 }
-# speak → escreve `update=true`, `update=false` ou `error=<motivo>`; devolve 0 só se o painel ouviu.
+# ── Serviço de WhatsApp ──
+# O perfil vai explícito: o serviço pode ainda não estar ligado nesta instalação.
+dcw() { dc --profile whatsapp "$@"; }
+whatsapp_running() { [ -n "$(dcw ps -q --status running waha 2>/dev/null)" ]; }
+# O que o agente conta ao painel, em códigos fechados: `running`, `failed <código>` ou `absent`.
+whatsapp_state() {
+  if whatsapp_running; then echo running
+  elif [ -s "$WA_FAILURE" ]; then echo "failed $(head -n 1 "$WA_FAILURE")"
+  else echo absent; fi
+}
+whatsapp_failed() { echo "$1" > "$WA_FAILURE"; note "serviço de WhatsApp: $1 ($2)"; }
+# Leva o serviço ao que o painel disse. Só `true` liga e só `false` desliga: qualquer outra coisa
+# (painel de versão sem o campo, resposta estranha) não muda nada. Devolve 0 se mexeu em algo, para
+# a passada contar o estado novo ao painel na volta seguinte.
+converge_whatsapp() {  # converge_whatsapp <true|false|unknown>
+  local created=1
+  case "$1" in
+    true)
+      if whatsapp_running; then rm -f "$WA_FAILURE"; return 1; fi
+      # Falhou há pouco: não repete um download de gigabytes a cada minuto.
+      if [ -n "$(find "$WA_FAILURE" -mmin -10 2>/dev/null)" ]; then return 1; fi
+      note "o painel pediu o serviço de WhatsApp: baixando a imagem e subindo o serviço"
+      if ensure_waha; then created=0; fi
+      if ! dcw pull -q waha >/dev/null 2>&1; then whatsapp_failed pull_failed "a imagem não baixou; nova tentativa em 10 minutos"; return 0; fi
+      env_set "$ENV_FILE" DESKVOICE_WHATSAPP on
+      # Instalação que ainda não tinha a chave: painel, voz e rotinas sobem de novo para recebê-la.
+      if [ "$created" = 0 ]; then dc up -d >/dev/null 2>&1 || { whatsapp_failed start_failed "o serviço não subiu"; return 0; }
+      else dc up -d waha >/dev/null 2>&1 || { whatsapp_failed start_failed "o serviço não subiu"; return 0; }; fi
+      rm -f "$WA_FAILURE"; note "serviço de WhatsApp no ar"
+      return 0 ;;
+    false)
+      if ! whatsapp_enabled && [ -z "$(dcw ps -aq waha 2>/dev/null)" ]; then rm -f "$WA_FAILURE"; return 1; fi
+      note "o painel não quer mais o serviço de WhatsApp: parando e removendo o contêiner (o volume com o pareamento fica)"
+      if ! dcw rm -sf waha >/dev/null 2>&1; then whatsapp_failed remove_failed "o contêiner não saiu"; return 0; fi
+      env_unset "$ENV_FILE" DESKVOICE_WHATSAPP
+      rm -f "$WA_FAILURE"; note "serviço de WhatsApp removido"
+      return 0 ;;
+  esac
+  return 1
+}
+
+# speak → escreve `update=<true|false> whatsapp=<true|false|unknown>` ou `error=<motivo>`; devolve
+# 0 só se o painel ouviu.
 speak() {
-  local token outcome="" to="" failure_at="" failure_detail=""
+  local token outcome="" to="" failure_at="" failure_detail="" wa wa_reason=""
   token="$(env_get "$ENV_FILE" UPDATE_AGENT_TOKEN)"
   [ -n "$token" ] || { echo "error=falta o segredo do agente em deploy/.env; rode: bash install/agent.sh --install"; return 1; }
   if [ -f "$PENDING" ]; then outcome="$(sed -n 1p "$PENDING")"; to="$(sed -n 2p "$PENDING")"; fi
   if [ -f "$FAILURE" ]; then failure_at="$(sed -n 1p "$FAILURE")"; failure_detail="$(sed -n 2p "$FAILURE")"; fi
+  wa="$(whatsapp_state)"
+  case "$wa" in "failed "*) wa_reason="${wa#failed }"; wa=failed ;; esac
   local code=0
   {
-    printf '%s\n' "$token" "$(env_get "$ENV_FILE" DESKVOICE_VERSION)" "$target" "$outcome" "$to" "$failure_at" "$failure_detail"
+    printf '%s\n' "$token" "$(env_get "$ENV_FILE" DESKVOICE_VERSION)" "$target" "$outcome" "$to" "$failure_at" "$failure_detail" "$wa" "$wa_reason"
     if [ -f "$PENDING" ]; then sed 1,2d "$PENDING"; fi
   } | with_deadline "$DEADLINE" dc exec -T panel node -e "$SPEAK_JS" 2>/dev/null || code=$?
   if [ "$code" = 124 ]; then echo "error=o painel não respondeu em ${DEADLINE}s"; fi
@@ -200,8 +252,14 @@ while [ "$turn" -lt 2 ]; do
   # O painel ouviu: o que estava pendente foi entregue.
   rm -f "$PENDING" "$FAILURE"
   stamp > "$LAST_OK"
+  # O segundo sim ou não. Painel de uma versão que não o manda vale como "não sei": nada muda.
+  wa_want=unknown
+  case "$answer" in *" whatsapp="*) wa_want="${answer##* whatsapp=}"; answer="${answer%% whatsapp=*}" ;; esac
+  case "$wa_want" in true|false) ;; *) wa_want=unknown ;; esac
   case "$answer" in
-    update=false) exit 0 ;;
+    # Sem atualização a fazer, converge o serviço de WhatsApp. Se mexeu, a volta seguinte conta ao
+    # painel como ficou (e lê a resposta como em qualquer passada).
+    update=false) if converge_whatsapp "$wa_want"; then continue; fi; exit 0 ;;
     update=true) ;;
     *) fail_pass "o painel respondeu algo que não é um sim nem um não (${answer:-vazio}); nada foi executado" ;;
   esac

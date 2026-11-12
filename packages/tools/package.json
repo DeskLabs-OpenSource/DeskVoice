@@ -5,7 +5,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./waha": "./src/connectors/waha.ts"
   },
   "dependencies": {
     "@deskvoice/core": "workspace:^",

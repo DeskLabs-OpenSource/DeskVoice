@@ -17,6 +17,15 @@ Do módulo de voz do DeskcommCRM vieram:
 - **As lições de NAT e RTP.** O que o instalador confere sobre endereço público, endereço da
   interface e faixa de portas de áudio é conhecimento pago com instalações reais do Deskcomm.
 
+Do uso do WAHA no DeskcommCRM vieram, como lição e não como código:
+
+- **O que o WhatsApp por QR Code precisa para não quebrar em silêncio.** O nome certo da variável
+  do motor (com o errado, o WAHA cai no motor com navegador), a imagem fixada em vez de etiqueta
+  móvel, a chave entregue ao contêiner só como hash, o teto de memória, ler a configuração da
+  sessão antes de regravá-la (a escrita substitui tudo), sair antes de iniciar quando a sessão
+  falhou e conferir o endereço do número antes de enviar. O cliente do DeskVoice
+  (`packages/tools/src/connectors/waha.ts`) foi escrito do zero a partir da documentação do WAHA.
+
 Da fábrica do DeskcommCRM vieram a contribuição guiada por skills, o lançamento por fragmentos,
 a forma do instalador e as doutrinas de sistema vivo, versionamento e ação destrutiva, aqui
 reescritas para telefonia.
@@ -33,6 +42,11 @@ embutido nem modificado.
 | [Asterisk](https://www.asterisk.org) | Borda de telefonia: fala SIP e RTP com a operadora e entrega o áudio por AudioSocket | GPLv2 |
 | [PostgreSQL](https://www.postgresql.org) | Banco de dados e fila | PostgreSQL License |
 | [Caddy](https://caddyserver.com) | Publica o painel com HTTPS | Apache 2.0 |
+| [WAHA](https://github.com/devlikeapro/waha) | Mantém a sessão do WhatsApp conectado por QR Code e envia as mensagens. Cliente não oficial do WhatsApp | Apache 2.0 |
+
+Sobre o WAHA: a imagem publicada pelos autores (`devlikeapro/waha`) é referenciada pelo Compose,
+com versão e resumo fixos, e nunca republicada. O DeskVoice fala com ele pela API HTTP. O WAHA
+não é afiliado ao WhatsApp nem à Meta, e o DeskVoice não é afiliado ao WAHA.
 
 Sobre o Asterisk: o DeskVoice conversa com ele por interfaces de rede (ARI e AudioSocket) e não
 contém código do Asterisk. O Asterisk continua sob a licença dele, e o DeskVoice sob MIT. O

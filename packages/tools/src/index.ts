@@ -7,4 +7,5 @@ export * from "./run-tool";
 export * from "./to-spec";
 export * from "./net/safe-fetch";
 export * from "./connectors/whatsapp";
+export * from "./connectors/waha";
 export * from "./connectors/webhook";

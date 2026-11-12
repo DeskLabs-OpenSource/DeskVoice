@@ -8,6 +8,10 @@
 # de cada tabela. Essas contagens vão para o manifesto, e é contra elas que o restore.sh
 # confere. Backup que ninguém consegue abrir não é backup.
 #
+# O pareamento do WhatsApp por QR Code (volume waha-sessions) NÃO entra no backup: é a credencial
+# viva de um aparelho conectado, e uma cópia antiga dela não volta a valer. Depois de restaurar em
+# outro servidor, a tela pede para ler o QR Code de novo.
+#
 # Agendar todo dia às 3h:  crontab -e  →  0 3 * * * cd /caminho/DeskVoice && bash install/backup.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -15,7 +19,7 @@ keep="${DESKVOICE_BACKUP_KEEP:-14}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --keep) keep="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Use --keep <quantidade> ou nenhuma opção." ;;
   esac
 done

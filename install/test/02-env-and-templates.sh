@@ -6,7 +6,7 @@ D="$DESKVOICE_DEPLOY_DIR"
 
 write_env_files "https://voz.exemplo.com.br" 203.0.113.10 voz.exemplo.com.br 10000 10200
 keys() { sed 's/=.*//' "$1" | sort | tr '\n' ' '; }
-equal "campos do .env (a versão é gravada pelo instalador; o endereço das imagens mora em images.env)" "PANEL_DOMAIN POSTGRES_PASSWORD RTP_END RTP_START UPDATE_AGENT_TOKEN " "$(keys "$D/.env")"
+equal "campos do .env (a versão é gravada pelo instalador; o endereço das imagens mora em images.env)" "PANEL_DOMAIN POSTGRES_PASSWORD RTP_END RTP_START UPDATE_AGENT_TOKEN WAHA_API_KEY WAHA_API_KEY_SHA512 " "$(keys "$D/.env")"
 equal "campos do app.env" "ARI_PASSWORD ARI_USERNAME DATABASE_URL DESKVOICE_SECRET_KEY INTERNAL_TOKEN PUBLIC_IP PUBLIC_URL SYSTEM_DATABASE_URL " "$(keys "$D/app.env")"
 equal "campos do migrate.env" "APP_DB_PASSWORD MIGRATION_DATABASE_URL SYSTEM_DATABASE_URL SYSTEM_DB_PASSWORD " "$(keys "$D/migrate.env")"
 for f in .env app.env migrate.env; do equal "permissão 600 em $f" 600 "$(mode_of "$D/$f")"; done
@@ -65,7 +65,8 @@ lacks "o compose não monta mais arquivo direto do repositório" "$(grep -E '^\s
 O="$D/docker-compose.override.yml"
 services_with_ports() { awk '/^  [a-z-]+:/ { s = $1 } /^    ports:/ { print s }' "$1" | tr -d ':' | tr '\n' ' '; }
 equal "compose base: só o Asterisk publica porta (o Caddy recebe as dele do instalador)" "asterisk " "$(services_with_ports "$REPO/deploy/docker-compose.yml")"
-lacks "compose base: o Caddy não é mais opcional" "$(cat "$REPO/deploy/docker-compose.yml")" "profiles:"
+lacks "compose base: o Caddy não é mais opcional" "$(awk '/^  caddy:/ { on = 1; next } on && /^  [a-z-]+:/ { on = 0 } on' "$REPO/deploy/docker-compose.yml")" "profiles:"
+equal "compose base: só o serviço de WhatsApp fica num perfil" "waha " "$(awk '/^  [a-z-]+:/ { s = $1 } /^    profiles:/ { print s }' "$REPO/deploy/docker-compose.yml" | tr -d ':' | tr '\n' ' ')"
 contains "o Caddy encaminha a voz do navegador" "$(cat "$REPO/deploy/Caddyfile")" "reverse_proxy voice:8091"
 contains "o Caddy encaminha o resto ao painel" "$(cat "$REPO/deploy/Caddyfile")" "reverse_proxy panel:3000"
 hops() { env_get "$D/app.env" TRUSTED_PROXY_HOPS; }

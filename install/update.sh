@@ -73,6 +73,8 @@ info "Alvo:  $target"
 if [ "$current" = "$target" ]; then
   # Quem chegou a esta versão pelo atualizador de uma versão sem agente ganha o agente aqui.
   converge_agent
+  # E quem chegou a ela sem a chave do WhatsApp por QR Code ganha a chave.
+  converge_waha
   ok "Esta instalação já está na versão $target. Nada a fazer."
   exit 0
 fi
@@ -110,7 +112,14 @@ apply_version() {  # apply_version <versão> <commit ou tag do código>
 # A entrada única não é peça essencial em termos absolutos (certificado que ainda não saiu daria
 # volta falsa). Mas se ela respondia ANTES da atualização e parou DEPOIS, a atualização quebrou o
 # caminho de quem usa o painel: conta como falha e volta.
-entry_ok() { NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --json 2>/dev/null | grep -q '"id":"entry"[^}]*"status":"ok"'; }
+# Olha SÓ a linha da entrada. O código de saída da checagem não entra: ele é 2 quando qualquer peça
+# não essencial falha (uma linha recusada pela operadora, por exemplo), e num pipe com `pipefail`
+# isso fazia esta função dizer "a entrada não respondia" e desligava a volta por regressão.
+entry_ok() {
+  local report re='"id":"entry"[^}]*"status":"ok"'
+  report="$(NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --json 2>/dev/null || true)"
+  [[ "$report" =~ $re ]]
+}
 wait_healthy() {
   local waited=0 timeout="${DESKVOICE_HEALTH_TIMEOUT:-240}"
   until NO_COLOR=1 bash "$KIT_DIR/healthcheck.sh" --essential >/dev/null 2>&1 && { [ "$entry_was_ok" = 0 ] || entry_ok; }; do
@@ -157,6 +166,10 @@ if [ "$resume" = 0 ]; then
   fi
 fi
 env_set "$ENV_FILE" DESKVOICE_VERSION "$target"
+# Quem vem de uma versão sem o WhatsApp por QR Code ganha aqui a chave que painel, voz e rotinas
+# vão receber (o serviço em si só sobe se alguém o instalar pela tela). Em ARM, é este passo que
+# diz ao Compose qual é a imagem do WAHA.
+ensure_waha || true
 # As imagens vêm antes de qualquer outra mudança. Sem elas não há atualização, e construir aqui
 # não é saída: até este ponto só a versão foi trocada, então basta voltá-la. O banco e os
 # serviços não foram tocados.
@@ -167,6 +180,16 @@ else
   apply_version "$current" "$previous_commit" \
     || die "Não consegui baixar as imagens da versão $target, e também não consegui voltar o código para $previous_commit." "Os serviços seguem rodando na versão anterior e o banco não foi tocado. Rode: git -C $REPO_DIR checkout $previous_commit  — e depois bash install/diagnose.sh para pedir ajuda."
   die "Não consegui baixar as imagens da versão $target (resposta do Docker acima). Nada foi alterado: a instalação segue na versão $current, e o banco não foi tocado." "Causas prováveis: a internet da VPS ou o ghcr.io fora do ar; ou a versão acabou de sair e as imagens ainda estão sendo publicadas (espere alguns minutos). Teste com: docker pull $(image_ref panel "$target")  — e rode bash install/update.sh de novo."
+fi
+# Só em instalação que ligou o WhatsApp pela tela: o WAHA é peça de terceiros, vinda de outro
+# registro. Baixar agora, e não no `up`, faz a falta dele parar a atualização aqui, onde só a
+# versão foi trocada, em vez de provocar a volta inteira depois que o banco já recebeu as
+# migrations. Instalação sem o serviço não baixa nada.
+if whatsapp_enabled && ! pull_output="$(dc pull -q waha 2>&1)"; then
+  printf '%s\n' "$pull_output" | tail -n 5 | sed 's/^/    /' >&2
+  apply_version "$current" "$previous_commit" \
+    || die "Não consegui baixar a imagem do serviço de WhatsApp (WAHA), e também não consegui voltar o código para $previous_commit." "Os serviços seguem rodando na versão anterior e o banco não foi tocado. Rode: git -C $REPO_DIR checkout $previous_commit  — e depois bash install/diagnose.sh para pedir ajuda."
+  die "Não consegui baixar a imagem do serviço de WhatsApp (WAHA), que esta instalação usa (resposta do Docker acima). Nada foi alterado: a instalação segue na versão $current, e o banco não foi tocado." "Causas prováveis: a internet da VPS, o Docker Hub fora do ar ou o limite de downloads dele (espere uma hora). Confira também o espaço em disco (df -h): a imagem ocupa cerca de 3,2 GB. Depois rode bash install/update.sh de novo."
 fi
 render_asterisk_config
 # Instalação de antes da entrada única: o Caddy passa a ser a única porta publicada, na mesma

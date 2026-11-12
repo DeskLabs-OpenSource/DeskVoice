@@ -1,8 +1,8 @@
 import type { ClaimedTask, Clock, Db } from "@deskvoice/core";
-import type { SafeFetchOptions } from "@deskvoice/tools";
+import type { WhatsAppDeps } from "@deskvoice/tools";
 
-/** O que toda rotina recebe. `fetch` e `lookup` existem para o teste não tocar a rede. */
-export interface RoutineDeps extends SafeFetchOptions {
+/** O que toda rotina recebe. `fetch`, `lookup` e `waha` existem para o teste não tocar a rede. */
+export interface RoutineDeps extends WhatsAppDeps {
   db: Db;
   clock: Clock;
   /** Decifra os segredos de `settings`. */

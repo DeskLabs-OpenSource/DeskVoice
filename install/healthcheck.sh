@@ -9,7 +9,7 @@
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
 # Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, Asterisk,
 # worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (linha, motor de voz,
-# entrada única, portas, disco). O agente de atualização nunca é falha: no máximo, aviso.
+# entrada única, WhatsApp, portas, disco). O agente de atualização nunca é falha: no máximo, aviso.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 as_json=0; only_essential=0
@@ -146,6 +146,24 @@ if [ "$only_essential" = 0 ]; then
         if [ "$entry_scheme" = https ]; then add entry "Entrada única" 0 falha "o Caddy não respondeu em HTTPS para $entry_site (${entry_panel:-sem saída}). Causa mais comum: o certificado ainda não saiu porque o domínio não aponta para esta VPS. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"
         else add entry "Entrada única" 0 falha "o Caddy do DeskVoice não respondeu (${entry_panel:-sem saída}). Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"; fi ;;
     esac
+  fi
+
+  # ── WhatsApp por QR Code: o serviço, que só existe na instalação que o pediu pela tela ──
+  # "Não instalado" é o estado normal, nunca falha. Instalado, é perguntado a partir do painel,
+  # que é quem fala com ele; qualquer resposta HTTP abaixo de 500 conta. Se há um número conectado,
+  # só a tela diz.
+  if ! whatsapp_enabled; then
+    add whatsapp "WhatsApp" 0 ok "serviço não instalado nesta máquina (é o padrão). Para conectar um número, instale-o pela tela: Configurações → WhatsApp"
+  elif ! running waha; then
+    add whatsapp "WhatsApp" 0 falha "o serviço de WhatsApp (WAHA) foi instalado pela tela e o contêiner não está rodando: avisos e mensagens por WhatsApp não saem. Veja: docker compose -f deploy/docker-compose.yml --profile whatsapp logs --tail 50 waha"
+  elif [ -z "$(env_get "$ENV_FILE" WAHA_API_KEY)" ]; then
+    add whatsapp "WhatsApp" 0 falha "o serviço de WhatsApp está rodando, mas esta instalação não tem a chave dele: o painel não consegue conectar um número. Rode: bash install/update.sh"
+  elif ! running panel; then
+    add whatsapp "WhatsApp" 0 aviso "não deu para conferir porque o painel não está rodando; resolva o painel primeiro"
+  elif dc exec -T panel node -e "fetch('http://waha:3000/ping',{signal:AbortSignal.timeout(8000)}).then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+    add whatsapp "WhatsApp" 0 ok "serviço instalado e respondendo. Se há um número conectado, e qual, aparece em Configurações"
+  else
+    add whatsapp "WhatsApp" 0 falha "o serviço de WhatsApp (WAHA) está rodando, mas não responde ao painel. Veja: docker compose -f deploy/docker-compose.yml --profile whatsapp logs --tail 50 waha"
   fi
 
   # ── Portas UDP na máquina ──

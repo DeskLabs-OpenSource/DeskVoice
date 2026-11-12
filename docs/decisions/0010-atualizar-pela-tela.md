@@ -17,7 +17,7 @@ O painel **pede**; não executa. Quem atualiza é um agente pequeno do kit de in
 | Tema | O que vale | Onde está |
 |---|---|---|
 | Quem executa | `install/agent.sh`, agendado pelo instalador para passar a cada minuto (timer do systemd; sem systemd, uma linha em `/etc/cron.d`) | `install/agent.sh`, `install_agent_schedule` em `install/_common.sh` |
-| O que passa do painel para o servidor | **Um booleano.** A resposta da rota do agente é `{ update: true \| false }` e mais nada | `apps/panel/src/app/api/v1/system/agent/route.ts` |
+| O que passa do painel para o servidor | **Dois booleanos.** A resposta da rota do agente é `{ update: true \| false, whatsapp: true \| false }` e mais nada. O segundo entrou com o WhatsApp por QR Code ([registro 0012](0012-whatsapp-por-qr-code.md)): "esta instalação quer o serviço de WhatsApp" | `apps/panel/src/app/api/v1/system/agent/route.ts` |
 | Para qual versão | O painel não diz. O agente descobre a maior versão final nas tags do repositório (consulta no máximo a cada 10 minutos), **anuncia** essa versão ao painel a cada passada e, quando o painel diz sim, vai para ela com `update.sh --to` | `discover_target` em `install/agent.sh` |
 | A pessoa confirma a versão que o servidor executaria | A tela nomeia, no botão e na confirmação, a versão anunciada pelo agente, e mostra as notas das versões até ela. Sem a página dessa versão na lista pública, a tela diz que a versão existe e não oferece o botão; a rota recusa do mesmo jeito | `apps/panel/src/app/api/v1/system/update/route.ts` |
 | Ninguém é atualizado para o que não confirmou | O pedido guarda a versão vista. Na passada do agente, **o painel compara** essa versão com a que o agente acabou de anunciar: se saiu outra, o pedido termina como `superseded` e a resposta é "não". O agente continua recebendo só o booleano **[construtor]** | `agentCheckIn` em `apps/panel/src/server/update.ts` |
@@ -44,6 +44,27 @@ O `update.sh` carrega `_common.sh` e chama `backup.sh`, `restore.sh` e `healthch
 
 O atualizador que roda numa atualização **a partir da 0.1.0** é o da 0.1.0, que não passa a vez nem conhece o agente. Não há como mudar isso de fora. Por isso quem está na 0.1.0 atualiza uma vez pelo terminal e roda `bash install/update.sh` mais uma vez: na segunda, o atualizador novo não tem o que atualizar, gera o segredo, recria o painel para ele recebê-lo e agenda o agente.
 
+### O segundo booleano, e por que ele ainda não é um comando **[construtor]**
+
+O serviço de WhatsApp (o WAHA) custa cerca de 360 MB de memória parado e 3,2 GB em disco, então só existe na instalação de quem o pede pela tela ([registro 0012](0012-whatsapp-por-qr-code.md)). Ligar e desligar um contêiner é trabalho de quem fala com o Docker, e esse continua sendo só o agente. Para isso a resposta ganhou um segundo campo, `whatsapp`, que diz se a instalação quer o serviço.
+
+Ele continua sendo um sim ou não, e não um comando, pelos mesmos motivos do primeiro:
+
+| O que o painel poderia querer mandar | O que acontece |
+|---|---|
+| Qual imagem, etiqueta ou resumo baixar | Não existe campo para isso. A imagem é a que o `deploy/docker-compose.yml` e o kit desta instalação fixam, por versão e resumo |
+| Um comando, um nome de serviço, um endereço | Não existe campo para isso. O agente só sabe duas ações, escritas nele: subir o serviço `waha` e remover o contêiner `waha` |
+| Algo no lugar do booleano (texto, objeto, lista) | O agente só age com `true` ou `false` exatos. Qualquer outra coisa vale como "não sei", e nada muda |
+| Apagar o pareamento do número | Não há como: remover o serviço tira o contêiner, e o volume fica |
+
+O pior que um painel comprometido consegue com o segundo booleano é fazer o servidor baixar e subir o WAHA que o próprio kit fixou, gastando disco e memória, ou tirar o serviço do ar. Não ganha execução no servidor.
+
+O agente responde, na fala seguinte, o estado do serviço em códigos fechados (`absent`, `running`, `failed` com `pull_failed`, `start_failed` ou `remove_failed`). O painel grava; um código que ele não conhece vale como "o agente não contou", e nunca faz o relato da atualização ser recusado.
+
+**Compatibilidade, conferida.** O agente da 0.2.0 lê só `data.update` e ignora o resto: o JavaScript dele (`git show v0.2.0:install/agent.sh`) foi executado contra uma resposta com os dois campos e devolveu `update=false`. O painel manda o campo novo sempre. No sentido contrário, um painel antigo não manda `whatsapp`, e o agente novo lê isso como "não sei": não liga nem desliga nada.
+
+**Atualização e WhatsApp pedidos na mesma fala:** a atualização vai primeiro. O serviço converge na volta que entrega o resultado dela, ou na passada seguinte.
+
 ## O que não existe, e por quê
 
 | O que não existe | Por quê | O que vale hoje |
@@ -60,7 +81,7 @@ O atualizador que roda numa atualização **a partir da 0.1.0** é o da 0.1.0, q
 | Alternativa | Por que não |
 |---|---|
 | O painel monta o socket do Docker e atualiza a si mesmo | Quem controla o socket do Docker é administrador da máquina. Uma falha no painel (que fica na internet) viraria controle total do servidor. E um contêiner que se substitui não tem quem desfaça quando a versão nova não sobe |
-| O painel manda o comando (ou a versão) e um agente executa | É uma porta de administração remota com outro nome: quem conseguisse escrever no painel, ou no banco dele, executaria no servidor. Com um booleano, o pior que o painel consegue é pedir a atualização que o próprio servidor escolheria |
+| O painel manda o comando (ou a versão) e um agente executa | É uma porta de administração remota com outro nome: quem conseguisse escrever no painel, ou no banco dele, executaria no servidor. Com booleanos, o pior que o painel consegue é pedir a atualização que o próprio servidor escolheria, ou ligar e desligar o serviço de WhatsApp que o próprio kit fixou |
 | Webhook de fora (o GitHub avisa a instalação, ou um serviço central dispara) | Exigiria a instalação aceitar pedido vindo da internet e, para saber a quem avisar, um cadastro das instalações: telemetria. Também tiraria de quem administra a decisão de quando sair do ar |
 | O agente fala com o painel pela entrada pública (o Caddy) | A rota do agente ficaria exposta à internet, protegida só pelo segredo. Falando de dentro do contêiner, ela nem existe para quem está fora |
 | A versão confirmada viajar junto com o "sim", para o agente comparar | O agente passaria a receber um número de versão do painel, mesmo que só para comparar. Com a comparação no painel, a resposta segue sendo um booleano e o agente não tem o que interpretar |

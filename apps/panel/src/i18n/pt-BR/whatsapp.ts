@@ -1,0 +1,69 @@
+const whatsapp = {
+  title: "WhatsApp",
+  lead: "Conecte um número de WhatsApp lendo um QR Code, como no WhatsApp Web. É por ele que saem os avisos para a equipe e as mensagens que o agente envia durante a ligação.",
+  unavailable: "Este servidor ainda não tem a chave do serviço de WhatsApp. Isso acontece quando a atualização foi feita por um atualizador antigo. Rode no servidor, uma vez:",
+  serviceAbsent: "O serviço de WhatsApp não está instalado neste servidor.",
+  serviceCost:
+    "Ele é uma peça à parte, que só é baixada e ligada se você pedir. Custa cerca de 360 MB de memória com o serviço parado e 3,2 GB em disco, medidos em 11/11/2026 numa VPS de 8 GB. Com um número conectado o uso de memória ainda não foi medido; o teto é de 1280 MB. O DeskVoice inteiro, sem ele, usa cerca de 320 MB.",
+  installService: "Instalar o serviço de WhatsApp",
+  servicePreparing: "Preparando o serviço: o servidor está baixando o WhatsApp. Leva alguns minutos, e esta tela acompanha.",
+  serviceFailed: {
+    pull_failed: "O servidor não conseguiu baixar o serviço de WhatsApp. Costuma ser a internet do servidor, o registro de imagens fora do ar ou falta de espaço em disco.",
+    start_failed: "O servidor baixou o serviço de WhatsApp, mas ele não subiu. Costuma ser falta de memória ou de espaço em disco.",
+    remove_failed: "O servidor não conseguiu remover o serviço de WhatsApp.",
+    unknown: "O servidor não conseguiu instalar o serviço de WhatsApp.",
+  },
+  serviceRetry: "O servidor tenta de novo sozinho em cerca de 10 minutos. O registro do que aconteceu fica no servidor, em deploy/agent/agent.log.",
+  serviceRemoving: "Removendo o serviço de WhatsApp do servidor. Leva até um minuto.",
+  removeService: "Remover o serviço de WhatsApp",
+  removeServiceConfirm:
+    "Remover o serviço de WhatsApp deste servidor? Nenhum número fica conectado, os avisos e as mensagens por WhatsApp deixam de sair e cerca de 360 MB de memória são liberados. Os arquivos baixados continuam no disco. Para voltar, é só instalar de novo.",
+  removeServiceYes: "Remover o serviço de WhatsApp",
+  agentNever: "O agente deste servidor, que é quem instala e remove o serviço, ainda não falou com o painel. Sem ele, o pedido fica esperando. Para executar agora, rode no servidor:",
+  agentSilent: "O agente deste servidor, que é quem instala e remove o serviço, não está respondendo. O pedido fica esperando até ele voltar. Para executar agora, rode no servidor:",
+  testUnverified: "Mensagem de teste enviada para {to}, mas o serviço de WhatsApp não confirmou o endereço deste número antes do envio. Confira no celular se ela chegou.",
+  testMessage: "Mensagem de teste do DeskVoice. O WhatsApp desta central está conectado, e os avisos chegam por aqui.",
+  riskTitle: "Antes de conectar",
+  risk: "Esta conexão usa um cliente não oficial do WhatsApp, e não a API oficial da Meta. O WhatsApp pode restringir ou bloquear o número, sem aviso. Use um número dedicado a isto, nunca o seu pessoal nem o principal da empresa.",
+  riskStrangers:
+    "O que mais leva a bloqueio é escrever primeiro para quem nunca falou com o número. O agente só envia para quem está na ligação ou para a equipe, e a mensagem para quem ligou pede a confirmação de uma pessoa. Mantenha poucas mensagens por hora.",
+  connect: "Conectar",
+  replaceConfirm:
+    "Já existe um conector de WhatsApp configurado ({type}, {url}). Ao conectar um número, esse conector é substituído agora e o token gravado é apagado. Se o QR Code não for lido, o envio por WhatsApp fica parado até você conectar um número ou configurar o conector de novo.",
+  replaceYes: "Substituir o conector {url} e conectar",
+  starting: "Preparando a conexão. O QR Code aparece em alguns segundos.",
+  qrTitle: "Leia o código com o celular do número",
+  steps: [
+    "Abra o WhatsApp no celular do número que vai enviar os avisos.",
+    "Toque em Mais opções (ou em Configurações) e depois em Dispositivos conectados.",
+    "Toque em Conectar dispositivo e aponte a câmera para este código.",
+  ],
+  qrAlt: "QR Code para conectar o WhatsApp",
+  qrRenew: "O código é trocado sozinho algumas vezes e vale por poucos minutos. Esta tela acompanha e avisa quando conectar.",
+  qrBetween: "Gerando o próximo código.",
+  connected: "Conectado",
+  connectedNumber: "Número conectado: {phone}",
+  connectedUnknown: "Um número está conectado.",
+  since: "Conectado desde {when}.",
+  sendTest: "Enviar mensagem de teste",
+  testHint: "A mensagem de teste vai para o seu WhatsApp, o que está em Meu contato, no começo desta página.",
+  testSent: "Mensagem de teste enviada para {to}. Confira no celular.",
+  disconnect: "Desconectar",
+  disconnectConfirm:
+    "Desconectar {phone}? Os avisos e as mensagens por WhatsApp deixam de sair até um número ser conectado de novo, e para voltar será preciso ler o QR Code outra vez.",
+  disconnectYes: "Desconectar {phone}",
+  thisNumber: "o número conectado",
+  failed: {
+    FAILED: "A conexão com o WhatsApp caiu. O aparelho pode ter sido removido em Dispositivos conectados, no celular, ou o WhatsApp encerrou a sessão.",
+    STOPPED: "A sessão do WhatsApp está parada. Isso acontece quando o serviço reinicia e não retoma a sessão sozinho.",
+    missing: "O serviço de WhatsApp não tem mais os dados desta conexão. Isso acontece depois de restaurar um backup ou de mudar de servidor, porque a sessão do WhatsApp não entra no backup.",
+    qr_expired: "O QR Code não foi lido a tempo, e a tentativa foi encerrada.",
+  },
+  failedEffect: "Enquanto isso, os avisos e as mensagens por WhatsApp não saem.",
+  reconnect: "Conectar de novo",
+  reconnectHint: "Se o WhatsApp pedir, um novo QR Code aparece aqui para ser lido.",
+  newCode: "Gerar novo código",
+};
+
+export default whatsapp;
+export type WhatsAppDictionary = typeof whatsapp;
