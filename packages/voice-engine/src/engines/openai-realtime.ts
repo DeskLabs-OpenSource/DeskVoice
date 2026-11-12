@@ -92,6 +92,13 @@ function parseArguments(json: string): unknown {
 const engine: VoiceEngine = {
   id: "openai-realtime",
   label: "OpenAI Realtime",
+  provedor: "openai",
+  // A OpenAI documenta data residency por projeto/região (Estados Unidos, Europa, Reino Unido,
+  // Japão, entre outros) — não um país fixo por provedor. Como a instalação usa a API padrão, sem
+  // projeto regional escolhido pelo operador, o lugar de processamento depende da conta dele.
+  // Fonte: developers.openai.com/api/docs/guides/your-data (consultado em 12/11/2026).
+  paisDeProcessamento: "desconhecido",
+  fonteDoPais: null,
   pricing: {
     // US$ 32,00 e US$ 64,00 por milhão de tokens de áudio (entrada e saída) do gpt-realtime-2.1.
     // Texto e entrada em cache custam menos; cobrar tudo como áudio superestima, nunca subestima.

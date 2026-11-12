@@ -120,6 +120,16 @@ export interface KeyCheckOptions {
 export interface VoiceEngine {
   id: string;
   label: string;
+  /** Quem processa o áudio: `google`, `openai`, ou `nenhum` (o motor simulado roda aqui mesmo). */
+  provedor: string;
+  /**
+   * Onde o áudio é processado, quando o provedor declara. `neste-servidor` é o motor simulado;
+   * `desconhecido` é o provedor que não publica o lugar de processamento — e isso precisa aparecer
+   * na tela, porque silêncio ali se confunde com garantia.
+   */
+  paisDeProcessamento: string | "neste-servidor" | "desconhecido";
+  /** De onde veio a declaração. Fora de `neste-servidor`/`desconhecido`, país sem fonte não vale. */
+  fonteDoPais: { url: string; consultadoEm: string } | null;
   /** Verdadeiro para motores que não precisam de chave (o simulado). */
   keyless?: boolean;
   pricing: EnginePricing;
