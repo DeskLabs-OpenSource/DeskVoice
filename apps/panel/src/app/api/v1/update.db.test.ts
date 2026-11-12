@@ -363,6 +363,9 @@ describe("the version screen", () => {
     // O agente viu: o alvo é a mais recente, e não há mais o que ele não tenha visto.
     await speak({ version: "0.1.0", target: "0.2.0" });
     expect((await state(owner.cookie)).offer).toMatchObject({ target: "0.2.0", unseen: false });
+    // O agente já atualizou e anuncia a 0.2.0, e o painel antigo ainda responde: ele não "deixou de ver".
+    await speak({ version: "0.2.0" });
+    expect((await state(owner.cookie)).offer).toMatchObject({ target: null, unseen: false });
     // Depois da atualização: instalada igual à mais recente, sem alvo. É "está na mais recente".
     panel.deps.appVersion = "0.2.0";
     await speak({ version: "0.2.0" });

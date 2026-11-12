@@ -11,16 +11,19 @@ import { AGENT_SILENT_MINUTES, REQUEST_COLUMNS, expireStaleUpdates } from "../..
  */
 export const GET = handle(
   {
-    after: async (state: { running: { version: string }; agent: { targetVersion: string | null } | null }, { deps }) => {
+    after: async (state: { running: { version: string }; agent: { version: string; targetVersion: string | null } | null }, { deps }) => {
       const published = await publishedReleases(deps);
       // O alvo é o que o SERVIDOR executaria (anunciado pelo agente), não o topo da lista pública.
       // As notas são as das versões até ele; sem a página dele, não há o que confirmar.
       const target = state.agent?.targetVersion ?? null;
       const releases = published.ok && target ? published.newer.filter((release) => compareVersions(release.version, target) <= 0) : [];
       // A lista pública e o agente não andam juntos: o agente só consulta as tags a cada 10 minutos.
-      // `unseen` = a mais recente publicada é mais nova que a instalada e que o que o agente ofereceu.
+      // `unseen` = a mais recente publicada é mais nova que a versão em execução e que tudo o que o
+      // agente conhece: a que ele ofereceu e a que ele anunciou (logo depois de uma atualização, o
+      // agente já está na nova enquanto o painel antigo ainda responde).
       const latest = published.ok ? published.latest : null;
-      const unseen = latest !== null && compareVersions(latest, state.running.version) > 0 && (target === null || compareVersions(latest, target) > 0);
+      const known = [state.running.version, target, state.agent?.version].filter((version): version is string => !!version);
+      const unseen = latest !== null && known.every((version) => compareVersions(latest, version) > 0);
       return { ...state, published, offer: { target, notesReady: releases.some((release) => release.version === target), releases, unseen } };
     },
   },
