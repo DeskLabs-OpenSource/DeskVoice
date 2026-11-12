@@ -387,9 +387,10 @@ bash install/reset-password.sh voce@empresa.com.br
 O script pede a senha nova duas vezes, troca, encerra as sessões abertas dessa conta e **entra
 com a senha nova** pela tela de login antes de dizer que trocou. Só funciona de dentro da VPS:
 quem tem acesso ao servidor já é dono da instalação. Se o e-mail não existir, ele diz isso e
-não altera nada. Se você errou a senha várias vezes antes de chegar aqui, o painel segura novas
-tentativas para esse e-mail por até 15 minutos: o script troca a senha, diz que não conseguiu
-testar e pede para esperar.
+não altera nada. Senhas erradas fazem o painel segurar novas tentativas para esse e-mail: por
+até 15 minutos no endereço de onde vieram, ou por até uma hora em qualquer endereço quando vieram
+muitas, de vários lugares. Se o teste do script cair nesse limite, ele troca a senha, diz que não
+conseguiu testar e pede para esperar.
 
 Não rode o instalador de novo esperando que ele troque a senha: ele vê que já existe um dono e
 não cria outro.

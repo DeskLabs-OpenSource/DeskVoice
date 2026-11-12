@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { UNKNOWN_IP, clientIp, trustedProxyHops } from "./client-ip";
+import { UNKNOWN_IP, addressBucket, clientIp, trustedProxyHops } from "./client-ip";
 
 describe("clientIp", () => {
   it("ignores what the client forged and takes the address our proxy appended", () => {
@@ -32,5 +32,24 @@ describe("trustedProxyHops", () => {
     expect(trustedProxyHops({ TRUSTED_PROXY_HOPS: "0" })).toBe(0);
     expect(trustedProxyHops({ TRUSTED_PROXY_HOPS: "many" })).toBe(0);
     expect(trustedProxyHops({ TRUSTED_PROXY_HOPS: "-1" })).toBe(0);
+  });
+});
+
+describe("addressBucket", () => {
+  it("counts IPv4 whole, IPv6 by its /64, and IPv4 written as IPv6 as the IPv4", () => {
+    expect(addressBucket("203.0.113.7")).toBe("203.0.113.7");
+    expect(addressBucket("::ffff:203.0.113.7")).toBe("203.0.113.7");
+    expect(addressBucket("2001:db8:1:2:3:4:5:6")).toBe("2001:db8:1:2::/64");
+    expect(addressBucket("2001:0db8:0001:0002:ffff::1")).toBe("2001:db8:1:2::/64");
+    expect(addressBucket("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(addressBucket("2001:db8:1:2::")).toBe("2001:db8:1:2::/64");
+    expect(addressBucket("fe80::1%eth0")).toBe("fe80:0:0:0::/64");
+    expect(addressBucket(UNKNOWN_IP)).toBe(UNKNOWN_IP);
+  });
+
+  it("ten addresses of one /64 are one bucket, and two /64s are two", () => {
+    const one = new Set(Array.from({ length: 10 }, (_, index) => addressBucket(`2001:db8:aa:bb:${index}:1:2:3`)));
+    expect(one.size).toBe(1);
+    expect(addressBucket("2001:db8:aa:bb::1")).not.toBe(addressBucket("2001:db8:aa:bc::1"));
   });
 });
