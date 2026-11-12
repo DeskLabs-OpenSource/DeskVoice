@@ -201,6 +201,7 @@ Rode `pnpm verify` e, se tocou em banco, `pnpm test:db`. Isso cobre:
 - endereço das imagens repetido fora de `deploy/images.env`, ou canal no lugar do número da versão;
 - imagem de terceiros sem resumo fixo no Compose de produção, na base de um `Dockerfile` ou num job do CI;
 - fonte baixada de fora (`next/font/google`, ou o endereço do serviço de fontes num CSS ou numa tela) em vez de versionada no repositório;
+- cor escrita como valor (`#fff`, `rgb(`, `hsl(`, `oklch(`) num `.ts` ou `.tsx` do painel, em vez de um token de `apps/panel/src/design/tokens.css` ([direção do painel](docs/design/direcao-do-painel.md));
 - fragmento de versão inválido;
 - instalação nova e atualização a partir da última versão;
 - a chamada simulada de ponta a ponta;

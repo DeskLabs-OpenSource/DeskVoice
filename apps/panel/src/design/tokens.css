@@ -36,6 +36,11 @@
   --dv-fail: light-dark(#a3463a, #d98878);
   --dv-fail-soft: light-dark(#f7e5e1, #38211d);
 
+  /* QR Code: o mesmo valor nos dois temas, de propósito. A câmera precisa do contraste do código
+     também no tema escuro. Só para a moldura do QR Code. */
+  --dv-qr-surface: light-dark(#ffffff, #ffffff);
+  --dv-qr-ink: light-dark(#1b1e17, #1b1e17);
+
   /* Espaço: base 4 px */
   --dv-space-1: 4px;
   --dv-space-2: 8px;

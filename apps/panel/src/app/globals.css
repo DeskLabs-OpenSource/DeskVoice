@@ -21,6 +21,8 @@
   --color-warn-soft: var(--dv-warn-soft);
   --color-fail: var(--dv-fail);
   --color-fail-soft: var(--dv-fail-soft);
+  --color-qr-surface: var(--dv-qr-surface);
+  --color-qr-ink: var(--dv-qr-ink);
 
   --font-sans: var(--font-atkinson), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, monospace;

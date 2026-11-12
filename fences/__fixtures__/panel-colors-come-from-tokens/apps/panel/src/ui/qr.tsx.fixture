@@ -1,0 +1,10 @@
+// O QR Code do PR #25 tinha #fff no fundo; comentário não é cor.
+export const anchor = <a href="#calls">Chamadas</a>;
+export const entity = "&#123;";
+export const inline = <div style={{ background: "#fff", color: "#333" }} />;
+export const arbitrary = <div className="bg-[#1b1e17]" />;
+export const shadow = "0 1px 2px rgb(0 0 0 / 0.3)";
+export const ring = "hsl(20 50% 40%)";
+export const accent = "oklch(0.6 0.1 40)";
+export const token = <div className="bg-qr-surface text-qr-ink" />;
+export const variable = "var(--dv-accent)";
