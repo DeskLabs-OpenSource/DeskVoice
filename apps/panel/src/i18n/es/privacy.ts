@@ -8,7 +8,7 @@ const privacy: PrivacyDictionary = {
   recordingDisk:
     "Cada minuto de llamada ocupa cerca de 1,9 MB en el disco del servidor. Es la cuenta del formato (dos canales, 8 kHz, 16 bits), y no una medición.",
   recordingKeeps:
-    "Encender o apagar no borra nada. Las grabaciones ya hechas siguen el plazo de conservación de abajo: salen junto con el texto de la conversación, y sin plazo se conservan para siempre. Las copias de seguridad de hoy no incluyen las grabaciones. Verifique que el aviso del inicio de la llamada diga a quien llama que la conversación queda registrada.",
+    "Encender o apagar no borra nada. Las grabaciones ya hechas siguen el plazo de conservación de abajo: salen junto con el texto de la conversación, y sin plazo se conservan para siempre. Las copias de seguridad de hoy no incluyen las grabaciones. Verifique que el aviso del inicio de la llamada, en Configuración → Llamadas, diga a quien llama que la conversación queda registrada.",
   recordingForever:
     "El plazo de conservación está vacío: las grabaciones se conservan para siempre, y el disco del servidor crece sin límite, cerca de 1,9 MB por minuto de llamada. Defina un plazo abajo para que las grabaciones antiguas salgan.",
   recordingStates: { on: "encendida", off: "apagada" },
