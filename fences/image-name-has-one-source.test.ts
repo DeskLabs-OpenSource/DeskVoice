@@ -3,6 +3,7 @@
 //   o formato da versão divergia (X.Y.Z no CI, vX.Y.Z no atualizador): a atualização nunca achava
 //   a imagem e construía na VPS. A instalação também gravava o canal `stable` em vez do número.
 // revisar em: 2027-05-11
+// exceção do WaCalls fixado (abaixo): revisar até 2027-02-13, ou antes, quando JotaDev66/WaCalls#69 sair
 import { describe, it, expect } from "vitest";
 import { parse } from "yaml";
 import { REPO_ROOT, asRecord, exists, expectClean, fixture, listFiles, read } from "./_lib";
@@ -26,6 +27,8 @@ function check(root: string): string[] {
       const text = read(root, file);
       // O WaCalls do fork mora no mesmo registro, mas não é imagem do DeskVoice: vai fixado por
       // resumo, e um fork do DeskVoice que troca o prefixo continua baixando o mesmo WaCalls.
+      // Exceção com prazo: sai quando os autores publicarem JotaDev66/WaCalls#69 e o Compose voltar
+      // à imagem deles; revisar até 2027-02-13 mesmo que o PR não ande.
       const own = text.split("\n").filter((line) => !pinnedWacalls.test(line)).join("\n");
       if (file !== SOURCE && own.includes(prefix)) violations.push(`${file}: repete \`${prefix}\`, que só pode estar em ${SOURCE}`);
       // Canal não é versão: nem padrão do Compose, nem valor gravado pelo kit. Os testes do kit
