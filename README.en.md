@@ -269,7 +269,10 @@ When you ask for it, the install also talks to the outside:
 
 In use, DeskVoice talks to what you configured: the voice AI provider (Google or OpenAI) during
 calls, with your key; the SIP trunk carrier; WhatsApp, through WAHA, if you connected it; and the
-addresses of the tools and webhooks you registered.
+addresses of the tools and webhooks you registered. With the call outcome turned on (Settings →
+Artificial intelligence, off by default), the routines process also sends the text transcript to
+the same provider, after the call, through its text API (`/chat/completions` on OpenAI,
+`:generateContent` on Google).
 
 ## Contributing
 

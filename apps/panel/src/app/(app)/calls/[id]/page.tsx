@@ -91,6 +91,19 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
         </dl>
       </header>
 
+      {data.outcome ? (
+        <section className="grid max-w-[72ch] gap-1.5">
+          <h2 className="text-[0.8rem] font-bold text-muted">{t.outcomeTitle}</h2>
+          <p className="flex flex-wrap items-baseline gap-2">
+            <span className="rounded-full border border-line px-2 py-0.5 text-[0.8rem] font-bold">{(t.outcomes as Record<string, string>)[data.outcome] ?? t.outcomes.unknown}</span>
+            {typeof data.outcomeConfidence === "string" ? (
+              <span className="text-[0.8rem] text-muted">{fill(t.outcomeConfidence, { value: String(Math.round(Number(data.outcomeConfidence) * 100)) })}</span>
+            ) : null}
+          </p>
+          {data.outcomeEvidence ? <p className="text-[0.8rem] leading-relaxed text-muted">“{data.outcomeEvidence}”</p> : null}
+        </section>
+      ) : null}
+
       {data.summary || !live ? (
         <section className="grid max-w-[72ch] gap-1.5">
           <h2 className="text-[0.8rem] font-bold text-muted">{t.summaryTitle}</h2>

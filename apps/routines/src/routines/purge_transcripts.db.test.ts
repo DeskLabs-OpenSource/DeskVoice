@@ -37,7 +37,14 @@ describe("purge_transcripts", () => {
     const oldAgent = await addEvent(org, call, "transcript_agent", { text: "Anotado." }, daysAgo(30.5));
     const oldTool = await addEvent(org, call, "tool_called", { name: "end_call", args: {} }, daysAgo(31));
     const recent = await addEvent(org, call, "transcript_user", { text: "Ainda dentro do prazo." }, daysAgo(29));
-    const foreign = await addEvent(other, await createCall(app, other, daysAgo(40)), "transcript_user", { text: "Outra empresa." }, daysAgo(60));
+    const recentCall = await createCall(app, org, daysAgo(29));
+    // A fala que sustenta o desfecho é cópia da transcrição: sai com o mesmo prazo, e o desfecho fica.
+    await withSystem(app, (q) =>
+      q.exec("update calls set outcome = 'booked', outcome_evidence = 'Pode marcar.' where id = any($1::uuid[])", [[call, recentCall]]),
+    );
+    const foreignCall = await createCall(app, other, daysAgo(40));
+    const foreign = await addEvent(other, foreignCall, "transcript_user", { text: "Outra empresa." }, daysAgo(60));
+    await withSystem(app, (q) => q.exec("update calls set outcome = 'booked', outcome_evidence = 'Outra empresa.' where id = $1", [foreignCall]));
 
     await run(org);
 
@@ -47,6 +54,12 @@ describe("purge_transcripts", () => {
     expect(await payloadOf(oldTool)).toEqual({ name: "end_call", args: {} });
     expect(await payloadOf(recent)).toEqual({ text: "Ainda dentro do prazo." });
     expect(await payloadOf(foreign)).toEqual({ text: "Outra empresa." });
+    const outcomes = await withSystem(app, (q) =>
+      q.many<{ id: string; outcome: string; outcome_evidence: string | null }>("select id, outcome, outcome_evidence from calls where id = any($1::uuid[])", [[call, recentCall, foreignCall]]),
+    );
+    expect(outcomes.find((row) => row.id === call)).toMatchObject({ outcome: "booked", outcome_evidence: null });
+    expect(outcomes.find((row) => row.id === recentCall)).toMatchObject({ outcome: "booked", outcome_evidence: "Pode marcar." });
+    expect(outcomes.find((row) => row.id === foreignCall)).toMatchObject({ outcome: "booked", outcome_evidence: "Outra empresa." });
 
     expect(await orgEventsOf(org)).toEqual([
       { kind: "transcripts_purged", actor_user_id: null, payload: { count: 2, retentionDays: 30, before: daysAgo(30).toISOString() } },

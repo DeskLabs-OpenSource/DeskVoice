@@ -1,3 +1,5 @@
+import type { OutcomeGuess } from "./outcome";
+
 /** Definição de ferramenta no formato que os motores entendem (JSON Schema em `parameters`). */
 export interface ToolSpec {
   name: string;
@@ -151,6 +153,38 @@ export type ProcessingLocation =
   | { kind: "undeclared" }
   | { kind: "country"; country: string; source: LocationSource };
 
+/** O que a classificação precisa saber: o que foi dito e o que o agente fez. */
+export interface ClassifyInput {
+  /** Falas da ligação, uma por linha, com quem falou. */
+  transcript: string;
+  /** Ferramentas chamadas na ligação, pelo nome. */
+  tools: readonly string[];
+}
+
+export interface ClassifyOptions {
+  fetch?: typeof fetch;
+  /** Prazo da resposta. Padrão: 10 s. */
+  timeoutMs?: number;
+  /** Agendador do prazo (`setTimeout` por padrão). Devolve como cancelar. */
+  schedule?: (fn: () => void, delayMs: number) => () => void;
+  /** Sobrepõe a URL da API HTTP do provedor (testes apontam para um servidor falso). */
+  baseUrl?: string;
+}
+
+/** Por que a classificação não leu um desfecho: o vocabulário do teste da chave, menos o que não é falha. */
+export type ClassifyFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
+
+/**
+ * O que a classificação devolve: o palpite, ou o motivo de não haver um. Nos dois casos, o consumo
+ * que o provedor declarou e o custo dele pelo preço do modelo de texto, para entrar no custo da
+ * chamada (um 200 fora da forma também foi cobrado).
+ */
+export type ClassifyResult = { model: string; usage: Usage; costCents: number } & (
+  | { ok: true; guess: OutcomeGuess }
+  // `status` é o HTTP da resposta; `null` quando ela não veio (prazo, rede).
+  | { ok: false; failure: ClassifyFailure; status: number | null }
+);
+
 export interface VoiceEngine {
   id: string;
   label: string;
@@ -166,8 +200,27 @@ export interface VoiceEngine {
   pricing: EnginePricing;
   connect(config: VoiceSessionConfig, apiKey: string, options?: ConnectOptions): Promise<VoiceSession>;
   /**
+   * Lê a conversa e diz o desfecho comercial dela, com a confiança e a fala que o sustenta.
+   *
+   * Opcional de propósito: motor que não classifica apenas não declara o método, e a rotina não
+   * grava nada. Nunca lança: provedor fora do ar, resposta estranha ou chave sem crédito voltam como
+   * `ok: false` com o motivo, que a rotina registra na linha do tempo da chamada.
+   */
+  classifyOutcome?(apiKey: string, input: ClassifyInput, options?: ClassifyOptions): Promise<ClassifyResult>;
+
+  /**
    * Confere a chave sem abrir sessão de voz e sem gastar: a chamada mais barata do provedor que
    * prova que a chave vale e alcança o modelo de `connect`. Nunca lança, nunca registra a chave.
    */
   checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
 }
+
+// Mora aqui, e não em outcome.ts, porque o painel importa valor só por `@deskvoice/voice-engine/types`:
+// o índice puxa load.ts, cujo `new URL("./engines", import.meta.url)` o Turbopack não resolve.
+/**
+ * Classificação do desfecho ligada, por organização (chave `calls.outcome_enabled` em `settings`).
+ * Ausente é desligada, de fábrica: cada ligação classificada é uma chamada paga ao provedor, com a
+ * transcrição em texto, e quem atualiza não passa a gastar nem a enviar sem decidir. Só `true` liga.
+ */
+export const OUTCOME_SETTING = "calls.outcome_enabled";
+export const outcomeEnabledOf = (stored: unknown): boolean => stored === true;

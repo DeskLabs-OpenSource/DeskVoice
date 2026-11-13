@@ -82,6 +82,7 @@ aconteceu nessa ligação?".
 | `cost_ceiling_reached` | Bateu o teto de custo e encerrou |
 | `call_ended` | Fim, com o motivo |
 | `task_queued`, `task_finished` | O que ficou rodando depois (resumo, aviso, webhook) |
+| `outcome_not_classified` | O desfecho (ligado em Configurações → Inteligência artificial) não foi classificado: chave recusada, modelo inexistente, sem crédito, provedor fora do ar, resposta fora do formato, ou a ligação já estava no teto de custo |
 
 Perguntas comuns, e onde está a resposta:
 

@@ -244,6 +244,21 @@ describe("settings", () => {
     expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: 12 });
   });
 
+  it("keeps calls.outcome_enabled off until an owner or admin turns it on, and an operator cannot", async () => {
+    const params = { key: "calls.outcome_enabled" };
+    const put = (value: unknown, cookie = owner) => call(putSetting, { method: "PUT", cookie, params, body: { value } });
+    expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: false });
+
+    for (const bad of ["true", 1, { enabled: true }]) expect((await put(bad)).code, JSON.stringify(bad)).toBe("validation_error");
+    expect((await put(true, operator.cookie)).status).toBe(403);
+    expect(await stored("select value from settings where key = $1", [params.key])).toBeNull();
+
+    expect((await put(true)).data).toEqual({ key: params.key, value: true });
+    expect(await stored("select value, secret from settings where key = $1", [params.key])).toEqual({ value: true, secret: false });
+    expect((await put(null)).data).toEqual({ key: params.key, value: null });
+    expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: false });
+  });
+
   it.each(["whatsapp.trust_caller_id", "whatsapp.notify_owner_on_call_end"])("keeps %s as a plain boolean that starts unset, and an operator cannot change it", async (key) => {
     const params = { key };
     const put = (value: unknown, cookie = owner) => call(putSetting, { method: "PUT", cookie, params, body: { value } });

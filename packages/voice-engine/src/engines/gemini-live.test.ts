@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
 import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
-import type { KeyCheckOptions, VoiceSessionConfig } from "../types";
+import type { ClassifyOptions, KeyCheckOptions, VoiceSessionConfig } from "../types";
 import engine from "./gemini-live";
 
 const config: VoiceSessionConfig = {
@@ -192,5 +192,48 @@ describe("gemini-live: teste da chave (contrato com servidor HTTP falso)", () =>
     expect((await check({ schedule: expireAtOnce })).result).toBe("unreachable");
     await http.stop();
     expect((await check()).result).toBe("unreachable");
+  });
+});
+
+describe("gemini-live: desfecho da ligação (contrato com servidor HTTP falso)", () => {
+  let http: Awaited<ReturnType<typeof startFakeHttp>>;
+  beforeEach(async () => {
+    http = await startFakeHttp();
+  });
+  afterEach(() => http.stop());
+  const classify = (options: ClassifyOptions = {}) => {
+    const run = engine.classifyOutcome;
+    if (!run) throw new Error("gemini-live classifies the outcome");
+    return run("chave-de-teste", { transcript: "Cliente: Pode marcar quinta.", tools: [] }, { baseUrl: http.url, ...options });
+  };
+  const palpite = { outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta." };
+
+  it("lê o palpite e cobra o raciocínio como saída, pelo preço do modelo de texto", async () => {
+    // 1 milhão de entrada a US$ 0,30 e 100 mil de saída (60 mil de resposta, 40 mil de raciocínio) a US$ 2,50: 55 centavos.
+    http.respond({
+      status: 200,
+      body: { candidates: [{ content: { parts: [{ text: JSON.stringify(palpite) }] } }], usageMetadata: { promptTokenCount: 1_000_000, candidatesTokenCount: 60_000, thoughtsTokenCount: 40_000 } },
+    });
+    expect(await classify()).toEqual({ ok: true, guess: palpite, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 100_000 }, costCents: 55 });
+    expect(http.requests[0]).toMatchObject({ method: "POST", url: "/models/gemini-3.5-flash-lite:generateContent", headers: { "x-goog-api-key": "chave-de-teste" } });
+  });
+
+  it.each([
+    ["400 com API_KEY_INVALID", "rejected", { status: 400, body: { error: { code: 400, details: [{ reason: "API_KEY_INVALID" }] } } }],
+    ["404", "model_unavailable", { status: 404, body: { error: { code: 404 } } }],
+    ["400 sem motivo de chave (schema recusado)", "unexpected_response", { status: 400, body: { error: { code: 400 } } }],
+  ] as const)("%s vira %s, sem custo", async (_, failure, reply) => {
+    http.respond(reply);
+    expect(await classify()).toEqual({ ok: false, failure, status: reply.status, model: "gemini-3.5-flash-lite", usage: {}, costCents: 0 });
+  });
+
+  it("um 200 fora da forma é falha, mas o que foi cobrado vem junto", async () => {
+    http.respond({ status: 200, body: { candidates: [{ content: { parts: [{ text: "não é JSON" }] } }], usageMetadata: { promptTokenCount: 1_000_000 } } });
+    expect(await classify()).toEqual({ ok: false, failure: "unexpected_response", status: 200, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 0 }, costCents: 30 });
+  });
+
+  it("sem resposta no prazo é provedor fora do ar", async () => {
+    http.respond({ status: 200, hang: true });
+    expect(await classify({ schedule: expireAtOnce })).toMatchObject({ ok: false, failure: "unreachable", status: null, costCents: 0 });
   });
 });

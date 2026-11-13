@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
+import { UNKNOWN_OUTCOME } from "../outcome";
 import type { VoiceEngine, VoiceSession, VoiceSessionConfig, VoiceSessionEvents } from "../types";
 
 /**
@@ -182,6 +183,12 @@ export function createSimulatedEngine(options: { schedule?: Schedule } = {}): Vo
     pricing: { centsPerMinute: 0, checkedOn: "2026-11-10", source: "motor simulado: não chama provedor, não tem custo" },
     async connect(config) {
       return new SimulatedSession(resolveScript(config), schedule);
+    },
+    async classifyOutcome() {
+      // O motor simulado não chama provedor. Classificar aqui seria inventar sobre o cliente: o
+      // desfecho honesto de uma instalação sem provedor é `unknown`, e é o que a tela mostra. Sem
+      // provedor, sem custo.
+      return { ok: true, guess: UNKNOWN_OUTCOME, model: "simulated", usage: {}, costCents: 0 };
     },
     async checkKey() {
       return { result: "not_needed" };

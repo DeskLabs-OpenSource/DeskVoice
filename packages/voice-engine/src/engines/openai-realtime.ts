@@ -28,12 +28,27 @@ import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
-import type { KeyCheckResult, Usage, VoiceEngine, VoiceSession } from "../types";
+import { classifyOutcomeOverHttp } from "../outcome-over-http";
+import { OUTCOME_GUESS_SCHEMA, outcomePrompt, readOutcomeGuess } from "../outcome";
+import type { ClassifyOptions, EnginePricing, KeyCheckResult, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
 const DEFAULT_API_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-realtime-2.1";
 const DEFAULT_VOICE = "marin";
+// Modelo de texto que classifica o desfecho: barato e com saída estruturada (conferido em
+// 2026-11-13). O `gpt-5-mini` já tem desligamento marcado, então o padrão é o nano. Trocar de modelo
+// é trocar o preço abaixo junto, numa versão: o custo medido só vale para o modelo que ele descreve.
+const OUTCOME_MODEL = "gpt-5-nano";
+// gpt-5-nano, por milhão de tokens: entrada US$ 0,05, entrada em cache US$ 0,005, saída US$ 0,40
+// (a saída inclui o raciocínio, que vem somado em `completion_tokens`).
+const OUTCOME_PRICING: EnginePricing = {
+  centsPerMillionInputTokens: 5,
+  centsPerMillionCachedInputTokens: 0.5,
+  centsPerMillionOutputTokens: 40,
+  checkedOn: "2026-11-13",
+  source: "https://developers.openai.com/api/docs/pricing",
+};
 // Vozes do Realtime, conferidas em 2026-11-12 (developers.openai.com, guia de conversas Realtime).
 // A documentação recomenda marin e cedar pela qualidade; ela não descreve o estilo de cada uma.
 const VOICES = [
@@ -104,6 +119,21 @@ const isBillingError = (body: unknown): boolean => {
   return BILLING_CODES.has(error?.code ?? "") || BILLING_CODES.has(error?.type ?? "");
 };
 const isRegionError = (body: unknown): boolean => providerError.safeParse(body).data?.error.code === "unsupported_country_region_territory";
+const chatUsage = z.object({
+  usage: z.object({
+    prompt_tokens: z.number(),
+    completion_tokens: z.number(),
+    prompt_tokens_details: z.object({ cached_tokens: z.number().optional() }).nullish(),
+  }),
+});
+/** O consumo de `/chat/completions`: a entrada em cache sai do total de entrada, para não ser cobrada duas vezes. */
+const chatUsageOf = (body: unknown): Usage => {
+  const usage = chatUsage.safeParse(body).data?.usage;
+  if (!usage) return {};
+  const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+  return { inputTokens: usage.prompt_tokens - cached, cachedInputTokens: cached, outputTokens: usage.completion_tokens };
+};
+
 const classifyError = (status: number, body: unknown): KeyCheckResult | undefined => {
   if (status === 429 && isBillingError(body)) return "no_credit";
   if (status === 403 && isRegionError(body)) return "region_unavailable";
@@ -289,6 +319,34 @@ const engine: VoiceEngine = {
 
     if (config.greeting) session.say(config.greeting);
     return session;
+  },
+
+  async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
+    return classifyOutcomeOverHttp(
+      {
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/chat/completions`,
+        headers: { Authorization: `Bearer ${apiKey}` },
+        model: OUTCOME_MODEL,
+        pricing: OUTCOME_PRICING,
+        body: JSON.stringify({
+          model: OUTCOME_MODEL,
+          messages: [{ role: "user", content: outcomePrompt(input) }],
+          response_format: { type: "json_schema", json_schema: { name: "desfecho", strict: true, schema: OUTCOME_GUESS_SCHEMA } },
+        }),
+        read: (body) => {
+          const content = (body as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content;
+          if (typeof content !== "string") return null;
+          try {
+            return readOutcomeGuess(JSON.parse(content));
+          } catch {
+            return null;
+          }
+        },
+        usage: chatUsageOf,
+        classify: classifyError,
+      },
+      options,
+    );
   },
 
   checkKey(apiKey, options = {}) {
