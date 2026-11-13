@@ -15,11 +15,12 @@ const SILENCE = Buffer.alloc(WHATSAPP_FRAME_BYTES);
 // Teto do áudio de quem ligou guardado à espera de quem ouça (a sessão ainda abre o motor): 5 s a 8 kHz.
 const MAX_HELD_BYTES = 5 * 16_000;
 /**
- * Enquanto quem ligou está calado, o celular para de mandar áudio (a transmissão descontínua do
- * WhatsApp), e o WaCalls só repassa o que recebe (`audio.go`, `handleInbound`). Sem áudio, o
- * detector de turno do motor nunca vê o silêncio e só responde quando algo volta a chegar: 4 a 5 s
- * medidos em 13/11/2026, contra menos de 2 s pelo painel. Passado este tempo sem nada, a conversa
- * recebe silêncio no lugar.
+ * Nas pausas de quem ligou, nenhum áudio chega pelo canal: medido em 13/11/2026 nas gravações, em
+ * que o lado de quem ligou fica em zero exato (o preenchimento de `recording.ts` para tempo sem
+ * áudio recebido). O WaCalls só repassa o que recebe (`audio.go`, `handleInbound`); a explicação
+ * provável é o celular parar de mandar no silêncio, o que não foi medido no WaCalls. Sem áudio, o
+ * detector de turno do motor não vê o fim da fala e o agente demorou 4 a 5 s para responder, contra
+ * menos de 2 s pelo painel. Passado este tempo sem nada, a conversa recebe silêncio no lugar.
  */
 const CALLER_GAP_MS = 100;
 const CALLER_SILENCE = Buffer.alloc((SAMPLE_RATE / 1000) * FRAME_MS * 2);
