@@ -12,4 +12,5 @@ transferência aparece como "Transferência não atendida", e não mais como "Tr
 Na lista de chamadas ela continua como "Transferida"; o motivo `transfer_unanswered` sai pela API e
 na exportação. Se quem ligou desligou enquanto a transferência tocava, o aviso sai igual, e o motivo
 continua `transferred`. A transferência atendida não gera aviso, seja quem for que desligue depois.
+As transferências atendidas gravadas antes desta versão ficaram registradas como não atendidas e passam a aparecer como "Transferência não atendida" na linha do tempo; as novas aparecem certas.
 Crédito: @webtecnica.
