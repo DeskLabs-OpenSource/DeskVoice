@@ -19,12 +19,14 @@ function check(root: string): string[] {
   const prefix = /^DESKVOICE_IMAGE_PREFIX=(\S+)$/m.exec(read(root, SOURCE))?.[1];
   if (!prefix) return [`${SOURCE}: sem uma linha DESKVOICE_IMAGE_PREFIX=<endereço>`];
   const violations: string[] = [];
+  const escaped = prefix.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&");
+  const pinnedWacalls = new RegExp(`${escaped}/wacalls@sha256:[0-9a-f]{64}`);
   for (const dir of SIDES) {
     for (const file of listFiles(root, dir, isText)) {
       const text = read(root, file);
       // O WaCalls do fork mora no mesmo registro, mas não é imagem do DeskVoice: vai fixado por
       // resumo, e um fork do DeskVoice que troca o prefixo continua baixando o mesmo WaCalls.
-      const own = text.replaceAll(new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/wacalls@sha256:[0-9a-f]{64}`, "g"), "");
+      const own = text.split("\n").filter((line) => !pinnedWacalls.test(line)).join("\n");
       if (file !== SOURCE && own.includes(prefix)) violations.push(`${file}: repete \`${prefix}\`, que só pode estar em ${SOURCE}`);
       // Canal não é versão: nem padrão do Compose, nem valor gravado pelo kit. Os testes do kit
       // ficam de fora: eles montam de propósito a instalação antiga, que gravava o canal.
