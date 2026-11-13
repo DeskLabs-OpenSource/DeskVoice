@@ -416,14 +416,18 @@ esac
 
 ufw_rules="5060/udp ${rtp_start}:${rtp_end}/udp"
 [ "$entry_mode" = caddy ] && ufw_rules="$ufw_rules 80/tcp 443/tcp"
+# O Docker publica as portas por fora do ufw (medido: docs/fundacao/ufw-e-docker.md). As regras
+# abaixo só valem onde quem escuta é o host, e por isso são oferecidas como opcionais: vender a
+# regra como proteção daria a quem instala a impressão de que a porta está fechada.
 if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
-  warn "O firewall ufw está ativo. Regras necessárias:"
+  warn "O firewall ufw está ativo, mas ele não filtra as portas que o Docker publica: 5060/udp e ${rtp_start}-${rtp_end}/udp ficam abertas mesmo sem regra nenhuma, e um 'ufw deny' também não as fecha."
+  info "Estas regras são opcionais, para o caso de quem escuta ser o host (instalação sem Docker):"
   for rule in $ufw_rules; do info "    $SUDO ufw allow $rule"; done
   if [ "$DRY_RUN" = 1 ]; then would "oferecer aplicar essas regras"
   elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ] || { [ "$ASSUME_YES" != 1 ] && confirm "Aplico essas regras agora?"; }; then
     for rule in $ufw_rules; do $SUDO ufw allow "$rule" >/dev/null || die "Não consegui aplicar a regra $rule no ufw." "Rode à mão: $SUDO ufw allow $rule"; done
-    ok "Regras aplicadas no ufw"
-  else warn "Regras NÃO aplicadas. Sem elas a ligação pode ficar muda: rode os comandos acima."; fi
+    ok "Regras aplicadas no ufw (elas não mudam nada para as portas publicadas pelo Docker)"
+  else warn "Regras NÃO aplicadas — e, com o Docker publicando as portas, elas não fariam diferença: não é por falta delas que uma ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor da VPS, se ele tiver um, ou uma regra na cadeia DOCKER-USER desta máquina (ver docs/fundacao/ufw-e-docker.md)."; fi
 elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; then
   info "DESKVOICE_APPLY_UFW=yes não teve efeito: o firewall ufw não está ativo nesta máquina, e não há regra a aplicar."
 fi
