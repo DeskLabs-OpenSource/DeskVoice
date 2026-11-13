@@ -274,3 +274,15 @@ O que não prova:
 - **O pareamento com um número de verdade.** Ninguém leu o QR.
 - **O clique na tela nesta versão.** Foi pela API.
 - **A gravação com fala humana.** O WAV não foi ouvido.
+
+## Processadores e memória das máquinas de prova (medido em 2026-11-13)
+
+Os documentos de entrada falam em "VPS de 8 GB e 4 vCPU", mas as seções acima só anotavam a memória. Medido por SSH (`nproc` e `free -m`), às 00:20 UTC:
+
+| Máquina | vCPU | Memória total |
+|---|---|---|
+| `hg-vps` (primeira instalação real) | 4 | 7940 MiB |
+| `vps-teste` (segunda VPS) | 4 | 7940 MiB |
+| VPS da parceira, dedicada (AlmaLinux) | 4 | 11699 MiB (seção "Na VPS da parceira") |
+
+"8 GB" é o tamanho vendido. O sistema vê 7940 MiB.
