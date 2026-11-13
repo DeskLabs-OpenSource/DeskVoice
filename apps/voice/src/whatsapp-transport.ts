@@ -14,6 +14,15 @@ const WHATSAPP_FRAME_BYTES = (WHATSAPP_SAMPLE_RATE / 1000) * FRAME_MS * 2;
 const SILENCE = Buffer.alloc(WHATSAPP_FRAME_BYTES);
 // Teto do áudio de quem ligou guardado à espera de quem ouça (a sessão ainda abre o motor): 5 s a 8 kHz.
 const MAX_HELD_BYTES = 5 * 16_000;
+/**
+ * Enquanto quem ligou está calado, o celular para de mandar áudio (a transmissão descontínua do
+ * WhatsApp), e o WaCalls só repassa o que recebe (`audio.go`, `handleInbound`). Sem áudio, o
+ * detector de turno do motor nunca vê o silêncio e só responde quando algo volta a chegar: 4 a 5 s
+ * medidos em 13/11/2026, contra menos de 2 s pelo painel. Passado este tempo sem nada, a conversa
+ * recebe silêncio no lugar.
+ */
+const CALLER_GAP_MS = 100;
+const CALLER_SILENCE = Buffer.alloc((SAMPLE_RATE / 1000) * FRAME_MS * 2);
 
 /**
  * O par fica na rede interna do Compose, ao lado do WaCalls: nenhum servidor STUN (o padrão da
@@ -77,11 +86,22 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
   let left = false;
   let remoteGone = false;
   let released: Promise<void> | undefined;
+  let lastHeard = 0;
+  let cancelFill: (() => void) | undefined;
 
   const open = (): boolean => !left && released === undefined && channel.readyState === "open";
   const pacer = createPacer({ schedule: options.schedule, now: options.now, frameBytes: WHATSAPP_FRAME_BYTES, silence: SILENCE, isOpen: open, write: (frame) => channel.send(frame) });
   const startIfReady = (): void => {
     if (mediaUp && open()) pacer.start();
+  };
+  // ponytail: um tick de 20 ms sem contar desde o começo; o atraso do timer só deixa o silêncio um
+  // pouco mais curto, o que o detector de turno tolera. Contar como o `pacer` se isso aparecer.
+  const fillCallerGaps = (): void => {
+    cancelFill = options.schedule(() => {
+      if (left || released) return;
+      if (audioHandler && options.now() - lastHeard >= CALLER_GAP_MS) audioHandler(CALLER_SILENCE);
+      fillCallerGaps();
+    }, FRAME_MS);
   };
 
   /** Quem ligou saiu, ou a perna caiu: avisa a conversa uma vez. Quem solta a perna é `close`. */
@@ -90,6 +110,7 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
     left = true;
     held = [];
     pacer.stop();
+    cancelFill?.();
     hangupHandler?.();
   };
 
@@ -97,6 +118,7 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
   const release = (): Promise<void> =>
     (released ??= (async () => {
       pacer.stop();
+      cancelFill?.();
       await peer.close().catch((error: unknown) => log("error", "could not close the WhatsApp peer connection", { error: messageOf(error) }));
       if (!remoteGone) await leg.end().catch((error: unknown) => log("error", "could not end the call in WaCalls", { error: messageOf(error) }));
     })());
@@ -107,6 +129,7 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
   });
   channel.onMessage.subscribe((data) => {
     if (typeof data === "string" || data.length < 2 || left) return;
+    lastHeard = options.now();
     // Meia amostra no fim não é áudio: o PCM16 tem dois bytes por amostra.
     const pcm = resample(data.subarray(0, data.length - (data.length % 2)), WHATSAPP_SAMPLE_RATE, SAMPLE_RATE);
     if (audioHandler) audioHandler(pcm);
@@ -158,6 +181,10 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
     },
     close: release,
     mediaConnected() {
+      if (!mediaUp && !left && !released) {
+        lastHeard = options.now();
+        fillCallerGaps();
+      }
       mediaUp = true;
       startIfReady();
     },

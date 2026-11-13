@@ -75,6 +75,24 @@ describe("ligação pelo WhatsApp: o transporte contra o par do WaCalls", { time
     expect(context.heard[0]).toHaveLength(960);
   });
 
+  it("quem ligou se calou e o celular parou de mandar áudio: a conversa recebe silêncio no lugar, e o detector de turno vê o fim da fala", async () => {
+    const context = await connect();
+    await started(context);
+    const caller = tone(960, 16_000);
+    context.fake.channel?.send(caller);
+    await waitFor(() => context.heard.length === 1, "the caller audio");
+    // Nada chega do celular por 600 ms: depois de 100 ms sem áudio, um pedaço de silêncio a cada 20 ms.
+    for (let elapsed = 0; elapsed < 600; elapsed += 20) context.time.advance(20);
+    const filled = context.heard.slice(1);
+    expect(filled).toHaveLength(26);
+    for (const frame of filled) expect(frame.equals(Buffer.alloc(320))).toBe(true);
+    // O áudio volta: o silêncio para de ser inventado.
+    context.fake.channel?.send(caller);
+    await waitFor(() => context.heard.length === 28, "the caller audio again");
+    context.time.advance(80);
+    expect(context.heard).toHaveLength(28);
+  });
+
   it("nada sai antes de o WaCalls dizer connected: a saudação não se perde no buffer de 240 ms dele", async () => {
     const context = await connect();
     context.transport.sendAudio(tone(1600, 8000));

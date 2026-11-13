@@ -117,8 +117,12 @@ describe("ligação pelo WhatsApp: entrada e atendimento", { timeout: 60_000 }, 
     expect(frames.slice(0, 10).every((frame) => frame.some((byte) => byte !== 0))).toBe(true);
     expect(frames[11]?.every((byte) => byte === 0)).toBe(true);
 
+    // Quem ligou não disse nada nesses 240 ms: o motor recebeu silêncio, e o detector de turno anda.
+    const silence = engine.audioBytes;
+    expect(silence).toBeGreaterThan(0);
+    // Sem o relógio andar, nenhum silêncio novo: o que chega agora é só a voz.
     wacalls.speak(call, Buffer.alloc(1920, 2));
-    await waitFor(() => engine.audioBytes === 960, "the caller audio at 8 kHz");
+    await waitFor(() => engine.audioBytes - silence === 960, "the caller audio at 8 kHz");
   });
 
   it("quem ligou desliga: a chamada fecha como desligada por quem ligou, sem mandar desligar de novo no WaCalls", async () => {
