@@ -195,7 +195,7 @@ ensure_wacalls() {
   return "$created"
 }
 # A imagem do WaCalls que ESTA instalação usa, por resumo, como o Docker a guarda. Sai do Compose.
-wacalls_image_ref() { sed -n 's/^ *image: \(ghcr\.io\/jotadev66\/wacalls@sha256:[0-9a-f]\{64\}\)$/\1/p' "$DEPLOY_DIR/docker-compose.yml" | head -n 1; }
+wacalls_image_ref() { sed -n 's/^ *image: \(ghcr\.io\/[a-z0-9-]*\/wacalls@sha256:[0-9a-f]\{64\}\)$/\1/p' "$DEPLOY_DIR/docker-compose.yml" | head -n 1; }
 
 # Grava os três arquivos de ambiente. Segredo que já existe fica como está; o resto é
 # regravado com o que foi decidido nesta execução.
