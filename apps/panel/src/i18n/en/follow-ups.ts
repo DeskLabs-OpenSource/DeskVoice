@@ -14,6 +14,7 @@ const followUps: FollowUpsDictionary = {
   team: "The team",
   owner: "Owner",
   due: "Due",
+  dueNow: "Due now",
   overdue: "Overdue",
   olderThanRetention: "Open for longer than the retention period ({days} days). An open follow-up is never deleted by the retention period: close or cancel it once it is settled.",
   caller: "Phone",

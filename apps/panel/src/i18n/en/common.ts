@@ -94,7 +94,7 @@ const common: CommonDictionary = {
     number_already_registered: "This number is already registered.",
     last_owner: "This is the only active owner. Make another person an owner first.",
     cannot_manage_owner: "Only an owner can invite, change, disable or remove another owner.",
-    has_history: "This person has decided approvals, and the history must keep saying who decided. Disable the account instead of removing it.",
+    has_history: "This person has decided approvals or closed follow-ups, and the history must keep saying who decided and who closed. Disable the account instead of removing it.",
     cannot_change_self_role: "You cannot change your own role. Ask another owner.",
     email_taken: "This e-mail already has an account on this panel.",
     wrong_password: "The current password does not match.",

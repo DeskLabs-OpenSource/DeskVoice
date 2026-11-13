@@ -15,7 +15,10 @@ export type FollowUpStage = "due" | "overdue";
 
 /** A tarefa da fila que lembra o dono (`apps/routines/src/routines/follow_up.ts`). */
 export const FOLLOW_UP_TASK = "follow_up";
-/** Quanto depois do prazo a pendência ainda aberta é avisada como vencida, uma única vez. */
+/**
+ * "Vencida" tem uma definição só: aberta um dia depois do prazo. Antes disso, passado o prazo, ela é
+ * "para agora". A rotina avisa a vencida com esta constante, e a tela marca e filtra com ela.
+ */
 export const FOLLOW_UP_OVERDUE_AFTER_MS = 24 * 60 * 60 * 1000;
 export const FOLLOW_UP_TITLE_MAX = 200;
 export const FOLLOW_UP_NOTE_MAX = 500;
@@ -36,6 +39,15 @@ const eventOf = (id: string, row: Snapshot, extra: object = {}): object => ({
 });
 
 /**
+ * A pessoa, se está ativa; senão `null`. `for share` segura a linha até o fim da transação: a
+ * desativação, que grava na mesma linha, espera, e depois dela `returnFollowUpsToTeam` devolve a
+ * pendência. Se a desativação veio antes, a releitura já vê a pessoa desativada.
+ */
+async function activePerson(q: OrgQuery, userId: string): Promise<string | null> {
+  return (await q.one<{ id: string }>("select id from users where id = $1 and disabled_at is null for share", [userId]))?.id ?? null;
+}
+
+/**
  * Cria a pendência nascida numa ligação e marca o lembrete na fila para `dueAt`. O dono vem da
  * configuração do agente ("Dono das pendências"), nunca do modelo; sem dono, ou com o dono
  * desativado, a pendência é da equipe. O telefone é o de quem está do outro lado da linha.
@@ -45,19 +57,18 @@ export async function createFollowUp(
   input: { callId: string; agentId: string; title: string; details: string; dueAt: Date },
   now: Date,
 ): Promise<{ id: string; ownerUserId: string | null; taskId: string }> {
-  const origin = await q.one<{ owner: string | null; caller: string | null }>(
-    `select u.id as owner, case when c.direction = 'outbound' then c.to_e164 else c.from_e164 end as caller
-       from calls c
-       left join agents a on a.id = $2
-       left join users u on u.id = a.follow_up_owner_user_id and u.disabled_at is null
-      where c.id = $1`,
+  const origin = await q.one<{ configured: string | null; caller: string | null }>(
+    `select (select follow_up_owner_user_id from agents where id = $2) as configured,
+            case when c.direction = 'outbound' then c.to_e164 else c.from_e164 end as caller
+       from calls c where c.id = $1`,
     [input.callId, input.agentId],
   );
   if (!origin) throw new Error(`Call ${input.callId} not found in this organization: the follow-up was not created`);
+  const owner = origin.configured === null ? null : await activePerson(q, origin.configured);
   const row = await q.one<{ id: string } & Snapshot>(
     `insert into follow_ups (organization_id, call_id, caller_e164, title, details, owner_user_id, due_at, created_at)
      values ($1, $2, $3, $4, $5, $6, $7, $8) returning id, call_id, owner_user_id, due_at, status`,
-    [q.organizationId, input.callId, origin.caller, input.title, input.details, origin.owner, input.dueAt, now],
+    [q.organizationId, input.callId, origin.caller, input.title, input.details, owner, input.dueAt, now],
   );
   if (!row) throw new Error("Follow-up was not created");
   await recordEvent(q, input.callId, "follow_up_created", eventOf(row.id, row), now);
@@ -69,7 +80,7 @@ export type AssignResult = "assigned" | "not_found" | "closed" | "owner_unavaila
 
 /** Troca o dono de uma pendência aberta. `null` devolve à equipe. Só pessoa ativa da organização recebe. */
 export async function assignFollowUp(q: OrgQuery, id: string, ownerUserId: string | null, now: Date): Promise<AssignResult> {
-  if (ownerUserId !== null && !(await q.one("select 1 from users where id = $1 and disabled_at is null", [ownerUserId]))) return "owner_unavailable";
+  if (ownerUserId !== null && (await activePerson(q, ownerUserId)) === null) return "owner_unavailable";
   const row = await q.one<Snapshot>(
     "update follow_ups set owner_user_id = $2 where id = $1 and status = 'open' returning call_id, owner_user_id, due_at, status",
     [id, ownerUserId],

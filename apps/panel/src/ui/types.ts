@@ -142,6 +142,8 @@ export interface FollowUp {
   ownerUserId: string | null;
   ownerName: string | null;
   dueAt: string;
+  /** Quando ela passa a ser vencida: um dia depois do prazo (regra do núcleo, calculada no servidor). */
+  overdueAt: string;
   status: FollowUpStatus;
   closedAt: string | null;
   closedBy: string | null;

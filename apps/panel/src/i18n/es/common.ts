@@ -94,7 +94,7 @@ const common: CommonDictionary = {
     number_already_registered: "Este número ya está registrado.",
     last_owner: "Esta es la única persona con rol de dueño activa. Haz dueña a otra persona antes.",
     cannot_manage_owner: "Solo un dueño puede invitar, cambiar, desactivar o quitar a otro dueño.",
-    has_history: "Esta persona ya decidió aprobaciones, y el historial debe seguir diciendo quién decidió. Desactiva la cuenta en lugar de quitarla.",
+    has_history: "Esta persona ya decidió aprobaciones o cerró pendientes, y el historial debe seguir diciendo quién decidió y quién cerró. Desactiva la cuenta en lugar de quitarla.",
     cannot_change_self_role: "No puedes cambiar tu propio rol. Pídelo a otro dueño.",
     email_taken: "Este correo ya tiene cuenta en este panel.",
     wrong_password: "La contraseña actual no coincide.",

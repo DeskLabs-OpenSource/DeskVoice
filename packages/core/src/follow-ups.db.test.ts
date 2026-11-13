@@ -41,6 +41,20 @@ async function scene(label: string, options: { ownedBy?: "person" | "team"; dire
   return { org, person, agent, call, create };
 }
 
+/** Espera alguma consulta com `text` ficar parada numa trava. Devolve se ficou; o prazo só existe para não travar. */
+async function someoneWaitsOn(text: string, timeoutMs = 3000): Promise<boolean> {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    const { rows } = await owner.pool.query<{ n: number }>(
+      "select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and position($1 in query) > 0",
+      [text],
+    );
+    if ((rows[0]?.n ?? 0) > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
+
 const eventsOf = (call: string) =>
   withSystem(app, (q) => q.many<{ kind: string; payload: Record<string, unknown> }>("select kind, payload from call_events where call_id = $1 order by id", [call]));
 const followUpOf = (id: string) => withSystem(app, (q) => q.one("select caller_e164, owner_user_id, status, closed_by, closed_at, closing_note from follow_ups where id = $1", [id]));
@@ -68,6 +82,33 @@ describe("createFollowUp", () => {
     const { person, create } = await scene("follow-up disabled owner");
     await withSystem(app, (q) => q.exec("update users set disabled_at = $2 where id = $1", [person, at]));
     expect((await create()).ownerUserId).toBeNull();
+  });
+});
+
+describe("a corrida com a desativação", () => {
+  it("a pendência nova espera a desativação em curso do dono e então vai para a equipe", async () => {
+    const { org, person, create } = await scene("follow-up disable race");
+    let release: () => void = () => undefined;
+    let updated: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const didUpdate = new Promise<void>((resolve) => (updated = resolve));
+    // A desativação já gravou e devolveu à equipe o que havia; a transação ainda não confirmou.
+    const disabling = withOrg(app, org, async (q) => {
+      await q.exec("update users set disabled_at = $2 where id = $1", [person, at]);
+      await returnFollowUpsToTeam(q, person, at);
+      updated();
+      await held;
+    });
+    await didUpdate;
+    const creating = create();
+    try {
+      // Com a trava, a leitura da pessoa espera a desativação. Sem ela, leria a pessoa ainda ativa.
+      expect(await someoneWaitsOn("for share")).toBe(true);
+    } finally {
+      release();
+      await disabling;
+    }
+    expect((await creating).ownerUserId).toBeNull();
   });
 });
 

@@ -1,4 +1,4 @@
-import { TRANSCRIPT_RETENTION_SETTING, transcriptRetentionOf } from "@deskvoice/core";
+import { FOLLOW_UP_OVERDUE_AFTER_MS, TRANSCRIPT_RETENTION_SETTING, transcriptRetentionOf } from "@deskvoice/core";
 import { ApiError, handle } from "../../../../server/context";
 import { followUpsFor } from "../../../../server/follow-ups";
 
@@ -10,7 +10,8 @@ type View = (typeof VIEWS)[number];
 const VIEW_QUERY: Record<View, (userId: string, now: Date) => [string, unknown[]]> = {
   open: () => ["f.status = 'open' order by f.due_at", []],
   mine: (userId) => ["f.status = 'open' and f.owner_user_id = $1 order by f.due_at", [userId]],
-  overdue: (_userId, now) => ["f.status = 'open' and f.due_at <= $1 order by f.due_at", [now]],
+  // Vencida: aberta um dia depois do prazo, a mesma regra da rotina que avisa.
+  overdue: (_userId, now) => ["f.status = 'open' and f.due_at <= $1 order by f.due_at", [new Date(now.getTime() - FOLLOW_UP_OVERDUE_AFTER_MS)]],
   closed: () => ["f.status <> 'open' order by f.closed_at desc", []],
 };
 

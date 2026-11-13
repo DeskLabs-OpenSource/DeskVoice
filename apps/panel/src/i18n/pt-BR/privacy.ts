@@ -26,7 +26,7 @@ const privacy = {
   confirmYes: "Apagar e guardar por {days} dias",
   exportTitle: "Dados de uma pessoa que ligou",
   exportLead:
-    "Quando alguém pede o que a central guarda sobre ela, informe o telefone. Sai um arquivo com as chamadas desse número nesta organização, os eventos delas, as pendências abertas para ele e a entrada na lista de não ligar. A fala que já saiu pelo prazo aparece como apagada. Cada chamada diz se tem gravação; o áudio não vai no arquivo e se ouve na tela da chamada.",
+    "Quando alguém pede o que a central guarda sobre ela, informe o telefone. Sai um arquivo com as chamadas desse número nesta organização, os eventos delas, as pendências desse número, abertas e fechadas, e a entrada na lista de não ligar. A fala que já saiu pelo prazo aparece como apagada. Cada chamada diz se tem gravação; o áudio não vai no arquivo e se ouve na tela da chamada.",
   exportPhone: "Telefone",
   exportPhoneHint: "A busca é pelo número. Se a pessoa ligou de outro telefone, exporte cada um.",
   exportRun: "Exportar",

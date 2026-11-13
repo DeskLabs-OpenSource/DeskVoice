@@ -92,7 +92,7 @@ const common = {
     number_already_registered: "Este número já está cadastrado.",
     last_owner: "Esta é a única pessoa com papel de dono ativa. Torne outra pessoa dona antes.",
     cannot_manage_owner: "Só um dono pode convidar, alterar, desativar ou remover outro dono.",
-    has_history: "Esta pessoa já decidiu aprovações, e o histórico precisa continuar dizendo quem decidiu. Desative a conta em vez de remover.",
+    has_history: "Esta pessoa já decidiu aprovações ou fechou pendências, e o histórico precisa continuar dizendo quem decidiu e quem fechou. Desative a conta em vez de remover.",
     cannot_change_self_role: "Você não pode trocar o próprio papel. Peça a outro dono.",
     email_taken: "Este e-mail já tem conta neste painel.",
     wrong_password: "A senha atual não confere.",

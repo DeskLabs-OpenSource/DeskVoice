@@ -1,13 +1,13 @@
-import { createFollowUp, withOrg } from "@deskvoice/core";
+import { assignFollowUp, closeFollowUp, createFollowUp, withOrg } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { NOW, call, createCall, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
-import { PATCH as patchAgent } from "./agents/[id]/route";
+import { GET as getAgent, PATCH as patchAgent } from "./agents/[id]/route";
 import { POST as close } from "./follow-ups/[id]/close/route";
 import { PATCH as assign } from "./follow-ups/[id]/route";
 import { GET as owners } from "./follow-ups/owners/route";
 import { GET as list } from "./follow-ups/route";
 import { GET as notifications } from "./notifications/route";
-import { PATCH as patchMember } from "./team/users/[id]/route";
+import { DELETE as removeMember, PATCH as patchMember } from "./team/users/[id]/route";
 
 const panel = startPanel();
 afterAll(() => panel.close());
@@ -22,6 +22,7 @@ interface Item {
   closingNote: string | null;
   closedByName: string | null;
   canChange: boolean;
+  overdueAt: string;
 }
 type Listed = { items: Item[]; retentionDays: number | null; people?: Array<{ id: string; name: string }> };
 
@@ -40,6 +41,18 @@ async function scene(label: string) {
   };
   return { org, owner, operator, colleague, agent, callId, open };
 }
+/** Espera alguma transação desta suíte ficar parada numa trava de `follow_ups`, sem dormir tempo fixo. */
+async function untilWaitingOnLock(org: string): Promise<void> {
+  const deadline = performance.now() + 10_000;
+  for (;;) {
+    const row = await withOrg(panel.app, org, (q) =>
+      q.one<{ n: number }>("select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and query like '%follow_ups%'"),
+    );
+    if ((row?.n ?? 0) > 0) return;
+    if (performance.now() > deadline) throw new Error("no transaction is waiting on a follow-up lock");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 const view = async (cookie: string, name: string): Promise<Listed> => (await call(list, { cookie, query: `?view=${name}` })).data as Listed;
 const titles = (listed: Listed): string[] => listed.items.map((item) => item.title).sort();
 
@@ -48,14 +61,18 @@ describe("the follow-ups screen", () => {
     const { operator, colleague, open } = await scene("follow-ups views");
     await open("Da equipe", null);
     await open("Do operador", operator.id);
-    await open("Da colega, vencida", colleague.id, -2);
+    await open("Da colega, vencida", colleague.id, -25);
+    // Passou do prazo há 2 horas: é "para agora", e só vira vencida um dia depois do prazo.
+    await open("Da colega, para agora", colleague.id, -2);
 
-    expect(titles(await view(operator.cookie, "open"))).toEqual(["Da colega, vencida", "Da equipe", "Do operador"]);
+    expect(titles(await view(operator.cookie, "open"))).toEqual(["Da colega, para agora", "Da colega, vencida", "Da equipe", "Do operador"]);
     expect(titles(await view(operator.cookie, "mine"))).toEqual(["Do operador"]);
     expect(titles(await view(operator.cookie, "overdue"))).toEqual(["Da colega, vencida"]);
+    const dueNow = (await view(operator.cookie, "open")).items.find((item) => item.title === "Da colega, para agora");
+    expect(dueNow?.overdueAt).toBe(new Date(NOW.getTime() + 22 * HOUR_MS).toISOString());
     expect(titles(await view(operator.cookie, "closed"))).toEqual([]);
     const byTitle = Object.fromEntries((await view(operator.cookie, "open")).items.map((item) => [item.title, item.canChange]));
-    expect(byTitle).toEqual({ "Da equipe": true, "Do operador": true, "Da colega, vencida": false });
+    expect(byTitle).toEqual({ "Da equipe": true, "Do operador": true, "Da colega, vencida": false, "Da colega, para agora": false });
     expect((await call(list, { cookie: operator.cookie, query: "?view=all" })).code).toBe("validation_error");
   });
 
@@ -111,11 +128,15 @@ describe("the follow-ups screen", () => {
   });
 
   it("the agent screen saves the follow-up owner, and refuses a person of another organization", async () => {
-    const { owner, operator, agent } = await scene("follow-ups agent owner");
+    const { owner, operator, colleague, agent } = await scene("follow-ups agent owner");
     const other = await scene("follow-ups agent owner other");
     expect((await call(patchAgent, { method: "PATCH", cookie: owner.cookie, params: { id: agent }, body: { followUpOwnerUserId: operator.id } })).data).toMatchObject({ followUpOwnerUserId: operator.id });
     const foreign = await call(patchAgent, { method: "PATCH", cookie: owner.cookie, params: { id: agent }, body: { followUpOwnerUserId: other.operator.id } });
-    expect([foreign.status, foreign.code]).toEqual([404, "not_found"]);
+    expect([foreign.status, foreign.code]).toEqual([400, "owner_unavailable"]);
+    // Pessoa desativada também não serve de dono: a tela mostra o motivo, e o dono salvo antes fica.
+    await call(patchMember, { method: "PATCH", cookie: owner.cookie, params: { id: colleague.id }, body: { disabled: true } });
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner.cookie, params: { id: agent }, body: { followUpOwnerUserId: colleague.id } })).code).toBe("owner_unavailable");
+    expect((await call(getAgent, { cookie: owner.cookie, params: { id: agent } })).data).toMatchObject({ followUpOwnerUserId: operator.id });
   });
 
   it("the bell shows the follow-up title read through the id, with a fixed body", async () => {
@@ -126,5 +147,37 @@ describe("the follow-ups screen", () => {
     );
     const shown = (await call(notifications, { cookie: owner.cookie })).data as Array<Record<string, unknown>>;
     expect(shown).toMatchObject([{ body: "Pendência para agora", followUpId: id, followUpTitle: "Retornar para Paula sobre o laudo", followUpStatus: "open" }]);
+  });
+
+  it("an operator's close waits for an admin's reassignment and then sees the new owner: it never closes a follow-up that just changed hands", async () => {
+    const { org, operator, colleague, open } = await scene("follow-ups race");
+    const id = await open("Da equipe", null);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    // O administrador passa a pendência à colega e a transação fica aberta, com a linha presa.
+    const admin = withOrg(panel.app, org, async (q) => {
+      expect(await assignFollowUp(q, id, colleague.id, NOW)).toBe("assigned");
+      await held;
+    });
+    const closing = call(close, { method: "POST", cookie: operator.cookie, params: { id }, body: { status: "done", note: "Fechei antes." } });
+    try {
+      await untilWaitingOnLock(org);
+    } finally {
+      release();
+      await admin;
+    }
+
+    const result = await closing;
+    expect([result.status, result.code]).toEqual([403, "forbidden"]);
+    const [item] = (await view(operator.cookie, "open")).items;
+    expect(item).toMatchObject({ id, ownerUserId: colleague.id, status: "open" });
+  });
+
+  it("a person who closed a follow-up is disabled, never removed: the history keeps who closed", async () => {
+    const { org, owner, colleague, open } = await scene("follow-ups closed by");
+    const id = await open("Da colega", colleague.id);
+    await withOrg(panel.app, org, (q) => closeFollowUp(q, id, { status: "done", note: "Feito.", closedBy: colleague.id }, NOW));
+    const removed = await call(removeMember, { method: "DELETE", cookie: owner.cookie, params: { id: colleague.id } });
+    expect([removed.status, removed.code]).toEqual([409, "has_history"]);
   });
 });

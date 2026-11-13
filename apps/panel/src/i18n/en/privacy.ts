@@ -28,7 +28,7 @@ const privacy: PrivacyDictionary = {
   confirmYes: "Delete and keep for {days} days",
   exportTitle: "Data about a caller",
   exportLead:
-    "When someone asks what the phone system keeps about them, enter the phone number. You get a file with the calls from that number in this organization, their events, the follow-ups opened for it and the do-not-call entry. Speech already removed by the retention period appears as deleted. Each call says whether it has a recording; the audio is not in the file and can be played on the call page.",
+    "When someone asks what the phone system keeps about them, enter the phone number. You get a file with the calls from that number in this organization, their events, the follow-ups for that number, open and closed, and the do-not-call entry. Speech already removed by the retention period appears as deleted. Each call says whether it has a recording; the audio is not in the file and can be played on the call page.",
   exportPhone: "Phone",
   exportPhoneHint: "The search is by number. If the person called from another phone, export each one.",
   exportRun: "Export",

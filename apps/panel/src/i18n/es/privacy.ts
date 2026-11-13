@@ -28,7 +28,7 @@ const privacy: PrivacyDictionary = {
   confirmYes: "Borrar y conservar durante {days} días",
   exportTitle: "Datos de una persona que llamó",
   exportLead:
-    "Cuando alguien pide lo que la central guarda sobre ella, ingrese el teléfono. Sale un archivo con las llamadas de ese número en esta organización, sus eventos, los pendientes abiertos para él y la entrada en la lista de no llamar. Lo dicho que ya salió por el plazo aparece como borrado. Cada llamada dice si tiene grabación; el audio no va en el archivo y se escucha en la pantalla de la llamada.",
+    "Cuando alguien pide lo que la central guarda sobre ella, ingrese el teléfono. Sale un archivo con las llamadas de ese número en esta organización, sus eventos, los pendientes de ese número, abiertos y cerrados, y la entrada en la lista de no llamar. Lo dicho que ya salió por el plazo aparece como borrado. Cada llamada dice si tiene grabación; el audio no va en el archivo y se escucha en la pantalla de la llamada.",
   exportPhone: "Teléfono",
   exportPhoneHint: "La búsqueda es por número. Si la persona llamó desde otro teléfono, exporte cada uno.",
   exportRun: "Exportar",

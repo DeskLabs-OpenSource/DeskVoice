@@ -12,6 +12,7 @@ const followUps = {
   team: "A equipe",
   owner: "Responsável",
   due: "Prazo",
+  dueNow: "Para agora",
   overdue: "Vencida",
   olderThanRetention: "Aberta há mais tempo que o prazo de guarda ({days} dias). Pendência aberta não sai pelo prazo: feche ou cancele quando estiver resolvida.",
   caller: "Telefone",

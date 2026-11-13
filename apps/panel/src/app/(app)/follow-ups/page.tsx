@@ -77,7 +77,9 @@ function FollowUpItem({ item, people, retentionDays, onChanged }: { item: Follow
   const [closing, setClosing] = useState<"done" | "canceled" | null>(null);
   const [note, setNote] = useState("");
   const open = item.status === "open";
-  const overdue = open && new Date(item.dueAt).getTime() <= now;
+  // Passado o prazo, é "para agora"; um dia depois, vencida. O servidor diz quando (`overdueAt`).
+  const overdue = open && new Date(item.overdueAt).getTime() <= now;
+  const dueNow = open && !overdue && new Date(item.dueAt).getTime() <= now;
   const olderThanRetention = open && retentionDays !== null && now - new Date(item.createdAt).getTime() > retentionDays * DAY_MS;
   const run = (task: () => Promise<unknown>): void =>
     void action.run(task).then((ok) => {
@@ -89,7 +91,7 @@ function FollowUpItem({ item, people, retentionDays, onChanged }: { item: Follow
     <li className="grid gap-3 rounded-md border border-line bg-surface px-5 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h2 className="max-w-[60ch] text-[1.07rem] leading-snug font-bold">{item.title}</h2>
-        <Badge tone={!open ? "neutral" : overdue ? "fail" : "accent"}>{overdue ? t.overdue : t.status[item.status]}</Badge>
+        <Badge tone={!open ? "neutral" : overdue ? "fail" : dueNow ? "warn" : "accent"}>{overdue ? t.overdue : dueNow ? t.dueNow : t.status[item.status]}</Badge>
       </div>
       {item.details ? <p className="max-w-[72ch] whitespace-pre-line text-muted">{item.details}</p> : null}
       <dl className="flex flex-wrap gap-x-6 gap-y-1 text-[0.87rem]">

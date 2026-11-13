@@ -14,6 +14,7 @@ const followUps: FollowUpsDictionary = {
   team: "El equipo",
   owner: "Responsable",
   due: "Plazo",
+  dueNow: "Para ahora",
   overdue: "Vencido",
   olderThanRetention: "Abierto hace más tiempo que el plazo de conservación ({days} días). Un pendiente abierto no se borra por el plazo: ciérralo o cancélalo cuando esté resuelto.",
   caller: "Teléfono",
