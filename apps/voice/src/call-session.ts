@@ -346,6 +346,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const enabled = new Map<string, Tool>();
     for (const name of overrides?.tools ?? agent.tools) {
       const tool = deps.tools.get(name);
+      // Sem transferência no canal (ligação pelo WhatsApp), o motor nem a vê: a descrição manda
+      // anunciar a transferência antes de chamar, e quem ligou ouviria "vou transferir" e o recuo.
+      if (name === "transfer_to_human" && !canTransfer) continue;
       if (tool) enabled.set(name, tool);
       else log("error", "agent enables a tool that is not installed; ignoring it", { tool: name });
     }

@@ -107,6 +107,9 @@ export function createPacer(options: PacerOptions): Pacer {
     },
     clear() {
       queue = Buffer.alloc(0);
+      // Fala que entrou e foi descartada antes de o compasso a pegar: o próximo tick não acordaria
+      // quem espera, porque para ele nada começou a tocar.
+      if (!speaking) wake();
     },
     drained: () => (queue.length > 0 || speaking ? new Promise((resolve) => waiters.push(resolve)) : Promise.resolve()),
     start() {
