@@ -95,8 +95,9 @@ hostname -I                                  # IPs da interface
 - **IP público diferente do IP da interface** quer dizer NAT. O instalador detecta e configura o
   Asterisk para anunciar o endereço público; anote os dois, porque é a primeira coisa a conferir
   se a ligação ficar muda.
-- **As portas UDP precisam estar liberadas em dois lugares**: no firewall da VPS (`ufw status`) e
-  no painel da hospedagem. Liberar só TCP é o erro clássico.
+- **As portas UDP são publicadas pelo Docker, e o Docker passa por fora do `ufw`**: quem abre ou
+  fecha é o firewall do painel da hospedagem. `ufw allow` não abre nada e `ufw deny` não fecha nada
+  ([medido](../../../docs/fundacao/ufw-e-docker.md)). Liberar só TCP é o erro clássico.
 - Tronco **por IP**: a operadora precisa cadastrar o IP público da VPS do lado dela.
 
 ## 3. Instalar
@@ -172,8 +173,9 @@ Depois **ligue de um celular** e confira: o agente atende, você o ouve, ele ouv
 A sinalização (SIP, porta 5060) passou, por isso a ligação completa. O áudio (RTP) viaja por
 outras portas e não está chegando. Nesta ordem:
 
-1. **A faixa UDP de RTP está liberada nos dois firewalls?** `ufw status` na VPS **e** o firewall
-   do painel da hospedagem. É a causa em nove de cada dez casos.
+1. **A faixa UDP de RTP está liberada no firewall do painel da hospedagem?** O `ufw` não filtra
+   porta publicada pelo Docker, então `ufw status` não responde a esta pergunta — quem responde é o
+   painel do provedor. É a causa em nove de cada dez casos.
 2. **O Asterisk anuncia o IP público?** Compare `curl -4 -s https://ifconfig.me` com o que a
    checagem de saúde mostra. Se a VPS está atrás de NAT e o Asterisk anuncia o IP interno, a
    operadora manda o áudio para um endereço que não existe na internet. Rode
