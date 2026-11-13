@@ -35,9 +35,13 @@ export const PURGED_TRANSCRIPT = { purged: true } as const;
  * marcador, e devolve quantas trocou. É o único caminho que reescreve `call_events`. Fala já
  * expurgada não tem mais `text`, então rodar de novo não reconta. Só dentro de `withOrg`: numa
  * transação de sistema, o mesmo `update` alcançaria todas as organizações.
+ *
+ * A fala que sustenta o desfecho (`calls.outcome_evidence`) é cópia da transcrição e sai junto, nas
+ * chamadas começadas antes de `before`. O desfecho e a confiança ficam: não são fala de ninguém.
  */
 export async function purgeTranscripts(q: OrgQuery, before: Date): Promise<number> {
   if (q.organizationId === "") throw new Error("purgeTranscripts runs inside withOrg, never withSystem: it would reach every organization");
+  await q.exec("update calls set outcome_evidence = null where outcome_evidence is not null and started_at < $1", [before]);
   return q.exec("update call_events set payload = $2 where kind in ('transcript_user', 'transcript_agent') and payload ? 'text' and at < $1", [
     before,
     JSON.stringify(PURGED_TRANSCRIPT),

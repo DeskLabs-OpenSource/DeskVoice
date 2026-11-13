@@ -5,10 +5,11 @@ import { handle } from "../../../../../server/context";
 import { phone } from "../../../../../server/shapes";
 
 // Tudo o que a organização guarda sobre um telefone, uma linha por registro: as chamadas em que ele
-// é origem ou destino, os eventos delas (a fala expurgada sai com o marcador `{ "purged": true }`),
-// a entrada na lista de não ligar e as pendências do número, abertas e fechadas, com título,
-// detalhes e nota de fechamento. Base: a consulta de @webtecnica no PR #66. Sem filtro de
-// organização à mão: `withOrg` só deixa ver a da sessão, e é isso que impede a ficha de levar o
+// é origem ou destino, com o desfecho e a fala que o sustenta, os eventos delas (a fala expurgada
+// sai com o marcador `{ "purged": true }`), a entrada na lista de não ligar e as pendências do
+// número, abertas e fechadas, com título, detalhes e nota de fechamento. Base: a consulta de
+// @webtecnica no PR #66. Sem filtro de organização à mão: `withOrg` só deixa ver a da sessão, e é
+// isso que impede a ficha de levar o
 // que a pessoa disse a outra empresa da mesma instalação. Cada chamada diz se tem gravação
 // (`recording`), sem o áudio: ele sai pela tela da chamada, e embutido em base64 faria o arquivo
 // de texto crescer cerca de 2,5 MB por minuto de conversa (registro 0016).
@@ -18,7 +19,8 @@ const RECORD_SQL = `
            json_build_object(
              'type', 'call', 'call', c.id, 'direction', c.direction, 'from', c.from_e164, 'to', c.to_e164,
              'status', c.status, 'endReason', c.end_reason, 'engine', c.engine, 'startedAt', c.started_at,
-             'answeredAt', c.answered_at, 'endedAt', c.ended_at, 'costCents', c.cost_cents, 'summary', c.summary
+             'answeredAt', c.answered_at, 'endedAt', c.ended_at, 'costCents', c.cost_cents, 'summary', c.summary,
+             'outcome', c.outcome, 'outcomeConfidence', c.outcome_confidence, 'outcomeEvidence', c.outcome_evidence
            ) as line
       from calls c
      where $1 in (c.from_e164, c.to_e164)

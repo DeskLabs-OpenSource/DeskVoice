@@ -29,7 +29,7 @@ interface Privacy {
 async function seedCaller(org: string, followUpTitle = "Retornar sobre a remarcação"): Promise<string> {
   const callId = await createCall(panel.app, org, NOW);
   await withOrg(panel.app, org, async (q) => {
-    await q.exec("update calls set from_e164 = $2, summary = 'Pediu retorno.' where id = $1", [callId, PHONE]);
+    await q.exec("update calls set from_e164 = $2, summary = 'Pediu retorno.', outcome = 'callback_requested', outcome_confidence = 0.8, outcome_evidence = 'Me liga amanhã.' where id = $1", [callId, PHONE]);
     await q.exec("insert into call_events (organization_id, call_id, at, kind, payload) values ($1, $2, $3, 'transcript_user', $4), ($1, $2, $3, 'transcript_agent', $5)", [
       org,
       callId,
@@ -177,7 +177,7 @@ describe("exporting what the organization keeps about a phone", () => {
       ["do_not_call", null],
     ]);
     expect(lines[3]).toMatchObject({ call: callId, phone: PHONE, title: "Retornar sobre a remarcação", details: "Prefere de manhã.", status: "open", closingNote: null });
-    expect(lines[0]).toMatchObject({ call: callId, from: PHONE, summary: "Pediu retorno.", recording: false });
+    expect(lines[0]).toMatchObject({ call: callId, from: PHONE, summary: "Pediu retorno.", outcome: "callback_requested", outcomeConfidence: 0.8, outcomeEvidence: "Me liga amanhã.", recording: false });
     expect(lines[2]).toMatchObject({ payload: { purged: true } });
     expect(data.content).not.toContain(foreignCall);
     expect(data.content).not.toContain("outra empresa");
