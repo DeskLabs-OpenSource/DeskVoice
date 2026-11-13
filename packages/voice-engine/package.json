@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./transcription": "./src/transcription.ts"
   },
   "dependencies": {
     "ws": "^8.22.2",
