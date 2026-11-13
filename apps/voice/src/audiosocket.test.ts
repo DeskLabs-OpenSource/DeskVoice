@@ -199,6 +199,33 @@ describe("servidor AudioSocket", { timeout: 60_000 }, () => {
     expect(client.frames[2]?.payload[0]).toBe(6);
   });
 
+  it("o tom de tecla passa à frente da fala pendente e o clearAudio não o apaga", async () => {
+    const { time, connection, client } = await identified();
+    connection.sendAudio(pcm(10, 4));
+    await waitFor(() => client.frames.length === 1, "the first speech frame");
+    let played = false;
+    void connection.sendTone(pcm(3, 9)).then(() => (played = true));
+    // A URA fala por cima e o motor interrompe: a fala some, as teclas não.
+    connection.clearAudio();
+    for (let expected = 2; expected <= 4; expected++) {
+      time.advance(20);
+      await waitFor(() => client.frames.length === expected, `frame ${expected}`);
+    }
+    expect(client.frames.slice(1).map((frame) => frame.payload[0])).toEqual([9, 9, 9]);
+    await waitFor(() => played, "the tone to be played");
+    time.advance(1000);
+    await connection.drained();
+    expect(client.frames.length).toBe(4);
+  });
+
+  it("o tom que não chegou a tocar porque a conexão fechou rejeita, e não vira tecla apertada", async () => {
+    const { connection } = await identified();
+    const played = connection.sendTone(pcm(10, 9));
+    connection.close();
+    await expect(played).rejects.toThrow(/closed before the tone/);
+    await expect(connection.sendTone(pcm(1, 9))).rejects.toThrow(/closed before the tone/);
+  });
+
   it("close() fecha o TCP sem mandar quadro de desligar, e não dispara onClose em dobro", async () => {
     const { connection, client } = await identified();
     const reasons: AudioSocketCloseReason[] = [];

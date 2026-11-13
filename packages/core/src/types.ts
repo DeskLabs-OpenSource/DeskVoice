@@ -35,6 +35,7 @@ export const CALL_EVENT_KINDS = [
   "approval_requested",
   "approval_decided",
   "human_notified",
+  "dtmf_sent",
   "transfer_started",
   "transfer_completed",
   "engine_failed",
@@ -49,6 +50,8 @@ export const CALL_EVENT_KINDS = [
   "follow_up_assigned",
   "follow_up_closed",
   "outcome_not_classified",
+  "call_analyzed",
+  "analysis_not_done",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];

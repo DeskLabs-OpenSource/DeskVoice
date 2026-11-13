@@ -459,6 +459,24 @@ describe("encerrar com despedida", { timeout: 120_000 }, () => {
   });
 });
 
+describe("teclas do menu", { timeout: 120_000 }, () => {
+  it("send_dtmf pedido pelo motor chega ao transporte da chamada e deixa o rastro", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start } = await scene("send-dtmf", { engine: "manual", tools: ["send_dtmf"] }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("toolCall", { id: "t1", name: "send_dtmf", args: { digits: "2#" } });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    expect(manual.toolResults[0]?.result).toMatchObject({ ok: true, data: { digits: "2#" } });
+    expect(transport.sentDtmf).toEqual(["2#"]);
+    expect((await eventsOf(app, callId)).filter((event) => event.kind === "dtmf_sent")).toMatchObject([{ payload: { digits: "2#" } }]);
+
+    transport.callerHangup();
+    await session.done;
+  });
+});
+
 describe("tetos da chamada", { timeout: 120_000 }, () => {
   it("duração máxima: o agente se despede e a chamada termina, com o motivo", async () => {
     const manual = manualEngine({ keyless: true });

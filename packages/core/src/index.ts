@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./analysis";
 export * from "./clock";
 export * from "./config";
 export * from "./db";

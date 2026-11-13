@@ -3,6 +3,7 @@
 //   o formato da versão divergia (X.Y.Z no CI, vX.Y.Z no atualizador): a atualização nunca achava
 //   a imagem e construía na VPS. A instalação também gravava o canal `stable` em vez do número.
 // revisar em: 2027-05-11
+// exceção do WaCalls fixado (abaixo): revisar até 2027-02-13, ou antes, quando JotaDev66/WaCalls#69 sair
 import { describe, it, expect } from "vitest";
 import { parse } from "yaml";
 import { REPO_ROOT, asRecord, exists, expectClean, fixture, listFiles, read } from "./_lib";
@@ -19,10 +20,17 @@ function check(root: string): string[] {
   const prefix = /^DESKVOICE_IMAGE_PREFIX=(\S+)$/m.exec(read(root, SOURCE))?.[1];
   if (!prefix) return [`${SOURCE}: sem uma linha DESKVOICE_IMAGE_PREFIX=<endereço>`];
   const violations: string[] = [];
+  const escaped = prefix.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&");
+  const pinnedWacalls = new RegExp(`${escaped}/wacalls@sha256:[0-9a-f]{64}`);
   for (const dir of SIDES) {
     for (const file of listFiles(root, dir, isText)) {
       const text = read(root, file);
-      if (file !== SOURCE && text.includes(prefix)) violations.push(`${file}: repete \`${prefix}\`, que só pode estar em ${SOURCE}`);
+      // O WaCalls do fork mora no mesmo registro, mas não é imagem do DeskVoice: vai fixado por
+      // resumo, e um fork do DeskVoice que troca o prefixo continua baixando o mesmo WaCalls.
+      // Exceção com prazo: sai quando os autores publicarem JotaDev66/WaCalls#69 e o Compose voltar
+      // à imagem deles; revisar até 2027-02-13 mesmo que o PR não ande.
+      const own = text.split("\n").filter((line) => !pinnedWacalls.test(line)).join("\n");
+      if (file !== SOURCE && own.includes(prefix)) violations.push(`${file}: repete \`${prefix}\`, que só pode estar em ${SOURCE}`);
       // Canal não é versão: nem padrão do Compose, nem valor gravado pelo kit. Os testes do kit
       // ficam de fora: eles montam de propósito a instalação antiga, que gravava o canal.
       if (!file.startsWith("install/test/") && /DESKVOICE_VERSION[^\n]*\bstable\b/.test(text)) violations.push(`${file}: usa o canal \`stable\` como versão da instalação`);
@@ -59,6 +67,8 @@ describe("image-name-has-one-source", () => {
       "install/_common.sh: usa o canal `stable` como versão da instalação",
       "deploy/docker-compose.yml: repete `registro.example/projeto`, que só pode estar em deploy/images.env",
       "deploy/docker-compose.yml: usa o canal `stable` como versão da instalação",
+      // O WaCalls por etiqueta reprova; o fixado por resumo (install/wacalls-pinned.sh) passa.
+      "deploy/wacalls-tag.yml: repete `registro.example/projeto`, que só pode estar em deploy/images.env",
       "deploy/docker-compose.yml: a imagem de `panel` é `${DESKVOICE_IMAGE_PREFIX:-registro.example/projeto}/deskvoice-panel:${DESKVOICE_VERSION:-stable}`; deveria ser `${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-panel:${DESKVOICE_VERSION:-dev}`",
       "deploy/docker-compose.yml: a imagem de `voice` é `${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-voz:${DESKVOICE_VERSION:-dev}`; deveria ser `${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-voice:${DESKVOICE_VERSION:-dev}`",
       ".github/workflows/publish-image.yml: monta o nome da imagem à mão; use `image_ref`, de install/_common.sh",

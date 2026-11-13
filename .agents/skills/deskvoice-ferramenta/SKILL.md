@@ -34,7 +34,7 @@ interface ToolContext {
   organizationId: string; callId: string; agentId: string;
   q: OrgQuery;      // banco, já preso à organização da chamada
   clock: Clock;     // a hora vem daqui, nunca de `new Date()`
-  telephony: { transfer(toE164: string): Promise<void>; hangup(): Promise<void> };
+  telephony: { transfer(toE164: string): Promise<void>; sendDtmf?(digits: string): Promise<void>; hangup(): Promise<void> };
   say(text: string): void;
   waitForApproval(approvalId: string, timeoutMs: number): Promise<ApprovalOutcome>;
 }
