@@ -3,8 +3,8 @@
 A ligação pelo WhatsApp faz o agente atender quem liga para a empresa pelo WhatsApp, com as mesmas
 ferramentas, aviso de gravação e tetos da ligação pelo telefone. Instale o serviço, conecte o número
 e escolha o agente que atende. Em Chamadas, a ligação pelo WhatsApp aparece como uma ligação
-recebida, com o número de quem ligou; o canal "WhatsApp" na lista e na linha do tempo vem na versão
-seguinte.
+recebida, com o número de quem ligou. Quando o WhatsApp esconde o número (`@lid`), o que hoje é o
+caso comum, quem liga aparece como número não identificado: a correção depende do WaCalls. A ligação ainda não tem um canal "WhatsApp" próprio na lista e na linha do tempo.
 
 O desenho completo, com o que se sabe e o que não se sabe, está em
 [`docs/specs/2026-11-12-ligacao-pelo-whatsapp.md`](../specs/2026-11-12-ligacao-pelo-whatsapp.md).
