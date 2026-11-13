@@ -207,7 +207,9 @@ export type WacallsAuthState = z.output<typeof authStateSchema>;
 const eventSchema = z.discriminatedUnion("type", [
   authStateSchema,
   /** Uma ligação recebida começou a tocar. `peer` é o JID de quem liga (`@s.whatsapp.net` ou `@lid`). */
-  z.object({ type: z.literal("incoming"), sessionId: z.string().min(1), id: z.string().min(1), peer: z.string() }),
+  // `peerPhone`: o telefone que a oferta diz para um `@lid` que o WaCalls não resolveu (o `caller_pn`).
+  // Vem só da imagem com o conserto (JotaDev66/WaCalls#69); a oficial não manda o campo.
+  z.object({ type: z.literal("incoming"), sessionId: z.string().min(1), id: z.string().min(1), peer: z.string(), peerPhone: z.string().optional() }),
   /** `starting`, `ringing`, `connected` (áudio com o WhatsApp de pé), `reconnecting`, `ended`. */
   z.object({ type: z.literal("call-status"), sessionId: z.string().min(1), id: z.string().min(1), status: z.string() }),
   z.object({ type: z.literal("call-ended"), id: z.string().min(1), reason: z.string().nullish() }),
