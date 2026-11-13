@@ -59,6 +59,7 @@ const timeline: TimelineDictionary = {
     transfer_started: "Transferring the call",
     transfer_to: "To {to}",
     transfer_completed: "Transfer completed",
+    transfer_unanswered: "Transfer not answered",
     engine_failed: "The voice engine failed",
     engine_failed_body: "The caller heard a warning tone and was transferred or disconnected, never left in silence. Check the key and the provider status in Settings → Artificial intelligence.",
     call_refused: "Call refused",

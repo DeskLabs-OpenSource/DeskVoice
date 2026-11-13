@@ -182,6 +182,14 @@ export function Timeline({
           ),
         };
       case "transfer_completed":
+        if (p.answered === false) {
+          return {
+            ...base,
+            tone: "fail",
+            icon: ArrowsLeftRight,
+            body: <Card tone="fail" title={e.transfer_unanswered}>{text(p.status) ? <p className="data text-[0.87rem] text-muted">{text(p.status)}</p> : null}</Card>,
+          };
+        }
         return { ...base, tone: "ok", icon: ArrowsLeftRight, body: <Quiet>{e.transfer_completed}</Quiet> };
       case "engine_failed":
         return {

@@ -8,15 +8,20 @@
  *   2. Quando o processo fecha o AudioSocket, o dialplan devolve o canal à Stasis com
  *      `after-audio`. Aqui se decide: havendo transferência pedida, o canal vai para
  *      `deskvoice-transfer`; senão, desliga.
- *   3. `deskvoice-transfer` disca e devolve o canal com `transfer-ended` e o estado da discagem.
+ *   3. `deskvoice-transfer` disca. Se ninguém atende, devolve o canal com `transfer-ended` e o
+ *      estado da discagem. Se atendem, o canal não volta: o Dial não tem a opção `g`, e mesmo com
+ *      ela não voltaria quando é quem ligou que desliga. Quando a conversa com o humano acaba, o
+ *      canal só morre (`ChannelDestroyed`). O que diz que houve atendimento é o evento `Dial` da
+ *      ARI com `ANSWER`, que chega pela assinatura de todos os canais (`subscribeAll`).
  *
  * Lição do módulo de voz do DeskcommCRM (MIT, mesmo autor; ver CREDITS.md): a mídia nunca passa
  * por bridge + externalMedia. Por isso a transferência é do dialplan, e não uma bridge da ARI.
  */
-import { recordEvent, withOrg, type Clock, type Db } from "@deskvoice/core";
+import { recordEvent, withOrg, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
+import { panelNotice } from "./panel-notice";
 import { dtmfTones, type CallTransport } from "./transport";
 
 export interface ExpectedCall {
@@ -33,6 +38,7 @@ interface TrackedCall extends ExpectedCall {
   attached: boolean;
   transferTo?: string;
   transferReported?: boolean;
+  transferAnswered?: boolean;
 }
 
 export interface AsteriskCallsDeps {
@@ -116,6 +122,12 @@ export class AsteriskCalls {
     await this.deps.ari.hangup(channelId);
   }
 
+  /** A discagem da transferência mudou de estado (evento `Dial` da ARI, com o canal de quem ligou em `caller`). */
+  transferDialed(channelId: string, dialStatus: string): void {
+    const call = this.byChannel.get(channelId);
+    if (call?.transferTo && dialStatus === "ANSWER") call.transferAnswered = true;
+  }
+
   /** O canal deixou de existir. */
   async channelDestroyed(channelId: string, cause: string | undefined): Promise<void> {
     const call = this.byChannel.get(channelId);
@@ -129,8 +141,9 @@ export class AsteriskCalls {
         if (ended === 1) await recordEvent(q, call.callId, "call_ended", { status: "failed", reason: "no_answer", cause: cause ?? null }, clock.now());
       });
     } else if (call.transferTo) {
-      // Quem ligou desligou durante a transferência: o dialplan não chega a informar o estado da discagem.
-      await this.reportTransfer(call, "CALLER_HANGUP");
+      // A transferência atendida termina assim, desligue quem desligar. Sem o atendimento, foi quem
+      // ligou que desistiu enquanto tocava: o dialplan não chega a informar o estado da discagem.
+      await this.reportTransfer(call, call.transferAnswered ? "ANSWER" : "CALLER_HANGUP");
     }
   }
 
@@ -138,10 +151,12 @@ export class AsteriskCalls {
     if (call.transferReported) return;
     call.transferReported = true;
     const { db, clock, log } = this.deps;
+    const answered = dialStatus === "ANSWER";
     try {
-      await withOrg(db, call.organizationId, (q) =>
-        recordEvent(q, call.callId, "transfer_completed", { to: call.transferTo, status: dialStatus, answered: dialStatus === "ANSWER", ...(error !== undefined && { error }) }, clock.now()),
-      );
+      await withOrg(db, call.organizationId, async (q) => {
+        await recordEvent(q, call.callId, "transfer_completed", { to: call.transferTo, status: dialStatus, answered, ...(error !== undefined && { error }) }, clock.now());
+        if (!answered) await noticeUnansweredTransfer(q, call, dialStatus, clock);
+      });
     } catch (cause) {
       log("error", "could not record transfer_completed", { callId: call.callId, dialStatus, error: messageOf(cause) });
     }
@@ -152,4 +167,37 @@ export class AsteriskCalls {
     this.byCall.delete(call.callId);
     this.byChannel.delete(call.channelId);
   }
+}
+
+/** `DIALSTATUS` de quem ligou desistindo no meio: não foi a equipe que deixou de atender. */
+const CALLER_HANGUP = "CALLER_HANGUP";
+
+/**
+ * A transferência não completou e a ligação acaba ali: quem ligou ficou sem ninguém. Sem este aviso,
+ * o painel mostraria mais uma chamada "transferida" — e o relatório mentiria para melhor, porque a
+ * pessoa não falou com humano nenhum. O briefing vem do `transfer_started` que a ferramenta gravou.
+ */
+async function noticeUnansweredTransfer(q: OrgQuery, call: TrackedCall, dialStatus: string, clock: Clock): Promise<void> {
+  // Quem ligou desistiu por conta própria: o motivo do desligamento dele fica como está.
+  if (dialStatus !== CALLER_HANGUP) await q.exec("update calls set end_reason = 'transfer_unanswered' where id = $1", [call.callId]);
+
+  const briefing = await q.one<{ from_e164: string | null; reason: string | null; summary: string | null }>(
+    `select c.from_e164, e.payload->>'reason' as reason, e.payload->>'summary' as summary
+       from calls c
+       left join lateral (
+         select payload from call_events where call_id = c.id and kind = 'transfer_started' order by id desc limit 1
+       ) e on true
+      where c.id = $1`,
+    [call.callId],
+  );
+  const lines = [
+    dialStatus === CALLER_HANGUP
+      ? `Quem ligou desligou antes de a transferência para ${call.transferTo} completar.`
+      : `Ninguém atendeu a transferência para ${call.transferTo} (${dialStatus}).`,
+  ];
+  if (briefing?.from_e164) lines.push(`Quem ligou: ${briefing.from_e164}.`);
+  if (briefing?.reason) lines.push(`Motivo: ${briefing.reason}`);
+  if (briefing?.summary) lines.push(`O que já foi combinado: ${briefing.summary}`);
+  lines.push("A pessoa ficou sem resposta: retorne a ligação.");
+  await panelNotice(q, clock, call.callId, lines.join("\n"));
 }
