@@ -61,6 +61,7 @@ const common: CommonDictionary = {
     unauthenticated: "Your session expired. Sign in again to continue.",
     forbidden: "Your role does not allow this change. Talk to an owner or administrator.",
     not_found: "This record no longer exists. Refresh the page.",
+    call_not_live: "This call has already ended. Refresh the page.",
     validation_error: "A field was not accepted. Check it and try again.",
     invalid_json: "The request arrived incomplete. Try again.",
     already_exists: "A record with these values already exists.",

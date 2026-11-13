@@ -15,11 +15,22 @@ export interface ToolContext {
     sendDtmf?(digits: string): Promise<void>;
     /** Com `farewell`, o agente fala a despedida e só então a ligação cai. */
     hangup(farewell?: string): Promise<void>;
+    /**
+     * Para de gravar a ligação, mantendo gravado tudo o que já foi dito. Diz o que de fato
+     * aconteceu: sem gravação em curso (desligada, sem espaço, falhou), nada é parado nem registrado.
+     */
+    pauseRecording(reason: string): Promise<RecordingStop>;
   };
   /** Faz o agente dizer algo enquanto a ferramenta trabalha ("um instante, estou conferindo"). */
   say(text: string): void;
   waitForApproval(approvalId: string, timeoutMs: number): Promise<ApprovalOutcome>;
 }
+
+/**
+ * O que um pedido de parar a gravação produziu: `stopped` parou agora e registrou o pedido;
+ * `already_stopped` já tinha parado antes nesta ligação; `not_recording` não havia o que parar.
+ */
+export type RecordingStop = "stopped" | "already_stopped" | "not_recording";
 
 export interface ToolResult {
   ok: boolean;

@@ -1,5 +1,5 @@
 import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
-import { autoCommitOrgQuery, runTool, toSpec, toolCalledArgs, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
+import { autoCommitOrgQuery, runTool, toSpec, toolCalledArgs, type RecordingStop, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
 import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
@@ -41,10 +41,17 @@ export interface CallOutcome {
 }
 
 export interface CallSession {
+  organizationId: string;
+  callId: string;
   /** Resolve quando a chamada terminou e tudo foi gravado. Nunca rejeita. */
   done: Promise<CallOutcome>;
   /** Encerra de fora (o processo está saindo). */
   stop(reason: string): void;
+  /**
+   * Para a gravação a pedido feito no painel, por `userId`. `call_ended`: a chamada já está
+   * encerrando, e não há mais o que pedir a ela.
+   */
+  stopRecording(userId: string, reason: string | null): Promise<RecordingStop | "call_ended">;
 }
 
 interface Ending {
@@ -140,8 +147,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let lastEngineError: Error | undefined;
   let ending = false;
   let recorder: Recording | undefined;
+  /** A gravação já parou a pedido de quem ligou: não volta na mesma chamada. */
+  let recordingPaused = false;
   /** A gravação de `recording_failed`, para o fim da chamada esperar por ela. */
   let recordingFailed: Promise<void> | undefined;
+  // A sessão já é alcançável pelo painel antes de se saber se ela grava: o pedido de parar espera essa
+  // decisão (arquivo aberto ou não), para não responder "não está gravando" e a gravação começar logo
+  // depois. O encerramento também resolve, para o pedido nunca ficar pendurado.
+  let resolveRecordingDecided: () => void = () => undefined;
+  const recordingDecided = new Promise<void>((resolve) => (resolveRecordingDecided = resolve));
   let wrappingUp = false;
   let requestedEnd: Ending | undefined;
   let requestedFarewell: string | undefined;
@@ -157,6 +171,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   async function finish(end: Ending): Promise<void> {
     if (ending) return;
     ending = true;
+    resolveRecordingDecided();
     for (const cancel of cancelTimers) cancel();
     // Ferramenta em espera (uma aprovação pendente) é solta, e o resultado dela entra na linha do
     // tempo antes de `call_ended`.
@@ -218,6 +233,27 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // A chamada pode ter terminado enquanto o arquivo abria: fecha já, e o `.part` vazio some.
     if (ending) await opened.finish();
     else recorder = opened;
+  }
+
+  /**
+   * Para a gravação a pedido de quem ligou. O trecho já dito — inclusive a frase do pedido — vai para
+   * o disco antes de parar: é a prova de que a revogação existiu e de quando ela começou. Do pedido
+   * em diante nada mais é gravado, e não há retomada.
+   */
+  async function pauseRecording(who: { by: "agent" } | { by: "human"; userId: string }, reason: string | null): Promise<RecordingStop | "call_ended"> {
+    if (ending) return "call_ended";
+    if (recordingPaused) return "already_stopped";
+    await recordingDecided;
+    if (ending) return "call_ended";
+    if (recordingPaused) return "already_stopped";
+    // Sem arquivo aberto (gravação desligada, sem espaço) ou com a gravação já interrompida por
+    // falha, não há o que parar: nada é registrado, e quem pediu ouve a verdade.
+    if (!recorder || recordingFailed) return "not_recording";
+    recordingPaused = true;
+    await recorder.pause().catch(logFailure("could not stop the call recording"));
+    await q.exec("update calls set recording_paused_at = $2, recording_paused_by = $3, recording_pause_reason = $4 where id = $1", [callId, clock.now(), who.by, reason]);
+    await event("recording_paused", { ...who, ...(reason !== null && { reason }) });
+    return "stopped";
   }
 
   /** O agente se despede e a chamada termina logo depois. */
@@ -282,6 +318,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       },
       // Sem `sendDtmf` no transporte (a ligação pelo WhatsApp), a ferramenta recusa em vez de fingir.
       ...(transport.sendDtmf && { sendDtmf: transport.sendDtmf.bind(transport) }),
+      // O pedido de quem ligou vem do agente; a gravação para aqui, com o pedido já no arquivo.
+      // Ferramenta só roda com a chamada no ar; se ela já encerra, não há gravação a parar.
+      async pauseRecording(reason) {
+        const result = await pauseRecording({ by: "agent" }, reason);
+        return result === "call_ended" ? "not_recording" : result;
+      },
     },
     say(text) {
       if (!ending) voice?.say(text);
@@ -344,6 +386,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const recording = deps.recordingsDir ? await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALL_RECORDING_SETTING]) : null;
     // O arquivo abre antes do motor: depois que ele conecta, nada pode esperar (ver abaixo).
     if (deps.recordingsDir && callRecordingOf(recording?.value)) await openRecording(deps.recordingsDir);
+    resolveRecordingDecided();
 
     const enabled = new Map<string, Tool>();
     for (const name of overrides?.tools ?? agent.tools) {
@@ -480,5 +523,25 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     return finish({ status: "failed", endReason: "internal_error", tone: true });
   });
 
-  return { done, stop: (reason) => void finish({ status: "completed", endReason: reason }) };
+  return {
+    organizationId,
+    callId,
+    done,
+    stop: (reason) => void finish({ status: "completed", endReason: reason }),
+    stopRecording: (userId, reason) => pauseRecording({ by: "human", userId }, reason),
+  };
+}
+
+/**
+ * Pedido do painel para parar a gravação de uma chamada em curso neste processo. A organização
+ * vem da sessão do painel e precisa ser a da chamada: um id de outra empresa é chamada que não existe.
+ */
+export async function stopRecordingOfLiveCall(
+  sessions: Iterable<CallSession>,
+  input: { organizationId: string; callId: string; userId: string; reason: string | null },
+): Promise<{ recording: RecordingStop } | { code: string; message: string }> {
+  const session = [...sessions].find((live) => live.callId === input.callId && live.organizationId === input.organizationId);
+  const result = session ? await session.stopRecording(input.userId, input.reason) : "call_ended";
+  if (result === "call_ended") return { code: "call_not_live", message: "This call is not in progress in the voice process." };
+  return { recording: result };
 }

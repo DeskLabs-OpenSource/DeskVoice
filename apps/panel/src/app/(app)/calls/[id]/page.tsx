@@ -11,10 +11,10 @@ import { fill } from "../../../../i18n/locales";
 import ptBRCommon from "../../../../i18n/pt-BR/common";
 import ptBR from "../../../../i18n/pt-BR/timeline";
 import { useDict, useLocale } from "../../../../i18n/provider";
-import { useApi } from "../../../../ui/api";
+import { api, useApi } from "../../../../ui/api";
 import { useErrorText } from "../../../../ui/errors";
 import { formatDateTime, formatDuration, formatMoney, formatPhone, secondsBetween } from "../../../../ui/format";
-import { Badge, Notice, Skeleton, type Tone } from "../../../../ui/kit";
+import { Badge, Button, Notice, Skeleton, TextInput, type Tone } from "../../../../ui/kit";
 import { useLive, useNow } from "../../../../ui/live";
 import { Timeline } from "../../../../ui/timeline";
 import type { Call, CallEvent, CallStatus, Engine, FollowUpList } from "../../../../ui/types";
@@ -111,7 +111,18 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
         </section>
       ) : null}
 
-      {!live ? <Recording id={id} title={t.recordingTitle} missing={t.recordingMissing} /> : null}
+      {live ? (
+        <StopRecording
+          id={id}
+          title={t.stopRecordingTitle}
+          why={t.stopRecordingWhy}
+          send={t.stopRecordingSend}
+          results={{ stopped: t.stopRecordingStopped, already_stopped: t.stopRecordingAlready, not_recording: t.stopRecordingNotRecording }}
+          hint={t.stopRecordingHint}
+        />
+      ) : (
+        <Recording id={id} title={t.recordingTitle} missing={t.recordingMissing} />
+      )}
 
       {events.error && !events.data ? <Notice tone="fail">{errorText(events.error)}</Notice> : null}
       {events.data ? <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} followUps={followUps.data?.items} people={followUps.data?.people} /> : <Skeleton lines={4} />}
@@ -126,6 +137,55 @@ function Recording({ id, title, missing }: { id: string; title: string; missing:
     <section className="grid max-w-[72ch] gap-1.5">
       <h2 className="text-[0.8rem] font-bold text-muted">{title}</h2>
       {absent ? <p className="text-muted">{missing}</p> : <audio controls preload="metadata" src={`/api/v1/calls/${id}/recording`} onError={() => setAbsent(true)} className="w-full" />}
+    </section>
+  );
+}
+
+type RecordingStop = "stopped" | "already_stopped" | "not_recording";
+
+/**
+ * Durante a chamada, quem atende pode pedir para parar a gravação, porque a pessoa na linha pediu.
+ * O processo de voz responde o que de fato aconteceu, e a tela diz isso: parou, já tinha parado, ou
+ * a chamada não estava sendo gravada. O trecho do pedido fica gravado, como prova.
+ */
+function StopRecording({ id, title, why, send, results, hint }: { id: string; title: string; why: string; send: string; results: Record<RecordingStop, string>; hint: string }) {
+  const errorText = useErrorText();
+  const [reason, setReason] = useState("");
+  const [sending, setSending] = useState(false);
+  const [outcome, setOutcome] = useState<RecordingStop | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const request = (): void => {
+    setSending(true);
+    setError(null);
+    void api<{ recording: RecordingStop }>(`/calls/${id}/recording/pause`, { method: "POST", body: { reason: reason.trim() || null } })
+      .then((answer) => setOutcome(answer.recording))
+      .catch((failure: unknown) => setError(errorText(failure)))
+      .finally(() => setSending(false));
+  };
+
+  return (
+    <section className="grid max-w-[72ch] gap-1.5">
+      <h2 className="text-[0.8rem] font-bold text-muted">{title}</h2>
+      {outcome ? (
+        <Notice tone={outcome === "stopped" ? "ok" : "neutral"}>{results[outcome]}</Notice>
+      ) : (
+        <div className="flex flex-wrap items-end gap-2">
+          <TextInput
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            maxLength={300}
+            placeholder={why}
+            aria-label={why}
+            className="min-w-[16rem] flex-1"
+          />
+          <Button variant="secondary" busy={sending} onClick={request}>
+            {send}
+          </Button>
+        </div>
+      )}
+      {error ? <Notice tone="fail">{error}</Notice> : null}
+      <p className="text-[0.85rem] text-muted">{hint}</p>
     </section>
   );
 }

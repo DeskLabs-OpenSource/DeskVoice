@@ -25,7 +25,7 @@ export default {
 describe("loadTools", { timeout: 30_000 }, () => {
   it("descobre as sete ferramentas da fundação, cada uma com o nome do próprio arquivo", async () => {
     const tools = await loadTools();
-    expect([...tools.keys()].sort()).toEqual(["call_webhook", "create_task", "end_call", "notify_human", "request_approval", "send_dtmf", "send_whatsapp", "transfer_to_human"]);
+    expect([...tools.keys()].sort()).toEqual(["call_webhook", "create_task", "end_call", "notify_human", "request_approval", "send_dtmf", "send_whatsapp", "stop_recording", "transfer_to_human"]);
   });
 
   it("toda ferramenta entrega ao motor um JSON Schema de objeto e uma descrição que diz quando NÃO usar", async () => {
