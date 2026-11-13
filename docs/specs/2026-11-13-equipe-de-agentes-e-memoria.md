@@ -1,7 +1,7 @@
 # Equipe de agentes, memória entre chamadas e pendências com dono
 
-- **Estado:** desenho. Nenhum código de produto foi escrito. Antes da primeira fatia que depende
-  deles, os pedidos de decisão da seção 8 viram issues.
+- **Estado:** desenho. Nenhum código de produto foi escrito. A seção 8 traz os pedidos de decisão,
+  no formato do [`GOVERNANCE.md`](../../GOVERNANCE.md), e diz que fatia espera qual.
 - **Data:** 2026-11-13
 - **Quem pediu:** o dono, com quatro frentes: equipe de agentes com funções (recepcionista,
   qualificador, agendador, supervisor), regras e escalonamento entre agentes, memória entre chamadas,
@@ -84,37 +84,58 @@ tokens dos argumentos da ferramenta, dentro do teto da chamada. O ponto de exten
 por modelo continua onde está, em `summarize_call.ts`.
 
 `caller_notes` tem `organization_id`, `call_id` (a ligação em que a nota nasceu, com chave composta e
-`on delete cascade`), `caller_e164`, `text` (até 300 caracteres) e `created_at`. Uma nota pertence a
-uma ligação: é isso que a faz seguir o prazo de guarda e aparecer na exportação sem caminho próprio.
+`on delete cascade`), `caller_e164`, `text` (até 300 caracteres) e `created_at`. A cascata só serve
+para a ligação apagada não deixar nota órfã; ela **não** é o que aplica o prazo, porque o prazo de
+guarda nunca apaga a ligação: `purgeTranscripts` só troca o texto das falas pelo marcador, e a linha
+de `calls` fica ([`purge_transcripts.ts`](../../apps/routines/src/routines/purge_transcripts.ts)).
+Quem apaga a nota vencida é a própria rotina do prazo, explicitamente (seção 2.4).
 
 ### 2.3 Como a equipe vê e apaga
 
 - **Na tela da chamada:** um bloco "Este número" com as ligações anteriores (data, agente, desfecho,
   link), as pendências abertas e as notas, cada nota com o link da ligação em que nasceu.
-- **Na transferência e no aviso:** `transfer_to_human` e `notify_human` acrescentam ao texto que vai
-  para a equipe uma linha como "Este número já ligou 3 vezes; 1 pendência aberta: Retornar sobre o
-  orçamento". Só contagem e títulos de pendência, nunca o texto das notas: o aviso pode sair por
-  WhatsApp.
+- **Na transferência e no aviso:** `transfer_to_human` e `notify_human` acrescentam ao aviso de
+  painel uma linha como "Este número já ligou 3 vezes; 1 pendência aberta: Retornar sobre o
+  orçamento". Nunca o texto das notas. **No WhatsApp, só a contagem** ("Este número já ligou 3
+  vezes; 2 pendências abertas"), nunca o título: ele é texto livre escrito pelo modelo, e o WhatsApp
+  é um canal fora da instalação. Hoje `notifyHumans` escreve o mesmo texto para todos os canais
+  ([`notify.ts`](../../packages/tools/src/notify.ts)); a cópia do WhatsApp passa a ter texto próprio.
 - **Apagar uma nota:** botão na nota, com confirmação. Grava `caller_notes_deleted` em
   `organization_events` com quem apagou e a contagem.
 - **Esquecer este número:** em Configurações, junto da exportação, por dono ou administrador. Apaga
   as notas do número e pede confirmação nomeando o número
-  ([`destrutivo-pede-confirmacao.md`](../doctrine/destrutivo-pede-confirmacao.md)). A tela diz o que
-  não sai: as ligações e as falas seguem o prazo de guarda da transcrição, e as pendências abertas
-  continuam, porque são obrigação da empresa. Grava `caller_notes_deleted` com o telefone, como
-  `caller_data_exported` já grava.
+  ([`destrutivo-pede-confirmacao.md`](../doctrine/destrutivo-pede-confirmacao.md)). Apaga também as
+  pendências **fechadas** do número (feitas ou canceladas): são histórico, e não obrigação. A tela
+  diz o que não sai: as ligações e as falas seguem o prazo de guarda da transcrição, e as pendências
+  **abertas** continuam, porque são obrigação da empresa com a pessoa. Grava `caller_notes_deleted`
+  com o telefone e as duas contagens, como `caller_data_exported` já grava o telefone.
 
 ### 2.4 Prazo de guarda e exportação (0014)
 
-- **Prazo.** A nota é o que a pessoa disse, da mesma natureza da fala. Ela sai com o prazo de guarda
-  da transcrição ([`0014`](../decisions/0014-direitos-de-quem-ligou-pela-tela.md)) e, além disso,
-  com o prazo da própria memória (pedido de decisão 2), o que vencer primeiro. Quem apaga é uma
-  rotina `purge_caller_notes`, que se reagenda uma vez por dia pela fila (`run_at`), como
-  `purge_transcripts`; sem prazo nenhum, a corrente não existe. Cada passagem que apaga algo grava
-  `caller_notes_purged` com a contagem.
-- **Exportação.** A consulta de `POST /privacy/export` ganha dois tipos de linha: `note` e
-  `follow_up`. O operador que atende um pedido de titular entrega tudo o que a memória sabe, no mesmo
-  arquivo.
+- **Prazo da nota.** A nota é o que a pessoa disse, da mesma natureza da fala. Ela sai com o prazo
+  de guarda da transcrição ([`0014`](../decisions/0014-direitos-de-quem-ligou-pela-tela.md)): a
+  rotina `purge_transcripts`, na mesma passagem em que troca as falas, chama
+  `purgeCallerNotes(q, before)` e **apaga** as notas criadas antes do mesmo limite. A nota é apagada,
+  e não trocada por marcador, porque ela não tem lugar numa linha do tempo que precise continuar
+  legível. Sem prazo de guarda, a nota fica, como a fala fica. A contagem entra no
+  `transcripts_purged` que a rotina já grava (`notes`, ao lado de `count` e `recordings`).
+- **Prazo próprio da memória**, só se o pedido de decisão 2 escolher A: uma rotina
+  `purge_caller_notes`, que se reagenda uma vez por dia pela fila (`run_at`) como
+  `purge_transcripts`, apaga as notas mais velhas que o prazo da memória e grava
+  `caller_notes_purged`. Com B, essa rotina não existe.
+- **Prazo da pendência.** Pendência aberta nunca sai pelo prazo: é trabalho em curso, e a tela marca
+  a que está aberta há mais tempo que o prazo de guarda. Pendência fechada (feita ou cancelada) sai
+  com o prazo de guarda da transcrição, contado do fechamento (`closed_at`), na mesma passagem de
+  `purge_transcripts`, e a contagem entra no mesmo `transcripts_purged` (`followUps`). Sem prazo de
+  guarda, fica, como a fala.
+- **Nenhum texto livre em evento.** `follow_up_created`, `follow_up_assigned` e `follow_up_closed`
+  levam só o id da pendência, o dono, o prazo e o estado. Título, detalhes e `closing_note` moram só
+  em `follow_ups`, que o prazo alcança; num evento, escapariam dele. Na linha do tempo, a tela lê o
+  título da pendência pelo id e, se ela já saiu pelo prazo, diz "pendência apagada pelo prazo de
+  guarda".
+- **Exportação.** A consulta de `POST /privacy/export` ganha a linha `follow_up` na fatia 1, que é
+  quando a pendência nasce, e a linha `note` na fatia 3, quando a nota nasce. O operador que atende um
+  pedido de titular entrega tudo o que a memória sabe, no mesmo arquivo.
 - **Lacuna que já existe e pesa mais com memória.** O resumo extrativo copia falas (as três primeiras
   e as três últimas), e a 0014 diz que o resumo não sai com o prazo. Ou seja: hoje parte da fala
   sobrevive ao expurgo dentro de `calls.summary`. Este desenho **não** põe o resumo no contexto do
@@ -206,7 +227,9 @@ O que entra:
   deste agente", na tela do agente), nunca do modelo: o modelo não escolhe pessoa da equipe por nome.
   Sem dono configurado, a pendência é da equipe.
 - **Lembrete e vencimento pela fila.** `follow_up` recebe o id da pendência e, na hora marcada, avisa
-  o dono pelo painel e, se ele cadastrou WhatsApp e há conector, por WhatsApp. Se a pendência ainda
+  o dono pelo painel e, se ele cadastrou WhatsApp e há conector, por WhatsApp. O aviso de painel traz
+  o título; o de WhatsApp, só "Você tem 1 pendência vencendo agora no painel do DeskVoice", sem
+  título nem detalhes, pela mesma razão da seção 2.3. Se a pendência ainda
   estiver aberta um dia depois do prazo, avisa de novo uma única vez como vencida. Tarefa `follow_up`
   que já estava na fila antes da atualização (payload só com título e detalhes) continua criando o
   aviso de antes: quem atualiza não perde pendência.
@@ -216,7 +239,12 @@ O que entra:
 - **O fecho aparece na chamada.** `follow_up_created`, `follow_up_assigned` e `follow_up_closed`
   entram em `call_events` da ligação de origem, por `recordEvent` (o mesmo caminho que o
   `task_finished` já usa depois que a ligação acabou). Quem abre a ligação de terça vê, na linha do
-  tempo, que o retorno foi feito na quarta e por quem.
+  tempo, que o retorno foi feito na quarta e por quem. Os eventos não levam título nem nota de
+  fechamento (seção 2.4): a tela os lê da pendência.
+- **É dado pessoal novo, e entra com prazo e exportação.** O título, os detalhes e a nota de
+  fechamento são texto sobre a pessoa. Até hoje o título e os detalhes viviam só no payload da tarefa
+  da fila, que o consumidor apaga 7 dias depois de feita; em `follow_ups` eles ficam. Por isso a
+  pendência fechada sai com o prazo de guarda, e a exportação a traz, já na fatia 1 (seção 2.4).
 - **Dono que sai da equipe**: pendência de usuário desativado volta para a equipe, e a tela diz.
 
 O que **não** entra: a pendência não liga para ninguém. Retornar a ligação é trabalho de uma pessoa,
@@ -313,12 +341,12 @@ O supervisor humano ao vivo continua sendo a frente "Painel de supervisão ao vi
 | Tabelas | `db/migrations/<carimbo>_follow_ups.sql`, `<carimbo>_caller_notes.sql`, `<carimbo>_agent_handoffs.sql` (tabela `agent_handoff_targets`, coluna `agents.follow_up_owner_user_id`, coluna `usage_ledger.agent_id`) | Um caminho de schema; `organization_id` em tudo; chaves compostas; RLS como em `organization_events`; o teste de isolamento gerado as cobre sozinho |
 | Ponto de escrita das pendências | `packages/core/src/follow-ups.ts` (`createFollowUp`, `assignFollowUp`, `closeFollowUp`) | Um ponto de escrita por entidade, dentro de `withOrg` |
 | Ponto de escrita e leitura da memória | `packages/core/src/caller-memory.ts` (`saveCallerNote`, `loadCallerMemory` com o teto de caracteres, `forgetCaller`, `purgeCallerNotes`) | Idem; `purgeCallerNotes` recusa rodar fora de `withOrg`, como `purgeTranscripts` |
-| Vocabulário | `packages/core/src/types.ts`: em `CALL_EVENT_KINDS`, `follow_up_created`, `follow_up_assigned`, `follow_up_closed`, `agent_handoff`, `memory_loaded`; em `ORG_EVENT_KINDS`, `caller_memory_changed`, `caller_notes_deleted`, `caller_notes_purged` | Vocabulário fechado; cada tipo tem tela na linha do tempo |
+| Vocabulário | `packages/core/src/types.ts`: em `CALL_EVENT_KINDS`, `follow_up_created`, `follow_up_assigned`, `follow_up_closed`, `agent_handoff`, `memory_loaded`; em `ORG_EVENT_KINDS`, `caller_memory_changed`, `caller_notes_deleted` e, só com o pedido 2 em A, `caller_notes_purged` | Vocabulário fechado; cada tipo tem tela na linha do tempo |
 | Ferramentas | `packages/tools/src/tools/remember_caller_note.ts` (nova, até 10 notas por ligação), `transfer_to_agent.ts` (nova), `create_task.ts` (muda) | Um arquivo por peça; argumento validado com zod; organização vem do contexto, nunca do modelo |
 | Telefonia | `apps/voice/src/call-session.ts`: troca de sessão na passagem, limites da ligação, bloco de memória | É capacidade de telefonia (transferir), núcleo pela regra 1 do `GOVERNANCE.md` |
-| Rotinas | `apps/routines/src/routines/follow_up.ts` (muda), `review_call.ts` (nova), `purge_caller_notes.ts` (nova) | Um arquivo por rotina; fila por notificação, com `run_at` como relógio |
+| Rotinas | `apps/routines/src/routines/follow_up.ts` (muda), `purge_transcripts.ts` (muda: apaga as notas e as pendências fechadas vencidas), `review_call.ts` (nova), `purge_caller_notes.ts` (nova, só com o pedido 2 em A) | Um arquivo por rotina; fila por notificação, com `run_at` como relógio |
 | Painel | Página `apps/panel/src/app/(app)/follow-ups/`; bloco "Este número" na tela da chamada; "Pode passar para" e "Dono das pendências" na tela do agente; bloco "Memória entre chamadas" e "Esquecer este número" em Configurações, junto da privacidade; dicionários em pt-BR, inglês e espanhol | Configuração pela tela; nenhum texto fora de dicionário; destrutivo pede confirmação nomeando o alvo |
-| Exportação | `apps/panel/src/app/api/v1/privacy/export/route.ts`: linhas `note` e `follow_up` | 0014 |
+| Exportação | `apps/panel/src/app/api/v1/privacy/export/route.ts`: linha `follow_up` na fatia 1, linha `note` na fatia 3 | 0014 |
 
 Nenhuma peça usa `withSystem`: a memória é lida dentro da organização da chamada, e a fila já tem o
 acesso dela. Nenhuma variável de ambiente nova.
@@ -372,17 +400,22 @@ mexe na ligação ao vivo; por último o que pode vazar dado.
 
 `follow_ups`, `packages/core/src/follow-ups.ts`, `create_task` criando a pendência, `follow_up` com
 lembrete e vencimento, compatibilidade com a tarefa antiga na fila, "Dono das pendências" na tela do
-agente, página Pendências, os três eventos na linha do tempo.
+agente, página Pendências, os três eventos na linha do tempo, a linha `follow_up` na exportação, e a
+pendência fechada saindo com o prazo de guarda em `purge_transcripts`.
 
 **Por que primeiro:** é a promessa feita ao telefone que hoje mais se perde, e o conserto não toca no
-áudio, não chama provedor e não guarda nada que `create_task` já não guardasse.
+áudio nem chama provedor. O dado novo que ela guarda (a pendência que dura além dos 7 dias da tarefa
+da fila, e a nota de fechamento) entra com prazo e exportação no mesmo PR.
 
 **Prova:** `pnpm verify` e `pnpm test:db`: pendência criada numa chamada simulada nasce com o dono do
-agente; com relógio injetado, o lembrete sai na hora e o aviso de vencida sai uma vez; fechar grava
-`follow_up_closed` na linha do tempo da ligação de origem; tarefa `follow_up` com o payload antigo
-ainda cria o aviso; dono desativado devolve a pendência à equipe; o teste de isolamento gerado cobre
-`follow_ups`. Teste de tela: simular uma chamada cujo roteiro chama `create_task`, ver a pendência em
-"Minhas", fechar com uma nota e ver o fecho na tela da chamada.
+agente; com relógio injetado, o lembrete sai na hora e o aviso de vencida sai uma vez; o aviso de
+WhatsApp não traz o título; fechar grava `follow_up_closed` na linha do tempo da ligação de origem,
+sem título nem nota no payload; tarefa `follow_up` com o payload antigo ainda cria o aviso; dono
+desativado devolve a pendência à equipe; com prazo de guarda, a pendência fechada antes do limite
+sai e a aberta fica, e `transcripts_purged` conta as que saíram; a exportação de um número traz as
+pendências dele e só da organização de quem pede; o teste de isolamento gerado cobre `follow_ups`.
+Teste de tela: simular uma chamada cujo roteiro chama `create_task`, ver a pendência em "Minhas",
+fechar com uma nota e ver o fecho na tela da chamada.
 
 ### Fatia 2: a memória do número para a equipe
 
@@ -393,24 +426,31 @@ contexto em `transfer_to_human` e `notify_human`. Só leitura do que já existe.
 ver nada, então o número forjado não muda de risco.
 
 **Prova:** testes de banco: o mesmo número em duas organizações nunca mostra a ligação da outra;
-ligação sem número não mostra bloco; o aviso de `notify_human` que sai por WhatsApp (o da
-transferência só vai ao painel) traz contagem e títulos, e não notas nem resumo. Teste de tela: duas chamadas simuladas do mesmo número, e a segunda
-mostra a primeira.
+ligação sem número não mostra bloco; o aviso de painel traz contagem e títulos; o aviso de
+`notify_human` que sai por WhatsApp (o da transferência só vai ao painel) traz só a contagem, sem
+título, nota nem resumo. Teste de tela: duas chamadas simuladas do mesmo número, e a segunda mostra a
+primeira.
+
+**Depende de:** o pedido de decisão 1. A fatia pode ser escrita e revisada antes da resposta, mas só
+entra depois que ela chegar ou o prazo dela vencer (vale A).
 
 ### Fatia 3: as notas do agente, com prazo, exportação e esquecimento
 
-`caller_notes`, `remember_caller_note`, `purge_caller_notes`, bloco "Memória entre chamadas" em
-Configurações (prazo, conforme o pedido 2), apagar nota, "Esquecer este número", exportação com
-`note` e `follow_up`, os eventos da organização.
+`caller_notes`, `remember_caller_note`, `purgeCallerNotes` chamada por `purge_transcripts`, bloco
+"Memória entre chamadas" em Configurações, apagar nota, "Esquecer este número", a linha `note` na
+exportação, os eventos da organização. Com o pedido 2 em A, também a rotina `purge_caller_notes` e o
+campo de prazo da memória; em B, nenhum dos dois.
 
-**Por que terceira:** é o primeiro dado pessoal novo, e entra com prazo, exportação e apagamento no
-mesmo PR, nunca depois.
+**Por que terceira:** é o dado pessoal novo de maior volume, e entra com prazo, exportação e
+apagamento no mesmo PR, nunca depois.
 
-**Prova:** testes de banco: a ferramenta recusa a 11ª nota; a nota sai com o prazo da transcrição e
-com o da memória, o que vencer antes (relógio injetado); `purgeCallerNotes` recusa rodar fora de
-`withOrg`; a exportação de um número traz as notas e pendências dele e só da organização de quem
-pede; esquecer um número apaga só as notas dele e grava o evento. Teste de tela: a confirmação de
-"Esquecer" nomeia o número.
+**Prova:** testes de banco: a ferramenta recusa a 11ª nota; com relógio injetado, `purge_transcripts`
+apaga as notas anteriores ao limite e conta `notes` em `transcripts_purged`, e sem prazo de guarda
+não apaga nada; `purgeCallerNotes` recusa rodar fora de `withOrg`; a exportação de um número traz as
+notas dele e só da organização de quem pede; esquecer um número apaga as notas e as pendências
+fechadas dele, deixa as abertas e grava o evento com as contagens. Com A, a nota sai com o prazo que
+vencer antes, e a nota anterior à escolha de um prazo não é apagada na atualização (pedido 2).
+Teste de tela: a confirmação de "Esquecer" nomeia o número e diz que as pendências abertas ficam.
 
 ### Fatia 4: a ligação passa de um agente para outro
 
@@ -451,13 +491,15 @@ nenhum teste prova, e o PR diz: que o modelo não lê as notas para quem insiste
 
 ## 8. Pedidos de decisão ao dono
 
-Cada um vira uma issue no formato do [`GOVERNANCE.md`](../../GOVERNANCE.md). As fatias 1 e 2 não
-esperam nenhum deles.
+Pedidos de decisão no formato do [`GOVERNANCE.md`](../../GOVERNANCE.md). A fatia 1 não espera
+nenhum deles. As fatias 2 e 3 podem ser escritas e revisadas já, mas só entram depois da resposta ao
+pedido 1, ou do prazo dele (a fatia 3 também espera o pedido 2). A ordem das fatias 2 a 4 é o pedido
+3; a fatia 6 é o pedido 4.
 
 ### Decisão: a memória vem ligada ou desligada de fábrica?
 
 **Quem decide:** dono do projeto
-**O que está parado esperando:** fatias 2 e 3
+**O que está parado esperando:** a entrada das fatias 2 e 3 (as duas podem ser escritas antes)
 
 #### Opções
 - **A.** Memória para a equipe ligada; notas só gravadas por agente que tiver `remember_caller_note`
@@ -505,6 +547,20 @@ contou não serve a ela.
 A apaga dado, e o padrão de um pedido sem resposta tem que ser o caminho reversível. B não apaga nada
 além do que a organização já escolheu no prazo de guarda. A fatia 3 entra com B e muda para A no
 dia em que o dono responder.
+
+**B só é aceitável como padrão porque nenhuma nota nasce sozinha.** Ela só existe quando o agente
+chama `remember_caller_note`, e o agente só a tem quando alguém a marca na tela dele. Na instalação
+que nunca marcou a ferramenta, B guarda para sempre zero notas. Se algum dia a nota passar a nascer
+sem essa escolha (extraída depois da ligação, por exemplo), B deixa de servir como padrão, e este
+pedido volta a ser aberto.
+
+**A troca de B para A não apaga, na atualização, as notas de quem nunca escolheu um prazo.** Quem
+atualiza não é surpreendido ([`GOVERNANCE.md`](../../GOVERNANCE.md), regra 7), e mudança de padrão
+não apaga dado de quem já o tem (o mesmo raciocínio da
+[`0016`](../decisions/0016-gravacao-desligada-de-fabrica.md), em que ligar ou desligar a gravação não
+apaga nada). Na versão que traz A, a organização que já tem notas e nunca gravou um prazo de memória
+fica sem prazo de memória até alguém escolher um na tela, e a tela e a nota de versão dizem isso. Os
+90 dias de fábrica valem para a organização que ainda não tem nota nenhuma.
 
 #### Não medido
 Em quanto tempo uma pessoa costuma ligar de novo para o mesmo negócio. Nenhuma instalação tem
