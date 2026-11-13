@@ -10,7 +10,7 @@ você precisa fazer antes ou logo depois.
 
 ## Pela tela
 
-Em **Configurações → Versão e atualização**:
+Em **Configurações → Sistema**, no bloco Versão e atualização:
 
 1. A tela mostra a versão **em execução** (lida do próprio painel, na hora), a **mais recente
    publicada** e as notas das versões entre a instalada e aquela para a qual o servidor iria.

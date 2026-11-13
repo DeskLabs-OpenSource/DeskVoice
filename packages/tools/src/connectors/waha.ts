@@ -202,7 +202,7 @@ export async function wahaSendText(options: WahaOptions, name: string, chatId: s
 export async function sendViaWaha(options: WahaOptions, name: string, message: { to: string; text: string }): Promise<{ addressVerified: boolean }> {
   const session = await wahaGetSession(options, name);
   if (session?.status !== "WORKING") {
-    throw new WahaError("session_not_working", `The WhatsApp number of this installation is not connected (session is ${session?.status ?? "missing"}): connect it in Settings`);
+    throw new WahaError("session_not_working", `The WhatsApp number of this installation is not connected (session is ${session?.status ?? "missing"}): connect it in Settings → WhatsApp`);
   }
   let chatId: string | null;
   let addressVerified = true;

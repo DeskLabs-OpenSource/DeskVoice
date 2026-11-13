@@ -134,10 +134,10 @@ async function record(q: OrgQuery, now: Date, state: VoiceState): Promise<Row | 
     await notice(
       q,
       now,
-      `O número${number} desconectou da ligação pelo WhatsApp. Conecte de novo em Configurações. O WhatsApp desconecta os aparelhos vinculados quando o celular principal fica mais de 14 dias sem uso.`,
+      `O número${number} desconectou da ligação pelo WhatsApp. Conecte de novo em Configurações → WhatsApp. O WhatsApp desconecta os aparelhos vinculados quando o celular principal fica mais de 14 dias sem uso.`,
     );
   } else if (next.status === "failed") {
-    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Configurações.");
+    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Configurações → WhatsApp.");
   }
   return after;
 }

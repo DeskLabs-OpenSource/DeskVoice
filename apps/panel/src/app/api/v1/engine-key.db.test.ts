@@ -132,7 +132,7 @@ describe("engine key test", () => {
     const report = await call(health);
     const outside = (report.data as { engine: { status: string; reason: string; detail: string; params: unknown } }).engine;
     expect([outside.status, outside.reason, outside.params]).toEqual(["fail", "engine_key_problem", {}]);
-    expect(outside.detail).toBe("o último teste da chave de um motor de voz não deu certo: as ligações com esse motor podem ser recusadas. Veja o resultado no painel, em Configurações → Motores de voz");
+    expect(outside.detail).toBe("o último teste da chave de um motor de voz não deu certo: as ligações com esse motor podem ser recusadas. Veja o resultado no painel, em Configurações → Inteligência artificial");
     expect(leaksFrom(report.data)).toEqual([]);
 
     // Com a chave dela aceita, a B vê a dela, e ainda não a da A.

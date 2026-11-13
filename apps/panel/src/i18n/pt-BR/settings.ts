@@ -1,6 +1,16 @@
 const settings = {
   title: "Configurações",
   lead: "Chaves e conexões que os agentes usam. O que é segredo fica cifrado no seu servidor e não volta a aparecer na tela.",
+  sectionsNav: "Seções de Configurações",
+  sections: {
+    ai: "Inteligência artificial",
+    calls: "Ligações",
+    whatsapp: "WhatsApp",
+    integrations: "Integrações",
+    privacy: "Privacidade",
+    system: "Sistema",
+    account: "Sua conta",
+  },
   enginesTitle: "Motores de voz",
   enginesLead: "O motor de voz é o modelo de IA que escuta e fala na ligação. Cada provedor pede uma chave própria.",
   keyOf: "Chave de {engine}",

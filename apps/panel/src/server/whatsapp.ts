@@ -130,9 +130,9 @@ async function record(q: OrgQuery, now: Date, session: WahaSession | null): Prom
   if (next.status === "connected") {
     await notice(q, now, `WhatsApp conectado${phone ? `: ${phone}` : ""}. Os avisos e as mensagens do agente passam a sair por este número.`);
   } else if (next.status === "failed" && before.status === "connected") {
-    await notice(q, now, `O WhatsApp${phone ? ` ${phone}` : ""} desconectou. Os avisos e as mensagens por WhatsApp não saem até alguém conectar de novo, em Configurações.`);
+    await notice(q, now, `O WhatsApp${phone ? ` ${phone}` : ""} desconectou. Os avisos e as mensagens por WhatsApp não saem até alguém conectar de novo, em Configurações → WhatsApp.`);
   } else if (next.status === "failed") {
-    await notice(q, now, "A conexão do WhatsApp não foi concluída: o QR Code não foi lido a tempo ou a conexão falhou. Tente de novo em Configurações.");
+    await notice(q, now, "A conexão do WhatsApp não foi concluída: o QR Code não foi lido a tempo ou a conexão falhou. Tente de novo em Configurações → WhatsApp.");
   }
   return after;
 }

@@ -409,7 +409,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         notice:
           reason === "engine_not_responding"
             ? `Uma ligação do agente ${agent.name} foi recusada porque o provedor do motor de voz ${label} não respondeu: ${problem}. Quem ligou ouviu o sinal de falha. Confira a situação do provedor e faça uma chamada de teste.`
-            : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${agent.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações, na seção do motor de voz, e faça uma chamada de teste.`,
+            : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${agent.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações → Inteligência artificial e faça uma chamada de teste.`,
       });
     }
 
@@ -449,7 +449,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         transferTo: transferTo ?? undefined,
         tone: true,
         events: [["engine_failed", { engine: engineId, error }], ...(transferTo ? [["transfer_started", { to: transferTo, reason: "engine_failed" }] satisfies [CallEventKind, object]] : [])],
-        notice: `O motor de voz ${engineLabel} caiu no meio de uma ligação do agente ${agent?.name}: ${error}. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : "A ligação foi encerrada, porque o agente não tem número de transferência."} Confira a chave e a situação do provedor em Configurações.`,
+        notice: `O motor de voz ${engineLabel} caiu no meio de uma ligação do agente ${agent?.name}: ${error}. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : "A ligação foi encerrada, porque o agente não tem número de transferência."} Confira a chave e a situação do provedor em Configurações → Inteligência artificial.`,
       });
     });
     transport.onAudio((pcm) => {
