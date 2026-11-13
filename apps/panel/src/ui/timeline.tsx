@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
+import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, DotsNine, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import en from "../i18n/en/timeline";
@@ -166,6 +166,8 @@ export function Timeline({
             </Card>
           ),
         };
+      case "dtmf_sent":
+        return { ...base, tone: "neutral", icon: DotsNine, body: <Quiet><span className="font-bold text-ink">{e.dtmf_sent}</span>{text(p.digits) ? <> · <span className="data">{text(p.digits)}</span></> : null}</Quiet> };
       case "transfer_started":
         return {
           ...base,
