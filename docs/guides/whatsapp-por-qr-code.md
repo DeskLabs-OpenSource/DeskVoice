@@ -30,7 +30,7 @@ do DeskVoice e não há configuração que elimine o risco. O que o reduz:
 - **Não escreva primeiro para desconhecidos.** É o que mais leva a bloqueio. O agente só envia
   para o número de quem está na ligação ou para a equipe cadastrada, e a mensagem para quem ligou
   pede a confirmação de uma pessoa, porque o número exibido numa ligação pode ser forjado
-  (Configurações → "Enviar direto para quem ligou"). Mesmo confirmada, essa mensagem é uma
+  (Configurações → WhatsApp → "Enviar direto para quem ligou"). Mesmo confirmada, essa mensagem é uma
   conversa iniciada pelo seu número com alguém que talvez nunca tenha falado com ele.
 - **Poucas mensagens por hora.** O guia do WAHA fala em no máximo 4 mensagens por hora para um
   mesmo contato, com pausa entre elas, e em nunca enviar em sequência para muitos contatos. O

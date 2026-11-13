@@ -52,7 +52,7 @@ const whatsapp: WhatsAppDictionary = {
   connectedUnknown: "A number is connected.",
   since: "Connected since {when}.",
   sendTest: "Send test message",
-  testHint: "The test message goes to your own WhatsApp, the one in My contact, at the top of this page.",
+  testHint: "The test message goes to your own WhatsApp, the one in My contact, under Settings → Your account.",
   testHintConnector: "The test message goes to your own WhatsApp, the one in My contact, through the connector configured in this installation. If the connector refuses it, this page says why.",
   testSent: "Test message sent to {to}. Check your phone.",
   disconnect: "Disconnect",

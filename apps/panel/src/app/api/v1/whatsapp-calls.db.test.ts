@@ -137,8 +137,8 @@ describe("the service exists only on the server of whoever asked for it", () => 
     expect(await healthLine(owner.cookie)).toMatchObject({ status: "warn", reason: "whatsapp_calls_no_number" });
     expect(await notices(org)).toEqual([
       "Test owner pediu a instalação do serviço de ligação pelo WhatsApp neste servidor. O servidor baixa e sobe o serviço em alguns minutos.",
-      "O servidor não conseguiu instalar ou remover o serviço de ligação pelo WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações.",
-      "O serviço de ligação pelo WhatsApp está instalado neste servidor. Conecte um número em Configurações.",
+      "O servidor não conseguiu instalar ou remover o serviço de ligação pelo WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações → WhatsApp.",
+      "O serviço de ligação pelo WhatsApp está instalado neste servidor. Conecte um número em Configurações → WhatsApp.",
     ]);
   });
 
@@ -222,7 +222,7 @@ describe("pairing the number by QR code", () => {
     const first = sessionOf(org);
     wacalls.expire(first);
     await expect.poll(async () => (await state(owner.cookie)).failure).toBe("qr_expired");
-    expect(await notices(org)).toContain("A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Configurações.");
+    expect(await notices(org)).toContain("A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Configurações → WhatsApp.");
     wacalls.requests.length = 0;
     expect((await start(owner.cookie)).data).toMatchObject({ status: "qr" });
     const paths = wacalls.requests.filter((request) => request.path !== "/api/events").map((request) => `${request.method} ${request.path}`);

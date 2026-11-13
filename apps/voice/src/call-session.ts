@@ -140,6 +140,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let lastEngineError: Error | undefined;
   let ending = false;
   let recorder: Recording | undefined;
+  /** A gravação de `recording_failed`, para o fim da chamada esperar por ela. */
+  let recordingFailed: Promise<void> | undefined;
   let wrappingUp = false;
   let requestedEnd: Ending | undefined;
   let requestedFarewell: string | undefined;
@@ -188,6 +190,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     }
     // Fecha o arquivo em qualquer caminho de fim: com áudio vira `.wav`; sem, ou com falha, o `.part` some.
     await recorder?.finish().catch(logFailure("could not save the call recording"));
+    await recordingFailed;
     resolveDone({ status: end.status, endReason: end.endReason, costCents });
   }
 
@@ -201,7 +204,13 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     try {
       const free = await freeBytes(dir);
       if (free < minFreeBytes) return void (await event("recording_skipped", { reason: "low_disk", freeBytes: free, minFreeBytes }));
-      opened = await startRecording(recordingPath(dir, organizationId, callId), () => clock.now().getTime());
+      opened = await startRecording(recordingPath(dir, organizationId, callId), () => clock.now().getTime(), {
+        // A chamada segue sem gravar, e a linha do tempo diz na hora que a gravação parou.
+        onFailure: (reason, error) => {
+          log("error", "the call recording failed; the call goes on without it", { reason, error: error.message });
+          recordingFailed = event("recording_failed", { reason, error: error.message }).catch(logFailure("could not record the recording failure"));
+        },
+      });
     } catch (error) {
       log("error", "could not start the call recording", { error: messageOf(error) });
       return void (await event("recording_skipped", { reason: "unavailable", error: messageOf(error) }));
@@ -404,7 +413,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         notice:
           reason === "engine_not_responding"
             ? `Uma ligação do agente ${agent.name} foi recusada porque o provedor do motor de voz ${label} não respondeu: ${problem}. Quem ligou ouviu o sinal de falha. Confira a situação do provedor e faça uma chamada de teste.`
-            : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${agent.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações, na seção do motor de voz, e faça uma chamada de teste.`,
+            : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${agent.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações → Inteligência artificial e faça uma chamada de teste.`,
       });
     }
 
@@ -444,7 +453,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         transferTo: transferTo ?? undefined,
         tone: true,
         events: [["engine_failed", { engine: engineId, error }], ...(transferTo ? [["transfer_started", { to: transferTo, reason: "engine_failed" }] satisfies [CallEventKind, object]] : [])],
-        notice: `O motor de voz ${engineLabel} caiu no meio de uma ligação do agente ${agent?.name}: ${error}. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : canTransfer ? "A ligação foi encerrada, porque o agente não tem número de transferência." : "A ligação foi encerrada, porque este canal não tem como transferir."} Confira a chave e a situação do provedor em Configurações.`,
+        notice: `O motor de voz ${engineLabel} caiu no meio de uma ligação do agente ${agent?.name}: ${error}. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : canTransfer ? "A ligação foi encerrada, porque o agente não tem número de transferência." : "A ligação foi encerrada, porque este canal não tem como transferir."} Confira a chave e a situação do provedor em Configurações → Inteligência artificial.`,
       });
     });
     transport.onAudio((pcm) => {

@@ -3,6 +3,16 @@ import type { SettingsDictionary } from "../pt-BR/settings";
 const settings: SettingsDictionary = {
   title: "Settings",
   lead: "Keys and connections the agents use. What is secret stays encrypted on your server and is never shown on screen again.",
+  sectionsNav: "Settings sections",
+  sections: {
+    ai: "Artificial intelligence",
+    calls: "Calls",
+    whatsapp: "WhatsApp",
+    integrations: "Integrations",
+    privacy: "Privacy",
+    system: "System",
+    account: "Your account",
+  },
   enginesTitle: "Voice engines",
   enginesLead: "The voice engine is the AI model that listens and speaks on the call. Each provider asks for its own key.",
   keyOf: "{engine} key",

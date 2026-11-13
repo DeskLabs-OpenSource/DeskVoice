@@ -178,7 +178,7 @@ if [ "$only_essential" = 0 ]; then
   elif ! running panel; then
     add whatsapp "WhatsApp" 0 aviso "não deu para conferir porque o painel não está rodando; resolva o painel primeiro"
   elif dc exec -T panel node -e "fetch('http://waha:3000/ping',{signal:AbortSignal.timeout(8000)}).then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
-    add whatsapp "WhatsApp" 0 ok "serviço instalado e respondendo. Se há um número conectado, e qual, aparece em Configurações"
+    add whatsapp "WhatsApp" 0 ok "serviço instalado e respondendo. Se há um número conectado, e qual, aparece em Configurações → WhatsApp"
   else
     add whatsapp "WhatsApp" 0 falha "o serviço de WhatsApp (WAHA) está rodando, mas não responde ao painel. Veja: docker compose -f deploy/docker-compose.yml --profile whatsapp logs --tail 50 waha"
   fi
@@ -187,7 +187,7 @@ if [ "$only_essential" = 0 ]; then
   # Perguntado a partir do processo de voz, que é o único que fala com ele. `/healthz` é a rota sem
   # token do WaCalls. Se há um número conectado, e qual, só a tela diz.
   if ! whatsapp_calls_enabled; then
-    add whatsapp_calls "Ligação pelo WhatsApp" 0 ok "serviço não instalado nesta máquina (é o padrão). Para conectar um número, instale-o pela tela: Configurações → Ligação pelo WhatsApp"
+    add whatsapp_calls "Ligação pelo WhatsApp" 0 ok "serviço não instalado nesta máquina (é o padrão). Para conectar um número, instale-o pela tela: Configurações → WhatsApp"
   elif ! running wacalls; then
     add whatsapp_calls "Ligação pelo WhatsApp" 0 falha "o serviço de ligação pelo WhatsApp (WaCalls) foi instalado pela tela e o contêiner não está rodando. Veja: docker compose -f deploy/docker-compose.yml --profile whatsapp-calls logs --tail 50 wacalls"
   elif [ -z "$(env_get "$ENV_FILE" WACALLS_API_TOKEN)" ]; then
@@ -195,7 +195,7 @@ if [ "$only_essential" = 0 ]; then
   elif ! running voice; then
     add whatsapp_calls "Ligação pelo WhatsApp" 0 aviso "não deu para conferir porque o processo de voz não está rodando; resolva a voz primeiro"
   elif dc exec -T voice node -e "fetch('http://wacalls:8080/healthz',{signal:AbortSignal.timeout(8000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
-    add whatsapp_calls "Ligação pelo WhatsApp" 0 ok "serviço instalado e respondendo. Se há um número conectado, e qual, aparece em Configurações"
+    add whatsapp_calls "Ligação pelo WhatsApp" 0 ok "serviço instalado e respondendo. Se há um número conectado, e qual, aparece em Configurações → WhatsApp"
   else
     add whatsapp_calls "Ligação pelo WhatsApp" 0 falha "o serviço de ligação pelo WhatsApp (WaCalls) está rodando, mas não responde ao processo de voz. Veja: docker compose -f deploy/docker-compose.yml --profile whatsapp-calls logs --tail 50 wacalls"
   fi

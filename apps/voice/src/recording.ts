@@ -151,24 +151,64 @@ export async function freeBytes(dir: string): Promise<number> {
 }
 
 /**
+ * Teto da fila de escritas: 10 s de áudio (a 8 kHz estéreo PCM16, 32 kB por segundo, 320 kB).
+ * Os blocos saem a cada ~1 s com ~32 kB, e um disco são escreve isso em menos de 1 ms: dez blocos
+ * esperando querem dizer que o disco passou 10 s sem dar conta de 32 kB/s, e não vai alcançar a
+ * chamada. 10 s, e não 2 ou 3, para que um engasgo de E/S da VPS de alguns segundos não perca a
+ * gravação. Em memória, 320 kB por chamada, cinco vezes os 64 kB que o gravador segura (#102):
+ * 50 chamadas presas no mesmo disco somam 16 MB, e não a chamada inteira de cada uma.
+ */
+export const MAX_QUEUED_AUDIO_SECONDS = 10;
+
+/** Por que a gravação parou no meio: o disco encheu, a escrita deu erro, ou o disco não deu conta. */
+export type RecordingFailureReason = "disk_full" | "write_failed" | "disk_too_slow";
+
+/**
  * Começa a gravar em `<file>.part`, com o cabeçalho WAV provisório (tamanhos zerados), e escreve
  * em blocos durante a chamada, na ordem. Só no fim o arquivo vira `.wav`: quem lê nunca vê um
  * arquivo pela metade.
+ *
+ * Se a escrita falha, ou a fila passa do teto, a gravação para ali, `onFailure` é chamado uma vez,
+ * na hora, e o resto da chamada não é mais gravado; `finish` apaga o `.part` e lança a falha.
  */
-export async function startRecording(file: string, now: () => number, sampleRate = 8000): Promise<Recording> {
+export async function startRecording(
+  file: string,
+  now: () => number,
+  options: { sampleRate?: number; onFailure?: (reason: RecordingFailureReason, error: Error) => void } = {},
+): Promise<Recording> {
+  const { sampleRate = 8000, onFailure } = options;
+  const maxQueuedBytes = MAX_QUEUED_AUDIO_SECONDS * sampleRate * 4;
   await mkdir(path.dirname(file), { recursive: true });
   const partial = `${file}.part`;
   const handle = await open(partial, "w", 0o640);
-  let failure: unknown;
+  let failure: Error | undefined;
+  const fail = (reason: RecordingFailureReason, error: Error): void => {
+    if (failure !== undefined) return;
+    failure = error;
+    onFailure?.(reason, error);
+  };
   let writing: Promise<void> = Promise.resolve();
+  let queuedBytes = 0;
+  let closing = false;
   const append = (data: Buffer, at: number): void => {
+    if (failure !== undefined) return;
+    // Medido antes de cada bloco, durante a chamada: a fila passa do teto por no máximo um bloco.
+    // No fim não: depois do resto da fala do agente e do cabeçalho, nada mais entra na fila, e o
+    // resto já estava em memória.
+    if (!closing && queuedBytes >= maxQueuedBytes) {
+      return fail("disk_too_slow", new Error(`the disk did not keep up: more than ${MAX_QUEUED_AUDIO_SECONDS} s of audio waiting to be written`));
+    }
+    queuedBytes += data.length;
     writing = writing
       .then(async () => {
         if (failure === undefined) await handle.write(data, 0, data.length, at);
       })
       .catch((error: unknown) => {
-        // Guardada para o fim: a chamada segue, e `finish` diz que a gravação falhou.
-        failure ??= error;
+        const full = error instanceof Error && "code" in error && error.code === "ENOSPC";
+        fail(full ? "disk_full" : "write_failed", error instanceof Error ? error : new Error(String(error)));
+      })
+      .finally(() => {
+        queuedBytes -= data.length;
       });
   };
   append(wavHeader(0, sampleRate), 0);
@@ -183,10 +223,16 @@ export async function startRecording(file: string, now: () => number, sampleRate
   );
 
   return {
-    caller: (pcm) => recorder.caller(pcm),
-    agent: (pcm) => recorder.agent(pcm),
+    // Depois da falha, nada mais é gravado: nem o trecho que ainda podia mudar fica em memória.
+    caller: (pcm) => {
+      if (failure === undefined) recorder.caller(pcm);
+    },
+    agent: (pcm) => {
+      if (failure === undefined) recorder.agent(pcm);
+    },
     clear: () => recorder.clear(),
     async finish() {
+      closing = true;
       const bytes = recorder.end();
       if (bytes > 0) append(wavHeader(bytes, sampleRate), 0);
       await writing;

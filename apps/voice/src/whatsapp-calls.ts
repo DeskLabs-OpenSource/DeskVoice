@@ -181,9 +181,9 @@ type Refusal = "no_agent" | "agent_disabled" | "inbound_limit_reached";
 
 const NOTICE: Record<Refusal, (from: string, to: string, limit: number) => string> = {
   no_agent: (from, to) =>
-    `Uma ligação pelo WhatsApp de ${from} para ${to} não foi atendida pelo agente porque nenhum agente atende esse número. Ela continuou tocando no celular. Escolha o agente em Configurações, em Ligação pelo WhatsApp.`,
+    `Uma ligação pelo WhatsApp de ${from} para ${to} não foi atendida pelo agente porque nenhum agente atende esse número. Ela continuou tocando no celular. Escolha o agente em Configurações → WhatsApp, no bloco Ligação pelo WhatsApp.`,
   agent_disabled: (from, to) =>
-    `Uma ligação pelo WhatsApp de ${from} para ${to} não foi atendida pelo agente porque o agente desse número está desligado. Ela continuou tocando no celular. Ligue o agente ou escolha outro em Configurações, em Ligação pelo WhatsApp.`,
+    `Uma ligação pelo WhatsApp de ${from} para ${to} não foi atendida pelo agente porque o agente desse número está desligado. Ela continuou tocando no celular. Ligue o agente ou escolha outro em Configurações → WhatsApp, no bloco Ligação pelo WhatsApp.`,
   inbound_limit_reached: (from, to, limit) =>
     `Uma ligação pelo WhatsApp de ${from} para ${to} não foi atendida pelo agente porque já havia ${limit} ligações recebidas em andamento, pela operadora e pelo WhatsApp, o limite definido em Configurações. Ela continuou tocando no celular. Outras pelo mesmo motivo nos próximos 10 minutos aparecem só em Chamadas.`,
 };

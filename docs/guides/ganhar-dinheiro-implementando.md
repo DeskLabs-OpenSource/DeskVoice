@@ -120,7 +120,7 @@ redige contratos.
 - **Quem responde pelos dados.** Quem opera a instalação responde pelo uso que faz dela
   ([conformidade no Brasil](conformidade-brasil.md)). O contrato diz quem é essa pessoa: em
   geral o cliente, que decide o que o agente faz, e você, que executa. Diga também quem escolhe o
-  prazo de guarda das conversas e se a gravação fica ligada. Os dois ficam em Configurações, só
+  prazo de guarda das conversas e se a gravação fica ligada. Os dois ficam em Configurações → Privacidade, só
   dono ou administrador muda, e a gravação vem desligada. E diga quem atende o pedido de uma
   pessoa que quer os próprios dados: a tela exporta tudo de um telefone, menos o áudio, que sai à
   parte, chamada por chamada.
@@ -156,7 +156,7 @@ Só o que foi medido, com a versão e a data. O registro inteiro está em
 | Gravação | Cerca de 1,9 MB por minuto de chamada, pela conta do formato. Um arquivo real de 75 s teve 2,4 MB, o que bate com a conta |
 
 O teto de ligações recebidas ao mesmo tempo é de 5 por organização, ajustável de 1 a 50 em
-Configurações, e o de chamadas pelo navegador é de 3. São limites de gasto, e não uma medida do
+Configurações → Ligações, e o de chamadas pelo navegador é de 3. São limites de gasto, e não uma medida do
 que a máquina aguenta.
 
 O que **não** foi medido, e por isso você não deve prometer:

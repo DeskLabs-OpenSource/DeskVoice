@@ -105,7 +105,7 @@ por HTTPS, de qualquer lugar.
 
 ### 4. Informe a chave de IA
 
-Em Configurações, no motor de voz, cole a chave do Gemini ou da OpenAI. Ela é guardada cifrada.
+Em Configurações → Inteligência artificial, no motor de voz, cole a chave do Gemini ou da OpenAI. Ela é guardada cifrada.
 
 Teste a chave antes de ligar. Ao salvar, o painel já testa e diz o resultado; depois, o botão
 **Testar a chave**, ao lado dela, testa de novo. O teste não abre sessão de voz e não gasta: ele só

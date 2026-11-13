@@ -44,7 +44,7 @@ tem risco zero. Três pontos:
 
 O DeskVoice guarda a **transcrição** da conversa e os eventos da chamada. A **gravação do áudio**
 existe, mas vem **desligada de fábrica**: só grava a organização em que um dono ou administrador a
-ligar, em Configurações, em "Gravação das chamadas". Transcrição e gravação de conversa com uma
+ligar, em Configurações → Privacidade, em "Gravação das chamadas". Transcrição e gravação de conversa com uma
 pessoa identificável são dado pessoal; a voz, mais ainda.
 
 O que o sistema faz: a chamada começa com um aviso de que a conversa é registrada, e o aviso

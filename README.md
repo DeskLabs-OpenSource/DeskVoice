@@ -247,7 +247,7 @@ projeto. Estes são todos os contatos com fora que a instalação faz sem você 
 
 | Quem | Com quem | Quando | O que envia |
 |---|---|---|---|
-| Painel | API pública de versões do GitHub (`api.github.com/repos/DeskLabs-OpenSource/DeskVoice/releases`) | Quando alguém abre Configurações ou confirma uma atualização. A resposta fica guardada por 10 minutos (1 minuto, se a consulta falhou) | Um pedido de leitura sem credencial e sem corpo, com dois cabeçalhos fixos, iguais em toda instalação: `accept: application/vnd.github+json` e `user-agent: deskvoice-panel`. Nenhuma versão, endereço ou identificador da instalação |
+| Painel | API pública de versões do GitHub (`api.github.com/repos/DeskLabs-OpenSource/DeskVoice/releases`) | Quando alguém abre Configurações → Sistema ou confirma uma atualização. A resposta fica guardada por 10 minutos (1 minuto, se a consulta falhou) | Um pedido de leitura sem credencial e sem corpo, com dois cabeçalhos fixos, iguais em toda instalação: `accept: application/vnd.github+json` e `user-agent: deskvoice-panel`. Nenhuma versão, endereço ou identificador da instalação |
 | Agente de atualização | O repositório no GitHub, por `git fetch --tags` | O agente passa a cada minuto e busca as versões no máximo a cada 10 minutos, quando a instalação está numa versão publicada e veio de um clone do repositório | O pedido do git para buscar as etiquetas, sem credencial. O git se identifica com a própria versão (`git/2.x`); nada da instalação vai junto |
 | Caddy, só com domínio | A autoridade de certificados que o Caddy usa (Let's Encrypt, por padrão) | Ao instalar e, depois, sozinho, para renovar o certificado antes de vencer | O domínio, para provar que ele aponta para a VPS. O DeskVoice não configura e-mail nesse pedido |
 

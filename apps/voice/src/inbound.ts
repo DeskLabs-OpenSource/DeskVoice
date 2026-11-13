@@ -26,7 +26,7 @@ const NOTICE: Record<Refusal, (dialed: string, limit: number) => string> = {
   no_agent: (dialed) => `Uma ligação para ${dialed} foi recusada porque nenhum agente atende esse número. Escolha o agente do número em Linha telefônica.`,
   agent_disabled: (dialed) => `Uma ligação para ${dialed} foi recusada porque o agente desse número está desligado. Ligue o agente ou escolha outro em Linha telefônica.`,
   inbound_limit_reached: (dialed, limit) =>
-    `Uma ligação para ${dialed} recebeu sinal de ocupado porque já havia ${limit} ligações recebidas em andamento, o limite definido em Configurações. Outras recusas pelo mesmo motivo nos próximos 10 minutos aparecem só em Chamadas.`,
+    `Uma ligação para ${dialed} recebeu sinal de ocupado porque já havia ${limit} ligações recebidas em andamento, o limite definido em Configurações → Ligações. Outras recusas pelo mesmo motivo nos próximos 10 minutos aparecem só em Chamadas.`,
 };
 
 /**

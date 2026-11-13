@@ -6,7 +6,7 @@ const privacy = {
   recordingDisk:
     "Cada minuto de chamada ocupa cerca de 1,9 MB no disco do servidor. É a conta do formato (dois canais, 8 kHz, 16 bits), e não uma medição.",
   recordingKeeps:
-    "Ligar ou desligar não apaga nada. As gravações já feitas seguem o prazo de guarda abaixo: saem junto com o texto da conversa, e sem prazo ficam para sempre. Os backups de hoje não incluem as gravações. Confira se o aviso do começo da ligação diz a quem liga que a conversa fica registrada.",
+    "Ligar ou desligar não apaga nada. As gravações já feitas seguem o prazo de guarda abaixo: saem junto com o texto da conversa, e sem prazo ficam para sempre. Os backups de hoje não incluem as gravações. Confira se o aviso do começo da ligação, em Configurações → Ligações, diz a quem liga que a conversa fica registrada.",
   recordingForever:
     "O prazo de guarda está vazio: as gravações ficam para sempre, e o disco do servidor cresce sem limite, cerca de 1,9 MB por minuto de chamada. Defina um prazo abaixo para que as gravações antigas saiam.",
   recordingStates: { on: "ligada", off: "desligada" },
