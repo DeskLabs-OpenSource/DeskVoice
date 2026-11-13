@@ -28,12 +28,18 @@ import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
-import type { KeyCheckResult, Usage, VoiceEngine, VoiceSession } from "../types";
+import { classifyOutcomeOverHttp } from "../outcome-over-http";
+import { OUTCOME_GUESS_SCHEMA, outcomePrompt, readOutcomeGuess } from "../outcome";
+import type { ClassifyOptions, KeyCheckResult, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
 const DEFAULT_API_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-realtime-2.1";
 const DEFAULT_VOICE = "marin";
+// Modelo de texto que classifica o desfecho: barato e com saída estruturada (conferido em
+// 2026-11-13). O `gpt-5-mini` já tem desligamento marcado, então o padrão é o nano — e o operador
+// pode trocar pelo modelo que quiser em `engine.openai.classify_model`.
+const OUTCOME_MODEL = "gpt-5-nano";
 // Vozes do Realtime, conferidas em 2026-11-12 (developers.openai.com, guia de conversas Realtime).
 // A documentação recomenda marin e cedar pela qualidade; ela não descreve o estilo de cada uma.
 const VOICES = [
@@ -289,6 +295,31 @@ const engine: VoiceEngine = {
 
     if (config.greeting) session.say(config.greeting);
     return session;
+  },
+
+  async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
+    const model = options.model ?? OUTCOME_MODEL;
+    return classifyOutcomeOverHttp(
+      {
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/chat/completions`,
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: outcomePrompt(input) }],
+          response_format: { type: "json_schema", json_schema: { name: "desfecho", strict: true, schema: OUTCOME_GUESS_SCHEMA } },
+        }),
+        read: (body) => {
+          const content = (body as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content;
+          if (typeof content !== "string") return null;
+          try {
+            return readOutcomeGuess(JSON.parse(content));
+          } catch {
+            return null;
+          }
+        },
+      },
+      options,
+    );
   },
 
   checkKey(apiKey, options = {}) {

@@ -44,6 +44,12 @@ export interface Call {
   endedAt: string | null;
   costCents: number;
   summary: string | null;
+  /** O desfecho comercial, quando alguém leu a conversa. `null` = não classificado. */
+  outcome: string | null;
+  /** Veio do banco como `numeric`: é string, não número. */
+  outcomeConfidence: string | null;
+  /** A fala que sustenta o desfecho. */
+  outcomeEvidence: string | null;
   costCeilingCents?: number | null;
 }
 
