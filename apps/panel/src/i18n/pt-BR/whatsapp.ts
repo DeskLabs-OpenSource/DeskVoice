@@ -51,7 +51,7 @@ const whatsapp = {
   since: "Conectado desde {when}.",
   sendTest: "Enviar mensagem de teste",
   testHint: "A mensagem de teste vai para o seu WhatsApp, o que está em Meu contato, em Configurações → Sua conta.",
-  testHintConnector: "A mensagem de teste vai para o seu WhatsApp, o que está em Meu contato, pelo conector configurado nesta instalação. Se o conector recusar, esta página diz o motivo.",
+  testHintConnector: "A mensagem de teste vai para o seu WhatsApp, o que está em Meu contato, em Configurações → Sua conta, pelo conector configurado nesta instalação. Se o conector recusar, esta página diz o motivo.",
   testSent: "Mensagem de teste enviada para {to}. Confira no celular.",
   disconnect: "Desconectar",
   disconnectConfirm:
