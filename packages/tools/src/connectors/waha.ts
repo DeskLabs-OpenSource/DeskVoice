@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { phoneOfWhatsAppId } from "@deskvoice/core";
 
 /**
  * Cliente do WAHA, o serviço da própria instalação que mantém a sessão do WhatsApp lido por
@@ -80,12 +81,6 @@ const qrSchema = z.object({ mimetype: z.literal("image/png"), data: z.string().r
 const existsSchema = z.object({ numberExists: z.boolean(), chatId: z.string().min(1).nullish() });
 const anyObject = z.record(z.string(), z.unknown());
 
-/** `5531999998888@c.us` → `+5531999998888`. Id que não é telefone (`@lid`) vale como desconhecido. */
-function phoneOf(id: string | undefined): string | null {
-  const match = /^(\d{8,15})(?::\d+)?@(?:c\.us|s\.whatsapp\.net)$/.exec(id ?? "");
-  return match ? `+${match[1]}` : null;
-}
-
 interface Call {
   method?: string;
   body?: unknown;
@@ -134,7 +129,7 @@ const ALREADY = [409, 422];
 /** Estado da sessão, ou `null` se o WAHA não a conhece. */
 export async function wahaGetSession(options: WahaOptions, name: string): Promise<WahaSession | null> {
   const session = await call(options, sessionPath(name), sessionSchema, { tolerate: [404] });
-  return session ? { status: session.status, phone: phoneOf(session.me?.id) } : null;
+  return session ? { status: session.status, phone: phoneOfWhatsAppId(session.me?.id) } : null;
 }
 
 /**

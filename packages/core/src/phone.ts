@@ -28,3 +28,16 @@ export function toE164(input: string, defaultCountry: "BR" = "BR"): string | nul
 function brazilian(national: string): string | null {
   return BR_NATIONAL.test(national) || BR_SERVICE.test(national) ? `+55${national}` : null;
 }
+
+/**
+ * O telefone de um id do WhatsApp (`5531999998888:12@s.whatsapp.net`, `5531999998888@c.us`), em E.164.
+ * O `@lid` (número oculto) não é telefone. Celular brasileiro antigo chega sem o nono dígito
+ * (`553188887777`, medido numa ligação real em 13/11/2026), e ele volta aqui: sem isso o número
+ * não passa em `toE164`, nem casa com o mesmo telefone digitado no painel.
+ */
+export function phoneOfWhatsAppId(id: string | null | undefined): string | null {
+  const digits = /^(\d{8,15})(?::\d+)?@(?:s\.whatsapp\.net|c\.us)$/.exec(id ?? "")?.[1];
+  if (!digits) return null;
+  const withoutNinth = /^55([1-9][1-9])([6-9]\d{7})$/.exec(digits);
+  return withoutNinth ? `+55${withoutNinth[1]}9${withoutNinth[2]}` : `+${digits}`;
+}
