@@ -186,7 +186,6 @@ export function fakeAri(): FakeAri {
     hangup: (channelId, reason) => record(`hangup ${channelId}${reason ? ` ${reason}` : ""}`),
     setVariable: (channelId, name, value) => record(`set ${channelId} ${name}=${value}`),
     continueDialplan: (channelId, context, extension) => record(`continue ${channelId} ${context},${extension}`),
-    sendDtmf: (channelId, digits) => record(`dtmf ${channelId} ${digits}`),
     async originate(params) {
       await record(`originate ${params.endpoint}`);
       ari.originated.push(params);
@@ -220,6 +219,8 @@ export interface ManualTransport extends CallTransport {
   hangups: number;
   closes: number;
   transferredTo: string | null;
+  /** Teclas que a conversa mandou apertar. */
+  sentDtmf: string[];
   callerAudio(ms: number): void;
   callerHangup(): void;
 }
@@ -233,12 +234,14 @@ export function manualTransport(): ManualTransport {
     hangups: 0,
     closes: 0,
     transferredTo: null,
+    sentDtmf: [],
     onAudio: (handler) => void (audio = handler),
     sendAudio: (pcm) => void (transport.sentBytes += pcm.length),
     clearAudio: () => void (transport.cleared += 1),
     onHangup: (handler) => void (hangup = handler),
     hangup: async () => void (transport.hangups += 1),
     transfer: async (to) => void (transport.transferredTo = to),
+    sendDtmf: async (digits) => void transport.sentDtmf.push(digits),
     close: async () => void (transport.closes += 1),
     callerAudio(ms) {
       for (let sent = 0; sent < ms; sent += 20) audio?.(Buffer.alloc(320));

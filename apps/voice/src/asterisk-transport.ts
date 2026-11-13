@@ -17,7 +17,7 @@ import { recordEvent, withOrg, type Clock, type Db } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
-import type { CallTransport } from "./transport";
+import { dtmfTones, type CallTransport } from "./transport";
 
 export interface ExpectedCall {
   callId: string;
@@ -61,7 +61,6 @@ export class AsteriskCalls {
     const call = this.byCall.get(connection.id);
     if (!call || call.attached) return null;
     call.attached = true;
-    const { ari } = this.deps;
     const transport: CallTransport = {
       onAudio: (handler) => connection.onAudio(handler),
       sendAudio: (pcm) => connection.sendAudio(pcm),
@@ -80,10 +79,8 @@ export class AsteriskCalls {
         await connection.drained();
         connection.close();
       },
-      // Teclas no menu do outro lado: a ARI entrega o tom ao canal (POST /channels/{id}/dtmf).
-      async sendDtmf(digits) {
-        await ari.sendDtmf(call.channelId, digits);
-      },
+      // Tom em banda, pelo próprio AudioSocket: a ARI recusa DTMF a canal fora da Stasis (ver `dtmfTones`).
+      sendDtmf: (digits) => connection.sendTone(dtmfTones(digits)),
       async close() {
         connection.close();
       },

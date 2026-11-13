@@ -52,8 +52,6 @@ export interface AriClient {
   setVariable(channelId: string, name: string, value: string): Promise<void>;
   /** Devolve ao dialplan um canal que está na Stasis. */
   continueDialplan(channelId: string, context: string, extension: string, priority?: number): Promise<void>;
-  /** Aperta teclas no canal, como se quem ligou digitasse (menu de URA, convênio, banco). */
-  sendDtmf(channelId: string, digits: string): Promise<void>;
   originate(params: OriginateParams): Promise<void>;
   reloadModule(name: string): Promise<void>;
   listEndpoints(technology: string): Promise<AriEndpoint[]>;
@@ -169,9 +167,6 @@ export function createAriClient(options: AriClientOptions): AriClient {
     },
     async continueDialplan(channelId, context, extension, priority = 1) {
       await request("POST", `/channels/${encodeURIComponent(channelId)}/continue`, {}, { context, extension, priority });
-    },
-    async sendDtmf(channelId, digits) {
-      await request("POST", `/channels/${encodeURIComponent(channelId)}/dtmf`, { dtmf: digits });
     },
     async originate(params) {
       await request(
