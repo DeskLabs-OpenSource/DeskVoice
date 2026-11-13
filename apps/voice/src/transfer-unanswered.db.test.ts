@@ -23,6 +23,7 @@ const conexao = (id: string): AudioSocketConnection => ({
   onClose: () => undefined,
   sendAudio: () => undefined,
   clearAudio: () => undefined,
+  sendTone: () => Promise.resolve(),
   drained: async () => undefined,
   close: () => undefined,
 });
