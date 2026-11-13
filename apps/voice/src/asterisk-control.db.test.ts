@@ -290,8 +290,8 @@ describe("chamada simulada pela API interna", { timeout: 120_000 }, () => {
 
     const kinds = await kindsOf(app, callId);
     expect(kinds.filter((kind) => !kind.startsWith("transcript"))).toEqual([
-      "call_started", "call_answered", "recording_notice", "tool_called", "human_notified", "tool_result", "tool_called", "approval_requested", "approval_decided", "tool_result",
-      "tool_called", "transfer_started", "tool_result", "call_ended", "task_queued",
+      "call_started", "call_answered", "recording_notice", "tool_called", "follow_up_created", "tool_result", "tool_called", "human_notified", "tool_result",
+      "tool_called", "approval_requested", "approval_decided", "tool_result", "tool_called", "transfer_started", "tool_result", "call_ended", "task_queued",
     ]);
     expect(kinds.filter((kind) => kind === "transcript_user")).toHaveLength(1);
     expect(await callOf(app, callId)).toMatchObject({ status: "transferred", end_reason: "transferred", engine: "simulated" });

@@ -44,6 +44,9 @@ export const CALL_EVENT_KINDS = [
   "call_ended",
   "task_queued",
   "task_finished",
+  "follow_up_created",
+  "follow_up_assigned",
+  "follow_up_closed",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];

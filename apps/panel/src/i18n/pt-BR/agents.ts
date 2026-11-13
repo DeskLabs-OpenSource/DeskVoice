@@ -46,6 +46,11 @@ const agents = {
   delete: "Apagar agente",
   deleteConfirm: "Apagar {name}? As chamadas antigas continuam no histórico, sem o nome do agente. Essa ação não pode ser desfeita.",
   deleteYes: "Apagar {name}",
+  followUps: "Pendências",
+  followUpsLead: "Quem recebe as pendências que este agente abre com a ferramenta create_task. O agente nunca escolhe a pessoa: ela vem daqui.",
+  followUpOwner: "Dono das pendências deste agente",
+  followUpOwnerTeam: "A equipe (aparece para todo mundo)",
+  followUpOwnerHint: "Se a pessoa for desativada, as pendências abertas dela voltam para a equipe.",
 };
 
 export default agents;

@@ -4,13 +4,18 @@ import type { Tool, ToolContext, ToolResult } from "./types";
 const FAILURE_MESSAGE =
   "Não consegui concluir isso agora. Diga a quem está na linha, com naturalidade, que não foi possível concluir neste momento, e ofereça outra forma de ajudar.";
 
+/** O que `tool_called` grava como argumentos: nada do texto, se a ferramenta declara que ele é pessoal. */
+export function toolCalledArgs(tool: Tool | undefined, rawArgs: unknown): unknown {
+  return tool?.personalTextArgs ? { omitted: "personal_text" } : (rawArgs ?? null);
+}
+
 /**
  * Executa uma ferramenta pedida pelo modelo e deixa o rastro na linha do tempo (`tool_called`,
  * `tool_result`). Argumento inválido e erro dentro da ferramenta voltam como `ok: false`: quem
  * está na linha nunca fica no silêncio por causa de uma exceção.
  */
 export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): Promise<ToolResult> {
-  await recordEvent(ctx.q, ctx.callId, "tool_called", { name: tool.name, args: rawArgs ?? null }, ctx.clock.now());
+  await recordEvent(ctx.q, ctx.callId, "tool_called", { name: tool.name, args: toolCalledArgs(tool, rawArgs) }, ctx.clock.now());
 
   let result: ToolResult;
   let error: string | undefined;

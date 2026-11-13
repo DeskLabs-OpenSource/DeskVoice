@@ -33,11 +33,12 @@ interface Privacy {
 interface Exported {
   phone: string;
   exportedAt: string;
-  counts: { calls: number; events: number; doNotCall: boolean };
+  counts: { calls: number; events: number; doNotCall: boolean; followUps: number };
   content: string;
 }
 
 const numberOf = (value: unknown): number => (typeof value === "number" ? value : 0);
+const hasRecord = (counts: Exported["counts"]): boolean => counts.calls > 0 || counts.doNotCall || counts.followUps > 0;
 
 /** Uma linha do registro, na voz da tela. */
 function describe(entry: Entry, t: PrivacyDictionary): string {
@@ -49,7 +50,11 @@ function describe(entry: Entry, t: PrivacyDictionary): string {
       return fill(t.history.transcript_retention_changed, { who, from: span(p.from), to: span(p.to) });
     case "transcripts_purged": {
       const line = fill(t.history.transcripts_purged, { days: numberOf(p.retentionDays), count: numberOf(p.count) });
-      return numberOf(p.recordings) > 0 ? `${line} ${fill(t.purgedRecordings, { count: numberOf(p.recordings) })}` : line;
+      const extra = [
+        numberOf(p.recordings) > 0 ? fill(t.purgedRecordings, { count: numberOf(p.recordings) }) : null,
+        numberOf(p.followUps) > 0 ? fill(t.purgedFollowUps, { count: numberOf(p.followUps) }) : null,
+      ];
+      return [line, ...extra].filter(Boolean).join(" ");
     }
     case "caller_data_exported":
       return fill(t.history.caller_data_exported, { who, phone: formatPhone(typeof p.phone === "string" ? p.phone : ""), calls: numberOf(p.calls), events: numberOf(p.events) });
@@ -172,7 +177,7 @@ export function PrivacyPanel() {
             void exporter
               .run(async () => {
                 const result = await api<Exported>("/privacy/export", { body: { phone } });
-                if (result.counts.calls > 0 || result.counts.doNotCall) download(result, t);
+                if (hasRecord(result.counts)) download(result, t);
                 setExported(result);
               })
               .then(state.reload);
@@ -187,10 +192,11 @@ export function PrivacyPanel() {
             </Button>
           </div>
           {exporter.error ? <Notice tone="fail">{exporter.error}</Notice> : null}
-          {exported && exported.counts.calls === 0 && !exported.counts.doNotCall ? <Notice>{fill(t.exportEmpty, { phone: formatPhone(exported.phone) })}</Notice> : null}
-          {exported && (exported.counts.calls > 0 || exported.counts.doNotCall) ? (
+          {exported && !hasRecord(exported.counts) ? <Notice>{fill(t.exportEmpty, { phone: formatPhone(exported.phone) })}</Notice> : null}
+          {exported && hasRecord(exported.counts) ? (
             <Notice tone="ok">
               <p>{fill(t.exportDone, { phone: formatPhone(exported.phone), calls: exported.counts.calls, events: exported.counts.events })}</p>
+              {exported.counts.followUps > 0 ? <p>{fill(t.exportDoneFollowUps, { count: exported.counts.followUps })}</p> : null}
               {exported.counts.doNotCall ? <p>{t.exportDoneDnc}</p> : null}
               <p>{t.exportCare}</p>
             </Notice>

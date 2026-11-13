@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { recordingPath, withSystem } from "@deskvoice/core";
+import { closeFollowUp, createFollowUp, recordingPath, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
-import { createCall, createOrganization, depsFor, openTestDbs, putSetting, t0, task, tasksOf } from "../../test/helpers";
+import { createCall, createOrganization, createUser, depsFor, openTestDbs, putSetting, t0, task, tasksOf } from "../../test/helpers";
 import purgeTranscripts from "./purge_transcripts";
 
 const { app, owner } = openTestDbs();
@@ -87,6 +87,49 @@ describe("purge_transcripts", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("apaga a pendência fechada antes do limite (pelo fecho) com o aviso dela, deixa a aberta mesmo velha, e conta followUps", async () => {
+    const org = await createOrganization(app, "purge follow-ups");
+    await putSetting(app, org, "transcripts.retention_days", 30, false);
+    const call = await createCall(app, org, daysAgo(200));
+    const person = await createUser(app, org, null);
+    const agent = await withSystem(app, (q) => q.one<{ id: string }>("insert into agents (organization_id, name, engine) values ($1, 'Recepção', 'simulated') returning id", [org]));
+    const open = (title: string) => withOrg(app, org, (q) => createFollowUp(q, { callId: call, agentId: agent?.id ?? "", title, details: "", dueAt: daysAgo(199) }, daysAgo(200)));
+    const old = await open("Fechada há 40 dias");
+    const recent = await open("Fechada há 10 dias");
+    const stillOpen = await open("Aberta há 200 dias");
+    const close = (id: string, at: Date) => withOrg(app, org, (q) => closeFollowUp(q, id, { status: "done", note: "Feito.", closedBy: person }, at));
+    await close(old.id, daysAgo(40));
+    await close(recent.id, daysAgo(10));
+    // O aviso do sino aponta para a pendência: sai junto com ela.
+    for (const id of [old.id, stillOpen.id]) {
+      await withSystem(app, (q) => q.exec("insert into notifications (organization_id, follow_up_id, channel, body, status, created_at) values ($1, $2, 'panel', 'Pendência para agora', 'sent', $3)", [org, id, daysAgo(199)]));
+    }
+
+    await run(org);
+
+    const left = await withSystem(app, (q) => q.many<{ id: string }>("select id from follow_ups where organization_id = $1 order by created_at, id", [org]));
+    expect(left.map((row) => row.id).sort()).toEqual([recent.id, stillOpen.id].sort());
+    const notices = await withSystem(app, (q) => q.many<{ follow_up_id: string }>("select follow_up_id from notifications where organization_id = $1", [org]));
+    expect(notices).toEqual([{ follow_up_id: stillOpen.id }]);
+    expect(await orgEventsOf(org)).toEqual([
+      { kind: "transcripts_purged", actor_user_id: null, payload: { count: 0, followUps: 1, retentionDays: 30, before: daysAgo(30).toISOString() } },
+    ]);
+  });
+
+  it("sem prazo gravado, a pendência fechada também fica para sempre", async () => {
+    const org = await createOrganization(app, "purge follow-ups forever");
+    const call = await createCall(app, org, daysAgo(4000));
+    const person = await createUser(app, org, null);
+    const agent = await withSystem(app, (q) => q.one<{ id: string }>("insert into agents (organization_id, name, engine) values ($1, 'Recepção', 'simulated') returning id", [org]));
+    const { id } = await withOrg(app, org, (q) => createFollowUp(q, { callId: call, agentId: agent?.id ?? "", title: "Antiga", details: "", dueAt: daysAgo(4000) }, daysAgo(4000)));
+    await withOrg(app, org, (q) => closeFollowUp(q, id, { status: "canceled", note: "Desistiu.", closedBy: person }, daysAgo(3999)));
+
+    await run(org);
+
+    expect(await withSystem(app, (q) => q.one("select 1 as kept from follow_ups where id = $1", [id]))).toEqual({ kept: 1 });
+    expect(await orgEventsOf(org)).toEqual([]);
   });
 
   it("rodar de novo não reconta, não grava evento e não abre uma segunda corrente", async () => {

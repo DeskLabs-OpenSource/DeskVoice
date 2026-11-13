@@ -30,5 +30,10 @@ export interface Tool<Input = unknown> {
   /** JSON Schema entregue ao motor de voz. */
   parameters: Record<string, unknown>;
   inputSchema: ZodType<Input>;
+  /**
+   * Os argumentos são texto sobre quem ligou (o título de uma pendência, uma nota). Com `true`,
+   * `tool_called` não os grava: o texto mora só onde o prazo de guarda o alcança (registro 0014).
+   */
+  personalTextArgs?: boolean;
   run(input: Input, ctx: ToolContext): Promise<ToolResult>;
 }
