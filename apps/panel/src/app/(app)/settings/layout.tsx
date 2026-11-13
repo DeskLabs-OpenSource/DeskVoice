@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import en from "../../../i18n/en/settings";
 import es from "../../../i18n/es/settings";
 import ptBR from "../../../i18n/pt-BR/settings";
@@ -26,13 +26,19 @@ const ACCOUNT = "/settings/account";
 export default function SettingsLayout({ children }: { children: ReactNode }) {
   const t = useDict(ptBR, en, es);
   const pathname = usePathname();
+  const nav = useRef<HTMLElement>(null);
+  // No celular a seção aberta pode estar fora da faixa visível (Sua conta é a última): traz para a vista.
+  useEffect(() => {
+    nav.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [pathname]);
   return (
     <>
-      <div className="grid gap-5">
+      {/* `min-w-0` nos dois níveis: sem ele a largura das seções alarga a página em vez de rolar. */}
+      <div className="grid min-w-0 gap-5">
         <PageHeader title={t.title} lead={t.lead} />
         {/* Em tela estreita as seções rolam na horizontal; a linha de baixo fica fora da rolagem. */}
-        <div className="border-b border-line">
-          <nav aria-label={t.sectionsNav} className="flex gap-1 overflow-x-auto">
+        <div className="min-w-0 border-b border-line">
+          <nav ref={nav} aria-label={t.sectionsNav} className="flex gap-1 overflow-x-auto">
             {SECTIONS.map(({ href, key }) => (
               <Link
                 key={href}
