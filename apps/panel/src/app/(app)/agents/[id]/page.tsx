@@ -17,7 +17,7 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatPhone } from "../../../../ui/format";
 import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
-import type { Agent, Engine, Setting, ToolInfo } from "../../../../ui/types";
+import type { Agent, Engine, Person, Setting, ToolInfo } from "../../../../ui/types";
 
 interface Draft {
   name: string;
@@ -32,9 +32,11 @@ interface Draft {
   maxMinutes: string;
   costCeiling: string;
   enabled: boolean;
+  /** Vazio: as pendências do agente são da equipe. */
+  followUpOwner: string;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "" };
 
 const toDraft = (agent: Agent): Draft => ({
   name: agent.name,
@@ -49,6 +51,7 @@ const toDraft = (agent: Agent): Draft => ({
   maxMinutes: String(Math.round(agent.maxCallSeconds / 60)),
   costCeiling: (agent.costCeilingCents / 100).toFixed(2),
   enabled: agent.enabled,
+  followUpOwner: agent.followUpOwnerUserId ?? "",
 });
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -62,6 +65,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const agent = useApi<Agent>(isNew ? null : `/agents/${id}`);
   const engines = useApi<Engine[]>("/engines");
   const tools = useApi<ToolInfo[]>("/tools");
+  const owners = useApi<Person[]>("/follow-ups/owners");
   const defaultEngine = useApi<Setting<string>>(isNew ? "/settings/engine.default" : null);
   const save = useAction();
   const remove = useAction();
@@ -110,6 +114,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         maxCallSeconds: Math.round(Number(draft.maxMinutes) * 60),
         costCeilingCents: Math.round(Number(draft.costCeiling.replace(",", ".")) * 100),
         enabled: draft.enabled,
+        followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
       };
       const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       if (isNew) router.replace(`/agents/${saved.id}`);
@@ -245,6 +250,19 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </div>
           </Panel>
         </div>
+
+        <Panel title={t.followUps} description={t.followUpsLead}>
+          <Field label={t.followUpOwner} hint={t.followUpOwnerHint}>
+            <Select value={draft.followUpOwner} onChange={(event) => set("followUpOwner", event.target.value)} className="max-w-sm">
+              <option value="">{t.followUpOwnerTeam}</option>
+              {owners.data?.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </Panel>
       </fieldset>
 
       {canConfigure ? (

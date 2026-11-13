@@ -11,6 +11,9 @@ import { POST as outbound } from "./calls/outbound/route";
 import { GET as listCalls } from "./calls/route";
 import { POST as simulate } from "./calls/simulate/route";
 import { POST as webCall } from "./calls/web/route";
+import { POST as closeFollowUp } from "./follow-ups/[id]/close/route";
+import { PATCH as assignFollowUp } from "./follow-ups/[id]/route";
+import { GET as listFollowUps } from "./follow-ups/route";
 import { POST as readNotification } from "./notifications/[id]/read/route";
 import { DELETE as deleteNumber, PATCH as patchNumber } from "./phone-numbers/[id]/route";
 import { POST as createNumber } from "./phone-numbers/route";
@@ -20,7 +23,7 @@ import { DELETE as deleteTrunk, PATCH as patchTrunk } from "./trunks/[id]/route"
 const panel = startPanel();
 let orgB: string;
 let intruder: string;
-let theirs: { agent: string; call: string; approval: string; trunk: string; number: string; notification: string };
+let theirs: { agent: string; call: string; approval: string; trunk: string; number: string; notification: string; followUp: string };
 let mine: { agent: string; trunk: string };
 
 beforeAll(async () => {
@@ -47,6 +50,7 @@ beforeAll(async () => {
     ),
     number: await insert(panel.app, orgB, "insert into phone_numbers (organization_id, trunk_id, e164) values ($1, $2, '+5531999990001') returning id", [orgB, trunk]),
     notification: await insert(panel.app, orgB, "insert into notifications (organization_id, channel, body) values ($1, 'panel', 'Aviso') returning id", [orgB]),
+    followUp: await insert(panel.app, orgB, "insert into follow_ups (organization_id, call_id, title, due_at, created_at) values ($1, $2, 'Retornar', $3, $3) returning id", [orgB, callId, NOW]),
   };
   panel.voice.respond = () => Response.json({ callId: "should-never-be-asked" });
 });
@@ -59,6 +63,7 @@ const snapshot = () =>
     trunk: await q.one("select name, host, status from trunks where id = $1", [theirs.trunk]),
     number: await q.one("select agent_id, e164 from phone_numbers where id = $1", [theirs.number]),
     notification: await q.one("select read_at from notifications where id = $1", [theirs.notification]),
+    followUp: await q.one("select owner_user_id, status, closing_note from follow_ups where id = $1", [theirs.followUp]),
     numbers: await q.many("select e164 from phone_numbers"),
   }));
 
@@ -80,6 +85,8 @@ describe("a user of organization A, through every route that takes an id", () =>
       ["DELETE number", call(deleteNumber, { ...as, method: "DELETE", params: { id: theirs.number } })],
       ["DELETE trunk", call(deleteTrunk, { ...as, method: "DELETE", params: { id: theirs.trunk } })],
       ["read notification", call(readNotification, { ...as, method: "POST", params: { id: theirs.notification } })],
+      ["assign their follow-up", call(assignFollowUp, { ...as, method: "PATCH", params: { id: theirs.followUp }, body: { ownerUserId: null } })],
+      ["close their follow-up", call(closeFollowUp, { ...as, method: "POST", params: { id: theirs.followUp }, body: { status: "done", note: "Fechei." } })],
       ["simulate with their agent", call(simulate, { ...as, method: "POST", body: { agentId: theirs.agent } })],
       ["browser call with their agent", call(webCall, { ...as, method: "POST", body: { agentId: theirs.agent } })],
       ["outbound with their agent", call(outbound, { ...as, method: "POST", body: { agentId: theirs.agent, toE164: "(31) 99999-8888" } })],
@@ -96,7 +103,10 @@ describe("a user of organization A, through every route that takes an id", () =>
   });
 
   it("does not see records of organization B in any list", async () => {
-    const lists = await Promise.all([listAgents, listCalls, listApprovals].map((handler) => call(handler, { cookie: intruder })));
+    const lists = await Promise.all([
+      ...[listAgents, listCalls, listApprovals, listFollowUps].map((handler) => call(handler, { cookie: intruder })),
+      call(listFollowUps, { cookie: intruder, query: `?callId=${theirs.call}` }),
+    ]);
     const text = lists.map((list) => list.text).join("\n");
     for (const id of Object.values(theirs)) expect(text).not.toContain(id);
     expect(lists[0]?.data).toMatchObject([{ id: mine.agent }]);

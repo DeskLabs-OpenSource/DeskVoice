@@ -1,5 +1,5 @@
 import { handle, notFound } from "../../../../../server/context";
-import { AGENT_COLUMNS, agentPatch, type AgentValues } from "../../../../../server/shapes";
+import { AGENT_COLUMNS, agentPatch, requireActiveOwner, type AgentValues } from "../../../../../server/shapes";
 import { updateAgent } from "../store";
 
 export const GET = handle({}, async ({ q, params }) => {
@@ -11,6 +11,7 @@ export const GET = handle({}, async ({ q, params }) => {
 export const PATCH = handle({ body: agentPatch, configure: true }, async ({ q, params, body, deps }) => {
   const current = await q.one<AgentValues>(`select ${AGENT_COLUMNS} from agents where id = $1`, [params.id]);
   if (!current) throw notFound();
+  await requireActiveOwner(q, body.followUpOwnerUserId);
   return updateAgent(q, params.id ?? "", { ...current, ...body }, deps.clock.now());
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, ChartBar, CircleHalf, GearSix, Headset, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UsersThree, Waveform } from "@phosphor-icons/react";
+import { Bell, ChartBar, CircleHalf, GearSix, Headset, ListChecks, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UsersThree, Waveform } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -29,6 +29,7 @@ const setCookie = (name: string, value: string): void => {
 const NAV = [
   { href: "/calls", key: "calls", icon: PhoneCall },
   { href: "/approvals", key: "approvals", icon: SealQuestion },
+  { href: "/follow-ups", key: "followUps", icon: ListChecks },
   { href: "/agents", key: "agents", icon: Headset },
   { href: "/line", key: "line", icon: PlugsConnected },
   { href: "/outbound", key: "outbound", icon: PhoneOutgoing },
@@ -128,8 +129,15 @@ function NotificationBell({ align }: { align: string }) {
         {data.map((notification) => (
           <div key={notification.id} className={`grid gap-1 rounded-xs px-3 py-2.5 ${notification.readAt ? "text-muted" : ""}`}>
             <p className="whitespace-pre-line">{notification.body}</p>
+            {/* O aviso de uma pendência não copia o título: ele vem da própria pendência, pelo id. */}
+            {notification.followUpId ? <p className="font-bold">{notification.followUpTitle ?? t.followUpGone}</p> : null}
             <div className="flex flex-wrap items-center gap-x-3 text-[0.87rem] text-muted">
               <span className="data">{formatDateTime(notification.createdAt, locale)}</span>
+              {notification.followUpId ? (
+                <Link href="/follow-ups" className="font-bold underline-offset-4 hover:text-ink hover:underline">
+                  {t.followUpOpen}
+                </Link>
+              ) : null}
               {notification.callId ? (
                 <Link href={`/calls/${notification.callId}`} className="font-bold underline-offset-4 hover:text-ink hover:underline">
                   {t.openCall}

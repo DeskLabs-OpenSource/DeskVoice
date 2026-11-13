@@ -1,14 +1,15 @@
 "use client";
 
-import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, type Icon, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
+import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import en from "../i18n/en/timeline";
 import es from "../i18n/es/timeline";
 import { fill } from "../i18n/locales";
 import ptBR from "../i18n/pt-BR/timeline";
 import { useDict, useLocale } from "../i18n/provider";
-import { formatClock, formatPhone } from "./format";
-import type { CallEvent } from "./types";
+import { formatClock, formatDateTime, formatPhone } from "./format";
+import type { CallEvent, FollowUp, Person } from "./types";
 
 type NodeTone = "neutral" | "accent" | "ok" | "fail" | "speech" | "speech-agent";
 interface Row {
@@ -52,10 +53,25 @@ const Quiet = ({ children }: { children: ReactNode }) => <p className="pt-1 text
  * A linha do tempo de uma chamada: cada evento de `call_events` vira um item legível preso ao fio.
  * Falas são conversa (quem ligou de um lado, agente do outro); o resto são marcos com ícone.
  */
-export function Timeline({ events, live, agentName }: { events: CallEvent[]; live: boolean; agentName: string }) {
+export function Timeline({
+  events,
+  live,
+  agentName,
+  followUps = [],
+  people = [],
+}: {
+  events: CallEvent[];
+  live: boolean;
+  agentName: string;
+  /** As pendências da ligação: o evento leva só o id, e o título e a nota vêm daqui. */
+  followUps?: FollowUp[];
+  /** Nomes de quem aparece nos eventos de pendência (dono, quem fechou). */
+  people?: Person[];
+}) {
   const t = useDict(ptBR, en, es);
   const locale = useLocale();
   const e = t.events;
+  const nameOf = (id: unknown): string => people.find((person) => person.id === id)?.name ?? t.removedPerson;
   const reason = (code: unknown): string => {
     const key = text(code);
     return Object.hasOwn(t.reasons, key) ? t.reasons[key as keyof typeof t.reasons] : key;
@@ -93,7 +109,9 @@ export function Timeline({ events, live, agentName }: { events: CallEvent[]; liv
       case "tool_result": {
         const outcome = event.kind === "tool_result" ? event : result;
         const failed = outcome?.payload.ok === false;
-        const hasArgs = event.kind === "tool_called" && p.args !== null && p.args !== undefined && Object.keys(p.args).length > 0;
+        // Ferramenta cujos argumentos são texto sobre quem ligou: a linha do tempo não os guarda.
+        const omitted = event.kind === "tool_called" && typeof p.args === "object" && p.args !== null && "omitted" in p.args;
+        const hasArgs = event.kind === "tool_called" && !omitted && p.args !== null && p.args !== undefined && Object.keys(p.args).length > 0;
         return {
           ...base,
           tone: failed ? "fail" : "neutral",
@@ -102,6 +120,7 @@ export function Timeline({ events, live, agentName }: { events: CallEvent[]; liv
             <Card tone={failed ? "fail" : undefined} title={<>{e.tool} <span className="font-medium">{t.names[text(p.name)] ?? text(p.name)}</span></>}>
               <p className={failed ? "text-fail" : "text-muted"}>{outcome ? text(outcome.payload.message) : e.tool_running}</p>
               {text(outcome?.payload.error) ? <p className="text-[0.87rem] text-muted">{e.tool_operator_detail}: <span className="data">{text(outcome?.payload.error)}</span></p> : null}
+              {omitted ? <p className="text-[0.87rem] text-muted">{e.tool_args_omitted}</p> : null}
               {hasArgs ? (
                 <details className="text-[0.87rem] text-muted">
                   <summary className="cursor-pointer font-bold hover:text-ink">{e.tool_args}</summary>
@@ -197,6 +216,40 @@ export function Timeline({ events, live, agentName }: { events: CallEvent[]; liv
         return { ...base, tone: "neutral", icon: PhoneX, body: <Quiet><span className="font-bold text-ink">{e.call_ended}</span>{reason(p.reason) ? ` · ${reason(p.reason)}` : ""}</Quiet> };
       case "task_queued":
         return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{e.task_queued}{text(p.title) || text(p.kind) ? `: ${text(p.title) || (t.names[text(p.kind)] ?? text(p.kind))}` : ""}</Quiet> };
+      case "follow_up_created":
+      case "follow_up_assigned":
+      case "follow_up_closed": {
+        const followUp = followUps.find((candidate) => candidate.id === p.followUpId);
+        const closed = event.kind === "follow_up_closed";
+        const status = p.status === "canceled" ? "canceled" : "done";
+        const owner = p.ownerUserId === null || p.ownerUserId === undefined ? e.follow_up_team : fill(e.follow_up_owner, { name: nameOf(p.ownerUserId) });
+        return {
+          ...base,
+          tone: closed ? (status === "done" ? "ok" : "neutral") : "accent",
+          icon: closed ? (status === "done" ? CheckCircle : XCircle) : ListChecks,
+          body: (
+            <Card title={closed ? e.follow_up_closed[status] : event.kind === "follow_up_created" ? e.follow_up_created : e.follow_up_assigned}>
+              {followUp ? <p className="text-[1.07rem] leading-snug">{followUp.title}</p> : <p className="text-muted italic">{e.follow_up_gone}</p>}
+              {closed ? (
+                <>
+                  {followUp?.closingNote ? <p className="whitespace-pre-line">{followUp.closingNote}</p> : null}
+                  <p className="text-[0.87rem] text-muted">{fill(e.follow_up_closed_by, { name: nameOf(p.closedBy) })}</p>
+                </>
+              ) : (
+                <p className="text-[0.87rem] text-muted">
+                  {p.reason === "owner_disabled" ? e.follow_up_owner_disabled : owner}
+                  {event.kind === "follow_up_created" && text(p.dueAt) ? ` · ${fill(e.follow_up_due, { when: formatDateTime(text(p.dueAt), locale) })}` : ""}
+                </p>
+              )}
+              {followUp ? (
+                <Link href="/follow-ups" className="text-[0.87rem] font-bold text-muted underline-offset-4 hover:text-ink hover:underline">
+                  {e.follow_up_link}
+                </Link>
+              ) : null}
+            </Card>
+          ),
+        };
+      }
       case "task_finished": {
         const failed = p.outcome === "failed" || text(p.error) !== "";
         return { ...base, tone: failed ? "fail" : "ok", icon: failed ? XCircle : CheckCircle, body: <Quiet>{failed ? e.task_failed : e.task_finished}{text(p.kind) ? `: ${t.names[text(p.kind)] ?? text(p.kind)}` : ""}</Quiet> };

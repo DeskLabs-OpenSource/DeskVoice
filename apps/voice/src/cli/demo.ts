@@ -45,6 +45,8 @@ function describeEvent(kind: string, payload: Record<string, unknown>): string {
       return `Transferindo para ${text(payload.to)}: ${text(payload.reason)}`;
     case "call_ended":
       return `Chamada encerrada (${text(payload.status)}, motivo ${text(payload.reason)})`;
+    case "follow_up_created":
+      return "Pendência aberta para a equipe, com dono e prazo";
     case "task_queued":
       return `Tarefa deixada para depois da chamada: ${text(payload.kind)}`;
     default:
@@ -59,7 +61,7 @@ async function run(db: Db): Promise<void> {
       `insert into agents (organization_id, name, role_label, instructions, greeting, engine, tools, transfer_to_e164)
        values ($1, 'Lia', 'Recepção', 'Você é a Lia, da recepção da Clínica Bem Viver.', 'Clínica Bem Viver, bom dia. Aqui é a Lia, assistente virtual da recepção. Como posso ajudar?', 'simulated', $2, $3)
        returning id`,
-      [organizationId, ["notify_human", "request_approval", "transfer_to_human", "end_call"], TRANSFER_TO],
+      [organizationId, ["create_task", "notify_human", "request_approval", "transfer_to_human", "end_call"], TRANSFER_TO],
     ),
   );
   if (!agent) throw new Error("Demo agent was not created");

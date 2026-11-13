@@ -1,3 +1,4 @@
+import { returnFollowUpsToTeam } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, handle } from "../../../../../../server/context";
 import { roleName } from "../../../../../../server/shapes";
@@ -24,6 +25,10 @@ export const PATCH = handle({ body: z.object({ role: roleName.optional(), disabl
   if (disabled) {
     await q.exec("delete from sessions where user_id = $1", [member.id]);
     await revokeInvitesCreatedBy(q, member.id, deps.clock.now());
+    // Quem saiu não cumpre mais o combinado: as pendências abertas dela voltam para a equipe, e os
+    // agentes que a tinham como dono das pendências passam a entregá-las à equipe.
+    await returnFollowUpsToTeam(q, member.id, deps.clock.now());
+    await q.exec("update agents set follow_up_owner_user_id = null where follow_up_owner_user_id = $1", [member.id]);
   } else if (role !== member.role) {
     // Papel novo: caem os convites que a pessoa criou e que, com ele, não poderia mais emitir.
     await revokeInvitesCreatedBy(q, member.id, deps.clock.now(), role);
@@ -31,14 +36,15 @@ export const PATCH = handle({ body: z.object({ role: roleName.optional(), disabl
   return person;
 });
 
-// Remover de vez só quem nunca decidiu uma aprovação: o histórico precisa continuar dizendo quem
-// decidiu. Para os outros, o caminho é desativar.
+// Remover de vez só quem nunca decidiu uma aprovação nem fechou uma pendência: o histórico precisa
+// continuar dizendo quem decidiu e quem fechou (a chave estrangeira zeraria `closed_by`). Para os
+// outros, o caminho é desativar. A pendência fechada que sai pelo prazo de guarda deixa de contar.
 export const DELETE = handle({ configure: true }, async ({ q, session, params, deps }) => {
   const member = await loadMember(q, params.id);
   requireOwnerToManage(session, member.role);
   await requireAnotherOwner(q, member);
-  if (await q.one("select 1 from approvals where decided_by = $1 limit 1", [member.id])) {
-    throw new ApiError(409, "has_history", "This person decided approvals. Disable the account instead of removing it.");
+  if (await q.one("select 1 from approvals where decided_by = $1 union all select 1 from follow_ups where closed_by = $1 limit 1", [member.id])) {
+    throw new ApiError(409, "has_history", "This person decided approvals or closed follow-ups. Disable the account instead of removing it.");
   }
   // Antes de apagar: a remoção zera `created_by` nos convites, e depois disso não daria mais para achá-los.
   await revokeInvitesCreatedBy(q, member.id, deps.clock.now());

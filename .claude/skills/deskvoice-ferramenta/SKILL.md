@@ -15,7 +15,7 @@ reprova quem tenta). O guia longo, com exemplo completo, é
 | Situação | Caminho |
 |---|---|
 | O agente só precisa avisar um sistema externo | `call_webhook`, com URL cadastrada na tela. Sem código |
-| Algo precisa acontecer depois da chamada | `create_task` enfileira uma tarefa |
+| Algo precisa acontecer depois da chamada | `create_task` abre uma pendência com responsável e prazo |
 | O agente precisa consultar ou executar algo e usar a resposta na conversa | Ferramenta nova |
 | É regra de um ramo de negócio ou de uma empresa só | Não entra no núcleo: webhook, ou no seu fork |
 
@@ -64,7 +64,8 @@ Confira a interface no arquivo antes de escrever: se este resumo divergir, vale 
      sucesso sem sucesso.
 7. **Eventos**: toda execução registra `tool_called` e `tool_result` na linha do tempo
    (`recordEvent`, de `@deskvoice/core`), do jeito que as vizinhas fazem. Sem senha, chave ou dado
-   de cartão no `payload`.
+   de cartão no `payload`. Argumento que é texto sobre quem ligou (título de pendência, nota):
+   `personalTextArgs: true` no arquivo da ferramenta, e `tool_called` não o grava.
 8. **Telefone** sempre por `toE164` antes de gravar ou comparar.
 
 ## 3. Quando pedir aprovação humana

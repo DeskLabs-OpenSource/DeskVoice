@@ -48,6 +48,11 @@ const agents: AgentsDictionary = {
   delete: "Borrar agente",
   deleteConfirm: "¿Borrar {name}? Las llamadas antiguas siguen en el historial, sin el nombre del agente. Esta acción no se puede deshacer.",
   deleteYes: "Borrar {name}",
+  followUps: "Pendientes",
+  followUpsLead: "Quién recibe los pendientes que este agente abre con la herramienta create_task. El agente nunca elige a la persona: viene de aquí.",
+  followUpOwner: "Dueño de los pendientes de este agente",
+  followUpOwnerTeam: "El equipo (lo ven todos)",
+  followUpOwnerHint: "Si la persona se desactiva, sus pendientes abiertos vuelven al equipo.",
 };
 
 export default agents;

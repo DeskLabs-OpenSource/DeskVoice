@@ -17,7 +17,7 @@ import { formatDateTime, formatDuration, formatMoney, formatPhone, secondsBetwee
 import { Badge, Notice, Skeleton, type Tone } from "../../../../ui/kit";
 import { useLive, useNow } from "../../../../ui/live";
 import { Timeline } from "../../../../ui/timeline";
-import type { Call, CallEvent, CallStatus, Engine } from "../../../../ui/types";
+import type { Call, CallEvent, CallStatus, Engine, FollowUpList } from "../../../../ui/types";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
 
@@ -31,10 +31,12 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   const call = useApi<Call>(`/calls/${id}`);
   const events = useApi<CallEvent[]>(`/calls/${id}/events`);
   const engines = useApi<Engine[]>("/engines");
+  const followUps = useApi<FollowUpList>(`/follow-ups?callId=${id}`);
   useLive((signal) => {
     if (signal.callId !== id) return;
     call.reload();
     events.reload();
+    followUps.reload();
   });
 
   const back = (
@@ -99,7 +101,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
       {!live ? <Recording id={id} title={t.recordingTitle} missing={t.recordingMissing} /> : null}
 
       {events.error && !events.data ? <Notice tone="fail">{errorText(events.error)}</Notice> : null}
-      {events.data ? <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} /> : <Skeleton lines={4} />}
+      {events.data ? <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} followUps={followUps.data?.items} people={followUps.data?.people} /> : <Skeleton lines={4} />}
     </>
   );
 }

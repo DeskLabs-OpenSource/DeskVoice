@@ -14,7 +14,7 @@ lista, índice nem registro. O sistema descobre a ferramenta pela pasta.
 | Situação | Caminho |
 |---|---|
 | Preciso que o agente avise um sistema meu de algo | A ferramenta `call_webhook` já faz isso, para URLs cadastradas na tela. Sem código |
-| Preciso que algo aconteça depois da chamada | A ferramenta `create_task` enfileira uma tarefa |
+| Preciso que algo aconteça depois da chamada | A ferramenta `create_task` abre uma pendência com responsável e prazo |
 | Preciso que o agente consulte ou execute algo e use a resposta na conversa | Ferramenta nova. Siga este guia |
 
 E uma segunda pergunta: **a ferramenta é de uso geral ou de um ramo de negócio?**
@@ -45,6 +45,7 @@ interface Tool<Input = unknown> {
   description: string;
   parameters: Record<string, unknown>; // JSON Schema entregue ao motor de voz
   inputSchema: ZodType<Input>;         // validação da entrada
+  personalTextArgs?: boolean;          // os argumentos são texto sobre quem ligou: não vão para `tool_called`
   run(input: Input, ctx: ToolContext): Promise<ToolResult>;
 }
 
@@ -169,6 +170,12 @@ conferindo." Três segundos de silêncio ao telefone parecem uma ligação caíd
 
 Toda execução registra `tool_called` e `tool_result`. Veja como as ferramentas existentes fazem,
 e siga a mesma forma. Não coloque dado sensível no evento: senha, chave, número de cartão.
+
+Se os argumentos que o modelo manda são texto sobre a pessoa que ligou (o título de uma pendência,
+uma nota sobre ela), declare `personalTextArgs: true` no próprio arquivo da ferramenta. Aí
+`tool_called` grava `{ omitted: "personal_text" }` no lugar dos argumentos: a linha do tempo não sai
+pelo prazo de guarda, e o texto precisa morar num lugar que o prazo e a exportação alcançam. É o que
+`create_task` faz, guardando o texto na pendência.
 
 ### 7. Ação que não tem volta pede confirmação
 
