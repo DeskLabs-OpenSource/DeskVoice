@@ -112,6 +112,106 @@ envelheceria em meses. O raciocínio que se sustenta:
 - **O preço fica entre os dois**, mais perto do piso enquanto você não tem casos para mostrar, e
   mais perto do teto quando tem.
 
+## O que o contrato precisa cobrir
+
+Isto não é aconselhamento jurídico: é a lista do que o software deixa em aberto. Leve-a a quem
+redige contratos.
+
+- **Quem responde pelos dados.** Quem opera a instalação responde pelo uso que faz dela
+  ([conformidade no Brasil](conformidade-brasil.md)). O contrato diz quem é essa pessoa: em
+  geral o cliente, que decide o que o agente faz, e você, que executa. Diga também quem escolhe o
+  prazo de guarda das conversas e se a gravação fica ligada. Os dois ficam em Configurações, só
+  dono ou administrador muda, e a gravação vem desligada. E diga quem atende o pedido de uma
+  pessoa que quer os próprios dados: a tela exporta tudo de um telefone, menos o áudio, que sai à
+  parte, chamada por chamada.
+- **O que o prazo de guarda não apaga.** O resumo da chamada, os argumentos das ferramentas e os
+  backups já feitos ficam. Escreva isso, para ninguém prometer um apagamento que não acontece.
+- **No nome de quem ficam o número e o tronco.** A recomendação é no nome do cliente, como as
+  outras contas (veja "Custos de terceiros"). Se ficarem no seu, o contrato diz como passam a ele.
+- **O risco de bloqueio do WhatsApp.** A conexão por QR Code usa um cliente não oficial, e o
+  WhatsApp pode restringir ou bloquear o número sem aviso
+  ([guia](whatsapp-por-qr-code.md)). O cliente precisa saber disso antes de conectar, e o contrato
+  diz que o bloqueio não é falha sua e que o número deve ser dedicado ao atendimento.
+- **O que acontece quando o contrato termina.** O que você entrega: o acesso ao servidor, um
+  backup recente e as gravações, que ficam fora dele (só no volume `recordings` da VPS). O que
+  você deixa de ter: a sua conta no painel, desativada pelo cliente em Equipe, e as chaves que
+  fossem suas, trocadas pelas dele. Se a VPS estava no seu nome, a mudança para a dele é
+  `backup.sh` numa máquina e `restore.sh --with-config` na outra
+  ([`install/README.md`](../../install/README.md)). Essa restauração em outro servidor ainda não
+  foi exercitada pelo projeto: ensaie antes de prometer prazo.
+
+## Capacidade da máquina
+
+Só o que foi medido, com a versão e a data. O registro inteiro está em
+[instalação real](../fundacao/instalacao-real.md).
+
+| O que | Medida |
+|---|---|
+| Máquina em que a instalação foi provada | 8 GB e 4 vCPU (e uma de 12 GB e 4 vCPU, na VPS da parceira) |
+| Memória do sistema parado, sem o WhatsApp | Cerca de 380 MiB nos seis contêineres (0.3.0, 12/11/2026) |
+| Disco de uma versão | Cerca de 2,7 GB (0.3.0). A atualização guarda a versão anterior para voltar a ela: com duas versões, as imagens ocupavam 2,9 GB (0.5.0) |
+| WhatsApp por QR Code, à parte | Cerca de 323 MiB de memória sem número conectado e mais 3,2 GB de disco (0.3.0) |
+| Ligação pelo WhatsApp, à parte | 8,4 MiB de memória, parado (0.6.0) |
+| Processo de voz durante uma chamada simulada gravando | De 118 a 120 MiB, estável (0.6.0) |
+| Gravação | Cerca de 1,9 MB por minuto de chamada, pela conta do formato. Um arquivo real de 75 s teve 2,4 MB, o que bate com a conta |
+
+O teto de ligações recebidas ao mesmo tempo é de 5 por organização, ajustável de 1 a 50 em
+Configurações, e o de chamadas pelo navegador é de 3. São limites de gasto, e não uma medida do
+que a máquina aguenta.
+
+O que **não** foi medido, e por isso você não deve prometer:
+
+- **Quantas chamadas simultâneas reais uma máquina aguenta.** Nenhuma ligação por operadora foi
+  feita, e não há teste de carga.
+- **O menor tamanho de máquina** em que a instalação cabe.
+- **O crescimento do banco com uso real.** O banco medido tinha 84 KB de dump.
+
+Na prática: dimensione pela máquina provada, ligue a gravação só com prazo de guarda, e meça na
+instalação do cliente nas primeiras semanas.
+
+## Acesso do cliente
+
+A equipe do cliente entra pelo painel. Em Equipe, um dono ou administrador cria um convite com
+nome, e-mail e papel. A tela mostra um link uma única vez; você o envia por onde preferir, e ele
+vale por 7 dias e serve uma vez. A pessoa escolhe a própria senha.
+
+| Papel | O que faz |
+|---|---|
+| Dono | Configura tudo e gere a equipe inteira, inclusive outros donos. Sempre sobra um dono ativo |
+| Administrador | Configura agentes, linha, privacidade, WhatsApp e atualização; convida e gere administradores e operadores. Não mexe em dono |
+| Operador | Acompanha chamadas e a linha do tempo, vê custos, responde aprovações e faz chamadas de teste. Não altera configuração |
+
+Uma divisão que protege os dois lados: o cliente é o dono no painel, e você entra como
+administrador. Ele pode desativar a sua conta quando quiser, e você configura tudo sem precisar
+dele.
+
+O que o cliente faz sozinho, pela tela, com papel de dono ou administrador: ajustar as instruções
+do agente, trocar a linha, mudar o prazo de guarda, exportar os dados de uma pessoa, convidar a
+equipe e atualizar a versão. O que não dá para fazer pela tela: backup, restauração, a checagem
+de saúde, o diagnóstico e a troca de senha de quem esqueceu (a tela de entrada manda falar com quem
+instalou). Tudo isso roda por SSH, na VPS.
+
+**O acesso ao servidor fica com quem implementa.** Combine no contrato quem mais o tem, e
+restrinja o SSH ([`SECURITY.md`](../../SECURITY.md), "Responsabilidade de quem hospeda").
+
+## A quem recorrer
+
+Não existe suporte pago nem prazo de resposta garantido. O que existe:
+
+- **Defeito:** uma issue no
+  [GitHub](https://github.com/DeskLabs-OpenSource/DeskVoice/issues). O modelo pede a versão, o
+  motor, o tronco e a saída de `bash install/healthcheck.sh`.
+- **Dúvida ou ideia:** as
+  [Discussions](https://github.com/DeskLabs-OpenSource/DeskVoice/discussions).
+- **Falha de segurança:** nunca em issue pública. Relato privado, como diz o
+  [`SECURITY.md`](../../SECURITY.md).
+- **Antes de pedir ajuda:** `bash install/diagnose.sh` junta num arquivo de texto as versões, a
+  saúde, os contêineres, o fim dos logs e o teste de portas. Senhas, chaves e tokens saem como
+  `***`, e e-mails e telefones saem encurtados. Leia o arquivo antes de publicar: ele é da
+  instalação do seu cliente.
+
+O primeiro a ser chamado, para o cliente, é você. Diga isso no documento de entrega.
+
 ## O que entregar
 
 Uma implantação bem feita termina com isto na mão do cliente:
