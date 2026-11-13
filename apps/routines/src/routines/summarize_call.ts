@@ -1,4 +1,5 @@
-import { enqueueTask, withOrg, type CallStatus } from "@deskvoice/core";
+import { enqueueTask, withOrg, type CallStatus, type OrgQuery } from "@deskvoice/core";
+import { hasWhatsAppConnector } from "@deskvoice/tools";
 import { OUTCOME_SETTING, outcomeEnabledOf } from "@deskvoice/voice-engine";
 import type { Routine } from "../types";
 
@@ -45,6 +46,48 @@ export function extractiveSummary(digest: CallDigest): string {
   return parts.join("\n");
 }
 
+/** Quem recebe o resumo: o dono, ou o primeiro admin, com WhatsApp cadastrado. */
+async function ownerToNotify(q: OrgQuery): Promise<string | null> {
+  const row = await q.one<{ whatsapp_e164: string }>(
+    `select whatsapp_e164 from users
+      where role in ('owner', 'admin') and whatsapp_e164 is not null
+      order by case when role = 'owner' then 0 else 1 end, created_at
+      limit 1`,
+  );
+  return row?.whatsapp_e164 ?? null;
+}
+
+// Liga o aviso em Configurações → WhatsApp. Ausente vale desligado.
+export const OWNER_NOTICE_SETTING = "whatsapp.notify_owner_on_call_end";
+// O WhatsApp é um canal fora da instalação: corpo fixo, sem fala e sem número de quem ligou (a mesma
+// regra do `WHATSAPP_BODY` de `follow_up.ts`). O resumo fica no painel.
+export const OWNER_NOTICE_BODY = "Uma ligação terminou. O resumo está no painel do DeskVoice";
+
+/**
+ * Avisa pelo WhatsApp quem opera a instalação de que uma ligação terminou.
+ *
+ * Só avisa com o aviso ligado na tela, conector de WhatsApp configurado e alguém com número
+ * cadastrado. Faltando qualquer um, nada acontece: o resumo fica só no painel.
+ *
+ * `owner_notified_at` é o cadeado: a fila reexecuta `summarize_call`, e quem ganha o
+ * `update` condicional é quem cria o aviso. Sem ele, um retry vira mensagem repetida no
+ * WhatsApp do dono — e o WhatsApp não tem desfazer.
+ */
+async function notifyOwner(q: OrgQuery, callId: string, now: Date): Promise<void> {
+  const enabled = await q.one<{ value: unknown }>("select value from settings where key = $1", [OWNER_NOTICE_SETTING]);
+  if (enabled?.value !== true || !(await hasWhatsAppConnector(q))) return;
+  const target = await ownerToNotify(q);
+  if (target === null) return;
+  const claimed = await q.one<{ id: string }>("update calls set owner_notified_at = $2 where id = $1 and owner_notified_at is null returning id", [callId, now]);
+  if (!claimed) return;
+  const notification = await q.one<{ id: string }>(
+    "insert into notifications (organization_id, call_id, channel, target, body, created_at) values ($1, $2, 'whatsapp', $3, $4, $5) returning id",
+    [q.organizationId, callId, target, OWNER_NOTICE_BODY, now],
+  );
+  if (!notification) throw new Error(`Notification for call ${callId} was not created`);
+  await enqueueTask(q, { kind: "deliver_notification", payload: { notificationId: notification.id }, callId, runAt: now });
+}
+
 const routine: Routine = {
   kind: "summarize_call",
   async run(task, deps) {
@@ -64,6 +107,7 @@ const routine: Routine = {
       const toolsUsed = [...new Set(events.flatMap((event) => (event.kind === "tool_called" && event.name ? [event.name] : [])))];
       const summary = extractiveSummary({ status: call.status, endReason: call.end_reason, turns, toolsUsed });
       await q.exec("update calls set summary = $2 where id = $1", [callId, summary]);
+      await notifyOwner(q, callId, deps.clock.now());
       // O desfecho comercial é do motor do agente: vai para a fila em separado, para o resumo não
       // depender de provedor nenhum para ficar pronto. Desligado (de fábrica), nem entra na fila.
       const outcome = await q.one<{ value: unknown }>("select value from settings where key = $1", [OUTCOME_SETTING]);

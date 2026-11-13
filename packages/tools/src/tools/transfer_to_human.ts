@@ -15,6 +15,14 @@ export default defineTool({
       .describe("Resumo para o humano que vai atender: quem é a pessoa, o que ela quer e o que já foi feito ou combinado. Ele não ouviu a conversa."),
   }),
   async run(input, ctx) {
+    // Sem `transfer_started`: registrar uma transferência que não aconteceu seria falso.
+    if (!ctx.telephony.canTransfer) {
+      return {
+        ok: false,
+        message:
+          "Nesta ligação não há como transferir para uma pessoa, então a ligação NÃO foi transferida. Diga isso à pessoa com calma e ofereça deixar um recado para a equipe retornar (use notify_human).",
+      };
+    }
     const agent = await ctx.q.one<{ transfer_to_e164: string | null }>("select transfer_to_e164 from agents where id = $1", [ctx.agentId]);
     const to = agent?.transfer_to_e164;
     if (!to) {

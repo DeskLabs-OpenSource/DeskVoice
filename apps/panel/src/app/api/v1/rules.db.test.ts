@@ -259,10 +259,11 @@ describe("settings", () => {
     expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: false });
   });
 
-  it("keeps whatsapp.trust_caller_id as a plain boolean that starts unset, and an operator cannot change it", async () => {
-    const params = { key: "whatsapp.trust_caller_id" };
+  it.each(["whatsapp.trust_caller_id", "whatsapp.notify_owner_on_call_end"])("keeps %s as a plain boolean that starts unset, and an operator cannot change it", async (key) => {
+    const params = { key };
     const put = (value: unknown, cookie = owner) => call(putSetting, { method: "PUT", cookie, params, body: { value } });
-    // Sem linha gravada a ferramenta lê como desligado: enviar para quem ligou pede confirmação.
+    // Sem linha gravada quem lê entende desligado: enviar para quem ligou pede confirmação, e o
+    // aviso de fim de ligação pelo WhatsApp não sai.
     expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: null });
 
     for (const bad of ["true", 1, { enabled: true }]) expect((await put(bad)).code, JSON.stringify(bad)).toBe("validation_error");

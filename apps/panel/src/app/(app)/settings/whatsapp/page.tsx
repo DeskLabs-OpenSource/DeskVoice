@@ -29,6 +29,8 @@ export default function WhatsAppSettings() {
   const trustCaller = useApi<Setting<boolean>>("/settings/whatsapp.trust_caller_id");
   const saveConnector = useAction();
   const saveTrustCaller = useAction();
+  const ownerNotice = useApi<Setting<boolean>>("/settings/whatsapp.notify_owner_on_call_end");
+  const saveOwnerNotice = useAction();
   const [whatsapp, setWhatsapp] = useState({ type: "deskcomm", url: "", token: "" });
   // A remoção espera confirmação: o botão só abre o pedido, nunca remove.
   const [removingConnector, setRemovingConnector] = useState(false);
@@ -124,6 +126,19 @@ export default function WhatsAppSettings() {
               onChange={(next) => void saveTrustCaller.run(() => put("whatsapp.trust_caller_id", next)).then(trustCaller.reload)}
             />
             <ActionStatus action={saveTrustCaller} />
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 border-t border-line pt-5">
+          <h3 className="font-bold">{t.ownerNoticeTitle}</h3>
+          <p className="max-w-prose text-muted">{t.ownerNoticeLead}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Switch
+              label={t.ownerNoticeSwitch}
+              disabled={!canConfigure || saveOwnerNotice.busy}
+              checked={ownerNotice.data?.value === true}
+              onChange={(next) => void saveOwnerNotice.run(() => put("whatsapp.notify_owner_on_call_end", next)).then(ownerNotice.reload)}
+            />
+            <ActionStatus action={saveOwnerNotice} />
           </div>
         </div>
       </Panel>

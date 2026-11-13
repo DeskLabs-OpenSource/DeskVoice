@@ -12,21 +12,23 @@ import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { useAction, useErrorText } from "../../../ui/errors";
 import { formatDateTime, formatPhone } from "../../../ui/format";
-import { Badge, Button, Notice, Panel, Skeleton } from "../../../ui/kit";
+import { Badge, Button, Field, Notice, Panel, Select, Skeleton } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
+import type { Agent } from "../../../ui/types";
 import { QrCodeBox, RemovalConfirm, ServiceStates, useServicePolling, type ServiceData } from "./optional-service";
 
 interface WhatsAppCallsState extends ServiceData {
   failure: "logged_out" | "qr_expired" | "missing" | null;
   phone: string | null;
   connectedAt: string | null;
+  agentId: string | null;
   qr: string | null;
   messagesPhone: string | null;
 }
 
 /**
- * Ligação pelo WhatsApp: instalar o serviço e conectar o número por QR Code. Só `owner` e `admin`
- * veem o bloco. O atendimento pelo agente chega na próxima fatia; a tela diz isso.
+ * Ligação pelo WhatsApp: instalar o serviço, conectar o número por QR Code e escolher o agente que
+ * atende. Só `owner` e `admin` veem o bloco.
  */
 export function WhatsAppCallsPanel() {
   const t = useDict(ptBR, en, es);
@@ -35,6 +37,7 @@ export function WhatsAppCallsPanel() {
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
   const state = useApi<WhatsAppCallsState>(canConfigure ? "/whatsapp-calls" : null);
+  const agents = useApi<Agent[]>(canConfigure ? "/agents" : null);
   const act = useAction();
   const [confirming, setConfirming] = useState<"disconnect" | "remove" | null>(null);
   const { data, reload } = state;
@@ -44,8 +47,8 @@ export function WhatsAppCallsPanel() {
   if (!canConfigure) return null;
   if (!data) return <Panel title={t.title}>{state.error ? <Notice tone="fail">{errorText(state.error)}</Notice> : <Skeleton lines={2} />}</Panel>;
 
-  const run = (path: string, body: unknown = {}): void => {
-    void act.run(() => api(path, { body })).then((ok) => {
+  const run = (path: string, body: unknown = {}, method?: string): void => {
+    void act.run(() => api(path, { method, body })).then((ok) => {
       if (ok) setConfirming(null);
       reload();
     });
@@ -88,7 +91,7 @@ export function WhatsAppCallsPanel() {
     <Panel title={t.title} description={t.lead} actions={up && data.status === "connected" ? <Badge tone="ok">{t.connected}</Badge> : null}>
       <div className="grid gap-4">
         {state.error ? <Notice tone="fail">{errorText(state.error)}</Notice> : null}
-        <p className="max-w-prose text-muted">{t.nextVersion}</p>
+        <p className="max-w-prose text-muted">{t.howItWorks}</p>
         <ServiceStates data={data} t={t} risk={risk} busy={act.busy} removal={removal} removeButton={removeButton} onInstall={() => run("/whatsapp-calls/service", { wanted: true })} />
 
         {up && data.status === "disconnected" ? (
@@ -109,6 +112,17 @@ export function WhatsAppCallsPanel() {
               {data.connectedAt ? <p className="text-muted">{fill(t.since, { when: formatDateTime(data.connectedAt, locale) })}</p> : null}
             </div>
             {data.phone && data.phone === data.messagesPhone ? <Notice tone="warn">{t.sameNumber}</Notice> : null}
+            <Field label={t.answeredBy}>
+              <Select value={data.agentId ?? ""} disabled={act.busy} onChange={(event) => run("/whatsapp-calls", { agentId: event.target.value || null }, "PATCH")}>
+                <option value="">{t.nobody}</option>
+                {agents.data?.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {data.agentId ? null : <Notice tone="warn">{t.noAgent}</Notice>}
             {confirming === "disconnect" ? (
               <Notice tone="fail">
                 <p>{fill(t.disconnectConfirm, { phone })}</p>

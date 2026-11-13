@@ -1,4 +1,4 @@
-import type { Clock, Db } from "@deskvoice/core";
+import { whatsappCallsWanted, type Clock, type Db } from "@deskvoice/core";
 import type { Tool } from "@deskvoice/tools";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
 import { createApprovalWaiter } from "./approvals";
@@ -128,8 +128,15 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   ari.onConnected(reapply);
   reapply();
 
-  // Não depende do Asterisk: a chamada pelo navegador funciona com a telefonia fora do ar.
-  const whatsappCalls = createWhatsAppCalls(deps.wacalls ?? { token: "" }, { schedule: deps.schedule ?? realSchedule, log });
+  // Não depende do Asterisk: nem a chamada pelo navegador nem a ligação pelo WhatsApp passam por ele.
+  const whatsappCalls = createWhatsAppCalls(deps.wacalls ?? { token: "" }, {
+    schedule: deps.schedule ?? realSchedule,
+    log,
+    answer: { db, clock, now: deps.now ?? (() => performance.now()), session: sessionDeps, onSession: track },
+  });
+  // As ligações chegam pelo SSE do WaCalls: onde alguma organização pediu o serviço, ele abre já na
+  // partida, e não só quando alguém abre a tela. Se o WaCalls ainda está subindo, a escuta tenta de novo.
+  if (await whatsappCallsWanted(db)) whatsappCalls.listen();
 
   const webCalls = await startWebCalls({ db, clock, session: sessionDeps, port: deps.webPort, host: deps.host, schedule: deps.schedule, now: deps.now, log, onSession: track });
 

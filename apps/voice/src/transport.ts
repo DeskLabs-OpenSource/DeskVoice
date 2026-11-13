@@ -16,6 +16,8 @@ export const FRAME_BYTES = 320;
  * roda sobre o Asterisk (`asterisk-transport.ts`) e sem telefonia (`simulated-transport.ts`).
  */
 export interface CallTransport {
+  /** `false`: este canal não tem para onde transferir (a ligação pelo WhatsApp). Ausente vale `true`. */
+  readonly canTransfer?: boolean;
   /** Áudio de quem ligou. O que chegar antes do primeiro handler fica guardado e é entregue a ele. */
   onAudio(handler: (pcm16_8k: Buffer) => void): void;
   /** Fala do agente, em pedaços de qualquer tamanho. Sai na cadência real de 20 ms por quadro. */

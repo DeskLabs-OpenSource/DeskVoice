@@ -196,9 +196,9 @@ services:
   #
   # Porta UDP do áudio: nenhuma, e de propósito. O DeskcommCRM publica uma porque lá o par WebRTC é o
   # navegador de quem atende, fora da máquina. Aqui o par vai ser o processo de voz, na mesma rede
-  # interna, e a perna até o WhatsApp é de saída. Nesta versão não há áudio nenhum (o serviço só
-  # conecta o número); se a prova da próxima fatia mostrar que o WaCalls precisa de porta fixa, o
-  # caminho é WACALLS_WEBRTC_UDP_PORT sem publicá-la (desenho, seção 4.3).
+  # interna, e a perna até o WhatsApp é de saída. Isso é leitura de código, e o teste de contrato
+  # passa no loopback; a prova numa VPS ainda falta. Se ela mostrar que o WaCalls precisa de porta
+  # fixa, o caminho é WACALLS_WEBRTC_UDP_PORT sem publicá-la (desenho, seção 4.3).
   #
   # Fica num perfil: NÃO sobe nem é baixado por padrão. Quem liga o perfil é o agente do kit
   # (install/agent.sh), quando um dono ou administrador pede pela tela; a marca fica em deploy/.env
@@ -210,6 +210,12 @@ services:
     # Teto, e não medição: é o que o DeskcommCRM usa com a mesma imagem. Sem teto, um serviço que
     # cresce leva a máquina inteira; com ele, cai só quem estourou e o `restart` o traz de volta.
     mem_limit: 256m
+    # O comando da imagem (`-addr=:8080 -db=/data/wacalls.db`, Dockerfile do WaCalls em d16a076) mais
+    # o teto de ligações por número. O padrão dele é 8, e acima do teto ele RECUSA a ligação no
+    # WhatsApp (`internal/voip/call/client.go:100-102`), contando também as que tocam sem ninguém
+    # atender. Quem limita é o DeskVoice (o limite de recebidas, de 1 a 50, em Configurações); o do
+    # WaCalls fica no máximo dessa faixa, como segunda trava (desenho, seção 5.1).
+    command: ["-addr=:8080", "-db=/data/wacalls.db", "-max-calls-per-session=50"]
     environment:
       # O serviço não sobe sem administrador. Usuário e senha são gerados pelo instalador e nunca
       # mostrados: ninguém entra na tela do WaCalls, que nem é alcançável de fora.

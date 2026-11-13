@@ -262,6 +262,25 @@ aberto, e não fecham nada — inclusive porque quem as lê acredita ter fechado
 decide o que entra numa porta publicada é o do provedor da VPS, ou uma regra em `DOCKER-USER` com
 `--ctorigdstport`, medida aqui nos dois protocolos que o kit usa (TCP na seção 5, UDP na 6).
 
+## E o `firewalld`
+
+Medido em 13/11/2026 numa VPS AlmaLinux 9.8, só do DeskVoice: Docker 29.9.3, `iptables` 1.8.10
+(nf_tables), `firewalld` 1.3.4 com a zona padrão `public` (issue #52). A sonda UDP saiu de uma
+máquina fora da VPS, por outra rede, contra dois ecos: um contêiner publicado com `-p 48506:9999/udp`
+e um processo do host em 48507/udp.
+
+| Situação | Contêiner (48506/udp) | Host (48507/udp) |
+|---|---|---|
+| `firewalld` parado | responde | responde |
+| `firewalld` ativo, `public` sem as portas | **responde** | sem resposta |
+| `firewalld` ativo, rich rule `reject` na `public` | **responde** | sem resposta |
+| `firewalld` parado de novo | responde | responde |
+
+Com o `firewalld` no ar, as pontes do Docker vão para a zona `docker`, e a interface de rede fica na
+`public`. As portas de telefonia que o kit publica se comportaram como o eco do contêiner nas três
+situações. É o mesmo resultado do `ufw`: a zona do host filtra o que escuta no host, e não o que o
+Docker publica, nem com `reject` explícito. O instalador avisa disso e não roda `firewall-cmd`.
+
 ## O que mudou no kit
 
 A regra continua sendo oferecida, e a mensagem passa a dizer a verdade: ela é opcional, vale para
@@ -273,12 +292,14 @@ A mensagem nova ataca o segundo sem criar o primeiro.
 
 ## O que não foi medido
 
-- **`firewalld`**: esta VPS não tem `firewalld`, e instalá-lo derrubaria o `ufw` de uma máquina em
-  produção. O comportamento com `firewalld` segue não medido (o instalador só avisa, nunca promete).
+- **`firewalld`, além do que está na seção dele**: o `firewalld` foi ligado com o Docker já rodando,
+  e não com os dois subindo juntos no boot. Também não foram medidos o `DOCKER-USER` com o
+  `firewalld` ativo, o IPv6, nem uma ligação de verdade com ele ligado.
 - **UDP de fora, de verdade**: o check-host não sonda UDP. O UDP foi medido de um namespace com
   `veth` no mesmo host, que percorre as mesmas cadeias (`PREROUTING` → DNAT → `FORWARD`), mas não
   passa por um roteador de verdade. O TCP, esse sim, foi medido de três países. Vale para o UDP
-  tudo o que está medido acima, inclusive a regra que fecha (seção 6).
+  tudo o que está medido acima, inclusive a regra que fecha (seção 6). A medição do `firewalld`
+  é a exceção: nela o UDP saiu de uma máquina fora da VPS, por outra rede.
 - **IPv6**: o `ufw` cria as regras também em `(v6)` e o Docker publica em `[::]`, mas nenhuma sonda
   externa usou IPv6.
 - **Docker com o iptables desligado**: nesse modo o Docker não escreve as regras dele e o `ufw`

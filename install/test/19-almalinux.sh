@@ -47,12 +47,16 @@ contains "simulação, Docker parado: diz que ligaria o serviço" "$out" "ligar 
 equal "simulação, Docker parado: não chama o systemctl" 0 "$(calls '^systemctl ')"
 rm -f "$FAKE_DIR/docker_down"
 
-# ── firewalld ativo: avisa que não foi provado, sem receita de firewall-cmd ──
+# ── firewalld ativo: avisa que ele não filtra as portas do Docker, sem receita de firewall-cmd ──
 fresh; touch "$FAKE_DIR/firewalld_active"
 out="$(install)"; equal "firewalld ativo: instala" 0 "$?"
 contains "firewalld ativo: avisa" "$out" "O firewall firewalld está ativo"
-contains "firewalld ativo: diz que não foi provado" "$out" "não foi provado"
-contains "firewalld ativo: diz as portas e a faixa de áudio" "$out" "se as portas 5060/udp e 10000-10200/udp chegam aos contêineres"
+contains "firewalld ativo: diz que não filtra as portas do Docker" "$out" "não filtra as portas que o Docker publica"
+contains "firewalld ativo: diz as portas e a faixa de áudio" "$out" "5060/udp e 10000-10200/udp chegam aos contêineres"
+contains "firewalld ativo: aponta o firewall do provedor" "$out" "use o firewall do provedor da VPS"
+contains "firewalld ativo: não vende o DOCKER-USER como medido com ele" "$out" "medida com o ufw, não com o firewalld"
+lacks "firewalld ativo: não diz mais que não foi provado" "$out" "com o firewalld ativo não foi provado"
+lacks "firewalld ativo: não manda diagnosticar a ligação muda pelo firewalld" "$out" "comece o diagnóstico pelo firewalld"
 contains "firewalld ativo: aponta a prova de fora" "$out" "teste da tela Linha"
 lacks "firewalld ativo: não imprime receita" "$out" "--add-port"
 equal "firewalld ativo: só consulta o estado, não muda nada" "$(calls '^firewall-cmd ')" "$(calls '^firewall-cmd --state')"

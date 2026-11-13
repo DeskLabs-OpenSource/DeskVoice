@@ -1,0 +1,11 @@
+-- Quem opera a instalação pode ser avisado pelo WhatsApp de que uma ligação terminou.
+--
+-- A tarefa `summarize_call` grava `calls.summary`; a partir daqui ela também cria um aviso
+-- para o dono, de corpo fixo (o resumo fica no painel). O aviso nasce desligado e se liga em
+-- Configurações → WhatsApp; desligado, ou faltando conector ou número cadastrado, nada sai.
+--
+-- `owner_notified_at` é o cadeado dessa entrega. A fila reexecuta tarefas (até 3
+-- tentativas), e sem um compare-and-set o dono receberia o mesmo resumo mais de uma vez:
+-- quem ganha o `update ... where owner_notified_at is null` é quem cria o aviso. Uma
+-- coluna, um aviso, por chamada.
+alter table calls add column owner_notified_at timestamptz;
