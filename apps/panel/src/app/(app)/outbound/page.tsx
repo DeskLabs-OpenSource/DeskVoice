@@ -163,7 +163,13 @@ export default function OutboundPage() {
           {add.error ? <Notice tone="fail">{add.error}</Notice> : null}
           {remove.error ? <Notice tone="fail">{remove.error}</Notice> : null}
 
-          {blocked.data?.length === 0 ? <p className="text-muted">{t.dncEmpty}</p> : null}
+          {blocked.data?.length === 0 ? (
+            <div className="grid gap-1 text-muted">
+              <p>{t.dncEmpty}</p>
+              {/* Sem permissão de configurar não há campo para colar: o próximo passo não é dele. */}
+              {canConfigure ? <p>{t.dncEmptyNext}</p> : null}
+            </div>
+          ) : null}
           {blocked.data?.length ? (
             <div className="grid gap-2">
               <p className="text-[0.87rem] font-bold text-muted">{fill(t.dncCount, { n: blocked.data.length })}</p>

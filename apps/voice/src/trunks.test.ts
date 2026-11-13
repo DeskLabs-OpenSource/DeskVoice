@@ -319,6 +319,11 @@ retry_interval=60
 
   describe("escrita atômica", () => {
     let dir: string;
+    // O NTFS não guarda modo POSIX: `stat().mode` devolve 0o666 e `chmod` só alterna o atributo
+    // somente-leitura. Onde o modo existe — o Linux, que é onde a instalação roda — 0640 é o que
+    // impede outro usuário do servidor de ler a senha da linha, então a afirmação não pode ser
+    // afrouxada para todo mundo: ela é pulada no Windows, com o motivo no nome do caso (#48).
+    const hasPosixMode = process.platform !== "win32";
     beforeAll(async () => {
       dir = await mkdtemp(path.join(tmpdir(), "deskvoice-trunks-"));
     });
@@ -332,21 +337,31 @@ retry_interval=60
       expect(await readdir(path.dirname(file))).toEqual(["pjsip_trunks.conf"]);
     });
 
-    it("com dono: entrega o arquivo ao usuário pedido e mantém 0640; sem poder trocar o dono, cai para 0644 em vez de deixar ilegível", async () => {
-      const mode = async (file: string): Promise<string> => ((await stat(file)).mode & 0o777).toString(8);
+    it("com dono: aceita o dono pedido; sem poder trocar o dono, cai para 0644 em vez de deixar ilegível", async () => {
       const mine = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
       const owned = path.join(dir, "dono", "pjsip_trunks.conf");
       expect(await writeFileAtomic(owned, "x")).toEqual({ mode: 0o640 });
       expect(await writeFileAtomic(owned, "x", mine)).toEqual({ mode: 0o640 });
-      expect(await mode(owned)).toBe("640");
-      expect((await stat(owned)).uid).toBe(mine.uid);
       // Quem não é root não consegue dar o arquivo a outro usuário (em CI que roda como root, consegue).
       if (mine.uid !== 0) {
         const fallback = path.join(dir, "dono", "sem-privilegio.conf");
         expect(await writeFileAtomic(fallback, "x", { uid: 0, gid: 0 })).toEqual({ mode: 0o644, chownError: expect.any(String) });
-        expect(await mode(fallback)).toBe("644");
+        if (hasPosixMode) expect((await stat(fallback)).mode & 0o777).toBe(0o644);
       }
       expect((await readdir(path.dirname(owned))).sort()).toEqual(["pjsip_trunks.conf", ...(mine.uid !== 0 ? ["sem-privilegio.conf"] : [])].sort());
+    });
+
+    it.skipIf(!hasPosixMode)("no disco, o arquivo fica 0640 e com o dono pedido (pulado no Windows, onde o NTFS devolve 0666)", async () => {
+      const own = await mkdtemp(path.join(tmpdir(), "deskvoice-trunks-modo-"));
+      try {
+        const mine = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+        const file = path.join(own, "pjsip_trunks.conf");
+        expect(await writeFileAtomic(file, "x", mine)).toEqual({ mode: 0o640 });
+        expect((await stat(file)).mode & 0o777).toBe(0o640);
+        expect((await stat(file)).uid).toBe(mine.uid);
+      } finally {
+        await rm(own, { recursive: true, force: true });
+      }
     });
 
     it("se a troca falha, o arquivo anterior fica intacto e o temporário é removido", async () => {
