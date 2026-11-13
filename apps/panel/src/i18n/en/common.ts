@@ -4,6 +4,7 @@ const common: CommonDictionary = {
   nav: {
     calls: "Calls",
     approvals: "Approvals",
+    followUps: "Follow-ups",
     agents: "Agents",
     line: "Phone line",
     outbound: "Outbound calls",
@@ -32,6 +33,8 @@ const common: CommonDictionary = {
     noNotifications: "No notices. When an agent notifies you during a call, the notice shows up here.",
     markRead: "Mark as read",
     openCall: "See the call",
+    followUpOpen: "See the follow-up",
+    followUpGone: "Follow-up deleted by the retention period.",
   },
   roles: { owner: "Owner", admin: "Administrator", operator: "Operator" },
   health: {
@@ -80,6 +83,8 @@ const common: CommonDictionary = {
     whatsapp_contact_required: "Save your WhatsApp in My contact, at the top of this page, to receive the test message.",
     whatsapp_connector_refused: "The configured WhatsApp connector refused the test message. Check the connector address and token; the technical detail is in the panel log.",
     whatsapp_connected: "A WhatsApp number is connected by QR code. Disconnect the number before saving another connector or removing the service.",
+    owner_unavailable: "This person is not active in the team. Pick someone else, or leave it with the team.",
+    follow_up_closed: "Someone else already closed this follow-up. Refresh the page.",
     whatsapp_calls_unavailable: "The voice process of this server does not have the key of the WhatsApp calls service yet. Run bash install/update.sh on the server, once.",
     whatsapp_calls_service_absent: "The WhatsApp calls service is not running on this server. Install the service before connecting a number.",
     whatsapp_calls_service_down: "The WhatsApp calls service of this server did not respond. Try again in a moment; if it continues, run the health check on the server.",

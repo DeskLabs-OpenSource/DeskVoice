@@ -1,5 +1,5 @@
 import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
-import { autoCommitOrgQuery, runTool, toSpec, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
+import { autoCommitOrgQuery, runTool, toSpec, toolCalledArgs, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
 import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
@@ -288,7 +288,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         result = { ok: false, message: CLOSING_MESSAGE };
       } else if (!tool) {
         result = { ok: false, message: `A ferramenta ${call.name} não está disponível para este agente. Siga a conversa sem ela.` };
-        await event("tool_called", { name: call.name, args: call.args ?? null });
+        // A ferramenta instalada com esse nome diz se os argumentos são texto pessoal, mesmo fora da lista do agente.
+        await event("tool_called", { name: call.name, args: toolCalledArgs(deps.tools.get(call.name), call.args) });
         await event("tool_result", { name: call.name, ok: false, message: result.message, error: "tool is not enabled for this agent" });
       } else {
         result = await runTool(tool, call.args, context);

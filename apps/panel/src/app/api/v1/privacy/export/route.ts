@@ -5,8 +5,9 @@ import { handle } from "../../../../../server/context";
 import { phone } from "../../../../../server/shapes";
 
 // Tudo o que a organização guarda sobre um telefone, uma linha por registro: as chamadas em que ele
-// é origem ou destino, os eventos delas (a fala expurgada sai com o marcador `{ "purged": true }`)
-// e a entrada na lista de não ligar. Base: a consulta de @webtecnica no PR #66. Sem filtro de
+// é origem ou destino, os eventos delas (a fala expurgada sai com o marcador `{ "purged": true }`),
+// a entrada na lista de não ligar e as pendências do número, abertas e fechadas, com título,
+// detalhes e nota de fechamento. Base: a consulta de @webtecnica no PR #66. Sem filtro de
 // organização à mão: `withOrg` só deixa ver a da sessão, e é isso que impede a ficha de levar o
 // que a pessoa disse a outra empresa da mesma instalação. Cada chamada diz se tem gravação
 // (`recording`), sem o áudio: ele sai pela tela da chamada, e embutido em base64 faria o arquivo
@@ -30,10 +31,19 @@ const RECORD_SQL = `
     select d.created_at, null, 2, 0, json_build_object('type', 'do_not_call', 'phone', d.e164, 'reason', d.reason, 'since', d.created_at)
       from do_not_call d
      where d.e164 = $1
+    union all
+    select f.created_at, f.call_id, 3, 0,
+           json_build_object(
+             'type', 'follow_up', 'followUp', f.id, 'call', f.call_id, 'phone', f.caller_e164, 'title', f.title,
+             'details', f.details, 'status', f.status, 'dueAt', f.due_at, 'createdAt', f.created_at,
+             'closedAt', f.closed_at, 'closingNote', f.closing_note
+           )
+      from follow_ups f
+     where f.caller_e164 = $1
   )
   select line from record order by sort_at, call_id nulls last, rank, seq`;
 
-type Line = { type: "call" | "event" | "do_not_call" } & Record<string, unknown>;
+type Line = { type: "call" | "event" | "do_not_call" | "follow_up" } & Record<string, unknown>;
 
 /**
  * Exporta a ficha de um telefone como NDJSON e registra quem exportou, de qual telefone e quando,
@@ -48,7 +58,7 @@ export const POST = handle({ body: z.object({ phone }), configure: true }, async
     if (line.type === "call") line.recording = await access(recordingPath(deps.recordingsDir, q.organizationId, String(line.call))).then(() => true, () => false);
   }
   const count = (type: Line["type"]): number => lines.filter((line) => line.type === type).length;
-  const counts = { calls: count("call"), events: count("event"), doNotCall: count("do_not_call") > 0 };
+  const counts = { calls: count("call"), events: count("event"), doNotCall: count("do_not_call") > 0, followUps: count("follow_up") };
   await recordOrgEvent(q, "caller_data_exported", { phone: body.phone, ...counts }, now, session.userId);
   return { phone: body.phone, exportedAt: now, counts, content: lines.map((line) => `${JSON.stringify(line)}\n`).join("") };
 });

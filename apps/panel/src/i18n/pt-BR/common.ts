@@ -2,6 +2,7 @@ const common = {
   nav: {
     calls: "Chamadas",
     approvals: "Aprovações",
+    followUps: "Pendências",
     agents: "Agentes",
     line: "Linha telefônica",
     outbound: "Ligações de saída",
@@ -30,6 +31,8 @@ const common = {
     noNotifications: "Nenhum aviso. Quando um agente avisar você durante uma ligação, o aviso aparece aqui.",
     markRead: "Marcar como lido",
     openCall: "Ver a ligação",
+    followUpOpen: "Ver a pendência",
+    followUpGone: "Pendência apagada pelo prazo de guarda.",
   },
   roles: { owner: "Dono", admin: "Administrador", operator: "Operador" },
   health: {
@@ -78,6 +81,8 @@ const common = {
     whatsapp_contact_required: "Cadastre o seu WhatsApp em Meu contato, no começo desta página, para receber a mensagem de teste.",
     whatsapp_connector_refused: "O conector de WhatsApp configurado recusou a mensagem de teste. Confira o endereço e o token do conector; o detalhe técnico fica no registro do painel.",
     whatsapp_connected: "Há um número de WhatsApp conectado por QR Code. Desconecte o número antes de salvar outro conector ou de remover o serviço.",
+    owner_unavailable: "Essa pessoa não está ativa na equipe. Escolha outra, ou deixe com a equipe.",
+    follow_up_closed: "Esta pendência já foi fechada por outra pessoa. Atualize a página.",
     whatsapp_calls_unavailable: "O processo de voz deste servidor ainda não tem a chave do serviço de ligação pelo WhatsApp. Rode bash install/update.sh no servidor, uma vez.",
     whatsapp_calls_service_absent: "O serviço de ligação pelo WhatsApp não está de pé neste servidor. Instale o serviço antes de conectar um número.",
     whatsapp_calls_service_down: "O serviço de ligação pelo WhatsApp deste servidor não respondeu. Tente de novo em instantes; se continuar, rode a checagem de saúde no servidor.",

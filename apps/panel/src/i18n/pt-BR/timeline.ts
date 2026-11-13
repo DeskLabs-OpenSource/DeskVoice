@@ -11,6 +11,7 @@ const timeline = {
   empty: "Nenhum evento registrado nesta chamada ainda.",
   notFound: "Esta chamada não existe ou foi apagada.",
   speakers: { user: "Quem ligou", agent: "Agente" },
+  removedPerson: "Uma pessoa que saiu da equipe",
   // Nome legível das ferramentas e tarefas da fundação. Peça nova sem nome aqui aparece com o nome
   // técnico: ninguém precisa editar este arquivo para registrar uma peça.
   names: {
@@ -20,7 +21,7 @@ const timeline = {
     request_approval: "Pedir aprovação",
     send_whatsapp: "Enviar WhatsApp",
     call_webhook: "Chamar um sistema externo",
-    create_task: "Deixar uma tarefa",
+    create_task: "Abrir uma pendência",
     summarize_call: "Resumo da chamada",
     deliver_notification: "Entrega de aviso",
     deliver_webhook: "Envio a um sistema externo",
@@ -58,6 +59,17 @@ const timeline = {
     task_finished: "Tarefa concluída",
     task_failed: "Tarefa não concluída",
     transcript_purged: "Texto apagado pelo prazo de guarda da transcrição.",
+    follow_up_created: "Pendência aberta",
+    follow_up_assigned: "Pendência com novo responsável",
+    follow_up_closed: { done: "Pendência feita", canceled: "Pendência cancelada" },
+    follow_up_owner: "Responsável: {name}",
+    follow_up_team: "Responsável: a equipe",
+    follow_up_owner_disabled: "Voltou para a equipe: a pessoa responsável foi desativada.",
+    follow_up_due: "Vence {when}",
+    follow_up_closed_by: "Por {name}",
+    follow_up_gone: "Pendência apagada pelo prazo de guarda.",
+    follow_up_link: "Ver em Pendências",
+    tool_args_omitted: "Os dados enviados são texto sobre quem ligou e não ficam na linha do tempo. O que importa está na pendência.",
     unknown: "Evento",
   },
   reasons: {

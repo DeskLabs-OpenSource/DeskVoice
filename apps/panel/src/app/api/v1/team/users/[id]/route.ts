@@ -1,3 +1,4 @@
+import { returnFollowUpsToTeam } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, handle } from "../../../../../../server/context";
 import { roleName } from "../../../../../../server/shapes";
@@ -24,6 +25,10 @@ export const PATCH = handle({ body: z.object({ role: roleName.optional(), disabl
   if (disabled) {
     await q.exec("delete from sessions where user_id = $1", [member.id]);
     await revokeInvitesCreatedBy(q, member.id, deps.clock.now());
+    // Quem saiu não cumpre mais o combinado: as pendências abertas dela voltam para a equipe, e os
+    // agentes que a tinham como dono das pendências passam a entregá-las à equipe.
+    await returnFollowUpsToTeam(q, member.id, deps.clock.now());
+    await q.exec("update agents set follow_up_owner_user_id = null where follow_up_owner_user_id = $1", [member.id]);
   } else if (role !== member.role) {
     // Papel novo: caem os convites que a pessoa criou e que, com ele, não poderia mais emitir.
     await revokeInvitesCreatedBy(q, member.id, deps.clock.now(), role);

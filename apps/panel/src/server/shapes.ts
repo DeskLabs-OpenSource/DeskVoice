@@ -25,7 +25,7 @@ const optionalText = (max: number) =>
 
 export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions, greeting, engine, voice_id as "voiceId", language, tools,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
-  created_at as "createdAt", updated_at as "updatedAt"`;
+  follow_up_owner_user_id as "followUpOwnerUserId", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -40,6 +40,9 @@ const agentFields = z.object({
   maxCallSeconds: z.number().int().min(30).max(7200),
   costCeilingCents: z.number().int().min(0).max(100000),
   transferTo: optionalPhone,
+  // A pessoa que recebe as pendências que o agente abre; nula é a equipe. Pessoa de outra
+  // organização cai na chave estrangeira composta, e vira 404.
+  followUpOwnerUserId: z.uuid().nullable(),
 });
 export type AgentValues = z.output<typeof agentFields>;
 export const agentPatch = agentFields.partial();
@@ -56,6 +59,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   maxCallSeconds: 600,
   costCeilingCents: 500,
   transferTo: null,
+  followUpOwnerUserId: null,
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId", status,

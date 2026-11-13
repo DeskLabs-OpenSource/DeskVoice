@@ -1,0 +1,36 @@
+const followUps = {
+  title: "Pendências",
+  lead: "O que ficou combinado nas ligações e precisa de uma pessoa: retornar, enviar, conferir. Cada uma tem um responsável, um prazo e um fecho que fica na linha do tempo da ligação.",
+  views: { mine: "Minhas", open: "Abertas", overdue: "Vencidas", closed: "Fechadas" },
+  empty: {
+    mine: "Nenhuma pendência aberta com você.",
+    open: "Nenhuma pendência aberta.",
+    overdue: "Nenhuma pendência vencida.",
+    closed: "Nenhuma pendência fechada ainda.",
+  },
+  emptyBody: "Quando um agente com a ferramenta create_task combinar um retorno na ligação, a pendência aparece aqui.",
+  team: "A equipe",
+  owner: "Responsável",
+  due: "Prazo",
+  overdue: "Vencida",
+  olderThanRetention: "Aberta há mais tempo que o prazo de guarda ({days} dias). Pendência aberta não sai pelo prazo: feche ou cancele quando estiver resolvida.",
+  caller: "Telefone",
+  openCall: "Ver a ligação",
+  status: { open: "Aberta", done: "Feita", canceled: "Cancelada" },
+  closedBy: "{status} por {name} em {when}",
+  removedPerson: "uma pessoa que saiu da equipe",
+  done: "Marcar como feita",
+  cancel: "Cancelar pendência",
+  noteDone: "O que foi feito",
+  noteDoneHint: "Uma frase. Exemplo: Retornei, consulta marcada para 14/11.",
+  noteCancel: "Por que foi cancelada",
+  noteCancelHint: "Uma frase. Fica com a pendência e aparece para quem abrir a ligação.",
+  confirmDone: "Fechar como feita",
+  confirmCancel: "Cancelar a pendência",
+  keepOpen: "Voltar",
+  changeOwner: "Trocar o responsável",
+  notYours: "Esta pendência é de outra pessoa. Só ela, um dono ou um administrador pode mexer nela.",
+};
+
+export default followUps;
+export type FollowUpsDictionary = typeof followUps;

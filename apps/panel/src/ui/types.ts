@@ -25,6 +25,7 @@ export interface Agent {
   maxCallSeconds: number;
   costCeilingCents: number;
   transferTo: string | null;
+  followUpOwnerUserId: string | null;
 }
 
 export type CallStatus = "ringing" | "in_progress" | "transferred" | "completed" | "failed" | "refused";
@@ -126,6 +127,39 @@ export interface PanelNotification {
   body: string;
   createdAt: string;
   readAt: string | null;
+  followUpId: string | null;
+  followUpTitle: string | null;
+  followUpStatus: FollowUpStatus | null;
+}
+
+export type FollowUpStatus = "open" | "done" | "canceled";
+export interface FollowUp {
+  id: string;
+  callId: string | null;
+  caller: string | null;
+  title: string;
+  details: string;
+  ownerUserId: string | null;
+  ownerName: string | null;
+  dueAt: string;
+  status: FollowUpStatus;
+  closedAt: string | null;
+  closedBy: string | null;
+  closedByName: string | null;
+  closingNote: string | null;
+  createdAt: string;
+  /** Quem está na tela pode trocar o dono e fechar (operador: as próprias e as da equipe). */
+  canChange: boolean;
+}
+export interface FollowUpList {
+  items: FollowUp[];
+  retentionDays: number | null;
+  /** Só na lista de uma ligação (`?callId=`): os nomes que os eventos de pendência citam. */
+  people?: Person[];
+}
+export interface Person {
+  id: string;
+  name: string;
 }
 
 export interface OutboundPolicy {
