@@ -645,6 +645,24 @@ describe("gravação a pedido de quem ligou", { timeout: 120_000 }, () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it("o pedido do painel que chega enquanto o arquivo ainda abre espera a abertura e para a gravação", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("recording-stop-while-opening", { engine: "manual", greeting: "Bom dia.", tools: ["stop_recording"] }, manual);
+    await putSetting(app, made.organizationId, "calls.recording_enabled", true, false);
+    const session = startCallSession(
+      { ...made.harness.deps, recordingsDir: dir },
+      { organizationId: made.organizationId, callId: made.callId, agentId: made.agentId, transport: made.transport },
+    );
+    // A sessão já existe para o painel, mas o arquivo ainda não abriu: sem esperar, a resposta seria
+    // "não está gravando" e a gravação começaria logo depois.
+    expect(await session.stopRecording(USER, "não quero ser gravado")).toBe("stopped");
+    expect(await paradaDaChamada(made.callId)).toMatchObject({ recording_paused_by: "human", recording_pause_reason: "não quero ser gravado" });
+    made.transport.callerHangup();
+    await session.done;
+    await rm(dir, { recursive: true, force: true });
+  });
+
   it("o pedido do painel para a gravação e registra quem pediu; sem gravação, diz que não havia o que parar", async () => {
     const recorded = await chamada("recording-human-stop", true);
     recorded.made.transport.callerAudio(200);

@@ -151,6 +151,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let recordingPaused = false;
   /** A gravação de `recording_failed`, para o fim da chamada esperar por ela. */
   let recordingFailed: Promise<void> | undefined;
+  // A sessão já é alcançável pelo painel antes de se saber se ela grava: o pedido de parar espera essa
+  // decisão (arquivo aberto ou não), para não responder "não está gravando" e a gravação começar logo
+  // depois. O encerramento também resolve, para o pedido nunca ficar pendurado.
+  let resolveRecordingDecided: () => void = () => undefined;
+  const recordingDecided = new Promise<void>((resolve) => (resolveRecordingDecided = resolve));
   let wrappingUp = false;
   let requestedEnd: Ending | undefined;
   let requestedFarewell: string | undefined;
@@ -166,6 +171,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   async function finish(end: Ending): Promise<void> {
     if (ending) return;
     ending = true;
+    resolveRecordingDecided();
     for (const cancel of cancelTimers) cancel();
     // Ferramenta em espera (uma aprovação pendente) é solta, e o resultado dela entra na linha do
     // tempo antes de `call_ended`.
@@ -235,6 +241,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * em diante nada mais é gravado, e não há retomada.
    */
   async function pauseRecording(who: { by: "agent" } | { by: "human"; userId: string }, reason: string | null): Promise<RecordingStop | "call_ended"> {
+    if (ending) return "call_ended";
+    if (recordingPaused) return "already_stopped";
+    await recordingDecided;
     if (ending) return "call_ended";
     if (recordingPaused) return "already_stopped";
     // Sem arquivo aberto (gravação desligada, sem espaço) ou com a gravação já interrompida por
@@ -377,6 +386,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const recording = deps.recordingsDir ? await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALL_RECORDING_SETTING]) : null;
     // O arquivo abre antes do motor: depois que ele conecta, nada pode esperar (ver abaixo).
     if (deps.recordingsDir && callRecordingOf(recording?.value)) await openRecording(deps.recordingsDir);
+    resolveRecordingDecided();
 
     const enabled = new Map<string, Tool>();
     for (const name of overrides?.tools ?? agent.tools) {
