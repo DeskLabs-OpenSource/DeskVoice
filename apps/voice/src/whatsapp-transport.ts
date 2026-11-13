@@ -171,13 +171,15 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
       hangupHandler = handler;
       if (left) handler();
     },
+    // Antes do `connected` a fala não tem por onde sair, e esperá-la prenderia a ligação até o
+    // WaCalls dizer alguma coisa, se disser.
     async hangup() {
-      await pacer.drained();
+      if (mediaUp) await pacer.drained();
       await release();
     },
     // Nunca chamado: `canTransfer` é falso. Se for, a ligação termina em vez de ficar presa.
     async transfer() {
-      await pacer.drained();
+      if (mediaUp) await pacer.drained();
       await release();
     },
     close: release,

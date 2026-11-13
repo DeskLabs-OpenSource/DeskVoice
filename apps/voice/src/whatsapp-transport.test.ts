@@ -175,6 +175,13 @@ describe("ligação pelo WhatsApp: o transporte contra o par do WaCalls", { time
     await waitFor(() => context.fake.connection.connectionState === "closed" || context.fake.channel?.readyState === "closed", "the WebRTC leg to close");
   });
 
+  it("o agente desliga antes de o WaCalls dizer connected: não espera a fala que não tem por onde sair", async () => {
+    const context = await connect();
+    context.transport.sendAudio(tone(800, 8000));
+    await context.transport.hangup();
+    expect(context.ends).toEqual(["DELETE"]);
+  });
+
   it("a perna WebRTC cai: a conversa fica sabendo, e fechar desliga a ligação no WaCalls, que senão seguraria 30 s", async () => {
     const context = await connect();
     await context.fake.connection.close();
