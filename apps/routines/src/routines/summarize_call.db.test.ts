@@ -1,6 +1,6 @@
 import { recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createCall, createOrganization, depsFor, openTestDbs, t0, task } from "../../test/helpers";
+import { createCall, createOrganization, depsFor, openTestDbs, putWhatsAppConnector, t0, task } from "../../test/helpers";
 import summarizeCall, { extractiveSummary } from "./summarize_call";
 
 const { app, owner } = openTestDbs();
@@ -61,6 +61,98 @@ describe("summarize_call", () => {
     const foreign = await createCall(app, other, t0);
     await expect(summarizeCall.run(task(org, "summarize_call", {}, foreign), depsFor(app))).rejects.toThrow(/not found/);
     expect(await summaryOf(foreign)).toBeNull();
+  });
+});
+
+/**
+ * O resumo não serve de nada se só quem já abriu o painel o encontra. Estes casos guardam a
+ * entrega pelo WhatsApp e, principalmente, o cadeado contra mensagem repetida: a fila
+ * reexecuta `summarize_call`, e o dono não pode receber o mesmo resumo duas vezes.
+ */
+describe("o dono recebe o resumo pelo WhatsApp", () => {
+  const DONO = "+5511999990000";
+  const recordIn = (organizationId: string, callId: string, events: [CallEventKind, object][]): Promise<void> =>
+    withOrg(app, organizationId, async (q) => {
+      for (const [kind, payload] of events) await recordEvent(q, callId, kind, payload, t0);
+    });
+  // `createOrganization` cria a organização sem gente dentro: quem atende é criado aqui,
+  // como dono, porque é ele que recebe o resumo. `createUser` do kit cria operador — não serve.
+  const dono = (organizationId: string, e164: string | null): Promise<number> =>
+    withSystem(app, (q) =>
+      q.exec("insert into users (organization_id, email, name, password_hash, role, whatsapp_e164) values ($1, $2, 'Dono', 'x', 'owner', $3)", [
+        organizationId,
+        `dono-${organizationId}@example.com`,
+        e164,
+      ]),
+    );
+  const avisosDe = (organizationId: string): Promise<{ channel: string; target: string | null; body: string }[]> =>
+    withSystem(app, (q) =>
+      q.many<{ channel: string; target: string | null; body: string }>(
+        "select channel, target, body from notifications where organization_id = $1 order by created_at",
+        [organizationId],
+      ),
+    );
+  const entregasDe = (organizationId: string): Promise<number> =>
+    withSystem(app, async (q) => (await q.many("select id from tasks where organization_id = $1 and kind = 'deliver_notification'", [organizationId])).length);
+
+  it("com conector e número do dono: cria o aviso e enfileira a entrega", async () => {
+    const org = await createOrganization(app, "resumo no whatsapp");
+    await putWhatsAppConnector(app, org);
+    await dono(org, DONO);
+    const callId = await createCall(app, org, t0);
+    await recordIn(org, callId, [
+      ["transcript_agent", { text: "Bom dia!" }],
+      ["transcript_user", { text: "Quero um orçamento de 30 caixas." }],
+    ]);
+
+    await summarizeCall.run(task(org, "summarize_call", {}, callId), depsFor(app));
+
+    const avisos = await avisosDe(org);
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0]?.channel).toBe("whatsapp");
+    expect(avisos[0]?.target).toBe(DONO);
+    expect(avisos[0]?.body).toContain("Resumo da ligação");
+    expect(avisos[0]?.body).toContain("Quero um orçamento de 30 caixas.");
+    expect(await entregasDe(org)).toBe(1);
+  });
+
+  it("a reexecução da tarefa não manda o resumo de novo", async () => {
+    const org = await createOrganization(app, "resumo sem repetir");
+    await putWhatsAppConnector(app, org);
+    await dono(org, DONO);
+    const callId = await createCall(app, org, t0);
+    await recordIn(org, callId, [["transcript_user", { text: "Alô?" }]]);
+
+    await summarizeCall.run(task(org, "summarize_call", {}, callId), depsFor(app));
+    await summarizeCall.run(task(org, "summarize_call", {}, callId), depsFor(app));
+
+    expect(await avisosDe(org)).toHaveLength(1);
+    expect(await entregasDe(org)).toBe(1);
+  });
+
+  it("sem conector configurado o resumo fica só no painel", async () => {
+    const org = await createOrganization(app, "resumo sem conector");
+    await dono(org, DONO);
+    const callId = await createCall(app, org, t0);
+    await recordIn(org, callId, [["transcript_user", { text: "Alô?" }]]);
+
+    await summarizeCall.run(task(org, "summarize_call", {}, callId), depsFor(app));
+
+    expect(await avisosDe(org)).toHaveLength(0);
+    expect(await summaryOf(callId)).toContain("Desfecho:");
+  });
+
+  it("sem número do dono o resumo fica só no painel", async () => {
+    const org = await createOrganization(app, "resumo sem numero");
+    await putWhatsAppConnector(app, org);
+    await dono(org, null);
+    const callId = await createCall(app, org, t0);
+    await recordIn(org, callId, [["transcript_user", { text: "Alô?" }]]);
+
+    await summarizeCall.run(task(org, "summarize_call", {}, callId), depsFor(app));
+
+    expect(await avisosDe(org)).toHaveLength(0);
+    expect(await summaryOf(callId)).toContain("Desfecho:");
   });
 });
 
