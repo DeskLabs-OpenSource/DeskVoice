@@ -30,6 +30,11 @@ export interface CallTransport {
   hangup(): Promise<void>;
   /** Espera a fala pendente terminar de sair e passa a ligação para `toE164`. */
   transfer(toE164: string): Promise<void>;
+  /**
+   * Aperta teclas no menu do outro lado. Opcional de propósito: só existe onde há telefonia de
+   * verdade — na chamada simulada não há para onde mandar tom.
+   */
+  sendDtmf?(digits: string): Promise<void>;
   /** Solta a telefonia na hora, sem esperar fala pendente. */
   close(): Promise<void>;
 }

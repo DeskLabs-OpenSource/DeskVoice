@@ -61,6 +61,7 @@ export class AsteriskCalls {
     const call = this.byCall.get(connection.id);
     if (!call || call.attached) return null;
     call.attached = true;
+    const { ari } = this.deps;
     const transport: CallTransport = {
       onAudio: (handler) => connection.onAudio(handler),
       sendAudio: (pcm) => connection.sendAudio(pcm),
@@ -78,6 +79,10 @@ export class AsteriskCalls {
         call.transferTo = toE164;
         await connection.drained();
         connection.close();
+      },
+      // Teclas no menu do outro lado: a ARI entrega o tom ao canal (POST /channels/{id}/dtmf).
+      async sendDtmf(digits) {
+        await ari.sendDtmf(call.channelId, digits);
       },
       async close() {
         connection.close();
