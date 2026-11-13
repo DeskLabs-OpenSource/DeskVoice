@@ -221,6 +221,42 @@ describe("purgeTranscripts and the call analysis", () => {
   });
 });
 
+describe("purgeTranscripts and the request to stop recording", () => {
+  const PEDIDO = "Não quero que essa conversa fique gravada.";
+  const pauseOf = async (call: string) =>
+    (await owner.pool.query("select recording_paused_at, recording_paused_by, recording_pause_reason from calls where id = $1", [call])).rows[0];
+
+  it("drops the caller's words from the call and from the event before the deadline, keeps when and by whom, and leaves later calls and other organizations alone", async () => {
+    const older = new Date(at.getTime() - 1);
+    const purgedCall = await createCall(app, org, older);
+    const keptCall = await createCall(app, org, at);
+    const foreignCall = await createCall(app, otherOrg, older);
+    for (const [organization, call, when] of [
+      [org, purgedCall, older],
+      [org, keptCall, at],
+      [otherOrg, foreignCall, older],
+    ] as const) {
+      await owner.pool.query("update calls set recording_paused_at = $2, recording_paused_by = 'agent', recording_pause_reason = $3 where id = $1", [call, when, PEDIDO]);
+      await owner.pool.query("insert into call_events (organization_id, call_id, at, kind, payload) values ($1, $2, $3, 'recording_paused', $4)", [
+        organization,
+        call,
+        when,
+        JSON.stringify({ by: "agent", reason: PEDIDO }),
+      ]);
+    }
+
+    await withOrg(app, org, (q) => purgeTranscripts(q, at));
+    await withOrg(app, org, (q) => purgeTranscripts(q, at));
+
+    expect(await pauseOf(purgedCall)).toEqual({ recording_paused_at: older, recording_paused_by: "agent", recording_pause_reason: null });
+    expect((await eventsOf(purgedCall)).map((row) => row.payload)).toEqual([{ by: "agent", reasonPurged: true }]);
+    for (const call of [keptCall, foreignCall]) {
+      expect((await pauseOf(call))?.recording_pause_reason).toBe(PEDIDO);
+      expect((await eventsOf(call)).map((row) => row.payload)).toEqual([{ by: "agent", reason: PEDIDO }]);
+    }
+  });
+});
+
 describe("listen", () => {
   it("notifies the approvals channel when the status changes, and only then", async () => {
     const approvalId = await withOrg(app, org, async (q) => {
