@@ -122,6 +122,9 @@ function serialQuery(inner: OrgQuery): OrgQuery {
 export function startCallSession(deps: CallSessionDeps, input: CallSessionInput): CallSession {
   const { clock } = deps;
   const { organizationId, callId, agentId, transport, overrides } = input;
+  // O canal que não transfere (WhatsApp) é lido aqui, num ponto só: o número de transferência do
+  // agente deixa de existir para esta chamada, e quem encerra é a despedida.
+  const canTransfer = transport.canTransfer !== false;
   const schedule = deps.schedule ?? realSchedule;
   const log: Logger = (level, message, fields) => (deps.log ?? silentLogger)(level, message, { callId, ...fields });
 
@@ -242,7 +245,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const ceiling = agent?.cost_ceiling_cents ?? 0;
     // Teto zero é "sem teto": com `>=`, zero derrubaria toda chamada na primeira medição.
     const reached = ceiling > 0 && total >= ceiling && !ending && !wrappingUp;
-    const transferTo = agent?.transfer_to_e164 ?? null;
+    const transferTo = canTransfer ? (agent?.transfer_to_e164 ?? null) : null;
     if (reached) {
       wrapUp(
         transferTo ? FAREWELL.costCeilingTransfer : FAREWELL.costCeiling,
@@ -267,6 +270,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     q,
     clock,
     telephony: {
+      canTransfer,
       // A ferramenta só marca o desfecho. Ele acontece depois que o resultado dela foi gravado e
       // entregue ao motor, para a linha do tempo fechar na ordem em que as coisas ocorreram.
       async transfer(toE164) {
@@ -323,7 +327,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     )) ?? undefined;
     const call = await q.one<{ direction: "inbound" | "outbound"; from_e164: string | null; to_e164: string | null }>("select direction, from_e164, to_e164 from calls where id = $1", [callId]);
     if (!agent || !call) throw new Error(`Agent ${agentId} or call ${callId} not found in organization ${organizationId}`);
-    const { transfer_to_e164: transferTo } = agent;
+    const transferTo = canTransfer ? agent.transfer_to_e164 : null;
 
     await event("call_started", { direction: call.direction, from: call.from_e164, to: call.to_e164, agentId, ...input.started });
     transport.onHangup(() => void finish({ status: "completed", endReason: "caller_hangup", callerGone: true }));
@@ -449,7 +453,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         transferTo: transferTo ?? undefined,
         tone: true,
         events: [["engine_failed", { engine: engineId, error }], ...(transferTo ? [["transfer_started", { to: transferTo, reason: "engine_failed" }] satisfies [CallEventKind, object]] : [])],
-        notice: `O motor de voz ${engineLabel} caiu no meio de uma ligação do agente ${agent?.name}: ${error}. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : "A ligação foi encerrada, porque o agente não tem número de transferência."} Confira a chave e a situação do provedor em Configurações → Inteligência artificial.`,
+        notice: `O motor de voz ${engineLabel} caiu no meio de uma ligação do agente ${agent?.name}: ${error}. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : canTransfer ? "A ligação foi encerrada, porque o agente não tem número de transferência." : "A ligação foi encerrada, porque este canal não tem como transferir."} Confira a chave e a situação do provedor em Configurações → Inteligência artificial.`,
       });
     });
     transport.onAudio((pcm) => {

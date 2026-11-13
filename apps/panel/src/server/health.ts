@@ -170,7 +170,7 @@ export function whatsappCallsLine(view: WhatsAppCallsView | "down" | null): Heal
   if (!view.available) return warn("whatsapp_calls_unavailable");
   if (view.service === "preparing") return ok("whatsapp_calls_preparing");
   if (view.service === "failed") return warn("whatsapp_calls_service_failed");
-  if (view.status === "connected") return ok("whatsapp_calls_connected");
+  if (view.status === "connected") return view.agentId ? ok("whatsapp_calls_connected") : warn("whatsapp_calls_no_agent");
   return view.status === "failed" ? warn("whatsapp_calls_dropped") : warn("whatsapp_calls_no_number");
 }
 

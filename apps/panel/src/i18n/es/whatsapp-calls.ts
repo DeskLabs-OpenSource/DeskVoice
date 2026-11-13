@@ -2,9 +2,12 @@ import type { WhatsAppCallsDictionary } from "../pt-BR/whatsapp-calls";
 
 const whatsappCalls: WhatsAppCallsDictionary = {
   title: "Llamadas por WhatsApp",
-  lead: "Conecta el número de la empresa leyendo un código QR, como un dispositivo más de WhatsApp. Es por él que el agente va a atender a quien llama por WhatsApp.",
-  nextVersion:
-    "En esta versión el servicio solo conecta el número. La atención de las llamadas por el agente llega en la próxima versión; hasta entonces, quien llama por WhatsApp es atendido como hoy, en el teléfono.",
+  lead: "Conecta el número de la empresa leyendo un código QR, como un dispositivo más de WhatsApp. El agente elegido atiende en el acto a quien llama por WhatsApp a ese número.",
+  howItWorks:
+    "El agente atiende apenas llega la llamada, con el mismo aviso de grabación y los mismos límites de costo y de duración que las llamadas por la operadora, y la llamada cuenta en el mismo límite de llamadas recibidas al mismo tiempo. En este canal no hay transferencia a una persona: cuando alguien pide hablar con el equipo, el agente ofrece dejar un recado.",
+  answeredBy: "Quién atiende",
+  nobody: "Nadie: las llamadas suenan solo en el celular",
+  noAgent: "Ningún agente atiende este número. Las llamadas por WhatsApp siguen sonando solo en el celular hasta que elijas uno.",
   unavailable: "El proceso de voz de este servidor todavía no tiene la clave del servicio de llamadas por WhatsApp. Esto ocurre cuando la actualización la hizo un actualizador antiguo. Ejecuta en el servidor, una vez:",
   serviceAbsent: "El servicio de llamadas por WhatsApp no está instalado en este servidor.",
   serviceCost:

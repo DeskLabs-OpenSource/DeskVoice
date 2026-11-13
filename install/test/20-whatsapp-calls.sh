@@ -34,6 +34,7 @@ lacks "não fixa porta UDP de áudio nesta fatia" "$block" "WACALLS_WEBRTC_UDP_P
 lacks "não anuncia IP público: o par do áudio é o processo de voz, na rede interna" "$block" "WACALLS_PUBLIC_IP"
 lacks "não lê o app.env" "$block" "env_file"
 contains "tem teto de memória" "$block" "mem_limit: 256m"
+contains "teto de ligações por número no máximo do limite de recebidas, mantendo o banco no volume" "$block" 'command: ["-addr=:8080", "-db=/data/wacalls.db", "-max-calls-per-session=50"]'
 contains "o pareamento mora num volume nomeado" "$block" "wacalls-data:/data"
 contains "só na rede interna" "$block" "networks: [internal]"
 contains "log no padrão dos outros serviços" "$block" "logging: *logging"

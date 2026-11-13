@@ -1,7 +1,7 @@
 # Ligação pelo WhatsApp, atendida pelo agente (WaCalls)
 
-- **Estado:** desenho. Nenhum código de produto foi escrito. Antes da primeira fatia, os pedidos de
-  decisão da seção 10 viram issues.
+- **Estado:** em construção. A fatia 1 entrou (#106); a fatia 2 está escrita e testada contra um
+  WaCalls falso, sem prova numa VPS. Os pedidos de decisão da seção 10 foram respondidos.
 - **Data:** 2026-11-12
 - **Frente do roadmap:** "Ligação pelo WhatsApp" ([`ROADMAP.md`](../../ROADMAP.md)), tamanho G.
 - **Quem decidiu fazer:** o dono. O que ainda é dele está na seção 10, cada item com o padrão que vale
@@ -54,7 +54,7 @@ nada. Há dois estados muito diferentes do projeto, e quase tudo o que importa e
 | Par que cai | A chamada fica de pé 30 s esperando o par voltar; depois é encerrada | `session.go:55-57, 296-305` |
 | Eventos | SSE em `GET /api/events`: `session-list`, `session-qr`, `auth-state`, `incoming`, `incoming-claimed`, `call-status` (`starting`, `ringing`, `connected`, `reconnecting`, `ended`), `call-ended` (com `reason`), `call-list` (retrato ao conectar), `call-quality`, `call-mark`, `call-relay`, `call-peer-mute`, `ping` | `internal/app/events/broker.go:118-180, 203, 222`; `callregistry.go:16-20, 63, 139, 198` |
 | Motivos de fim | `user_ended`, `declined`, `timeout`, `busy`, `cancelled`, `failed`, `do_not_disturb`, `unknown` | `internal/voip/core/types.go:32-39` |
-| Prazos | Toque e atendimento 60 s, mídia 30 s para conectar, 5 s sem mídia do outro lado derruba, 75 s para reconectar, 4 h no máximo | `internal/voip/call/callmanager_timeout.go:20-25, 71-78` |
+| Prazos | Toque e atendimento 60 s, mídia 30 s para conectar, 75 s para reconectar, 4 h no máximo. Os "5 s sem mídia" são da perna com o WhatsApp, não do par WebRTC: contam o que chega dos relays (`callmanager_media.go:103-113, 122-128`) e, vencidos, levam a chamada a `reconnecting` e refazem os relays (`callmanager_relay.go:118-146`); ela só termina se não voltar em 75 s. O próprio WaCalls manda silêncio ao WhatsApp a cada 60 ms quando o par não mandou nada (`internal/voip/extension/audio/audio.go:101-127`). Corrigido na fatia 2: a primeira leitura dizia "derruba" | `internal/voip/call/callmanager_timeout.go:20-25, 71-91` |
 | Autenticação | Não sobe sem administrador (`WACALLS_ADMIN_USER` e `WACALLS_ADMIN_PASSWORD` semeiam o primeiro). Toda rota `/api` exige cookie de login ou `Authorization: Bearer <WACALLS_API_TOKEN>`, comparado em tempo constante. `/healthz` é aberta. O token também é aceito em `?access_token=` | `internal/app/server.go:76-91`; `internal/app/auth.go:17-53`; `internal/app/routes.go:60-64` |
 | Dono da chamada | `X-Client-Id` vira o dono; um dono só segura uma chamada ativa (`409 operator already on a call`) | `internal/app/handlers_call.go:107-128` |
 | Atender | `POST .../calls/{id}/accept`. Não há atendimento automático | `handlers_call.go:107-128` |
@@ -557,6 +557,45 @@ os números no registro e na tela.
 
 Par WebRTC no processo de voz, `whatsapp-transport.ts`, `pacer.ts` extraído do transporte do
 navegador, entrada com agente, teto e atendimento, transferência declarada como indisponível.
+
+**O que mudou na construção** (12/11/2026, ramo `feat/ligacao-whatsapp-fatia-2`):
+
+- **Biblioteca:** `werift` 0.27.0 (MIT, conferida no npm em 12/11/2026), fixada sem `^`. Traz
+  `mediabunny` (MPL-2.0), `multicast-dns` e `buffer` (MIT). Configuração do par: sem servidor STUN (o
+  padrão da biblioteca consultaria um do Google), sem IPv6 e sem TCP. Oferta com a coleta completa,
+  como o cliente do WaCalls (`client/src/lib/webrtc.ts:24-41`); canal `pcm` ordenado, como
+  `client/src/lib/call/audio-channel.ts:20`. `node-datachannel` não foi preciso.
+- **Silêncio contínuo, por outro motivo:** a revisão pediu silêncio para a chamada não cair com 5 s
+  sem mídia. O código desmente o motivo (linha "Prazos" acima). O silêncio entrou assim mesmo, pelo
+  que o código mostra: o WaCalls só codifica quadros cheios de 960 amostras (`audio.go:117-121`), e
+  sem nada atrás o fim de cada fala ficaria preso no buffer dele até a fala seguinte. A cadência
+  completa o último pedaço com silêncio e segue mandando silêncio de 20 em 20 ms.
+- **Nada sai antes de `connected`:** antes de a perna com o WhatsApp ficar de pé, o WaCalls não
+  consome o buffer e guarda só os últimos 240 ms (`audio.go:71-81, 112-115`); a saudação chegaria
+  cortada. A fala espera na fila até o `call-status` `connected`.
+- **`clear`** esvazia só a fila deste lado. O canal não tem mensagem de controle: tudo o que chega
+  nele é tratado como PCM (`bridge.go:39-45`). O que já está no buffer do WaCalls (até 60 ms, com a
+  cadência) ainda toca.
+- **Organização pelo nome da sessão,** e não por uma busca que atravessa organizações: o nome é
+  `deskvoice_<id da organização>`, criado só por este processo, com o token. O telefone do número
+  conectado sai do JID da sessão. Nenhum arquivo novo em `withSystem`; `packages/core` ganhou só
+  `whatsappCallsWanted`, um sim ou não para a partida do processo ouvir o SSE.
+- **Agente:** coluna nova `whatsapp_call_sessions.agent_id` (migration `20261112T193412`), escolhida em
+  Configurações, no bloco do WhatsApp. A fatia 1 não tinha a coluna. Sem agente, a saúde avisa
+  (`whatsapp_calls_no_agent`).
+- **Teto:** a conferência do teto saiu de `inbound.ts` para `inboundLimitReached`, usada pelas duas
+  entradas na mesma transação e na mesma trava.
+- **Teto do WaCalls:** o Compose passa `-max-calls-per-session=50`. Acima do teto ele **recusa** a
+  ligação no WhatsApp (`internal/voip/call/client.go:100-102`), contando as que tocam sem ninguém
+  atender; o padrão 8 recusaria a nona ligação simultânea mesmo com o teto do DeskVoice maior.
+- **Falha ao atender:** se o WaCalls recusa a troca de SDP ou o atendimento, nada foi atendido; a
+  linha fecha como `failed`/`whatsapp_answer_failed`, o painel recebe o aviso, e a ligação segue
+  tocando no celular. A perna WebRTC que cai no meio encerra a conversa e desliga no WaCalls, que
+  senão seguraria a ligação 30 s esperando outra oferta (`session.go:55-57, 296-305`).
+- **Motor caído sem transferência:** o aviso do painel diz que o canal não transfere, em vez de dizer
+  que o agente não tem número de transferência.
+- **Fica para a fatia 3:** reconciliação pelo `call-list`, o estado `reconnecting` (a fala segue
+  saindo e o WaCalls guarda os últimos 240 ms), `@lid` e nono dígito, o canal na lista de Chamadas.
 
 **Prova:** teste de contrato com um par WebRTC falso no papel do WaCalls (canal `pcm`, 16 kHz),
 conferindo conversão de taxa, cadência de 20 ms com relógio injetado e o `clear`. Numa VPS, com uma

@@ -1,10 +1,9 @@
 import type WebSocket from "ws";
-import { FRAME_BYTES, FRAME_MS, type CallTransport, type Schedule } from "./transport";
+import { createPacer } from "./pacer";
+import { FRAME_BYTES, type CallTransport, type Schedule } from "./transport";
 
 // Teto do áudio guardado à espera de quem ouça (a sessão ainda está abrindo o motor): 5 s.
 const MAX_HELD_BYTES = 5 * 16_000;
-// Depois de um engasgo do processo, no máximo este número de pedaços sai de uma vez.
-const MAX_BURST_FRAMES = 3;
 
 export interface WebTransport extends CallTransport {
   /** Áudio que chegou do navegador. */
@@ -19,9 +18,7 @@ export interface WebTransport extends CallTransport {
  * `CallTransport` sobre o WebSocket da chamada pelo navegador. O áudio é o mesmo PCM16 mono
  * 8 kHz da telefonia; só muda por onde ele passa.
  *
- * A fala do agente sai na cadência real, em pedaços de até 20 ms: o motor gera mais rápido que o
- * tempo real, e é a cadência que faz o `clear` (quem fala por cima) cortar a fala na hora, em vez
- * de sobrar uma fila inteira já entregue ao navegador.
+ * A fala do agente sai na cadência real, em pedaços de até 20 ms (`pacer.ts`).
  *
  * No navegador não há para onde transferir o áudio. A transferência fica registrada como em
  * qualquer chamada (o evento e o resumo ao humano são o que importa) e a conversa termina pelo
@@ -35,44 +32,11 @@ export function createWebTransport(socket: WebSocket, options: { schedule: Sched
   let left = false;
   let ended = false;
 
-  let queue: Buffer = Buffer.alloc(0);
-  let pacing = false;
-  let cancelTick: (() => void) | undefined;
-  let epoch = 0;
-  let sent = 0;
-  const drainWaiters: Array<() => void> = [];
-
   const open = (): boolean => !ended && !left && socket.readyState === socket.OPEN;
   const text = (message: object): void => {
     if (open()) socket.send(JSON.stringify(message));
   };
-
-  const stopPacing = (): void => {
-    pacing = false;
-    cancelTick?.();
-    cancelTick = undefined;
-    queue = Buffer.alloc(0);
-    for (const resolve of drainWaiters.splice(0)) resolve();
-  };
-
-  const tick = (): void => {
-    cancelTick = undefined;
-    if (!open()) return stopPacing();
-    const elapsedFrames = Math.floor((options.now() - epoch) / FRAME_MS);
-    const due = Math.min(MAX_BURST_FRAMES, elapsedFrames + 1 - sent);
-    let wrote = 0;
-    while (wrote < due && queue.length > 0) {
-      socket.send(queue.subarray(0, FRAME_BYTES), { binary: true });
-      queue = queue.subarray(FRAME_BYTES);
-      wrote += 1;
-    }
-    if (due > 0) sent = elapsedFrames + 1;
-    // Depois do último pedaço ainda corre um tick: ele leva 20 ms para tocar do outro lado.
-    if (wrote > 0 || queue.length > 0) cancelTick = options.schedule(tick, FRAME_MS);
-    else stopPacing();
-  };
-
-  const drained = (): Promise<void> => (pacing ? new Promise((resolve) => drainWaiters.push(resolve)) : Promise.resolve());
+  const pacer = createPacer({ schedule: options.schedule, now: options.now, frameBytes: FRAME_BYTES, isOpen: open, write: (frame) => socket.send(frame, { binary: true }) });
 
   return {
     onAudio(handler) {
@@ -88,16 +52,10 @@ export function createWebTransport(socket: WebSocket, options: { schedule: Sched
       }
     },
     sendAudio(pcm) {
-      if (!open() || pcm.length === 0) return;
-      queue = Buffer.concat([queue, pcm]);
-      if (pacing) return;
-      pacing = true;
-      epoch = options.now();
-      sent = 0;
-      tick();
+      if (open()) pacer.push(pcm);
     },
     clearAudio() {
-      queue = Buffer.alloc(0);
+      pacer.clear();
       text({ type: "clear" });
     },
     onHangup(handler) {
@@ -108,21 +66,21 @@ export function createWebTransport(socket: WebSocket, options: { schedule: Sched
       if (left || ended) return;
       left = true;
       held = [];
-      stopPacing();
+      pacer.stop();
       hangupHandler?.();
     },
     // Os três só esperam a fala sair: quem diz `ended` e fecha o socket é `end`, chamado quando
     // a conversa terminou de gravar tudo e o desfecho é conhecido.
-    hangup: drained,
-    transfer: () => drained(),
+    hangup: pacer.drained,
+    transfer: () => pacer.drained(),
     async close() {
-      stopPacing();
+      pacer.stop();
     },
     end(status, reason) {
       if (ended) return;
       text({ type: "ended", status, reason });
       ended = true;
-      stopPacing();
+      pacer.stop();
       if (socket.readyState === socket.OPEN) socket.close(1000);
     },
   };
