@@ -232,10 +232,10 @@ export async function startFakeWacalls() {
       return session;
     },
     /** Alguém liga para o número da sessão pelo WhatsApp. */
-    ring(session: FakeSession, peer = "5531988887777@s.whatsapp.net"): FakeCall {
+    ring(session: FakeSession, peer = "5531988887777@s.whatsapp.net", peerPhone?: string): FakeCall {
       const call: FakeCall = { id: `c${nextCall++}`, sessionId: session.id, peer, owner: null, offers: [], status: "ringing", endReason: null, leg: null };
       calls.set(call.id, call);
-      emit({ type: "incoming", sessionId: session.id, id: call.id, peer, peerName: "", peerPhotoUrl: "", offeredAt: 0 });
+      emit({ type: "incoming", sessionId: session.id, id: call.id, peer, peerName: "", peerPhotoUrl: "", ...(peerPhone && { peerPhone }), offeredAt: 0 });
       callStatus(call);
       return call;
     },

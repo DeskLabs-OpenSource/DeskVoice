@@ -72,7 +72,7 @@ async function connected(label: string, options: { agent?: "none" | "disabled"; 
     ]),
   );
   const session = wacalls.paired(wacallsSessionName(organizationId), NUMBER.slice(1));
-  return { organizationId, agentId, ring: (peer = `${CALLER.slice(1)}@s.whatsapp.net`) => wacalls.ring(session, peer) };
+  return { organizationId, agentId, ring: (peer = `${CALLER.slice(1)}@s.whatsapp.net`, peerPhone?: string) => wacalls.ring(session, peer, peerPhone) };
 }
 
 const callPaths = (call: FakeCall): string[] =>
@@ -219,6 +219,18 @@ describe("ligação pelo WhatsApp: quando o agente não atende, ela segue tocand
     const { organizationId, ring } = await connected("wa-ninth-digit", { agent: "none" });
     const { refused } = await refusedBy(organizationId, ring("553188887777:28@s.whatsapp.net"));
     expect(refused).toMatchObject({ from_e164: CALLER });
+  });
+
+  it("número oculto: vale o telefone que a oferta informa, com o nono dígito", async () => {
+    const { organizationId, ring } = await connected("wa-peer-phone", { agent: "none" });
+    const { refused } = await refusedBy(organizationId, ring("62440234549366:28@lid", "553188887777@s.whatsapp.net"));
+    expect(refused).toMatchObject({ from_e164: CALLER });
+  });
+
+  it("número oculto sem telefone informado continua não identificado", async () => {
+    const { organizationId, ring } = await connected("wa-lid-only", { agent: "none" });
+    const { refused } = await refusedBy(organizationId, ring("62440234549366:28@lid"));
+    expect(refused).toMatchObject({ from_e164: null });
   });
 
   it("sem agente escolhido", async () => {

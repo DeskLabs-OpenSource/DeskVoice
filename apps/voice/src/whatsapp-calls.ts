@@ -221,7 +221,7 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
   }
 
   /** Resolve `true` quando a conversa começou: dali em diante, quem tira a ligação de `live` é o fim dela. */
-  async function take(event: { sessionId: string; id: string; peer: string }, entry: Live): Promise<boolean> {
+  async function take(event: { sessionId: string; id: string; peer: string; peerPhone?: string }, entry: Live): Promise<boolean> {
     const session = (await wacallsListSessions(options)).find((candidate) => candidate.id === event.sessionId);
     const organizationId = organizationOfSession(session?.name);
     // O número conectado é o destino: é por ele que a ligação conta no teto das recebidas.
@@ -230,7 +230,9 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
       log("error", "WhatsApp call on a session this installation did not create, or without its number; not answering", { wacallsSession: event.sessionId });
       return false;
     }
-    const callerPhone = phoneOfJid(event.peer);
+    // Com o número oculto (`@lid`), vale o telefone que a oferta informa. O WhatsApp não o confirma,
+    // como a operadora não confirma o número de quem liga: os dois chegam ao mesmo `from_e164`.
+    const callerPhone = phoneOfJid(event.peer) ?? phoneOfJid(event.peerPhone);
     const from = callerPhone ? toE164(callerPhone) : null;
 
     const outcome = await withOrg(db, organizationId, async (q) => {
