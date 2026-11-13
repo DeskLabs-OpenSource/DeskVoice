@@ -1,7 +1,7 @@
 import type { SimulatedScript } from "@deskvoice/voice-engine";
 
 /** As ferramentas que o roteiro usa. A chamada simulada as habilita, seja qual for a lista do agente. */
-export const DEMO_TOOLS = ["notify_human", "request_approval", "transfer_to_human", "end_call"];
+export const DEMO_TOOLS = ["create_task", "notify_human", "request_approval", "transfer_to_human", "end_call"];
 
 /** Quanto a aprovação da demonstração espera por alguém no painel antes de valer o padrão do operador (negar, se ele não mudou). */
 export const DEMO_APPROVAL_TIMEOUT_SECONDS = 60;
@@ -25,6 +25,16 @@ export function demoScript(options: { greet: boolean; canTransfer: boolean }): S
       text: "Oi, bom dia. Aqui é a Marina Duarte. Tenho uma limpeza de pele marcada para quinta às duas da tarde e preciso remarcar. E queria saber se consigo um desconto fechando o pacote de três sessões.",
     },
     { say: "Claro, Marina. Vou deixar o pedido de remarcação anotado para a recepção confirmar o novo horário com você." },
+    // A pendência vai para a lista do painel, com o dono configurado no agente.
+    {
+      toolCall: {
+        name: "create_task",
+        args: {
+          title: "Confirmar com Marina Duarte o novo horário da limpeza de pele",
+          details: "Ela tem limpeza de pele marcada para quinta às 14h e prefere sexta de manhã. Retornar para confirmar o novo horário.",
+        },
+      },
+    },
     {
       toolCall: {
         name: "notify_human",

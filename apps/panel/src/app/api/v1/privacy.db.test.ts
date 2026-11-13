@@ -26,7 +26,7 @@ interface Privacy {
   history: Array<{ kind: string; actorName: string | null; payload: Record<string, unknown> }>;
 }
 
-async function seedCaller(org: string): Promise<string> {
+async function seedCaller(org: string, followUpTitle = "Retornar sobre a remarcação"): Promise<string> {
   const callId = await createCall(panel.app, org, NOW);
   await withOrg(panel.app, org, async (q) => {
     await q.exec("update calls set from_e164 = $2, summary = 'Pediu retorno.' where id = $1", [callId, PHONE]);
@@ -38,6 +38,13 @@ async function seedCaller(org: string): Promise<string> {
       JSON.stringify({ purged: true }),
     ]);
     await q.exec("insert into do_not_call (organization_id, e164, reason) values ($1, $2, 'Pediu para não ligar.')", [org, PHONE]);
+    await q.exec("insert into follow_ups (organization_id, call_id, caller_e164, title, details, due_at, created_at) values ($1, $2, $3, $4, 'Prefere de manhã.', $5, $5)", [
+      org,
+      callId,
+      PHONE,
+      followUpTitle,
+      NOW,
+    ]);
   });
   return callId;
 }
@@ -154,25 +161,28 @@ describe("exporting what the organization keeps about a phone", () => {
     const theirs = await createOrganization(panel.app, "privacy export theirs");
     const admin = await createUser(panel.app, mine, "admin");
     const callId = await seedCaller(mine);
-    const foreignCall = await seedCaller(theirs);
+    const foreignCall = await seedCaller(theirs, "Pendência da outra empresa");
 
     const result = await exportPhone(admin.cookie, "(31) 99999-8888");
     expect(result.status).toBe(200);
     const data = result.data as { phone: string; counts: unknown; content: string; exportedAt: string };
-    expect(data).toMatchObject({ phone: PHONE, counts: { calls: 1, events: 2, doNotCall: true }, exportedAt: NOW.toISOString() });
+    expect(data).toMatchObject({ phone: PHONE, counts: { calls: 1, events: 2, doNotCall: true, followUps: 1 }, exportedAt: NOW.toISOString() });
 
     const lines = data.content.trimEnd().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.map((line) => [line.type, line.kind ?? null])).toEqual([
       ["call", null],
       ["event", "transcript_user"],
       ["event", "transcript_agent"],
+      ["follow_up", null],
       ["do_not_call", null],
     ]);
+    expect(lines[3]).toMatchObject({ call: callId, phone: PHONE, title: "Retornar sobre a remarcação", details: "Prefere de manhã.", status: "open", closingNote: null });
     expect(lines[0]).toMatchObject({ call: callId, from: PHONE, summary: "Pediu retorno.", recording: false });
     expect(lines[2]).toMatchObject({ payload: { purged: true } });
     expect(data.content).not.toContain(foreignCall);
+    expect(data.content).not.toContain("outra empresa");
 
-    expect(await orgEvents(mine)).toEqual([{ kind: "caller_data_exported", actor_user_id: admin.id, payload: { phone: PHONE, calls: 1, events: 2, doNotCall: true } }]);
+    expect(await orgEvents(mine)).toEqual([{ kind: "caller_data_exported", actor_user_id: admin.id, payload: { phone: PHONE, calls: 1, events: 2, doNotCall: true, followUps: 1 } }]);
     expect(await orgEvents(theirs)).toEqual([]);
     const shown = (await call(privacy, { cookie: admin.cookie })).data as Privacy;
     expect(shown.history).toMatchObject([{ kind: "caller_data_exported", actorName: "Test admin", payload: { phone: PHONE } }]);
@@ -198,8 +208,8 @@ describe("exporting what the organization keeps about a phone", () => {
   it("records the lookup even when nothing is found, and refuses what is not a phone", async () => {
     const org = await createOrganization(panel.app, "privacy export empty");
     const owner = await createUser(panel.app, org, "owner");
-    expect((await exportPhone(owner.cookie, "+5531988887777")).data).toMatchObject({ counts: { calls: 0, events: 0, doNotCall: false }, content: "" });
+    expect((await exportPhone(owner.cookie, "+5531988887777")).data).toMatchObject({ counts: { calls: 0, events: 0, doNotCall: false, followUps: 0 }, content: "" });
     expect(refusal(await exportPhone(owner.cookie, "não é telefone"))).toEqual([400, "validation_error"]);
-    expect((await orgEvents(org)).map((event) => event.payload)).toEqual([{ phone: "+5531988887777", calls: 0, events: 0, doNotCall: false }]);
+    expect((await orgEvents(org)).map((event) => event.payload)).toEqual([{ phone: "+5531988887777", calls: 0, events: 0, doNotCall: false, followUps: 0 }]);
   });
 });

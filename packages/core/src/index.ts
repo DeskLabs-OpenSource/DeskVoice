@@ -3,6 +3,7 @@ export * from "./clock";
 export * from "./config";
 export * from "./db";
 export * from "./events";
+export * from "./follow-ups";
 export * from "./inbound-limit";
 export * from "./invites";
 export * from "./migrate";

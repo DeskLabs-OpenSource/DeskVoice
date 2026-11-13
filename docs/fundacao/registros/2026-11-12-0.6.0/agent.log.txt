@@ -1,0 +1,9 @@
+2026-11-12T14:49:15Z pedido de atualização aceito; versão instalada: 0.3.0
+2026-11-12T14:50:21Z atualização terminou: succeeded (de 0.3.0 para 0.4.0; update.sh saiu com 0)
+2026-11-12T16:04:06Z pedido de atualização aceito; versão instalada: 0.4.0
+2026-11-12T16:05:04Z atualização terminou: succeeded (de 0.4.0 para 0.5.0; update.sh saiu com 0)
+2026-11-12T22:04:09Z pedido de atualização aceito; versão instalada: 0.5.0
+2026-11-12T22:04:57Z atualização terminou: succeeded (de 0.5.0 para 0.6.0; update.sh saiu com 0)
+2026-11-12T22:05:12Z a imagem do serviço de ligação pelo WhatsApp não saiu do disco (ghcr.io/jotadev66/wacalls@sha256:9ff52ef9455cf42125a911c38bb8c855f0cc205516cada2054e5c05546909022): outra coisa a usa. Cada passada tenta de novo; para tentar agora: bash install/agent.sh
+2026-11-12T22:06:01Z o painel pediu o serviço de ligação pelo WhatsApp: baixando a imagem e subindo o serviço
+2026-11-12T22:06:03Z serviço de ligação pelo WhatsApp no ar

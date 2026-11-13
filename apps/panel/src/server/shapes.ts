@@ -25,7 +25,7 @@ const optionalText = (max: number) =>
 
 export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions, greeting, engine, voice_id as "voiceId", language, tools,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
-  created_at as "createdAt", updated_at as "updatedAt"`;
+  follow_up_owner_user_id as "followUpOwnerUserId", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -40,6 +40,9 @@ const agentFields = z.object({
   maxCallSeconds: z.number().int().min(30).max(7200),
   costCeilingCents: z.number().int().min(0).max(100000),
   transferTo: optionalPhone,
+  // A pessoa que recebe as pendências que o agente abre; nula é a equipe. A rota confere que ela
+  // está ativa (`requireActiveOwner`); a de outra organização nem é vista.
+  followUpOwnerUserId: z.uuid().nullable(),
 });
 export type AgentValues = z.output<typeof agentFields>;
 export const agentPatch = agentFields.partial();
@@ -56,6 +59,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   maxCallSeconds: 600,
   costCeilingCents: 500,
   transferTo: null,
+  followUpOwnerUserId: null,
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId", status,
@@ -78,6 +82,14 @@ export const CALL_COLUMNS = `c.id, c.agent_id as "agentId", a.name as "agentName
   c.status, c.end_reason as "endReason", c.engine, c.started_at as "startedAt", c.answered_at as "answeredAt", c.ended_at as "endedAt",
   c.cost_cents as "costCents", c.summary`;
 export const CALL_STATUSES = ["ringing", "in_progress", "transferred", "completed", "failed", "refused"] as const;
+
+/** O dono das pendências de um agente é uma pessoa ativa da organização; outra coisa é recusada com motivo. */
+export async function requireActiveOwner(q: OrgQuery, userId: string | null | undefined): Promise<void> {
+  if (userId === null || userId === undefined) return;
+  if (!(await q.one("select 1 from users where id = $1 and disabled_at is null for share", [userId]))) {
+    throw new ApiError(400, "owner_unavailable", "The follow-up owner must be an active person of this team.");
+  }
+}
 
 export async function requireAgent(q: OrgQuery, agentId: string): Promise<void> {
   if (!(await q.one("select 1 from agents where id = $1", [agentId]))) throw new ApiError(404, "not_found", "Agent not found.");

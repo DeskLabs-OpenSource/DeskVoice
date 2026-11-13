@@ -1,9 +1,9 @@
 // Semente da demonstração: uma organização com agente, linha, chamadas e uma chamada completa
-// (falas, ferramenta, aprovação decidida, tarefa, transferência, custo), mais uma chamada em
+// (falas, ferramenta, aprovação decidida, pendência com dono, transferência, custo), mais uma chamada em
 // andamento com um pedido esperando resposta. Dados inventados.
 //
 //   DATABASE_URL=... SYSTEM_DATABASE_URL=... pnpm --filter @deskvoice/panel exec tsx scripts/seed-demo.ts
-import { createDb, hashPassword, recordEvent, systemClock, withOrg, withSystem, type CallEventKind, type OrgQuery } from "@deskvoice/core";
+import { createDb, createFollowUp, hashPassword, recordEvent, systemClock, withOrg, withSystem, type CallEventKind, type OrgQuery } from "@deskvoice/core";
 
 const EMAIL = "demo@deskvoice.test";
 const PASSWORD = "deskvoice-demo";
@@ -52,6 +52,8 @@ try {
       "+5531988887777",
       true,
     ]);
+    // As pendências que a Lia abre ficam com a Marina ("Dono das pendências", na tela do agente).
+    await q.exec("update agents set follow_up_owner_user_id = $2 where id = $1", [lia, owner]);
     await id(q, agentSql, [org, "Caio", "Confirmação de consultas", "Você confirma as consultas do dia seguinte.", "Olá, aqui é o Caio, da Clínica Aurora.", "gemini-live", ["end_call", "notify_human"], null, false]);
 
     const trunk = await id(q, "insert into trunks (organization_id, name, host, username, auth_mode, caller_id_e164) values ($1, 'Operadora Exemplo', 'sip.exemplo.com.br', '553132221100', 'register', '+553132221100') returning id", [org]);
@@ -85,9 +87,17 @@ try {
       ["approval_decided", { approvalId: approval, outcome: "approved", decision: "approved" }, 81],
       ["tool_result", { name: "request_approval", ok: true, message: "Aprovado por uma pessoa da equipe. Diga a quem está na linha que foi aprovado e siga." }, 82],
       ["transcript_agent", { text: "Helena, consegui: a taxa está isenta. Sua consulta ficou para segunda às 14h." }, 88],
-      ["tool_called", { name: "create_task", args: { title: "Enviar confirmação da consulta de segunda, 14h, por WhatsApp", when: "amanhã às 9h" } }, 96],
-      ["task_queued", { kind: "follow_up", title: "Enviar confirmação da consulta de segunda, 14h, por WhatsApp" }, 97],
-      ["tool_result", { name: "create_task", ok: true, message: "Tarefa agendada. Diga que a confirmação chega por WhatsApp amanhã." }, 97],
+      // Os argumentos de create_task são texto sobre quem ligou: a linha do tempo não os guarda.
+      ["tool_called", { name: "create_task", args: { omitted: "personal_text" } }, 96],
+    ]);
+    // A pendência nasce pelo ponto de escrita do produto, com o dono do agente e o evento na linha do tempo.
+    await createFollowUp(
+      q,
+      { callId: full, agentId: lia, title: "Enviar confirmação da consulta de segunda, 14h, por WhatsApp", details: "Helena remarcou de quinta para segunda às 14h, com a taxa isenta.", dueAt: new Date(started.getTime() + 18 * 3600_000) },
+      new Date(started.getTime() + 97_000),
+    );
+    await timeline(q, full, started, [
+      ["tool_result", { name: "create_task", ok: true, message: "Pendência registrada para a equipe. Diga à pessoa que ficou anotado, sem prometer horário que não foi combinado." }, 97],
       ["transcript_user", { text: "Perfeito. Só mais uma coisa: quero ver um reembolso do mês passado." }, 108],
       ["transcript_agent", { text: "Isso é com o financeiro. Vou transferir você agora, tudo bem?" }, 116],
       ["tool_called", { name: "transfer_to_human", args: { reason: "Reembolso de mensalidade do mês passado", summary: "Helena remarcou a consulta para segunda, 14h, com taxa isenta. Agora quer tratar de um reembolso." } }, 121],

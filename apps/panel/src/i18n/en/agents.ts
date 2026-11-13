@@ -48,6 +48,11 @@ const agents: AgentsDictionary = {
   delete: "Delete agent",
   deleteConfirm: "Delete {name}? Old calls stay in the history, without the agent's name. This cannot be undone.",
   deleteYes: "Delete {name}",
+  followUps: "Follow-ups",
+  followUpsLead: "Who receives the follow-ups this agent opens with the create_task tool. The agent never picks the person: it comes from here.",
+  followUpOwner: "Owner of this agent's follow-ups",
+  followUpOwnerTeam: "The team (everyone sees it)",
+  followUpOwnerHint: "If the person is disabled, their open follow-ups go back to the team.",
 };
 
 export default agents;
