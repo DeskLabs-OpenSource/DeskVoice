@@ -57,6 +57,7 @@ const timeline = {
     transfer_started: "Transferindo a ligação",
     transfer_to: "Para {to}",
     transfer_completed: "Transferência concluída",
+    transfer_unanswered: "Transferência não atendida",
     engine_failed: "O motor de voz falhou",
     engine_failed_body: "Quem estava na linha ouviu um sinal de aviso e foi transferido ou desligado, sem ficar em silêncio. Confira a chave e a situação do provedor em Configurações → Inteligência artificial.",
     call_refused: "Chamada recusada",
