@@ -3,6 +3,34 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.8.0] - 2026-11-13
+
+### Adicionado
+
+- **A chamada passa a dizer o que aconteceu, e não só o que foi dito** Depois do resumo, o motor de voz do agente lê a conversa e classifica o desfecho: agendou, pediu
+  retorno, deixou recado, sem interesse ou só informação, com a fala de quem ligou que sustenta a
+  classificação e a confiança que o provedor declarou. Nasce desligado: um dono ou administrador liga
+  em Configurações → Inteligência artificial. Cada ligação classificada é uma chamada paga ao
+  provedor, com a chave do motor do agente e a transcrição em texto; o valor entra no custo da
+  chamada e no teto de custo do agente, e ligação que já atingiu o teto não é classificada. Quando o
+  provedor falha, a linha do tempo da chamada diz por quê. A fala guardada sai com o prazo de guarda
+  da transcrição e entra na exportação por telefone. Crédito: @webtecnica.
+- **Ligação pelo WhatsApp, segunda parte - o agente atende quem liga pelo WhatsApp** Com o número conectado em Configurações, no bloco "Ligação pelo WhatsApp", escolha o agente que atende. A partir daí, quem liga para a empresa pelo WhatsApp é atendido na hora pelo agente, com o mesmo aviso de gravação, as mesmas ferramentas e os mesmos tetos de custo e de duração da ligação pelo telefone. A ligação conta no mesmo limite de ligações recebidas ao mesmo tempo das que chegam pela operadora. Quando o agente não atende (nenhum agente escolhido, agente desligado ou limite atingido), a ligação continua tocando no celular, e o painel recebe um aviso. Neste canal não há transferência para uma pessoa: o agente oferece deixar um recado. A saúde do sistema avisa quando o número está conectado e nenhum agente atende. O áudio tem a qualidade de telefone fixo, como o resto do DeskVoice. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+- **Quem opera a instalação pode ser avisado no WhatsApp quando uma ligação termina** Ao fim de cada ligação, o dono (ou, sem número dele, o primeiro administrador que tenha número no
+  perfil) pode receber no WhatsApp uma mensagem curta dizendo que o resumo está no painel. O aviso
+  nasce desligado, inclusive em quem atualiza: o dono ou um administrador liga em Configurações →
+  WhatsApp. A mensagem não leva o conteúdo da conversa nem o número de quem ligou, só o aviso; o
+  resumo continua no painel. É uma mensagem por ligação, mesmo que o resumo seja recalculado, e sem
+  conector ou sem número nada sai. Crédito: @webtecnica.
+
+### Alterado
+
+- **O instalador diz o que o firewalld faz com as portas do Docker** Com o `firewalld` ativo (AlmaLinux e Rocky Linux), o instalador avisava que esse caso não tinha sido provado e mandava começar pelo `firewalld` o diagnóstico de uma ligação muda. Agora está medido: o `firewalld` não filtra as portas que o Docker publica. A porta SIP e a faixa de áudio chegam aos contêineres com ele ligado, e nem uma regra de bloqueio dele as fecha. O aviso passa a dizer isso e aponta o firewall do provedor da VPS, quando ele existe, como o lugar de fechar a porta. A regra na cadeia `DOCKER-USER`, que fecha a porta com o `ufw`, ainda não foi medida com o `firewalld`. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+
+### Corrigido
+
+- **O celular de quem liga pelo WhatsApp fica gravado com o nono dígito** O WhatsApp manda o celular brasileiro antigo sem o nono dígito (`55 31 8888-7777` em vez de `55 31 98888-7777`). A ligação recebida pelo WhatsApp ficava como número não identificado nesses casos, mesmo quando o número chegava. Agora o nono dígito volta, e o número passa a casar com o mesmo telefone digitado no painel, na lista de não ligar e na exportação de dados. O mesmo vale para o número mostrado do WhatsApp conectado por QR Code e do número conectado à ligação pelo WhatsApp: os que já estavam gravados sem o nono dígito são corrigidos na atualização, e o aviso de "mesmo número" volta a reconhecer o mesmo telefone nos dois blocos. Quando o WhatsApp esconde o número de quem liga (`@lid`), ele continua não identificado: isso depende do WaCalls. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+
 ## [0.7.0] - 2026-11-13
 
 ### Adicionado

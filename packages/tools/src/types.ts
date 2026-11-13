@@ -11,6 +11,8 @@ export interface ToolContext {
     /** `false`: o canal desta chamada não tem para onde transferir (a ligação pelo WhatsApp). */
     canTransfer: boolean;
     transfer(toE164: string): Promise<void>;
+    /** Aperta teclas no menu do outro lado. A ligação pelo WhatsApp não declara: lá a ferramenta recusa. A chamada simulada declara e só registra as teclas. */
+    sendDtmf?(digits: string): Promise<void>;
     /** Com `farewell`, o agente fala a despedida e só então a ligação cai. */
     hangup(farewell?: string): Promise<void>;
   };

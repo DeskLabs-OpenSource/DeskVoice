@@ -148,7 +148,10 @@ capacidade abaixo diz até onde a prova foi:
 | Enviar WhatsApp durante a chamada, por conector | Aguardando prova real |
 | Conectar um WhatsApp por QR Code (Configurações → WhatsApp) e enviar por ele os avisos e as mensagens do agente | O serviço não vem instalado: instala-se pela tela, e custa cerca de 323 MiB de memória sem número conectado e 3,2 GB em disco (medido na 0.3.0, em 12/11/2026). Rotas testadas com banco real e com um serviço de WhatsApp falso; instalar e remover pelo agente, com Docker simulado. **Ainda sem prova com um número real:** nenhum QR Code foi lido e nenhuma mensagem saiu. É um cliente não oficial do WhatsApp; veja o [guia](docs/guides/whatsapp-por-qr-code.md) |
 | Atender pelo agente a ligação feita para o número no WhatsApp (Configurações → WhatsApp, no bloco Ligação pelo WhatsApp: conectar o número e escolher o agente) | O serviço (WaCalls) não vem instalado: instala-se pela tela; memória e disco ainda não medidos. **Provado com um número real** em quatro ligações recebidas em 12 e 13/11/2026 (a mais longa com 2 min 7 s), com áudio nos dois sentidos e transcrição, sem transferência para humano neste canal. O agente responde entre 0,6 e 2,4 s depois que quem ligou para de falar (nove respostas medidas nas gravações de duas ligações em 13/11; antes do ajuste que preenche o silêncio que o WhatsApp não manda, eram 4 a 5 s). **Quem liga aparece como número não identificado** quando o WhatsApp esconde o número (`@lid`), o que hoje é o caso comum: a correção depende do WaCalls. Cliente não oficial do WhatsApp; veja o [guia](docs/guides/ligacao-pelo-whatsapp.md) |
+| Desfecho da ligação (agendou, pediu retorno, deixou recado, sem interesse, só informação), classificado pelo motor depois da chamada; desligado de fábrica, liga em Configurações → Inteligência artificial | Testado com banco real e com uma resposta do provedor simulada, com o custo no limite de gasto e a falha na linha do tempo. Ainda sem prova numa instalação real nem com OpenAI ou Gemini de verdade. Desde a 0.8.0 |
+| Aviso de fim de ligação no WhatsApp de quem opera, com texto fixo (sem fala nem telefone de quem ligou); desligado de fábrica, liga em Configurações → WhatsApp | Testado com banco real e um WhatsApp falso. Ainda sem prova com um número real. Desde a 0.8.0 |
 | Chamar um webhook durante a chamada | Aguardando prova real (sem um receptor de verdade) |
+| Apertar as teclas de um menu automático (URA) durante a chamada, com a ferramenta `send_dtmf` | Medido num Asterisk local, com a imagem e o dialplan da instalação, contra outro Asterisk no papel da URA: o menu que reconhece o tom no áudio leu as teclas; o que só aceita tecla por RFC 4733 não leu. Ainda sem prova com a URA de uma operadora |
 | Atualização, checagem de saúde, backup e restauração | Provado numa instalação real, na VPS da parceira: instalador rodado duas vezes sem regerar segredo, backup conferido, restauração que devolve as contagens do backup e a volta automática de uma atualização que falhou. Restaurar em outro servidor, ou entre versões com migration nova, ainda sem prova |
 | Atualizar pela tela (Configurações → Sistema), por um agente do kit no servidor | Provado numa instalação real: duas vezes na VPS da parceira (0.3.0 → 0.4.0 e 0.4.0 → 0.5.0), sem ninguém no terminal do servidor, com a passagem para o atualizador da versão nova e a remoção das imagens antigas |
 | Gravar o áudio da chamada, desligado de fábrica e ligado pela tela (Configurações → Privacidade → Gravação das chamadas) | Testado com banco real e numa chamada pelo navegador, em teste de ponta a ponta. Ainda sem prova numa instalação real. Desde a 0.6.0 |
@@ -158,8 +161,8 @@ capacidade abaixo diz até onde a prova foi:
 Se você atender uma ligação por uma linha de operadora, conte como foi numa issue: a entrada por
 tronco SIP ainda não tem registro público, e é a contribuição mais valiosa neste momento.
 
-O que **não** existe ainda: várias empresas na mesma tela, construtor visual de fluxos, atender a
-ligação pelo WhatsApp, URA por voz, filas de atendimento. Parte disso está no [roadmap](ROADMAP.md), aberta para a comunidade.
+O que **não** existe ainda: várias empresas na mesma tela, construtor visual de fluxos,
+URA por voz, filas de atendimento. Parte disso está no [roadmap](ROADMAP.md), aberta para a comunidade.
 
 ## Como funciona
 
@@ -301,10 +304,10 @@ DeskcommCRM e painel de supervisão ao vivo.
 
 O DeskVoice foi criado por Rafael Melgaço ([@melgarafael](https://www.youtube.com/@melgarafael)) e
 é construído em público, com a comunidade. Já há contribuições de fora: as cercas e a
-segurança de [webtecnica](https://github.com/webtecnica) estão nas versões publicadas. Estão na `main` e saem na próxima
-versão os direitos de quem ligou (prazo de guarda e exportação), também de webtecnica, e o custo da
-OpenAI conferido contra a fatura, a despedida antes de desligar e a gravação das chamadas, de
-[aliffstefano](https://github.com/aliffstefano). O DeskcommCRM, de onde vem a fábrica de contribuição
+segurança de [webtecnica](https://github.com/webtecnica) estão nas versões publicadas, e desde a 0.6.0 também os direitos de
+quem ligou (prazo de guarda e exportação), de webtecnica, e o custo da OpenAI conferido contra a
+fatura, a despedida antes de desligar e a gravação das chamadas, de
+[aliffstefano](https://github.com/aliffstefano). A 0.8.0 traz o desfecho da ligação e o aviso de fim de ligação no WhatsApp, de webtecnica. O DeskcommCRM, de onde vem a fábrica de contribuição
 usada aqui, recebeu PRs de mais de 250 pessoas.
 
 Crédito é regra, não cortesia: quem contribui mantém a autoria do commit e tem o nome nas notas

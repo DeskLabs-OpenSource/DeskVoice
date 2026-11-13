@@ -105,6 +105,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   });
 
   const onEvent = async (event: AriEvent): Promise<void> => {
+    if (event.type === "Dial" && event.caller) return calls.transferDialed(event.caller.id, event.dialstatus ?? "");
     const channel = event.channel;
     if (!channel) return;
     if (event.type === "ChannelDestroyed") return calls.channelDestroyed(channel.id, event.cause_txt);

@@ -280,6 +280,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         requestedEnd ??= { status: "completed", endReason: "end_call" };
         requestedFarewell ??= farewell;
       },
+      // Sem `sendDtmf` no transporte (a ligação pelo WhatsApp), a ferramenta recusa em vez de fingir.
+      ...(transport.sendDtmf && { sendDtmf: transport.sendDtmf.bind(transport) }),
     },
     say(text) {
       if (!ending) voice?.say(text);

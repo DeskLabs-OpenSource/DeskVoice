@@ -42,6 +42,12 @@ export interface AudioSocketConnection {
   /** Dispara uma vez. Registrado depois do fechamento, dispara na hora. */
   onClose(handler: (reason: AudioSocketCloseReason) => void): void;
   sendAudio(pcm16_8k: Buffer): void;
+  /**
+   * Som que sai antes da fala na fila e que `clearAudio` não apaga (os tons de tecla: a URA fala
+   * por cima e não pode cortá-los). Tamanho múltiplo de um quadro. Resolve quando o último quadro
+   * saiu; rejeita se a conexão já fechou ou fechar antes.
+   */
+  sendTone(pcm16_8k: Buffer): Promise<void>;
   clearAudio(): void;
   /** Resolve quando tudo o que foi enfileirado saiu (ou a conexão fechou). */
   drained(): Promise<void>;
@@ -83,6 +89,8 @@ class Connection implements AudioSocketConnection {
   private closedWith: AudioSocketCloseReason | undefined;
 
   private queue: Buffer = Buffer.alloc(0);
+  private tones: Buffer = Buffer.alloc(0);
+  private toneWaiters: Array<(played: boolean) => void> = [];
   private pacing = false;
   private cancelTick: (() => void) | undefined;
   private epoch = 0;
@@ -122,6 +130,20 @@ class Connection implements AudioSocketConnection {
   sendAudio(pcm: Buffer): void {
     if (this.closedWith !== undefined || pcm.length === 0) return;
     this.queue = Buffer.concat([this.queue, pcm]);
+    this.startPacing();
+  }
+
+  sendTone(pcm: Buffer): Promise<void> {
+    const notPlayed = new Error("the connection closed before the tone was played");
+    if (this.closedWith !== undefined) return Promise.reject(notPlayed);
+    if (pcm.length === 0) return Promise.resolve();
+    this.tones = Buffer.concat([this.tones, pcm]);
+    const played = new Promise<void>((resolve, reject) => this.toneWaiters.push((ok) => (ok ? resolve() : reject(notPlayed))));
+    this.startPacing();
+    return played;
+  }
+
+  private startPacing(): void {
     if (this.pacing) return;
     this.pacing = true;
     this.epoch = this.now();
@@ -161,6 +183,12 @@ class Connection implements AudioSocketConnection {
     const elapsedFrames = Math.floor((this.now() - this.epoch) / FRAME_MS);
     const due = Math.min(MAX_BURST_FRAMES, elapsedFrames + 1 - this.sent);
     let wrote = 0;
+    while (wrote < due && this.tones.length > 0) {
+      this.socket.write(frame(FRAME.AUDIO, this.tones.subarray(0, FRAME_BYTES)));
+      this.tones = this.tones.subarray(FRAME_BYTES);
+      wrote += 1;
+      if (this.tones.length === 0) for (const settle of this.toneWaiters.splice(0)) settle(true);
+    }
     while (wrote < due && this.queue.length >= FRAME_BYTES) {
       this.socket.write(frame(FRAME.AUDIO, this.queue.subarray(0, FRAME_BYTES)));
       this.queue = this.queue.subarray(FRAME_BYTES);
@@ -178,13 +206,16 @@ class Connection implements AudioSocketConnection {
     // Em dia com o relógio: fila que secou não vira crédito para uma rajada depois.
     if (due > 0) this.sent = elapsedFrames + 1;
     // Depois do último quadro ainda corre um tick: ele leva 20 ms para tocar do outro lado.
-    if (wrote > 0 || this.queue.length > 0) this.cancelTick = this.schedule(() => this.tick(), FRAME_MS);
+    if (wrote > 0 || this.queue.length > 0 || this.tones.length > 0) this.cancelTick = this.schedule(() => this.tick(), FRAME_MS);
     else this.stopPacing();
   }
 
   private stopPacing(): void {
     this.pacing = false;
     this.queue = Buffer.alloc(0);
+    this.tones = Buffer.alloc(0);
+    // Só sobra quem espera tom quando a conexão fechou antes de ele tocar.
+    for (const settle of this.toneWaiters.splice(0)) settle(false);
     for (const resolve of this.drainWaiters.splice(0)) resolve();
   }
 }

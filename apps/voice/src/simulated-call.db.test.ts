@@ -215,6 +215,45 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     expect((await eventsOf(app, callId)).at(-1)).toEqual({ kind: "transfer_completed", payload: { to: "+5531988887777", status: "NOANSWER", answered: false } });
   });
 
+  // As duas sequências abaixo são as que um Asterisk 20 real (a imagem do Compose) emitiu para o canal
+  // de quem ligou, com o Dial de `deskvoice-transfer` como está no repositório, sem a opção `g`.
+  // Atendida, o canal não volta à Stasis com `transfer-ended`: só morre quando a conversa acaba.
+  const transferringCall = async (label: string) => {
+    const script: SimulatedScript = [{ toolCall: { name: "transfer_to_human", args: { reason: "Pediu um humano.", summary: "Quer falar com a recepção." } } }];
+    const scene = await incomingCall(label, { script, transferTo: "+5531988887777" });
+    await ended(scene.callId);
+    await waitFor(() => scene.asterisk.closed, "the AudioSocket to close");
+    scene.ari.emit({ type: "StasisStart", args: ["after-audio"], channel: { id: scene.channelId } });
+    await waitFor(() => scene.ari.log.includes(`continue ${scene.channelId} deskvoice-transfer,s`), "the transfer to start");
+    return scene;
+  };
+  const transferCompleted = (callId: string) =>
+    waitFor(async () => (await eventsOf(app, callId)).find((event) => event.kind === "transfer_completed"), "the transfer outcome");
+  const returnCallNotices = async (organizationId: string) => (await notificationsOf(app, organizationId)).filter((notification) => notification.body.includes("retorne a ligação"));
+
+  it("transferência atendida que termina: o canal só morre, e a chamada conta como atendida, sem aviso de retorno", async () => {
+    const { ari, organizationId, callId, channelId } = await transferringCall("e2e-transfer-answered");
+    ari.emit({ type: "Dial", caller: { id: channelId }, dialstatus: "" });
+    ari.emit({ type: "Dial", caller: { id: channelId }, dialstatus: "ANSWER" });
+    ari.emit({ type: "ChannelDestroyed", channel: { id: channelId }, cause_txt: "Normal Clearing" });
+
+    expect((await transferCompleted(callId)).payload).toEqual({ to: "+5531988887777", status: "ANSWER", answered: true });
+    expect(await callOf(app, callId)).toMatchObject({ status: "transferred", end_reason: "transferred" });
+    expect(await returnCallNotices(organizationId)).toEqual([]);
+  });
+
+  it("quem ligou desiste enquanto a transferência toca: o aviso de retorno sai", async () => {
+    const { ari, organizationId, callId, channelId } = await transferringCall("e2e-transfer-abandoned");
+    ari.emit({ type: "Dial", caller: { id: channelId }, dialstatus: "" });
+    ari.emit({ type: "Dial", caller: { id: channelId }, dialstatus: "RINGING" });
+    ari.emit({ type: "Dial", caller: { id: channelId }, dialstatus: "CANCEL" });
+    ari.emit({ type: "ChannelDestroyed", channel: { id: channelId }, cause_txt: "Normal Clearing" });
+
+    expect((await transferCompleted(callId)).payload).toEqual({ to: "+5531988887777", status: "CALLER_HANGUP", answered: false });
+    expect(await callOf(app, callId)).toMatchObject({ status: "transferred", end_reason: "transferred" });
+    expect(await returnCallNotices(organizationId)).toHaveLength(1);
+  });
+
   it("aprovação negada: o agente é informado e a chamada segue até o agente encerrar", async () => {
     const script: SimulatedScript = [approvalStep(), { say: "Infelizmente não consigo o desconto." }, { toolCall: { name: "end_call", args: { reason: "A cliente se despediu." } } }];
     const { ari, clock, callId, channelId, asterisk } = await incomingCall("e2e-denied", { script });

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
+import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, DotsNine, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import en from "../i18n/en/timeline";
@@ -166,6 +166,8 @@ export function Timeline({
             </Card>
           ),
         };
+      case "dtmf_sent":
+        return { ...base, tone: "neutral", icon: DotsNine, body: <Quiet><span className="font-bold text-ink">{e.dtmf_sent}</span>{text(p.digits) ? <> · <span className="data">{text(p.digits)}</span></> : null}</Quiet> };
       case "transfer_started":
         return {
           ...base,
@@ -180,6 +182,14 @@ export function Timeline({
           ),
         };
       case "transfer_completed":
+        if (p.answered === false) {
+          return {
+            ...base,
+            tone: "fail",
+            icon: ArrowsLeftRight,
+            body: <Card tone="fail" title={e.transfer_unanswered}>{text(p.status) ? <p className="data text-[0.87rem] text-muted">{text(p.status)}</p> : null}</Card>,
+          };
+        }
         return { ...base, tone: "ok", icon: ArrowsLeftRight, body: <Quiet>{e.transfer_completed}</Quiet> };
       case "engine_failed":
         return {

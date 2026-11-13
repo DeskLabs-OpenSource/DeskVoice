@@ -29,8 +29,8 @@ E uma segunda pergunta: **a ferramenta é de uso geral ou de um ramo de negócio
 
 Em `packages/tools/src/tools/`, um arquivo por ferramenta, com o teste ao lado. O nome do
 arquivo é o nome da ferramenta, em inglês e com sublinhado, como as que já existem: `end_call`,
-`transfer_to_human`, `notify_human`, `request_approval`, `send_whatsapp`, `call_webhook`,
-`create_task`.
+`transfer_to_human`, `notify_human`, `request_approval`, `send_whatsapp`, `send_dtmf`,
+`call_webhook`, `create_task`.
 
 Abra uma delas antes de começar. A forma de exportar e de registrar eventos é a que está lá, e
 a descoberta por pasta espera o mesmo formato.
@@ -67,6 +67,7 @@ interface ToolContext {
   clock: Clock;         // use isto, nunca `new Date()`
   telephony: {
     transfer(toE164: string): Promise<void>;
+    sendDtmf?(digits: string): Promise<void>; // ausente onde o canal não manda tecla
     hangup(): Promise<void>;
   };
   say(text: string): void; // faz o agente dizer algo enquanto a ferramenta trabalha

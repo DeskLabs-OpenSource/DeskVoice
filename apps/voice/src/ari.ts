@@ -28,6 +28,9 @@ const eventSchema = z.object({
     })
     .optional(),
   cause_txt: z.string().optional(),
+  // Evento `Dial`: o canal que disca vem em `caller`, não em `channel`.
+  caller: z.object({ id: z.string() }).optional(),
+  dialstatus: z.string().optional(),
 });
 export type AriEvent = z.infer<typeof eventSchema>;
 export type AriChannel = NonNullable<AriEvent["channel"]>;
