@@ -1,4 +1,4 @@
-import { withOrg, type CallStatus } from "@deskvoice/core";
+import { enqueueTask, withOrg, type CallStatus } from "@deskvoice/core";
 import type { Routine } from "../types";
 
 export interface CallDigest {
@@ -63,6 +63,9 @@ const routine: Routine = {
       const toolsUsed = [...new Set(events.flatMap((event) => (event.kind === "tool_called" && event.name ? [event.name] : [])))];
       const summary = extractiveSummary({ status: call.status, endReason: call.end_reason, turns, toolsUsed });
       await q.exec("update calls set summary = $2 where id = $1", [callId, summary]);
+      // O desfecho comercial é do motor do agente: vai para a fila em separado, para o resumo não
+      // depender de provedor nenhum para ficar pronto.
+      await enqueueTask(q, { kind: "classify_call_outcome", payload: {}, callId });
     });
   },
 };

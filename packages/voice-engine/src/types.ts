@@ -1,3 +1,5 @@
+import type { OutcomeGuess } from "./outcome";
+
 /** Definição de ferramenta no formato que os motores entendem (JSON Schema em `parameters`). */
 export interface ToolSpec {
   name: string;
@@ -151,6 +153,27 @@ export type ProcessingLocation =
   | { kind: "undeclared" }
   | { kind: "country"; country: string; source: LocationSource };
 
+/** O que a classificação precisa saber: o que foi dito e o que o agente fez. */
+export interface ClassifyInput {
+  /** Falas da ligação, uma por linha, com quem falou. */
+  transcript: string;
+  /** Ferramentas chamadas na ligação, pelo nome. */
+  tools: readonly string[];
+}
+
+export interface ClassifyOptions {
+  fetch?: typeof fetch;
+  /** Prazo da resposta. Padrão: 10 s. */
+  timeoutMs?: number;
+  /** Agendador do prazo (`setTimeout` por padrão). Devolve como cancelar. */
+  schedule?: (fn: () => void, delayMs: number) => () => void;
+  /** Sobrepõe o modelo de classificação (o mesmo motor fala e classifica). */
+  model?: string;
+  /** Sobrepõe a URL da API HTTP do provedor (testes apontam para um servidor falso). */
+  baseUrl?: string;
+  apiKey?: string;
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;
@@ -165,6 +188,15 @@ export interface VoiceEngine {
   keyless?: boolean;
   pricing: EnginePricing;
   connect(config: VoiceSessionConfig, apiKey: string, options?: ConnectOptions): Promise<VoiceSession>;
+  /**
+   * Lê a conversa e diz o desfecho comercial dela, com a confiança e a fala que o sustenta.
+   *
+   * Opcional de propósito: motor que não classifica apenas não declara o método, e a rotina grava
+   * `unknown`. Nunca lança — provedor fora do ar, resposta estranha ou chave sem crédito são uma
+   * ligação sem desfecho, não uma tarefa que falha três vezes.
+   */
+  classifyOutcome?(apiKey: string, input: ClassifyInput, options?: ClassifyOptions): Promise<OutcomeGuess>;
+
   /**
    * Confere a chave sem abrir sessão de voz e sem gastar: a chamada mais barata do provedor que
    * prova que a chave vale e alcança o modelo de `connect`. Nunca lança, nunca registra a chave.

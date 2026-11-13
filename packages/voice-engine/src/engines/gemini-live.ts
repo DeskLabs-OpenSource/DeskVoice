@@ -31,13 +31,18 @@ import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { resample } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
-import type { VoiceEngine, VoiceSession } from "../types";
+import { classifyOutcomeOverHttp } from "../outcome-over-http";
+import { OUTCOME_GUESS_SCHEMA_GOOGLE, outcomePrompt, readOutcomeGuess } from "../outcome";
+import type { ClassifyOptions, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const DEFAULT_API_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_MODEL = "gemini-3.8-live";
 const DEFAULT_VOICE = "Sulafat";
+// Modelo de texto que classifica o desfecho: barato e com `responseSchema` (conferido em
+// 2026-11-13). Trocável em `engine.gemini.classify_model`, sem PR.
+const OUTCOME_MODEL = "gemini-3.5-flash";
 // As 30 vozes prontas, com o descritor oficial. Conferido em 2026-11-12 na página de síntese de voz
 // (aistudio.google.com/docs/speech-generation); a página da Live API não lista as vozes dela.
 const VOICES = [
@@ -260,6 +265,31 @@ const engine: VoiceEngine = {
 
     if (config.greeting) session.say(config.greeting);
     return session;
+  },
+
+  async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
+    const model = options.model ?? OUTCOME_MODEL;
+    return classifyOutcomeOverHttp(
+      {
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(model)}:generateContent`,
+        // No cabeçalho, e não na URL: endereço de pedido costuma ir para log de proxy.
+        headers: { "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: outcomePrompt(input) }] }],
+          generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: OUTCOME_GUESS_SCHEMA_GOOGLE },
+        }),
+        read: (body) => {
+          const text = (body as { candidates?: { content?: { parts?: { text?: unknown }[] } }[] }).candidates?.[0]?.content?.parts?.[0]?.text;
+          if (typeof text !== "string") return null;
+          try {
+            return readOutcomeGuess(JSON.parse(text));
+          } catch {
+            return null;
+          }
+        },
+      },
+      options,
+    );
   },
 
   checkKey(apiKey, options = {}) {
