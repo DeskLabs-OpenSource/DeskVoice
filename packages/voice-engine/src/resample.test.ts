@@ -14,7 +14,53 @@ function rms(pcm: Buffer, skip = 0): number {
   return Math.sqrt(sum / count);
 }
 
+/** Amplitude de um tom de `hz` no sinal, por DFT de um ponto com janela de Hann. */
+function amplitude(pcm: Buffer, rate: number, hz: number): number {
+  const count = pcm.length / 2;
+  let re = 0;
+  let im = 0;
+  let weight = 0;
+  for (let i = 0; i < count; i++) {
+    const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (count - 1));
+    const sample = pcm.readInt16LE(i * 2) * w;
+    re += sample * Math.cos((2 * Math.PI * hz * i) / rate);
+    im += sample * Math.sin((2 * Math.PI * hz * i) / rate);
+    weight += w;
+  }
+  return (2 * Math.hypot(re, im)) / weight;
+}
+
+const db = (ratio: number) => 20 * Math.log10(ratio);
+
 describe("resample", () => {
+  it("8k -> 16k não cria imagem espelhada em 8000 - f (40 dB abaixo do tom, no mínimo)", () => {
+    for (const hz of [1000, 2000, 3000, 3400]) {
+      const up = resample(tone(hz, 8000, 8000), 8000, 16000);
+      const image = db(amplitude(up, 16000, 8000 - hz) / amplitude(up, 16000, hz));
+      expect(image, `imagem de ${hz} Hz em ${8000 - hz} Hz`).toBeLessThanOrEqual(-40);
+    }
+  });
+
+  it("8k -> 16k perde no máximo 1 dB de 300 Hz a 3 kHz", () => {
+    for (const hz of [300, 500, 1000, 1500, 2000, 2500, 3000]) {
+      const up = resample(tone(hz, 8000, 8000), 8000, 16000);
+      expect(db(amplitude(up, 16000, hz) / 10000), `tom de ${hz} Hz`).toBeGreaterThanOrEqual(-1);
+    }
+  });
+
+  it("mede o tempo de reamostrar 1 s de áudio de 8k para 16k", () => {
+    const second = tone(1000, 8000, 8000);
+    const time = (run: () => void) => {
+      for (let i = 0; i < 5; i++) run();
+      const start = performance.now();
+      for (let i = 0; i < 20; i++) run();
+      return (performance.now() - start) / 20;
+    };
+    const up = time(() => resample(second, 8000, 16000));
+    // Folga larga: o número medido vai no PR (0,8 ms em 13/11); aqui só se pega regressão grosseira.
+    expect(up, `1 s de 8k para 16k levou ${up.toFixed(2)} ms`).toBeLessThan(100);
+  });
+
   it("8k -> 16k -> 8k preserva o número de amostras", () => {
     const original = tone(440, 8000, 801);
     const up = resample(original, 8000, 16000);
