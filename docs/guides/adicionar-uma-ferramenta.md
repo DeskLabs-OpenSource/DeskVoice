@@ -30,7 +30,7 @@ E uma segunda pergunta: **a ferramenta é de uso geral ou de um ramo de negócio
 Em `packages/tools/src/tools/`, um arquivo por ferramenta, com o teste ao lado. O nome do
 arquivo é o nome da ferramenta, em inglês e com sublinhado, como as que já existem: `end_call`,
 `transfer_to_human`, `notify_human`, `request_approval`, `send_whatsapp`, `send_dtmf`,
-`call_webhook`, `create_task`.
+`call_webhook`, `create_task`, `stop_recording`.
 
 Abra uma delas antes de começar. A forma de exportar e de registrar eventos é a que está lá, e
 a descoberta por pasta espera o mesmo formato.
