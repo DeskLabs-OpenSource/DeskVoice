@@ -431,13 +431,13 @@ if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
 elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; then
   info "DESKVOICE_APPLY_UFW=yes não teve efeito: o firewall ufw não está ativo nesta máquina, e não há regra a aplicar."
 fi
-# firewalld (o firewall do AlmaLinux e do Rocky): só avisa. O Docker cria a zona dele no firewalld
-# e encaminha as portas publicadas por fora das outras zonas (docs.docker.com, "Integration with
-# firewalld"), então um comando firewall-cmd aqui seria receita sem prova. Nenhuma máquina com
-# firewalld ativo foi medida; quem mede é a ligação, de fora.
+# firewalld (o firewall do AlmaLinux e do Rocky): só avisa. Medido de fora em 13/11/2026 (AlmaLinux
+# 9.8, Docker 29.9.3, firewalld 1.3.4; issue #52): com ele ativo, as pontes do Docker vão para a zona
+# docker, e a porta publicada pelo Docker continua respondendo, mesmo com rich rule reject na zona
+# public; a porta escutada pelo host fica fechada. Por isso nenhum firewall-cmd aqui: não mudaria nada.
 if have firewall-cmd && [ "$($SUDO firewall-cmd --state 2>/dev/null || true)" = running ]; then
-  warn "O firewall firewalld está ativo. O DeskVoice com o firewalld ativo não foi provado: nenhuma instalação mediu se as portas 5060/udp e ${rtp_start}-${rtp_end}/udp chegam aos contêineres."
-  info "A prova é de fora: a primeira ligação e o teste da tela Linha do painel. Se a ligação não completar ou ficar muda, comece o diagnóstico pelo firewalld."
+  warn "O firewall firewalld está ativo, e ele não filtra as portas que o Docker publica: 5060/udp e ${rtp_start}-${rtp_end}/udp chegam aos contêineres com ele ligado, e uma regra dele não as fecha. Não é por ele que uma ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor da VPS, se ele tiver um, ou uma regra na cadeia DOCKER-USER desta máquina (ver docs/fundacao/ufw-e-docker.md)."
+  info "A prova da ligação continua sendo de fora: a primeira ligação e o teste da tela Linha do painel."
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -43,9 +43,11 @@ mesmo, por sua conta. O que foi provado em cada um:
   baixar pacotes, um passo que ninguém mediu.
 
 Sem Docker, o instalador oferece o script oficial (`get.docker.com`), que também atende AlmaLinux
-e Rocky Linux. Com o `firewalld` ativo, ou com o SELinux em `Enforcing` e o Docker rodando com ele
-ligado, o instalador avisa e segue: nenhum dos dois casos foi provado, e a prova é a primeira
-ligação e o teste da tela Linha.
+e Rocky Linux. Com o `firewalld` ativo, o instalador avisa e segue: ele não filtra as portas que o
+Docker publica (medido de fora em 13/11/2026, ver `docs/fundacao/ufw-e-docker.md`), então não é por
+ele que uma ligação fica muda, nem é ele que fecha a porta. Com o SELinux em `Enforcing` e o Docker
+rodando com ele ligado, o instalador também avisa e segue: esse caso não foi provado. Nos dois, a
+prova é a primeira ligação e o teste da tela Linha.
 
 ## Ordem de uso
 
