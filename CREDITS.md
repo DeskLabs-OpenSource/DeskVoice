@@ -62,9 +62,14 @@ Sobre o WAHA: a imagem publicada pelos autores (`devlikeapro/waha`) é referenci
 com versão e resumo fixos, e nunca republicada. O DeskVoice fala com ele pela API HTTP. O WAHA
 não é afiliado ao WhatsApp nem à Meta, e o DeskVoice não é afiliado ao WAHA.
 
-Sobre o WaCalls: a imagem publicada pelos autores (`ghcr.io/jotadev66/wacalls`, canal `develop`) é
-referenciada pelo Compose, fixada por resumo, e nunca republicada. O DeskVoice fala com ele pela API
-HTTP e pelo SSE, só a partir do processo de voz. O WaCalls, de JotaDev66 e Joseph Fernandes, traz o
+Sobre o WaCalls: o Compose usa uma imagem construída do fork
+[DeskLabs-OpenSource/WaCalls](https://github.com/DeskLabs-OpenSource/WaCalls)
+(`ghcr.io/desklabs-opensource/wacalls`, fixada por resumo). O fork é o commit `d16a076` dos autores
+com um conserto, o `caller_pn` da oferta repassado como `peerPhone` para quem liga com o número
+oculto. O conserto foi proposto aos autores em
+[JotaDev66/WaCalls#69](https://github.com/JotaDev66/WaCalls/pull/69), e a imagem volta a ser a deles
+quando eles o publicarem. O código do fork é público, sob a mesma licença MIT. O DeskVoice fala com
+ele pela API HTTP e pelo SSE, só a partir do processo de voz. O WaCalls, de JotaDev66 e Joseph Fernandes, traz o
 codec MLow sob a licença MIT de origem e usa a biblioteca `whatsmeow` (MPL-2.0). Ele não é afiliado
 ao WhatsApp nem à Meta, e o DeskVoice não é afiliado ao WaCalls.
 

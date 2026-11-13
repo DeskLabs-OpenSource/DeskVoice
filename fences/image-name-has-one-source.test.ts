@@ -22,7 +22,10 @@ function check(root: string): string[] {
   for (const dir of SIDES) {
     for (const file of listFiles(root, dir, isText)) {
       const text = read(root, file);
-      if (file !== SOURCE && text.includes(prefix)) violations.push(`${file}: repete \`${prefix}\`, que só pode estar em ${SOURCE}`);
+      // O WaCalls do fork mora no mesmo registro, mas não é imagem do DeskVoice: vai fixado por
+      // resumo, e um fork do DeskVoice que troca o prefixo continua baixando o mesmo WaCalls.
+      const own = text.replaceAll(new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/wacalls@sha256:[0-9a-f]{64}`, "g"), "");
+      if (file !== SOURCE && own.includes(prefix)) violations.push(`${file}: repete \`${prefix}\`, que só pode estar em ${SOURCE}`);
       // Canal não é versão: nem padrão do Compose, nem valor gravado pelo kit. Os testes do kit
       // ficam de fora: eles montam de propósito a instalação antiga, que gravava o canal.
       if (!file.startsWith("install/test/") && /DESKVOICE_VERSION[^\n]*\bstable\b/.test(text)) violations.push(`${file}: usa o canal \`stable\` como versão da instalação`);
@@ -59,6 +62,8 @@ describe("image-name-has-one-source", () => {
       "install/_common.sh: usa o canal `stable` como versão da instalação",
       "deploy/docker-compose.yml: repete `registro.example/projeto`, que só pode estar em deploy/images.env",
       "deploy/docker-compose.yml: usa o canal `stable` como versão da instalação",
+      // O WaCalls por etiqueta reprova; o fixado por resumo (install/wacalls-pinned.sh) passa.
+      "deploy/wacalls-tag.yml: repete `registro.example/projeto`, que só pode estar em deploy/images.env",
       "deploy/docker-compose.yml: a imagem de `panel` é `${DESKVOICE_IMAGE_PREFIX:-registro.example/projeto}/deskvoice-panel:${DESKVOICE_VERSION:-stable}`; deveria ser `${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-panel:${DESKVOICE_VERSION:-dev}`",
       "deploy/docker-compose.yml: a imagem de `voice` é `${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-voz:${DESKVOICE_VERSION:-dev}`; deveria ser `${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-voice:${DESKVOICE_VERSION:-dev}`",
       ".github/workflows/publish-image.yml: monta o nome da imagem à mão; use `image_ref`, de install/_common.sh",
