@@ -175,11 +175,36 @@ describe("ligação pelo WhatsApp: o transporte contra o par do WaCalls", { time
     await waitFor(() => context.fake.connection.connectionState === "closed" || context.fake.channel?.readyState === "closed", "the WebRTC leg to close");
   });
 
-  it("o agente desliga antes de o WaCalls dizer connected: não espera a fala que não tem por onde sair", async () => {
+  it("o agente desliga antes de o WaCalls dizer connected, e ele nunca diz: solta a ligação no teto", async () => {
     const context = await connect();
     context.transport.sendAudio(tone(800, 8000));
-    await context.transport.hangup();
+    let done = false;
+    const hangup = context.transport.hangup().then(() => (done = true));
+    context.time.advance(4_980);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(done).toBe(false);
+    context.time.advance(20);
+    await hangup;
     expect(context.ends).toEqual(["DELETE"]);
+  });
+
+  it("o agente desliga antes do connected, e ele chega: a fala pendente sai antes de soltar a ligação", async () => {
+    const context = await connect();
+    await waitFor(() => context.fake.channel?.readyState === "open", "the data channel to open");
+    context.transport.sendAudio(tone(800, 2000));
+    let done = false;
+    const hangup = context.transport.hangup().then(() => (done = true));
+    expect(done).toBe(false);
+    context.transport.mediaConnected();
+    await waitFor(() => context.fake.received.length >= 1, "the first frame");
+    // A fala tem 125 ms: o relógio anda até o desligar soltar, com teto bem abaixo do de 5 s.
+    for (let elapsed = 0; elapsed < 1_000 && !done; elapsed += 20) {
+      context.time.advance(20);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await hangup;
+    expect(context.ends).toEqual(["DELETE"]);
+    expect(context.fake.received.some((frame) => !isSilence(frame))).toBe(true);
   });
 
   it("a perna WebRTC cai: a conversa fica sabendo, e fechar desliga a ligação no WaCalls, que senão seguraria 30 s", async () => {

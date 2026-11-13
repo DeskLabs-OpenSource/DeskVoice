@@ -23,6 +23,8 @@ const MAX_HELD_BYTES = 5 * 16_000;
  * menos de 2 s pelo painel. Passado este tempo sem nada, a conversa recebe silêncio no lugar.
  */
 const CALLER_GAP_MS = 100;
+/** Quanto o desligar espera o `connected` para a última fala sair. A chave recusada, por exemplo, falha antes dele. */
+const MEDIA_WAIT_MS = 5_000;
 const CALLER_SILENCE = Buffer.alloc((SAMPLE_RATE / 1000) * FRAME_MS * 2);
 
 /**
@@ -89,6 +91,23 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
   let released: Promise<void> | undefined;
   let lastHeard = 0;
   let cancelFill: (() => void) | undefined;
+  let mediaWaiters: (() => void)[] = [];
+  const wakeMediaWaiters = (): void => {
+    for (const wake of mediaWaiters.splice(0)) wake();
+  };
+  /** Até o `connected`, a saída de quem ligou, ou o teto: o que vier antes. */
+  const untilMedia = (): Promise<void> =>
+    mediaUp || left || released
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          const cancel = options.schedule(done, MEDIA_WAIT_MS);
+          function done(): void {
+            cancel();
+            mediaWaiters = mediaWaiters.filter((wake) => wake !== done);
+            resolve();
+          }
+          mediaWaiters.push(done);
+        });
 
   const open = (): boolean => !left && released === undefined && channel.readyState === "open";
   const pacer = createPacer({ schedule: options.schedule, now: options.now, frameBytes: WHATSAPP_FRAME_BYTES, silence: SILENCE, isOpen: open, write: (frame) => channel.send(frame) });
@@ -112,6 +131,7 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
     held = [];
     pacer.stop();
     cancelFill?.();
+    wakeMediaWaiters();
     hangupHandler?.();
   };
 
@@ -120,6 +140,7 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
     (released ??= (async () => {
       pacer.stop();
       cancelFill?.();
+      wakeMediaWaiters();
       await peer.close().catch((error: unknown) => log("error", "could not close the WhatsApp peer connection", { error: messageOf(error) }));
       if (!remoteGone) await leg.end().catch((error: unknown) => log("error", "could not end the call in WaCalls", { error: messageOf(error) }));
     })());
@@ -171,14 +192,16 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
       hangupHandler = handler;
       if (left) handler();
     },
-    // Antes do `connected` a fala não tem por onde sair, e esperá-la prenderia a ligação até o
-    // WaCalls dizer alguma coisa, se disser.
+    // Antes do `connected` a fala não tem por onde sair: espera ele chegar, com teto, para não
+    // prender a ligação se o WaCalls não disser nada.
     async hangup() {
+      await untilMedia();
       if (mediaUp) await pacer.drained();
       await release();
     },
     // Nunca chamado: `canTransfer` é falso. Se for, a ligação termina em vez de ficar presa.
     async transfer() {
+      await untilMedia();
       if (mediaUp) await pacer.drained();
       await release();
     },
@@ -190,6 +213,7 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
       }
       mediaUp = true;
       startIfReady();
+      wakeMediaWaiters();
     },
     remoteEnded() {
       remoteGone = true;
