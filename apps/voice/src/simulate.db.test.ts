@@ -4,8 +4,8 @@ import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { startSimulatedCall } from "./simulate";
-import { createAgent, createOrganization, sessionHarness, simulatedSpeechMs } from "./testing/db";
-import { manualTime } from "./testing/helpers";
+import { createAgent, createOrganization, kindsOf, sessionHarness, simulatedSpeechMs } from "./testing/db";
+import { manualTime, waitFor } from "./testing/helpers";
 
 const { app, owner } = openTestDbs();
 afterAll(async () => {
@@ -14,7 +14,7 @@ afterAll(async () => {
 });
 
 describe("chamada simulada no ritmo de uma ligação (issue #111)", { timeout: 120_000 }, () => {
-  it("quem ligou só fala depois de ouvir a fala do agente, e a chamada termina depois de a última fala tocar", async () => {
+  it("quem ligou só fala depois de ouvir a fala do agente, e a chamada termina e solta o transporte", async () => {
     const organizationId = await createOrganization(app, "simulate-pace");
     const agentId = await createAgent(app, organizationId);
     const harness = await sessionHarness(app);
@@ -29,11 +29,15 @@ describe("chamada simulada no ritmo de uma ligação (issue #111)", { timeout: 1
     if ("code" in call) throw new Error(call.message);
     let done = false;
     void call.session.done.then(() => (done = true));
-    // O relógio da chamada e o do transporte andam juntos, de 20 em 20 ms.
-    for (let elapsed = 0; !done && elapsed < 60_000; elapsed += 20) {
+    // A partida passa pelo banco: o relógio só anda com a chamada atendida.
+    await waitFor(async () => (await kindsOf(app, call.callId)).includes("call_answered"), "the call to be answered");
+    // O relógio da chamada e o do transporte andam juntos, de 20 em 20 ms. `setTimeout` cede à E/S
+    // a cada volta: o fim da chamada (`finish`) espera o banco antes de chamar `hangup`, e o relógio
+    // não pode passar dele. O teto de voltas é só a rede de segurança; o prazo é o do teste.
+    for (let turn = 0; !done && turn < 100_000; turn += 1) {
       time.advance(20);
       harness.clock.advance(20);
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(done).toBe(true);
 
