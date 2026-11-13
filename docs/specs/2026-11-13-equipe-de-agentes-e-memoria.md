@@ -64,8 +64,9 @@ instalação usa: passar a ligação a outro agente, lembrar de um número e cob
 
 A chave é **(organização, telefone em E.164)**. O telefone é o `from_e164` na ligação recebida e o
 `to_e164` na que o sistema fez. Ligação sem número (o tronco não informou, chamada pelo navegador, ou
-`@lid` no WhatsApp, seção 5.3 do [desenho do WhatsApp](2026-11-12-ligacao-pelo-whatsapp.md)) não
-lembra nem é lembrada. A regra das duas grafias do nono dígito, que o desenho do WhatsApp põe ao lado
+`@lid` no WhatsApp sem telefone informado, seção 5.3 do [desenho do WhatsApp](2026-11-12-ligacao-pelo-whatsapp.md))
+não lembra nem é lembrada. Desde o #157, o `@lid` com o `caller_pn` da oferta ganha `from_e164`: é um
+número informado e não confirmado, e vale como chave igual ao que o tronco repassa. A regra das duas grafias do nono dígito, que o desenho do WhatsApp põe ao lado
 de `toE164`, vale aqui também quando chegar.
 
 O que entra na memória, em três tipos:
@@ -413,9 +414,10 @@ acesso dela. Nenhuma variável de ambiente nova.
   motor, inclusive no simulado.
 - **Recontagem de tokens no Gemini Live.** O custo da seção 2.6 para o Gemini supõe o pior caso. Não
   conferido.
-- **Confiança no número do WhatsApp.** O número vem da conta do WhatsApp, e não de um campo que o
-  tronco repassa. Pode ser mais difícil de forjar, mas não foi medido, e este desenho o trata como
-  qualquer número exibido.
+- **Confiança no número do WhatsApp.** Quando o WhatsApp mostra o telefone, ele vem da conta. Quando
+  esconde (`@lid`, hoje o caso comum), o telefone vem do `caller_pn` da oferta, um campo que o WhatsApp
+  não confirma (#157). Nos dois casos, este desenho o trata como qualquer número exibido, igual ao
+  que o tronco repassa.
 - **Uso real.** Não se sabe quantas pendências e notas uma instalação típica cria, nem se a tela de
   pendências vira o lugar de trabalho da recepção ou mais uma aba esquecida. A fatia 1 é a que mede.
 - **Mudança de comportamento para quem já instalou.** `create_task` passa a criar uma pendência com
