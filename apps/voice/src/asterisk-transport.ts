@@ -8,7 +8,11 @@
  *   2. Quando o processo fecha o AudioSocket, o dialplan devolve o canal à Stasis com
  *      `after-audio`. Aqui se decide: havendo transferência pedida, o canal vai para
  *      `deskvoice-transfer`; senão, desliga.
- *   3. `deskvoice-transfer` disca e devolve o canal com `transfer-ended` e o estado da discagem.
+ *   3. `deskvoice-transfer` disca. Se ninguém atende, devolve o canal com `transfer-ended` e o
+ *      estado da discagem. Se atendem, o canal não volta: o Dial não tem a opção `g`, e mesmo com
+ *      ela não voltaria quando é quem ligou que desliga. Quando a conversa com o humano acaba, o
+ *      canal só morre (`ChannelDestroyed`). O que diz que houve atendimento é o evento `Dial` da
+ *      ARI com `ANSWER`, que chega pela assinatura de todos os canais (`subscribeAll`).
  *
  * Lição do módulo de voz do DeskcommCRM (MIT, mesmo autor; ver CREDITS.md): a mídia nunca passa
  * por bridge + externalMedia. Por isso a transferência é do dialplan, e não uma bridge da ARI.
@@ -34,6 +38,7 @@ interface TrackedCall extends ExpectedCall {
   attached: boolean;
   transferTo?: string;
   transferReported?: boolean;
+  transferAnswered?: boolean;
 }
 
 export interface AsteriskCallsDeps {
@@ -115,6 +120,12 @@ export class AsteriskCalls {
     await this.deps.ari.hangup(channelId);
   }
 
+  /** A discagem da transferência mudou de estado (evento `Dial` da ARI, com o canal de quem ligou em `caller`). */
+  transferDialed(channelId: string, dialStatus: string): void {
+    const call = this.byChannel.get(channelId);
+    if (call?.transferTo && dialStatus === "ANSWER") call.transferAnswered = true;
+  }
+
   /** O canal deixou de existir. */
   async channelDestroyed(channelId: string, cause: string | undefined): Promise<void> {
     const call = this.byChannel.get(channelId);
@@ -128,8 +139,9 @@ export class AsteriskCalls {
         if (ended === 1) await recordEvent(q, call.callId, "call_ended", { status: "failed", reason: "no_answer", cause: cause ?? null }, clock.now());
       });
     } else if (call.transferTo) {
-      // Quem ligou desligou durante a transferência: o dialplan não chega a informar o estado da discagem.
-      await this.reportTransfer(call, "CALLER_HANGUP");
+      // A transferência atendida termina assim, desligue quem desligar. Sem o atendimento, foi quem
+      // ligou que desistiu enquanto tocava: o dialplan não chega a informar o estado da discagem.
+      await this.reportTransfer(call, call.transferAnswered ? "ANSWER" : "CALLER_HANGUP");
     }
   }
 
