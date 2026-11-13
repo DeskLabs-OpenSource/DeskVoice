@@ -13,10 +13,11 @@
  * Lição do módulo de voz do DeskcommCRM (MIT, mesmo autor; ver CREDITS.md): a mídia nunca passa
  * por bridge + externalMedia. Por isso a transferência é do dialplan, e não uma bridge da ARI.
  */
-import { recordEvent, withOrg, type Clock, type Db } from "@deskvoice/core";
+import { recordEvent, withOrg, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
+import { panelNotice } from "./panel-notice";
 import type { CallTransport } from "./transport";
 
 export interface ExpectedCall {
@@ -136,10 +137,12 @@ export class AsteriskCalls {
     if (call.transferReported) return;
     call.transferReported = true;
     const { db, clock, log } = this.deps;
+    const answered = dialStatus === "ANSWER";
     try {
-      await withOrg(db, call.organizationId, (q) =>
-        recordEvent(q, call.callId, "transfer_completed", { to: call.transferTo, status: dialStatus, answered: dialStatus === "ANSWER", ...(error !== undefined && { error }) }, clock.now()),
-      );
+      await withOrg(db, call.organizationId, async (q) => {
+        await recordEvent(q, call.callId, "transfer_completed", { to: call.transferTo, status: dialStatus, answered, ...(error !== undefined && { error }) }, clock.now());
+        if (!answered) await noticeUnansweredTransfer(q, call, dialStatus, clock);
+      });
     } catch (cause) {
       log("error", "could not record transfer_completed", { callId: call.callId, dialStatus, error: messageOf(cause) });
     }
@@ -150,4 +153,37 @@ export class AsteriskCalls {
     this.byCall.delete(call.callId);
     this.byChannel.delete(call.channelId);
   }
+}
+
+/** `DIALSTATUS` de quem ligou desistindo no meio: não foi a equipe que deixou de atender. */
+const CALLER_HANGUP = "CALLER_HANGUP";
+
+/**
+ * A transferência não completou e a ligação acaba ali: quem ligou ficou sem ninguém. Sem este aviso,
+ * o painel mostraria mais uma chamada "transferida" — e o relatório mentiria para melhor, porque a
+ * pessoa não falou com humano nenhum. O briefing vem do `transfer_started` que a ferramenta gravou.
+ */
+async function noticeUnansweredTransfer(q: OrgQuery, call: TrackedCall, dialStatus: string, clock: Clock): Promise<void> {
+  // Quem ligou desistiu por conta própria: o motivo do desligamento dele fica como está.
+  if (dialStatus !== CALLER_HANGUP) await q.exec("update calls set end_reason = 'transfer_unanswered' where id = $1", [call.callId]);
+
+  const briefing = await q.one<{ from_e164: string | null; reason: string | null; summary: string | null }>(
+    `select c.from_e164, e.payload->>'reason' as reason, e.payload->>'summary' as summary
+       from calls c
+       left join lateral (
+         select payload from call_events where call_id = c.id and kind = 'transfer_started' order by id desc limit 1
+       ) e on true
+      where c.id = $1`,
+    [call.callId],
+  );
+  const lines = [
+    dialStatus === CALLER_HANGUP
+      ? `Quem ligou desligou antes de a transferência para ${call.transferTo} completar.`
+      : `Ninguém atendeu a transferência para ${call.transferTo} (${dialStatus}).`,
+  ];
+  if (briefing?.from_e164) lines.push(`Quem ligou: ${briefing.from_e164}.`);
+  if (briefing?.reason) lines.push(`Motivo: ${briefing.reason}`);
+  if (briefing?.summary) lines.push(`O que já foi combinado: ${briefing.summary}`);
+  lines.push("A pessoa ficou sem resposta: retorne a ligação.");
+  await panelNotice(q, clock, call.callId, lines.join("\n"));
 }
