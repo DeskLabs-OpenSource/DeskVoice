@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toE164 } from "./phone";
+import { phoneOfWhatsAppId, toE164 } from "./phone";
 
 describe("toE164", () => {
   it.each([
@@ -67,3 +67,23 @@ describe("toE164", () => {
     expect(toE164("(31) 99999-8888")).toBe("+5531999998888");
   });
 });
+
+describe("phoneOfWhatsAppId", () => {
+  it("lê o telefone do JID e do id do WAHA, com ou sem aparelho", () => {
+    expect(phoneOfWhatsAppId("5531999998888:12@s.whatsapp.net")).toBe("+5531999998888");
+    expect(phoneOfWhatsAppId("5531999998888@c.us")).toBe("+5531999998888");
+    expect(phoneOfWhatsAppId("14155550123@s.whatsapp.net")).toBe("+14155550123");
+  });
+
+  it("devolve o nono dígito do celular brasileiro que o WhatsApp manda sem ele", () => {
+    expect(phoneOfWhatsAppId("553198887777@s.whatsapp.net")).toBe("+5531998887777");
+    expect(phoneOfWhatsAppId("551176543210:3@s.whatsapp.net")).toBe("+5511976543210");
+  });
+
+  it("fixo brasileiro fica como está, e o @lid não é telefone", () => {
+    expect(phoneOfWhatsAppId("553132221111@s.whatsapp.net")).toBe("+553132221111");
+    expect(phoneOfWhatsAppId("123456789012:28@lid")).toBeNull();
+    expect(phoneOfWhatsAppId(undefined)).toBeNull();
+  });
+});
+

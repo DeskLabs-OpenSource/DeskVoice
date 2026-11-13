@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { phoneOfWhatsAppId } from "@deskvoice/core";
 import { realSchedule, type Schedule } from "./transport";
 import { messageOf, silentLogger, type Logger } from "./log";
 
@@ -79,11 +80,8 @@ const sessionListSchema = z.object({ sessions: z.array(sessionSchema) });
 const createdSchema = z.object({ id: z.string().min(1) });
 const anything = z.unknown();
 
-/** `5531999998888:12@s.whatsapp.net` → `+5531999998888`. O `@lid` (número oculto) não é telefone. */
-export function phoneOfJid(jid: string | null | undefined): string | null {
-  const match = /^(\d{8,15})(?::\d+)?@s\.whatsapp\.net$/.exec(jid ?? "");
-  return match ? `+${match[1]}` : null;
-}
+/** O telefone do JID, com o nono dígito de volta; `@lid` (número oculto) não é telefone. */
+export const phoneOfJid = phoneOfWhatsAppId;
 
 /**
  * Conectada é a sessão pareada. O DeskcommCRM mediu que `paired` pode demorar a subir com o JID já

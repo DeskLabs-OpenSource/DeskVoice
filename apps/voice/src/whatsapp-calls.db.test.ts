@@ -72,7 +72,7 @@ async function connected(label: string, options: { agent?: "none" | "disabled"; 
     ]),
   );
   const session = wacalls.paired(wacallsSessionName(organizationId), NUMBER.slice(1));
-  return { organizationId, agentId, ring: () => wacalls.ring(session, `${CALLER.slice(1)}@s.whatsapp.net`) };
+  return { organizationId, agentId, ring: (peer = `${CALLER.slice(1)}@s.whatsapp.net`) => wacalls.ring(session, peer) };
 }
 
 const callPaths = (call: FakeCall): string[] =>
@@ -214,6 +214,12 @@ describe("ligação pelo WhatsApp: quando o agente não atende, ela segue tocand
     expect(call.status).toBe("ringing");
     return { refused, events: await eventsOf(app, refused?.id ?? ""), notices: await notificationsOf(app, organizationId) };
   }
+
+  it("celular que o WhatsApp manda sem o nono dígito fica gravado com ele", async () => {
+    const { organizationId, ring } = await connected("wa-ninth-digit", { agent: "none" });
+    const { refused } = await refusedBy(organizationId, ring("553188887777:28@s.whatsapp.net"));
+    expect(refused).toMatchObject({ from_e164: CALLER });
+  });
 
   it("sem agente escolhido", async () => {
     const { organizationId, ring } = await connected("wa-no-agent", { agent: "none" });
