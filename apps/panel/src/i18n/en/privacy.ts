@@ -8,7 +8,7 @@ const privacy: PrivacyDictionary = {
   recordingDisk:
     "Each minute of a call takes about 1.9 MB on the server disk. That is arithmetic from the format (two channels, 8 kHz, 16 bits), not a measurement.",
   recordingKeeps:
-    "Turning it on or off deletes nothing. Recordings already made follow the retention period below: they are removed together with the conversation text, and without a period they are kept forever. Today's backups do not include the recordings. Check that the notice at the start of the call tells callers the conversation is kept.",
+    "Turning it on or off deletes nothing. Recordings already made follow the retention period below: they are removed together with the conversation text, and without a period they are kept forever. Today's backups do not include the recordings. Check that the notice at the start of the call, under Settings → Calls, tells callers the conversation is kept.",
   recordingForever:
     "The retention period is empty: recordings are kept forever, and the server disk grows without limit, about 1.9 MB per minute of call. Set a period below so old recordings are removed.",
   recordingStates: { on: "on", off: "off" },
