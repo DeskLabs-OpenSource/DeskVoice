@@ -25,6 +25,38 @@ A sonda externa é o [check-host.net](https://check-host.net), que abre uma cone
 máquinas fora da VPS (Alemanha, EUA, Japão, entre outras) e devolve o tempo de conexão. Todo
 tráfego de UDP foi medido de um namespace com `veth` (ver "O que não foi medido").
 
+### Como repetir
+
+```bash
+# 1. o contêiner publicado (porta alta, nada a ver com a telefonia de produção)
+docker run -d --name dk-probe -p 48080:80 -p 48506:9999/udp node:22-alpine node /app.js
+
+# 2. a sonda externa: pede e depois recolhe o resultado dos três nós
+curl -s -H 'Accept: application/json' \
+  'https://check-host.net/check-tcp?host=152.53.89.236:48080&max_nodes=3'
+# {"nodes":{...},"ok":1,"permanent_link":"https://check-host.net/check-report/<id>","request_id":"<id>"}
+curl -s -H 'Accept: application/json' 'https://check-host.net/check-result/<id>'
+# {"de2.node.check-host.net":[{"address":"152.53.89.236","time":0.089737}], ...}
+
+# 3. o controle: o host escutando, sem Docker no meio
+python3 -m http.server 48081 --bind 0.0.0.0 &
+
+# 4. o lado de fora emulado, para o UDP (o check-host não sonda UDP)
+ip netns add fora
+ip link add veth-dk type veth peer name veth-dk.ns
+ip link set veth-dk.ns netns fora
+ip addr add 10.99.99.1/24 dev veth-dk && ip link set veth-dk up
+ip netns exec fora ip addr add 10.99.99.2/24 dev veth-dk.ns
+ip netns exec fora ip link set veth-dk.ns up && ip netns exec fora ip link set lo up
+ip netns exec fora ip route add default via 10.99.99.1
+ip netns exec fora python3 -c 'import socket,sys;s=socket.socket(2,2);s.settimeout(2.5);
+s.sendto(b"probe",("152.53.89.236",48506));print(s.recvfrom(2048))'
+```
+
+O `/app.js` é um servidor de 15 linhas: `http.createServer(...).listen(80)` e um
+`dgram.createSocket("udp4")` que devolve o que recebe na 9999. No fim: `docker rm -f dk-probe`,
+`ip netns del fora`, `kill` no `http.server` e `ufw delete` em cada regra criada.
+
 ### 1. Sem regra nenhuma, o contêiner já está aberto
 
 ```
