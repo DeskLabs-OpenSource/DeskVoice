@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { decideTag, gitHistory } from "./tag-target";
 
 // Repositórios de verdade, numa pasta temporária: o que se prova é o histórico que cada jeito de
@@ -21,9 +21,8 @@ const ENV = {
 
 const changelog = (...versions: string[]): string => `# Changelog\n\n${versions.map((v) => `## [${v}] - 2026-01-01\n\n- item\n`).join("\n")}`;
 
-function repo() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "deskvoice-tag-target-"));
-  onTestFinished(() => fs.rmSync(root, { recursive: true, force: true }));
+/** Os comandos de git de um repositório de teste. Não cria nada: quem chama decide a pasta. */
+function open(root: string) {
   const git = (...args: string[]): string => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", env: ENV }).trim();
   const write = (file: string, text: string): void => {
     fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
@@ -39,7 +38,24 @@ function repo() {
     write("CHANGELOG.md", changelog(...versions));
     for (const file of fs.readdirSync(path.join(root, ".changes"))) if (file !== "README.md") fs.rmSync(path.join(root, ".changes", file));
   };
+  return { root, git, write, commit, cut };
+}
 
+/** Cada caso ganha uma cópia do repositório de partida, e não um repositório montado do zero. */
+function repo() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "deskvoice-tag-target-"));
+  onTestFinished(() => fs.rmSync(root, { recursive: true, force: true }));
+  // O repositório de partida vem pronto de `base`, copiado em vez de montado: `git init` e os dois
+  // commits iniciais custam 8 processos por caso, e o custo desta suíte é o de criar processo (ver
+  // o teto comentado no `describe`), não o de escrever bytes. A cópia não gasta processo nenhum.
+  for (const entry of fs.readdirSync(base)) fs.cpSync(path.join(base, entry), path.join(root, entry), { recursive: true });
+  return open(root);
+}
+
+/** O repositório de partida: a 0.1.0 marcada e dois fragmentos novos na main. */
+function buildBase(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "deskvoice-tag-target-"));
+  const { git, write, commit } = open(root);
   git("init", "--quiet", "-b", "main");
   write(".changes/README.md", "formato\n");
   write("CHANGELOG.md", changelog("0.1.0"));
@@ -48,13 +64,28 @@ function repo() {
   write(".changes/a.md", "fragmento\n");
   write(".changes/b.md", "fragmento\n");
   commit("feat: a e b");
-  return { root, git, write, commit, cut };
+  return root;
 }
 
 /** Ramos de PR por commit, como a API do GitHub os devolveria. */
 const decide = (root: string, head: string, prs: Record<string, string[]> = {}) => decideTag(gitHistory(root, (commit) => prs[commit] ?? []), head);
 
-describe("decideTag", () => {
+/** O repositório de partida de todo caso, montado uma vez no `beforeAll`. */
+let base: string;
+
+// Cada caso roda o git de verdade, e o custo é o de CRIAR PROCESSO, não o de bytes: nesta máquina
+// (4 núcleos, /tmp em tmpfs) um spawn de git custa 2,6 ms com ela ociosa e 121 ms com carga 83,
+// enquanto o ciclo equivalente de I/O fica em 0,55 ms e 19 ms. Como o git é justamente o que o teste
+// prova, o tempo cresce com a carga: com 5 s de teto o caso mais caro estourou a 10,7 s sob carga 83,
+// sem defeito nenhum no código (#101). O teto de 20 s é 3x o pior caso medido depois do conserto
+// (6,2 s com carga 44): a variação da máquina fica fora do veredito e um travamento de verdade ainda
+// aparece.
+describe("decideTag", { timeout: 20_000 }, () => {
+  beforeAll(() => {
+    base = buildBase();
+  });
+  afterAll(() => fs.rmSync(base, { recursive: true, force: true }));
+
   it("merge: marca o commit de merge, mesmo com outro push na main depois", () => {
     const { root, git, write, commit, cut } = repo();
     git("switch", "--quiet", "-c", "release/0.2.0");
