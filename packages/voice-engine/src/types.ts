@@ -214,3 +214,13 @@ export interface VoiceEngine {
    */
   checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
 }
+
+// Mora aqui, e não em outcome.ts, porque o painel importa valor só por `@deskvoice/voice-engine/types`:
+// o índice puxa load.ts, cujo `new URL("./engines", import.meta.url)` o Turbopack não resolve.
+/**
+ * Classificação do desfecho ligada, por organização (chave `calls.outcome_enabled` em `settings`).
+ * Ausente é desligada, de fábrica: cada ligação classificada é uma chamada paga ao provedor, com a
+ * transcrição em texto, e quem atualiza não passa a gastar nem a enviar sem decidir. Só `true` liga.
+ */
+export const OUTCOME_SETTING = "calls.outcome_enabled";
+export const outcomeEnabledOf = (stored: unknown): boolean => stored === true;

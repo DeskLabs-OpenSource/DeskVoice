@@ -10,14 +10,6 @@ import { z } from "zod";
 export const CALL_OUTCOMES = ["booked", "callback_requested", "message_taken", "not_interested", "info_only", "unknown"] as const;
 export type CallOutcome = (typeof CALL_OUTCOMES)[number];
 
-/**
- * Classificação do desfecho ligada, por organização (chave `calls.outcome_enabled` em `settings`).
- * Ausente é desligada, de fábrica: cada ligação classificada é uma chamada paga ao provedor, com a
- * transcrição em texto, e quem atualiza não passa a gastar nem a enviar sem decidir. Só `true` liga.
- */
-export const OUTCOME_SETTING = "calls.outcome_enabled";
-export const outcomeEnabledOf = (stored: unknown): boolean => stored === true;
-
 export interface OutcomeGuess {
   outcome: CallOutcome;
   /** 0 a 1, como o provedor declarou. */

@@ -1,6 +1,7 @@
 import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
-import { OUTCOME_SETTING, type VoiceEngine } from "@deskvoice/voice-engine";
+import type { VoiceEngine } from "@deskvoice/voice-engine";
+import { OUTCOME_SETTING } from "@deskvoice/voice-engine/types";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
