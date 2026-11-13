@@ -85,6 +85,9 @@ export function createRecorder(now: () => number, sink?: (stereo: Buffer) => voi
   const kept: Buffer[] = [];
   const write = sink ?? ((stereo: Buffer) => void kept.push(stereo));
   let flushed = 0;
+  // Depois da pausa o áudio não entra mais, mas o que já estava guardado sai: o pedido de quem
+  // ligou tem de estar no arquivo.
+  let paused = false;
 
   const bytesAt = (ms: number): number => Math.max(0, Math.floor((ms * BYTES_PER_MS) / 2) * 2);
   const elapsedBytes = (): number => bytesAt(now() - startedAt);
@@ -112,11 +115,13 @@ export function createRecorder(now: () => number, sink?: (stereo: Buffer) => voi
 
   return {
     caller(pcm: Buffer): void {
+      if (paused) return;
       // Áudio de quem ligou chega no tempo real; um buraco (rede, mudo) vira silêncio.
       caller.append(Math.max(caller.end, elapsedBytes() - pcm.length), pcm);
       settle();
     },
     agent(pcm: Buffer): void {
+      if (paused) return;
       agent.append(Math.max(agent.end, elapsedBytes()), pcm);
       settle();
     },
@@ -125,6 +130,15 @@ export function createRecorder(now: () => number, sink?: (stereo: Buffer) => voi
       agent.truncate(elapsedBytes());
     },
     end,
+    /**
+     * Para de aceitar áudio e devolve quantos bytes de áudio a gravação tem até aqui — o trecho
+     * inteiro, inclusive o pedido que acabou de ser feito. Chamar de novo não muda nada.
+     */
+    pause(): number {
+      if (paused) return flushed * 2;
+      paused = true;
+      return end();
+    },
     /** O WAV pronto, ou `null` se ninguém falou nada. Só sem `sink`. */
     wav(): Buffer | null {
       const bytes = end();
@@ -139,6 +153,11 @@ export interface Recording {
   caller(pcm: Buffer): void;
   agent(pcm: Buffer): void;
   clear(): void;
+  /**
+   * Para de gravar, deixando no arquivo tudo o que foi dito até aqui. Espera os blocos chegarem ao
+   * disco antes de resolver: quem chamou pode contar que o pedido está salvo.
+   */
+  pause(): Promise<void>;
   /** Fecha o arquivo. Com áudio, acerta o cabeçalho e troca `.part` por `.wav`; sem, ou com falha, apaga o `.part`. */
   finish(): Promise<boolean>;
 }
@@ -222,6 +241,7 @@ export async function startRecording(
     sampleRate,
   );
 
+  let paused = false;
   return {
     // Depois da falha, nada mais é gravado: nem o trecho que ainda podia mudar fica em memória.
     caller: (pcm) => {
@@ -231,6 +251,15 @@ export async function startRecording(
       if (failure === undefined) recorder.agent(pcm);
     },
     clear: () => recorder.clear(),
+    async pause() {
+      if (paused) return;
+      paused = true;
+      const bytes = recorder.pause();
+      if (bytes > 0) append(wavHeader(bytes, sampleRate), 0);
+      // O pedido de quem ligou pode estar no último bloco, ainda na fila: só resolve depois que ele
+      // entrou no arquivo.
+      await writing;
+    },
     async finish() {
       closing = true;
       const bytes = recorder.end();
