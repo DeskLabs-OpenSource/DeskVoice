@@ -33,7 +33,7 @@ export const GET = handle({}, async ({ q, url, session, deps }) => {
   // A linha do tempo da ligação: as pendências dela e o nome de cada pessoa que os eventos citam
   // (dono em cada momento, quem fechou), inclusive quem já foi desativado.
   return {
-    items: await followUpsFor(q, session, "f.call_id = $1 order by f.created_at", [callId]),
+    items: await followUpsFor(q, session, "f.call_id = $1 order by f.created_at, f.id", [callId]),
     retentionDays,
     people: await q.many(
       `select id, name from users where id in (

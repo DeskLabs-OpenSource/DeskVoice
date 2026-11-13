@@ -75,9 +75,10 @@ describe("the follow-ups screen", () => {
 
     // A tela da ligação lê as pendências dela e os nomes que os eventos citam.
     const ofCall = (await call(list, { cookie: operator.cookie, query: `?callId=${callId}` })).data as Listed;
-    expect(ofCall.items.map((item) => [item.title, item.status])).toEqual([
-      ["Da equipe", "done"],
+    // As duas nasceram no mesmo instante: a ordem entre elas não é o que se confere.
+    expect(ofCall.items.map((item) => [item.title, item.status]).sort()).toEqual([
       ["Da colega", "canceled"],
+      ["Da equipe", "done"],
     ]);
     expect(ofCall.people?.map((person) => person.id).sort()).toEqual([owner.id, operator.id, colleague.id].sort());
   });
