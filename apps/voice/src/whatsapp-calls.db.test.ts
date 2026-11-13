@@ -150,13 +150,14 @@ describe("ligação pelo WhatsApp: entrada e atendimento", { timeout: 60_000 }, 
     expect(await callOf(app, callId)).toMatchObject({ end_reason: "max_duration" });
   });
 
-  it("transferir não existe neste canal: a ferramenta responde para oferecer recado, sem evento de transferência", async () => {
-    const { organizationId, ring } = await connected("wa-transfer", { transferTo: "+5531977776666", tools: ["transfer_to_human"] });
+  it("transferir não existe neste canal: o motor nem recebe a ferramenta, e chamá-la assim mesmo não transfere", async () => {
+    const { organizationId, ring } = await connected("wa-transfer", { transferTo: "+5531977776666", tools: ["transfer_to_human", "notify_human"] });
     ring();
     const callId = await answeredCall(organizationId);
+    expect(engine.configs.at(-1)?.tools.map((tool) => tool.name)).toEqual(["notify_human"]);
     engine.emit("toolCall", { id: "t1", name: "transfer_to_human", args: { reason: "pediu uma pessoa", summary: "Quer falar com a recepção." } });
     await waitFor(() => engine.toolResults.length === 1, "the tool result");
-    expect(engine.toolResults[0]?.result).toMatchObject({ ok: false, message: expect.stringMatching(/não há como transferir.*notify_human/) });
+    expect(engine.toolResults[0]?.result).toMatchObject({ ok: false });
     expect(await kindsOf(app, callId)).not.toContain("transfer_started");
   });
 

@@ -81,6 +81,20 @@ describe("pacer", () => {
     expect(kinds()).toBe(".ss...");
   });
 
+  it("clear antes de o compasso pegar a fala nova solta quem esperava ela sair", async () => {
+    const { time, pacer } = harness({ silence: true });
+    pacer.start();
+    time.advance(10);
+    pacer.push(speech(50));
+    let done = false;
+    const drained = pacer.drained().then(() => (done = true));
+    pacer.clear();
+    await Promise.resolve();
+    expect(done).toBe(true);
+    time.advance(20);
+    await drained;
+  });
+
   it("para quando o caminho fecha, e solta quem esperava a fala sair", async () => {
     const { time, pacer, written, close } = harness({ silence: true });
     pacer.start();
