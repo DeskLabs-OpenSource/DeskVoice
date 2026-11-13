@@ -210,6 +210,20 @@ export function Timeline({
           ),
         };
       }
+      case "recording_failed": {
+        const body = p.reason === "disk_full" ? e.recording_failed_disk_full : p.reason === "disk_too_slow" ? e.recording_failed_disk_too_slow : e.recording_failed_write_failed;
+        return {
+          ...base,
+          tone: "fail",
+          icon: RecordIcon,
+          body: (
+            <Card tone="fail" title={e.recording_failed}>
+              <p className="text-muted">{body}</p>
+              {text(p.error) ? <p className="data text-[0.87rem] text-muted">{text(p.error)}</p> : null}
+            </Card>
+          ),
+        };
+      }
       case "cost_ceiling_reached":
         return { ...base, tone: "fail", icon: Coins, body: <Card tone="fail" title={e.cost_ceiling_reached}><p className="text-muted">{e.cost_ceiling_body}</p></Card> };
       case "call_ended":

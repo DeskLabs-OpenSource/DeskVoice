@@ -137,6 +137,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let lastEngineError: Error | undefined;
   let ending = false;
   let recorder: Recording | undefined;
+  /** A gravação de `recording_failed`, para o fim da chamada esperar por ela. */
+  let recordingFailed: Promise<void> | undefined;
   let wrappingUp = false;
   let requestedEnd: Ending | undefined;
   let requestedFarewell: string | undefined;
@@ -185,6 +187,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     }
     // Fecha o arquivo em qualquer caminho de fim: com áudio vira `.wav`; sem, ou com falha, o `.part` some.
     await recorder?.finish().catch(logFailure("could not save the call recording"));
+    await recordingFailed;
     resolveDone({ status: end.status, endReason: end.endReason, costCents });
   }
 
@@ -198,7 +201,13 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     try {
       const free = await freeBytes(dir);
       if (free < minFreeBytes) return void (await event("recording_skipped", { reason: "low_disk", freeBytes: free, minFreeBytes }));
-      opened = await startRecording(recordingPath(dir, organizationId, callId), () => clock.now().getTime());
+      opened = await startRecording(recordingPath(dir, organizationId, callId), () => clock.now().getTime(), {
+        // A chamada segue sem gravar, e a linha do tempo diz na hora que a gravação parou.
+        onFailure: (reason, error) => {
+          log("error", "the call recording failed; the call goes on without it", { reason, error: error.message });
+          recordingFailed = event("recording_failed", { reason, error: error.message }).catch(logFailure("could not record the recording failure"));
+        },
+      });
     } catch (error) {
       log("error", "could not start the call recording", { error: messageOf(error) });
       return void (await event("recording_skipped", { reason: "unavailable", error: messageOf(error) }));

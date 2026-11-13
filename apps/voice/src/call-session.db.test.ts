@@ -1,11 +1,11 @@
 // A conversa sobre um transporte nas mãos do teste: falhas do motor (Review Focus 1 e 2), teto de
 // duração e teto de custo.
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, open, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { encryptSecret, recordingPath } from "@deskvoice/core";
 import type { SimulatedScript } from "@deskvoice/voice-engine";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting, tasksOf } from "../../../packages/tools/test/helpers";
 import { EngineTimeoutError } from "@deskvoice/voice-engine";
@@ -339,6 +339,7 @@ describe("gravação do áudio, por organização (registro 0016)", { timeout: 1
     expect(wav.readUInt32LE(40)).toBe(wav.length - 44);
     expect(await readdir(path.dirname(file))).toEqual([path.basename(file)]); // sem .part
     expect(await kindsOf(app, callId)).not.toContain("recording_skipped");
+    expect(await kindsOf(app, callId)).not.toContain("recording_failed");
     await cleanup();
   });
 
@@ -377,6 +378,49 @@ describe("gravação do áudio, por organização (registro 0016)", { timeout: 1
     await session.done;
     const wav = await readFile(recordingPath(dir, made.organizationId, made.callId));
     expect(wav.readUInt32LE(40) / (8000 * 2 * 2)).toBeGreaterThan(19.5);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("o disco enche no meio da chamada: recording_failed na hora, a chamada segue e não sobra arquivo (issue #103)", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("recording-fails-midway", { engine: "manual", greeting: "Bom dia." }, manual);
+    await putSetting(app, made.organizationId, "calls.recording_enabled", true, false);
+    const session = startCallSession({ ...made.harness.deps, recordingsDir: dir }, { organizationId: made.organizationId, callId: made.callId, agentId: made.agentId, transport: made.transport });
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_notice"), "the notice event");
+
+    // O `write` de todo arquivo de `fs/promises` passa a falhar como disco cheio.
+    const probe = await open(path.join(dir, "probe"), "w");
+    const write = vi.spyOn(Object.getPrototypeOf(probe) as { write: () => Promise<unknown> }, "write");
+    await probe.close();
+    await rm(path.join(dir, "probe"));
+    write.mockRejectedValue(Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" }));
+    try {
+      for (let second = 0; second < 3; second += 1) {
+        made.harness.clock.advance(1000);
+        made.transport.callerAudio(1000);
+      }
+      await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_failed"), "the recording failure event");
+      // A chamada segue: a fala de quem ligou ainda chega ao motor, e o agente ainda responde.
+      const heard = manual.audioBytes;
+      made.transport.callerAudio(200);
+      expect(manual.audioBytes).toBeGreaterThan(heard);
+      manual.emit("audio", Buffer.alloc(320, 1));
+      expect(made.transport.sentBytes).toBeGreaterThan(0);
+      expect((await callOf(app, made.callId)).status).toBe("in_progress");
+      made.transport.callerHangup();
+      await session.done;
+    } finally {
+      write.mockRestore();
+    }
+
+    const events = await eventsOf(app, made.callId);
+    const kinds = events.map((event) => event.kind);
+    expect(events.find((event) => event.kind === "recording_failed")?.payload).toEqual({ reason: "disk_full", error: "ENOSPC: no space left on device, write" });
+    expect(kinds.filter((kind) => kind === "recording_failed")).toHaveLength(1);
+    expect(kinds.indexOf("recording_failed")).toBeLessThan(kinds.indexOf("call_ended")); // gravado na hora, não no fim
+    expect(await callOf(app, made.callId)).toMatchObject({ status: "completed", end_reason: "caller_hangup" });
+    expect(await readdir(path.dirname(recordingPath(dir, made.organizationId, made.callId)))).toEqual([]); // nem .wav, nem .part
     await rm(dir, { recursive: true, force: true });
   });
 
