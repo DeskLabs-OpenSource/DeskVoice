@@ -117,6 +117,10 @@ describe("cliente ARI", { timeout: 60_000 }, () => {
     first.send(JSON.stringify({ type: "StasisStart", args: ["inbound"], channel: { id: "c1", name: "PJSIP/trunk-x-0001", dialplan: { exten: "s" }, caller: { number: "31999998888" }, extra: 1 } }));
     await waitFor(() => events.length === 1, "the event");
     expect(events[0]).toEqual({ type: "StasisStart", args: ["inbound"], channel: { id: "c1", name: "PJSIP/trunk-x-0001", dialplan: { exten: "s" }, caller: { number: "31999998888" } } });
+    // O `Dial` traz o canal que disca em `caller`: é ele que diz que a transferência foi atendida.
+    first.send(JSON.stringify({ type: "Dial", caller: { id: "c1", name: "PJSIP/trunk-x-0001", state: "Up" }, peer: { id: "c2", name: "PJSIP/trunk-x-0002" }, dialstring: "5531988887777@trunk-x", dialstatus: "ANSWER" }));
+    await waitFor(() => events.length === 2, "the dial event");
+    expect(events[1]).toEqual({ type: "Dial", caller: { id: "c1" }, dialstatus: "ANSWER" });
 
     first.terminate();
     await waitFor(() => sockets.length === 2 && client.status().connected, "the reconnection");
