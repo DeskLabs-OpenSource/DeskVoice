@@ -363,7 +363,7 @@ describe("send_whatsapp pelo número conectado por QR Code (conector waha)", () 
     waha.requests.length = 0;
     const result = await runTool(wahaTool, { text: "Oi" }, ctx);
     expect(result).toEqual({ ok: false, message: expect.stringMatching(/^Não consegui concluir/) as string });
-    expect((await eventsOf(app, ctx.callId)).at(-1)?.payload.error).toBe("The WhatsApp number of this installation is not connected (session is FAILED): connect it in Settings");
+    expect((await eventsOf(app, ctx.callId)).at(-1)?.payload.error).toBe("The WhatsApp number of this installation is not connected (session is FAILED): connect it in Settings → WhatsApp");
     expect(waha.requests.map((request) => request.method)).toEqual(["GET"]);
     expect(waha.sent).toEqual([]);
   });

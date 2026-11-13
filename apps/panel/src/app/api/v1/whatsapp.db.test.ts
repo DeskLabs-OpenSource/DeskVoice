@@ -320,7 +320,7 @@ describe("disconnecting and failing", () => {
     if (live) live.status = "FAILED";
     expect(await state(owner.cookie)).toMatchObject({ status: "failed", failure: "FAILED", phone: "+553133330000" });
     await state(owner.cookie);
-    expect((await notices(org)).slice(1)).toEqual(["O WhatsApp +553133330000 desconectou. Os avisos e as mensagens por WhatsApp não saem até alguém conectar de novo, em Configurações."]);
+    expect((await notices(org)).slice(1)).toEqual(["O WhatsApp +553133330000 desconectou. Os avisos e as mensagens por WhatsApp não saem até alguém conectar de novo, em Configurações → WhatsApp."]);
 
     waha.requests.length = 0;
     expect((await start(owner.cookie)).data).toMatchObject({ status: "qr", failure: null, qr: expect.any(String) as string });
@@ -350,7 +350,7 @@ describe("disconnecting and failing", () => {
     const live = waha.sessions.get(session);
     if (live) live.status = "FAILED";
     expect(await state(owner.cookie)).toMatchObject({ status: "failed", failure: "qr_expired", qr: null });
-    expect(await notices(org)).toEqual(["A conexão do WhatsApp não foi concluída: o QR Code não foi lido a tempo ou a conexão falhou. Tente de novo em Configurações."]);
+    expect(await notices(org)).toEqual(["A conexão do WhatsApp não foi concluída: o QR Code não foi lido a tempo ou a conexão falhou. Tente de novo em Configurações → WhatsApp."]);
 
     const gone = await connectedOrg("wa missing");
     waha.sessions.delete(gone.session);
@@ -406,8 +406,8 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
     expect(await state(owner.cookie)).toMatchObject({ service: "running", serviceReason: null, status: "disconnected" });
     expect(await allNotices(org)).toEqual([
       "Test owner pediu a instalação do serviço de WhatsApp neste servidor. O servidor baixa e sobe o serviço em alguns minutos.",
-      "O servidor não conseguiu instalar ou remover o serviço de WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações.",
-      "O serviço de WhatsApp está instalado neste servidor. Conecte um número em Configurações.",
+      "O servidor não conseguiu instalar ou remover o serviço de WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações → WhatsApp.",
+      "O serviço de WhatsApp está instalado neste servidor. Conecte um número em Configurações → WhatsApp.",
     ]);
     // Enquanto o serviço não estava de pé nada foi perguntado ao WAHA; de pé, o painel só olha.
     expect(waha.requests.map((request) => request.method)).toEqual(["GET"]);

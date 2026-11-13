@@ -137,7 +137,7 @@ hora com o agente, um defeito. Ajuste os dois para o tamanho normal do seu atend
 folga.
 
 Esses dois limites valem por chamada. Para o gasto somado, a organização tem um limite de
-**ligações recebidas ao mesmo tempo**, em Configurações: de 1 a 50, e 5 de fábrica. Acima dele,
+**ligações recebidas ao mesmo tempo**, em Configurações → Ligações: de 1 a 50, e 5 de fábrica. Acima dele,
 quem liga recebe sinal de ocupado antes de qualquer gasto com IA, e a recusa aparece em Chamadas
 com o motivo. O pior caso de gasto simultâneo passa a ser o teto por chamada vezes esse limite.
 Chamadas pelo navegador têm um limite próprio, de 3 por organização, e as ligações feitas pelo

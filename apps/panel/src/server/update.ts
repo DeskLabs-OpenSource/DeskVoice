@@ -126,14 +126,14 @@ export function isAgent(request: Request, deps: ServerDeps): boolean {
   return timingSafeEqual(digest(given), digest(deps.agentToken));
 }
 
-const STARTED = "A atualização do DeskVoice começou. O sistema fica fora do ar por alguns minutos, e as chamadas em andamento caem. O resultado aparece em Configurações.";
+const STARTED = "A atualização do DeskVoice começou. O sistema fica fora do ar por alguns minutos, e as chamadas em andamento caem. O resultado aparece em Configurações → Sistema.";
 const FINISHED: Record<NonNullable<AgentReport["result"]>["outcome"] | "expired" | "superseded", (version: string) => string> = {
   succeeded: (version) => `A atualização do DeskVoice terminou: o sistema está na versão ${version}.`,
   nothing_to_do: () => "O pedido de atualização terminou sem mudança: o servidor já estava na versão publicada mais recente.",
-  rolled_back: () => "A atualização do DeskVoice não foi aplicada: o sistema segue na versão anterior e está respondendo. O motivo está em Configurações.",
-  failed: () => "A atualização do DeskVoice falhou e o sistema pode não ter voltado inteiro. Veja o que aconteceu em Configurações e confira o servidor.",
-  superseded: () => "O pedido de atualização do DeskVoice não foi executado: saiu uma versão mais nova depois que ele foi feito, e ninguém confirmou essa. Nada foi alterado. Veja as notas em Configurações e peça de novo.",
-  expired: () => "O pedido de atualização do DeskVoice venceu sem resultado. Veja em Configurações o que aconteceu; outro pedido já pode ser feito.",
+  rolled_back: () => "A atualização do DeskVoice não foi aplicada: o sistema segue na versão anterior e está respondendo. O motivo está em Configurações → Sistema.",
+  failed: () => "A atualização do DeskVoice falhou e o sistema pode não ter voltado inteiro. Veja o que aconteceu em Configurações → Sistema e confira o servidor.",
+  superseded: () => "O pedido de atualização do DeskVoice não foi executado: saiu uma versão mais nova depois que ele foi feito, e ninguém confirmou essa. Nada foi alterado. Veja as notas em Configurações → Sistema e peça de novo.",
+  expired: () => "O pedido de atualização do DeskVoice venceu sem resultado. Veja em Configurações → Sistema o que aconteceu; outro pedido já pode ser feito.",
 };
 
 interface Notice {
@@ -142,13 +142,13 @@ interface Notice {
 
 const SERVICE_NOTICE: Record<"whatsapp" | "whatsappCalls", Record<(typeof WHATSAPP_SERVICE_STATES)[number], string>> = {
   whatsapp: {
-    running: "O serviço de WhatsApp está instalado neste servidor. Conecte um número em Configurações.",
-    failed: "O servidor não conseguiu instalar ou remover o serviço de WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações.",
+    running: "O serviço de WhatsApp está instalado neste servidor. Conecte um número em Configurações → WhatsApp.",
+    failed: "O servidor não conseguiu instalar ou remover o serviço de WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações → WhatsApp.",
     absent: "O serviço de WhatsApp foi removido deste servidor.",
   },
   whatsappCalls: {
-    running: "O serviço de ligação pelo WhatsApp está instalado neste servidor. Conecte um número em Configurações.",
-    failed: "O servidor não conseguiu instalar ou remover o serviço de ligação pelo WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações.",
+    running: "O serviço de ligação pelo WhatsApp está instalado neste servidor. Conecte um número em Configurações → WhatsApp.",
+    failed: "O servidor não conseguiu instalar ou remover o serviço de ligação pelo WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações → WhatsApp.",
     absent: "O serviço de ligação pelo WhatsApp foi removido deste servidor.",
   },
 };
