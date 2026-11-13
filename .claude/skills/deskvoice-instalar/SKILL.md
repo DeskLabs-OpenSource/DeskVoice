@@ -96,7 +96,8 @@ hostname -I                                  # IPs da interface
   Asterisk para anunciar o endereço público; anote os dois, porque é a primeira coisa a conferir
   se a ligação ficar muda.
 - **As portas UDP são publicadas pelo Docker, e o Docker passa por fora do `ufw`**: quem abre ou
-  fecha é o firewall do painel da hospedagem. `ufw allow` não abre nada e `ufw deny` não fecha nada
+  fecha é o firewall do painel da hospedagem, ou, se ela não tiver um, uma regra na cadeia
+  `DOCKER-USER` da VPS. `ufw allow` não abre nada e `ufw deny` não fecha nada
   ([medido](../../../docs/fundacao/ufw-e-docker.md)). Liberar só TCP é o erro clássico.
 - Tronco **por IP**: a operadora precisa cadastrar o IP público da VPS do lado dela.
 
@@ -175,7 +176,7 @@ outras portas e não está chegando. Nesta ordem:
 
 1. **A faixa UDP de RTP está liberada no firewall do painel da hospedagem?** O `ufw` não filtra
    porta publicada pelo Docker, então `ufw status` não responde a esta pergunta — quem responde é o
-   painel do provedor. É a causa em nove de cada dez casos.
+   painel do provedor, ou uma regra na cadeia `DOCKER-USER`, se alguém a criou na VPS. É a causa em nove de cada dez casos.
 2. **O Asterisk anuncia o IP público?** Compare `curl -4 -s https://ifconfig.me` com o que a
    checagem de saúde mostra. Se a VPS está atrás de NAT e o Asterisk anuncia o IP interno, a
    operadora manda o áudio para um endereço que não existe na internet. Rode

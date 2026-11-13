@@ -98,6 +98,7 @@ out="$(install)"; equal "ufw ativo, sem a opção e sem terminal: instala" 0 "$?
 equal "ufw ativo, sem a opção: não aplica nada" 0 "$(calls '^ufw allow')"
 contains "ufw ativo, sem a opção: diz que não aplicou" "$out" "Regras NÃO aplicadas"
 lacks "ufw ativo, sem a opção: não promete ligação muda" "$out" "pode ficar muda"
+contains "ufw ativo, sem a opção: aponta o DOCKER-USER além do provedor" "$out" "DOCKER-USER"
 rm "$FAKE_DIR/ufw_active"
 out="$(DESKVOICE_APPLY_UFW=yes install)"; equal "ufw inativo e yes: instala" 0 "$?"
 contains "ufw inativo e yes: diz que a opção não teve efeito" "$out" "DESKVOICE_APPLY_UFW=yes não teve efeito"

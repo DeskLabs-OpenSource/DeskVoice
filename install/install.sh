@@ -427,7 +427,7 @@ if have ufw && $SUDO ufw status 2>/dev/null | grep -q '^Status: active'; then
   elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ] || { [ "$ASSUME_YES" != 1 ] && confirm "Aplico essas regras agora?"; }; then
     for rule in $ufw_rules; do $SUDO ufw allow "$rule" >/dev/null || die "Não consegui aplicar a regra $rule no ufw." "Rode à mão: $SUDO ufw allow $rule"; done
     ok "Regras aplicadas no ufw (elas não mudam nada para as portas publicadas pelo Docker)"
-  else warn "Regras NÃO aplicadas — e, com o Docker publicando as portas, elas não fariam diferença: não é por falta delas que uma ligação fica muda. Quem filtra de fora é o firewall do provedor da VPS."; fi
+  else warn "Regras NÃO aplicadas — e, com o Docker publicando as portas, elas não fariam diferença: não é por falta delas que uma ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor da VPS, se ele tiver um, ou uma regra na cadeia DOCKER-USER desta máquina (ver docs/fundacao/ufw-e-docker.md)."; fi
 elif [ "${DESKVOICE_APPLY_UFW:-}" = yes ]; then
   info "DESKVOICE_APPLY_UFW=yes não teve efeito: o firewall ufw não está ativo nesta máquina, e não há regra a aplicar."
 fi
