@@ -3,6 +3,16 @@ import type { SettingsDictionary } from "../pt-BR/settings";
 const settings: SettingsDictionary = {
   title: "Configuración",
   lead: "Claves y conexiones que usan los agentes. Lo que es secreto queda cifrado en tu servidor y no vuelve a aparecer en pantalla.",
+  sectionsNav: "Secciones de Configuración",
+  sections: {
+    ai: "Inteligencia artificial",
+    calls: "Llamadas",
+    whatsapp: "WhatsApp",
+    integrations: "Integraciones",
+    privacy: "Privacidad",
+    system: "Sistema",
+    account: "Tu cuenta",
+  },
   enginesTitle: "Motores de voz",
   enginesLead: "El motor de voz es el modelo de IA que escucha y habla en la llamada. Cada proveedor pide su propia clave.",
   keyOf: "Clave de {engine}",
