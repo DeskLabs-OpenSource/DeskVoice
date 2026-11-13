@@ -12,7 +12,7 @@ import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus, useAction, useErrorText } from "../../../ui/errors";
 import { formatDateTime, formatDay } from "../../../ui/format";
-import { Badge, Button, Field, Notice, Panel, Select, Skeleton, TextInput } from "../../../ui/kit";
+import { Badge, Button, Field, Notice, Panel, Select, Skeleton, Switch, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import type { Engine, KeyCheck, KeyCheckResult, Setting } from "../../../ui/types";
 import { put } from "./setting-api";
@@ -125,6 +125,31 @@ function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: Settin
   );
 }
 
+/** Classificar o desfecho de cada ligação: desligado de fábrica, porque cada uma é uma chamada paga ao provedor. */
+function OutcomeSetting({ t }: { t: SettingsDictionary }) {
+  const canConfigure = useCanConfigure();
+  const setting = useApi<Setting<boolean>>("/settings/calls.outcome_enabled");
+  const save = useAction();
+  const enabled = setting.data?.value === true;
+  return (
+    <Panel title={t.outcomeTitle} description={t.outcomeLead}>
+      <div className="grid max-w-xl gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Switch
+            checked={enabled}
+            onChange={(next) => void save.run(() => put("calls.outcome_enabled", next || null)).then(setting.reload)}
+            label={t.outcomeSwitch}
+            disabled={!canConfigure || !setting.data || save.busy}
+          />
+          <ActionStatus action={save} />
+        </div>
+        <p>{t.outcomeCost}</p>
+        <Notice tone={enabled ? "warn" : "neutral"}>{t.outcomeData}</Notice>
+      </div>
+    </Panel>
+  );
+}
+
 export default function AiSettings() {
   const t = useDict(ptBR, en, es);
   const common = useDict(commonPtBR, commonEn, commonEs);
@@ -138,29 +163,32 @@ export default function AiSettings() {
   if (!engines.data) return <Skeleton lines={4} />;
 
   return (
-    <Panel title={t.enginesTitle} description={t.enginesLead}>
-      <ul className="grid">
-        {engines.data.map((engine) => (
-          <EngineKey key={engine.id} engine={engine} t={t} cancel={common.actions.cancel} onChanged={engines.reload} />
-        ))}
-      </ul>
-      <div className="mt-5 grid max-w-md gap-3 border-t border-line pt-5">
-        <Field label={t.defaultEngine} hint={t.defaultEngineHint}>
-          <Select
-            disabled={!canConfigure}
-            value={defaultEngine.data?.value ?? ""}
-            onChange={(event) => void saveDefault.run(() => put("engine.default", event.target.value || null)).then(defaultEngine.reload)}
-          >
-            <option value="" />
-            {engines.data.map((engine) => (
-              <option key={engine.id} value={engine.id}>
-                {engine.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <ActionStatus action={saveDefault} />
-      </div>
-    </Panel>
+    <>
+      <Panel title={t.enginesTitle} description={t.enginesLead}>
+        <ul className="grid">
+          {engines.data.map((engine) => (
+            <EngineKey key={engine.id} engine={engine} t={t} cancel={common.actions.cancel} onChanged={engines.reload} />
+          ))}
+        </ul>
+        <div className="mt-5 grid max-w-md gap-3 border-t border-line pt-5">
+          <Field label={t.defaultEngine} hint={t.defaultEngineHint}>
+            <Select
+              disabled={!canConfigure}
+              value={defaultEngine.data?.value ?? ""}
+              onChange={(event) => void saveDefault.run(() => put("engine.default", event.target.value || null)).then(defaultEngine.reload)}
+            >
+              <option value="" />
+              {engines.data.map((engine) => (
+                <option key={engine.id} value={engine.id}>
+                  {engine.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <ActionStatus action={saveDefault} />
+        </div>
+      </Panel>
+      <OutcomeSetting t={t} />
+    </>
   );
 }

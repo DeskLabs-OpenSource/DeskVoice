@@ -1,6 +1,7 @@
 import { encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createCall, createOrganization, depsFor, openTestDbs, t0, task } from "../../test/helpers";
+import { OUTCOME_SETTING } from "@deskvoice/voice-engine";
 import classifyCallOutcome from "./classify_call_outcome";
 
 const { app, owner } = openTestDbs();
@@ -25,8 +26,12 @@ const comAgente = async (label: string): Promise<{ org: string; callId: string }
   return { org, callId };
 };
 
+/** A chave do motor e o desfecho ligado: é como fica depois que o dono liga em Configurações. */
 const comChave = (org: string, motor = MOTOR): Promise<number> =>
-  withSystem(app, (q) => q.exec("insert into settings (organization_id, key, value) values ($1, $2, to_jsonb($3::text))", [org, `engine.${motor}.api_key`, encryptSecret("sk-de-teste", secretKey)]));
+  withSystem(app, async (q) => {
+    await q.exec("insert into settings (organization_id, key, value) values ($1, $2, 'true'::jsonb)", [org, OUTCOME_SETTING]);
+    return q.exec("insert into settings (organization_id, key, value) values ($1, $2, to_jsonb($3::text))", [org, `engine.${motor}.api_key`, encryptSecret("sk-de-teste", secretKey)]);
+  });
 
 const fala = (org: string, callId: string, texto: string): Promise<void> =>
   withOrg(app, org, (q) => recordEvent(q, callId, "transcript_user", { text: texto }, t0));
@@ -75,8 +80,21 @@ describe("classify_call_outcome", () => {
     expect(desfecho?.outcome_evidence).toContain("obrigado");
   });
 
+  it("desligado (de fábrica) não chama o provedor, mesmo com chave", async () => {
+    const { org, callId } = await comAgente("desfecho desligado");
+    await withSystem(app, (q) => q.exec("insert into settings (organization_id, key, value) values ($1, $2, to_jsonb($3::text))", [org, `engine.${MOTOR}.api_key`, encryptSecret("sk-de-teste", secretKey)]));
+    await fala(org, callId, "Pode marcar quinta às dez.");
+    const fetch = openai({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez." });
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await desfechoDe(callId))?.outcome).toBeNull();
+  });
+
   it("sem chave salva não chama o provedor e não grava nada", async () => {
     const { org, callId } = await comAgente("desfecho sem chave");
+    await withSystem(app, (q) => q.exec("insert into settings (organization_id, key, value) values ($1, $2, 'true'::jsonb)", [org, OUTCOME_SETTING]));
     await fala(org, callId, "Queria um orçamento.");
     const fetch = openai({ outcome: "info_only", confidence: 0.9, evidence: "Queria um orçamento." });
 

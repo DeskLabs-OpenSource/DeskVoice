@@ -1,6 +1,6 @@
 import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
-import type { VoiceEngine } from "@deskvoice/voice-engine";
+import { OUTCOME_SETTING, type VoiceEngine } from "@deskvoice/voice-engine";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -111,6 +111,9 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     // do operador, não do modelo de IA.
     "approvals.default_on_timeout": plain(z.enum(["denied", "approved"])),
     "recording_notice.text": plain(z.string().trim().min(1).max(500)),
+    // Classificar o desfecho de cada ligação com o motor do agente. Ausente vale desligado: é uma
+    // chamada paga ao provedor por ligação, e o dono decide.
+    [OUTCOME_SETTING]: { ...plain(z.boolean()), fallback: false },
     "network.public_ip": plain(z.ipv4()),
     // Ligações recebidas pela operadora ao mesmo tempo. Ausente vale o teto de fábrica.
     [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },

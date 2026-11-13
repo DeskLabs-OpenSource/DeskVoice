@@ -1,5 +1,5 @@
 import { decryptSecret, withOrg } from "@deskvoice/core";
-import { loadEngines, settleOutcome, type CallOutcome, type OutcomeGuess } from "@deskvoice/voice-engine";
+import { OUTCOME_SETTING, loadEngines, outcomeEnabledOf, settleOutcome, type CallOutcome, type OutcomeGuess } from "@deskvoice/voice-engine";
 import type { Routine } from "../types";
 
 /** Mesmo nome que o painel usa: a chave do motor, cifrada. */
@@ -37,6 +37,9 @@ const routine: Routine = {
     const callId = task.callId;
 
     const pendente = await withOrg(deps.db, task.organizationId, async (q): Promise<Pendente | null> => {
+      // Desligado de fábrica. A tarefa pode ter entrado na fila antes de alguém desligar: confere de novo.
+      const ligado = await q.one<{ value: unknown }>("select value from settings where key = $1", [OUTCOME_SETTING]);
+      if (!outcomeEnabledOf(ligado?.value)) return null;
       const call = await q.one<{ agent_id: string | null; outcome: CallOutcome | null }>("select agent_id, outcome from calls where id = $1", [callId]);
       if (!call) throw new Error(`Call ${callId} not found in this organization`);
       // Já classificado: chamar o provedor de novo custaria dinheiro para escrever o mesmo.

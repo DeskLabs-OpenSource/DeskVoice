@@ -1,4 +1,5 @@
 import { enqueueTask, withOrg, type CallStatus } from "@deskvoice/core";
+import { OUTCOME_SETTING, outcomeEnabledOf } from "@deskvoice/voice-engine";
 import type { Routine } from "../types";
 
 export interface CallDigest {
@@ -64,8 +65,9 @@ const routine: Routine = {
       const summary = extractiveSummary({ status: call.status, endReason: call.end_reason, turns, toolsUsed });
       await q.exec("update calls set summary = $2 where id = $1", [callId, summary]);
       // O desfecho comercial é do motor do agente: vai para a fila em separado, para o resumo não
-      // depender de provedor nenhum para ficar pronto.
-      await enqueueTask(q, { kind: "classify_call_outcome", payload: {}, callId });
+      // depender de provedor nenhum para ficar pronto. Desligado (de fábrica), nem entra na fila.
+      const outcome = await q.one<{ value: unknown }>("select value from settings where key = $1", [OUTCOME_SETTING]);
+      if (outcomeEnabledOf(outcome?.value)) await enqueueTask(q, { kind: "classify_call_outcome", payload: {}, callId });
     });
   },
 };

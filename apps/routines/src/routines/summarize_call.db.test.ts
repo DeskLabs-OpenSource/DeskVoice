@@ -1,6 +1,7 @@
 import { recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createCall, createOrganization, depsFor, openTestDbs, t0, task } from "../../test/helpers";
+import { OUTCOME_SETTING } from "@deskvoice/voice-engine";
+import { createCall, createOrganization, depsFor, openTestDbs, putSetting, t0, task, tasksOf } from "../../test/helpers";
 import summarizeCall, { extractiveSummary } from "./summarize_call";
 
 const { app, owner } = openTestDbs();
@@ -53,6 +54,19 @@ describe("summarize_call", () => {
     const first = await summaryOf(callId);
     await summarizeCall.run(task(org, "summarize_call", {}, callId), depsFor(app));
     expect(await summaryOf(callId)).toBe(first);
+  });
+
+  it("só deixa o desfecho na fila quando o dono ligou a classificação", async () => {
+    const desligada = await createOrganization(app, "summarize outcome off");
+    const ligada = await createOrganization(app, "summarize outcome on");
+    await putSetting(app, ligada, OUTCOME_SETTING, true, false);
+    for (const organization of [desligada, ligada]) {
+      const callId = await createCall(app, organization, t0);
+      await summarizeCall.run(task(organization, "summarize_call", {}, callId), depsFor(app));
+    }
+
+    expect((await tasksOf(app, desligada)).map((queued) => queued.kind)).toEqual([]);
+    expect((await tasksOf(app, ligada)).map((queued) => queued.kind)).toEqual(["classify_call_outcome"]);
   });
 
   it("falha com mensagem clara sem chamada ou com chamada de outra organização", async () => {
