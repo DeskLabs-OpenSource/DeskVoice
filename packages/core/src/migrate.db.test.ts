@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -101,5 +101,27 @@ describe("runMigrations", () => {
     expect(first).toContain("20261110T230000_foundation.sql");
     expect(await runMigrations(db, REAL_MIGRATIONS)).toEqual([]);
     expect(await applied()).toEqual(first);
+  });
+
+  it("o número conectado gravado sem o nono dígito ganha o dígito, e o resto fica como estava", async () => {
+    const NINTH = "20261113T190000_whatsapp_nono_digito_gravado.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name !== NINTH) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    // Uma sessão de cada tipo por organização: três organizações para os três casos.
+    const orgs = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A'), ('B'), ('C') returning id")).rows.map((row) => row.id);
+    await db.pool.query("insert into whatsapp_sessions (organization_id, session_name, phone_e164) values ($1, 'qr', '+553188887777')", [orgs[0]]);
+    await db.pool.query(
+      "insert into whatsapp_call_sessions (organization_id, session_name, phone_e164) values ($1, 'calls-old', '+551176543210'), ($2, 'calls-fixed', '+553132221111'), ($3, 'calls-new', '+5531988887777')",
+      orgs,
+    );
+    await copyFile(path.join(REAL_MIGRATIONS, NINTH), path.join(dir, NINTH));
+    expect(await runMigrations(db, dir)).toEqual([NINTH]);
+    const phones = async (table: string) => (await db.pool.query<{ session_name: string; phone_e164: string }>(`select session_name, phone_e164 from ${table} order by session_name`)).rows;
+    expect(await phones("whatsapp_sessions")).toEqual([{ session_name: "qr", phone_e164: "+5531988887777" }]);
+    expect(await phones("whatsapp_call_sessions")).toEqual([
+      { session_name: "calls-fixed", phone_e164: "+553132221111" },
+      { session_name: "calls-new", phone_e164: "+5531988887777" },
+      { session_name: "calls-old", phone_e164: "+5511976543210" },
+    ]);
   });
 });
