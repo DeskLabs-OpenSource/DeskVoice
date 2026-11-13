@@ -35,6 +35,7 @@ export const CALL_EVENT_KINDS = [
   "approval_requested",
   "approval_decided",
   "human_notified",
+  "dtmf_sent",
   "transfer_started",
   "transfer_completed",
   "engine_failed",

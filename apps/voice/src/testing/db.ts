@@ -186,6 +186,7 @@ export function fakeAri(): FakeAri {
     hangup: (channelId, reason) => record(`hangup ${channelId}${reason ? ` ${reason}` : ""}`),
     setVariable: (channelId, name, value) => record(`set ${channelId} ${name}=${value}`),
     continueDialplan: (channelId, context, extension) => record(`continue ${channelId} ${context},${extension}`),
+    sendDtmf: (channelId, digits) => record(`dtmf ${channelId} ${digits}`),
     async originate(params) {
       await record(`originate ${params.endpoint}`);
       ari.originated.push(params);

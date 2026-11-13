@@ -9,6 +9,8 @@ export interface ToolContext {
   clock: Clock;
   telephony: {
     transfer(toE164: string): Promise<void>;
+    /** Aperta teclas no menu do outro lado. A chamada simulada não declara: lá não há para onde mandar tom. */
+    sendDtmf?(digits: string): Promise<void>;
     /** Com `farewell`, o agente fala a despedida e só então a ligação cai. */
     hangup(farewell?: string): Promise<void>;
   };
