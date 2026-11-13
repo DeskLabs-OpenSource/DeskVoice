@@ -104,7 +104,7 @@ Respostas para o modo `--yes` (variável de ambiente ou linha `CHAVE=valor` do a
 | `DESKVOICE_ORG_NAME` | Nome da empresa |
 | `DESKVOICE_OWNER_NAME`, `DESKVOICE_OWNER_EMAIL`, `DESKVOICE_OWNER_PASSWORD` | O primeiro usuário (dono). Senha com 10 caracteres ou mais |
 | `DESKVOICE_PUBLIC_IP` | Só se a descoberta automática do IP falhar |
-| `DESKVOICE_APPLY_UFW=yes` | Aplica as regras no firewall `ufw` sem perguntar. Só aceita `yes`: outro valor para com erro. Com o `ufw` inativo, não tem efeito, e o instalador diz |
+| `DESKVOICE_APPLY_UFW=yes` | Aplica as regras no firewall `ufw` sem perguntar. Só aceita `yes`: outro valor para com erro. Com o `ufw` inativo, não tem efeito, e o instalador diz. As portas de telefonia são publicadas pelo Docker, que passa por fora do `ufw`: estas regras só valem onde quem escuta é o host, e não é por falta delas que a ligação fica muda. Ver [O ufw não filtra as portas que o Docker publica](../docs/fundacao/ufw-e-docker.md) |
 | `DESKVOICE_RTP_START`, `DESKVOICE_RTP_END` | Outra faixa de portas de áudio (padrão 10000 a 10200) |
 | `DESKVOICE_VERSION` | Uma versão publicada específica (exemplo: `0.3.0`), em vez da mais recente. Junto de `--build`, que constrói o código desta pasta, para com erro |
 | `DESKVOICE_ADOPT=yes` (ou `--adopt`) | Esta pasta adota a instalação desta máquina, feita a partir de uma pasta que não existe mais. Ver abaixo, em "Pasta movida" |
@@ -332,7 +332,9 @@ passar.
    conserto está escrito nela.
 2. No painel do provedor da VPS (firewall, security group), libere a entrada de `5060/udp` e
    de `10000-10200/udp`. O instalador confere a máquina, mas não tem como abrir nem enxergar o
-   firewall do provedor.
+   firewall do provedor. **É aqui que se fecha ou abre a porta**, e não no `ufw` da máquina: essas
+   portas são publicadas pelo Docker, que passa por fora do `ufw` — `ufw allow` não abre nada e
+   `ufw deny` não fecha nada ([medido](../docs/fundacao/ufw-e-docker.md)).
 3. Se o IP público da VPS mudou, rode `bash install/install.sh` de novo. Ele regrava o IP que
    o Asterisk anuncia para a operadora.
 4. Refaça a ligação e acompanhe na tela Chamadas. Só a ligação prova que o áudio passa.
