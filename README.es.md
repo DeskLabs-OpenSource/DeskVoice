@@ -274,7 +274,10 @@ Cuando lo pides, la instalación también habla con el exterior:
 
 En el uso, DeskVoice habla con lo que configuraste: el proveedor de IA de voz (Google u OpenAI)
 durante las llamadas, con tu clave; la operadora del troncal SIP; WhatsApp, por WAHA, si lo
-conectaste; y las direcciones de las herramientas y webhooks que registraste.
+conectaste; y las direcciones de las herramientas y webhooks que registraste. Con el desenlace de
+la llamada encendido (Configuración → Inteligencia artificial, apagado de fábrica), el proceso de
+rutinas también envía la transcripción en texto al mismo proveedor, después de la llamada, por su
+API de texto (`/chat/completions` en OpenAI, `:generateContent` en Google).
 
 ## Contribuir
 
