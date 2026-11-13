@@ -58,6 +58,7 @@ export async function createFixture(
       hangup: async () => {
         ctx.hangups += 1;
       },
+      pauseRecording: async () => "not_recording",
     },
     say: (text) => {
       ctx.said.push(text);

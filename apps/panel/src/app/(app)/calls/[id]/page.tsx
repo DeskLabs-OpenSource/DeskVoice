@@ -117,7 +117,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
           title={t.stopRecordingTitle}
           why={t.stopRecordingWhy}
           send={t.stopRecordingSend}
-          done={t.stopRecordingDone}
+          results={{ stopped: t.stopRecordingStopped, already_stopped: t.stopRecordingAlready, not_recording: t.stopRecordingNotRecording }}
           hint={t.stopRecordingHint}
         />
       ) : (
@@ -141,47 +141,50 @@ function Recording({ id, title, missing }: { id: string; title: string; missing:
   );
 }
 
+type RecordingStop = "stopped" | "already_stopped" | "not_recording";
+
 /**
- * Durante a chamada, quem atende pode pedir para parar a gravação — porque a pessoa na linha pediu.
- * O pedido vai para a chamada, que aplica; o trecho do pedido fica gravado, como prova.
+ * Durante a chamada, quem atende pode pedir para parar a gravação, porque a pessoa na linha pediu.
+ * O processo de voz responde o que de fato aconteceu, e a tela diz isso: parou, já tinha parado, ou
+ * a chamada não estava sendo gravada. O trecho do pedido fica gravado, como prova.
  */
-function StopRecording({ id, title, why, send, done, hint }: { id: string; title: string; why: string; send: string; done: string; hint: string }) {
+function StopRecording({ id, title, why, send, results, hint }: { id: string; title: string; why: string; send: string; results: Record<RecordingStop, string>; hint: string }) {
   const errorText = useErrorText();
   const [reason, setReason] = useState("");
-  const [estado, setEstado] = useState<"livre" | "enviando" | "feito">("livre");
-  const [erro, setErro] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [outcome, setOutcome] = useState<RecordingStop | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const pedir = (): void => {
-    setEstado("enviando");
-    setErro(null);
-    void api(`/calls/${id}/recording/pause`, { method: "POST", body: { reason: reason.trim() || null } })
-      .then(() => setEstado("feito"))
-      .catch((error: unknown) => {
-        setEstado("livre");
-        setErro(errorText(error));
-      });
+  const request = (): void => {
+    setSending(true);
+    setError(null);
+    void api<{ recording: RecordingStop }>(`/calls/${id}/recording/pause`, { method: "POST", body: { reason: reason.trim() || null } })
+      .then((answer) => setOutcome(answer.recording))
+      .catch((failure: unknown) => setError(errorText(failure)))
+      .finally(() => setSending(false));
   };
 
   return (
     <section className="grid max-w-[72ch] gap-1.5">
       <h2 className="text-[0.8rem] font-bold text-muted">{title}</h2>
-      {estado === "feito" ? (
-        <Notice tone="ok">{done}</Notice>
+      {outcome ? (
+        <Notice tone={outcome === "stopped" ? "ok" : "neutral"}>{results[outcome]}</Notice>
       ) : (
         <div className="flex flex-wrap items-end gap-2">
           <TextInput
             value={reason}
             onChange={(event) => setReason(event.target.value)}
+            maxLength={300}
             placeholder={why}
             aria-label={why}
             className="min-w-[16rem] flex-1"
           />
-          <Button variant="secondary" busy={estado === "enviando"} onClick={pedir}>
+          <Button variant="secondary" busy={sending} onClick={request}>
             {send}
           </Button>
         </div>
       )}
-      {erro ? <Notice tone="fail">{erro}</Notice> : null}
+      {error ? <Notice tone="fail">{error}</Notice> : null}
       <p className="text-[0.85rem] text-muted">{hint}</p>
     </section>
   );

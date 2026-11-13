@@ -568,51 +568,57 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
   });
 });
 
+describe("gravação a pedido de quem ligou", { timeout: 120_000 }, () => {
+  const PEDIDO = "Por favor, não quero que essa conversa fique gravada.";
+  const USER = "0c000000-0000-4000-8000-000000000003";
 
-describe("gravação a pedido de quem ligou (registro 0017)", { timeout: 120_000 }, () => {
-  /** Chamada gravada, com a gravação já aberta, pronta para o pedido chegar. */
-  async function gravando(label: string, extra: Record<string, unknown> = {}) {
+  /** Chamada com a gravação ligada ou não, pronta para o pedido chegar. */
+  async function chamada(label: string, recording: boolean) {
     const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
     const manual = manualEngine({ keyless: true });
     const made = await scene(label, { engine: "manual", greeting: "Bom dia.", tools: ["stop_recording"] }, manual);
-    await putSetting(app, made.organizationId, "calls.recording_enabled", true, false);
+    if (recording) await putSetting(app, made.organizationId, "calls.recording_enabled", true, false);
     const session = startCallSession(
-      { ...made.harness.deps, recordingsDir: dir, ...extra },
+      { ...made.harness.deps, recordingsDir: dir },
       { organizationId: made.organizationId, callId: made.callId, agentId: made.agentId, transport: made.transport },
     );
     await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_notice"), "the notice event");
     return { dir, manual, made, session, file: recordingPath(dir, made.organizationId, made.callId) };
   }
 
-  /** `callOf` traz colunas fixas; as da pausa ficam de fora, então vão por consulta direta. */
-  async function pausaDaChamada(callId: string) {
+  /** `callOf` traz colunas fixas; as da parada ficam de fora, então vão por consulta direta. */
+  async function paradaDaChamada(callId: string) {
     return withSystem(app, (q) =>
-      q.one<{ recording_paused_by: string | null; recording_pause_reason: string | null; recording_paused_at: Date | null; recording_pause_requested_at: Date | null }>(
-        "select recording_paused_by, recording_pause_reason, recording_paused_at, recording_pause_requested_at from calls where id = $1",
+      q.one<{ recording_paused_by: string | null; recording_pause_reason: string | null; recording_paused_at: Date | null }>(
+        "select recording_paused_by, recording_pause_reason, recording_paused_at from calls where id = $1",
         [callId],
       ),
     );
   }
 
-  it("o agente para quando a pessoa pede, e a frase do pedido fica no arquivo", async () => {
-    const { dir, manual, made, session, file } = await gravando("recording-agent-stop");
-    const PEDIDO = "Por favor, não quero que essa conversa fique gravada.";
+  it("o agente para quando a pessoa pede, e a frase do pedido fica no arquivo e não nos argumentos da ferramenta", async () => {
+    const { dir, manual, made, session, file } = await chamada("recording-agent-stop", true);
 
     made.transport.callerAudio(200); // a fala em que a pessoa pediu
     await new Promise((resolve) => setTimeout(resolve, 120)); // deixa o quadro chegar ao gravador
     manual.emit("toolCall", { id: "t1", name: "stop_recording", args: { reason: PEDIDO } });
 
-    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_paused"), "o evento da parada");
-    expect(manual.toolResults.at(-1)?.result).toMatchObject({ ok: true });
-    expect(await pausaDaChamada(made.callId)).toMatchObject({ recording_paused_by: "agent", recording_pause_reason: PEDIDO });
-    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "recording_paused")?.payload).toEqual({
-      by: "agent",
-      reason: PEDIDO,
-    });
+    await waitFor(async () => manual.toolResults.length > 0, "o resultado da ferramenta");
+    expect(manual.toolResults.at(-1)?.result).toMatchObject({ ok: true, data: { recording: "stopped" } });
+    expect(await paradaDaChamada(made.callId)).toMatchObject({ recording_paused_by: "agent", recording_pause_reason: PEDIDO, recording_paused_at: expect.any(Date) });
+    const events = await eventsOf(app, made.callId);
+    expect(events.find((event) => event.kind === "recording_paused")?.payload).toEqual({ by: "agent", reason: PEDIDO });
+    expect(events.find((event) => event.kind === "tool_called")?.payload).toEqual({ name: "stop_recording", args: { omitted: "personal_text" } });
+
+    // Um segundo pedido não registra de novo: a gravação já parou.
+    manual.emit("toolCall", { id: "t2", name: "stop_recording", args: { reason: PEDIDO } });
+    await waitFor(async () => manual.toolResults.length > 1, "o segundo resultado");
+    expect(manual.toolResults.at(-1)?.result).toMatchObject({ ok: true, data: { recording: "already_stopped" } });
 
     made.transport.callerAudio(100); // dito DEPOIS do pedido: não pode entrar no arquivo
     made.transport.callerHangup();
     await session.done;
+    expect((await kindsOf(app, made.callId)).filter((kind) => kind === "recording_paused")).toHaveLength(1);
 
     // 8 kHz, 16 bits, dois canais: 32 bytes por milissegundo de áudio.
     const wav = await readFile(file);
@@ -622,44 +628,45 @@ describe("gravação a pedido de quem ligou (registro 0017)", { timeout: 120_000
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("o pedido feito no painel também para a gravação, sem ninguém do outro lado pedir de novo", async () => {
-    const { dir, made, session, file } = await gravando("recording-human-stop", {
-      recordingPauseRequest: async () => ({ reason: "A pessoa pediu, o painel registrou" }),
-    });
+  it("sem gravação, o agente ouve que a chamada não está sendo gravada, e nada é registrado como parada", async () => {
+    const { dir, manual, made, session } = await chamada("recording-agent-off", false);
 
-    expect((await pausaDaChamada(made.callId))?.recording_paused_by).toBeNull();
-    made.transport.callerAudio(200); // a fala em que a pessoa pediu para não ser gravada
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    made.harness.timers.fire(2_000); // a sessão olha o pedido a cada 2 s
+    manual.emit("toolCall", { id: "t1", name: "stop_recording", args: { reason: PEDIDO } });
+    await waitFor(async () => manual.toolResults.length > 0, "o resultado da ferramenta");
 
-    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_paused"), "o evento da parada");
-    expect(await pausaDaChamada(made.callId)).toMatchObject({
-      recording_paused_by: "human",
-      recording_pause_reason: "A pessoa pediu, o painel registrou",
-      recording_pause_requested_at: null,
-    });
-
+    const result = manual.toolResults.at(-1)?.result as { ok: boolean; message: string; data: unknown };
+    expect(result).toMatchObject({ ok: true, data: { recording: "not_recording" } });
+    expect(result.message).toContain("não está sendo gravada");
+    expect(result.message).not.toContain("ficou registrado");
     made.transport.callerHangup();
     await session.done;
-    expect((await readFile(file)).length).toBeGreaterThan(44);
+    expect(await kindsOf(app, made.callId)).not.toContain("recording_paused");
+    expect(await paradaDaChamada(made.callId)).toEqual({ recording_paused_by: null, recording_pause_reason: null, recording_paused_at: null });
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("sem gravação ligada, o pedido do painel não inventa pausa", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
-    const manual = manualEngine({ keyless: true });
-    const made = await scene("recording-human-off", { engine: "manual", greeting: "Bom dia." }, manual);
-    const session = startCallSession(
-      { ...made.harness.deps, recordingsDir: dir, recordingPauseRequest: async () => ({ reason: "sem gravação" }) },
-      { organizationId: made.organizationId, callId: made.callId, agentId: made.agentId, transport: made.transport },
-    );
-    await waitFor(async () => (await kindsOf(app, made.callId)).includes("recording_notice"), "the notice event");
-    made.harness.timers.fire(2_000);
-    made.transport.callerHangup();
-    await session.done;
+  it("o pedido do painel para a gravação e registra quem pediu; sem gravação, diz que não havia o que parar", async () => {
+    const recorded = await chamada("recording-human-stop", true);
+    recorded.made.transport.callerAudio(200);
+    await new Promise((resolve) => setTimeout(resolve, 120));
 
-    expect((await kindsOf(app, made.callId)).includes("recording_paused")).toBe(false);
-    expect((await pausaDaChamada(made.callId))?.recording_paused_at).toBeNull();
-    await rm(dir, { recursive: true, force: true });
+    expect(await recorded.session.stopRecording(USER, null)).toBe("stopped");
+    expect(await paradaDaChamada(recorded.made.callId)).toMatchObject({ recording_paused_by: "human", recording_pause_reason: null });
+    expect((await eventsOf(app, recorded.made.callId)).find((event) => event.kind === "recording_paused")?.payload).toEqual({ by: "human", userId: USER });
+    expect(await recorded.session.stopRecording(USER, "de novo")).toBe("already_stopped");
+    recorded.made.transport.callerHangup();
+    await recorded.session.done;
+    expect((await readFile(recorded.file)).length).toBeGreaterThan(44);
+    // Chamada encerrada: não há mais o que pedir a ela.
+    expect(await recorded.session.stopRecording(USER, null)).toBe("call_ended");
+    await rm(recorded.dir, { recursive: true, force: true });
+
+    const silent = await chamada("recording-human-off", false);
+    expect(await silent.session.stopRecording(USER, "sem gravação")).toBe("not_recording");
+    silent.made.transport.callerHangup();
+    await silent.session.done;
+    expect(await kindsOf(app, silent.made.callId)).not.toContain("recording_paused");
+    expect(await paradaDaChamada(silent.made.callId)).toEqual({ recording_paused_by: null, recording_pause_reason: null, recording_paused_at: null });
+    await rm(silent.dir, { recursive: true, force: true });
   });
 });

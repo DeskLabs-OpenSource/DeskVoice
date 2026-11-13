@@ -1,14 +1,11 @@
 import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
-import { autoCommitOrgQuery, runTool, toSpec, toolCalledArgs, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
+import { autoCommitOrgQuery, runTool, toSpec, toolCalledArgs, type RecordingStop, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
 import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
-
-/** De quanto em quanto tempo a sessão olha se o painel pediu para parar a gravação. */
-const RECORDING_PAUSE_POLL_MS = 2000;
 
 export interface CallSessionDeps {
   db: Db;
@@ -24,11 +21,6 @@ export interface CallSessionDeps {
   recordingsDir?: string;
   /** Espaço livre mínimo na pasta para gravar (padrão `MIN_FREE_BYTES_TO_RECORD`). */
   recordingMinFreeBytes?: number;
-  /**
-   * Pedido de parada feito no painel durante a chamada. A chamada é deste processo, e o painel só
-   * sabe escrever no banco: por isso a consulta periódica. Sem esta função, o painel não pausa nada.
-   */
-  recordingPauseRequest?: (callId: string) => Promise<{ reason: string | null } | null>;
 }
 
 export interface CallSessionInput {
@@ -49,10 +41,17 @@ export interface CallOutcome {
 }
 
 export interface CallSession {
+  organizationId: string;
+  callId: string;
   /** Resolve quando a chamada terminou e tudo foi gravado. Nunca rejeita. */
   done: Promise<CallOutcome>;
   /** Encerra de fora (o processo está saindo). */
   stop(reason: string): void;
+  /**
+   * Para a gravação a pedido feito no painel, por `userId`. `call_ended`: a chamada já está
+   * encerrando, e não há mais o que pedir a ela.
+   */
+  stopRecording(userId: string, reason: string | null): Promise<RecordingStop | "call_ended">;
 }
 
 interface Ending {
@@ -235,15 +234,17 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * o disco antes de parar: é a prova de que a revogação existiu e de quando ela começou. Do pedido
    * em diante nada mais é gravado, e não há retomada.
    */
-  async function pauseRecording(by: "agent" | "human", reason: string): Promise<void> {
-    if (!recorder || recordingPaused) return;
+  async function pauseRecording(who: { by: "agent" } | { by: "human"; userId: string }, reason: string | null): Promise<RecordingStop | "call_ended"> {
+    if (ending) return "call_ended";
+    if (recordingPaused) return "already_stopped";
+    // Sem arquivo aberto (gravação desligada, sem espaço) ou com a gravação já interrompida por
+    // falha, não há o que parar: nada é registrado, e quem pediu ouve a verdade.
+    if (!recorder || recordingFailed) return "not_recording";
     recordingPaused = true;
     await recorder.pause().catch(logFailure("could not stop the call recording"));
-    await q.exec(
-      "update calls set recording_paused_at = $2, recording_paused_by = $3, recording_pause_reason = $4, recording_pause_requested_at = null where id = $1",
-      [callId, clock.now(), by, reason],
-    );
-    await event("recording_paused", { by, reason });
+    await q.exec("update calls set recording_paused_at = $2, recording_paused_by = $3, recording_pause_reason = $4 where id = $1", [callId, clock.now(), who.by, reason]);
+    await event("recording_paused", { ...who, ...(reason !== null && { reason }) });
+    return "stopped";
   }
 
   /** O agente se despede e a chamada termina logo depois. */
@@ -309,8 +310,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // Sem `sendDtmf` no transporte (a ligação pelo WhatsApp), a ferramenta recusa em vez de fingir.
       ...(transport.sendDtmf && { sendDtmf: transport.sendDtmf.bind(transport) }),
       // O pedido de quem ligou vem do agente; a gravação para aqui, com o pedido já no arquivo.
+      // Ferramenta só roda com a chamada no ar; se ela já encerra, não há gravação a parar.
       async pauseRecording(reason) {
-        await pauseRecording("agent", reason);
+        const result = await pauseRecording({ by: "agent" }, reason);
+        return result === "call_ended" ? "not_recording" : result;
       },
     },
     say(text) {
@@ -374,19 +377,6 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const recording = deps.recordingsDir ? await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALL_RECORDING_SETTING]) : null;
     // O arquivo abre antes do motor: depois que ele conecta, nada pode esperar (ver abaixo).
     if (deps.recordingsDir && callRecordingOf(recording?.value)) await openRecording(deps.recordingsDir);
-    // O pedido feito no painel não tem outro caminho até aqui. Um pedido por chamada basta, então a
-    // consulta é espaçada — e para de rodar quando a chamada termina.
-    const pedidoDoPainel = deps.recordingPauseRequest;
-    if (pedidoDoPainel) {
-      const olharPedido = (): void => {
-        if (ending) return;
-        void pedidoDoPainel(callId)
-          .then((pedido) => (pedido ? pauseRecording("human", pedido.reason ?? "pedido feito no painel") : undefined))
-          .catch(logFailure("could not read the recording pause request"));
-        cancelTimers.push(schedule(olharPedido, RECORDING_PAUSE_POLL_MS));
-      };
-      cancelTimers.push(schedule(olharPedido, RECORDING_PAUSE_POLL_MS));
-    }
 
     const enabled = new Map<string, Tool>();
     for (const name of overrides?.tools ?? agent.tools) {
@@ -523,5 +513,25 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     return finish({ status: "failed", endReason: "internal_error", tone: true });
   });
 
-  return { done, stop: (reason) => void finish({ status: "completed", endReason: reason }) };
+  return {
+    organizationId,
+    callId,
+    done,
+    stop: (reason) => void finish({ status: "completed", endReason: reason }),
+    stopRecording: (userId, reason) => pauseRecording({ by: "human", userId }, reason),
+  };
+}
+
+/**
+ * Pedido do painel para parar a gravação de uma chamada em curso neste processo. A organização
+ * vem da sessão do painel e precisa ser a da chamada: um id de outra empresa é chamada que não existe.
+ */
+export async function stopRecordingOfLiveCall(
+  sessions: Iterable<CallSession>,
+  input: { organizationId: string; callId: string; userId: string; reason: string | null },
+): Promise<{ recording: RecordingStop } | { code: string; message: string }> {
+  const session = [...sessions].find((live) => live.callId === input.callId && live.organizationId === input.organizationId);
+  const result = session ? await session.stopRecording(input.userId, input.reason) : "call_ended";
+  if (result === "call_ended") return { code: "call_not_live", message: "This call is not in progress in the voice process." };
+  return { recording: result };
 }

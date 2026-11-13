@@ -234,6 +234,19 @@ export function Timeline({
           ),
         };
       }
+      case "recording_paused":
+        return {
+          ...base,
+          tone: "neutral",
+          icon: RecordIcon,
+          body: (
+            <Card title={e.recording_paused}>
+              <p className="text-muted">{p.by === "human" ? e.recording_paused_human : e.recording_paused_agent}</p>
+              {text(p.reason) ? <p className="text-[0.87rem] text-muted">“{text(p.reason)}”</p> : null}
+              {p.reasonPurged === true ? <p className="text-[0.87rem] text-muted">{e.recording_paused_reason_purged}</p> : null}
+            </Card>
+          ),
+        };
       case "cost_ceiling_reached":
         return { ...base, tone: "fail", icon: Coins, body: <Card tone="fail" title={e.cost_ceiling_reached}><p className="text-muted">{e.cost_ceiling_body}</p></Card> };
       case "outcome_not_classified": {

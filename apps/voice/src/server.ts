@@ -5,7 +5,7 @@ import { createApprovalWaiter } from "./approvals";
 import type { AriClient, AriEvent } from "./ari";
 import { AsteriskCalls } from "./asterisk-transport";
 import { startAudioSocketServer } from "./audiosocket";
-import { startCallSession, type CallSession, type CallSessionDeps } from "./call-session";
+import { startCallSession, stopRecordingOfLiveCall, type CallSession, type CallSessionDeps } from "./call-session";
 import { handleInbound } from "./inbound";
 import { startInternalApi } from "./internal-api";
 import { messageOf, silentLogger, type Logger } from "./log";
@@ -155,6 +155,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
       applyTrunks: () => applyTrunks(trunksDeps),
       outbound: (input) => startOutboundCall({ db, ari, clock, calls, log }, input),
       web: (input) => webCalls.request(input),
+      stopRecording: (input) => stopRecordingOfLiveCall(sessions, input),
       whatsappCalls,
       async simulate(input) {
         const started = await startSimulatedCall(sessionDeps, input);
