@@ -15,6 +15,11 @@ export interface ToolContext {
     sendDtmf?(digits: string): Promise<void>;
     /** Com `farewell`, o agente fala a despedida e só então a ligação cai. */
     hangup(farewell?: string): Promise<void>;
+    /**
+     * Para de gravar a ligação, mantendo gravado tudo o que já foi dito. Opcional: a chamada
+     * simulada não declara, e a ferramenta se recusa em vez de fingir que parou.
+     */
+    pauseRecording?(reason: string): Promise<void>;
   };
   /** Faz o agente dizer algo enquanto a ferramenta trabalha ("um instante, estou conferindo"). */
   say(text: string): void;

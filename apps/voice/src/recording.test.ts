@@ -12,6 +12,25 @@ const channel = (wav: Buffer, side: 0 | 1): number[] => {
 };
 
 describe("gravação da chamada", () => {
+  it("pausar a pedido guarda o que já foi dito — o pedido — e não grava o depois", () => {
+    let t = 0;
+    const rec = createRecorder(() => t);
+    t = 20;
+    rec.caller(frame(100)); // a frase em que a pessoa pediu para não ser gravada
+    const guardado = rec.pause();
+    expect(guardado).toBeGreaterThan(0);
+    t = 60;
+    rec.caller(frame(300)); // depois do pedido: não entra no arquivo
+
+    const wav = rec.wav();
+    expect(wav).not.toBeNull();
+    const left = channel(wav!, 0);
+    expect(left).toContain(100);
+    expect(left).not.toContain(300);
+    // Pausar de novo não muda o que já está guardado.
+    expect(rec.pause()).toBe(guardado);
+  });
+
   it("WAV estéreo 8 kHz: quem ligou à esquerda, agente à direita, cada um no seu tempo", () => {
     let t = 0;
     const rec = createRecorder(() => t);

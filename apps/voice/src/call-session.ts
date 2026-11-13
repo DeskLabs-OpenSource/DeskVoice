@@ -7,6 +7,9 @@ import { panelNotice } from "./panel-notice";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
 
+/** De quanto em quanto tempo a sessão olha se o painel pediu para parar a gravação. */
+const RECORDING_PAUSE_POLL_MS = 2000;
+
 export interface CallSessionDeps {
   db: Db;
   clock: Clock;
@@ -21,6 +24,11 @@ export interface CallSessionDeps {
   recordingsDir?: string;
   /** Espaço livre mínimo na pasta para gravar (padrão `MIN_FREE_BYTES_TO_RECORD`). */
   recordingMinFreeBytes?: number;
+  /**
+   * Pedido de parada feito no painel durante a chamada. A chamada é deste processo, e o painel só
+   * sabe escrever no banco: por isso a consulta periódica. Sem esta função, o painel não pausa nada.
+   */
+  recordingPauseRequest?: (callId: string) => Promise<{ reason: string | null } | null>;
 }
 
 export interface CallSessionInput {
@@ -140,6 +148,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let lastEngineError: Error | undefined;
   let ending = false;
   let recorder: Recording | undefined;
+  /** A gravação já parou a pedido de quem ligou: não volta na mesma chamada. */
+  let recordingPaused = false;
   /** A gravação de `recording_failed`, para o fim da chamada esperar por ela. */
   let recordingFailed: Promise<void> | undefined;
   let wrappingUp = false;
@@ -220,6 +230,22 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     else recorder = opened;
   }
 
+  /**
+   * Para a gravação a pedido de quem ligou. O trecho já dito — inclusive a frase do pedido — vai para
+   * o disco antes de parar: é a prova de que a revogação existiu e de quando ela começou. Do pedido
+   * em diante nada mais é gravado, e não há retomada.
+   */
+  async function pauseRecording(by: "agent" | "human", reason: string): Promise<void> {
+    if (!recorder || recordingPaused) return;
+    recordingPaused = true;
+    await recorder.pause().catch(logFailure("could not stop the call recording"));
+    await q.exec(
+      "update calls set recording_paused_at = $2, recording_paused_by = $3, recording_pause_reason = $4, recording_pause_requested_at = null where id = $1",
+      [callId, clock.now(), by, reason],
+    );
+    await event("recording_paused", { by, reason });
+  }
+
   /** O agente se despede e a chamada termina logo depois. */
   function wrapUp(farewell: string | null, end: Ending): void {
     if (ending || wrappingUp) return;
@@ -282,6 +308,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       },
       // Sem `sendDtmf` no transporte (a ligação pelo WhatsApp), a ferramenta recusa em vez de fingir.
       ...(transport.sendDtmf && { sendDtmf: transport.sendDtmf.bind(transport) }),
+      // O pedido de quem ligou vem do agente; a gravação para aqui, com o pedido já no arquivo.
+      async pauseRecording(reason) {
+        await pauseRecording("agent", reason);
+      },
     },
     say(text) {
       if (!ending) voice?.say(text);
@@ -344,6 +374,19 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const recording = deps.recordingsDir ? await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALL_RECORDING_SETTING]) : null;
     // O arquivo abre antes do motor: depois que ele conecta, nada pode esperar (ver abaixo).
     if (deps.recordingsDir && callRecordingOf(recording?.value)) await openRecording(deps.recordingsDir);
+    // O pedido feito no painel não tem outro caminho até aqui. Um pedido por chamada basta, então a
+    // consulta é espaçada — e para de rodar quando a chamada termina.
+    const pedidoDoPainel = deps.recordingPauseRequest;
+    if (pedidoDoPainel) {
+      const olharPedido = (): void => {
+        if (ending) return;
+        void pedidoDoPainel(callId)
+          .then((pedido) => (pedido ? pauseRecording("human", pedido.reason ?? "pedido feito no painel") : undefined))
+          .catch(logFailure("could not read the recording pause request"));
+        cancelTimers.push(schedule(olharPedido, RECORDING_PAUSE_POLL_MS));
+      };
+      cancelTimers.push(schedule(olharPedido, RECORDING_PAUSE_POLL_MS));
+    }
 
     const enabled = new Map<string, Tool>();
     for (const name of overrides?.tools ?? agent.tools) {
