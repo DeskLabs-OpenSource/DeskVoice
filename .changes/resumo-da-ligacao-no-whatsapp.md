@@ -1,10 +1,12 @@
 ---
 impact: new_capability
 section: added
-title: O resumo da ligação chega no WhatsApp de quem opera a instalação
+title: Quem opera a instalação pode ser avisado no WhatsApp quando uma ligação termina
 ---
 
-Quando a ligação termina, o resumo que já aparecia no painel passa a ir também para o WhatsApp
-do dono — ou do primeiro admin que tenha número cadastrado no perfil — sempre que houver um
-conector de WhatsApp configurado. É um aviso por ligação, mesmo que o resumo seja recalculado,
-e sem conector ou sem número o resumo continua só no painel. Crédito: @webtecnica.
+Ao fim de cada ligação, o dono (ou, sem número dele, o primeiro administrador que tenha número no
+perfil) pode receber no WhatsApp uma mensagem curta dizendo que o resumo está no painel. O aviso
+nasce desligado, inclusive em quem atualiza: o dono ou um administrador liga em Configurações →
+WhatsApp. A mensagem não leva o conteúdo da conversa nem o número de quem ligou, só o aviso; o
+resumo continua no painel. É uma mensagem por ligação, mesmo que o resumo seja recalculado, e sem
+conector ou sem número nada sai. Crédito: @webtecnica.

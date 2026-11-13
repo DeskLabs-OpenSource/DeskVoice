@@ -1,8 +1,8 @@
--- O resumo da ligação também chega em quem opera a instalação, pelo WhatsApp.
+-- Quem opera a instalação pode ser avisado pelo WhatsApp de que uma ligação terminou.
 --
 -- A tarefa `summarize_call` grava `calls.summary`; a partir daqui ela também cria um aviso
--- para o dono, com o resumo no corpo. Faltando conector ou número cadastrado, o resumo
--- continua só no painel — é o estado de toda instalação nova.
+-- para o dono, de corpo fixo (o resumo fica no painel). O aviso nasce desligado e se liga em
+-- Configurações → WhatsApp; desligado, ou faltando conector ou número cadastrado, nada sai.
 --
 -- `owner_notified_at` é o cadeado dessa entrega. A fila reexecuta tarefas (até 3
 -- tentativas), e sem um compare-and-set o dono receberia o mesmo resumo mais de uma vez:

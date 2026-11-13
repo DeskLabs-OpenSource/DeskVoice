@@ -56,35 +56,35 @@ async function ownerToNotify(q: OrgQuery): Promise<string | null> {
   return row?.whatsapp_e164 ?? null;
 }
 
+// Liga o aviso em Configurações → WhatsApp. Ausente vale desligado.
+export const OWNER_NOTICE_SETTING = "whatsapp.notify_owner_on_call_end";
+// O WhatsApp é um canal fora da instalação: corpo fixo, sem fala e sem número de quem ligou (a mesma
+// regra do `WHATSAPP_BODY` de `follow_up.ts`). O resumo fica no painel.
+export const OWNER_NOTICE_BODY = "Uma ligação terminou. O resumo está no painel do DeskVoice";
+
 /**
- * Manda o resumo da ligação para o WhatsApp de quem opera a instalação.
+ * Avisa pelo WhatsApp quem opera a instalação de que uma ligação terminou.
  *
- * Só avisa quando há como avisar: conector de WhatsApp configurado E alguém com número
- * cadastrado. Faltando qualquer um dos dois, o resumo fica só no painel — é o estado de
- * toda instalação nova, e transformar isso numa tarefa que falha três vezes não ajudaria
- * ninguém.
+ * Só avisa com o aviso ligado na tela, conector de WhatsApp configurado e alguém com número
+ * cadastrado. Faltando qualquer um, nada acontece: o resumo fica só no painel.
  *
  * `owner_notified_at` é o cadeado: a fila reexecuta `summarize_call`, e quem ganha o
  * `update` condicional é quem cria o aviso. Sem ele, um retry vira mensagem repetida no
  * WhatsApp do dono — e o WhatsApp não tem desfazer.
  */
-async function notifyOwner(q: OrgQuery, callId: string, summary: string): Promise<void> {
-  if (!(await hasWhatsAppConnector(q))) return;
+async function notifyOwner(q: OrgQuery, callId: string, now: Date): Promise<void> {
+  const enabled = await q.one<{ value: unknown }>("select value from settings where key = $1", [OWNER_NOTICE_SETTING]);
+  if (enabled?.value !== true || !(await hasWhatsAppConnector(q))) return;
   const target = await ownerToNotify(q);
   if (target === null) return;
-  const claimed = await q.one<{ id: string }>(
-    "update calls set owner_notified_at = now() where id = $1 and owner_notified_at is null returning id",
-    [callId],
-  );
+  const claimed = await q.one<{ id: string }>("update calls set owner_notified_at = $2 where id = $1 and owner_notified_at is null returning id", [callId, now]);
   if (!claimed) return;
-  const call = await q.one<{ from_e164: string | null }>("select from_e164 from calls where id = $1", [callId]);
-  const from = call?.from_e164 ? ` de ${call.from_e164}` : "";
   const notification = await q.one<{ id: string }>(
-    "insert into notifications (organization_id, call_id, channel, target, body) values ($1, $2, 'whatsapp', $3, $4) returning id",
-    [q.organizationId, callId, target, `Resumo da ligação${from}:\n\n${summary}`],
+    "insert into notifications (organization_id, call_id, channel, target, body, created_at) values ($1, $2, 'whatsapp', $3, $4, $5) returning id",
+    [q.organizationId, callId, target, OWNER_NOTICE_BODY, now],
   );
   if (!notification) throw new Error(`Notification for call ${callId} was not created`);
-  await enqueueTask(q, { kind: "deliver_notification", payload: { notificationId: notification.id }, callId });
+  await enqueueTask(q, { kind: "deliver_notification", payload: { notificationId: notification.id }, callId, runAt: now });
 }
 
 const routine: Routine = {
@@ -106,7 +106,7 @@ const routine: Routine = {
       const toolsUsed = [...new Set(events.flatMap((event) => (event.kind === "tool_called" && event.name ? [event.name] : [])))];
       const summary = extractiveSummary({ status: call.status, endReason: call.end_reason, turns, toolsUsed });
       await q.exec("update calls set summary = $2 where id = $1", [callId, summary]);
-      await notifyOwner(q, callId, summary);
+      await notifyOwner(q, callId, deps.clock.now());
     });
   },
 };
