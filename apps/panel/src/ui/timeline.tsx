@@ -226,6 +226,20 @@ export function Timeline({
       }
       case "cost_ceiling_reached":
         return { ...base, tone: "fail", icon: Coins, body: <Card tone="fail" title={e.cost_ceiling_reached}><p className="text-muted">{e.cost_ceiling_body}</p></Card> };
+      case "outcome_not_classified": {
+        const body = e.outcome_not_classified_body[text(p.reason)];
+        return {
+          ...base,
+          tone: "fail",
+          icon: SealQuestion,
+          body: (
+            <Card tone="fail" title={e.outcome_not_classified}>
+              <p className="text-muted">{body ? fill(body, { model: text(p.model) }) : text(p.reason)}</p>
+              {typeof p.status === "number" ? <p className="data text-[0.87rem] text-muted">{fill(e.outcome_not_classified_status, { status: String(p.status) })}</p> : null}
+            </Card>
+          ),
+        };
+      }
       case "call_ended":
         return { ...base, tone: "neutral", icon: PhoneX, body: <Quiet><span className="font-bold text-ink">{e.call_ended}</span>{reason(p.reason) ? ` · ${reason(p.reason)}` : ""}</Quiet> };
       case "task_queued":

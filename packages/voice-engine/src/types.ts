@@ -167,12 +167,23 @@ export interface ClassifyOptions {
   timeoutMs?: number;
   /** Agendador do prazo (`setTimeout` por padrão). Devolve como cancelar. */
   schedule?: (fn: () => void, delayMs: number) => () => void;
-  /** Sobrepõe o modelo de classificação (o mesmo motor fala e classifica). */
-  model?: string;
   /** Sobrepõe a URL da API HTTP do provedor (testes apontam para um servidor falso). */
   baseUrl?: string;
-  apiKey?: string;
 }
+
+/** Por que a classificação não leu um desfecho: o vocabulário do teste da chave, menos o que não é falha. */
+export type ClassifyFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
+
+/**
+ * O que a classificação devolve: o palpite, ou o motivo de não haver um. Nos dois casos, o consumo
+ * que o provedor declarou e o custo dele pelo preço do modelo de texto, para entrar no custo da
+ * chamada (um 200 fora da forma também foi cobrado).
+ */
+export type ClassifyResult = { model: string; usage: Usage; costCents: number } & (
+  | { ok: true; guess: OutcomeGuess }
+  // `status` é o HTTP da resposta; `null` quando ela não veio (prazo, rede).
+  | { ok: false; failure: ClassifyFailure; status: number | null }
+);
 
 export interface VoiceEngine {
   id: string;
@@ -191,11 +202,11 @@ export interface VoiceEngine {
   /**
    * Lê a conversa e diz o desfecho comercial dela, com a confiança e a fala que o sustenta.
    *
-   * Opcional de propósito: motor que não classifica apenas não declara o método, e a rotina grava
-   * `unknown`. Nunca lança — provedor fora do ar, resposta estranha ou chave sem crédito são uma
-   * ligação sem desfecho, não uma tarefa que falha três vezes.
+   * Opcional de propósito: motor que não classifica apenas não declara o método, e a rotina não
+   * grava nada. Nunca lança: provedor fora do ar, resposta estranha ou chave sem crédito voltam como
+   * `ok: false` com o motivo, que a rotina registra na linha do tempo da chamada.
    */
-  classifyOutcome?(apiKey: string, input: ClassifyInput, options?: ClassifyOptions): Promise<OutcomeGuess>;
+  classifyOutcome?(apiKey: string, input: ClassifyInput, options?: ClassifyOptions): Promise<ClassifyResult>;
 
   /**
    * Confere a chave sem abrir sessão de voz e sem gastar: a chamada mais barata do provedor que

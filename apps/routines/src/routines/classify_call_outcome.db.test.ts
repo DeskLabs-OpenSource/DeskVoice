@@ -1,6 +1,6 @@
 import { encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { createCall, createOrganization, depsFor, openTestDbs, t0, task } from "../../test/helpers";
+import { createCall, createOrganization, depsFor, eventsOf, openTestDbs, t0, task } from "../../test/helpers";
 import { OUTCOME_SETTING } from "@deskvoice/voice-engine";
 import classifyCallOutcome from "./classify_call_outcome";
 
@@ -44,11 +44,34 @@ const desfechoDe = (callId: string) =>
     ),
   );
 
+/**
+ * O consumo que a OpenAI declararia. Grande de propósito, para a conta não sumir no arredondamento:
+ * 800 mil de entrada a US$ 0,05, 200 mil em cache a US$ 0,005 e 100 mil de saída a US$ 0,40 por
+ * milhão dão 8,1 centavos, que o preço arredonda para 9.
+ */
+const USO = { prompt_tokens: 1_000_000, completion_tokens: 100_000, prompt_tokens_details: { cached_tokens: 200_000 } };
+const CUSTO = 9;
+
 /** O corpo que a OpenAI devolveria, com `content` já em JSON — é o que o motor lê. */
 const openai = (palpite: unknown, status = 200): typeof fetch =>
   vi.fn(async () =>
-    new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }] }), { status }),
+    new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: USO }), { status }),
   ) as unknown as typeof fetch;
+
+/** O provedor responde um erro com este status e este corpo. */
+const erro = (status: number, corpo: unknown = { error: { message: "não importa" } }): typeof fetch =>
+  vi.fn(async () => new Response(JSON.stringify(corpo), { status })) as unknown as typeof fetch;
+
+const custoDe = (callId: string) =>
+  withSystem(app, async (q) => ({
+    call: (await q.one<{ cost_cents: number }>("select cost_cents from calls where id = $1", [callId]))?.cost_cents,
+    extrato: await q.many<{ engine: string; input_tokens: number; output_tokens: number; cost_cents: number }>(
+      "select engine, input_tokens, output_tokens, cost_cents from usage_ledger where call_id = $1",
+      [callId],
+    ),
+  }));
+
+const falhasDe = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "outcome_not_classified").map((event) => event.payload);
 
 const roda = (org: string, callId: string, fetch: typeof globalThis.fetch) =>
   classifyCallOutcome.run(task(org, "classify_call_outcome", {}, callId), depsFor(app, { fetch }));
@@ -65,6 +88,33 @@ describe("classify_call_outcome", () => {
     expect(desfecho?.outcome).toBe("booked");
     expect(Number(desfecho?.outcome_confidence)).toBeCloseTo(0.9);
     expect(desfecho?.outcome_evidence).toContain("quinta às dez");
+    expect(await falhasDe(callId)).toEqual([]);
+  });
+
+  it("soma o que o provedor cobrou ao custo da chamada e ao extrato, pelo preço do modelo de texto", async () => {
+    const { org, callId } = await comAgente("desfecho custo");
+    await comChave(org);
+    await withSystem(app, (q) => q.exec("update calls set cost_cents = 40 where id = $1", [callId]));
+    await fala(org, callId, "Me liga amanhã, por favor.");
+
+    await roda(org, callId, openai({ outcome: "callback_requested", confidence: 0.8, evidence: "Me liga amanhã, por favor." }));
+
+    expect(await custoDe(callId)).toEqual({ call: 40 + CUSTO, extrato: [{ engine: MOTOR, input_tokens: 1_000_000, output_tokens: 100_000, cost_cents: CUSTO }] });
+  });
+
+  it("no teto de custo do agente não chama o provedor e diz por quê", async () => {
+    const { org, callId } = await comAgente("desfecho teto");
+    await comChave(org);
+    await withSystem(app, (q) => q.exec("update calls set cost_cents = 500 where id = $1", [callId]));
+    await fala(org, callId, "Pode marcar quinta às dez.");
+    const fetch = openai({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez." });
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await desfechoDe(callId))?.outcome).toBeNull();
+    expect(await falhasDe(callId)).toEqual([{ reason: "cost_ceiling", engine: MOTOR, costCents: 500, ceilingCents: 500 }]);
+    expect((await custoDe(callId)).call).toBe(500);
   });
 
   it("palpite fraco vira unknown, mas a evidência fica guardada para auditoria", async () => {
@@ -117,16 +167,30 @@ describe("classify_call_outcome", () => {
     expect((await desfechoDe(callId))?.outcome).toBe("callback_requested");
   });
 
-  it("provedor fora do ar não enterra a ligação como sem desfecho", async () => {
-    const { org, callId } = await comAgente("desfecho provedor fora");
-    await comChave(org);
-    await fala(org, callId, "Alô?");
-    const fetch = vi.fn(async () => new Response("{}", { status: 500 })) as unknown as typeof globalThis.fetch;
+  it("falha do provedor não enterra a ligação como sem desfecho: vira um evento com o motivo", async () => {
+    const casos: Array<[string, typeof globalThis.fetch, Record<string, unknown>]> = [
+      ["401", erro(401), { reason: "rejected", status: 401, costCents: 0 }],
+      ["modelo inexistente", erro(404, { error: { code: "model_not_found" } }), { reason: "model_unavailable", status: 404, costCents: 0 }],
+      ["sem crédito", erro(429, { error: { code: "insufficient_quota" } }), { reason: "no_credit", status: 429, costCents: 0 }],
+      ["fora do ar", erro(500), { reason: "unreachable", status: 500, costCents: 0 }],
+      ["rede", vi.fn(async () => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof globalThis.fetch, { reason: "unreachable", status: null, costCents: 0 }],
+      // Um 200 fora da forma foi cobrado: o custo entra, e o desfecho fica para depois.
+      ["fora do schema", openai({ outcome: "comprou", confidence: 2, evidence: "" }), { reason: "unexpected_response", status: 200, costCents: CUSTO }],
+    ];
+    for (const [nome, fetch, esperado] of casos) {
+      const { org, callId } = await comAgente(`desfecho falha ${nome}`);
+      await comChave(org);
+      await fala(org, callId, "Alô?");
 
-    await roda(org, callId, fetch);
+      await roda(org, callId, fetch);
 
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect((await desfechoDe(callId))?.outcome).toBeNull();
+      expect(fetch, nome).toHaveBeenCalledTimes(1);
+      expect((await desfechoDe(callId))?.outcome, nome).toBeNull();
+      expect(await falhasDe(callId), nome).toEqual([{ engine: MOTOR, model: "gpt-5-nano", ...esperado }]);
+      expect((await custoDe(callId)).call, nome).toBe(esperado.costCents);
+      // Nem a chave nem o corpo do provedor vão para a linha do tempo.
+      expect(JSON.stringify(await eventsOf(app, callId)), nome).not.toContain("sk-de-teste");
+    }
   });
 
   it("sem fala transcrita não gasta chamada", async () => {

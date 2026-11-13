@@ -33,16 +33,34 @@ import { resample } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
 import { classifyOutcomeOverHttp } from "../outcome-over-http";
 import { OUTCOME_GUESS_SCHEMA_GOOGLE, outcomePrompt, readOutcomeGuess } from "../outcome";
-import type { ClassifyOptions, VoiceEngine, VoiceSession } from "../types";
+import type { ClassifyOptions, EnginePricing, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const DEFAULT_API_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_MODEL = "gemini-3.8-live";
 const DEFAULT_VOICE = "Sulafat";
-// Modelo de texto que classifica o desfecho: barato e com `responseSchema` (conferido em
-// 2026-11-13). Trocável em `engine.gemini.classify_model`, sem PR.
-const OUTCOME_MODEL = "gemini-3.5-flash";
+// Modelo de texto que classifica o desfecho: o mais barato da linha estável de texto. A página de
+// preços e a de modelos (conferidas em 2026-11-13) não listam `gemini-3.5-flash`, só o
+// `gemini-3.5-flash-lite`. Trocar de modelo é trocar o preço abaixo junto, numa versão.
+const OUTCOME_MODEL = "gemini-3.5-flash-lite";
+// gemini-3.5-flash-lite, por milhão de tokens: entrada US$ 0,30 e saída US$ 2,50, com o raciocínio
+// incluído na saída. O cache implícito custaria menos; cobrar tudo como entrada nova superestima.
+const OUTCOME_PRICING: EnginePricing = {
+  centsPerMillionInputTokens: 30,
+  centsPerMillionOutputTokens: 250,
+  checkedOn: "2026-11-13",
+  source: "https://ai.google.dev/gemini-api/docs/pricing",
+};
+const generateUsage = z.object({
+  usageMetadata: z.object({ promptTokenCount: z.number(), candidatesTokenCount: z.number().optional(), thoughtsTokenCount: z.number().optional() }),
+});
+/** O consumo de `:generateContent`. O raciocínio vem à parte e é cobrado como saída. */
+const generateUsageOf = (body: unknown): Usage => {
+  const usage = generateUsage.safeParse(body).data?.usageMetadata;
+  if (!usage) return {};
+  return { inputTokens: usage.promptTokenCount, outputTokens: (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0) };
+};
 // As 30 vozes prontas, com o descritor oficial. Conferido em 2026-11-12 na página de síntese de voz
 // (aistudio.google.com/docs/speech-generation); a página da Live API não lista as vozes dela.
 const VOICES = [
@@ -268,10 +286,11 @@ const engine: VoiceEngine = {
   },
 
   async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
-    const model = options.model ?? OUTCOME_MODEL;
     return classifyOutcomeOverHttp(
       {
-        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(model)}:generateContent`,
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(OUTCOME_MODEL)}:generateContent`,
+        model: OUTCOME_MODEL,
+        pricing: OUTCOME_PRICING,
         // No cabeçalho, e não na URL: endereço de pedido costuma ir para log de proxy.
         headers: { "x-goog-api-key": apiKey },
         body: JSON.stringify({
@@ -287,6 +306,8 @@ const engine: VoiceEngine = {
             return null;
           }
         },
+        usage: generateUsageOf,
+        classify: (status, body) => (status === 400 && saysInvalidKey(body) ? "rejected" : undefined),
       },
       options,
     );

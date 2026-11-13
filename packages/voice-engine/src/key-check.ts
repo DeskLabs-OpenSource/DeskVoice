@@ -18,7 +18,7 @@ export interface KeyCheckRequest {
   classify?: (status: number, body: unknown) => KeyCheckResult | undefined;
 }
 
-function byStatus(status: number): KeyCheckResult {
+export function byStatus(status: number): KeyCheckResult {
   if (status === 401 || status === 403) return "rejected";
   if (status === 404) return "model_unavailable";
   if (status === 402) return "no_credit";

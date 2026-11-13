@@ -186,8 +186,9 @@ export function createSimulatedEngine(options: { schedule?: Schedule } = {}): Vo
     },
     async classifyOutcome() {
       // O motor simulado não chama provedor. Classificar aqui seria inventar sobre o cliente: o
-      // desfecho honesto de uma instalação sem provedor é `unknown`, e é o que a tela mostra.
-      return UNKNOWN_OUTCOME;
+      // desfecho honesto de uma instalação sem provedor é `unknown`, e é o que a tela mostra. Sem
+      // provedor, sem custo.
+      return { ok: true, guess: UNKNOWN_OUTCOME, model: "simulated", usage: {}, costCents: 0 };
     },
     async checkKey() {
       return { result: "not_needed" };

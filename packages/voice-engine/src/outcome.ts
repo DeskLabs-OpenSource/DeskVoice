@@ -35,7 +35,9 @@ export const UNKNOWN_OUTCOME: OutcomeGuess = { outcome: "unknown", confidence: 0
 export const outcomeGuess = z.object({
   outcome: z.enum(CALL_OUTCOMES),
   confidence: z.number().min(0).max(1),
-  evidence: z.string().max(280),
+  // O teto vai no pedido, mas o schema enviado não o impõe: uma citação mais longa é cortada, e não
+  // derruba o palpite inteiro por um caractere.
+  evidence: z.string().transform((evidence) => evidence.slice(0, 280)),
 });
 
 export const OUTCOME_GUESS_SCHEMA = {
@@ -51,8 +53,8 @@ export const OUTCOME_GUESS_SCHEMA = {
 
 /**
  * O mesmo pedido para o Google, sem `additionalProperties`: o `responseSchema` do Gemini aceita um
- * subconjunto de OpenAPI e recusa o campo. Mandar o schema do OpenAI para lá daria 400 e a
- * classificação nunca aconteceria — e, como falha vira `unknown`, ninguém veria o erro.
+ * subconjunto de OpenAPI e recusa o campo. Mandar o schema do OpenAI para lá daria 400 em toda
+ * ligação, e a classificação nunca aconteceria.
  */
 export const OUTCOME_GUESS_SCHEMA_GOOGLE = {
   type: "object",
