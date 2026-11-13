@@ -50,6 +50,8 @@ export const CALL_EVENT_KINDS = [
   "follow_up_assigned",
   "follow_up_closed",
   "outcome_not_classified",
+  "call_analyzed",
+  "analysis_not_done",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];
