@@ -42,7 +42,7 @@ describe("createOwner", () => {
       engine: "simulated",
       language: "pt-BR",
       agent_enabled: true,
-      tools: ["call_webhook", "create_task", "end_call", "notify_human", "request_approval", "send_whatsapp", "transfer_to_human"],
+      tools: ["call_webhook", "create_task", "end_call", "notify_human", "request_approval", "send_dtmf", "send_whatsapp", "transfer_to_human"],
     });
     expect(row?.greeting).toMatch(/Olá/);
     expect(row?.instructions).toMatch(/português do Brasil/);

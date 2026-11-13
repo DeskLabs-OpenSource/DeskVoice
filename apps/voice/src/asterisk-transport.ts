@@ -22,7 +22,7 @@ import { trunkEndpointName, type AriClient } from "./ari";
 import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
-import type { CallTransport } from "./transport";
+import { dtmfTones, type CallTransport } from "./transport";
 
 export interface ExpectedCall {
   callId: string;
@@ -85,6 +85,8 @@ export class AsteriskCalls {
         await connection.drained();
         connection.close();
       },
+      // Tom em banda, pelo próprio AudioSocket: a ARI recusa DTMF a canal fora da Stasis (ver `dtmfTones`).
+      sendDtmf: (digits) => connection.sendTone(dtmfTones(digits)),
       async close() {
         connection.close();
       },
