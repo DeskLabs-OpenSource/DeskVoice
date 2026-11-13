@@ -148,6 +148,8 @@ proven yet, each capability below says how far the proof went:
 | Send WhatsApp during the call, through a connector | Awaiting real-world proof |
 | Connect a WhatsApp number by QR code (Settings → WhatsApp) and send the agent's notices and messages through it | The service does not come installed: you install it from the screen, and it costs about 323 MiB of memory with no number connected and 3.2 GB of disk (measured on 0.3.0, November 12, 2026). Routes tested with a real database and a fake WhatsApp service; installing and removing through the agent, with a simulated Docker. **Not yet proven with a real number:** no QR code was scanned and no message went out. It is an unofficial WhatsApp client; see the [guide](docs/guides/whatsapp-por-qr-code.md) (in Portuguese) |
 | Have the agent answer calls made to the number on WhatsApp (Settings → WhatsApp, in the WhatsApp calls block: connect the number and pick the agent) | The service (WaCalls) does not come installed: you install it from the screen; memory and disk not measured yet. **Proven with a real number** in four incoming calls on 12 and 13/11/2026 (the longest lasting 2 min 7 s), with audio both ways and transcription, and no transfer to a human on this channel. The agent answers 0.6 to 2.4 s after the caller stops talking (nine answers measured on the recordings of two calls on 13/11; before the fix that fills in the silence WhatsApp does not send, it was 4 to 5 s). **The caller shows up as an unidentified number** when WhatsApp hides the number (`@lid`), which is now the common case: the fix depends on WaCalls. Unofficial WhatsApp client; see the [guide](docs/guides/ligacao-pelo-whatsapp.md) (in Portuguese) |
+| Call outcome (booked, callback requested, message taken, not interested, info only), classified by the engine after the call; off by default, turned on in Settings → Artificial intelligence | Tested against a real database and the simulated engine, with the cost counted against the spending cap and failures on the timeline. Not yet proven on a real install or against a real OpenAI or Gemini. Since 0.8.0 |
+| End-of-call notice on the operator's WhatsApp, with a fixed text (no speech or phone number of the caller); off by default, turned on in Settings → WhatsApp | Tested against a real database and a fake WhatsApp. Not yet proven with a real number. Since 0.8.0 |
 | Call a webhook during the call | Awaiting real-world proof (without a real receiver) |
 | Update, health check, backup and restore | Proven on a real install, on the partner's VPS: installer run twice without regenerating secrets, backup checked, a restore that brings back the backup's row counts, and the automatic rollback of a failed update. Restoring on another server, or across versions with a new migration, not yet proven |
 | Update from the panel (Settings → System), through a kit agent on the server | Proven on a real install: twice on the partner's VPS (0.3.0 → 0.4.0 and 0.4.0 → 0.5.0), with nobody at the server's terminal, including the hand-off to the new version's updater and the removal of old images |
@@ -159,7 +161,7 @@ If you answer a call through a carrier line, tell us how it went in an issue: in
 a SIP trunk have no public record yet, and that is the most valuable contribution right now.
 
 What does **not** exist yet: several
-companies on one screen, a visual flow builder, answering calls over WhatsApp, voice IVR, call queues.
+companies on one screen, a visual flow builder, voice IVR, call queues.
 Part of this is on the [roadmap](ROADMAP.md), open to the community.
 
 ## How it works
@@ -296,10 +298,10 @@ code, are in [`ROADMAP.md`](ROADMAP.md).
 
 DeskVoice was created by Rafael Melgaço ([@melgarafael](https://www.youtube.com/@melgarafael))
 and is built in public, with the community. There are already outside contributions: the fences
-and security work from [webtecnica](https://github.com/webtecnica) are in the published releases. On `main`, shipping in
-the next release, are the rights of callers (retention period and export), also from webtecnica,
-and the OpenAI cost checked against the invoice, the farewell before hanging up and call
-recording, from [aliffstefano](https://github.com/aliffstefano). DeskcommCRM, where the contribution workflow used
+and security work from [webtecnica](https://github.com/webtecnica) are in the published releases, and since 0.6.0 so are
+the rights of callers (retention period and export), from webtecnica, and the OpenAI cost checked
+against the invoice, the farewell before hanging up and call recording, from
+[aliffstefano](https://github.com/aliffstefano). Release 0.8.0 brings the call outcome and the end-of-call WhatsApp notice, from webtecnica. DeskcommCRM, where the contribution workflow used
 here comes from, has received PRs from more than 250 people.
 
 Credit is a rule, not a courtesy: contributors keep authorship of their commits and are named

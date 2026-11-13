@@ -150,6 +150,8 @@ no se probó, cada capacidad dice hasta dónde llegó la prueba:
 | Enviar WhatsApp durante la llamada, por conector | Esperando prueba real |
 | Conectar un WhatsApp por código QR (Configuración → WhatsApp) y enviar por él los avisos y los mensajes del agente | El servicio no viene instalado: se instala desde la pantalla, y cuesta cerca de 323 MiB de memoria sin número conectado y 3,2 GB en disco (medido en la 0.3.0, el 12/11/2026). Rutas probadas con base de datos real y con un servicio de WhatsApp falso; instalar y quitar por el agente, con Docker simulado. **Aún sin prueba con un número real:** no se leyó ningún código QR y no salió ningún mensaje. Es un cliente no oficial de WhatsApp; mira la [guía](docs/guides/whatsapp-por-qr-code.md) (en portugués) |
 | Que el agente atienda las llamadas hechas al número por WhatsApp (Configuración → WhatsApp, en el bloque Llamadas por WhatsApp: conectar el número y elegir el agente) | El servicio (WaCalls) no viene instalado: se instala desde la pantalla; memoria y disco aún no medidos. **Probado con un número real** en cuatro llamadas recibidas el 12 y el 13/11/2026 (la más larga de 2 min 7 s), con audio en los dos sentidos y transcripción, sin transferencia a una persona en este canal. El agente responde entre 0,6 y 2,4 s después de que quien llama deja de hablar (nueve respuestas medidas en las grabaciones de dos llamadas el 13/11; antes del ajuste que rellena el silencio que WhatsApp no envía, eran 4 a 5 s). **Quien llama aparece como número no identificado** cuando WhatsApp oculta el número (`@lid`), que hoy es el caso común: la corrección depende de WaCalls. Cliente no oficial de WhatsApp; mira la [guía](docs/guides/ligacao-pelo-whatsapp.md) (en portugués) |
+| Desenlace de la llamada (agendó, pidió que lo llamen, dejó recado, sin interés, solo información), clasificado por el motor después de la llamada; apagado de fábrica, se enciende en Configuración → Inteligencia artificial | Probado con base de datos real y con el motor simulado, con el costo dentro del límite de gasto y la falla en la línea de tiempo. Todavía sin prueba en una instalación real ni con OpenAI o Gemini de verdad. Desde la 0.8.0 |
+| Aviso de fin de llamada en el WhatsApp de quien opera, con texto fijo (sin habla ni teléfono de quien llamó); apagado de fábrica, se enciende en Configuración → WhatsApp | Probado con base de datos real y un WhatsApp falso. Todavía sin prueba con un número real. Desde la 0.8.0 |
 | Llamar a un webhook durante la llamada | Esperando prueba real (sin un receptor real) |
 | Actualización, chequeo de salud, respaldo y restauración | Probado en una instalación real, en la VPS del socio: instalador corrido dos veces sin regenerar secretos, respaldo verificado, restauración que devuelve los conteos del respaldo y la vuelta automática de una actualización fallida. Restaurar en otro servidor, o entre versiones con migration nueva, todavía sin prueba |
 | Actualizar desde el panel (Configuración → Sistema), mediante un agente del kit en el servidor | Probado en una instalación real: dos veces en la VPS del socio (0.3.0 → 0.4.0 y 0.4.0 → 0.5.0), sin nadie en la terminal del servidor, con el paso al actualizador de la versión nueva y la eliminación de las imágenes viejas |
@@ -162,7 +164,7 @@ por troncal SIP todavía no tiene registro público, y es la contribución más 
 momento.
 
 Lo que **no** existe todavía: varias
-empresas en la misma pantalla, constructor visual de flujos, atender las llamadas por WhatsApp, IVR por voz,
+empresas en la misma pantalla, constructor visual de flujos, IVR por voz,
 colas de atención. Parte de esto está en el [roadmap](ROADMAP.md), abierto a la comunidad.
 
 ## Cómo funciona
@@ -302,10 +304,10 @@ código, están en [`ROADMAP.md`](ROADMAP.md).
 
 DeskVoice fue creado por Rafael Melgaço ([@melgarafael](https://www.youtube.com/@melgarafael)) y
 se construye en público, con la comunidad. Ya hay contribuciones de fuera: las cercas y la
-seguridad de [webtecnica](https://github.com/webtecnica) están en las versiones publicadas. Están en `main` y salen en la
-próxima versión los derechos de quien llama (plazo de conservación y exportación), también de
-webtecnica, y el costo de OpenAI verificado contra la factura, la despedida antes de colgar y la
-grabación de las llamadas, de [aliffstefano](https://github.com/aliffstefano). DeskcommCRM, de donde viene la forma de contribuir
+seguridad de [webtecnica](https://github.com/webtecnica) están en las versiones publicadas, y desde la 0.6.0 también los
+derechos de quien llama (plazo de conservación y exportación), de webtecnica, y el costo de OpenAI
+verificado contra la factura, la despedida antes de colgar y la grabación de las llamadas, de
+[aliffstefano](https://github.com/aliffstefano). La 0.8.0 trae el desenlace de la llamada y el aviso de fin de llamada por WhatsApp, de webtecnica. DeskcommCRM, de donde viene la forma de contribuir
 usada aquí, recibió PRs de más de 250 personas.
 
 El crédito es regla, no cortesía: quien contribuye conserva la autoría de sus commits y aparece
