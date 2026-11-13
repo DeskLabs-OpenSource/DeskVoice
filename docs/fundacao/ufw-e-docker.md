@@ -54,11 +54,20 @@ ip netns exec fora ip link set veth-dk.ns up && ip netns exec fora ip link set l
 ip netns exec fora ip route add default via 10.99.99.1
 ip netns exec fora python3 -c 'import socket,sys;s=socket.socket(2,2);s.settimeout(2.5);
 s.sendto(b"probe",("<IP-DA-VPS>",48506));print(s.recvfrom(2048))'
+
+# 5. o que fecha a porta, no TCP e no UDP
+iptables -I DOCKER-USER 1 -p tcp -m conntrack --ctorigdstport 48080 --ctdir ORIGINAL -j DROP
+iptables -I DOCKER-USER 1 -p udp -m conntrack --ctorigdstport 48506 --ctdir ORIGINAL -j DROP
+ip netns exec fora python3 sonda.py udp <IP-DA-VPS> 48506
+iptables -D DOCKER-USER -p tcp -m conntrack --ctorigdstport 48080 --ctdir ORIGINAL -j DROP
+iptables -D DOCKER-USER -p udp -m conntrack --ctorigdstport 48506 --ctdir ORIGINAL -j DROP
 ```
 
 O `/app.js` é um servidor de 15 linhas: `http.createServer(...).listen(80)` e um
-`dgram.createSocket("udp4")` que devolve o que recebe na 9999. No fim: `docker rm -f dk-probe`,
-`ip netns del fora`, `kill` no `http.server` e `ufw delete` em cada regra criada.
+`dgram.createSocket("udp4")` que devolve o que recebe na 9999. A `sonda.py` é um cliente de 20
+linhas, TCP e UDP, com `timeout` de 3 s, que imprime `ABERTO` ou `FECHADO`. No fim: `docker rm -f
+dk-probe`, `ip netns del fora`, `kill` no `http.server`, `ufw delete` em cada regra criada e
+`iptables -D` em cada regra do `DOCKER-USER`.
 
 ### 1. Sem regra nenhuma, o contêiner já está aberto
 
@@ -166,7 +175,74 @@ pl1.node.check-host.net: FECHADO (Connection timed out)
 rs1.node.check-host.net: FECHADO (Connection timed out)
 ```
 
-### 6. Nem o próprio host é protegido
+### 6. O UDP, que é o protocolo da telefonia
+
+O kit publica `5060/udp` e a faixa de RTP, então a regra que fecha precisava ser medida no mesmo
+protocolo. Mesma máquina, portas altas, `ufw` em `deny (incoming)` e `deny (routed)`, sonda do
+namespace com `veth`:
+
+```
+$ ufw deny 48506/udp
+$ iptables -S ufw-user-input | grep 48506
+-A ufw-user-input -p udp -m udp --dport 48506 -j DROP
+$ [netns] sonda.py udp <IP-DA-VPS> 48506
+UDP <IP-DA-VPS>:48506 ABERTO -> ok-udp de <IP-DA-VPS>:48506
+
+$ ufw route deny proto udp to any port 48506
+$ iptables -S ufw-user-forward | grep 48506
+-A ufw-user-forward -p udp -m udp --dport 48506 -j DROP
+$ [netns] sonda.py udp <IP-DA-VPS> 48506
+UDP <IP-DA-VPS>:48506 ABERTO -> ok-udp de <IP-DA-VPS>:48506
+```
+
+Nem a regra de entrada nem a de rota do `ufw` fecham o UDP publicado. A regra óbvia no
+`DOCKER-USER` também não:
+
+```
+$ iptables -I DOCKER-USER 1 -p udp -m udp --dport 48506 -j DROP
+$ iptables -L DOCKER-USER -v -n | head -4
+ pkts bytes target     prot opt in     out     source               destination
+    0     0 DROP       udp  --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:48506
+$ [netns] sonda.py udp <IP-DA-VPS> 48506
+UDP <IP-DA-VPS>:48506 ABERTO -> ok-udp de <IP-DA-VPS>:48506
+$ iptables -L DOCKER-USER -v -n | head -4     # o contador continua em zero
+    0     0 DROP       udp  --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:48506
+```
+
+Com a porta **original**, o UDP fecha — e o contador prova que foi a regra, não o acaso:
+
+```
+$ iptables -D DOCKER-USER -p udp -m udp --dport 48506 -j DROP
+$ iptables -I DOCKER-USER 1 -p udp -m conntrack --ctorigdstport 48506 --ctdir ORIGINAL -j DROP
+$ [netns] sonda.py udp <IP-DA-VPS> 48506
+UDP <IP-DA-VPS>:48506 FECHADO (TimeoutError: timed out)
+$ [netns] sonda.py udp <IP-DA-VPS> 48506      # 2ª tentativa
+UDP <IP-DA-VPS>:48506 FECHADO (TimeoutError: timed out)
+$ iptables -L DOCKER-USER -v -n | head -4
+    2    66 DROP       udp  --  *      *       0.0.0.0/0            0.0.0.0/0            ctorigdstport 48506 ctdir ORIGINAL
+$ [netns] sonda.py tcp <IP-DA-VPS> 48080      # a porta vizinha, mesma máquina: segue aberta
+TCP <IP-DA-VPS>:48080 ABERTO
+```
+
+O motivo é o mesmo do TCP: a regra de `DNAT` do Docker já trocou a porta antes do `FORWARD`.
+
+```
+$ iptables -t nat -S DOCKER | grep 48506
+-A DOCKER ! -i docker0 -p udp -m udp --dport 48506 -j DNAT --to-destination 172.17.0.16:9999
+```
+
+O controle, que separa "o `ufw` não funciona" de "o `ufw` não vê a porta do Docker" — eco UDP no
+**próprio host** (`48085/udp`), mesma sonda, mesma máquina:
+
+```
+$ ufw deny 48085/udp  →  [netns] sonda.py udp <IP-DA-VPS> 48085
+UDP <IP-DA-VPS>:48085 FECHADO (TimeoutError: timed out)
+
+$ ufw allow 48085/udp →  [netns] sonda.py udp <IP-DA-VPS> 48085
+UDP <IP-DA-VPS>:48085 ABERTO -> ok-udp-host de 10.99.99.1:48085
+```
+
+### 7. Nem o próprio host é protegido
 
 ```
 $ curl -s -m 5 http://<IP-DA-VPS>:48080      # com ufw deny 48080/tcp no lugar
@@ -184,7 +260,7 @@ ok-tcp
 Ou seja: **as regras de `ufw` do kit são teatro**. Elas não abrem nada que o Docker já não tenha
 aberto, e não fecham nada — inclusive porque quem as lê acredita ter fechado. O `firewall` que
 decide o que entra numa porta publicada é o do provedor da VPS, ou uma regra em `DOCKER-USER` com
-`--ctorigdstport`.
+`--ctorigdstport`, medida aqui nos dois protocolos que o kit usa (TCP na seção 5, UDP na 6).
 
 ## O que mudou no kit
 
@@ -201,7 +277,8 @@ A mensagem nova ataca o segundo sem criar o primeiro.
   produção. O comportamento com `firewalld` segue não medido (o instalador só avisa, nunca promete).
 - **UDP de fora, de verdade**: o check-host não sonda UDP. O UDP foi medido de um namespace com
   `veth` no mesmo host, que percorre as mesmas cadeias (`PREROUTING` → DNAT → `FORWARD`), mas não
-  passa por um roteador de verdade. O TCP, esse sim, foi medido de três países.
+  passa por um roteador de verdade. O TCP, esse sim, foi medido de três países. Vale para o UDP
+  tudo o que está medido acima, inclusive a regra que fecha (seção 6).
 - **IPv6**: o `ufw` cria as regras também em `(v6)` e o Docker publica em `[::]`, mas nenhuma sonda
   externa usou IPv6.
 - **Docker com o iptables desligado**: nesse modo o Docker não escreve as regras dele e o `ufw`
