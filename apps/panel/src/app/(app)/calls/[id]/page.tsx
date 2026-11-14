@@ -18,7 +18,8 @@ import { Badge, Button, Notice, Skeleton, TextInput, type Tone } from "../../../
 import { useLive, useNow } from "../../../../ui/live";
 import { useCanConfigure } from "../../../../ui/me";
 import { Timeline } from "../../../../ui/timeline";
-import type { Call, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
+import { AnalysisSection } from "./analysis-section";
+import type { CallDetail, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
 
@@ -29,11 +30,12 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   const locale = useLocale();
   const errorText = useErrorText();
   const now = useNow();
-  const call = useApi<Call>(`/calls/${id}`);
+  const call = useApi<CallDetail>(`/calls/${id}`);
   const events = useApi<CallEvent[]>(`/calls/${id}/events`);
   const engines = useApi<Engine[]>("/engines");
   const followUps = useApi<FollowUpList>(`/follow-ups?callId=${id}`);
   const transcription = useApi<Setting<boolean>>("/settings/calls.transcription_enabled");
+  const analysisEnabled = useApi<Setting<boolean>>("/settings/calls.analysis_enabled");
   const canConfigure = useCanConfigure();
   useLive((signal) => {
     if (signal.callId !== id) return;
@@ -109,6 +111,8 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
           {data.outcomeEvidence ? <p className="text-[0.8rem] leading-relaxed text-muted">“{data.outcomeEvidence}”</p> : null}
         </section>
       ) : null}
+
+      <AnalysisSection call={data} events={events.data} enabled={analysisEnabled.data?.value === true} live={live} t={t} />
 
       {data.summary || !live ? (
         <section className="grid max-w-[72ch] gap-1.5">

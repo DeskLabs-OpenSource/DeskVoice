@@ -150,6 +150,34 @@ function OutcomeSetting({ t }: { t: SettingsDictionary }) {
   );
 }
 
+/**
+ * Analisar cada ligação no fim: desligado de fábrica. A análise inclui o desfecho e sai na mesma
+ * chamada paga ao provedor; quem pode ligar é o dono ou um admin (`useCanConfigure`).
+ */
+function AnalysisSetting({ t }: { t: SettingsDictionary }) {
+  const canConfigure = useCanConfigure();
+  const setting = useApi<Setting<boolean>>("/settings/calls.analysis_enabled");
+  const save = useAction();
+  const enabled = setting.data?.value === true;
+  return (
+    <Panel title={t.analysisTitle} description={t.analysisLead}>
+      <div className="grid max-w-xl gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Switch
+            checked={enabled}
+            onChange={(next) => void save.run(() => put("calls.analysis_enabled", next || null)).then(setting.reload)}
+            label={t.analysisSwitch}
+            disabled={!canConfigure || !setting.data || save.busy}
+          />
+          <ActionStatus action={save} />
+        </div>
+        <p>{t.analysisCost}</p>
+        <Notice tone={enabled ? "warn" : "neutral"}>{t.analysisData}</Notice>
+      </div>
+    </Panel>
+  );
+}
+
 /** Transcrever a gravação de uma chamada sem texto: desligado de fábrica, porque o áudio vai ao provedor e é pago. */
 function TranscriptionSetting({ t }: { t: SettingsDictionary }) {
   const canConfigure = useCanConfigure();
@@ -214,6 +242,7 @@ export default function AiSettings() {
         </div>
       </Panel>
       <OutcomeSetting t={t} />
+      <AnalysisSetting t={t} />
       <TranscriptionSetting t={t} />
     </>
   );
