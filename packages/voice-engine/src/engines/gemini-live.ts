@@ -31,27 +31,37 @@ import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { resample } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
-import { classifyOutcomeOverHttp } from "../outcome-over-http";
+import { classifyOutcomeOverHttp, transcribeOverHttp } from "../outcome-over-http";
 import { OUTCOME_GUESS_SCHEMA_GOOGLE, outcomePrompt, readOutcomeGuess } from "../outcome";
-import type { ClassifyOptions, EnginePricing, Usage, VoiceEngine, VoiceSession } from "../types";
+import type { ClassifyOptions, EnginePricing, RecordingTranscriber, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const DEFAULT_API_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_MODEL = "gemini-3.8-live";
 const DEFAULT_VOICE = "Sulafat";
-// Modelo de texto que classifica o desfecho: o mais barato da linha estável de texto. A página de
+// Modelo de texto que classifica o desfecho e transcreve a gravação: o mais barato da linha estável de texto. A página de
 // preços e a de modelos (conferidas em 2026-11-13) não listam `gemini-3.5-flash`, só o
 // `gemini-3.5-flash-lite`. Trocar de modelo é trocar o preço abaixo junto, numa versão.
-const OUTCOME_MODEL = "gemini-3.5-flash-lite";
+const TEXT_MODEL = "gemini-3.5-flash-lite";
 // gemini-3.5-flash-lite, por milhão de tokens: entrada US$ 0,30 e saída US$ 2,50, com o raciocínio
-// incluído na saída. O cache implícito custaria menos; cobrar tudo como entrada nova superestima.
-const OUTCOME_PRICING: EnginePricing = {
+// incluído na saída. A linha de entrada diz "text / image / video / audio" (conferida em 2026-11-13):
+// o áudio da gravação custa o mesmo que o texto. O cache implícito custaria menos; cobrar tudo como entrada nova superestima.
+const TEXT_PRICING: EnginePricing = {
   centsPerMillionInputTokens: 30,
   centsPerMillionOutputTokens: 250,
   checkedOn: "2026-11-13",
   source: "https://ai.google.dev/gemini-api/docs/pricing",
 };
+// "Maximum request size is 20 MB total (including prompts and all files)", na página de áudio
+// (aistudio.google.com/docs/audio, conferida em 2026-11-13). A página de formas de envio diz 100 MB
+// para dados embutidos; vale a menor. O áudio vai em base64 (4/3 do tamanho), com folga para o
+// pedido: cerca de 15 minutos de um lado a 8 kHz.
+const TRANSCRIBE_MAX_BYTES = Math.floor(((20_000_000 - 100_000) * 3) / 4);
+/** Transcrever, não resumir: resumo e desfecho são outras peças, com outro dono. */
+const TRANSCRIBE_PROMPT =
+  "Transcreva a fala deste áudio literalmente, no idioma em que foi dita, sem resumir, sem comentar, sem traduzir e sem marcar quem fala. Se não houver fala, responda com um texto vazio.";
+const generateText = z.object({ candidates: z.array(z.object({ content: z.object({ parts: z.array(z.object({ text: z.string().optional() })) }) })).min(1) });
 const generateUsage = z.object({
   usageMetadata: z.object({ promptTokenCount: z.number(), candidatesTokenCount: z.number().optional(), thoughtsTokenCount: z.number().optional() }),
 });
@@ -136,6 +146,34 @@ const saysInvalidKey = (body: unknown): boolean =>
 function literalSpeech(text: string, language: string): string {
   return `Say exactly the following to the caller, in ${language}, without adding anything: "${text}"`;
 }
+
+const recordingTranscriber: RecordingTranscriber = {
+  model: TEXT_MODEL,
+  pricing: TEXT_PRICING,
+  maxAudioBytes: TRANSCRIBE_MAX_BYTES,
+  transcribe(apiKey, input, options = {}) {
+    return transcribeOverHttp(
+      {
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(TEXT_MODEL)}:generateContent`,
+        // No cabeçalho, e não na URL: endereço de pedido costuma ir para log de proxy.
+        headers: { "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ inlineData: { mimeType: "audio/wav", data: Buffer.from(input.audio).toString("base64") } }, { text: TRANSCRIBE_PROMPT }] }],
+          generationConfig: { temperature: 0 },
+        }),
+        model: TEXT_MODEL,
+        pricing: TEXT_PRICING,
+        read: (body) => {
+          const parsed = generateText.safeParse(body);
+          return parsed.success ? (parsed.data.candidates[0]?.content.parts ?? []).map((part) => part.text ?? "").join("").trim() : null;
+        },
+        usage: generateUsageOf,
+        classify: (status, body) => (status === 400 && saysInvalidKey(body) ? "rejected" : undefined),
+      },
+      options,
+    );
+  },
+};
 
 const engine: VoiceEngine = {
   id: "gemini-live",
@@ -288,9 +326,9 @@ const engine: VoiceEngine = {
   async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
     return classifyOutcomeOverHttp(
       {
-        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(OUTCOME_MODEL)}:generateContent`,
-        model: OUTCOME_MODEL,
-        pricing: OUTCOME_PRICING,
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(TEXT_MODEL)}:generateContent`,
+        model: TEXT_MODEL,
+        pricing: TEXT_PRICING,
         // No cabeçalho, e não na URL: endereço de pedido costuma ir para log de proxy.
         headers: { "x-goog-api-key": apiKey },
         body: JSON.stringify({
@@ -312,6 +350,8 @@ const engine: VoiceEngine = {
       options,
     );
   },
+
+  transcription: recordingTranscriber,
 
   checkKey(apiKey, options = {}) {
     const model = options.model ?? DEFAULT_MODEL;

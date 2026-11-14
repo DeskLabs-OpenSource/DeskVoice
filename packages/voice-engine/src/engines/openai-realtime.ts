@@ -28,9 +28,9 @@ import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
-import { classifyOutcomeOverHttp } from "../outcome-over-http";
+import { classifyOutcomeOverHttp, transcribeOverHttp } from "../outcome-over-http";
 import { OUTCOME_GUESS_SCHEMA, outcomePrompt, readOutcomeGuess } from "../outcome";
-import type { ClassifyOptions, EnginePricing, KeyCheckResult, Usage, VoiceEngine, VoiceSession } from "../types";
+import type { ClassifyOptions, EnginePricing, KeyCheckResult, RecordingTranscriber, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
 const DEFAULT_API_URL = "https://api.openai.com/v1";
@@ -49,6 +49,27 @@ const OUTCOME_PRICING: EnginePricing = {
   checkedOn: "2026-11-13",
   source: "https://developers.openai.com/api/docs/pricing",
 };
+// O modelo que transcreve a fala de quem ligou durante a chamada, e a gravação depois dela.
+const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+// gpt-4o-mini-transcribe, na seção "Transcription" da página de preços (conferida em 2026-11-13):
+// entrada US$ 1,25 e saída US$ 5,00 por milhão de tokens, e a estimativa de US$ 0,003 por minuto.
+// A linha não separa entrada de áudio e de texto: o preço de entrada vale para os dois. O minuto só
+// conta quando a resposta não traz o consumo em tokens (`usage.type: "duration"` ou sem `usage`).
+const TRANSCRIBE_PRICING: EnginePricing = {
+  centsPerMillionInputTokens: 125,
+  centsPerMillionOutputTokens: 500,
+  centsPerMinute: 0.3,
+  checkedOn: "2026-11-13",
+  source: "https://developers.openai.com/api/docs/pricing",
+};
+// "Files can be up to 25 MB", no guia de fala para texto (developers.openai.com/api/docs/guides/speech-to-text,
+// conferido em 2026-11-13). Em unidades de mil, o limite menor das duas leituras de "MB".
+// Um lado a 8 kHz é 16 kB/s: cerca de 26 minutos.
+const TRANSCRIBE_MAX_BYTES = 25_000_000;
+// `POST /audio/transcriptions` (referência da API, conferida em 2026-11-13): `text`, e `usage` em
+// tokens ou em segundos, conforme o modelo.
+const transcriptionBody = z.object({ text: z.string() });
+const transcriptionUsage = z.object({ usage: z.object({ type: z.literal("tokens"), input_tokens: z.number(), output_tokens: z.number() }) });
 // Vozes do Realtime, conferidas em 2026-11-12 (developers.openai.com, guia de conversas Realtime).
 // A documentação recomenda marin e cedar pela qualidade; ela não descreve o estilo de cada uma.
 const VOICES = [
@@ -170,6 +191,38 @@ export function usageOf(usage: RealtimeUsage): Usage {
   };
 }
 
+const transcription: RecordingTranscriber = {
+  model: TRANSCRIBE_MODEL,
+  pricing: TRANSCRIBE_PRICING,
+  maxAudioBytes: TRANSCRIBE_MAX_BYTES,
+  transcribe(apiKey, input, options = {}) {
+    // Cópia com buffer próprio: o `Blob` não aceita a vista genérica de `Uint8Array`.
+    const audio = new Uint8Array(input.audio.byteLength);
+    audio.set(input.audio);
+    const form = new FormData();
+    form.set("model", TRANSCRIBE_MODEL);
+    form.set("language", input.language.split("-")[0] ?? input.language);
+    form.set("response_format", "json");
+    form.set("file", new Blob([audio], { type: "audio/wav" }), "gravacao.wav");
+    return transcribeOverHttp(
+      {
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/audio/transcriptions`,
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        model: TRANSCRIBE_MODEL,
+        pricing: TRANSCRIBE_PRICING,
+        read: (body) => transcriptionBody.safeParse(body).data?.text.trim() ?? null,
+        usage: (body) => {
+          const usage = transcriptionUsage.safeParse(body).data?.usage;
+          return usage ? { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } : { seconds: input.seconds };
+        },
+        classify: classifyError,
+      },
+      options,
+    );
+  },
+};
+
 const engine: VoiceEngine = {
   id: "openai-realtime",
   label: "OpenAI Realtime",
@@ -287,7 +340,7 @@ const engine: VoiceEngine = {
         audio: {
           input: {
             format: AUDIO_FORMAT,
-            transcription: { model: "gpt-4o-mini-transcribe", language: config.language.split("-")[0] },
+            transcription: { model: TRANSCRIBE_MODEL, language: config.language.split("-")[0] },
             turn_detection: { type: "server_vad", create_response: true, interrupt_response: true },
           },
           output: { format: AUDIO_FORMAT, voice: config.voiceId ?? DEFAULT_VOICE },
@@ -348,6 +401,8 @@ const engine: VoiceEngine = {
       options,
     );
   },
+
+  transcription,
 
   checkKey(apiKey, options = {}) {
     const model = options.model ?? DEFAULT_MODEL;

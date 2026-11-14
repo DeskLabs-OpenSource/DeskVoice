@@ -150,6 +150,31 @@ function OutcomeSetting({ t }: { t: SettingsDictionary }) {
   );
 }
 
+/** Transcrever a gravação de uma chamada sem texto: desligado de fábrica, porque o áudio vai ao provedor e é pago. */
+function TranscriptionSetting({ t }: { t: SettingsDictionary }) {
+  const canConfigure = useCanConfigure();
+  const setting = useApi<Setting<boolean>>("/settings/calls.transcription_enabled");
+  const save = useAction();
+  const enabled = setting.data?.value === true;
+  return (
+    <Panel title={t.transcriptionTitle} description={t.transcriptionLead}>
+      <div className="grid max-w-xl gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Switch
+            checked={enabled}
+            onChange={(next) => void save.run(() => put("calls.transcription_enabled", next || null)).then(setting.reload)}
+            label={t.transcriptionSwitch}
+            disabled={!canConfigure || !setting.data || save.busy}
+          />
+          <ActionStatus action={save} />
+        </div>
+        <p>{t.transcriptionCost}</p>
+        <Notice tone={enabled ? "warn" : "neutral"}>{t.transcriptionData}</Notice>
+      </div>
+    </Panel>
+  );
+}
+
 export default function AiSettings() {
   const t = useDict(ptBR, en, es);
   const common = useDict(commonPtBR, commonEn, commonEs);
@@ -189,6 +214,7 @@ export default function AiSettings() {
         </div>
       </Panel>
       <OutcomeSetting t={t} />
+      <TranscriptionSetting t={t} />
     </>
   );
 }
