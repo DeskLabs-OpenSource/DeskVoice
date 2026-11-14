@@ -1,6 +1,6 @@
 import { enqueueTask, withOrg, type CallStatus, type OrgQuery } from "@deskvoice/core";
 import { hasWhatsAppConnector } from "@deskvoice/tools";
-import { OUTCOME_SETTING, outcomeEnabledOf } from "@deskvoice/voice-engine";
+import { ANALYSIS_SETTING, OUTCOME_SETTING, analysisEnabledOf, outcomeEnabledOf } from "@deskvoice/voice-engine";
 import type { Routine } from "../types";
 
 export interface CallDigest {
@@ -111,10 +111,13 @@ const routine: Routine = {
       const written = await q.exec("update calls set summary = $2 where id = $1 and erased_at is null", [callId, summary]);
       if (written === 0) return;
       await notifyOwner(q, callId, deps.clock.now());
-      // O desfecho comercial é do motor do agente: vai para a fila em separado, para o resumo não
-      // depender de provedor nenhum para ficar pronto. Desligado (de fábrica), nem entra na fila.
-      const outcome = await q.one<{ value: unknown }>("select value from settings where key = $1", [OUTCOME_SETTING]);
-      if (outcomeEnabledOf(outcome?.value)) await enqueueTask(q, { kind: "classify_call_outcome", payload: {}, callId });
+      // O desfecho comercial e a análise são do motor do agente, na mesma rotina e na mesma chamada
+      // paga: vão para a fila em separado, para o resumo não depender de provedor nenhum para ficar
+      // pronto. As duas desligadas (de fábrica), nem entra na fila.
+      const settings = await q.many<{ key: string; value: unknown }>("select key, value from settings where key = any($1)", [[OUTCOME_SETTING, ANALYSIS_SETTING]]);
+      const outcomeOn = outcomeEnabledOf(settings.find((row) => row.key === OUTCOME_SETTING)?.value);
+      const analysisOn = analysisEnabledOf(settings.find((row) => row.key === ANALYSIS_SETTING)?.value);
+      if (outcomeOn || analysisOn) await enqueueTask(q, { kind: "classify_call_outcome", payload: {}, callId });
     });
   },
 };

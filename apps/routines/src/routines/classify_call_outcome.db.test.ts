@@ -1,7 +1,7 @@
-import { encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
+import { callAnalysisSchema, encryptSecret, recordEvent, scoreOf, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createCall, createOrganization, depsFor, eventsOf, openTestDbs, t0, task } from "../../test/helpers";
-import { OUTCOME_SETTING } from "@deskvoice/voice-engine";
+import { ANALYSIS_CRITERIA, ANALYSIS_SETTING, OUTCOME_SETTING } from "@deskvoice/voice-engine";
 import classifyCallOutcome from "./classify_call_outcome";
 
 const { app, owner } = openTestDbs();
@@ -15,10 +15,10 @@ afterAll(async () => {
   await owner.close();
 });
 
-const comAgente = async (label: string): Promise<{ org: string; callId: string }> => {
+const comAgente = async (label: string, motor = MOTOR): Promise<{ org: string; callId: string }> => {
   const org = await createOrganization(app, label);
   const agentId = await withSystem(app, async (q) => {
-    const row = await q.one<{ id: string }>("insert into agents (organization_id, name, engine) values ($1, $2, $3) returning id", [org, "Recepção", MOTOR]);
+    const row = await q.one<{ id: string }>("insert into agents (organization_id, name, engine) values ($1, $2, $3) returning id", [org, "Recepção", motor]);
     return row?.id as string;
   });
   const callId = await createCall(app, org, t0);
@@ -221,5 +221,275 @@ describe("classify_call_outcome", () => {
     expect(desfecho?.outcome).toBe("booked");
     expect(desfecho?.outcome_evidence).toBeNull();
     expect((await custoDe(callId)).call).toBe(CUSTO);
+  });
+});
+
+/** Liga uma chave booleana da organização. */
+const liga = (org: string, key: string): Promise<number> =>
+  withSystem(app, (q) => q.exec("insert into settings (organization_id, key, value) values ($1, $2, 'true'::jsonb)", [org, key]));
+
+/** Só a chave do motor, sem ligar nada. */
+const soChave = (org: string, motor = MOTOR): Promise<number> =>
+  withSystem(app, (q) => q.exec("insert into settings (organization_id, key, value) values ($1, $2, to_jsonb($3::text))", [org, `engine.${motor}.api_key`, encryptSecret("sk-de-teste", secretKey)]));
+
+const falaDoAgente = (org: string, callId: string, texto: string): Promise<void> =>
+  withOrg(app, org, (q) => recordEvent(q, callId, "transcript_agent", { text: texto }, t0));
+
+const OBJECAO = { objection: "Preço", quote: "achei o preço caro demais", response: "Ofereceu parcelamento em três vezes.", handled: "addressed" };
+
+/** A resposta completa que o modelo devolveria, com os critérios num objeto por id. */
+const completa = (overrides: Record<string, unknown> = {}) => ({
+  outcome: "booked",
+  confidence: 0.9,
+  evidence: "Então pode marcar para terça.",
+  criteria: {
+    opening: { status: "met", evidence: "Boa tarde, aqui é a Clínica Exemplo." },
+    discovery: { status: "partial", evidence: "" },
+    objections: { status: "met", evidence: "Temos parcelamento em três vezes." },
+    accuracy: { status: "met", evidence: "frase que ninguém disse" },
+    closing: { status: "missed", evidence: "" },
+  },
+  temperature: { start: "warm", middle: "cold", end: "hot" },
+  objections: [OBJECAO],
+  strengths: ["Ofereceu alternativa de pagamento."],
+  weaknesses: ["Não confirmou o horário."],
+  nextStep: "Confirmar a consulta de terça.",
+  ...overrides,
+});
+/** met, partial, met, met, missed: 2 + 1 + 2 + 2 + 0. */
+const NOTA = 7;
+
+const conversa = async (org: string, callId: string): Promise<void> => {
+  await falaDoAgente(org, callId, "Boa tarde, aqui é a Clínica Exemplo. Em que posso ajudar?");
+  await fala(org, callId, "Queria marcar uma consulta, mas achei o preço caro demais.");
+  await falaDoAgente(org, callId, "Entendo. Temos parcelamento em três vezes.");
+  await fala(org, callId, "Então pode marcar para terça.");
+};
+
+const analiseDe = (callId: string) =>
+  withSystem(app, (q) =>
+    q.one<{ analysis: Record<string, unknown> | null; analysis_score: number | null; analyzed_at: Date | null; outcome: string | null; outcome_evidence: string | null }>(
+      "select analysis, analysis_score, analyzed_at, outcome, outcome_evidence from calls where id = $1",
+      [callId],
+    ),
+  );
+
+const eventosDe = async (callId: string, kind: string) => (await eventsOf(app, callId)).filter((event) => event.kind === kind).map((event) => event.payload);
+
+/** O corpo do pedido que o `fetch` falso recebeu, já lido. */
+const pedidoDe = (fetch: typeof globalThis.fetch, index = 0) => JSON.parse(String((vi.mocked(fetch).mock.calls[index]?.[1] as RequestInit).body));
+
+describe("classify_call_outcome: análise da ligação", () => {
+  it("com as duas chaves desligadas não chama o provedor nem registra nada, mesmo com chave", async () => {
+    const { org, callId } = await comAgente("analise desligada");
+    await soChave(org);
+    await conversa(org, callId);
+    const fetch = openai(completa());
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await analiseDe(callId)).toMatchObject({ analysis: null, analysis_score: null, analyzed_at: null, outcome: null });
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([]);
+  });
+
+  it("só o desfecho ligado: o pedido continua o só de desfecho, e nenhum evento de análise", async () => {
+    const { org, callId } = await comAgente("analise so desfecho");
+    await comChave(org);
+    await conversa(org, callId);
+    const fetch = openai({ outcome: "booked", confidence: 0.9, evidence: "Então pode marcar para terça." });
+
+    await roda(org, callId, fetch);
+
+    expect(pedidoDe(fetch).response_format.json_schema.name).toBe("desfecho");
+    expect(await analiseDe(callId)).toMatchObject({ analysis: null, analysis_score: null, outcome: "booked" });
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([]);
+    expect(await eventosDe(callId, "call_analyzed")).toEqual([]);
+  });
+
+  it("sucesso: uma chamada paga, a nota da régua, a análise conferida e call_analyzed na linha do tempo", async () => {
+    const { org, callId } = await comAgente("analise sucesso");
+    await soChave(org);
+    // Só a análise ligada: o desfecho vem junto, já pago.
+    await liga(org, ANALYSIS_SETTING);
+    await conversa(org, callId);
+    // O modelo manda uma nota; ela não é lida.
+    const fetch = openai({ ...completa(), score: 10 });
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(pedidoDe(fetch).response_format.json_schema.name).toBe("analise");
+    const linha = await analiseDe(callId);
+    expect(linha?.outcome).toBe("booked");
+    expect(linha?.analysis_score).toBe(NOTA);
+    expect(linha?.analyzed_at).toEqual(t0);
+    const analysis = callAnalysisSchema.parse(linha?.analysis);
+    expect(scoreOf(analysis.criteria)).toBe(NOTA);
+    expect(analysis).toMatchObject({ rubricVersion: 1, model: "gpt-5-nano", droppedObjections: 0, objections: [OBJECAO], nextStep: "Confirmar a consulta de terça." });
+    expect(analysis.criteria.map((criterion) => criterion.id)).toEqual([...ANALYSIS_CRITERIA]);
+    // A evidência que ninguém disse sai; o status fica.
+    expect(analysis.criteria.find((criterion) => criterion.id === "accuracy")).toEqual({ id: "accuracy", status: "met", evidence: "" });
+    expect(analysis.criteria.find((criterion) => criterion.id === "opening")?.evidence).toBe("Boa tarde, aqui é a Clínica Exemplo.");
+    expect(linha?.analysis).not.toHaveProperty("score");
+    expect(await eventosDe(callId, "call_analyzed")).toEqual([{ score: NOTA, rubricVersion: 1, model: "gpt-5-nano", costCents: CUSTO, droppedObjections: 0 }]);
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([]);
+    expect(await custoDe(callId)).toEqual({ call: CUSTO, extrato: [{ engine: MOTOR, input_tokens: 1_000_000, output_tokens: 100_000, cost_cents: CUSTO }] });
+  });
+
+  it("reprocessar não paga de novo, com uma ou com as duas chaves ligadas", async () => {
+    const { org, callId } = await comAgente("analise reprocesso");
+    await comChave(org);
+    await liga(org, ANALYSIS_SETTING);
+    await conversa(org, callId);
+    const fetch = openai(completa());
+
+    await roda(org, callId, fetch);
+    await roda(org, callId, fetch);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect((await custoDe(callId)).extrato).toHaveLength(1);
+    expect(await eventosDe(callId, "call_analyzed")).toHaveLength(1);
+  });
+
+  it("a análise ligada depois do desfecho gravado ainda é pedida, uma vez, e o desfecho não é reescrito", async () => {
+    const { org, callId } = await comAgente("analise depois do desfecho");
+    await comChave(org);
+    await liga(org, ANALYSIS_SETTING);
+    await conversa(org, callId);
+    await withSystem(app, (q) => q.exec("update calls set outcome = 'callback_requested' where id = $1", [callId]));
+    const fetch = openai(completa());
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(await analiseDe(callId)).toMatchObject({ outcome: "callback_requested", analysis_score: NOTA });
+  });
+
+  it("descarta a objeção inventada e a de uma palavra, e conta as duas", async () => {
+    const { org, callId } = await comAgente("analise objecao inventada");
+    await soChave(org);
+    await liga(org, ANALYSIS_SETTING);
+    await conversa(org, callId);
+    const inventada = { ...OBJECAO, objection: "Confiança", quote: "não confio nessa clínica" };
+    // "terça" está na fala de quem ligou, mas uma palavra só não sustenta objeção.
+    const curta = { ...OBJECAO, objection: "Data", quote: "terça" };
+
+    await roda(org, callId, openai(completa({ objections: [OBJECAO, inventada, curta] })));
+
+    const analysis = callAnalysisSchema.parse((await analiseDe(callId))?.analysis);
+    expect(analysis.objections).toEqual([OBJECAO]);
+    expect(analysis.droppedObjections).toBe(2);
+    expect((await eventosDe(callId, "call_analyzed"))[0]).toMatchObject({ droppedObjections: 2 });
+  });
+
+  it("sem fala transcrita não gasta chamada e diz por quê", async () => {
+    const { org, callId } = await comAgente("analise sem fala");
+    await comChave(org);
+    await liga(org, ANALYSIS_SETTING);
+    const fetch = openai(completa());
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([{ reason: "no_speech", engine: MOTOR }]);
+    expect(await falhasDe(callId)).toEqual([]);
+  });
+
+  it("sem chave não gasta chamada e diz por quê", async () => {
+    const { org, callId } = await comAgente("analise sem chave");
+    await liga(org, ANALYSIS_SETTING);
+    await conversa(org, callId);
+    const fetch = openai(completa());
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([{ reason: "no_key", engine: MOTOR }]);
+    expect((await analiseDe(callId))?.analysis).toBeNull();
+  });
+
+  it("motor simulado: não analisa, diz por quê, e o desfecho segue como antes", async () => {
+    const { org, callId } = await comAgente("analise simulado", "simulated");
+    await liga(org, OUTCOME_SETTING);
+    await liga(org, ANALYSIS_SETTING);
+    await conversa(org, callId);
+    const fetch = openai(completa());
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([{ reason: "engine_cannot_analyze", engine: "simulated" }]);
+    expect(await analiseDe(callId)).toMatchObject({ analysis: null, analysis_score: null, outcome: null });
+    expect(await falhasDe(callId)).toEqual([]);
+  });
+
+  it("no teto de custo do agente não cobra nada, e os dois eventos dizem por quê", async () => {
+    const { org, callId } = await comAgente("analise teto");
+    await comChave(org);
+    await liga(org, ANALYSIS_SETTING);
+    await withSystem(app, (q) => q.exec("update calls set cost_cents = 500 where id = $1", [callId]));
+    await conversa(org, callId);
+    const fetch = openai(completa());
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).not.toHaveBeenCalled();
+    const teto = { reason: "cost_ceiling", engine: MOTOR, costCents: 500, ceilingCents: 500 };
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([teto]);
+    expect(await falhasDe(callId)).toEqual([teto]);
+    expect(await custoDe(callId)).toEqual({ call: 500, extrato: [] });
+  });
+
+  it("provedor falhando: com as duas chaves, os dois eventos; só com a análise, só o dela", async () => {
+    const casos: Array<[string, typeof globalThis.fetch, Record<string, unknown>]> = [
+      ["401", erro(401), { reason: "rejected", status: 401, costCents: 0 }],
+      ["fora do ar", erro(500), { reason: "unreachable", status: 500, costCents: 0 }],
+      // Fora da forma foi cobrado: o custo entra uma vez, e nada é gravado, nem o desfecho.
+      ["seis objeções", openai(completa({ objections: Array.from({ length: 6 }, () => OBJECAO) })), { reason: "unexpected_response", status: 200, costCents: CUSTO }],
+      ["só o desfecho", openai({ outcome: "booked", confidence: 0.9, evidence: "Então pode marcar para terça." }), { reason: "unexpected_response", status: 200, costCents: CUSTO }],
+    ];
+    for (const duas of [true, false]) {
+      for (const [nome, fetch, esperado] of casos) {
+        const rotulo = `${nome} (${duas ? "duas chaves" : "só análise"})`;
+        const { org, callId } = await comAgente(`analise falha ${rotulo}`);
+        await soChave(org);
+        if (duas) await liga(org, OUTCOME_SETTING);
+        await liga(org, ANALYSIS_SETTING);
+        await conversa(org, callId);
+        vi.mocked(fetch).mockClear();
+
+        await roda(org, callId, fetch);
+
+        expect(fetch, rotulo).toHaveBeenCalledTimes(1);
+        const evento = { engine: MOTOR, model: "gpt-5-nano", ...esperado };
+        expect(await eventosDe(callId, "analysis_not_done"), rotulo).toEqual([evento]);
+        expect(await falhasDe(callId), rotulo).toEqual(duas ? [evento] : []);
+        expect(await analiseDe(callId), rotulo).toMatchObject({ analysis: null, analysis_score: null, analyzed_at: null, outcome: null });
+        expect(await custoDe(callId), rotulo).toMatchObject({ call: esperado.costCents, extrato: esperado.costCents ? [{ cost_cents: CUSTO }] : [] });
+        expect(JSON.stringify(await eventsOf(app, callId)), rotulo).not.toContain("sk-de-teste");
+      }
+    }
+  });
+
+  it("o titular pede o apagamento enquanto o provedor responde: o desfecho, a nota e o custo ficam, o texto da análise não", async () => {
+    const { org, callId } = await comAgente("analise apagada no meio");
+    await comChave(org);
+    await liga(org, ANALYSIS_SETTING);
+    await conversa(org, callId);
+    const responde = openai(completa());
+    // O apagamento confirma depois de a rotina ler as falas e antes de ela gravar.
+    const apagaNoMeio = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      await withSystem(app, (q) => q.exec("update calls set erased_at = $2 where id = $1", [callId, t0]));
+      return responde(...args);
+    }) as unknown as typeof fetch;
+
+    await roda(org, callId, apagaNoMeio);
+
+    expect(await analiseDe(callId)).toMatchObject({ analysis: null, analysis_score: NOTA, analyzed_at: t0, outcome: "booked", outcome_evidence: null });
+    expect((await custoDe(callId)).call).toBe(CUSTO);
+    // Rodar de novo não paga outra vez para a mesma chamada apagada.
+    await roda(org, callId, apagaNoMeio);
+    expect(apagaNoMeio).toHaveBeenCalledTimes(1);
   });
 });

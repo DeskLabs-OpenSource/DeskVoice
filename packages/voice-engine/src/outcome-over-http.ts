@@ -1,5 +1,6 @@
 import { byStatus } from "./key-check";
-import type { OutcomeGuess } from "./outcome";
+import { ANALYSIS_TIMEOUT_MS, readAnalysisGuess, type AnalysisGuess } from "./analysis";
+import { readOutcomeGuess, type OutcomeGuess } from "./outcome";
 import { estimateCostCents } from "./pricing";
 import type { ClassifyFailure, ClassifyOptions, ClassifyResult, EnginePricing, KeyCheckResult, Usage } from "./types";
 
@@ -10,6 +11,12 @@ const scheduleTimeout = (fn: () => void, delayMs: number): (() => void) => {
   return () => clearTimeout(timer);
 };
 
+/** O que se leu de um 200: o palpite do desfecho e, no pedido completo, a análise. */
+export interface OutcomeReading {
+  guess: OutcomeGuess;
+  analysis?: AnalysisGuess;
+}
+
 export interface OutcomeRequest {
   url: string;
   headers: Record<string, string>;
@@ -17,13 +24,34 @@ export interface OutcomeRequest {
   /** O modelo de texto pedido: o preço abaixo é o dele. */
   model: string;
   pricing: EnginePricing;
-  /** Lê o palpite do corpo de um 200. `null` quando o corpo não tem o que esperar. */
-  read: (body: unknown) => OutcomeGuess | null;
+  /** Lê o palpite (e, no pedido completo, a análise) do corpo de um 200. `null` quando o corpo não tem o que esperar. */
+  read: (body: unknown) => OutcomeReading | null;
   /** Lê o consumo que o provedor declarou no corpo de um 200. Sem a declaração, `{}`. */
   usage: (body: unknown) => Usage;
   /** O que o provedor diz de próprio em respostas de erro; `undefined` cai na regra geral do status. */
   classify?: (status: number, body: unknown) => KeyCheckResult | undefined;
 }
+
+/**
+ * Lê o texto JSON que o provedor pôs na resposta: só o desfecho, ou o desfecho com a análise
+ * (`analyze`). Texto que não é JSON, ou fora da forma pedida, é `null`.
+ */
+export function readClassifyText(text: unknown, analyze: boolean): OutcomeReading | null {
+  if (typeof text !== "string") return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (analyze) return readAnalysisGuess(raw);
+  const guess = readOutcomeGuess(raw);
+  return guess ? { guess } : null;
+}
+
+/** O prazo do pedido: o de quem chamou, ou 30 s no pedido completo. Sem nada, o padrão de 10 s. */
+export const classifyOptionsFor = (options: ClassifyOptions, analyze: boolean): ClassifyOptions =>
+  analyze && options.timeoutMs === undefined ? { ...options, timeoutMs: ANALYSIS_TIMEOUT_MS } : options;
 
 const asFailure = (result: KeyCheckResult): ClassifyFailure => (result === "accepted" || result === "not_needed" ? "unexpected_response" : result);
 
@@ -69,9 +97,9 @@ export async function classifyOutcomeOverHttp(request: OutcomeRequest, options: 
     }
     if (!response.ok) return failed(asFailure(request.classify?.(response.status, body) ?? byStatus(response.status)), response.status);
     const usage = request.usage(body);
-    const guess = request.read(body);
-    if (!guess) return failed("unexpected_response", response.status, usage);
-    return { ok: true, guess, model, usage, costCents: estimateCostCents(pricing, usage) };
+    const reading = request.read(body);
+    if (!reading) return failed("unexpected_response", response.status, usage);
+    return { ok: true, ...reading, model, usage, costCents: estimateCostCents(pricing, usage) };
   } finally {
     cancel();
   }

@@ -1,7 +1,7 @@
 import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
-import { OUTCOME_SETTING } from "@deskvoice/voice-engine/types";
+import { ANALYSIS_SETTING, OUTCOME_SETTING } from "@deskvoice/voice-engine/types";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -117,6 +117,9 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     // Classificar o desfecho de cada ligação com o motor do agente. Ausente vale desligado: é uma
     // chamada paga ao provedor por ligação, e o dono decide.
     [OUTCOME_SETTING]: { ...plain(z.boolean()), fallback: false },
+    // Analisar cada ligação no fim (nota pela régua, temperatura, objeções). Ausente vale desligado:
+    // a análise vem na mesma chamada paga do desfecho, mais longa, e o dono decide.
+    [ANALYSIS_SETTING]: { ...plain(z.boolean()), fallback: false },
     "network.public_ip": plain(z.ipv4()),
     // Ligações recebidas pela operadora ao mesmo tempo. Ausente vale o teto de fábrica.
     [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },
