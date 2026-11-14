@@ -113,7 +113,7 @@ export async function createPhoneNumber(app: Db, organizationId: string, trunkId
 export async function createCall(app: Db, organizationId: string, agentId: string, at: Date, direction: "inbound" | "outbound" = "inbound"): Promise<string> {
   const id = randomUUID();
   await withSystem(app, (q) =>
-    q.exec("insert into calls (id, organization_id, agent_id, direction, status, started_at) values ($1, $2, $3, $4, 'ringing', $5)", [id, organizationId, agentId, direction, at]),
+    q.exec("insert into calls (id, organization_id, agent_id, direction, channel, status, started_at) values ($1, $2, $3, $4, 'phone', 'ringing', $5)", [id, organizationId, agentId, direction, at]),
   );
   return id;
 }

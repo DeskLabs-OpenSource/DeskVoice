@@ -102,8 +102,8 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
       if (checked.reached) refusal = "inbound_limit_reached";
     }
     const call = await q.one<{ id: string }>(
-      `insert into calls (organization_id, agent_id, direction, from_e164, to_e164, status, end_reason, started_at, ended_at)
-       values ($1, $2, 'inbound', $3, $4, $5, $6, $7, $8) returning id`,
+      `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
+       values ($1, $2, 'inbound', 'phone', $3, $4, $5, $6, $7, $8) returning id`,
       [route.organizationId, route.agentId, from, to, refusal ? "refused" : "ringing", refusal, clock.now(), refusal ? clock.now() : null],
     );
     if (!call) throw new Error("Inbound call was not created");

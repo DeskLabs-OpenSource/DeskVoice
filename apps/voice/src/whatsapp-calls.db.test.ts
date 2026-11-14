@@ -252,7 +252,7 @@ describe("ligação pelo WhatsApp: quando o agente não atende, ela segue tocand
     const { organizationId, agentId, ring } = await connected("wa-limit");
     await putSetting(app, organizationId, INBOUND_LIMIT_SETTING, 1, false);
     await withSystem(app, (q) =>
-      q.exec("insert into calls (organization_id, agent_id, direction, from_e164, to_e164, status, started_at) values ($1, $2, 'inbound', '+5531911112222', '+553144445555', 'in_progress', $3)", [
+      q.exec("insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, started_at) values ($1, $2, 'inbound', 'whatsapp', '+5531911112222', '+553144445555', 'in_progress', $3)", [
         organizationId,
         agentId,
         harness.clock.now(),

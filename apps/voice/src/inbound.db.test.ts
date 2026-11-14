@@ -225,7 +225,7 @@ describe("teto de ligações recebidas ao mesmo tempo", { timeout: 120_000 }, ()
     // A chamada pelo navegador nasce como `web-calls.ts` a cria: `inbound`, sem número de destino.
     await createCall(app, organizationId, agentId ?? "", fakeClock().now());
     await withSystem(app, (q) =>
-      q.exec("insert into calls (organization_id, agent_id, direction, from_e164, to_e164, status, started_at) values ($1, $2, 'outbound', $3, '+5531988887777', 'in_progress', $4)", [organizationId, agentId, NUMBER, fakeClock().now()]),
+      q.exec("insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, started_at) values ($1, $2, 'outbound', 'phone', $3, '+5531988887777', 'in_progress', $4)", [organizationId, agentId, NUMBER, fakeClock().now()]),
     );
     expect((await receive(incoming(trunkId))).ari.log.at(-1)).toBe(ACCEPTED);
     expect((await receive(incoming(trunkId))).ari.log).toEqual(BUSY);

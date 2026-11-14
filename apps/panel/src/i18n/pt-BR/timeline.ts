@@ -55,6 +55,7 @@ const timeline = {
     call_started: "A ligação chegou",
     call_started_whatsapp: "A ligação chegou pelo WhatsApp",
     call_started_web: "A chamada pelo navegador começou",
+    call_started_simulated: "A chamada simulada começou",
     call_started_outbound: "O agente iniciou a ligação",
     call_answered: "O agente atendeu",
     recording_notice: "Aviso de gravação",

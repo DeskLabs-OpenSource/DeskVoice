@@ -102,7 +102,7 @@ export function Timeline({
       }
       case "call_started": {
         const outbound = p.direction === "outbound";
-        const said = outbound ? e.call_started_outbound : p.channel === "whatsapp" ? e.call_started_whatsapp : p.channel === "web" ? e.call_started_web : e.call_started;
+        const said = outbound ? e.call_started_outbound : p.channel === "whatsapp" ? e.call_started_whatsapp : p.channel === "web" ? e.call_started_web : p.channel === "simulated" ? e.call_started_simulated : e.call_started;
         return { ...base, tone: "neutral", icon: outbound ? PhoneOutgoing : PhoneIncoming, body: <Quiet>{said}</Quiet> };
       }
       case "call_answered":

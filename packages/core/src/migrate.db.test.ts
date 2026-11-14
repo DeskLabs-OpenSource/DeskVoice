@@ -125,13 +125,19 @@ describe("runMigrations", () => {
     ]);
   });
 
-  it("as chamadas que já existem herdam o canal do evento; sem canal no evento, ficam como linha", async () => {
+  it("as chamadas que já existem herdam o canal do evento, a simulada vira simulada, o resto fica como linha, e a coluna perde o padrão", async () => {
     const CHANNEL = "20261114T014000_canal_da_chamada.sql";
     for (const name of await readdir(REAL_MIGRATIONS)) if (name < CHANNEL) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
     await runMigrations(db, dir);
     const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
-    const call = async (event: object | null): Promise<string> => {
-      const id = (await db.pool.query<{ id: string }>("insert into calls (organization_id, direction, status, started_at) values ($1, 'inbound', 'completed', now()) returning id", [org])).rows[0]?.id ?? "";
+    const call = async (event: object | null, row: { engine?: string; to?: string } = {}): Promise<string> => {
+      const id = (
+        await db.pool.query<{ id: string }>("insert into calls (organization_id, direction, status, engine, to_e164, started_at) values ($1, 'inbound', 'completed', $2, $3, now()) returning id", [
+          org,
+          row.engine ?? null,
+          row.to ?? null,
+        ])
+      ).rows[0]?.id ?? "";
       if (event) await db.pool.query("insert into call_events (organization_id, call_id, at, kind, payload) values ($1, $2, now(), 'call_started', $3)", [org, id, event]);
       return id;
     };
@@ -139,9 +145,25 @@ describe("runMigrations", () => {
     const web = await call({ direction: "inbound", channel: "web", userId: "u" });
     const phone = await call({ direction: "inbound" });
     const silent = await call(null);
+    // A simulada do botão não registrava canal: motor simulado e nenhum número chamado.
+    const simulated = await call({ direction: "inbound" }, { engine: "simulated" });
+    // Ligação da linha com agente de motor simulado: tem o número chamado, continua linha.
+    const lineWithSimulatedEngine = await call({ direction: "inbound" }, { engine: "simulated", to: "+553132221100" });
+    // Navegador com agente de motor simulado: o evento manda.
+    const webWithSimulatedEngine = await call({ direction: "inbound", channel: "web" }, { engine: "simulated" });
     await copyFile(path.join(REAL_MIGRATIONS, CHANNEL), path.join(dir, CHANNEL));
     expect(await runMigrations(db, dir)).toEqual([CHANNEL]);
     const channels = new Map((await db.pool.query<{ id: string; channel: string }>("select id, channel from calls")).rows.map((row) => [row.id, row.channel]));
-    expect([channels.get(whatsapp), channels.get(web), channels.get(phone), channels.get(silent)]).toEqual(["whatsapp", "web", "phone", "phone"]);
+    expect([whatsapp, web, phone, silent, simulated, lineWithSimulatedEngine, webWithSimulatedEngine].map((id) => channels.get(id))).toEqual([
+      "whatsapp",
+      "web",
+      "phone",
+      "phone",
+      "simulated",
+      "phone",
+      "web",
+    ]);
+    // Sem padrão depois do backfill: quem cria uma chamada diz o canal.
+    await expect(db.pool.query("insert into calls (organization_id, direction, status, started_at) values ($1, 'inbound', 'completed', now())", [org])).rejects.toThrow(/channel/);
   });
 });

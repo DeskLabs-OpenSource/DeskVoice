@@ -30,7 +30,7 @@ export async function createOrganization(app: Db, label: string): Promise<string
 export async function createCall(app: Db, organizationId: string, startedAt: Date): Promise<string> {
   const id = randomUUID();
   await withSystem(app, (q) =>
-    q.exec("insert into calls (id, organization_id, direction, status, started_at) values ($1, $2, 'inbound', 'in_progress', $3)", [id, organizationId, startedAt]),
+    q.exec("insert into calls (id, organization_id, direction, channel, status, started_at) values ($1, $2, 'inbound', 'phone', 'in_progress', $3)", [id, organizationId, startedAt]),
   );
   return id;
 }

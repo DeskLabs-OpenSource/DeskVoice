@@ -32,7 +32,7 @@ const check = (organizationId: string, to: string, now: { now(): Date }, line?: 
 
 const call = (organizationId: string, startedAt: string, options: { to?: string; from?: string | null; direction?: string; status?: string } = {}): Promise<number> =>
   withSystem(app, (q) =>
-    q.exec("insert into calls (organization_id, direction, from_e164, to_e164, status, started_at) values ($1, $2, $3, $4, $5, $6)", [
+    q.exec("insert into calls (organization_id, direction, channel, from_e164, to_e164, status, started_at) values ($1, $2, 'phone', $3, $4, $5, $6)", [
       organizationId,
       options.direction ?? "outbound",
       options.from === undefined ? "+553133334444" : options.from,

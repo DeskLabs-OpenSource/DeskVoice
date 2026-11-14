@@ -42,8 +42,8 @@ export async function startOutboundCall(deps: OutboundDeps, input: { organizatio
 
     const decision = await checkOutboundAllowed(q, to, clock, trunk.caller_id_e164);
     const call = await q.one<{ id: string }>(
-      `insert into calls (organization_id, agent_id, direction, from_e164, to_e164, status, end_reason, started_at, ended_at)
-       values ($1, $2, 'outbound', $3, $4, $5, $6, $7, $8) returning id`,
+      `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
+       values ($1, $2, 'outbound', 'phone', $3, $4, $5, $6, $7, $8) returning id`,
       [input.organizationId, input.agentId, trunk.caller_id_e164, to, decision.allowed ? "ringing" : "refused", decision.allowed ? null : decision.code, clock.now(), decision.allowed ? null : clock.now()],
     );
     if (!call) throw new Error("Outbound call was not created");
