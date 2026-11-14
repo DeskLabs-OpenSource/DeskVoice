@@ -213,6 +213,11 @@ const eventSchema = z.discriminatedUnion("type", [
   /** `starting`, `ringing`, `connected` (áudio com o WhatsApp de pé), `reconnecting`, `ended`. */
   z.object({ type: z.literal("call-status"), sessionId: z.string().min(1), id: z.string().min(1), status: z.string() }),
   z.object({ type: z.literal("call-ended"), id: z.string().min(1), reason: z.string().nullish() }),
+  /** O retrato das ligações vivas, a cada conexão do SSE e a cada mudança (`broker.go:207`, `callregistry.go:200`). */
+  z.object({
+    type: z.literal("call-list"),
+    calls: z.array(z.object({ sessionId: z.string().min(1), callId: z.string().min(1), owner: z.string().nullish(), status: z.string() })),
+  }),
 ]);
 export type WacallsEvent = z.output<typeof eventSchema>;
 
