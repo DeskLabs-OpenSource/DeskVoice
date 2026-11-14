@@ -43,10 +43,14 @@ function followsRubric(criteria: readonly { id: RubricCriterionId }[]): boolean 
 }
 const RUBRIC_ORDER = { message: `criteria must list ${RUBRIC_IDS.join(", ")}, once each, in this order` };
 
+/** Até quantas objeções a análise guarda, e quantos caracteres por campo de objeção. */
+export const MAX_OBJECTIONS = 5;
+export const MAX_OBJECTION_FIELD = 280;
+
 const objection = z.strictObject({
-  objection: z.string(),
-  quote: z.string(),
-  response: z.string(),
+  objection: z.string().max(MAX_OBJECTION_FIELD),
+  quote: z.string().max(MAX_OBJECTION_FIELD),
+  response: z.string().max(MAX_OBJECTION_FIELD),
   handled: z.enum(OBJECTION_HANDLING),
 });
 
@@ -56,7 +60,7 @@ export const callAnalysisSchema = z.strictObject({
   model: z.string().min(1),
   criteria: z.array(z.strictObject({ id: criterionId, status: criterionStatus, evidence: z.string() })).refine(followsRubric, RUBRIC_ORDER),
   temperature: temperatureArc,
-  objections: z.array(objection),
+  objections: z.array(objection).max(MAX_OBJECTIONS),
   strengths: z.array(z.string().max(200)).max(3),
   weaknesses: z.array(z.string().max(200)).max(3),
   nextStep: z.string().max(280),
@@ -130,15 +134,26 @@ function appearsIn(quote: string, turns: readonly string[]): boolean {
 }
 
 /**
+ * Citação de objeção mais curta que isto, depois de normalizar, não sustenta objeção nenhuma: "não"
+ * e "sim" aparecem em toda conversa. Três é um palpite, não uma medida.
+ */
+export const MIN_OBJECTION_QUOTE_WORDS = 3;
+
+const wordCount = (text: string): number => (text === "" ? 0 : text.split(" ").length);
+
+/**
  * Confere a resposta do provedor contra a transcrição enviada, antes de gravar. Objeção cuja citação
- * não aparece numa fala de quem ligou sai, e conta em `droppedObjections`. Evidência de critério que
+ * não aparece numa fala de quem ligou sai, e conta em `droppedObjections`; também sai a de citação
+ * com menos de `MIN_OBJECTION_QUOTE_WORDS` palavras. Evidência de critério que
  * não aparece em fala nenhuma vira `""`, e o status fica. É o que impede a tela de mostrar uma
  * objeção que ninguém disse.
  */
 export function verifyAgainstTranscript(draft: CallAnalysisDraft, transcript: readonly TranscriptTurn[]): CallAnalysis {
   const callerTurns = transcript.filter((turn) => turn.speaker === "user").map((turn) => normalize(turn.text));
   const allTurns = transcript.map((turn) => normalize(turn.text));
-  const objections = draft.objections.filter((candidate) => appearsIn(candidate.quote, callerTurns));
+  const objections = draft.objections.filter(
+    (candidate) => wordCount(normalize(candidate.quote)) >= MIN_OBJECTION_QUOTE_WORDS && appearsIn(candidate.quote, callerTurns),
+  );
   return {
     ...draft,
     criteria: draft.criteria.map((criterion) => ({ ...criterion, evidence: appearsIn(criterion.evidence, allTurns) ? criterion.evidence : "" })),

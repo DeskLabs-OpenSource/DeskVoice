@@ -1,6 +1,6 @@
 import { recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { OUTCOME_SETTING } from "@deskvoice/voice-engine";
+import { ANALYSIS_SETTING, OUTCOME_SETTING } from "@deskvoice/voice-engine";
 import { createCall, createOrganization, depsFor, openTestDbs, putSetting, putWhatsAppConnector, t0, task, tasksOf } from "../../test/helpers";
 import summarizeCall, { OWNER_NOTICE_BODY, OWNER_NOTICE_SETTING, extractiveSummary } from "./summarize_call";
 
@@ -56,17 +56,24 @@ describe("summarize_call", () => {
     expect(await summaryOf(callId)).toBe(first);
   });
 
-  it("só deixa o desfecho na fila quando o dono ligou a classificação", async () => {
+  it("só deixa o desfecho na fila quando o dono ligou a classificação ou a análise", async () => {
     const desligada = await createOrganization(app, "summarize outcome off");
     const ligada = await createOrganization(app, "summarize outcome on");
+    const analise = await createOrganization(app, "summarize analysis on");
+    const desligadaDeVolta = await createOrganization(app, "summarize both false");
     await putSetting(app, ligada, OUTCOME_SETTING, true, false);
-    for (const organization of [desligada, ligada]) {
+    await putSetting(app, analise, ANALYSIS_SETTING, true, false);
+    await putSetting(app, desligadaDeVolta, OUTCOME_SETTING, false, false);
+    await putSetting(app, desligadaDeVolta, ANALYSIS_SETTING, false, false);
+    for (const organization of [desligada, ligada, analise, desligadaDeVolta]) {
       const callId = await createCall(app, organization, t0);
       await summarizeCall.run(task(organization, "summarize_call", {}, callId), depsFor(app));
     }
 
     expect((await tasksOf(app, desligada)).map((queued) => queued.kind)).toEqual([]);
     expect((await tasksOf(app, ligada)).map((queued) => queued.kind)).toEqual(["classify_call_outcome"]);
+    expect((await tasksOf(app, analise)).map((queued) => queued.kind)).toEqual(["classify_call_outcome"]);
+    expect((await tasksOf(app, desligadaDeVolta)).map((queued) => queued.kind)).toEqual([]);
   });
 
   it("chamada apagada a pedido do titular não recebe resumo nem entra na fila do desfecho", async () => {

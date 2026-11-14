@@ -31,8 +31,9 @@ import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { resample } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
-import { classifyOutcomeOverHttp, transcribeOverHttp } from "../outcome-over-http";
-import { OUTCOME_GUESS_SCHEMA_GOOGLE, outcomePrompt, readOutcomeGuess } from "../outcome";
+import { ANALYSIS_SCHEMA_GOOGLE, analysisPrompt } from "../analysis";
+import { classifyOptionsFor, classifyOutcomeOverHttp, readClassifyText, transcribeOverHttp } from "../outcome-over-http";
+import { OUTCOME_GUESS_SCHEMA_GOOGLE, outcomePrompt } from "../outcome";
 import type { ClassifyOptions, EnginePricing, RecordingTranscriber, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL =
@@ -323,7 +324,10 @@ const engine: VoiceEngine = {
     return session;
   },
 
+  analyzes: true,
+
   async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
+    const analyze = input.analyze === true;
     return classifyOutcomeOverHttp(
       {
         url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(TEXT_MODEL)}:generateContent`,
@@ -331,23 +335,16 @@ const engine: VoiceEngine = {
         pricing: TEXT_PRICING,
         // No cabeçalho, e não na URL: endereço de pedido costuma ir para log de proxy.
         headers: { "x-goog-api-key": apiKey },
+        // Sem `analyze`, o pedido é exatamente o só de desfecho: quem usa só o desfecho não paga a análise.
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: outcomePrompt(input) }] }],
-          generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: OUTCOME_GUESS_SCHEMA_GOOGLE },
+          contents: [{ role: "user", parts: [{ text: analyze ? analysisPrompt(input) : outcomePrompt(input) }] }],
+          generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: analyze ? ANALYSIS_SCHEMA_GOOGLE : OUTCOME_GUESS_SCHEMA_GOOGLE },
         }),
-        read: (body) => {
-          const text = (body as { candidates?: { content?: { parts?: { text?: unknown }[] } }[] }).candidates?.[0]?.content?.parts?.[0]?.text;
-          if (typeof text !== "string") return null;
-          try {
-            return readOutcomeGuess(JSON.parse(text));
-          } catch {
-            return null;
-          }
-        },
+        read: (body) => readClassifyText((body as { candidates?: { content?: { parts?: { text?: unknown }[] } }[] }).candidates?.[0]?.content?.parts?.[0]?.text, analyze),
         usage: generateUsageOf,
         classify: (status, body) => (status === 400 && saysInvalidKey(body) ? "rejected" : undefined),
       },
-      options,
+      classifyOptionsFor(options, analyze),
     );
   },
 
