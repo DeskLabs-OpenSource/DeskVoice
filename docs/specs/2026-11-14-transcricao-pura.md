@@ -142,6 +142,61 @@ Empate em nomes (diferença menor que 5 pontos percentuais) se resolve pelo meno
 no aceite (serviço, WER, acerto em nomes, latência parcial e final, preço com data) e a escolha
 justificada. **Sem essa seção, nenhuma peça de provedor é escrita.**
 
+## Medida
+
+> Rodada 1, da fatia 1 ([#201](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/201),
+> mesclado em `115d2e5`). Texto copiado do corpo do #201, sem alteração. O "Não medido" da rodada está
+> no fim deste documento.
+
+Rodada de **14/11/2026, 11:01Z a 11:52Z** (medida 3, depois da reprovação 1), na VPS de teste (4 vCPU AMD EPYC, só CPU), em `ce4c102`. Comando: `medir.ts --teto-usd 0 --decisor laya`. Regra de normalização `pt-br-v1`. **Gasto: US$ 0,00 de US$ 0.**
+
+- **Conjunto:** 24 frases inventadas; 87 casos (frase × voz × ruído). Por caso: nomes 15, empresas 8, lugares 8, números 8, geral 3; sotaque (voz) 6 por voz, em 4 vozes do Piper; ruído 5 por tipo e nível (obra, música, conversa a 15, 5 e 0 dB; relação medida igual à pedida).
+- **Modelo:** `faster-whisper small int8`, feixe 5 no final, fim de fala pelo Silero VAD (500 ms). Vocabulário: 26 termos, como `initial_prompt`.
+- **Ritmo do envio (limite 100 ms):** **0 de 348 itens fora do ritmo.** Pior atraso: envio inteiro 20 ms, um pedaço 46 ms, espera do final 9 ms. Um item fora do ritmo sairia das latências e do "sem final" e seria contado na coluna própria.
+
+| Whisper em CPU (todos os 87) | Linha | Vocab. | WER | Acerto em nomes (75 frases) | Parcial p50/p95 (ms) | Final p50/p95 (ms) | Sem final | Fora do ritmo |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| whisper-local | estreita | com | 26,1 % | 68,0 % | 1913 / 5787 | 2425 / 4311 | 16 | 0 |
+| whisper-local | estreita | sem | 37,1 % | 25,3 % | 1776 / 2776 | 2109 / 3775 | 15 | 0 |
+| whisper-local | larga | com | 26,9 % | 72,0 % | 1854 / 6484 | 2345 / 4429 | 18 | 0 |
+| whisper-local | larga | sem | 40,4 % | 25,3 % | 1770 / 5699 | 2183 / 4126 | 15 | 0 |
+
+Com o vocabulário, o WER em nomes cai de ~25 % para 9,4 % nas duas linhas, e o acerto exato em nomes sai de 13 a 20 % para 80 %. Números acertam 100 % com e sem vocabulário. A estreita e a larga empatam no total. A tabela completa por caso (voz, ruído, tipo de frase) sai da bancada; vai na tarefa.
+
+**Laya** (`convaiinnovations/laya` multilingual, pacote 0.4.31, CPU; carga 9,6 s; memória máxima 2,3 GB):
+
+| Chamadas simultâneas | Passadas | 3 perguntas p50/p95 (ms) | 1 pergunta p50/p95 (ms) | Núcleos ocupados |
+|---:|---:|---:|---:|---:|
+| 1 | 24 | 266 / 405 | 104 / 180 | 2,39 |
+| 3 | 72 | 693 / 1114 | 290 / 465 | 2,69 |
+
+**Como ler (o que a medida diz e o que não diz):**
+
+- **Conversa de fundo dá 100 % de WER em todos os níveis, até a 15 dB.** Não é erro de transcrição: com conversa contínua, o VAD não acha 500 ms de silêncio, o turno não fecha e não sai final (15 itens por linha). O que isso mede é o fechamento de turno por VAD com fala ao fundo, e não o acerto do Whisper. Fica como achado para a fatia do ambiente barulhento (DESA-24).
+- **O caso de 26 s da medida 2** (`numero-02`, voz jeff, estreita com vocabulário): na medida 3 ele deu parcial de 1,9 s e final de 1,9 s, com o envio 18 ms atrasado em 6,4 s de áudio entregue (204 880 bytes), e acertou a frase. A causa provável é a de que o Verificador suspeitou: na medida 2 o processo saiu do ritmo, com a VPS dividida com outro trabalho. **Isso não está provado**, porque a medida 2 não guardava o atraso do envio. Agora a bancada guarda esse dado, e um caso assim sai das latências e aparece contado.
+- **"Voz" não é sotaque regional:** são 4 vozes sintéticas, e a linha mede erro por voz e só isso.
+
+### O que a rodada 1 decide (leitura do Arquiteto, 14/11)
+
+- **Ainda não há vencedor.** O único candidato medido, o Whisper em CPU, fica com o final p95
+  entre 3,8 e 4,4 s, muito acima da régua de 700 ms. Ele perde, com número, como a Parte 1 previa.
+  O reconhecedor de hoje (OpenAI e Gemini) e os externos não foram medidos, porque dependem da chave
+  da DESA-10 e da decisão 1. **A fatia 3 não começa** antes de uma rodada que meça pelo menos um
+  candidato capaz de passar na régua. As fatias 2 (contrato e simulado) e 6 (filtro) não dependem
+  do vencedor.
+- **O vocabulário é o que mais pesa.** Com o mesmo motor, o acerto em nomes sai de 25 % para
+  68 a 72 %. Isso confirma que a peça leva o vocabulário da DESA-10 desde o primeiro arquivo.
+- **Ponte de 8 kHz:** no Whisper, a linha larga não ganha 5 pontos (nomes +4 com vocabulário,
+  WER 0,8 ponto pior). A regra da Parte 4 vale "para o vencedor", e por isso a pergunta continua
+  aberta até haver um.
+- **Laya:** com uma chamada, as três perguntas cabem na régua (p95 405 ms). Com três chamadas
+  simultâneas, não cabem (p95 1114 ms), e ele ocupa perto de 2,7 núcleos dos 4 da VPS. Pela regra
+  da Parte 3, a decisão que chega tarde vira só observação, e então o filtro não atrasa a resposta.
+  Mesmo assim, com chamadas simultâneas ele chegaria tarde quase sempre. Isso pesa na decisão 3
+  (o Laya dentro do produto), junto com o acerto que a fatia 6 vai medir.
+- **Conversa de fundo fecha mal o turno por VAD:** o achado vai para a DESA-24 (R11), e não para
+  esta frente.
+
 ## Parte 2: a peça de transcrição em streaming
 
 ### Contrato
@@ -577,12 +632,16 @@ Ficam no comentário da DESA-25, no formato do `GOVERNANCE.md`, e vão ao lote d
 
 ## Não medido (deste documento)
 
-- **Nenhum serviço de transcrição foi medido.** A tabela de candidatos é de preço e de recurso,
-  conferidos nas páginas em 14/11/2026, e não de acerto.
+- **Só o Whisper em CPU foi medido** (rodada 1, seção "Medida"). O `gpt-4o-mini-transcribe` e o
+  Gemini Live de hoje não rodaram, porque falta a chave da DESA-10, e os externos dependem da
+  decisão 1. A tabela de candidatos dos outros serviços é de preço e de recurso, conferidos nas
+  páginas em 14/11/2026, e não de acerto.
+- Rodada 1: a carga da VPS não foi registrada, a variância entre rodadas não foi calculada, a
+  "voz" são 4 vozes sintéticas do Piper (não é sotaque regional), e a fala atípica ficou sem
+  medida, porque não há banco aberto em português com licença.
 - O suporte a português em streaming de Deepgram, AssemblyAI e Soniox: as páginas de preço não o
   confirmam.
 - Preço, vocabulário e português de ElevenLabs, Speechmatics, Google Cloud, Azure e AWS.
-- A latência do candidato aberto em CPU na VPS.
 - O Jev e o Laya: precisão, latência e o formato exato da API vêm do fornecedor ou de fontes
   secundárias. O cartão do Laya no Hugging Face não foi lido. O "0,59 contra 0,97" vem de dois blogs
   cujo método não foi conferido.
