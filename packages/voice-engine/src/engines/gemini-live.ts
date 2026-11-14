@@ -42,6 +42,16 @@
  *   Não confirmado contra o servidor real: se o Gemini manda `interimInputTranscription` sem que se
  *   peça, e com que frequência; se `audioStreamEnd` o faz responder ao que ouviu, ou só esvazia o que
  *   estava guardado. `voiceActivity` não entra: a referência não diz se ele é início de fala.
+ *
+ * Ambiente barulhento (`listeningEnvironment: "noisy"`), consultado em 2026-11-14 na referência v1beta
+ * (https://aistudio.google.com/api-reference/live, `setup.realtimeInputConfig`):
+ *   - `automaticActivityDetection.startOfSpeechSensitivity`: `START_SENSITIVITY_HIGH` (padrão) ou `_LOW`;
+ *   - `automaticActivityDetection.endOfSpeechSensitivity`: `END_SENSITIVITY_HIGH` (padrão) ou `_LOW`;
+ *   - `automaticActivityDetection.prefixPaddingMs` (int32);
+ *   - `activityHandling`: `START_OF_ACTIVITY_INTERRUPTS` (padrão) ou `NO_INTERRUPTION`. Fica no padrão:
+ *     `NO_INTERRUPTION` mataria a interrupção de verdade.
+ *   Não confirmado contra o servidor real: o efeito desses valores numa ligação com ruído (a bancada
+ *   da fatia 5 mede).
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
@@ -56,6 +66,19 @@ import type { ClassifyOptions, EnginePricing, RecordingTranscriber, Usage, Voice
 
 const DEFAULT_BASE_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+/**
+ * Ambiente barulhento, ponto de partida do desenho (a bancada da fatia 5 pode trocar os valores):
+ * início de fala menos sensível (menos início falso, que é a interrupção falsa) com 300 ms de fala
+ * antes de confirmar, e fim de fala sensível, que não espera o ruído acabar. `activityHandling` não
+ * aparece: fica no padrão, em que a fala de verdade interrompe o agente.
+ */
+const NOISY_REALTIME_INPUT = {
+  automaticActivityDetection: {
+    startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
+    endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
+    prefixPaddingMs: 300,
+  },
+} as const;
 const DEFAULT_API_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_MODEL = "gemini-3.8-live";
 const DEFAULT_VOICE = "Sulafat";
@@ -319,6 +342,8 @@ const engine: VoiceEngine = {
           ...(config.vocabulary && config.vocabulary.length > 0 && { customVocabulary: [...config.vocabulary] }),
         },
         outputAudioTranscription: {},
+        // Ambiente `normal` ou ausente: o campo nem aparece, e o setup fica igual ao de antes.
+        ...(config.listeningEnvironment === "noisy" && { realtimeInputConfig: NOISY_REALTIME_INPUT }),
       },
     });
     await awaitSessionReady(ready, socket, { label: "Gemini Live", emitter, timeout: options });

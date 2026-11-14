@@ -73,6 +73,26 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     });
   });
 
+  it.each([["ausente", undefined], ["normal", "normal" as const]])("ambiente %s: a abertura é byte a byte a de antes", async (_, listeningEnvironment) => {
+    const { update } = await openSession({ listeningEnvironment });
+    expect(JSON.stringify(update)).toBe(SESSAO_SEM_VOCABULARIO);
+  });
+
+  it("ambiente barulhento: redução de ruído near_field e fim de turno pelo sentido, com a interrupção do provedor", async () => {
+    const { update } = await openSession({ listeningEnvironment: "noisy" });
+    const session = update.session as { audio: { input: Record<string, unknown> } };
+    expect(session.audio.input).toEqual({
+      format: { type: "audio/pcmu" },
+      transcription: { model: "gpt-4o-mini-transcribe", language: "pt" },
+      noise_reduction: { type: "near_field" },
+      turn_detection: { type: "semantic_vad", eagerness: "auto", create_response: true, interrupt_response: true },
+    });
+    // Só a entrada de áudio muda: o resto da abertura é o de sempre.
+    const { audio: _audio, ...rest } = update.session as Record<string, unknown>;
+    const { audio: _today, ...todayRest } = (JSON.parse(SESSAO_SEM_VOCABULARIO) as { session: Record<string, unknown> }).session;
+    expect(rest).toEqual(todayRest);
+  });
+
   it("custo separa áudio, texto e cache, como a OpenAI cobra", () => {
     // Uma resposta no meio da conversa: o prompt e a conversa anterior voltam como entrada, quase tudo em cache.
     const usage = usageOf({

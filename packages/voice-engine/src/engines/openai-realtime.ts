@@ -23,6 +23,15 @@
  *   - O `keywords` do guia de transcrição (developers.openai.com/api/docs/guides/realtime-transcription) só aparece
  *     em sessão `type: "transcription"` com `gpt-live-transcribe`. Esta sessão é `type: "realtime"`: não é usado.
  *
+ * Ambiente barulhento (`listeningEnvironment: "noisy"`), consultado em 2026-11-14, no formato GA da
+ * sessão (`session.type: "realtime"`, campos em `session.audio.input`), que é o deste motor:
+ *   - https://developers.openai.com/api/docs/api-reference/realtime  (`RealtimeAudioConfig.input.noise_reduction`:
+ *     `{ type: "near_field" | "far_field", strength: 0..1 }`, `strength` padrão 1; `near_field` é microfone perto da boca)
+ *   - https://developers.openai.com/api/docs/guides/realtime-vad  (`audio.input.turn_detection` com
+ *     `type: "semantic_vad"`, `eagerness: "auto"` (padrão, igual a `medium`), `create_response` e `interrupt_response`)
+ *   Não confirmado contra o servidor real: que o servidor aceite os dois juntos sem erro, e o efeito
+ *   deles numa ligação com ruído (a bancada da fatia 5 mede).
+ *
  * A API aceita G.711 μ-law (`audio/pcmu`, 8 kHz) na entrada e na saída: a ligação não é reamostrada.
  *
  * Não confirmado contra o servidor real (nenhuma chamada com chave foi feita):
@@ -77,6 +86,16 @@ const OUTCOME_PRICING: EnginePricing = {
 // O modelo que transcreve a fala de quem ligou durante a chamada, e a gravação depois dela.
 const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
 /** O `prompt` da transcrição lateral, em texto livre, como a referência pede para a família `gpt-4o-transcribe`. */
+/**
+ * Ambiente barulhento, ponto de partida do desenho (a bancada da fatia 5 pode trocar os valores):
+ * redução de ruído de microfone perto da boca, que é o do telefone, e fim de turno pelo sentido
+ * (`semantic_vad`), que não espera o ruído acabar. A interrupção de verdade continua com o provedor.
+ */
+const NOISY_INPUT = {
+  noise_reduction: { type: "near_field" },
+  turn_detection: { type: "semantic_vad", eagerness: "auto", create_response: true, interrupt_response: true },
+} as const;
+
 const transcriptionPrompt = (vocabulary: readonly string[]): string => `Names and terms that may appear: ${vocabulary.join(", ")}.`;
 // gpt-4o-mini-transcribe, na seção "Transcription" da página de preços (conferida em 2026-11-13):
 // entrada US$ 1,25 e saída US$ 5,00 por milhão de tokens, e a estimativa de US$ 0,003 por minuto.
@@ -389,7 +408,10 @@ const engine: VoiceEngine = {
               language: config.language.split("-")[0],
               ...(config.vocabulary && config.vocabulary.length > 0 && { prompt: transcriptionPrompt(config.vocabulary) }),
             },
-            turn_detection: { type: "server_vad", create_response: true, interrupt_response: true },
+            // Ambiente `normal` ou ausente: a sessão fica igual à de antes.
+            ...(config.listeningEnvironment === "noisy"
+              ? NOISY_INPUT
+              : { turn_detection: { type: "server_vad", create_response: true, interrupt_response: true } }),
           },
           output: { format: AUDIO_FORMAT, voice: config.voiceId ?? DEFAULT_VOICE },
         },
