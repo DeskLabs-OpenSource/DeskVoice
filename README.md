@@ -311,7 +311,7 @@ O DeskVoice foi criado por Rafael Melgaço ([@melgarafael](https://www.youtube.c
 segurança de [webtecnica](https://github.com/webtecnica) estão nas versões publicadas, e desde a 0.6.0 também os direitos de
 quem ligou (prazo de guarda e exportação), de webtecnica, e o custo da OpenAI conferido contra a
 fatura, a despedida antes de desligar e a gravação das chamadas, de
-[aliffstefano](https://github.com/aliffstefano). A 0.8.0 traz o desfecho da ligação e o aviso de fim de ligação no WhatsApp, de webtecnica, e a 0.9.0, também de webtecnica, as teclas do menu automático, a transferência não atendida, a gravação que para a pedido e o apagamento a pedido de quem ligou, e a 0.10.0, também de webtecnica, a transcrição da gravação. O DeskcommCRM, de onde vem a fábrica de contribuição
+[aliffstefano](https://github.com/aliffstefano). A 0.8.0 traz o desfecho da ligação e o aviso de fim de ligação no WhatsApp, de webtecnica, e a 0.9.0, também de webtecnica, as teclas do menu automático, a transferência não atendida, a gravação que para a pedido e o apagamento a pedido de quem ligou, e a 0.10.0, também de webtecnica, a transcrição da gravação, e a 0.11.0, também de webtecnica, o prazo de guarda que alcança o resumo da chamada e o custo exato da leitura do desfecho. O DeskcommCRM, de onde vem a fábrica de contribuição
 usada aqui, recebeu PRs de mais de 250 pessoas.
 
 Crédito é regra, não cortesia: quem contribui mantém a autoria do commit e tem o nome nas notas

@@ -306,7 +306,7 @@ and is built in public, with the community. There are already outside contributi
 and security work from [webtecnica](https://github.com/webtecnica) are in the published releases, and since 0.6.0 so are
 the rights of callers (retention period and export), from webtecnica, and the OpenAI cost checked
 against the invoice, the farewell before hanging up and call recording, from
-[aliffstefano](https://github.com/aliffstefano). Release 0.8.0 brings the call outcome and the end-of-call WhatsApp notice, from webtecnica, and 0.9.0, also from webtecnica, brings automated-menu keys, unanswered transfers, recording that stops on request and erasure at the caller's request, and 0.10.0, also from webtecnica, brings transcription of the recording. DeskcommCRM, where the contribution workflow used
+[aliffstefano](https://github.com/aliffstefano). Release 0.8.0 brings the call outcome and the end-of-call WhatsApp notice, from webtecnica, and 0.9.0, also from webtecnica, brings automated-menu keys, unanswered transfers, recording that stops on request and erasure at the caller's request, and 0.10.0, also from webtecnica, brings transcription of the recording, and 0.11.0, also from webtecnica, brings the retention period reaching the call summary and the exact cost of reading the outcome. DeskcommCRM, where the contribution workflow used
 here comes from, has received PRs from more than 250 people.
 
 Credit is a rule, not a courtesy: contributors keep authorship of their commits and are named
