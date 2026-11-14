@@ -183,4 +183,24 @@ describe("runMigrations", () => {
     ]);
     await expect(db.pool.query("insert into agents (organization_id, name, engine, vocabulary) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/vocabulary/);
   });
+
+  it("o agente que já existe fica no ambiente normal, o novo sem a coluna também, e o ambiente só aceita normal ou noisy", async () => {
+    const ENVIRONMENT = "20261114T094134_agents_listening_environment.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < ENVIRONMENT) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Antes', 'simulated')", [org]);
+    await copyFile(path.join(REAL_MIGRATIONS, ENVIRONMENT), path.join(dir, ENVIRONMENT));
+    expect(await runMigrations(db, dir)).toEqual([ENVIRONMENT]);
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Depois', 'simulated')", [org]);
+    await db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Obra', 'simulated', 'noisy')", [org]);
+    const rows = (await db.pool.query<{ name: string; listening_environment: string }>("select name, listening_environment from agents order by name")).rows;
+    expect(rows).toEqual([
+      { name: "Antes", listening_environment: "normal" },
+      { name: "Depois", listening_environment: "normal" },
+      { name: "Obra", listening_environment: "noisy" },
+    ]);
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Alto', 'simulated', 'loud')", [org])).rejects.toThrow(/listening_environment/);
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/listening_environment/);
+  });
 });

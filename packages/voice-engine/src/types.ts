@@ -23,7 +23,17 @@ export interface VoiceSessionConfig {
    * em pipeline (R5) reaproveita este campo no serviço de transcrição dele.
    */
   vocabulary?: readonly string[];
+  /**
+   * Ambiente de quem liga. `noisy` ajusta a detecção de fala do provedor para ruído de fundo (obra,
+   * música, pessoas falando): o fim de turno não espera o ruído acabar, e o ruído interrompe menos.
+   * `normal` ou ausente, o motor envia ao provedor o mesmo de antes. Os valores de `noisy` são ponto
+   * de partida (docs/specs/2026-11-14-ambiente-barulhento.md); o efeito real não foi medido.
+   */
+  listeningEnvironment?: ListeningEnvironment;
 }
+
+/** Como o agente ajusta a detecção de fala do provedor. `normal` é o de sempre. */
+export type ListeningEnvironment = "normal" | "noisy";
 
 export interface Usage {
   seconds?: number;

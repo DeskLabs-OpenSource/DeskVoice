@@ -99,6 +99,32 @@ describe("agents", () => {
     const emptied = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { vocabulary: [] } });
     expect([emptied.status, emptied.data]).toMatchObject([200, { vocabulary: [] }]);
   });
+
+  it("keeps the listening environment: normal when absent, noisy when chosen, and refuses any other value", async () => {
+    const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Ambiente", engine: "simulated" } });
+    expect(created.data).toMatchObject({ listeningEnvironment: "normal" });
+    const id = (created.data as { id: string }).id;
+    expect(await stored("select listening_environment from agents where id = $1", [id])).toEqual({ listening_environment: "normal" });
+
+    const noisy = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { listeningEnvironment: "noisy" } });
+    expect([noisy.status, noisy.data]).toMatchObject([200, { listeningEnvironment: "noisy" }]);
+    expect(await stored("select listening_environment from agents where id = $1", [id])).toEqual({ listening_environment: "noisy" });
+    // Mudar outro campo não mexe no ambiente.
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ listeningEnvironment: "noisy" });
+
+    for (const listeningEnvironment of ["loud", "NOISY", "", null, 1]) {
+      const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { listeningEnvironment } });
+      expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", expect.stringMatching(/listeningEnvironment/)]);
+    }
+    const refusedOnCreate = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Z", engine: "simulated", listeningEnvironment: "loud" } });
+    expect([refusedOnCreate.status, refusedOnCreate.code]).toEqual([400, "validation_error"]);
+    expect(await stored("select listening_environment from agents where id = $1", [id])).toEqual({ listening_environment: "noisy" });
+
+    const createdNoisy = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Obra", engine: "simulated", listeningEnvironment: "noisy" } });
+    expect(createdNoisy.data).toMatchObject({ listeningEnvironment: "noisy" });
+    const back = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { listeningEnvironment: "normal" } });
+    expect([back.status, back.data]).toMatchObject([200, { listeningEnvironment: "normal" }]);
+  });
 });
 
 describe("secrets", () => {

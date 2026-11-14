@@ -67,6 +67,22 @@ describe("gemini-live (contrato com servidor falso)", () => {
     expect((setup.setup as Record<string, unknown>).inputAudioTranscription).toEqual({ languageCodes: ["pt-BR"], customVocabulary: ["Melgaço", "DeskVoice"] });
   });
 
+  it.each([["ausente", undefined], ["normal", "normal" as const]])("ambiente %s: a abertura é byte a byte a de antes", async (_, listeningEnvironment) => {
+    const { setup } = await openSession({ listeningEnvironment });
+    expect(JSON.stringify(setup)).toBe(SETUP_SEM_VOCABULARIO);
+  });
+
+  it("ambiente barulhento: início de fala pouco sensível, fim sensível e 300 ms, sem tocar na interrupção", async () => {
+    const { setup } = await openSession({ listeningEnvironment: "noisy" });
+    const { realtimeInputConfig, ...rest } = setup.setup as Record<string, unknown>;
+    expect(realtimeInputConfig).toEqual({
+      automaticActivityDetection: { startOfSpeechSensitivity: "START_SENSITIVITY_LOW", endOfSpeechSensitivity: "END_SENSITIVITY_HIGH", prefixPaddingMs: 300 },
+    });
+    // `activityHandling` fica no padrão (a fala de verdade interrompe); o resto é o de sempre.
+    expect(JSON.stringify(setup)).not.toContain("activityHandling");
+    expect(rest).toEqual((JSON.parse(SETUP_SEM_VOCABULARIO) as { setup: unknown }).setup);
+  });
+
   it("só devolve a sessão depois do setupComplete e faz o agente falar primeiro", async () => {
     let connected = false;
     const connecting = engine.connect(config, "k", { baseUrl: fake.url }).then((session) => {

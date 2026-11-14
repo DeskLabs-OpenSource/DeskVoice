@@ -34,7 +34,7 @@ const optionalText = (max: number) =>
 
 export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions, greeting, engine, voice_id as "voiceId", language, tools,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
-  follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, created_at as "createdAt", updated_at as "updatedAt"`;
+  follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -53,6 +53,8 @@ const agentFields = z.object({
   // está ativa (`requireActiveOwner`); a de outra organização nem é vista.
   followUpOwnerUserId: z.uuid().nullable(),
   vocabulary,
+  // Ambiente de quem liga: `noisy` ajusta a detecção de fala do provedor para ruído de fundo.
+  listeningEnvironment: z.enum(["normal", "noisy"]),
 });
 export type AgentValues = z.output<typeof agentFields>;
 export const agentPatch = agentFields.partial();
@@ -71,6 +73,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   transferTo: null,
   followUpOwnerUserId: null,
   vocabulary: [],
+  listeningEnvironment: "normal",
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId", status,

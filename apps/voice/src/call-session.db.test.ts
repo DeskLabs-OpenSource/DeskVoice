@@ -220,6 +220,24 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     await second.done;
   });
 
+  it("o ambiente do agente chega ao motor; sem escolha, chega normal", async () => {
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("engine-noisy", { engine: "manual", listeningEnvironment: "noisy" }, manual);
+    const session = made.start();
+    await waitFor(() => manual.configs.length === 1, "the engine to connect");
+    expect(manual.configs[0]?.listeningEnvironment).toBe("noisy");
+    made.transport.callerHangup();
+    await session.done;
+
+    const plain = manualEngine({ keyless: true });
+    const without = await scene("engine-normal", { engine: "manual" }, plain);
+    const second = without.start();
+    await waitFor(() => plain.configs.length === 1, "the engine to connect");
+    expect(plain.configs[0]?.listeningEnvironment).toBe("normal");
+    without.transport.callerHangup();
+    await second.done;
+  });
+
   it("na ligação feita pelo agente a saudação não é falada: quem atende fala primeiro", async () => {
     const manual = manualEngine({ keyless: true });
     const made = await scene("engine-outbound", { engine: "manual", greeting: "Bom dia." }, manual, "outbound");

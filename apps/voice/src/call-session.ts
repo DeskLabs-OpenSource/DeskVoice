@@ -84,6 +84,7 @@ interface AgentRow {
   cost_ceiling_cents: number;
   transfer_to_e164: string | null;
   vocabulary: string[];
+  listening_environment: "normal" | "noisy";
 }
 
 export const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
@@ -375,7 +376,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
 
   async function run(): Promise<void> {
     agent = (await q.one<AgentRow>(
-      "select name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary from agents where id = $1",
+      "select name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment from agents where id = $1",
       [agentId],
     )) ?? undefined;
     const call = await q.one<{ direction: "inbound" | "outbound"; from_e164: string | null; to_e164: string | null }>("select direction, from_e164, to_e164 from calls where id = $1", [callId]);
@@ -439,6 +440,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
           tools: [...enabled.values()].map(toSpec),
           // Dica de reconhecimento; vazia, o motor envia ao provedor o mesmo de antes.
           vocabulary: agent.vocabulary,
+          // `normal` envia ao provedor o mesmo de antes; `noisy` ajusta a detecção de fala.
+          listeningEnvironment: agent.listening_environment,
         },
         apiKey,
       );
