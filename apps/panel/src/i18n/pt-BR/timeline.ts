@@ -45,6 +45,7 @@ const timeline = {
     nextStepNone: "A conversa não pediu próximo passo.",
     purged: "O texto saiu com o prazo de guarda. Ficaram a régua, a temperatura e a contagem de objeções.",
     erased: "O texto foi apagado a pedido do titular. Ficaram a régua, a temperatura e a contagem de objeções.",
+    erasedMidway: "O titular pediu o apagamento enquanto a análise era feita. Ficou só a nota: a régua, a temperatura e as objeções não foram guardadas.",
     unreadable: "A análise gravada desta ligação não pôde ser lida.",
     pending: "Ainda não há análise desta ligação.",
   },

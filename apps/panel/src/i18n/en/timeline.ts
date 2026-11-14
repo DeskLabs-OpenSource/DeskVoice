@@ -46,6 +46,7 @@ const timeline: TimelineDictionary = {
     nextStepNone: "The conversation did not call for a next step.",
     purged: "The text was removed by the transcript retention period. The rubric, the temperature and the objection count remain.",
     erased: "The text was erased at the data subject's request. The rubric, the temperature and the objection count remain.",
+    erasedMidway: "The data subject asked for the erasure while the analysis was running. Only the score remains: the rubric, the temperature and the objections were not kept.",
     unreadable: "The stored analysis of this call could not be read.",
     pending: "There is no analysis of this call yet.",
   },

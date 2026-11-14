@@ -17,11 +17,24 @@ const Heading = ({ children }: { children: string }) => <h3 className="text-[0.8
  * A seção "Análise" do detalhe da chamada (desenho `docs/specs/2026-11-13-analise-da-ligacao.md`,
  * seção 3.7). Com análise gravada, mostra a nota ao lado da régua inteira que a soma. Com a análise
  * ligada e nada gravado, diz o motivo do último `analysis_not_done`, com a mesma frase da linha do
- * tempo. Com a análise desligada e nada gravado (o de fábrica), não aparece.
+ * tempo. Apagada no meio da análise, só a nota, com o motivo. Com a análise desligada e nada
+ * gravado (o de fábrica), não aparece.
  */
 export function AnalysisSection({ call, events, enabled, live, t }: { call: CallDetail; events: CallEvent[] | undefined; enabled: boolean; live: boolean; t: TimelineDictionary }) {
   const a = t.analysis;
   if (call.analysis) return <AnalysisBody analysis={call.analysis} erased={call.erased} t={t} />;
+  // Apagada no meio da análise: a rotina guarda a nota e deixa `analysis` nula (`case when erased_at
+  // is null`), e o apagamento não refaz nada. A nota que a lista e a linha do tempo mostram aparece
+  // aqui também, com o motivo de não haver régua, e nenhum `analysis_not_done` antigo é lido.
+  if (call.analysisScore !== null && call.erased && !call.analysisUnreadable) {
+    return (
+      <section className="grid max-w-[72ch] gap-1">
+        <h2 className="text-[0.8rem] font-bold text-muted">{a.title}</h2>
+        <p className="text-[1.5rem] leading-tight font-medium">{fill(a.score, { score: String(call.analysisScore) })}</p>
+        <p className="text-[0.87rem] text-muted italic">{a.erasedMidway}</p>
+      </section>
+    );
+  }
   let body;
   if (call.analysisUnreadable) body = <Notice tone="warn">{a.unreadable}</Notice>;
   else if (enabled && !live && events) {

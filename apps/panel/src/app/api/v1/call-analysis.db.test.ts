@@ -30,7 +30,7 @@ const PURGED = {
 
 async function setAnalysis(callId: string, analysis: unknown, score: number | null, erased = false): Promise<void> {
   await withSystem(panel.app, (q) =>
-    q.exec("update calls set analysis = $2::jsonb, analysis_score = $3, analyzed_at = $4, erased_at = $5 where id = $1", [callId, JSON.stringify(analysis), score, NOW, erased ? NOW : null]),
+    q.exec("update calls set analysis = $2::jsonb, analysis_score = $3, analyzed_at = $4, erased_at = $5 where id = $1", [callId, analysis === null ? null : JSON.stringify(analysis), score, NOW, erased ? NOW : null]),
   );
 }
 
@@ -65,6 +65,20 @@ describe("call analysis in the panel API", () => {
     expect(fromPurged.data).toMatchObject({ analysis: PURGED, erased: false });
     expect(fromPurged.text).not.toContain("Ana");
     expect((await call(detail, { cookie, params: { id: erased } })).data).toMatchObject({ analysis: PURGED, erased: true });
+  });
+
+  it("keeps the score of a call erased while the analysis ran, with no analysis and no text", async () => {
+    const organizationId = await createOrganization(panel.app, "analysis-erased-midway");
+    const { cookie } = await createUser(panel.app, organizationId, "operator");
+    const midway = await createCall(panel.app, organizationId, NOW);
+    // O que a rotina grava quando o apagamento chega enquanto o provedor responde.
+    await setAnalysis(midway, null, 7, true);
+
+    const rows = (await call(list, { cookie })).data as Array<{ id: string; analysisScore: number | null }>;
+    expect(rows.find((row) => row.id === midway)?.analysisScore).toBe(7);
+    const shown = await call(detail, { cookie, params: { id: midway } });
+    expect(shown.status).toBe(200);
+    expect(shown.data).toMatchObject({ analysis: null, analysisScore: 7, analysisUnreadable: false, erased: true });
   });
 
   it("keeps the detail up and flags an analysis out of shape, without sending the raw value", async () => {

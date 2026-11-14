@@ -46,6 +46,7 @@ const timeline: TimelineDictionary = {
     nextStepNone: "La conversación no pidió próximo paso.",
     purged: "El texto salió con el plazo de conservación. Quedaron la rúbrica, la temperatura y el conteo de objeciones.",
     erased: "El texto fue borrado a pedido del titular. Quedaron la rúbrica, la temperatura y el conteo de objeciones.",
+    erasedMidway: "El titular pidió el borrado mientras se hacía el análisis. Solo quedó la nota: la rúbrica, la temperatura y las objeciones no se guardaron.",
     unreadable: "El análisis guardado de esta llamada no se pudo leer.",
     pending: "Todavía no hay análisis de esta llamada.",
   },
