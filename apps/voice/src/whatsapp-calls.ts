@@ -213,6 +213,26 @@ interface Live {
 function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, schedule: Schedule, log: Logger) {
   const { db, clock } = deps;
   const live = new Map<string, Live>();
+  // Toda ligação que este processo já tentou atender, atendida ou recusada: o `incoming` e o retrato
+  // da volta do SSE podem trazer a mesma, e a recusada segue tocando (não sai do retrato). Sai daqui
+  // quando some do retrato.
+  const seen = new Set<string>();
+
+  function admit(event: { sessionId: string; id: string; peer: string; peerPhone?: string }): void {
+    if (seen.has(event.id)) return;
+    seen.add(event.id);
+    const entry: Live = { transport: null, ended: false };
+    live.set(event.id, entry);
+    take(event, entry).then(
+      (started) => {
+        if (!started) live.delete(event.id);
+      },
+      (error: unknown) => {
+        live.delete(event.id);
+        log("error", "could not handle a WhatsApp call", { wacallsCall: event.id, error: messageOf(error) });
+      },
+    );
+  }
 
   /** A ligação que este processo criou e não chegou à conversa: fecha a linha, para ela não segurar vaga no teto. */
   async function closeUnanswered(organizationId: string, callId: string, reason: string, notice?: string): Promise<void> {
@@ -314,8 +334,17 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
         // fechada como `process_restarted` na partida; aqui só se desliga no WhatsApp. A que ainda toca
         // fica: o WaCalls grava o dono antes de atender (`handlers_call.go:118-127`), então o
         // atendimento que falhou deixa `ringing` com o nosso dono, e ela segue tocando no celular.
+        const present = new Set(event.calls.map((call) => call.callId));
+        for (const id of seen) if (!present.has(id)) seen.delete(id);
         for (const call of event.calls) {
           const leftover = call.owner?.startsWith(CLIENT_PREFIX) && call.status !== "ringing" && call.status !== "ended";
+          // Tocou com a escuta caída: o `incoming` dela se perdeu, e só o retrato da volta a mostra. Os
+          // retratos de cada mudança ficam de fora: o da ligação nova chega antes do `incoming` dela
+          // (`session.go:101-106`), e nele o `incoming` é quem decide.
+          if (event.initial && !call.owner && call.direction === "inbound" && call.status === "ringing" && call.peer) {
+            admit({ sessionId: call.sessionId, id: call.callId, peer: call.peer, ...(call.peerPhone && { peerPhone: call.peerPhone }) });
+            continue;
+          }
           if (!leftover || live.has(call.callId)) continue;
           log("info", "ending a WhatsApp call left by a previous voice process", { wacallsCall: call.callId });
           wacallsEndCall(options, call.sessionId, call.callId).catch((error: unknown) => {
@@ -325,19 +354,7 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
         return;
       }
       if (event.type === "incoming") {
-        // O mesmo `incoming` duas vezes não vira duas chamadas.
-        if (live.has(event.id)) return;
-        const entry: Live = { transport: null, ended: false };
-        live.set(event.id, entry);
-        take(event, entry).then(
-          (started) => {
-            if (!started) live.delete(event.id);
-          },
-          (error: unknown) => {
-            live.delete(event.id);
-            log("error", "could not handle a WhatsApp call", { wacallsCall: event.id, error: messageOf(error) });
-          },
-        );
+        admit(event);
         return;
       }
       const entry = live.get(event.id);

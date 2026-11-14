@@ -53,6 +53,9 @@ afterEach(async () => {
   await pump(() => over, "the calls to end");
   channel.close();
   await harness.approvals.close();
+  // Ligação que ficou tocando no falso apareceria no retrato da conexão do próximo teste, e o
+  // processo a atenderia (é o que ele faz com a que tocou com a escuta caída).
+  for (const call of wacalls.calls.values()) wacalls.hangUp(call);
   // A escuta parada não reage a mais nada (`listenWacalls` ignora o que chegar depois de `stop`); o
   // falso derruba o que sobrar aberto, para o próximo teste contar só a dele.
   wacalls.dropStreams();
@@ -320,5 +323,42 @@ describe("ligação pelo WhatsApp: a que sobrou de um processo de voz anterior",
     expect(callPaths(own).filter((path) => path.startsWith("DELETE"))).toEqual([]);
     expect(own.status).not.toBe("ended");
     wacalls.hangUp(human);
+  });
+});
+
+describe("ligação pelo WhatsApp: a que tocou com a escuta caída", { timeout: 60_000 }, () => {
+  const sessionOf = (organizationId: string) => {
+    const session = wacalls.byName(wacallsSessionName(organizationId));
+    if (!session) throw new Error("no WaCalls session");
+    return session;
+  };
+  const leftover = (organizationId: string) => wacalls.answeredBy(sessionOf(organizationId), "deskvoice-call-00000000-0000-0000-0000-000000000000");
+
+  it("o retrato de cada mudança não a atende; o da volta do SSE, sim", async () => {
+    const { organizationId } = await connected("wa-tocou");
+    const quiet = wacalls.ringQuietly(sessionOf(organizationId), `${CALLER.slice(1)}@s.whatsapp.net`);
+
+    // A sobra no mesmo retrato mostra que ele foi lido.
+    const first = leftover(organizationId);
+    wacalls.broadcastCallList();
+    await waitFor(() => first.status === "ended", "the leftover call ended");
+    expect(callPaths(quiet)).toEqual([]);
+
+    await reconnect();
+    await answeredCall(organizationId);
+    expect(callPaths(quiet)).toEqual(["POST webrtc", "POST accept"]);
+    expect(await callsOf(app, organizationId)).toMatchObject([{ from_e164: CALLER, status: "in_progress" }]);
+  });
+
+  it("a recusada segue tocando e não é recusada de novo quando o retrato da volta a mostra", async () => {
+    const { organizationId, ring } = await connected("wa-tocou-recusada", { agent: "none" });
+    const call = ring();
+    await waitFor(async () => (await callsOf(app, organizationId))[0]?.status === "refused", "the refused call");
+
+    const second = leftover(organizationId);
+    await reconnect();
+    await waitFor(() => second.status === "ended", "the leftover call ended");
+    expect(await callsOf(app, organizationId)).toHaveLength(1);
+    expect(callPaths(call)).toEqual([]);
   });
 });

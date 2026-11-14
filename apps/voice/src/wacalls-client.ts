@@ -213,10 +213,25 @@ const eventSchema = z.discriminatedUnion("type", [
   /** `starting`, `ringing`, `connected` (áudio com o WhatsApp de pé), `reconnecting`, `ended`. */
   z.object({ type: z.literal("call-status"), sessionId: z.string().min(1), id: z.string().min(1), status: z.string() }),
   z.object({ type: z.literal("call-ended"), id: z.string().min(1), reason: z.string().nullish() }),
-  /** O retrato das ligações vivas, a cada conexão do SSE e a cada mudança (`broker.go:207`, `callregistry.go:200`). */
+  /**
+   * O retrato das ligações vivas, a cada conexão do SSE e a cada mudança (`broker.go:207`,
+   * `callregistry.go:200`). `initial` não vem do WaCalls: é `listenWacalls` que marca o primeiro de
+   * cada conexão, o único que mostra o que aconteceu com a escuta caída.
+   */
   z.object({
     type: z.literal("call-list"),
-    calls: z.array(z.object({ sessionId: z.string().min(1), callId: z.string().min(1), owner: z.string().nullish(), status: z.string() })),
+    initial: z.boolean().default(false),
+    calls: z.array(
+      z.object({
+        sessionId: z.string().min(1),
+        callId: z.string().min(1),
+        owner: z.string().nullish(),
+        direction: z.string().nullish(),
+        peer: z.string().nullish(),
+        peerPhone: z.string().nullish(),
+        status: z.string(),
+      }),
+    ),
   }),
 ]);
 export type WacallsEvent = z.output<typeof eventSchema>;
@@ -245,6 +260,8 @@ export function listenWacalls(options: WacallsOptions, onEvent: (event: WacallsE
   let delay = RETRY_FIRST_MS;
   let open = false;
   let lost = false;
+  // O primeiro `call-list` desta conexão ainda não chegou.
+  let snapshot = false;
   let waiting: Array<() => void> = [];
 
   const opened = (): void => {
@@ -266,7 +283,13 @@ export function listenWacalls(options: WacallsOptions, onEvent: (event: WacallsE
       return;
     }
     const event = eventSchema.safeParse(raw);
-    if (event.success) onEvent(event.data);
+    if (!event.success) return;
+    if (event.data.type === "call-list" && snapshot) {
+      snapshot = false;
+      onEvent({ ...event.data, initial: true });
+      return;
+    }
+    onEvent(event.data);
   };
 
   async function connect(): Promise<void> {
@@ -278,6 +301,7 @@ export function listenWacalls(options: WacallsOptions, onEvent: (event: WacallsE
     });
     if (!response.ok || !response.body) throw new WacallsError(response.status === 401 || response.status === 403 ? "unauthorized" : "rejected", `WaCalls answered HTTP ${response.status} to the events stream`, response.status);
     opened();
+    snapshot = true;
     const decoder = new TextDecoder();
     let buffer = "";
     for await (const chunk of response.body) {
