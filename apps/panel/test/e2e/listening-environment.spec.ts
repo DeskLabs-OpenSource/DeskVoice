@@ -47,7 +47,8 @@ test("ambiente: fora do OpenAI a opção some, e um agente em Barulhento que tro
   // Motor sem prova e em Normal: o campo não aparece.
   const simulatedId = await createAgent(page, { engine: "simulated" });
   await page.goto(`/agents/${simulatedId}`);
-  await expect(page.getByLabel(agents.engine, { exact: true })).toHaveValue("simulated");
+  // A nota do motor simulado só aparece depois que a tela carregou o motor do agente.
+  await expect(page.getByText(agents.engineSimulated)).toBeVisible();
   await expect(page.getByLabel(agents.listeningEnvironment)).toHaveCount(0);
 
   const agentId = await createAgent(page, { engine: "openai-realtime", listeningEnvironment: "noisy" });
@@ -59,13 +60,16 @@ test("ambiente: fora do OpenAI a opção some, e um agente em Barulhento que tro
 
   // Troca para o Gemini: o Barulhento não fica escondido; o campo segue à vista, com o aviso.
   await page.getByLabel(agents.engine, { exact: true }).selectOption("gemini-live");
+  // As vozes do Gemini na lista provam que a tela já está no motor do Gemini.
+  const geminiVoice = page.locator("option", { hasText: /^Zephyr\b/ });
+  await expect(geminiVoice).toHaveCount(1);
   await expect(field).toHaveValue("noisy");
   await expect(warning).toBeVisible();
 
   // Salvar assim não esconde nada: depois de recarregar, o aviso continua lá.
   expect((await save(page)).listeningEnvironment).toBe("noisy");
   await page.reload();
-  await expect(page.getByLabel(agents.engine, { exact: true })).toHaveValue("gemini-live");
+  await expect(geminiVoice).toHaveCount(1);
   await expect(warning).toBeVisible();
 
   // Voltar para Normal: o PATCH leva `normal` e, recarregada, a tela não mostra mais o campo.
@@ -73,6 +77,6 @@ test("ambiente: fora do OpenAI a opção some, e um agente em Barulhento que tro
   await expect(warning).toHaveCount(0);
   expect((await save(page)).listeningEnvironment).toBe("normal");
   await page.reload();
-  await expect(page.getByLabel(agents.engine, { exact: true })).toHaveValue("gemini-live");
+  await expect(geminiVoice).toHaveCount(1);
   await expect(page.getByLabel(agents.listeningEnvironment)).toHaveCount(0);
 });
