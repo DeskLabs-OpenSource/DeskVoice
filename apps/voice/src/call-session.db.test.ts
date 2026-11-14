@@ -11,10 +11,12 @@ import { notificationsOf, putSetting, tasksOf } from "../../../packages/tools/te
 import { EngineTimeoutError } from "@deskvoice/voice-engine";
 import { DEFAULT_RECORDING_NOTICE, startCallSession, type CallSession } from "./call-session";
 import {
+  approvalsOf,
   callOf,
   createAgent,
   createCall,
   createOrganization,
+  decideApproval,
   eventsOf,
   kindsOf,
   ledgerOf,
@@ -28,6 +30,7 @@ import {
   type SessionHarness,
 } from "./testing/db";
 import { waitFor } from "./testing/helpers";
+import { AFTER_CLOSE_MS, AFTER_WORDS_MS, ASK_TO_REPEAT, WITHOUT_WORDS_MS } from "./silence-guard";
 import { failureTone } from "./transport";
 
 const { app, owner } = openTestDbs();
@@ -456,6 +459,95 @@ describe("encerrar com despedida", { timeout: 120_000 }, () => {
     expect(harness.timers.fire(6000)).toBe(1);
     expect(await session.done).toMatchObject({ status: "completed", endReason: "end_call" });
     expect(transport.hangups).toBe(1);
+  });
+});
+
+describe("guarda contra o silêncio (antipadrão 15)", { timeout: 120_000 }, () => {
+  it("quem ligou fala e o agente fica calado: fecha o turno, pede para repetir e grava caller_unanswered com o payload do contrato", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("silence-guard", { engine: "manual" }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("callerActivity", { words: true });
+    expect(harness.timers.held()).toContain(AFTER_WORDS_MS);
+    harness.clock.advance(AFTER_WORDS_MS);
+    expect(harness.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    expect(manual.callerTurnsClosed).toBe(1);
+    expect(manual.said).toEqual([]);
+
+    harness.clock.advance(AFTER_CLOSE_MS);
+    expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+    expect(manual.said).toEqual([ASK_TO_REPEAT]);
+    await waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "caller_unanswered").length === 2, "the guard events");
+    const guardEvents = (await eventsOf(app, callId)).filter((event) => event.kind === "caller_unanswered");
+    expect(guardEvents.map((event) => event.payload)).toEqual([
+      { action: "turn_closed", waitedMs: AFTER_WORDS_MS, words: true },
+      { action: "asked_to_repeat", waitedMs: AFTER_WORDS_MS + AFTER_CLOSE_MS, words: true },
+    ]);
+
+    // O agente responde: a guarda desarma e nada mais acontece.
+    manual.emit("callerActivity", { words: false });
+    expect(harness.timers.held()).toContain(WITHOUT_WORDS_MS);
+    manual.emit("audio", Buffer.alloc(320));
+    expect(harness.timers.held()).not.toContain(WITHOUT_WORDS_MS);
+
+    // Encerrada a chamada, nenhum prazo da guarda fica pendurado.
+    manual.emit("callerActivity", { words: true });
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+    expect(harness.timers.held()).toEqual([]);
+    expect(manual.callerTurnsClosed).toBe(1);
+  });
+});
+
+describe("guarda contra o silêncio: ferramenta e despedida", { timeout: 120_000 }, () => {
+  it("aprovação em espera: a guarda não age durante a espera, e volta a agir depois que a ferramenta acaba", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("silence-guard-approval", { engine: "manual", tools: ["request_approval"] }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("toolCall", { id: "t1", name: "request_approval", args: { question: "Posso dar 10% de desconto?", context: "Cliente antiga." } });
+    const approval = await waitFor(async () => (await approvalsOf(app, callId)).find((candidate) => candidate.status === "pending"), "the approval to wait for the panel");
+    // Quem ligou fala enquanto o responsável decide: a guarda não arma.
+    manual.emit("callerActivity", { words: true });
+    expect(harness.timers.held()).not.toContain(AFTER_WORDS_MS);
+
+    await decideApproval(app, approval.id, "approved", harness.clock.now());
+    await waitFor(async () => manual.toolResults.length === 1, "the tool result");
+    // Acabada a ferramenta, a guarda volta: sem isto, ela morreria pelo resto da chamada.
+    await waitFor(async () => {
+      manual.emit("callerActivity", { words: true });
+      return harness.timers.held().includes(AFTER_WORDS_MS);
+    }, "the guard to arm again");
+    harness.clock.advance(AFTER_WORDS_MS);
+    harness.timers.fire(AFTER_WORDS_MS);
+    expect(manual.callerTurnsClosed).toBe(1);
+
+    transport.callerHangup();
+    await session.done;
+  });
+
+  it("depois do end_call, a guarda não fecha turno nem pede para repetir durante a despedida", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, start, harness } = await scene("silence-guard-farewell", { engine: "manual", tools: ["end_call"] }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("toolCall", { id: "t1", name: "end_call", args: { reason: "Fim.", farewell: "Até logo." } });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    await new Promise((resolve) => setImmediate(resolve)); // a ferramenta termina de vez (toolFinished)
+    // Quem ligou ainda fala durante a despedida: a guarda está parada, nada arma.
+    manual.emit("callerActivity", { words: true });
+    manual.emit("callerActivity", { words: false });
+    expect(harness.timers.held()).not.toContain(AFTER_WORDS_MS);
+    expect(harness.timers.held()).not.toContain(WITHOUT_WORDS_MS);
+    expect(manual.callerTurnsClosed).toBe(0);
+    expect(manual.said).toEqual([]);
+
+    expect(harness.timers.fire(6000)).toBe(1);
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "end_call" });
   });
 });
 

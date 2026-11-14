@@ -53,6 +53,7 @@ export const CALL_EVENT_KINDS = [
   "outcome_not_classified",
   "call_analyzed",
   "analysis_not_done",
+  "caller_unanswered",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];

@@ -258,6 +258,8 @@ export interface ManualEngine {
   configs: VoiceSessionConfig[];
   keys: string[];
   said: string[];
+  /** Quantas vezes a conversa pediu o fim do turno de quem ligou (a guarda contra o silêncio). */
+  callerTurnsClosed: number;
   toolResults: Array<{ id: string; result: unknown }>;
   audioBytes: number;
   closed: number;
@@ -270,6 +272,7 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
     configs: [],
     keys: [],
     said: [],
+    callerTurnsClosed: 0,
     toolResults: [],
     audioBytes: 0,
     closed: 0,
@@ -294,6 +297,7 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
           sendAudio: (pcm) => void (manual.audioBytes += pcm.length),
           sendToolResult: (id, result) => void manual.toolResults.push({ id, result }),
           say: (text) => void manual.said.push(text),
+          closeCallerTurn: () => void (manual.callerTurnsClosed += 1),
           close: async () => void (manual.closed += 1),
         };
         return session;

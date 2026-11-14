@@ -170,6 +170,10 @@ const timeline: TimelineDictionary = {
       unreachable: "the provider did not answer in time, or it is down",
       unexpected_response: "the provider answered outside the requested format",
     },
+    caller_unanswered: {
+      turn_closed: "The caller went {seconds} s without an answer, possibly because of noise on the line. The agent was asked to answer what it heard.",
+      asked_to_repeat: "The agent was still silent {seconds} s after the caller last spoke, and asked them to repeat.",
+    },
     unknown: "Event",
   },
   reasons: {
