@@ -83,6 +83,16 @@ const OUTCOME_PRICING: EnginePricing = {
   checkedOn: "2026-11-13",
   source: "https://developers.openai.com/api/docs/pricing",
 };
+// Modelo configurado pelo dono (provedor compatível): o projeto não conhece a tabela de preço dele,
+// e um centavo inventado seria pior que nenhum. O consumo em tokens continua no extrato; o custo
+// fica zero até alguém medir o preço desse modelo.
+const OUTCOME_PRICING_UNKNOWN: EnginePricing = {
+  centsPerMillionInputTokens: 0,
+  centsPerMillionCachedInputTokens: 0,
+  centsPerMillionOutputTokens: 0,
+  checkedOn: "2026-11-14",
+  source: "unmeasured: the price of a configured model is not known to the project",
+};
 // O modelo que transcreve a fala de quem ligou durante a chamada, e a gravação depois dela.
 const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
 /**
@@ -455,17 +465,21 @@ const engine: VoiceEngine = {
 
   analyzes: true,
 
+  classifyTarget: true,
+
   async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
     const analyze = input.analyze === true;
+    // O modelo configurado pelo dono é o do pedido, do corpo e do preço; sem ele, o de sempre.
+    const model = options.model ?? OUTCOME_MODEL;
     return classifyOutcomeOverHttp(
       {
         url: `${options.baseUrl ?? DEFAULT_API_URL}/chat/completions`,
         headers: { Authorization: `Bearer ${apiKey}` },
-        model: OUTCOME_MODEL,
-        pricing: OUTCOME_PRICING,
+        model,
+        pricing: options.model === undefined ? OUTCOME_PRICING : OUTCOME_PRICING_UNKNOWN,
         // Sem `analyze`, o pedido é exatamente o só de desfecho: quem usa só o desfecho não paga a análise.
         body: JSON.stringify({
-          model: OUTCOME_MODEL,
+          model,
           messages: [{ role: "user", content: analyze ? analysisPrompt(input) : outcomePrompt(input) }],
           response_format: analyze
             ? { type: "json_schema", json_schema: { name: "analise", strict: true, schema: ANALYSIS_SCHEMA } }

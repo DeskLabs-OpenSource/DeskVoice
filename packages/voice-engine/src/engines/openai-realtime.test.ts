@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pcm16ToUlaw } from "../resample";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
 import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
-import type { KeyCheckOptions, VoiceSessionConfig } from "../types";
+import type { ClassifyOptions, KeyCheckOptions, VoiceSessionConfig } from "../types";
 import { estimateCostCents } from "../pricing";
 import engine, { usageOf } from "./openai-realtime";
 
@@ -323,5 +323,46 @@ describe("openai-realtime: teste da chave (contrato com servidor HTTP falso)", (
     expect((await check({ schedule: expireAtOnce })).result).toBe("unreachable");
     await http.stop();
     expect((await check()).result).toBe("unreachable");
+  });
+});
+
+
+/**
+ * O destino da classificação: com `baseUrl` e `model` no pedido, o motor vai ao provedor compatível;
+ * sem eles, vai à OpenAI com o modelo de sempre. O corpo é lido do próprio pedido, não do servidor.
+ */
+describe("openai-realtime: desfecho da ligação (o destino vem de quem chama)", () => {
+  const palpite = { outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta." };
+  const usar = (uso: object = { prompt_tokens: 1_000_000, completion_tokens: 0 }) => {
+    const pedidos: Array<{ url: string; model: string }> = [];
+    const fetchFalso = (async (url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { model: string };
+      pedidos.push({ url, model: body.model });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: uso }), { status: 200 });
+    }) as unknown as typeof fetch;
+    return { pedidos, fetch: fetchFalso };
+  };
+  const classify = (options: ClassifyOptions = {}) => {
+    const run = engine.classifyOutcome;
+    if (!run) throw new Error("openai-realtime classifies the outcome");
+    return run("chave-de-teste", { transcript: "Cliente: Pode marcar quinta.", tools: [] }, options);
+  };
+
+  it("provedor compatível: o endpoint e o modelo configurados são os do pedido, e o preço não é inventado", async () => {
+    const { pedidos, fetch } = usar();
+    const result = await classify({ fetch, baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" });
+
+    expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat" }]);
+    // O preço do modelo configurado não é conhecido: o consumo entra, o custo fica zero.
+    expect(result).toEqual({ ok: true, guess: palpite, model: "deepseek-chat", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 0, costMicrocents: 0 });
+  });
+
+  it("sem configuração: o pedido é o de hoje, na OpenAI e no modelo de sempre", async () => {
+    const { pedidos, fetch } = usar();
+    const result = await classify({ fetch });
+
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano" }]);
+    // 1 milhão de entrada a US$ 0,05 por milhão: 5 centavos, como antes de o modelo ser configurável.
+    expect(result).toEqual({ ok: true, guess: palpite, model: "gpt-5-nano", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 5, costMicrocents: 5_000_000 });
   });
 });

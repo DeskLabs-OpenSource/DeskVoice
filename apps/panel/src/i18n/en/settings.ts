@@ -32,6 +32,15 @@ const settings: SettingsDictionary = {
   keyNeverTested: "Key not tested yet.",
   keyTested: "Tested on {when}: {result}",
   keySavedNotTested: "Key saved. The test is postponed for a few minutes: this engine reached its test limit.",
+  /** Endpoint and model for the classification, for those paying an OpenAI-compatible provider. */
+  classifyBaseUrl: "Classification endpoint",
+  classifyBaseUrlHint: "OpenAI-compatible provider, for example https://api.deepseek.com/v1. With an endpoint, classification uses its own key, below, and never the engine's key. Empty means the engine's official address and key.",
+  classifyKey: "Endpoint key",
+  classifyKeyHint: "Sent only to the endpoint above. When the endpoint changes, enter the key again.",
+  classifyKeyKeep: "Leave empty to keep the saved key",
+  classifyModel: "Classification model",
+  classifyModelHint: "The name the provider publishes, for example deepseek-chat. Empty means the engine's model.",
+  classifyTargetSave: "Save destination",
   keyResults: {
     accepted: "accepted, with access to the model {model}. The test does not check credit: it only reads the model's details, at no cost.",
     rejected: "the provider rejected the key. Check that it was copied whole and was not revoked, or create a new one on the provider's site.",
