@@ -10,6 +10,13 @@
  *   - https://ai.google.dev/gemini-api/docs/speech-generation  (lista de vozes)
  *   - https://ai.google.dev/gemini-api/docs/pricing  (preços)
  *
+ * Vocabulário do agente, consultado em 2026-11-13 (ai.google.dev/api/live redireciona para
+ * aistudio.google.com/api-reference/live):
+ *   - `AudioTranscriptionConfig.customVocabulary[]`: "A list of custom vocabulary phrases to bias the speech
+ *     recognition model toward recognizing specific terms". Vale para a transcrição lateral; a página não diz
+ *     formato, limite de quantidade nem de tamanho. O modelo de voz não tem campo de vocabulário no `setup`:
+ *     os termos vão também na instrução de sistema (`instructionsWithVocabulary`).
+ *
  * Teste da chave (`checkKey`), consultado em 2026-11-12 (ai.google.dev redireciona para aistudio.google.com):
  *   - https://ai.google.dev/api/models  (`GET /v1beta/models/{model}`: lê os dados do modelo, não gera nada)
  *   - https://ai.google.dev/gemini-api/docs/api-key  (a chave vai no cabeçalho `x-goog-api-key`)
@@ -24,6 +31,8 @@
  *   - `responseModalities`/`speechConfig` vão dentro de `setup.generationConfig`, como na referência da
  *     API; o exemplo do guia de WebSocket mostra `responseModalities` direto em `setup`;
  *   - `inputAudioTranscription.languageCodes` (está na referência; os guias só mostram `{}`);
+ *   - `inputAudioTranscription.customVocabulary` aceito pela Live API (está na referência, nenhum guia mostra),
+ *     e o efeito dele no reconhecimento;
  *   - se `usageMetadata` é por turno ou acumulado na sessão. Aqui é tratado como incremento.
  *
  * Sinal de fala e fim de turno forçado (`callerActivity`, `closeCallerTurn`), consultado em 2026-11-14:
@@ -38,6 +47,7 @@ import { z } from "zod";
 import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { resample } from "../resample";
+import { instructionsWithVocabulary } from "../vocabulary";
 import { checkKeyOverHttp } from "../key-check";
 import { ANALYSIS_SCHEMA_GOOGLE, analysisPrompt } from "../analysis";
 import { classifyOptionsFor, classifyOutcomeOverHttp, readClassifyText, transcribeOverHttp } from "../outcome-over-http";
@@ -291,7 +301,7 @@ const engine: VoiceEngine = {
         },
         // Os modelos de áudio nativo não aceitam código de idioma para a fala; a documentação manda
         // restringir o idioma pela instrução de sistema.
-        systemInstruction: { parts: [{ text: `${config.instructions}\n\nSpeak only in ${config.language}.` }] },
+        systemInstruction: { parts: [{ text: `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.` }] },
         ...(config.tools.length > 0 && {
           tools: [
             {
@@ -303,7 +313,11 @@ const engine: VoiceEngine = {
             },
           ],
         }),
-        inputAudioTranscription: { languageCodes: [config.language] },
+        // Sem termos, o campo nem aparece: o setup fica igual ao de antes.
+        inputAudioTranscription: {
+          languageCodes: [config.language],
+          ...(config.vocabulary && config.vocabulary.length > 0 && { customVocabulary: [...config.vocabulary] }),
+        },
         outputAudioTranscription: {},
       },
     });

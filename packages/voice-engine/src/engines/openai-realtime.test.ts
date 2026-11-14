@@ -46,6 +46,33 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     });
   });
 
+  // A abertura de hoje, gravada como texto: agente sem termos não pode mandar ao provedor nada além disto.
+  const SESSAO_SEM_VOCABULARIO =
+    '{"type":"session.update","session":{"type":"realtime","instructions":"Você atende a clínica.\\n\\nSpeak only in pt-BR.","output_modalities":["audio"],' +
+    '"audio":{"input":{"format":{"type":"audio/pcmu"},"transcription":{"model":"gpt-4o-mini-transcribe","language":"pt"},' +
+    '"turn_detection":{"type":"server_vad","create_response":true,"interrupt_response":true}},"output":{"format":{"type":"audio/pcmu"},"voice":"marin"}},' +
+    '"tools":[{"type":"function","name":"end_call","description":"Encerra a ligação","parameters":{"type":"object","properties":{}}}]}}';
+
+  it.each([["ausente", undefined], ["vazio", []]])("vocabulário %s: a abertura é byte a byte a de antes", async (_, vocabulary) => {
+    const { update } = await openSession({ vocabulary });
+    expect(JSON.stringify(update)).toBe(SESSAO_SEM_VOCABULARIO);
+  });
+
+  it("vocabulário: os termos vão ao prompt da transcrição e às instruções, antes do idioma", async () => {
+    const { update } = await openSession({ vocabulary: ["Melgaço", "DeskVoice"] });
+    expect(update).toMatchObject({
+      session: {
+        instructions: "Você atende a clínica.\n\nNames and terms that may come up in this call, spelled as written: Melgaço; DeskVoice.\n\nSpeak only in pt-BR.",
+      },
+    });
+    const session = update.session as { audio: { input: { transcription: unknown } } };
+    expect(session.audio.input.transcription).toEqual({
+      model: "gpt-4o-mini-transcribe",
+      language: "pt",
+      prompt: "Names and terms that may appear: Melgaço, DeskVoice.",
+    });
+  });
+
   it("custo separa áudio, texto e cache, como a OpenAI cobra", () => {
     // Uma resposta no meio da conversa: o prompt e a conversa anterior voltam como entrada, quase tudo em cache.
     const usage = usageOf({

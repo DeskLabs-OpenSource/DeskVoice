@@ -15,13 +15,24 @@
  *     O 403 de país não atendido não é defeito da chave: trocar a chave não resolve, então tem resultado próprio.
  *   A página do modelo não cita preço; nenhuma página de preço lista essa chamada.
  *
+ * Vocabulário do agente, consultado em 2026-11-13:
+ *   - https://developers.openai.com/api/docs/api-reference/realtime  (`RealtimeAudioConfig.input.transcription.prompt`:
+ *     para `whisper-1`, lista de palavras-chave; para `gpt-4o-transcribe` e variantes, texto livre). Vale para a
+ *     transcrição lateral. O modelo de voz não tem campo de vocabulário: os termos vão também nas `instructions`
+ *     (`instructionsWithVocabulary`).
+ *   - O `keywords` do guia de transcrição (developers.openai.com/api/docs/guides/realtime-transcription) só aparece
+ *     em sessão `type: "transcription"` com `gpt-live-transcribe`. Esta sessão é `type: "realtime"`: não é usado.
+ *
  * A API aceita G.711 μ-law (`audio/pcmu`, 8 kHz) na entrada e na saída: a ligação não é reamostrada.
  *
  * Não confirmado contra o servidor real (nenhuma chamada com chave foi feita):
  *   - a taxa do `audio/pcmu` não aparece escrita na referência; G.711 é 8 kHz por definição;
  *   - `gpt-4o-mini-transcribe` como modelo de transcrição da fala de quem ligou (está na lista aceita);
  *   - que a leitura do modelo responda 404 a uma chave sem acesso a ele (a página de erros não lista 404);
- *   - se a leitura do modelo chega a conferir crédito: a resposta "aceita" não promete crédito.
+ *   - se a leitura do modelo chega a conferir crédito: a resposta "aceita" não promete crédito;
+ *   - o efeito do `transcription.prompt` no `gpt-4o-mini-transcribe` (a referência só o descreve para
+ *     `whisper-1` e `gpt-4o-transcribe`);
+ *   - o limite de tamanho do `transcription.prompt` (a referência não publica).
  *
  * Sinal de fala e fim de turno forçado (`callerActivity`, `closeCallerTurn`), consultado em 2026-11-14:
  *   - https://developers.openai.com/api/docs/api-reference/realtime  (`input_audio_buffer.speech_started`,
@@ -39,6 +50,7 @@ import { z } from "zod";
 import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
+import { instructionsWithVocabulary } from "../vocabulary";
 import { checkKeyOverHttp } from "../key-check";
 import { ANALYSIS_SCHEMA, analysisPrompt } from "../analysis";
 import { classifyOptionsFor, classifyOutcomeOverHttp, readClassifyText, transcribeOverHttp } from "../outcome-over-http";
@@ -64,6 +76,8 @@ const OUTCOME_PRICING: EnginePricing = {
 };
 // O modelo que transcreve a fala de quem ligou durante a chamada, e a gravação depois dela.
 const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+/** O `prompt` da transcrição lateral, em texto livre, como a referência pede para a família `gpt-4o-transcribe`. */
+const transcriptionPrompt = (vocabulary: readonly string[]): string => `Names and terms that may appear: ${vocabulary.join(", ")}.`;
 // gpt-4o-mini-transcribe, na seção "Transcription" da página de preços (conferida em 2026-11-13):
 // entrada US$ 1,25 e saída US$ 5,00 por milhão de tokens, e a estimativa de US$ 0,003 por minuto.
 // A linha não separa entrada de áudio e de texto: o preço de entrada vale para os dois. O minuto só
@@ -364,12 +378,17 @@ const engine: VoiceEngine = {
       session: {
         type: "realtime",
         // O idioma só existe como parâmetro na transcrição; a fala segue a instrução.
-        instructions: `${config.instructions}\n\nSpeak only in ${config.language}.`,
+        instructions: `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.`,
         output_modalities: ["audio"],
         audio: {
           input: {
             format: AUDIO_FORMAT,
-            transcription: { model: TRANSCRIBE_MODEL, language: config.language.split("-")[0] },
+            // Sem termos, o `prompt` nem aparece: a sessão fica igual à de antes.
+            transcription: {
+              model: TRANSCRIBE_MODEL,
+              language: config.language.split("-")[0],
+              ...(config.vocabulary && config.vocabulary.length > 0 && { prompt: transcriptionPrompt(config.vocabulary) }),
+            },
             turn_detection: { type: "server_vad", create_response: true, interrupt_response: true },
           },
           output: { format: AUDIO_FORMAT, voice: config.voiceId ?? DEFAULT_VOICE },
