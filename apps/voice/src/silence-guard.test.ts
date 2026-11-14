@@ -42,6 +42,42 @@ function scene() {
 }
 
 describe("guarda contra o silêncio", () => {
+  it("os prazos do contrato: 2500, 8000 e 4000 ms", () => {
+    expect({ AFTER_WORDS_MS, WITHOUT_WORDS_MS, AFTER_CLOSE_MS }).toEqual({ AFTER_WORDS_MS: 2500, WITHOUT_WORDS_MS: 8000, AFTER_CLOSE_MS: 4000 });
+  });
+
+  it("linha sem barulho: transcrição atrasada da fala já respondida, com a resposta ainda tocando, não arma (parecer do #192, ponto 1)", () => {
+    const { time, log, guard } = scene();
+    guard.callerActivity({ words: true });
+    // A resposta chega inteira de uma vez (o modelo gera mais rápido que o tempo real): 3 s de fala.
+    guard.agentAudio(1500);
+    guard.agentAudio(1500);
+    time.advance(200);
+    guard.callerActivity({ words: true }); // o pedaço atrasado da transcrição da fala anterior
+    time.advance(20_000);
+    expect(log).toEqual([]);
+    expect(time.pending()).toBe(0);
+  });
+
+  it("quem ligou fala depois que a resposta termina de tocar: a guarda arma de novo", () => {
+    const { time, log, guard } = scene();
+    guard.agentAudio(3000);
+    time.advance(3000);
+    guard.callerActivity({ words: true });
+    time.advance(AFTER_WORDS_MS);
+    expect(log).toEqual(["close"]);
+  });
+
+  it("quem ligou fala por cima e o resto da resposta é descartado: a guarda arma na hora", () => {
+    const { time, log, guard } = scene();
+    guard.agentAudio(10_000);
+    time.advance(500);
+    guard.agentInterrupted();
+    guard.callerActivity({ words: false });
+    time.advance(WITHOUT_WORDS_MS);
+    expect(log).toEqual(["close"]);
+  });
+
   it("quem ligou fala e o agente fica calado: fecha o turno no prazo e, calado ainda, pede para repetir", () => {
     const { time, log, reports, guard } = scene();
     // Fala com texto por 3 s; depois o ruído segue (início de fala sem texto) e ninguém responde.
@@ -84,7 +120,7 @@ describe("guarda contra o silêncio", () => {
     guard.callerActivity({ words: true });
     time.advance(AFTER_WORDS_MS);
     expect(log).toEqual(["close"]);
-    guard.agentAudio();
+    guard.agentAudio(20);
     time.advance(60_000);
     expect(log).toEqual(["close"]);
   });
@@ -102,7 +138,7 @@ describe("guarda contra o silêncio", () => {
     const { time, log, guard } = scene();
     guard.callerActivity({ words: true });
     time.advance(AFTER_WORDS_MS - 1);
-    guard.agentAudio();
+    guard.agentAudio(20);
     time.advance(60_000);
     expect(log).toEqual([]);
     expect(time.pending()).toBe(0);

@@ -143,6 +143,20 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     expect(signals).toEqual([{ words: false }, { words: true }]);
   });
 
+  it("transcrição atrasada de uma fala que já teve resposta não vira callerActivity; a de um item novo vira", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    const signals: Array<{ words: boolean }> = [];
+    session.on("callerActivity", (signal) => signals.push(signal));
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: "i1" });
+    fake.send({ type: "response.created", response: {} });
+    // A referência: a transcrição corre em paralelo à resposta e pode chegar depois dela.
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: "i1", content_index: 0, delta: "quero marcar" });
+    const fresh = nextEvent(session, "callerActivity");
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: "i2", content_index: 0, delta: "e mais uma coisa" });
+    await fresh;
+    expect(signals).toEqual([{ words: true }]);
+  });
+
   it("closeCallerTurn fecha o áudio de quem ligou num item e pede a resposta", async () => {
     const { session } = await openSession({ greeting: undefined });
     session.closeCallerTurn();

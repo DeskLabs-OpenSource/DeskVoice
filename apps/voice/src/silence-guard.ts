@@ -47,8 +47,16 @@ export interface SilenceGuardDeps {
 export interface SilenceGuard {
   /** Quem ligou dá sinal de fala (`callerActivity` do motor). */
   callerActivity(signal: { words: boolean }): void;
-  /** Chegou áudio do agente: ele respondeu. */
-  agentAudio(): void;
+  /**
+   * Chegou áudio do agente: ele respondeu. `durationMs` é quanto o pedaço leva para tocar. Até o
+   * último pedaço terminar de tocar, sinal de quem ligou é ignorado: o modelo gera mais rápido que o
+   * tempo real, e a transcrição da fala anterior pode chegar depois da resposta (a OpenAI diz que ela
+   * corre em paralelo à resposta). Sem isto, a guarda armaria com a fala já respondida e falaria por
+   * cima da resposta que ainda toca.
+   */
+  agentAudio(durationMs: number): void;
+  /** Quem ligou falou por cima e o que faltava tocar foi descartado: o agente parou de falar agora. */
+  agentInterrupted(): void;
   /** Uma ferramenta começou. Enquanto alguma estiver em curso (aprovação em espera inclusive), a guarda não arma. */
   toolStarted(): void;
   toolFinished(): void;
@@ -71,6 +79,8 @@ export function createSilenceGuard(deps: SilenceGuardDeps): SilenceGuard {
   let turnWords = false;
   /** Desde quando quem ligou espera (ver `waitedMs`). */
   let since = 0;
+  /** Até quando o áudio do agente que já chegou ainda está tocando. */
+  let agentSpeakingUntil = 0;
   let cancel: () => void = () => undefined;
 
   const now = (): number => clock.now().getTime();
@@ -102,7 +112,7 @@ export function createSilenceGuard(deps: SilenceGuardDeps): SilenceGuard {
 
   return {
     callerActivity({ words }) {
-      if (stopped || toolsRunning > 0) return;
+      if (stopped || toolsRunning > 0 || now() < agentSpeakingUntil) return;
       if (phase.kind === "idle") {
         turnWords = words;
         since = now();
@@ -117,7 +127,13 @@ export function createSilenceGuard(deps: SilenceGuardDeps): SilenceGuard {
       since = now();
       listen(AFTER_WORDS_MS);
     },
-    agentAudio: disarm,
+    agentAudio(durationMs) {
+      disarm();
+      agentSpeakingUntil = Math.max(now(), agentSpeakingUntil) + durationMs;
+    },
+    agentInterrupted() {
+      agentSpeakingUntil = 0;
+    },
     toolStarted() {
       toolsRunning++;
       disarm();

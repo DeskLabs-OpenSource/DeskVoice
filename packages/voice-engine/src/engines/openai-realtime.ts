@@ -25,7 +25,9 @@
  *
  * Sinal de fala e fim de turno forçado (`callerActivity`, `closeCallerTurn`), consultado em 2026-11-14:
  *   - https://developers.openai.com/api/docs/api-reference/realtime  (`input_audio_buffer.speech_started`,
- *     `conversation.item.input_audio_transcription.delta`, `input_audio_buffer.commit`, `response.create`)
+ *     `conversation.item.input_audio_transcription.delta`, `input_audio_buffer.commit`, `response.create`,
+ *     `input_audio_buffer.committed` com `item_id`; a transcrição "runs asynchronously with Response
+ *     creation, so this event may come before or after the Response events")
  *   - https://developers.openai.com/api/docs/guides/realtime-vad  (`server_vad`)
  *   Não confirmado contra o servidor real: se a OpenAI emite `input_audio_transcription.delta` antes
  *   do fim do turno (a leitura indica que não; por isso a guarda tem o prazo sem palavras), e se o
@@ -116,7 +118,8 @@ const serverEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("response.output_audio.delta"), delta: z.string() }),
   z.object({ type: z.literal("response.output_audio_transcript.done"), transcript: z.string() }),
   z.object({ type: z.literal("conversation.item.input_audio_transcription.completed"), transcript: z.string() }),
-  z.object({ type: z.literal("conversation.item.input_audio_transcription.delta"), delta: z.string() }),
+  z.object({ type: z.literal("conversation.item.input_audio_transcription.delta"), item_id: z.string().optional(), delta: z.string() }),
+  z.object({ type: z.literal("input_audio_buffer.committed"), item_id: z.string() }),
   z.object({
     type: z.literal("response.function_call_arguments.done"),
     call_id: z.string(),
@@ -261,6 +264,11 @@ const engine: VoiceEngine = {
     let configured = false;
     let responseActive = false;
     const queuedResponses: object[] = [];
+    // Falas de quem ligou já fechadas num item e ainda sem resposta, e as que já tiveram resposta. A
+    // transcrição corre em paralelo à resposta (referência, `input_audio_transcription`), então um
+    // pedaço dela pode chegar depois: texto de item já respondido não é quem ligou falando agora.
+    const unansweredItems = new Set<string>();
+    const answeredItems = new Set<string>();
 
     let sessionReady: () => void = () => undefined;
     let sessionFailed: (error: Error) => void = () => undefined;
@@ -290,6 +298,11 @@ const engine: VoiceEngine = {
           break;
         case "response.created":
           responseActive = true;
+          for (const id of unansweredItems) answeredItems.add(id);
+          unansweredItems.clear();
+          break;
+        case "input_audio_buffer.committed":
+          unansweredItems.add(event.item_id);
           break;
         case "response.output_audio.delta":
           emitter.emit("audio", ulawToPcm16(Buffer.from(event.delta, "base64")));
@@ -301,7 +314,7 @@ const engine: VoiceEngine = {
           if (event.transcript.trim()) emitter.emit("transcript", { speaker: "user", text: event.transcript.trim() });
           break;
         case "conversation.item.input_audio_transcription.delta":
-          if (event.delta.trim()) emitter.emit("callerActivity", { words: true });
+          if (event.delta.trim() && !(event.item_id && answeredItems.has(event.item_id))) emitter.emit("callerActivity", { words: true });
           break;
         case "response.function_call_arguments.done":
           emitter.emit("toolCall", { id: event.call_id, name: event.name, args: parseArguments(event.arguments) });

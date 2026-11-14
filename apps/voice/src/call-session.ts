@@ -8,6 +8,9 @@ import { createSilenceGuard, type SilenceGuard } from "./silence-guard";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
 
+/** O áudio do motor é PCM16 mono 8 kHz: 16 bytes por milissegundo de fala. */
+const PCM16_8K_BYTES_PER_MS = 16;
+
 export interface CallSessionDeps {
   db: Db;
   clock: Clock;
@@ -478,20 +481,20 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       clock,
       schedule,
       closeCallerTurn: () => session.closeCallerTurn(),
-      say: (text) => {
-        if (!ending && !wrappingUp) session.say(text);
-      },
+      // `wrapUp` e `finish` param a guarda: depois disso ela não chama nada.
+      say: (text) => session.say(text),
       acted: (report) => void event("caller_unanswered", report).catch(logFailure("could not record an unanswered caller")),
     });
     guard = silenceGuard;
     session.on("callerActivity", (signal) => silenceGuard.callerActivity(signal));
     session.on("audio", (pcm) => {
-      silenceGuard.agentAudio();
+      silenceGuard.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
       if (ending) return;
       transport.sendAudio(pcm);
       recorder?.agent(pcm);
     });
     session.on("interrupted", () => {
+      silenceGuard.agentInterrupted();
       transport.clearAudio();
       recorder?.clear();
     });
