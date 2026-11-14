@@ -27,8 +27,13 @@ beforeEach(async () => {
   panel.voice.requests.length = 0;
   // O índice de "um pedido aberto" vale para a instalação inteira: cada teste começa sem nenhum.
   await withSystem(panel.app, (q) => q.exec("delete from update_requests"));
-  // O segundo booleano também é da instalação inteira: nenhuma organização de outro arquivo de teste quer o serviço.
-  await withSystem(panel.app, (q) => q.exec("update whatsapp_sessions set service_wanted = false"));
+  // Os booleanos de serviço são da instalação inteira, e moram em duas tabelas: `whatsapp_sessions`
+  // responde por `whatsapp` e `whatsapp_call_sessions` por `whatsappCalls`. Zerar só a primeira
+  // deixava o teste dependente da ordem dos arquivos (issue #177).
+  await withSystem(panel.app, async (q) => {
+    await q.exec("update whatsapp_sessions set service_wanted = false");
+    await q.exec("update whatsapp_call_sessions set service_wanted = false");
+  });
 });
 afterAll(() => panel.close());
 

@@ -192,6 +192,33 @@ export type ClassifyResult = { model: string; usage: Usage; costCents: number } 
   | { ok: false; failure: ClassifyFailure; status: number | null }
 );
 
+/** A transcrição de um lado da gravação: o texto, ou o motivo de não haver um, e sempre o custo. */
+export type TranscribeResult = { model: string; usage: Usage; costCents: number } & (
+  // `text` vazio é "o provedor ouviu e não achou fala", não falha.
+  | { ok: true; text: string }
+  | { ok: false; failure: ClassifyFailure; status: number | null }
+);
+
+export interface TranscribeInput {
+  /** Um lado da chamada, WAV PCM16 mono. */
+  audio: Uint8Array;
+  /** Duração do áudio, para o preço por minuto quando o provedor não declara o consumo. */
+  seconds: number;
+  /** O idioma do agente (`pt-BR`). */
+  language: string;
+}
+
+/** Transcreve áudio já gravado, depois da chamada. */
+export interface RecordingTranscriber {
+  /** O modelo que transcreve: o preço abaixo é o dele. */
+  model: string;
+  pricing: EnginePricing;
+  /** O maior WAV mono que o provedor aceita num pedido, em bytes. Acima disto o pedido nem sai. */
+  maxAudioBytes: number;
+  /** Nunca lança: falha volta como `ok: false`, com o consumo que o provedor cobrou. */
+  transcribe(apiKey: string, input: TranscribeInput, options?: ClassifyOptions): Promise<TranscribeResult>;
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;
@@ -221,6 +248,12 @@ export interface VoiceEngine {
   analyzes?: boolean;
 
   /**
+   * Transcreve a gravação de uma chamada que ficou sem texto, um lado por vez. Opcional como
+   * `classifyOutcome`: motor que não declara não transcreve, e o painel diz isso.
+   */
+  transcription?: RecordingTranscriber;
+
+  /**
    * Confere a chave sem abrir sessão de voz e sem gastar: a chamada mais barata do provedor que
    * prova que a chave vale e alcança o modelo de `connect`. Nunca lança, nunca registra a chave.
    */
@@ -244,3 +277,11 @@ export const outcomeEnabledOf = (stored: unknown): boolean => stored === true;
  */
 export const ANALYSIS_SETTING = "calls.analysis_enabled";
 export const analysisEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
+ * Transcrever a gravação de uma chamada sem texto, por organização (chave `calls.transcription_enabled`).
+ * Ausente é desligada, de fábrica: o áudio gravado vai ao provedor do motor e cada transcrição é paga.
+ * Só `true` liga.
+ */
+export const TRANSCRIPTION_SETTING = "calls.transcription_enabled";
+export const transcriptionEnabledOf = (stored: unknown): boolean => stored === true;

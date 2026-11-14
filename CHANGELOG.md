@@ -3,6 +3,46 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.10.0] - 2026-11-14
+
+### Adicionado
+
+- **Transcrever a gravação de uma chamada que ficou sem texto** Chamada sem transcrição, como um recado, uma falha do motor em tempo real ou uma chamada sem motor, agora pode ter a gravação transcrita pelo provedor do motor do agente (OpenAI ou Google), com um botão na tela da chamada. Cada lado da ligação é transcrito em separado, e o texto entra na linha do tempo como fala de quem ligou e do agente, marcado como transcrito da gravação. A opção nasce desligada e se liga em Configurações → Inteligência artificial, porque o áudio gravado sai para o provedor e cada transcrição é paga: o valor entra no custo da chamada e respeita o teto de custo do agente. Só donos e administradores pedem. Chamada apagada a pedido de quem ligou, fora do prazo de guarda da transcrição, que já tem texto ou com gravação mais longa do que o provedor aceita num pedido não é transcrita, e a tela diz o motivo. Repetir o pedido devolve o mesmo texto sem cobrar de novo. Nada a fazer em instalações existentes. Crédito: @webtecnica.
+
+## [0.9.0] - 2026-11-14
+
+### Adicionado
+
+- **O banco passa a ter onde guardar a análise da ligação, já com o prazo de guarda** Esta é a primeira parte da análise da ligação no fim: a nota de 0 a 10 por uma régua de cinco critérios, a temperatura da conversa e as objeções de quem ligou. Ela ainda não analisa nenhuma ligação e não tem tela; só prepara o lugar onde a análise fica e as regras dela. A citação de cada objeção precisa estar na fala de quem ligou, ou a objeção é descartada. Depois do prazo de guarda da transcrição, a análise perde todo o texto e mantém a nota, a régua e a temperatura. A exportação por telefone, em Configurações → Privacidade, passa a levar a análise e a nota de cada chamada. Nada a fazer em instalações existentes: as colunas nascem vazias e nenhuma ligação antiga é alterada. Crédito: @melgarafael.
+- **Apagar a conversa a pedido de quem ligou** Em Configurações → Privacidade, o dono ou administrador passa a atender o pedido de apagamento de quem ligou, em dois passos: informa o telefone, vê a prévia do que sairia (chamadas, eventos, pendências, avisos, aprovações e gravações) e só então confirma, num botão que nomeia o telefone. Nas chamadas desse número saem as falas, o resumo, a citação do desfecho, o texto da análise, o motivo do pedido para parar a gravação, os argumentos e respostas das ferramentas, o texto das aprovações e dos avisos enviados ao dono, e as pendências ligadas ao número ou à chamada; o telefone da pessoa some dessas chamadas, dos eventos e das pendências. A gravação sai logo depois que o banco confirma, por uma rotina; se um arquivo não sair, o registro diz quantos ficaram, e a rotina e um novo pedido tentam de novo. Fica o registro do serviço prestado (horário, duração, custo, desfecho e nota), e o número continua na lista de não ligar, se estiver nela. Enquanto houver uma chamada em andamento com o número, o apagamento espera. O recibo fica no registro da tela, com quem pediu, as contagens e só os quatro últimos dígitos do telefone. Resumo, desfecho e avisos que chegam depois do fim da chamada não regravam texto numa chamada já apagada. A exportação por telefone passa a usar o mesmo critério: o número é o de quem ligou, na chamada recebida, ou o de quem recebeu, na feita, e exportar a própria linha da empresa não devolve mais as chamadas de outras pessoas. As cópias de backup já feitas pelo operador não são alcançadas pelo apagamento. Nada a fazer em instalações existentes. Crédito: @webtecnica.
+- **A gravação para a pedido de quem liga, e o pedido fica registrado** Quando a pessoa na linha pede para não ser gravada, o agente pode parar a gravação naquele ponto, com a nova ferramenta `stop_recording`, e quem acompanha a chamada no painel também pode parar pelo botão na tela da chamada ao vivo. O trecho em que o pedido foi feito continua no arquivo, como prova de que ele existiu; do pedido em diante nada mais é gravado, e não há como retomar na mesma ligação. O que a pessoa disser entre o pedido e a resposta do agente ainda entra no arquivo. A tela e o agente dizem o que de fato aconteceu: se a chamada não estava sendo gravada (a gravação vem desligada, ou faltou espaço no disco), nada é parado nem registrado, e o agente diz isso à pessoa. A parada aparece na linha do tempo, dizendo se veio do agente ou do painel, e entra na exportação por telefone, em Configurações → Privacidade. O motivo do pedido é fala de quem ligou e sai no mesmo prazo de guarda da transcrição; quando e por quem ficam. Os agentes que já existem não ganham a ferramenta sozinhos: com a gravação ligada, marque `stop_recording` nas ferramentas de cada agente, em Agentes, para ele poder atender o pedido. Crédito: @webtecnica.
+- **O agente aperta as teclas do menu automático em vez de pedir que a pessoa aperte** Ligação para fora esbarrava em menu automático: a URA da operadora ou do convênio pedia um número e
+  o agente só podia pedir a quem ligou que digitasse. Agora existe a ferramenta `send_dtmf`, que toca
+  o tom de cada tecla na própria fala do agente, como faz um telefone, e o rastro de cada tecla fica
+  na linha do tempo da chamada. Funciona com o menu que reconhece o tom no áudio. O menu que só
+  aceita tecla enviada à parte, pela sinalização (RFC 4733 ou SIP INFO), não reconhece: isso foi
+  medido entre dois Asterisk, e ainda não há prova com a URA de uma operadora. Na ligação pelo
+  WhatsApp a ferramenta se recusa. O tom não entra na gravação da chamada, porque sai direto para a linha, sem passar pelo motor. Agentes que já existem não a ganham sozinhos: ela se liga na lista
+  de ferramentas do agente. Crédito: @webtecnica.
+
+### Alterado
+
+- **O serviço da ligação pelo WhatsApp passa a repassar o telefone de quem liga com o número oculto** O serviço que atende a ligação pelo WhatsApp (WaCalls) passa a vir de uma cópia mantida pelo projeto, igual à dos autores mais um conserto: quando o WhatsApp esconde o número de quem liga, ele repassa o telefone que a própria chamada informa. A troca acontece na atualização, só onde a ligação pelo WhatsApp está instalada, e o número conectado continua pareado. O conserto foi proposto aos autores, e a imagem volta a ser a deles quando eles o publicarem. Nada a fazer em instalações existentes. Crédito: @melgarafael e, pelo WaCalls, JotaDev66 e Joseph Fernandes.
+
+### Corrigido
+
+- **Transferência que ninguém atende não passa mais por atendida** Quando o destino da transferência não atende, está ocupado ou cai, a chamada terminava como se a
+  transferência tivesse dado certo, e quem opera só descobria pelo cliente. Agora a equipe recebe, no
+  painel, um aviso com quem ligou, por que pediu para falar com uma pessoa e o resumo do que já tinha
+  sido combinado, com o pedido de retornar a ligação. Na linha do tempo da chamada, o fim da
+  transferência aparece como "Transferência não atendida", e não mais como "Transferência concluída".
+  Na lista de chamadas ela continua como "Transferida"; o motivo `transfer_unanswered` sai pela API e
+  na exportação. Se quem ligou desligou enquanto a transferência tocava, o aviso sai igual, e o motivo
+  continua `transferred`. A transferência atendida não gera aviso, seja quem for que desligue depois.
+  As transferências atendidas gravadas antes desta versão ficaram registradas como não atendidas e passam a aparecer como "Transferência não atendida" na linha do tempo; as novas aparecem certas.
+  Crédito: @webtecnica.
+- **Quem liga pelo WhatsApp com o número oculto deixa de aparecer como não identificado** O WhatsApp passou a esconder o número de quem liga (`@lid`), e a ligação ficava como número não identificado, inclusive na linha do tempo e na exportação de dados. A própria chamada traz o telefone de quem liga, e o DeskVoice passa a usá-lo quando o serviço da ligação pelo WhatsApp o repassa. O WhatsApp não confirma esse telefone, assim como a operadora não confirma o número de quem liga pelo telefone. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+
 ## [0.8.0] - 2026-11-13
 
 ### Adicionado

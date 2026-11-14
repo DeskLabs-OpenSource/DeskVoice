@@ -1,7 +1,7 @@
 import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
-import { ANALYSIS_SETTING, OUTCOME_SETTING } from "@deskvoice/voice-engine/types";
+import { ANALYSIS_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING } from "@deskvoice/voice-engine/types";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -120,6 +120,9 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     // Analisar cada ligação no fim (nota pela régua, temperatura, objeções). Ausente vale desligado:
     // a análise vem na mesma chamada paga do desfecho, mais longa, e o dono decide.
     [ANALYSIS_SETTING]: { ...plain(z.boolean()), fallback: false },
+    // Transcrever a gravação de uma chamada sem texto, a pedido. Ausente vale desligado: o áudio
+    // gravado vai ao provedor do motor, e cada transcrição é paga.
+    [TRANSCRIPTION_SETTING]: { ...plain(z.boolean()), fallback: false },
     "network.public_ip": plain(z.ipv4()),
     // Ligações recebidas pela operadora ao mesmo tempo. Ausente vale o teto de fábrica.
     [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },

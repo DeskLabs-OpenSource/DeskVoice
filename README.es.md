@@ -144,7 +144,7 @@ no se probó, cada capacidad dice hasta dónde llegó la prueba:
 | Conversar por voz con el agente desde la pantalla "Hablar con el agente" | Probado en una instalación real con el motor OpenAI Realtime, por un cliente de prueba que hace el papel del navegador con habla grabada. Todavía no desde un navegador con micrófono |
 | Panel con dominio y HTTPS | Esperando prueba real |
 | Atender una llamada entrante por una línea de operador (troncal SIP) | Esperando prueba real |
-| Transferir la llamada a una persona | Esperando prueba real (el camino en Asterisk se verificó, sin operador) |
+| Transferir la llamada a una persona | Esperando prueba real (el camino en Asterisk se verificó, sin operador). Desde la 0.9.0, la transferencia que nadie atiende aparece como no atendida y genera un aviso en el panel con el pedido de devolver la llamada, probado con base de datos real y con la telefonía simulada |
 | Motor de voz OpenAI Realtime | Probado en una instalación real, en la conversación por la pantalla "Hablar con el agente" descrita arriba. Un colaborador hizo llamadas reales con él en una instalación propia, y, con la corrección del costo ([#94](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/94)), la estimación de DeskVoice coincidió con la factura de OpenAI. La corrección vale desde la 0.6.0 |
 | Motor de voz Gemini Live | Esperando prueba real (probado contra servidor falso, sin clave) |
 | Enviar WhatsApp durante la llamada, por conector | Esperando prueba real |
@@ -157,7 +157,10 @@ no se probó, cada capacidad dice hasta dónde llegó la prueba:
 | Actualización, chequeo de salud, respaldo y restauración | Probado en una instalación real, en la VPS del socio: instalador corrido dos veces sin regenerar secretos, respaldo verificado, restauración que devuelve los conteos del respaldo y la vuelta automática de una actualización fallida. Restaurar en otro servidor, o entre versiones con migration nueva, todavía sin prueba |
 | Actualizar desde el panel (Configuración → Sistema), mediante un agente del kit en el servidor | Probado en una instalación real: dos veces en la VPS del socio (0.3.0 → 0.4.0 y 0.4.0 → 0.5.0), sin nadie en la terminal del servidor, con el paso al actualizador de la versión nueva y la eliminación de las imágenes viejas |
 | Grabar el audio de la llamada, apagado de fábrica y encendido desde el panel (Configuración → Privacidad → Grabación de las llamadas) | Probado con base de datos real y en una llamada por el navegador, en una prueba de punta a punta. Todavía sin prueba en una instalación real. Desde la 0.6.0 |
+| Detener la grabación a pedido de quien llama, por el agente (herramienta `stop_recording`, marcada en cada agente) o por el botón en la pantalla de la llamada en vivo; la detención queda en la línea de tiempo | Probado con base de datos real, en la sesión de llamada real, con motor y telefonía simulados. Todavía sin prueba en una instalación real. Desde la 0.9.0 |
+| Transcribir la grabación de una llamada que quedó sin texto, por el proveedor del agente, con cada lado de la llamada por separado; apagado de fábrica, se enciende en Configuración → Inteligencia artificial, y el botón está en la pantalla de la llamada | Probado con base de datos real y con respuestas del proveedor simuladas: costo en el extracto y en el tope, rechazo de la llamada borrada, fuera del plazo de conservación o demasiado larga para el proveedor. Todavía sin prueba en una instalación real ni con OpenAI o Gemini de verdad. Desde la 0.10.0 |
 | Plazo de conservación de la transcripción y exportación de lo que la organización guarda sobre un teléfono (Configuración) | Probado con base de datos real y revisado en pantalla, en un panel contra una base descartable. Todavía sin prueba en una instalación real. Desde la 0.6.0 |
+| Borrar a pedido de quien llamó (Configuración → Privacidad): vista previa de lo que sale, confirmación que nombra el teléfono, recibo; sale toda el habla y el texto sobre la persona, incluida la grabación, y queda el registro del servicio. Las copias de respaldo ya hechas no se alcanzan | Probado con base de datos real, incluida la vuelta por la exportación. Todavía sin prueba en una instalación real. Desde la 0.9.0 |
 | Llamadas hechas por el agente | Esperando prueba real, y apagado de fábrica. Ver "Llamadas salientes" |
 
 Si usted atiende una llamada por una línea de operador, cuente cómo fue en un issue: la entrada
@@ -308,7 +311,7 @@ se construye en público, con la comunidad. Ya hay contribuciones de fuera: las 
 seguridad de [webtecnica](https://github.com/webtecnica) están en las versiones publicadas, y desde la 0.6.0 también los
 derechos de quien llama (plazo de conservación y exportación), de webtecnica, y el costo de OpenAI
 verificado contra la factura, la despedida antes de colgar y la grabación de las llamadas, de
-[aliffstefano](https://github.com/aliffstefano). La 0.8.0 trae el desenlace de la llamada y el aviso de fin de llamada por WhatsApp, de webtecnica. DeskcommCRM, de donde viene la forma de contribuir
+[aliffstefano](https://github.com/aliffstefano). La 0.8.0 trae el desenlace de la llamada y el aviso de fin de llamada por WhatsApp, de webtecnica, y la 0.9.0, también suya, las teclas del menú automático, la transferencia no atendida, la grabación que se detiene a pedido y el borrado a pedido de quien llamó, y la 0.10.0, también suya, la transcripción de la grabación. DeskcommCRM, de donde viene la forma de contribuir
 usada aquí, recibió PRs de más de 250 personas.
 
 El crédito es regla, no cortesía: quien contribuye conserva la autoría de sus commits y aparece

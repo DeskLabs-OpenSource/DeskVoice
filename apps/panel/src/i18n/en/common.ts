@@ -112,6 +112,17 @@ const common: CommonDictionary = {
     caller_call_live: "There is a call in progress with this number. Nothing was erased. Wait for the call to end and try again.",
     daily_cap_reached: "The daily call limit of this line was reached.",
     attempts_exhausted: "The attempt limit for this person was reached.",
+    transcription_disabled: "Recording transcription is off. Turn it on in Settings → Artificial intelligence.",
+    transcription_call_erased: "This call was erased at the caller's request and gets no new text.",
+    transcription_outside_retention: "This call is past the transcript retention period and gets no new text.",
+    transcription_has_text: "This call already has a transcript. Refresh the page.",
+    transcription_engine_unsupported: "The voice engine of this call does not transcribe recordings. Only the OpenAI and Google engines do.",
+    transcription_cost_ceiling: "This call already reached the agent's cost ceiling. The transcription was not made and nothing was charged.",
+    transcription_no_recording: "This call has no recording to transcribe.",
+    transcription_unreadable: "The recording of this call is not in the format the recorder writes, with one channel per side. Nothing was sent to the provider.",
+    transcription_too_long: "The recording is longer than the provider accepts in one request. Nothing was sent or charged.",
+    transcription_no_speech: "No speech was found in the recording. Nothing was added to the timeline.",
+    transcription_failed: "The provider did not transcribe the recording. What it charged is in the call cost. Try again shortly; if it persists, test the key in Settings → Artificial intelligence.",
   },
 };
 
