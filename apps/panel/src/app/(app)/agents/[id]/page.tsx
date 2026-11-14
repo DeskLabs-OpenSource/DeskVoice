@@ -39,6 +39,9 @@ interface Draft {
 
 const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal" };
 
+/** Motores em que a sessão em Barulhento foi provada numa instalação real. */
+const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime"];
+
 const toDraft = (agent: Agent): Draft => ({
   name: agent.name,
   roleLabel: agent.roleLabel ?? "",
@@ -101,6 +104,9 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   if (!draft) return <Skeleton lines={5} />;
 
   const engine = engines.data?.find((candidate) => candidate.id === draft.engine);
+  // Barulhento só foi provado no OpenAI Realtime. Em outro motor, a opção some; um agente que já
+  // está em Barulhento continua vendo o campo, com um aviso, para não guardar a escolha escondida.
+  const noisyProven = NOISY_PROVEN_ENGINES.includes(draft.engine);
   const submit = (): Promise<boolean> =>
     save.run(async () => {
       const body = {
@@ -200,14 +206,28 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               <TextInput mono value={draft.language} onChange={(event) => set("language", event.target.value)} required maxLength={20} />
             </Field>
           </div>
-          <div className="mt-4 max-w-md">
-            <Field label={t.listeningEnvironment} hint={t.listeningEnvironmentHint}>
-              <Select value={draft.listeningEnvironment} onChange={(event) => set("listeningEnvironment", event.target.value === "noisy" ? "noisy" : "normal")}>
-                <option value="normal">{t.listeningEnvironmentNormal}</option>
-                <option value="noisy">{t.listeningEnvironmentNoisy}</option>
-              </Select>
-            </Field>
-          </div>
+          {noisyProven || draft.listeningEnvironment === "noisy" ? (
+            <div className="mt-4 max-w-md">
+              <Field label={t.listeningEnvironment} hint={t.listeningEnvironmentHint}>
+                <Select value={draft.listeningEnvironment} onChange={(event) => set("listeningEnvironment", event.target.value === "noisy" ? "noisy" : "normal")}>
+                  <option value="normal">{t.listeningEnvironmentNormal}</option>
+                  <option value="noisy">{t.listeningEnvironmentNoisy}</option>
+                </Select>
+              </Field>
+              {noisyProven ? null : (
+                <div className="mt-2">
+                  <Notice tone="warn">
+                    <p>{fill(t.listeningEnvironmentUnproven, { engine: engine?.label ?? draft.engine })}</p>
+                    <div>
+                      <Button type="button" onClick={() => set("listeningEnvironment", "normal")}>
+                        {t.listeningEnvironmentBackToNormal}
+                      </Button>
+                    </div>
+                  </Notice>
+                </div>
+              )}
+            </div>
+          ) : null}
           {engine && engine.requiresKey && !engine.keyConfigured ? (
             <div className="mt-4">
               <Notice tone="warn">
