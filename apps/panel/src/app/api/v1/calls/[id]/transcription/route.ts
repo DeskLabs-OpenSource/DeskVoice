@@ -46,6 +46,14 @@ async function refusal(q: OrgQuery, callId: string, startedAt: Date, now: Date):
   return null;
 }
 
+/** As falas com texto da chamada, e se cada uma veio desta rota (`source: "stt"`). */
+const spokenOf = (q: OrgQuery, callId: string) =>
+  q.many<{ kind: string; text: string; stt: boolean }>(
+    `select kind, payload->>'text' as text, coalesce(payload->>'source' = 'stt', false) as stt from call_events
+      where call_id = $1 and kind in ('transcript_user', 'transcript_agent') and coalesce(payload->>'text', '') <> '' order by id`,
+    [callId],
+  );
+
 const turnsOf = (rows: Array<{ kind: string; text: string }>): Turn[] => rows.map((row) => ({ speaker: row.kind === "transcript_user" ? "user" : "agent", text: row.text }));
 
 /**
@@ -75,6 +83,9 @@ export const POST = handle(
         const input = results.reduce((sum, { result }) => sum + (result.usage.inputTokens ?? 0) + (result.usage.textInputTokens ?? 0) + (result.usage.cachedInputTokens ?? 0), 0);
         const output = results.reduce((sum, { result }) => sum + (result.usage.outputTokens ?? 0) + (result.usage.textOutputTokens ?? 0), 0);
         const cents = results.reduce((sum, { result }) => sum + result.costCents, 0);
+        // Sempre, mesmo somando zero: o `update` trava a linha da chamada até o commit, e um segundo
+        // pedido simultâneo espera aqui e depois enxerga o texto deste (conferido abaixo).
+        await q.exec("update calls set cost_cents = cost_cents + $2 where id = $1", [callId, cents]);
         // O que o provedor cobrou fica no extrato, com ou sem texto: foi gasto.
         if (input > 0 || output > 0 || cents > 0) {
           await q.exec("insert into usage_ledger (organization_id, call_id, engine, input_tokens, output_tokens, cost_cents, at) values ($1, $2, $3, $4, $5, $6, $7)", [
@@ -86,7 +97,6 @@ export const POST = handle(
             cents,
             now,
           ]);
-          await q.exec("update calls set cost_cents = cost_cents + $2 where id = $1", [callId, cents]);
         }
         const failed = results.find(({ result }) => !result.ok)?.result;
         if (failed && !failed.ok) return new ApiError(502, "transcription_failed", `The provider did not transcribe the recording (${failed.failure}${failed.status === null ? "" : `, HTTP ${failed.status}`}).`);
@@ -96,10 +106,13 @@ export const POST = handle(
         const refused = await refusal(q, callId, call.started_at, now);
         if (refused) return refused;
 
+        // Outro pedido gravou primeiro enquanto este esperava o provedor: vale o texto dele.
+        const already = await spokenOf(q, callId);
+        if (already.some((row) => row.stt)) return { cached: true, turns: turnsOf(already.filter((row) => row.stt)) };
+        if (already.length > 0) return new ApiError(409, "transcription_has_text", "This call already has a transcript.");
+
         const turns = results.flatMap(({ speaker, result }) => (result.ok && result.text !== "" ? [{ speaker, text: result.text }] : []));
         if (turns.length === 0) return new ApiError(422, "transcription_no_speech", "The provider found no speech in the recording.");
-        // ponytail: dois pedidos simultâneos à mesma chamada passam ambos por aqui e gravam o texto duas
-        // vezes (`lockCall` trava para escrita, não entre leitores). O botão fica ocupado enquanto espera.
         for (const turn of turns) {
           await recordEvent(q, callId, KIND[turn.speaker], { text: turn.text, source: "stt", engine: pending.engineId, model: pending.transcriber.model, transcribedAt: now.toISOString() }, pending.at);
         }
@@ -127,11 +140,7 @@ export const POST = handle(
     const refused = await refusal(q, callId, call.started_at, now);
     if (refused) throw refused;
 
-    const spoken = await q.many<{ kind: string; text: string; stt: boolean }>(
-      `select kind, payload->>'text' as text, coalesce(payload->>'source' = 'stt', false) as stt from call_events
-        where call_id = $1 and kind in ('transcript_user', 'transcript_agent') and coalesce(payload->>'text', '') <> '' order by id`,
-      [callId],
-    );
+    const spoken = await spokenOf(q, callId);
     const done = spoken.filter((row) => row.stt);
     if (done.length > 0) return { cached: true, turns: turnsOf(done) };
     if (spoken.length > 0) throw new ApiError(409, "transcription_has_text", "This call already has a transcript.");

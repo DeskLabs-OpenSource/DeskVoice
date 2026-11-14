@@ -136,6 +136,16 @@ describe("transcrição da gravação", () => {
     expect(panel.voice.requests).toHaveLength(2);
   });
 
+  it("dois pedidos ao mesmo tempo gravam o texto uma vez só: o segundo devolve o do primeiro", async () => {
+    const { org, cookie } = await owner("transcribe twice at once");
+    const callId = await seed(org, { audio: stereoWav({ agent: false }) });
+    panel.voice.respond = async () => Response.json({ text: CALLER });
+    const results = await Promise.all([post(cookie, callId), post(cookie, callId)]);
+    expect(results.map((result) => result.status)).toEqual([200, 200]);
+    expect(results.map((result) => (result.data as { cached: boolean }).cached).sort()).toEqual([false, true]);
+    expect((await transcripts(org, callId)).map((event) => event.payload.text)).toEqual([CALLER]);
+  });
+
   it("no Gemini, a chave vai no cabeçalho x-goog-api-key, nunca na URL, e o lado em silêncio não vai ao provedor", async () => {
     const { org, cookie } = await owner("transcribe gemini");
     const callId = await seed(org, { engine: "gemini-live", audio: stereoWav({ agent: false }) });
