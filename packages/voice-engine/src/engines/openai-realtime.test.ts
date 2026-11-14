@@ -165,6 +165,36 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     expect(await fake.waitFor(ofType("response.create"))).toEqual({ type: "response.create", response: {} });
   });
 
+  it("closeCallerTurn com uma resposta em curso não manda commit nem pede outra resposta", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: "i1" });
+    fake.send({ type: "response.created", response: {} });
+    const interrupted = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await interrupted; // o motor já processou o response.created
+    session.closeCallerTurn();
+    fake.send({ type: "response.done", response: {} });
+    const done = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await done; // o motor já processou o response.done (e soltaria a fila aqui)
+    session.say("marcador");
+    // A primeira mensagem de commit ou de resposta é a do say: closeCallerTurn não deixou nada.
+    const first = await fake.waitFor((m) => m.type === "input_audio_buffer.commit" || m.type === "response.create");
+    expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining("marcador") } });
+  });
+
+  it("closeCallerTurn com o item já fechado pelo servidor, antes do response.created, não faz nada", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: "i1" });
+    const interrupted = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await interrupted;
+    session.closeCallerTurn();
+    session.say("marcador");
+    const first = await fake.waitFor((m) => m.type === "input_audio_buffer.commit" || m.type === "response.create");
+    expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining("marcador") } });
+  });
+
   it("evento error do provedor vira error sem fechar; mensagem fora do formato é ignorada", async () => {
     const { session } = await openSession();
     const error = nextEvent(session, "error");

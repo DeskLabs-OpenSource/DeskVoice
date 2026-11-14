@@ -32,6 +32,8 @@
  *   Não confirmado contra o servidor real: se a OpenAI emite `input_audio_transcription.delta` antes
  *   do fim do turno (a leitura indica que não; por isso a guarda tem o prazo sem palavras), e se o
  *   `input_audio_buffer.commit` com a detecção de fala do servidor em curso fecha o turno sem erro.
+ *   Com resposta em curso ou item já fechado, `closeCallerTurn` não faz nada: o `commit` "will produce
+ *   an error if the input audio buffer is empty" (referência), e o servidor já vai responder.
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
@@ -395,6 +397,10 @@ const engine: VoiceEngine = {
         });
       },
       closeCallerTurn() {
+        // Se o servidor já viu o fim da fala (item fechado à espera da resposta, ou resposta em
+        // curso), ele só está lento: o `commit` de buffer vazio dá `error`, que soltaria a fila de
+        // falas por cima da resposta, e o `response.create` enfileirado faria o agente falar duas vezes.
+        if (responseActive || unansweredItems.size > 0) return;
         // Fecha o que quem ligou disse num item e pede a resposta: o servidor não viu o fim da fala.
         socket.send({ type: "input_audio_buffer.commit" });
         requestResponse({});
