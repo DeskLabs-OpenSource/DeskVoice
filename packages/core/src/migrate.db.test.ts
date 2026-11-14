@@ -166,4 +166,21 @@ describe("runMigrations", () => {
     // Sem padrão depois do backfill: quem cria uma chamada diz o canal.
     await expect(db.pool.query("insert into calls (organization_id, direction, status, started_at) values ($1, 'inbound', 'completed', now())", [org])).rejects.toThrow(/channel/);
   });
+
+  it("o agente que já existe ganha a lista de termos vazia, o novo sem a coluna também, e a lista não aceita nulo", async () => {
+    const VOCABULARY = "20261114T063000_vocabulario_do_agente.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < VOCABULARY) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Antes', 'simulated')", [org]);
+    await copyFile(path.join(REAL_MIGRATIONS, VOCABULARY), path.join(dir, VOCABULARY));
+    expect(await runMigrations(db, dir)).toEqual([VOCABULARY]);
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Depois', 'simulated')", [org]);
+    const rows = (await db.pool.query<{ name: string; vocabulary: string[] }>("select name, vocabulary from agents order by name")).rows;
+    expect(rows).toEqual([
+      { name: "Antes", vocabulary: [] },
+      { name: "Depois", vocabulary: [] },
+    ]);
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, vocabulary) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/vocabulary/);
+  });
 });
