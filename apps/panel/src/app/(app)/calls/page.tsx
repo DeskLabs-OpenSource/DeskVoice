@@ -185,14 +185,19 @@ export default function CallsPage() {
                     <span className="data text-right text-muted md:text-left">{formatDateTime(call.startedAt, locale)}</span>
                     <span className="data text-muted md:text-right md:text-ink">{call.endedAt ? formatDuration(secondsBetween(call.answeredAt ?? call.startedAt, call.endedAt)) : ""}</span>
                     <span className="data text-right">{formatMoney(call.costCents, locale)}</span>
-                    {/* A nota é a soma da régua; sem análise (o de fábrica), um traço. */}
-                    {call.analysisScore === null ? (
-                      <span className="data text-right text-muted" title={t.noScore} aria-label={t.noScore}>
-                        —
-                      </span>
-                    ) : (
-                      <span className="data text-right">{fill(t.score, { score: String(call.analysisScore) })}</span>
-                    )}
+                    {/* A nota é a soma da régua; sem análise (o de fábrica), um traço. No celular ela ocupa a
+                        linha toda, com o rótulo da coluna, para não cair solta no grid de duas colunas. */}
+                    <span className="col-span-2 flex items-center justify-between gap-4 md:col-span-1 md:block md:text-right">
+                      <span className="text-muted md:hidden">{t.columns.score}</span>
+                      {call.analysisScore === null ? (
+                        <span className="data text-muted" title={t.noScore}>
+                          <span aria-hidden="true">—</span>
+                          <span className="sr-only">{t.noScore}</span>
+                        </span>
+                      ) : (
+                        <span className="data">{fill(t.score, { score: String(call.analysisScore) })}</span>
+                      )}
+                    </span>
                   </Link>
                 ))}
               </div>
