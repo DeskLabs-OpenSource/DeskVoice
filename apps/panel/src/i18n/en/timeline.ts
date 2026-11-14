@@ -154,6 +154,8 @@ const timeline: TimelineDictionary = {
       rate_limited: "The provider asked to wait (account request limit).",
       unreachable: "The provider did not answer within 10 seconds, or it is down.",
       unexpected_response: "The provider answered outside the requested format. What it charged went into the call cost.",
+      endpoint_refused: "Classification is set to an endpoint that is not a public https address, or that the network guard refused. Nothing was sent. Check the endpoint in Settings → Artificial intelligence.",
+      endpoint_key_missing: "Classification is set to an endpoint without its own key. The engine key is not sent to that address, and nothing was sent. Enter the endpoint key in Settings → Artificial intelligence.",
     },
     outcome_not_classified_status: "Provider response: HTTP {status}",
     call_analyzed: "Call analyzed: score {score} out of 10",
@@ -170,6 +172,8 @@ const timeline: TimelineDictionary = {
       rate_limited: "the provider asked to wait (account request limit)",
       unreachable: "the provider did not answer in time, or it is down",
       unexpected_response: "the provider answered outside the requested format",
+      endpoint_refused: "the classification endpoint is not a public https address, or the network guard refused it",
+      endpoint_key_missing: "the classification endpoint has no key saved",
     },
     caller_unanswered: {
       turn_closed: "The caller went {seconds} s without an answer, possibly because of noise on the line. The agent was asked to answer what it heard.",

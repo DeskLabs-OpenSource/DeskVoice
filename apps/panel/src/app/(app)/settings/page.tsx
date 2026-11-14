@@ -37,27 +37,36 @@ function KeyCheckStatus({ check, t }: { check: KeyCheck | null; t: SettingsDicti
   return <Notice tone={KEY_CHECK_TONE[check.result]}>{fill(t.keyTested, { when: formatDateTime(check.checkedAt, locale), result })}</Notice>;
 }
 
-/** Endpoint e modelo da classificação, para quem paga um provedor compatível com OpenAI em vez da OpenAI. */
+/**
+ * Endpoint, modelo e chave da classificação, para quem paga um provedor compatível com OpenAI em vez
+ * da OpenAI. Os três vão juntos: a chave é do endpoint, e trocar o endpoint pede a chave de novo.
+ */
 function ClassifyTarget({ engine, t, onChanged }: { engine: Engine; t: SettingsDictionary; onChanged(): void }) {
   const save = useAction();
   const [baseUrl, setBaseUrl] = useState(engine.baseUrl ?? "");
   const [model, setModel] = useState(engine.classifyModel ?? "");
+  const [apiKey, setApiKey] = useState("");
   return (
     <form
       className="grid gap-2"
       onSubmit={(event) => {
         event.preventDefault();
-        // Em branco apaga a configuração: o motor volta ao endereço e ao modelo dele.
+        const target = { baseUrl: baseUrl.trim() || undefined, model: model.trim() || undefined, apiKey: apiKey.trim() || undefined };
+        // Tudo em branco apaga a configuração: o motor volta ao endereço, ao modelo e à chave dele.
         void save
-          .run(async () => {
-            await put(`engine.${engine.id}.base_url`, baseUrl.trim() || null);
-            await put(`engine.${engine.id}.classify_model`, model.trim() || null);
-          })
-          .then((ok) => ok && onChanged());
+          .run(() => put(`engine.${engine.id}.classify_target`, target.baseUrl || target.model || target.apiKey ? target : null))
+          .then((ok) => {
+            if (!ok) return;
+            setApiKey("");
+            onChanged();
+          });
       }}
     >
       <Field label={t.classifyBaseUrl} hint={t.classifyBaseUrlHint}>
         <TextInput mono type="url" inputMode="url" autoComplete="off" placeholder={URL_PREFIX} className="max-w-md" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+      </Field>
+      <Field label={t.classifyKey} hint={t.classifyKeyHint}>
+        <TextInput mono type="password" autoComplete="off" className="max-w-md" placeholder={engine.classifyKeyConfigured ? t.classifyKeyKeep : undefined} value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
       </Field>
       <Field label={t.classifyModel} hint={t.classifyModelHint}>
         <TextInput mono autoComplete="off" className="max-w-md" value={model} onChange={(event) => setModel(event.target.value)} />

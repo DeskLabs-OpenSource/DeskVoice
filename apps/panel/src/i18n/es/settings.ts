@@ -34,7 +34,10 @@ const settings: SettingsDictionary = {
   keySavedNotTested: "Clave guardada. La prueba quedó para dentro de unos minutos: este motor alcanzó su límite de pruebas.",
   /** Endpoint y modelo de la clasificación, para quien paga un proveedor compatible con OpenAI. */
   classifyBaseUrl: "Endpoint de la clasificación",
-  classifyBaseUrlHint: "Proveedor compatible con OpenAI, por ejemplo https://api.deepseek.com/v1. La clave de arriba es la que va a esta dirección. En blanco, la clasificación usa la dirección oficial del motor.",
+  classifyBaseUrlHint: "Proveedor compatible con OpenAI, por ejemplo https://api.deepseek.com/v1. Con endpoint, la clasificación usa su propia clave, abajo, y nunca la clave del motor. En blanco, la clasificación usa la dirección oficial y la clave del motor.",
+  classifyKey: "Clave del endpoint",
+  classifyKeyHint: "Va solo al endpoint de arriba. Al cambiar el endpoint, escribe la clave de nuevo.",
+  classifyKeyKeep: "En blanco, mantiene la clave guardada",
   classifyModel: "Modelo de la clasificación",
   classifyModelHint: "El nombre que publica el proveedor, por ejemplo deepseek-chat. En blanco, la clasificación usa el modelo del motor.",
   classifyTargetSave: "Guardar destino",

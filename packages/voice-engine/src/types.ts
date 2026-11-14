@@ -1,3 +1,6 @@
+import { isIP } from "node:net";
+import { isPublicAddress } from "@deskvoice/core";
+import { z } from "zod";
 import type { AnalysisGuess } from "./analysis";
 import type { OutcomeGuess } from "./outcome";
 
@@ -329,8 +332,8 @@ export const TRANSCRIPTION_SETTING = "calls.transcription_enabled";
 export const transcriptionEnabledOf = (stored: unknown): boolean => stored === true;
 
 /**
- * Endpoint e modelo da **classificação**, por motor (chaves `engine.<id>.base_url` e
- * `engine.<id>.classify_model` em `settings`).
+ * Endpoint, modelo e chave da **classificação**, por motor, juntos numa configuração só
+ * (`engine.<id>.classify_target` em `settings`).
  *
  * Existem porque a classificação é a tarefa em que o provedor compatível com OpenAI (DeepSeek,
  * Qwen, OpenRouter, Groq) resolve: uma chamada curta, saída em JSON, uma vez por ligação. Sem
@@ -338,10 +341,11 @@ export const transcriptionEnabledOf = (stored: unknown): boolean => stored === t
  * endpoints oficiais: provedor compatível não oferece áudio bidirecional.
  *
  * Ausentes valem o padrão do motor, que é o de hoje: OpenAI em `https://api.openai.com/v1`, com
- * `gpt-5-nano`. Quem nunca configurou nada não vê mudança no pedido.
+ * `gpt-5-nano` e a chave do motor. Com endpoint, a chave é a dele (`apiKey`, cifrada), dada a esse
+ * endereço: a chave do motor nunca vai a um endpoint configurado, e trocar o endpoint pede a chave
+ * de novo. Só o modelo, sem endpoint, continua na OpenAI com a chave do motor.
  */
-export const engineBaseUrlSetting = (engineId: string): string => `engine.${engineId}.base_url`;
-export const engineClassifyModelSetting = (engineId: string): string => `engine.${engineId}.classify_model`;
+export const engineClassifyTargetSetting = (engineId: string): string => `engine.${engineId}.classify_target`;
 
 /** O destino da classificação, quando o dono configurou um; vazio é o padrão do motor. */
 export interface ClassifyTarget {
@@ -349,35 +353,34 @@ export interface ClassifyTarget {
   model?: string;
 }
 
+/** Como a configuração fica gravada: só os campos de texto, sem validar o conteúdo. `apiKey` vem cifrada. */
+export interface StoredClassifyTarget {
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+}
+
+// Campo que não é texto, ou vazio, é como se não estivesse gravado.
+const storedText = z.string().min(1).optional().catch(undefined);
+const storedClassifyTarget = z.object({ baseUrl: storedText, model: storedText, apiKey: storedText }).catch({});
+
+export const storedClassifyTargetOf = (stored: unknown): StoredClassifyTarget => storedClassifyTarget.parse(stored);
+
 const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 
 /**
- * Endereço de literal interno: loopback, rede privada ou link-local. A checagem é do texto da URL,
- * não de uma resolução de DNS — um nome que resolve para a rede interna continua possível, e o
- * preço de fechar isso é resolver todo endereço duas vezes (o que não impede DNS rebinding).
- */
-const isInternalHost = (hostname: string): boolean => {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0" || host === "::1" || host === "::") return true;
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!v4) return false;
-  const [a, b] = [Number(v4[1]), Number(v4[2])];
-  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-};
-
-/**
  * O endereço serve como destino da classificação? Só `https`, porque a chave do provedor vai no
- * cabeçalho e um `http` a entregaria em claro, e só host público: o processo de rotinas alcança a
- * rede interna (Postgres, o próprio painel), e abrir a URL cria uma superfície que hoje não existe.
+ * cabeçalho e um `http` a entregaria em claro; sem usuário e senha na URL; e, quando o host é um
+ * IP, só IP público, pela mesma lista da guarda de rede dos conectores. Nome de host é conferido
+ * de novo na hora do pedido, com o DNS resolvido, pela própria guarda.
  */
 export const isClassifyBaseUrl = (value: string): boolean => {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  return url.protocol === "https:" && url.hostname !== "" && !isInternalHost(url.hostname);
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (url.protocol !== "https:" || host === "" || url.username !== "" || url.password !== "") return false;
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  return isIP(host) === 0 || isPublicAddress(host);
 };
 
 /** O endereço gravado, sem a barra final (o caminho é colado depois), ou `undefined` se não serve. */
@@ -394,12 +397,28 @@ export const classifyModelOf = (stored: unknown): string | undefined => {
   return MODEL_NAME.test(value) ? value : undefined;
 };
 
+/** Por que a classificação não sai para o endpoint configurado. */
+export type ClassifyDestinationRefusal =
+  /** O endpoint gravado não é `https` público (foi gravado por fora do painel), ou a guarda de rede o recusou na hora. */
+  | "endpoint_refused"
+  /** Há endpoint, mas não a chave dele: a do motor não serve, porque foi dada a outro endereço. */
+  | "endpoint_key_missing";
+
 /**
- * O que a rotina repassa ao motor, lido do que está gravado: só o que é válido entra. Valor inválido
- * (gravado por fora do painel) cai no padrão do motor, e a classificação continua funcionando.
+ * Para onde a rotina manda a classificação, lido do que está gravado. Sem endpoint, o padrão do
+ * motor (e o modelo, se válido), com a chave do motor. Com endpoint, só se ele for válido e tiver
+ * a chave dele, que volta em `endpointKey`, ainda cifrada; senão, o motivo de não sair nada.
+ * Modelo inválido cai no padrão do motor.
  */
-export const classifyTargetOf = (stored: { baseUrl?: unknown; model?: unknown }): ClassifyTarget => {
-  const baseUrl = classifyBaseUrlOf(stored.baseUrl);
-  const model = classifyModelOf(stored.model);
-  return { ...(baseUrl !== undefined && { baseUrl }), ...(model !== undefined && { model }) };
+export const classifyDestinationOf = (
+  stored: unknown,
+): { ok: true; target: ClassifyTarget; endpointKey?: string } | { ok: false; reason: ClassifyDestinationRefusal } => {
+  const { baseUrl: storedBaseUrl, model: storedModel, apiKey } = storedClassifyTargetOf(stored);
+  const model = classifyModelOf(storedModel);
+  const withModel = model !== undefined ? { model } : {};
+  if (storedBaseUrl === undefined) return { ok: true, target: withModel };
+  const baseUrl = classifyBaseUrlOf(storedBaseUrl);
+  if (baseUrl === undefined) return { ok: false, reason: "endpoint_refused" };
+  if (apiKey === undefined) return { ok: false, reason: "endpoint_key_missing" };
+  return { ok: true, target: { baseUrl, ...withModel }, endpointKey: apiKey };
 };

@@ -154,6 +154,8 @@ const timeline: TimelineDictionary = {
       rate_limited: "El proveedor pidió esperar (límite de solicitudes de la cuenta).",
       unreachable: "El proveedor no respondió en 10 segundos, o está caído.",
       unexpected_response: "El proveedor respondió fuera del formato pedido. Lo que cobró entró en el costo de la llamada.",
+      endpoint_refused: "La clasificación está configurada para un endpoint que no es una dirección https pública, o que la protección de red rechazó. No se envió nada. Revisa el endpoint en Configuración → Inteligencia artificial.",
+      endpoint_key_missing: "La clasificación está configurada para un endpoint sin su propia clave. La clave del motor no va a esa dirección, y no se envió nada. Escribe la clave del endpoint en Configuración → Inteligencia artificial.",
     },
     outcome_not_classified_status: "Respuesta del proveedor: HTTP {status}",
     call_analyzed: "Llamada analizada: nota {score} de 10",
@@ -170,6 +172,8 @@ const timeline: TimelineDictionary = {
       rate_limited: "el proveedor pidió esperar (límite de solicitudes de la cuenta)",
       unreachable: "el proveedor no respondió a tiempo, o está caído",
       unexpected_response: "el proveedor respondió fuera del formato pedido",
+      endpoint_refused: "el endpoint de la clasificación no es una dirección https pública, o la protección de red lo rechazó",
+      endpoint_key_missing: "el endpoint de la clasificación no tiene su clave guardada",
     },
     caller_unanswered: {
       turn_closed: "Quien llamó estuvo {seconds} s sin respuesta, quizás por ruido en la línea. Se pidió al agente que respondiera a lo que escuchó.",

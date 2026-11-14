@@ -155,6 +155,8 @@ const timeline = {
       rate_limited: "O provedor pediu para esperar (limite de pedidos da conta).",
       unreachable: "O provedor não respondeu em 10 segundos, ou está fora do ar.",
       unexpected_response: "O provedor respondeu algo fora do formato pedido. O que ele cobrou entrou no custo da chamada.",
+      endpoint_refused: "A classificação está configurada para um endpoint que não é um endereço https público, ou que a guarda de rede recusou. Nada foi enviado. Confira o endpoint em Configurações → Inteligência artificial.",
+      endpoint_key_missing: "A classificação está configurada para um endpoint sem a chave dele. A chave do motor não vai a esse endereço, e nada foi enviado. Informe a chave do endpoint em Configurações → Inteligência artificial.",
     } as Record<string, string>,
     outcome_not_classified_status: "Resposta do provedor: HTTP {status}",
     call_analyzed: "Ligação analisada: nota {score} de 10",
@@ -171,6 +173,8 @@ const timeline = {
       rate_limited: "o provedor pediu para esperar (limite de pedidos da conta)",
       unreachable: "o provedor não respondeu a tempo, ou está fora do ar",
       unexpected_response: "o provedor respondeu algo fora do formato pedido",
+      endpoint_refused: "o endpoint da classificação não é um endereço https público, ou a guarda de rede o recusou",
+      endpoint_key_missing: "o endpoint da classificação não tem a chave dele cadastrada",
     } as Record<string, string>,
     caller_unanswered: {
       turn_closed: "Quem ligou ficou {seconds} s sem resposta, talvez por barulho na linha. O agente foi chamado a responder ao que ouviu.",

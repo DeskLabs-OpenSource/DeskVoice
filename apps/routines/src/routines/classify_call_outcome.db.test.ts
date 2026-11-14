@@ -1,6 +1,6 @@
 import { callAnalysisSchema, encryptSecret, recordEvent, scoreOf, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { createCall, createOrganization, depsFor, eventsOf, openTestDbs, t0, task } from "../../test/helpers";
+import { createCall, createOrganization, depsFor, eventsOf, fakeLookup, openTestDbs, t0, task } from "../../test/helpers";
 import { ANALYSIS_CRITERIA, ANALYSIS_SETTING, OMITTED_TURNS_MARK, OUTCOME_SETTING, type VoiceEngine } from "@deskvoice/voice-engine";
 import type * as VoiceEngineModule from "@deskvoice/voice-engine";
 import classifyCallOutcome from "./classify_call_outcome";
@@ -72,27 +72,42 @@ const openai = (palpite: unknown, status = 200): typeof fetch =>
     new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: USO }), { status }),
   ) as unknown as typeof fetch;
 
+interface Pedido {
+  url: string;
+  model: string;
+  authorization: string | null;
+}
+
 /**
- * Como `openai`, mas guarda o destino do pedido: o que se prova aqui é o que a rotina repassa ao
- * motor — o endereço e o modelo, que vêm das configurações do motor.
+ * Como `openai`, mas guarda cada pedido que sai: o endereço, o modelo e a chave no cabeçalho. O que
+ * se prova aqui é o que a rotina repassa ao motor, e com que chave. `responde` troca a resposta de
+ * um endereço (um redirecionamento, por exemplo).
  */
-const pedidoCom = (palpite: unknown): { fetch: typeof fetch; pedidos: Array<{ url: string; model: string }> } => {
-  const pedidos: Array<{ url: string; model: string }> = [];
+const pedidoCom = (palpite: unknown, responde: (url: string) => Response | undefined = () => undefined): { fetch: typeof fetch; pedidos: Pedido[] } => {
+  const pedidos: Pedido[] = [];
   const fetchFalso = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    pedidos.push({ url: String(url), model: (JSON.parse(String(init?.body)) as { model: string }).model });
-    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: USO }), { status: 200 });
+    pedidos.push({ url: String(url), model: (JSON.parse(String(init?.body)) as { model: string }).model, authorization: new Headers(init?.headers).get("authorization") });
+    return responde(String(url)) ?? new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: USO }), { status: 200 });
   }) as unknown as typeof globalThis.fetch;
   return { fetch: fetchFalso as unknown as typeof globalThis.fetch, pedidos };
 };
 
-/** Grava o destino da classificação como o painel faria. */
-const comDestino = (org: string, valores: { baseUrl?: string; modelo?: string }): Promise<number> =>
-  withSystem(app, async (q) => {
-    let written = 0;
-    if (valores.baseUrl !== undefined) written += await q.exec("insert into settings (organization_id, key, value) values ($1, 'engine.openai-realtime.base_url', to_jsonb($2::text))", [org, valores.baseUrl]);
-    if (valores.modelo !== undefined) written += await q.exec("insert into settings (organization_id, key, value) values ($1, 'engine.openai-realtime.classify_model', to_jsonb($2::text))", [org, valores.modelo]);
-    return written;
-  });
+/** A chave do motor, gravada por `comChave`, e a do endpoint, gravada por `comDestino`. */
+const CHAVE_DO_MOTOR = "Bearer sk-de-teste";
+const CHAVE_DO_ENDPOINT = "sk-do-endpoint";
+
+/** Grava o destino da classificação como o painel faria: endpoint, modelo e a chave do endpoint, cifrada. */
+const comDestino = (org: string, valores: { baseUrl?: string; modelo?: string; chave?: string }): Promise<number> =>
+  withSystem(app, (q) =>
+    q.exec("insert into settings (organization_id, key, value, secret) values ($1, 'engine.openai-realtime.classify_target', $2, true)", [
+      org,
+      JSON.stringify({
+        ...(valores.baseUrl !== undefined && { baseUrl: valores.baseUrl }),
+        ...(valores.modelo !== undefined && { model: valores.modelo }),
+        ...(valores.chave !== undefined && { apiKey: encryptSecret(valores.chave, secretKey) }),
+      }),
+    ]),
+  );
 
 /** O provedor responde um erro com este status e este corpo. */
 const erro = (status: number, corpo: unknown = { error: { message: "não importa" } }): typeof fetch =>
@@ -109,8 +124,9 @@ const custoDe = (callId: string) =>
 
 const falhasDe = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "outcome_not_classified").map((event) => event.payload);
 
+// O DNS é falso: todo nome resolve para um endereço público, e o teste não consulta a rede.
 const roda = (org: string, callId: string, fetch: typeof globalThis.fetch) =>
-  classifyCallOutcome.run(task(org, "classify_call_outcome", {}, callId), depsFor(app, { fetch }));
+  classifyCallOutcome.run(task(org, "classify_call_outcome", {}, callId), depsFor(app, { fetch, lookup: fakeLookup() }));
 
 describe("classify_call_outcome", () => {
   it("grava o desfecho com a fala que o sustenta", async () => {
@@ -127,22 +143,53 @@ describe("classify_call_outcome", () => {
     expect(await falhasDe(callId)).toEqual([]);
   });
 
-  it("provedor compatível: o endpoint e o modelo gravados chegam ao pedido do motor", async () => {
+  it("provedor compatível: o endpoint, o modelo e a chave do endpoint chegam ao pedido; a do motor, nunca", async () => {
     const { org, callId } = await comAgente("desfecho provedor compatível");
     await comChave(org);
+    await comDestino(org, { baseUrl: "https://api.deepseek.com/v1", modelo: "deepseek-chat", chave: CHAVE_DO_ENDPOINT });
+    await fala(org, callId, "Pode marcar quinta às dez, por favor.");
+
+    const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
+    await roda(org, callId, fetch);
+
+    expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat", authorization: `Bearer ${CHAVE_DO_ENDPOINT}` }]);
+    expect((await desfechoDe(callId))?.outcome).toBe("booked");
+    expect(await falhasDe(callId)).toEqual([]);
+  });
+
+  it("endpoint sem a chave dele: nenhum pedido sai, nem com a chave do motor, e a linha do tempo diz por quê", async () => {
+    const { org, callId } = await comAgente("desfecho endpoint sem chave");
+    await comChave(org);
+    await liga(org, ANALYSIS_SETTING);
     await comDestino(org, { baseUrl: "https://api.deepseek.com/v1", modelo: "deepseek-chat" });
     await fala(org, callId, "Pode marcar quinta às dez, por favor.");
 
     const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
     await roda(org, callId, fetch);
 
-    // A chave gravada para o motor vai no cabeçalho; o pedido é o do provedor compatível.
-    expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat" }]);
-    expect((await desfechoDe(callId))?.outcome).toBe("booked");
-    expect(await falhasDe(callId)).toEqual([]);
+    // Nem para o endpoint, nem para a OpenAI: a chave do motor foi dada à OpenAI para a voz, e
+    // cair nela aqui a levaria a um endereço que o dono não escolheu para ela.
+    expect(pedidos).toEqual([]);
+    expect(pedidos.filter((pedido) => pedido.authorization === CHAVE_DO_MOTOR)).toEqual([]);
+    expect(await falhasDe(callId)).toEqual([{ reason: "endpoint_key_missing", engine: MOTOR }]);
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([{ reason: "endpoint_key_missing", engine: MOTOR }]);
+    expect((await desfechoDe(callId))?.outcome).toBeNull();
   });
 
-  it("sem destino configurado, o pedido é o de hoje: OpenAI, com o modelo de sempre", async () => {
+  it("com o endpoint e a chave dele, a classificação sai mesmo sem a chave do motor", async () => {
+    const { org, callId } = await comAgente("desfecho só com a chave do endpoint");
+    await liga(org, OUTCOME_SETTING);
+    await comDestino(org, { baseUrl: "https://api.deepseek.com/v1", chave: CHAVE_DO_ENDPOINT });
+    await fala(org, callId, "Pode marcar quinta às dez, por favor.");
+
+    const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
+    await roda(org, callId, fetch);
+
+    expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "gpt-5-nano", authorization: `Bearer ${CHAVE_DO_ENDPOINT}` }]);
+    expect((await desfechoDe(callId))?.outcome).toBe("booked");
+  });
+
+  it("sem destino configurado, o pedido é o de hoje: OpenAI, com o modelo de sempre e a chave do motor", async () => {
     const { org, callId } = await comAgente("desfecho sem destino");
     await comChave(org);
     await fala(org, callId, "Pode marcar quinta às dez, por favor.");
@@ -150,19 +197,60 @@ describe("classify_call_outcome", () => {
     const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
     await roda(org, callId, fetch);
 
-    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano" }]);
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano", authorization: CHAVE_DO_MOTOR }]);
   });
 
-  it("endpoint gravado por fora do painel que não é https público é ignorado; o modelo válido fica", async () => {
-    const { org, callId } = await comAgente("desfecho destino recusado");
+  it("só o modelo, sem endpoint: OpenAI com a chave do motor e o modelo escolhido", async () => {
+    const { org, callId } = await comAgente("desfecho só modelo");
     await comChave(org);
-    await comDestino(org, { baseUrl: "http://10.0.0.5:8080/v1", modelo: "deepseek-chat" });
+    await comDestino(org, { modelo: "gpt-5-mini" });
     await fala(org, callId, "Pode marcar quinta às dez, por favor.");
 
     const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
     await roda(org, callId, fetch);
 
-    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "deepseek-chat" }]);
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-mini", authorization: CHAVE_DO_MOTOR }]);
+  });
+
+  it.each([
+    ["http em rede interna", "http://10.0.0.5:8080/v1"],
+    ["IPv6 de uso local", "https://[fd00::1]/v1"],
+    ["IPv6 link-local", "https://[fe80::1]/v1"],
+    ["IPv4 embutido em IPv6", "https://[::ffff:7f00:1]/v1"],
+    ["CGNAT", "https://100.64.0.1/v1"],
+  ])("endpoint gravado por fora do painel (%s) não recebe nada, nem a OpenAI, e a linha do tempo diz por quê", async (_caso, baseUrl) => {
+    const { org, callId } = await comAgente(`desfecho destino recusado ${baseUrl}`);
+    await comChave(org);
+    await comDestino(org, { baseUrl, modelo: "deepseek-chat", chave: CHAVE_DO_ENDPOINT });
+    await fala(org, callId, "Pode marcar quinta às dez, por favor.");
+
+    const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
+    await roda(org, callId, fetch);
+
+    expect(pedidos).toEqual([]);
+    expect(await falhasDe(callId)).toEqual([{ reason: "endpoint_refused", engine: MOTOR }]);
+  });
+
+  it.each([
+    ["um IP interno", "https://10.0.0.1/v1/chat/completions"],
+    ["um nome que resolve para dentro", "https://intranet.example.com/v1/chat/completions"],
+  ])("endpoint público que redireciona para %s: a guarda recusa o salto, e nada vai além do primeiro pedido", async (_caso, destino) => {
+    const { org, callId } = await comAgente(`desfecho redirecionado ${destino}`);
+    await comChave(org);
+    await comDestino(org, { baseUrl: "https://api.deepseek.com/v1", chave: CHAVE_DO_ENDPOINT });
+    await fala(org, callId, "Pode marcar quinta às dez, por favor.");
+
+    const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." }, (url) =>
+      url.startsWith("https://api.deepseek.com/") ? new Response(null, { status: 307, headers: { location: destino } }) : undefined,
+    );
+    await classifyCallOutcome.run(
+      task(org, "classify_call_outcome", {}, callId),
+      depsFor(app, { fetch, lookup: fakeLookup({ "intranet.example.com": ["10.0.0.7"] }) }),
+    );
+
+    expect(pedidos.map((pedido) => pedido.url)).toEqual(["https://api.deepseek.com/v1/chat/completions"]);
+    // Sem status: o pedido não chegou a lugar nenhum além do endpoint, e nada dele vai à linha do tempo.
+    expect(await falhasDe(callId)).toEqual([{ reason: "endpoint_refused", engine: MOTOR, model: "gpt-5-nano", status: null, costCents: 0 }]);
   });
 
   it("soma o que o provedor cobrou ao custo da chamada e ao extrato, pelo preço do modelo de texto", async () => {

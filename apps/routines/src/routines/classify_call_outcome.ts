@@ -2,19 +2,21 @@ import { RUBRIC_VERSION, callAnalysisSchema, decryptSecret, recordEvent, scoreOf
 import {
   ANALYSIS_SETTING,
   OUTCOME_SETTING,
+  ANALYSIS_TIMEOUT_MS,
   analysisEnabledOf,
-  classifyTargetOf,
-  engineBaseUrlSetting,
-  engineClassifyModelSetting,
+  classifyDestinationOf,
+  engineClassifyTargetSetting,
   loadEngines,
   outcomeEnabledOf,
   settleOutcome,
   type CallOutcome,
+  type ClassifyDestinationRefusal,
   type ClassifyFailure,
   type ClassifyResult,
   type ClassifyTarget,
 } from "@deskvoice/voice-engine";
-import type { Routine } from "../types";
+import { safeFetch, UnsafeDestinationError } from "@deskvoice/tools";
+import type { Routine, RoutineDeps } from "../types";
 
 /** Mesmo nome que o painel usa: a chave do motor, cifrada. */
 const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
@@ -23,10 +25,41 @@ const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_k
 const TRANSCRIPT_LIMIT = 6000;
 
 /** Por que a análise não foi pedida, ou não foi gravada. */
-type AnalysisNotDoneReason = "no_speech" | "no_key" | "engine_cannot_analyze" | "cost_ceiling" | ClassifyFailure;
+type AnalysisNotDoneReason = "no_speech" | "no_key" | "engine_cannot_analyze" | "cost_ceiling" | ClassifyFailure | ClassifyDestinationRefusal;
+
+// O prazo do pedido só de desfecho; o completo, com a análise, tem o dele (`ANALYSIS_TIMEOUT_MS`).
+const OUTCOME_TIMEOUT_MS = 10_000;
+// A resposta da análise passa dos 16 KB que a guarda aceita por padrão para um conector.
+const CLASSIFY_MAX_BYTES = 1024 * 1024;
+// Status que a especificação proíbe de ter corpo num `Response`.
+const NULL_BODY_STATUS = new Set([204, 205, 304]);
+
+/**
+ * O `fetch` do endpoint configurado: o pedido passa pela guarda de rede dos conectores (`safeFetch`),
+ * com o DNS resolvido e cada redirecionamento conferido. `refused` marca que foi a guarda que recusou,
+ * para a linha do tempo dizer isso em vez de "o provedor não respondeu".
+ */
+function guardedFetch(deps: RoutineDeps, timeoutMs: number): { fetch: typeof fetch; refused: () => boolean } {
+  let refused = false;
+  const guarded: typeof fetch = async (input, init) => {
+    try {
+      const response = await safeFetch(
+        String(input),
+        { method: init?.method ?? "GET", headers: Object.fromEntries(new Headers(init?.headers).entries()), body: typeof init?.body === "string" ? init.body : undefined },
+        { fetch: deps.fetch, lookup: deps.lookup, timeoutMs, maxBytes: CLASSIFY_MAX_BYTES },
+      );
+      return new Response(NULL_BODY_STATUS.has(response.status) ? null : response.body, { status: response.status });
+    } catch (error) {
+      if (error instanceof UnsafeDestinationError) refused = true;
+      throw error;
+    }
+  };
+  return { fetch: guarded, refused: () => refused };
+}
 
 interface Pendente {
   engineId: string;
+  /** A chave que vai no pedido, cifrada: a do endpoint configurado, ou a do motor sem endpoint. */
   stored: string;
   /** Endpoint e modelo da classificação gravados pelo dono; vazio é o padrão do motor. */
   target: ClassifyTarget;
@@ -57,10 +90,11 @@ const notAnalyzed = (q: OrgQuery, callId: string, reason: AnalysisNotDoneReason,
  * que classifique ou sem chave, o desfecho não é gravado e a próxima execução, quando a chave
  * existir, classifica. A análise que não dá para pedir vira `analysis_not_done` com o motivo.
  *
- * O destino da classificação não é fixo: `engine.<id>.base_url` e `engine.<id>.classify_model`
- * levam o pedido a um provedor compatível com OpenAI (DeepSeek, Qwen, OpenRouter, Groq), com a
- * chave que já está guardada para esse motor. Sem as duas configurações, o pedido é o de sempre,
- * no endereço oficial do motor.
+ * O destino da classificação não é fixo: `engine.<id>.classify_target` leva o pedido a um
+ * provedor compatível com OpenAI (DeepSeek, Qwen, OpenRouter, Groq), com a chave própria desse
+ * endpoint, nunca a do motor, e pela guarda de rede dos conectores. Endpoint sem a chave dele, ou
+ * que não passa na guarda, não recebe nada, e a linha do tempo diz por quê. Sem endpoint, o pedido
+ * é o de sempre, no endereço oficial do motor, com a chave do motor.
  *
  * O custo segue o caminho do custo da voz: uma linha no extrato (`usage_ledger`) e a soma em
  * `calls.cost_cents`, uma vez por chamada ao provedor. Com modelo configurado, o preço dele não é
@@ -124,22 +158,25 @@ const routine: Routine = {
         if (!outcome) return null;
       }
 
-      const chave = await q.one<{ value: unknown }>("select value from settings where key = $1", [engineKeySetting(agent.engine)]);
+      // O destino da classificação, se o dono configurou um (só o motor que declara aceita). Com
+      // endpoint, a chave é a dele; sem, a do motor. O painel valida ao gravar; aqui é a segunda
+      // leitura, para o banco editado à mão não virar pedido para um endereço interno.
+      const alvo = engine?.classifyTarget
+        ? await q.one<{ value: unknown }>("select value from settings where key = $1", [engineClassifyTargetSetting(agent.engine)])
+        : null;
+      const destino = classifyDestinationOf(alvo?.value);
+      if (!destino.ok) {
+        const details = { engine: agent.engine };
+        if (outcome) await recordEvent(q, callId, "outcome_not_classified", { reason: destino.reason, ...details }, now);
+        if (analysis) await notAnalyzed(q, callId, destino.reason, details, now);
+        return null;
+      }
+      const chave = destino.endpointKey !== undefined ? { value: destino.endpointKey } : await q.one<{ value: unknown }>("select value from settings where key = $1", [engineKeySetting(agent.engine)]);
       if (typeof chave?.value !== "string") {
         if (analysis) await notAnalyzed(q, callId, "no_key", { engine: agent.engine }, now);
         return null;
       }
-
-      // O destino da classificação, se o dono configurou um: sem as duas chaves, o motor usa o
-      // endereço e o modelo de sempre. Só campo válido entra (o painel valida ao gravar; aqui é a
-      // segunda leitura, para o banco editado à mão não virar pedido para um endereço interno).
-      const alvo = await q.many<{ key: string; value: unknown }>("select key, value from settings where key = any($1)", [
-        [engineBaseUrlSetting(agent.engine), engineClassifyModelSetting(agent.engine)],
-      ]);
-      const target = classifyTargetOf({
-        baseUrl: alvo.find((row) => row.key === engineBaseUrlSetting(agent.engine))?.value,
-        model: alvo.find((row) => row.key === engineClassifyModelSetting(agent.engine))?.value,
-      });
+      const target = destino.target;
 
       // O mesmo teto da voz: zero é "sem teto". Chegou nele, não gasta mais nada nesta ligação.
       // ponytail: confere o que já foi gasto, não o que a leitura vai custar; ela pode passar do
@@ -170,11 +207,12 @@ const routine: Routine = {
     const engine = engines.get(pendente.engineId);
     if (!engine?.classifyOutcome) return;
 
+    // Endpoint configurado vai pela guarda de rede; o endereço oficial do motor, como antes.
+    const guarded = pendente.target.baseUrl !== undefined ? guardedFetch(deps, pendente.analysis ? ANALYSIS_TIMEOUT_MS : OUTCOME_TIMEOUT_MS) : undefined;
     const result: ClassifyResult = await engine.classifyOutcome(
       decryptSecret(pendente.stored, deps.secretKey),
       { transcript: pendente.transcript, tools: pendente.tools, ...(pendente.analysis ? { analyze: true } : {}) },
-      // Endpoint e modelo configurados vão junto; sem eles, o motor usa o padrão dele, como antes.
-      { fetch: deps.fetch, ...pendente.target },
+      { fetch: guarded?.fetch ?? deps.fetch, ...pendente.target },
     );
 
     const now = deps.clock.now();
@@ -199,12 +237,12 @@ const routine: Routine = {
 
       // Sem a chave e sem o corpo do provedor: o motivo no vocabulário fechado e o status bastam.
       // Dois eventos quando as duas funções estão ligadas: cada um diz o que não aconteceu.
-      const failed = async (reason: ClassifyFailure, status: number | null): Promise<void> => {
+      const failed = async (reason: ClassifyFailure | ClassifyDestinationRefusal, status: number | null): Promise<void> => {
         const details = { engine: pendente.engineId, model: result.model, status, costCents };
         if (pendente.outcome) await recordEvent(q, callId, "outcome_not_classified", { reason, ...details }, now);
         if (pendente.analysis) await notAnalyzed(q, callId, reason, details, now);
       };
-      if (!result.ok) return failed(result.failure, result.status);
+      if (!result.ok) return failed(guarded?.refused() ? "endpoint_refused" : result.failure, result.status);
 
       // A análise passa pela checagem contra as falas e pelo schema de gravação antes de qualquer
       // escrita: fora da forma, ela quebraria o expurgo da organização inteira. Como veio na mesma
