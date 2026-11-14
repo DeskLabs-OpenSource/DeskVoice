@@ -251,9 +251,11 @@ também não mediu contra a API real até aquele relatório.
   checkpoint multilíngue. O fornecedor diz 32,8 ms por pergunta numa GPU T4. **A VPS de teste não
   tem GPU** (4 vCPU, 7 GB). O cartão do modelo no Hugging Face não foi lido neste desenho.
 - A precisão divulgada do Laya é contestada: a DESA-25 cita um teste independente com 0,59 de
-  acerto contra 0,97 do Jev. **A fonte desse número não foi achada neste desenho** (o artigo
-  arXiv 2609.28940, que compara os dois num harness de pentest, não traz esses números no
-  resumo). A medida da fatia 6 é que decide.
+  acerto contra 0,97 do Jev. **Fonte (informada pelo board em 14/11):** dois blogs achados numa
+  busca na web em 13/11, flowtivity.ai/blog/laya-open-source-jev-alternative e
+  wilsonwu.me/blog/2026/jev-vs-laya (este, um teste num Mac mini M4 Pro). O método deles não foi
+  conferido por ninguém desta empresa: é afirmação de terceiro não verificada. A medida da
+  fatia 6 é que decide.
 - **Eles não ouvem.** Só leem o texto que a peça de transcrição produziu, e o que mais o
   `state` levar. Tudo o que decidem é sobre texto.
 
@@ -565,8 +567,8 @@ Ficam no comentário da DESA-25, no formato do `GOVERNANCE.md`, e vão ao lote d
 - Preço, vocabulário e português de ElevenLabs, Speechmatics, Google Cloud, Azure e AWS.
 - A latência do candidato aberto em CPU na VPS.
 - O Jev e o Laya: precisão, latência e o formato exato da API vêm do fornecedor ou de fontes
-  secundárias. O cartão do Laya no Hugging Face não foi lido. A fonte do "0,59 contra 0,97" citado
-  na DESA-25 não foi achada.
+  secundárias. O cartão do Laya no Hugging Face não foi lido. O "0,59 contra 0,97" vem de dois blogs
+  cujo método não foi conferido.
 - Se as três perguntas sobre texto acertam o bastante para servir. A régua de "a tempo" e o corte
   de 0,8 são estimativa.
 - A régua de 700 ms de ouvido é estimativa, e não medida.
