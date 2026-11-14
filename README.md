@@ -155,7 +155,7 @@ capacidade abaixo diz até onde a prova foi:
 | Atualização, checagem de saúde, backup e restauração | Provado numa instalação real, na VPS da parceira: instalador rodado duas vezes sem regerar segredo, backup conferido, restauração que devolve as contagens do backup e a volta automática de uma atualização que falhou. Restaurar em outro servidor, ou entre versões com migration nova, ainda sem prova |
 | Atualizar pela tela (Configurações → Sistema), por um agente do kit no servidor | Provado numa instalação real: duas vezes na VPS da parceira (0.3.0 → 0.4.0 e 0.4.0 → 0.5.0), sem ninguém no terminal do servidor, com a passagem para o atualizador da versão nova e a remoção das imagens antigas |
 | Gravar o áudio da chamada, desligado de fábrica e ligado pela tela (Configurações → Privacidade → Gravação das chamadas) | Testado com banco real e numa chamada pelo navegador, em teste de ponta a ponta. Ainda sem prova numa instalação real. Desde a 0.6.0 |
-| Parar a gravação a pedido de quem liga, pelo agente (ferramenta `stop_recording`, marcada em cada agente) ou pelo botão na tela da chamada ao vivo; a parada fica na linha do tempo | Testado com banco real e com a chamada simulada. Ainda sem prova numa instalação real. Desde a 0.9.0 |
+| Parar a gravação a pedido de quem liga, pelo agente (ferramenta `stop_recording`, marcada em cada agente) ou pelo botão na tela da chamada ao vivo; a parada fica na linha do tempo | Testado com banco real, na sessão de chamada de verdade, com motor e telefonia simulados. Ainda sem prova numa instalação real. Desde a 0.9.0 |
 | Prazo de guarda da transcrição e exportação do que a organização guarda sobre um telefone (Configurações) | Testado com banco real e conferido na tela, num painel contra um banco descartável. Ainda sem prova numa instalação real. Desde a 0.6.0 |
 | Apagar a pedido de quem ligou (Configurações → Privacidade): prévia do que sai, confirmação que nomeia o telefone, recibo; sai toda a fala e o texto sobre a pessoa, inclusive a gravação, e fica o registro do serviço. Cópias de backup já feitas não são alcançadas | Testado com banco real, incluindo a volta pela exportação. Ainda sem prova numa instalação real. Desde a 0.9.0 |
 | Ligações feitas pelo agente | Aguardando prova real, e desligado de fábrica. Veja "Ligações de saída", abaixo |
@@ -309,7 +309,7 @@ O DeskVoice foi criado por Rafael Melgaço ([@melgarafael](https://www.youtube.c
 segurança de [webtecnica](https://github.com/webtecnica) estão nas versões publicadas, e desde a 0.6.0 também os direitos de
 quem ligou (prazo de guarda e exportação), de webtecnica, e o custo da OpenAI conferido contra a
 fatura, a despedida antes de desligar e a gravação das chamadas, de
-[aliffstefano](https://github.com/aliffstefano). A 0.8.0 traz o desfecho da ligação e o aviso de fim de ligação no WhatsApp, de webtecnica, e a 0.9.0, também dele, as teclas do menu automático, a transferência não atendida, a gravação que para a pedido e o apagamento a pedido de quem ligou. O DeskcommCRM, de onde vem a fábrica de contribuição
+[aliffstefano](https://github.com/aliffstefano). A 0.8.0 traz o desfecho da ligação e o aviso de fim de ligação no WhatsApp, de webtecnica, e a 0.9.0, também de webtecnica, as teclas do menu automático, a transferência não atendida, a gravação que para a pedido e o apagamento a pedido de quem ligou. O DeskcommCRM, de onde vem a fábrica de contribuição
 usada aqui, recebeu PRs de mais de 250 pessoas.
 
 Crédito é regra, não cortesia: quem contribui mantém a autoria do commit e tem o nome nas notas
