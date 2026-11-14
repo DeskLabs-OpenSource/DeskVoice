@@ -415,6 +415,13 @@ Dito com honestidade, a partir do que foi pesquisado em 14/11/2026:
 Cada uma é um PR de rascunho contra `main`, com fragmento em `.changes/`. A 1 não depende de
 código das outras frentes. Da 2 em diante, a ordem é depois da fatia 2 da DESA-10 (DESA-27).
 
+**Regra de toda fatia que cria migration** (board, 13/11, na DESA-8; origem: revisão do PR #200):
+o carimbo de `db/migrations/AAAAMMDDTHHMMSS_<slug>.sql` é a hora real da criação, gerada com
+`date -u +%Y%m%dT%H%M%S` no momento em que o arquivo é criado. Nunca uma hora futura nem um
+carimbo arredondado para frente. O runner ordena pelo nome e não recusa fora de ordem: um carimbo
+à frente do relógio faz a instalação nova rodar, antes dele, uma migration posterior que depende
+dele, e o `install.sh` quebra. Nesta frente, as fatias 4 e 7 criam migration.
+
 ### Fatia 1: a bancada e a medida sem chave nova
 
 `scripts/bancada-de-voz/`: o manifesto do conjunto, o gerador de áudio (voz sintética e ruído), o
@@ -462,8 +469,11 @@ Na página do agente: o transcritor (padrão: nenhum), a chave dele (cifrada, te
 `checkKey`) e uma frase que diz que, nos motores diretos, ele soma custo. Migration com a coluna
 do agente (padrão nulo, que é igual a hoje). Nos três idiomas.
 
-Aceite: a pessoa escolhe o transcritor, salva, recarrega e vê a escolha; chave recusada mostra o
-motivo pelo vocabulário fechado.
+Aceite:
+- a pessoa escolhe o transcritor, salva, recarrega e vê a escolha; chave recusada mostra o motivo
+  pelo vocabulário fechado;
+- o carimbo da migration é a hora real da criação (regra acima): não é posterior ao commit que a
+  traz, e é posterior à última migration da `main` no momento do PR.
 
 ### Fatia 5: a linha do tempo com o texto da peça
 
@@ -490,7 +500,14 @@ Aceite:
 ### Fatia 7: o filtro na tela
 
 O modelo de decisão (nenhum, Jev, Laya se a decisão 3 vier), com a confirmação do fornecedor nos
-EUA para o Jev. Nos três idiomas. Só depois da 6.
+EUA para o Jev. Migration com a coluna do agente (padrão nulo, que é igual a hoje). Nos três
+idiomas. Só depois da 6.
+
+Aceite:
+- a pessoa escolhe o modelo de decisão, salva, recarrega e vê a escolha; o Jev só salva depois da
+  confirmação do envio aos EUA;
+- o carimbo da migration é a hora real da criação (regra acima): não é posterior ao commit que a
+  traz, e é posterior à última migration da `main` no momento do PR.
 
 ## Onde esta frente toca as outras
 
