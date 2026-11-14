@@ -312,7 +312,7 @@ se construye en público, con la comunidad. Ya hay contribuciones de fuera: las 
 seguridad de [webtecnica](https://github.com/webtecnica) están en las versiones publicadas, y desde la 0.6.0 también los
 derechos de quien llama (plazo de conservación y exportación), de webtecnica, y el costo de OpenAI
 verificado contra la factura, la despedida antes de colgar y la grabación de las llamadas, de
-[aliffstefano](https://github.com/aliffstefano). La 0.8.0 trae el desenlace de la llamada y el aviso de fin de llamada por WhatsApp, de webtecnica, y la 0.9.0, también suya, las teclas del menú automático, la transferencia no atendida, la grabación que se detiene a pedido y el borrado a pedido de quien llamó, y la 0.10.0, también suya, la transcripción de la grabación. DeskcommCRM, de donde viene la forma de contribuir
+[aliffstefano](https://github.com/aliffstefano). La 0.8.0 trae el desenlace de la llamada y el aviso de fin de llamada por WhatsApp, de webtecnica, y la 0.9.0, también suya, las teclas del menú automático, la transferencia no atendida, la grabación que se detiene a pedido y el borrado a pedido de quien llamó, y la 0.10.0, también suya, la transcripción de la grabación, y la 0.11.0, también suya, el plazo de conservación que alcanza el resumen de la llamada y el costo exacto de la lectura del desenlace. DeskcommCRM, de donde viene la forma de contribuir
 usada aquí, recibió PRs de más de 250 personas.
 
 El crédito es regla, no cortesía: quien contribuye conserva la autoría de sus commits y aparece

@@ -1,6 +1,6 @@
 import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { autoCommitOrgQuery, runTool, toSpec, toolCalledArgs, type RecordingStop, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
-import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
+import { EngineTimeoutError, MICROCENTS_PER_CENT, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
@@ -299,8 +299,21 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       );
     }
     await q.exec(
-      "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, at) values ($1, $2, $3, $4, $5, $6, $7, $8)",
-      [organizationId, callId, engine.id, Math.round(increment.seconds ?? 0), (increment.inputTokens ?? 0) + (increment.textInputTokens ?? 0) + (increment.cachedInputTokens ?? 0), (increment.outputTokens ?? 0) + (increment.textOutputTokens ?? 0), delta, clock.now()],
+      "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+      [
+        organizationId,
+        callId,
+        engine.id,
+        Math.round(increment.seconds ?? 0),
+        (increment.inputTokens ?? 0) + (increment.textInputTokens ?? 0) + (increment.cachedInputTokens ?? 0),
+        (increment.outputTokens ?? 0) + (increment.textOutputTokens ?? 0),
+        delta,
+        // A linha do medidor já é a diferença de dois totais arredondados; o micro-centavo dela é o
+        // centavo inteiro, para o extrato somar na mesma unidade do resto (a classificação, que é
+        // menor que um centavo).
+        delta * MICROCENTS_PER_CENT,
+        clock.now(),
+      ],
     );
     await q.exec("update calls set cost_cents = $2 where id = $1", [callId, total]);
     if (reached) {

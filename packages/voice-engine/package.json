@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./types": "./src/types.ts",
+    "./pricing": "./src/pricing.ts",
     "./transcription": "./src/transcription.ts"
   },
   "dependencies": {

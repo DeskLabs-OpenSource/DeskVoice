@@ -354,7 +354,7 @@ describe("openai-realtime: desfecho da ligação (o destino vem de quem chama)",
 
     expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat" }]);
     // O preço do modelo configurado não é conhecido: o consumo entra, o custo fica zero.
-    expect(result).toEqual({ ok: true, guess: palpite, model: "deepseek-chat", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 0 });
+    expect(result).toEqual({ ok: true, guess: palpite, model: "deepseek-chat", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 0, costMicrocents: 0 });
   });
 
   it("sem configuração: o pedido é o de hoje, na OpenAI e no modelo de sempre", async () => {
@@ -363,6 +363,6 @@ describe("openai-realtime: desfecho da ligação (o destino vem de quem chama)",
 
     expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano" }]);
     // 1 milhão de entrada a US$ 0,05 por milhão: 5 centavos, como antes de o modelo ser configurável.
-    expect(result).toEqual({ ok: true, guess: palpite, model: "gpt-5-nano", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 5 });
+    expect(result).toEqual({ ok: true, guess: palpite, model: "gpt-5-nano", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 5, costMicrocents: 5_000_000 });
   });
 });

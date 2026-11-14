@@ -220,11 +220,15 @@ export interface ClassifyOptions {
 export type ClassifyFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
 
 /**
- * O que a classificação devolve: o palpite, ou o motivo de não haver um. Nos dois casos, o consumo
+ * O que a classificação devolve: o palpite, ou o motivo de não haver. Nos dois casos, o consumo
  * que o provedor declarou e o custo dele pelo preço do modelo de texto, para entrar no custo da
  * chamada (um 200 fora da forma também foi cobrado).
+ *
+ * O custo vem em duas vistas do mesmo número: `costMicrocents`, a exata, e `costCents`, ela
+ * arredondada para cima. Quem lê uma ligação custa cerca de 0,03 centavo, então quem grava o
+ * extrato usa o micro-centavo e arredonda uma vez só, no total da chamada.
  */
-export type ClassifyResult = { model: string; usage: Usage; costCents: number } & (
+export type ClassifyResult = { model: string; usage: Usage; costCents: number; costMicrocents: number } & (
   // `analysis` só no pedido completo, já na forma e antes da checagem contra a transcrição.
   | { ok: true; guess: OutcomeGuess; analysis?: AnalysisGuess }
   // `status` é o HTTP da resposta; `null` quando ela não veio (prazo, rede).
