@@ -188,6 +188,9 @@ const NOTICE: Record<Refusal, (from: string, to: string, limit: number) => strin
     `Uma ligação pelo WhatsApp de ${from} para ${to} não foi atendida pelo agente porque já havia ${limit} ligações recebidas em andamento, pela operadora e pelo WhatsApp, o limite definido em Configurações. Ela continuou tocando no celular. Outras pelo mesmo motivo nos próximos 10 minutos aparecem só em Chamadas.`,
 };
 
+/** O dono que este processo dá a cada ligação que atende: é por ele que reconhece as suas no `call-list`. */
+const CLIENT_PREFIX = "deskvoice-call-";
+
 /** O que este processo sabe de uma ligação do WaCalls que ele está atendendo. */
 interface Live {
   transport: WhatsAppTransport | null;
@@ -267,7 +270,7 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
 
     // Um dono por ligação no WaCalls: com um id só para o processo, a segunda ligação ao mesmo tempo
     // receberia 409 (`handlers_call.go:113-116`).
-    const clientId = `deskvoice-call-${callId}`;
+    const clientId = `${CLIENT_PREFIX}${callId}`;
     let answered = false;
     let transport: WhatsAppTransport;
     try {
@@ -305,6 +308,19 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
 
   return {
     onEvent(event: Exclude<WacallsEvent, { type: "auth-state" }>): void {
+      if (event.type === "call-list") {
+        // Atendida por este processo antes de ele cair (o fim sem SIGTERM não desliga nada): o WaCalls
+        // segura a ligação até a janela de volta vencer, e quem ligou ouve silêncio. A linha já foi
+        // fechada como `process_restarted` na partida; aqui só se desliga no WhatsApp.
+        for (const call of event.calls) {
+          if (!call.owner?.startsWith(CLIENT_PREFIX) || call.status === "ended" || live.has(call.callId)) continue;
+          log("info", "ending a WhatsApp call left by a previous voice process", { wacallsCall: call.callId });
+          wacallsEndCall(options, call.sessionId, call.callId).catch((error: unknown) => {
+            log("error", "could not end a WhatsApp call left by a previous voice process", { wacallsCall: call.callId, error: messageOf(error) });
+          });
+        }
+        return;
+      }
       if (event.type === "incoming") {
         // O mesmo `incoming` duas vezes não vira duas chamadas.
         if (live.has(event.id)) return;

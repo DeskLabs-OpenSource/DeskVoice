@@ -281,3 +281,28 @@ describe("ligação pelo WhatsApp: a partida do processo de voz", { timeout: 60_
     expect(await whatsappCallsWanted(app)).toBe(true);
   });
 });
+
+describe("ligação pelo WhatsApp: a que sobrou de um processo de voz anterior", { timeout: 60_000 }, () => {
+  it("na volta do SSE, desliga no WaCalls a que um processo anterior atendeu; a deste processo e a de outro dono seguem", async () => {
+    const { organizationId, ring } = await connected("wa-sobra");
+    const session = wacalls.byName(wacallsSessionName(organizationId));
+    if (!session) throw new Error("no WaCalls session");
+    const own = ring();
+    await answeredCall(organizationId);
+    const leftover = wacalls.answeredBy(session, "deskvoice-call-00000000-0000-0000-0000-000000000000");
+    const human = wacalls.answeredBy(session, "recepcao-no-navegador");
+
+    wacalls.dropStreams();
+    await waitFor(() => {
+      time.advance(1000);
+      return wacalls.streams() >= 1;
+    }, "the events stream back");
+    await waitFor(() => leftover.status === "ended", "the leftover call ended");
+
+    expect(callPaths(leftover)).toEqual([`DELETE ${leftover.id}`]);
+    expect(callPaths(human)).toEqual([]);
+    expect(callPaths(own).filter((path) => path.startsWith("DELETE"))).toEqual([]);
+    expect(own.status).not.toBe("ended");
+    wacalls.hangUp(human);
+  });
+});
