@@ -27,7 +27,11 @@ export interface Agent {
   costCeilingCents: number;
   transferTo: string | null;
   followUpOwnerUserId: string | null;
+  /** Onde quem liga costuma estar. Agente gravado antes do campo existir pode chegar sem ele: vale `normal`. */
+  listeningEnvironment?: ListeningEnvironment;
 }
+
+export type ListeningEnvironment = "normal" | "noisy";
 
 export type CallStatus = "ringing" | "in_progress" | "transferred" | "completed" | "failed" | "refused";
 export interface Call {

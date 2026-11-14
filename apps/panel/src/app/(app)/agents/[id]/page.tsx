@@ -17,7 +17,7 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatPhone } from "../../../../ui/format";
 import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
-import type { Agent, Engine, Person, Setting, ToolInfo } from "../../../../ui/types";
+import type { Agent, Engine, ListeningEnvironment, Person, Setting, ToolInfo } from "../../../../ui/types";
 
 interface Draft {
   name: string;
@@ -34,9 +34,10 @@ interface Draft {
   enabled: boolean;
   /** Vazio: as pendências do agente são da equipe. */
   followUpOwner: string;
+  listeningEnvironment: ListeningEnvironment;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "" };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal" };
 
 const toDraft = (agent: Agent): Draft => ({
   name: agent.name,
@@ -52,6 +53,7 @@ const toDraft = (agent: Agent): Draft => ({
   costCeiling: (agent.costCeilingCents / 100).toFixed(2),
   enabled: agent.enabled,
   followUpOwner: agent.followUpOwnerUserId ?? "",
+  listeningEnvironment: agent.listeningEnvironment ?? "normal",
 });
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -115,6 +117,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         costCeilingCents: Math.round(Number(draft.costCeiling.replace(",", ".")) * 100),
         enabled: draft.enabled,
         followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
+        listeningEnvironment: draft.listeningEnvironment,
       };
       const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       if (isNew) router.replace(`/agents/${saved.id}`);
@@ -195,6 +198,14 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </Field>
             <Field label={t.language}>
               <TextInput mono value={draft.language} onChange={(event) => set("language", event.target.value)} required maxLength={20} />
+            </Field>
+          </div>
+          <div className="mt-4 max-w-md">
+            <Field label={t.listeningEnvironment} hint={t.listeningEnvironmentHint}>
+              <Select value={draft.listeningEnvironment} onChange={(event) => set("listeningEnvironment", event.target.value === "noisy" ? "noisy" : "normal")}>
+                <option value="normal">{t.listeningEnvironmentNormal}</option>
+                <option value="noisy">{t.listeningEnvironmentNoisy}</option>
+              </Select>
             </Field>
           </div>
           {engine && engine.requiresKey && !engine.keyConfigured ? (
