@@ -112,6 +112,17 @@ const common: CommonDictionary = {
     caller_call_live: "Hay una llamada en curso con este número. No se borró nada. Espere a que la llamada termine e intente de nuevo.",
     daily_cap_reached: "Se alcanzó el tope diario de llamadas de esta línea.",
     attempts_exhausted: "Se alcanzó el límite de intentos para esta persona.",
+    transcription_disabled: "La transcripción de la grabación está apagada. Enciéndala en Configuración → Inteligencia artificial.",
+    transcription_call_erased: "Esta llamada fue borrada a pedido de quien llamó y no recibe texto nuevo.",
+    transcription_outside_retention: "Esta llamada superó el plazo de conservación de la transcripción y no recibe texto nuevo.",
+    transcription_has_text: "Esta llamada ya tiene transcripción. Actualice la página.",
+    transcription_engine_unsupported: "El motor de voz de esta llamada no transcribe grabaciones. Solo los motores de OpenAI y de Google lo hacen.",
+    transcription_cost_ceiling: "Esta llamada ya alcanzó el tope de costo del agente. La transcripción no se hizo y no se cobró nada.",
+    transcription_no_recording: "Esta llamada no tiene grabación para transcribir.",
+    transcription_unreadable: "La grabación de esta llamada no está en el formato que escribe el grabador, con un canal para cada lado. No se envió nada al proveedor.",
+    transcription_too_long: "La grabación es más larga de lo que el proveedor acepta en una solicitud. No se envió ni se cobró nada.",
+    transcription_no_speech: "No se encontró habla en la grabación. No se agregó nada a la línea de tiempo.",
+    transcription_failed: "El proveedor no transcribió la grabación. Lo que cobró está en el costo de la llamada. Intente de nuevo en unos instantes; si continúa, pruebe la clave en Configuración → Inteligencia artificial.",
   },
 };
 

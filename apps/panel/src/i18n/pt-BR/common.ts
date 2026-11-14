@@ -110,6 +110,17 @@ const common = {
     caller_call_live: "Há uma chamada em andamento com este número. Nada foi apagado. Espere a chamada terminar e tente de novo.",
     daily_cap_reached: "O teto diário de ligações desta linha foi atingido.",
     attempts_exhausted: "O limite de tentativas para esta pessoa foi atingido.",
+    transcription_disabled: "A transcrição da gravação está desligada. Ligue em Configurações → Inteligência artificial.",
+    transcription_call_erased: "Esta chamada foi apagada a pedido de quem ligou e não recebe texto novo.",
+    transcription_outside_retention: "Esta chamada passou do prazo de guarda da transcrição e não recebe texto novo.",
+    transcription_has_text: "Esta chamada já tem transcrição. Atualize a página.",
+    transcription_engine_unsupported: "O motor de voz desta chamada não transcreve gravações. Só os motores da OpenAI e do Google transcrevem.",
+    transcription_cost_ceiling: "Esta chamada já atingiu o teto de custo do agente. A transcrição não foi feita e nada foi cobrado.",
+    transcription_no_recording: "Esta chamada não tem gravação para transcrever.",
+    transcription_unreadable: "A gravação desta chamada não está no formato que o gravador escreve, com um canal para cada lado. Nada foi enviado ao provedor.",
+    transcription_too_long: "A gravação é mais longa do que o provedor aceita num pedido. Nada foi enviado nem cobrado.",
+    transcription_no_speech: "Não foi encontrada fala na gravação. Nada foi gravado na linha do tempo.",
+    transcription_failed: "O provedor não transcreveu a gravação. O que ele cobrou está no custo da chamada. Tente de novo em instantes; se continuar, teste a chave em Configurações → Inteligência artificial.",
   },
 };
 

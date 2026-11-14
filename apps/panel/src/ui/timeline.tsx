@@ -95,6 +95,7 @@ export function Timeline({
             <div className={`grid max-w-[46ch] gap-0.5 rounded-md px-4 py-2.5 ${user ? "bg-sunken" : "border border-line bg-surface"}`}>
               {previous !== event.kind ? <span className="text-[0.8rem] font-bold text-muted">{user ? t.speakers.user : agentName || t.speakers.agent}</span> : null}
               {p.purged === true ? <p className="text-muted italic">{p.erased === true ? e.transcript_erased : e.transcript_purged}</p> : <p className="leading-relaxed">{text(p.text)}</p>}
+              {p.source === "stt" ? <p className="text-[0.8rem] text-muted">{e.transcript_from_recording}</p> : null}
             </div>
           ),
         };
