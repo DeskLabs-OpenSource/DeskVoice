@@ -203,6 +203,7 @@ Rode `pnpm verify` e, se tocou em banco, `pnpm test:db`. Isso cobre:
 - fonte baixada de fora (`next/font/google`, ou o endereço do serviço de fontes num CSS ou numa tela) em vez de versionada no repositório;
 - cor escrita como valor (`#fff`, `rgb(`, `hsl(`, `oklch(`) num `.ts` ou `.tsx` do painel, em vez de um token de `apps/panel/src/design/tokens.css` ([direção do painel](docs/design/direcao-do-painel.md));
 - fragmento de versão inválido;
+- motivo de fim ou de recusa de chamada sem frase na linha do tempo;
 - instalação nova e atualização a partir da última versão;
 - a chamada simulada de ponta a ponta;
 - os caminhos de primeira impressão no navegador, contra a instalação de verdade: entrar, configurar,

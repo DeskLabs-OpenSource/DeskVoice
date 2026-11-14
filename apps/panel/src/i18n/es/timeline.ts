@@ -154,6 +154,17 @@ const timeline: TimelineDictionary = {
     cost_ceiling: "La llamada alcanzó el tope de costo definido en el agente.",
     engine_failed: "El motor de voz falló.",
     script_finished: "El guion de la simulación terminó.",
+    shutdown: "DeskVoice se apagó o se actualizó en medio de la llamada.",
+    internal_error: "DeskVoice tuvo un error interno y terminó la llamada.",
+    no_answer: "La llamada sonó y nadie contestó, o quien llamó desistió antes de conectar.",
+    web_never_connected: "La llamada desde el navegador no llegó a conectarse.",
+    whatsapp_answer_failed: "El agente no pudo contestar la llamada por WhatsApp, que siguió sonando en el celular. Revisa la línea Llamadas por WhatsApp en Salud.",
+    transfer_unanswered: "La transferencia no fue atendida.",
+    outbound_disabled: "Las llamadas salientes estaban desactivadas.",
+    outside_window: "Fuera del horario permitido para llamadas salientes.",
+    do_not_call: "El número está en la lista de no llamar.",
+    daily_cap_reached: "Se había alcanzado el tope diario de llamadas de esta línea.",
+    attempts_exhausted: "Se había alcanzado el límite de intentos para esta persona.",
   },
 };
 

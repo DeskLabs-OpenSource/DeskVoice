@@ -154,6 +154,17 @@ const timeline = {
     cost_ceiling: "A chamada atingiu o teto de custo definido no agente.",
     engine_failed: "O motor de voz falhou.",
     script_finished: "O roteiro da simulação terminou.",
+    shutdown: "O DeskVoice foi desligado ou atualizado no meio da chamada.",
+    internal_error: "O DeskVoice teve um erro interno e encerrou a chamada.",
+    no_answer: "A ligação tocou e ninguém atendeu, ou quem ligou desistiu antes de conectar.",
+    web_never_connected: "A ligação pelo navegador não chegou a conectar.",
+    whatsapp_answer_failed: "O agente não conseguiu atender a ligação pelo WhatsApp, que continuou tocando no celular. Confira a linha Ligação pelo WhatsApp em Saúde.",
+    transfer_unanswered: "A transferência não foi atendida.",
+    outbound_disabled: "As ligações de saída estavam desligadas.",
+    outside_window: "Fora do horário permitido para ligações de saída.",
+    do_not_call: "O número está na lista de não ligar.",
+    daily_cap_reached: "O teto diário de ligações desta linha tinha sido atingido.",
+    attempts_exhausted: "O limite de tentativas para esta pessoa tinha sido atingido.",
   },
 };
 

@@ -1,0 +1,3 @@
+await recordEvent(q, id, "call_ended", { status: "failed", reason: "engine_gone" }, now);
+await recordEvent(q, id, "call_refused", { reason: "no_answer", to }, now);
+await recordEvent(q, id, "task_queued", { reason: "not_a_call_reason" }, now);
