@@ -142,7 +142,7 @@ proven yet, each capability below says how far the proof went:
 | Talk to the agent by voice from the "Talk to the agent" screen | Proven on a real install with the OpenAI Realtime engine, by a test client that plays the browser's role with recorded speech. Not yet from a browser with a microphone |
 | Panel with a domain and HTTPS | Awaiting real-world proof |
 | Answer an inbound call from a carrier line (SIP trunk) | Awaiting real-world proof |
-| Transfer the call to a person | Awaiting real-world proof (the Asterisk path was checked, without a carrier) |
+| Transfer the call to a person | Awaiting real-world proof (the Asterisk path was checked, without a carrier). Since 0.9.0, a transfer nobody answers shows as unanswered and creates a panel notice asking for a callback, tested against a real database and simulated telephony |
 | OpenAI Realtime voice engine | Proven on a real install, in the "Talk to the agent" conversation described above. A contributor placed real calls with it on their own install, and, with the cost fix ([#94](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/94)), DeskVoice's estimate matched the OpenAI invoice. The fix applies since 0.6.0 |
 | Gemini Live voice engine | Awaiting real-world proof (tested against a fake server, without a key) |
 | Send WhatsApp during the call, through a connector | Awaiting real-world proof |
@@ -155,7 +155,9 @@ proven yet, each capability below says how far the proof went:
 | Update, health check, backup and restore | Proven on a real install, on the partner's VPS: installer run twice without regenerating secrets, backup checked, a restore that brings back the backup's row counts, and the automatic rollback of a failed update. Restoring on another server, or across versions with a new migration, not yet proven |
 | Update from the panel (Settings → System), through a kit agent on the server | Proven on a real install: twice on the partner's VPS (0.3.0 → 0.4.0 and 0.4.0 → 0.5.0), with nobody at the server's terminal, including the hand-off to the new version's updater and the removal of old images |
 | Record the call audio, off by default and turned on from the panel (Settings → Privacy → Call recording) | Tested against a real database and on a browser call, in an end-to-end test. Not yet proven on a real install. Since 0.6.0 |
+| Stop recording when the caller asks, by the agent (the `stop_recording` tool, checked per agent) or by the button on the live call screen; the stop shows on the timeline | Tested against a real database, in the real call session, with a simulated engine and telephony. Not yet proven on a real install. Since 0.9.0 |
 | Transcript retention period and export of what the organization keeps about a phone number (Settings) | Tested against a real database and checked on screen, on a panel against a throwaway database. Not yet proven on a real install. Since 0.6.0 |
+| Erase at the caller's request (Settings → Privacy): preview of what goes, a confirmation that names the phone number, a receipt; all speech and text about the person goes, including the recording, and the service record stays. Backup copies already made are not reached | Tested against a real database, including the check back through the export. Not yet proven on a real install. Since 0.9.0 |
 | Calls placed by the agent | Awaiting real-world proof, and off by default. See "Outbound calls" |
 
 If you answer a call through a carrier line, tell us how it went in an issue: inbound calls over
@@ -302,7 +304,7 @@ and is built in public, with the community. There are already outside contributi
 and security work from [webtecnica](https://github.com/webtecnica) are in the published releases, and since 0.6.0 so are
 the rights of callers (retention period and export), from webtecnica, and the OpenAI cost checked
 against the invoice, the farewell before hanging up and call recording, from
-[aliffstefano](https://github.com/aliffstefano). Release 0.8.0 brings the call outcome and the end-of-call WhatsApp notice, from webtecnica. DeskcommCRM, where the contribution workflow used
+[aliffstefano](https://github.com/aliffstefano). Release 0.8.0 brings the call outcome and the end-of-call WhatsApp notice, from webtecnica, and 0.9.0, also from webtecnica, brings automated-menu keys, unanswered transfers, recording that stops on request and erasure at the caller's request. DeskcommCRM, where the contribution workflow used
 here comes from, has received PRs from more than 250 people.
 
 Credit is a rule, not a courtesy: contributors keep authorship of their commits and are named
