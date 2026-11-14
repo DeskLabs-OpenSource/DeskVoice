@@ -55,16 +55,20 @@ const EVENT_RULES: ReadonlyArray<{ where: string; set: string }> = [
 const paramsOf = (where: string, ids: string[], phoneE164: string): unknown[] => (where.includes("$2") ? [ids, phoneE164] : [ids]);
 
 // Pendências do titular: pelo telefone ou pela chamada de onde nasceram. Avisos: das chamadas e dessas pendências.
+const SUBJECT_WHERE = "((direction = 'inbound' and from_e164 = $1) or (direction = 'outbound' and to_e164 = $1))";
+
 const FOLLOW_UPS_WHERE = "(caller_e164 = $1 or call_id = any($2::uuid[]))";
 const NOTIFICATIONS_WHERE = `(call_id = any($2::uuid[]) or follow_up_id in (select id from follow_ups where ${FOLLOW_UPS_WHERE}))`;
 
 /**
- * Chamadas em que o telefone aparece — como quem ligou (`from_e164`) ou como destino de uma
- * ligação feita (`to_e164`). Já apagadas ficam de fora: é o que torna o mesmo pedido repetível sem
- * recontar nem reescrever.
+ * Chamadas em que o telefone é o outro lado: quem ligou (`from_e164`, na recebida) ou quem recebeu
+ * (`to_e164`, na feita). O lado da empresa nunca casa: digitar a própria linha não alcança as
+ * chamadas dela. Já apagadas ficam de fora, o que torna o mesmo pedido repetível sem recontar; e só
+ * as encerradas entram, para que uma chamada que comece entre a checagem de chamada viva e o commit
+ * não seja marcada como apagada enquanto ainda grava (ela fica para um novo pedido).
  */
 export async function callsOfCaller(q: OrgQuery, phoneE164: string): Promise<string[]> {
-  const rows = await q.many<{ id: string }>("select id from calls where (from_e164 = $1 or to_e164 = $1) and erased_at is null order by started_at", [phoneE164]);
+  const rows = await q.many<{ id: string }>(`select id from calls where ${SUBJECT_WHERE} and erased_at is null and ended_at is not null order by started_at`, [phoneE164]);
   return rows.map((row) => row.id);
 }
 
@@ -73,7 +77,7 @@ export async function callsOfCaller(q: OrgQuery, phoneE164: string): Promise<str
  * e o arquivo de áudio depois do apagamento, e o pedido não estaria atendido: o apagamento espera.
  */
 export async function hasLiveCall(q: OrgQuery, phoneE164: string): Promise<boolean> {
-  const row = await q.one("select 1 from calls where (from_e164 = $1 or to_e164 = $1) and (status in ('ringing', 'in_progress') or ended_at is null) limit 1", [phoneE164]);
+  const row = await q.one(`select 1 from calls where ${SUBJECT_WHERE} and (status in ('ringing', 'in_progress') or ended_at is null) limit 1`, [phoneE164]);
   return row !== null;
 }
 

@@ -301,6 +301,35 @@ describe("apagar a conversa a pedido do titular", () => {
     expect(second.data).toEqual({ calls: 0, events: 0, followUps: 0, notifications: 0, approvals: 0, recordings: 0 });
   });
 
+  it("o titular é sempre o outro lado: a própria linha não alcança nada, e a ligação feita para a pessoa entra", async () => {
+    const org = await createOrganization(panel.app, "erasure subject");
+    const owner = await createUser(panel.app, org, "owner");
+    // Uma linha da empresa que passa na validação de telefone, para o pedido chegar ao apagamento.
+    const OWN = "+554133334444";
+    const { callId: inbound } = await seed(org);
+    const outbound = await createCall(panel.app, org, NOW);
+    await withOrg(panel.app, org, async (q) => {
+      await q.exec("update calls set to_e164 = $2 where id = $1", [inbound, OWN]);
+      await q.exec("update calls set direction = 'outbound', status = 'completed', from_e164 = $2, to_e164 = $3, summary = 'Confirmou.', ended_at = $4 where id = $1", [
+        outbound,
+        OWN,
+        PHONE,
+        new Date(NOW.getTime() + 60_000),
+      ]);
+    });
+
+    const ownLine = await call(erase, { method: "POST", cookie: owner.cookie, body: { phone: OWN } });
+    expect([ownLine.status, ownLine.code]).toEqual([200, undefined]);
+    expect(ownLine.data).toMatchObject({ calls: 0 });
+    const untouched = await one<{ summary: string; erased_at: Date | null }>(org, "select summary, erased_at from calls where id = $1", [inbound]);
+    expect(untouched).toMatchObject({ summary: "Pediu retorno.", erased_at: null });
+
+    const subject = await call(erase, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
+    expect(subject.data).toMatchObject({ calls: 2 });
+    const placed = await one<{ to_e164: string | null; from_e164: string | null }>(org, "select to_e164, from_e164 from calls where id = $1", [outbound]);
+    expect(placed).toEqual({ to_e164: null, from_e164: OWN });
+  });
+
   it("o recibo guarda quem pediu e as contagens, sem fala, sem motivo livre e sem o telefone em claro", async () => {
     const org = await createOrganization(panel.app, "erasure receipt");
     const owner = await createUser(panel.app, org, "owner");
