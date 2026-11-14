@@ -16,7 +16,7 @@ const fixtureRoutine = (kind: string): string => `export default { kind: ${JSON.
 describe("loadRoutines", { timeout: 30_000 }, () => {
   it("descobre as rotinas da fundação", async () => {
     const routines = await loadRoutines();
-    expect([...routines.keys()].sort()).toEqual(["classify_call_outcome", "deliver_notification", "deliver_webhook", "expire_approval", "follow_up", "purge_transcripts", "summarize_call"]);
+    expect([...routines.keys()].sort()).toEqual(["classify_call_outcome", "deliver_notification", "deliver_webhook", "erase_recordings", "expire_approval", "follow_up", "purge_transcripts", "summarize_call"]);
   });
 
   it("rotina nova é só um arquivo novo na pasta; arquivo de teste é ignorado", async () => {

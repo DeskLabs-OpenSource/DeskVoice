@@ -39,6 +39,11 @@ como código, as regras da ligação pelo WhatsApp:
   seção 8) para as próximas fatias. O cliente do DeskVoice (`apps/voice/src/wacalls-client.ts`)
   foi escrito do zero, a partir do contrato que o desenho leu no código do WaCalls.
 
+Do módulo LGPD do DeskcommCRM veio, como lição de desenho e não como código, o apagamento a
+pedido do titular (`packages/core/src/erasures.ts`): anonimizar o conteúdo em vez de apagar o
+registro do serviço prestado, mostrar a prévia do que sai antes de apagar e deixar um recibo de
+quem pediu. A adaptação ao DeskVoice é de @webtecnica, no PR #171.
+
 Da fábrica do DeskcommCRM vieram a contribuição guiada por skills, o lançamento por fragmentos,
 a forma do instalador e as doutrinas de sistema vivo, versionamento e ação destrutiva, aqui
 reescritas para telefonia.

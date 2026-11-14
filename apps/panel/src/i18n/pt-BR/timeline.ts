@@ -89,6 +89,8 @@ const timeline = {
     task_finished: "Tarefa concluída",
     task_failed: "Tarefa não concluída",
     transcript_purged: "Texto apagado pelo prazo de guarda da transcrição.",
+    transcript_erased: "Texto apagado a pedido de quem ligou.",
+    erased: "O texto deste registro foi apagado a pedido de quem ligou.",
     follow_up_created: "Pendência aberta",
     follow_up_assigned: "Pendência com novo responsável",
     follow_up_closed: { done: "Pendência feita", canceled: "Pendência cancelada" },

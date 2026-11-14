@@ -106,7 +106,10 @@ const routine: Routine = {
       );
       const toolsUsed = [...new Set(events.flatMap((event) => (event.kind === "tool_called" && event.name ? [event.name] : [])))];
       const summary = extractiveSummary({ status: call.status, endReason: call.end_reason, turns, toolsUsed });
-      await q.exec("update calls set summary = $2 where id = $1", [callId, summary]);
+      // Chamada apagada a pedido do titular não recebe resumo, aviso nem desfecho. O `update` trava a
+      // linha: se o apagamento confirmou depois da leitura das falas acima, nada é escrito.
+      const written = await q.exec("update calls set summary = $2 where id = $1 and erased_at is null", [callId, summary]);
+      if (written === 0) return;
       await notifyOwner(q, callId, deps.clock.now());
       // O desfecho comercial é do motor do agente: vai para a fila em separado, para o resumo não
       // depender de provedor nenhum para ficar pronto. Desligado (de fábrica), nem entra na fila.

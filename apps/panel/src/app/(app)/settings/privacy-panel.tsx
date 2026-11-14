@@ -37,8 +37,25 @@ interface Exported {
   content: string;
 }
 
+interface ErasureCounts {
+  calls: number;
+  events: number;
+  followUps: number;
+  notifications: number;
+  approvals: number;
+  recordings: number;
+}
+interface ErasurePreview extends ErasureCounts {
+  phone: string;
+  live: boolean;
+}
+
 const numberOf = (value: unknown): number => (typeof value === "number" ? value : 0);
 const hasRecord = (counts: Exported["counts"]): boolean => counts.calls > 0 || counts.doNotCall || counts.followUps > 0;
+const hasErasable = (counts: ErasureCounts): boolean => counts.calls + counts.followUps + counts.notifications + counts.approvals + counts.recordings > 0;
+
+const countsLine = ({ calls, events, followUps, notifications, approvals, recordings }: ErasureCounts, t: PrivacyDictionary): string =>
+  fill(t.erasureCounts, { calls, events, followUps, notifications, approvals, recordings });
 
 /** Uma linha do registro, na voz da tela. */
 function describe(entry: Entry, t: PrivacyDictionary): string {
@@ -60,6 +77,12 @@ function describe(entry: Entry, t: PrivacyDictionary): string {
       return fill(t.history.caller_data_exported, { who, phone: formatPhone(typeof p.phone === "string" ? p.phone : ""), calls: numberOf(p.calls), events: numberOf(p.events) });
     case "call_recording_changed":
       return fill(t.history.call_recording_changed, { who, state: p.to === true ? t.recordingStates.on : t.recordingStates.off });
+    case "caller_data_erased":
+      return fill(t.history.caller_data_erased, { who, suffix: typeof p.phoneSuffix === "string" ? p.phoneSuffix : "", calls: numberOf(p.calls), recordings: numberOf(p.recordings) });
+    case "caller_recordings_erased": {
+      const line = fill(t.history.caller_recordings_erased, { removed: numberOf(p.removed) });
+      return numberOf(p.left) > 0 ? `${line} ${fill(t.erasedRecordingsLeft, { left: numberOf(p.left) })}` : line;
+    }
   }
 }
 
@@ -75,8 +98,8 @@ function download(result: Exported, t: PrivacyDictionary): void {
 
 /**
  * Os direitos de quem ligou, pela tela (registros 0014 e 0016): a gravação do áudio, o prazo de
- * guarda da transcrição e a exportação do que a organização guarda sobre um telefone, com o
- * registro de cada um. Só dono ou administrador; para o operador a seção não aparece.
+ * guarda da transcrição, a exportação e o apagamento a pedido do titular do que a organização
+ * guarda sobre um telefone, com o registro de cada um. Só dono ou administrador; para o operador a seção não aparece.
  */
 export function PrivacyPanel() {
   const t = useDict(ptBR, en, es);
@@ -93,6 +116,12 @@ export function PrivacyPanel() {
   const [confirming, setConfirming] = useState<number | null>(null);
   const [phone, setPhone] = useState("");
   const [exported, setExported] = useState<Exported | null>(null);
+  const previewer = useAction();
+  const eraser = useAction();
+  const [erasePhone, setErasePhone] = useState("");
+  // A prévia é o pedido de confirmação: o botão que apaga só existe com ela na tela, e nomeia o telefone dela.
+  const [preview, setPreview] = useState<ErasurePreview | null>(null);
+  const [erased, setErased] = useState<{ phone: string; counts: ErasureCounts } | null>(null);
 
   useEffect(() => {
     if (state.data) setDays(state.data.retentionDays === null ? "" : String(state.data.retentionDays));
@@ -199,6 +228,76 @@ export function PrivacyPanel() {
               {exported.counts.followUps > 0 ? <p>{fill(t.exportDoneFollowUps, { count: exported.counts.followUps })}</p> : null}
               {exported.counts.doNotCall ? <p>{t.exportDoneDnc}</p> : null}
               <p>{t.exportCare}</p>
+            </Notice>
+          ) : null}
+        </form>
+      </Panel>
+
+      <Panel title={t.erasureTitle} description={t.erasureLead}>
+        <form
+          className="grid max-w-xl gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setPreview(null);
+            setErased(null);
+            void previewer.run(async () => setPreview(await api<ErasurePreview>("/privacy/erasure/preview", { body: { phone: erasePhone } })));
+          }}
+        >
+          <Field label={t.erasurePhone} hint={t.erasurePhoneHint}>
+            <TextInput
+              mono
+              type="tel"
+              className="max-w-60"
+              value={erasePhone}
+              onChange={(event) => {
+                setErasePhone(event.target.value);
+                setPreview(null);
+              }}
+              required
+            />
+          </Field>
+          <Notice tone="warn">{t.erasureBackups}</Notice>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit" busy={previewer.busy}>
+              {t.erasurePreview}
+            </Button>
+          </div>
+          {previewer.error ? <Notice tone="fail">{previewer.error}</Notice> : null}
+          {preview?.live ? <Notice tone="warn">{fill(t.erasureLive, { phone: formatPhone(preview.phone) })}</Notice> : null}
+          {preview && !preview.live && !hasErasable(preview) ? <Notice>{fill(t.erasureEmpty, { phone: formatPhone(preview.phone) })}</Notice> : null}
+          {preview && !preview.live && hasErasable(preview) ? (
+            <Notice tone="fail">
+              <p className="font-bold">{fill(t.erasureConfirmTitle, { phone: formatPhone(preview.phone) })}</p>
+              <p>{countsLine(preview, t)}</p>
+              <p>{t.erasureConfirmBody}</p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <Button
+                  variant="danger"
+                  busy={eraser.busy}
+                  onClick={() =>
+                    void eraser
+                      .run(async () => {
+                        const counts = await api<ErasureCounts>("/privacy/erasure", { body: { phone: preview.phone } });
+                        setErased({ phone: preview.phone, counts });
+                        setPreview(null);
+                      })
+                      .then(state.reload)
+                  }
+                >
+                  {fill(t.erasureConfirmYes, { phone: formatPhone(preview.phone) })}
+                </Button>
+                <Button variant="ghost" onClick={() => setPreview(null)}>
+                  {common.actions.cancel}
+                </Button>
+              </div>
+              {eraser.error ? <p>{eraser.error}</p> : null}
+            </Notice>
+          ) : null}
+          {erased ? (
+            <Notice tone="ok">
+              <p>{fill(t.erasureDone, { phone: formatPhone(erased.phone) })}</p>
+              <p>{countsLine(erased.counts, t)}</p>
+              {erased.counts.recordings > 0 ? <p>{t.erasureDoneRecordings}</p> : null}
             </Notice>
           ) : null}
         </form>

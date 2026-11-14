@@ -115,13 +115,12 @@ const routine: Routine = {
         return;
       }
       const decidido = settleOutcome(result.guess);
-      await q.exec("update calls set outcome = $2, outcome_confidence = $3, outcome_evidence = $4, outcome_classified_at = $5 where id = $1 and outcome is null", [
-        callId,
-        decidido.outcome,
-        decidido.confidence,
-        decidido.evidence,
-        now,
-      ]);
+      // Se o titular pediu o apagamento enquanto o provedor respondia, o desfecho (que não é fala)
+      // fica e a citação não. O `update` trava a linha e relê `erased_at` depois de o apagamento confirmar.
+      await q.exec(
+        "update calls set outcome = $2, outcome_confidence = $3, outcome_evidence = case when erased_at is null then $4 end, outcome_classified_at = $5 where id = $1 and outcome is null",
+        [callId, decidido.outcome, decidido.confidence, decidido.evidence, now],
+      );
     });
   },
 };
