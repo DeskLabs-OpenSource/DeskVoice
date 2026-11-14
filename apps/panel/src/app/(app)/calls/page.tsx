@@ -9,6 +9,7 @@ import enCommon from "../../../i18n/en/common";
 import es from "../../../i18n/es/calls";
 import esCommon from "../../../i18n/es/common";
 import ptBR from "../../../i18n/pt-BR/calls";
+import { fill } from "../../../i18n/locales";
 import ptBRCommon from "../../../i18n/pt-BR/common";
 import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
@@ -158,19 +159,20 @@ export default function CallsPage() {
               <p className="text-muted">{t.emptyFilter}</p>
             ) : (
               <div className="overflow-hidden rounded-md border border-line bg-surface">
-                <div className="hidden grid-cols-[1.4fr_1.2fr_1fr_1fr_0.7fr_0.7fr] gap-4 border-b border-line px-5 py-2.5 text-[0.8rem] font-bold text-muted md:grid">
+                <div className="hidden grid-cols-[1.4fr_1.2fr_1fr_1fr_0.7fr_0.7fr_0.5fr] gap-4 border-b border-line px-5 py-2.5 text-[0.8rem] font-bold text-muted md:grid">
                   <span>{t.columns.caller}</span>
                   <span>{t.columns.agent}</span>
                   <span>{t.columns.status}</span>
                   <span>{t.columns.started}</span>
                   <span className="text-right">{t.columns.duration}</span>
                   <span className="text-right">{t.columns.cost}</span>
+                  <span className="text-right">{t.columns.score}</span>
                 </div>
                 {history.map((call) => (
                   <Link
                     key={call.id}
                     href={`/calls/${call.id}`}
-                    className="grid grid-cols-2 items-center gap-x-4 gap-y-1 border-b border-line px-5 py-3 transition-colors duration-[120ms] last:border-b-0 hover:bg-sunken md:grid-cols-[1.4fr_1.2fr_1fr_1fr_0.7fr_0.7fr]"
+                    className="grid grid-cols-2 items-center gap-x-4 gap-y-1 border-b border-line px-5 py-3 transition-colors duration-[120ms] last:border-b-0 hover:bg-sunken md:grid-cols-[1.4fr_1.2fr_1fr_1fr_0.7fr_0.7fr_0.5fr]"
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="data truncate">{formatCaller(call, common)}</span>
@@ -183,6 +185,14 @@ export default function CallsPage() {
                     <span className="data text-right text-muted md:text-left">{formatDateTime(call.startedAt, locale)}</span>
                     <span className="data text-muted md:text-right md:text-ink">{call.endedAt ? formatDuration(secondsBetween(call.answeredAt ?? call.startedAt, call.endedAt)) : ""}</span>
                     <span className="data text-right">{formatMoney(call.costCents, locale)}</span>
+                    {/* A nota é a soma da régua; sem análise (o de fábrica), um traço. */}
+                    {call.analysisScore === null ? (
+                      <span className="data text-right text-muted" title={t.noScore} aria-label={t.noScore}>
+                        —
+                      </span>
+                    ) : (
+                      <span className="data text-right">{fill(t.score, { score: String(call.analysisScore) })}</span>
+                    )}
                   </Link>
                 ))}
               </div>
