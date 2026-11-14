@@ -34,6 +34,8 @@ export interface Call {
   agentId: string | null;
   agentName: string | null;
   direction: "inbound" | "outbound";
+  /** Por onde chegou: linha telefônica, navegador ou WhatsApp. */
+  channel: "phone" | "web" | "whatsapp";
   from: string | null;
   to: string | null;
   status: CallStatus;

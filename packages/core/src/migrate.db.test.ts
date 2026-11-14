@@ -124,4 +124,24 @@ describe("runMigrations", () => {
       { session_name: "calls-old", phone_e164: "+5511976543210" },
     ]);
   });
+
+  it("as chamadas que já existem herdam o canal do evento; sem canal no evento, ficam como linha", async () => {
+    const CHANNEL = "20261114T014000_canal_da_chamada.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < CHANNEL) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    const call = async (event: object | null): Promise<string> => {
+      const id = (await db.pool.query<{ id: string }>("insert into calls (organization_id, direction, status, started_at) values ($1, 'inbound', 'completed', now()) returning id", [org])).rows[0]?.id ?? "";
+      if (event) await db.pool.query("insert into call_events (organization_id, call_id, at, kind, payload) values ($1, $2, now(), 'call_started', $3)", [org, id, event]);
+      return id;
+    };
+    const whatsapp = await call({ direction: "inbound", channel: "whatsapp" });
+    const web = await call({ direction: "inbound", channel: "web", userId: "u" });
+    const phone = await call({ direction: "inbound" });
+    const silent = await call(null);
+    await copyFile(path.join(REAL_MIGRATIONS, CHANNEL), path.join(dir, CHANNEL));
+    expect(await runMigrations(db, dir)).toEqual([CHANNEL]);
+    const channels = new Map((await db.pool.query<{ id: string; channel: string }>("select id, channel from calls")).rows.map((row) => [row.id, row.channel]));
+    expect([channels.get(whatsapp), channels.get(web), channels.get(phone), channels.get(silent)]).toEqual(["whatsapp", "web", "phone", "phone"]);
+  });
 });

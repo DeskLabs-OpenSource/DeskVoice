@@ -53,6 +53,8 @@ const timeline = {
   } as Record<string, string>,
   events: {
     call_started: "A ligação chegou",
+    call_started_whatsapp: "A ligação chegou pelo WhatsApp",
+    call_started_web: "A chamada pelo navegador começou",
     call_started_outbound: "O agente iniciou a ligação",
     call_answered: "O agente atendeu",
     recording_notice: "Aviso de gravação",

@@ -121,9 +121,9 @@ export default function CallsPage() {
               >
                 <span className="live-dot" aria-hidden />
                 <div className="grid min-w-0 gap-0.5">
-                  <span className="data truncate text-[1.2rem] font-medium">{formatPhone(call.from) || common.unknownCaller}</span>
+                  <span className="data truncate text-[1.2rem] font-medium">{formatPhone(call.from) || (call.channel === "web" ? common.webCaller : common.unknownCaller)}</span>
                   <span className="truncate text-muted">
-                    {call.agentName ?? common.noAgent} · {common.callStatus[call.status]}
+                    {call.channel === "phone" ? "" : `${common.channel[call.channel]} · `}{call.agentName ?? common.noAgent} · {common.callStatus[call.status]}
                   </span>
                 </div>
                 <div className="flex items-center gap-4">
@@ -172,7 +172,10 @@ export default function CallsPage() {
                     href={`/calls/${call.id}`}
                     className="grid grid-cols-2 items-center gap-x-4 gap-y-1 border-b border-line px-5 py-3 transition-colors duration-[120ms] last:border-b-0 hover:bg-sunken md:grid-cols-[1.4fr_1.2fr_1fr_1fr_0.7fr_0.7fr]"
                   >
-                    <span className="data truncate">{formatPhone(call.direction === "outbound" ? call.to : call.from) || common.unknownCaller}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="data truncate">{formatPhone(call.direction === "outbound" ? call.to : call.from) || (call.channel === "web" ? common.webCaller : common.unknownCaller)}</span>
+                      {call.channel === "phone" ? null : <Badge tone="neutral">{common.channel[call.channel]}</Badge>}
+                    </span>
                     <span className="truncate text-right text-muted md:text-left">{call.agentName ?? common.noAgent}</span>
                     <span>
                       <Badge tone={STATUS_TONE[call.status]}>{common.callStatus[call.status]}</Badge>

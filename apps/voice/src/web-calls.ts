@@ -218,7 +218,7 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
           if (typeof key?.value !== "string") return { code: "engine_not_configured", message: `No API key is saved for the voice engine ${engine.label}. Save it in the settings before calling.` };
         }
         const call = await q.one<{ id: string }>(
-          "insert into calls (organization_id, agent_id, direction, status, engine, started_at) values ($1, $2, 'inbound', 'ringing', $3, $4) returning id",
+          "insert into calls (organization_id, agent_id, direction, channel, status, engine, started_at) values ($1, $2, 'inbound', 'web', 'ringing', $3, $4) returning id",
           [input.organizationId, input.agentId, agent.engine, clock.now()],
         );
         if (!call) throw new Error("Web call was not created");

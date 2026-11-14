@@ -94,7 +94,7 @@ describe("ligação pelo WhatsApp: entrada e atendimento", { timeout: 60_000 }, 
     expect(callPaths(call)).toEqual(["POST webrtc", "POST accept"]);
     expect(call.offers).toEqual([clientId]);
     expect(call.owner).toBe(clientId);
-    expect(await callOf(app, callId)).toMatchObject({ direction: "inbound", agent_id: agentId, from_e164: CALLER, to_e164: NUMBER, engine: "manual" });
+    expect(await callOf(app, callId)).toMatchObject({ direction: "inbound", channel: "whatsapp", agent_id: agentId, from_e164: CALLER, to_e164: NUMBER, engine: "manual" });
     expect((await eventsOf(app, callId)).slice(0, 3)).toEqual([
       { kind: "call_started", payload: { direction: "inbound", from: CALLER, to: NUMBER, agentId, channel: "whatsapp" } },
       { kind: "call_answered", payload: { engine: "manual" } },

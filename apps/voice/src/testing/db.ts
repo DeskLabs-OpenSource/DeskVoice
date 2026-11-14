@@ -129,11 +129,12 @@ export interface CallRow {
   from_e164: string | null;
   to_e164: string | null;
   direction: string;
+  channel: string;
 }
 
 export const callOf = async (app: Db, callId: string): Promise<CallRow> => {
   const row = await withSystem(app, (q) =>
-    q.one<CallRow>("select status, end_reason, engine, cost_cents, answered_at, ended_at, agent_id, from_e164, to_e164, direction from calls where id = $1", [callId]),
+    q.one<CallRow>("select status, end_reason, engine, cost_cents, answered_at, ended_at, agent_id, from_e164, to_e164, direction, channel from calls where id = $1", [callId]),
   );
   if (!row) throw new Error(`Call ${callId} not found`);
   return row;

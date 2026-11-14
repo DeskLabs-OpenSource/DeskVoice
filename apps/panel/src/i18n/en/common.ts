@@ -52,6 +52,8 @@ const common: CommonDictionary = {
     refused: "Refused",
   },
   unknownCaller: "Unidentified number",
+  channel: { phone: "Phone line", web: "Browser", whatsapp: "WhatsApp" },
+  webCaller: "Browser call",
   noAgent: "No agent",
   readOnly: "Your role is operator: you follow calls and answer approvals. To change this screen, talk to an owner or administrator.",
   errors: {
