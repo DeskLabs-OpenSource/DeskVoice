@@ -64,6 +64,7 @@ const timeline: TimelineDictionary = {
   stopRecordingNotRecording: "This call is not being recorded. Nothing was stopped or recorded.",
   stopRecordingHint: "The recording cannot be resumed on this call.",
   summaryPending: "The summary is written after the call ends.",
+  summaryPurged: "The summary was deleted by the conversation retention period.",
   empty: "No event recorded in this call yet.",
   notFound: "This call does not exist or was deleted.",
   speakers: { user: "Caller", agent: "Agent" },

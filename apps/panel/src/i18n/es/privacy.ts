@@ -14,13 +14,13 @@ const privacy: PrivacyDictionary = {
   recordingStates: { on: "encendida", off: "apagada" },
   retentionTitle: "Plazo de conservación de las conversaciones",
   retentionLead:
-    "La transcripción de cada llamada, lo que dijeron quien llamó y el agente, queda en la base de datos hasta salir del plazo. Después, el texto se reemplaza por una marca y la grabación, si la hay, se borra; la llamada, la hora, el resumen y el resto de la línea de tiempo se mantienen. Los pendientes cerrados hace más tiempo que el plazo, contado desde el cierre, también se borran; el pendiente abierto queda hasta que alguien lo cierre.",
+    "La transcripción de cada llamada, lo que dijeron quien llamó y el agente, queda en la base de datos hasta salir del plazo. Después, el texto se reemplaza por una marca y la grabación, si la hay, se borra; la llamada, la hora y el resto de la línea de tiempo se mantienen. El resumen de la llamada se escribe a partir de lo dicho y sale con el plazo, y la pantalla dice que salió. Los pendientes cerrados hace más tiempo que el plazo, contado desde el cierre, también se borran; el pendiente abierto queda hasta que alguien lo cierre.",
   retentionDays: "Conservar durante (días)",
   retentionHint: "Vacío conserva para siempre. El plazo mínimo es de {min} días.",
   currentForever: "Hoy esta organización conserva la transcripción para siempre.",
   currentDays: "Hoy esta organización conserva la transcripción durante {days} días.",
   irreversible:
-    "El texto que sale no vuelve, ni por este panel ni por el servidor. Las copias de seguridad ya hechas mantienen el texto hasta ser descartadas. El resumen de la llamada y los datos enviados por las herramientas no salen con el plazo.",
+    "El texto que sale no vuelve, ni por este panel ni por el servidor. Las copias de seguridad ya hechas mantienen el texto hasta ser descartadas. Los datos enviados por las herramientas no salen con el plazo.",
   save: "Guardar plazo",
   confirmTitle: "¿Borrar el texto de las conversaciones de más de {days} días?",
   confirmBody:
@@ -58,7 +58,7 @@ const privacy: PrivacyDictionary = {
   historyEmpty: "Nada registrado todavía.",
   history: {
     transcript_retention_changed: "{who} cambió el plazo de conservación de {from} a {to}.",
-    transcripts_purged: "El texto de lo dicho hace más de {days} días fue borrado por el plazo. Fragmentos borrados: {count}.",
+    transcripts_purged: "El texto de lo dicho y los resúmenes de las llamadas de hace más de {days} días fueron borrados por el plazo. Fragmentos y resúmenes borrados: {count}.",
     caller_data_exported: "{who} exportó los datos de {phone}. Llamadas: {calls}. Eventos: {events}.",
     call_recording_changed: "{who} dejó la grabación de las llamadas {state}.",
     caller_data_erased: "{who} borró, a pedido de quien llamó, los datos del teléfono terminado en {suffix}. Llamadas: {calls}. Grabaciones: {recordings}.",
