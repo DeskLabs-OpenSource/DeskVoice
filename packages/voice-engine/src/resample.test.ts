@@ -32,6 +32,46 @@ function amplitude(pcm: Buffer, rate: number, hz: number): number {
 
 const db = (ratio: number) => 20 * Math.log10(ratio);
 
+/**
+ * O que sobra fora do tom, em dB relativos ao tom: o sinal menos o tom de `hz` ajustado por mínimos
+ * quadrados (seno e cosseno). Pega a imagem e também a junção entre pedaços.
+ */
+function residual(pcm: Buffer, rate: number, hz: number): number {
+  const count = pcm.length / 2;
+  let ss = 0;
+  let cc = 0;
+  let sc = 0;
+  let ys = 0;
+  let yc = 0;
+  for (let i = 0; i < count; i++) {
+    const s = Math.sin((2 * Math.PI * hz * i) / rate);
+    const c = Math.cos((2 * Math.PI * hz * i) / rate);
+    const y = pcm.readInt16LE(i * 2);
+    ss += s * s;
+    cc += c * c;
+    sc += s * c;
+    ys += y * s;
+    yc += y * c;
+  }
+  const det = ss * cc - sc * sc;
+  const a = (ys * cc - yc * sc) / det;
+  const b = (yc * ss - ys * sc) / det;
+  let error = 0;
+  for (let i = 0; i < count; i++) {
+    const fit = a * Math.sin((2 * Math.PI * hz * i) / rate) + b * Math.cos((2 * Math.PI * hz * i) / rate);
+    error += (pcm.readInt16LE(i * 2) - fit) ** 2;
+  }
+  return db(Math.sqrt(error / count) / (Math.hypot(a, b) / Math.SQRT2));
+}
+
+/** Reamostra em pedaços de 20 ms, cada um isolado, como o produto chama (gemini-live, whatsapp-transport). */
+function resampleIn20ms(pcm: Buffer, from: number, to: number): Buffer {
+  const step = (from / 50) * 2;
+  const parts: Buffer[] = [];
+  for (let offset = 0; offset < pcm.length; offset += step) parts.push(resample(pcm.subarray(offset, offset + step), from, to));
+  return Buffer.concat(parts);
+}
+
 describe("resample", () => {
   it("8k -> 16k não cria imagem espelhada em 8000 - f (40 dB abaixo do tom, no mínimo)", () => {
     for (const hz of [1000, 2000, 3000, 3400]) {
@@ -45,6 +85,16 @@ describe("resample", () => {
     for (const hz of [300, 500, 1000, 1500, 2000, 2500, 3000]) {
       const up = resample(tone(hz, 8000, 8000), 8000, 16000);
       expect(db(amplitude(up, 16000, hz) / 10000), `tom de ${hz} Hz`).toBeGreaterThanOrEqual(-1);
+    }
+  });
+
+  it("8k -> 16k em pedaços de 20 ms: imagem 40 dB abaixo do tom, e a junção 25 dB abaixo, no mínimo", () => {
+    // É o número que o fragmento afirma. Medido em 14/11: imagem de -45 a -64 dB, junção de -26 a -42 dB.
+    for (const hz of [300, 1000, 2000, 3000, 3400]) {
+      const up = resampleIn20ms(tone(hz, 8000, 8000), 8000, 16000);
+      const image = db(amplitude(up, 16000, 8000 - hz) / amplitude(up, 16000, hz));
+      expect(image, `imagem de ${hz} Hz em ${8000 - hz} Hz, em pedaços de 20 ms`).toBeLessThanOrEqual(-40);
+      expect(residual(up, 16000, hz), `resíduo fora do tom de ${hz} Hz, em pedaços de 20 ms`).toBeLessThanOrEqual(-25);
     }
   });
 
