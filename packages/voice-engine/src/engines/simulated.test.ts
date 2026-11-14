@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { VoiceSession, VoiceSessionConfig } from "../types";
-import defaultEngine, { createSimulatedEngine, setSimulatedScript, SIMULATED_PREFIX, type SimulatedScript } from "./simulated";
+import defaultEngine, { createSimulatedEngine, setSimulatedScript, SIMULATED_PREFIX, type SimulatedScript, type SimulatedSession } from "./simulated";
 
 const config: VoiceSessionConfig = { instructions: "Você é a recepção.", language: "pt-BR", tools: [] };
 const audio = (ms: number): Buffer => Buffer.alloc(ms * 16);
@@ -116,5 +116,24 @@ describe("motor simulado", () => {
     const log = record(session);
     await new Promise<void>((resolve) => session.on("closed", () => resolve()));
     expect(log.at(-1)).toBe("closed ended");
+  });
+
+  it("quem ligou falando no roteiro vira callerActivity com palavras, e closeCallerTurn fica registrado", async () => {
+    const scheduler = manualScheduler();
+    const engine = createSimulatedEngine({ schedule: scheduler.schedule });
+    setSimulatedScript([{ expectUserAudio: 40, text: "alô" }, { say: "Oi" }]);
+    const session = await engine.connect(config, "");
+    const signals: Array<{ words: boolean }> = [];
+    session.on("callerActivity", (signal) => signals.push(signal));
+    scheduler.flush();
+    session.sendAudio(audio(20));
+    session.sendAudio(audio(20));
+    scheduler.flush();
+    // Fora da vez de quem ligou, o áudio que chega não é fala do roteiro.
+    session.sendAudio(audio(20));
+    expect(signals).toEqual([{ words: true }, { words: true }]);
+
+    session.closeCallerTurn();
+    expect((session as SimulatedSession).callerTurnsClosed).toBe(1);
   });
 });

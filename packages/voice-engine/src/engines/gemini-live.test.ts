@@ -129,6 +129,29 @@ describe("gemini-live (contrato com servidor falso)", () => {
     await expect(interrupted).resolves.toEqual([]);
   });
 
+  it("sinal de fala de quem ligou: transcrição interina ou definitiva com texto vira { words: true }, sem entrar no texto da fala", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    const signals: Array<{ words: boolean }> = [];
+    const transcripts: string[] = [];
+    session.on("callerActivity", (signal) => signals.push(signal));
+    session.on("transcript", (turn) => transcripts.push(`${turn.speaker}: ${turn.text}`));
+    fake.send({ serverContent: { interimInputTranscription: { text: "quero" } } });
+    fake.send({ serverContent: { interimInputTranscription: { text: " " } } });
+    fake.send({ serverContent: { inputTranscription: { text: "quero marcar" } } });
+    const done = nextEvent(session, "transcript");
+    fake.send({ serverContent: { turnComplete: true } });
+    await done;
+    expect(signals).toEqual([{ words: true }, { words: true }]);
+    // A interina só avisa: o texto da fala é o definitivo.
+    expect(transcripts).toEqual(["user: quero marcar"]);
+  });
+
+  it("closeCallerTurn manda audioStreamEnd", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    session.closeCallerTurn();
+    expect(await fake.waitFor((message) => "realtimeInput" in message)).toEqual({ realtimeInput: { audioStreamEnd: true } });
+  });
+
   it("mensagem fora do formato é ignorada sem derrubar a sessão", async () => {
     const { session } = await openSession();
     const errors: Error[] = [];

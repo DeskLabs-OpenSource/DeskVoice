@@ -43,6 +43,15 @@ export interface VoiceSessionEvents {
   toolCall(call: { id: string; name: string; args: unknown }): void;
   /** O usuário falou por cima: quem toca o áudio deve descartar o que ainda não saiu. */
   interrupted(): void;
+  /**
+   * Há sinal de que quem ligou está falando: início de fala detectado pelo provedor, ou um pedaço
+   * novo de transcrição. Vem muitas vezes por turno. Não diz quando a fala acabou: é o que a guarda
+   * contra o silêncio precisa saber, e é o que o provedor erra com ruído.
+   *
+   * `words` é verdadeiro quando o sinal é texto novo da transcrição de quem ligou, e falso quando é
+   * só detecção de início de fala.
+   */
+  callerActivity(signal: { words: boolean }): void;
   /** Incremento desde o último `usage` (não é acumulado): quem mede custo soma os eventos. */
   usage(usage: Usage): void;
   /** Seguido de `closed` quando é fatal; sozinho, a sessão continua. */
@@ -57,6 +66,11 @@ export interface VoiceSession {
   sendToolResult(id: string, result: unknown): void;
   /** Pede ao motor uma fala com este conteúdo (aviso de gravação, desculpa, espera). */
   say(text: string): void;
+  /**
+   * Pede ao provedor que dê por encerrada a fala de quem ligou e responda ao que ouviu. A guarda
+   * contra o silêncio chama isto quando o provedor não viu o fim do turno.
+   */
+  closeCallerTurn(): void;
   close(): Promise<void>;
 }
 
