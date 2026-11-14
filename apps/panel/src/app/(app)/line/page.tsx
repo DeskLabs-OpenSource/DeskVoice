@@ -198,7 +198,7 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
               {/* A operadora que entrega a ligação por vários blocos: um por linha. A linha que
                   sempre teve um endereço só continua com o campo acima e a lista vazia. */}
               <Field label={t.matchExtra} hint={t.matchExtraHint}>
-                <TextArea mono value={draft.matchExtra} onChange={(event) => set("matchExtra", event.target.value)} rows={4} />
+                <TextArea className="data" value={draft.matchExtra} onChange={(event) => set("matchExtra", event.target.value)} rows={4} />
               </Field>
               <Field label={t.outboundHost} hint={t.outboundHostHint}>
                 <TextInput mono value={draft.outboundHost} onChange={(event) => set("outboundHost", event.target.value)} />
