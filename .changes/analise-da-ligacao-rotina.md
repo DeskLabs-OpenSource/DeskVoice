@@ -1,5 +1,5 @@
 ---
-impact: nothing_changes
+impact: new_capability
 section: added
 title: A ligação pode ser analisada no fim, na mesma chamada paga do desfecho
 ---
