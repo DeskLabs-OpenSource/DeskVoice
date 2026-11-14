@@ -8,7 +8,9 @@ import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting, tasksOf } from "../../../packages/tools/test/helpers";
-import { EngineTimeoutError } from "@deskvoice/voice-engine";
+import { EngineTimeoutError, type VoiceEngine } from "@deskvoice/voice-engine";
+import openaiRealtime from "../../../packages/voice-engine/src/engines/openai-realtime";
+import { startFakeProvider } from "../../../packages/voice-engine/src/testing/fake-provider";
 import { DEFAULT_RECORDING_NOTICE, startCallSession, type CallSession } from "./call-session";
 import {
   approvalsOf,
@@ -584,6 +586,128 @@ describe("guarda contra o silêncio: ferramenta e despedida", { timeout: 120_000
 
     expect(harness.timers.fire(6000)).toBe(1);
     expect(await session.done).toMatchObject({ status: "completed", endReason: "end_call" });
+  });
+});
+
+describe("guarda contra o silêncio: a janela do áudio e o desligar", { timeout: 120_000 }, () => {
+  it("pedaços pequenos de áudio somam o tempo de tocar, e a interrupção solta a janela na hora", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("silence-guard-window", { engine: "manual" }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    // Cem pedaços de 20 ms (320 bytes de PCM16 8 kHz) chegam juntos, como em produção: 2 s de fala
+    // na fila da ponte. A janela é a soma deles, e não o tamanho do último.
+    for (let piece = 0; piece < 100; piece++) manual.emit("audio", Buffer.alloc(320));
+    harness.clock.advance(1990);
+    // A transcrição atrasada da fala já respondida chega com o agente ainda tocando: não arma.
+    manual.emit("callerActivity", { words: true });
+    expect(harness.timers.held()).not.toContain(AFTER_WORDS_MS);
+    // Tocados os 2 s, texto de quem ligou é fala nova: arma.
+    harness.clock.advance(20);
+    manual.emit("callerActivity", { words: true });
+    expect(harness.timers.held()).toContain(AFTER_WORDS_MS);
+
+    // O agente responde com mais 2 s, e quem ligou fala por cima: o resto é descartado, e o sinal de
+    // fala logo depois da interrupção arma a guarda, sem esperar a fala descartada "tocar".
+    for (let piece = 0; piece < 100; piece++) manual.emit("audio", Buffer.alloc(320));
+    expect(harness.timers.held()).not.toContain(AFTER_WORDS_MS);
+    manual.emit("interrupted");
+    manual.emit("callerActivity", { words: false });
+    expect(transport.cleared).toBe(1);
+    expect(harness.timers.held()).toContain(WITHOUT_WORDS_MS);
+
+    transport.callerHangup();
+    await session.done;
+  });
+
+  it("quem ligou desliga com a guarda armada: nenhum prazo dela fica pendurado", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("silence-guard-hangup", { engine: "manual" }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("callerActivity", { words: true });
+    expect(harness.timers.held()).toContain(AFTER_WORDS_MS);
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+    expect(harness.timers.held()).toEqual([]);
+    expect(manual.callerTurnsClosed).toBe(0);
+    expect(manual.said).toEqual([]);
+  });
+});
+
+describe("guarda contra o silêncio com o motor OpenAI (servidor falso)", { timeout: 120_000 }, () => {
+  let fake: Awaited<ReturnType<typeof startFakeProvider>>;
+  afterEach(() => fake.stop());
+
+  /** O motor OpenAI de verdade, falando com o servidor falso. A chave não importa: o servidor é nosso. */
+  async function openaiCall(label: string) {
+    fake = await startFakeProvider();
+    const engine: VoiceEngine = {
+      ...openaiRealtime,
+      keyless: true,
+      connect: (config) => openaiRealtime.connect(config, "sk-teste", { baseUrl: fake.url, model: "modelo-x" }),
+    };
+    const organizationId = await createOrganization(app, label);
+    const agentId = await createAgent(app, organizationId, { engine: engine.id });
+    await harness?.approvals.close();
+    harness = await sessionHarness(app, [engine]);
+    const callId = await createCall(app, organizationId, agentId, harness.clock.now(), "inbound");
+    const transport = manualTransport();
+    const session = startCallSession(harness.deps, { organizationId, callId, agentId, transport });
+    await fake.waitFor((message) => message.type === "session.update");
+    fake.send({ type: "session.updated", session: {} });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    // A saudação: o servidor responde e termina, e a fila de falas do motor fica livre.
+    await fake.waitFor((message) => message.type === "response.create");
+    fake.send({ type: "response.created", response: {} });
+    fake.send({ type: "response.done", response: {} });
+    return { callId, transport, session, harness };
+  }
+
+  it("interrupção com o agente tocando: o sinal de fala que vem junto arma a guarda", async () => {
+    const { transport, session, harness } = await openaiCall("silence-guard-openai-interrupt");
+
+    // 2 s de fala do agente (μ-law 8 kHz, um byte por amostra) chegam à ponte de uma vez.
+    fake.send({ type: "response.output_audio.delta", delta: Buffer.alloc(16_000, 0xff).toString("base64") });
+    await waitFor(() => transport.sentBytes === 32_000, "the agent audio");
+    // Quem ligou fala por cima. O motor avisa a interrupção antes do sinal de fala; na ordem
+    // inversa, a janela ainda aberta engoliria o sinal.
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await waitFor(() => transport.cleared === 1, "the interruption");
+    expect(harness.timers.held()).toContain(WITHOUT_WORDS_MS);
+
+    transport.callerHangup();
+    await session.done;
+  });
+
+  it("o servidor fecha o item e nunca começa a resposta: closeCallerTurn não age, e a guarda pede para repetir depois de 4 s", async () => {
+    const { callId, transport, session, harness } = await openaiCall("silence-guard-openai-stuck");
+
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: "i1" });
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: "i1", delta: "Quero marcar uma consulta" });
+    await waitFor(() => harness.timers.held().includes(AFTER_WORDS_MS), "the guard to arm on the caller words");
+
+    // O `response.created` nunca vem. A guarda fecha o turno, e o motor não manda nada, porque o
+    // servidor já fechou o item.
+    harness.clock.advance(AFTER_WORDS_MS);
+    expect(harness.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    harness.clock.advance(AFTER_CLOSE_MS);
+    expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+    // O agente não fica calado: a primeira mensagem de commit ou de resposta é o pedido para repetir.
+    const first = await fake.waitFor((message) => message.type === "input_audio_buffer.commit" || message.type === "response.create");
+    expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining(ASK_TO_REPEAT) } });
+    await waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "caller_unanswered").length === 2, "the guard events");
+    const guardEvents = (await eventsOf(app, callId)).filter((event) => event.kind === "caller_unanswered");
+    expect(guardEvents.map((event) => event.payload)).toEqual([
+      { action: "turn_closed", waitedMs: AFTER_WORDS_MS, words: true },
+      { action: "asked_to_repeat", waitedMs: AFTER_WORDS_MS + AFTER_CLOSE_MS, words: true },
+    ]);
+
+    transport.callerHangup();
+    await session.done;
   });
 });
 
