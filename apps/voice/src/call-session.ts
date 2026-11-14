@@ -4,6 +4,7 @@ import { EngineTimeoutError, estimateCostCents, type Usage, type VoiceEngine, ty
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
+import { createSilenceGuard, type SilenceGuard } from "./silence-guard";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
 
@@ -144,6 +145,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let agent: AgentRow | undefined;
   let engine: VoiceEngine | undefined;
   let voice: VoiceSession | undefined;
+  /** A guarda contra o silêncio (antipadrão 15). Existe a partir de quando o motor conecta. */
+  let guard: SilenceGuard | undefined;
   let lastEngineError: Error | undefined;
   let ending = false;
   let recorder: Recording | undefined;
@@ -171,6 +174,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   async function finish(end: Ending): Promise<void> {
     if (ending) return;
     ending = true;
+    guard?.stop();
     resolveRecordingDecided();
     for (const cancel of cancelTimers) cancel();
     // Ferramenta em espera (uma aprovação pendente) é solta, e o resultado dela entra na linha do
@@ -260,6 +264,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   function wrapUp(farewell: string | null, end: Ending): void {
     if (ending || wrappingUp) return;
     wrappingUp = true;
+    guard?.stop();
     // Sem texto: o modelo já vai falar a despedida (o resultado da ferramenta pediu), e só se espera.
     if (farewell) voice?.say(farewell);
     cancelTimers.push(schedule(() => void finish(end), FAREWELL_MS));
@@ -469,7 +474,19 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // handlers e os primeiros eventos precisam estar na fila antes da primeira fala.
     const session = voice;
     const engineLabel = engine.label;
+    const silenceGuard = createSilenceGuard({
+      clock,
+      schedule,
+      closeCallerTurn: () => session.closeCallerTurn(),
+      say: (text) => {
+        if (!ending && !wrappingUp) session.say(text);
+      },
+      acted: (report) => void event("caller_unanswered", report).catch(logFailure("could not record an unanswered caller")),
+    });
+    guard = silenceGuard;
+    session.on("callerActivity", (signal) => silenceGuard.callerActivity(signal));
     session.on("audio", (pcm) => {
+      silenceGuard.agentAudio();
       if (ending) return;
       transport.sendAudio(pcm);
       recorder?.agent(pcm);
@@ -480,7 +497,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     });
     session.on("transcript", (turn) => void event(turn.speaker === "user" ? "transcript_user" : "transcript_agent", { text: turn.text }).catch(logFailure("could not record a transcript")));
     session.on("toolCall", (toolCall) => {
-      const running: Promise<void> = handleToolCall(enabled, toolCall).finally(() => toolsRunning.delete(running));
+      // Ferramenta em curso, aprovação em espera inclusive: a guarda não age até ela acabar.
+      silenceGuard.toolStarted();
+      const running: Promise<void> = handleToolCall(enabled, toolCall).finally(() => {
+        toolsRunning.delete(running);
+        silenceGuard.toolFinished();
+      });
       toolsRunning.add(running);
     });
     session.on("usage", (increment) => void meter(increment).catch(logFailure("could not record usage")));

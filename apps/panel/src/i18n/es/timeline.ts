@@ -136,6 +136,10 @@ const timeline: TimelineDictionary = {
       unreachable: "el proveedor no respondió a tiempo, o está caído",
       unexpected_response: "el proveedor respondió fuera del formato pedido",
     },
+    caller_unanswered: {
+      turn_closed: "Quien llamó estuvo {seconds} s sin respuesta, quizás por ruido en la línea. Se pidió al agente que respondiera a lo que escuchó.",
+      asked_to_repeat: "El agente seguía callado {seconds} s después de lo último que dijo quien llamó, y le pidió que lo repitiera.",
+    },
     unknown: "Evento",
   },
   reasons: {

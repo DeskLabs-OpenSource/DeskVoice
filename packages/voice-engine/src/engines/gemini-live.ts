@@ -25,6 +25,14 @@
  *     API; o exemplo do guia de WebSocket mostra `responseModalities` direto em `setup`;
  *   - `inputAudioTranscription.languageCodes` (está na referência; os guias só mostram `{}`);
  *   - se `usageMetadata` é por turno ou acumulado na sessão. Aqui é tratado como incremento.
+ *
+ * Sinal de fala e fim de turno forçado (`callerActivity`, `closeCallerTurn`), consultado em 2026-11-14:
+ *   - https://aistudio.google.com/api-reference/live  (`serverContent.interimInputTranscription`,
+ *     `serverContent.inputTranscription`, `realtimeInput.audioStreamEnd`, que só vale com a detecção
+ *     automática de fala ligada, como aqui, e reabre quando chega áudio de novo)
+ *   Não confirmado contra o servidor real: se o Gemini manda `interimInputTranscription` sem que se
+ *   peça, e com que frequência; se `audioStreamEnd` o faz responder ao que ouviu, ou só esvazia o que
+ *   estava guardado. `voiceActivity` não entra: a referência não diz se ele é início de fala.
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
@@ -124,6 +132,7 @@ const serverMessage = z.object({
       turnComplete: z.boolean().optional(),
       interrupted: z.boolean().optional(),
       inputTranscription: transcription.optional(),
+      interimInputTranscription: transcription.optional(),
       outputTranscription: transcription.optional(),
     })
     .optional(),
@@ -225,6 +234,11 @@ const engine: VoiceEngine = {
       if (serverContent) {
         // A transcrição chega em fragmentos; o contrato entrega a fala inteira de cada turno.
         if (serverContent.inputTranscription?.text) userText += serverContent.inputTranscription.text;
+        // A interina não entra no texto da fala (a definitiva chega em `inputTranscription`): só avisa
+        // que quem ligou está falando.
+        if (serverContent.interimInputTranscription?.text?.trim() || serverContent.inputTranscription?.text?.trim()) {
+          emitter.emit("callerActivity", { words: true });
+        }
         if (serverContent.modelTurn || serverContent.outputTranscription) flush("user");
         if (serverContent.outputTranscription?.text) agentText += serverContent.outputTranscription.text;
         for (const part of serverContent.modelTurn?.parts ?? []) {
@@ -315,6 +329,10 @@ const engine: VoiceEngine = {
       },
       say(text) {
         socket.send({ realtimeInput: { text: literalSpeech(text, config.language) } });
+      },
+      closeCallerTurn() {
+        // O áudio seguinte de quem ligou reabre o fluxo, sem mensagem a mais.
+        socket.send({ realtimeInput: { audioStreamEnd: true } });
       },
       close: () => socket.close(),
     };

@@ -128,6 +128,29 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     await expect(interrupted).resolves.toEqual([]);
   });
 
+  it("sinal de fala de quem ligou: início de fala vira { words: false } e transcrição parcial com texto vira { words: true }", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    const signals: Array<{ words: boolean }> = [];
+    session.on("callerActivity", (signal) => signals.push(signal));
+    const interrupted = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started", audio_start_ms: 100, item_id: "i1" });
+    await interrupted;
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: "i1", content_index: 0, delta: "   " });
+    const words = nextEvent(session, "callerActivity");
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: "i1", content_index: 0, delta: "quero marcar" });
+    await words;
+    // O pedaço só de espaço não conta como palavra.
+    expect(signals).toEqual([{ words: false }, { words: true }]);
+  });
+
+  it("closeCallerTurn fecha o áudio de quem ligou num item e pede a resposta", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    session.closeCallerTurn();
+    const commit = await fake.waitFor((message) => message.type === "input_audio_buffer.commit" || message.type === "response.create");
+    expect(commit).toEqual({ type: "input_audio_buffer.commit" });
+    expect(await fake.waitFor(ofType("response.create"))).toEqual({ type: "response.create", response: {} });
+  });
+
   it("evento error do provedor vira error sem fechar; mensagem fora do formato é ignorada", async () => {
     const { session } = await openSession();
     const error = nextEvent(session, "error");

@@ -66,7 +66,9 @@ function resolveScript(config: VoiceSessionConfig): SimulatedScript {
 type Schedule = (task: () => void) => void;
 type Waiting = { kind: "audio"; remainingMs: number; text?: string } | { kind: "tool"; id: string };
 
-class SimulatedSession implements VoiceSession {
+export class SimulatedSession implements VoiceSession {
+  /** Quantas vezes alguém pediu o fim do turno de quem ligou (`closeCallerTurn`), para o teste conferir. */
+  callerTurnsClosed = 0;
   private readonly emitter = new SessionEmitter();
   private index = 0;
   private waiting: Waiting | undefined;
@@ -92,6 +94,8 @@ class SimulatedSession implements VoiceSession {
     const ms = (pcm16_8k.length / 2 / SAMPLE_RATE) * 1000;
     this.audioMs += ms;
     if (this.waiting?.kind !== "audio") return;
+    // O roteiro está fazendo quem ligou falar: é o sinal que os motores reais dão com a transcrição.
+    this.emitter.emit("callerActivity", { words: true });
     this.waiting.remainingMs -= ms;
     if (this.waiting.remainingMs > 0) return;
     const { text } = this.waiting;
@@ -113,6 +117,10 @@ class SimulatedSession implements VoiceSession {
     this.schedule(() => {
       if (!this.finished) this.speak(text);
     });
+  }
+
+  closeCallerTurn(): void {
+    if (!this.finished) this.callerTurnsClosed++;
   }
 
   close(): Promise<void> {

@@ -22,6 +22,14 @@
  *   - `gpt-4o-mini-transcribe` como modelo de transcrição da fala de quem ligou (está na lista aceita);
  *   - que a leitura do modelo responda 404 a uma chave sem acesso a ele (a página de erros não lista 404);
  *   - se a leitura do modelo chega a conferir crédito: a resposta "aceita" não promete crédito.
+ *
+ * Sinal de fala e fim de turno forçado (`callerActivity`, `closeCallerTurn`), consultado em 2026-11-14:
+ *   - https://developers.openai.com/api/docs/api-reference/realtime  (`input_audio_buffer.speech_started`,
+ *     `conversation.item.input_audio_transcription.delta`, `input_audio_buffer.commit`, `response.create`)
+ *   - https://developers.openai.com/api/docs/guides/realtime-vad  (`server_vad`)
+ *   Não confirmado contra o servidor real: se a OpenAI emite `input_audio_transcription.delta` antes
+ *   do fim do turno (a leitura indica que não; por isso a guarda tem o prazo sem palavras), e se o
+ *   `input_audio_buffer.commit` com a detecção de fala do servidor em curso fecha o turno sem erro.
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
@@ -108,6 +116,7 @@ const serverEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("response.output_audio.delta"), delta: z.string() }),
   z.object({ type: z.literal("response.output_audio_transcript.done"), transcript: z.string() }),
   z.object({ type: z.literal("conversation.item.input_audio_transcription.completed"), transcript: z.string() }),
+  z.object({ type: z.literal("conversation.item.input_audio_transcription.delta"), delta: z.string() }),
   z.object({
     type: z.literal("response.function_call_arguments.done"),
     call_id: z.string(),
@@ -291,6 +300,9 @@ const engine: VoiceEngine = {
         case "conversation.item.input_audio_transcription.completed":
           if (event.transcript.trim()) emitter.emit("transcript", { speaker: "user", text: event.transcript.trim() });
           break;
+        case "conversation.item.input_audio_transcription.delta":
+          if (event.delta.trim()) emitter.emit("callerActivity", { words: true });
+          break;
         case "response.function_call_arguments.done":
           emitter.emit("toolCall", { id: event.call_id, name: event.name, args: parseArguments(event.arguments) });
           break;
@@ -300,6 +312,7 @@ const engine: VoiceEngine = {
           // ponytail: não envia `conversation.item.truncate` (exige saber quantos ms a ponte já tocou);
           // o modelo fica achando que disse a fala inteira. Acrescentar se isso atrapalhar a conversa.
           emitter.emit("interrupted");
+          emitter.emit("callerActivity", { words: false });
           break;
         case "response.done": {
           responseActive = false;
@@ -366,6 +379,11 @@ const engine: VoiceEngine = {
         requestResponse({
           instructions: `Say exactly the following to the caller, in ${config.language}, without adding anything: "${text}"`,
         });
+      },
+      closeCallerTurn() {
+        // Fecha o que quem ligou disse num item e pede a resposta: o servidor não viu o fim da fala.
+        socket.send({ type: "input_audio_buffer.commit" });
+        requestResponse({});
       },
       close: () => socket.close(),
     };
