@@ -164,8 +164,9 @@ export async function startFakeWacalls() {
         if (method === "POST" && action === "accept") {
           const busy = [...calls.values()].some((other) => other !== found && other.owner === clientId && other.status !== "ended");
           if (busy) return json(response, 409, { error: "operator already on a call" });
-          if (state.refuseAccept) return json(response, 500, { error: "accept failed" });
+          // O dono fica gravado antes de o atendimento falhar (`handlers_call.go:118-127`).
           found.owner = clientId;
+          if (state.refuseAccept) return json(response, 500, { error: "accept failed" });
           return json(response, 200, { call: { callId: found.id } });
         }
         return json(response, 405, { error: "method not allowed" });

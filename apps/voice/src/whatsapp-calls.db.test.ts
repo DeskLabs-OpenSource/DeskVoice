@@ -83,6 +83,14 @@ const pump = <T>(probe: () => T | Promise<T>, what: string) =>
     time.advance(20);
     return probe();
   }, what);
+/** Derruba o SSE e espera a volta, que traz o `call-list`. */
+async function reconnect(): Promise<void> {
+  wacalls.dropStreams();
+  await waitFor(() => {
+    time.advance(1000);
+    return wacalls.streams() >= 1;
+  }, "the events stream back");
+}
 const answeredCall = async (organizationId: string) => (await waitFor(async () => (await callsOf(app, organizationId)).find((call) => call.status === "in_progress"), "the call in progress")).id;
 
 describe("ligação pelo WhatsApp: entrada e atendimento", { timeout: 60_000 }, () => {
@@ -200,6 +208,18 @@ describe("ligação pelo WhatsApp: entrada e atendimento", { timeout: 60_000 }, 
     expect(await kindsOf(app, failed?.id ?? "")).toEqual(["call_ended"]);
     expect((await notificationsOf(app, organizationId))[0]?.body).toMatch(/não pôde ser atendida.*continuou tocando no celular/);
     expect(callPaths(call)).toEqual(["POST webrtc", "POST accept"]);
+
+    // O WaCalls gravou o nosso dono antes de falhar; o retrato seguinte não a desliga. A sobra de
+    // outro processo, no mesmo retrato, mostra que ele foi lido.
+    expect(call.owner).toMatch(/^deskvoice-call-/);
+    const session = wacalls.byName(wacallsSessionName(organizationId));
+    if (!session) throw new Error("no WaCalls session");
+    const leftover = wacalls.answeredBy(session, "deskvoice-call-00000000-0000-0000-0000-000000000000");
+    await reconnect();
+    await waitFor(() => leftover.status === "ended", "the leftover call ended");
+    expect(callPaths(call)).toEqual(["POST webrtc", "POST accept"]);
+    expect(call.status).toBe("ringing");
+    wacalls.hangUp(call);
   });
 });
 
@@ -292,11 +312,7 @@ describe("ligação pelo WhatsApp: a que sobrou de um processo de voz anterior",
     const leftover = wacalls.answeredBy(session, "deskvoice-call-00000000-0000-0000-0000-000000000000");
     const human = wacalls.answeredBy(session, "recepcao-no-navegador");
 
-    wacalls.dropStreams();
-    await waitFor(() => {
-      time.advance(1000);
-      return wacalls.streams() >= 1;
-    }, "the events stream back");
+    await reconnect();
     await waitFor(() => leftover.status === "ended", "the leftover call ended");
 
     expect(callPaths(leftover)).toEqual([`DELETE ${leftover.id}`]);

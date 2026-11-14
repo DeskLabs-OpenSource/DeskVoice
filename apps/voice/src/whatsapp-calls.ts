@@ -311,9 +311,12 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
       if (event.type === "call-list") {
         // Atendida por este processo antes de ele cair (o fim sem SIGTERM não desliga nada): o WaCalls
         // segura a ligação até a janela de volta vencer, e quem ligou ouve silêncio. A linha já foi
-        // fechada como `process_restarted` na partida; aqui só se desliga no WhatsApp.
+        // fechada como `process_restarted` na partida; aqui só se desliga no WhatsApp. A que ainda toca
+        // fica: o WaCalls grava o dono antes de atender (`handlers_call.go:118-127`), então o
+        // atendimento que falhou deixa `ringing` com o nosso dono, e ela segue tocando no celular.
         for (const call of event.calls) {
-          if (!call.owner?.startsWith(CLIENT_PREFIX) || call.status === "ended" || live.has(call.callId)) continue;
+          const leftover = call.owner?.startsWith(CLIENT_PREFIX) && call.status !== "ringing" && call.status !== "ended";
+          if (!leftover || live.has(call.callId)) continue;
           log("info", "ending a WhatsApp call left by a previous voice process", { wacallsCall: call.callId });
           wacallsEndCall(options, call.sessionId, call.callId).catch((error: unknown) => {
             log("error", "could not end a WhatsApp call left by a previous voice process", { wacallsCall: call.callId, error: messageOf(error) });
