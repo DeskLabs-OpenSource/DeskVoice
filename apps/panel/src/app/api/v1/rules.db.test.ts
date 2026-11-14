@@ -634,8 +634,11 @@ describe("costs", () => {
     const agent = await newAgent("Custos");
     const callId = await insert(panel.app, org, "insert into calls (organization_id, agent_id, direction, channel, status, started_at, engine) values ($1, $2, 'inbound', 'simulated', 'completed', $3, 'simulated') returning id", [org, agent, NOW]);
     for (const [cents, at] of [[12, NOW], [30, new Date(NOW.getTime() - 86_400_000)], [99, new Date(NOW.getTime() - 90 * 86_400_000)]] as const) {
-      await insert(panel.app, org, "insert into usage_ledger (organization_id, call_id, engine, seconds, cost_cents, at) values ($1, $2, 'simulated', 60, $3, $4) returning id", [org, callId, cents, at]);
+      await insert(panel.app, org, "insert into usage_ledger (organization_id, call_id, engine, seconds, cost_cents, cost_microcents, at) values ($1, $2, 'simulated', 60, $3, ($3::int)::bigint * 1000000, $4) returning id", [org, callId, cents, at]);
     }
+    // A classificação de uma ligação custa menos de um centavo: 0,034 centavo entra no extrato em
+    // micro-centavos e não vira um centavo inteiro no total do período.
+    await insert(panel.app, org, "insert into usage_ledger (organization_id, call_id, engine, seconds, cost_cents, cost_microcents, at) values ($1, $2, 'simulated', 0, 0, 34000, $3) returning id", [org, callId, NOW]);
     const result = await call(costs, { cookie: owner });
     expect(result.data).toMatchObject({
       from: "2026-01-31",

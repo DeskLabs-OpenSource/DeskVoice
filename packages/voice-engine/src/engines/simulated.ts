@@ -197,7 +197,7 @@ export function createSimulatedEngine(options: { schedule?: Schedule } = {}): Vo
       // desfecho honesto de uma instalação sem provedor é `unknown`, e é o que a tela mostra. Sem
       // provedor, sem custo. Pelo mesmo motivo ele não declara `analyzes`: inventar uma análise
       // seria inventar sobre o cliente, e com `analyze` a resposta continua sem análise.
-      return { ok: true, guess: UNKNOWN_OUTCOME, model: "simulated", usage: {}, costCents: 0 };
+      return { ok: true, guess: UNKNOWN_OUTCOME, model: "simulated", usage: {}, costCents: 0, costMicrocents: 0 };
     },
     async checkKey() {
       return { result: "not_needed" };

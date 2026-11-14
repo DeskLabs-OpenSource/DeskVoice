@@ -61,15 +61,28 @@ const desfechoDe = (callId: string) =>
 /**
  * O consumo que a OpenAI declararia. Grande de propósito, para a conta não sumir no arredondamento:
  * 800 mil de entrada a US$ 0,05, 200 mil em cache a US$ 0,005 e 100 mil de saída a US$ 0,40 por
- * milhão dão 8,1 centavos, que o preço arredonda para 9.
+ * milhão dão 8,1 centavos. O extrato guarda os 8,1 inteiros (em micro-centavos) e as vistas em
+ * centavo dizem 8; é o mesmo consumo que a fatura cobraria.
  */
 const USO = { prompt_tokens: 1_000_000, completion_tokens: 100_000, prompt_tokens_details: { cached_tokens: 200_000 } };
-const CUSTO = 9;
+/** Os 8,1 centavos, em centavo inteiro: o que a coluna da linha e o evento dizem. */
+const CUSTO = 8;
+/** O mesmo valor na unidade do extrato, sem arredondar: 8,1 centavos são 8 100 000 µ¢. */
+const CUSTO_MICRO = 8_100_000;
+const MICRO = 1_000_000;
+
+/**
+ * O consumo de uma leitura de verdade, e não de um milhão de tokens: a transcrição cortada e a
+ * resposta curta. Pelo preço do `gpt-5-nano`, dá 0,034 centavo — o valor de tabela que, arredondado
+ * para centavo inteiro, virava 1 centavo por classificação (trinta vezes o real).
+ */
+const USO_CURTO = { prompt_tokens: 6_000, completion_tokens: 100 };
+const CUSTO_CURTO = 34_000;
 
 /** O corpo que a OpenAI devolveria, com `content` já em JSON — é o que o motor lê. */
-const openai = (palpite: unknown, status = 200): typeof fetch =>
+const openai = (palpite: unknown, status = 200, uso: object = USO): typeof fetch =>
   vi.fn(async () =>
-    new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: USO }), { status }),
+    new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: uso }), { status }),
   ) as unknown as typeof fetch;
 
 /** O provedor responde um erro com este status e este corpo. */
@@ -79,11 +92,18 @@ const erro = (status: number, corpo: unknown = { error: { message: "não importa
 const custoDe = (callId: string) =>
   withSystem(app, async (q) => ({
     call: (await q.one<{ cost_cents: number }>("select cost_cents from calls where id = $1", [callId]))?.cost_cents,
-    extrato: await q.many<{ engine: string; input_tokens: number; output_tokens: number; cost_cents: number }>(
-      "select engine, input_tokens, output_tokens, cost_cents from usage_ledger where call_id = $1",
-      [callId],
-    ),
+    // `cost_microcents` é bigint: o driver devolve texto, e o teste compara número.
+    extrato: (
+      await q.many<{ engine: string; input_tokens: number; output_tokens: number; cost_cents: number; cost_microcents: string }>(
+        "select engine, input_tokens, output_tokens, cost_cents, cost_microcents from usage_ledger where call_id = $1 order by at",
+        [callId],
+      )
+    ).map((linha) => ({ ...linha, cost_microcents: Number(linha.cost_microcents) })),
   }));
+
+/** O que o extrato somou, em micro-centavos: é a unidade em que a fração de centavo existe. */
+const microsDe = async (callId: string): Promise<number> =>
+  withSystem(app, async (q) => Number((await q.one<{ micros: string }>("select coalesce(sum(cost_microcents), 0) as micros from usage_ledger where call_id = $1", [callId]))?.micros));
 
 const falhasDe = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "outcome_not_classified").map((event) => event.payload);
 
@@ -108,12 +128,65 @@ describe("classify_call_outcome", () => {
   it("soma o que o provedor cobrou ao custo da chamada e ao extrato, pelo preço do modelo de texto", async () => {
     const { org, callId } = await comAgente("desfecho custo");
     await comChave(org);
+    // A voz da chamada: 40 centavos, no extrato como na coluna.
+    await withSystem(app, (q) =>
+      q.exec("insert into usage_ledger (organization_id, call_id, engine, seconds, cost_cents, cost_microcents, at) values ($1, $2, $3, 60, 40, 40000000, $4)", [org, callId, MOTOR, new Date(t0.getTime() - 60_000)]),
+    );
     await withSystem(app, (q) => q.exec("update calls set cost_cents = 40 where id = $1", [callId]));
     await fala(org, callId, "Me liga amanhã, por favor.");
 
     await roda(org, callId, openai({ outcome: "callback_requested", confidence: 0.8, evidence: "Me liga amanhã, por favor." }));
 
-    expect(await custoDe(callId)).toEqual({ call: 40 + CUSTO, extrato: [{ engine: MOTOR, input_tokens: 1_000_000, output_tokens: 100_000, cost_cents: CUSTO }] });
+    expect(await custoDe(callId)).toEqual({
+      call: 40 + CUSTO,
+      extrato: [
+        { engine: MOTOR, input_tokens: 0, output_tokens: 0, cost_cents: 40, cost_microcents: 40 * MICRO },
+        { engine: MOTOR, input_tokens: 1_000_000, output_tokens: 100_000, cost_cents: CUSTO, cost_microcents: CUSTO_MICRO },
+      ],
+    });
+  });
+
+  it("uma classificação custa o valor de tabela, 0,034 centavo, e não um centavo inteiro na chamada", async () => {
+    const { org, callId } = await comAgente("desfecho custo de tabela");
+    await comChave(org);
+    // A voz da mesma chamada já gastou 40 centavos, no extrato como na coluna.
+    await withSystem(app, (q) =>
+      q.exec("insert into usage_ledger (organization_id, call_id, engine, seconds, cost_cents, cost_microcents, at) values ($1, $2, $3, 60, 40, 40000000, $4)", [org, callId, MOTOR, new Date(t0.getTime() - 60_000)]),
+    );
+    await withSystem(app, (q) => q.exec("update calls set cost_cents = 40 where id = $1", [callId]));
+    await fala(org, callId, "Me liga amanhã, por favor.");
+
+    await roda(org, callId, openai({ outcome: "callback_requested", confidence: 0.8, evidence: "Me liga amanhã, por favor." }, 200, USO_CURTO));
+
+    // Antes deste conserto: 40 centavos da voz + 1 centavo da classificação = 41, e o extrato dizia
+    // 9 centavos para uma leitura de 0,034. Agora a fração inteira fica no extrato e o centavo
+    // arredonda uma vez só, no total da chamada: 40,034 centavos.
+    expect(await custoDe(callId)).toEqual({
+      call: 40,
+      extrato: [
+        { engine: MOTOR, input_tokens: 0, output_tokens: 0, cost_cents: 40, cost_microcents: 40 * MICRO },
+        { engine: MOTOR, input_tokens: 6_000, output_tokens: 100, cost_cents: 0, cost_microcents: CUSTO_CURTO },
+      ],
+    });
+    expect(await microsDe(callId)).toBe(40 * MICRO + CUSTO_CURTO);
+  });
+
+  it("duas classificações na mesma chamada: a fração de cada uma soma no extrato antes de arredondar", async () => {
+    const { org, callId } = await comAgente("desfecho custo de duas leituras");
+    await comChave(org);
+    await conversa(org, callId);
+    // Primeira leitura: só o desfecho ligado.
+    await roda(org, callId, openai({ outcome: "booked", confidence: 0.9, evidence: "Então pode marcar para terça." }, 200, USO_CURTO));
+    // A análise ligada depois do desfecho gravado pede a segunda leitura, e ela é paga.
+    await liga(org, ANALYSIS_SETTING);
+    await roda(org, callId, openai(completa(), 200, USO_CURTO));
+
+    // 0,034 + 0,034 = 0,068 centavo: antes eram dois centavos inteiros; agora nenhum, com a fração
+    // toda guardada no extrato — é ela que o teto de gasto e a tela de custos leem.
+    const custo = await custoDe(callId);
+    expect(custo.call).toBe(0);
+    expect(custo.extrato.map((linha) => linha.cost_microcents)).toEqual([CUSTO_CURTO, CUSTO_CURTO]);
+    expect(await microsDe(callId)).toBe(2 * CUSTO_CURTO);
   });
 
   it("no teto de custo do agente não chama o provedor e diz por quê", async () => {
@@ -348,7 +421,10 @@ describe("classify_call_outcome: análise da ligação", () => {
     expect(linha?.analysis).not.toHaveProperty("score");
     expect(await eventosDe(callId, "call_analyzed")).toEqual([{ score: NOTA, rubricVersion: 1, model: "gpt-5-nano", costCents: CUSTO, droppedObjections: 0 }]);
     expect(await eventosDe(callId, "analysis_not_done")).toEqual([]);
-    expect(await custoDe(callId)).toEqual({ call: CUSTO, extrato: [{ engine: MOTOR, input_tokens: 1_000_000, output_tokens: 100_000, cost_cents: CUSTO }] });
+    expect(await custoDe(callId)).toEqual({
+      call: CUSTO,
+      extrato: [{ engine: MOTOR, input_tokens: 1_000_000, output_tokens: 100_000, cost_cents: CUSTO, cost_microcents: CUSTO_MICRO }],
+    });
   });
 
   it("reprocessar não paga de novo, com uma ou com as duas chaves ligadas", async () => {
@@ -553,6 +629,7 @@ describe("classify_call_outcome: análise da ligação", () => {
       model: "modelo-falso",
       usage: { inputTokens: 10, outputTokens: 5 },
       costCents: 3,
+      costMicrocents: 3_000_000,
     });
 
     await roda(org, callId, openai(completa()));

@@ -117,7 +117,11 @@ Os mesmos preços de IA estão no código, com a data e a fonte, em
 
 - **Cada chamada tem custo.** O motor informa o uso, o sistema converte em valor com a tabela de
   preço daquele motor, e o resultado aparece na linha do tempo da chamada.
-- **O painel soma por período.** A tela de custos mostra o total entre duas datas.
+- **O valor abaixo de um centavo existe.** A classificação do desfecho custa cerca de 0,03 centavo,
+  e o extrato guarda essa fração (em micro-centavos, 1 centavo = 1 000 000); o centavo mostrado é a
+  soma do extrato arredondada uma vez só.
+- **O painel soma por período.** A tela de custos mostra o total entre duas datas, arredondado no
+  total e não linha a linha.
 - **O custo mostrado é uma estimativa** calculada a partir do uso informado. A fatura do
   provedor é a verdade. Se a diferença entre as duas for grande, isso é um defeito: abra uma
   issue, com os dois números.

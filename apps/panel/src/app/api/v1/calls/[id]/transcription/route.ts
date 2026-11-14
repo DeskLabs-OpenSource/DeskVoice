@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { TRANSCRIPT_RETENTION_SETTING, decryptSecret, enqueueTask, lockCall, recordEvent, recordingPath, transcriptRetentionOf, type OrgQuery } from "@deskvoice/core";
 // Pelo caminho do arquivo: o índice do pacote carrega a descoberta por pasta, que não existe no Next.
+import { MICROCENTS_PER_CENT } from "@deskvoice/voice-engine/pricing";
 import { splitRecording } from "@deskvoice/voice-engine/transcription";
 import { TRANSCRIPTION_SETTING, transcriptionEnabledOf, type RecordingTranscriber, type TranscribeResult } from "@deskvoice/voice-engine/types";
 import { ApiError, handle, notFound } from "../../../../../../server/context";
@@ -88,13 +89,16 @@ export const POST = handle(
         await q.exec("update calls set cost_cents = cost_cents + $2 where id = $1", [callId, cents]);
         // O que o provedor cobrou fica no extrato, com ou sem texto: foi gasto.
         if (input > 0 || output > 0 || cents > 0) {
-          await q.exec("insert into usage_ledger (organization_id, call_id, engine, input_tokens, output_tokens, cost_cents, at) values ($1, $2, $3, $4, $5, $6, $7)", [
+          await q.exec("insert into usage_ledger (organization_id, call_id, engine, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8)", [
             q.organizationId,
             callId,
             pending.engineId,
             input,
             output,
             cents,
+            // O preço da transcrição já vem em centavo inteiro; o micro-centavo dele é o mesmo valor,
+            // para o extrato somar na unidade exata do resto e a classificação não perder a fração.
+            Math.round(cents * MICROCENTS_PER_CENT),
             now,
           ]);
         }

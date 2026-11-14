@@ -1,6 +1,7 @@
 import { RUBRIC_VERSION, callAnalysisSchema, decryptSecret, recordEvent, scoreOf, verifyAgainstTranscript, withOrg, type OrgQuery, type TranscriptTurn } from "@deskvoice/core";
 import {
   ANALYSIS_SETTING,
+  MICROCENTS_PER_CENT,
   OUTCOME_SETTING,
   analysisEnabledOf,
   loadEngines,
@@ -52,9 +53,13 @@ const notAnalyzed = (q: OrgQuery, callId: string, reason: AnalysisNotDoneReason,
  * existir, classifica. A análise que não dá para pedir vira `analysis_not_done` com o motivo.
  *
  * O custo segue o caminho do custo da voz: uma linha no extrato (`usage_ledger`) e a soma em
- * `calls.cost_cents`, uma vez por chamada ao provedor. Ligação que já atingiu o teto de custo do
- * agente não é lida. Falha do provedor e teto atingido viram `outcome_not_classified` (desfecho
- * pedido) e `analysis_not_done` (análise pedida) na linha do tempo, cada um com o motivo.
+ * `calls.cost_cents`, uma vez por chamada ao provedor. A linha guarda o micro-centavo
+ * (`cost_microcents`), porque ler uma ligação custa cerca de 0,03 centavo e o centavo inteiro por
+ * leitura seria trinta vezes o valor de tabela; `calls.cost_cents` é o extrato somado e arredondado
+ * uma vez só. Ligação que já atingiu o teto de custo do agente não é lida — o teto continua sendo
+ * comparado com o mesmo `calls.cost_cents`, na mesma unidade de antes. Falha do provedor e teto
+ * atingido viram `outcome_not_classified` (desfecho pedido) e `analysis_not_done` (análise pedida)
+ * na linha do tempo, cada um com o motivo.
  *
  * Roda depois de `summarize_call`, que é quem enfileira. A chamada ao provedor acontece fora da
  * transação (leva até trinta segundos) e não lança: falha não devolve a tarefa à fila para pagar de novo.
@@ -153,22 +158,26 @@ const routine: Routine = {
 
     const now = deps.clock.now();
     await withOrg(deps.db, task.organizationId, async (q) => {
-      const { usage, costCents } = result;
+      const { usage, costMicrocents } = result;
+      // O centavo desta leitura é o arredondamento do micro-centavo, a mesma conta que a linha do
+      // extrato leva: 0,034 centavo fica 0, e 8,1 ficam 8. O exato vive no extrato, não aqui.
+      const costCents = Math.round(costMicrocents / MICROCENTS_PER_CENT);
       const inputTokens = (usage.inputTokens ?? 0) + (usage.textInputTokens ?? 0) + (usage.cachedInputTokens ?? 0);
       const outputTokens = (usage.outputTokens ?? 0) + (usage.textOutputTokens ?? 0);
       // O que o provedor cobrou entra no extrato e no custo da chamada, como o consumo da voz. Uma vez:
-      // o desfecho e a análise vieram na mesma resposta.
-      if (inputTokens > 0 || outputTokens > 0 || costCents > 0) {
-        await q.exec("insert into usage_ledger (organization_id, call_id, engine, input_tokens, output_tokens, cost_cents, at) values ($1, $2, $3, $4, $5, $6, $7)", [
-          q.organizationId,
-          callId,
-          pendente.engineId,
-          inputTokens,
-          outputTokens,
-          costCents,
-          now,
-        ]);
-        await q.exec("update calls set cost_cents = cost_cents + $2 where id = $1", [callId, costCents]);
+      // o desfecho e a análise vieram na mesma resposta. O extrato guarda o micro-centavo, que é a
+      // unidade em que uma leitura de 0,03 centavo existe; o `cost_cents` da linha é essa medida
+      // arredondada, e o da chamada é o extrato somado e arredondado **uma vez só** — cobrar um
+      // centavo por leitura daria trinta vezes o valor de tabela.
+      if (inputTokens > 0 || outputTokens > 0 || costMicrocents > 0) {
+        await q.exec(
+          "insert into usage_ledger (organization_id, call_id, engine, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8)",
+          [q.organizationId, callId, pendente.engineId, inputTokens, outputTokens, Math.round(costCents), costMicrocents, now],
+        );
+        await q.exec(
+          "update calls set cost_cents = round((select coalesce(sum(cost_microcents), 0) from usage_ledger where call_id = $1)::numeric / 1000000) where id = $1",
+          [callId],
+        );
       }
 
       // Sem a chave e sem o corpo do provedor: o motivo no vocabulário fechado e o status bastam.
