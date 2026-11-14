@@ -1,0 +1,31 @@
+{
+  "versao": 1,
+  "idioma": "pt-BR",
+  "nota": "Frases inventadas. Só texto: o áudio é gerado na hora da medida, numa pasta temporária, e nunca entra no repositório. 'termos' é comparado letra por letra (acento e cedilha incluídos); 'numeros' depois da normalização. 'sotaque' gera a frase em todas as vozes; 'ruido' mistura a frase com cada ruído, em cada nível.",
+  "frases": [
+    { "id": "nome-01", "texto": "Aqui é o Rafael Melgaço, tudo bem?", "casos": ["nomes", "sotaque", "ruido"], "termos": ["Rafael", "Melgaço"], "numeros": [] },
+    { "id": "nome-02", "texto": "Falo com a Doutora Iracema Tupinambá?", "casos": ["nomes", "sotaque"], "termos": ["Iracema", "Tupinambá"], "numeros": [] },
+    { "id": "nome-03", "texto": "Meu nome é Joaquim Assunção, quero falar com a Lúcia.", "casos": ["nomes"], "termos": ["Joaquim", "Assunção", "Lúcia"], "numeros": [] },
+    { "id": "nome-04", "texto": "Quem indicou foi o Heitor Bragança, da contabilidade.", "casos": ["nomes", "ruido"], "termos": ["Heitor", "Bragança"], "numeros": [] },
+    { "id": "nome-05", "texto": "Pode chamar a Conceição Araújo, por favor?", "casos": ["nomes", "sotaque"], "termos": ["Conceição", "Araújo"], "numeros": [] },
+    { "id": "nome-06", "texto": "O responsável é o senhor Thiago Gonçalves Magalhães.", "casos": ["nomes"], "termos": ["Thiago", "Gonçalves", "Magalhães"], "numeros": [] },
+    { "id": "empresa-01", "texto": "Sou cliente da DeskVoice faz dois anos.", "casos": ["empresas", "ruido"], "termos": ["DeskVoice"], "numeros": [] },
+    { "id": "empresa-02", "texto": "Comprei pela Magazine Ipiranga e o produto não chegou.", "casos": ["empresas", "sotaque"], "termos": ["Magazine Ipiranga"], "numeros": [] },
+    { "id": "empresa-03", "texto": "Trabalho na Construtora Tapajós, no setor de compras.", "casos": ["empresas"], "termos": ["Tapajós"], "numeros": [] },
+    { "id": "empresa-04", "texto": "O plano que eu tenho é o Vivacor Premium.", "casos": ["empresas"], "termos": ["Vivacor"], "numeros": [] },
+    { "id": "empresa-05", "texto": "A fatura veio da Farmácia São Benedito.", "casos": ["empresas"], "termos": ["São Benedito"], "numeros": [] },
+    { "id": "numero-01", "texto": "Meu CPF termina em quatro sete dois.", "casos": ["numeros", "ruido"], "termos": [], "numeros": ["472"] },
+    { "id": "numero-02", "texto": "O pedido é o dez mil trezentos e quarenta e oito.", "casos": ["numeros", "sotaque"], "termos": [], "numeros": ["10348"] },
+    { "id": "numero-03", "texto": "Posso passar aí às três e quinze?", "casos": ["numeros"], "termos": [], "numeros": ["3:15"] },
+    { "id": "numero-04", "texto": "O protocolo é cinco oito nove um zero dois.", "casos": ["numeros"], "termos": [], "numeros": ["589102"] },
+    { "id": "numero-05", "texto": "A conta deu duzentos e setenta reais.", "casos": ["numeros"], "termos": [], "numeros": ["270"] },
+    { "id": "lugar-01", "texto": "Eu moro em Itaquaquecetuba, perto da estação.", "casos": ["lugares", "sotaque"], "termos": ["Itaquaquecetuba"], "numeros": [] },
+    { "id": "lugar-02", "texto": "A entrega é em Mossoró, no Rio Grande do Norte.", "casos": ["lugares"], "termos": ["Mossoró"], "numeros": [] },
+    { "id": "lugar-03", "texto": "Estou ligando de Paranapiacaba.", "casos": ["lugares"], "termos": ["Paranapiacaba"], "numeros": [] },
+    { "id": "lugar-04", "texto": "A loja fica na rua Voluntários da Pátria, em Botafogo.", "casos": ["lugares"], "termos": ["Voluntários da Pátria", "Botafogo"], "numeros": [] },
+    { "id": "lugar-05", "texto": "Mandaram o boleto para Chapecó em vez de Joinville.", "casos": ["lugares"], "termos": ["Chapecó", "Joinville"], "numeros": [] },
+    { "id": "geral-01", "texto": "Eu queria remarcar a consulta para a semana que vem.", "casos": ["geral", "ruido"], "termos": [], "numeros": [] },
+    { "id": "geral-02", "texto": "Não, obrigado, já resolvi pelo aplicativo.", "casos": ["geral"], "termos": [], "numeros": [] },
+    { "id": "geral-03", "texto": "Desculpa, a ligação cortou, pode repetir?", "casos": ["geral"], "termos": [], "numeros": [] }
+  ]
+}
