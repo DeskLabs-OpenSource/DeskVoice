@@ -88,6 +88,10 @@ case "$args" in
   # Listar por nome devolve as etiquetas dele; `rmi` tira a linha, salvo as referências listadas em
   # $FAKE_DIR/rmi_busy (imagem em uso por um contêiner, que o `rmi` sem força recusa).
   " image ls "*) grep "^$last:" "$FAKE_DIR/images" 2>/dev/null | sed "s|^$last:||"; exit 0 ;;
+  # Por resumo (`nome@sha256:...`), a que não está no disco é recusada como o Docker recusa.
+  " rmi "*@sha256:*) if ! grep -qx "$last" "$FAKE_DIR/images" 2>/dev/null; then echo "Error response from daemon: No such image: $last" >&2; exit 1; fi
+    if grep -qx "$last" "$FAKE_DIR/rmi_busy" 2>/dev/null; then echo "Error response from daemon: conflict: unable to delete $last (must be forced) - image is being used by stopped container cid" >&2; exit 1; fi
+    grep -vx "$last" "$FAKE_DIR/images" > "$FAKE_DIR/images.next"; mv "$FAKE_DIR/images.next" "$FAKE_DIR/images"; exit 0 ;;
   " rmi "*) if grep -qx "$last" "$FAKE_DIR/rmi_busy" 2>/dev/null; then echo "Error response from daemon: conflict: unable to remove repository reference \"$last\" (must force) - container cid is using its referenced image" >&2; exit 1; fi
     grep -vx "$last" "$FAKE_DIR/images" > "$FAKE_DIR/images.next" 2>/dev/null; mv "$FAKE_DIR/images.next" "$FAKE_DIR/images"; exit 0 ;;
   *" logs "*) answer logs; exit 0 ;;
