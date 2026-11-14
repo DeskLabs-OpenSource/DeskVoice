@@ -5,6 +5,17 @@ import { anything, voiceRequest } from "../../../../server/voice";
 const applyAnswer = z.object({ applied: z.boolean(), detail: z.string() });
 
 /**
+ * Endereço extra de entrada e destino de saída só existem na linha reconhecida por IP; no modo
+ * registro o provedor acha a linha pelo usuário e pela senha, e o campo extra não teria efeito.
+ * Recusar na hora de salvar é melhor do que salvar e deixar a linha de fora da configuração.
+ */
+export function requireIpModeForAddresses(authMode: string, matchExtra: number, outboundHost: string | null): void {
+  if (authMode !== "ip" && (matchExtra > 0 || outboundHost !== null)) {
+    throw new ApiError(400, "validation_error", "Extra inbound addresses and an outbound address belong to a line recognized by IP; with registration the provider finds the line by the user and password.");
+  }
+}
+
+/**
  * Pede ao processo de voz que regenere a configuração do Asterisk a partir do banco. Se ele não
  * responder, a linha fica salva mesmo assim e a tela avisa que falta aplicar.
  *

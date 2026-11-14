@@ -82,6 +82,31 @@ describe("troncos", { timeout: 120_000 }, () => {
     expect((await trunkRow(good))?.status).toBe("unverified");
   });
 
+  it("escreve todos os blocos de uma linha e resolve o nome do provedor em endereço antes do identify", async () => {
+    const organizationId = await createOrganization(app, "trunks-blocks");
+    const options = { username: null, password: null, authMode: "ip" as const };
+    const blocks = ["54.171.127.192/30", "35.156.191.128/30"];
+    const twilio = await createTrunk(app, organizationId, { ...options, host: blocks[0] ?? "", matchExtra: [blocks[1] ?? ""], outboundHost: "conta.pstn.twilio.com" });
+    // Provedor que publica nome em vez de bloco: o nome resolve na hora de escrever o arquivo.
+    const named = await createTrunk(app, organizationId, { ...options, host: "blocos.operadora.example" });
+
+    const file = path.join(scratch, "blocks", "pjsip_trunks.conf");
+    const ari = fakeAri();
+    ari.loadsFile = file;
+    const deps: TrunksDeps = { ...trunksDeps(ari, file), resolveName: async (name) => (name === "blocos.operadora.example" ? ["54.65.63.192/30"] : []) };
+    const result = await applyTrunks(deps);
+    // O banco é o mesmo do arquivo inteiro: as linhas de outros casos não importam aqui, só as duas.
+    expect(result.applied).toBe(true);
+    expect(result.skipped.filter((entry) => entry.id === twilio || entry.id === named)).toEqual([]);
+
+    const conf = await readFile(file, "utf8");
+    expect(conf).toContain("match=54.171.127.192/30\nmatch=35.156.191.128/30\n");
+    expect(conf).toContain("contact=sip:conta.pstn.twilio.com\n");
+    expect(conf).toContain("match=54.65.63.192/30\n");
+    expect(conf).toContain(`[trunk-${twilio}-identify]`);
+    expect(conf).toContain(`[trunk-${named}-identify]`);
+  });
+
   it("endereço repetido: entre organizações ninguém em modo ip é emitido; dentro da mesma organização, só o de menor id; e nada de estado ao lado do arquivo", async () => {
     const first = await createOrganization(app, "trunks-shared-a");
     const second = await createOrganization(app, "trunks-shared-b");
