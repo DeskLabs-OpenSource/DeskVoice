@@ -1,0 +1,6 @@
+export async function a(q: Q, closeUnanswered: Close, ended: boolean): Promise<void> {
+  await q.exec("update calls set status = 'failed', end_reason = 'line_dropped' where id = $1", ["x"]);
+  finish({ status: "failed", endReason: "ring_timeout" });
+  finish({ status: "completed", endReason: "caller_hangup" });
+  await closeUnanswered("org", "call", ended ? "caller_hangup" : "wa_failed", `Aviso para o painel.`);
+}
