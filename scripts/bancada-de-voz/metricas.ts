@@ -59,6 +59,14 @@ export interface ResultadoBruto {
   /** Do fim da fala ao texto final; nulo se o final não chegou no prazo. */
   latenciaFinalMs: number | null;
   custoUsd: number;
+  /**
+   * Como o áudio saiu. `atrasoMs` é o tempo real do envio menos a duração do áudio entregue;
+   * `atrasoMaxPedacoMs`, o pior pedaço contra o seu horário; `atrasoMaxEsperaMs`, o pior atraso do
+   * relógio da bancada na espera do final. Acima de `LIMITE_FORA_DO_RITMO_MS`, `foraDoRitmo`.
+   */
+  envio: { bytes: number; duracaoMs: number; atrasoMs: number; atrasoMaxPedacoMs: number; atrasoMaxEsperaMs: number };
+  /** O item não foi medido em tempo real: o WER conta, as latências e o "sem final" não. */
+  foraDoRitmo: boolean;
   /** Só no arquivo bruto da pasta temporária: o texto transcrito e o erro do serviço. Nunca na tabela. */
   transcricao?: string;
   erro?: string | null;
@@ -78,15 +86,18 @@ export interface LinhaDaTabela {
   finalP50: number | null;
   finalP95: number | null;
   semFinal: number;
+  foraDoRitmo: number;
   custoUsd: number;
 }
 
-function agregar(resultados: readonly ResultadoBruto[], base: Omit<LinhaDaTabela, "frases" | "wer" | "acertoEmNomes" | "frasesComTermo" | "parcialP50" | "parcialP95" | "finalP50" | "finalP95" | "semFinal" | "custoUsd">): LinhaDaTabela {
+function agregar(resultados: readonly ResultadoBruto[], base: Omit<LinhaDaTabela, "frases" | "wer" | "acertoEmNomes" | "frasesComTermo" | "parcialP50" | "parcialP95" | "finalP50" | "finalP95" | "semFinal" | "foraDoRitmo" | "custoUsd">): LinhaDaTabela {
   const palavras = resultados.reduce((s, r) => s + r.medida.palavras, 0);
   const edicoes = resultados.reduce((s, r) => s + r.medida.edicoes, 0);
   const comTermo = resultados.filter((r) => r.medida.termosCertos !== null);
-  const parciais = resultados.flatMap((r) => (r.latenciaParcialMs === null ? [] : [r.latenciaParcialMs]));
-  const finais = resultados.flatMap((r) => (r.latenciaFinalMs === null ? [] : [r.latenciaFinalMs]));
+  // A latência só vale do que foi enviado no ritmo do relógio; o resto é contado à parte.
+  const noRitmo = resultados.filter((r) => !r.foraDoRitmo);
+  const parciais = noRitmo.flatMap((r) => (r.latenciaParcialMs === null ? [] : [r.latenciaParcialMs]));
+  const finais = noRitmo.flatMap((r) => (r.latenciaFinalMs === null ? [] : [r.latenciaFinalMs]));
   return {
     ...base,
     frases: resultados.length,
@@ -97,7 +108,8 @@ function agregar(resultados: readonly ResultadoBruto[], base: Omit<LinhaDaTabela
     parcialP95: percentil(parciais, 95),
     finalP50: percentil(finais, 50),
     finalP95: percentil(finais, 95),
-    semFinal: resultados.length - finais.length,
+    semFinal: noRitmo.length - finais.length,
+    foraDoRitmo: resultados.length - noRitmo.length,
     custoUsd: resultados.reduce((s, r) => s + r.custoUsd, 0),
   };
 }
@@ -135,11 +147,11 @@ const ms = (v: number | null): string => (v === null ? "—" : `${Math.round(v)}
 
 /** A tabela em Markdown, pronta para a seção "Medida". Só números agregados: nenhum texto de voz. */
 export function tabelaEmMarkdown(linhas: readonly LinhaDaTabela[]): string {
-  const cabecalho = "| Serviço | Linha | Vocab. | Caso | Frases | WER | Acerto em nomes (frases) | Parcial p50/p95 (ms) | Final p50/p95 (ms) | Sem final | Custo (US$) |";
-  const separador = "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|";
+  const cabecalho = "| Serviço | Linha | Vocab. | Caso | Frases | WER | Acerto em nomes (frases) | Parcial p50/p95 (ms) | Final p50/p95 (ms) | Sem final | Fora do ritmo | Custo (US$) |";
+  const separador = "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|";
   const corpo = linhas.map(
     (l) =>
-      `| ${l.servico} | ${l.linha} | ${l.vocabulario ? "com" : "sem"} | ${l.caso} | ${l.frases} | ${pct(l.wer)} | ${pct(l.acertoEmNomes)} (${l.frasesComTermo}) | ${ms(l.parcialP50)} / ${ms(l.parcialP95)} | ${ms(l.finalP50)} / ${ms(l.finalP95)} | ${l.semFinal} | ${l.custoUsd.toFixed(4)} |`,
+      `| ${l.servico} | ${l.linha} | ${l.vocabulario ? "com" : "sem"} | ${l.caso} | ${l.frases} | ${pct(l.wer)} | ${pct(l.acertoEmNomes)} (${l.frasesComTermo}) | ${ms(l.parcialP50)} / ${ms(l.parcialP95)} | ${ms(l.finalP50)} / ${ms(l.finalP95)} | ${l.semFinal} | ${l.foraDoRitmo} | ${l.custoUsd.toFixed(4)} |`,
   );
   return [cabecalho, separador, ...corpo].join("\n");
 }

@@ -3,6 +3,8 @@ import { distanciaDePalavras, medirFrase, percentil, tabelar, type ResultadoBrut
 import { normalizar, numeroPresente, termoExato } from "./normalizacao";
 import { carregarConjunto, conferirConjunto } from "./conjunto";
 
+const ENVIO_NO_RITMO = { bytes: 32000, duracaoMs: 1000, atrasoMs: 0, atrasoMaxPedacoMs: 0, atrasoMaxEsperaMs: 0 };
+
 describe("normalizar", () => {
   it("tira maiúscula e pontuação, e guarda acento e cedilha", () => {
     expect(normalizar("Aqui é o Rafael Melgaço!")).toEqual(["aqui", "é", "o", "rafael", "melgaço"]);
@@ -29,6 +31,11 @@ describe("acerto em nomes", () => {
     expect(termoExato("sou cliente da Desk Voice", "DeskVoice")).toBe(false);
   });
 
+  it("maiúscula conta no termo: nome em minúscula é erro", () => {
+    expect(termoExato("aqui é o rafael melgaço", "Melgaço")).toBe(false);
+    expect(termoExato("sou cliente da Deskvoice", "DeskVoice")).toBe(false);
+  });
+
   it("compara número depois da normalização", () => {
     expect(numeroPresente("o pedido é o dez mil trezentos e quarenta e oito", "10.348")).toBe(true);
     expect(numeroPresente("o pedido é o 10.384", "10.348")).toBe(false);
@@ -53,13 +60,23 @@ describe("WER e percentil", () => {
   });
 
   it("a tabela soma edições e palavras do grupo, e conta frase sem final", () => {
-    const base = { servico: "s", linha: "estreita", vocabulario: true, voz: "v", ruido: null, custoUsd: 0 } as const;
+    const base = { servico: "s", linha: "estreita", vocabulario: true, voz: "v", ruido: null, custoUsd: 0, envio: ENVIO_NO_RITMO, foraDoRitmo: false } as const;
     const resultados: ResultadoBruto[] = [
       { ...base, fraseId: "a", casos: ["nomes"], medida: { palavras: 4, edicoes: 1, termosCertos: true }, latenciaParcialMs: 300, latenciaFinalMs: 500 },
       { ...base, fraseId: "b", casos: ["nomes"], medida: { palavras: 6, edicoes: 6, termosCertos: false }, latenciaParcialMs: null, latenciaFinalMs: null },
     ];
     const [todos] = tabelar(resultados);
-    expect(todos).toMatchObject({ caso: "todos", frases: 2, wer: 0.7, acertoEmNomes: 0.5, semFinal: 1, finalP95: 500 });
+    expect(todos).toMatchObject({ caso: "todos", frases: 2, wer: 0.7, acertoEmNomes: 0.5, semFinal: 1, finalP95: 500, foraDoRitmo: 0 });
+  });
+
+  it("o item fora do ritmo sai das latências e do \"sem final\", conta à parte e segue no WER", () => {
+    const base = { servico: "s", linha: "larga", vocabulario: false, voz: "v", ruido: null, custoUsd: 0, envio: ENVIO_NO_RITMO, foraDoRitmo: false } as const;
+    const resultados: ResultadoBruto[] = [
+      { ...base, fraseId: "a", casos: ["numeros"], medida: { palavras: 5, edicoes: 0, termosCertos: true }, latenciaParcialMs: 900, latenciaFinalMs: 1200 },
+      { ...base, fraseId: "b", casos: ["numeros"], medida: { palavras: 5, edicoes: 5, termosCertos: false }, latenciaParcialMs: 26000, latenciaFinalMs: null, envio: { ...ENVIO_NO_RITMO, atrasoMs: 12000 }, foraDoRitmo: true },
+    ];
+    const [todos] = tabelar(resultados);
+    expect(todos).toMatchObject({ frases: 2, wer: 0.5, foraDoRitmo: 1, semFinal: 0, parcialP95: 900, finalP95: 1200 });
   });
 });
 

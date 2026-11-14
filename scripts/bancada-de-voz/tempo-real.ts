@@ -8,6 +8,13 @@
 
 export const PEDACO_MS = 20;
 
+/**
+ * Um item cujo envio (ou cuja espera depois dele) atrasou mais que isto contra o horário não foi
+ * medido em tempo real: a bancada o tira das latências e o conta como "fora do ritmo" na tabela.
+ * 100 ms são cinco pedaços: bem acima do tremor do `setTimeout`, bem abaixo de qualquer latência medida.
+ */
+export const LIMITE_FORA_DO_RITMO_MS = 100;
+
 /** O relógio da bancada. O de verdade lê `performance.now()`; o teste usa um falso. */
 export interface Relogio {
   /** Milissegundos de um relógio monotônico. */
@@ -33,8 +40,9 @@ export function bytesPorPedaco(taxaHz: number): number {
 
 /**
  * Manda `pcm16` (mono, `taxaHz`) em pedaços de 20 ms, cada um no seu horário. O último pedaço,
- * se incompleto, sai do tamanho que tem. Devolve o instante em que o envio começou (o zero do áudio)
- * e o instante do último pedaço.
+ * se incompleto, sai do tamanho que tem. Devolve o instante em que o envio começou (o zero do áudio),
+ * o instante do último pedaço, quantos bytes saíram e o maior atraso de um pedaço contra o seu
+ * horário. Quem chama confere o atraso: o envio não esconde que saiu do ritmo.
  */
 export async function enviarEmTempoReal(
   pcm16: Buffer,
@@ -42,17 +50,23 @@ export async function enviarEmTempoReal(
   enviar: (pedaco: Buffer) => void,
   relogio: Relogio,
   parar: () => boolean = () => false,
-): Promise<{ inicioMs: number; fimMs: number; pedacos: number }> {
+): Promise<{ inicioMs: number; fimMs: number; pedacos: number; bytes: number; atrasoMaxMs: number }> {
   const tamanho = bytesPorPedaco(taxaHz);
   const inicioMs = relogio.agora();
   let pedacos = 0;
   let fimMs = inicioMs;
+  let bytes = 0;
+  let atrasoMaxMs = 0;
   for (let offset = 0; offset < pcm16.length; offset += tamanho) {
     if (parar()) break;
-    await relogio.esperarAte(inicioMs + (pedacos + 1) * PEDACO_MS);
-    enviar(pcm16.subarray(offset, Math.min(offset + tamanho, pcm16.length)));
+    const horario = inicioMs + (pedacos + 1) * PEDACO_MS;
+    await relogio.esperarAte(horario);
+    const pedaco = pcm16.subarray(offset, Math.min(offset + tamanho, pcm16.length));
+    enviar(pedaco);
     pedacos++;
+    bytes += pedaco.length;
     fimMs = relogio.agora();
+    atrasoMaxMs = Math.max(atrasoMaxMs, fimMs - horario);
   }
-  return { inicioMs, fimMs, pedacos };
+  return { inicioMs, fimMs, pedacos, bytes, atrasoMaxMs };
 }

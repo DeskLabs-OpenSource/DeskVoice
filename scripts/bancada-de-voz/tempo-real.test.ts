@@ -22,12 +22,29 @@ describe("enviarEmTempoReal", () => {
     const enviados: { tamanho: number; em: number }[] = [];
     // 1 s de áudio a 8 kHz = 50 pedaços de 320 bytes.
     const pcm = Buffer.alloc(8000 * 2);
-    const { inicioMs, fimMs, pedacos } = await enviarEmTempoReal(pcm, 8000, (p) => enviados.push({ tamanho: p.length, em: relogio.agora() }), relogio);
+    const { inicioMs, fimMs, pedacos, bytes, atrasoMaxMs } = await enviarEmTempoReal(pcm, 8000, (p) => enviados.push({ tamanho: p.length, em: relogio.agora() }), relogio);
 
     expect(pedacos).toBe(50);
     expect(enviados.every((e) => e.tamanho === 320)).toBe(true);
     expect(enviados.map((e) => e.em - inicioMs)).toEqual(Array.from({ length: 50 }, (_, i) => (i + 1) * PEDACO_MS));
     expect(fimMs - inicioMs).toBe(1000);
+    expect(bytes).toBe(16000);
+    expect(atrasoMaxMs).toBe(0);
+  });
+
+  it("diz quando saiu do ritmo: devolve o pior atraso de um pedaço contra o horário", async () => {
+    let agora = 0;
+    const relogio: Relogio = {
+      agora: () => agora,
+      // A máquina trava 12 s antes do terceiro pedaço; os seguintes saem atrasados até alcançar.
+      esperarAte: async (instante) => {
+        agora = Math.max(agora, instante === 60 ? 12060 : instante);
+      },
+    };
+    const { inicioMs, fimMs, bytes, atrasoMaxMs } = await enviarEmTempoReal(Buffer.alloc(320 * 5), 8000, () => {}, relogio);
+    expect(atrasoMaxMs).toBe(12000);
+    expect(bytes).toBe(1600);
+    expect(fimMs - inicioMs - 100).toBe(11960);
   });
 
   it("não manda o arquivo de uma vez: nenhum pedaço sai antes do seu horário", async () => {

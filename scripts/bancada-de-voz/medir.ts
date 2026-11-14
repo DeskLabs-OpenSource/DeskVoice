@@ -21,7 +21,7 @@ import { REGRA_DE_NORMALIZACAO } from "./normalizacao";
 import { Orcamento } from "./orcamento";
 import { NIVEIS_DB, TIPOS_DE_RUIDO, musica, obra, sorteio, type TipoDeRuido } from "./ruido";
 import { ehServicoMedido, type ServicoMedido } from "./servicos/tipos";
-import { enviarEmTempoReal, relogioDoSistema, type Relogio } from "./tempo-real";
+import { LIMITE_FORA_DO_RITMO_MS, enviarEmTempoReal, relogioDoSistema, type Relogio } from "./tempo-real";
 import { TAXA_LARGA, VOZES, VOZ_PADRAO, conversaDeFundo, pastaTemporaria, sintetizar, vozPorId } from "./voz";
 
 const ANTES_S = 0.5;
@@ -117,16 +117,24 @@ async function medirItem(servico: ServicoMedido, linha: Linha, comVocabulario: b
     },
     erro: (e) => (erro = e),
   }, relogio);
-  const { inicioMs } = await enviarEmTempoReal(audio, entrega.taxaHz, (p) => sessao.enviar(p), relogio, () => erro !== null);
+  const envio = await enviarEmTempoReal(audio, entrega.taxaHz, (p) => sessao.enviar(p), relogio, () => erro !== null);
+  const { inicioMs } = envio;
   const inicioDaFala = inicioMs + item.falaInicioMs;
   const fimDaFala = inicioMs + item.falaFimMs;
   const prazo = relogio.agora() + ESPERA_FINAL_MS;
+  let atrasoMaxEsperaMs = 0;
   for (;;) {
     const ultimo = finais[finais.length - 1];
     if (erro || relogio.agora() >= prazo) break;
     if (ultimo && ultimo.em >= fimDaFala && relogio.agora() - ultimo.em >= QUIETO_MS) break;
-    await relogio.esperarAte(relogio.agora() + 50);
+    const alvo = relogio.agora() + 50;
+    await relogio.esperarAte(alvo);
+    atrasoMaxEsperaMs = Math.max(atrasoMaxEsperaMs, relogio.agora() - alvo);
   }
+  // Duração do áudio entregue, na taxa da entrega (PCM16 mono: 2 bytes por amostra).
+  const duracaoMs = (envio.bytes / 2 / entrega.taxaHz) * 1000;
+  const atrasoMs = envio.fimMs - inicioMs - duracaoMs;
+  const foraDoRitmo = Math.max(atrasoMs, envio.atrasoMaxMs, atrasoMaxEsperaMs) > LIMITE_FORA_DO_RITMO_MS;
   const { custoUsd } = await sessao.fechar();
   const transcricao = finais.map((f) => f.texto).join(" ");
   const ultimoFinal = finais[finais.length - 1];
@@ -142,6 +150,8 @@ async function medirItem(servico: ServicoMedido, linha: Linha, comVocabulario: b
     latenciaParcialMs: primeiroParcial === null ? null : primeiroParcial - inicioDaFala,
     latenciaFinalMs: ultimoFinal ? ultimoFinal.em - fimDaFala : null,
     custoUsd: custoUsd ?? (item.duracaoS / 60) * servico.preco.usdPorMinuto,
+    envio: { bytes: envio.bytes, duracaoMs, atrasoMs, atrasoMaxPedacoMs: envio.atrasoMaxMs, atrasoMaxEsperaMs },
+    foraDoRitmo,
     transcricao,
     erro: erro ? String(erro) : null,
   };
@@ -210,6 +220,13 @@ async function main(): Promise<void> {
     await writeFile(join(pasta, "resultados.json"), JSON.stringify(resultados, null, 2));
     print("\n## Transcrição\n");
     print(tabelaEmMarkdown(tabelar(resultados)));
+    const fora = resultados.filter((r) => r.foraDoRitmo);
+    const pior = (f: (r: ResultadoBruto) => number): number => Math.round(Math.max(0, ...resultados.map(f)));
+    print(
+      `\nRitmo do envio (limite ${LIMITE_FORA_DO_RITMO_MS} ms): ${fora.length} de ${resultados.length} itens fora do ritmo, tirados das latências. ` +
+        `Pior atraso: envio inteiro ${pior((r) => r.envio.atrasoMs)} ms, um pedaço ${pior((r) => r.envio.atrasoMaxPedacoMs)} ms, espera do final ${pior((r) => r.envio.atrasoMaxEsperaMs)} ms.`,
+    );
+    for (const r of fora) print(`- ${r.servico} ${r.linha} ${r.vocabulario ? "com" : "sem"} vocabulário, ${r.fraseId}, voz ${r.voz}${r.ruido ? `, ${r.ruido.tipo} ${r.ruido.snrDb} dB` : ""}: envio ${Math.round(r.envio.atrasoMs)} ms, pedaço ${Math.round(r.envio.atrasoMaxPedacoMs)} ms, espera ${Math.round(r.envio.atrasoMaxEsperaMs)} ms (áudio entregue ${Math.round(r.envio.duracaoMs)} ms).`);
     const snr = new Map<string, number[]>();
     for (const i of itens) if (i.ruido) snr.set(`${i.ruido.tipo} ${i.ruido.snrDb} dB`, [...(snr.get(`${i.ruido.tipo} ${i.ruido.snrDb} dB`) ?? []), i.ruido.snrMedidoDb]);
     if (snr.size > 0) {

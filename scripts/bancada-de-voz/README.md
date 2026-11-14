@@ -81,6 +81,12 @@ cada frase, a bancada estima o pior caso pelo preço do serviço e para se ele p
   texto, nos motores de hoje, que não entregam o texto parcial).
 - **Latência até o final:** do fim da fala ao último trecho final da frase. Sem final em 8 s depois
   do último áudio, a frase conta como "sem final", e o WER dela conta tudo como apagado.
+- **Fora do ritmo:** cada item guarda, no resultado bruto, os bytes entregues, a duração do áudio
+  entregue, o atraso do envio inteiro (tempo real do envio menos essa duração), o pior pedaço
+  contra o seu horário e o pior atraso do relógio da bancada na espera do final. Se qualquer um
+  passa de 100 ms (`LIMITE_FORA_DO_RITMO_MS`), o item não foi medido em tempo real: sai das
+  latências e do "sem final", conta na coluna "Fora do ritmo" e segue no WER. A tela lista cada
+  um. VPS dividida com outro trabalho pesado é a causa mais comum.
 - **WER:** soma das edições sobre a soma das palavras do grupo, depois de `normalizacao.ts`.
 - **Acerto em nomes:** fração das frases com termo marcado em que **todos** os termos saíram letra
   por letra. "Melgaco" é erro.
