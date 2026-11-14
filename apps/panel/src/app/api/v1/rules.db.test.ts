@@ -68,6 +68,37 @@ describe("agents", () => {
     const unknownEngine = await call(createAgent, { method: "POST", cookie: owner, body: { name: "X", engine: "made-up" } });
     expect(unknownEngine.message).toMatch(/engine/);
   });
+
+  it("keeps the vocabulary: empty by default, trimmed on save, and refused with the reason when a term breaks the rule", async () => {
+    const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Vocabulário", engine: "simulated" } });
+    expect(created.data).toMatchObject({ vocabulary: [] });
+    const id = (created.data as { id: string }).id;
+
+    const saved = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { vocabulary: [" Melgaço ", "DeskVoice"] } });
+    expect(saved.data).toMatchObject({ vocabulary: ["Melgaço", "DeskVoice"] });
+    expect(await stored("select vocabulary from agents where id = $1", [id])).toEqual({ vocabulary: ["Melgaço", "DeskVoice"] });
+    // Mudar outro campo não mexe nos termos.
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ vocabulary: ["Melgaço", "DeskVoice"] });
+
+    const refusals: [unknown, string][] = [
+      [["Melgaço", "melgaço"], 'vocabulary: term 2 repeats "melgaço"'],
+      [["dois\ntermos"], "vocabulary: term 1 cannot contain line breaks, control characters, '<' or '>'"],
+      [["<script>"], "vocabulary: term 1 cannot contain line breaks, control characters, '<' or '>'"],
+      [["  "], "vocabulary: term 1 is empty"],
+      [["x".repeat(61)], "vocabulary: term 1 has 61 characters; the limit is 60"],
+      [Array.from({ length: 51 }, (_, index) => `t${index}`), "vocabulary: at most 50 terms (got 51)"],
+    ];
+    for (const [vocabulary, message] of refusals) {
+      const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { vocabulary } });
+      expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", message]);
+    }
+    const refusedOnCreate = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Y", engine: "simulated", vocabulary: ["a>b"] } });
+    expect([refusedOnCreate.status, refusedOnCreate.code]).toEqual([400, "validation_error"]);
+    expect(await stored("select vocabulary from agents where id = $1", [id])).toEqual({ vocabulary: ["Melgaço", "DeskVoice"] });
+
+    const emptied = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { vocabulary: [] } });
+    expect([emptied.status, emptied.data]).toMatchObject([200, { vocabulary: [] }]);
+  });
 });
 
 describe("secrets", () => {

@@ -199,6 +199,24 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     expect(manual.closed).toBe(1);
   });
 
+  it("o vocabulário do agente chega ao motor; sem termos, chega a lista vazia", async () => {
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("engine-vocabulary", { engine: "manual", vocabulary: ["Melgaço", "DeskVoice"] }, manual);
+    const session = made.start();
+    await waitFor(() => manual.configs.length === 1, "the engine to connect");
+    expect(manual.configs[0]?.vocabulary).toEqual(["Melgaço", "DeskVoice"]);
+    made.transport.callerHangup();
+    await session.done;
+
+    const plain = manualEngine({ keyless: true });
+    const without = await scene("engine-no-vocabulary", { engine: "manual" }, plain);
+    const second = without.start();
+    await waitFor(() => plain.configs.length === 1, "the engine to connect");
+    expect(plain.configs[0]?.vocabulary).toEqual([]);
+    without.transport.callerHangup();
+    await second.done;
+  });
+
   it("na ligação feita pelo agente a saudação não é falada: quem atende fala primeiro", async () => {
     const manual = manualEngine({ keyless: true });
     const made = await scene("engine-outbound", { engine: "manual", greeting: "Bom dia." }, manual, "outbound");

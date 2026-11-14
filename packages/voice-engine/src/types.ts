@@ -16,6 +16,13 @@ export interface VoiceSessionConfig {
   /** BCP 47, ex.: "pt-BR". */
   language: string;
   tools: ToolSpec[];
+  /**
+   * Nomes e termos que podem aparecer na ligação, já conferidos pela regra de `@deskvoice/core`
+   * (`checkVocabulary`). É dica de reconhecimento, que o provedor pode ignorar, e não garantia de
+   * que o agente vá entender. Vazia ou ausente, o motor envia ao provedor o mesmo de antes. O motor
+   * em pipeline (R5) reaproveita este campo no serviço de transcrição dele.
+   */
+  vocabulary?: readonly string[];
 }
 
 export interface Usage {
