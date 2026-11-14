@@ -68,6 +68,8 @@ export interface CallDetail extends Call {
   analysis: StoredCallAnalysis | null;
   /** Havia análise gravada, mas fora da forma: a tela diz isso em vez de mostrar a seção. */
   analysisUnreadable: boolean;
+  /** O resumo saiu com o prazo de guarda (`calls.summary` virou marcador). */
+  summaryPurged: boolean;
   /** O conteúdo saiu a pedido do titular (`calls.erased_at`). */
   erased: boolean;
 }
@@ -125,6 +127,14 @@ export interface Engine {
   provider: string;
   processingLocation: ProcessingLocation;
   requiresKey: boolean;
+  /** O motor aceita endpoint e modelo próprios na classificação (provedor compatível com OpenAI). */
+  classifyTarget: boolean;
+  /** O endpoint da classificação gravado, ou `null` para o do motor. */
+  baseUrl: string | null;
+  /** O modelo da classificação gravado, ou `null` para o do motor. */
+  classifyModel: string | null;
+  /** O endpoint da classificação tem a chave dele gravada (o valor nunca chega à tela). */
+  classifyKeyConfigured: boolean;
   /** Vozes do provedor; vazia quando o motor não oferece escolha (o simulado). */
   voices: EngineVoice[];
   defaultVoice: string | null;

@@ -1,7 +1,7 @@
 import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
-import { ANALYSIS_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING } from "@deskvoice/voice-engine/types";
+import { ANALYSIS_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, classifyBaseUrlOf, classifyModelOf, engineClassifyTargetSetting, storedClassifyTargetOf } from "@deskvoice/voice-engine/types";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -44,9 +44,51 @@ const secretText = setting<string>({
   view: () => CONFIGURED,
 });
 
+/** O destino da classificação como a tela o vê: da chave, só se existe. */
+export function classifyTargetView(stored: unknown): { baseUrl: string | null; model: string | null; apiKey: { configured: boolean } } {
+  const target = storedClassifyTargetOf(stored);
+  return { baseUrl: classifyBaseUrlOf(target.baseUrl) ?? null, model: classifyModelOf(target.model) ?? null, apiKey: { configured: target.apiKey !== undefined } };
+}
+
 const httpUrl = z.url({ protocol: /^https?$/ });
 const storedConnector = z.object({ type: z.string(), url: z.string(), token: z.string() });
 const storedHooks = z.array(z.object({ name: z.string(), url: z.string(), token: z.string().optional() }));
+
+// O destino da classificação: `https` e host público (o processo de rotinas alcança a rede interna),
+// gravado sem a barra final, porque o caminho do provedor é colado depois. O modelo é o nome que o
+// provedor publica. A mesma regra vale na leitura da rotina: endpoint gravado por fora do painel
+// que não passe aqui não recebe pedido nenhum, e modelo que não passe fica no padrão do motor.
+const classifyBaseUrlSchema = z
+  .string()
+  .max(500)
+  .transform((value) => value.trim())
+  .refine((value) => classifyBaseUrlOf(value) !== undefined, "must be a public https URL with no credentials")
+  .transform((value) => value.replace(/\/+$/, ""));
+const classifyModelSchema = z
+  .string()
+  .max(200)
+  .transform((value) => value.trim())
+  .refine((value) => classifyModelOf(value) !== undefined, "model names take letters, digits and . _ : / -");
+
+// Endpoint, modelo e a chave do endpoint juntos, com a regra do conector abaixo: a chave foi dada
+// a um endereço, então chave em branco só mantém a gravada se o endpoint for o mesmo; endpoint novo
+// pede a chave de novo. A chave do motor nunca serve aqui. Sem endpoint não há chave: só o modelo,
+// e a classificação segue na OpenAI com a chave do motor.
+const classifyTarget = setting<{ baseUrl?: string; model?: string; apiKey?: string }>({
+  schema: z.object({ baseUrl: classifyBaseUrlSchema.optional(), model: classifyModelSchema.optional(), apiKey: z.string().trim().min(1).max(500).optional() }),
+  secret: true,
+  store(value, key, previous) {
+    if (value.baseUrl === undefined) {
+      if (value.apiKey !== undefined) throw new ApiError(400, "endpoint_required", "The classification key belongs to an endpoint: enter the endpoint too.");
+      return value.model === undefined ? {} : { model: value.model };
+    }
+    const kept = storedClassifyTargetOf(previous);
+    const apiKey = value.apiKey ? encryptSecret(value.apiKey, key) : kept.baseUrl === value.baseUrl ? kept.apiKey : undefined;
+    if (apiKey === undefined) throw new ApiError(400, "endpoint_key_required", "When the classification endpoint changes, enter its key again.");
+    return { baseUrl: value.baseUrl, ...(value.model !== undefined && { model: value.model }), apiKey };
+  },
+  view: classifyTargetView,
+});
 
 // Token em branco numa alteração mantém o que já estava gravado: a tela nunca recebe o valor
 // para devolver, então "não mexi" precisa ser representável. Mas só para o MESMO destino: o token
@@ -129,5 +171,9 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
   };
   // Uma chave por motor que pede chave: motor novo na pasta ganha a configuração sem editar aqui.
   for (const engine of engines) if (!engine.keyless) definitions[engineKeySetting(engine.id)] = { ...secretText, engine };
+  // Onde a classificação do desfecho acontece, por motor, para quem paga um provedor compatível com
+  // OpenAI em vez da OpenAI. A voz em tempo real não muda. Ausente vale o endereço, o modelo e a
+  // chave do motor, que é o de hoje: quem não configura nada não vê diferença no pedido.
+  for (const engine of engines) if (!engine.keyless && engine.classifyTarget) definitions[engineClassifyTargetSetting(engine.id)] = classifyTarget;
   return Object.hasOwn(definitions, key) ? definitions[key] : undefined;
 }

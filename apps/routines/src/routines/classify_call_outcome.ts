@@ -1,16 +1,23 @@
 import { RUBRIC_VERSION, callAnalysisSchema, decryptSecret, recordEvent, scoreOf, verifyAgainstTranscript, withOrg, type OrgQuery, type TranscriptTurn } from "@deskvoice/core";
 import {
   ANALYSIS_SETTING,
+  MICROCENTS_PER_CENT,
   OUTCOME_SETTING,
+  ANALYSIS_TIMEOUT_MS,
   analysisEnabledOf,
+  classifyDestinationOf,
+  engineClassifyTargetSetting,
   loadEngines,
   outcomeEnabledOf,
   settleOutcome,
   type CallOutcome,
+  type ClassifyDestinationRefusal,
   type ClassifyFailure,
   type ClassifyResult,
+  type ClassifyTarget,
 } from "@deskvoice/voice-engine";
-import type { Routine } from "../types";
+import { safeFetch, UnsafeDestinationError } from "@deskvoice/tools";
+import type { Routine, RoutineDeps } from "../types";
 
 /** Mesmo nome que o painel usa: a chave do motor, cifrada. */
 const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
@@ -19,11 +26,44 @@ const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_k
 const TRANSCRIPT_LIMIT = 6000;
 
 /** Por que a análise não foi pedida, ou não foi gravada. */
-type AnalysisNotDoneReason = "no_speech" | "no_key" | "engine_cannot_analyze" | "cost_ceiling" | ClassifyFailure;
+type AnalysisNotDoneReason = "no_speech" | "no_key" | "engine_cannot_analyze" | "cost_ceiling" | ClassifyFailure | ClassifyDestinationRefusal;
+
+// O prazo do pedido só de desfecho; o completo, com a análise, tem o dele (`ANALYSIS_TIMEOUT_MS`).
+const OUTCOME_TIMEOUT_MS = 10_000;
+// A resposta da análise passa dos 16 KB que a guarda aceita por padrão para um conector.
+const CLASSIFY_MAX_BYTES = 1024 * 1024;
+// Status que a especificação proíbe de ter corpo num `Response`.
+const NULL_BODY_STATUS = new Set([204, 205, 304]);
+
+/**
+ * O `fetch` do endpoint configurado: o pedido passa pela guarda de rede dos conectores (`safeFetch`),
+ * com o DNS resolvido e cada redirecionamento conferido. `refused` marca que foi a guarda que recusou,
+ * para a linha do tempo dizer isso em vez de "o provedor não respondeu".
+ */
+function guardedFetch(deps: RoutineDeps, timeoutMs: number): { fetch: typeof fetch; refused: () => boolean } {
+  let refused = false;
+  const guarded: typeof fetch = async (input, init) => {
+    try {
+      const response = await safeFetch(
+        String(input),
+        { method: init?.method ?? "GET", headers: Object.fromEntries(new Headers(init?.headers).entries()), body: typeof init?.body === "string" ? init.body : undefined },
+        { fetch: deps.fetch, lookup: deps.lookup, timeoutMs, maxBytes: CLASSIFY_MAX_BYTES },
+      );
+      return new Response(NULL_BODY_STATUS.has(response.status) ? null : response.body, { status: response.status });
+    } catch (error) {
+      if (error instanceof UnsafeDestinationError) refused = true;
+      throw error;
+    }
+  };
+  return { fetch: guarded, refused: () => refused };
+}
 
 interface Pendente {
   engineId: string;
+  /** A chave que vai no pedido, cifrada: a do endpoint configurado, ou a do motor sem endpoint. */
   stored: string;
+  /** Endpoint e modelo da classificação gravados pelo dono; vazio é o padrão do motor. */
+  target: ClassifyTarget;
   /** O desfecho foi pedido pelo dono (`calls.outcome_enabled`) e ainda não está gravado. */
   outcome: boolean;
   /** A análise foi pedida (`calls.analysis_enabled`), dá para pedir e ainda não está gravada. */
@@ -51,10 +91,22 @@ const notAnalyzed = (q: OrgQuery, callId: string, reason: AnalysisNotDoneReason,
  * que classifique ou sem chave, o desfecho não é gravado e a próxima execução, quando a chave
  * existir, classifica. A análise que não dá para pedir vira `analysis_not_done` com o motivo.
  *
+ * O destino da classificação não é fixo: `engine.<id>.classify_target` leva o pedido a um
+ * provedor compatível com OpenAI (DeepSeek, Qwen, OpenRouter, Groq), com a chave própria desse
+ * endpoint, nunca a do motor, e pela guarda de rede dos conectores. Endpoint sem a chave dele, ou
+ * que não passa na guarda, não recebe nada, e a linha do tempo diz por quê. Sem endpoint, o pedido
+ * é o de sempre, no endereço oficial do motor, com a chave do motor.
+ *
  * O custo segue o caminho do custo da voz: uma linha no extrato (`usage_ledger`) e a soma em
- * `calls.cost_cents`, uma vez por chamada ao provedor. Ligação que já atingiu o teto de custo do
- * agente não é lida. Falha do provedor e teto atingido viram `outcome_not_classified` (desfecho
- * pedido) e `analysis_not_done` (análise pedida) na linha do tempo, cada um com o motivo.
+ * `calls.cost_cents`, uma vez por chamada ao provedor. A linha guarda o micro-centavo
+ * (`cost_microcents`), porque ler uma ligação custa cerca de 0,03 centavo e o centavo inteiro por
+ * leitura seria trinta vezes o valor de tabela; `calls.cost_cents` é o extrato somado e arredondado
+ * uma vez só. Com modelo configurado, o preço dele não é conhecido pelo projeto: o consumo vai ao
+ * extrato e o custo fica zero, em vez de um número errado. Ligação que já atingiu o teto de custo
+ * do agente não é lida — o teto continua sendo comparado com o mesmo `calls.cost_cents`, na mesma
+ * unidade de antes. Falha do provedor e teto
+ * atingido viram `outcome_not_classified` (desfecho pedido) e `analysis_not_done` (análise pedida)
+ * na linha do tempo, cada um com o motivo.
  *
  * Roda depois de `summarize_call`, que é quem enfileira. A chamada ao provedor acontece fora da
  * transação (leva até trinta segundos) e não lança: falha não devolve a tarefa à fila para pagar de novo.
@@ -111,11 +163,25 @@ const routine: Routine = {
         if (!outcome) return null;
       }
 
-      const chave = await q.one<{ value: unknown }>("select value from settings where key = $1", [engineKeySetting(agent.engine)]);
+      // O destino da classificação, se o dono configurou um (só o motor que declara aceita). Com
+      // endpoint, a chave é a dele; sem, a do motor. O painel valida ao gravar; aqui é a segunda
+      // leitura, para o banco editado à mão não virar pedido para um endereço interno.
+      const alvo = engine?.classifyTarget
+        ? await q.one<{ value: unknown }>("select value from settings where key = $1", [engineClassifyTargetSetting(agent.engine)])
+        : null;
+      const destino = classifyDestinationOf(alvo?.value);
+      if (!destino.ok) {
+        const details = { engine: agent.engine };
+        if (outcome) await recordEvent(q, callId, "outcome_not_classified", { reason: destino.reason, ...details }, now);
+        if (analysis) await notAnalyzed(q, callId, destino.reason, details, now);
+        return null;
+      }
+      const chave = destino.endpointKey !== undefined ? { value: destino.endpointKey } : await q.one<{ value: unknown }>("select value from settings where key = $1", [engineKeySetting(agent.engine)]);
       if (typeof chave?.value !== "string") {
         if (analysis) await notAnalyzed(q, callId, "no_key", { engine: agent.engine }, now);
         return null;
       }
+      const target = destino.target;
 
       // O mesmo teto da voz: zero é "sem teto". Chegou nele, não gasta mais nada nesta ligação.
       // ponytail: confere o que já foi gasto, não o que a leitura vai custar; ela pode passar do
@@ -131,6 +197,7 @@ const routine: Routine = {
         engineId: agent.engine,
         // Decifrar fora daqui mantém o texto cifrado o tempo todo no banco; o claro vive só na memória.
         stored: chave.value,
+        target,
         outcome,
         analysis,
         turns,
@@ -145,40 +212,47 @@ const routine: Routine = {
     const engine = engines.get(pendente.engineId);
     if (!engine?.classifyOutcome) return;
 
+    // Endpoint configurado vai pela guarda de rede; o endereço oficial do motor, como antes.
+    const guarded = pendente.target.baseUrl !== undefined ? guardedFetch(deps, pendente.analysis ? ANALYSIS_TIMEOUT_MS : OUTCOME_TIMEOUT_MS) : undefined;
     const result: ClassifyResult = await engine.classifyOutcome(
       decryptSecret(pendente.stored, deps.secretKey),
       { transcript: pendente.transcript, tools: pendente.tools, ...(pendente.analysis ? { analyze: true } : {}) },
-      { fetch: deps.fetch },
+      { fetch: guarded?.fetch ?? deps.fetch, ...pendente.target },
     );
 
     const now = deps.clock.now();
     await withOrg(deps.db, task.organizationId, async (q) => {
-      const { usage, costCents } = result;
+      const { usage, costMicrocents } = result;
+      // O centavo desta leitura é o arredondamento do micro-centavo, a mesma conta que a linha do
+      // extrato leva: 0,034 centavo fica 0, e 8,1 ficam 8. O exato vive no extrato, não aqui.
+      const costCents = Math.round(costMicrocents / MICROCENTS_PER_CENT);
       const inputTokens = (usage.inputTokens ?? 0) + (usage.textInputTokens ?? 0) + (usage.cachedInputTokens ?? 0);
       const outputTokens = (usage.outputTokens ?? 0) + (usage.textOutputTokens ?? 0);
       // O que o provedor cobrou entra no extrato e no custo da chamada, como o consumo da voz. Uma vez:
-      // o desfecho e a análise vieram na mesma resposta.
-      if (inputTokens > 0 || outputTokens > 0 || costCents > 0) {
-        await q.exec("insert into usage_ledger (organization_id, call_id, engine, input_tokens, output_tokens, cost_cents, at) values ($1, $2, $3, $4, $5, $6, $7)", [
-          q.organizationId,
-          callId,
-          pendente.engineId,
-          inputTokens,
-          outputTokens,
-          costCents,
-          now,
-        ]);
-        await q.exec("update calls set cost_cents = cost_cents + $2 where id = $1", [callId, costCents]);
+      // o desfecho e a análise vieram na mesma resposta. O extrato guarda o micro-centavo, que é a
+      // unidade em que uma leitura de 0,03 centavo existe; o `cost_cents` da linha é essa medida
+      // arredondada, e o da chamada é o extrato somado e arredondado **uma vez só** — cobrar um
+      // centavo por leitura daria trinta vezes o valor de tabela.
+      if (inputTokens > 0 || outputTokens > 0 || costMicrocents > 0) {
+        await q.exec(
+          "insert into usage_ledger (organization_id, call_id, engine, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8)",
+          [q.organizationId, callId, pendente.engineId, inputTokens, outputTokens, Math.round(costCents), costMicrocents, now],
+        );
+        await q.exec(
+          "update calls set cost_cents = round((select coalesce(sum(cost_microcents), 0) from usage_ledger where call_id = $1)::numeric / 1000000) where id = $1",
+          [callId],
+        );
       }
 
       // Sem a chave e sem o corpo do provedor: o motivo no vocabulário fechado e o status bastam.
       // Dois eventos quando as duas funções estão ligadas: cada um diz o que não aconteceu.
-      const failed = async (reason: ClassifyFailure, status: number | null): Promise<void> => {
-        const details = { engine: pendente.engineId, model: result.model, status, costCents };
+      const failed = async (reason: ClassifyFailure | ClassifyDestinationRefusal, status: number | null): Promise<void> => {
+        // `endpoint` diz à tela que a chave do pedido era a do endpoint configurado, não a do motor.
+        const details = { engine: pendente.engineId, model: result.model, status, costCents, ...(pendente.target.baseUrl !== undefined && { endpoint: true }) };
         if (pendente.outcome) await recordEvent(q, callId, "outcome_not_classified", { reason, ...details }, now);
         if (pendente.analysis) await notAnalyzed(q, callId, reason, details, now);
       };
-      if (!result.ok) return failed(result.failure, result.status);
+      if (!result.ok) return failed(guarded?.refused() ? "endpoint_refused" : result.failure, result.status);
 
       // A análise passa pela checagem contra as falas e pelo schema de gravação antes de qualquer
       // escrita: fora da forma, ela quebraria o expurgo da organização inteira. Como veio na mesma

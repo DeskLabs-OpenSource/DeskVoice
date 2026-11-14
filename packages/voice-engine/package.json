@@ -7,9 +7,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./types": "./src/types.ts",
+    "./pricing": "./src/pricing.ts",
     "./transcription": "./src/transcription.ts"
   },
   "dependencies": {
+    "@deskvoice/core": "workspace:^",
     "ws": "^8.22.2",
     "zod": "^4.6.7"
   }

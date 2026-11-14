@@ -76,6 +76,8 @@ const common = {
     purpose_required: "Para ligar, declare a finalidade e a base legal das ligações.",
     password_required: "Ao mudar o provedor ou o usuário, informe a senha de novo.",
     token_required: "Ao mudar o endereço ou o tipo do conector, informe o token de novo.",
+    endpoint_required: "A chave da classificação pertence a um endpoint: informe o endpoint também.",
+    endpoint_key_required: "Ao mudar o endpoint da classificação, informe a chave dele de novo.",
     whatsapp_unavailable: "Este servidor ainda não tem a chave do serviço de WhatsApp. Rode bash install/update.sh no servidor, uma vez.",
     whatsapp_service_absent: "O serviço de WhatsApp não está de pé neste servidor. Instale o serviço antes de conectar um número.",
     whatsapp_service_down: "O serviço de WhatsApp deste servidor não respondeu. Tente de novo em instantes; se continuar, rode a checagem de saúde no servidor.",

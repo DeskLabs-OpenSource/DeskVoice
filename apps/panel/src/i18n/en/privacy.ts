@@ -14,13 +14,13 @@ const privacy: PrivacyDictionary = {
   recordingStates: { on: "on", off: "off" },
   retentionTitle: "How long conversations are kept",
   retentionLead:
-    "The transcript of each call, what the caller and the agent said, stays in the database until it falls outside the retention period. After that, the text is replaced by a marker and the recording, if any, is deleted; the call, its time, the summary and the rest of the timeline remain. Follow-ups closed longer ago than the period, counted from when they were closed, are deleted too; an open follow-up stays until someone closes it.",
+    "The transcript of each call, what the caller and the agent said, stays in the database until it falls outside the retention period. After that, the text is replaced by a marker and the recording, if any, is deleted; the call, its time and the rest of the timeline remain. The call summary is written from the speech and goes with it, and the screen says it went. Follow-ups closed longer ago than the period, counted from when they were closed, are deleted too; an open follow-up stays until someone closes it.",
   retentionDays: "Keep for (days)",
   retentionHint: "Empty keeps it forever. The shortest period is {min} days.",
   currentForever: "This organization currently keeps transcripts forever.",
   currentDays: "This organization currently keeps transcripts for {days} days.",
   irreversible:
-    "Text that is removed does not come back, neither through this panel nor through the server. Backups already made keep the text until they are discarded. The call summary and the data sent by tools are not removed with the period.",
+    "Text that is removed does not come back, neither through this panel nor through the server. Backups already made keep the text until they are discarded. The data sent by tools is not removed with the period.",
   save: "Save period",
   confirmTitle: "Delete the text of conversations older than {days} days?",
   confirmBody:
@@ -58,7 +58,7 @@ const privacy: PrivacyDictionary = {
   historyEmpty: "Nothing recorded yet.",
   history: {
     transcript_retention_changed: "{who} changed the retention period from {from} to {to}.",
-    transcripts_purged: "The text of speech older than {days} days was deleted by the retention period. Deleted: {count}.",
+    transcripts_purged: "The text of speech and the call summaries older than {days} days were deleted by the retention period. Speech and summaries deleted: {count}.",
     caller_data_exported: "{who} exported the data of {phone}. Calls: {calls}. Events: {events}.",
     call_recording_changed: "{who} turned call recording {state}.",
     caller_data_erased: "{who} erased, at the caller's request, the data of the phone ending in {suffix}. Calls: {calls}. Recordings: {recordings}.",

@@ -11,6 +11,7 @@ export * from "./invites";
 export * from "./migrate";
 export * from "./password";
 export * from "./phone";
+export * from "./public-address";
 export * from "./queue";
 export * from "./recordings";
 export * from "./retention";

@@ -5,10 +5,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Aplica o prazo de guarda da transcrição de UMA organização: troca o texto das falas mais antigas
- * que o prazo por um marcador, apaga as gravações de áudio da mesma idade e as pendências fechadas
- * há mais tempo que o prazo (contado do fecho; a aberta nunca sai), e registra quantas saíram. Roda uma vez por dia, reagendando a si
- * mesma pela fila (`run_at`), sem timer nem polling. Quem começa a corrente é a tela, ao gravar
- * um prazo; sem prazo gravado, a corrente para e a transcrição fica para sempre, como antes.
+ * que o prazo por um marcador, troca o resumo da chamada de mesma idade pelo marcador dele, apaga as
+ * gravações de áudio da mesma idade e as pendências fechadas há mais tempo que o prazo (contado do
+ * fecho; a aberta nunca sai), e registra quantas falas e resumos saíram. Roda uma vez por dia,
+ * reagendando a si mesma pela fila (`run_at`), sem timer nem polling. Quem começa a corrente é a tela,
+ * ao gravar um prazo; sem prazo gravado, a corrente para e a transcrição fica para sempre, como antes.
  */
 const routine: Routine = {
   kind: PURGE_TRANSCRIPTS_TASK,

@@ -78,6 +78,8 @@ const common: CommonDictionary = {
     purpose_required: "Para activarlas, declara la finalidad y la base legal de las llamadas.",
     password_required: "Al cambiar el proveedor o el usuario, escribe la contraseña de nuevo.",
     token_required: "Al cambiar la dirección o el tipo del conector, escribe el token de nuevo.",
+    endpoint_required: "La clave de la clasificación pertenece a un endpoint: escribe también el endpoint.",
+    endpoint_key_required: "Al cambiar el endpoint de la clasificación, escribe su clave de nuevo.",
     whatsapp_unavailable: "Este servidor todavía no tiene la clave del servicio de WhatsApp. Ejecuta bash install/update.sh en el servidor, una vez.",
     whatsapp_service_absent: "El servicio de WhatsApp no está en marcha en este servidor. Instala el servicio antes de conectar un número.",
     whatsapp_service_down: "El servicio de WhatsApp de este servidor no respondió. Intenta de nuevo en un momento; si continúa, ejecuta la verificación de salud en el servidor.",

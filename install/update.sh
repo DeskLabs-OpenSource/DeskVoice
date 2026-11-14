@@ -157,6 +157,32 @@ roll_back() {  # roll_back "<o que falhou>"
 # `local`, construída nesta máquina, sai mesmo sendo a de onde se saiu: a instalação passou a rodar
 # a imagem publicada. Só as três imagens do DeskVoice, por nome exato, e `docker rmi` sem força:
 # ele recusa imagem que algum contêiner usa, e essa recusa é a trava. Nunca `prune`. Falha é aviso.
+# As imagens de terceiros (WAHA, WaCalls, Caddy...) que o Compose da versão de onde se saiu fixava
+# por resumo e o da nova não fixa mais: a troca de imagem de um serviço deixava a antiga no disco
+# (issue #163; a do WAHA tem mais de 3 GB). Só a referência exata, com resumo, que o próprio
+# DeskVoice fixou: imagem de outro sistema nesta VPS não entra nem por nome parecido. `docker rmi`
+# sem força recusa a que algum contêiner usa. Ao contrário das do DeskVoice, a da versão de onde se
+# saiu não fica: voltar a ela pede internet para baixá-la de novo. Falha é aviso.
+pinned_images() { sed -nE 's/^[[:space:]]*image:[[:space:]]*(\$\{[A-Z_]+:-)?([^}[:space:]]+@sha256:[0-9a-f]{64})\}?[[:space:]]*$/\2/p' | sort -u; }
+remove_unpinned_images() {
+  local before after ref out removed=""
+  [ -n "$previous_commit" ] || return 0
+  before="$(git -C "$REPO_DIR" show "$previous_commit:deploy/docker-compose.yml" 2>/dev/null | pinned_images)"
+  after="$(pinned_images < "$DEPLOY_DIR/docker-compose.yml")"
+  for ref in $before; do
+    if printf '%s\n' "$after" | grep -qxF "$ref"; then continue; fi
+    if out="$(docker rmi "$ref" 2>&1)"; then removed="$removed $ref"; continue; fi
+    case "$out" in
+      *"No such image"*) ;;
+      *) warn "Não consegui remover a imagem $ref, que a versão $target deixou de usar; a atualização está completa, ela só ocupa espaço. Veja se algum contêiner a usa: docker ps -a --filter ancestor=$ref" ;;
+    esac
+  done
+  [ -n "$removed" ] || return 0
+  ok "Imagens de terceiros que a versão $target deixou de usar removidas, para liberar disco:"
+  for ref in $removed; do info "  $ref"; done
+  info "Voltar para a versão $current pede internet, para baixá-las de novo."
+}
+
 remove_old_images() {
   local service repo tags tag ref removed="" local_removed=0
   for service in $APP_SERVICES; do
@@ -274,6 +300,7 @@ if [ "$reach" = 200 ]; then ok "O painel responde pela porta publicada ($probe_u
 elif [ -n "$reach" ]; then warn "As peças respondem, mas a porta publicada do painel (${probe_url:-nenhuma}) não respondeu daqui (resposta: $reach): confira se o painel abre no navegador e rode bash install/healthcheck.sh"
 else warn "Não conferi a porta publicada do painel: falta o comando curl nesta máquina. Confira se o painel abre no navegador."; fi
 remove_old_images || warn "A limpeza das imagens antigas parou no meio; a atualização está completa."
+remove_unpinned_images || warn "A limpeza das imagens de terceiros parou no meio; a atualização está completa."
 # Perto do fim de propósito: a tela mostra só o fim da saída, e esta linha é a prova de que quem
 # terminou foi o atualizador da versão de destino, e não o que estava instalado.
 if [ "$resume" = 1 ]; then info "O atualizador da versão $target assumiu a atualização a partir da $current."; fi

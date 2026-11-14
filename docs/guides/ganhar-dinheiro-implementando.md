@@ -124,8 +124,9 @@ redige contratos.
   dono ou administrador muda, e a gravação vem desligada. E diga quem atende o pedido de uma
   pessoa que quer os próprios dados: a tela exporta tudo de um telefone, menos o áudio, que sai à
   parte, chamada por chamada.
-- **O que o prazo de guarda não apaga.** O resumo da chamada, os argumentos das ferramentas e os
-  backups já feitos ficam. Escreva isso, para ninguém prometer um apagamento que não acontece.
+- **O que o prazo de guarda não apaga.** Os argumentos das ferramentas e os backups já feitos ficam;
+  o resumo da chamada, esse sai junto com a transcrição da mesma chamada. Escreva isso, para ninguém
+  prometer um apagamento que não acontece.
 - **No nome de quem ficam o número e o tronco.** A recomendação é no nome do cliente, como as
   outras contas (veja "Custos de terceiros"). Se ficarem no seu, o contrato diz como passam a ele.
 - **O risco de bloqueio do WhatsApp.** A conexão por QR Code usa um cliente não oficial, e o

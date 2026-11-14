@@ -1,3 +1,6 @@
+import { isIP } from "node:net";
+import { isPublicAddress } from "@deskvoice/core";
+import { z } from "zod";
 import type { AnalysisGuess } from "./analysis";
 import type { OutcomeGuess } from "./outcome";
 
@@ -206,17 +209,26 @@ export interface ClassifyOptions {
   schedule?: (fn: () => void, delayMs: number) => () => void;
   /** Sobrepõe a URL da API HTTP do provedor (testes apontam para um servidor falso). */
   baseUrl?: string;
+  /**
+   * Sobrepõe o modelo do pedido de classificação. Sem ele, o modelo do motor — o mesmo de antes
+   * desta opção existir. Só a classificação lê: a voz em tempo real tem o modelo dela.
+   */
+  model?: string;
 }
 
 /** Por que a classificação não leu um desfecho: o vocabulário do teste da chave, menos o que não é falha. */
 export type ClassifyFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
 
 /**
- * O que a classificação devolve: o palpite, ou o motivo de não haver um. Nos dois casos, o consumo
+ * O que a classificação devolve: o palpite, ou o motivo de não haver. Nos dois casos, o consumo
  * que o provedor declarou e o custo dele pelo preço do modelo de texto, para entrar no custo da
  * chamada (um 200 fora da forma também foi cobrado).
+ *
+ * O custo vem em duas vistas do mesmo número: `costMicrocents`, a exata, e `costCents`, ela
+ * arredondada para cima. Quem lê uma ligação custa cerca de 0,03 centavo, então quem grava o
+ * extrato usa o micro-centavo e arredonda uma vez só, no total da chamada.
  */
-export type ClassifyResult = { model: string; usage: Usage; costCents: number } & (
+export type ClassifyResult = { model: string; usage: Usage; costCents: number; costMicrocents: number } & (
   // `analysis` só no pedido completo, já na forma e antes da checagem contra a transcrição.
   | { ok: true; guess: OutcomeGuess; analysis?: AnalysisGuess }
   // `status` é o HTTP da resposta; `null` quando ela não veio (prazo, rede).
@@ -273,6 +285,12 @@ export interface VoiceEngine {
    */
   classifyOutcome?(apiKey: string, input: ClassifyInput, options?: ClassifyOptions): Promise<ClassifyResult>;
   /**
+   * Verdadeiro para motor cujo `classifyOutcome` aceita destino próprio na classificação: `baseUrl`
+   * e `model` de `ClassifyOptions`. Só esses motores ganham, no painel, os campos de endpoint e
+   * modelo; motor sem a declaração classifica no endereço oficial dele.
+   */
+  classifyTarget?: boolean;
+  /**
    * Verdadeiro para motor cujo `classifyOutcome` atende `analyze` e devolve a análise da ligação.
    * Motor sem a declaração não analisa, e a rotina registra o motivo na linha do tempo.
    */
@@ -316,3 +334,95 @@ export const analysisEnabledOf = (stored: unknown): boolean => stored === true;
  */
 export const TRANSCRIPTION_SETTING = "calls.transcription_enabled";
 export const transcriptionEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
+ * Endpoint, modelo e chave da **classificação**, por motor, juntos numa configuração só
+ * (`engine.<id>.classify_target` em `settings`).
+ *
+ * Existem porque a classificação é a tarefa em que o provedor compatível com OpenAI (DeepSeek,
+ * Qwen, OpenRouter, Groq) resolve: uma chamada curta, saída em JSON, uma vez por ligação. Sem
+ * eles, quem não tem chave OpenAI ou Google não classifica nada. A voz em tempo real continua nos
+ * endpoints oficiais: provedor compatível não oferece áudio bidirecional.
+ *
+ * Ausentes valem o padrão do motor, que é o de hoje: OpenAI em `https://api.openai.com/v1`, com
+ * `gpt-5-nano` e a chave do motor. Com endpoint, a chave é a dele (`apiKey`, cifrada), dada a esse
+ * endereço: a chave do motor nunca vai a um endpoint configurado, e trocar o endpoint pede a chave
+ * de novo. Só o modelo, sem endpoint, continua na OpenAI com a chave do motor.
+ */
+export const engineClassifyTargetSetting = (engineId: string): string => `engine.${engineId}.classify_target`;
+
+/** O destino da classificação, quando o dono configurou um; vazio é o padrão do motor. */
+export interface ClassifyTarget {
+  baseUrl?: string;
+  model?: string;
+}
+
+/** Como a configuração fica gravada: só os campos de texto, sem validar o conteúdo. `apiKey` vem cifrada. */
+export interface StoredClassifyTarget {
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+}
+
+// Campo que não é texto, ou vazio, é como se não estivesse gravado.
+const storedText = z.string().min(1).optional().catch(undefined);
+const storedClassifyTarget = z.object({ baseUrl: storedText, model: storedText, apiKey: storedText }).catch({});
+
+export const storedClassifyTargetOf = (stored: unknown): StoredClassifyTarget => storedClassifyTarget.parse(stored);
+
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
+
+/**
+ * O endereço serve como destino da classificação? Só `https`, porque a chave do provedor vai no
+ * cabeçalho e um `http` a entregaria em claro; sem usuário e senha na URL; e, quando o host é um
+ * IP, só IP público, pela mesma lista da guarda de rede dos conectores. Nome de host é conferido
+ * de novo na hora do pedido, com o DNS resolvido, pela própria guarda.
+ */
+export const isClassifyBaseUrl = (value: string): boolean => {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (url.protocol !== "https:" || host === "" || url.username !== "" || url.password !== "") return false;
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  return isIP(host) === 0 || isPublicAddress(host);
+};
+
+/** O endereço gravado, sem a barra final (o caminho é colado depois), ou `undefined` se não serve. */
+export const classifyBaseUrlOf = (stored: unknown): string | undefined => {
+  if (typeof stored !== "string") return undefined;
+  const value = stored.trim().replace(/\/+$/, "");
+  return isClassifyBaseUrl(value) ? value : undefined;
+};
+
+/** O nome do modelo: o que o provedor publica (`deepseek-chat`, `qwen/qwen3-32b`), ou `undefined`. */
+export const classifyModelOf = (stored: unknown): string | undefined => {
+  if (typeof stored !== "string") return undefined;
+  const value = stored.trim();
+  return MODEL_NAME.test(value) ? value : undefined;
+};
+
+/** Por que a classificação não sai para o endpoint configurado. */
+export type ClassifyDestinationRefusal =
+  /** O endpoint gravado não é `https` público (foi gravado por fora do painel), ou a guarda de rede o recusou na hora. */
+  | "endpoint_refused"
+  /** Há endpoint, mas não a chave dele: a do motor não serve, porque foi dada a outro endereço. */
+  | "endpoint_key_missing";
+
+/**
+ * Para onde a rotina manda a classificação, lido do que está gravado. Sem endpoint, o padrão do
+ * motor (e o modelo, se válido), com a chave do motor. Com endpoint, só se ele for válido e tiver
+ * a chave dele, que volta em `endpointKey`, ainda cifrada; senão, o motivo de não sair nada.
+ * Modelo inválido cai no padrão do motor.
+ */
+export const classifyDestinationOf = (
+  stored: unknown,
+): { ok: true; target: ClassifyTarget; endpointKey?: string } | { ok: false; reason: ClassifyDestinationRefusal } => {
+  const { baseUrl: storedBaseUrl, model: storedModel, apiKey } = storedClassifyTargetOf(stored);
+  const model = classifyModelOf(storedModel);
+  const withModel = model !== undefined ? { model } : {};
+  if (storedBaseUrl === undefined) return { ok: true, target: withModel };
+  const baseUrl = classifyBaseUrlOf(storedBaseUrl);
+  if (baseUrl === undefined) return { ok: false, reason: "endpoint_refused" };
+  if (apiKey === undefined) return { ok: false, reason: "endpoint_key_missing" };
+  return { ok: true, target: { baseUrl, ...withModel }, endpointKey: apiKey };
+};

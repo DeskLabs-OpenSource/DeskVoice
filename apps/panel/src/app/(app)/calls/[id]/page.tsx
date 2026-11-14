@@ -114,10 +114,12 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
 
       <AnalysisSection call={data} events={events.data} enabled={analysisEnabled.data?.value === true} live={live} t={t} />
 
-      {data.summary || !live ? (
+      {data.summary || data.summaryPurged || !live ? (
         <section className="grid max-w-[72ch] gap-1.5">
           <h2 className="text-[0.8rem] font-bold text-muted">{t.summaryTitle}</h2>
-          <p className={data.summary ? "text-[1.07rem] leading-relaxed whitespace-pre-line" : "text-muted"}>{data.summary ?? t.summaryPending}</p>
+          <p className={data.summary ? "text-[1.07rem] leading-relaxed whitespace-pre-line" : "text-muted italic"}>
+            {data.summary ?? (data.summaryPurged ? t.summaryPurged : t.summaryPending)}
+          </p>
         </section>
       ) : null}
 
