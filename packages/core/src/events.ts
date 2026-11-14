@@ -28,11 +28,12 @@ export async function recordOrgEvent(q: OrgQuery, kind: OrgEventKind, payload: o
 }
 
 /**
- * Monta a forma expurgada da análise só com campos de vocabulário fechado, copiados um a um: o que
- * não está nomeado aqui (evidência, objeções, pontos fortes e fracos, próximo passo) não passa.
+ * A forma expurgada da análise, como expressão SQL sobre a linha de `calls`, só com campos de
+ * vocabulário fechado copiados um a um: o que não está nomeado aqui (evidência, objeções, pontos
+ * fortes e fracos, próximo passo) não passa. O prazo de guarda e o apagamento a pedido do titular
+ * usam a mesma forma.
  */
-const PURGE_ANALYSIS_SQL = `
-  update calls set analysis = jsonb_build_object(
+export const PURGED_ANALYSIS_SQL = `jsonb_build_object(
       'rubricVersion', analysis->'rubricVersion',
       'model', analysis->'model',
       'criteria', coalesce(
@@ -44,7 +45,10 @@ const PURGE_ANALYSIS_SQL = `
         'middle', analysis->'temperature'->'middle',
         'end', analysis->'temperature'->'end'),
       'objectionCount', jsonb_array_length(coalesce(analysis->'objections', '[]'::jsonb)),
-      'purged', true)
+      'purged', true)`;
+
+const PURGE_ANALYSIS_SQL = `
+  update calls set analysis = ${PURGED_ANALYSIS_SQL}
    where analysis is not null and not (analysis ? 'purged') and started_at < $1`;
 
 /** O que fica no lugar do texto de uma fala expurgada: a linha do tempo diz que houve fala, sem a fala. */
@@ -52,7 +56,8 @@ export const PURGED_TRANSCRIPT = { purged: true } as const;
 
 /**
  * Troca o texto das falas (`transcript_user`, `transcript_agent`) gravadas antes de `before` pelo
- * marcador, e devolve quantas trocou. É o único caminho que reescreve `call_events`. Fala já
+ * marcador, e devolve quantas trocou. É um dos dois caminhos que reescrevem `call_events`; o outro é o
+ * apagamento a pedido do titular (`eraseCaller`). Fala já
  * expurgada não tem mais `text`, então rodar de novo não reconta. Só dentro de `withOrg`: numa
  * transação de sistema, o mesmo `update` alcançaria todas as organizações.
  *

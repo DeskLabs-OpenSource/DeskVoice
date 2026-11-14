@@ -89,6 +89,8 @@ const timeline: TimelineDictionary = {
     task_finished: "Tarea completada",
     task_failed: "Tarea no completada",
     transcript_purged: "Texto borrado por el plazo de conservación de la transcripción.",
+    transcript_erased: "Texto borrado a pedido de quien llamó.",
+    erased: "El texto de este registro fue borrado a pedido de quien llamó.",
     follow_up_created: "Pendiente abierto",
     follow_up_assigned: "Pendiente con nuevo responsable",
     follow_up_closed: { done: "Pendiente hecho", canceled: "Pendiente cancelado" },

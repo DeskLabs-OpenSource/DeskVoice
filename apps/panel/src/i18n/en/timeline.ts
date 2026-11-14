@@ -89,6 +89,8 @@ const timeline: TimelineDictionary = {
     task_finished: "Task completed",
     task_failed: "Task not completed",
     transcript_purged: "Text deleted by the transcript retention period.",
+    transcript_erased: "Text erased at the caller's request.",
+    erased: "The text of this entry was erased at the caller's request.",
     follow_up_created: "Follow-up opened",
     follow_up_assigned: "Follow-up has a new owner",
     follow_up_closed: { done: "Follow-up done", canceled: "Follow-up canceled" },

@@ -107,6 +107,7 @@ const common = {
     outbound_disabled: "As ligações de saída estão desligadas. Ligue em Ligações de saída.",
     outside_window: "Fora do horário permitido para ligações de saída.",
     do_not_call: "Este número está na lista de não ligar.",
+    caller_call_live: "Há uma chamada em andamento com este número. Nada foi apagado. Espere a chamada terminar e tente de novo.",
     daily_cap_reached: "O teto diário de ligações desta linha foi atingido.",
     attempts_exhausted: "O limite de tentativas para esta pessoa foi atingido.",
   },

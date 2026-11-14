@@ -109,6 +109,7 @@ const common: CommonDictionary = {
     outbound_disabled: "Las llamadas salientes están desactivadas. Actívalas en Llamadas salientes.",
     outside_window: "Fuera del horario permitido para llamadas salientes.",
     do_not_call: "Este número está en la lista de no llamar.",
+    caller_call_live: "Hay una llamada en curso con este número. No se borró nada. Espere a que la llamada termine e intente de nuevo.",
     daily_cap_reached: "Se alcanzó el tope diario de llamadas de esta línea.",
     attempts_exhausted: "Se alcanzó el límite de intentos para esta persona.",
   },

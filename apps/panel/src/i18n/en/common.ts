@@ -109,6 +109,7 @@ const common: CommonDictionary = {
     outbound_disabled: "Outbound calls are off. Turn them on in Outbound calls.",
     outside_window: "Outside the hours allowed for outbound calls.",
     do_not_call: "This number is on the do-not-call list.",
+    caller_call_live: "There is a call in progress with this number. Nothing was erased. Wait for the call to end and try again.",
     daily_cap_reached: "The daily call limit of this line was reached.",
     attempts_exhausted: "The attempt limit for this person was reached.",
   },

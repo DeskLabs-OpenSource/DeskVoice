@@ -48,6 +48,8 @@ function Card({ title, tone, children }: { title: ReactNode; tone?: "accent" | "
 }
 
 const Quiet = ({ children }: { children: ReactNode }) => <p className="pt-1 text-muted">{children}</p>;
+/** O lugar do texto que saiu a pedido de quem ligou (`erased` no payload). */
+const Erased = ({ children }: { children: ReactNode }) => <p className="text-[0.87rem] text-muted italic">{children}</p>;
 
 /**
  * A linha do tempo de uma chamada: cada evento de `call_events` vira um item legível preso ao fio.
@@ -92,7 +94,7 @@ export function Timeline({
           body: (
             <div className={`grid max-w-[46ch] gap-0.5 rounded-md px-4 py-2.5 ${user ? "bg-sunken" : "border border-line bg-surface"}`}>
               {previous !== event.kind ? <span className="text-[0.8rem] font-bold text-muted">{user ? t.speakers.user : agentName || t.speakers.agent}</span> : null}
-              {p.purged === true ? <p className="text-muted italic">{e.transcript_purged}</p> : <p className="leading-relaxed">{text(p.text)}</p>}
+              {p.purged === true ? <p className="text-muted italic">{p.erased === true ? e.transcript_erased : e.transcript_purged}</p> : <p className="leading-relaxed">{text(p.text)}</p>}
             </div>
           ),
         };
@@ -121,6 +123,7 @@ export function Timeline({
               <p className={failed ? "text-fail" : "text-muted"}>{outcome ? text(outcome.payload.message) : e.tool_running}</p>
               {text(outcome?.payload.error) ? <p className="text-[0.87rem] text-muted">{e.tool_operator_detail}: <span className="data">{text(outcome?.payload.error)}</span></p> : null}
               {omitted ? <p className="text-[0.87rem] text-muted">{e.tool_args_omitted}</p> : null}
+              {p.erased === true || outcome?.payload.erased === true ? <Erased>{e.erased}</Erased> : null}
               {hasArgs ? (
                 <details className="text-[0.87rem] text-muted">
                   <summary className="cursor-pointer font-bold hover:text-ink">{e.tool_args}</summary>
@@ -141,6 +144,7 @@ export function Timeline({
               <p className="text-[1.07rem] leading-snug">{text(p.question)}</p>
               {text(p.context) ? <p className="whitespace-pre-line text-muted">{text(p.context)}</p> : null}
               {p.defaultOnTimeout === "approved" || p.defaultOnTimeout === "denied" ? <p className="text-[0.87rem] text-muted">{e.approval_default[p.defaultOnTimeout]}</p> : null}
+              {p.erased === true ? <Erased>{e.erased}</Erased> : null}
             </Card>
           ),
         };
@@ -163,11 +167,12 @@ export function Timeline({
             <Card title={e.human_notified}>
               <p className="whitespace-pre-line text-muted">{text(p.message) || text(p.body)}</p>
               {Array.isArray(p.channels) && p.channels.length > 0 ? <p className="text-[0.87rem] text-muted">{fill(e.human_notified_channels, { channels: p.channels.join(", ") })}</p> : null}
+              {p.erased === true ? <Erased>{e.erased}</Erased> : null}
             </Card>
           ),
         };
       case "dtmf_sent":
-        return { ...base, tone: "neutral", icon: DotsNine, body: <Quiet><span className="font-bold text-ink">{e.dtmf_sent}</span>{text(p.digits) ? <> · <span className="data">{text(p.digits)}</span></> : null}</Quiet> };
+        return { ...base, tone: "neutral", icon: DotsNine, body: <Quiet><span className="font-bold text-ink">{e.dtmf_sent}</span>{text(p.digits) ? <> · <span className="data">{text(p.digits)}</span></> : null}{p.erased === true ? <> · {e.erased}</> : null}</Quiet> };
       case "transfer_started":
         return {
           ...base,
@@ -178,6 +183,7 @@ export function Timeline({
               {text(p.to) ? <p className="data">{fill(e.transfer_to, { to: formatPhone(text(p.to)) })}</p> : null}
               {text(p.reason) ? <p className="text-muted">{text(p.reason)}</p> : null}
               {text(p.summary) ? <p className="text-[0.87rem] text-muted">{text(p.summary)}</p> : null}
+              {p.erased === true ? <Erased>{e.erased}</Erased> : null}
             </Card>
           ),
         };
@@ -243,7 +249,7 @@ export function Timeline({
             <Card title={e.recording_paused}>
               <p className="text-muted">{p.by === "human" ? e.recording_paused_human : e.recording_paused_agent}</p>
               {text(p.reason) ? <p className="text-[0.87rem] text-muted">“{text(p.reason)}”</p> : null}
-              {p.reasonPurged === true ? <p className="text-[0.87rem] text-muted">{e.recording_paused_reason_purged}</p> : null}
+              {p.reasonPurged === true ? <p className="text-[0.87rem] text-muted">{p.erased === true ? e.erased : e.recording_paused_reason_purged}</p> : null}
             </Card>
           ),
         };
