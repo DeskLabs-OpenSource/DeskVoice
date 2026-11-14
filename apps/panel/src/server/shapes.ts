@@ -78,7 +78,7 @@ const trunkFields = z.object({
 export const trunkPatch = trunkFields.partial();
 export const trunkCreate = trunkPatch.required({ name: true, host: true, authMode: true });
 
-export const CALL_COLUMNS = `c.id, c.agent_id as "agentId", a.name as "agentName", c.direction, c.from_e164 as "from", c.to_e164 as "to",
+export const CALL_COLUMNS = `c.id, c.agent_id as "agentId", a.name as "agentName", c.direction, c.channel, c.from_e164 as "from", c.to_e164 as "to",
   c.status, c.end_reason as "endReason", c.engine, c.started_at as "startedAt", c.answered_at as "answeredAt", c.ended_at as "endedAt",
   c.cost_cents as "costCents", c.summary,
   c.outcome, c.outcome_confidence as "outcomeConfidence", c.outcome_evidence as "outcomeEvidence"`;

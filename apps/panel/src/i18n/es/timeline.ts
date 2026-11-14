@@ -53,6 +53,9 @@ const timeline: TimelineDictionary = {
   },
   events: {
     call_started: "Entró la llamada",
+    call_started_whatsapp: "Entró la llamada por WhatsApp",
+    call_started_web: "Empezó la llamada desde el navegador",
+    call_started_simulated: "Empezó la llamada simulada",
     call_started_outbound: "El agente inició la llamada",
     call_answered: "El agente atendió",
     recording_notice: "Aviso de grabación",

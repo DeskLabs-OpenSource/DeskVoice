@@ -575,7 +575,7 @@ describe("voice process", () => {
 describe("costs", () => {
   it("adds usage by day, agent and engine inside the period, with the date the price was checked", async () => {
     const agent = await newAgent("Custos");
-    const callId = await insert(panel.app, org, "insert into calls (organization_id, agent_id, direction, status, started_at, engine) values ($1, $2, 'inbound', 'completed', $3, 'simulated') returning id", [org, agent, NOW]);
+    const callId = await insert(panel.app, org, "insert into calls (organization_id, agent_id, direction, channel, status, started_at, engine) values ($1, $2, 'inbound', 'simulated', 'completed', $3, 'simulated') returning id", [org, agent, NOW]);
     for (const [cents, at] of [[12, NOW], [30, new Date(NOW.getTime() - 86_400_000)], [99, new Date(NOW.getTime() - 90 * 86_400_000)]] as const) {
       await insert(panel.app, org, "insert into usage_ledger (organization_id, call_id, engine, seconds, cost_cents, at) values ($1, $2, 'simulated', 60, $3, $4) returning id", [org, callId, cents, at]);
     }

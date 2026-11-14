@@ -167,7 +167,7 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect(body).toEqual({ callId: expect.any(String), token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), expiresInSeconds: 60 });
     const callId = body.callId ?? "";
     // A chamada existe, tocando, sem número de origem nem de destino.
-    expect(await callOf(app, callId)).toMatchObject({ status: "ringing", direction: "inbound", from_e164: null, to_e164: null, agent_id: made.agentId, engine: "roteiro" });
+    expect(await callOf(app, callId)).toMatchObject({ status: "ringing", direction: "inbound", channel: "web", from_e164: null, to_e164: null, agent_id: made.agentId, engine: "roteiro" });
     expect(await kindsOf(app, callId)).toEqual([]);
 
     const client = browser(body.token);

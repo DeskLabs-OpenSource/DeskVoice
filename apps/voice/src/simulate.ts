@@ -22,7 +22,7 @@ export async function startSimulatedCall(
     const agent = await q.one<{ greeting: string | null; transfer_to_e164: string | null }>("select greeting, transfer_to_e164 from agents where id = $1", [agentId]);
     if (!agent) return null;
     const call = await q.one<{ id: string }>(
-      "insert into calls (organization_id, agent_id, direction, status, engine, started_at) values ($1, $2, 'inbound', 'ringing', 'simulated', $3) returning id",
+      "insert into calls (organization_id, agent_id, direction, channel, status, engine, started_at) values ($1, $2, 'inbound', 'simulated', 'ringing', 'simulated', $3) returning id",
       [organizationId, agentId, deps.clock.now()],
     );
     if (!call) throw new Error("Simulated call was not created");
@@ -37,6 +37,7 @@ export async function startSimulatedCall(
     callId: created.callId,
     agentId,
     transport,
+    started: { channel: "simulated" },
     overrides: { engineId: "simulated", instructions: SIMULATED_PREFIX + JSON.stringify(script), tools: options.tools ?? DEMO_TOOLS },
   });
   return { callId: created.callId, session, transport };

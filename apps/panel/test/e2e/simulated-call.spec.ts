@@ -14,7 +14,7 @@ test("primeira ação útil: simular uma chamada abre a chamada com a linha do t
 
   // A linha do tempo mostra a chegada, o atendimento e, ao vivo, o agente pedindo aprovação no meio
   // da conversa: a tela acompanha a chamada, e não só um retrato tirado ao abrir.
-  await expect(page.getByText(timeline.events.call_started, { exact: true })).toBeVisible();
+  await expect(page.getByText(timeline.events.call_started_simulated, { exact: true })).toBeVisible();
   await expect(page.getByText(timeline.events.call_answered, { exact: true })).toBeVisible();
   await expect(page.getByText(timeline.events.approval_requested, { exact: true })).toBeVisible({ timeout: 45_000 });
 });
