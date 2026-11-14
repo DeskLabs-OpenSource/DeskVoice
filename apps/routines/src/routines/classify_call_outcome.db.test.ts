@@ -1,8 +1,22 @@
 import { callAnalysisSchema, encryptSecret, recordEvent, scoreOf, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createCall, createOrganization, depsFor, eventsOf, openTestDbs, t0, task } from "../../test/helpers";
-import { ANALYSIS_CRITERIA, ANALYSIS_SETTING, OUTCOME_SETTING } from "@deskvoice/voice-engine";
+import { ANALYSIS_CRITERIA, ANALYSIS_SETTING, OMITTED_TURNS_MARK, OUTCOME_SETTING, type VoiceEngine } from "@deskvoice/voice-engine";
+import type * as VoiceEngineModule from "@deskvoice/voice-engine";
 import classifyCallOutcome from "./classify_call_outcome";
+
+/**
+ * Um motor a mais no mapa de `loadEngines`, para o caminho que nenhum motor de verdade alcança: a
+ * análise passa pelo schema da resposta e cai no de gravação. Os motores de verdade seguem iguais.
+ */
+const FALSO = vi.hoisted(() => ({ id: "falso-que-analisa", analyzes: true, classifyOutcome: vi.fn() }));
+vi.mock("@deskvoice/voice-engine", async (importOriginal) => {
+  const real = await importOriginal<typeof VoiceEngineModule>();
+  return {
+    ...real,
+    loadEngines: async (...args: Parameters<typeof real.loadEngines>) => (await real.loadEngines(...args)).set(FALSO.id, FALSO as unknown as VoiceEngine),
+  };
+});
 
 const { app, owner } = openTestDbs();
 const secretKey = depsFor(app).secretKey;
@@ -491,5 +505,65 @@ describe("classify_call_outcome: análise da ligação", () => {
     // Rodar de novo não paga outra vez para a mesma chamada apagada.
     await roda(org, callId, apagaNoMeio);
     expect(apagaNoMeio).toHaveBeenCalledTimes(1);
+  });
+
+  it("conversa acima de 6 000 caracteres: o pedido completo leva o começo, o só de desfecho continua levando só o fim", async () => {
+    // Cerca de 12 000 caracteres: passa dos 6 000 do corte do desfecho e fica abaixo dos 24 000 do motor.
+    const longa = async (org: string, callId: string): Promise<void> => {
+      await fala(org, callId, "Primeira fala: achei o preço caro demais.");
+      for (let i = 0; i < 100; i++) await falaDoAgente(org, callId, `Fala do meio número ${String(i).padStart(3, "0")}, ${"com bastante conteúdo ".repeat(4)}`);
+      await fala(org, callId, "Última fala: então pode marcar para terça.");
+    };
+    const completo = await comAgente("analise conversa longa");
+    await soChave(completo.org);
+    await liga(completo.org, ANALYSIS_SETTING);
+    await longa(completo.org, completo.callId);
+    const soDesfecho = await comAgente("desfecho conversa longa");
+    await comChave(soDesfecho.org);
+    await longa(soDesfecho.org, soDesfecho.callId);
+    const fetchCompleto = openai(completa());
+    const fetchDesfecho = openai({ outcome: "booked", confidence: 0.9, evidence: "então pode marcar para terça." });
+
+    await roda(completo.org, completo.callId, fetchCompleto);
+    await roda(soDesfecho.org, soDesfecho.callId, fetchDesfecho);
+
+    const textoCompleto: string = pedidoDe(fetchCompleto).messages[0].content;
+    expect(textoCompleto.length).toBeGreaterThan(10_000);
+    expect(textoCompleto).toContain("Cliente: Primeira fala: achei o preço caro demais.");
+    expect(textoCompleto).toContain("Fala do meio número 000");
+    expect(textoCompleto).toContain("Cliente: Última fala: então pode marcar para terça.");
+    expect(textoCompleto).not.toContain(OMITTED_TURNS_MARK);
+    const textoDesfecho: string = pedidoDe(fetchDesfecho).messages[0].content;
+    expect(textoDesfecho).not.toContain("Primeira fala");
+    expect(textoDesfecho).toContain("Cliente: Última fala: então pode marcar para terça.");
+    expect((await analiseDe(completo.callId))?.analysis_score).toBe(NOTA);
+  });
+
+  it("análise que passa pela resposta e cai no schema de gravação: unexpected_response, custo uma vez e nada gravado", async () => {
+    const { org, callId } = await comAgente("analise fora do schema de gravacao", FALSO.id);
+    await comChave(org, FALSO.id);
+    await liga(org, ANALYSIS_SETTING);
+    await conversa(org, callId);
+    // Quatro pontos fortes: o schema de gravação aceita até três. O resto está na forma.
+    const { outcome, confidence, evidence, criteria, ...resto } = completa({ strengths: ["um", "dois", "três", "quatro"] });
+    FALSO.classifyOutcome.mockResolvedValueOnce({
+      ok: true,
+      guess: { outcome, confidence, evidence },
+      analysis: { ...resto, criteria: ANALYSIS_CRITERIA.map((id) => ({ id, ...(criteria as Record<string, { status: string; evidence: string }>)[id] })) },
+      model: "modelo-falso",
+      usage: { inputTokens: 10, outputTokens: 5 },
+      costCents: 3,
+    });
+
+    await roda(org, callId, openai(completa()));
+
+    expect(FALSO.classifyOutcome).toHaveBeenCalledTimes(1);
+    expect(FALSO.classifyOutcome.mock.calls[0]?.[1]).toMatchObject({ analyze: true });
+    const evento = { reason: "unexpected_response", engine: FALSO.id, model: "modelo-falso", status: 200, costCents: 3 };
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
+    expect(await falhasDe(callId)).toEqual([evento]);
+    expect(await eventosDe(callId, "call_analyzed")).toEqual([]);
+    expect(await analiseDe(callId)).toMatchObject({ analysis: null, analysis_score: null, analyzed_at: null, outcome: null });
+    expect(await custoDe(callId)).toMatchObject({ call: 3, extrato: [{ engine: FALSO.id, input_tokens: 10, output_tokens: 5, cost_cents: 3 }] });
   });
 });
