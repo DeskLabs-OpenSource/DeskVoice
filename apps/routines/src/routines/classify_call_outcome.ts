@@ -3,12 +3,16 @@ import {
   ANALYSIS_SETTING,
   OUTCOME_SETTING,
   analysisEnabledOf,
+  classifyTargetOf,
+  engineBaseUrlSetting,
+  engineClassifyModelSetting,
   loadEngines,
   outcomeEnabledOf,
   settleOutcome,
   type CallOutcome,
   type ClassifyFailure,
   type ClassifyResult,
+  type ClassifyTarget,
 } from "@deskvoice/voice-engine";
 import type { Routine } from "../types";
 
@@ -24,6 +28,8 @@ type AnalysisNotDoneReason = "no_speech" | "no_key" | "engine_cannot_analyze" | 
 interface Pendente {
   engineId: string;
   stored: string;
+  /** Endpoint e modelo da classificação gravados pelo dono; vazio é o padrão do motor. */
+  target: ClassifyTarget;
   /** O desfecho foi pedido pelo dono (`calls.outcome_enabled`) e ainda não está gravado. */
   outcome: boolean;
   /** A análise foi pedida (`calls.analysis_enabled`), dá para pedir e ainda não está gravada. */
@@ -51,8 +57,15 @@ const notAnalyzed = (q: OrgQuery, callId: string, reason: AnalysisNotDoneReason,
  * que classifique ou sem chave, o desfecho não é gravado e a próxima execução, quando a chave
  * existir, classifica. A análise que não dá para pedir vira `analysis_not_done` com o motivo.
  *
+ * O destino da classificação não é fixo: `engine.<id>.base_url` e `engine.<id>.classify_model`
+ * levam o pedido a um provedor compatível com OpenAI (DeepSeek, Qwen, OpenRouter, Groq), com a
+ * chave que já está guardada para esse motor. Sem as duas configurações, o pedido é o de sempre,
+ * no endereço oficial do motor.
+ *
  * O custo segue o caminho do custo da voz: uma linha no extrato (`usage_ledger`) e a soma em
- * `calls.cost_cents`, uma vez por chamada ao provedor. Ligação que já atingiu o teto de custo do
+ * `calls.cost_cents`, uma vez por chamada ao provedor. Com modelo configurado, o preço dele não é
+ * conhecido pelo projeto: o consumo vai ao extrato e o custo fica zero, em vez de um número errado.
+ * Ligação que já atingiu o teto de custo do
  * agente não é lida. Falha do provedor e teto atingido viram `outcome_not_classified` (desfecho
  * pedido) e `analysis_not_done` (análise pedida) na linha do tempo, cada um com o motivo.
  *
@@ -117,6 +130,17 @@ const routine: Routine = {
         return null;
       }
 
+      // O destino da classificação, se o dono configurou um: sem as duas chaves, o motor usa o
+      // endereço e o modelo de sempre. Só campo válido entra (o painel valida ao gravar; aqui é a
+      // segunda leitura, para o banco editado à mão não virar pedido para um endereço interno).
+      const alvo = await q.many<{ key: string; value: unknown }>("select key, value from settings where key = any($1)", [
+        [engineBaseUrlSetting(agent.engine), engineClassifyModelSetting(agent.engine)],
+      ]);
+      const target = classifyTargetOf({
+        baseUrl: alvo.find((row) => row.key === engineBaseUrlSetting(agent.engine))?.value,
+        model: alvo.find((row) => row.key === engineClassifyModelSetting(agent.engine))?.value,
+      });
+
       // O mesmo teto da voz: zero é "sem teto". Chegou nele, não gasta mais nada nesta ligação.
       // ponytail: confere o que já foi gasto, não o que a leitura vai custar; ela pode passar do
       // teto pelo próprio valor (centavos). Estimar antes pede um limite de tokens de saída.
@@ -131,6 +155,7 @@ const routine: Routine = {
         engineId: agent.engine,
         // Decifrar fora daqui mantém o texto cifrado o tempo todo no banco; o claro vive só na memória.
         stored: chave.value,
+        target,
         outcome,
         analysis,
         turns,
@@ -148,7 +173,8 @@ const routine: Routine = {
     const result: ClassifyResult = await engine.classifyOutcome(
       decryptSecret(pendente.stored, deps.secretKey),
       { transcript: pendente.transcript, tools: pendente.tools, ...(pendente.analysis ? { analyze: true } : {}) },
-      { fetch: deps.fetch },
+      // Endpoint e modelo configurados vão junto; sem eles, o motor usa o padrão dele, como antes.
+      { fetch: deps.fetch, ...pendente.target },
     );
 
     const now = deps.clock.now();

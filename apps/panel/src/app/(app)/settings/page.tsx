@@ -15,7 +15,7 @@ import { formatDateTime, formatDay } from "../../../ui/format";
 import { Badge, Button, Field, Notice, Panel, Select, Skeleton, Switch, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import type { Engine, KeyCheck, KeyCheckResult, Setting } from "../../../ui/types";
-import { put } from "./setting-api";
+import { URL_PREFIX, put } from "./setting-api";
 
 const KEY_CHECK_TONE: Record<KeyCheckResult, "ok" | "warn" | "fail" | "neutral"> = {
   accepted: "ok",
@@ -35,6 +35,41 @@ function KeyCheckStatus({ check, t }: { check: KeyCheck | null; t: SettingsDicti
   if (!check) return <p className="text-sm text-muted">{t.keyNeverTested}</p>;
   const result = fill(t.keyResults[check.result], { model: check.model ?? "" });
   return <Notice tone={KEY_CHECK_TONE[check.result]}>{fill(t.keyTested, { when: formatDateTime(check.checkedAt, locale), result })}</Notice>;
+}
+
+/** Endpoint e modelo da classificação, para quem paga um provedor compatível com OpenAI em vez da OpenAI. */
+function ClassifyTarget({ engine, t, onChanged }: { engine: Engine; t: SettingsDictionary; onChanged(): void }) {
+  const save = useAction();
+  const [baseUrl, setBaseUrl] = useState(engine.baseUrl ?? "");
+  const [model, setModel] = useState(engine.classifyModel ?? "");
+  return (
+    <form
+      className="grid gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        // Em branco apaga a configuração: o motor volta ao endereço e ao modelo dele.
+        void save
+          .run(async () => {
+            await put(`engine.${engine.id}.base_url`, baseUrl.trim() || null);
+            await put(`engine.${engine.id}.classify_model`, model.trim() || null);
+          })
+          .then((ok) => ok && onChanged());
+      }}
+    >
+      <Field label={t.classifyBaseUrl} hint={t.classifyBaseUrlHint}>
+        <TextInput mono type="url" inputMode="url" autoComplete="off" placeholder={URL_PREFIX} className="max-w-md" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+      </Field>
+      <Field label={t.classifyModel} hint={t.classifyModelHint}>
+        <TextInput mono autoComplete="off" className="max-w-md" value={model} onChange={(event) => setModel(event.target.value)} />
+      </Field>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="submit" variant="secondary" busy={save.busy}>
+          {t.classifyTargetSave}
+        </Button>
+        <ActionStatus action={save} />
+      </div>
+    </form>
+  );
 }
 
 /** Chave de um motor: a tela só sabe se existe e o resultado do último teste. Para trocar, cola-se a nova. */
@@ -106,6 +141,7 @@ function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: Settin
         </form>
       ) : null}
       {engine.requiresKey && engine.keyConfigured ? <KeyCheckStatus check={engine.keyCheck} t={t} /> : null}
+      {engine.classifyTarget && canConfigure ? <ClassifyTarget engine={engine} t={t} onChanged={onChanged} /> : null}
       {testPostponed ? <Notice tone="warn">{t.keySavedNotTested}</Notice> : null}
       {test.error ? <Notice tone="fail">{test.error}</Notice> : null}
       {canConfigure && engine.keyConfigured && confirming ? (

@@ -32,6 +32,12 @@ const settings: SettingsDictionary = {
   keyNeverTested: "Clave aún no probada.",
   keyTested: "Probada el {when}: {result}",
   keySavedNotTested: "Clave guardada. La prueba quedó para dentro de unos minutos: este motor alcanzó su límite de pruebas.",
+  /** Endpoint y modelo de la clasificación, para quien paga un proveedor compatible con OpenAI. */
+  classifyBaseUrl: "Endpoint de la clasificación",
+  classifyBaseUrlHint: "Proveedor compatible con OpenAI, por ejemplo https://api.deepseek.com/v1. La clave de arriba es la que va a esta dirección. En blanco, la clasificación usa la dirección oficial del motor.",
+  classifyModel: "Modelo de la clasificación",
+  classifyModelHint: "El nombre que publica el proveedor, por ejemplo deepseek-chat. En blanco, la clasificación usa el modelo del motor.",
+  classifyTargetSave: "Guardar destino",
   keyResults: {
     accepted: "aceptada, con acceso al modelo {model}. La prueba no revisa el crédito: solo lee los datos del modelo, sin gastar.",
     rejected: "el proveedor rechazó la clave. Revisa que se haya copiado entera y que no esté revocada, o genera una nueva en el sitio del proveedor.",

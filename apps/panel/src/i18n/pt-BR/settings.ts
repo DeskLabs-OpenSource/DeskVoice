@@ -32,6 +32,12 @@ const settings = {
   /** `{when}` é a data do teste, formatada no idioma da tela; `{result}`, uma frase de `keyResults`. */
   keyTested: "Testada em {when}: {result}",
   keySavedNotTested: "Chave salva. O teste ficou para daqui a alguns minutos: o limite de testes deste motor foi atingido.",
+  /** Endpoint e modelo da classificação, para quem paga um provedor compatível com OpenAI. */
+  classifyBaseUrl: "Endpoint da classificação",
+  classifyBaseUrlHint: "Provedor compatível com OpenAI, por exemplo https://api.deepseek.com/v1. A chave acima é a que vai neste endereço. Em branco, a classificação usa o endereço oficial do motor.",
+  classifyModel: "Modelo da classificação",
+  classifyModelHint: "O nome que o provedor publica, por exemplo deepseek-chat. Em branco, a classificação usa o modelo do motor.",
+  classifyTargetSave: "Salvar destino",
   /** O teste só lê os dados do modelo no provedor: não abre sessão de voz e não gasta. */
   keyResults: {
     accepted: "aceita, com acesso ao modelo {model}. O teste não confere crédito: ele só lê os dados do modelo, sem gastar.",
