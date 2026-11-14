@@ -149,6 +149,7 @@ const timeline = {
     outcome_not_classified_body: {
       cost_ceiling: "A ligação já tinha atingido o teto de custo do agente, e a classificação custaria mais. Nada foi enviado ao provedor.",
       rejected: "O provedor recusou a chave do motor. Confira a chave em Configurações → Inteligência artificial.",
+      rejected_endpoint: "O provedor recusou a chave do endpoint da classificação. Confira a chave do endpoint em Configurações → Inteligência artificial.",
       model_unavailable: "A chave não dá acesso ao modelo de texto que classifica o desfecho ({model}). Confira no site do provedor se a conta tem acesso a ele.",
       no_credit: "O provedor diz que falta crédito ou que o teto de gasto da conta foi atingido.",
       region_unavailable: "O provedor não atende o país ou a região deste servidor.",
@@ -167,6 +168,7 @@ const timeline = {
       engine_cannot_analyze: "o motor de voz do agente não faz análise",
       cost_ceiling: "o teto de custo do agente já tinha sido atingido",
       rejected: "o provedor recusou a chave do motor",
+      rejected_endpoint: "o provedor recusou a chave do endpoint da classificação",
       model_unavailable: "a chave não dá acesso ao modelo de texto que analisa a ligação ({model})",
       no_credit: "o provedor diz que falta crédito ou que o teto de gasto da conta foi atingido",
       region_unavailable: "o provedor não atende o país ou a região deste servidor",

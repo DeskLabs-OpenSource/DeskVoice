@@ -209,6 +209,19 @@ describe("classify_call_outcome", () => {
     expect((await desfechoDe(callId))?.outcome).toBe("booked");
   });
 
+  it("chave do endpoint recusada: a linha do tempo marca que a chave era a do endpoint, não a do motor", async () => {
+    const { org, callId } = await comAgente("desfecho chave do endpoint recusada");
+    await comChave(org);
+    await liga(org, ANALYSIS_SETTING);
+    await comDestino(org, { baseUrl: "https://api.deepseek.com/v1", chave: CHAVE_DO_ENDPOINT });
+    await fala(org, callId, "Pode marcar quinta às dez, por favor.");
+
+    await roda(org, callId, erro(401));
+
+    expect(await falhasDe(callId)).toEqual([{ reason: "rejected", engine: MOTOR, model: "gpt-5-nano", status: 401, costCents: 0, endpoint: true }]);
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([{ reason: "rejected", engine: MOTOR, model: "gpt-5-nano", status: 401, costCents: 0, endpoint: true }]);
+  });
+
   it("sem destino configurado, o pedido é o de hoje: OpenAI, com o modelo de sempre e a chave do motor", async () => {
     const { org, callId } = await comAgente("desfecho sem destino");
     await comChave(org);
@@ -270,7 +283,7 @@ describe("classify_call_outcome", () => {
 
     expect(pedidos.map((pedido) => pedido.url)).toEqual(["https://api.deepseek.com/v1/chat/completions"]);
     // Sem status: o pedido não chegou a lugar nenhum além do endpoint, e nada dele vai à linha do tempo.
-    expect(await falhasDe(callId)).toEqual([{ reason: "endpoint_refused", engine: MOTOR, model: "gpt-5-nano", status: null, costCents: 0 }]);
+    expect(await falhasDe(callId)).toEqual([{ reason: "endpoint_refused", engine: MOTOR, model: "gpt-5-nano", status: null, costCents: 0, endpoint: true }]);
   });
 
   it("soma o que o provedor cobrou ao custo da chamada e ao extrato, pelo preço do modelo de texto", async () => {

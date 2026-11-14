@@ -148,6 +148,7 @@ const timeline: TimelineDictionary = {
     outcome_not_classified_body: {
       cost_ceiling: "La llamada ya había alcanzado el tope de costo del agente, y clasificar costaría más. No se envió nada al proveedor.",
       rejected: "El proveedor rechazó la clave del motor. Revisa la clave en Configuración → Inteligencia artificial.",
+      rejected_endpoint: "El proveedor rechazó la clave del endpoint de la clasificación. Revisa la clave del endpoint en Configuración → Inteligencia artificial.",
       model_unavailable: "La clave no da acceso al modelo de texto que clasifica el desenlace ({model}). Revisa en el sitio del proveedor si la cuenta tiene acceso a él.",
       no_credit: "El proveedor dice que falta crédito o que se alcanzó el tope de gasto de la cuenta.",
       region_unavailable: "El proveedor no atiende el país o la región de este servidor.",
@@ -166,6 +167,7 @@ const timeline: TimelineDictionary = {
       engine_cannot_analyze: "el motor de voz del agente no hace análisis",
       cost_ceiling: "el tope de costo del agente ya se había alcanzado",
       rejected: "el proveedor rechazó la clave del motor",
+      rejected_endpoint: "el proveedor rechazó la clave del endpoint de la clasificación",
       model_unavailable: "la clave no da acceso al modelo de texto que analiza la llamada ({model})",
       no_credit: "el proveedor dice que falta crédito o que se alcanzó el tope de gasto de la cuenta",
       region_unavailable: "el proveedor no atiende el país o la región de este servidor",

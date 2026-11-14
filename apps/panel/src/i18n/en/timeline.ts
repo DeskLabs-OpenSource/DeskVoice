@@ -148,6 +148,7 @@ const timeline: TimelineDictionary = {
     outcome_not_classified_body: {
       cost_ceiling: "The call had already reached the agent's cost ceiling, and classifying would cost more. Nothing was sent to the provider.",
       rejected: "The provider rejected the engine key. Check the key in Settings → Artificial intelligence.",
+      rejected_endpoint: "The provider rejected the classification endpoint key. Check the endpoint key in Settings → Artificial intelligence.",
       model_unavailable: "The key does not give access to the text model that classifies the outcome ({model}). Check on the provider's site whether the account has access to it.",
       no_credit: "The provider says credit is missing or the account spending limit was reached.",
       region_unavailable: "The provider does not serve the country or region of this server.",
@@ -166,6 +167,7 @@ const timeline: TimelineDictionary = {
       engine_cannot_analyze: "the agent's voice engine does not analyze calls",
       cost_ceiling: "the agent's cost ceiling had already been reached",
       rejected: "the provider rejected the engine key",
+      rejected_endpoint: "the provider rejected the classification endpoint key",
       model_unavailable: "the key does not give access to the text model that analyzes the call ({model})",
       no_credit: "the provider says credit is missing or the account spending limit was reached",
       region_unavailable: "the provider does not serve the country or region of this server",

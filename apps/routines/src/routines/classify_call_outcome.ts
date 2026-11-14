@@ -247,7 +247,8 @@ const routine: Routine = {
       // Sem a chave e sem o corpo do provedor: o motivo no vocabulário fechado e o status bastam.
       // Dois eventos quando as duas funções estão ligadas: cada um diz o que não aconteceu.
       const failed = async (reason: ClassifyFailure | ClassifyDestinationRefusal, status: number | null): Promise<void> => {
-        const details = { engine: pendente.engineId, model: result.model, status, costCents };
+        // `endpoint` diz à tela que a chave do pedido era a do endpoint configurado, não a do motor.
+        const details = { engine: pendente.engineId, model: result.model, status, costCents, ...(pendente.target.baseUrl !== undefined && { endpoint: true }) };
         if (pendente.outcome) await recordEvent(q, callId, "outcome_not_classified", { reason, ...details }, now);
         if (pendente.analysis) await notAnalyzed(q, callId, reason, details, now);
       };

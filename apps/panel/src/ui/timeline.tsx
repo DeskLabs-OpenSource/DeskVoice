@@ -8,6 +8,7 @@ import es from "../i18n/es/timeline";
 import { fill } from "../i18n/locales";
 import ptBR from "../i18n/pt-BR/timeline";
 import { useDict, useLocale } from "../i18n/provider";
+import { classifyReasonCode } from "./classify-reason";
 import { formatClock, formatDateTime, formatPhone } from "./format";
 import type { CallEvent, FollowUp, Person } from "./types";
 
@@ -54,7 +55,7 @@ type TimelineDictionary = typeof ptBR;
  * do tempo e ao detalhe da chamada: o teto (ou a falha) não aparece só num dos dois lugares.
  */
 export function analysisNotDoneText(e: TimelineDictionary["events"], payload: Record<string, unknown>): string {
-  const code = text(payload.reason);
+  const code = classifyReasonCode(payload);
   const known = Object.hasOwn(e.analysis_not_done_reasons, code) ? e.analysis_not_done_reasons[code] : undefined;
   return fill(e.analysis_not_done, { reason: known ? fill(known, { model: text(payload.model) }) : code });
 }
@@ -270,7 +271,7 @@ export function Timeline({
       case "cost_ceiling_reached":
         return { ...base, tone: "fail", icon: Coins, body: <Card tone="fail" title={e.cost_ceiling_reached}><p className="text-muted">{e.cost_ceiling_body}</p></Card> };
       case "outcome_not_classified": {
-        const body = e.outcome_not_classified_body[text(p.reason)];
+        const body = e.outcome_not_classified_body[classifyReasonCode(p)];
         return {
           ...base,
           tone: "fail",
