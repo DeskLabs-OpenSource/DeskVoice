@@ -1,0 +1,12 @@
+const timeline = {
+  events: {
+    no_answer_label: "Não é motivo: está fora de reasons.",
+  },
+  reasons: {
+    caller_hangup: "Quem ligou desligou.",
+    no_answer: "Ninguém atendeu.",
+    do_not_call: "O número está na lista de não ligar.",
+  },
+};
+
+export default timeline;

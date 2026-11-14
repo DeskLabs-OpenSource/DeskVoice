@@ -1,0 +1,1 @@
+finish({ status: "failed", endReason: "only_in_a_test" });

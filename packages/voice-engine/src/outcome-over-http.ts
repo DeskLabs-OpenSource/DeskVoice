@@ -1,5 +1,6 @@
 import { byStatus } from "./key-check";
-import type { OutcomeGuess } from "./outcome";
+import { ANALYSIS_TIMEOUT_MS, readAnalysisGuess, type AnalysisGuess } from "./analysis";
+import { readOutcomeGuess, type OutcomeGuess } from "./outcome";
 import { estimateCostCents } from "./pricing";
 import type { ClassifyFailure, ClassifyOptions, ClassifyResult, EnginePricing, KeyCheckResult, TranscribeResult, Usage } from "./types";
 
@@ -9,6 +10,12 @@ const scheduleTimeout = (fn: () => void, delayMs: number): (() => void) => {
   const timer = setTimeout(fn, delayMs);
   return () => clearTimeout(timer);
 };
+
+/** O que se leu de um 200: o palpite do desfecho e, no pedido completo, a análise. */
+export interface OutcomeReading {
+  guess: OutcomeGuess;
+  analysis?: AnalysisGuess;
+}
 
 export interface HttpRequest<T> {
   url: string;
@@ -26,7 +33,28 @@ export interface HttpRequest<T> {
   classify?: (status: number, body: unknown) => KeyCheckResult | undefined;
 }
 
-export type OutcomeRequest = HttpRequest<OutcomeGuess>;
+/**
+ * Lê o texto JSON que o provedor pôs na resposta: só o desfecho, ou o desfecho com a análise
+ * (`analyze`). Texto que não é JSON, ou fora da forma pedida, é `null`.
+ */
+export function readClassifyText(text: unknown, analyze: boolean): OutcomeReading | null {
+  if (typeof text !== "string") return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (analyze) return readAnalysisGuess(raw);
+  const guess = readOutcomeGuess(raw);
+  return guess ? { guess } : null;
+}
+
+/** O prazo do pedido: o de quem chamou, ou 30 s no pedido completo. Sem nada, o padrão de 10 s. */
+export const classifyOptionsFor = (options: ClassifyOptions, analyze: boolean): ClassifyOptions =>
+  analyze && options.timeoutMs === undefined ? { ...options, timeoutMs: ANALYSIS_TIMEOUT_MS } : options;
+
+export type OutcomeRequest = HttpRequest<OutcomeReading>;
 
 export type HttpResult<T> = { model: string; usage: Usage; costCents: number } & ({ ok: true; value: T } | { ok: false; failure: ClassifyFailure; status: number | null });
 
@@ -82,12 +110,12 @@ export async function postOverHttp<T>(request: HttpRequest<T>, options: Classify
   }
 }
 
-/** O desfecho por um `POST` com prazo: `postOverHttp` com o palpite no lugar do valor. */
+/** O desfecho por um `POST` com prazo: `postOverHttp` com o palpite (e, no pedido completo, a análise) no lugar do valor. */
 export async function classifyOutcomeOverHttp(request: OutcomeRequest, options: ClassifyOptions): Promise<ClassifyResult> {
   const result = await postOverHttp(request, options);
   if (!result.ok) return result;
   const { value, ...rest } = result;
-  return { ...rest, guess: value };
+  return { ...rest, ...value };
 }
 
 // Um lado de uma ligação longa leva mais que os 10 s de um texto curto para voltar transcrito.

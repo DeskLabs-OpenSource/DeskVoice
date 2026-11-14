@@ -1,3 +1,4 @@
+import type { AnalysisGuess } from "./analysis";
 import type { OutcomeGuess } from "./outcome";
 
 /** Definição de ferramenta no formato que os motores entendem (JSON Schema em `parameters`). */
@@ -136,7 +137,7 @@ export interface KeyCheckOptions {
   /** Sobrepõe a URL da API HTTP do provedor (testes apontam para um servidor falso). */
   baseUrl?: string;
   fetch?: typeof fetch;
-  /** Prazo da resposta. Padrão: 10 s. */
+  /** Prazo da resposta. Padrão: 10 s; 30 s no pedido completo (`analyze`). */
   timeoutMs?: number;
   /** Agendador do prazo (`setTimeout` por padrão). Devolve como cancelar. */
   schedule?: (fn: () => void, delayMs: number) => () => void;
@@ -173,11 +174,16 @@ export interface ClassifyInput {
   transcript: string;
   /** Ferramentas chamadas na ligação, pelo nome. */
   tools: readonly string[];
+  /**
+   * Pede o formato completo: o desfecho e a análise da ligação na mesma resposta. Só vale para motor
+   * com `analyzes`. Sem ele, o pedido é exatamente o só de desfecho.
+   */
+  analyze?: boolean;
 }
 
 export interface ClassifyOptions {
   fetch?: typeof fetch;
-  /** Prazo da resposta. Padrão: 10 s. */
+  /** Prazo da resposta. Padrão: 10 s; 30 s no pedido completo (`analyze`). */
   timeoutMs?: number;
   /** Agendador do prazo (`setTimeout` por padrão). Devolve como cancelar. */
   schedule?: (fn: () => void, delayMs: number) => () => void;
@@ -194,7 +200,8 @@ export type ClassifyFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">
  * chamada (um 200 fora da forma também foi cobrado).
  */
 export type ClassifyResult = { model: string; usage: Usage; costCents: number } & (
-  | { ok: true; guess: OutcomeGuess }
+  // `analysis` só no pedido completo, já na forma e antes da checagem contra a transcrição.
+  | { ok: true; guess: OutcomeGuess; analysis?: AnalysisGuess }
   // `status` é o HTTP da resposta; `null` quando ela não veio (prazo, rede).
   | { ok: false; failure: ClassifyFailure; status: number | null }
 );
@@ -248,6 +255,11 @@ export interface VoiceEngine {
    * `ok: false` com o motivo, que a rotina registra na linha do tempo da chamada.
    */
   classifyOutcome?(apiKey: string, input: ClassifyInput, options?: ClassifyOptions): Promise<ClassifyResult>;
+  /**
+   * Verdadeiro para motor cujo `classifyOutcome` atende `analyze` e devolve a análise da ligação.
+   * Motor sem a declaração não analisa, e a rotina registra o motivo na linha do tempo.
+   */
+  analyzes?: boolean;
 
   /**
    * Transcreve a gravação de uma chamada que ficou sem texto, um lado por vez. Opcional como
@@ -271,6 +283,14 @@ export interface VoiceEngine {
  */
 export const OUTCOME_SETTING = "calls.outcome_enabled";
 export const outcomeEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
+ * Análise da ligação no fim ligada, por organização (chave `calls.analysis_enabled` em `settings`).
+ * Ausente é desligada, de fábrica, pelo mesmo motivo do desfecho. Com ela ligada, o pedido ao
+ * provedor é o completo, e o desfecho é gravado junto. Só `true` liga.
+ */
+export const ANALYSIS_SETTING = "calls.analysis_enabled";
+export const analysisEnabledOf = (stored: unknown): boolean => stored === true;
 
 /**
  * Transcrever a gravação de uma chamada sem texto, por organização (chave `calls.transcription_enabled`).

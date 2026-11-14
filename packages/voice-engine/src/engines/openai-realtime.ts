@@ -38,8 +38,9 @@ import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
 import { checkKeyOverHttp } from "../key-check";
-import { classifyOutcomeOverHttp, transcribeOverHttp } from "../outcome-over-http";
-import { OUTCOME_GUESS_SCHEMA, outcomePrompt, readOutcomeGuess } from "../outcome";
+import { ANALYSIS_SCHEMA, analysisPrompt } from "../analysis";
+import { classifyOptionsFor, classifyOutcomeOverHttp, readClassifyText, transcribeOverHttp } from "../outcome-over-http";
+import { OUTCOME_GUESS_SCHEMA, outcomePrompt } from "../outcome";
 import type { ClassifyOptions, EnginePricing, KeyCheckResult, RecordingTranscriber, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
@@ -405,31 +406,29 @@ const engine: VoiceEngine = {
     return session;
   },
 
+  analyzes: true,
+
   async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
+    const analyze = input.analyze === true;
     return classifyOutcomeOverHttp(
       {
         url: `${options.baseUrl ?? DEFAULT_API_URL}/chat/completions`,
         headers: { Authorization: `Bearer ${apiKey}` },
         model: OUTCOME_MODEL,
         pricing: OUTCOME_PRICING,
+        // Sem `analyze`, o pedido é exatamente o só de desfecho: quem usa só o desfecho não paga a análise.
         body: JSON.stringify({
           model: OUTCOME_MODEL,
-          messages: [{ role: "user", content: outcomePrompt(input) }],
-          response_format: { type: "json_schema", json_schema: { name: "desfecho", strict: true, schema: OUTCOME_GUESS_SCHEMA } },
+          messages: [{ role: "user", content: analyze ? analysisPrompt(input) : outcomePrompt(input) }],
+          response_format: analyze
+            ? { type: "json_schema", json_schema: { name: "analise", strict: true, schema: ANALYSIS_SCHEMA } }
+            : { type: "json_schema", json_schema: { name: "desfecho", strict: true, schema: OUTCOME_GUESS_SCHEMA } },
         }),
-        read: (body) => {
-          const content = (body as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content;
-          if (typeof content !== "string") return null;
-          try {
-            return readOutcomeGuess(JSON.parse(content));
-          } catch {
-            return null;
-          }
-        },
+        read: (body) => readClassifyText((body as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content, analyze),
         usage: chatUsageOf,
         classify: classifyError,
       },
-      options,
+      classifyOptionsFor(options, analyze),
     );
   },
 

@@ -85,6 +85,11 @@ export async function startFakeWacalls() {
   const calls = new Map<string, FakeCall>();
   let nextCall = 1;
 
+  // O retrato que o broker manda ao conectar (`broker.go:207`): só as vivas.
+  const callList = () =>
+    [...calls.values()]
+      .filter((call) => call.status !== "ended")
+      .map((call) => ({ sessionId: call.sessionId, callId: call.id, owner: call.owner, direction: "incoming", peer: call.peer, startedAt: 0, status: call.status }));
   const listOf = () => [...sessions.values()].map(({ id, name, jid, state: s, paired }) => ({ id, name, jid, state: s, paired }));
   const emit = (event: object): void => {
     for (const stream of streams) stream.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -120,6 +125,7 @@ export async function startFakeWacalls() {
       if (method === "GET" && url.pathname === "/api/events") {
         response.writeHead(200, { "content-type": "text/event-stream" });
         response.write(`data: ${JSON.stringify({ type: "session-list", sessions: listOf() })}\n\n`);
+        response.write(`data: ${JSON.stringify({ type: "call-list", calls: callList() })}\n\n`);
         streams.add(response);
         response.on("close", () => streams.delete(response));
         return;
@@ -158,8 +164,9 @@ export async function startFakeWacalls() {
         if (method === "POST" && action === "accept") {
           const busy = [...calls.values()].some((other) => other !== found && other.owner === clientId && other.status !== "ended");
           if (busy) return json(response, 409, { error: "operator already on a call" });
-          if (state.refuseAccept) return json(response, 500, { error: "accept failed" });
+          // O dono fica gravado antes de o atendimento falhar (`handlers_call.go:118-127`).
           found.owner = clientId;
+          if (state.refuseAccept) return json(response, 500, { error: "accept failed" });
           return json(response, 200, { call: { callId: found.id } });
         }
         return json(response, 405, { error: "method not allowed" });
@@ -237,6 +244,12 @@ export async function startFakeWacalls() {
       calls.set(call.id, call);
       emit({ type: "incoming", sessionId: session.id, id: call.id, peer, peerName: "", peerPhotoUrl: "", ...(peerPhone && { peerPhone }), offeredAt: 0 });
       callStatus(call);
+      return call;
+    },
+    /** Uma ligação já atendida por `owner` (outro processo), sem evento: aparece só no `call-list` do próximo SSE. */
+    answeredBy(session: FakeSession, owner: string): FakeCall {
+      const call: FakeCall = { id: `c${nextCall++}`, sessionId: session.id, peer: "5531988887777@s.whatsapp.net", owner, offers: [], status: "connected", endReason: null, leg: null };
+      calls.set(call.id, call);
       return call;
     },
     /** O áudio com o WhatsApp ficou de pé (`ACTIVE`). */

@@ -158,6 +158,17 @@ const timeline: TimelineDictionary = {
     cost_ceiling: "The call reached the cost ceiling set on the agent.",
     engine_failed: "The voice engine failed.",
     script_finished: "The simulation script ended.",
+    shutdown: "DeskVoice was shut down or updated in the middle of the call.",
+    internal_error: "DeskVoice hit an internal error and ended the call.",
+    no_answer: "The call rang and nobody answered, or the caller gave up before it connected.",
+    web_never_connected: "The browser call never connected.",
+    whatsapp_answer_failed: "The agent could not answer the WhatsApp call, which kept ringing on the phone. Check the WhatsApp calls line in Health.",
+    transfer_unanswered: "The transfer was not answered.",
+    outbound_disabled: "Outbound calls were off.",
+    outside_window: "Outside the hours allowed for outbound calls.",
+    do_not_call: "The number is on the do-not-call list.",
+    daily_cap_reached: "The daily call limit of this line had been reached.",
+    attempts_exhausted: "The attempt limit for this person had been reached.",
   },
 };
 
