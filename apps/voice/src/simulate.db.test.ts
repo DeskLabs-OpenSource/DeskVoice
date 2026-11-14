@@ -4,7 +4,7 @@ import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { startSimulatedCall } from "./simulate";
-import { createAgent, createOrganization, kindsOf, sessionHarness, simulatedSpeechMs } from "./testing/db";
+import { callOf, createAgent, createOrganization, kindsOf, sessionHarness, simulatedSpeechMs } from "./testing/db";
 import { manualTime, waitFor } from "./testing/helpers";
 
 const { app, owner } = openTestDbs();
@@ -59,6 +59,22 @@ describe("chamada simulada no ritmo de uma ligação (issue #111)", { timeout: 1
     expect(gap).toBeGreaterThanOrEqual(heardMs + 200);
     expect(gap).toBeLessThan(heardMs + 200 + 100);
     expect(call.transport.ended).toBe(true);
+    await harness.approvals.close();
+  });
+
+  it("a simulada fica registrada como simulada, na coluna e no começo da linha do tempo, e não como linha telefônica", async () => {
+    const organizationId = await createOrganization(app, "simulate-channel");
+    const agentId = await createAgent(app, organizationId);
+    const harness = await sessionHarness(app);
+    const call = await startSimulatedCall(harness.deps, { organizationId, agentId }, { script: [{ end: true }], tools: [] });
+    if ("code" in call) throw new Error(call.message);
+    expect((await callOf(app, call.callId)).channel).toBe("simulated");
+    await waitFor(async () => (await kindsOf(app, call.callId)).includes("call_started"), "the call to start");
+    const started = await withOrg(app, organizationId, (q) =>
+      q.one<{ payload: { channel?: string } }>("select payload from call_events where call_id = $1 and kind = 'call_started'", [call.callId]),
+    );
+    expect(started?.payload.channel).toBe("simulated");
+    await call.session.done;
     await harness.approvals.close();
   });
 });

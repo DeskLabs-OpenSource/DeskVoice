@@ -52,6 +52,8 @@ const common: CommonDictionary = {
     refused: "Rechazada",
   },
   unknownCaller: "Número no identificado",
+  channel: { phone: "Línea telefónica", web: "Navegador", whatsapp: "WhatsApp", simulated: "Simulada" },
+  noNumber: { web: "Llamada desde el navegador", simulated: "Llamada simulada" },
   noAgent: "Sin agente",
   readOnly: "Tu rol es de operador: sigues las llamadas y respondes aprobaciones. Para cambiar esta pantalla, habla con un dueño o administrador.",
   errors: {

@@ -59,8 +59,8 @@ async function seed(org: string, options: Seed = {}): Promise<string> {
   const callId = await insert(
     panel.app,
     org,
-    `insert into calls (organization_id, agent_id, direction, from_e164, status, engine, started_at, ended_at, cost_cents)
-     values ($1, $2, 'inbound', '+5511988887777', 'completed', $3, $4, $5, $6) returning id`,
+    `insert into calls (organization_id, agent_id, direction, channel, from_e164, status, engine, started_at, ended_at, cost_cents)
+     values ($1, $2, 'inbound', 'phone', '+5511988887777', 'completed', $3, $4, $5, $6) returning id`,
     [org, agentId, engine, startedAt, new Date(startedAt.getTime() + 60_000), options.costCents ?? 0],
   );
   await withOrg(panel.app, org, async (q) => {

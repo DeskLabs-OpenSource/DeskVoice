@@ -50,6 +50,8 @@ const common = {
     refused: "Recusada",
   },
   unknownCaller: "Número não identificado",
+  channel: { phone: "Linha telefônica", web: "Navegador", whatsapp: "WhatsApp", simulated: "Simulada" },
+  noNumber: { web: "Chamada pelo navegador", simulated: "Chamada simulada" },
   noAgent: "Sem agente",
   readOnly: "Seu papel é de operador: você acompanha chamadas e responde aprovações. Para alterar esta tela, fale com um dono ou administrador.",
   errors: {

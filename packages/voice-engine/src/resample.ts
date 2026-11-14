@@ -12,40 +12,95 @@ function toBuffer(samples: ArrayLike<number>): Buffer {
   return out;
 }
 
+/** Meia largura do núcleo, em amostras de entrada: quatro ciclos da frequência de corte. */
+function kernelHalf(cutoff: number): number {
+  return Math.ceil(4 / cutoff);
+}
+
+/**
+ * Núcleo do passa-baixa: sinc com janela de Hann, avaliado a `t` amostras de entrada do centro.
+ * `cutoff` é fração da taxa de amostragem de entrada.
+ */
+function kernel(cutoff: number, half: number, t: number): number {
+  const sinc = t === 0 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * t) / (Math.PI * t);
+  return sinc * (0.5 + 0.5 * Math.cos((Math.PI * t) / (half + 1)));
+}
+
+/** Borda: repete a primeira/última amostra em vez de supor silêncio, que geraria um clique. */
+function at(input: Int16Array, index: number): number {
+  return input[Math.max(0, Math.min(input.length - 1, index))] ?? 0;
+}
+
 /** Passa-baixa FIR (sinc com janela de Hann). `cutoff` é fração da taxa de amostragem de entrada. */
 function lowPass(input: Int16Array, cutoff: number): Float64Array {
-  const half = Math.ceil(4 / cutoff);
+  const half = kernelHalf(cutoff);
   const taps = new Float64Array(half * 2 + 1);
   let sum = 0;
   for (let i = -half; i <= half; i++) {
-    const sinc = i === 0 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * i) / (Math.PI * i);
-    const tap = sinc * (0.5 + 0.5 * Math.cos((Math.PI * i) / (half + 1)));
+    const tap = kernel(cutoff, half, i);
     taps[i + half] = tap;
     sum += tap;
   }
   const out = new Float64Array(input.length);
   for (let n = 0; n < input.length; n++) {
     let acc = 0;
-    for (let k = -half; k <= half; k++) {
-      // Borda: repete a primeira/última amostra em vez de supor silêncio, que geraria um clique.
-      const index = Math.max(0, Math.min(input.length - 1, n + k));
-      acc += (input[index] ?? 0) * (taps[k + half] ?? 0);
-    }
+    for (let k = -half; k <= half; k++) acc += at(input, n + k) * (taps[k + half] ?? 0);
     out[n] = acc / sum;
   }
   return out;
 }
 
 /**
- * Reamostra PCM16 LE mono. Subir: interpolação linear. Descer: passa-baixa abaixo da nova
- * frequência de Nyquist antes de decimar, para o que estava acima dela não virar aliasing.
+ * Sobe de taxa com o mesmo passa-baixa da descida, avaliado entre as amostras (interpolação
+ * limitada em banda). A interpolação linear deixava cópias espelhadas da voz entre a Nyquist de
+ * origem e a de destino (de 8 para 16 kHz, a imagem de 3 kHz em 5 kHz ficava só 7 dB abaixo).
+ * Os coeficientes de cada fase entre amostras são calculados uma vez por chamada.
+ */
+function upsample(input: Int16Array, fromHz: number, toHz: number, length: number): Float64Array {
+  const cutoff = 0.45;
+  const half = kernelHalf(cutoff);
+  const phases = new Map<number, { taps: Float64Array; sum: number }>();
+  const out = new Float64Array(length);
+  for (let i = 0; i < length; i++) {
+    // Posição i·from/to separada em amostra base e fase (resto/to), em inteiros para a fase repetir.
+    const numerator = i * fromHz;
+    const remainder = numerator % toHz;
+    const base = Math.round((numerator - remainder) / toHz);
+    const phase = remainder / toHz;
+    let entry = phases.get(remainder);
+    if (!entry) {
+      // Taps para as amostras base-half .. base+half+1, à distância (phase - k) da posição.
+      const taps = new Float64Array(half * 2 + 2);
+      let sum = 0;
+      for (let k = -half; k <= half + 1; k++) {
+        const tap = kernel(cutoff, half, phase - k);
+        taps[k + half] = tap;
+        sum += tap;
+      }
+      entry = { taps, sum };
+      phases.set(remainder, entry);
+    }
+    let acc = 0;
+    for (let k = -half; k <= half + 1; k++) acc += at(input, base + k) * (entry.taps[k + half] ?? 0);
+    out[i] = acc / entry.sum;
+  }
+  return out;
+}
+
+/**
+ * Reamostra PCM16 LE mono, cada pedaço isolado. Os dois sentidos filtram com passa-baixa a 45% da
+ * menor das taxas: ao descer, antes de decimar, para o que estava acima da nova Nyquist não virar
+ * aliasing; ao subir, na própria interpolação, para não criar imagem espelhada acima da Nyquist
+ * de origem.
  */
 export function resample(pcm16: Buffer, fromHz: number, toHz: number): Buffer {
   if (!(fromHz > 0) || !(toHz > 0)) throw new RangeError(`taxa de amostragem inválida: ${fromHz} -> ${toHz}`);
   const input = toSamples(pcm16);
   if (fromHz === toHz || input.length === 0) return toBuffer(input);
-  const source = toHz < fromHz ? lowPass(input, (0.45 * toHz) / fromHz) : input;
-  const out = new Float64Array(Math.round((input.length * toHz) / fromHz));
+  const length = Math.round((input.length * toHz) / fromHz);
+  if (toHz > fromHz) return toBuffer(upsample(input, fromHz, toHz, length));
+  const source = lowPass(input, (0.45 * toHz) / fromHz);
+  const out = new Float64Array(length);
   const step = fromHz / toHz;
   for (let i = 0; i < out.length; i++) {
     const position = i * step;

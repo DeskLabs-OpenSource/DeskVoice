@@ -13,7 +13,7 @@ import ptBR from "../../../../i18n/pt-BR/timeline";
 import { useDict, useLocale } from "../../../../i18n/provider";
 import { api, useApi } from "../../../../ui/api";
 import { useErrorText } from "../../../../ui/errors";
-import { formatDateTime, formatDuration, formatMoney, formatPhone, secondsBetween } from "../../../../ui/format";
+import { formatCaller, formatDateTime, formatDuration, formatMoney, secondsBetween } from "../../../../ui/format";
 import { Badge, Button, Notice, Skeleton, TextInput, type Tone } from "../../../../ui/kit";
 import { useLive, useNow } from "../../../../ui/live";
 import { useCanConfigure } from "../../../../ui/me";
@@ -77,11 +77,11 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
       <header className="grid gap-5">
         {back}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <h1 className="data text-[1.75rem] leading-tight font-medium tracking-[-0.02em]">{formatPhone(data.direction === "outbound" ? data.to : data.from) || common.unknownCaller}</h1>
+          <h1 className="data text-[1.75rem] leading-tight font-medium tracking-[-0.02em]">{formatCaller(data, common)}</h1>
           <Badge tone={STATUS_TONE[data.status]} live={live}>
             {common.callStatus[data.status]}
           </Badge>
-          <span className="text-muted">{t.direction[data.direction]}</span>
+          <span className="text-muted">{t.direction[data.direction]}{data.channel === "phone" ? "" : ` · ${common.channel[data.channel]}`}</span>
         </div>
         {/* Métricas em linha, separadas por fio: sem grade de cartões. */}
         <dl className="grid grid-cols-2 gap-4 border-y border-line py-4 sm:flex sm:flex-wrap">

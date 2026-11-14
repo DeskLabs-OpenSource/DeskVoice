@@ -31,7 +31,7 @@ async function scene(label: string, options: { ownedBy?: "person" | "team"; dire
     org,
     options.ownedBy === "team" ? null : person,
   ]);
-  const call = await insert(app, "insert into calls (id, organization_id, agent_id, direction, from_e164, to_e164, status, started_at) values ($1, $2, $3, $4, '+5531999990001', '+5531999990002', 'in_progress', $5)", [
+  const call = await insert(app, "insert into calls (id, organization_id, agent_id, direction, channel, from_e164, to_e164, status, started_at) values ($1, $2, $3, $4, 'phone', '+5531999990001', '+5531999990002', 'in_progress', $5)", [
     org,
     agent,
     options.direction ?? "inbound",

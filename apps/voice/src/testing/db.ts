@@ -113,7 +113,7 @@ export async function createPhoneNumber(app: Db, organizationId: string, trunkId
 export async function createCall(app: Db, organizationId: string, agentId: string, at: Date, direction: "inbound" | "outbound" = "inbound"): Promise<string> {
   const id = randomUUID();
   await withSystem(app, (q) =>
-    q.exec("insert into calls (id, organization_id, agent_id, direction, status, started_at) values ($1, $2, $3, $4, 'ringing', $5)", [id, organizationId, agentId, direction, at]),
+    q.exec("insert into calls (id, organization_id, agent_id, direction, channel, status, started_at) values ($1, $2, $3, $4, 'phone', 'ringing', $5)", [id, organizationId, agentId, direction, at]),
   );
   return id;
 }
@@ -129,11 +129,12 @@ export interface CallRow {
   from_e164: string | null;
   to_e164: string | null;
   direction: string;
+  channel: string;
 }
 
 export const callOf = async (app: Db, callId: string): Promise<CallRow> => {
   const row = await withSystem(app, (q) =>
-    q.one<CallRow>("select status, end_reason, engine, cost_cents, answered_at, ended_at, agent_id, from_e164, to_e164, direction from calls where id = $1", [callId]),
+    q.one<CallRow>("select status, end_reason, engine, cost_cents, answered_at, ended_at, agent_id, from_e164, to_e164, direction, channel from calls where id = $1", [callId]),
   );
   if (!row) throw new Error(`Call ${callId} not found`);
   return row;

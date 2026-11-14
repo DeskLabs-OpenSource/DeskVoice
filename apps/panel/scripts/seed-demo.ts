@@ -59,8 +59,8 @@ try {
     const trunk = await id(q, "insert into trunks (organization_id, name, host, username, auth_mode, caller_id_e164) values ($1, 'Operadora Exemplo', 'sip.exemplo.com.br', '553132221100', 'register', '+553132221100') returning id", [org]);
     await id(q, "insert into phone_numbers (organization_id, trunk_id, e164, agent_id) values ($1, $2, '+553132221100', $3) returning id", [org, trunk, lia]);
 
-    const callSql = `insert into calls (organization_id, agent_id, direction, from_e164, to_e164, status, end_reason, engine, started_at, answered_at, ended_at, cost_cents, summary)
-                     values ($1, $2, 'inbound', $3, '+553132221100', $4, $5, $6, $7, $8, $9, $10, $11) returning id`;
+    const callSql = `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, engine, started_at, answered_at, ended_at, cost_cents, summary)
+                     values ($1, $2, 'inbound', 'phone', $3, '+553132221100', $4, $5, $6, $7, $8, $9, $10, $11) returning id`;
     const usageSql = "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, at) values ($1, $2, $3, $4, $5, $6, $7, $8) returning id";
 
     // 1. A chamada completa: remarcação com isenção de taxa aprovada, tarefa e transferência.
