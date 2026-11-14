@@ -61,7 +61,7 @@ try {
 
     const callSql = `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, engine, started_at, answered_at, ended_at, cost_cents, summary)
                      values ($1, $2, 'inbound', 'phone', $3, '+553132221100', $4, $5, $6, $7, $8, $9, $10, $11) returning id`;
-    const usageSql = "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, at) values ($1, $2, $3, $4, $5, $6, $7, $8) returning id";
+    const usageSql = "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, ($7::int)::bigint * 1000000, $8) returning id";
 
     // 1. A chamada completa: remarcação com isenção de taxa aprovada, tarefa e transferência.
     const started = ago(42 * 60);

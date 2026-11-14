@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimateCostCents } from "./pricing";
+import { estimateCostCents, estimateCostMicrocents } from "./pricing";
 
 const base = { checkedOn: "2026-11-10", source: "teste" };
 
@@ -27,5 +27,21 @@ describe("estimateCostCents", () => {
 
   it("não cobra um centavo a mais por ruído de ponto flutuante", () => {
     expect(estimateCostCents({ ...base, centsPerMinute: 0.1 }, { seconds: 1800 })).toBe(3);
+  });
+
+  it("o micro-centavo guarda o que o centavo arredonda: uma leitura de ligação custa 0,034 centavo", () => {
+    // Pelo preço do gpt-5-nano (5 centavos por milhão de entrada, 40 por milhão de saída), a
+    // transcrição de 6 000 caracteres e a resposta curta dão 0,034 centavo — o valor que, em
+    // centavo inteiro, virava 1 centavo, trinta vezes a tabela.
+    const nano = { ...base, centsPerMillionInputTokens: 5, centsPerMillionOutputTokens: 40 };
+    expect(estimateCostMicrocents(nano, { inputTokens: 6_000, outputTokens: 100 })).toBe(34_000);
+    expect(estimateCostCents(nano, { inputTokens: 6_000, outputTokens: 100 })).toBe(1);
+  });
+
+  it("não perde token: um token de entrada do gpt-5-nano custa 5 micro-centavos", () => {
+    const nano = { ...base, centsPerMillionInputTokens: 5 };
+    expect(estimateCostMicrocents(nano, { inputTokens: 1 })).toBe(5);
+    expect(estimateCostMicrocents(nano, {})).toBe(0);
+    expect(estimateCostMicrocents({ ...base, centsPerMinute: 6 }, { seconds: 60 })).toBe(6_000_000);
   });
 });
