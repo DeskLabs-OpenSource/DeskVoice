@@ -59,7 +59,7 @@ test("ambiente: fora do OpenAI a opção some, e um agente em Barulhento que tro
   await expect(warning).toHaveCount(0);
 
   // Troca para o Gemini: o Barulhento não fica escondido; o campo segue à vista, com o aviso.
-  await page.getByLabel(agents.engine, { exact: true }).selectOption("gemini-live");
+  await page.getByRole("combobox", { name: agents.engine, exact: true }).selectOption("gemini-live");
   // As vozes do Gemini na lista provam que a tela já está no motor do Gemini.
   const geminiVoice = page.locator("option", { hasText: /^Zephyr\b/ });
   await expect(geminiVoice).toHaveCount(1);
