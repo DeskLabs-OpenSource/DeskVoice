@@ -154,6 +154,7 @@ const timeline = {
     cost_ceiling: "A chamada atingiu o teto de custo definido no agente.",
     engine_failed: "O motor de voz falhou.",
     script_finished: "O roteiro da simulação terminou.",
+    shutdown: "O DeskVoice foi desligado ou atualizado no meio da chamada.",
     internal_error: "O DeskVoice teve um erro interno e encerrou a chamada.",
     no_answer: "A ligação tocou e ninguém atendeu, ou quem ligou desistiu antes de conectar.",
     web_never_connected: "A ligação pelo navegador não chegou a conectar.",

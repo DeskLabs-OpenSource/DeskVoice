@@ -154,6 +154,7 @@ const timeline: TimelineDictionary = {
     cost_ceiling: "La llamada alcanzó el tope de costo definido en el agente.",
     engine_failed: "El motor de voz falló.",
     script_finished: "El guion de la simulación terminó.",
+    shutdown: "DeskVoice se apagó o se actualizó en medio de la llamada.",
     internal_error: "DeskVoice tuvo un error interno y terminó la llamada.",
     no_answer: "La llamada sonó y nadie contestó, o quien llamó desistió antes de conectar.",
     web_never_connected: "La llamada desde el navegador no llegó a conectarse.",

@@ -154,6 +154,7 @@ const timeline: TimelineDictionary = {
     cost_ceiling: "The call reached the cost ceiling set on the agent.",
     engine_failed: "The voice engine failed.",
     script_finished: "The simulation script ended.",
+    shutdown: "DeskVoice was shut down or updated in the middle of the call.",
     internal_error: "DeskVoice hit an internal error and ended the call.",
     no_answer: "The call rang and nobody answered, or the caller gave up before it connected.",
     web_never_connected: "The browser call never connected.",

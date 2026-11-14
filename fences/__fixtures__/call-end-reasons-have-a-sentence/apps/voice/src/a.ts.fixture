@@ -3,4 +3,5 @@ export async function a(q: Q, closeUnanswered: Close, ended: boolean): Promise<v
   finish({ status: "failed", endReason: "ring_timeout" });
   finish({ status: "completed", endReason: "caller_hangup" });
   await closeUnanswered("org", "call", ended ? "caller_hangup" : "wa_failed", `Aviso para o painel.`);
+  for (const session of sessions) session.stop("server_going_down");
 }
