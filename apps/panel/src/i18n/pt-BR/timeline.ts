@@ -63,6 +63,7 @@ const timeline = {
   stopRecordingNotRecording: "Esta chamada não está sendo gravada. Nada foi parado nem registrado.",
   stopRecordingHint: "Não há como retomar a gravação nesta chamada.",
   summaryPending: "O resumo é escrito depois que a chamada termina.",
+  summaryPurged: "O resumo saiu com o prazo de guarda das conversas.",
   empty: "Nenhum evento registrado nesta chamada ainda.",
   notFound: "Esta chamada não existe ou foi apagada.",
   speakers: { user: "Quem ligou", agent: "Agente" },

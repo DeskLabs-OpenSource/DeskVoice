@@ -204,8 +204,11 @@ organização. Só dono ou administrador muda.
 - **Vazio guarda para sempre.** É assim que toda instalação começa, e é como era antes de o prazo
   existir.
 - **Preenchido, é um número de dias**, de 30 a 3650. O piso de 30 dias protege a conversa recente.
-- Depois do prazo, o texto de cada fala é trocado por um marcador. A chamada, o horário, o resumo e
-  o resto da linha do tempo continuam, e a linha do tempo diz que ali houve uma fala apagada.
+- Depois do prazo, o texto de cada fala é trocado por um marcador. A chamada, o horário e o resto da
+  linha do tempo continuam, e a linha do tempo diz que ali houve uma fala apagada.
+- **O resumo da chamada sai junto.** Ele é escrito a partir da conversa e guarda frases de quem
+  ligou; vencido o prazo da transcrição da mesma chamada, o texto dele vira um marcador, e a tela
+  da chamada diz que o resumo saiu com o prazo.
 - A troca roda logo que o prazo é gravado e, daí em diante, uma vez por dia.
 - **A gravação do áudio sai junto.** Quando a gravação está ligada, o arquivo de cada chamada
   mais antiga que o prazo é apagado na mesma passagem, e o registro conta quantos saíram.
@@ -219,11 +222,12 @@ minuto de chamada ocupa cerca de 1,9 MB no disco; é a conta do formato (dois ca
 bits), e não uma medição. Sem prazo, o disco cresce sem limite, e a tela avisa. Com menos de 1 GiB
 livre, a chamada segue sem gravar, e a linha do tempo dela diz isso.
 
-Quatro lugares guardam dado tirado da conversa, e **o prazo só alcança os dois primeiros**:
+Quatro lugares guardam dado tirado da conversa, e **o prazo alcança os três primeiros**:
 
 - **a transcrição**, nos eventos da chamada: sai com o prazo;
 - **a gravação do áudio**, quando ligada: sai com o prazo;
-- **o resumo da chamada**, escrito a partir da conversa: fica;
+- **o resumo da chamada**, escrito a partir da conversa: sai com o prazo da transcrição da mesma
+  chamada, e o que fica no lugar é um marcador;
 - **os argumentos das ferramentas** que o agente usou, por exemplo o texto de uma mensagem enviada
   por WhatsApp: ficam na linha do tempo.
 

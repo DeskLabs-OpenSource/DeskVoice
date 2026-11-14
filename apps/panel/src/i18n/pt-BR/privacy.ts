@@ -12,13 +12,13 @@ const privacy = {
   recordingStates: { on: "ligada", off: "desligada" },
   retentionTitle: "Prazo de guarda das conversas",
   retentionLead:
-    "A transcrição de cada ligação, o que quem ligou e o agente disseram, fica no banco até sair do prazo. Depois dele, o texto é trocado por um marcador e a gravação, quando houver, é apagada; a chamada, o horário, o resumo e o resto da linha do tempo continuam. As pendências fechadas há mais tempo que o prazo, contado do fecho, também saem; a pendência aberta fica até alguém fechar.",
+    "A transcrição de cada ligação, o que quem ligou e o agente disseram, fica no banco até sair do prazo. Depois dele, o texto é trocado por um marcador e a gravação, quando houver, é apagada; a chamada, o horário e o resto da linha do tempo continuam. O resumo da chamada é escrito a partir das falas e sai junto, e a tela diz que ele saiu. As pendências fechadas há mais tempo que o prazo, contado do fecho, também saem; a pendência aberta fica até alguém fechar.",
   retentionDays: "Guardar por (dias)",
   retentionHint: "Vazio guarda para sempre. O menor prazo é de {min} dias.",
   currentForever: "Hoje esta organização guarda a transcrição para sempre.",
   currentDays: "Hoje esta organização guarda a transcrição por {days} dias.",
   irreversible:
-    "O texto que sai não volta, nem por este painel nem pelo servidor. Os backups já feitos continuam com o texto até serem descartados. O resumo da chamada e os dados que as ferramentas enviaram não saem com o prazo.",
+    "O texto que sai não volta, nem por este painel nem pelo servidor. Os backups já feitos continuam com o texto até serem descartados. Os dados que as ferramentas enviaram não saem com o prazo.",
   save: "Salvar prazo",
   confirmTitle: "Apagar o texto das conversas com mais de {days} dias?",
   confirmBody:
@@ -56,7 +56,7 @@ const privacy = {
   historyEmpty: "Nada registrado ainda.",
   history: {
     transcript_retention_changed: "{who} mudou o prazo de guarda de {from} para {to}.",
-    transcripts_purged: "O texto das falas com mais de {days} dias foi apagado pelo prazo. Falas apagadas: {count}.",
+    transcripts_purged: "O texto das falas e o resumo das chamadas com mais de {days} dias foram apagados pelo prazo. Falas e resumos apagados: {count}.",
     caller_data_exported: "{who} exportou os dados de {phone}. Chamadas: {calls}. Eventos: {events}.",
     call_recording_changed: "{who} deixou a gravação das chamadas {state}.",
     caller_data_erased: "{who} apagou, a pedido de quem ligou, os dados do telefone terminado em {suffix}. Chamadas: {calls}. Gravações: {recordings}.",

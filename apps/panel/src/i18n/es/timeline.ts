@@ -64,6 +64,7 @@ const timeline: TimelineDictionary = {
   stopRecordingNotRecording: "Esta llamada no se está grabando. No se detuvo ni se registró nada.",
   stopRecordingHint: "No se puede reanudar la grabación en esta llamada.",
   summaryPending: "El resumen se escribe cuando la llamada termina.",
+  summaryPurged: "El resumen salió con el plazo de guarda de las conversaciones.",
   empty: "Todavía no hay eventos registrados en esta llamada.",
   notFound: "Esta llamada no existe o fue borrada.",
   speakers: { user: "Quien llamó", agent: "Agente" },

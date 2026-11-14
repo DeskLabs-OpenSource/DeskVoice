@@ -64,6 +64,8 @@ export interface CallDetail extends Call {
   analysis: StoredCallAnalysis | null;
   /** Havia análise gravada, mas fora da forma: a tela diz isso em vez de mostrar a seção. */
   analysisUnreadable: boolean;
+  /** O resumo saiu com o prazo de guarda (`calls.summary` virou marcador). */
+  summaryPurged: boolean;
   /** O conteúdo saiu a pedido do titular (`calls.erased_at`). */
   erased: boolean;
 }

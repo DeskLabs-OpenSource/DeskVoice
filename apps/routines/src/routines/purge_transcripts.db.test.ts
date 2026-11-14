@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { closeFollowUp, createFollowUp, recordingPath, withOrg, withSystem } from "@deskvoice/core";
+import { ERASED_TEXT, PURGED_SUMMARY_TEXT, closeFollowUp, createFollowUp, recordingPath, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { createCall, createOrganization, createUser, depsFor, openTestDbs, putSetting, t0, task, tasksOf } from "../../test/helpers";
 import purgeTranscripts from "./purge_transcripts";
@@ -22,6 +22,8 @@ async function addEvent(org: string, callId: string, kind: string, payload: obje
   return row?.id ?? "";
 }
 const payloadOf = async (id: string): Promise<unknown> => (await withSystem(app, (q) => q.one<{ payload: unknown }>("select payload from call_events where id = $1", [id])))?.payload;
+const summaryOf = async (callId: string): Promise<string | null> =>
+  (await withSystem(app, (q) => q.one<{ summary: string | null }>("select summary from calls where id = $1", [callId])))?.summary ?? null;
 const orgEventsOf = (org: string) =>
   withSystem(app, (q) => q.many<{ kind: string; actor_user_id: string | null; payload: Record<string, unknown> }>("select kind, actor_user_id, payload from organization_events where organization_id = $1 order by id", [org]));
 const run = (org: string): Promise<void> => purgeTranscripts.run(task(org, "purge_transcripts"), depsFor(app));
@@ -67,6 +69,38 @@ describe("purge_transcripts", () => {
     expect(await orgEventsOf(other)).toEqual([]);
     expect((await tasksOf(app, org)).map(({ kind, status, run_at }) => ({ kind, status, run_at }))).toEqual([
       { kind: "purge_transcripts", status: "queued", run_at: new Date(t0.getTime() + DAY_MS) },
+    ]);
+  });
+
+  // O resumo é escrito a partir das falas e guarda "Cliente: ...": vencido o prazo da transcrição, a
+  // linha da chamada fica, mas o texto do resumo sai com ela.
+  it("troca o resumo da chamada vencida pelo marcador, deixa o da chamada dentro do prazo e conta os dois tipos de texto no evento", async () => {
+    const org = await createOrganization(app, "purge summary");
+    await putSetting(app, org, "transcripts.retention_days", 30, false);
+    const oldCall = await createCall(app, org, daysAgo(40));
+    const recentCall = await createCall(app, org, daysAgo(29));
+    const erasedCall = await createCall(app, org, daysAgo(45));
+    const oldSpeech = "Desfecho: concluída.\nConversa:\nCliente: Meu CPF é 000.000.000-00.\nAgente: Anotado.";
+    const recentSpeech = "Desfecho: concluída.\nConversa:\nCliente: Queria saber o horário.\nAgente: Abrimos às nove.";
+    await withSystem(app, async (q) => {
+      await q.exec("update calls set summary = $2 where id = $1", [oldCall, oldSpeech]);
+      await q.exec("update calls set summary = $2 where id = $1", [recentCall, recentSpeech]);
+      await q.exec("update calls set summary = $2, erased_at = $3 where id = $1", [erasedCall, ERASED_TEXT, daysAgo(44)]);
+    });
+    await addEvent(org, oldCall, "transcript_user", { text: "Meu CPF é 000.000.000-00." }, daysAgo(31));
+
+    await run(org);
+    await run(org);
+
+    // Nenhuma fala de quem ligou sobra no resumo da chamada vencida, e a linha da chamada continua lá.
+    expect(await summaryOf(oldCall)).toBe(PURGED_SUMMARY_TEXT);
+    expect(await summaryOf(oldCall)).not.toContain("Cliente:");
+    // Dentro do prazo, o resumo inteiro fica. O apagamento a pedido do titular já tem o marcador dele e não é reescrito.
+    expect(await summaryOf(recentCall)).toBe(recentSpeech);
+    expect(await summaryOf(erasedCall)).toBe(ERASED_TEXT);
+    // A contagem do evento soma a fala trocada e o resumo trocado: 1 + 1.
+    expect(await orgEventsOf(org)).toEqual([
+      { kind: "transcripts_purged", actor_user_id: null, payload: { count: 2, retentionDays: 30, before: daysAgo(30).toISOString() } },
     ]);
   });
 

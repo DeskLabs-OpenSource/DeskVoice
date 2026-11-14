@@ -55,6 +55,12 @@ const PURGE_ANALYSIS_SQL = `
 export const PURGED_TRANSCRIPT = { purged: true } as const;
 
 /**
+ * O que fica no lugar do resumo de uma chamada cuja conversa saiu pelo prazo: a tela diz que houve
+ * resumo, sem o resumo. Mesma ideia do marcador da fala, num campo de texto (`calls.summary`).
+ */
+export const PURGED_SUMMARY_TEXT = "[resumo apagado pelo prazo de guarda]";
+
+/**
  * Troca o texto das falas (`transcript_user`, `transcript_agent`) gravadas antes de `before` pelo
  * marcador, e devolve quantas trocou. É um dos dois caminhos que reescrevem `call_events`; o outro é o
  * apagamento a pedido do titular (`eraseCaller`). Fala já
@@ -70,6 +76,11 @@ export const PURGED_TRANSCRIPT = { purged: true } as const;
  *
  * O motivo do pedido para parar a gravação (`calls.recording_pause_reason` e o `reason` do evento
  * `recording_paused`) é fala de quem ligou e sai junto. Fica o fato: quando parou e por quem.
+ *
+ * O resumo (`calls.summary`) é escrito a partir das falas e guarda frases de quem ligou ("Cliente:
+ * ..."): nas chamadas começadas antes de `before`, vira `PURGED_SUMMARY_TEXT` e entra na contagem
+ * devolvida, junto com as falas. O resumo de chamada apagada a pedido do titular não é tocado: ele
+ * já tem o marcador do apagamento, e essa linha não volta.
  */
 export async function purgeTranscripts(q: OrgQuery, before: Date): Promise<number> {
   if (q.organizationId === "") throw new Error("purgeTranscripts runs inside withOrg, never withSystem: it would reach every organization");
@@ -77,8 +88,15 @@ export async function purgeTranscripts(q: OrgQuery, before: Date): Promise<numbe
   await q.exec(PURGE_ANALYSIS_SQL, [before]);
   await q.exec("update calls set recording_pause_reason = null where recording_pause_reason is not null and started_at < $1", [before]);
   await q.exec("update call_events set payload = (payload - 'reason') || '{\"reasonPurged\": true}' where kind = 'recording_paused' and payload ? 'reason' and at < $1", [before]);
-  return q.exec("update call_events set payload = $2 where kind in ('transcript_user', 'transcript_agent') and payload ? 'text' and at < $1", [
+  const speech = await q.exec("update call_events set payload = $2 where kind in ('transcript_user', 'transcript_agent') and payload ? 'text' and at < $1", [
     before,
     JSON.stringify(PURGED_TRANSCRIPT),
   ]);
+  // A linha da chamada fica: sai só o texto do resumo, e o marcador já gravado não é reescrito nem
+  // recontado numa segunda passagem.
+  const summaries = await q.exec("update calls set summary = $2 where summary is not null and summary <> $2 and erased_at is null and started_at < $1", [
+    before,
+    PURGED_SUMMARY_TEXT,
+  ]);
+  return speech + summaries;
 }
