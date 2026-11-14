@@ -1,7 +1,7 @@
 import { byStatus } from "./key-check";
 import { ANALYSIS_TIMEOUT_MS, readAnalysisGuess, type AnalysisGuess } from "./analysis";
 import { readOutcomeGuess, type OutcomeGuess } from "./outcome";
-import { estimateCostCents } from "./pricing";
+import { estimateCostCents, estimateCostMicrocents } from "./pricing";
 import type { ClassifyFailure, ClassifyOptions, ClassifyResult, EnginePricing, KeyCheckResult, TranscribeResult, Usage } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -113,9 +113,12 @@ export async function postOverHttp<T>(request: HttpRequest<T>, options: Classify
 /** O desfecho por um `POST` com prazo: `postOverHttp` com o palpite (e, no pedido completo, a análise) no lugar do valor. */
 export async function classifyOutcomeOverHttp(request: OutcomeRequest, options: ClassifyOptions): Promise<ClassifyResult> {
   const result = await postOverHttp(request, options);
-  if (!result.ok) return result;
+  // O custo exato da leitura, ao lado do arredondado: é ele que o extrato guarda, porque uma
+  // classificação custa menos de um centavo e o centavo inteiro é trinta vezes o valor de tabela.
+  const costMicrocents = estimateCostMicrocents(request.pricing, result.usage);
+  if (!result.ok) return { ...result, costMicrocents };
   const { value, ...rest } = result;
-  return { ...rest, ...value };
+  return { ...rest, ...value, costMicrocents };
 }
 
 // Um lado de uma ligação longa leva mais que os 10 s de um texto curto para voltar transcrito.

@@ -236,6 +236,6 @@ describe("motor simulado", () => {
     const engine = createSimulatedEngine();
     expect(engine.analyzes).toBeUndefined();
     const result = await classify(engine, { transcript: TRANSCRICAO, tools: [], analyze: true }, {});
-    expect(result).toEqual({ ok: true, guess: { outcome: "unknown", confidence: 0, evidence: "" }, model: "simulated", usage: {}, costCents: 0 });
+    expect(result).toEqual({ ok: true, guess: { outcome: "unknown", confidence: 0, evidence: "" }, model: "simulated", usage: {}, costCents: 0, costMicrocents: 0 });
   });
 });

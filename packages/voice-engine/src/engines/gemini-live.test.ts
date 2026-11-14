@@ -277,7 +277,7 @@ describe("gemini-live: desfecho da ligação (contrato com servidor HTTP falso)"
       status: 200,
       body: { candidates: [{ content: { parts: [{ text: JSON.stringify(palpite) }] } }], usageMetadata: { promptTokenCount: 1_000_000, candidatesTokenCount: 60_000, thoughtsTokenCount: 40_000 } },
     });
-    expect(await classify()).toEqual({ ok: true, guess: palpite, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 100_000 }, costCents: 55 });
+    expect(await classify()).toEqual({ ok: true, guess: palpite, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 100_000 }, costCents: 55, costMicrocents: 55_000_000 });
     expect(http.requests[0]).toMatchObject({ method: "POST", url: "/models/gemini-3.5-flash-lite:generateContent", headers: { "x-goog-api-key": "chave-de-teste" } });
   });
 
@@ -287,12 +287,12 @@ describe("gemini-live: desfecho da ligação (contrato com servidor HTTP falso)"
     ["400 sem motivo de chave (schema recusado)", "unexpected_response", { status: 400, body: { error: { code: 400 } } }],
   ] as const)("%s vira %s, sem custo", async (_, failure, reply) => {
     http.respond(reply);
-    expect(await classify()).toEqual({ ok: false, failure, status: reply.status, model: "gemini-3.5-flash-lite", usage: {}, costCents: 0 });
+    expect(await classify()).toEqual({ ok: false, failure, status: reply.status, model: "gemini-3.5-flash-lite", usage: {}, costCents: 0, costMicrocents: 0 });
   });
 
   it("um 200 fora da forma é falha, mas o que foi cobrado vem junto", async () => {
     http.respond({ status: 200, body: { candidates: [{ content: { parts: [{ text: "não é JSON" }] } }], usageMetadata: { promptTokenCount: 1_000_000 } } });
-    expect(await classify()).toEqual({ ok: false, failure: "unexpected_response", status: 200, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 0 }, costCents: 30 });
+    expect(await classify()).toEqual({ ok: false, failure: "unexpected_response", status: 200, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 0 }, costCents: 30, costMicrocents: 30_000_000 });
   });
 
   it("sem resposta no prazo é provedor fora do ar", async () => {
