@@ -185,7 +185,7 @@ describe("runMigrations", () => {
   });
 
   it("o agente que já existe fica no ambiente normal, o novo sem a coluna também, e o ambiente só aceita normal ou noisy", async () => {
-    const ENVIRONMENT = "20261114T120000_agents_listening_environment.sql";
+    const ENVIRONMENT = "20261114T094134_agents_listening_environment.sql";
     for (const name of await readdir(REAL_MIGRATIONS)) if (name < ENVIRONMENT) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
     await runMigrations(db, dir);
     const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;

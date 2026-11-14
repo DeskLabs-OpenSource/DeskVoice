@@ -85,7 +85,6 @@ const OUTCOME_PRICING: EnginePricing = {
 };
 // O modelo que transcreve a fala de quem ligou durante a chamada, e a gravação depois dela.
 const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
-/** O `prompt` da transcrição lateral, em texto livre, como a referência pede para a família `gpt-4o-transcribe`. */
 /**
  * Ambiente barulhento, ponto de partida do desenho (a bancada da fatia 5 pode trocar os valores):
  * redução de ruído de microfone perto da boca, que é o do telefone, e fim de turno pelo sentido
@@ -96,6 +95,7 @@ const NOISY_INPUT = {
   turn_detection: { type: "semantic_vad", eagerness: "auto", create_response: true, interrupt_response: true },
 } as const;
 
+/** O `prompt` da transcrição lateral, em texto livre, como a referência pede para a família `gpt-4o-transcribe`. */
 const transcriptionPrompt = (vocabulary: readonly string[]): string => `Names and terms that may appear: ${vocabulary.join(", ")}.`;
 // gpt-4o-mini-transcribe, na seção "Transcription" da página de preços (conferida em 2026-11-13):
 // entrada US$ 1,25 e saída US$ 5,00 por milhão de tokens, e a estimativa de US$ 0,003 por minuto.
