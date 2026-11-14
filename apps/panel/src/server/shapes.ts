@@ -76,18 +76,25 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   listeningEnvironment: "normal",
 };
 
-export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId", status,
+export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",
+  match_extra as "matchExtra", outbound_host as "outboundHost", status,
   last_check_at as "lastCheckAt", last_error as "lastError", json_build_object('configured', secret_enc is not null) as secret`;
 
 // Host, usuário e senha acabam dentro da configuração gerada do Asterisk: nada de quebra de linha
 // nem de caractere que abra seção ou comentário ali.
+const trunkHost = z.string().trim().refine(isTrunkHost, "must be a host name or IP (optionally with :port), an IPv6 address or a CIDR block");
 const trunkFields = z.object({
   name: z.string().trim().min(1).max(80),
-  host: z.string().trim().refine(isTrunkHost, "must be a host name or IP (optionally with :port), an IPv6 address or a CIDR block"),
+  host: trunkHost,
   username: z.union([z.null(), z.literal("").transform(() => null), z.string().regex(/^[^\s;[\]]{1,80}$/, "cannot contain spaces, ';' or brackets")]),
   password: z.string().regex(/^[^\r\n]{1,200}$/, "cannot be empty or contain line breaks"),
   authMode: z.enum(["register", "ip"]),
   callerId: optionalPhone,
+  // O mesmo provedor entrega a ligação por vários blocos (um por região): todos entram no
+  // `identify`, e a linha antiga, sem lista, continua com o `host` sozinho.
+  matchExtra: z.array(trunkHost).max(16, "at most 16 extra addresses").optional(),
+  // Nome ou IP do destino das ligações de saída; vazio vale o `host`.
+  outboundHost: z.union([z.null(), z.literal("").transform(() => null), trunkHost]).optional(),
 });
 export const trunkPatch = trunkFields.partial();
 export const trunkCreate = trunkPatch.required({ name: true, host: true, authMode: true });

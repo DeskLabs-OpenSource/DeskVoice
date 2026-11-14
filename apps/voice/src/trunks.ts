@@ -10,6 +10,7 @@
 // VPS (comando `create-owner`): quem pode provocar o conflito é quem administra o servidor.
 // Não existe precedência por antiguidade nem estado guardado ao lado do arquivo.
 import { randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { chmod, chown, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { decryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core";
@@ -31,6 +32,16 @@ export interface TrunkConfig {
   publicIp: string | null;
   /** De quem é a linha: endereço repetido só é tolerado dentro da mesma organização. */
   organizationId: string;
+  /**
+   * Mais endereços de onde as ligações chegam, além do `host` (modo `ip`): a operadora que entrega
+   * por vários blocos, um por região. Vazio na linha que sempre teve um endereço só.
+   */
+  matchExtra?: string[];
+  /**
+   * Destino das ligações de saída, quando difere do `host` (modo `ip`). Nome ou IP: nome resolve
+   * para o endereço na hora de escrever a configuração.
+   */
+  outboundHost?: string | null;
 }
 
 export type TrunkHealth = { id: string; status: "ok" | "warn" | "fail"; detail: string };
@@ -61,6 +72,14 @@ export function trunkProblem(trunk: TrunkConfig): string | null {
   }
   if (trunk.authMode === "register" && (!trunk.username || !trunk.password)) return "a line that registers needs user and password";
   if (trunk.authMode === "register" && host.uri === null) return "a line that registers needs the address of one server, not an address block";
+  const extras = trunk.matchExtra ?? [];
+  if (trunk.authMode !== "ip" && (extras.length > 0 || trunk.outboundHost != null)) return EXTRA_ONLY_IN_IP_MODE_REASON;
+  for (const [index, extra] of extras.entries()) if (!parseTrunkHost(extra)) return extraAddressReason(index + 1);
+  if (trunk.outboundHost != null) {
+    const outbound = parseTrunkHost(trunk.outboundHost);
+    if (!outbound) return "the outbound address is not a server name, an IP address or an address block";
+    if (outbound.uri === null) return OUTBOUND_BLOCK_REASON;
+  }
   return null;
 }
 
@@ -73,7 +92,7 @@ const value = (text: string): string => text.replaceAll(";", "\\;");
  * leva o IP privado do contêiner e há provedor que derruba a ligação) e `ulaw`/`alaw`, que casam
  * com o AudioSocket sem transcodificar.
  */
-function renderTrunk(trunk: TrunkConfig, host: TrunkHost, identify: boolean): string {
+function renderTrunk(trunk: TrunkConfig, inbound: Inbound, identify: boolean): string {
   const name = trunkEndpointName(trunk.id);
   const withAuth = trunk.username !== null && trunk.password !== null;
   const publicIp = trunk.publicIp !== null && IPV4.test(trunk.publicIp) ? trunk.publicIp : null;
@@ -95,14 +114,19 @@ function renderTrunk(trunk: TrunkConfig, host: TrunkHost, identify: boolean): st
     "",
     `[${name}]`,
     "type=aor",
-    // Bloco de endereços não é destino: a linha só recebe.
-    ...(host.uri === null ? [] : [`contact=sip:${host.uri}`]),
+    // Bloco de endereços não é destino: a linha só recebe. Um `outbound_host` dá destino à linha
+    // que recebe por bloco (a Twilio recebe por /30 e atende pelo nome da conta).
+    ...(inbound.destination === null ? [] : [`contact=sip:${inbound.destination.uri}`]),
     "qualify_frequency=30",
   ];
-  // O `identify` casa a chamada recebida pelo endereço de origem. Só sai para endereço numérico
+  // O `identify` casa a chamada recebida pelo endereço de origem. Só sai com endereço numérico
   // (nome resolve para endereços que mudam) e só para a linha que é dona dele: com o endereço
-  // repetido, o Asterisk entregaria a chamada de uma organização ao tronco de outra.
-  if (identify && host.kind === "address") lines.push("", `[${name}-identify]`, "type=identify", `endpoint=${name}`, `match=${host.match}`);
+  // repetido, o Asterisk entregaria a chamada de uma organização ao tronco de outra. Uma linha
+  // pode ter vários blocos: cada um vira uma linha `match=` do mesmo `identify`.
+  if (identify && inbound.matches.length > 0) {
+    lines.push("", `[${name}-identify]`, "type=identify", `endpoint=${name}`);
+    for (const match of inbound.matches) lines.push(`match=${match}`);
+  }
   if (withAuth) {
     lines.push("", `[${name}-auth]`, "type=auth", "auth_type=userpass", `username=${value(trunk.username ?? "")}`, `password=${value(trunk.password ?? "")}`);
   }
@@ -113,8 +137,8 @@ function renderTrunk(trunk: TrunkConfig, host: TrunkHost, identify: boolean): st
       "type=registration",
       "transport=transport-udp",
       `outbound_auth=${name}-auth`,
-      `server_uri=sip:${host.uri}`,
-      `client_uri=sip:${value(trunk.username ?? "")}@${host.uri}`,
+      `server_uri=sip:${inbound.host.uri}`,
+      `client_uri=sip:${value(trunk.username ?? "")}@${inbound.host.uri}`,
       // O Asterisk põe um parâmetro `line` único no Contact do registro e casa a chamada recebida
       // com este endpoint por ele: é o que separa duas contas na mesma operadora.
       "line=yes",
@@ -128,28 +152,105 @@ function renderTrunk(trunk: TrunkConfig, host: TrunkHost, identify: boolean): st
 // Não diz de quem é a outra linha, nem qual é o endereço: pode ser de outra organização.
 export const SHARED_HOST_REASON =
   "this provider address is already used by another line of this installation, and a line recognized only by its address cannot share it; change this line to registration (user and password) to fix it";
-export const NAME_IN_IP_MODE_REASON =
-  "a line recognized by IP needs the numeric address of the provider (an IP or an address block), not a name; with a name, change this line to registration (user and password)";
+/**
+ * A operadora que publica um nome em vez de bloco: o nome é aceito, mas precisa resolver para
+ * endereço na hora de escrever a configuração, e é o endereço que o `identify` compara.
+ */
+export const NAME_UNRESOLVED_REASON =
+  "the provider name could not be resolved to an address now, and a line recognized by its address needs a numeric one; try again later or use the numeric address";
+export const OUTBOUND_BLOCK_REASON = "the outbound address must be one server (a name or an IP), not an address block";
+export const EXTRA_ONLY_IN_IP_MODE_REASON =
+  "extra inbound addresses and an outbound address belong to a line recognized by IP; with registration the provider finds the line by the user and password";
+/** A posição diz qual item recusar sem repetir a lista inteira. */
+export const extraAddressReason = (position: number): string => `the extra inbound address ${position} is not a server name, an IP address or an address block`;
+export const extraNameUnresolvedReason = (position: number): string =>
+  `the provider name of the extra inbound address ${position} could not be resolved to an address now; try again later or use the numeric address`;
+
+/** Nome do provedor já resolvido para endereços; o `identify` só aceita endereço numérico. */
+export type ResolvedNames = ReadonlyMap<string, readonly string[]>;
+
+interface Inbound {
+  /** O `host` da linha, como foi lido: manda no registro e no destino padrão. */
+  host: TrunkHost;
+  /** Blocos canônicos e sem repetição: cada um vira uma linha `match=` do `identify`. */
+  matches: string[];
+  /** Os mesmos endereços como faixas, para a comparação de sobreposição. */
+  hosts: TrunkHost[];
+  /** Destino da ligação de saída; `null` quando a linha só recebe. */
+  destination: TrunkHost | null;
+}
+
+const hostWithoutPort = (uri: string): string => uri.replace(/:\d+$/, "");
+
+/**
+ * De onde as ligações entram e para onde as de saída vão: o `host`, os `match_extra` e o
+ * `outbound_host`. Nome não vai para o `identify` — ele é resolvido antes e cada endereço dele
+ * entra como `match`. Devolve o motivo da recusa quando um nome não resolve.
+ */
+function readInbound(trunk: TrunkConfig, resolved: ResolvedNames): Inbound | string {
+  const host = parseTrunkHost(trunk.host);
+  if (!host) return "the host cannot be read";
+  const matches: string[] = [];
+  const hosts: TrunkHost[] = [];
+  const add = (address: TrunkHost & { kind: "address" }): void => {
+    hosts.push(address);
+    if (!matches.includes(address.match)) matches.push(address.match);
+  };
+  // O primeiro item é o `host`; a posição dos extras começa em 1, na ordem em que foram digitados.
+  for (const [index, value] of [trunk.host, ...(trunk.matchExtra ?? [])].entries()) {
+    const parsed = parseTrunkHost(value);
+    if (!parsed) {
+      if (index === 0) return "the host cannot be read";
+      return extraAddressReason(index);
+    }
+    if (parsed.kind === "address") {
+      add(parsed);
+      continue;
+    }
+    // No registro a linha é reconhecida pelo `line` do REGISTER, não pelo endereço de origem: o
+    // nome do servidor não precisa resolver para o `identify`.
+    if (trunk.authMode !== "ip") continue;
+    const addresses = resolved.get(hostWithoutPort(parsed.uri)) ?? [];
+    if (addresses.length === 0) return index === 0 ? NAME_UNRESOLVED_REASON : extraNameUnresolvedReason(index);
+    for (const text of addresses) {
+      const address = parseTrunkHost(text);
+      if (!address || address.kind !== "address") return index === 0 ? NAME_UNRESOLVED_REASON : extraNameUnresolvedReason(index);
+      add(address);
+    }
+  }
+  const destination = parseTrunkHost(trunk.outboundHost ?? trunk.host);
+  return { host, matches, hosts, destination: destination !== null && destination.uri !== null ? destination : null };
+}
+
+const overlap = (a: Inbound, b: Inbound): boolean => a.hosts.some((mine) => b.hosts.some((theirs) => hostsOverlap(mine, theirs)));
 
 /**
  * O arquivo inteiro. Tronco que não pode ser escrito fica de fora, com o motivo em `skipped`.
  *
  * As linhas válidas de endereço numérico são agrupadas por sobreposição de endereço (ver o
- * comentário no topo do arquivo):
+ * comentário no topo do arquivo), item por item: uma linha com vários blocos pertence a todos os
+ * grupos que algum deles toca.
  *   - grupo de uma organização só: o `identify` vai para uma linha, a de menor `id`; as outras em
  *     modo `ip` ficam de fora (é configuração repetida da própria organização);
  *   - grupo com mais de uma organização: nenhum `identify`, e nenhuma linha em modo `ip`.
  * Em qualquer grupo, linha em modo `register` sai normalmente, reconhecida pelo `line` do registro.
  * Linha inválida por outro motivo não entra em grupo nenhum.
  */
-export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
+export function renderTrunksConf(trunks: TrunkConfig[], resolved: ResolvedNames = new Map()): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
   const skipped: Array<{ id: string; reason: string }> = [];
-  const valid: Array<{ trunk: TrunkConfig; host: TrunkHost; group: number }> = [];
+  const valid: Array<{ trunk: TrunkConfig; inbound: Inbound; group: number }> = [];
   for (const trunk of [...trunks].sort((a, b) => a.id.localeCompare(b.id))) {
-    const host = parseTrunkHost(trunk.host);
-    const reason = trunkProblem(trunk) ?? (trunk.authMode === "ip" && host?.kind === "name" ? NAME_IN_IP_MODE_REASON : null);
-    if (reason || !host) skipped.push({ id: trunk.id, reason: reason ?? "the host cannot be read" });
-    else valid.push({ trunk, host, group: valid.length });
+    const reason = trunkProblem(trunk);
+    if (reason !== null) {
+      skipped.push({ id: trunk.id, reason });
+      continue;
+    }
+    const inbound = readInbound(trunk, resolved);
+    if (typeof inbound === "string") {
+      skipped.push({ id: trunk.id, reason: inbound });
+      continue;
+    }
+    valid.push({ trunk, inbound, group: valid.length });
   }
 
   // Sobreposição não é transitiva (um bloco liga dois endereços que não se tocam): os grupos são
@@ -158,7 +259,7 @@ export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped
     merged = false;
     for (const a of valid) {
       for (const b of valid) {
-        if (a.group !== b.group && hostsOverlap(a.host, b.host)) {
+        if (a.group !== b.group && overlap(a.inbound, b.inbound)) {
           const from = Math.max(a.group, b.group);
           const to = Math.min(a.group, b.group);
           for (const entry of valid) if (entry.group === from) entry.group = to;
@@ -177,7 +278,7 @@ export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped
     const identify = oneOrganization && group[0] === entry;
     if (!identify && entry.trunk.authMode === "ip") skipped.push({ id: entry.trunk.id, reason: SHARED_HOST_REASON });
     else {
-      sections.push(renderTrunk(entry.trunk, entry.host, identify));
+      sections.push(renderTrunk(entry.trunk, entry.inbound, identify));
       emitted.push(entry.trunk.id);
     }
   }
@@ -237,7 +338,39 @@ export interface TrunksDeps {
   /** Usuário do Asterisk dentro do contêiner dele: o dono do arquivo de troncos. */
   owner?: FileOwner;
   schedule?: Schedule;
+  /** Resolve o nome do provedor que publica nome em vez de bloco; nos testes, um mapa fixo. */
+  resolveName?: NameResolver;
   log: Logger;
+}
+
+/** Nome do provedor vira endereço antes de escrever a configuração: o `identify` compara endereço. */
+export type NameResolver = (name: string) => Promise<readonly string[]>;
+
+const lookupAddresses: NameResolver = async (name) => (await lookup(name, { all: true, verbatim: true })).map((entry) => entry.address);
+
+/** Só as linhas em modo `ip` precisam do nome resolvido; o registro é reconhecido pelo `line`. */
+async function resolveProviderNames(trunks: TrunkConfig[], resolve: NameResolver): Promise<ResolvedNames> {
+  const names = new Set<string>();
+  for (const trunk of trunks) {
+    if (trunk.authMode !== "ip" || trunkProblem(trunk) !== null) continue;
+    for (const value of [trunk.host, ...(trunk.matchExtra ?? [])]) {
+      const host = parseTrunkHost(value);
+      if (host?.kind === "name") names.add(hostWithoutPort(host.uri));
+    }
+  }
+  const resolved = new Map<string, readonly string[]>();
+  await Promise.all(
+    [...names].map(async (name) => {
+      try {
+        resolved.set(name, await resolve(name));
+      } catch {
+        // Nome que não resolve não derruba a aplicação das outras linhas: a linha dele fica de
+        // fora com o motivo, e o painel mostra o que fazer.
+        resolved.set(name, []);
+      }
+    }),
+  );
+  return resolved;
 }
 
 // Depois de recarregar, o Asterisk leva um instante para listar os endpoints novos.
@@ -265,8 +398,18 @@ async function setStatus(deps: TrunksDeps, updates: TrunkHealth[]): Promise<void
  */
 export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean; detail: string; skipped: Array<{ id: string; reason: string }> }> {
   const rows = await withSystem(deps.db, (q) =>
-    q.many<{ id: string; organization_id: string; host: string; username: string | null; secret_enc: string | null; auth_mode: "register" | "ip"; public_ip: unknown }>(
-      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode,
+    q.many<{
+      id: string;
+      organization_id: string;
+      host: string;
+      username: string | null;
+      secret_enc: string | null;
+      auth_mode: "register" | "ip";
+      match_extra: string[] | null;
+      outbound_host: string | null;
+      public_ip: unknown;
+    }>(
+      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host,
               (select s.value from settings s where s.organization_id = t.organization_id and s.key = 'network.public_ip') as public_ip
          from trunks t order by t.id`,
     ),
@@ -282,13 +425,16 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
         username: row.username?.trim() || null,
         password: row.secret_enc ? decryptSecret(row.secret_enc, deps.secretKey) : null,
         authMode: row.auth_mode,
+        matchExtra: (row.match_extra ?? []).map((extra) => extra.trim()).filter((extra) => extra !== ""),
+        outboundHost: row.outbound_host?.trim() || null,
         publicIp: typeof row.public_ip === "string" ? row.public_ip : deps.publicIp,
       });
     } catch (error) {
       unreadable.push({ id: row.id, reason: `the saved password cannot be read (${messageOf(error)})` });
     }
   }
-  const { conf, skipped: invalid, emitted } = renderTrunksConf(trunks);
+  const resolved = await resolveProviderNames(trunks, deps.resolveName ?? lookupAddresses);
+  const { conf, skipped: invalid, emitted } = renderTrunksConf(trunks, resolved);
   const skipped = [...unreadable, ...invalid];
   const written = await writeFileAtomic(deps.file, conf, deps.owner);
   if (written.chownError !== undefined) {

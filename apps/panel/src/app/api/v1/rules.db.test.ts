@@ -503,6 +503,42 @@ describe("removing and correcting lines and numbers", () => {
     for (const host of ["203.0.113.0/24", "[2001:db8::1]:5060", "2001:db8::1", "sip.example.test:5060"]) expect([host, (await create(host)).status]).toEqual([host, 200]);
     for (const host of ["sip.example.test;x", "[evil]", "sip.example.test\n[evil]", "203.0.113.0/99"]) expect([host, (await create(host)).code]).toEqual([host, "validation_error"]);
   });
+
+  it("stores more than one inbound block and an outbound name, and refuses extra addresses outside IP mode", async () => {
+    // Os dois primeiros blocos que a Twilio publica para sinalização; a fonte está no PR.
+    const blocks = ["54.172.60.0/30", "54.244.51.0/30"];
+    const created = await call(createTrunk, {
+      method: "POST",
+      cookie: owner,
+      body: { name: "Twilio", host: blocks[0], matchExtra: blocks.slice(1), outboundHost: "conta.pstn.twilio.com", authMode: "ip" },
+    });
+    expect(created.status).toBe(200);
+    // O primeiro bloco fica no `host`; os outros entram na lista, na ordem digitada.
+    expect(created.data).toMatchObject({ matchExtra: blocks.slice(1), outboundHost: "conta.pstn.twilio.com" });
+    const id = (created.data as { id: string }).id;
+    const row = await withOrg(panel.app, org, (q) => q.one<{ match_extra: string[]; outbound_host: string | null }>("select match_extra, outbound_host from trunks where id = $1", [id]));
+    expect(row).toEqual({ match_extra: blocks.slice(1), outbound_host: "conta.pstn.twilio.com" });
+    const listed = (await call(listTrunks, { cookie: owner })).data as Array<{ id: string; matchExtra: string[]; outboundHost: string | null }>;
+    expect(listed.find((entry) => entry.id === id)).toMatchObject({ matchExtra: blocks.slice(1), outboundHost: "conta.pstn.twilio.com" });
+
+    // Fora do modo por IP esses campos não teriam efeito: a API recusa antes de gravar.
+    const registered = await call(createTrunk, {
+      method: "POST",
+      cookie: owner,
+      body: { name: "Registro", host: "sip.example.test", username: "5531", password: "senha-longa", authMode: "register", matchExtra: blocks },
+    });
+    expect([registered.status, registered.code]).toEqual([400, "validation_error"]);
+    const movedToRegister = await call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body: { authMode: "register", username: "5531", password: "senha-longa" } });
+    expect([movedToRegister.status, movedToRegister.code]).toEqual([400, "validation_error"]);
+
+    // Campo vazio limpa o destino de saída; a lista vazia volta a linha ao caso de um endereço só.
+    const cleared = await call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body: { outboundHost: "", matchExtra: [] } });
+    expect(cleared.data).toMatchObject({ matchExtra: [], outboundHost: null });
+
+    // Item que não é nome, IP nem bloco é recusado na entrada.
+    const invalid = await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Host", host: "203.0.113.0/24", matchExtra: ["[evil]"], authMode: "ip" } });
+    expect([invalid.status, invalid.code]).toEqual([400, "validation_error"]);
+  });
 });
 
 describe("my contact", () => {

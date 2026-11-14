@@ -13,7 +13,7 @@ import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../ui/errors";
 import { formatDateTime, formatPhone } from "../../../ui/format";
-import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, TextInput, type Tone } from "../../../ui/kit";
+import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, TextArea, TextInput, type Tone } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import type { Agent, PhoneNumber, Setting, Trunk } from "../../../ui/types";
 
@@ -124,6 +124,8 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
     username: trunk?.username ?? "",
     password: "",
     callerId: formatPhone(trunk?.callerId),
+    matchExtra: (trunk?.matchExtra ?? []).join("\n"),
+    outboundHost: trunk?.outboundHost ?? "",
   });
   const [applied, setApplied] = useState(true);
   const [result, setResult] = useState<CheckResult | null>(null);
@@ -136,8 +138,22 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
   const submit = (event: FormEvent): void => {
     event.preventDefault();
     void save.run(async () => {
-      const { password, ...rest } = draft;
-      const saved = await api<Trunk>(trunk ? `/trunks/${trunk.id}` : "/trunks", { method: trunk ? "PATCH" : "POST", body: { ...rest, ...(password && { password }) } });
+      const { password, matchExtra, outboundHost, ...rest } = draft;
+      // Uma linha por campo; o que ficou em branco não vira endereço. Fora do modo por IP a lista
+      // e o destino de saída não existem: a API recusa, e a tela não manda lixo para lá.
+      const addresses = matchExtra
+        .split("\n")
+        .map((item) => item.trim())
+        .filter((item) => item !== "");
+      const saved = await api<Trunk>(trunk ? `/trunks/${trunk.id}` : "/trunks", {
+        method: trunk ? "PATCH" : "POST",
+        body: {
+          ...rest,
+          matchExtra: rest.authMode === "ip" ? addresses : [],
+          outboundHost: rest.authMode === "ip" && outboundHost.trim() !== "" ? outboundHost.trim() : null,
+          ...(password && { password }),
+        },
+      });
       setApplied(saved.applied !== false);
       setResult(null);
       set("password", "");
@@ -177,7 +193,18 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
                 <TextInput mono type="password" value={draft.password} onChange={(event) => set("password", event.target.value)} autoComplete="new-password" required={moved} />
               </Field>
             </>
-          ) : null}
+          ) : (
+            <>
+              {/* A operadora que entrega a ligação por vários blocos: um por linha. A linha que
+                  sempre teve um endereço só continua com o campo acima e a lista vazia. */}
+              <Field label={t.matchExtra} hint={t.matchExtraHint}>
+                <TextArea mono value={draft.matchExtra} onChange={(event) => set("matchExtra", event.target.value)} rows={4} />
+              </Field>
+              <Field label={t.outboundHost} hint={t.outboundHostHint}>
+                <TextInput mono value={draft.outboundHost} onChange={(event) => set("outboundHost", event.target.value)} />
+              </Field>
+            </>
+          )}
         </fieldset>
 
         {!applied ? <Notice tone="warn">{t.notApplied}</Notice> : null}
