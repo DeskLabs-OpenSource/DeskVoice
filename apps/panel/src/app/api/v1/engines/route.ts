@@ -1,3 +1,4 @@
+import { classifyBaseUrlOf, classifyModelOf, engineBaseUrlSetting, engineClassifyModelSetting } from "@deskvoice/voice-engine/types";
 import { handle } from "../../../../server/context";
 import { keyCheckSetting, readKeyCheck } from "../../../../server/engine-key";
 import { engineKeySetting, listEngines } from "../../../../server/pieces";
@@ -11,6 +12,11 @@ export const GET = handle({}, async ({ q }) => {
     provider: engine.provider,
     processingLocation: engine.processingLocation,
     requiresKey: !engine.keyless,
+    // Só o motor que declara aceita endpoint e modelo próprios na classificação; a tela mostra os
+    // campos só para ele.
+    classifyTarget: engine.classifyTarget === true,
+    baseUrl: classifyBaseUrlOf(byKey.get(engineBaseUrlSetting(engine.id))) ?? null,
+    classifyModel: classifyModelOf(byKey.get(engineClassifyModelSetting(engine.id))) ?? null,
     voices: engine.voices ?? [],
     defaultVoice: engine.defaultVoice ?? null,
     keyConfigured: byKey.has(engineKeySetting(engine.id)),

@@ -72,6 +72,28 @@ const openai = (palpite: unknown, status = 200): typeof fetch =>
     new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: USO }), { status }),
   ) as unknown as typeof fetch;
 
+/**
+ * Como `openai`, mas guarda o destino do pedido: o que se prova aqui é o que a rotina repassa ao
+ * motor — o endereço e o modelo, que vêm das configurações do motor.
+ */
+const pedidoCom = (palpite: unknown): { fetch: typeof fetch; pedidos: Array<{ url: string; model: string }> } => {
+  const pedidos: Array<{ url: string; model: string }> = [];
+  const fetchFalso = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    pedidos.push({ url: String(url), model: (JSON.parse(String(init?.body)) as { model: string }).model });
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: USO }), { status: 200 });
+  }) as unknown as typeof globalThis.fetch;
+  return { fetch: fetchFalso as unknown as typeof globalThis.fetch, pedidos };
+};
+
+/** Grava o destino da classificação como o painel faria. */
+const comDestino = (org: string, valores: { baseUrl?: string; modelo?: string }): Promise<number> =>
+  withSystem(app, async (q) => {
+    let written = 0;
+    if (valores.baseUrl !== undefined) written += await q.exec("insert into settings (organization_id, key, value) values ($1, 'engine.openai-realtime.base_url', to_jsonb($2::text))", [org, valores.baseUrl]);
+    if (valores.modelo !== undefined) written += await q.exec("insert into settings (organization_id, key, value) values ($1, 'engine.openai-realtime.classify_model', to_jsonb($2::text))", [org, valores.modelo]);
+    return written;
+  });
+
 /** O provedor responde um erro com este status e este corpo. */
 const erro = (status: number, corpo: unknown = { error: { message: "não importa" } }): typeof fetch =>
   vi.fn(async () => new Response(JSON.stringify(corpo), { status })) as unknown as typeof fetch;
@@ -103,6 +125,44 @@ describe("classify_call_outcome", () => {
     expect(Number(desfecho?.outcome_confidence)).toBeCloseTo(0.9);
     expect(desfecho?.outcome_evidence).toContain("quinta às dez");
     expect(await falhasDe(callId)).toEqual([]);
+  });
+
+  it("provedor compatível: o endpoint e o modelo gravados chegam ao pedido do motor", async () => {
+    const { org, callId } = await comAgente("desfecho provedor compatível");
+    await comChave(org);
+    await comDestino(org, { baseUrl: "https://api.deepseek.com/v1", modelo: "deepseek-chat" });
+    await fala(org, callId, "Pode marcar quinta às dez, por favor.");
+
+    const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
+    await roda(org, callId, fetch);
+
+    // A chave gravada para o motor vai no cabeçalho; o pedido é o do provedor compatível.
+    expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat" }]);
+    expect((await desfechoDe(callId))?.outcome).toBe("booked");
+    expect(await falhasDe(callId)).toEqual([]);
+  });
+
+  it("sem destino configurado, o pedido é o de hoje: OpenAI, com o modelo de sempre", async () => {
+    const { org, callId } = await comAgente("desfecho sem destino");
+    await comChave(org);
+    await fala(org, callId, "Pode marcar quinta às dez, por favor.");
+
+    const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
+    await roda(org, callId, fetch);
+
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano" }]);
+  });
+
+  it("endpoint gravado por fora do painel que não é https público é ignorado; o modelo válido fica", async () => {
+    const { org, callId } = await comAgente("desfecho destino recusado");
+    await comChave(org);
+    await comDestino(org, { baseUrl: "http://10.0.0.5:8080/v1", modelo: "deepseek-chat" });
+    await fala(org, callId, "Pode marcar quinta às dez, por favor.");
+
+    const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
+    await roda(org, callId, fetch);
+
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "deepseek-chat" }]);
   });
 
   it("soma o que o provedor cobrou ao custo da chamada e ao extrato, pelo preço do modelo de texto", async () => {

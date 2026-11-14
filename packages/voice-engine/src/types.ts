@@ -206,6 +206,11 @@ export interface ClassifyOptions {
   schedule?: (fn: () => void, delayMs: number) => () => void;
   /** Sobrepõe a URL da API HTTP do provedor (testes apontam para um servidor falso). */
   baseUrl?: string;
+  /**
+   * Sobrepõe o modelo do pedido de classificação. Sem ele, o modelo do motor — o mesmo de antes
+   * desta opção existir. Só a classificação lê: a voz em tempo real tem o modelo dela.
+   */
+  model?: string;
 }
 
 /** Por que a classificação não leu um desfecho: o vocabulário do teste da chave, menos o que não é falha. */
@@ -273,6 +278,12 @@ export interface VoiceEngine {
    */
   classifyOutcome?(apiKey: string, input: ClassifyInput, options?: ClassifyOptions): Promise<ClassifyResult>;
   /**
+   * Verdadeiro para motor cujo `classifyOutcome` aceita destino próprio na classificação: `baseUrl`
+   * e `model` de `ClassifyOptions`. Só esses motores ganham, no painel, os campos de endpoint e
+   * modelo; motor sem a declaração classifica no endereço oficial dele.
+   */
+  classifyTarget?: boolean;
+  /**
    * Verdadeiro para motor cujo `classifyOutcome` atende `analyze` e devolve a análise da ligação.
    * Motor sem a declaração não analisa, e a rotina registra o motivo na linha do tempo.
    */
@@ -316,3 +327,79 @@ export const analysisEnabledOf = (stored: unknown): boolean => stored === true;
  */
 export const TRANSCRIPTION_SETTING = "calls.transcription_enabled";
 export const transcriptionEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
+ * Endpoint e modelo da **classificação**, por motor (chaves `engine.<id>.base_url` e
+ * `engine.<id>.classify_model` em `settings`).
+ *
+ * Existem porque a classificação é a tarefa em que o provedor compatível com OpenAI (DeepSeek,
+ * Qwen, OpenRouter, Groq) resolve: uma chamada curta, saída em JSON, uma vez por ligação. Sem
+ * eles, quem não tem chave OpenAI ou Google não classifica nada. A voz em tempo real continua nos
+ * endpoints oficiais: provedor compatível não oferece áudio bidirecional.
+ *
+ * Ausentes valem o padrão do motor, que é o de hoje: OpenAI em `https://api.openai.com/v1`, com
+ * `gpt-5-nano`. Quem nunca configurou nada não vê mudança no pedido.
+ */
+export const engineBaseUrlSetting = (engineId: string): string => `engine.${engineId}.base_url`;
+export const engineClassifyModelSetting = (engineId: string): string => `engine.${engineId}.classify_model`;
+
+/** O destino da classificação, quando o dono configurou um; vazio é o padrão do motor. */
+export interface ClassifyTarget {
+  baseUrl?: string;
+  model?: string;
+}
+
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
+
+/**
+ * Endereço de literal interno: loopback, rede privada ou link-local. A checagem é do texto da URL,
+ * não de uma resolução de DNS — um nome que resolve para a rede interna continua possível, e o
+ * preço de fechar isso é resolver todo endereço duas vezes (o que não impede DNS rebinding).
+ */
+const isInternalHost = (hostname: string): boolean => {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0" || host === "::1" || host === "::") return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!v4) return false;
+  const [a, b] = [Number(v4[1]), Number(v4[2])];
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+};
+
+/**
+ * O endereço serve como destino da classificação? Só `https`, porque a chave do provedor vai no
+ * cabeçalho e um `http` a entregaria em claro, e só host público: o processo de rotinas alcança a
+ * rede interna (Postgres, o próprio painel), e abrir a URL cria uma superfície que hoje não existe.
+ */
+export const isClassifyBaseUrl = (value: string): boolean => {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && url.hostname !== "" && !isInternalHost(url.hostname);
+};
+
+/** O endereço gravado, sem a barra final (o caminho é colado depois), ou `undefined` se não serve. */
+export const classifyBaseUrlOf = (stored: unknown): string | undefined => {
+  if (typeof stored !== "string") return undefined;
+  const value = stored.trim().replace(/\/+$/, "");
+  return isClassifyBaseUrl(value) ? value : undefined;
+};
+
+/** O nome do modelo: o que o provedor publica (`deepseek-chat`, `qwen/qwen3-32b`), ou `undefined`. */
+export const classifyModelOf = (stored: unknown): string | undefined => {
+  if (typeof stored !== "string") return undefined;
+  const value = stored.trim();
+  return MODEL_NAME.test(value) ? value : undefined;
+};
+
+/**
+ * O que a rotina repassa ao motor, lido do que está gravado: só o que é válido entra. Valor inválido
+ * (gravado por fora do painel) cai no padrão do motor, e a classificação continua funcionando.
+ */
+export const classifyTargetOf = (stored: { baseUrl?: unknown; model?: unknown }): ClassifyTarget => {
+  const baseUrl = classifyBaseUrlOf(stored.baseUrl);
+  const model = classifyModelOf(stored.model);
+  return { ...(baseUrl !== undefined && { baseUrl }), ...(model !== undefined && { model }) };
+};
