@@ -89,7 +89,7 @@ export async function startFakeWacalls() {
   const callList = () =>
     [...calls.values()]
       .filter((call) => call.status !== "ended")
-      .map((call) => ({ sessionId: call.sessionId, callId: call.id, owner: call.owner, direction: "incoming", peer: call.peer, startedAt: 0, status: call.status }));
+      .map((call) => ({ sessionId: call.sessionId, callId: call.id, owner: call.owner, direction: "inbound", peer: call.peer, startedAt: 0, status: call.status }));
   const listOf = () => [...sessions.values()].map(({ id, name, jid, state: s, paired }) => ({ id, name, jid, state: s, paired }));
   const emit = (event: object): void => {
     for (const stream of streams) stream.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -251,6 +251,16 @@ export async function startFakeWacalls() {
       const call: FakeCall = { id: `c${nextCall++}`, sessionId: session.id, peer: "5531988887777@s.whatsapp.net", owner, offers: [], status: "connected", endReason: null, leg: null };
       calls.set(call.id, call);
       return call;
+    },
+    /** Toca sem `incoming` no SSE, como a ligação que chega com a escuta caída. */
+    ringQuietly(session: FakeSession, peer = "5531988887777@s.whatsapp.net"): FakeCall {
+      const call: FakeCall = { id: `c${nextCall++}`, sessionId: session.id, peer, owner: null, offers: [], status: "ringing", endReason: null, leg: null };
+      calls.set(call.id, call);
+      return call;
+    },
+    /** O retrato que o WaCalls manda a cada mudança de qualquer ligação (`callregistry.go:200`). */
+    broadcastCallList() {
+      emit({ type: "call-list", calls: callList() });
     },
     /** O áudio com o WhatsApp ficou de pé (`ACTIVE`). */
     connectMedia(call: FakeCall) {

@@ -1,4 +1,5 @@
 // Só tipos: o compilador os apaga, e nada do servidor chega ao navegador.
+import type { StoredCallAnalysis } from "@deskvoice/core";
 import type { EngineVoice, ProcessingLocation } from "@deskvoice/voice-engine";
 import type { KeyCheckView } from "../server/engine-key";
 import type { HealthLine, HealthStatus } from "../server/health";
@@ -52,7 +53,19 @@ export interface Call {
   outcomeConfidence: string | null;
   /** A fala que sustenta o desfecho. */
   outcomeEvidence: string | null;
+  /** A nota de 0 a 10, soma da régua (`scoreOf`). `null` = sem análise. */
+  analysisScore: number | null;
   costCeilingCents?: number | null;
+}
+
+/** O detalhe de uma chamada: a análise inteira, que a lista não traz. */
+export interface CallDetail extends Call {
+  /** Lida com `storedCallAnalysisSchema`; `null` também quando não pôde ser lida. */
+  analysis: StoredCallAnalysis | null;
+  /** Havia análise gravada, mas fora da forma: a tela diz isso em vez de mostrar a seção. */
+  analysisUnreadable: boolean;
+  /** O conteúdo saiu a pedido do titular (`calls.erased_at`). */
+  erased: boolean;
 }
 
 export interface CallEvent {

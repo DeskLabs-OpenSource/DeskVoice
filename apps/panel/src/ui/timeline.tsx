@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, DotsNine, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
+import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, DotsNine, Gauge, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import en from "../i18n/en/timeline";
@@ -45,6 +45,18 @@ function Card({ title, tone, children }: { title: ReactNode; tone?: "accent" | "
       {children}
     </div>
   );
+}
+
+type TimelineDictionary = typeof ptBR;
+
+/**
+ * "Ligação não analisada: <motivo>", do payload de `analysis_not_done`. A mesma frase serve à linha
+ * do tempo e ao detalhe da chamada: o teto (ou a falha) não aparece só num dos dois lugares.
+ */
+export function analysisNotDoneText(e: TimelineDictionary["events"], payload: Record<string, unknown>): string {
+  const code = text(payload.reason);
+  const known = Object.hasOwn(e.analysis_not_done_reasons, code) ? e.analysis_not_done_reasons[code] : undefined;
+  return fill(e.analysis_not_done, { reason: known ? fill(known, { model: text(payload.model) }) : code });
 }
 
 const Quiet = ({ children }: { children: ReactNode }) => <p className="pt-1 text-muted">{children}</p>;
@@ -271,6 +283,19 @@ export function Timeline({
           ),
         };
       }
+      case "call_analyzed":
+        return { ...base, tone: "ok", icon: Gauge, body: <Quiet><span className="font-bold text-ink">{fill(e.call_analyzed, { score: String(p.score) })}</span></Quiet> };
+      case "analysis_not_done":
+        return {
+          ...base,
+          tone: "fail",
+          icon: Gauge,
+          body: (
+            <Card tone="fail" title={analysisNotDoneText(e, p)}>
+              {typeof p.status === "number" ? <p className="data text-[0.87rem] text-muted">{fill(e.outcome_not_classified_status, { status: String(p.status) })}</p> : null}
+            </Card>
+          ),
+        };
       case "call_ended":
         return { ...base, tone: "neutral", icon: PhoneX, body: <Quiet><span className="font-bold text-ink">{e.call_ended}</span>{reason(p.reason) ? ` · ${reason(p.reason)}` : ""}</Quiet> };
       case "task_queued":
