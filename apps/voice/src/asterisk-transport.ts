@@ -17,7 +17,7 @@
  * Lição do módulo de voz do DeskcommCRM (MIT, mesmo autor; ver CREDITS.md): a mídia nunca passa
  * por bridge + externalMedia. Por isso a transferência é do dialplan, e não uma bridge da ARI.
  */
-import { recordEvent, withOrg, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { lockCall, recordEvent, withOrg, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
@@ -178,6 +178,10 @@ const CALLER_HANGUP = "CALLER_HANGUP";
  * pessoa não falou com humano nenhum. O briefing vem do `transfer_started` que a ferramenta gravou.
  */
 async function noticeUnansweredTransfer(q: OrgQuery, call: TrackedCall, dialStatus: string, clock: Clock): Promise<void> {
+  // A chamada já tem `ended_at`: o titular pode ter pedido o apagamento. Com a linha travada, o
+  // briefing abaixo já lê o que sobrou do apagamento (sem telefone, motivo nem resumo), ou o
+  // apagamento espera este aviso e o alcança.
+  await lockCall(q, call.callId);
   // Quem ligou desistiu por conta própria: o motivo do desligamento dele fica como está.
   if (dialStatus !== CALLER_HANGUP) await q.exec("update calls set end_reason = 'transfer_unanswered' where id = $1", [call.callId]);
 

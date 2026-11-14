@@ -69,6 +69,18 @@ describe("summarize_call", () => {
     expect((await tasksOf(app, ligada)).map((queued) => queued.kind)).toEqual(["classify_call_outcome"]);
   });
 
+  it("chamada apagada a pedido do titular não recebe resumo nem entra na fila do desfecho", async () => {
+    const apagada = await createOrganization(app, "summarize erased");
+    await putSetting(app, apagada, OUTCOME_SETTING, true, false);
+    const callId = await createCall(app, apagada, t0);
+    await withSystem(app, (q) => q.exec("update calls set summary = '[apagado a pedido do titular]', erased_at = $2 where id = $1", [callId, t0]));
+
+    await summarizeCall.run(task(apagada, "summarize_call", {}, callId), depsFor(app));
+
+    expect(await summaryOf(callId)).toBe("[apagado a pedido do titular]");
+    expect(await tasksOf(app, apagada)).toEqual([]);
+  });
+
   it("falha com mensagem clara sem chamada ou com chamada de outra organização", async () => {
     await expect(summarizeCall.run(task(org, "summarize_call"), depsFor(app))).rejects.toThrow(/needs a task with callId/);
     const other = await createOrganization(app, "summarize other");

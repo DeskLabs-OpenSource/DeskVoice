@@ -54,9 +54,17 @@ const EVENT_RULES: ReadonlyArray<{ where: string; set: string }> = [
 
 const paramsOf = (where: string, ids: string[], phoneE164: string): unknown[] => (where.includes("$2") ? [ids, phoneE164] : [ids]);
 
-// Pendências do titular: pelo telefone ou pela chamada de onde nasceram. Avisos: das chamadas e dessas pendências.
-const SUBJECT_WHERE = "((direction = 'inbound' and from_e164 = $1) or (direction = 'outbound' and to_e164 = $1))";
+/**
+ * O telefone `$1` como o outro lado da chamada: quem ligou na recebida (`from_e164`), quem recebeu
+ * na feita (`to_e164`). O lado da empresa nunca casa. É o mesmo critério para apagar e para exportar
+ * os dados de um titular. `alias` é o prefixo da tabela `calls` na consulta (`"c."`), ou vazio.
+ */
+export const callerSideSql = (alias = ""): string =>
+  `((${alias}direction = 'inbound' and ${alias}from_e164 = $1) or (${alias}direction = 'outbound' and ${alias}to_e164 = $1))`;
 
+const SUBJECT_WHERE = callerSideSql();
+
+// Pendências do titular: pelo telefone ou pela chamada de onde nasceram. Avisos: das chamadas e dessas pendências.
 const FOLLOW_UPS_WHERE = "(caller_e164 = $1 or call_id = any($2::uuid[]))";
 const NOTIFICATIONS_WHERE = `(call_id = any($2::uuid[]) or follow_up_id in (select id from follow_ups where ${FOLLOW_UPS_WHERE}))`;
 
@@ -81,17 +89,35 @@ export async function hasLiveCall(q: OrgQuery, phoneE164: string): Promise<boole
   return row !== null;
 }
 
-/** Quantos arquivos de gravação existem hoje para estas chamadas (a conta é do disco, não do banco). */
+const exists = (file: string): Promise<boolean> =>
+  access(file).then(
+    () => true,
+    () => false,
+  );
+
+/**
+ * Quantas gravações existem hoje para estas chamadas (a conta é do disco, não do banco). Conta também
+ * o `.part`: a chamada já tem `ended_at` quando o processo de voz ainda fecha o arquivo e o troca
+ * pelo `.wav`.
+ */
 export async function countRecordings(dir: string, organizationId: string, callIds: string[]): Promise<number> {
   let found = 0;
   for (const callId of callIds) {
-    const exists = await access(recordingPath(dir, organizationId, callId)).then(
-      () => true,
-      () => false,
-    );
-    if (exists) found += 1;
+    const file = recordingPath(dir, organizationId, callId);
+    if ((await exists(file)) || (await exists(`${file}.part`))) found += 1;
   }
   return found;
+}
+
+/**
+ * Trava a linha da chamada até o fim da transação e diz se ela foi apagada a pedido do titular.
+ * Quem grava texto numa chamada depois do fim chama isto na mesma transação da escrita: o
+ * apagamento trava as chamadas antes de escrever, então um dos dois espera o outro confirmar, e o
+ * texto nunca chega depois do apagamento sem ser alcançado por ele.
+ */
+export async function lockCall(q: OrgQuery, callId: string): Promise<{ erased: boolean }> {
+  const row = await q.one<{ erased: boolean }>("select erased_at is not null as erased from calls where id = $1 for share", [callId]);
+  return { erased: row?.erased ?? false };
 }
 
 /**
@@ -119,8 +145,8 @@ export async function countCallerData(q: OrgQuery, options: { dir: string; phone
 }
 
 /**
- * Atende o pedido de apagamento de um titular, numa transação só. Nas chamadas em que o telefone
- * aparece, sai toda fala e todo texto sobre a pessoa: as falas, o resumo, a citação do desfecho, o
+ * Atende o pedido de apagamento de um titular, numa transação só. Nas chamadas encerradas em que o
+ * telefone é o outro lado (`callerSideSql`), sai toda fala e todo texto sobre a pessoa: as falas, o resumo, a citação do desfecho, o
  * texto da análise, o motivo do pedido para parar a gravação, os argumentos e mensagens de
  * ferramenta, o texto de aprovações e de avisos, e as pendências (pelo telefone e pela chamada). O
  * telefone do titular vira nulo nas chamadas, nos eventos e nas pendências.
@@ -143,6 +169,9 @@ export async function eraseCaller(q: OrgQuery, options: { dir: string; phoneE164
   if (await hasLiveCall(q, phoneE164)) return "live_call";
 
   const ids = await callsOfCaller(q, phoneE164);
+  // Trava as chamadas antes de qualquer escrita: quem grava texto depois do fim (resumo, desfecho,
+  // aviso) trava a mesma linha (`lockCall`, ou um `update ... and erased_at is null`) e espera.
+  await q.exec("select 1 from calls where id = any($1::uuid[]) for update", [ids]);
   const recordings = await countRecordings(dir, q.organizationId, ids);
 
   const events = new Set<string>();
@@ -161,6 +190,8 @@ export async function eraseCaller(q: OrgQuery, options: { dir: string; phoneE164
     ids,
     ERASED_TEXT,
   ]);
+  // A tarefa de lembrete de antes da atualização leva o título e os detalhes da pendência no payload.
+  await q.exec(`update tasks set payload = payload || jsonb_build_object('title', $2::text, 'details', '') where call_id = any($1::uuid[]) and payload ? 'title'`, [ids, ERASED_TEXT]);
   const approvals = await q.exec(`update approvals set question = $2, context = ${ERASED} where call_id = any($1::uuid[])`, [ids, ERASED_TEXT]);
 
   const calls = await q.exec(
@@ -189,6 +220,11 @@ export async function eraseCaller(q: OrgQuery, options: { dir: string; phoneE164
  * sai fica contado em `left`, com o motivo: quem chama decide repetir (a rotina lança, e a fila
  * tenta de novo).
  *
+ * O `.part` sai antes do `.wav`. A chamada recebe `ended_at` antes de o processo de voz trocar o
+ * `.part` pelo `.wav`; apagado o `.part`, a troca falha (o processo de voz registra a falha) e o
+ * `.wav` nunca aparece. Se a troca já aconteceu, o `.wav` está lá e sai em seguida. Nas duas ordens
+ * possíveis o arquivo sai nesta passagem, sem mexer no fim da chamada.
+ *
  * ponytail: passa por todas as chamadas com `erased_at` a cada execução; são só as apagadas a pedido,
  * poucas. Se crescerem, uma coluna `recording_erased_at` limita a varredura às pendentes.
  */
@@ -198,12 +234,15 @@ export async function removeErasedRecordings(db: Db, options: { dir: string; org
   let removed = 0;
   const errors: string[] = [];
   for (const { id } of ids) {
-    try {
-      await rm(recordingPath(dir, organizationId, id));
-      removed += 1;
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
-      errors.push(error instanceof Error ? error.message : String(error));
+    const file = recordingPath(dir, organizationId, id);
+    for (const target of [`${file}.part`, file]) {
+      try {
+        await rm(target);
+        removed += 1;
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
     }
   }
   const left = errors.length;

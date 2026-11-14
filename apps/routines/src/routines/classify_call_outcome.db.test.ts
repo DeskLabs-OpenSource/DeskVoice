@@ -203,4 +203,23 @@ describe("classify_call_outcome", () => {
     expect(fetch).not.toHaveBeenCalled();
     expect((await desfechoDe(callId))?.outcome).toBeNull();
   });
+
+  it("o titular pede o apagamento enquanto o provedor responde: o desfecho e o custo ficam, a citação não", async () => {
+    const { org, callId } = await comAgente("desfecho apagado no meio");
+    await comChave(org);
+    await fala(org, callId, "Pode marcar quinta às dez, por favor.");
+    const responde = openai({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
+    // O apagamento confirma depois de a rotina ler as falas e antes de ela gravar o desfecho.
+    const apagaNoMeio = (async (...args: Parameters<typeof fetch>) => {
+      await withSystem(app, (q) => q.exec("update calls set erased_at = $2 where id = $1", [callId, t0]));
+      return responde(...args);
+    }) as typeof fetch;
+
+    await roda(org, callId, apagaNoMeio);
+
+    const desfecho = await desfechoDe(callId);
+    expect(desfecho?.outcome).toBe("booked");
+    expect(desfecho?.outcome_evidence).toBeNull();
+    expect((await custoDe(callId)).call).toBe(CUSTO);
+  });
 });

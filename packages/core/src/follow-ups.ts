@@ -1,3 +1,4 @@
+import { ERASED_TEXT } from "./erasures";
 import { recordEvent } from "./events";
 import { enqueueTask } from "./queue";
 import type { OrgQuery } from "./types";
@@ -100,9 +101,11 @@ export async function closeFollowUp(
   now: Date,
 ): Promise<CloseResult> {
   const row = await q.one<Snapshot>(
-    `update follow_ups set status = $2, closing_note = $3, closed_by = $4, closed_at = $5
+    // Pendência apagada a pedido do titular fecha sem nota: um novo pedido não a acharia mais (sem
+    // telefone, e a chamada dela já apagada), então texto escrito agora ficaria para sempre.
+    `update follow_ups set status = $2, closing_note = case when title = $6 then null else $3 end, closed_by = $4, closed_at = $5
       where id = $1 and status = 'open' returning call_id, owner_user_id, due_at, status`,
-    [id, close.status, close.note, close.closedBy, now],
+    [id, close.status, close.note, close.closedBy, now, ERASED_TEXT],
   );
   if (!row) return (await q.one("select 1 from follow_ups where id = $1", [id])) ? "already_closed" : "not_found";
   if (row.call_id) await recordEvent(q, row.call_id, "follow_up_closed", eventOf(id, row, { closedBy: close.closedBy }), now);

@@ -1,6 +1,6 @@
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { ERASED_TEXT, ERASED_TRANSCRIPT, ERASE_RECORDINGS_TASK, recordingPath, removeErasedRecordings, withOrg } from "@deskvoice/core";
+import { ERASED_TEXT, ERASED_TRANSCRIPT, ERASE_RECORDINGS_TASK, closeFollowUp, recordingPath, removeErasedRecordings, withOrg } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { NOW, call, createCall, createOrganization, createUser, startPanel } from "../../../../test/kit";
 import { POST as erase } from "./privacy/erasure/route";
@@ -289,6 +289,55 @@ describe("apagar a conversa a pedido do titular", () => {
     expect([done.removed, done.left]).toEqual([1, 0]);
     await expect(access(file)).rejects.toThrow();
     expect((await recordingEvents()).at(-1)).toEqual({ payload: { removed: 1, left: 0 } });
+  });
+
+  it("a gravação que ainda é .part quando a chamada já tem ended_at sai na mesma passagem, e o .wav nunca aparece", async () => {
+    const org = await createOrganization(panel.app, "erasure part");
+    const owner = await createUser(panel.app, org, "owner");
+    const { file } = await seed(org);
+    // O processo de voz grava `ended_at` antes de trocar o `.part` pelo `.wav`.
+    await rename(file, `${file}.part`);
+
+    const seen = await call(preview, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
+    expect(seen.data).toMatchObject({ recordings: 1 });
+    await call(erase, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
+    const swept = await removeErasedRecordings(panel.app, { dir: panel.deps.recordingsDir, organizationId: org, now: NOW });
+    expect([swept.removed, swept.left]).toEqual([1, 0]);
+
+    // A troca que o processo de voz faria depois falha, e não há arquivo nenhum.
+    await expect(rename(`${file}.part`, file)).rejects.toThrow();
+    await expect(access(file)).rejects.toThrow();
+  });
+
+  it("a pendência apagada fecha sem nota: texto escrito depois não ficaria ao alcance de um novo pedido", async () => {
+    const org = await createOrganization(panel.app, "erasure close");
+    const owner = await createUser(panel.app, org, "owner");
+    await seed(org);
+    await call(erase, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
+
+    const open = await one<{ id: string }>(org, "select id from follow_ups where status = 'open' and title = $1 limit 1", [ERASED_TEXT]);
+    const closed = await withOrg(panel.app, org, (q) => closeFollowUp(q, String(open?.id), { status: "done", note: "Helena ligou de novo.", closedBy: owner.id }, NOW));
+    expect(closed).toBe("closed");
+    expect(await one(org, "select status, closing_note from follow_ups where id = $1", [open?.id])).toEqual({ status: "done", closing_note: null });
+  });
+
+  it("exportar a própria linha da empresa não devolve as chamadas de quem ligou para ela", async () => {
+    const org = await createOrganization(panel.app, "export own line");
+    const owner = await createUser(panel.app, org, "owner");
+    // Uma linha da empresa que passa na validação de telefone.
+    const OWN = "+554133334444";
+    const { callId } = await seed(org);
+    await withOrg(panel.app, org, (q) => q.exec("update calls set to_e164 = $2 where id = $1", [callId, OWN]));
+
+    const exported = await call(exportRecord, { method: "POST", cookie: owner.cookie, body: { phone: OWN } });
+
+    expect(exported.status).toBe(200);
+    const { content, counts } = exported.data as { content: string; counts: Record<string, unknown> };
+    expect(counts).toMatchObject({ calls: 0, events: 0 });
+    for (const spoken of SPOKEN) expect(content).not.toContain(spoken);
+    // A pessoa, pelo telefone dela, continua achando a própria chamada.
+    const subject = await call(exportRecord, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
+    expect((subject.data as { counts: Record<string, unknown> }).counts).toMatchObject({ calls: 1 });
   });
 
   it("repetir o pedido não reconta nem reescreve", async () => {

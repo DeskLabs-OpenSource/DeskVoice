@@ -96,6 +96,14 @@ describe("follow_up", () => {
     ]);
   });
 
+  it("tarefa de antes da atualização, de chamada apagada a pedido do titular, avisa sem o título nem os detalhes", async () => {
+    const org = await createOrganization(app, "follow up legacy erased");
+    const callId = await createCall(app, org, t0);
+    await withSystem(app, (q) => q.exec("update calls set erased_at = $2 where id = $1", [callId, t0]));
+    await followUp.run(task(org, "follow_up", { title: "Retornar para Maria", details: "Quer o orçamento por e-mail." }, callId), depsFor(app));
+    expect((await notificationsOf(app, org)).map((notification) => notification.body)).toEqual(["Pendência: [apagado a pedido do titular]"]);
+  });
+
   it("recusa tarefa sem pendência nem título", async () => {
     const org = await createOrganization(app, "follow up invalid");
     await expect(followUp.run(task(org, "follow_up", { details: "x" }), depsFor(app))).rejects.toThrow();

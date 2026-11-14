@@ -1,4 +1,4 @@
-import { FOLLOW_UP_OVERDUE_AFTER_MS, FOLLOW_UP_TASK, enqueueTask, withOrg, type FollowUpStage, type OrgQuery } from "@deskvoice/core";
+import { ERASED_TEXT, FOLLOW_UP_OVERDUE_AFTER_MS, FOLLOW_UP_TASK, enqueueTask, lockCall, withOrg, type FollowUpStage, type OrgQuery } from "@deskvoice/core";
 import { hasWhatsAppConnector } from "@deskvoice/tools";
 import { z } from "zod";
 import type { Routine } from "../types";
@@ -47,14 +47,17 @@ const routine: Routine = {
     const reminder = reminderSchema.safeParse(task.payload);
     if (!reminder.success) {
       const { title, details } = legacySchema.parse(task.payload);
-      await withOrg(deps.db, task.organizationId, (q) =>
-        q.exec("insert into notifications (organization_id, call_id, channel, body, status, created_at) values ($1, $2, 'panel', $3, 'sent', $4)", [
+      await withOrg(deps.db, task.organizationId, async (q) => {
+        // O payload lido ao reivindicar a tarefa pode ser de antes do apagamento a pedido do titular.
+        const erased = task.callId !== null && (await lockCall(q, task.callId)).erased;
+        const body = erased ? `Pendência: ${ERASED_TEXT}` : details ? `Pendência: ${title}\n\n${details}` : `Pendência: ${title}`;
+        await q.exec("insert into notifications (organization_id, call_id, channel, body, status, created_at) values ($1, $2, 'panel', $3, 'sent', $4)", [
           task.organizationId,
           task.callId,
-          details ? `Pendência: ${title}\n\n${details}` : `Pendência: ${title}`,
+          body,
           now,
-        ]),
-      );
+        ]);
+      });
       return;
     }
 
