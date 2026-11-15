@@ -266,6 +266,27 @@ O resultado vira uma seção "Medida da redução de ruído" neste documento. Li
 fatia: ela traz dependência nova (segunda leitura, porque muda dependência e talvez o `Dockerfile`),
 e só existe se a medida passar.
 
+### Fatia 4b: a medida que falta antes de ligar (aberta depois do #256)
+
+No mesmo script da fatia 4 (`scripts/bancada-de-voz/`), fora do CI, sem dependência nova no
+repositório. Só RNNoise e DeepFilterNet; o SpeexDSP saiu (veja "Medida da redução de ruído").
+
+Aceite:
+- **perda por quadro:** régua no repositório, em quadros de 20 ms, sobre o quarto mais fraco dos
+  quadros com fala, a −20 e a −30 dB do pico. Acima de 1 dB de perda média, o candidato reprova. Um
+  teste prova que a régua reprova o filtro que zera os quadros mais de 12 dB abaixo do mais forte (o
+  que passou na régua da frase inteira);
+- **fala baixa debaixo de ruído:** a mesma régua por quadro, com obra, música e conversa de fundo
+  por baixo, a 15, 5 e 0 dB. A perda é medida contra a voz limpa, só nos quadros de fala;
+- **CPU em fluxo:** o candidato recebe pedaços de 20 ms, um de cada vez, como a ponte manda, e a
+  medida dá o tempo por pedaço (média e p99) e a CPU de um núcleo por segundo de áudio;
+- o resultado entra numa seção do spec, com o comando e o commit.
+
+Fracasso mesmo funcionando: régua que um filtro que corta sílaba fraca passa; CPU medida no áudio
+inteiro e chamada de "em fluxo".
+
+Fora: ligar o candidato no produto, o μ-law, voz real e o efeito no provedor (fatia 5).
+
 ### Fatia 5: bancada antes e depois, contra os provedores (depende do pedido de decisão)
 
 Um script manual em `scripts/`, fora do CI, que, para cada motor e para `normal` e `noisy`, com e
