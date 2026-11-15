@@ -35,38 +35,48 @@ export const MAX_SUCCESSFUL_CALLS_PER_CALL: Readonly<Record<string, number>> = {
 };
 
 /**
- * Chamadas concluídas neste processo cujo `tool_result` ainda não chegou ao banco.
+ * Vagas tomadas neste processo, por ligação e ferramenta: as que estão em curso e as que já
+ * concluíram com sucesso.
  *
  * O modelo pede ferramentas em paralelo, e o `tool_result` só é gravado depois que a ferramenta
- * retorna: contar apenas o banco deixaria todas as chamadas de um mesmo turno passarem juntas pelo
- * mesmo limite. A poda é por tempo porque a ligação não avisa quando termina.
+ * retorna: contar apenas o banco, ou somar só depois do sucesso, deixaria todas as chamadas de um
+ * mesmo turno passarem juntas pelo mesmo limite. Por isso a vaga é tomada antes de a ferramenta
+ * rodar e devolvida se ela não concluir. A poda é por tempo porque a ligação não avisa quando
+ * termina, e nunca leva uma entrada com chamada em curso.
  */
-const inFlight = new Map<string, { count: number; at: number }>();
+const slots = new Map<string, { taken: number; running: number; at: number }>();
 const FORGET_AFTER_MS = 60_000;
 
-function budgetKey(ctx: ToolContext, name: string): string {
+function slotKey(ctx: ToolContext, name: string): string {
   return JSON.stringify([ctx.callId, name]);
 }
 
-function noteSpent(ctx: ToolContext, name: string): void {
-  const key = budgetKey(ctx, name);
-  const entry = inFlight.get(key) ?? { count: 0, at: ctx.clock.now().getTime() };
-  entry.count += 1;
-  entry.at = ctx.clock.now().getTime();
-  inFlight.set(key, entry);
-}
-
-/** Quantas vezes `name` já concluiu nesta ligação: o que o banco diz, ou o que este processo já fez. */
-async function spentInCall(ctx: ToolContext, name: string): Promise<number> {
-  const now = ctx.clock.now().getTime();
-  for (const [key, entry] of inFlight) {
-    if (now - entry.at >= FORGET_AFTER_MS) inFlight.delete(key);
-  }
+/**
+ * Toma uma vaga de `name` nesta ligação e devolve como fechá-la (o sucesso a mantém, o resto a
+ * devolve), ou `null` se o teto já foi alcançado. Entre ler o banco e tomar a vaga não há `await`:
+ * duas chamadas paralelas nunca leem o mesmo número livre.
+ */
+async function takeSlot(ctx: ToolContext, name: string, budget: number): Promise<((succeeded: boolean) => void) | null> {
   const recorded = await ctx.q.one<{ count: string }>(
     "select count(*) as count from call_events where call_id = $1 and kind = 'tool_result' and payload->>'name' = $2 and payload->>'ok' = 'true'",
     [ctx.callId, name],
   );
-  return Math.max(Number(recorded?.count ?? 0), inFlight.get(budgetKey(ctx, name))?.count ?? 0);
+  const now = ctx.clock.now().getTime();
+  for (const [key, entry] of slots) {
+    if (entry.running === 0 && now - entry.at >= FORGET_AFTER_MS) slots.delete(key);
+  }
+  const key = slotKey(ctx, name);
+  const entry = slots.get(key) ?? { taken: 0, running: 0, at: now };
+  if (Math.max(Number(recorded?.count ?? 0), entry.taken) >= budget) return null;
+  entry.taken += 1;
+  entry.running += 1;
+  entry.at = now;
+  slots.set(key, entry);
+  return (succeeded) => {
+    entry.running -= 1;
+    if (!succeeded) entry.taken -= 1;
+    entry.at = ctx.clock.now().getTime();
+  };
 }
 
 /** O que `tool_called` grava como argumentos: nada do texto, se a ferramenta declara que ele é pessoal. */
@@ -91,14 +101,20 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
   } else {
     const budget = MAX_SUCCESSFUL_CALLS_PER_CALL[tool.name];
     try {
-      if (budget !== undefined && (await spentInCall(ctx, tool.name)) >= budget) {
+      const release = budget === undefined ? undefined : await takeSlot(ctx, tool.name, budget);
+      if (release === null) {
         result = {
           ok: false,
-          message: `Nada foi feito: nesta ligação o limite de ${budget} chamadas a ${tool.name} já foi alcançado. Diga a quem está na linha, com naturalidade, que isso já foi tratado, e siga a conversa sem repetir o pedido.`,
+          message: `Nada foi feito: nesta ligação o limite de ${budget} chamadas a ${tool.name} já foi alcançado, e este pedido não foi registrado. Diga a quem está na linha, com naturalidade, que por esta ligação não dá para registrar mais nada desse tipo, que o que foi registrado antes continua valendo, e que, se precisar, a pessoa pode ligar de novo ou aguardar o retorno da equipe. Não diga que este pedido foi tratado.`,
         };
       } else {
-        result = await tool.run(parsed.data, ctx);
-        if (result.ok && budget !== undefined) noteSpent(ctx, tool.name);
+        let succeeded = false;
+        try {
+          result = await tool.run(parsed.data, ctx);
+          succeeded = result.ok;
+        } finally {
+          release?.(succeeded);
+        }
       }
     } catch (cause) {
       // O motivo fica no evento, para o operador; o modelo recebe só o que pode dizer em voz alta.

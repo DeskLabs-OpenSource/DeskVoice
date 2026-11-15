@@ -3,7 +3,7 @@ import { z } from "zod";
 import { openTestDbs } from "../../core/test/helpers";
 import { createFixture, eventsOf, t0, type FakeContext } from "../test/helpers";
 import { defineTool } from "./define-tool";
-import { MAX_CREATE_TASK_PER_CALL, MAX_NOTIFY_HUMAN_PER_CALL, runTool } from "./run-tool";
+import { MAX_AGENDA_MARCAR_PER_CALL, MAX_CALL_WEBHOOK_PER_CALL, MAX_CREATE_TASK_PER_CALL, MAX_NOTIFY_HUMAN_PER_CALL, runTool } from "./run-tool";
 import endCall from "./tools/end_call";
 
 const { app, owner } = openTestDbs();
@@ -94,6 +94,9 @@ describe("runTool", () => {
     const refusedResult = await runTool(fake, {}, ctx);
     expect(refusedResult.ok).toBe(false);
     expect(refusedResult.message).toContain(`limite de ${allowed} chamadas a notify_human`);
+    // A recusa não faz o agente afirmar que um pedido novo foi tratado.
+    expect(refusedResult.message).toContain("este pedido não foi registrado");
+    expect(refusedResult.message).toContain("Não diga que este pedido foi tratado");
     // A ferramenta não roda de novo: o teto é antes da escrita, não depois dela.
     expect(runs).toBe(allowed);
     // E a recusa deixa rastro na linha do tempo, como qualquer outro desfecho.
@@ -118,5 +121,71 @@ describe("runTool", () => {
     expect(runs).toBe(0);
     for (let i = 0; i < allowed; i += 1) expect((await runTool(fake, { quando: "amanhã" }, ctx)).ok).toBe(true);
     expect(runs).toBe(allowed);
+  });
+
+  it("vale para chamadas em paralelo no mesmo turno: só o teto executa, as outras são recusadas", async () => {
+    const parallel = await createFixture(app, "run-tool-paralelo");
+    const allowed = MAX_AGENDA_MARCAR_PER_CALL;
+    const total = allowed + 3;
+    let runs = 0;
+    const refused: Array<{ ok: boolean; message: string }> = [];
+    // Resolve quando toda chamada já decidiu: entrou na ferramenta ou voltou recusada.
+    let allDecided: () => void = () => undefined;
+    const decided = new Promise<void>((resolve) => (allDecided = resolve));
+    const checkDecided = (): void => {
+      if (runs + refused.length === total) allDecided();
+    };
+    let openGate: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (openGate = resolve));
+    const fake = defineTool({
+      name: "agenda_marcar",
+      description: "Ferramenta de teste, com o teto de produção",
+      inputSchema: z.object({}),
+      async run() {
+        runs += 1;
+        checkDecided();
+        await gate;
+        return { ok: true, message: "marcado" };
+      },
+    });
+
+    const pending = Array.from({ length: total }, () =>
+      runTool(fake, {}, parallel).then((result) => {
+        if (runs + refused.length < total) {
+          refused.push(result);
+          checkDecided();
+        }
+        return result;
+      }),
+    );
+    await decided;
+    openGate();
+    const all = await Promise.all(pending);
+
+    expect(runs).toBe(allowed);
+    expect(refused).toHaveLength(3);
+    for (const result of refused) expect(result).toMatchObject({ ok: false, message: expect.stringContaining(`limite de ${allowed} chamadas a agenda_marcar`) });
+    expect(all.filter((result) => result.ok)).toHaveLength(allowed);
+  });
+
+  it("devolve a vaga quando a ferramenta não conclui, seja por ok: false ou por erro", async () => {
+    const own = await createFixture(app, "run-tool-vaga");
+    const allowed = MAX_CALL_WEBHOOK_PER_CALL;
+    const outcomes: Array<"fail" | "throw" | "ok"> = ["fail", "throw", "fail", ...Array<"ok">(allowed).fill("ok")];
+    const fake = defineTool({
+      name: "call_webhook",
+      description: "Ferramenta de teste, com o teto de produção",
+      inputSchema: z.object({}),
+      async run() {
+        const next = outcomes.shift();
+        if (next === "throw") throw new Error("falha simulada");
+        return { ok: next === "ok", message: next ?? "acabou" };
+      },
+    });
+
+    const results = [];
+    for (let i = 0; i < allowed + 3; i += 1) results.push(await runTool(fake, {}, own));
+    expect(results.map((result) => result.ok)).toEqual([false, false, false, ...Array<boolean>(allowed).fill(true)]);
+    expect((await runTool(fake, {}, own)).message).toContain(`limite de ${allowed} chamadas a call_webhook`);
   });
 });
