@@ -468,6 +468,12 @@ Fica no comentário da DESA-24, no formato do `GOVERNANCE.md`. Resumo:
    DESA-10 disser. Se nada for dito, a bancada não roda, e o PR de cada fatia diz que o "antes e
    depois" contra o provedor não foi medido.
 
+**Como ficou (15/11):** o pedido 1 não teve resposta, e o diagnóstico não é feito. O pedido 2 caiu
+no padrão B, e por isso vale a decisão 1 da DESA-10, que o Rafael respondeu com A em 13/11 (lote
+DESA-19, decisão 2): a medida contra o provedor roda com teto de US$ 5 no total, e a chave de cada
+motor chega por canal privado. A fatia 5 e a fatia 4 do R3 dividem esse teto. Até a chave chegar, a
+fatia 5 fica com o script pronto e testado sem rede, e a rodada espera.
+
 ## Não medido (deste documento)
 
 - Nenhum parâmetro de provedor foi provado contra o servidor real. Tudo vem da documentação lida
