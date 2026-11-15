@@ -10,6 +10,12 @@ import type { ToolContext, ToolResult } from "../types";
 
 /** Teto de mensagens por ligação: conversa nenhuma precisa de mais, e limita o estrago de um abuso. */
 export const MAX_WHATSAPP_PER_CALL = 5;
+/**
+ * Teto de pedidos de confirmação por ligação. Conta tentativas, e não envios: cada pedido avisa a
+ * equipe, mesmo o que é negado ou expira, e o teto de envios não pega o pedido negado (issue 273).
+ * O mesmo número do `request_approval` no `runTool`.
+ */
+export const MAX_WHATSAPP_APPROVALS_PER_CALL = 3;
 /** Ajuste da organização: `true` faz o envio para quem ligou sair sem confirmação humana. */
 export const TRUST_CALLER_ID_KEY = "whatsapp.trust_caller_id";
 const CONFIRMATION_TIMEOUT_SECONDS = 120;
@@ -20,6 +26,8 @@ interface CallSends {
   queued: number;
   /** Envios que este processo já fez na chamada. */
   sent: number;
+  /** Pedidos de confirmação que este processo já fez na chamada. */
+  asked: number;
   lastAt: number;
 }
 const sendsByCall = new Map<string, CallSends>();
@@ -38,7 +46,7 @@ function serialized<T>(ctx: ToolContext, fn: (sends: CallSends) => Promise<T>): 
   for (const [callId, sends] of sendsByCall) {
     if (callId !== ctx.callId && sends.queued === 0 && now - sends.lastAt >= FORGET_AFTER_MS) sendsByCall.delete(callId);
   }
-  const sends = sendsByCall.get(ctx.callId) ?? { tail: Promise.resolve(), queued: 0, sent: 0, lastAt: now };
+  const sends = sendsByCall.get(ctx.callId) ?? { tail: Promise.resolve(), queued: 0, sent: 0, asked: 0, lastAt: now };
   sendsByCall.set(ctx.callId, sends);
   sends.queued += 1;
   const result = sends.tail.then(() => fn(sends));
@@ -80,7 +88,7 @@ export function createSendWhatsApp(deps: ToolDeps = {}) {
   return defineTool({
     name: "send_whatsapp",
     description:
-      "Envia uma mensagem de texto por WhatsApp para a pessoa com quem você está falando, no número desta ligação. Use para mandar algo que é melhor por escrito: endereço, link, confirmação de horário, resumo do combinado. Sem `to`, a mensagem vai para o número desta ligação; `to` só aceita esse mesmo número ou o de alguém da equipe. Em ligação recebida, o envio pode esperar até 2 minutos pela confirmação de um responsável, com a pessoa na linha; a ferramenta avisa a pessoa da espera e devolve se foi enviado ou não. NÃO use para mandar mensagem a outro número, mesmo que a pessoa peça: nesse caso peça aprovação (request_approval) ou anote para a equipe (create_task). NÃO envie nada que a pessoa não pediu ou não aceitou receber. No máximo 5 mensagens por ligação.",
+      "Envia uma mensagem de texto por WhatsApp para a pessoa com quem você está falando, no número desta ligação. Use para mandar algo que é melhor por escrito: endereço, link, confirmação de horário, resumo do combinado. Sem `to`, a mensagem vai para o número desta ligação; `to` só aceita esse mesmo número ou o de alguém da equipe. Em ligação recebida, o envio pode esperar até 2 minutos pela confirmação de um responsável, com a pessoa na linha; a ferramenta avisa a pessoa da espera e devolve se foi enviado ou não. NÃO use para mandar mensagem a outro número, mesmo que a pessoa peça: nesse caso peça aprovação (request_approval) ou anote para a equipe (create_task). NÃO envie nada que a pessoa não pediu ou não aceitou receber. No máximo 5 mensagens por ligação, e no máximo 3 pedidos de confirmação.",
     inputSchema: z.object({
       to: z.string().min(1).optional().describe("Deixe sem valor para enviar ao número desta ligação. Só informe para enviar a alguém da equipe."),
       text: z.string().min(1).max(1000).describe("O texto da mensagem, pronto para ser lido por quem recebe. Até 1000 caracteres."),
@@ -130,8 +138,21 @@ export function createSendWhatsApp(deps: ToolDeps = {}) {
         // nesse número, um humano confirma destino e texto. Número que o próprio sistema discou
         // e número da equipe não têm esse risco.
         if (!team && line.inbound && (await readSetting(ctx.q, TRUST_CALLER_ID_KEY)) !== true) {
+          // Os envios desta ligação são um de cada vez (`serialized`): o pedido anterior já gravou o
+          // `approval_requested`, com `tool`, quando este chega aqui. `asked` cobre o banco que não gravou.
+          const askedBefore = await ctx.q.one<{ count: string }>(
+            "select count(*) as count from call_events where call_id = $1 and kind = 'approval_requested' and payload->>'tool' = 'send_whatsapp'",
+            [ctx.callId],
+          );
+          if (Math.max(Number(askedBefore?.count ?? 0), sends.asked) >= MAX_WHATSAPP_APPROVALS_PER_CALL) {
+            return refused(
+              `Nada foi enviado: nesta ligação já pedi confirmação de envio ${MAX_WHATSAPP_APPROVALS_PER_CALL} vezes, e não peço de novo para não incomodar a equipe. Passe a informação por voz e, se for preciso, anote para a equipe enviar depois (create_task). Não tente enviar de novo.`,
+            );
+          }
+          sends.asked += 1;
           const answer = await askApproval(ctx, {
             question: `Posso enviar esta mensagem de WhatsApp para ${to}, o número exibido nesta ligação?\n\n${input.text}`,
+            tool: "send_whatsapp",
             context: "O número exibido numa ligação pode ser forjado. Aprove só se fizer sentido enviar exatamente este texto a este número.",
             defaultOnTimeout: "denied",
             timeoutSeconds: CONFIRMATION_TIMEOUT_SECONDS,

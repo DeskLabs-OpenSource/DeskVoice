@@ -37,6 +37,12 @@ export interface ToolResult {
   /** Texto devolvido ao modelo: o que aconteceu e o que ele deve dizer a quem está na linha. */
   message: string;
   data?: unknown;
+  /**
+   * `true` com `ok: false`: a ferramenta recusou antes de fazer qualquer efeito (nada foi escrito,
+   * enviado nem chamado), e a vaga do teto por ligação volta. Sem ele, a vaga fica gasta, porque o
+   * efeito pode ter saído: o webhook que respondeu erro já recebeu o POST.
+   */
+  noEffect?: boolean;
 }
 
 export interface Tool<Input = unknown> {

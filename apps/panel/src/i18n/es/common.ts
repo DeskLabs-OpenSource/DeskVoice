@@ -29,6 +29,8 @@ const common: CommonDictionary = {
     themeSystem: "Tema: igual al del sistema",
     themeLight: "Tema: claro",
     themeDark: "Tema: oscuro",
+    versionShort: "Versión {version}",
+    updateAvailable: "Actualización disponible: {version}",
     notifications: "Avisos",
     noNotifications: "Ningún aviso. Cuando un agente te avise durante una llamada, el aviso aparece aquí.",
     markRead: "Marcar como leído",

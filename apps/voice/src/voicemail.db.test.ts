@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -156,11 +156,14 @@ describe("recado quando ninguém pode atender", { timeout: 120_000 }, () => {
     expect(summary).toMatchObject([{ call_id: vm.callId }]);
 
     const events = await eventsOf(app, vm.callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "voicemail_left", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "voicemail_left", "call_ended", "task_queued", "recording_saved"]);
     expect(events[0]?.payload).toMatchObject({ voicemail: "no_agent", language: "pt-BR" });
     expect(events[1]?.payload).toMatchObject({ left: true, recorded: true, recordedSeconds: 1.5, reason: "no_agent", cause: "silence" });
     expect(events[2]?.payload).toMatchObject({ status: "completed", reason: "voicemail", costCents: 0 });
     expect(events[3]?.payload).toMatchObject({ kind: "summarize_call" });
+    // O recado também fecha com impressão digital, e ela é a do arquivo que ficou no disco.
+    const wav = await readFile(recordingPath(vm.dir, vm.organizationId, vm.callId));
+    expect(events[4]?.payload).toEqual({ bytes: wav.length, sha256: createHash("sha256").update(wav).digest("hex") });
     await vm.cleanup();
   });
 
@@ -232,6 +235,8 @@ describe("recado quando ninguém pode atender", { timeout: 120_000 }, () => {
     expect(outcome).toMatchObject({ status: "completed", endReason: "voicemail", cause: "max_duration", left: false, file: null });
     const events = await eventsOf(app, vm.callId);
     expect(events[1]?.payload).toMatchObject({ left: false, recorded: false, file: null, reason: "agent_disabled" });
+    // O arquivo apagado não deixa impressão digital: não há o que conferir depois.
+    expect(events.map((event) => event.kind)).not.toContain("recording_saved");
     await expect(readFile(recordingPath(vm.dir, vm.organizationId, vm.callId))).rejects.toThrow();
     await vm.cleanup();
   });

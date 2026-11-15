@@ -106,7 +106,12 @@ describe("ligação pelo WhatsApp: entrada e atendimento", { timeout: 60_000 }, 
     expect(call.offers).toEqual([clientId]);
     expect(call.owner).toBe(clientId);
     expect(await callOf(app, callId)).toMatchObject({ direction: "inbound", channel: "whatsapp", agent_id: agentId, from_e164: CALLER, to_e164: NUMBER, engine: "manual" });
-    expect((await eventsOf(app, callId)).slice(0, 3)).toEqual([
+    // A chamada vira `in_progress` antes de a sessão gravar o aviso: espera os três primeiros eventos.
+    const opening = await waitFor(async () => {
+      const events = await eventsOf(app, callId);
+      return events.length >= 3 ? events.slice(0, 3) : null;
+    }, "the first three events");
+    expect(opening).toEqual([
       { kind: "call_started", payload: { direction: "inbound", from: CALLER, to: NUMBER, agentId, channel: "whatsapp" } },
       { kind: "call_answered", payload: { engine: "manual" } },
       { kind: "recording_notice", payload: { text: expect.any(String) } },

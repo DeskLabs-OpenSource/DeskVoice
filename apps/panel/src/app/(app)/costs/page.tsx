@@ -105,7 +105,7 @@ export default function CostsPage() {
                         </span>
                         <Bar share={row.costCents / max(data.byEngine.map((entry) => entry.costCents))} />
                         <span className="text-[0.87rem] text-muted">
-                          {fill(t.minutes, { n: Math.round(row.seconds / 60) })}
+                          {fill(t.minutes, { n: Math.round(row.callSeconds / 60) })}
                           {row.priceCheckedOn ? ` · ${fill(t.priceChecked, { date: formatDay(row.priceCheckedOn, locale) })}` : ""}
                         </span>
                         {row.priceSource?.startsWith("http") ? (

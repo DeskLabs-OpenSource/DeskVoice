@@ -139,6 +139,8 @@ export interface Engine {
   baseUrl: string | null;
   /** O modelo da classificação gravado, ou `null` para o do motor. */
   classifyModel: string | null;
+  /** O modelo gravado, sem endpoint, não está na tabela de preço: a classificação usa o do motor. */
+  classifyModelUnmeasured: boolean;
   /** O endpoint da classificação tem a chave dele gravada (o valor nunca chega à tela). */
   classifyKeyConfigured: boolean;
   /** Vozes do provedor; vazia quando o motor não oferece escolha (o simulado). */
@@ -220,9 +222,9 @@ export interface Costs {
   from: string;
   to: string;
   totalCents: number;
-  byDay: Array<{ day: string; costCents: number; seconds: number }>;
+  byDay: Array<{ day: string; costCents: number; billedSeconds: number }>;
   byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number }>;
-  byEngine: Array<{ engine: string; label: string; costCents: number; seconds: number; priceCheckedOn: string | null; priceSource: string | null }>;
+  byEngine: Array<{ engine: string; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null }>;
 }
 
 export interface Setting<T> {

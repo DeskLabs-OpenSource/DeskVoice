@@ -40,6 +40,7 @@ const settings = {
   classifyKeyKeep: "Em branco, mantém a chave salva",
   classifyModel: "Modelo da classificação",
   classifyModelHint: "O nome que o provedor publica, por exemplo deepseek-chat. Em branco, a classificação usa o modelo do motor. Sem endpoint, só é aceito o modelo cujo preço o projeto conhece; para outro modelo, informe o endpoint.",
+  classifyModelUnmeasured: "Este modelo não está na tabela de preço desta versão. Sem endpoint, a classificação usa o modelo do motor no lugar dele. Para usar este modelo, informe o endpoint do provedor; para o do motor, deixe o campo em branco e salve.",
   classifyTargetSave: "Salvar destino",
   /** O teste só lê os dados do modelo no provedor: não abre sessão de voz e não gasta. */
   keyResults: {

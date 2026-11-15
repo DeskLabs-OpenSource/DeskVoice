@@ -36,8 +36,11 @@ mesmo, por sua conta. O que foi provado em cada um:
 - **Ubuntu**: é o sistema em que a instalação foi provada e o que a VPS da parceira entrega.
 - **AlmaLinux 9**: instalado numa VPS da parceira em 12/11/2026 (AlmaLinux 9.8), com o serviço do
   Docker ligado à mão (`systemctl enable --now docker`), porque ele veio instalado e desligado.
-  Agora o instalador liga esse serviço sozinho quando o encontra parado; essa correção ainda não
-  rodou numa máquina real.
+  O instalador passou a ligar esse serviço sozinho quando o encontra parado, e isso foi provado na
+  mesma VPS em 15/11/2026: com o Docker desligado (`systemctl disable --now docker.socket docker`),
+  o instalador da 0.13.0 disse que o Docker não respondia, ligou o serviço e seguiu até o fim, com
+  a mesma publicação e o WhatsApp conectado. Desde 13/11 essa VPS também é atualizada pelo
+  `install/update.sh`, da 0.9.0 até a 0.13.0.
 - **Rocky Linux 9**: aceito por ser da mesma família do AlmaLinux, e não provado.
 - **RHEL**: fora da lista até uma instalação provar. Ele pede assinatura ativa para o `dnf`
   baixar pacotes, um passo que ninguém mediu.

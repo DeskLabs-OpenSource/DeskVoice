@@ -37,8 +37,23 @@ export const GET = handle({}, async ({ q, url, deps }) => {
       where (l.at at time zone z.zone)::date between $1::date and $2::date group by 1, 2 order by 3 desc`,
     range,
   );
+  // Os minutos de cada motor são a duração das ligações que ele atendeu (do atendimento ao fim),
+  // e não o `seconds` do extrato: esse é o uso que o motor declara para cobrar, e o OpenAI Realtime
+  // cobra por token e declara zero segundo (issue #244). A ligação conta no dia em que terminou, no
+  // fuso da organização, como o resto do quadro: uma ligação com linhas do extrato em dois dias (o
+  // desfecho classificado depois da meia-noite) não aparece inteira nos dois períodos.
   const byEngine = await q.many<{ engine: string; microcents: string; seconds: number }>(
-    `select l.engine, coalesce(sum(l.cost_microcents), 0)::text as microcents, sum(l.seconds)::int as seconds ${scope} group by 1 order by 2 desc`,
+    `with scoped as (select l.engine, l.call_id, l.cost_microcents ${scope}),
+          answered as (
+            select c.engine, coalesce(sum(extract(epoch from (c.ended_at - c.answered_at))), 0)::int as seconds
+              from calls c
+             cross join (select coalesce((select timezone from outbound_policy), 'America/Sao_Paulo') as zone) z
+             where c.answered_at is not null and c.ended_at is not null
+               and (c.ended_at at time zone z.zone)::date between $1::date and $2::date
+             group by 1)
+     select s.engine, coalesce(sum(s.cost_microcents), 0)::text as microcents, coalesce(a.seconds, 0)::int as seconds
+       from scoped s left join answered a on a.engine = s.engine
+      group by s.engine, a.seconds order by coalesce(sum(s.cost_microcents), 0) desc`,
     range,
   );
   const engines = new Map((await listEngines()).map((engine) => [engine.id, engine]));
@@ -48,12 +63,14 @@ export const GET = handle({}, async ({ q, url, deps }) => {
     // O total arredonda a soma inteira, não a soma dos totais de cada motor: um centavo a menos de
     // erro, e o mesmo número que o extrato do período diz.
     totalCents: centsOf(byDay.reduce((sum, row) => sum + Number(row.microcents), 0)),
-    byDay: byDay.map((row) => ({ day: row.day, costCents: centsOf(row.microcents), seconds: row.seconds })),
+    // Dois nomes, porque são duas medidas: `billedSeconds` é o uso que os motores declararam para
+    // cobrar (o OpenAI Realtime declara token, não segundo), e `callSeconds` é a duração das ligações.
+    byDay: byDay.map((row) => ({ day: row.day, costCents: centsOf(row.microcents), billedSeconds: row.seconds })),
     byAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents), calls: row.calls })),
     byEngine: byEngine.map((row) => ({
       engine: row.engine,
       costCents: centsOf(row.microcents),
-      seconds: row.seconds,
+      callSeconds: row.seconds,
       label: engines.get(row.engine)?.label ?? row.engine,
       priceCheckedOn: engines.get(row.engine)?.pricing.checkedOn ?? null,
       priceSource: engines.get(row.engine)?.pricing.source ?? null,

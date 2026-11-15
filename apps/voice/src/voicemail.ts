@@ -2,7 +2,7 @@ import { readFile, rm } from "node:fs/promises";
 import { enqueueTask, recordEvent, recordingPath, withOrg, type Clock, type Db, type VoicemailLanguage } from "@deskvoice/core";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
-import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording, type RecordingFailureReason } from "./recording";
+import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording, type RecordingFailureReason, type RecordingOutcome } from "./recording";
 import { SAMPLE_RATE, realSchedule, type CallTransport, type Schedule } from "./transport";
 
 /**
@@ -199,9 +199,11 @@ export function startVoicemailSession(deps: VoicemailDeps, input: VoicemailInput
     const left = leftOf();
     let failure = end.failure;
     let file: string | null = null;
+    let saved: RecordingOutcome | false = false;
     if (recorder) {
       try {
-        const saved = await recorder.finish();
+        saved = await recorder.finish();
+        if (saved && saved.sha256Error !== undefined) log("error", "could not compute the recording fingerprint", { error: saved.sha256Error });
         if (saved && left && dir) file = recordingPath(dir, organizationId, callId);
         // Silêncio ou ruído não vira recado: o arquivo sai, e a linha do tempo diz que não houve fala.
         if (saved && !left && dir) await rm(recordingPath(dir, organizationId, callId), { force: true });
@@ -229,6 +231,8 @@ export function startVoicemailSession(deps: VoicemailDeps, input: VoicemailInput
         // a chave do agente do número) e o aviso ao responsável saem dele.
         const taskId = await enqueueTask(q, { kind: "summarize_call", payload: {}, callId, runAt: clock.now() });
         await recordEvent(q, callId, "task_queued", { taskId, kind: "summarize_call" }, clock.now());
+        // A impressão digital só do arquivo que ficou: silêncio apagado não tem o que conferir depois.
+        if (saved && file) await recordEvent(q, callId, "recording_saved", { bytes: saved.bytes, sha256: saved.sha256 }, clock.now());
       });
     } catch (error) {
       log("error", "could not record the end of the voicemail", { error: messageOf(error) });

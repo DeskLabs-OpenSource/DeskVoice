@@ -19,6 +19,7 @@ export function createCallWebhook(deps: ToolDeps = {}) {
         const names = hooks.map((candidate) => candidate.name).join(", ");
         return {
           ok: false,
+          noEffect: true,
           message: `Não existe integração chamada "${input.name}", e nada foi chamado. ${names ? `Cadastradas: ${names}.` : "Nenhuma integração está cadastrada nesta central."} Não tente outro nome por conta própria.`,
         };
       }

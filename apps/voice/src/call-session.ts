@@ -213,7 +213,16 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       log("error", "could not release the telephony side", { error: messageOf(error) });
     }
     // Fecha o arquivo em qualquer caminho de fim: com áudio vira `.wav`; sem, ou com falha, o `.part` some.
-    await recorder?.finish().catch(logFailure("could not save the call recording"));
+    const savedRecording = await recorder?.finish().catch((error: unknown) => {
+      logFailure("could not save the call recording")(error);
+      return undefined;
+    });
+    // A impressão digital vai para a linha do tempo junto do fim da chamada: com ela se confere se uma
+    // cópia do áudio é igual à que esta instalação gravou (não prova nada contra quem administra o
+    // servidor). `null` quando não pôde ser calculada: a gravação está salva assim mesmo.
+    // A falha do banco aqui não pode impedir o `done`: o arquivo já está salvo, só o registro falta.
+    if (savedRecording && savedRecording.sha256Error !== undefined) logFailure("could not compute the recording fingerprint")(savedRecording.sha256Error);
+    if (savedRecording) await event("recording_saved", { bytes: savedRecording.bytes, sha256: savedRecording.sha256 }).catch(logFailure("could not record the saved recording"));
     await recordingFailed;
     resolveDone({ status: end.status, endReason: end.endReason, costCents });
   }

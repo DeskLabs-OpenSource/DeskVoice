@@ -1,0 +1,13 @@
+name: bad
+on: push
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: matriz no shell
+        run: |
+          printf '%s\n' "${matrix.arch}"
+      - name: saída de passo no shell
+        run: echo "${steps.image.outputs.repo}"

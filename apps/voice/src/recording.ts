@@ -1,5 +1,33 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, open, readdir, rename, rm, statfs } from "node:fs/promises";
 import path from "node:path";
+
+/**
+ * O que a gravação deixou no disco quando fechou: o tamanho final e a impressão digital do arquivo.
+ *
+ * A impressão serve para conferir se uma cópia do `.wav` (mandada por e-mail, guardada fora do
+ * servidor) é igual ao arquivo que esta instalação gravou. Não prova nada contra quem administra o
+ * servidor: ela fica no mesmo banco, na mesma máquina que o áudio. `null` quando a leitura para
+ * calculá-la falhou: a gravação está salva do mesmo jeito, e a linha do tempo diz que a impressão
+ * não pôde ser calculada.
+ */
+export type RecordingOutcome = { bytes: number; sha256: string | null; sha256Error?: string };
+
+/**
+ * A impressão digital lida do arquivo já fechado, por stream: uma hora de conversa passa de 100 MB,
+ * e o fim da chamada não é lugar para carregar isso na memória.
+ */
+async function sha256Of(file: string): Promise<string> {
+  const digest = createHash("sha256");
+  await new Promise<void>((resolve, reject) => {
+    createReadStream(file)
+      .on("data", (bloco) => digest.update(bloco))
+      .on("error", reject)
+      .on("end", resolve);
+  });
+  return digest.digest("hex");
+}
 
 /**
  * Abaixo deste espaço livre na pasta das gravações, a chamada não é gravada. As gravações dividem
@@ -159,7 +187,7 @@ export interface Recording {
    */
   pause(): Promise<void>;
   /** Fecha o arquivo. Com áudio, acerta o cabeçalho e troca `.part` por `.wav`; sem, ou com falha, apaga o `.part`. */
-  finish(): Promise<boolean>;
+  finish(): Promise<RecordingOutcome | false>;
 }
 
 /** O espaço livre na pasta das gravações, criando-a se ainda não existe. */
@@ -272,7 +300,16 @@ export async function startRecording(
         return false;
       }
       await rename(partial, file);
-      return true;
+      // Daqui em diante a gravação está salva, e nada mais pode fazê-la contar como perdida. O tamanho
+      // sai da conta, e não de um `stat` que poderia falhar: o arquivo é o cabeçalho de 44 bytes mais
+      // os bytes de áudio que o próprio cabeçalho declara. A impressão é um extra: se a leitura falhar,
+      // ela vira `null`, e o motivo vai junto para o log e a linha do tempo (issue 278).
+      const size = WAV_HEADER_BYTES + bytes;
+      try {
+        return { bytes: size, sha256: await sha256Of(file) };
+      } catch (error) {
+        return { bytes: size, sha256: null, sha256Error: error instanceof Error ? error.message : String(error) };
+      }
     },
   };
 }
@@ -298,8 +335,10 @@ export async function removePartialRecordings(dir: string): Promise<number> {
   return removed;
 }
 
+const WAV_HEADER_BYTES = 44;
+
 function wavHeader(dataBytes: number, sampleRate: number): Buffer {
-  const header = Buffer.alloc(44);
+  const header = Buffer.alloc(WAV_HEADER_BYTES);
   header.write("RIFF", 0);
   header.writeUInt32LE(36 + dataBytes, 4);
   header.write("WAVE", 8);

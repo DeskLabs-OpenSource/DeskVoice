@@ -130,7 +130,9 @@ const routine: Routine = {
       // lugar do vazio, e os dois saem dessa segunda passada: classificar antes pagaria por uma
       // conversa vazia, e avisar antes mandaria o dono a um resumo sem fala.
       // A existência da própria tarefa é a marca de "já pedi": sem isso, chamada sem fala nenhuma
-      // faria o resumo e a transcrição se reenfileirarem para sempre.
+      // faria o resumo e a transcrição se reenfileirarem sem fim. A marca dura enquanto a tarefa está
+      // na tabela (a concluída sai na faxina de 7 dias do runner), e só a transcrição volta a pedir
+      // este resumo: depois da faxina, ninguém o pede de novo.
       if (transcriptionEnabledOf(valueOf(TRANSCRIPTION_SETTING)) && autoTranscriptionEnabledOf(valueOf(AUTO_TRANSCRIPTION_SETTING))) {
         const asked = await q.one<{ n: number }>("select count(*)::int as n from tasks where call_id = $1 and kind = 'transcribe_call'", [callId]);
         if ((asked?.n ?? 0) === 0 && !(await hasSpeech(q, callId))) {
