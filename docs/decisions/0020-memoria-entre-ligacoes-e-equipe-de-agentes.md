@@ -71,7 +71,7 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
      ([`0004`](0004-ligacoes-de-saida-desligadas.md)). Quem a liga passa a mandar ao modelo, nas
      ligações discadas, as notas e os títulos das pendências abertas do número, sem ter ligado a
      chave. Isso gasta tokens dentro do teto da chamada.
-   - **Pedido de revisão aberto neste ponto.** O Arquiteto pediu ao dono que a chave valha também
+   - **Pedido de revisão aberto neste ponto ([#272](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/272)).** O Arquiteto pediu ao dono que a chave valha também
      para a ligação de saída (opção A do pedido), porque o item 1 diz que o agente não recebe nada
      por padrão. O padrão sem resposta desse pedido é manter o que está aqui (opção B): o silêncio
      não desfaz uma escolha explícita do dono. Se ele mudar, uma decisão nova emenda esta. Só a
@@ -149,7 +149,7 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
 
 ## Quando revisar
 
-- Se o dono aceitar o pedido de revisão do item 4 (a chave valer também para a ligação de saída).
+- Se o dono aceitar o pedido de revisão do item 4, na [#272](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/272) (a chave valer também para a ligação de saída).
   Uma decisão nova emenda esta. Com ela, a fatia 6 deixa de dar memória à ligação de saída com a
   chave desligada.
 - Quando a nota passar a nascer sem a ferramenta marcada (extraída por modelo depois da ligação,

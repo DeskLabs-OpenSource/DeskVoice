@@ -20,7 +20,7 @@ O que mudou entre o #114 e a primeira fatia de memória, e onde está no texto a
   - Como nenhuma nota existe antes da fatia 3, a regra de transição "de B para A" da seção 8 não se
     aplica: os 90 dias valem desde a primeira nota.
   - Com 4B, a fatia 6 entra, e a ligação de saída fica como na seção 2.5: recebe a memória sempre,
-    mesmo com a chave desligada. Há um pedido de revisão aberto nesse ponto (a chave valer também
+    mesmo com a chave desligada. Há um pedido de revisão aberto nesse ponto, na [#272](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/272) (a chave valer também
     para a de saída); sem resposta, fica como está.
 - **Fatia 1 entregue** no #115: pendências, `personalTextArgs` em `create_task` e
   `notifications.follow_up_id`.
@@ -200,7 +200,7 @@ No nível agente (o dono escolheu 4B; a 0020 manda onde este texto discordar):
   `caller_memory_changed`.
 - Na ligação que o próprio sistema discou (`direction = 'outbound'`), o número não foi informado por
   quem está do outro lado, e o risco não existe; o mesmo raciocínio que `send_whatsapp` já usa.
-  Confirmado pela 0020 (opção 4B). Há um pedido de revisão aberto nesse ponto; se o dono mudar, uma
+  Confirmado pela 0020 (opção 4B). Há um pedido de revisão aberto nesse ponto ([#272](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/272)); se o dono mudar, uma
   decisão nova emenda a 0020 e esta seção.
 - O bloco que o agente recebe nunca traz o resumo nem as falas: só as notas e os títulos das
   pendências abertas.
