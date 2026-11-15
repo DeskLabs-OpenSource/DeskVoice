@@ -704,7 +704,13 @@ describe("voice process", () => {
 describe("costs", () => {
   it("adds usage by day, agent and engine inside the period, with the date the price was checked", async () => {
     const agent = await newAgent("Custos");
-    const callId = await insert(panel.app, org, "insert into calls (organization_id, agent_id, direction, channel, status, started_at, engine) values ($1, $2, 'inbound', 'simulated', 'completed', $3, 'simulated') returning id", [org, agent, NOW]);
+    // Atendida às 15:00:02 e encerrada às 15:02:41: 159 s de ligação, que é o que os minutos do motor contam.
+    const callId = await insert(
+      panel.app,
+      org,
+      "insert into calls (organization_id, agent_id, direction, channel, status, started_at, answered_at, ended_at, engine) values ($1, $2, 'inbound', 'simulated', 'completed', $3, $3::timestamptz + interval '2 seconds', $3::timestamptz + interval '161 seconds', 'simulated') returning id",
+      [org, agent, NOW],
+    );
     for (const [cents, at] of [[12, NOW], [30, new Date(NOW.getTime() - 86_400_000)], [99, new Date(NOW.getTime() - 90 * 86_400_000)]] as const) {
       await insert(panel.app, org, "insert into usage_ledger (organization_id, call_id, engine, seconds, cost_cents, cost_microcents, at) values ($1, $2, 'simulated', 60, $3, ($3::int)::bigint * 1000000, $4) returning id", [org, callId, cents, at]);
     }
@@ -718,8 +724,22 @@ describe("costs", () => {
       totalCents: 42,
       byDay: [{ day: "2026-02-28", costCents: 30 }, { day: "2026-03-01", costCents: 12 }],
       byAgent: [{ agentId: agent, name: "Custos", costCents: 42, calls: 1 }],
-      byEngine: [{ engine: "simulated", costCents: 42, seconds: 120, priceCheckedOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) }],
+      byEngine: [{ engine: "simulated", costCents: 42, seconds: 159, priceCheckedOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) }],
     });
     expect((await call(costs, { cookie: owner, query: "?from=2026-03-02&to=2026-03-01" })).code).toBe("validation_error");
+  });
+
+  it("os minutos do motor são a duração da ligação, também no motor que cobra por token e declara zero segundo (issue 244)", async () => {
+    const agent = await newAgent("Por token");
+    const callId = await insert(
+      panel.app,
+      org,
+      "insert into calls (organization_id, agent_id, direction, channel, status, started_at, answered_at, ended_at, engine) values ($1, $2, 'inbound', 'whatsapp', 'completed', $3, $3, $3::timestamptz + interval '120 seconds', 'openai-realtime') returning id",
+      [org, agent, NOW],
+    );
+    // O OpenAI Realtime declara tokens: a linha do extrato tem custo e zero segundo, como a ligação de teste de 15/11.
+    await insert(panel.app, org, "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, 'openai-realtime', 0, 9000, 4000, 26, 26000000, $3) returning id", [org, callId, NOW]);
+    const engines = (await call(costs, { cookie: owner })).data as { byEngine: Array<{ engine: string; seconds: number; costCents: number }> };
+    expect(engines.byEngine.find((row) => row.engine === "openai-realtime")).toMatchObject({ costCents: 26, seconds: 120 });
   });
 });

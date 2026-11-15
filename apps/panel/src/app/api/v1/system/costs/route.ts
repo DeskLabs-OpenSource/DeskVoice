@@ -37,8 +37,20 @@ export const GET = handle({}, async ({ q, url, deps }) => {
       where (l.at at time zone z.zone)::date between $1::date and $2::date group by 1, 2 order by 3 desc`,
     range,
   );
+  // Os minutos de cada motor são a duração das ligações que ele atendeu (do atendimento ao fim),
+  // e não o `seconds` do extrato: esse é o uso que o motor declara para cobrar, e o OpenAI Realtime
+  // cobra por token e declara zero segundo (issue #244). Conta cada ligação uma vez, a que tem
+  // alguma linha do extrato no período e cujo motor é o da linha.
   const byEngine = await q.many<{ engine: string; microcents: string; seconds: number }>(
-    `select l.engine, coalesce(sum(l.cost_microcents), 0)::text as microcents, sum(l.seconds)::int as seconds ${scope} group by 1 order by 2 desc`,
+    `with scoped as (select l.engine, l.call_id, l.cost_microcents ${scope}),
+          answered as (
+            select c.engine, coalesce(sum(extract(epoch from (c.ended_at - c.answered_at))), 0)::int as seconds
+              from calls c
+             where c.id in (select call_id from scoped) and c.answered_at is not null and c.ended_at is not null
+             group by 1)
+     select s.engine, coalesce(sum(s.cost_microcents), 0)::text as microcents, coalesce(a.seconds, 0)::int as seconds
+       from scoped s left join answered a on a.engine = s.engine
+      group by s.engine, a.seconds order by coalesce(sum(s.cost_microcents), 0) desc`,
     range,
   );
   const engines = new Map((await listEngines()).map((engine) => [engine.id, engine]));
