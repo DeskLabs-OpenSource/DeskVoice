@@ -1,6 +1,6 @@
 import { recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ANALYSIS_SETTING, OUTCOME_SETTING } from "@deskvoice/voice-engine";
+import { ANALYSIS_SETTING, AUTO_TRANSCRIPTION_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING } from "@deskvoice/voice-engine";
 import { createCall, createOrganization, depsFor, openTestDbs, putSetting, putWhatsAppConnector, t0, task, tasksOf } from "../../test/helpers";
 import summarizeCall, { OWNER_NOTICE_BODY, OWNER_NOTICE_SETTING, extractiveSummary } from "./summarize_call";
 
@@ -74,6 +74,36 @@ describe("summarize_call", () => {
     expect((await tasksOf(app, ligada)).map((queued) => queued.kind)).toEqual(["classify_call_outcome"]);
     expect((await tasksOf(app, analise)).map((queued) => queued.kind)).toEqual(["classify_call_outcome"]);
     expect((await tasksOf(app, desligadaDeVolta)).map((queued) => queued.kind)).toEqual([]);
+  });
+
+  it("transcrição automática: só a chamada sem fala nenhuma vai à transcrição, e o desfecho espera por ela", async () => {
+    const ligada = await createOrganization(app, "summarize auto transcription on");
+    const soManual = await createOrganization(app, "summarize manual transcription only");
+    for (const organization of [ligada, soManual]) {
+      await putSetting(app, organization, OUTCOME_SETTING, true, false);
+      await putSetting(app, organization, TRANSCRIPTION_SETTING, true, false);
+    }
+    await putSetting(app, ligada, AUTO_TRANSCRIPTION_SETTING, true, false);
+    const kinds = async (organization: string, callId: string): Promise<string[]> =>
+      (await tasksOf(app, organization)).filter((queued) => queued.call_id === callId).map((queued) => queued.kind).sort();
+
+    // Conversa transcrita em tempo real: a sessão de voz grava só o texto, sem `source`.
+    const comFala = await createCall(app, ligada, t0);
+    await withOrg(app, ligada, (q) => recordEvent(q, comFala, "transcript_user", { text: "Quero remarcar." }, t0));
+    await summarizeCall.run(task(ligada, "summarize_call", {}, comFala), depsFor(app));
+    expect(await kinds(ligada, comFala)).toEqual(["classify_call_outcome"]);
+
+    // Sem fala nenhuma: a transcrição primeiro; o desfecho sai da segunda passada, que ela enfileira.
+    const semFala = await createCall(app, ligada, t0);
+    await summarizeCall.run(task(ligada, "summarize_call", {}, semFala), depsFor(app));
+    expect(await kinds(ligada, semFala)).toEqual(["transcribe_call"]);
+    await summarizeCall.run(task(ligada, "summarize_call", {}, semFala), depsFor(app));
+    expect(await kinds(ligada, semFala)).toEqual(["classify_call_outcome", "transcribe_call"]);
+
+    // Só a transcrição a pedido ligada: nada vai à transcrição sozinho.
+    const manual = await createCall(app, soManual, t0);
+    await summarizeCall.run(task(soManual, "summarize_call", {}, manual), depsFor(app));
+    expect(await kinds(soManual, manual)).toEqual(["classify_call_outcome"]);
   });
 
   it("chamada apagada a pedido do titular não recebe resumo nem entra na fila do desfecho", async () => {

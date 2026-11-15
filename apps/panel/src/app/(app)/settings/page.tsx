@@ -229,6 +229,10 @@ function TranscriptionSetting({ t }: { t: SettingsDictionary }) {
   const setting = useApi<Setting<boolean>>("/settings/calls.transcription_enabled");
   const save = useAction();
   const enabled = setting.data?.value === true;
+  // A automática só age com a transcrição ligada, que é a licença do áudio sair para o provedor.
+  const auto = useApi<Setting<boolean>>("/settings/calls.auto_transcription_enabled");
+  const saveAuto = useAction();
+  const autoEnabled = enabled && auto.data?.value === true;
   return (
     <Panel title={t.transcriptionTitle} description={t.transcriptionLead}>
       <div className="grid max-w-xl gap-4">
@@ -243,6 +247,17 @@ function TranscriptionSetting({ t }: { t: SettingsDictionary }) {
         </div>
         <p>{t.transcriptionCost}</p>
         <Notice tone={enabled ? "warn" : "neutral"}>{t.transcriptionData}</Notice>
+        <div className="flex flex-wrap items-center gap-3">
+          <Switch
+            checked={autoEnabled}
+            onChange={(next) => void saveAuto.run(() => put("calls.auto_transcription_enabled", next || null)).then(auto.reload)}
+            label={t.autoTranscriptionSwitch}
+            disabled={!canConfigure || !enabled || !auto.data || saveAuto.busy}
+          />
+          <ActionStatus action={saveAuto} />
+        </div>
+        <p>{t.autoTranscriptionCost}</p>
+        {!enabled && <p>{t.autoTranscriptionNeedsManual}</p>}
       </div>
     </Panel>
   );

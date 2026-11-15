@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
-import { TRANSCRIPTION_SETTING, type VoiceEngine } from "@deskvoice/voice-engine";
+import { AUTO_TRANSCRIPTION_SETTING, TRANSCRIPTION_SETTING, type VoiceEngine } from "@deskvoice/voice-engine";
 import type * as VoiceEngineModule from "@deskvoice/voice-engine";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCall, createOrganization, depsFor, eventsOf, openTestDbs, t0, task } from "../../test/helpers";
@@ -88,11 +88,18 @@ const comAgente = async (label: string): Promise<{ org: string; callId: string }
   return { org, callId };
 };
 
-const ligar = (org: string): Promise<unknown> =>
+/** As duas chaves: a licença do áudio sair (`calls.transcription_enabled`) e a automática. */
+const ligarChaves = (org: string, keys = [TRANSCRIPTION_SETTING, AUTO_TRANSCRIPTION_SETTING]): Promise<unknown> =>
   withSystem(app, async (q) => {
-    await q.exec("insert into settings (organization_id, key, value) values ($1, $2, 'true'::jsonb)", [org, TRANSCRIPTION_SETTING]);
-    return q.exec("insert into settings (organization_id, key, value) values ($1, $2, to_jsonb($3::text))", [org, `engine.${MOTOR}.api_key`, encryptSecret("sk-de-teste", secretKey)]);
+    for (const key of keys) await q.exec("insert into settings (organization_id, key, value) values ($1, $2, 'true'::jsonb)", [org, key]);
   });
+
+const ligar = async (org: string, keys?: string[]): Promise<unknown> => {
+  await ligarChaves(org, keys);
+  return withSystem(app, (q) =>
+    q.exec("insert into settings (organization_id, key, value) values ($1, $2, to_jsonb($3::text))", [org, `engine.${MOTOR}.api_key`, encryptSecret("sk-de-teste", secretKey)]),
+  );
+};
 
 /** Grava o arquivo no lugar em que a rotina procura: `<dir>/<org>/<callId>.wav`. */
 async function gravar(org: string, callId: string, frames = 8000 * 3): Promise<string> {
@@ -145,7 +152,7 @@ describe("a transcrição automática do fim da chamada", () => {
 
   it("sem chave do motor: registra o motivo e não gasta", async () => {
     const { org, callId } = await comAgente("Sem chave");
-    await withSystem(app, (q) => q.exec("insert into settings (organization_id, key, value) values ($1, $2, 'true'::jsonb)", [org, TRANSCRIPTION_SETTING]));
+    await ligarChaves(org);
     const dir = await gravar(org, callId);
 
     await rodar(org, callId, dir);
@@ -165,6 +172,55 @@ describe("a transcrição automática do fim da chamada", () => {
 
     expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
     expect(await falas(callId)).toHaveLength(1);
+  });
+
+  it("só a transcrição a pedido ligada: a automática não age", async () => {
+    const { org, callId } = await comAgente("Só manual");
+    await ligar(org, [TRANSCRIPTION_SETTING]);
+    const dir = await gravar(org, callId);
+
+    await rodar(org, callId, dir);
+
+    expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
+    expect(await resumos(org, callId)).toBe(1);
+  });
+
+  it("só a automática ligada, sem a licença do áudio sair: não age", async () => {
+    const { org, callId } = await comAgente("Só automática");
+    await ligar(org, [AUTO_TRANSCRIPTION_SETTING]);
+    const dir = await gravar(org, callId);
+
+    await rodar(org, callId, dir);
+
+    expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
+  });
+
+  it("conversa transcrita em tempo real (sem source) e gravada: não paga de novo", async () => {
+    const { org, callId } = await comAgente("Tempo real");
+    await ligar(org);
+    const dir = await gravar(org, callId);
+    // O que a sessão de voz grava durante a ligação: só o texto, sem `source`.
+    await withOrg(app, org, async (q) => {
+      await recordEvent(q, callId, "transcript_agent", { text: "Olá, em que posso ajudar?" }, t0);
+      await recordEvent(q, callId, "transcript_user", { text: "Quero remarcar." }, t0);
+    });
+
+    await rodar(org, callId, dir);
+
+    expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
+    expect(await falas(callId)).toHaveLength(2);
+    expect(await resumos(org, callId)).toBe(1);
+  });
+
+  it("fala vazia não conta como texto: a chamada é transcrita", async () => {
+    const { org, callId } = await comAgente("Fala vazia");
+    await ligar(org);
+    const dir = await gravar(org, callId);
+    await withOrg(app, org, (q) => recordEvent(q, callId, "transcript_user", { text: "" }, t0));
+
+    await rodar(org, callId, dir);
+
+    expect(PROVEDOR.transcribe).toHaveBeenCalledTimes(2);
   });
 
   it("sem gravação no disco: não é falha, e o resumo segue", async () => {

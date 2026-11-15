@@ -8,10 +8,13 @@ import {
   recordingPath,
   transcriptRetentionOf,
   withOrg,
+  type OrgQuery,
 } from "@deskvoice/core";
 import {
+  AUTO_TRANSCRIPTION_SETTING,
   MICROCENTS_PER_CENT,
   TRANSCRIPTION_SETTING,
+  autoTranscriptionEnabledOf,
   loadEngines,
   transcriptionEnabledOf,
   type RecordingTranscriber,
@@ -27,6 +30,18 @@ const KIND: Record<Speaker, "transcript_user" | "transcript_agent"> = {
   caller: "transcript_user",
   agent: "transcript_agent",
 };
+
+/**
+ * A chamada já tem alguma fala na linha do tempo, de qualquer fonte. A mesma régua do botão manual
+ * (`spokenOf` da rota de transcrição): fala vazia não conta.
+ */
+export async function hasSpeech(q: OrgQuery, callId: string): Promise<boolean> {
+  const row = await q.one<{ n: number }>(
+    "select count(*)::int as n from call_events where call_id = $1 and kind in ('transcript_user', 'transcript_agent') and coalesce(payload->>'text', '') <> ''",
+    [callId],
+  );
+  return (row?.n ?? 0) > 0;
+}
 
 interface Pending {
   engineId: string;
@@ -49,8 +64,9 @@ interface Pending {
  * seguinte encontra um áudio que ninguém ouve e uma linha do tempo sem uma palavra do que a pessoa
  * pediu.
  *
- * Desligada de fábrica (`calls.transcription_enabled`): o áudio gravado sai da instalação para o
- * provedor do motor, e cada transcrição é paga. Desligada, esta rotina apenas passa a tarefa adiante.
+ * Desligada de fábrica: exige `calls.auto_transcription_enabled` e também `calls.transcription_enabled`,
+ * a licença para o áudio gravado sair da instalação para o provedor do motor. Cada transcrição é paga.
+ * Faltando uma das duas, esta rotina apenas passa a tarefa adiante.
  *
  * Nunca lança por falha do provedor: a fila reexecuta, e reexecutar pagaria de novo pelo mesmo áudio.
  * O motivo fica na linha do tempo, sem áudio e sem fala.
@@ -64,10 +80,11 @@ const routine: Routine = {
 
     const pending = await withOrg(deps.db, task.organizationId, async (q): Promise<Pending | null> => {
       const settings = await q.many<{ key: string; value: unknown }>("select key, value from settings where key = any($1)", [
-        [TRANSCRIPTION_SETTING, TRANSCRIPT_RETENTION_SETTING],
+        [TRANSCRIPTION_SETTING, AUTO_TRANSCRIPTION_SETTING, TRANSCRIPT_RETENTION_SETTING],
       ]);
       // Desligadas de fábrica. A tarefa pode ter entrado na fila antes de alguém desligar: confere de novo.
-      if (!transcriptionEnabledOf(settings.find((row) => row.key === TRANSCRIPTION_SETTING)?.value)) return null;
+      const valueOf = (key: string): unknown => settings.find((row) => row.key === key)?.value;
+      if (!transcriptionEnabledOf(valueOf(TRANSCRIPTION_SETTING)) || !autoTranscriptionEnabledOf(valueOf(AUTO_TRANSCRIPTION_SETTING))) return null;
 
       const call = await q.one<{ agent_id: string | null; started_at: Date; ended_at: Date | null; cost_cents: number }>(
         "select agent_id, started_at, ended_at, cost_cents from calls where id = $1",
@@ -77,16 +94,13 @@ const routine: Routine = {
       if (call.agent_id === null) return null;
 
       const now = deps.clock.now();
-      const retention = transcriptRetentionOf(settings.find((row) => row.key === TRANSCRIPT_RETENTION_SETTING)?.value);
+      const retention = transcriptRetentionOf(valueOf(TRANSCRIPT_RETENTION_SETTING));
       // O mesmo corte do expurgo: chamada fora do prazo não ganha texto que já deveria ter sido apagado.
       if (retention !== null && call.started_at.getTime() < now.getTime() - retention * DAY_MS) return null;
 
-      // Já existe texto vindo de provedor: nada a fazer (a fila reexecuta).
-      const had = await q.one<{ n: number }>(
-        "select count(*)::int as n from call_events where call_id = $1 and kind in ('transcript_user', 'transcript_agent') and payload->>'source' = 'stt'",
-        [callId],
-      );
-      if ((had?.n ?? 0) > 0) return null;
+      // Já existe fala, de qualquer fonte: a do tempo real não grava `source`, a da gravação grava
+      // `stt`. Transcrever de novo pagaria pela conversa que já está na linha do tempo, em dobro.
+      if (await hasSpeech(q, callId)) return null;
 
       const agent = await q.one<{ engine: string; cost_ceiling_cents: number; language: string }>(
         "select engine, cost_ceiling_cents, language from agents where id = $1",

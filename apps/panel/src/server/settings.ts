@@ -1,7 +1,7 @@
 import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
-import { ANALYSIS_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, classifyBaseUrlOf, classifyModelOf, engineClassifyTargetSetting, storedClassifyTargetOf } from "@deskvoice/voice-engine/types";
+import { ANALYSIS_SETTING, AUTO_TRANSCRIPTION_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, classifyBaseUrlOf, classifyModelOf, engineClassifyTargetSetting, storedClassifyTargetOf } from "@deskvoice/voice-engine/types";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -165,6 +165,9 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     // Transcrever a gravação de uma chamada sem texto, a pedido. Ausente vale desligado: o áudio
     // gravado vai ao provedor do motor, e cada transcrição é paga.
     [TRANSCRIPTION_SETTING]: { ...plain(z.boolean()), fallback: false },
+    // Transcrever sozinho, no fim, toda chamada que terminou sem fala. Ausente vale desligado: cada
+    // uma é um pedido pago ao provedor, sem ninguém pedir. Só age com a transcrição acima ligada.
+    [AUTO_TRANSCRIPTION_SETTING]: { ...plain(z.boolean()), fallback: false },
     "network.public_ip": plain(z.ipv4()),
     // Ligações recebidas pela operadora ao mesmo tempo. Ausente vale o teto de fábrica.
     [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },
