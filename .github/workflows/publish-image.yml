@@ -125,13 +125,14 @@ jobs:
           VERSION: ${{ needs.probe.outputs.version }}
         run: |
           source install/_common.sh
+          # O `name=` do construtor é o repositório de CADA imagem, sem etiqueta: quem carrega a
+          # etiqueta é o `merge`, depois que os dois resumos existem. Um repositório só para as três
+          # (o do panel) mandava a voz e as rotinas para dentro de deskvoice-panel, e o `merge` não
+          # as achava no repositório delas (corte da 0.12.0, run 43723273704).
           for process in ${APP_SERVICES}; do
-            echo "${process}=$(image_ref "${process}" "${VERSION}")" >> "${GITHUB_OUTPUT}"
+            ref="$(image_ref "${process}" "${VERSION}")"
+            echo "${process}_repo=${ref%:*}" >> "${GITHUB_OUTPUT}"
           done
-          # O `name=` do construtor é o repositório, sem etiqueta: quem carrega a etiqueta é o
-          # `merge`, depois que os dois resumos existem.
-          ref="$(image_ref panel "${VERSION}")"
-          echo "repo=${ref%:*}" >> "${GITHUB_OUTPUT}"
       # `push-by-digest`: cada arquitetura vai para o registro pelo resumo do seu manifesto, sem
       # etiqueta. A etiqueta sai uma vez, no `merge`, com os dois resumos dentro do índice.
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -140,7 +141,7 @@ jobs:
           context: .
           target: voice
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ steps.image.outputs.repo }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ steps.image.outputs.voice_repo }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             APP_VERSION=${{ needs.probe.outputs.version }}
           labels: |
@@ -154,7 +155,7 @@ jobs:
           context: .
           target: routines
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ steps.image.outputs.repo }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ steps.image.outputs.routines_repo }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             APP_VERSION=${{ needs.probe.outputs.version }}
           labels: |
@@ -168,7 +169,7 @@ jobs:
           context: .
           target: panel
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ steps.image.outputs.repo }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ steps.image.outputs.panel_repo }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             APP_VERSION=${{ needs.probe.outputs.version }}
           labels: |
@@ -181,17 +182,20 @@ jobs:
           VOICE: ${{ steps.voice.outputs.digest }}
           ROUTINES: ${{ steps.routines.outputs.digest }}
           PANEL: ${{ steps.panel.outputs.digest }}
+          # A arquitetura vai por variável de shell: escrita no script com a sintaxe de expressão
+          # do workflow, sem as chaves duplas, o bash para com "bad substitution" (corte da 0.12.0).
+          ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p "${RUNNER_TEMP}/digests"
           for pair in "voice:${VOICE}" "routines:${ROUTINES}" "panel:${PANEL}"; do
             process="${pair%%:*}"; digest="${pair#*:}"
             case "${digest}" in
               sha256:?*) ;;
-              *) echo "::error::O construtor não devolveu o resumo da imagem ${process} (${matrix.arch})." ; exit 1 ;;
+              *) echo "::error::O construtor não devolveu o resumo da imagem ${process} (${ARCH})." ; exit 1 ;;
             esac
             printf '%s\n' "${digest}" > "${RUNNER_TEMP}/digests/${process}"
           done
-          printf 'Resumos (%s):\n' "${matrix.arch}" >> "${GITHUB_STEP_SUMMARY}"
+          printf 'Resumos (%s):\n' "${ARCH}" >> "${GITHUB_STEP_SUMMARY}"
           cat "${RUNNER_TEMP}/digests/"* | tee -a "${GITHUB_STEP_SUMMARY}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
