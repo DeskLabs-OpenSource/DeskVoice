@@ -6,9 +6,9 @@
  * Teto: estimativa do pior caso de US$ 0,03 por minuto enviado (entrada e uma resposta do modelo
  * pelo preço do motor), só para parar antes do teto. O custo escrito na tabela é o do `usage`.
  */
-import { servicoDoMotor } from "./_motor-de-hoje";
+import { servicoDoMotor, type MotorDeHoje } from "./_motor-de-hoje";
 
-export default servicoDoMotor({
+export const GEMINI_DE_HOJE: MotorDeHoje = {
   id: "gemini-hoje",
   rotulo: "Gemini Live de hoje (inputAudioTranscription)",
   carregar: async () => (await import("../../../packages/voice-engine/src/engines/gemini-live")).default,
@@ -17,4 +17,6 @@ export default servicoDoMotor({
   piorCasoUsdPorMinuto: 0.03,
   fontePreco: "preço do motor gemini-live (ai.google.dev/gemini-api/docs/pricing)",
   conferidoEm: "2026-11-10",
-});
+};
+
+export default servicoDoMotor(GEMINI_DE_HOJE);

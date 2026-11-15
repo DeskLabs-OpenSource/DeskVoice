@@ -32,7 +32,8 @@ export function custoEmDolares(preco: EnginePricing, uso: Usage): number {
 
 const INSTRUCOES = "Você está numa medida de reconhecimento de fala. Não responda nada e não fale: apenas ouça.";
 
-export function servicoDoMotor(opcoes: {
+/** Um motor de hoje, como a bancada o abre. A medida contra o provedor (`barulho-no-provedor.ts`) usa o mesmo. */
+export interface MotorDeHoje {
   id: string;
   rotulo: string;
   carregar: () => Promise<VoiceEngine>;
@@ -42,7 +43,9 @@ export function servicoDoMotor(opcoes: {
   piorCasoUsdPorMinuto: number;
   fontePreco: string;
   conferidoEm: string;
-}): ServicoMedido {
+}
+
+export function servicoDoMotor(opcoes: MotorDeHoje): ServicoMedido {
   return {
     id: opcoes.id,
     rotulo: opcoes.rotulo,
