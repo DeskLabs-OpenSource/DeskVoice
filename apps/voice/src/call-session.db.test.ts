@@ -559,7 +559,10 @@ describe("guarda contra o silêncio (antipadrão 15)", { timeout: 120_000 }, () 
     manual.emit("audio", Buffer.alloc(320));
     expect(harness.timers.held()).not.toContain(WITHOUT_WORDS_MS);
 
-    // Encerrada a chamada, nenhum prazo da guarda fica pendurado.
+    // Este `callerActivity` cai dentro da janela do áudio de 20 ms logo acima, então a guarda não
+    // arma: estas linhas conferem só que desligar encerra a sessão sem prazo pendurado e sem fechar
+    // outro turno. Não cobrem a S16 (`finish` sem `guard.stop()`): quem cobre é o teste "quem
+    // ligou desliga com a guarda armada", mais abaixo.
     manual.emit("callerActivity", { words: true });
     transport.callerHangup();
     expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
