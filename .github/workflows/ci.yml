@@ -97,6 +97,11 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm fences
       - run: pnpm test
+      # Os workflows, pelo actionlint (expressões, contextos, saídas e o shellcheck de cada `run:`).
+      # Ele NÃO reprova `${matrix.x}` dentro do shell, que parou a publicação da 0.12.0: quem pega
+      # isso é a cerca workflow-shell-has-no-expression-context.
+      - name: actionlint
+        run: docker run --rm -v "${PWD}:/repo" --workdir /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -no-color
       - uses: ./.github/actions/explain-failure
         if: failure()
         with:
