@@ -18,6 +18,7 @@ import { Badge, Button, Notice, Skeleton, TextInput, type Tone } from "../../../
 import { useLive, useNow } from "../../../../ui/live";
 import { useCanConfigure } from "../../../../ui/me";
 import { Timeline } from "../../../../ui/timeline";
+import { transcribeAlsoClassifies } from "../../../../ui/transcription";
 import { AnalysisSection } from "./analysis-section";
 import type { CallDetail, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
 
@@ -35,6 +36,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   const engines = useApi<Engine[]>("/engines");
   const followUps = useApi<FollowUpList>(`/follow-ups?callId=${id}`);
   const transcription = useApi<Setting<boolean>>("/settings/calls.transcription_enabled");
+  const outcomeEnabled = useApi<Setting<boolean>>("/settings/calls.outcome_enabled");
   const analysisEnabled = useApi<Setting<boolean>>("/settings/calls.analysis_enabled");
   const canConfigure = useCanConfigure();
   useLive((signal) => {
@@ -65,6 +67,9 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   // A transcrição da gravação só se oferece para a chamada encerrada que ficou sem fala nenhuma, com a opção ligada.
   const silent = events.data !== undefined && !events.data.some((event) => event.kind === "transcript_user" || event.kind === "transcript_agent");
   const offerTranscription = !live && silent && canConfigure && transcription.data?.value === true;
+  // Transcrever reenfileira o resumo, e o resumo, com o desfecho ou a análise ligados, enfileira a
+  // classificação paga: a tela avisa ao lado do botão antes do clique, não só no extrato depois.
+  const classificationWarning = transcribeAlsoClassifies({ outcome: outcomeEnabled.data?.value === true, analysis: analysisEnabled.data?.value === true });
   const seconds = secondsBetween(data.answeredAt ?? data.startedAt, data.endedAt ?? now);
   const facts: Array<[string, string, boolean]> = [
     [t.facts.agent, data.agentName ?? common.noAgent, false],
@@ -139,6 +144,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
               id={id}
               title={t.transcribeTitle}
               hint={t.transcribeHint}
+              warning={classificationWarning ? t.transcribeAlsoClassifies : null}
               send={t.transcribeSend}
               onDone={() => {
                 call.reload();
@@ -174,7 +180,7 @@ function Recording({ id, title, missing, children }: { id: string; title: string
  * Pede a transcrição da gravação de uma chamada sem texto. O texto chega à linha do tempo; a falha
  * diz o motivo na frase da tela (sem chave, fora do prazo, teto atingido, sem fala).
  */
-function Transcribe({ id, title, hint, send, onDone }: { id: string; title: string; hint: string; send: string; onDone(): void }) {
+function Transcribe({ id, title, hint, warning, send, onDone }: { id: string; title: string; hint: string; warning: string | null; send: string; onDone(): void }) {
   const errorText = useErrorText();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -197,6 +203,7 @@ function Transcribe({ id, title, hint, send, onDone }: { id: string; title: stri
           {send}
         </Button>
       </div>
+      {warning ? <p className="text-[0.85rem] text-muted">{warning}</p> : null}
       {error ? <Notice tone="fail">{error}</Notice> : null}
     </div>
   );

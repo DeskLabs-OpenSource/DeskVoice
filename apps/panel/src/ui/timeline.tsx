@@ -113,6 +113,23 @@ export function Timeline({
           ),
         };
       }
+      case "transcription_failed": {
+        // O provedor não devolveu o texto da gravação: o motivo fica na linha do tempo, para a falha
+        // não existir só no extrato. O código e o HTTP ficam como detalhe para quem opera.
+        const code = classifyReasonCode(p);
+        const said = e.transcription_failed_body[code];
+        return {
+          ...base,
+          tone: "fail",
+          icon: WarningOctagon,
+          body: (
+            <Card tone="fail" title={e.transcription_failed}>
+              <p className="text-muted">{said ? fill(said, { model: text(p.model) }) : e.transcription_failed_unknown}</p>
+              {text(p.reason) ? <p className="data text-[0.87rem] text-muted">{text(p.reason)}{typeof p.status === "number" ? ` · HTTP ${p.status}` : ""}</p> : null}
+            </Card>
+          ),
+        };
+      }
       case "call_started": {
         const outbound = p.direction === "outbound";
         const said = outbound ? e.call_started_outbound : p.channel === "whatsapp" ? e.call_started_whatsapp : p.channel === "web" ? e.call_started_web : p.channel === "simulated" ? e.call_started_simulated : e.call_started;
