@@ -122,9 +122,10 @@ describe("callerHistory: a memória do número para a equipe", () => {
     const current = await callOf(org, { at: t(2), from: PHONE, to: line, ended: false });
     expect(await historyOf(org, current)).toMatchObject({ callCount: 1, calls: [{ id: outbound, direction: "outbound" }] });
 
-    // E a da empresa como "número" não junta as ligações de todo mundo.
-    const fromLine = await callOf(org, { at: t(3), direction: "outbound", from: line, to: "+5531966660000", ended: false });
-    expect(await historyOf(org, fromLine)).toMatchObject({ phone: "+5531966660000", callCount: 0 });
+    // E a linha da empresa como "número" não junta as ligações de todo mundo: quem liga da própria
+    // linha não vê as recebidas nela nem as feitas por ela.
+    const fromLine = await callOf(org, { at: t(3), from: line, to: "+5531966660000", ended: false });
+    expect(await historyOf(org, fromLine)).toMatchObject({ phone: line, callCount: 0, calls: [] });
   });
 
   it("só as ligações anteriores, as mais novas primeiro; só as pendências abertas", async () => {
