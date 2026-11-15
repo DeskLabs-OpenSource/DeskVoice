@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
+import { MAX_TASK_ATTEMPTS, encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
 import { AUTO_TRANSCRIPTION_SETTING, TRANSCRIPTION_SETTING, type VoiceEngine } from "@deskvoice/voice-engine";
 import type * as VoiceEngineModule from "@deskvoice/voice-engine";
 import type * as FsPromises from "node:fs/promises";
@@ -307,5 +307,22 @@ describe("a transcrição automática do fim da chamada", () => {
     expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
     expect((await eventsOf(app, callId)).some((event) => event.kind === "transcription_failed")).toBe(false);
     expect(await resumos(org, callId)).toBe(1);
+  });
+
+  it("falha que esgota as tentativas: na última, o resumo (e o aviso ao dono) sai mesmo sem texto", async () => {
+    const { org, callId } = await comAgente("Esgotou");
+    await ligar(org);
+    const dir = await gravar(org, callId);
+    const deps = depsFor(app, { recordingsDir: dir, fetch: (async () => new Response("{}")) as unknown as typeof fetch });
+    PROVEDOR.transcribe.mockRejectedValueOnce(new Error("rede caiu")).mockRejectedValueOnce(new Error("rede caiu"));
+
+    // Antes da última tentativa, a fila reexecuta: o resumo esperaria o texto da próxima.
+    await expect(transcribeCall.run({ ...task(org, "transcribe_call", {}, callId), attempts: MAX_TASK_ATTEMPTS - 1 }, deps)).rejects.toThrow("rede caiu");
+    expect(await resumos(org, callId)).toBe(0);
+
+    // Na última, a falha continua chegando à fila, e o resumo entra mesmo assim.
+    await expect(transcribeCall.run({ ...task(org, "transcribe_call", {}, callId), attempts: MAX_TASK_ATTEMPTS }, deps)).rejects.toThrow("rede caiu");
+    expect(await resumos(org, callId)).toBe(1);
+    expect(await falas(callId)).toHaveLength(0);
   });
 });
