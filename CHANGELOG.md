@@ -21,7 +21,10 @@ Este arquivo é montado a partir de `.changes/`; não edite à mão.
   pendência. Nada disso chega ao agente: as instruções e as ferramentas da ligação não mudam.
   Chamada sem número não mostra o bloco, e a ligação apagada a pedido do titular não aparece. A
   chamada simulada aparece na lista com a marca "Simulada" e não entra no "já ligou" dos avisos,
-  porque qualquer pessoa da equipe pode simular com o número de um cliente. Crédito: @melgarafael.
+  porque qualquer pessoa da equipe pode simular com o número de um cliente. O histórico casa o número
+  exatamente como ficou gravado: o mesmo cliente com o número escrito de outro jeito (com e sem o
+  nono dígito, pela linha e pelo WhatsApp) pode aparecer como dois números, e o que a linha
+  telefônica entrega não foi conferido. Crédito: @melgarafael.
 
 ## [0.13.1] - 2026-11-15
 
