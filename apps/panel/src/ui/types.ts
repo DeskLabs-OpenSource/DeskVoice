@@ -59,6 +59,8 @@ export interface Call {
   outcomeEvidence: string | null;
   /** A nota de 0 a 10, soma da régua (`scoreOf`). `null` = sem análise. */
   analysisScore: number | null;
+  /** Atendida pela caixa postal (decisão 0018): não há pessoa do time na linha. */
+  voicemail: boolean;
   costCeilingCents?: number | null;
 }
 

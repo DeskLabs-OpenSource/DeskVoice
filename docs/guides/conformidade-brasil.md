@@ -222,6 +222,16 @@ minuto de chamada ocupa cerca de 1,9 MB no disco; é a conta do formato (dois ca
 bits), e não uma medição. Sem prazo, o disco cresce sem limite, e a tela avisa. Com menos de 1 GiB
 livre, a chamada segue sem gravar, e a linha do tempo dela diz isso.
 
+**A caixa postal** grava o recado no mesmo lugar e do mesmo jeito, e só com a gravação ligada:
+com ela desligada, a caixa postal não atende. Antes de gravar, quem liga ouve um aviso já gravado
+de que a ligação será gravada, e nada do que a pessoa diz antes de o aviso terminar entra no
+arquivo. O recado é o arquivo da própria chamada: sai com o prazo e com o apagamento a pedido de
+quem ligou. O texto do aviso não muda pela tela; quem precisa de outro texto não liga a caixa
+postal. Ver a decisão [0018](../decisions/0018-caixa-postal.md).
+
+**As gravações e os recados ficam sem cifra no disco do servidor**, no volume `recordings`. Quem
+tem acesso ao servidor, ao disco ou a uma cópia dele pode ouvi-los. A proteção é a do acesso à VPS.
+
 Quatro lugares guardam dado tirado da conversa, e **o prazo alcança os três primeiros**:
 
 - **a transcrição**, nos eventos da chamada: sai com o prazo;

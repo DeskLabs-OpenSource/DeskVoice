@@ -159,6 +159,44 @@ describe("a transcrição automática do fim da chamada", () => {
     expect(await resumos(org, callId)).toBe(1);
   });
 
+  it("o recado da caixa postal com o agente desligado ganha texto com a chave do agente do número", async () => {
+    const { org, callId } = await comAgente("Recado");
+    await withSystem(app, async (q) => {
+      await q.exec("update agents set enabled = false where organization_id = $1", [org]);
+      await q.exec("update calls set voicemail = true, status = 'completed', end_reason = 'voicemail' where id = $1", [callId]);
+    });
+    await ligar(org);
+    // A forma que a caixa postal grava: o aviso no canal do agente e, só depois dele, quem ligou.
+    const dir = await gravar(org, callId);
+    const wav = await readFile(path.join(dir, org, `${callId}.wav`));
+    const aviso = 8000 * 1;
+    for (let frame = 0; frame < wav.subarray(44).length / 4; frame += 1) {
+      if (frame < aviso) wav.writeInt16LE(0, 44 + frame * 4);
+      else wav.writeInt16LE(0, 44 + frame * 4 + 2);
+    }
+    await writeFile(path.join(dir, org, `${callId}.wav`), wav);
+
+    await rodar(org, callId, dir);
+
+    expect((await falas(callId)).map((event) => event.kind)).toEqual(["transcript_user", "transcript_agent"]);
+    expect(PROVEDOR.transcribe).toHaveBeenCalledTimes(2);
+    expect(await resumos(org, callId)).toBe(1);
+  });
+
+  it("o recado de um número sem agente não tem chave: não fala com o provedor e ainda enfileira o resumo", async () => {
+    const org = await createOrganization(app, "Recado sem agente");
+    const callId = await createCall(app, org, t0);
+    await withSystem(app, (q) => q.exec("update calls set agent_id = null, voicemail = true, status = 'completed', end_reason = 'voicemail', ended_at = $2 where id = $1", [callId, t0]));
+    await ligar(org);
+    const dir = await gravar(org, callId);
+
+    await rodar(org, callId, dir);
+
+    expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
+    expect(await falas(callId)).toHaveLength(0);
+    expect(await resumos(org, callId)).toBe(1);
+  });
+
   it("desligada de fábrica: não fala com o provedor e ainda enfileira o resumo", async () => {
     const { org, callId } = await comAgente("Desligada");
     const dir = await gravar(org, callId);

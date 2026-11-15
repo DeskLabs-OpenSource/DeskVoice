@@ -64,6 +64,7 @@ const common: CommonDictionary = {
     forbidden: "Tu rol no permite este cambio. Habla con un dueño o administrador.",
     not_found: "Este registro ya no existe. Actualiza la página.",
     call_not_live: "Esta llamada ya terminó. Actualiza la página.",
+    recording_voicemail: "Esta llamada es un mensaje del buzón de voz: quien llamó oyó el aviso de grabación y termina el mensaje colgando.",
     validation_error: "Algún campo no fue aceptado. Revísalo e intenta de nuevo.",
     invalid_json: "El pedido llegó incompleto. Intenta de nuevo.",
     already_exists: "Ya existe un registro con estos datos.",

@@ -19,4 +19,5 @@ export * from "./retention";
 export * from "./routing";
 export * from "./secrets";
 export * from "./vocabulary";
+export * from "./voicemail";
 export * from "./with-org";
