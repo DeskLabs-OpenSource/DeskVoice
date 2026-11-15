@@ -4,6 +4,7 @@ export * from "./clock";
 export * from "./config";
 export * from "./db";
 export * from "./erasures";
+export * from "./share-links";
 export * from "./events";
 export * from "./follow-ups";
 export * from "./inbound-limit";

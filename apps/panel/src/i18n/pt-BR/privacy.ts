@@ -52,7 +52,7 @@ const privacy = {
   erasureDone: "Os dados de {phone} foram apagados.",
   erasureDoneRecordings: "As gravações saem em instantes. O registro abaixo diz quantas saíram.",
   historyTitle: "Registro",
-  historyLead: "Quem mudou o prazo ou a gravação, o que saiu pelo prazo, quem exportou os dados de qual telefone e quem apagou dados a pedido de quem ligou. Os 50 mais recentes.",
+  historyLead: "Quem mudou o prazo ou a gravação, o que saiu pelo prazo, quem exportou os dados de qual telefone, quem apagou dados a pedido de quem ligou e o que aconteceu com os links de gravação para quem ligou. Os 50 mais recentes.",
   historyEmpty: "Nada registrado ainda.",
   history: {
     transcript_retention_changed: "{who} mudou o prazo de guarda de {from} para {to}.",
@@ -61,6 +61,9 @@ const privacy = {
     call_recording_changed: "{who} deixou a gravação das chamadas {state}.",
     caller_data_erased: "{who} apagou, a pedido de quem ligou, os dados do telefone terminado em {suffix}. Chamadas: {calls}. Gravações: {recordings}.",
     caller_recordings_erased: "Gravações de chamadas apagadas a pedido de quem ligou: {removed}.",
+    share_created: "{who} criou um link para quem ligou baixar a gravação de uma chamada. Vale até {until}, com {uses} downloads.",
+    share_downloaded: "A gravação de uma chamada foi baixada pelo link de quem ligou. Download {use} de {uses}.",
+    share_revoked: "{who} revogou os links da gravação de uma chamada. Links revogados: {count}.",
   },
   purgedRecordings: "Gravações apagadas: {count}.",
   purgedFollowUps: "Pendências fechadas apagadas: {count}.",

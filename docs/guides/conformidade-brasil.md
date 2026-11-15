@@ -241,7 +241,7 @@ o telefone e sai um arquivo com as chamadas desse número na sua organização, 
 entrada na lista de não ligar. A fala que já saiu pelo prazo aparece como apagada. Cada chamada diz
 se tem gravação (`recording`), mas **o áudio não vai no arquivo**: ele fica no player da tela de cada
 chamada, e embutido no arquivo de texto o faria crescer cerca de 2,5 MB por minuto de conversa.
-Se a pessoa pediu também a voz dela, a entrega do áudio é feita à parte, chamada por chamada. Duas limitações
+Se a pessoa pediu também a voz dela, a entrega do áudio é feita à parte, chamada por chamada, pelo link descrito abaixo. Duas limitações
 que valem dizer a quem pediu:
 
 1. **A busca é pelo número.** Se a mesma pessoa ligou de outro telefone, exporte cada número.
@@ -250,13 +250,28 @@ que valem dizer a quem pediu:
 
 O arquivo é dado pessoal fora do banco: entregue pelo canal combinado e apague a cópia depois.
 
+**O link da gravação para quem ligou** fica na tela de cada chamada que tem gravação, só para dono
+ou administrador. O link vale 72 horas e permite 10 downloads do áudio; abrir a página do link não
+gasta download, e cada download fica no registro. A tela mostra o endereço uma vez só, lista os
+links que ainda valem e revoga todos de uma chamada na hora. O link deixa de valer quando a chamada
+é apagada a pedido de quem ligou ou quando o áudio sai pelo prazo de guarda. Três cuidados:
+
+1. **Qualquer pessoa com o link baixa o áudio**, que tem também a voz do agente. O link não confere
+   quem abre: mande só para quem pediu.
+2. **O endereço é o público da instalação.** Sem um domínio configurado, o painel fica só dentro do
+   servidor ([0011](../decisions/0011-sem-dominio-o-painel-nao-vai-para-a-internet.md)), e o link não
+   abre para quem está fora.
+3. **Atrás de um proxy seu**, na frente do Caddy da instalação, o endereço do link pode ficar no
+   log desse proxy, porque ele vai no caminho da URL. Se o seu proxy guarda log de pedidos, trate
+   esse log como dado pessoal, ou deixe o caminho `/s/` de fora dele.
+
 **Tudo fica registrado** na mesma tela: quem mudou o prazo e de quanto para quanto, quem ligou ou
-desligou a gravação, quantas falas e gravações saíram pelo prazo e quem exportou os dados de qual telefone, e quando. O registro de exportação
+desligou a gravação, quantas falas e gravações saíram pelo prazo, quem exportou os dados de qual telefone, quem criou ou revogou um link de gravação e cada download feito por ele, e quando. O registro de exportação
 guarda o telefone, e não sai com o prazo da transcrição: é ele que mostra, depois, que o pedido foi
 atendido.
 
-O porquê desse desenho está nas decisões [0014](../decisions/0014-direitos-de-quem-ligou-pela-tela.md)
-e [0016](../decisions/0016-gravacao-desligada-de-fabrica.md).
+O porquê desse desenho está nas decisões [0014](../decisions/0014-direitos-de-quem-ligou-pela-tela.md),
+[0016](../decisions/0016-gravacao-desligada-de-fabrica.md) e [0019](../decisions/0019-link-temporario-do-titular.md).
 
 ## Para implementadores
 

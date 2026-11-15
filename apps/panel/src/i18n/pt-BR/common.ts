@@ -106,6 +106,8 @@ const common = {
     email_taken: "Este e-mail já tem conta neste painel.",
     wrong_password: "A senha atual não confere.",
     invite_invalid: "Este convite não vale mais. Peça um novo a quem convidou você.",
+    call_erased: "Esta chamada foi apagada a pedido de quem ligou. Não há o que compartilhar.",
+    no_recording: "Esta chamada não tem gravação guardada, então não há link para criar.",
     trunk_has_numbers: "Esta linha ainda tem números ligados a ela. Remova os números antes de remover a linha.",
     update_in_progress: "Já existe um pedido de atualização em andamento neste servidor. Acompanhe em Configurações → Sistema.",
     update_unavailable: "Este servidor não roda uma versão publicada, então não atualiza pela tela. Veja em Configurações → Sistema como atualizar pelo terminal.",

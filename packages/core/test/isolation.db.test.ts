@@ -37,6 +37,16 @@ const factories: Record<string, Factory> = {
   whatsapp_sessions: (organization_id) => ({ organization_id, session_name: unique("session") }),
   whatsapp_call_sessions: (organization_id) => ({ organization_id, session_name: unique("call-session") }),
   organization_events: (organization_id, p) => ({ organization_id, at, kind: "isolation_probe", actor_user_id: p.users?.id, payload: {} }),
+  share_links: (organization_id, p) => ({
+    organization_id,
+    call_id: p.calls?.id,
+    token_hash: unique("share-token"),
+    kind: "recording",
+    expires_at: at,
+    max_uses: 10,
+    created_by: p.users?.id,
+    created_at: at,
+  }),
 };
 
 const UNSCOPED_TABLES = ["organizations", "schema_migrations"];
