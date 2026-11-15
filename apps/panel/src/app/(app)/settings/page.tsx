@@ -71,6 +71,7 @@ function ClassifyTarget({ engine, t, onChanged }: { engine: Engine; t: SettingsD
       <Field label={t.classifyModel} hint={t.classifyModelHint}>
         <TextInput mono autoComplete="off" className="max-w-md" value={model} onChange={(event) => setModel(event.target.value)} />
       </Field>
+      {engine.classifyModelUnmeasured ? <Notice tone="warn">{t.classifyModelUnmeasured}</Notice> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" variant="secondary" busy={save.busy}>
           {t.classifyTargetSave}

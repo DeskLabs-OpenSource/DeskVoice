@@ -40,6 +40,7 @@ const settings: SettingsDictionary = {
   classifyKeyKeep: "Leave empty to keep the saved key",
   classifyModel: "Classification model",
   classifyModelHint: "The name the provider publishes, for example deepseek-chat. Empty means the engine's model. Without an endpoint only a model whose price the project knows is accepted; for another model, enter the endpoint.",
+  classifyModelUnmeasured: "This model is not in this version's price table. Without an endpoint, the classification uses the engine's model instead. To use this model, enter the provider's endpoint; for the engine's model, leave the field empty and save.",
   classifyTargetSave: "Save destination",
   keyResults: {
     accepted: "accepted, with access to the model {model}. The test does not check credit: it only reads the model's details, at no cost.",

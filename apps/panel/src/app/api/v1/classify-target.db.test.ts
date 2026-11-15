@@ -18,6 +18,7 @@ interface EngineView {
   classifyTarget: boolean;
   baseUrl: string | null;
   classifyModel: string | null;
+  classifyModelUnmeasured: boolean;
   classifyKeyConfigured: boolean;
   keyConfigured: boolean;
 }
@@ -48,7 +49,7 @@ describe("settings: destino da classificação", () => {
 
     const saved = await set(cookie, TARGET, { baseUrl: "https://api.deepseek.com/v1/", model: " deepseek-chat ", apiKey: "sk-do-endpoint" });
     expect(saved.data).toEqual({ key: TARGET, value: { baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", apiKey: { configured: true } } });
-    expect(await viewOf(cookie)).toMatchObject({ baseUrl: "https://api.deepseek.com/v1", classifyModel: "deepseek-chat", classifyKeyConfigured: true });
+    expect(await viewOf(cookie)).toMatchObject({ baseUrl: "https://api.deepseek.com/v1", classifyModel: "deepseek-chat", classifyKeyConfigured: true, classifyModelUnmeasured: false });
     expect((await call(getSetting, { cookie, params: { key: TARGET } })).data).toEqual(saved.data);
 
     const stored = await storedOf(org);
@@ -83,7 +84,7 @@ describe("settings: destino da classificação", () => {
     const { org, cookie } = await owner("modelo com preço");
     expect((await set(cookie, TARGET, { model: "gpt-5-nano" })).status).toBe(200);
     expect(await storedOf(org)).toEqual({ model: "gpt-5-nano" });
-    expect(await viewOf(cookie)).toMatchObject({ baseUrl: null, classifyModel: "gpt-5-nano" });
+    expect(await viewOf(cookie)).toMatchObject({ baseUrl: null, classifyModel: "gpt-5-nano", classifyModelUnmeasured: false });
   });
 
   it("modelo sem endpoint fora da tabela de preço é recusado: o provedor do motor cobraria sem medir", async () => {
@@ -102,7 +103,8 @@ describe("settings: destino da classificação", () => {
       q.exec("insert into settings (organization_id, key, value, secret) values ($1, $2, $3::jsonb, true)", [org, TARGET, JSON.stringify({ model: "deepseek-chat" })]),
     );
     // O que está gravado não se perde nem muda de valor: a tela continua mostrando o modelo.
-    expect(await viewOf(cookie)).toMatchObject({ baseUrl: null, classifyModel: "deepseek-chat" });
+    // A tela, porém, diz que esse modelo não vale: sem endpoint, a classificação usa o do motor (issue 239).
+    expect(await viewOf(cookie)).toMatchObject({ baseUrl: null, classifyModel: "deepseek-chat", classifyModelUnmeasured: true });
     expect(refusal(await set(cookie, TARGET, { model: "deepseek-chat" }))).toEqual([400, "classify_model_unmeasured"]);
     expect(await storedOf(org)).toEqual({ model: "deepseek-chat" });
   });

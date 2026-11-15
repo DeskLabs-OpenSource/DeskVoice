@@ -139,6 +139,8 @@ export interface Engine {
   baseUrl: string | null;
   /** O modelo da classificação gravado, ou `null` para o do motor. */
   classifyModel: string | null;
+  /** O modelo gravado, sem endpoint, não está na tabela de preço: a classificação usa o do motor. */
+  classifyModelUnmeasured: boolean;
   /** O endpoint da classificação tem a chave dele gravada (o valor nunca chega à tela). */
   classifyKeyConfigured: boolean;
   /** Vozes do provedor; vazia quando o motor não oferece escolha (o simulado). */
