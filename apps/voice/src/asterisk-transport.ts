@@ -82,6 +82,8 @@ export class AsteriskCalls {
     call.attached = true;
     const transport: CallTransport & { drained(): Promise<void> } = {
       onAudio: (handler) => connection.onAudio(handler),
+      // A tecla chega em banda, pelo mesmo AudioSocket do áudio (a ARI não a entrega a canal fora da Stasis).
+      onDtmf: (handler) => connection.onDtmf(handler),
       sendAudio: (pcm) => connection.sendAudio(pcm),
       clearAudio: () => connection.clearAudio(),
       drained: () => connection.drained(),
