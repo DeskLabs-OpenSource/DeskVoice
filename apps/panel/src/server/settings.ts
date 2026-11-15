@@ -2,10 +2,13 @@ import {
   DEFAULT_INBOUND_LIMIT,
   DEFAULT_VOICEMAIL_MAX_SECONDS,
   INBOUND_LIMIT_SETTING,
+  DEFAULT_VOICEMAIL_LANGUAGE,
   VOICEMAIL_ENABLED_SETTING,
+  VOICEMAIL_LANGUAGE_SETTING,
   VOICEMAIL_MAX_SECONDS_SETTING,
   encryptSecret,
   inboundLimitSchema,
+  voicemailLanguageSchema,
   voicemailMaxSecondsSchema,
 } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
@@ -193,9 +196,11 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     "network.public_ip": plain(z.ipv4()),
     // Ligações recebidas pela operadora ao mesmo tempo. Ausente vale o teto de fábrica.
     [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },
-    // Caixa postal: desligada de fábrica, e o teto do recado em segundos. Ausentes valem os de fábrica.
+    // Caixa postal: desligada de fábrica, o teto do recado em segundos e o idioma do aviso gravado.
+    // Ausentes valem os de fábrica.
     [VOICEMAIL_ENABLED_SETTING]: { ...plain(z.boolean()), fallback: false },
     [VOICEMAIL_MAX_SECONDS_SETTING]: { ...plain(voicemailMaxSecondsSchema), fallback: DEFAULT_VOICEMAIL_MAX_SECONDS },
+    [VOICEMAIL_LANGUAGE_SETTING]: { ...plain(voicemailLanguageSchema), fallback: DEFAULT_VOICEMAIL_LANGUAGE },
   };
   // Uma chave por motor que pede chave: motor novo na pasta ganha a configuração sem editar aqui.
   for (const engine of engines) if (!engine.keyless) definitions[engineKeySetting(engine.id)] = { ...secretText, engine };

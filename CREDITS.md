@@ -97,6 +97,22 @@ Institute, e [IBM Plex Mono](https://github.com/IBM/plex), da IBM, as duas sob a
 License 1.1. Os arquivos ficam em `apps/panel/src/app/fonts/`, com a licença de cada uma ao lado.
 São o subconjunto latino publicado pelo [Fontsource](https://fontsource.org) 5.3.0, sem alteração.
 
+## Aviso gravado da caixa postal
+
+O aviso que a caixa postal toca antes do recado (`apps/voice/assets/voicemail-notice/`) foi
+sintetizado em 15/11/2026 com o [Piper](https://github.com/OHF-Voice/piper1-gpl) 1.8.0 (GPL-3.0),
+que roda fora do repositório: só o áudio que ele produz está aqui, não o programa. As vozes vêm de
+[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (repositório MIT), e a licença
+de cada base foi conferida no `MODEL_CARD` de cada voz:
+
+| Idioma | Voz | Base de treino |
+|---|---|---|
+| pt-BR | `pt_BR-cadu-medium` | OHF-Voice/voice-datasets, CC0 (afinada sobre a voz rdh, CC0) |
+| inglês | `en_US-ljspeech-medium` | LJ Speech, domínio público |
+| espanhol | `es_ES-davefx-medium` | OHF-Voice/voice-datasets, CC0 (afinada sobre a voz rdh, CC0) |
+
+O comando que gera os três arquivos é `scripts/aviso-da-caixa-postal/gerar.sh`.
+
 ## Provedores de IA
 
 Os motores de voz direta usam as interfaces Gemini Live, do Google, e Realtime, da OpenAI.

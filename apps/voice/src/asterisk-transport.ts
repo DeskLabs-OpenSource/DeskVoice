@@ -70,14 +70,15 @@ export class AsteriskCalls {
   }
 
   /** O AudioSocket conectou. Devolve o transporte da chamada, ou `null` se ninguém a esperava. */
-  attach(connection: AudioSocketConnection): { call: ExpectedCall; transport: CallTransport } | null {
+  attach(connection: AudioSocketConnection): { call: ExpectedCall; transport: CallTransport & { drained(): Promise<void> } } | null {
     const call = this.byCall.get(connection.id);
     if (!call || call.attached) return null;
     call.attached = true;
-    const transport: CallTransport = {
+    const transport: CallTransport & { drained(): Promise<void> } = {
       onAudio: (handler) => connection.onAudio(handler),
       sendAudio: (pcm) => connection.sendAudio(pcm),
       clearAudio: () => connection.clearAudio(),
+      drained: () => connection.drained(),
       onHangup: (handler) =>
         connection.onClose((reason) => {
           if (reason !== "local") handler();

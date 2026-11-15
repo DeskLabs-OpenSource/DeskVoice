@@ -20,11 +20,15 @@ export default function CallsSettings() {
   const recording = useApi<Setting<string>>("/settings/recording_notice.text");
   const voicemail = useApi<Setting<boolean>>("/settings/voicemail.enabled");
   const voicemailSeconds = useApi<Setting<number>>("/settings/voicemail.max_seconds");
+  const voicemailLanguage = useApi<Setting<"pt-BR" | "en" | "es">>("/settings/voicemail.language");
+  // A caixa postal só atende com a gravação ligada (decisão 0018): a tela diz quando ela está desligada.
+  const privacy = useApi<{ recording: boolean }>(canConfigure ? "/privacy" : null);
   const saveInboundLimit = useAction();
   const saveOnTimeout = useAction();
   const saveRecording = useAction();
   const saveVoicemail = useAction();
   const saveVoicemailSeconds = useAction();
+  const saveVoicemailLanguage = useAction();
   const [limit, setLimit] = useState("");
   const [notice, setNotice] = useState("");
   const [maxSeconds, setMaxSeconds] = useState("");
@@ -63,6 +67,11 @@ export default function CallsSettings() {
 
       <Panel title={t.voicemailTitle} description={t.voicemailLead}>
         <div className="grid max-w-md gap-4">
+          <Notice>
+            {t.voicemailTerms.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </Notice>
           <Switch
             label={t.voicemailSwitch}
             disabled={!canConfigure || saveVoicemail.busy}
@@ -70,6 +79,19 @@ export default function CallsSettings() {
             onChange={(next) => void saveVoicemail.run(() => put("voicemail.enabled", next)).then(voicemail.reload)}
           />
           <ActionStatus action={saveVoicemail} />
+          {voicemail.data?.value === true && privacy.data?.recording === false ? <Notice tone="warn">{t.voicemailNeedsRecording}</Notice> : null}
+          <Field label={t.voicemailLanguage} hint={t.voicemailLanguageHint}>
+            <Select
+              disabled={!canConfigure}
+              value={voicemailLanguage.data?.value ?? "pt-BR"}
+              onChange={(event) => void saveVoicemailLanguage.run(() => put("voicemail.language", event.target.value)).then(voicemailLanguage.reload)}
+            >
+              <option value="pt-BR">{t.voicemailLanguages["pt-BR"]}</option>
+              <option value="en">{t.voicemailLanguages.en}</option>
+              <option value="es">{t.voicemailLanguages.es}</option>
+            </Select>
+          </Field>
+          <ActionStatus action={saveVoicemailLanguage} />
           <form
             className="grid gap-4 border-t border-line pt-4"
             onSubmit={(event) => {
