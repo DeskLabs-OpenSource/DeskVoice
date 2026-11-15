@@ -6,6 +6,7 @@ import type { ToolDeps } from "../deps";
 export function createAgendaRemarcar(deps: ToolDeps = {}) {
   return defineTool({
     name: "agenda_remarcar",
+    available: deps.agenda !== undefined,
     description:
       "Troca o horário de um compromisso que já existe na agenda, depois que a pessoa confirmou o novo dia e a nova hora em voz alta. Use só com o identificador do agendamento que agenda_marcar devolveu ou que o operador informou. Chame só depois de ler o novo dia e a nova hora e ouvir o sim dela: sem `confirmed: true` nada é alterado. NÃO use para marcar um compromisso novo (use agenda_marcar) nem para desmarcar. NÃO remarque para um horário que já passou.",
     inputSchema: z.object({

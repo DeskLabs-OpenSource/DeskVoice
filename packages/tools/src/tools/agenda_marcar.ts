@@ -6,6 +6,7 @@ import type { ToolDeps } from "../deps";
 export function createAgendaMarcar(deps: ToolDeps = {}) {
   return defineTool({
     name: "agenda_marcar",
+    available: deps.agenda !== undefined,
     description:
       "Marca um horário na agenda, depois que a pessoa confirmou o dia e a hora em voz alta. Chame só depois de ler o dia e a hora e ouvir o sim dela: sem `confirmed: true` nada é gravado. Use o horário exato que agenda_horarios_livres devolveu. NÃO use para trocar um horário já marcado (use agenda_remarcar), nem para marcar sem a confirmação da pessoa, nem para um horário que já passou. NÃO chame duas vezes para o mesmo pedido.",
     inputSchema: z.object({

@@ -417,6 +417,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // Sem transferência no canal (ligação pelo WhatsApp), o motor nem a vê: a descrição manda
       // anunciar a transferência antes de chamar, e quem ligou ouviria "vou transferir" e o recuo.
       if (name === "transfer_to_human" && !canTransfer) continue;
+      // Ferramenta sem a peça de que depende (a agenda sem cliente) também some: oferecida, o motor a
+      // chamaria em toda ligação de agendamento só para ouvir que ela não está ligada.
+      if (tool?.available === false) continue;
       if (tool) enabled.set(name, tool);
       else log("error", "agent enables a tool that is not installed; ignoring it", { tool: name });
     }

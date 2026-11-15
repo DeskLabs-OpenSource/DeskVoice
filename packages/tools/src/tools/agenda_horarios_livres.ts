@@ -11,6 +11,7 @@ const SPOKEN_SLOTS = 3;
 export function createAgendaHorariosLivres(deps: ToolDeps = {}) {
   return defineTool({
     name: "agenda_horarios_livres",
+    available: deps.agenda !== undefined,
     description:
       "Consulta os horários livres na agenda para um tipo de atendimento, num período. Use quando a pessoa quiser marcar ou remarcar e ainda não souber que horas há vaga. Devolve os horários em ISO 8601 e em palavras, no fuso da agenda: leia em voz alta o dia da semana e a hora de até três opções e peça que a pessoa escolha. NÃO use para gravar nada nem para confirmar horário: para marcar, use agenda_marcar depois que a pessoa confirmar em voz alta; para trocar um horário já marcado, use agenda_remarcar. NÃO ofereça horário que não esteja na lista devolvida.",
     inputSchema: z.object({
