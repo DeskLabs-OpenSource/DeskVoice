@@ -11,6 +11,14 @@ export const GET = handle({}, async ({ q }) => {
   // vista, que diz se a chave existe e nunca o valor.
   const targets = await q.many<{ key: string; value: unknown }>("select key, value from settings where key like 'engine.%.classify_target'");
   const targetOf = (engineId: string) => classifyTargetView(targets.find((row) => row.key === engineClassifyTargetSetting(engineId))?.value);
+  // O modelo gravado sem endpoint que a tabela de preço desta versão não tem: o motor usa o modelo
+  // dele no lugar, e a tela precisa dizer isso, senão mostra como valendo um modelo que não vale
+  // (issue 239). Hoje só acontece com configuração posta por fora do painel ou com um modelo que
+  // saia da tabela numa versão futura.
+  const unmeasured = (engine: { id: string; classifyPricing?(model: string): unknown }): boolean => {
+    const { baseUrl, model } = targetOf(engine.id);
+    return baseUrl === null && model !== null && engine.classifyPricing?.(model) === undefined;
+  };
   return (await listEngines()).map((engine) => ({
     id: engine.id,
     label: engine.label,
@@ -22,6 +30,7 @@ export const GET = handle({}, async ({ q }) => {
     classifyTarget: engine.classifyTarget === true,
     baseUrl: targetOf(engine.id).baseUrl,
     classifyModel: targetOf(engine.id).model,
+    classifyModelUnmeasured: unmeasured(engine),
     classifyKeyConfigured: targetOf(engine.id).apiKey.configured,
     voices: engine.voices ?? [],
     defaultVoice: engine.defaultVoice ?? null,

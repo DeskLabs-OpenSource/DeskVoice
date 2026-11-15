@@ -40,6 +40,7 @@ const settings: SettingsDictionary = {
   classifyKeyKeep: "En blanco, mantiene la clave guardada",
   classifyModel: "Modelo de la clasificación",
   classifyModelHint: "El nombre que publica el proveedor, por ejemplo deepseek-chat. En blanco, la clasificación usa el modelo del motor. Sin endpoint solo se acepta un modelo cuyo precio conoce el proyecto; para otro modelo, escribe el endpoint.",
+  classifyModelUnmeasured: "Este modelo no está en la tabla de precios de esta versión. Sin endpoint, la clasificación usa el modelo del motor en su lugar. Para usar este modelo, escribe el endpoint del proveedor; para el del motor, deja el campo en blanco y guarda.",
   classifyTargetSave: "Guardar destino",
   keyResults: {
     accepted: "aceptada, con acceso al modelo {model}. La prueba no revisa el crédito: solo lee los datos del modelo, sin gastar.",
