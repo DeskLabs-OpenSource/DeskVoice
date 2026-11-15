@@ -132,3 +132,34 @@ export const fakeLookup =
   (table: Record<string, string[]> = {}) =>
   async (host: string): Promise<string[]> =>
     table[host] ?? ["93.184.216.34"];
+
+/**
+ * Dá à chamada da fixture um número e uma história: `calls` ligações anteriores do mesmo número e
+ * uma pendência aberta para cada título. Para os testes da linha "Este número já ligou…".
+ */
+export async function seedCallerHistory(app: Db, ctx: FakeContext, phone: string, history: { calls: number; openFollowUps: string[] }): Promise<string[]> {
+  return withSystem(app, async (q) => {
+    await q.exec("update calls set from_e164 = $2 where id = $1", [ctx.callId, phone]);
+    const ids: string[] = [];
+    for (let index = 0; index < history.calls; index += 1) {
+      const id = randomUUID();
+      await q.exec(
+        "insert into calls (id, organization_id, agent_id, direction, channel, status, from_e164, summary, started_at) values ($1, $2, $3, 'inbound', 'phone', 'completed', $4, $5, $6)",
+        [id, ctx.organizationId, ctx.agentId, phone, `Resumo ${index}: a pessoa contou um detalhe pessoal.`, new Date(t0.getTime() - (index + 1) * 86_400_000)],
+      );
+      ids.push(id);
+    }
+    // Prazos em sequência: a linha cita as pendências na ordem do prazo.
+    for (const [index, title] of history.openFollowUps.entries()) {
+      await q.exec("insert into follow_ups (organization_id, call_id, caller_e164, title, due_at, created_at) values ($1, $2, $3, $4, $5, $6)", [
+        ctx.organizationId,
+        ids[0] ?? null,
+        phone,
+        title,
+        new Date(t0.getTime() + (index + 1) * 60_000),
+        t0,
+      ]);
+    }
+    return ids;
+  });
+}

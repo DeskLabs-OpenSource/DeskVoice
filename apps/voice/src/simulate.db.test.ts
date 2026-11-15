@@ -78,3 +78,19 @@ describe("chamada simulada no ritmo de uma ligação (issue #111)", { timeout: 1
     await harness.approvals.close();
   });
 });
+
+describe("chamada simulada com o número de quem liga", { timeout: 120_000 }, () => {
+  it("grava o número como o de uma recebida, para a simulada entrar na memória do número", async () => {
+    const organizationId = await createOrganization(app, "simulate-from");
+    const agentId = await createAgent(app, organizationId);
+    const harness = await sessionHarness(app);
+    const script: SimulatedScript = [{ say: "Bom dia." }, { end: true }];
+    const call = await startSimulatedCall(harness.deps, { organizationId, agentId, fromE164: "+5531922221111" }, { script, tools: [] });
+    if ("code" in call) throw new Error(call.message);
+    const row = await withOrg(app, organizationId, (q) => q.one<{ direction: string; channel: string; from_e164: string | null }>("select direction, channel, from_e164 from calls where id = $1", [call.callId]));
+    expect(row).toEqual({ direction: "inbound", channel: "simulated", from_e164: "+5531922221111" });
+    call.transport.callerHangup();
+    await call.session.done;
+    await harness.approvals.close();
+  });
+});

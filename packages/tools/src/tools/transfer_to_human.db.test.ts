@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
-import { createFixture, eventsOf, notificationsOf, tasksOf, t0 } from "../../test/helpers";
+import { createFixture, eventsOf, notificationsOf, putWhatsAppConnector, seedCallerHistory, tasksOf, t0 } from "../../test/helpers";
 import { runTool } from "../run-tool";
 import transferToHuman from "./transfer_to_human";
 
@@ -50,5 +50,21 @@ describe("transfer_to_human", () => {
     expect(ctx.transfers).toEqual([]);
     expect(await notificationsOf(app, ctx.organizationId)).toEqual([]);
     expect((await eventsOf(app, ctx.callId)).map((event) => event.kind)).toEqual(["tool_called", "tool_result"]);
+  });
+
+  it("quem recebe a transferência lê no aviso que o número já ligou e o que ficou aberto; o modelo e o evento não", async () => {
+    const ctx = await createFixture(app, "transfer memoria", { transferTo: "+5531999998888" });
+    await putWhatsAppConnector(app, ctx.organizationId);
+    await seedCallerHistory(app, ctx, "+5531955554444", { calls: 2, openFollowUps: ["Enviar a segunda via do boleto"] });
+
+    const result = await runTool(transferToHuman, args, ctx);
+    const notifications = await notificationsOf(app, ctx.organizationId);
+    // O aviso da transferência continua só no painel, mesmo com WhatsApp configurado.
+    expect(notifications.map((notification) => notification.channel)).toEqual(["panel"]);
+    expect(notifications[0]?.body).toMatch(/\n\nEste número já ligou 2 vezes; 1 pendência aberta: Enviar a segunda via do boleto\.$/);
+
+    expect(result.message).not.toMatch(/ligou|boleto/);
+    const started = (await eventsOf(app, ctx.callId)).find((event) => event.kind === "transfer_started");
+    expect(started?.payload).toEqual({ to: "+5531999998888", ...args });
   });
 });

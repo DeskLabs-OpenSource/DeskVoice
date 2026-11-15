@@ -20,7 +20,8 @@ import { useCanConfigure } from "../../../../ui/me";
 import { Timeline } from "../../../../ui/timeline";
 import { transcribeAlsoClassifies } from "../../../../ui/transcription";
 import { AnalysisSection } from "./analysis-section";
-import type { CallDetail, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
+import { CallerHistorySection } from "./caller-history-section";
+import type { CallDetail, CallerHistory, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
 
@@ -35,6 +36,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   const events = useApi<CallEvent[]>(`/calls/${id}/events`);
   const engines = useApi<Engine[]>("/engines");
   const followUps = useApi<FollowUpList>(`/follow-ups?callId=${id}`);
+  const callerHistory = useApi<CallerHistory>(`/calls/${id}/caller-history`);
   const transcription = useApi<Setting<boolean>>("/settings/calls.transcription_enabled");
   const outcomeEnabled = useApi<Setting<boolean>>("/settings/calls.outcome_enabled");
   const analysisEnabled = useApi<Setting<boolean>>("/settings/calls.analysis_enabled");
@@ -103,6 +105,8 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
           ))}
         </dl>
       </header>
+
+      <CallerHistorySection history={callerHistory.data} t={t} common={common} locale={locale} />
 
       {data.outcome ? (
         <section className="grid max-w-[72ch] gap-1.5">

@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./analysis";
+export * from "./caller-history";
 export * from "./clock";
 export * from "./config";
 export * from "./db";

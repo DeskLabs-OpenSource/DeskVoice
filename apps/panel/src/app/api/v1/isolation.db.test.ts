@@ -5,6 +5,7 @@ import { DELETE as deleteAgent, GET as getAgent, PATCH as patchAgent } from "./a
 import { GET as listAgents } from "./agents/route";
 import { POST as decide } from "./approvals/[id]/decide/route";
 import { GET as listApprovals } from "./approvals/route";
+import { GET as callerHistory } from "./calls/[id]/caller-history/route";
 import { GET as callEvents } from "./calls/[id]/events/route";
 import { GET as getCall } from "./calls/[id]/route";
 import { POST as outbound } from "./calls/outbound/route";
@@ -77,6 +78,7 @@ describe("a user of organization A, through every route that takes an id", () =>
       ["DELETE agent", call(deleteAgent, { ...as, method: "DELETE", params: { id: theirs.agent } })],
       ["GET call", call(getCall, { ...as, params: { id: theirs.call } })],
       ["GET call events", call(callEvents, { ...as, params: { id: theirs.call } })],
+      ["GET caller history", call(callerHistory, { ...as, params: { id: theirs.call } })],
       ["decide approval", call(decide, { ...as, method: "POST", params: { id: theirs.approval }, body: { decision: "approved" } })],
       ["PATCH trunk", call(patchTrunk, { ...as, method: "PATCH", params: { id: theirs.trunk }, body: { host: "evil.example.test" } })],
       ["check trunk", call(checkTrunk, { ...as, method: "POST", params: { id: theirs.trunk } })],
