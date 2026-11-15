@@ -18,6 +18,7 @@ import { formatDateTime } from "./format";
 import { useLive, useNow } from "./live";
 import { MeContext } from "./me";
 import type { Approval, HealthReport, HealthStatus, Me, PanelNotification } from "./types";
+import { UpdateIndicator } from "./update-indicator";
 
 type Theme = "light" | "dark" | undefined;
 
@@ -258,6 +259,7 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
         </div>
         {nav}
         <div className="mt-auto grid gap-3">
+          <UpdateIndicator />
           <HealthIndicator />
           <div className="border-t border-line pt-3 pl-2">{account}</div>
         </div>
@@ -269,6 +271,7 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
           <div className="mr-auto">
             <Brand />
           </div>
+          <UpdateIndicator showVersion={false} />
           <HealthIndicator />
           <NotificationBell align="right-0" />
         </div>
