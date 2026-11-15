@@ -31,8 +31,6 @@ const config: NextConfig = {
           { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; form-action 'self'" },
           // O painel serve só os tipos que gera: um upload que adivinhe HTML não vira página.
           { key: "X-Content-Type-Options", value: "nosniff" },
-          // O caminho da tela pode carregar id de chamada; não vai inteiro para fora do domínio.
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           // Sem `includeSubDomains`: o painel pode estar no domínio principal da empresa, e não sabe o
           // que mais mora embaixo dele. Por HTTP e em endereço IP o navegador ignora este cabeçalho
           // (RFC 6797, seção 8.1), então a instalação sem domínio, aberta por túnel, não muda.
@@ -41,6 +39,13 @@ const config: NextConfig = {
           // Câmera e localização o painel não usa, e nenhuma página embutida pode pedir.
           { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=()" },
         ],
+      },
+      {
+        // O caminho da tela pode carregar id de chamada; não vai inteiro para fora do domínio. O link
+        // público (/s/...) fica de fora porque declara `no-referrer` por conta própria, e o cabeçalho
+        // daqui venceria o da rota.
+        source: "/:path((?!s/).*)",
+        headers: [{ key: "Referrer-Policy", value: "strict-origin-when-cross-origin" }],
       },
     ];
   },

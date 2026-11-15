@@ -1,3 +1,5 @@
+import { modifyRouteRegex } from "next/dist/lib/redirect-status";
+import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import { describe, expect, it } from "vitest";
 import config from "../next.config";
 
@@ -9,11 +11,9 @@ import config from "../next.config";
 describe("cabeçalhos de segurança do painel", () => {
   it("protege toda resposta contra iframe, MIME adivinhado e formulário forjado", async () => {
     const grupos = (await config.headers?.()) ?? [];
-    expect(grupos.length).toBeGreaterThan(0);
     // Um `source` mais estreito deixaria rotas sem cabeçalho sem ninguém notar.
-    expect(grupos.map((grupo) => grupo.source)).toEqual(["/:path*"]);
-
-    const porNome = new Map(grupos.flatMap((grupo) => grupo.headers).map((h) => [h.key.toLowerCase(), h.value]));
+    const todas = grupos.find((grupo) => grupo.source === "/:path*");
+    const porNome = new Map((todas?.headers ?? []).map((h) => [h.key.toLowerCase(), h.value]));
 
     expect(porNome.get("x-frame-options")).toBe("DENY");
     const csp = porNome.get("content-security-policy") ?? "";
@@ -24,7 +24,6 @@ describe("cabeçalhos de segurança do painel", () => {
     expect(csp).not.toContain("script-src");
 
     expect(porNome.get("x-content-type-options")).toBe("nosniff");
-    expect(porNome.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
     // Sem includeSubDomains: o painel não decide pelos outros subdomínios de quem instala.
     expect(porNome.get("strict-transport-security")).toMatch(/^max-age=\d{8,}$/);
 
@@ -33,5 +32,16 @@ describe("cabeçalhos de segurança do painel", () => {
     expect(permissoes).toContain("microphone=(self)");
     expect(permissoes).toContain("camera=()");
     expect(permissoes).toContain("geolocation=()");
+  });
+
+  it("manda a política de referência em toda tela, menos no link público, que declara no-referrer", async () => {
+    const grupos = (await config.headers?.()) ?? [];
+    const comReferencia = grupos.filter((grupo) => grupo.headers.some((h) => h.key.toLowerCase() === "referrer-policy"));
+    expect(comReferencia.flatMap((grupo) => grupo.headers.map((h) => [h.key, h.value]))).toEqual([["Referrer-Policy", "strict-origin-when-cross-origin"]]);
+
+    // O mesmo casamento que o Next monta para um `source` de cabeçalho (server/lib/router-utils/filesystem.js).
+    const casa = getPathMatch(comReferencia[0]?.source ?? "", { strict: true, removeUnnamedParams: true, regexModifier: (regex) => modifyRouteRegex(regex) });
+    for (const caminho of ["/", "/calls", "/calls/talk", "/settings", "/sobre", "/api/v1/calls"]) expect(casa(caminho), caminho).not.toBe(false);
+    for (const caminho of ["/s/abc", "/s/abc/audio"]) expect(casa(caminho), caminho).toBe(false);
   });
 });
