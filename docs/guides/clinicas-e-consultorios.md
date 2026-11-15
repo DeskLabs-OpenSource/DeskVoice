@@ -81,6 +81,8 @@ O que não está nesta lista você não sabe. Não complete de cabeça.
 3. Sintoma grave é transferência imediata, não conversa. Diga: "Isso precisa de atendimento agora.
    Vou chamar uma pessoa da equipe neste instante. Se você não conseguir falar com ninguém em um
    minuto, ligue para o SAMU, no 192." Só siga adiante depois de chamar a transferência.
+   Se a ligação veio pelo WhatsApp, não há transferência: diga "Isso precisa de atendimento agora.
+   Ligue para o SAMU, no 192. Vou avisar a equipe neste instante." e deixe o recado para a equipe.
 4. Não oriente sobre remédio. Diga: "Sobre o remédio, quem orienta é o profissional que receitou.
    Eu não posso dizer para mudar a dose nem para parar o remédio. Vou pedir para a recepção falar
    com você."
@@ -127,7 +129,7 @@ uma, porque a resposta muda o que você precisa configurar.
 |---|---|---|
 | Não orientar sintoma | Orientação clínica por telefone, sem examinar e sem prontuário, é conduta de saúde — e o agente não é profissional de saúde | Só as instruções. Nenhuma ferramenta recusa opinião clínica |
 | Não interpretar exame | Mesma razão. E o resultado pode ser de outra pessoa, no mesmo telefone da família | Só as instruções |
-| Sintoma grave transfere na hora | É o caso em que esperar custa caro, e o agente não tem como avaliar gravidade | As instruções mais a ferramenta `transfer_to_human`, que **falha se o agente não tiver número de transferência**: ela devolve `ok: false` e manda o modelo usar `notify_human` para deixar recado — que também precisa estar ligado. Configure o número antes de publicar |
+| Sintoma grave transfere na hora | É o caso em que esperar custa caro, e o agente não tem como avaliar gravidade | As instruções mais a ferramenta `transfer_to_human`, que **falha se o agente não tiver número de transferência**: ela devolve `ok: false` e manda o modelo usar `notify_human` para deixar recado — que também precisa estar ligado. Configure o número antes de publicar. **Na ligação pelo WhatsApp não há transferência:** o agente nem recebe a ferramenta `transfer_to_human` ali, e a saída é indicar o SAMU e deixar o recado com `notify_human` |
 | Não orientar sobre remédio | Dose e suspensão são prescrição. Erro aqui é dano direto | Só as instruções |
 | Não confirmar cobertura de convênio | Cobertura depende de contrato, carência e procedimento. Não há integração com operadora no repositório, e o agente completaria de cabeça | Só as instruções |
 | Não informar valor | O preço é da clínica, muda por convênio e por procedimento, e o produto não tem tabela de preço nem ferramenta de pagamento (é frente aberta no [ROADMAP](../../ROADMAP.md)) | Só as instruções |
@@ -140,7 +142,8 @@ Três consequências práticas:
   filtro de assunto: nada impede o agente de opinar sobre um sintoma se as instruções forem vagas.
   Por isso as frases são literais, e por isso o roteiro de teste abaixo insiste nos casos ruins.
 - **A transferência é o único caminho de saída que o código garante** — e só com número
-  configurado. Sem ele, o agente fica sem para onde mandar a urgência.
+  configurado, e só na ligação telefônica. Sem número, o agente fica sem para onde mandar a
+  urgência. Na ligação pelo WhatsApp ela não existe: ali a saída é o SAMU mais o recado.
 - **Quem não quer ficar na linha não pode ser obrigado.** Se a clínica não tem ninguém para
   receber a ligação fora do horário, a transferência cai no vazio. Nesse caso a orientação do
   agente é registrar o recado e dizer quando a equipe retorna, e a frase 3 muda com o dono da
@@ -148,7 +151,7 @@ Três consequências práticas:
 
 ## Dado de saúde é sensível: o que não gravar nem repetir
 
-Dado de saúde é dado pessoal sensível pela LGPD (Lei 13.709/2018), e a conversa telefônica inteira
+Dado de saúde é dado pessoal sensível pela LGPD (Lei 13.709/2018, art. 5º, II), com regras próprias de tratamento (art. 11), e a conversa telefônica inteira
 é registrada. Antes de publicar o agente, você precisa saber o que fica guardado, onde e por
 quanto tempo.
 
@@ -158,6 +161,8 @@ quanto tempo.
 |---|---|---|
 | A fala de quem ligou e a do agente, uma a uma | eventos da chamada (`transcript_user`, `transcript_agent`) | Sim |
 | O resumo da chamada, escrito a partir da conversa | registro da chamada | Sim, junto com a transcrição da mesma chamada |
+| A citação que sustenta o desfecho da ligação, quando o desfecho está ligado | registro da chamada | Sim, junto com a transcrição da mesma chamada |
+| A análise da ligação, quando ligada: a nota, a régua com a fala que sustenta cada critério, a temperatura e as objeções | registro da chamada | O texto sai; ficam a nota, a régua sem as falas, a temperatura e a contagem de objeções |
 | O áudio, **se** a gravação estiver ligada — vem desligada de fábrica | arquivo na VPS | Sim |
 | O texto que o agente mandou para uma ferramenta: o recado de `notify_human`, a pergunta e o contexto de `request_approval`, o resumo de `transfer_to_human`, o corpo de `send_whatsapp`, o payload de `call_webhook` | eventos da chamada, avisos e aprovações | **Não.** A tela de Privacidade diz, com essas palavras, que os dados que as ferramentas enviaram não saem com o prazo |
 | Título e detalhes de uma pendência (`create_task`) | pendências | Sim, para as pendências fechadas, contadas do fecho. A pendência aberta fica |
@@ -311,7 +316,10 @@ ouvindo. O caminho é Chamadas → Falar com o agente: conversa por voz pelo nav
 agente, as mesmas ferramentas e o mesmo aviso de gravação de uma ligação
 ([decisão 0008](../decisions/0008-chamada-pelo-navegador.md)). Precisa de motor de voz com chave: o
 motor simulado é recusado nesse caminho, porque ele segue roteiro e não conversa. Use fone de
-ouvido, senão o microfone capta a voz do agente e ele se interrompe.
+ouvido, senão o microfone capta a voz do agente e ele se interrompe. Nesse teste pelo navegador, a
+transferência só encerra a conversa, sem chamar ninguém: na pergunta 3, confira que o agente avisou
+e chamou a transferência, e não espere tocar o telefone da recepção. Para provar a transferência de
+verdade, faça uma ligação pela linha telefônica.
 
 Seis perguntas, na ordem. O que conta como falha está na última coluna.
 
