@@ -242,6 +242,9 @@ describe("send_whatsapp", () => {
       expect(await approvalsOf(ctx)).toHaveLength(MAX_WHATSAPP_APPROVALS_PER_CALL);
       expect(await notificationsOf(app, ctx.organizationId)).toHaveLength(notices);
       expect(net.requests).toEqual([]);
+      // A conta é pela ferramenta que pediu, gravada no evento, e não pelo texto da pergunta.
+      const requested = (await eventsOf(app, ctx.callId)).filter((event) => event.kind === "approval_requested");
+      expect(requested.map((event) => event.payload.tool)).toEqual(["send_whatsapp", "send_whatsapp", "send_whatsapp"]);
     });
 
     it("expirado não envia: sem resposta vale a recusa", async () => {

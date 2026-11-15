@@ -16,8 +16,6 @@ export const MAX_WHATSAPP_PER_CALL = 5;
  * O mesmo número do `request_approval` no `runTool`.
  */
 export const MAX_WHATSAPP_APPROVALS_PER_CALL = 3;
-/** Começo fixo da pergunta de confirmação: é por ele que a ligação conta os pedidos já feitos. */
-const APPROVAL_QUESTION_PREFIX = "Posso enviar esta mensagem de WhatsApp para ";
 /** Ajuste da organização: `true` faz o envio para quem ligou sair sem confirmação humana. */
 export const TRUST_CALLER_ID_KEY = "whatsapp.trust_caller_id";
 const CONFIRMATION_TIMEOUT_SECONDS = 120;
@@ -141,10 +139,10 @@ export function createSendWhatsApp(deps: ToolDeps = {}) {
         // e número da equipe não têm esse risco.
         if (!team && line.inbound && (await readSetting(ctx.q, TRUST_CALLER_ID_KEY)) !== true) {
           // Os envios desta ligação são um de cada vez (`serialized`): o pedido anterior já gravou o
-          // `approval_requested` quando este chega aqui. `asked` cobre o banco que não gravou.
+          // `approval_requested`, com `tool`, quando este chega aqui. `asked` cobre o banco que não gravou.
           const askedBefore = await ctx.q.one<{ count: string }>(
-            "select count(*) as count from call_events where call_id = $1 and kind = 'approval_requested' and payload->>'question' like $2",
-            [ctx.callId, `${APPROVAL_QUESTION_PREFIX}%`],
+            "select count(*) as count from call_events where call_id = $1 and kind = 'approval_requested' and payload->>'tool' = 'send_whatsapp'",
+            [ctx.callId],
           );
           if (Math.max(Number(askedBefore?.count ?? 0), sends.asked) >= MAX_WHATSAPP_APPROVALS_PER_CALL) {
             return refused(
@@ -153,7 +151,8 @@ export function createSendWhatsApp(deps: ToolDeps = {}) {
           }
           sends.asked += 1;
           const answer = await askApproval(ctx, {
-            question: `${APPROVAL_QUESTION_PREFIX}${to}, o número exibido nesta ligação?\n\n${input.text}`,
+            question: `Posso enviar esta mensagem de WhatsApp para ${to}, o número exibido nesta ligação?\n\n${input.text}`,
+            tool: "send_whatsapp",
             context: "O número exibido numa ligação pode ser forjado. Aprove só se fizer sentido enviar exatamente este texto a este número.",
             defaultOnTimeout: "denied",
             timeoutSeconds: CONFIRMATION_TIMEOUT_SECONDS,
