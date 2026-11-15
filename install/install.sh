@@ -150,7 +150,7 @@ else blocker "Este sistema (${os_id:-$(uname -s)} ${os_version}) não está entr
 
 arch="$(uname -m)"
 if arch_supported "$arch"; then ok "Processador: $arch"
-else blocker "O processador desta máquina ($arch) não tem imagem do DeskVoice." "use uma VPS x86_64 (amd64); em ARM de 64 bits (arm64) só construindo aqui, com --build"; fi
+else blocker "O processador desta máquina ($arch) não tem imagem do DeskVoice." "use uma VPS x86_64 (amd64) ou ARM de 64 bits (arm64); para construir nesta máquina, rode com --build"; fi
 
 if [ -r /proc/meminfo ]; then
   ram_mb="$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)"
@@ -233,10 +233,9 @@ if is_version "$version" && is_clone && [ "$DRY_RUN" != 1 ]; then
     blocker "O código desta pasta não é o da versão $version, que é a que seria instalada." "vá para a versão e rode de novo: git -C $REPO_DIR checkout $tag && bash install/install.sh  — ou, para rodar o código desta pasta de propósito, construa aqui: bash install/install.sh --build"
   fi
 fi
-# As imagens publicadas são para x86_64. Em ARM a instalação existe, mas construindo aqui.
-if is_version "$version"; then
-  case "$arch" in aarch64|arm64) blocker "Ainda não há imagem publicada do DeskVoice para processador ARM ($arch)." "use uma VPS x86_64, ou construa nesta máquina: bash install/install.sh --build" ;; esac
-fi
+# A imagem publicada é um índice com as duas arquiteturas (amd64 e arm64): em ARM, o mesmo
+# `docker pull` da versão publicada serve, sem construir aqui. Quem quer o código desta pasta
+# continua construindo com `--build`, e aí a versão é `local`, não um número.
 # O Compose dá preferência à variável do terminal sobre o arquivo: as duas têm de dizer o mesmo.
 export DESKVOICE_VERSION="$version"
 
