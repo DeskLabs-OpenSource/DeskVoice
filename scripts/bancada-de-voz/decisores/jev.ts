@@ -118,12 +118,17 @@ type Pedido = { ok: true; resposta: RespostaDoJev; ms: number } | { ok: false; m
 
 class Teto extends Error {}
 
-/** Um pedido ao Jev. Nunca lança, exceto `Teto` (para antes de gastar). */
+/**
+ * Um pedido ao Jev. Nunca lança, exceto `Teto` (para antes de gastar). A estimativa fica reservada
+ * no orçamento antes do pedido, e só é trocada pelo valor real depois da resposta: com pedidos
+ * simultâneos, o que está em voo conta, e o teto não estoura.
+ */
 async function pedir(url: string, chave: string, estado: string, questions: Record<string, Pergunta>, orcamento: Orcamento, relogio: Relogio): Promise<Pedido> {
   const corpo = JSON.stringify({ model: MODELO_PEDIDO, state: estado, questions });
   // Pior caso: um token por byte do corpo. Sobra muito, e nunca falta.
   const estimativa = (Buffer.byteLength(corpo) / 1e6) * USD_POR_MILHAO_DE_ENTRADA;
-  if (!orcamento.cabe(estimativa)) throw new Teto();
+  const reserva = orcamento.reservar(estimativa, "jev");
+  if (!reserva) throw new Teto();
   const inicio = relogio.agora();
   let resposta: Response;
   try {
@@ -134,29 +139,35 @@ async function pedir(url: string, chave: string, estado: string, questions: Reco
       signal: AbortSignal.timeout(PRAZO_MS),
     });
   } catch (erro) {
-    orcamento.somar(estimativa, "jev");
+    reserva.fechar(estimativa);
     return { ok: false, motivo: (erro as Error).name === "TimeoutError" ? `sem resposta em ${PRAZO_MS} ms` : "falha de rede", ms: relogio.agora() - inicio };
   }
-  const texto = await resposta.text();
+  let texto: string;
+  try {
+    texto = await resposta.text();
+  } catch {
+    reserva.fechar(estimativa);
+    return { ok: false, motivo: "falha de rede", ms: relogio.agora() - inicio };
+  }
   const ms = relogio.agora() - inicio;
   if (!resposta.ok) {
     // Pedido recusado não deveria cobrar; a bancada conta a estimativa mesmo assim.
-    orcamento.somar(estimativa, "jev");
+    reserva.fechar(estimativa);
     return { ok: false, motivo: `HTTP ${resposta.status}`, ms };
   }
   let json: unknown;
   try {
     json = JSON.parse(texto);
   } catch {
-    orcamento.somar(estimativa, "jev");
+    reserva.fechar(estimativa);
     return { ok: false, motivo: "resposta que não é JSON", ms };
   }
   const lido = Resposta.safeParse(json);
   if (!lido.success) {
-    orcamento.somar(estimativa, "jev");
+    reserva.fechar(estimativa);
     return { ok: false, motivo: `resposta fora do esquema (${camposComProblema(lido.error.issues)})`, ms };
   }
-  orcamento.somar((lido.data.usage.input_tokens / 1e6) * USD_POR_MILHAO_DE_ENTRADA, "jev");
+  reserva.fechar((lido.data.usage.input_tokens / 1e6) * USD_POR_MILHAO_DE_ENTRADA);
   const faltando = Object.keys(questions).filter((nome) => lido.data.answers[nome]?.type !== questions[nome]?.type);
   if (faltando.length > 0) return { ok: false, motivo: `sem resposta do tipo pedido para ${faltando.join(", ")}`, ms };
   return { ok: true, resposta: lido.data, ms };
@@ -187,42 +198,55 @@ export async function medirJev(frases: readonly Frase[], vocabulario: readonly s
   const semChave = (texto: string): string => texto.split(chave).join("***");
   const estado = (frase: Frase): string => `${AGENTE}\nPessoa: ${frase.texto}`;
   const modelos = new Set<string>();
-  let parouNoTeto: string | null = null;
+  const teto = { bateu: false };
   const resultado = new Map<number, PorConcorrencia>();
 
-  try {
-    for (const frase of frases.slice(0, AQUECIMENTO)) await pedir(url, chave, estado(frase), perguntas(frase.texto, vocabulario), orcamento, relogio);
-    for (const concorrencia of opcoes.concorrencias ?? CONCORRENCIAS) {
-      const r: PorConcorrencia = { passadas: [], umaPergunta: [], leituras: 0, leiturasCertas: 0, fundo: [], terminou: [], falhas: new Map() };
-      resultado.set(concorrencia, r);
-      const falhou = (motivo: string): void => void r.falhas.set(motivo, (r.falhas.get(motivo) ?? 0) + 1);
-      const trabalhar = async (): Promise<void> => {
-        for (const frase of frases) {
-          const q = perguntas(frase.texto, vocabulario);
-          const passada = await pedir(url, chave, estado(frase), q, orcamento, relogio);
-          if (passada.ok) {
-            r.passadas.push(passada.ms);
-            modelos.add(passada.resposta.model);
-            const { fundo, terminou, leitura } = passada.resposta.answers;
-            if (fundo?.type === "noul") r.fundo.push(fundo.noul);
-            if (terminou?.type === "noul") r.terminou.push(terminou.noul);
-            if (leitura?.type === "choice" && q.leitura?.type === "choice") {
-              r.leituras++;
-              if (leiturasCertas(frase, q.leitura.criteria).has(leitura.choice)) r.leiturasCertas++;
-            }
-          } else falhou(passada.motivo);
-          for (const [nome, pergunta] of Object.entries(q)) {
-            const uma = await pedir(url, chave, estado(frase), { [nome]: pergunta }, orcamento, relogio);
-            if (uma.ok) r.umaPergunta.push(uma.ms);
-            else falhou(uma.motivo);
-          }
-        }
-      };
-      await Promise.all(Array.from({ length: concorrencia }, trabalhar));
+  // Quando um pedido bate no teto, nenhum outro começa, e a tabela só sai depois que os que
+  // estavam em voo voltam: o gasto que ela mostra é o final.
+  const ateOTeto = async (trabalho: () => Promise<void>): Promise<void> => {
+    try {
+      await trabalho();
+    } catch (erro) {
+      if (!(erro instanceof Teto)) throw new Error(semChave(String(erro)));
+      teto.bateu = true;
     }
-  } catch (erro) {
-    if (!(erro instanceof Teto)) throw new Error(semChave(String(erro)));
-    parouNoTeto = `parou no teto (US$ ${orcamento.gasto.toFixed(4)} gastos na rodada) antes de terminar`;
+  };
+  await ateOTeto(async () => {
+    for (const frase of frases.slice(0, AQUECIMENTO)) await pedir(url, chave, estado(frase), perguntas(frase.texto, vocabulario), orcamento, relogio);
+  });
+  for (const concorrencia of opcoes.concorrencias ?? CONCORRENCIAS) {
+    if (teto.bateu) break;
+    const r: PorConcorrencia = { passadas: [], umaPergunta: [], leituras: 0, leiturasCertas: 0, fundo: [], terminou: [], falhas: new Map() };
+    resultado.set(concorrencia, r);
+    const falhou = (motivo: string): void => void r.falhas.set(motivo, (r.falhas.get(motivo) ?? 0) + 1);
+    const trabalhar = async (): Promise<void> => {
+      for (const frase of frases) {
+        if (teto.bateu) return;
+        const q = perguntas(frase.texto, vocabulario);
+        const passada = await pedir(url, chave, estado(frase), q, orcamento, relogio);
+        if (passada.ok) {
+          r.passadas.push(passada.ms);
+          modelos.add(passada.resposta.model);
+          const { fundo, terminou, leitura } = passada.resposta.answers;
+          if (fundo?.type === "noul") r.fundo.push(fundo.noul);
+          if (terminou?.type === "noul") r.terminou.push(terminou.noul);
+          if (leitura?.type === "choice" && q.leitura?.type === "choice") {
+            r.leituras++;
+            if (leiturasCertas(frase, q.leitura.criteria).has(leitura.choice)) r.leiturasCertas++;
+          }
+        } else falhou(passada.motivo);
+        for (const [nome, pergunta] of Object.entries(q)) {
+          if (teto.bateu) return;
+          const uma = await pedir(url, chave, estado(frase), { [nome]: pergunta }, orcamento, relogio);
+          if (uma.ok) r.umaPergunta.push(uma.ms);
+          else falhou(uma.motivo);
+        }
+      }
+    };
+    // Espera todos os trabalhadores, mesmo quando um bate no teto ou falha, antes de seguir.
+    const fim = await Promise.allSettled(Array.from({ length: concorrencia }, () => ateOTeto(trabalhar)));
+    const falha = fim.find((f) => f.status === "rejected");
+    if (falha) throw falha.reason;
   }
 
   const linhas = [
@@ -237,6 +261,6 @@ export async function medirJev(frases: readonly Frase[], vocabulario: readonly s
       return `| ${n} | ${r.passadas.length} | ${ms(percentil(r.passadas, 50))} / ${ms(percentil(r.passadas, 95))} | ${ms(percentil(r.umaPergunta, 50))} / ${ms(percentil(r.umaPergunta, 95))} | ${acerto} | ${media(r.fundo)} | ${media(r.terminou)} | ${falhas} |`;
     }),
   ];
-  if (parouNoTeto) linhas.push("", `Jev: ${parouNoTeto}.`);
+  if (teto.bateu) linhas.push("", `Jev: parou no teto (US$ ${orcamento.gasto.toFixed(4)} gastos na rodada) antes de terminar.`);
   return linhas.join("\n");
 }

@@ -49,8 +49,11 @@ function json(res: ServerResponse, status: number, corpo: unknown): void {
   res.end(JSON.stringify(corpo));
 }
 
-/** Responde certo: a leitura escolhe o primeiro termo da frase que está entre as opções. */
-function jevCerto(frases: readonly Frase[], tokens: number | ((r: Recebido) => number) = 100) {
+/**
+ * Responde certo: a leitura escolhe o primeiro termo da frase que está entre as opções. Com
+ * `errar`, as frases marcadas recebem uma opção que não é a certa.
+ */
+function jevCerto(frases: readonly Frase[], tokens: number | ((r: Recebido) => number) = 100, errar: (f: Frase) => boolean = () => false) {
   return (r: Recebido, res: ServerResponse): void => {
     const frase = frases.find((f) => r.corpo.state.endsWith(f.texto));
     const answers: Record<string, unknown> = {};
@@ -58,12 +61,17 @@ function jevCerto(frases: readonly Frase[], tokens: number | ((r: Recebido) => n
       if (q.type === "noul") answers[nome] = { type: "noul", noul: 0.9 };
       else {
         const opcoes = Object.keys(q.criteria ?? {});
-        answers[nome] = { type: "choice", choice: frase?.termos.find((t) => opcoes.includes(t)) ?? "nenhum", confidence: 0.8, probabilities: {} };
+        const certa = frase?.termos.find((t) => opcoes.includes(t)) ?? "nenhum";
+        const errada = opcoes.find((o) => o !== "nenhum" && !frase?.termos.includes(o)) ?? "nenhum";
+        answers[nome] = { type: "choice", choice: frase && errar(frase) ? errada : certa, confidence: 0.8, probabilities: {} };
       }
     }
     json(res, 200, { model: "jev-1.14.0", answers, usage: { input_tokens: typeof tokens === "number" ? tokens : tokens(r), output_tokens: 3 } });
   };
 }
+
+/** O custo de pior caso de um pedido, como a bancada estima: um token por byte do corpo. */
+const piorCaso = (r: Recebido): number => Buffer.byteLength(JSON.stringify(r.corpo));
 
 function relogioFalso(): Relogio {
   let agora = 0;
@@ -122,6 +130,14 @@ describe("medirJev", () => {
     expect(tabela).not.toContain(CHAVE);
   });
 
+  it("conta a leitura errada como errada", async () => {
+    // As frases de índice par recebem uma opção que não é a certa: 3 de 6.
+    const erradas = new Set(frases.filter((_, i) => i % 2 === 0).map((f) => f.id));
+    const s = await servidorFalso(jevCerto(frases, 100, (f) => erradas.has(f.id)));
+    const tabela = await medirJev(frases, vocabulario, new Orcamento(1), { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
+    expect(tabela).toMatch(/\| 1 \| 6 \| 50 \/ 50 \| 50 \/ 50 \| 3\/6 \(50%\) \|/);
+  });
+
   it("resposta recusada, fora do esquema, ou sem a pergunta pedida conta como falha, com o motivo", async () => {
     let n = 0;
     const s = await servidorFalso((r, res) => {
@@ -153,6 +169,41 @@ describe("medirJev", () => {
     expect(orcamento.gasto + custoDoMaior).toBeGreaterThan(teto - custoDoMaior);
     expect(tabela).toContain(`Jev: parou no teto (US$ ${orcamento.gasto.toFixed(4)} gastos na rodada) antes de terminar.`);
     expect(tabela).toContain(`Gasto do Jev: US$ ${orcamento.gasto.toFixed(6)}`);
+  });
+
+  it("com 3 chamadas simultâneas, o teto não estoura, e a tabela só sai depois que todas voltam", async () => {
+    // O servidor demora para responder: as 3 chamadas ficam em voo ao mesmo tempo.
+    const s = await servidorFalso((r, res) => void setTimeout(() => jevCerto(frases, piorCaso)(r, res), 15));
+    // O aquecimento cabe, e a fase de 3 bate no teto no meio, uns 10 pedidos depois.
+    const corpo = (f: Frase) => ({ model: "jev-latest", state: `Agente: Em que posso ajudar?\nPessoa: ${f.texto}`, questions: perguntas(f.texto, vocabulario) });
+    const passadas = frases.slice(0, 3).map((f) => Buffer.byteLength(JSON.stringify(corpo(f))));
+    const teto = (passadas.reduce((a, b) => a + b, 0) + 10.5 * (passadas[0] ?? 0)) * 0.042e-6;
+    const orcamento = new Orcamento(teto);
+    const tabela = await medirJev(frases, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [3] });
+    const pedidos = s.recebidos.length;
+    const gasto = orcamento.gasto;
+    expect(pedidos).toBeGreaterThan(3 + 3);
+    expect(pedidos).toBeLessThan(3 + 3 * 6 * 4);
+    expect(tabela).toContain("| 3 |");
+    expect(tabela).toContain("Jev: parou no teto");
+    // Nada passa do teto, nem o que estava em voo.
+    expect(gasto).toBeLessThanOrEqual(teto);
+    // Depois que a tabela sai, nenhum pedido novo chega e o gasto não muda.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(s.recebidos.length).toBe(pedidos);
+    expect(orcamento.gasto).toBe(gasto);
+    expect(tabela).toContain(`Gasto do Jev: US$ ${gasto.toFixed(6)}`);
+  });
+
+  it("a reserva de cada pedido volta quando a resposta chega: o teto conta o gasto real, e não a soma das estimativas", async () => {
+    // Cada pedido custa 10 tokens; o teto cabe 3 estimativas de pior caso (um token por byte), mas não as 27.
+    const s = await servidorFalso(jevCerto(frases, 10));
+    const maior = Math.max(...frases.map((f) => Buffer.byteLength(JSON.stringify({ model: "jev-latest", state: `Agente: Em que posso ajudar?\nPessoa: ${f.texto}`, questions: perguntas(f.texto, vocabulario) }))));
+    const orcamento = new Orcamento(3 * maior * 0.042e-6);
+    const tabela = await medirJev(frases, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
+    expect(s.recebidos).toHaveLength(3 + 6 * 4);
+    expect(tabela).not.toContain("parou no teto");
+    expect(orcamento.gasto).toBeCloseTo((27 * 10 * 0.042) / 1e6, 12);
   });
 
   it("sem a chave não mede e não pede nada", async () => {

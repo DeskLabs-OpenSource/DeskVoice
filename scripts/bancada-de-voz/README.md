@@ -17,7 +17,10 @@ parte, fora do repositório. `zod` e `ws` vêm de `packages/voice-engine`, que j
 - **Chave.** Vem do ambiente, numa variável própria da bancada (`BANCADA_*_API_KEY`, e
   `JEV_API_KEY` para o Jev), entregue pelo cofre do Paperclip. Nunca em arquivo, tarefa ou
   comentário. Os serviços externos trocam o valor da chave por `***` em todo erro, e um teste
-  (`servicos/externos.test.ts`, "a chave não sai") prova que nada do que escrevem a contém.
+  (`servicos/externos.test.ts`, "a chave não sai") prova que nada do que escrevem a contém. Além
+  disso, toda linha que a rodada escreve passa por `semAsChaves` (`rodada.ts`), que troca o valor
+  de qualquer variável `*_API_KEY` do ambiente por `***`, e `rodada.test.ts` prova que a saída da
+  rodada, com as quatro chaves no ambiente, não contém nenhuma.
 
 O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medida.
 
@@ -33,7 +36,9 @@ O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medi
 | `voz.ts` | voz sintética (Piper) e conversa de fundo; licença de cada voz no cabeçalho |
 | `ruido.ts` | obra e música geradas, com semente fixa ("Áudio de teste" do desenho da DESA-24) |
 | `audio.ts` | WAV, trecho da fala e mistura pela relação voz/ruído sobre o RMS |
-| `orcamento.ts` | o teto: a bancada para antes de passar dele |
+| `orcamento.ts` | o teto: quem vai gastar reserva o pior caso antes do pedido, e a reserva conta até virar o valor real; assim nem pedidos simultâneos passam do teto (`orcamento.test.ts`) |
+| `rodada.ts` | a rodada: argumentos, serviços com chave, o teto por item (pior caso por minuto), o gasto por serviço, o "não medido" e a saída sem chave. Testada com peças falsas em `rodada.test.ts` |
+| `medir.ts` | só liga a rodada às peças de verdade (descoberta dos serviços, áudio sintético, envio em tempo real) |
 | `servicos/*.ts` | um arquivo por serviço medido, descoberto pela pasta |
 | `servicos/deepgram.ts`, `assemblyai.ts`, `soniox.ts` | os externos em streaming, direto pelo WebSocket, sem SDK. Fonte, data, português em streaming, vocabulário e preço no cabeçalho de cada um |
 | `servicos/_externo.ts` | o que os externos têm em comum: conexão, leitura por zod, fechamento com prazo, chave fora de todo erro |

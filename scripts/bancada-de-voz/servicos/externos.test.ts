@@ -288,4 +288,26 @@ describe("a chave não sai", () => {
     expect(visto.length).toBeGreaterThan(10);
     for (const texto of [...visto, ...escrito]) expect(texto).not.toContain(CHAVE);
   });
+
+  it("a conexão que nem abre (porta fechada) cai pelo caminho de erro, com o prefixo do serviço e sem a chave", async () => {
+    // Uma porta que acabou de fechar: a conexão é recusada no TCP, antes de qualquer HTTP.
+    const livre = new ws.WebSocketServer({ port: 0, host: "127.0.0.1" });
+    await once(livre, "listening");
+    const porta = (livre.address() as AddressInfo).port;
+    await new Promise((resolve) => livre.close(resolve));
+    const escrito: string[] = [];
+    const guardar = (pedaco: string | Uint8Array): boolean => (escrito.push(String(pedaco)), true);
+    vi.spyOn(process.stdout, "write").mockImplementation(guardar);
+    vi.spyOn(process.stderr, "write").mockImplementation(guardar);
+    const visto: string[] = [];
+    for (const [id, criar] of [["deepgram", criarDeepgram], ["assemblyai", criarAssemblyAI], ["soniox", criarSoniox]] as const) {
+      // A chave também vai no endereço, para que um erro que repita o endereço a mostre.
+      const falha = await criar({ url: `ws://127.0.0.1:${porta}/${CHAVE}`, chave: () => CHAVE }).abrir({ idioma: "pt-BR", vocabulario: [] }, "estreita", coletor(), relogioFalso()).catch((e: Error) => e);
+      expect(falha).toBeInstanceOf(Error);
+      expect((falha as Error).message).toMatch(new RegExp(`^${id}: erro ao abrir \\(`));
+      visto.push(String(falha), (falha as Error).stack ?? "");
+    }
+    vi.restoreAllMocks();
+    for (const texto of [...visto, ...escrito]) expect(texto).not.toContain(CHAVE);
+  });
 });

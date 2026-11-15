@@ -7,20 +7,22 @@
  *
  * O áudio é gerado numa pasta temporária fora do repositório, e o resultado bruto (com o texto
  * transcrito) fica lá. A saída na tela é só a tabela agregada e o gasto.
+ *
+ * Este arquivo só liga as peças de verdade (serviços, áudio, envio em tempo real) à rodada, que
+ * está em `rodada.ts` e tem teste: o teto, o gasto por serviço, o serviço sem chave e a saída sem
+ * chave.
  */
 import { readdir, writeFile } from "node:fs/promises";
-import { cpus } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { misturar, paraPcm16, regiaoDaFala } from "./audio";
-import { carregarConjunto, vocabularioDoConjunto, type Frase } from "./conjunto";
+import type { Frase } from "./conjunto";
 import { medirJev } from "./decisores/jev";
 import { medirLaya } from "./decisores/laya";
-import { LINHAS, passarPelaLinha, type Linha } from "./linhas";
-import { medirFrase, tabelaEmMarkdown, tabelar, type ResultadoBruto } from "./metricas";
-import { REGRA_DE_NORMALIZACAO } from "./normalizacao";
-import { Orcamento } from "./orcamento";
-import { NIVEIS_DB, TIPOS_DE_RUIDO, musica, obra, sorteio, type TipoDeRuido } from "./ruido";
+import { passarPelaLinha, type Linha } from "./linhas";
+import { medirFrase, type ResultadoBruto } from "./metricas";
+import { NIVEIS_DB, TIPOS_DE_RUIDO, musica, obra, sorteio } from "./ruido";
+import { rodada, semAsChaves, type Item, type PecasDaRodada } from "./rodada";
 import { ehServicoMedido, type ServicoMedido } from "./servicos/tipos";
 import { LIMITE_FORA_DO_RITMO_MS, enviarEmTempoReal, relogioDoSistema, type Relogio } from "./tempo-real";
 import { TAXA_LARGA, VOZES, VOZ_PADRAO, conversaDeFundo, pastaTemporaria, sintetizar, vozPorId } from "./voz";
@@ -32,28 +34,6 @@ const DEPOIS_S = 3;
 const ESPERA_FINAL_MS = 8000;
 /** Sem final novo por este tempo, depois do fim da fala, a frase está fechada. */
 const QUIETO_MS = 1000;
-
-const print = (linha = ""): void => void process.stdout.write(`${linha}\n`);
-
-interface Item {
-  frase: Frase;
-  voz: string;
-  ruido: { tipo: TipoDeRuido; snrDb: number; snrMedidoDb: number } | null;
-  pcm16k: Buffer;
-  falaInicioMs: number;
-  falaFimMs: number;
-  duracaoS: number;
-}
-
-function argumento(nome: string): string | undefined {
-  const i = process.argv.indexOf(`--${nome}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
-}
-
-function lista(nome: string, padrao: readonly string[]): string[] {
-  const valor = argumento(nome);
-  return valor ? valor.split(",").map((s) => s.trim()).filter(Boolean) : [...padrao];
-}
 
 async function descobrirServicos(): Promise<ServicoMedido[]> {
   const pasta = fileURLToPath(new URL("./servicos", import.meta.url));
@@ -158,105 +138,19 @@ async function medirItem(servico: ServicoMedido, linha: Linha, comVocabulario: b
   };
 }
 
-async function main(): Promise<void> {
-  const tetoTexto = argumento("teto-usd");
-  if (tetoTexto === undefined) throw new Error("--teto-usd é obrigatório (0 para medir só o que não custa)");
-  const orcamento = new Orcamento(Number(tetoTexto));
-  const conjunto = carregarConjunto();
-  const limite = Number(argumento("limite") ?? Infinity);
-  const casos = argumento("casos")?.split(",");
-  const frases = conjunto.frases.filter((f) => !casos || f.casos.some((c) => casos.includes(c))).slice(0, limite);
-  const vocabulario = vocabularioDoConjunto(conjunto);
-  const linhas = lista("linhas", LINHAS) as Linha[];
-  const modos = lista("vocabulario", ["com", "sem"]).map((m) => m === "com");
-  const relogio = relogioDoSistema;
-  const pasta = await pastaTemporaria();
-  const naoMedido: string[] = [];
+const pecas: PecasDaRodada = {
+  descobrirServicos,
+  montarItens,
+  medirItem: (servico, linha, comVocabulario, vocabulario, item) => medirItem(servico, linha, comVocabulario, vocabulario, item, relogioDoSistema),
+  pastaTemporaria,
+  escrever: (caminho, conteudo) => writeFile(caminho, conteudo),
+  medirLaya,
+  medirJev: (frases, vocabulario, orcamento) => medirJev(frases, vocabulario, orcamento),
+  saida: (linha) => void process.stdout.write(`${linha}\n`),
+  progresso: (texto) => void process.stderr.write(texto),
+};
 
-  print(`# Bancada de voz — ${new Date().toISOString()}`);
-  print(`Máquina: ${cpus().length} vCPU (${cpus()[0]?.model ?? "?"}). Regra de normalização: ${REGRA_DE_NORMALIZACAO}. Teto: US$ ${orcamento.tetoUsd}.`);
-  print(`Pasta temporária (áudio e resultado bruto, fora do repositório): ${pasta}`);
-
-  const resultados: ResultadoBruto[] = [];
-  const pedidos = lista("servicos", []);
-  const pedidosOuTodos = (await descobrirServicos()).filter((s) => pedidos.length === 0 || pedidos.includes(s.id));
-  // O serviço sem chave (ou sem binário) não roda, e a tabela diz por quê. Sem nenhum que rode, nem o áudio é gerado.
-  const servicos = pedidosOuTodos.filter((s) => {
-    const motivo = s.indisponivel();
-    if (motivo) naoMedido.push(`${s.id}: ${motivo}`);
-    return !motivo;
-  });
-  if (servicos.length > 0) {
-    const itens = await montarItens(frases, pasta);
-    print(`Frases: ${frases.length}; casos gerados (frase × voz × ruído): ${itens.length}; vocabulário: ${vocabulario.length} termos.`);
-    let parou = false;
-    for (const servico of servicos) {
-      await servico.preparar?.();
-      print(`\n${servico.rotulo} — ${servico.modelo}`);
-      for (const linha of linhas) {
-        if (!servico.entrega(linha)) {
-          naoMedido.push(`${servico.id}, linha ${linha}: o serviço, como está escrito, não recebe esta linha`);
-          continue;
-        }
-        for (const comVocabulario of modos) {
-          for (const [n, item] of itens.entries()) {
-            const estimativa = (item.duracaoS / 60) * (servico.preco.tetoUsdPorMinuto ?? servico.preco.usdPorMinuto);
-            if (!orcamento.cabe(estimativa)) {
-              naoMedido.push(`${servico.id}, linha ${linha}, vocabulário ${comVocabulario ? "com" : "sem"}: parou no teto (US$ ${orcamento.gasto.toFixed(4)} gastos) antes do caso ${n + 1} de ${itens.length}`);
-              parou = true;
-              break;
-            }
-            const resultado = await medirItem(servico, linha, comVocabulario, vocabulario, item, relogio);
-            orcamento.somar(resultado.custoUsd, servico.id);
-            resultados.push(resultado);
-            process.stderr.write(`\r  ${linha} ${comVocabulario ? "com" : "sem"} vocabulário: ${n + 1}/${itens.length}   `);
-          }
-          process.stderr.write("\n");
-          if (parou) break;
-        }
-        if (parou) break;
-      }
-      await servico.encerrar?.();
-      if (parou) break;
-    }
-    await writeFile(join(pasta, "resultados.json"), JSON.stringify(resultados, null, 2));
-    print("\n## Transcrição\n");
-    print(tabelaEmMarkdown(tabelar(resultados)));
-    const fora = resultados.filter((r) => r.foraDoRitmo);
-    const pior = (f: (r: ResultadoBruto) => number): number => Math.round(Math.max(0, ...resultados.map(f)));
-    print(
-      `\nRitmo do envio (limite ${LIMITE_FORA_DO_RITMO_MS} ms): ${fora.length} de ${resultados.length} itens fora do ritmo, tirados das latências. ` +
-        `Pior atraso: envio inteiro ${pior((r) => r.envio.atrasoMs)} ms, um pedaço ${pior((r) => r.envio.atrasoMaxPedacoMs)} ms, espera do final ${pior((r) => r.envio.atrasoMaxEsperaMs)} ms.`,
-    );
-    for (const r of fora) print(`- ${r.servico} ${r.linha} ${r.vocabulario ? "com" : "sem"} vocabulário, ${r.fraseId}, voz ${r.voz}${r.ruido ? `, ${r.ruido.tipo} ${r.ruido.snrDb} dB` : ""}: envio ${Math.round(r.envio.atrasoMs)} ms, pedaço ${Math.round(r.envio.atrasoMaxPedacoMs)} ms, espera ${Math.round(r.envio.atrasoMaxEsperaMs)} ms (áudio entregue ${Math.round(r.envio.duracaoMs)} ms).`);
-    const snr = new Map<string, number[]>();
-    for (const i of itens) if (i.ruido) snr.set(`${i.ruido.tipo} ${i.ruido.snrDb} dB`, [...(snr.get(`${i.ruido.tipo} ${i.ruido.snrDb} dB`) ?? []), i.ruido.snrMedidoDb]);
-    if (snr.size > 0) {
-      print("\nRelação voz/ruído medida sobre o RMS do trecho da fala (pedido: mínimo a máximo medido):");
-      const dB = (x: number): string => (Math.abs(x) < 0.005 ? 0 : x).toFixed(2);
-      for (const [k, v] of snr) print(`- ${k}: ${dB(Math.min(...v))} a ${dB(Math.max(...v))} dB`);
-    }
-  }
-
-  const decisores = lista("decisor", []);
-  if (decisores.includes("laya")) {
-    print("\n## Laya (só CPU e latência, perguntas fixas)\n");
-    print(await medirLaya(frases, vocabulario));
-  }
-  if (decisores.includes("jev")) {
-    print("\n## Jev (acerto da leitura e latência, as mesmas perguntas do Laya)\n");
-    print(await medirJev(frases, vocabulario, orcamento));
-  }
-
-  print(`\nGasto: US$ ${orcamento.gasto.toFixed(4)} de US$ ${orcamento.tetoUsd}.`);
-  for (const [servico, gasto] of orcamento.porServico()) print(`- ${servico}: US$ ${gasto.toFixed(4)}`);
-  if (naoMedido.length > 0) {
-    print("\n## Não medido\n");
-    for (const linha of naoMedido) print(`- ${linha}`);
-  }
-}
-
-main().catch((erro: unknown) => {
-  process.stderr.write(`${erro instanceof Error ? erro.stack ?? erro.message : String(erro)}\n`);
+rodada(process.argv.slice(2), pecas).catch((erro: unknown) => {
+  process.stderr.write(`${semAsChaves(erro instanceof Error ? erro.stack ?? erro.message : String(erro))}\n`);
   process.exit(1);
 });
