@@ -3,7 +3,7 @@ import { z } from "zod";
 import { openTestDbs } from "../../core/test/helpers";
 import { createFixture, eventsOf, t0, type FakeContext } from "../test/helpers";
 import { defineTool } from "./define-tool";
-import { MAX_AGENDA_MARCAR_PER_CALL, MAX_CALL_WEBHOOK_PER_CALL, MAX_CREATE_TASK_PER_CALL, MAX_NOTIFY_HUMAN_PER_CALL, runTool } from "./run-tool";
+import { MAX_AGENDA_MARCAR_PER_CALL, MAX_AGENDA_REMARCAR_PER_CALL, MAX_CALL_WEBHOOK_PER_CALL, MAX_CREATE_TASK_PER_CALL, MAX_NOTIFY_HUMAN_PER_CALL, runTool } from "./run-tool";
 import endCall from "./tools/end_call";
 
 const { app, owner } = openTestDbs();
@@ -187,5 +187,58 @@ describe("runTool", () => {
     for (let i = 0; i < allowed + 3; i += 1) results.push(await runTool(fake, {}, own));
     expect(results.map((result) => result.ok)).toEqual([false, false, false, ...Array<boolean>(allowed).fill(true)]);
     expect((await runTool(fake, {}, own)).message).toContain(`limite de ${allowed} chamadas a call_webhook`);
+  });
+
+  it("soma os sucessos que o banco já tem às chamadas em paralelo, mesmo depois de a memória esquecer a ligação", async () => {
+    const own = await createFixture(app, "run-tool-gravados");
+    const allowed = MAX_AGENDA_REMARCAR_PER_CALL;
+    const total = 3;
+    let runs = 0;
+    let parallelRuns = 0;
+    const refused: Array<{ ok: boolean; message: string }> = [];
+    let allDecided: () => void = () => undefined;
+    const decided = new Promise<void>((resolve) => (allDecided = resolve));
+    const checkDecided = (): void => {
+      if (parallelRuns + refused.length === total) allDecided();
+    };
+    let gate: Promise<void> = Promise.resolve();
+    const fake = defineTool({
+      name: "agenda_remarcar",
+      description: "Ferramenta de teste, com o teto de produção",
+      inputSchema: z.object({}),
+      async run() {
+        runs += 1;
+        if (runs >= allowed) {
+          parallelRuns += 1;
+          checkDecided();
+        }
+        await gate;
+        return { ok: true, message: "remarcado" };
+      },
+    });
+
+    for (let i = 0; i < allowed - 1; i += 1) expect((await runTool(fake, {}, own)).ok).toBe(true);
+    // Um minuto parado: a memória poda a entrada, e o que veio antes só o banco sabe.
+    own.advance(60_000);
+
+    let openGate: () => void = () => undefined;
+    gate = new Promise<void>((resolve) => (openGate = resolve));
+    const pending = Array.from({ length: total }, () =>
+      runTool(fake, {}, own).then((result) => {
+        if (parallelRuns + refused.length < total) {
+          refused.push(result);
+          checkDecided();
+        }
+        return result;
+      }),
+    );
+    await decided;
+    openGate();
+    const all = await Promise.all(pending);
+
+    expect(parallelRuns).toBe(1);
+    expect(refused).toHaveLength(2);
+    for (const result of refused) expect(result).toMatchObject({ ok: false, message: expect.stringContaining(`limite de ${allowed} chamadas a agenda_remarcar`) });
+    expect(all.filter((result) => result.ok)).toHaveLength(1);
   });
 });

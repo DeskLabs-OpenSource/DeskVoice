@@ -35,46 +35,51 @@ export const MAX_SUCCESSFUL_CALLS_PER_CALL: Readonly<Record<string, number>> = {
 };
 
 /**
- * Vagas tomadas neste processo, por ligação e ferramenta: as que estão em curso e as que já
- * concluíram com sucesso.
+ * O que este processo sabe de cada ferramenta com teto, por ligação: quantas concluíram com
+ * sucesso e quantas estão em curso.
  *
  * O modelo pede ferramentas em paralelo, e o `tool_result` só é gravado depois que a ferramenta
- * retorna: contar apenas o banco, ou somar só depois do sucesso, deixaria todas as chamadas de um
- * mesmo turno passarem juntas pelo mesmo limite. Por isso a vaga é tomada antes de a ferramenta
- * rodar e devolvida se ela não concluir. A poda é por tempo porque a ligação não avisa quando
- * termina, e nunca leva uma entrada com chamada em curso.
+ * retorna: contar pelo banco, ou somar só depois do sucesso, deixaria todas as chamadas de um mesmo
+ * turno passarem juntas pelo mesmo limite. Por isso a vaga é tomada antes de a ferramenta rodar e
+ * devolvida se ela não concluir.
+ *
+ * O banco é lido uma vez, quando a entrada nasce, para trazer o que a ligação já fez antes dela.
+ * Depois a conta é só da memória: um sucesso entra em `succeeded` no mesmo instante em que sai de
+ * `running`, e somar a leitura do banco a cada chamada contaria duas vezes ou nenhuma, conforme a
+ * leitura visse ou não o `tool_result` que acabou de ser gravado. A poda é por tempo porque a
+ * ligação não avisa quando termina, e nunca leva uma entrada com chamada em curso: quando a entrada
+ * renasce, o último `tool_result` está gravado há um minuto e a leitura do banco é completa.
  */
-const slots = new Map<string, { taken: number; running: number; at: number }>();
+const slots = new Map<string, { succeeded: number; running: number; at: number }>();
 const FORGET_AFTER_MS = 60_000;
-
-function slotKey(ctx: ToolContext, name: string): string {
-  return JSON.stringify([ctx.callId, name]);
-}
 
 /**
  * Toma uma vaga de `name` nesta ligação e devolve como fechá-la (o sucesso a mantém, o resto a
- * devolve), ou `null` se o teto já foi alcançado. Entre ler o banco e tomar a vaga não há `await`:
- * duas chamadas paralelas nunca leem o mesmo número livre.
+ * devolve), ou `null` se o teto já foi alcançado. Entre conferir e tomar a vaga não há `await`:
+ * duas chamadas paralelas nunca veem a mesma vaga livre.
  */
 async function takeSlot(ctx: ToolContext, name: string, budget: number): Promise<((succeeded: boolean) => void) | null> {
-  const recorded = await ctx.q.one<{ count: string }>(
-    "select count(*) as count from call_events where call_id = $1 and kind = 'tool_result' and payload->>'name' = $2 and payload->>'ok' = 'true'",
-    [ctx.callId, name],
-  );
   const now = ctx.clock.now().getTime();
   for (const [key, entry] of slots) {
     if (entry.running === 0 && now - entry.at >= FORGET_AFTER_MS) slots.delete(key);
   }
-  const key = slotKey(ctx, name);
-  const entry = slots.get(key) ?? { taken: 0, running: 0, at: now };
-  if (Math.max(Number(recorded?.count ?? 0), entry.taken) >= budget) return null;
-  entry.taken += 1;
+  const key = JSON.stringify([ctx.callId, name]);
+  let entry = slots.get(key);
+  if (entry === undefined) {
+    const recorded = await ctx.q.one<{ count: string }>(
+      "select count(*) as count from call_events where call_id = $1 and kind = 'tool_result' and payload->>'name' = $2 and payload->>'ok' = 'true'",
+      [ctx.callId, name],
+    );
+    // Outra chamada paralela pode ter criado a entrada durante a leitura: vale a dela.
+    entry = slots.get(key) ?? { succeeded: Number(recorded?.count ?? 0), running: 0, at: now };
+    slots.set(key, entry);
+  }
+  if (entry.succeeded + entry.running >= budget) return null;
   entry.running += 1;
   entry.at = now;
-  slots.set(key, entry);
   return (succeeded) => {
     entry.running -= 1;
-    if (!succeeded) entry.taken -= 1;
+    if (succeeded) entry.succeeded += 1;
     entry.at = ctx.clock.now().getTime();
   };
 }
@@ -94,6 +99,7 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
 
   let result: ToolResult;
   let error: string | undefined;
+  let release: ((succeeded: boolean) => void) | undefined;
   const parsed = tool.inputSchema.safeParse(rawArgs);
   if (!parsed.success) {
     const problems = parsed.error.issues.map((issue) => `${issue.path.join(".") || "argumentos"}: ${issue.message}`).join("; ");
@@ -101,20 +107,15 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
   } else {
     const budget = MAX_SUCCESSFUL_CALLS_PER_CALL[tool.name];
     try {
-      const release = budget === undefined ? undefined : await takeSlot(ctx, tool.name, budget);
-      if (release === null) {
+      const slot = budget === undefined ? undefined : await takeSlot(ctx, tool.name, budget);
+      if (slot === null) {
         result = {
           ok: false,
           message: `Nada foi feito: nesta ligação o limite de ${budget} chamadas a ${tool.name} já foi alcançado, e este pedido não foi registrado. Diga a quem está na linha, com naturalidade, que por esta ligação não dá para registrar mais nada desse tipo, que o que foi registrado antes continua valendo, e que, se precisar, a pessoa pode ligar de novo ou aguardar o retorno da equipe. Não diga que este pedido foi tratado.`,
         };
       } else {
-        let succeeded = false;
-        try {
-          result = await tool.run(parsed.data, ctx);
-          succeeded = result.ok;
-        } finally {
-          release?.(succeeded);
-        }
+        release = slot;
+        result = await tool.run(parsed.data, ctx);
       }
     } catch (cause) {
       // O motivo fica no evento, para o operador; o modelo recebe só o que pode dizer em voz alta.
@@ -123,6 +124,11 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
     }
   }
 
-  await recordEvent(ctx.q, ctx.callId, "tool_result", { name: tool.name, ok: result.ok, message: result.message, ...(error !== undefined && { error }) }, ctx.clock.now());
+  try {
+    await recordEvent(ctx.q, ctx.callId, "tool_result", { name: tool.name, ok: result.ok, message: result.message, ...(error !== undefined && { error }) }, ctx.clock.now());
+  } finally {
+    // A vaga só fecha com o desfecho gravado: a entrada nunca é podada antes de o banco saber dele.
+    release?.(result.ok);
+  }
   return result;
 }
