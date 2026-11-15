@@ -8,4 +8,4 @@ Na tela da linha, em modo por IP, há dois campos novos: outros endereços de on
 
 ## Requer atenção
 
-Uma linha por IP cujo endereço do servidor seja um bloco mais largo que /16 (IPv4) ou /32 (IPv6) passa a ficar de fora da configuração depois da atualização, e deixa de receber ligações. A tela da linha mostra a linha com falha e o motivo. Para voltar a receber, cadastre na tela da linha os blocos menores que a operadora publica, ou o IP dela.
+Antes de atualizar, confira em Linha telefônica se alguma linha por IP usa como endereço do servidor um bloco mais largo que /16 (IPv4) ou /32 (IPv6). A atualização não é recusada nem pede nada, mas essa linha passa a ficar de fora da configuração e deixa de receber ligações. A tela da linha mostra a linha com falha e o motivo. Para voltar a receber, cadastre na tela da linha os blocos menores que a operadora publica, ou o IP dela.
