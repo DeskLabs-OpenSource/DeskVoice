@@ -72,7 +72,7 @@ Nenhum recurso exige SSH para ser ligado.
 |---|---|
 | Uma VPS Ubuntu 22.04 ou mais nova (Debian 12+, AlmaLinux 9+ e Rocky Linux 9+ também são aceitos; o que foi provado em cada um está em [`install/README.md`](install/README.md#sistemas-aceitos)) | A [VPS da HostGator](https://www.hostgator.com.br/52708-141-3-52.html), parceira do projeto, é a recomendada. Qualquer VPS com Docker serve, pelo mesmo comando. Sobre memória, só o que foi medido: a instalação foi provada numa VPS de 8 GB e 4 vCPU, e o DeskVoice parado usa cerca de 380 MiB de memória e ocupa cerca de 2,7 GB de disco (medidos na 0.3.0, sem o WhatsApp). O menor tamanho em que a instalação cabe ainda não foi medido. As imagens publicadas são para processador x86_64 (amd64); em ARM a instalação constrói na própria máquina, com `--build` ([por quê](docs/decisions/0013-imagens-so-amd64.md)) |
 | Um domínio apontado para a VPS | Opcional para testar. Sem domínio não há HTTPS: o painel fica só dentro da VPS e você entra por túnel SSH (o instalador mostra o comando) |
-| Um tronco SIP com um número | Contratado com a operadora de telefonia de sua escolha. Autenticação por registro ou por IP |
+| Um tronco SIP com um número | Contratado com a operadora de telefonia de sua escolha. Autenticação por registro ou por IP; por IP, com um ou mais endereços ou blocos numéricos da operadora, até /16 no IPv4 e /32 no IPv6 |
 | Uma chave de IA de voz | Gemini (Google) ou OpenAI. Você paga o uso direto ao provedor |
 
 O passo a passo completo, do zero à primeira chamada, está em
@@ -314,7 +314,7 @@ O DeskVoice foi criado por Rafael Melgaço ([@melgarafael](https://www.youtube.c
 segurança de [webtecnica](https://github.com/webtecnica) estão nas versões publicadas, e desde a 0.6.0 também os direitos de
 quem ligou (prazo de guarda e exportação), de webtecnica, e o custo da OpenAI conferido contra a
 fatura, a despedida antes de desligar e a gravação das chamadas, de
-[aliffstefano](https://github.com/aliffstefano). A 0.8.0 traz o desfecho da ligação e o aviso de fim de ligação no WhatsApp, de webtecnica, e a 0.9.0, também de webtecnica, as teclas do menu automático, a transferência não atendida, a gravação que para a pedido e o apagamento a pedido de quem ligou, e a 0.10.0, também de webtecnica, a transcrição da gravação, e a 0.11.0, também de webtecnica, o prazo de guarda que alcança o resumo da chamada, o custo exato da leitura do desfecho e o desfecho num provedor compatível com OpenAI. O DeskcommCRM, de onde vem a fábrica de contribuição
+[aliffstefano](https://github.com/aliffstefano). A 0.8.0 traz o desfecho da ligação e o aviso de fim de ligação no WhatsApp, de webtecnica, e a 0.9.0, também de webtecnica, as teclas do menu automático, a transferência não atendida, a gravação que para a pedido e o apagamento a pedido de quem ligou, e a 0.10.0, também de webtecnica, a transcrição da gravação, e a 0.11.0, também de webtecnica, o prazo de guarda que alcança o resumo da chamada, o custo exato da leitura do desfecho e o desfecho num provedor compatível com OpenAI, o aviso de custo e a falha da transcrição na tela, a linha por IP com vários blocos e os guias de implantação para clínicas e para a mesma VPS do CRM. O DeskcommCRM, de onde vem a fábrica de contribuição
 usada aqui, recebeu PRs de mais de 250 pessoas.
 
 Crédito é regra, não cortesia: quem contribui mantém a autoria do commit e tem o nome nas notas
