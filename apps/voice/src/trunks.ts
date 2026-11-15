@@ -16,7 +16,7 @@ import { decryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core"
 import { trunkEndpointName, type AriClient } from "./ari";
 import { messageOf, type Logger } from "./log";
 import { realSchedule, type Schedule } from "./transport";
-import { hostsOverlap, parseTrunkHost, type TrunkHost } from "./trunk-host";
+import { hostsOverlap, isBlockTooWide, parseTrunkHost, type TrunkHost } from "./trunk-host";
 
 export const DEFAULT_TRUNKS_FILE = "/asterisk-generated/pjsip_trunks.conf";
 
@@ -31,6 +31,16 @@ export interface TrunkConfig {
   publicIp: string | null;
   /** De quem é a linha: endereço repetido só é tolerado dentro da mesma organização. */
   organizationId: string;
+  /**
+   * Mais endereços de onde as ligações chegam, além do `host` (modo `ip`): a operadora que entrega
+   * por vários blocos, um por região. Vazio na linha que sempre teve um endereço só.
+   */
+  matchExtra?: string[];
+  /**
+   * Destino das ligações de saída, quando difere do `host` (modo `ip`). Nome ou IP: é saída, não
+   * entra no `identify`.
+   */
+  outboundHost?: string | null;
 }
 
 export type TrunkHealth = { id: string; status: "ok" | "warn" | "fail"; detail: string };
@@ -61,6 +71,21 @@ export function trunkProblem(trunk: TrunkConfig): string | null {
   }
   if (trunk.authMode === "register" && (!trunk.username || !trunk.password)) return "a line that registers needs user and password";
   if (trunk.authMode === "register" && host.uri === null) return "a line that registers needs the address of one server, not an address block";
+  if (trunk.authMode === "ip" && host.kind === "name") return NAME_IN_IP_MODE_REASON;
+  if (trunk.authMode === "ip" && isBlockTooWide(host)) return BLOCK_TOO_WIDE_REASON;
+  const extras = trunk.matchExtra ?? [];
+  if (trunk.authMode !== "ip" && (extras.length > 0 || trunk.outboundHost != null)) return EXTRA_ONLY_IN_IP_MODE_REASON;
+  for (const [index, extra] of extras.entries()) {
+    const parsed = parseTrunkHost(extra);
+    if (!parsed) return extraAddressReason(index + 1);
+    if (parsed.kind === "name") return extraNameReason(index + 1);
+    if (isBlockTooWide(parsed)) return extraTooWideReason(index + 1);
+  }
+  if (trunk.outboundHost != null) {
+    const outbound = parseTrunkHost(trunk.outboundHost);
+    if (!outbound) return "the outbound address is not a server name, an IP address or an address block";
+    if (outbound.uri === null) return OUTBOUND_BLOCK_REASON;
+  }
   return null;
 }
 
@@ -73,7 +98,7 @@ const value = (text: string): string => text.replaceAll(";", "\\;");
  * leva o IP privado do contêiner e há provedor que derruba a ligação) e `ulaw`/`alaw`, que casam
  * com o AudioSocket sem transcodificar.
  */
-function renderTrunk(trunk: TrunkConfig, host: TrunkHost, identify: boolean): string {
+function renderTrunk(trunk: TrunkConfig, inbound: Inbound, identify: boolean): string {
   const name = trunkEndpointName(trunk.id);
   const withAuth = trunk.username !== null && trunk.password !== null;
   const publicIp = trunk.publicIp !== null && IPV4.test(trunk.publicIp) ? trunk.publicIp : null;
@@ -95,14 +120,19 @@ function renderTrunk(trunk: TrunkConfig, host: TrunkHost, identify: boolean): st
     "",
     `[${name}]`,
     "type=aor",
-    // Bloco de endereços não é destino: a linha só recebe.
-    ...(host.uri === null ? [] : [`contact=sip:${host.uri}`]),
+    // Bloco de endereços não é destino: a linha só recebe. Um `outbound_host` dá destino à linha
+    // que recebe por bloco (a Twilio recebe por /30 e atende pelo nome da conta).
+    ...(inbound.destination === null ? [] : [`contact=sip:${inbound.destination.uri}`]),
     "qualify_frequency=30",
   ];
-  // O `identify` casa a chamada recebida pelo endereço de origem. Só sai para endereço numérico
+  // O `identify` casa a chamada recebida pelo endereço de origem. Só sai com endereço numérico
   // (nome resolve para endereços que mudam) e só para a linha que é dona dele: com o endereço
-  // repetido, o Asterisk entregaria a chamada de uma organização ao tronco de outra.
-  if (identify && host.kind === "address") lines.push("", `[${name}-identify]`, "type=identify", `endpoint=${name}`, `match=${host.match}`);
+  // repetido, o Asterisk entregaria a chamada de uma organização ao tronco de outra. Uma linha
+  // pode ter vários blocos: cada um vira uma linha `match=` do mesmo `identify`.
+  if (identify && inbound.matches.length > 0) {
+    lines.push("", `[${name}-identify]`, "type=identify", `endpoint=${name}`);
+    for (const match of inbound.matches) lines.push(`match=${match}`);
+  }
   if (withAuth) {
     lines.push("", `[${name}-auth]`, "type=auth", "auth_type=userpass", `username=${value(trunk.username ?? "")}`, `password=${value(trunk.password ?? "")}`);
   }
@@ -113,8 +143,8 @@ function renderTrunk(trunk: TrunkConfig, host: TrunkHost, identify: boolean): st
       "type=registration",
       "transport=transport-udp",
       `outbound_auth=${name}-auth`,
-      `server_uri=sip:${host.uri}`,
-      `client_uri=sip:${value(trunk.username ?? "")}@${host.uri}`,
+      `server_uri=sip:${inbound.host.uri}`,
+      `client_uri=sip:${value(trunk.username ?? "")}@${inbound.host.uri}`,
       // O Asterisk põe um parâmetro `line` único no Contact do registro e casa a chamada recebida
       // com este endpoint por ele: é o que separa duas contas na mesma operadora.
       "line=yes",
@@ -130,12 +160,54 @@ export const SHARED_HOST_REASON =
   "this provider address is already used by another line of this installation, and a line recognized only by its address cannot share it; change this line to registration (user and password) to fix it";
 export const NAME_IN_IP_MODE_REASON =
   "a line recognized by IP needs the numeric address of the provider (an IP or an address block), not a name; with a name, change this line to registration (user and password)";
+export const BLOCK_TOO_WIDE_REASON =
+  "a line recognized by IP accepts an address block of at most /16 (IPv4) or /32 (IPv6); enter the smaller blocks the provider publishes, or its IP";
+export const OUTBOUND_BLOCK_REASON = "the outbound address must be one server (a name or an IP), not an address block";
+export const EXTRA_ONLY_IN_IP_MODE_REASON =
+  "extra inbound addresses and an outbound address belong to a line recognized by IP; with registration the provider finds the line by the user and password";
+/** A posição diz qual item recusar sem repetir a lista inteira. */
+export const extraAddressReason = (position: number): string => `the extra inbound address ${position} is not an IP address or an address block`;
+export const extraNameReason = (position: number): string =>
+  `the extra inbound address ${position} is a name; inbound addresses must be numeric (an IP or an address block), and a provider name goes in the outbound address`;
+export const extraTooWideReason = (position: number): string => `the extra inbound address ${position} is a block wider than /16 (IPv4) or /32 (IPv6); enter the smaller blocks the provider publishes`;
+
+interface Inbound {
+  /** O `host` da linha, como foi lido: manda no registro e no destino padrão. */
+  host: TrunkHost;
+  /** Blocos canônicos e sem repetição: cada um vira uma linha `match=` do `identify`. */
+  matches: string[];
+  /** Os mesmos endereços como faixas, para a comparação de sobreposição. */
+  hosts: TrunkHost[];
+  /** Destino da ligação de saída; `null` quando a linha só recebe. */
+  destination: TrunkHost | null;
+}
+
+/**
+ * De onde as ligações entram e para onde as de saída vão: o `host`, os `match_extra` e o
+ * `outbound_host`. Só endereço numérico entra no `identify`; o nome de uma linha por registro fica
+ * de fora dele, e `trunkProblem` já recusou nome e bloco largo demais na linha por IP.
+ */
+function readInbound(trunk: TrunkConfig, host: TrunkHost): Inbound {
+  const matches: string[] = [];
+  const hosts: TrunkHost[] = [];
+  for (const value of [trunk.host, ...(trunk.matchExtra ?? [])]) {
+    const parsed = parseTrunkHost(value);
+    if (parsed?.kind !== "address") continue;
+    hosts.push(parsed);
+    if (!matches.includes(parsed.match)) matches.push(parsed.match);
+  }
+  const destination = parseTrunkHost(trunk.outboundHost ?? trunk.host);
+  return { host, matches, hosts, destination: destination !== null && destination.uri !== null ? destination : null };
+}
+
+const overlap = (a: Inbound, b: Inbound): boolean => a.hosts.some((mine) => b.hosts.some((theirs) => hostsOverlap(mine, theirs)));
 
 /**
  * O arquivo inteiro. Tronco que não pode ser escrito fica de fora, com o motivo em `skipped`.
  *
  * As linhas válidas de endereço numérico são agrupadas por sobreposição de endereço (ver o
- * comentário no topo do arquivo):
+ * comentário no topo do arquivo), item por item: uma linha com vários blocos pertence a todos os
+ * grupos que algum deles toca.
  *   - grupo de uma organização só: o `identify` vai para uma linha, a de menor `id`; as outras em
  *     modo `ip` ficam de fora (é configuração repetida da própria organização);
  *   - grupo com mais de uma organização: nenhum `identify`, e nenhuma linha em modo `ip`.
@@ -144,12 +216,12 @@ export const NAME_IN_IP_MODE_REASON =
  */
 export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
   const skipped: Array<{ id: string; reason: string }> = [];
-  const valid: Array<{ trunk: TrunkConfig; host: TrunkHost; group: number }> = [];
+  const valid: Array<{ trunk: TrunkConfig; inbound: Inbound; group: number }> = [];
   for (const trunk of [...trunks].sort((a, b) => a.id.localeCompare(b.id))) {
     const host = parseTrunkHost(trunk.host);
-    const reason = trunkProblem(trunk) ?? (trunk.authMode === "ip" && host?.kind === "name" ? NAME_IN_IP_MODE_REASON : null);
-    if (reason || !host) skipped.push({ id: trunk.id, reason: reason ?? "the host cannot be read" });
-    else valid.push({ trunk, host, group: valid.length });
+    const reason = trunkProblem(trunk);
+    if (reason !== null || !host) skipped.push({ id: trunk.id, reason: reason ?? "the host cannot be read" });
+    else valid.push({ trunk, inbound: readInbound(trunk, host), group: valid.length });
   }
 
   // Sobreposição não é transitiva (um bloco liga dois endereços que não se tocam): os grupos são
@@ -158,7 +230,7 @@ export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped
     merged = false;
     for (const a of valid) {
       for (const b of valid) {
-        if (a.group !== b.group && hostsOverlap(a.host, b.host)) {
+        if (a.group !== b.group && overlap(a.inbound, b.inbound)) {
           const from = Math.max(a.group, b.group);
           const to = Math.min(a.group, b.group);
           for (const entry of valid) if (entry.group === from) entry.group = to;
@@ -177,7 +249,7 @@ export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped
     const identify = oneOrganization && group[0] === entry;
     if (!identify && entry.trunk.authMode === "ip") skipped.push({ id: entry.trunk.id, reason: SHARED_HOST_REASON });
     else {
-      sections.push(renderTrunk(entry.trunk, entry.host, identify));
+      sections.push(renderTrunk(entry.trunk, entry.inbound, identify));
       emitted.push(entry.trunk.id);
     }
   }
@@ -265,8 +337,18 @@ async function setStatus(deps: TrunksDeps, updates: TrunkHealth[]): Promise<void
  */
 export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean; detail: string; skipped: Array<{ id: string; reason: string }> }> {
   const rows = await withSystem(deps.db, (q) =>
-    q.many<{ id: string; organization_id: string; host: string; username: string | null; secret_enc: string | null; auth_mode: "register" | "ip"; public_ip: unknown }>(
-      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode,
+    q.many<{
+      id: string;
+      organization_id: string;
+      host: string;
+      username: string | null;
+      secret_enc: string | null;
+      auth_mode: "register" | "ip";
+      match_extra: string[] | null;
+      outbound_host: string | null;
+      public_ip: unknown;
+    }>(
+      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host,
               (select s.value from settings s where s.organization_id = t.organization_id and s.key = 'network.public_ip') as public_ip
          from trunks t order by t.id`,
     ),
@@ -282,6 +364,8 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
         username: row.username?.trim() || null,
         password: row.secret_enc ? decryptSecret(row.secret_enc, deps.secretKey) : null,
         authMode: row.auth_mode,
+        matchExtra: (row.match_extra ?? []).map((extra) => extra.trim()).filter((extra) => extra !== ""),
+        outboundHost: row.outbound_host?.trim() || null,
         publicIp: typeof row.public_ip === "string" ? row.public_ip : deps.publicIp,
       });
     } catch (error) {

@@ -95,6 +95,9 @@ const common = {
     connector_replace_required: "Já existe um conector de WhatsApp configurado. Confirme a substituição para conectar.",
     invalid_numbers: "Estes números não foram reconhecidos como telefone. Nenhum foi adicionado:",
     number_already_registered: "Este número já está cadastrado.",
+    trunk_inbound_name:
+      "Na linha reconhecida por IP, o endereço do servidor e os outros endereços de entrada aceitam só IP ou bloco, não nome. O nome do provedor vai no endereço para as ligações de saída; para reconhecer a linha pelo nome, use usuário e senha.",
+    trunk_block_too_wide: "Na linha reconhecida por IP, cada bloco pode ir até /16 no IPv4 ou /32 no IPv6. Cadastre os blocos menores que a operadora publica, ou o IP dela.",
     last_owner: "Esta é a única pessoa com papel de dono ativa. Torne outra pessoa dona antes.",
     cannot_manage_owner: "Só um dono pode convidar, alterar, desativar ou remover outro dono.",
     has_history: "Esta pessoa já decidiu aprovações ou fechou pendências, e o histórico precisa continuar dizendo quem decidiu e quem fechou. Desative a conta em vez de remover.",

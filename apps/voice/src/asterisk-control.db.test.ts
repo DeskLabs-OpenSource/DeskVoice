@@ -29,7 +29,7 @@ import {
   type FakeAri,
 } from "./testing/db";
 import { waitFor } from "./testing/helpers";
-import { applyTrunks, checkTrunks, type TrunksDeps } from "./trunks";
+import { applyTrunks, BLOCK_TOO_WIDE_REASON, checkTrunks, extraNameReason, type TrunksDeps } from "./trunks";
 import { createSimulatedEngine } from "@deskvoice/voice-engine";
 
 const { app, owner } = openTestDbs();
@@ -80,6 +80,37 @@ describe("troncos", { timeout: 120_000 }, () => {
     expect(conf).not.toContain(evil);
     expect(await trunkRow(evil)).toMatchObject({ status: "fail", last_error: expect.stringContaining("left out") });
     expect((await trunkRow(good))?.status).toBe("unverified");
+  });
+
+  it("escreve todos os blocos de uma linha; nome na entrada e bloco largo demais ficam de fora com o motivo", async () => {
+    const organizationId = await createOrganization(app, "trunks-blocks");
+    const options = { username: null, password: null, authMode: "ip" as const };
+    const blocks = ["54.171.127.192/30", "35.156.191.128/30"];
+    const twilio = await createTrunk(app, organizationId, { ...options, host: blocks[0] ?? "", matchExtra: [blocks[1] ?? ""], outboundHost: "conta.pstn.twilio.com" });
+    // Linhas gravadas antes da recusa na tela: o arquivo não as escreve, e a tela da linha mostra o motivo.
+    const named = await createTrunk(app, organizationId, { ...options, host: "54.65.63.192/30", matchExtra: ["blocos.operadora.example"] });
+    const wide = await createTrunk(app, organizationId, { ...options, host: "10.0.0.0/8" });
+
+    const file = path.join(scratch, "blocks", "pjsip_trunks.conf");
+    const ari = fakeAri();
+    ari.loadsFile = file;
+    const result = await applyTrunks(trunksDeps(ari, file));
+    // O banco é o mesmo do arquivo inteiro: as linhas de outros casos não importam aqui, só as três.
+    expect(result.applied).toBe(true);
+    expect(result.skipped.filter((entry) => [twilio, named, wide].includes(entry.id))).toEqual([
+      { id: named, reason: extraNameReason(1) },
+      { id: wide, reason: BLOCK_TOO_WIDE_REASON },
+    ].sort((a, b) => a.id.localeCompare(b.id)));
+
+    const conf = await readFile(file, "utf8");
+    expect(conf).toContain("match=54.171.127.192/30\nmatch=35.156.191.128/30\n");
+    expect(conf).toContain("contact=sip:conta.pstn.twilio.com\n");
+    expect(conf).toContain(`[trunk-${twilio}-identify]`);
+    expect(conf).not.toContain(named);
+    expect(conf).not.toContain(wide);
+    expect(conf).not.toContain("10.0.0.0/8");
+    expect(await trunkRow(wide)).toMatchObject({ status: "fail", last_error: `This line was left out of the telephony configuration: ${BLOCK_TOO_WIDE_REASON}.` });
+    expect(await trunkRow(named)).toMatchObject({ status: "fail", last_error: expect.stringContaining(extraNameReason(1)) });
   });
 
   it("endereço repetido: entre organizações ninguém em modo ip é emitido; dentro da mesma organização, só o de menor id; e nada de estado ao lado do arquivo", async () => {
