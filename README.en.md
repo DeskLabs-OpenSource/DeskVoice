@@ -75,7 +75,7 @@ agent. No feature requires SSH to be turned on.
 |---|---|
 | A VPS running Ubuntu 22.04 or newer (Debian 12+, AlmaLinux 9+ and Rocky Linux 9+ are also accepted. AlmaLinux 9 was installed on 12/11/2026 with the Docker service started by hand; the installer now starts it on its own, not yet run on a real machine. Rocky Linux 9 has not been proven) | The [HostGator VPS](https://www.hostgator.com.br/52708-141-3-52.html), the project's partner, is the recommended one. Any VPS with Docker works, with the same command. On memory, only what was measured: the install was proven on a VPS with 8 GB and 4 vCPU, and DeskVoice at rest uses about 380 MiB of memory and takes about 2.7 GB of disk (measured on 0.3.0, without WhatsApp). The smallest size the install fits in has not been measured yet. The published images are for x86_64 (amd64) processors; on ARM the install builds on the machine itself, with `--build` ([why](docs/decisions/0013-imagens-so-amd64.md)) |
 | A domain pointing to the VPS | Optional for testing. Without a domain there is no HTTPS: the panel stays inside the VPS and you reach it through an SSH tunnel (the installer shows the command) |
-| A SIP trunk with a number | From the telephony carrier of your choice. Authentication by registration or by IP |
+| A SIP trunk with a number | From the telephony carrier of your choice. Authentication by registration or by IP; by IP, with one or more numeric addresses or blocks from the carrier, up to /16 on IPv4 and /32 on IPv6 |
 | A voice AI key | Gemini (Google) or OpenAI. You pay the provider directly |
 
 ### Installing with an AI assistant
@@ -308,7 +308,7 @@ and is built in public, with the community. There are already outside contributi
 and security work from [webtecnica](https://github.com/webtecnica) are in the published releases, and since 0.6.0 so are
 the rights of callers (retention period and export), from webtecnica, and the OpenAI cost checked
 against the invoice, the farewell before hanging up and call recording, from
-[aliffstefano](https://github.com/aliffstefano). Release 0.8.0 brings the call outcome and the end-of-call WhatsApp notice, from webtecnica, and 0.9.0, also from webtecnica, brings automated-menu keys, unanswered transfers, recording that stops on request and erasure at the caller's request, and 0.10.0, also from webtecnica, brings transcription of the recording, and 0.11.0, also from webtecnica, brings the retention period reaching the call summary, the exact cost of reading the outcome and the outcome on an OpenAI-compatible provider. DeskcommCRM, where the contribution workflow used
+[aliffstefano](https://github.com/aliffstefano). Release 0.8.0 brings the call outcome and the end-of-call WhatsApp notice, from webtecnica, and 0.9.0, also from webtecnica, brings automated-menu keys, unanswered transfers, recording that stops on request and erasure at the caller's request, and 0.10.0, also from webtecnica, brings transcription of the recording, and 0.11.0, also from webtecnica, brings the retention period reaching the call summary, the exact cost of reading the outcome and the outcome on an OpenAI-compatible provider, the transcription cost notice and failure on screen, and the IP line with several blocks. DeskcommCRM, where the contribution workflow used
 here comes from, has received PRs from more than 250 people.
 
 Credit is a rule, not a courtesy: contributors keep authorship of their commits and are named
