@@ -75,8 +75,36 @@ describe("settings: destino da classificação", () => {
     expect(decryptSecret((await storedOf(org))?.apiKey ?? "", SECRET_KEY)).toBe("sk-nova");
 
     // Tirar o endpoint e deixar só o modelo apaga a chave do endpoint: sem endpoint, vale a do motor.
-    expect((await set(cookie, TARGET, { model: "gpt-5-mini" })).status).toBe(200);
-    expect(await storedOf(org)).toEqual({ model: "gpt-5-mini" });
+    expect((await set(cookie, TARGET, { model: "gpt-5-nano" })).status).toBe(200);
+    expect(await storedOf(org)).toEqual({ model: "gpt-5-nano" });
+  });
+
+  it("modelo sem endpoint que a tabela de preço do motor tem continua aceito", async () => {
+    const { org, cookie } = await owner("modelo com preço");
+    expect((await set(cookie, TARGET, { model: "gpt-5-nano" })).status).toBe(200);
+    expect(await storedOf(org)).toEqual({ model: "gpt-5-nano" });
+    expect(await viewOf(cookie)).toMatchObject({ baseUrl: null, classifyModel: "gpt-5-nano" });
+  });
+
+  it("modelo sem endpoint fora da tabela de preço é recusado: o provedor do motor cobraria sem medir", async () => {
+    const { org, cookie } = await owner("modelo sem preço");
+    expect(refusal(await set(cookie, TARGET, { model: "gpt-5-mini" }))).toEqual([400, "classify_model_unmeasured"]);
+    expect(await storedOf(org)).toBeUndefined();
+
+    // Com endpoint, quem cobra é o provedor do endpoint, e o modelo dele não precisa estar na tabela.
+    expect((await set(cookie, TARGET, { baseUrl: "https://api.deepseek.com/v1", model: "gpt-5-mini", apiKey: "sk-do-endpoint" })).status).toBe(200);
+  });
+
+  it("configuração gravada antes da regra continua na tela; salvá-la de novo pede o endpoint", async () => {
+    const { org, cookie } = await owner("configuração anterior");
+    // Linha posta no banco por fora do painel, como a de quem configurou antes desta regra existir.
+    await withOrg(panel.app, org, (q) =>
+      q.exec("insert into settings (organization_id, key, value, secret) values ($1, $2, $3::jsonb, true)", [org, TARGET, JSON.stringify({ model: "deepseek-chat" })]),
+    );
+    // O que está gravado não se perde nem muda de valor: a tela continua mostrando o modelo.
+    expect(await viewOf(cookie)).toMatchObject({ baseUrl: null, classifyModel: "deepseek-chat" });
+    expect(refusal(await set(cookie, TARGET, { model: "deepseek-chat" }))).toEqual([400, "classify_model_unmeasured"]);
+    expect(await storedOf(org)).toEqual({ model: "deepseek-chat" });
   });
 
   it("chave sem endpoint é recusada: ela pertence a um endereço", async () => {

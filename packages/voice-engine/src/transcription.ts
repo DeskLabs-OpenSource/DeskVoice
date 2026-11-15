@@ -18,7 +18,22 @@ export interface RecordingSides {
   sideBytes: number;
 }
 
+/** O WAV do gravador: 44 bytes de cabeçalho e 4 por quadro (PCM16 estéreo); cada lado sai com 44 e 2. */
 const HEADER_BYTES = 44;
+/** A taxa que o gravador usa, para dizer a duração antes de ler o arquivo. */
+const RECORDER_SAMPLE_RATE = 8000;
+
+/**
+ * O tamanho de cada lado e a duração, só pelo tamanho do arquivo do gravador: dá para recusar a
+ * gravação que não cabe num pedido do provedor sem carregá-la na memória. `null` quando o arquivo
+ * não passa do cabeçalho. A conta exata vem depois, de `splitRecording`, para o WAV fora do formato
+ * canônico do gravador.
+ */
+export function recordingSideEstimate(fileBytes: number): { sideBytes: number; seconds: number } | null {
+  if (fileBytes <= HEADER_BYTES) return null;
+  const frames = Math.floor((fileBytes - HEADER_BYTES) / 4);
+  return { sideBytes: HEADER_BYTES + frames * 2, seconds: frames / RECORDER_SAMPLE_RATE };
+}
 
 function monoWavHeader(dataBytes: number, sampleRate: number): Buffer {
   const header = Buffer.alloc(HEADER_BYTES);

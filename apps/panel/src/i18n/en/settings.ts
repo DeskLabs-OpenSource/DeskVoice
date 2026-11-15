@@ -39,7 +39,7 @@ const settings: SettingsDictionary = {
   classifyKeyHint: "Sent only to the endpoint above. When the endpoint changes, enter the key again.",
   classifyKeyKeep: "Leave empty to keep the saved key",
   classifyModel: "Classification model",
-  classifyModelHint: "The name the provider publishes, for example deepseek-chat. Empty means the engine's model.",
+  classifyModelHint: "The name the provider publishes, for example deepseek-chat. Empty means the engine's model. Without an endpoint only a model whose price the project knows is accepted; for another model, enter the endpoint.",
   classifyTargetSave: "Save destination",
   keyResults: {
     accepted: "accepted, with access to the model {model}. The test does not check credit: it only reads the model's details, at no cost.",
@@ -69,6 +69,9 @@ const settings: SettingsDictionary = {
   transcriptionSwitch: "Allow transcribing recordings",
   transcriptionCost: "Each transcription is a paid request to the provider of the agent's engine, with its key. The amount goes into the call cost and the agent's cost ceiling; a call that already reached the ceiling is not transcribed. Only owners and admins can ask.",
   transcriptionData: "When on, the recorded audio of the call is sent to the AI provider of the agent's engine to become text. A call erased at the caller's request, or past the transcript retention period, gets no text.",
+  autoTranscriptionSwitch: "Transcribe every call without text on its own",
+  autoTranscriptionCost: "When on, every recorded call that ends with no speech in its timeline has the recording transcribed on its own, before the summary and the outcome, without anyone pressing the button. Each call transcribed this way is a paid request to the provider of the agent's engine: the amount goes into the call cost and the agent's cost ceiling. A call whose conversation was already transcribed during the call is not transcribed again.",
+  autoTranscriptionNeedsManual: "To turn this on, first allow transcribing recordings.",
   whatsappTitle: "External WhatsApp connector",
   whatsappLead: "An alternative to the number connected by QR code: the agent sends messages and notices through a system of yours. With no connected number and no connector, it says on the call that it could not send.",
   connectorIsWaha: "Sending goes through a WhatsApp number connected by QR code. To use an external connector, an owner or admin disconnects the number first.",

@@ -2,16 +2,12 @@ import { readFile, stat } from "node:fs/promises";
 import { TRANSCRIPT_RETENTION_SETTING, decryptSecret, enqueueTask, lockCall, recordEvent, recordingPath, transcriptRetentionOf, type OrgQuery } from "@deskvoice/core";
 // Pelo caminho do arquivo: o índice do pacote carrega a descoberta por pasta, que não existe no Next.
 import { MICROCENTS_PER_CENT } from "@deskvoice/voice-engine/pricing";
-import { splitRecording } from "@deskvoice/voice-engine/transcription";
+import { recordingSideEstimate, splitRecording } from "@deskvoice/voice-engine/transcription";
 import { TRANSCRIPTION_SETTING, transcriptionEnabledOf, type RecordingTranscriber, type TranscribeResult } from "@deskvoice/voice-engine/types";
 import { ApiError, handle, notFound } from "../../../../../../server/context";
 import { engineKeySetting, listEngines } from "../../../../../../server/pieces";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** O WAV do gravador: 44 bytes de cabeçalho e 4 por quadro (PCM16 estéreo); cada lado sai com 44 e 2. */
-const RECORDER_HEADER_BYTES = 44;
-/** A taxa que o gravador usa, para dizer em minutos o limite do provedor antes de ler o arquivo. */
-const RECORDER_SAMPLE_RATE = 8000;
 
 /**
  * A recusa por gravação maior que um pedido do provedor, com a duração que o arquivo tem: a mesma
@@ -182,16 +178,12 @@ export const POST = handle(
     }
 
     const recording = recordingPath(deps.recordingsDir, q.organizationId, callId);
-    // O tamanho basta para saber que a gravação não cabe num pedido do provedor: `splitRecording`
-    // devolve `44 + 2 bytes por quadro` para cada lado, e o arquivo tem `44 + 4` por quadro. Medir
-    // antes do `readFile` evita carregar na memória uma gravação que vai ser recusada.
+    // O tamanho basta para saber que a gravação não cabe num pedido do provedor. Medir antes do
+    // `readFile` evita carregar na memória uma gravação que vai ser recusada.
     const fileBytes = await stat(recording).then((info) => info.size).catch(() => null);
     if (fileBytes === null) throw new ApiError(404, "transcription_no_recording", "This call has no recording.");
-    if (fileBytes > RECORDER_HEADER_BYTES) {
-      const frames = Math.floor((fileBytes - RECORDER_HEADER_BYTES) / 4);
-      const estimate = RECORDER_HEADER_BYTES + frames * 2;
-      if (estimate > transcriber.maxAudioBytes) throw tooLong(transcriber, estimate, frames / RECORDER_SAMPLE_RATE);
-    }
+    const estimate = recordingSideEstimate(fileBytes);
+    if (estimate && estimate.sideBytes > transcriber.maxAudioBytes) throw tooLong(transcriber, estimate.sideBytes, estimate.seconds);
     const wav = await readFile(recording).catch(() => null);
     if (!wav) throw new ApiError(404, "transcription_no_recording", "This call has no recording.");
     const sides = splitRecording(new Uint8Array(wav));

@@ -80,6 +80,7 @@ const common: CommonDictionary = {
     token_required: "Al cambiar la dirección o el tipo del conector, escribe el token de nuevo.",
     endpoint_required: "La clave de la clasificación pertenece a un endpoint: escribe también el endpoint.",
     endpoint_key_required: "Al cambiar el endpoint de la clasificación, escribe su clave de nuevo.",
+    classify_model_unmeasured: "El modelo de la clasificación sin endpoint iría al proveedor del motor, que cobra por él, y el proyecto no conoce el precio de ese modelo. Escribe el endpoint del proveedor, o deja el modelo en blanco para usar el modelo del motor, que tiene precio medido.",
     whatsapp_unavailable: "Este servidor todavía no tiene la clave del servicio de WhatsApp. Ejecuta bash install/update.sh en el servidor, una vez.",
     whatsapp_service_absent: "El servicio de WhatsApp no está en marcha en este servidor. Instala el servicio antes de conectar un número.",
     whatsapp_service_down: "El servicio de WhatsApp de este servidor no respondió. Intenta de nuevo en un momento; si continúa, ejecuta la verificación de salud en el servidor.",

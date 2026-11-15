@@ -233,16 +233,17 @@ describe("classify_call_outcome", () => {
     expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano", authorization: CHAVE_DO_MOTOR }]);
   });
 
-  it("só o modelo, sem endpoint: OpenAI com a chave do motor e o modelo escolhido", async () => {
+  it("só o modelo, sem endpoint e fora da tabela de preços: volta ao modelo do motor, com a chave do motor", async () => {
     const { org, callId } = await comAgente("desfecho só modelo");
     await comChave(org);
+    // Gravado por fora do painel, que recusa modelo sem endpoint e sem preço conhecido.
     await comDestino(org, { modelo: "gpt-5-mini" });
     await fala(org, callId, "Pode marcar quinta às dez, por favor.");
 
     const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
     await roda(org, callId, fetch);
 
-    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-mini", authorization: CHAVE_DO_MOTOR }]);
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano", authorization: CHAVE_DO_MOTOR }]);
   });
 
   it.each([

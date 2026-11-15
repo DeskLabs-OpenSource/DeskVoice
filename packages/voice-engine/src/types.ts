@@ -291,6 +291,15 @@ export interface VoiceEngine {
    */
   classifyTarget?: boolean;
   /**
+   * O preço, por milhão de tokens, que este motor cobra por um modelo de classificação — quando o
+   * projeto o conhece. É o que autoriza gravar um modelo **sem** endpoint: sem endpoint o pedido vai
+   * ao próprio provedor do motor, que cobra, e o custo só é medido se o preço do modelo estiver
+   * aqui. O painel recusa ao salvar o modelo fora daqui, e o motor, na hora do pedido, troca o
+   * modelo gravado por fora pelo modelo de tabela (o medido). Modelo com endpoint não precisa disto:
+   * quem cobra é o provedor do endpoint.
+   */
+  classifyPricing?(model: string): EnginePricing | undefined;
+  /**
    * Verdadeiro para motor cujo `classifyOutcome` atende `analyze` e devolve a análise da ligação.
    * Motor sem a declaração não analisa, e a rotina registra o motivo na linha do tempo.
    */
@@ -336,6 +345,15 @@ export const TRANSCRIPTION_SETTING = "calls.transcription_enabled";
 export const transcriptionEnabledOf = (stored: unknown): boolean => stored === true;
 
 /**
+ * Transcrever sozinho, ao fim da chamada, a gravação que terminou sem fala nenhuma (chave
+ * `calls.auto_transcription_enabled`). Ausente é desligada, de fábrica: cada chamada sem texto vira
+ * um pedido pago ao provedor, sem ninguém pedir. Só vale com `calls.transcription_enabled` também
+ * ligada, que é a licença para o áudio sair para o provedor. Só `true` liga.
+ */
+export const AUTO_TRANSCRIPTION_SETTING = "calls.auto_transcription_enabled";
+export const autoTranscriptionEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
  * Endpoint, modelo e chave da **classificação**, por motor, juntos numa configuração só
  * (`engine.<id>.classify_target` em `settings`).
  *
@@ -347,7 +365,9 @@ export const transcriptionEnabledOf = (stored: unknown): boolean => stored === t
  * Ausentes valem o padrão do motor, que é o de hoje: OpenAI em `https://api.openai.com/v1`, com
  * `gpt-5-nano` e a chave do motor. Com endpoint, a chave é a dele (`apiKey`, cifrada), dada a esse
  * endereço: a chave do motor nunca vai a um endpoint configurado, e trocar o endpoint pede a chave
- * de novo. Só o modelo, sem endpoint, continua na OpenAI com a chave do motor.
+ * de novo. Só o modelo, sem endpoint, continua na OpenAI com a chave do motor — e só se o motor
+ * souber o preço dele (`classifyPricing`): o painel recusa gravar outro, e o motor usa o modelo de
+ * tabela quando um já gravado cai fora dela, para não cobrar sem medir.
  */
 export const engineClassifyTargetSetting = (engineId: string): string => `engine.${engineId}.classify_target`;
 

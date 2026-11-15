@@ -301,7 +301,7 @@ describe("settings", () => {
     expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: 12 });
   });
 
-  it.each(["calls.outcome_enabled", "calls.analysis_enabled"])("keeps %s off until an owner or admin turns it on, and an operator cannot", async (key) => {
+  it.each(["calls.outcome_enabled", "calls.analysis_enabled", "calls.auto_transcription_enabled"])("keeps %s off until an owner or admin turns it on, and an operator cannot", async (key) => {
     const params = { key };
     const put = (value: unknown, cookie = owner) => call(putSetting, { method: "PUT", cookie, params, body: { value } });
     expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: false });
