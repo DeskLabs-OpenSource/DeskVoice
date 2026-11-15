@@ -10,15 +10,11 @@ import { fill } from "../i18n/locales";
 import ptBR from "../i18n/pt-BR/common";
 import { useDict } from "../i18n/provider";
 import { useApi } from "./api";
+import { useCanConfigure } from "./me";
+import { updateNotice, type UpdateStatus } from "./update-notice";
 
 /** O agente do servidor confere as tags a cada 10 minutos: perguntar mais rápido repete a resposta. */
 const REFRESH_MS = 600_000;
-
-/** Só o que a lateral usa. O resto da resposta da rota não tem por que ser copiado aqui. */
-interface UpdateStatus {
-  running: { version: string; updatable: boolean };
-  published: { ok: true; latest: string | null; newer: Array<{ version: string }> } | { ok: false };
-}
 
 /**
  * Versão em execução e, quando há, a atualização esperando — na lateral, ao lado do estado do
@@ -34,12 +30,16 @@ interface UpdateStatus {
  * mostra a versão sem link: a tela de atualização recusa trocar o que não foi publicado, e prometer
  * o que a tela nega seria pior que não avisar.
  *
+ * O destaque é só de quem pode atualizar (dono e administrador); os outros papéis veem a versão
+ * em execução, sem o chamado para uma ação que a tela recusaria.
+ *
  * `showVersion: false` é para onde o espaço é curto (o cabeçalho do celular): ali aparece só o
  * aviso, e só quando existe.
  */
 export function UpdateIndicator({ showVersion = true }: { showVersion?: boolean }) {
   const t = useDict(ptBR, en, es).shell;
   const pathname = usePathname();
+  const canUpdate = useCanConfigure();
   const { data, reload } = useApi<UpdateStatus>("/system/update");
   useEffect(() => {
     const timer = setInterval(reload, REFRESH_MS);
@@ -50,16 +50,16 @@ export function UpdateIndicator({ showVersion = true }: { showVersion?: boolean 
   // da tela que ninguém abriu para ler sobre versão.
   if (!data) return null;
 
-  const newer = data.published.ok && data.running.updatable && data.published.newer.length > 0;
-  if (!newer && !showVersion) return null;
-  const version = newer && data.published.ok ? data.published.latest : data.running.version;
-  if (!version) return null;
+  const notice = updateNotice(data, canUpdate, showVersion);
+  if (!notice) return null;
+  const { version, newer } = notice;
+  const label = fill(newer ? t.updateAvailable : t.versionShort, { version });
 
   return (
     <Link
       href="/settings/system"
       aria-current={pathname === "/settings/system" ? "page" : undefined}
-      title={newer ? t.updateAvailable : t.versionShort}
+      title={label}
       className={`flex h-9 min-w-0 items-center gap-2 rounded-xs px-2 text-[0.87rem] hover:bg-sunken hover:text-ink aria-[current=page]:bg-sunken aria-[current=page]:text-ink ${newer ? "font-medium text-accent" : "text-muted"}`}
     >
       {newer ? (
@@ -67,7 +67,7 @@ export function UpdateIndicator({ showVersion = true }: { showVersion?: boolean 
       ) : (
         <span className="size-2 shrink-0 rounded-full bg-line-strong" aria-hidden />
       )}
-      <span className="truncate">{fill(newer ? t.updateAvailable : t.versionShort, { version })}</span>
+      <span className="truncate">{label}</span>
     </Link>
   );
 }
