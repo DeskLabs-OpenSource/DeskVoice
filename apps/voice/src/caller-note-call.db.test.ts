@@ -19,7 +19,7 @@ afterAll(async () => {
   await owner.close();
 });
 
-const NOTE = "Prefere ser atendida de manhã; o pedido é o 4471.";
+const NOTE = "Prefere ser atendida de manhã; o pedido é o PED-4471-Q.";
 const CALLER = "+5531999990043";
 
 async function scene(label: string, tools: string[]) {
@@ -49,7 +49,7 @@ describe("remember_caller_note numa ligação", { timeout: 120_000 }, () => {
     expect(result).toMatchObject({ ok: true });
     expect(await notesOf(organizationId)).toEqual([{ call_id: callId, caller_e164: CALLER, text: NOTE }]);
     expect(events.find((event) => event.kind === "tool_called")?.payload).toEqual({ name: "remember_caller_note", args: { omitted: "personal_text" } });
-    expect(JSON.stringify(events)).not.toMatch(/manhã|4471/);
+    expect(JSON.stringify(events)).not.toMatch(/manhã|PED-4471-Q/);
   });
 
   it("com a ferramenta fora da lista do agente: não a oferece, recusa, não grava, e o tool_called também não leva o texto", async () => {
@@ -59,6 +59,6 @@ describe("remember_caller_note numa ligação", { timeout: 120_000 }, () => {
     expect(result).toMatchObject({ ok: false });
     expect(await notesOf(organizationId)).toEqual([]);
     expect(events.find((event) => event.kind === "tool_called")?.payload).toEqual({ name: "remember_caller_note", args: { omitted: "personal_text" } });
-    expect(JSON.stringify(events)).not.toMatch(/manhã|4471/);
+    expect(JSON.stringify(events)).not.toMatch(/manhã|PED-4471-Q/);
   });
 });
