@@ -605,6 +605,31 @@ image_repo() {  # image_repo <panel|voice|routines> → o nome sem a etiqueta
 image_ref() {  # image_ref <panel|voice|routines> <versão> → o nome completo, igual ao do Compose
   printf '%s:%s\n' "$(image_repo "$1")" "$2"
 }
+# published_arm64 <versão> → 0: o índice publicado da versão lista arm64; 1: o registro respondeu e
+# não lista (versão de antes da 0017, ou sem imagem); 2: não deu para perguntar (sem curl, sem rede).
+# Pergunta como o `docker pull` pergunta: token anônimo de leitura e o índice da etiqueta. Basta o
+# painel: o publish-image.yml etiqueta as três juntas, e o verify-public confere as duas
+# arquiteturas em cada uma antes da release.
+# ponytail: o caminho do token é o do ghcr.io, o único registro em que o workflow publica.
+published_arm64() {
+  local repo host path token reply
+  have curl || return 2
+  repo="$(image_repo panel)"; host="${repo%%/*}"; path="${repo#*/}"
+  token="$(curl -fsS --max-time 10 "https://$host/token?scope=repository:$path:pull" 2>/dev/null | sed -n 's/.*"token" *: *"\([^"]*\)".*/\1/p')" || return 2
+  [ -n "$token" ] || return 2
+  reply="$(curl -sS --max-time 10 -w '\n%{http_code}' -H "Authorization: Bearer $token" \
+    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+    "https://$host/v2/$path/manifests/$1" 2>/dev/null)" || return 2
+  case "${reply##*$'\n'}" in
+    200) printf '%s\n' "$reply" | grep -Eq '"architecture"[[:space:]]*:[[:space:]]*"arm64"' && return 0; return 1 ;;
+    404) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+# A frase de quando a versão não tem imagem ARM: a mesma no instalador e no atualizador.
+no_arm64_image() {  # no_arm64_image <versão> <arquitetura>
+  printf 'A versão %s do DeskVoice não tem imagem publicada para processador ARM (%s): as imagens ARM existem a partir da primeira versão publicada com elas.\n' "$1" "$2"
+}
 
 # A versão publicada mais recente é a maior tag final do clone. O Compose e o kit vêm do mesmo
 # repositório, e a tag só nasce no CI, de um commit da main. Pré-versão não conta: só entra com

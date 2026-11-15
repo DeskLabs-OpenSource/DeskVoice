@@ -1,6 +1,6 @@
 # 0013: Imagens publicadas só para amd64
 
-- **Estado:** aceita, em vigor desde a 0.1.0
+- **Estado:** aceita, em vigor desde a 0.1.0; revisada pela [0017](0017-imagens-para-amd64-e-arm64.md) em 2026-11-14, quando o pedido de imagem arm64 publicada apareceu (issue #120)
 - **Data:** 2026-11-11 (decidida no PR #10); registrada em 2026-11-12
 - **Quem decidiu:** o construtor, no segundo commit do PR #10, em resposta ao parecer do PR; o dono mesclou. O registro veio depois, cobrado pelo item 12.5 da régua da Fábrica: declarar menos arquiteturas do que o produto já declarou pede decisão escrita.
 
@@ -31,6 +31,6 @@ Quem tem processador ARM de 64 bits (arm64) instala construindo as imagens na pr
 
 ## Quando revisar
 
-- Quando alguém pedir imagem arm64 publicada (issue ou discussão), ou quando uma instalação em ARM for relatada.
-- Quando o runner ARM do GitHub para repositório público estiver disponível sem custo para este repositório, o que torna a primeira alternativa barata. Não conferido em 12/11/2026.
+- Quando alguém pedir imagem arm64 publicada (issue ou discussão), ou quando uma instalação em ARM for relatada. **Aconteceu:** a issue #120 pediu, com o caso da VM Oracle Ampere A1, e a revisão está na [0017](0017-imagens-para-amd64-e-arm64.md).
+- Quando o runner ARM do GitHub para repositório público estiver disponível sem custo para este repositório, o que torna a primeira alternativa barata. Não conferido em 12/11/2026. **Confirmado depois:** o rótulo `ubuntu-24.04-arm` é sem custo em repositório público, e é o que a [0017](0017-imagens-para-amd64-e-arm64.md) usa.
 - Em qualquer caso, até 2027-05-12.

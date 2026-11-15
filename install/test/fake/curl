@@ -4,7 +4,16 @@
 # código de $FAKE_DIR/host_probe; sem o arquivo, 200.
 # O endereço de fora (HTTPS, pelo domínio) responde o código de $FAKE_DIR/outside_probe; sem o
 # arquivo, 200.
+# O registro de imagens (ghcr.io): o token anônimo e o índice da etiqueta pedida. O índice é o de
+# $FAKE_DIR/registry_index; sem o arquivo, um índice só com amd64, como o das versões de antes da
+# 0017. $FAKE_DIR/registry_status troca o código (404 = etiqueta que não existe), e
+# $FAKE_DIR/registry_down faz o registro não responder.
 case "$*" in
+  *"https://ghcr.io/token?"*|*"https://ghcr.io/v2/"*) echo "curl $*" >> "$FAKE_DIR/calls.log"; [ ! -f "$FAKE_DIR/registry_down" ] || exit 7
+    case "$*" in *"/token?"*) echo '{"token":"token-de-teste"}'; exit 0 ;; esac
+    if [ -f "$FAKE_DIR/registry_index" ]; then cat "$FAKE_DIR/registry_index"
+    else printf '{"manifests":[{"platform":{"architecture":"amd64","os":"linux"}},{"platform":{"architecture":"unknown","os":"unknown"}}]}'; fi
+    printf '\n%s' "$(cat "$FAKE_DIR/registry_status" 2>/dev/null || echo 200)"; exit 0 ;;
   *"https://"*"/api/v1/system/health"*) echo "curl $*" >> "$FAKE_DIR/calls.log"; cat "$FAKE_DIR/outside_probe" 2>/dev/null || printf 200; exit 0 ;;
   *"/api/v1/system/health"*) echo "curl $*" >> "$FAKE_DIR/calls.log"; cat "$FAKE_DIR/host_probe" 2>/dev/null || printf 200; exit 0 ;;
 esac

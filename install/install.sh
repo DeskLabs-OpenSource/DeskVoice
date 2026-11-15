@@ -150,7 +150,7 @@ else blocker "Este sistema (${os_id:-$(uname -s)} ${os_version}) não está entr
 
 arch="$(uname -m)"
 if arch_supported "$arch"; then ok "Processador: $arch"
-else blocker "O processador desta máquina ($arch) não tem imagem do DeskVoice." "use uma VPS x86_64 (amd64); em ARM de 64 bits (arm64) só construindo aqui, com --build"; fi
+else blocker "O processador desta máquina ($arch) não tem imagem do DeskVoice." "use uma VPS x86_64 (amd64) ou ARM de 64 bits (arm64); para construir nesta máquina, rode com --build"; fi
 
 if [ -r /proc/meminfo ]; then
   ram_mb="$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)"
@@ -233,9 +233,19 @@ if is_version "$version" && is_clone && [ "$DRY_RUN" != 1 ]; then
     blocker "O código desta pasta não é o da versão $version, que é a que seria instalada." "vá para a versão e rode de novo: git -C $REPO_DIR checkout $tag && bash install/install.sh  — ou, para rodar o código desta pasta de propósito, construa aqui: bash install/install.sh --build"
   fi
 fi
-# As imagens publicadas são para x86_64. Em ARM a instalação existe, mas construindo aqui.
+# Desde a 0017 a imagem publicada é um índice com amd64 e arm64, mas as versões de antes dela só
+# têm amd64. Em ARM, pergunta ao registro se esta versão tem arm64 antes de baixar: sem isso, a
+# frase clara vira o erro cru do `docker pull`. Quem quer o código desta pasta constrói com
+# `--build`, e aí a versão é `local`, não um número.
 if is_version "$version"; then
-  case "$arch" in aarch64|arm64) blocker "Ainda não há imagem publicada do DeskVoice para processador ARM ($arch)." "use uma VPS x86_64, ou construa nesta máquina: bash install/install.sh --build" ;; esac
+  case "$arch" in aarch64|arm64)
+    arm64_rc=0; published_arm64 "$version" || arm64_rc=$?
+    case "$arm64_rc" in
+      0) ok "Imagem ARM: a versão $version tem imagem publicada para arm64" ;;
+      1) blocker "$(no_arm64_image "$version" "$arch")" "use uma VPS x86_64, ou construa nesta máquina: bash install/install.sh --build" ;;
+      *) warn "Não consegui perguntar ao registro de imagens se a versão $version tem imagem para ARM. Sigo: se o download falhar, construa nesta máquina com bash install/install.sh --build" ;;
+    esac ;;
+  esac
 fi
 # O Compose dá preferência à variável do terminal sobre o arquivo: as duas têm de dizer o mesmo.
 export DESKVOICE_VERSION="$version"

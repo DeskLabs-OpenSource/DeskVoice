@@ -95,7 +95,7 @@ O instalador instala o Docker pelo script oficial, depois de perguntar (`install
 **Custo:**
 
 - O Docker é pré-requisito: a instalação depende do script oficial dele e da rede para baixar as
-  imagens. Imagem só para amd64 ([0013](0013-imagens-so-amd64.md)).
+  imagens. Imagem publicada só para amd64 até a [0017](0017-imagens-para-amd64-e-arm64.md), que passou a publicar arm64 ([0013](0013-imagens-so-amd64.md)).
 - O Asterisk precisa de UDP e de uma faixa de portas de áudio publicadas, e a rede do Docker é
   mais uma camada onde a ligação pode ficar muda (a checagem de saúde confere a faixa, não o
   caminho).
