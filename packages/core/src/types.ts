@@ -30,6 +30,7 @@ export const CALL_EVENT_KINDS = [
   "recording_notice",
   "transcript_user",
   "transcript_agent",
+  "transcription_failed",
   "tool_called",
   "tool_result",
   "approval_requested",
