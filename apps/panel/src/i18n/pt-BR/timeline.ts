@@ -137,6 +137,7 @@ const timeline = {
     recording_saved: "Gravação fechada: {size} MB, impressão digital {hash}…",
     recording_saved_full: "Impressão digital completa (SHA-256)",
     recording_saved_body: "Serve para conferir se uma cópia do arquivo é igual à que esta instalação gravou. Ela fica no mesmo servidor que o áudio, então não prova nada contra quem administra o servidor.",
+    recording_saved_no_hash: "Gravação fechada: {size} MB. A impressão digital não pôde ser calculada; o áudio está salvo do mesmo jeito.",
     call_ended: "Chamada encerrada",
     task_queued: "Tarefa deixada para depois da chamada",
     task_finished: "Tarefa concluída",

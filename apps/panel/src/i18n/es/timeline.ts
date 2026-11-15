@@ -136,6 +136,7 @@ const timeline: TimelineDictionary = {
     recording_saved: "Grabación cerrada: {size} MB, huella digital {hash}…",
     recording_saved_full: "Huella digital completa (SHA-256)",
     recording_saved_body: "Sirve para comprobar si una copia del archivo es igual a la que grabó esta instalación. Se guarda en el mismo servidor que el audio, así que no prueba nada frente a quien administra el servidor.",
+    recording_saved_no_hash: "Grabación cerrada: {size} MB. La huella digital no se pudo calcular; el audio está guardado igual.",
     call_ended: "Llamada terminada",
     task_queued: "Tarea dejada para después de la llamada",
     task_finished: "Tarea completada",

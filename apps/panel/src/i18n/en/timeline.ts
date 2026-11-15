@@ -136,6 +136,7 @@ const timeline: TimelineDictionary = {
     recording_saved: "Recording closed: {size} MB, fingerprint {hash}…",
     recording_saved_full: "Full fingerprint (SHA-256)",
     recording_saved_body: "Use it to check whether a copy of the file matches the one this installation recorded. It is kept on the same server as the audio, so it proves nothing against whoever administers the server.",
+    recording_saved_no_hash: "Recording closed: {size} MB. The fingerprint could not be computed; the audio is saved all the same.",
     call_ended: "Call ended",
     task_queued: "Task left for after the call",
     task_finished: "Task completed",
