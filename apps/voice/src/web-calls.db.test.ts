@@ -1,5 +1,6 @@
 // Chamada pelo navegador, de ponta a ponta: a API interna entrega o token, um cliente WebSocket de
 // verdade faz o papel da tela, o motor segue um roteiro e o banco é real.
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -189,6 +190,8 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect(client.closed).toBe(1000);
     expect(client.messages.at(-1)).toEqual({ type: "ended", status: "completed", reason: "end_call" });
     expect(typesOf(client)).toEqual(["ready", "ended"]);
+    // A impressão digital é gravada depois de o arquivo fechar, já com a telefonia solta.
+    await waitFor(async () => (await kindsOf(app, callId)).includes("recording_saved"), "the saved recording");
 
     const events = await eventsOf(app, callId);
     expect(events.map((event) => event.kind)).toEqual([
@@ -210,6 +213,7 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
       "tool_result",
       "call_ended",
       "task_queued",
+      "recording_saved",
     ]);
     expect(events[0]?.payload).toEqual({ direction: "inbound", from: null, to: null, agentId: made.agentId, channel: "web", userId: USER });
     expect(events[2]?.payload).toEqual({ text: DEFAULT_RECORDING_NOTICE });
@@ -233,6 +237,8 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect(wav.readUInt16LE(22)).toBe(2);
     expect(wav.readUInt32LE(24)).toBe(8000);
     expect(wav.readUInt32LE(40) / 4).toBeGreaterThanOrEqual((spokenMs / 20) * 160);
+    // A impressão digital na linha do tempo é a do arquivo que ficou no disco.
+    expect(events[18]?.payload).toEqual({ bytes: wav.length, sha256: createHash("sha256").update(wav).digest("hex") });
 
     const health = (await (await fetch(`http://127.0.0.1:${server?.internalPort}/health`)).json()) as Record<string, { status: string; detail: string }>;
     expect(health.web).toEqual({ status: "ok", detail: expect.stringContaining(String(server?.webPort)) });
