@@ -219,7 +219,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     });
     // A impressão digital vai para a linha do tempo junto do fim da chamada: é o que permite provar
     // depois que o arquivo apresentado é o que a chamada gravou, e não uma cópia qualquer.
-    if (savedRecording) await event("recording_saved", { bytes: savedRecording.bytes, sha256: savedRecording.sha256 });
+    // A falha do banco aqui não pode impedir o `done`: o arquivo já está salvo, só o registro falta.
+    if (savedRecording) await event("recording_saved", { bytes: savedRecording.bytes, sha256: savedRecording.sha256 }).catch(logFailure("could not record the saved recording"));
     await recordingFailed;
     resolveDone({ status: end.status, endReason: end.endReason, costCents });
   }
