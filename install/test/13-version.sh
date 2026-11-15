@@ -212,9 +212,17 @@ equal "clone fora da versão: nada foi baixado nem subiu" 0 "$(calls ' pull \| u
 out="$(install --build)"; equal "clone fora da versão, com --build: instala o código da pasta" 0 "$?"
 rm -f "$FAKE_DIR/git_head"
 
-# ── ARM: ainda não há imagem publicada; só construindo aqui ──
+# ── ARM: a versão publicada tem as duas arquiteturas; instala puxando, como no amd64 ──
 fresh; with_versions
-out="$(FAKE_ARCH=aarch64 install)"; equal "ARM com versão publicada: não instala" 1 "$?"
-contains "ARM com versão publicada: diz que não há imagem e aponta o --build" "$out" "bash install/install.sh --build"
-equal "ARM com versão publicada: nada foi baixado" 0 "$(calls ' pull ')"
+out="$(FAKE_ARCH=aarch64 install)"; equal "ARM com versão publicada: instala" 0 "$?"
+equal "ARM com versão publicada: grava o número" 0.2.0 "$(version)"
+contains "ARM com versão publicada: diz qual versão instalou" "$out" "Versão: 0.2.0, a publicada mais recente"
+equal "ARM com versão publicada: baixa as imagens" 1 "$(calls ' pull -q panel voice routines')"
+equal "ARM com versão publicada: não constrói aqui" 0 "$(calls ' build ')"
+# Quem quer o código desta pasta em ARM continua construindo: o caminho explícito não mudou.
+fresh
+out="$(FAKE_ARCH=aarch64 install --build)"; equal "ARM com --build: instala" 0 "$?"
+equal "ARM com --build: a versão é local" local "$(version)"
+equal "ARM com --build: constrói nesta máquina" 1 "$(calls ' build panel voice routines')"
+equal "ARM com --build: não baixa as imagens do DeskVoice" 0 "$(calls ' pull -q panel voice routines')"
 finish
