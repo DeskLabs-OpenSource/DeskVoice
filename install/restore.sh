@@ -44,6 +44,11 @@ if [ "$with_config" = 0 ] && [ -f "$src/app.env" ] && [ "$(env_get "$src/app.env
   die "Este backup foi feito com outra chave de segredos: restaurado só o banco, a senha da linha e a chave de IA não abririam." "Rode de novo com --with-config para restaurar também a configuração do backup."
 fi
 
+# Sem a rede do proxy do outro sistema gravada na publicação, o `up` do fim não sobe nada, e a
+# restauração terminaria com o banco trocado e o DeskVoice inteiro parado (issue #221).
+missing_network="$(missing_proxy_network)"
+[ -z "$missing_network" ] || die "A rede $missing_network, em que o Caddy do DeskVoice entra para o proxy do outro sistema publicar o painel, não existe mais nesta máquina: com ela faltando, os serviços não voltariam a subir depois da restauração. Nada foi alterado." "Suba o outro sistema, que recria a rede, e rode de novo. Para deixar de usar a rede: DESKVOICE_PROXY_NETWORK=off bash install/install.sh"
+
 if [ "$ASSUME_YES" != 1 ]; then
   printf '\n%sIsto vai SUBSTITUIR o banco do DeskVoice desta máquina pelo backup de %s.%s\n' "$C_BLD" "$(env_get "$manifest" created_at)" "$C_OFF"
   printf '  Tudo o que entrou depois desse backup (chamadas, agentes, configurações) será perdido.\n'
