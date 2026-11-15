@@ -39,7 +39,7 @@ const settings: SettingsDictionary = {
   classifyKeyHint: "Va solo al endpoint de arriba. Al cambiar el endpoint, escribe la clave de nuevo.",
   classifyKeyKeep: "En blanco, mantiene la clave guardada",
   classifyModel: "Modelo de la clasificación",
-  classifyModelHint: "El nombre que publica el proveedor, por ejemplo deepseek-chat. En blanco, la clasificación usa el modelo del motor.",
+  classifyModelHint: "El nombre que publica el proveedor, por ejemplo deepseek-chat. En blanco, la clasificación usa el modelo del motor. Sin endpoint solo se acepta un modelo cuyo precio conoce el proyecto; para otro modelo, escribe el endpoint.",
   classifyTargetSave: "Guardar destino",
   keyResults: {
     accepted: "aceptada, con acceso al modelo {model}. La prueba no revisa el crédito: solo lee los datos del modelo, sin gastar.",

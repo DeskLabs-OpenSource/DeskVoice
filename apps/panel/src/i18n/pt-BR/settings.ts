@@ -39,7 +39,7 @@ const settings = {
   classifyKeyHint: "Vai só para o endpoint acima. Ao trocar o endpoint, informe a chave de novo.",
   classifyKeyKeep: "Em branco, mantém a chave salva",
   classifyModel: "Modelo da classificação",
-  classifyModelHint: "O nome que o provedor publica, por exemplo deepseek-chat. Em branco, a classificação usa o modelo do motor.",
+  classifyModelHint: "O nome que o provedor publica, por exemplo deepseek-chat. Em branco, a classificação usa o modelo do motor. Sem endpoint, só é aceito o modelo cujo preço o projeto conhece; para outro modelo, informe o endpoint.",
   classifyTargetSave: "Salvar destino",
   /** O teste só lê os dados do modelo no provedor: não abre sessão de voz e não gasta. */
   keyResults: {

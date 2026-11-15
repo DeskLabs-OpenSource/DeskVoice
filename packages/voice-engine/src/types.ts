@@ -291,6 +291,15 @@ export interface VoiceEngine {
    */
   classifyTarget?: boolean;
   /**
+   * O preço, por milhão de tokens, que este motor cobra por um modelo de classificação — quando o
+   * projeto o conhece. É o que autoriza gravar um modelo **sem** endpoint: sem endpoint o pedido vai
+   * ao próprio provedor do motor, que cobra, e o custo só é medido se o preço do modelo estiver
+   * aqui. O painel recusa ao salvar o modelo fora daqui, e o motor, na hora do pedido, troca o
+   * modelo gravado por fora pelo modelo de tabela (o medido). Modelo com endpoint não precisa disto:
+   * quem cobra é o provedor do endpoint.
+   */
+  classifyPricing?(model: string): EnginePricing | undefined;
+  /**
    * Verdadeiro para motor cujo `classifyOutcome` atende `analyze` e devolve a análise da ligação.
    * Motor sem a declaração não analisa, e a rotina registra o motivo na linha do tempo.
    */
@@ -356,7 +365,9 @@ export const autoTranscriptionEnabledOf = (stored: unknown): boolean => stored =
  * Ausentes valem o padrão do motor, que é o de hoje: OpenAI em `https://api.openai.com/v1`, com
  * `gpt-5-nano` e a chave do motor. Com endpoint, a chave é a dele (`apiKey`, cifrada), dada a esse
  * endereço: a chave do motor nunca vai a um endpoint configurado, e trocar o endpoint pede a chave
- * de novo. Só o modelo, sem endpoint, continua na OpenAI com a chave do motor.
+ * de novo. Só o modelo, sem endpoint, continua na OpenAI com a chave do motor — e só se o motor
+ * souber o preço dele (`classifyPricing`): o painel recusa gravar outro, e o motor usa o modelo de
+ * tabela quando um já gravado cai fora dela, para não cobrar sem medir.
  */
 export const engineClassifyTargetSetting = (engineId: string): string => `engine.${engineId}.classify_target`;
 
