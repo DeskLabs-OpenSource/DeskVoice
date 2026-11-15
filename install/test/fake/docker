@@ -94,6 +94,8 @@ case "$args" in
     grep -vx "$last" "$FAKE_DIR/images" > "$FAKE_DIR/images.next"; mv "$FAKE_DIR/images.next" "$FAKE_DIR/images"; exit 0 ;;
   " rmi "*) if grep -qx "$last" "$FAKE_DIR/rmi_busy" 2>/dev/null; then echo "Error response from daemon: conflict: unable to remove repository reference \"$last\" (must force) - container cid is using its referenced image" >&2; exit 1; fi
     grep -vx "$last" "$FAKE_DIR/images" > "$FAKE_DIR/images.next" 2>/dev/null; mv "$FAKE_DIR/images.next" "$FAKE_DIR/images"; exit 0 ;;
+  # As redes que existem: uma por linha em $FAKE_DIR/networks.
+  " network inspect "*) grep -qx "$last" "$FAKE_DIR/networks" 2>/dev/null; exit $? ;;
   *" logs "*) answer logs; exit 0 ;;
   # Criar o dono: guarda a senha que veio pela entrada padrão e passa a existir um usuário.
   *"run create-owner"*) cat > "$FAKE_DIR/create_owner_stdin"; if [ -f "$FAKE_DIR/create_owner_fail" ]; then exit 1; fi; echo 1 > "$FAKE_DIR/users_count"; exit 0 ;;

@@ -6,8 +6,9 @@ disputa essas portas em nenhum momento: o Caddy dele fica só com HTTP numa port
 qualquer VPS que já tem um proxy — a diferença é que aqui o proxy é de contêiner, e o
 `127.0.0.1` do host não é o mesmo endereço para ele.
 
-O caminho completo é: instalar, ligar o Caddy do DeskVoice na rede do ponto de extensão do CRM,
-soltar um arquivo `.caddy` e recarregar o Caddy do CRM.
+O caminho completo é: instalar, ligar o Caddy do DeskVoice na rede do ponto de extensão do CRM
+(pelo próprio instalador, para a ligação sobreviver às atualizações), soltar um arquivo `.caddy` e
+recarregar o Caddy do CRM.
 
 ## Como fica o desenho
 
@@ -98,15 +99,20 @@ pede para não misturar.
 
 ## Passo 3 — ligar o Caddy do DeskVoice na rede, com um nome
 
+Na pasta do DeskVoice, rode o instalador de novo informando a rede do passo 2:
+
 ```bash
-docker network connect --alias deskvoice <rede> deskvoice-caddy-1
+DESKVOICE_PROXY_NETWORK=<rede> bash install/install.sh
 ```
 
-- `deskvoice` é o nome que vai no arquivo `.caddy` do passo 4. Pode ser outro; se trocar, troque
-  nos dois lugares.
-- `deskvoice-caddy-1` é o contêiner do Caddy do DeskVoice (o mesmo que o `docker port` do passo 1
-  mostrou).
-- Vale na hora, sem reiniciar nada.
+- O instalador grava a rede no arquivo de publicação que ele gera
+  (`deploy/docker-compose.override.yml`), e o Caddy do DeskVoice entra nela com o nome
+  `deskvoice`, que é o que vai no arquivo `.caddy` do passo 4.
+- Reinstalar não troca segredo nem dado, e mantém o domínio e a porta que já estavam.
+- Como a rede está declarada, a ligação sobrevive a toda atualização e restauração, sem passo
+  repetido.
+- Se a rede não existe, o instalador para antes de mudar qualquer coisa e diz o nome que recebeu.
+- Para deixar de usar a rede: `DESKVOICE_PROXY_NETWORK=off bash install/install.sh`.
 
 **Por que não `127.0.0.1:3080` nem `host.docker.internal:3080`.** Medido no
 `docker-compose.prod.yml` do CRM: o serviço `caddy` está nas redes `internal` e `caddy-sites` e
@@ -213,32 +219,35 @@ que já estava; o `restart` derruba o CRM junto.
    `/voice-ws`) até a porta do DeskVoice. Ele **não** enxerga o Caddy do CRM: a prova de fora são
    os itens 1 a 3.
 
-## Depois de atualizar o DeskVoice, refaça o passo 3
+## Depois de atualizar o DeskVoice
 
-`install/update.sh` (e o `up -d` que ele roda) recria o contêiner do Caddy quando a imagem ou a
-configuração muda. A ligação com a rede `_caddy-sites` não é declarada em arquivo nenhum, então
-ela se perde — e o domínio passa a dar 502, com o CRM no ar e o DeskVoice também. O conserto é
-repetir o passo 3:
+Não há nada a refazer. `install/update.sh` recria o contêiner do Caddy quando a imagem ou a
+configuração muda, e o contêiner novo já nasce na rede, porque ela está declarada no arquivo de
+publicação. Para conferir:
 
 ```bash
-docker network connect --alias deskvoice <rede> deskvoice-caddy-1
 docker network inspect <rede> --format '{{range .Containers}}{{.Name}} {{end}}'
 ```
 
-A segunda linha precisa listar `deskvoice-caddy-1`. Vale a mesma regra depois de o próprio CRM
-recriar a rede (`docker compose down` no CRM apaga a rede junto): contêiner recriado de um lado ou
-rede recriada do outro, o passo 3 volta.
+A lista precisa ter `deskvoice-caddy-1`.
+
+Se a ligação foi feita à mão, com `docker network connect`, como este guia ensinava até a 0.11.0,
+rode o passo 3 uma vez: a partir daí, ela fica declarada.
+
+Se a rede do CRM deixar de existir, porque o CRM foi derrubado com o DeskVoice parado, o Compose
+do DeskVoice não sobe serviço nenhum até ela voltar. A atualização confere isso antes do backup e
+para sem mexer em nada. Suba o CRM, que recria a rede com o mesmo nome, e rode de novo.
 
 ## Se não funcionar
 
 | O que aparece | O que conferir |
 |---|---|
-| 502 no domínio | O passo 3 foi feito? `docker network inspect <rede>`; o `deskvoice-caddy-1` está de pé (`docker ps`); o passo 3 foi refeito depois da última atualização |
+| 502 no domínio | O passo 3 foi feito? `docker network inspect <rede>` lista o `deskvoice-caddy-1`? Ele está de pé (`docker ps`)? |
 | O Caddy do CRM responde 404 na raiz | O domínio no `.caddy` está igual ao do DNS, e o arquivo tem a extensão `.caddy` |
 | Certificado não sai | O registro A aponta para este IP? As portas 80 e 443 chegam de fora? Log do `caddy` do CRM |
 | Painel abre, "Falar com o agente" não conecta | O `/voice-ws` não chegou ao DeskVoice: confira se o `.caddy` aponta para o alias e a porta `80`, e o log do Caddy do DeskVoice (`docker logs --tail 50 deskvoice-caddy-1`) |
 | O DeskVoice foi instalado **sem** domínio e o limite de login trata todo mundo como um visitante só | Reinstale com `DESKVOICE_DOMAIN=`: só o modo "atrás do proxy **com** domínio" grava `TRUSTED_PROXY_HOPS=2` e faz o Caddy do DeskVoice confiar no proxy da frente; sem domínio ele descarta o `X-Forwarded-For` que chega, como proteção |
-| `docker network connect` diz que a rede não existe | A rede foi recriada: refaça o passo 2 e use o nome medido agora |
+| O instalador ou a atualização dizem que a rede não existe | O CRM está no ar? Se o nome mudou, refaça o passo 2 e rode o passo 3 com o nome medido agora |
 
 ## Se a telefonia do CRM estiver ligada
 

@@ -11,9 +11,8 @@
 # Troque o domínio da primeira linha pelo seu (registro A apontando para esta
 # VPS) e confira o destino:
 #
-#   `deskvoice`  é o nome (alias) que o Caddy do DeskVoice recebeu na rede do
-#                ponto de extensão — passo 3 do guia; se você escolheu outro
-#                nome, troque aqui também;
+#   `deskvoice`  é o nome (alias) que o Caddy do DeskVoice recebe na rede do
+#                ponto de extensão, gravado pelo instalador no passo 3 do guia;
 #   `:80`        é a porta de DENTRO do contêiner do Caddy do DeskVoice, que
 #                escuta em HTTP. A 3080 é a porta do host (127.0.0.1:3080) e
 #                serve para conferir de dentro da VPS, não aqui.
