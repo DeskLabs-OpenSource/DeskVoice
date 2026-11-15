@@ -239,9 +239,16 @@ services:
     mem_limit: 256m
     ports:
       # Só UDP. A ARI (8088) é o controle total das chamadas e nunca sai da rede interna.
-      - "5060:5060/udp"
+      #
+      # Onde publicar é decisão da instalação (`SIP_BIND`). Sem tronco SIP não há quem deva alcançar
+      # a central, e publicar em 0.0.0.0 a entrega a qualquer scanner: o UFW NÃO filtra container
+      # (o Docker entra por DNAT/FORWARD, e a chain DOCKER-USER nasce vazia), então "porta fechada no
+      # firewall" e "porta fechada" são coisas diferentes. O padrão aqui continua 0.0.0.0 para não
+      # mudar o comportamento de quem já está instalado; o instalador grava 127.0.0.1 em instalação
+      # nova, e quem tem tronco SIP define 0.0.0.0 de propósito.
+      - "${SIP_BIND:-0.0.0.0}:5060:5060/udp"
       # Faixa de RTP: precisa ser idêntica à de asterisk/generated/rtp.conf.
-      - "${RTP_START:-10000}-${RTP_END:-10200}:${RTP_START:-10000}-${RTP_END:-10200}/udp"
+      - "${SIP_BIND:-0.0.0.0}:${RTP_START:-10000}-${RTP_END:-10200}:${RTP_START:-10000}-${RTP_END:-10200}/udp"
     volumes:
       # Tudo sai de asterisk/generated, que o instalador escreve com a permissão certa: o Asterisk
       # lê com outro usuário, e arquivo montado direto do repositório herdava o umask de quem baixou.

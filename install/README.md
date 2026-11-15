@@ -108,6 +108,7 @@ Respostas para o modo `--yes` (variável de ambiente ou linha `CHAVE=valor` do a
 | `DESKVOICE_PUBLIC_IP` | Só se a descoberta automática do IP falhar |
 | `DESKVOICE_APPLY_UFW=yes` | Aplica as regras no firewall `ufw` sem perguntar. Só aceita `yes`: outro valor para com erro. Com o `ufw` inativo, não tem efeito, e o instalador diz. As portas de telefonia são publicadas pelo Docker, que passa por fora do `ufw`: estas regras só valem onde quem escuta é o host, e não é por falta delas que a ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor, se ele tiver um, ou uma regra na cadeia `DOCKER-USER` da máquina. Ver [O ufw não filtra as portas que o Docker publica](../docs/fundacao/ufw-e-docker.md) |
 | `DESKVOICE_RTP_START`, `DESKVOICE_RTP_END` | Outra faixa de portas de áudio (padrão 10000 a 10200) |
+| `DESKVOICE_SIP_BIND` | Endereço em que o SIP (5060/udp) e o RTP são publicados — padrão `127.0.0.1`, fechado para a internet; use `0.0.0.0` quando houver tronco SIP de operadora |
 | `DESKVOICE_VERSION` | Uma versão publicada específica (exemplo: `0.3.0`), em vez da mais recente. Junto de `--build`, que constrói o código desta pasta, para com erro |
 | `DESKVOICE_ADOPT=yes` (ou `--adopt`) | Esta pasta adota a instalação desta máquina, feita a partir de uma pasta que não existe mais. Ver abaixo, em "Pasta movida" |
 

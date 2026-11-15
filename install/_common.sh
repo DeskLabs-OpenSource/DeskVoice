@@ -210,6 +210,11 @@ write_env_files() {
   env_set "$ENV_FILE" PANEL_DOMAIN "$3"
   env_set "$ENV_FILE" RTP_START "$4"
   env_set "$ENV_FILE" RTP_END "$5"
+  # Instalação nova começa com a telefonia fechada para a internet: sem tronco cadastrado não há
+  # quem deva alcançar o Asterisk, e o UFW não filtra container — só a publicação decide. Quem tem
+  # tronco SIP põe 0.0.0.0 (ou DESKVOICE_SIP_BIND=0.0.0.0 no arquivo de respostas). `if_missing`
+  # preserva o que uma instalação já rodando escolheu.
+  env_set_if_missing "$ENV_FILE" SIP_BIND "${DESKVOICE_SIP_BIND:-127.0.0.1}"
   # O Caddy deixou de ser perfil opcional: a chave de instalações antigas sai.
   env_unset "$ENV_FILE" COMPOSE_PROFILES
   # deploy/migrate.env

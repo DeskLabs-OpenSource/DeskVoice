@@ -6,7 +6,7 @@ D="$DESKVOICE_DEPLOY_DIR"
 
 write_env_files "https://voz.exemplo.com.br" 203.0.113.10 voz.exemplo.com.br 10000 10200
 keys() { sed 's/=.*//' "$1" | sort | tr '\n' ' '; }
-equal "campos do .env (a versão é gravada pelo instalador; o endereço das imagens mora em images.env)" "PANEL_DOMAIN POSTGRES_PASSWORD RTP_END RTP_START UPDATE_AGENT_TOKEN WACALLS_ADMIN_PASSWORD WACALLS_ADMIN_USER WACALLS_API_TOKEN WAHA_API_KEY WAHA_API_KEY_SHA512 " "$(keys "$D/.env")"
+equal "campos do .env (a versão é gravada pelo instalador; o endereço das imagens mora em images.env)" "PANEL_DOMAIN POSTGRES_PASSWORD RTP_END RTP_START SIP_BIND UPDATE_AGENT_TOKEN WACALLS_ADMIN_PASSWORD WACALLS_ADMIN_USER WACALLS_API_TOKEN WAHA_API_KEY WAHA_API_KEY_SHA512 " "$(keys "$D/.env")"
 equal "campos do app.env" "ARI_PASSWORD ARI_USERNAME DATABASE_URL DESKVOICE_SECRET_KEY INTERNAL_TOKEN PUBLIC_IP PUBLIC_URL SYSTEM_DATABASE_URL " "$(keys "$D/app.env")"
 equal "campos do migrate.env" "APP_DB_PASSWORD MIGRATION_DATABASE_URL SYSTEM_DATABASE_URL SYSTEM_DB_PASSWORD " "$(keys "$D/migrate.env")"
 for f in .env app.env migrate.env; do equal "permissão 600 em $f" 600 "$(mode_of "$D/$f")"; done
