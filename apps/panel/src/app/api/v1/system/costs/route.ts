@@ -39,14 +39,17 @@ export const GET = handle({}, async ({ q, url, deps }) => {
   );
   // Os minutos de cada motor são a duração das ligações que ele atendeu (do atendimento ao fim),
   // e não o `seconds` do extrato: esse é o uso que o motor declara para cobrar, e o OpenAI Realtime
-  // cobra por token e declara zero segundo (issue #244). Conta cada ligação uma vez, a que tem
-  // alguma linha do extrato no período e cujo motor é o da linha.
+  // cobra por token e declara zero segundo (issue #244). A ligação conta no dia em que terminou, no
+  // fuso da organização, como o resto do quadro: uma ligação com linhas do extrato em dois dias (o
+  // desfecho classificado depois da meia-noite) não aparece inteira nos dois períodos.
   const byEngine = await q.many<{ engine: string; microcents: string; seconds: number }>(
     `with scoped as (select l.engine, l.call_id, l.cost_microcents ${scope}),
           answered as (
             select c.engine, coalesce(sum(extract(epoch from (c.ended_at - c.answered_at))), 0)::int as seconds
               from calls c
-             where c.id in (select call_id from scoped) and c.answered_at is not null and c.ended_at is not null
+             cross join (select coalesce((select timezone from outbound_policy), 'America/Sao_Paulo') as zone) z
+             where c.answered_at is not null and c.ended_at is not null
+               and (c.ended_at at time zone z.zone)::date between $1::date and $2::date
              group by 1)
      select s.engine, coalesce(sum(s.cost_microcents), 0)::text as microcents, coalesce(a.seconds, 0)::int as seconds
        from scoped s left join answered a on a.engine = s.engine
@@ -60,12 +63,14 @@ export const GET = handle({}, async ({ q, url, deps }) => {
     // O total arredonda a soma inteira, não a soma dos totais de cada motor: um centavo a menos de
     // erro, e o mesmo número que o extrato do período diz.
     totalCents: centsOf(byDay.reduce((sum, row) => sum + Number(row.microcents), 0)),
-    byDay: byDay.map((row) => ({ day: row.day, costCents: centsOf(row.microcents), seconds: row.seconds })),
+    // Dois nomes, porque são duas medidas: `billedSeconds` é o uso que os motores declararam para
+    // cobrar (o OpenAI Realtime declara token, não segundo), e `callSeconds` é a duração das ligações.
+    byDay: byDay.map((row) => ({ day: row.day, costCents: centsOf(row.microcents), billedSeconds: row.seconds })),
     byAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents), calls: row.calls })),
     byEngine: byEngine.map((row) => ({
       engine: row.engine,
       costCents: centsOf(row.microcents),
-      seconds: row.seconds,
+      callSeconds: row.seconds,
       label: engines.get(row.engine)?.label ?? row.engine,
       priceCheckedOn: engines.get(row.engine)?.pricing.checkedOn ?? null,
       priceSource: engines.get(row.engine)?.pricing.source ?? null,

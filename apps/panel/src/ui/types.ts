@@ -220,9 +220,9 @@ export interface Costs {
   from: string;
   to: string;
   totalCents: number;
-  byDay: Array<{ day: string; costCents: number; seconds: number }>;
+  byDay: Array<{ day: string; costCents: number; billedSeconds: number }>;
   byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number }>;
-  byEngine: Array<{ engine: string; label: string; costCents: number; seconds: number; priceCheckedOn: string | null; priceSource: string | null }>;
+  byEngine: Array<{ engine: string; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null }>;
 }
 
 export interface Setting<T> {
