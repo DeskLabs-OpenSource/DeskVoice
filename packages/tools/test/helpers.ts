@@ -142,7 +142,7 @@ export async function seedCallerHistory(
   app: Db,
   ctx: FakeContext,
   phone: string,
-  history: { calls: number; openFollowUps: string[]; simulatedCalls?: number },
+  history: { calls: number; openFollowUps: string[]; simulatedCalls?: number; simulatedFollowUps?: string[]; notes?: string[]; simulatedNotes?: string[] },
 ): Promise<string[]> {
   return withSystem(app, async (q) => {
     await q.exec("update calls set from_e164 = $2 where id = $1", [ctx.callId, phone]);
@@ -155,12 +155,29 @@ export async function seedCallerHistory(
       );
       ids.push(id);
     }
+    // A pendência e a nota de simulada nascem na primeira simulada (#291).
+    const simulatedIds: string[] = [];
     for (let index = 0; index < (history.simulatedCalls ?? 0); index += 1) {
+      const id = randomUUID();
       await q.exec(
-        "insert into calls (organization_id, agent_id, direction, channel, status, engine, from_e164, started_at, ended_at) values ($1, $2, 'inbound', 'simulated', 'completed', 'simulated', $3, $4, $4)",
-        [ctx.organizationId, ctx.agentId, phone, new Date(t0.getTime() - (index + 1) * 3_600_000)],
+        "insert into calls (id, organization_id, agent_id, direction, channel, status, engine, from_e164, started_at, ended_at) values ($1, $2, $3, 'inbound', 'simulated', 'completed', 'simulated', $4, $5, $5)",
+        [id, ctx.organizationId, ctx.agentId, phone, new Date(t0.getTime() - (index + 1) * 3_600_000)],
       );
+      simulatedIds.push(id);
     }
+    for (const [index, title] of (history.simulatedFollowUps ?? []).entries()) {
+      await q.exec("insert into follow_ups (organization_id, call_id, caller_e164, title, due_at, created_at) values ($1, $2, $3, $4, $5, $5)", [
+        ctx.organizationId,
+        simulatedIds[0],
+        phone,
+        title,
+        new Date(t0.getTime() - (index + 1) * 60_000),
+      ]);
+    }
+    const note = (callId: string | undefined, text: string) =>
+      q.exec("insert into caller_notes (organization_id, call_id, caller_e164, text, created_at) values ($1, $2, $3, $4, $5)", [ctx.organizationId, callId, phone, text, t0]);
+    for (const text of history.notes ?? []) await note(ids[0] ?? ctx.callId, text);
+    for (const text of history.simulatedNotes ?? []) await note(simulatedIds[0], text);
     // Prazos em sequência: a linha cita as pendências na ordem do prazo.
     for (const [index, title] of history.openFollowUps.entries()) {
       await q.exec("insert into follow_ups (organization_id, call_id, caller_e164, title, due_at, created_at) values ($1, $2, $3, $4, $5, $6)", [

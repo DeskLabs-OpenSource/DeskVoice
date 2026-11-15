@@ -28,12 +28,21 @@ interface Privacy {
   recording: boolean;
   minDays: number;
   maxDays: number;
+  notesRetention: NotesRetention;
   history: Entry[];
+}
+interface NotesRetention {
+  configured: number | null;
+  days: number;
+  effective: number;
+  defaultDays: number;
+  minDays: number;
+  maxDays: number;
 }
 interface Exported {
   phone: string;
   exportedAt: string;
-  counts: { calls: number; events: number; doNotCall: boolean; followUps: number };
+  counts: { calls: number; events: number; doNotCall: boolean; followUps: number; notes: number };
   content: string;
 }
 
@@ -43,6 +52,7 @@ interface ErasureCounts {
   followUps: number;
   notifications: number;
   approvals: number;
+  notes: number;
   recordings: number;
 }
 interface ErasurePreview extends ErasureCounts {
@@ -51,11 +61,22 @@ interface ErasurePreview extends ErasureCounts {
 }
 
 const numberOf = (value: unknown): number => (typeof value === "number" ? value : 0);
-const hasRecord = (counts: Exported["counts"]): boolean => counts.calls > 0 || counts.doNotCall || counts.followUps > 0;
-const hasErasable = (counts: ErasureCounts): boolean => counts.calls + counts.followUps + counts.notifications + counts.approvals + counts.recordings > 0;
+const hasRecord = (counts: Exported["counts"]): boolean => counts.calls > 0 || counts.doNotCall || counts.followUps > 0 || counts.notes > 0;
+const hasErasable = (counts: ErasureCounts): boolean => counts.calls + counts.followUps + counts.notifications + counts.approvals + counts.notes + counts.recordings > 0;
 
-const countsLine = ({ calls, events, followUps, notifications, approvals, recordings }: ErasureCounts, t: PrivacyDictionary): string =>
-  fill(t.erasureCounts, { calls, events, followUps, notifications, approvals, recordings });
+const countsLine = ({ calls, events, followUps, notifications, approvals, notes, recordings }: ErasureCounts, t: PrivacyDictionary): string =>
+  fill(t.erasureCounts, { calls, events, followUps, notifications, approvals, notes, recordings });
+
+/**
+ * O que a tela recusa antes de mandar: fora de 30 a 365, ou acima do prazo de guarda das conversas
+ * (decisão 2A). A rota confere as mesmas duas regras.
+ */
+export function notesRetentionProblem(value: string, limits: { minDays: number; maxDays: number; transcriptDays: number | null }, t: PrivacyDictionary): string | null {
+  const days = Number(value);
+  if (value.trim() === "" || !Number.isInteger(days) || days < limits.minDays || days > limits.maxDays) return fill(t.notesOutOfRange, { min: limits.minDays, max: limits.maxDays });
+  if (limits.transcriptDays !== null && days > limits.transcriptDays) return fill(t.notesAboveTranscripts, { days: limits.transcriptDays });
+  return null;
+}
 
 /** Uma linha do registro, na voz da tela. */
 function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
@@ -70,6 +91,7 @@ function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
       const extra = [
         numberOf(p.recordings) > 0 ? fill(t.purgedRecordings, { count: numberOf(p.recordings) }) : null,
         numberOf(p.followUps) > 0 ? fill(t.purgedFollowUps, { count: numberOf(p.followUps) }) : null,
+        numberOf(p.notes) > 0 ? fill(t.purgedNotes, { count: numberOf(p.notes) }) : null,
       ];
       return [line, ...extra].filter(Boolean).join(" ");
     }
@@ -89,6 +111,13 @@ function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
       return fill(t.history.share_downloaded, { use: numberOf(p.use), uses: numberOf(p.maxUses) });
     case "share_revoked":
       return fill(t.history.share_revoked, { who, count: numberOf(p.revoked) });
+    case "caller_notes_purged":
+      return fill(t.history.caller_notes_purged, { days: numberOf(p.retentionDays), count: numberOf(p.count) });
+    case "caller_notes_retention_changed": {
+      // `from` nulo: a organização nunca tinha escolhido, e valia o prazo de fábrica.
+      const notesSpan = (value: unknown, fallback: string): string => (typeof value === "number" ? fill(t.days, { n: value }) : fallback);
+      return fill(t.history.caller_notes_retention_changed, { who, from: notesSpan(p.from, t.factoryDefault), to: notesSpan(p.to, t.factoryDefault) });
+    }
   }
 }
 
@@ -103,8 +132,8 @@ function download(result: Exported, t: PrivacyDictionary): void {
 }
 
 /**
- * Os direitos de quem ligou, pela tela (registros 0014 e 0016): a gravação do áudio, o prazo de
- * guarda da transcrição, a exportação e o apagamento a pedido do titular do que a organização
+ * Os direitos de quem ligou, pela tela (registros 0014, 0016 e 0020): a gravação do áudio, o prazo de
+ * guarda da transcrição, o prazo da memória entre chamadas (as notas do agente), a exportação e o apagamento a pedido do titular do que a organização
  * guarda sobre um telefone, com o registro de cada um. Só dono ou administrador; para o operador a seção não aparece.
  */
 export function PrivacyPanel() {
@@ -128,19 +157,31 @@ export function PrivacyPanel() {
   // A prévia é o pedido de confirmação: o botão que apaga só existe com ela na tela, e nomeia o telefone dela.
   const [preview, setPreview] = useState<ErasurePreview | null>(null);
   const [erased, setErased] = useState<{ phone: string; counts: ErasureCounts } | null>(null);
+  const notesSaver = useAction();
+  const [notesDays, setNotesDays] = useState("");
+  const [notesProblem, setNotesProblem] = useState<string | null>(null);
+  // O prazo da memória que espera confirmação: encurtar apaga as notas mais velhas.
+  const [notesConfirming, setNotesConfirming] = useState<number | null>(null);
 
   useEffect(() => {
     if (state.data) setDays(state.data.retentionDays === null ? "" : String(state.data.retentionDays));
+    if (state.data) setNotesDays(String(state.data.notesRetention.days));
   }, [state.data]);
 
   if (!canConfigure) return null;
   if (state.error && !state.data) return <Notice tone="fail">{errorText(state.error)}</Notice>;
   if (!state.data) return <Skeleton lines={2} />;
-  const { retentionDays: current, recording, minDays, maxDays, history } = state.data;
+  const { retentionDays: current, recording, minDays, maxDays, notesRetention, history } = state.data;
 
   const store = (next: number | null): void =>
     void save.run(() => api("/privacy/retention", { method: "PUT", body: { days: next } })).then((ok) => {
       if (ok) setConfirming(null);
+      state.reload();
+    });
+
+  const storeNotes = (next: number): void =>
+    void notesSaver.run(() => api("/privacy/caller-notes-retention", { method: "PUT", body: { days: next } })).then((ok) => {
+      if (ok) setNotesConfirming(null);
       state.reload();
     });
 
@@ -203,6 +244,64 @@ export function PrivacyPanel() {
         </form>
       </Panel>
 
+      <Panel title={t.notesTitle} description={t.notesLead}>
+        <form
+          className="grid max-w-xl gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const problem = notesRetentionProblem(notesDays, { minDays: notesRetention.minDays, maxDays: notesRetention.maxDays, transcriptDays: current }, t);
+            setNotesProblem(problem);
+            if (problem) return;
+            const next = Number(notesDays);
+            // Encurtar apaga as notas mais velhas: pede confirmação. Alongar não apaga nada.
+            if (next < notesRetention.days) setNotesConfirming(next);
+            else storeNotes(next);
+          }}
+        >
+          <p>{fill(notesRetention.configured === null ? t.notesCurrentDefault : t.notesCurrent, { days: notesRetention.days })}</p>
+          {notesRetention.effective < notesRetention.days ? <Notice tone="warn">{fill(t.notesEffective, { days: notesRetention.effective })}</Notice> : null}
+          <Field label={t.notesDays} hint={fill(t.notesHint, { min: notesRetention.minDays, max: notesRetention.maxDays, default: notesRetention.defaultDays })}>
+            <TextInput
+              mono
+              type="number"
+              className="max-w-40"
+              min={notesRetention.minDays}
+              max={current === null ? notesRetention.maxDays : Math.min(notesRetention.maxDays, current)}
+              step={1}
+              value={notesDays}
+              onChange={(event) => {
+                setNotesDays(event.target.value);
+                setNotesProblem(null);
+              }}
+              required
+            />
+          </Field>
+          {notesProblem ? <Notice tone="fail">{notesProblem}</Notice> : null}
+          {notesConfirming === null ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="submit" busy={notesSaver.busy}>
+                {t.notesSave}
+              </Button>
+              <ActionStatus action={notesSaver} />
+            </div>
+          ) : (
+            <Notice tone="fail">
+              <p className="font-bold">{fill(t.notesConfirmTitle, { days: notesConfirming })}</p>
+              <p>{t.notesConfirmBody}</p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <Button variant="danger" busy={notesSaver.busy} onClick={() => storeNotes(notesConfirming)}>
+                  {fill(t.notesConfirmYes, { days: notesConfirming })}
+                </Button>
+                <Button variant="ghost" onClick={() => setNotesConfirming(null)}>
+                  {common.actions.cancel}
+                </Button>
+              </div>
+              {notesSaver.error ? <p>{notesSaver.error}</p> : null}
+            </Notice>
+          )}
+        </form>
+      </Panel>
+
       <Panel title={t.exportTitle} description={t.exportLead}>
         <form
           className="grid max-w-xl gap-4"
@@ -232,6 +331,7 @@ export function PrivacyPanel() {
             <Notice tone="ok">
               <p>{fill(t.exportDone, { phone: formatPhone(exported.phone), calls: exported.counts.calls, events: exported.counts.events })}</p>
               {exported.counts.followUps > 0 ? <p>{fill(t.exportDoneFollowUps, { count: exported.counts.followUps })}</p> : null}
+              {exported.counts.notes > 0 ? <p>{fill(t.exportDoneNotes, { count: exported.counts.notes })}</p> : null}
               {exported.counts.doNotCall ? <p>{t.exportDoneDnc}</p> : null}
               <p>{t.exportCare}</p>
             </Notice>

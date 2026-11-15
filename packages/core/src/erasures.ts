@@ -23,6 +23,8 @@ export interface ErasureCounts {
   followUps: number;
   notifications: number;
   approvals: number;
+  /** Notas do agente (`caller_notes`): as do número e as das chamadas dele. Saem inteiras. */
+  notes: number;
   /** Arquivos de gravação que existiam e saem pela tarefa `erase_recordings`, depois do commit. */
   recordings: number;
 }
@@ -62,10 +64,15 @@ const paramsOf = (where: string, ids: string[], phoneE164: string): unknown[] =>
 export const callerSideSql = (alias = ""): string =>
   `((${alias}direction = 'inbound' and ${alias}from_e164 = $1) or (${alias}direction = 'outbound' and ${alias}to_e164 = $1))`;
 
+/** O telefone do outro lado de uma chamada, como coluna: o mesmo lado que `callerSideSql` casa. */
+export const CALLER_PHONE_SQL = "case when direction = 'outbound' then to_e164 else from_e164 end";
+
 const SUBJECT_WHERE = callerSideSql();
 
 // Pendências do titular: pelo telefone ou pela chamada de onde nasceram. Avisos: das chamadas e dessas pendências.
 const FOLLOW_UPS_WHERE = "(caller_e164 = $1 or call_id = any($2::uuid[]))";
+// Notas do titular: pelo telefone ou pela chamada em que nasceram. Saem inteiras, como no prazo.
+const NOTES_WHERE = "(caller_e164 = $1 or call_id = any($2::uuid[]))";
 const NOTIFICATIONS_WHERE = `(call_id = any($2::uuid[]) or follow_up_id in (select id from follow_ups where ${FOLLOW_UPS_WHERE}))`;
 
 /**
@@ -139,6 +146,7 @@ export async function countCallerData(q: OrgQuery, options: { dir: string; phone
     followUps: await count(`select count(*) as n from follow_ups where ${FOLLOW_UPS_WHERE}`, [phoneE164, ids]),
     notifications: await count(`select count(*) as n from notifications where ${NOTIFICATIONS_WHERE}`, [phoneE164, ids]),
     approvals: await count("select count(*) as n from approvals where call_id = any($1::uuid[])", [ids]),
+    notes: await count(`select count(*) as n from caller_notes where ${NOTES_WHERE}`, [phoneE164, ids]),
     recordings: await countRecordings(dir, q.organizationId, ids),
     live: await hasLiveCall(q, phoneE164),
   };
@@ -148,7 +156,8 @@ export async function countCallerData(q: OrgQuery, options: { dir: string; phone
  * Atende o pedido de apagamento de um titular, numa transação só. Nas chamadas encerradas em que o
  * telefone é o outro lado (`callerSideSql`), sai toda fala e todo texto sobre a pessoa: as falas, o resumo, a citação do desfecho, o
  * texto da análise, o motivo do pedido para parar a gravação, os argumentos e mensagens de
- * ferramenta, o texto de aprovações e de avisos, e as pendências (pelo telefone e pela chamada). O
+ * ferramenta, o texto de aprovações e de avisos, as pendências (pelo telefone e pela chamada) e as
+ * notas do agente (pelo telefone e pela chamada; estas saem inteiras). O
  * telefone do titular vira nulo nas chamadas, nos eventos e nas pendências.
  *
  * Fica o registro do serviço prestado — horário, duração, custo, desfecho, nota da análise, quem
@@ -192,6 +201,8 @@ export async function eraseCaller(q: OrgQuery, options: { dir: string; phoneE164
   ]);
   // A tarefa de lembrete de antes da atualização leva o título e os detalhes da pendência no payload.
   await q.exec(`update tasks set payload = payload || jsonb_build_object('title', $2::text, 'details', '') where call_id = any($1::uuid[]) and payload ? 'title'`, [ids, ERASED_TEXT]);
+  // A nota é o que a pessoa disse: sai inteira, e não trocada por marcador (como no prazo da memória).
+  const notes = await q.exec(`delete from caller_notes where ${NOTES_WHERE}`, [phoneE164, ids]);
   const approvals = await q.exec(`update approvals set question = $2, context = ${ERASED} where call_id = any($1::uuid[])`, [ids, ERASED_TEXT]);
 
   const calls = await q.exec(
@@ -211,7 +222,7 @@ export async function eraseCaller(q: OrgQuery, options: { dir: string; phoneE164
   const erasedBefore = await q.one("select 1 from calls where erased_at is not null limit 1");
   if (!queued && erasedBefore) await enqueueTask(q, { kind: ERASE_RECORDINGS_TASK, payload: {}, runAt: now });
 
-  return { calls, events: events.size, followUps, notifications, approvals, recordings };
+  return { calls, events: events.size, followUps, notifications, approvals, notes, recordings };
 }
 
 /**

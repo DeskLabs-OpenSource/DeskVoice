@@ -91,6 +91,7 @@ const common = {
     whatsapp_connector_refused: "O conector de WhatsApp configurado recusou a mensagem de teste. Confira o endereço e o token do conector; o detalhe técnico fica no registro do painel.",
     whatsapp_connected: "Há um número de WhatsApp conectado por QR Code. Desconecte o número antes de salvar outro conector ou de remover o serviço.",
     owner_unavailable: "Essa pessoa não está ativa na equipe. Escolha outra, ou deixe com a equipe.",
+    caller_notes_retention_above_transcripts: "O prazo da memória não pode passar do prazo de guarda das conversas. Escolha um prazo menor, ou aumente antes o prazo de guarda.",
     follow_up_closed: "Esta pendência já foi fechada por outra pessoa. Atualize a página.",
     whatsapp_calls_unavailable: "O processo de voz deste servidor ainda não tem a chave do serviço de ligação pelo WhatsApp. Rode bash install/update.sh no servidor, uma vez.",
     whatsapp_calls_service_absent: "O serviço de ligação pelo WhatsApp não está de pé neste servidor. Instale o serviço antes de conectar um número.",

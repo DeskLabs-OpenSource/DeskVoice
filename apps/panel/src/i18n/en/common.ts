@@ -93,6 +93,7 @@ const common: CommonDictionary = {
     whatsapp_connector_refused: "The configured WhatsApp connector refused the test message. Check the connector address and token; the technical detail is in the panel log.",
     whatsapp_connected: "A WhatsApp number is connected by QR code. Disconnect the number before saving another connector or removing the service.",
     owner_unavailable: "This person is not active in the team. Pick someone else, or leave it with the team.",
+    caller_notes_retention_above_transcripts: "The memory period cannot be longer than the conversation retention period. Pick a shorter period, or raise the retention period first.",
     follow_up_closed: "Someone else already closed this follow-up. Refresh the page.",
     whatsapp_calls_unavailable: "The voice process of this server does not have the key of the WhatsApp calls service yet. Run bash install/update.sh on the server, once.",
     whatsapp_calls_service_absent: "The WhatsApp calls service is not running on this server. Install the service before connecting a number.",

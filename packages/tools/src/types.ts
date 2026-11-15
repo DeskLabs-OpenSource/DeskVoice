@@ -61,5 +61,10 @@ export interface Tool<Input = unknown> {
    * ao motor, mesmo marcada no agente, e o agente de exemplo não nasce com ela. Omitido vale `true`.
    */
   available?: boolean;
+  /**
+   * `true`: nenhum agente nasce com ela, nem o de exemplo; só a tem quem a marcar na tela do agente.
+   * Para a ferramenta que guarda dado novo sobre quem liga (a nota), que pede uma escolha (registro 0020, 1A).
+   */
+  offByDefault?: boolean;
   run(input: Input, ctx: ToolContext): Promise<ToolResult>;
 }

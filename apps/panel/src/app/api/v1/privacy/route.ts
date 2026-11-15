@@ -1,4 +1,4 @@
-import { CALL_RECORDING_SETTING, MAX_TRANSCRIPT_RETENTION_DAYS, MIN_TRANSCRIPT_RETENTION_DAYS, ORG_EVENT_KINDS, TRANSCRIPT_RETENTION_SETTING, callRecordingOf, transcriptRetentionOf } from "@deskvoice/core";
+import { CALL_RECORDING_SETTING, DEFAULT_CALLER_NOTES_RETENTION_DAYS, MAX_CALLER_NOTES_RETENTION_DAYS, MIN_CALLER_NOTES_RETENTION_DAYS, callerNotesRetention, MAX_TRANSCRIPT_RETENTION_DAYS, MIN_TRANSCRIPT_RETENTION_DAYS, ORG_EVENT_KINDS, TRANSCRIPT_RETENTION_SETTING, callRecordingOf, transcriptRetentionOf } from "@deskvoice/core";
 import { handle } from "../../../../server/context";
 
 const HISTORY_LIMIT = 50;
@@ -13,5 +13,21 @@ export const GET = handle({ configure: true }, async ({ q }) => {
       where e.kind = any($1) order by e.at desc, e.id desc limit $2`,
     [ORG_EVENT_KINDS, HISTORY_LIMIT],
   );
-  return { retentionDays: transcriptRetentionOf(stored?.value), recording: callRecordingOf(recording?.value), minDays: MIN_TRANSCRIPT_RETENTION_DAYS, maxDays: MAX_TRANSCRIPT_RETENTION_DAYS, history };
+  const notes = await callerNotesRetention(q);
+  return {
+    retentionDays: transcriptRetentionOf(stored?.value),
+    recording: callRecordingOf(recording?.value),
+    minDays: MIN_TRANSCRIPT_RETENTION_DAYS,
+    maxDays: MAX_TRANSCRIPT_RETENTION_DAYS,
+    // O prazo da memória (2A): o gravado, o que vale sem escolha, os limites da tela e o que está em vigor.
+    notesRetention: {
+      configured: notes.configured,
+      days: notes.days,
+      effective: notes.effective,
+      defaultDays: DEFAULT_CALLER_NOTES_RETENTION_DAYS,
+      minDays: MIN_CALLER_NOTES_RETENTION_DAYS,
+      maxDays: MAX_CALLER_NOTES_RETENTION_DAYS,
+    },
+    history,
+  };
 });

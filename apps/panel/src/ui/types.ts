@@ -94,7 +94,11 @@ export interface CallerHistory {
     simulated: boolean;
   }>;
   openFollowUpCount: number;
-  openFollowUps: Array<{ id: string; callId: string | null; title: string; dueAt: string; ownerName: string | null }>;
+  simulatedOpenFollowUpCount: number;
+  openFollowUps: Array<{ id: string; callId: string | null; title: string; dueAt: string; ownerName: string | null; simulated: boolean }>;
+  noteCount: number;
+  simulatedNoteCount: number;
+  notes: Array<{ id: string; callId: string; text: string; createdAt: string; simulated: boolean }>;
 }
 
 export interface CallEvent {

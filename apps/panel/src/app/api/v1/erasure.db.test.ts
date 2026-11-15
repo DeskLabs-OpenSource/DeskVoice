@@ -39,6 +39,8 @@ const SPOKEN = [
   "Retornou e remarcou.",
   "Confirmar endereço",
   "Aviso: Helena pediu retorno.",
+  "Helena prefere ser atendida de manhã; pedido 4471.",
+  "Nota da chamada dela com outro telefone.",
 ];
 
 const ANALYSIS = {
@@ -109,6 +111,9 @@ async function seed(org: string, phone = PHONE): Promise<{ callId: string; file:
       NOW,
     ]);
     await q.exec("insert into do_not_call (organization_id, e164, reason) values ($1, $2, 'pediu') on conflict do nothing", [org, phone]);
+    // Notas do agente: a do número, e uma da chamada dele com outro telefone (sai pela chamada).
+    await q.exec("insert into caller_notes (organization_id, call_id, caller_e164, text, created_at) values ($1, $2, $3, 'Helena prefere ser atendida de manhã; pedido 4471.', $4)", [org, callId, phone, NOW]);
+    await q.exec("insert into caller_notes (organization_id, call_id, caller_e164, text, created_at) values ($1, $2, '+5541900001111', 'Nota da chamada dela com outro telefone.', $3)", [org, callId, NOW]);
   });
   const file = recordingPath(panel.deps.recordingsDir, org, callId);
   await mkdir(path.dirname(file), { recursive: true });
@@ -116,7 +121,7 @@ async function seed(org: string, phone = PHONE): Promise<{ callId: string; file:
   return { callId, file };
 }
 
-const EXPECTED = { calls: 1, events: 10, followUps: 3, notifications: 2, approvals: 1, recordings: 1 };
+const EXPECTED = { calls: 1, events: 10, followUps: 3, notifications: 2, approvals: 1, notes: 2, recordings: 1 };
 
 describe("apagar a conversa a pedido do titular", () => {
   it("a prévia conta o que sairia e não apaga nada", async () => {
@@ -208,6 +213,11 @@ describe("apagar a conversa a pedido do titular", () => {
     const approval = await one<{ question: string; context: unknown }>(org, "select question, context from approvals where call_id = $1", [callId]);
     expect(approval).toEqual({ question: ERASED_TEXT, context: { erased: true } });
 
+    // As notas do número e as da chamada dele saem inteiras; as da outra pessoa e da outra organização ficam.
+    expect(await read(org, "select 1 from caller_notes where call_id = $1 or caller_e164 = $2", [callId, PHONE])).toEqual([]);
+    expect(await read(org, "select 1 from caller_notes where call_id = $1", [otherCall])).toHaveLength(2);
+    expect(await read(foreign, "select 1 from caller_notes where caller_e164 = $1", [PHONE])).toHaveLength(1);
+
     // A lista de não ligar fica: é ela que impede ligar de novo para quem pediu.
     expect(await read(org, "select 1 from do_not_call where e164 = $1", [PHONE])).toHaveLength(1);
 
@@ -238,7 +248,7 @@ describe("apagar a conversa a pedido do titular", () => {
     const { content, counts } = exported.data as { content: string; counts: Record<string, unknown> };
     for (const spoken of SPOKEN) expect(content).not.toContain(spoken);
     // Só a lista de não ligar continua ligada ao número.
-    expect(counts).toEqual({ calls: 0, events: 0, doNotCall: true, followUps: 0 });
+    expect(counts).toEqual({ calls: 0, events: 0, doNotCall: true, followUps: 0, notes: 0 });
   });
 
   it("recusa enquanto houver chamada viva desse telefone, e a prévia avisa", async () => {
@@ -283,7 +293,7 @@ describe("apagar a conversa a pedido do titular", () => {
     await writeFile(file, "RIFF....WAVE");
     await withOrg(panel.app, org, (q) => q.exec("update tasks set status = 'done' where kind = $1", [ERASE_RECORDINGS_TASK]));
     const again = await call(erase, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
-    expect(again.data).toEqual({ calls: 0, events: 0, followUps: 0, notifications: 0, approvals: 0, recordings: 0 });
+    expect(again.data).toEqual({ calls: 0, events: 0, followUps: 0, notifications: 0, approvals: 0, notes: 0, recordings: 0 });
     expect((await tasks()).map((task) => task.status)).toEqual(["done", "queued"]);
     const done = await removeErasedRecordings(panel.app, { dir: panel.deps.recordingsDir, organizationId: org, now: NOW });
     expect([done.removed, done.left]).toEqual([1, 0]);
@@ -347,7 +357,7 @@ describe("apagar a conversa a pedido do titular", () => {
 
     await call(erase, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
     const second = await call(erase, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
-    expect(second.data).toEqual({ calls: 0, events: 0, followUps: 0, notifications: 0, approvals: 0, recordings: 0 });
+    expect(second.data).toEqual({ calls: 0, events: 0, followUps: 0, notifications: 0, approvals: 0, notes: 0, recordings: 0 });
   });
 
   it("o titular é sempre o outro lado: a própria linha não alcança nada, e a ligação feita para a pessoa entra", async () => {

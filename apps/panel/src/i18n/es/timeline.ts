@@ -68,10 +68,11 @@ const timeline: TimelineDictionary = {
   // El bloque "Este número": lo que la organización ya sabe del teléfono del otro lado (solo el equipo lo ve).
   callerHistory: {
     title: "Este número",
-    hint: "Las llamadas anteriores de este teléfono y lo que quedó abierto. Solo el equipo lo ve; el agente no recibe nada de esto.",
+    hint: "Las llamadas anteriores de este teléfono, lo que quedó abierto y las notas que guardó el agente. Solo el equipo lo ve; el agente no recibe nada de esto.",
     first: "Ninguna llamada anterior de este número.",
     calls: "Llamadas anteriores ({count})",
     followUps: "Pendientes abiertos ({count})",
+    notes: "Notas del agente ({count})",
     more: "Y {count} más.",
     erased: "Contenido borrado a pedido del titular.",
     due: "Plazo {value}",
@@ -93,6 +94,7 @@ const timeline: TimelineDictionary = {
     stop_recording: "Detener la grabación",
     call_webhook: "Llamar a un sistema externo",
     create_task: "Abrir un pendiente",
+    remember_caller_note: "Guardar una nota sobre quien llamó",
     summarize_call: "Resumen de la llamada",
     classify_call_outcome: "Desenlace de la llamada",
     deliver_notification: "Entrega de aviso",

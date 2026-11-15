@@ -68,10 +68,11 @@ const timeline: TimelineDictionary = {
   // The "This number" block: what the organization already knows about the phone on the other side (team only).
   callerHistory: {
     title: "This number",
-    hint: "Earlier calls from this phone and what is still open. Only the team sees this; the agent receives none of it.",
+    hint: "Earlier calls from this phone, what is still open and the notes the agent kept. Only the team sees this; the agent receives none of it.",
     first: "No earlier calls from this number.",
     calls: "Earlier calls ({count})",
     followUps: "Open follow-ups ({count})",
+    notes: "Agent notes ({count})",
     more: "And {count} more.",
     erased: "Content erased at the data subject's request.",
     due: "Due {value}",
@@ -93,6 +94,7 @@ const timeline: TimelineDictionary = {
     stop_recording: "Stop recording",
     call_webhook: "Call an external system",
     create_task: "Open a follow-up",
+    remember_caller_note: "Keep a note about the caller",
     summarize_call: "Call summary",
     classify_call_outcome: "Call outcome",
     deliver_notification: "Notice delivery",

@@ -5,14 +5,15 @@ import type { OrgQuery } from "./types";
 /**
  * A memória do número para a equipe (fatia 2 do desenho de 13/11, registro 0020, item 1): o que a
  * organização já sabe sobre o telefone do outro lado de uma chamada. É só leitura do que a equipe já
- * vê na lista de Chamadas e em Pendências, e nunca chega ao modelo: quem lê são a tela da chamada e
- * os avisos de `transfer_to_human` e `notify_human`.
+ * vê na lista de Chamadas e em Pendências, mais as notas do agente (fatia 3), e nunca chega ao modelo:
+ * quem lê são a tela da chamada e os avisos de `transfer_to_human` e `notify_human`, que nunca
+ * mostram o texto das notas.
  *
  * A chave é (organização, telefone): o telefone é o do outro lado, pelo mesmo critério do apagamento
  * a pedido do titular (`callerSideSql`). Chamada sem número não lembra nem é lembrada.
  */
 
-/** Quantas ligações anteriores e pendências abertas a tela lista. A contagem é sempre a inteira. */
+/** Quantas ligações anteriores, pendências abertas e notas a tela lista. A contagem é sempre a inteira. */
 export const CALLER_HISTORY_LIMIT = 10;
 
 export interface CallerHistoryCall {
@@ -40,6 +41,18 @@ export interface CallerHistoryFollowUp {
   title: string;
   dueAt: Date;
   ownerName: string | null;
+  /** Nasceu numa chamada simulada. A criada pela tela, sem chamada, conta como real. */
+  simulated: boolean;
+}
+
+/** Uma nota do agente sobre este número (`caller_notes`), com a ligação em que nasceu. */
+export interface CallerHistoryNote {
+  id: string;
+  callId: string;
+  text: string;
+  createdAt: Date;
+  /** Nasceu numa chamada simulada: a tela a marca, e os avisos nunca a contam. */
+  simulated: boolean;
 }
 
 export interface CallerHistory {
@@ -50,11 +63,21 @@ export interface CallerHistory {
   simulatedCallCount: number;
   calls: CallerHistoryCall[];
   openFollowUpCount: number;
+  /** Quantas de `openFollowUpCount` nasceram numa simulada. O aviso conta só as outras (#291). */
+  simulatedOpenFollowUpCount: number;
+  /** As reais primeiro, depois as de simulada; em cada grupo, pelo prazo. */
   openFollowUps: CallerHistoryFollowUp[];
+  /** Todas as notas do número nesta organização; `notes` traz só as mais novas. */
+  noteCount: number;
+  /** Quantas de `noteCount` nasceram numa simulada. */
+  simulatedNoteCount: number;
+  notes: CallerHistoryNote[];
 }
 
 /**
- * As ligações anteriores à chamada `callId` do mesmo telefone e as pendências abertas dele. `null`
+ * As ligações anteriores à chamada `callId` do mesmo telefone, as pendências abertas e as notas do
+ * agente sobre ele. O que nasceu numa chamada simulada vem marcado (`simulated`) e contado à parte:
+ * a tela o mostra com a marca, e os avisos não o contam (#291). `null`
  * quando a chamada não existe nesta organização ou não tem número do outro lado.
  *
  * Só dentro de `withOrg`: a RLS é o que impede o mesmo número de trazer a ligação de outra
@@ -100,16 +123,36 @@ export async function callerHistory(q: OrgQuery, callId: string): Promise<Caller
   const simulatedCallCount = Number(counted?.simulated ?? 0);
 
   // A pendência apagada a pedido do titular fica sem telefone; o marcador no título é a defesa a mais.
+  // A pendência sem chamada (criada pela tela) conta como real.
   const openWhere = "f.caller_e164 = $1 and f.status = 'open' and f.title <> $2";
-  const followUps = await q.many<{ id: string; call_id: string | null; title: string; due_at: Date; owner_name: string | null }>(
-    `select f.id, f.call_id, f.title, f.due_at, u.name as owner_name
-       from follow_ups f left join users u on u.id = f.owner_user_id
+  const followUpSimulated = "coalesce(oc.channel = 'simulated', false)";
+  const followUps = await q.many<{ id: string; call_id: string | null; title: string; due_at: Date; owner_name: string | null; simulated: boolean }>(
+    `select f.id, f.call_id, f.title, f.due_at, u.name as owner_name, ${followUpSimulated} as simulated
+       from follow_ups f left join users u on u.id = f.owner_user_id left join calls oc on oc.id = f.call_id
       where ${openWhere}
-      order by f.due_at, f.id
+      order by ${followUpSimulated}, f.due_at, f.id
       limit ${CALLER_HISTORY_LIMIT}`,
     [phone, ERASED_TEXT],
   );
-  const openFollowUpCount = Number((await q.one<{ n: string }>(`select count(*) as n from follow_ups f where ${openWhere}`, [phone, ERASED_TEXT]))?.n ?? 0);
+  const followUpCounts = await q.one<{ n: string; simulated: string }>(
+    `select count(*) as n, count(*) filter (where ${followUpSimulated}) as simulated from follow_ups f left join calls oc on oc.id = f.call_id where ${openWhere}`,
+    [phone, ERASED_TEXT],
+  );
+
+  // As notas do número, de qualquer ligação dele (inclusive desta). O texto é dado: a tela o mostra
+  // como texto puro, e nada daqui vai para aviso nem para o modelo.
+  const notes = await q.many<{ id: string; call_id: string; text: string; created_at: Date; simulated: boolean }>(
+    `select n.id, n.call_id, n.text, n.created_at, nc.channel = 'simulated' as simulated
+       from caller_notes n join calls nc on nc.id = n.call_id
+      where n.caller_e164 = $1
+      order by n.created_at desc, n.id
+      limit ${CALLER_HISTORY_LIMIT}`,
+    [phone],
+  );
+  const noteCounts = await q.one<{ n: string; simulated: string }>(
+    "select count(*) as n, count(*) filter (where nc.channel = 'simulated') as simulated from caller_notes n join calls nc on nc.id = n.call_id where n.caller_e164 = $1",
+    [phone],
+  );
 
   return {
     phone,
@@ -130,7 +173,11 @@ export async function callerHistory(q: OrgQuery, callId: string): Promise<Caller
         simulated: row.simulated,
       };
     }),
-    openFollowUpCount,
-    openFollowUps: followUps.map((row) => ({ id: row.id, callId: row.call_id, title: row.title, dueAt: row.due_at, ownerName: row.owner_name })),
+    openFollowUpCount: Number(followUpCounts?.n ?? 0),
+    simulatedOpenFollowUpCount: Number(followUpCounts?.simulated ?? 0),
+    openFollowUps: followUps.map((row) => ({ id: row.id, callId: row.call_id, title: row.title, dueAt: row.due_at, ownerName: row.owner_name, simulated: row.simulated })),
+    noteCount: Number(noteCounts?.n ?? 0),
+    simulatedNoteCount: Number(noteCounts?.simulated ?? 0),
+    notes: notes.map((row) => ({ id: row.id, callId: row.call_id, text: row.text, createdAt: row.created_at, simulated: row.simulated })),
   };
 }

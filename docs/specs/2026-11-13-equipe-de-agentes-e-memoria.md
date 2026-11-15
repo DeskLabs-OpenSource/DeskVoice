@@ -30,6 +30,11 @@ O que mudou entre o #114 e a primeira fatia de memória, e onde está no texto a
   Tudo o que a memória guarda sobre um telefone também sai por ele: as notas (fatia 3) e o `summary`
   e o `reason` de `agent_handoff` (fatia 4). O "Esquecer este número" da seção 2.3 continua sendo o
   caminho menor, só da memória.
+- **A fatia 3 saiu em duas** (seção 7): a 3a traz a nota já com prazo, exportação e apagamento a
+  pedido do titular; a 3b traz "Apagar nota" e "Esquecer este número", com `caller_notes_deleted`.
+- **O que nasce numa chamada simulada não conta no aviso** ([#291](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/291)).
+  A pendência e a nota de uma simulada aparecem no bloco "Este número" com a marca "Simulada", e os
+  avisos de `transfer_to_human` e `notify_human` não as contam nem as mostram (seção 7, fatia 3a).
 - **A fala de quem ligou é dado, nunca instrução.** Todo texto lembrado entra no contexto de um
   agente dentro de um bloco delimitado e escapado, e a memória nunca muda a configuração da ligação
   (0020, "Regras que valem em toda fatia"). Isso vale para a fatia 6 e para o resumo da passagem da
@@ -397,7 +402,7 @@ O supervisor humano ao vivo continua sendo a frente "Painel de supervisão ao vi
 | Tabelas | `db/migrations/<carimbo>_follow_ups.sql`, `<carimbo>_caller_notes.sql`, `<carimbo>_agent_handoffs.sql` (tabela `agent_handoff_targets`, coluna `agents.follow_up_owner_user_id`, coluna `usage_ledger.agent_id`); a de `follow_ups` traz também a coluna `notifications.follow_up_id` | Um caminho de schema; `organization_id` em tudo; chaves compostas; RLS como em `organization_events`; o teste de isolamento gerado as cobre sozinho |
 | Ponto de escrita das pendências | `packages/core/src/follow-ups.ts` (`createFollowUp`, `assignFollowUp`, `closeFollowUp`) | Um ponto de escrita por entidade, dentro de `withOrg` |
 | Ponto de escrita e leitura da memória | `packages/core/src/caller-memory.ts` (`saveCallerNote`, `loadCallerMemory` com o teto de caracteres, `forgetCaller`, `purgeCallerNotes`) | Idem; `purgeCallerNotes` recusa rodar fora de `withOrg`, como `purgeTranscripts` |
-| Vocabulário | `packages/core/src/types.ts`: em `CALL_EVENT_KINDS`, `follow_up_created`, `follow_up_assigned`, `follow_up_closed`, `agent_handoff`, `memory_loaded`; em `ORG_EVENT_KINDS`, `caller_memory_changed`, `caller_notes_deleted` e `caller_notes_purged` (2A) | Vocabulário fechado; cada tipo tem tela na linha do tempo |
+| Vocabulário | `packages/core/src/types.ts`: em `CALL_EVENT_KINDS`, `follow_up_created`, `follow_up_assigned`, `follow_up_closed`, `agent_handoff`, `memory_loaded`; em `ORG_EVENT_KINDS`, `caller_memory_changed`, `caller_notes_deleted`, `caller_notes_purged` (2A) e `caller_notes_retention_changed` (a mudança do prazo da memória, com o valor antigo e o novo; entrou na fatia 3a) | Vocabulário fechado; cada tipo tem tela na linha do tempo |
 | Ferramentas | `packages/tools/src/tools/remember_caller_note.ts` (nova, até 10 notas por ligação), `transfer_to_agent.ts` (nova), `create_task.ts` (muda); `run-tool.ts` respeita a declaração da ferramenta de que os argumentos são texto sobre a pessoa e não os grava em `tool_called` | Um arquivo por peça: a declaração mora no arquivo da ferramenta, sem lista central; argumento validado com zod; organização vem do contexto, nunca do modelo |
 | Telefonia | `apps/voice/src/call-session.ts`: troca de sessão na passagem, limites da ligação, bloco de memória | É capacidade de telefonia (transferir), núcleo pela regra 1 do `GOVERNANCE.md` |
 | Rotinas | `apps/routines/src/routines/follow_up.ts` (muda), `purge_transcripts.ts` (muda: apaga as notas e as pendências fechadas vencidas), `review_call.ts` (nova), `purge_caller_notes.ts` (nova, 2A) | Um arquivo por rotina; fila por notificação, com `run_at` como relógio |
@@ -509,6 +514,29 @@ entra depois que ela chegar ou o prazo dela vencer (vale A).
 
 ### Fatia 3: as notas do agente, com prazo, exportação e esquecimento
 
+**Dividida em duas** (15/11/2026), porque a fatia inteira não cabia numa revisão de uma sentada:
+
+- **3a:** `caller_notes`, `remember_caller_note`, `purgeCallerNotes` chamada por `purge_transcripts`,
+  a rotina `purge_caller_notes`, o campo de prazo da memória no bloco "Memória entre chamadas",
+  `caller_notes_purged` e `caller_notes_retention_changed`, a linha `note` na exportação, as notas no
+  apagamento a pedido do titular e no bloco "Este número", e a regra da simulada abaixo. A nota já
+  nasce com prazo, exportação e apagamento a pedido do titular.
+- **3b:** o botão "Apagar nota" e o "Esquecer este número", com `caller_notes_deleted`.
+
+**A regra da simulada** ([#291](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/291)), para
+as notas e para as pendências. A rota de simular não pede papel, então qualquer pessoa da equipe
+simula com o número de um cliente:
+
+- o que nasceu numa chamada com `channel = 'simulated'` aparece no bloco "Este número" com a marca
+  "Simulada", como a própria chamada simulada já aparece;
+- os avisos de `transfer_to_human` e `notify_human`, no painel e no WhatsApp, não contam nem mostram
+  esse registro; a pendência sem `call_id`, criada pela tela, conta como real;
+- `callerHistory` separa as contagens (`simulatedOpenFollowUpCount`, `simulatedNoteCount`), como já
+  fazia com `simulatedCallCount`;
+- **na fatia 6, as notas nascidas numa simulada ficam fora do contexto do agente.**
+
+O texto abaixo é o da fatia inteira, como foi desenhada.
+
 `caller_notes`, `remember_caller_note`, `purgeCallerNotes` chamada por `purge_transcripts`, bloco
 "Memória entre chamadas" em Configurações, apagar nota, "Esquecer este número", a linha `note` na
 exportação, os eventos da organização, a rotina `purge_caller_notes` e o campo de prazo da memória
@@ -561,7 +589,8 @@ caso não abre pendência; a mesma ligação revista duas vezes (nova tentativa 
 ### Fatia 6: a memória no contexto do agente (decisão 4B)
 
 `loadCallerMemory` com o teto, o bloco nas instruções, `memory_loaded`, o interruptor com o aviso em
-Configurações, a regra da ligação de saída.
+Configurações, a regra da ligação de saída. As notas e as pendências nascidas numa chamada simulada
+nunca entram no bloco (regra da simulada, fatia 3a).
 
 **Prova:** testes de banco: o bloco nunca passa de 1 500 caracteres e corta as notas mais antigas;
 nunca traz resumo nem fala; nota de outra organização com o mesmo número nunca entra; com a
