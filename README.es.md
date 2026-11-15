@@ -136,6 +136,7 @@ no se probó, cada capacidad dice hasta dónde llegó la prueba:
 | Conversación de la llamada: saludo, turnos, herramientas, cierre | Probado en simulación |
 | Avisar a una persona y pedir aprobación en medio de la llamada, con plazo y respuesta por defecto | Probado en simulación |
 | Línea de tiempo de cada llamada, evento por evento, con costo | Probado en simulación |
+| En la pantalla de cada llamada, las llamadas anteriores del mismo número (fecha, agente, desenlace y enlace) y sus pendientes abiertos; el aviso de transferencia y el de `notify_human` dicen cuántas veces ya llamó el número. Nada de esto llega al agente de la llamada | Probado con base de datos real, incluido el aislamiento entre empresas y que las instrucciones del agente no cambian; la prueba de pantalla corre en el CI, pero la pantalla no se vio en un navegador real. No se midió el rendimiento con muchas llamadas del mismo número. Desde la 0.14.0 |
 | Tareas que siguen después de la llamada (resumen, avisos, tareas de seguimiento) | Probado en simulación |
 | Tope de costo y de duración por llamada | Probado en simulación |
 | Tope por llamada en las herramientas que graban o avisan: 5 pendientes, 5 citas, 5 llamadas de webhook, 3 avisos al equipo y 3 pedidos de aprobación; por encima, la herramienta no corre y el agente dice que el pedido no quedó registrado | Probado con base de datos real, incluidas llamadas en paralelo, que no pasan del tope. Todavía sin llamada por operadora real. Desde la 0.13.0 |
