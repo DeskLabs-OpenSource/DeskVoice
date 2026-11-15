@@ -197,6 +197,49 @@ Com o vocabulário, o WER em nomes cai de ~25 % para 9,4 % nas duas linhas, e o 
 - **Conversa de fundo fecha mal o turno por VAD:** o achado vai para a DESA-24 (R11), e não para
   esta frente.
 
+### Rodada 2: os externos e o Jev (fatia 1b)
+
+> Da fatia 1b ([#262](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/262), mesclado em
+> `4377efb`). Tabelas copiadas do corpo do #262, sem alteração.
+
+Rodadas de **15/11/2026, 15:05Z (em `63b48d5`) e 16:02Z (em `4c1f6f7`)**, na mesma VPS, com
+`--teto-usd 1 --servicos deepgram,assemblyai,soniox --decisor jev`. Só o texto sintético das 24
+frases, sem áudio e sem nada de ligação. **Gasto: cerca de US$ 0,012 de US$ 1, todo do Jev.** A
+chave aparece 0 vezes na saída e no stderr.
+
+| Serviço | WER | Acerto em nomes | Latência parcial / final | Preço (15/11/2026) |
+|---|---|---|---|---|
+| Deepgram Nova-3 | não medido: chave não entregue | — | — | US$ 0,0048/min + US$ 0,0013/min de keyterm |
+| AssemblyAI Universal-Streaming | não medido: chave não entregue | — | — | US$ 0,15/h de sessão |
+| Soniox stt-rt-v6 | não medido: chave não entregue | — | — | US$ 0,12/h (a página não diz se é áudio ou sessão) |
+
+Os três têm português em streaming, conferido na documentação de idiomas em 15/11 (fontes no #262).
+
+**Jev** (`jev-latest`, que respondeu `jev-1.14.0`; US$ 0,042 por milhão de tokens de entrada):
+
+| Rodada | Chamadas simultâneas | Passadas | 3 perguntas p50/p95 (ms) | 1 pergunta p50/p95 (ms) | Acerto da leitura | Média de "fundo" | Média de "terminou" | Falhas |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| 15:05Z | 1 | 24 | 176 / 228 | 177 / 209 | 24/24 | 0.88 | 0.76 | 0 |
+| 15:05Z | 3 | 72 | 178 / 234 | 178 / 215 | 72/72 | 0.87 | 0.75 | 0 |
+| 16:02Z | 1 | 24 | 181 / 210 | 186 / 229 | 24/24 | 0.88 | 0.75 | 0 |
+| 16:02Z | 3 | 72 | 187 / 235 | 184 / 230 | 72/72 | 0.87 | 0.75 | 0 |
+
+### O que a rodada 2 decide (leitura do Arquiteto, 15/11)
+
+- **Ainda não há vencedor de transcrição.** Nenhum candidato capaz de passar na régua de 700 ms
+  foi medido. A fatia 3 continua parada até a rodada dos externos (chaves pelo cofre) ou a do
+  reconhecedor de hoje (chave da DESA-10).
+- **Latência do filtro:** o Jev cabe na régua com folga (p95 de 210 a 235 ms, de uma a três
+  chamadas simultâneas, da VPS aos EUA). O Laya, com uma chamada, também cabe (p95 405 ms), mas com
+  três não cabe (p95 1114 ms). Em latência, o Jev ganha. Em dado, o Laya ganha: não sai da VPS.
+- **O acerto ainda não decide nada.** Os 100 % da leitura vêm de um estado que já traz a frase
+  certa: a transcrição "acertou" antes de o Jev ser perguntado. O caso que importa é a transcrição
+  errada ("meu gasto" no lugar de "Melgaço"), e ele não foi medido. "Fundo" e "terminou" não têm
+  resposta esperada no conjunto: a média de 0,87 e 0,75 em frases que são todas de quem liga e
+  todas completas só diz que o Jev não é confiante, e não diz se ele acerta.
+- **Por isso a fatia 1c vem antes da 6** (e antes da decisão 3): o conjunto ganha as respostas
+  esperadas e as leituras erradas, e o Jev e o Laya rodam sobre o mesmo conjunto.
+
 ## Parte 2: a peça de transcrição em streaming
 
 ### Contrato
@@ -524,6 +567,45 @@ Aceite:
   e a do Jev (acerto, se o conjunto tiver a resposta esperada, e latência p50 e p95) vão para a
   seção "Medida", como na rodada 1.
 
+### Fatia 1c: o filtro medido onde ele importa
+
+Nasce da rodada 2. Só mexe em `scripts/bancada-de-voz/` (sem `call-session.ts`, sem `packages/`,
+sem migration, sem dependência nova). Mede o Jev e o Laya **sobre o mesmo conjunto**, com resposta
+esperada para as três perguntas, para que a decisão 3 e a fatia 6 tenham acerto, e não só latência.
+
+O que entra no conjunto (texto inventado, nunca de ligação real; áudio não é preciso, porque os
+dois decidem sobre texto):
+- **leitura com transcrição errada:** para cada termo do vocabulário do conjunto, ao menos uma
+  transcrição errada plausível ("meu gasto" no lugar de "Melgaço") com a resposta esperada; e
+  frases sem termo nenhum, em que a resposta certa é "nenhuma troca";
+- **"fundo":** trechos de quem liga e trechos de fundo (TV, outra pessoa na sala, anúncio), cada
+  um com a resposta esperada;
+- **"terminou":** pensamentos completos e pausas no meio ("o meu CPF é o três, quatro, sete...")
+  com a resposta esperada.
+
+O que a rodada imprime, por modelo e por pergunta: acerto, latência p50 e p95, falhas e o gasto.
+E, separado, **quantas falas de quem liga cada modelo marcou como fundo** com confiança acima do
+corte que a fatia 6 vai usar: é o número que mede o fracasso "descartar fala real".
+
+Roda o Jev com `JEV_API_KEY`, no que sobra do teto de US$ 1 da decisão 2, e o Laya na VPS sem
+custo.
+
+Aceite:
+- cada item novo do conjunto tem a resposta esperada no manifesto, e o teste prova que a contagem
+  do acerto sai certa contra um decisor falso que erra de propósito (por pergunta);
+- a leitura "nenhuma troca" é contada: um decisor que sempre troca perde ponto;
+- **o teto segura o excesso de uma reserva em voo** (ponto que a revisora deixou fora do bloqueio
+  no #262): se o custo real de um pedido passa do pior caso reservado, a rodada não abre pedido
+  novo, para e diz quanto passou. Teste com um pedido falso que custa mais que o reservado;
+- nenhuma chave, nenhum áudio e nenhum resultado bruto entra no diff; o log da rodada não contém a
+  chave (o teste do #262 continua valendo);
+- a tabela vai para a seção "Medida" deste documento, como nas rodadas 1 e 2, com o que ficou sem
+  medida.
+
+Fracasso mesmo funcionando: conjunto em que a resposta esperada de "fundo" é sempre "não" (o
+modelo que nunca marca fundo tira 100 %); leitura errada que só troca uma letra ("Melgaco"), que
+não é o caso que acontece; ou medida do Jev e do Laya sobre conjuntos diferentes.
+
 ### Fatia 2: o contrato e o transcritor simulado
 
 `types.ts` (`StreamingTranscriber` e companhia), `transcribers/simulated.ts`, a descoberta pela
@@ -597,7 +679,7 @@ Aceite: numa chamada simulada com o transcritor simulado, a linha do tempo mostr
 
 `types.ts` (`DecisionModel`), `deciders/simulated.ts`, `deciders/jev.ts` (a decisão 2 veio em
 15/11: a chave chega em `JEV_API_KEY`, teto de US$ 1, só texto sintético; o número da bancada sai
-da fatia 1b), as três
+das fatias 1b e 1c), as três
 perguntas num lugar só, e a ligação em `call-session.ts` com a regra de "ninguém espera" e a de
 "nunca apaga". Medida na bancada: acerto de cada pergunta no conjunto, latência p50 e p95, e
 quantas decisões chegaram a tempo.
