@@ -143,6 +143,7 @@ const timeline = {
       rate_limited: "O provedor pediu para esperar (limite de pedidos da conta).",
       unreachable: "O provedor não respondeu em dois minutos, ou está fora do ar.",
       unexpected_response: "O provedor respondeu algo fora do formato pedido. O que ele cobrou entrou no custo da chamada.",
+      transcription_too_long: "A gravação é mais longa do que o provedor aceita num pedido. Nada foi enviado nem cobrado.",
     } as Record<string, string>,
     transcription_failed_unknown: "O provedor não transcreveu a gravação. O motivo está abaixo e no registro do processo do painel.",
     erased: "O texto deste registro foi apagado a pedido de quem ligou.",

@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
 import { AUTO_TRANSCRIPTION_SETTING, TRANSCRIPTION_SETTING, type VoiceEngine } from "@deskvoice/voice-engine";
 import type * as VoiceEngineModule from "@deskvoice/voice-engine";
+import type * as FsPromises from "node:fs/promises";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCall, createOrganization, depsFor, eventsOf, openTestDbs, t0, task } from "../../test/helpers";
 import transcribeCall from "./transcribe_call";
@@ -11,6 +12,8 @@ import transcribeCall from "./transcribe_call";
 /** O provedor, interceptado: o que se prova aqui é a rotina — quem fala com a rede é o motor. */
 const PROVEDOR = vi.hoisted(() => ({
   id: "falso-transcreve",
+  /** O limite de um pedido do provedor; um teste o baixa para a gravação não caber. */
+  maxAudioBytes: 25 * 1024 * 1024,
   transcribe: vi.fn(async (_key: string, input: { seconds: number }) => ({
     ok: true as const,
     text: `fala de ${input.seconds}s`,
@@ -30,7 +33,14 @@ vi.mock("@deskvoice/voice-engine", async (importOriginal) => {
     provider: "falso",
     processingLocation: "neste-servidor",
     pricing: { inputPerMillionCents: 0, outputPerMillionCents: 0 },
-    transcription: { model: "falso-stt", pricing: { inputPerMillionCents: 0, outputPerMillionCents: 0 }, maxAudioBytes: 25 * 1024 * 1024, transcribe: PROVEDOR.transcribe },
+    transcription: {
+      model: "falso-stt",
+      pricing: { inputPerMillionCents: 0, outputPerMillionCents: 0 },
+      get maxAudioBytes() {
+        return PROVEDOR.maxAudioBytes;
+      },
+      transcribe: PROVEDOR.transcribe,
+    },
   } as unknown as VoiceEngine;
   return {
     ...real,
@@ -46,8 +56,16 @@ afterAll(async () => {
   await owner.close();
 });
 
+// `readFile` espiado: o que se prova é que a gravação longa demais nem é lida.
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const real = await importOriginal<typeof FsPromises>();
+  return { ...real, readFile: vi.fn(real.readFile) };
+});
+
 beforeEach(() => {
   PROVEDOR.transcribe.mockClear();
+  PROVEDOR.maxAudioBytes = 25 * 1024 * 1024;
+  vi.mocked(readFile).mockClear();
 });
 
 /**
@@ -112,6 +130,8 @@ async function gravar(org: string, callId: string, frames = 8000 * 3): Promise<s
 const rodar = (org: string, callId: string, recordingsDir?: string): Promise<void> =>
   transcribeCall.run(task(org, "transcribe_call", {}, callId), depsFor(app, { recordingsDir, fetch: (async () => new Response("{}")) as unknown as typeof fetch }));
 
+const leuAGravacao = (callId: string): boolean => vi.mocked(readFile).mock.calls.some(([file]) => String(file).endsWith(`${callId}.wav`));
+
 const falas = async (callId: string) =>
   (await eventsOf(app, callId)).filter((event) => event.kind === "transcript_user" || event.kind === "transcript_agent");
 
@@ -135,6 +155,7 @@ describe("a transcrição automática do fim da chamada", () => {
     expect(texto.every((event) => event.payload.source === "stt")).toBe(true);
     // Um pedido por lado: o provedor não recebe o arquivo estéreo inteiro de uma vez.
     expect(PROVEDOR.transcribe).toHaveBeenCalledTimes(2);
+    expect(leuAGravacao(callId)).toBe(true);
     expect(await resumos(org, callId)).toBe(1);
   });
 
@@ -221,6 +242,22 @@ describe("a transcrição automática do fim da chamada", () => {
     await rodar(org, callId, dir);
 
     expect(PROVEDOR.transcribe).toHaveBeenCalledTimes(2);
+  });
+
+  it("gravação maior que um pedido do provedor: nem é lida, e a linha do tempo diz o motivo", async () => {
+    const { org, callId } = await comAgente("Longa demais");
+    await ligar(org);
+    // Três segundos: 96.044 bytes no arquivo, 48.044 por lado. O limite fica abaixo disso.
+    const dir = await gravar(org, callId);
+    PROVEDOR.maxAudioBytes = 48_000;
+
+    await rodar(org, callId, dir);
+
+    expect(leuAGravacao(callId)).toBe(false);
+    expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
+    const motivo = (await eventsOf(app, callId)).find((event) => event.kind === "transcription_failed");
+    expect(motivo?.payload.reason).toBe("transcription_too_long");
+    expect(await resumos(org, callId)).toBe(1);
   });
 
   it("sem gravação no disco: não é falha, e o resumo segue", async () => {

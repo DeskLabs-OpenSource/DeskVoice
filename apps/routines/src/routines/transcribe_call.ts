@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import {
   TRANSCRIPT_RETENTION_SETTING,
   decryptSecret,
@@ -21,10 +21,12 @@ import {
   type TranscribeResult,
 } from "@deskvoice/voice-engine";
 // Pelo caminho do arquivo, como no painel: o índice do pacote carrega a descoberta por pasta.
-import { splitRecording } from "@deskvoice/voice-engine/transcription";
+import { recordingSideEstimate, splitRecording } from "@deskvoice/voice-engine/transcription";
 import type { Routine } from "../types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** O mesmo código de recusa do botão manual, para a linha do tempo dizer o motivo com uma frase só. */
+const TOO_LONG = "transcription_too_long";
 type Speaker = "caller" | "agent";
 const KIND: Record<Speaker, "transcript_user" | "transcript_agent"> = {
   caller: "transcript_user",
@@ -126,13 +128,19 @@ const routine: Routine = {
       }
 
       if (deps.recordingsDir === undefined) return null;
-      let wav: Buffer;
-      try {
-        wav = await readFile(recordingPath(deps.recordingsDir, task.organizationId, callId));
-      } catch {
-        // Sem gravação não há o que transcrever, e isso não é falha: a chamada só não foi gravada.
+      const recording = recordingPath(deps.recordingsDir, task.organizationId, callId);
+      // Sem gravação não há o que transcrever, e isso não é falha: a chamada só não foi gravada.
+      const fileBytes = await stat(recording).then((info) => info.size).catch(() => null);
+      if (fileBytes === null) return null;
+      // A mesma conta do botão manual, antes do `readFile`: gravação que não cabe num pedido do
+      // provedor não é carregada na memória, e esta rotina roda sozinha em toda chamada sem texto.
+      const estimate = recordingSideEstimate(fileBytes);
+      if (estimate && estimate.sideBytes > transcriber.maxAudioBytes) {
+        await recordEvent(q, callId, "transcription_failed", { reason: TOO_LONG, engine: agent.engine }, now);
         return null;
       }
+      const wav = await readFile(recording).catch(() => null);
+      if (wav === null) return null;
       const sides = splitRecording(wav);
       if (sides === null || sides.caller === null || sides.agent === null) {
         await recordEvent(q, callId, "transcription_failed", { reason: "unreadable_recording", engine: agent.engine }, now);
@@ -140,7 +148,7 @@ const routine: Routine = {
       }
       // Um pedido do provedor por lado: acima do limite dele, o pedido nem sai.
       if (sides.sideBytes > transcriber.maxAudioBytes) {
-        await recordEvent(q, callId, "transcription_failed", { reason: "too_long", engine: agent.engine }, now);
+        await recordEvent(q, callId, "transcription_failed", { reason: TOO_LONG, engine: agent.engine }, now);
         return null;
       }
 

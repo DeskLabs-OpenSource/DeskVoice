@@ -141,6 +141,7 @@ const timeline: TimelineDictionary = {
       rate_limited: "El proveedor pidió esperar (límite de solicitudes de la cuenta).",
       unreachable: "El proveedor no respondió en dos minutos, o está fuera del aire.",
       unexpected_response: "El proveedor respondió algo fuera del formato pedido. Lo que cobró entró en el costo de la llamada.",
+      transcription_too_long: "La grabación es más larga de lo que el proveedor acepta en una solicitud. No se envió ni se cobró nada.",
     } as Record<string, string>,
     transcription_failed_unknown: "El proveedor no transcribió la grabación. El motivo está abajo y en el registro del proceso del panel.",
     transcript_from_recording: "Transcrito de la grabación. El texto reúne todo lo que dijo este lado, sin el orden de las intervenciones.",
