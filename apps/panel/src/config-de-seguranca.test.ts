@@ -25,7 +25,13 @@ describe("cabeçalhos de segurança do painel", () => {
 
     expect(porNome.get("x-content-type-options")).toBe("nosniff");
     expect(porNome.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
-    expect(porNome.get("strict-transport-security")).toMatch(/^max-age=\d{8,}/);
-    expect(porNome.get("permissions-policy")).toContain("camera=()");
+    // Sem includeSubDomains: o painel não decide pelos outros subdomínios de quem instala.
+    expect(porNome.get("strict-transport-security")).toMatch(/^max-age=\d{8,}$/);
+
+    // "Falar com o agente" pede o microfone na própria origem: `microphone=()` desligaria a tela.
+    const permissoes = (porNome.get("permissions-policy") ?? "").split(",").map((item) => item.trim());
+    expect(permissoes).toContain("microphone=(self)");
+    expect(permissoes).toContain("camera=()");
+    expect(permissoes).toContain("geolocation=()");
   });
 });
