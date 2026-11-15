@@ -42,7 +42,9 @@ test("a segunda ligação simulada do mesmo número mostra a primeira, marcada c
   await expect(block.getByRole("heading", { name: timeline.callerHistory.calls.replace("{count}", "1") })).toBeVisible();
   await expect(block.locator(`a[href="/calls/${first}"]`).filter({ hasNotText: timeline.callerHistory.origin })).toBeVisible();
   // A primeira é simulada: aparece marcada, para ninguém ler um teste como a pessoa ligando.
-  const firstItem = block.getByRole("listitem").filter({ has: block.locator(`a[href="/calls/${first}"]`).filter({ hasNotText: timeline.callerHistory.origin }) });
+  // O `has` é procurado dentro do item: o link parte da página, e não do bloco.
+  const firstLink = page.locator(`a[href="/calls/${first}"]`, { hasNotText: timeline.callerHistory.origin });
+  const firstItem = block.getByRole("listitem").filter({ has: firstLink });
   await expect(firstItem.getByText(common.channel.simulated, { exact: true })).toBeVisible();
   // A pendência aberta da primeira ligação aparece no bloco da segunda, com o link para a de origem.
   const origin = page.locator(`a[href="/calls/${first}"]`, { hasText: timeline.callerHistory.origin });
