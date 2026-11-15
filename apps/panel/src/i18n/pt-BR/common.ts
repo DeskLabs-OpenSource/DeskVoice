@@ -27,6 +27,8 @@ const common = {
     themeSystem: "Tema: igual ao do sistema",
     themeLight: "Tema: claro",
     themeDark: "Tema: escuro",
+    versionShort: "Versão {version}",
+    updateAvailable: "Atualização disponível: {version}",
     notifications: "Avisos",
     noNotifications: "Nenhum aviso. Quando um agente avisar você durante uma ligação, o aviso aparece aqui.",
     markRead: "Marcar como lido",
