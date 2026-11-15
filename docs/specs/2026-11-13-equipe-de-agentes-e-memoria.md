@@ -521,7 +521,13 @@ entra depois que ela chegar ou o prazo dela vencer (vale A).
   `caller_notes_purged` e `caller_notes_retention_changed`, a linha `note` na exportação, as notas no
   apagamento a pedido do titular e no bloco "Este número", e a regra da simulada abaixo. A nota já
   nasce com prazo, exportação e apagamento a pedido do titular.
-- **3b:** o botão "Apagar nota" e o "Esquecer este número", com `caller_notes_deleted`.
+- **3b:** o botão "Apagar nota" e o "Esquecer este número", com `caller_notes_deleted`. Escolhas da
+  implementação: apaga a nota quem vê o bloco "Este número" (dono, administrador e operador), porque a
+  nota errada é dado pessoal errado e quem atende é quem a encontra; o registro guarda quem apagou.
+  O "Esquecer" alcança a pendência pela coluna `follow_ups.caller_e164`, que `createFollowUp` copia da
+  linha da chamada (é o único caminho que cria pendência); a pendência nascida numa chamada sem
+  número não tem telefone, e nenhum "Esquecer" a alcança, como o bloco também não a mostra. Os avisos
+  do sino ligados por `follow_up_id` a uma pendência fechada saem junto, em cascata, como no prazo.
 
 **A regra da simulada** ([#291](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/291)), para
 as notas e para as pendências. A rota de simular não pede papel, então qualquer pessoa da equipe

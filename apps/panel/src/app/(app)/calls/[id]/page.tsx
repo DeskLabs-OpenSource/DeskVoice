@@ -107,7 +107,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
         </dl>
       </header>
 
-      <CallerHistorySection history={callerHistory.data} t={t} common={common} locale={locale} />
+      <CallerHistorySection history={callerHistory.data} t={t} common={common} locale={locale} onChanged={callerHistory.reload} />
 
       {data.outcome ? (
         <section className="grid max-w-[72ch] gap-1.5">

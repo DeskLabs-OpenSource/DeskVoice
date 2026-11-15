@@ -1,3 +1,4 @@
+import { MAX_CALLER_NOTES_PER_CALL } from "@deskvoice/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { openTestDbs } from "../../core/test/helpers";
@@ -102,6 +103,28 @@ describe("runTool", () => {
     // E a recusa deixa rastro na linha do tempo, como qualquer outro desfecho.
     const [, finished] = await lastTwo();
     expect(finished).toMatchObject({ kind: "tool_result", payload: { name: "notify_human", ok: false } });
+  });
+
+  // Ressalva K4 do Verificador no #295: o teto de notas vale no `runTool` sozinho. A ferramenta falsa
+  // tem o nome de produção e não chama `saveCallerNote`, então o teto do banco fica fora do caminho.
+  it(`recusa a ${MAX_CALLER_NOTES_PER_CALL + 1}ª nota da ligação no runTool, sem o teto do banco`, async () => {
+    const own = await createFixture(app, "run-tool notes");
+    let runs = 0;
+    const fake = defineTool({
+      name: "remember_caller_note",
+      description: "Ferramenta de teste, com o teto de produção e sem o banco",
+      inputSchema: z.object({ text: z.string() }),
+      personalTextArgs: true,
+      async run() {
+        runs += 1;
+        return { ok: true, message: "anotado" };
+      },
+    });
+    for (let i = 0; i < MAX_CALLER_NOTES_PER_CALL; i += 1) expect((await runTool(fake, { text: `nota ${i}` }, own)).ok).toBe(true);
+    const refused = await runTool(fake, { text: "a décima primeira" }, own);
+    expect(refused.ok).toBe(false);
+    expect(refused.message).toContain(`limite de ${MAX_CALLER_NOTES_PER_CALL} chamadas a remember_caller_note`);
+    expect(runs).toBe(MAX_CALLER_NOTES_PER_CALL);
   });
 
   it("não gasta a cota quando a chamada é recusada por argumento inválido", async () => {
