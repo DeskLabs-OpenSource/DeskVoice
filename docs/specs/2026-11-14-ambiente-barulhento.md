@@ -375,6 +375,54 @@ e no provedor (fatia 5); o μ-law depois da redução; o atraso das conversões 
 supõem um `resample` em fluxo, e o de hoje trata cada pedaço isolado); ajustes dos candidatos além
 do padrão; voz real e outras vozes além da `cadu`.
 
+## Medida da fatia 4b e a decisão sobre ligar
+
+Da fatia 4b, PR #294, mesclado em `86910cf`. Rodada no commit `897df35`, na VPS de teste, em
+15/11/2026, 21:23Z: 4 vCPU AMD EPYC, só CPU, com carga de outros processos, 12 frases na voz `cadu`.
+Comando: `pnpm exec tsx scripts/bancada-de-voz/reducao-de-ruido.ts`. A saída inteira está no corpo
+do #294. A régua é a de `scripts/bancada-de-voz/regua-da-reducao.ts`: perda por quadro de 20 ms, no
+quarto mais fraco dos quadros com fala, e acima de 1 dB de média o candidato reprova.
+
+| Candidato | Por quadro, sem ruído (−20 / −30 dB) | Debaixo de ruído (obra, música e conversa a 15, 5 e 0 dB) | CPU de um núcleo por s de áudio, em fluxo | Por pedaço de 20 ms, média / p99 |
+|---|--:|---|--:|--:|
+| RNNoise (`pyrnnoise` 0.4.5) | passa: 0,5 / 0,6 dB | **reprova nos 18 casos**: perde de 3,9 a 11 dB e cala até 1,1% dos quadros fracos | 3,3% | 0,68 / 1,37 ms |
+| DeepFilterNet3 de baixa latência (plugin LADSPA 0.5.6, em fluxo) | **reprova**: 1,8 dB / cala 0,6% | **reprova nos 18 casos**: cala até 45% dos quadros fracos | 9,3% | 3,27 / 6,80 ms |
+| DeepFilterNet3 (torch, só áudio inteiro) | passa: 0,8 / 0,7 dB | **reprova nos 18 casos**: a −30 dB cala de 67 a 100% | não roda em fluxo | — |
+
+Sem redução, a perda debaixo de ruído dá 0,0 em todos os casos, e o controle das conversões
+8→48→8 kHz dá 0,2 dB. Ou seja, a régua não reprova por conta própria.
+
+**Decisão: a fatia "ligar" não existe.** Nenhum candidato fica perto da régua debaixo de ruído, e
+esse é exatamente o caso da ligação de 13/11. O que menos corta, o RNNoise, perde de 4 a 11 dB nos
+quadros fracos, o que é quatro a onze vezes a régua. Ligar um deles cortaria a fala baixa de quem
+ligou, e isso é o "fracasso mesmo funcionando" da tarefa. A camada 2 termina medida, sem nada
+ligado no produto. Para o ruído, o que vale é a camada 1 (o modo Barulhento, só no OpenAI), a guarda
+contra o silêncio da fatia 1 e a medida contra o provedor da fatia 5.
+
+A decisão não depende dos dois limites conhecidos da régua:
+- **A separação por inversão de fase** erra a favor de passar. Um candidato que decide diferente
+  nas duas misturas subestima a fração calada. A reprovação, portanto, é um piso.
+- **O ganho de um quadro esconde a perda de outro na média** (ponto do board, 15/11). Hoje a média
+  é feita sobre a perda crua de cada quadro (`perdaPorQuadroDb`, conferido em `86910cf`). Cortar o
+  ganho em zero (`max(0, p)`) antes da média só aumenta a perda medida, e por isso não muda nenhuma
+  reprovação.
+
+**Se a redução local voltar** (candidato novo, outra versão ou outro ajuste dos de hoje), ela é
+item de roteiro novo, e não esta frente. Antes de qualquer medida, a régua e o script ganham:
+1. **`max(0, p)` por quadro antes da média**, com um teste: um filtro que ganha num quadro e perde
+   no seguinte tem de reprovar;
+2. **conferência do sha256 do `.so` do plugin pelo próprio script, antes de carregá-lo.** O valor
+   esperado fica fixado no repositório, e se o arquivo divergir o script para sem medir nada. Hoje o
+   script carrega o `.so` com `ctypes.CDLL` e só depois calcula o sha256, apenas para mostrá-lo
+   (`reducao_de_ruido.py`, conferido em `86910cf`);
+3. a segunda medida da voz na saída, que a inversão de fase não dá, se algum candidato passar.
+
+**Não medido nesta seção:** voz real e outras vozes além da `cadu`; o μ-law; os ajustes dos
+candidatos além do padrão; a CPU de várias chamadas ao mesmo tempo; o DeepFilterNet3 completo em
+fluxo; o quanto a inversão de fase subestima a fração calada; se a perda medida muda o que o
+provedor entende (fatia 5). Também não rodei de novo a bancada: os números são os do #294,
+reproduzidos pelo Verificador no parecer dele.
+
 ## Onde esta frente toca as outras
 
 | Ponto | R3, ouvido (#160, DESA-10) | R12, transcrição pura (DESA-25) | O que fazer |
@@ -399,8 +447,11 @@ do padrão; voz real e outras vozes além da `cadu`.
 ## Fora do escopo
 
 - Separar a voz de quem ligou das vozes de fundo (separação de fonte). Nenhum candidato aberto
-  conhecido faz isso em tempo real em 8 kHz com custo de VPS. Se a fatia 4 mostrar que a conversa
-  de fundo é o caso que sobra, vira item de roteiro.
+  conhecido faz isso em tempo real em 8 kHz com custo de VPS. As fatias 4 e 4b mostraram que a
+  conversa de fundo é o caso que sobra (5 a 11 dB tirados, e a fala baixa cortada). Se for atacada,
+  vira item de roteiro.
+- Ligar redução de ruído local no produto: medida e reprovada na fatia 4b (veja "Medida da fatia 4b
+  e a decisão sobre ligar").
 - Detecção de fala própria do DeskVoice no lugar da do provedor (`automaticActivityDetection.disabled`,
   `turn_detection: null`). É o caminho do motor em pipeline (R5), e não destes motores.
 - Prazos da guarda configuráveis na tela. Ficam como constantes até a medida dizer se precisam
@@ -430,5 +481,7 @@ Fica no comentário da DESA-24, no formato do `GOVERNANCE.md`. Resumo:
 - Os prazos iniciais da guarda (2,5 s, 8 s e 4 s). São estimativa, e não medida.
 - As licenças, o custo e o atraso dos candidatos de redução de ruído: medidos depois, na seção
   "Medida da redução de ruído" (fatia 4, #256).
+- A perda deles na fala baixa por quadro, debaixo de ruído e a CPU em fluxo: medidas depois, na
+  seção "Medida da fatia 4b e a decisão sobre ligar" (#294).
 - O que aconteceu na ligação de 13/11: não vi os eventos dela.
 - Por qual canal a ligação de 13/11 entrou (tronco, WhatsApp ou navegador) nem qual motor ela usou.
