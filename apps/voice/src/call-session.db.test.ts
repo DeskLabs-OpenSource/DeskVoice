@@ -8,6 +8,10 @@ import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting, tasksOf } from "../../../packages/tools/test/helpers";
+import { crmSimulado } from "../../../packages/tools/test/agenda";
+import { createAgendaHorariosLivres } from "../../../packages/tools/src/tools/agenda_horarios_livres";
+import { createAgendaMarcar } from "../../../packages/tools/src/tools/agenda_marcar";
+import { createAgendaRemarcar } from "../../../packages/tools/src/tools/agenda_remarcar";
 import { EngineTimeoutError } from "@deskvoice/voice-engine";
 import { DEFAULT_RECORDING_NOTICE, startCallSession, type CallSession } from "./call-session";
 import {
@@ -200,6 +204,31 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     made.transport.callerHangup();
     await session.done;
     expect(manual.closed).toBe(1);
+  });
+
+  it("ferramentas de agenda sem cliente não chegam ao motor, mesmo marcadas; com o cliente, chegam e respondem", async () => {
+    const agenda = ["agenda_horarios_livres", "agenda_marcar", "agenda_remarcar"];
+    const unwired = manualEngine({ keyless: true });
+    const without = await scene("agenda-unwired", { engine: "manual", tools: [...agenda, "notify_human"] }, unwired);
+    const first = without.start();
+    await waitFor(() => unwired.configs.length === 1, "the engine to connect");
+    expect(unwired.configs[0]?.tools.map((tool) => tool.name)).toEqual(["notify_human"]);
+    without.transport.callerHangup();
+    await first.done;
+
+    const crm = crmSimulado();
+    const wired = manualEngine({ keyless: true });
+    const made = await scene("agenda-wired", { engine: "manual", tools: [...agenda, "notify_human"] }, wired);
+    for (const tool of [createAgendaHorariosLivres({ agenda: crm }), createAgendaMarcar({ agenda: crm }), createAgendaRemarcar({ agenda: crm })]) made.harness.deps.tools.set(tool.name, tool);
+    const session = made.start();
+    await waitFor(() => wired.configs.length === 1, "the engine to connect");
+    expect(wired.configs[0]?.tools.map((tool) => tool.name)).toEqual([...agenda, "notify_human"]);
+    wired.emit("toolCall", { id: "t1", name: "agenda_horarios_livres", args: { service_type: "Consulta" } });
+    await waitFor(() => wired.toolResults.length === 1, "the tool result");
+    expect(wired.toolResults[0]?.result).toMatchObject({ ok: true, data: { timezone: "America/Sao_Paulo" } });
+    expect(crm.pedidos.horarios).toHaveLength(1);
+    made.transport.callerHangup();
+    await session.done;
   });
 
   it("o vocabulário do agente chega ao motor; sem termos, chega a lista vazia", async () => {
