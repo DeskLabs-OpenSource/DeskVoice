@@ -112,7 +112,7 @@ describe("callerHistory: a memória do número para a equipe", () => {
     await callOf(org, { at: t(1) });
     expect(await historyOf(org, anonymous)).toBeNull();
     const later = await callOf(org, { at: t(2), from: PHONE });
-    expect(await historyOf(org, later)).toEqual({ phone: PHONE, callCount: 0, simulatedCallCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] });
+    expect(await historyOf(org, later)).toEqual({ phone: PHONE, callCount: 0, simulatedCallCount: 0, calls: [], openFollowUpCount: 0, simulatedOpenFollowUpCount: 0, openFollowUps: [], noteCount: 0, simulatedNoteCount: 0, notes: [] });
   });
 
   it("usa o telefone do outro lado: o to_e164 na feita, e nunca a linha da empresa", async () => {
@@ -193,7 +193,7 @@ describe("callerHistory: a memória do número para a equipe", () => {
       // Ela liga de novo: a ligação apagada perdeu o telefone, e a pendência apagada (caller_e164 nulo) não volta.
       const again = await callOf(org, { at: t(20), from: PHONE, ended: false });
       const history = await historyOf(org, again);
-      expect(history).toEqual({ phone: PHONE, callCount: 0, simulatedCallCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] });
+      expect(history).toEqual({ phone: PHONE, callCount: 0, simulatedCallCount: 0, calls: [], openFollowUpCount: 0, simulatedOpenFollowUpCount: 0, openFollowUps: [], noteCount: 0, simulatedNoteCount: 0, notes: [] });
       expect(JSON.stringify(history)).not.toMatch(/exame|apagado a pedido/);
     } finally {
       await rm(dir, { recursive: true, force: true });

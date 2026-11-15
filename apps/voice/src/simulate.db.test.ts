@@ -3,6 +3,7 @@ import { withOrg } from "@deskvoice/core";
 import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
+import { DEMO_NOTE_TOOL, demoScript } from "./demo-script";
 import { startSimulatedCall } from "./simulate";
 import { callOf, createAgent, createOrganization, kindsOf, sessionHarness, simulatedSpeechMs } from "./testing/db";
 import { manualTime, waitFor } from "./testing/helpers";
@@ -92,5 +93,38 @@ describe("chamada simulada com o número de quem liga", { timeout: 120_000 }, ()
     call.transport.callerHangup();
     await call.session.done;
     await harness.approvals.close();
+  });
+});
+
+describe("a nota do agente na simulada (fatia 3, #291)", { timeout: 120_000 }, () => {
+  const PHONE = "+5531922221112";
+  const script: SimulatedScript = [{ toolCall: { name: "remember_caller_note", args: { text: "Nota da simulada." } } }, { end: true }];
+  const simulateWith = async (tools: string[], label: string) => {
+    const organizationId = await createOrganization(app, label);
+    const agentId = await createAgent(app, organizationId, { tools });
+    const harness = await sessionHarness(app);
+    // Sem `tools` nas opções: vale o que a simulada habilita a partir do agente.
+    const call = await startSimulatedCall(harness.deps, { organizationId, agentId, fromE164: PHONE }, { script });
+    if ("code" in call) throw new Error(call.message);
+    await call.session.done;
+    await harness.approvals.close();
+    const notes = await withOrg(app, organizationId, (q) => q.many<{ call_id: string; caller_e164: string }>("select call_id, caller_e164 from caller_notes"));
+    return { callId: call.callId, notes };
+  };
+
+  it("o agente com a ferramenta marcada anota na simulada, com o número de quem ligou", async () => {
+    const { callId, notes } = await simulateWith(["remember_caller_note"], "simulate-note-on");
+    expect(notes).toEqual([{ call_id: callId, caller_e164: PHONE }]);
+  });
+
+  it("sem a ferramenta marcada, a simulada não a habilita, e nada é anotado", async () => {
+    const { notes } = await simulateWith([], "simulate-note-off");
+    expect(notes).toEqual([]);
+  });
+
+  it("o roteiro de demonstração só anota quando o agente tem a ferramenta", () => {
+    const steps = (note: boolean) => JSON.stringify(demoScript({ greet: true, canTransfer: false, note }));
+    expect(steps(true)).toContain(DEMO_NOTE_TOOL);
+    expect(steps(false)).not.toContain(DEMO_NOTE_TOOL);
   });
 });

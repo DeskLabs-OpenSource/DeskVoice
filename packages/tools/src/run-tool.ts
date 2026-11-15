@@ -1,4 +1,4 @@
-import { recordEvent } from "@deskvoice/core";
+import { MAX_CALLER_NOTES_PER_CALL, recordEvent } from "@deskvoice/core";
 import type { Tool, ToolContext, ToolResult } from "./types";
 
 const FAILURE_MESSAGE =
@@ -38,6 +38,8 @@ export const MAX_SUCCESSFUL_CALLS_PER_CALL: Readonly<Record<string, number>> = {
   notify_human: MAX_NOTIFY_HUMAN_PER_CALL,
   call_webhook: MAX_CALL_WEBHOOK_PER_CALL,
   request_approval: MAX_REQUEST_APPROVAL_PER_CALL,
+  // A nota é texto sobre a pessoa guardado além da ligação; `saveCallerNote` confere o mesmo teto no banco.
+  remember_caller_note: MAX_CALLER_NOTES_PER_CALL,
 };
 
 /**

@@ -10,5 +10,5 @@ export const GET = handle({}, async ({ q, params }) => {
   const id = params.id ?? "";
   if (!(await q.one("select 1 from calls where id = $1", [id]))) throw notFound();
   const history = await callerHistory(q, id);
-  return history ?? { phone: null, callCount: 0, simulatedCallCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] };
+  return history ?? { phone: null, callCount: 0, simulatedCallCount: 0, calls: [], openFollowUpCount: 0, simulatedOpenFollowUpCount: 0, openFollowUps: [], noteCount: 0, simulatedNoteCount: 0, notes: [] };
 });

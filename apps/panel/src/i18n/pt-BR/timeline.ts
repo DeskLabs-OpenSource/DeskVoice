@@ -67,10 +67,11 @@ const timeline = {
   // O bloco "Este número": o que a organização já sabe do telefone do outro lado (só a equipe vê).
   callerHistory: {
     title: "Este número",
-    hint: "As ligações anteriores deste telefone e o que ficou aberto. Só a equipe vê; o agente não recebe nada disto.",
+    hint: "As ligações anteriores deste telefone, o que ficou aberto e as notas que o agente guardou. Só a equipe vê; o agente não recebe nada disto.",
     first: "Nenhuma ligação anterior deste número.",
     calls: "Ligações anteriores ({count})",
     followUps: "Pendências abertas ({count})",
+    notes: "Notas do agente ({count})",
     more: "E mais {count}.",
     erased: "Conteúdo apagado a pedido do titular.",
     due: "Prazo {value}",
@@ -94,6 +95,7 @@ const timeline = {
     stop_recording: "Parar a gravação",
     call_webhook: "Chamar um sistema externo",
     create_task: "Abrir uma pendência",
+    remember_caller_note: "Guardar uma nota sobre quem ligou",
     summarize_call: "Resumo da chamada",
     classify_call_outcome: "Desfecho da ligação",
     deliver_notification: "Entrega de aviso",

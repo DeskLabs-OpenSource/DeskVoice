@@ -21,22 +21,31 @@ const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
  * - `whatsapp`: só as contagens. O título é texto livre escrito pelo modelo sobre a pessoa, e o
  *   WhatsApp é um canal fora da instalação: nenhum título, nota ou resumo vai por ele.
  *
- * `null` quando não há o que dizer: chamada sem número, ou número sem ligação anterior (fora as
- * simuladas) nem pendência.
+ * O que nasceu numa chamada simulada (a ligação, a pendência) não entra nem na contagem nem nos
+ * títulos: é um teste da equipe, e qualquer pessoa da equipe pode simular com o número de um cliente
+ * (#291). A pendência criada pela tela, sem chamada, conta. As notas do agente nunca entram no aviso.
+ *
+ * `null` quando não há o que dizer: chamada sem número, ou número sem ligação anterior nem pendência
+ * fora das simuladas.
  */
 export function callerContextLine(history: CallerHistory | null, channel: "panel" | "whatsapp"): string | null {
   if (!history) return null;
   // A simulada é um teste da equipe, não a pessoa ligando: não entra no "já ligou".
   const called = history.callCount - history.simulatedCallCount;
-  if (called === 0 && history.openFollowUpCount === 0) return null;
+  const open = history.openFollowUpCount - history.simulatedOpenFollowUpCount;
+  if (called === 0 && open === 0) return null;
   const parts: string[] = [];
   if (called > 0) parts.push(`Este número já ligou ${times(called)}`);
-  if (history.openFollowUpCount > 0) {
-    const count = called > 0 ? openFollowUps(history.openFollowUpCount) : `Este número tem ${openFollowUps(history.openFollowUpCount)}`;
+  if (open > 0) {
+    const count = called > 0 ? openFollowUps(open) : `Este número tem ${openFollowUps(open)}`;
     if (channel === "whatsapp") parts.push(count);
     else {
-      const titles = history.openFollowUps.slice(0, CONTEXT_TITLES).map((followUp) => oneLine(followUp.title));
-      const more = history.openFollowUpCount - titles.length;
+      // `callerHistory` traz as reais primeiro: os títulos citados nunca são de uma simulada.
+      const titles = history.openFollowUps
+        .filter((followUp) => !followUp.simulated)
+        .slice(0, CONTEXT_TITLES)
+        .map((followUp) => oneLine(followUp.title));
+      const more = open - titles.length;
       parts.push(`${count}: ${titles.join("; ")}${more > 0 ? `; e mais ${more}` : ""}`);
     }
   }
