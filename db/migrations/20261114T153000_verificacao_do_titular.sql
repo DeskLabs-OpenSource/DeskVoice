@@ -28,5 +28,5 @@ grant select, insert, update, delete on caller_verifications to deskvoice_app, d
 alter table caller_verifications enable row level security;
 alter table caller_verifications force row level security;
 create policy caller_verifications_org on caller_verifications
-  using (organization_id = current_setting('app.organization_id', true)::uuid)
-  with check (organization_id = current_setting('app.organization_id', true)::uuid);
+  using (organization_id = (nullif(current_setting('app.organization_id', true), ''))::uuid)
+  with check (organization_id = (nullif(current_setting('app.organization_id', true), ''))::uuid);
