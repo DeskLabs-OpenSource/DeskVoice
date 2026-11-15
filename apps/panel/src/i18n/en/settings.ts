@@ -134,6 +134,17 @@ const settings: SettingsDictionary = {
   inboundLimitLead: "How many calls received on the phone line the agents answer at the same time. Above that, the caller gets a busy signal and the refusal shows up in Calls. Each call already has a cost and a duration ceiling on the agent; this limit holds the combined spending when many arrive together. Browser calls and calls made by the agent do not count here.",
   inboundLimit: "Simultaneous call limit",
   inboundLimitHint: "From 1 to 50. The factory value is 5.",
+  voicemailTitle: "Voicemail when nobody can answer",
+  voicemailLead: "With voicemail on, a call to a number with no agent, or whose agent is off, is answered: the caller hears a recorded notice that the call will be recorded, then a beep, and leaves a message, which stays on the call and can be played there. A message does not take a conversation slot in the simultaneous call limit, but it has the same number as a limit of its own: with that many messages being recorded, the caller gets a busy signal.",
+  voicemailTerms: ["It only answers with call recording on, in Settings → Privacy. With recording off, the call is refused as before.", "Answering the call may cost money with a carrier that charges for answered incoming calls. Without voicemail, this call is refused without being answered."],
+  voicemailNeedsRecording: "Call recording is off in Settings → Privacy. While it is off, voicemail does not answer, and the call is refused as before.",
+  voicemailLanguage: "Notice language",
+  voicemailLanguageHint: "The notice is prerecorded audio: \"No one can take your call right now. This call will be recorded. Please leave a message after the tone.\" The text cannot be changed on screen.",
+  voicemailLanguages: { "pt-BR": "Portuguese (Brazil)", en: "English", es: "Spanish" },
+  voicemailSwitch: "Answer and record a message when nobody can answer",
+  voicemailMaxSeconds: "Maximum message length, in seconds",
+  voicemailMaxSecondsHint: "From 5 to 300, counted after the notice. The factory value is 60. The message ends 4 seconds after the last speech.",
+  saveVoicemail: "Save voicemail",
   saveInboundLimit: "Save limit",
 };
 

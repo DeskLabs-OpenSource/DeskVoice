@@ -243,6 +243,37 @@ export function Timeline({
         };
       case "call_refused":
         return { ...base, tone: "fail", icon: PhoneX, body: <Card tone="fail" title={e.call_refused}><p className="text-muted">{reason(p.reason)}</p></Card> };
+      case "voicemail_left": {
+        const seconds = typeof p.recordedSeconds === "number" ? Math.max(0, Math.round(p.recordedSeconds)) : 0;
+        const left = p.left === true;
+        // Decisão 0018, escolha 2A: o recado é transcrito com a chave do agente do número; sem agente, não há chave.
+        const noKey = left && p.reason === "no_agent";
+        return {
+          ...base,
+          tone: left ? "ok" : "neutral",
+          icon: RecordIcon,
+          body: (
+            <Quiet>
+              <span className="font-bold text-ink">{left ? e.voicemail_left : e.voicemail_none}</span>
+              {seconds > 0 ? ` · ${fill(e.voicemail_seconds, { seconds })}` : ""}
+              {left ? null : ` — ${e.voicemail_none_body}`}
+              {noKey ? ` — ${e.voicemail_no_key}` : null}
+            </Quiet>
+          ),
+        };
+      }
+      case "voicemail_failed":
+        return {
+          ...base,
+          tone: "fail",
+          icon: WarningOctagon,
+          body: (
+            <Card tone="fail" title={e.voicemail_failed}>
+              <p className="text-muted">{e.voicemail_failed_body}</p>
+              {text(p.reason) ? <p className="data text-[0.87rem] text-muted">{text(p.reason)}</p> : null}
+            </Card>
+          ),
+        };
       case "recording_skipped": {
         const mb = (value: unknown): string => Math.floor(Number(value) / 1e6).toLocaleString(locale);
         const lowDisk = p.reason === "low_disk";

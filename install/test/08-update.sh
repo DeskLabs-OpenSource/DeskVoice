@@ -9,6 +9,17 @@ printf 'agents=3\ncalls=120\nusers=1\n' > "$FAKE_DIR/counts_backup"
 cp "$FAKE_DIR/counts_backup" "$FAKE_DIR/counts_restore"
 position() { grep -n -- "$1" "$FAKE_DIR/calls.log" | head -n 1 | cut -d: -f1; }
 
+# Atrás do Caddy do CRM (issue #221): a rede do proxy dele está no arquivo de publicação. Se o CRM a
+# apagou, o `up` não subiria nada: a atualização para antes do backup, sem mexer em nada.
+printf 'networks:\n  proxy:\n    name: "crm_caddy-sites"\n    external: true\n' >> "$DESKVOICE_DEPLOY_DIR/docker-compose.override.yml"
+: > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.2.0 --yes 2>&1)"; equal "rede do proxy sumiu: a atualização para" 1 "$?"
+contains "rede do proxy sumiu: diz qual e que nada mudou" "$out" "A rede crm_caddy-sites"
+equal "rede do proxy sumiu: nem backup nem migration" 0 "$(grep -cE ' pg_dump |run --rm migrate| up -d' "$FAKE_DIR/calls.log")"
+equal "rede do proxy sumiu: continua na versão de antes" 0.1.0 "$(env_get "$E" DESKVOICE_VERSION)"
+# Com a rede de pé, a atualização segue, e a declaração da rede fica (é ela que mantém a ligação).
+echo crm_caddy-sites > "$FAKE_DIR/networks"
+
 # Atualização que dá certo, numa instalação que veio de uma versão sem agente de atualização.
 A="$DESKVOICE_DEPLOY_DIR/app.env"; env_unset "$E" UPDATE_AGENT_TOKEN
 : > "$FAKE_DIR/calls.log"

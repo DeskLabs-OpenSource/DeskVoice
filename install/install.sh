@@ -31,6 +31,10 @@
 #                              quando o painel sai por uma porta local (sem domínio, ou 80/443 de outro proxy)
 #   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar. Só aceita yes; com o
 #                              ufw inativo, não tem efeito, e o instalador diz
+#   DESKVOICE_PROXY_NETWORK    opcional: a rede Docker do proxy de outro sistema desta VPS (exemplo:
+#                              deskcommcrm_caddy-sites). O Caddy do DeskVoice entra nela com o nome deskvoice,
+#                              e a ligação sobrevive às atualizações. Vazio mantém a gravada; off tira
+#                              (guia docs/guides/na-mesma-vps-do-crm.md)
 #   DESKVOICE_RTP_START / DESKVOICE_RTP_END   opcional: outra faixa de portas de áudio
 #   DESKVOICE_VERSION          opcional: uma versão publicada específica (exemplo: 0.3.0), em vez da mais recente.
 #                              Não combina com --build, que constrói o código desta pasta: as duas juntas param com erro
@@ -48,7 +52,7 @@ while [ $# -gt 0 ]; do
     --build) BUILD=1 ;;
     --adopt) DESKVOICE_ADOPT=yes ;;
     --answers) answers_file="${2:-}"; shift ;;
-    -h|--help) sed -n '2,39p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Veja as opções com: bash install/install.sh --help" ;;
   esac
   shift
@@ -76,6 +80,9 @@ if [ -n "${DESKVOICE_PANEL_LOCAL_ONLY:-}" ] && [ -n "${DESKVOICE_PANEL_PUBLIC_HT
 fi
 if [ -n "${DESKVOICE_PANEL_PORT:-}" ]; then
   valid_port "$DESKVOICE_PANEL_PORT" >/dev/null || die "A porta do painel em DESKVOICE_PANEL_PORT ($DESKVOICE_PANEL_PORT) não vale." "Use um número de 1 a 65535, ou não defina a variável."
+fi
+if [ -n "${DESKVOICE_PROXY_NETWORK:-}" ] && ! [[ "$DESKVOICE_PROXY_NETWORK" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+  die "O nome de rede em DESKVOICE_PROXY_NETWORK ($DESKVOICE_PROXY_NETWORK) não vale." "Use o nome que o docker network ls mostra (exemplo: deskcommcrm_caddy-sites), off para tirar a rede gravada, ou não defina a variável."
 fi
 if [ "$BUILD" = 1 ] && [ -n "${DESKVOICE_VERSION:-}" ]; then
   die "DESKVOICE_VERSION=$DESKVOICE_VERSION e --build pedem coisas diferentes: a primeira, as imagens publicadas dessa versão; a segunda, imagens construídas nesta máquina a partir do código desta pasta." "Escolha um dos dois e rode de novo: tire a variável para construir aqui, ou tire o --build para instalar a versão publicada."
@@ -477,6 +484,8 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+missing_network="$(missing_proxy_network)"
+[ -z "$missing_network" ] || die "A rede $missing_network, em que o Caddy do DeskVoice entra para o proxy do outro sistema publicar o painel, não existe nesta máquina, e sem ela nenhum serviço sobe. Nada foi alterado." "Confira o nome com docker network ls (passo 2 do guia docs/guides/na-mesma-vps-do-crm.md) e rode de novo com DESKVOICE_PROXY_NETWORK=<rede>. Para deixar de usar a rede: DESKVOICE_PROXY_NETWORK=off bash install/install.sh"
 write_env_files "$public_url" "$public_ip" "$panel_domain" "$rtp_start" "$rtp_end"
 # Entrada única: só o Caddy publica porta. Reescreve por inteiro o arquivo de publicação (o de
 # uma versão antiga publicava painel e voz em duas portas), define quantos proxies o painel

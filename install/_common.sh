@@ -396,8 +396,9 @@ pick_free_port() {  # pick_free_port <primeira candidata> < lista de portas em u
 # O arquivo é reescrito por inteiro: o que uma versão antiga publicava (painel e voz em duas
 # portas) some na reinstalação, e o `up` seguinte recria os contêineres sem a porta antiga.
 write_proxy_override() {
-  local tmp site="$1" trusted="$2" port
+  local tmp site="$1" trusted="$2" port network
   shift 2
+  network="$(proxy_network)"
   tmp="$(mktemp "$PROXY_OVERRIDE.XXXXXX")"
   {
     echo "# Gerado pelo instalador. Não edite: rode bash install/install.sh para mudar."
@@ -408,9 +409,38 @@ write_proxy_override() {
     echo "      CADDY_TRUSTED_PROXIES: \"$trusted\""
     echo "    ports:"
     for port in "$@"; do echo "      - \"$port\""; done
+    if [ -n "$network" ]; then
+      echo "    networks:"
+      echo "      internal: {}"
+      echo "      proxy:"
+      echo "        aliases: [deskvoice]"
+      echo "networks:"
+      echo "  proxy:"
+      echo "    name: \"$network\""
+      echo "    external: true"
+    fi
   } > "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$PROXY_OVERRIDE"
+}
+# A rede Docker do proxy de outro sistema desta VPS (o `_caddy-sites` do CRM, no guia
+# docs/guides/na-mesma-vps-do-crm.md) em que o Caddy do DeskVoice entra com o nome `deskvoice`.
+# Declarada no arquivo de publicação, a ligação sobrevive a todo `up` que recria o contêiner
+# (atualização, volta, restauração), em vez de se perder como o `docker network connect` à mão
+# (issue #221). DESKVOICE_PROXY_NETWORK=<rede> grava, `off` tira, e vazio mantém a gravada.
+proxy_network() {
+  case "${DESKVOICE_PROXY_NETWORK:-}" in
+    off) ;;
+    "") if [ -f "$PROXY_OVERRIDE" ]; then sed -n 's/^    name: "\(.*\)"$/\1/p' "$PROXY_OVERRIDE" | head -n 1; fi ;;
+    *) echo "$DESKVOICE_PROXY_NETWORK" ;;
+  esac
+}
+# A rede gravada que o Docker não conhece mais (o outro sistema a apagou): sem ela, o `up` do
+# Compose para inteiro, e nenhum serviço do DeskVoice sobe. Devolve o nome, ou nada.
+missing_proxy_network() {
+  local network
+  network="$(proxy_network)"
+  if [ -n "$network" ] && ! docker network inspect "$network" >/dev/null 2>&1; then echo "$network"; fi
 }
 # O que o arquivo de publicação diz hoje, para a reinstalação manter a porta que o proxy do
 # operador (ou o túnel) já conhece. Lê o formato atual (Caddy, porta 80 de dentro) e o antigo

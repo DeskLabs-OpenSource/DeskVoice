@@ -5,7 +5,7 @@ import commonEn from "../../../i18n/en/common";
 import en from "../../../i18n/en/privacy";
 import commonEs from "../../../i18n/es/common";
 import es from "../../../i18n/es/privacy";
-import { fill } from "../../../i18n/locales";
+import { fill, type Locale } from "../../../i18n/locales";
 import commonPtBR from "../../../i18n/pt-BR/common";
 import ptBR, { type PrivacyDictionary } from "../../../i18n/pt-BR/privacy";
 import { useDict, useLocale } from "../../../i18n/provider";
@@ -58,7 +58,7 @@ const countsLine = ({ calls, events, followUps, notifications, approvals, record
   fill(t.erasureCounts, { calls, events, followUps, notifications, approvals, recordings });
 
 /** Uma linha do registro, na voz da tela. */
-function describe(entry: Entry, t: PrivacyDictionary): string {
+function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
   const p = entry.payload;
   const span = (value: unknown): string => (typeof value === "number" ? fill(t.days, { n: value }) : t.forever);
   const who = entry.actorName ?? t.removedPerson;
@@ -83,6 +83,12 @@ function describe(entry: Entry, t: PrivacyDictionary): string {
       const line = fill(t.history.caller_recordings_erased, { removed: numberOf(p.removed) });
       return numberOf(p.left) > 0 ? `${line} ${fill(t.erasedRecordingsLeft, { left: numberOf(p.left) })}` : line;
     }
+    case "share_created":
+      return fill(t.history.share_created, { who, until: typeof p.expiresAt === "string" ? formatDateTime(p.expiresAt, locale) : "", uses: numberOf(p.maxUses) });
+    case "share_downloaded":
+      return fill(t.history.share_downloaded, { use: numberOf(p.use), uses: numberOf(p.maxUses) });
+    case "share_revoked":
+      return fill(t.history.share_revoked, { who, count: numberOf(p.revoked) });
   }
 }
 
@@ -311,7 +317,7 @@ export function PrivacyPanel() {
             {history.map((entry) => (
               <li key={entry.id} className="grid gap-0.5 border-b border-line py-3 first:pt-0 last:border-b-0 last:pb-0 md:grid-cols-[10rem_minmax(0,1fr)] md:gap-4">
                 <span className="data text-[0.87rem] text-muted">{formatDateTime(entry.at, locale)}</span>
-                <span>{describe(entry, t)}</span>
+                <span>{describe(entry, t, locale)}</span>
               </li>
             ))}
           </ul>

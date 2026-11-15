@@ -21,6 +21,7 @@ import { Timeline } from "../../../../ui/timeline";
 import { transcribeAlsoClassifies } from "../../../../ui/transcription";
 import { AnalysisSection } from "./analysis-section";
 import { CallerHistorySection } from "./caller-history-section";
+import { ShareSection } from "./share-section";
 import type { CallDetail, CallerHistory, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
@@ -132,7 +133,8 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
         </section>
       ) : null}
 
-      {live ? (
+      {/* No recado não há pessoa do time na linha para receber o pedido de não gravar: quem liga ouviu o aviso e pode desligar. */}
+      {live && data.voicemail ? null : live ? (
         <StopRecording
           id={id}
           title={t.stopRecordingTitle}
@@ -156,6 +158,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
               }}
             />
           ) : null}
+          {canConfigure ? <ShareSection id={id} /> : null}
         </Recording>
       )}
 

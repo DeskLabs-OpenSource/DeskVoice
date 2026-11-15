@@ -54,7 +54,7 @@ const privacy: PrivacyDictionary = {
   erasureDone: "The data of {phone} was erased.",
   erasureDoneRecordings: "The recordings are removed in a moment. The record below says how many were removed.",
   historyTitle: "Record",
-  historyLead: "Who changed the period or the recording, what was removed by it, who exported the data of which phone and who erased data at a caller's request. The 50 most recent.",
+  historyLead: "Who changed the period or the recording, what was removed by it, who exported the data of which phone, who erased data at a caller's request, and what happened to the recording links for callers. The 50 most recent.",
   historyEmpty: "Nothing recorded yet.",
   history: {
     transcript_retention_changed: "{who} changed the retention period from {from} to {to}.",
@@ -63,6 +63,9 @@ const privacy: PrivacyDictionary = {
     call_recording_changed: "{who} turned call recording {state}.",
     caller_data_erased: "{who} erased, at the caller's request, the data of the phone ending in {suffix}. Calls: {calls}. Recordings: {recordings}.",
     caller_recordings_erased: "Call recordings erased at the caller's request: {removed}.",
+    share_created: "{who} created a link for the caller to download the recording of a call. Valid until {until}, with {uses} downloads.",
+    share_downloaded: "The recording of a call was downloaded through the caller's link. Download {use} of {uses}.",
+    share_revoked: "{who} revoked the recording links of a call. Links revoked: {count}.",
   },
   purgedRecordings: "Recordings deleted: {count}.",
   purgedFollowUps: "Closed follow-ups deleted: {count}.",

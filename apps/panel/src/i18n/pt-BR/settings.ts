@@ -135,6 +135,17 @@ const settings = {
   inboundLimitLead: "Quantas ligações recebidas pela linha telefônica os agentes atendem ao mesmo tempo. Acima disso, quem liga recebe sinal de ocupado e a recusa aparece em Chamadas. Cada ligação já tem teto de custo e de duração no agente; este limite segura o gasto somado quando muitas chegam juntas. Chamadas pelo navegador e ligações feitas pelo agente não entram nesta conta.",
   inboundLimit: "Limite de ligações simultâneas",
   inboundLimitHint: "De 1 a 50. O valor de fábrica é 5.",
+  voicemailTitle: "Caixa postal quando ninguém atende",
+  voicemailLead: "Com a caixa postal ligada, a ligação para um número sem agente, ou com o agente desligado, é atendida: quem liga ouve um aviso gravado de que a ligação será gravada, depois um bipe, e deixa o recado, que fica na chamada e pode ser ouvido nela. O recado não ocupa a vaga de uma conversa no limite de ligações simultâneas, mas tem o mesmo número como limite próprio: com esse tanto de recados sendo gravados, quem liga recebe ocupado.",
+  voicemailTerms: ["Ela só atende com a gravação das chamadas ligada, em Configurações → Privacidade. Com a gravação desligada, a ligação é recusada como antes.", "Atender a ligação pode gerar custo na operadora que cobra a ligação recebida atendida. Sem a caixa postal, essa ligação é recusada sem ser atendida."],
+  voicemailNeedsRecording: "A gravação das chamadas está desligada em Configurações → Privacidade. Enquanto ela estiver desligada, a caixa postal não atende, e a ligação é recusada como antes.",
+  voicemailLanguage: "Idioma do aviso",
+  voicemailLanguageHint: "O aviso é um áudio já gravado: \"No momento, ninguém pode atender. Esta ligação será gravada. Deixe o seu recado depois do sinal.\" O texto não muda pela tela.",
+  voicemailLanguages: { "pt-BR": "Português (Brasil)", en: "Inglês", es: "Espanhol" },
+  voicemailSwitch: "Atender e gravar recado quando ninguém pode atender",
+  voicemailMaxSeconds: "Tempo máximo do recado, em segundos",
+  voicemailMaxSecondsHint: "De 5 a 300, contados depois do aviso. O valor de fábrica é 60. O recado termina 4 segundos depois da última fala.",
+  saveVoicemail: "Salvar caixa postal",
   saveInboundLimit: "Salvar limite",
 };
 

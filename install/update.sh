@@ -98,6 +98,8 @@ case "$arch" in aarch64|arm64)
     *) warn "Não consegui perguntar ao registro de imagens se a versão $target tem imagem para ARM. Sigo: se o download falhar, nada é alterado." ;;
   esac ;;
 esac
+missing_network="$(missing_proxy_network)"
+[ -z "$missing_network" ] || die "A rede $missing_network, em que o Caddy do DeskVoice entra para o proxy do outro sistema publicar o painel, não existe mais nesta máquina: com ela faltando, o Compose não sobe serviço nenhum, e a atualização terminaria com tudo parado. Nada foi alterado." "Suba o outro sistema, que recria a rede, e rode de novo. Para deixar de usar a rede: DESKVOICE_PROXY_NETWORK=off bash install/install.sh"
 confirm "Atualizar de $current para $target? (faço um backup antes; se algo falhar, volto sozinho)" \
   || die "Atualização cancelada: nada foi alterado." "Quando quiser, rode de novo."
 

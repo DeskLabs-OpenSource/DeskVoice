@@ -3,6 +3,27 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.12.0] - 2026-11-15
+
+### Adicionado
+
+- **As imagens publicadas passam a sair também para servidor ARM de 64 bits** A partir desta versão, as três imagens são publicadas também para ARM de 64 bits (arm64), e o
+  instalador, num servidor ARM, puxa a imagem publicada como no x86_64, em vez de construí-la na
+  própria VPS. Ainda não houve prova numa máquina ARM de verdade: as Ampere A1 do plano gratuito da
+  Oracle e as Graviton são exemplos de onde a imagem deve servir. As versões anteriores continuam sem imagem ARM: em ARM,
+  o instalador e o atualizador conferem antes de baixar e, se a versão pedida não tem a imagem,
+  param antes de mexer em qualquer coisa e dizem que dá para construir com `--build`. Quem já tem
+  uma instalação em ARM construída na máquina passa para esta versão com
+  `bash install/update.sh --to <versão>`, sem reinstalar. Crédito: @webtecnica.
+- **Link temporário para quem ligou baixar a gravação da própria chamada** Na tela de uma chamada com gravação, o dono ou o administrador cria um link que entrega o áudio a quem ligou, sem login. O link vale 72 horas e permite 10 downloads: cada download gasta um, e abrir a página do link não gasta nada. O endereço aparece uma vez só, na criação, e usa o endereço público da instalação; sem domínio configurado, ele só abre de dentro do servidor. A mesma tela lista os links que ainda valem e revoga todos na hora, e quem recebe o link vê uma página em português, inglês ou espanhol com a validade e o botão de baixar. Qualquer pessoa com o link baixa o áudio, que tem também a voz do agente, e a tela avisa isso. Chamada apagada a pedido de quem ligou, ou gravação que saiu pelo prazo de guarda, deixa de ser entregue. Criar, revogar e cada download ficam no registro de Configurações → Privacidade. Crédito: @webtecnica.
+- **A ligação pode deixar recado quando ninguém atende** Com a caixa postal ligada em Configurações → Ligações, a ligação recebida pela linha telefônica para um número sem agente, ou com o agente desligado, é atendida em vez de desligada: quem liga ouve um aviso gravado de que a ligação será gravada, em português, inglês ou espanhol, depois um bipe, e deixa o recado, que fica na própria chamada, tocável ali. Nada do que a pessoa diz antes de o aviso terminar é gravado. O recado termina 4 segundos depois da última fala ou no tempo máximo configurado (60 segundos de fábrica, contados depois do aviso), e o silêncio não vira recado. Cada recado deixa um aviso no painel e segue o caminho do resumo de toda chamada; com a transcrição automática ligada, o recado de um número com agente desligado vira texto com a chave desse agente, e o de um número sem agente fica só em áudio. Os recados não ocupam a vaga das conversas no limite de ligações simultâneas e têm o mesmo número como limite próprio. A caixa postal só atende com a gravação das chamadas ligada em Configurações → Privacidade, e atender pode gerar custo na operadora que cobra a ligação recebida. O recado fica sem cifra no disco do servidor, como as gravações. A ligação pelo WhatsApp continua sem caixa postal. Vem desligada. Crédito: @webtecnica.
+
+### Corrigido
+
+- **Com a transcrição automática ligada, o dono é avisado da ligação mesmo quando a transcrição falha de vez** Com a transcrição automática ligada, o resumo de uma ligação sem fala espera a transcrição da gravação para avisar o dono e classificar o desfecho, e é a transcrição que o pede de novo no fim. Se a transcrição falhava em todas as tentativas da fila, esse pedido não saía, e a ligação terminava sem aviso nenhum. Agora, na última tentativa, o resumo vai para a fila mesmo sem o texto: o aviso ao dono e o desfecho saem como sairiam sem a transcrição. Nas tentativas anteriores nada muda, porque a próxima pode dar certo. Nada muda para quem não ligou a transcrição automática, que vem desligada de fábrica. Crédito: @melgarafael.
+- **O painel atrás do Caddy do CRM não cai mais a cada atualização** Quem publica o DeskVoice pelo Caddy do DeskcommCRM na mesma VPS ligava o Caddy do DeskVoice na rede do CRM à mão, com `docker network connect`. Cada atualização recriava o contêiner, a ligação se perdia, e o domínio respondia 502 até alguém refazer o passo. Agora o instalador grava essa rede no arquivo de publicação que ele mesmo gera, com `DESKVOICE_PROXY_NETWORK=<rede> bash install/install.sh`, e o contêiner recriado já nasce nela, com o nome `deskvoice`. Se a rede não existe, a instalação e a atualização param antes de mudar qualquer coisa. `DESKVOICE_PROXY_NETWORK=off` tira a rede. Nada muda para quem não usa o CRM na mesma VPS. Quem fez a ligação à mão roda o passo 3 do guia uma vez e não precisa mais repeti-lo. Crédito: @melgarafael.
+- **A restauração confere a rede do proxy do CRM antes de trocar o banco** Numa instalação publicada pelo Caddy do DeskcommCRM, com a rede dele gravada pelo instalador (`DESKVOICE_PROXY_NETWORK`), a restauração de um backup agora confere, antes de parar qualquer serviço, se essa rede ainda existe. Se ela sumiu, os serviços não voltariam a subir depois da troca do banco. Por isso a restauração para sem mexer em nada e diz como seguir, do mesmo jeito que a instalação e a atualização já faziam. Nada muda para quem não usa o CRM na mesma VPS. Crédito: @melgarafael.
+
 ## [0.11.0] - 2026-11-15
 
 ### Requer atenção
