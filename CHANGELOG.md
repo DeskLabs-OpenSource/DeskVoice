@@ -3,6 +3,26 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.14.0] - 2026-11-15
+
+### Adicionado
+
+- **Bancada de voz mede a redução de ruído local em 8 kHz, fora do produto** A bancada de voz (`scripts/bancada-de-voz/`) ganha uma medida manual da redução de ruído que
+  poderia rodar na VPS antes do provedor: SpeexDSP, RNNoise e DeepFilterNet, em áudio de telefone
+  (8 kHz) com voz sintética e ruído gerado. Ela mostra o atraso, a CPU, quanto cada um tira de obra,
+  música e conversa de fundo, e quanto corta da fala baixa, medido na frase inteira. Nenhum deles
+  entra no produto: não roda no CI, não entra na imagem e não muda nada numa instalação.
+  Crédito: @melgarafael.
+- **A tela da chamada mostra as ligações anteriores do mesmo número** Quem atualiza passa a ver, na tela de cada chamada, o bloco "Este número": as ligações anteriores
+  do mesmo telefone (data, agente, desfecho e link) e as pendências abertas dele, sem procurar na
+  lista de Chamadas. Não há interruptor, porque é leitura do que a equipe já via (registro 0020). O
+  aviso de transferência e o de `notify_human` ganham uma linha como "Este número já ligou 3 vezes;
+  1 pendência aberta: …". Pelo WhatsApp, essa linha leva só as contagens, nunca o título da
+  pendência. Nada disso chega ao agente: as instruções e as ferramentas da ligação não mudam.
+  Chamada sem número não mostra o bloco, e a ligação apagada a pedido do titular não aparece. A
+  chamada simulada aparece na lista com a marca "Simulada" e não entra no "já ligou" dos avisos,
+  porque qualquer pessoa da equipe pode simular com o número de um cliente. Crédito: @melgarafael.
+
 ## [0.13.1] - 2026-11-15
 
 ### Adicionado
