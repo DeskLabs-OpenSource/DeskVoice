@@ -535,19 +535,40 @@ Aceite:
   emite `callerActivity({ words: true })`;
 - teste: a falha ao abrir grava `transcriber_failed` e a chamada segue.
 
+Decidido na implementação (#245, revisto pelo Arquiteto em 15/11):
+- a peça que não abre lança `TranscriberOpenError` com o código do vocabulário fechado. Prazo
+  vencido vira `unreachable`, e qualquer outro erro vira `unexpected_response`;
+- chave ausente grava `rejected`, e a frase diz "recusada, ou não está cadastrada". Não há código
+  próprio: a fatia 4 impede salvar uma peça com chave sem a chave;
+- a chave fica em `transcriber.<id>.api_key`, cifrada, no molde de `engine.<id>.api_key`;
+- a linha do extrato é `transcriber:<id>`, para não se misturar a um motor de mesmo id;
+- a escolha chega por `CallSessionInput.transcriberId`. O processo de voz ainda não chama
+  `loadTranscribers()`: em produção nada carrega a peça até a fatia 4;
+- a peça recebe só os primeiros `maxVocabulary` termos do vocabulário;
+- o sinal de fala é o texto novo, venha de trecho parcial ou final.
+
 ### Fatia 3: a peça do vencedor
 
 Um arquivo em `transcribers/`, com fonte e data no cabeçalho (como os motores), vocabulário, zod
 em toda resposta, teste da chave e teste com servidor falso. **Só existe depois da fatia 1.**
 
-Aceite: a peça roda o conjunto da bancada e chega nos números da seção "Medida", com tolerância
-de 2 pontos.
+Aceite:
+- a peça roda o conjunto da bancada e chega nos números da seção "Medida", com tolerância de 2
+  pontos;
+- teste: a peça que abre depois de a chamada terminar é fechada na hora, e a que responde depois
+  de o prazo de abertura vencer também. Nos dois casos, nenhuma conexão fica aberta. (Ressalva do
+  Verificador no #245: o código da fatia 2 já fecha, mas nenhum teste cobre. Com serviço real, a
+  falha deixaria uma conexão aberta e cobrando.)
 
 ### Fatia 4: a escolha na tela
 
 Na página do agente: o transcritor (padrão: nenhum), a chave dele (cifrada, testada pelo
 `checkKey`) e uma frase que diz que, nos motores diretos, ele soma custo. Migration com a coluna
-do agente (padrão nulo, que é igual a hoje). Nos três idiomas.
+do agente (padrão nulo, que é igual a hoje). Nos três idiomas. O processo de voz passa a chamar
+`loadTranscribers()` e a entregar o `transcriberId` do agente à chamada. A linha
+`transcriber:<id>` ganha rótulo na tela de custos. Um teste de painel confere que a frase de
+`transcriber_failed` existe nos três dicionários (o `as Record` de hoje deixa passar uma chave
+faltando).
 
 Aceite:
 - a pessoa escolhe o transcritor, salva, recarrega e vê a escolha; chave recusada mostra o motivo
