@@ -134,6 +134,7 @@ capacidade abaixo diz até onde a prova foi:
 | Conversa da chamada: saudação, falas, ferramentas, encerramento | Provado em simulação |
 | Avisar um humano e pedir aprovação no meio da chamada, com prazo e resposta padrão | Provado em simulação |
 | Linha do tempo de cada chamada, evento por evento, com custo | Provado em simulação |
+| Na tela de cada chamada, as ligações anteriores do mesmo número (data, agente, desfecho e link) e as pendências abertas dele; o aviso de transferência e o de `notify_human` dizem quantas vezes o número já ligou. Nada disso chega ao agente da ligação | Testado com banco real, inclusive o isolamento entre empresas e que as instruções do agente não mudam; o teste de tela roda no CI, mas a tela não foi vista num navegador de verdade. O desempenho com muitas ligações do mesmo número não foi medido, e o mesmo número gravado de outro jeito (com e sem o nono dígito) conta como outro; o que a linha telefônica entrega não foi conferido. Desde a 0.14.0 |
 | Tarefas depois que a ligação termina (resumo, avisos, tarefas de acompanhamento) | Provado em simulação |
 | Teto de custo e de duração por chamada | Provado em simulação |
 | Teto por ligação nas ferramentas que gravam ou avisam: 5 pendências, 5 agendamentos, 5 chamadas de webhook, 3 avisos à equipe e 3 pedidos de aprovação; acima dele, a ferramenta não roda e o agente diz que o pedido não foi registrado | Testado com banco real, inclusive com chamadas em paralelo, que não passam do teto. Ainda sem ligação por operadora real. Desde a 0.13.0 |
