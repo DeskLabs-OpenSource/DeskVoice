@@ -5,6 +5,7 @@ export * from "./config";
 export * from "./db";
 export * from "./erasures";
 export * from "./events";
+export * from "./caller-verifications";
 export * from "./follow-ups";
 export * from "./inbound-limit";
 export * from "./invites";
