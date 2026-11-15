@@ -80,6 +80,7 @@ const common: CommonDictionary = {
     token_required: "Al cambiar la dirección o el tipo del conector, escribe el token de nuevo.",
     endpoint_required: "La clave de la clasificación pertenece a un endpoint: escribe también el endpoint.",
     endpoint_key_required: "Al cambiar el endpoint de la clasificación, escribe su clave de nuevo.",
+    classify_model_unmeasured: "El modelo de la clasificación sin endpoint iría al proveedor del motor, que cobra por él, y el proyecto no conoce el precio de ese modelo. Escribe el endpoint del proveedor, o deja el modelo en blanco para usar el modelo del motor, que tiene precio medido.",
     whatsapp_unavailable: "Este servidor todavía no tiene la clave del servicio de WhatsApp. Ejecuta bash install/update.sh en el servidor, una vez.",
     whatsapp_service_absent: "El servicio de WhatsApp no está en marcha en este servidor. Instala el servicio antes de conectar un número.",
     whatsapp_service_down: "El servicio de WhatsApp de este servidor no respondió. Intenta de nuevo en un momento; si continúa, ejecuta la verificación de salud en el servidor.",
@@ -97,6 +98,9 @@ const common: CommonDictionary = {
     connector_replace_required: "Ya hay un conector de WhatsApp configurado. Confirma el reemplazo para conectar.",
     invalid_numbers: "Estos números no fueron reconocidos como teléfono. No se agregó ninguno:",
     number_already_registered: "Este número ya está registrado.",
+    trunk_inbound_name:
+      "En la línea reconocida por IP, la dirección del servidor y las otras direcciones de entrada aceptan solo IP o bloque, no nombre. El nombre del proveedor va en la dirección para las llamadas salientes; para reconocer la línea por el nombre, usa usuario y contraseña.",
+    trunk_block_too_wide: "En la línea reconocida por IP, cada bloque puede llegar hasta /16 en IPv4 o /32 en IPv6. Registra los bloques más pequeños que publica la operadora, o su IP.",
     last_owner: "Esta es la única persona con rol de dueño activa. Haz dueña a otra persona antes.",
     cannot_manage_owner: "Solo un dueño puede invitar, cambiar, desactivar o quitar a otro dueño.",
     has_history: "Esta persona ya decidió aprobaciones o cerró pendientes, y el historial debe seguir diciendo quién decidió y quién cerró. Desactiva la cuenta en lugar de quitarla.",

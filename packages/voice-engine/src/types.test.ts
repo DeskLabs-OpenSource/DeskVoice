@@ -23,7 +23,7 @@ describe("destino da classificação", () => {
     });
   });
 
-  it("só o modelo, sem endpoint, fica na OpenAI com a chave do motor: não há chave do endpoint", () => {
+  it("só o modelo, sem endpoint, vai ao endereço do motor com a chave do motor: não há chave do endpoint", () => {
     expect(classifyDestinationOf({ model: "llama-3.3-70b-versatile" })).toEqual({ ok: true, target: { model: "llama-3.3-70b-versatile" } });
     // Uma chave gravada sem endpoint não vai a lugar nenhum.
     expect(classifyDestinationOf({ model: "gpt-5-mini", apiKey: "cifrada" })).toEqual({ ok: true, target: { model: "gpt-5-mini" } });

@@ -76,10 +76,16 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const remove = useAction();
   const [draft, setDraft] = useState<Draft | null>(isNew ? BLANK : null);
   const [confirming, setConfirming] = useState(false);
+  // O que está gravado no servidor. `agent.data` não se atualiza sozinho depois de salvar, então o
+  // aviso de rascunho precisa da cópia que o próprio salvar devolve.
+  const [savedEnvironment, setSavedEnvironment] = useState<ListeningEnvironment>("normal");
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void => setDraft((current) => (current ? { ...current, [key]: value } : current));
 
   useEffect(() => {
-    if (agent.data) setDraft(toDraft(agent.data));
+    if (agent.data) {
+      setDraft(toDraft(agent.data));
+      setSavedEnvironment(agent.data.listeningEnvironment ?? "normal");
+    }
   }, [agent.data]);
   // Agente novo já nasce com o motor padrão da instalação; sem padrão, o primeiro da lista.
   const fallbackEngine = defaultEngine.data?.value ?? engines.data?.[0]?.id ?? "";
@@ -107,6 +113,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // Barulhento só foi provado no OpenAI Realtime. Em outro motor, a opção some; um agente que já
   // está em Barulhento continua vendo o campo, com um aviso, para não guardar a escolha escondida.
   const noisyProven = NOISY_PROVEN_ENGINES.includes(draft.engine);
+  // "Voltar para Normal" mexe só no rascunho: até salvar, o agente atende em Barulhento.
+  const backToNormalPending = savedEnvironment === "noisy" && draft.listeningEnvironment === "normal";
   const submit = (): Promise<boolean> =>
     save.run(async () => {
       const body = {
@@ -126,6 +134,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         listeningEnvironment: draft.listeningEnvironment,
       };
       const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
+      setSavedEnvironment(saved.listeningEnvironment ?? "normal");
       if (isNew) router.replace(`/agents/${saved.id}`);
       else setDraft(toDraft(saved));
     });
@@ -226,6 +235,16 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                   </Notice>
                 </div>
               )}
+            </div>
+          ) : (
+            // Sem o campo, a linha fica: é ela que conta a quem usa outro motor que o modo existe.
+            <p className="mt-4 max-w-md text-[0.87rem] text-muted">{t.listeningEnvironmentOnlyOpenAi}</p>
+          )}
+          {backToNormalPending ? (
+            <div className="mt-2 max-w-md">
+              <Notice tone="warn">
+                <p>{t.listeningEnvironmentUnsaved}</p>
+              </Notice>
             </div>
           ) : null}
           {engine && engine.requiresKey && !engine.keyConfigured ? (

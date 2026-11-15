@@ -80,6 +80,7 @@ const common: CommonDictionary = {
     token_required: "When the connector address or type changes, enter the token again.",
     endpoint_required: "The classification key belongs to an endpoint: enter the endpoint too.",
     endpoint_key_required: "When the classification endpoint changes, enter its key again.",
+    classify_model_unmeasured: "Without an endpoint the classification goes to the engine's own provider, which charges for it, and the project does not know this model's price. Enter the provider's endpoint, or leave the model empty to use the engine's priced model.",
     whatsapp_unavailable: "This server does not have the key of the WhatsApp service yet. Run bash install/update.sh on the server, once.",
     whatsapp_service_absent: "The WhatsApp service is not running on this server. Install the service before connecting a number.",
     whatsapp_service_down: "The WhatsApp service of this server did not respond. Try again in a moment; if it continues, run the health check on the server.",
@@ -97,6 +98,9 @@ const common: CommonDictionary = {
     connector_replace_required: "A WhatsApp connector is already configured. Confirm the replacement to connect.",
     invalid_numbers: "These were not recognized as phone numbers. None was added:",
     number_already_registered: "This number is already registered.",
+    trunk_inbound_name:
+      "In a line recognized by IP, the server address and the other inbound addresses accept only an IP or a block, not a name. The provider name goes in the address for outbound calls; to recognize the line by name, use user and password.",
+    trunk_block_too_wide: "In a line recognized by IP, each block can be at most /16 in IPv4 or /32 in IPv6. Enter the smaller blocks the provider publishes, or its IP.",
     last_owner: "This is the only active owner. Make another person an owner first.",
     cannot_manage_owner: "Only an owner can invite, change, disable or remove another owner.",
     has_history: "This person has decided approvals or closed follow-ups, and the history must keep saying who decided and who closed. Disable the account instead of removing it.",

@@ -102,6 +102,42 @@ Crie quando as três condições valem:
 Se a regra pede julgamento, ela não é cerca. Ela vai para a lista "o que o CI não vê" do
 [`AGENTS.md`](../../AGENTS.md), e é cobrada na revisão.
 
+## Cerca que falha de vez em quando
+
+Cerca que reprova sozinha, sem ninguém tocar no repositório, é defeito da cerca — e se conserta
+antes de qualquer outra coisa. O difícil é que ela não deixa rastro: a rodada vermelha passa, a
+seguinte fica verde, e ninguém sabe qual teste caiu.
+
+Por isso falha intermitente se **captura**, não se adivinha. `scripts/fence-soak.sh` roda as cercas
+em laço — 40 rodadas por padrão — com um comando pesado em paralelo, e guarda a saída inteira de
+cada rodada vermelha:
+
+```bash
+bash scripts/fence-soak.sh            # 40 rodadas com pnpm typecheck em paralelo
+bash scripts/fence-soak.sh 120        # taxa de falha baixa pede laço maior
+```
+
+O que ele deixa em `${TMPDIR:-/tmp}/fence-soak/<carimbo>/`:
+
+| arquivo | o que tem |
+|---|---|
+| `falhas/rodada-N.log` | a saída verbosa da rodada vermelha, com o nome do teste; é o que se anexa na issue |
+| `falhas/rodada-N.ambiente.txt` | load, memória, HEAD, árvore suja e os processos pesados daquele momento |
+| `resumo.txt` | rodadas, falhas e tempos (mínimo, mediana, máximo) |
+
+Medido em 4 vCPU com o typecheck em paralelo: cerca de 4 s por rodada, 120 rodadas em 11 minutos.
+A saída fica fora do repositório de propósito — as cercas que varrem a árvore inteira leriam o
+próprio log da rodada anterior.
+
+O laço **não** é do CI: o CI roda as cercas uma vez, dentro de `pnpm verify`. Quarenta rodadas
+existem para caçar a falha rara na máquina de quem está investigando.
+
+Intermitência não se conserta aumentando `testTimeout` nem marcando o teste como `skip`: os dois
+escondem o sintoma e devolvem a cerca vermelha para a máquina de outra pessoa. Com o nome do teste
+e a saída guardada, a causa costuma ser uma entre poucas — relógio, porta, arquivo temporário,
+ordem de execução, ou uma árvore que outro processo está mudando — e aí sim se conserta, com prova
+de sabotagem.
+
 ## Quando uma cerca reprova o seu PR
 
 1. Leia a mensagem. Ela diz o que fazer.

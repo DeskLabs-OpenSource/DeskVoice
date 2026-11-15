@@ -125,3 +125,17 @@ export function parseTrunkHost(input: string): TrunkHost | null {
 
 /** Dois endereços ou blocos se sobrepõem: um contém o outro, ou são o mesmo. */
 export const hostsOverlap = (a: TrunkHost, b: TrunkHost): boolean => a.kind === "address" && b.kind === "address" && a.start <= b.end && b.start <= a.end;
+
+const V4_SPACE_END = V4_MAPPED | 0xffffffffn;
+
+/**
+ * O reconhecimento por IP recusa bloco largo demais: mais largo que /16 no IPv4 ou que /32 no
+ * IPv6. A conta é feita no espaço de 128 bits, então um bloco escrito em IPv6 que alcança o espaço
+ * do IPv4 (como `::ffff:0:0/96` ou `::/64`) obedece o piso do IPv4.
+ */
+export function isBlockTooWide(host: TrunkHost): boolean {
+  if (host.kind !== "address") return false;
+  const size = host.end - host.start + 1n;
+  if (size > 1n << 96n) return true;
+  return size > 1n << 16n && host.start <= V4_SPACE_END && V4_MAPPED <= host.end;
+}

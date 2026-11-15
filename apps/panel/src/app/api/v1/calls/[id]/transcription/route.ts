@@ -1,13 +1,20 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { TRANSCRIPT_RETENTION_SETTING, decryptSecret, enqueueTask, lockCall, recordEvent, recordingPath, transcriptRetentionOf, type OrgQuery } from "@deskvoice/core";
 // Pelo caminho do arquivo: o índice do pacote carrega a descoberta por pasta, que não existe no Next.
 import { MICROCENTS_PER_CENT } from "@deskvoice/voice-engine/pricing";
-import { splitRecording } from "@deskvoice/voice-engine/transcription";
+import { recordingSideEstimate, splitRecording } from "@deskvoice/voice-engine/transcription";
 import { TRANSCRIPTION_SETTING, transcriptionEnabledOf, type RecordingTranscriber, type TranscribeResult } from "@deskvoice/voice-engine/types";
 import { ApiError, handle, notFound } from "../../../../../../server/context";
 import { engineKeySetting, listEngines } from "../../../../../../server/pieces";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A recusa por gravação maior que um pedido do provedor, com a duração que o arquivo tem: a mesma
+ * frase vale para a conta feita só com o tamanho do arquivo e para a feita depois de separar os lados.
+ */
+const tooLong = (transcriber: RecordingTranscriber, sideBytes: number, seconds: number): ApiError =>
+  new ApiError(409, "transcription_too_long", `The recording is longer than the provider accepts in one request (about ${Math.floor((transcriber.maxAudioBytes / sideBytes) * (seconds / 60))} minutes).`);
 
 type Speaker = "user" | "agent";
 interface Turn {
@@ -102,8 +109,16 @@ export const POST = handle(
             now,
           ]);
         }
+        // A falha vira evento na linha do tempo, com o motivo e sem áudio nem fala: o extrato mostra a
+        // cobrança, e este registro diz por que não houve texto. Chamada apagada a pedido do titular
+        // não ganha registro novo, nem um que não carregue dado pessoal.
         const failed = results.find(({ result }) => !result.ok)?.result;
-        if (failed && !failed.ok) return new ApiError(502, "transcription_failed", `The provider did not transcribe the recording (${failed.failure}${failed.status === null ? "" : `, HTTP ${failed.status}`}).`);
+        if (failed && !failed.ok) {
+          if (!(await lockCall(q, callId)).erased) {
+            await recordEvent(q, callId, "transcription_failed", { reason: failed.failure, status: failed.status, engine: pending.engineId, model: pending.transcriber.model }, now);
+          }
+          return new ApiError(502, "transcription_failed", `The provider did not transcribe the recording (${failed.failure}${failed.status === null ? "" : `, HTTP ${failed.status}`}).`);
+        }
 
         const call = await q.one<{ started_at: Date }>("select started_at from calls where id = $1", [callId]);
         if (!call) return notFound();
@@ -162,13 +177,20 @@ export const POST = handle(
       throw new ApiError(409, "transcription_cost_ceiling", "This call already reached the agent's cost ceiling.");
     }
 
-    const wav = await readFile(recordingPath(deps.recordingsDir, q.organizationId, callId)).catch(() => null);
+    const recording = recordingPath(deps.recordingsDir, q.organizationId, callId);
+    // O tamanho basta para saber que a gravação não cabe num pedido do provedor. Medir antes do
+    // `readFile` evita carregar na memória uma gravação que vai ser recusada.
+    const fileBytes = await stat(recording).then((info) => info.size).catch(() => null);
+    if (fileBytes === null) throw new ApiError(404, "transcription_no_recording", "This call has no recording.");
+    const estimate = recordingSideEstimate(fileBytes);
+    if (estimate && estimate.sideBytes > transcriber.maxAudioBytes) throw tooLong(transcriber, estimate.sideBytes, estimate.seconds);
+    const wav = await readFile(recording).catch(() => null);
     if (!wav) throw new ApiError(404, "transcription_no_recording", "This call has no recording.");
     const sides = splitRecording(new Uint8Array(wav));
     if (!sides) throw new ApiError(422, "transcription_unreadable", "The recording is not the stereo file the recorder writes.");
-    if (sides.sideBytes > transcriber.maxAudioBytes) {
-      throw new ApiError(409, "transcription_too_long", `The recording is longer than the provider accepts in one request (about ${Math.floor((transcriber.maxAudioBytes / sides.sideBytes) * (sides.seconds / 60))} minutes).`);
-    }
+    // A conta de novo, agora com os lados de verdade: um WAV fora do formato canônico do gravador
+    // passa pela medida do tamanho e só é recusado aqui.
+    if (sides.sideBytes > transcriber.maxAudioBytes) throw tooLong(transcriber, sides.sideBytes, sides.seconds);
     const audio = [
       { speaker: "user" as const, audio: sides.caller },
       { speaker: "agent" as const, audio: sides.agent },

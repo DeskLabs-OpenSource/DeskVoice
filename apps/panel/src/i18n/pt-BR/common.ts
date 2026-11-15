@@ -78,6 +78,7 @@ const common = {
     token_required: "Ao mudar o endereço ou o tipo do conector, informe o token de novo.",
     endpoint_required: "A chave da classificação pertence a um endpoint: informe o endpoint também.",
     endpoint_key_required: "Ao mudar o endpoint da classificação, informe a chave dele de novo.",
+    classify_model_unmeasured: "O modelo da classificação sem endpoint iria ao provedor do motor, que cobra por ele, e o projeto não conhece o preço desse modelo. Informe o endpoint do provedor, ou deixe o modelo em branco para usar o modelo do motor, que tem preço medido.",
     whatsapp_unavailable: "Este servidor ainda não tem a chave do serviço de WhatsApp. Rode bash install/update.sh no servidor, uma vez.",
     whatsapp_service_absent: "O serviço de WhatsApp não está de pé neste servidor. Instale o serviço antes de conectar um número.",
     whatsapp_service_down: "O serviço de WhatsApp deste servidor não respondeu. Tente de novo em instantes; se continuar, rode a checagem de saúde no servidor.",
@@ -95,6 +96,9 @@ const common = {
     connector_replace_required: "Já existe um conector de WhatsApp configurado. Confirme a substituição para conectar.",
     invalid_numbers: "Estes números não foram reconhecidos como telefone. Nenhum foi adicionado:",
     number_already_registered: "Este número já está cadastrado.",
+    trunk_inbound_name:
+      "Na linha reconhecida por IP, o endereço do servidor e os outros endereços de entrada aceitam só IP ou bloco, não nome. O nome do provedor vai no endereço para as ligações de saída; para reconhecer a linha pelo nome, use usuário e senha.",
+    trunk_block_too_wide: "Na linha reconhecida por IP, cada bloco pode ir até /16 no IPv4 ou /32 no IPv6. Cadastre os blocos menores que a operadora publica, ou o IP dela.",
     last_owner: "Esta é a única pessoa com papel de dono ativa. Torne outra pessoa dona antes.",
     cannot_manage_owner: "Só um dono pode convidar, alterar, desativar ou remover outro dono.",
     has_history: "Esta pessoa já decidiu aprovações ou fechou pendências, e o histórico precisa continuar dizendo quem decidiu e quem fechou. Desative a conta em vez de remover.",

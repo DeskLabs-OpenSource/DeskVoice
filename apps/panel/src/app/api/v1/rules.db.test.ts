@@ -43,7 +43,7 @@ describe("roles", () => {
       call(createAgent, { ...as, method: "POST", body: { name: "Nope", engine: "simulated" } }),
       call(patchAgent, { ...as, method: "PATCH", params: { id: agent }, body: { enabled: false } }),
       call(deleteAgent, { ...as, method: "DELETE", params: { id: agent } }),
-      call(createTrunk, { ...as, method: "POST", body: { name: "T", host: "sip.example.test", authMode: "ip" } }),
+      call(createTrunk, { ...as, method: "POST", body: { name: "T", host: "203.0.113.60", authMode: "ip" } }),
       call(putSetting, { ...as, method: "PUT", params: { key: "recording_notice.text" }, body: { value: "x" } }),
       call(putPolicy, { ...as, method: "PUT", body: { dailyCapPerLine: 2000 } }),
       call(addDoNotCall, { ...as, method: "POST", body: { numbers: ["31999998888"] } }),
@@ -243,7 +243,7 @@ describe("secrets", () => {
     expect([moved?.host, decryptSecret(moved?.secret_enc ?? "", SECRET_KEY)]).toEqual(["sip2.example.test", "new-password"]);
 
     // Autenticação por IP não tem senha: a antiga é apagada, não reaproveitada.
-    expect((await patch({ authMode: "ip", host: "sip3.example.test" })).data).toMatchObject({ secret: { configured: false } });
+    expect((await patch({ authMode: "ip", host: "203.0.113.61" })).data).toMatchObject({ secret: { configured: false } });
     expect((await row())?.secret_enc).toBeNull();
   });
 
@@ -301,7 +301,7 @@ describe("settings", () => {
     expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: 12 });
   });
 
-  it.each(["calls.outcome_enabled", "calls.analysis_enabled"])("keeps %s off until an owner or admin turns it on, and an operator cannot", async (key) => {
+  it.each(["calls.outcome_enabled", "calls.analysis_enabled", "calls.auto_transcription_enabled"])("keeps %s off until an owner or admin turns it on, and an operator cannot", async (key) => {
     const params = { key };
     const put = (value: unknown, cookie = owner) => call(putSetting, { method: "PUT", cookie, params, body: { value } });
     expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: false });
@@ -401,7 +401,7 @@ describe("outbound policy", () => {
 
 describe("phone numbers", () => {
   it("normalizes the number and refuses one already registered as a validation error", async () => {
-    const trunk = ((await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Linha", host: "sip.example.test", authMode: "ip" } })).data as { id: string }).id;
+    const trunk = ((await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Linha", host: "203.0.113.62", authMode: "ip" } })).data as { id: string }).id;
     const created = await call(createNumber, { method: "POST", cookie: owner, body: { trunkId: trunk, number: "(31) 3222-1100" } });
     expect(created.data).toMatchObject({ e164: "+553132221100", trunkId: trunk, agentId: null });
 
@@ -414,7 +414,7 @@ describe("phone numbers", () => {
 
 describe("removing and correcting lines and numbers", () => {
   const newTrunk = async (name: string): Promise<string> =>
-    ((await call(createTrunk, { method: "POST", cookie: owner, body: { name, host: "sip.example.test", authMode: "ip" } })).data as { id: string }).id;
+    ((await call(createTrunk, { method: "POST", cookie: owner, body: { name, host: "203.0.113.63", authMode: "ip" } })).data as { id: string }).id;
   const newNumber = async (trunkId: string, number: string): Promise<string> =>
     ((await call(createNumber, { method: "POST", cookie: owner, body: { trunkId, number } })).data as { id: string }).id;
 
@@ -500,8 +500,80 @@ describe("removing and correcting lines and numbers", () => {
 
   it("accepts the provider addresses the voice process supports and refuses anything that could break the configuration", async () => {
     const create = (host: string) => call(createTrunk, { method: "POST", cookie: owner, body: { name: "Host", host, authMode: "ip" } });
-    for (const host of ["203.0.113.0/24", "[2001:db8::1]:5060", "2001:db8::1", "sip.example.test:5060"]) expect([host, (await create(host)).status]).toEqual([host, 200]);
+    for (const host of ["203.0.113.0/24", "[2001:db8::1]:5060", "2001:db8::1", "100.64.0.0/16", "3fff::/32"]) expect([host, (await create(host)).status]).toEqual([host, 200]);
     for (const host of ["sip.example.test;x", "[evil]", "sip.example.test\n[evil]", "203.0.113.0/99"]) expect([host, (await create(host)).code]).toEqual([host, "validation_error"]);
+  });
+
+  it("stores more than one inbound block and an outbound name, and refuses extra addresses outside IP mode", async () => {
+    // Os dois primeiros blocos que a Twilio publica para sinalização; a fonte está no PR.
+    const blocks = ["54.172.60.0/30", "54.244.51.0/30"];
+    const created = await call(createTrunk, {
+      method: "POST",
+      cookie: owner,
+      body: { name: "Twilio", host: blocks[0], matchExtra: blocks.slice(1), outboundHost: "conta.pstn.twilio.com", authMode: "ip" },
+    });
+    expect(created.status).toBe(200);
+    // O primeiro bloco fica no `host`; os outros entram na lista, na ordem digitada.
+    expect(created.data).toMatchObject({ matchExtra: blocks.slice(1), outboundHost: "conta.pstn.twilio.com" });
+    const id = (created.data as { id: string }).id;
+    const row = await withOrg(panel.app, org, (q) => q.one<{ match_extra: string[]; outbound_host: string | null }>("select match_extra, outbound_host from trunks where id = $1", [id]));
+    expect(row).toEqual({ match_extra: blocks.slice(1), outbound_host: "conta.pstn.twilio.com" });
+    const listed = (await call(listTrunks, { cookie: owner })).data as Array<{ id: string; matchExtra: string[]; outboundHost: string | null }>;
+    expect(listed.find((entry) => entry.id === id)).toMatchObject({ matchExtra: blocks.slice(1), outboundHost: "conta.pstn.twilio.com" });
+
+    // Fora do modo por IP esses campos não teriam efeito: a API recusa antes de gravar.
+    const registered = await call(createTrunk, {
+      method: "POST",
+      cookie: owner,
+      body: { name: "Registro", host: "sip.example.test", username: "5531", password: "senha-longa", authMode: "register", matchExtra: blocks },
+    });
+    expect([registered.status, registered.code]).toEqual([400, "validation_error"]);
+    const movedToRegister = await call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body: { authMode: "register", username: "5531", password: "senha-longa" } });
+    expect([movedToRegister.status, movedToRegister.code]).toEqual([400, "validation_error"]);
+
+    // Campo vazio limpa o destino de saída; a lista vazia volta a linha ao caso de um endereço só.
+    const cleared = await call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body: { outboundHost: "", matchExtra: [] } });
+    expect(cleared.data).toMatchObject({ matchExtra: [], outboundHost: null });
+
+    // Item que não é nome, IP nem bloco é recusado na entrada.
+    const invalid = await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Host", host: "203.0.113.0/24", matchExtra: ["[evil]"], authMode: "ip" } });
+    expect([invalid.status, invalid.code]).toEqual([400, "validation_error"]);
+  });
+
+  it("in a line recognized by IP, the inbound addresses are numeric and the block has a floor; a name only goes in the outbound address", async () => {
+    const create = (body: object) => call(createTrunk, { method: "POST", cookie: owner, body: { name: "Por IP", host: "203.0.113.0/24", authMode: "ip", ...body } });
+    const refused = async (result: ReturnType<typeof call>, code: string, value: string): Promise<void> => {
+      const answer = await result;
+      expect([value, answer.status, answer.code]).toEqual([value, 400, code]);
+      // A recusa diz qual campo, sem repetir o valor digitado.
+      expect(answer.message ?? "").not.toContain(value);
+    };
+    const before = await stored("select count(*)::int as n from trunks");
+
+    for (const name of ["sip.example.test", "sip.example.test:5060", "localhost"]) {
+      await refused(create({ host: name }), "trunk_inbound_name", name);
+      await refused(create({ matchExtra: ["54.172.60.0/30", name] }), "trunk_inbound_name", name);
+    }
+    for (const block of ["0.0.0.0/0", "::/0", "10.0.0.0/8", "2001:db8::/16", "::ffff:0:0/96"]) {
+      await refused(create({ host: block }), "trunk_block_too_wide", block);
+      await refused(create({ matchExtra: [block] }), "trunk_block_too_wide", block);
+    }
+    expect(await stored("select count(*)::int as n from trunks")).toEqual(before);
+
+    // O nome do provedor continua aceito na saída, e a linha por registro segue aceitando nome no host.
+    const ok = await create({ matchExtra: ["54.172.60.0/30"], outboundHost: "conta.pstn.twilio.com" });
+    expect(ok.status).toBe(200);
+    const register = await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Registro", host: "sip.example.test", username: "5531", password: "senha-longa", authMode: "register" } });
+    expect(register.status).toBe(200);
+
+    // A edição passa pela mesma regra: no host, na lista e ao mudar a linha de registro para IP.
+    const id = (ok.data as { id: string }).id;
+    const patch = (body: object) => call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body });
+    await refused(patch({ host: "sip.example.test" }), "trunk_inbound_name", "sip.example.test");
+    await refused(patch({ matchExtra: ["10.0.0.0/8"] }), "trunk_block_too_wide", "10.0.0.0/8");
+    const toIp = call(patchTrunk, { method: "PATCH", cookie: owner, params: { id: (register.data as { id: string }).id }, body: { authMode: "ip" } });
+    await refused(toIp, "trunk_inbound_name", "sip.example.test");
+    expect(await stored("select host, match_extra from trunks where id = $1", [id])).toEqual({ host: "203.0.113.0/24", match_extra: ["54.172.60.0/30"] });
   });
 });
 

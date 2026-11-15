@@ -39,6 +39,8 @@ const agents: AgentsDictionary = {
   listeningEnvironmentHint: "Use it if callers are often somewhere noisy. The agent becomes less sensitive to noise before it starts listening. For now, OpenAI Realtime only: this mode has not been tested on Gemini Live yet.",
   listeningEnvironmentUnproven: "Noisy mode has not been tested on the {engine} engine yet. For now, it is for OpenAI Realtime only.",
   listeningEnvironmentBackToNormal: "Back to Normal",
+  listeningEnvironmentOnlyOpenAi: "Noisy mode, for callers in a noisy place, is for now OpenAI Realtime only, the one engine where it has been tested. That is why the choice does not appear on this engine: to use Noisy, choose OpenAI Realtime.",
+  listeningEnvironmentUnsaved: "The change is only in the draft: until you save, the agent stays on Noisy.",
   tools: "Tools",
   toolsLead: "What this agent can do during the call.",
   toolsEmpty: "No tool available in this installation.",

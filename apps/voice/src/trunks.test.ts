@@ -3,7 +3,20 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseTrunkHost } from "./trunk-host";
-import { NAME_IN_IP_MODE_REASON, renderTrunksConf, SHARED_HOST_REASON, trunkProblem, writeFileAtomic, type TrunkConfig } from "./trunks";
+import {
+  BLOCK_TOO_WIDE_REASON,
+  EXTRA_ONLY_IN_IP_MODE_REASON,
+  extraAddressReason,
+  extraNameReason,
+  extraTooWideReason,
+  NAME_IN_IP_MODE_REASON,
+  OUTBOUND_BLOCK_REASON,
+  renderTrunksConf,
+  SHARED_HOST_REASON,
+  trunkProblem,
+  writeFileAtomic,
+  type TrunkConfig,
+} from "./trunks";
 
 const A = "0a000000-0000-4000-8000-000000000001";
 const B = "0b000000-0000-4000-8000-000000000002";
@@ -97,9 +110,26 @@ retry_interval=60
     for (const host of ["sip.operadora.example", "sip.operadora.example:5060", "provedor"]) {
       const { conf, skipped } = renderTrunksConf([{ ...byIp, host }, register]);
       expect(skipped, host).toEqual([{ id: B, reason: NAME_IN_IP_MODE_REASON }]);
-      expect(conf).not.toContain(B);
+      expect(conf, host).not.toContain(B);
+      expect(identifies(conf), host).toEqual([]);
     }
     expect(NAME_IN_IP_MODE_REASON).toMatch(/numeric address.*not a name.*registration/);
+  });
+
+  it("o reconhecimento por IP recusa bloco largo demais, no host e em cada item da lista", () => {
+    for (const block of ["0.0.0.0/0", "::/0", "10.0.0.0/8", "198.51.0.0/15", "2001:db8::/16", "2001:db8::/31", "::ffff:0:0/96", "::ffff:10.0.0.0/104", "::/64"]) {
+      const host = renderTrunksConf([{ ...byIp, host: block }, register]);
+      expect(host.skipped, block).toEqual([{ id: B, reason: BLOCK_TOO_WIDE_REASON }]);
+      expect(identifies(host.conf), block).toEqual([]);
+      const extra = renderTrunksConf([{ ...byIp, matchExtra: ["203.0.113.0/24", block] }, register]);
+      expect(extra.skipped, block).toEqual([{ id: B, reason: extraTooWideReason(2) }]);
+      expect(identifies(extra.conf), block).toEqual([]);
+    }
+    for (const block of ["198.51.0.0/16", "2001:db8::/32", "::ffff:198.51.0.0/112"]) {
+      expect(trunkProblem({ ...byIp, host: block }), block).toBeNull();
+      expect(trunkProblem({ ...byIp, matchExtra: [block] }), block).toBeNull();
+    }
+    expect(BLOCK_TOO_WIDE_REASON).not.toMatch(/0[.]0[.]0[.]0|::\/0/);
   });
 
   it("nome nunca gera identify, em nenhum modo, nem quando é exclusivo", () => {
@@ -111,6 +141,90 @@ retry_interval=60
     const { conf } = renderTrunksConf([byIp, register]);
     expect(sections(conf).map((line) => line.slice(7, 9))).toEqual(["0a", "0a", "0a", "0a", "0b", "0b", "0b"]);
     expect(renderTrunksConf([register, byIp]).conf).toBe(conf);
+  });
+
+  // Fonte: https://www.twilio.com/docs/sip-trunking/ip-addresses (medido em 14/11/2026). A Twilio
+  // publica um bloco /30 por região de sinalização e manda liberar TODOS, porque a entrega muda de
+  // região quando uma cai.
+  const TWILIO_BLOCKS = ["54.172.60.0/30", "54.244.51.0/30", "54.171.127.192/30", "35.156.191.128/30", "54.65.63.192/30", "54.169.127.128/30", "54.252.254.64/30", "177.71.206.192/30"];
+
+  describe("linha de operadora que entrega por vários blocos", () => {
+    const canonical = (value: string): string => {
+      const host = parseTrunkHost(value);
+      if (host === null || host.kind !== "address") throw new Error(`not an address: ${value}`);
+      return host.match;
+    };
+    /** O que o Asterisk faz com `match=`: a origem só entra se algum bloco do arquivo a contém. */
+    const acceptedFrom = (conf: string, origin: string): boolean => {
+      const source = parseTrunkHost(origin);
+      if (source === null || source.kind !== "address") return false;
+      return identifies(conf)
+        .map((line) => parseTrunkHost(line.slice("match=".length)))
+        .some((match) => match !== null && match.kind === "address" && match.start <= source.start && source.end <= match.end);
+    };
+    const network = (block: string): string => block.slice(0, block.indexOf("/"));
+    const twilio: TrunkConfig = { ...byIp, host: TWILIO_BLOCKS[0] ?? "", matchExtra: TWILIO_BLOCKS.slice(1), outboundHost: "conta.pstn.twilio.com" };
+
+    it("aceita a ligação de qualquer um dos blocos da operadora, e liga pelo nome da conta", () => {
+      const { conf, skipped } = renderTrunksConf([twilio]);
+      expect(skipped).toEqual([]);
+      expect(identifies(conf)).toEqual(TWILIO_BLOCKS.map((block) => `match=${canonical(block)}`));
+      for (const block of TWILIO_BLOCKS) expect([block, acceptedFrom(conf, network(block))]).toEqual([block, true]);
+      expect(conf).toContain("contact=sip:conta.pstn.twilio.com");
+    });
+
+    it("origem fora de todos os blocos continua recusada: nenhum match a cobre", () => {
+      const { conf } = renderTrunksConf([twilio]);
+      for (const outside of ["203.0.113.7", "54.172.60.4", "8.8.8.8", "2001:db8::1"]) expect([outside, acceptedFrom(conf, outside)]).toEqual([outside, false]);
+      // O `identify` só tem os blocos cadastrados; nenhum curinga entrou no lugar deles.
+      expect(identifies(conf)).toHaveLength(TWILIO_BLOCKS.length);
+      expect(conf).not.toMatch(/match=(?:0\.0\.0\.0\/0|::\/0)/);
+    });
+
+    it("a linha antiga, com um endereço só, continua igual: um match e o contato do host", () => {
+      const before = renderTrunksConf([byIp]).conf;
+      expect(renderTrunksConf([{ ...byIp, matchExtra: [] }]).conf).toBe(before);
+      expect(identifies(before)).toEqual(["match=198.51.100.20"]);
+      expect(before).toContain("contact=sip:198.51.100.20");
+    });
+
+    it("nome na lista de entrada é recusado: a lista só aceita IP ou bloco, e o nome do provedor vai na saída", () => {
+      const { conf, skipped } = renderTrunksConf([{ ...twilio, matchExtra: [TWILIO_BLOCKS[1] ?? "", "blocos.operadora.example"] }]);
+      expect(skipped).toEqual([{ id: B, reason: extraNameReason(2) }]);
+      expect(skipped[0]?.reason).not.toMatch(/54[.]|blocos/);
+      expect(conf).not.toContain(B);
+    });
+
+    it("todos os blocos publicados da Twilio passam pelo piso de prefixo", () => {
+      for (const block of TWILIO_BLOCKS) expect([block, trunkProblem({ ...byIp, host: block })]).toEqual([block, null]);
+    });
+
+    it("endereço extra repetido não vira match repetido", () => {
+      const { conf } = renderTrunksConf([{ ...byIp, host: "198.51.100.20/30", matchExtra: ["198.51.100.20/30"] }]);
+      expect(identifies(conf)).toEqual(["match=198.51.100.20/30"]);
+    });
+
+    it("a recusa diz qual item não casou, sem repetir a lista inteira", () => {
+      const { conf, skipped } = renderTrunksConf([{ ...twilio, matchExtra: [TWILIO_BLOCKS[1] ?? "", "[evil]"] }]);
+      expect(skipped).toEqual([{ id: B, reason: extraAddressReason(2) }]);
+      expect(skipped[0]?.reason).not.toMatch(/54[.]|177[.]|198[.]|\[evil\]/);
+      expect(conf).not.toContain(B);
+    });
+
+    it("endereço extra e destino de saída só existem no modo por IP; bloco não é destino", () => {
+      expect(trunkProblem({ ...register, matchExtra: [TWILIO_BLOCKS[1] ?? ""] })).toBe(EXTRA_ONLY_IN_IP_MODE_REASON);
+      expect(trunkProblem({ ...register, outboundHost: "conta.pstn.twilio.com" })).toBe(EXTRA_ONLY_IN_IP_MODE_REASON);
+      expect(trunkProblem({ ...byIp, outboundHost: "54.172.60.0/30" })).toBe(OUTBOUND_BLOCK_REASON);
+      expect(trunkProblem(twilio)).toBeNull();
+    });
+
+    it("cada bloco entra na regra de endereço compartilhado, não só o host", () => {
+      const mine: TrunkConfig = { ...byIp, host: "203.0.113.0/24", matchExtra: ["198.51.100.0/24"] };
+      const theirs: TrunkConfig = { ...byIp, id: C, organizationId: ORG2, host: "198.51.100.64/26" };
+      const { conf, skipped } = renderTrunksConf([mine, theirs]);
+      expect(skipped.map((entry) => entry.id)).toEqual([B, C]);
+      expect(identifies(conf)).toEqual([]);
+    });
   });
 
   describe("endereços que se sobrepõem", () => {

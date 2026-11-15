@@ -87,6 +87,17 @@ if [ "$is_git" = 1 ]; then
   git -C "$REPO_DIR" rev-parse --verify --quiet "refs/tags/$target_tag" >/dev/null \
     || die "A versão $target não existe no repositório (procurei a tag $target_tag)." "Veja as versões com: git tag --list  — e rode de novo com --to <versão>."
 fi
+# Em ARM, a versão alvo tem de ter imagem arm64 (as de antes da 0017 não têm). Pergunta antes do
+# backup: sem isso, a frase clara vira o erro cru do `docker pull`, depois de um backup à toa.
+arch="$(uname -m)"
+case "$arch" in aarch64|arm64)
+  arm64_rc=0; published_arm64 "$target" || arm64_rc=$?
+  case "$arm64_rc" in
+    0) ;;
+    1) die "$(no_arm64_image "$target" "$arch") Nada foi alterado: a instalação segue na versão $current." "Atualize para uma versão que tenha a imagem ARM, ou construa a $target nesta máquina: git -C $REPO_DIR checkout $target_tag && bash install/install.sh --build" ;;
+    *) warn "Não consegui perguntar ao registro de imagens se a versão $target tem imagem para ARM. Sigo: se o download falhar, nada é alterado." ;;
+  esac ;;
+esac
 confirm "Atualizar de $current para $target? (faço um backup antes; se algo falhar, volto sozinho)" \
   || die "Atualização cancelada: nada foi alterado." "Quando quiser, rode de novo."
 

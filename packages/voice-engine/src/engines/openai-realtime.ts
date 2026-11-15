@@ -83,9 +83,14 @@ const OUTCOME_PRICING: EnginePricing = {
   checkedOn: "2026-11-13",
   source: "https://developers.openai.com/api/docs/pricing",
 };
-// Modelo configurado pelo dono (provedor compatível): o projeto não conhece a tabela de preço dele,
-// e um centavo inventado seria pior que nenhum. O consumo em tokens continua no extrato; o custo
-// fica zero até alguém medir o preço desse modelo.
+// A tabela de preço dos modelos de classificação que este motor cobra: só entra aqui modelo com
+// preço conferido na página do provedor. Modelo fora daqui só pode ser pedido com endpoint (o preço
+// é do provedor do endpoint); sem endpoint, ele não é aceito ao salvar e, se já estiver gravado, o
+// motor usa o modelo de tabela — cobrar sem medir é o que esta tabela existe para impedir.
+const OUTCOME_PRICING_BY_MODEL = new Map<string, EnginePricing>([[OUTCOME_MODEL, OUTCOME_PRICING]]);
+// Modelo configurado pelo dono e servido por um endpoint (provedor compatível): o projeto não
+// conhece a tabela de preço dele, e um centavo inventado seria pior que nenhum. O consumo em tokens
+// continua no extrato; o custo fica zero até alguém medir o preço desse modelo.
 const OUTCOME_PRICING_UNKNOWN: EnginePricing = {
   centsPerMillionInputTokens: 0,
   centsPerMillionCachedInputTokens: 0,
@@ -467,16 +472,28 @@ const engine: VoiceEngine = {
 
   classifyTarget: true,
 
+  classifyPricing: (model) => OUTCOME_PRICING_BY_MODEL.get(model),
+
   async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
     const analyze = input.analyze === true;
-    // O modelo configurado pelo dono é o do pedido, do corpo e do preço; sem ele, o de sempre.
-    const model = options.model ?? OUTCOME_MODEL;
+    // O modelo configurado pelo dono é o do pedido, do corpo e do preço; sem ele, o de sempre. Sem
+    // endpoint, quem cobra é o próprio provedor deste motor: modelo fora da tabela de preço sairia
+    // cobrado e contado como "não medido", então ele cai no modelo de tabela (o custo volta a ser
+    // medido). Com endpoint, quem cobra é o outro provedor, e o modelo é o que o dono pediu.
+    const asked = options.model ?? OUTCOME_MODEL;
+    const model = options.baseUrl === undefined && !OUTCOME_PRICING_BY_MODEL.has(asked) ? OUTCOME_MODEL : asked;
+    const pricing =
+      options.baseUrl !== undefined
+        ? options.model === undefined
+          ? OUTCOME_PRICING
+          : OUTCOME_PRICING_UNKNOWN
+        : (OUTCOME_PRICING_BY_MODEL.get(model) ?? OUTCOME_PRICING);
     return classifyOutcomeOverHttp(
       {
         url: `${options.baseUrl ?? DEFAULT_API_URL}/chat/completions`,
         headers: { Authorization: `Bearer ${apiKey}` },
         model,
-        pricing: options.model === undefined ? OUTCOME_PRICING : OUTCOME_PRICING_UNKNOWN,
+        pricing,
         // Sem `analyze`, o pedido é exatamente o só de desfecho: quem usa só o desfecho não paga a análise.
         body: JSON.stringify({
           model,

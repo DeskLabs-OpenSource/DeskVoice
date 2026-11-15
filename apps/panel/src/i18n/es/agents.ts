@@ -39,6 +39,8 @@ const agents: AgentsDictionary = {
   listeningEnvironmentHint: "Úselo si quien llama suele estar en un lugar ruidoso. El agente se vuelve menos sensible al ruido para empezar a escuchar. Por ahora, solo en OpenAI Realtime: el modo aún no se ha probado en Gemini Live.",
   listeningEnvironmentUnproven: "El modo Ruidoso aún no se ha probado en el motor {engine}. Por ahora, es solo para OpenAI Realtime.",
   listeningEnvironmentBackToNormal: "Volver a Normal",
+  listeningEnvironmentOnlyOpenAi: "El modo Ruidoso, para quien llama desde un lugar con ruido, por ahora vale solo en OpenAI Realtime, el único motor en el que se probó. Por eso la opción no aparece en este motor: para usar Ruidoso, elija OpenAI Realtime.",
+  listeningEnvironmentUnsaved: "El cambio está solo en el borrador: hasta que guarde, el agente sigue en Ruidoso.",
   tools: "Herramientas",
   toolsLead: "Lo que este agente puede hacer durante la llamada.",
   toolsEmpty: "Ninguna herramienta disponible en esta instalación.",

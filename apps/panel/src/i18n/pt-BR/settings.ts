@@ -39,7 +39,7 @@ const settings = {
   classifyKeyHint: "Vai só para o endpoint acima. Ao trocar o endpoint, informe a chave de novo.",
   classifyKeyKeep: "Em branco, mantém a chave salva",
   classifyModel: "Modelo da classificação",
-  classifyModelHint: "O nome que o provedor publica, por exemplo deepseek-chat. Em branco, a classificação usa o modelo do motor.",
+  classifyModelHint: "O nome que o provedor publica, por exemplo deepseek-chat. Em branco, a classificação usa o modelo do motor. Sem endpoint, só é aceito o modelo cujo preço o projeto conhece; para outro modelo, informe o endpoint.",
   classifyTargetSave: "Salvar destino",
   /** O teste só lê os dados do modelo no provedor: não abre sessão de voz e não gasta. */
   keyResults: {
@@ -70,6 +70,9 @@ const settings = {
   transcriptionSwitch: "Permitir transcrever gravações",
   transcriptionCost: "Cada transcrição é um pedido pago ao provedor do motor do agente, com a chave dele. O valor entra no custo da chamada e no teto de custo do agente; chamada que já atingiu o teto não é transcrita. Só donos e administradores pedem.",
   transcriptionData: "Ligado, o áudio gravado da chamada é enviado ao provedor de IA do motor do agente para virar texto. Chamada apagada a pedido de quem ligou, ou fora do prazo de guarda da transcrição, não recebe texto.",
+  autoTranscriptionSwitch: "Transcrever sozinho toda chamada sem texto",
+  autoTranscriptionCost: "Ligado, toda chamada gravada que termina sem nenhuma fala na linha do tempo tem a gravação transcrita sozinha, antes do resumo e do desfecho, sem ninguém apertar o botão. Cada chamada transcrita assim é um pedido pago ao provedor do motor do agente: o valor entra no custo da chamada e no teto de custo do agente. Chamada que já tem a conversa transcrita durante a ligação não é transcrita de novo.",
+  autoTranscriptionNeedsManual: "Para ligar, antes permita transcrever gravações.",
   whatsappTitle: "Conector externo de WhatsApp",
   whatsappLead: "Alternativa ao número conectado por QR Code: o agente envia as mensagens e os avisos por um sistema seu. Sem número conectado e sem conector, ele diz na ligação que não conseguiu enviar.",
   connectorIsWaha: "O envio sai por um número de WhatsApp conectado por QR Code. Para usar um conector externo, um dono ou administrador desconecta o número antes.",

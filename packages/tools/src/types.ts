@@ -50,5 +50,10 @@ export interface Tool<Input = unknown> {
    * `tool_called` não os grava: o texto mora só onde o prazo de guarda o alcança (registro 0014).
    */
   personalTextArgs?: boolean;
+  /**
+   * `false`: falta a peça de que a ferramenta depende (a agenda sem cliente). A sessão não a oferece
+   * ao motor, mesmo marcada no agente, e o agente de exemplo não nasce com ela. Omitido vale `true`.
+   */
+  available?: boolean;
   run(input: Input, ctx: ToolContext): Promise<ToolResult>;
 }

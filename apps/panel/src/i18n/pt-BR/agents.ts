@@ -37,6 +37,8 @@ const agents = {
   listeningEnvironmentHint: "Use se quem liga costuma estar em lugar barulhento. O agente fica menos sensível a ruído para começar a ouvir. Por enquanto, só no OpenAI Realtime: o modo ainda não foi provado no Gemini Live.",
   listeningEnvironmentUnproven: "O modo Barulhento ainda não foi provado no motor {engine}. Por enquanto, ele é só para o OpenAI Realtime.",
   listeningEnvironmentBackToNormal: "Voltar para Normal",
+  listeningEnvironmentOnlyOpenAi: "O modo Barulhento, para quem liga de lugar com barulho, por enquanto vale só no OpenAI Realtime, o único motor em que foi provado. Por isso a escolha não aparece neste motor: para usar o Barulhento, escolha o OpenAI Realtime.",
+  listeningEnvironmentUnsaved: "A mudança está só no rascunho: até você salvar, o agente continua em Barulhento.",
   tools: "Ferramentas",
   toolsLead: "O que este agente pode fazer durante a ligação.",
   toolsEmpty: "Nenhuma ferramenta disponível nesta instalação.",

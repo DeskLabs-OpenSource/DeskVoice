@@ -1,7 +1,7 @@
 import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
-import { ANALYSIS_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, classifyBaseUrlOf, classifyModelOf, engineClassifyTargetSetting, storedClassifyTargetOf } from "@deskvoice/voice-engine/types";
+import { ANALYSIS_SETTING, AUTO_TRANSCRIPTION_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, classifyBaseUrlOf, classifyModelOf, engineClassifyTargetSetting, storedClassifyTargetOf } from "@deskvoice/voice-engine/types";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -73,22 +73,35 @@ const classifyModelSchema = z
 // Endpoint, modelo e a chave do endpoint juntos, com a regra do conector abaixo: a chave foi dada
 // a um endereço, então chave em branco só mantém a gravada se o endpoint for o mesmo; endpoint novo
 // pede a chave de novo. A chave do motor nunca serve aqui. Sem endpoint não há chave: só o modelo,
-// e a classificação segue na OpenAI com a chave do motor.
-const classifyTarget = setting<{ baseUrl?: string; model?: string; apiKey?: string }>({
-  schema: z.object({ baseUrl: classifyBaseUrlSchema.optional(), model: classifyModelSchema.optional(), apiKey: z.string().trim().min(1).max(500).optional() }),
-  secret: true,
-  store(value, key, previous) {
-    if (value.baseUrl === undefined) {
-      if (value.apiKey !== undefined) throw new ApiError(400, "endpoint_required", "The classification key belongs to an endpoint: enter the endpoint too.");
-      return value.model === undefined ? {} : { model: value.model };
-    }
-    const kept = storedClassifyTargetOf(previous);
-    const apiKey = value.apiKey ? encryptSecret(value.apiKey, key) : kept.baseUrl === value.baseUrl ? kept.apiKey : undefined;
-    if (apiKey === undefined) throw new ApiError(400, "endpoint_key_required", "When the classification endpoint changes, enter its key again.");
-    return { baseUrl: value.baseUrl, ...(value.model !== undefined && { model: value.model }), apiKey };
-  },
-  view: classifyTargetView,
-});
+// e a classificação segue no endereço oficial do motor, com a chave do motor — mas só com modelo que
+// o motor saiba precificar (`classifyPricing`): quem cobra é ele, e custo sem preço não é medido.
+// Com endpoint, o modelo é o que o dono quiser: quem cobra é o provedor do endpoint.
+// A configuração é por motor, por isso a função: o preço de cada modelo é do motor.
+const classifyTargetOf = (engine: VoiceEngine): Setting =>
+  setting<{ baseUrl?: string; model?: string; apiKey?: string }>({
+    schema: z.object({ baseUrl: classifyBaseUrlSchema.optional(), model: classifyModelSchema.optional(), apiKey: z.string().trim().min(1).max(500).optional() }),
+    secret: true,
+    store(value, key, previous) {
+      if (value.baseUrl === undefined) {
+        if (value.apiKey !== undefined) throw new ApiError(400, "endpoint_required", "The classification key belongs to an endpoint: enter the endpoint too.");
+        // Sem endpoint, o pedido vai ao provedor do próprio motor, que cobra por ele: modelo que o
+        // motor não sabe precificar seria cobrado com o custo "não medido". Com endpoint, o preço é
+        // do provedor do endpoint e o modelo passa.
+        if (value.model !== undefined && engine.classifyPricing?.(value.model) === undefined)
+          throw new ApiError(
+            400,
+            "classify_model_unmeasured",
+            "Without an endpoint the classification goes to the engine's own provider, which charges for it, and the project does not know this model's price: enter the endpoint, or leave the model empty to use the engine's priced model.",
+          );
+        return value.model === undefined ? {} : { model: value.model };
+      }
+      const kept = storedClassifyTargetOf(previous);
+      const apiKey = value.apiKey ? encryptSecret(value.apiKey, key) : kept.baseUrl === value.baseUrl ? kept.apiKey : undefined;
+      if (apiKey === undefined) throw new ApiError(400, "endpoint_key_required", "When the classification endpoint changes, enter its key again.");
+      return { baseUrl: value.baseUrl, ...(value.model !== undefined && { model: value.model }), apiKey };
+    },
+    view: classifyTargetView,
+  });
 
 // Token em branco numa alteração mantém o que já estava gravado: a tela nunca recebe o valor
 // para devolver, então "não mexi" precisa ser representável. Mas só para o MESMO destino: o token
@@ -165,6 +178,9 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     // Transcrever a gravação de uma chamada sem texto, a pedido. Ausente vale desligado: o áudio
     // gravado vai ao provedor do motor, e cada transcrição é paga.
     [TRANSCRIPTION_SETTING]: { ...plain(z.boolean()), fallback: false },
+    // Transcrever sozinho, no fim, toda chamada que terminou sem fala. Ausente vale desligado: cada
+    // uma é um pedido pago ao provedor, sem ninguém pedir. Só age com a transcrição acima ligada.
+    [AUTO_TRANSCRIPTION_SETTING]: { ...plain(z.boolean()), fallback: false },
     "network.public_ip": plain(z.ipv4()),
     // Ligações recebidas pela operadora ao mesmo tempo. Ausente vale o teto de fábrica.
     [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },
@@ -174,6 +190,6 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
   // Onde a classificação do desfecho acontece, por motor, para quem paga um provedor compatível com
   // OpenAI em vez da OpenAI. A voz em tempo real não muda. Ausente vale o endereço, o modelo e a
   // chave do motor, que é o de hoje: quem não configura nada não vê diferença no pedido.
-  for (const engine of engines) if (!engine.keyless && engine.classifyTarget) definitions[engineClassifyTargetSetting(engine.id)] = classifyTarget;
+  for (const engine of engines) if (!engine.keyless && engine.classifyTarget) definitions[engineClassifyTargetSetting(engine.id)] = classifyTargetOf(engine);
   return Object.hasOwn(definitions, key) ? definitions[key] : undefined;
 }

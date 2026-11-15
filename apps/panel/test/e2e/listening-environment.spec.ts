@@ -44,17 +44,22 @@ test("ambiente: o agente sem escolha abre em Normal, salvar sem mexer mantém, e
 test("ambiente: fora do OpenAI a opção some, e um agente em Barulhento que troca para o Gemini vê o aviso e volta para Normal", async ({ page }) => {
   await signIn(page);
 
-  // Motor sem prova e em Normal: o campo não aparece.
+  // Motor sem prova e em Normal: o campo não aparece, mas a linha que conta que o modo existe fica.
   const simulatedId = await createAgent(page, { engine: "simulated" });
   await page.goto(`/agents/${simulatedId}`);
   // A nota do motor simulado só aparece depois que a tela carregou o motor do agente.
   await expect(page.getByText(agents.engineSimulated)).toBeVisible();
   await expect(page.getByLabel(agents.listeningEnvironment)).toHaveCount(0);
+  await expect(page.getByText(agents.listeningEnvironmentOnlyOpenAi)).toBeVisible();
+  await expect(page.getByText(agents.listeningEnvironmentHint)).toHaveCount(0);
 
   const agentId = await createAgent(page, { engine: "openai-realtime", listeningEnvironment: "noisy" });
   await page.goto(`/agents/${agentId}`);
   const field = page.getByLabel(agents.listeningEnvironment);
   await expect(field).toHaveValue("noisy");
+  // No OpenAI a ajuda é a do campo, uma vez só: a linha de fora não se repete aqui.
+  await expect(page.getByText(agents.listeningEnvironmentHint)).toHaveCount(1);
+  await expect(page.getByText(agents.listeningEnvironmentOnlyOpenAi)).toHaveCount(0);
   const warning = page.getByText(agents.listeningEnvironmentUnproven.slice(0, agents.listeningEnvironmentUnproven.indexOf("{engine}")));
   await expect(warning).toHaveCount(0);
 
@@ -78,5 +83,42 @@ test("ambiente: fora do OpenAI a opção some, e um agente em Barulhento que tro
   expect((await save(page)).listeningEnvironment).toBe("normal");
   await page.reload();
   await expect(geminiVoice).toHaveCount(1);
+  await expect(page.getByLabel(agents.listeningEnvironment)).toHaveCount(0);
+});
+
+test("ambiente: voltar para Normal avisa que é só rascunho, e salvar tira o aviso", async ({ page }) => {
+  await signIn(page);
+  const agentId = await createAgent(page, { engine: "openai-realtime", listeningEnvironment: "noisy" });
+  await page.goto(`/agents/${agentId}`);
+
+  // Em Barulhento gravado, nada de aviso de rascunho.
+  await expect(page.getByLabel(agents.listeningEnvironment)).toHaveValue("noisy");
+  await expect(page.getByText(agents.listeningEnvironmentUnsaved)).toHaveCount(0);
+
+  // Troca para o Gemini: o campo continua à vista por causa do gravado.
+  await page.getByRole("combobox", { name: agents.engine, exact: true }).selectOption("gemini-live");
+  await expect(page.locator("option", { hasText: /^Zephyr\b/ })).toHaveCount(1);
+  const backToNormal = page.getByRole("button", { name: agents.listeningEnvironmentBackToNormal, exact: true });
+  await expect(backToNormal).toBeVisible();
+
+  // Voltar para Normal mexe só no rascunho: o campo some, e a tela diz que falta salvar.
+  await backToNormal.click();
+  await expect(page.getByLabel(agents.listeningEnvironment)).toHaveCount(0);
+  await expect(page.getByText(agents.listeningEnvironmentOnlyOpenAi)).toBeVisible();
+  await expect(page.getByText(agents.listeningEnvironmentUnsaved)).toBeVisible();
+
+  // Quem recarrega sem salvar continua em Barulhento: o aviso é a única coisa que segura a pessoa.
+  await page.reload();
+  await expect(page.getByLabel(agents.listeningEnvironment)).toHaveValue("noisy");
+
+  // Voltando de novo e salvando: o PATCH leva `normal`, o aviso sai e recarregada a tela não o traz.
+  await page.getByRole("combobox", { name: agents.engine, exact: true }).selectOption("gemini-live");
+  await expect(page.locator("option", { hasText: /^Zephyr\b/ })).toHaveCount(1);
+  await page.getByRole("button", { name: agents.listeningEnvironmentBackToNormal, exact: true }).click();
+  await expect(page.getByText(agents.listeningEnvironmentUnsaved)).toBeVisible();
+  expect((await save(page)).listeningEnvironment).toBe("normal");
+  await expect(page.getByText(agents.listeningEnvironmentUnsaved)).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText(agents.listeningEnvironmentUnsaved)).toHaveCount(0);
   await expect(page.getByLabel(agents.listeningEnvironment)).toHaveCount(0);
 });
