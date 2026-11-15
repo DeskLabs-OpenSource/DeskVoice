@@ -16,7 +16,7 @@
  * - modelo e preço: docs.typesafe.ai/models. `jev-latest` aponta para `jev-1.14.0`. US$ 0,042 por
  *   milhão de tokens de entrada, saída grátis. A página não diz quais idiomas o modelo lê.
  *
- * Teto: cada pedido reserva o pior caso (um token por byte do corpo) antes de sair. Se o custo
+ * Teto: cada pedido reserva o pior caso (um token por byte do corpo, mais uma sobra fixa) antes de sair. Se o custo
  * real de um pedido passar do reservado, o orçamento não reserva mais nada, e a medida para e diz
  * quanto passou (`Orcamento.excesso`).
  *
@@ -34,6 +34,12 @@ export const MODELO_PEDIDO = "jev-latest";
 export const USD_POR_MILHAO_DE_ENTRADA = 0.042;
 export const FONTE_DO_PRECO = "docs.typesafe.ai/models (US$ 0,042 por milhão de tokens de entrada, saída grátis), conferido em 2026-11-15";
 const PRAZO_MS = 15_000;
+/**
+ * A sobra fixa do pior caso, em tokens. Medido em 15/11/2026 (jev-1.14.0): o Jev cobra uns 250 a
+ * 300 tokens por pedido além do corpo (221 bytes viraram 304 tokens; 820 bytes, 498). Com só
+ * "um token por byte", o pedido curto passava do reservado, e a trava de excesso parou a rodada.
+ */
+export const SOBRA_DE_TOKENS = 1000;
 const AQUECIMENTO = 3;
 const CONCORRENCIAS = [1, 3] as const;
 
@@ -57,6 +63,11 @@ export interface OpcoesDoJev {
   concorrencias?: readonly number[];
 }
 
+/** O pior caso de um pedido, em US$: um token por byte do corpo, mais `SOBRA_DE_TOKENS`. */
+export function estimativaDoPedido(corpo: string): number {
+  return ((Buffer.byteLength(corpo) + SOBRA_DE_TOKENS) / 1e6) * USD_POR_MILHAO_DE_ENTRADA;
+}
+
 class Teto extends Error {}
 
 /**
@@ -66,8 +77,8 @@ class Teto extends Error {}
  */
 async function pedir(url: string, chave: string, pedido: PedidoDoFiltro, orcamento: Orcamento, relogio: Relogio, modelos: Set<string>): Promise<Registro> {
   const corpo = corpoDoPedido(pedido);
-  // Pior caso: um token por byte do corpo. Sobra muito, e nunca falta (se faltar, o orçamento trava).
-  const estimativa = (Buffer.byteLength(corpo) / 1e6) * USD_POR_MILHAO_DE_ENTRADA;
+  // Pior caso: um token por byte do corpo, mais a sobra fixa. Se faltar, o orçamento trava.
+  const estimativa = estimativaDoPedido(corpo);
   const reserva = orcamento.reservar(estimativa, "jev");
   if (!reserva) throw new Teto();
   const inicio = relogio.agora();

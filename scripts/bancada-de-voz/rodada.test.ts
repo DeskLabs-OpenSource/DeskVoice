@@ -197,7 +197,7 @@ describe("o filtro", () => {
     const orcamento = await rodada(["--teto-usd", "10", ...UMA_LINHA], m.pecas);
     expect(m.medidos).toEqual(["a"]);
     expect(orcamento.excesso).toBeGreaterThan(0.9);
-    expect(m.saida.join("\n")).toContain(`a, linha estreita, vocabulário com: parou porque o custo real passou do pior caso reservado em US$ ${orcamento.excesso.toFixed(6)}`);
+    expect(m.saida.join("\n")).toContain(`a, linha estreita, vocabulário com: parou porque o custo real passou do pior caso reservado em US$ ${orcamento.excesso.toFixed(8)}`);
   });
 });
 

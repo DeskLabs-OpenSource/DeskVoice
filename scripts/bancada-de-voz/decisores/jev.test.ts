@@ -11,7 +11,7 @@ import { carregarConjunto, vocabularioDoConjunto } from "../conjunto";
 import { carregarFiltro, pedidosDoFiltro, type ItemDoFiltro } from "../filtro";
 import { Orcamento } from "../orcamento";
 import type { Relogio } from "../tempo-real";
-import { corpoDoPedido, medirJev } from "./jev";
+import { SOBRA_DE_TOKENS, corpoDoPedido, estimativaDoPedido, medirJev } from "./jev";
 
 const CHAVE = "jev-chave-falsa-fedcba9876543210";
 
@@ -72,8 +72,10 @@ function jevCerto(itens: readonly ItemDoFiltro[], tokens: number | ((r: Recebido
   };
 }
 
-/** O custo de pior caso de um pedido, como a bancada estima: um token por byte do corpo. */
-const piorCaso = (r: Recebido): number => Buffer.byteLength(JSON.stringify(r.corpo));
+/** O pior caso de um pedido, em tokens, como a bancada estima: um token por byte do corpo, mais a sobra fixa. */
+const piorCaso = (r: Recebido): number => Buffer.byteLength(JSON.stringify(r.corpo)) + SOBRA_DE_TOKENS;
+/** O pior caso de cada pedido do filtro, em US$. */
+const estimativas = (lista: readonly ItemDoFiltro[]): number[] => pedidosDoFiltro(lista, vocabulario).map((p) => estimativaDoPedido(corpoDoPedido(p)));
 
 function relogioFalso(): Relogio {
   let agora = 0;
@@ -146,7 +148,7 @@ describe("medirJev", () => {
     // O pior caso que o serviço pode cobrar: um token por byte do corpo, que é a estimativa da bancada.
     const s = await servidorFalso(jevCerto(itens, piorCaso));
     // Cabem uns 8 pedidos de pior caso: o aquecimento e um pedaço da fase de 1.
-    const teto = 8.5 * Math.max(...pedidosDoFiltro(itens, vocabulario).map((p) => Buffer.byteLength(corpoDoPedido(p)))) * 0.042e-6;
+    const teto = 8.5 * Math.max(...estimativas(itens));
     const orcamento = new Orcamento(teto);
     const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso() });
     expect(s.recebidos.length).toBeGreaterThan(3);
@@ -172,7 +174,7 @@ describe("medirJev", () => {
     // O teto (US$ 1) estava longe: quem parou foi o excesso, logo depois do quinto pedido.
     expect(s.recebidos).toHaveLength(5);
     expect(orcamento.excesso).toBeCloseTo(excesso, 12);
-    expect(tabela).toContain(`Jev: parou porque o custo real passou do pior caso reservado em US$ ${excesso.toFixed(6)} (US$ ${orcamento.gasto.toFixed(4)} gastos) antes de terminar.`);
+    expect(tabela).toContain(`Jev: parou porque o custo real passou do pior caso reservado em US$ ${excesso.toFixed(8)} (US$ ${orcamento.gasto.toFixed(4)} gastos) antes de terminar.`);
   });
 
   it("com 3 chamadas em voo, o excesso de uma não deixa as outras abrirem pedido novo, e a tabela só sai depois que as em voo voltam", async () => {
@@ -197,9 +199,9 @@ describe("medirJev", () => {
 
   it("com 3 chamadas simultâneas, o teto não estoura, e a tabela só sai depois que todas voltam", async () => {
     const s = await servidorFalso((r, res) => void setTimeout(() => jevCerto(itens, piorCaso)(r, res), 15));
-    const corpos = pedidosDoFiltro(itens, vocabulario).map((p) => Buffer.byteLength(corpoDoPedido(p)));
+    const e = estimativas(itens);
     // O aquecimento cabe, e a fase de 3 bate no teto no meio, uns 6 pedidos depois.
-    const teto = (corpos.slice(0, 3).reduce((a, b) => a + b, 0) + 6.5 * Math.max(...corpos)) * 0.042e-6;
+    const teto = e.slice(0, 3).reduce((a, b) => a + b, 0) + 6.5 * Math.max(...e);
     const orcamento = new Orcamento(teto);
     const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [3] });
     const pedidos = s.recebidos.length;
@@ -217,12 +219,21 @@ describe("medirJev", () => {
 
   it("a reserva de cada pedido volta quando a resposta chega: o teto conta o gasto real, e não a soma das estimativas", async () => {
     const s = await servidorFalso(jevCerto(itens, 10));
-    const maior = Math.max(...pedidosDoFiltro(itens, vocabulario).map((p) => Buffer.byteLength(corpoDoPedido(p))));
-    const orcamento = new Orcamento(3 * maior * 0.042e-6);
+    const orcamento = new Orcamento(3 * Math.max(...estimativas(itens)));
     const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
     expect(s.recebidos).toHaveLength(3 + 6 * 2);
     expect(tabela).not.toContain("parou");
     expect(orcamento.gasto).toBeCloseTo((15 * 10 * 0.042) / 1e6, 12);
+  });
+
+  it("o pedido curto com a sobra fixa que o Jev cobra (medida em 15/11) cabe no pior caso: nada passa do reservado", async () => {
+    // O que se mediu: uns 300 tokens além do corpo. 221 bytes viraram 304 tokens.
+    const s = await servidorFalso(jevCerto(itens, (r) => Buffer.byteLength(JSON.stringify(r.corpo)) + 300));
+    const orcamento = new Orcamento(1);
+    const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
+    expect(s.recebidos).toHaveLength(3 + 6 * 2);
+    expect(orcamento.excesso).toBe(0);
+    expect(tabela).not.toContain("parou");
   });
 
   it("sem a chave não mede e não pede nada", async () => {

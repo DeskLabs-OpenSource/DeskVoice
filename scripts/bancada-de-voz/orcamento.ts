@@ -66,7 +66,7 @@ export class Orcamento {
 
   /** Por que a reserva foi recusada, para a rodada dizer onde parou e quanto passou. */
   motivoDaParada(): string {
-    if (this.excessoUsd > 0) return `parou porque o custo real passou do pior caso reservado em US$ ${this.excessoUsd.toFixed(6)} (US$ ${this.gastoUsd.toFixed(4)} gastos)`;
+    if (this.excessoUsd > 0) return `parou porque o custo real passou do pior caso reservado em US$ ${this.excessoUsd.toFixed(8)} (US$ ${this.gastoUsd.toFixed(4)} gastos)`;
     return `parou no teto (US$ ${this.gastoUsd.toFixed(4)} gastos)`;
   }
 
