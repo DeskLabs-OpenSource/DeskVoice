@@ -141,6 +141,7 @@ const timeline: TimelineDictionary = {
       rate_limited: "The provider asked to wait (account request limit).",
       unreachable: "The provider did not answer within two minutes, or it is down.",
       unexpected_response: "The provider answered outside the requested format. What it charged went into the call cost.",
+      transcription_too_long: "The recording is longer than the provider accepts in one request. Nothing was sent or charged.",
     } as Record<string, string>,
     transcription_failed_unknown: "The provider did not transcribe the recording. The reason is below and in the panel process log.",
     transcript_from_recording: "Transcribed from the recording. The text gathers everything this side said, without the order of the turns.",

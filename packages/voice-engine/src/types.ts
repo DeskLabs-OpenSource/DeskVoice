@@ -336,6 +336,15 @@ export const TRANSCRIPTION_SETTING = "calls.transcription_enabled";
 export const transcriptionEnabledOf = (stored: unknown): boolean => stored === true;
 
 /**
+ * Transcrever sozinho, ao fim da chamada, a gravação que terminou sem fala nenhuma (chave
+ * `calls.auto_transcription_enabled`). Ausente é desligada, de fábrica: cada chamada sem texto vira
+ * um pedido pago ao provedor, sem ninguém pedir. Só vale com `calls.transcription_enabled` também
+ * ligada, que é a licença para o áudio sair para o provedor. Só `true` liga.
+ */
+export const AUTO_TRANSCRIPTION_SETTING = "calls.auto_transcription_enabled";
+export const autoTranscriptionEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
  * Endpoint, modelo e chave da **classificação**, por motor, juntos numa configuração só
  * (`engine.<id>.classify_target` em `settings`).
  *

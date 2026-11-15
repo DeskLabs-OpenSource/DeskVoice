@@ -1,7 +1,17 @@
 import { enqueueTask, withOrg, type CallStatus, type OrgQuery } from "@deskvoice/core";
 import { hasWhatsAppConnector } from "@deskvoice/tools";
-import { ANALYSIS_SETTING, OUTCOME_SETTING, analysisEnabledOf, outcomeEnabledOf } from "@deskvoice/voice-engine";
+import {
+  ANALYSIS_SETTING,
+  AUTO_TRANSCRIPTION_SETTING,
+  OUTCOME_SETTING,
+  TRANSCRIPTION_SETTING,
+  analysisEnabledOf,
+  autoTranscriptionEnabledOf,
+  outcomeEnabledOf,
+  transcriptionEnabledOf,
+} from "@deskvoice/voice-engine";
 import type { Routine } from "../types";
+import { hasSpeech } from "./transcribe_call";
 
 export interface CallDigest {
   status: CallStatus;
@@ -110,13 +120,30 @@ const routine: Routine = {
       // linha: se o apagamento confirmou depois da leitura das falas acima, nada é escrito.
       const written = await q.exec("update calls set summary = $2 where id = $1 and erased_at is null", [callId, summary]);
       if (written === 0) return;
+      const settings = await q.many<{ key: string; value: unknown }>("select key, value from settings where key = any($1)", [
+        [OUTCOME_SETTING, ANALYSIS_SETTING, TRANSCRIPTION_SETTING, AUTO_TRANSCRIPTION_SETTING],
+      ]);
+      const valueOf = (key: string): unknown => settings.find((row) => row.key === key)?.value;
+      // A chamada terminou sem fala nenhuma e a transcrição automática está ligada (ela e a licença do
+      // áudio sair, `calls.transcription_enabled`): a gravação vai para a fila agora, e o desfecho
+      // espera, com o aviso ao dono. É a transcrição quem enfileira este resumo de novo, com o texto no
+      // lugar do vazio, e os dois saem dessa segunda passada: classificar antes pagaria por uma
+      // conversa vazia, e avisar antes mandaria o dono a um resumo sem fala.
+      // A existência da própria tarefa é a marca de "já pedi": sem isso, chamada sem fala nenhuma
+      // faria o resumo e a transcrição se reenfileirarem para sempre.
+      if (transcriptionEnabledOf(valueOf(TRANSCRIPTION_SETTING)) && autoTranscriptionEnabledOf(valueOf(AUTO_TRANSCRIPTION_SETTING))) {
+        const asked = await q.one<{ n: number }>("select count(*)::int as n from tasks where call_id = $1 and kind = 'transcribe_call'", [callId]);
+        if ((asked?.n ?? 0) === 0 && !(await hasSpeech(q, callId))) {
+          await enqueueTask(q, { kind: "transcribe_call", payload: {}, callId });
+          return;
+        }
+      }
       await notifyOwner(q, callId, deps.clock.now());
       // O desfecho comercial e a análise são do motor do agente, na mesma rotina e na mesma chamada
       // paga: vão para a fila em separado, para o resumo não depender de provedor nenhum para ficar
       // pronto. As duas desligadas (de fábrica), nem entra na fila.
-      const settings = await q.many<{ key: string; value: unknown }>("select key, value from settings where key = any($1)", [[OUTCOME_SETTING, ANALYSIS_SETTING]]);
-      const outcomeOn = outcomeEnabledOf(settings.find((row) => row.key === OUTCOME_SETTING)?.value);
-      const analysisOn = analysisEnabledOf(settings.find((row) => row.key === ANALYSIS_SETTING)?.value);
+      const outcomeOn = outcomeEnabledOf(valueOf(OUTCOME_SETTING));
+      const analysisOn = analysisEnabledOf(valueOf(ANALYSIS_SETTING));
       if (outcomeOn || analysisOn) await enqueueTask(q, { kind: "classify_call_outcome", payload: {}, callId });
     });
   },
