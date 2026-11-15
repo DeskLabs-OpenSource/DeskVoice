@@ -316,6 +316,26 @@ export function Timeline({
             </Card>
           ),
         };
+      case "recording_saved": {
+        // Na linha, o começo da impressão digital; a inteira fica à mão para copiar e conferir uma cópia.
+        const sha256 = text(p.sha256);
+        const size = (Number(p.bytes) / 1e6).toLocaleString(locale, { maximumFractionDigits: 1 });
+        return {
+          ...base,
+          tone: "neutral",
+          icon: RecordIcon,
+          body: (
+            <div className="grid max-w-[52ch] gap-1 pt-1 text-muted">
+              <p>{fill(e.recording_saved, { size, hash: sha256.slice(0, 12) })}</p>
+              <details className="text-[0.87rem]">
+                <summary className="cursor-pointer font-bold hover:text-ink">{e.recording_saved_full}</summary>
+                <p className="mt-1.5">{e.recording_saved_body}</p>
+                <p className="data mt-1.5 rounded-xs bg-sunken p-2.5 break-all text-ink select-all">{sha256}</p>
+              </details>
+            </div>
+          ),
+        };
+      }
       case "cost_ceiling_reached":
         return { ...base, tone: "fail", icon: Coins, body: <Card tone="fail" title={e.cost_ceiling_reached}><p className="text-muted">{e.cost_ceiling_body}</p></Card> };
       case "outcome_not_classified": {
