@@ -191,7 +191,7 @@ rodem na VPS, em áudio de 8 kHz:
 | RNNoise | rede pequena, feita para ruído de fundo | licença; trabalha em 48 kHz, então soma duas conversões de taxa |
 | DeepFilterNet | qualidade maior | licença, custo de CPU, 48 kHz |
 
-As licenças acima não foram conferidas neste documento. Nenhum deles foi feito para tirar **outra
+As licenças acima foram conferidas depois, na seção "Medida da redução de ruído". Nenhum deles foi feito para tirar **outra
 voz** de fundo: com conversa de fundo, o ganho esperado é pequeno, e a fatia 4 diz o quanto.
 
 Se algum entrar, ele fica em `apps/voice`, antes de `session.sendAudio`, em 8 kHz, e antes da
@@ -291,6 +291,69 @@ ela que ajusta os prazos da guarda e os valores do modo "noisy". "Melhorou" só 
 - **Níveis medidos:** relação voz/ruído de 15, 5 e 0 dB, calculada sobre o RMS de cada trecho, e
   escrita junto do resultado.
 
+## Medida da redução de ruído
+
+Da fatia 4, PR #256 (commit `f0be80a`), rodada na VPS de teste em 15/11/2026: 4 vCPU AMD EPYC, só
+CPU, 12 frases na voz sintética `cadu` (Piper), linha estreita de 8 kHz. Comando:
+`pnpm exec tsx scripts/bancada-de-voz/reducao-de-ruido.ts`. O Verificador reproduziu a rodada no
+mesmo commit, e os números bateram (parecer no #256).
+
+| Candidato | Versão | Atraso somado | CPU de um núcleo por s de áudio | Perda na frase inteira, −20 / −30 dB (pior) |
+|---|---|--:|--:|--:|
+| SpeexDSP | `speexdsp-ns` 0.1.2 | 20 ms | 0,05% | 0,2 / 0,2 dB |
+| RNNoise | `pyrnnoise` 0.4.5 | 32 ms | 3,1% | 0,1 / 0,1 dB |
+| DeepFilterNet | 0.5.6, DeepFilterNet3 | 42 ms | 3,5% (áudio inteiro, não em fluxo) | 0,3 / 0,3 dB |
+
+O atraso já inclui as conversões 8↔48 kHz do RNNoise e do DeepFilterNet (2,3 ms).
+
+Quanto cada um tira do ruído, nos trechos sem fala (dB, média das frases, relação voz/ruído de
+15 / 5 / 0 dB):
+
+| Candidato | Obra | Música | Conversa de fundo |
+|---|---|---|---|
+| SpeexDSP | 5,7 / 4,9 / 4,4 | 2,4 / 1,9 / 1,8 | 1,4 / 1,0 / 0,9 |
+| RNNoise | 53,0 / 28,6 / 24,0 | 37,1 / 39,9 / 40,3 | 6,0 / 5,9 / 6,5 |
+| DeepFilterNet | 18,6 / 25,4 / 29,5 | 19,0 / 29,6 / 30,9 | 7,8 / 7,3 / 7,5 |
+
+Entre rodadas, os números variam até 4,5 dB (RNNoise, obra a 0 dB). Diferenças de 1 a 2 dB entre os
+candidatos são empate.
+
+Licenças, conferidas em 15/11/2026:
+- SpeexDSP: BSD de 3 cláusulas (https://github.com/xiph/speexdsp). O binding `speexdsp-ns` diz
+  Apache 2.0 no repositório e BSD no PyPI (https://github.com/TeaPoly/speexdsp-ns-python).
+- RNNoise: BSD de 3 cláusulas, com o modelo incluído (https://github.com/xiph/rnnoise). O binding
+  `pyrnnoise` é Apache 2.0.
+- DeepFilterNet: MIT ou Apache 2.0, para o código e os pesos (https://github.com/Rikorose/DeepFilterNet).
+
+**O que a medida diz:**
+- **Os três passam na régua da frase inteira** (perda menor que 1 dB, sem ruído). Isso **não**
+  prova que não cortem a fala baixa. A régua mede a energia da frase, e são as sílabas fortes que
+  a dominam. O Verificador montou um filtro que zera todo quadro mais de 12 dB abaixo do mais forte,
+  e ele passa com 0,15 dB. Num esboço quadro a quadro (4 frases, quadros de 20 ms, quarto mais fraco
+  dos quadros com fala), a perda média foi de 3,3 dB no SpeexDSP (pior caso 5,3), 1,25 dB no
+  DeepFilterNet (1,5) e 0,6 dB no RNNoise (1,0). Isso sem ruído nenhum. O esboço não entrou no
+  repositório e não fecha número: mostra a direção.
+- **Obra e música:** o RNNoise e o DeepFilterNet tiram muito (18 a 53 dB). O SpeexDSP tira pouco
+  (2 a 6 dB).
+- **Conversa de fundo:** o ganho é pequeno, como a seção 5 esperava. O DeepFilterNet tira 7 a 8 dB,
+  o RNNoise 5 a 6,5 dB e o SpeexDSP cerca de 1 dB. Nenhum deles separa a voz de quem liga das vozes
+  de fundo enquanto ela fala.
+
+**A fatia que ligar um candidato** (outra fatia, com segunda leitura, porque traz dependência nova)
+só se abre depois de medir, no mesmo script:
+1. a perda por quadro nas sílabas fracas, com régua no repositório e teste que reprove o filtro
+   que zera os quadros fracos;
+2. a fala baixa debaixo de ruído;
+3. a CPU do candidato em fluxo, quadro a quadro.
+
+Pela medida de hoje, o SpeexDSP sai da disputa (corta a sílaba fraca e tira pouco ruído), e o
+RNNoise é o primeiro a medir de novo.
+
+**Não medido nesta seção:** o ruído que sai enquanto a voz principal fala; o efeito na transcrição
+e no provedor (fatia 5); o μ-law depois da redução; o atraso das conversões no produto (os 2,3 ms
+supõem um `resample` em fluxo, e o de hoje trata cada pedaço isolado); ajustes dos candidatos além
+do padrão; voz real e outras vozes além da `cadu`.
+
 ## Onde esta frente toca as outras
 
 | Ponto | R3, ouvido (#160, DESA-10) | R12, transcrição pura (DESA-25) | O que fazer |
@@ -344,6 +407,7 @@ Fica no comentário da DESA-24, no formato do `GOVERNANCE.md`. Resumo:
   não emite, e por isso existe `WITHOUT_WORDS_MS`).
 - O valor padrão de `threshold`, `prefix_padding_ms` e `silence_duration_ms` no OpenAI.
 - Os prazos iniciais da guarda (2,5 s, 8 s e 4 s). São estimativa, e não medida.
-- As licenças, o custo e o atraso dos candidatos de redução de ruído.
+- As licenças, o custo e o atraso dos candidatos de redução de ruído: medidos depois, na seção
+  "Medida da redução de ruído" (fatia 4, #256).
 - O que aconteceu na ligação de 13/11: não vi os eventos dela.
 - Por qual canal a ligação de 13/11 entrou (tronco, WhatsApp ou navegador) nem qual motor ela usou.
