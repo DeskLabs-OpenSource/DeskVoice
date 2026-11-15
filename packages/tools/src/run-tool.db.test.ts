@@ -168,18 +168,20 @@ describe("runTool", () => {
     expect(all.filter((result) => result.ok)).toHaveLength(allowed);
   });
 
-  it("devolve a vaga quando a ferramenta não conclui, seja por ok: false ou por erro", async () => {
+  it("devolve a vaga quando a ferramenta recusa antes de fazer o efeito (noEffect)", async () => {
     const own = await createFixture(app, "run-tool-vaga");
     const allowed = MAX_CALL_WEBHOOK_PER_CALL;
-    const outcomes: Array<"fail" | "throw" | "ok"> = ["fail", "throw", "fail", ...Array<"ok">(allowed).fill("ok")];
+    let refusals = 3;
     const fake = defineTool({
       name: "call_webhook",
       description: "Ferramenta de teste, com o teto de produção",
       inputSchema: z.object({}),
       async run() {
-        const next = outcomes.shift();
-        if (next === "throw") throw new Error("falha simulada");
-        return { ok: next === "ok", message: next ?? "acabou" };
+        if (refusals > 0) {
+          refusals -= 1;
+          return { ok: false, noEffect: true, message: "nada foi chamado" };
+        }
+        return { ok: true, message: "chamado" };
       },
     });
 
@@ -187,6 +189,28 @@ describe("runTool", () => {
     for (let i = 0; i < allowed + 3; i += 1) results.push(await runTool(fake, {}, own));
     expect(results.map((result) => result.ok)).toEqual([false, false, false, ...Array<boolean>(allowed).fill(true)]);
     expect((await runTool(fake, {}, own)).message).toContain(`limite de ${allowed} chamadas a call_webhook`);
+  });
+
+  it("na dúvida a vaga fica gasta: ok: false sem noEffect e erro lançado contam como efeito", async () => {
+    const own = await createFixture(app, "run-tool-efeito");
+    const allowed = MAX_CREATE_TASK_PER_CALL;
+    let runs = 0;
+    const fake = defineTool({
+      name: "create_task",
+      description: "Ferramenta de teste, com o teto de produção",
+      inputSchema: z.object({}),
+      async run() {
+        runs += 1;
+        if (runs === 1) return { ok: false, message: "escrevi, mas a confirmação falhou" };
+        if (runs === 2) throw new Error("falha simulada depois de escrever");
+        return { ok: true, message: "anotado" };
+      },
+    });
+
+    for (let i = 0; i < allowed; i += 1) await runTool(fake, {}, own);
+    const refusedResult = await runTool(fake, {}, own);
+    expect(runs).toBe(allowed);
+    expect(refusedResult.message).toContain(`limite de ${allowed} chamadas a create_task`);
   });
 
   it("soma os sucessos que o banco já tem às chamadas em paralelo, mesmo depois de a memória esquecer a ligação", async () => {

@@ -24,6 +24,8 @@ describe("agenda_remarcar", () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toContain("falta a confirmação");
+    // Recusa antes de chamar a agenda: a vaga do teto por ligação volta.
+    expect(result.noEffect).toBe(true);
     expect(crm.pedidos.remarcacoes).toEqual([]);
     expect(crm.compromissos.get(marcado.id)?.startsAt).toBe("2026-11-18T09:00:00-03:00");
   });

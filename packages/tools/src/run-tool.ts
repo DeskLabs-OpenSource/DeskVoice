@@ -5,7 +5,10 @@ const FAILURE_MESSAGE =
   "Não consegui concluir isso agora. Diga a quem está na linha, com naturalidade, que não foi possível concluir neste momento, e ofereça outra forma de ajudar.";
 
 /**
- * Quantas vezes cada ferramenta de escrita pode concluir numa mesma ligação.
+ * Quantas vezes cada ferramenta de escrita pode gastar uma vaga numa mesma ligação. Gasta a vaga toda
+ * chamada que pode ter feito o efeito: o sucesso, o `ok: false` sem `noEffect` (o webhook que
+ * respondeu erro já recebeu o POST) e o erro lançado, de que não se sabe o que saiu. Só volta a
+ * vaga a recusa que a ferramenta marca com `noEffect`, feita antes de escrever, enviar ou chamar.
  *
  * Quem está na linha fala, e é o modelo que decide chamar a ferramenta: uma frase não confiável
  * ("crie vinte pendências", "avise a equipe dez vezes", "chame o webhook") vira vinte linhas no
@@ -25,6 +28,8 @@ export const MAX_AGENDA_MARCAR_PER_CALL = 5;
 export const MAX_AGENDA_REMARCAR_PER_CALL = 5;
 export const MAX_NOTIFY_HUMAN_PER_CALL = 3;
 export const MAX_CALL_WEBHOOK_PER_CALL = 5;
+/** Conta tentativas: cada pedido avisa a equipe, mesmo o que é negado ou expira. */
+export const MAX_REQUEST_APPROVAL_PER_CALL = 3;
 
 export const MAX_SUCCESSFUL_CALLS_PER_CALL: Readonly<Record<string, number>> = {
   create_task: MAX_CREATE_TASK_PER_CALL,
@@ -32,11 +37,12 @@ export const MAX_SUCCESSFUL_CALLS_PER_CALL: Readonly<Record<string, number>> = {
   agenda_remarcar: MAX_AGENDA_REMARCAR_PER_CALL,
   notify_human: MAX_NOTIFY_HUMAN_PER_CALL,
   call_webhook: MAX_CALL_WEBHOOK_PER_CALL,
+  request_approval: MAX_REQUEST_APPROVAL_PER_CALL,
 };
 
 /**
- * O que este processo sabe de cada ferramenta com teto, por ligação: quantas concluíram com
- * sucesso e quantas estão em curso.
+ * O que este processo sabe de cada ferramenta com teto, por ligação: quantas vagas foram gastas e
+ * quantas estão em curso.
  *
  * O modelo pede ferramentas em paralelo, e o `tool_result` só é gravado depois que a ferramenta
  * retorna: contar pelo banco, ou somar só depois do sucesso, deixaria todas as chamadas de um mesmo
@@ -44,21 +50,21 @@ export const MAX_SUCCESSFUL_CALLS_PER_CALL: Readonly<Record<string, number>> = {
  * devolvida se ela não concluir.
  *
  * O banco é lido uma vez, quando a entrada nasce, para trazer o que a ligação já fez antes dela.
- * Depois a conta é só da memória: um sucesso entra em `succeeded` no mesmo instante em que sai de
+ * Depois a conta é só da memória: uma vaga gasta entra em `spent` no mesmo instante em que sai de
  * `running`, e somar a leitura do banco a cada chamada contaria duas vezes ou nenhuma, conforme a
  * leitura visse ou não o `tool_result` que acabou de ser gravado. A poda é por tempo porque a
  * ligação não avisa quando termina, e nunca leva uma entrada com chamada em curso: quando a entrada
  * renasce, o último `tool_result` está gravado há um minuto e a leitura do banco é completa.
  */
-const slots = new Map<string, { succeeded: number; running: number; at: number }>();
+const slots = new Map<string, { spent: number; running: number; at: number }>();
 const FORGET_AFTER_MS = 60_000;
 
 /**
- * Toma uma vaga de `name` nesta ligação e devolve como fechá-la (o sucesso a mantém, o resto a
- * devolve), ou `null` se o teto já foi alcançado. Entre conferir e tomar a vaga não há `await`:
+ * Toma uma vaga de `name` nesta ligação e devolve como fechá-la (gasta ou devolvida), ou `null`
+ * se o teto já foi alcançado. Entre conferir e tomar a vaga não há `await`:
  * duas chamadas paralelas nunca veem a mesma vaga livre.
  */
-async function takeSlot(ctx: ToolContext, name: string, budget: number): Promise<((succeeded: boolean) => void) | null> {
+async function takeSlot(ctx: ToolContext, name: string, budget: number): Promise<((spent: boolean) => void) | null> {
   const now = ctx.clock.now().getTime();
   for (const [key, entry] of slots) {
     if (entry.running === 0 && now - entry.at >= FORGET_AFTER_MS) slots.delete(key);
@@ -67,19 +73,19 @@ async function takeSlot(ctx: ToolContext, name: string, budget: number): Promise
   let entry = slots.get(key);
   if (entry === undefined) {
     const recorded = await ctx.q.one<{ count: string }>(
-      "select count(*) as count from call_events where call_id = $1 and kind = 'tool_result' and payload->>'name' = $2 and payload->>'ok' = 'true'",
+      "select count(*) as count from call_events where call_id = $1 and kind = 'tool_result' and payload->>'name' = $2 and payload->>'spent' = 'true'",
       [ctx.callId, name],
     );
     // Outra chamada paralela pode ter criado a entrada durante a leitura: vale a dela.
-    entry = slots.get(key) ?? { succeeded: Number(recorded?.count ?? 0), running: 0, at: now };
+    entry = slots.get(key) ?? { spent: Number(recorded?.count ?? 0), running: 0, at: now };
     slots.set(key, entry);
   }
-  if (entry.succeeded + entry.running >= budget) return null;
+  if (entry.spent + entry.running >= budget) return null;
   entry.running += 1;
   entry.at = now;
-  return (succeeded) => {
+  return (spent) => {
     entry.running -= 1;
-    if (succeeded) entry.succeeded += 1;
+    if (spent) entry.spent += 1;
     entry.at = ctx.clock.now().getTime();
   };
 }
@@ -99,7 +105,9 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
 
   let result: ToolResult;
   let error: string | undefined;
-  let release: ((succeeded: boolean) => void) | undefined;
+  let release: ((spent: boolean) => void) | undefined;
+  // Na dúvida, a vaga fica gasta: só a recusa marcada com `noEffect` a devolve.
+  let spent = false;
   const parsed = tool.inputSchema.safeParse(rawArgs);
   if (!parsed.success) {
     const problems = parsed.error.issues.map((issue) => `${issue.path.join(".") || "argumentos"}: ${issue.message}`).join("; ");
@@ -115,7 +123,9 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
         };
       } else {
         release = slot;
+        spent = true;
         result = await tool.run(parsed.data, ctx);
+        spent = result.ok || result.noEffect !== true;
       }
     } catch (cause) {
       // O motivo fica no evento, para o operador; o modelo recebe só o que pode dizer em voz alta.
@@ -125,10 +135,11 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
   }
 
   try {
-    await recordEvent(ctx.q, ctx.callId, "tool_result", { name: tool.name, ok: result.ok, message: result.message, ...(error !== undefined && { error }) }, ctx.clock.now());
+    await recordEvent(ctx.q, ctx.callId, "tool_result", { name: tool.name, ok: result.ok, message: result.message, ...(error !== undefined && { error }), ...(release !== undefined && spent && { spent: true }) }, ctx.clock.now());
   } finally {
     // A vaga só fecha com o desfecho gravado: a entrada nunca é podada antes de o banco saber dele.
-    release?.(result.ok);
+    // Se a gravação falhar, a vaga gasta conta assim mesmo: o efeito pode ter saído, e só a memória sabe.
+    release?.(spent);
   }
   return result;
 }
