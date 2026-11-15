@@ -103,7 +103,7 @@ export const CALL_COLUMNS = `c.id, c.agent_id as "agentId", a.name as "agentName
   c.status, c.end_reason as "endReason", c.engine, c.started_at as "startedAt", c.answered_at as "answeredAt", c.ended_at as "endedAt",
   c.cost_cents as "costCents", c.summary,
   c.outcome, c.outcome_confidence as "outcomeConfidence", c.outcome_evidence as "outcomeEvidence",
-  c.analysis_score as "analysisScore"`;
+  c.analysis_score as "analysisScore", c.voicemail`;
 export const CALL_STATUSES = ["ringing", "in_progress", "transferred", "completed", "failed", "refused"] as const;
 
 /** O dono das pendências de um agente é uma pessoa ativa da organização; outra coisa é recusada com motivo. */

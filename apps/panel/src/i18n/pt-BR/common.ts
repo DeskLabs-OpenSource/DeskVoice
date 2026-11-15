@@ -62,6 +62,7 @@ const common = {
     forbidden: "Seu papel não permite essa alteração. Fale com um dono ou administrador.",
     not_found: "Esse registro não existe mais. Atualize a página.",
     call_not_live: "Esta chamada já terminou. Atualize a página.",
+    recording_voicemail: "Esta chamada é um recado da caixa postal: quem ligou ouviu o aviso de gravação e encerra o recado desligando.",
     validation_error: "Algum campo não foi aceito. Confira e tente de novo.",
     invalid_json: "O pedido chegou incompleto. Tente de novo.",
     already_exists: "Já existe um registro com esses dados.",

@@ -128,7 +128,8 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
         </section>
       ) : null}
 
-      {live ? (
+      {/* No recado não há pessoa do time na linha para receber o pedido de não gravar: quem liga ouviu o aviso e pode desligar. */}
+      {live && data.voicemail ? null : live ? (
         <StopRecording
           id={id}
           title={t.stopRecordingTitle}
