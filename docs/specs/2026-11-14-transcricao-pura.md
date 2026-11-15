@@ -499,6 +499,31 @@ Fracasso mesmo funcionando: bancada que mede vazão em vez de latência (manda o
 vez); acerto em nomes que aceita "Melgaco" como certo; ou conjunto que diz ter fala atípica com
 voz sintética alterada.
 
+### Fatia 1b: a bancada mede os externos e o Jev
+
+Nasce das decisões 1 e 2 (15/11). Só mexe em `scripts/bancada-de-voz/`, e por isso não briga com
+`call-session.ts`. Um arquivo por serviço em `servicos/` (Deepgram Nova-3, AssemblyAI
+Universal-Streaming, Soniox), com fonte e data no cabeçalho, vocabulário pelo recurso de cada um
+(keyterm, keyterms, contexto), zod em toda resposta e teste contra servidor falso. E
+`decisores/jev.ts`, com as mesmas perguntas e a mesma saída do `decisores/laya.ts`.
+
+Antes de gastar, a fatia confere na documentação de idiomas de cada serviço se há português em
+streaming, e escreve a fonte e a data. Serviço sem português em streaming não roda.
+
+Roda **agora** o Jev, com `JEV_API_KEY`, `--teto-usd 1`, só sobre o texto sintético do conjunto.
+Os três externos rodam quando as chaves chegarem pelo cofre, com teto de US$ 10 somado ao da
+DESA-10. Enquanto não chegam, a seção "Medida" diz "não medido: chave não entregue".
+
+Aceite:
+- os testes contra servidor falso passam sem chave nenhuma, no CI;
+- nenhuma chave, nenhum áudio e nenhum resultado bruto com texto de voz entra no diff, e o valor
+  da chave não aparece em log, PR, tarefa ou fixture (teste: o log da rodada não contém a chave);
+- o teto é respeitado pela própria bancada: a rodada para antes de passar do valor e diz quanto
+  gastou, por serviço;
+- a tabela da rodada (serviço, WER, acerto em nomes, latência parcial e final, preço com data)
+  e a do Jev (acerto, se o conjunto tiver a resposta esperada, e latência p50 e p95) vão para a
+  seção "Medida", como na rodada 1.
+
 ### Fatia 2: o contrato e o transcritor simulado
 
 `types.ts` (`StreamingTranscriber` e companhia), `transcribers/simulated.ts`, a descoberta pela
@@ -539,8 +564,9 @@ Aceite: numa chamada simulada com o transcritor simulado, a linha do tempo mostr
 
 ### Fatia 6: o filtro (Jev e Laya), medido
 
-`types.ts` (`DecisionModel`), `deciders/simulated.ts`, `deciders/jev.ts` (se a decisão 2 vier;
-sem ela, o arquivo existe com o servidor falso e a medida diz "Jev: não medido"), as três
+`types.ts` (`DecisionModel`), `deciders/simulated.ts`, `deciders/jev.ts` (a decisão 2 veio em
+15/11: a chave chega em `JEV_API_KEY`, teto de US$ 1, só texto sintético; o número da bancada sai
+da fatia 1b), as três
 perguntas num lugar só, e a ligação em `call-session.ts` com a regra de "ninguém espera" e a de
 "nunca apaga". Medida na bancada: acerto de cada pergunta no conjunto, latência p50 e p95, e
 quantas decisões chegaram a tempo.
@@ -616,25 +642,28 @@ Aceite:
 - Separar a voz de quem ligou das vozes de fundo no áudio (separação de fonte): o desenho da
   DESA-24 já deixou de fora.
 
-## Pedidos de decisão
+## Decisões do Rafael (15/11/2026)
 
-Ficam no comentário da DESA-25, no formato do `GOVERNANCE.md`, e vão ao lote do Líder. Resumo:
+Os três pedidos foram ao lote do Líder, e o Rafael respondeu em 15/11, pelo terminal do
+orquestrador (comentário do board na DESA-25):
 
-1. **Chaves e teto da medida dos transcritores externos.** Até três serviços (proposta: Deepgram,
-   AssemblyAI e Soniox, os de preço conferido), com chave do dono por canal privado e um teto de
-   US$ 10 além dos US$ 5 da DESA-10. **Sem resposta:** a fatia 1 mede só o que roda sem chave nova
-   e diz quais serviços ficaram sem medida. O vencedor sai só entre os medidos.
-2. **Jev:** uma chave da TypeSafe para a medida, e o envio de texto de voz sintética (nunca de
-   ligação real) a um fornecedor nos EUA. **Sem resposta:** o Jev não é medido, e a fatia 6 entrega
-   o arquivo dele só contra o servidor falso, sem ligável na tela.
-3. **Laya no produto:** depois da medida, um contêiner novo no Compose ou uma dependência nova
-   (caminho sensível: imagem e instalador). **Sem resposta:** o Laya fica só na bancada.
+1. **Transcritores externos: A.** Medir Deepgram Nova-3, AssemblyAI Universal-Streaming e Soniox,
+   com teto de **US$ 10**, além dos US$ 5 da DESA-10 (decisão 2 da DESA-19). As três chaves ainda
+   não existem: o Rafael as cria, e elas chegam pelo cofre de segredos do Paperclip, nunca em
+   tarefa ou comentário. Até chegarem, a parte externa da medida fica "não medida".
+2. **Jev: A.** Medir com teto de **US$ 1**, só com texto sintético da bancada, nunca de ligação
+   real. A chave está no cofre (`jev_api_key`) e chega ao Desenvolvedor e ao Verificador na
+   variável `JEV_API_KEY`. O valor nunca é impresso: nem em log, PR, tarefa ou fixture.
+3. **Laya no produto:** decidido depois da medida, como o desenho propôs. Até lá, o Laya fica só
+   na bancada.
+
+O que isso muda nas fatias está na "Fatia 1b" e na "Fatia 6".
 
 ## Não medido (deste documento)
 
 - **Só o Whisper em CPU foi medido** (rodada 1, seção "Medida"). O `gpt-4o-mini-transcribe` e o
-  Gemini Live de hoje não rodaram, porque falta a chave da DESA-10, e os externos dependem da
-  decisão 1. A tabela de candidatos dos outros serviços é de preço e de recurso, conferidos nas
+  Gemini Live de hoje não rodaram, porque falta a chave da DESA-10. Os externos foram autorizados
+  em 15/11 (decisão 1), mas as chaves ainda não existem, e o Jev (decisão 2) ainda não rodou. A tabela de candidatos dos outros serviços é de preço e de recurso, conferidos nas
   páginas em 14/11/2026, e não de acerto.
 - Rodada 1: a carga da VPS não foi registrada, a variância entre rodadas não foi calculada, a
   "voz" são 4 vozes sintéticas do Piper (não é sotaque regional), e a fala atípica ficou sem
