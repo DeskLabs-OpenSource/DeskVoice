@@ -1,4 +1,7 @@
-import { withOrg } from "@deskvoice/core";
+import { eraseCaller, withOrg, withSystem } from "@deskvoice/core";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
 import { createFixture, createUser, eventsOf, notificationsOf, putWhatsAppConnector, seedCallerHistory, tasksOf } from "../../test/helpers";
@@ -107,6 +110,23 @@ describe("notify_human", () => {
       await seedCallerHistory(app, first, "+5531966665553", { calls: 0, openFollowUps: [] });
       await runTool(notifyHuman, { message: "Recado." }, first);
       expect((await notificationsOf(app, first.organizationId))[0]?.body).toBe("Aviso: Recado.");
+    });
+
+    it("o apagamento a pedido do titular alcança o título copiado no aviso", async () => {
+      const ctx = await createFixture(app, "notify memoria apagamento");
+      await seedCallerHistory(app, ctx, "+5531966665551", { calls: 1, openFollowUps: [TITLE] });
+      await runTool(notifyHuman, { message: "Recado." }, ctx);
+      expect((await notificationsOf(app, ctx.organizationId))[0]?.body).toContain(TITLE);
+
+      await withSystem(app, (q) => q.exec("update calls set ended_at = $2, status = 'completed' where id = $1", [ctx.callId, ctx.clock.now()]));
+      const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-notify-"));
+      try {
+        const erased = await withOrg(app, ctx.organizationId, (q) => eraseCaller(q, { dir, phoneE164: "+5531966665551", now: ctx.clock.now() }));
+        expect(erased).toMatchObject({ calls: 2 });
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+      expect((await notificationsOf(app, ctx.organizationId))[0]?.body).not.toContain(TITLE);
     });
 
     it("só pendência, sem ligação anterior", async () => {

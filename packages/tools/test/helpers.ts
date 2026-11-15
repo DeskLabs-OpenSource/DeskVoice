@@ -144,7 +144,7 @@ export async function seedCallerHistory(app: Db, ctx: FakeContext, phone: string
     for (let index = 0; index < history.calls; index += 1) {
       const id = randomUUID();
       await q.exec(
-        "insert into calls (id, organization_id, agent_id, direction, channel, status, from_e164, summary, started_at) values ($1, $2, $3, 'inbound', 'phone', 'completed', $4, $5, $6)",
+        "insert into calls (id, organization_id, agent_id, direction, channel, status, from_e164, summary, started_at, ended_at) values ($1, $2, $3, 'inbound', 'phone', 'completed', $4, $5, $6, $6)",
         [id, ctx.organizationId, ctx.agentId, phone, `Resumo ${index}: a pessoa contou um detalhe pessoal.`, new Date(t0.getTime() - (index + 1) * 86_400_000)],
       );
       ids.push(id);
