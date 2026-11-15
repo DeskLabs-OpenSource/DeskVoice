@@ -1,6 +1,6 @@
 import { enqueueTask, withOrg, type CallStatus, type OrgQuery } from "@deskvoice/core";
 import { hasWhatsAppConnector } from "@deskvoice/tools";
-import { ANALYSIS_SETTING, OUTCOME_SETTING, analysisEnabledOf, outcomeEnabledOf } from "@deskvoice/voice-engine";
+import { ANALYSIS_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, analysisEnabledOf, outcomeEnabledOf, transcriptionEnabledOf } from "@deskvoice/voice-engine";
 import type { Routine } from "../types";
 
 export interface CallDigest {
@@ -114,6 +114,19 @@ const routine: Routine = {
       // O desfecho comercial e a análise são do motor do agente, na mesma rotina e na mesma chamada
       // paga: vão para a fila em separado, para o resumo não depender de provedor nenhum para ficar
       // pronto. As duas desligadas (de fábrica), nem entra na fila.
+      // A gravação desta chamada ainda não virou texto e a transcrição automática está ligada: vai
+      // para a fila agora. É ela quem enfileira este resumo de novo, com o texto no lugar do vazio.
+      // A existência da própria tarefa é a marca de "já pedi": sem isso, chamada sem fala nenhuma
+      // faria o resumo e a transcrição se reenfileirarem para sempre.
+      const transcriptionSetting = await q.one<{ value: unknown }>("select value from settings where key = $1", [TRANSCRIPTION_SETTING]);
+      if (transcriptionEnabledOf(transcriptionSetting?.value)) {
+        const pedida = await q.one<{ n: number }>("select count(*)::int as n from tasks where call_id = $1 and kind = 'transcribe_call'", [callId]);
+        const semTexto = await q.one<{ n: number }>(
+          "select count(*)::int as n from call_events where call_id = $1 and kind in ('transcript_user', 'transcript_agent') and payload->>'source' = 'stt'",
+          [callId],
+        );
+        if ((pedida?.n ?? 0) === 0 && (semTexto?.n ?? 0) === 0) await enqueueTask(q, { kind: "transcribe_call", payload: {}, callId });
+      }
       const settings = await q.many<{ key: string; value: unknown }>("select key, value from settings where key = any($1)", [[OUTCOME_SETTING, ANALYSIS_SETTING]]);
       const outcomeOn = outcomeEnabledOf(settings.find((row) => row.key === OUTCOME_SETTING)?.value);
       const analysisOn = analysisEnabledOf(settings.find((row) => row.key === ANALYSIS_SETTING)?.value);
