@@ -7,7 +7,8 @@ import { handle, notFound } from "../../../../../../server/context";
  * e a tela não mostra o bloco. Só leitura: nada daqui chega ao agente.
  */
 export const GET = handle({}, async ({ q, params }) => {
-  if (!(await q.one("select 1 from calls where id = $1", [params.id]))) throw notFound();
-  const history = await callerHistory(q, params.id);
+  const id = params.id ?? "";
+  if (!(await q.one("select 1 from calls where id = $1", [id]))) throw notFound();
+  const history = await callerHistory(q, id);
   return history ?? { phone: null, callCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] };
 });
