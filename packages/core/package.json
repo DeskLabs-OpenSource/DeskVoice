@@ -5,7 +5,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./vocabulary": "./src/vocabulary.ts"
   },
   "dependencies": {
     "pg": "^8.23.1",

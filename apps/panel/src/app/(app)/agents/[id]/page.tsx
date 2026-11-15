@@ -18,6 +18,7 @@ import { formatPhone } from "../../../../ui/format";
 import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
 import type { Agent, Engine, ListeningEnvironment, Person, Setting, ToolInfo } from "../../../../ui/types";
+import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
 
 interface Draft {
   name: string;
@@ -35,9 +36,13 @@ interface Draft {
   /** Vazio: as pendências do agente são da equipe. */
   followUpOwner: string;
   listeningEnvironment: ListeningEnvironment;
+  /** O texto da caixa, um termo por linha. Vazio grava `[]`. */
+  vocabulary: string;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal" };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "" };
+
+const VOCABULARY_FIELD_ID = "agent-vocabulary";
 
 /** Motores em que a sessão em Barulhento foi provada numa instalação real. */
 const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime"];
@@ -57,6 +62,7 @@ const toDraft = (agent: Agent): Draft => ({
   enabled: agent.enabled,
   followUpOwner: agent.followUpOwnerUserId ?? "",
   listeningEnvironment: agent.listeningEnvironment ?? "normal",
+  vocabulary: (agent.vocabulary ?? []).join("\n"),
 });
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -115,8 +121,16 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const noisyProven = NOISY_PROVEN_ENGINES.includes(draft.engine);
   // "Voltar para Normal" mexe só no rascunho: até salvar, o agente atende em Barulhento.
   const backToNormalPending = savedEnvironment === "noisy" && draft.listeningEnvironment === "normal";
-  const submit = (): Promise<boolean> =>
-    save.run(async () => {
+  // A regra é a da API (`checkVocabulary`): a tela diz o erro ao lado do campo e não manda nada.
+  const vocabulary = readVocabulary(draft.vocabulary);
+  const vocabularyError = vocabulary.result.ok ? undefined : vocabularyErrorText(vocabulary.result.problem, t);
+  const submit = (): Promise<boolean> => {
+    if (!vocabulary.result.ok) {
+      document.getElementById(VOCABULARY_FIELD_ID)?.focus();
+      return Promise.resolve(false);
+    }
+    const terms = vocabulary.result.terms;
+    return save.run(async () => {
       const body = {
         name: draft.name,
         roleLabel: draft.roleLabel,
@@ -132,12 +146,14 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         enabled: draft.enabled,
         followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
         listeningEnvironment: draft.listeningEnvironment,
+        vocabulary: terms,
       };
       const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       setSavedEnvironment(saved.listeningEnvironment ?? "normal");
       if (isNew) router.replace(`/agents/${saved.id}`);
       else setDraft(toDraft(saved));
     });
+  };
 
   return (
     <form
@@ -176,6 +192,21 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </Field>
             <Field label={t.instructions} hint={t.instructionsHint}>
               <TextArea value={draft.instructions} onChange={(event) => set("instructions", event.target.value)} rows={9} />
+            </Field>
+          </div>
+        </Panel>
+
+        <Panel title={t.vocabulary} description={t.vocabularyLead}>
+          <div className="max-w-xl">
+            <Field label={t.vocabularyField} hint={vocabularyCountText(vocabulary.count, t)} error={vocabularyError}>
+              <TextArea
+                id={VOCABULARY_FIELD_ID}
+                value={draft.vocabulary}
+                onChange={(event) => set("vocabulary", event.target.value)}
+                rows={6}
+                spellCheck={false}
+                aria-invalid={vocabularyError ? true : undefined}
+              />
             </Field>
           </div>
         </Panel>
