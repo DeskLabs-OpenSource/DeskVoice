@@ -37,11 +37,12 @@ export const VOICEMAIL_MIN_SPEECH_MS = 500;
 /** Pico (PCM16, 32767 é o máximo) a partir do qual o quadro conta como fala. */
 export const SPEECH_PEAK = 1200;
 /**
- * Folga sobre a duração do aviso antes de desistir de esperar que ele termine de tocar. O transporte
- * real sempre resolve (`drained` também resolve quando a conexão cai); isto só garante que a linha
- * nunca fica pendurada se ele não resolver.
+ * Tempo dado ao atendimento (abrir o arquivo) e ao aviso, que dura menos de 10 s em cada idioma
+ * (`voicemail.test.ts`), além do tempo máximo do recado. O transporte real sempre resolve
+ * (`drained` também resolve quando a conexão cai); isto só garante que a linha nunca fica pendurada
+ * se algo antes do recado não resolver.
  */
-const NOTICE_SLACK_MS = 5000;
+const BEFORE_MESSAGE_MS = 20_000;
 
 const NOTICE_DIR = new URL("../assets/voicemail-notice/", import.meta.url);
 
@@ -292,8 +293,6 @@ export function startVoicemailSession(deps: VoicemailDeps, input: VoicemailInput
     // O aviso vai para o canal do agente da gravação, como a fala do agente numa conversa.
     recorder?.agent(prepared.notice);
     transport.sendAudio(prepared.notice);
-    // Se o aviso não terminar de sair no tempo dele com folga, a linha não fica pendurada.
-    cancelTimers.push(schedule(() => void finish({ cause: "max_duration" }), ms(prepared.notice.length) + NOTICE_SLACK_MS + maxMs));
     await transport.drained();
     if (ending) return;
     listening = true;
@@ -316,6 +315,8 @@ export function startVoicemailSession(deps: VoicemailDeps, input: VoicemailInput
 
   transport.onHangup(() => void finish({ cause: "caller_hangup", callerGone: true }));
   transport.onAudio(ingest);
+  // Armado antes de qualquer espera: a chamada nunca fica pendurada.
+  cancelTimers.push(schedule(() => void finish({ cause: "max_duration" }), BEFORE_MESSAGE_MS + maxMs));
 
   void start();
   void run();
