@@ -194,6 +194,21 @@ const timeline: TimelineDictionary = {
       turn_closed: "Quien llamó estuvo {seconds} s sin respuesta, quizás por ruido en la línea. Se pidió al agente que respondiera a lo que escuchó.",
       asked_to_repeat: "El agente seguía callado {seconds} s después de lo último que dijo quien llamó, y le pidió que lo repitiera.",
     },
+    transcriber_failed: {
+      title: "La transcripción en vivo quedó fuera",
+      reason: {
+        rejected: "La clave de la pieza de transcripción fue rechazada, o no está guardada.",
+        model_unavailable: "La clave de la pieza de transcripción no da acceso al modelo que usa.",
+        no_credit: "El servicio de transcripción dice que falta crédito o que se alcanzó el tope de gasto de la cuenta.",
+        region_unavailable: "El servicio de transcripción no atiende el país o la región de este servidor.",
+        rate_limited: "El servicio de transcripción pidió esperar (límite de pedidos de la cuenta).",
+        unreachable: "El servicio de transcripción no respondió a tiempo, o está caído.",
+        unexpected_response: "El servicio de transcripción respondió algo fuera del formato esperado.",
+        closed: "El servicio de transcripción se cayó en medio de la llamada.",
+      } as Record<string, string>,
+      unknown: "La pieza de transcripción no se abrió en esta llamada.",
+      continued: "La llamada siguió solo con el motor de voz, como antes.",
+    },
     unknown: "Evento",
   },
   reasons: {

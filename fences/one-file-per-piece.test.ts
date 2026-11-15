@@ -5,9 +5,9 @@
 import { describe, it, expect } from "vitest";
 import { REPO_ROOT, expectClean, fixture, isSource, isTest, listFiles, read } from "./_lib";
 
-const PIECE_DIRS = ["packages/tools/src/tools", "packages/voice-engine/src/engines", "apps/routines/src/routines"];
-// Import estático de uma peça pelo nome: `./tools/end_call`, `../engines/simulated`, `…/src/routines/x`.
-const PIECE_IMPORT = /(?:from|import)\s+["'](?:[^"']*\/)?(?:\.{1,2}|src)\/(tools|engines|routines)\/([\w-]+)(?:\.[jt]s)?["']/g;
+const PIECE_DIRS = ["packages/tools/src/tools", "packages/voice-engine/src/engines", "packages/voice-engine/src/transcribers", "apps/routines/src/routines"];
+// Import estático de uma peça pelo nome: `./tools/end_call`, `../engines/simulated`, `./transcribers/simulated`, `…/src/routines/x`.
+const PIECE_IMPORT = /(?:from|import)\s+["'](?:[^"']*\/)?(?:\.{1,2}|src)\/(tools|engines|transcribers|routines)\/([\w-]+)(?:\.[jt]s)?["']/g;
 
 function check(root: string): string[] {
   const violations: string[] = [];
@@ -27,10 +27,10 @@ function check(root: string): string[] {
 }
 
 describe("one-file-per-piece", () => {
-  it("nenhuma lista central de ferramentas, motores ou rotinas", () => {
+  it("nenhuma lista central de ferramentas, motores, transcritores ou rotinas", () => {
     expectClean(
       check(REPO_ROOT),
-      "Peça nova é um arquivo novo na pasta dela, e mais nada: `loadTools()`, `loadEngines()` e o runner de rotinas descobrem por pasta. Apague a lista e use o carregador.",
+      "Peça nova é um arquivo novo na pasta dela, e mais nada: `loadTools()`, `loadEngines()`, `loadTranscribers()` e o runner de rotinas descobrem por pasta. Apague a lista e use o carregador.",
     );
   });
 

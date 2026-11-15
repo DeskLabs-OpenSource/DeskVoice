@@ -262,6 +262,70 @@ export interface RecordingTranscriber {
   transcribe(apiKey: string, input: TranscribeInput, options?: ClassifyOptions): Promise<TranscribeResult>;
 }
 
+/** Um trecho de texto da fala de quem ligou, enquanto ela acontece. */
+export interface TranscriptPiece {
+  /** O texto do trecho. No parcial, pode mudar no próximo evento. */
+  text: string;
+  /** Verdadeiro quando o serviço não vai mais mudar este trecho. */
+  final: boolean;
+  /**
+   * Outras leituras do mesmo trecho, quando o serviço as devolve, da mais para a menos provável.
+   * É o que o filtro de leitura (R12, Parte 3) escolhe. Vazio quando o serviço não devolve.
+   */
+  alternatives: readonly string[];
+  /** Milissegundos desde o início do fluxo, segundo o serviço. Ausente se ele não diz. */
+  startMs?: number;
+  endMs?: number;
+}
+
+export interface StreamingTranscriptionEvents {
+  piece(piece: TranscriptPiece): void;
+  /** Incremento de consumo, como em `VoiceSessionEvents.usage`. */
+  usage(usage: Usage): void;
+  /** Seguido de `closed` quando é fatal. */
+  error(error: Error): void;
+  closed(reason: string): void;
+}
+
+export interface StreamingTranscription {
+  on<K extends keyof StreamingTranscriptionEvents>(event: K, handler: StreamingTranscriptionEvents[K]): void;
+  /** Áudio de quem ligou, PCM16 mono 8 kHz, o mesmo que o motor recebe. */
+  sendAudio(pcm16_8k: Buffer): void;
+  close(): Promise<void>;
+}
+
+/**
+ * Transcrição da fala de quem ligou em streaming, ao lado do motor (docs/specs/2026-11-14-transcricao-pura.md).
+ * Uma peça por arquivo em `transcribers/`, descoberta pela pasta (`loadTranscribers`). Nasce
+ * desligada: sem um agente que peça a peça, a chamada é a de sempre.
+ */
+export interface StreamingTranscriber {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  pricing: EnginePricing;
+  /** Verdadeiro quando não usa chave (o simulado, ou um local). */
+  keyless?: boolean;
+  /** Quantos termos de vocabulário o serviço aceita. Acima disso, os primeiros N. */
+  maxVocabulary: number;
+  connect(config: { language: string; vocabulary: readonly string[] }, apiKey: string, options?: ConnectOptions): Promise<StreamingTranscription>;
+  checkKey?(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+}
+
+/**
+ * A peça de transcrição recusou abrir, com o motivo no vocabulário fechado do teste da chave. Quem
+ * chama `connect` grava o motivo na linha do tempo; o texto do provedor fica só no log.
+ */
+export class TranscriberOpenError extends Error {
+  constructor(
+    readonly result: Exclude<KeyCheckResult, "accepted" | "not_needed">,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;

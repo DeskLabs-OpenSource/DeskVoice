@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadEngines } from "./load";
+import { loadEngines, loadTranscribers } from "./load";
 
 let dir: string | undefined;
 afterEach(async () => {
@@ -45,5 +45,43 @@ describe("loadEngines", () => {
     await writeFile(join(dir, "first.ts"), fixtureEngine("same"));
     await writeFile(join(dir, "second.ts"), fixtureEngine("same"));
     await expect(loadEngines(dir)).rejects.toThrow(/repetido/);
+  });
+});
+
+const fixtureTranscriber = (id: string): string => `
+export default {
+  id: ${JSON.stringify(id)},
+  label: "Transcritor de fixture",
+  maxVocabulary: 10,
+  pricing: { checkedOn: "2026-11-15", source: "fixture" },
+  async connect() { throw new Error("fixture"); },
+};
+`;
+
+describe("loadTranscribers", () => {
+  it("descobre o transcritor simulado da pasta, sem chave", async () => {
+    const transcribers = await loadTranscribers();
+    expect([...transcribers.keys()]).toEqual(["simulated"]);
+    expect(transcribers.get("simulated")?.keyless).toBe(true);
+    for (const transcriber of transcribers.values()) expect(transcriber.pricing.checkedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("transcritor novo é só um arquivo novo na pasta; arquivo de teste é ignorado", async () => {
+    dir = await mkdtemp(join(tmpdir(), "deskvoice-transcribers-"));
+    await writeFile(join(dir, "fixture.ts"), fixtureTranscriber("fixture"));
+    await writeFile(join(dir, "fixture.test.ts"), "throw new Error('arquivo de teste não pode ser importado');");
+    const transcribers = await loadTranscribers(dir);
+    expect([...transcribers.keys()]).toEqual(["fixture"]);
+    expect(transcribers.get("fixture")?.maxVocabulary).toBe(10);
+  });
+
+  it("recusa arquivo sem transcritor no export default (um motor não serve) e id repetido", async () => {
+    dir = await mkdtemp(join(tmpdir(), "deskvoice-transcribers-"));
+    await writeFile(join(dir, "engine.ts"), fixtureEngine("engine"));
+    await expect(loadTranscribers(dir)).rejects.toThrow(/engine\.ts: o export default não é um StreamingTranscriber/);
+    await rm(join(dir, "engine.ts"));
+    await writeFile(join(dir, "first.ts"), fixtureTranscriber("same"));
+    await writeFile(join(dir, "second.ts"), fixtureTranscriber("same"));
+    await expect(loadTranscribers(dir)).rejects.toThrow(/second\.ts: id de transcritor repetido: same/);
   });
 });

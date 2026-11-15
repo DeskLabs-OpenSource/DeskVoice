@@ -362,6 +362,22 @@ export function Timeline({
         const seconds = (Number(p.waitedMs) / 1000).toLocaleString(locale, { maximumFractionDigits: 1 });
         return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(said, { seconds })}</Quiet> };
       }
+      case "transcriber_failed": {
+        // A peça de transcrição ficou de fora e a chamada seguiu com o motor. Só o código do motivo
+        // chega aqui: o texto do provedor fica no log do processo de voz.
+        const said = e.transcriber_failed.reason[text(p.reason)] ?? e.transcriber_failed.unknown;
+        return {
+          ...base,
+          tone: "fail",
+          icon: WarningOctagon,
+          body: (
+            <Card tone="fail" title={e.transcriber_failed.title}>
+              <p className="text-muted">{said} {e.transcriber_failed.continued}</p>
+              {text(p.transcriber) ? <p className="data text-[0.87rem] text-muted">{text(p.transcriber)}</p> : null}
+            </Card>
+          ),
+        };
+      }
       default:
         return { ...base, tone: "neutral", body: <Quiet>{e.unknown} <span className="data">{event.kind}</span></Quiet> };
     }

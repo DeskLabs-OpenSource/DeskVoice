@@ -1,6 +1,6 @@
 import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { autoCommitOrgQuery, runTool, toSpec, toolCalledArgs, type RecordingStop, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
-import { EngineTimeoutError, MICROCENTS_PER_CENT, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
+import { EngineTimeoutError, MICROCENTS_PER_CENT, TranscriberOpenError, estimateCostCents, type EnginePricing, type KeyCheckResult, type StreamingTranscriber, type StreamingTranscription, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
@@ -25,6 +25,8 @@ export interface CallSessionDeps {
   recordingsDir?: string;
   /** Espaço livre mínimo na pasta para gravar (padrão `MIN_FREE_BYTES_TO_RECORD`). */
   recordingMinFreeBytes?: number;
+  /** As peças de transcrição em streaming instaladas (`loadTranscribers`). Sem elas, nenhuma chamada usa peça. */
+  transcribers?: Map<string, StreamingTranscriber>;
 }
 
 export interface CallSessionInput {
@@ -36,6 +38,11 @@ export interface CallSessionInput {
   started?: Record<string, unknown>;
   /** A chamada simulada troca o motor, as instruções e as ferramentas do agente pelas do roteiro. */
   overrides?: { engineId?: string; instructions?: string; tools?: string[] };
+  /**
+   * A peça de transcrição em streaming desta chamada (R12, fatia 2). Ausente, a chamada é byte a
+   * byte a de sempre. Ainda não há onde o operador escolha (fatia 4): por enquanto, só os testes.
+   */
+  transcriberId?: string;
 }
 
 export interface CallOutcome {
@@ -88,6 +95,8 @@ interface AgentRow {
 }
 
 export const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
+/** A chave da peça de transcrição, cifrada como a do motor. */
+export const transcriberKeySetting = (transcriberId: string): string => `transcriber.${transcriberId}.api_key`;
 export const RECORDING_NOTICE_SETTING = "recording_notice.text";
 /** O aviso que vale quando o operador não escreveu o dele. Toda chamada começa por um aviso. */
 export const DEFAULT_RECORDING_NOTICE = "Esta ligação é atendida por uma assistente virtual e a conversa fica registrada.";
@@ -169,6 +178,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let requestedFarewell: string | undefined;
   let costCents = 0;
   const usage = { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 };
+  /** A peça de transcrição, quando a chamada tem uma e ela abriu. Soma ao custo do motor. */
+  let transcription: StreamingTranscription | undefined;
+  const transcriberMeter = { usage: { ...usage }, costCents: 0 };
   const cancelTimers: Array<() => void> = [];
   const toolsRunning = new Set<Promise<void>>();
   const callEnded = new AbortController();
@@ -189,6 +201,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     try {
       // Fechar o motor entrega a última medição de uso; ela entra no custo gravado abaixo.
       await voice?.close();
+      // A peça também entrega o último consumo ao fechar; sem peça, nada muda aqui.
+      await transcription?.close();
       for (const [kind, payload] of end.events ?? []) await event(kind, payload);
       if (end.notice) await panelNotice(q, clock, callId, end.notice);
       await q.exec("update calls set status = $2, end_reason = $3, ended_at = $4, cost_cents = $5 where id = $1", [callId, end.status, end.endReason, clock.now(), costCents]);
@@ -275,18 +289,34 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     cancelTimers.push(schedule(() => void finish(end), FAREWELL_MS));
   }
 
-  async function meter(increment: Usage): Promise<void> {
+  function accumulate(into: typeof usage, increment: Usage): void {
+    into.seconds += increment.seconds ?? 0;
+    into.inputTokens += increment.inputTokens ?? 0;
+    into.outputTokens += increment.outputTokens ?? 0;
+    into.textInputTokens += increment.textInputTokens ?? 0;
+    into.cachedInputTokens += increment.cachedInputTokens ?? 0;
+    into.textOutputTokens += increment.textOutputTokens ?? 0;
+  }
+
+  /**
+   * Mede um incremento de consumo. Quem consome é o motor ou, quando a chamada tem uma, a peça de
+   * transcrição, cada um com o preço dele; o custo da chamada é a soma dos dois e respeita o teto.
+   */
+  async function meter(increment: Usage, piece?: { id: string; pricing: EnginePricing }): Promise<void> {
     if (!engine) return;
-    usage.seconds += increment.seconds ?? 0;
-    usage.inputTokens += increment.inputTokens ?? 0;
-    usage.outputTokens += increment.outputTokens ?? 0;
-    usage.textInputTokens += increment.textInputTokens ?? 0;
-    usage.cachedInputTokens += increment.cachedInputTokens ?? 0;
-    usage.textOutputTokens += increment.textOutputTokens ?? 0;
     // `usage` é incremento: o custo sai do total somado, e cada linha do extrato leva a diferença.
     // Assim a soma do extrato é sempre o custo da chamada, apesar do arredondamento.
-    const total = estimateCostCents(engine.pricing, usage);
-    const delta = total - costCents;
+    let delta: number;
+    if (piece) {
+      accumulate(transcriberMeter.usage, increment);
+      const pieceTotal = estimateCostCents(piece.pricing, transcriberMeter.usage);
+      delta = pieceTotal - transcriberMeter.costCents;
+      transcriberMeter.costCents = pieceTotal;
+    } else {
+      accumulate(usage, increment);
+      delta = estimateCostCents(engine.pricing, usage) - (costCents - transcriberMeter.costCents);
+    }
+    const total = costCents + delta;
     costCents = total;
     const ceiling = agent?.cost_ceiling_cents ?? 0;
     // Teto zero é "sem teto": com `>=`, zero derrubaria toda chamada na primeira medição.
@@ -303,7 +333,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       [
         organizationId,
         callId,
-        engine.id,
+        // A peça tem linha própria no extrato, e não se confunde com um motor de mesmo id.
+        piece ? `transcriber:${piece.id}` : engine.id,
         Math.round(increment.seconds ?? 0),
         (increment.inputTokens ?? 0) + (increment.textInputTokens ?? 0) + (increment.cachedInputTokens ?? 0),
         (increment.outputTokens ?? 0) + (increment.textOutputTokens ?? 0),
@@ -387,6 +418,53 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     else if (requestedEnd) void finish(requestedEnd);
   }
 
+  /** Por que a peça de transcrição ficou fora da chamada: o vocabulário do teste da chave, ou `closed`. */
+  type TranscriberFailure = Exclude<KeyCheckResult, "accepted" | "not_needed"> | "closed";
+  const transcriberFailed = (transcriberId: string, reason: TranscriberFailure, detail: string): void => {
+    // O texto do provedor fica no log, para quem opera; a linha do tempo leva só o código.
+    log("error", "the transcriber is out of this call; the call goes on without it", { transcriber: transcriberId, reason, error: detail });
+    if (!ending) void event("transcriber_failed", { transcriber: transcriberId, reason }).catch(logFailure("could not record a transcriber failure"));
+  };
+
+  /**
+   * Abre a peça de transcrição ao lado do motor, sem que o motor espere por ela: o áudio de quem
+   * ligou continua indo ao motor do mesmo jeito, e só passa a ir também à peça quando ela abre. Se
+   * ela não abre, ou cai no meio, a chamada segue sem ela, e a linha do tempo grava o motivo.
+   */
+  async function openTranscription(piece: StreamingTranscriber, apiKey: string, config: { language: string; vocabulary: readonly string[] }, guard: SilenceGuard): Promise<void> {
+    const connecting = piece.connect(config, apiKey);
+    let cancelDeadline: () => void = () => undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      cancelDeadline = schedule(() => reject(new EngineTimeoutError(`the transcriber did not answer in ${CONNECT_TIMEOUT_MS / 1000} s`)), CONNECT_TIMEOUT_MS);
+    });
+    let opened: StreamingTranscription;
+    try {
+      opened = await Promise.race([connecting, deadline]);
+    } catch (error) {
+      if (error instanceof EngineTimeoutError) connecting.then((late) => late.close(), () => undefined);
+      const reason = error instanceof TranscriberOpenError ? error.result : error instanceof EngineTimeoutError ? "unreachable" : "unexpected_response";
+      return transcriberFailed(piece.id, reason, messageOf(error));
+    } finally {
+      cancelDeadline();
+    }
+    if (ending || wrappingUp) return void (await opened.close());
+    let lastText = "";
+    opened.on("piece", (said) => {
+      // Cada trecho com texto novo é sinal de que quem ligou está falando: a guarda contra o
+      // silêncio passa a ter texto mesmo no motor que só transcreve depois do fim do turno.
+      if (said.text.trim() !== "" && said.text !== lastText) guard.callerActivity({ words: true });
+      lastText = said.final ? "" : said.text;
+    });
+    opened.on("usage", (increment) => void meter(increment, piece).catch(logFailure("could not record transcriber usage")));
+    opened.on("error", (error) => log("error", "transcriber error", { transcriber: piece.id, error: error.message }));
+    opened.on("closed", (reason) => {
+      if (reason === "client") return;
+      transcription = undefined;
+      transcriberFailed(piece.id, "closed", reason);
+    });
+    transcription = opened;
+  }
+
   async function run(): Promise<void> {
     agent = (await q.one<AgentRow>(
       "select name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment from agents where id = $1",
@@ -439,6 +517,25 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
           apiKey = decryptSecret(stored.value, deps.secretKey);
         } catch (error) {
           problem = `the saved API key cannot be read (${messageOf(error)})`;
+        }
+      }
+    }
+    // A peça de transcrição, quando a chamada pede uma. Sem pedido, nada aqui consulta o banco.
+    let piece: StreamingTranscriber | undefined;
+    let pieceKey = "";
+    if (input.transcriberId !== undefined && engine && problem === undefined) {
+      piece = deps.transcribers?.get(input.transcriberId);
+      if (!piece) {
+        log("error", "the call asks for a transcriber that is not installed; going on without it", { transcriber: input.transcriberId });
+      } else if (!piece.keyless) {
+        const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberKeySetting(piece.id)]);
+        try {
+          if (typeof stored?.value !== "string") throw new Error("no API key is saved for this transcriber");
+          pieceKey = decryptSecret(stored.value, deps.secretKey);
+        } catch (error) {
+          // Sem chave que sirva, a peça não abre: para quem lê a linha do tempo, é a chave recusada.
+          transcriberFailed(piece.id, "rejected", messageOf(error));
+          piece = undefined;
         }
       }
     }
@@ -553,8 +650,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     });
     transport.onAudio((pcm) => {
       recorder?.caller(pcm);
-      if (!ending && !wrappingUp) session.sendAudio(pcm);
+      if (ending || wrappingUp) return;
+      // O motor recebe primeiro, sem esperar a peça; a peça recebe o mesmo pedaço logo depois.
+      session.sendAudio(pcm);
+      transcription?.sendAudio(pcm);
     });
+    if (piece) void openTranscription(piece, pieceKey, { language: agent.language, vocabulary: agent.vocabulary.slice(0, piece.maxVocabulary) }, silenceGuard).catch(logFailure("could not open the transcriber"));
     const answered = [
       q.exec("update calls set status = 'in_progress', answered_at = $2, engine = $3 where id = $1", [callId, clock.now(), engineId]),
       event("call_answered", { engine: engineId }),
