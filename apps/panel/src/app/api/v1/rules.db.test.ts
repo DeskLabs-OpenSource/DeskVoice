@@ -722,9 +722,9 @@ describe("costs", () => {
       from: "2026-01-31",
       to: "2026-03-01",
       totalCents: 42,
-      byDay: [{ day: "2026-02-28", costCents: 30 }, { day: "2026-03-01", costCents: 12 }],
+      byDay: [{ day: "2026-02-28", costCents: 30, billedSeconds: 60 }, { day: "2026-03-01", costCents: 12, billedSeconds: 60 }],
       byAgent: [{ agentId: agent, name: "Custos", costCents: 42, calls: 1 }],
-      byEngine: [{ engine: "simulated", costCents: 42, seconds: 159, priceCheckedOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) }],
+      byEngine: [{ engine: "simulated", costCents: 42, callSeconds: 159, priceCheckedOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) }],
     });
     expect((await call(costs, { cookie: owner, query: "?from=2026-03-02&to=2026-03-01" })).code).toBe("validation_error");
   });
@@ -739,7 +739,12 @@ describe("costs", () => {
     );
     // O OpenAI Realtime declara tokens: a linha do extrato tem custo e zero segundo, como a ligação de teste de 15/11.
     await insert(panel.app, org, "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, 'openai-realtime', 0, 9000, 4000, 26, 26000000, $3) returning id", [org, callId, NOW]);
-    const engines = (await call(costs, { cookie: owner })).data as { byEngine: Array<{ engine: string; seconds: number; costCents: number }> };
-    expect(engines.byEngine.find((row) => row.engine === "openai-realtime")).toMatchObject({ costCents: 26, seconds: 120 });
+    const engines = (await call(costs, { cookie: owner })).data as { byEngine: Array<{ engine: string; callSeconds: number; costCents: number }> };
+    expect(engines.byEngine.find((row) => row.engine === "openai-realtime")).toMatchObject({ costCents: 26, callSeconds: 120 });
+    // O desfecho classificado no dia seguinte põe a ligação no extrato de dois dias; a duração conta
+    // só no dia em que ela terminou.
+    await insert(panel.app, org, "insert into usage_ledger (organization_id, call_id, engine, seconds, cost_cents, cost_microcents, at) values ($1, $2, 'openai-realtime', 0, 0, 34000, $3::timestamptz + interval '1 day') returning id", [org, callId, NOW]);
+    const nextDay = (await call(costs, { cookie: owner, query: "?from=2026-03-02&to=2026-03-02" })).data as { byEngine: Array<{ engine: string; callSeconds: number }> };
+    expect(nextDay.byEngine.find((row) => row.engine === "openai-realtime")).toMatchObject({ callSeconds: 0 });
   });
 });
