@@ -227,8 +227,12 @@ se pedido), `--frases 12` (as primeiras do conjunto).
   segundo de áudio, somando todos os áudios da rodada. O sinal medido nas outras tabelas usa as
   conversões do áudio inteiro, como na fatia 4. O plugin do DeepFilterNet faz a conta numa linha de
   execução própria e verifica a saída a cada 2 ms: o relógio dele inclui essa espera, e a CPU de
-  um pedaço pode cair no pedaço seguinte (a média não muda). O plugin avisa quando fica lento
-  demais e aumenta o próprio atraso; a tabela conta esses avisos.
+  um pedaço pode cair no pedaço seguinte (a média não muda). Cada áudio roda numa instância nova
+  do plugin, num processo filho (a linha de execução dele não para sozinha). Quando uma chamada
+  leva mais que o próprio áudio, o plugin avisa e aumenta o atraso no meio do áudio, e o
+  alinhamento da régua deixa de valer: esse áudio é refeito (até 4 vezes) e só o que passou sem
+  aviso volta para a régua. A tabela de CPU conta os avisos, os áudios refeitos e os que não
+  passaram sem aviso, e os pedaços de todas as tentativas entram no tempo.
 - **Quanto tira do ruído:** energia que entrou sobre a que saiu (dB) nos trechos só de ruído da
   mistura, antes e depois da fala, sem o primeiro segundo (a adaptação do candidato). Média das
   frases.
@@ -241,7 +245,7 @@ se pedido), `--frases 12` (as primeiras do conjunto).
   cortada em quadros de 20 ms. São "quadros com fala" os que ficam a até 30 dB do quadro mais
   forte, na voz limpa. Do quarto mais fraco deles, a perda de cada quadro é a energia que entrou
   sobre a que saiu, e a do áudio é a média dos quadros. Um quadro mudo na saída dá perda infinita
-  (a tabela diz a parte dos quadros fracos que calou). **Média das frases acima de 1 dB, em
+  (a tabela diz a parte dos quadros fracos que calou e a perda média dos outros). **Média das frases acima de 1 dB, em
   qualquer nível, reprova.** O teste prova que ela reprova o filtro que zera os quadros mais de
   12 dB abaixo do mais forte, que passa na régua da frase inteira (`regua-da-reducao.test.ts`).
 - **Fala baixa debaixo de ruído (fatia 4b):** os mesmos quadros, com obra, música e conversa por

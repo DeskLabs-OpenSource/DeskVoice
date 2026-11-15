@@ -181,6 +181,8 @@ describe("a régua por quadro (fatia 4b)", () => {
     const calado = perdaPorQuadroDb(ref, ref.map((v, i) => (i < 4 ? 0 : v)), q, 0);
     expect(calado.mediaDb).toBe(Number.POSITIVE_INFINITY);
     expect(calado.calados).toBe(0.5);
+    expect(calado.semCaladosDb).toBeCloseTo(0, 6);
+    expect(perdaPorQuadroDb(ref, ref.map(() => 0), q, 0).semCaladosDb).toBeNaN();
   });
 });
 

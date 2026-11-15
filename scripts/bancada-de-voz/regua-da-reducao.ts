@@ -143,18 +143,25 @@ export function quadrosMaisFracos(voz: ArrayLike<number>, fala: Trecho, taxaHz: 
 /**
  * A perda (dB) de cada quadro, da referência para a saída deslocada pelo atraso, e a média. Um
  * quadro em que a saída zera (calado) dá perda infinita, e a média também; `calados` é a fração
- * dos quadros nessa situação, para dizer o tamanho do corte quando a média não diz.
+ * dos quadros nessa situação e `semCaladosDb` a média dos outros, para dizer o tamanho do corte
+ * quando a média não diz. Só a média decide.
  */
 export function perdaPorQuadroDb(
   referencia: ArrayLike<number>,
   saida: ArrayLike<number>,
   quadros: readonly Trecho[],
   atraso: number,
-): { mediaDb: number; porQuadroDb: number[]; calados: number } {
+): { mediaDb: number; porQuadroDb: number[]; calados: number; semCaladosDb: number } {
   if (quadros.length === 0) throw new Error("nenhum quadro para medir");
   const porQuadroDb = quadros.map((q) => razaoDeEnergiaDb(referencia, saida, [q], atraso));
-  const calados = porQuadroDb.filter((p) => p === Number.POSITIVE_INFINITY).length / porQuadroDb.length;
-  return { mediaDb: porQuadroDb.reduce((a, b) => a + b, 0) / porQuadroDb.length, porQuadroDb, calados };
+  const falam = porQuadroDb.filter((p) => p !== Number.POSITIVE_INFINITY);
+  return {
+    mediaDb: porQuadroDb.reduce((a, b) => a + b, 0) / porQuadroDb.length,
+    porQuadroDb,
+    calados: 1 - falam.length / porQuadroDb.length,
+    // A média só dos quadros que não calaram (NaN se todos calaram): o tamanho do corte além dos mudos.
+    semCaladosDb: falam.length ? falam.reduce((a, b) => a + b, 0) / falam.length : Number.NaN,
+  };
 }
 
 /**
@@ -168,10 +175,11 @@ export async function medirPorQuadro(
   taxaHz: number,
   filtro: (entrada: Float64Array) => ArrayLike<number> | Promise<ArrayLike<number>>,
   atrasoMaximo: number,
-): Promise<{ perdasDb: number[]; calados: number[]; perdasFraseDb: number[]; atrasos: number[]; reprova: boolean }> {
+): Promise<{ perdasDb: number[]; calados: number[]; semCaladosDb: number[]; perdasFraseDb: number[]; atrasos: number[]; reprova: boolean }> {
   const quadros = quadrosMaisFracos(voz, fala, taxaHz);
   const perdasDb: number[] = [];
   const calados: number[] = [];
+  const semCaladosDb: number[] = [];
   const perdasFraseDb: number[] = [];
   const atrasos: number[] = [];
   for (const picoDb of PICOS_DA_FALA_BAIXA_DB) {
@@ -182,9 +190,10 @@ export async function medirPorQuadro(
     const porQuadro = perdaPorQuadroDb(entrada, saida, quadros, atraso);
     perdasDb.push(porQuadro.mediaDb);
     calados.push(porQuadro.calados);
+    semCaladosDb.push(porQuadro.semCaladosDb);
     perdasFraseDb.push(perdaNaFalaDb(entrada, saida, fala, atraso));
   }
-  return { perdasDb, calados, perdasFraseDb, atrasos, reprova: reprovaNaFalaBaixa(perdasDb) };
+  return { perdasDb, calados, semCaladosDb, perdasFraseDb, atrasos, reprova: reprovaNaFalaBaixa(perdasDb) };
 }
 
 /**
@@ -198,10 +207,10 @@ export async function medirSobRuido(
   quadros: readonly Trecho[],
   atraso: number,
   filtro: (entrada: Float64Array) => ArrayLike<number> | Promise<ArrayLike<number>>,
-): Promise<{ mediaDb: number; calados: number }> {
+): Promise<{ mediaDb: number; calados: number; semCaladosDb: number }> {
   const saida = await filtro(mistura);
-  const { mediaDb, calados } = perdaPorQuadroDb(vozNoNivel, saida, quadros, atraso);
-  return { mediaDb, calados };
+  const { mediaDb, calados, semCaladosDb } = perdaPorQuadroDb(vozNoNivel, saida, quadros, atraso);
+  return { mediaDb, calados, semCaladosDb };
 }
 
 /** Média e p99 (posição mais próxima) de uma lista de tempos. */

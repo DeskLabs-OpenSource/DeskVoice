@@ -99,6 +99,13 @@ function lookaheadDaConversaoMs(deHz: number, paraHz: number): number {
   return (Math.ceil(4 / corte) / deHz) * 1000;
 }
 
+interface Lentidao {
+  avisos: number;
+  refeitos: number;
+  semPassar: number;
+}
+const SEM_LENTIDAO: Lentidao = { avisos: 0, refeitos: 0, semPassar: 0 };
+
 /** O tempo de um pedaço de 20 ms em fluxo: o candidato e as duas conversões de taxa do pedaço. */
 interface TempoDoPedaco {
   relogioS: number;
@@ -122,8 +129,12 @@ interface Filtro {
   /** Recebe o áudio em pedaços de 20 ms, um de cada vez, com o estado guardado entre eles. */
   fluxo: boolean;
   processar(x8k: Float64Array): Promise<Processado>;
-  /** Avisos de "processamento lento demais" do candidato (o plugin do DeepFilterNet aumenta o atraso quando isso acontece). */
-  lentidoes(): number;
+  /**
+   * Os avisos de "processamento lento demais" do candidato até aqui. O plugin do DeepFilterNet
+   * aumenta o próprio atraso quando avisa; o áudio com aviso é refeito (`refeitos`), e
+   * `semPassar` conta os que não passaram sem aviso em nenhuma tentativa.
+   */
+  lentidoes(): Lentidao;
   encerrar(): void;
 }
 
@@ -176,12 +187,16 @@ async function porConversoes(
   cpu += cpuDoNodeS(marca);
   const saida = amostras(descida).subarray(0, x8k.length);
   if (!r.pedacos) return { saida, cpuS: cpu };
-  const conversoes = taxaHz === TAXA_DA_PONTE ? r.pedacos.map(() => ({ relogioS: 0, cpuS: 0 })) : conversoesPorPedaco(x8k, r.pcm, taxaHz);
-  if (conversoes.length !== r.pedacos.length) throw new Error(`pedaços desencontrados: ${conversoes.length} conversões, ${r.pedacos.length} do candidato`);
+  const conversoes = taxaHz === TAXA_DA_PONTE ? null : conversoesPorPedaco(x8k, r.pcm, taxaHz);
+  // Um áudio refeito traz os pedaços de cada tentativa em seguida; o pedaço i de cada uma soma as conversões do pedaço i.
+  if (conversoes && r.pedacos.length % conversoes.length !== 0) throw new Error(`pedaços desencontrados: ${conversoes.length} conversões, ${r.pedacos.length} do candidato`);
   return {
     saida,
     cpuS: cpu,
-    pedacos: r.pedacos.map((p, i) => ({ relogioS: p.relogioS + (conversoes[i]?.relogioS ?? 0), cpuS: p.cpuS + (conversoes[i]?.cpuS ?? 0) })),
+    pedacos: r.pedacos.map((p, i) => {
+      const c = conversoes?.[i % conversoes.length];
+      return { relogioS: p.relogioS + (c?.relogioS ?? 0), cpuS: p.cpuS + (c?.cpuS ?? 0) };
+    }),
   };
 }
 
@@ -196,7 +211,7 @@ function controle(id: "nenhum" | "conversoes"): Filtro {
     quadro: 0,
     lookahead: 0,
     fluxo: id === "conversoes",
-    lentidoes: () => 0,
+    lentidoes: () => SEM_LENTIDAO,
     processar: (x) =>
       porConversoes(x, taxaHz, async (pcm) => {
         if (id === "nenhum") return { pcm, cpuS: 0 };
@@ -210,12 +225,8 @@ function controle(id: "nenhum" | "conversoes"): Filtro {
 async function abrirCandidato(id: string, python: string): Promise<Filtro | { naoInstalou: string }> {
   const filho: ChildProcessWithoutNullStreams = spawn(python, ["-I", AJUDANTE, id], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1" } });
   let stderr = "";
-  let lentidoes = 0;
-  filho.stderr.on("data", (d: Buffer) => {
-    const texto = d.toString();
-    lentidoes += texto.match(/Underrun detected/g)?.length ?? 0;
-    stderr = (stderr + texto).slice(-2000);
-  });
+  const lentidao: Lentidao = { ...SEM_LENTIDAO };
+  filho.stderr.on("data", (d: Buffer) => void (stderr = (stderr + d.toString()).slice(-2000)));
   const linhas: Interface = createInterface({ input: filho.stdout });
   const fila: ((linha: string) => void)[] = [];
   const pendentes: string[] = [];
@@ -261,15 +272,29 @@ async function abrirCandidato(id: string, python: string): Promise<Filtro | { na
       porConversoes(x, taxaHz, async (pcm) => {
         const pedido = `i${++contador}`;
         filho.stdin.write(`${JSON.stringify({ id: pedido, b64: pcm.toString("base64"), ...(fluxo ? { pedaco } : {}) })}\n`);
-        const resposta = JSON.parse(await proxima()) as { id: string; b64: string; cpu_s: number; pedacos?: [number, number][]; erro?: string };
+        const resposta = JSON.parse(await proxima()) as {
+          id: string;
+          b64: string;
+          cpu_s: number;
+          pedacos?: [number, number][];
+          erro?: string;
+          lentidoes?: number;
+          refeitos?: number;
+          sem_aviso?: boolean;
+        };
         if (resposta.erro) throw new Error(`reducao_de_ruido.py ${id}: ${resposta.erro}`);
+        lentidao.avisos += resposta.lentidoes ?? 0;
+        lentidao.refeitos += resposta.refeitos ?? 0;
+        if (resposta.sem_aviso === false) lentidao.semPassar++;
         if (resposta.id !== pedido) throw new Error(`resposta fora de ordem: ${resposta.id}`);
-        if (fluxo && resposta.pedacos?.length !== Math.ceil(pcm.length / 2 / pedaco)) throw new Error(`${id}: o candidato não devolveu o tempo de cada pedaço`);
+        // Com áudio refeito (lentidão), vêm os pedaços de todas as tentativas, um áudio inteiro por tentativa.
+        const porTentativa = Math.ceil(pcm.length / 2 / pedaco);
+        if (fluxo && !(resposta.pedacos?.length && resposta.pedacos.length % porTentativa === 0)) throw new Error(`${id}: o candidato não devolveu o tempo de cada pedaço`);
         // Em fluxo, a CPU do candidato é a soma dos pedaços (o silêncio entre áudios do plugin fica de fora).
         const pedacos = resposta.pedacos?.map(([relogioS, cpuS]) => ({ relogioS, cpuS }));
         return { pcm: Buffer.from(resposta.b64, "base64"), cpuS: pedacos ? pedacos.reduce((a, p) => a + p.cpuS, 0) : resposta.cpu_s, pedacos };
       }),
-    lentidoes: () => lentidoes,
+    lentidoes: () => ({ ...lentidao }),
     encerrar: () => filho.stdin.end(),
   };
 }
@@ -349,21 +374,26 @@ interface Resultado {
   /** Por nível da fala baixa: a perda na frase inteira (fatia 4), média e pior frase (dB). */
   falaBaixa?: { picoDb: number; mediaDb: number; piorDb: number }[];
   /** Por nível da fala baixa: a perda por quadro (fatia 4b), média das frases e pior frase (dB), e a fração dos quadros calados. */
-  porQuadro?: { picoDb: number; mediaDb: number; piorDb: number; calados: number }[];
+  porQuadro?: { picoDb: number; mediaDb: number; piorDb: number; calados: number; semCaladosDb: number }[];
   /** A régua por quadro, sem ruído: média das frases acima de 1 dB em algum nível. */
   reprova?: boolean;
   /** Por nível da fala baixa, tipo e relação: a perda por quadro com o ruído por baixo (dB). */
-  sobRuido?: { picoDb: number; tipo: TipoDeRuido; snrDb: number; mediaDb: number; piorDb: number; calados: number }[];
+  sobRuido?: { picoDb: number; tipo: TipoDeRuido; snrDb: number; mediaDb: number; piorDb: number; calados: number; semCaladosDb: number }[];
   /** Algum caso debaixo de ruído com média acima de 1 dB. */
   reprovaSobRuido?: boolean;
   /** Por tipo e nível: redução média (dB) nos trechos só de ruído. */
   reducao?: { tipo: TipoDeRuido; snrDb: number; reducaoDb: number }[];
   /** Em fluxo: pedaços de 20 ms um a um, o tempo de cada (ms) e a CPU de um núcleo por segundo de áudio. */
-  fluxo?: { lentidoes: number; pedacos: number; relogioMs: { media: number; p99: number }; cpuMs: { media: number; p99: number }; cpuPorSegundo: number };
+  fluxo?: { lentidao: Lentidao; pedacos: number; relogioMs: { media: number; p99: number }; cpuMs: { media: number; p99: number }; cpuPorSegundo: number };
 }
 
 const media = (v: readonly number[]): number => v.reduce((a, b) => a + b, 0) / Math.max(1, v.length);
 const mediana = (v: readonly number[]): number => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)] ?? 0;
+/** Média do que é número (a frase em que todo quadro calou não tem média dos que falam). */
+const mediaDosNumeros = (v: readonly number[]): number => {
+  const n = v.filter(Number.isFinite);
+  return n.length ? media(n) : Number.NaN;
+};
 const resumo = (v: readonly number[]): { mediaDb: number; piorDb: number } => ({ mediaDb: media(v), piorDb: Math.max(...v) });
 
 async function medir(filtro: Filtro, itens: readonly Item[]): Promise<Resultado> {
@@ -384,6 +414,7 @@ async function medir(filtro: Filtro, itens: readonly Item[]): Promise<Resultado>
   const perdasFrase: number[][] = PICOS_DA_FALA_BAIXA_DB.map(() => []);
   const perdasQuadro: number[][] = PICOS_DA_FALA_BAIXA_DB.map(() => []);
   const caladosQuadro: number[][] = PICOS_DA_FALA_BAIXA_DB.map(() => []);
+  const semCaladosQuadro: number[][] = PICOS_DA_FALA_BAIXA_DB.map(() => []);
   const atrasos: number[] = [];
   /** O atraso de cada frase em cada nível, medido sem ruído, para alinhar a mesma frase com ruído. */
   const atrasoDaFrase = new Map<string, number>();
@@ -392,6 +423,7 @@ async function medir(filtro: Filtro, itens: readonly Item[]): Promise<Resultado>
     r.perdasFraseDb.forEach((p, i) => perdasFrase[i]?.push(p));
     r.perdasDb.forEach((p, i) => perdasQuadro[i]?.push(p));
     r.calados.forEach((c, i) => caladosQuadro[i]?.push(c));
+    r.semCaladosDb.forEach((c, i) => semCaladosQuadro[i]?.push(c));
     r.atrasos.forEach((a, i) => atrasoDaFrase.set(`${item.n}:${PICOS_DA_FALA_BAIXA_DB[i]}`, a));
     atrasos.push(...r.atrasos);
   }
@@ -415,6 +447,7 @@ async function medir(filtro: Filtro, itens: readonly Item[]): Promise<Resultado>
       for (const snrDb of NIVEIS_DB) {
         const valores: number[] = [];
         const calados: number[] = [];
+        const semCalados: number[] = [];
         for (const item of itens) {
           const vozNoNivel = escalarAoPico(item.voz8k, picoDb);
           const { mistura } = misturar(vozNoNivel, item.ruidos[tipo], snrDb, item.fala);
@@ -424,8 +457,9 @@ async function medir(filtro: Filtro, itens: readonly Item[]): Promise<Resultado>
           const r = await medirSobRuido(vozNoNivel, mistura, quadrosMaisFracos(item.voz8k, item.fala, TAXA_DA_PONTE), atrasoDoItem, processar);
           valores.push(r.mediaDb);
           calados.push(r.calados);
+          semCalados.push(r.semCaladosDb);
         }
-        sobRuido.push({ picoDb, tipo, snrDb, ...resumo(valores), calados: media(calados) });
+        sobRuido.push({ picoDb, tipo, snrDb, ...resumo(valores), calados: media(calados), semCaladosDb: mediaDosNumeros(semCalados) });
       }
     }
   }
@@ -434,10 +468,15 @@ async function medir(filtro: Filtro, itens: readonly Item[]): Promise<Resultado>
   const lookaheadMs = (filtro.lookahead / filtro.taxaHz) * 1000;
   const conversoesMs = filtro.taxaHz === TAXA_DA_PONTE ? 0 : lookaheadDaConversaoMs(TAXA_DA_PONTE, filtro.taxaHz) + lookaheadDaConversaoMs(filtro.taxaHz, TAXA_DA_PONTE);
   const falaBaixa = PICOS_DA_FALA_BAIXA_DB.map((picoDb, i) => ({ picoDb, ...resumo(perdasFrase[i] ?? []) }));
-  const porQuadro = PICOS_DA_FALA_BAIXA_DB.map((picoDb, i) => ({ picoDb, ...resumo(perdasQuadro[i] ?? []), calados: media(caladosQuadro[i] ?? []) }));
+  const porQuadro = PICOS_DA_FALA_BAIXA_DB.map((picoDb, i) => ({
+    picoDb,
+    ...resumo(perdasQuadro[i] ?? []),
+    calados: media(caladosQuadro[i] ?? []),
+    semCaladosDb: mediaDosNumeros(semCaladosQuadro[i] ?? []),
+  }));
   const fluxo: Resultado["fluxo"] = pedacos.length
     ? {
-        lentidoes: filtro.lentidoes(),
+        lentidao: filtro.lentidoes(),
         pedacos: pedacos.length,
         relogioMs: mediaEP99(pedacos.map((p) => p.relogioS * 1000)),
         cpuMs: mediaEP99(pedacos.map((p) => p.cpuS * 1000)),
@@ -514,12 +553,17 @@ async function main(): Promise<void> {
   for (const r of resultados) if (r.naoInstalou) print(`- **${r.rotulo} não instalou:** ${r.naoInstalou.replace(/\|/g, "/")}`);
   print();
   /** Média / pior; com quadro calado (média infinita), diz quantos dos quadros fracos calaram. */
-  const par = (v?: { mediaDb: number; piorDb: number; calados?: number }): string =>
-    v ? `${dB(v.mediaDb)} / ${dB(v.piorDb)}${v.calados ? ` (${(v.calados * 100).toFixed(0)}% calados)` : ""}` : "—";
+  const par = (v?: { mediaDb: number; piorDb: number; calados?: number; semCaladosDb?: number }): string => {
+    if (!v) return "—";
+    const base = `${dB(v.mediaDb)} / ${dB(v.piorDb)}`;
+    if (!v.calados) return base;
+    const resto = Number.isFinite(v.semCaladosDb) ? `; ${dB(v.semCaladosDb ?? Number.NaN)} nos outros` : "";
+    return `${base} (${(v.calados * 100).toFixed(1)}% calados${resto})`;
+  };
   const nivel = (picoDb: number): string => `${picoDb < 0 ? "−" : ""}${Math.abs(picoDb)} dB`;
   print(`### Fala baixa sem ruído: por quadro (fatia 4b) e na frase inteira (fatia 4)`);
   print();
-  print(`Por quadro: quadros de ${QUADRO_MS} ms, o ${PARTE_MAIS_FRACA === 0.25 ? "quarto" : PARTE_MAIS_FRACA} mais fraco dos quadros com fala (até ${QUADRO_COM_FALA_DB} dB abaixo do mais forte, na voz limpa), perda média dos quadros. Cada célula é a média das frases / a pior frase (dB). Um quadro que sai mudo dá perda infinita; aí a célula diz a parte dos quadros fracos que calou (média das frases). **Reprova** se a média das frases passa de ${LIMITE_PERDA_DB} dB em algum nível.`);
+  print(`Por quadro: quadros de ${QUADRO_MS} ms, o ${PARTE_MAIS_FRACA === 0.25 ? "quarto" : PARTE_MAIS_FRACA} mais fraco dos quadros com fala (até ${QUADRO_COM_FALA_DB} dB abaixo do mais forte, na voz limpa), perda média dos quadros. Cada célula é a média das frases / a pior frase (dB). Um quadro que sai mudo dá perda infinita; aí a célula diz a parte dos quadros fracos que calou e a perda média dos outros (médias das frases). **Reprova** se a média das frases passa de ${LIMITE_PERDA_DB} dB em algum nível.`);
   print();
   print(`| Candidato | Versão | Por quadro −20 dB | Por quadro −30 dB | Frase inteira −20 dB | Frase inteira −30 dB | Régua por quadro |`);
   print(`|---|---|--:|--:|--:|--:|---|`);
@@ -556,7 +600,7 @@ async function main(): Promise<void> {
   print();
   print(`Cada pedaço é cronometrado sozinho: as duas conversões de taxa do pedaço (o \`resample\` do produto, um pedaço por vez) e o candidato, com o estado guardado entre os pedaços. Todos os áudios da rodada (sem ruído e com ruído) entram. A CPU é a do processo do candidato inteiro (todas as linhas de execução) mais a do Node nas conversões.`);
   print();
-  print(`| Candidato | Pedaços | Relógio por pedaço, média / p99 (ms) | CPU por pedaço, média / p99 (ms) | CPU de um núcleo por s de áudio | Avisos de lentidão |`);
+  print(`| Candidato | Pedaços | Relógio por pedaço, média / p99 (ms) | CPU por pedaço, média / p99 (ms) | CPU de um núcleo por s de áudio | Avisos de lentidão (áudios refeitos; sem passar) |`);
   print(`|---|--:|--:|--:|--:|--:|`);
   for (const r of instalados) {
     const f = r.fluxo;
@@ -564,7 +608,7 @@ async function main(): Promise<void> {
       print(`| ${r.rotulo} | — | ${r.id === "nenhum" ? "não faz nada" : "não roda em fluxo"} | — | — | — |`);
       continue;
     }
-    print(`| ${r.rotulo} | ${f.pedacos} | ${f.relogioMs.media.toFixed(3)} / ${f.relogioMs.p99.toFixed(3)} | ${f.cpuMs.media.toFixed(3)} / ${f.cpuMs.p99.toFixed(3)} | ${(f.cpuPorSegundo * 100).toFixed(2)}% | ${f.lentidoes} |`);
+    print(`| ${r.rotulo} | ${f.pedacos} | ${f.relogioMs.media.toFixed(3)} / ${f.relogioMs.p99.toFixed(3)} | ${f.cpuMs.media.toFixed(3)} / ${f.cpuMs.p99.toFixed(3)} | ${(f.cpuPorSegundo * 100).toFixed(2)}% | ${f.lentidao.avisos} (${f.lentidao.refeitos}; ${f.lentidao.semPassar}) |`);
   }
   print();
   print(`### Atraso (fatia 4)`);

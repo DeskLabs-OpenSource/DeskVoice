@@ -8,10 +8,10 @@ Conversa por linhas JSON:
              ou {"tipo":"nao_instalou","motivo":"..."} (e sai)
   entrada    {"id":"...","b64":"<PCM16 mono na taxa do candidato>","pedaco":<amostras, opcional>}
   saída      {"id":"...","b64":"<PCM16 mono, mesma taxa>","cpu_s":<segundos de CPU do processo>,
-              "pedacos":[[<relógio s>,<CPU s>], ...] (só com "pedaco")}
+              "pedacos":[[<relógio s>,<CPU s>], ...] (só com "pedaco"),
+              "lentidoes":n,"refeitos":n,"sem_aviso":bool (só no deepfilternet-fluxo)}
 
-Cada áudio começa com o estado zerado, como uma ligação nova (no `deepfilternet-fluxo`, veja a
-classe). A CPU é a do processo inteiro (`time.process_time`, todas as linhas de execução), só no
+Cada áudio começa com o estado zerado, como uma ligação nova. A CPU é a do processo inteiro (`time.process_time`, todas as linhas de execução), só no
 processamento: carregar o modelo fica de fora. Uma linha só de cálculo (`torch.set_num_threads(1)`),
 para a CPU ser a de um núcleo.
 
@@ -200,18 +200,24 @@ class DeepfilternetFluxo:
     Os controles ficam no padrão da biblioteca (`RuntimeParams::default_with_ch`: limite de
     atenuação 100 dB, que é sem limite; −10, 30 e 20 dB nos limiares; sem pós-filtro). O
     "Min Processing Buffer" fica em 1 quadro: com 0, o plugin tira um quadro do atraso depois de
-    1000 chamadas, e o atraso mudaria no meio da medida.
+    1000 chamadas.
 
-    Uma instância só para a medida inteira: o plugin não para a linha de execução dele ao ser
-    descartado, e uma por áudio deixaria dezenas delas acordando a cada 2 ms e somando CPU. Para cada
-    áudio ser uma ligação nova, a bancada empurra 1 s de silêncio antes dele (fora da conta) e
-    descarta a saída correspondente. O atraso do plugin aparece na correlação, como nos outros.
+    **Um processo filho por áudio**, com uma instância nova (uma ligação nova, como nos outros
+    candidatos). O plugin não para a linha de execução dele ao ser descartado; no filho, ela morre
+    junto. O filho carrega o modelo de novo (fora da conta).
+
+    **Lentidão:** quando uma chamada leva mais que o áudio dela, o plugin avisa ("Underrun") e
+    aumenta o próprio atraso em um quadro, no meio do áudio, e o alinhamento da régua deixa de
+    valer depois disso. Por isso, o áudio com aviso é refeito (até `TENTATIVAS` vezes) e só o que
+    passou sem aviso volta para a régua. Todos os avisos, e os pedaços de todas as tentativas, vão
+    na resposta: a tabela de CPU os mostra.
     """
 
     taxa = 48000
     lookahead = 0
     fluxo = True
-    SILENCIO_ENTRE_AUDIOS_S = 1.0
+    quadro = 480
+    TENTATIVAS = 4
 
     def __init__(self):
         import ctypes
@@ -244,6 +250,8 @@ class DeepfilternetFluxo:
             ("deactivate", c.CFUNCTYPE(None, c.c_void_p)),
             ("cleanup", c.CFUNCTYPE(None, c.c_void_p)),
         ]
+        # Só carrega a biblioteca aqui: nenhuma instância (e nenhuma linha de execução) no processo
+        # principal, para o fork de cada áudio ser seguro.
         lib = c.CDLL(caminho)
         lib.ladspa_descriptor.restype = c.POINTER(Descritor)
         lib.ladspa_descriptor.argtypes = [c.c_ulong]
@@ -251,8 +259,16 @@ class DeepfilternetFluxo:
         if d.Label != b"deep_filter_mono":
             raise RuntimeError(f"plugin inesperado: {d.Label!r}")
         self.lib, self.d = lib, d
-        self.h = d.instantiate(c.byref(d), self.taxa)
-        if not self.h:
+        with open(caminho, "rb") as f:
+            sha = hashlib.sha256(f.read()).hexdigest()[:12]
+        m = re.search(r"ladspa-(\d+\.\d+\.\d+)", os.path.basename(caminho))
+        self.versao = f"plugin LADSPA {m.group(1) if m else '?'} (sha256 {sha}), DeepFilterNet3 de baixa latência"
+
+    def _no_filho(self, x, pedaco):
+        """Roda no processo filho: uma instância nova, o áudio em pedaços, e devolve saída e tempos."""
+        c, d = self.ctypes, self.d
+        h = d.instantiate(c.byref(d), self.taxa)
+        if not h:
             raise RuntimeError("o plugin não abriu em 48 kHz")
         controles = {
             b"Attenuation Limit (dB)": 100.0,
@@ -262,49 +278,76 @@ class DeepfilternetFluxo:
             b"Min Processing Buffer (frames)": 1.0,
             b"Post Filter Beta": 0.0,
         }
-        self._valores = []
-        self._ent = np.zeros(0, np.float32)
-        self._sai = np.zeros(0, np.float32)
+        valores = []
         for k in range(d.PortCount):
             nome = d.PortNames[k]
             if nome in controles:
                 v = c.c_float(controles.pop(nome))
-                self._valores.append(v)
-                d.connect_port(self.h, k, c.pointer(v))
+                valores.append(v)
+                d.connect_port(h, k, c.pointer(v))
         if controles:
             raise RuntimeError(f"controles que o plugin não tem: {list(controles)}")
-        d.activate(self.h)
-        self.quadro = 480
-        with open(caminho, "rb") as f:
-            sha = hashlib.sha256(f.read()).hexdigest()[:12]
-        m = re.search(r"ladspa-(\d+\.\d+\.\d+)", os.path.basename(caminho))
-        self.versao = f"plugin LADSPA {m.group(1) if m else '?'} (sha256 {sha}), DeepFilterNet3 de baixa latência"
-
-    def _rodar(self, bloco):
-        """Um `run` do plugin: entra `bloco` (float32), sai o mesmo tamanho."""
-        c = self.ctypes
-        n = len(bloco)
-        if len(self._ent) != n:
-            self._ent = np.zeros(n, np.float32)
-            self._sai = np.zeros(n, np.float32)
-            self.d.connect_port(self.h, 0, self._ent.ctypes.data_as(c.POINTER(c.c_float)))
-            self.d.connect_port(self.h, 1, self._sai.ctypes.data_as(c.POINTER(c.c_float)))
-        self._ent[:] = bloco
-        self.d.run(self.h, n)
-        return self._sai.copy()
-
-    def processar_em_fluxo(self, x, pedaco):
-        def abrir():
-            silencio = np.zeros(pedaco, np.float32)
-            for _ in range(int(round(self.SILENCIO_ENTRE_AUDIOS_S * self.taxa / pedaco))):
-                self._rodar(silencio)
-            return None
+        ent = np.zeros(pedaco, np.float32)
+        sai = np.zeros(pedaco, np.float32)
+        d.connect_port(h, 0, ent.ctypes.data_as(c.POINTER(c.c_float)))
+        d.connect_port(h, 1, sai.ctypes.data_as(c.POINTER(c.c_float)))
+        d.activate(h)
 
         def passo(_, p):
-            y = self._rodar(p.astype(np.float32) / 32768.0)
-            return np.clip(np.round(y * 32768.0), -32768, 32767).astype(np.int16)
+            ent[:] = p.astype(np.float32) / 32768.0
+            d.run(h, pedaco)
+            return np.clip(np.round(sai * 32768.0), -32768, 32767).astype(np.int16)
 
-        return em_pedacos(x, pedaco, abrir, passo, lambda _: None)
+        return em_pedacos(x, pedaco, lambda: None, passo, lambda _: None)
+
+    def _uma_vez(self, x, pedaco):
+        """Um filho, um áudio. Devolve a saída, os tempos e quantos avisos de lentidão o plugin deu."""
+        import pickle
+
+        r, w = os.pipe()
+        er, ew = os.pipe()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        pid = os.fork()
+        if pid == 0:
+            codigo = 0
+            try:
+                os.close(r)
+                os.close(er)
+                os.dup2(ew, 2)
+                dados = pickle.dumps(self._no_filho(x, pedaco))
+                with os.fdopen(w, "wb") as f:
+                    f.write(dados)
+            except BaseException as erro:  # noqa: BLE001
+                os.write(2, f"filho: {type(erro).__name__}: {erro}\n".encode())
+                codigo = 1
+            os._exit(codigo)
+        os.close(w)
+        os.close(ew)
+        with os.fdopen(r, "rb") as f:
+            dados = f.read()
+        with os.fdopen(er, "rb") as f:
+            erros = f.read()
+        _, status = os.waitpid(pid, 0)
+        if erros:
+            sys.stderr.write(erros.decode(errors="replace"))
+        if status != 0 or not dados:
+            raise RuntimeError(f"o filho do plugin saiu com {status}: {erros.decode(errors='replace')[-300:]}")
+        y, tempos = pickle.loads(dados)
+        return y, tempos, erros.count(b"Underrun detected")
+
+    def processar_em_fluxo(self, x, pedaco):
+        todos, lentidoes = [], 0
+        for tentativa in range(self.TENTATIVAS):
+            y, tempos, avisos = self._uma_vez(x, pedaco)
+            todos += tempos
+            lentidoes += avisos
+            if avisos == 0:
+                break
+        # Os pedaços de todas as tentativas entram na conta de CPU; a saída é a da última (sem aviso,
+        # se alguma passou). `refeitos` diz quantas tentativas sobraram.
+        self.ultimo = {"lentidoes": lentidoes, "refeitos": tentativa, "sem_aviso": avisos == 0}
+        return y, todos
 
     def processar(self, x):
         y, _ = self.processar_em_fluxo(x, 960)
@@ -343,6 +386,7 @@ def main():
             y, tempos = candidato.processar_em_fluxo(x, int(pedaco))
         cpu = time.process_time() - inicio
         resposta = {"id": pedido["id"], "b64": base64.b64encode(y.astype("<i2").tobytes()).decode("ascii"), "cpu_s": cpu}
+        resposta.update(getattr(candidato, "ultimo", {}))
         if tempos is not None:
             resposta["pedacos"] = tempos
         falar(resposta)
