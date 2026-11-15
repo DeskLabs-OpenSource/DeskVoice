@@ -1,5 +1,16 @@
-import { mkdir, open, readdir, rename, rm, statfs } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { mkdir, open, readdir, rename, rm, stat, statfs } from "node:fs/promises";
 import path from "node:path";
+
+/**
+ * O que a gravação deixou no disco quando fechou: o tamanho final e a impressão digital do arquivo.
+ *
+ * Existe para o operador poder provar depois que o áudio que ele apresenta é o que a chamada gravou.
+ * Sem isso, qualquer cópia do `.wav` tem o mesmo peso de qualquer outra, e contestação sobre o que
+ * foi dito numa ligação vira palavra contra palavra.
+ */
+export type RecordingOutcome = { bytes: number; sha256: string };
 
 /**
  * Abaixo deste espaço livre na pasta das gravações, a chamada não é gravada. As gravações dividem
@@ -159,7 +170,7 @@ export interface Recording {
    */
   pause(): Promise<void>;
   /** Fecha o arquivo. Com áudio, acerta o cabeçalho e troca `.part` por `.wav`; sem, ou com falha, apaga o `.part`. */
-  finish(): Promise<boolean>;
+  finish(): Promise<RecordingOutcome | false>;
 }
 
 /** O espaço livre na pasta das gravações, criando-a se ainda não existe. */
@@ -272,7 +283,16 @@ export async function startRecording(
         return false;
       }
       await rename(partial, file);
-      return true;
+      // A impressão digital é lida do arquivo já fechado, por stream: uma hora de conversa passa de
+      // 100 MB e o fim da chamada não é lugar para carregar isso na memória.
+      const digest = createHash("sha256");
+      await new Promise<void>((resolve, reject) => {
+        createReadStream(file)
+          .on("data", (bloco) => digest.update(bloco))
+          .on("error", reject)
+          .on("end", resolve);
+      });
+      return { bytes: (await stat(file)).size, sha256: digest.digest("hex") };
     },
   };
 }
