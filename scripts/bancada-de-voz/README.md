@@ -48,9 +48,9 @@ O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medi
 | `dependencias.ts` | `zod` e `ws`, pegos de `packages/voice-engine` (sem dependência nova na raiz) |
 | `decisores/laya.ts` | o Laya: acerto, latência e CPU, sobre o conjunto do filtro. `laya_local.py` só executa os pedidos que recebe (`laya.test.ts`, com o ajudante trocado por um falso) |
 | `decisores/jev.ts` | o Jev: os mesmos pedidos do Laya, com acerto e latência (`jev.test.ts`, contra um servidor HTTP falso) |
-| `reducao-de-ruido.ts` | a medida da redução de ruído local em 8 kHz (fatia 4 da DESA-24): só mede, não liga nada |
-| `reducao_de_ruido.py` | os candidatos dessa medida (SpeexDSP, RNNoise, DeepFilterNet), um por processo |
-| `regua-da-reducao.ts` | a régua dela: perda na fala baixa, medida na frase inteira (acima de 1 dB reprova), redução do ruído e atraso |
+| `reducao-de-ruido.ts` | a medida da redução de ruído local em 8 kHz (fatias 4 e 4b da DESA-24): só mede, não liga nada |
+| `reducao_de_ruido.py` | os candidatos dessa medida (RNNoise, DeepFilterNet em fluxo e em torch; SpeexDSP só se pedido), um por processo |
+| `regua-da-reducao.ts` | a régua dela: perda na fala baixa por quadro (acima de 1 dB de média reprova) e na frase inteira, a fala baixa debaixo de ruído, redução do ruído, atraso e tempo por pedaço |
 
 ## Montar o ambiente (uma vez, fora do repositório)
 
@@ -154,7 +154,7 @@ são das frases da transcrição, e não valem para ele).
 - **Vozes:** quatro vozes do Piper. **Não são sotaques regionais**: a linha "voz" da tabela mede
   erro por voz, e só isso.
 
-## Redução de ruído (fatia 4 da DESA-24)
+## Redução de ruído (fatias 4 e 4b da DESA-24)
 
 Mede, para cada candidato aberto que roda na VPS, o que ele faria **antes** do provedor, em 8 kHz.
 Não liga nenhum candidato no produto. Não usa chave.
@@ -177,6 +177,17 @@ curl -sL https://bootstrap.pypa.io/get-pip.py | ./venv-reducao/bin/python
 Os pesos do DeepFilterNet3 baixam na primeira vez para `$XDG_CACHE_HOME/DeepFilterNet`. O candidato
 que não carregar sai na tabela como "não instalou", com o motivo.
 
+O DeepFilterNet do pacote em torch só processa o áudio inteiro. Em fluxo, a bancada usa o plugin
+LADSPA que o próprio projeto publica em cada versão (o `deep_filter` em Rust, um quadro de 10 ms por
+vez). Ele é um `.so` pronto, sem compilar, carregado pelo `ctypes` do Python; o plugin publicado
+traz o **DeepFilterNet3 de baixa latência**, e não o DeepFilterNet3 do torch:
+
+```bash
+mkdir -p /tmp/bancada-env/df-ladspa && cd /tmp/bancada-env/df-ladspa
+gh release download v0.5.6 -R Rikorose/DeepFilterNet -p 'libdeep_filter_ladspa-0.5.6-x86_64-unknown-linux-gnu.so'
+sha256sum libdeep_filter_ladspa-0.5.6-x86_64-unknown-linux-gnu.so   # 2ca3205c2911… em 15/11/2026
+```
+
 ### Rodar
 
 ```bash
@@ -184,11 +195,13 @@ export BANCADA_PIPER=/tmp/bancada-env/venv/bin/piper
 export BANCADA_VOZES=/tmp/bancada-env/vozes
 export BANCADA_REDUCAO_PYTHON=/tmp/bancada-env/venv-reducao/bin/python
 export XDG_CACHE_HOME=/tmp/bancada-env/cache
+export BANCADA_DF_LADSPA=/tmp/bancada-env/df-ladspa/libdeep_filter_ladspa-0.5.6-x86_64-unknown-linux-gnu.so
 
 pnpm exec tsx scripts/bancada-de-voz/reducao-de-ruido.ts
 ```
 
-Opções: `--candidatos speexdsp,rnnoise,deepfilternet`, `--frases 12` (as primeiras do conjunto).
+Opções: `--candidatos rnnoise,deepfilternet-fluxo,deepfilternet` (o padrão; `speexdsp` ainda roda
+se pedido), `--frases 12` (as primeiras do conjunto).
 
 ### Como cada número é medido
 
@@ -204,26 +217,60 @@ Opções: `--candidatos speexdsp,rnnoise,deepfilternet`, `--frases 12` (as prime
   saída (o lookahead do DeepFilterNet) + o lookahead das duas conversões, se elas rodassem em fluxo
   (meia largura do núcleo do `resample`).
 - **CPU:** segundos de CPU do processo do candidato (uma linha de cálculo) mais a das conversões no
-  Node, sobre os segundos de áudio processados. Carregar o modelo não entra. O DeepFilterNet
-  processa o áudio inteiro de uma vez: em fluxo, quadro a quadro, ele custaria mais.
+  Node, sobre os segundos de áudio processados. Carregar o modelo não entra. O DeepFilterNet em
+  torch processa o áudio inteiro de uma vez, e a tabela de atraso diz "áudio inteiro" ao lado dele.
+- **CPU em fluxo (fatia 4b):** quem roda em fluxo (RNNoise e o plugin do DeepFilterNet) recebe o
+  áudio em pedaços de 20 ms, um de cada vez, com o estado guardado entre eles, como a ponte manda.
+  Cada pedaço é cronometrado sozinho, em relógio e em CPU do processo inteiro (todas as linhas de
+  execução), e a ele se somam as duas conversões de taxa **daquele pedaço**, com o `resample` do
+  produto chamado pedaço a pedaço. Sai o tempo por pedaço (média e p99) e a CPU de um núcleo por
+  segundo de áudio, somando todos os áudios da rodada. O sinal medido nas outras tabelas usa as
+  conversões do áudio inteiro, como na fatia 4. O plugin do DeepFilterNet faz a conta numa linha de
+  execução própria e verifica a saída a cada 2 ms: o relógio dele inclui essa espera, e a CPU de
+  um pedaço pode cair no pedaço seguinte (a média não muda). Cada áudio roda numa instância nova
+  do plugin, num processo filho (a linha de execução dele não para sozinha). Quando uma chamada
+  leva mais que o próprio áudio, o plugin avisa e aumenta o atraso no meio do áudio, e o
+  alinhamento da régua deixa de valer: esse áudio é refeito (até 4 vezes) e só o que passou sem
+  aviso volta para a régua. A tabela de CPU conta os avisos, os áudios refeitos e os que não
+  passaram sem aviso, e os pedaços de todas as tentativas entram no tempo.
 - **Quanto tira do ruído:** energia que entrou sobre a que saiu (dB) nos trechos só de ruído da
   mistura, antes e depois da fala, sem o primeiro segundo (a adaptação do candidato). Média das
   frases.
 - **Perda na fala baixa, medida na frase inteira:** a voz sem ruído, com o pico a −20 dB e a
   −30 dB do fundo de escala. Energia da frase inteira que entrou sobre a que saiu, alinhada pelo
-  atraso. Média e pior frase. **Perda
-  acima de 1 dB, em qualquer frase e nível, reprova o candidato** (`regua-da-reducao.ts`, provada
-  em `regua-da-reducao.test.ts`).
+  atraso. Média e pior frase. Na fatia 4, perda acima de 1 dB em qualquer frase reprovava. Ela
+  continua na tabela, ao lado da por quadro, mas **não decide mais**: as sílabas fortes escondem
+  as fracas, e o filtro que apaga as sílabas fracas passa nela.
+- **Perda por quadro (fatia 4b), a régua que decide:** a mesma voz sem ruído, nos dois níveis,
+  cortada em quadros de 20 ms. São "quadros com fala" os que ficam a até 30 dB do quadro mais
+  forte, na voz limpa. Do quarto mais fraco deles, a perda de cada quadro é a energia que entrou
+  sobre a que saiu, e a do áudio é a média dos quadros. Um quadro mudo na saída dá perda infinita
+  (a tabela diz a parte dos quadros fracos que calou e a perda média dos outros). **Média das frases acima de 1 dB, em
+  qualquer nível, reprova.** O teste prova que ela reprova o filtro que zera os quadros mais de
+  12 dB abaixo do mais forte, que passa na régua da frase inteira (`regua-da-reducao.test.ts`).
+- **Fala baixa debaixo de ruído (fatia 4b):** os mesmos quadros, com obra, música e conversa por
+  baixo da fala baixa a 15, 5 e 0 dB (a relação é sobre a fala baixa). A saída é comparada com a
+  **voz limpa**, só nesses quadros, alinhada pelo atraso que a mesma frase teve sem ruído. O ruído
+  que sobra na saída **não** conta como voz: o candidato recebe a voz com o ruído e, à parte, a voz
+  com o ruído invertido, e a parte da saída que é voz é a média das duas saídas, em que o ruído se
+  cancela (separação por inversão de fase, Hagerman e Olofsson, 2004). Por isso a medida debaixo
+  de ruído passa cada áudio duas vezes pelo candidato. Sem redução, a perda dá zero. O teste prova
+  que ela reprova o filtro que deixa o ruído e corta 6 dB da voz fraca, a 15, 5 e 0 dB. Célula com
+  média acima de 1 dB sai em negrito.
 
 ## O que esta bancada não finge medir
 
-- **Perda por quadro (a sílaba fraca), na redução de ruído.** A régua soma a energia da frase
-  inteira, e as sílabas fortes escondem as fracas: um filtro que apaga as sílabas fracas passa
-  com 0,15 dB. "Passa na régua da frase inteira" não é "não corta a fala baixa". Num esboço do
-  Verificador, quadro a quadro e fora do repositório, a perda no quarto mais fraco foi de 3,3 dB
-  no SpeexDSP, 1,25 dB no DeepFilterNet e 0,6 dB no RNNoise.
-- **Fala baixa debaixo de ruído, na redução de ruído.** A perda na fala baixa é medida com a voz
-  sozinha, sem ruído.
+- **Redução de ruído: a separação da voz na saída.** A inversão de fase supõe que o candidato
+  trata a voz com o ruído e a voz com o ruído invertido do mesmo jeito. As duas misturas têm a mesma
+  relação voz/ruído e o mesmo espectro, mas um candidato que decide por quadro pode decidir um
+  pouco diferente em cada uma, e a diferença entra na voz medida. Quanto, não foi medido.
+- **Redução de ruído: o limiar de "quadro com fala" (30 dB) e o quarto mais fraco.** São escolhas
+  da régua, provadas nos testes, e não medidas contra o ouvido de ninguém.
+- **Redução de ruído: o DeepFilterNet3 completo em fluxo.** O plugin publicado traz o modelo de
+  baixa latência; o DeepFilterNet3 do torch só roda com o áudio inteiro. O custo em fluxo do modelo
+  completo não foi medido.
+- **Redução de ruído: a ponte de verdade.** Os pedaços vêm de um arquivo, sem rede, sem μ-law e sem
+  outras chamadas na mesma VPS. A CPU de várias chamadas ao mesmo tempo não foi medida.
 - **Fala atípica.** Voz sintética alterada mediria o efeito, e não a fala. O conjunto não tem esse
   caso. Ele só entra com um banco aberto, com licença para este uso e consentimento declarado dos
   falantes.
