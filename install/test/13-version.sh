@@ -212,17 +212,64 @@ equal "clone fora da versão: nada foi baixado nem subiu" 0 "$(calls ' pull \| u
 out="$(install --build)"; equal "clone fora da versão, com --build: instala o código da pasta" 0 "$?"
 rm -f "$FAKE_DIR/git_head"
 
-# ── ARM: a versão publicada tem as duas arquiteturas; instala puxando, como no amd64 ──
+# ── ARM: só puxa a versão cujo índice publicado tem arm64; as de antes da 0017 não têm ──
+# O índice como o ghcr.io devolve (formatado, com o manifesto de atestado), agora com arm64.
+arm64_index() {
+  printf '%s\n' '{' '  "schemaVersion": 2,' '  "mediaType": "application/vnd.oci.image.index.v1+json",' '  "manifests": [' \
+    '    { "digest": "sha256:aaa", "platform": { "architecture": "amd64", "os": "linux" } },' \
+    '    { "digest": "sha256:bbb", "platform": { "architecture": "arm64", "os": "linux" } },' \
+    '    { "digest": "sha256:ccc", "platform": { "architecture": "unknown", "os": "unknown" } }' '  ]' '}' > "$FAKE_DIR/registry_index"
+}
+manifest_asked() { calls "ghcr.io/v2/${prefix#ghcr.io/}/deskvoice-panel/manifests/$1"; }
 fresh; with_versions
-out="$(FAKE_ARCH=aarch64 install)"; equal "ARM com versão publicada: instala" 0 "$?"
-equal "ARM com versão publicada: grava o número" 0.2.0 "$(version)"
-contains "ARM com versão publicada: diz qual versão instalou" "$out" "Versão: 0.2.0, a publicada mais recente"
-equal "ARM com versão publicada: baixa as imagens" 1 "$(calls ' pull -q panel voice routines')"
-equal "ARM com versão publicada: não constrói aqui" 0 "$(calls ' build ')"
-# Quem quer o código desta pasta em ARM continua construindo: o caminho explícito não mudou.
+out="$(install)"; equal "x86_64: instala" 0 "$?"
+equal "x86_64: não pergunta ao registro, toda versão tem amd64" 0 "$(calls 'ghcr.io')"
+# O índice com arm64: instala puxando, como no amd64.
+fresh; with_versions; arm64_index
+out="$(FAKE_ARCH=aarch64 install)"; equal "ARM, versão com arm64: instala" 0 "$?"
+equal "ARM, versão com arm64: perguntou ao registro pelo índice da versão" 1 "$(manifest_asked 0.2.0)"
+check "ARM, versão com arm64: com o token anônimo de leitura" grep -q "ghcr.io/token?scope=repository:${prefix#ghcr.io/}/deskvoice-panel:pull" "$FAKE_DIR/calls.log"
+equal "ARM, versão com arm64: grava o número" 0.2.0 "$(version)"
+contains "ARM, versão com arm64: diz que conferiu" "$out" "a versão 0.2.0 tem imagem publicada para arm64"
+equal "ARM, versão com arm64: baixa as imagens" 1 "$(calls ' pull -q panel voice routines')"
+equal "ARM, versão com arm64: não constrói aqui" 0 "$(calls ' build ')"
+rm "$FAKE_DIR/registry_index"
+# O índice só com amd64 (o de toda versão publicada até hoje): a frase clara, não o erro do pull.
+fresh; with_versions
+out="$(FAKE_ARCH=aarch64 install)"; equal "ARM, versão sem arm64: não instala" 1 "$?"
+contains "ARM, versão sem arm64: diz que a versão não tem imagem ARM" "$out" "A versão 0.2.0 do DeskVoice não tem imagem publicada para processador ARM (aarch64)"
+contains "ARM, versão sem arm64: aponta o --build" "$out" "bash install/install.sh --build"
+lacks "ARM, versão sem arm64: é a frase do kit, não a do erro imprevisto" "$out" "de um jeito que o kit não previu"
+equal "ARM, versão sem arm64: nada foi baixado" 0 "$(calls ' pull ')"
+refuse "ARM, versão sem arm64: nada é gravado" test -e "$E"
+# Versão pedida de propósito que o registro não conhece: a mesma frase.
+fresh; echo 404 > "$FAKE_DIR/registry_status"
+out="$(DESKVOICE_VERSION=0.1.0 FAKE_ARCH=arm64 install)"; equal "ARM, etiqueta que o registro não tem: não instala" 1 "$?"
+contains "ARM, etiqueta que o registro não tem: a mesma frase" "$out" "A versão 0.1.0 do DeskVoice não tem imagem publicada para processador ARM (arm64)"
+rm "$FAKE_DIR/registry_status"
+# Registro que não responde: não dá para afirmar nada. Avisa e segue; o download diz o resto.
+fresh; with_versions; touch "$FAKE_DIR/registry_down"
+out="$(FAKE_ARCH=aarch64 install)"; equal "ARM, registro sem resposta: segue" 0 "$?"
+contains "ARM, registro sem resposta: avisa que não conferiu" "$out" "Não consegui perguntar ao registro de imagens se a versão 0.2.0 tem imagem para ARM"
+rm "$FAKE_DIR/registry_down"
+# Quem quer o código desta pasta em ARM continua construindo, sem perguntar ao registro.
 fresh
 out="$(FAKE_ARCH=aarch64 install --build)"; equal "ARM com --build: instala" 0 "$?"
 equal "ARM com --build: a versão é local" local "$(version)"
 equal "ARM com --build: constrói nesta máquina" 1 "$(calls ' build panel voice routines')"
 equal "ARM com --build: não baixa as imagens do DeskVoice" 0 "$(calls ' pull -q panel voice routines')"
+equal "ARM com --build: não pergunta ao registro" 0 "$(calls 'ghcr.io')"
+# O atualizador, com --to de uma versão sem arm64: para antes do backup, com a frase.
+legacy local
+out="$(FAKE_ARCH=aarch64 update --to 0.1.0)"; equal "atualizar em ARM para versão sem arm64: sai com erro" 1 "$?"
+contains "atualizar em ARM para versão sem arm64: diz que a versão não tem imagem ARM" "$out" "A versão 0.1.0 do DeskVoice não tem imagem publicada para processador ARM (aarch64)"
+contains "atualizar em ARM para versão sem arm64: diz que nada mudou" "$out" "Nada foi alterado: a instalação segue na versão local"
+lacks "atualizar em ARM para versão sem arm64: é a frase do kit, não a do erro imprevisto" "$out" "de um jeito que o kit não previu"
+equal "atualizar em ARM para versão sem arm64: nem backup, nem download, nem troca de código" 0 "$(grep -cE ' (pg_dump|pull) |checkout' "$FAKE_DIR/calls.log")"
+equal "atualizar em ARM para versão sem arm64: a versão não muda" local "$(version)"
+legacy local; arm64_index
+out="$(FAKE_ARCH=aarch64 update --to 0.2.0)"; equal "atualizar em ARM para versão com arm64: zero" 0 "$?"
+equal "atualizar em ARM para versão com arm64: perguntou pelo índice da versão alvo" 1 "$(manifest_asked 0.2.0)"
+equal "atualizar em ARM para versão com arm64: grava o número" 0.2.0 "$(version)"
+rm "$FAKE_DIR/registry_index"
 finish
