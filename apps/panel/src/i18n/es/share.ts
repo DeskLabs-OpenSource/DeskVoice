@@ -1,0 +1,40 @@
+import type { ShareDictionary } from "../pt-BR/share";
+
+const share: ShareDictionary = {
+  title: "Enlace para quien llamó",
+  lead: "Cuando quien llamó pide la grabación de esta llamada, crea un enlace y envíaselo. Vale {hours} horas y permite {uses} descargas del audio. Abrir la página del enlace no gasta descargas.",
+  warning: "Cualquier persona que tenga el enlace descarga el audio, que también tiene la voz del agente. Envíalo solo a quien lo pidió.",
+  addressHint: "El enlace usa la dirección pública de esta instalación. Sin un dominio configurado, solo abre desde dentro del servidor.",
+  create: "Crear enlace",
+  createdTitle: "Enlace creado",
+  createdBody: "Cópialo ahora: la dirección aparece solo esta vez. Vale hasta {until}, con {uses} descargas.",
+  linkLabel: "Dirección del enlace",
+  copy: "Copiar",
+  copied: "Copiado.",
+  done: "Listo",
+  liveTitle: "Enlaces que todavía valen",
+  liveEmpty: "Ningún enlace vale para esta llamada.",
+  liveRow: "Creado el {created} por {who}. Vale hasta {until}. Descargas: {uses} de {max}.",
+  removedPerson: "una persona que salió del equipo",
+  revoke: "Revocar los enlaces",
+  revokeConfirmOne: "¿Revocar el enlace que todavía vale para esta llamada? Quien tenga la dirección deja de descargar el audio al instante.",
+  revokeConfirmMany: "¿Revocar los {count} enlaces que todavía valen para esta llamada? Quien tenga la dirección deja de descargar el audio al instante.",
+  revokeYes: "Revocar",
+  revoked: "Enlaces revocados.",
+  page: {
+    title: "Grabación de tu llamada",
+    lead: "Este es el audio de la llamada cuya grabación pediste.",
+    started: "Inicio",
+    ended: "Fin",
+    endedUnknown: "Sin registro",
+    validUntil: "Vale hasta",
+    left: "Descargas que quedan",
+    download: "Descargar la grabación",
+    downloadHint: "Cada descarga gasta una de las que quedan. El archivo es un audio WAV, que abre en el celular y en la computadora.",
+    personal: "Este enlace es personal: quien tenga la dirección puede descargar el audio. No lo compartas.",
+    goneTitle: "Este enlace ya no vale.",
+    goneBody: "Puede haber vencido, llegado al límite de descargas o sido revocado. Pide uno nuevo a quien lo envió.",
+  },
+};
+
+export default share;

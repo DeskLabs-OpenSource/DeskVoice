@@ -108,6 +108,8 @@ const common: CommonDictionary = {
     email_taken: "Este correo ya tiene cuenta en este panel.",
     wrong_password: "La contraseña actual no coincide.",
     invite_invalid: "Esta invitación ya no vale. Pide una nueva a quien te invitó.",
+    call_erased: "Esta llamada fue borrada a pedido de quien llamó. No hay nada que compartir.",
+    no_recording: "Esta llamada no tiene grabación guardada, así que no hay enlace que crear.",
     trunk_has_numbers: "Esta línea todavía tiene números ligados a ella. Quita los números antes de quitar la línea.",
     update_in_progress: "Ya hay una solicitud de actualización en curso en este servidor. Síguela en Configuración → Sistema.",
     update_unavailable: "Este servidor no ejecuta una versión publicada, por lo que no se actualiza desde el panel. En Configuración → Sistema se explica cómo actualizar desde la terminal.",

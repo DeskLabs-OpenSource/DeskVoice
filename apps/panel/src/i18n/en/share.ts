@@ -1,0 +1,40 @@
+import type { ShareDictionary } from "../pt-BR/share";
+
+const share: ShareDictionary = {
+  title: "Link for the caller",
+  lead: "When the caller asks for the recording of this call, create a link and send it to them. It lasts {hours} hours and allows {uses} downloads of the audio. Opening the link page does not use a download.",
+  warning: "Anyone who has the link can download the audio, which also contains the agent's voice. Send it only to the person who asked.",
+  addressHint: "The link uses this installation's public address. Without a configured domain, it only opens from inside the server.",
+  create: "Create link",
+  createdTitle: "Link created",
+  createdBody: "Copy it now: the address is shown only this once. Valid until {until}, with {uses} downloads.",
+  linkLabel: "Link address",
+  copy: "Copy",
+  copied: "Copied.",
+  done: "Done",
+  liveTitle: "Links still valid",
+  liveEmpty: "No valid link for this call.",
+  liveRow: "Created on {created} by {who}. Valid until {until}. Downloads: {uses} of {max}.",
+  removedPerson: "someone who left the team",
+  revoke: "Revoke the links",
+  revokeConfirmOne: "Revoke the link still valid for this call? Whoever has the address can no longer download the audio, right away.",
+  revokeConfirmMany: "Revoke the {count} links still valid for this call? Whoever has the address can no longer download the audio, right away.",
+  revokeYes: "Revoke",
+  revoked: "Links revoked.",
+  page: {
+    title: "Recording of your call",
+    lead: "This is the audio of the call whose recording you asked for.",
+    started: "Started",
+    ended: "Ended",
+    endedUnknown: "Not recorded",
+    validUntil: "Valid until",
+    left: "Downloads left",
+    download: "Download the recording",
+    downloadHint: "Each download uses one of those left. The file is a WAV audio file, which opens on a phone or a computer.",
+    personal: "This link is personal: anyone who has the address can download the audio. Do not pass it on.",
+    goneTitle: "This link is no longer valid.",
+    goneBody: "It may have expired, reached its download limit or been revoked. Ask whoever sent it for a new one.",
+  },
+};
+
+export default share;

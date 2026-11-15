@@ -20,6 +20,7 @@ import { useCanConfigure } from "../../../../ui/me";
 import { Timeline } from "../../../../ui/timeline";
 import { transcribeAlsoClassifies } from "../../../../ui/transcription";
 import { AnalysisSection } from "./analysis-section";
+import { ShareSection } from "./share-section";
 import type { CallDetail, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
@@ -152,6 +153,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
               }}
             />
           ) : null}
+          {canConfigure ? <ShareSection id={id} /> : null}
         </Recording>
       )}
 

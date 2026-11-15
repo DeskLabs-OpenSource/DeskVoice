@@ -54,7 +54,7 @@ const privacy: PrivacyDictionary = {
   erasureDone: "Los datos de {phone} fueron borrados.",
   erasureDoneRecordings: "Las grabaciones salen en un momento. El registro de abajo dice cuántas salieron.",
   historyTitle: "Registro",
-  historyLead: "Quién cambió el plazo o la grabación, qué salió por el plazo, quién exportó los datos de qué teléfono y quién borró datos a pedido de quien llamó. Los 50 más recientes.",
+  historyLead: "Quién cambió el plazo o la grabación, qué salió por el plazo, quién exportó los datos de qué teléfono, quién borró datos a pedido de quien llamó y qué pasó con los enlaces de grabación para quien llamó. Los 50 más recientes.",
   historyEmpty: "Nada registrado todavía.",
   history: {
     transcript_retention_changed: "{who} cambió el plazo de conservación de {from} a {to}.",
@@ -63,6 +63,9 @@ const privacy: PrivacyDictionary = {
     call_recording_changed: "{who} dejó la grabación de las llamadas {state}.",
     caller_data_erased: "{who} borró, a pedido de quien llamó, los datos del teléfono terminado en {suffix}. Llamadas: {calls}. Grabaciones: {recordings}.",
     caller_recordings_erased: "Grabaciones de llamadas borradas a pedido de quien llamó: {removed}.",
+    share_created: "{who} creó un enlace para que quien llamó descargue la grabación de una llamada. Vale hasta {until}, con {uses} descargas.",
+    share_downloaded: "La grabación de una llamada se descargó por el enlace de quien llamó. Descarga {use} de {uses}.",
+    share_revoked: "{who} revocó los enlaces de grabación de una llamada. Enlaces revocados: {count}.",
   },
   purgedRecordings: "Grabaciones borradas: {count}.",
   purgedFollowUps: "Pendientes cerrados borrados: {count}.",
