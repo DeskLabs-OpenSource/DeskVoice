@@ -6,11 +6,15 @@
   [desenho da equipe de agentes e da memória](../specs/2026-11-13-equipe-de-agentes-e-memoria.md)
   (#114). Resposta: "Pode seguir com sua recomendação em todos docs de decisão abertos", o que vale
   **1A 2A 3A 4B 5A**. A resposta foi registrada pelo maestro de PRs.
-- **O que é do dono e o que é do Arquiteto:** as cinco escolhas (itens 1 a 5, nas palavras das
-  opções da seção 8) são do dono. Dois pontos são do Arquiteto, a partir do direcionamento da
-  DESA-37, e valem até o dono dizer outra coisa:
-  - "só por dono ou administrador" no prazo da memória (item 2), que a opção 2A não dizia;
-  - a seção "Regras que valem em toda fatia que lê ou grava memória".
+- **O que é do dono, do desenho e do Arquiteto:** as cinco escolhas são do dono, e o título de
+  cada item (1 a 5) e o texto sem marca estão nas palavras das opções da seção 8 do desenho. O que
+  as opções não dizem tem a origem marcada entre parênteses:
+  - **"(do desenho, seção X)":** detalhe que o desenho do #114 já trazia e que o dono aprovou junto
+    com ele, sem ser palavra da opção;
+  - **"(ponto do Arquiteto)":** leitura ou acréscimo do Arquiteto, a partir do direcionamento da
+    DESA-37. Vale até o dono dizer outra coisa.
+
+  A seção "Regras que valem em toda fatia que lê ou grava memória" é inteira ponto do Arquiteto.
 
 ## Contexto
 
@@ -31,33 +35,35 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
 
 1. **Memória para a equipe ligada; notas só com a ferramenta; agente sem memória por padrão (1A).**
    - Quem atende, quem recebe a transferência e quem abre a pendência vê as ligações anteriores do
-     número e as pendências abertas. Não há interruptor, porque isso é só leitura de dados que a
-     equipe já vê na lista de Chamadas.
+     número e as pendências abertas.
+   - Não há interruptor, porque isso é só leitura de dados que a equipe já vê na lista de Chamadas
+     (do desenho, seção 8, custo da opção 1B, e seção 7, fatia 2; decorre da 1A).
    - A nota só nasce quando o agente tem `remember_caller_note` marcada na tela dele. Ela vem
-     desmarcada em todo agente, novo ou já existente.
+     desmarcada em todo agente, novo ou já existente (do desenho, seção 8, nota do pedido sobre o prazo).
    - Numa ligação recebida, o agente não recebe nada sobre o número enquanto a chave do item 4
      estiver desligada, e ela vem desligada. A ligação que o sistema discou é a exceção que o dono
      escolheu no item 4.
 2. **Prazo próprio da memória (2A).**
-   - O padrão é de 90 dias, ajustável na tela entre 30 e 365, por organização. Só dono ou
-     administrador muda o prazo (ponto do Arquiteto, não da opção 2A).
+   - O padrão é de 90 dias, ajustável na tela entre 30 e 365. O prazo é por organização, e só dono
+     ou administrador o muda (ponto do Arquiteto).
    - O prazo efetivo nunca passa do prazo de guarda da transcrição: vale o menor dos dois. Sem prazo
-     de guarda, vale o da memória.
-   - Uma rotina diária apaga as notas vencidas e grava `caller_notes_purged` com a contagem.
+     de guarda, vale o da memória (a opção 2A diz "quando houver um").
+   - Uma rotina diária apaga as notas vencidas. Ela grava `caller_notes_purged` com a contagem (do
+     desenho, seção 2.4).
    - Nenhuma nota existe antes desta decisão, porque a ferramenta ainda não existe. Por isso, a
      regra de transição do desenho ("a troca de B para A não apaga, na atualização, as notas de quem
      nunca escolheu um prazo") não tem a quem se aplicar: os 90 dias valem para todas as
-     organizações desde a primeira nota.
+     organizações desde a primeira nota (ponto do Arquiteto).
 3. **A memória vem antes da equipe de agentes (3A).** As fatias seguem esta ordem: pendências (já
    entregue) → memória para a equipe → notas → passagem entre agentes → supervisor → memória no
-   agente.
+   agente (a última fatia vem do desenho, seção 7, fatia 6).
 4. **O agente pode receber a memória, com uma chave por organização (4B).**
-   - A chave fica em Configurações e só dono ou administrador a liga.
-   - A tela avisa que o número exibido pode ser forjado e que o agente pode repetir o que sabe para
-     quem fingir ser a pessoa.
-   - Cada mudança grava `caller_memory_changed`.
+   - A chave fica em Configurações (do desenho, seção 7, fatia 6) e só dono ou administrador a liga.
+   - A tela avisa que o número exibido pode ser forjado. Ela avisa também que o agente pode repetir
+     o que sabe para quem fingir ser a pessoa (do desenho, seção 2.5; é o custo da opção 4B).
+   - Cada mudança grava `caller_memory_changed` (do desenho, seção 2.5).
    - O bloco que o agente recebe nunca traz resumo nem fala. Ele traz só as notas e os títulos das
-     pendências abertas, dentro do teto de 1 500 caracteres.
+     pendências abertas, dentro do teto de 1 500 caracteres (do desenho, seção 2.6).
    - **A ligação que o próprio sistema discou recebe sempre (parte da opção 4B que o dono
      aceitou).** O texto da opção diz "sempre ligado na ligação que o sistema discou". Na ligação de
      saída (`direction = 'outbound'`), o número não foi informado por quem está do outro lado, e o
@@ -76,8 +82,8 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
      por padrão. O padrão sem resposta desse pedido é manter o que está aqui (opção B): o silêncio
      não desfaz uma escolha explícita do dono. Se ele mudar, uma decisão nova emenda esta. Só a
      fatia 6 depende disso.
-5. **O supervisor usa só regras fixas (5A).** A rotina `review_call` não usa modelo de IA. Revisão
-   por modelo é pedido futuro, próprio.
+5. **O supervisor usa só regras fixas (5A).** A rotina `review_call` não usa modelo de IA (do
+   desenho, seção 4.4). Revisão por modelo é pedido futuro, próprio.
 
 ### Regras que valem em toda fatia que lê ou grava memória
 
