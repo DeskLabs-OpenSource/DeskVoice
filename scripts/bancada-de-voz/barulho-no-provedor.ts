@@ -319,7 +319,7 @@ export function piorCasoDoItem(motor: Pick<MotorDeHoje, "piorCasoUsdPorMinuto">,
   return ((audioS + ESPERA_DO_FIM_S) / 60) * motor.piorCasoUsdPorMinuto;
 }
 
-type Linha =
+export type Linha =
   | { parte: "resposta"; ambiente: ListeningEnvironment; comGuarda: boolean; frase: AudioDaFrase; r: ResultadoDaResposta }
   | { parte: "interrupcao"; ambiente: ListeningEnvironment; comGuarda: boolean; porBaixo: AudioPorBaixo; r: ResultadoDaInterrupcao }
   | { parte: "longa"; ambiente: ListeningEnvironment; comGuarda: boolean; frase: AudioDaFrase; r: ResultadoDaFraseLonga };
@@ -363,7 +363,13 @@ function percentil(valores: readonly number[], p: number): number | null {
 const ms = (v: number | null): string => (v === null ? "—" : String(Math.round(v)));
 const guardaTexto = (comGuarda: boolean): string => (comGuarda ? "com" : "sem");
 
-function tabelaDaResposta(linhas: Linha[]): string[] {
+/**
+ * A tabela da parte 1. A mediana e o p90 contam só as frases em que a guarda não pediu para
+ * repetir: nelas o primeiro áudio é o pedido da guarda, e o tempo mediria a guarda, e não o motor.
+ * Quando a guarda só fecha o turno, a frase fica, porque quem responde é o motor. "Frases" é o total
+ * do grupo, e "Na mediana" é quantas entraram na conta.
+ */
+export function tabelaDaResposta(linhas: Linha[]): string[] {
   const grupos = new Map<string, Extract<Linha, { parte: "resposta" }>[]>();
   for (const l of linhas) {
     if (l.parte !== "resposta") continue;
@@ -375,21 +381,21 @@ function tabelaDaResposta(linhas: Linha[]): string[] {
     "",
     "**1. Resposta** (do fim da fala ao primeiro áudio do agente, em ms)",
     "",
-    "| Ambiente | Guarda | Ruído | dB | Frases | Mediana | p90 | Sem resposta | Antecipou | Guarda fechou o turno | Guarda pediu para repetir | Fora do ritmo |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|",
+    "| Ambiente | Guarda | Ruído | dB | Frases | Na mediana | Mediana | p90 | Sem resposta | Antecipou | Guarda fechou o turno | Guarda pediu para repetir | Fora do ritmo |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
   ];
   for (const [chave, ls] of grupos) {
     const [ambiente, guarda, tipo, snr] = chave.split("|");
-    const tempos = ls.flatMap((l) => (l.r.respostaMs === null ? [] : [l.r.respostaMs]));
+    const tempos = ls.flatMap((l) => (l.r.respostaMs === null || l.r.guardaPediuRepetir ? [] : [l.r.respostaMs]));
     const conta = (f: (r: ResultadoDaResposta) => boolean): number => ls.filter((l) => f(l.r)).length;
     out.push(
-      `| ${ambiente} | ${guarda} | ${tipo} | ${snr} | ${ls.length} | ${ms(percentil(tempos, 50))} | ${ms(percentil(tempos, 90))} | ${conta((r) => r.semResposta)} | ${conta((r) => r.antecipou)} | ${conta((r) => r.guardaFechou)} | ${conta((r) => r.guardaPediuRepetir)} | ${conta((r) => r.foraDoRitmo)} |`,
+      `| ${ambiente} | ${guarda} | ${tipo} | ${snr} | ${ls.length} | ${tempos.length} | ${ms(percentil(tempos, 50))} | ${ms(percentil(tempos, 90))} | ${conta((r) => r.semResposta)} | ${conta((r) => r.antecipou)} | ${conta((r) => r.guardaFechou)} | ${conta((r) => r.guardaPediuRepetir)} | ${conta((r) => r.foraDoRitmo)} |`,
     );
   }
   return out;
 }
 
-function tabelaDaInterrupcao(linhas: Linha[]): string[] {
+export function tabelaDaInterrupcao(linhas: Linha[]): string[] {
   const ls = linhas.filter((l): l is Extract<Linha, { parte: "interrupcao" }> => l.parte === "interrupcao");
   if (ls.length === 0) return [];
   const out = [
@@ -406,7 +412,7 @@ function tabelaDaInterrupcao(linhas: Linha[]): string[] {
   return out;
 }
 
-function tabelaDaFraseLonga(linhas: Linha[]): string[] {
+export function tabelaDaFraseLonga(linhas: Linha[]): string[] {
   const ls = linhas.filter((l): l is Extract<Linha, { parte: "longa" }> => l.parte === "longa");
   if (ls.length === 0) return [];
   const out = [

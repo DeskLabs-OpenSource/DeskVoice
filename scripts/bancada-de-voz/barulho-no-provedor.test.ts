@@ -6,11 +6,15 @@ import {
   JANELA_S,
   bancadaContraOProvedor,
   escutar,
+  itensDoMotor,
   medirFraseLonga,
   medirInterrupcao,
   medirResposta,
   piorCasoDoItem,
+  tabelaDaInterrupcao,
+  tabelaDaResposta,
   type AudioDaFrase,
+  type Linha,
   type AudioPorBaixo,
   type Plano,
   type RelogioComAgenda,
@@ -170,6 +174,118 @@ describe("medirResposta", () => {
   });
 });
 
+describe("escutar com a guarda", () => {
+  it("o `interrupted` do motor solta a guarda: a fala de quem ligou depois dele volta a armar o prazo", async () => {
+    const relogio = relogioFalso();
+    const sessao = new SessaoFalsa();
+    const escuta = escutar(sessao, motorFalso, relogio, true);
+    // O agente manda 10 s de fala, e o motor a interrompe 1 s depois: o agente parou de falar.
+    sessao.emitir("audio", audioDoAgente(10000));
+    relogio.agendar(() => sessao.emitir("interrupted"), 1000);
+    relogio.agendar(() => sessao.emitir("callerActivity", { words: true }), 1500);
+    await relogio.esperarAte(1500 + AFTER_WORDS_MS);
+    expect(escuta.acoes).toEqual([{ acao: "turn_closed", emMs: 1500 + AFTER_WORDS_MS }]);
+    expect(sessao.fechamentos).toBe(1);
+  });
+
+  it("pararGuarda desarma o prazo que estava correndo: a sessão fechada não fecha turno nem fala", async () => {
+    const relogio = relogioFalso();
+    const sessao = new SessaoFalsa();
+    const escuta = escutar(sessao, motorFalso, relogio, true);
+    sessao.emitir("callerActivity", { words: true });
+    await relogio.esperarAte(100);
+    escuta.pararGuarda();
+    await relogio.esperarAte(60000);
+    expect(escuta.acoes).toEqual([]);
+    expect(sessao.fechamentos).toBe(0);
+    expect(sessao.falas).toEqual([]);
+  });
+});
+
+describe("piorCasoDoItem", () => {
+  // A 0,6 US$/min, escrito à mão: (segundos de áudio + 8 s de espera) / 60 × 0,6.
+  const motor = { piorCasoUsdPorMinuto: 0.6 };
+
+  it("resposta e frase longa: o áudio inteiro do item mais 8 s de espera", () => {
+    // 1 s de áudio + 8 s = 9 s = US$ 0,09.
+    expect(piorCasoDoItem(motor, "resposta", Buffer.alloc(1000 * BYTES_POR_MS))).toBeCloseTo(0.09, 10);
+    // 13 s de áudio + 8 s = 21 s = US$ 0,21.
+    expect(piorCasoDoItem(motor, "longa", Buffer.alloc(13000 * BYTES_POR_MS))).toBeCloseTo(0.21, 10);
+  });
+
+  it("interrupção: 10 s de silêncio até o agente falar, 12 s de janela e 8 s de espera", () => {
+    // 10 + 12 + 8 = 30 s = US$ 0,30, seja qual for o áudio por baixo.
+    expect(piorCasoDoItem(motor, "interrupcao")).toBeCloseTo(0.3, 10);
+  });
+});
+
+describe("itensDoMotor", () => {
+  it("a frase longa roda só com a guarda, uma vez por ambiente; resposta e interrupção, com e sem", () => {
+    const itens = itensDoMotor(
+      { nFrases: 1, frases: [frase(200, 800, 1000)], porBaixo: [{ caso: "uhum", snrDb: null, pcm8k: Buffer.alloc(0) }], longas: [frase(200, 12200, 13000)] },
+      ["resposta", "interrupcao", "longa"],
+    );
+    const resumo = itens.map((i) => `${i.ambiente} ${i.comGuarda ? "com" : "sem"} ${i.parte}`);
+    expect(resumo).toEqual([
+      "normal sem resposta",
+      "normal sem interrupcao",
+      "normal com resposta",
+      "normal com interrupcao",
+      "normal com longa",
+      "noisy sem resposta",
+      "noisy sem interrupcao",
+      "noisy com resposta",
+      "noisy com interrupcao",
+      "noisy com longa",
+    ]);
+  });
+});
+
+describe("as tabelas", () => {
+  const ruido = { tipo: "obra", snrDb: 5, snrMedidoDb: 5 } as const;
+  const resposta = (r: Partial<Extract<Linha, { parte: "resposta" }>["r"]>, comGuarda = true): Linha => ({
+    parte: "resposta",
+    ambiente: "noisy",
+    comGuarda,
+    frase: { ...frase(1000, 3000, 24000), ruido },
+    r: { respostaMs: null, semResposta: false, antecipou: false, guardaFechou: false, guardaPediuRepetir: false, foraDoRitmo: false, ...r },
+  });
+
+  it("resposta: mediana e p90 só das frases em que a guarda não pediu para repetir, com o total e o n da conta", () => {
+    const linhas = [
+      resposta({ respostaMs: 300 }),
+      resposta({ respostaMs: 100 }),
+      resposta({ respostaMs: 900 }),
+      // A guarda fechou o turno e o motor respondeu: entra.
+      resposta({ respostaMs: 2800, guardaFechou: true }),
+      // O primeiro áudio foi o "pode repetir" da guarda: fica fora da mediana.
+      resposta({ respostaMs: 9000, guardaFechou: true, guardaPediuRepetir: true }),
+      resposta({ semResposta: true }),
+    ];
+    const tabela = tabelaDaResposta(linhas);
+    expect(tabela).toContain("| Ambiente | Guarda | Ruído | dB | Frases | Na mediana | Mediana | p90 | Sem resposta | Antecipou | Guarda fechou o turno | Guarda pediu para repetir | Fora do ritmo |");
+    // 6 frases, 4 na conta: [100, 300, 900, 2800] → mediana 300, p90 2800.
+    expect(tabela).toContain("| noisy | com | obra | 5 | 6 | 4 | 300 | 2800 | 1 | 0 | 2 | 1 | 0 |");
+  });
+
+  it("resposta: um grupo por ambiente, guarda, ruído e nível", () => {
+    const tabela = tabelaDaResposta([resposta({ respostaMs: 500 }, false), resposta({ respostaMs: 700 }, true)]);
+    expect(tabela).toContain("| noisy | sem | obra | 5 | 1 | 1 | 500 | 500 | 0 | 0 | 0 | 0 | 0 |");
+    expect(tabela).toContain("| noisy | com | obra | 5 | 1 | 1 | 700 | 700 | 0 | 0 | 0 | 0 | 0 |");
+  });
+
+  it("interrupção: o número de `interrupted` de cada caso, e traço quando o agente não falou", () => {
+    const porBaixo: AudioPorBaixo = { caso: "musica", snrDb: 5, pcm8k: Buffer.alloc(0) };
+    const base = { agenteNaoFalou: false, interrupcoes: 3, falaDoAgenteMs: 4500, guardaAgiu: false, foraDoRitmo: false };
+    const tabela = tabelaDaInterrupcao([
+      { parte: "interrupcao", ambiente: "normal", comGuarda: false, porBaixo, r: base },
+      { parte: "interrupcao", ambiente: "noisy", comGuarda: true, porBaixo: { ...porBaixo, caso: "uhum", snrDb: null }, r: { ...base, agenteNaoFalou: true, interrupcoes: 0, falaDoAgenteMs: 0 } },
+    ]);
+    expect(tabela).toContain("| normal | sem | musica | 5 | 3 | 4.5 | não | não | não |");
+    expect(tabela).toContain("| noisy | com | uhum | nível da voz | — | 0.0 | sim | não | não |");
+  });
+});
+
 describe("medirInterrupcao", () => {
   const porBaixo: AudioPorBaixo = { caso: "musica", snrDb: 5, pcm8k: Buffer.alloc(JANELA_S * 1000 * BYTES_POR_MS) };
 
@@ -271,7 +387,7 @@ describe("medirFraseLonga", () => {
 });
 
 /** Um motor de hoje falso: responde a cada item logo depois do primeiro áudio, e manda `usage` de 1 s. */
-function motorDeHojeFalso(id: string, variavel: string, opcoes: { noisyNaoAbre?: boolean } = {}) {
+function motorDeHojeFalso(id: string, variavel: string, opcoes: { noisyNaoAbre?: boolean; calado?: boolean } = {}) {
   const sessoes: SessaoFalsa[] = [];
   const configs: VoiceSessionConfig[] = [];
   let carregou = 0;
@@ -298,8 +414,13 @@ function motorDeHojeFalso(id: string, variavel: string, opcoes: { noisyNaoAbre?:
             sessao.emitir("audio", audioDoAgente(500));
             sessao.emitir("usage", { seconds: 1 });
           };
-          sessao.aoReceber = (bytes) => bytes === 320 && responder();
-          sessao.aoFalar = responder;
+          if (opcoes.calado) {
+            // Não responde nunca, e o provedor só dá um início de fala sem texto aos 200 ms (como o OpenAI).
+            sessao.aoReceber = (bytes) => bytes === 200 * BYTES_POR_MS && sessao.emitir("callerActivity", { words: false });
+          } else {
+            sessao.aoReceber = (bytes) => bytes === 320 && responder();
+            sessao.aoFalar = responder;
+          }
           sessoes.push(sessao);
           return sessao;
         },
@@ -385,6 +506,18 @@ describe("bancadaContraOProvedor", () => {
 
     expect(openai.sessoes).toHaveLength(1);
     expect(texto).toContain("A rodada parou antes do fim:** openai-hoje, interrupcao, normal, sem guarda: parou no teto");
+  });
+
+  it("a frase longa da rodada roda com a guarda: com o motor calado, a guarda age antes do fim e a tabela diz isso", async () => {
+    const openai = motorDeHojeFalso("openai-hoje", "BANCADA_OPENAI_API_KEY", { calado: true });
+    const r = rodadaFalsa([openai.motor], { BANCADA_OPENAI_API_KEY: "openai-chave-falsa-5555eeee" });
+    await bancadaContraOProvedor(["--teto-usd", "5", "--partes", "longa"], r.pecas);
+    const texto = r.saida.join("\n");
+
+    expect(openai.sessoes).toHaveLength(2);
+    // Início de fala sem texto junto do início da fala (200 ms); a guarda fecha o turno 8 s depois, antes do fim (12,2 s).
+    expect(texto).toContain(`| normal | obra | 5 | 12.0 | **sim** | ${WITHOUT_WORDS_MS} |`);
+    expect(texto).toContain(`| noisy | obra | 5 | 12.0 | **sim** | ${WITHOUT_WORDS_MS} |`);
   });
 
   it("a sessão noisy que não abre fica anotada, e o normal é medido", async () => {

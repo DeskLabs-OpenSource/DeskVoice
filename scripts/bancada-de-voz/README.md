@@ -284,6 +284,19 @@ export BANCADA_VOZES=/tmp/bancada-env/vozes
 pnpm exec tsx scripts/bancada-de-voz/ambiente-barulhento.ts --teto-usd 0
 ```
 
+**A rodada paga vai em duas chamadas** (decisão do Arquiteto na DESA-45). O teto é de US$ 5 no total
+e é dividido com a fatia 4 do R3. O pior caso dos dois motores (US$ 5,62, abaixo) não cabe nele.
+Por isso o Gemini vai primeiro, sozinho, e o OpenAI vai depois, com o que sobrar:
+
+```bash
+# 1. Gemini (pior caso US$ 1,30). TETO_GEMINI = US$ 5 − o gasto real da fatia 4 do R3.
+pnpm exec tsx scripts/bancada-de-voz/ambiente-barulhento.ts --motores gemini-hoje --teto-usd "$TETO_GEMINI"
+# 2. OpenAI. TETO_OPENAI = US$ 5 − o gasto real do R3 − o gasto real do Gemini (o "Custo real" da 1).
+pnpm exec tsx scripts/bancada-de-voz/ambiente-barulhento.ts --motores openai-hoje --teto-usd "$TETO_OPENAI"
+```
+
+O que não couber sai como "parou no teto", e a seção diz onde parou. Quem roda não aumenta o teto.
+
 Opções: `--motores openai-hoje,gemini-hoje`, `--frases 1` (quantas frases do conjunto; cada uma
 entra em cada ruído e cada nível), `--niveis 15,5,0`, `--partes resposta,interrupcao,longa`.
 `--teto-usd` é obrigatório. A saída é uma seção em markdown ("Medida contra o provedor"), com a
@@ -308,7 +321,10 @@ envio atrasou mais de 100 ms contra o horário sai como "fora do ritmo", fora da
    em que sai o pedaço com a última amostra da fala até o primeiro áudio do agente; o envio para ali.
    Se o agente fala antes do fim da frase, o item é "antecipou" e não entra no tempo. Sem áudio em
    20 s, "sem resposta". A tabela diz, por ambiente, guarda, ruído e nível, a mediana, o p90 e
-   quantas vezes a guarda fechou o turno ou pediu para repetir.
+   quantas vezes a guarda fechou o turno ou pediu para repetir. A mediana e o p90 **não** contam as
+   frases em que a guarda pediu para repetir: ali o primeiro áudio é o pedido da guarda, e o tempo
+   mediria a guarda, e não o motor. A frase em que a guarda só fechou o turno entra, porque quem
+   respondeu foi o motor. "Frases" é o total do grupo, e "Na mediana" é quantas entraram na conta.
 2. **Interrupção falsa.** A bancada pede ao agente uma fala de uns 10 s (`say`), manda silêncio até
    ele começar e, daí, 12 s do caso por baixo: obra, música ou conversa no nível em que estariam
    debaixo da voz de quem ligou (15, 5 e 0 dB), ou três "uhum" sintéticos no nível da voz. Conta o
