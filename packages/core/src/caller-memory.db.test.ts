@@ -52,7 +52,7 @@ describe("saveCallerNote", () => {
     const inbound = await callOf(org, { at: t(0), from: PHONE, to: LINE });
     const outbound = await callOf(org, { at: t(1), direction: "outbound", from: LINE, to: PHONE });
     expect(await save(org, inbound, "  Prefere de manhã.  ")).toMatchObject({ status: "saved" });
-    expect(await save(org, outbound, "O pedido é o 4471.")).toMatchObject({ status: "saved" });
+    expect(await save(org, outbound, "O pedido é o 4471.", t(1))).toMatchObject({ status: "saved" });
     expect(await notesOf(org)).toEqual([
       { call_id: inbound, caller_e164: PHONE, text: "Prefere de manhã." },
       { call_id: outbound, caller_e164: PHONE, text: "O pedido é o 4471." },

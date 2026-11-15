@@ -28,6 +28,7 @@ const factories: Record<string, Factory> = {
   tasks: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, kind: "isolation_probe", payload: {}, status: "done" }),
   follow_ups: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, title: "Retornar", owner_user_id: p.users?.id, due_at: at, created_at: at }),
   notifications: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, follow_up_id: p.follow_ups?.id, channel: "panel", body: "Aviso" }),
+  caller_notes: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, caller_e164: "+5531999990000", text: "Nota", created_at: at }),
   outbound_policy: (organization_id) => ({ organization_id }),
   do_not_call: (organization_id) => ({ organization_id, e164: `+55${Math.floor(1e10 + Math.random() * 9e10)}` }),
   usage_ledger: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, engine: "simulated", at }),
