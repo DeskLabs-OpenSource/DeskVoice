@@ -129,6 +129,45 @@ describe("notify_human", () => {
       expect((await notificationsOf(app, ctx.organizationId))[0]?.body).not.toContain(TITLE);
     });
 
+    it("nada do bloco chega ao modelo: o resultado inteiro é o mesmo com e sem ligações anteriores ou pendências", async () => {
+      // O modelo recebe o resultado inteiro (`JSON.stringify(result)` no OpenAI, `{ result }` no
+      // Gemini), e não só `message`: a guarda compara o resultado serializado.
+      const SUMMARY = "Resumo"; // o texto que `seedCallerHistory` grava em cada ligação anterior
+      const scenarios = [
+        { label: "nada", calls: 0, openFollowUps: [] },
+        { label: "ligacoes", calls: 2, openFollowUps: [] },
+        { label: "pendencias", calls: 0, openFollowUps: [TITLE] },
+        { label: "as duas", calls: 12, openFollowUps: [TITLE, "Ligar de volta sobre o exame"] },
+      ];
+      const serialized: string[] = [];
+      for (const [index, scenario] of scenarios.entries()) {
+        const ctx = await createFixture(app, `notify guarda ${scenario.label}`);
+        await putWhatsAppConnector(app, ctx.organizationId);
+        await createUser(app, ctx.organizationId, "+5531988887777");
+        await seedCallerHistory(app, ctx, `+553196666${String(index).padStart(4, "0")}`, scenario);
+        const result = await runTool(notifyHuman, { message: "Pediu retorno.", urgency: "high" }, ctx);
+        // O aviso do painel de fato levou a linha: a guarda não passa por falta do que vazar.
+        if (scenario.calls + scenario.openFollowUps.length > 0) expect((await notificationsOf(app, ctx.organizationId))[0]?.body).toContain("Este número");
+        serialized.push(JSON.stringify(result));
+      }
+      for (const text of serialized) {
+        expect(text).toBe(serialized[0]);
+        expect(text).not.toMatch(new RegExp(`ligou|pendência|Este número|${TITLE}|exame|${SUMMARY}`));
+      }
+    });
+
+    it("acima de 10: o painel e o WhatsApp contam tudo; o painel cita três títulos e conta o resto", async () => {
+      const ctx = await createFixture(app, "notify memoria acima de 10");
+      await putWhatsAppConnector(app, ctx.organizationId);
+      await createUser(app, ctx.organizationId, "+5531988887777");
+      const titles = Array.from({ length: 12 }, (_, index) => `Pendência ${index + 1}`);
+      await seedCallerHistory(app, ctx, "+5531966665550", { calls: 12, openFollowUps: titles });
+      await runTool(notifyHuman, { message: "Recado." }, ctx);
+      const [panelNotice, whatsapp] = await notificationsOf(app, ctx.organizationId);
+      expect(panelNotice?.body).toBe("Aviso: Recado.\n\nEste número já ligou 12 vezes; 12 pendências abertas: Pendência 1; Pendência 2; Pendência 3; e mais 9.");
+      expect(whatsapp).toMatchObject({ channel: "whatsapp", body: "Aviso: Recado.\n\nEste número já ligou 12 vezes; 12 pendências abertas." });
+    });
+
     it("só pendência, sem ligação anterior", async () => {
       const ctx = await createFixture(app, "notify memoria so pendencia");
       await seedCallerHistory(app, ctx, "+5531966665552", { calls: 0, openFollowUps: [TITLE] });

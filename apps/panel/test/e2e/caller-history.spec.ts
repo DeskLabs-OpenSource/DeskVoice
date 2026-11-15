@@ -19,15 +19,30 @@ test("a segunda ligação simulada do mesmo número mostra a primeira no bloco E
     return ((await response.json()) as { data: { callId: string } }).data.callId;
   };
   const first = await simulate();
-  // A primeira não mostra o bloco com ligação nenhuma: ela é a primeira deste número.
+  // A primeira não mostra ligação anterior nenhuma: ela é a primeira deste número.
   await page.goto(`/calls/${first}`);
   const block = page.getByRole("region", { name: timeline.callerHistory.title });
-  await expect(block.getByText(timeline.callerHistory.first)).toBeVisible();
+  await expect(block).toBeVisible();
+  await expect(block.getByRole("heading", { name: new RegExp(`^${timeline.callerHistory.calls.split(" (")[0]}`) })).toHaveCount(0);
+
+  // O roteiro da simulada abre uma pendência para quem ligou: espera ela existir na primeira.
+  let pending = "";
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/v1/follow-ups?callId=${first}`);
+      const items = ((await response.json()) as { data: { items: { title: string; status: string }[] } }).data.items;
+      pending = items.find((item) => item.status === "open")?.title ?? "";
+      return pending;
+    }, { timeout: 30_000 })
+    .not.toBe("");
 
   const second = await simulate();
   await page.goto(`/calls/${second}`);
   await expect(block.getByRole("heading", { name: timeline.callerHistory.calls.replace("{count}", "1") })).toBeVisible();
-  await expect(block.locator(`a[href="/calls/${first}"]`)).toBeVisible();
+  await expect(block.locator(`a[href="/calls/${first}"]`).filter({ hasNotText: timeline.callerHistory.origin })).toBeVisible();
+  // A pendência aberta da primeira ligação aparece no bloco da segunda, com o link para a de origem.
+  const origin = page.locator(`a[href="/calls/${first}"]`, { hasText: timeline.callerHistory.origin });
+  await expect(block.getByRole("listitem").filter({ hasText: pending }).filter({ has: origin })).toBeVisible();
 
   // Chamada simulada sem número não mostra o bloco.
   const anonymous = await page.request.post("/api/v1/calls/simulate", { data: { agentId } });

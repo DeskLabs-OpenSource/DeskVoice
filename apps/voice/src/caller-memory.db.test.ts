@@ -1,10 +1,27 @@
 import { randomUUID } from "node:crypto";
-import { withSystem } from "@deskvoice/core";
+import { callerHistory, withOrg, withSystem } from "@deskvoice/core";
 import type { VoiceSessionConfig } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
+import { AsteriskCalls } from "./asterisk-transport";
 import { startCallSession } from "./call-session";
-import { createAgent, createCall, createOrganization, eventsOf, kindsOf, manualEngine, manualTransport, sessionHarness, type SessionHarness } from "./testing/db";
+import { startOutboundCall } from "./outbound";
+import {
+  createAgent,
+  createCall,
+  createOrganization,
+  createPhoneNumber,
+  createTrunk,
+  eventsOf,
+  fakeAri,
+  fakeClock,
+  kindsOf,
+  manualEngine,
+  manualTransport,
+  sessionHarness,
+  t0,
+  type SessionHarness,
+} from "./testing/db";
 import { waitFor } from "./testing/helpers";
 
 /**
@@ -78,5 +95,45 @@ describe("memória do número: nada chega ao modelo", { timeout: 120_000 }, () =
     const kinds = (events: string) => (JSON.parse(events) as Array<{ kind: string }>).map((event) => event.kind);
     expect(kinds(second.events)).toEqual(kinds(first.events));
     expect(second.events).not.toMatch(/exame|ignore as instruções|\+5531900000000/);
+  });
+});
+
+describe("memória do número numa chamada feita", { timeout: 120_000 }, () => {
+  it("a ligação que o agente faz pelo fluxo de saída abre o bloco com a recebida anterior do mesmo número e a pendência dela", async () => {
+    const organizationId = await createOrganization(app, "memoria chamada feita");
+    const agentId = await createAgent(app, organizationId);
+    const line = "+553133334444";
+    const trunkId = await createTrunk(app, organizationId, { callerId: line });
+    await createPhoneNumber(app, organizationId, trunkId, line, agentId);
+    await withSystem(app, (q) => q.exec("insert into outbound_policy (organization_id, enabled, window_start, window_end) values ($1, true, '00:00', '23:59')", [organizationId]));
+
+    // Ontem o número ligou para a empresa e ficou uma pendência aberta.
+    const inbound = await createCall(app, organizationId, agentId, new Date(t0.getTime() - 86_400_000));
+    await withSystem(app, async (q) => {
+      await q.exec("update calls set from_e164 = $2, to_e164 = $3, status = 'completed' where id = $1", [inbound, PHONE, line]);
+      await q.exec("insert into follow_ups (organization_id, call_id, caller_e164, title, due_at, created_at) values ($1, $2, $3, 'Confirmar o horário', $4, $4)", [
+        organizationId,
+        inbound,
+        PHONE,
+        t0,
+      ]);
+    });
+
+    // Hoje o agente liga de volta, pelo mesmo caminho que o painel usa.
+    const ari = fakeAri();
+    const clock = fakeClock();
+    const calls = new AsteriskCalls({ ari, db: app, clock, log: () => undefined });
+    const placed = await startOutboundCall({ db: app, ari, clock, calls, log: () => undefined }, { organizationId, agentId, toE164: "(31) 94444-3333" });
+    if (!("callId" in placed)) throw new Error(placed.message);
+
+    // O telefone do bloco é o do outro lado (to_e164), e não a linha da empresa.
+    const history = await withOrg(app, organizationId, (q) => callerHistory(q, placed.callId));
+    expect(history).toMatchObject({
+      phone: PHONE,
+      callCount: 1,
+      calls: [{ id: inbound, direction: "inbound" }],
+      openFollowUpCount: 1,
+      openFollowUps: [{ callId: inbound, title: "Confirmar o horário" }],
+    });
   });
 });

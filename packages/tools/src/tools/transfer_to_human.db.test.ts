@@ -67,4 +67,29 @@ describe("transfer_to_human", () => {
     const started = (await eventsOf(app, ctx.callId)).find((event) => event.kind === "transfer_started");
     expect(started?.payload).toEqual({ to: "+5531999998888", ...args });
   });
+
+  it("nada do bloco chega ao modelo: o resultado inteiro é o mesmo com e sem ligações anteriores ou pendências", async () => {
+    // O modelo recebe o resultado inteiro (`JSON.stringify(result)` no OpenAI, `{ result }` no
+    // Gemini), e não só `message`: a guarda compara o resultado serializado.
+    const TITLE = "Enviar a segunda via do boleto";
+    const scenarios = [
+      { label: "nada", calls: 0, openFollowUps: [] },
+      { label: "ligacoes", calls: 2, openFollowUps: [] },
+      { label: "pendencias", calls: 0, openFollowUps: [TITLE] },
+      { label: "as duas", calls: 12, openFollowUps: [TITLE, "Ligar de volta sobre o exame"] },
+    ];
+    const serialized: string[] = [];
+    for (const [index, scenario] of scenarios.entries()) {
+      const ctx = await createFixture(app, `transfer guarda ${scenario.label}`, { transferTo: "+5531999998888" });
+      await seedCallerHistory(app, ctx, `+553195555${String(index).padStart(4, "0")}`, scenario);
+      const result = await runTool(transferToHuman, args, ctx);
+      // O aviso do painel de fato levou a linha: a guarda não passa por falta do que vazar.
+      if (scenario.calls + scenario.openFollowUps.length > 0) expect((await notificationsOf(app, ctx.organizationId))[0]?.body).toContain("Este número");
+      serialized.push(JSON.stringify(result));
+    }
+    for (const text of serialized) {
+      expect(text).toBe(serialized[0]);
+      expect(text).not.toMatch(/ligou|pendência|Este número|boleto|exame|Resumo/);
+    }
+  });
 });

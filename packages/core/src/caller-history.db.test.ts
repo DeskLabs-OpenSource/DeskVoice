@@ -144,6 +144,19 @@ describe("callerHistory: a memória do número para a equipe", () => {
     expect(history?.openFollowUpCount).toBe(1);
   });
 
+  it("acima de 10: a tela lista as 10 mais novas, e as contagens são as inteiras", async () => {
+    const org = await createOrganization(app, "memoria acima de 10");
+    const ids: string[] = [];
+    for (let minute = 0; minute < 12; minute += 1) ids.push(await callOf(org, { at: t(minute), from: PHONE }));
+    for (let index = 0; index < 12; index += 1) await followUpOf(org, ids[index] ?? "", `Pendência ${index}`);
+    const current = await callOf(org, { at: t(20), from: PHONE, ended: false });
+
+    const history = await historyOf(org, current);
+    expect(history).toMatchObject({ callCount: 12, openFollowUpCount: 12 });
+    expect(history?.calls.map((call) => call.id)).toEqual(ids.slice(2).reverse());
+    expect(history?.openFollowUps).toHaveLength(10);
+  });
+
   it("o resumo trocado pelo prazo de guarda vem como marcado, sem o texto do marcador", async () => {
     const org = await createOrganization(app, "memoria prazo");
     await callOf(org, { at: t(0), from: PHONE, summary: PURGED_SUMMARY_TEXT });
