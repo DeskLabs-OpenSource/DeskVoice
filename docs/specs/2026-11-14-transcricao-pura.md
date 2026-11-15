@@ -240,6 +240,53 @@ Os três têm português em streaming, conferido na documentação de idiomas em
 - **Por isso a fatia 1c vem antes da 6** (e antes da decisão 3): o conjunto ganha as respostas
   esperadas e as leituras erradas, e o Jev e o Laya rodam sobre o mesmo conjunto.
 
+### Rodada 3: o filtro com resposta esperada (fatia 1c)
+
+> Da fatia 1c ([#281](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/281), em `ce63acf`,
+> aprovado pelo Verificador; ainda sem merge). Números copiados do corpo do #281.
+
+15/11/2026, na mesma VPS (4 vCPU, AMD EPYC 9J45). Só o texto do conjunto do filtro: 86 itens
+inventados, com resposta esperada (leitura 38, sendo 10 "nenhuma troca"; "fundo" 12 de quem liga e
+12 de fundo; "terminou" 12 completos e 12 pausas no meio). Jev e Laya sobre **os mesmos pedidos**.
+Acerto com 0,5 de fronteira do "sim"; o corte de 0,8 é o que a fatia 6 vai usar. **Gasto do Jev
+nesta fatia: cerca de US$ 0,014; acumulado cerca de US$ 0,026 de US$ 1.** A chave aparece 0 vezes
+na saída e no stderr.
+
+Acerto, uma chamada (passada de 3 perguntas / pergunta sozinha), e p95 da passada:
+
+| Modelo | Leitura | "Fundo" | "Terminou" | Fala de quem liga marcada como fundo, ≥ 0,8 | Troca errada na leitura, ≥ 0,8 | p95 passada, 1 / 3 chamadas (ms) |
+|---|---:|---:|---:|---:|---:|---:|
+| Laya (CPU, VPS) | 20/38 (53 %) / 53 % | 12/24 (50 %) / 50 % | 13/24 (54 %) / 54 % | **7 de 12** | 2 de 38 | 496 / 1345 |
+| Jev (API, EUA) | 29/38 (76 %) / 30/38 (79 %) | 17/24 (71 %) / 71 % | 24/24 (100 %) / 100 % | **0 de 12** | 0 de 38 | 218 / 215 |
+
+Com três chamadas simultâneas, o acerto não muda de forma relevante (Laya 53/50/54 %; Jev 74 %,
+68 a 71 %, 100 %) e as contagens acima do corte escalam igual (Laya 21 de 36 falas de quem liga
+como fundo; Jev 0 de 36). O Laya ocupa 2,07 núcleos com uma chamada e 2,85 com três, e 2,3 GB de
+memória. As tabelas completas, com p50 e com a pergunta sozinha, estão no corpo do #281.
+
+O Verificador rodou o Laya de novo e o resultado bateu (fundo 12/24, 7 de 12 acima de 0,8). Com o
+pedido em inglês deu o mesmo: o problema é do modelo, e não da integração.
+
+### O que a rodada 3 decide (leitura do Arquiteto, 15/11)
+
+- **O Laya não serve como filtro.** O acerto está no acaso nas três perguntas, e ele comete o
+  fracasso que o desenho mais teme: marca 7 de 12 falas de quem liga como fundo com confiança
+  acima do corte. Mesmo com a regra "nunca apaga", isso mandaria ao cérebro um sinal falso de
+  "fundo" na maioria das falas reais. A **recomendação para a decisão 3 é B: o Laya não entra no
+  produto**, e fica só na bancada. É uma recomendação: a decisão 3 é do Rafael, e vai no lote do
+  Líder.
+- **O Jev serve para "terminou"** (100 %, p95 abaixo de 250 ms) e erra na direção segura nas
+  outras duas: nenhuma fala de quem liga marcada como fundo acima do corte, e nenhuma troca errada
+  na leitura acima do corte. Os erros dele são "fundo" lido como pessoa, ou leitura que deixa de
+  trocar. Com o corte de 0,8, ele é conservador, que é o que a regra "nunca apaga" pede.
+- **A fatia 6 pode partir só com o Jev** como modelo real (e o simulado nos testes). A fatia 7
+  oferece "nenhum" e "Jev"; o Laya só aparece se a decisão 3 vier diferente.
+- **A fatia 6 herda dois pontos da verificação do #281:** o corte é "≥ 0,8" e a borda (`>` contra
+  `>=`) precisa de teste; e a leitura de 76 a 79 % ainda não diz se os erros do Jev são termos que
+  ele deixou de trocar ou "nenhuma troca" que ele trocou abaixo do corte (o número por tipo de
+  item entra na medida da fatia 6).
+- **Nada disso escolhe o transcritor.** A fatia 3 continua parada até a rodada dos externos.
+
 ## Parte 2: a peça de transcrição em streaming
 
 ### Contrato
@@ -776,7 +823,7 @@ O que isso muda nas fatias está na "Fatia 1b" e na "Fatia 6".
 
 - **Só o Whisper em CPU foi medido** (rodada 1, seção "Medida"). O `gpt-4o-mini-transcribe` e o
   Gemini Live de hoje não rodaram, porque falta a chave da DESA-10. Os externos foram autorizados
-  em 15/11 (decisão 1), mas as chaves ainda não existem, e o Jev (decisão 2) ainda não rodou. A tabela de candidatos dos outros serviços é de preço e de recurso, conferidos nas
+  em 15/11 (decisão 1), mas as chaves ainda não existem, e o Jev (decisão 2) rodou só sobre texto (rodadas 2 e 3). A tabela de candidatos dos outros serviços é de preço e de recurso, conferidos nas
   páginas em 14/11/2026, e não de acerto.
 - Rodada 1: a carga da VPS não foi registrada, a variância entre rodadas não foi calculada, a
   "voz" são 4 vozes sintéticas do Piper (não é sotaque regional), e a fala atípica ficou sem
@@ -787,7 +834,9 @@ O que isso muda nas fatias está na "Fatia 1b" e na "Fatia 6".
 - O Jev e o Laya: precisão, latência e o formato exato da API vêm do fornecedor ou de fontes
   secundárias. O cartão do Laya no Hugging Face não foi lido. O "0,59 contra 0,97" vem de dois blogs
   cujo método não foi conferido.
-- Se as três perguntas sobre texto acertam o bastante para servir. A régua de "a tempo" e o corte
+- Se as três perguntas sobre texto acertam o bastante para servir sobre transcrição real e sobre o
+  texto parcial: a rodada 3 é de texto inventado, sem variância entre rodadas, e o Jev não foi
+  rodado de novo pelo Verificador (custo). A régua de "a tempo" e o corte
   de 0,8 são estimativa.
 - A régua de 700 ms de ouvido é estimativa, e não medida.
 - O ganho da linha larga sobre a estreita.
