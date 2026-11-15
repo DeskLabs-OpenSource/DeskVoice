@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -160,9 +161,14 @@ describe("gravação em disco", () => {
     expect(await readdir(path.dirname(file))).toEqual(["call.wav.part"]);
     expect((await readFile(`${file}.part`)).length).toBeGreaterThan(44); // já há áudio no disco
 
-    expect(await recording.finish()).toBe(true);
+    const desfecho = await recording.finish();
+    expect(desfecho).toMatchObject({ bytes: expect.any(Number), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(await readdir(path.dirname(file))).toEqual(["call.wav"]);
     const wav = await readFile(file);
+    // O hash tem de ser o do arquivo no disco, não um valor qualquer: é a prova de integridade.
+    if (desfecho === false) throw new Error("a gravação devia ter fechado");
+    expect(createHash("sha256").update(wav).digest("hex")).toBe(desfecho.sha256);
+    expect(desfecho.bytes).toBe(wav.length);
     expect(wav.readUInt32LE(4)).toBe(wav.length - 8);
     expect(wav.readUInt32LE(40)).toBe(wav.length - 44);
     expect(wav.readUInt32LE(40)).toBe(150 * 320 * 2); // 3 s, dois canais
@@ -276,7 +282,8 @@ describe("gravação em disco", () => {
     await speak(recording, clock, (MAX_QUEUED_AUDIO_SECONDS + 1) * 1000);
     release();
     await speak(recording, clock, 30_000);
-    expect(await recording.finish()).toBe(true);
+    // Disco simulado: o arquivo real fica vazio, mas o desfecho continua trazendo a impressão digital.
+    expect(await recording.finish()).toMatchObject({ bytes: expect.any(Number), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(failures).toEqual([]);
     const audio = written.filter((block) => block.at >= 44).reduce((sum, block) => sum + block.data.length, 0);
     expect(audio).toBe(30 * 8000 * 4);

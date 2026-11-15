@@ -213,7 +213,13 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       log("error", "could not release the telephony side", { error: messageOf(error) });
     }
     // Fecha o arquivo em qualquer caminho de fim: com áudio vira `.wav`; sem, ou com falha, o `.part` some.
-    await recorder?.finish().catch(logFailure("could not save the call recording"));
+    const savedRecording = await recorder?.finish().catch((error: unknown) => {
+      logFailure("could not save the call recording")(error);
+      return undefined;
+    });
+    // A impressão digital vai para a linha do tempo junto do fim da chamada: é o que permite provar
+    // depois que o arquivo apresentado é o que a chamada gravou, e não uma cópia qualquer.
+    if (savedRecording) await event("recording_saved", { bytes: savedRecording.bytes, sha256: savedRecording.sha256 });
     await recordingFailed;
     resolveDone({ status: end.status, endReason: end.endReason, costCents });
   }
