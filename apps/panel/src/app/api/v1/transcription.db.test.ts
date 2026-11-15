@@ -1,9 +1,24 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import type * as FsPromises from "node:fs/promises";
 import path from "node:path";
 import { encryptSecret, recordingPath, withOrg } from "@deskvoice/core";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOW, call, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
 import { POST } from "./calls/[id]/transcription/route";
+
+/**
+ * O que o processo leu do disco. A rota mede a gravação com `stat` e recusa antes do `readFile`;
+ * sem esta lista não haveria como provar que o arquivo grande não foi carregado na memória.
+ */
+const reads = vi.hoisted(() => [] as string[]);
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  const readFile = ((file: Parameters<typeof actual.readFile>[0], options?: Parameters<typeof actual.readFile>[1]) => {
+    reads.push(String(file));
+    return actual.readFile(file as never, options as never);
+  }) as typeof actual.readFile;
+  return { ...actual, readFile };
+});
 
 const panel = startPanel();
 afterAll(() => panel.close());
@@ -242,6 +257,20 @@ describe("transcrição da gravação", () => {
     expect(panel.voice.requests).toHaveLength(0);
   });
 
+  it("gravação acima do limite é recusada pelo tamanho, sem o corpo ser lido", async () => {
+    const { org, cookie } = await owner("transcribe too long without reading");
+    // 16 minutos a 8 kHz, como o gravador escreve, mas sem WAV válido dentro: se a rota lesse o
+    // arquivo antes de medir, a recusa seria `transcription_unreadable` (422), e não a do tamanho.
+    const callId = await seed(org, { engine: "gemini-live", audio: Buffer.alloc(4 * 8_000 * 16 * 60, 7) });
+    reads.length = 0;
+
+    const result = await post(cookie, callId);
+
+    expect([result.status, result.code]).toEqual([409, "transcription_too_long"]);
+    expect(reads).not.toContain(recordingPath(panel.deps.recordingsDir, org, callId));
+    expect(panel.voice.requests).toHaveLength(0);
+  });
+
   it("sem chave do motor, recusa dizendo o que falta", async () => {
     const { org, cookie } = await owner("transcribe no key");
     const callId = await seed(org, { withKey: false });
@@ -257,12 +286,33 @@ describe("transcrição da gravação", () => {
     expect([result.status, result.code]).toEqual([404, "transcription_no_recording"]);
   });
 
-  it("provedor que recusa vira 502, sem texto na linha do tempo", async () => {
+  it("provedor que recusa vira 502, com o motivo na linha do tempo e sem texto", async () => {
     const { org, cookie } = await owner("transcribe provider down");
     const callId = await seed(org, { audio: stereoWav({ agent: false }) });
     panel.voice.respond = async () => Response.json({ error: { message: "boom" } }, { status: 500 });
     const result = await post(cookie, callId);
     expect([result.status, result.code]).toEqual([502, "transcription_failed"]);
     expect(await transcripts(org, callId)).toEqual([]);
+
+    const events = await withOrg(panel.app, org, (q) =>
+      q.many<{ kind: string; at: Date; payload: Record<string, unknown> }>("select kind, at, payload from call_events where call_id = $1 order by id", [callId]),
+    );
+    expect(events.map((event) => [event.kind, event.payload.reason, event.payload.status, event.payload.engine, event.payload.model])).toEqual([
+      ["transcription_failed", "unreachable", 500, "openai-realtime", "gpt-4o-mini-transcribe"],
+    ]);
+    // O horário é o do pedido, quando a falha aconteceu, e não o do fim da chamada.
+    expect(events[0]?.at.getTime()).toBe(NOW.getTime());
+  });
+
+  it("falha do provedor não grava evento em chamada apagada a pedido do titular", async () => {
+    const { org, cookie } = await owner("transcribe provider down erased");
+    const callId = await seed(org, { audio: stereoWav({ agent: false }) });
+    panel.voice.respond = async () => {
+      await withOrg(panel.app, org, (q) => q.exec("update calls set erased_at = $2 where id = $1", [callId, NOW]));
+      return Response.json({ error: { message: "boom" } }, { status: 500 });
+    };
+    const result = await post(cookie, callId);
+    expect([result.status, result.code]).toEqual([502, "transcription_failed"]);
+    expect(await withOrg(panel.app, org, (q) => q.many("select 1 from call_events where call_id = $1 and kind = 'transcription_failed'", [callId]))).toEqual([]);
   });
 });

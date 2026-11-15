@@ -102,6 +102,10 @@ export interface Trunk {
   username: string | null;
   authMode: "register" | "ip";
   callerId: string | null;
+  /** Endereços extras de onde as ligações chegam, além do `host` (modo por IP). */
+  matchExtra: string[];
+  /** Destino das ligações de saída, quando difere do `host`; `null` vale o `host`. */
+  outboundHost: string | null;
   status: string;
   lastCheckAt: string | null;
   lastError: string | null;

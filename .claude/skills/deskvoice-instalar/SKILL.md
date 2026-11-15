@@ -78,6 +78,12 @@ curl -fsSL https://raw.githubusercontent.com/DeskLabs-OpenSource/DeskVoice/main/
 
 Sem tronco ou sem chave dá para instalar e ver tudo funcionando com a chamada simulada.
 
+- **A VPS já roda o DeskcommCRM?** Então as portas 80 e 443 são do Caddy dele, em contêiner, e o
+  DeskVoice entra por um `.caddy` do ponto de extensão (`caddy-sites/`) mais um alias de rede —
+  `127.0.0.1:3080` não serve, porque dentro do contêiner do CRM esse endereço é ele mesmo. Não
+  invente o nome da rede: meça com `docker network ls | grep _caddy-sites$`. Passo a passo e
+  exemplo copiável em [`docs/guides/na-mesma-vps-do-crm.md`](../../../docs/guides/na-mesma-vps-do-crm.md).
+
 ## 2. Conferir a rede antes de instalar
 
 | Porta | Protocolo | Para quê |

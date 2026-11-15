@@ -88,20 +88,33 @@ export async function createAgent(app: Db, organizationId: string, options: Agen
 export async function createTrunk(
   app: Db,
   organizationId: string,
-  options: { host?: string; username?: string | null; password?: string | null; authMode?: "register" | "ip"; callerId?: string | null } = {},
+  options: {
+    host?: string;
+    username?: string | null;
+    password?: string | null;
+    authMode?: "register" | "ip";
+    callerId?: string | null;
+    matchExtra?: string[];
+    outboundHost?: string | null;
+  } = {},
 ): Promise<string> {
   const id = randomUUID();
   const password = options.password === undefined ? "s3nha-do-tronco" : options.password;
   await withSystem(app, (q) =>
-    q.exec("insert into trunks (id, organization_id, name, host, username, secret_enc, auth_mode, caller_id_e164) values ($1, $2, 'Operadora', $3, $4, $5, $6, $7)", [
-      id,
-      organizationId,
-      options.host ?? "sip.operadora.example",
-      options.username === undefined ? "conta100" : options.username,
-      password === null ? null : encryptSecret(password, secretKey),
-      options.authMode ?? "register",
-      options.callerId ?? null,
-    ]),
+    q.exec(
+      "insert into trunks (id, organization_id, name, host, username, secret_enc, auth_mode, caller_id_e164, match_extra, outbound_host) values ($1, $2, 'Operadora', $3, $4, $5, $6, $7, $8, $9)",
+      [
+        id,
+        organizationId,
+        options.host ?? "sip.operadora.example",
+        options.username === undefined ? "conta100" : options.username,
+        password === null ? null : encryptSecret(password, secretKey),
+        options.authMode ?? "register",
+        options.callerId ?? null,
+        options.matchExtra ?? [],
+        options.outboundHost ?? null,
+      ],
+    ),
   );
   return id;
 }
