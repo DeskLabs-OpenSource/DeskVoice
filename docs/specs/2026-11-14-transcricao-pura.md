@@ -547,6 +547,13 @@ Decidido na implementação (#245, revisto pelo Arquiteto em 15/11):
 - a peça recebe só os primeiros `maxVocabulary` termos do vocabulário;
 - o sinal de fala é o texto novo, venha de trecho parcial ou final.
 
+Como entra (15/11, depois do parecer da revisora no #245): pela regra 4 do `GOVERNANCE.md`, o #245
+fica aberto até a fatia 4, que é a primeira a ligar a peça numa instalação, e entra junto com ela.
+O fragmento do #245 fica, porque só vale quando a fatia 4 entrar. As fatias 3 e 4 partem do ramo do
+#245 (`feat/transcricao-contrato-simulado`), e não da `main`. Se a `main` andar, o ramo recebe a
+`main` por merge, sem reescrita. Na hora do merge, os três PRs entram em sequência: o #245, a fatia
+3 e a fatia 4.
+
 ### Fatia 3: a peça do vencedor
 
 Um arquivo em `transcribers/`, com fonte e data no cabeçalho (como os motores), vocabulário, zod
@@ -573,6 +580,9 @@ faltando).
 Aceite:
 - a pessoa escolhe o transcritor, salva, recarrega e vê a escolha; chave recusada mostra o motivo
   pelo vocabulário fechado;
+- o #245 (fatia 2) e a fatia 3 entram junto com esta fatia, nessa ordem, e não antes (regra 4);
+- `docs/doctrine/um-arquivo-por-peca.md` cita a pasta `transcribers/`, que a cerca já cobre desde o
+  #245. É documento de autoridade: a linha só entra com o sim do Rafael, que vai pelo lote do Líder;
 - o carimbo da migration é a hora real da criação (regra acima): não é posterior ao commit que a
   traz, e é posterior à última migration da `main` no momento do PR.
 
