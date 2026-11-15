@@ -320,6 +320,8 @@ export function Timeline({
         // Na linha, o começo da impressão digital; a inteira fica à mão para copiar e conferir uma cópia.
         const sha256 = text(p.sha256);
         const size = (Number(p.bytes) / 1e6).toLocaleString(locale, { maximumFractionDigits: 1 });
+        // A leitura para calcular a impressão falhou: a gravação está salva, só a impressão falta (issue 278).
+        if (sha256 === "") return { ...base, tone: "neutral", icon: RecordIcon, body: <p className="max-w-[52ch] pt-1 text-muted">{fill(e.recording_saved_no_hash, { size })}</p> };
         return {
           ...base,
           tone: "neutral",

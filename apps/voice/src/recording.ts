@@ -6,11 +6,28 @@ import path from "node:path";
 /**
  * O que a gravação deixou no disco quando fechou: o tamanho final e a impressão digital do arquivo.
  *
- * Existe para o operador poder provar depois que o áudio que ele apresenta é o que a chamada gravou.
- * Sem isso, qualquer cópia do `.wav` tem o mesmo peso de qualquer outra, e contestação sobre o que
- * foi dito numa ligação vira palavra contra palavra.
+ * A impressão serve para conferir se uma cópia do `.wav` (mandada por e-mail, guardada fora do
+ * servidor) é igual ao arquivo que esta instalação gravou. Não prova nada contra quem administra o
+ * servidor: ela fica no mesmo banco, na mesma máquina que o áudio. `null` quando a leitura para
+ * calculá-la falhou: a gravação está salva do mesmo jeito, e a linha do tempo diz que a impressão
+ * não pôde ser calculada.
  */
-export type RecordingOutcome = { bytes: number; sha256: string };
+export type RecordingOutcome = { bytes: number; sha256: string | null };
+
+/**
+ * A impressão digital lida do arquivo já fechado, por stream: uma hora de conversa passa de 100 MB,
+ * e o fim da chamada não é lugar para carregar isso na memória.
+ */
+async function sha256Of(file: string): Promise<string> {
+  const digest = createHash("sha256");
+  await new Promise<void>((resolve, reject) => {
+    createReadStream(file)
+      .on("data", (bloco) => digest.update(bloco))
+      .on("error", reject)
+      .on("end", resolve);
+  });
+  return digest.digest("hex");
+}
 
 /**
  * Abaixo deste espaço livre na pasta das gravações, a chamada não é gravada. As gravações dividem
@@ -283,16 +300,9 @@ export async function startRecording(
         return false;
       }
       await rename(partial, file);
-      // A impressão digital é lida do arquivo já fechado, por stream: uma hora de conversa passa de
-      // 100 MB e o fim da chamada não é lugar para carregar isso na memória.
-      const digest = createHash("sha256");
-      await new Promise<void>((resolve, reject) => {
-        createReadStream(file)
-          .on("data", (bloco) => digest.update(bloco))
-          .on("error", reject)
-          .on("end", resolve);
-      });
-      return { bytes: (await stat(file)).size, sha256: digest.digest("hex") };
+      // Daqui em diante a gravação está salva. A impressão é um extra sobre ela: se a leitura falhar,
+      // ela vira `null`, e a gravação não passa a contar como perdida (issue 278).
+      return { bytes: (await stat(file)).size, sha256: await sha256Of(file).catch(() => null) };
     },
   };
 }

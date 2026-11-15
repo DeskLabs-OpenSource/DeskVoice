@@ -3,7 +3,22 @@ import { mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type * as Fs from "node:fs";
 import { MAX_QUEUED_AUDIO_SECONDS, createRecorder, removePartialRecordings, startRecording, type RecordingFailureReason } from "./recording";
+
+/** A leitura que calcula a impressão digital, sabotável: o resto do arquivo usa o `node:fs` real. */
+const leitura = vi.hoisted(() => ({ falha: false }));
+vi.mock("node:fs", async (importOriginal) => {
+  const real = await importOriginal<typeof Fs>();
+  return {
+    ...real,
+    createReadStream: ((...args: Parameters<typeof real.createReadStream>) => {
+      const stream = real.createReadStream(...args);
+      if (leitura.falha) queueMicrotask(() => stream.destroy(Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" })));
+      return stream;
+    }) as typeof real.createReadStream,
+  };
+});
 
 const frame = (value: number, ms = 20): Buffer => Buffer.alloc((ms * 16_000) / 1000, 0).fill(Buffer.from(Int16Array.of(value).buffer));
 const channel = (wav: Buffer, side: 0 | 1): number[] => {
@@ -172,6 +187,22 @@ describe("gravação em disco", () => {
     expect(wav.readUInt32LE(4)).toBe(wav.length - 8);
     expect(wav.readUInt32LE(40)).toBe(wav.length - 44);
     expect(wav.readUInt32LE(40)).toBe(150 * 320 * 2); // 3 s, dois canais
+  });
+
+  it("a leitura da impressão digital falha: a gravação conta como salva, com sha256 null, e o .wav fica (issue 278)", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recording-"));
+    const file = path.join(dir, "org", "call.wav");
+    let t = 0;
+    const recording = await startRecording(file, () => t);
+    for (; t < 3000; t += 20) recording.caller(frame(7));
+    leitura.falha = true;
+    try {
+      const desfecho = await recording.finish();
+      expect(desfecho).toEqual({ bytes: (await readFile(file)).length, sha256: null });
+    } finally {
+      leitura.falha = false;
+    }
+    expect(await readdir(path.dirname(file))).toEqual(["call.wav"]);
   });
 
   it("sem áudio nenhum, o .part some e não fica .wav", async () => {

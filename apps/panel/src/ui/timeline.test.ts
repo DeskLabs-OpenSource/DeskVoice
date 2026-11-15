@@ -19,4 +19,17 @@ describe("linha do tempo", () => {
     expect(html).toContain(sha256);
     expect(html).not.toContain(ptBR.events.unknown);
   });
+
+  it("a gravação fechada sem impressão digital diz que ela não pôde ser calculada, e que o áudio está salvo (issue 278)", () => {
+    const html = renderToStaticMarkup(
+      createElement(Timeline, {
+        events: [{ id: "1", kind: "recording_saved", at: "2026-11-15T12:00:00.000Z", payload: { bytes: 1_920_044, sha256: null } }],
+        live: false,
+        agentName: "Ana",
+      }),
+    );
+    expect(html).toContain("Gravação fechada: 1,9 MB. A impressão digital não pôde ser calculada; o áudio está salvo do mesmo jeito.");
+    expect(html).not.toContain("SHA-256");
+    expect(html).not.toContain(ptBR.events.unknown);
+  });
 });
