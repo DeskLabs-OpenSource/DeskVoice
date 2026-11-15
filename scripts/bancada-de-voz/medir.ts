@@ -144,8 +144,8 @@ const pecas: PecasDaRodada = {
   medirItem: (servico, linha, comVocabulario, vocabulario, item) => medirItem(servico, linha, comVocabulario, vocabulario, item, relogioDoSistema),
   pastaTemporaria,
   escrever: (caminho, conteudo) => writeFile(caminho, conteudo),
-  medirLaya,
-  medirJev: (frases, vocabulario, orcamento) => medirJev(frases, vocabulario, orcamento),
+  medirLaya: (itens, vocabulario) => medirLaya(itens, vocabulario),
+  medirJev: (itens, vocabulario, orcamento) => medirJev(itens, vocabulario, orcamento),
   saida: (linha) => void process.stdout.write(`${linha}\n`),
   progresso: (texto) => void process.stderr.write(texto),
 };

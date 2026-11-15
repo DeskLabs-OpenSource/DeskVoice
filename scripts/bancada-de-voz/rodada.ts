@@ -10,6 +10,7 @@
 import { cpus } from "node:os";
 import { join } from "node:path";
 import { carregarConjunto, vocabularioDoConjunto, type Frase } from "./conjunto";
+import { CORTE, carregarFiltro, coberturaDasOpcoes, type ItemDoFiltro } from "./filtro";
 import { LINHAS, type Linha } from "./linhas";
 import { tabelaEmMarkdown, tabelar, type ResultadoBruto } from "./metricas";
 import { REGRA_DE_NORMALIZACAO } from "./normalizacao";
@@ -35,8 +36,8 @@ export interface PecasDaRodada {
   medirItem(servico: ServicoMedido, linha: Linha, comVocabulario: boolean, vocabulario: readonly string[], item: Item): Promise<ResultadoBruto>;
   pastaTemporaria(): Promise<string>;
   escrever(caminho: string, conteudo: string): Promise<void>;
-  medirLaya(frases: readonly Frase[], vocabulario: readonly string[]): Promise<string>;
-  medirJev(frases: readonly Frase[], vocabulario: readonly string[], orcamento: Orcamento): Promise<string>;
+  medirLaya(itens: readonly ItemDoFiltro[], vocabulario: readonly string[]): Promise<string>;
+  medirJev(itens: readonly ItemDoFiltro[], vocabulario: readonly string[], orcamento: Orcamento): Promise<string>;
   /** A saída da rodada (a tela). Recebe cada linha já sem chave. */
   saida(linha: string): void;
   /** O progresso (stderr). Também já sem chave. */
@@ -122,7 +123,7 @@ export async function rodada(argv: readonly string[], pecas: PecasDaRodada): Pro
             // Reserva o pior caso antes de abrir a sessão; o custo real a substitui no fim.
             const reserva = orcamento.reservar(estimativaDoItem(servico, item), servico.id);
             if (!reserva) {
-              naoMedido.push(`${servico.id}, linha ${linha}, vocabulário ${comVocabulario ? "com" : "sem"}: parou no teto (US$ ${orcamento.gasto.toFixed(4)} gastos) antes do caso ${n + 1} de ${itens.length}`);
+              naoMedido.push(`${servico.id}, linha ${linha}, vocabulário ${comVocabulario ? "com" : "sem"}: ${orcamento.motivoDaParada()} antes do caso ${n + 1} de ${itens.length}`);
               parou = true;
               break;
             }
@@ -166,13 +167,24 @@ export async function rodada(argv: readonly string[], pecas: PecasDaRodada): Pro
   }
 
   const decisores = lista(argv, "decisor", []);
-  if (decisores.includes("laya")) {
-    print("\n## Laya (só CPU e latência, perguntas fixas)\n");
-    print(await pecas.medirLaya(frases, vocabulario));
-  }
-  if (decisores.includes("jev")) {
-    print("\n## Jev (acerto da leitura e latência, as mesmas perguntas do Laya)\n");
-    print(await pecas.medirJev(frases, vocabulario, orcamento));
+  if (decisores.length > 0) {
+    // O Jev e o Laya decidem sobre o mesmo conjunto, com os mesmos pedidos (filtro.ts).
+    const filtro = carregarFiltro(vocabulario).itens;
+    const cobertura = coberturaDasOpcoes(filtro, vocabulario);
+    const conta = (tipo: ItemDoFiltro["tipo"]): number => filtro.filter((i) => i.tipo === tipo).length;
+    print(`\n## Filtro (R12, fatia 1c)\n`);
+    print(
+      `Conjunto do filtro: ${filtro.length} itens (leitura ${conta("leitura")}, dos quais ${filtro.filter((i) => i.tipo === "leitura" && i.esperado === "nenhum").length} "nenhum"; fundo ${conta("fundo")}; terminou ${conta("terminou")}). ` +
+        `Termo esperado entre as opções da leitura: ${cobertura.cobertos} de ${cobertura.total}${cobertura.fora.length > 0 ? ` (fora: ${cobertura.fora.join(", ")})` : ""}. Corte de confiança: ${CORTE}. Acerto com 0,5 como fronteira de "sim".`,
+    );
+    if (decisores.includes("laya")) {
+      print("\n### Laya (CPU, na VPS)\n");
+      print(await pecas.medirLaya(filtro, vocabulario));
+    }
+    if (decisores.includes("jev")) {
+      print("\n### Jev (API, EUA)\n");
+      print(await pecas.medirJev(filtro, vocabulario, orcamento));
+    }
   }
 
   print(`\nGasto: US$ ${orcamento.gasto.toFixed(4)} de US$ ${orcamento.tetoUsd}.`);

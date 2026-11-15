@@ -1,12 +1,12 @@
 /**
- * Jev (TypeSafe AI) na bancada: acerto da leitura e latência, com as **mesmas três perguntas** do
- * Laya (`laya_local.py`: fundo, fim do pensamento, leitura certa), o mesmo estado ("Agente: Em que
- * posso ajudar?" e a frase do manifesto, como se a transcrição tivesse acertado) e a mesma saída:
- * uma tabela em Markdown, por número de chamadas simultâneas (1 e 3), com a passada das três
- * perguntas num pedido e cada pergunta sozinha. As três primeiras passadas aquecem e não contam.
+ * Jev (TypeSafe AI) na bancada: acerto e latência das três perguntas do filtro (leitura com a
+ * transcrição errada, fundo, fim do pensamento), sobre o conjunto do filtro (`filtro.ts`), com os
+ * **mesmos pedidos** que o Laya recebe. Por item, dois pedidos: as três perguntas numa passada, e
+ * a pergunta do item sozinha. Com 1 e com 3 chamadas simultâneas. Os três primeiros pedidos
+ * aquecem e não contam.
  *
- * O Jev é uma API fechada, nos EUA. Por isso: **só texto sintético da bancada** (as frases
- * inventadas do conjunto), nunca de ligação, e o teto da rodada (`--teto-usd`) vale para ele.
+ * O Jev é uma API fechada, nos EUA. Por isso: **só texto sintético da bancada** (os itens
+ * inventados do conjunto), nunca de ligação, e o teto da rodada (`--teto-usd`) vale para ele.
  *
  * Fontes, conferidas em 15/11/2026:
  * - API: docs.typesafe.ai/api. `POST https://api.typesafe.ai/v1/systemone`, `Authorization: Bearer`,
@@ -16,16 +16,14 @@
  * - modelo e preço: docs.typesafe.ai/models. `jev-latest` aponta para `jev-1.14.0`. US$ 0,042 por
  *   milhão de tokens de entrada, saída grátis. A página não diz quais idiomas o modelo lê.
  *
- * Acerto: o conjunto só tem a resposta esperada da **leitura** (os termos marcados na frase). A
- * resposta certa é um dos termos da frase que estão entre as opções, ou "nenhum" se a frase não
- * tem termo. Para "fundo" e "terminou" o conjunto não tem resposta esperada: a tabela dá a média
- * do valor devolvido, e não um acerto.
+ * Teto: cada pedido reserva o pior caso (um token por byte do corpo) antes de sair. Se o custo
+ * real de um pedido passar do reservado, o orçamento não reserva mais nada, e a medida para e diz
+ * quanto passou (`Orcamento.excesso`).
  *
  * Chave: `JEV_API_KEY` (cofre do Paperclip, `jev_api_key`). O valor nunca sai em erro ou tabela.
  */
-import type { Frase } from "../conjunto";
 import { z } from "../dependencias";
-import { percentil } from "../metricas";
+import { RespostaDaPergunta, pedidosDoFiltro, tabelaDoFiltro, type ItemDoFiltro, type PedidoDoFiltro, type Registro } from "../filtro";
 import { camposComProblema } from "../servicos/_externo";
 import type { Orcamento } from "../orcamento";
 import { relogioDoSistema, type Relogio } from "../tempo-real";
@@ -35,75 +33,20 @@ export const URL_DO_JEV = "https://api.typesafe.ai/v1/systemone";
 export const MODELO_PEDIDO = "jev-latest";
 export const USD_POR_MILHAO_DE_ENTRADA = 0.042;
 export const FONTE_DO_PRECO = "docs.typesafe.ai/models (US$ 0,042 por milhão de tokens de entrada, saída grátis), conferido em 2026-11-15";
-const AGENTE = "Agente: Em que posso ajudar?";
 const PRAZO_MS = 15_000;
 const AQUECIMENTO = 3;
 const CONCORRENCIAS = [1, 3] as const;
 
-type Pergunta = { type: "noul"; instructions: string } | { type: "choice"; instructions: string; criteria: Record<string, string> };
-
 const Resposta = z.object({
   model: z.string(),
-  answers: z.record(
-    z.string(),
-    z.union([
-      z.object({ type: z.literal("noul"), noul: z.number().min(0).max(1) }),
-      z.object({ type: z.literal("choice"), choice: z.string(), confidence: z.number().nullable().optional(), probabilities: z.record(z.string(), z.number()).optional() }),
-    ]),
-  ),
+  answers: z.record(z.string(), RespostaDaPergunta),
   usage: z.object({ input_tokens: z.number().int().nonnegative(), output_tokens: z.number().int().nonnegative() }),
 });
 export type RespostaDoJev = z.infer<typeof Resposta>;
 
-/** Quantos caracteres as duas palavras têm em comum, pelos blocos de Ratcliff/Obershelp (os do `difflib`). */
-function emComum(a: string, b: string): number {
-  if (!a || !b) return 0;
-  let tamanho = 0;
-  let ia = 0;
-  let ib = 0;
-  let anterior = new Array<number>(b.length + 1).fill(0);
-  for (let i = 1; i <= a.length; i++) {
-    const atual = new Array<number>(b.length + 1).fill(0);
-    for (let j = 1; j <= b.length; j++) {
-      if (a[i - 1] !== b[j - 1]) continue;
-      atual[j] = (anterior[j - 1] ?? 0) + 1;
-      if ((atual[j] ?? 0) > tamanho) {
-        tamanho = atual[j] ?? 0;
-        ia = i - tamanho;
-        ib = j - tamanho;
-      }
-    }
-    anterior = atual;
-  }
-  if (tamanho === 0) return 0;
-  return tamanho + emComum(a.slice(0, ia), b.slice(0, ib)) + emComum(a.slice(ia + tamanho), b.slice(ib + tamanho));
-}
-
-/** A `ratio()` do `SequenceMatcher` do Python, para as opções da leitura saírem iguais às do Laya. */
-export function semelhanca(a: string, b: string): number {
-  const total = a.length + b.length;
-  return total === 0 ? 1 : (2 * emComum(a, b)) / total;
-}
-
-/** As três perguntas de `laya_local.py`, com as mesmas opções na leitura (até 4 termos parecidos, mais "nenhum"). */
-export function perguntas(frase: string, vocabulario: readonly string[]): Record<string, Pergunta> {
-  const palavras = frase.split(/\s+/).filter(Boolean);
-  const nota = new Map(vocabulario.map((t) => [t, Math.max(0, ...palavras.map((p) => semelhanca(t.toLowerCase(), p.toLowerCase())))]));
-  const parecidos = [...vocabulario].sort((x, y) => (nota.get(y) ?? 0) - (nota.get(x) ?? 0)).slice(0, 4);
-  const opcoes: Record<string, string> = {};
-  for (const t of parecidos) opcoes[t] = `a pessoa disse ${t}`;
-  opcoes.nenhum = "nenhum destes termos foi dito";
-  return {
-    fundo: { type: "noul", instructions: "A fala é de quem está na ligação, conversando com o agente (e não fala de fundo)?" },
-    terminou: { type: "noul", instructions: "A pessoa terminou o pensamento, ou só fez uma pausa no meio?" },
-    leitura: { type: "choice", instructions: "Qual destes termos a pessoa disse?", criteria: opcoes },
-  };
-}
-
-/** As respostas certas da leitura: os termos da frase entre as opções, ou "nenhum". */
-export function leiturasCertas(frase: Frase, opcoes: Record<string, string>): Set<string> {
-  const certas = frase.termos.filter((t) => t in opcoes);
-  return new Set(frase.termos.length === 0 || certas.length === 0 ? ["nenhum"] : certas);
+/** O corpo do pedido ao Jev, para o teto estimar o pior caso. */
+export function corpoDoPedido(pedido: Pick<PedidoDoFiltro, "estado" | "perguntas">): string {
+  return JSON.stringify({ model: MODELO_PEDIDO, state: pedido.estado, questions: pedido.perguntas });
 }
 
 export interface OpcoesDoJev {
@@ -114,8 +57,6 @@ export interface OpcoesDoJev {
   concorrencias?: readonly number[];
 }
 
-type Pedido = { ok: true; resposta: RespostaDoJev; ms: number } | { ok: false; motivo: string; ms: number };
-
 class Teto extends Error {}
 
 /**
@@ -123,13 +64,18 @@ class Teto extends Error {}
  * no orçamento antes do pedido, e só é trocada pelo valor real depois da resposta: com pedidos
  * simultâneos, o que está em voo conta, e o teto não estoura.
  */
-async function pedir(url: string, chave: string, estado: string, questions: Record<string, Pergunta>, orcamento: Orcamento, relogio: Relogio): Promise<Pedido> {
-  const corpo = JSON.stringify({ model: MODELO_PEDIDO, state: estado, questions });
-  // Pior caso: um token por byte do corpo. Sobra muito, e nunca falta.
+async function pedir(url: string, chave: string, pedido: PedidoDoFiltro, orcamento: Orcamento, relogio: Relogio, modelos: Set<string>): Promise<Registro> {
+  const corpo = corpoDoPedido(pedido);
+  // Pior caso: um token por byte do corpo. Sobra muito, e nunca falta (se faltar, o orçamento trava).
   const estimativa = (Buffer.byteLength(corpo) / 1e6) * USD_POR_MILHAO_DE_ENTRADA;
   const reserva = orcamento.reservar(estimativa, "jev");
   if (!reserva) throw new Teto();
   const inicio = relogio.agora();
+  const falha = (motivo: string, ms = relogio.agora() - inicio): Registro => {
+    // Sem resposta lida, a bancada conta a estimativa como gasto.
+    reserva.fechar(estimativa);
+    return { pedido, ms, ok: false, motivo };
+  };
   let resposta: Response;
   try {
     resposta = await fetch(url, {
@@ -139,67 +85,45 @@ async function pedir(url: string, chave: string, estado: string, questions: Reco
       signal: AbortSignal.timeout(PRAZO_MS),
     });
   } catch (erro) {
-    reserva.fechar(estimativa);
-    return { ok: false, motivo: (erro as Error).name === "TimeoutError" ? `sem resposta em ${PRAZO_MS} ms` : "falha de rede", ms: relogio.agora() - inicio };
+    return falha((erro as Error).name === "TimeoutError" ? `sem resposta em ${PRAZO_MS} ms` : "falha de rede");
   }
   let texto: string;
   try {
     texto = await resposta.text();
   } catch {
-    reserva.fechar(estimativa);
-    return { ok: false, motivo: "falha de rede", ms: relogio.agora() - inicio };
+    return falha("falha de rede");
   }
   const ms = relogio.agora() - inicio;
-  if (!resposta.ok) {
-    // Pedido recusado não deveria cobrar; a bancada conta a estimativa mesmo assim.
-    reserva.fechar(estimativa);
-    return { ok: false, motivo: `HTTP ${resposta.status}`, ms };
-  }
+  if (!resposta.ok) return falha(`HTTP ${resposta.status}`, ms);
   let json: unknown;
   try {
     json = JSON.parse(texto);
   } catch {
-    reserva.fechar(estimativa);
-    return { ok: false, motivo: "resposta que não é JSON", ms };
+    return falha("resposta que não é JSON", ms);
   }
   const lido = Resposta.safeParse(json);
-  if (!lido.success) {
-    reserva.fechar(estimativa);
-    return { ok: false, motivo: `resposta fora do esquema (${camposComProblema(lido.error.issues)})`, ms };
-  }
+  if (!lido.success) return falha(`resposta fora do esquema (${camposComProblema(lido.error.issues)})`, ms);
   reserva.fechar((lido.data.usage.input_tokens / 1e6) * USD_POR_MILHAO_DE_ENTRADA);
-  const faltando = Object.keys(questions).filter((nome) => lido.data.answers[nome]?.type !== questions[nome]?.type);
-  if (faltando.length > 0) return { ok: false, motivo: `sem resposta do tipo pedido para ${faltando.join(", ")}`, ms };
-  return { ok: true, resposta: lido.data, ms };
+  modelos.add(lido.data.model);
+  const faltando = Object.entries(pedido.perguntas).filter(([nome, q]) => lido.data.answers[nome]?.type !== q?.type).map(([nome]) => nome);
+  if (faltando.length > 0) return { pedido, ms, ok: false, motivo: `sem resposta do tipo pedido para ${faltando.join(", ")}` };
+  return { pedido, ms, ok: true, respostas: lido.data.answers };
 }
-
-interface PorConcorrencia {
-  passadas: number[];
-  umaPergunta: number[];
-  leituras: number;
-  leiturasCertas: number;
-  fundo: number[];
-  terminou: number[];
-  falhas: Map<string, number>;
-}
-
-const ms = (v: number | null): string => (v === null ? "—" : String(Math.round(v)));
-const media = (v: readonly number[]): string => (v.length === 0 ? "—" : (v.reduce((a, b) => a + b, 0) / v.length).toFixed(2));
 
 /**
  * Roda a medida e devolve a tabela em Markdown. Sem a chave, diz que não mediu. Para antes de
- * passar do teto, e diz onde parou.
+ * passar do teto (ou quando um pedido custou mais que o reservado), e diz onde parou.
  */
-export async function medirJev(frases: readonly Frase[], vocabulario: readonly string[], orcamento: Orcamento, opcoes: OpcoesDoJev = {}): Promise<string> {
+export async function medirJev(itens: readonly ItemDoFiltro[], vocabulario: readonly string[], orcamento: Orcamento, opcoes: OpcoesDoJev = {}): Promise<string> {
   const chave = opcoes.chave ?? process.env[VARIAVEL_DA_CHAVE];
   if (!chave) return `Jev: não medido (${VARIAVEL_DA_CHAVE} não definido).`;
   const url = opcoes.url ?? URL_DO_JEV;
   const relogio = opcoes.relogio ?? relogioDoSistema;
   const semChave = (texto: string): string => texto.split(chave).join("***");
-  const estado = (frase: Frase): string => `${AGENTE}\nPessoa: ${frase.texto}`;
+  const pedidos = pedidosDoFiltro(itens, vocabulario);
   const modelos = new Set<string>();
   const teto = { bateu: false };
-  const resultado = new Map<number, PorConcorrencia>();
+  const resultado = new Map<number, Registro[]>();
 
   // Quando um pedido bate no teto, nenhum outro começa, e a tabela só sai depois que os que
   // estavam em voo voltam: o gasto que ela mostra é o final.
@@ -212,35 +136,16 @@ export async function medirJev(frases: readonly Frase[], vocabulario: readonly s
     }
   };
   await ateOTeto(async () => {
-    for (const frase of frases.slice(0, AQUECIMENTO)) await pedir(url, chave, estado(frase), perguntas(frase.texto, vocabulario), orcamento, relogio);
+    for (const pedido of pedidos.slice(0, AQUECIMENTO)) await pedir(url, chave, pedido, orcamento, relogio, modelos);
   });
   for (const concorrencia of opcoes.concorrencias ?? CONCORRENCIAS) {
     if (teto.bateu) break;
-    const r: PorConcorrencia = { passadas: [], umaPergunta: [], leituras: 0, leiturasCertas: 0, fundo: [], terminou: [], falhas: new Map() };
-    resultado.set(concorrencia, r);
-    const falhou = (motivo: string): void => void r.falhas.set(motivo, (r.falhas.get(motivo) ?? 0) + 1);
+    const registros: Registro[] = [];
+    resultado.set(concorrencia, registros);
     const trabalhar = async (): Promise<void> => {
-      for (const frase of frases) {
+      for (const pedido of pedidos) {
         if (teto.bateu) return;
-        const q = perguntas(frase.texto, vocabulario);
-        const passada = await pedir(url, chave, estado(frase), q, orcamento, relogio);
-        if (passada.ok) {
-          r.passadas.push(passada.ms);
-          modelos.add(passada.resposta.model);
-          const { fundo, terminou, leitura } = passada.resposta.answers;
-          if (fundo?.type === "noul") r.fundo.push(fundo.noul);
-          if (terminou?.type === "noul") r.terminou.push(terminou.noul);
-          if (leitura?.type === "choice" && q.leitura?.type === "choice") {
-            r.leituras++;
-            if (leiturasCertas(frase, q.leitura.criteria).has(leitura.choice)) r.leiturasCertas++;
-          }
-        } else falhou(passada.motivo);
-        for (const [nome, pergunta] of Object.entries(q)) {
-          if (teto.bateu) return;
-          const uma = await pedir(url, chave, estado(frase), { [nome]: pergunta }, orcamento, relogio);
-          if (uma.ok) r.umaPergunta.push(uma.ms);
-          else falhou(uma.motivo);
-        }
+        registros.push(await pedir(url, chave, pedido, orcamento, relogio, modelos));
       }
     };
     // Espera todos os trabalhadores, mesmo quando um bate no teto ou falha, antes de seguir.
@@ -251,16 +156,10 @@ export async function medirJev(frases: readonly Frase[], vocabulario: readonly s
 
   const linhas = [
     `Modelo pedido: ${MODELO_PEDIDO}; modelo que respondeu: ${[...modelos].join(", ") || "—"}. Preço: ${FONTE_DO_PRECO}.`,
-    `Gasto do Jev: US$ ${(orcamento.porServico().find(([s]) => s === "jev")?.[1] ?? 0).toFixed(6)}. ${AQUECIMENTO} passadas de aquecimento, fora da tabela.`,
+    `Gasto do Jev: US$ ${(orcamento.porServico().find(([s]) => s === "jev")?.[1] ?? 0).toFixed(6)}. ${AQUECIMENTO} pedidos de aquecimento, fora da tabela.`,
     "",
-    "| Chamadas simultâneas | Passadas medidas | Passada de 3 perguntas p50/p95 (ms) | Uma pergunta p50/p95 (ms) | Acerto da leitura | Média de \"fundo\" (sem resposta esperada) | Média de \"terminou\" (sem resposta esperada) | Falhas |",
-    "|---:|---:|---:|---:|---:|---:|---:|---|",
-    ...[...resultado].map(([n, r]) => {
-      const falhas = [...r.falhas].map(([motivo, vezes]) => `${vezes}× ${semChave(motivo)}`).join("; ") || "0";
-      const acerto = r.leituras === 0 ? "—" : `${r.leiturasCertas}/${r.leituras} (${Math.round((100 * r.leiturasCertas) / r.leituras)}%)`;
-      return `| ${n} | ${r.passadas.length} | ${ms(percentil(r.passadas, 50))} / ${ms(percentil(r.passadas, 95))} | ${ms(percentil(r.umaPergunta, 50))} / ${ms(percentil(r.umaPergunta, 95))} | ${acerto} | ${media(r.fundo)} | ${media(r.terminou)} | ${falhas} |`;
-    }),
+    tabelaDoFiltro(resultado, semChave),
   ];
-  if (teto.bateu) linhas.push("", `Jev: parou no teto (US$ ${orcamento.gasto.toFixed(4)} gastos na rodada) antes de terminar.`);
+  if (teto.bateu) linhas.push("", `Jev: ${orcamento.motivoDaParada()} antes de terminar.`);
   return linhas.join("\n");
 }
