@@ -9,6 +9,11 @@ import type { Relogio } from "../tempo-real";
 export interface Preco {
   /** US$ por minuto de áudio enviado. Zero para o que roda na VPS (o custo é CPU). */
   usdPorMinuto: number;
+  /**
+   * Pior caso por minuto de áudio, só para o teto, quando o serviço cobra mais que o áudio (a
+   * sessão inteira, por exemplo). Ausente: o teto usa `usdPorMinuto`.
+   */
+  tetoUsdPorMinuto?: number;
   fonte: string;
   conferidoEm: string;
 }
