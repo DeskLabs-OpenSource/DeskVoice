@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
-import { createFixture, eventsOf, notificationsOf, tasksOf, t0 } from "../../test/helpers";
+import { createFixture, eventsOf, notificationsOf, putWhatsAppConnector, seedCallerHistory, tasksOf, t0 } from "../../test/helpers";
 import { runTool } from "../run-tool";
 import transferToHuman from "./transfer_to_human";
 
@@ -50,5 +50,53 @@ describe("transfer_to_human", () => {
     expect(ctx.transfers).toEqual([]);
     expect(await notificationsOf(app, ctx.organizationId)).toEqual([]);
     expect((await eventsOf(app, ctx.callId)).map((event) => event.kind)).toEqual(["tool_called", "tool_result"]);
+  });
+
+  it("quem recebe a transferência lê no aviso que o número já ligou e o que ficou aberto; o modelo e o evento não", async () => {
+    const ctx = await createFixture(app, "transfer memoria", { transferTo: "+5531999998888" });
+    await putWhatsAppConnector(app, ctx.organizationId);
+    await seedCallerHistory(app, ctx, "+5531955554444", { calls: 2, openFollowUps: ["Enviar a segunda via do boleto"] });
+
+    const result = await runTool(transferToHuman, args, ctx);
+    const notifications = await notificationsOf(app, ctx.organizationId);
+    // O aviso da transferência continua só no painel, mesmo com WhatsApp configurado.
+    expect(notifications.map((notification) => notification.channel)).toEqual(["panel"]);
+    expect(notifications[0]?.body).toMatch(/\n\nEste número já ligou 2 vezes; 1 pendência aberta: Enviar a segunda via do boleto\.$/);
+
+    expect(result.message).not.toMatch(/ligou|boleto/);
+    const started = (await eventsOf(app, ctx.callId)).find((event) => event.kind === "transfer_started");
+    expect(started?.payload).toEqual({ to: "+5531999998888", ...args });
+  });
+
+  it("a simulada com o número de um cliente não entra no \"já ligou\" do aviso de transferência", async () => {
+    const ctx = await createFixture(app, "transfer memoria simulada", { transferTo: "+5531999998887" });
+    await seedCallerHistory(app, ctx, "+5531955554443", { calls: 1, openFollowUps: [], simulatedCalls: 3 });
+    await runTool(transferToHuman, args, ctx);
+    expect((await notificationsOf(app, ctx.organizationId))[0]?.body).toMatch(/\n\nEste número já ligou 1 vez\.$/);
+  });
+
+  it("nada do bloco chega ao modelo: o resultado inteiro é o mesmo com e sem ligações anteriores ou pendências", async () => {
+    // O modelo recebe o resultado inteiro (`JSON.stringify(result)` no OpenAI, `{ result }` no
+    // Gemini), e não só `message`: a guarda compara o resultado serializado.
+    const TITLE = "Enviar a segunda via do boleto";
+    const scenarios = [
+      { label: "nada", calls: 0, openFollowUps: [] },
+      { label: "ligacoes", calls: 2, openFollowUps: [] },
+      { label: "pendencias", calls: 0, openFollowUps: [TITLE] },
+      { label: "as duas", calls: 12, openFollowUps: [TITLE, "Ligar de volta sobre o exame"] },
+    ];
+    const serialized: string[] = [];
+    for (const [index, scenario] of scenarios.entries()) {
+      const ctx = await createFixture(app, `transfer guarda ${scenario.label}`, { transferTo: "+5531999998888" });
+      await seedCallerHistory(app, ctx, `+553195555${String(index).padStart(4, "0")}`, scenario);
+      const result = await runTool(transferToHuman, args, ctx);
+      // O aviso do painel de fato levou a linha: a guarda não passa por falta do que vazar.
+      if (scenario.calls + scenario.openFollowUps.length > 0) expect((await notificationsOf(app, ctx.organizationId))[0]?.body).toContain("Este número");
+      serialized.push(JSON.stringify(result));
+    }
+    for (const text of serialized) {
+      expect(text).toBe(serialized[0]);
+      expect(text).not.toMatch(/ligou|pendência|Este número|boleto|exame|Resumo/);
+    }
   });
 });

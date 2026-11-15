@@ -76,6 +76,27 @@ export interface CallDetail extends Call {
   erased: boolean;
 }
 
+/** O bloco "Este número" da tela da chamada (`GET /calls/:id/caller-history`). `phone: null`: a chamada não tem número, e o bloco não aparece. */
+export interface CallerHistory {
+  phone: string | null;
+  callCount: number;
+  simulatedCallCount: number;
+  calls: Array<{
+    id: string;
+    startedAt: string;
+    agentName: string | null;
+    direction: "inbound" | "outbound";
+    status: CallStatus;
+    outcome: string | null;
+    summary: string | null;
+    summaryPurged: boolean;
+    erased: boolean;
+    simulated: boolean;
+  }>;
+  openFollowUpCount: number;
+  openFollowUps: Array<{ id: string; callId: string | null; title: string; dueAt: string; ownerName: string | null }>;
+}
+
 export interface CallEvent {
   id: string;
   at: string;

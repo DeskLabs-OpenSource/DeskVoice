@@ -20,7 +20,7 @@ export interface InternalApiHandlers {
   health(): Promise<VoiceHealth>;
   applyTrunks(input: { organizationId: string }): Promise<object>;
   outbound(input: { organizationId: string; agentId: string; toE164: string }): Promise<{ callId: string } | Refusal>;
-  simulate(input: { organizationId: string; agentId: string }): Promise<{ callId: string } | Refusal>;
+  simulate(input: { organizationId: string; agentId: string; fromE164?: string | null }): Promise<{ callId: string } | Refusal>;
   /** Chamada pelo navegador: cria a chamada e o token de uso único que abre o WebSocket dela. */
   web(input: { organizationId: string; agentId: string; userId: string }): Promise<{ callId: string; token: string; expiresInSeconds: number } | Refusal>;
   /** Para a gravação de uma chamada em curso, a pedido de quem está no painel. */
@@ -41,7 +41,7 @@ export interface InternalApiOptions {
 const MAX_BODY_BYTES = 64 * 1024;
 const organization = z.strictObject({ organizationId: z.uuid() });
 const outbound = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), toE164: z.string().min(1).max(40) });
-const simulate = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid() });
+const simulate = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), fromE164: z.string().regex(/^\+[1-9]\d{7,14}$/).nullable().optional() });
 const web = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), userId: z.uuid() });
 const stopRecording = z.strictObject({ organizationId: z.uuid(), callId: z.uuid(), userId: z.uuid(), reason: z.string().max(300).nullable() });
 
