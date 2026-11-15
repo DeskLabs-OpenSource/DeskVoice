@@ -173,6 +173,34 @@ describe("o serviço sem chave", () => {
   });
 });
 
+describe("o filtro", () => {
+  it("o Jev e o Laya recebem o mesmo conjunto do filtro, inteiro, e a saída diz o que ele tem", async () => {
+    const m = montar([]);
+    const recebidos: { quem: string; ids: string[]; vocabulario: readonly string[] }[] = [];
+    m.pecas.medirLaya = async (itens, vocabulario) => (recebidos.push({ quem: "laya", ids: itens.map((i) => i.id), vocabulario }), "Laya: falso");
+    m.pecas.medirJev = async (itens, vocabulario) => (recebidos.push({ quem: "jev", ids: itens.map((i) => i.id), vocabulario }), "Jev: falso");
+    await rodada(["--teto-usd", "1", "--decisor", "laya,jev", "--limite", "2"], m.pecas);
+    expect(recebidos.map((r) => r.quem)).toEqual(["laya", "jev"]);
+    // O --limite é das frases da transcrição: o filtro vai inteiro.
+    expect(recebidos[0]?.ids.length).toBeGreaterThan(50);
+    expect(recebidos[1]?.ids).toEqual(recebidos[0]?.ids);
+    expect(recebidos[1]?.vocabulario).toEqual(recebidos[0]?.vocabulario);
+    const tudo = m.saida.join("\n");
+    expect(tudo).toMatch(/Conjunto do filtro: \d+ itens \(leitura \d+, dos quais \d+ "nenhum"; fundo \d+; terminou \d+\)/);
+    expect(tudo).toMatch(/Termo esperado entre as opções da leitura: (\d+) de \1\./);
+  });
+
+  it("o serviço que custou mais que o reservado para a rodada, e o 'Não medido' diz quanto passou", async () => {
+    // Pior caso de 0,01 por minuto; o primeiro item custa 1. O teto (10) está longe.
+    const a = falso("a", { usdPorMinuto: 0.01 });
+    const m = montar([a], { itens: 4, custo: () => 1 });
+    const orcamento = await rodada(["--teto-usd", "10", ...UMA_LINHA], m.pecas);
+    expect(m.medidos).toEqual(["a"]);
+    expect(orcamento.excesso).toBeGreaterThan(0.9);
+    expect(m.saida.join("\n")).toContain(`a, linha estreita, vocabulário com: parou porque o custo real passou do pior caso reservado em US$ ${orcamento.excesso.toFixed(8)}`);
+  });
+});
+
 describe("a saída da rodada não contém chave", () => {
   it("com as quatro chaves no ambiente, nada do que a rodada escreve as contém", async () => {
     Object.assign(process.env, CHAVES);

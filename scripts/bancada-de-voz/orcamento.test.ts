@@ -31,6 +31,29 @@ describe("Orcamento", () => {
     expect(o.cabe(0.5)).toBe(true);
   });
 
+  it("o custo real que passa do pior caso reservado trava as reservas novas, e o orçamento diz quanto passou", () => {
+    const o = new Orcamento(10);
+    const emVoo = o.reservar(1, "a");
+    const outra = o.reservar(1, "a");
+    emVoo?.fechar(1.5);
+    expect(o.excesso).toBeCloseTo(0.5, 12);
+    expect(o.gasto).toBeCloseTo(1.5, 12);
+    // Ainda cabe no teto, mas o pior caso deixou de ser pior caso: nada novo começa.
+    expect(o.cabe(1)).toBe(true);
+    expect(o.reservar(1, "a")).toBeNull();
+    // A que já estava em voo fecha normalmente, e o excesso só soma o que passou.
+    outra?.fechar(0.2);
+    expect(o.excesso).toBeCloseTo(0.5, 12);
+    expect(o.gasto).toBeCloseTo(1.7, 12);
+  });
+
+  it("o custo real igual ao reservado não é excesso", () => {
+    const o = new Orcamento(1);
+    o.reservar(0.5)?.fechar(0.5);
+    expect(o.excesso).toBe(0);
+    expect(o.reservar(0.5)).not.toBeNull();
+  });
+
   it("teto inválido não começa", () => {
     expect(() => new Orcamento(Number.NaN)).toThrow(RangeError);
     expect(() => new Orcamento(-1)).toThrow(RangeError);

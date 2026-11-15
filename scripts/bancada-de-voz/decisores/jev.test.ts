@@ -1,21 +1,19 @@
 /**
- * O Jev contra um servidor HTTP falso, em porta 0, sem chave de verdade: o pedido, as perguntas
- * (as mesmas do Laya), a leitura da resposta por zod, o acerto da leitura, o teto e a chave que
- * não sai.
+ * O Jev contra um servidor HTTP falso, em porta 0, sem chave de verdade: o pedido (os mesmos do
+ * Laya, de `filtro.ts`), a leitura da resposta por zod, o acerto por pergunta, o teto (também
+ * quando o custo real passa do reservado) e a chave que não sai.
  */
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { carregarConjunto, vocabularioDoConjunto, type Frase } from "../conjunto";
+import { carregarConjunto, vocabularioDoConjunto } from "../conjunto";
+import { carregarFiltro, pedidosDoFiltro, type ItemDoFiltro } from "../filtro";
 import { Orcamento } from "../orcamento";
 import type { Relogio } from "../tempo-real";
-import { leiturasCertas, medirJev, perguntas, semelhanca } from "./jev";
+import { SOBRA_DE_TOKENS, corpoDoPedido, estimativaDoPedido, medirJev } from "./jev";
 
 const CHAVE = "jev-chave-falsa-fedcba9876543210";
-
-/** As opções da leitura que o `laya_local.py` monta para cada frase do conjunto (gerado com o `difflib` do Python 3). */
-const OPCOES_DO_LAYA: Record<string, string[]> = {"nome-01": ["Rafael", "Melgaço", "Joaquim", "Iracema"], "nome-02": ["Iracema", "Tupinambá", "Rafael", "Heitor"], "nome-03": ["Joaquim", "Assunção", "Lúcia", "Rafael"], "nome-04": ["Heitor", "Bragança", "Joaquim", "Vivacor"], "nome-05": ["Conceição", "Araújo", "Assunção", "Iracema"], "nome-06": ["Thiago", "Gonçalves", "Magalhães", "Botafogo"], "empresa-01": ["DeskVoice", "Rafael", "Joaquim", "Mossoró"], "empresa-02": ["Magazine Ipiranga", "Magalhães", "Melgaço", "Assunção"], "empresa-03": ["Tapajós", "Heitor", "Rafael", "Mossoró"], "empresa-04": ["Vivacor", "Thiago", "Melgaço", "Assunção"], "empresa-05": ["São Benedito", "Heitor", "Assunção", "Vivacor"], "numero-01": ["Tupinambá", "Araújo", "Thiago", "Iracema"], "numero-02": ["Heitor", "Itaquaquecetuba", "São Benedito", "Botafogo"], "numero-03": ["Mossoró", "Assunção", "Tapajós", "Joaquim"], "numero-04": ["Heitor", "Vivacor", "São Benedito", "Botafogo"], "numero-05": ["Botafogo", "Heitor", "Conceição", "Gonçalves"], "lugar-01": ["Itaquaquecetuba", "Heitor", "Mossoró", "Melgaço"], "lugar-02": ["Mossoró", "Rafael", "Iracema", "Heitor"], "lugar-03": ["Paranapiacaba", "Melgaço", "Heitor", "Lúcia"], "lugar-04": ["Botafogo", "Voluntários da Pátria", "Thiago", "Rafael"], "lugar-05": ["Chapecó", "Joinville", "Araújo", "Botafogo"], "geral-01": ["Araújo", "Iracema", "Paranapiacaba", "Joaquim"], "geral-02": ["Melgaço", "Assunção", "DeskVoice", "Bragança"], "geral-03": ["Melgaço", "Assunção", "Lúcia", "Conceição"]};
 
 interface Recebido {
   autorizacao: string;
@@ -50,145 +48,169 @@ function json(res: ServerResponse, status: number, corpo: unknown): void {
 }
 
 /**
- * Responde certo: a leitura escolhe o primeiro termo da frase que está entre as opções. Com
- * `errar`, as frases marcadas recebem uma opção que não é a certa.
+ * Responde certo cada pergunta do item, pela resposta esperada. Com `errar`, os itens marcados
+ * recebem a resposta errada na pergunta deles. As outras perguntas da passada recebem 0,9.
  */
-function jevCerto(frases: readonly Frase[], tokens: number | ((r: Recebido) => number) = 100, errar: (f: Frase) => boolean = () => false) {
+function jevCerto(itens: readonly ItemDoFiltro[], tokens: number | ((r: Recebido) => number) = 100, errar: (i: ItemDoFiltro) => boolean = () => false) {
   return (r: Recebido, res: ServerResponse): void => {
-    const frase = frases.find((f) => r.corpo.state.endsWith(f.texto));
+    const item = itens.find((i) => r.corpo.state.endsWith(i.trecho));
     const answers: Record<string, unknown> = {};
     for (const [nome, q] of Object.entries(r.corpo.questions)) {
-      if (q.type === "noul") answers[nome] = { type: "noul", noul: 0.9 };
-      else {
+      const doItem = item?.tipo === nome;
+      const erra = doItem && item !== undefined && errar(item);
+      if (q.type === "noul") {
+        const sim = doItem ? item?.esperado === "pessoa" || item?.esperado === "terminou" : true;
+        answers[nome] = { type: "noul", noul: (erra ? !sim : sim) ? 0.9 : 0.1 };
+      } else {
         const opcoes = Object.keys(q.criteria ?? {});
-        const certa = frase?.termos.find((t) => opcoes.includes(t)) ?? "nenhum";
-        const errada = opcoes.find((o) => o !== "nenhum" && !frase?.termos.includes(o)) ?? "nenhum";
-        answers[nome] = { type: "choice", choice: frase && errar(frase) ? errada : certa, confidence: 0.8, probabilities: {} };
+        const certa = doItem ? (item?.esperado ?? "nenhum") : "nenhum";
+        const errada = opcoes.find((o) => o !== certa) ?? "nenhum";
+        answers[nome] = { type: "choice", choice: erra ? errada : certa, confidence: 0.9, probabilities: {} };
       }
     }
     json(res, 200, { model: "jev-1.14.0", answers, usage: { input_tokens: typeof tokens === "number" ? tokens : tokens(r), output_tokens: 3 } });
   };
 }
 
-/** O custo de pior caso de um pedido, como a bancada estima: um token por byte do corpo. */
-const piorCaso = (r: Recebido): number => Buffer.byteLength(JSON.stringify(r.corpo));
+/** O pior caso de um pedido, em tokens, como a bancada estima: um token por byte do corpo, mais a sobra fixa. */
+const piorCaso = (r: Recebido): number => Buffer.byteLength(JSON.stringify(r.corpo)) + SOBRA_DE_TOKENS;
+/** O pior caso de cada pedido do filtro, em US$. */
+const estimativas = (lista: readonly ItemDoFiltro[]): number[] => pedidosDoFiltro(lista, vocabulario).map((p) => estimativaDoPedido(corpoDoPedido(p)));
 
 function relogioFalso(): Relogio {
   let agora = 0;
   return { agora: () => (agora += 50), esperarAte: async () => {} };
 }
 
-const conjunto = carregarConjunto();
-const vocabulario = vocabularioDoConjunto(conjunto);
-
-describe("as perguntas do Jev são as do Laya", () => {
-  it("semelhança igual à ratio() do difflib", () => {
-    const pares: [string, string, number][] = [["melgaço", "melgaço,", 0.933333], ["rafael", "aqui", 0.2], ["tupinambá", "tupinambá?", 0.947368], ["deskvoice", "desk", 0.615385], ["abcd", "bcda", 0.75], ["assunção", "assim", 0.461538]];
-    for (const [a, b, esperado] of pares) expect(semelhanca(a, b)).toBeCloseTo(esperado, 5);
-    expect(semelhanca("", "")).toBe(1);
-  });
-
-  it("as opções da leitura de cada frase do conjunto saem iguais às do laya_local.py", () => {
-    for (const frase of conjunto.frases) {
-      const leitura = perguntas(frase.texto, vocabulario).leitura;
-      expect(leitura?.type).toBe("choice");
-      if (leitura?.type !== "choice") continue;
-      expect(Object.keys(leitura.criteria), frase.id).toEqual([...(OPCOES_DO_LAYA[frase.id] ?? []), "nenhum"]);
-    }
-  });
-
-  it("a leitura certa é um termo da frase entre as opções, ou 'nenhum'", () => {
-    const comTermo = conjunto.frases.find((f) => f.id === "nome-01") as Frase;
-    expect([...leiturasCertas(comTermo, { Rafael: "", Melgaço: "", Joaquim: "", nenhum: "" })]).toEqual(["Rafael", "Melgaço"]);
-    expect([...leiturasCertas({ ...comTermo, termos: [] }, { Rafael: "", nenhum: "" })]).toEqual(["nenhum"]);
-  });
-});
+const vocabulario = vocabularioDoConjunto(carregarConjunto());
+const filtro = carregarFiltro(vocabulario).itens;
+/** Dois itens de cada pergunta, com as duas respostas esperadas de cada uma. */
+const itens = ["leitura-02", "leitura-29", "fundo-01", "fundo-13", "terminou-01", "terminou-13"].map((id) => filtro.find((i) => i.id === id) as ItemDoFiltro);
+const linha = (tabela: string, pergunta: string): string => tabela.split("\n").find((l) => l.startsWith(`| 1 | ${pergunta} |`)) ?? "";
 
 describe("medirJev", () => {
-  const frases = conjunto.frases.slice(0, 6);
-
-  it("manda o modelo, o estado sintético e as três perguntas, com a chave no cabeçalho; conta o acerto e o gasto", async () => {
-    const s = await servidorFalso(jevCerto(frases));
+  it("manda o modelo, o estado sintético e os pedidos do filtro, com a chave no cabeçalho; conta o acerto por pergunta e o gasto", async () => {
+    const s = await servidorFalso(jevCerto(itens));
     const orcamento = new Orcamento(1);
-    const tabela = await medirJev(frases, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
+    const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
 
-    // 3 de aquecimento + 6 frases × (1 passada + 3 perguntas sozinhas).
-    expect(s.recebidos).toHaveLength(3 + 6 * 4);
+    // 3 de aquecimento + 6 itens × (1 passada + 1 pergunta sozinha).
+    expect(s.recebidos).toHaveLength(3 + 6 * 2);
     expect(s.recebidos.every((r) => r.autorizacao === `Bearer ${CHAVE}`)).toBe(true);
+    const pedidos = pedidosDoFiltro(itens, vocabulario);
+    expect(s.recebidos.slice(3).map((r) => JSON.stringify(r.corpo))).toEqual(pedidos.map((p) => corpoDoPedido(p)));
     const primeira = s.recebidos[3] as Recebido;
     expect(primeira.corpo.model).toBe("jev-latest");
-    expect(primeira.corpo.state).toBe(`Agente: Em que posso ajudar?\nPessoa: ${frases[0]?.texto}`);
+    expect(primeira.corpo.state).toBe(`Agente: ${itens[0]?.agente}\nPessoa: ${itens[0]?.trecho}`);
     expect(Object.keys(primeira.corpo.questions)).toEqual(["fundo", "terminou", "leitura"]);
-    expect(primeira.corpo.questions).toEqual(perguntas(frases[0]?.texto ?? "", vocabulario));
+    expect(Object.keys((s.recebidos[4] as Recebido).corpo.questions)).toEqual(["leitura"]);
     // A chave só vai no cabeçalho, nunca no corpo.
     expect(JSON.stringify(s.recebidos.map((r) => r.corpo))).not.toContain(CHAVE);
 
     expect(tabela).toContain("modelo que respondeu: jev-1.14.0");
-    expect(tabela).toMatch(/\| 1 \| 6 \| 50 \/ 50 \| 50 \/ 50 \| 6\/6 \(100%\) \| 0\.90 \| 0\.90 \| 0 \|/);
-    // 27 pedidos de 100 tokens a US$ 0,042 por milhão.
-    expect(orcamento.porServico()).toEqual([["jev", expect.closeTo((27 * 100 * 0.042) / 1e6, 12)]]);
+    for (const p of ["leitura", "fundo", "terminou"]) expect(linha(tabela, p)).toMatch(new RegExp(`^\\| 1 \\| ${p} \\| 2 \\| 2/2 \\(100%\\) \\| 2/2 \\(100%\\) \\| 50 / 50 \\| 50 / 50 \\| 0 \\|$`));
+    expect(tabela).toContain("fala de quem liga marcada como fundo com confiança ≥ 0.8: 0 de 1 (passada), 0 de 1 (sozinha).");
+    // 15 pedidos de 100 tokens a US$ 0,042 por milhão.
+    expect(orcamento.porServico()).toEqual([["jev", expect.closeTo((15 * 100 * 0.042) / 1e6, 12)]]);
     expect(tabela).not.toContain(CHAVE);
   });
 
-  it("conta a leitura errada como errada", async () => {
-    // As frases de índice par recebem uma opção que não é a certa: 3 de 6.
-    const erradas = new Set(frases.filter((_, i) => i % 2 === 0).map((f) => f.id));
-    const s = await servidorFalso(jevCerto(frases, 100, (f) => erradas.has(f.id)));
-    const tabela = await medirJev(frases, vocabulario, new Orcamento(1), { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
-    expect(tabela).toMatch(/\| 1 \| 6 \| 50 \/ 50 \| 50 \/ 50 \| 3\/6 \(50%\) \|/);
+  it("conta a resposta errada como errada, em cada pergunta", async () => {
+    // Erra o primeiro item de cada pergunta: 1 de 2 em cada uma.
+    const erradas = new Set(["leitura-02", "fundo-01", "terminou-01"]);
+    const s = await servidorFalso(jevCerto(itens, 100, (i) => erradas.has(i.id)));
+    const tabela = await medirJev(itens, vocabulario, new Orcamento(1), { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
+    for (const p of ["leitura", "fundo", "terminou"]) expect(linha(tabela, p)).toContain("| 1/2 (50%) | 1/2 (50%) |");
+    // fundo-01 é de quem liga, e o falso disse "fundo" com 0,9: é o fracasso que a tabela conta à parte.
+    expect(tabela).toContain("fala de quem liga marcada como fundo com confiança ≥ 0.8: 1 de 1 (passada), 1 de 1 (sozinha).");
+    // leitura-02 recebeu outro termo com 0,9: trocaria errado.
+    expect(tabela).toContain("leitura que trocaria por um termo errado com confiança ≥ 0.8: 1 de 2 (passada), 1 de 2 (sozinha).");
   });
 
   it("resposta recusada, fora do esquema, ou sem a pergunta pedida conta como falha, com o motivo", async () => {
     let n = 0;
     const s = await servidorFalso((r, res) => {
       n++;
-      // Com uma frase só, o aquecimento é um pedido.
-      if (n === 1) return jevCerto(frases)(r, res);
+      if (n <= 3) return jevCerto(itens)(r, res);
       if (n % 3 === 0) return json(res, 422, { detail: [{ loc: ["body"], msg: `chave ${CHAVE}` }] });
       if (n % 3 === 1) return json(res, 200, { model: "jev", answers: { fundo: { type: "noul", noul: 2 } }, usage: { input_tokens: 1, output_tokens: 0 } });
       return json(res, 200, { model: "jev", answers: {}, usage: { input_tokens: 1, output_tokens: 0 } });
     });
-    const tabela = await medirJev(frases.slice(0, 1), vocabulario, new Orcamento(1), { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
+    const tabela = await medirJev(itens.slice(0, 2), vocabulario, new Orcamento(1), { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
     expect(tabela).toContain("HTTP 422");
     expect(tabela).toContain("resposta fora do esquema (answers.fundo.noul)");
     expect(tabela).toMatch(/sem resposta do tipo pedido para (fundo|terminou|leitura)/);
+    expect(linha(tabela, "leitura")).toContain("| — | — |");
     expect(tabela).not.toContain(CHAVE);
   });
 
   it("para antes de passar do teto e diz quanto gastou", async () => {
     // O pior caso que o serviço pode cobrar: um token por byte do corpo, que é a estimativa da bancada.
-    const s = await servidorFalso(jevCerto(frases, (r) => Buffer.byteLength(JSON.stringify(r.corpo))));
-    const teto = 1e-4;
+    const s = await servidorFalso(jevCerto(itens, piorCaso));
+    // Cabem uns 8 pedidos de pior caso: o aquecimento e um pedaço da fase de 1.
+    const teto = 8.5 * Math.max(...estimativas(itens));
     const orcamento = new Orcamento(teto);
-    const tabela = await medirJev(frases, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso() });
-    expect(s.recebidos.length).toBeGreaterThan(0);
-    expect(s.recebidos.length).toBeLessThan(3 + 6 * 4);
+    const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso() });
+    expect(s.recebidos.length).toBeGreaterThan(3);
+    expect(s.recebidos.length).toBeLessThan(3 + 6 * 2 * 4);
     expect(orcamento.gasto).toBeLessThanOrEqual(teto);
-    // O próximo pedido teria passado do teto.
-    const custoDoMaior = Math.max(...s.recebidos.map((r) => Buffer.byteLength(JSON.stringify(r.corpo)))) * 0.042e-6;
-    expect(orcamento.gasto + custoDoMaior).toBeGreaterThan(teto - custoDoMaior);
-    expect(tabela).toContain(`Jev: parou no teto (US$ ${orcamento.gasto.toFixed(4)} gastos na rodada) antes de terminar.`);
+    expect(orcamento.excesso).toBe(0);
+    expect(tabela).toContain(`Jev: parou no teto (US$ ${orcamento.gasto.toFixed(4)} gastos) antes de terminar.`);
+    expect(tabela).toContain(`Gasto do Jev: US$ ${orcamento.gasto.toFixed(6)}`);
+  });
+
+  it("um pedido que custa mais que o reservado: nenhum pedido novo sai, e a medida diz quanto passou", async () => {
+    // O quinto pedido cobra o dobro do pior caso reservado; os outros, 10 tokens.
+    let n = 0;
+    let excesso = 0;
+    const s = await servidorFalso((r, res) => {
+      n++;
+      const tokens = n === 5 ? 2 * piorCaso(r) : 10;
+      if (n === 5) excesso = (piorCaso(r) * 0.042) / 1e6;
+      jevCerto(itens, tokens)(r, res);
+    });
+    const orcamento = new Orcamento(1);
+    const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
+    // O teto (US$ 1) estava longe: quem parou foi o excesso, logo depois do quinto pedido.
+    expect(s.recebidos).toHaveLength(5);
+    expect(orcamento.excesso).toBeCloseTo(excesso, 12);
+    expect(tabela).toContain(`Jev: parou porque o custo real passou do pior caso reservado em US$ ${excesso.toFixed(8)} (US$ ${orcamento.gasto.toFixed(4)} gastos) antes de terminar.`);
+  });
+
+  it("com 3 chamadas em voo, o excesso de uma não deixa as outras abrirem pedido novo, e a tabela só sai depois que as em voo voltam", async () => {
+    let n = 0;
+    const s = await servidorFalso((r, res) => {
+      n++;
+      const tokens = n === 6 ? 3 * piorCaso(r) : 10;
+      setTimeout(() => jevCerto(itens, tokens)(r, res), 15);
+    });
+    const orcamento = new Orcamento(1);
+    const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [3] });
+    const pedidos = s.recebidos.length;
+    // 3 de aquecimento + as 3 primeiras em voo; a 6ª passa do reservado, e só as que já estavam em voo terminam.
+    expect(pedidos).toBeGreaterThanOrEqual(6);
+    expect(pedidos).toBeLessThanOrEqual(8);
+    expect(orcamento.excesso).toBeGreaterThan(0);
+    expect(tabela).toContain("parou porque o custo real passou do pior caso reservado");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(s.recebidos.length).toBe(pedidos);
     expect(tabela).toContain(`Gasto do Jev: US$ ${orcamento.gasto.toFixed(6)}`);
   });
 
   it("com 3 chamadas simultâneas, o teto não estoura, e a tabela só sai depois que todas voltam", async () => {
-    // O servidor demora para responder: as 3 chamadas ficam em voo ao mesmo tempo.
-    const s = await servidorFalso((r, res) => void setTimeout(() => jevCerto(frases, piorCaso)(r, res), 15));
-    // O aquecimento cabe, e a fase de 3 bate no teto no meio, uns 10 pedidos depois.
-    const corpo = (f: Frase) => ({ model: "jev-latest", state: `Agente: Em que posso ajudar?\nPessoa: ${f.texto}`, questions: perguntas(f.texto, vocabulario) });
-    const passadas = frases.slice(0, 3).map((f) => Buffer.byteLength(JSON.stringify(corpo(f))));
-    const teto = (passadas.reduce((a, b) => a + b, 0) + 10.5 * (passadas[0] ?? 0)) * 0.042e-6;
+    const s = await servidorFalso((r, res) => void setTimeout(() => jevCerto(itens, piorCaso)(r, res), 15));
+    const e = estimativas(itens);
+    // O aquecimento cabe, e a fase de 3 bate no teto no meio, uns 6 pedidos depois.
+    const teto = e.slice(0, 3).reduce((a, b) => a + b, 0) + 6.5 * Math.max(...e);
     const orcamento = new Orcamento(teto);
-    const tabela = await medirJev(frases, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [3] });
+    const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [3] });
     const pedidos = s.recebidos.length;
     const gasto = orcamento.gasto;
     expect(pedidos).toBeGreaterThan(3 + 3);
-    expect(pedidos).toBeLessThan(3 + 3 * 6 * 4);
+    expect(pedidos).toBeLessThan(3 + 3 * 6 * 2);
     expect(tabela).toContain("| 3 |");
     expect(tabela).toContain("Jev: parou no teto");
-    // Nada passa do teto, nem o que estava em voo.
     expect(gasto).toBeLessThanOrEqual(teto);
-    // Depois que a tabela sai, nenhum pedido novo chega e o gasto não muda.
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(s.recebidos.length).toBe(pedidos);
     expect(orcamento.gasto).toBe(gasto);
@@ -196,22 +218,30 @@ describe("medirJev", () => {
   });
 
   it("a reserva de cada pedido volta quando a resposta chega: o teto conta o gasto real, e não a soma das estimativas", async () => {
-    // Cada pedido custa 10 tokens; o teto cabe 3 estimativas de pior caso (um token por byte), mas não as 27.
-    const s = await servidorFalso(jevCerto(frases, 10));
-    const maior = Math.max(...frases.map((f) => Buffer.byteLength(JSON.stringify({ model: "jev-latest", state: `Agente: Em que posso ajudar?\nPessoa: ${f.texto}`, questions: perguntas(f.texto, vocabulario) }))));
-    const orcamento = new Orcamento(3 * maior * 0.042e-6);
-    const tabela = await medirJev(frases, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
-    expect(s.recebidos).toHaveLength(3 + 6 * 4);
-    expect(tabela).not.toContain("parou no teto");
-    expect(orcamento.gasto).toBeCloseTo((27 * 10 * 0.042) / 1e6, 12);
+    const s = await servidorFalso(jevCerto(itens, 10));
+    const orcamento = new Orcamento(3 * Math.max(...estimativas(itens)));
+    const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
+    expect(s.recebidos).toHaveLength(3 + 6 * 2);
+    expect(tabela).not.toContain("parou");
+    expect(orcamento.gasto).toBeCloseTo((15 * 10 * 0.042) / 1e6, 12);
+  });
+
+  it("o pedido curto com a sobra fixa que o Jev cobra (medida em 15/11) cabe no pior caso: nada passa do reservado", async () => {
+    // O que se mediu: uns 300 tokens além do corpo. 221 bytes viraram 304 tokens.
+    const s = await servidorFalso(jevCerto(itens, (r) => Buffer.byteLength(JSON.stringify(r.corpo)) + 300));
+    const orcamento = new Orcamento(1);
+    const tabela = await medirJev(itens, vocabulario, orcamento, { url: s.url, chave: CHAVE, relogio: relogioFalso(), concorrencias: [1] });
+    expect(s.recebidos).toHaveLength(3 + 6 * 2);
+    expect(orcamento.excesso).toBe(0);
+    expect(tabela).not.toContain("parou");
   });
 
   it("sem a chave não mede e não pede nada", async () => {
-    const s = await servidorFalso(jevCerto(frases));
+    const s = await servidorFalso(jevCerto(itens));
     const anterior = process.env.JEV_API_KEY;
     delete process.env.JEV_API_KEY;
     try {
-      expect(await medirJev(frases, vocabulario, new Orcamento(1), { url: s.url })).toBe("Jev: não medido (JEV_API_KEY não definido).");
+      expect(await medirJev(itens, vocabulario, new Orcamento(1), { url: s.url })).toBe("Jev: não medido (JEV_API_KEY não definido).");
     } finally {
       if (anterior !== undefined) process.env.JEV_API_KEY = anterior;
     }
