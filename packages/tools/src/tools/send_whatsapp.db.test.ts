@@ -5,7 +5,7 @@ import { startFakeWaha } from "../../test/fake-waha";
 import { createFixture, createUser, eventsOf, fakeFetch, fakeLookup, putSetting, notificationsOf, putWhatsAppConnector, secretKey, t0, type FakeContext } from "../../test/helpers";
 import { runTool } from "../run-tool";
 import { wahaSessionName } from "../connectors/waha";
-import { createSendWhatsApp } from "./send_whatsapp";
+import { MAX_WHATSAPP_APPROVALS_PER_CALL, createSendWhatsApp } from "./send_whatsapp";
 
 const { app, owner } = openTestDbs();
 const waha = await startFakeWaha();
@@ -223,6 +223,24 @@ describe("send_whatsapp", () => {
       expect(result).toMatchObject({ ok: false, data: { outcome: "denied", decision: "denied" } });
       expect(result.message).toMatch(/não autorizou o envio/);
       expect(result.message).toMatch(/create_task/);
+      expect(net.requests).toEqual([]);
+    });
+
+    it("depois de 3 pedidos negados na mesma ligação, o quarto nem pede: a equipe não recebe mais aviso (issue 273)", async () => {
+      const ctx = await fixture("whatsapp negado demais", { onWait: humanDecides("denied") });
+      const net = fakeFetch();
+      for (let i = 0; i < MAX_WHATSAPP_APPROVALS_PER_CALL; i++) {
+        expect((await runTool(tool(net), { text: `Oi ${i}` }, ctx)).message).toMatch(/não autorizou o envio/);
+      }
+      const notices = (await notificationsOf(app, ctx.organizationId)).length;
+      expect(notices).toBeGreaterThan(0);
+
+      const extra = await runTool(tool(net), { text: "Oi de novo" }, ctx);
+      expect(extra).toMatchObject({ ok: false });
+      expect(extra.message).toMatch(/já pedi confirmação de envio 3 vezes/);
+      expect(ctx.waits).toHaveLength(MAX_WHATSAPP_APPROVALS_PER_CALL);
+      expect(await approvalsOf(ctx)).toHaveLength(MAX_WHATSAPP_APPROVALS_PER_CALL);
+      expect(await notificationsOf(app, ctx.organizationId)).toHaveLength(notices);
       expect(net.requests).toEqual([]);
     });
 
