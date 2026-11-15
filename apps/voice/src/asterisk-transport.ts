@@ -23,15 +23,22 @@ import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import { dtmfTones, type CallTransport } from "./transport";
+import type { VoicemailJob } from "./voicemail";
 
 export interface ExpectedCall {
   callId: string;
   /** Canal do Asterisk que carrega a chamada. */
   channelId: string;
   organizationId: string;
-  agentId: string;
+  /** Nulo quando a chamada não tem agente e vai para o recado (`voicemail`). */
+  agentId: string | null;
   /** Tronco por onde a chamada chegou ou saiu; a transferência sai por ele. */
   trunkId: string;
+  /**
+   * A chamada não tem quem atenda: quem conecta o áudio atende a caixa postal em vez de abrir uma
+   * conversa com o motor de voz.
+   */
+  voicemail?: VoicemailJob;
 }
 
 interface TrackedCall extends ExpectedCall {

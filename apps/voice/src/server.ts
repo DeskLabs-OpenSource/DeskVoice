@@ -16,6 +16,7 @@ import { startSimulatedCall } from "./simulate";
 import { realSchedule, type Schedule } from "./transport";
 import { applyTrunks, checkTrunks, type TrunksDeps } from "./trunks";
 import type { WacallsOptions } from "./wacalls-client";
+import { startVoicemailSession, type VoicemailSession } from "./voicemail";
 import { startWebCalls } from "./web-calls";
 import { createWhatsAppCalls } from "./whatsapp-calls";
 
@@ -75,12 +76,23 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, log };
   const calls = new AsteriskCalls({ ari, db, clock, log });
   const sessions = new Set<CallSession>();
+  // Recados em curso, com o ciclo de vida próprio: não são conversas, e não atendem a pedido de
+  // parar gravação (`stopRecordingOfLiveCall`).
+  const voicemails = new Set<VoicemailSession>();
 
   const track = (session: CallSession): void => {
     sessions.add(session);
     void session.done.then((outcome) => {
       sessions.delete(session);
       log("info", "call ended", { ...outcome });
+    });
+  };
+
+  const trackVoicemail = (session: VoicemailSession): void => {
+    voicemails.add(session);
+    void session.done.then((outcome) => {
+      voicemails.delete(session);
+      log("info", "voicemail ended", { ...outcome });
     });
   };
 
@@ -100,6 +112,21 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
         return;
       }
       const { call, transport } = attached;
+      if (call.voicemail) {
+        trackVoicemail(
+          startVoicemailSession(
+            { db, clock, recordingsDir: deps.recordingsDir, schedule: deps.schedule, log },
+            { organizationId: call.organizationId, callId: call.callId, reason: call.voicemail.reason, maxSeconds: call.voicemail.maxSeconds, transport },
+          ),
+        );
+        return;
+      }
+      if (!call.agentId) {
+        // Sem agente e sem recado: não deveria existir. Fechar devolve o canal à Stasis, que desliga.
+        log("error", "audiosocket connection for a call with neither agent nor voicemail; closing", { callId: call.callId });
+        connection.close();
+        return;
+      }
       track(startCallSession(sessionDeps, { organizationId: call.organizationId, callId: call.callId, agentId: call.agentId, transport }));
     },
   });
@@ -176,7 +203,9 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
       whatsappCalls.close();
       await api.close();
       for (const session of sessions) session.stop("shutdown");
+      for (const session of voicemails) session.stop("shutdown");
       await Promise.all([...sessions].map((session) => session.done));
+      await Promise.all([...voicemails].map((session) => session.done));
       await audioSocket.close();
       await webCalls.close();
       await approvals.close();

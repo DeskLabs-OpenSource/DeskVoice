@@ -135,6 +135,12 @@ const settings = {
   inboundLimitLead: "Quantas ligações recebidas pela linha telefônica os agentes atendem ao mesmo tempo. Acima disso, quem liga recebe sinal de ocupado e a recusa aparece em Chamadas. Cada ligação já tem teto de custo e de duração no agente; este limite segura o gasto somado quando muitas chegam juntas. Chamadas pelo navegador e ligações feitas pelo agente não entram nesta conta.",
   inboundLimit: "Limite de ligações simultâneas",
   inboundLimitHint: "De 1 a 50. O valor de fábrica é 5.",
+  voicemailTitle: "Caixa postal quando ninguém atende",
+  voicemailLead: "Com a caixa postal ligada, a ligação para um número sem agente, ou com o agente desligado, é atendida: quem liga ouve um bipe e deixa um recado gravado, que fica na chamada e pode ser ouvido nela. O recado ocupa uma vaga no limite de ligações simultâneas enquanto é gravado. No próprio limite nada muda: quem liga continua recebendo ocupado.",
+  voicemailSwitch: "Atender e gravar recado quando ninguém pode atender",
+  voicemailMaxSeconds: "Tempo máximo do recado, em segundos",
+  voicemailMaxSecondsHint: "De 5 a 300. O valor de fábrica é 60. O recado termina 4 segundos depois da última fala.",
+  saveVoicemail: "Salvar caixa postal",
   saveInboundLimit: "Salvar limite",
 };
 

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, withSystem, type Clock } from "@deskvoice/core";
+import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, VOICEMAIL_ENABLED_SETTING, VOICEMAIL_MAX_SECONDS_SETTING, withSystem, type Clock } from "@deskvoice/core";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
 import type { AriChannel } from "./ari";
@@ -270,5 +270,69 @@ describe("teto de ligações recebidas ao mesmo tempo", { timeout: 120_000 }, ()
     expect(together.filter(({ ari }) => ari.log.join() === BUSY.join())).toHaveLength(5);
     expect(await statusesOf(organizationId)).toEqual([...Array<string>(5).fill("refused"), "ringing", "ringing"]);
     expect(await notificationsOf(app, organizationId)).toHaveLength(1);
+  });
+});
+
+describe("caixa postal quando ninguém pode atender", { timeout: 120_000 }, () => {
+  const ACCEPTED = "continue canal-1 deskvoice-audio,s";
+  const BUSY = ["hangup canal-1 busy"];
+  const incoming = (trunkId: string): AriChannel => channel(trunkId, "553133334444");
+  const voicemailOn = async (organizationId: string, maxSeconds?: number): Promise<void> => {
+    await putSetting(app, organizationId, VOICEMAIL_ENABLED_SETTING, true, false);
+    if (maxSeconds !== undefined) await putSetting(app, organizationId, VOICEMAIL_MAX_SECONDS_SETTING, maxSeconds, false);
+  };
+
+  it("número sem agente: atende, manda o áudio e a chamada nasce aceita em vez de recusada", async () => {
+    const { organizationId, trunkId } = await line("voicemail-no-agent", { agent: "none" });
+    await voicemailOn(organizationId);
+
+    const { ari, expected } = await receive(incoming(trunkId));
+
+    expect(ari.log).toEqual([expect.stringMatching(/^set canal-1 AUDIOSOCKET_UUID=/), ACCEPTED]);
+    const calls = await callsOf(app, organizationId);
+    expect(calls).toMatchObject([{ status: "ringing", end_reason: null, agent_id: null, to_e164: NUMBER, ended_at: null }]);
+    expect(await eventsOf(app, calls[0]?.id ?? "")).toEqual([]);
+    expect(await notificationsOf(app, organizationId)).toEqual([]);
+    expect(expected).toEqual([{ callId: calls[0]?.id, channelId: "canal-1", organizationId, agentId: null, trunkId, voicemail: { reason: "no_agent", maxSeconds: 60 } }]);
+  });
+
+  it("agente desligado: atende pelo recado, com o motivo próprio e o teto que o operador gravou", async () => {
+    const { organizationId, agentId, trunkId } = await line("voicemail-disabled", { agent: "disabled" });
+    await voicemailOn(organizationId, 45);
+
+    const { ari, expected } = await receive(incoming(trunkId));
+
+    expect(ari.log.at(-1)).toBe(ACCEPTED);
+    expect(await callsOf(app, organizationId)).toMatchObject([{ status: "ringing", end_reason: null, agent_id: agentId }]);
+    expect(expected[0]?.voicemail).toEqual({ reason: "agent_disabled", maxSeconds: 45 });
+  });
+
+  it("teto de simultâneas continua ocupado: a caixa postal não abre canal quando o limite já foi atingido", async () => {
+    const { organizationId, agentId, trunkId } = await line("voicemail-limit");
+    await voicemailOn(organizationId);
+    await putSetting(app, organizationId, INBOUND_LIMIT_SETTING, 1, false);
+
+    expect((await receive(incoming(trunkId))).ari.log.at(-1)).toBe(ACCEPTED);
+    const { ari, expected } = await receive(incoming(trunkId));
+
+    expect(ari.log).toEqual(BUSY);
+    expect(expected).toEqual([]);
+    const refused = (await callsOf(app, organizationId)).filter((call) => call.status === "refused");
+    expect(refused).toMatchObject([{ end_reason: "inbound_limit_reached", agent_id: agentId, ended_at: expect.any(Date) }]);
+    expect(await eventsOf(app, refused[0]?.id ?? "")).toEqual([
+      { kind: "call_refused", payload: { reason: "inbound_limit_reached", from: expect.stringContaining("8888"), to: NUMBER, dialed: "553133334444", limit: 1 } },
+    ]);
+  });
+
+  it("caixa postal desligada, que é o padrão, mantém a recusa de hoje", async () => {
+    const { organizationId, trunkId } = await line("voicemail-off", { agent: "none" });
+
+    const { ari, expected } = await receive(incoming(trunkId));
+
+    expect(ari.log).toEqual(["hangup canal-1"]);
+    expect(expected).toEqual([]);
+    const calls = await callsOf(app, organizationId);
+    expect(calls).toMatchObject([{ status: "refused", end_reason: "no_agent" }]);
+    expect((await eventsOf(app, calls[0]?.id ?? "")).map((event) => event.kind)).toEqual(["call_refused"]);
   });
 });

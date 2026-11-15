@@ -1,8 +1,23 @@
-import { INBOUND_LIMIT_SETTING, inboundLimitOf, recordEvent, resolveInboundRoute, toE164, withOrg, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import {
+  INBOUND_LIMIT_SETTING,
+  VOICEMAIL_ENABLED_SETTING,
+  VOICEMAIL_MAX_SECONDS_SETTING,
+  inboundLimitOf,
+  recordEvent,
+  resolveInboundRoute,
+  toE164,
+  voicemailEnabledOf,
+  voicemailMaxSecondsOf,
+  withOrg,
+  type Clock,
+  type Db,
+  type OrgQuery,
+} from "@deskvoice/core";
 import type { AriChannel, AriClient } from "./ari";
 import type { AsteriskCalls } from "./asterisk-transport";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
+import type { VoicemailJob, VoicemailReason } from "./voicemail";
 
 export interface InboundDeps {
   db: Db;
@@ -16,6 +31,14 @@ export interface InboundDeps {
 const TRUNK_CHANNEL = /^PJSIP\/trunk-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-/i;
 
 type Refusal = "no_agent" | "agent_disabled" | "inbound_limit_reached";
+
+/**
+ * Os motivos em que a chamada não tem quem atenda e o recado pode entrar. O teto de ligações
+ * simultâneas fica de fora: lá o problema é quantidade de chamadas, e abrir mais um canal de áudio
+ * para gravar iria contra o próprio teto.
+ */
+const VOICEMAIL_REASONS: ReadonlyArray<VoicemailReason> = ["no_agent", "agent_disabled"];
+const acceptsVoicemail = (refusal: Refusal | null): refusal is VoicemailReason => refusal !== null && (VOICEMAIL_REASONS as readonly string[]).includes(refusal);
 
 // Estourar o teto costuma vir em rajada: um aviso por janela basta. Cada recusa continua no histórico.
 const LIMIT_NOTICE_EVERY_MS = 10 * 60 * 1000;
@@ -101,29 +124,50 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
       limit = checked.limit;
       if (checked.reached) refusal = "inbound_limit_reached";
     }
+    // A caixa postal só entra onde não há quem atenda, e só quando o operador a ligou. No teto de
+    // simultâneas a chamada continua recebendo ocupado: ver `VOICEMAIL_REASONS`.
+    let voicemail: VoicemailJob | null = null;
+    if (acceptsVoicemail(refusal)) {
+      const stored = await q.many<{ key: string; value: unknown }>("select key, value from settings where organization_id = $1 and key in ($2, $3)", [
+        route.organizationId,
+        VOICEMAIL_ENABLED_SETTING,
+        VOICEMAIL_MAX_SECONDS_SETTING,
+      ]);
+      const valueOf = (key: string): unknown => stored.find((row) => row.key === key)?.value;
+      if (voicemailEnabledOf(valueOf(VOICEMAIL_ENABLED_SETTING))) voicemail = { reason: refusal, maxSeconds: voicemailMaxSecondsOf(valueOf(VOICEMAIL_MAX_SECONDS_SETTING)) };
+    }
+    const answered = refusal === null || voicemail !== null;
     const call = await q.one<{ id: string }>(
       `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
        values ($1, $2, 'inbound', 'phone', $3, $4, $5, $6, $7, $8) returning id`,
-      [route.organizationId, route.agentId, from, to, refusal ? "refused" : "ringing", refusal, clock.now(), refusal ? clock.now() : null],
+      [route.organizationId, route.agentId, from, to, answered ? "ringing" : "refused", answered ? null : refusal, clock.now(), answered ? null : clock.now()],
     );
     if (!call) throw new Error("Inbound call was not created");
-    if (refusal) {
+    if (refusal && !voicemail) {
       const overLimit = refusal === "inbound_limit_reached";
       await recordEvent(q, call.id, "call_refused", { reason: refusal, from, to, dialed: exten, ...(overLimit && { limit }) }, clock.now());
       const noticedLately = overLimit && (await limitNoticedLately(q, clock));
       if (!noticedLately) await panelNotice(q, clock, call.id, NOTICE[refusal](to ?? "um número que este tronco não informou", limit));
     }
-    return { callId: call.id, refusal };
+    return { callId: call.id, refusal, voicemail };
   });
 
-  if (outcome.refusal || !route.agentId) {
+  if (outcome.refusal && !outcome.voicemail) {
     log("info", "inbound call refused", { callId: outcome.callId, reason: outcome.refusal });
     // No teto, quem ligou recebe ocupado: é o que aconteceu, e ele sabe que pode tentar de novo.
     await ari.hangup(channel.id, outcome.refusal === "inbound_limit_reached" ? "busy" : undefined);
     return;
   }
+  if (outcome.voicemail) log("info", "inbound call goes to voicemail", { callId: outcome.callId, reason: outcome.voicemail.reason, maxSeconds: outcome.voicemail.maxSeconds });
 
-  deps.calls.expect({ callId: outcome.callId, channelId: channel.id, organizationId: route.organizationId, agentId: route.agentId, trunkId: route.trunkId });
+  deps.calls.expect({
+    callId: outcome.callId,
+    channelId: channel.id,
+    organizationId: route.organizationId,
+    agentId: route.agentId,
+    trunkId: route.trunkId,
+    ...(outcome.voicemail && { voicemail: outcome.voicemail }),
+  });
   try {
     // O dialplan abre o AudioSocket com este UUID: é ele que liga a conexão de áudio à chamada.
     await ari.setVariable(channel.id, "AUDIOSOCKET_UUID", outcome.callId);

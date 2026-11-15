@@ -237,7 +237,8 @@ export interface ManualTransport extends CallTransport {
   transferredTo: string | null;
   /** Teclas que a conversa mandou apertar. */
   sentDtmf: string[];
-  callerAudio(ms: number): void;
+  /** Áudio de quem ligou por `ms`; `peak` acima de zero manda fala em vez de silêncio. */
+  callerAudio(ms: number, peak?: number): void;
   callerHangup(): void;
 }
 
@@ -259,8 +260,10 @@ export function manualTransport(): ManualTransport {
     transfer: async (to) => void (transport.transferredTo = to),
     sendDtmf: async (digits) => void transport.sentDtmf.push(digits),
     close: async () => void (transport.closes += 1),
-    callerAudio(ms) {
-      for (let sent = 0; sent < ms; sent += 20) audio?.(Buffer.alloc(320));
+    callerAudio(ms, peak = 0) {
+      const frame = Buffer.alloc(320);
+      if (peak > 0) for (let i = 0; i + 1 < frame.length; i += 2) frame.writeInt16LE(i % 4 === 0 ? peak : -peak, i);
+      for (let sent = 0; sent < ms; sent += 20) audio?.(frame);
     },
     callerHangup: () => hangup?.(),
   };
