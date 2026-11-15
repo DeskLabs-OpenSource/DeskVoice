@@ -7,9 +7,8 @@
   (#114). Resposta: "Pode seguir com sua recomendação em todos docs de decisão abertos", o que vale
   **1A 2A 3A 4B 5A**. A resposta foi registrada pelo maestro de PRs.
 - **O que é do dono e o que é do Arquiteto:** as cinco escolhas (itens 1 a 5, nas palavras das
-  opções da seção 8) são do dono. Três pontos são do Arquiteto, a partir do direcionamento da
+  opções da seção 8) são do dono. Dois pontos são do Arquiteto, a partir do direcionamento da
   DESA-37, e valem até o dono dizer outra coisa:
-  - a leitura da ligação de saída no item 4;
   - "só por dono ou administrador" no prazo da memória (item 2), que a opção 2A não dizia;
   - a seção "Regras que valem em toda fatia que lê ou grava memória".
 
@@ -36,8 +35,9 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
      equipe já vê na lista de Chamadas.
    - A nota só nasce quando o agente tem `remember_caller_note` marcada na tela dele. Ela vem
      desmarcada em todo agente, novo ou já existente.
-   - O agente não recebe nada sobre o número enquanto a chave do item 4 estiver desligada, e ela vem
-     desligada.
+   - Numa ligação recebida, o agente não recebe nada sobre o número enquanto a chave do item 4
+     estiver desligada, e ela vem desligada. A ligação que o sistema discou é a exceção que o dono
+     escolheu no item 4.
 2. **Prazo próprio da memória (2A).**
    - O padrão é de 90 dias, ajustável na tela entre 30 e 365, por organização. Só dono ou
      administrador muda o prazo (ponto do Arquiteto, não da opção 2A).
@@ -58,24 +58,24 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
    - Cada mudança grava `caller_memory_changed`.
    - O bloco que o agente recebe nunca traz resumo nem fala. Ele traz só as notas e os títulos das
      pendências abertas, dentro do teto de 1 500 caracteres.
-   - **A ligação de saída (leitura do Arquiteto, à espera do dono).** A opção B diz "e sempre na
-     ligação que o próprio sistema discou". Há duas leituras, e as duas têm apoio:
-     - **Fora da chave** (a do desenho original): a seção 2.5 diz que, na ligação de saída, o número
-       não foi informado por quem está do outro lado e "o risco não existe; o mesmo raciocínio que
-       `send_whatsapp` já usa". Em [`send_whatsapp.ts`](../../packages/tools/src/tools/send_whatsapp.ts)
-       (linha 132), `whatsapp.trust_caller_id` só vale para a ligação recebida, e a de saída passa
-       sem ela. A prova original da fatia 6 também dizia "com o interruptor desligado, nada entra
-       numa ligação recebida", deixando a de saída de fora.
-     - **Dentro da chave** (a que esta decisão adota): o item 1 diz que o agente não recebe nada por
-       padrão. Se a ligação de saída recebesse a memória com a chave desligada, toda instalação
-       atualizada que disca passaria a pôr notas no contexto do agente sem ninguém ter escolhido,
-       contra a regra 7 do `GOVERNANCE.md`.
+   - **A ligação que o próprio sistema discou recebe sempre (parte da opção 4B que o dono
+     aceitou).** O texto da opção diz "sempre ligado na ligação que o sistema discou". Na ligação de
+     saída (`direction = 'outbound'`), o número não foi informado por quem está do outro lado, e o
+     desenho (seção 2.5) usa o mesmo raciocínio de
+     [`send_whatsapp.ts`](../../packages/tools/src/tools/send_whatsapp.ts) (linha 132), onde
+     `whatsapp.trust_caller_id` só vale para a ligação recebida. Por isso:
+     - com a chave desligada, a ligação recebida não recebe memória, e a de saída recebe;
+     - com a chave ligada, as duas recebem o mesmo bloco, com a mesma frase fixa.
 
-     **Esta decisão muda o desenho original até o dono responder:** com a chave desligada, nenhuma
-     ligação recebe memória, nem a de saída. Com a chave ligada, a de saída e a recebida recebem o
-     mesmo bloco, com a mesma frase fixa. O aviso de número forjado é só da tela de Configurações e
-     não muda por ligação. O pedido está aberto (seção "Quando revisar") e só a fatia 6 depende
-     dele.
+     A ligação de saída já vem desligada de fábrica
+     ([`0004`](0004-ligacoes-de-saida-desligadas.md)). Quem a liga passa a mandar ao modelo, nas
+     ligações discadas, as notas e os títulos das pendências abertas do número, sem ter ligado a
+     chave. Isso gasta tokens dentro do teto da chamada.
+   - **Pedido de revisão aberto neste ponto.** O Arquiteto pediu ao dono que a chave valha também
+     para a ligação de saída (opção A do pedido), porque o item 1 diz que o agente não recebe nada
+     por padrão. O padrão sem resposta desse pedido é manter o que está aqui (opção B): o silêncio
+     não desfaz uma escolha explícita do dono. Se ele mudar, uma decisão nova emenda esta. Só a
+     fatia 6 depende disso.
 5. **O supervisor usa só regras fixas (5A).** A rotina `review_call` não usa modelo de IA. Revisão
    por modelo é pedido futuro, próprio.
 
@@ -119,7 +119,8 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
     não prova nada, porque sem escape ela continua dentro do bloco.
   - O que nenhum teste prova, e o PR diz: que o modelo não obedece ao texto do bloco.
 - **Desligado de fábrica onde gasta ou expõe.** As notas só nascem com a ferramenta marcada, e o
-  agente só recebe memória com a chave ligada. A memória para a equipe é só leitura e não gasta.
+  agente só recebe memória numa ligação recebida com a chave ligada, ou numa ligação de saída,
+  que já vem desligada de fábrica (item 4). A memória para a equipe é só leitura e não gasta.
 
 ## Alternativas
 
@@ -136,6 +137,8 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
 
 - Quem atualiza passa a ver, na tela da chamada, as ligações anteriores do mesmo número. A nota de
   versão da fatia 2 diz isso. Nenhum dado novo é guardado sem alguém marcar a ferramenta.
+- Na ligação de saída, o agente recebe a memória mesmo com a chave do item 4 desligada (ver o
+  pedido de revisão no item 4).
 - Com a chave do item 4 ligada, numa ligação recebida com número forjado, o agente pode repetir as
   notas para o impostor. A instrução contra isso não é garantia, e a tela diz isso.
 - A memória no agente gasta tokens dentro do teto da chamada, sem conta nova. A conta do desenho
@@ -146,11 +149,9 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
 
 ## Quando revisar
 
-- Se o dono responder de outro jeito ao ponto da ligação de saída (item 4). O desenho original lia
-  a ligação de saída fora da chave (seção 2.5 e prova da fatia 6). Esta decisão a pôs dentro da
-  chave até o dono responder. Se ele escolher "fora da chave", a fatia 6 passa a dar memória à
-  ligação de saída também com a chave desligada, e a prova volta a dizer "nada entra numa ligação
-  recebida".
+- Se o dono aceitar o pedido de revisão do item 4 (a chave valer também para a ligação de saída).
+  Uma decisão nova emenda esta. Com ela, a fatia 6 deixa de dar memória à ligação de saída com a
+  chave desligada.
 - Quando a nota passar a nascer sem a ferramenta marcada (extraída por modelo depois da ligação,
   por exemplo): o item 1 deixa de valer como está.
 - Quando houver medida de quantas promessas ficam sem pendência (item 5).
