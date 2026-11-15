@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { callerAudioAccessible, markCallerAccessOpened, recordingPath } from "@deskvoice/core";
-import { notFound, serverDeps } from "../../../server/context";
+import { notFound, serverDeps } from "../../../../server/context";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
