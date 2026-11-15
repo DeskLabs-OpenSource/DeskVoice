@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ApiError, type ServerDeps } from "../../../../server/context";
+import { inboundAddressProblem } from "../../../../server/trunk-host";
 import { anything, voiceRequest } from "../../../../server/voice";
 
 const applyAnswer = z.object({ applied: z.boolean(), detail: z.string() });
@@ -12,6 +13,22 @@ const applyAnswer = z.object({ applied: z.boolean(), detail: z.string() });
 export function requireIpModeForAddresses(authMode: string, matchExtra: number, outboundHost: string | null): void {
   if (authMode !== "ip" && (matchExtra > 0 || outboundHost !== null)) {
     throw new ApiError(400, "validation_error", "Extra inbound addresses and an outbound address belong to a line recognized by IP; with registration the provider finds the line by the user and password.");
+  }
+}
+
+/**
+ * Na linha reconhecida por IP, o endereço do servidor e os outros endereços de entrada são só
+ * numéricos (decisão 0007): nome fica para o endereço de saída. E o reconhecimento por IP recusa
+ * bloco largo demais. A mensagem diz qual campo, sem repetir o valor.
+ */
+export function requireNumericInbound(authMode: string, host: string, matchExtra: readonly string[]): void {
+  if (authMode !== "ip") return;
+  for (const [index, value] of [host, ...matchExtra].entries()) {
+    const problem = inboundAddressProblem(value);
+    if (problem === null) continue;
+    const field = index === 0 ? "the provider server address" : `the other inbound address ${index}`;
+    if (problem === "name") throw new ApiError(400, "trunk_inbound_name", `In a line recognized by IP, ${field} must be an IP or an address block, not a name.`);
+    throw new ApiError(400, "trunk_block_too_wide", `In a line recognized by IP, ${field} is a block wider than /16 (IPv4) or /32 (IPv6).`);
   }
 }
 

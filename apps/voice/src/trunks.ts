@@ -10,14 +10,13 @@
 // VPS (comando `create-owner`): quem pode provocar o conflito é quem administra o servidor.
 // Não existe precedência por antiguidade nem estado guardado ao lado do arquivo.
 import { randomUUID } from "node:crypto";
-import { lookup } from "node:dns/promises";
 import { chmod, chown, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { decryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import { messageOf, type Logger } from "./log";
 import { realSchedule, type Schedule } from "./transport";
-import { hostsOverlap, parseTrunkHost, type TrunkHost } from "./trunk-host";
+import { hostsOverlap, isBlockTooWide, parseTrunkHost, type TrunkHost } from "./trunk-host";
 
 export const DEFAULT_TRUNKS_FILE = "/asterisk-generated/pjsip_trunks.conf";
 
@@ -38,8 +37,8 @@ export interface TrunkConfig {
    */
   matchExtra?: string[];
   /**
-   * Destino das ligações de saída, quando difere do `host` (modo `ip`). Nome ou IP: nome resolve
-   * para o endereço na hora de escrever a configuração.
+   * Destino das ligações de saída, quando difere do `host` (modo `ip`). Nome ou IP: é saída, não
+   * entra no `identify`.
    */
   outboundHost?: string | null;
 }
@@ -72,9 +71,16 @@ export function trunkProblem(trunk: TrunkConfig): string | null {
   }
   if (trunk.authMode === "register" && (!trunk.username || !trunk.password)) return "a line that registers needs user and password";
   if (trunk.authMode === "register" && host.uri === null) return "a line that registers needs the address of one server, not an address block";
+  if (trunk.authMode === "ip" && host.kind === "name") return NAME_IN_IP_MODE_REASON;
+  if (trunk.authMode === "ip" && isBlockTooWide(host)) return BLOCK_TOO_WIDE_REASON;
   const extras = trunk.matchExtra ?? [];
   if (trunk.authMode !== "ip" && (extras.length > 0 || trunk.outboundHost != null)) return EXTRA_ONLY_IN_IP_MODE_REASON;
-  for (const [index, extra] of extras.entries()) if (!parseTrunkHost(extra)) return extraAddressReason(index + 1);
+  for (const [index, extra] of extras.entries()) {
+    const parsed = parseTrunkHost(extra);
+    if (!parsed) return extraAddressReason(index + 1);
+    if (parsed.kind === "name") return extraNameReason(index + 1);
+    if (isBlockTooWide(parsed)) return extraTooWideReason(index + 1);
+  }
   if (trunk.outboundHost != null) {
     const outbound = parseTrunkHost(trunk.outboundHost);
     if (!outbound) return "the outbound address is not a server name, an IP address or an address block";
@@ -152,22 +158,18 @@ function renderTrunk(trunk: TrunkConfig, inbound: Inbound, identify: boolean): s
 // Não diz de quem é a outra linha, nem qual é o endereço: pode ser de outra organização.
 export const SHARED_HOST_REASON =
   "this provider address is already used by another line of this installation, and a line recognized only by its address cannot share it; change this line to registration (user and password) to fix it";
-/**
- * A operadora que publica um nome em vez de bloco: o nome é aceito, mas precisa resolver para
- * endereço na hora de escrever a configuração, e é o endereço que o `identify` compara.
- */
-export const NAME_UNRESOLVED_REASON =
-  "the provider name could not be resolved to an address now, and a line recognized by its address needs a numeric one; try again later or use the numeric address";
+export const NAME_IN_IP_MODE_REASON =
+  "a line recognized by IP needs the numeric address of the provider (an IP or an address block), not a name; with a name, change this line to registration (user and password)";
+export const BLOCK_TOO_WIDE_REASON =
+  "a line recognized by IP accepts an address block of at most /16 (IPv4) or /32 (IPv6); enter the smaller blocks the provider publishes, or its IP";
 export const OUTBOUND_BLOCK_REASON = "the outbound address must be one server (a name or an IP), not an address block";
 export const EXTRA_ONLY_IN_IP_MODE_REASON =
   "extra inbound addresses and an outbound address belong to a line recognized by IP; with registration the provider finds the line by the user and password";
 /** A posição diz qual item recusar sem repetir a lista inteira. */
-export const extraAddressReason = (position: number): string => `the extra inbound address ${position} is not a server name, an IP address or an address block`;
-export const extraNameUnresolvedReason = (position: number): string =>
-  `the provider name of the extra inbound address ${position} could not be resolved to an address now; try again later or use the numeric address`;
-
-/** Nome do provedor já resolvido para endereços; o `identify` só aceita endereço numérico. */
-export type ResolvedNames = ReadonlyMap<string, readonly string[]>;
+export const extraAddressReason = (position: number): string => `the extra inbound address ${position} is not an IP address or an address block`;
+export const extraNameReason = (position: number): string =>
+  `the extra inbound address ${position} is a name; inbound addresses must be numeric (an IP or an address block), and a provider name goes in the outbound address`;
+export const extraTooWideReason = (position: number): string => `the extra inbound address ${position} is a block wider than /16 (IPv4) or /32 (IPv6); enter the smaller blocks the provider publishes`;
 
 interface Inbound {
   /** O `host` da linha, como foi lido: manda no registro e no destino padrão. */
@@ -180,43 +182,19 @@ interface Inbound {
   destination: TrunkHost | null;
 }
 
-const hostWithoutPort = (uri: string): string => uri.replace(/:\d+$/, "");
-
 /**
  * De onde as ligações entram e para onde as de saída vão: o `host`, os `match_extra` e o
- * `outbound_host`. Nome não vai para o `identify` — ele é resolvido antes e cada endereço dele
- * entra como `match`. Devolve o motivo da recusa quando um nome não resolve.
+ * `outbound_host`. Só endereço numérico entra no `identify`; o nome de uma linha por registro fica
+ * de fora dele, e `trunkProblem` já recusou nome e bloco largo demais na linha por IP.
  */
-function readInbound(trunk: TrunkConfig, resolved: ResolvedNames): Inbound | string {
-  const host = parseTrunkHost(trunk.host);
-  if (!host) return "the host cannot be read";
+function readInbound(trunk: TrunkConfig, host: TrunkHost): Inbound {
   const matches: string[] = [];
   const hosts: TrunkHost[] = [];
-  const add = (address: TrunkHost & { kind: "address" }): void => {
-    hosts.push(address);
-    if (!matches.includes(address.match)) matches.push(address.match);
-  };
-  // O primeiro item é o `host`; a posição dos extras começa em 1, na ordem em que foram digitados.
-  for (const [index, value] of [trunk.host, ...(trunk.matchExtra ?? [])].entries()) {
+  for (const value of [trunk.host, ...(trunk.matchExtra ?? [])]) {
     const parsed = parseTrunkHost(value);
-    if (!parsed) {
-      if (index === 0) return "the host cannot be read";
-      return extraAddressReason(index);
-    }
-    if (parsed.kind === "address") {
-      add(parsed);
-      continue;
-    }
-    // No registro a linha é reconhecida pelo `line` do REGISTER, não pelo endereço de origem: o
-    // nome do servidor não precisa resolver para o `identify`.
-    if (trunk.authMode !== "ip") continue;
-    const addresses = resolved.get(hostWithoutPort(parsed.uri)) ?? [];
-    if (addresses.length === 0) return index === 0 ? NAME_UNRESOLVED_REASON : extraNameUnresolvedReason(index);
-    for (const text of addresses) {
-      const address = parseTrunkHost(text);
-      if (!address || address.kind !== "address") return index === 0 ? NAME_UNRESOLVED_REASON : extraNameUnresolvedReason(index);
-      add(address);
-    }
+    if (parsed?.kind !== "address") continue;
+    hosts.push(parsed);
+    if (!matches.includes(parsed.match)) matches.push(parsed.match);
   }
   const destination = parseTrunkHost(trunk.outboundHost ?? trunk.host);
   return { host, matches, hosts, destination: destination !== null && destination.uri !== null ? destination : null };
@@ -236,21 +214,14 @@ const overlap = (a: Inbound, b: Inbound): boolean => a.hosts.some((mine) => b.ho
  * Em qualquer grupo, linha em modo `register` sai normalmente, reconhecida pelo `line` do registro.
  * Linha inválida por outro motivo não entra em grupo nenhum.
  */
-export function renderTrunksConf(trunks: TrunkConfig[], resolved: ResolvedNames = new Map()): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
+export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
   const skipped: Array<{ id: string; reason: string }> = [];
   const valid: Array<{ trunk: TrunkConfig; inbound: Inbound; group: number }> = [];
   for (const trunk of [...trunks].sort((a, b) => a.id.localeCompare(b.id))) {
+    const host = parseTrunkHost(trunk.host);
     const reason = trunkProblem(trunk);
-    if (reason !== null) {
-      skipped.push({ id: trunk.id, reason });
-      continue;
-    }
-    const inbound = readInbound(trunk, resolved);
-    if (typeof inbound === "string") {
-      skipped.push({ id: trunk.id, reason: inbound });
-      continue;
-    }
-    valid.push({ trunk, inbound, group: valid.length });
+    if (reason !== null || !host) skipped.push({ id: trunk.id, reason: reason ?? "the host cannot be read" });
+    else valid.push({ trunk, inbound: readInbound(trunk, host), group: valid.length });
   }
 
   // Sobreposição não é transitiva (um bloco liga dois endereços que não se tocam): os grupos são
@@ -338,39 +309,7 @@ export interface TrunksDeps {
   /** Usuário do Asterisk dentro do contêiner dele: o dono do arquivo de troncos. */
   owner?: FileOwner;
   schedule?: Schedule;
-  /** Resolve o nome do provedor que publica nome em vez de bloco; nos testes, um mapa fixo. */
-  resolveName?: NameResolver;
   log: Logger;
-}
-
-/** Nome do provedor vira endereço antes de escrever a configuração: o `identify` compara endereço. */
-export type NameResolver = (name: string) => Promise<readonly string[]>;
-
-const lookupAddresses: NameResolver = async (name) => (await lookup(name, { all: true, verbatim: true })).map((entry) => entry.address);
-
-/** Só as linhas em modo `ip` precisam do nome resolvido; o registro é reconhecido pelo `line`. */
-async function resolveProviderNames(trunks: TrunkConfig[], resolve: NameResolver): Promise<ResolvedNames> {
-  const names = new Set<string>();
-  for (const trunk of trunks) {
-    if (trunk.authMode !== "ip" || trunkProblem(trunk) !== null) continue;
-    for (const value of [trunk.host, ...(trunk.matchExtra ?? [])]) {
-      const host = parseTrunkHost(value);
-      if (host?.kind === "name") names.add(hostWithoutPort(host.uri));
-    }
-  }
-  const resolved = new Map<string, readonly string[]>();
-  await Promise.all(
-    [...names].map(async (name) => {
-      try {
-        resolved.set(name, await resolve(name));
-      } catch {
-        // Nome que não resolve não derruba a aplicação das outras linhas: a linha dele fica de
-        // fora com o motivo, e o painel mostra o que fazer.
-        resolved.set(name, []);
-      }
-    }),
-  );
-  return resolved;
 }
 
 // Depois de recarregar, o Asterisk leva um instante para listar os endpoints novos.
@@ -433,8 +372,7 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
       unreadable.push({ id: row.id, reason: `the saved password cannot be read (${messageOf(error)})` });
     }
   }
-  const resolved = await resolveProviderNames(trunks, deps.resolveName ?? lookupAddresses);
-  const { conf, skipped: invalid, emitted } = renderTrunksConf(trunks, resolved);
+  const { conf, skipped: invalid, emitted } = renderTrunksConf(trunks);
   const skipped = [...unreadable, ...invalid];
   const written = await writeFileAtomic(deps.file, conf, deps.owner);
   if (written.chownError !== undefined) {

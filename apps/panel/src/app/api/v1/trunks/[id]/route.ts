@@ -1,7 +1,7 @@
 import { encryptSecret } from "@deskvoice/core";
 import { ApiError, handle, notFound } from "../../../../../server/context";
 import { TRUNK_COLUMNS, trunkPatch } from "../../../../../server/shapes";
-import { applyTrunks, requireIpModeForAddresses } from "../store";
+import { applyTrunks, requireIpModeForAddresses, requireNumericInbound } from "../store";
 
 export const PATCH = handle(
   {
@@ -28,6 +28,7 @@ export const PATCH = handle(
     const { password, ...rest } = body;
     const merged = { ...current, ...rest };
     requireIpModeForAddresses(merged.authMode, merged.matchExtra?.length ?? 0, merged.outboundHost ?? null);
+    requireNumericInbound(merged.authMode, merged.host, merged.matchExtra ?? []);
     // A senha gravada só vale para o destino para o qual foi digitada. Sem isso, quem pode editar a
     // linha apontava o host para um servidor seu e recebia, no registro, a senha do provedor.
     const sameDestination = merged.host === current.host && merged.username === current.username && merged.authMode === current.authMode;
