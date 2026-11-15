@@ -6,9 +6,11 @@ import { CALL_OUTCOMES, outcomeGuess, outcomeInstructions, type OutcomeGuess } f
  * `docs/specs/2026-11-13-analise-da-ligacao.md`, seção 3.4). Uma chamada paga só: a transcrição
  * vai uma vez.
  *
- * A forma guardada, a régua e a nota moram em `@deskvoice/core` (`analysis.ts`); o motor de voz não
- * depende de `core`, então o vocabulário abaixo é repetido aqui. Um teste da rotina (que importa os
- * dois) prova que os critérios são os mesmos e na mesma ordem.
+ * A forma guardada, a régua e a nota moram em `@deskvoice/core` (`analysis.ts`); este pacote depende
+ * de `core` (`types.ts` usa a lista de endereços públicos de lá, na guarda do endpoint da
+ * classificação), e ainda assim repete o vocabulário da régua aqui, sem importá-la. Um teste de
+ * contrato da rotina (`apps/routines/src/analysis-contract.test.ts`, que importa os dois) prova que
+ * os critérios são os mesmos e na mesma ordem.
  */
 
 /** Os critérios da régua v1, na ordem dela. Os mesmos ids de `RUBRIC` em `@deskvoice/core`. */
