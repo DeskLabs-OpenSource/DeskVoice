@@ -233,7 +233,7 @@ describe("classify_call_outcome", () => {
     expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano", authorization: CHAVE_DO_MOTOR }]);
   });
 
-  it("só o modelo, sem endpoint: OpenAI com a chave do motor e o modelo escolhido", async () => {
+  it("só o modelo, sem endpoint: o modelo fora da tabela de preço cai no modelo medido, não no pedido", async () => {
     const { org, callId } = await comAgente("desfecho só modelo");
     await comChave(org);
     await comDestino(org, { modelo: "gpt-5-mini" });
@@ -242,7 +242,9 @@ describe("classify_call_outcome", () => {
     const { fetch, pedidos } = pedidoCom({ outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta às dez, por favor." });
     await roda(org, callId, fetch);
 
-    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-mini", authorization: CHAVE_DO_MOTOR }]);
+    // Sem endpoint, quem cobra é a OpenAI: pedir um modelo que o projeto não precifica daria custo
+    // "não medido" numa fatura de verdade. O modelo gravado continua na tela; o pedido usa a tabela.
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano", authorization: CHAVE_DO_MOTOR }]);
   });
 
   it.each([
