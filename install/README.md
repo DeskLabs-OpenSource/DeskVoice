@@ -361,6 +361,12 @@ e as linhas que o instalador imprime já trazem as duas:
 Se o seu proxy tinha uma regra separada para `/voice-ws` apontando para outra porta (era assim
 até a versão anterior), apague-a. Agora é tudo no mesmo destino.
 
+Se quem ocupa as portas 80 e 443 é o **Caddy do DeskcommCRM**, instalado nesta mesma VPS, o
+`127.0.0.1:3080` do host não serve: o Caddy dele roda em contêiner e precisa enxergar o DeskVoice
+pela rede Docker do ponto de extensão dele (`caddy-sites/`). O passo a passo medido, com o
+arquivo `.caddy` de exemplo, está em
+[`docs/guides/na-mesma-vps-do-crm.md`](../docs/guides/na-mesma-vps-do-crm.md).
+
 Se quem ocupa é a porta `5060/udp` ou a faixa de áudio, é outro programa de telefonia. Descubra
 com `sudo ss -lunp | grep :5060`, pare esse programa e rode o instalador de novo.
 

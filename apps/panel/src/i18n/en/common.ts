@@ -97,6 +97,9 @@ const common: CommonDictionary = {
     connector_replace_required: "A WhatsApp connector is already configured. Confirm the replacement to connect.",
     invalid_numbers: "These were not recognized as phone numbers. None was added:",
     number_already_registered: "This number is already registered.",
+    trunk_inbound_name:
+      "In a line recognized by IP, the server address and the other inbound addresses accept only an IP or a block, not a name. The provider name goes in the address for outbound calls; to recognize the line by name, use user and password.",
+    trunk_block_too_wide: "In a line recognized by IP, each block can be at most /16 in IPv4 or /32 in IPv6. Enter the smaller blocks the provider publishes, or its IP.",
     last_owner: "This is the only active owner. Make another person an owner first.",
     cannot_manage_owner: "Only an owner can invite, change, disable or remove another owner.",
     has_history: "This person has decided approvals or closed follow-ups, and the history must keep saying who decided and who closed. Disable the account instead of removing it.",
