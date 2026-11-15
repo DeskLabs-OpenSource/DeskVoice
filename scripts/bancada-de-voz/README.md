@@ -251,14 +251,19 @@ se pedido), `--frases 12` (as primeiras do conjunto).
 - **Fala baixa debaixo de ruído (fatia 4b):** os mesmos quadros, com obra, música e conversa por
   baixo da fala baixa a 15, 5 e 0 dB (a relação é sobre a fala baixa). A saída é comparada com a
   **voz limpa**, só nesses quadros, alinhada pelo atraso que a mesma frase teve sem ruído. O ruído
-  que sobra na saída conta como voz, e a perda sai menor do que é: sem redução, ela sai negativa,
-  e os controles mostram quanto. Célula com média acima de 1 dB sai em negrito.
+  que sobra na saída **não** conta como voz: o candidato recebe a voz com o ruído e, à parte, a voz
+  com o ruído invertido, e a parte da saída que é voz é a média das duas saídas, em que o ruído se
+  cancela (separação por inversão de fase, Hagerman e Olofsson, 2004). Por isso a medida debaixo
+  de ruído passa cada áudio duas vezes pelo candidato. Sem redução, a perda dá zero. O teste prova
+  que ela reprova o filtro que deixa o ruído e corta 6 dB da voz fraca, a 15, 5 e 0 dB. Célula com
+  média acima de 1 dB sai em negrito.
 
 ## O que esta bancada não finge medir
 
-- **Redução de ruído: o ruído que sobra contado como voz.** Debaixo de ruído, a régua compara a
-  energia da saída com a da voz limpa. Um candidato que deixasse o ruído e cortasse a voz no mesmo
-  quadro passaria por "sem perda". Separar a voz do ruído na saída não foi feito.
+- **Redução de ruído: a separação da voz na saída.** A inversão de fase supõe que o candidato
+  trata a voz com o ruído e a voz com o ruído invertido do mesmo jeito. As duas misturas têm a mesma
+  relação voz/ruído e o mesmo espectro, mas um candidato que decide por quadro pode decidir um
+  pouco diferente em cada uma, e a diferença entra na voz medida. Quanto, não foi medido.
 - **Redução de ruído: o limiar de "quadro com fala" (30 dB) e o quarto mais fraco.** São escolhas
   da régua, provadas nos testes, e não medidas contra o ouvido de ninguém.
 - **Redução de ruído: o DeepFilterNet3 completo em fluxo.** O plugin publicado traz o modelo de

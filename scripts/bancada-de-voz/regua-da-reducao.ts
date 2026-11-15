@@ -18,7 +18,11 @@
  *   média dos quadros. Um quadro zerado dá perda infinita. **Acima de 1 dB de perda média, reprova.**
  * - **Fala baixa debaixo de ruído:** a mesma régua, com o ruído por baixo da fala baixa. A perda é
  *   medida contra a voz limpa, só nos mesmos quadros, com o atraso medido sem ruído. O ruído que
- *   sobra na saída conta como voz (a perda sai menor, e o controle sem redução mostra quanto).
+ *   sobra na saída **não** conta como voz: o filtro recebe a voz com o ruído e, à parte, a voz com
+ *   o ruído invertido, e a parte da saída que é voz é a média das duas saídas (a do ruído se
+ *   cancela). É a separação por inversão de fase (Hagerman e Olofsson, 2004). Ela vale quando o
+ *   filtro trata as duas misturas do mesmo jeito; com a mesma relação voz/ruído e o mesmo
+ *   espectro, um redutor de ruído quase sempre trata.
  */
 
 /** Perda na fala baixa acima disto reprova o candidato (dB). */
@@ -197,19 +201,26 @@ export async function medirPorQuadro(
 }
 
 /**
- * A régua por quadro debaixo de ruído: `mistura` é a fala baixa (`vozNoNivel`, já escalada) com o
- * ruído por baixo. A saída do filtro é comparada com a voz limpa, só nos quadros mais fracos da
- * fala, com o `atraso` medido sem ruído (o ruído atrapalha a correlação).
+ * A régua por quadro debaixo de ruído. `vozNoNivel` é a fala baixa (já escalada) e `ruidoNoNivel`
+ * o ruído já no nível da relação pedida. O filtro recebe `voz + ruído` e `voz − ruído`, cada uma
+ * do começo, e a parte da saída que é voz é a média das duas. Ela é comparada com a voz limpa, só
+ * nos quadros mais fracos da fala, com o `atraso` medido sem ruído (o ruído atrapalha a
+ * correlação). Assim o ruído que o filtro deixa passar não esconde a sílaba fraca que ele cortou.
  */
 export async function medirSobRuido(
   vozNoNivel: ArrayLike<number>,
-  mistura: Float64Array,
+  ruidoNoNivel: ArrayLike<number>,
   quadros: readonly Trecho[],
   atraso: number,
   filtro: (entrada: Float64Array) => ArrayLike<number> | Promise<ArrayLike<number>>,
 ): Promise<{ mediaDb: number; calados: number; semCaladosDb: number }> {
-  const saida = await filtro(mistura);
-  const { mediaDb, calados, semCaladosDb } = perdaPorQuadroDb(vozNoNivel, saida, quadros, atraso);
+  if (ruidoNoNivel.length < vozNoNivel.length) throw new Error("o ruído precisa cobrir a voz inteira");
+  const comRuido = Float64Array.from({ length: vozNoNivel.length }, (_, i) => (vozNoNivel[i] ?? 0) + (ruidoNoNivel[i] ?? 0));
+  const comRuidoInvertido = Float64Array.from({ length: vozNoNivel.length }, (_, i) => (vozNoNivel[i] ?? 0) - (ruidoNoNivel[i] ?? 0));
+  const saida = await filtro(comRuido);
+  const saidaInvertida = await filtro(comRuidoInvertido);
+  const vozNaSaida = Float64Array.from({ length: Math.min(saida.length, saidaInvertida.length) }, (_, i) => ((saida[i] ?? 0) + (saidaInvertida[i] ?? 0)) / 2);
+  const { mediaDb, calados, semCaladosDb } = perdaPorQuadroDb(vozNoNivel, vozNaSaida, quadros, atraso);
   return { mediaDb, calados, semCaladosDb };
 }
 

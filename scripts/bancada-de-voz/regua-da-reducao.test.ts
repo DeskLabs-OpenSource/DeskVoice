@@ -191,24 +191,57 @@ describe("a fala baixa debaixo de ruído (fatia 4b)", () => {
   const rand = sorteio(11);
   const ruido = Float64Array.from({ length: voz.length }, () => rand() * 2 - 1);
   const vozNoNivel = escalarAoPico(voz, -30);
-  const { mistura } = misturar(vozNoNivel, ruido, 0, fala);
   const quadros = quadrosMaisFracos(voz, fala, TAXA);
+  const ruidoA = (snrDb: number) => misturar(vozNoNivel, ruido, snrDb, fala).ruidoNoNivel;
+  const { ruidoNoNivel } = misturar(vozNoNivel, ruido, 0, fala);
+  /** Só a voz dos quadros mais fracos (o resto zerado): o que o filtro de sílaba fraca corta. */
+  const vozFraca = new Float64Array(vozNoNivel.length);
+  for (const q of quadros) for (let i = q.inicio; i < q.fim; i++) vozFraca[i] = vozNoNivel[i] ?? 0;
+  const naoFraco = (i: number) => vozFraca[i] === 0;
 
   it("mede contra a voz limpa: o filtro ideal (devolve a voz limpa) perde zero", async () => {
-    expect((await medirSobRuido(vozNoNivel, mistura, quadros, 0, () => vozNoNivel)).mediaDb).toBeCloseTo(0, 6);
+    expect((await medirSobRuido(vozNoNivel, ruidoNoNivel, quadros, 0, () => vozNoNivel)).mediaDb).toBeCloseTo(0, 6);
   });
 
-  it("sem redução, o ruído que fica soma energia e a perda sai negativa", async () => {
-    expect((await medirSobRuido(vozNoNivel, mistura, quadros, 0, (x) => x)).mediaDb).toBeLessThan(-1);
+  it("o ruído que sobra não conta como voz: sem redução, a perda dá zero", async () => {
+    expect((await medirSobRuido(vozNoNivel, ruidoNoNivel, quadros, 0, (x) => x)).mediaDb).toBeCloseTo(0, 6);
   });
 
   it("o filtro que tira o ruído e zera os quadros fracos da fala reprova", async () => {
     const filtro = () => zerarQuadrosFracos(12)(vozNoNivel);
-    expect((await medirSobRuido(vozNoNivel, mistura, quadros, 0, filtro)).mediaDb).toBeGreaterThan(LIMITE_PERDA_DB);
+    expect((await medirSobRuido(vozNoNivel, ruidoNoNivel, quadros, 0, filtro)).mediaDb).toBeGreaterThan(LIMITE_PERDA_DB);
+  });
+
+  // O fracasso do aceite: na régua que contava o ruído como voz, este filtro passava a 15, 5 e 0 dB.
+  for (const snrDb of [15, 5, 0]) {
+    it(`o filtro que deixa o ruído e corta 6 dB da voz fraca reprova a ${snrDb} dB`, async () => {
+      const k = 1 - 10 ** (-6 / 20);
+      const filtro = (x: Float64Array) => x.map((v, i) => v - k * (vozFraca[i] ?? 0));
+      const r = await medirSobRuido(vozNoNivel, ruidoA(snrDb), quadros, 0, filtro);
+      expect(r.mediaDb).toBeCloseTo(6, 6);
+    });
+
+    it(`o filtro que corta 6 dB da mistura nos quadros fracos (voz e ruído) reprova a ${snrDb} dB`, async () => {
+      const filtro = (x: Float64Array) => x.map((v, i) => (naoFraco(i) ? v : v * 10 ** (-6 / 20)));
+      const r = await medirSobRuido(vozNoNivel, ruidoA(snrDb), quadros, 0, filtro);
+      expect(r.mediaDb).toBeCloseTo(6, 6);
+    });
+  }
+
+  it("passa a voz com o ruído e a voz com o ruído invertido, uma vez cada", async () => {
+    const entradas: Float64Array[] = [];
+    await medirSobRuido(vozNoNivel, ruidoNoNivel, quadros, 0, (x) => {
+      entradas.push(x);
+      return x;
+    });
+    expect(entradas).toHaveLength(2);
+    const i = fala.inicio + 100;
+    expect(entradas[0]?.[i]).toBeCloseTo((vozNoNivel[i] ?? 0) + (ruidoNoNivel[i] ?? 0), 9);
+    expect(entradas[1]?.[i]).toBeCloseTo((vozNoNivel[i] ?? 0) - (ruidoNoNivel[i] ?? 0), 9);
   });
 
   it("usa o atraso dado: a voz limpa atrasada perde zero com o atraso certo", async () => {
-    expect((await medirSobRuido(vozNoNivel, mistura, quadros, 160, () => atrasar(160)(vozNoNivel))).mediaDb).toBeCloseTo(0, 6);
+    expect((await medirSobRuido(vozNoNivel, ruidoNoNivel, quadros, 160, () => atrasar(160)(vozNoNivel))).mediaDb).toBeCloseTo(0, 6);
   });
 });
 

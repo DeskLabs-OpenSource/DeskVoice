@@ -450,11 +450,13 @@ async function medir(filtro: Filtro, itens: readonly Item[]): Promise<Resultado>
         const semCalados: number[] = [];
         for (const item of itens) {
           const vozNoNivel = escalarAoPico(item.voz8k, picoDb);
-          const { mistura } = misturar(vozNoNivel, item.ruidos[tipo], snrDb, item.fala);
+          const { ruidoNoNivel, escala } = misturar(vozNoNivel, item.ruidos[tipo], snrDb, item.fala);
           // `misturar` baixa voz e ruído juntos se a soma estourar; aí a voz limpa não seria mais a referência.
-          if (mistura.some((v) => Math.abs(v) > 30000)) throw new Error(`a mistura estourou (frase ${item.n}, ${tipo}, ${snrDb} dB)`);
+          // A régua também passa a voz com o ruído invertido, que não pode estourar.
+          const estoura = vozNoNivel.some((v, i) => Math.abs(v - (ruidoNoNivel[i] ?? 0)) > 30000);
+          if (escala !== 1 || estoura) throw new Error(`a mistura estourou (frase ${item.n}, ${tipo}, ${snrDb} dB)`);
           const atrasoDoItem = atrasoDaFrase.get(`${item.n}:${picoDb}`) ?? atraso;
-          const r = await medirSobRuido(vozNoNivel, mistura, quadrosMaisFracos(item.voz8k, item.fala, TAXA_DA_PONTE), atrasoDoItem, processar);
+          const r = await medirSobRuido(vozNoNivel, ruidoNoNivel, quadrosMaisFracos(item.voz8k, item.fala, TAXA_DA_PONTE), atrasoDoItem, processar);
           valores.push(r.mediaDb);
           calados.push(r.calados);
           semCalados.push(r.semCaladosDb);
@@ -575,7 +577,7 @@ async function main(): Promise<void> {
   print();
   print(`### Fala baixa debaixo de ruído, por quadro (dB, média das frases / pior frase)`);
   print();
-  print(`Os mesmos quadros, com o ruído por baixo na relação pedida (calculada sobre a fala baixa), contra a voz limpa e com o atraso medido sem ruído. O ruído que sobra na saída conta como voz: sem redução, a "perda" sai negativa (o controle mostra quanto). Célula acima de ${LIMITE_PERDA_DB} dB na média em **negrito**.`);
+  print(`Os mesmos quadros, com o ruído por baixo na relação pedida (calculada sobre a fala baixa), contra a voz limpa e com o atraso medido sem ruído. O ruído que sobra na saída não conta como voz: cada áudio passa com o ruído e com o ruído invertido, e a voz na saída é a média das duas saídas (sem redução, a perda dá zero). Célula acima de ${LIMITE_PERDA_DB} dB na média em **negrito**.`);
   for (const picoDb of PICOS_DA_FALA_BAIXA_DB) {
     print();
     print(`Fala baixa a ${nivel(picoDb)} do pico:`);
