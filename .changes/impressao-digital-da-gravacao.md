@@ -1,7 +1,7 @@
 ---
 impact: new_capability
 section: added
-title: A gravação fecha com impressão digital, para provar que o áudio é o original
+title: A gravação fecha com impressão digital, para conferir se uma cópia é igual ao que foi gravado
 ---
 
-Ao fim de cada ligação gravada, o arquivo `.wav` passa a ser lido em stream e resumido em SHA-256, e a linha do tempo da chamada ganha o evento `recording_saved` com o tamanho e a impressão digital do arquivo — antes o `.wav` era fechado e ninguém guardava nada que o identificasse. Isso muda o peso de uma gravação numa contestação: sem impressão digital, qualquer cópia do arquivo tem o mesmo valor de qualquer outra, e a resposta a "essa gravação é a original?" depende da palavra de quem apresenta; com ela, o áudio apresentado pode ser conferido contra o que a chamada registrou, e uma edição deixa de ser indetectável. A leitura é por stream porque uma hora de conversa passa de 100 MB e o fim da chamada não é lugar para carregar o arquivo inteiro na memória. Crédito: @webtecnica.
+Ao fim de cada ligação gravada, e de cada recado da caixa postal, a linha do tempo da chamada mostra "Gravação fechada", com o tamanho do arquivo e o começo da impressão digital (SHA-256); a impressão inteira fica logo abaixo, para copiar. Com ela dá para conferir se uma cópia do áudio, enviada por e-mail ou guardada fora do servidor, é igual ao arquivo que a instalação gravou: qualquer alteração na cópia muda a impressão. Ela não serve de prova contra quem administra o servidor: a impressão fica no mesmo banco, na mesma máquina que o áudio, e quem tem acesso aos dois pode trocar os dois. Gravações anteriores à atualização não têm impressão digital. Crédito: @webtecnica.
