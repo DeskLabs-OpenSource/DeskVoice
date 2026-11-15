@@ -3,6 +3,27 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.13.1] - 2026-11-15
+
+### Adicionado
+
+- **Bancada de voz mede Deepgram, AssemblyAI, Soniox e o Jev, fora do produto** O script manual `scripts/bancada-de-voz/` ganha três serviços externos de transcrição em streaming
+  (Deepgram Nova-3, AssemblyAI Universal-Streaming multilíngue e Soniox), cada um com o
+  vocabulário pelo recurso do próprio serviço, e o Jev como modelo de decisão, com as mesmas
+  perguntas do Laya. Cada um só roda com a chave entregue à bancada, para antes do teto de gasto e
+  diz quanto gastou. Nada disso roda no CI, entra na imagem ou muda uma instalação. Crédito: @melgarafael.
+- **Bancada de voz mede o acerto do Jev e do Laya com transcrição errada, fundo e fim do pensamento** O script manual `scripts/bancada-de-voz/` ganha um conjunto de texto inventado para o filtro, com a
+  resposta esperada de cada item: a leitura com o nome escrito errado pela transcrição (ou sem nome
+  nenhum), a fala de quem liga ou de fundo, e o pensamento completo ou a pausa. O Jev e o Laya
+  respondem aos mesmos pedidos, e a bancada conta o acerto por pergunta e quantas falas de quem liga
+  cada um marcou como fundo. O teto de gasto também para a medida quando um pedido custa mais que o
+  reservado. Nada disso roda no CI, entra na imagem ou muda uma instalação. Crédito: @melgarafael.
+
+### Corrigido
+
+- **Uma falha ao calcular a impressão digital não faz mais a gravação contar como perdida** A impressão digital (SHA-256) é calculada lendo o arquivo depois que a gravação fecha. Na 0.13.0, se essa leitura falhasse, a gravação inteira contava como falha: na ligação, o log dizia que o áudio não tinha sido salvo, embora o arquivo existisse; no recado da caixa postal, a chamada virava recado com falha, e o arquivo ficava solto no disco. Agora a falha fica só na impressão: a gravação conta como salva, o motivo vai para o log do processo de voz, e a linha do tempo diz que a impressão não pôde ser calculada. O tamanho da gravação passou a vir do próprio cabeçalho do arquivo, sem outra leitura do disco depois de a gravação estar salva. Crédito: @melgarafael.
+- **O envio por WhatsApp pede confirmação no máximo 3 vezes por ligação** Numa ligação recebida, o `send_whatsapp` pede a um responsável que confirme o envio antes de mandar a mensagem, e cada pedido avisa a equipe. O teto de 5 mensagens por ligação contava só os envios feitos, então os pedidos negados não tinham limite, e quem estava na linha podia fazer a equipe receber aviso atrás de aviso. Agora, depois de 3 pedidos de confirmação na mesma ligação, aprovados ou não, o agente não pede de novo: diz que não consegue enviar, passa a informação por voz e, se for preciso, anota para a equipe. É o mesmo teto do pedido de aprovação (`request_approval`). Nada muda numa ligação normal. Crédito: @melgarafael.
+
 ## [0.13.0] - 2026-11-15
 
 ### Adicionado
