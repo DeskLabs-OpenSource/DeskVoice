@@ -33,7 +33,7 @@ Operador vê o bloco e não pode pedir.
 |---|---|---|
 | O agente de atualização ainda não falou com o painel | O agente não está instalado neste servidor. É o caso de quem atualizou a partir da 0.1.0, que não tinha agente | No servidor, na pasta do DeskVoice: `bash install/update.sh` (ou `sudo bash install/agent.sh --install`). Não atualiza nada: instala o agente |
 | O agente não está respondendo desde ... | O agente parou de passar, ou não consegue falar com o painel | Veja `deploy/agent/agent.log` no servidor. O botão continua: um pedido feito assim espera o agente e vence em 15 minutos |
-| Este servidor roda a versão "local" | As imagens foram construídas no servidor (`--build`) | Atualize pelo terminal: `git pull && bash install/install.sh --build` |
+| Este servidor roda a versão "local" | As imagens foram construídas no servidor (`--build`, ou processador ARM numa versão sem imagem ARM) | Atualize pelo terminal: `git pull && bash install/install.sh --build` |
 | Não foi possível consultar as versões publicadas | O painel não alcançou a lista pública de versões | A versão em execução continua certa. Sem as notas a tela não oferece o botão; a consulta é refeita em um minuto. Pelo terminal dá para atualizar |
 | A versão já existe, mas as notas ainda não estão disponíveis | O servidor já enxerga uma versão nova, e a página dela ainda não foi publicada (ou a consulta falhou) | Espere alguns minutos. O botão aparece quando as notas puderem ser lidas: ninguém confirma sem ver o que muda |
 | O pedido não foi executado: saiu uma versão mais nova | Entre a sua confirmação e a execução saiu outra versão. O servidor não atualiza para uma versão que ninguém confirmou | Nada foi alterado. Leia as notas da versão nova e peça de novo |

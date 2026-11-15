@@ -66,7 +66,7 @@ A instalação real aconteceu depois da publicação (item 13.5 da conformidade)
 - Instalação do zero, de verdade, pelo comando de uma linha contra uma versão publicada, numa máquina limpa. Só a simulação e a atualização foram exercitadas. (Depois da 0.2.0 a instalação do zero contra a 0.1.0 aconteceu, numa segunda VPS compartilhada: ver "Depois da 0.2.0". Máquina limpa continua sem prova.)
 - Conversa por voz depois da atualização para a 0.1.0.
 - A volta automática do `update.sh` numa VPS.
-- Instalação em processador ARM. Até a [0017](../decisions/0017-imagens-para-amd64-e-arm64.md) ela só existia construindo na própria máquina; desde então a imagem publicada tem arm64 e a instalação puxa, sem que ninguém tenha instalado numa máquina ARM real.
+- Instalação em processador ARM. Nas versões sem imagem ARM ela só existe construindo na própria máquina; a partir da primeira versão publicada com imagem ARM ([0017](../decisions/0017-imagens-para-amd64-e-arm64.md)), a instalação puxa, sem que ninguém tenha instalado numa máquina ARM real.
 
 ## Depois da 0.2.0 (2026-11-11)
 
