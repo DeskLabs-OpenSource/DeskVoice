@@ -4,6 +4,7 @@
  */
 export class Orcamento {
   private gastoUsd = 0;
+  private readonly porServicoUsd = new Map<string, number>();
 
   constructor(readonly tetoUsd: number) {
     if (!(tetoUsd >= 0)) throw new RangeError(`teto inválido: ${tetoUsd}`);
@@ -18,7 +19,14 @@ export class Orcamento {
     return this.gastoUsd + estimativaUsd <= this.tetoUsd;
   }
 
-  somar(valorUsd: number): void {
+  /** Soma o que foi gasto. Com `servico`, o gasto também fica separado por serviço. */
+  somar(valorUsd: number, servico?: string): void {
     this.gastoUsd += valorUsd;
+    if (servico !== undefined) this.porServicoUsd.set(servico, (this.porServicoUsd.get(servico) ?? 0) + valorUsd);
+  }
+
+  /** O gasto de cada serviço, na ordem em que gastou pela primeira vez. */
+  porServico(): [string, number][] {
+    return [...this.porServicoUsd];
   }
 }

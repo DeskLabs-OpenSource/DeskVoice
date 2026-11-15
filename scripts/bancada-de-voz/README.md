@@ -7,14 +7,17 @@ entram aqui como arquivos novos, e não como outra bancada.
 
 Script manual. **Fora do CI e fora do produto**: nada daqui entra na imagem, e nenhuma dependência
 nova entra no `package.json`. O que ela usa de fora (Piper, faster-whisper, Laya) fica num venv à
-parte, fora do repositório.
+parte, fora do repositório. `zod` e `ws` vêm de `packages/voice-engine`, que já depende deles
+(`dependencias.ts`).
 
 ## O que nunca entra no repositório
 
 - **Áudio.** É gerado na hora, numa pasta temporária (`$TMPDIR/bancada-de-voz-*`).
 - **Resultado bruto** com o texto transcrito: fica nessa mesma pasta (`resultados.json`).
-- **Chave.** Vem do ambiente, numa variável própria da bancada (`BANCADA_*_API_KEY`), entregue por
-  canal privado. Nunca em arquivo, tarefa ou comentário.
+- **Chave.** Vem do ambiente, numa variável própria da bancada (`BANCADA_*_API_KEY`, e
+  `JEV_API_KEY` para o Jev), entregue pelo cofre do Paperclip. Nunca em arquivo, tarefa ou
+  comentário. Os serviços externos trocam o valor da chave por `***` em todo erro, e um teste
+  (`servicos/externos.test.ts`, "a chave não sai") prova que nada do que escrevem a contém.
 
 O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medida.
 
@@ -32,7 +35,12 @@ O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medi
 | `audio.ts` | WAV, trecho da fala e mistura pela relação voz/ruído sobre o RMS |
 | `orcamento.ts` | o teto: a bancada para antes de passar dele |
 | `servicos/*.ts` | um arquivo por serviço medido, descoberto pela pasta |
+| `servicos/deepgram.ts`, `assemblyai.ts`, `soniox.ts` | os externos em streaming, direto pelo WebSocket, sem SDK. Fonte, data, português em streaming, vocabulário e preço no cabeçalho de cada um |
+| `servicos/_externo.ts` | o que os externos têm em comum: conexão, leitura por zod, fechamento com prazo, chave fora de todo erro |
+| `servicos/externos.test.ts` | os três contra um servidor WebSocket falso, sem chave: roda no `pnpm verify` |
+| `dependencias.ts` | `zod` e `ws`, pegos de `packages/voice-engine` (sem dependência nova na raiz) |
 | `decisores/laya.ts` | o Laya: só CPU e latência, com as três perguntas fixas |
+| `decisores/jev.ts` | o Jev: as mesmas três perguntas, com acerto da leitura e latência (`jev.test.ts`, contra um servidor HTTP falso) |
 
 ## Montar o ambiente (uma vez, fora do repositório)
 
@@ -62,13 +70,34 @@ export BANCADA_PYTHON=/tmp/bancada-env/venv/bin/python
 export HF_HOME=/tmp/bancada-env/hf          # onde os pesos do Whisper e do Laya ficam
 # Só com a chave entregue por canal privado (decisão 2 da DESA-19):
 # export BANCADA_OPENAI_API_KEY=...  BANCADA_GEMINI_API_KEY=...
+# Externos e Jev (R12, fatia 1b), pelo cofre do Paperclip:
+# export BANCADA_DEEPGRAM_API_KEY=...  BANCADA_ASSEMBLYAI_API_KEY=...  BANCADA_SONIOX_API_KEY=...
+# export JEV_API_KEY=...
 
 pnpm exec tsx scripts/bancada-de-voz/medir.ts --teto-usd 0 --decisor laya
 ```
 
+Os externos, com o teto da decisão da R12 (US$ 10, somado ao da DESA-10):
+
+```bash
+pnpm exec tsx scripts/bancada-de-voz/medir.ts --teto-usd 10 --servicos deepgram,assemblyai,soniox
+```
+
+Só o Jev, com o teto dele (US$ 1). Sem nenhum serviço com chave, a bancada nem gera áudio:
+
+```bash
+pnpm exec tsx scripts/bancada-de-voz/medir.ts --teto-usd 1 --servicos deepgram,assemblyai,soniox --decisor jev
+```
+
+O serviço sem chave sai em "Não medido" como "chave não entregue". No fim, a bancada imprime o
+gasto total e o de cada serviço.
+
 Opções: `--servicos whisper-local,openai-hoje`, `--linhas estreita,larga`, `--vocabulario com,sem`,
 `--casos nomes,ruido`, `--limite 5` (só as primeiras frases). `--teto-usd` é obrigatório. Antes de
-cada frase, a bancada estima o pior caso pelo preço do serviço e para se ele passar do teto.
+cada frase, a bancada estima o pior caso pelo preço do serviço e para se ele passar do teto. Quem
+cobra pela sessão, e não pelo áudio (AssemblyAI; e Soniox, cuja página não diz), declara um pior
+caso maior por minuto (`tetoUsdPorMinuto`). O Jev estima um token por byte do pedido antes de cada
+pedido.
 
 ## Como cada número é medido
 
@@ -79,6 +108,12 @@ cada frase, a bancada estima o pior caso pelo preço do serviço e para se ele p
   do pico), antes de misturar o ruído.
 - **Latência até o parcial:** do início da fala ao primeiro texto parcial (ou primeiro aviso de
   texto, nos motores de hoje, que não entregam o texto parcial).
+- **Final, nos externos:** Deepgram, cada `Results` com `is_final`; AssemblyAI, o `Turn` de fim
+  de turno já formatado (a formatação entra na latência); Soniox, o trecho inteiro no token
+  `<end>`, para uma palavra partida em dois tokens não virar duas.
+- **Jev:** latência do pedido HTTP inteiro, da VPS à API, por passada (as três perguntas num
+  pedido) e por pergunta sozinha, com 1 e 3 chamadas simultâneas. Os três primeiros pedidos
+  aquecem e não contam.
 - **Latência até o final:** do fim da fala ao último trecho final da frase. Sem final em 8 s depois
   do último áudio, a frase conta como "sem final", e o WER dela conta tudo como apagado.
 - **Fora do ritmo:** cada item guarda, no resultado bruto, os bytes entregues, a duração do áudio
@@ -101,3 +136,7 @@ cada frase, a bancada estima o pior caso pelo preço do serviço e para se ele p
   caso. Ele só entra com um banco aberto, com licença para este uso e consentimento declarado dos
   falantes.
 - **Acerto do Laya.** Aqui só o tempo e a CPU. O acerto das perguntas é da fatia 6 da R12.
+- **Acerto do Jev em "fundo" e "terminou".** O conjunto não tem a resposta esperada dessas duas
+  perguntas: a tabela dá a média do valor devolvido. O acerto da "leitura" vem dos termos marcados
+  na frase. Ele é fácil por construção, porque o estado traz a frase certa, como se a transcrição
+  tivesse acertado. Com a transcrição errada, não foi medido.

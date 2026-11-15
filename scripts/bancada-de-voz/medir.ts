@@ -3,7 +3,7 @@
  * Fora do CI e fora do produto. Como rodar, o que instalar e onde: README.md desta pasta.
  *
  *   pnpm exec tsx scripts/bancada-de-voz/medir.ts --teto-usd 0 [--servicos whisper-local] \
- *     [--linhas estreita,larga] [--vocabulario com,sem] [--limite 5] [--decisor laya]
+ *     [--linhas estreita,larga] [--vocabulario com,sem] [--limite 5] [--decisor laya,jev]
  *
  * O áudio é gerado numa pasta temporária fora do repositório, e o resultado bruto (com o texto
  * transcrito) fica lá. A saída na tela é só a tabela agregada e o gasto.
@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { misturar, paraPcm16, regiaoDaFala } from "./audio";
 import { carregarConjunto, vocabularioDoConjunto, type Frase } from "./conjunto";
+import { medirJev } from "./decisores/jev";
 import { medirLaya } from "./decisores/laya";
 import { LINHAS, passarPelaLinha, type Linha } from "./linhas";
 import { medirFrase, tabelaEmMarkdown, tabelar, type ResultadoBruto } from "./metricas";
@@ -178,17 +179,18 @@ async function main(): Promise<void> {
 
   const resultados: ResultadoBruto[] = [];
   const pedidos = lista("servicos", []);
-  const servicos = (await descobrirServicos()).filter((s) => pedidos.length === 0 || pedidos.includes(s.id));
+  const pedidosOuTodos = (await descobrirServicos()).filter((s) => pedidos.length === 0 || pedidos.includes(s.id));
+  // O serviço sem chave (ou sem binário) não roda, e a tabela diz por quê. Sem nenhum que rode, nem o áudio é gerado.
+  const servicos = pedidosOuTodos.filter((s) => {
+    const motivo = s.indisponivel();
+    if (motivo) naoMedido.push(`${s.id}: ${motivo}`);
+    return !motivo;
+  });
   if (servicos.length > 0) {
     const itens = await montarItens(frases, pasta);
     print(`Frases: ${frases.length}; casos gerados (frase × voz × ruído): ${itens.length}; vocabulário: ${vocabulario.length} termos.`);
     let parou = false;
     for (const servico of servicos) {
-      const motivo = servico.indisponivel();
-      if (motivo) {
-        naoMedido.push(`${servico.id}: ${motivo}`);
-        continue;
-      }
       await servico.preparar?.();
       print(`\n${servico.rotulo} — ${servico.modelo}`);
       for (const linha of linhas) {
@@ -198,14 +200,14 @@ async function main(): Promise<void> {
         }
         for (const comVocabulario of modos) {
           for (const [n, item] of itens.entries()) {
-            const estimativa = (item.duracaoS / 60) * servico.preco.usdPorMinuto;
+            const estimativa = (item.duracaoS / 60) * (servico.preco.tetoUsdPorMinuto ?? servico.preco.usdPorMinuto);
             if (!orcamento.cabe(estimativa)) {
               naoMedido.push(`${servico.id}, linha ${linha}, vocabulário ${comVocabulario ? "com" : "sem"}: parou no teto (US$ ${orcamento.gasto.toFixed(4)} gastos) antes do caso ${n + 1} de ${itens.length}`);
               parou = true;
               break;
             }
             const resultado = await medirItem(servico, linha, comVocabulario, vocabulario, item, relogio);
-            orcamento.somar(resultado.custoUsd);
+            orcamento.somar(resultado.custoUsd, servico.id);
             resultados.push(resultado);
             process.stderr.write(`\r  ${linha} ${comVocabulario ? "com" : "sem"} vocabulário: ${n + 1}/${itens.length}   `);
           }
@@ -236,12 +238,18 @@ async function main(): Promise<void> {
     }
   }
 
-  if (argumento("decisor") === "laya") {
+  const decisores = lista("decisor", []);
+  if (decisores.includes("laya")) {
     print("\n## Laya (só CPU e latência, perguntas fixas)\n");
     print(await medirLaya(frases, vocabulario));
   }
+  if (decisores.includes("jev")) {
+    print("\n## Jev (acerto da leitura e latência, as mesmas perguntas do Laya)\n");
+    print(await medirJev(frases, vocabulario, orcamento));
+  }
 
   print(`\nGasto: US$ ${orcamento.gasto.toFixed(4)} de US$ ${orcamento.tetoUsd}.`);
+  for (const [servico, gasto] of orcamento.porServico()) print(`- ${servico}: US$ ${gasto.toFixed(4)}`);
   if (naoMedido.length > 0) {
     print("\n## Não medido\n");
     for (const linha of naoMedido) print(`- ${linha}`);

@@ -94,4 +94,17 @@ describe("Orcamento", () => {
     expect(new Orcamento(0).cabe(0.0001)).toBe(false);
     expect(new Orcamento(0).cabe(0)).toBe(true);
   });
+
+  it("separa o gasto por serviço, e o total soma todos", () => {
+    const orcamento = new Orcamento(1);
+    orcamento.somar(0.01, "deepgram");
+    orcamento.somar(0.002, "jev");
+    orcamento.somar(0.03, "deepgram");
+    orcamento.somar(0.005);
+    expect(orcamento.porServico()).toEqual([
+      ["deepgram", expect.closeTo(0.04, 12)],
+      ["jev", 0.002],
+    ]);
+    expect(orcamento.gasto).toBeCloseTo(0.047, 12);
+  });
 });
