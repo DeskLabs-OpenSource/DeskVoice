@@ -35,7 +35,7 @@ O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medi
 | `decisores/laya.ts` | o Laya: só CPU e latência, com as três perguntas fixas |
 | `reducao-de-ruido.ts` | a medida da redução de ruído local em 8 kHz (fatia 4 da DESA-24): só mede, não liga nada |
 | `reducao_de_ruido.py` | os candidatos dessa medida (SpeexDSP, RNNoise, DeepFilterNet), um por processo |
-| `regua-da-reducao.ts` | a régua dela: perda na fala baixa (acima de 1 dB reprova), redução do ruído e atraso |
+| `regua-da-reducao.ts` | a régua dela: perda na fala baixa, medida na frase inteira (acima de 1 dB reprova), redução do ruído e atraso |
 
 ## Montar o ambiente (uma vez, fora do repositório)
 
@@ -153,13 +153,21 @@ Opções: `--candidatos speexdsp,rnnoise,deepfilternet`, `--frases 12` (as prime
 - **Quanto tira do ruído:** energia que entrou sobre a que saiu (dB) nos trechos só de ruído da
   mistura, antes e depois da fala, sem o primeiro segundo (a adaptação do candidato). Média das
   frases.
-- **Perda na fala baixa:** a voz sem ruído, com o pico a −20 dB e a −30 dB do fundo de escala.
-  Energia da fala que entrou sobre a que saiu, alinhada pelo atraso. Média e pior frase. **Perda
+- **Perda na fala baixa, medida na frase inteira:** a voz sem ruído, com o pico a −20 dB e a
+  −30 dB do fundo de escala. Energia da frase inteira que entrou sobre a que saiu, alinhada pelo
+  atraso. Média e pior frase. **Perda
   acima de 1 dB, em qualquer frase e nível, reprova o candidato** (`regua-da-reducao.ts`, provada
   em `regua-da-reducao.test.ts`).
 
 ## O que esta bancada não finge medir
 
+- **Perda por quadro (a sílaba fraca), na redução de ruído.** A régua soma a energia da frase
+  inteira, e as sílabas fortes escondem as fracas: um filtro que apaga as sílabas fracas passa
+  com 0,15 dB. "Passa na régua da frase inteira" não é "não corta a fala baixa". Num esboço do
+  Verificador, quadro a quadro e fora do repositório, a perda no quarto mais fraco foi de 3,3 dB
+  no SpeexDSP, 1,25 dB no DeepFilterNet e 0,6 dB no RNNoise.
+- **Fala baixa debaixo de ruído, na redução de ruído.** A perda na fala baixa é medida com a voz
+  sozinha, sem ruído.
 - **Fala atípica.** Voz sintética alterada mediria o efeito, e não a fala. O conjunto não tem esse
   caso. Ele só entra com um banco aberto, com licença para este uso e consentimento declarado dos
   falantes.
