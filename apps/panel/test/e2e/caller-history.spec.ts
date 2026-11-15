@@ -1,12 +1,13 @@
 import { randomInt } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import common from "../../src/i18n/pt-BR/common";
 import timeline from "../../src/i18n/pt-BR/timeline";
 import { signIn, unique } from "./session";
 
 // Um número só deste teste, para não encontrar as ligações de outro.
 const phone = (): string => `(31) 9${String(randomInt(0, 100_000_000)).padStart(8, "0")}`;
 
-test("a segunda ligação simulada do mesmo número mostra a primeira no bloco Este número", async ({ page }) => {
+test("a segunda ligação simulada do mesmo número mostra a primeira, marcada como simulada, no bloco Este número", async ({ page }) => {
   await signIn(page);
   const created = await page.request.post("/api/v1/agents", { data: { name: `Memória ${unique()}`, engine: "simulated" } });
   expect(created.status()).toBe(200);
@@ -40,6 +41,9 @@ test("a segunda ligação simulada do mesmo número mostra a primeira no bloco E
   await page.goto(`/calls/${second}`);
   await expect(block.getByRole("heading", { name: timeline.callerHistory.calls.replace("{count}", "1") })).toBeVisible();
   await expect(block.locator(`a[href="/calls/${first}"]`).filter({ hasNotText: timeline.callerHistory.origin })).toBeVisible();
+  // A primeira é simulada: aparece marcada, para ninguém ler um teste como a pessoa ligando.
+  const firstItem = block.getByRole("listitem").filter({ has: block.locator(`a[href="/calls/${first}"]`).filter({ hasNotText: timeline.callerHistory.origin }) });
+  await expect(firstItem.getByText(common.channel.simulated, { exact: true })).toBeVisible();
   // A pendência aberta da primeira ligação aparece no bloco da segunda, com o link para a de origem.
   const origin = page.locator(`a[href="/calls/${first}"]`, { hasText: timeline.callerHistory.origin });
   await expect(block.getByRole("listitem").filter({ hasText: pending }).filter({ has: origin })).toBeVisible();

@@ -26,6 +26,12 @@ export interface CallerHistoryCall {
   summary: string | null;
   summaryPurged: boolean;
   erased: boolean;
+  /**
+   * Chamada simulada (`channel = 'simulated'`): um teste da equipe, e não a pessoa ligando. A rota de
+   * simular não pede papel, então qualquer pessoa da equipe pode simular com o número de um cliente.
+   * A tela a lista com a marca "Simulada", e os avisos não a contam (`simulatedCallCount`).
+   */
+  simulated: boolean;
 }
 
 export interface CallerHistoryFollowUp {
@@ -40,6 +46,8 @@ export interface CallerHistory {
   phone: string;
   /** Todas as ligações anteriores do número nesta organização; `calls` traz só as mais novas. */
   callCount: number;
+  /** Quantas de `callCount` são simuladas. O aviso diz "já ligou" só com as outras. */
+  simulatedCallCount: number;
   calls: CallerHistoryCall[];
   openFollowUpCount: number;
   openFollowUps: CallerHistoryFollowUp[];
@@ -73,16 +81,23 @@ export async function callerHistory(q: OrgQuery, callId: string): Promise<Caller
     outcome: string | null;
     summary: string | null;
     erased: boolean;
+    simulated: boolean;
   }>(
     `select c.id, c.started_at, a.name as agent_name, c.direction, c.status, c.outcome,
-            case when c.erased_at is null then c.summary end as summary, c.erased_at is not null as erased
+            case when c.erased_at is null then c.summary end as summary, c.erased_at is not null as erased,
+            c.channel = 'simulated' as simulated
        from calls c left join agents a on a.id = c.agent_id
       where ${before}
       order by c.started_at desc, c.id
       limit ${CALLER_HISTORY_LIMIT}`,
     [phone, current.started_at, callId],
   );
-  const callCount = Number((await q.one<{ n: string }>(`select count(*) as n from calls c where ${before}`, [phone, current.started_at, callId]))?.n ?? 0);
+  const counted = await q.one<{ n: string; simulated: string }>(
+    `select count(*) as n, count(*) filter (where c.channel = 'simulated') as simulated from calls c where ${before}`,
+    [phone, current.started_at, callId],
+  );
+  const callCount = Number(counted?.n ?? 0);
+  const simulatedCallCount = Number(counted?.simulated ?? 0);
 
   // A pendência apagada a pedido do titular fica sem telefone; o marcador no título é a defesa a mais.
   const openWhere = "f.caller_e164 = $1 and f.status = 'open' and f.title <> $2";
@@ -99,6 +114,7 @@ export async function callerHistory(q: OrgQuery, callId: string): Promise<Caller
   return {
     phone,
     callCount,
+    simulatedCallCount,
     calls: calls.map((row) => {
       const summaryPurged = row.summary === PURGED_SUMMARY_TEXT;
       return {
@@ -111,6 +127,7 @@ export async function callerHistory(q: OrgQuery, callId: string): Promise<Caller
         summary: summaryPurged ? null : row.summary,
         summaryPurged,
         erased: row.erased,
+        simulated: row.simulated,
       };
     }),
     openFollowUpCount,

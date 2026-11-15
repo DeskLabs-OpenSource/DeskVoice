@@ -34,7 +34,7 @@ describe("GET /calls/:id/caller-history", () => {
     const org = await createOrganization(panel.app, "historico sem numero");
     const { cookie } = await createUser(panel.app, org, "operator");
     const anonymous = await createCall(panel.app, org, NOW);
-    expect((await call(callerHistory, { cookie, params: { id: anonymous } })).data).toEqual({ phone: null, callCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] });
+    expect((await call(callerHistory, { cookie, params: { id: anonymous } })).data).toEqual({ phone: null, callCount: 0, simulatedCallCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] });
   });
 });
 

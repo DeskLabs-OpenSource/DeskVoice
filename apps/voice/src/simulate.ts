@@ -22,8 +22,8 @@ export async function startSimulatedCall(
     const agent = await q.one<{ greeting: string | null; transfer_to_e164: string | null }>("select greeting, transfer_to_e164 from agents where id = $1", [agentId]);
     if (!agent) return null;
     const call = await q.one<{ id: string }>(
-      // O número de quem liga é opcional: com ele, a simulada entra na memória do número como uma
-      // recebida de verdade (duas simuladas do mesmo número, e a segunda mostra a primeira).
+      // O número de quem liga é opcional: com ele, a simulada aparece no bloco "Este número" marcada
+      // como simulada (`channel`), e os avisos de transferência e de recado não a contam como ligação.
       "insert into calls (organization_id, agent_id, direction, channel, status, engine, from_e164, started_at) values ($1, $2, 'inbound', 'simulated', 'ringing', 'simulated', $3, $4) returning id",
       [organizationId, agentId, input.fromE164 ?? null, deps.clock.now()],
     );

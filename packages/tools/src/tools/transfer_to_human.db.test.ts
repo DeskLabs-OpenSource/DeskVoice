@@ -68,6 +68,13 @@ describe("transfer_to_human", () => {
     expect(started?.payload).toEqual({ to: "+5531999998888", ...args });
   });
 
+  it("a simulada com o número de um cliente não entra no \"já ligou\" do aviso de transferência", async () => {
+    const ctx = await createFixture(app, "transfer memoria simulada", { transferTo: "+5531999998887" });
+    await seedCallerHistory(app, ctx, "+5531955554443", { calls: 1, openFollowUps: [], simulatedCalls: 3 });
+    await runTool(transferToHuman, args, ctx);
+    expect((await notificationsOf(app, ctx.organizationId))[0]?.body).toMatch(/\n\nEste número já ligou 1 vez\.$/);
+  });
+
   it("nada do bloco chega ao modelo: o resultado inteiro é o mesmo com e sem ligações anteriores ou pendências", async () => {
     // O modelo recebe o resultado inteiro (`JSON.stringify(result)` no OpenAI, `{ result }` no
     // Gemini), e não só `message`: a guarda compara o resultado serializado.

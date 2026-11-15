@@ -80,7 +80,7 @@ describe("chamada simulada no ritmo de uma ligação (issue #111)", { timeout: 1
 });
 
 describe("chamada simulada com o número de quem liga", { timeout: 120_000 }, () => {
-  it("grava o número como o de uma recebida, para a simulada entrar na memória do número", async () => {
+  it("grava o número como o de uma recebida, com o canal simulado que a memória do número marca e não conta", async () => {
     const organizationId = await createOrganization(app, "simulate-from");
     const agentId = await createAgent(app, organizationId);
     const harness = await sessionHarness(app);

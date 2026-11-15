@@ -80,6 +80,7 @@ export interface CallDetail extends Call {
 export interface CallerHistory {
   phone: string | null;
   callCount: number;
+  simulatedCallCount: number;
   calls: Array<{
     id: string;
     startedAt: string;
@@ -90,6 +91,7 @@ export interface CallerHistory {
     summary: string | null;
     summaryPurged: boolean;
     erased: boolean;
+    simulated: boolean;
   }>;
   openFollowUpCount: number;
   openFollowUps: Array<{ id: string; callId: string | null; title: string; dueAt: string; ownerName: string | null }>;

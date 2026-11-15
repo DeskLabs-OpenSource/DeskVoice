@@ -21,14 +21,18 @@ const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
  * - `whatsapp`: só as contagens. O título é texto livre escrito pelo modelo sobre a pessoa, e o
  *   WhatsApp é um canal fora da instalação: nenhum título, nota ou resumo vai por ele.
  *
- * `null` quando não há o que dizer: chamada sem número, ou número sem ligação anterior nem pendência.
+ * `null` quando não há o que dizer: chamada sem número, ou número sem ligação anterior (fora as
+ * simuladas) nem pendência.
  */
 export function callerContextLine(history: CallerHistory | null, channel: "panel" | "whatsapp"): string | null {
-  if (!history || (history.callCount === 0 && history.openFollowUpCount === 0)) return null;
+  if (!history) return null;
+  // A simulada é um teste da equipe, não a pessoa ligando: não entra no "já ligou".
+  const called = history.callCount - history.simulatedCallCount;
+  if (called === 0 && history.openFollowUpCount === 0) return null;
   const parts: string[] = [];
-  if (history.callCount > 0) parts.push(`Este número já ligou ${times(history.callCount)}`);
+  if (called > 0) parts.push(`Este número já ligou ${times(called)}`);
   if (history.openFollowUpCount > 0) {
-    const count = history.callCount > 0 ? openFollowUps(history.openFollowUpCount) : `Este número tem ${openFollowUps(history.openFollowUpCount)}`;
+    const count = called > 0 ? openFollowUps(history.openFollowUpCount) : `Este número tem ${openFollowUps(history.openFollowUpCount)}`;
     if (channel === "whatsapp") parts.push(count);
     else {
       const titles = history.openFollowUps.slice(0, CONTEXT_TITLES).map((followUp) => oneLine(followUp.title));

@@ -26,6 +26,7 @@ interface CallInput {
   summary?: string | null;
   ended?: boolean;
   agentId?: string | null;
+  channel?: "phone" | "simulated";
 }
 
 async function agentOf(organizationId: string, name: string): Promise<string> {
@@ -40,7 +41,7 @@ async function callOf(organizationId: string, input: CallInput): Promise<string>
   await withSystem(app, (q) =>
     q.exec(
       `insert into calls (id, organization_id, agent_id, direction, channel, status, from_e164, to_e164, summary, started_at, ended_at)
-       values ($1, $2, $3, $4, 'phone', $5, $6, $7, $8, $9, $10)`,
+       values ($1, $2, $3, $4, $11, $5, $6, $7, $8, $9, $10)`,
       [
         id,
         organizationId,
@@ -52,6 +53,7 @@ async function callOf(organizationId: string, input: CallInput): Promise<string>
         input.summary ?? null,
         input.at,
         ended ? new Date(input.at.getTime() + 60_000) : null,
+        input.channel ?? "phone",
       ],
     ),
   );
@@ -110,7 +112,7 @@ describe("callerHistory: a memória do número para a equipe", () => {
     await callOf(org, { at: t(1) });
     expect(await historyOf(org, anonymous)).toBeNull();
     const later = await callOf(org, { at: t(2), from: PHONE });
-    expect(await historyOf(org, later)).toEqual({ phone: PHONE, callCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] });
+    expect(await historyOf(org, later)).toEqual({ phone: PHONE, callCount: 0, simulatedCallCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] });
   });
 
   it("usa o telefone do outro lado: o to_e164 na feita, e nunca a linha da empresa", async () => {
@@ -157,6 +159,21 @@ describe("callerHistory: a memória do número para a equipe", () => {
     expect(history?.openFollowUps).toHaveLength(10);
   });
 
+  it("a simulada com o número de um cliente aparece marcada como simulada, e a contagem a separa", async () => {
+    // A rota de simular não pede papel: qualquer pessoa da equipe simula com o número de um cliente.
+    const org = await createOrganization(app, "memoria simulada");
+    const real = await callOf(org, { at: t(0), from: PHONE });
+    const simulated = await callOf(org, { at: t(1), from: PHONE, channel: "simulated" });
+    const current = await callOf(org, { at: t(2), from: PHONE, ended: false });
+
+    const history = await historyOf(org, current);
+    expect(history).toMatchObject({ callCount: 2, simulatedCallCount: 1 });
+    expect(history?.calls.map((call) => [call.id, call.simulated])).toEqual([
+      [simulated, true],
+      [real, false],
+    ]);
+  });
+
   it("o resumo trocado pelo prazo de guarda vem como marcado, sem o texto do marcador", async () => {
     const org = await createOrganization(app, "memoria prazo");
     await callOf(org, { at: t(0), from: PHONE, summary: PURGED_SUMMARY_TEXT });
@@ -176,7 +193,7 @@ describe("callerHistory: a memória do número para a equipe", () => {
       // Ela liga de novo: a ligação apagada perdeu o telefone, e a pendência apagada (caller_e164 nulo) não volta.
       const again = await callOf(org, { at: t(20), from: PHONE, ended: false });
       const history = await historyOf(org, again);
-      expect(history).toEqual({ phone: PHONE, callCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] });
+      expect(history).toEqual({ phone: PHONE, callCount: 0, simulatedCallCount: 0, calls: [], openFollowUpCount: 0, openFollowUps: [] });
       expect(JSON.stringify(history)).not.toMatch(/exame|apagado a pedido/);
     } finally {
       await rm(dir, { recursive: true, force: true });

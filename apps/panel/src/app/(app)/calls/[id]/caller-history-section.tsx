@@ -11,7 +11,9 @@ import type { CallerHistory } from "../../../../ui/types";
  * "Este número": as ligações anteriores do telefone do outro lado e as pendências abertas dele, para
  * quem atende não precisar procurar na lista de Chamadas (fatia 2 do desenho de 13/11, registro
  * 0020). Chamada sem número não mostra o bloco. A chamada apagada a pedido do titular aparece sem
- * conteúdo, e o resumo que saiu com o prazo aparece como a frase do prazo.
+ * conteúdo, e o resumo que saiu com o prazo aparece como a frase do prazo. A simulada aparece com a
+ * marca "Simulada": é um teste da equipe, e qualquer pessoa da equipe pode simular com o número de um
+ * cliente.
  */
 export function CallerHistorySection({ history, t, common, locale }: { history: CallerHistory | undefined; t: TimelineDictionary; common: CommonDictionary; locale: Locale }) {
   if (!history?.phone) return null;
@@ -63,6 +65,7 @@ export function CallerHistorySection({ history, t, common, locale }: { history: 
                     {formatDateTime(call.startedAt, locale)}
                   </Link>
                   <span>{call.agentName ?? common.noAgent}</span>
+                  {call.simulated ? <span className="rounded border border-line px-1.5 text-[0.8rem] font-bold">{common.channel.simulated}</span> : null}
                   <span className="text-[0.85rem] text-muted">
                     {t.direction[call.direction]} · {common.callStatus[call.status]}
                     {call.outcome ? ` · ${(t.outcomes as Record<string, string>)[call.outcome] ?? t.outcomes.unknown}` : ""}

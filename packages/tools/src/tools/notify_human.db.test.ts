@@ -112,6 +112,23 @@ describe("notify_human", () => {
       expect((await notificationsOf(app, first.organizationId))[0]?.body).toBe("Aviso: Recado.");
     });
 
+    it("a simulada com o número de um cliente não entra no \"já ligou\", no painel nem no WhatsApp", async () => {
+      const ctx = await createFixture(app, "notify memoria simulada");
+      await putWhatsAppConnector(app, ctx.organizationId);
+      await createUser(app, ctx.organizationId, "+5531988887776");
+      await seedCallerHistory(app, ctx, "+5531966665551", { calls: 1, openFollowUps: [TITLE], simulatedCalls: 2 });
+      await runTool(notifyHuman, { message: "Recado." }, ctx);
+      const [panelNotice, whatsapp] = await notificationsOf(app, ctx.organizationId);
+      expect(panelNotice?.body).toBe(`Aviso: Recado.\n\nEste número já ligou 1 vez; 1 pendência aberta: ${TITLE}.`);
+      expect(whatsapp?.body).toBe("Aviso: Recado.\n\nEste número já ligou 1 vez; 1 pendência aberta.");
+
+      // Só simuladas antes, e nada aberto: o aviso é o de sempre.
+      const onlySimulated = await createFixture(app, "notify memoria so simulada");
+      await seedCallerHistory(app, onlySimulated, "+5531966665550", { calls: 0, openFollowUps: [], simulatedCalls: 1 });
+      await runTool(notifyHuman, { message: "Recado." }, onlySimulated);
+      expect((await notificationsOf(app, onlySimulated.organizationId))[0]?.body).toBe("Aviso: Recado.");
+    });
+
     it("o apagamento a pedido do titular alcança o título copiado no aviso", async () => {
       const ctx = await createFixture(app, "notify memoria apagamento");
       await seedCallerHistory(app, ctx, "+5531966665551", { calls: 1, openFollowUps: [TITLE] });
