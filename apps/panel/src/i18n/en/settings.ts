@@ -131,6 +131,12 @@ const settings: SettingsDictionary = {
   inboundLimitLead: "How many calls received on the phone line the agents answer at the same time. Above that, the caller gets a busy signal and the refusal shows up in Calls. Each call already has a cost and a duration ceiling on the agent; this limit holds the combined spending when many arrive together. Browser calls and calls made by the agent do not count here.",
   inboundLimit: "Simultaneous call limit",
   inboundLimitHint: "From 1 to 50. The factory value is 5.",
+  voicemailTitle: "Voicemail when nobody can answer",
+  voicemailLead: "With voicemail on, a call to a number with no agent, or whose agent is off, is answered: the caller hears a beep and leaves a recorded message, which stays on the call and can be played there. The message takes one slot of the simultaneous call limit while it is being recorded. At the limit itself nothing changes: the caller still gets a busy signal.",
+  voicemailSwitch: "Answer and record a message when nobody can answer",
+  voicemailMaxSeconds: "Maximum message length, in seconds",
+  voicemailMaxSecondsHint: "From 5 to 300. The factory value is 60. The message ends 4 seconds after the last speech.",
+  saveVoicemail: "Save voicemail",
   saveInboundLimit: "Save limit",
 };
 

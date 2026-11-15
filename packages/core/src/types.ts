@@ -41,6 +41,8 @@ export const CALL_EVENT_KINDS = [
   "transfer_completed",
   "engine_failed",
   "call_refused",
+  "voicemail_left",
+  "voicemail_failed",
   "cost_ceiling_reached",
   "recording_skipped",
   "recording_failed",

@@ -131,6 +131,12 @@ const settings: SettingsDictionary = {
   inboundLimitLead: "Cuántas llamadas recibidas por la línea telefónica atienden los agentes al mismo tiempo. Por encima de eso, quien llama recibe señal de ocupado y el rechazo aparece en Llamadas. Cada llamada ya tiene tope de costo y de duración en el agente; este límite contiene el gasto sumado cuando llegan muchas juntas. Las llamadas por el navegador y las que hace el agente no entran en esta cuenta.",
   inboundLimit: "Límite de llamadas simultáneas",
   inboundLimitHint: "De 1 a 50. El valor de fábrica es 5.",
+  voicemailTitle: "Buzón de voz cuando nadie puede atender",
+  voicemailLead: "Con el buzón activado, la llamada a un número sin agente, o con el agente apagado, es atendida: quien llama oye un pitido y deja un mensaje grabado, que queda en la llamada y se puede escuchar allí. El mensaje ocupa una plaza en el límite de llamadas simultáneas mientras se graba. En el límite mismo nada cambia: quien llama sigue recibiendo ocupado.",
+  voicemailSwitch: "Atender y grabar mensaje cuando nadie puede atender",
+  voicemailMaxSeconds: "Duración máxima del mensaje, en segundos",
+  voicemailMaxSecondsHint: "De 5 a 300. El valor de fábrica es 60. El mensaje termina 4 segundos después del último habla.",
+  saveVoicemail: "Guardar buzón de voz",
   saveInboundLimit: "Guardar límite",
 };
 
