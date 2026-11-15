@@ -39,7 +39,7 @@ const settings: SettingsDictionary = {
   classifyKeyHint: "Sent only to the endpoint above. When the endpoint changes, enter the key again.",
   classifyKeyKeep: "Leave empty to keep the saved key",
   classifyModel: "Classification model",
-  classifyModelHint: "The name the provider publishes, for example deepseek-chat. Empty means the engine's model.",
+  classifyModelHint: "The name the provider publishes, for example deepseek-chat. Empty means the engine's model. Without an endpoint only a model whose price the project knows is accepted; for another model, enter the endpoint.",
   classifyTargetSave: "Save destination",
   keyResults: {
     accepted: "accepted, with access to the model {model}. The test does not check credit: it only reads the model's details, at no cost.",

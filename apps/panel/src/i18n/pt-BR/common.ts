@@ -78,6 +78,7 @@ const common = {
     token_required: "Ao mudar o endereço ou o tipo do conector, informe o token de novo.",
     endpoint_required: "A chave da classificação pertence a um endpoint: informe o endpoint também.",
     endpoint_key_required: "Ao mudar o endpoint da classificação, informe a chave dele de novo.",
+    classify_model_unmeasured: "O modelo da classificação sem endpoint iria ao provedor do motor, que cobra por ele, e o projeto não conhece o preço desse modelo. Informe o endpoint do provedor, ou deixe o modelo em branco para usar o modelo do motor, que tem preço medido.",
     whatsapp_unavailable: "Este servidor ainda não tem a chave do serviço de WhatsApp. Rode bash install/update.sh no servidor, uma vez.",
     whatsapp_service_absent: "O serviço de WhatsApp não está de pé neste servidor. Instale o serviço antes de conectar um número.",
     whatsapp_service_down: "O serviço de WhatsApp deste servidor não respondeu. Tente de novo em instantes; se continuar, rode a checagem de saúde no servidor.",

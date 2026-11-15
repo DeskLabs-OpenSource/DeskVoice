@@ -101,8 +101,10 @@ const notAnalyzed = (q: OrgQuery, callId: string, reason: AnalysisNotDoneReason,
  * `calls.cost_cents`, uma vez por chamada ao provedor. A linha guarda o micro-centavo
  * (`cost_microcents`), porque ler uma ligação custa cerca de 0,03 centavo e o centavo inteiro por
  * leitura seria trinta vezes o valor de tabela; `calls.cost_cents` é o extrato somado e arredondado
- * uma vez só. Com modelo configurado, o preço dele não é conhecido pelo projeto: o consumo vai ao
- * extrato e o custo fica zero, em vez de um número errado. Ligação que já atingiu o teto de custo
+ * uma vez só. Com endpoint e modelo configurados, o preço do modelo não é conhecido pelo projeto: o
+ * consumo vai ao extrato e o custo fica zero, em vez de um número errado. Sem endpoint, quem cobra é
+ * o provedor do motor e só o modelo de tabela é pedido — modelo fora dela que esteja gravado cai no
+ * de tabela, porque cobrar sem medir não é custo, é dívida escondida. Ligação que já atingiu o teto
  * do agente não é lida — o teto continua sendo comparado com o mesmo `calls.cost_cents`, na mesma
  * unidade de antes. Falha do provedor e teto
  * atingido viram `outcome_not_classified` (desfecho pedido) e `analysis_not_done` (análise pedida)

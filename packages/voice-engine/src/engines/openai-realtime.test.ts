@@ -365,4 +365,27 @@ describe("openai-realtime: desfecho da ligação (o destino vem de quem chama)",
     // 1 milhão de entrada a US$ 0,05 por milhão: 5 centavos, como antes de o modelo ser configurável.
     expect(result).toEqual({ ok: true, guess: palpite, model: "gpt-5-nano", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 5, costMicrocents: 5_000_000 });
   });
+
+  it("sem endpoint, o modelo de tabela é o do pedido, e o preço é o dele", async () => {
+    const { pedidos, fetch } = usar();
+    const result = await classify({ fetch, model: "gpt-5-nano" });
+
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano" }]);
+    expect(result).toEqual({ ok: true, guess: palpite, model: "gpt-5-nano", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 5, costMicrocents: 5_000_000 });
+  });
+
+  it("sem endpoint, modelo fora da tabela de preço cai no modelo medido: o provedor não cobra sem medida", async () => {
+    const { pedidos, fetch } = usar();
+    // Configuração que já estava gravada antes da recusa no painel: `gpt-5-mini` não está na tabela.
+    const result = await classify({ fetch, model: "gpt-5-mini" });
+
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano" }]);
+    expect(result).toMatchObject({ model: "gpt-5-nano", costCents: 5, costMicrocents: 5_000_000 });
+  });
+
+  it("a tabela de preço do motor só tem o modelo conferido: é o que o painel consulta ao salvar", () => {
+    expect(engine.classifyPricing?.("gpt-5-nano")).toMatchObject({ centsPerMillionInputTokens: 5 });
+    expect(engine.classifyPricing?.("gpt-5-mini")).toBeUndefined();
+    expect(engine.classifyPricing?.("deepseek-chat")).toBeUndefined();
+  });
 });
