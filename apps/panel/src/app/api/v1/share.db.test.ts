@@ -31,6 +31,8 @@ const page = async (token: string): Promise<PublicShare | null> => {
   const element = await SharePage({ params: Promise.resolve({ token }) });
   return (element.props as { share: PublicShare | null }).share;
 };
+/** O limite de usos só muda no banco: a API não aceita outro. */
+const limitTo = (org: string, callId: string, maxUses: number) => withOrg(panel.app, org, (q) => q.exec("update share_links set max_uses = $2 where call_id = $1", [callId, maxUses]));
 const usesOf = (org: string, callId: string) => withOrg(panel.app, org, (q) => q.many<{ uses: number }>("select uses from share_links where call_id = $1", [callId]));
 const eventsOf = (org: string, kind: string) =>
   withOrg(panel.app, org, (q) => q.many<{ payload: Record<string, unknown> }>("select payload from organization_events where kind = $1 order by at, id", [kind]));
@@ -48,6 +50,13 @@ describe("link de quem ligou", () => {
     expect(data.maxUses).toBe(10);
     expect(data.expiresAt).toBe(new Date(NOW.getTime() + 72 * 3_600_000).toISOString());
     expect((await eventsOf(org, "share_created"))[0]?.payload).toMatchObject({ callId, maxUses: 10 });
+
+    // Prazo e usos são os do registro 0019: um corpo que tente mudá-los é recusado, e nada é criado.
+    for (const body of [{ ttlHours: 720 }, { maxUses: 100 }]) {
+      const refused = await create(owner.cookie, callId, body);
+      expect([refused.status, refused.code]).toEqual([400, "validation_error"]);
+    }
+    expect(await usesOf(org, callId)).toHaveLength(1);
   });
 
   it("abrir a página não gasta download; cada download gasta um, sai em fluxo e fica registrado", async () => {
@@ -80,7 +89,8 @@ describe("link de quem ligou", () => {
     const org = await createOrganization(panel.app, "share race");
     const owner = await createUser(panel.app, org, "owner");
     const callId = await seed(org);
-    const token = tokenOf((((await create(owner.cookie, callId, { maxUses: 3 })).data) as { url: string }).url);
+    const token = tokenOf((((await create(owner.cookie, callId)).data) as { url: string }).url);
+    await limitTo(org, callId, 3);
 
     const responses = await Promise.all(Array.from({ length: 8 }, () => fetchAudio(token)));
     const statuses = responses.map((response) => response.status).sort();
@@ -94,7 +104,7 @@ describe("link de quem ligou", () => {
   it("inventado, vencido, revogado, esgotado, de chamada apagada e sem áudio respondem igual", async () => {
     const org = await createOrganization(panel.app, "share gone");
     const owner = await createUser(panel.app, org, "owner");
-    const linkFor = async (callId: string, body: unknown = {}): Promise<string> => tokenOf((((await create(owner.cookie, callId, body)).data) as { url: string }).url);
+    const linkFor = async (callId: string): Promise<string> => tokenOf((((await create(owner.cookie, callId)).data) as { url: string }).url);
     const gone = async (token: string): Promise<void> => {
       expect(await page(token)).toBeNull();
       const response = await fetchAudio(token);
@@ -116,7 +126,8 @@ describe("link de quem ligou", () => {
     await gone(revoked);
 
     const usedCall = await seed(org);
-    const used = await linkFor(usedCall, { maxUses: 1 });
+    const used = await linkFor(usedCall);
+    await limitTo(org, usedCall, 1);
     expect((await fetchAudio(used)).status).toBe(200);
     await gone(used);
 
@@ -140,8 +151,9 @@ describe("link de quem ligou", () => {
     const callId = await seed(org);
     await create(owner.cookie, callId);
     panel.clock.at = new Date(NOW.getTime() + 60_000);
-    await create(owner.cookie, callId, { maxUses: 2 });
+    await create(owner.cookie, callId);
     panel.clock.at = NOW;
+    await withOrg(panel.app, org, (q) => q.exec("update share_links set max_uses = 2 where created_at > $1", [NOW]));
 
     const listed = await call(list, { cookie: owner.cookie, params: { id: callId } });
     const data = listed.data as { ttlHours: number; maxUses: number; links: Array<Record<string, unknown>> };

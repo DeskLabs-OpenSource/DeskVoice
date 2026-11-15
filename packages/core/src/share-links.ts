@@ -43,11 +43,12 @@ const ALIVE = "revoked_at is null and expires_at > $2 and uses < max_uses";
 
 export async function createShareLink(
   q: OrgQuery,
-  options: { callId: string; now: Date; createdBy: string | null; ttlHours?: number; maxUses?: number },
+  options: { callId: string; now: Date; createdBy: string | null },
 ): Promise<{ id: string; token: string; expiresAt: Date; maxUses: number }> {
   const token = randomBytes(32).toString("base64url");
-  const maxUses = options.maxUses ?? SHARE_MAX_USES;
-  const expiresAt = new Date(options.now.getTime() + (options.ttlHours ?? SHARE_TTL_HOURS) * 60 * 60 * 1000);
+  // Prazo e usos são os do registro 0019, sempre: não há pedido que os mude.
+  const maxUses = SHARE_MAX_USES;
+  const expiresAt = new Date(options.now.getTime() + SHARE_TTL_HOURS * 60 * 60 * 1000);
   const created = await q.one<{ id: string }>(
     "insert into share_links (organization_id, call_id, token_hash, kind, expires_at, max_uses, created_by, created_at) values ($1, $2, $3, 'recording', $4, $5, $6, $7) returning id",
     [q.organizationId, options.callId, hashToken(token), expiresAt, maxUses, options.createdBy, options.now],

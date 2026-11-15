@@ -3,10 +3,9 @@ import { SHARE_MAX_USES, SHARE_TTL_HOURS, createShareLink, liveShareLinks, recor
 import { z } from "zod";
 import { ApiError, handle, notFound } from "../../../../../../server/context";
 
-const body = z.object({
-  ttlHours: z.number().int().min(1).max(24 * 30).optional(),
-  maxUses: z.number().int().min(1).max(100).optional(),
-});
+// O link nasce sempre com o prazo e os usos do registro 0019. Um corpo que tente mudá-los é
+// recusado, em vez de ignorado: quem pediu 30 dias fica sabendo que não terá.
+const body = z.object({}).strict();
 
 /** Os links vivos da chamada, sem o endereço (ele não é guardado), e o prazo e os usos de um link novo. */
 export const GET = handle({ configure: true }, async ({ q, deps, params }) => {
@@ -26,7 +25,7 @@ export const GET = handle({ configure: true }, async ({ q, deps, params }) => {
  * Sem gravação no disco não há o que entregar: 409, em vez de um link que promete áudio e devolve
  * vazio. Chamada apagada a pedido do titular também não gera link.
  */
-export const POST = handle({ body, configure: true }, async ({ q, body, session, deps, params }) => {
+export const POST = handle({ body, configure: true }, async ({ q, session, deps, params }) => {
   const id = params.id ?? "";
   const call = await q.one<{ id: string; erased_at: Date | null }>("select id, erased_at from calls where id = $1", [id]);
   if (!call) throw notFound();
@@ -38,7 +37,7 @@ export const POST = handle({ body, configure: true }, async ({ q, body, session,
   if (!exists) throw new ApiError(409, "no_recording", "This call has no stored recording.");
 
   const now = deps.clock.now();
-  const link = await createShareLink(q, { callId: id, now, createdBy: session.userId, ...body });
+  const link = await createShareLink(q, { callId: id, now, createdBy: session.userId });
   await recordOrgEvent(q, "share_created", { callId: id, linkId: link.id, expiresAt: link.expiresAt.toISOString(), maxUses: link.maxUses }, now, session.userId);
   return { id: link.id, url: new URL(`/s/${link.token}`, deps.publicUrl).toString(), expiresAt: link.expiresAt, maxUses: link.maxUses };
 });

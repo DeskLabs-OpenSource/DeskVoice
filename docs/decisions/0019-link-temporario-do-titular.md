@@ -38,6 +38,7 @@ O desenho do token, a tabela, a rota pública e os testes de partida são o trab
 
 - É a primeira rota do produto sem login. Qualquer rota pública nova passa a ter este registro como referência do que ela precisa: resposta igual para todos os casos de falha, endereço que vem da configuração da instalação e registro do que foi entregue.
 - O link não amarra quem abre a quem ligou: quem tiver o endereço baixa o áudio. A tela avisa quem cria.
+- **Não está coberto:** um leitor de links de e-mail ou de mensagem que siga o botão de baixar da página gasta um uso, porque o download é um `GET` como outro qualquer. Abrir a página não gasta; seguir o botão, sim. Por qual canal o link chega a quem ligou é escolha de quem opera, por fora do produto.
 - Atrás de um proxy do operador, na frente do Caddy da instalação, o endereço do link pode ficar no log desse proxy. O guia de [conformidade](../guides/conformidade-brasil.md) diz isso.
 - Cada download vira uma linha do registro de Privacidade, que mostra as 50 mais recentes. Um link muito usado ocupa parte desse registro.
 - Nada muda para quem atualiza: sem criar um link, nenhuma rota pública entrega nada.
