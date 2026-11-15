@@ -27,12 +27,25 @@ name: publish-image
 # credencial e têm as duas arquiteturas: "release publicada" significa "instalável".
 #
 # `workflow_dispatch` existe para o release.yml disparar este workflow na tag que ele acabou de
-# criar (tag empurrada pelo GITHUB_TOKEN não aciona `on: push`). Disparado fora de uma tag, recusa.
+# criar (tag empurrada pelo GITHUB_TOKEN não aciona `on: push`). Disparado fora de uma tag, recusa,
+# salvo em ensaio.
+#
+# Ensaio (`ensaio: true`, disparado à mão em qualquer ramo): roda a publicação inteira sem publicar
+# versão. Constrói e envia por resumo, sem etiqueta, para os três repositórios de verdade, nas duas
+# arquiteturas; o `merge` monta os índices com `--dry-run`, que falha se um resumo não está no
+# repositório da sua imagem; o `verify-public` pergunta por cada repositório@resumo sem credencial.
+# Nenhuma etiqueta nasce e a release não roda. Nasceu do corte da 0.12.0, em que este workflow rodou
+# de verdade pela primeira vez já numa tag, e a tag ficou sem imagens.
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      ensaio:
+        description: "Ensaio: constrói e confere sem etiquetar nem publicar a release"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,6 +62,7 @@ jobs:
     outputs:
       dockerfile: ${{ steps.probe.outputs.dockerfile }}
       version: ${{ steps.probe.outputs.version }}
+      ensaio: ${{ steps.probe.outputs.ensaio }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,8 +70,17 @@ jobs:
           fetch-depth: 0
       - name: Há o que publicar?
         id: probe
+        env:
+          ENSAIO: ${{ github.event_name == 'workflow_dispatch' && inputs.ensaio == true }}
         run: |
           source install/_common.sh
+          if [ "${ENSAIO}" = true ]; then
+            # Ensaio: nenhuma etiqueta nasce, então a versão só dá nome ao que se constrói.
+            { echo "ensaio=true"; echo "version=0.0.0-ensaio"; echo "dockerfile=true"; } >> "${GITHUB_OUTPUT}"
+            echo "ENSAIO em ${GITHUB_REF} (${GITHUB_SHA}): constrói e confere, sem etiquetar nem publicar." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          echo "ensaio=false" >> "${GITHUB_OUTPUT}"
           # Versão só sai de commit que está na main. Não há regra de tags no repositório, então
           # qualquer pessoa com escrita consegue empurrar uma tag de qualquer commit: aqui ela não publica.
           git fetch --quiet origin main
@@ -232,6 +255,7 @@ jobs:
       - name: Juntar os dois resumos no índice de cada imagem
         env:
           VERSION: ${{ needs.probe.outputs.version }}
+          ENSAIO: ${{ needs.probe.outputs.ensaio }}
         run: |
           source install/_common.sh
           set -eo pipefail
@@ -247,8 +271,12 @@ jobs:
               fi
               digests+=("${repo}@$(cat "${file}")")
             done
-            docker buildx imagetools create --tag "${ref}" "${digests[@]}"
-            echo "ok: ${ref} (amd64 ${digests[0]#*@}, arm64 ${digests[1]#*@})" | tee -a "${GITHUB_STEP_SUMMARY}"
+            # Em ensaio, `--dry-run` monta o índice sem enviar: ele busca cada resumo no repositório
+            # citado e falha se não o acha, que é o par repositório↔resumo que se quer provar.
+            dry_run=()
+            if [ "${ENSAIO}" = true ]; then dry_run=(--dry-run); fi
+            docker buildx imagetools create "${dry_run[@]}" --tag "${ref}" "${digests[@]}"
+            echo "ok${dry_run:+ (ensaio)}: ${ref} (amd64 ${digests[0]#*@}, arm64 ${digests[1]#*@})" | tee -a "${GITHUB_STEP_SUMMARY}"
           done
 
   # Publicar não basta: a VPS de quem instala baixa sem credencial. Um pacote novo no registro
@@ -266,7 +294,38 @@ jobs:
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Ensaio: não há etiqueta para perguntar. Pergunta por cada repositório@resumo que os builds
+      # enviaram, sem credencial, como a VPS perguntaria, e confere a arquitetura de cada um.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.probe.outputs.ensaio == 'true'
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
+      - name: Ensaio, cada resumo baixa sem credencial do repositório da sua imagem?
+        if: needs.probe.outputs.ensaio == 'true'
+        env:
+          VERSION: ${{ needs.probe.outputs.version }}
+        run: |
+          source install/_common.sh
+          missing=0
+          for process in ${APP_SERVICES}; do
+            ref="$(image_ref "${process}" "${VERSION}")"
+            repo="${ref%:*}"
+            for arch in amd64 arm64; do
+              digest="$(cat "${RUNNER_TEMP}/digests/digests-${arch}/${process}")"
+              found="$(docker buildx imagetools inspect --raw "${repo}@${digest}" 2>/dev/null \
+                | jq -r 'if .manifests then (.manifests[] | select(.platform.architecture != "unknown") | .platform.architecture) else empty end' \
+                | sort -u | tr '\n' ' ')" || found=""
+              if [ -z "${found}" ] && docker buildx imagetools inspect "${repo}@${digest}" >/dev/null 2>&1; then found="(manifesto único)"; fi
+              case " ${found} " in
+                *" ${arch} "*|*"(manifesto único)"*) echo "ok: ${repo}@${digest} (${arch}: ${found})" | tee -a "${GITHUB_STEP_SUMMARY}" ;;
+                *) missing=1; echo "::error::${repo}@${digest} (${arch}) não baixa sem credencial do repositório de ${process}, ou não é ${arch} (veio: ${found:-nada})." ;;
+              esac
+            done
+          done
+          exit "${missing}"
       - name: As três imagens baixam sem credencial?
+        if: needs.probe.outputs.ensaio != 'true'
         env:
           VERSION: ${{ needs.probe.outputs.version }}
         run: |
@@ -285,6 +344,7 @@ jobs:
       # O índice multiarquitetura não tem `rootfs`: as arquiteturas se conferem nos filhos. É esta
       # lista que a instalação em ARM consulta ao puxar, então ela tem de estar aqui.
       - name: Cada imagem tem as duas arquiteturas?
+        if: needs.probe.outputs.ensaio != 'true'
         env:
           VERSION: ${{ needs.probe.outputs.version }}
         run: |
@@ -309,6 +369,7 @@ jobs:
       # antes disso, o estágio `base` foi construído duas vezes. Vale por arquitetura: a base do
       # arm64 é a do arm64.
       - name: Voz e rotinas dividem as camadas da base?
+        if: needs.probe.outputs.ensaio != 'true'
         # Se o formato do `imagetools inspect` mudar, este passo falha sozinho e não segura a versão.
         continue-on-error: true
         env:
@@ -338,6 +399,8 @@ jobs:
   release:
     name: release
     needs: [probe, verify-public]
+    # Ensaio não publica release: nenhuma etiqueta nasceu.
+    if: needs.probe.outputs.ensaio != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
