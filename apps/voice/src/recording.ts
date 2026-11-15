@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, open, readdir, rename, rm, stat, statfs } from "node:fs/promises";
+import { mkdir, open, readdir, rename, rm, statfs } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -12,7 +12,7 @@ import path from "node:path";
  * calculá-la falhou: a gravação está salva do mesmo jeito, e a linha do tempo diz que a impressão
  * não pôde ser calculada.
  */
-export type RecordingOutcome = { bytes: number; sha256: string | null };
+export type RecordingOutcome = { bytes: number; sha256: string | null; sha256Error?: string };
 
 /**
  * A impressão digital lida do arquivo já fechado, por stream: uma hora de conversa passa de 100 MB,
@@ -300,9 +300,16 @@ export async function startRecording(
         return false;
       }
       await rename(partial, file);
-      // Daqui em diante a gravação está salva. A impressão é um extra sobre ela: se a leitura falhar,
-      // ela vira `null`, e a gravação não passa a contar como perdida (issue 278).
-      return { bytes: (await stat(file)).size, sha256: await sha256Of(file).catch(() => null) };
+      // Daqui em diante a gravação está salva, e nada mais pode fazê-la contar como perdida. O tamanho
+      // sai da conta, e não de um `stat` que poderia falhar: o arquivo é o cabeçalho de 44 bytes mais
+      // os bytes de áudio que o próprio cabeçalho declara. A impressão é um extra: se a leitura falhar,
+      // ela vira `null`, e o motivo vai junto para o log e a linha do tempo (issue 278).
+      const size = WAV_HEADER_BYTES + bytes;
+      try {
+        return { bytes: size, sha256: await sha256Of(file) };
+      } catch (error) {
+        return { bytes: size, sha256: null, sha256Error: error instanceof Error ? error.message : String(error) };
+      }
     },
   };
 }
@@ -328,8 +335,10 @@ export async function removePartialRecordings(dir: string): Promise<number> {
   return removed;
 }
 
+const WAV_HEADER_BYTES = 44;
+
 function wavHeader(dataBytes: number, sampleRate: number): Buffer {
-  const header = Buffer.alloc(44);
+  const header = Buffer.alloc(WAV_HEADER_BYTES);
   header.write("RIFF", 0);
   header.writeUInt32LE(36 + dataBytes, 4);
   header.write("WAVE", 8);

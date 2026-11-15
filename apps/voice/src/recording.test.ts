@@ -198,7 +198,7 @@ describe("gravação em disco", () => {
     leitura.falha = true;
     try {
       const desfecho = await recording.finish();
-      expect(desfecho).toEqual({ bytes: (await readFile(file)).length, sha256: null });
+      expect(desfecho).toEqual({ bytes: (await readFile(file)).length, sha256: null, sha256Error: "EIO: i/o error, read" });
     } finally {
       leitura.falha = false;
     }

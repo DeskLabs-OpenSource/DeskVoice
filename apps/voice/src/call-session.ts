@@ -221,6 +221,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // cópia do áudio é igual à que esta instalação gravou (não prova nada contra quem administra o
     // servidor). `null` quando não pôde ser calculada: a gravação está salva assim mesmo.
     // A falha do banco aqui não pode impedir o `done`: o arquivo já está salvo, só o registro falta.
+    if (savedRecording && savedRecording.sha256Error !== undefined) logFailure("could not compute the recording fingerprint")(savedRecording.sha256Error);
     if (savedRecording) await event("recording_saved", { bytes: savedRecording.bytes, sha256: savedRecording.sha256 }).catch(logFailure("could not record the saved recording"));
     await recordingFailed;
     resolveDone({ status: end.status, endReason: end.endReason, costCents });

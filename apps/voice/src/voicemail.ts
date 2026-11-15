@@ -203,6 +203,7 @@ export function startVoicemailSession(deps: VoicemailDeps, input: VoicemailInput
     if (recorder) {
       try {
         saved = await recorder.finish();
+        if (saved && saved.sha256Error !== undefined) log("error", "could not compute the recording fingerprint", { error: saved.sha256Error });
         if (saved && left && dir) file = recordingPath(dir, organizationId, callId);
         // Silêncio ou ruído não vira recado: o arquivo sai, e a linha do tempo diz que não houve fala.
         if (saved && !left && dir) await rm(recordingPath(dir, organizationId, callId), { force: true });
