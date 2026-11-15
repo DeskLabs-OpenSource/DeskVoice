@@ -18,7 +18,9 @@ import { z } from "zod";
 export const VOICEMAIL_ENABLED_SETTING = "voicemail.enabled";
 export const VOICEMAIL_MAX_SECONDS_SETTING = "voicemail.max_seconds";
 export const DEFAULT_VOICEMAIL_MAX_SECONDS = 60;
-export const voicemailMaxSecondsSchema = z.number().int().min(5).max(300);
+/** O maior tempo máximo que o operador pode gravar: também é o que mais dura um recado vivo. */
+export const MAX_VOICEMAIL_SECONDS = 300;
+export const voicemailMaxSecondsSchema = z.number().int().min(5).max(MAX_VOICEMAIL_SECONDS);
 
 /** Só `true` liga. Ausente, `false`, texto ou número não ligam: o padrão é nunca atender sozinho. */
 export function voicemailEnabledOf(stored: unknown): boolean {

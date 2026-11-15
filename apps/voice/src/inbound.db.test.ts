@@ -365,6 +365,28 @@ describe("caixa postal quando ninguém pode atender", { timeout: 120_000 }, () =
     expect(conversation.expected[0]?.voicemail).toBeUndefined();
   });
 
+  it("a vida do recado vem do próprio recado: com agentes de 60 s, um recado de 5 minutos atrás ainda ocupa a vaga", async () => {
+    const organizationId = await createOrganization(app, "voicemail-limit-window");
+    await createAgent(app, organizationId, { maxCallSeconds: 60 });
+    const trunkId = await createTrunk(app, organizationId);
+    await createPhoneNumber(app, organizationId, trunkId, NUMBER, null);
+    await voicemailOn(organizationId);
+    await putSetting(app, organizationId, INBOUND_LIMIT_SETTING, 1, false);
+    const clock = fakeClock();
+
+    expect((await receive(incoming(trunkId), clock)).ari.log.at(-1)).toBe(ACCEPTED);
+    const [inProgress] = await callsOf(app, organizationId);
+    await withSystem(app, (q) => q.exec("update calls set status = 'in_progress' where id = $1", [inProgress?.id]));
+
+    // 300 s: além da janela das conversas (60 s do agente mais a folga de 120 s), dentro da vida de
+    // um recado (20 s de atendimento e aviso, até 300 s de recado, mais a folga).
+    clock.advance(300 * 1000);
+    expect((await receive(incoming(trunkId), clock)).ari.log).toEqual(BUSY);
+    // Passada a vida máxima do recado, a linha presa deixa de segurar a vaga.
+    clock.advance((20 + 300 + 120 - 300 + 1) * 1000);
+    expect((await receive(incoming(trunkId), clock)).ari.log.at(-1)).toBe(ACCEPTED);
+  });
+
   it("caixa postal desligada, que é o padrão, mantém a recusa de hoje", async () => {
     const { organizationId, trunkId } = await line("voicemail-off", { agent: "none" });
     await putSetting(app, organizationId, CALL_RECORDING_SETTING, true, false);

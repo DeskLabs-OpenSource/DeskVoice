@@ -1,6 +1,7 @@
 import {
   CALL_RECORDING_SETTING,
   INBOUND_LIMIT_SETTING,
+  MAX_VOICEMAIL_SECONDS,
   VOICEMAIL_ENABLED_SETTING,
   VOICEMAIL_LANGUAGE_SETTING,
   VOICEMAIL_MAX_SECONDS_SETTING,
@@ -21,7 +22,7 @@ import type { AriChannel, AriClient } from "./ari";
 import type { AsteriskCalls } from "./asterisk-transport";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
-import type { VoicemailJob, VoicemailReason } from "./voicemail";
+import { BEFORE_MESSAGE_MS, type VoicemailJob, type VoicemailReason } from "./voicemail";
 
 export interface InboundDeps {
   db: Db;
@@ -79,8 +80,13 @@ export async function inboundLimitReached(q: OrgQuery, clock: Clock, kind: "conv
   // agentes da organização. Linha mais velha que isso ficou presa (o processo caiu no meio, ou
   // o fim do canal não chegou) e não pode segurar vaga, senão cinco linhas presas dariam
   // ocupado a toda ligação até alguém reiniciar o processo de voz.
-  const longest = await q.one<{ seconds: number }>("select coalesce(max(max_call_seconds), 600)::int as seconds from agents where organization_id = $1", [q.organizationId]);
-  const alive = new Date(clock.now().getTime() - ((longest?.seconds ?? 600) + STUCK_CALL_SLACK_SECONDS) * 1000);
+  // O recado não tem agente que o limite: a vida dele vem do próprio recado, o atendimento e o aviso
+  // mais o maior tempo máximo que o operador pode gravar.
+  const longest =
+    kind === "voicemail"
+      ? BEFORE_MESSAGE_MS / 1000 + MAX_VOICEMAIL_SECONDS
+      : ((await q.one<{ seconds: number }>("select coalesce(max(max_call_seconds), 600)::int as seconds from agents where organization_id = $1", [q.organizationId]))?.seconds ?? 600);
+  const alive = new Date(clock.now().getTime() - (longest + STUCK_CALL_SLACK_SECONDS) * 1000);
   const active = await q.one<{ count: number }>(
     "select count(*)::int as count from calls where organization_id = $1 and direction = 'inbound' and to_e164 is not null and status in ('ringing', 'in_progress') and started_at > $2 and voicemail = $3",
     [q.organizationId, alive, kind === "voicemail"],

@@ -42,7 +42,7 @@ export const SPEECH_PEAK = 1200;
  * (`drained` também resolve quando a conexão cai); isto só garante que a linha nunca fica pendurada
  * se algo antes do recado não resolver.
  */
-const BEFORE_MESSAGE_MS = 20_000;
+export const BEFORE_MESSAGE_MS = 20_000;
 
 const NOTICE_DIR = new URL("../assets/voicemail-notice/", import.meta.url);
 
