@@ -15,6 +15,7 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, TextArea, TextInput, type Tone } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
+import { trunkFailure } from "../../../ui/trunk-status";
 import type { Agent, PhoneNumber, Setting, Trunk } from "../../../ui/types";
 
 type StepStatus = "ok" | "warn" | "fail" | "skipped";
@@ -134,6 +135,7 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
   const moved = trunk !== null && trunk.secret.configured && (draft.host !== trunk.host || draft.username !== (trunk.username ?? ""));
   const status = result?.status ?? trunk?.status ?? "unverified";
   const statusLabel = Object.hasOwn(t.status, status) ? t.status[status as keyof typeof t.status] : t.status.unverified;
+  const failure = trunkFailure(trunk);
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
@@ -208,6 +210,12 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
         </fieldset>
 
         {!applied ? <Notice tone="warn">{t.notApplied}</Notice> : null}
+        {/* A linha que ficou de fora da configuração mostra o motivo sem pedir um teste. */}
+        {failure && !result ? (
+          <Notice tone={status === "warn" ? "warn" : "fail"}>
+            <span className="data text-[0.87rem]">{failure}</span>
+          </Notice>
+        ) : null}
         {result ? (
           <ol className="grid gap-2 rounded-sm bg-sunken p-4">
             {result.steps.map((step) => (
