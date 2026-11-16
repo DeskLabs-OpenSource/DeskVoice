@@ -229,6 +229,7 @@ const timeline: TimelineDictionary = {
       turn_closed: "Quien llamó estuvo {seconds} s sin respuesta, quizás por ruido en la línea. Se pidió al agente que respondiera a lo que escuchó.",
       asked_to_repeat: "El agente seguía callado {seconds} s después de lo último que dijo quien llamó, y le pidió que lo repitiera.",
     },
+    memory_loaded: "El agente recibió la memoria del número: {notes} notas y {followUps} pendientes, {chars} caracteres.",
     unknown: "Evento",
   },
   reasons: {

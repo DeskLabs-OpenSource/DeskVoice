@@ -1,4 +1,24 @@
-import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, rememberedBlock, voicemailLanguageSchema, type CallEventKind, type VoicemailLanguage, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import {
+  CALL_RECORDING_SETTING,
+  CALLER_MEMORY_AGENT_SETTING,
+  callerMemoryAgentOf,
+  callRecordingOf,
+  decryptSecret,
+  enqueueTask,
+  loadCallerMemory,
+  recordEvent,
+  recordingPath,
+  rememberedBlock,
+  voicemailLanguageSchema,
+  type CallerMemory,
+  type CallEventKind,
+  type CallStatus,
+  type Clock,
+  type Db,
+  type OrgQuery,
+  type RememberedItem,
+  type VoicemailLanguage,
+} from "@deskvoice/core";
 import {
   autoCommitOrgQuery,
   handoffTargetsOf,
@@ -186,11 +206,15 @@ const oneLine = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u0
  * 0020), o motivo e o resumo: texto do modelo a partir da fala de quem ligou, que é dado e nunca
  * instrução. Nada do resumo muda a configuração: os destinos e as ferramentas vêm só do banco.
  *
+ * Com a memória do número (`memory`, fatia 6: as notas e os títulos de pendência que
+ * `loadCallerMemory` montou), os itens entram no mesmo bloco, depois do motivo e do resumo quando há
+ * passagem: as instruções nunca têm mais de um bloco. Sem item, nada muda.
+ *
  * O roteiro do motor simulado (`simulated:` seguido de JSON) passa intacto: ninguém o lê como
  * instrução, e qualquer texto colado nele quebraria o `JSON.parse` do motor. O teste lê as instruções
  * montadas com um motor que as guarda.
  */
-export function composeInstructions(base: string, targets: readonly HandoffTarget[], handoff?: HandoffNote): string {
+export function composeInstructions(base: string, targets: readonly HandoffTarget[], handoff?: HandoffNote, memory: readonly RememberedItem[] = []): string {
   if (base.startsWith(SIMULATED_PREFIX)) return base;
   const parts = [base];
   if (targets.length > 0) {
@@ -205,12 +229,11 @@ export function composeInstructions(base: string, targets: readonly HandoffTarge
     parts.push(
       [
         `Esta ligação veio do agente ${oneLine(handoff.fromName)}, que já saiu da linha. Quem ligou já ouviu o aviso de gravação e acabou de ouvir você dizer que continua o atendimento. Continue a partir do motivo e do resumo da passagem, sem pedir de novo o que já foi dito.`,
-        rememberedBlock([
-          { label: "motivo", text: handoff.reason },
-          { label: "resumo", text: handoff.summary },
-        ]),
+        rememberedBlock([{ label: "motivo", text: handoff.reason }, { label: "resumo", text: handoff.summary }, ...memory]),
       ].join("\n"),
     );
+  } else if (memory.length > 0) {
+    parts.push(rememberedBlock(memory));
   }
   return parts.join("\n\n");
 }
@@ -270,6 +293,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   const visited: AgentRow[] = [];
   let handoffs = 0;
   let handingOff = false;
+  /**
+   * A memória do número que o agente recebe (fatia 6), carregada uma vez no começo: o agente de
+   * destino de uma passagem recebe os mesmos itens. `null` com a chave desligada ou sem item.
+   */
+  let memory: CallerMemory | null = null;
   let ending = false;
   let recorder: Recording | undefined;
   /** A gravação já parou a pedido de quem ligou: não volta na mesma chamada. */
@@ -759,7 +787,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       if (!next) return { ok: false, problem: "unavailable", detail: "the target agent was not found in this organization" };
       const targets = await targetsOf(next);
       const enabled = enabledToolsFor(next.tools, targets);
-      const instructions = composeInstructions(next.instructions, targets, { fromName: from.agent.name, reason: input.reason, summary: input.summary });
+      const instructions = composeInstructions(next.instructions, targets, { fromName: from.agent.name, reason: input.reason, summary: input.summary }, memory?.items);
       // A chamada simulada abre o motor simulado na ligação inteira, o trecho do destino inclusive:
       // ela nunca gasta com o provedor nem usa a chave da organização.
       const opened = await connectEngine(overrides?.engineId ?? next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled));
@@ -825,13 +853,22 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
 
     const targets = await targetsOf(first);
     const enabled = enabledToolsFor(overrides?.tools ?? first.tools, targets);
+    const baseInstructions = overrides?.instructions ?? first.instructions;
+    // A memória do número no agente (registro 0020, item 4): só com a chave da organização ligada, em
+    // qualquer direção. Lida uma vez, antes do motor, como a gravação; desligada, nada é lido, e as
+    // instruções são as de antes, byte a byte. O roteiro do motor simulado não recebe bloco (ele
+    // quebraria o JSON), e por isso nem lê. A memória nunca muda as ferramentas nem os destinos, já escolhidos acima.
+    if (!baseInstructions.startsWith(SIMULATED_PREFIX)) {
+      const memoryKey = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALLER_MEMORY_AGENT_SETTING]);
+      if (callerMemoryAgentOf(memoryKey?.value)) memory = await loadCallerMemory(q, { callId, now: clock.now() });
+    }
 
     // Chave ausente ou inválida: a chamada não fica muda. É recusada com evento, aviso e sinal.
     const opened = await connectEngine(
       engineId,
       sessionConfig(
         first,
-        composeInstructions(overrides?.instructions ?? first.instructions, targets),
+        composeInstructions(baseInstructions, targets, undefined, memory?.items),
         // O aviso vem antes de tudo, e os motores falam a abertura ao conectar: o aviso entra
         // na frente da saudação. Lição do DeskcommCRM: na ligação recebida quem atende fala
         // primeiro; na que nós fazemos, quem atende diz "alô" e o agente responde a isso, então
@@ -874,6 +911,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       q.exec("update calls set status = 'in_progress', answered_at = $2, engine = $3 where id = $1", [callId, clock.now(), engineId]),
       event("call_answered", { engine: engineId }),
       event("recording_notice", { text: recordingNotice }),
+      // Os ids e o tamanho, nunca o texto: `call_events` não sai com o prazo da memória.
+      ...(memory ? [event("memory_loaded", { noteIds: memory.noteIds, followUpIds: memory.followUpIds, chars: memory.chars })] : []),
     ];
     if (call.direction !== "inbound") session.say(recordingNotice);
     answeredAt = clock.now();

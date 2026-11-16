@@ -450,6 +450,14 @@ export function Timeline({
         const seconds = (Number(p.waitedMs) / 1000).toLocaleString(locale, { maximumFractionDigits: 1 });
         return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(said, { seconds })}</Quiet> };
       }
+      case "memory_loaded":
+        // Só os ids e o tamanho: o texto das notas fica na tabela delas, onde o prazo o alcança.
+        return {
+          ...base,
+          tone: "neutral",
+          icon: ListChecks,
+          body: <Quiet>{fill(e.memory_loaded, { notes: Array.isArray(p.noteIds) ? p.noteIds.length : 0, followUps: Array.isArray(p.followUpIds) ? p.followUpIds.length : 0, chars: typeof p.chars === "number" ? p.chars : 0 })}</Quiet>,
+        };
       default:
         return { ...base, tone: "neutral", body: <Quiet>{e.unknown} <span className="data">{event.kind}</span></Quiet> };
     }

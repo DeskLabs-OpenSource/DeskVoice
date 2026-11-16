@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CALLER_PHONE_SQL, lockCall } from "./erasures";
 import { enqueueTask } from "./queue";
+import { rememberedBlock, type RememberedItem } from "./remembered-text";
 import { TRANSCRIPT_RETENTION_SETTING, transcriptRetentionOf } from "./retention";
 import type { OrgQuery } from "./types";
 
@@ -155,4 +156,91 @@ export async function forgetCaller(q: OrgQuery, e164: string): Promise<ForgetCal
   const notes = await q.exec("delete from caller_notes where caller_e164 = $1", [e164]);
   const followUps = await q.exec("delete from follow_ups where caller_e164 = $1 and status <> 'open'", [e164]);
   return { notes, followUps };
+}
+
+/**
+ * A chave da memória no agente (decisão 4B, revista na #272, registro 0020, item 4): por
+ * organização, chave `caller_memory.agent` em `settings`. Desligada é a ausência da chave, como vem
+ * de fábrica, e vale nas duas direções: desligada, nem a ligação recebida nem a que o sistema discou
+ * mandam ao modelo nada do que a organização sabe do número.
+ */
+export const CALLER_MEMORY_AGENT_SETTING = "caller_memory.agent";
+export const callerMemoryAgentOf = (stored: unknown): boolean => stored === true;
+
+/** Quantas notas e quantos títulos de pendência entram no bloco, no máximo (desenho de 13/11, seção 2.6). */
+export const CALLER_MEMORY_MAX_NOTES = 10;
+export const CALLER_MEMORY_MAX_FOLLOW_UPS = 5;
+/** O teto do bloco inteiro, em caracteres: a frase fixa, os marcadores e os itens já escapados. */
+export const CALLER_MEMORY_MAX_CHARS = 1500;
+/** Os rótulos fixos de cada item. Nunca vêm do modelo. */
+export const CALLER_MEMORY_NOTE_LABEL = "nota";
+export const CALLER_MEMORY_FOLLOW_UP_LABEL = "pendência";
+
+export interface CallerMemory {
+  /** Os itens do bloco, na ordem em que entram: as notas, da mais nova para a mais velha, e depois os títulos. */
+  items: RememberedItem[];
+  /** Os ids do que entrou, para `memory_loaded`. Nunca o texto. */
+  noteIds: string[];
+  followUpIds: string[];
+  /** O tamanho do bloco sozinho (`rememberedBlock(items)`), em caracteres. */
+  chars: number;
+}
+
+/**
+ * O que o agente recebe sobre o número do outro lado da ligação `callId` (fatia 6 do desenho de
+ * 13/11, seções 2.5 e 2.6). `null` quando não há nada: a ligação sem número, ou o número sem nota nem
+ * pendência aberta.
+ *
+ * - **O número** vem da linha da chamada (`from_e164` na recebida, `to_e164` na de saída), nunca do modelo.
+ * - **As notas** do mesmo número, dentro do prazo efetivo (o menor entre o da memória e o da
+ *   transcrição), filtrado aqui, sem esperar a rotina: a nota vencida não entra, mesmo antes de ela
+ *   rodar. Até `CALLER_MEMORY_MAX_NOTES`, as mais novas. A nota apagada (prazo, tela, "Esquecer este
+ *   número", apagamento a pedido do titular) já não existe na tabela.
+ * - **As pendências:** só o título das abertas do número, até `CALLER_MEMORY_MAX_FOLLOW_UPS`, as mais
+ *   novas. Nunca os detalhes nem a nota de fecho.
+ * - **Ficam de fora** a nota e a pendência nascidas numa chamada simulada (`channel = 'simulated'`).
+ *   A pendência sem chamada (criada pela tela, ou cuja chamada foi apagada) entra.
+ * - **Nunca entram** o resumo nem as falas: nenhuma das duas é lida aqui.
+ * - **Teto:** o bloco inteiro, com a frase fixa, os marcadores e os literais escapados, fica em até
+ *   `CALLER_MEMORY_MAX_CHARS`. Corta a nota mais velha primeiro e, sem nota, o título mais velho.
+ *
+ * Só dentro de `withOrg`: numa transação de sistema a RLS não vale, e a nota de outra organização
+ * com o mesmo número entraria.
+ */
+export async function loadCallerMemory(q: OrgQuery, input: { callId: string; now: Date }): Promise<CallerMemory | null> {
+  if (q.organizationId === "") throw new Error("loadCallerMemory runs inside withOrg, never withSystem: another organization's notes would be read");
+  const call = await q.one<{ phone: string | null }>(`select ${CALLER_PHONE_SQL} as phone from calls where id = $1`, [input.callId]);
+  if (!call?.phone) return null;
+  const { effective } = await callerNotesRetention(q);
+  const since = new Date(input.now.getTime() - effective * DAY_MS);
+  const notes = await q.many<{ id: string; text: string }>(
+    `select n.id, n.text from caller_notes n join calls c on c.id = n.call_id
+      where n.caller_e164 = $1 and n.created_at >= $2 and c.channel <> 'simulated'
+      order by n.created_at desc, n.id desc limit $3`,
+    [call.phone, since, CALLER_MEMORY_MAX_NOTES],
+  );
+  const followUps = await q.many<{ id: string; title: string }>(
+    `select f.id, f.title from follow_ups f left join calls c on c.id = f.call_id
+      where f.caller_e164 = $1 and f.status = 'open' and c.channel is distinct from 'simulated'
+      order by f.created_at desc, f.id desc limit $2`,
+    [call.phone, CALLER_MEMORY_MAX_FOLLOW_UPS],
+  );
+  return fitCallerMemory(notes, followUps);
+}
+
+/** Monta o bloco dentro do teto: tira a nota mais velha enquanto passar dele, e depois o título mais velho. */
+export function fitCallerMemory(notes: ReadonlyArray<{ id: string; text: string }>, followUps: ReadonlyArray<{ id: string; title: string }>): CallerMemory | null {
+  const keptNotes = [...notes];
+  const keptFollowUps = [...followUps];
+  const itemsOf = (): RememberedItem[] => [
+    ...keptNotes.map((note) => ({ label: CALLER_MEMORY_NOTE_LABEL, text: note.text })),
+    ...keptFollowUps.map((followUp) => ({ label: CALLER_MEMORY_FOLLOW_UP_LABEL, text: followUp.title })),
+  ];
+  while (keptNotes.length + keptFollowUps.length > 0 && rememberedBlock(itemsOf()).length > CALLER_MEMORY_MAX_CHARS) {
+    if (keptNotes.length > 0) keptNotes.pop();
+    else keptFollowUps.pop();
+  }
+  const items = itemsOf();
+  if (items.length === 0) return null;
+  return { items, noteIds: keptNotes.map((note) => note.id), followUpIds: keptFollowUps.map((followUp) => followUp.id), chars: rememberedBlock(items).length };
 }

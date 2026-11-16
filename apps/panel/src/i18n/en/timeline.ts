@@ -229,6 +229,7 @@ const timeline: TimelineDictionary = {
       turn_closed: "The caller went {seconds} s without an answer, possibly because of noise on the line. The agent was asked to answer what it heard.",
       asked_to_repeat: "The agent was still silent {seconds} s after the caller last spoke, and asked them to repeat.",
     },
+    memory_loaded: "The agent received the caller's memory: {notes} notes and {followUps} follow-ups, {chars} characters.",
     unknown: "Event",
   },
   reasons: {
