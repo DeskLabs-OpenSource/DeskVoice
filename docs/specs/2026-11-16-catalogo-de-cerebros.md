@@ -164,6 +164,12 @@ parte (o consumo não a separa) ou preço que muda por faixa de tamanho do pedid
 (conferido em 16/11) isso deixou sem preço os modelos mais novos da OpenAI: as famílias `gpt-6*` e
 `gpt-5.6*`, e `gpt-5.5` e `gpt-5.4`.
 
+Também fica **sem preço** o modelo cuja troca de preço já está marcada na página do provedor: um
+preço com data para acabar viraria custo errado sem ninguém notar (decidido no #346, fatia 2). Na
+fatia 2 (conferido em 16/11) ficaram com preço 17 modelos da Anthropic e 5 do Gemini. A DeepSeek
+ficou toda sem preço, porque cobra conforme a hora do pedido. O Haiku 5.5 e os Gemini com faixa
+acima de 200 mil tokens ficaram sem preço pela regra da faixa.
+
 ### 3.3 Credenciais (fatia 3)
 
 Em `settings`, por organização, sem migration:
@@ -350,8 +356,8 @@ A, porque deixa usar o modelo novo que o dono pediu e nunca esconde que o custo 
 ### Não medido
 Quantos modelos de cada provedor ficam sem preço com o pedido 2 em B. Medido só na OpenAI (fatia 1,
 16/11): a tabela tem 15 modelos com preço, e os mais novos (`gpt-6*`, `gpt-5.6*`, `gpt-5.5`,
-`gpt-5.4`) ficam sem preço. Com C, nenhum desses mais novos poderia ler a ligação. Anthropic,
-Gemini e DeepSeek não conferi.
+`gpt-5.4`) ficam sem preço. Com C, nenhum desses mais novos poderia ler a ligação. Na fatia 2
+(16/11): 17 com preço na Anthropic, 5 no Gemini e nenhum na DeepSeek.
 
 **Pedido 2.** Dono: Arquiteto.
 
