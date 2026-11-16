@@ -145,11 +145,25 @@ Comparando as duas árvores, falta isto:
   APROVADO ou REPROVADO com achados e **Não medido**.
 - O que fica de fora do de lá: `loop/LOOP.md`, `features.json`, `update-feature.ts` e a "lane". O
   DeskVoice não tem esse laço, e o estado é o próprio desenho e o PR.
+- Item à parte, pedido pelo board na revisão do #318 (fatia 1): o
+  `deskvoice-contribuir/scripts/hooks/warn-identity.sh` passa a ler a identidade de quem assina o
+  commit por `git var GIT_AUTHOR_IDENT`, não por `git config user.email`. Hoje ele dá aviso falso
+  quando a pessoa passa um e-mail certo por `GIT_AUTHOR_EMAIL` ou `-c user.email=…`, e não avisa
+  quando o `root@` vem do ambiente. Se o `git var` falhar (identidade desconhecida), o hook trata
+  como e-mail vazio e avisa. Continua saindo sempre com 0, e o `pre-commit` continua chamando com
+  `|| true`. A regra de `@vps*` não muda nesta fatia.
 
 **Aceite.** Rodado numa sessão nova do Claude Code sobre uma fatia pequena e já entregue de um
 desenho existente (a escolha fica com o Desenvolvedor, num worktree jogado fora depois), o
 implementador produz a mudança, o verificador dá um veredito com "Não medido", e nada vai ao
 GitHub.
+
+Para o item do hook, a prova vai no PR, com `user.email=root@vps-teste` no `git config`:
+`GIT_AUTHOR_EMAIL=pessoa@exemplo.com.br git commit` sai sem aviso; `git -c
+user.email=pessoa@exemplo.com.br commit` sai sem aviso; com o `git config` de pessoa,
+`GIT_AUTHOR_EMAIL=root@vps-teste git commit` sai com aviso; sem e-mail nenhum sai com aviso. Todos
+com exit 0. Os casos da fatia 1 (`root@vps-teste` e e-mail de pessoa no `git config`) continuam
+iguais.
 
 ### Fatia 4: as skills de doutrina e de métricas
 
