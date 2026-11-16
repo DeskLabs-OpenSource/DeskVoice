@@ -44,6 +44,14 @@ pedido do titular (`packages/core/src/erasures.ts`): anonimizar o conteúdo em v
 registro do serviço prestado, mostrar a prévia do que sai antes de apagar e deixar um recibo de
 quem pediu. A adaptação ao DeskVoice é de @webtecnica, no PR #171.
 
+Do catálogo de modelos de IA do DeskcommCRM (`app/api/v1/ai/credentials`,
+`ai/providers/[provider]/models`, `cron/sync-model-catalog` e `ModelPicker.tsx`, lidos em `9dea1ee`)
+vieram, como lição e não como código, os cérebros do DeskVoice (`packages/voice-engine/src/brains/`
+e `/settings/brains`): os endereços e cabeçalhos de listagem de modelos de cada provedor, conferidos
+depois na documentação de cada um, a chave por provedor guardada cifrada com teste ao salvar e a
+busca de modelo sem acento e sem caixa. Os arquivos foram escritos do zero, um por provedor, nos
+PRs #336, #346, #350, #354, #358 e #368.
+
 Da fábrica do DeskcommCRM vieram a contribuição guiada por skills, o lançamento por fragmentos,
 a forma do instalador e as doutrinas de sistema vivo, versionamento e ação destrutiva, aqui
 reescritas para telefonia.
