@@ -30,8 +30,9 @@ Nenhum desses casos mede nada. Não trate como "passou".
 
 - **`você está em 'main'`.** PR sai de um ramo com nome. A `main` do fork carrega o que é da sua
   instalação, e um PR aberto dali propõe tudo isso ao projeto. `git switch -c fix/o-que-conserta`.
-- **`N commit(s) atrás de origin/main`.** O CI mede o seu ramo, não o resultado do merge: verde num
-  ramo atrasado não prova o que vai entrar. `git merge origin/main`; nunca `reset --hard` nem
+- **`N commit(s) atrás de origin/main`.** O CI mede a prévia do merge com a `main` do momento do seu
+  último push, e não mede de novo quando a `main` anda: um verde antigo não prova o que vai entrar,
+  e com conflito ele nem roda. `git merge origin/main`; nunca `reset --hard` nem
   `push --force`.
 - **`arquivos que a main também mudou`.** É onde o conflito vai nascer. Mescle agora. Num conflito,
   leia os dois lados: a resposta certa costuma ser a combinação, não um lado só. Depois do merge,
