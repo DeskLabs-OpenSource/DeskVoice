@@ -11,7 +11,7 @@ import {
   recordEventWithId,
   recordingPath,
   rememberedBlock,
-  voicemailLanguageSchema,
+  spokenLanguageOf,
   type CallerMemory,
   type CallEventKind,
   type CallStatus,
@@ -19,7 +19,7 @@ import {
   type Db,
   type OrgQuery,
   type RememberedItem,
-  type VoicemailLanguage,
+  type SpokenLanguage,
 } from "@deskvoice/core";
 import {
   autoCommitOrgQuery,
@@ -186,18 +186,18 @@ const TOOL_CRASH_MESSAGE = "Não consegui concluir isso agora. Diga a quem está
 /**
  * O que o agente que recebe a ligação diz primeiro, antes de quem ligou falar. Fixa, e não a saudação
  * do agente: a saudação é para quem acabou de ligar, e esta pessoa já foi atendida. O resto ele tira
- * do motivo e do resumo, que estão nas instruções. Vai no idioma do agente que recebe, nos mesmos
- * idiomas do aviso da caixa postal; um idioma fora do mapa cai no pt-BR.
+ * do motivo e do resumo, que estão nas instruções. Vai no idioma do agente que recebe, na mesma lista
+ * do aviso da caixa postal: quem escolhe é `spokenLanguageOf`, então `en-US` fala inglês e um idioma
+ * que as falas não têm cai no padrão do produto.
  */
-export const HANDOFF_GREETINGS: Readonly<Record<VoicemailLanguage, string>> = {
+export const HANDOFF_GREETINGS: Readonly<Record<SpokenLanguage, string>> = {
   "pt-BR": "Oi, vou continuar o seu atendimento a partir daqui.",
   en: "Hi, I'll take it from here and continue helping you.",
   es: "Hola, voy a continuar con su atención a partir de aquí.",
 };
 
 export function handoffGreetingFor(language: string): string {
-  const parsed = voicemailLanguageSchema.safeParse(language);
-  return HANDOFF_GREETINGS[parsed.success ? parsed.data : "pt-BR"];
+  return HANDOFF_GREETINGS[spokenLanguageOf(language)];
 }
 
 /** O que entra nas instruções do agente que recebe a ligação: quem passou, o motivo e o resumo. */

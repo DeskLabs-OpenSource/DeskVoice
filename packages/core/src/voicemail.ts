@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_SPOKEN_LANGUAGE, SPOKEN_LANGUAGES, type SpokenLanguage, spokenLanguageOf } from "./spoken-language";
 
 /**
  * Caixa postal por organização: quando ninguém pode atender, a chamada é atendida e o recado é
@@ -34,14 +35,20 @@ export function voicemailMaxSecondsOf(stored: unknown): number {
 }
 
 export const VOICEMAIL_LANGUAGE_SETTING = "voicemail.language";
-/** Os idiomas em que o aviso existe gravado, um arquivo cada (`apps/voice/assets/voicemail-notice`). */
-export const VOICEMAIL_LANGUAGES = ["pt-BR", "en", "es"] as const;
-export type VoicemailLanguage = (typeof VOICEMAIL_LANGUAGES)[number];
-export const DEFAULT_VOICEMAIL_LANGUAGE: VoicemailLanguage = "pt-BR";
+/**
+ * Os idiomas em que o aviso existe gravado, um arquivo cada (`apps/voice/assets/voicemail-notice`).
+ * A lista é a das falas do sistema, num lugar só (`spoken-language.ts`): o aviso, a saudação da
+ * passagem entre agentes e as falas da agenda leem dela, para não divergirem de novo.
+ */
+export const VOICEMAIL_LANGUAGES = SPOKEN_LANGUAGES;
+export type VoicemailLanguage = SpokenLanguage;
+export const DEFAULT_VOICEMAIL_LANGUAGE: VoicemailLanguage = DEFAULT_SPOKEN_LANGUAGE;
 export const voicemailLanguageSchema = z.enum(VOICEMAIL_LANGUAGES);
 
-/** O idioma do aviso para um valor lido de `settings`: ausente ou desconhecido cai no de fábrica. */
+/**
+ * O idioma do aviso para um valor lido de `settings`: ausente ou desconhecido cai no de fábrica, e
+ * um rótulo com região (`en-US`) escolhe o idioma que o aviso fala (`en`).
+ */
 export function voicemailLanguageOf(stored: unknown): VoicemailLanguage {
-  const parsed = voicemailLanguageSchema.safeParse(stored);
-  return parsed.success ? parsed.data : DEFAULT_VOICEMAIL_LANGUAGE;
+  return spokenLanguageOf(stored);
 }
