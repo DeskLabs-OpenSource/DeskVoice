@@ -399,6 +399,18 @@ describe("as recusas", { timeout: 120_000 }, () => {
     expect(String(self?.message)).toMatch(/Você já é Recepção/);
   });
 
+  it("o nome com o rótulo, como a lista das instruções mostra, também passa a ligação", async () => {
+    const { ids, call } = await team("handoff-with-label", {
+      Recepção: { script: [handoffCall("Agendamento (Agendador)"), { say: "NÃO DEVIA FALAR" }, { end: true }] },
+      Agendamento: { roleLabel: "Agendador", script: [{ say: "Qual dia fica melhor?" }, { end: true }] },
+    });
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
+    const { callId, session } = await call("Recepção");
+    await session.done;
+    expect(await payloadsOf(callId, "agent_handoff")).toEqual([expect.objectContaining({ to: { id: ids.Agendamento, name: "Agendamento" } })]);
+    expect(await toolResults(callId)).toEqual([expect.objectContaining({ name: "transfer_to_agent", ok: true })]);
+  });
+
   it("o próprio agente na lista de destinos: recusado com ok: false, e não há agent_handoff", async () => {
     const { ids, call } = await team("handoff-self-in-list", {
       Recepção: { script: [handoffCall("Recepção"), { say: "Sigo eu." }, { end: true }] },
