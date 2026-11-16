@@ -29,6 +29,8 @@ export interface Agent {
   followUpOwnerUserId: string | null;
   /** Onde quem liga costuma estar. Agente gravado antes do campo existir pode chegar sem ele: vale `normal`. */
   listeningEnvironment?: ListeningEnvironment;
+  /** Para quem o agente pode passar a ligação (`transfer_to_agent`). Vazia de fábrica. */
+  agentHandoffTargets?: string[];
 }
 
 export type ListeningEnvironment = "normal" | "noisy";

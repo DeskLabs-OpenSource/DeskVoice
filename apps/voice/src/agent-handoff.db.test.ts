@@ -1,11 +1,13 @@
 // A passagem da ligação entre agentes no processo de voz (fatia 4a do desenho de 13/11, seções 4.2 e
 // 4.3; registro 0020): a troca de sessão, os limites da ligação, o custo por trecho e o resumo como dado.
 import { REMEMBERED_BLOCK_CLOSE, REMEMBERED_BLOCK_OPEN, withOrg, withSystem } from "@deskvoice/core";
-import { MAX_AGENT_HANDOFFS_PER_CALL } from "@deskvoice/tools";
+import { defineTool, MAX_AGENT_HANDOFFS_PER_CALL, type Tool } from "@deskvoice/tools";
 import { createSimulatedEngine, estimateCostCents, type SimulatedScript, type VoiceEngine, type VoiceSessionConfig } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { forceHandoffTargets, openTestDbs } from "../../../packages/core/test/helpers";
+import { z } from "zod";
 import { DEFAULT_RECORDING_NOTICE, HANDOFF_GREETINGS, handoffGreetingFor, startCallSession, type CallSession } from "./call-session";
+import { startSimulatedCall } from "./simulate";
 import {
   callOf,
   createAgent,
@@ -542,5 +544,114 @@ describe("sem destino, nada muda", { timeout: 120_000 }, () => {
       expect(config.instructions).toBe(instructions);
       expect(config.tools.map((tool) => tool.name)).toEqual(["create_task"]);
     }
+  });
+});
+
+describe("as correções antes da tela (fatia 4b)", { timeout: 120_000 }, () => {
+  it("a chamada simulada abre o motor simulado também no trecho do destino, e não gasta com o provedor", async () => {
+    // O destino é de um motor pago e sem chave a pedir: se a passagem o abrisse, a sessão abriria.
+    const paid = manualEngine({ id: "openai-realtime", keyless: true, centsPerMinute: 600 });
+    const simulated = createSimulatedEngine();
+    const { ids, harness: h, organizationId } = await team(
+      "handoff-simulated",
+      { Recepção: {}, Vendas: { engine: "openai-realtime", script: [{ say: "Vendas, pois não." }, { end: true }] } },
+      [simulated, paid.engine],
+    );
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Vendas ?? ""]);
+    const asked: string[] = [];
+    const engines = h.deps.engines;
+    h.deps.engines = { get: (id: string) => (asked.push(id), engines.get(id)) } as typeof engines;
+
+    const started = await startSimulatedCall(h.deps, { organizationId, agentId: ids.Recepção ?? "" }, { script: [handoffCall("Vendas"), { end: true }], tools: [] });
+    if ("code" in started) throw new Error(started.message);
+    // Com o motor pago aberto, a ligação ficaria esperando por ele: o prazo é só para o teste cair rápido.
+    const outcome = await Promise.race([started.session.done, new Promise<"stuck">((resolve) => setTimeout(() => resolve("stuck"), 10_000))]);
+    expect(paid.configs).toEqual([]);
+    expect(new Set(asked)).toEqual(new Set(["simulated"]));
+    expect(outcome).toMatchObject({ status: "completed", endReason: "script_finished" });
+
+    // A passagem aconteceu, e o destino falou pelo motor simulado.
+    expect(await payloadsOf(started.callId, "agent_handoff")).toEqual([expect.objectContaining({ to: { id: ids.Vendas, name: "Vendas" } })]);
+    expect(await payloadsOf(started.callId, "transcript_agent")).toContainEqual({ text: "Vendas, pois não.", agentId: ids.Vendas });
+    expect(asked.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(asked)).toEqual(new Set(["simulated"]));
+    expect(paid.configs).toEqual([]);
+    // Nenhuma medição com o motor nem com o preço do provedor.
+    const ledger = await ledgerOf(app, started.callId);
+    expect(ledger.length).toBeGreaterThan(0);
+    expect(ledger.every((row) => row.engine === "simulated" && row.cost_cents === 0)).toBe(true);
+    expect(ledger.some((row) => row.agent_id === ids.Vendas)).toBe(true);
+  });
+
+  it("ctx.say de uma ferramenta do trecho substituído não fala na voz nova", async () => {
+    let releaseTool: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (releaseTool = resolve));
+    const slowSay: Tool = defineTool({
+      name: "slow_say",
+      description: "Teste: fala depois de soltar.",
+      inputSchema: z.object({ text: z.string() }),
+      async run(input, ctx) {
+        if (input.text !== "agora") await gate;
+        ctx.say(input.text);
+        return { ok: true, message: "ok" };
+      },
+    });
+    const first = manualEngine({ id: "first", keyless: true });
+    const second = manualEngine({ id: "second", keyless: true });
+    const { ids, call, harness: h } = await team("handoff-say", { Recepção: { engine: "first", tools: ["slow_say"] }, Agendamento: { engine: "second", tools: ["slow_say"] } }, [first.engine, second.engine]);
+    (h.deps.tools as Map<string, Tool>).set("slow_say", slowSay);
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    // Antes da troca, a ferramenta fala pela sessão do trecho dela.
+    first.emit("toolCall", { id: "t0", name: "slow_say", args: { text: "agora" } });
+    await waitFor(async () => first.said.includes("agora"), "the tool to speak");
+    first.emit("toolCall", { id: "t1", name: "slow_say", args: { text: "DEPOIS DA TROCA" } });
+    first.emit("toolCall", { id: "t2", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    releaseTool();
+    await waitFor(async () => (await toolResults(callId)).filter((result) => result.name === "slow_say").length === 2, "the slow tool to finish");
+    expect(second.said).not.toContain("DEPOIS DA TROCA");
+    expect(first.said).not.toContain("DEPOIS DA TROCA");
+    // A ferramenta do trecho atual continua falando, pela sessão nova.
+    second.emit("toolCall", { id: "t3", name: "slow_say", args: { text: "agora" } });
+    await waitFor(async () => second.said.includes("agora"), "the new leg's tool to speak");
+    transport.callerHangup();
+    await session.done;
+  });
+
+  it("quem ligou desliga durante a abertura: a telefonia é solta na hora, sem esperar os 15 s, e a sessão que abre depois é fechada", async () => {
+    let release: () => void = () => undefined;
+    const slow = manualEngine({ id: "slow", keyless: true, connectWhen: new Promise<void>((resolve) => (release = resolve)) });
+    const manual = manualEngine({ id: "first", keyless: true });
+    const { ids, call, harness: h } = await team("handoff-hangup-time", { Recepção: { engine: "first" }, Agendamento: { engine: "slow" } }, [manual.engine, slow.engine]);
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    manual.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => slow.configs.length === 1, "the next session to be asked for");
+    expect(h.timers.held()).toContain(15_000);
+
+    const before = h.timers.now();
+    transport.callerHangup();
+    // Nenhum prazo é disparado: o encerramento não pode depender dos 15 s. Os 5 s de relógio real
+    // são só o limite do teste; antes da correção, a ligação esperava a abertura para sempre.
+    const outcome = await Promise.race([session.done, new Promise<"stuck">((resolve) => setTimeout(() => resolve("stuck"), 5_000))]);
+    expect(outcome).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+    expect(h.timers.now() - before).toBeLessThan(15_000);
+    expect(h.timers.held()).not.toContain(15_000);
+    expect(transport.closes).toBe(1);
+    // A ferramenta respondeu antes de `call_ended`, sem passagem.
+    const kinds = await kindsOf(app, callId);
+    expect(kinds).not.toContain("agent_handoff");
+    expect(kinds.indexOf("tool_result")).toBeLessThan(kinds.indexOf("call_ended"));
+    expect(await toolResults(callId)).toEqual([expect.objectContaining({ name: "transfer_to_agent", ok: false })]);
+
+    // O provedor responde depois: a sessão é fechada, e nada dela entra na ligação.
+    release();
+    await waitFor(async () => slow.closed === 1, "the session opened after the hangup to be closed");
+    slow.emit("usage", { seconds: 30 });
+    expect((await ledgerOf(app, callId)).filter((row) => row.agent_id === ids.Agendamento || row.engine === "slow")).toEqual([]);
   });
 });

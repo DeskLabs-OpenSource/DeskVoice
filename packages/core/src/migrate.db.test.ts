@@ -203,4 +203,31 @@ describe("runMigrations", () => {
     await expect(db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Alto', 'simulated', 'loud')", [org])).rejects.toThrow(/listening_environment/);
     await expect(db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/listening_environment/);
   });
+  it("os destinos de passagem que já apontavam para agente apagado saem da lista, na ordem de antes, em toda organização", async () => {
+    const CLEANUP = "20261116T032848_apagar_agente_tira_destino.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < CLEANUP) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const agent = async (org: string, name: string): Promise<string> =>
+      (await db.pool.query<{ id: string }>("insert into agents (organization_id, name, engine) values ($1, $2, 'simulated') returning id", [org, name])).rows[0]?.id ?? "";
+    const orgA = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id ?? "";
+    const orgB = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('B') returning id")).rows[0]?.id ?? "";
+    const [recepcao, vendas, agenda, suporte] = [await agent(orgA, "Recepção"), await agent(orgA, "Vendas"), await agent(orgA, "Agenda"), await agent(orgA, "Suporte")];
+    const [outra, apagada] = [await agent(orgB, "Outra"), await agent(orgB, "Apagada")];
+    await db.pool.query("update agents set agent_handoff_targets = $2 where id = $1", [recepcao, [suporte, agenda, vendas]]);
+    await db.pool.query("update agents set agent_handoff_targets = $2 where id = $1", [outra, [apagada]]);
+    await db.pool.query("update agents set agent_handoff_targets = $2 where id = $1", [vendas, [agenda]]);
+    // Antes desta mudança, apagar não mexia nas listas: o id ficava lá.
+    await db.pool.query("delete from agents where id = any($1::uuid[])", [[agenda, apagada]]);
+    expect((await db.pool.query("select agent_handoff_targets from agents where id = $1", [recepcao])).rows[0]).toEqual({ agent_handoff_targets: [suporte, agenda, vendas] });
+
+    await copyFile(path.join(REAL_MIGRATIONS, CLEANUP), path.join(dir, CLEANUP));
+    expect(await runMigrations(db, dir)).toEqual([CLEANUP]);
+    const targets = async (id: string): Promise<string[]> => (await db.pool.query<{ agent_handoff_targets: string[] }>("select agent_handoff_targets from agents where id = $1", [id])).rows[0]?.agent_handoff_targets ?? [];
+    expect(await targets(recepcao)).toEqual([suporte, vendas]);
+    expect(await targets(vendas)).toEqual([]);
+    expect(await targets(outra)).toEqual([]);
+    expect(await targets(suporte)).toEqual([]);
+    // E a edição do agente volta a passar pelo gatilho de checagem.
+    await db.pool.query("update agents set name = 'Recepção 2', agent_handoff_targets = agent_handoff_targets where id = $1", [recepcao]);
+  });
 });

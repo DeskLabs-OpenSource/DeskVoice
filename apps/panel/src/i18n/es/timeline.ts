@@ -90,6 +90,7 @@ const timeline: TimelineDictionary = {
   removedPerson: "Una persona que dejó el equipo",
   names: {
     end_call: "Terminar la llamada",
+    transfer_to_agent: "Pasar a otro agente",
     transfer_to_human: "Transferir a una persona",
     notify_human: "Avisar al equipo",
     request_approval: "Pedir aprobación",
@@ -125,6 +126,9 @@ const timeline: TimelineDictionary = {
     human_notified: "Avisó a una persona",
     human_notified_channels: "Enviado por: {channels}",
     dtmf_sent: "Pulsó teclas en el menú",
+    agent_handoff: "Pasó a {to}",
+    agent_handoff_from: "De {from}",
+    agent_handoff_summary: "Resumen para el próximo agente",
     transfer_started: "Transfiriendo la llamada",
     transfer_to: "A {to}",
     transfer_completed: "Transferencia completada",

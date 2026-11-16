@@ -34,7 +34,8 @@ const optionalText = (max: number) =>
 
 export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions, greeting, engine, voice_id as "voiceId", language, tools,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
-  follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment", created_at as "createdAt", updated_at as "updatedAt"`;
+  follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment",
+  agent_handoff_targets as "agentHandoffTargets", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -55,6 +56,12 @@ const agentFields = z.object({
   vocabulary,
   // Ambiente de quem liga: `noisy` ajusta a detecção de fala do provedor para ruído de fundo.
   listeningEnvironment: z.enum(["normal", "noisy"]),
+  // Para quem o agente pode passar a ligação (`transfer_to_agent`). A rota confere que cada um é
+  // outro agente desta organização (`requireHandoffTargets`); vazia, a ferramenta não aparece.
+  agentHandoffTargets: z
+    .array(z.uuid())
+    .max(50)
+    .transform((ids) => [...new Set(ids)]),
 });
 export type AgentValues = z.output<typeof agentFields>;
 export const agentPatch = agentFields.partial();
@@ -74,6 +81,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   followUpOwnerUserId: null,
   vocabulary: [],
   listeningEnvironment: "normal",
+  agentHandoffTargets: [],
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",
@@ -111,6 +119,23 @@ export async function requireActiveOwner(q: OrgQuery, userId: string | null | un
   if (userId === null || userId === undefined) return;
   if (!(await q.one("select 1 from users where id = $1 and disabled_at is null for share", [userId]))) {
     throw new ApiError(400, "owner_unavailable", "The follow-up owner must be an active person of this team.");
+  }
+}
+
+/**
+ * Os destinos de passagem são outros agentes desta organização. O de outra organização nem é visto
+ * (`withOrg`), e volta o mesmo erro do que não existe; o próprio agente também é recusado. Os
+ * destinos ficam travados até o fim da escrita: apagados no meio, o banco recusaria com
+ * `check_violation`, e a pessoa leria um erro cru.
+ */
+export async function requireHandoffTargets(q: OrgQuery, selfId: string | null, targets: readonly string[] | undefined): Promise<void> {
+  if (!targets || targets.length === 0) return;
+  if (selfId !== null && targets.includes(selfId)) {
+    throw new ApiError(400, "handoff_target_invalid", "An agent cannot hand the call off to itself.");
+  }
+  const found = await q.many<{ id: string }>("select id from agents where id = any($1::uuid[]) for share", [targets]);
+  if (found.length !== targets.length) {
+    throw new ApiError(400, "handoff_target_invalid", "Every handoff target must be another agent of this organization.");
   }
 }
 

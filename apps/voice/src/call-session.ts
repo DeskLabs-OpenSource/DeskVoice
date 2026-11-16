@@ -137,6 +137,9 @@ export const DEFAULT_RECORDING_NOTICE = "Esta ligação é atendida por uma assi
 // Além do prazo do próprio motor: nenhum `connect` segura quem ligou em silêncio por mais que isto.
 const CONNECT_TIMEOUT_MS = 15_000;
 
+/** A ligação acabou enquanto um motor abria: a abertura desiste sem esperar o prazo. */
+class CallEndedError extends Error {}
+
 // Tempo para a despedida ser gerada e chegar à fila de saída; o que estiver na fila ainda toca
 // até o fim antes de a ligação cair (`transport.hangup` espera).
 const FAREWELL_MS = 6000;
@@ -512,8 +515,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     q,
     clock,
     telephony,
+    // Fala pela sessão do próprio trecho, e só enquanto ela é a atual: a ferramenta de um trecho já
+    // substituído numa passagem não fala na voz do agente seguinte.
     say(text) {
-      if (!ending) voice?.say(text);
+      if (!ending && leg?.voice === session) session.say(text);
     },
     waitForApproval: (approvalId, timeoutMs) =>
       deps.approvals.wait(
@@ -611,23 +616,34 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         return { engine: found, reason: "engine_not_configured", problem: `the saved API key cannot be read (${messageOf(error)})` };
       }
     }
-    if (ending) return { engine: found, reason: "engine_not_configured", problem: "the call ended before the engine connected" };
+    const endedProblem = "the call ended before the engine connected";
+    if (ending) return { engine: found, reason: "engine_not_configured", problem: endedProblem };
     const connecting = found.connect(config, apiKey);
     let cancelDeadline: () => void = () => undefined;
     const deadline = new Promise<never>((_, reject) => {
       cancelDeadline = schedule(() => reject(new EngineTimeoutError(`the provider did not answer in ${CONNECT_TIMEOUT_MS / 1000} s`)), CONNECT_TIMEOUT_MS);
     });
+    // A abertura corre também contra o fim da ligação: quem desligou não espera o prazo, e o
+    // encerramento (que espera as ferramentas, a passagem inclusive) solta a telefonia na hora.
+    let stopWatchingEnd: () => void = () => undefined;
+    const callGone = new Promise<never>((_, reject) => {
+      const onEnd = (): void => reject(new CallEndedError(endedProblem));
+      callEnded.signal.addEventListener("abort", onEnd, { once: true });
+      stopWatchingEnd = () => callEnded.signal.removeEventListener("abort", onEnd);
+    });
     try {
-      return { engine: found, voice: await Promise.race([connecting, deadline]) };
+      return { engine: found, voice: await Promise.race([connecting, deadline, callGone]) };
     } catch (error) {
-      if (error instanceof EngineTimeoutError) {
-        // Se a sessão ainda abrir depois do prazo, ninguém vai usá-la.
+      if (error instanceof EngineTimeoutError || error instanceof CallEndedError) {
+        // Se a sessão ainda abrir depois do prazo ou do fim da ligação, ninguém vai usá-la.
         connecting.then((late) => late.close(), () => undefined);
+        if (error instanceof CallEndedError) return { engine: found, reason: "engine_not_configured", problem: endedProblem };
         return { engine: found, reason: "engine_not_responding", problem: `the voice provider did not answer (${messageOf(error)})` };
       }
       return { engine: found, reason: "engine_not_configured", problem: `the voice engine refused the session (${messageOf(error)})` };
     } finally {
       cancelDeadline();
+      stopWatchingEnd();
     }
   }
 
@@ -738,7 +754,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const targets = await targetsOf(next);
       const enabled = enabledToolsFor(next.tools, targets);
       const instructions = composeInstructions(next.instructions, targets, { fromName: from.agent.name, reason: input.reason, summary: input.summary });
-      const opened = await connectEngine(next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled));
+      // A chamada simulada abre o motor simulado na ligação inteira, o trecho do destino inclusive:
+      // ela nunca gasta com o provedor nem usa a chave da organização.
+      const opened = await connectEngine(overrides?.engineId ?? next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled));
+      if (!("voice" in opened) && ending) return { ok: false, problem: "closing" };
       if (!("voice" in opened)) {
         log("error", "the next agent's session did not open; the current agent stays on the line", { to: next.id, reason: opened.reason, error: opened.problem });
         return { ok: false, problem: "unavailable", detail: opened.problem };

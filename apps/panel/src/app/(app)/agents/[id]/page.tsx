@@ -35,9 +35,11 @@ interface Draft {
   /** Vazio: as pendências do agente são da equipe. */
   followUpOwner: string;
   listeningEnvironment: ListeningEnvironment;
+  /** Para quem o agente pode passar a ligação; vazia de fábrica. */
+  handoffTargets: string[];
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal" };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", handoffTargets: [] };
 
 /** Motores em que a sessão em Barulhento foi provada numa instalação real. */
 const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime"];
@@ -57,6 +59,7 @@ const toDraft = (agent: Agent): Draft => ({
   enabled: agent.enabled,
   followUpOwner: agent.followUpOwnerUserId ?? "",
   listeningEnvironment: agent.listeningEnvironment ?? "normal",
+  handoffTargets: agent.agentHandoffTargets ?? [],
 });
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -71,6 +74,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const engines = useApi<Engine[]>("/engines");
   const tools = useApi<ToolInfo[]>("/tools");
   const owners = useApi<Person[]>("/follow-ups/owners");
+  // Os outros agentes da organização, para "Pode passar a ligação para". A lista vem da sessão (`withOrg`).
+  const team = useApi<Agent[]>("/agents");
   const defaultEngine = useApi<Setting<string>>(isNew ? "/settings/engine.default" : null);
   const save = useAction();
   const remove = useAction();
@@ -109,6 +114,10 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   }
   if (!draft) return <Skeleton lines={5} />;
 
+  // O próprio agente nunca aparece: ele não passa a ligação para si mesmo.
+  const others = team.data?.filter((candidate) => candidate.id !== id) ?? [];
+  // Os agentes que podem passar a ligação para este: apagá-lo o tira da lista deles.
+  const handingOffHere = others.filter((other) => other.agentHandoffTargets?.includes(id));
   const engine = engines.data?.find((candidate) => candidate.id === draft.engine);
   // Barulhento só foi provado no OpenAI Realtime. Em outro motor, a opção some; um agente que já
   // está em Barulhento continua vendo o campo, com um aviso, para não guardar a escolha escondida.
@@ -132,6 +141,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         enabled: draft.enabled,
         followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
         listeningEnvironment: draft.listeningEnvironment,
+        agentHandoffTargets: draft.handoffTargets,
       };
       const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       setSavedEnvironment(saved.listeningEnvironment ?? "normal");
@@ -301,6 +311,34 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           </Panel>
         </div>
 
+        <Panel title={t.handoff} description={t.handoffLead}>
+          {team.data && others.length === 0 ? <p className="text-muted">{t.handoffEmpty}</p> : null}
+          <ul className="grid gap-1" aria-label={t.handoff}>
+            {others.map((other) => {
+              const checked = draft.handoffTargets.includes(other.id);
+              return (
+                <li key={other.id}>
+                  <label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-x-3 rounded-sm px-3 py-2.5 transition-colors duration-[120ms] hover:bg-sunken has-checked:bg-sunken">
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4 accent-(--dv-accent)"
+                      checked={checked}
+                      onChange={() => set("handoffTargets", checked ? draft.handoffTargets.filter((target) => target !== other.id) : [...draft.handoffTargets, other.id])}
+                    />
+                    <span className="font-medium">{other.name}</span>
+                    {other.roleLabel ? <span className="col-start-2 text-[0.87rem] text-muted">{other.roleLabel}</span> : null}
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          <ul className="mt-4 grid list-disc gap-1 pl-5 text-[0.87rem] text-muted">
+            <li>{t.handoffWhen}</li>
+            <li>{t.handoffLimits}</li>
+            <li>{t.handoffMax}</li>
+          </ul>
+        </Panel>
+
         <Panel title={t.followUps} description={t.followUpsLead}>
           <Field label={t.followUpOwner} hint={t.followUpOwnerHint}>
             <Select value={draft.followUpOwner} onChange={(event) => set("followUpOwner", event.target.value)} className="max-w-sm">
@@ -332,6 +370,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       {confirming ? (
         <Notice tone="fail">
           <p>{fill(t.deleteConfirm, { name: draft.name })}</p>
+          {/* O que vai junto: o agente sai da lista de destinos de quem o tinha marcado. */}
+          {handingOffHere.length > 0 ? <p>{fill(t.deleteHandoffTargets, { name: draft.name, agents: handingOffHere.map((other) => other.name).join(", ") })}</p> : null}
           <div className="mt-1 flex flex-wrap gap-2">
             <Button variant="danger" busy={remove.busy} onClick={() => void remove.run(() => api(`/agents/${id}`, { method: "DELETE" })).then((ok) => ok && router.replace("/agents"))}>
               {fill(t.deleteYes, { name: draft.name })}

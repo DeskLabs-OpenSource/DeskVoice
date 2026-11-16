@@ -92,6 +92,7 @@ const common: CommonDictionary = {
     whatsapp_contact_required: "Save your WhatsApp in My contact, under Settings → Your account, to receive the test message.",
     whatsapp_connector_refused: "The configured WhatsApp connector refused the test message. Check the connector address and token; the technical detail is in the panel log.",
     whatsapp_connected: "A WhatsApp number is connected by QR code. Disconnect the number before saving another connector or removing the service.",
+    handoff_target_invalid: "One of the agents checked in \"Can hand the call off to\" no longer exists or is this agent itself. Reload the page and check again.",
     owner_unavailable: "This person is not active in the team. Pick someone else, or leave it with the team.",
     caller_notes_retention_above_transcripts: "The memory period cannot be longer than the conversation retention period. Pick a shorter period, or raise the retention period first.",
     follow_up_closed: "Someone else already closed this follow-up. Refresh the page.",

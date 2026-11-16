@@ -91,6 +91,7 @@ const timeline = {
   // técnico: ninguém precisa editar este arquivo para registrar uma peça.
   names: {
     end_call: "Encerrar a chamada",
+    transfer_to_agent: "Passar para outro agente",
     transfer_to_human: "Transferir para uma pessoa",
     notify_human: "Avisar a equipe",
     request_approval: "Pedir aprovação",
@@ -126,6 +127,9 @@ const timeline = {
     human_notified: "Avisou uma pessoa",
     human_notified_channels: "Enviado por: {channels}",
     dtmf_sent: "Apertou teclas no menu",
+    agent_handoff: "Passou para {to}",
+    agent_handoff_from: "De {from}",
+    agent_handoff_summary: "Resumo para o próximo agente",
     transfer_started: "Transferindo a ligação",
     transfer_to: "Para {to}",
     transfer_completed: "Transferência concluída",

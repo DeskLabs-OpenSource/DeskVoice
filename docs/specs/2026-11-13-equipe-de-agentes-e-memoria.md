@@ -35,8 +35,11 @@ O que mudou entre o #114 e a primeira fatia de memória, e onde está no texto a
 - **O que nasce numa chamada simulada não conta no aviso** ([#291](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/291)).
   A pendência e a nota de uma simulada aparecem no bloco "Este número" com a marca "Simulada", e os
   avisos de `transfer_to_human` e `notify_human` não as contam nem as mostram (seção 7, fatia 3a).
-- **A fatia 4 saiu em duas:** a 4a traz a passagem no processo de voz; a 4b traz a tela, o custo por
-  agente na tela, o guia e a prova na VPS.
+- **A fatia 4 saiu em quatro:** a 4a traz a passagem no processo de voz; a 4b traz "Pode passar
+  para" na tela do agente, `agent_handoff` na linha do tempo e as correções antes da tela (apagar um
+  agente o tira da lista dos outros; a simulada abre o motor simulado também no destino; `ctx.say`
+  fala só pela sessão do trecho dela; a ligação que cai durante a abertura é solta na hora); a 4c
+  traz o custo por agente na tela; a 4d traz o guia das quatro funções e a prova na VPS.
 - **A fala de quem ligou é dado, nunca instrução.** Todo texto lembrado entra no contexto de um
   agente dentro de um bloco delimitado e escapado, e a memória nunca muda a configuração da ligação
   (0020, "Regras que valem em toda fatia"). Isso vale para a fatia 6 e para o resumo da passagem da
