@@ -599,7 +599,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     listeningEnvironment: row.listening_environment,
   });
 
-  type Opened = { engine: VoiceEngine; voice: VoiceSession } | { engine?: VoiceEngine; reason: "engine_not_configured" | "engine_not_responding"; problem: string };
+  type EngineRefusal = "engine_not_configured" | "engine_not_responding" | "engine_refused";
+  type Opened = { engine: VoiceEngine; voice: VoiceSession } | { engine?: VoiceEngine; reason: EngineRefusal; problem: string };
 
   /**
    * Abre a sessão de um motor com a chave da organização, ou diz por que não abriu. Nenhum `connect`
@@ -643,7 +644,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         if (error instanceof CallEndedError) return { engine: found, reason: "engine_not_configured", problem: endedProblem };
         return { engine: found, reason: "engine_not_responding", problem: `the voice provider did not answer (${messageOf(error)})` };
       }
-      return { engine: found, reason: "engine_not_configured", problem: `the voice engine refused the session (${messageOf(error)})` };
+      // A chave existe: o provedor recusou a sessão (chave recusada, crédito esgotado, limite da conta)
+      // ou não foi alcançado pela rede (DNS, firewall de saída). O motivo vem no `problem`.
+      return { engine: found, reason: "engine_refused", problem: `the voice provider refused the session or could not be reached (${messageOf(error)})` };
     } finally {
       cancelDeadline();
       stopWatchingEnd();
@@ -852,7 +855,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         notice:
           reason === "engine_not_responding"
             ? `Uma ligação do agente ${first.name} foi recusada porque o provedor do motor de voz ${label} não respondeu: ${problem}. Quem ligou ouviu o sinal de falha. Confira a situação do provedor e faça uma chamada de teste.`
-            : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${first.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações → Inteligência artificial e faça uma chamada de teste.`,
+            : reason === "engine_refused"
+              ? `Uma ligação do agente ${first.name} foi recusada porque o provedor do motor de voz ${label} recusou a sessão ou não foi alcançado: ${problem}. Quem ligou ouviu o sinal de falha. Confira o crédito e os limites na conta do provedor, a chave em Configurações → Inteligência artificial e, se o motivo for de rede, se a VPS alcança o provedor pela internet; depois faça uma chamada de teste.`
+              : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${first.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações → Inteligência artificial e faça uma chamada de teste.`,
       });
     }
 
