@@ -75,7 +75,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   // classificação paga: a tela avisa ao lado do botão antes do clique, não só no extrato depois.
   const classificationWarning = transcribeAlsoClassifies({ outcome: outcomeEnabled.data?.value === true, analysis: analysisEnabled.data?.value === true });
   const seconds = secondsBetween(data.answeredAt ?? data.startedAt, data.endedAt ?? now);
-  const costShown = amountShown(data.costCents, data.costUnmeasured);
+  const costShown = amountShown(data.costCents, data.unmeasuredCount > 0);
   const facts: Array<[string, string, boolean]> = [
     [t.facts.agent, data.agentName ?? common.noAgent, false],
     [t.facts.engine, engines.data?.find((engine) => engine.id === data.engine)?.label ?? data.engine ?? "", false],

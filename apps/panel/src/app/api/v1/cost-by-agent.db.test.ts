@@ -89,7 +89,7 @@ async function before(organizationId: string, period: { from: string; to: string
   }));
 }
 const shape = (costsRead: Costs) => ({
-  byAgent: costsRead.byAgent,
+  byAgent: costsRead.byAgent.map(({ agentId, name, costCents, calls }) => ({ agentId, name, costCents, calls })),
   byEngine: costsRead.byEngine.map(({ engine, costCents, callSeconds }) => ({ engine, costCents, callSeconds })),
 });
 
@@ -108,8 +108,8 @@ describe("Custos com passagem entre agentes", () => {
     expect(read.totalCents).toBe(20);
     expect(read.byAgent).toEqual(
       expect.arrayContaining([
-        { agentId: recepcao, name: "Recepção", costCents: 10, calls: 1 },
-        { agentId: agenda, name: "Agenda", costCents: 10, calls: 1 },
+        { agentId: recepcao, name: "Recepção", costCents: 10, calls: 1, unmeasuredCount: 0 },
+        { agentId: agenda, name: "Agenda", costCents: 10, calls: 1, unmeasuredCount: 0 },
       ]),
     );
     expect(read.byAgent).toHaveLength(2);
@@ -144,9 +144,9 @@ describe("Custos com passagem entre agentes", () => {
     expect(read.totalCents).toBe(12);
     expect(read.byAgent).toEqual(
       expect.arrayContaining([
-        { agentId: recepcao, name: "Recepção", costCents: 3, calls: 1 },
-        { agentId: agenda, name: "Agenda", costCents: 4, calls: 1 },
-        { agentId: financeiro, name: "Financeiro", costCents: 5, calls: 1 },
+        { agentId: recepcao, name: "Recepção", costCents: 3, calls: 1, unmeasuredCount: 0 },
+        { agentId: agenda, name: "Agenda", costCents: 4, calls: 1, unmeasuredCount: 0 },
+        { agentId: financeiro, name: "Financeiro", costCents: 5, calls: 1, unmeasuredCount: 0 },
       ]),
     );
     // OpenAI: 100 s + 150 s; Gemini: 150 s. A soma é a duração da ligação.
@@ -220,7 +220,7 @@ describe("o agente apagado", () => {
     expect((await call(deleteAgent, { method: "DELETE", cookie, params: { id: agenda } })).status).toBe(200);
     let read = await readCosts();
     expect(read.totalCents).toBe(20);
-    expect(read.byAgent).toEqual([{ agentId: recepcao, name: "Recepção", costCents: 20, calls: 1 }]);
+    expect(read.byAgent).toEqual([{ agentId: recepcao, name: "Recepção", costCents: 20, calls: 1, unmeasuredCount: 0 }]);
     expect((await readCall(callId)).costByAgent).toEqual([{ agentId: recepcao, name: "Recepção", costCents: 20 }]);
     // Os minutos de cada motor não dependem do agente: ficam como estavam.
     expect(read.byEngine.map(({ engine, callSeconds }) => [engine, callSeconds])).toEqual(expect.arrayContaining([["openai-realtime", 120], ["gemini-live", 180]]));
@@ -229,7 +229,7 @@ describe("o agente apagado", () => {
     expect((await call(deleteAgent, { method: "DELETE", cookie, params: { id: recepcao } })).status).toBe(200);
     read = await readCosts();
     expect(read.totalCents).toBe(20);
-    expect(read.byAgent).toEqual([{ agentId: null, name: null, costCents: 20, calls: 1 }]);
+    expect(read.byAgent).toEqual([{ agentId: null, name: null, costCents: 20, calls: 1, unmeasuredCount: 0 }]);
     expect((await readCall(callId)).costByAgent).toEqual([{ agentId: null, name: null, costCents: 20 }]);
   });
 
@@ -246,8 +246,8 @@ describe("o agente apagado", () => {
     expect(read.totalCents).toBe(20);
     expect(read.byAgent).toEqual(
       expect.arrayContaining([
-        { agentId: null, name: null, costCents: 10, calls: 1 },
-        { agentId: agenda, name: "Agenda", costCents: 10, calls: 1 },
+        { agentId: null, name: null, costCents: 10, calls: 1, unmeasuredCount: 0 },
+        { agentId: agenda, name: "Agenda", costCents: 10, calls: 1, unmeasuredCount: 0 },
       ]),
     );
     expect((await readCall(callId)).costByAgent).toEqual([

@@ -1,6 +1,6 @@
 import { PURGED_SUMMARY_TEXT, storedCallAnalysisSchema } from "@deskvoice/core";
 import { handle, notFound } from "../../../../../server/context";
-import { callCostUnmeasured, centsOf, LEDGER_AGENT } from "../../../../../server/costs";
+import { centsOf, LEDGER_AGENT, UNMEASURED_COUNT } from "../../../../../server/costs";
 import { CALL_COLUMNS } from "../../../../../server/shapes";
 
 export const GET = handle({}, async ({ q, params }) => {
@@ -33,7 +33,7 @@ export const GET = handle({}, async ({ q, params }) => {
     analysis: parsed?.success ? parsed.data : null,
     analysisUnreadable: parsed !== null && !parsed.success,
     costByAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents) })),
-    // Alguma linha do extrato sem custo medido: o valor da ligação não é o gasto inteiro.
-    costUnmeasured: await callCostUnmeasured(q, params.id ?? ""),
+    // Quantas linhas do extrato da ligação não têm custo medido: com alguma, o valor não é o gasto inteiro.
+    unmeasuredCount: (await q.one<{ n: number }>(`select ${UNMEASURED_COUNT} as n from usage_ledger l where l.call_id = $1`, [params.id]))?.n ?? 0,
   };
 });

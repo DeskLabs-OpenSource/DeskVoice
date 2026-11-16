@@ -19,8 +19,8 @@ const costs: CostsDictionary = {
   handoffCounts: "A call that was handed off counts for each agent.",
   unmeasured: "Not measured",
   unmeasuredPart: "+ part not measured",
-  unmeasuredNote: "{n} calls in this period have an unmeasured cost: they were read by a model with no known price, and what they cost is not in the values below. It only shows on the provider's bill.",
-  unmeasuredNoteOne: "1 call in this period has an unmeasured cost: it was read by a model with no known price, and what it cost is not in the values below. It only shows on the provider's bill.",
+  unmeasuredNote: "{n} usage lines in this period have no measured cost: they come from a model with no known price, and what they cost is not in the values below. It only shows on the provider's bill.",
+  unmeasuredNoteOne: "1 usage line in this period has no measured cost: it comes from a model with no known price, and what it cost is not in the values below. It only shows on the provider's bill.",
 };
 
 export default costs;
