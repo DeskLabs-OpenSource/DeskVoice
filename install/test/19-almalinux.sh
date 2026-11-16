@@ -55,6 +55,8 @@ contains "firewalld ativo: diz que não filtra as portas do Docker" "$out" "não
 contains "firewalld ativo: diz as portas e a faixa de áudio" "$out" "5060/udp e 10000-10200/udp chegam aos contêineres"
 contains "firewalld ativo: aponta o firewall do provedor" "$out" "use o firewall do provedor da VPS"
 contains "firewalld ativo: diz que a regra do DOCKER-USER some ao reiniciar e abre uma janela no reload" "$out" "some ao reiniciar a máquina e deixa a porta aberta por alguns segundos a cada firewall-cmd --reload"
+contains "firewalld ativo: diz que a regra foi medida numa porta TCP de prova, e não em UDP" "$out" "fechou uma porta TCP de prova"
+contains "firewalld ativo: não vende a regra como medida na telefonia (UDP)" "$out" "em UDP, que é o da telefonia, ela não foi medida com o firewalld"
 lacks "firewalld ativo: não diz mais que não foi provado" "$out" "com o firewalld ativo não foi provado"
 lacks "firewalld ativo: não manda diagnosticar a ligação muda pelo firewalld" "$out" "comece o diagnóstico pelo firewalld"
 contains "firewalld ativo: aponta a prova de fora" "$out" "teste da tela Linha"

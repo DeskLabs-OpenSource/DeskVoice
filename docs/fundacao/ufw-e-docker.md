@@ -309,9 +309,11 @@ em outro provedor), com `curl -m 6`. A regra é a mesma da seção 5:
 - Os serviços do DeskVoice voltaram sozinhos depois do reinício, com a checagem de saúde verde e o
   WhatsApp de ligação reconectado em segundos.
 
-Antes de ligar o `firewalld` nessa VPS, foi preciso liberar a porta do SSH dela (22022) na
-configuração permanente: a zona `public` de fábrica libera o serviço `ssh`, que é a porta 22. Em
-VPS com o SSH em outra porta, ligar o `firewalld` sem isso corta o acesso.
+Em qualquer VPS com o SSH fora da porta 22, ligar o `firewalld` corta o acesso: a zona `public` de
+fábrica libera o serviço `ssh`, que é a porta 22. Antes de ligar (ou antes de um `--reload`),
+libere a porta do SSH na configuração permanente com `firewall-cmd --permanent --add-port=<porta>/tcp`
+(com o `firewalld` parado, `firewall-offline-cmd --add-port=<porta>/tcp`). Foi o que a medida acima
+precisou.
 
 ## O que mudou no kit
 
