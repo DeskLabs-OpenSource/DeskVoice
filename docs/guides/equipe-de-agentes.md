@@ -180,7 +180,8 @@ trechos, e o teto é conferido contra essa soma.
 
 - **Em Custos**, "Por agente" mostra o gasto de cada agente nos trechos em que a ligação estava
   com ele, e "Por motor de voz" mostra os minutos de cada motor por trecho. Uma ligação com passagem conta para cada agente.
-- **Na tela da chamada**, o custo aparece separado por agente.
+- **Na tela da chamada**, o custo aparece separado por agente quando a ligação passou por mais de um
+  agente.
 - **Limite conhecido.** Se um agente de destino for apagado depois, o custo do trecho dele volta
   para o agente que atendeu a ligação. Ele só aparece como "Agente apagado" quando quem atendeu
   também foi apagado. O total da ligação e o do período não mudam; muda só a divisão por agente.
@@ -200,3 +201,7 @@ resto do que vale para qualquer agente estão em [custos](custos.md).
   que limite de sessões simultâneas da sua conta.
 - **Se a frase fixa do segundo agente soa natural** depois do resumo, em cada idioma.
 - **Se o custo por agente na tela bate com a fatura do provedor** numa ligação com passagem.
+- **A última fala da sessão antiga.** O que a sessão do primeiro agente ainda fala depois da troca
+  é descartado, mas o texto dela continua entrando na linha do tempo, com o nome dele. Quem lê a
+  ligação pode ver uma frase que quem ligou não ouviu, ou ouviu só em parte, e que também não está na
+  gravação. Não há teste para isso, e ninguém mediu com motor real com que frequência acontece.

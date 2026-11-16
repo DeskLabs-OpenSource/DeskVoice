@@ -243,16 +243,18 @@ hoje, em `packages/tools/src/tools/`:
 | `send_whatsapp` | Manda mensagem pelo conector de WhatsApp, se instalado | Confirmação de horário, se a clínica usa | Opcional: nunca com detalhe clínico, e o texto fica guardado |
 | `send_dtmf` | Aperta teclas num menu automático do outro lado | Navegar a URA de um convênio, por exemplo | Não. Não é tarefa de recepção, e tecla errada leva a caminho sem volta |
 
-O que **não** existe hoje, e portanto não se promete à clínica: ferramenta de agenda, consulta a
-prontuário, cobrança, verificação de identidade de quem liga, horário de atendimento e fila. A
-agenda e o horário de atendimento são frentes abertas no [ROADMAP](../../ROADMAP.md); prontuário e
-identidade de quem liga não estão nem lá.
+O que **não** funciona hoje, e portanto não se promete à clínica: agenda, consulta a prontuário,
+cobrança, verificação de identidade de quem liga, horário de atendimento e fila. A agenda e o
+horário de atendimento são frentes abertas no [ROADMAP](../../ROADMAP.md); prontuário e identidade de
+quem liga não estão nem lá.
 
 ## Agenda: ver horário livre, marcar, remarcar
 
-Marcar e remarcar é o pedido mais comum por telefone, e **o repositório ainda não tem ferramenta
-de agenda**. A frente está aberta no [ROADMAP](../../ROADMAP.md). Hoje há dois caminhos, e nenhum
-deles é uma integração pronta.
+Marcar e remarcar é o pedido mais comum por telefone, e **nenhuma instalação tem a agenda ligada
+hoje**. As três ferramentas de agenda existem no código (`agenda_horarios_livres`, `agenda_marcar` e
+`agenda_remarcar`), mas ficam com `available: false` enquanto não houver um cliente de agenda, e
+nenhum app entrega um ainda. Por isso elas nem aparecem na tela do agente. A frente está aberta no
+[ROADMAP](../../ROADMAP.md). Hoje há dois caminhos, e nenhum deles é uma integração pronta.
 
 ### Caminho 1: webhook, sem escrever código
 
@@ -286,16 +288,16 @@ Regras que fazem esse caminho funcionar:
 - **Marque antes de confirmar.** Se o sistema de agenda não confirma na resposta, o agente diz que
   a recepção confirma — nunca "está marcado".
 
-### Caminho 2: ferramenta nova, no seu fork
+### Caminho 2: um cliente de agenda, no seu fork
 
-Se a clínica tem agenda própria e você quer o agente consultando e marcando direto, isso é uma
-ferramenta. O guia é [adicionar uma ferramenta](adicionar-uma-ferramenta.md), e a regra do projeto
-vale: ferramenta de nicho não entra no núcleo — mora no seu fork ou vira contribuição se servir a
-outros ramos.
+Se a clínica tem agenda própria e você quer o agente consultando e marcando direto, não escreva
+uma ferramenta nova: as três já existem. O que falta é o cliente, a interface `AgendaClient` de
+`packages/tools/src/connectors/agenda.ts`, entregue às ferramentas em `ToolDeps.agenda`. Hoje não há
+tela nem configuração para isso, então ligar um cliente é mudança no código da central, no seu fork.
 
-Uma ferramenta de agenda tem as três operações de cima e mais uma obrigação: **nunca devolver
-sucesso quando não marcou**. A regra 4 do guia de ferramentas é essa, e é a que separa um agente
-útil de um agente que promete horário que não existe.
+As três ferramentas já cumprem a obrigação que importa: **nunca devolver sucesso quando não
+marcou**, e já têm as falas para quando a agenda não está ligada ou não responde. O seu cliente
+precisa manter isso: um erro da agenda volta como erro, e não como horário marcado.
 
 ### O que deixar de fora
 
