@@ -560,10 +560,22 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (result.costMicrocents > 0 || (result.usage.inputTokens ?? 0) > 0) {
       decisionMicrocents += result.costMicrocents;
       const reached = reachCeiling(callCents());
-      // Uma linha por pedido, no agente do trecho, com o id do modelo no lugar do motor.
+      // Uma linha por pedido, no agente do trecho, com o id do modelo no lugar do motor. O custo
+      // estimado (pedido que saiu sem consumo lido) entra igual no total e no teto, marcado.
       await q.exec(
-        "insert into usage_ledger (organization_id, call_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9)",
-        [organizationId, callId, active.model.id, owner.agent.id, result.usage.inputTokens ?? 0, result.usage.outputTokens ?? 0, Math.round(result.costMicrocents / MICROCENTS_PER_CENT), result.costMicrocents, clock.now()],
+        "insert into usage_ledger (organization_id, call_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, cost_estimated, at) values ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9, $10)",
+        [
+          organizationId,
+          callId,
+          active.model.id,
+          owner.agent.id,
+          result.usage.inputTokens ?? 0,
+          result.usage.outputTokens ?? 0,
+          Math.round(result.costMicrocents / MICROCENTS_PER_CENT),
+          result.costMicrocents,
+          result.costEstimated === true,
+          clock.now(),
+        ],
       );
       await q.exec("update calls set cost_cents = $2 where id = $1", [callId, callCents()]);
       if (reached) await recordCeiling(callCents(), reached);

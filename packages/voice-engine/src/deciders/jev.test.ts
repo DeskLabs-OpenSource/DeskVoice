@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { speechFilterQuestions } from "../speech-filter";
-import jev, { JEV_PRICING } from "./jev";
+import jev, { estimatedInputTokens, JEV_PRICING } from "./jev";
 
 const KEY = "jev-test-key-que-nunca-aparece";
 const input = { state: "Agente: Em que cidade?\nPessoa: moro em meu gasto", questions: speechFilterQuestions("moro em meu gasto", ["Melgaço", "Betim"]) };
@@ -115,7 +115,72 @@ describe("Jev: nunca lança, e a chave nunca sai", () => {
     const deadline = manualDeadline();
     const pending = jev.decide(KEY, input, { fetch: fakeFetch("hang").fetch, timeoutMs: 1000, schedule: deadline.schedule });
     deadline.expire();
-    expect(await pending).toMatchObject({ ok: false, failure: "late", status: null, usage: {}, costMicrocents: 0 });
+    expect(await pending).toMatchObject({ ok: false, failure: "late", status: null });
+  });
+});
+
+describe("Jev: custo desconhecido nunca é zero", () => {
+  /** O corpo que o pedido levou, sem o `model`: o `state` e as perguntas no formato do Jev. */
+  const sentTokens = (sent: Sent[]): number => {
+    const body = sent[0]?.body as { state: string; questions: Record<string, unknown> };
+    return new TextEncoder().encode(JSON.stringify({ state: body.state, questions: body.questions })).length;
+  };
+  const expectEstimate = (result: Awaited<ReturnType<typeof jev.decide>>, sent: Sent[]) => {
+    const tokens = sentTokens(sent);
+    expect(tokens).toBeGreaterThan(100);
+    expect(estimatedInputTokens(input.state, (sent[0]?.body as { questions: Record<string, unknown> }).questions)).toBe(tokens);
+    expect(result).toMatchObject({ ok: false, costEstimated: true, usage: { inputTokens: tokens, outputTokens: 0 } });
+    // Pelo preço do arquivo: um token por byte, a 4,2 centavos por milhão de tokens de entrada.
+    expect(result.costMicrocents).toBe(Math.round(tokens * 4.2));
+    expect(result.costMicrocents).toBeGreaterThan(0);
+  };
+
+  it("atrasado: o pedido cancelado pelo prazo grava a estimativa pela entrada enviada", async () => {
+    const deadline = manualDeadline();
+    const { fetch, sent } = fakeFetch("hang");
+    const pending = jev.decide(KEY, input, { fetch, timeoutMs: 1000, schedule: deadline.schedule });
+    deadline.expire();
+    const result = await pending;
+    expect(result).toMatchObject({ failure: "late", status: null });
+    expectEstimate(result, sent);
+  });
+
+  it("sem rede: a estimativa pela entrada enviada", async () => {
+    const { fetch, sent } = fakeFetch("network");
+    const result = await jev.decide(KEY, input, { fetch });
+    expect(result).toMatchObject({ failure: "unreachable", status: null });
+    expectEstimate(result, sent);
+  });
+
+  for (const [label, body] of [
+    ["fora da forma: corpo que não é JSON", "<html>"],
+    ["fora da forma: resposta fora do esquema", { ...okBody, answers: { ...okBody.answers, background: { type: "noul", noul: 1.2 } } }],
+    ["fora da forma: sem o consumo", { model: okBody.model, answers: okBody.answers }],
+  ] as const) {
+    it(label, async () => {
+      const { fetch, sent } = fakeFetch({ status: 200, body });
+      const result = await jev.decide(KEY, input, { fetch });
+      expect(result).toMatchObject({ failure: "unexpected_response", status: 200 });
+      expectEstimate(result, sent);
+    });
+  }
+
+  it("o pedido que dá certo grava o consumo medido, sem a marca", async () => {
+    const result = await jev.decide(KEY, input, { fetch: fakeFetch({ status: 200, body: okBody }).fetch });
+    expect(result).toMatchObject({ ok: true, costEstimated: false, usage: { inputTokens: 512, outputTokens: 3 }, costMicrocents: 2150 });
+  });
+
+  it("um 200 com resposta faltando: o consumo declarado é medido, não estimado", async () => {
+    const body = { ...okBody, answers: { background: okBody.answers.background } };
+    const result = await jev.decide(KEY, input, { fetch: fakeFetch({ status: 200, body }).fetch });
+    expect(result).toMatchObject({ ok: false, costEstimated: false, usage: { inputTokens: 512 }, costMicrocents: 2150 });
+  });
+
+  it("erro HTTP (recusa do pedido): sem custo, como antes", async () => {
+    for (const status of [401, 429, 529, 422]) {
+      const result = await jev.decide(KEY, input, { fetch: fakeFetch({ status, body: {} }).fetch });
+      expect(result).toMatchObject({ ok: false, costEstimated: false, usage: {}, costMicrocents: 0 });
+    }
   });
 });
 

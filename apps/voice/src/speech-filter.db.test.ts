@@ -4,7 +4,7 @@ import { createSimulatedDecider, DECISION_MODEL_SETTING, decisionModelKeySetting
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { putSetting } from "../../../packages/tools/test/helpers";
-import jev from "../../../packages/voice-engine/src/deciders/jev";
+import jev, { estimatedInputTokens } from "../../../packages/voice-engine/src/deciders/jev";
 import { startCallSession } from "./call-session";
 import { callOf, createAgent, createCall, createOrganization, eventsOf, kindsOf, manualEngine, manualTransport, secretKey, sessionHarness, setHandoffTargets, type AgentOptions, type ManualEngine, type SessionHarness } from "./testing/db";
 import { waitFor } from "./testing/helpers";
@@ -82,7 +82,12 @@ const readsOf = (callId: string) => payloadsOf(callId, "caller_speech_read");
 const answered = (callId: string) => waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
 const reads = (callId: string, count: number) => waitFor(async () => (await readsOf(callId)).length >= count, `${count} reading(s) of the caller`);
 const ledgerOf = (callId: string) =>
-  withSystem(app, (q) => q.many<{ engine: string; agent_id: string | null; input_tokens: number; cost_cents: number; cost_microcents: string }>("select engine, agent_id, input_tokens, cost_cents, cost_microcents::text from usage_ledger where call_id = $1 order by id", [callId]));
+  withSystem(app, (q) =>
+    q.many<{ engine: string; agent_id: string | null; input_tokens: number; cost_cents: number; cost_microcents: string; cost_estimated: boolean }>(
+      "select engine, agent_id, input_tokens, cost_cents, cost_microcents::text, cost_estimated from usage_ledger where call_id = $1 order by id",
+      [callId],
+    ),
+  );
 
 /** Uma conversa curta: o agente pergunta, quem ligou responde, e desliga. */
 async function converse(made: Awaited<ReturnType<typeof scene>>, callerText = "moro em meu gasto") {
@@ -121,7 +126,7 @@ describe("desligado é o de hoje", { timeout: 120_000 }, () => {
     expect(b.map((event) => event.kind)).not.toContain("caller_speech_read");
     expect(await payloadsOf(after.callId, "transcript_user")).toEqual([{ text: "moro em meu gasto" }]);
     expect(outcomeAfter).toEqual(outcomeBefore);
-    expect((await ledgerOf(after.callId)).map((row) => row.engine)).toEqual(["manual"]);
+    expect((await ledgerOf(after.callId)).map((row) => [row.engine, row.cost_estimated])).toEqual([["manual", false]]);
   });
 });
 
@@ -235,7 +240,7 @@ describe("o custo do filtro", { timeout: 120_000 }, () => {
     expect(outcome.costCents).toBe(12);
     expect((await callOf(app, made.callId)).cost_cents).toBe(12);
     expect(await payloadsOf(made.callId, "call_ended")).toEqual([expect.objectContaining({ costCents: 12 })]);
-    expect((await ledgerOf(made.callId)).find((row) => row.engine === "test-model")).toEqual({ engine: "test-model", agent_id: made.agentId, input_tokens: 160, cost_cents: 2, cost_microcents: "1600000" });
+    expect((await ledgerOf(made.callId)).find((row) => row.engine === "test-model")).toEqual({ engine: "test-model", agent_id: made.agentId, input_tokens: 160, cost_cents: 2, cost_microcents: "1600000", cost_estimated: false });
   });
 
   it("conta no teto do agente: o filtro sozinho alcança o teto e a despedida começa", async () => {
@@ -315,7 +320,7 @@ describe("o Jev na chamada", { timeout: 120_000 }, () => {
 
     expect(await payloadsOf(made.callId, "transcript_user")).toEqual([{ text: "moro em meu gasto", read: { suggestion: { term: "Melgaço", confidence: 0.93 } } }]);
     const ledger = await ledgerOf(made.callId);
-    expect(ledger.find((row) => row.engine === "jev")).toEqual({ engine: "jev", agent_id: made.agentId, input_tokens: 512, cost_cents: 0, cost_microcents: "2150" });
+    expect(ledger.find((row) => row.engine === "jev")).toEqual({ engine: "jev", agent_id: made.agentId, input_tokens: 512, cost_cents: 0, cost_microcents: "2150", cost_estimated: false });
     // Milésimos de centavo: o total arredondado da ligação é o da voz.
     expect(outcome.costCents).toBe(10);
     expect(JSON.stringify(made.harness.logs)).not.toContain(JEV_KEY);
@@ -344,6 +349,79 @@ describe("o Jev na chamada", { timeout: 120_000 }, () => {
     await waitFor(async () => (await kindsOf(app, made.callId)).filter((kind) => kind === "transcript_agent").length >= 2, "the agent going on");
     made.transport.callerHangup();
     expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+  });
+
+  describe("custo desconhecido nunca é zero: a estimativa é gravada, marcada, e conta no teto", () => {
+    // Uma fala longa do agente vai no `state` e torna a estimativa maior que meio centavo
+    // (150 000 bytes a 4,2 centavos por milhão = 0,63 centavo): com o teto de 1 centavo e nenhum uso
+    // de voz, só a estimativa alcança o teto. Fora dele, a ligação somaria zero e seguiria.
+    const longAgentText = "Vou ler os detalhes do pedido. ".repeat(5000);
+
+    async function estimatedScene(label: string, reply: Parameters<typeof jevWith>[0], expire: boolean) {
+      const made = await jevScene(label, reply);
+      await withSystem(app, (q) => q.exec("update agents set cost_ceiling_cents = 1 where id = $1", [made.agentId]));
+      const session = made.start();
+      await answered(made.callId);
+      made.manual.emit("transcript", { speaker: "agent", text: longAgentText });
+      made.manual.emit("transcript", { speaker: "user", text: "moro em meu gasto" });
+      await waitFor(async () => made.sent.length === 1, "the request");
+      if (expire) {
+        await waitFor(async () => made.harness.timers.held().includes(1000), "the deadline");
+        expect(made.harness.timers.fire(1000)).toBe(1);
+      }
+      await waitFor(async () => (await kindsOf(app, made.callId)).includes("cost_ceiling_reached"), "the ceiling");
+      await reads(made.callId, 1);
+      made.transport.callerHangup();
+      const outcome = await session.done;
+
+      const body = made.sent[0] as { state: string; questions: Record<string, unknown> };
+      const tokens = estimatedInputTokens(body.state, body.questions);
+      expect(tokens).toBeGreaterThan(150_000);
+      const microcents = Math.round(tokens * 4.2);
+      expect((await ledgerOf(made.callId)).filter((row) => row.engine === "jev")).toEqual([
+        { engine: "jev", agent_id: made.agentId, input_tokens: tokens, cost_cents: 1, cost_microcents: String(microcents), cost_estimated: true },
+      ]);
+      expect(await payloadsOf(made.callId, "cost_ceiling_reached")).toEqual([{ costCents: 1, ceilingCents: 1 }]);
+      expect(made.manual.said).toEqual([expect.stringContaining("encerrar esta ligação")]);
+      expect(outcome.costCents).toBe(1);
+      expect((await callOf(app, made.callId)).cost_cents).toBe(1);
+      // O texto de quem ligou continua intacto.
+      expect(await payloadsOf(made.callId, "transcript_user")).toEqual([{ text: "moro em meu gasto" }]);
+      return made;
+    }
+
+    it("atrasado: o pedido cancelado pelo prazo grava a estimativa, e ela alcança o teto", async () => {
+      const made = await estimatedScene("jev-estimated-late", "hang", true);
+      expect(await readsOf(made.callId)).toEqual([expect.objectContaining({ onTime: false, failure: "late" })]);
+    });
+
+    it("sem rede: grava a estimativa, e ela alcança o teto", async () => {
+      const made = await estimatedScene("jev-estimated-network", "network", false);
+      expect(await readsOf(made.callId)).toEqual([expect.objectContaining({ onTime: false, failure: "unreachable", status: null })]);
+    });
+
+    it("fora da forma: grava a estimativa, e ela alcança o teto", async () => {
+      const made = await estimatedScene("jev-estimated-shape", { status: 200, body: { model: "jev-1.14.0", answers: {} } }, false);
+      expect(await readsOf(made.callId)).toEqual([expect.objectContaining({ onTime: false, failure: "unexpected_response", status: 200 })]);
+    });
+
+    it("o pedido que dá certo, com a mesma fala longa, grava o consumo medido, sem a marca, e não alcança o teto", async () => {
+      const made = await jevScene("jev-measured-long", { status: 200, body: okBody });
+      await withSystem(app, (q) => q.exec("update agents set cost_ceiling_cents = 1 where id = $1", [made.agentId]));
+      const session = made.start();
+      await answered(made.callId);
+      made.manual.emit("transcript", { speaker: "agent", text: longAgentText });
+      made.manual.emit("transcript", { speaker: "user", text: "moro em meu gasto" });
+      await reads(made.callId, 1);
+      made.transport.callerHangup();
+      const outcome = await session.done;
+
+      expect((await ledgerOf(made.callId)).filter((row) => row.engine === "jev")).toEqual([
+        { engine: "jev", agent_id: made.agentId, input_tokens: 512, cost_cents: 0, cost_microcents: "2150", cost_estimated: false },
+      ]);
+      expect(await kindsOf(app, made.callId)).not.toContain("cost_ceiling_reached");
+      expect(outcome).toMatchObject({ endReason: "caller_hangup", costCents: 0 });
+    });
   });
 
   it("ligado sem a chave: nenhum pedido sai, e a linha do tempo diz por quê", async () => {
