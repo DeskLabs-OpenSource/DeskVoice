@@ -147,6 +147,10 @@ com o motivo. O pior caso de gasto simultâneo passa a ser o teto por chamada ve
 Chamadas pelo navegador têm um limite próprio, de 3 por organização, e as ligações feitas pelo
 agente têm o teto diário de Ligações de saída.
 
+Quando um agente passa a ligação para outro, os limites continuam sendo da ligação: vale o menor
+teto e a menor duração entre os agentes por onde ela passou, com o relógio contado do atendimento.
+Como montar essa equipe, e o custo de cada trecho, está em [equipe de agentes](equipe-de-agentes.md).
+
 Além disso, defina um limite de gasto **na conta do provedor de IA**. É a proteção que não
 depende do DeskVoice.
 
