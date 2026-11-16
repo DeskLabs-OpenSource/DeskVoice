@@ -683,6 +683,70 @@ O fragmento do #245 fica, porque só vale quando a fatia 4 entrar. As fatias 3 e
 `main` por merge, sem reescrita. Na hora do merge, os três PRs entram em sequência: o #245, a fatia
 3 e a fatia 4.
 
+### A passagem entre agentes: a peça é do trecho (16/11, depois do #304)
+
+O #304 (R13, fatia 4a, `cd3f63e`) fez a ligação trocar de agente. Cada agente por onde ela passa é
+um **trecho** (`Leg` em `call-session.ts`), com o motor, a guarda e o custo dele, e a linha do
+extrato leva o `agent_id` do trecho. A pergunta do board: a peça de transcrição segue o agente novo
+ou fica com a ligação?
+
+**Resposta: a peça é do trecho, como o motor.** Cada trecho usa o transcritor do agente dele.
+Há três motivos:
+- **A escolha é do agente.** A fatia 4 grava o transcritor na linha do agente, e cada transcritor
+  tem um lugar de processamento e um preço. Um agente com "nenhum" não pode continuar mandando a
+  fala a um serviço externo só porque o agente anterior escolheu um.
+- **O idioma e o vocabulário são do agente.** A peça abre com `language` e `vocabulary` da linha do
+  agente. Com o agente novo, os nomes que importam mudam.
+- **O custo por agente** do #304 só fica verdadeiro se o consumo da peça cair no trecho em que
+  aconteceu.
+
+**A regra da troca:**
+1. **Mesma peça, mesma abertura:** quando o agente novo tem o mesmo transcritor, o mesmo idioma e os
+   mesmos primeiros `maxVocabulary` termos, a conexão aberta **passa ao trecho novo**, sem fechar
+   nem reabrir. Não há buraco no texto nem segunda conexão. O consumo daí em diante cai no trecho
+   novo.
+2. **Peça diferente, ou nenhuma:** a peça do agente novo começa a abrir junto com o motor dele, e
+   **a passagem não espera por ela**. A passagem continua esperando só o motor, como no #304. Na
+   troca, a peça antiga fecha, e a última medição fica no trecho dela. A nova passa a receber o
+   áudio quando abrir. Se ela abrir depois de a ligação terminar, ou depois de outra passagem, ela
+   é fechada na hora. Se não abrir, grava `transcriber_failed`, e a ligação segue.
+3. **O buraco é aceito nos motores diretos.** Ali a peça só alimenta a linha do tempo e o filtro, e
+   a fala do reconhecedor do provedor continua indo para a linha do tempo (fatia 5). No pipeline
+   (DESA-13), a peça é o ouvido. Por isso a DESA-13 herda esta regra com uma diferença: a passagem
+   espera também a peça nova (ou reaproveita a antiga), porque um agente sem ouvido não pode entrar
+   na linha.
+4. **A chamada simulada:** `CallSessionInput.transcriberId` passa a valer como substituição para
+   **todos** os trechos, igual ao motor simulado da DESA-47. A coluna do agente (fatia 4) vale
+   quando não há substituição.
+
+**O que muda no #245 (o contrato da fatia 2):**
+- A interface `StreamingTranscriber` e os tipos de `types.ts` **não mudam**. O que muda é só a
+  ligação em `call-session.ts`.
+- Hoje a peça é da ligação: `transcription` e `transcriberMeter` ficam soltos na sessão. Eles
+  passam para dentro do `Leg`, com uso e custo próprios. O custo do trecho passa a ser motor + peça,
+  e a soma dos trechos continua sendo o custo da ligação e respeitando o teto. A linha
+  `transcriber:<id>` do extrato leva o `agent_id` do trecho.
+- Hoje o `piece` chama a guarda capturada na abertura. Depois de uma passagem, essa guarda está
+  parada (`from.guard.stop()`), e o sinal de fala se perderia. Ele passa a chamar a guarda do
+  **trecho atual**, e os eventos de uma peça que já saiu da linha são ignorados, como os da sessão
+  substituída (`current()`).
+- O `transport.onAudio` manda o pedaço à peça do trecho atual.
+- `transcriber_failed` ganha `agentId` depois de uma passagem, pela mesma regra de
+  `transcript_agent`.
+
+**Aceite (soma ao da fatia 2):**
+- teste: com a mesma peça nos dois agentes, a passagem não abre segunda conexão, e o consumo
+  depois da troca vai para o extrato com o `agent_id` do agente novo;
+- teste: de uma peça para "nenhuma", a peça fecha na troca, a última medição fica no trecho antigo,
+  e nenhum pedaço de áudio chega a ela depois;
+- teste: com peça diferente que demora a abrir, a passagem conclui sem esperar, e a peça nova
+  recebe áudio quando abre. Se ela abrir depois do fim, fecha na hora;
+- teste: depois da passagem, o texto novo da peça arma a guarda do agente novo.
+
+**Quando:** a primeira fatia desta frente que retomar (a 3 ou a 4) começa pelo ramo do #245, com
+um merge da `main` (até `cd3f63e` ou mais nova) e sem reescrita. Os ajustes acima vêm num commit à
+parte, por cima, e o #245 é revisto de novo antes de entrar com a fatia 4.
+
 ### Fatia 3: a peça do vencedor
 
 Um arquivo em `transcribers/`, com fonte e data no cabeçalho (como os motores), vocabulário, zod
@@ -762,6 +826,7 @@ Aceite:
 | Áudio de quem ligou antes do provedor | `resample` sem imagem (#161, mesclado) | redução de ruído local (se entrar), em 8 kHz, antes do motor | a peça recebe o **mesmo** pedaço que o motor recebe | se a redução de ruído entrar, ela fica antes da derivação, e os dois recebem o áudio limpo |
 | Guarda contra o silêncio | — | arma com `callerActivity` | a peça dá texto parcial ao OpenAI, e o filtro dá "terminou o pensamento" | o filtro só pode **encurtar** o prazo da guarda, nunca alongar |
 | Bancada | fatia 4 (acerto de nome, modelo repete o nome) | fatias 4 e 5 (ruído, prazos) | fatia 1 cria a bancada | **uma bancada só** em `scripts/bancada-de-voz/`. Esta frente cria; as outras acrescentam o seu caso como arquivo novo |
+| Passagem entre agentes (R13, #304) | — | — | a peça é do trecho, como o motor | a seção "A passagem entre agentes" acima. O #245 recebe a `main` e põe a peça no `Leg` |
 | Gasto da medida | decisão 2 da DESA-19 (US$ 5) | segue a da DESA-10 | soma à mesma; o que passar disso é a decisão 1 abaixo | um extrato só, com o gasto por frente |
 
 ## O que a DESA-13 (pipeline) herda
