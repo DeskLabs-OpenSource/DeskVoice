@@ -768,9 +768,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       }
       // Daqui até a troca nada espera: a sessão nova só emite no próximo ciclo.
       handoffs += 1;
+      // O motor do trecho que começa, e não o do agente: o agente pode ser editado depois, e a
+      // chamada simulada abre o simulado no destino. É dele que saem os minutos de cada motor em Custos.
       const recorded = event("agent_handoff", {
         from: { id: from.agent.id, name: from.agent.name },
         to: { id: next.id, name: next.name },
+        engine: opened.engine.id,
         reason: input.reason,
         summary: input.summary,
       });

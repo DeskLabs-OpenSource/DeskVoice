@@ -16,6 +16,7 @@ const costs: CostsDictionary = {
   priceChecked: "Price checked on {date}",
   priceSource: "Price source",
   deletedAgent: "Deleted agent",
+  handoffCounts: "A call that was handed off counts for each agent.",
 };
 
 export default costs;

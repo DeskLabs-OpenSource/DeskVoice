@@ -14,6 +14,7 @@ const costs = {
   priceChecked: "Preço conferido em {date}",
   priceSource: "Fonte do preço",
   deletedAgent: "Agente apagado",
+  handoffCounts: "Uma ligação com passagem conta para cada agente.",
 };
 
 export default costs;
