@@ -539,10 +539,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   };
 
   /** O contexto das ferramentas de um trecho: `agentId` é o agente do trecho (o número de transferência, a lista de destinos). */
-  const contextFor = (legAgentId: string, session: VoiceSession): ToolContext => ({
+  const contextFor = (legAgentId: string, legLanguage: string, session: VoiceSession): ToolContext => ({
     organizationId,
     callId,
     agentId: legAgentId,
+    language: legLanguage,
     q,
     clock,
     telephony,
@@ -700,7 +701,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       voice: session,
       enabled,
       guard: silenceGuard,
-      context: contextFor(row.id, session),
+      context: contextFor(row.id, row.language, session),
       usage: { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 },
       costCents: 0,
     };

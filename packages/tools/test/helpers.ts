@@ -41,6 +41,7 @@ export async function createFixture(
     organizationId,
     agentId,
     callId,
+    language: "pt-BR",
     q: autoCommitOrgQuery(app, organizationId),
     clock: { now: () => now },
     said: [],
