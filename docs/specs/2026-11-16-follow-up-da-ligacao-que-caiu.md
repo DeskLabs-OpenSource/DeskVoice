@@ -37,8 +37,10 @@ modelo e lê só a linha da chamada e o tipo e os campos estáveis dos eventos, 
    recusada antes de atender (`call_refused`) continua no caso 1 do supervisor, como hoje.
 2. **Terminou por um destes motivos** (`calls.end_reason`):
    - (a) `engine_failed` ou `internal_error`: caiu do nosso lado, no meio da conversa;
-   - (b) `caller_hangup` **com a vez aberta**: no instante em que a linha caiu, o agente estava
-     falando, quem ligou esperava resposta ou uma ferramenta estava em curso (seção 3.1).
+   - (b) `caller_hangup` **com a vez aberta**: no instante em que a linha caiu, quem ligou já
+     esperava resposta além do prazo da guarda do silêncio, ou uma ferramenta estava em curso
+     (seção 3.1). O `agent_speaking` é gravado, mas **não** conta como queda (decisão de 16/11,
+     depois da 1ª reprovação do #367).
 3. **Ninguém ficou com o próximo passo na própria ligação.** Não há `transfer_started`,
    `voicemail_left`, `follow_up_created`, `human_notified` nem um `tool_result` de `send_whatsapp`
    com `ok: true`.
@@ -69,12 +71,26 @@ Quando o fim é `caller_hangup` (o `transport.onHangup`), a sessão grava no `ca
 | Valor | Quando | De onde vem |
 |---|---|---|
 | `agent_speaking` | Havia fala do agente na fila de áudio, ainda não tocada | A mesma fila que hoje é descartada quando quem ligou desliga (o comentário da #109 em `finish`) |
-| `caller_waiting` | A última fala de quem ligou não teve resposta | O guarda do silêncio (`silenceGuard`, R11 fatia 1), que já sabe quando a vez de quem ligou está aberta |
+| `caller_waiting` | A última fala de quem ligou ficou sem resposta **além do prazo** da guarda: a guarda já fechou o turno à força (fase `closed`) | O guarda do silêncio (`silenceGuard`, R11 fatia 1). Na fase `listening` (o prazo ainda corre), a vez conta como fechada |
 | `tool_running` | Havia ferramenta em curso ou aprovação pendente | `toolsRunning.size > 0`, lido **antes** do `callEnded.abort` |
 | `null` | Nada disso: a vez estava fechada | |
 
 Em qualquer outro motivo de fim, o campo não é gravado. O valor é lido no instante do desligar,
 antes de `finish` soltar as ferramentas e esvaziar a fila: depois disso, tudo parece fechado.
+
+**Por que `caller_waiting` só depois do prazo** (decisão de 16/11). A guarda arma no **início** da
+fala de quem ligou. Sem o prazo, o fim comum ("Posso ajudar em algo mais?" / "Não, obrigado, tchau"
+e o desligar antes da resposta) sairia como vez aberta, e o modo `task` abriria pendência para uma
+ligação que terminou bem. O prazo é o da própria guarda (`AFTER_WORDS_MS`, 2,5 s depois do último
+texto de quem ligou; `WITHOUT_WORDS_MS`, 8 s quando não houve texto), sem constante nova: quando a
+fatia 5 da R11 medir e ajustar o prazo, esta regra acompanha. Quem desliga com a guarda já tendo
+agido esperou de verdade.
+
+**Por que `agent_speaking` não conta** (mesma decisão). Quem desliga no meio da fala do agente é,
+na maior parte, quem já ouviu o que precisava, inclusive a despedida do agente sem `end_call`. A
+regra é fixa e sem modelo, e não tem como separar isso de uma linha que caiu. O valor continua
+gravado no `call_ended`, para medir; o caso 5 não o usa. A estimativa é a do tempo de áudio da
+guarda (`agentAudio`), e não a fila do transporte: basta para um valor que só é gravado.
 O teste que prova isso usa uma sessão de verdade com motor manual (como `follow-up-call.db.test.ts`)
 e cobre os quatro valores.
 
@@ -96,7 +112,10 @@ e cobre os quatro valores.
 O supervisor continua sendo a única revisão depois da ligação. Ele ganha:
 
 - **o caso 5, `call_dropped`** (**novo** em `REVIEW_CASES`, frase "a ligação caiu no meio da
-  conversa"), que é a condição 2(b) da seção 2. O caso 1 continua sendo a condição 2(a);
+  conversa"), que é a condição 2(b) da seção 2 com `openTurn` em `caller_waiting` ou `tool_running`,
+  **e também** o `internal_error` da condição 2(a) numa ligação recebida e atendida (com `openTurn`
+  nulo no evento). O caso 1 continua **igual a hoje**, sem o `internal_error`: assim o modo `off`
+  não muda nada para quem já instalou, e o `internal_error` só age em quem escolheu um modo;
 - **a leitura do modo do agente que atendeu** (`calls.agent_id`). Com passagem entre agentes, vale
   o modo de quem atendeu, o mesmo agente cujo dono recebe a pendência hoje. É uma configuração só,
   e não a soma de várias;
@@ -278,8 +297,9 @@ Bloco **"Quando a ligação cai"** na tela do agente, perto de "Dono das pendên
 
 - Quatro opções, nesta ordem: "Não fazer nada" (padrão), "Abrir uma pendência para alguém
   retornar", "Mandar uma mensagem no WhatsApp para quem ligou" e "Ligar de volta".
-- Abaixo das opções, a definição em uma frase: "Conta como queda quando a linha cai no meio da
-  conversa ou o sistema falha. Quem desliga depois de se despedir não conta."
+- Abaixo das opções, a definição em uma frase: "Conta como queda quando o sistema falha, quando quem
+  ligou fica alguns segundos sem resposta e desliga, ou quando a linha cai durante uma ação do
+  agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta."
 - Opção indisponível aparece desabilitada, com o motivo e o caminho para resolver: sem conector de
   WhatsApp; WhatsApp sem confiar no número de quem liga; ligações de saída desligadas.
 - A opção "Ligar de volta" diz quantas tentativas e quando ("1 tentativa, 30 minutos depois, dentro
@@ -310,7 +330,8 @@ As fatias 3 e 4 tocam a origem de chamada, que é caminho sensível: passam pelo
 ## 5. Critério de aceite
 
 **O que uma pessoa consegue fazer quando terminar.** O operador abre o agente, escolhe "Quando a
-ligação cai" entre as quatro opções, faz uma ligação simulada e fecha a aba enquanto o agente fala.
+ligação cai" entre as quatro opções, faz uma ligação simulada e fecha a aba enquanto o agente executa uma ação (por exemplo, consulta a
+agenda).
 A linha do tempo da simulada diz o que teria acontecido no modo escolhido. Numa ligação de verdade
 que cai, acontece o que o modo diz, e cada passo aparece na linha do tempo da ligação original.
 
@@ -322,6 +343,10 @@ Por fatia, com teste:
   comportamento do caso 1 fica idêntico ao de hoje (os testes atuais do `review_call` passam sem
   mudança). No modo `task`, o caso 5 abre exatamente uma pendência, e repetir a tarefa não abre a
   segunda. A simulada grava `drop_follow_up` com `simulated: true` e não abre pendência.
+  Depois da 1ª reprovação do #367: quem ligou fala e desliga **antes** do prazo da guarda sai com a
+  vez fechada (o "tchau"); depois do prazo, `caller_waiting` e o caso 5. O `agent_speaking` é
+  gravado e não abre nada em nenhum modo. O `internal_error` numa recebida e atendida abre o caso 5
+  em `task` e nada em `off`.
 - **F2.** Número em `do_not_call` não recebe mensagem. A segunda queda do mesmo número em menos de 24
   horas cai em pendência. Sem `trust_caller_id`, a rota recusa o modo e a revisão grava
   `mode_unavailable`. O corpo da mensagem é exatamente o texto configurado, sem nada da conversa: o
@@ -375,8 +400,10 @@ Dono do pedido: **Arquiteto**. Vai ao lote do Líder, no formato do `GOVERNANCE.
 ## 8. Não medido
 
 - **Se o `openTurn` distingue bem a queda do "tchau".** O critério é medível, mas não foi medido em
-  ligação real. Uma pessoa que desliga no meio da despedida do agente cai em `agent_speaking` e conta
-  como queda. Uma linha que cai em silêncio, depois da resposta e antes de a pessoa falar, não conta.
+  ligação real. Com a decisão de 16/11, quem desliga logo depois do próprio "tchau" (antes do prazo da guarda)
+  ou no meio da fala do agente não conta. O preço é o inverso: a linha que cai enquanto o agente
+  fala, ou nos primeiros segundos depois da pergunta de quem ligou, também não conta. Não foi
+  medido com que frequência cada um acontece. Uma linha que cai em silêncio, depois da resposta e antes de a pessoa falar, não conta.
   A medida vem da fatia 1 em uso: quantos casos 5 por dia, e quantos a equipe fecha como "não era
   queda".
 - Se o `silenceGuard` expõe hoje, sem mudança, o estado "vez de quem ligou aberta". O desenho supõe
