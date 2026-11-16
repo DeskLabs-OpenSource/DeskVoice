@@ -940,6 +940,29 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
     expect(await extratoDe(callId)).toEqual([]);
   });
 
+  it.each([
+    ["sem o modelo", { brain: "openai" }],
+    ["com o cérebro em número", { brain: 1, model: "modelo-com-preco" }],
+    ["com o modelo vazio", { brain: "openai", model: "" }],
+    ["um texto solto", "openai"],
+    ["uma lista", ["openai", "modelo-com-preco"]],
+  ])("a escolha fora da forma (%s, gravada à mão) é brain_unavailable e nunca cai no motor", async (_caso, valor) => {
+    const { org, callId } = await pronta(`cerebro fora da forma ${JSON.stringify(valor)}`);
+    await comCerebro(org, "openai", [COM_PRECO]);
+    await withSystem(app, (q) => q.exec("insert into settings (organization_id, key, value) values ($1, 'calls.analysis_brain', $2)", [org, JSON.stringify(valor)]));
+    const calls = CEREBRO.completeJson.mock.calls.length;
+    const fetch = openai(completa());
+
+    await roda(org, callId, fetch);
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+    const evento = { reason: "brain_unavailable", brain: null, model: null };
+    expect(await falhasDe(callId)).toEqual([evento]);
+    expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
+    expect(await extratoDe(callId)).toEqual([]);
+  });
+
   it("brain_no_key: o cérebro escolhido sem chave não lê, e a chave do motor não é usada", async () => {
     const { org, callId } = await pronta("cerebro sem chave");
     await comCerebro(org, CEREBRO.id, [COM_PRECO], false);
@@ -1119,10 +1142,27 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
   it("remover a escolha com o classify_target gravado volta ao endpoint", async () => {
     const { org, callId } = await pronta("cerebro removido volta ao endpoint");
     await comDestino(org, { baseUrl: "https://api.deepseek.com/v1", modelo: "deepseek-chat", chave: CHAVE_DO_ENDPOINT });
+    await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+    await escolhe(org, CEREBRO.id, COM_PRECO.id);
+    cerebroResponde({ inputTokens: 10, outputTokens: 5 });
+    const antes = pedidoCom(completa());
+
+    // Com a escolha, quem lê é o cérebro, e o endpoint não recebe nada.
+    await roda(org, callId, antes.fetch);
+    expect(antes.pedidos).toEqual([]);
+    expect((await extratoDe(callId))[0]?.engine).toBe(`brain:${CEREBRO.id}`);
+
+    await withSystem(app, (q) => q.exec("delete from settings where organization_id = $1 and key = 'calls.analysis_brain'", [org]));
+    const outra = await createCall(app, org, t0);
+    await withSystem(app, (q) => q.exec("update calls set agent_id = (select agent_id from calls where id = $2) where id = $1", [outra, callId]));
+    await conversa(org, outra);
+    const calls = CEREBRO.completeJson.mock.calls.length;
     const { fetch, pedidos } = pedidoCom(completa());
 
-    await roda(org, callId, fetch);
+    await roda(org, outra, fetch);
 
+    // Sem a escolha, o destino que continuou gravado volta a valer.
     expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat", authorization: `Bearer ${CHAVE_DO_ENDPOINT}` }]);
+    expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
   });
 });

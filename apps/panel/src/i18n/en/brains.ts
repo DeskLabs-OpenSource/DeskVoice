@@ -14,6 +14,7 @@ const brains: BrainsDictionary = {
   remove: "Remove",
   removeConfirm: "Remove the {brain} key? The {brain} model list is deleted too. A removed key cannot be recovered.",
   removeYes: "Remove the {brain} key",
+  removeChosen: "{brain} is who reads the calls today (model {model}). Without the key, calls stop being read until the key is back or you choose another in \"Who reads the call\", in the analysis section. They do not move to the agent's engine.",
   cancel: "Cancel",
   neverTested: "The key has not been tested yet. Use Refresh list to test it.",
   tested: "Tested on {when}: {result}",

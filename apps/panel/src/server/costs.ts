@@ -20,3 +20,11 @@ export const centsOf = (microcents: string | number): number => Math.round(Numbe
  * mudança de schema.
  */
 export const LEDGER_AGENT = "coalesce(l.agent_id, c.agent_id)";
+
+/**
+ * Quantas linhas de um grupo do extrato (`usage_ledger l`) não têm custo medido (`cost_measured =
+ * false`: modelo sem preço, ou consumo que o provedor não declarou). O custo delas é zero no banco, e
+ * o zero não quer dizer grátis: cada soma de `/costs` e da chamada leva esta contagem ao lado, no
+ * mesmo `group by` da soma, e a tela diz "não medido" onde ela passa de zero.
+ */
+export const UNMEASURED_COUNT = `count(*) filter (where not l.cost_measured)::int`;

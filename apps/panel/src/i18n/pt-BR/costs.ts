@@ -15,6 +15,10 @@ const costs = {
   priceSource: "Fonte do preço",
   deletedAgent: "Agente apagado",
   handoffCounts: "Uma ligação com passagem conta para cada agente.",
+  unmeasured: "Não medido",
+  unmeasuredPart: "+ parte não medida",
+  unmeasuredNote: "{n} linhas do extrato deste período não têm custo medido: o modelo não tem preço conhecido, ou o provedor não informou o consumo daquela leitura. O gasto delas não entra nos valores abaixo. Ele aparece só na fatura do provedor.",
+  unmeasuredNoteOne: "1 linha do extrato deste período não tem custo medido: o modelo não tem preço conhecido, ou o provedor não informou o consumo daquela leitura. O gasto dela não entra nos valores abaixo. Ele aparece só na fatura do provedor.",
 };
 
 export default costs;

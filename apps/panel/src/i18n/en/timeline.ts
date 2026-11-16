@@ -4,7 +4,7 @@ const timeline: TimelineDictionary = {
   back: "Calls",
   live: "Live",
   liveHint: "The timeline updates by itself while the call happens.",
-  facts: { agent: "Agent", engine: "Voice engine", duration: "Duration", cost: "Estimated cost", ceiling: "ceiling of {value}", byAgent: "By agent:", deletedAgent: "Deleted agent", started: "Started", direction: "Direction" },
+  facts: { agent: "Agent", engine: "Voice engine", duration: "Duration", cost: "Estimated cost", ceiling: "ceiling of {value}", byAgent: "By agent:", deletedAgent: "Deleted agent", costUnmeasured: "Not measured", costUnmeasuredPart: "plus a part not measured: the model has no known price, or the provider did not report the usage", started: "Started", direction: "Direction" },
   direction: { inbound: "Received", outbound: "Placed by the agent" },
   outcomeTitle: "What this call left behind",
   outcomes: {
