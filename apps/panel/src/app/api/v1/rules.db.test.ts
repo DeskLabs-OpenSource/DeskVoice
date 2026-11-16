@@ -549,6 +549,47 @@ describe("removing and correcting lines and numbers", () => {
     expect([invalid.status, invalid.code]).toEqual([400, "validation_error"]);
   });
 
+  it("the allowed addresses are zeroed only when the host or the mode changes, in the same write; changing only the extras keeps them (R14, contract 7)", async () => {
+    const register = { name: "Por nome", host: "sip.zera.example.test", username: "5532", password: "senha-longa", authMode: "register" };
+    const created = await call(createTrunk, { method: "POST", cookie: owner, body: register });
+    expect(created.status).toBe(200);
+    const id = (created.data as { id: string }).id;
+    const columns = () =>
+      withOrg(panel.app, org, (q) =>
+        q.one<{ inbound_from_name: string[]; inbound_allowed: string[]; resolved: boolean }>(
+          "select inbound_from_name, inbound_allowed, inbound_resolved_at is not null as resolved from trunks where id = $1",
+          [id],
+        ),
+      );
+    // O que o processo de voz teria gravado depois de resolver o nome.
+    const resolved = async (): Promise<void> => {
+      await withOrg(panel.app, org, (q) =>
+        q.exec("update trunks set inbound_from_name = '{203.0.113.7}', inbound_allowed = '{203.0.113.7,198.51.100.1}', inbound_resolved_at = now() where id = $1", [id]),
+      );
+    };
+    const kept = { inbound_from_name: ["203.0.113.7"], inbound_allowed: ["203.0.113.7", "198.51.100.1"], resolved: true };
+    const zeroed = { inbound_from_name: [], inbound_allowed: [], resolved: false };
+    await resolved();
+    const patch = (body: object) => call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body });
+
+    expect((await patch({ matchExtra: ["198.51.100.2"] })).status).toBe(200);
+    expect(await columns()).toEqual(kept);
+    expect((await patch({ name: "Outro nome", callerId: null })).status).toBe(200);
+    expect(await columns()).toEqual(kept);
+    // O mesmo host, regravado igual, também não zera.
+    expect((await patch({ host: register.host })).status).toBe(200);
+    expect(await columns()).toEqual(kept);
+
+    const moved = await patch({ host: "sip.outra.example.test", password: "senha-longa" });
+    expect(moved.status).toBe(200);
+    expect(moved.data).toMatchObject({ inboundAllowed: [], inboundResolvedAt: null });
+    expect(await columns()).toEqual(zeroed);
+
+    await resolved();
+    expect((await patch({ authMode: "ip", host: "203.0.113.70", username: null })).status).toBe(200);
+    expect(await columns()).toEqual(zeroed);
+  });
+
   it("in a line recognized by IP, the inbound addresses are numeric and the block has a floor; a name only goes in the outbound address", async () => {
     const create = (body: object) => call(createTrunk, { method: "POST", cookie: owner, body: { name: "Por IP", host: "203.0.113.0/24", authMode: "ip", ...body } });
     const refused = async (result: ReturnType<typeof call>, code: string, value: string): Promise<void> => {

@@ -7,15 +7,18 @@ import {
   allowedAddresses,
   BLOCK_TOO_WIDE_REASON,
   computeAllowed,
+  EMPTY_ALLOWED,
   extraAddressReason,
   extraNameReason,
   extraTooWideReason,
   NAME_IN_IP_MODE_REASON,
   OUTBOUND_BLOCK_REASON,
   OUTBOUND_ONLY_IN_IP_MODE_REASON,
+  MAX_FROM_NAME,
   RESOLVE_TIMEOUT_MS,
   renderTrunksConf,
   SHARED_HOST_REASON,
+  TOO_MANY_FROM_NAME,
   trunkProblem,
   writeFileAtomic,
   type TrunkConfig,
@@ -517,7 +520,7 @@ describe("conjunto de endereços liberados por linha", () => {
     expect(allowedAddresses({ ...byIp, host: "198.051.100.020:5080" })).toEqual(["198.51.100.20"]);
     expect(allowedAddresses({ ...byIp, host: "54.172.60.1/30", matchExtra: ["54.244.51.0/30", "54.172.60.0/30", "2001:DB8::1"] })).toEqual(["54.172.60.0/30", "54.244.51.0/30", "2001:db8::1"]);
     const { resolve, asked } = resolver({});
-    expect(await computeAllowed({ resolve }, [byIp], new Map())).toEqual(new Map([[B, { addresses: ["198.51.100.20"] }]]));
+    expect(await computeAllowed({ resolve }, [byIp], new Map())).toEqual(new Map([[B, { addresses: ["198.51.100.20"], fromName: [] }]]));
     // Linha por IP nunca pergunta ao DNS.
     expect(asked).toEqual([]);
   });
@@ -525,14 +528,17 @@ describe("conjunto de endereços liberados por linha", () => {
   it("registro com IP no host: esse IP, com a porta fora", async () => {
     const withIp: TrunkConfig = { ...register, host: "203.0.113.5:5080" };
     const { resolve, asked } = resolver({});
-    expect((await computeAllowed({ resolve }, [withIp], new Map())).get(A)).toEqual({ addresses: ["203.0.113.5"] });
+    expect((await computeAllowed({ resolve }, [withIp], new Map())).get(A)).toEqual({ addresses: ["203.0.113.5"], fromName: [] });
     expect(asked).toEqual([]);
   });
 
   it("registro com nome: A, AAAA e alvos do SRV que o resolvedor devolve, em ordem fixa e canônica, mais os extras", async () => {
     const { resolve, asked } = resolver({ [SIP]: ["203.0.113.9", "2001:DB8:0:0::5", "203.0.113.7", "203.0.113.9", "lixo"] });
     const withExtra: TrunkConfig = { ...register, matchExtra: ["198.51.100.0/24"] };
-    expect((await computeAllowed({ resolve }, [withExtra], new Map())).get(A)).toEqual({ addresses: ["2001:db8::5", "203.0.113.7", "203.0.113.9", "198.51.100.0/24"] });
+    expect((await computeAllowed({ resolve }, [withExtra], new Map())).get(A)).toEqual({
+      addresses: ["2001:db8::5", "203.0.113.7", "203.0.113.9", "198.51.100.0/24"],
+      fromName: ["2001:db8::5", "203.0.113.7", "203.0.113.9"],
+    });
     // A porta não vai na pergunta.
     expect(asked).toEqual([SIP]);
   });
@@ -594,5 +600,109 @@ describe("conjunto de endereços liberados por linha", () => {
     expect(skipped).toEqual([]);
     expect(identifies(conf)).toEqual(["match=198.51.100.20"]);
     expect(blocksOf(conf, B)).toContain(`[trunk-${B}-identify]`);
+  });
+});
+
+describe("o filtro de entrada por linha (R14, fatia 2)", () => {
+  const SIP = "sip.operadora.example";
+  /** As linhas da seção `type=endpoint` de um tronco. */
+  const endpointOf = (conf: string, id: string): string[] => (conf.split("\n\n").find((block) => block.startsWith(`[trunk-${id}]\ntype=endpoint`)) ?? "").split("\n");
+  const acl = (conf: string, id: string): string[] => endpointOf(conf, id).filter((line) => /^(deny|permit)=/.test(line));
+  const failing = async (): Promise<string[]> => {
+    throw Object.assign(new Error(`queryA ESERVFAIL ${SIP}`), { code: "ESERVFAIL" });
+  };
+  const addressesOf = (allowed: Map<string, { addresses: string[] }>) => new Map([...allowed].map(([id, entry]) => [id, entry.addresses]));
+
+  it("cada endpoint recusa tudo e libera só os endereços DELE; nenhuma lista global (type=acl)", () => {
+    const allowed = new Map([
+      [A, ["203.0.113.7", "2001:db8::5", "198.51.100.0/24"]],
+      [B, ["198.51.100.20"]],
+    ]);
+    const { conf } = renderTrunksConf([register, byIp], allowed);
+    expect(acl(conf, A)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.7", "permit=2001:db8::5", "permit=198.51.100.0/24"]);
+    expect(acl(conf, B)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=198.51.100.20"]);
+    expect(conf).not.toMatch(/type=acl/);
+    // O filtro fica só na seção do endpoint: nem no aor, nem no identify, nem no registro.
+    expect(conf.split("\n").filter((line) => /^(deny|permit)=/.test(line))).toHaveLength(8);
+  });
+
+  it("nome, bloco largo demais e repetição nunca viram permit; o que sobra é canônico", () => {
+    const { conf } = renderTrunksConf([byIp], new Map([[B, ["198.051.100.020", "nome.example", "10.0.0.0/8", "::/0", "198.51.100.20", "2001:DB8::1"]]]));
+    expect(acl(conf, B)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=198.51.100.20", "permit=2001:db8::1"]);
+    // Nada que sirva: sem filtro, nunca um deny sozinho.
+    expect(acl(renderTrunksConf([byIp], new Map([[B, ["nome.example", "0.0.0.0/0"]]])).conf, B)).toEqual([]);
+  });
+
+  it("isolamento: duas organizações com o mesmo nome de operadora e resoluções diferentes no tempo; nenhum endereço de uma no endpoint da outra", async () => {
+    const theirs: TrunkConfig = { ...register, id: C, organizationId: ORG2, username: "conta200" };
+    // A resolução falha agora: cada linha fica com o que o nome dela resolveu da última vez.
+    const previous = new Map([
+      [A, ["203.0.113.7"]],
+      [C, ["198.51.100.99"]],
+    ]);
+    const allowed = await computeAllowed({ resolve: failing }, [register, theirs], previous);
+    const { conf } = renderTrunksConf([register, theirs], addressesOf(allowed));
+    expect(acl(conf, A)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.7"]);
+    expect(acl(conf, C)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=198.51.100.99"]);
+    // E com uma linha por IP da outra organização ao lado: o endereço dela só no endpoint dela.
+    const ipTheirs: TrunkConfig = { ...byIp, organizationId: ORG2 };
+    const both = renderTrunksConf([register, ipTheirs], new Map([[A, ["203.0.113.7"]], [B, ["198.51.100.20"]]])).conf;
+    expect(endpointOf(both, A).join("\n")).not.toContain("198.51.100.20");
+    expect(endpointOf(both, B).join("\n")).not.toContain("203.0.113.7");
+  });
+
+  it("DNS falhando: o permit é o mesmo conjunto que vai para a tela (inbound_allowed)", async () => {
+    const line: TrunkConfig = { ...register, matchExtra: ["198.51.100.1"] };
+    const allowed = await computeAllowed({ resolve: failing }, [line], new Map([[A, ["203.0.113.7", "203.0.113.9"]]]));
+    const shown = allowed.get(A)?.addresses ?? [];
+    expect(shown).toEqual(["203.0.113.7", "203.0.113.9", "198.51.100.1"]);
+    expect(acl(renderTrunksConf([line], addressesOf(allowed)).conf, A).filter((rule) => rule.startsWith("permit="))).toEqual(shown.map((address) => `permit=${address}`));
+  });
+
+  it("extra removido com o DNS falhando sai do permit; extra mudado mantém a parte do nome", async () => {
+    const fromName = new Map([[A, ["203.0.113.7"]]]);
+    const removed = await computeAllowed({ resolve: failing }, [{ ...register, matchExtra: [] }], fromName);
+    expect(removed.get(A)).toMatchObject({ addresses: ["203.0.113.7"], fromName: ["203.0.113.7"] });
+    expect(acl(renderTrunksConf([register], addressesOf(removed)).conf, A)).not.toContain("permit=198.51.100.1");
+    const changed = await computeAllowed({ resolve: failing }, [{ ...register, matchExtra: ["198.51.100.2"] }], fromName);
+    expect(changed.get(A)).toMatchObject({ addresses: ["203.0.113.7", "198.51.100.2"], fromName: ["203.0.113.7"] });
+  });
+
+  it("conjunto vazio de linha ativa: endpoint sem deny e sem permit, e a linha fica 'warn' com o motivo", async () => {
+    const allowed = await computeAllowed({ resolve: failing }, [register], new Map());
+    expect(allowed.get(A)).toMatchObject({ addresses: [], fromName: [], problem: expect.stringMatching(new RegExp(`^${EMPTY_ALLOWED}; its filter stays off until the name ${SIP} resolves\\.`)) });
+    const { conf, emitted } = renderTrunksConf([register], addressesOf(allowed));
+    expect(emitted).toEqual([A]);
+    expect(acl(conf, A)).toEqual([]);
+    // Sem conjunto calculado, também sem filtro (o arquivo gerado antigo, antes da primeira aplicação).
+    expect(acl(renderTrunksConf([register]).conf, A)).toEqual([]);
+  });
+
+  it("o nome resolve: o deny e o permit entram, e a linha não fica 'warn'", async () => {
+    const allowed = await computeAllowed({ resolve: async () => ["203.0.113.9", "203.0.113.7"] }, [register], new Map());
+    expect(allowed.get(A)).toEqual({ addresses: ["203.0.113.7", "203.0.113.9"], fromName: ["203.0.113.7", "203.0.113.9"] });
+    expect(acl(renderTrunksConf([register], addressesOf(allowed)).conf, A)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.7", "permit=203.0.113.9"]);
+  });
+
+  it("linha por IP nunca tem conjunto vazio, nem com o DNS fora", async () => {
+    const lines: TrunkConfig[] = [byIp, { ...byIp, id: C, host: "54.172.60.0/30" }, { ...register, host: "203.0.113.5:5080" }];
+    const allowed = await computeAllowed({ resolve: failing }, lines, new Map());
+    for (const line of lines) expect(allowed.get(line.id)?.addresses.length, line.host).toBeGreaterThan(0);
+    for (const line of lines) expect(allowed.get(line.id)?.problem).toBeUndefined();
+  });
+
+  it(`um nome que resolve 20 endereços: ficam os ${MAX_FROM_NAME} primeiros em ordem canônica, e a linha fica 'warn'`, async () => {
+    const twenty = Array.from({ length: 20 }, (_, index) => `203.0.113.${100 + index}`);
+    const extras = Array.from({ length: 16 }, (_, index) => `198.51.100.${index + 1}`);
+    for (const order of [twenty, [...twenty].reverse()]) {
+      const allowed = (await computeAllowed({ resolve: async () => order }, [{ ...register, matchExtra: extras }], new Map())).get(A);
+      expect(allowed?.fromName).toEqual(twenty.slice(0, MAX_FROM_NAME));
+      expect(allowed?.problem).toMatch(new RegExp(`^${TOO_MANY_FROM_NAME} \\(${SIP.replaceAll(".", "\\.")}\\)`));
+      // O teto da linha: 16 do nome e 16 extras (o host é nome).
+      expect(allowed?.addresses).toHaveLength(32);
+    }
+    // Com o DNS fora, o que veio guardado também respeita o teto.
+    const kept = (await computeAllowed({ resolve: failing }, [register], new Map([[A, twenty]]))).get(A);
+    expect(kept?.fromName).toHaveLength(MAX_FROM_NAME);
   });
 });

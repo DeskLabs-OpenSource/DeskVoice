@@ -42,21 +42,22 @@ function hostName(host: string): string | null {
 }
 
 /**
- * De onde a central vai aceitar a ligação desta linha, como o processo de voz gravou (R14). Nesta
- * versão nada é filtrado: a tela diz o estado de hoje (aceita de qualquer endereço) para não
- * prometer uma proteção que ainda não existe.
+ * De onde a central aceita a ligação desta linha, como o processo de voz gravou (R14). É o mesmo
+ * conjunto que vira o filtro da linha na central. Linha ativa com nome que ainda não resolveu fica
+ * sem filtro, e a tela diz isso em vez de dizer que recusa o resto.
  */
 function AllowedAddresses({ trunk, t }: { trunk: Trunk; t: LineDictionary }) {
   const locale = useLocale();
   const name = hostName(trunk.host);
   const allowed = trunk.inboundAllowed ?? [];
+  const filterOff = allowed.length === 0 && name !== null && trunk.status === "warn";
   return (
     <div className="grid gap-1.5 rounded-sm bg-sunken p-4">
       <p>
         <span className="font-bold">{t.allowed}:</span>{" "}
-        {allowed.length > 0 ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{t.allowedNone}</span>}
+        {allowed.length > 0 ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{filterOff ? t.allowedEmpty : t.allowedNone}</span>}
       </p>
-      <p className="text-[0.87rem]">{t.allowedToday}</p>
+      {allowed.length > 0 ? <p className="text-[0.87rem]">{t.allowedOthers}</p> : null}
       {name !== null && trunk.inboundResolvedAt ? <p className="text-[0.87rem] text-muted">{fill(t.allowedResolvedAt, { name, when: formatDateTime(trunk.inboundResolvedAt, locale) })}</p> : null}
       <p className="text-[0.87rem] text-muted">{t.allowedHint}</p>
     </div>

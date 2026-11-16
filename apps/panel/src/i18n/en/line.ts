@@ -18,12 +18,13 @@ const line: LineDictionary = {
   matchExtraHint:
     "One per line: IP or block (54.172.60.0/30), never a name. A carrier that delivers calls from several regions publishes several blocks and asks you to allow all of them; without them, the call is lost when the main region goes down.",
   matchExtraRegisterHint:
-    "One per line: IP or block (54.172.60.0/30), never a name. Only for a carrier that registers the line through one server and delivers the call from another: the line is still recognized by the registration, and these addresses will join the incoming list once the filter is turned on (today they have no effect yet).",
-  allowed: "Will accept calls from",
+    "One per line: IP or block (54.172.60.0/30), never a name. Only for a carrier that registers the line through one server and delivers the call from another: the line is still recognized by the registration, and these addresses join the list the server accepts calls from.",
+  allowed: "Accepts calls from",
   allowedNone: "no address yet. The list appears once the line is applied (Save line or Test line); a failed line accepts no calls.",
-  allowedToday: "Today the server still accepts calls from any address: this list only takes effect once the incoming filter is turned on, in a future version.",
+  allowedOthers: "The server refuses calls for this line that come from any other address.",
+  allowedEmpty: "The server does not know yet which addresses this line receives calls from; its filter stays off until the name resolves.",
   allowedResolvedAt: "Addresses of the name {name} updated on {when}.",
-  allowedHint: "Once the filter is on, if calls from this carrier stop arriving, it may be delivering from another address: add it to Extra addresses.",
+  allowedHint: "If calls from this carrier stop arriving, it may be delivering from another address: add it to Extra addresses.",
   outboundHost: "Address for outbound calls (optional)",
   outboundHostHint: "Name or IP of the provider for calls that leave through this line, such as account.pstn.twilio.com. It is the only field of a line by IP that accepts a name. Blank, the server address above is used; with a block, the line only receives.",
   username: "User",
