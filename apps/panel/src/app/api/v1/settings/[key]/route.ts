@@ -45,6 +45,7 @@ export const PUT = handle(
       await q.exec("delete from settings where key = $1", [key]);
       return { key, value: null };
     }
+    await definition.check?.(body.value, q);
     let stored: unknown;
     try {
       stored = definition.store(body.value, deps.secretKey, previous?.value ?? null);
