@@ -1,7 +1,9 @@
 # 0020: Memória entre ligações e equipe de agentes, com as escolhas do dono
 
-- **Estado:** aceita
-- **Data:** 2026-11-15
+- **Estado:** aceita; o item 4 foi revisto pelo dono em 16/11/2026
+  ([#272](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/272)): a chave vale também para a
+  ligação que o sistema discou
+- **Data:** 2026-11-15; revisão do item 4 em 2026-11-16
 - **Quem decidiu:** o dono do projeto, em 15/11/2026, sobre os cinco pedidos de decisão da seção 8 do
   [desenho da equipe de agentes e da memória](../specs/2026-11-13-equipe-de-agentes-e-memoria.md)
   (#114). Resposta: "Pode seguir com sua recomendação em todos docs de decisão abertos", o que vale
@@ -12,7 +14,9 @@
   - **"(do desenho, seção X)":** detalhe que o desenho do #114 já trazia e que o dono aprovou junto
     com ele, sem ser palavra da opção;
   - **"(ponto do Arquiteto)":** leitura ou acréscimo do Arquiteto, a partir do direcionamento da
-    DESA-37. Vale até o dono dizer outra coisa.
+    DESA-37. Vale até o dono dizer outra coisa;
+  - **"(revisão do dono, #272)":** o que o dono escolheu em 16/11/2026 na opção A da #272, e que
+    substitui a segunda parte da opção 4B.
 
   A seção "Regras que valem em toda fatia que lê ou grava memória" é inteira ponto do Arquiteto.
 
@@ -40,9 +44,9 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
      (do desenho, seção 8, custo da opção 1B, e seção 7, fatia 2; decorre da 1A).
    - A nota só nasce quando o agente tem `remember_caller_note` marcada na tela dele. Ela vem
      desmarcada em todo agente, novo ou já existente (do desenho, seção 8, nota do pedido sobre o prazo).
-   - Numa ligação recebida, o agente não recebe nada sobre o número enquanto a chave do item 4
-     estiver desligada, e ela vem desligada. A ligação que o sistema discou é a exceção que o dono
-     escolheu no item 4.
+   - O agente não recebe nada sobre o número enquanto a chave do item 4 estiver desligada, e ela
+     vem desligada. Isso vale para a ligação recebida e para a que o sistema discou (revisão do
+     dono, #272).
 2. **Prazo próprio da memória (2A).**
    - O padrão é de 90 dias, ajustável na tela entre 30 e 365. O prazo é por organização, e só dono
      ou administrador o muda (ponto do Arquiteto).
@@ -64,24 +68,18 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
    - Cada mudança grava `caller_memory_changed` (do desenho, seção 2.5).
    - O bloco que o agente recebe nunca traz resumo nem fala. Ele traz só as notas e os títulos das
      pendências abertas, dentro do teto de 1 500 caracteres (do desenho, seção 2.6).
-   - **A ligação que o próprio sistema discou recebe sempre (parte da opção 4B que o dono
-     aceitou).** O texto da opção diz "sempre ligado na ligação que o sistema discou". Na ligação de
-     saída (`direction = 'outbound'`), o número não foi informado por quem está do outro lado, e o
-     desenho (seção 2.5) usa o mesmo raciocínio de
-     [`send_whatsapp.ts`](../../packages/tools/src/tools/send_whatsapp.ts) (linha 132), onde
-     `whatsapp.trust_caller_id` só vale para a ligação recebida. Por isso:
-     - com a chave desligada, a ligação recebida não recebe memória, e a de saída recebe;
-     - com a chave ligada, as duas recebem o mesmo bloco, com a mesma frase fixa.
-
-     A ligação de saída já vem desligada de fábrica
-     ([`0004`](0004-ligacoes-de-saida-desligadas.md)). Quem a liga passa a mandar ao modelo, nas
-     ligações discadas, as notas e os títulos das pendências abertas do número, sem ter ligado a
-     chave. Isso gasta tokens dentro do teto da chamada.
-   - **Pedido de revisão aberto neste ponto ([#272](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/272)).** O Arquiteto pediu ao dono que a chave valha também
-     para a ligação de saída (opção A do pedido), porque o item 1 diz que o agente não recebe nada
-     por padrão. O padrão sem resposta desse pedido é manter o que está aqui (opção B): o silêncio
-     não desfaz uma escolha explícita do dono. Se ele mudar, uma decisão nova emenda esta. Só a
-     fatia 6 depende disso.
+   - **A chave vale nas duas direções (revisão do dono, #272).** Com a chave desligada, nenhuma
+     ligação recebe a memória, nem a que o sistema discou. Com a chave ligada, a ligação recebida e
+     a de saída (`direction = 'outbound'`) recebem o mesmo bloco, com a mesma frase fixa. O aviso de
+     número forjado fica na tela de Configurações e não muda por ligação.
+   - **O que a revisão mudou.** A opção 4B, como o dono a aceitou em 15/11/2026, dizia "sempre
+     ligado na ligação que o sistema discou", e esta decisão registrou isso. O Arquiteto pediu a
+     revisão na [#272](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/272), porque o item 1
+     diz que o agente não recebe nada por padrão, e porque quem já ligou a ligação de saída
+     ([`0004`](0004-ligacoes-de-saida-desligadas.md)) passaria a mandar notas ao modelo e a gastar
+     tokens sem ter escolhido isso. Em 16/11/2026 o dono respondeu ao maestro de PRs: "Nos docs que
+     precisam de minha decisão, pode seguir com sua recomendação", o que vale a opção A da #272.
+     Nenhuma fatia tinha entregado a regra antiga: a fatia 6 ainda não existia.
 5. **O supervisor usa só regras fixas (5A).** A rotina `review_call` não usa modelo de IA (do
    desenho, seção 4.4). Revisão por modelo é pedido futuro, próprio.
 
@@ -125,8 +123,8 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
     não prova nada, porque sem escape ela continua dentro do bloco.
   - O que nenhum teste prova, e o PR diz: que o modelo não obedece ao texto do bloco.
 - **Desligado de fábrica onde gasta ou expõe.** As notas só nascem com a ferramenta marcada, e o
-  agente só recebe memória numa ligação recebida com a chave ligada, ou numa ligação de saída,
-  que já vem desligada de fábrica (item 4). A memória para a equipe é só leitura e não gasta.
+  agente só recebe memória com a chave do item 4 ligada, em qualquer direção da ligação. A memória
+  para a equipe é só leitura e não gasta.
 
 ## Alternativas
 
@@ -136,6 +134,7 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
 | Tudo ligado, inclusive no agente (1C, 4C) | Toda instalação atualizada passaria a expor notas ao número exibido | Contra a regra 7 do `GOVERNANCE.md` e o raciocínio da [`0016`](0016-gravacao-desligada-de-fabrica.md) |
 | Só o prazo da transcrição (2B) | A nota sairia com a fala, e sem prazo de guarda ficaria para sempre | A instalação que nunca preencheu o prazo guardaria para sempre o que a pessoa contou |
 | Equipe de agentes antes da memória (3B) | A passagem entre agentes viria na fatia 2 | A primeira mudança na ligação ao vivo chegaria antes de a equipe ter o contexto do número quando algo der errado |
+| Ligação de saída sempre com memória, mesmo com a chave desligada (segunda parte da 4B, como aceita em 15/11) | O agente receberia a memória em toda ligação discada | Revista pelo dono na #272: contradiz o item 1 e gasta tokens e expõe notas sem escolha de quem já ligou a ligação de saída |
 | Agente nunca recebe memória (4A) | Memória só para pessoas | O dono escolheu deixar a escolha com cada empresa, como já vale em `whatsapp.trust_caller_id` |
 | Supervisor com modelo (5B) | Revisão por IA de cada ligação | Gasto novo por ligação, fora do teto da chamada, sem medida de quantas promessas ficam sem pendência |
 
@@ -143,8 +142,9 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
 
 - Quem atualiza passa a ver, na tela da chamada, as ligações anteriores do mesmo número. A nota de
   versão da fatia 2 diz isso. Nenhum dado novo é guardado sem alguém marcar a ferramenta.
-- Na ligação de saída, o agente recebe a memória mesmo com a chave do item 4 desligada (ver o
-  pedido de revisão no item 4).
+- Com a chave do item 4 desligada, que é como ela vem, nenhuma ligação manda memória ao modelo,
+  nem a de saída. Quem liga para os próprios clientes e quer a memória precisa ligar a chave e
+  aceitar o aviso de número forjado, que vale para as recebidas.
 - Com a chave do item 4 ligada, numa ligação recebida com número forjado, o agente pode repetir as
   notas para o impostor. A instrução contra isso não é garantia, e a tela diz isso.
 - A memória no agente gasta tokens dentro do teto da chamada, sem conta nova. A conta do desenho
@@ -155,9 +155,6 @@ Esta decisão registra as escolhas e as regras que valem em todas as fatias cont
 
 ## Quando revisar
 
-- Se o dono aceitar o pedido de revisão do item 4, na [#272](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/272) (a chave valer também para a ligação de saída).
-  Uma decisão nova emenda esta. Com ela, a fatia 6 deixa de dar memória à ligação de saída com a
-  chave desligada.
 - Quando a nota passar a nascer sem a ferramenta marcada (extraída por modelo depois da ligação,
   por exemplo): o item 1 deixa de valer como está.
 - Quando houver medida de quantas promessas ficam sem pendência (item 5).
