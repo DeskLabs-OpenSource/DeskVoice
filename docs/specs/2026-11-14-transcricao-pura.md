@@ -962,6 +962,20 @@ acréscimos de linha, e quem chegar depois faz o merge da `main`.
     só começa depois da resposta do Rafael, e o aviso da tela e o guia dizem o que ele decidir
     sobre o prazo.
 
+**Ajuste de 16/11, 21:10Z (Arquiteto, depois do merge da 7a):**
+
+- **A 7a está na `main`**, no #359 (merge `3a44763`). Ficam três pendências:
+  - o ramo em que o prazo vence depois de a resposta ser lida (`deciders/jev.ts`, perto da linha
+    142) não tem teste. Uma tarefa à parte acrescenta o teste: a linha tem custo > 0, e
+    `cost_estimated = true`;
+  - erro HTTP (401, 429, 4xx, 5xx) segue sem custo. Ainda não se mediu se a TypeSafe cobra esses
+    pedidos;
+  - a estimativa usa 1 token por byte, o pior caso, e fica cerca de 1,6× acima do real medido.
+- **A tela de Custos mostra os dois avisos juntos** (pedido da revisora): "custo não medido" (do
+  `cost_measured`, #354) e "inclui estimativa" (do `cost_estimated`, #359), nas mesmas somas e no
+  detalhe da chamada. É a fatia da tela de custo que vem depois da 4b da R4. Teste: um período com
+  uma linha de cada tipo mostra os dois avisos ao mesmo tempo.
+
 ### Fatia 8: o serviço do Laya
 
 `deploy/laya/` (Dockerfile e servidor HTTP mínimo, com as três primitivas e nada mais), o serviço
