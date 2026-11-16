@@ -940,6 +940,28 @@ chaves do filtro), `apps/panel/src/i18n/*/speech-filter.ts` (**novo**),
 `server/settings.ts`, `timeline.ts` e `calls/[id]/**` (a 4b põe ali a marca de custo); são
 acréscimos de linha, e quem chegar depois faz o merge da `main`.
 
+**Ajuste de 16/11, à noite (Arquiteto, com a página da TypeSafe lida pelo Desenvolvedor na DESA-73):**
+
+- **A página não diz o prazo.** Em https://typesafe.ai/legal/privacy-policy ("Last updated Nov 19,
+  2025", lida em 2026-11-16 20:07Z), a seção *Retention* diz que o dado fica guardado "for as long
+  as reasonably necessary to provide you with the Services, or otherwise in support of our business
+  or commercial purposes", e que é apagado a pedido. Não há prazo em dias. Como esta fatia manda,
+  o pedido foi ao Rafael antes de a tela oferecer o Jev.
+- **Agora há fonte para o país.** A mesma página, em *International Visitors*, diz que o serviço é
+  hospedado nos Estados Unidos. Na 7b, `deciders/jev.ts` passa a declarar
+  `processingLocation: 'US'`, com o endereço e a data da leitura num comentário ao lado. O aviso
+  nomeia os EUA citando a página. O teste com `undeclared` continua: ele vale para qualquer
+  modelo sem fonte.
+- **A fatia se divide em duas**, para a parte que não depende da resposta seguir andando:
+  - **7a, o custo estimado:** a migration `<carimbo>_custo_estimado.sql`, a estimativa gravada
+    quando o pedido ao Jev chega atrasado, sem rede ou fora da forma (em `apps/voice` e
+    `packages/voice-engine/src/deciders/**`), e os três testes. Não tem tela nem guia. O fragmento
+    diz que nada muda para quem já instalou. O aceite é o item "custo desconhecido nunca é zero",
+    escrito acima;
+  - **7b, a tela, a linha do tempo e o guia:** todo o resto do aceite, mais o país com fonte. Ela
+    só começa depois da resposta do Rafael, e o aviso da tela e o guia dizem o que ele decidir
+    sobre o prazo.
+
 ### Fatia 8: o serviço do Laya
 
 `deploy/laya/` (Dockerfile e servidor HTTP mínimo, com as três primitivas e nada mais), o serviço
@@ -1120,7 +1142,8 @@ em arm64, nem quanto tempo a construção acrescenta ao `publish-image`.
   de fontes de 2023 e 2024 e de não ter achado uma em 2026, e não de uma página oficial dizendo isso.
 - O Laya como serviço (imagem, teto de CPU, efeito no áudio das ligações) e em arm64: só rodou na
   bancada, num venv. A memória de 2,3 GB é da rodada 3, sem teto.
-- A política de retenção de dados da TypeSafe: não lida até 16/11. É aceite da fatia 7.
+- A política de retenção de dados da TypeSafe: lida em 16/11, sem prazo em dias. O pedido foi ao Rafael
+  (ajuste da fatia 7, à noite). Páginas que pedem login (console, contrato, DPA) não foram lidas.
 - Se o texto final do reconhecedor lateral (a fonte do filtro sem transcritor) erra os nomes do
   mesmo jeito que a bancada supõe: a bancada usou texto inventado, e não a saída do
   `gpt-4o-mini-transcribe` nem do Gemini.
