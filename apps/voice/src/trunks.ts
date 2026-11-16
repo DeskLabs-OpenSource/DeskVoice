@@ -10,6 +10,7 @@
 // VPS (comando `create-owner`): quem pode provocar o conflito é quem administra o servidor.
 // Não existe precedência por antiguidade nem estado guardado ao lado do arquivo.
 import { randomUUID } from "node:crypto";
+import { promises as dns } from "node:dns";
 import { chmod, chown, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { decryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core";
@@ -32,8 +33,10 @@ export interface TrunkConfig {
   /** De quem é a linha: endereço repetido só é tolerado dentro da mesma organização. */
   organizationId: string;
   /**
-   * Mais endereços de onde as ligações chegam, além do `host` (modo `ip`): a operadora que entrega
-   * por vários blocos, um por região. Vazio na linha que sempre teve um endereço só.
+   * Mais endereços de onde as ligações chegam, além do `host`: a operadora que entrega por vários
+   * blocos, um por região. Vazio na linha que sempre teve um endereço só. Na linha por IP eles
+   * entram no `identify`; na linha por registro só liberam a entrada (ela é reconhecida pelo `line`
+   * do registro), para a operadora que registra por um servidor e entrega por outro.
    */
   matchExtra?: string[];
   /**
@@ -74,7 +77,7 @@ export function trunkProblem(trunk: TrunkConfig): string | null {
   if (trunk.authMode === "ip" && host.kind === "name") return NAME_IN_IP_MODE_REASON;
   if (trunk.authMode === "ip" && isBlockTooWide(host)) return BLOCK_TOO_WIDE_REASON;
   const extras = trunk.matchExtra ?? [];
-  if (trunk.authMode !== "ip" && (extras.length > 0 || trunk.outboundHost != null)) return EXTRA_ONLY_IN_IP_MODE_REASON;
+  if (trunk.authMode !== "ip" && trunk.outboundHost != null) return OUTBOUND_ONLY_IN_IP_MODE_REASON;
   for (const [index, extra] of extras.entries()) {
     const parsed = parseTrunkHost(extra);
     if (!parsed) return extraAddressReason(index + 1);
@@ -163,8 +166,8 @@ export const NAME_IN_IP_MODE_REASON =
 export const BLOCK_TOO_WIDE_REASON =
   "a line recognized by IP accepts an address block of at most /16 (IPv4) or /32 (IPv6); enter the smaller blocks the provider publishes, or its IP";
 export const OUTBOUND_BLOCK_REASON = "the outbound address must be one server (a name or an IP), not an address block";
-export const EXTRA_ONLY_IN_IP_MODE_REASON =
-  "extra inbound addresses and an outbound address belong to a line recognized by IP; with registration the provider finds the line by the user and password";
+export const OUTBOUND_ONLY_IN_IP_MODE_REASON =
+  "an outbound address belongs to a line recognized by IP; with registration the calls go out to the server the line registers with";
 /** A posição diz qual item recusar sem repetir a lista inteira. */
 export const extraAddressReason = (position: number): string => `the extra inbound address ${position} is not an IP address or an address block`;
 export const extraNameReason = (position: number): string =>
@@ -185,12 +188,15 @@ interface Inbound {
 /**
  * De onde as ligações entram e para onde as de saída vão: o `host`, os `match_extra` e o
  * `outbound_host`. Só endereço numérico entra no `identify`; o nome de uma linha por registro fica
- * de fora dele, e `trunkProblem` já recusou nome e bloco largo demais na linha por IP.
+ * de fora dele, e `trunkProblem` já recusou nome e bloco largo demais na linha por IP. Os
+ * `match_extra` da linha por registro não entram aqui: ela é reconhecida pelo `line` do registro,
+ * e o extra dela só libera a entrada (`allowedAddresses`). Também não entram na regra de endereço
+ * compartilhado, que é sobre o `identify`.
  */
 function readInbound(trunk: TrunkConfig, host: TrunkHost): Inbound {
   const matches: string[] = [];
   const hosts: TrunkHost[] = [];
-  for (const value of [trunk.host, ...(trunk.matchExtra ?? [])]) {
+  for (const value of [trunk.host, ...(trunk.authMode === "ip" ? (trunk.matchExtra ?? []) : [])]) {
     const parsed = parseTrunkHost(value);
     if (parsed?.kind !== "address") continue;
     hosts.push(parsed);
@@ -258,6 +264,114 @@ export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped
   return { conf: `${[header, ...sections].join(NL + NL)}${NL}`, skipped, emitted };
 }
 
+/**
+ * Os endereços de onde a central aceita a ligação de uma linha (R14). É a fonte única: a tela mostra
+ * o que esta função devolve (gravado em `trunks.inbound_allowed`), e o filtro da central vai liberar
+ * a mesma lista. Canônicos (a forma de `parseTrunkHost`), sem repetição, só IP ou bloco, e nunca um
+ * bloco mais largo que o piso de `isBlockTooWide`.
+ *   - `host` numérico (linha por IP, ou registro com IP): ele mesmo;
+ *   - `host` nome (registro): `resolved`, os endereços que o nome resolve, em ordem fixa;
+ *   - mais os `match_extra`, nos dois modos.
+ * A linha deixada de fora do arquivo não passa por aqui: o conjunto dela é vazio.
+ */
+export function allowedAddresses(trunk: Pick<TrunkConfig, "host" | "matchExtra">, resolved: readonly string[] = []): string[] {
+  const host = parseTrunkHost(trunk.host);
+  const fromHost = host?.kind === "address" ? [trunk.host] : [...resolved].map((value) => parseTrunkHost(value)).flatMap((parsed) => (parsed?.kind === "address" ? [parsed.match] : [])).sort();
+  return canonicalAddresses([...fromHost, ...(trunk.matchExtra ?? [])]);
+}
+
+function canonicalAddresses(values: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const value of values) {
+    const parsed = parseTrunkHost(value);
+    if (parsed?.kind !== "address" || isBlockTooWide(parsed) || out.includes(parsed.match)) continue;
+    out.push(parsed.match);
+  }
+  return out;
+}
+
+/** Os endereços (IP) que um nome resolve. Injetado, para o teste não ir à rede. */
+export type ResolveName = (name: string) => Promise<string[]>;
+
+/** Prazo de cada nome: estourou, conta como falha, e vale o último conjunto conhecido. */
+export const RESOLVE_TIMEOUT_MS = 3000;
+
+const NO_RECORD = new Set(["ENODATA", "ENOTFOUND", "NODATA", "NOTFOUND"]);
+
+/**
+ * A resolução de verdade: A e AAAA do nome, e os alvos do SRV `_sip._udp.<nome>` (A e AAAA de cada
+ * um), que é por onde a operadora diz que entrega SIP por UDP. Tipo de registro que não existe não é
+ * erro; qualquer outro erro é, para não encolher o conjunto com uma resposta pela metade. Nome que
+ * não resolve para endereço nenhum também é erro.
+ */
+export async function resolveSipName(name: string): Promise<string[]> {
+  const lookup = async (query: () => Promise<string[]>): Promise<string[]> => {
+    try {
+      return await query();
+    } catch (error) {
+      if (NO_RECORD.has((error as { code?: string }).code ?? "")) return [];
+      throw error;
+    }
+  };
+  const addressesOf = async (target: string): Promise<string[]> => (await Promise.all([lookup(() => dns.resolve4(target)), lookup(() => dns.resolve6(target))])).flat();
+  const srv = await lookup(async () => (await dns.resolveSrv(`_sip._udp.${name}`)).map((record) => record.name).filter((target) => target !== "" && target !== "."));
+  const found = (await Promise.all([addressesOf(name), ...srv.map(addressesOf)])).flat();
+  if (found.length === 0) throw new Error("the name resolves to no address");
+  return found;
+}
+
+/** Começo do motivo gravado quando o nome não resolveu: a conferência de saúde o mantém. */
+const UNRESOLVED = "The provider name could not be resolved";
+
+interface Allowed {
+  addresses: string[];
+  /** Por que o conjunto não pôde ser atualizado (a linha fica `warn`); `undefined` quando pôde. */
+  problem?: string;
+}
+
+function withDeadline<T>(promise: Promise<T>, ms: number, schedule: Schedule): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const cancel = schedule(() => reject(new Error(`no answer in ${ms / 1000} s`)), ms);
+    promise.then(
+      (value) => (cancel(), resolve(value)),
+      (error: unknown) => (cancel(), reject(error instanceof Error ? error : new Error(String(error)))),
+    );
+  });
+}
+
+/**
+ * O conjunto de cada linha emitida, resolvendo os nomes (um pedido por nome, com prazo). O prazo
+ * corre no relógio de verdade, e não no `schedule` das dependências, que nos testes adianta tudo. Resolução
+ * que falha MANTÉM o conjunto anterior da linha (`previous`, o que está gravado), somado aos extras
+ * de agora: falha de DNS nunca encolhe a lista, e muito menos a esvazia.
+ */
+export async function computeAllowed(deps: Pick<TrunksDeps, "resolve">, trunks: readonly TrunkConfig[], previous: ReadonlyMap<string, readonly string[]>): Promise<Map<string, Allowed>> {
+  const pending = new Map<string, Promise<string[]>>();
+  const resolveOnce = (name: string): Promise<string[]> => {
+    let found = pending.get(name);
+    if (!found) pending.set(name, (found = withDeadline(Promise.resolve().then(() => deps.resolve(name)), RESOLVE_TIMEOUT_MS, realSchedule)));
+    return found;
+  };
+  const entries = await Promise.all(
+    trunks.map(async (trunk): Promise<[string, Allowed]> => {
+      const host = parseTrunkHost(trunk.host);
+      if (host?.kind !== "name") return [trunk.id, { addresses: allowedAddresses(trunk) }];
+      // O nome sem a porta: `sip.operadora.example:5080` resolve como `sip.operadora.example`.
+      const name = host.uri.split(":")[0] ?? host.uri;
+      try {
+        const resolved = await resolveOnce(name);
+        // Resposta sem nenhum endereço que sirva é falha, e não "o conjunto ficou vazio".
+        if (canonicalAddresses(resolved).length === 0) throw new Error("the name resolves to no address");
+        return [trunk.id, { addresses: allowedAddresses(trunk, resolved) }];
+      } catch (error) {
+        const kept = canonicalAddresses([...(previous.get(trunk.id) ?? []), ...allowedAddresses(trunk)]);
+        return [trunk.id, { addresses: kept, problem: `${UNRESOLVED} (${name}: ${messageOf(error)}). The line keeps the addresses it had; check the name with the provider.` }];
+      }
+    }),
+  );
+  return new Map(entries);
+}
+
 export interface FileOwner {
   uid: number;
   gid: number;
@@ -309,6 +423,8 @@ export interface TrunksDeps {
   /** Usuário do Asterisk dentro do contêiner dele: o dono do arquivo de troncos. */
   owner?: FileOwner;
   schedule?: Schedule;
+  /** Resolve o nome no `host` da linha por registro (`resolveSipName` em produção). */
+  resolve: ResolveName;
   log: Logger;
 }
 
@@ -331,11 +447,18 @@ async function setStatus(deps: TrunksDeps, updates: TrunkHealth[]): Promise<void
   });
 }
 
-/**
- * Regrava o arquivo de troncos com as linhas de todas as organizações e pede ao Asterisk para
- * recarregar o PJSIP. Sem Asterisk no ar o arquivo fica escrito e o resultado diz que falta recarregar.
- */
-export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean; detail: string; skipped: Array<{ id: string; reason: string }> }> {
+interface TrunksPlan {
+  conf: string;
+  skipped: Array<{ id: string; reason: string }>;
+  emitted: string[];
+  /** O conjunto liberado de CADA linha do banco: a emitida tem o calculado, a de fora tem vazio. */
+  allowed: Map<string, Allowed>;
+  /** O que está gravado hoje, para gravar só o que mudou. */
+  stored: Map<string, { allowed: string[]; lastError: string | null }>;
+}
+
+/** Lê as linhas do banco, monta o arquivo e calcula o conjunto liberado de cada uma. Não grava nada. */
+async function planTrunks(deps: TrunksDeps): Promise<TrunksPlan> {
   const rows = await withSystem(deps.db, (q) =>
     q.many<{
       id: string;
@@ -346,9 +469,11 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
       auth_mode: "register" | "ip";
       match_extra: string[] | null;
       outbound_host: string | null;
+      inbound_allowed: string[] | null;
+      last_error: string | null;
       public_ip: unknown;
     }>(
-      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host,
+      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host, t.inbound_allowed, t.last_error,
               (select s.value from settings s where s.organization_id = t.organization_id and s.key = 'network.public_ip') as public_ip
          from trunks t order by t.id`,
     ),
@@ -373,13 +498,77 @@ export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean;
     }
   }
   const { conf, skipped: invalid, emitted } = renderTrunksConf(trunks);
-  const skipped = [...unreadable, ...invalid];
-  const written = await writeFileAtomic(deps.file, conf, deps.owner);
+  const stored = new Map(rows.map((row) => [row.id, { allowed: row.inbound_allowed ?? [], lastError: row.last_error }]));
+  const emittedSet = new Set(emitted);
+  const computed = await computeAllowed(
+    deps,
+    trunks.filter((trunk) => emittedSet.has(trunk.id)),
+    new Map([...stored].map(([id, entry]) => [id, entry.allowed])),
+  );
+  const allowed = new Map(rows.map((row) => [row.id, computed.get(row.id) ?? { addresses: [] }]));
+  return { conf, skipped: [...unreadable, ...invalid], emitted, allowed, stored };
+}
+
+const sameList = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((value, index) => value === b[index]);
+
+/**
+ * Grava o conjunto de cada linha, só onde mudou (`is distinct from`, como `setStatus`), com a hora.
+ * A linha cujo nome não resolveu fica `warn` com o motivo; quando volta a resolver, o aviso sai.
+ */
+async function recordAllowed(deps: TrunksDeps, plan: TrunksPlan): Promise<void> {
+  const now = deps.clock.now();
+  await withSystem(deps.db, async (q) => {
+    for (const [id, { addresses }] of plan.allowed) {
+      if (sameList(plan.stored.get(id)?.allowed ?? [], addresses)) continue;
+      await q.exec("update trunks set inbound_allowed = $2, inbound_resolved_at = $3 where id = $1 and inbound_allowed is distinct from $2", [id, addresses, now]);
+    }
+  });
+  const problems = [...plan.allowed].flatMap(([id, entry]) => (entry.problem === undefined ? [] : [{ id, status: "warn" as const, detail: entry.problem }]));
+  await setStatus(deps, problems);
+  for (const { id, detail } of problems) deps.log("error", "could not resolve the provider name of a line; kept its last known addresses", { trunkId: id, detail });
+  const recovered = [...plan.allowed].filter(([id, entry]) => entry.problem === undefined && plan.stored.get(id)?.lastError?.startsWith(UNRESOLVED));
+  if (recovered.length === 0) return;
+  await withSystem(deps.db, async (q) => {
+    for (const [id] of recovered) {
+      await q.exec("update trunks set status = 'unverified', last_error = null where id = $1 and status = 'warn' and last_error like $2", [id, `${UNRESOLVED}%`]);
+    }
+  });
+}
+
+/**
+ * O relógio de 5 minutos: resolve de novo os nomes e, se o conjunto de alguma linha mudou, aplica
+ * as linhas de novo (o arquivo é a fonte do filtro). Sem mudança, só grava o aviso de nome que não
+ * resolveu (ou tira o aviso, se voltou a resolver). Devolve se aplicou.
+ */
+export async function refreshAllowed(deps: TrunksDeps): Promise<boolean> {
+  const plan = await planTrunks(deps);
+  const changed = [...plan.allowed].some(([id, entry]) => !sameList(plan.stored.get(id)?.allowed ?? [], entry.addresses));
+  if (changed) {
+    const result = await applyTrunks(deps);
+    deps.log(result.applied ? "info" : "error", "the addresses of a line changed; trunks applied again", { applied: result.applied, detail: result.detail });
+    return true;
+  }
+  await recordAllowed(deps, plan);
+  return false;
+}
+
+/** De quanto em quanto tempo o processo de voz resolve de novo os nomes das linhas. */
+export const REFRESH_ALLOWED_MS = 5 * 60_000;
+
+/**
+ * Regrava o arquivo de troncos com as linhas de todas as organizações e pede ao Asterisk para
+ * recarregar o PJSIP. Sem Asterisk no ar o arquivo fica escrito e o resultado diz que falta recarregar.
+ */
+export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean; detail: string; skipped: Array<{ id: string; reason: string }> }> {
+  const plan = await planTrunks(deps);
+  const written = await writeFileAtomic(deps.file, plan.conf, deps.owner);
   if (written.chownError !== undefined) {
     deps.log("error", "could not hand the lines file to the Asterisk user; left it readable by everyone (0644) instead", { file: deps.file, owner: deps.owner, error: written.chownError });
   }
+  const { skipped, emitted } = plan;
   await setStatus(deps, skipped.map(({ id, reason }) => ({ id, status: "fail" as const, detail: `${LEFT_OUT}: ${reason}.` })));
   for (const { id, reason } of skipped) deps.log("error", "trunk left out of the generated configuration", { trunkId: id, reason });
+  await recordAllowed(deps, plan);
 
   try {
     await deps.ari.reloadModule("res_pjsip.so");
@@ -419,12 +608,14 @@ export async function checkTrunks(deps: TrunksDeps): Promise<TrunkHealth[]> {
   const ids = rows.map((row) => row.id);
   // Linha deixada de fora do arquivo continua mostrando o motivo, e não "não carregada".
   const leftOut = new Map(rows.flatMap((row) => (row.last_error?.startsWith(LEFT_OUT) ? [[row.id, row.last_error] as const] : [])));
+  // O nome que não resolveu não derruba a linha (ela segue com o último conjunto), mas pede atenção.
+  const unresolved = new Map(rows.flatMap((row) => (row.last_error?.startsWith(UNRESOLVED) ? [[row.id, row.last_error] as const] : [])));
   let health: TrunkHealth[];
   try {
     const states = new Map((await deps.ari.listEndpoints("PJSIP")).map((endpoint) => [endpoint.resource, endpoint.state ?? "unknown"]));
     health = ids.map((id) => {
       const state = states.get(trunkEndpointName(id));
-      if (state === "online") return { id, status: "ok", detail: "The provider answers." };
+      if (state === "online") return unresolved.has(id) ? { id, status: "warn", detail: unresolved.get(id) ?? "" } : { id, status: "ok", detail: "The provider answers." };
       if (state === "offline") return { id, status: "fail", detail: "The provider does not answer. Check the host, the user and the password, and whether the provider allows this server's IP." };
       if (state === undefined) return { id, status: "fail", detail: leftOut.get(id) ?? `${NOT_LOADED}.` };
       return { id, status: "warn", detail: "The line is loaded, but the provider has not been checked yet. Try again in a minute." };

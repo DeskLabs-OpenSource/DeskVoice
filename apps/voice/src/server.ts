@@ -14,7 +14,7 @@ import { removePartialRecordings } from "./recording";
 import { closeOrphanCalls } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
 import { realSchedule, type Schedule } from "./transport";
-import { applyTrunks, checkTrunks, type TrunksDeps } from "./trunks";
+import { applyTrunks, checkTrunks, REFRESH_ALLOWED_MS, refreshAllowed, resolveSipName, type ResolveName, type TrunksDeps } from "./trunks";
 import type { WacallsOptions } from "./wacalls-client";
 import { startVoicemailSession, type VoicemailSession } from "./voicemail";
 import { startWebCalls } from "./web-calls";
@@ -40,6 +40,8 @@ export interface VoiceServerDeps {
   trunksOwner?: { uid: number; gid: number };
   host?: string;
   schedule?: Schedule;
+  /** Resolve o nome no `host` da linha por registro. Sem ele, vai ao DNS de verdade (`resolveSipName`). */
+  resolveName?: ResolveName;
   /** Acesso ao WaCalls da instalação (ligação pelo WhatsApp). Sem token, o recurso não existe aqui. */
   wacalls?: WacallsOptions;
   /** Relógio monotônico da cadência de áudio, em ms. */
@@ -73,7 +75,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   }
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
   const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir };
-  const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, log };
+  const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, resolve: deps.resolveName ?? resolveSipName, log };
   const calls = new AsteriskCalls({ ari, db, clock, log });
   const sessions = new Set<CallSession>();
   // Recados em curso, com o ciclo de vida próprio: não são conversas, e não atendem a pedido de
@@ -155,6 +157,20 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     );
   ari.onConnected(reapply);
   reapply();
+  // O nome da linha por registro pode passar a resolver para outro endereço sem ninguém mexer na
+  // tela: de 5 em 5 minutos o conjunto liberado é recalculado, e aplicado de novo se mudou.
+  const schedule = deps.schedule ?? realSchedule;
+  let stopRefresh = (): void => undefined;
+  let closed = false;
+  const refreshLater = (): void => {
+    if (closed) return;
+    stopRefresh = schedule(() => {
+      void refreshAllowed(trunksDeps)
+        .catch((error: unknown) => log("error", "could not refresh the addresses of the lines", { error: messageOf(error) }))
+        .finally(refreshLater);
+    }, REFRESH_ALLOWED_MS);
+  };
+  refreshLater();
 
   // Não depende do Asterisk: nem a chamada pelo navegador nem a ligação pelo WhatsApp passam por ele.
   const whatsappCalls = createWhatsAppCalls(deps.wacalls ?? { token: "" }, {
@@ -199,6 +215,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     webPort: webCalls.port,
     calls,
     async close() {
+      closed = true;
+      stopRefresh();
       ari.close();
       whatsappCalls.close();
       await api.close();

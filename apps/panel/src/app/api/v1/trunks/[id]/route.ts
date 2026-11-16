@@ -27,7 +27,7 @@ export const PATCH = handle(
     if (!current) throw notFound();
     const { password, ...rest } = body;
     const merged = { ...current, ...rest };
-    requireIpModeForAddresses(merged.authMode, merged.matchExtra?.length ?? 0, merged.outboundHost ?? null);
+    requireIpModeForAddresses(merged.authMode, merged.outboundHost ?? null);
     requireNumericInbound(merged.authMode, merged.host, merged.matchExtra ?? []);
     // A senha gravada só vale para o destino para o qual foi digitada. Sem isso, quem pode editar a
     // linha apontava o host para um servidor seu e recebia, no registro, a senha do provedor.

@@ -104,6 +104,7 @@ async function incomingCall(label: string, agent: AgentOptions, settings: Record
     publicIp: "203.0.113.10",
     host: "127.0.0.1",
     schedule: timers.schedule,
+    resolveName: async () => ["192.0.2.53"],
     now: timers.now,
   });
 
@@ -348,7 +349,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     const ari = fakeAri();
     server = await startVoiceServer({
       db: app, clock: fakeClock(), engines: new Map(), tools: new Map(), ari, secretKey, audioSocketPort: 0, internalPort: 0, webPort: 0, internalToken: undefined,
-      trunksFile: path.join(scratch, `${organizationId}.conf`), publicIp: null, host: "127.0.0.1",
+      trunksFile: path.join(scratch, `${organizationId}.conf`), publicIp: null, host: "127.0.0.1", resolveName: async () => ["192.0.2.53"],
     });
     ari.emit({ type: "StasisStart", args: ["inbound"], channel: { id: "canal-x", name: `PJSIP/trunk-${trunkId}-0000000a`, dialplan: { exten: "s" } } });
     const variable = await waitFor(() => ari.log.find((line) => line.startsWith("set canal-x AUDIOSOCKET_UUID=")), "the call to be created");

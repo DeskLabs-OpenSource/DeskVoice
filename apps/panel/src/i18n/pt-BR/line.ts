@@ -12,9 +12,16 @@ const line = {
   authRegister: "Por usuário e senha (registro)",
   authIp: "Pelo IP do seu servidor",
   authIpHint: "Informe ao provedor o IP público deste servidor. Usuário e senha ficam em branco. O endereço do provedor precisa ser numérico e não pode estar em uso por outra linha desta instalação.",
-  matchExtra: "Outros endereços de onde as ligações chegam (opcional)",
+  matchExtra: "Endereços extras de onde as ligações chegam (opcional)",
   matchExtraHint:
     "Um por linha: IP ou bloco (54.172.60.0/30), nunca nome. A operadora que entrega a ligação por várias regiões publica vários blocos e pede para liberar todos; sem eles, a ligação se perde quando a região principal cai.",
+  matchExtraRegisterHint:
+    "Um por linha: IP ou bloco (54.172.60.0/30), nunca nome. Só para a operadora que registra a linha por um servidor e entrega a ligação por outro: a linha continua reconhecida pelo registro, e estes endereços vão entrar na lista de entrada quando o filtro for ligado (hoje ainda não têm efeito).",
+  allowed: "Vai aceitar ligações de",
+  allowedNone: "nenhum endereço por enquanto. A lista aparece quando a linha é aplicada (Salvar linha ou Testar linha); a linha com falha não aceita ligação.",
+  allowedToday: "Hoje a central ainda aceita ligações de qualquer endereço: esta lista só passa a valer quando o filtro de entrada for ligado, numa versão futura.",
+  allowedResolvedAt: "Endereços do nome {name} atualizados em {when}.",
+  allowedHint: "Quando o filtro for ligado, se as ligações desta operadora pararem de chegar, ela pode estar entregando de outro endereço: inclua-o em Endereços extras.",
   outboundHost: "Endereço para as ligações de saída (opcional)",
   outboundHostHint: "Nome ou IP do provedor para as chamadas que saem por esta linha, como conta.pstn.twilio.com. É o único campo da linha por IP que aceita nome. Em branco, vale o endereço do servidor acima; com um bloco, a linha só recebe.",
   username: "Usuário",
