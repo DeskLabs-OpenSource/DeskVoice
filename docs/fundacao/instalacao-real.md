@@ -286,3 +286,34 @@ Os documentos de entrada falam em "VPS de 8 GB e 4 vCPU", mas as seções acima 
 | VPS da parceira, dedicada (AlmaLinux) | 4 | 11699 MiB (seção "Na VPS da parceira") |
 
 "8 GB" é o tamanho vendido. O sistema vê 7940 MiB.
+
+## Primeira passagem entre agentes com motor de voz real, na VPS da parceira (2026-11-16)
+
+Até aqui a passagem entre agentes (0.17.0) e o custo por agente (0.18.0) só tinham sido provados
+com o motor simulado. A prova abaixo foi feita às 14:39 UTC (11:39 BRT) com a 0.19.1, pelo
+caminho da **chamada pelo navegador**, sem operadora e sem WhatsApp. Quem "ligou" foi um script
+rodado dentro do contêiner de voz. Ele pediu o convite à API interna, como o painel pede, e
+conversou pelo WebSocket da chamada com três falas gravadas pela voz sintética do macOS (PCM16
+mono a 8 kHz, em quadros de 20 ms), com silêncio entre elas.
+
+Foram criados dois agentes só para a prova, no motor OpenAI Realtime (`gpt-realtime-2.1`), com teto
+de 40 centavos e 150 s cada: uma recepção, que tinha o financeiro como único destino de passagem,
+e um financeiro, com o rótulo "Teste de passagem". Os agentes que já existiam na instalação não
+foram tocados.
+
+| O que | O que se observou |
+|---|---|
+| Passagem | Feita na **segunda** tentativa. Na primeira, o modelo pediu `transfer_to_agent` com o nome e o rótulo, "Prova Financeiro (Teste de passagem)", copiando a linha das instruções. A ferramenta recusou, e quem ligou ouviu "Entendi, vou ajustar o destino e encaminhar corretamente". Na segunda, com o nome só, veio `agent_handoff`, com motivo e resumo. O conserto é o #333 |
+| Depois da passagem | O financeiro abriu com a frase da passagem, respondeu o valor pedido e encerrou com `end_call` depois da despedida de quem ligou. As falas dele levam o `agentId` dele |
+| Duração e desfecho | 63 s, `completed`, motivo `end_call` |
+| Custo | 9 centavos de dólar no `call_ended`. No extrato (`usage_ledger`), as linhas da recepção somam 5 e as do financeiro somam 4 |
+| Gravação | `recording_saved`, 2,0 MB |
+| Rotinas | `summarize_call` e `review_call` terminaram com `done` |
+
+O que não prova:
+
+- **O custo por agente na tela.** A soma foi conferida no banco, não na tela de custos.
+- **O supervisor de regras fixas.** Ele ignora de propósito a chamada pelo navegador, que não tem número.
+- **A passagem numa ligação por operadora ou pelo WhatsApp.** O transporte da chamada pelo navegador não tem para onde transferir áudio; aqui só se troca o agente, e isso vale em qualquer transporte, mas não foi medido nos outros dois.
+- **Fala humana.** As falas eram sintéticas, ditas sem ruído.
+- **O conserto do #333 numa ligação real.** A prova foi antes dele.
