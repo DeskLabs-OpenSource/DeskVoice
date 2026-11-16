@@ -58,6 +58,15 @@ Do kit de contribuição do DeskcommCRM (`deskcomm-contribuir`) vieram também, 
   página que explica cada item do script de pré-voo, e outra com o passo a passo para rodar na
   própria máquina o que o CI roda. O conteúdo foi escrito a partir do `preflight.sh` e do
   `package.json` do DeskVoice.
+- **A triagem de PR só lendo** (`.claude/commands/deskvoice-triagem-de-pr.md` e os subagentes
+  `deskvoice-triagem-medidor`, `deskvoice-triagem-reprodutor` e `deskvoice-triagem-cetico`): a
+  divisão em medidor, reprodutor e cético, o formato de devolução de cada um e as regras duras
+  (exit medido direto, `grep` vazio com controle positivo, presença de símbolo não é
+  comportamento, sabotagem restaurada byte a byte, a tabela de recusa automática) vieram, como
+  texto adaptado, do `triagem-de-pr.md` e dos `triagem-*.md` de lá. A régua é a do DeskVoice
+  (`AGENTS.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`), e o comando daqui só lê: não acolhe, não
+  corrige e não publica, ao contrário do de lá. O eixo de self-host do cético ficou de fora: aqui
+  quem cobre isso são as regras de produto, que o medidor lê.
 
 O DeskcommCRM é obra de mais de 250 autores de PR. Parte do que está aqui é trabalho deles.
 
