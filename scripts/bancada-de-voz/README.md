@@ -51,6 +51,9 @@ O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medi
 | `reducao-de-ruido.ts` | a medida da redução de ruído local em 8 kHz (fatias 4 e 4b da DESA-24): só mede, não liga nada |
 | `reducao_de_ruido.py` | os candidatos dessa medida (RNNoise, DeepFilterNet em fluxo e em torch; SpeexDSP só se pedido), um por processo |
 | `regua-da-reducao.ts` | a régua dela: perda na fala baixa por quadro (acima de 1 dB de média reprova) e na frase inteira, a fala baixa debaixo de ruído, redução do ruído, atraso e tempo por pedaço |
+| `barulho-no-provedor.ts` | a medida contra o provedor do ambiente barulhento (fatia 5 da DESA-24): resposta, interrupção falsa e frase longa, com e sem a guarda, o teto por item e a tabela. Testada sem rede em `barulho-no-provedor.test.ts` (sessão falsa e relógio falso) |
+| `plano-do-barulho.ts` | o áudio dessa medida: as frases do conjunto na voz `cadu`, misturadas a obra, música e conversa, o ruído e o "uhum" por baixo da fala do agente, e a frase longa |
+| `ambiente-barulhento.ts` | só liga essa medida às peças de verdade (os motores de `servicos/openai-hoje.ts` e `gemini-hoje.ts`, o Piper, o relógio do sistema) |
 
 ## Montar o ambiente (uma vez, fora do repositório)
 
@@ -258,6 +261,83 @@ se pedido), `--frases 12` (as primeiras do conjunto).
   que ela reprova o filtro que deixa o ruído e corta 6 dB da voz fraca, a 15, 5 e 0 dB. Célula com
   média acima de 1 dB sai em negrito.
 
+## Ambiente barulhento contra o provedor (fatia 5 da DESA-24)
+
+O antes e depois do desenho `docs/specs/2026-11-14-ambiente-barulhento.md` (PR #182), em cada
+motor de hoje (OpenAI Realtime e Gemini Live), pelo próprio motor de `packages/voice-engine`: para
+`normal` e `noisy` (o `listeningEnvironment` da sessão), com e sem a guarda contra o silêncio
+(`apps/voice/src/silence-guard.ts`, com os prazos de hoje, ligada à sessão como `call-session.ts`
+liga). Não liga redução de ruído e não muda nenhum prazo nem valor do `noisy`: só mede.
+
+**A rodada paga ainda não aconteceu.** Ela espera o pedido 2 da DESA-24 e a chave de cada motor por
+canal privado. Sem a chave, o motor sai como "chave não entregue", sem gerar áudio e sem abrir
+sessão, e o gasto é zero.
+
+### Rodar
+
+```bash
+export BANCADA_PIPER=/tmp/bancada-env/venv/bin/piper
+export BANCADA_VOZES=/tmp/bancada-env/vozes
+# Só com a chave entregue por canal privado (nunca a OPENAI_API_KEY ou GEMINI_API_KEY de outro programa):
+# export BANCADA_OPENAI_API_KEY=...  BANCADA_GEMINI_API_KEY=...
+
+pnpm exec tsx scripts/bancada-de-voz/ambiente-barulhento.ts --teto-usd 0
+```
+
+**A rodada paga vai em duas chamadas** (decisão do Arquiteto na DESA-45). O teto é de US$ 5 no total
+e é dividido com a fatia 4 do R3. O pior caso dos dois motores (US$ 5,62, abaixo) não cabe nele.
+Por isso o Gemini vai primeiro, sozinho, e o OpenAI vai depois, com o que sobrar:
+
+```bash
+# 1. Gemini (pior caso US$ 1,30). TETO_GEMINI = US$ 5 − o gasto real da fatia 4 do R3.
+pnpm exec tsx scripts/bancada-de-voz/ambiente-barulhento.ts --motores gemini-hoje --teto-usd "$TETO_GEMINI"
+# 2. OpenAI. TETO_OPENAI = US$ 5 − o gasto real do R3 − o gasto real do Gemini (o "Custo real" da 1).
+pnpm exec tsx scripts/bancada-de-voz/ambiente-barulhento.ts --motores openai-hoje --teto-usd "$TETO_OPENAI"
+```
+
+O que não couber sai como "parou no teto", e a seção diz onde parou. Quem roda não aumenta o teto.
+
+Opções: `--motores openai-hoje,gemini-hoje`, `--frases 1` (quantas frases do conjunto; cada uma
+entra em cada ruído e cada nível), `--niveis 15,5,0`, `--partes resposta,interrupcao,longa`.
+`--teto-usd` é obrigatório. A saída é uma seção em markdown ("Medida contra o provedor"), com a
+data, o modelo e o preço conferido de cada motor, o número de frases, as três tabelas e o custo real.
+
+**Pior caso** (o que a bancada reserva, conferido com o plano gerado em 15/11/2026, sem rede): com
+`--frases 1` são 82 itens por motor, US$ 4,32 no OpenAI e US$ 1,30 no Gemini; com `--frases 2`, 118
+itens, US$ 6,20 e US$ 1,86. O pior caso conta o áudio inteiro de cada item (a frase com os 20 s de
+cauda) ao preço de pior caso do motor, mais 8 s de resposta. O custo real deve ser bem menor,
+porque o envio para no primeiro áudio do agente, mas isso não foi medido. Com um teto menor que o
+pior caso, a rodada mede até onde couber e diz onde parou: cada item reserva o pior caso dele antes
+de abrir a sessão, e a reserva vira o custo do `usage` ao fechar.
+
+### Como cada número é medido
+
+Cada item abre uma sessão nova, com instruções de atendente ("responda numa frase curta"), sem
+ferramentas, e a fecha no fim. O áudio vai em pedaços de 20 ms a 8 kHz no ritmo do relógio
+(`tempo-real.ts`), como a ponte manda; o motor faz a conversão dele (μ-law no OpenAI). Item cujo
+envio atrasou mais de 100 ms contra o horário sai como "fora do ritmo", fora das latências.
+
+1. **Resposta.** 1 s de ruído, a frase, e 20 s de ruído depois, sem parar. O tempo vai do instante
+   em que sai o pedaço com a última amostra da fala até o primeiro áudio do agente; o envio para ali.
+   Se o agente fala antes do fim da frase, o item é "antecipou" e não entra no tempo. Sem áudio em
+   20 s, "sem resposta". A tabela diz, por ambiente, guarda, ruído e nível, a mediana, o p90 e
+   quantas vezes a guarda fechou o turno ou pediu para repetir. A mediana e o p90 **não** contam as
+   frases em que a guarda pediu para repetir: ali o primeiro áudio é o pedido da guarda, e o tempo
+   mediria a guarda, e não o motor. A frase em que a guarda só fechou o turno entra, porque quem
+   respondeu foi o motor. "Frases" é o total do grupo, e "Na mediana" é quantas entraram na conta.
+2. **Interrupção falsa.** A bancada pede ao agente uma fala de uns 10 s (`say`), manda silêncio até
+   ele começar e, daí, 12 s do caso por baixo: obra, música ou conversa no nível em que estariam
+   debaixo da voz de quem ligou (15, 5 e 0 dB), ou três "uhum" sintéticos no nível da voz. Conta o
+   evento `interrupted` **do motor** que chega enquanto o áudio do agente ainda tocaria na ligação
+   (cada pedaço soma a duração dele; a interrupção descarta o resto, como a ponte). O `interrupted`
+   com o agente calado não conta: o OpenAI manda um a cada início de fala.
+3. **Frase longa.** Frases do conjunto emendadas com pausas de 0,4 s até passar de 12 s, sobre obra,
+   música e conversa a 5 dB, só com a guarda. A frase toca inteira, mesmo que o agente fale no meio.
+   A tabela diz se a guarda agiu antes do fim da fala, e quando.
+
+Depois do primeiro áudio do agente, a bancada espera até 8 s pelo `usage` da resposta, para o custo
+dela entrar na conta, e só então fecha a sessão.
+
 ## O que esta bancada não finge medir
 
 - **Redução de ruído: a separação da voz na saída.** A inversão de fase supõe que o candidato
@@ -281,3 +361,15 @@ se pedido), `--frases 12` (as primeiras do conjunto).
   pedido isolado, com uma fala do agente. Quantas decisões chegariam a tempo é da fatia 6.
 - **Fundo de verdade.** "Fundo" aqui é o texto que a transcrição teria tirado de TV, rádio, anúncio
   ou outra pessoa. Se a transcrição de verdade pega esse texto, e como, não foi medido.
+- **Ambiente barulhento contra o provedor: a rodada.** Nenhuma chamada paga saiu ainda. Tudo o que
+  esta parte diz do provedor espera a chave, e o que está escrito acima foi provado só com sessão
+  falsa e relógio falso.
+- **Ambiente barulhento: a ligação de verdade.** Sem telefonia, sem a ponte, sem gravação e sem
+  ferramenta. Depois do primeiro áudio do agente a bancada para de mandar áudio, e a ligação de
+  verdade continuaria mandando o ruído: o efeito disso na resposta que segue não foi medido. A
+  guarda é ligada como `call-session.ts` a liga, mas por código copiado, e não pelo próprio arquivo.
+- **Ambiente barulhento: o "uhum".** É o Piper falando "Uhum.", e não a concordância de uma pessoa
+  no meio da fala do agente. O nível dele é o da voz, sem medida de quanto um "uhum" real tem.
+- **Ambiente barulhento: o custo real e se US$ 5 bastam.** Só o pior caso foi calculado. A voz do
+  Piper também pode variar um pouco entre rodadas (o início da fala variou 10 ms entre duas gerações
+  da mesma frase), e o ruído não: tem semente fixa.

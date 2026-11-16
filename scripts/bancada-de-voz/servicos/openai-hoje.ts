@@ -7,9 +7,9 @@
  * de tokens, mais uma resposta do modelo a US$ 64 por milhão), só para parar antes do teto. O custo
  * escrito na tabela é o do `usage` que o provedor devolve.
  */
-import { servicoDoMotor } from "./_motor-de-hoje";
+import { servicoDoMotor, type MotorDeHoje } from "./_motor-de-hoje";
 
-export default servicoDoMotor({
+export const OPENAI_DE_HOJE: MotorDeHoje = {
   id: "openai-hoje",
   rotulo: "OpenAI Realtime de hoje (gpt-4o-mini-transcribe lateral)",
   carregar: async () => (await import("../../../packages/voice-engine/src/engines/openai-realtime")).default,
@@ -18,4 +18,6 @@ export default servicoDoMotor({
   piorCasoUsdPorMinuto: 0.1,
   fontePreco: "preço do motor openai-realtime (developers.openai.com/api/docs/pricing)",
   conferidoEm: "2026-11-12",
-});
+};
+
+export default servicoDoMotor(OPENAI_DE_HOJE);
