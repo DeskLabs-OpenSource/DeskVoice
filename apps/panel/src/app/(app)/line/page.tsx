@@ -15,7 +15,7 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, TextArea, TextInput, type Tone } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
-import { trunkFailure } from "../../../ui/trunk-status";
+import { filterOff, trunkFailure } from "../../../ui/trunk-status";
 import type { Agent, PhoneNumber, Setting, Trunk } from "../../../ui/types";
 
 type StepStatus = "ok" | "warn" | "fail" | "skipped";
@@ -50,12 +50,12 @@ function AllowedAddresses({ trunk, t }: { trunk: Trunk; t: LineDictionary }) {
   const locale = useLocale();
   const name = hostName(trunk.host);
   const allowed = trunk.inboundAllowed ?? [];
-  const filterOff = allowed.length === 0 && name !== null && trunk.status === "warn";
+  const unfiltered = filterOff(trunk, name !== null);
   return (
     <div className="grid gap-1.5 rounded-sm bg-sunken p-4">
       <p>
         <span className="font-bold">{t.allowed}:</span>{" "}
-        {allowed.length > 0 ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{filterOff ? t.allowedEmpty : t.allowedNone}</span>}
+        {allowed.length > 0 ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{unfiltered ? t.allowedEmpty : t.allowedNone}</span>}
       </p>
       {allowed.length > 0 ? <p className="text-[0.87rem]">{t.allowedOthers}</p> : null}
       {name !== null && trunk.inboundResolvedAt ? <p className="text-[0.87rem] text-muted">{fill(t.allowedResolvedAt, { name, when: formatDateTime(trunk.inboundResolvedAt, locale) })}</p> : null}

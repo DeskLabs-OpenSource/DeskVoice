@@ -460,6 +460,7 @@ export async function writeFileAtomic(file: string, content: string, owner?: Fil
 }
 
 const NL = String.fromCharCode(10);
+// A tela reconhece a linha deixada de fora por este começo (`apps/panel/src/ui/trunk-status.ts`).
 const LEFT_OUT = "This line was left out of the telephony configuration";
 
 export interface TrunksDeps {
