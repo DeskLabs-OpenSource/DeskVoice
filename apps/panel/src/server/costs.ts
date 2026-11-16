@@ -13,6 +13,10 @@ export const centsOf = (microcents: string | number): number => Math.round(Numbe
  * Ficam com o agente que atendeu as linhas sem trecho: as de antes da 4a (`agent_id` nulo) e as de
  * depois da ligação (transcrição da gravação, classificação), que não pertencem a trecho nenhum.
  * O agente apagado deixa o `agent_id` nulo (`on delete set null`): a linha volta ao que atendeu e,
- * se ele também foi apagado, fica em "Agente apagado".
+ * se ele também foi apagado, fica em "Agente apagado". Isso vale também para o trecho de um agente
+ * de destino apagado: o custo dele aparece no agente que atendeu, e não em "Agente apagado". Depois
+ * do apagamento, a linha desse trecho não se distingue das linhas sem trecho, porque todas têm o
+ * `agent_id` nulo, e separar pelo horário seria adivinhar. Mostrar "Agente apagado" nesse caso pede
+ * mudança de schema.
  */
 export const LEDGER_AGENT = "coalesce(l.agent_id, c.agent_id)";

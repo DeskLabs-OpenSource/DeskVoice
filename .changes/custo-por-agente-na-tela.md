@@ -5,7 +5,9 @@ title: Custos e a tela da chamada mostram quanto cada agente gastou numa ligaç�
 ---
 
 Numa ligação passada de um agente para outro, a tela de Custos põe o custo de cada trecho no agente
-em que a ligação estava, e não mais tudo no que atendeu. Uma ligação com passagem conta para cada
+em que a ligação estava, e não mais tudo no que atendeu. Se o agente de um trecho for apagado, o
+custo desse trecho volta para o agente que atendeu; só fica em "Agente apagado" quando o que atendeu
+também foi apagado. A tela da chamada segue a mesma regra. Uma ligação com passagem conta para cada
 agente na contagem de chamadas, e a tela diz isso. Os minutos de cada motor de voz também saem dos
 trechos: uma ligação que começou num motor e passou para um agente de outro motor divide a duração
 entre os dois. A tela da chamada mostra, abaixo do custo, quanto cada agente gastou, quando a
