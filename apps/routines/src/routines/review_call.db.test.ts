@@ -85,8 +85,8 @@ describe("review_call: os quatro casos", () => {
     await expectOpened(await scene("review engine failed", [["engine_failed", { engine: "openai-realtime", error: "socket closed" }]], { endReason: "engine_failed" }), "engine_failed");
   });
 
-  it("1. a ligação foi recusada por motor não configurado ou sem resposta", async () => {
-    for (const reason of ["engine_not_configured", "engine_not_responding"]) {
+  it("1. a ligação foi recusada por motor não configurado, recusado pelo provedor ou sem resposta", async () => {
+    for (const reason of ["engine_not_configured", "engine_not_responding", "engine_refused"]) {
       const s = await scene(`review refused ${reason}`, [["call_refused", { reason, engine: "openai-realtime", detail: "no API key" }]], { endReason: reason });
       await expectOpened(s, "engine_failed");
     }

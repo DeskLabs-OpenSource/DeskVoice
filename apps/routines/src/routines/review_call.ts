@@ -37,7 +37,7 @@ export const reviewDetails = (found: ReviewCase, transferred = false): string =>
     : `Aberta pelo supervisor de regras fixas, depois da ligação: ${CASE_PHRASE[found]}, e ninguém ficou com o próximo passo. Veja a linha do tempo da ligação.`;
 
 /** Os motivos de `call_refused` que são falta de motor (o caminho de `connectEngine` em `call-session.ts`). Política não conta. */
-const ENGINE_REFUSALS: ReadonlySet<string> = new Set(["engine_not_configured", "engine_not_responding"]);
+const ENGINE_REFUSALS: ReadonlySet<string> = new Set(["engine_not_configured", "engine_not_responding", "engine_refused"]);
 
 /** Só os campos estáveis de um evento: nenhum texto livre. */
 export interface ReviewEvent {

@@ -235,6 +235,7 @@ const timeline = {
   reasons: {
     engine_not_configured: "O agente usa um motor de voz sem chave cadastrada.",
     engine_not_responding: "O provedor do motor de voz não respondeu a tempo. Confira a situação do provedor e a chave em Configurações → Inteligência artificial.",
+    engine_refused: "O provedor do motor de voz recusou a sessão. O motivo que ele deu está no aviso do painel. Confira, na conta do provedor, o crédito e os limites, e a chave em Configurações → Inteligência artificial.",
     process_restarted: "O processo de voz reiniciou no meio da chamada.",
     no_agent: "Nenhum agente atende este número.",
     agent_disabled: "O agente deste número está desligado.",
