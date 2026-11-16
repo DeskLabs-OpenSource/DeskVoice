@@ -860,7 +860,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
               : opened.engine
                 ? `Uma ligação foi recusada porque o motor de voz ${label} do agente ${first.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações → Inteligência artificial e faça uma chamada de teste.`
                 : // Sem motor não há chave a cadastrar: o agente aponta para um motor que esta instalação não tem.
-                  `Uma ligação foi recusada porque o motor de voz ${label} do agente ${first.name} não está instalado nesta versão: ${problem}. Escolha outro motor de voz na tela do agente e faça uma chamada de teste.`,
+                  `Uma ligação foi recusada porque o motor de voz ${label} do agente ${first.name} não está disponível nesta instalação: ${problem}. Escolha outro motor de voz na tela do agente e faça uma chamada de teste.`,
       });
     }
 

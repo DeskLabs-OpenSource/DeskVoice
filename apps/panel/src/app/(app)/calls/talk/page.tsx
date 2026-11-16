@@ -123,7 +123,7 @@ export default function TalkPage() {
   const problemFix =
     problem === "engine_not_configured" ? (
       <FixLink href="/settings">{t.fix.settings}</FixLink>
-    ) : (problem === "engine_simulated" || problem === "agent_disabled") && agent ? (
+    ) : (problem === "engine_simulated" || problem === "engine_not_installed" || problem === "agent_disabled") && agent ? (
       <FixLink href={`/agents/${agent.id}`}>{t.fix.agent}</FixLink>
     ) : problem === "agent_not_found" ? (
       <FixLink href="/agents">{t.fix.agents}</FixLink>

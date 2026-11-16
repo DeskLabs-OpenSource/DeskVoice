@@ -424,7 +424,7 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect(await ask(disabled)).toMatchObject({ status: 409, body: { code: "agent_disabled" } });
     expect(await ask(simulated)).toEqual({ status: 409, body: { code: "engine_simulated", message: expect.stringMatching(/simulated engine.*Change the agent's voice engine/) } });
     expect(await ask(noKey)).toMatchObject({ status: 409, body: { code: "engine_not_configured" } });
-    expect(await ask(unknownEngine)).toMatchObject({ status: 409, body: { code: "engine_not_configured" } });
+    expect(await ask(unknownEngine)).toMatchObject({ status: 409, body: { code: "engine_not_installed", message: expect.stringMatching(/not available in this installation.*Choose another voice engine/) } });
     expect((await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER }, null)).status).toBe(401);
     expect((await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER }, "errado")).status).toBe(401);
     expect((await made.post({ organizationId: made.organizationId, agentId: made.agentId })).status).toBe(400);
