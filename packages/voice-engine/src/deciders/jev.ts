@@ -11,7 +11,18 @@
  *   sobrecarga; 400 e 422 pedido fora da regra;
  * - teste da chave: docs.typesafe.ai/api/list-models.md. `GET /v1/models` lista os modelos da conta,
  *   sem custo de token;
- * - preço: docs.typesafe.ai/models.md. US$ 0,042 por milhão de tokens de entrada, saída grátis.
+ * - preço: docs.typesafe.ai/models.md. US$ 0,042 por milhão de tokens de entrada, saída grátis. A
+ *   página não diz como o texto vira token nem se um pedido que falha é cobrado; diz só que o
+ *   `state` e todas as perguntas entram no limite do pedido.
+ *
+ * Custo desconhecido nunca é zero (desenho R12, fatia 7a): quando o pedido saiu e o consumo não
+ * foi lido (o prazo venceu, a rede caiu, ou um 2xx veio fora da forma), o resultado leva uma
+ * estimativa marcada (`costEstimated`). A entrada estimada é o que o pedido leva, o `state` e as
+ * perguntas no formato do Jev, contado como **um token por byte** (a regra de pior caso da bancada,
+ * `scripts/bancada-de-voz/filtro-na-chamada.ts`; na rodada de 16/11 o consumo real foi cerca de
+ * 0,6 token por byte, então a estimativa fica acima). A saída estimada é zero, porque a saída é grátis.
+ * Uma resposta de erro HTTP (fora de 2xx: 401, 429, 529, 400, 422) é recusa do pedido e fica sem
+ * custo, como antes; essa escolha não está medida na página do fornecedor.
  *
  * Onde o texto é processado: nenhuma das páginas lidas em 16/11/2026 diz o país (o acordo de
  * tratamento de dados, typesafe.ai/legal/data-processing, fala em transferência internacional sem
@@ -52,6 +63,14 @@ const responseSchema = z.object({
   answers: z.record(z.string(), answerSchema),
   usage: z.object({ input_tokens: z.number().int().nonnegative(), output_tokens: z.number().int().nonnegative() }),
 });
+/** Quantos bytes UTF-8 o texto tem: a contagem da estimativa, um token por byte. */
+const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;
+
+/** A entrada estimada de um pedido: o `state` e as perguntas, como vão no corpo, um token por byte. */
+export function estimatedInputTokens(state: DecideInput["state"], questions: Record<string, unknown>): number {
+  return utf8Bytes(JSON.stringify({ state, questions }));
+}
+
 const modelsSchema = z.object({ models: z.array(z.object({ name: z.string() })) });
 
 /** A pergunta no formato do Jev. */
@@ -93,14 +112,18 @@ const jev: DecisionModel = {
       controller.abort();
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const questions = Object.fromEntries(Object.entries(input.questions).map(([id, question]) => [id, wireQuestion(question)]));
-    const done = (usage: Usage, rest: { ok: true; answers: Record<string, DecisionAnswer> } | { ok: false; failure: ClassifyFailure | "late"; status: number | null }, answeredModel = model): DecideResult => ({
+    const done = (usage: Usage, rest: { ok: true; answers: Record<string, DecisionAnswer> } | { ok: false; failure: ClassifyFailure | "late"; status: number | null }, answeredModel = model, costEstimated = false): DecideResult => ({
       model: answeredModel,
       usage,
       costCents: estimateCostCents(JEV_PRICING, usage),
       costMicrocents: estimateCostMicrocents(JEV_PRICING, usage),
+      costEstimated,
       latencyMs: Math.round(performance.now() - started),
       ...rest,
     });
+    // O pedido saiu e o consumo não foi lido: a estimativa pela entrada enviada, saída zero.
+    const estimated = (rest: { ok: false; failure: ClassifyFailure | "late"; status: number | null }): DecideResult =>
+      done({ inputTokens: estimatedInputTokens(input.state, questions), outputTokens: 0 }, rest, model, true);
     try {
       let response: Response;
       let text: string;
@@ -113,19 +136,19 @@ const jev: DecisionModel = {
         });
         text = await response.text();
       } catch {
-        // Sem resposta: o prazo (tarde) ou a rede. Nada foi lido, então nada se sabe do consumo.
-        return done({}, { ok: false, failure: late ? "late" : "unreachable", status: null });
+        // Sem resposta: o prazo (tarde) ou a rede. Nada foi lido; o pedido pode ter sido cobrado.
+        return estimated({ ok: false, failure: late ? "late" : "unreachable", status: null });
       }
-      if (late) return done({}, { ok: false, failure: "late", status: response.status });
+      if (late) return estimated({ ok: false, failure: "late", status: response.status });
       if (!response.ok) return done({}, { ok: false, failure: failureOf(response.status), status: response.status });
       let body: unknown;
       try {
         body = JSON.parse(text);
       } catch {
-        return done({}, { ok: false, failure: "unexpected_response", status: response.status });
+        return estimated({ ok: false, failure: "unexpected_response", status: response.status });
       }
       const parsed = responseSchema.safeParse(body);
-      if (!parsed.success) return done({}, { ok: false, failure: "unexpected_response", status: response.status });
+      if (!parsed.success) return estimated({ ok: false, failure: "unexpected_response", status: response.status });
       // Um 200 foi cobrado mesmo se faltar uma resposta: o consumo entra nos dois casos.
       const usage: Usage = { inputTokens: parsed.data.usage.input_tokens, outputTokens: parsed.data.usage.output_tokens };
       const answers: Record<string, DecisionAnswer> = {};

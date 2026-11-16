@@ -288,7 +288,11 @@ export interface DecideInput {
  * classificação (`ClassifyResult`): um pedido custa milésimos de centavo, e o extrato guarda o
  * micro-centavo.
  */
-export type DecideResult = { model: string; usage: Usage; costCents: number; costMicrocents: number; latencyMs: number } & (
+/**
+ * `costEstimated`: o custo é uma estimativa (o pedido saiu e o consumo não foi lido). Ausente ou
+ * `false`, o custo é o medido pelo consumo que o provedor declarou.
+ */
+export type DecideResult = { model: string; usage: Usage; costCents: number; costMicrocents: number; costEstimated?: boolean; latencyMs: number } & (
   | { ok: true; answers: Record<string, DecisionAnswer> }
   | { ok: false; failure: ClassifyFailure | "late"; status: number | null }
 );
