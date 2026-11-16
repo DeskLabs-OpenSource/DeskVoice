@@ -12,7 +12,7 @@ Este arquivo é montado a partir de `.changes/`; não edite à mão.
   sair desse modelo, na frente do motor de voz e do endpoint de classificação. O extrato de custo
   ganha o modelo cobrado e a marca de custo medido. Um modelo sem preço conhecido só é aceito com
   confirmação, só lê ligações de agentes com teto de custo, e a linha dele no extrato fica marcada
-  como não medida, nunca como zero. Se o cérebro escolhido ficar sem chave, sumir ou o modelo sair da
+  como custo não medido; o total da ligação e o de Custos ainda contam esse custo como zero, e as telas não avisam. Se o cérebro escolhido ficar sem chave, sumir ou o modelo sair da
   lista, a ligação não é lida, a linha do tempo diz por quê, e nada vai ao motor de voz. A escolha ainda não tem tela; hoje é pela API do painel, com
   `PUT /api/v1/settings/calls.analysis_brain`. Sem escolha, tudo segue como antes. Nada muda em instalações
   existentes. Crédito: @melgarafael.
