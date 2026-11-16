@@ -243,16 +243,18 @@ hoje, em `packages/tools/src/tools/`:
 | `send_whatsapp` | Manda mensagem pelo conector de WhatsApp, se instalado | Confirmação de horário, se a clínica usa | Opcional: nunca com detalhe clínico, e o texto fica guardado |
 | `send_dtmf` | Aperta teclas num menu automático do outro lado | Navegar a URA de um convênio, por exemplo | Não. Não é tarefa de recepção, e tecla errada leva a caminho sem volta |
 
-O que **não** existe hoje, e portanto não se promete à clínica: ferramenta de agenda, consulta a
-prontuário, cobrança, verificação de identidade de quem liga, horário de atendimento e fila. A
-agenda e o horário de atendimento são frentes abertas no [ROADMAP](../../ROADMAP.md); prontuário e
-identidade de quem liga não estão nem lá.
+O que **não** funciona hoje, e portanto não se promete à clínica: agenda, consulta a prontuário,
+cobrança, verificação de identidade de quem liga, horário de atendimento e fila. A agenda e o
+horário de atendimento são frentes abertas no [ROADMAP](../../ROADMAP.md); prontuário e identidade de
+quem liga não estão nem lá.
 
 ## Agenda: ver horário livre, marcar, remarcar
 
-Marcar e remarcar é o pedido mais comum por telefone, e **o repositório ainda não tem ferramenta
-de agenda**. A frente está aberta no [ROADMAP](../../ROADMAP.md). Hoje há dois caminhos, e nenhum
-deles é uma integração pronta.
+Marcar e remarcar é o pedido mais comum por telefone, e **nenhuma instalação tem a agenda ligada
+hoje**. As três ferramentas de agenda existem no código (`agenda_horarios_livres`, `agenda_marcar` e
+`agenda_remarcar`), mas ficam com `available: false` enquanto não houver um cliente de agenda, e
+nenhum app entrega um ainda. Por isso elas nem aparecem na tela do agente. A frente está aberta no
+[ROADMAP](../../ROADMAP.md). Hoje há dois caminhos, e nenhum deles é uma integração pronta.
 
 ### Caminho 1: webhook, sem escrever código
 
