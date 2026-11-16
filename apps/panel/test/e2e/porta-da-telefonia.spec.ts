@@ -37,6 +37,8 @@ async function until(probe: SipProbe, host: string, user: string, accept: (answe
   return answer;
 }
 
+/** O campo pelo começo do rótulo: o nome acessível também leva a dica, e "Provedor" aparece em outros rótulos. */
+const label = (text: string): RegExp => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 const section = (page: Page, name: string) => page.locator("section").filter({ has: page.getByRole("heading", { level: 2, name, exact: true }) });
 
 // R14, fatia 2: a central só aceita a ligação de uma linha que vem dos endereços dela. Contra o
@@ -64,9 +66,9 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
     // sonda, que responde à qualificação da central (M2).
     await page.goto("/line");
     const form = section(page, line.newLine);
-    await form.getByLabel(line.name).fill(name);
-    await form.getByLabel(line.host).fill(`${host}:${probe.local.port}`);
-    await form.getByLabel(line.authMode).selectOption({ label: line.authIp });
+    await form.getByLabel(label(line.name)).fill(name);
+    await form.getByLabel(label(line.host)).fill(`${host}:${probe.local.port}`);
+    await form.getByLabel(label(line.authMode)).selectOption({ label: line.authIp });
     await form.getByRole("button", { name: line.saveLine }).click();
     const panel = section(page, name);
     await expect(panel.getByText(`${line.allowed}:`)).toBeVisible();
@@ -97,7 +99,7 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
     // A linha passa para outro endereço: a mesma origem agora é recusada, também quando se
     // apresenta como a linha (M1, origem que casa com uma linha mas está fora do permit).
     const elsewhere = "198.51.100.77";
-    await panel.getByLabel(line.host).fill(elsewhere);
+    await panel.getByLabel(label(line.host)).fill(elsewhere);
     await panel.getByRole("button", { name: line.saveLine }).click();
     await expect(panel.getByText(`${line.allowed}:`).locator("..")).toContainText(elsewhere);
     const refusedAsLine = await until(probe, host, `trunk-${trunkId}`, (answer) => answer.answered && answer.status !== 200);
