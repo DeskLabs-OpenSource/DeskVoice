@@ -4,14 +4,14 @@ import { useState } from "react";
 import en from "../../../i18n/en/costs";
 import es from "../../../i18n/es/costs";
 import { fill } from "../../../i18n/locales";
-import ptBR, { type CostsDictionary } from "../../../i18n/pt-BR/costs";
+import ptBR from "../../../i18n/pt-BR/costs";
 import { useDict, useLocale } from "../../../i18n/provider";
 import { useApi } from "../../../ui/api";
 import { useErrorText } from "../../../ui/errors";
-import { formatDay, formatMoney } from "../../../ui/format";
-import { Badge, Notice, PageHeader, Panel, Skeleton } from "../../../ui/kit";
+import { formatDay } from "../../../ui/format";
+import { Notice, PageHeader, Panel, Skeleton } from "../../../ui/kit";
 import type { Costs } from "../../../ui/types";
-import { amountShown } from "./amount";
+import { Amount } from "./amount-view";
 
 const PERIODS = [7, 30, 90];
 const isoDay = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -22,27 +22,6 @@ function Bar({ share }: { share: number }) {
     <span className="block h-2 overflow-hidden rounded-full bg-sunken">
       <span className="block h-full rounded-full bg-ok" style={{ width: `${Math.max(share * 100, 1.5)}%` }} />
     </span>
-  );
-}
-
-/**
- * Um valor do extrato. Com linha de custo não medido, o zero não é grátis: sem nada medido aparece
- * só "não medido", e com parte medida o valor vem com a marca de que falta uma parte.
- */
-function Amount({ cents, unmeasured, t }: { cents: number; unmeasured: boolean; t: CostsDictionary }) {
-  const locale = useLocale();
-  const shown = amountShown(cents, unmeasured);
-  if (shown === "unmeasured") return <Badge tone="warn">{t.unmeasured}</Badge>;
-  return (
-    <>
-      {formatMoney(cents, locale)}
-      {shown === "money-and-unmeasured" ? (
-        <>
-          {" "}
-          <Badge tone="warn">{t.unmeasuredPart}</Badge>
-        </>
-      ) : null}
-    </>
   );
 }
 
@@ -85,10 +64,11 @@ export default function CostsPage() {
           <div className="grid gap-1 border-y border-line py-5">
             <span className="text-[0.8rem] font-bold text-muted">{t.total}</span>
             <span className="data text-[2.4rem] leading-none font-medium tracking-[-0.03em]">
-              <Amount cents={data.totalCents} unmeasured={data.unmeasuredCount > 0} t={t} />
+              <Amount cents={data.totalCents} unmeasuredCount={data.unmeasuredCount} estimatedCount={data.estimatedCount} />
             </span>
           </div>
           {data.unmeasuredCount > 0 ? <Notice tone="warn">{data.unmeasuredCount === 1 ? t.unmeasuredNoteOne : fill(t.unmeasuredNote, { n: data.unmeasuredCount })}</Notice> : null}
+          {data.estimatedCount > 0 ? <Notice tone="warn">{data.estimatedCount === 1 ? t.estimatedNoteOne : fill(t.estimatedNote, { n: data.estimatedCount })}</Notice> : null}
           <Notice>{t.estimate}</Notice>
           {data.byDay.length === 0 ? <p className="text-muted">{t.empty}</p> : null}
 
@@ -101,7 +81,7 @@ export default function CostsPage() {
                       <span className="data text-muted">{formatDay(row.day, locale)}</span>
                       <Bar share={row.costCents / max(data.byDay.map((entry) => entry.costCents))} />
                       <span className="data text-right">
-                        <Amount cents={row.costCents} unmeasured={row.unmeasuredCount > 0} t={t} />
+                        <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
                       </span>
                     </li>
                   ))}
@@ -115,7 +95,7 @@ export default function CostsPage() {
                         <span className="flex items-baseline justify-between gap-3">
                           <span className="truncate font-bold">{row.name ?? t.deletedAgent}</span>
                           <span className="data">
-                            <Amount cents={row.costCents} unmeasured={row.unmeasuredCount > 0} t={t} />
+                            <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
                           </span>
                         </span>
                         <Bar share={row.costCents / max(data.byAgent.map((entry) => entry.costCents))} />
@@ -131,7 +111,7 @@ export default function CostsPage() {
                         <span className="flex items-baseline justify-between gap-3">
                           <span className="truncate font-bold">{row.label}</span>
                           <span className="data">
-                            <Amount cents={row.costCents} unmeasured={row.unmeasuredCount > 0} t={t} />
+                            <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
                           </span>
                         </span>
                         <Bar share={row.costCents / max(data.byEngine.map((entry) => entry.costCents))} />

@@ -19,7 +19,7 @@ import { useLive, useNow } from "../../../../ui/live";
 import { useCanConfigure } from "../../../../ui/me";
 import { Timeline } from "../../../../ui/timeline";
 import { transcribeAlsoClassifies } from "../../../../ui/transcription";
-import { amountShown } from "../../costs/amount";
+import { Amount } from "../../costs/amount-view";
 import { AnalysisSection } from "./analysis-section";
 import { CallerHistorySection } from "./caller-history-section";
 import { ShareSection } from "./share-section";
@@ -75,13 +75,13 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   // classificação paga: a tela avisa ao lado do botão antes do clique, não só no extrato depois.
   const classificationWarning = transcribeAlsoClassifies({ outcome: outcomeEnabled.data?.value === true, analysis: analysisEnabled.data?.value === true });
   const seconds = secondsBetween(data.answeredAt ?? data.startedAt, data.endedAt ?? now);
-  const costShown = amountShown(data.costCents, data.unmeasuredCount > 0);
-  const facts: Array<[string, string, boolean]> = [
+  const facts: Array<[string, ReactNode, boolean]> = [
     [t.facts.agent, data.agentName ?? common.noAgent, false],
     [t.facts.engine, engines.data?.find((engine) => engine.id === data.engine)?.label ?? data.engine ?? "", false],
     [t.facts.duration, formatDuration(seconds), true],
-    // Com linha de custo não medido, o zero não é grátis: sem nada medido, "não medido" no lugar do valor.
-    [t.facts.cost, costShown === "unmeasured" ? t.facts.costUnmeasured : formatMoney(data.costCents, locale), true],
+    // O mesmo valor da tela de Custos: com linha de custo não medido, o zero não é grátis, e a
+    // estimativa vem marcada.
+    [t.facts.cost, <Amount key="cost" cents={data.costCents} unmeasuredCount={data.unmeasuredCount} estimatedCount={data.estimatedCount} />, true],
     [t.facts.started, formatDateTime(data.startedAt, locale), true],
   ];
 
@@ -103,7 +103,6 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
               <dt className="text-[0.8rem] font-bold text-muted">{label}</dt>
               <dd className={`${mono ? "data" : ""} ${live && label === t.facts.duration ? "text-accent-strong" : ""}`}>
                 {value}
-                {label === t.facts.cost && costShown === "money-and-unmeasured" ? <span className="ml-2 font-sans text-[0.8rem] text-warn">{t.facts.costUnmeasuredPart}</span> : null}
                 {label === t.facts.cost && data.costCeilingCents ? <span className="ml-2 font-sans text-[0.8rem] text-muted">{fill(t.facts.ceiling, { value: formatMoney(data.costCeilingCents, locale) })}</span> : null}
                 {/* Com passagem entre agentes, quanto cada um gastou; com um agente só, nada muda. */}
                 {label === t.facts.cost && data.costByAgent.length > 1 ? (
@@ -111,7 +110,9 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
                     <li>{t.facts.byAgent}</li>
                     {data.costByAgent.map((row) => (
                       <li key={row.agentId ?? "deleted"}>
-                        {row.name ?? t.facts.deletedAgent} · <span className="data">{formatMoney(row.costCents, locale)}</span>
+                        {row.name ?? t.facts.deletedAgent} · <span className="data">
+                          <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
+                        </span>
                       </li>
                     ))}
                   </ul>

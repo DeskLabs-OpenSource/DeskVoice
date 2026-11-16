@@ -1,5 +1,5 @@
 import { ApiError, handle } from "../../../../../server/context";
-import { centsOf, LEDGER_AGENT, UNMEASURED_COUNT } from "../../../../../server/costs";
+import { centsOf, ESTIMATED_COUNT, LEDGER_AGENT, UNMEASURED_COUNT } from "../../../../../server/costs";
 import { listEngines } from "../../../../../server/pieces";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -18,9 +18,9 @@ export const GET = handle({}, async ({ q, url, deps }) => {
     where (l.at at time zone z.zone)::date between $1::date and $2::date`;
   const range = [from, to];
   // Em série: as três consultas dividem a conexão da transação.
-  const byDay = await q.many<{ day: string; microcents: string; seconds: number; unmeasured: number }>(
+  const byDay = await q.many<{ day: string; microcents: string; seconds: number; unmeasured: number; estimated: number }>(
     `select to_char((l.at at time zone z.zone)::date, 'YYYY-MM-DD') as day, coalesce(sum(l.cost_microcents), 0)::text as microcents, sum(l.seconds)::int as seconds,
-            ${UNMEASURED_COUNT} as unmeasured
+            ${UNMEASURED_COUNT} as unmeasured, ${ESTIMATED_COUNT} as estimated
        ${scope} group by 1 order by 1`,
     range,
   );
@@ -28,9 +28,9 @@ export const GET = handle({}, async ({ q, url, deps }) => {
   // de A para B, o trecho de B não entra na conta de A. `calls` conta as ligações em que o agente teve
   // linha no extrato, e uma ligação com passagem conta para cada agente: a soma das chamadas da lista
   // pode passar do número de ligações. O total não muda, porque cada linha entra num agente só.
-  const byAgent = await q.many<{ agentId: string | null; name: string | null; microcents: string; calls: number; unmeasured: number }>(
+  const byAgent = await q.many<{ agentId: string | null; name: string | null; microcents: string; calls: number; unmeasured: number; estimated: number }>(
     `select ${LEDGER_AGENT} as "agentId", a.name, coalesce(sum(l.cost_microcents), 0)::text as microcents, count(distinct l.call_id)::int as calls,
-            ${UNMEASURED_COUNT} as unmeasured
+            ${UNMEASURED_COUNT} as unmeasured, ${ESTIMATED_COUNT} as estimated
        from usage_ledger l join calls c on c.id = l.call_id left join agents a on a.id = ${LEDGER_AGENT}
        cross join (select coalesce((select timezone from outbound_policy), 'America/Sao_Paulo') as zone) z
       where (l.at at time zone z.zone)::date between $1::date and $2::date group by 1, 2 order by 3 desc`,
@@ -46,8 +46,8 @@ export const GET = handle({}, async ({ q, url, deps }) => {
   // atendeu, como antes. A ligação conta no dia em que terminou, no fuso da organização, como o resto
   // do quadro: uma ligação com linhas do extrato em dois dias (o desfecho classificado depois da
   // meia-noite) não aparece inteira nos dois períodos.
-  const byEngine = await q.many<{ engine: string; microcents: string; seconds: number; unmeasured: number }>(
-    `with scoped as (select l.engine, l.call_id, l.cost_microcents, l.cost_measured ${scope}),
+  const byEngine = await q.many<{ engine: string; microcents: string; seconds: number; unmeasured: number; estimated: number }>(
+    `with scoped as (select l.engine, l.call_id, l.cost_microcents, l.cost_measured, l.cost_estimated ${scope}),
           ended as (
             select c.id, c.engine, c.answered_at, c.ended_at,
                    exists (select 1 from call_events h where h.call_id = c.id and h.kind = 'agent_handoff' and not (h.payload ? 'engine')) as untold
@@ -66,7 +66,7 @@ export const GET = handle({}, async ({ q, url, deps }) => {
           answered as (
             select engine, coalesce(sum(extract(epoch from (ends_at - starts_at))), 0)::int as seconds from timed group by 1)
      select s.engine, coalesce(sum(s.cost_microcents), 0)::text as microcents, coalesce(a.seconds, 0)::int as seconds,
-            count(*) filter (where not s.cost_measured)::int as unmeasured
+            count(*) filter (where not s.cost_measured)::int as unmeasured, count(*) filter (where s.cost_estimated)::int as estimated
        from scoped s left join answered a on a.engine = s.engine
       group by s.engine, a.seconds order by coalesce(sum(s.cost_microcents), 0) desc`,
     range,
@@ -81,15 +81,18 @@ export const GET = handle({}, async ({ q, url, deps }) => {
     // Cada soma diz quantas linhas do extrato dela não têm custo medido: o zero delas não é grátis, e
     // a tela diz "não medido" onde a contagem passa de zero.
     unmeasuredCount: byDay.reduce((sum, row) => sum + row.unmeasured, 0),
+    // E quantas têm custo estimado: esse entra no valor, acima do real, e a tela diz "inclui estimativa".
+    estimatedCount: byDay.reduce((sum, row) => sum + row.estimated, 0),
     // Dois nomes, porque são duas medidas: `billedSeconds` é o uso que os motores declararam para
     // cobrar (o OpenAI Realtime declara token, não segundo), e `callSeconds` é a duração das ligações.
-    byDay: byDay.map((row) => ({ day: row.day, costCents: centsOf(row.microcents), billedSeconds: row.seconds, unmeasuredCount: row.unmeasured })),
-    byAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents), calls: row.calls, unmeasuredCount: row.unmeasured })),
+    byDay: byDay.map((row) => ({ day: row.day, costCents: centsOf(row.microcents), billedSeconds: row.seconds, unmeasuredCount: row.unmeasured, estimatedCount: row.estimated })),
+    byAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents), calls: row.calls, unmeasuredCount: row.unmeasured, estimatedCount: row.estimated })),
     byEngine: byEngine.map((row) => ({
       engine: row.engine,
       costCents: centsOf(row.microcents),
       callSeconds: row.seconds,
       unmeasuredCount: row.unmeasured,
+      estimatedCount: row.estimated,
       label: engines.get(row.engine)?.label ?? row.engine,
       priceCheckedOn: engines.get(row.engine)?.pricing.checkedOn ?? null,
       priceSource: engines.get(row.engine)?.pricing.source ?? null,
