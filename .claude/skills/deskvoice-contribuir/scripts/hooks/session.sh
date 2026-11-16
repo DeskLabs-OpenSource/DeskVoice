@@ -21,8 +21,15 @@ who="$(bash "$here/../who-am-i.sh" --short 2>/dev/null || echo contribuidor)"
 echo "$today" > "$marker" 2>/dev/null || true
 [ "$who" = "contribuidor" ] || exit 0
 
-hooks="NÃO armados (bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh)"
-case "$(git config --get core.hooksPath 2>/dev/null || true)" in *deskvoice-contribuir*) hooks="armados" ;; esac
+# Detecção exata: a cópia em <.git comum>/deskvoice-hooks (arm-hooks.sh atual) ou o caminho
+# relativo das versões antigas, que segue o ramo em que você está e precisa ser armado de novo.
+arm="bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh"
+dest="$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)/deskvoice-hooks"
+hooks="NÃO armados ($arm)"
+case "$(git config --get core.hooksPath 2>/dev/null || true)" in
+  "$dest") hooks="armados" ;;
+  ".agents/skills/deskvoice-contribuir/scripts/hooks") hooks="armados à moda antiga: arme de novo ($arm)" ;;
+esac
 
 cat <<TXT
 [DeskVoice] Clone de contribuidor. Antes de codar ou commitar, carregue a skill deskvoice-contribuir:

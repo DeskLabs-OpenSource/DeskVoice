@@ -8,17 +8,27 @@
 #
 # Hook de git é configuração local do clone e não viaja no repositório: por isso este passo existe.
 #
+# Os hooks são COPIADOS da árvore de trabalho para uma pasta dentro do diretório git comum
+# (`<.git>/deskvoice-hooks`), e o `core.hooksPath` aponta para ela com caminho absoluto. Assim os
+# hooks armados não mudam com o ramo em que você está, e toda worktree do clone vê os mesmos.
+# A cópia é congelada: quando os hooks mudarem na main, rode este script de novo estando na main
+# atualizada.
+#
 # Uso: bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh [--disarm]
 set -euo pipefail
 
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
-target=".agents/skills/deskvoice-contribuir/scripts/hooks"
+src=".agents/skills/deskvoice-contribuir/scripts/hooks"
+# Caminho relativo gravado pelas versões antigas deste script: também é nosso.
+legacy="$src"
+dest="$(cd "$(git rev-parse --git-common-dir)" && pwd)/deskvoice-hooks"
 current="$(git config --get core.hooksPath || true)"
 
 if [ "${1:-}" = "--disarm" ]; then
-  if [ "$current" = "$target" ]; then
+  if [ "$current" = "$legacy" ] || [ "$current" = "$dest" ]; then
     git config --unset core.hooksPath
+    rm -rf "$dest"
     echo "ok: hooks do contribuidor desarmados."
   else
     echo "nada a fazer: core.hooksPath=${current:-<vazio>} não é o dos hooks do contribuidor."
@@ -26,15 +36,23 @@ if [ "${1:-}" = "--disarm" ]; then
   exit 0
 fi
 
-if [ -n "$current" ] && [ "$current" != "$target" ]; then
+if [ -n "$current" ] && [ "$current" != "$legacy" ] && [ "$current" != "$dest" ]; then
   echo "core.hooksPath já aponta para '$current': este clone tem hooks próprios e eu não sobrescrevo." >&2
-  echo "Se quiser trocar mesmo assim: git config core.hooksPath $target" >&2
+  echo "Se quiser trocar mesmo assim: git config --unset core.hooksPath e rode este script de novo" >&2
   exit 2
 fi
 
-chmod +x "$target/pre-commit" "$target/pre-push"
-git config core.hooksPath "$target"
-echo "ok: core.hooksPath=$target"
+# O pre-commit chama `$(dirname "$0")/warn-identity.sh`: a cópia leva os dois juntos. O session.sh
+# é hook de sessão do assistente, não de git, e fica onde está.
+mkdir -p "$dest"
+for hook in pre-commit pre-push warn-identity.sh; do
+  cp "$src/$hook" "$dest/$hook"
+  chmod +x "$dest/$hook"
+done
+git config core.hooksPath "$dest"
+echo "ok: core.hooksPath=$dest"
 echo "  pre-commit: segredo e .env no commit; nome e carimbo de migration; e-mail de máquina gera aviso"
 echo "  pre-push:   push direto na main é recusado; ramo atrasado gera aviso"
+echo "A cópia é congelada e vale para qualquer ramo: quando os hooks mudarem na main, rode este"
+echo "script de novo estando na main atualizada."
 echo "Desarmar: bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh --disarm"

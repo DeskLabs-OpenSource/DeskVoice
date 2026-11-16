@@ -58,7 +58,9 @@ bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh
 | `pre-commit` | chave com formato conhecido e `.env` no commit; migration fora de `AAAAMMDDTHHMMSS_slug.sql`, com carimbo repetido, ou edição de migration já publicada | e-mail de máquina no `git config` (`root@…`, `@localhost`, `@vps…`, `@srv…`, `@….local`) ou vazio: o commit não daria crédito a ninguém (`scripts/hooks/warn-identity.sh`) |
 | `pre-push` | push direto na `main` | ramo atrasado em relação a `origin/main` |
 
-Se o clone já tem `core.hooksPath` próprio, o script não sobrescreve. Desarmar: `--disarm`.
+Os hooks são copiados para dentro do `.git` e ficam iguais em qualquer ramo; quando mudarem na
+`main`, arme de novo estando na `main` atualizada. Se o clone já tem `core.hooksPath` próprio, o
+script não sobrescreve. Desarmar: `--disarm`.
 
 ## Passo 3: antes de codar
 
