@@ -42,7 +42,7 @@ const privacy: PrivacyDictionary = {
   notesConfirmYes: "Delete and keep for {days} days",
   memoryTitle: "Caller memory for the agent",
   memoryLead:
-    "With this on, the agent starts each call knowing the notes saved about the number and the titles of its open follow-ups. It applies to incoming calls and to the calls the system places. The summary and the words of earlier calls never go in. It comes off.",
+    "With this on, the agent starts each call knowing the notes saved about the number and the titles of its open follow-ups. It applies to incoming calls and to the calls the system places. The summary and the words of earlier calls never go in. It is off by default.",
   memorySwitch: "Give the agent the caller's memory",
   memorySpoofed:
     "The displayed number can be spoofed. Someone calling with another person's number may hear from the agent what is in that person's notes: the agent is told not to read them to the caller, but that is not a guarantee.",
