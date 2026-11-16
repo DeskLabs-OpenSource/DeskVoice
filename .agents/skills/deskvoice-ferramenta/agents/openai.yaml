@@ -1,0 +1,6 @@
+interface:
+  display_name: "Criar uma ferramenta do agente"
+  short_description: "Uma ferramenta que o agente usa durante a ligação: um arquivo em packages/tools, zod, eventos, teste, aprovação"
+  default_prompt: "Use a skill deskvoice-ferramenta e me ajude a criar a ferramenta que o agente vai usar na ligação."
+policy:
+  allow_implicit_invocation: true

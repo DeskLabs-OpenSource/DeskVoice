@@ -1,0 +1,6 @@
+interface:
+  display_name: "Instalar o DeskVoice numa VPS"
+  short_description: "Do servidor à primeira ligação: o que perguntar, portas, tronco, healthcheck e ligação muda (NAT, RTP)"
+  default_prompt: "Use a skill deskvoice-instalar e me conduza na instalação do DeskVoice na minha VPS."
+policy:
+  allow_implicit_invocation: true
