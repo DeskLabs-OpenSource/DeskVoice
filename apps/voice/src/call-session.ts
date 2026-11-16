@@ -857,7 +857,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
             ? `Uma ligação do agente ${first.name} foi recusada porque o provedor do motor de voz ${label} não respondeu: ${problem}. Quem ligou ouviu o sinal de falha. Confira a situação do provedor e faça uma chamada de teste.`
             : reason === "engine_refused"
               ? `Uma ligação do agente ${first.name} foi recusada porque o provedor do motor de voz ${label} recusou a sessão ou não foi alcançado: ${problem}. Quem ligou ouviu o sinal de falha. Confira o crédito e os limites na conta do provedor, a chave em Configurações → Inteligência artificial e, se o motivo for de rede, se a VPS alcança o provedor pela internet; depois faça uma chamada de teste.`
-              : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${first.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações → Inteligência artificial e faça uma chamada de teste.`,
+              : opened.engine
+                ? `Uma ligação foi recusada porque o motor de voz ${label} do agente ${first.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações → Inteligência artificial e faça uma chamada de teste.`
+                : // Sem motor não há chave a cadastrar: o agente aponta para um motor que esta instalação não tem.
+                  `Uma ligação foi recusada porque o motor de voz ${label} do agente ${first.name} não está instalado nesta versão: ${problem}. Escolha outro motor de voz na tela do agente e faça uma chamada de teste.`,
       });
     }
 

@@ -186,9 +186,12 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     expect(notice).not.toMatch(/Cadastre/);
   });
 
-  it("motor que não existe nesta instalação: recusa", async () => {
-    const { callId } = await refused("engine-unknown", manualEngine({ id: "outro" }));
-    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ detail: 'the voice engine "manual" is not installed' });
+  it("motor que não existe nesta instalação: recusa, e o aviso manda escolher outro motor, não cadastrar a chave", async () => {
+    const { organizationId, callId } = await refused("engine-unknown", manualEngine({ id: "outro" }));
+    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ reason: "engine_not_configured", detail: 'the voice engine "manual" is not installed' });
+    const notice = (await notificationsOf(app, organizationId))[0]?.body ?? "";
+    expect(notice).toMatch(/não está instalado nesta versão: .*Escolha outro motor de voz na tela do agente/);
+    expect(notice).not.toMatch(/Cadastre/);
   });
 
   it("com a chave cadastrada, o motor recebe a chave decifrada, as instruções, a voz, o idioma e as ferramentas do agente", async () => {

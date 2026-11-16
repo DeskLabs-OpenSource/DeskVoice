@@ -233,7 +233,7 @@ const timeline = {
     unknown: "Evento",
   },
   reasons: {
-    engine_not_configured: "O agente usa um motor de voz sem chave cadastrada.",
+    engine_not_configured: "O motor de voz do agente não está pronto: falta a chave, a chave salva não pôde ser lida ou o motor não está instalado. O motivo está no aviso do painel.",
     engine_not_responding: "O provedor do motor de voz não respondeu a tempo. Confira a situação do provedor e a chave em Configurações → Inteligência artificial.",
     engine_refused: "O provedor do motor de voz recusou a sessão ou não foi alcançado. O motivo está no aviso do painel. Confira o crédito e os limites na conta do provedor, a chave em Configurações → Inteligência artificial e se a VPS alcança o provedor pela internet.",
     process_restarted: "O processo de voz reiniciou no meio da chamada.",

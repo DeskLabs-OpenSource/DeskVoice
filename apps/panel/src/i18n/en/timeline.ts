@@ -232,7 +232,7 @@ const timeline: TimelineDictionary = {
     unknown: "Event",
   },
   reasons: {
-    engine_not_configured: "The agent uses a voice engine with no key.",
+    engine_not_configured: "The agent's voice engine is not ready: the key is missing, the saved key could not be read, or the engine is not installed. The reason is in the panel notice.",
     engine_not_responding: "The voice engine provider did not answer in time. Check the provider status and the key in Settings → Artificial intelligence.",
     engine_refused: "The voice engine provider refused the session or could not be reached. The reason is in the panel notice. Check the credit and limits in the provider account, the key in Settings → Artificial intelligence, and whether the VPS reaches the provider over the internet.",
     process_restarted: "The voice process restarted in the middle of the call.",
