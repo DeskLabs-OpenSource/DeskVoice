@@ -11,7 +11,7 @@ ele é um nome, os endereços para os quais o nome resolve (com a hora da últim
 processo de voz recalcula a lista a cada vez que as linhas são aplicadas e de 5 em 5 minutos; se o
 nome deixar de resolver, a lista fica como estava e a linha pede atenção com o motivo. O campo de
 endereços extras aparece também na linha por registro, para a operadora que registra por um servidor
-e entrega a ligação por outro: na linha por registro ele só vale para a entrada, e a linha continua
+e entrega a ligação por outro: na linha por registro ele só vai valer para a entrada, e a linha continua
 reconhecida pelo registro. Nada muda no que a central aceita: hoje ela ainda aceita ligações de
 qualquer endereço, e a tela diz isso; a lista é o que um filtro futuro vai liberar, mostrada antes
 de ele existir. Crédito: @melgarafael.

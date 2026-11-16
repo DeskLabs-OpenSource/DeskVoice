@@ -18,7 +18,7 @@ const line: LineDictionary = {
   matchExtraHint:
     "Una por línea: IP o bloque (54.172.60.0/30), nunca nombre. La operadora que entrega la llamada desde varias regiones publica varios bloques y pide liberarlos todos; sin ellos, la llamada se pierde cuando cae la región principal.",
   matchExtraRegisterHint:
-    "Una por línea: IP o bloque (54.172.60.0/30), nunca nombre. Solo para la operadora que registra la línea por un servidor y entrega la llamada por otro: la línea sigue reconocida por el registro, y estas direcciones solo se aceptan en la entrada.",
+    "Una por línea: IP o bloque (54.172.60.0/30), nunca nombre. Solo para la operadora que registra la línea por un servidor y entrega la llamada por otro: la línea sigue reconocida por el registro, y estas direcciones van a entrar en la lista de entrada cuando se active el filtro (hoy todavía no tienen efecto).",
   allowed: "Va a aceptar llamadas de",
   allowedNone: "ninguna dirección por ahora. La lista aparece cuando la línea se aplica (Guardar línea o Probar línea); la línea con falla no acepta llamadas.",
   allowedToday: "Hoy la central todavía acepta llamadas de cualquier dirección: esta lista solo pasa a valer cuando el filtro de entrada se active, en una versión futura.",

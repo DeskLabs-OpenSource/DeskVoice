@@ -16,7 +16,7 @@ const line = {
   matchExtraHint:
     "Um por linha: IP ou bloco (54.172.60.0/30), nunca nome. A operadora que entrega a ligação por várias regiões publica vários blocos e pede para liberar todos; sem eles, a ligação se perde quando a região principal cai.",
   matchExtraRegisterHint:
-    "Um por linha: IP ou bloco (54.172.60.0/30), nunca nome. Só para a operadora que registra a linha por um servidor e entrega a ligação por outro: a linha continua reconhecida pelo registro, e estes endereços só são aceitos na entrada.",
+    "Um por linha: IP ou bloco (54.172.60.0/30), nunca nome. Só para a operadora que registra a linha por um servidor e entrega a ligação por outro: a linha continua reconhecida pelo registro, e estes endereços vão entrar na lista de entrada quando o filtro for ligado (hoje ainda não têm efeito).",
   allowed: "Vai aceitar ligações de",
   allowedNone: "nenhum endereço por enquanto. A lista aparece quando a linha é aplicada (Salvar linha ou Testar linha); a linha com falha não aceita ligação.",
   allowedToday: "Hoje a central ainda aceita ligações de qualquer endereço: esta lista só passa a valer quando o filtro de entrada for ligado, numa versão futura.",
