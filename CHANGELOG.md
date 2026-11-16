@@ -3,6 +3,35 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.19.1] - 2026-11-16
+
+### Adicionado
+
+- **Para quem contribui, as skills aparecem no Codex e o guia de contribuição explica o pré-voo** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e contribui. Cada skill
+  de `.agents/skills/` ganhou `agents/openai.yaml`, o arquivo pelo qual o Codex mostra a skill e a
+  carrega sozinho, e uma cerca reprova a skill nova que nascer sem ele. A skill `deskvoice-contribuir`
+  ganhou duas referências: o pré-voo item a item (o que cada linha do `preflight.sh` quer dizer e o
+  que fazer quando ela acusa) e a receita para rodar na própria máquina os testes de banco, a chamada
+  simulada e os testes de tela. O hook `pre-commit` passa a avisar, sem bloquear, quando o commit vai
+  sair com e-mail de máquina (`root@vps-…`), que não dá crédito a ninguém no GitHub. Crédito: @melgarafael.
+
+### Corrigido
+
+- **Quando o provedor de voz recusa a sessão, o aviso no painel traz o motivo que ele deu** Se o Gemini Live ou o OpenAI Realtime fechavam a conexão antes de confirmar a sessão, o aviso no
+  painel sobre a ligação recusada dizia só que a conexão fechou, e no Gemini ainda sugeria "chave ou
+  modelo inválido?", mesmo quando o motivo era outro. Agora o aviso leva o código e o motivo que o
+  provedor mandou, como "Your prepayment credits are depleted" quando o crédito pré-pago do Google
+  acabou. O cartão da ligação na linha do tempo continua mostrando só o tipo da recusa. Nada a fazer
+  em instalações existentes. Crédito: @melgarafael.
+- **A ligação recusada pelo provedor de voz não manda mais cadastrar uma chave que já existe** Quando o provedor de voz recusava a sessão com a chave cadastrada, por exemplo porque o crédito
+  pré-pago acabou ou porque recusou a chave, ou quando a VPS não alcançava o provedor pela rede, a
+  ligação era registrada como "motor de voz sem chave cadastrada", e o aviso no painel mandava
+  cadastrar a chave. Agora esses casos têm motivo próprio na linha do tempo, "o provedor do motor de
+  voz recusou a sessão ou não foi alcançado", e o aviso traz o motivo que o provedor ou a rede deu e
+  manda conferir o crédito e os limites na conta do provedor, a chave e a rede da VPS. A
+  ligação sem chave cadastrada continua com o aviso de antes. Nada a fazer em instalações
+  existentes. Crédito: @melgarafael.
+
 ## [0.19.0] - 2026-11-16
 
 ### Adicionado
