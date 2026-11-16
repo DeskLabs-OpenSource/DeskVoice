@@ -262,6 +262,13 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     await expect(connecting).rejects.toThrow("OpenAI Realtime: modelo inexistente");
   });
 
+  it("fechamento antes da sessão confirmada leva o código e o motivo do provedor", async () => {
+    const connecting = engine.connect(config, "sk", { baseUrl: fake.url });
+    await fake.waitFor(ofType("session.update"));
+    fake.refuse(1008, "quota exceeded");
+    await expect(connecting).rejects.toThrow("OpenAI Realtime: a conexão fechou antes de confirmar a sessão (código 1008; quota exceeded)");
+  });
+
   it("queda do socket vira error seguido de closed", async () => {
     const { session } = await openSession();
     const order: string[] = [];
