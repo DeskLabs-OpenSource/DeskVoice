@@ -238,6 +238,62 @@ describe("brain keys and model lists", () => {
     expect((await refresh(owner)).data).toMatchObject({ stale: false, check: { result: "accepted" } });
   });
 
+  it("the limit is per brain: one provider spent does not hold back another of the same organization", async () => {
+    const { owner } = await setup("brain limit per brain");
+    // Um teste da OpenAI antes, para o "Atualizar lista" dela ter chave.
+    expect(((await save(owner, KEY, "openai")).data as { check: unknown }).check).toMatchObject({ result: "accepted" });
+    await save(owner, KEY);
+    for (let attempt = 0; attempt < 4; attempt += 1) expect((await refresh(owner)).status).toBe(200);
+    expect((await refresh(owner)).code).toBe("too_many_brain_checks");
+    // A OpenAI ainda tem leituras: o pedido chega ao provedor, e a resposta é uma lista nova.
+    providerRequests.length = 0;
+    const other = await refresh(owner, "openai");
+    expect([other.status, other.data]).toMatchObject([200, { stale: false, check: { result: "accepted" }, models: [{ id: "gpt-modelo-de-teste" }] }]);
+    expect(providerRequests.map((request) => new URL(request.url).host)).toEqual(["api.openai.com"]);
+  });
+
+  it("a refresh that fails keeps the stored list and says it is stale, never an empty list", async () => {
+    const { org, owner } = await setup("brain refresh fails");
+    await save(owner, KEY);
+    const before = (await settingsOf(org)).find((row) => row.key === "brain.openrouter.models")?.value;
+    for (const failure of [{ status: 503, body: {} }, { status: 401, body: { error: { message: "nope" } } }]) {
+      openrouterKey = failure;
+      panel.clock.at = new Date(panel.clock.at.getTime() + 60_000);
+      const failed = await refresh(owner);
+      expect(failed.status).toBe(200);
+      expect(failed.data).toMatchObject({
+        fetchedAt: NOW.toISOString(),
+        stale: true,
+        models: [{ id: "vendor/modelo-com-preco" }, { id: "vendor/modelo-tarifa-por-pedido" }],
+        check: { result: failure.status === 401 ? "rejected" : "unreachable", status: failure.status },
+      });
+      // A lista guardada não foi tocada; o teste da chave, sim.
+      expect((await settingsOf(org)).find((row) => row.key === "brain.openrouter.models")?.value).toEqual(before);
+    }
+  });
+
+  it("each model is checked before it is stored: one out of shape is dropped, the rest of the list stays", async () => {
+    const { org, owner } = await setup("brain write filter");
+    const openrouter = (await listBrains()).find((brain) => brain.id === "openrouter");
+    if (!openrouter) throw new Error("openrouter not found");
+    // A peça já filtra; aqui ela deixa passar itens fora da forma, para provar o filtro da gravação.
+    vi.spyOn(openrouter, "listModels").mockResolvedValue({
+      ok: true,
+      models: [
+        { id: "bom", label: "Bom" },
+        { id: "preco-negativo", label: "Negativo", price: { centsPerMillionInputTokens: -1, centsPerMillionOutputTokens: 1, source: "x", checkedOn: "2026-03-01" } },
+        { id: "", label: "Sem id" },
+        { id: "data-torta", label: "Data", price: { centsPerMillionInputTokens: 1, centsPerMillionOutputTokens: 1, source: "x", checkedOn: "ontem" } },
+        { id: "bom-com-preco", label: "Bom com preço", price: { centsPerMillionInputTokens: 1, centsPerMillionOutputTokens: 2, source: "x", checkedOn: "2026-03-01" } },
+      ],
+    } as never);
+    const saved = await save(owner, KEY);
+    expect(saved.data).toMatchObject({ check: { result: "accepted" }, modelCount: 2 });
+    const stored = (await settingsOf(org)).find((row) => row.key === "brain.openrouter.models")?.value as { models: Array<{ id: string }> };
+    expect(stored.models.map((model) => model.id)).toEqual(["bom", "bom-com-preco"]);
+    expect(((await models(owner)).data as { models: Array<{ id: string }> }).models.map((model) => model.id)).toEqual(["bom", "bom-com-preco"]);
+  });
+
   it("a list older than a day is read again when asked, inside the same limit; if that fails, the kept list comes back stale", async () => {
     const { owner } = await setup("brain stale");
     await save(owner, KEY);

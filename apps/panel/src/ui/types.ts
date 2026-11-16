@@ -78,6 +78,8 @@ export interface CallDetail extends Call {
   erased: boolean;
   /** O custo de cada agente da ligação, na ordem em que gastou; `name: null` é agente apagado. A tela mostra com mais de um. */
   costByAgent: Array<{ agentId: string | null; name: string | null; costCents: number }>;
+  /** Alguma linha do extrato da ligação tem custo não medido (modelo sem preço): o zero não é grátis. */
+  costUnmeasured: boolean;
 }
 
 /** O bloco "Este número" da tela da chamada (`GET /calls/:id/caller-history`). `phone: null`: a chamada não tem número, e o bloco não aparece. */
@@ -262,6 +264,8 @@ export interface Costs {
   byDay: Array<{ day: string; costCents: number; billedSeconds: number }>;
   byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number }>;
   byEngine: Array<{ engine: string; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null }>;
+  /** Onde o período tem linha de custo não medido: o valor ali não é o gasto inteiro. */
+  unmeasured: { calls: number; days: string[]; agentIds: Array<string | null>; engines: string[] };
 }
 
 export interface Setting<T> {

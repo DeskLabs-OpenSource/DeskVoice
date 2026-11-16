@@ -131,6 +131,7 @@ function Models({ brain, t, version }: { brain: BrainView; t: BrainsDictionary; 
   const shown = matchModels(models, query);
   return (
     <div className="grid gap-2">
+      <h3 className="text-[0.87rem] font-bold">{t.modelsTitle}</h3>
       {stale ? <Notice tone="warn">{t.modelsStale}</Notice> : null}
       <p className="text-sm text-muted">{models.length === 0 ? t.modelsNone : fill(t.modelsCount, { count: models.length, when: formatDateTime(fetchedAt, locale) })}</p>
       {models.length > 0 ? (
@@ -152,7 +153,7 @@ function Models({ brain, t, version }: { brain: BrainView; t: BrainsDictionary; 
 }
 
 /** Um cérebro: a chave (só se existe; nunca o valor), o último teste e a lista de modelos. */
-function BrainCard({ brain, t, onChanged }: { brain: BrainView; t: BrainsDictionary; onChanged(): void }) {
+function BrainCard({ brain, t, chosenModel, onChanged }: { brain: BrainView; t: BrainsDictionary; chosenModel: string | null; onChanged(): void }) {
   const canConfigure = useCanConfigure();
   const save = useBrainAction(t);
   const refresh = useBrainAction(t);
@@ -237,6 +238,8 @@ function BrainCard({ brain, t, onChanged }: { brain: BrainView; t: BrainsDiction
       {canConfigure && brain.configured && confirming ? (
         <Notice tone="fail">
           <p>{fill(t.removeConfirm, { brain: brain.label })}</p>
+          {/* Escolhido para ler as ligações: remover para a análise, e o dono fica sabendo antes. */}
+          {chosenModel !== null ? <p className="mt-1 font-bold">{fill(t.removeChosen, { brain: brain.label, model: chosenModel })}</p> : null}
           <div className="mt-1 flex flex-wrap gap-2">
             <Button variant="danger" busy={save.busy} onClick={removeKey}>
               {fill(t.removeYes, { brain: brain.label })}
@@ -265,13 +268,15 @@ export default function BrainsSettings() {
   const t = useDict(ptBR, en, es);
   const errorText = useErrorText();
   const brains = useApi<BrainView[]>("/brains");
+  // Quem lê a ligação: a confirmação de remover a chave do escolhido diz que a análise para.
+  const chosen = useApi<{ value: { brain: string; model: string } | null }>("/settings/calls.analysis_brain");
   if (brains.error && !brains.data) return <Notice tone="fail">{errorText(brains.error)}</Notice>;
   if (!brains.data) return <Skeleton lines={4} />;
   return (
     <Panel title={t.title} description={t.lead}>
       <ul className="grid">
         {brains.data.map((brain) => (
-          <BrainCard key={brain.id} brain={brain} t={t} onChanged={brains.reload} />
+          <BrainCard key={brain.id} brain={brain} t={t} chosenModel={chosen.data?.value?.brain === brain.id ? chosen.data.value.model : null} onChanged={brains.reload} />
         ))}
       </ul>
     </Panel>

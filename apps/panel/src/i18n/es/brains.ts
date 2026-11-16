@@ -14,6 +14,7 @@ const brains: BrainsDictionary = {
   remove: "Eliminar",
   removeConfirm: "¿Eliminar la clave de {brain}? La lista de modelos de {brain} también se borra. La clave eliminada no se puede recuperar.",
   removeYes: "Eliminar la clave de {brain}",
+  removeChosen: "{brain} es quien lee las llamadas hoy (modelo {model}). Sin la clave, las llamadas dejan de leerse hasta que la clave vuelva o elijas otro en \"Quién lee la llamada\", en la sección del análisis. No pasan al motor del agente.",
   cancel: "Cancelar",
   neverTested: "La clave todavía no se probó. Use Actualizar lista para probarla.",
   tested: "Probada el {when}: {result}",

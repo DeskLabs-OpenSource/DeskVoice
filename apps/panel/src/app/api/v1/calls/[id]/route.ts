@@ -1,6 +1,6 @@
 import { PURGED_SUMMARY_TEXT, storedCallAnalysisSchema } from "@deskvoice/core";
 import { handle, notFound } from "../../../../../server/context";
-import { centsOf, LEDGER_AGENT } from "../../../../../server/costs";
+import { callCostUnmeasured, centsOf, LEDGER_AGENT } from "../../../../../server/costs";
 import { CALL_COLUMNS } from "../../../../../server/shapes";
 
 export const GET = handle({}, async ({ q, params }) => {
@@ -33,5 +33,7 @@ export const GET = handle({}, async ({ q, params }) => {
     analysis: parsed?.success ? parsed.data : null,
     analysisUnreadable: parsed !== null && !parsed.success,
     costByAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents) })),
+    // Alguma linha do extrato sem custo medido: o valor da ligação não é o gasto inteiro.
+    costUnmeasured: await callCostUnmeasured(q, params.id),
   };
 });

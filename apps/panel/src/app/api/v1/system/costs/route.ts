@@ -1,5 +1,5 @@
 import { ApiError, handle } from "../../../../../server/context";
-import { centsOf, LEDGER_AGENT } from "../../../../../server/costs";
+import { centsOf, LEDGER_AGENT, unmeasuredIn } from "../../../../../server/costs";
 import { listEngines } from "../../../../../server/pieces";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -68,6 +68,8 @@ export const GET = handle({}, async ({ q, url, deps }) => {
       group by s.engine, a.seconds order by coalesce(sum(s.cost_microcents), 0) desc`,
     range,
   );
+  // As linhas sem custo medido: o zero delas não é grátis, e a tela diz "não medido" onde houver.
+  const unmeasured = await unmeasuredIn(q, from, to);
   const engines = new Map((await listEngines()).map((engine) => [engine.id, engine]));
   return {
     from,
@@ -87,5 +89,6 @@ export const GET = handle({}, async ({ q, url, deps }) => {
       priceCheckedOn: engines.get(row.engine)?.pricing.checkedOn ?? null,
       priceSource: engines.get(row.engine)?.pricing.source ?? null,
     })),
+    unmeasured,
   };
 });
