@@ -93,6 +93,7 @@ async function scene(label: string, agent: AgentOptions): Promise<Scene> {
     publicIp: null,
     host: "127.0.0.1",
     schedule: timers.schedule,
+    resolveName: async () => ["192.0.2.53"],
     now: timers.now,
   });
   const internalPort = server.internalPort;

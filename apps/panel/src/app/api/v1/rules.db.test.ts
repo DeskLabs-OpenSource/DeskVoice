@@ -504,7 +504,7 @@ describe("removing and correcting lines and numbers", () => {
     for (const host of ["sip.example.test;x", "[evil]", "sip.example.test\n[evil]", "203.0.113.0/99"]) expect([host, (await create(host)).code]).toEqual([host, "validation_error"]);
   });
 
-  it("stores more than one inbound block and an outbound name, and refuses extra addresses outside IP mode", async () => {
+  it("stores more than one inbound block and an outbound name; extra addresses also in a line that registers, the outbound address only by IP", async () => {
     // Os dois primeiros blocos que a Twilio publica para sinalização; a fonte está no PR.
     const blocks = ["54.172.60.0/30", "54.244.51.0/30"];
     const created = await call(createTrunk, {
@@ -521,13 +521,22 @@ describe("removing and correcting lines and numbers", () => {
     const listed = (await call(listTrunks, { cookie: owner })).data as Array<{ id: string; matchExtra: string[]; outboundHost: string | null }>;
     expect(listed.find((entry) => entry.id === id)).toMatchObject({ matchExtra: blocks.slice(1), outboundHost: "conta.pstn.twilio.com" });
 
-    // Fora do modo por IP esses campos não teriam efeito: a API recusa antes de gravar.
-    const registered = await call(createTrunk, {
-      method: "POST",
-      cookie: owner,
-      body: { name: "Registro", host: "sip.example.test", username: "5531", password: "senha-longa", authMode: "register", matchExtra: blocks },
-    });
-    expect([registered.status, registered.code]).toEqual([400, "validation_error"]);
+    // O conjunto liberado é do processo de voz: o painel só devolve o que está gravado (aqui, nada ainda).
+    expect(created.data).toMatchObject({ inboundAllowed: [], inboundResolvedAt: null });
+
+    // Na linha por registro, os extras liberam a entrada da operadora que entrega por outro servidor
+    // (R14); continuam numéricos. O destino de saída segue só da linha por IP.
+    const register = { name: "Registro", host: "sip.example.test", username: "5531", password: "senha-longa", authMode: "register" };
+    const registered = await call(createTrunk, { method: "POST", cookie: owner, body: { ...register, matchExtra: blocks } });
+    expect(registered.status).toBe(200);
+    expect(registered.data).toMatchObject({ authMode: "register", host: "sip.example.test", matchExtra: blocks });
+    const registeredName = await call(createTrunk, { method: "POST", cookie: owner, body: { ...register, matchExtra: ["outro.example.test"] } });
+    expect([registeredName.status, registeredName.code]).toEqual([400, "trunk_inbound_name"]);
+    expect(registeredName.message ?? "").not.toContain("outro.example.test");
+    const registeredWide = await call(createTrunk, { method: "POST", cookie: owner, body: { ...register, matchExtra: ["10.0.0.0/8"] } });
+    expect([registeredWide.status, registeredWide.code]).toEqual([400, "trunk_block_too_wide"]);
+    const registeredOutbound = await call(createTrunk, { method: "POST", cookie: owner, body: { ...register, outboundHost: "conta.pstn.twilio.com" } });
+    expect([registeredOutbound.status, registeredOutbound.code]).toEqual([400, "validation_error"]);
     const movedToRegister = await call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body: { authMode: "register", username: "5531", password: "senha-longa" } });
     expect([movedToRegister.status, movedToRegister.code]).toEqual([400, "validation_error"]);
 

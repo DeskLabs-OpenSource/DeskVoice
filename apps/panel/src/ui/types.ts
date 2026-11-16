@@ -133,10 +133,18 @@ export interface Trunk {
   username: string | null;
   authMode: "register" | "ip";
   callerId: string | null;
-  /** Endereços extras de onde as ligações chegam, além do `host` (modo por IP). */
+  /** Endereços extras de onde as ligações chegam, além do `host` (nos dois modos). */
   matchExtra: string[];
   /** Destino das ligações de saída, quando difere do `host`; `null` vale o `host`. */
   outboundHost: string | null;
+  /**
+   * De quais endereços a central aceita a ligação desta linha, como o processo de voz calculou e
+   * gravou. O painel nunca resolve nome: mostra o que está aqui. Vazio na linha ainda não aplicada
+   * ou deixada de fora da configuração.
+   */
+  inboundAllowed: string[];
+  /** Quando o conjunto mudou pela última vez (o que a tela mostra quando o `host` é nome). */
+  inboundResolvedAt: string | null;
   status: string;
   lastCheckAt: string | null;
   lastError: string | null;

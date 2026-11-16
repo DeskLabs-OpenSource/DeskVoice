@@ -1,16 +1,19 @@
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseTrunkHost } from "./trunk-host";
 import {
+  allowedAddresses,
   BLOCK_TOO_WIDE_REASON,
-  EXTRA_ONLY_IN_IP_MODE_REASON,
+  computeAllowed,
   extraAddressReason,
   extraNameReason,
   extraTooWideReason,
   NAME_IN_IP_MODE_REASON,
   OUTBOUND_BLOCK_REASON,
+  OUTBOUND_ONLY_IN_IP_MODE_REASON,
+  RESOLVE_TIMEOUT_MS,
   renderTrunksConf,
   SHARED_HOST_REASON,
   trunkProblem,
@@ -211,9 +214,11 @@ retry_interval=60
       expect(conf).not.toContain(B);
     });
 
-    it("endereço extra e destino de saída só existem no modo por IP; bloco não é destino", () => {
-      expect(trunkProblem({ ...register, matchExtra: [TWILIO_BLOCKS[1] ?? ""] })).toBe(EXTRA_ONLY_IN_IP_MODE_REASON);
-      expect(trunkProblem({ ...register, outboundHost: "conta.pstn.twilio.com" })).toBe(EXTRA_ONLY_IN_IP_MODE_REASON);
+    it("destino de saída só existe no modo por IP; o endereço extra vale nos dois modos; bloco não é destino", () => {
+      expect(trunkProblem({ ...register, matchExtra: [TWILIO_BLOCKS[1] ?? ""] })).toBeNull();
+      expect(trunkProblem({ ...register, matchExtra: ["outro.operadora.example"] })).toBe(extraNameReason(1));
+      expect(trunkProblem({ ...register, matchExtra: ["10.0.0.0/8"] })).toBe(extraTooWideReason(1));
+      expect(trunkProblem({ ...register, outboundHost: "conta.pstn.twilio.com" })).toBe(OUTBOUND_ONLY_IN_IP_MODE_REASON);
       expect(trunkProblem({ ...byIp, outboundHost: "54.172.60.0/30" })).toBe(OUTBOUND_BLOCK_REASON);
       expect(trunkProblem(twilio)).toBeNull();
     });
@@ -487,5 +492,107 @@ retry_interval=60
       expect((await readdir(dir)).sort()).toEqual(["dono", "generated", "ocupado", "vizinho.conf"]);
       expect(await readFile(path.join(target, "dentro.conf"), "utf8")).toBe("conteúdo\n");
     });
+  });
+});
+
+// R14, fatia 1: de onde a central aceita a ligação de cada linha. Os formatos são os que a 0.19.0
+// (a última publicada) aceita na tela: por IP com e sem extras, registro com IP, registro com nome.
+describe("conjunto de endereços liberados por linha", () => {
+  const SIP = "sip.operadora.example";
+  const resolver = (answers: Record<string, string[] | Error>) => {
+    const asked: string[] = [];
+    const resolve = async (name: string): Promise<string[]> => {
+      asked.push(name);
+      const answer = answers[name];
+      if (answer === undefined) throw Object.assign(new Error(`queryA ENOTFOUND ${name}`), { code: "ENOTFOUND" });
+      if (answer instanceof Error) throw answer;
+      return answer;
+    };
+    return { resolve, asked };
+  };
+  afterEach(() => vi.useRealTimers());
+
+  it("linha por IP: o host e os extras, canônicos e sem repetição", async () => {
+    expect(allowedAddresses(byIp)).toEqual(["198.51.100.20"]);
+    expect(allowedAddresses({ ...byIp, host: "198.051.100.020:5080" })).toEqual(["198.51.100.20"]);
+    expect(allowedAddresses({ ...byIp, host: "54.172.60.1/30", matchExtra: ["54.244.51.0/30", "54.172.60.0/30", "2001:DB8::1"] })).toEqual(["54.172.60.0/30", "54.244.51.0/30", "2001:db8::1"]);
+    const { resolve, asked } = resolver({});
+    expect(await computeAllowed({ resolve }, [byIp], new Map())).toEqual(new Map([[B, { addresses: ["198.51.100.20"] }]]));
+    // Linha por IP nunca pergunta ao DNS.
+    expect(asked).toEqual([]);
+  });
+
+  it("registro com IP no host: esse IP, com a porta fora", async () => {
+    const withIp: TrunkConfig = { ...register, host: "203.0.113.5:5080" };
+    const { resolve, asked } = resolver({});
+    expect((await computeAllowed({ resolve }, [withIp], new Map())).get(A)).toEqual({ addresses: ["203.0.113.5"] });
+    expect(asked).toEqual([]);
+  });
+
+  it("registro com nome: A, AAAA e alvos do SRV que o resolvedor devolve, em ordem fixa e canônica, mais os extras", async () => {
+    const { resolve, asked } = resolver({ [SIP]: ["203.0.113.9", "2001:DB8:0:0::5", "203.0.113.7", "203.0.113.9", "lixo"] });
+    const withExtra: TrunkConfig = { ...register, matchExtra: ["198.51.100.0/24"] };
+    expect((await computeAllowed({ resolve }, [withExtra], new Map())).get(A)).toEqual({ addresses: ["2001:db8::5", "203.0.113.7", "203.0.113.9", "198.51.100.0/24"] });
+    // A porta não vai na pergunta.
+    expect(asked).toEqual([SIP]);
+  });
+
+  it("um pedido por nome, mesmo com várias linhas no mesmo servidor", async () => {
+    const { resolve, asked } = resolver({ [SIP]: ["203.0.113.7"] });
+    const other: TrunkConfig = { ...register, id: C, host: SIP };
+    const allowed = await computeAllowed({ resolve }, [register, other], new Map());
+    expect([allowed.get(A)?.addresses, allowed.get(C)?.addresses]).toEqual([["203.0.113.7"], ["203.0.113.7"]]);
+    expect(asked).toEqual([SIP]);
+  });
+
+  it("nome que não resolve MANTÉM o último conjunto (somado aos extras de agora) e diz o motivo; nunca encolhe para vazio", async () => {
+    const before = new Map([[A, ["203.0.113.7", "203.0.113.9"]]]);
+    for (const failure of [new Error("queryA ESERVFAIL sip.operadora.example"), undefined]) {
+      const { resolve } = resolver(failure === undefined ? {} : { [SIP]: failure });
+      const allowed = (await computeAllowed({ resolve }, [{ ...register, matchExtra: ["198.51.100.1"] }], before)).get(A);
+      expect(allowed?.addresses).toEqual(["203.0.113.7", "203.0.113.9", "198.51.100.1"]);
+      expect(allowed?.problem).toMatch(/^The provider name could not be resolved \(sip\.operadora\.example: .*\)\. The line keeps the addresses it had/);
+    }
+    // Sem conjunto anterior (linha nova, DNS fora), fica o que dá para saber sem DNS: os extras.
+    const { resolve } = resolver({});
+    expect((await computeAllowed({ resolve }, [register], new Map())).get(A)).toMatchObject({ addresses: [] , problem: expect.any(String) });
+  });
+
+  it("resposta sem nenhum endereço utilizável conta como falha (mantém), e não como conjunto vazio", async () => {
+    const { resolve } = resolver({ [SIP]: [] });
+    const allowed = (await computeAllowed({ resolve }, [register], new Map([[A, ["203.0.113.7"]]]))).get(A);
+    expect(allowed).toMatchObject({ addresses: ["203.0.113.7"], problem: expect.stringContaining("resolves to no address") });
+  });
+
+  it(`o nome que não responde em ${RESOLVE_TIMEOUT_MS / 1000} s conta como falha`, async () => {
+    vi.useFakeTimers();
+    const resolve = (): Promise<string[]> => new Promise(() => undefined);
+    const pending = computeAllowed({ resolve }, [register], new Map([[A, ["203.0.113.7"]]]));
+    await vi.advanceTimersByTimeAsync(RESOLVE_TIMEOUT_MS - 1);
+    let done = false;
+    void pending.then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await pending).get(A)).toMatchObject({ addresses: ["203.0.113.7"], problem: expect.stringContaining("no answer in 3 s") });
+  });
+
+  it("bloco largo demais e nome nunca entram no conjunto", () => {
+    expect(allowedAddresses({ host: "198.51.100.20", matchExtra: ["10.0.0.0/8", "nome.example", "::/0", "54.172.60.0/30"] })).toEqual(["198.51.100.20", "54.172.60.0/30"]);
+    expect(allowedAddresses({ host: SIP }, ["0.0.0.0/0", "203.0.113.7"])).toEqual(["203.0.113.7"]);
+  });
+
+  it("linha por registro com extra: o arquivo gerado sai igual ao de hoje (nenhum match= novo), e o extra não entra na regra de endereço compartilhado", () => {
+    const extra = ["198.51.100.20", "54.172.60.0/30"];
+    for (const host of [register.host, "203.0.113.5"]) {
+      const today = renderTrunksConf([{ ...register, host }]);
+      expect(renderTrunksConf([{ ...register, host, matchExtra: extra }])).toEqual(today);
+    }
+    // O extra da linha por registro bate no host da linha por IP de outra organização: ela segue emitida.
+    const theirs: TrunkConfig = { ...byIp, organizationId: ORG2 };
+    const { skipped, conf } = renderTrunksConf([{ ...register, matchExtra: extra }, theirs]);
+    expect(skipped).toEqual([]);
+    expect(identifies(conf)).toEqual(["match=198.51.100.20"]);
+    expect(blocksOf(conf, B)).toContain(`[trunk-${B}-identify]`);
   });
 });

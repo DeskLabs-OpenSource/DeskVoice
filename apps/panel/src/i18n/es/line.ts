@@ -14,9 +14,15 @@ const line: LineDictionary = {
   authRegister: "Por usuario y contraseña (registro)",
   authIp: "Por la IP de tu servidor",
   authIpHint: "Informa al proveedor la IP pública de este servidor. Usuario y contraseña quedan en blanco. La dirección del proveedor debe ser numérica y no puede estar en uso por otra línea de esta instalación.",
-  matchExtra: "Otras direcciones desde donde llegan las llamadas (opcional)",
+  matchExtra: "Direcciones extra desde donde llegan las llamadas (opcional)",
   matchExtraHint:
     "Una por línea: IP o bloque (54.172.60.0/30), nunca nombre. La operadora que entrega la llamada desde varias regiones publica varios bloques y pide liberarlos todos; sin ellos, la llamada se pierde cuando cae la región principal.",
+  matchExtraRegisterHint:
+    "Una por línea: IP o bloque (54.172.60.0/30), nunca nombre. Solo para la operadora que registra la línea por un servidor y entrega la llamada por otro: la línea sigue reconocida por el registro, y estas direcciones solo se aceptan en la entrada.",
+  allowed: "Acepta llamadas de",
+  allowedNone: "ninguna dirección por ahora. La lista aparece cuando la línea se aplica (Guardar línea o Probar línea); la línea con falla no acepta llamadas.",
+  allowedResolvedAt: "Direcciones del nombre {name} actualizadas el {when}.",
+  allowedHint: "Si las llamadas de esta operadora dejan de llegar, puede estar entregando desde otra dirección: inclúyala en Direcciones extra.",
   outboundHost: "Dirección para las llamadas salientes (opcional)",
   outboundHostHint: "Nombre o IP del proveedor para las llamadas que salen por esta línea, como cuenta.pstn.twilio.com. Es el único campo de la línea por IP que acepta nombre. En blanco, vale la dirección del servidor de arriba; con un bloque, la línea solo recibe.",
   username: "Usuario",

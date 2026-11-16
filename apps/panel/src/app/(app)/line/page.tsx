@@ -32,6 +32,32 @@ const STEP_ICON: Record<StepStatus, ReactNode> = {
   skipped: <MinusCircle size={20} weight="duotone" className="text-muted" aria-hidden />,
 };
 
+/**
+ * O nome no `host` (sem a porta), ou `null` quando o host é IP ou bloco. Só decide se a tela mostra
+ * a hora da última atualização dos endereços: quem resolve o nome é o processo de voz, nunca o painel.
+ */
+function hostName(host: string): string | null {
+  const bare = host.trim().replace(/:\d+$/, "");
+  return /^[a-z0-9.-]+$/i.test(bare) && /[a-z]/i.test(bare) ? bare : null;
+}
+
+/** De onde a central aceita a ligação desta linha, como o processo de voz gravou (R14). */
+function AllowedAddresses({ trunk, t }: { trunk: Trunk; t: LineDictionary }) {
+  const locale = useLocale();
+  const name = hostName(trunk.host);
+  const allowed = trunk.inboundAllowed ?? [];
+  return (
+    <div className="grid gap-1.5 rounded-sm bg-sunken p-4">
+      <p>
+        <span className="font-bold">{t.allowed}:</span>{" "}
+        {allowed.length > 0 ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{t.allowedNone}</span>}
+      </p>
+      {name !== null && trunk.inboundResolvedAt ? <p className="text-[0.87rem] text-muted">{fill(t.allowedResolvedAt, { name, when: formatDateTime(trunk.inboundResolvedAt, locale) })}</p> : null}
+      <p className="text-[0.87rem] text-muted">{t.allowedHint}</p>
+    </div>
+  );
+}
+
 const ICON_BUTTON = "grid size-9 cursor-pointer place-items-center rounded-xs text-muted hover:bg-sunken";
 
 /** Um número da linha: troca quem atende, corrige o número digitado errado e remove, com confirmação. */
@@ -141,8 +167,8 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
     event.preventDefault();
     void save.run(async () => {
       const { password, matchExtra, outboundHost, ...rest } = draft;
-      // Uma linha por campo; o que ficou em branco não vira endereço. Fora do modo por IP a lista
-      // e o destino de saída não existem: a API recusa, e a tela não manda lixo para lá.
+      // Uma linha por campo; o que ficou em branco não vira endereço. A lista vale nos dois modos;
+      // fora do modo por IP o destino de saída não existe: a API recusa, e a tela não manda lixo.
       const addresses = matchExtra
         .split("\n")
         .map((item) => item.trim())
@@ -151,7 +177,7 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
         method: trunk ? "PATCH" : "POST",
         body: {
           ...rest,
-          matchExtra: rest.authMode === "ip" ? addresses : [],
+          matchExtra: addresses,
           outboundHost: rest.authMode === "ip" && outboundHost.trim() !== "" ? outboundHost.trim() : null,
           ...(password && { password }),
         },
@@ -194,6 +220,11 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
               <Field label={t.password} hint={moved ? t.passwordAgain : trunk?.secret.configured ? t.passwordKept : undefined}>
                 <TextInput mono type="password" value={draft.password} onChange={(event) => set("password", event.target.value)} autoComplete="new-password" required={moved} />
               </Field>
+              {/* A operadora que registra por um servidor e entrega por outro: os endereços de
+                  entrada dela, um por linha. Não mudam como a linha é reconhecida. */}
+              <Field label={t.matchExtra} hint={t.matchExtraRegisterHint}>
+                <TextArea className="data" value={draft.matchExtra} onChange={(event) => set("matchExtra", event.target.value)} rows={3} />
+              </Field>
             </>
           ) : (
             <>
@@ -209,6 +240,7 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
           )}
         </fieldset>
 
+        {trunk ? <AllowedAddresses trunk={trunk} t={t} /> : null}
         {!applied ? <Notice tone="warn">{t.notApplied}</Notice> : null}
         {/* A linha que ficou de fora da configuração mostra o motivo sem pedir um teste. */}
         {failure && !result ? (
