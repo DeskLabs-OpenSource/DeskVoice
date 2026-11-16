@@ -445,6 +445,25 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
     expect((await dropEvents(s.callId)).map((event) => event.payload)).toEqual([{ case: "engine_failed", mode: "task", action: "task_opened", simulated: false, openTurn: null }]);
   });
 
+  it("modo task: o caso 1 da recusa antes de atender e o da ligação feita abrem a pendência de sempre, sem drop_follow_up", async () => {
+    const refused = await scene("drop task refused", [["call_refused", { reason: "engine_not_configured" }]], { endReason: "engine_failed" });
+    const outbound = await scene("drop task outbound one", [["call_answered", { engine: "simulated" }], ["engine_failed", { engine: "x", error: "y" }]], { endReason: "engine_failed", direction: "outbound" });
+    for (const s of [refused, outbound]) {
+      await setMode(s.org, "task");
+      await expectOpened(s, "engine_failed");
+      expect(await dropEvents(s.callId)).toEqual([]);
+    }
+  });
+
+  it("agente apagado depois da ligação (calls.agent_id nulo pela FK): vale off, o de antes", async () => {
+    const s = await dropped("drop deleted agent", "agent_speaking");
+    await setMode(s.org, "task");
+    await withSystem(app, (q) => q.exec("delete from agents where organization_id = $1", [s.org]));
+    expect(await reviewCall_(s)).toBe("no_case");
+    expect(await followUpsOf(s.org)).toEqual([]);
+    expect(await dropEvents(s.callId)).toEqual([]);
+  });
+
   it("os casos 2 a 4 não mudam com o modo e não gravam drop_follow_up", async () => {
     const s = await scene("drop task case2", [toolResult("transfer_to_human", false)]);
     await setMode(s.org, "task");

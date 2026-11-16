@@ -182,7 +182,10 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
   const found = reviewCaseOf(events, call.end_reason, { direction: call.direction, openTurn });
   // Em `off`, o caso 5 não faz nada: a revisão é a de antes da fatia.
   if (found === null || (found === "call_dropped" && mode === "off")) return "no_case";
-  const dropped = DROP_CASES.has(found) && mode !== "off";
+  // `drop_follow_up` só para a ligação recebida e atendida (seção 2, condição 1): a recusa antes de
+  // atender e a ligação feita seguem só no caso 1 de sempre, sem o evento.
+  const answeredInbound = call.direction === "inbound" && events.some((event) => event.kind === "call_answered");
+  const dropped = DROP_CASES.has(found) && mode !== "off" && answeredInbound;
   const report = async (): Promise<void> => {
     if (!dropped) return;
     // `whatsapp` e `call_back` ainda não têm caminho (fatias 2 a 4) e a rota não os aceita; gravados
