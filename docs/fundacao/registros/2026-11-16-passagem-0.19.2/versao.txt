@@ -1,0 +1,12 @@
+# docker ps, imagens em execução (lido às 15:24:32 UTC, depois da ligação)
+deskvoice-voice-1 ghcr.io/desklabs-opensource/deskvoice-voice:0.19.2 Up 5 minutes (healthy)
+deskvoice-routines-1 ghcr.io/desklabs-opensource/deskvoice-routines:0.19.2 Up 5 minutes
+deskvoice-panel-1 ghcr.io/desklabs-opensource/deskvoice-panel:0.19.2 Up 5 minutes (healthy)
+deskvoice-caddy-1 caddy:2.11.9-alpine Up 4 minutes
+deskvoice-wacalls-1 74612a1d175b Up 14 hours (healthy)
+deskvoice-waha-1 devlikeapro/waha:noweb-2026.10.1 Up 14 hours (healthy)
+deskvoice-asterisk-1 927d4c987771 Up 14 hours (healthy)
+deskvoice-postgres-1 postgres:17.11-alpine Up 14 hours (healthy)
+
+# docker inspect: início do contêiner de voz
+/deskvoice-voice-1 2026-11-16T15:19:22.908902081Z

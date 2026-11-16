@@ -325,7 +325,7 @@ O que não prova:
 seção anterior foi refeita. Valeram o mesmo caminho (chamada pelo navegador por script, com o
 convite pedido direto à API interna do processo de voz), os mesmos dois agentes, as mesmas três
 falas sintéticas e o mesmo motor. Saídas em
-[`registros/2026-11-16-passagem-0.19.2/`](registros/2026-11-16-passagem-0.19.2/), com os ids trocados por rótulos.
+[`registros/2026-11-16-passagem-0.19.2/`](registros/2026-11-16-passagem-0.19.2/), com os ids trocados por rótulos. A versão é a das imagens em execução: `panel`, `voice` e `routines` na `0.19.2`. O contêiner de voz subiu às 15:19:22 UTC, antes de a ligação começar, às 15:20:00 ([`versao.txt`](registros/2026-11-16-passagem-0.19.2/versao.txt)).
 
 | O que | O que se observou |
 |---|---|
@@ -337,7 +337,7 @@ falas sintéticas e o mesmo motor. Saídas em
 
 Duas notas valem para as duas provas. A duração vem de `ended_at - started_at` na linha de `calls`.
 O `"seconds": 0` do `call_ended` é o uso medido pelo motor, e o OpenAI Realtime informa tokens, não
-segundos. O valor que o financeiro disse estava nas instruções escritas para ele, e não é invenção do modelo.
+segundos. O valor que o financeiro disse estava nas instruções escritas para ele, e não é invenção do modelo ([`instrucoes.txt`](registros/2026-11-16-passagem-0.19.2/instrucoes.txt), as mesmas nas duas provas).
 
 O que não prova, além do que a seção anterior já lista:
 
