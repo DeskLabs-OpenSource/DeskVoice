@@ -1,7 +1,9 @@
 import { PURGE_CALLER_NOTES_TASK, withOrg } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { NOW, call, createCall, createOrganization, createUser, startPanel } from "../../../../test/kit";
+import { DELETE as deleteNote } from "./caller-notes/[id]/route";
 import { GET as callerHistory } from "./calls/[id]/caller-history/route";
+import { POST as forget } from "./privacy/forget/route";
 import { PUT as putNotesRetention } from "./privacy/caller-notes-retention/route";
 import { POST as exportRecord } from "./privacy/export/route";
 import { PUT as putRetention } from "./privacy/retention/route";
@@ -152,5 +154,116 @@ describe("as notas na exportação e no bloco \"Este número\"", () => {
       ],
     });
     expect(JSON.stringify(result.data)).not.toContain("outra empresa");
+  });
+});
+
+describe("apagar uma nota e esquecer um número (fatia 3b)", () => {
+  const notesOf = (org: string) => read<{ id: string; text: string }>(org, "select id, text from caller_notes order by created_at, id");
+  const deletedEvents = (org: string) =>
+    read<{ actor_user_id: string; payload: unknown }>(org, "select actor_user_id, payload from organization_events where kind = 'caller_notes_deleted' order by id");
+  /** Todo evento da organização, de chamada e da organização, como texto: nenhum pode conter a nota. */
+  const allEvents = async (org: string) =>
+    JSON.stringify([...(await read(org, "select kind, payload from call_events")), ...(await read(org, "select kind, payload from organization_events"))]);
+  async function followUpOf(org: string, callId: string, status: "open" | "done" | "canceled", title: string): Promise<void> {
+    await withOrg(panel.app, org, (q) =>
+      q.exec("insert into follow_ups (organization_id, call_id, caller_e164, title, due_at, created_at, status, closed_at) values ($1, $2, $3, $4, $5, $5, $6, $7)", [
+        org,
+        callId,
+        PHONE,
+        title,
+        NOW,
+        status,
+        status === "open" ? null : NOW,
+      ]),
+    );
+  }
+
+  it("o operador apaga uma nota; o evento leva quem apagou e a contagem, nunca o texto", async () => {
+    const org = await createOrganization(panel.app, "delete note route");
+    const operator = await createUser(panel.app, org, "operator");
+    await noteOf(org, NOTE);
+    await noteOf(org, "Outra nota que fica.");
+    const target = (await notesOf(org)).find((note) => note.text === NOTE);
+
+    const result = await call(deleteNote, { method: "DELETE", cookie: operator.cookie, params: { id: target?.id ?? "" } });
+    expect(result.status).toBe(200);
+    expect((await notesOf(org)).map((note) => note.text)).toEqual(["Outra nota que fica."]);
+    expect(await deletedEvents(org)).toEqual([{ actor_user_id: operator.id, payload: { notes: 1 } }]);
+    expect(await allEvents(org)).not.toContain(NOTE);
+
+    // A segunda vez não acha a nota e não grava de novo.
+    expect(refusal(await call(deleteNote, { method: "DELETE", cookie: operator.cookie, params: { id: target?.id ?? "" } }))).toEqual([404, "not_found"]);
+    expect(await deletedEvents(org)).toHaveLength(1);
+  });
+
+  it("a nota de outra organização não é achada nem apagada", async () => {
+    const mine = await createOrganization(panel.app, "delete note mine");
+    const theirs = await createOrganization(panel.app, "delete note theirs");
+    const owner = await createUser(panel.app, mine, "owner");
+    await noteOf(theirs, NOTE);
+    const [foreign] = await notesOf(theirs);
+    expect(refusal(await call(deleteNote, { method: "DELETE", cookie: owner.cookie, params: { id: foreign?.id ?? "" } }))).toEqual([404, "not_found"]);
+    expect(await notesOf(theirs)).toHaveLength(1);
+    expect(await deletedEvents(mine)).toEqual([]);
+  });
+
+  it("o operador não esquece um número", async () => {
+    const org = await createOrganization(panel.app, "forget operator");
+    const operator = await createUser(panel.app, org, "operator");
+    await noteOf(org, NOTE);
+    expect(refusal(await call(forget, { method: "POST", cookie: operator.cookie, body: { phone: PHONE } }))).toEqual([403, "forbidden"]);
+    expect(await notesOf(org)).toHaveLength(1);
+    expect(await deletedEvents(org)).toEqual([]);
+  });
+
+  it("esquecer apaga as notas e as pendências fechadas, deixa as abertas, grava o final do telefone e as contagens, e não toca a outra organização", async () => {
+    const mine = await createOrganization(panel.app, "forget mine");
+    const theirs = await createOrganization(panel.app, "forget theirs");
+    const admin = await createUser(panel.app, mine, "admin");
+    const first = await noteOf(mine, NOTE);
+    await noteOf(mine, "Segunda nota do número.");
+    await noteOf(mine, "Terceira nota do número.");
+    await noteOf(mine, "Nota de outro número.", "+5531900001111");
+    await followUpOf(mine, first, "done", "Retornar sobre o orçamento");
+    await followUpOf(mine, first, "canceled", "Mandar o boleto");
+    await followUpOf(mine, first, "open", "Confirmar a consulta");
+    const foreign = await noteOf(theirs, NOTE);
+    await followUpOf(theirs, foreign, "done", "Fechada da outra");
+
+    const result = await call(forget, { method: "POST", cookie: admin.cookie, body: { phone: PHONE } });
+    expect(result.status).toBe(200);
+    expect(result.data).toEqual({ phone: PHONE, notes: 3, followUps: 2 });
+
+    expect((await notesOf(mine)).map((note) => note.text)).toEqual(["Nota de outro número."]);
+    expect(await read(mine, "select title, status from follow_ups")).toEqual([{ title: "Confirmar a consulta", status: "open" }]);
+    // Notas e pendências em contagens diferentes: trocar uma pela outra fica vermelho.
+    // Só os quatro últimos dígitos: o registro não tem prazo e não guarda o número esquecido.
+    expect(await deletedEvents(mine)).toEqual([{ actor_user_id: admin.id, payload: { phoneSuffix: PHONE.slice(-4), notes: 3, followUps: 2 } }]);
+    expect(JSON.stringify(await read(mine, "select payload from organization_events"))).not.toContain(PHONE.slice(1));
+    expect(await allEvents(mine)).not.toContain(NOTE);
+    expect(await allEvents(mine)).not.toContain("Segunda nota");
+    expect(await allEvents(mine)).not.toContain("Terceira nota");
+
+    expect((await notesOf(theirs)).map((note) => note.text)).toEqual([NOTE]);
+    expect(await read(theirs, "select title from follow_ups")).toEqual([{ title: "Fechada da outra" }]);
+    expect(await deletedEvents(theirs)).toEqual([]);
+
+    // O registro da tela mostra quem esqueceu o número.
+    const shown = (await call(privacy, { cookie: admin.cookie })).data as { history: { kind: string; actorName: string | null; payload: unknown }[] };
+    expect(shown.history).toContainEqual(expect.objectContaining({ kind: "caller_notes_deleted", payload: { phoneSuffix: PHONE.slice(-4), notes: 3, followUps: 2 } }));
+  });
+
+  it("esquecer um número sem nada grava o pedido mesmo assim, com contagens zero", async () => {
+    const org = await createOrganization(panel.app, "forget empty");
+    const owner = await createUser(panel.app, org, "owner");
+    const result = await call(forget, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
+    expect(result.data).toEqual({ phone: PHONE, notes: 0, followUps: 0 });
+    expect(await deletedEvents(org)).toEqual([{ actor_user_id: owner.id, payload: { notes: 0, followUps: 0, phoneSuffix: PHONE.slice(-4) } }]);
+  });
+
+  it("recusa telefone fora do formato", async () => {
+    const org = await createOrganization(panel.app, "forget invalid");
+    const owner = await createUser(panel.app, org, "owner");
+    expect(refusal(await call(forget, { method: "POST", cookie: owner.cookie, body: { phone: "31 99999" } }))).toEqual([400, "validation_error"]);
   });
 });

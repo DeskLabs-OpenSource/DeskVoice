@@ -120,3 +120,39 @@ export async function purgeCallerNotes(q: OrgQuery, before: Date): Promise<numbe
   if (q.organizationId === "") throw new Error("purgeCallerNotes runs inside withOrg, never withSystem: it would reach every organization");
   return q.exec("delete from caller_notes where created_at < $1", [before]);
 }
+
+/**
+ * Apaga uma nota pelo id, pela tela ("Apagar" no bloco "Este número", fatia 3b). Devolve se ela
+ * existia nesta organização. Só dentro de `withOrg`: numa transação de sistema a RLS não vale, e o
+ * id de outra organização seria alcançado.
+ */
+export async function deleteCallerNote(q: OrgQuery, id: string): Promise<boolean> {
+  if (q.organizationId === "") throw new Error("deleteCallerNote runs inside withOrg, never withSystem: it would reach every organization");
+  return (await q.exec("delete from caller_notes where id = $1", [id])) > 0;
+}
+
+export interface ForgetCallerResult {
+  notes: number;
+  followUps: number;
+}
+
+/**
+ * "Esquecer este número" (seção 2.3 do desenho de 13/11, fatia 3b): o caminho menor que o apagamento
+ * a pedido do titular, só da memória. Apaga as notas do telefone e as pendências FECHADAS dele (feitas
+ * ou canceladas), que são histórico; os avisos delas saem junto, em cascata, como no prazo de guarda.
+ * As pendências ABERTAS ficam: são obrigação da empresa com a pessoa. As ligações, as falas e os
+ * eventos ficam, e seguem o prazo de guarda da transcrição.
+ *
+ * A pendência se liga ao número pela coluna `caller_e164`, que `createFollowUp` copia da linha da
+ * chamada; é o único caminho que cria pendência. A que nasceu numa chamada sem número não tem
+ * telefone, e nenhum "Esquecer" a alcança, como nenhum a mostra no bloco "Este número".
+ *
+ * Só dentro de `withOrg`: numa transação de sistema o mesmo `delete` alcançaria o número em todas as
+ * organizações.
+ */
+export async function forgetCaller(q: OrgQuery, e164: string): Promise<ForgetCallerResult> {
+  if (q.organizationId === "") throw new Error("forgetCaller runs inside withOrg, never withSystem: it would reach every organization");
+  const notes = await q.exec("delete from caller_notes where caller_e164 = $1", [e164]);
+  const followUps = await q.exec("delete from follow_ups where caller_e164 = $1 and status <> 'open'", [e164]);
+  return { notes, followUps };
+}

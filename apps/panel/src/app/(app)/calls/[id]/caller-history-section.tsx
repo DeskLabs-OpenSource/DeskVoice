@@ -1,10 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import type { CommonDictionary } from "../../../../i18n/pt-BR/common";
 import type { TimelineDictionary } from "../../../../i18n/pt-BR/timeline";
 import { fill, type Locale } from "../../../../i18n/locales";
+import { api } from "../../../../ui/api";
+import { useAction } from "../../../../ui/errors";
 import { formatDateTime } from "../../../../ui/format";
+import { Button, Notice } from "../../../../ui/kit";
 import type { CallerHistory } from "../../../../ui/types";
 
 /**
@@ -14,9 +18,25 @@ import type { CallerHistory } from "../../../../ui/types";
  * conteúdo, e o resumo que saiu com o prazo aparece como a frase do prazo. A simulada aparece com a
  * marca "Simulada": é um teste da equipe, e qualquer pessoa da equipe pode simular com o número de um
  * cliente. A pendência e a nota nascidas numa simulada levam a mesma marca (#291). Cada nota do agente
- * traz o link da ligação em que nasceu, e o texto dela aparece como texto puro.
+ * traz o link da ligação em que nasceu, e o texto dela aparece como texto puro. Cada nota tem
+ * "Apagar", que só apaga depois da confirmação (fatia 3b; `destrutivo-pede-confirmacao.md`).
  */
-export function CallerHistorySection({ history, t, common, locale }: { history: CallerHistory | undefined; t: TimelineDictionary; common: CommonDictionary; locale: Locale }) {
+export function CallerHistorySection({
+  history,
+  t,
+  common,
+  locale,
+  onChanged,
+}: {
+  history: CallerHistory | undefined;
+  t: TimelineDictionary;
+  common: CommonDictionary;
+  locale: Locale;
+  onChanged: () => void;
+}) {
+  const remover = useAction();
+  // A nota que espera confirmação: o botão que apaga só existe com ela marcada.
+  const [confirming, setConfirming] = useState<string | null>(null);
   if (!history?.phone) return null;
   const h = t.callerHistory;
   const empty = history.callCount === 0 && history.openFollowUpCount === 0 && history.noteCount === 0;
@@ -73,7 +93,42 @@ export function CallerHistorySection({ history, t, common, locale }: { history: 
                   <Link href={`/calls/${note.callId}`} className="underline hover:text-ink">
                     {h.origin}
                   </Link>
+                  {confirming === note.id ? null : (
+                    <button
+                      type="button"
+                      className="underline hover:text-ink"
+                      onClick={() => {
+                        setConfirming(note.id);
+                      }}
+                    >
+                      {h.deleteNote}
+                    </button>
+                  )}
                 </p>
+                {confirming === note.id ? (
+                  <Notice tone="fail">
+                    <p className="font-bold">{h.deleteNoteTitle}</p>
+                    <p>{h.deleteNoteBody}</p>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      <Button
+                        variant="danger"
+                        busy={remover.busy}
+                        onClick={() =>
+                          void remover.run(() => api(`/caller-notes/${note.id}`, { method: "DELETE" })).then((ok) => {
+                            if (ok) setConfirming(null);
+                            onChanged();
+                          })
+                        }
+                      >
+                        {h.deleteNoteYes}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setConfirming(null)}>
+                        {common.actions.cancel}
+                      </Button>
+                    </div>
+                    {remover.error ? <p>{remover.error}</p> : null}
+                  </Notice>
+                ) : null}
               </li>
             ))}
           </ul>

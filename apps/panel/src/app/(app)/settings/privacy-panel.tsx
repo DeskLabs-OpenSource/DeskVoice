@@ -14,6 +14,8 @@ import { ActionStatus, useAction, useErrorText } from "../../../ui/errors";
 import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Button, Field, Notice, Panel, Skeleton, Switch, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
+import { forgetTarget } from "../../../ui/forget-target";
+import { notesRetentionNeedsConfirm, notesRetentionProblem } from "../../../ui/notes-retention";
 
 type Kind = keyof PrivacyDictionary["history"];
 interface Entry {
@@ -46,6 +48,12 @@ interface Exported {
   content: string;
 }
 
+interface Forgotten {
+  phone: string;
+  notes: number;
+  followUps: number;
+}
+
 interface ErasureCounts {
   calls: number;
   events: number;
@@ -66,17 +74,6 @@ const hasErasable = (counts: ErasureCounts): boolean => counts.calls + counts.fo
 
 const countsLine = ({ calls, events, followUps, notifications, approvals, notes, recordings }: ErasureCounts, t: PrivacyDictionary): string =>
   fill(t.erasureCounts, { calls, events, followUps, notifications, approvals, notes, recordings });
-
-/**
- * O que a tela recusa antes de mandar: fora de 30 a 365, ou acima do prazo de guarda das conversas
- * (decisão 2A). A rota confere as mesmas duas regras.
- */
-export function notesRetentionProblem(value: string, limits: { minDays: number; maxDays: number; transcriptDays: number | null }, t: PrivacyDictionary): string | null {
-  const days = Number(value);
-  if (value.trim() === "" || !Number.isInteger(days) || days < limits.minDays || days > limits.maxDays) return fill(t.notesOutOfRange, { min: limits.minDays, max: limits.maxDays });
-  if (limits.transcriptDays !== null && days > limits.transcriptDays) return fill(t.notesAboveTranscripts, { days: limits.transcriptDays });
-  return null;
-}
 
 /** Uma linha do registro, na voz da tela. */
 function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
@@ -113,6 +110,11 @@ function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
       return fill(t.history.share_revoked, { who, count: numberOf(p.revoked) });
     case "caller_notes_purged":
       return fill(t.history.caller_notes_purged, { days: numberOf(p.retentionDays), count: numberOf(p.count) });
+    case "caller_notes_deleted":
+      // Sem final de telefone: uma nota apagada pelo botão do bloco "Este número". Com ele: "Esquecer este número".
+      return typeof p.phoneSuffix === "string"
+        ? fill(t.history.caller_notes_deleted, { who, suffix: p.phoneSuffix, notes: numberOf(p.notes), followUps: numberOf(p.followUps) })
+        : fill(t.noteDeleted, { who });
     case "caller_notes_retention_changed": {
       // `from` nulo: a organização nunca tinha escolhido, e valia o prazo de fábrica.
       const notesSpan = (value: unknown, fallback: string): string => (typeof value === "number" ? fill(t.days, { n: value }) : fallback);
@@ -157,6 +159,12 @@ export function PrivacyPanel() {
   // A prévia é o pedido de confirmação: o botão que apaga só existe com ela na tela, e nomeia o telefone dela.
   const [preview, setPreview] = useState<ErasurePreview | null>(null);
   const [erased, setErased] = useState<{ phone: string; counts: ErasureCounts } | null>(null);
+  const forgetter = useAction();
+  const [forgetPhone, setForgetPhone] = useState("");
+  // O telefone que espera confirmação: o botão que apaga só existe com ele na tela, e o nomeia.
+  const [forgetConfirming, setForgetConfirming] = useState<string | null>(null);
+  const [forgotten, setForgotten] = useState<Forgotten | null>(null);
+  const [forgetInvalid, setForgetInvalid] = useState<string | null>(null);
   const notesSaver = useAction();
   const [notesDays, setNotesDays] = useState("");
   const [notesProblem, setNotesProblem] = useState<string | null>(null);
@@ -254,7 +262,7 @@ export function PrivacyPanel() {
             if (problem) return;
             const next = Number(notesDays);
             // Encurtar apaga as notas mais velhas: pede confirmação. Alongar não apaga nada.
-            if (next < notesRetention.days) setNotesConfirming(next);
+            if (notesRetentionNeedsConfirm(next, notesRetention.days)) setNotesConfirming(next);
             else storeNotes(next);
           }}
         >
@@ -335,6 +343,69 @@ export function PrivacyPanel() {
               {exported.counts.doNotCall ? <p>{t.exportDoneDnc}</p> : null}
               <p>{t.exportCare}</p>
             </Notice>
+          ) : null}
+        </form>
+      </Panel>
+
+      <Panel title={t.forgetTitle} description={t.forgetLead}>
+        <form
+          className="grid max-w-xl gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setForgotten(null);
+            // A confirmação nomeia o número como o servidor o vai usar; o inválido não chega a abrir.
+            const target = forgetTarget(forgetPhone);
+            setForgetInvalid(target === null ? fill(t.forgetInvalid, { phone: forgetPhone.trim() }) : null);
+            setForgetConfirming(target);
+          }}
+        >
+          <Field label={t.forgetPhone} hint={t.forgetPhoneHint} error={forgetInvalid ?? undefined}>
+            <TextInput
+              mono
+              type="tel"
+              className="max-w-60"
+              value={forgetPhone}
+              onChange={(event) => {
+                setForgetPhone(event.target.value);
+                setForgetConfirming(null);
+                setForgetInvalid(null);
+              }}
+              required
+            />
+          </Field>
+          {forgetConfirming === null ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="submit">{t.forgetRun}</Button>
+            </div>
+          ) : (
+            <Notice tone="fail">
+              <p className="font-bold">{fill(t.forgetConfirmTitle, { phone: formatPhone(forgetConfirming) })}</p>
+              <p>{fill(t.forgetConfirmBody, { phone: formatPhone(forgetConfirming) })}</p>
+              <p>{t.forgetKeeps}</p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <Button
+                  variant="danger"
+                  busy={forgetter.busy}
+                  onClick={() =>
+                    void forgetter
+                      .run(async () => {
+                        setForgotten(await api<Forgotten>("/privacy/forget", { body: { phone: forgetConfirming } }));
+                        setForgetConfirming(null);
+                      })
+                      .then(state.reload)
+                  }
+                >
+                  {fill(t.forgetConfirmYes, { phone: formatPhone(forgetConfirming) })}
+                </Button>
+                <Button variant="ghost" onClick={() => setForgetConfirming(null)}>
+                  {common.actions.cancel}
+                </Button>
+              </div>
+              {forgetter.error ? <p>{forgetter.error}</p> : null}
+            </Notice>
+          )}
+          {forgotten ? (
+            <Notice tone="ok">{fill(t.forgetDone, { phone: formatPhone(forgotten.phone), notes: forgotten.notes, followUps: forgotten.followUps })}</Notice>
           ) : null}
         </form>
       </Panel>

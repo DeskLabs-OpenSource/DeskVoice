@@ -140,9 +140,12 @@ Quem apaga a nota vencida é a própria rotina do prazo, explicitamente (seção
   diz o que não sai: as ligações e as falas seguem o prazo de guarda da transcrição; as pendências
   **abertas** continuam, porque são obrigação da empresa com a pessoa; e o texto que o modelo mandou
   em ligações anteriores à fatia 1 continua onde já estava, nos argumentos de `create_task` gravados
-  em `tool_called` e no corpo dos avisos "Pendência: …" do sino (seção 6). Grava
-  `caller_notes_deleted` com o telefone e as duas contagens, como `caller_data_exported` já grava o
-  telefone.
+  em `tool_called` e no corpo dos avisos "Pendência: …" do sino (seção 6); e os avisos de
+  transferência e de recado da fatia 2, que copiam os títulos das pendências abertas na hora da
+  ligação e são da chamada (`call_id`), não da pendência, por isso a cascata não os alcança. Grava
+  `caller_notes_deleted` com as duas contagens e só os quatro últimos dígitos do telefone
+  (`phoneSuffix`), como `caller_data_erased`: `organization_events` não tem prazo, e o registro do
+  pedido não pode guardar o número esquecido (ajuste da revisão do #298).
 
 ### 2.4 Prazo de guarda e exportação (0014)
 
@@ -521,7 +524,13 @@ entra depois que ela chegar ou o prazo dela vencer (vale A).
   `caller_notes_purged` e `caller_notes_retention_changed`, a linha `note` na exportação, as notas no
   apagamento a pedido do titular e no bloco "Este número", e a regra da simulada abaixo. A nota já
   nasce com prazo, exportação e apagamento a pedido do titular.
-- **3b:** o botão "Apagar nota" e o "Esquecer este número", com `caller_notes_deleted`.
+- **3b:** o botão "Apagar nota" e o "Esquecer este número", com `caller_notes_deleted`. Escolhas da
+  implementação: apaga a nota quem vê o bloco "Este número" (dono, administrador e operador), porque a
+  nota errada é dado pessoal errado e quem atende é quem a encontra; o registro guarda quem apagou.
+  O "Esquecer" alcança a pendência pela coluna `follow_ups.caller_e164`, que `createFollowUp` copia da
+  linha da chamada (é o único caminho que cria pendência); a pendência nascida numa chamada sem
+  número não tem telefone, e nenhum "Esquecer" a alcança, como o bloco também não a mostra. Os avisos
+  do sino ligados por `follow_up_id` a uma pendência fechada saem junto, em cascata, como no prazo.
 
 **A regra da simulada** ([#291](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/291)), para
 as notas e para as pendências. A rota de simular não pede papel, então qualquer pessoa da equipe

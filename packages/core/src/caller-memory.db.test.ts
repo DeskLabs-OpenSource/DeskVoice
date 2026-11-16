@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { createOrganization, openTestDbs } from "../test/helpers";
 import { callerHistory } from "./caller-history";
-import { MAX_CALLER_NOTES_PER_CALL, PURGE_CALLER_NOTES_TASK, purgeCallerNotes, saveCallerNote } from "./caller-memory";
+import { MAX_CALLER_NOTES_PER_CALL, PURGE_CALLER_NOTES_TASK, deleteCallerNote, forgetCaller, purgeCallerNotes, saveCallerNote } from "./caller-memory";
 import { withOrg, withSystem } from "./with-org";
 
 /**
@@ -158,5 +158,93 @@ describe("callerHistory com notas e simuladas (#291)", () => {
       ["Anotado na simulada.", simulated, true],
       ["Anotado na real.", real, false],
     ]);
+  });
+});
+
+describe("apagar uma nota e esquecer um número (fatia 3b)", () => {
+  /** Uma pendência do número, aberta ou fechada, com notificação ligada a ela. */
+  async function followUpOf(organizationId: string, callId: string | null, status: "open" | "done" | "canceled", title: string, phone: string | null = PHONE): Promise<string> {
+    return withSystem(app, async (q) => {
+      const row = await q.one<{ id: string }>(
+        `insert into follow_ups (organization_id, call_id, caller_e164, title, due_at, created_at, status, closed_at)
+         values ($1, $2, $3, $4, $5, $5, $6, $7) returning id`,
+        [organizationId, callId, phone, title, t(0), status, status === "open" ? null : t(1)],
+      );
+      await q.exec("insert into notifications (organization_id, channel, body, follow_up_id, created_at) values ($1, 'panel', 'Pendência', $2, $3)", [organizationId, row?.id, t(0)]);
+      return row?.id ?? "";
+    });
+  }
+  const followUpsOf = (organizationId: string) =>
+    withOrg(app, organizationId, (q) => q.many<{ title: string; status: string }>("select title, status from follow_ups order by title"));
+
+  it("deleteCallerNote e forgetCaller falham em withSystem", async () => {
+    const org = await createOrganization(app, "forget system");
+    const callId = await callOf(org, { at: t(0), from: PHONE });
+    const saved = await save(org, callId, "Nota.");
+    const id = saved.status === "saved" ? saved.id : "";
+    await expect(withSystem(app, (q) => deleteCallerNote(q, id))).rejects.toThrow(/inside withOrg/);
+    await expect(withSystem(app, (q) => forgetCaller(q, PHONE))).rejects.toThrow(/inside withOrg/);
+    expect(await notesOf(org)).toHaveLength(1);
+  });
+
+  it("deleteCallerNote apaga só a nota pedida, e o id de outra organização não é achado", async () => {
+    const org = await createOrganization(app, "delete note");
+    const other = await createOrganization(app, "delete note other");
+    const callId = await callOf(org, { at: t(0), from: PHONE });
+    const first = await save(org, callId, "Primeira.");
+    await save(org, callId, "Segunda.", t(1));
+    const foreign = await save(other, await callOf(other, { at: t(0), from: PHONE }), "Da outra.");
+    if (first.status !== "saved" || foreign.status !== "saved") throw new Error("fixture");
+
+    expect(await withOrg(app, org, (q) => deleteCallerNote(q, foreign.id))).toBe(false);
+    expect((await notesOf(other)).map((note) => note.text)).toEqual(["Da outra."]);
+    expect(await withOrg(app, org, (q) => deleteCallerNote(q, first.id))).toBe(true);
+    expect(await withOrg(app, org, (q) => deleteCallerNote(q, first.id))).toBe(false);
+    expect((await notesOf(org)).map((note) => note.text)).toEqual(["Segunda."]);
+  });
+
+  it("forgetCaller apaga as notas e as pendências fechadas do número, deixa as abertas, os outros números e as ligações", async () => {
+    const org = await createOrganization(app, "forget");
+    const other = await createOrganization(app, "forget other");
+    const OTHER_PHONE = "+5531911110000";
+    const inbound = await callOf(org, { at: t(0), from: PHONE, to: LINE });
+    const outbound = await callOf(org, { at: t(1), direction: "outbound", from: LINE, to: PHONE });
+    const stranger = await callOf(org, { at: t(2), from: OTHER_PHONE, to: LINE });
+    await save(org, inbound, "Prefere de manhã.");
+    await save(org, outbound, "O pedido é o 4471.", t(1));
+    await save(org, stranger, "De outro número.", t(2));
+    const done = await followUpOf(org, inbound, "done", "b feita");
+    await followUpOf(org, outbound, "canceled", "c cancelada");
+    const open = await followUpOf(org, inbound, "open", "a aberta");
+    await followUpOf(org, stranger, "done", "d de outro número", OTHER_PHONE);
+    const otherCall = await callOf(other, { at: t(0), from: PHONE });
+    await save(other, otherCall, "Na outra organização.");
+    await followUpOf(other, otherCall, "done", "e fechada da outra");
+
+    expect(await withOrg(app, org, (q) => forgetCaller(q, PHONE))).toEqual({ notes: 2, followUps: 2 });
+
+    expect((await notesOf(org)).map((note) => note.text)).toEqual(["De outro número."]);
+    expect(await followUpsOf(org)).toEqual([
+      { title: "a aberta", status: "open" },
+      { title: "d de outro número", status: "done" },
+    ]);
+    // Os avisos da pendência fechada saem em cascata; os da aberta ficam.
+    const notifications = await withOrg(app, org, (q) => q.many<{ follow_up_id: string }>("select follow_up_id from notifications where follow_up_id = any($1::uuid[])", [[done, open]]));
+    expect(notifications.map((row) => row.follow_up_id)).toEqual([open]);
+    // As ligações ficam: seguem o prazo de guarda.
+    expect(await withOrg(app, org, (q) => q.many("select id from calls where id = any($1::uuid[])", [[inbound, outbound]]))).toHaveLength(2);
+    // A outra organização não é tocada.
+    expect((await notesOf(other)).map((note) => note.text)).toEqual(["Na outra organização."]);
+    expect(await followUpsOf(other)).toEqual([{ title: "e fechada da outra", status: "done" }]);
+
+    // Repetir não acha mais nada.
+    expect(await withOrg(app, org, (q) => forgetCaller(q, PHONE))).toEqual({ notes: 0, followUps: 0 });
+  });
+
+  it("a linha da empresa não esquece as notas de quem ligou para ela", async () => {
+    const org = await createOrganization(app, "forget line");
+    await save(org, await callOf(org, { at: t(0), from: PHONE, to: LINE }), "Nota.");
+    expect(await withOrg(app, org, (q) => forgetCaller(q, LINE))).toEqual({ notes: 0, followUps: 0 });
+    expect(await notesOf(org)).toHaveLength(1);
   });
 });

@@ -12,7 +12,7 @@ afterAll(async () => {
 });
 
 const PHONE = "+5531922221111";
-const NOTE = "Prefere ser atendida de manhã; o pedido é o 4471.";
+const NOTE = "Prefere ser atendida de manhã; o pedido é o PED-4471-Q.";
 const notesOf = (organizationId: string) => withSystem(app, (q) => q.many<{ call_id: string; caller_e164: string; text: string }>("select call_id, caller_e164, text from caller_notes where organization_id = $1 order by created_at, id", [organizationId]));
 const withPhone = (callId: string, phone: string | null) => withSystem(app, (q) => q.exec("update calls set from_e164 = $2 where id = $1", [callId, phone]));
 
@@ -30,11 +30,11 @@ describe("remember_caller_note", () => {
 
     expect(result).toMatchObject({ ok: true });
     expect(await notesOf(ctx.organizationId)).toEqual([{ call_id: ctx.callId, caller_e164: PHONE, text: NOTE }]);
-    expect(JSON.stringify(result)).not.toMatch(/manhã|4471/);
+    expect(JSON.stringify(result)).not.toMatch(/manhã|PED-4471-Q/);
     const events = await eventsOf(app, ctx.callId);
     expect(events.map((event) => event.kind)).toEqual(["tool_called", "tool_result"]);
     expect(events[0]?.payload).toEqual({ name: "remember_caller_note", args: { omitted: "personal_text" } });
-    expect(JSON.stringify(events)).not.toMatch(/manhã|4471|\+5531900000000/);
+    expect(JSON.stringify(events)).not.toMatch(/manhã|PED-4471-Q|\+5531900000000/);
   });
 
   it("numa ligação sem número não grava nada e devolve uma fala para seguir sem anotar", async () => {
@@ -43,7 +43,7 @@ describe("remember_caller_note", () => {
     const result = await runTool(rememberCallerNote, { text: NOTE }, ctx);
     expect(result).toMatchObject({ ok: false, noEffect: true });
     expect(result.message).toMatch(/nada foi anotado/);
-    expect(result.message).not.toMatch(/manhã|4471/);
+    expect(result.message).not.toMatch(/manhã|PED-4471-Q/);
     expect(await notesOf(ctx.organizationId)).toEqual([]);
     expect(await tasksOf(app, ctx.organizationId)).toEqual([]);
   });

@@ -409,4 +409,23 @@ describe("apagar a conversa a pedido do titular", () => {
     expect(receipt).not.toContain(PHONE);
     for (const spoken of SPOKEN) expect(receipt).not.toContain(spoken);
   });
+
+  // Ressalva K16b do Verificador no #295: a nota sai também pelo número, e não só pela chamada. Aqui a
+  // nota do titular mora numa chamada que o caminho das chamadas dele não alcança (o outro lado dela é
+  // outro telefone), então só o ramo `caller_e164 = $1` de `NOTES_WHERE` a apaga.
+  it("apaga a nota pelo número mesmo quando a chamada dela não é do titular", async () => {
+    const org = await createOrganization(panel.app, "erasure note by number");
+    const owner = await createUser(panel.app, org, "owner");
+    const callId = await createCall(panel.app, org, NOW);
+    await withOrg(panel.app, org, async (q) => {
+      await q.exec("update calls set from_e164 = $2, to_e164 = $3, status = 'completed', ended_at = $4 where id = $1", [callId, OTHER, LINE, NOW]);
+      await q.exec("insert into caller_notes (organization_id, call_id, caller_e164, text, created_at) values ($1, $2, $3, 'Nota do titular numa chamada alheia.', $4)", [org, callId, PHONE, NOW]);
+      await q.exec("insert into caller_notes (organization_id, call_id, caller_e164, text, created_at) values ($1, $2, $3, 'Nota de quem ligou nessa chamada.', $4)", [org, callId, OTHER, NOW]);
+    });
+
+    const result = await call(erase, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
+    expect(result.status).toBe(200);
+    expect(result.data).toMatchObject({ calls: 0, notes: 1 });
+    expect(await read(org, "select text from caller_notes order by text")).toEqual([{ text: "Nota de quem ligou nessa chamada." }]);
+  });
 });
