@@ -48,6 +48,7 @@ O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medi
 | `dependencias.ts` | `zod` e `ws`, pegos de `packages/voice-engine` (sem dependência nova na raiz) |
 | `decisores/laya.ts` | o Laya: acerto, latência e CPU, sobre o conjunto do filtro. `laya_local.py` só executa os pedidos que recebe (`laya.test.ts`, com o ajudante trocado por um falso) |
 | `decisores/jev.ts` | o Jev: os mesmos pedidos do Laya, com acerto e latência (`jev.test.ts`, contra um servidor HTTP falso) |
+| `filtro-na-chamada.ts` | a medida da fatia 6 da R12: o filtro **do produto** (`deciders/jev.ts`, as perguntas de `speech-filter.ts`, o prazo de 1 s) sobre o conjunto do filtro, com a leitura por tipo de item, o fundo como marca, p50 e p95 e quantas decisões chegaram a tempo. Teto próprio de US$ 0,05 por rodada (`filtro-na-chamada.test.ts`, com um decisor falso que erra de propósito) |
 | `reducao-de-ruido.ts` | a medida da redução de ruído local em 8 kHz (fatias 4 e 4b da DESA-24): só mede, não liga nada |
 | `reducao_de_ruido.py` | os candidatos dessa medida (RNNoise, DeepFilterNet em fluxo e em torch; SpeexDSP só se pedido), um por processo |
 | `regua-da-reducao.ts` | a régua dela: perda na fala baixa por quadro (acima de 1 dB de média reprova) e na frase inteira, a fala baixa debaixo de ruído, redução do ruído, atraso e tempo por pedaço |

@@ -5,14 +5,23 @@ import { CALL_EVENT_KINDS, ORG_EVENT_KINDS, type CallEventKind, type OrgEventKin
  * com `organization_id:call_id:id` quando a transação confirma.
  */
 export async function recordEvent(q: OrgQuery, callId: string, kind: CallEventKind, payload: object, at: Date): Promise<void> {
+  await recordEventWithId(q, callId, kind, payload, at);
+}
+
+/**
+ * `recordEvent`, devolvendo o id do evento, para quem precisa prender algo a ele depois (a marca do
+ * filtro da fala presa à fala de quem ligou).
+ */
+export async function recordEventWithId(q: OrgQuery, callId: string, kind: CallEventKind, payload: object, at: Date): Promise<string> {
   if (!CALL_EVENT_KINDS.includes(kind)) throw new Error(`Unknown call event kind: ${JSON.stringify(kind)}`);
   // A organização vem da própria chamada: vale igual dentro de `withOrg` e de `withSystem`, e o
   // evento nunca fica numa organização diferente da chamada.
-  const inserted = await q.exec(
-    "insert into call_events (organization_id, call_id, at, kind, payload) select organization_id, id, $2, $3, $4 from calls where id = $1",
+  const inserted = await q.one<{ id: string }>(
+    "insert into call_events (organization_id, call_id, at, kind, payload) select organization_id, id, $2, $3, $4 from calls where id = $1 returning id::text",
     [callId, at, kind, JSON.stringify(payload)],
   );
-  if (inserted !== 1) throw new Error(`Call ${callId} not found in this organization: event ${kind} was not recorded`);
+  if (!inserted) throw new Error(`Call ${callId} not found in this organization: event ${kind} was not recorded`);
+  return inserted.id;
 }
 
 /** Grava um evento da organização (fora de uma chamada). `actorUserId` nulo: quem fez foi uma rotina. */

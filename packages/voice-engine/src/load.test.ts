@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadEngines } from "./load";
+import { loadDecisionModels, loadEngines } from "./load";
 
 let dir: string | undefined;
 afterEach(async () => {
@@ -45,5 +45,21 @@ describe("loadEngines", () => {
     await writeFile(join(dir, "first.ts"), fixtureEngine("same"));
     await writeFile(join(dir, "second.ts"), fixtureEngine("same"));
     await expect(loadEngines(dir)).rejects.toThrow(/repetido/);
+  });
+});
+
+describe("loadDecisionModels", () => {
+  it("descobre o Jev e o simulado pela pasta deciders/; só o simulado não tem chave", async () => {
+    const models = await loadDecisionModels();
+    expect([...models.keys()].sort()).toEqual(["jev", "simulated"]);
+    expect(models.get("simulated")?.keyless).toBe(true);
+    expect(models.get("jev")?.keyless).toBeFalsy();
+    for (const model of models.values()) expect(model.pricing.checkedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("recusa arquivo sem modelo no export default", async () => {
+    dir = await mkdtemp(join(tmpdir(), "deskvoice-deciders-"));
+    await writeFile(join(dir, "broken.ts"), "export default { id: 'broken' };");
+    await expect(loadDecisionModels(dir)).rejects.toThrow(/broken\.ts/);
   });
 });

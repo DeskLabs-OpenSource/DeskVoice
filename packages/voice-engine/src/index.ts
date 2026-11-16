@@ -9,3 +9,6 @@ export { createSimulatedEngine, setSimulatedScript, SIMULATED_PREFIX } from "./e
 export type { SimulatedScript, SimulatedStep } from "./engines/simulated";
 export * from "./brain";
 export { loadBrains } from "./brain-load";
+export * from "./speech-filter";
+export { createSimulatedDecider, neutralAnswers } from "./deciders/simulated";
+export type { SimulatedDecision } from "./deciders/simulated";

@@ -1,6 +1,6 @@
 import { createDb, loadConfig, systemClock } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
-import { loadEngines } from "@deskvoice/voice-engine";
+import { loadDecisionModels, loadEngines } from "@deskvoice/voice-engine";
 import { createAriClient } from "./ari";
 import { createLogger, messageOf } from "./log";
 import { startVoiceServer } from "./server";
@@ -11,7 +11,7 @@ import { wacallsFromEnv } from "./wacalls-client";
 const log = createLogger(systemClock);
 const config = loadConfig(process.env);
 const db = createDb(config.databaseUrl, config.systemDatabaseUrl);
-const [engines, tools] = await Promise.all([loadEngines(), loadTools()]);
+const [engines, tools, decisionModels] = await Promise.all([loadEngines(), loadTools(), loadDecisionModels()]);
 
 const ari = createAriClient({ url: config.ariUrl, app: config.ariApp, username: config.ariUsername, password: config.ariPassword, log });
 const server = await startVoiceServer({
@@ -19,6 +19,7 @@ const server = await startVoiceServer({
   clock: systemClock,
   engines,
   tools,
+  decisionModels,
   ari,
   secretKey: config.secretKey,
   audioSocketPort: config.audioSocketPort,
@@ -36,7 +37,7 @@ const server = await startVoiceServer({
 // Sem Asterisk no ar o processo não morre: a escuta fica tentando, a saúde diz `fail` com o
 // motivo, e a chamada simulada funciona assim mesmo.
 ari.start();
-log("info", "voice process started", { audioSocketPort: server.audioSocketPort, internalPort: server.internalPort, webPort: server.webPort, engines: [...engines.keys()], tools: [...tools.keys()] });
+log("info", "voice process started", { audioSocketPort: server.audioSocketPort, internalPort: server.internalPort, webPort: server.webPort, engines: [...engines.keys()], tools: [...tools.keys()], decisionModels: [...decisionModels.keys()] });
 
 let stopping = false;
 async function shutdown(signal: string): Promise<void> {

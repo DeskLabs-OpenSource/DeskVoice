@@ -7,6 +7,7 @@ import {
   enqueueTask,
   loadCallerMemory,
   recordEvent,
+  recordEventWithId,
   recordingPath,
   rememberedBlock,
   voicemailLanguageSchema,
@@ -35,10 +36,18 @@ import {
   type ToolResult,
 } from "@deskvoice/tools";
 import {
+  DECISION_DEADLINE_MS,
+  DECISION_MODEL_SETTING,
   EngineTimeoutError,
   MICROCENTS_PER_CENT,
   SIMULATED_PREFIX,
+  decisionModelKeySetting,
+  decisionModelOf,
   estimateCostCents,
+  readSpeechDecision,
+  speechFilterQuestions,
+  speechFilterState,
+  type DecisionModel,
   type Usage,
   type VoiceEngine,
   type VoiceSession,
@@ -68,6 +77,8 @@ export interface CallSessionDeps {
   recordingsDir?: string;
   /** Espaço livre mínimo na pasta para gravar (padrão `MIN_FREE_BYTES_TO_RECORD`). */
   recordingMinFreeBytes?: number;
+  /** Os modelos de decisão instalados (`loadDecisionModels`). Sem eles, o filtro da fala não liga. */
+  decisionModels?: Map<string, DecisionModel>;
 }
 
 export interface CallSessionInput {
@@ -298,6 +309,17 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * destino de uma passagem recebe os mesmos itens. `null` com a chave desligada ou sem item.
    */
   let memory: CallerMemory | null = null;
+  /**
+   * O filtro da fala de quem ligou (R12, fatia 6), lido uma vez no começo, como a memória. Ausente
+   * (o de fábrica), nenhum pedido sai e nada muda na linha do tempo.
+   */
+  let filter: { model: DecisionModel; apiKey: string } | undefined;
+  /** A última fala do agente, de qualquer trecho: é o contexto da pergunta "é fala de fundo?". */
+  let lastAgentText: string | undefined;
+  /** As leituras em voo: o fim da chamada espera por elas (cada uma tem o prazo de 1 s) antes de `call_ended`. */
+  const readingsRunning = new Set<Promise<void>>();
+  /** O custo do filtro, em micro-centavos: um pedido custa milésimos de centavo. */
+  let decisionMicrocents = 0;
   let ending = false;
   let recorder: Recording | undefined;
   /** A gravação já parou a pedido de quem ligou: não volta na mesma chamada. */
@@ -313,6 +335,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let requestedEnd: Ending | undefined;
   let requestedFarewell: string | undefined;
   let costCents = 0;
+  /**
+   * O custo da ligação: o da voz, em centavos, mais o do filtro, arredondado uma vez só, no total
+   * (a mesma conta de `calls.cost_cents` na classificação). Sem filtro, é o custo da voz, como antes.
+   */
+  const callCents = (): number => costCents + Math.round(decisionMicrocents / MICROCENTS_PER_CENT);
   /** Os segundos da ligação inteira, somados de todos os trechos (vão em `call_ended`). */
   const usage = { seconds: 0 };
   const cancelTimers: Array<() => void> = [];
@@ -339,13 +366,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // tempo antes de `call_ended`.
     callEnded.abort(new Error("The call ended before the tool finished"));
     await Promise.allSettled(toolsRunning);
+    // A leitura em voo tem prazo de 1 s: o que ela disser entra na linha do tempo antes de `call_ended`.
+    await Promise.allSettled(readingsRunning);
     try {
       // Fechar o motor entrega a última medição de uso; ela entra no custo gravado abaixo.
       await voice?.close();
       for (const [kind, payload] of end.events ?? []) await event(kind, payload);
       if (end.notice) await panelNotice(q, clock, callId, end.notice);
-      await q.exec("update calls set status = $2, end_reason = $3, ended_at = $4, cost_cents = $5 where id = $1", [callId, end.status, end.endReason, clock.now(), costCents]);
-      await event("call_ended", { status: end.status, reason: end.endReason, costCents, seconds: Math.round(usage.seconds) });
+      await q.exec("update calls set status = $2, end_reason = $3, ended_at = $4, cost_cents = $5 where id = $1", [callId, end.status, end.endReason, clock.now(), callCents()]);
+      await event("call_ended", { status: end.status, reason: end.endReason, costCents: callCents(), seconds: Math.round(usage.seconds) });
       const taskId = await enqueueTask(q, { kind: "summarize_call", payload: {}, callId, runAt: clock.now() });
       await event("task_queued", { taskId, kind: "summarize_call" });
       // O supervisor de regras fixas: sem modelo e sem gasto, abre uma pendência se a ligação terminou sem próximo passo.
@@ -380,7 +409,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (savedRecording && savedRecording.sha256Error !== undefined) logFailure("could not compute the recording fingerprint")(savedRecording.sha256Error);
     if (savedRecording) await event("recording_saved", { bytes: savedRecording.bytes, sha256: savedRecording.sha256 }).catch(logFailure("could not record the saved recording"));
     await recordingFailed;
-    resolveDone({ status: end.status, endReason: end.endReason, costCents });
+    resolveDone({ status: end.status, endReason: end.endReason, costCents: callCents() });
   }
 
   /**
@@ -486,7 +515,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const total = legs.reduce((sum, each) => sum + each.costCents, 0);
     const delta = total - costCents;
     costCents = total;
-    const reached = reachCeiling(total);
+    const reached = reachCeiling(callCents());
     await q.exec(
       "insert into usage_ledger (organization_id, call_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
       [
@@ -506,8 +535,58 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         clock.now(),
       ],
     );
-    await q.exec("update calls set cost_cents = $2 where id = $1", [callId, total]);
-    if (reached) await recordCeiling(total, reached);
+    await q.exec("update calls set cost_cents = $2 where id = $1", [callId, callCents()]);
+    if (reached) await recordCeiling(callCents(), reached);
+  }
+
+  /**
+   * Pergunta ao modelo de decisão sobre uma fala de quem ligou, sem que ninguém espere (desenho R12,
+   * "A regra que impede o atraso"). O filtro **só marca e sugere**: o texto gravado nunca muda, e a
+   * fala nunca sai da linha do tempo nem do que o motor ouviu. Com resposta, a marca de fundo e a
+   * sugestão de leitura que passam do corte ficam presas à própria fala (`read`, ao lado de `text`,
+   * e saem com ela no prazo de guarda e no apagamento, que trocam o payload inteiro), e a leitura
+   * vira `caller_speech_read` com as confianças e o agente do trecho. O "terminou o pensamento" chega
+   * depois do turno (o texto é o final), e por isso é só observação: não toca a guarda contra o
+   * silêncio. Sem resposta no prazo, o pedido é cancelado e a linha do tempo diz `late`.
+   */
+  async function readCallerSpeech(owner: Leg, active: { model: DecisionModel; apiKey: string }, text: string, recorded: Promise<string>): Promise<void> {
+    const vocabulary = owner.agent.vocabulary;
+    // O texto de quem ligou vai só no `state`. As perguntas são fixas.
+    const input = { state: speechFilterState(lastAgentText, text), questions: speechFilterQuestions(text, vocabulary) };
+    const askedAt = clock.now().getTime();
+    const result = await active.model.decide(active.apiKey, input, { timeoutMs: DECISION_DEADLINE_MS, schedule });
+    const latencyMs = clock.now().getTime() - askedAt;
+    const common = { agentId: owner.agent.id, model: result.model, latencyMs };
+    if (result.costMicrocents > 0 || (result.usage.inputTokens ?? 0) > 0) {
+      decisionMicrocents += result.costMicrocents;
+      const reached = reachCeiling(callCents());
+      // Uma linha por pedido, no agente do trecho, com o id do modelo no lugar do motor.
+      await q.exec(
+        "insert into usage_ledger (organization_id, call_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9)",
+        [organizationId, callId, active.model.id, owner.agent.id, result.usage.inputTokens ?? 0, result.usage.outputTokens ?? 0, Math.round(result.costMicrocents / MICROCENTS_PER_CENT), result.costMicrocents, clock.now()],
+      );
+      await q.exec("update calls set cost_cents = $2 where id = $1", [callId, callCents()]);
+      if (reached) await recordCeiling(callCents(), reached);
+    }
+    if (!result.ok) return void (await event("caller_speech_read", { ...common, onTime: false, failure: result.failure, status: result.status }));
+    const reading = readSpeechDecision(result.answers, vocabulary);
+    const marked = reading.marks.background !== undefined || reading.marks.suggestion !== undefined;
+    if (marked) {
+      // A fala que já saiu pelo prazo de guarda ou foi apagada não tem mais `text`, e não recebe marca.
+      const transcriptId = await recorded;
+      await q.exec("update call_events set payload = payload || jsonb_build_object('read', $2::jsonb) where id = $1 and kind = 'transcript_user' and payload ? 'text'", [
+        transcriptId,
+        JSON.stringify(reading.marks),
+      ]);
+    }
+    await event("caller_speech_read", {
+      ...common,
+      onTime: true,
+      background: reading.background,
+      reading: reading.reading && { confidence: reading.reading.confidence, suggested: reading.marks.suggestion !== undefined },
+      finished: reading.finished === null ? null : { confidence: reading.finished, observation: true },
+      marked,
+    });
   }
 
   /** (Re)agenda o fim pela duração máxima, contada de quando a ligação foi atendida. */
@@ -726,7 +805,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("transcript", (turn) => {
       // Depois de uma passagem, a fala do agente leva quem falou.
       const payload = turn.speaker === "agent" && handoffs > 0 ? { text: turn.text, agentId: row.id } : { text: turn.text };
-      void event(turn.speaker === "user" ? "transcript_user" : "transcript_agent", payload).catch(logFailure("could not record a transcript"));
+      const recorded = recordEventWithId(q, callId, turn.speaker === "user" ? "transcript_user" : "transcript_agent", payload, clock.now());
+      recorded.catch(logFailure("could not record a transcript"));
+      if (turn.speaker === "agent") return void (lastAgentText = turn.text);
+      // Com o filtro desligado, nada além da fala; com ele, a pergunta corre ao lado, sem segurar nada.
+      if (!filter || ending || turn.text.trim() === "") return;
+      const reading: Promise<void> = readCallerSpeech(self, filter, turn.text, recorded)
+        .catch(logFailure("could not record the reading of a caller turn"))
+        .finally(() => readingsRunning.delete(reading));
+      readingsRunning.add(reading);
     });
     session.on("toolCall", (toolCall) => {
       // Ferramenta em curso, aprovação em espera inclusive: a guarda não age até ela acabar.
@@ -823,12 +910,32 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       await from.voice.close();
       await recorded;
       // O teto do novo agente pode ser menor que o custo já gasto: vale na hora, sem esperar outra medição.
-      const reached = reachCeiling(costCents);
-      if (reached) await recordCeiling(costCents, reached);
+      const reached = reachCeiling(callCents());
+      if (reached) await recordCeiling(callCents(), reached);
       return { ok: true };
     } finally {
       handingOff = false;
     }
+  }
+
+  /** Lê `calls.decision_model` e abre o filtro. Devolve o motivo quando ele foi ligado e não abriu. */
+  async function openFilter(): Promise<{ failure: "model_not_installed" | "key_missing" | "key_unreadable"; model: string } | undefined> {
+    const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, DECISION_MODEL_SETTING]);
+    const chosen = decisionModelOf(stored?.value);
+    if (chosen === undefined) return undefined;
+    const modelId = overrides?.engineId ? "simulated" : chosen;
+    const model = deps.decisionModels?.get(modelId);
+    if (!model) return { failure: "model_not_installed", model: modelId };
+    if (model.keyless) return void (filter = { model, apiKey: "" });
+    const key = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, decisionModelKeySetting(model.id)]);
+    if (typeof key?.value !== "string") return { failure: "key_missing", model: model.id };
+    try {
+      filter = { model, apiKey: decryptSecret(key.value, deps.secretKey) };
+    } catch {
+      // O motivo da falha de decifrar não vai para a linha do tempo: só o código.
+      return { failure: "key_unreadable", model: model.id };
+    }
+    return undefined;
   }
 
   async function run(): Promise<void> {
@@ -863,6 +970,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const memoryKey = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALLER_MEMORY_AGENT_SETTING]);
       if (callerMemoryAgentOf(memoryKey?.value)) memory = await loadCallerMemory(q, { callId, now: clock.now() });
     }
+
+    // O filtro da fala: só com `calls.decision_model` gravado. Ausente, a única diferença é a leitura
+    // dessa configuração: nenhum pedido sai, e a linha do tempo é a de antes, byte a byte. A chamada
+    // simulada nunca gasta com provedor: com o filtro ligado, ela pergunta ao modelo simulado.
+    const filterProblem = await openFilter();
 
     // Chave ausente ou inválida: a chamada não fica muda. É recusada com evento, aviso e sinal.
     const opened = await connectEngine(
@@ -917,6 +1029,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       event("recording_notice", { text: recordingNotice }),
       // Os ids e o tamanho, nunca o texto: `call_events` não sai com o prazo da memória.
       ...(memory ? [event("memory_loaded", { noteIds: memory.noteIds, followUpIds: memory.followUpIds, chars: memory.chars })] : []),
+      // O filtro foi ligado e não pôde abrir: a linha do tempo diz por quê, e a chamada segue sem ele.
+      ...(filterProblem ? [event("caller_speech_read", { onTime: false, failure: filterProblem.failure, model: filterProblem.model })] : []),
     ];
     if (call.direction !== "inbound") session.say(recordingNotice);
     answeredAt = clock.now();
