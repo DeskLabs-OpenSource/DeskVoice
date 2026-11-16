@@ -26,9 +26,14 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
 
 - **Nada no `.env`, nada no Compose, nada no instalador.** Nenhuma variável nova. Reinstalar e
   atualizar não mudam a lista de quem é aceito; só a tela muda.
-- **O mecanismo é o ACL do PJSIP** (`type=acl`, módulo `res_pjsip_acl`): `deny` para tudo, depois um
-  `permit` por endereço liberado. Ele age antes da identificação da linha, então vale também para
-  `OPTIONS` e `REGISTER` de varredura.
+- **O mecanismo é o ACL de cada endpoint** (as opções `deny` e `permit` da seção `type=endpoint`):
+  `deny` para tudo, depois um `permit` por endereço liberado **daquela linha**. Nunca uma lista
+  global (`type=acl`): com a lista global, o endereço da operadora de uma organização liberaria
+  a entrada na linha de outra organização (requisito da sessão revisora no parecer do #325). O ACL
+  do endpoint age depois da identificação da linha: a requisição de um endereço liberado para a
+  linha A que se apresenta como a linha B (o `line` dela) é recusada pela B. A requisição que não
+  casa com linha nenhuma já é recusada por falta de endpoint (não há endpoint `anonymous`); o que a
+  central responde a ela é a medida M1.
 - **Endereço liberado de uma linha** (**novo**, calculado só no processo de voz):
   - linha por IP: o `host` e os `match_extra`, como já são lidos por `readInbound`;
   - linha por registro com IP no `host`: esse IP;
@@ -50,8 +55,10 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
 - **A tela mostra o que está liberado.** Cada linha mostra "Aceita ligações de: …", com a hora da
   última mudança do conjunto ("atualizados em", contrato 4) quando o `host` é nome, e o texto "Se as ligações desta operadora pararem de
   chegar, ela pode estar entregando de outro endereço: inclua-o em Endereços extras". O conjunto
-  fica gravado na linha (**novo**: `trunks.inbound_allowed text[] not null default '{}'` e
-  `trunks.inbound_resolved_at timestamptz`), escrito só pelo processo de voz.
+  fica gravado na linha (`trunks.inbound_allowed` e `trunks.inbound_resolved_at`, da fatia 1),
+  escrito só pelo processo de voz. Na fatia 2, o que veio do nome fica guardado à parte
+  (**novo**: `trunks.inbound_from_name text[] not null default '{}'`), porque só essa parte
+  usa a regra do último conjunto (contrato 7).
 
 ### O que é núcleo, e as regras de produto
 
@@ -65,10 +72,13 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
 
 ## 3. Contrato
 
-1. `renderTrunksConf` (ou uma função irmã no mesmo arquivo) devolve, além das seções de linha, uma
-   seção `[deskvoice-acl]` `type=acl` com `deny=0.0.0.0/0.0.0.0`, `deny=::/0` e um `permit=` por
-   endereço liberado, sem repetição, canônico (a mesma forma de `parseTrunkHost`). Sem linha
-   emitida, a seção sai só com os `deny`.
+1. `renderTrunk` escreve, na seção `type=endpoint` de cada linha, `deny=0.0.0.0/0.0.0.0`,
+   `deny=::/0` e um `permit=` por endereço liberado **dessa linha**, sem repetição, canônico (a
+   mesma forma de `parseTrunkHost`). O arquivo gerado não tem seção `type=acl`. **Teste de
+   isolamento** (render e `test:db`): duas organizações, cada uma com uma linha em endereço
+   próprio; o endpoint de cada uma só tem o `permit` dos seus endereços, e nenhum endereço de uma
+   aparece na outra, também quando as duas usam o mesmo nome de operadora com resoluções
+   diferentes no tempo.
 2. Endereço que não é IP nem bloco nunca vira `permit` (o ACL não resolve nome). Bloco mais largo
    que o permitido por `isBlockTooWide` não vira `permit`.
 3. A resolução de nome é uma dependência injetada (`resolve(name) => Promise<string[]>`), para o
@@ -76,17 +86,40 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
 4. `inbound_allowed` e `inbound_resolved_at` só mudam quando o conjunto muda (mesma regra de
    `setStatus`: `is distinct from`).
 5. A tela lê o que está gravado; o painel nunca resolve nome.
-6. **O filtro sai do mesmo conjunto que a tela mostra** (fatia 2): o `[deskvoice-acl]` é escrito a
-   partir do conjunto calculado por `computeAllowed` (`plan.allowed`), que já aplica a regra do
+6. **O filtro sai do mesmo conjunto que a tela mostra** (fatia 2): o `permit` de cada endpoint é
+   escrito a partir do conjunto calculado por `computeAllowed` (`plan.allowed`), que já aplica a regra do
    último conjunto, e nunca de `allowedAddresses` chamado direto. Do contrário, tela e filtro
    divergem justamente quando o DNS falha. Teste: resolução que falha, o `permit` é igual ao
    `inbound_allowed` gravado.
-7. **O último conjunto só vale para as mesmas entradas** (fatia 2, antes de o filtro entrar).
-   Quando o painel muda `host`, `auth_mode` ou `match_extra` de uma linha, ele zera
-   `inbound_allowed` e `inbound_resolved_at` dela, na mesma gravação (única escrita do painel
-   nessas colunas). Assim, trocar o nome A pelo nome B com B sem resolver não deixa o `permit` da
-   operadora antiga, e um extra removido sai na hora. O preço, aceito: editar a linha com o DNS
-   fora deixa só a parte numérica (IP e extras) até o nome resolver, com a linha em `warn`.
+7. **O último conjunto só vale para o que veio do nome** (fatia 2, antes de o filtro entrar;
+   requisito da sessão revisora no #325). O processo de voz grava à parte o que o nome resolveu
+   (`inbound_from_name`). O conjunto da linha é sempre: o `host` numérico e os `match_extra`
+   **atuais** da linha, mais o que veio do nome (o resolvido agora ou, se a resolução falhou,
+   `inbound_from_name`). Um extra removido sai do `permit` na aplicação seguinte, com o DNS
+   funcionando ou não. O painel zera `inbound_from_name`, `inbound_allowed` e
+   `inbound_resolved_at` só quando muda o `host` ou o `auth_mode` da linha, na mesma gravação
+   (única escrita do painel nessas colunas); mudar só os extras não zera nada. Assim, trocar o
+   nome A pelo nome B com B sem resolver não deixa o `permit` da operadora antiga. A migration
+   preenche `inbound_from_name` das linhas por registro com nome a partir de `inbound_allowed`
+   menos os `match_extra` dela (conferir que os dois estão na mesma forma canônica; se não
+   estiverem, a subtração é feita na forma canônica). Testes: extra removido com o DNS falhando
+   sai do `permit`; extra mudado com o DNS falhando mantém a parte do nome; `host` mudado zera.
+8. **O filtro não vale com o conjunto vazio de uma linha ativa** (requisito da sessão revisora).
+   Linha emitida cujo conjunto, nesta aplicação, é vazio (linha por registro com nome que nunca
+   resolveu e sem `inbound_from_name`) sai **sem** `deny` e sem `permit` no endpoint, como é
+   hoje, e fica `warn` com o motivo na tela ("a central ainda não sabe de que endereços esta linha
+   recebe; o filtro dela fica desligado até o nome resolver"). O `deny` só é escrito com o
+   conjunto calculado na mesma aplicação (`plan.allowed`), nunca com a coluna lida sem cálculo.
+   Na atualização, o arquivo gerado antigo não tem ACL e continua valendo até a aplicação da
+   partida do processo de voz, que é a primeira a calcular o conjunto. Testes: conjunto vazio,
+   endpoint sem `deny` e linha `warn`; o nome resolve, o `deny` e o `permit` entram; linha por IP
+   nunca tem conjunto vazio.
+9. **Teto de endereços por linha** (requisito da sessão revisora). Os `match_extra` já têm teto
+   de 16 (`apps/panel/src/server/shapes.ts`). O que vem do nome tem teto de 16, em ordem canônica
+   (para a escolha não variar entre consultas iguais); passou disso, ficam os 16 primeiros e a
+   linha fica `warn` ("o nome resolve mais de 16 endereços; inclua em Endereços extras os que a
+   operadora usa para entregar"). Teto da linha: 33 (`host`, 16 extras, 16 do nome). O processo
+   de voz confere o teto antes de escrever; teste com um nome que resolve 20 endereços.
 
 ## 4. Critério de aceite
 
@@ -95,6 +128,7 @@ O que uma pessoa consegue fazer quando terminar:
 - Cadastrar uma linha na tela e ver de quais endereços a central aceita a ligação dela, sem abrir
   arquivo nenhum.
 - Uma origem que não é endereço de linha recebe recusa (medida no Asterisk de verdade, ver 5).
+- Uma origem liberada para a linha de uma organização não entra na linha de outra.
 - Uma origem que é endereço de linha passa (não recebe a recusa do ACL).
 - Sem linha cadastrada, **nenhuma resposta SIP** (fatia 3; ver o limite em 6).
 - Incluir um endereço extra numa linha por registro e ver a ligação daquele endereço passar.
@@ -108,6 +142,8 @@ Fracasso mesmo funcionando:
 - A recusa do ACL atinge a resposta de `REGISTER` ou de `OPTIONS` que a própria central mandou, e a
   linha por registro cai.
 - Reinstalar muda quem é aceito.
+- Um extra removido continua liberado porque o DNS está fora.
+- A atualização corta a linha antes de o processo de voz calcular o conjunto dela.
 
 ## 5. As fatias
 
@@ -120,14 +156,17 @@ Cada uma cabe numa revisão de uma sentada. Uma de cada vez.
    de aviso. Nenhuma mudança no que o Asterisk aceita. Testes: render e cálculo com os formatos de
    linha que a última versão publicada aceita (por IP, por registro com IP, por registro com nome,
    com `match_extra`); DNS que falha mantém o conjunto; `pnpm verify` e `pnpm test:db`.
-2. **O filtro** (`operator_action`, crédito a @webtecnica no fragmento e no `CREDITS.md`). A seção
-   `[deskvoice-acl]` no arquivo gerado. Uma sonda SIP (**novo**, `scripts/sonda-sip/`, um `OPTIONS`
+2. **O filtro** (`operator_action`, crédito a @webtecnica no fragmento e no `CREDITS.md`). O
+   `deny` e o `permit` em cada endpoint, com os contratos 6 a 9 (migration de
+   `inbound_from_name`, teste de isolamento entre organizações, conjunto vazio sem filtro, teto). Uma sonda SIP (**novo**, `scripts/sonda-sip/`, um `OPTIONS`
    por UDP, que diz se veio resposta e qual código) e um teste de tela em `apps/panel/test/e2e/`,
    que já roda no job `install` contra o Asterisk de verdade da imagem fixada, **sem mudar o
    workflow**: sem linha, a sonda recebe a recusa; com uma linha por IP no endereço de onde a sonda
    sai, ela passa; com a linha em outro endereço, recusa. O PR diz o que mediu, com o código de
    resposta visto:
-   - **M1.** O que o ACL devolve a quem é recusado (espero `403`, não medido).
+   - **M1.** O que a central devolve a quem é recusado: à origem que não casa com linha (sem
+     endpoint) e à origem que casa com uma linha mas não está no `permit` dela (espero `401` ou
+     `403`, não medido). E se o `andrius/asterisk` fixado aplica `deny` e `permit` de endpoint.
    - **M2.** Uma linha com `qualify` para um endereço liberado continua `online` (a resposta ao
      `OPTIONS` que a central mandou não é barrada).
    - **M3.** O endereço de origem visto pelo Asterisk, entrando pela porta publicada, é o do
@@ -142,7 +181,7 @@ Cada uma cabe numa revisão de uma sentada. Uma de cada vez.
      não derruba a linha de quem tem operadora antes de o processo de voz regravar. Se derrubar,
      a fatia muda de forma ou não entra.
    Se M4, M5 ou M6 falharem, a fatia **para** e volta ao Arquiteto. O aceite "sem linha, nenhuma
-   resposta" fica então em "sem linha, recusa a todos" (o `403` da fatia 2), e o Arquiteto leva a
+   resposta" fica então em "sem linha, recusa a todos" (a recusa por falta de endpoint, M1), e o Arquiteto leva a
    diferença ao Líder.
 4. **A prova da atualização com linha** (pedido ao dono, porque é workflow). Um passo no CI que
    instala a última versão publicada, cadastra uma linha por IP, atualiza para o PR e roda a sonda.
@@ -162,15 +201,22 @@ Cada uma cabe numa revisão de uma sentada. Uma de cada vez.
   e recarrega o `res_pjsip` a cada 5 minutos. Recarregar não derruba ligação; o custo é ruído. A
   fatia 2 mede com um nome real; se recarregar demais, a saída é uma fatia própria, não um ajuste
   escondido no filtro.
-- **Sem linha, o `403` até a fatia 3 entrar.** Ainda é resposta SIP, só que sem nada útil a quem
-  procura central.
+- **Sem linha, a recusa por falta de endpoint até a fatia 3 entrar.** Ainda é resposta SIP, só
+  que sem nada útil a quem procura central.
+- **Varredura com linha cadastrada ainda recebe resposta.** Sem lista global, a origem que não
+  casa com linha é recusada pela falta de endpoint, e não antes da identificação. Ela recebe a
+  recusa (M1), não silêncio. Foi o preço de o `permit` ser por linha (isolamento entre
+  organizações).
 
 ## 7. O que não foi medido neste desenho
 
 - Nada rodou. Não subi Asterisk: a VPS onde o desenho foi escrito não tem acesso ao Docker.
 - O código de resposta do ACL (M1), o comportamento do recarregamento do transporte (M4, M5) e a
   ordem da atualização (M6) vêm da leitura do código e da memória do Asterisk 20, não de medida.
-- Não conferi se o `andrius/asterisk` fixado traz o `res_pjsip_acl` carregado.
+- Não conferi no Asterisk fixado que `deny` e `permit` de endpoint são aplicados (é M1), nem em
+  que ponto (antes ou depois do desafio de autenticação).
+- Não conferi se `match_extra` é gravado na forma canônica (importa para a migration do
+  contrato 7).
 - Não li o `install/update.sh` inteiro para saber em que ordem ele recria o processo de voz e
   recarrega o Asterisk (importa para M6).
 - Não sei quantas instalações têm linha por registro cuja operadora entrega de outro endereço.
