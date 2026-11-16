@@ -236,7 +236,10 @@ teto e antes do caminho do motor:
    leitura**. Uma linha no `usage_ledger` com `engine = 'brain:<id>'` e as colunas novas abaixo.
    Um resultado **sem `usage`** (prazo vencido depois do processamento, ou 200 fora da forma) é
    **custo desconhecido**, nunca zero: conta como modelo sem preço para o teto e para a linha do
-   tempo. Condição da revisão do #336.
+   tempo. Condição da revisão do #336. Vale também para um `usage` **sem `inputTokens`**: custo
+   desconhecido, nunca zero no teto. Hoje isso cobre a DeepSeek sem preço, o Haiku 5.5 com preço por
+   faixa e a escrita em cache da Anthropic, que devolvem `usage {}` (regra do board ao fechar o #346).
+   Um teste para cada um desses três casos.
 
 Migration **nova** `db/migrations/<carimbo>_custo_por_modelo.sql`, só para frente:
 
