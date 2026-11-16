@@ -230,6 +230,7 @@ const timeline = {
       turn_closed: "Quem ligou ficou {seconds} s sem resposta, talvez por barulho na linha. O agente foi chamado a responder ao que ouviu.",
       asked_to_repeat: "O agente seguia calado {seconds} s depois da última fala de quem ligou e pediu para a pessoa repetir.",
     },
+    memory_loaded: "O agente recebeu a memória do número: {notes} notas e {followUps} pendências, {chars} caracteres.",
     unknown: "Evento",
   },
   reasons: {

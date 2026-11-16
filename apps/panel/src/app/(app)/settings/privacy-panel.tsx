@@ -31,6 +31,7 @@ interface Privacy {
   minDays: number;
   maxDays: number;
   notesRetention: NotesRetention;
+  callerMemoryAgent: boolean;
   history: Entry[];
 }
 interface NotesRetention {
@@ -120,6 +121,8 @@ function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
       const notesSpan = (value: unknown, fallback: string): string => (typeof value === "number" ? fill(t.days, { n: value }) : fallback);
       return fill(t.history.caller_notes_retention_changed, { who, from: notesSpan(p.from, t.factoryDefault), to: notesSpan(p.to, t.factoryDefault) });
     }
+    case "caller_memory_changed":
+      return fill(t.history.caller_memory_changed, { who, state: p.to === true ? t.memoryStates.on : t.memoryStates.off });
   }
 }
 
@@ -166,6 +169,7 @@ export function PrivacyPanel() {
   const [forgotten, setForgotten] = useState<Forgotten | null>(null);
   const [forgetInvalid, setForgetInvalid] = useState<string | null>(null);
   const notesSaver = useAction();
+  const memorySaver = useAction();
   const [notesDays, setNotesDays] = useState("");
   const [notesProblem, setNotesProblem] = useState<string | null>(null);
   // O prazo da memória que espera confirmação: encurtar apaga as notas mais velhas.
@@ -179,7 +183,7 @@ export function PrivacyPanel() {
   if (!canConfigure) return null;
   if (state.error && !state.data) return <Notice tone="fail">{errorText(state.error)}</Notice>;
   if (!state.data) return <Skeleton lines={2} />;
-  const { retentionDays: current, recording, minDays, maxDays, notesRetention, history } = state.data;
+  const { retentionDays: current, recording, minDays, maxDays, notesRetention, callerMemoryAgent, history } = state.data;
 
   const store = (next: number | null): void =>
     void save.run(() => api("/privacy/retention", { method: "PUT", body: { days: next } })).then((ok) => {
@@ -196,6 +200,10 @@ export function PrivacyPanel() {
   // Ligar e desligar não apagam nada (o que já foi gravado segue o prazo): sem confirmação.
   const setRecording = (enabled: boolean): void =>
     void recorder.run(() => api("/privacy/recording", { method: "PUT", body: { enabled } })).then(state.reload);
+
+  // Ligar e desligar não apagam nota: sem confirmação. O aviso do número forjado fica sempre à vista.
+  const setCallerMemory = (enabled: boolean): void =>
+    void memorySaver.run(() => api("/privacy/caller-memory", { method: "PUT", body: { enabled } })).then(state.reload);
 
   return (
     <>
@@ -308,6 +316,17 @@ export function PrivacyPanel() {
             </Notice>
           )}
         </form>
+      </Panel>
+
+      <Panel title={t.memoryTitle} description={t.memoryLead}>
+        <div className="grid max-w-xl gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Switch checked={callerMemoryAgent} onChange={setCallerMemory} label={t.memorySwitch} disabled={memorySaver.busy} />
+            <ActionStatus action={memorySaver} />
+          </div>
+          <Notice tone="warn">{t.memorySpoofed}</Notice>
+          <Notice>{t.memoryCost}</Notice>
+        </div>
       </Panel>
 
       <Panel title={t.exportTitle} description={t.exportLead}>

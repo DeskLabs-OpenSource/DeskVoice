@@ -1,4 +1,4 @@
-import { CALL_RECORDING_SETTING, DEFAULT_CALLER_NOTES_RETENTION_DAYS, MAX_CALLER_NOTES_RETENTION_DAYS, MIN_CALLER_NOTES_RETENTION_DAYS, callerNotesRetention, MAX_TRANSCRIPT_RETENTION_DAYS, MIN_TRANSCRIPT_RETENTION_DAYS, ORG_EVENT_KINDS, TRANSCRIPT_RETENTION_SETTING, callRecordingOf, transcriptRetentionOf } from "@deskvoice/core";
+import { CALL_RECORDING_SETTING, CALLER_MEMORY_AGENT_SETTING, callerMemoryAgentOf, DEFAULT_CALLER_NOTES_RETENTION_DAYS, MAX_CALLER_NOTES_RETENTION_DAYS, MIN_CALLER_NOTES_RETENTION_DAYS, callerNotesRetention, MAX_TRANSCRIPT_RETENTION_DAYS, MIN_TRANSCRIPT_RETENTION_DAYS, ORG_EVENT_KINDS, TRANSCRIPT_RETENTION_SETTING, callRecordingOf, transcriptRetentionOf } from "@deskvoice/core";
 import { handle } from "../../../../server/context";
 
 const HISTORY_LIMIT = 50;
@@ -14,6 +14,7 @@ export const GET = handle({ configure: true }, async ({ q }) => {
     [ORG_EVENT_KINDS, HISTORY_LIMIT],
   );
   const notes = await callerNotesRetention(q);
+  const memory = await q.one<{ value: unknown }>("select value from settings where key = $1", [CALLER_MEMORY_AGENT_SETTING]);
   return {
     retentionDays: transcriptRetentionOf(stored?.value),
     recording: callRecordingOf(recording?.value),
@@ -28,6 +29,8 @@ export const GET = handle({ configure: true }, async ({ q }) => {
       minDays: MIN_CALLER_NOTES_RETENTION_DAYS,
       maxDays: MAX_CALLER_NOTES_RETENTION_DAYS,
     },
+    // A memória do número no agente (4B, #272): desligada de fábrica, nas duas direções.
+    callerMemoryAgent: callerMemoryAgentOf(memory?.value),
     history,
   };
 });

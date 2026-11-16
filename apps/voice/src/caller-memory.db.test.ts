@@ -26,7 +26,7 @@ import { waitFor } from "./testing/helpers";
 
 /**
  * A memória do número é só da equipe (registro 0020, item 1; fatia 2 do desenho de 13/11). Com a
- * chave do agente desligada, que é a única que existe por enquanto, nada do que a organização sabe
+ * chave do agente desligada, que é como ela vem (a ligada está em `caller-memory-agent.db.test.ts`), nada do que a organização sabe
  * do número chega ao modelo: as instruções e as ferramentas da sessão são as mesmas com e sem
  * ligações anteriores e pendências abertas, e nenhum evento novo carrega texto.
  */
