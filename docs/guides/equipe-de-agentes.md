@@ -201,7 +201,7 @@ resto do que vale para qualquer agente estão em [custos](custos.md).
   que limite de sessões simultâneas da sua conta.
 - **Se a frase fixa do segundo agente soa natural** depois do resumo, em cada idioma.
 - **Se o custo por agente na tela bate com a fatura do provedor** numa ligação com passagem.
-- **A última fala da sessão antiga.** Uma fala que a sessão do primeiro agente transcreve logo
-  depois da troca entra na linha do tempo com o nome dele, mas o áudio dela já foi cortado. Quem lê a
-  ligação pode ver uma frase que quem ligou não ouviu inteira. Não há teste para isso, e ninguém mediu
-  com motor real com que frequência acontece.
+- **A última fala da sessão antiga.** O que a sessão do primeiro agente ainda fala depois da troca
+  é descartado, mas o texto dela continua entrando na linha do tempo, com o nome dele. Quem lê a
+  ligação pode ver uma frase que quem ligou não ouviu, ou ouviu só em parte, e que também não está na
+  gravação. Não há teste para isso, e ninguém mediu com motor real com que frequência acontece.

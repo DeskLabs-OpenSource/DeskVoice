@@ -288,16 +288,16 @@ Regras que fazem esse caminho funcionar:
 - **Marque antes de confirmar.** Se o sistema de agenda não confirma na resposta, o agente diz que
   a recepção confirma — nunca "está marcado".
 
-### Caminho 2: ferramenta nova, no seu fork
+### Caminho 2: um cliente de agenda, no seu fork
 
-Se a clínica tem agenda própria e você quer o agente consultando e marcando direto, isso é uma
-ferramenta. O guia é [adicionar uma ferramenta](adicionar-uma-ferramenta.md), e a regra do projeto
-vale: ferramenta de nicho não entra no núcleo — mora no seu fork ou vira contribuição se servir a
-outros ramos.
+Se a clínica tem agenda própria e você quer o agente consultando e marcando direto, não escreva
+uma ferramenta nova: as três já existem. O que falta é o cliente, a interface `AgendaClient` de
+`packages/tools/src/connectors/agenda.ts`, entregue às ferramentas em `ToolDeps.agenda`. Hoje não há
+tela nem configuração para isso, então ligar um cliente é mudança no código da central, no seu fork.
 
-Uma ferramenta de agenda tem as três operações de cima e mais uma obrigação: **nunca devolver
-sucesso quando não marcou**. A regra 4 do guia de ferramentas é essa, e é a que separa um agente
-útil de um agente que promete horário que não existe.
+As três ferramentas já cumprem a obrigação que importa: **nunca devolver sucesso quando não
+marcou**, e já têm as falas para quando a agenda não está ligada ou não responde. O seu cliente
+precisa manter isso: um erro da agenda volta como erro, e não como horário marcado.
 
 ### O que deixar de fora
 
