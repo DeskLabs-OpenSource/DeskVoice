@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { ERASED_TEXT, eraseCaller, recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { createOrganization, createUser, depsFor, eventsOf, openTestDbs, t0, task, tasksOf } from "../../test/helpers";
-import reviewCallRoutine, { CASE_PHRASE, reviewCall, reviewDetails, reviewTitle, type ReviewCase } from "./review_call";
+import reviewCallRoutine, { CASE_PHRASE, TRANSFERRED_DETAILS, reviewCall, reviewDetails, reviewTitle, type ReviewCase } from "./review_call";
 
 /**
  * O supervisor de regras fixas (desenho 2026-11-13-equipe-de-agentes-e-memoria, seção 4.4, fatia 5;
@@ -65,11 +65,11 @@ const createdEvents = async (_org: string, callId: string) => (await eventsOf(ap
 const toolResult = (name: string, ok: boolean, message = "x"): Ev => ["tool_result", { name, ok, message }];
 
 /** Abre a pendência do caso e confere título, detalhes, dono, prazo, lembrete e evento. */
-async function expectOpened(s: Scene, found: ReviewCase): Promise<void> {
+async function expectOpened(s: Scene, found: ReviewCase, details = reviewDetails(found)): Promise<void> {
   await run(s.org, s.callId);
   const rows = await followUpsOf(s.org);
   expect(rows).toEqual([
-    expect.objectContaining({ call_id: s.callId, caller_e164: CALLER, title: reviewTitle(CALLER, found), details: reviewDetails(found), owner_user_id: s.person, due_at: t0, source: "review_call", status: "open" }),
+    expect.objectContaining({ call_id: s.callId, caller_e164: CALLER, title: reviewTitle(CALLER, found), details, owner_user_id: s.person, due_at: t0, source: "review_call", status: "open" }),
   ]);
   expect(rows[0]?.title).toBe(`Retornar para ${CALLER}: ${CASE_PHRASE[found]}`);
   const created = await createdEvents(s.org, s.callId);
@@ -92,6 +92,16 @@ describe("review_call: os quatro casos", () => {
     }
   });
 
+  it("1. o motor caiu depois de a ligação ser transferida: os detalhes dizem que não há confirmação de que alguém atendeu", async () => {
+    const s = await scene("review engine failed transferred", [
+      // Como o processo de voz grava a queda com transferência de reserva (`call-session.ts`).
+      ["engine_failed", { engine: "openai-realtime", error: "socket closed" }],
+      ["transfer_started", { to: "+5531977776666", reason: "engine_failed" }],
+    ], { endReason: "engine_failed" });
+    await expectOpened(s, "engine_failed", TRANSFERRED_DETAILS);
+    expect(TRANSFERRED_DETAILS).not.toContain("ninguém ficou com o próximo passo");
+  });
+
   it("2. transfer_to_human falhou e ninguém ficou com o próximo passo", async () => {
     await expectOpened(await scene("review transfer failed", [["tool_called", { name: "transfer_to_human", args: {} }], toolResult("transfer_to_human", false)]), "transfer_failed");
   });
@@ -103,6 +113,19 @@ describe("review_call: os quatro casos", () => {
         ["tool_called", { name: "request_approval", args: {} }],
         ["approval_requested", { approvalId: "11111111-1111-4111-8111-111111111111", question: "Posso dar o desconto?", context: "", defaultOnTimeout: "denied", expiresAt: t0.toISOString() }],
         ["tool_result", { name: "request_approval", ok: false, message: "x", error: "The call ended before the tool finished" }],
+      ],
+      { endReason: "caller_hangup" },
+    );
+    await expectOpened(s, "caller_hung_up_waiting");
+  });
+
+  it("3. com duas aprovações, uma decidida e outra não, quem desligou ainda esperava a segunda", async () => {
+    const s = await scene(
+      "review hangup two approvals",
+      [
+        ["approval_requested", { approvalId: "55555555-5555-4555-8555-555555555555" }],
+        ["approval_decided", { approvalId: "55555555-5555-4555-8555-555555555555", outcome: "approved", decision: "approved" }],
+        ["approval_requested", { approvalId: "66666666-6666-4666-8666-666666666666" }],
       ],
       { endReason: "caller_hangup" },
     );
@@ -141,9 +164,18 @@ describe("review_call: quando não abre", () => {
       await run(s.org, s.callId);
       expect(await followUpsOf(s.org)).toEqual([]);
     }
-    // O aviso não vale para o WhatsApp: só uma pendência fecha o caso 4.
+    // O aviso não vale para o WhatsApp: só uma pendência, ou uma nova tentativa que saiu, fecha o
+    // caso 4. Até a recusa por falta de conector pede create_task, e não notify_human.
     const whatsappThenNotice = await scene("review whatsapp then notice", [toolResult("send_whatsapp", false), ["human_notified", { channel: "panel" }]]);
     await expectOpened(whatsappThenNotice, "whatsapp_not_sent");
+  });
+
+  it("o WhatsApp que falhou e saiu numa nova tentativa não abre; o que saiu antes e falhou depois abre", async () => {
+    const retried = await scene("review whatsapp retried", [toolResult("send_whatsapp", false), toolResult("send_whatsapp", true)]);
+    await run(retried.org, retried.callId);
+    expect(await followUpsOf(retried.org)).toEqual([]);
+    const failedLast = await scene("review whatsapp failed last", [toolResult("send_whatsapp", true), toolResult("send_whatsapp", false)]);
+    await expectOpened(failedLast, "whatsapp_not_sent");
   });
 
   it("a falha antiga não conta se a pendência veio depois dela, mas uma falha nova depois da pendência conta", async () => {

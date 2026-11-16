@@ -25,8 +25,16 @@ export const CASE_PHRASE: Record<ReviewCase, string> = {
 };
 
 export const reviewTitle = (caller: string, found: ReviewCase): string => `Retornar para ${caller}: ${CASE_PHRASE[found]}`;
-export const reviewDetails = (found: ReviewCase): string =>
-  `Aberta pelo supervisor de regras fixas, depois da ligação: ${CASE_PHRASE[found]}, e ninguém ficou com o próximo passo. Veja a linha do tempo da ligação.`;
+/**
+ * Os detalhes, também texto fixo. O caso 1 numa ligação que já tinha sido transferida tem frase
+ * própria: ali alguém pode ter atendido, mas o sistema não tem como confirmar.
+ */
+export const TRANSFERRED_DETAILS =
+  "Aberta pelo supervisor de regras fixas, depois da ligação: o motor de voz caiu ou não estava pronto. A ligação foi transferida, mas não há confirmação de que alguém atendeu. Veja a linha do tempo da ligação.";
+export const reviewDetails = (found: ReviewCase, transferred = false): string =>
+  found === "engine_failed" && transferred
+    ? TRANSFERRED_DETAILS
+    : `Aberta pelo supervisor de regras fixas, depois da ligação: ${CASE_PHRASE[found]}, e ninguém ficou com o próximo passo. Veja a linha do tempo da ligação.`;
 
 /** Os motivos de `call_refused` que são falta de motor (o caminho de `connectEngine` em `call-session.ts`). Política não conta. */
 const ENGINE_REFUSALS: ReadonlySet<string> = new Set(["engine_not_configured", "engine_not_responding"]);
@@ -45,11 +53,13 @@ export interface ReviewEvent {
 }
 
 /** Depois do índice `from`, há algum evento de um destes tipos? */
-const anyAfter = (events: readonly ReviewEvent[], from: number, kinds: readonly string[]): boolean => events.slice(from + 1).some((event) => kinds.includes(event.kind));
-
-/** Houve uma falha de `tool` sem nenhum evento de `kinds` depois dela? */
-function failedWithoutFollowUp(events: readonly ReviewEvent[], tool: string, kinds: readonly string[]): boolean {
-  return events.some((event, index) => event.kind === "tool_result" && event.name === tool && event.ok === false && !anyAfter(events, index, kinds));
+/**
+ * Houve uma falha de `tool` sem nenhum evento de `kinds` depois dela? Com `retried`, uma nova
+ * chamada da mesma ferramenta que deu certo depois da falha também fecha o caso.
+ */
+function failedWithoutFollowUp(events: readonly ReviewEvent[], tool: string, kinds: readonly string[], retried = false): boolean {
+  const closes = (event: ReviewEvent): boolean => kinds.includes(event.kind) || (retried && event.kind === "tool_result" && event.name === tool && event.ok === true);
+  return events.some((event, index) => event.kind === "tool_result" && event.name === tool && event.ok === false && !events.slice(index + 1).some(closes));
 }
 
 /**
@@ -73,8 +83,9 @@ export function reviewCaseOf(events: readonly ReviewEvent[], endReason: string |
     if (events.some((event) => event.kind === "approval_requested" && (event.approvalId === null || !decided.has(event.approvalId)))) return "caller_hung_up_waiting";
   }
 
-  // 4. O WhatsApp foi recusado ou não confirmado (`ok: false`), e nenhuma pendência veio depois.
-  if (failedWithoutFollowUp(events, "send_whatsapp", ["follow_up_created"])) return "whatsapp_not_sent";
+  // 4. O WhatsApp foi recusado ou não confirmado (`ok: false`), e depois nem uma pendência foi
+  // criada nem uma nova tentativa saiu (a recusa do `to` inválido pede para chamar de novo).
+  if (failedWithoutFollowUp(events, "send_whatsapp", ["follow_up_created"], true)) return "whatsapp_not_sent";
 
   return null;
 }
@@ -113,7 +124,7 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
             case when kind = 'call_refused' then payload->>'reason' end as reason,
             case when kind in ('approval_requested', 'approval_decided') then payload->>'approvalId' end as "approvalId"
        from call_events
-      where call_id = $1 and kind in ('engine_failed', 'call_refused', 'voicemail_left', 'tool_result', 'follow_up_created', 'human_notified', 'approval_requested', 'approval_decided')
+      where call_id = $1 and kind in ('engine_failed', 'call_refused', 'voicemail_left', 'tool_result', 'follow_up_created', 'human_notified', 'approval_requested', 'approval_decided', 'transfer_started')
       order by id`,
     [callId],
   );
@@ -121,7 +132,7 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
   if (found === null) return "no_case";
   await createFollowUp(
     q,
-    { callId, agentId: call.agent_id, title: reviewTitle(call.caller, found), details: reviewDetails(found), dueAt: now, origin: { source: "review_call", case: found } },
+    { callId, agentId: call.agent_id, title: reviewTitle(call.caller, found), details: reviewDetails(found, events.some((event) => event.kind === "transfer_started")), dueAt: now, origin: { source: "review_call", case: found } },
     now,
   );
   return "opened";

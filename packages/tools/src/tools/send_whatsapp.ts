@@ -129,7 +129,7 @@ export function createSendWhatsApp(deps: ToolDeps = {}) {
         const connector = await loadWhatsAppConnector(ctx.q, (deps.secretKey ?? configSecretKey)());
         if (connector === null) {
           return refused(
-            "O envio por WhatsApp não está configurado nesta central, e nada foi enviado. Diga à pessoa que não consegue mandar mensagem agora e passe a informação por voz; se for importante, deixe um aviso para a equipe (notify_human).",
+            "O envio por WhatsApp não está configurado nesta central, e nada foi enviado. Diga à pessoa que não consegue mandar mensagem agora e passe a informação por voz; se for importante, anote para a equipe cuidar depois (create_task).",
           );
         }
 
