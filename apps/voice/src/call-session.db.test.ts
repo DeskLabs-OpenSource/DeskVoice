@@ -190,7 +190,7 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     const { organizationId, callId } = await refused("engine-unknown", manualEngine({ id: "outro" }));
     expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ reason: "engine_not_configured", detail: 'the voice engine "manual" is not installed' });
     const notice = (await notificationsOf(app, organizationId))[0]?.body ?? "";
-    expect(notice).toMatch(/não está instalado nesta versão: .*Escolha outro motor de voz na tela do agente/);
+    expect(notice).toMatch(/não está disponível nesta instalação: .*Escolha outro motor de voz na tela do agente/);
     expect(notice).not.toMatch(/Cadastre/);
   });
 

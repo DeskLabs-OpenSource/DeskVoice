@@ -646,7 +646,7 @@ describe("voice process", () => {
 
   it("a browser call passes on each refusal of the voice process with its own code, and says when it is down", async () => {
     const agent = await newAgent("Recusado");
-    for (const code of ["agent_not_found", "agent_disabled", "engine_not_configured", "engine_simulated"]) {
+    for (const code of ["agent_not_found", "agent_disabled", "engine_not_configured", "engine_not_installed", "engine_simulated"]) {
       panel.voice.respond = () => Response.json({ code, message: "refused" }, { status: 409 });
       const refused = await call(webCall, { method: "POST", cookie: owner, body: { agentId: agent } });
       expect([refused.status, refused.code]).toEqual([422, code]);
