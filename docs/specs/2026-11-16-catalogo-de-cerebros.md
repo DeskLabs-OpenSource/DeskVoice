@@ -225,7 +225,9 @@ teto e antes do caminho do motor:
 1. Lê `calls.analysis_brain`. Ausente: segue o caminho de hoje, sem mudança de linha.
 2. Cérebro não descoberto, ou modelo que sumiu da lista guardada: `outcome_not_classified` e
    `analysis_not_done` com o motivo **novo** `brain_unavailable`.
-3. Sem `brain.<id>.api_key`: motivo `no_key`, com `brain` no payload.
+3. Sem `brain.<id>.api_key`: motivo **novo** `brain_no_key`, com `brain` no payload. O `no_key` de
+   hoje tem frase sobre o motor de voz ("o motor de voz do agente não tem chave cadastrada") e
+   mentiria aqui.
 4. Modelo sem preço e agente sem teto (`cost_ceiling_cents = 0`): motivo **novo**
    `brain_unmeasured_without_ceiling`, nada é pedido (padrão do pedido 1).
 5. Fora da transação: `brain.completeJson` com `outcomePrompt`/`analysisPrompt` e os esquemas que já
@@ -253,8 +255,8 @@ alter table usage_ledger
 - `cost_measured = false` na linha cujo preço não era conhecido: tokens gravados, custo zero, e o
   zero não é confundido com grátis. A tela de custo (`/costs`) e o detalhe da chamada mostram "custo
   não medido" quando alguma linha da chamada tem `false`.
-- `call_analyzed` e as falhas ganham `brain` e `costMeasured` no payload. Os dois motivos novos
-  entram no vocabulário fechado com frase na linha do tempo, em pt-BR, inglês e espanhol (o CI
+- `call_analyzed` e as falhas ganham `brain` e `costMeasured` no payload. Os três motivos novos
+  (`brain_unavailable`, `brain_no_key`, `brain_unmeasured_without_ceiling`) entram no vocabulário fechado com frase na linha do tempo, em pt-BR, inglês e espanhol (o CI
   reprova motivo sem frase).
 
 ### 3.6 Tela (fatias 3 e 4)
@@ -268,7 +270,8 @@ alter table usage_ledger
 - Frases do resultado do teste: uma por código de `BrainFailure`, dizendo o que fazer
   ("O provedor recusou a chave. Confira se copiou inteira e se ela não foi revogada.";
   "A conta está sem crédito."; etc.). O status HTTP aparece entre parênteses.
-- **Na seção da análise em `/settings/calls`** (fatia 4): "Quem lê a ligação": "O motor do agente
+- **Na seção da análise** (fatia 4b; hoje ela fica em `apps/panel/src/app/(app)/settings/page.tsx`,
+  painel `analysisTitle`, e não em `/settings/calls`): "Quem lê a ligação": "O motor do agente
   (padrão)" ou um cérebro e um modelo, escolhidos de uma lista pesquisável só com cérebros que têm
   chave aceita. Ao escolher modelo sem preço, aviso fixo antes de salvar: "O preço deste modelo não é
   conhecido. O custo da análise não vai ser medido, e ela só roda nas ligações de agentes com teto de
@@ -285,10 +288,12 @@ verificado pelo **Verificador 2**. Uma de cada vez, nesta ordem.
 | **1. A peça, OpenAI e OpenRouter** | `brain.ts`, `brain-load.ts`, `brains/openai.ts`, `brains/openrouter.ts`, testes com respostas gravadas (lista, filtro, preço do OpenRouter, preço desconhecido, cada falha, JSON fora da forma), entrada `./brain` no `package.json` do pacote, `CREDITS.md` se trouxer código | `packages/voice-engine/src/brain*.ts`, `packages/voice-engine/src/brains/**`, `packages/voice-engine/package.json`, `packages/voice-engine/src/index.ts` (só a exportação), `CREDITS.md`, `.changes/` |
 | **2. Anthropic, Gemini e DeepSeek** | os três arquivos e os testes, com o bloco de fontes e datas | `packages/voice-engine/src/brains/**`, `CREDITS.md`, `.changes/` |
 | **3. Credenciais e catálogo na tela** | settings da 3.3, as rotas, `/settings/brains`, dicionários, testes de banco (isolamento entre organizações, troca de chave apaga lista, chave nunca na resposta, limite) | `apps/panel/src/app/api/v1/brains/**`, `apps/panel/src/server/brains.ts` (**novo**), `apps/panel/src/app/(app)/settings/brains/**`, `apps/panel/src/i18n/*/brains.ts` (**novo**), o item do menu de configurações, `.changes/` |
-| **4. A análise no cérebro escolhido** | migration da 3.5, `calls.analysis_brain`, o caminho na rotina, os motivos novos com frase, "custo não medido" em `/costs` e no detalhe, a escolha em `/settings/calls` | `db/migrations/<novo>`, `packages/core/src/types.ts` (vocabulário), `apps/routines/src/routines/classify_call_outcome.ts` e testes, `apps/panel/src/server/settings.ts`, `apps/panel/src/server/costs.ts`, `apps/panel/src/app/(app)/settings/calls/**`, `apps/panel/src/app/(app)/costs/**`, i18n, `.changes/` |
+| **4a. A análise no cérebro escolhido (rotina)** | migration da 3.5, `calls.analysis_brain` com zod e a validação ao salvar (modelo na lista guardada; sem preço só com `acceptUnmeasured`), o caminho na rotina, os três motivos novos com frase na linha do tempo, `model`/`cost_measured` no extrato, testes de banco (os casos 2 a 6 da 3.5, os três de `usage` sem `inputTokens`, sem fallback para o motor, remover a escolha volta ao de antes) | `db/migrations/<novo>`, `apps/routines/src/routines/classify_call_outcome.ts` e testes, `apps/panel/src/server/settings.ts` (só a chave nova), `apps/panel/src/i18n/*/timeline.ts`, `.changes/` |
+| **4b. A escolha e o custo na tela** | "Quem lê a ligação" no painel da análise, com o aviso da 3.6 antes e depois de salvar; "custo não medido" em `/costs` e no detalhe da chamada; a confirmação de remover a chave quando o cérebro é o escolhido; as lacunas 1, 2, 4 e 5 do parecer do #350 (limite por cérebro com teste; refresh falho devolve a lista guardada com `stale`; filtro zod item a item na escrita; usar ou remover `modelsTitle`) | `apps/panel/src/app/(app)/settings/page.tsx` (só o painel da análise), `apps/panel/src/server/costs.ts`, `apps/panel/src/app/(app)/costs/**`, `apps/panel/src/app/(app)/calls/[id]/**` (só a marca de custo), `apps/panel/src/server/brains.ts`, `apps/panel/src/app/(app)/settings/brains/**`, i18n, `.changes/` |
 
-Choque possível com a trilha A: `packages/core/src/types.ts` (vocabulário de eventos) e
-`packages/voice-engine/src/index.ts`. As duas são acréscimos de linha; quem chegar depois faz o
+Choque possível com a trilha A: `apps/panel/src/i18n/*/timeline.ts` (frases de motivo) e
+`packages/voice-engine/src/index.ts`. O vocabulário do motivo da análise mora na própria rotina
+(`AnalysisNotDoneReason`), e não em `packages/core/src/types.ts`; a fatia 4a não precisa tocar ali. As duas são acréscimos de linha; quem chegar depois faz o
 merge da `main`.
 
 O motor em pipeline (R5) e os analistas ao vivo (R6) usam `loadBrains` e `completeJson` (ou um
