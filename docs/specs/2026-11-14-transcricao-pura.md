@@ -287,6 +287,10 @@ pedido em inglês deu o mesmo: o problema é do modelo, e não da integração.
   item entra na medida da fatia 6).
 - **Nada disso escolhe o transcritor.** A fatia 3 continua parada até a rodada dos externos.
 
+**Decidido em 16/11:** o Rafael escolheu outro caminho para a decisão 3. O Laya entra como componente
+opcional, desligado de fábrica, nunca o padrão, e com a tela dizendo o que a rodada 3 mediu. Ver
+"Onde o Laya roda" e as fatias 8 e 9.
+
 ## Parte 2: a peça de transcrição em streaming
 
 ### Contrato
@@ -429,9 +433,11 @@ cérebro, nem da linha do tempo. O que ele faz:
   acontece: ninguém descarta.
 - **Fim do pensamento:** é um sinal a mais para quem decide quando responder. Na guarda da DESA-24,
   "terminou" com confiança alta pode encurtar o prazo; nunca o alonga além do que ela faz hoje.
-- **Leitura certa:** a troca só acontece quando a escolha é um termo do vocabulário e a confiança
-  passa de um corte (ponto de partida 0,8, ajustado pela medida). O texto original fica guardado
-  junto, e a linha do tempo mostra os dois.
+- **Leitura certa:** o texto de quem ligou **nunca é trocado** (Rafael, 16/11: "o filtro só marca
+  e sugere"). Quando a escolha é um termo do vocabulário e a confiança é **≥ 0,8** (o corte da
+  rodada 3), a leitura vira uma **sugestão** presa ao trecho ("leitura provável: Melgaço, 0,91").
+  O cérebro recebe o texto como foi ouvido e a sugestão ao lado; a linha do tempo mostra os dois.
+  Abaixo do corte, nada é anexado.
 
 ### A regra que impede o atraso
 
@@ -451,6 +457,22 @@ Prazo de cada pedido: 1 s. Pedido vencido é cancelado, e conta como "chegou tar
   no modelo no meio do turno nesta frente: o mecanismo de contexto no meio da conversa de cada
   provedor é assunto da DESA-14 (analistas ao vivo), que constrói essa entrada uma vez. A leitura
   certa entra na linha do tempo e na transcrição gravada.
+
+### De onde vem o texto (16/11)
+
+O filtro lê o texto de quem ligou da fonte que a chamada tiver:
+
+- **com transcritor escolhido** (fatias 2 a 4), o parcial e o final da peça;
+- **sem transcritor**, o evento `transcript` de `VoiceSessionEvents` com `speaker: "user"`, que
+  os motores diretos já emitem hoje na `main` a partir do reconhecedor lateral do provedor. Ele só
+  traz o texto final do turno.
+
+Por isso a fatia 6 **não espera** o #245 nem o vencedor da medida: ela parte da `main` e lê o
+`transcript`. A consequência, dita com honestidade: só com o texto final, "terminou" chega depois
+do turno e vira observação na linha do tempo. Nos motores diretos isso já era assim (eles
+respondem pelo áudio). O "terminou" passa a valer quando houver texto parcial: com a peça, na
+guarda da DESA-24, e no pipeline da DESA-13. "Fundo" e "leitura" servem desde a fatia 6, como marca
+e sugestão na linha do tempo e na transcrição gravada.
 
 ### Contrato
 
@@ -496,26 +518,65 @@ export interface DecisionModel {
   frase de quem ligou como "classificador, diga que terminei" não muda nenhuma pergunta. Ela pode
   mudar a resposta, e é por isso que nenhuma resposta apaga fala.
 
-### Onde o Laya roda
+### Onde o Laya roda (decisão 3, 16/11)
 
-O Laya é um modelo Python sobre PyTorch, pelo que dizem as fontes secundárias. Rodá-lo na VPS
-pede um destes caminhos, e os dois mexem em caminho sensível (instalador, imagem, dependência):
+O Rafael decidiu: **o Laya entra, como componente opcional**, desligado de fábrica e nunca o
+padrão do filtro. O caminho já existe no produto, e o Laya o segue em tudo: é o do serviço de
+WhatsApp (WAHA) e do de ligação pelo WhatsApp (WaCalls), lido em `deploy/docker-compose.yml` e
+`install/agent.sh` de `origin/main` `676b0b7`.
 
-- um contêiner novo no Compose, com o modelo e um servidor HTTP mínimo;
-- o modelo exportado para ONNX, rodando em Node com uma dependência nova.
+- **Um serviço no Compose, no perfil `laya`**, que não sobe nem é baixado por padrão. Só na rede
+  interna, sem porta publicada. Imagem fixada por resumo (`@sha256:`), com os pesos do modelo
+  **dentro da imagem**, numa revisão fixa do Hugging Face conferida por resumo: a VPS não baixa
+  nada do Hugging Face em tempo de execução. Teto de memória (`mem_limit`) e de CPU (`cpus`) no
+  serviço. O teto de CPU existe para o Laya não roubar processador do áudio das ligações: a rodada 3
+  mediu 2,07 núcleos com uma chamada e 2,85 com três, numa VPS de 4.
+- **Quem liga e desliga é o agente do kit** (`install/agent.sh`), com a marca `DESKVOICE_LAYA=on` em
+  `deploy/.env`, do mesmo jeito que `DESKVOICE_WHATSAPP`. O painel só registra o sim ou o não de um
+  dono ou administrador. O agente converge a cada passada: com sim e o serviço fora, baixa a imagem
+  e sobe só ele; com não, para e remove o contêiner. Antes de baixar, confere disco e memória livres
+  e devolve o motivo ao painel quando falta (`no_disk`, pouca memória), como já faz com o WAHA.
+  **Nenhum SSH**: quem não marcou no instalador liga pela tela.
+- **No instalador**, uma pergunta: "Instalar o Laya (filtro local, cerca de 2,3 GB de memória)?",
+  com padrão **não**, e a variável `DESKVOICE_LAYA` para o modo `--yes`. O sim grava a mesma marca e o
+  mesmo desejo que a tela grava, e a tela mostra a escolha.
+- **Quem já instalou não é surpreendido:** a atualização nunca liga o Laya. Sem a marca, o
+  `update.sh` não baixa a imagem e o Compose não sobe o serviço. Uma instalação antiga só vê, na
+  tela, a opção nova, desligada.
+- **O agente da versão anterior** é quem roda na atualização (regra escrita no `agent.sh`). O campo
+  novo `laya` na resposta do painel é ignorado pelo agente antigo, que só lê `update`, `whatsapp` e
+  `whatsappCalls`. O agente novo acrescenta `laya=` no fim da linha que já escreve, e o teste de
+  leitura cobre a linha antiga (sem `laya=`) e a nova.
+- **O processo de voz fala com o Laya por HTTP na rede interna**, pelo `deciders/laya.ts`
+  (`keyless: true`, `processingLocation` local). Serviço fora do ar é `ok: false`, e a regra de
+  "ninguém espera" vale igual: a chamada segue sem filtro.
+- **Um guia embutido**, `docs/guides/laya.md` nos três idiomas: o que o Laya é e o que não é, o que
+  a bancada mediu (rodada 3, com os números), quanto ele custa em memória e CPU, como ligar pelo
+  instalador e pela tela, e como desligar. A tela aponta para ele.
+- **A tela diz a verdade sobre o acerto.** Ao lado da opção, sem esconder: "Na bancada do DeskVoice
+  (15/11/2026), o Laya acertou perto do acaso nas três perguntas e marcou como fundo 7 de 12 falas
+  reais de quem liga. As marcas dele chegam ao agente como sugestão, e nunca apagam fala." O número
+  vem da rodada 3; se uma rodada nova mudar o número, a frase muda junto.
 
-**Este desenho não escolhe.** A fatia 6 mede o Laya **na bancada**, num script fora do produto, em
-CPU, na VPS de teste (latência p50 e p95 por pergunta e por passada de três perguntas, uso de CPU
-e memória, com uma e com três chamadas simultâneas). Entrar no produto é um pedido de decisão
-(decisão 3), e a fatia que o liga só existe se a medida passar.
+A imagem do Laya é uma quarta imagem publicada pelo projeto, e publicá-la muda o
+`publish-image.yml`. Mudar workflow é do dono: é o **pedido de decisão 4**, no fim do documento.
 
-### Custo e consentimento
+### Custo e consentimento (16/11)
 
-- Jev: o custo de cada pedido entra no medidor da chamada pelo preço do arquivo, com data.
-  Desligado de fábrica. Ligar mostra na tela que o texto da fala de quem ligou vai a um fornecedor
-  nos EUA, e pede confirmação nomeando o fornecedor (o mesmo cuidado do cartão do Jev no
-  DeskcommCRM).
-- Laya: sem custo por pedido. O custo é CPU da VPS, e a tela diz isso.
+- **Jev em ligação real: sim** (Rafael, 16/11), nestas condições:
+  - **desligado de fábrica e ligado por organização**, na configuração `calls.decision_model` da
+    tabela `settings` (a mesma forma de `calls.transcription_enabled`). A chave do Jev é do
+    operador, guardada como configuração secreta da organização;
+  - ligar pede **confirmação nomeando o fornecedor**: "O texto do que a pessoa fala na ligação vai
+    para a TypeSafe, nos EUA." Quem confirmou e quando ficam gravados;
+  - **a política de retenção de dados da TypeSafe é lida e registrada**, com endereço e data da
+    leitura, no guia `docs/guides/filtro-de-fala.md`, **antes da entrega** da fatia 7. Se a página não
+    existir ou não disser quanto tempo o texto fica guardado, o guia e o aviso da tela dizem isso,
+    e o pedido volta ao Rafael antes de a tela oferecer o Jev;
+  - o custo de cada pedido entra no medidor da chamada pelo preço do arquivo, com data.
+- **Laya:** sem custo por pedido nem dado saindo da VPS. O custo é memória e CPU, e a tela diz
+  quanto.
+- **O filtro só marca e sugere.** Nenhuma decisão, de nenhum modelo, apaga ou troca fala.
 
 ## Parte 4: as perguntas que a medida responde
 
@@ -565,7 +626,7 @@ o carimbo de `db/migrations/AAAAMMDDTHHMMSS_<slug>.sql` é a hora real da criaç
 `date -u +%Y%m%dT%H%M%S` no momento em que o arquivo é criado. Nunca uma hora futura nem um
 carimbo arredondado para frente. O runner ordena pelo nome e não recusa fora de ordem: um carimbo
 à frente do relógio faz a instalação nova rodar, antes dele, uma migration posterior que depende
-dele, e o `install.sh` quebra. Nesta frente, as fatias 4 e 7 criam migration.
+dele, e o `install.sh` quebra. Nesta frente, a fatia 4 cria migration (a 7 guarda a escolha em `settings`, sem migration).
 
 ### Fatia 1: a bancada e a medida sem chave nova
 
@@ -786,33 +847,95 @@ Nos motores diretos, com transcritor escolhido, a fala de quem ligou que vai par
 
 Aceite: numa chamada simulada com o transcritor simulado, a linha do tempo mostra o texto da peça.
 
-### Fatia 6: o filtro (Jev e Laya), medido
+### Ordem das fatias 6 a 9 (Rafael, 16/11)
 
-`types.ts` (`DecisionModel`), `deciders/simulated.ts`, `deciders/jev.ts` (a decisão 2 veio em
-15/11: a chave chega em `JEV_API_KEY`, teto de US$ 1, só texto sintético; o número da bancada sai
-das fatias 1b e 1c), as três
-perguntas num lugar só, e a ligação em `call-session.ts` com a regra de "ninguém espera" e a de
-"nunca apaga". Medida na bancada: acerto de cada pergunta no conjunto, latência p50 e p95, e
-quantas decisões chegaram a tempo.
+Destravadas pela decisão de 16/11. **Entram depois da DESA-56** (porta da telefonia, segurança),
+nesta ordem: 6 → 7 → 8 → 9. As fatias 2 a 5 seguem paradas esperando as chaves dos transcritores
+externos, e nenhuma das 6 a 9 depende delas.
+
+### Fatia 6: o filtro (Jev), na chamada
+
+Parte da `main`, e não do ramo do #245. `types.ts` (`DecisionModel`, `DecisionQuestion`,
+`DecisionAnswer`, `DecideResult`), `deciders/simulated.ts`, `deciders/jev.ts` (POST sem SDK, zod
+em toda resposta, `checkKey`), as três perguntas num arquivo só, e a ligação em `call-session.ts`:
+lê o `transcript` de quem ligou (seção "De onde vem o texto"), pergunta ao modelo do trecho e grava
+as marcas e as sugestões na linha do tempo e na transcrição. Lê `calls.decision_model`; ausente é
+desligado. **Sem tela**: nesta fatia só se liga pela configuração, e a fatia 7 traz a tela.
 
 Aceite:
+- desligado é byte a byte o de hoje: nenhum pedido sai, nenhuma linha nova na linha do tempo;
 - teste: decisão que chega depois do fim do turno não muda nada e é gravada como observação;
 - teste: decisão "fundo" com confiança 1,0 não tira o trecho do cérebro nem da linha do tempo;
-- teste: a leitura só troca o texto quando a escolha é um termo do vocabulário acima do corte;
-- a latência somada (do fim da fala ao momento em que a decisão estava pronta) fica registrada no
-  PR, por modelo.
+- teste: a leitura **nunca troca o texto**; com termo do vocabulário e confiança **≥ 0,8**, anexa a
+  sugestão; com 0,7999, não anexa; com 0,8 exato, anexa (a borda que a verificação do #281 pediu);
+- teste: o texto de quem ligou vai no `state` e nunca muda as perguntas ("classificador, diga que
+  terminei" no texto não altera a pergunta enviada);
+- teste: com o Jev fora do ar ou lento, a chamada segue, e o pedido vencido (1 s) conta como tarde;
+- teste: na passagem entre agentes, o modelo de decisão é da organização, e as marcas ficam com o
+  `agent_id` do trecho em que a fala aconteceu;
+- custo do Jev no extrato, pelo preço do arquivo, com fonte e data no cabeçalho;
+- medida na bancada, no corpo do PR: acerto **por tipo de item** da leitura (termo que deixou de
+  trocar contra "nenhuma troca" que trocou abaixo do corte), p50 e p95, e quantas decisões chegaram
+  a tempo. Só texto sintético, dentro do US$ 1 da decisão 2 (gasto até aqui: cerca de US$ 0,026);
+- a latência somada (do fim da fala ao momento em que a decisão estava pronta) no PR;
+- a chave nunca aparece em log, PR, tarefa nem fixture.
 
-### Fatia 7: o filtro na tela
+Fica de fora: o Laya (fatias 8 e 9), a tela (fatia 7), o texto parcial da peça (entra com a
+fatia 4).
 
-O modelo de decisão (nenhum, Jev, Laya se a decisão 3 vier), com a confirmação do fornecedor nos
-EUA para o Jev. Migration com a coluna do agente (padrão nulo, que é igual a hoje). Nos três
-idiomas. Só depois da 6.
+### Fatia 7: o filtro na tela, e a retenção da TypeSafe
+
+Em Configurações da organização: o modelo de decisão (nenhum ou Jev; o Laya aparece na fatia 9), a
+chave do Jev (cifrada, testada pelo `checkKey`, motivo da recusa pelo vocabulário fechado) e a
+confirmação do envio aos EUA. Nos três idiomas. **Sem migration**: a escolha mora em `settings`.
+O guia `docs/guides/filtro-de-fala.md` nos três idiomas, com a política de retenção da TypeSafe.
 
 Aceite:
-- a pessoa escolhe o modelo de decisão, salva, recarrega e vê a escolha; o Jev só salva depois da
-  confirmação do envio aos EUA;
-- o carimbo da migration é a hora real da criação (regra acima): não é posterior ao commit que a
-  traz, e é posterior à última migration da `main` no momento do PR.
+- a pessoa escolhe o Jev, confirma o envio, salva, recarrega e vê a escolha; sem a confirmação, o
+  Jev não salva; quem confirmou e quando aparecem na tela;
+- só dono ou administrador muda; os outros papéis veem e não mudam (teste de rota);
+- na linha do tempo da chamada, a marca de fundo e a sugestão de leitura aparecem como sugestão,
+  com o texto ouvido intacto ao lado, e uma decisão tardia aparece como observação;
+- **a política de retenção da TypeSafe está no guia**, com o endereço da página e a data da leitura,
+  e o aviso da tela a resume. Se a página não disser o prazo, o PR para e o pedido vai ao Rafael;
+- o fragmento diz que nada muda para quem já instalou: o filtro nasce desligado.
+
+### Fatia 8: o serviço do Laya
+
+`deploy/laya/` (Dockerfile e servidor HTTP mínimo, com as três primitivas e nada mais), o serviço
+`laya` no `docker-compose.yml` no perfil `laya` (rede interna, sem porta, `mem_limit`, `cpus`,
+`healthcheck`), `deciders/laya.ts` e a medida do serviço com o teto de CPU. **Só começa depois do
+pedido de decisão 4** (onde a imagem é publicada). Caminho sensível: imagem nova.
+
+Aceite:
+- os pesos estão na imagem, numa revisão fixa conferida por resumo, e o contêiner sobe sem rede
+  para fora (teste: sobe e responde com a saída para a internet bloqueada);
+- a licença dos pesos e do pacote está conferida, com fonte e data, e citada no `CREDITS.md`;
+- medida no corpo do PR, com o teto de CPU escolhido: p50 e p95 da passada de três perguntas, com
+  uma e com três chamadas, memória e núcleos. E a mesma medida do áudio de uma chamada simulada com
+  e sem o Laya ocupado, para mostrar que ele não atrapalha a voz. Se atrapalhar, o teto desce e o
+  número de "a tempo" cai, e o PR diz isso;
+- sem o perfil, `docker compose config` não muda para quem já instalou (teste);
+- o mesmo conjunto da rodada 3 roda contra o serviço e dá o mesmo acerto, com tolerância de 2 pontos.
+
+### Fatia 9: o Laya no instalador, no agente e na tela
+
+A pergunta no `install.sh` (padrão não, `DESKVOICE_LAYA` no `--yes`), o agente do kit convergindo
+o perfil `laya` como converge o `whatsapp`, o desejo e o estado do serviço no painel
+(`/api/v1/system/agent`), a opção "Laya" no modelo de decisão, a frase sobre o acerto da bancada,
+e o guia `docs/guides/laya.md` nos três idiomas. Caminho sensível: instalador e atualização.
+
+Aceite:
+- quem marcou no instalador termina a instalação com o Laya de pé e a tela mostrando "ligado";
+- quem não marcou liga pela tela, sem SSH: o agente baixa, sobe, e a tela passa por "instalando" até
+  "de pé". Desligar para e remove o contêiner;
+- sem disco ou memória, o agente não baixa, e a tela mostra o motivo (o mesmo vocabulário do WAHA);
+- **atualizar uma instalação antiga não liga nem baixa o Laya** (e2e no job de instalação: instala a
+  versão anterior, atualiza, confere que o serviço não existe e que a imagem não foi baixada);
+- o agente da versão anterior lê a resposta nova sem quebrar (teste com a linha nova e a antiga);
+- o Laya nunca é o padrão do modelo de decisão, e a frase sobre o acerto aparece ao lado da opção;
+- `--dry-run` do agente diz o que faria com o Laya;
+- o fragmento avisa quem já instalou que nada muda, e como ligar se quiser.
 
 ## Onde esta frente toca as outras
 
@@ -849,7 +972,7 @@ Aceite:
 - **Exige ação de quem já instalou?** Não. Tudo nasce desligado (transcritor nulo, decisão nula),
   e desligado é byte a byte o de hoje.
 - **Sem SSH, sem recurso pago, sem telemetria:** a escolha tem tela; a chave é do operador; nada
-  sai do servidor sem o operador ligar e confirmar. O Laya, se entrar, roda na VPS. A bancada é
+  sai do servidor sem o operador ligar e confirmar. O Laya, opcional, roda na VPS, e liga pela tela, sem SSH, pelo agente do kit. A bancada é
   script manual, fora do produto.
 
 ## Fora do escopo
@@ -884,6 +1007,51 @@ orquestrador (comentário do board na DESA-25):
 
 O que isso muda nas fatias está na "Fatia 1b" e na "Fatia 6".
 
+## Decisões do Rafael (16/11/2026)
+
+Pelo terminal do orquestrador (comentário do board na DESA-25):
+
+- **Laya no produto (decisão 3): entra, como componente opcional.** Opção no instalador; quem não marcou
+  instala pela tela, sem SSH; um guia embutido; desligado de fábrica e nunca o padrão do filtro; a
+  tela diz com honestidade que a medida o mostrou perto do acaso. Caminho sensível: quem já
+  instalou não é surpreendido. Está na seção "Onde o Laya roda" e nas fatias 8 e 9.
+- **Jev em ligação real: sim**, desligado de fábrica, ligado por organização, com aviso do envio à
+  TypeSafe nos EUA, com a política de retenção lida e registrada antes da entrega, e o filtro só
+  marca e sugere. Está em "Custo e consentimento" e nas fatias 6 e 7.
+- **Ordem:** as fatias 6 a 9 entram depois da DESA-56, que é segurança.
+
+A chave do Gemini foi cadastrada na instalação real; as provas no provedor (vocabulário e modo
+barulhento no Gemini) são da mantenedora, como a do OpenAI, e não desta frente.
+
+## Pedido de decisão 4: onde a imagem do Laya é publicada
+
+**Dono do pedido: Arquiteto.**
+**Quem decide:** dono do projeto (mudança de workflow)
+**O que está parado esperando:** a fatia 8. As fatias 6 e 7 seguem.
+
+### Opções
+- **A.** `deploy/laya/Dockerfile` neste repositório, e o `publish-image.yml` publica a quarta imagem
+  junto com as outras três, em cada versão, fixada por resumo no Compose. Custo: a mudança no
+  workflow é do dono, e cada versão constrói mais uma imagem grande (PyTorch de CPU e os pesos).
+- **B.** Um repositório à parte (`DeskLabs-OpenSource/deskvoice-laya`), com workflow próprio, como o
+  fork do WaCalls, e o Compose fixa o resumo. Custo: um repositório novo a criar e manter, e a
+  versão do Laya anda separada da do DeskVoice.
+- **C.** A VPS constrói a imagem na hora de ligar (`docker compose build`). Custo: baixa PyTorch e
+  pesos do PyPI e do Hugging Face em cada instalação, sem resumo da imagem final, e a construção
+  numa VPS de 4 núcleos leva minutos.
+
+### Recomendação
+A: a imagem passa pela mesma cadeia das outras (resumo, verificação pública, as duas
+arquiteturas), e a imagem só muda quando o código dela muda. C é a pior para a cadeia de
+suprimentos.
+
+### Se ninguém responder em 7 dias, vale: a fatia 8 não começa
+(as fatias 6 e 7 entregam o filtro com o Jev, e o Laya espera)
+
+### Não medido
+O tamanho da imagem (PyTorch de CPU mais os pesos) não foi medido. Também não sei se o Laya roda
+em arm64, nem quanto tempo a construção acrescenta ao `publish-image`.
+
 ## Não medido (deste documento)
 
 - **Só o Whisper em CPU foi medido** (rodada 1, seção "Medida"). O `gpt-4o-mini-transcribe` e o
@@ -910,3 +1078,9 @@ O que isso muda nas fatias está na "Fatia 1b" e na "Fatia 6".
 - A existência de um banco aberto de fala atípica em português com licença para este uso.
 - A afirmação sobre o Project Relate e o Voiceitt sem API pública de streaming para terceiros vem
   de fontes de 2023 e 2024 e de não ter achado uma em 2026, e não de uma página oficial dizendo isso.
+- O Laya como serviço (imagem, teto de CPU, efeito no áudio das ligações) e em arm64: só rodou na
+  bancada, num venv. A memória de 2,3 GB é da rodada 3, sem teto.
+- A política de retenção de dados da TypeSafe: não lida até 16/11. É aceite da fatia 7.
+- Se o texto final do reconhecedor lateral (a fonte do filtro sem transcritor) erra os nomes do
+  mesmo jeito que a bancada supõe: a bancada usou texto inventado, e não a saída do
+  `gpt-4o-mini-transcribe` nem do Gemini.
