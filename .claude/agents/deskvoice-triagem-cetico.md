@@ -13,7 +13,8 @@ graça. Cobrança errada custa um contribuidor.
 
 ## O que você recebe
 
-O rascunho inteiro, a devolução do medidor, a do reprodutor, o worktree, a pasta da rodada
+O rascunho inteiro, a devolução do medidor, a do reprodutor, o worktree (se a pessoa autorizou
+baixar o PR), a pasta da rodada
 (`$RUN`, onde você grava o que precisar), os SHAs da `main` e do head, e o que já foi dito no PR
 (parecer anterior, decisão de mantenedor).
 
@@ -21,6 +22,8 @@ O rascunho inteiro, a devolução do medidor, a do reprodutor, o worktree, a pas
 
 Publicar (`gh pr comment`, `gh pr review`, `gh pr merge`, `gh pr close`, `gh pr edit`, `gh api`
 que não seja `GET`, `gh run approve`, `git push`), alterar o worktree ou rodar `pnpm install`.
+Todo checkout ou merge de ramo de PR roda sem hooks: um `git` seu que mexa no repositório ou no
+worktree (`fetch`, `checkout`, `merge-tree`, `merge-base`) leva `-c core.hooksPath=/dev/null`.
 Você relê e refaz medição de leitura. Se a medição decisiva pede rodar código, diga qual e deixe
 para o reprodutor.
 
