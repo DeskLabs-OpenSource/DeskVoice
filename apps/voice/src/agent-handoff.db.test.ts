@@ -26,6 +26,7 @@ import {
   type SessionHarness,
 } from "./testing/db";
 import { waitFor } from "./testing/helpers";
+import { AFTER_CLOSE_MS, AFTER_WORDS_MS, ASK_TO_REPEAT, WITHOUT_WORDS_MS } from "./silence-guard";
 
 const { app, owner } = openTestDbs();
 let harness: SessionHarness | undefined;
@@ -656,5 +657,150 @@ describe("as correções antes da tela (fatia 4b)", { timeout: 120_000 }, () => 
     await waitFor(async () => slow.closed === 1, "the session opened after the hangup to be closed");
     slow.emit("usage", { seconds: 30 });
     expect((await ledgerOf(app, callId)).filter((row) => row.agent_id === ids.Agendamento || row.engine === "slow")).toEqual([]);
+  });
+});
+
+// As três corridas que a leitura do #304 achou corretas e que não tinham teste (fatia 4d). Cada teste
+// precisa cair se a proteção que ele exercita for desfeita: as sabotagens estão no corpo do PR.
+describe("as corridas da troca de sessão (fatia 4d)", { timeout: 120_000 }, () => {
+  it("a guarda de silêncio do trecho antigo não age depois da troca, e a do trecho novo age na sessão nova", async () => {
+    const first = manualEngine({ id: "first", keyless: true });
+    const second = manualEngine({ id: "second", keyless: true });
+    const { ids, call, harness: h } = await team("handoff-guard", { Recepção: { engine: "first" }, Agendamento: { engine: "second" } }, [first.engine, second.engine]);
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    // Antes da troca, a guarda do primeiro arma com a fala de quem ligou.
+    first.emit("callerActivity", { words: true });
+    expect(h.timers.held()).toContain(AFTER_WORDS_MS);
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    await waitFor(async () => first.toolResults.length + second.toolResults.length === 0 && (await toolResults(callId)).length === 1, "the handoff tool to finish");
+    expect(h.timers.held()).not.toContain(AFTER_WORDS_MS);
+
+    // A sessão antiga ainda manda sinais de fala depois da troca (o provedor não parou de uma vez).
+    first.emit("callerActivity", { words: true });
+    first.emit("callerActivity", { words: false });
+    for (const delay of [AFTER_WORDS_MS, WITHOUT_WORDS_MS, AFTER_CLOSE_MS]) {
+      h.clock.advance(delay);
+      expect(h.timers.fire(delay)).toBe(0);
+    }
+    expect(first.callerTurnsClosed).toBe(0);
+    expect(first.said).not.toContain(ASK_TO_REPEAT);
+    expect(second.callerTurnsClosed).toBe(0);
+    expect(second.said).not.toContain(ASK_TO_REPEAT);
+    expect(await kindsOf(app, callId)).not.toContain("caller_unanswered");
+
+    // A guarda do trecho novo funciona, e age na sessão nova.
+    second.emit("callerActivity", { words: true });
+    h.clock.advance(AFTER_WORDS_MS);
+    expect(h.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    expect(second.callerTurnsClosed).toBe(1);
+    h.clock.advance(AFTER_CLOSE_MS);
+    expect(h.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+    expect(second.said).toEqual([ASK_TO_REPEAT]);
+    expect(first.callerTurnsClosed).toBe(0);
+    expect(first.said).toEqual([]);
+    await waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "caller_unanswered").length === 2, "the new guard's events");
+    transport.callerHangup();
+    await session.done;
+  });
+
+  it("uma passagem pedida enquanto outra abre devolve busy, e não abre uma terceira sessão", async () => {
+    let release: () => void = () => undefined;
+    const slow = manualEngine({ id: "slow", keyless: true, connectWhen: new Promise<void>((resolve) => (release = resolve)) });
+    const third = manualEngine({ id: "third", keyless: true });
+    const first = manualEngine({ id: "first", keyless: true });
+    const { ids, call } = await team(
+      "handoff-busy",
+      { Recepção: { engine: "first" }, Agendamento: { engine: "slow" }, Financeiro: { engine: "third" } },
+      [first.engine, slow.engine, third.engine],
+    );
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? "", ids.Financeiro ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => slow.configs.length === 1, "the first handoff to start opening");
+    // O modelo pede outra passagem antes de a primeira terminar: para outro destino e para o mesmo.
+    first.emit("toolCall", { id: "t2", name: "transfer_to_agent", args: { agent: "Financeiro", reason: "boleto", summary: "Quer a segunda via." } });
+    first.emit("toolCall", { id: "t3", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => first.toolResults.length === 2, "the two refusals");
+    for (const refused of first.toolResults) {
+      expect(refused.result).toMatchObject({ ok: false, noEffect: true });
+      expect(String((refused.result as { message: string }).message)).toMatch(/Outra passagem desta ligação está em curso/);
+    }
+    expect(first.toolResults.map((refused) => refused.id).sort()).toEqual(["t2", "t3"]);
+    expect(third.configs).toEqual([]);
+    expect(slow.configs).toHaveLength(1);
+    expect(first.closed).toBe(0);
+
+    // A primeira termina: uma passagem só, e a ligação no segundo.
+    release();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    await waitFor(async () => (await toolResults(callId)).length === 3, "all tool results");
+    expect(await payloadsOf(callId, "agent_handoff")).toEqual([expect.objectContaining({ to: { id: ids.Agendamento, name: "Agendamento" } })]);
+    expect(slow.configs).toHaveLength(1);
+    expect(third.configs).toEqual([]);
+    expect(first.closed).toBe(1);
+    transport.callerAudio(100);
+    expect(slow.audioBytes).toBeGreaterThan(0);
+    transport.callerHangup();
+    await session.done;
+  });
+
+  it("a ferramenta que a sessão substituída ainda roda termina sem falar pela voz nova, sem entregar resultado e sem mudar o trecho atual", async () => {
+    let releaseTool: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (releaseTool = resolve));
+    const outcomes: unknown[] = [];
+    // Uma ferramenta lenta do primeiro que, ao terminar, tenta falar e passar a ligação adiante.
+    const lingering: Tool = defineTool({
+      name: "lingering",
+      description: "Teste: termina depois da troca.",
+      inputSchema: z.object({}),
+      async run(_input, ctx) {
+        await gate;
+        ctx.say("FALA DA SESSÃO VELHA");
+        outcomes.push(await ctx.handoff?.({ id: ids.Financeiro ?? "", name: "Financeiro", roleLabel: null }, { reason: "x", summary: "y" }));
+        return { ok: true, message: "RESULTADO DA SESSÃO VELHA" };
+      },
+    });
+    const first = manualEngine({ id: "first", keyless: true });
+    const second = manualEngine({ id: "second", keyless: true });
+    const third = manualEngine({ id: "third", keyless: true });
+    const { ids, call, harness: h } = await team(
+      "handoff-lingering",
+      { Recepção: { engine: "first", tools: ["lingering"] }, Agendamento: { engine: "second" }, Financeiro: { engine: "third" } },
+      [first.engine, second.engine, third.engine],
+    );
+    (h.deps.tools as Map<string, Tool>).set("lingering", lingering);
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? "", ids.Financeiro ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    first.emit("toolCall", { id: "t0", name: "lingering", args: {} });
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    releaseTool();
+    await waitFor(async () => (await toolResults(callId)).filter((result) => result.name === "lingering").length === 1, "the lingering tool to finish");
+
+    // Não falou por nenhuma das vozes, e o resultado não foi a ninguém.
+    expect(second.said).not.toContain("FALA DA SESSÃO VELHA");
+    expect(first.said).not.toContain("FALA DA SESSÃO VELHA");
+    expect([...first.toolResults, ...second.toolResults].map((sent) => sent.id)).not.toContain("t0");
+    // A passagem pedida pela sessão velha foi recusada: a ligação continua no segundo.
+    expect(outcomes).toEqual([{ ok: false, problem: "closing" }]);
+    expect(third.configs).toEqual([]);
+    expect(await payloadsOf(callId, "agent_handoff")).toHaveLength(1);
+    expect(second.closed).toBe(0);
+    transport.callerAudio(100);
+    expect(second.audioBytes).toBeGreaterThan(0);
+    expect(third.audioBytes).toBe(0);
+    second.emit("transcript", { speaker: "agent", text: "Sigo com você." });
+    await waitFor(async () => (await payloadsOf(callId, "transcript_agent")).some((payload) => payload.text === "Sigo com você."), "the second agent's line");
+    expect(await payloadsOf(callId, "transcript_agent")).toContainEqual({ text: "Sigo com você.", agentId: ids.Agendamento });
+    transport.callerHangup();
+    await session.done;
   });
 });
