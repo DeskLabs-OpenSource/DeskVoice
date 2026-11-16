@@ -95,6 +95,8 @@ describe("loadCallerMemory: o número e o que entra", () => {
         { label: "nota", text: "Prefere de manhã." },
         { label: "pendência", text: "Confirmar o horário" },
       ]).length,
+      notes: [{ id: note, text: "Prefere de manhã." }],
+      followUps: [{ id: task, title: "Confirmar o horário" }],
     };
     expect(await load(org, inbound)).toEqual(expected);
     expect(await load(org, outbound)).toEqual(expected);
@@ -133,6 +135,26 @@ describe("loadCallerMemory: o número e o que entra", () => {
     expect(memory?.items).toEqual([{ label: "pendência", text: "Criada pela tela" }]);
     expect(memory?.followUpIds).toEqual([manual]);
     expect(memory?.noteIds).toEqual([]);
+  });
+
+  it("o número sai do título da pendência que o supervisor abriu: o da ligação vira `este número`, outro vira `[número]`", async () => {
+    const org = await createOrganization(app, "load sem numero no titulo");
+    const old = await callOf(org, { at: daysAgo(1), from: PHONE });
+    // O formato de `reviewTitle` (apps/routines/src/routines/review_call.ts): `Retornar para <número>: <o caso>`.
+    const own = await followUpOf(org, old, `Retornar para ${PHONE}: a ligação caiu antes do fim`, daysAgo(1));
+    const other = await followUpOf(org, old, "Avisar +5531900001111 do retorno", daysAgo(1, 1));
+    const memory = await load(org, await callOf(org, { at: NOW, from: PHONE }));
+    expect(memory?.items).toEqual([
+      { label: "pendência", text: "Avisar [número] do retorno" },
+      { label: "pendência", text: "Retornar para este número: a ligação caiu antes do fim" },
+    ]);
+    expect(memory?.followUpIds).toEqual([other, own]);
+    expect(JSON.stringify(memory)).not.toContain(PHONE);
+    expect(JSON.stringify(memory)).not.toContain("+5531900001111");
+    expect(memory?.chars).toBe(rememberedBlock(memory?.items ?? []).length);
+    // A tabela continua com o número: o dono precisa dele na tela.
+    const stored = await withSystem(app, (q) => q.one<{ title: string }>("select title from follow_ups where id = $1", [own]));
+    expect(stored?.title).toBe(`Retornar para ${PHONE}: a ligação caiu antes do fim`);
   });
 
   it("até 10 notas e 5 pendências, as mais novas, com as notas da mais nova para a mais velha", async () => {

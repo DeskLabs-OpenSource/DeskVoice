@@ -5,6 +5,7 @@ import {
   callRecordingOf,
   decryptSecret,
   enqueueTask,
+  fitCallerMemory,
   loadCallerMemory,
   recordEvent,
   recordEventWithId,
@@ -211,6 +212,17 @@ export interface HandoffNote {
 const oneLine = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").trim();
 
 /**
+ * O motivo e o resumo da passagem como itens do bloco lembrado. A mesma lista vai para
+ * `composeInstructions` e para o corte da memória na passagem: o que é medido é, byte a byte, o que vai.
+ */
+export function handoffItems(handoff: Pick<HandoffNote, "reason" | "summary">): RememberedItem[] {
+  return [
+    { label: "motivo", text: handoff.reason },
+    { label: "resumo", text: handoff.summary },
+  ];
+}
+
+/**
  * As instruções que a sessão entrega ao motor. Sem destino e sem passagem, são as do agente, byte a
  * byte. Com destino, ganham uma linha por agente para quem ele pode passar a ligação, com nome e papel.
  * Com passagem, ganham quem passou e, no bloco delimitado e escapado (`rememberedBlock`, registro
@@ -240,7 +252,7 @@ export function composeInstructions(base: string, targets: readonly HandoffTarge
     parts.push(
       [
         `Esta ligação veio do agente ${oneLine(handoff.fromName)}, que já saiu da linha. Quem ligou já ouviu o aviso de gravação e acabou de ouvir você dizer que continua o atendimento. Continue a partir do motivo e do resumo da passagem, sem pedir de novo o que já foi dito.`,
-        rememberedBlock([{ label: "motivo", text: handoff.reason }, { label: "resumo", text: handoff.summary }, ...memory]),
+        rememberedBlock([...handoffItems(handoff), ...memory]),
       ].join("\n"),
     );
   } else if (memory.length > 0) {
@@ -875,7 +887,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       if (!next) return { ok: false, problem: "unavailable", detail: "the target agent was not found in this organization" };
       const targets = await targetsOf(next);
       const enabled = enabledToolsFor(next.tools, targets);
-      const instructions = composeInstructions(next.instructions, targets, { fromName: from.agent.name, reason: input.reason, summary: input.summary }, memory?.items);
+      // O teto de 1 500 vale para o bloco inteiro, com o motivo e o resumo: o corte é refeito a partir
+      // da memória lida no começo da ligação, e nunca em cima do corte de uma passagem anterior.
+      const handoff = { fromName: from.agent.name, reason: input.reason, summary: input.summary };
+      const lead = handoffItems(handoff);
+      const fitted = memory && fitCallerMemory(memory.notes, memory.followUps, lead);
+      const instructions = composeInstructions(next.instructions, targets, handoff, fitted?.items ?? []);
       // A chamada simulada abre o motor simulado na ligação inteira, o trecho do destino inclusive:
       // ela nunca gasta com o provedor nem usa a chave da organização.
       const opened = await connectEngine(overrides?.engineId ?? next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled));
@@ -899,6 +916,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         reason: input.reason,
         summary: input.summary,
       });
+      // O que o modelo do destino recebeu da memória: os ids e o tamanho do bloco inteiro, nunca o
+      // texto, mesmo quando nada coube.
+      const loaded = memory
+        ? event("memory_loaded", {
+            noteIds: fitted?.noteIds ?? [],
+            followUpIds: fitted?.followUpIds ?? [],
+            chars: fitted?.chars ?? rememberedBlock(lead).length,
+          })
+        : undefined;
       startLeg(next, opened.engine, opened.voice, enabled);
       from.guard.stop();
       visited.push(next);
@@ -909,6 +935,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // Fechar a sessão antiga entrega a última medição dela, que entra no trecho dela.
       await from.voice.close();
       await recorded;
+      await loaded;
       // O teto do novo agente pode ser menor que o custo já gasto: vale na hora, sem esperar outra medição.
       const reached = reachCeiling(callCents());
       if (reached) await recordCeiling(callCents(), reached);
