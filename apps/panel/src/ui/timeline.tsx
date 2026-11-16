@@ -92,10 +92,23 @@ export function Timeline({
     return Object.hasOwn(t.reasons, key) ? t.reasons[key as keyof typeof t.reasons] : key;
   };
 
+  // Depois de uma passagem, a fala do agente leva o id de quem falou (`agentId`); o nome vem da
+  // própria passagem, que guarda de quem e para quem ela foi.
+  const handoffNames = new Map<string, string>();
+  for (const event of events) {
+    if (event.kind !== "agent_handoff") continue;
+    for (const side of [event.payload.from, event.payload.to]) {
+      if (typeof side === "object" && side !== null && "id" in side && "name" in side) handoffNames.set(text(side.id), text(side.name));
+    }
+  }
+  const speakerOf = (payload: Record<string, unknown>): string => (text(payload.agentId) ? handoffNames.get(text(payload.agentId)) : undefined) ?? (agentName || t.speakers.agent);
+  const sideName = (side: unknown): string => (typeof side === "object" && side !== null && "name" in side ? text(side.name) : "");
+
   const rows: Row[] = pairTools(events).map(({ event, result }, index, all): Row => {
     const p = event.payload;
     const base = { key: event.id, at: event.at };
-    const previous = all[index - 1]?.event.kind;
+    const previousEvent = all[index - 1]?.event;
+    const previous = previousEvent?.kind;
     switch (event.kind) {
       case "transcript_user":
       case "transcript_agent": {
@@ -106,7 +119,9 @@ export function Timeline({
           side: user ? "left" : undefined,
           body: (
             <div className={`grid max-w-[46ch] gap-0.5 rounded-md px-4 py-2.5 ${user ? "bg-sunken" : "border border-line bg-surface"}`}>
-              {previous !== event.kind ? <span className="text-[0.8rem] font-bold text-muted">{user ? t.speakers.user : agentName || t.speakers.agent}</span> : null}
+              {previous !== event.kind || (!user && text(previousEvent?.payload.agentId) !== text(p.agentId)) ? (
+                <span className="text-[0.8rem] font-bold text-muted">{user ? t.speakers.user : speakerOf(p)}</span>
+              ) : null}
               {p.purged === true ? <p className="text-muted italic">{p.erased === true ? e.transcript_erased : e.transcript_purged}</p> : <p className="leading-relaxed">{text(p.text)}</p>}
               {p.source === "stt" ? <p className="text-[0.8rem] text-muted">{e.transcript_from_recording}</p> : null}
             </div>
@@ -216,6 +231,26 @@ export function Timeline({
               {text(p.reason) ? <p className="text-muted">{text(p.reason)}</p> : null}
               {text(p.summary) ? <p className="text-[0.87rem] text-muted">{text(p.summary)}</p> : null}
               {p.erased === true ? <Erased>{e.erased}</Erased> : null}
+            </Card>
+          ),
+        };
+      case "agent_handoff":
+        // O motivo e o resumo saem com o prazo de guarda e com o apagamento a pedido do titular: o
+        // cartão fica só com de quem e para quem.
+        return {
+          ...base,
+          tone: "accent",
+          icon: ArrowsLeftRight,
+          body: (
+            <Card title={fill(e.agent_handoff, { to: sideName(p.to) })}>
+              <p className="text-muted">{fill(e.agent_handoff_from, { from: sideName(p.from) })}</p>
+              {text(p.reason) ? <p className="text-muted">{text(p.reason)}</p> : null}
+              {text(p.summary) ? (
+                <details className="text-[0.87rem] text-muted">
+                  <summary className="cursor-pointer font-bold hover:text-ink">{e.agent_handoff_summary}</summary>
+                  <p className="mt-1 whitespace-pre-line">{text(p.summary)}</p>
+                </details>
+              ) : null}
             </Card>
           ),
         };

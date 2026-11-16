@@ -90,6 +90,7 @@ const common = {
     whatsapp_contact_required: "Cadastre o seu WhatsApp em Meu contato, em Configurações → Sua conta, para receber a mensagem de teste.",
     whatsapp_connector_refused: "O conector de WhatsApp configurado recusou a mensagem de teste. Confira o endereço e o token do conector; o detalhe técnico fica no registro do painel.",
     whatsapp_connected: "Há um número de WhatsApp conectado por QR Code. Desconecte o número antes de salvar outro conector ou de remover o serviço.",
+    handoff_target_invalid: "Um dos agentes marcados em \"Pode passar a ligação para\" não existe mais ou é o próprio agente. Recarregue a página e marque de novo.",
     owner_unavailable: "Essa pessoa não está ativa na equipe. Escolha outra, ou deixe com a equipe.",
     caller_notes_retention_above_transcripts: "O prazo da memória não pode passar do prazo de guarda das conversas. Escolha um prazo menor, ou aumente antes o prazo de guarda.",
     follow_up_closed: "Esta pendência já foi fechada por outra pessoa. Atualize a página.",

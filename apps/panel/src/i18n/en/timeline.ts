@@ -90,6 +90,7 @@ const timeline: TimelineDictionary = {
   removedPerson: "Someone who left the team",
   names: {
     end_call: "End the call",
+    transfer_to_agent: "Hand off to another agent",
     transfer_to_human: "Transfer to a person",
     notify_human: "Notify the team",
     request_approval: "Ask for approval",
@@ -125,6 +126,9 @@ const timeline: TimelineDictionary = {
     human_notified: "Notified a person",
     human_notified_channels: "Sent by: {channels}",
     dtmf_sent: "Pressed keys on the menu",
+    agent_handoff: "Handed off to {to}",
+    agent_handoff_from: "From {from}",
+    agent_handoff_summary: "Summary for the next agent",
     transfer_started: "Transferring the call",
     transfer_to: "To {to}",
     transfer_completed: "Transfer completed",
