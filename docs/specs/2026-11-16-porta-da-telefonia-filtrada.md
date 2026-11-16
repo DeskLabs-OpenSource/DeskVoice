@@ -35,6 +35,10 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
   - linha por registro com nome no `host`: os endereços que o nome resolve (A e AAAA, e os alvos
     do SRV `_sip._udp.<nome>` quando houver), mais os `match_extra` dela;
   - linha deixada de fora do arquivo (`skipped`): nenhum endereço. Ela já aparece "Com falha".
+  - os `match_extra` da linha por registro ficam fora da regra de endereço compartilhado: essa
+    regra existe porque dois `identify` com o mesmo endereço tornam a linha ambígua, e a linha por
+    registro é reconhecida pelo `line`, não pelo endereço. No ACL, endereço repetido é um `permit`
+    só.
 - **`match_extra` passa a valer também na linha por registro**, só para liberar a entrada (o
   `identify` dela continua sendo o `line` do registro). É a resposta à operadora que registra por
   um servidor e entrega a ligação por outro. Hoje `trunkProblem` e `requireIpModeForAddresses`
@@ -44,7 +48,7 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
   falha **mantém o último conjunto conhecido** daquela linha e marca a linha `warn` com o motivo;
   nunca encolhe para vazio por falha de DNS.
 - **A tela mostra o que está liberado.** Cada linha mostra "Aceita ligações de: …", com a hora da
-  última resolução quando o `host` é nome, e o texto "Se as ligações desta operadora pararem de
+  última mudança do conjunto ("atualizados em", contrato 4) quando o `host` é nome, e o texto "Se as ligações desta operadora pararem de
   chegar, ela pode estar entregando de outro endereço: inclua-o em Endereços extras". O conjunto
   fica gravado na linha (**novo**: `trunks.inbound_allowed text[] not null default '{}'` e
   `trunks.inbound_resolved_at timestamptz`), escrito só pelo processo de voz.
@@ -72,6 +76,17 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
 4. `inbound_allowed` e `inbound_resolved_at` só mudam quando o conjunto muda (mesma regra de
    `setStatus`: `is distinct from`).
 5. A tela lê o que está gravado; o painel nunca resolve nome.
+6. **O filtro sai do mesmo conjunto que a tela mostra** (fatia 2): o `[deskvoice-acl]` é escrito a
+   partir do conjunto calculado por `computeAllowed` (`plan.allowed`), que já aplica a regra do
+   último conjunto, e nunca de `allowedAddresses` chamado direto. Do contrário, tela e filtro
+   divergem justamente quando o DNS falha. Teste: resolução que falha, o `permit` é igual ao
+   `inbound_allowed` gravado.
+7. **O último conjunto só vale para as mesmas entradas** (fatia 2, antes de o filtro entrar).
+   Quando o painel muda `host`, `auth_mode` ou `match_extra` de uma linha, ele zera
+   `inbound_allowed` e `inbound_resolved_at` dela, na mesma gravação (única escrita do painel
+   nessas colunas). Assim, trocar o nome A pelo nome B com B sem resolver não deixa o `permit` da
+   operadora antiga, e um extra removido sai na hora. O preço, aceito: editar a linha com o DNS
+   fora deixa só a parte numérica (IP e extras) até o nome resolver, com a linha em `warn`.
 
 ## 4. Critério de aceite
 
@@ -143,6 +158,10 @@ Cada uma cabe numa revisão de uma sentada. Uma de cada vez.
   endereço". Fica para uma fatia futura, se houver um sinal medido (log de segurança do Asterisk
   lido por alguém).
 - **Operadora que entrega de endereços que mudam sem estar no DNS.** Só os `match_extra` resolvem.
+- **DNS em rodízio.** Um nome que devolve um subconjunto diferente a cada consulta muda o conjunto
+  e recarrega o `res_pjsip` a cada 5 minutos. Recarregar não derruba ligação; o custo é ruído. A
+  fatia 2 mede com um nome real; se recarregar demais, a saída é uma fatia própria, não um ajuste
+  escondido no filtro.
 - **Sem linha, o `403` até a fatia 3 entrar.** Ainda é resposta SIP, só que sem nada útil a quem
   procura central.
 
