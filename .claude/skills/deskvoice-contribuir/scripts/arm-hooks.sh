@@ -2,7 +2,8 @@
 # arm-hooks.sh: arma, neste clone, os hooks de git do contribuidor (uma vez por clone).
 #
 #   pre-commit  recusa segredo com formato conhecido e `.env` no commit; recusa migration fora do
-#               padrão AAAAMMDDTHHMMSS_slug.sql ou com carimbo já usado
+#               padrão AAAAMMDDTHHMMSS_slug.sql ou com carimbo já usado; avisa (sem bloquear)
+#               commit assinado pela máquina (root@…, @vps…, @localhost)
 #   pre-push    recusa push direto na main; avisa (sem bloquear) ramo atrasado
 #
 # Hook de git é configuração local do clone e não viaja no repositório: por isso este passo existe.
@@ -34,6 +35,6 @@ fi
 chmod +x "$target/pre-commit" "$target/pre-push"
 git config core.hooksPath "$target"
 echo "ok: core.hooksPath=$target"
-echo "  pre-commit: segredo e .env no commit; nome e carimbo de migration"
+echo "  pre-commit: segredo e .env no commit; nome e carimbo de migration; e-mail de máquina gera aviso"
 echo "  pre-push:   push direto na main é recusado; ramo atrasado gera aviso"
 echo "Desarmar: bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh --disarm"

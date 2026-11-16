@@ -1,0 +1,6 @@
+interface:
+  display_name: "Contribuir para o DeskVoice"
+  short_description: "Mede antes do PR o que a revisão e o CI medem depois: ramo atrasado, segredo, migration, fragmento, teste"
+  default_prompt: "Use a skill deskvoice-contribuir e me conduza até um PR pronto para a revisão."
+policy:
+  allow_implicit_invocation: true

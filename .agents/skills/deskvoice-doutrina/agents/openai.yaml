@@ -1,0 +1,6 @@
+interface:
+  display_name: "Regras de forma do DeskVoice"
+  short_description: "Por que cada regra existe (schema, peça em arquivo próprio, organização, fila, tela, log, relógio) e onde está a lei"
+  default_prompt: "Use a skill deskvoice-doutrina e me diga se esta forma é permitida e por quê."
+policy:
+  allow_implicit_invocation: true

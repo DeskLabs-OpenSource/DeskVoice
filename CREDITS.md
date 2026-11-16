@@ -48,6 +48,17 @@ Da fábrica do DeskcommCRM vieram a contribuição guiada por skills, o lançame
 a forma do instalador e as doutrinas de sistema vivo, versionamento e ação destrutiva, aqui
 reescritas para telefonia.
 
+Do kit de contribuição do DeskcommCRM (`deskcomm-contribuir`) vieram também, no roteiro R9:
+
+- **O `agents/openai.yaml` de cada skill**, o arquivo que apresenta a skill ao Codex: a forma
+  (quatro campos) veio de lá; o texto de cada um foi escrito aqui, a partir da skill do DeskVoice.
+- **O aviso de identidade no commit** (`warn-identity.sh`): texto adaptado do
+  `avisar-identidade.sh` de lá, com o mesmo comportamento (avisa e nunca bloqueia).
+- **As referências do pré-voo e da receita local**, como lição de estrutura e não como texto: uma
+  página que explica cada item do script de pré-voo, e outra com o passo a passo para rodar na
+  própria máquina o que o CI roda. O conteúdo foi escrito a partir do `preflight.sh` e do
+  `package.json` do DeskVoice.
+
 O DeskcommCRM é obra de mais de 250 autores de PR. Parte do que está aqui é trabalho deles.
 
 ## Software usado como serviço à parte
