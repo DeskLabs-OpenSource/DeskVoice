@@ -26,6 +26,8 @@ export interface ProbeAnswer {
   rport?: number;
   /** De onde a sonda mandou: endereço e porta locais. */
   local: { address: string; port: number };
+  /** O Call-ID do pedido, para achar a linha dele no log da central. */
+  callId?: string;
 }
 
 /** Um OPTIONS que a central mandou para cá (a qualificação), e a quem respondemos 200. */
@@ -146,10 +148,10 @@ export class SipProbe {
       });
       send();
     });
-    if (answer === null) return { answered: false, local: this.local };
+    if (answer === null) return { answered: false, local: this.local, callId };
     const { startLine, headers } = parseSipMessage(answer);
     const [, status, reason] = /^SIP\/2\.0 (\d{3}) ?(.*)$/.exec(startLine) ?? [];
-    return { answered: true, status: Number(status), reason: reason ?? "", ...viaSeen(headers.get("via")?.[0]), local: this.local };
+    return { answered: true, status: Number(status), reason: reason ?? "", ...viaSeen(headers.get("via")?.[0]), local: this.local, callId };
   }
 
   private receive(text: string, remote: { address: string; port: number }): void {

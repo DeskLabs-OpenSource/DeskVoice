@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
 import { expect, test, type Page } from "@playwright/test";
 import { SipProbe, type ProbeAnswer } from "../../../../scripts/sonda-sip/sonda";
@@ -27,6 +28,28 @@ function measured(label: string, answer: ProbeAnswer): void {
   process.stdout.write(`[sonda] ${label}: ${text}\n`);
 }
 
+/**
+ * O que o Asterisk registrou sobre os pedidos da sonda (o motivo da recusa: "No matching endpoint
+ * found" ou "Not match Endpoint ACL"), achado pelo Call-ID. Só quando esta máquina alcança o Docker
+ * da instalação (no runner, sim); fora disso, a medida fica só com o código de resposta.
+ */
+function asteriskSaid(answers: ProbeAnswer[]): void {
+  try {
+    const id = execFileSync("docker", ["ps", "-q", "--filter", "label=com.docker.compose.service=asterisk"], { encoding: "utf8" }).trim().split("\n")[0];
+    if (!id) return;
+    const log = execFileSync("docker", ["logs", "--since", "10m", id], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    for (const answer of answers) {
+      for (const entry of log.split("\n").filter((text) => answer.callId !== undefined && text.includes(answer.callId))) {
+        const said = entry.replace(/\u001b\[[0-9;]*m/g, "");
+        test.info().annotations.push({ type: "Asterisk", description: said });
+        process.stdout.write(`[sonda] Asterisk: ${said}\n`);
+      }
+    }
+  } catch (error) {
+    process.stdout.write(`[sonda] log do Asterisk não lido: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
 /** Repete a sonda (uma por segundo, até 20) até o código esperado; devolve a última resposta vista. */
 async function until(probe: SipProbe, host: string, user: string, accept: (answer: ProbeAnswer) => boolean, attempts = 20): Promise<ProbeAnswer> {
   let answer = await probe.options(host, { user });
@@ -50,6 +73,7 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
   const name = `Sonda ${unique()}`;
   const probe = await SipProbe.open(host);
   let trunkId: string | null = null;
+  let registerId: string | null = null;
   await signIn(page);
   try {
     // Sem linha no endereço da sonda: a central recusa (M1, origem que não casa com linha).
@@ -109,8 +133,31 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
     const refused = await probe.options(host, { user: stranger });
     measured("M1 linha em outro endereço", refused);
     expect(refused.status).not.toBe(200);
+    const seen = [noLine, allowed, asLine, refusedAsLine, refused];
+
+    // O controle: a central reconhece a linha pelo nome que a sonda apresenta? Uma linha por registro
+    // com um nome que nunca resolve fica sem filtro (contrato 8) e a tela diz isso; ali, a sonda que
+    // se apresenta como a linha passa. Com um extra noutro endereço, o filtro liga só com ele, e a
+    // mesma sonda é recusada: a recusa acima é do filtro, e não da falta de linha.
+    const created = await page.request.post("/api/v1/trunks", {
+      data: { name: `${name} registro`, host: "sip.invalid", username: "sonda", password: `sonda-${unique()}${unique()}`, authMode: "register" },
+    });
+    expect(created.status()).toBe(200);
+    registerId = ((await created.json()) as { data: { id: string } }).data.id;
+    await page.reload();
+    await expect(section(page, `${name} registro`)).toContainText(line.allowedEmpty);
+    const unfiltered = await until(probe, host, `trunk-${registerId}`, (answer) => answer.status === 200);
+    measured("controle: linha sem filtro (nome que não resolve), apresentando-se como a linha", unfiltered);
+    expect(unfiltered.status, "the telephony server does not recognize a line by the name the probe presents, so the refusals above say nothing about the filter").toBe(200);
+    const patched = await page.request.patch(`/api/v1/trunks/${registerId}`, { data: { matchExtra: ["198.51.100.78"] } });
+    expect(patched.status()).toBe(200);
+    const filtered = await until(probe, host, `trunk-${registerId}`, (answer) => answer.answered && answer.status !== 200);
+    measured("M1 linha por registro filtrada (só o extra 198.51.100.78), apresentando-se como a linha", filtered);
+    expect(filtered.status).not.toBe(200);
+    asteriskSaid([...seen, unfiltered, filtered]);
   } finally {
     await probe.close();
     if (trunkId) await page.request.delete(`/api/v1/trunks/${trunkId}`);
+    if (registerId) await page.request.delete(`/api/v1/trunks/${registerId}`);
   }
 });

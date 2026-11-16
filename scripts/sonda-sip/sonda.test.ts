@@ -35,7 +35,7 @@ describe("sonda SIP", () => {
     const probe = await SipProbe.open("127.0.0.1", { targetPort: server.port });
     open.push(probe);
     const answer = await probe.options("127.0.0.1", { port: server.port, user: "trunk-x" });
-    expect(answer).toEqual({ answered: true, status: 403, reason: "Forbidden", received: "127.0.0.1", rport: probe.local.port, local: probe.local });
+    expect(answer).toEqual({ answered: true, status: 403, reason: "Forbidden", received: "127.0.0.1", rport: probe.local.port, local: probe.local, callId: expect.stringMatching(/@deskvoice-sonda$/) });
     const sent = parseSipMessage(server.requests[0] ?? "");
     expect(sent.startLine).toBe(`OPTIONS sip:127.0.0.1:${server.port} SIP/2.0`);
     expect(sent.headers.get("from")?.[0]).toMatch(/^<sip:trunk-x@127\.0\.0\.1>;tag=/);
@@ -47,7 +47,7 @@ describe("sonda SIP", () => {
     open.push({ close: () => new Promise<void>((resolve) => server.socket.close(() => resolve())) });
     const probe = await SipProbe.open("127.0.0.1", { targetPort: server.port });
     open.push(probe);
-    expect(await probe.options("127.0.0.1", { port: server.port, timeoutMs: 1200 })).toEqual({ answered: false, local: probe.local });
+    expect(await probe.options("127.0.0.1", { port: server.port, timeoutMs: 1200 })).toEqual({ answered: false, local: probe.local, callId: expect.any(String) });
     expect(server.requests.length).toBeGreaterThan(1);
   });
 
