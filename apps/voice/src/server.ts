@@ -1,6 +1,6 @@
 import { whatsappCallsWanted, type Clock, type Db } from "@deskvoice/core";
 import type { Tool } from "@deskvoice/tools";
-import type { VoiceEngine } from "@deskvoice/voice-engine";
+import type { DecisionModel, VoiceEngine } from "@deskvoice/voice-engine";
 import { createApprovalWaiter } from "./approvals";
 import type { AriClient, AriEvent } from "./ari";
 import { AsteriskCalls } from "./asterisk-transport";
@@ -25,6 +25,8 @@ export interface VoiceServerDeps {
   clock: Clock;
   engines: Map<string, VoiceEngine>;
   tools: Map<string, Tool>;
+  /** Os modelos de decisão do filtro da fala (R12, fatia 6). Sem eles, o filtro não liga. */
+  decisionModels?: Map<string, DecisionModel>;
   ari: AriClient;
   secretKey: Buffer;
   audioSocketPort: number;
@@ -74,7 +76,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     if (removed > 0) log("info", "removed partial recordings left by a previous process", { removed });
   }
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
-  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir };
+  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir, decisionModels: deps.decisionModels };
   const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, resolve: deps.resolveName ?? resolveSipName, log };
   const calls = new AsteriskCalls({ ari, db, clock, log });
   const sessions = new Set<CallSession>();

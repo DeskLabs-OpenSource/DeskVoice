@@ -262,6 +262,53 @@ export interface RecordingTranscriber {
   transcribe(apiKey: string, input: TranscribeInput, options?: ClassifyOptions): Promise<TranscribeResult>;
 }
 
+/**
+ * Uma pergunta fixa ao modelo de decisão (R12, Parte 3). O texto de quem ligou nunca entra aqui:
+ * ele vai no `state`, que é dado. `noul` é sim ou não (a resposta é a probabilidade do sim),
+ * `choice` é uma entre as opções, `score` é um nível de uma escala.
+ */
+export type DecisionQuestion =
+  | { kind: "noul"; instruction: string; criteria?: { true: string; false: string } }
+  | { kind: "choice"; instruction: string; options: Record<string, string> }
+  | { kind: "score"; instruction: string; levels: readonly [string, string, ...string[]] };
+
+export type DecisionAnswer =
+  | { kind: "noul"; value: number }
+  | { kind: "choice"; choice: string; probabilities: Record<string, number>; confidence: number }
+  | { kind: "score"; score: number; probabilities: Record<string, number>; confidence: number };
+
+export interface DecideInput {
+  state: string;
+  questions: Record<string, DecisionQuestion>;
+}
+
+/**
+ * O que o modelo de decisão devolve: as respostas, ou o motivo de não haver, e sempre o consumo e
+ * o custo. `late` é o pedido que passou do prazo e foi cancelado. O custo vem nas duas vistas da
+ * classificação (`ClassifyResult`): um pedido custa milésimos de centavo, e o extrato guarda o
+ * micro-centavo.
+ */
+export type DecideResult = { model: string; usage: Usage; costCents: number; costMicrocents: number; latencyMs: number } & (
+  | { ok: true; answers: Record<string, DecisionAnswer> }
+  | { ok: false; failure: ClassifyFailure | "late"; status: number | null }
+);
+
+/**
+ * Um modelo que decide sobre texto (o filtro da fala de quem ligou; depois, os analistas ao vivo).
+ * Um arquivo por modelo em `deciders/`, descoberto por `loadDecisionModels`.
+ */
+export interface DecisionModel {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  pricing: EnginePricing;
+  keyless?: boolean;
+  /** Nunca lança. Todas as perguntas numa passada só. Passado `timeoutMs`, cancela e devolve `late`. */
+  decide(apiKey: string, input: DecideInput, options?: ClassifyOptions): Promise<DecideResult>;
+  checkKey?(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;
@@ -352,6 +399,17 @@ export const transcriptionEnabledOf = (stored: unknown): boolean => stored === t
  */
 export const AUTO_TRANSCRIPTION_SETTING = "calls.auto_transcription_enabled";
 export const autoTranscriptionEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
+ * O modelo de decisão que lê a fala de quem ligou durante a chamada, por organização (chave
+ * `calls.decision_model` em `settings`, com o id do modelo). Ausente é desligado, de fábrica: cada
+ * fala vira um pedido pago, com o texto de quem ligou, ao fornecedor do modelo. Só um id de texto liga;
+ * quem confere se o modelo existe nesta instalação é quem o usa.
+ */
+export const DECISION_MODEL_SETTING = "calls.decision_model";
+export const decisionModelOf = (stored: unknown): string | undefined => (typeof stored === "string" && stored.trim() !== "" ? stored.trim() : undefined);
+/** A chave do modelo de decisão, cifrada como a dos motores. É do operador, e nunca a do motor de voz. */
+export const decisionModelKeySetting = (modelId: string): string => `decision_model.${modelId}.api_key`;
 
 /**
  * Endpoint, modelo e chave da **classificação**, por motor, juntos numa configuração só
