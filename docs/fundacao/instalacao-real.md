@@ -294,7 +294,7 @@ com o motor simulado. A prova abaixo foi feita às 14:39 UTC (11:39 BRT) com a 0
 caminho da **chamada pelo navegador**, sem operadora e sem WhatsApp. Quem "ligou" foi um script
 rodado dentro do contêiner de voz. Ele pediu o convite à API interna, como o painel pede, e
 conversou pelo WebSocket da chamada com três falas gravadas pela voz sintética do macOS (PCM16
-mono a 8 kHz, em quadros de 20 ms), com silêncio entre elas.
+mono a 8 kHz, em quadros de 20 ms), com silêncio entre elas. Saídas em [`registros/2026-11-16-passagem/`](registros/2026-11-16-passagem/), com os ids trocados por rótulos.
 
 Foram criados dois agentes só para a prova, no motor OpenAI Realtime (`gpt-realtime-2.1`), com teto
 de 40 centavos e 150 s cada: uma recepção, que tinha o financeiro como único destino de passagem,
@@ -306,15 +306,15 @@ foram tocados.
 | Passagem | Feita na **segunda** tentativa. Na primeira, o modelo pediu `transfer_to_agent` com o nome e o rótulo, "Prova Financeiro (Teste de passagem)", copiando a linha das instruções. A ferramenta recusou, e a transcrição da fala seguinte do agente é "Entendi, vou ajustar o destino e encaminhar corretamente" (o áudio não foi ouvido). Na segunda, com o nome só, veio `agent_handoff`, com motivo e resumo. O conserto é o #333 |
 | Depois da passagem | O financeiro abriu com a frase da passagem, respondeu o valor pedido e encerrou com `end_call` depois da despedida de quem ligou. As falas dele levam o `agentId` dele |
 | Duração e desfecho | 63 s, `completed`, motivo `end_call` |
-| Custo | 9 centavos de dólar no `call_ended`. No extrato (`usage_ledger`), as linhas da recepção somam 5 e as do financeiro somam 4 |
+| Custo | 9 centavos de dólar no `call_ended`. O extrato (`usage_ledger`) da ligação, somado por `agent_id` depois que ela terminou, tem 7 linhas e nenhuma sem agente: 3 da recepção, que somam 5, e 4 do financeiro, que somam 4. Cada linha é a diferença entre dois totais arredondados, por isso há linha de 0 centavo com tokens ([`extrato.txt`](registros/2026-11-16-passagem/extrato.txt)) |
 | Gravação | `recording_saved`, 2,0 MB |
 | Rotinas | `summarize_call` e `review_call` terminaram com `done` |
 
 O que não prova:
 
 - **O custo por agente na tela.** A soma foi conferida no banco, não na tela de custos.
-- **O supervisor de regras fixas.** Ele ignora de propósito a chamada pelo navegador, que não tem número.
-- **A passagem numa ligação por operadora ou pelo WhatsApp.** O transporte da chamada pelo navegador não tem para onde transferir áudio; aqui só se troca o agente, e isso vale em qualquer transporte, mas não foi medido nos outros dois.
+- **O supervisor de regras fixas.** Ele pula toda ligação sem número, e a chamada pelo navegador não tem número.
+- **A passagem numa ligação por operadora ou pelo WhatsApp.** A passagem troca o agente sem mexer no transporte, então o caminho é o mesmo nos três, mas só o da chamada pelo navegador foi medido.
 - **O painel e o navegador.** O convite foi pedido direto à API interna do processo de voz, sem a sessão do painel nem a rota `/api/v1/calls/web`, e nenhum navegador abriu o microfone.
 - **Fala humana.** As falas eram sintéticas, ditas sem ruído.
 - **O conserto do #333 numa ligação real.** A prova foi antes dele.

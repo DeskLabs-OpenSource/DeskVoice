@@ -1,0 +1,25 @@
+14:39:34.736 UTC | call_started | {"to": null, "from": null, "userId": "<dono>", "agentId": "<recepção>", "channel": "web", "direction": "inbound"}
+14:39:36.107 UTC | call_answered | {"engine": "openai-realtime"}
+14:39:36.107 UTC | recording_notice | {"text": "Esta ligação é atendida por uma assistente virtual e a conversa fica registrada."}
+14:39:38.958 UTC | transcript_agent | {"text": "Esta ligação é atendida por uma assistente virtual e a conversa fica registrada. Olá, recepção de teste. Qual é o assunto?"}
+14:39:55.103 UTC | transcript_user | {"text": "Oi, bom dia, eu queria falar sobre a minha fatura, é um assunto do financeiro."}
+14:39:57.336 UTC | transcript_agent | {"text": "Certo, vou encaminhar você para o financeiro agora."}
+14:39:57.339 UTC | tool_called | {"args": {"omitted": "personal_text"}, "name": "transfer_to_agent"}
+14:39:57.347 UTC | tool_result | {"ok": false, "name": "transfer_to_agent", "message": "\"Prova Financeiro (Teste de passagem)\" não está entre os agentes para quem você pode passar a ligação, então ela NÃO foi passada. Os destinos são: Prova Financeiro."}
+14:39:59.605 UTC | transcript_agent | {"text": "Entendi, vou ajustar o destino e encaminhar corretamente."}
+14:39:59.607 UTC | tool_called | {"args": {"omitted": "personal_text"}, "name": "transfer_to_agent"}
+14:40:00.972 UTC | agent_handoff | {"to": {"id": "<financeiro>", "name": "Prova Financeiro"}, "from": {"id": "<recepção>", "name": "Prova Recepção"}, "engine": "openai-realtime", "reason": "Assunto de fatura e financeiro.", "summary": "Cliente quer falar sobre a fatura. Não informou valores ou detalhes. Encaminhar para o financeiro para suporte sobre cobrança, pagamento ou dúvidas financeiras."}
+14:40:01.129 UTC | tool_result | {"ok": true, "name": "transfer_to_agent", "message": "A ligação passou para Prova Financeiro, que já está com a pessoa. Não diga mais nada."}
+14:40:02.598 UTC | transcript_agent | {"text": "Oi, vou continuar o seu atendimento a partir daqui.", "agentId": "<financeiro>"}
+14:40:15.014 UTC | transcript_user | {"text": "Isso, qual é o valor da minha fatura deste mês?"}
+14:40:17.582 UTC | transcript_agent | {"text": "A fatura de teste deste mês é de cento e vinte reais. Se quiser, posso ajudar com dúvidas gerais sobre cobrança ou pagamento.", "agentId": "<financeiro>"}
+14:40:31.142 UTC | transcript_user | {"text": "Entendi, obrigada. Tchau."}
+14:40:31.422 UTC | tool_called | {"args": {"reason": "Cliente se despediu e não há mais pendências no atendimento.", "farewell": "Obrigada pelo contato! Tenha um ótimo dia. Até mais!"}, "name": "end_call"}
+14:40:31.426 UTC | tool_result | {"ok": true, "name": "end_call", "message": "A ligação vai encerrar. Diga agora, uma vez só, exatamente esta despedida e nada mais: \"Obrigada pelo contato! Tenha um ótimo dia. Até mais!\""}
+14:40:33.237 UTC | transcript_agent | {"text": "Obrigada pelo contato! Tenha um ótimo dia. Até mais!", "agentId": "<financeiro>"}
+14:40:37.592 UTC | call_ended | {"reason": "end_call", "status": "completed", "seconds": 0, "costCents": 9}
+14:40:37.607 UTC | recording_saved | {"bytes": 2030188, "sha256": "555dafcf0da437d99549ccb96531dd9b738e9de6a914196d60940e5945024556"}
+14:40:37.597 UTC | task_queued | summarize_call | 
+14:40:37.600 UTC | task_queued | review_call | 
+14:40:37.628 UTC | task_finished | summarize_call | done
+14:40:37.638 UTC | task_finished | review_call | done
