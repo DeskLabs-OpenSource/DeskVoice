@@ -1,4 +1,4 @@
-import { type VoicemailLanguage, voicemailLanguageSchema } from "@deskvoice/core";
+import { type SpokenLanguage, spokenLanguageOf } from "@deskvoice/core";
 
 /**
  * As falas da agenda. As três ferramentas dizem a mesma coisa quando a agenda não está ligada ou
@@ -6,6 +6,10 @@ import { type VoicemailLanguage, voicemailLanguageSchema } from "@deskvoice/core
  *
  * `outcome` é o que deixou de acontecer, na voz do resultado: "o horário não foi marcado",
  * "os horários não foram consultados".
+ *
+ * O idioma é o do agente, escolhido por `spokenLanguageOf`, em `@deskvoice/core`: o mesmo ponto do
+ * aviso da caixa postal e da saudação da passagem entre agentes. O prefixo vale (`en-US` fala
+ * inglês) e um idioma que as falas não têm cai no padrão do produto.
  */
 
 /** A agenda ainda não tem cliente ligado nesta central (o conector é a fatia seguinte). */
@@ -27,19 +31,10 @@ export function agendaUnavailable(outcome: string): string {
 }
 
 /**
- * O idioma das falas da agenda: o do agente, nos mesmos idiomas do aviso da caixa postal e da passagem
- * entre agentes. Um idioma fora do mapa cai no pt-BR, como lá.
- */
-function agendaLanguage(language: string): VoicemailLanguage {
-  const parsed = voicemailLanguageSchema.safeParse(language);
-  return parsed.success ? parsed.data : "pt-BR";
-}
-
-/**
  * O que o agente diz enquanto a agenda trabalha. Vai para `ctx.say`, que o motor fala como está: por
  * isso já sai no idioma do agente, e não como instrução para ele traduzir.
  */
-export const AGENDA_WAIT_LINES: Readonly<Record<VoicemailLanguage, Readonly<Record<"checking" | "booking" | "rescheduling", string>>>> = {
+export const AGENDA_WAIT_LINES: Readonly<Record<SpokenLanguage, Readonly<Record<"checking" | "booking" | "rescheduling", string>>>> = {
   "pt-BR": {
     checking: "Um instante, estou conferindo a agenda.",
     booking: "Um instante, estou marcando.",
@@ -58,7 +53,7 @@ export const AGENDA_WAIT_LINES: Readonly<Record<VoicemailLanguage, Readonly<Reco
 };
 
 export function agendaWaitLine(kind: "checking" | "booking" | "rescheduling", language: string): string {
-  return AGENDA_WAIT_LINES[agendaLanguage(language)][kind];
+  return AGENDA_WAIT_LINES[spokenLanguageOf(language)][kind];
 }
 
 /**
@@ -67,7 +62,7 @@ export function agendaWaitLine(kind: "checking" | "booking" | "rescheduling", la
  * português e espanhol, em 24. Datas vêm do CRM em ISO; a conversão é só de apresentação e não lê o relógio.
  */
 export function speakSlot(startsAt: string, timezone: string, language: string): string {
-  const lang = agendaLanguage(language);
+  const lang = spokenLanguageOf(language);
   return new Intl.DateTimeFormat(lang, {
     timeZone: timezone,
     weekday: "long",
