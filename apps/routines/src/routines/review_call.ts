@@ -12,8 +12,10 @@ import type { Routine } from "../types";
  * ferramenta, `ok`, o motivo da recusa, o id da aprovação). O título e os detalhes são texto fixo,
  * um por caso. A fala de quem ligou é dado, nunca instrução.
  *
- * O caso 5, `call_dropped` (desenho 2026-11-16-follow-up-da-ligacao-que-caiu, seções 2 e 3.3), é quem
- * ligou ter desligado com a vez aberta. Ele e o caso 1 seguem o modo do agente que atendeu
+ * O caso 5, `call_dropped` (desenho 2026-11-16-follow-up-da-ligacao-que-caiu, seções 2 e 3.3), é a
+ * ligação recebida e atendida que caiu: quem ligou desligou com a vez aberta (`caller_waiting` ou
+ * `tool_running`), ou o sistema falhou (`internal_error`, que fica fora do caso 1). Ele e o caso 1
+ * seguem o modo do agente que atendeu
  * (`agents.drop_follow_up`): em `off`, o padrão, o caso 1 abre a pendência como sempre e o caso 5 não
  * faz nada, e a revisão é a de antes; em `task`, os dois abrem.
  */
@@ -102,12 +104,15 @@ export function reviewCaseOf(events: readonly ReviewEvent[], endReason: string |
   // criada nem uma nova tentativa saiu (a recusa do `to` inválido pede para chamar de novo).
   if (failedWithoutFollowUp(events, "send_whatsapp", ["follow_up_created"], true)) return "whatsapp_not_sent";
 
-  // 5. Quem ligou desligou com a vez aberta, numa ligação recebida e atendida, e ninguém ficou com o
-  // próximo passo na própria ligação. A vez fechada (`openTurn` nulo) é o "obrigado, tchau".
+  // 5. A ligação recebida e atendida caiu, e ninguém ficou com o próximo passo na própria ligação.
+  // Caiu: o sistema falhou (`internal_error`), ou quem ligou desligou com a vez aberta, esperando
+  // além do prazo da guarda (`caller_waiting`) ou durante uma ação do agente (`tool_running`). A vez
+  // fechada (`null`) é o "obrigado, tchau"; o `agent_speaking` é gravado e não conta, porque quem
+  // desliga enquanto o agente fala, na maior parte, já ouviu o que precisava (decisão de 16/11).
+  const droppedLine = endReason === "internal_error" || (endReason === "caller_hangup" && (drop?.openTurn === "caller_waiting" || drop?.openTurn === "tool_running"));
   if (
     drop?.direction === "inbound" &&
-    drop.openTurn !== null &&
-    endReason === "caller_hangup" &&
+    droppedLine &&
     has("call_answered") &&
     !["transfer_started", "voicemail_left", "follow_up_created", "human_notified"].some(has) &&
     !events.some((event) => event.kind === "tool_result" && event.name === "send_whatsapp" && event.ok === true)

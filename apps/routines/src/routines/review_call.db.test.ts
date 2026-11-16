@@ -362,7 +362,7 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
     scene(label, hangup(openTurn, before), { endReason: "caller_hangup", ...call });
 
   it("modo task: cada vez aberta abre uma pendência do caso 5 e grava drop_follow_up só com campos fixos", async () => {
-    for (const openTurn of ["agent_speaking", "caller_waiting", "tool_running"]) {
+    for (const openTurn of ["caller_waiting", "tool_running"]) {
       const s = await dropped(`drop task ${openTurn}`, openTurn);
       await setMode(s.org, "task");
       await expectOpened(s, "call_dropped");
@@ -374,7 +374,7 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
   });
 
   it("modo task: repetir a revisão não abre a segunda pendência nem grava o segundo evento", async () => {
-    const s = await dropped("drop task twice", "agent_speaking");
+    const s = await dropped("drop task twice", "caller_waiting");
     await setMode(s.org, "task");
     await run(s.org, s.callId);
     await run(s.org, s.callId);
@@ -392,9 +392,42 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
     }
   });
 
+  it("agent_speaking (quem desligou enquanto o agente falava) é gravado, mas não gera nada em nenhum modo", async () => {
+    for (const mode of ["off", "task", "whatsapp", "call_back"]) {
+      const s = await dropped(`drop speaking ${mode}`, "agent_speaking");
+      await setMode(s.org, mode);
+      expect(await reviewCall_(s)).toBe("no_case");
+      expect(await followUpsOf(s.org)).toEqual([]);
+      expect(await dropEvents(s.callId)).toEqual([]);
+    }
+  });
+
+  it("internal_error numa recebida e atendida: em task abre o caso 5 com openTurn nulo; em off, nada", async () => {
+    const failed = (label: string, call: Parameters<typeof scene>[2] = {}, answered = true) =>
+      scene(label, [...(answered ? ([["call_answered", { engine: "simulated" }]] as Ev[]) : []), ["transcript_user", { text: "Meu nome é Joana Prado" }], ["call_ended", { status: "failed", reason: "internal_error", costCents: 0, seconds: 30 }]], { endReason: "internal_error", ...call });
+    const task = await failed("drop internal task");
+    await setMode(task.org, "task");
+    await expectOpened(task, "call_dropped");
+    const drops = await dropEvents(task.callId);
+    expect(drops.map((event) => event.payload)).toEqual([{ case: "call_dropped", mode: "task", action: "task_opened", simulated: false, openTurn: null }]);
+    expect(JSON.stringify(drops)).not.toContain("Joana");
+    // off: o caso 1 é o de hoje, sem o internal_error; nada abre.
+    const off = await failed("drop internal off");
+    expect(await reviewCall_(off)).toBe("no_case");
+    expect(await followUpsOf(off.org)).toEqual([]);
+    expect(await dropEvents(off.callId)).toEqual([]);
+    // A feita e a que não chegou a ser atendida: nada, nem em task.
+    for (const s of [await failed("drop internal outbound", { direction: "outbound" }), await failed("drop internal unanswered", {}, false)]) {
+      await setMode(s.org, "task");
+      await run(s.org, s.callId);
+      expect(await followUpsOf(s.org)).toEqual([]);
+      expect(await dropEvents(s.callId)).toEqual([]);
+    }
+  });
+
   it("end_call, transferred e voicemail_left não geram nada, nem com a vez aberta gravada", async () => {
     for (const endReason of ["end_call", "transferred", "voicemail_left"]) {
-      const s = await scene(`drop end ${endReason}`, [["call_answered", { engine: "simulated" }], ["call_ended", { status: "completed", reason: endReason, openTurn: "agent_speaking" }]], { endReason });
+      const s = await scene(`drop end ${endReason}`, [["call_answered", { engine: "simulated" }], ["call_ended", { status: "completed", reason: endReason, openTurn: "caller_waiting" }]], { endReason });
       await setMode(s.org, "task");
       await run(s.org, s.callId);
       expect(await followUpsOf(s.org)).toEqual([]);
@@ -410,7 +443,7 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
       toolResult("send_whatsapp", true),
     ];
     for (const closer of closers) {
-      const s = await dropped(`drop closer ${closer[0]}`, "agent_speaking", [closer]);
+      const s = await dropped(`drop closer ${closer[0]}`, "caller_waiting", [closer]);
       await setMode(s.org, "task");
       await run(s.org, s.callId);
       expect(await followUpsOf(s.org)).toEqual([]);
@@ -419,7 +452,7 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
   });
 
   it("só ligação recebida e atendida: a feita e a que não chegou a ser atendida não geram nada", async () => {
-    const outbound = await dropped("drop outbound", "agent_speaking", [], { direction: "outbound" });
+    const outbound = await dropped("drop outbound", "caller_waiting", [], { direction: "outbound" });
     const unanswered = await scene("drop unanswered", [["call_ended", { status: "completed", reason: "caller_hangup", openTurn: "caller_waiting" }]], { endReason: "caller_hangup" });
     for (const s of [outbound, unanswered]) {
       await setMode(s.org, "task");
@@ -430,7 +463,7 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
   });
 
   it("modo off (o padrão): o caso 5 não faz nada, e o caso 1 abre a pendência como antes, sem drop_follow_up", async () => {
-    const five = await dropped("drop off five", "agent_speaking");
+    const five = await dropped("drop off five", "caller_waiting");
     expect(await reviewCall_(five)).toBe("no_case");
     expect(await followUpsOf(five.org)).toEqual([]);
     const one = await scene("drop off one", [["call_answered", { engine: "simulated" }], ["engine_failed", { engine: "x", error: "y" }]], { endReason: "engine_failed" });
@@ -456,7 +489,7 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
   });
 
   it("agente apagado depois da ligação (calls.agent_id nulo pela FK): vale off, o de antes", async () => {
-    const s = await dropped("drop deleted agent", "agent_speaking");
+    const s = await dropped("drop deleted agent", "caller_waiting");
     await setMode(s.org, "task");
     await withSystem(app, (q) => q.exec("delete from agents where organization_id = $1", [s.org]));
     expect(await reviewCall_(s)).toBe("no_case");
@@ -472,7 +505,7 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
   });
 
   it("vale o modo do agente que atendeu (calls.agent_id), não o de outro agente da organização", async () => {
-    const s = await dropped("drop answering agent", "agent_speaking");
+    const s = await dropped("drop answering agent", "caller_waiting");
     await withSystem(app, (q) => q.exec("insert into agents (organization_id, name, engine, drop_follow_up) values ($1, 'Vendas', 'simulated', 'task')", [s.org]));
     await run(s.org, s.callId);
     expect(await followUpsOf(s.org)).toEqual([]);
@@ -501,10 +534,10 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
 
   it("whatsapp e call_back gravados direto no banco, sem caminho nesta fatia, caem na reserva: a pendência", async () => {
     for (const mode of ["whatsapp", "call_back"]) {
-      const s = await dropped(`drop reserve ${mode}`, "agent_speaking");
+      const s = await dropped(`drop reserve ${mode}`, "caller_waiting");
       await setMode(s.org, mode);
       await expectOpened(s, "call_dropped");
-      expect((await dropEvents(s.callId)).map((event) => event.payload)).toEqual([{ case: "call_dropped", mode, action: "task_opened", simulated: false, openTurn: "agent_speaking" }]);
+      expect((await dropEvents(s.callId)).map((event) => event.payload)).toEqual([{ case: "call_dropped", mode, action: "task_opened", simulated: false, openTurn: "caller_waiting" }]);
     }
   });
 

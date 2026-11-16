@@ -65,8 +65,9 @@ export interface SilenceGuard {
   /**
    * A vez aberta neste instante, para o `openTurn` de `call_ended` (desenho do follow-up da ligação
    * que caiu, seção 3.1): `agent_speaking` enquanto o áudio do agente que já chegou ainda toca;
-   * `caller_waiting` quando quem ligou deu sinal de fala e o agente ainda não respondeu (a guarda está
-   * armada ou fechou o turno à força). Só leitura: não muda nada. Depois de `stop`, a guarda
+   * `caller_waiting` só quando quem ligou esperou além do prazo da guarda, que já fechou o turno à
+   * força (fase `closed`). Enquanto o prazo corre (`listening`), a vez conta como fechada: é o "tchau"
+   * seguido do desligar (decisão de 16/11, depois da 1ª reprovação do #367). Só leitura: não muda nada. Depois de `stop`, a guarda
    * desarmada não vê mais quem ligou esperando; quem lê precisa ler antes.
    */
   openTurn(): "agent_speaking" | "caller_waiting" | null;
@@ -155,7 +156,7 @@ export function createSilenceGuard(deps: SilenceGuardDeps): SilenceGuard {
     },
     openTurn() {
       if (now() < agentSpeakingUntil) return "agent_speaking";
-      if (phase.kind !== "idle") return "caller_waiting";
+      if (phase.kind === "closed") return "caller_waiting";
       return null;
     },
   };

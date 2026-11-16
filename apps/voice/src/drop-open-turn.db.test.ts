@@ -6,6 +6,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { startCallSession } from "./call-session";
+import { AFTER_WORDS_MS } from "./silence-guard";
 import { createAgent, createCall, createOrganization, eventsOf, kindsOf, manualEngine, manualTransport, sessionHarness, type ManualEngine, type ManualTransport, type SessionHarness } from "./testing/db";
 import { waitFor } from "./testing/helpers";
 
@@ -84,9 +85,20 @@ describe("openTurn no fim por caller_hangup", { timeout: 120_000 }, () => {
     expect(await endedOf(s.callId)).toMatchObject({ reason: "caller_hangup", openTurn: "agent_speaking" });
   });
 
-  it("caller_waiting: quem ligou falou e o agente ainda não respondeu", async () => {
+  it("o \"tchau\": quem ligou falou e desligou antes do prazo da guarda → openTurn nulo", async () => {
+    const s = await answered("open-turn-goodbye");
+    s.manual.emit("callerActivity", { words: true });
+    s.transport.callerHangup();
+    await s.done;
+    const ended = await endedOf(s.callId);
+    expect(ended).toMatchObject({ reason: "caller_hangup" });
+    expect(ended).toHaveProperty("openTurn", null);
+  });
+
+  it("caller_waiting: quem ligou esperou além do prazo da guarda, que fechou o turno, e desligou", async () => {
     const s = await answered("open-turn-caller");
     s.manual.emit("callerActivity", { words: true });
+    expect(harness?.timers.fire(AFTER_WORDS_MS)).toBe(1);
     s.transport.callerHangup();
     await s.done;
     expect(await endedOf(s.callId)).toMatchObject({ reason: "caller_hangup", openTurn: "caller_waiting" });

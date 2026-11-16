@@ -72,7 +72,7 @@ const agents: AgentsDictionary = {
   dropFollowUpOff: "No hacer nada",
   dropFollowUpTask: "Abrir un pendiente para que alguien devuelva la llamada",
   dropFollowUpOther: "Otro modo, guardado fuera de esta pantalla",
-  dropFollowUpDefinition: "Cuenta como corte cuando la línea se cae en medio de la conversación o el sistema falla. Quien cuelga después de despedirse no cuenta.",
+  dropFollowUpDefinition: "Cuenta como corte cuando el sistema falla, cuando quien llamó pasa algunos segundos sin respuesta y cuelga, o cuando la línea se cae durante una acción del agente. Quien cuelga después de despedirse, o mientras el agente habla, no cuenta.",
 };
 
 export default agents;

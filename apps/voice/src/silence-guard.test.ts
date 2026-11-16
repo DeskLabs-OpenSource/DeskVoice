@@ -222,10 +222,15 @@ describe("guarda contra o silêncio", () => {
     expect(log).toEqual(["close", "close"]);
   });
 
-  it("openTurn: a fala do agente tocando, quem ligou esperando resposta, e fechada depois da resposta tocar", () => {
+  it("openTurn: a fala do agente tocando, quem ligou esperando além do prazo, e fechada depois da resposta tocar", () => {
     const { time, guard } = scene();
     expect(guard.openTurn()).toBeNull();
     guard.callerActivity({ words: true });
+    // Enquanto o prazo corre, a vez conta como fechada: é o "tchau" seguido do desligar.
+    expect(guard.openTurn()).toBeNull();
+    time.advance(AFTER_WORDS_MS - 1);
+    expect(guard.openTurn()).toBeNull();
+    time.advance(1);
     expect(guard.openTurn()).toBe("caller_waiting");
     guard.agentAudio(1000);
     expect(guard.openTurn()).toBe("agent_speaking");

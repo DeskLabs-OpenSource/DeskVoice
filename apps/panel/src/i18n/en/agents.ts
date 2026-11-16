@@ -72,7 +72,7 @@ const agents: AgentsDictionary = {
   dropFollowUpOff: "Do nothing",
   dropFollowUpTask: "Open a follow-up for someone to call back",
   dropFollowUpOther: "Another mode, saved outside this screen",
-  dropFollowUpDefinition: "A call counts as dropped when the line goes down mid-conversation or the system fails. Hanging up after saying goodbye does not count.",
+  dropFollowUpDefinition: "A call counts as dropped when the system fails, when the caller goes a few seconds without an answer and hangs up, or when the line goes down during an agent action. Hanging up after saying goodbye, or while the agent is speaking, does not count.",
 };
 
 export default agents;

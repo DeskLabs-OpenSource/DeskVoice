@@ -70,7 +70,7 @@ const agents = {
   dropFollowUpOff: "Não fazer nada",
   dropFollowUpTask: "Abrir uma pendência para alguém retornar",
   dropFollowUpOther: "Outro modo, gravado fora desta tela",
-  dropFollowUpDefinition: "Conta como queda quando a linha cai no meio da conversa ou o sistema falha. Quem desliga depois de se despedir não conta.",
+  dropFollowUpDefinition: "Conta como queda quando o sistema falha, quando quem ligou fica alguns segundos sem resposta e desliga, ou quando a linha cai durante uma ação do agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta.",
 };
 
 export default agents;
