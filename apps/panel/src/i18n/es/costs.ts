@@ -19,8 +19,8 @@ const costs: CostsDictionary = {
   handoffCounts: "Una llamada que se pasó a otro agente cuenta para cada agente.",
   unmeasured: "No medido",
   unmeasuredPart: "+ parte no medida",
-  unmeasuredNote: "{n} líneas del extracto de este período no tienen costo medido: vienen de un modelo sin precio conocido, y lo que costaron no está en los valores de abajo. Solo aparece en la factura del proveedor.",
-  unmeasuredNoteOne: "1 línea del extracto de este período no tiene costo medido: viene de un modelo sin precio conocido, y lo que costó no está en los valores de abajo. Solo aparece en la factura del proveedor.",
+  unmeasuredNote: "{n} líneas del extracto de este período no tienen costo medido: el modelo no tiene precio conocido, o el proveedor no informó el consumo de esa lectura. Lo que costaron no está en los valores de abajo. Solo aparece en la factura del proveedor.",
+  unmeasuredNoteOne: "1 línea del extracto de este período no tiene costo medido: el modelo no tiene precio conocido, o el proveedor no informó el consumo de esa lectura. Lo que costó no está en los valores de abajo. Solo aparece en la factura del proveedor.",
 };
 
 export default costs;

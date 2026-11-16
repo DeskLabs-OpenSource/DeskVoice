@@ -4,7 +4,7 @@ const timeline: TimelineDictionary = {
   back: "Llamadas",
   live: "En vivo",
   liveHint: "La línea de tiempo se actualiza sola mientras ocurre la llamada.",
-  facts: { agent: "Agente", engine: "Motor de voz", duration: "Duración", cost: "Costo estimado", ceiling: "tope de {value}", byAgent: "Por agente:", deletedAgent: "Agente borrado", costUnmeasured: "No medido", costUnmeasuredPart: "y una parte no medida: el precio del modelo no se conoce", started: "Inicio", direction: "Sentido" },
+  facts: { agent: "Agente", engine: "Motor de voz", duration: "Duración", cost: "Costo estimado", ceiling: "tope de {value}", byAgent: "Por agente:", deletedAgent: "Agente borrado", costUnmeasured: "No medido", costUnmeasuredPart: "y una parte no medida: el modelo no tiene precio conocido, o el proveedor no informó el consumo", started: "Inicio", direction: "Sentido" },
   direction: { inbound: "Recibida", outbound: "Hecha por el agente" },
   outcomeTitle: "Lo que dejó esta llamada",
   outcomes: {

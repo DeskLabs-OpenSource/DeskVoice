@@ -105,6 +105,22 @@ describe("custo não medido na tela", () => {
     ]);
   });
 
+  it("o total conta as linhas não medidas de todos os dias, e não só as de um", async () => {
+    const { cookie, newCall, line } = await team("custo nao medido dois dias");
+    const callId = await newCall();
+    await line(callId, "simulated", 4 * CENT, true, { when: new Date("2026-02-28T12:00:00.000Z") });
+    await line(callId, "brain:openai", 0, false, { model: "modelo-sem-preco", when: new Date("2026-02-28T13:00:00.000Z") });
+    await line(callId, "brain:openai", 0, false, { model: "modelo-sem-preco", when: new Date("2026-03-01T12:00:00.000Z") });
+    await line(callId, "brain:openai", 0, false, { model: "modelo-sem-preco", when: new Date("2026-03-01T13:00:00.000Z") });
+
+    const read = (await call(costs, { cookie, query: "?from=2026-02-28&to=2026-03-01" })).data as Costs;
+    expect(read.byDay).toEqual([
+      expect.objectContaining({ day: "2026-02-28", unmeasuredCount: 1 }),
+      expect.objectContaining({ day: "2026-03-01", unmeasuredCount: 2 }),
+    ]);
+    expect(read.unmeasuredCount).toBe(3);
+  });
+
   it("numa ligação com passagem, a linha não medida conta no agente do trecho dela", async () => {
     const { cookie, agentId, newAgent, newCall, line } = await team("custo nao medido passagem");
     const destino = await newAgent("Agente de destino");
