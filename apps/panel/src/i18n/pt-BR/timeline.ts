@@ -102,6 +102,7 @@ const timeline = {
     create_task: "Abrir uma pendência",
     remember_caller_note: "Guardar uma nota sobre quem ligou",
     summarize_call: "Resumo da chamada",
+    review_call: "Revisão do supervisor",
     classify_call_outcome: "Desfecho da ligação",
     deliver_notification: "Entrega de aviso",
     deliver_webhook: "Envio a um sistema externo",

@@ -101,6 +101,7 @@ const timeline: TimelineDictionary = {
     create_task: "Abrir un pendiente",
     remember_caller_note: "Guardar una nota sobre quien llamó",
     summarize_call: "Resumen de la llamada",
+    review_call: "Revisión del supervisor",
     classify_call_outcome: "Desenlace de la llamada",
     deliver_notification: "Entrega de aviso",
     deliver_webhook: "Envío a un sistema externo",

@@ -74,7 +74,7 @@ describe("motor que cai no meio da chamada (Review Focus 1)", { timeout: 120_000
 
     const events = await eventsOf(app, callId);
     expect(events.map((event) => event.kind)).toEqual([
-      "call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "transfer_started", "call_ended", "task_queued",
+      "call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "transfer_started", "call_ended", "task_queued", "task_queued",
     ]);
     expect(events[5]?.payload).toEqual({ engine: "simulated", error: "OpenAI Realtime: a conexão caiu (código 1006)" });
     expect(events[6]?.payload).toEqual({ to: "+5531988887777", reason: "engine_failed" });
@@ -97,7 +97,7 @@ describe("motor que cai no meio da chamada (Review Focus 1)", { timeout: 120_000
     const { organizationId, callId, transport, start } = await scene("engine-fail-hangup", { script });
     expect(await start().done).toMatchObject({ status: "failed", endReason: "engine_failed" });
 
-    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "call_ended", "task_queued"]);
+    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "call_ended", "task_queued", "task_queued"]);
     expect(await callOf(app, callId)).toMatchObject({ status: "failed", end_reason: "engine_failed", ended_at: expect.any(Date) });
     expect(transport.transferredTo).toBeNull();
     expect(transport.hangups).toBe(1);
@@ -136,7 +136,7 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     const { organizationId, callId, transport } = await refused("engine-no-key", manual);
 
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_refused", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_refused", "call_ended", "task_queued", "task_queued"]);
     expect(events[1]?.payload).toEqual({ reason: "engine_not_configured", engine: "manual", detail: "no API key is saved for this voice engine" });
     expect(await callOf(app, callId)).toMatchObject({ status: "refused", end_reason: "engine_not_configured", answered_at: null, ended_at: expect.any(Date) });
     // O motor nem foi chamado, e quem ligou ouviu o sinal antes de a ligação cair.
@@ -295,7 +295,7 @@ describe("provedor de IA que não responde", { timeout: 120_000 }, () => {
     expect(harness.timers.fire(15_000)).toBe(1);
     expect(await session.done).toEqual({ status: "refused", endReason: "engine_not_responding", costCents: 0 });
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_refused", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_refused", "call_ended", "task_queued", "task_queued"]);
     expect(events[1]?.payload).toEqual({ reason: "engine_not_responding", engine: "manual", detail: expect.stringContaining("did not answer in 15 s") });
     expect(await callOf(app, callId)).toMatchObject({ status: "refused", end_reason: "engine_not_responding" });
     expect(transport.sentBytes).toBe(failureTone().length);
@@ -782,7 +782,7 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
 
     expect(harness.timers.fire(6000)).toBe(1);
     expect(await session.done).toMatchObject({ status: "completed", endReason: "max_duration" });
-    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "call_ended", "task_queued"]);
+    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "call_ended", "task_queued", "task_queued"]);
     expect((await eventsOf(app, callId))[3]?.payload).toMatchObject({ status: "completed", reason: "max_duration" });
     expect(transport.hangups).toBe(1);
     expect(transport.transferredTo).toBeNull();
@@ -809,7 +809,7 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
     expect(harness.timers.fire(6000)).toBe(1);
     expect(await session.done).toEqual({ status: "completed", endReason: "cost_ceiling", costCents: 160 });
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "call_ended", "task_queued", "task_queued"]);
     expect(events[3]?.payload).toEqual({ costCents: 150, ceilingCents: 150 });
     expect(events[4]?.payload).toEqual({ status: "completed", reason: "cost_ceiling", costCents: 160, seconds: 96 });
     // O extrato tem uma linha por medição, cada uma no agente da ligação, e a soma dele é o custo da chamada.
@@ -833,7 +833,7 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
     harness.timers.fire(6000);
     expect(await session.done).toEqual({ status: "transferred", endReason: "cost_ceiling", costCents: 102 });
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "transfer_started", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "transfer_started", "call_ended", "task_queued", "task_queued"]);
     expect(events[4]?.payload).toEqual({ to: "+5531988887777", reason: "cost_ceiling" });
     expect(transport.transferredTo).toBe("+5531988887777");
   });

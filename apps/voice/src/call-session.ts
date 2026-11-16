@@ -320,6 +320,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       await event("call_ended", { status: end.status, reason: end.endReason, costCents, seconds: Math.round(usage.seconds) });
       const taskId = await enqueueTask(q, { kind: "summarize_call", payload: {}, callId, runAt: clock.now() });
       await event("task_queued", { taskId, kind: "summarize_call" });
+      // O supervisor de regras fixas: sem modelo e sem gasto, abre uma pendência se a ligação terminou sem próximo passo.
+      const reviewId = await enqueueTask(q, { kind: "review_call", payload: {}, callId, runAt: clock.now() });
+      await event("task_queued", { taskId: reviewId, kind: "review_call" });
     } catch (error) {
       log("error", "could not record the end of the call", { error: messageOf(error) });
     }

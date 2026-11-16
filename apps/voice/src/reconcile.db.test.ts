@@ -44,6 +44,7 @@ describe("chamadas órfãs na partida do processo", { timeout: 120_000 }, () => 
       expect(events).toEqual([
         { kind: "call_ended", payload: { status: "failed", reason: "process_restarted" } },
         { kind: "task_queued", payload: { taskId: expect.any(String), kind: "summarize_call" } },
+        { kind: "task_queued", payload: { taskId: expect.any(String), kind: "review_call" } },
       ]);
       expect((await tasksOf(app, organizationId)).filter((task) => task.kind === "summarize_call" && task.call_id === callId)).toHaveLength(1);
     }
@@ -59,8 +60,9 @@ describe("chamadas órfãs na partida do processo", { timeout: 120_000 }, () => 
     clock.advance(5000);
     expect(await closeOrphanCalls(app, clock, () => undefined)).toBe(0);
     for (const [callId, organizationId] of [[ringing, first], [live, second]] as const) {
-      expect(await eventsOf(app, callId)).toHaveLength(2);
+      expect(await eventsOf(app, callId)).toHaveLength(3);
       expect((await tasksOf(app, organizationId)).filter((task) => task.kind === "summarize_call" && task.call_id === callId)).toHaveLength(1);
+      expect((await tasksOf(app, organizationId)).filter((task) => task.kind === "review_call" && task.call_id === callId)).toHaveLength(1);
       expect((await callOf(app, callId)).ended_at).not.toEqual(clock.now());
     }
   });

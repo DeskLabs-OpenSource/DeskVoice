@@ -156,14 +156,15 @@ describe("recado quando ninguém pode atender", { timeout: 120_000 }, () => {
     expect(summary).toMatchObject([{ call_id: vm.callId }]);
 
     const events = await eventsOf(app, vm.callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "voicemail_left", "call_ended", "task_queued", "recording_saved"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "voicemail_left", "call_ended", "task_queued", "task_queued", "recording_saved"]);
     expect(events[0]?.payload).toMatchObject({ voicemail: "no_agent", language: "pt-BR" });
     expect(events[1]?.payload).toMatchObject({ left: true, recorded: true, recordedSeconds: 1.5, reason: "no_agent", cause: "silence" });
     expect(events[2]?.payload).toMatchObject({ status: "completed", reason: "voicemail", costCents: 0 });
     expect(events[3]?.payload).toMatchObject({ kind: "summarize_call" });
+    expect(events[4]?.payload).toMatchObject({ kind: "review_call" });
     // O recado também fecha com impressão digital, e ela é a do arquivo que ficou no disco.
     const wav = await readFile(recordingPath(vm.dir, vm.organizationId, vm.callId));
-    expect(events[4]?.payload).toEqual({ bytes: wav.length, sha256: createHash("sha256").update(wav).digest("hex") });
+    expect(events[5]?.payload).toEqual({ bytes: wav.length, sha256: createHash("sha256").update(wav).digest("hex") });
     await vm.cleanup();
   });
 
@@ -218,7 +219,7 @@ describe("recado quando ninguém pode atender", { timeout: 120_000 }, () => {
     expect(vm.transport.hangups).toBe(1);
     expect(await callOf(vm.callId)).toMatchObject({ status: "failed", end_reason: "voicemail_failed" });
     const events = await eventsOf(app, vm.callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "voicemail_failed", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "voicemail_failed", "call_ended", "task_queued", "task_queued"]);
     expect(events[1]?.payload).toMatchObject({ reason: "unavailable" });
     expect((await notificationsOf(app, vm.organizationId))[0]?.body).toMatch(/não pôde ser gravado/);
     await rm(dir, { recursive: true, force: true });
