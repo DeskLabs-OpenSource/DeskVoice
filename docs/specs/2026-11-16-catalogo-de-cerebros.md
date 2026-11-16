@@ -305,7 +305,18 @@ verificado pelo **Verificador 2**. Uma de cada vez, nesta ordem.
 - **Não toca** `settings/layout.tsx` nem `apps/voice`: a fatia 7 da R12 (trilha A) abre
   `/settings/speech-filter` ao mesmo tempo. Choque possível em `server/settings.ts` e em
   `calls/[id]/**`; são acréscimos, e quem chegar depois faz o merge da `main`.
-- **Não medido pelo Arquiteto:** não li o diff do #354 inteiro.
+- **Condição da revisora no merge do #354 (`a2ce389`):** hoje a tela de Custos e a da chamada
+  somam `cost_cents` e nenhum ponto do painel lê `cost_measured`. Na 4b, **cada soma** carrega
+  também quantas linhas não foram medidas: o total do período, cada dia, cada agente, cada motor e
+  o total da chamada. Onde houver pelo menos uma, a tela diz "há custo não medido" ao lado do
+  valor, e o valor nunca aparece como completo. As duas rotas que devolvem as mesmas somas,
+  `api/v1/system/costs` e `api/v1/calls/[id]`, ganham o campo `unmeasuredCount` (só acréscimo,
+  nada muda para quem já lê). Teste de banco: um período com uma linha medida e uma não medida
+  mostra a soma da medida **e** o aviso, nas duas telas e nas duas rotas; um período só com
+  linhas medidas não mostra aviso. Arquivos a mais: `apps/panel/src/app/api/v1/system/costs/route.ts`
+  e `apps/panel/src/app/api/v1/calls/[id]/route.ts`.
+- **Não medido pelo Arquiteto:** não li o diff do #354 inteiro; não conferi se a
+  transcrição (`api/v1/calls/[id]/transcription`) também devolve custo somado.
 
 Choque possível com a trilha A: `apps/panel/src/i18n/*/timeline.ts` (frases de motivo) e
 `packages/voice-engine/src/index.ts`. O vocabulário do motivo da análise mora na própria rotina
