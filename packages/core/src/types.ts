@@ -39,6 +39,7 @@ export const CALL_EVENT_KINDS = [
   "dtmf_sent",
   "transfer_started",
   "transfer_completed",
+  "agent_handoff",
   "engine_failed",
   "call_refused",
   "voicemail_left",

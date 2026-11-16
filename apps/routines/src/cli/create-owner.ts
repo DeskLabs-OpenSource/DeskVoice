@@ -45,8 +45,9 @@ export async function createOwner(db: Db, input: OwnerInput): Promise<CreateOwne
 
   const passwordHash = await hashPassword(password);
   // As ferramentas vêm da pasta: o agente de exemplo nasce com todas as que funcionam, sem lista aqui,
-  // menos as que vêm desligadas (`offByDefault`: a nota sobre quem ligou pede que alguém a marque).
-  const tools = [...(await loadTools()).values()].filter((tool) => tool.available !== false && tool.offByDefault !== true).map((tool) => tool.name);
+  // menos as que vêm desligadas (`offByDefault`: a nota sobre quem ligou pede que alguém a marque) e as
+  // que a sessão oferece sozinha (`offeredBySession`: a passagem entre agentes).
+  const tools = [...(await loadTools()).values()].filter((tool) => tool.available !== false && tool.offByDefault !== true && tool.offeredBySession !== true).map((tool) => tool.name);
 
   return withSystem(db, async (q) => {
     const insert = async (sql: string, params: unknown[]): Promise<string> => {

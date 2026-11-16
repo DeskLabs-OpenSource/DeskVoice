@@ -1,6 +1,29 @@
-import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
-import { autoCommitOrgQuery, runTool, toSpec, toolCalledArgs, type RecordingStop, type Tool, type ToolContext, type ToolResult } from "@deskvoice/tools";
-import { EngineTimeoutError, MICROCENTS_PER_CENT, estimateCostCents, type Usage, type VoiceEngine, type VoiceSession } from "@deskvoice/voice-engine";
+import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, rememberedBlock, voicemailLanguageSchema, type CallEventKind, type VoicemailLanguage, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import {
+  autoCommitOrgQuery,
+  handoffTargetsOf,
+  MAX_AGENT_HANDOFFS_PER_CALL,
+  runTool,
+  toSpec,
+  toolCalledArgs,
+  TRANSFER_TO_AGENT,
+  type HandoffOutcome,
+  type HandoffTarget,
+  type RecordingStop,
+  type Tool,
+  type ToolContext,
+  type ToolResult,
+} from "@deskvoice/tools";
+import {
+  EngineTimeoutError,
+  MICROCENTS_PER_CENT,
+  SIMULATED_PREFIX,
+  estimateCostCents,
+  type Usage,
+  type VoiceEngine,
+  type VoiceSession,
+  type VoiceSessionConfig,
+} from "@deskvoice/voice-engine";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
@@ -73,6 +96,7 @@ interface Ending {
 }
 
 interface AgentRow {
+  id: string;
   name: string;
   instructions: string;
   greeting: string | null;
@@ -85,6 +109,25 @@ interface AgentRow {
   transfer_to_e164: string | null;
   vocabulary: string[];
   listening_environment: "normal" | "noisy";
+  agent_handoff_targets: string[];
+}
+
+const AGENT_COLUMNS =
+  "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets";
+
+/** Um trecho da ligação: o tempo em que ela esteve com um agente, com o motor e o custo dele. */
+interface Leg {
+  agent: AgentRow;
+  engine: VoiceEngine;
+  voice: VoiceSession;
+  enabled: Map<string, Tool>;
+  guard: SilenceGuard;
+  context: ToolContext;
+  usage: Required<Pick<Usage, "seconds" | "inputTokens" | "outputTokens" | "textInputTokens" | "cachedInputTokens" | "textOutputTokens">>;
+  /** O custo do trecho, calculado com o preço do motor dele. */
+  costCents: number;
+  /** O último `error` do motor, para explicar um `closed` que venha em seguida. */
+  lastError?: Error;
 }
 
 export const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
@@ -104,6 +147,70 @@ const FAREWELL = {
 };
 const CLOSING_MESSAGE = "A ligação está sendo encerrada. Não chame mais ferramentas.";
 const TOOL_CRASH_MESSAGE = "Não consegui concluir isso agora. Diga a quem está na linha que não foi possível concluir neste momento, e ofereça outra forma de ajudar.";
+
+/**
+ * O que o agente que recebe a ligação diz primeiro, antes de quem ligou falar. Fixa, e não a saudação
+ * do agente: a saudação é para quem acabou de ligar, e esta pessoa já foi atendida. O resto ele tira
+ * do motivo e do resumo, que estão nas instruções. Vai no idioma do agente que recebe, nos mesmos
+ * idiomas do aviso da caixa postal; um idioma fora do mapa cai no pt-BR.
+ */
+export const HANDOFF_GREETINGS: Readonly<Record<VoicemailLanguage, string>> = {
+  "pt-BR": "Oi, vou continuar o seu atendimento a partir daqui.",
+  en: "Hi, I'll take it from here and continue helping you.",
+  es: "Hola, voy a continuar con su atención a partir de aquí.",
+};
+
+export function handoffGreetingFor(language: string): string {
+  const parsed = voicemailLanguageSchema.safeParse(language);
+  return HANDOFF_GREETINGS[parsed.success ? parsed.data : "pt-BR"];
+}
+
+/** O que entra nas instruções do agente que recebe a ligação: quem passou, o motivo e o resumo. */
+export interface HandoffNote {
+  fromName: string;
+  reason: string;
+  summary: string;
+}
+
+// Nome e papel do agente vêm da configuração, e não de quem ligou; ainda assim ficam numa linha só,
+// para nenhum nome mal digitado abrir um parágrafo nas instruções.
+const oneLine = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").trim();
+
+/**
+ * As instruções que a sessão entrega ao motor. Sem destino e sem passagem, são as do agente, byte a
+ * byte. Com destino, ganham uma linha por agente para quem ele pode passar a ligação, com nome e papel.
+ * Com passagem, ganham quem passou e, no bloco delimitado e escapado (`rememberedBlock`, registro
+ * 0020), o motivo e o resumo: texto do modelo a partir da fala de quem ligou, que é dado e nunca
+ * instrução. Nada do resumo muda a configuração: os destinos e as ferramentas vêm só do banco.
+ *
+ * O roteiro do motor simulado (`simulated:` seguido de JSON) passa intacto: ninguém o lê como
+ * instrução, e qualquer texto colado nele quebraria o `JSON.parse` do motor. O teste lê as instruções
+ * montadas com um motor que as guarda.
+ */
+export function composeInstructions(base: string, targets: readonly HandoffTarget[], handoff?: HandoffNote): string {
+  if (base.startsWith(SIMULATED_PREFIX)) return base;
+  const parts = [base];
+  if (targets.length > 0) {
+    parts.push(
+      [
+        "Agentes para quem você pode passar a ligação com transfer_to_agent, pelo nome exato:",
+        ...targets.map((target) => `- ${oneLine(target.name)}${target.roleLabel?.trim() ? ` (${oneLine(target.roleLabel)})` : ""}`),
+      ].join("\n"),
+    );
+  }
+  if (handoff) {
+    parts.push(
+      [
+        `Esta ligação veio do agente ${oneLine(handoff.fromName)}, que já saiu da linha. Quem ligou já ouviu o aviso de gravação e acabou de ouvir você dizer que continua o atendimento. Continue a partir do motivo e do resumo da passagem, sem pedir de novo o que já foi dito.`,
+        rememberedBlock([
+          { label: "motivo", text: handoff.reason },
+          { label: "resumo", text: handoff.summary },
+        ]),
+      ].join("\n"),
+    );
+  }
+  return parts.join("\n\n");
+}
 
 /**
  * `OrgQuery` que executa uma consulta de cada vez, na ordem em que foram pedidas. A linha do tempo
@@ -147,12 +254,19 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   const event = (kind: CallEventKind, payload: object): Promise<void> => recordEvent(q, callId, kind, payload, clock.now());
   const logFailure = (what: string) => (error: unknown) => log("error", what, { error: messageOf(error) });
 
+  /** O agente em que a ligação está agora. Muda numa passagem (`transfer_to_agent`). */
   let agent: AgentRow | undefined;
-  let engine: VoiceEngine | undefined;
   let voice: VoiceSession | undefined;
   /** A guarda contra o silêncio (antipadrão 15). Existe a partir de quando o motor conecta. */
   let guard: SilenceGuard | undefined;
-  let lastEngineError: Error | undefined;
+  /** O trecho da ligação em curso: um por agente por onde ela passou. */
+  let leg: Leg | undefined;
+  /** Todos os trechos, o atual inclusive: o custo da ligação é a soma dos custos deles. */
+  const legs: Leg[] = [];
+  /** Os agentes por onde a ligação passou: os limites da ligação são os menores entre eles. */
+  const visited: AgentRow[] = [];
+  let handoffs = 0;
+  let handingOff = false;
   let ending = false;
   let recorder: Recording | undefined;
   /** A gravação já parou a pedido de quem ligou: não volta na mesma chamada. */
@@ -168,8 +282,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let requestedEnd: Ending | undefined;
   let requestedFarewell: string | undefined;
   let costCents = 0;
-  const usage = { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 };
+  /** Os segundos da ligação inteira, somados de todos os trechos (vão em `call_ended`). */
+  const usage = { seconds: 0 };
   const cancelTimers: Array<() => void> = [];
+  /** O prazo da duração máxima, que uma passagem pode reagendar para mais cedo. */
+  let cancelDuration: () => void = () => undefined;
+  /** Quando a ligação foi atendida: a duração máxima conta daqui, e uma passagem não zera o relógio. */
+  let answeredAt: Date | undefined;
+  /** A menor duração máxima entre os agentes por onde a ligação passou, em segundos. */
+  let durationLimitSeconds = 0;
   const toolsRunning = new Set<Promise<void>>();
   const callEnded = new AbortController();
   let resolveDone: (outcome: CallOutcome) => void = () => undefined;
@@ -182,6 +303,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     guard?.stop();
     resolveRecordingDecided();
     for (const cancel of cancelTimers) cancel();
+    cancelDuration();
     // Ferramenta em espera (uma aprovação pendente) é solta, e o resultado dela entra na linha do
     // tempo antes de `call_ended`.
     callEnded.abort(new Error("The call ended before the tool finished"));
@@ -284,35 +406,61 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     cancelTimers.push(schedule(() => void finish(end), FAREWELL_MS));
   }
 
-  async function meter(increment: Usage): Promise<void> {
-    if (!engine) return;
+  /** Teto de custo da ligação: o menor `cost_ceiling_cents` acima de zero entre os agentes por onde ela passou. Zero é "sem teto". */
+  function costCeiling(): number {
+    const positive = visited.map((row) => row.cost_ceiling_cents).filter((cents) => cents > 0);
+    return positive.length === 0 ? 0 : Math.min(...positive);
+  }
+
+  /** O número de transferência que vale: o do agente em que a ligação está agora, se o canal transfere. */
+  const currentTransferTo = (): string | null => (canTransfer ? (agent?.transfer_to_e164 ?? null) : null);
+
+  /**
+   * Confere o teto contra o custo somado da ligação. Alcançado, a despedida começa na hora, sem
+   * esperar o banco, e volta o que registrar na linha do tempo.
+   */
+  function reachCeiling(total: number): { ceiling: number; transferTo: string | null } | undefined {
+    const ceiling = costCeiling();
+    // Teto zero é "sem teto": com `>=`, zero derrubaria toda chamada na primeira medição.
+    if (!(ceiling > 0 && total >= ceiling) || ending || wrappingUp) return undefined;
+    const transferTo = currentTransferTo();
+    wrapUp(
+      transferTo ? FAREWELL.costCeilingTransfer : FAREWELL.costCeiling,
+      transferTo ? { status: "transferred", endReason: "cost_ceiling", transferTo } : { status: "completed", endReason: "cost_ceiling" },
+    );
+    return { ceiling, transferTo };
+  }
+
+  async function recordCeiling(total: number, reached: { ceiling: number; transferTo: string | null }): Promise<void> {
+    await event("cost_ceiling_reached", { costCents: total, ceilingCents: reached.ceiling });
+    if (reached.transferTo) await event("transfer_started", { to: reached.transferTo, reason: "cost_ceiling" });
+  }
+
+  async function meter(from: Leg, increment: Usage): Promise<void> {
     usage.seconds += increment.seconds ?? 0;
-    usage.inputTokens += increment.inputTokens ?? 0;
-    usage.outputTokens += increment.outputTokens ?? 0;
-    usage.textInputTokens += increment.textInputTokens ?? 0;
-    usage.cachedInputTokens += increment.cachedInputTokens ?? 0;
-    usage.textOutputTokens += increment.textOutputTokens ?? 0;
+    from.usage.seconds += increment.seconds ?? 0;
+    from.usage.inputTokens += increment.inputTokens ?? 0;
+    from.usage.outputTokens += increment.outputTokens ?? 0;
+    from.usage.textInputTokens += increment.textInputTokens ?? 0;
+    from.usage.cachedInputTokens += increment.cachedInputTokens ?? 0;
+    from.usage.textOutputTokens += increment.textOutputTokens ?? 0;
+    // Cada trecho é calculado com o preço do motor dele, e o custo da ligação é a soma dos trechos:
+    // com dois agentes em motores de preço diferente, um preço só erraria a conta.
     // `usage` é incremento: o custo sai do total somado, e cada linha do extrato leva a diferença.
     // Assim a soma do extrato é sempre o custo da chamada, apesar do arredondamento.
-    const total = estimateCostCents(engine.pricing, usage);
+    from.costCents = estimateCostCents(from.engine.pricing, from.usage);
+    const total = legs.reduce((sum, each) => sum + each.costCents, 0);
     const delta = total - costCents;
     costCents = total;
-    const ceiling = agent?.cost_ceiling_cents ?? 0;
-    // Teto zero é "sem teto": com `>=`, zero derrubaria toda chamada na primeira medição.
-    const reached = ceiling > 0 && total >= ceiling && !ending && !wrappingUp;
-    const transferTo = canTransfer ? (agent?.transfer_to_e164 ?? null) : null;
-    if (reached) {
-      wrapUp(
-        transferTo ? FAREWELL.costCeilingTransfer : FAREWELL.costCeiling,
-        transferTo ? { status: "transferred", endReason: "cost_ceiling", transferTo } : { status: "completed", endReason: "cost_ceiling" },
-      );
-    }
+    const reached = reachCeiling(total);
     await q.exec(
-      "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+      "insert into usage_ledger (organization_id, call_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
       [
         organizationId,
         callId,
-        engine.id,
+        from.engine.id,
+        // O agente do trecho, e não o que atendeu: o custo por agente continua verdadeiro com passagem.
+        from.agent.id,
         Math.round(increment.seconds ?? 0),
         (increment.inputTokens ?? 0) + (increment.textInputTokens ?? 0) + (increment.cachedInputTokens ?? 0),
         (increment.outputTokens ?? 0) + (increment.textOutputTokens ?? 0),
@@ -325,38 +473,45 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       ],
     );
     await q.exec("update calls set cost_cents = $2 where id = $1", [callId, total]);
-    if (reached) {
-      await event("cost_ceiling_reached", { costCents: total, ceilingCents: ceiling });
-      if (transferTo) await event("transfer_started", { to: transferTo, reason: "cost_ceiling" });
-    }
+    if (reached) await recordCeiling(total, reached);
   }
 
-  const context: ToolContext = {
+  /** (Re)agenda o fim pela duração máxima, contada de quando a ligação foi atendida. */
+  function scheduleDuration(): void {
+    cancelDuration();
+    const elapsedMs = answeredAt ? clock.now().getTime() - answeredAt.getTime() : 0;
+    cancelDuration = schedule(() => wrapUp(FAREWELL.maxDuration, { status: "completed", endReason: "max_duration" }), Math.max(0, durationLimitSeconds * 1000 - elapsedMs));
+  }
+
+  const telephony: ToolContext["telephony"] = {
+    canTransfer,
+    // A ferramenta só marca o desfecho. Ele acontece depois que o resultado dela foi gravado e
+    // entregue ao motor, para a linha do tempo fechar na ordem em que as coisas ocorreram.
+    async transfer(toE164) {
+      requestedEnd ??= { status: "transferred", endReason: "transferred", transferTo: toE164 };
+    },
+    async hangup(farewell) {
+      requestedEnd ??= { status: "completed", endReason: "end_call" };
+      requestedFarewell ??= farewell;
+    },
+    // Sem `sendDtmf` no transporte (a ligação pelo WhatsApp), a ferramenta recusa em vez de fingir.
+    ...(transport.sendDtmf && { sendDtmf: transport.sendDtmf.bind(transport) }),
+    // O pedido de quem ligou vem do agente; a gravação para aqui, com o pedido já no arquivo.
+    // Ferramenta só roda com a chamada no ar; se ela já encerra, não há gravação a parar.
+    async pauseRecording(reason) {
+      const result = await pauseRecording({ by: "agent" }, reason);
+      return result === "call_ended" ? "not_recording" : result;
+    },
+  };
+
+  /** O contexto das ferramentas de um trecho: `agentId` é o agente do trecho (o número de transferência, a lista de destinos). */
+  const contextFor = (legAgentId: string, session: VoiceSession): ToolContext => ({
     organizationId,
     callId,
-    agentId,
+    agentId: legAgentId,
     q,
     clock,
-    telephony: {
-      canTransfer,
-      // A ferramenta só marca o desfecho. Ele acontece depois que o resultado dela foi gravado e
-      // entregue ao motor, para a linha do tempo fechar na ordem em que as coisas ocorreram.
-      async transfer(toE164) {
-        requestedEnd ??= { status: "transferred", endReason: "transferred", transferTo: toE164 };
-      },
-      async hangup(farewell) {
-        requestedEnd ??= { status: "completed", endReason: "end_call" };
-        requestedFarewell ??= farewell;
-      },
-      // Sem `sendDtmf` no transporte (a ligação pelo WhatsApp), a ferramenta recusa em vez de fingir.
-      ...(transport.sendDtmf && { sendDtmf: transport.sendDtmf.bind(transport) }),
-      // O pedido de quem ligou vem do agente; a gravação para aqui, com o pedido já no arquivo.
-      // Ferramenta só roda com a chamada no ar; se ela já encerra, não há gravação a parar.
-      async pauseRecording(reason) {
-        const result = await pauseRecording({ by: "agent" }, reason);
-        return result === "call_ended" ? "not_recording" : result;
-      },
-    },
+    telephony,
     say(text) {
       if (!ending) voice?.say(text);
     },
@@ -367,13 +522,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         async () => (await q.one<{ status: "pending" | "approved" | "denied" | "expired" }>("select status from approvals where id = $1", [approvalId]))?.status ?? null,
         callEnded.signal,
       ),
-  };
+    handoff: (target, input) => handOff(session, target, input),
+  });
 
-  async function handleToolCall(enabled: Map<string, Tool>, call: { id: string; name: string; args: unknown }): Promise<void> {
+  async function handleToolCall(owner: Leg, call: { id: string; name: string; args: unknown }): Promise<void> {
     let result: ToolResult;
-    const tool = enabled.get(call.name);
+    const tool = owner.enabled.get(call.name);
     try {
-      if (ending || wrappingUp) {
+      // `owner !== leg`: a sessão que pediu já foi substituída numa passagem e está fechada.
+      if (ending || wrappingUp || owner !== leg) {
         result = { ok: false, message: CLOSING_MESSAGE };
       } else if (!tool) {
         result = { ok: false, message: `A ferramenta ${call.name} não está disponível para este agente. Siga a conversa sem ela.` };
@@ -381,14 +538,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         await event("tool_called", { name: call.name, args: toolCalledArgs(deps.tools.get(call.name), call.args) });
         await event("tool_result", { name: call.name, ok: false, message: result.message, error: "tool is not enabled for this agent" });
       } else {
-        result = await runTool(tool, call.args, context);
+        result = await runTool(tool, call.args, owner.context);
       }
     } catch (error) {
       // `runTool` só lança se nem o evento pôde ser gravado. O modelo ainda recebe uma resposta.
       log("error", "tool call could not be recorded", { tool: call.name, error: messageOf(error) });
       result = { ok: false, message: TOOL_CRASH_MESSAGE };
     }
-    if (!ending) voice?.sendToolResult(call.id, result);
+    // Depois de uma passagem, a sessão que pediu já fechou: o resultado não tem a quem ir.
+    if (!ending && owner === leg) owner.voice.sendToolResult(call.id, result);
     // Com despedida, a ligação só cai depois de ela ser falada: sem isso o modelo às vezes encerrava
     // calado, e a pessoa ouvia a ligação cair na cara dela. Quem fala é o próprio modelo, ao receber
     // o resultado do end_call (que traz a despedida); pedir a fala de novo aqui a repetia.
@@ -396,20 +554,237 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     else if (requestedEnd) void finish(requestedEnd);
   }
 
+  /** Para quem o agente pode passar a ligação: só os que existem, da mesma organização (`handoffTargetsOf`). */
+  const targetsOf = async (row: AgentRow): Promise<HandoffTarget[]> => (row.agent_handoff_targets.length === 0 ? [] : (await handoffTargetsOf(q, row.id)).targets);
+
+  /** As ferramentas que o motor recebe para o agente. */
+  function enabledToolsFor(names: readonly string[], targets: readonly HandoffTarget[]): Map<string, Tool> {
+    const enabled = new Map<string, Tool>();
+    for (const name of names) {
+      const tool = deps.tools.get(name);
+      // Sem transferência no canal (ligação pelo WhatsApp), o motor nem a vê: a descrição manda
+      // anunciar a transferência antes de chamar, e quem ligou ouviria "vou transferir" e o recuo.
+      if (name === "transfer_to_human" && !canTransfer) continue;
+      // Ferramenta sem a peça de que depende (a agenda sem cliente) também some: oferecida, o motor a
+      // chamaria em toda ligação de agendamento só para ouvir que ela não está ligada.
+      if (tool?.available === false) continue;
+      // A passagem não se marca: o que a liga é a lista de destinos, abaixo.
+      if (tool?.offeredBySession === true) continue;
+      if (tool) enabled.set(name, tool);
+      else log("error", "agent enables a tool that is not installed; ignoring it", { tool: name });
+    }
+    // Sem destino que exista, a ferramenta não aparece, e o motor recebe o mesmo de antes.
+    const handoffTool = deps.tools.get(TRANSFER_TO_AGENT);
+    if (targets.length > 0 && handoffTool) enabled.set(TRANSFER_TO_AGENT, handoffTool);
+    return enabled;
+  }
+
+  const sessionConfig = (row: AgentRow, instructions: string, greeting: string | undefined, enabled: Map<string, Tool>): VoiceSessionConfig => ({
+    instructions,
+    greeting,
+    voiceId: row.voice_id ?? undefined,
+    language: row.language,
+    tools: [...enabled.values()].map(toSpec),
+    // Dica de reconhecimento; vazia, o motor envia ao provedor o mesmo de antes.
+    vocabulary: row.vocabulary,
+    // `normal` envia ao provedor o mesmo de antes; `noisy` ajusta a detecção de fala.
+    listeningEnvironment: row.listening_environment,
+  });
+
+  type Opened = { engine: VoiceEngine; voice: VoiceSession } | { engine?: VoiceEngine; reason: "engine_not_configured" | "engine_not_responding"; problem: string };
+
+  /**
+   * Abre a sessão de um motor com a chave da organização, ou diz por que não abriu. Nenhum `connect`
+   * segura a ligação por mais de `CONNECT_TIMEOUT_MS`: no atendimento, a ligação é recusada com sinal;
+   * numa passagem, o agente atual continua na linha.
+   */
+  async function connectEngine(engineId: string, config: VoiceSessionConfig): Promise<Opened> {
+    const found = deps.engines.get(engineId);
+    if (!found) return { reason: "engine_not_configured", problem: `the voice engine "${engineId}" is not installed` };
+    let apiKey = "";
+    if (!found.keyless) {
+      const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, engineKeySetting(engineId)]);
+      if (typeof stored?.value !== "string") return { engine: found, reason: "engine_not_configured", problem: "no API key is saved for this voice engine" };
+      try {
+        apiKey = decryptSecret(stored.value, deps.secretKey);
+      } catch (error) {
+        return { engine: found, reason: "engine_not_configured", problem: `the saved API key cannot be read (${messageOf(error)})` };
+      }
+    }
+    if (ending) return { engine: found, reason: "engine_not_configured", problem: "the call ended before the engine connected" };
+    const connecting = found.connect(config, apiKey);
+    let cancelDeadline: () => void = () => undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      cancelDeadline = schedule(() => reject(new EngineTimeoutError(`the provider did not answer in ${CONNECT_TIMEOUT_MS / 1000} s`)), CONNECT_TIMEOUT_MS);
+    });
+    try {
+      return { engine: found, voice: await Promise.race([connecting, deadline]) };
+    } catch (error) {
+      if (error instanceof EngineTimeoutError) {
+        // Se a sessão ainda abrir depois do prazo, ninguém vai usá-la.
+        connecting.then((late) => late.close(), () => undefined);
+        return { engine: found, reason: "engine_not_responding", problem: `the voice provider did not answer (${messageOf(error)})` };
+      }
+      return { engine: found, reason: "engine_not_configured", problem: `the voice engine refused the session (${messageOf(error)})` };
+    } finally {
+      cancelDeadline();
+    }
+  }
+
+  /**
+   * Põe um agente na linha: liga os eventos da sessão dele e o torna o atual. Nada aqui espera: o
+   * motor só começa a emitir no próximo ciclo, e os handlers precisam estar no lugar antes da primeira fala.
+   */
+  function startLeg(row: AgentRow, legEngine: VoiceEngine, session: VoiceSession, enabled: Map<string, Tool>): Leg {
+    const silenceGuard = createSilenceGuard({
+      clock,
+      schedule,
+      closeCallerTurn: () => session.closeCallerTurn(),
+      // `wrapUp` e `finish` param a guarda: depois disso ela não chama nada.
+      say: (text) => session.say(text),
+      acted: (report) => void event("caller_unanswered", report).catch(logFailure("could not record an unanswered caller")),
+    });
+    const self: Leg = {
+      agent: row,
+      engine: legEngine,
+      voice: session,
+      enabled,
+      guard: silenceGuard,
+      context: contextFor(row.id, session),
+      usage: { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 },
+      costCents: 0,
+    };
+    // Uma sessão substituída numa passagem já foi fechada; o que ela ainda emitir não vai para a linha.
+    const current = (): boolean => leg === self;
+    session.on("callerActivity", (signal) => {
+      if (current()) silenceGuard.callerActivity(signal);
+    });
+    session.on("audio", (pcm) => {
+      if (!current()) return;
+      silenceGuard.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
+      if (ending) return;
+      transport.sendAudio(pcm);
+      recorder?.agent(pcm);
+    });
+    session.on("interrupted", () => {
+      if (!current()) return;
+      silenceGuard.agentInterrupted();
+      transport.clearAudio();
+      recorder?.clear();
+    });
+    session.on("transcript", (turn) => {
+      // Depois de uma passagem, a fala do agente leva quem falou.
+      const payload = turn.speaker === "agent" && handoffs > 0 ? { text: turn.text, agentId: row.id } : { text: turn.text };
+      void event(turn.speaker === "user" ? "transcript_user" : "transcript_agent", payload).catch(logFailure("could not record a transcript"));
+    });
+    session.on("toolCall", (toolCall) => {
+      // Ferramenta em curso, aprovação em espera inclusive: a guarda não age até ela acabar.
+      silenceGuard.toolStarted();
+      const running: Promise<void> = handleToolCall(self, toolCall).finally(() => {
+        toolsRunning.delete(running);
+        silenceGuard.toolFinished();
+      });
+      toolsRunning.add(running);
+    });
+    // A última medição de uma sessão substituída também conta, e no trecho dela.
+    session.on("usage", (increment) => void meter(self, increment).catch(logFailure("could not record usage")));
+    // `error` sozinho não é fatal: fica guardado para explicar um `closed` que venha em seguida.
+    session.on("error", (error) => {
+      self.lastError = error;
+      log("error", "voice engine error", { error: error.message, agentId: row.id });
+    });
+    session.on("closed", (reason) => {
+      if (reason === "client" || !current()) return;
+      // O roteiro do motor simulado chegou ao fim.
+      if (reason === "ended") return void finish({ status: "completed", endReason: "script_finished" });
+      // O motor caiu no meio: evento, aviso, sinal para quem está na linha e, havendo para quem, transferência.
+      const error = self.lastError?.message ?? `the voice engine closed the session (${reason})`;
+      const transferTo = currentTransferTo();
+      void finish({
+        status: transferTo ? "transferred" : "failed",
+        endReason: "engine_failed",
+        transferTo: transferTo ?? undefined,
+        tone: true,
+        events: [["engine_failed", { engine: legEngine.id, error }], ...(transferTo ? [["transfer_started", { to: transferTo, reason: "engine_failed" }] satisfies [CallEventKind, object]] : [])],
+        notice: `O motor de voz ${legEngine.label} caiu no meio de uma ligação do agente ${row.name}: ${error}. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : canTransfer ? "A ligação foi encerrada, porque o agente não tem número de transferência." : "A ligação foi encerrada, porque este canal não tem como transferir."} Confira a chave e a situação do provedor em Configurações → Inteligência artificial.`,
+      });
+    });
+    leg = self;
+    legs.push(self);
+    agent = row;
+    voice = session;
+    guard = silenceGuard;
+    return self;
+  }
+
+  /**
+   * A passagem da ligação para outro agente (desenho de 13/11, seção 4.2). A sessão do destino abre
+   * antes de a atual fechar: se não abrir, o agente atual continua na linha e a ferramenta devolve
+   * `ok: false`. Aberta, ela vira a atual, a antiga fecha (a última medição fica no trecho dela) e o
+   * áudio passa a ir para a nova. O transporte, a gravação e a linha de `calls` não mudam, e os
+   * limites continuam sendo os da ligação: o menor teto e a menor duração entre os agentes por onde
+   * ela passou, com o relógio contado do atendimento.
+   */
+  async function handOff(fromSession: VoiceSession, target: HandoffTarget, input: { reason: string; summary: string }): Promise<HandoffOutcome> {
+    const from = leg;
+    if (ending || wrappingUp || !from || from.voice !== fromSession) return { ok: false, problem: "closing" };
+    if (handingOff) return { ok: false, problem: "busy" };
+    if (handoffs >= MAX_AGENT_HANDOFFS_PER_CALL) return { ok: false, problem: "limit" };
+    handingOff = true;
+    try {
+      // Pelo `withOrg` da ligação: um agente de outra organização não é encontrado.
+      const next = await q.one<AgentRow>(`select ${AGENT_COLUMNS} from agents where id = $1`, [target.id]);
+      if (!next) return { ok: false, problem: "unavailable", detail: "the target agent was not found in this organization" };
+      const targets = await targetsOf(next);
+      const enabled = enabledToolsFor(next.tools, targets);
+      const instructions = composeInstructions(next.instructions, targets, { fromName: from.agent.name, reason: input.reason, summary: input.summary });
+      const opened = await connectEngine(next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled));
+      if (!("voice" in opened)) {
+        log("error", "the next agent's session did not open; the current agent stays on the line", { to: next.id, reason: opened.reason, error: opened.problem });
+        return { ok: false, problem: "unavailable", detail: opened.problem };
+      }
+      if (ending || wrappingUp) {
+        await opened.voice.close();
+        return { ok: false, problem: "closing" };
+      }
+      // Daqui até a troca nada espera: a sessão nova só emite no próximo ciclo.
+      handoffs += 1;
+      const recorded = event("agent_handoff", {
+        from: { id: from.agent.id, name: from.agent.name },
+        to: { id: next.id, name: next.name },
+        reason: input.reason,
+        summary: input.summary,
+      });
+      startLeg(next, opened.engine, opened.voice, enabled);
+      from.guard.stop();
+      visited.push(next);
+      if (next.max_call_seconds < durationLimitSeconds) {
+        durationLimitSeconds = next.max_call_seconds;
+        scheduleDuration();
+      }
+      // Fechar a sessão antiga entrega a última medição dela, que entra no trecho dela.
+      await from.voice.close();
+      await recorded;
+      // O teto do novo agente pode ser menor que o custo já gasto: vale na hora, sem esperar outra medição.
+      const reached = reachCeiling(costCents);
+      if (reached) await recordCeiling(costCents, reached);
+      return { ok: true };
+    } finally {
+      handingOff = false;
+    }
+  }
+
   async function run(): Promise<void> {
-    agent = (await q.one<AgentRow>(
-      "select name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment from agents where id = $1",
-      [agentId],
-    )) ?? undefined;
+    const first = (await q.one<AgentRow>(`select ${AGENT_COLUMNS} from agents where id = $1`, [agentId])) ?? undefined;
+    agent = first;
     const call = await q.one<{ direction: "inbound" | "outbound"; from_e164: string | null; to_e164: string | null }>("select direction, from_e164, to_e164 from calls where id = $1", [callId]);
-    if (!agent || !call) throw new Error(`Agent ${agentId} or call ${callId} not found in organization ${organizationId}`);
-    const transferTo = canTransfer ? agent.transfer_to_e164 : null;
+    if (!first || !call) throw new Error(`Agent ${agentId} or call ${callId} not found in organization ${organizationId}`);
+    visited.push(first);
 
     await event("call_started", { direction: call.direction, from: call.from_e164, to: call.to_e164, agentId, ...input.started });
     transport.onHangup(() => void finish({ status: "completed", endReason: "caller_hangup", callerGone: true }));
 
-    const engineId = overrides?.engineId ?? agent.engine;
-    engine = deps.engines.get(engineId);
+    const engineId = overrides?.engineId ?? first.engine;
     const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);
     // Sem texto do operador, ou com texto em branco, vale o padrão: o aviso nunca falta.
     const recordingNotice = typeof notice?.value === "string" && notice.value.trim() !== "" ? notice.value.trim() : DEFAULT_RECORDING_NOTICE;
@@ -420,78 +795,30 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (deps.recordingsDir && callRecordingOf(recording?.value)) await openRecording(deps.recordingsDir);
     resolveRecordingDecided();
 
-    const enabled = new Map<string, Tool>();
-    for (const name of overrides?.tools ?? agent.tools) {
-      const tool = deps.tools.get(name);
-      // Sem transferência no canal (ligação pelo WhatsApp), o motor nem a vê: a descrição manda
-      // anunciar a transferência antes de chamar, e quem ligou ouviria "vou transferir" e o recuo.
-      if (name === "transfer_to_human" && !canTransfer) continue;
-      // Ferramenta sem a peça de que depende (a agenda sem cliente) também some: oferecida, o motor a
-      // chamaria em toda ligação de agendamento só para ouvir que ela não está ligada.
-      if (tool?.available === false) continue;
-      if (tool) enabled.set(name, tool);
-      else log("error", "agent enables a tool that is not installed; ignoring it", { tool: name });
-    }
+    const targets = await targetsOf(first);
+    const enabled = enabledToolsFor(overrides?.tools ?? first.tools, targets);
 
     // Chave ausente ou inválida: a chamada não fica muda. É recusada com evento, aviso e sinal.
-    let apiKey = "";
-    let problem: string | undefined;
-    let reason: "engine_not_configured" | "engine_not_responding" = "engine_not_configured";
-    if (!engine) {
-      problem = `the voice engine "${engineId}" is not installed`;
-    } else if (!engine.keyless) {
-      const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, engineKeySetting(engineId)]);
-      if (typeof stored?.value !== "string") {
-        problem = "no API key is saved for this voice engine";
-      } else {
-        try {
-          apiKey = decryptSecret(stored.value, deps.secretKey);
-        } catch (error) {
-          problem = `the saved API key cannot be read (${messageOf(error)})`;
-        }
-      }
+    const opened = await connectEngine(
+      engineId,
+      sessionConfig(
+        first,
+        composeInstructions(overrides?.instructions ?? first.instructions, targets),
+        // O aviso vem antes de tudo, e os motores falam a abertura ao conectar: o aviso entra
+        // na frente da saudação. Lição do DeskcommCRM: na ligação recebida quem atende fala
+        // primeiro; na que nós fazemos, quem atende diz "alô" e o agente responde a isso, então
+        // não há saudação, e o aviso sai por `say` assim que a pessoa atende.
+        call.direction === "inbound" ? [recordingNotice, first.greeting?.trim()].filter(Boolean).join(" ") : undefined,
+        enabled,
+      ),
+    );
+    if (ending) {
+      if ("voice" in opened) await opened.voice.close();
+      return;
     }
-    if (engine && problem === undefined && !ending) {
-      const connecting = engine.connect(
-        {
-          instructions: overrides?.instructions ?? agent.instructions,
-          // O aviso vem antes de tudo, e os motores falam a abertura ao conectar: o aviso entra
-          // na frente da saudação. Lição do DeskcommCRM: na ligação recebida quem atende fala
-          // primeiro; na que nós fazemos, quem atende diz "alô" e o agente responde a isso, então
-          // não há saudação, e o aviso sai por `say` assim que a pessoa atende.
-          greeting: call.direction === "inbound" ? [recordingNotice, agent.greeting?.trim()].filter(Boolean).join(" ") : undefined,
-          voiceId: agent.voice_id ?? undefined,
-          language: agent.language,
-          tools: [...enabled.values()].map(toSpec),
-          // Dica de reconhecimento; vazia, o motor envia ao provedor o mesmo de antes.
-          vocabulary: agent.vocabulary,
-          // `normal` envia ao provedor o mesmo de antes; `noisy` ajusta a detecção de fala.
-          listeningEnvironment: agent.listening_environment,
-        },
-        apiKey,
-      );
-      let cancelDeadline: () => void = () => undefined;
-      const deadline = new Promise<never>((_, reject) => {
-        cancelDeadline = schedule(() => reject(new EngineTimeoutError(`the provider did not answer in ${CONNECT_TIMEOUT_MS / 1000} s`)), CONNECT_TIMEOUT_MS);
-      });
-      try {
-        voice = await Promise.race([connecting, deadline]);
-      } catch (error) {
-        if (error instanceof EngineTimeoutError) {
-          reason = "engine_not_responding";
-          problem = `the voice provider did not answer (${messageOf(error)})`;
-          // Se a sessão ainda abrir depois do prazo, ninguém vai usá-la.
-          connecting.then((late) => late.close(), () => undefined);
-        } else {
-          problem = `the voice engine refused the session (${messageOf(error)})`;
-        }
-      } finally {
-        cancelDeadline();
-      }
-    }
-    if (ending) return void (await voice?.close());
-    if (!voice || !engine) {
-      const label = engine?.label ?? engineId;
+    if (!("voice" in opened)) {
+      const label = opened.engine?.label ?? engineId;
+      const { reason, problem } = opened;
       return finish({
         status: "refused",
         endReason: reason,
@@ -499,70 +826,19 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         events: [["call_refused", { reason, engine: engineId, detail: problem }]],
         notice:
           reason === "engine_not_responding"
-            ? `Uma ligação do agente ${agent.name} foi recusada porque o provedor do motor de voz ${label} não respondeu: ${problem}. Quem ligou ouviu o sinal de falha. Confira a situação do provedor e faça uma chamada de teste.`
-            : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${agent.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações → Inteligência artificial e faça uma chamada de teste.`,
+            ? `Uma ligação do agente ${first.name} foi recusada porque o provedor do motor de voz ${label} não respondeu: ${problem}. Quem ligou ouviu o sinal de falha. Confira a situação do provedor e faça uma chamada de teste.`
+            : `Uma ligação foi recusada porque o motor de voz ${label} do agente ${first.name} não está pronto: ${problem}. Cadastre ou corrija a chave em Configurações → Inteligência artificial e faça uma chamada de teste.`,
       });
     }
 
     // Daqui até o fim do bloco nada espera: o motor só começa a emitir no próximo ciclo, e os
     // handlers e os primeiros eventos precisam estar na fila antes da primeira fala.
-    const session = voice;
-    const engineLabel = engine.label;
-    const silenceGuard = createSilenceGuard({
-      clock,
-      schedule,
-      closeCallerTurn: () => session.closeCallerTurn(),
-      // `wrapUp` e `finish` param a guarda: depois disso ela não chama nada.
-      say: (text) => session.say(text),
-      acted: (report) => void event("caller_unanswered", report).catch(logFailure("could not record an unanswered caller")),
-    });
-    guard = silenceGuard;
-    session.on("callerActivity", (signal) => silenceGuard.callerActivity(signal));
-    session.on("audio", (pcm) => {
-      silenceGuard.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
-      if (ending) return;
-      transport.sendAudio(pcm);
-      recorder?.agent(pcm);
-    });
-    session.on("interrupted", () => {
-      silenceGuard.agentInterrupted();
-      transport.clearAudio();
-      recorder?.clear();
-    });
-    session.on("transcript", (turn) => void event(turn.speaker === "user" ? "transcript_user" : "transcript_agent", { text: turn.text }).catch(logFailure("could not record a transcript")));
-    session.on("toolCall", (toolCall) => {
-      // Ferramenta em curso, aprovação em espera inclusive: a guarda não age até ela acabar.
-      silenceGuard.toolStarted();
-      const running: Promise<void> = handleToolCall(enabled, toolCall).finally(() => {
-        toolsRunning.delete(running);
-        silenceGuard.toolFinished();
-      });
-      toolsRunning.add(running);
-    });
-    session.on("usage", (increment) => void meter(increment).catch(logFailure("could not record usage")));
-    // `error` sozinho não é fatal: fica guardado para explicar um `closed` que venha em seguida.
-    session.on("error", (error) => {
-      lastEngineError = error;
-      log("error", "voice engine error", { error: error.message });
-    });
-    session.on("closed", (reason) => {
-      if (reason === "client") return;
-      // O roteiro do motor simulado chegou ao fim.
-      if (reason === "ended") return void finish({ status: "completed", endReason: "script_finished" });
-      // O motor caiu no meio: evento, aviso, sinal para quem está na linha e, havendo para quem, transferência.
-      const error = lastEngineError?.message ?? `the voice engine closed the session (${reason})`;
-      void finish({
-        status: transferTo ? "transferred" : "failed",
-        endReason: "engine_failed",
-        transferTo: transferTo ?? undefined,
-        tone: true,
-        events: [["engine_failed", { engine: engineId, error }], ...(transferTo ? [["transfer_started", { to: transferTo, reason: "engine_failed" }] satisfies [CallEventKind, object]] : [])],
-        notice: `O motor de voz ${engineLabel} caiu no meio de uma ligação do agente ${agent?.name}: ${error}. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : canTransfer ? "A ligação foi encerrada, porque o agente não tem número de transferência." : "A ligação foi encerrada, porque este canal não tem como transferir."} Confira a chave e a situação do provedor em Configurações → Inteligência artificial.`,
-      });
-    });
+    const session = opened.voice;
+    startLeg(first, opened.engine, session, enabled);
+    // O áudio de quem ligou vai para o agente em que a ligação está agora.
     transport.onAudio((pcm) => {
       recorder?.caller(pcm);
-      if (!ending && !wrappingUp) session.sendAudio(pcm);
+      if (!ending && !wrappingUp) voice?.sendAudio(pcm);
     });
     const answered = [
       q.exec("update calls set status = 'in_progress', answered_at = $2, engine = $3 where id = $1", [callId, clock.now(), engineId]),
@@ -570,7 +846,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       event("recording_notice", { text: recordingNotice }),
     ];
     if (call.direction !== "inbound") session.say(recordingNotice);
-    cancelTimers.push(schedule(() => wrapUp(FAREWELL.maxDuration, { status: "completed", endReason: "max_duration" }), agent.max_call_seconds * 1000));
+    answeredAt = clock.now();
+    durationLimitSeconds = first.max_call_seconds;
+    scheduleDuration();
     await Promise.all(answered);
   }
 

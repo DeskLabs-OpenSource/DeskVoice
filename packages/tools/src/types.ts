@@ -21,10 +21,30 @@ export interface ToolContext {
      */
     pauseRecording(reason: string): Promise<RecordingStop>;
   };
+  /**
+   * Passa a ligação para outro agente da mesma organização (`transfer_to_agent`). A sessão abre a do
+   * destino antes de fechar a atual; se não abrir, o agente atual continua na linha e recebe a
+   * recusa. Ausente: quem roda a ferramenta não troca de agente (um teste, uma rotina).
+   */
+  handoff?(target: HandoffTarget, input: { reason: string; summary: string }): Promise<HandoffOutcome>;
   /** Faz o agente dizer algo enquanto a ferramenta trabalha ("um instante, estou conferindo"). */
   say(text: string): void;
   waitForApproval(approvalId: string, timeoutMs: number): Promise<ApprovalOutcome>;
 }
+
+/** Um agente para quem a ligação pode passar, como a sessão o leu do banco. */
+export interface HandoffTarget {
+  id: string;
+  name: string;
+  roleLabel: string | null;
+}
+
+/**
+ * O que a sessão fez com um pedido de passagem. `limit`: a ligação já passou o máximo de vezes;
+ * `busy`: outra passagem está em curso; `unavailable`: a sessão do destino não abriu (`detail` diz por
+ * quê, em inglês, para o log); `closing`: a ligação já está encerrando.
+ */
+export type HandoffOutcome = { ok: true } | { ok: false; problem: "limit" | "busy" | "closing" } | { ok: false; problem: "unavailable"; detail: string };
 
 /**
  * O que um pedido de parar a gravação produziu: `stopped` parou agora e registrou o pedido;
@@ -66,5 +86,11 @@ export interface Tool<Input = unknown> {
    * Para a ferramenta que guarda dado novo sobre quem liga (a nota), que pede uma escolha (registro 0020, 1A).
    */
   offByDefault?: boolean;
+  /**
+   * `true`: o operador não marca a ferramenta. A sessão a oferece sozinha quando a configuração de que
+   * ela depende existe (a passagem entre agentes, com ao menos um destino), e a ignora na lista
+   * `tools` do agente. A tela não a lista como caixa de marcar.
+   */
+  offeredBySession?: boolean;
   run(input: Input, ctx: ToolContext): Promise<ToolResult>;
 }
