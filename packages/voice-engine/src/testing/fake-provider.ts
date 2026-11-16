@@ -43,6 +43,10 @@ export async function startFakeProvider() {
     drop(): void {
       client?.terminate();
     },
+    /** Fecha a conexão com código e motivo, como o provedor faz ao recusar a sessão. */
+    refuse(code: number, reason: string): void {
+      client?.close(code, reason);
+    },
     async stop(): Promise<void> {
       for (const socket of server.clients) socket.terminate();
       await new Promise((resolve) => server.close(resolve));

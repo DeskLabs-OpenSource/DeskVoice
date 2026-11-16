@@ -403,7 +403,7 @@ const engine: VoiceEngine = {
       label: "OpenAI Realtime",
       emitter,
       onMessage,
-      onClosed: () => sessionFailed(new Error("OpenAI Realtime: a conexão fechou antes de confirmar a sessão")),
+      onClosed: (detail) => sessionFailed(new Error(`OpenAI Realtime: a conexão fechou antes de confirmar a sessão (${detail})`)),
       timeout: options,
     });
 

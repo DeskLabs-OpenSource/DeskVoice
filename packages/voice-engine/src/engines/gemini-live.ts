@@ -27,7 +27,10 @@
  * Não confirmado contra o servidor real (nenhuma chamada com chave foi feita):
  *   - o código de uma chave inválida na API de modelos: a página de erros diz 401, e a forma antiga
  *     da API respondia 400 com `API_KEY_INVALID`; as duas são tratadas como chave recusada;
- *   - se a leitura do modelo confere crédito (402) ou só a chave: a resposta "aceita" não promete crédito;
+ *   - se a leitura do modelo confere crédito (402) ou só a chave: a resposta "aceita" não promete crédito.
+ *     Medido em 2026-11-16 numa instalação: com o crédito pré-pago esgotado, a leitura do modelo aceitou
+ *     a chave, e a Live API fechou o socket antes do `setupComplete` com código 1011 e o motivo "Your
+ *     prepayment credits are depleted…". Esse motivo chega ao `connect` pelo `onClosed`;
  *   - `responseModalities`/`speechConfig` vão dentro de `setup.generationConfig`, como na referência da
  *     API; o exemplo do guia de WebSocket mostra `responseModalities` direto em `setup`;
  *   - `inputAudioTranscription.languageCodes` (está na referência; os guias só mostram `{}`);
@@ -311,7 +314,7 @@ const engine: VoiceEngine = {
       label: "Gemini Live",
       emitter,
       onMessage,
-      onClosed: () => setupFailed(new Error("Gemini Live: a conexão fechou antes de confirmar a sessão (chave ou modelo inválido?)")),
+      onClosed: (detail) => setupFailed(new Error(`Gemini Live: a conexão fechou antes de confirmar a sessão (${detail})`)),
       timeout: options,
     });
 
