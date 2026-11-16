@@ -76,6 +76,8 @@ export interface CallDetail extends Call {
   summaryPurged: boolean;
   /** O conteúdo saiu a pedido do titular (`calls.erased_at`). */
   erased: boolean;
+  /** O custo de cada agente da ligação, na ordem em que gastou; `name: null` é agente apagado. A tela mostra com mais de um. */
+  costByAgent: Array<{ agentId: string | null; name: string | null; costCents: number }>;
 }
 
 /** O bloco "Este número" da tela da chamada (`GET /calls/:id/caller-history`). `phone: null`: a chamada não tem número, e o bloco não aparece. */

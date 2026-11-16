@@ -5,6 +5,7 @@ import { createDb, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { forceHandoffTargets } from "../../../../../../packages/core/test/helpers";
 import { call, createOrganization, createUser, startPanel } from "../../../../test/kit";
+import { requireHandoffTargets } from "../../../server/shapes";
 import { DELETE as deleteAgent, GET as getAgent, PATCH as patchAgent } from "./agents/[id]/route";
 import { GET as listAgents, POST as createAgent } from "./agents/route";
 
@@ -117,5 +118,69 @@ describe("Pode passar a ligação para", () => {
     await withSystem(panel.app, (q) => q.exec("delete from agents where id = $1", [vendas]));
     expect(await targetsOf(org, recepcao)).toEqual([]);
     expect(await targetsOf(otherOrg, intruso)).toEqual([vendas]);
+  });
+
+  it("apagar dois destinos numa instrução só tira os dois da lista, e os que ficam mantêm a ordem (ressalva do PR 306)", async () => {
+    const recepcao = await newAgent(owner, "Recepção E");
+    const vendas = await newAgent(owner, "Vendas E");
+    const agenda = await newAgent(owner, "Agenda E");
+    const suporte = await newAgent(owner, "Suporte E");
+    const triagem = await newAgent(owner, "Triagem E");
+    await call(patchAgent, { method: "PATCH", cookie: owner, params: { id: recepcao }, body: { agentHandoffTargets: [vendas, suporte, agenda] } });
+    await call(patchAgent, { method: "PATCH", cookie: owner, params: { id: triagem }, body: { agentHandoffTargets: [agenda, vendas] } });
+    // Antes, a limpeza de Vendas deixava Agenda (já apagada) na lista, e a checagem recusava com `check_violation`.
+    expect(await withOrg(panel.app, org, (q) => q.exec("delete from agents where id = any($1::uuid[])", [[vendas, agenda]]))).toBe(2);
+    expect(await targetsOf(org, recepcao)).toEqual([suporte]);
+    expect(await targetsOf(org, triagem)).toEqual([]);
+    // Pelo caminho de sistema também, com o próprio dono da lista na mesma instrução.
+    const outro = await newAgent(owner, "Outro E");
+    await call(patchAgent, { method: "PATCH", cookie: owner, params: { id: suporte }, body: { agentHandoffTargets: [outro, recepcao] } });
+    await withSystem(panel.app, (q) => q.exec("delete from agents where id = any($1::uuid[])", [[outro, recepcao, triagem]]));
+    expect(await targetsOf(org, suporte)).toEqual([]);
+  });
+});
+
+/** Alguém do banco espera uma trava numa consulta que contém `text`. */
+async function someoneWaitsOn(text: string, timeoutMs = 3000): Promise<boolean> {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    // Pelo papel da aplicação, o mesmo das duas transações: só ele lê o texto da consulta delas.
+    const waiting = await withOrg(panel.app, org, (q) =>
+      q.one<{ n: number }>("select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and position($1 in query) > 0", [text]),
+    );
+    if ((waiting?.n ?? 0) > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
+
+describe("a corrida entre marcar um destino e apagá-lo (ressalva do PR 306)", () => {
+  it("o destino conferido fica travado até a escrita acabar: o apagamento espera e depois o tira da lista", async () => {
+    const recepcao = await newAgent(owner, "Recepção F");
+    const vendas = await newAgent(owner, "Vendas F");
+    let release: () => void = () => undefined;
+    let checked: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const didCheck = new Promise<void>((resolve) => (checked = resolve));
+    // A escrita do agente, como na rota: confere os destinos, e só depois grava. Entre as duas, alguém apaga o destino.
+    const saving = withOrg(panel.app, org, async (q) => {
+      await requireHandoffTargets(q, recepcao, [vendas]);
+      checked();
+      await held;
+      await q.exec("update agents set agent_handoff_targets = $2 where id = $1", [recepcao, [vendas]]);
+    });
+    await didCheck;
+    const deleting = call(deleteAgent, { method: "DELETE", cookie: owner, params: { id: vendas } });
+    try {
+      // Com a trava, o apagamento espera a escrita. Sem ela, apagaria antes, e a escrita cairia em
+      // `check_violation`, que a pessoa leria como erro cru.
+      expect(await someoneWaitsOn("delete from agents")).toBe(true);
+    } finally {
+      release();
+    }
+    await saving;
+    expect((await deleting).status).toBe(200);
+    // O apagamento veio depois da escrita, e a limpeza tirou o destino da lista.
+    expect(await targetsOf(org, recepcao)).toEqual([]);
   });
 });

@@ -101,6 +101,17 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
               <dd className={`${mono ? "data" : ""} ${live && label === t.facts.duration ? "text-accent-strong" : ""}`}>
                 {value}
                 {label === t.facts.cost && data.costCeilingCents ? <span className="ml-2 font-sans text-[0.8rem] text-muted">{fill(t.facts.ceiling, { value: formatMoney(data.costCeilingCents, locale) })}</span> : null}
+                {/* Com passagem entre agentes, quanto cada um gastou; com um agente só, nada muda. */}
+                {label === t.facts.cost && data.costByAgent.length > 1 ? (
+                  <ul className="mt-1 grid gap-0.5 font-sans text-[0.8rem] text-muted">
+                    <li>{t.facts.byAgent}</li>
+                    {data.costByAgent.map((row) => (
+                      <li key={row.agentId ?? "deleted"}>
+                        {row.name ?? t.facts.deletedAgent} · <span className="data">{formatMoney(row.costCents, locale)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </dd>
             </div>
           ))}

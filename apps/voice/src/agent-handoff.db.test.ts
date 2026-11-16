@@ -114,6 +114,7 @@ describe("a passagem com o motor simulado", { timeout: 120_000 }, () => {
     expect(handoff).toEqual({
       from: { id: ids.Recepção, name: "Recepção" },
       to: { id: ids.Agendamento, name: "Agendamento" },
+      engine: "simulated",
       reason: "quer marcar horário",
       summary: "Quer marcar um retorno na terça.",
     });
@@ -455,6 +456,8 @@ describe("o custo por trecho", { timeout: 120_000 }, () => {
     expect(byAgent(ids.Recepção).map((row) => row.engine)).toEqual(["simulated"]);
     expect(byAgent(ids.Agendamento).map((row) => row.engine)).toEqual(["simulated-pricey"]);
     expect(ledger.filter((row) => row.agent_id === null)).toEqual([]);
+    // O motor do trecho que começa fica no evento: é dele que saem os minutos de cada motor em Custos.
+    expect(await payloadsOf(callId, "agent_handoff")).toEqual([expect.objectContaining({ engine: "simulated-pricey" })]);
 
     // O primeiro fala o aviso de gravação ao atender.
     const firstSeconds = (simulatedSpeechMs(DEFAULT_RECORDING_NOTICE) + simulatedSpeechMs(firstLine)) / 1000;
@@ -571,7 +574,7 @@ describe("as correções antes da tela (fatia 4b)", { timeout: 120_000 }, () => 
     expect(outcome).toMatchObject({ status: "completed", endReason: "script_finished" });
 
     // A passagem aconteceu, e o destino falou pelo motor simulado.
-    expect(await payloadsOf(started.callId, "agent_handoff")).toEqual([expect.objectContaining({ to: { id: ids.Vendas, name: "Vendas" } })]);
+    expect(await payloadsOf(started.callId, "agent_handoff")).toEqual([expect.objectContaining({ to: { id: ids.Vendas, name: "Vendas" }, engine: "simulated" })]);
     expect(await payloadsOf(started.callId, "transcript_agent")).toContainEqual({ text: "Vendas, pois não.", agentId: ids.Vendas });
     expect(asked.length).toBeGreaterThanOrEqual(2);
     expect(new Set(asked)).toEqual(new Set(["simulated"]));

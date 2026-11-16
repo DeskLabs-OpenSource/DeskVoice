@@ -81,7 +81,7 @@ export default function CostsPage() {
                 </ul>
               </Panel>
               <div className="grid gap-6 md:grid-cols-2">
-                <Panel title={t.byAgent}>
+                <Panel title={t.byAgent} description={t.handoffCounts}>
                   <ul className="grid gap-4">
                     {data.byAgent.map((row) => (
                       <li key={row.agentId ?? "deleted"} className="grid gap-1.5">

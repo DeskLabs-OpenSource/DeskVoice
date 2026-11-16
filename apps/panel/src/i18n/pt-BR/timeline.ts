@@ -2,7 +2,7 @@ const timeline = {
   back: "Chamadas",
   live: "Ao vivo",
   liveHint: "A linha do tempo atualiza sozinha enquanto a chamada acontece.",
-  facts: { agent: "Agente", engine: "Motor de voz", duration: "Duração", cost: "Custo estimado", ceiling: "teto de {value}", started: "Início", direction: "Sentido" },
+  facts: { agent: "Agente", engine: "Motor de voz", duration: "Duração", cost: "Custo estimado", ceiling: "teto de {value}", byAgent: "Por agente:", deletedAgent: "Agente apagado", started: "Início", direction: "Sentido" },
   direction: { inbound: "Recebida", outbound: "Feita pelo agente" },
   outcomeTitle: "O que ficou desta ligação",
   outcomes: {
