@@ -303,7 +303,7 @@ foram tocados.
 
 | O que | O que se observou |
 |---|---|
-| Passagem | Feita na **segunda** tentativa. Na primeira, o modelo pediu `transfer_to_agent` com o nome e o rótulo, "Prova Financeiro (Teste de passagem)", copiando a linha das instruções. A ferramenta recusou, e quem ligou ouviu "Entendi, vou ajustar o destino e encaminhar corretamente". Na segunda, com o nome só, veio `agent_handoff`, com motivo e resumo. O conserto é o #333 |
+| Passagem | Feita na **segunda** tentativa. Na primeira, o modelo pediu `transfer_to_agent` com o nome e o rótulo, "Prova Financeiro (Teste de passagem)", copiando a linha das instruções. A ferramenta recusou, e a transcrição da fala seguinte do agente é "Entendi, vou ajustar o destino e encaminhar corretamente" (o áudio não foi ouvido). Na segunda, com o nome só, veio `agent_handoff`, com motivo e resumo. O conserto é o #333 |
 | Depois da passagem | O financeiro abriu com a frase da passagem, respondeu o valor pedido e encerrou com `end_call` depois da despedida de quem ligou. As falas dele levam o `agentId` dele |
 | Duração e desfecho | 63 s, `completed`, motivo `end_call` |
 | Custo | 9 centavos de dólar no `call_ended`. No extrato (`usage_ledger`), as linhas da recepção somam 5 e as do financeiro somam 4 |
@@ -315,5 +315,6 @@ O que não prova:
 - **O custo por agente na tela.** A soma foi conferida no banco, não na tela de custos.
 - **O supervisor de regras fixas.** Ele ignora de propósito a chamada pelo navegador, que não tem número.
 - **A passagem numa ligação por operadora ou pelo WhatsApp.** O transporte da chamada pelo navegador não tem para onde transferir áudio; aqui só se troca o agente, e isso vale em qualquer transporte, mas não foi medido nos outros dois.
+- **O painel e o navegador.** O convite foi pedido direto à API interna do processo de voz, sem a sessão do painel nem a rota `/api/v1/calls/web`, e nenhum navegador abriu o microfone.
 - **Fala humana.** As falas eram sintéticas, ditas sem ruído.
 - **O conserto do #333 numa ligação real.** A prova foi antes dele.
