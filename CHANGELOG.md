@@ -3,6 +3,27 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.23.0] - 2026-11-16
+
+### Adicionado
+
+- **O desfecho e a análise da ligação podem ser lidos por um cérebro escolhido** Com a chave de um cérebro salva em Configurações → Cérebros, a configuração `calls.analysis_brain`
+  escolhe um cérebro e um modelo da lista dele para ler as ligações: o desfecho e a análise passam a
+  sair desse modelo, na frente do motor de voz e do endpoint de classificação. O extrato de custo
+  ganha o modelo cobrado e a marca de custo medido. Um modelo sem preço conhecido só é aceito com
+  confirmação, só lê ligações de agentes com teto de custo, e a linha dele no extrato fica marcada
+  como não medida, nunca como zero. Se o cérebro escolhido ficar sem chave, sumir ou o modelo sair da
+  lista, a ligação não é lida, a linha do tempo diz por quê, e nada vai ao motor de voz. A escolha na
+  tela vem na próxima versão; sem escolha, tudo segue como antes. Nada muda em instalações
+  existentes. Crédito: @melgarafael.
+
+### Alterado
+
+- **Mais testes guardam o custo e os limites do filtro da fala** O filtro da fala de quem liga ganhou testes que guardam o que ele já fazia: o custo dele entra no
+  total da ligação e no teto do agente, a chamada simulada nunca pergunta ao modelo de verdade, a
+  linha do extrato fica com o agente do trecho em que a fala aconteceu, e a marca de fala de fundo
+  começa exatamente em 0,8 de confiança. Nada muda em instalações existentes. Crédito: @melgarafael.
+
 ## [0.22.0] - 2026-11-16
 
 ### Adicionado
