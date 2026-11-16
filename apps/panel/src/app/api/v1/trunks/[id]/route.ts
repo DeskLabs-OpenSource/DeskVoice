@@ -47,6 +47,7 @@ export const PATCH = handle(
     return q.one(
       `update trunks set name = $2, host = $3, username = $4, secret_enc = $5, auth_mode = $6, caller_id_e164 = $7, match_extra = $8, outbound_host = $9, status = 'unverified',
               inbound_from_name = case when host is distinct from $3 or auth_mode is distinct from $6 then '{}' else inbound_from_name end,
+              inbound_from_name_seen = case when host is distinct from $3 or auth_mode is distinct from $6 then '{}'::jsonb else inbound_from_name_seen end,
               inbound_allowed = case when host is distinct from $3 or auth_mode is distinct from $6 then '{}' else inbound_allowed end,
               inbound_resolved_at = case when host is distinct from $3 or auth_mode is distinct from $6 then null else inbound_resolved_at end
         where id = $1 returning ${TRUNK_COLUMNS}`,

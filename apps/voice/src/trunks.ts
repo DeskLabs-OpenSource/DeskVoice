@@ -302,6 +302,42 @@ export function nameAddresses(resolved: readonly string[]): { addresses: string[
   return { addresses: all.slice(0, MAX_FROM_NAME), over: all.length > MAX_FROM_NAME };
 }
 
+/**
+ * Por quanto tempo um endereço que o nome devolveu continua liberado depois da última resposta que o
+ * trouxe. Há DNS que devolve só uma parte dos endereços a cada consulta (rodízio): com só a última
+ * resposta, o `permit` oscilaria e recusaria a ligação vinda de um endereço válido da vez anterior.
+ */
+export const NAME_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Endereço vindo do nome → quando uma resposta do nome o trouxe pela última vez (ISO 8601). */
+export type SeenAt = Record<string, string>;
+
+/**
+ * A parte do nome depois de uma resposta que deu certo: a resposta de agora mais o que alguma
+ * resposta trouxe nas últimas `NAME_WINDOW_MS` (a união da janela), dentro do teto. Com mais do que
+ * `MAX_FROM_NAME`, ficam primeiro os da resposta de agora (em ordem canônica), depois os vistos mais
+ * recentemente; `over` diz se sobrou endereço. Endereço guardado sem hora conhecida não conta como
+ * visto na janela; hora no futuro (o relógio voltou) conta, para o filtro não encolher por isso. A lista sai em ordem canônica, e `seen` só tem os endereços que ficaram.
+ */
+export function nameWindow(resolved: readonly string[], previous: readonly string[], previousSeen: Readonly<SeenAt>, now: Date): { addresses: string[]; seen: SeenAt; over: boolean } {
+  const current = nameAddresses(resolved);
+  const nowIso = now.toISOString();
+  const since = now.getTime() - NAME_WINDOW_MS;
+  const older = canonicalAddresses(previous)
+    .filter((address) => !current.addresses.includes(address))
+    .flatMap((address) => {
+      const at = Date.parse(previousSeen[address] ?? "");
+      return Number.isFinite(at) && at >= since ? [{ address, at }] : [];
+    })
+    .sort((a, b) => b.at - a.at || (a.address < b.address ? -1 : 1));
+  const room = MAX_FROM_NAME - current.addresses.length;
+  const kept = older.slice(0, Math.max(room, 0));
+  const seen: SeenAt = {};
+  for (const address of current.addresses) seen[address] = nowIso;
+  for (const { address } of kept) seen[address] = previousSeen[address] as string;
+  return { addresses: [...current.addresses, ...kept.map(({ address }) => address)].sort(), seen, over: current.over || older.length > kept.length };
+}
+
 function canonicalAddresses(values: readonly string[]): string[] {
   const out: string[] = [];
   for (const value of values) {
@@ -356,9 +392,12 @@ interface Allowed {
   addresses: string[];
   /**
    * O que veio do nome, guardado à parte (`trunks.inbound_from_name`): só essa parte usa a regra do
-   * último conjunto (contrato 7). Vazio quando o `host` é numérico.
+   * último conjunto (contrato 7), e é a união das respostas do nome numa janela (`nameWindow`).
+   * Vazio quando o `host` é numérico.
    */
   fromName: string[];
+  /** Quando cada endereço de `fromName` veio numa resposta do nome (`trunks.inbound_from_name_seen`). */
+  seen: SeenAt;
   /** Por que o conjunto não pôde ser atualizado, ou ficou vazio, ou passou do teto (a linha fica `warn`). */
   problem?: string;
 }
@@ -378,15 +417,20 @@ function withDeadline<T>(promise: Promise<T>, ms: number, schedule: Schedule): P
  * corre no relógio de verdade, e não no `schedule` das dependências, que nos testes adianta tudo.
  *
  * O conjunto é sempre o `host` numérico e os `match_extra` ATUAIS da linha, mais o que veio do nome
- * (contrato 7). Resolução que falha mantém só a parte do nome (`previousFromName`, o
- * `inbound_from_name` gravado): falha de DNS nunca encolhe essa parte, e um extra removido sai do
- * conjunto mesmo com o DNS fora. Conjunto vazio (nome que nunca resolveu, sem extra) e nome com
- * mais endereços que o teto deixam a linha `warn` (contratos 8 e 9).
+ * (contrato 7). Resolução que dá certo junta a resposta de agora com o que o nome trouxe nas últimas
+ * 24 horas (`nameWindow`, `previousSeen` diz quando). Resolução que falha mantém só a parte do nome
+ * (`previousFromName`, o `inbound_from_name` gravado), sem vencer nada: falha de DNS nunca encolhe
+ * essa parte, e um extra removido sai do conjunto mesmo com o DNS fora.
+ *
+ * Linha com nome no `host` que nunca resolveu (sem nada vindo do nome) fica SEM filtro, mesmo com
+ * extras: o filtro só com os extras recusaria a entrega pelo servidor do registro. O conjunto dela
+ * é vazio e ela fica `warn` (contrato 8); o mesmo com nome acima do teto (contrato 9).
  */
 export async function computeAllowed(
   deps: Pick<TrunksDeps, "resolve">,
   trunks: readonly TrunkConfig[],
   previousFromName: ReadonlyMap<string, readonly string[]>,
+  { previousSeen = new Map(), now = new Date() }: { previousSeen?: ReadonlyMap<string, Readonly<SeenAt>>; now?: Date } = {},
 ): Promise<Map<string, Allowed>> {
   const pending = new Map<string, Promise<string[]>>();
   const resolveOnce = (name: string): Promise<string[]> => {
@@ -397,27 +441,32 @@ export async function computeAllowed(
   const entries = await Promise.all(
     trunks.map(async (trunk): Promise<[string, Allowed]> => {
       const host = parseTrunkHost(trunk.host);
-      if (host?.kind !== "name") return [trunk.id, { addresses: allowedAddresses(trunk), fromName: [] }];
+      if (host?.kind !== "name") return [trunk.id, { addresses: allowedAddresses(trunk), fromName: [], seen: {} }];
       // O nome sem a porta: `sip.operadora.example:5080` resolve como `sip.operadora.example`.
       const name = host.uri.split(":")[0] ?? host.uri;
-      let fromName: { addresses: string[]; over: boolean };
+      const previous = previousFromName.get(trunk.id) ?? [];
+      const seenBefore = previousSeen.get(trunk.id) ?? {};
+      let fromName: { addresses: string[]; seen: SeenAt; over: boolean };
       let problem: string | undefined;
       try {
-        fromName = nameAddresses(await resolveOnce(name));
+        const resolved = await resolveOnce(name);
         // Resposta sem nenhum endereço que sirva é falha, e não "o conjunto ficou vazio".
-        if (fromName.addresses.length === 0) throw new Error("the name resolves to no address");
+        if (nameAddresses(resolved).addresses.length === 0) throw new Error("the name resolves to no address");
+        fromName = nameWindow(resolved, previous, seenBefore, now);
         if (fromName.over) {
           problem = `${TOO_MANY_FROM_NAME} (${name}); only the first ${MAX_FROM_NAME} are accepted. Add to Extra addresses the ones the provider uses to deliver calls.`;
         }
       } catch (error) {
-        fromName = nameAddresses(previousFromName.get(trunk.id) ?? []);
+        const kept = nameAddresses(previous);
+        fromName = { ...kept, seen: Object.fromEntries(kept.addresses.flatMap((address) => (seenBefore[address] === undefined ? [] : [[address, seenBefore[address]]]))) };
         problem = `${UNRESOLVED} (${name}: ${messageOf(error)}). The line keeps the addresses it had; check the name with the provider.`;
       }
-      const addresses = allowedAddresses(trunk, fromName.addresses);
+      // Sem nada vindo do nome, sem filtro: os extras sozinhos não ligam o filtro (contrato 8).
+      const addresses = fromName.addresses.length === 0 ? [] : allowedAddresses(trunk, fromName.addresses);
       if (addresses.length === 0) {
         problem = `${EMPTY_ALLOWED}; its filter stays off until the name ${name} resolves.${problem === undefined ? "" : ` ${problem}`}`;
       }
-      return [trunk.id, { addresses, fromName: fromName.addresses, ...(problem === undefined ? {} : { problem }) }];
+      return [trunk.id, { addresses, fromName: fromName.addresses, seen: fromName.seen, ...(problem === undefined ? {} : { problem }) }];
     }),
   );
   return new Map(entries);
@@ -509,7 +558,7 @@ interface TrunksPlan {
    * O que está gravado hoje, para gravar só o que mudou. `host` e `authMode` como lidos: a gravação
    * só vale se a linha não mudou de destino no meio (o painel zera as colunas nessa hora).
    */
-  stored: Map<string, { allowed: string[]; fromName: string[]; lastError: string | null; host: string; authMode: string }>;
+  stored: Map<string, { allowed: string[]; fromName: string[]; seen: SeenAt; lastError: string | null; host: string; authMode: string }>;
 }
 
 /** Lê as linhas do banco, monta o arquivo e calcula o conjunto liberado de cada uma. Não grava nada. */
@@ -526,10 +575,11 @@ async function planTrunks(deps: TrunksDeps): Promise<TrunksPlan> {
       outbound_host: string | null;
       inbound_allowed: string[] | null;
       inbound_from_name: string[] | null;
+      inbound_from_name_seen: SeenAt | null;
       last_error: string | null;
       public_ip: unknown;
     }>(
-      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host, t.inbound_allowed, t.inbound_from_name, t.last_error,
+      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host, t.inbound_allowed, t.inbound_from_name, t.inbound_from_name_seen, t.last_error,
               (select s.value from settings s where s.organization_id = t.organization_id and s.key = 'network.public_ip') as public_ip
          from trunks t order by t.id`,
     ),
@@ -556,32 +606,35 @@ async function planTrunks(deps: TrunksDeps): Promise<TrunksPlan> {
   // Quem sai no arquivo não depende do conjunto: a primeira passada só diz quais linhas são emitidas.
   const { skipped: invalid, emitted } = renderTrunksConf(trunks);
   const stored = new Map(
-    rows.map((row) => [row.id, { allowed: row.inbound_allowed ?? [], fromName: row.inbound_from_name ?? [], lastError: row.last_error, host: row.host, authMode: row.auth_mode }]),
+    rows.map((row) => [row.id, { allowed: row.inbound_allowed ?? [], fromName: row.inbound_from_name ?? [], seen: row.inbound_from_name_seen ?? {}, lastError: row.last_error, host: row.host, authMode: row.auth_mode }]),
   );
   const emittedSet = new Set(emitted);
   const computed = await computeAllowed(
     deps,
     trunks.filter((trunk) => emittedSet.has(trunk.id)),
     new Map([...stored].map(([id, entry]) => [id, entry.fromName])),
+    { previousSeen: new Map([...stored].map(([id, entry]) => [id, entry.seen])), now: deps.clock.now() },
   );
-  const allowed = new Map(rows.map((row) => [row.id, computed.get(row.id) ?? { addresses: [], fromName: row.inbound_from_name ?? [] }]));
+  const allowed = new Map(rows.map((row) => [row.id, computed.get(row.id) ?? { addresses: [], fromName: row.inbound_from_name ?? [], seen: row.inbound_from_name_seen ?? {} }]));
   // O filtro sai do conjunto calculado AGORA (contratos 6 e 8), o mesmo que a tela vai mostrar.
   const { conf } = renderTrunksConf(trunks, new Map([...computed].map(([id, entry]) => [id, entry.addresses])));
   return { conf, skipped: [...unreadable, ...invalid], emitted, allowed, stored };
 }
 
 const sameList = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((value, index) => value === b[index]);
+const sameSeen = (a: Readonly<SeenAt>, b: Readonly<SeenAt>): boolean =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([address, at]) => Date.parse(b[address] ?? "") === Date.parse(at));
 
 /**
  * Grava o conjunto de cada linha, só onde mudou (`is distinct from`, como `setStatus`), com a hora, e
- * à parte o que veio do nome. Só grava se a linha ainda tem o `host` e o modo que foram lidos: se o
+ * à parte o que veio do nome, com a hora em que cada endereço dele veio. Só grava se a linha ainda tem o `host` e o modo que foram lidos: se o
  * painel trocou o destino no meio (e zerou as colunas), o conjunto do destino antigo não volta.
  * A linha com aviso do conjunto fica `warn` com o motivo; quando o motivo some, o aviso sai.
  */
 async function recordAllowed(deps: TrunksDeps, plan: TrunksPlan): Promise<void> {
   const now = deps.clock.now();
   await withSystem(deps.db, async (q) => {
-    for (const [id, { addresses, fromName }] of plan.allowed) {
+    for (const [id, { addresses, fromName, seen }] of plan.allowed) {
       const stored = plan.stored.get(id);
       if (!stored) continue;
       if (!sameList(stored.allowed, addresses)) {
@@ -590,13 +643,12 @@ async function recordAllowed(deps: TrunksDeps, plan: TrunksPlan): Promise<void> 
           [id, addresses, now, stored.host, stored.authMode],
         );
       }
-      if (!sameList(stored.fromName, fromName)) {
-        await q.exec("update trunks set inbound_from_name = $2 where id = $1 and host = $3 and auth_mode = $4 and inbound_from_name is distinct from $2", [
-          id,
-          fromName,
-          stored.host,
-          stored.authMode,
-        ]);
+      // A hora de cada endereço muda a cada resposta do nome: grava a parte do nome junto com ela.
+      if (!sameList(stored.fromName, fromName) || !sameSeen(stored.seen, seen)) {
+        await q.exec(
+          "update trunks set inbound_from_name = $2, inbound_from_name_seen = $3::jsonb where id = $1 and host = $4 and auth_mode = $5",
+          [id, fromName, JSON.stringify(seen), stored.host, stored.authMode],
+        );
       }
     }
   });

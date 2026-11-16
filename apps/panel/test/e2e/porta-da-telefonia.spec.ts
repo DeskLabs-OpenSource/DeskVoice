@@ -137,8 +137,8 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
 
     // O controle: a central reconhece a linha pelo nome que a sonda apresenta? Uma linha por registro
     // com um nome que nunca resolve fica sem filtro (contrato 8) e a tela diz isso; ali, a sonda que
-    // se apresenta como a linha passa. Com um extra noutro endereço, o filtro liga só com ele, e a
-    // mesma sonda é recusada: a recusa acima é do filtro, e não da falta de linha.
+    // se apresenta como a linha passa. Então a recusa acima é do filtro, e não da falta de linha (o
+    // log do Asterisk diz "Not match Endpoint ACL").
     const created = await page.request.post("/api/v1/trunks", {
       data: { name: `${name} registro`, host: "sip.invalid", username: "sonda", password: `sonda-${unique()}${unique()}`, authMode: "register" },
     });
@@ -149,12 +149,22 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
     const unfiltered = await until(probe, host, `trunk-${registerId}`, (answer) => answer.status === 200);
     measured("controle: linha sem filtro (nome que não resolve), apresentando-se como a linha", unfiltered);
     expect(unfiltered.status, "the telephony server does not recognize a line by the name the probe presents, so the refusals above say nothing about the filter").toBe(200);
+    // Com um extra noutro endereço, a linha continua sem filtro: os extras sozinhos não ligam o filtro
+    // de um nome que nunca resolveu, para não recusar a entrega pelo servidor do registro.
     const patched = await page.request.patch(`/api/v1/trunks/${registerId}`, { data: { matchExtra: ["198.51.100.78"] } });
     expect(patched.status()).toBe(200);
-    const filtered = await until(probe, host, `trunk-${registerId}`, (answer) => answer.answered && answer.status !== 200);
-    measured("M1 linha por registro filtrada (só o extra 198.51.100.78), apresentando-se como a linha", filtered);
-    expect(filtered.status).not.toBe(200);
-    asteriskSaid([...seen, unfiltered, filtered]);
+    // A gravação volta a linha a "não verificada"; a aplicação com o extra a devolve a "warn" (conjunto vazio), ou "fail" se a conferência já passou.
+    await expect
+      .poll(async () => ((await (await page.request.get("/api/v1/trunks")).json()) as { data: Array<{ id: string; status: string; matchExtra: string[] }> }).data.find((entry) => entry.id === registerId), {
+        timeout: 60_000,
+      })
+      .toMatchObject({ status: expect.stringMatching(/^(warn|fail)$/), matchExtra: ["198.51.100.78"] });
+    await page.reload();
+    await expect(section(page, `${name} registro`)).toContainText(line.allowedEmpty);
+    const stillOpen = await until(probe, host, `trunk-${registerId}`, (answer) => answer.status === 200);
+    measured("linha por registro com nome que não resolve e um extra (198.51.100.78): continua sem filtro, apresentando-se como a linha", stillOpen);
+    expect(stillOpen.status).toBe(200);
+    asteriskSaid([...seen, unfiltered, stillOpen]);
   } finally {
     await probe.close();
     if (trunkId) await page.request.delete(`/api/v1/trunks/${trunkId}`);

@@ -2,7 +2,10 @@
 // central disse ter visto o pedido (o `received` do Via). É a régua do filtro de entrada por linha
 // (R14): quem não é endereço de linha recebe a recusa, quem é passa.
 //
-// Uso, de qualquer máquina que alcance a central:
+// Aponte só para uma central sua. Mandar pedido SIP para servidor de outra pessoa é sondar a rede
+// dela, e isso não é o uso desta ferramenta.
+//
+// Uso, de qualquer máquina que alcance a central sua:
 //   pnpm exec tsx scripts/sonda-sip/sonda.ts <host> [--porta 5060] [--de-porta 0] [--usuario sonda] [--prazo 3000]
 // Sai com 0 quando veio resposta (qualquer código) e com 1 quando não veio nada no prazo. A linha
 // impressa é JSON: { answered, status, reason, received, rport, local }.
@@ -187,7 +190,7 @@ export class SipProbe {
 /** Lê os argumentos da linha de comando. */
 function parseArgs(argv: string[]): { host: string; port: number; fromPort: number; user: string; timeoutMs: number } {
   const [host, ...rest] = argv;
-  if (!host || host.startsWith("--")) throw new Error("usage: sonda.ts <host> [--porta 5060] [--de-porta 0] [--usuario sonda] [--prazo 3000]");
+  if (!host || host.startsWith("--")) throw new Error("usage: sonda.ts <host> [--porta 5060] [--de-porta 0] [--usuario sonda] [--prazo 3000] (point it only at a telephony server of yours)");
   const flag = (name: string, fallback: string): string => {
     const at = rest.indexOf(name);
     return at >= 0 && rest[at + 1] !== undefined ? (rest[at + 1] ?? fallback) : fallback;

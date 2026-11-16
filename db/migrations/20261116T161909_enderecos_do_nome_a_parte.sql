@@ -1,9 +1,13 @@
 -- O que o nome da operadora resolveu, guardado à parte do conjunto liberado da linha (R14, fatia 2,
 -- contrato 7). Só essa parte usa a regra do último conjunto quando o DNS falha: o `host` numérico e
 -- os `match_extra` saem sempre da linha atual, então um extra removido deixa de ser liberado mesmo
--- com o DNS fora. Quem grava é só o processo de voz; o painel só zera as três colunas quando muda o
+-- com o DNS fora. Quem grava é só o processo de voz; o painel só zera as colunas quando muda o
 -- `host` ou o modo da linha.
 alter table trunks add column inbound_from_name text[] not null default '{}';
+-- Quando cada endereço de `inbound_from_name` veio numa resposta do nome pela última vez (endereço →
+-- hora ISO 8601). A parte do nome é a união das respostas das últimas 24 horas, para que um DNS que
+-- devolve só uma parte dos endereços a cada consulta não faça o filtro oscilar.
+alter table trunks add column inbound_from_name_seen jsonb not null default '{}';
 
 -- A linha por registro com nome no `host` já tem o conjunto gravado pela fatia 1: o que veio do nome
 -- é esse conjunto menos os `match_extra` dela. O conjunto está na forma canônica, mas os extras são
@@ -44,5 +48,13 @@ update trunks t
  where t.auth_mode = 'register'
    and pg_temp.endereco_canonico(t.host) is null
    and cardinality(t.inbound_allowed) > 0;
+
+-- O que veio da fatia 1 conta como visto na hora em que foi gravado.
+update trunks
+   set inbound_from_name_seen = (
+         select coalesce(jsonb_object_agg(address, to_char(coalesce(inbound_resolved_at, now()) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')), '{}')
+           from unnest(inbound_from_name) as address
+       )
+ where cardinality(inbound_from_name) > 0;
 
 drop function pg_temp.endereco_canonico(text);

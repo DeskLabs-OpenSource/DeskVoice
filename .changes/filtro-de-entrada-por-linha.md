@@ -8,14 +8,15 @@ A central de telefonia passa a filtrar a entrada linha por linha: cada linha só
 dos endereços que a tela mostra em "Aceita ligações de", e a ligação que se apresenta como aquela
 linha vinda de qualquer outro endereço é recusada. Na linha por IP, valem o endereço do servidor e
 os endereços extras; na linha por registro, o IP do servidor ou, quando ele é um nome, os endereços
-para os quais o nome resolve (até 16), mais os endereços extras. O endereço liberado para a linha de
-uma organização nunca entra na linha de outra. Se o nome da operadora deixar de resolver, a linha
-continua aceitando os endereços que o nome tinha da última vez, mas um endereço extra que você
-removeu deixa de ser aceito na hora. Enquanto a central ainda não souber de que endereços uma linha
-por registro recebe (o nome nunca resolveu e não há endereço extra), o filtro dessa linha fica
-desligado e a tela diz isso. A porta 5060 continua publicada como antes, e nada muda no instalador
-nem no arquivo `.env`. Crédito: @webtecnica, pela medição numa instalação real que mostrou a central
-respondendo a qualquer origem.
+que o nome devolveu nas últimas 24 horas (até 16), mais os endereços extras. Juntar as respostas
+de 24 horas evita recusar uma ligação válida quando o DNS da operadora devolve só uma parte dos
+endereços a cada consulta. O endereço liberado para a linha de uma organização nunca entra na linha
+de outra. Se o nome da operadora deixar de resolver, a linha continua aceitando os endereços que o
+nome tinha, mas um endereço extra que você removeu deixa de ser aceito na hora. Enquanto o nome de
+uma linha por registro nunca tiver resolvido, o filtro dessa linha fica desligado, mesmo com
+endereços extras, e a tela diz isso. A porta 5060 continua publicada como antes, e nada muda no
+instalador nem no arquivo `.env`. Crédito: @webtecnica, pela medição numa instalação real que
+mostrou a central respondendo a qualquer origem.
 
 ## Requer atenção
 

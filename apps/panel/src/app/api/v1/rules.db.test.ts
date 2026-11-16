@@ -556,19 +556,19 @@ describe("removing and correcting lines and numbers", () => {
     const id = (created.data as { id: string }).id;
     const columns = () =>
       withOrg(panel.app, org, (q) =>
-        q.one<{ inbound_from_name: string[]; inbound_allowed: string[]; resolved: boolean }>(
-          "select inbound_from_name, inbound_allowed, inbound_resolved_at is not null as resolved from trunks where id = $1",
+        q.one<{ inbound_from_name: string[]; seen: object; inbound_allowed: string[]; resolved: boolean }>(
+          "select inbound_from_name, inbound_from_name_seen as seen, inbound_allowed, inbound_resolved_at is not null as resolved from trunks where id = $1",
           [id],
         ),
       );
     // O que o processo de voz teria gravado depois de resolver o nome.
     const resolved = async (): Promise<void> => {
       await withOrg(panel.app, org, (q) =>
-        q.exec("update trunks set inbound_from_name = '{203.0.113.7}', inbound_allowed = '{203.0.113.7,198.51.100.1}', inbound_resolved_at = now() where id = $1", [id]),
+        q.exec("update trunks set inbound_from_name = '{203.0.113.7}', inbound_from_name_seen = '{\"203.0.113.7\": \"2026-11-16T12:00:00.000Z\"}', inbound_allowed = '{203.0.113.7,198.51.100.1}', inbound_resolved_at = now() where id = $1", [id]),
       );
     };
-    const kept = { inbound_from_name: ["203.0.113.7"], inbound_allowed: ["203.0.113.7", "198.51.100.1"], resolved: true };
-    const zeroed = { inbound_from_name: [], inbound_allowed: [], resolved: false };
+    const kept = { inbound_from_name: ["203.0.113.7"], seen: { "203.0.113.7": "2026-11-16T12:00:00.000Z" }, inbound_allowed: ["203.0.113.7", "198.51.100.1"], resolved: true };
+    const zeroed = { inbound_from_name: [], seen: {}, inbound_allowed: [], resolved: false };
     await resolved();
     const patch = (body: object) => call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body });
 

@@ -520,7 +520,7 @@ describe("conjunto de endereços liberados por linha", () => {
     expect(allowedAddresses({ ...byIp, host: "198.051.100.020:5080" })).toEqual(["198.51.100.20"]);
     expect(allowedAddresses({ ...byIp, host: "54.172.60.1/30", matchExtra: ["54.244.51.0/30", "54.172.60.0/30", "2001:DB8::1"] })).toEqual(["54.172.60.0/30", "54.244.51.0/30", "2001:db8::1"]);
     const { resolve, asked } = resolver({});
-    expect(await computeAllowed({ resolve }, [byIp], new Map())).toEqual(new Map([[B, { addresses: ["198.51.100.20"], fromName: [] }]]));
+    expect(await computeAllowed({ resolve }, [byIp], new Map())).toEqual(new Map([[B, { addresses: ["198.51.100.20"], fromName: [], seen: {} }]]));
     // Linha por IP nunca pergunta ao DNS.
     expect(asked).toEqual([]);
   });
@@ -528,16 +528,18 @@ describe("conjunto de endereços liberados por linha", () => {
   it("registro com IP no host: esse IP, com a porta fora", async () => {
     const withIp: TrunkConfig = { ...register, host: "203.0.113.5:5080" };
     const { resolve, asked } = resolver({});
-    expect((await computeAllowed({ resolve }, [withIp], new Map())).get(A)).toEqual({ addresses: ["203.0.113.5"], fromName: [] });
+    expect((await computeAllowed({ resolve }, [withIp], new Map())).get(A)).toEqual({ addresses: ["203.0.113.5"], fromName: [], seen: {} });
     expect(asked).toEqual([]);
   });
 
   it("registro com nome: A, AAAA e alvos do SRV que o resolvedor devolve, em ordem fixa e canônica, mais os extras", async () => {
     const { resolve, asked } = resolver({ [SIP]: ["203.0.113.9", "2001:DB8:0:0::5", "203.0.113.7", "203.0.113.9", "lixo"] });
     const withExtra: TrunkConfig = { ...register, matchExtra: ["198.51.100.0/24"] };
-    expect((await computeAllowed({ resolve }, [withExtra], new Map())).get(A)).toEqual({
+    const now = new Date("2026-11-16T12:00:00.000Z");
+    expect((await computeAllowed({ resolve }, [withExtra], new Map(), { now })).get(A)).toEqual({
       addresses: ["2001:db8::5", "203.0.113.7", "203.0.113.9", "198.51.100.0/24"],
       fromName: ["2001:db8::5", "203.0.113.7", "203.0.113.9"],
+      seen: { "2001:db8::5": now.toISOString(), "203.0.113.7": now.toISOString(), "203.0.113.9": now.toISOString() },
     });
     // A porta não vai na pergunta.
     expect(asked).toEqual([SIP]);
@@ -680,7 +682,8 @@ describe("o filtro de entrada por linha (R14, fatia 2)", () => {
 
   it("o nome resolve: o deny e o permit entram, e a linha não fica 'warn'", async () => {
     const allowed = await computeAllowed({ resolve: async () => ["203.0.113.9", "203.0.113.7"] }, [register], new Map());
-    expect(allowed.get(A)).toEqual({ addresses: ["203.0.113.7", "203.0.113.9"], fromName: ["203.0.113.7", "203.0.113.9"] });
+    expect(allowed.get(A)).toMatchObject({ addresses: ["203.0.113.7", "203.0.113.9"], fromName: ["203.0.113.7", "203.0.113.9"] });
+    expect(allowed.get(A)?.problem).toBeUndefined();
     expect(acl(renderTrunksConf([register], addressesOf(allowed)).conf, A)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.7", "permit=203.0.113.9"]);
   });
 
@@ -704,5 +707,112 @@ describe("o filtro de entrada por linha (R14, fatia 2)", () => {
     // Com o DNS fora, o que veio guardado também respeita o teto.
     const kept = (await computeAllowed({ resolve: failing }, [register], new Map([[A, twenty]]))).get(A);
     expect(kept?.fromName).toHaveLength(MAX_FROM_NAME);
+  });
+  it("nome que nunca resolveu, com extras: sem filtro (os extras sozinhos não ligam o filtro), e a linha fica 'warn'", async () => {
+    const line: TrunkConfig = { ...register, matchExtra: ["198.51.100.1", "54.172.60.0/30"] };
+    const allowed = (await computeAllowed({ resolve: failing }, [line], new Map())).get(A);
+    expect(allowed).toMatchObject({ addresses: [], fromName: [], problem: expect.stringMatching(new RegExp(`^${EMPTY_ALLOWED}`)) });
+    expect(acl(renderTrunksConf([line], new Map([[A, allowed?.addresses ?? []]])).conf, A)).toEqual([]);
+    // O mesmo com a resposta sem endereço que sirva.
+    const useless = (await computeAllowed({ resolve: async () => ["lixo"] }, [line], new Map())).get(A);
+    expect(useless).toMatchObject({ addresses: [], fromName: [] });
+    // Quando o nome resolve, os extras entram junto.
+    const resolved = (await computeAllowed({ resolve: async () => ["203.0.113.7"] }, [line], new Map())).get(A);
+    expect(resolved?.addresses).toEqual(["203.0.113.7", "198.51.100.1", "54.172.60.0/30"]);
+  });
+
+  describe("a parte do nome é a união das respostas das últimas 24 horas", () => {
+    const t0 = new Date("2026-11-16T00:00:00.000Z");
+    const at = (hours: number): Date => new Date(t0.getTime() + hours * 3_600_000);
+    /** Aplica a linha várias vezes, cada uma com a resposta do DNS daquela hora, guardando como o processo de voz guarda. */
+    async function rounds(answers: Array<[number, string[] | Error]>): Promise<Array<{ addresses: string[]; problem?: string }>> {
+      let fromName = new Map<string, string[]>();
+      let seen = new Map<string, Record<string, string>>();
+      const out: Array<{ addresses: string[]; problem?: string }> = [];
+      for (const [hours, answer] of answers) {
+        const resolve = async (): Promise<string[]> => {
+          if (answer instanceof Error) throw answer;
+          return answer;
+        };
+        const allowed = (await computeAllowed({ resolve }, [register], fromName, { previousSeen: seen, now: at(hours) })).get(A);
+        if (!allowed) throw new Error("no line");
+        fromName = new Map([[A, allowed.fromName]]);
+        seen = new Map([[A, allowed.seen]]);
+        out.push({ addresses: allowed.addresses, ...(allowed.problem === undefined ? {} : { problem: allowed.problem }) });
+      }
+      return out;
+    }
+
+    it("DNS em rodízio (uma parte a cada consulta): o permit não oscila, junta as respostas da janela", async () => {
+      const [first, second, third] = await rounds([
+        [0, ["203.0.113.1", "203.0.113.2"]],
+        [1, ["203.0.113.3", "203.0.113.4"]],
+        [2, ["203.0.113.1", "203.0.113.2"]],
+      ]);
+      expect(first?.addresses).toEqual(["203.0.113.1", "203.0.113.2"]);
+      expect(second?.addresses).toEqual(["203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4"]);
+      expect(third?.addresses).toEqual(["203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4"]);
+      expect(acl(renderTrunksConf([register], new Map([[A, third?.addresses ?? []]])).conf, A).filter((rule) => rule.startsWith("permit="))).toHaveLength(4);
+      for (const round of [first, second, third]) expect(round?.problem).toBeUndefined();
+    });
+
+    it("o endereço que nenhuma resposta trouxe em 24 horas sai; o que voltou na janela fica", async () => {
+      const out = await rounds([
+        [0, ["203.0.113.1", "203.0.113.2"]],
+        [20, ["203.0.113.2"]],
+        [24, ["203.0.113.3"]],
+        [24.5, ["203.0.113.3"]],
+      ]);
+      // Às 24 h o .1 (visto às 0 h) ainda está na janela, no limite; meia hora depois, não.
+      expect(out[2]?.addresses).toEqual(["203.0.113.1", "203.0.113.2", "203.0.113.3"]);
+      expect(out[3]?.addresses).toEqual(["203.0.113.2", "203.0.113.3"]);
+    });
+
+    it("com o DNS fora, nada vence: a parte do nome fica como estava, mesmo depois de 24 horas", async () => {
+      const out = await rounds([
+        [0, ["203.0.113.1"]],
+        [1, ["203.0.113.2"]],
+        [48, new Error("SERVFAIL")],
+      ]);
+      expect(out[2]?.addresses).toEqual(["203.0.113.1", "203.0.113.2"]);
+      expect(out[2]?.problem).toMatch(/^The provider name could not be resolved/);
+      // E quando volta, só a janela conta: o que não volta em 24 horas sai.
+      const back = await rounds([
+        [0, ["203.0.113.1"]],
+        [1, ["203.0.113.2"]],
+        [48, new Error("SERVFAIL")],
+        [49, ["203.0.113.2"]],
+      ]);
+      expect(back[3]?.addresses).toEqual(["203.0.113.2"]);
+    });
+
+    it(`o teto vale para a união: no máximo ${MAX_FROM_NAME}, primeiro a resposta de agora, depois os vistos mais recentemente, e 'warn'`, async () => {
+      const block = (from: number): string[] => Array.from({ length: 8 }, (_, index) => `203.0.113.${from + index}`);
+      const out = await rounds([
+        [0, block(10)],
+        [1, block(20)],
+        [2, block(30)],
+      ]);
+      expect(out[1]?.addresses).toHaveLength(16);
+      expect(out[1]?.problem).toBeUndefined();
+      // Às 2 h há 24 na janela: ficam os 8 de agora e os 8 de 1 h; os de 0 h saem.
+      expect(out[2]?.addresses).toEqual([...block(20), ...block(30)].sort());
+      expect(out[2]?.problem).toMatch(new RegExp(`^${TOO_MANY_FROM_NAME}`));
+    });
+
+    it("endereço guardado sem hora conhecida não conta como visto na janela; hora no futuro conta", async () => {
+      const allowed = (
+        await computeAllowed({ resolve: async () => ["203.0.113.2"] }, [register], new Map([[A, ["203.0.113.1"]]]), { previousSeen: new Map([[A, {}]]), now: t0 })
+      ).get(A);
+      expect(allowed?.fromName).toEqual(["203.0.113.2"]);
+      // Já uma hora no futuro (o relógio voltou) conta: o filtro não encolhe por isso.
+      const future = (
+        await computeAllowed({ resolve: async () => ["203.0.113.2"] }, [register], new Map([[A, ["203.0.113.1"]]]), {
+          previousSeen: new Map([[A, { "203.0.113.1": at(5).toISOString() }]]),
+          now: t0,
+        })
+      ).get(A);
+      expect(future?.fromName).toEqual(["203.0.113.1", "203.0.113.2"]);
+    });
   });
 });

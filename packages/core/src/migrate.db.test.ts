@@ -268,6 +268,15 @@ describe("runMigrations", () => {
     expect(await fromName(byIp)).toEqual([]);
     expect(await fromName(neverResolved)).toEqual([]);
     expect(await fromName(brokenExtra)).toEqual(["203.0.113.70"]);
+    // Cada endereço do nome conta como visto na hora em que a fatia 1 gravou o conjunto (a janela de
+    // 24 horas começa daí); a linha sem nada do nome fica sem hora nenhuma.
+    const seen = async (id: string): Promise<{ seen: Record<string, string>; at: Date } | undefined> =>
+      (await db.pool.query<{ seen: Record<string, string>; at: Date }>("select inbound_from_name_seen as seen, inbound_resolved_at as at from trunks where id = $1", [id])).rows[0];
+    const namedSeen = await seen(named);
+    expect(Object.keys(namedSeen?.seen ?? {}).sort()).toEqual(["203.0.113.7", "203.0.113.9"]);
+    for (const at of Object.values(namedSeen?.seen ?? {})) expect(Date.parse(at)).toBe(namedSeen?.at.getTime());
+    expect((await seen(neverResolved))?.seen).toEqual({});
+    expect((await seen(byIp))?.seen).toEqual({});
     // A função de apoio era da sessão da migration: não fica no banco.
     expect((await db.pool.query("select 1 from pg_proc where proname = 'endereco_canonico'")).rowCount).toBe(0);
     // A linha nova nasce com a lista vazia.
