@@ -17,20 +17,17 @@ Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
 ### Corrigido
 
-- **Quando o provedor de voz recusa a sessão, o aviso no painel traz o motivo que ele deu** Se o Gemini Live ou o OpenAI Realtime fechavam a conexão antes de confirmar a sessão, o aviso no
-  painel sobre a ligação recusada dizia só que a conexão fechou, e no Gemini ainda sugeria "chave ou
-  modelo inválido?", mesmo quando o motivo era outro. Agora o aviso leva o código e o motivo que o
-  provedor mandou, como "Your prepayment credits are depleted" quando o crédito pré-pago do Google
-  acabou. O cartão da ligação na linha do tempo continua mostrando só o tipo da recusa. Nada a fazer
-  em instalações existentes. Crédito: @melgarafael.
-- **A ligação recusada pelo provedor de voz não manda mais cadastrar uma chave que já existe** Quando o provedor de voz recusava a sessão com a chave cadastrada, por exemplo porque o crédito
+- **A ligação recusada pelo provedor de voz diz o motivo dele e não manda mais cadastrar uma chave que já existe** Quando o provedor de voz recusava a sessão com a chave cadastrada, por exemplo porque o crédito
   pré-pago acabou ou porque recusou a chave, ou quando a VPS não alcançava o provedor pela rede, a
   ligação era registrada como "motor de voz sem chave cadastrada", e o aviso no painel mandava
-  cadastrar a chave. Agora esses casos têm motivo próprio na linha do tempo, "o provedor do motor de
-  voz recusou a sessão ou não foi alcançado", e o aviso traz o motivo que o provedor ou a rede deu e
-  manda conferir o crédito e os limites na conta do provedor, a chave e a rede da VPS. A
-  ligação sem chave cadastrada continua com o aviso de antes. Nada a fazer em instalações
-  existentes. Crédito: @melgarafael.
+  cadastrar a chave sem dizer o que o provedor respondeu (no Gemini, ainda sugeria "chave ou modelo
+  inválido?"). Agora esses casos têm motivo próprio na linha do tempo, "o provedor do motor de voz
+  recusou a sessão ou não foi alcançado", e o aviso no painel traz o código e o motivo que o provedor
+  ou a rede deu, como "Your prepayment credits are depleted" quando o crédito pré-pago do Google
+  acabou, e manda conferir o crédito e os limites na conta do provedor, a chave e a rede da VPS. O
+  mesmo motivo do provedor passa a aparecer no aviso quando o OpenAI Realtime fecha a conexão antes de
+  confirmar a sessão. A ligação sem chave cadastrada continua com o aviso de antes. Nada a fazer em
+  instalações existentes. Crédito: @melgarafael.
 
 ## [0.19.0] - 2026-11-16
 
