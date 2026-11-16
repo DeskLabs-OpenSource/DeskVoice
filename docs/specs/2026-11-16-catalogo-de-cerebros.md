@@ -119,7 +119,14 @@ Regras que valem para todo arquivo de cérebro:
 - **O motivo da falha é código fechado, nunca o texto do provedor.** O texto de erro de alguns
   provedores repete parte da chave. A tela traduz o código (seção 3.6). Status HTTP vai junto.
 - **Prazo:** 10 s para listar; o pedido usa o de quem chama (30 s na análise, como hoje).
-- **Paginação:** quem pagina (Anthropic, Gemini) segue até o fim, com teto de 20 páginas.
+- **Paginação:** quem pagina (Anthropic, Gemini e, pela documentação de 16/11, OpenRouter com
+  `limit`/`offset`) segue até o fim, com teto de 20 páginas; para também na página que não traz id
+  novo.
+- **Status:** 401 é `rejected`. O 403 e o 404 no **pedido** são `unexpected_response` (no
+  OpenRouter o 403 é moderação, não chave). Na prova da chave do OpenRouter (`/key`), 403 continua
+  `rejected`.
+- **Preço fora da forma** (negativo, texto que não é número) deixa o modelo **sem preço**, nunca 0.
+  O 0 só vale quando o provedor publica 0 (os `:free` do OpenRouter).
 - `today` vem do `Clock` de quem chama (convenção 10): é a data do preço lido da API.
 
 O cálculo de custo reusa `estimateCostMicrocents` de `pricing.ts`: `BrainPrice` cabe em
@@ -147,6 +154,11 @@ mudou ganha a forma documentada, e a mudança é dita no PR.
 segue (`OUTCOME_PRICING_BY_MODEL`): só entra modelo com preço conferido na página do provedor, com
 `source` e `checkedOn`. Modelo que a API lista e a tabela não tem aparece **sem preço**. A tabela é
 dado de preço, não a lista de modelos: ela nunca faz um modelo aparecer nem sumir.
+
+Modelo cujo preço não cabe no `EnginePricing` também fica **sem preço**: escrita em cache cobrada à
+parte (o consumo não a separa) ou preço que muda por faixa de tamanho do pedido. Na fatia 1
+(conferido em 16/11) isso deixou sem preço os modelos mais novos da OpenAI: as famílias `gpt-6*` e
+`gpt-5.6*`, e `gpt-5.5` e `gpt-5.4`.
 
 ### 3.3 Credenciais (fatia 3)
 
@@ -329,7 +341,10 @@ A, porque deixa usar o modelo novo que o dono pediu e nunca esconde que o custo 
 ### Se ninguém responder em 3 dias, vale: A (o padrão que a tarefa já trazia)
 
 ### Não medido
-Quantos modelos de cada provedor ficam sem preço com o pedido 2 em B. Não conferi.
+Quantos modelos de cada provedor ficam sem preço com o pedido 2 em B. Medido só na OpenAI (fatia 1,
+16/11): a tabela tem 15 modelos com preço, e os mais novos (`gpt-6*`, `gpt-5.6*`, `gpt-5.5`,
+`gpt-5.4`) ficam sem preço. Com C, nenhum modelo atual da OpenAI poderia ler a ligação. Anthropic,
+Gemini e DeepSeek não conferi.
 
 **Pedido 2.** Dono: Arquiteto.
 
