@@ -6,7 +6,7 @@ import { openTestDbs } from "../../../packages/core/test/helpers";
 import { putSetting } from "../../../packages/tools/test/helpers";
 import jev from "../../../packages/voice-engine/src/deciders/jev";
 import { startCallSession } from "./call-session";
-import { createAgent, createCall, createOrganization, eventsOf, kindsOf, manualEngine, manualTransport, secretKey, sessionHarness, setHandoffTargets, type AgentOptions, type ManualEngine, type SessionHarness } from "./testing/db";
+import { callOf, createAgent, createCall, createOrganization, eventsOf, kindsOf, manualEngine, manualTransport, secretKey, sessionHarness, setHandoffTargets, type AgentOptions, type ManualEngine, type SessionHarness } from "./testing/db";
 import { waitFor } from "./testing/helpers";
 
 const { app, owner } = openTestDbs();
@@ -34,6 +34,23 @@ function scripted(respond: (input: DecideInput) => SimulatedDecision = (input) =
     id: "test-model",
   };
   return { model, inputs };
+}
+
+/**
+ * Um modelo de decisão de teste com preço: cada pedido custa `microcents(input)` micro-centavos,
+ * alto o bastante para mudar o centavo da ligação.
+ */
+function priced(microcents: (input: DecideInput) => number, respond?: (input: DecideInput) => SimulatedDecision) {
+  const base = scripted(respond);
+  const model: DecisionModel = {
+    ...base.model,
+    decide: async (apiKey, input, options) => {
+      const result = await base.model.decide(apiKey, input, options);
+      const cost = microcents(input);
+      return { ...result, usage: { inputTokens: cost / 10_000, outputTokens: 1 }, costMicrocents: cost };
+    },
+  };
+  return { model, inputs: base.inputs };
 }
 
 /** O texto de quem ligou que está no `state` do pedido. */
@@ -203,6 +220,64 @@ describe("o filtro ligado: marca e sugere", { timeout: 120_000 }, () => {
   });
 });
 
+describe("o custo do filtro", { timeout: 120_000 }, () => {
+  it("entra no total da ligação: calls.cost_cents, call_ended e o desfecho somam a voz e o filtro", async () => {
+    // 1,6 centavo por pedido: a voz (6 s) dá 10 centavos, e o total arredondado vira 12.
+    const model = priced(() => 1_600_000);
+    const made = await scene("filter-cost-total", { models: [model.model], setting: "test-model" });
+    const session = await converse(made);
+    await reads(made.callId, 1);
+    made.manual.emit("usage", { seconds: 6 });
+    await waitFor(async () => (await ledgerOf(made.callId)).some((row) => row.engine === "manual"), "the voice cost");
+    made.transport.callerHangup();
+    const outcome = await session.done;
+
+    expect(outcome.costCents).toBe(12);
+    expect((await callOf(app, made.callId)).cost_cents).toBe(12);
+    expect(await payloadsOf(made.callId, "call_ended")).toEqual([expect.objectContaining({ costCents: 12 })]);
+    expect((await ledgerOf(made.callId)).find((row) => row.engine === "test-model")).toEqual({ engine: "test-model", agent_id: made.agentId, input_tokens: 160, cost_cents: 2, cost_microcents: "1600000" });
+  });
+
+  it("conta no teto do agente: o filtro sozinho alcança o teto e a despedida começa", async () => {
+    // Sem nenhum uso de voz: só o filtro (2 centavos) pode alcançar o teto de 2 centavos.
+    const model = priced(() => 2_000_000);
+    const made = await scene("filter-cost-ceiling", { models: [model.model], setting: "test-model", agent: { costCeilingCents: 2 } });
+    const session = await converse(made);
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("cost_ceiling_reached"), "the ceiling");
+
+    expect(await payloadsOf(made.callId, "cost_ceiling_reached")).toEqual([{ costCents: 2, ceilingCents: 2 }]);
+    expect(made.manual.said).toEqual([expect.stringContaining("encerrar esta ligação")]);
+    made.transport.callerHangup();
+    expect((await session.done).costCents).toBe(2);
+  });
+});
+
+describe("a chamada simulada", { timeout: 120_000 }, () => {
+  it("nunca pergunta ao modelo real: com o Jev escolhido, a chave gravada e o Jev instalado, quem responde é o simulado", async () => {
+    const sent: unknown[] = [];
+    const fetch = (async (_url: string, init: RequestInit) => {
+      sent.push(init.body);
+      return new Response("{}", { status: 500 });
+    }) as unknown as typeof globalThis.fetch;
+    const realJev: DecisionModel = { ...jev, decide: (apiKey, input, options) => jev.decide(apiKey, input, { ...options, fetch }) };
+    const made = await scene("filter-simulated-call", { models: [realJev, createSimulatedDecider()], setting: "jev" });
+    await putSetting(app, made.organizationId, decisionModelKeySetting("jev"), encryptSecret(JEV_KEY, secretKey));
+    // A chamada simulada é a que troca o motor (`overrides.engineId`), como a do painel.
+    const { organizationId, callId, agentId, transport } = made;
+    const session = startCallSession(made.harness.deps, { organizationId, callId, agentId, transport, overrides: { engineId: made.manual.engine.id } });
+    await answered(callId);
+    made.manual.emit("transcript", { speaker: "agent", text: "Em que cidade você mora?" });
+    made.manual.emit("transcript", { speaker: "user", text: "moro em meu gasto" });
+    await reads(callId, 1);
+    transport.callerHangup();
+    await session.done;
+
+    expect(sent).toEqual([]);
+    expect(await readsOf(callId)).toEqual([expect.objectContaining({ model: "simulated", onTime: true })]);
+    expect((await ledgerOf(callId)).map((row) => row.engine)).not.toContain("jev");
+  });
+});
+
 describe("o Jev na chamada", { timeout: 120_000 }, () => {
   /** O Jev de verdade, com o `fetch` do teste no lugar da rede. */
   function jevWith(reply: { status: number; body?: unknown } | "hang" | "network") {
@@ -317,6 +392,46 @@ describe("a passagem entre agentes", { timeout: 120_000 }, () => {
     expect(await payloadsOf(callId, "transcript_user")).toEqual([
       { text: "moro em meu gasto", read: { suggestion: { term: "Melgaço", confidence: 0.95 } } },
       { text: "pode ser em melgasso mesmo", read: { suggestion: { term: "Melgaço", confidence: 0.95 } } },
+    ]);
+  });
+
+  it("a linha do extrato de cada pedido leva o agent_id do trecho em que a fala aconteceu, e não o do agente atual", async () => {
+    // A primeira fala demora (500 ms) e custa 1 centavo; a segunda custa 2. A primeira resposta
+    // chega quando o agente atual já é o de destino.
+    const early = "moro em meu gasto";
+    const model = priced(
+      (input) => (callerTextOf(input) === early ? 1_000_000 : 2_000_000),
+      (input) => ({ answers: answers(0, 1), ...(callerTextOf(input) === early && { delayMs: 500 }) }),
+    );
+    const first = manualEngine({ id: "first", keyless: true });
+    const second = manualEngine({ id: "second", keyless: true });
+    const organizationId = await createOrganization(app, "filter-handoff-ledger");
+    const reception = await createAgent(app, organizationId, { name: "Recepção", engine: "first", vocabulary: ["Melgaço"] });
+    const scheduling = await createAgent(app, organizationId, { name: "Agendamento", engine: "second", vocabulary: ["Melgaço"] });
+    await setHandoffTargets(app, reception, [scheduling]);
+    await harness?.approvals.close();
+    harness = await sessionHarness(app, [first.engine, second.engine]);
+    harness.deps.decisionModels = new Map([[model.model.id, model.model]]);
+    await putSetting(app, organizationId, DECISION_MODEL_SETTING, "test-model", false);
+    const callId = await createCall(app, organizationId, reception, harness.clock.now());
+    const transport = manualTransport();
+    const session = startCallSession(harness.deps, { organizationId, callId, agentId: reception, transport });
+    await answered(callId);
+
+    first.emit("transcript", { speaker: "user", text: early });
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    second.emit("transcript", { speaker: "user", text: "pode ser em melgasso mesmo" });
+    await reads(callId, 1);
+    harness.timers.fire(500);
+    await reads(callId, 2);
+    transport.callerHangup();
+    await session.done;
+
+    const filterRows = (await ledgerOf(callId)).filter((row) => row.engine === "test-model").sort((a, b) => a.cost_cents - b.cost_cents);
+    expect(filterRows.map((row) => ({ agent_id: row.agent_id, cost_microcents: row.cost_microcents }))).toEqual([
+      { agent_id: reception, cost_microcents: "1000000" },
+      { agent_id: scheduling, cost_microcents: "2000000" },
     ]);
   });
 });
