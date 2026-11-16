@@ -318,3 +318,28 @@ O que não prova:
 - **O painel e o navegador.** O convite foi pedido direto à API interna do processo de voz, sem a sessão do painel nem a rota `/api/v1/calls/web`, e nenhum navegador abriu o microfone.
 - **Fala humana.** As falas eram sintéticas, ditas sem ruído.
 - **O conserto do #333 numa ligação real.** A prova foi antes dele.
+
+## A mesma passagem refeita com a 0.19.2 (2026-11-16)
+
+Às 15:20 UTC, depois de a VPS da parceira ir para a 0.19.2, que traz o conserto do #333, a prova da
+seção anterior foi refeita. Valeram o mesmo caminho (chamada pelo navegador por script, com o
+convite pedido direto à API interna do processo de voz), os mesmos dois agentes, as mesmas três
+falas sintéticas e o mesmo motor. Saídas em
+[`registros/2026-11-16-passagem-0.19.2/`](registros/2026-11-16-passagem-0.19.2/), com os ids trocados por rótulos. A versão é a das imagens em execução: `panel`, `voice` e `routines` na `0.19.2`. O contêiner de voz subiu às 15:19:22 UTC, antes de a ligação começar, às 15:20:00 ([`versao.txt`](registros/2026-11-16-passagem-0.19.2/versao.txt)).
+
+| O que | O que se observou |
+|---|---|
+| Passagem | Na **primeira** tentativa: um `transfer_to_agent` só, com `ok: true`, seguido de `agent_handoff` |
+| Depois da passagem | O financeiro respondeu o valor pedido e encerrou com `end_call`. Pela transcrição, ele se despediu duas vezes: uma frase própria antes da ferramenta e a despedida que a ferramenta mandou dizer |
+| Duração e desfecho | 59 s, `completed`, motivo `end_call` |
+| Custo | 9 centavos de dólar no `call_ended`. O extrato tem 6 linhas, nenhuma sem agente: 2 da recepção, que somam 4, e 4 do financeiro, que somam 5 |
+| Rotinas e gravação | `summarize_call` e `review_call` terminaram com `done`. `recording_saved` com 1,9 MB |
+
+Duas notas valem para as duas provas. A duração vem de `ended_at - started_at` na linha de `calls`.
+O `"seconds": 0` do `call_ended` é o uso medido pelo motor, e o OpenAI Realtime informa tokens, não
+segundos. O valor que o financeiro disse estava nas instruções escritas para ele, e não é invenção do modelo ([`instrucoes.txt`](registros/2026-11-16-passagem-0.19.2/instrucoes.txt), as mesmas nas duas provas).
+
+O que não prova, além do que a seção anterior já lista:
+
+- **O conserto do #333 em ação.** Os argumentos do `transfer_to_agent` não são gravados, porque são texto pessoal. Por isso não se sabe se, desta vez, o modelo escreveu o nome com o rótulo, que é o caso consertado, ou só o nome. O conserto está provado em `agent-handoff.db.test.ts`. Uma ligação mostra só que a passagem saiu de primeira.
+- **Que a passagem de primeira se repete.** Foi uma ligação em cada versão.
