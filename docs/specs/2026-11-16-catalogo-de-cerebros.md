@@ -291,6 +291,22 @@ verificado pelo **Verificador 2**. Uma de cada vez, nesta ordem.
 | **4a. A análise no cérebro escolhido (rotina)** | migration da 3.5, `calls.analysis_brain` com zod e a validação ao salvar (modelo na lista guardada; sem preço só com `acceptUnmeasured`), o caminho na rotina, os três motivos novos com frase na linha do tempo, `model`/`cost_measured` no extrato, testes de banco (os casos 2 a 6 da 3.5, os três de `usage` sem `inputTokens`, sem fallback para o motor, remover a escolha volta ao de antes) | `db/migrations/<novo>`, `apps/routines/src/routines/classify_call_outcome.ts` e testes, `apps/panel/src/server/settings.ts` (só a chave nova), `apps/panel/src/i18n/*/timeline.ts`, `.changes/` |
 | **4b. A escolha e o custo na tela** | "Quem lê a ligação" no painel da análise, com o aviso da 3.6 antes e depois de salvar; "custo não medido" em `/costs` e no detalhe da chamada; a confirmação de remover a chave quando o cérebro é o escolhido; as lacunas 1, 2, 4 e 5 do parecer do #350 (limite por cérebro com teste; refresh falho devolve a lista guardada com `stale`; filtro zod item a item na escrita; usar ou remover `modelsTitle`) | `apps/panel/src/app/(app)/settings/page.tsx` (só o painel da análise), `apps/panel/src/server/costs.ts`, `apps/panel/src/app/(app)/costs/**`, `apps/panel/src/app/(app)/calls/[id]/**` (só a marca de custo), `apps/panel/src/server/brains.ts`, `apps/panel/src/app/(app)/settings/brains/**`, i18n, `.changes/` |
 
+**Fatia 4b, ajuste de 16/11 (Arquiteto, ao abrir a fatia):**
+
+- **Parte do ramo do #354** (`feat/cerebro-analise-rotina`, `7fcea3a`), porque a tela lê
+  `calls.analysis_brain` e `usage_ledger.cost_measured`, que só existem nele. O PR aponta para
+  `main` e fica em rascunho até o #354 ser mesclado; depois disso, o ramo recebe a `main`. Se o #354
+  mudar de head antes do merge, a 4b recebe o ramo novo.
+- **Entram também as lacunas 1 e 2 do parecer do Verificador 2 no #354:** um teste em que
+  `calls.analysis_brain` fora da forma (gravado à mão) dá `brain_unavailable` e nunca cai no motor;
+  e o teste "remover a escolha volta ao `classify_target`" passa a gravar a escolha, ler, remover e
+  ler de novo (ou troca de nome para o que mede). Arquivo a mais:
+  `apps/routines/src/routines/classify_call_outcome.db.test.ts` (só testes).
+- **Não toca** `settings/layout.tsx` nem `apps/voice`: a fatia 7 da R12 (trilha A) abre
+  `/settings/speech-filter` ao mesmo tempo. Choque possível em `server/settings.ts` e em
+  `calls/[id]/**`; são acréscimos, e quem chegar depois faz o merge da `main`.
+- **Não medido pelo Arquiteto:** não li o diff do #354 inteiro.
+
 Choque possível com a trilha A: `apps/panel/src/i18n/*/timeline.ts` (frases de motivo) e
 `packages/voice-engine/src/index.ts`. O vocabulário do motivo da análise mora na própria rotina
 (`AnalysisNotDoneReason`), e não em `packages/core/src/types.ts`; a fatia 4a não precisa tocar ali. As duas são acréscimos de linha; quem chegar depois faz o
