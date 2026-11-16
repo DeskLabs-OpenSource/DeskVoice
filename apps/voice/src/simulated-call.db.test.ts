@@ -121,7 +121,7 @@ async function incomingCall(label: string, agent: AgentOptions, settings: Record
 const pendingApproval = (callId: string) => waitFor(async () => (await approvalsOf(app, callId)).find((approval) => approval.status === "pending"), "the pending approval in the database");
 const saidWaitLine = (callId: string) =>
   waitFor(async () => (await eventsOf(app, callId)).some((event) => event.kind === "transcript_agent" && event.payload.text === WAIT_LINE), "the agent to say it is checking");
-const ended = (callId: string) => waitFor(async () => (await kindsOf(app, callId)).includes("task_queued"), "the call to end");
+const ended = (callId: string) => waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "task_queued").length === 2, "the call to end");
 
 describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
   it("atende, espera a aprovação decidida no painel, transfere e deixa o resumo na fila", async () => {
@@ -164,6 +164,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
       "tool_result",
       "call_ended",
       "task_queued",
+      "task_queued",
     ]);
     const payloads = events.map((event) => event.payload);
     expect(payloads[0]).toEqual({ direction: "inbound", from: "+5531999998888", to: "+553133334444", agentId: expect.any(String) });
@@ -185,6 +186,10 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     const tasks = (await tasksOf(app, organizationId)).filter((task) => task.kind === "summarize_call");
     expect(tasks).toMatchObject([{ kind: "summarize_call", payload: {}, status: "queued", call_id: callId }]);
     expect(payloads[16]).toEqual({ taskId: tasks[0]?.id, kind: "summarize_call" });
+    // O supervisor de regras fixas vai para a fila junto com o resumo, no fim de toda ligação.
+    const reviews = (await tasksOf(app, organizationId)).filter((task) => task.kind === "review_call");
+    expect(reviews).toMatchObject([{ kind: "review_call", payload: {}, status: "queued", call_id: callId }]);
+    expect(payloads[17]).toEqual({ taskId: reviews[0]?.id, kind: "review_call" });
 
     // A fala do agente chegou ao Asterisk, e a transferência fecha o AudioSocket sem derrubar o canal.
     await waitFor(() => asterisk.closed, "the AudioSocket to close");
@@ -265,7 +270,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     const events = await eventsOf(app, callId);
     expect(events.map((event) => event.kind)).toEqual([
       "call_started", "call_answered", "recording_notice", "transcript_agent", "tool_called", "approval_requested", "transcript_agent",
-      "approval_decided", "tool_result", "transcript_agent", "tool_called", "tool_result", "call_ended", "task_queued",
+      "approval_decided", "tool_result", "transcript_agent", "tool_called", "tool_result", "call_ended", "task_queued", "task_queued",
     ]);
     // Sem texto do operador, o aviso é o padrão, e vem na frente da saudação.
     expect([events[2]?.payload, events[3]?.payload]).toEqual([{ text: DEFAULT_RECORDING_NOTICE }, { text: `${DEFAULT_RECORDING_NOTICE} ${GREETING}` }]);
@@ -312,7 +317,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
 
     const events = await eventsOf(app, callId);
     expect(events.map((event) => event.kind)).toEqual([
-      "call_started", "call_answered", "recording_notice", "transcript_agent", "tool_called", "approval_requested", "transcript_agent", "tool_result", "call_ended", "task_queued",
+      "call_started", "call_answered", "recording_notice", "transcript_agent", "tool_called", "approval_requested", "transcript_agent", "tool_result", "call_ended", "task_queued", "task_queued",
     ]);
     // A ferramenta em espera foi solta, com o motivo para o operador, antes do fim da chamada.
     expect(events[7]?.payload).toMatchObject({ name: "request_approval", ok: false, error: "The call ended before the tool finished" });
@@ -324,7 +329,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     // O canal morre do lado do Asterisk; nada mais é gravado por causa disso.
     ari.emit({ type: "ChannelDestroyed", channel: { id: channelId }, cause_txt: "Normal Clearing" });
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(await kindsOf(app, callId)).toHaveLength(10);
+    expect(await kindsOf(app, callId)).toHaveLength(11);
   });
 
   it("fecha a conexão de áudio de uma chamada que ninguém espera", async () => {

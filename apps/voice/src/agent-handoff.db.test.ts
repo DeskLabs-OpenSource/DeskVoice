@@ -110,6 +110,7 @@ describe("a passagem com o motor simulado", { timeout: 120_000 }, () => {
       "transcript_agent",
       "call_ended",
       "task_queued",
+      "task_queued",
     ]);
     const handoff = events[6]?.payload;
     expect(handoff).toEqual({
