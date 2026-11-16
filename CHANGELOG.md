@@ -3,6 +3,38 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.16.0] - 2026-11-16
+
+### Adicionado
+
+- **Bancada de voz prepara o antes e depois do ambiente barulhento contra o OpenAI e o Gemini** Uma medida manual nova na bancada de voz (`scripts/bancada-de-voz/ambiente-barulhento.ts`) toca
+  para cada motor de hoje, no ritmo de uma ligação, frases sintéticas no meio de obra, música e
+  conversa, nos modos "normal" e "barulhento", com e sem a guarda contra o silêncio. Ela mede o tempo
+  até o agente responder, conta as interrupções falsas pelo evento do motor e confere que a guarda
+  não fala por cima de uma frase longa. Exige um teto de gasto e, sem a chave do motor, não gera áudio
+  nem abre sessão. Ainda não rodou contra o provedor: espera a chave. Nada muda numa instalação: não
+  roda no CI e não entra na imagem. Crédito: @melgarafael.
+- **Bancada de voz mede a redução de ruído por quadro, debaixo de ruído e em fluxo** A medida manual da redução de ruído na bancada de voz (`scripts/bancada-de-voz/`) passa a medir a
+  fala baixa quadro a quadro (o quarto mais fraco dos quadros de 20 ms com fala, acima de 1 dB de
+  perda média reprova), a mesma fala baixa debaixo de obra, música e conversa de fundo (só a parte da saída que é voz, sem o ruído que sobra), e a CPU com o
+  áudio entregue em pedaços de 20 ms, um de cada vez, como a ponte manda. Só RNNoise e DeepFilterNet;
+  o DeepFilterNet em fluxo usa o plugin de tempo real que o próprio projeto publica, baixado à parte.
+  Nenhum deles entra no produto: não roda no CI, não entra na imagem e não muda nada numa instalação.
+  Crédito: @melgarafael.
+- **Apagar uma nota do agente e "Esquecer este número"** Cada nota do agente no bloco "Este número", na tela da chamada, ganha o botão "Apagar", que pede
+  confirmação antes de apagar. Em Configurações → Privacidade, o dono ou administrador ganha
+  "Esquecer este número": informa o telefone, e a confirmação nomeia o número e diz o que fica. Saem
+  as notas do agente sobre esse número e as pendências fechadas dele (feitas ou canceladas). Ficam as
+  ligações e as falas, que seguem o prazo de guarda das conversas, e as pendências abertas, que são
+  trabalho em curso. Também fica o texto que o agente mandou para `create_task` antes da 0.7.0, nos
+  argumentos gravados na linha do tempo daquelas chamadas e nos avisos antigos do sino, e os avisos
+  de transferência e de recado da 0.14.0 em diante, que copiam os títulos das pendências abertas na
+  hora da ligação: esses avisos são da ligação, e não da pendência. Para apagar o conteúdo das
+  ligações, o caminho continua sendo o apagamento a pedido de quem ligou. O registro da página de
+  Privacidade mostra quem apagou uma nota e quem esqueceu o número terminado em quais quatro dígitos,
+  com as contagens e nunca o texto nem o número inteiro. Nada muda sem clique e confirmação.
+  Crédito: @melgarafael.
+
 ## [0.15.0] - 2026-11-15
 
 ### Adicionado
