@@ -34,6 +34,6 @@ export const GET = handle({}, async ({ q, params }) => {
     analysisUnreadable: parsed !== null && !parsed.success,
     costByAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents) })),
     // Alguma linha do extrato sem custo medido: o valor da ligação não é o gasto inteiro.
-    costUnmeasured: await callCostUnmeasured(q, params.id),
+    costUnmeasured: await callCostUnmeasured(q, params.id ?? ""),
   };
 });
