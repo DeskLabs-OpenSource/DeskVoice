@@ -68,7 +68,9 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
   mesmo endereço do registro seguem sem ação. A linha por registro cuja operadora entrega por outro
   endereço **para de receber** até alguém incluir o endereço na tela. Por isso o fragmento da fatia
   2 é `operator_action`, com o `## Requer atenção` dizendo onde ver e o que incluir. Ninguém edita
-  arquivo, e ninguém precisa de SSH.
+  arquivo, e ninguém precisa de SSH. **Isso fere a restrição do dono** ("quem já tem operadora não
+  perde a linha"), como mostrou a sessão revisora no #343. A saída está no contrato 11, pendente
+  da escolha do dono.
 
 ## 3. Contrato
 
@@ -107,7 +109,10 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
 8. **O filtro não vale com o conjunto vazio de uma linha ativa** (requisito da sessão revisora).
    Linha emitida cujo conjunto, nesta aplicação, é vazio (linha por registro com nome que nunca
    resolveu e sem `inbound_from_name`) sai **sem** `deny` e sem `permit` no endpoint, como é
-   hoje, e fica `warn` com o motivo na tela ("a central ainda não sabe de que endereços esta linha
+   hoje, e fica `warn`. **Também sem filtro** (ajuste B da sessão revisora, no `693ae02`): a linha
+   por registro com nome e sem nada vindo do nome, **mesmo com extras**. Os extras sozinhos não
+   dizem por onde a operadora entrega, e filtrar só com eles cortaria a entrega pelo servidor do
+   registro. A linha fica `warn` com o motivo na tela ("a central ainda não sabe de que endereços esta linha
    recebe; o filtro dela fica desligado até o nome resolver"). O `deny` só é escrito com o
    conjunto calculado na mesma aplicação (`plan.allowed`), nunca com a coluna lida sem cálculo.
    Na atualização, o arquivo gerado antigo não tem ACL e continua valendo até a aplicação da
@@ -120,6 +125,50 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
    linha fica `warn` ("o nome resolve mais de 16 endereços; inclua em Endereços extras os que a
    operadora usa para entregar"). Teto da linha: 33 (`host`, 16 extras, 16 do nome). O processo
    de voz confere o teto antes de escrever; teste com um nome que resolve 20 endereços.
+10. **A parte do nome é a união de 24 h** (ajuste A da sessão revisora, no `693ae02`). Um DNS de
+   rodízio devolve um pedaço do conjunto a cada consulta; com só a última resposta, o `permit`
+   oscilaria e recusaria ligação válida. A parte do nome é a união dos endereços que o nome
+   resolveu nas últimas 24 h, com a hora de cada um em `inbound_from_name_seen`. Dentro do teto
+   de 16: primeiro os da resposta de agora, depois os vistos mais recentemente. Um endereço só sai
+   quando passa 24 h sem aparecer; com o DNS fora, nada vence. O painel zera
+   `inbound_from_name_seen` junto com as outras colunas (contrato 7). Limite conhecido: depois de
+   uma queda do DNS de mais de 24 h, a primeira resposta boa vence tudo o que é antigo de uma vez,
+   e num DNS de rodízio o `permit` encolhe para esse pedaço até as próximas respostas (observação
+   do Verificador; aceito, porque o caso é raro e a tela mostra o conjunto).
+11. **Quem já tem operadora não perde a linha na atualização.** **Pendente da escolha do dono**
+   (pedido de decisão da R14, opção 1 recomendada). A sessão revisora mostrou que, com o filtro
+   ligando sozinho na atualização, a linha por registro cuja operadora entrega por outro servidor
+   é cortada, e o `operator_action` avisa do corte mas não o evita. **Se a escolha for a opção 1,
+   o contrato é este** (não implementar antes da resposta):
+   - Coluna nova `trunks.inbound_filter boolean not null default true`, na mesma migration de
+     `inbound_from_name` (ainda não mesclada). A migration grava `false` nas linhas por registro
+     que já existem; as linhas por IP ficam `true`. A linha por registro criada depois da
+     atualização nasce `true` pelo padrão da coluna, porque quem cadastra vê a lista na tela.
+   - O endpoint só ganha `deny`/`permit` com `inbound_filter = true` **e** o conjunto do contrato
+     8 permitindo. Com `false`, sai como hoje, sem `deny` e sem `permit`.
+   - A linha por IP liga na hora e não tem botão: ela já só era reconhecida pelo `host` e pelos
+     extras, que são o mesmo conjunto do `permit`, e não perde nada.
+   - A linha por registro com `inbound_filter = false` mostra, no bloco "Aceita ligações de", o
+     aviso "Filtro desligado nesta linha: a central aceita a ligação dela de qualquer endereço.
+     Confira os endereços acima e ligue o filtro", e o botão **Ligar o filtro**. Com o filtro
+     ligado, o bloco tem **Desligar o filtro**, a saída de quem descobre que a operadora entrega
+     por um endereço que ninguém conhecia. O aviso não muda o estado da linha para `warn`, porque
+     a linha funciona; o `warn` continua só para os contratos 8 e 9. Textos nos 3 idiomas.
+   - O botão é um `PATCH` da linha que só grava `inbound_filter`, só para linha por registro, só
+     da organização de quem pede (a mesma checagem das outras gravações da linha). Trocar o `host`
+     ou o modo não mexe em `inbound_filter`.
+   - O fragmento diz que nenhuma linha que já existe é cortada: as por IP passam a filtrar sem
+     perder nada, e as por registro ficam sem filtro até alguém ligar na tela.
+   - Testes: a migration desliga a linha por registro antiga e mantém a por IP ligada; a linha por
+     registro criada depois nasce ligada; com o filtro desligado e o conjunto cheio, o endpoint
+     sai sem `deny`; o botão de uma organização não muda a linha de outra; o botão recusa a linha
+     por IP; o e2e mede `200` na linha por registro desligada e `401` (`Not match Endpoint ACL`)
+     depois de ligar.
+   - **Medida antes da versão que levar o PR** (condição da sessão revisora, vale em qualquer
+     opção): instalar a última versão publicada, cadastrar uma linha por registro (o registrar
+     pode ser a sonda, ou um destino que não responde), atualizar para a versão do PR e conferir
+     o que o arquivo gerado tem para essa linha (com a opção 1: nada de `deny`) e o que a tela
+     diz.
 
 ## 4. Critério de aceite
 
