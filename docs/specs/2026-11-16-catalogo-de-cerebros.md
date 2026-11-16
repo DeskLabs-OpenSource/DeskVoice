@@ -343,7 +343,7 @@ A, porque deixa usar o modelo novo que o dono pediu e nunca esconde que o custo 
 ### Não medido
 Quantos modelos de cada provedor ficam sem preço com o pedido 2 em B. Medido só na OpenAI (fatia 1,
 16/11): a tabela tem 15 modelos com preço, e os mais novos (`gpt-6*`, `gpt-5.6*`, `gpt-5.5`,
-`gpt-5.4`) ficam sem preço. Com C, nenhum modelo atual da OpenAI poderia ler a ligação. Anthropic,
+`gpt-5.4`) ficam sem preço. Com C, nenhum desses mais novos poderia ler a ligação. Anthropic,
 Gemini e DeepSeek não conferi.
 
 **Pedido 2.** Dono: Arquiteto.
