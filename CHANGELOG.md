@@ -7,19 +7,16 @@ Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
 ### Corrigido
 
-- **Falar com o agente pelo navegador, com motor ausente, não manda mais cadastrar a chave** Quando o agente aponta para um motor de voz que a instalação não tem, a tela "Falar com o agente"
-  agora diz que o motor não está disponível nesta instalação e leva à tela do agente para escolher
-  outro, em vez de mandar cadastrar a chave. A chamada sem chave cadastrada continua com o aviso de
-  antes. Nada a fazer em instalações existentes. Crédito: @melgarafael.
-- **A ligação recusada por motor que não está instalado não manda mais cadastrar a chave** Quando o agente aponta para um motor de voz que a instalação não tem, o aviso no painel agora diz
-  que o motor não está instalado e manda escolher outro motor na tela do agente, em vez de mandar
-  cadastrar a chave. Na linha do tempo, a recusa por motor que não está pronto deixa de afirmar
-  "sem chave cadastrada" quando a chave existe e não pôde ser lida, e aponta para o aviso do
-  painel, que traz o motivo. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+- **O motor de voz que não está disponível na instalação não manda mais cadastrar a chave** Quando o agente aponta para um motor de voz que a instalação não tem, a ligação recusada e a tela
+  "Falar com o agente" agora dizem que o motor não está disponível nesta instalação e mandam escolher
+  outro motor na tela do agente, em vez de mandar cadastrar a chave. Na linha do tempo, a recusa por
+  motor que não está pronto deixa de afirmar "sem chave cadastrada" quando a chave existe e não pôde
+  ser lida, e aponta para o aviso do painel, que traz o motivo. A ligação sem chave cadastrada continua
+  com o aviso de antes. Nada a fazer em instalações existentes. Crédito: @melgarafael.
 - **A passagem entre agentes aceita o destino escrito com o rótulo, como aparece nas instruções** As instruções do agente listam cada destino de passagem com o nome e, entre parênteses, o rótulo
   dele, como "Financeiro (Cobrança)". Numa ligação real, o agente pediu a passagem com a linha inteira
-  e ela foi recusada na primeira tentativa, e quem ligou ouviu o agente dizer que ia ajustar o
-  destino. Agora o nome com o rótulo, como listado, também passa a ligação. Destino fora da lista
+  e ela foi recusada na primeira tentativa; pela transcrição, o agente disse em seguida que ia
+  ajustar o destino. Agora o nome com o rótulo, como listado, também passa a ligação. Destino fora da lista
   continua recusado. Nada a fazer em instalações existentes. Crédito: @melgarafael.
 
 ## [0.19.1] - 2026-11-16
