@@ -11,8 +11,9 @@ Este arquivo é montado a partir de `.changes/`; não edite à mão.
   papel. Marcado um deles, o agente pode passar a ligação para ele no meio da conversa: a sessão do
   próximo abre antes de a atual fechar, e ele continua a partir de um resumo, com as instruções, as
   ferramentas, a voz e o motor dele. A regra de quando passar fica escrita nas instruções, são no
-  máximo 3 passagens por ligação, o tempo e o teto de custo continuam sendo os da ligação, e o custo de
-  cada trecho fica com o agente em que ela estava. A linha do tempo mostra a passagem (de quem, para
+  máximo 3 passagens por ligação, passar não zera o tempo nem o custo (vale a menor duração e o menor
+  teto entre os agentes por onde ela passou), e no extrato o custo de cada trecho fica com o agente em
+  que ela estava. A linha do tempo mostra a passagem (de quem, para
   quem, o motivo e o resumo recolhido), e as falas seguintes levam o nome do novo agente. Apagar um
   agente o tira da lista dos outros, que continuam editáveis; a chamada simulada usa o motor simulado
   também no agente que recebe, sem custo de provedor; e quem desliga durante a troca tem a ligação
