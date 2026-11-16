@@ -127,6 +127,10 @@ Regras que valem para todo arquivo de cérebro:
   `rejected`.
 - **Preço fora da forma** (negativo, texto que não é número) deixa o modelo **sem preço**, nunca 0.
   O 0 só vale quando o provedor publica 0 (os `:free` do OpenRouter).
+- **Tarifa além do token** (OpenRouter): o preço só lê `prompt`, `completion` e
+  `input_cache_read`. Qualquer outro componente de `pricing` diferente de zero (`request`,
+  `web_search`, `image`, `input_cache_write` ou um que apareça depois) deixa o modelo **sem preço**,
+  porque o custo medido sairia menor que o cobrado. Pedido da revisão do #336.
 - `today` vem do `Clock` de quem chama (convenção 10): é a data do preço lido da API.
 
 O cálculo de custo reusa `estimateCostMicrocents` de `pricing.ts`: `BrainPrice` cabe em
@@ -224,6 +228,9 @@ teto e antes do caminho do motor:
    `erased_at`) não muda.
 6. Custo: `estimateCostMicrocents(price, usage)` com o preço da lista guardada **no momento da
    leitura**. Uma linha no `usage_ledger` com `engine = 'brain:<id>'` e as colunas novas abaixo.
+   Um resultado **sem `usage`** (prazo vencido depois do processamento, ou 200 fora da forma) é
+   **custo desconhecido**, nunca zero: conta como modelo sem preço para o teto e para a linha do
+   tempo. Condição da revisão do #336.
 
 Migration **nova** `db/migrations/<carimbo>_custo_por_modelo.sql`, só para frente:
 
