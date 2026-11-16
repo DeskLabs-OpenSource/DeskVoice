@@ -3,6 +3,24 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.25.0] - 2026-11-16
+
+### Adicionado
+
+- **A lista de Chamadas e a tela de Custos dizem o que não foi medido e o que é estimativa** Na lista de Chamadas, a ligação em que nada pôde ser medido não aparece mais como R$ 0,00: ali
+  está escrito "Não medido", e a ligação com uma parte sem medida mostra o valor com "+ parte não
+  medida", como já fazia a tela de Custos. A linha do extrato com custo estimado agora aparece marcada
+  com "inclui estimativa" na lista, no detalhe da chamada e em Custos (no total, no dia, no agente e
+  no motor), e um aviso em Custos explica que a estimativa conta no total e no teto e é feita para
+  ficar acima do real. Hoje a linha estimada só nasce do filtro da fala (um pedido cujo consumo não
+  foi lido), e o filtro vem desligado: quem não o ligou não vê essa marca. O aviso do custo não
+  medido deixa de culpar o provedor: ele diz que o consumo não pôde ser medido. Na API,
+  `GET /api/v1/calls` ganha `unmeasuredCount` e `estimatedCount` em cada ligação;
+  `GET /api/v1/calls/{id}` ganha `estimatedCount` no total e os dois campos em cada agente de
+  `costByAgent`; e `GET /api/v1/system/costs` ganha `estimatedCount` no total e em cada dia, agente e
+  motor. Os campos de antes não mudam. Nada a configurar em instalações existentes. Crédito:
+  @melgarafael.
+
 ## [0.24.0] - 2026-11-16
 
 ### Adicionado
