@@ -393,7 +393,8 @@ também não mediu contra a API real até aquele relatório.
   Bearer`, `model: "jev-latest"`, corpo com `state` e `questions`. Três primitivas: `choice` (uma
   entre até 255 opções, com a probabilidade de cada uma), `score` (escala de 2 a 10 níveis) e
   `noul` (sim ou não, de 0 a 1). O fornecedor diz 70 a 500 ms ponta a ponta e US$ 0,042 por milhão
-  de tokens de entrada, saída gratuita. Produto em acesso antecipado. O processamento é nos EUA.
+  de tokens de entrada, saída gratuita. Produto em acesso antecipado. O país do processamento **não está conferido**: o #349 registrou
+  `processingLocation: undeclared`, e o aviso da tela só nomeia um país com fonte (fatia 7).
 - **Laya** (Convai Innovations): pesos abertos, Apache 2.0, segundo fontes secundárias
   (systemonemodels.org, laya.studio, innfactory.ai, conferidas em 14/11/2026). As mesmas fontes
   dizem que é um modelo de codificador (ModernBERT), com as mesmas três primitivas, e que há um
@@ -568,12 +569,16 @@ A imagem do Laya é uma quarta imagem publicada pelo projeto, e publicá-la muda
     tabela `settings` (a mesma forma de `calls.transcription_enabled`). A chave do Jev é do
     operador, guardada como configuração secreta da organização;
   - ligar pede **confirmação nomeando o fornecedor**: "O texto do que a pessoa fala na ligação vai
-    para a TypeSafe, nos EUA." Quem confirmou e quando ficam gravados;
+    para a TypeSafe." O país só entra no aviso se a fonte do fornecedor o declarar, com endereço e
+    data; sem fonte, o aviso diz que o fornecedor não declara onde processa, e nunca presume os
+    EUA (condição da revisora no #349, 16/11). Quem confirmou e quando ficam gravados;
   - **a política de retenção de dados da TypeSafe é lida e registrada**, com endereço e data da
     leitura, no guia `docs/guides/filtro-de-fala.md`, **antes da entrega** da fatia 7. Se a página não
     existir ou não disser quanto tempo o texto fica guardado, o guia e o aviso da tela dizem isso,
     e o pedido volta ao Rafael antes de a tela oferecer o Jev;
-  - o custo de cada pedido entra no medidor da chamada pelo preço do arquivo, com data.
+  - o custo de cada pedido entra no medidor da chamada pelo preço do arquivo, com data. **Custo
+    desconhecido nunca é zero:** pedido atrasado, sem rede ou com resposta fora da forma grava uma
+    estimativa pela entrada enviada, marcada como estimada (condição da revisora no #349, 16/11).
 - **Laya:** sem custo por pedido nem dado saindo da VPS. O custo é memória e CPU, e a tela diz
   quanto.
 - **O filtro só marca e sugere.** Nenhuma decisão, de nenhum modelo, apaga ou troca fala.
@@ -887,7 +892,7 @@ fatia 4).
 
 Em Configurações da organização: o modelo de decisão (nenhum ou Jev; o Laya aparece na fatia 9), a
 chave do Jev (cifrada, testada pelo `checkKey`, motivo da recusa pelo vocabulário fechado) e a
-confirmação do envio aos EUA. Nos três idiomas. **Sem migration**: a escolha mora em `settings`.
+confirmação do envio à TypeSafe. Nos três idiomas. **Sem migration**: a escolha mora em `settings`.
 O guia `docs/guides/filtro-de-fala.md` nos três idiomas, com a política de retenção da TypeSafe.
 
 Aceite:
@@ -898,6 +903,13 @@ Aceite:
   com o texto ouvido intacto ao lado, e uma decisão tardia aparece como observação;
 - **a política de retenção da TypeSafe está no guia**, com o endereço da página e a data da leitura,
   e o aviso da tela a resume. Se a página não disser o prazo, o PR para e o pedido vai ao Rafael;
+- **o aviso diz só o que a fonte diz:** o país do processamento aparece só com endereço e data da
+  página do fornecedor; sem isso, o aviso e o guia dizem que o fornecedor não declara onde
+  processa. Teste: com `processingLocation: undeclared`, o texto da tela não nomeia país;
+- **custo desconhecido nunca é zero:** hoje, um pedido ao Jev que chega atrasado, sem rede ou fora
+  da forma não grava nada no extrato. A fatia grava uma estimativa pelos tokens da entrada enviada
+  ao preço do arquivo, marca a linha como estimada, e ela conta no teto. Um teste por caso:
+  atrasado, sem rede, fora da forma (a mesma regra da fatia 4 da R4);
 - o fragmento diz que nada muda para quem já instalou: o filtro nasce desligado.
 
 ### Fatia 8: o serviço do Laya
@@ -1016,7 +1028,7 @@ Pelo terminal do orquestrador (comentário do board na DESA-25):
   tela diz com honestidade que a medida o mostrou perto do acaso. Caminho sensível: quem já
   instalou não é surpreendido. Está na seção "Onde o Laya roda" e nas fatias 8 e 9.
 - **Jev em ligação real: sim**, desligado de fábrica, ligado por organização, com aviso do envio à
-  TypeSafe nos EUA, com a política de retenção lida e registrada antes da entrega, e o filtro só
+  TypeSafe (o país só com fonte), com a política de retenção lida e registrada antes da entrega, e o filtro só
   marca e sugere. Está em "Custo e consentimento" e nas fatias 6 e 7.
 - **Ordem:** as fatias 6 a 9 entram depois da DESA-56, que é segurança.
 
