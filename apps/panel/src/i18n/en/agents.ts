@@ -68,6 +68,11 @@ const agents: AgentsDictionary = {
   followUpOwner: "Owner of this agent's follow-ups",
   followUpOwnerTeam: "The team (everyone sees it)",
   followUpOwnerHint: "If the person is disabled, their open follow-ups go back to the team.",
+  dropFollowUp: "When the call drops",
+  dropFollowUpOff: "Do nothing",
+  dropFollowUpTask: "Open a follow-up for someone to call back",
+  dropFollowUpOther: "Another mode, saved outside this screen",
+  dropFollowUpDefinition: "A call counts as dropped when the line goes down mid-conversation or the system fails. Hanging up after saying goodbye does not count.",
 };
 
 export default agents;

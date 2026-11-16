@@ -39,4 +39,21 @@ describe("review_call: as regras fixas", () => {
   it("a aprovação sem id, pedida e nunca decidida, conta quando quem ligou desligou", () => {
     expect(reviewCaseOf([ev("approval_requested")], "caller_hangup")).toBe("caller_hung_up_waiting");
   });
+
+  it("caso 5: só quem ligou desligando com a vez aberta, numa recebida atendida, sem próximo passo", () => {
+    const answered = [ev("call_answered")];
+    const inbound = (openTurn: "agent_speaking" | "caller_waiting" | "tool_running" | null) => ({ direction: "inbound" as const, openTurn });
+    for (const openTurn of ["agent_speaking", "caller_waiting", "tool_running"] as const) expect(reviewCaseOf(answered, "caller_hangup", inbound(openTurn))).toBe("call_dropped");
+    // A vez fechada, outro fim, a ligação feita, a não atendida e a revisão sem os fatos da queda.
+    expect(reviewCaseOf(answered, "caller_hangup", inbound(null))).toBeNull();
+    expect(reviewCaseOf(answered, "end_call", inbound("agent_speaking"))).toBeNull();
+    expect(reviewCaseOf(answered, "caller_hangup", { direction: "outbound", openTurn: "agent_speaking" })).toBeNull();
+    expect(reviewCaseOf([], "caller_hangup", inbound("agent_speaking"))).toBeNull();
+    expect(reviewCaseOf(answered, "caller_hangup")).toBeNull();
+    // Alguém ficou com o próximo passo.
+    for (const kind of ["transfer_started", "voicemail_left", "follow_up_created", "human_notified"]) expect(reviewCaseOf([...answered, ev(kind)], "caller_hangup", inbound("agent_speaking"))).toBeNull();
+    expect(reviewCaseOf([...answered, ev("tool_result", { name: "send_whatsapp", ok: true })], "caller_hangup", inbound("agent_speaking"))).toBeNull();
+    // A aprovação pendente continua no caso 3, que vem antes.
+    expect(reviewCaseOf([...answered, ev("approval_requested")], "caller_hangup", inbound("tool_running"))).toBe("caller_hung_up_waiting");
+  });
 });

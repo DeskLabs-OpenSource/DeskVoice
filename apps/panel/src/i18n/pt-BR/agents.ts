@@ -66,6 +66,11 @@ const agents = {
   followUpOwner: "Dono das pendências deste agente",
   followUpOwnerTeam: "A equipe (aparece para todo mundo)",
   followUpOwnerHint: "Se a pessoa for desativada, as pendências abertas dela voltam para a equipe.",
+  dropFollowUp: "Quando a ligação cai",
+  dropFollowUpOff: "Não fazer nada",
+  dropFollowUpTask: "Abrir uma pendência para alguém retornar",
+  dropFollowUpOther: "Outro modo, gravado fora desta tela",
+  dropFollowUpDefinition: "Conta como queda quando a linha cai no meio da conversa ou o sistema falha. Quem desliga depois de se despedir não conta.",
 };
 
 export default agents;

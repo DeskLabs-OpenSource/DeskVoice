@@ -68,6 +68,11 @@ const agents: AgentsDictionary = {
   followUpOwner: "Dueño de los pendientes de este agente",
   followUpOwnerTeam: "El equipo (lo ven todos)",
   followUpOwnerHint: "Si la persona se desactiva, sus pendientes abiertos vuelven al equipo.",
+  dropFollowUp: "Cuando la llamada se corta",
+  dropFollowUpOff: "No hacer nada",
+  dropFollowUpTask: "Abrir un pendiente para que alguien devuelva la llamada",
+  dropFollowUpOther: "Otro modo, guardado fuera de esta pantalla",
+  dropFollowUpDefinition: "Cuenta como corte cuando la línea se cae en medio de la conversación o el sistema falla. Quien cuelga después de despedirse no cuenta.",
 };
 
 export default agents;

@@ -17,6 +17,7 @@ import {
   type CallStatus,
   type Clock,
   type Db,
+  type OpenTurn,
   type OrgQuery,
   type RememberedItem,
   type SpokenLanguage,
@@ -125,6 +126,11 @@ interface Ending {
   events?: Array<[CallEventKind, object]>;
   /** Aviso para o painel. */
   notice?: string;
+  /**
+   * Só no fim por `caller_hangup`: a vez aberta lida no instante do desligar, antes de `finish`
+   * soltar as ferramentas e parar a guarda. Vai para `call_ended.openTurn`; ausente, o campo não é gravado.
+   */
+  openTurn?: OpenTurn | null;
 }
 
 interface AgentRow {
@@ -366,6 +372,20 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let resolveDone: (outcome: CallOutcome) => void = () => undefined;
   const done = new Promise<CallOutcome>((resolve) => (resolveDone = resolve));
 
+  /**
+   * A vez aberta agora (desenho do follow-up da ligação que caiu, seção 3.1). Lida no instante em que
+   * quem ligou desligou, antes de `finish`: depois dele as ferramentas foram soltas, a guarda parou e a
+   * fila de áudio foi descartada, e tudo pareceria fechado. Com a despedida já em curso (`end_call`,
+   * duração máxima ou teto de custo), a ligação já tinha o fim decidido aqui, e a vez conta como
+   * fechada: quem desliga ouvindo o "tchau" não deixou a conversa no meio.
+   */
+  function openTurnNow(): OpenTurn | null {
+    if (ending || wrappingUp) return null;
+    const heard = guard?.openTurn() ?? null;
+    if (heard) return heard;
+    return toolsRunning.size > 0 ? "tool_running" : null;
+  }
+
   /** O único encerramento: por qualquer caminho, roda uma vez. */
   async function finish(end: Ending): Promise<void> {
     if (ending) return;
@@ -386,7 +406,13 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       for (const [kind, payload] of end.events ?? []) await event(kind, payload);
       if (end.notice) await panelNotice(q, clock, callId, end.notice);
       await q.exec("update calls set status = $2, end_reason = $3, ended_at = $4, cost_cents = $5 where id = $1", [callId, end.status, end.endReason, clock.now(), callCents()]);
-      await event("call_ended", { status: end.status, reason: end.endReason, costCents: callCents(), seconds: Math.round(usage.seconds) });
+      await event("call_ended", {
+        status: end.status,
+        reason: end.endReason,
+        costCents: callCents(),
+        seconds: Math.round(usage.seconds),
+        ...(end.openTurn !== undefined && { openTurn: end.openTurn }),
+      });
       const taskId = await enqueueTask(q, { kind: "summarize_call", payload: {}, callId, runAt: clock.now() });
       await event("task_queued", { taskId, kind: "summarize_call" });
       // O supervisor de regras fixas: sem modelo e sem gasto, abre uma pendência se a ligação terminou sem próximo passo.
@@ -985,7 +1011,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     visited.push(first);
 
     await event("call_started", { direction: call.direction, from: call.from_e164, to: call.to_e164, agentId, ...input.started });
-    transport.onHangup(() => void finish({ status: "completed", endReason: "caller_hangup", callerGone: true }));
+    transport.onHangup(() => void finish({ status: "completed", endReason: "caller_hangup", callerGone: true, openTurn: openTurnNow() }));
 
     const engineId = overrides?.engineId ?? first.engine;
     const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);

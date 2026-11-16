@@ -238,6 +238,12 @@ const timeline: TimelineDictionary = {
       asked_to_repeat: "The agent was still silent {seconds} s after the caller last spoke, and asked them to repeat.",
     },
     memory_loaded: "The agent received the caller's memory: {notes} notes and {followUps} follow-ups, {chars} characters.",
+    drop_follow_up: {
+      engine_failed: "The call dropped because the system failed.",
+      call_dropped: "The call dropped mid-conversation.",
+      task_opened: "A follow-up was opened for someone to call back.",
+      simulated: "Simulated call: nothing was opened. On a real call, a follow-up would be opened for someone to call back.",
+    },
     unknown: "Event",
   },
   reasons: {

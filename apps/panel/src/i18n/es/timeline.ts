@@ -238,6 +238,12 @@ const timeline: TimelineDictionary = {
       asked_to_repeat: "El agente seguía callado {seconds} s después de lo último que dijo quien llamó, y le pidió que lo repitiera.",
     },
     memory_loaded: "El agente recibió la memoria del número: {notes} notas y {followUps} pendientes, {chars} caracteres.",
+    drop_follow_up: {
+      engine_failed: "La llamada se cortó porque el sistema falló.",
+      call_dropped: "La llamada se cortó en medio de la conversación.",
+      task_opened: "Se abrió un pendiente para que alguien devuelva la llamada.",
+      simulated: "Llamada simulada: no se abrió nada. En una llamada real, se abriría un pendiente para que alguien devuelva la llamada.",
+    },
     unknown: "Evento",
   },
   reasons: {

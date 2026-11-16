@@ -61,9 +61,26 @@ export const CALL_EVENT_KINDS = [
   "caller_unanswered",
   "memory_loaded",
   "caller_speech_read",
+  "drop_follow_up",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];
+
+/**
+ * A vez aberta no instante em que quem ligou desligou, gravada em `call_ended.openTurn` só no fim
+ * por `caller_hangup` (desenho do follow-up da ligação que caiu, seção 3.1). `null` é a vez fechada:
+ * o "obrigado, tchau" seguido do desligar.
+ */
+export const OPEN_TURNS = ["agent_speaking", "caller_waiting", "tool_running"] as const;
+export type OpenTurn = (typeof OPEN_TURNS)[number];
+
+/**
+ * O que acontece quando a ligação cai, por agente (`agents.drop_follow_up`). O banco já aceita os
+ * quatro; `whatsapp` e `call_back` só passam a valer nas fatias 2 a 4 do desenho, e até lá a rota
+ * recusa os dois.
+ */
+export const DROP_FOLLOW_UP_MODES = ["off", "task", "whatsapp", "call_back"] as const;
+export type DropFollowUpMode = (typeof DROP_FOLLOW_UP_MODES)[number];
 
 /**
  * O que acontece na organização fora de uma chamada e precisa ficar registrado

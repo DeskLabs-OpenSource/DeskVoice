@@ -17,7 +17,7 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatPhone } from "../../../../ui/format";
 import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
-import type { Agent, Engine, ListeningEnvironment, Person, Setting, ToolInfo } from "../../../../ui/types";
+import type { Agent, DropFollowUp, Engine, ListeningEnvironment, Person, Setting, ToolInfo } from "../../../../ui/types";
 
 interface Draft {
   name: string;
@@ -37,9 +37,14 @@ interface Draft {
   listeningEnvironment: ListeningEnvironment;
   /** Para quem o agente pode passar a ligação; vazia de fábrica. */
   handoffTargets: string[];
+  /** O que acontece quando a ligação cai. */
+  dropFollowUp: DropFollowUp;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", handoffTargets: [] };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", handoffTargets: [], dropFollowUp: "off" };
+
+/** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
+const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task"];
 
 /** Motores em que a sessão em Barulhento foi provada numa instalação real. */
 const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime"];
@@ -60,6 +65,7 @@ const toDraft = (agent: Agent): Draft => ({
   followUpOwner: agent.followUpOwnerUserId ?? "",
   listeningEnvironment: agent.listeningEnvironment ?? "normal",
   handoffTargets: agent.agentHandoffTargets ?? [],
+  dropFollowUp: agent.dropFollowUp ?? "off",
 });
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -142,6 +148,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
         listeningEnvironment: draft.listeningEnvironment,
         agentHandoffTargets: draft.handoffTargets,
+        // Um modo que a tela não oferece (gravado fora dela) não volta no salvar: fica como está.
+        ...(DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) && { dropFollowUp: draft.dropFollowUp }),
       };
       const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       setSavedEnvironment(saved.listeningEnvironment ?? "normal");
@@ -350,6 +358,19 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               ))}
             </Select>
           </Field>
+          <div className="mt-4">
+            <Field label={t.dropFollowUp} hint={t.dropFollowUpDefinition}>
+              <Select value={draft.dropFollowUp} onChange={(event) => set("dropFollowUp", event.target.value === "task" ? "task" : "off")} className="max-w-sm">
+                <option value="off">{t.dropFollowUpOff}</option>
+                <option value="task">{t.dropFollowUpTask}</option>
+                {DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) ? null : (
+                  <option value={draft.dropFollowUp} disabled>
+                    {t.dropFollowUpOther}
+                  </option>
+                )}
+              </Select>
+            </Field>
+          </div>
         </Panel>
       </fieldset>
 

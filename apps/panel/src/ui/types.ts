@@ -31,9 +31,15 @@ export interface Agent {
   listeningEnvironment?: ListeningEnvironment;
   /** Para quem o agente pode passar a ligação (`transfer_to_agent`). Vazia de fábrica. */
   agentHandoffTargets?: string[];
+  /**
+   * O que acontece quando a ligação cai. O banco aceita quatro modos; a tela, nesta fatia, oferece
+   * `off` e `task`. Agente gravado antes do campo existir pode chegar sem ele: vale `off`.
+   */
+  dropFollowUp?: DropFollowUp;
 }
 
 export type ListeningEnvironment = "normal" | "noisy";
+export type DropFollowUp = "off" | "task" | "whatsapp" | "call_back";
 
 export type CallStatus = "ringing" | "in_progress" | "transferred" | "completed" | "failed" | "refused";
 export interface Call {
