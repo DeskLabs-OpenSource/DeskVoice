@@ -49,7 +49,7 @@ function arm(cwd: string, ...args: string[]) {
   return spawnSync("bash", [`${scripts}/arm-hooks.sh`, ...args], { cwd, env, encoding: "utf8" });
 }
 
-/** Repositório com a pasta de scripts da skill na main, com um commit. */
+/** Repositório com a pasta de scripts da skill na main, com um commit, e `origin/main` nele. */
 function repo(): string {
   const d = tmp();
   git(d, "init", "-q", "-b", "main");
@@ -57,7 +57,15 @@ function repo(): string {
   writeFileSync(join(d, "README.md"), "x\n");
   git(d, "add", "-A");
   git(d, "commit", "-q", "--no-verify", "-m", "base");
+  git(d, "update-ref", "refs/remotes/origin/main", "HEAD");
   return d;
+}
+
+/** Troca o pre-push na main e leva `origin/main` junto (o que um `git fetch` faria). */
+function newPrePushOnMain(d: string): void {
+  writeFileSync(join(d, legacy, "pre-push"), "#!/usr/bin/env bash\n# novo\nexit 0\n");
+  git(d, "commit", "-q", "--no-verify", "-am", "pre-push novo");
+  git(d, "update-ref", "refs/remotes/origin/main", "HEAD");
 }
 
 function dest(d: string): string {
@@ -92,6 +100,47 @@ describe("arm-hooks.sh", () => {
     expect(existsSync(marker)).toBe(false);
   });
 
+  it("armar num ramo que troca o pre-commit copia o da main, não o do ramo", () => {
+    const d = repo();
+    const marker = join(tmp(), "marcador");
+    git(d, "switch", "-q", "-c", "troca-hook");
+    writeFileSync(join(d, legacy, "pre-commit"), `#!/usr/bin/env bash\necho rodou > '${marker}'\nexit 1\n`);
+    git(d, "commit", "-q", "--no-verify", "-am", "troca o pre-commit");
+    // E ainda uma mudança só no disco, sem commit.
+    writeFileSync(join(d, legacy, "pre-push"), "#!/usr/bin/env bash\n# do disco\nexit 0\n");
+
+    expect(arm(d).status).toBe(0);
+    const main = (f: string) => git(d, "show", `origin/main:${legacy}/${f}`);
+    for (const f of ["pre-commit", "pre-push", "warn-identity.sh"])
+      expect(readFileSync(join(dest(d), f), "utf8").trim()).toBe(main(f));
+
+    git(d, "checkout", "-q", "--", legacy);
+    writeFileSync(join(d, "a.txt"), "a\n");
+    git(d, "add", "a.txt");
+    expect(gitTry(d, "commit", "-q", "-m", "commit comum").status).toBe(0);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("prefere upstream/main a origin/main", () => {
+    const d = repo();
+    writeFileSync(join(d, legacy, "pre-push"), "#!/usr/bin/env bash\n# do upstream\nexit 0\n");
+    git(d, "commit", "-q", "--no-verify", "-am", "pre-push do upstream");
+    git(d, "update-ref", "refs/remotes/upstream/main", "HEAD");
+    git(d, "reset", "-q", "--hard", "origin/main");
+    expect(arm(d).status).toBe(0);
+    expect(readFileSync(join(dest(d), "pre-push"), "utf8")).toContain("# do upstream");
+  });
+
+  it("sem upstream/main nem origin/main, recusa e não muda nada", () => {
+    const d = repo();
+    git(d, "update-ref", "-d", "refs/remotes/origin/main");
+    const r = arm(d);
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain("git fetch");
+    expect(hooksPath(d)).toBe("");
+    expect(existsSync(dest(d))).toBe(false);
+  });
+
   it("migra o core.hooksPath relativo antigo para a cópia, com caminho absoluto", () => {
     const d = repo();
     git(d, "config", "core.hooksPath", legacy);
@@ -107,7 +156,7 @@ describe("arm-hooks.sh", () => {
   it("rodar de novo atualiza a cópia", () => {
     const d = repo();
     expect(arm(d).status).toBe(0);
-    writeFileSync(join(d, legacy, "pre-push"), "#!/usr/bin/env bash\n# novo\nexit 0\n");
+    newPrePushOnMain(d);
     expect(arm(d).status).toBe(0);
     expect(readFileSync(join(dest(d), "pre-push"), "utf8")).toContain("# novo");
   });
@@ -145,7 +194,7 @@ describe("arm-hooks.sh", () => {
     const d = repo();
     expect(arm(d).status).toBe(0);
     git(d, "config", "core.hooksPath", `${dest(d)}/`);
-    writeFileSync(join(d, legacy, "pre-push"), "#!/usr/bin/env bash\n# novo\nexit 0\n");
+    newPrePushOnMain(d);
     const r = arm(d);
     expect(r.status).toBe(0);
     expect(hooksPath(d)).toBe(dest(d));

@@ -8,11 +8,12 @@
 #
 # Hook de git é configuração local do clone e não viaja no repositório: por isso este passo existe.
 #
-# Os hooks são COPIADOS da árvore de trabalho para uma pasta dentro do diretório git comum
-# (`<.git>/deskvoice-hooks`), e o `core.hooksPath` aponta para ela com caminho absoluto. Assim os
-# hooks armados não mudam com o ramo em que você está, e toda worktree do clone vê os mesmos.
-# A cópia é congelada: quando os hooks mudarem na main, rode este script de novo estando na main
-# atualizada.
+# Os hooks são COPIADOS da main (`upstream/main` se existir, senão `origin/main`, a mesma escolha do
+# preflight.sh), e não do disco, para uma pasta dentro do diretório git comum
+# (`<.git>/deskvoice-hooks`). O `core.hooksPath` aponta para ela com caminho absoluto. Assim os
+# hooks armados não mudam com o ramo em que você está, armar dá o mesmo resultado em qualquer ramo,
+# e toda worktree do clone vê os mesmos. A cópia é congelada: quando os hooks mudarem na main,
+# rode `git fetch` e este script de novo.
 #
 # Uso: bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh [--disarm]
 set -euo pipefail
@@ -47,17 +48,26 @@ if [ -n "$current" ] && ! ours; then
   exit 2
 fi
 
+if git rev-parse -q --verify upstream/main >/dev/null 2>&1; then main_ref=upstream/main; else main_ref=origin/main; fi
 # O pre-commit chama `$(dirname "$0")/warn-identity.sh`: a cópia leva os dois juntos. O session.sh
 # é hook de sessão do assistente, não de git, e fica onde está.
+hooks="pre-commit pre-push warn-identity.sh"
+for hook in $hooks; do
+  if ! git cat-file -e "$main_ref:$src/$hook" 2>/dev/null; then
+    echo "não armei: não achei $src/$hook em $main_ref neste clone." >&2
+    echo "Os hooks vêm da main, não do disco. Rode: git fetch ${main_ref%%/*} e este script de novo." >&2
+    exit 3
+  fi
+done
 mkdir -p "$dest"
-for hook in pre-commit pre-push warn-identity.sh; do
-  cp "$src/$hook" "$dest/$hook"
+for hook in $hooks; do
+  git show "$main_ref:$src/$hook" > "$dest/$hook"
   chmod +x "$dest/$hook"
 done
 git config core.hooksPath "$dest"
-echo "ok: core.hooksPath=$dest"
+echo "ok: core.hooksPath=$dest (hooks copiados de $main_ref)"
 echo "  pre-commit: segredo e .env no commit; nome e carimbo de migration; e-mail de máquina gera aviso"
 echo "  pre-push:   push direto na main é recusado; ramo atrasado gera aviso"
-echo "A cópia é congelada e vale para qualquer ramo: quando os hooks mudarem na main, rode este"
-echo "script de novo estando na main atualizada."
+echo "A cópia é congelada e vale para qualquer ramo: quando os hooks mudarem na main, rode"
+echo "git fetch ${main_ref%%/*} e este script de novo (de qualquer ramo)."
 echo "Desarmar: bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh --disarm"
