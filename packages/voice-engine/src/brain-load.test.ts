@@ -23,7 +23,7 @@ export default {
 describe("loadBrains", () => {
   it("descobre os cérebros da pasta", async () => {
     const brains = await loadBrains();
-    expect([...brains.keys()].sort()).toEqual(["openai", "openrouter"]);
+    expect([...brains.keys()].sort()).toEqual(["anthropic", "deepseek", "gemini", "openai", "openrouter"]);
     for (const brain of brains.values()) expect(brain.keyUrl).toMatch(/^https:\/\//);
   });
 
