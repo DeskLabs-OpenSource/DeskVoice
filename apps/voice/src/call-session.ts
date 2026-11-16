@@ -1,4 +1,4 @@
-import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, rememberedBlock, type CallEventKind, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { CALL_RECORDING_SETTING, callRecordingOf, decryptSecret, enqueueTask, recordEvent, recordingPath, rememberedBlock, voicemailLanguageSchema, type CallEventKind, type VoicemailLanguage, type CallStatus, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import {
   autoCommitOrgQuery,
   handoffTargetsOf,
@@ -151,9 +151,19 @@ const TOOL_CRASH_MESSAGE = "Não consegui concluir isso agora. Diga a quem está
 /**
  * O que o agente que recebe a ligação diz primeiro, antes de quem ligou falar. Fixa, e não a saudação
  * do agente: a saudação é para quem acabou de ligar, e esta pessoa já foi atendida. O resto ele tira
- * do motivo e do resumo, que estão nas instruções.
+ * do motivo e do resumo, que estão nas instruções. Vai no idioma do agente que recebe, nos mesmos
+ * idiomas do aviso da caixa postal; um idioma fora do mapa cai no pt-BR.
  */
-export const HANDOFF_GREETING = "Oi, vou continuar o seu atendimento a partir daqui.";
+export const HANDOFF_GREETINGS: Readonly<Record<VoicemailLanguage, string>> = {
+  "pt-BR": "Oi, vou continuar o seu atendimento a partir daqui.",
+  en: "Hi, I'll take it from here and continue helping you.",
+  es: "Hola, voy a continuar con su atención a partir de aquí.",
+};
+
+export function handoffGreetingFor(language: string): string {
+  const parsed = voicemailLanguageSchema.safeParse(language);
+  return HANDOFF_GREETINGS[parsed.success ? parsed.data : "pt-BR"];
+}
 
 /** O que entra nas instruções do agente que recebe a ligação: quem passou, o motivo e o resumo. */
 export interface HandoffNote {
@@ -728,7 +738,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const targets = await targetsOf(next);
       const enabled = enabledToolsFor(next.tools, targets);
       const instructions = composeInstructions(next.instructions, targets, { fromName: from.agent.name, reason: input.reason, summary: input.summary });
-      const opened = await connectEngine(next.engine, sessionConfig(next, instructions, HANDOFF_GREETING, enabled));
+      const opened = await connectEngine(next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled));
       if (!("voice" in opened)) {
         log("error", "the next agent's session did not open; the current agent stays on the line", { to: next.id, reason: opened.reason, error: opened.problem });
         return { ok: false, problem: "unavailable", detail: opened.problem };

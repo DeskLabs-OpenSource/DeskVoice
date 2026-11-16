@@ -72,6 +72,7 @@ export interface AgentOptions {
   costCeilingCents?: number;
   vocabulary?: string[];
   listeningEnvironment?: "normal" | "noisy";
+  language?: string;
 }
 
 export async function createAgent(app: Db, organizationId: string, options: AgentOptions = {}): Promise<string> {
@@ -79,8 +80,8 @@ export async function createAgent(app: Db, organizationId: string, options: Agen
   const instructions = options.script ? SIMULATED_PREFIX + JSON.stringify(options.script) : (options.instructions ?? "Você é a recepção.");
   await withSystem(app, (q) =>
     q.exec(
-      `insert into agents (id, organization_id, name, instructions, greeting, engine, tools, transfer_to_e164, enabled, max_call_seconds, cost_ceiling_cents, vocabulary, listening_environment, role_label)
-       values ($1, $2, coalesce($13, 'Recepção'), $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, '{}'::text[]), coalesce($12, 'normal'), $14)`,
+      `insert into agents (id, organization_id, name, instructions, greeting, engine, tools, transfer_to_e164, enabled, max_call_seconds, cost_ceiling_cents, vocabulary, listening_environment, role_label, language)
+       values ($1, $2, coalesce($13, 'Recepção'), $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, '{}'::text[]), coalesce($12, 'normal'), $14, coalesce($15, 'pt-BR'))`,
       [
         id,
         organizationId,
@@ -96,6 +97,7 @@ export async function createAgent(app: Db, organizationId: string, options: Agen
         options.listeningEnvironment ?? null,
         options.name ?? null,
         options.roleLabel ?? null,
+        options.language ?? null,
       ],
     ),
   );
@@ -305,7 +307,7 @@ export interface ManualEngine {
   emit<K extends keyof VoiceSessionEvents>(event: K, ...args: Parameters<VoiceSessionEvents[K]>): void;
 }
 
-export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean } = {}): ManualEngine {
+export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean; connectWhen?: Promise<unknown> } = {}): ManualEngine {
   const handlers = new Map<string, Array<(...args: never[]) => void>>();
   const manual: ManualEngine = {
     configs: [],
@@ -331,6 +333,8 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
         if (options.connectError) throw typeof options.connectError === "string" ? new Error(options.connectError) : options.connectError;
         // O provedor aceitou a conexão e ficou mudo: o `connect` nunca volta.
         if (options.connectHangs) await new Promise(() => undefined);
+        // O provedor demora: a sessão só abre quando o teste soltar.
+        if (options.connectWhen) await options.connectWhen;
         const session: VoiceSession = {
           on: (event, handler) => void handlers.set(event, [...(handlers.get(event) ?? []), handler as (...args: never[]) => void]),
           sendAudio: (pcm) => void (manual.audioBytes += pcm.length),

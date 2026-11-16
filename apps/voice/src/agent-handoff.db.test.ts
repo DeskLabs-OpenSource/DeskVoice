@@ -5,7 +5,7 @@ import { MAX_AGENT_HANDOFFS_PER_CALL } from "@deskvoice/tools";
 import { createSimulatedEngine, estimateCostCents, type SimulatedScript, type VoiceEngine, type VoiceSessionConfig } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { forceHandoffTargets, openTestDbs } from "../../../packages/core/test/helpers";
-import { DEFAULT_RECORDING_NOTICE, HANDOFF_GREETING, startCallSession, type CallSession } from "./call-session";
+import { DEFAULT_RECORDING_NOTICE, HANDOFF_GREETINGS, handoffGreetingFor, startCallSession, type CallSession } from "./call-session";
 import {
   callOf,
   createAgent,
@@ -119,7 +119,7 @@ describe("a passagem com o motor simulado", { timeout: 120_000 }, () => {
     expect(events[5]?.payload).toEqual({ name: "transfer_to_agent", args: { omitted: "personal_text" } });
     expect(await toolResults(callId)).toEqual([expect.objectContaining({ name: "transfer_to_agent", ok: true })]);
     // A abertura do segundo é a da passagem, e não a saudação dele; as falas dele levam o agente.
-    expect(events[7]?.payload).toEqual({ text: HANDOFF_GREETING, agentId: ids.Agendamento });
+    expect(events[7]?.payload).toEqual({ text: HANDOFF_GREETINGS["pt-BR"], agentId: ids.Agendamento });
     expect(events[8]?.payload).toEqual({ text: "Qual dia fica melhor?", agentId: ids.Agendamento });
     expect(events.some((event) => event.payload.text === "NÃO DEVIA FALAR")).toBe(false);
     // A linha de `calls` é a mesma: o agente que atendeu fica.
@@ -129,7 +129,7 @@ describe("a passagem com o motor simulado", { timeout: 120_000 }, () => {
     const [first, second] = cheap.configs.slice(-2);
     expect(first?.tools.map((tool) => tool.name)).toContain("transfer_to_agent");
     expect(second?.tools.map((tool) => tool.name)).not.toContain("transfer_to_agent");
-    expect(second?.greeting).toBe(HANDOFF_GREETING);
+    expect(second?.greeting).toBe(HANDOFF_GREETINGS["pt-BR"]);
   });
 
   it("o segundo sem chave: o primeiro continua na linha com ok: false, e não há agent_handoff", async () => {
@@ -156,22 +156,104 @@ describe("a passagem com o motor simulado", { timeout: 120_000 }, () => {
     expect((await payloadsOf(callId, "transcript_agent")).map((payload) => payload.text)).toContain("Continuo com você.");
   });
 
-  it("o segundo sem resposta em 15 s: o primeiro continua na linha, e a sessão que abrir tarde é fechada", async () => {
-    const hangs = manualEngine({ id: "hangs", keyless: true, connectHangs: true });
+  it("o segundo sem resposta em 15 s: o primeiro continua na linha, e a sessão que abre depois do prazo é fechada sem entrar no custo", async () => {
+    let release: () => void = () => undefined;
+    const late = manualEngine({ id: "late", keyless: true, connectWhen: new Promise<void>((resolve) => (release = resolve)) });
     const manual = manualEngine({ id: "first", keyless: true });
-    const { ids, call, harness: h } = await team("handoff-timeout", { Recepção: { engine: "first" }, Agendamento: { engine: "hangs" } }, [manual.engine, hangs.engine]);
+    const { ids, call, harness: h } = await team("handoff-timeout", { Recepção: { engine: "first" }, Agendamento: { engine: "late" } }, [manual.engine, late.engine]);
     await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
     const { callId, transport, session } = await call("Recepção");
     await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
     manual.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
-    await waitFor(async () => hangs.configs.length === 1, "the next session to be asked for");
+    await waitFor(async () => late.configs.length === 1, "the next session to be asked for");
     expect(h.timers.fire(15_000)).toBe(1);
     await waitFor(async () => manual.toolResults.length === 1, "the tool result");
     expect(manual.toolResults[0]?.result).toMatchObject({ ok: false });
     expect(manual.closed).toBe(0);
     expect(await kindsOf(app, callId)).not.toContain("agent_handoff");
+
+    // O provedor responde depois do prazo: a sessão que abriu é fechada, e ninguém a escuta.
+    expect(late.closed).toBe(0);
+    release();
+    await waitFor(async () => late.closed === 1, "the late session to be closed");
+    late.emit("usage", { seconds: 30 });
+    late.emit("audio", Buffer.alloc(320));
+    const sent = transport.sentBytes;
+    transport.callerAudio(100);
+    expect(late.audioBytes).toBe(0);
+    expect(manual.audioBytes).toBeGreaterThan(0);
+    manual.emit("usage", { seconds: 10 });
+    transport.callerHangup();
+    const outcome = await session.done;
+    expect(transport.sentBytes).toBe(sent);
+    // O custo da ligação é só o do primeiro: nenhum trecho da sessão órfã.
+    const ledger = await ledgerOf(app, callId);
+    expect(ledger.filter((row) => row.agent_id === ids.Agendamento || row.engine === "late")).toEqual([]);
+    expect(ledger.every((row) => row.agent_id === ids.Recepção)).toBe(true);
+    expect(outcome.costCents).toBe(estimateCostCents(manual.engine.pricing, { seconds: 10 }));
+  });
+
+  it("a ligação encerra durante a abertura: a sessão nova é fechada, e não há agent_handoff nem trecho dela", async () => {
+    let release: () => void = () => undefined;
+    const slow = manualEngine({ id: "slow", keyless: true, connectWhen: new Promise<void>((resolve) => (release = resolve)) });
+    const manual = manualEngine({ id: "first", keyless: true });
+    const { ids, call } = await team("handoff-hangup-opening", { Recepção: { engine: "first" }, Agendamento: { engine: "slow" } }, [manual.engine, slow.engine]);
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    manual.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => slow.configs.length === 1, "the next session to be asked for");
+    transport.callerHangup();
+    release();
+    await session.done;
+    await waitFor(async () => slow.closed === 1, "the session opened after the hangup to be closed");
+    expect(await kindsOf(app, callId)).not.toContain("agent_handoff");
+    expect((await ledgerOf(app, callId)).filter((row) => row.agent_id === ids.Agendamento)).toEqual([]);
+  });
+
+  it("o áudio de quem ligou vai para o segundo, e o do primeiro não sai mais para quem ligou", async () => {
+    const first = manualEngine({ id: "first", keyless: true });
+    const second = manualEngine({ id: "second", keyless: true });
+    const { ids, call } = await team("handoff-audio", { Recepção: { engine: "first" }, Agendamento: { engine: "second" } }, [first.engine, second.engine]);
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    transport.callerAudio(100);
+    const firstHeard = first.audioBytes;
+    expect(firstHeard).toBeGreaterThan(0);
+    expect(second.audioBytes).toBe(0);
+
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    expect(first.closed).toBe(1);
+
+    // Quem ligou fala: o segundo ouve, e o primeiro não ouve mais nada.
+    transport.callerAudio(100);
+    expect(second.audioBytes).toBeGreaterThan(0);
+    expect(first.audioBytes).toBe(firstHeard);
+    // O que a sessão antiga ainda emitir não chega a quem ligou; o que a nova emite, chega.
+    const sent = transport.sentBytes;
+    first.emit("audio", Buffer.alloc(320));
+    expect(transport.sentBytes).toBe(sent);
+    second.emit("audio", Buffer.alloc(320));
+    expect(transport.sentBytes).toBe(sent + 320);
     transport.callerHangup();
     await session.done;
+  });
+
+  it("o segundo abre no idioma dele, e um idioma fora do mapa cai no pt-BR", async () => {
+    const { ids, call } = await team("handoff-language", {
+      Recepção: { script: [handoffCall("Agenda"), { end: true }] },
+      Agenda: { language: "es", script: [{ say: "¿Qué día le queda mejor?" }, { end: true }] },
+    });
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agenda ?? ""]);
+    const { callId, session } = await call("Recepção");
+    await session.done;
+    expect(cheap.configs.at(-1)?.greeting).toBe(HANDOFF_GREETINGS.es);
+    expect(await payloadsOf(callId, "transcript_agent")).toContainEqual({ text: HANDOFF_GREETINGS.es, agentId: ids.Agenda });
+    expect(HANDOFF_GREETINGS.es).not.toBe(HANDOFF_GREETINGS["pt-BR"]);
+    expect(handoffGreetingFor("en")).toBe(HANDOFF_GREETINGS.en);
+    expect(handoffGreetingFor("fr")).toBe(HANDOFF_GREETINGS["pt-BR"]);
   });
 });
 
@@ -312,6 +394,21 @@ describe("as recusas", { timeout: 120_000 }, () => {
     expect(String(self?.message)).toMatch(/Você já é Recepção/);
   });
 
+  it("o próprio agente na lista de destinos: recusado com ok: false, e não há agent_handoff", async () => {
+    const { ids, call } = await team("handoff-self-in-list", {
+      Recepção: { script: [handoffCall("Recepção"), { say: "Sigo eu." }, { end: true }] },
+      Agendamento: {},
+    });
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Recepção ?? "", ids.Agendamento ?? ""]);
+    const { callId, session } = await call("Recepção");
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "script_finished" });
+    expect(await kindsOf(app, callId)).not.toContain("agent_handoff");
+    const [self] = await toolResults(callId);
+    expect(self).toMatchObject({ name: "transfer_to_agent", ok: false });
+    expect(String(self?.message)).toMatch(/Você já é Recepção/);
+    expect((await payloadsOf(callId, "transcript_agent")).at(-1)).toEqual({ text: "Sigo eu." });
+  });
+
   it("agente de outra organização: o banco recusa na escrita, e a leitura o ignora mesmo se ele chegar à lista", async () => {
     const manual = manualEngine({ id: "first", keyless: true });
     const { organizationId, ids, call } = await team("handoff-other-org", { Recepção: { engine: "first", instructions: "Você é a recepção." }, Agendamento: { roleLabel: "Agendador" } }, [manual.engine, cheap.engine]);
@@ -359,7 +456,7 @@ describe("o custo por trecho", { timeout: 120_000 }, () => {
 
     // O primeiro fala o aviso de gravação ao atender.
     const firstSeconds = (simulatedSpeechMs(DEFAULT_RECORDING_NOTICE) + simulatedSpeechMs(firstLine)) / 1000;
-    const secondSeconds = (simulatedSpeechMs(HANDOFF_GREETING) + simulatedSpeechMs(secondLine)) / 1000;
+    const secondSeconds = (simulatedSpeechMs(HANDOFF_GREETINGS["pt-BR"]) + simulatedSpeechMs(secondLine)) / 1000;
     const firstCost = estimateCostCents(cheap.engine.pricing, { seconds: firstSeconds });
     const secondCost = estimateCostCents(pricey.engine.pricing, { seconds: secondSeconds });
     expect(byAgent(ids.Recepção).reduce((sum, row) => sum + row.cost_cents, 0)).toBe(firstCost);
