@@ -2,11 +2,19 @@
 // revisto na #272): a chave da organização vale nas duas direções, o bloco é um só (com ou sem
 // passagem), o texto lembrado é dado e nunca instrução, e `memory_loaded` não leva texto.
 import { randomUUID } from "node:crypto";
-import { CALLER_MEMORY_AGENT_SETTING, REMEMBERED_BLOCK_CLOSE, REMEMBERED_BLOCK_OPEN, rememberedBlock, withSystem } from "@deskvoice/core";
+import {
+  CALLER_MEMORY_AGENT_SETTING,
+  CALLER_MEMORY_MAX_CHARS,
+  REMEMBERED_BLOCK_CLOSE,
+  REMEMBERED_BLOCK_INTRO,
+  REMEMBERED_BLOCK_OPEN,
+  rememberedBlock,
+  withSystem,
+} from "@deskvoice/core";
 import { SIMULATED_PREFIX, type VoiceSessionConfig } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
-import { composeInstructions, startCallSession } from "./call-session";
+import { composeInstructions, handoffItems, startCallSession } from "./call-session";
 import { startSimulatedCall } from "./simulate";
 import { createAgent, createCall, createOrganization, eventsOf, kindsOf, manualEngine, manualTransport, sessionHarness, setHandoffTargets, t0, type SessionHarness } from "./testing/db";
 import { waitFor } from "./testing/helpers";
@@ -39,11 +47,12 @@ const outsideBlock = (instructions: string): string => {
 };
 
 /** Uma organização com a recepção (motor `first`) e o agendamento (motor `second`), com uma ligação anterior do número, uma nota e uma pendência. */
-async function clinic(label: string, options: { key: boolean; note?: string; handoff?: boolean }) {
+async function clinic(label: string, options: { key: boolean; note?: string; title?: string; handoff?: boolean; back?: boolean }) {
   const organizationId = await createOrganization(app, label);
   const reception = await createAgent(app, organizationId, { name: "Recepção", engine: "first", instructions: BASE, tools: TOOLS });
   const scheduling = await createAgent(app, organizationId, { name: "Agendamento", engine: "second", instructions: "Você cuida da agenda.", tools: ["create_task"] });
   if (options.handoff) await setHandoffTargets(app, reception, [scheduling]);
+  if (options.back) await setHandoffTargets(app, scheduling, [reception]);
   if (options.key)
     await withSystem(app, (q) => q.exec("insert into settings (organization_id, key, value, secret, updated_at) values ($1, $2, 'true', false, $3)", [organizationId, CALLER_MEMORY_AGENT_SETTING, t0]));
   const old = randomUUID();
@@ -56,15 +65,15 @@ async function clinic(label: string, options: { key: boolean; note?: string; han
     const note = await q.one<{ id: string }>("insert into caller_notes (organization_id, call_id, caller_e164, text, created_at) values ($1, $2, $3, $4, $5) returning id", [organizationId, old, PHONE, options.note ?? NOTE, before]);
     const followUp = await q.one<{ id: string }>(
       "insert into follow_ups (organization_id, call_id, caller_e164, title, details, due_at, created_at) values ($1, $2, $3, $4, 'DETALHE-SECRETO', $5, $5) returning id",
-      [organizationId, old, PHONE, TITLE, before],
+      [organizationId, old, PHONE, options.title ?? TITLE, before],
     );
     return { note: note?.id ?? "", followUp: followUp?.id ?? "" };
   });
-  return { organizationId, reception, scheduling, ids };
+  return { organizationId, reception, scheduling, ids, old };
 }
 
 /** Uma ligação do número com a recepção, recebida ou feita; com `summary`, a recepção passa ao agendamento. Devolve o que cada motor recebeu e os eventos. */
-async function callOf(organizationId: string, agentId: string, direction: "inbound" | "outbound", summary?: string) {
+async function callOf(organizationId: string, agentId: string, direction: "inbound" | "outbound", summary?: string, more: { reason?: string; back?: { reason: string; summary: string } } = {}) {
   const first = manualEngine({ id: "first", keyless: true });
   const second = manualEngine({ id: "second", keyless: true });
   const harness = await sessionHarness(app, [first.engine, second.engine]);
@@ -75,14 +84,18 @@ async function callOf(organizationId: string, agentId: string, direction: "inbou
   const session = startCallSession(harness.deps, { organizationId, callId, agentId, transport });
   await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
   if (summary !== undefined) {
-    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary } });
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: more.reason ?? "agenda", summary } });
     await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+  }
+  if (more.back) {
+    second.emit("toolCall", { id: "t2", name: "transfer_to_agent", args: { agent: "Recepção", ...more.back } });
+    await waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "agent_handoff").length === 2, "the handoff back");
   }
   transport.callerHangup();
   await session.done;
   const config = first.configs[0];
   if (!config) throw new Error("the first session was not opened");
-  return { config, next: second.configs[0], events: await eventsOf(app, callId) };
+  return { config, next: second.configs[0], back: first.configs[1], events: await eventsOf(app, callId) };
 }
 
 const memoryEvents = (events: Array<{ kind: string; payload: Record<string, unknown> }>) => events.filter((event) => event.kind === "memory_loaded").map((event) => event.payload);
@@ -147,7 +160,7 @@ describe("a chave ligada", { timeout: 120_000 }, () => {
   });
 
   it("com passagem, motivo, resumo, notas e pendências ficam num único bloco, e o destino recebe os mesmos itens", async () => {
-    const { organizationId, reception } = await clinic("memoria agente passagem", { key: true, handoff: true });
+    const { organizationId, reception, ids } = await clinic("memoria agente passagem", { key: true, handoff: true });
     const { config, next, events } = await callOf(organizationId, reception, "inbound", "Quer marcar.");
     const items = [
       { label: "nota", text: NOTE },
@@ -159,8 +172,73 @@ describe("a chave ligada", { timeout: 120_000 }, () => {
     expect(count(next?.instructions ?? "", REMEMBERED_BLOCK_CLOSE)).toBe(1);
     const inside = (next?.instructions ?? "").slice((next?.instructions ?? "").indexOf(REMEMBERED_BLOCK_OPEN));
     expect(inside).toBe([REMEMBERED_BLOCK_OPEN, 'motivo: "agenda"', 'resumo: "Quer marcar."', `nota: ${JSON.stringify(NOTE)}`, `pendência: ${JSON.stringify(TITLE)}`, REMEMBERED_BLOCK_CLOSE].join("\n"));
-    // Carregada uma vez só.
-    expect(memoryEvents(events)).toHaveLength(1);
+    // Lida uma vez só, e gravada de novo na passagem: o que o destino recebeu, com o bloco inteiro.
+    expect(memoryEvents(events)).toEqual([
+      { noteIds: [ids.note], followUpIds: [ids.followUp], chars: rememberedBlock(items).length },
+      { noteIds: [ids.note], followUpIds: [ids.followUp], chars: rememberedBlock([{ label: "motivo", text: "agenda" }, { label: "resumo", text: "Quer marcar." }, ...items]).length },
+    ]);
+  });
+
+  it("a pendência aberta pelo supervisor entra como `Retornar para este número`, sem o telefone, nas duas direções e na passagem", async () => {
+    // O formato de `reviewTitle` (apps/routines/src/routines/review_call.ts).
+    const { organizationId, reception } = await clinic("memoria agente sem numero no titulo", { key: true, handoff: true, title: `Retornar para ${PHONE}: a ligação caiu antes do fim` });
+    const inbound = await callOf(organizationId, reception, "inbound", "Quer marcar.");
+    const outbound = await callOf(organizationId, reception, "outbound");
+    for (const instructions of [inbound.config.instructions, inbound.next?.instructions ?? "", outbound.config.instructions]) {
+      expect(instructions).toContain(`pendência: ${JSON.stringify("Retornar para este número: a ligação caiu antes do fim")}`);
+      expect(instructions).not.toContain(PHONE);
+    }
+  });
+
+  it("com passagem, o bloco do destino tem até 1 500 com o motivo e o resumo, corta a nota mais velha, e a volta não perde nada", async () => {
+    const { organizationId, reception, ids, old } = await clinic("memoria agente teto passagem", { key: true, handoff: true, back: true });
+    // Mais quatro notas, mais novas que a do `clinic`: sozinha, a memória cabe inteira.
+    const newer: string[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      const row = await withSystem(app, (q) =>
+        q.one<{ id: string }>("insert into caller_notes (organization_id, call_id, caller_e164, text, created_at) values ($1, $2, $3, $4, $5) returning id", [
+          organizationId,
+          old,
+          PHONE,
+          `${i}`.padEnd(150, "n"),
+          new Date(t0.getTime() - (i + 1) * 60_000),
+        ]),
+      );
+      newer.push(row?.id ?? "");
+    }
+    const allNotes = [...newer, ids.note];
+    // Com resumo de 1 000 o bloco sozinho já passa do teto (o teste seguinte): 600 deixa lugar para parte da memória.
+    const reason = "m".repeat(300);
+    const summary = "r".repeat(600);
+    const { config, next, back, events } = await callOf(organizationId, reception, "inbound", summary, { reason, back: { reason: "volta", summary: "Já marcou." } });
+    const blockOf = (instructions: string): string => instructions.slice(instructions.indexOf(REMEMBERED_BLOCK_INTRO), instructions.indexOf(REMEMBERED_BLOCK_CLOSE) + REMEMBERED_BLOCK_CLOSE.length);
+    if (!next || !back) throw new Error("the handoffs did not open the sessions");
+
+    const loaded = memoryEvents(events);
+    expect(loaded).toHaveLength(3);
+    // O começo: tudo entrou.
+    expect(loaded[0]).toEqual({ noteIds: allNotes, followUpIds: [ids.followUp], chars: blockOf(config.instructions).length });
+    // O destino: o bloco inteiro no teto, o motivo e o resumo inteiros, e as notas mais velhas cortadas primeiro.
+    const destination = blockOf(next.instructions);
+    expect(destination.length).toBeLessThanOrEqual(CALLER_MEMORY_MAX_CHARS);
+    expect(destination).toContain(`motivo: "${reason}"`);
+    expect(destination).toContain(`resumo: "${summary}"`);
+    const kept = (loaded[1]?.noteIds as string[]).length;
+    expect(kept).toBeGreaterThan(0);
+    expect(kept).toBeLessThan(allNotes.length);
+    expect(loaded[1]).toEqual({ noteIds: allNotes.slice(0, kept), followUpIds: [ids.followUp], chars: destination.length });
+    // A volta refaz o corte a partir da memória do começo: as notas cortadas no destino voltam.
+    expect(loaded[2]).toEqual({ noteIds: allNotes, followUpIds: [ids.followUp], chars: blockOf(back.instructions).length });
+    expect(blockOf(back.instructions)).toContain(`nota: ${JSON.stringify(NOTE)}`);
+    expect(JSON.stringify(events.filter((event) => event.kind === "memory_loaded"))).not.toContain(NOTE);
+  });
+
+  it("com motivo de 300 e resumo de 1 000, nenhuma memória cabe: o destino recebe só a passagem, inteira, e memory_loaded diz que nada entrou", async () => {
+    const { organizationId, reception } = await clinic("memoria agente passagem maxima", { key: true, handoff: true });
+    const handoff = { fromName: "Recepção", reason: "m".repeat(300), summary: "r".repeat(1000) };
+    const { next, events } = await callOf(organizationId, reception, "inbound", handoff.summary, { reason: handoff.reason });
+    expect(next?.instructions).toBe(composeInstructions("Você cuida da agenda.", [], handoff));
+    expect(memoryEvents(events)[1]).toEqual({ noteIds: [], followUpIds: [], chars: rememberedBlock(handoffItems(handoff)).length });
   });
 
   it("o roteiro do motor simulado passa intacto, e a simulada não lê a memória", async () => {

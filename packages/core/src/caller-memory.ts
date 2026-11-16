@@ -177,13 +177,31 @@ export const CALLER_MEMORY_NOTE_LABEL = "nota";
 export const CALLER_MEMORY_FOLLOW_UP_LABEL = "pendência";
 
 export interface CallerMemory {
-  /** Os itens do bloco, na ordem em que entram: as notas, da mais nova para a mais velha, e depois os títulos. */
+  /** Os itens de memória do bloco, na ordem em que entram: as notas, da mais nova para a mais velha, e depois os títulos. Nunca o `lead`. */
   items: RememberedItem[];
   /** Os ids do que entrou, para `memory_loaded`. Nunca o texto. */
   noteIds: string[];
   followUpIds: string[];
-  /** O tamanho do bloco sozinho (`rememberedBlock(items)`), em caracteres. */
+  /** O tamanho do bloco inteiro (`rememberedBlock([...lead, ...items])`), em caracteres. */
   chars: number;
+  /**
+   * As notas e as pendências que entraram, com o título já mascarado: a passagem refaz o corte a
+   * partir delas, com o motivo e o resumo na frente, e nunca em cima de um corte de passagem anterior.
+   */
+  notes: Array<{ id: string; text: string }>;
+  followUps: Array<{ id: string; title: string }>;
+}
+
+const E164_IN_TEXT = /\+\d{8,15}/g;
+
+/**
+ * Tira o telefone do texto que vai ao modelo (o título que o supervisor grava é
+ * `Retornar para +55…: <o caso>`). O número da própria ligação, exato, vira `este número`; qualquer
+ * outra sequência E.164 vira `[número]`; o resto não muda. Só para o bloco: a tabela e o painel
+ * continuam com o número, que o dono precisa ver.
+ */
+export function maskPhoneNumbers(text: string, callerE164: string): string {
+  return text.replace(E164_IN_TEXT, (found) => (found === callerE164 ? "este número" : "[número]"));
 }
 
 /**
@@ -201,6 +219,8 @@ export interface CallerMemory {
  * - **Ficam de fora** a nota e a pendência nascidas numa chamada simulada (`channel = 'simulated'`).
  *   A pendência sem chamada (criada pela tela, ou cuja chamada foi apagada) entra.
  * - **Nunca entram** o resumo nem as falas: nenhuma das duas é lida aqui.
+ * - **O telefone** sai do título da pendência (`maskPhoneNumbers`) antes do teto, para o teto contar o
+ *   texto que vai mesmo.
  * - **Teto:** o bloco inteiro, com a frase fixa, os marcadores e os literais escapados, fica em até
  *   `CALLER_MEMORY_MAX_CHARS`. Corta a nota mais velha primeiro e, sem nota, o título mais velho.
  *
@@ -225,22 +245,42 @@ export async function loadCallerMemory(q: OrgQuery, input: { callId: string; now
       order by f.created_at desc, f.id desc limit $2`,
     [call.phone, CALLER_MEMORY_MAX_FOLLOW_UPS],
   );
-  return fitCallerMemory(notes, followUps);
+  const phone = call.phone;
+  return fitCallerMemory(
+    notes,
+    followUps.map((followUp) => ({ id: followUp.id, title: maskPhoneNumbers(followUp.title, phone) })),
+  );
 }
 
-/** Monta o bloco dentro do teto: tira a nota mais velha enquanto passar dele, e depois o título mais velho. */
-export function fitCallerMemory(notes: ReadonlyArray<{ id: string; text: string }>, followUps: ReadonlyArray<{ id: string; title: string }>): CallerMemory | null {
+/**
+ * Monta o bloco dentro do teto: tira a nota mais velha enquanto passar dele, e depois o título mais
+ * velho. O teto mede o bloco inteiro, com o `lead` na frente (o motivo e o resumo da passagem), e o
+ * `lead` nunca é cortado. Sem item de memória que caiba, `null`.
+ */
+export function fitCallerMemory(
+  notes: ReadonlyArray<{ id: string; text: string }>,
+  followUps: ReadonlyArray<{ id: string; title: string }>,
+  lead: readonly RememberedItem[] = [],
+): CallerMemory | null {
   const keptNotes = [...notes];
   const keptFollowUps = [...followUps];
   const itemsOf = (): RememberedItem[] => [
     ...keptNotes.map((note) => ({ label: CALLER_MEMORY_NOTE_LABEL, text: note.text })),
     ...keptFollowUps.map((followUp) => ({ label: CALLER_MEMORY_FOLLOW_UP_LABEL, text: followUp.title })),
   ];
-  while (keptNotes.length + keptFollowUps.length > 0 && rememberedBlock(itemsOf()).length > CALLER_MEMORY_MAX_CHARS) {
+  const blockOf = (): string => rememberedBlock([...lead, ...itemsOf()]);
+  while (keptNotes.length + keptFollowUps.length > 0 && blockOf().length > CALLER_MEMORY_MAX_CHARS) {
     if (keptNotes.length > 0) keptNotes.pop();
     else keptFollowUps.pop();
   }
   const items = itemsOf();
   if (items.length === 0) return null;
-  return { items, noteIds: keptNotes.map((note) => note.id), followUpIds: keptFollowUps.map((followUp) => followUp.id), chars: rememberedBlock(items).length };
+  return {
+    items,
+    noteIds: keptNotes.map((note) => note.id),
+    followUpIds: keptFollowUps.map((followUp) => followUp.id),
+    chars: blockOf().length,
+    notes: keptNotes.map((note) => ({ id: note.id, text: note.text })),
+    followUps: keptFollowUps.map((followUp) => ({ id: followUp.id, title: followUp.title })),
+  };
 }
