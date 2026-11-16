@@ -22,10 +22,11 @@ export function listEngines(): Promise<VoiceEngine[]> {
 /**
  * As ferramentas que o operador pode marcar no agente. A que declara `available: false` (a agenda,
  * que nenhum app liga ainda) fica de fora: a sessão não a ofereceria ao motor, e a marca sumiria
- * em silêncio.
+ * em silêncio. A que a sessão oferece sozinha (`offeredBySession`: a passagem entre agentes) também
+ * fica: ela não é caixa de marcar.
  */
 export async function listTools(): Promise<Array<{ name: string; description: string }>> {
-  return (await (tools ??= loadAll(toolModules))).filter((tool) => tool.available !== false).map((tool) => ({ name: tool.name, description: tool.description }));
+  return (await (tools ??= loadAll(toolModules))).filter((tool) => tool.available !== false && tool.offeredBySession !== true).map((tool) => ({ name: tool.name, description: tool.description }));
 }
 
 export const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;

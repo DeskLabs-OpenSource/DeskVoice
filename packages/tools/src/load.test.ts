@@ -38,6 +38,7 @@ describe("loadTools", { timeout: 30_000 }, () => {
       "send_dtmf",
       "send_whatsapp",
       "stop_recording",
+      "transfer_to_agent",
       "transfer_to_human",
     ]);
   });

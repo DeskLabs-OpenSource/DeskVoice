@@ -43,3 +43,24 @@ export async function waitFor(condition: () => boolean, what: string, timeoutMs 
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
+
+/**
+ * Grava a lista de destinos de passagem sem o gatilho que confere a organização, como um banco mexido à
+ * mão: é como o teste prova que a leitura também confere. Só o dono do schema (`owner`) consegue, e numa
+ * transação só, para nenhuma outra conexão ver a tabela sem o gatilho.
+ */
+export async function forceHandoffTargets(owner: Db, agentId: string, targets: string[]): Promise<void> {
+  const client = await owner.pool.connect();
+  try {
+    await client.query("begin");
+    await client.query("alter table agents disable trigger agents_handoff_targets_check");
+    await client.query("update agents set agent_handoff_targets = $2 where id = $1", [agentId, targets]);
+    await client.query("alter table agents enable trigger agents_handoff_targets_check");
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}

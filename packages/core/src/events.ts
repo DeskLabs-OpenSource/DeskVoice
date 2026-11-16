@@ -81,6 +81,9 @@ export const PURGED_SUMMARY_TEXT = "[resumo apagado pelo prazo de guarda]";
  * ..."): nas chamadas começadas antes de `before`, vira `PURGED_SUMMARY_TEXT` e entra na contagem
  * devolvida, junto com as falas. O resumo de chamada apagada a pedido do titular não é tocado: ele
  * já tem o marcador do apagamento, e essa linha não volta.
+ *
+ * O `reason` e o `summary` de `agent_handoff` (a passagem entre agentes) também são fala resumida:
+ * saem dos eventos gravados antes de `before`, ficam os agentes, e entram na contagem.
  */
 export async function purgeTranscripts(q: OrgQuery, before: Date): Promise<number> {
   if (q.organizationId === "") throw new Error("purgeTranscripts runs inside withOrg, never withSystem: it would reach every organization");
@@ -92,11 +95,17 @@ export async function purgeTranscripts(q: OrgQuery, before: Date): Promise<numbe
     before,
     JSON.stringify(PURGED_TRANSCRIPT),
   ]);
+  // O resumo e o motivo de uma passagem entre agentes são a conversa resumida pelo modelo: saem com
+  // as falas, e ficam os ids e os nomes dos agentes. Entram na contagem, como o resumo da chamada.
+  const handoffs = await q.exec(
+    "update call_events set payload = (payload - array['reason', 'summary']) || $2::jsonb where kind = 'agent_handoff' and payload ?| array['reason', 'summary'] and at < $1",
+    [before, JSON.stringify(PURGED_TRANSCRIPT)],
+  );
   // A linha da chamada fica: sai só o texto do resumo, e o marcador já gravado não é reescrito nem
   // recontado numa segunda passagem.
   const summaries = await q.exec("update calls set summary = $2 where summary is not null and summary <> $2 and erased_at is null and started_at < $1", [
     before,
     PURGED_SUMMARY_TEXT,
   ]);
-  return speech + summaries;
+  return speech + handoffs + summaries;
 }

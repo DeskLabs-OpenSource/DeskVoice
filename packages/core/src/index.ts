@@ -17,6 +17,7 @@ export * from "./phone";
 export * from "./public-address";
 export * from "./queue";
 export * from "./recordings";
+export * from "./remembered-text";
 export * from "./retention";
 export * from "./routing";
 export * from "./secrets";

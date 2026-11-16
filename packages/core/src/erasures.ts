@@ -48,6 +48,8 @@ const EVENT_RULES: ReadonlyArray<{ where: string; set: string }> = [
   // Só a transferência pedida pelo modelo tem `summary`, e o `reason` dela é texto livre. A do teto
   // de custo e a da falha do motor trazem um código (`cost_ceiling`, `engine_failed`) e ficam.
   { where: "kind = 'transfer_started' and payload ? 'summary'", set: `(payload - array['reason', 'summary']) || ${ERASED}` },
+  // A passagem entre agentes: o motivo e o resumo são texto livre do modelo sobre quem ligou. Ficam os ids e os nomes dos agentes.
+  { where: "kind = 'agent_handoff' and payload ?| array['reason', 'summary']", set: `(payload - array['reason', 'summary']) || ${ERASED}` },
   { where: "kind = 'dtmf_sent' and payload ? 'digits'", set: `(payload - 'digits') || ${ERASED}` },
   // O telefone do titular em qualquer evento (`call_started`, `call_refused`) vira nulo; o da linha da empresa fica.
   { where: "payload->>'from' = $2", set: `jsonb_set(payload, '{from}', 'null'::jsonb) || ${ERASED}` },

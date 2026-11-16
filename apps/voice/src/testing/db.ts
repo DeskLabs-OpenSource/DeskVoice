@@ -59,6 +59,8 @@ export function testSchedule(): { schedule: Schedule; now: () => number; fire(de
 }
 
 export interface AgentOptions {
+  name?: string;
+  roleLabel?: string | null;
   script?: SimulatedScript;
   instructions?: string;
   greeting?: string | null;
@@ -77,9 +79,24 @@ export async function createAgent(app: Db, organizationId: string, options: Agen
   const instructions = options.script ? SIMULATED_PREFIX + JSON.stringify(options.script) : (options.instructions ?? "Você é a recepção.");
   await withSystem(app, (q) =>
     q.exec(
-      `insert into agents (id, organization_id, name, instructions, greeting, engine, tools, transfer_to_e164, enabled, max_call_seconds, cost_ceiling_cents, vocabulary, listening_environment)
-       values ($1, $2, 'Recepção', $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, '{}'::text[]), coalesce($12, 'normal'))`,
-      [id, organizationId, instructions, options.greeting ?? null, options.engine ?? "simulated", options.tools ?? [], options.transferTo ?? null, options.enabled ?? true, options.maxCallSeconds ?? 600, options.costCeilingCents ?? 500, options.vocabulary ?? null, options.listeningEnvironment ?? null],
+      `insert into agents (id, organization_id, name, instructions, greeting, engine, tools, transfer_to_e164, enabled, max_call_seconds, cost_ceiling_cents, vocabulary, listening_environment, role_label)
+       values ($1, $2, coalesce($13, 'Recepção'), $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, '{}'::text[]), coalesce($12, 'normal'), $14)`,
+      [
+        id,
+        organizationId,
+        instructions,
+        options.greeting ?? null,
+        options.engine ?? "simulated",
+        options.tools ?? [],
+        options.transferTo ?? null,
+        options.enabled ?? true,
+        options.maxCallSeconds ?? 600,
+        options.costCeilingCents ?? 500,
+        options.vocabulary ?? null,
+        options.listeningEnvironment ?? null,
+        options.name ?? null,
+        options.roleLabel ?? null,
+      ],
     ),
   );
   return id;
@@ -165,8 +182,12 @@ export const eventsOf = (app: Db, callId: string): Promise<Array<{ kind: string;
 
 export const kindsOf = async (app: Db, callId: string): Promise<string[]> => (await eventsOf(app, callId)).map((event) => event.kind);
 
-export const ledgerOf = (app: Db, callId: string): Promise<Array<{ engine: string; seconds: number; input_tokens: number; output_tokens: number; cost_cents: number }>> =>
-  withSystem(app, (q) => q.many("select engine, seconds, input_tokens, output_tokens, cost_cents from usage_ledger where call_id = $1 order by at, cost_cents", [callId]));
+export const ledgerOf = (app: Db, callId: string): Promise<Array<{ engine: string; agent_id: string | null; seconds: number; input_tokens: number; output_tokens: number; cost_cents: number }>> =>
+  withSystem(app, (q) => q.many("select engine, agent_id, seconds, input_tokens, output_tokens, cost_cents from usage_ledger where call_id = $1 order by at, cost_cents", [callId]));
+
+/** Para quem o agente pode passar a ligação. Pelo caminho de sistema: o gatilho do banco confere a organização mesmo assim. */
+export const setHandoffTargets = (app: Db, agentId: string, targets: string[]): Promise<number> =>
+  withSystem(app, (q) => q.exec("update agents set agent_handoff_targets = $2 where id = $1", [agentId, targets]));
 
 export const approvalsOf = (app: Db, callId: string): Promise<Array<{ id: string; status: string; question: string }>> =>
   withSystem(app, (q) => q.many("select id, status, question from approvals where call_id = $1", [callId]));

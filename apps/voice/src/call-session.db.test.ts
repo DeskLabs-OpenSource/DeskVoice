@@ -791,7 +791,7 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
 
   it("teto de custo sem número de transferência: soma os incrementos de uso, grava o evento, despede e encerra", async () => {
     const manual = manualEngine({ keyless: true, centsPerMinute: 100 });
-    const { callId, transport, start, harness } = await scene("ceiling-cost", { engine: "manual", costCeilingCents: 150 }, manual);
+    const { callId, agentId, transport, start, harness } = await scene("ceiling-cost", { engine: "manual", costCeilingCents: 150 }, manual);
     const session = start();
     await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
 
@@ -812,11 +812,11 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
     expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "call_ended", "task_queued"]);
     expect(events[3]?.payload).toEqual({ costCents: 150, ceilingCents: 150 });
     expect(events[4]?.payload).toEqual({ status: "completed", reason: "cost_ceiling", costCents: 160, seconds: 96 });
-    // O extrato tem uma linha por medição, e a soma dele é o custo da chamada.
+    // O extrato tem uma linha por medição, cada uma no agente da ligação, e a soma dele é o custo da chamada.
     expect(await ledgerOf(app, callId)).toEqual([
-      { engine: "manual", seconds: 6, input_tokens: 0, output_tokens: 0, cost_cents: 10 },
-      { engine: "manual", seconds: 30, input_tokens: 0, output_tokens: 500, cost_cents: 50 },
-      { engine: "manual", seconds: 60, input_tokens: 1000, output_tokens: 0, cost_cents: 100 },
+      { engine: "manual", agent_id: agentId, seconds: 6, input_tokens: 0, output_tokens: 0, cost_cents: 10 },
+      { engine: "manual", agent_id: agentId, seconds: 30, input_tokens: 0, output_tokens: 500, cost_cents: 50 },
+      { engine: "manual", agent_id: agentId, seconds: 60, input_tokens: 1000, output_tokens: 0, cost_cents: 100 },
     ]);
     expect((await callOf(app, callId)).cost_cents).toBe(160);
     expect(transport.hangups).toBe(1);
