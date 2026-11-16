@@ -50,6 +50,15 @@ describe("a regra: marca e sugere, nunca troca", () => {
     expect(readSpeechDecision({ background: noul(0.21) }, vocabulary).marks).toEqual({});
   });
 
+  it("o corte do fundo também é ≥ 0,8: 0,8 exato marca, 0,7999 não marca", () => {
+    const edge = readSpeechDecision({ background: noul(0.2) }, vocabulary);
+    expect(edge.background).toBe(0.8);
+    expect(edge.marks).toEqual({ background: { confidence: 0.8 } });
+    const below = readSpeechDecision({ background: noul(0.2001) }, vocabulary);
+    expect(below.background).toBeCloseTo(0.7999, 10);
+    expect(below.marks).toEqual({});
+  });
+
   it("a leitura não recebe o texto: não há como trocá-lo", () => {
     // `readSpeechDecision` só vê as respostas e o vocabulário; o que ela devolve vai ao lado do texto.
     expect(readSpeechDecision.length).toBe(2);
