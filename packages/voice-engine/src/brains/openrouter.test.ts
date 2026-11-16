@@ -125,6 +125,35 @@ describe("brains/openrouter: lista de modelos", () => {
     }
   });
 
+  it("tarifa além do token, diferente de zero, deixa o modelo sem preço; zero publicado não", async () => {
+    const tokens = { prompt: "0.000001", completion: "0.000002" };
+    const body = {
+      data: [
+        textModel("inventor/com-pedido", { ...tokens, request: "0.005" }),
+        textModel("inventor/com-busca", { ...tokens, web_search: "0.01" }),
+        textModel("inventor/com-imagem", { ...tokens, image: "0.0003" }),
+        textModel("inventor/com-escrita-cache", { ...tokens, input_cache_write: "0.0000012" }),
+        textModel("inventor/tarifa-estranha", { ...tokens, request: "consulte" }),
+        textModel("inventor/tarifa-numero", { ...tokens }, { pricing: { ...tokens, request: 0.005 } }),
+        textModel("inventor/extras-zerados", { ...tokens, request: "0", image: "0.0", web_search: "0" }),
+        textModel("inventor/extras-numero-zero", { ...tokens }, { pricing: { ...tokens, request: 0, internal_reasoning: null } }),
+      ],
+    };
+    const { fetch } = fakeFetch({ key: KEY_OK, models: { status: 200, body } });
+    const result = await brain.listModels(KEY, { fetch, today: TODAY });
+    if (!result.ok) throw new Error("lista falhou");
+    const byId = new Map(result.models.map((m) => [m.id, m]));
+    expect(byId.size).toBe(8);
+    for (const id of ["inventor/com-pedido", "inventor/com-busca", "inventor/com-imagem", "inventor/com-escrita-cache", "inventor/tarifa-estranha", "inventor/tarifa-numero"]) {
+      const model = byId.get(id);
+      expect(model, id).toBeDefined();
+      expect(model && "price" in model, id).toBe(false);
+    }
+    for (const id of ["inventor/extras-zerados", "inventor/extras-numero-zero"]) {
+      expect(byId.get(id)?.price, id).toEqual({ centsPerMillionInputTokens: 100, centsPerMillionOutputTokens: 200, source: MODELS_URL, checkedOn: TODAY });
+    }
+  });
+
   it("sem nome publicado, o rótulo é o id; contexto nulo fica ausente", async () => {
     const { fetch } = fakeFetch({ key: KEY_OK, models: { status: 200, body: MODELS } });
     const result = await brain.listModels(KEY, { fetch, today: TODAY });

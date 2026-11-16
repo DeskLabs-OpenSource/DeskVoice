@@ -27,6 +27,10 @@
  *   - se `/api/v1/models` com `limit` e `offset` pagina de fato, ou devolve tudo de uma vez;
  *   - se a lista lida com a chave muda conforme as restrições da conta (provedores, região, dados);
  *   - o preço publicado negativo (`-1`) de modelos que roteiam para outros: aqui ele vira "sem preço".
+ *
+ * Além de `prompt`, `completion` e `input_cache_read`, o `pricing` da lista traz outros componentes
+ * (`request` por pedido, busca na web, imagem, escrita em cache). Qualquer um deles diferente de zero
+ * deixa o modelo sem preço: o `BrainPrice` só cobra por token, e o número ficaria abaixo da fatura.
  */
 import { z } from "zod";
 import type { Brain, BrainFailure, BrainModel, BrainPrice } from "../brain";
@@ -54,8 +58,23 @@ const modelItem = z.object({
   name: z.string().nullish(),
   context_length: z.number().int().positive().nullish(),
   architecture: z.object({ input_modalities: z.array(z.string()), output_modalities: z.array(z.string()) }),
-  pricing: z.object({ prompt: z.string(), completion: z.string(), input_cache_read: z.string().nullish() }),
+  pricing: z.object({ prompt: z.string(), completion: z.string(), input_cache_read: z.string().nullish() }).passthrough(),
 });
+
+/** Os componentes que o `BrainPrice` sabe cobrar. Qualquer outro diferente de zero cobra fora dele. */
+const PRICED_BY_TOKEN = new Set(["prompt", "completion", "input_cache_read"]);
+
+/** Zero publicado: `"0"`, `"0.0"` ou o número 0. Ausente ou nulo também não cobra. O resto conta como tarifa. */
+const isZeroOrAbsent = (value: unknown): boolean =>
+  value === undefined || value === null || value === 0 || (typeof value === "string" && /^0+(\.0+)?$/.test(value.trim()));
+
+/**
+ * Tarifa além do token (`request` por pedido, busca na web, imagem, escrita em cache e o que vier):
+ * o preço por token sozinho ficaria abaixo do cobrado. Preço incompleto mostrado como completo é o mesmo
+ * erro do zero inventado, então o modelo fica sem preço.
+ */
+const chargesBeyondTokens = (pricing: Record<string, unknown>): boolean =>
+  Object.entries(pricing).some(([key, value]) => !PRICED_BY_TOKEN.has(key) && !isZeroOrAbsent(value));
 const modelPage = z.object({ data: z.array(z.unknown()) });
 const withId = z.object({ id: z.string() });
 const keyInfo = z.object({ data: z.object({}).passthrough() });
@@ -72,7 +91,7 @@ const readModel =
     const output = centsPerMillionOf(pricing.completion);
     const cached = centsPerMillionOf(pricing.input_cache_read ?? undefined);
     const price: BrainPrice | undefined =
-      input === undefined || output === undefined
+      input === undefined || output === undefined || chargesBeyondTokens(pricing)
         ? undefined
         : {
             centsPerMillionInputTokens: input,
