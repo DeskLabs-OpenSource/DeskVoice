@@ -5,6 +5,11 @@ export interface ToolContext {
   organizationId: string;
   callId: string;
   agentId: string;
+  /**
+   * O idioma do agente do trecho (`agents.language`, o mesmo que vai ao motor). Escolhe o idioma do que
+   * a ferramenta fala por `say` e do texto pronto para ler em voz alta (o horário da agenda).
+   */
+  language: string;
   q: OrgQuery;
   clock: Clock;
   telephony: {
