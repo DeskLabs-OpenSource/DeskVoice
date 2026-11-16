@@ -3,6 +3,32 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.21.0] - 2026-11-16
+
+### Adicionado
+
+- **Base do catálogo de cérebros, com OpenAI e OpenRouter** O DeskVoice ganha a peça que lista os modelos de texto que uma chave da OpenAI ou do OpenRouter
+  alcança, lida da API do provedor e nunca de uma lista fixa, com o preço de cada modelo, a fonte e a
+  data, ou a marca de preço não conhecido. Ainda não há tela nem uso na ligação: os dois chegam nas
+  próximas entregas do catálogo. Nada muda em instalações existentes. Crédito: @melgarafael.
+- **Para quem contribui, o Claude Code ganha uma triagem de PR que só lê** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e revisa PRs. No
+  Claude Code, `/deskvoice-triagem-de-pr <número>` baixa o PR num worktree descartável, mede o diff
+  contra a régua da `main` (o que o CI não vê, os antipadrões e as regras de produto), roda a suíte
+  se a pessoa autorizar, passa o resultado por um cético e imprime um rascunho de parecer no formato
+  do `GOVERNANCE.md`, com o que não foi medido. Ele não publica nada no GitHub: quem publica, se
+  quiser, é a pessoa. PR que toca instalador, workflow, imagem, dependências, autenticação,
+  isolamento ou atualização sai com "pede segunda leitura de um mantenedor". Crédito: @melgarafael.
+- **O agente pode começar a ligação sabendo as notas e as pendências abertas do número** Em Configurações, no painel de privacidade, junto do prazo da memória, há uma chave nova: "Entregar
+  ao agente a memória do número". Ligada, o agente começa cada ligação, recebida ou feita pelo
+  sistema, com as notas guardadas sobre o número (até 10, dentro do prazo da memória) e os títulos
+  das pendências abertas dele (até 5), num bloco de no máximo 1 500 caracteres, que ele recebe como
+  dado e não como instrução. O resumo e as falas de ligações anteriores nunca entram, nem as notas e
+  pendências de chamadas simuladas. A linha do tempo da chamada mostra quantas notas e pendências
+  entraram, sem o texto. A tela avisa que o número exibido pode ser forjado e que o agente pode
+  repetir o que sabe para quem fingir ser a pessoa. Só dono ou administrador muda a chave, e cada
+  mudança fica no histórico de privacidade. Ela vem desligada: para quem já instalou, nada muda até
+  alguém ligá-la. Crédito: @melgarafael.
+
 ## [0.20.0] - 2026-11-16
 
 ### Adicionado
