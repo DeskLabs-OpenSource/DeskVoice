@@ -912,6 +912,34 @@ Aceite:
   atrasado, sem rede, fora da forma (a mesma regra da fatia 4 da R4);
 - o fragmento diz que nada muda para quem já instalou: o filtro nasce desligado.
 
+**Ajuste de 16/11 (Arquiteto, ao abrir a fatia com a trilha B andando ao lado):**
+
+- **A tela é uma página própria**, `/settings/speech-filter` ("Filtro de fala"), com o item no menu
+  de `settings/layout.tsx`, como `/settings/brains`. Ela **não toca** `settings/page.tsx`, que a
+  fatia 4b da R4 (trilha B) está mudando ao mesmo tempo.
+- **"Sem migration" vale para a escolha**, que fica em `settings`. A marca de estimado precisa de
+  uma coluna, porque o `cost_measured` da R4 (#354) quer dizer outra coisa: custo **zero** e fora do
+  teto. Aqui o custo estimado **é gravado e conta no teto**. Por isso, uma migration nova, só para a
+  frente: `alter table usage_ledger add column cost_estimated boolean not null default false;`.
+  Linha antiga e linha da voz ficam `false`. Ela não depende do #354: as duas acrescentam colunas
+  diferentes à mesma tabela.
+- **De onde vêm os tokens da estimativa:** os mesmos que o pedido leva (o `state` e as perguntas,
+  contados com a mesma regra que o arquivo de preço usa); a saída estimada é zero, e o PR diz isso.
+- **Fica de fora** (vai para uma fatia da tela de custo, depois da 4b): a marca "estimado" em
+  `/costs` e no detalhe da chamada. Nesta fatia a estimativa aparece na linha do tempo e no total.
+
+Arquivos que toca: `apps/panel/src/app/(app)/settings/speech-filter/**` (**novo**),
+`apps/panel/src/app/(app)/settings/layout.tsx` (uma linha do menu),
+`apps/panel/src/app/api/v1/speech-filter/**` (**novo**), `apps/panel/src/server/settings.ts` (só as
+chaves do filtro), `apps/panel/src/i18n/*/speech-filter.ts` (**novo**),
+`apps/panel/src/i18n/*/timeline.ts` (frases da marca, da sugestão e da observação),
+`apps/panel/src/app/(app)/calls/[id]/**` (só a exibição das marcas na linha do tempo),
+`apps/voice/src/call-session.ts` e `apps/voice/src/speech-filter*`,
+`packages/voice-engine/src/deciders/**`, `db/migrations/<novo>_custo_estimado.sql`,
+`docs/guides/filtro-de-fala*.md`, `.changes/`. Choque com a trilha B: `layout.tsx`,
+`server/settings.ts`, `timeline.ts` e `calls/[id]/**` (a 4b põe ali a marca de custo); são
+acréscimos de linha, e quem chegar depois faz o merge da `main`.
+
 ### Fatia 8: o serviço do Laya
 
 `deploy/laya/` (Dockerfile e servidor HTTP mínimo, com as três primitivas e nada mais), o serviço
