@@ -181,7 +181,7 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     expect(transport.hangups).toBe(1);
     // A chave existe e foi enviada: o aviso não manda cadastrá-la, manda conferir a conta e a chave no provedor.
     const notice = (await notificationsOf(app, organizationId))[0]?.body ?? "";
-    expect(notice).toMatch(/recusou a sessão: .*código 401/);
+    expect(notice).toMatch(/recusou a sessão ou não foi alcançado: .*código 401/);
     expect(notice).toMatch(/crédito/);
     expect(notice).not.toMatch(/Cadastre/);
   });

@@ -4,7 +4,7 @@
 //   `no_answer`). Os dicionários em inglês e espanhol seguem o tipo do português, então basta ele.
 // teto: lê os códigos escritos como texto (`end_reason = '...'`, `endReason: "..."`, o `reason` dos
 //   eventos `call_ended` e `call_refused`, o argumento de `.stop("...")`, os argumentos de
-//   `closeUnanswered` e os tipos `OutboundRefusalCode` e `Refusal`). Código que chega por outro caminho, numa
+//   `closeUnanswered` e os tipos `OutboundRefusalCode`, `Refusal` e `EngineRefusal`). Código que chega por outro caminho, numa
 //   variável, fica com a revisão.
 // revisar em: 2027-05-14
 import { describe, it, expect } from "vitest";
@@ -33,7 +33,7 @@ function reasonsWritten(root: string): Map<string, string> {
       for (const call of source.matchAll(/await closeUnanswered\(([\s\S]*?)\);/g)) {
         for (const match of (call[1] ?? "").matchAll(QUOTED)) add(match[1] ?? "", file);
       }
-      for (const union of source.matchAll(/type (?:OutboundRefusalCode|Refusal) = ([^;]+);/g)) {
+      for (const union of source.matchAll(/type (?:OutboundRefusalCode|Refusal|EngineRefusal) = ([^;]+);/g)) {
         for (const match of (union[1] ?? "").matchAll(QUOTED)) add(match[1] ?? "", file);
       }
     }
