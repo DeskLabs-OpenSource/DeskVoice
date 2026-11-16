@@ -145,6 +145,28 @@ describe("Jev: custo desconhecido nunca é zero", () => {
     expectEstimate(result, sent);
   });
 
+  it("atrasado depois de ler: a resposta chega, o prazo vence antes de terminar, e grava a estimativa", async () => {
+    const deadline = manualDeadline();
+    const sent: Sent[] = [];
+    // Um 200 com o consumo medido, mas o prazo vence enquanto o corpo é lido: o resultado é late, e o
+    // consumo declarado não vale (não foi aceito), então entra a estimativa pela entrada enviada.
+    const fetch = (async (url: string, init: RequestInit) => {
+      sent.push({ url, method: init.method ?? "GET", headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) });
+      const response = new Response(JSON.stringify(okBody), { status: 200 });
+      Object.defineProperty(response, "text", {
+        value: async () => {
+          deadline.expire();
+          return JSON.stringify(okBody);
+        },
+      });
+      return response;
+    }) as unknown as typeof globalThis.fetch;
+    const result = await jev.decide(KEY, input, { fetch, timeoutMs: 1000, schedule: deadline.schedule });
+    expect(result).toMatchObject({ failure: "late", status: 200 });
+    expectEstimate(result, sent);
+    expect(result.costCents).toBeGreaterThan(0);
+  });
+
   it("sem rede: a estimativa pela entrada enviada", async () => {
     const { fetch, sent } = fakeFetch("network");
     const result = await jev.decide(KEY, input, { fetch });

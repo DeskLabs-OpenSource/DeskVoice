@@ -285,13 +285,16 @@ describe("a chamada simulada", { timeout: 120_000 }, () => {
 
 describe("o Jev na chamada", { timeout: 120_000 }, () => {
   /** O Jev de verdade, com o `fetch` do teste no lugar da rede. */
-  function jevWith(reply: { status: number; body?: unknown } | "hang" | "network") {
+  /** `readUntilLate`: a resposta chega, e o corpo só termina de ser lido depois que o prazo vence. */
+  function jevWith(reply: { status: number; body?: unknown; readUntilLate?: true } | "hang" | "network") {
     const sent: unknown[] = [];
     const fetch = (async (_url: string, init: RequestInit) => {
       sent.push(JSON.parse(String(init.body)));
       if (reply === "network") throw new TypeError("fetch failed");
       if (reply === "hang") return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
-      return new Response(JSON.stringify(reply.body), { status: reply.status });
+      const response = new Response(JSON.stringify(reply.body), { status: reply.status });
+      if (reply.readUntilLate) Object.defineProperty(response, "text", { value: () => new Promise<string>((resolve) => init.signal?.addEventListener("abort", () => resolve(JSON.stringify(reply.body)))) });
+      return response;
     }) as unknown as typeof globalThis.fetch;
     const model: DecisionModel = { ...jev, decide: (apiKey, input, options) => jev.decide(apiKey, input, { ...options, fetch }) };
     return { model, sent };
@@ -393,6 +396,11 @@ describe("o Jev na chamada", { timeout: 120_000 }, () => {
     it("atrasado: o pedido cancelado pelo prazo grava a estimativa, e ela alcança o teto", async () => {
       const made = await estimatedScene("jev-estimated-late", "hang", true);
       expect(await readsOf(made.callId)).toEqual([expect.objectContaining({ onTime: false, failure: "late" })]);
+    });
+
+    it("atrasado depois de ler a resposta: grava a estimativa, não o consumo declarado, e ela alcança o teto", async () => {
+      const made = await estimatedScene("jev-estimated-late-read", { status: 200, body: okBody, readUntilLate: true }, true);
+      expect(await readsOf(made.callId)).toEqual([expect.objectContaining({ onTime: false, failure: "late", status: 200 })]);
     });
 
     it("sem rede: grava a estimativa, e ela alcança o teto", async () => {
