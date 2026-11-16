@@ -140,9 +140,12 @@ Quem apaga a nota vencida é a própria rotina do prazo, explicitamente (seção
   diz o que não sai: as ligações e as falas seguem o prazo de guarda da transcrição; as pendências
   **abertas** continuam, porque são obrigação da empresa com a pessoa; e o texto que o modelo mandou
   em ligações anteriores à fatia 1 continua onde já estava, nos argumentos de `create_task` gravados
-  em `tool_called` e no corpo dos avisos "Pendência: …" do sino (seção 6). Grava
-  `caller_notes_deleted` com o telefone e as duas contagens, como `caller_data_exported` já grava o
-  telefone.
+  em `tool_called` e no corpo dos avisos "Pendência: …" do sino (seção 6); e os avisos de
+  transferência e de recado da fatia 2, que copiam os títulos das pendências abertas na hora da
+  ligação e são da chamada (`call_id`), não da pendência, por isso a cascata não os alcança. Grava
+  `caller_notes_deleted` com as duas contagens e só os quatro últimos dígitos do telefone
+  (`phoneSuffix`), como `caller_data_erased`: `organization_events` não tem prazo, e o registro do
+  pedido não pode guardar o número esquecido (ajuste da revisão do #298).
 
 ### 2.4 Prazo de guarda e exportação (0014)
 

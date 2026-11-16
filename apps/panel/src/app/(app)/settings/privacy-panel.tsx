@@ -14,6 +14,7 @@ import { ActionStatus, useAction, useErrorText } from "../../../ui/errors";
 import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Button, Field, Notice, Panel, Skeleton, Switch, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
+import { forgetTarget } from "../../../ui/forget-target";
 import { notesRetentionNeedsConfirm, notesRetentionProblem } from "../../../ui/notes-retention";
 
 type Kind = keyof PrivacyDictionary["history"];
@@ -110,9 +111,9 @@ function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
     case "caller_notes_purged":
       return fill(t.history.caller_notes_purged, { days: numberOf(p.retentionDays), count: numberOf(p.count) });
     case "caller_notes_deleted":
-      // Sem telefone: uma nota apagada pelo botão do bloco "Este número". Com telefone: "Esquecer este número".
-      return typeof p.phone === "string"
-        ? fill(t.history.caller_notes_deleted, { who, phone: formatPhone(p.phone), notes: numberOf(p.notes), followUps: numberOf(p.followUps) })
+      // Sem final de telefone: uma nota apagada pelo botão do bloco "Este número". Com ele: "Esquecer este número".
+      return typeof p.phoneSuffix === "string"
+        ? fill(t.history.caller_notes_deleted, { who, suffix: p.phoneSuffix, notes: numberOf(p.notes), followUps: numberOf(p.followUps) })
         : fill(t.noteDeleted, { who });
     case "caller_notes_retention_changed": {
       // `from` nulo: a organização nunca tinha escolhido, e valia o prazo de fábrica.
@@ -163,6 +164,7 @@ export function PrivacyPanel() {
   // O telefone que espera confirmação: o botão que apaga só existe com ele na tela, e o nomeia.
   const [forgetConfirming, setForgetConfirming] = useState<string | null>(null);
   const [forgotten, setForgotten] = useState<Forgotten | null>(null);
+  const [forgetInvalid, setForgetInvalid] = useState<string | null>(null);
   const notesSaver = useAction();
   const [notesDays, setNotesDays] = useState("");
   const [notesProblem, setNotesProblem] = useState<string | null>(null);
@@ -351,10 +353,13 @@ export function PrivacyPanel() {
           onSubmit={(event) => {
             event.preventDefault();
             setForgotten(null);
-            setForgetConfirming(forgetPhone.trim());
+            // A confirmação nomeia o número como o servidor o vai usar; o inválido não chega a abrir.
+            const target = forgetTarget(forgetPhone);
+            setForgetInvalid(target === null ? fill(t.forgetInvalid, { phone: forgetPhone.trim() }) : null);
+            setForgetConfirming(target);
           }}
         >
-          <Field label={t.forgetPhone} hint={t.forgetPhoneHint}>
+          <Field label={t.forgetPhone} hint={t.forgetPhoneHint} error={forgetInvalid ?? undefined}>
             <TextInput
               mono
               type="tel"
@@ -363,6 +368,7 @@ export function PrivacyPanel() {
               onChange={(event) => {
                 setForgetPhone(event.target.value);
                 setForgetConfirming(null);
+                setForgetInvalid(null);
               }}
               required
             />

@@ -216,12 +216,13 @@ describe("apagar uma nota e esquecer um número (fatia 3b)", () => {
     expect(await deletedEvents(org)).toEqual([]);
   });
 
-  it("esquecer apaga as notas e as pendências fechadas, deixa as abertas, grava o telefone e as contagens, e não toca a outra organização", async () => {
+  it("esquecer apaga as notas e as pendências fechadas, deixa as abertas, grava o final do telefone e as contagens, e não toca a outra organização", async () => {
     const mine = await createOrganization(panel.app, "forget mine");
     const theirs = await createOrganization(panel.app, "forget theirs");
     const admin = await createUser(panel.app, mine, "admin");
     const first = await noteOf(mine, NOTE);
     await noteOf(mine, "Segunda nota do número.");
+    await noteOf(mine, "Terceira nota do número.");
     await noteOf(mine, "Nota de outro número.", "+5531900001111");
     await followUpOf(mine, first, "done", "Retornar sobre o orçamento");
     await followUpOf(mine, first, "canceled", "Mandar o boleto");
@@ -231,13 +232,17 @@ describe("apagar uma nota e esquecer um número (fatia 3b)", () => {
 
     const result = await call(forget, { method: "POST", cookie: admin.cookie, body: { phone: PHONE } });
     expect(result.status).toBe(200);
-    expect(result.data).toEqual({ phone: PHONE, notes: 2, followUps: 2 });
+    expect(result.data).toEqual({ phone: PHONE, notes: 3, followUps: 2 });
 
     expect((await notesOf(mine)).map((note) => note.text)).toEqual(["Nota de outro número."]);
     expect(await read(mine, "select title, status from follow_ups")).toEqual([{ title: "Confirmar a consulta", status: "open" }]);
-    expect(await deletedEvents(mine)).toEqual([{ actor_user_id: admin.id, payload: { phone: PHONE, notes: 2, followUps: 2 } }]);
+    // Notas e pendências em contagens diferentes: trocar uma pela outra fica vermelho.
+    // Só os quatro últimos dígitos: o registro não tem prazo e não guarda o número esquecido.
+    expect(await deletedEvents(mine)).toEqual([{ actor_user_id: admin.id, payload: { phoneSuffix: PHONE.slice(-4), notes: 3, followUps: 2 } }]);
+    expect(JSON.stringify(await read(mine, "select payload from organization_events"))).not.toContain(PHONE.slice(1));
     expect(await allEvents(mine)).not.toContain(NOTE);
     expect(await allEvents(mine)).not.toContain("Segunda nota");
+    expect(await allEvents(mine)).not.toContain("Terceira nota");
 
     expect((await notesOf(theirs)).map((note) => note.text)).toEqual([NOTE]);
     expect(await read(theirs, "select title from follow_ups")).toEqual([{ title: "Fechada da outra" }]);
@@ -245,7 +250,7 @@ describe("apagar uma nota e esquecer um número (fatia 3b)", () => {
 
     // O registro da tela mostra quem esqueceu o número.
     const shown = (await call(privacy, { cookie: admin.cookie })).data as { history: { kind: string; actorName: string | null; payload: unknown }[] };
-    expect(shown.history).toContainEqual(expect.objectContaining({ kind: "caller_notes_deleted", payload: { phone: PHONE, notes: 2, followUps: 2 } }));
+    expect(shown.history).toContainEqual(expect.objectContaining({ kind: "caller_notes_deleted", payload: { phoneSuffix: PHONE.slice(-4), notes: 3, followUps: 2 } }));
   });
 
   it("esquecer um número sem nada grava o pedido mesmo assim, com contagens zero", async () => {
@@ -253,7 +258,7 @@ describe("apagar uma nota e esquecer um número (fatia 3b)", () => {
     const owner = await createUser(panel.app, org, "owner");
     const result = await call(forget, { method: "POST", cookie: owner.cookie, body: { phone: PHONE } });
     expect(result.data).toEqual({ phone: PHONE, notes: 0, followUps: 0 });
-    expect(await deletedEvents(org)).toEqual([{ actor_user_id: owner.id, payload: { phone: PHONE, notes: 0, followUps: 0 } }]);
+    expect(await deletedEvents(org)).toEqual([{ actor_user_id: owner.id, payload: { notes: 0, followUps: 0, phoneSuffix: PHONE.slice(-4) } }]);
   });
 
   it("recusa telefone fora do formato", async () => {

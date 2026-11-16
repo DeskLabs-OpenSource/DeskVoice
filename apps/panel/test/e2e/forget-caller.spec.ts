@@ -89,7 +89,13 @@ test("passo 2: esquecer um número nomeia o número, diz o que fica, apaga as no
 
   await page.goto("/settings/privacy");
   const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: privacy.forgetTitle, exact: true }) });
-  await panel.getByLabel(privacy.forgetPhone).fill(phone);
+  // O número inválido é recusado antes de a confirmação abrir.
+  await panel.getByLabel(privacy.forgetPhone).fill("999990000");
+  await panel.getByRole("button", { name: privacy.forgetRun, exact: true }).click();
+  await expect(panel.getByText(fill(privacy.forgetInvalid, { phone: "999990000" }), { exact: true })).toBeVisible();
+  await expect(panel.getByText(privacy.forgetKeeps)).toHaveCount(0);
+  // Digitado sem o +55, a confirmação nomeia o número como o servidor o vai esquecer.
+  await panel.getByLabel(privacy.forgetPhone).fill(phone.slice(3));
   await panel.getByRole("button", { name: privacy.forgetRun, exact: true }).click();
 
   // A confirmação nomeia o número e diz o que não sai: as ligações e as pendências abertas.
@@ -97,6 +103,7 @@ test("passo 2: esquecer um número nomeia o número, diz o que fica, apaga as no
   await expect(panel.getByText(privacy.forgetKeeps)).toBeVisible();
   expect(privacy.forgetKeeps).toContain("as pendências abertas, que continuam");
   expect(privacy.forgetKeeps).toContain("as ligações e as falas desse número");
+  expect(privacy.forgetKeeps).toContain("os avisos do sino de transferência e de recado");
   // Antes de confirmar, nada saiu.
   expect((await history(second)).noteCount).toBe(2);
 
@@ -107,9 +114,11 @@ test("passo 2: esquecer um número nomeia o número, diz o que fica, apaga as no
   expect(after.noteCount).toBe(0);
   expect(after.openFollowUpCount).toBe(before.openFollowUpCount);
 
-  // O registro mostra quem esqueceu qual número, com as contagens e sem o texto da nota.
-  const entry = page.getByRole("listitem").filter({ hasText: fill(privacy.history.caller_notes_deleted, { who: "", phone: shown, notes: 2, followUps: 1 }).trim() });
+  // O registro mostra quem esqueceu o número terminado em quais dígitos, com as contagens, sem o
+  // número inteiro e sem o texto da nota.
+  const entry = page.getByRole("listitem").filter({ hasText: fill(privacy.history.caller_notes_deleted, { who: "", suffix: phone.slice(-4), notes: 2, followUps: 1 }).trim() });
   await expect(entry).toBeVisible();
+  await expect(entry).not.toContainText(shown);
   await expect(page.getByText(SCRIPTED_NOTE)).toHaveCount(0);
 });
 
