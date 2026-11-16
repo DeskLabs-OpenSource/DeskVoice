@@ -1,7 +1,8 @@
 // Issue #348: o campo "Idioma da conversa" do agente é texto livre, e o rótulo com região (`en-US`,
-// `es-MX`) caía no pt-BR nas três falas que o sistema diz por conta própria. A escolha do idioma é
-// uma só (`spokenLanguageOf`), e este arquivo mede as três falas pelos três pontos de entrada: o
-// aviso da caixa postal, a saudação da passagem entre agentes e as falas da agenda.
+// `es-MX`) caía no pt-BR na saudação da passagem entre agentes e nas falas da agenda. A escolha do
+// idioma é uma só (`spokenLanguageOf`), e este arquivo mede as três falas fixas pelos três pontos de
+// entrada. O aviso da caixa postal lê o ajuste da organização (três opções na tela), não o do agente:
+// aqui ele só prova que passa pelo mesmo normalizador.
 import { DEFAULT_SPOKEN_LANGUAGE, spokenLanguageOf, voicemailLanguageOf } from "@deskvoice/core";
 import { describe, expect, it } from "vitest";
 // As falas da agenda moram num módulo interno de `@deskvoice/tools` (a raiz do pacote exporta as

@@ -1,7 +1,7 @@
 // dono: @DeskLabs-OpenSource/maintainers
 // motivo: o aviso da caixa postal, a saudação da passagem entre agentes e as falas da agenda
 //   escolhiam idioma por um mapa de três valores copiado em cada lugar, com a queda para o pt-BR
-//   escrita à mão; `en-US` de agente configurado saía em português nas três (#348).
+//   escrita à mão; `en-US` de agente configurado saía em português na passagem e na agenda (#348).
 // revisar em: 2027-05-16
 import { describe, it, expect } from "vitest";
 import { REPO_ROOT, expectClean, exists, fixture, isSource, isTest, listFiles, read } from "./_lib";
