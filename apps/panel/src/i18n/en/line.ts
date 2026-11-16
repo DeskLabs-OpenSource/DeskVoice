@@ -19,10 +19,11 @@ const line: LineDictionary = {
     "One per line: IP or block (54.172.60.0/30), never a name. A carrier that delivers calls from several regions publishes several blocks and asks you to allow all of them; without them, the call is lost when the main region goes down.",
   matchExtraRegisterHint:
     "One per line: IP or block (54.172.60.0/30), never a name. Only for a carrier that registers the line through one server and delivers the call from another: the line is still recognized by the registration, and these addresses are only accepted for incoming traffic.",
-  allowed: "Accepts calls from",
+  allowed: "Will accept calls from",
   allowedNone: "no address yet. The list appears once the line is applied (Save line or Test line); a failed line accepts no calls.",
+  allowedToday: "Today the server still accepts calls from any address: this list only takes effect once the incoming filter is turned on, in a future version.",
   allowedResolvedAt: "Addresses of the name {name} updated on {when}.",
-  allowedHint: "If calls from this carrier stop arriving, it may be delivering from another address: add it to Extra addresses.",
+  allowedHint: "Once the filter is on, if calls from this carrier stop arriving, it may be delivering from another address: add it to Extra addresses.",
   outboundHost: "Address for outbound calls (optional)",
   outboundHostHint: "Name or IP of the provider for calls that leave through this line, such as account.pstn.twilio.com. It is the only field of a line by IP that accepts a name. Blank, the server address above is used; with a block, the line only receives.",
   username: "User",

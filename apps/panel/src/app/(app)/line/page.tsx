@@ -41,7 +41,11 @@ function hostName(host: string): string | null {
   return /^[a-z0-9.-]+$/i.test(bare) && /[a-z]/i.test(bare) ? bare : null;
 }
 
-/** De onde a central aceita a ligação desta linha, como o processo de voz gravou (R14). */
+/**
+ * De onde a central vai aceitar a ligação desta linha, como o processo de voz gravou (R14). Nesta
+ * versão nada é filtrado: a tela diz o estado de hoje (aceita de qualquer endereço) para não
+ * prometer uma proteção que ainda não existe.
+ */
 function AllowedAddresses({ trunk, t }: { trunk: Trunk; t: LineDictionary }) {
   const locale = useLocale();
   const name = hostName(trunk.host);
@@ -52,6 +56,7 @@ function AllowedAddresses({ trunk, t }: { trunk: Trunk; t: LineDictionary }) {
         <span className="font-bold">{t.allowed}:</span>{" "}
         {allowed.length > 0 ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{t.allowedNone}</span>}
       </p>
+      <p className="text-[0.87rem]">{t.allowedToday}</p>
       {name !== null && trunk.inboundResolvedAt ? <p className="text-[0.87rem] text-muted">{fill(t.allowedResolvedAt, { name, when: formatDateTime(trunk.inboundResolvedAt, locale) })}</p> : null}
       <p className="text-[0.87rem] text-muted">{t.allowedHint}</p>
     </div>
