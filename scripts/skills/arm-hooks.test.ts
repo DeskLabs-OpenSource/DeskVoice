@@ -139,6 +139,24 @@ describe("arm-hooks.sh", () => {
     expect(hooksPath(d)).toBe("");
   });
 
+  // No Git Bash o `pwd` devolve `/c/...` e o git grava `C:/...`: mesma pasta, texto diferente. A barra
+  // no fim reproduz essa forma sem Windows.
+  it("reconhece a cópia escrita de outro jeito (mesma pasta, texto diferente)", () => {
+    const d = repo();
+    expect(arm(d).status).toBe(0);
+    git(d, "config", "core.hooksPath", `${dest(d)}/`);
+    writeFileSync(join(d, legacy, "pre-push"), "#!/usr/bin/env bash\n# novo\nexit 0\n");
+    const r = arm(d);
+    expect(r.status).toBe(0);
+    expect(hooksPath(d)).toBe(dest(d));
+    expect(readFileSync(join(dest(d), "pre-push"), "utf8")).toContain("# novo");
+
+    git(d, "config", "core.hooksPath", `${dest(d)}/`);
+    expect(arm(d, "--disarm").status).toBe(0);
+    expect(hooksPath(d)).toBe("");
+    expect(existsSync(dest(d))).toBe(false);
+  });
+
   it("uma worktree vê os hooks armados (pasta comum)", () => {
     const d = repo();
     expect(arm(d).status).toBe(0);

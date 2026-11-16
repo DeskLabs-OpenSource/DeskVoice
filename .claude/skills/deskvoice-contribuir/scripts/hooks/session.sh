@@ -25,11 +25,15 @@ echo "$today" > "$marker" 2>/dev/null || true
 # relativo das versões antigas, que segue o ramo em que você está e precisa ser armado de novo.
 arm="bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh"
 dest="$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)/deskvoice-hooks"
+current="$(git config --get core.hooksPath 2>/dev/null || true)"
+# Mesmo caminho escrito de outro jeito (Git Bash: `C:/...`; barra no fim) também conta.
+cur_abs="$( [ -n "$current" ] && cd "$current" 2>/dev/null && pwd || true )"
 hooks="NÃO armados ($arm)"
-case "$(git config --get core.hooksPath 2>/dev/null || true)" in
-  "$dest") hooks="armados" ;;
-  ".agents/skills/deskvoice-contribuir/scripts/hooks") hooks="armados à moda antiga: arme de novo ($arm)" ;;
-esac
+if [ "$current" = "$dest" ] || [ "$cur_abs" = "$dest" ]; then
+  hooks="armados"
+elif [ "$current" = ".agents/skills/deskvoice-contribuir/scripts/hooks" ]; then
+  hooks="armados à moda antiga: arme de novo ($arm)"
+fi
 
 cat <<TXT
 [DeskVoice] Clone de contribuidor. Antes de codar ou commitar, carregue a skill deskvoice-contribuir:

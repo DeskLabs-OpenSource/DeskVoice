@@ -24,9 +24,14 @@ src=".agents/skills/deskvoice-contribuir/scripts/hooks"
 legacy="$src"
 dest="$(cd "$(git rev-parse --git-common-dir)" && pwd)/deskvoice-hooks"
 current="$(git config --get core.hooksPath || true)"
+# O mesmo caminho pode vir escrito de outro jeito (no Git Bash, `C:/...` em vez de `/c/...`; ou com
+# barra no fim): compara também a forma que o `cd` + `pwd` desta shell devolve. Se a pasta sumiu, só
+# a comparação literal vale.
+cur_abs="$( [ -n "$current" ] && cd "$current" 2>/dev/null && pwd || true )"
+ours() { [ "$current" = "$legacy" ] || [ "$current" = "$dest" ] || [ "$cur_abs" = "$dest" ]; }
 
 if [ "${1:-}" = "--disarm" ]; then
-  if [ "$current" = "$legacy" ] || [ "$current" = "$dest" ]; then
+  if ours; then
     git config --unset core.hooksPath
     rm -rf "$dest"
     echo "ok: hooks do contribuidor desarmados."
@@ -36,7 +41,7 @@ if [ "${1:-}" = "--disarm" ]; then
   exit 0
 fi
 
-if [ -n "$current" ] && [ "$current" != "$legacy" ] && [ "$current" != "$dest" ]; then
+if [ -n "$current" ] && ! ours; then
   echo "core.hooksPath já aponta para '$current': este clone tem hooks próprios e eu não sobrescrevo." >&2
   echo "Se quiser trocar mesmo assim: git config --unset core.hooksPath e rode este script de novo" >&2
   exit 2
