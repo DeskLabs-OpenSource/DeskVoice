@@ -281,6 +281,38 @@ Com o `firewalld` no ar, as pontes do Docker vão para a zona `docker`, e a inte
 situações. É o mesmo resultado do `ufw`: a zona do host filtra o que escuta no host, e não o que o
 Docker publica, nem com `reject` explícito. O instalador avisa disso e não roda `firewall-cmd`.
 
+### A regra no `DOCKER-USER` com o `firewalld` ativo, o reload e o reinício
+
+Medido em 15/11/2026 na mesma VPS (AlmaLinux 9.8, Docker 29.9.3, `iptables` 1.8.10 nf_tables,
+`firewalld` 1.3.4, zona `public`, ligado à mão com o Docker já rodando e sem ligar no boot). Um
+contêiner de prova publicado com `-p 48080:80/tcp` foi sondado de fora, de outra rede (um computador
+em outro provedor), com `curl -m 6`. A regra é a mesma da seção 5:
+`iptables -I DOCKER-USER 1 -p tcp -m conntrack --ctorigdstport 48080 --ctdir ORIGINAL -j DROP`.
+
+| Situação | 48080/tcp de fora |
+|---|---|
+| `firewalld` ativo, sem a regra | responde |
+| `firewalld` ativo, com a regra | **fechada** (o contador da regra sobe a cada sonda) |
+| logo depois de `firewall-cmd --reload` | **responde por cerca de 4 s**, e depois fecha de novo |
+| depois de reiniciar a máquina | responde: a cadeia `DOCKER-USER` volta vazia |
+
+- **Com o `firewalld` ativo, a regra fecha a porta**, como com o `ufw`. O `firewalld` cria a tabela
+  `inet firewalld` dele e não reescreve a `DOCKER-USER`: a regra continua listada e contando.
+- **A cada `firewall-cmd --reload` sobra uma janela.** Sondando uma vez por segundo, a porta
+  respondeu de 01:23:42 a 01:23:45 UTC e fechou em 01:23:46, com a regra listada o tempo todo. Ao
+  que tudo indica, é o tempo que o Docker leva para refazer as cadeias dele depois do reload do
+  `firewalld`. Isso não foi medido por dentro.
+- **A regra criada à mão não sobrevive ao reinício.** `iptables -I` só vale até a máquina desligar;
+  depois do boot, a `DOCKER-USER` voltou vazia e a porta voltou a responder. Quem quiser a regra
+  depois de reiniciar precisa recriá-la no boot, por exemplo num serviço do systemd que rode depois
+  do Docker. Isso não foi medido.
+- Os serviços do DeskVoice voltaram sozinhos depois do reinício, com a checagem de saúde verde e o
+  WhatsApp de ligação reconectado em segundos.
+
+Antes de ligar o `firewalld` nessa VPS, foi preciso liberar a porta do SSH dela (22022) na
+configuração permanente: a zona `public` de fábrica libera o serviço `ssh`, que é a porta 22. Em
+VPS com o SSH em outra porta, ligar o `firewalld` sem isso corta o acesso.
+
 ## O que mudou no kit
 
 A regra continua sendo oferecida, e a mensagem passa a dizer a verdade: ela é opcional, vale para
@@ -293,14 +325,16 @@ A mensagem nova ataca o segundo sem criar o primeiro.
 ## O que não foi medido
 
 - **`firewalld`, além do que está na seção dele**: o `firewalld` foi ligado com o Docker já rodando,
-  e não com os dois subindo juntos no boot. Também não foram medidos o `DOCKER-USER` com o
-  `firewalld` ativo, o IPv6, nem uma ligação de verdade com ele ligado.
+  e não com os dois subindo juntos no boot. A regra no `DOCKER-USER` com ele ativo foi medida só em
+  TCP, e não em UDP. Também não foram medidos uma ligação de verdade com ele ligado, nem uma regra
+  recriada no boot.
 - **UDP de fora, de verdade**: o check-host não sonda UDP. O UDP foi medido de um namespace com
   `veth` no mesmo host, que percorre as mesmas cadeias (`PREROUTING` → DNAT → `FORWARD`), mas não
   passa por um roteador de verdade. O TCP, esse sim, foi medido de três países. Vale para o UDP
   tudo o que está medido acima, inclusive a regra que fecha (seção 6). A medição do `firewalld`
   é a exceção: nela o UDP saiu de uma máquina fora da VPS, por outra rede.
 - **IPv6**: o `ufw` cria as regras também em `(v6)` e o Docker publica em `[::]`, mas nenhuma sonda
-  externa usou IPv6.
+  externa usou IPv6. A VPS da medição do `firewalld` não tem endereço IPv6 público, então lá não há o
+  que sondar.
 - **Docker com o iptables desligado**: nesse modo o Docker não escreve as regras dele e o `ufw`
   volta a valer. Não foi medido; é a razão de a regra continuar sendo oferecida.
