@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { promises as dns } from "node:dns";
 import { chmod, chown, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { decryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core";
+import { decryptSecret, inboundFilterOn, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import { messageOf, type Logger } from "./log";
 import { realSchedule, type Schedule } from "./transport";
@@ -44,6 +44,13 @@ export interface TrunkConfig {
    * entra no `identify`.
    */
   outboundHost?: string | null;
+  /**
+   * A coluna `trunks.inbound_filter` (R14 contrato 11), crua. Só vale para a linha por registro:
+   * com `false`, o endpoint dela sai sem `deny` e sem `permit`, mesmo com o conjunto cheio, até
+   * alguém conferir a lista e ligar na tela. Ausente vale `true`. Nunca leia direto: o filtro
+   * efetivo é `inboundFilterOn` (a linha por IP filtra sempre).
+   */
+  inboundFilter?: boolean;
 }
 
 export type TrunkHealth = { id: string; status: "ok" | "warn" | "fail"; detail: string };
@@ -101,7 +108,7 @@ const value = (text: string): string => text.replaceAll(";", "\\;");
  * leva o IP privado do contêiner e há provedor que derruba a ligação) e `ulaw`/`alaw`, que casam
  * com o AudioSocket sem transcodificar.
  */
-function renderTrunk(trunk: TrunkConfig, inbound: Inbound, identify: boolean): string {
+function renderTrunk(trunk: TrunkConfig, inbound: Inbound, identify: boolean, permit: readonly string[]): string {
   const name = trunkEndpointName(trunk.id);
   const withAuth = trunk.username !== null && trunk.password !== null;
   const publicIp = trunk.publicIp !== null && IPV4.test(trunk.publicIp) ? trunk.publicIp : null;
@@ -120,6 +127,10 @@ function renderTrunk(trunk: TrunkConfig, inbound: Inbound, identify: boolean): s
     "rtp_symmetric=yes",
     "force_rport=yes",
     "rewrite_contact=yes",
+    // O filtro de entrada da linha (R14): recusa tudo e libera só os endereços DESTA linha. Por
+    // endpoint, nunca numa lista global (`type=acl`): com a lista global, o endereço da operadora
+    // de uma organização entraria na linha de outra. Conjunto vazio sai sem filtro (contrato 8).
+    ...(permit.length > 0 ? ["deny=0.0.0.0/0.0.0.0", "deny=::/0", ...permit.map((address) => `permit=${address}`)] : []),
     "",
     `[${name}]`,
     "type=aor",
@@ -210,6 +221,10 @@ const overlap = (a: Inbound, b: Inbound): boolean => a.hosts.some((mine) => b.ho
 
 /**
  * O arquivo inteiro. Tronco que não pode ser escrito fica de fora, com o motivo em `skipped`.
+ * `allowed` é o conjunto liberado de cada linha, calculado por `computeAllowed` na mesma aplicação:
+ * vira o `deny` e os `permit` do endpoint. Linha sem conjunto (vazio ou ausente) ou com o filtro
+ * efetivo desligado (`inboundFilterOn`: só a linha por registro com `inboundFilter: false`) sai
+ * sem filtro.
  *
  * As linhas válidas de endereço numérico são agrupadas por sobreposição de endereço (ver o
  * comentário no topo do arquivo), item por item: uma linha com vários blocos pertence a todos os
@@ -220,7 +235,10 @@ const overlap = (a: Inbound, b: Inbound): boolean => a.hosts.some((mine) => b.ho
  * Em qualquer grupo, linha em modo `register` sai normalmente, reconhecida pelo `line` do registro.
  * Linha inválida por outro motivo não entra em grupo nenhum.
  */
-export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
+export function renderTrunksConf(
+  trunks: TrunkConfig[],
+  allowed: ReadonlyMap<string, readonly string[]> = new Map(),
+): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
   const skipped: Array<{ id: string; reason: string }> = [];
   const valid: Array<{ trunk: TrunkConfig; inbound: Inbound; group: number }> = [];
   for (const trunk of [...trunks].sort((a, b) => a.id.localeCompare(b.id))) {
@@ -255,7 +273,10 @@ export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped
     const identify = oneOrganization && group[0] === entry;
     if (!identify && entry.trunk.authMode === "ip") skipped.push({ id: entry.trunk.id, reason: SHARED_HOST_REASON });
     else {
-      sections.push(renderTrunk(entry.trunk, entry.inbound, identify));
+      // O `permit` passa de novo pela regra do contrato 2: só IP ou bloco, nunca bloco largo demais.
+      // Com o filtro efetivo desligado (contrato 11), nada de `permit`: o endpoint sai sem filtro.
+      const permit = inboundFilterOn(entry.trunk) ? canonicalAddresses(allowed.get(entry.trunk.id) ?? []) : [];
+      sections.push(renderTrunk(entry.trunk, entry.inbound, identify, permit));
       emitted.push(entry.trunk.id);
     }
   }
@@ -265,19 +286,67 @@ export function renderTrunksConf(trunks: TrunkConfig[]): { conf: string; skipped
 }
 
 /**
- * Os endereços de onde a central aceita a ligação de uma linha (R14). É a fonte única: a tela mostra
- * o que esta função devolve (gravado em `trunks.inbound_allowed`), e o filtro da central vai liberar
- * a mesma lista. Canônicos (a forma de `parseTrunkHost`), sem repetição, só IP ou bloco, e nunca um
- * bloco mais largo que o piso de `isBlockTooWide`.
+ * Os endereços de onde a central aceita a ligação de uma linha (R14), montados a partir das partes.
+ * Canônicos (a forma de `parseTrunkHost`), sem repetição, só IP ou bloco, e nunca um bloco mais
+ * largo que o piso de `isBlockTooWide`.
  *   - `host` numérico (linha por IP, ou registro com IP): ele mesmo;
- *   - `host` nome (registro): `resolved`, os endereços que o nome resolve, em ordem fixa;
- *   - mais os `match_extra`, nos dois modos.
- * A linha deixada de fora do arquivo não passa por aqui: o conjunto dela é vazio.
+ *   - `host` nome (registro): `fromName`, o que veio do nome, em ordem fixa;
+ *   - mais os `match_extra` ATUAIS, nos dois modos.
+ * A linha deixada de fora do arquivo não passa por aqui: o conjunto dela é vazio. O filtro e a tela
+ * não chamam esta função direto: os dois leem o resultado de `computeAllowed` (contrato 6).
  */
-export function allowedAddresses(trunk: Pick<TrunkConfig, "host" | "matchExtra">, resolved: readonly string[] = []): string[] {
+export function allowedAddresses(trunk: Pick<TrunkConfig, "host" | "matchExtra">, fromName: readonly string[] = []): string[] {
   const host = parseTrunkHost(trunk.host);
-  const fromHost = host?.kind === "address" ? [trunk.host] : [...resolved].map((value) => parseTrunkHost(value)).flatMap((parsed) => (parsed?.kind === "address" ? [parsed.match] : [])).sort();
+  const fromHost = host?.kind === "address" ? [trunk.host] : [...fromName].map((value) => parseTrunkHost(value)).flatMap((parsed) => (parsed?.kind === "address" ? [parsed.match] : [])).sort();
   return canonicalAddresses([...fromHost, ...(trunk.matchExtra ?? [])]);
+}
+
+/** Quantos endereços vindos do nome uma linha aceita (contrato 9). Com os 16 extras e o `host`, 33. */
+export const MAX_FROM_NAME = 16;
+
+/**
+ * O que um nome resolveu, como entra no conjunto: canônico, sem repetição, em ordem fixa (a mesma
+ * resposta dá sempre a mesma escolha) e no máximo `MAX_FROM_NAME`. `over` diz se sobrou endereço.
+ */
+export function nameAddresses(resolved: readonly string[]): { addresses: string[]; over: boolean } {
+  const all = canonicalAddresses(resolved).sort();
+  return { addresses: all.slice(0, MAX_FROM_NAME), over: all.length > MAX_FROM_NAME };
+}
+
+/**
+ * Por quanto tempo um endereço que o nome devolveu continua liberado depois da última resposta que o
+ * trouxe. Há DNS que devolve só uma parte dos endereços a cada consulta (rodízio): com só a última
+ * resposta, o `permit` oscilaria e recusaria a ligação vinda de um endereço válido da vez anterior.
+ */
+export const NAME_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Endereço vindo do nome → quando uma resposta do nome o trouxe pela última vez (ISO 8601). */
+export type SeenAt = Record<string, string>;
+
+/**
+ * A parte do nome depois de uma resposta que deu certo: a resposta de agora mais o que alguma
+ * resposta trouxe nas últimas `NAME_WINDOW_MS` (a união da janela), dentro do teto. Com mais do que
+ * `MAX_FROM_NAME`, ficam primeiro os da resposta de agora (em ordem canônica), depois os vistos mais
+ * recentemente; `over` diz se sobrou endereço. Endereço guardado sem hora conhecida não conta como
+ * visto na janela; hora no futuro (o relógio voltou) conta, para o filtro não encolher por isso. A lista sai em ordem canônica, e `seen` só tem os endereços que ficaram.
+ */
+export function nameWindow(resolved: readonly string[], previous: readonly string[], previousSeen: Readonly<SeenAt>, now: Date): { addresses: string[]; seen: SeenAt; over: boolean } {
+  const current = nameAddresses(resolved);
+  const nowIso = now.toISOString();
+  const since = now.getTime() - NAME_WINDOW_MS;
+  const older = canonicalAddresses(previous)
+    .filter((address) => !current.addresses.includes(address))
+    .flatMap((address) => {
+      const at = Date.parse(previousSeen[address] ?? "");
+      return Number.isFinite(at) && at >= since ? [{ address, at }] : [];
+    })
+    .sort((a, b) => b.at - a.at || (a.address < b.address ? -1 : 1));
+  const room = MAX_FROM_NAME - current.addresses.length;
+  const kept = older.slice(0, Math.max(room, 0));
+  const seen: SeenAt = {};
+  for (const address of current.addresses) seen[address] = nowIso;
+  for (const { address } of kept) seen[address] = previousSeen[address] as string;
+  return { addresses: [...current.addresses, ...kept.map(({ address }) => address)].sort(), seen, over: current.over || older.length > kept.length };
 }
 
 function canonicalAddresses(values: readonly string[]): string[] {
@@ -322,10 +391,25 @@ export async function resolveSipName(name: string): Promise<string[]> {
 
 /** Começo do motivo gravado quando o nome não resolveu: a conferência de saúde o mantém. */
 const UNRESOLVED = "The provider name could not be resolved";
+/** Começo do motivo da linha ativa sem conjunto: o filtro dela fica desligado (contrato 8). */
+export const EMPTY_ALLOWED = "The telephony server does not know yet which addresses this line receives calls from";
+/** Começo do motivo do nome que resolve mais endereços do que o teto (contrato 9). */
+export const TOO_MANY_FROM_NAME = `The provider name resolves to more than ${MAX_FROM_NAME} addresses`;
+/** Os avisos do conjunto liberado: a conferência de saúde os mantém, e saem quando o motivo some. */
+const ALLOWED_WARNINGS = [UNRESOLVED, EMPTY_ALLOWED, TOO_MANY_FROM_NAME];
+const isAllowedWarning = (text: string | null | undefined): boolean => ALLOWED_WARNINGS.some((start) => text?.startsWith(start) === true);
 
 interface Allowed {
   addresses: string[];
-  /** Por que o conjunto não pôde ser atualizado (a linha fica `warn`); `undefined` quando pôde. */
+  /**
+   * O que veio do nome, guardado à parte (`trunks.inbound_from_name`): só essa parte usa a regra do
+   * último conjunto (contrato 7), e é a união das respostas do nome numa janela (`nameWindow`).
+   * Vazio quando o `host` é numérico.
+   */
+  fromName: string[];
+  /** Quando cada endereço de `fromName` veio numa resposta do nome (`trunks.inbound_from_name_seen`). */
+  seen: SeenAt;
+  /** Por que o conjunto não pôde ser atualizado, ou ficou vazio, ou passou do teto (a linha fica `warn`). */
   problem?: string;
 }
 
@@ -341,11 +425,24 @@ function withDeadline<T>(promise: Promise<T>, ms: number, schedule: Schedule): P
 
 /**
  * O conjunto de cada linha emitida, resolvendo os nomes (um pedido por nome, com prazo). O prazo
- * corre no relógio de verdade, e não no `schedule` das dependências, que nos testes adianta tudo. Resolução
- * que falha MANTÉM o conjunto anterior da linha (`previous`, o que está gravado), somado aos extras
- * de agora: falha de DNS nunca encolhe a lista, e muito menos a esvazia.
+ * corre no relógio de verdade, e não no `schedule` das dependências, que nos testes adianta tudo.
+ *
+ * O conjunto é sempre o `host` numérico e os `match_extra` ATUAIS da linha, mais o que veio do nome
+ * (contrato 7). Resolução que dá certo junta a resposta de agora com o que o nome trouxe nas últimas
+ * 24 horas (`nameWindow`, `previousSeen` diz quando). Resolução que falha mantém só a parte do nome
+ * (`previousFromName`, o `inbound_from_name` gravado), sem vencer nada: falha de DNS nunca encolhe
+ * essa parte, e um extra removido sai do conjunto mesmo com o DNS fora.
+ *
+ * Linha com nome no `host` que nunca resolveu (sem nada vindo do nome) fica SEM filtro, mesmo com
+ * extras: o filtro só com os extras recusaria a entrega pelo servidor do registro. O conjunto dela
+ * é vazio e ela fica `warn` (contrato 8); o mesmo com nome acima do teto (contrato 9).
  */
-export async function computeAllowed(deps: Pick<TrunksDeps, "resolve">, trunks: readonly TrunkConfig[], previous: ReadonlyMap<string, readonly string[]>): Promise<Map<string, Allowed>> {
+export async function computeAllowed(
+  deps: Pick<TrunksDeps, "resolve">,
+  trunks: readonly TrunkConfig[],
+  previousFromName: ReadonlyMap<string, readonly string[]>,
+  { previousSeen = new Map(), now = new Date() }: { previousSeen?: ReadonlyMap<string, Readonly<SeenAt>>; now?: Date } = {},
+): Promise<Map<string, Allowed>> {
   const pending = new Map<string, Promise<string[]>>();
   const resolveOnce = (name: string): Promise<string[]> => {
     let found = pending.get(name);
@@ -355,18 +452,32 @@ export async function computeAllowed(deps: Pick<TrunksDeps, "resolve">, trunks: 
   const entries = await Promise.all(
     trunks.map(async (trunk): Promise<[string, Allowed]> => {
       const host = parseTrunkHost(trunk.host);
-      if (host?.kind !== "name") return [trunk.id, { addresses: allowedAddresses(trunk) }];
+      if (host?.kind !== "name") return [trunk.id, { addresses: allowedAddresses(trunk), fromName: [], seen: {} }];
       // O nome sem a porta: `sip.operadora.example:5080` resolve como `sip.operadora.example`.
       const name = host.uri.split(":")[0] ?? host.uri;
+      const previous = previousFromName.get(trunk.id) ?? [];
+      const seenBefore = previousSeen.get(trunk.id) ?? {};
+      let fromName: { addresses: string[]; seen: SeenAt; over: boolean };
+      let problem: string | undefined;
       try {
         const resolved = await resolveOnce(name);
         // Resposta sem nenhum endereço que sirva é falha, e não "o conjunto ficou vazio".
-        if (canonicalAddresses(resolved).length === 0) throw new Error("the name resolves to no address");
-        return [trunk.id, { addresses: allowedAddresses(trunk, resolved) }];
+        if (nameAddresses(resolved).addresses.length === 0) throw new Error("the name resolves to no address");
+        fromName = nameWindow(resolved, previous, seenBefore, now);
+        if (fromName.over) {
+          problem = `${TOO_MANY_FROM_NAME} (${name}); only the first ${MAX_FROM_NAME} are accepted. Add to Extra addresses the ones the provider uses to deliver calls.`;
+        }
       } catch (error) {
-        const kept = canonicalAddresses([...(previous.get(trunk.id) ?? []), ...allowedAddresses(trunk)]);
-        return [trunk.id, { addresses: kept, problem: `${UNRESOLVED} (${name}: ${messageOf(error)}). The line keeps the addresses it had; check the name with the provider.` }];
+        const kept = nameAddresses(previous);
+        fromName = { ...kept, seen: Object.fromEntries(kept.addresses.flatMap((address) => (seenBefore[address] === undefined ? [] : [[address, seenBefore[address]]]))) };
+        problem = `${UNRESOLVED} (${name}: ${messageOf(error)}). The line keeps the addresses it had; check the name with the provider.`;
       }
+      // Sem nada vindo do nome, sem filtro: os extras sozinhos não ligam o filtro (contrato 8).
+      const addresses = fromName.addresses.length === 0 ? [] : allowedAddresses(trunk, fromName.addresses);
+      if (addresses.length === 0) {
+        problem = `${EMPTY_ALLOWED}; its filter stays off until the name ${name} resolves.${problem === undefined ? "" : ` ${problem}`}`;
+      }
+      return [trunk.id, { addresses, fromName: fromName.addresses, seen: fromName.seen, ...(problem === undefined ? {} : { problem }) }];
     }),
   );
   return new Map(entries);
@@ -409,6 +520,7 @@ export async function writeFileAtomic(file: string, content: string, owner?: Fil
 }
 
 const NL = String.fromCharCode(10);
+// A tela reconhece a linha deixada de fora por este começo (`apps/panel/src/ui/trunk-status.ts`).
 const LEFT_OUT = "This line was left out of the telephony configuration";
 
 export interface TrunksDeps {
@@ -453,8 +565,11 @@ interface TrunksPlan {
   emitted: string[];
   /** O conjunto liberado de CADA linha do banco: a emitida tem o calculado, a de fora tem vazio. */
   allowed: Map<string, Allowed>;
-  /** O que está gravado hoje, para gravar só o que mudou. */
-  stored: Map<string, { allowed: string[]; lastError: string | null }>;
+  /**
+   * O que está gravado hoje, para gravar só o que mudou. `host` e `authMode` como lidos: a gravação
+   * só vale se a linha não mudou de destino no meio (o painel zera as colunas nessa hora).
+   */
+  stored: Map<string, { allowed: string[]; fromName: string[]; seen: SeenAt; lastError: string | null; host: string; authMode: string }>;
 }
 
 /** Lê as linhas do banco, monta o arquivo e calcula o conjunto liberado de cada uma. Não grava nada. */
@@ -470,10 +585,13 @@ async function planTrunks(deps: TrunksDeps): Promise<TrunksPlan> {
       match_extra: string[] | null;
       outbound_host: string | null;
       inbound_allowed: string[] | null;
+      inbound_from_name: string[] | null;
+      inbound_from_name_seen: SeenAt | null;
+      inbound_filter: boolean;
       last_error: string | null;
       public_ip: unknown;
     }>(
-      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host, t.inbound_allowed, t.last_error,
+      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host, t.inbound_allowed, t.inbound_from_name, t.inbound_from_name_seen, t.inbound_filter, t.last_error,
               (select s.value from settings s where s.organization_id = t.organization_id and s.key = 'network.public_ip') as public_ip
          from trunks t order by t.id`,
     ),
@@ -492,45 +610,70 @@ async function planTrunks(deps: TrunksDeps): Promise<TrunksPlan> {
         matchExtra: (row.match_extra ?? []).map((extra) => extra.trim()).filter((extra) => extra !== ""),
         outboundHost: row.outbound_host?.trim() || null,
         publicIp: typeof row.public_ip === "string" ? row.public_ip : deps.publicIp,
+        // O plano já leva o filtro efetivo (contrato 11), e não a coluna crua.
+        inboundFilter: inboundFilterOn({ authMode: row.auth_mode, inboundFilter: row.inbound_filter }),
       });
     } catch (error) {
       unreadable.push({ id: row.id, reason: `the saved password cannot be read (${messageOf(error)})` });
     }
   }
-  const { conf, skipped: invalid, emitted } = renderTrunksConf(trunks);
-  const stored = new Map(rows.map((row) => [row.id, { allowed: row.inbound_allowed ?? [], lastError: row.last_error }]));
+  // Quem sai no arquivo não depende do conjunto: a primeira passada só diz quais linhas são emitidas.
+  const { skipped: invalid, emitted } = renderTrunksConf(trunks);
+  const stored = new Map(
+    rows.map((row) => [row.id, { allowed: row.inbound_allowed ?? [], fromName: row.inbound_from_name ?? [], seen: row.inbound_from_name_seen ?? {}, lastError: row.last_error, host: row.host, authMode: row.auth_mode }]),
+  );
   const emittedSet = new Set(emitted);
   const computed = await computeAllowed(
     deps,
     trunks.filter((trunk) => emittedSet.has(trunk.id)),
-    new Map([...stored].map(([id, entry]) => [id, entry.allowed])),
+    new Map([...stored].map(([id, entry]) => [id, entry.fromName])),
+    { previousSeen: new Map([...stored].map(([id, entry]) => [id, entry.seen])), now: deps.clock.now() },
   );
-  const allowed = new Map(rows.map((row) => [row.id, computed.get(row.id) ?? { addresses: [] }]));
+  const allowed = new Map(rows.map((row) => [row.id, computed.get(row.id) ?? { addresses: [], fromName: row.inbound_from_name ?? [], seen: row.inbound_from_name_seen ?? {} }]));
+  // O filtro sai do conjunto calculado AGORA (contratos 6 e 8), o mesmo que a tela vai mostrar.
+  const { conf } = renderTrunksConf(trunks, new Map([...computed].map(([id, entry]) => [id, entry.addresses])));
   return { conf, skipped: [...unreadable, ...invalid], emitted, allowed, stored };
 }
 
 const sameList = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((value, index) => value === b[index]);
+const sameSeen = (a: Readonly<SeenAt>, b: Readonly<SeenAt>): boolean =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([address, at]) => Date.parse(b[address] ?? "") === Date.parse(at));
 
 /**
- * Grava o conjunto de cada linha, só onde mudou (`is distinct from`, como `setStatus`), com a hora.
- * A linha cujo nome não resolveu fica `warn` com o motivo; quando volta a resolver, o aviso sai.
+ * Grava o conjunto de cada linha, só onde mudou (`is distinct from`, como `setStatus`), com a hora, e
+ * à parte o que veio do nome, com a hora em que cada endereço dele veio. Só grava se a linha ainda tem o `host` e o modo que foram lidos: se o
+ * painel trocou o destino no meio (e zerou as colunas), o conjunto do destino antigo não volta.
+ * A linha com aviso do conjunto fica `warn` com o motivo; quando o motivo some, o aviso sai.
  */
 async function recordAllowed(deps: TrunksDeps, plan: TrunksPlan): Promise<void> {
   const now = deps.clock.now();
   await withSystem(deps.db, async (q) => {
-    for (const [id, { addresses }] of plan.allowed) {
-      if (sameList(plan.stored.get(id)?.allowed ?? [], addresses)) continue;
-      await q.exec("update trunks set inbound_allowed = $2, inbound_resolved_at = $3 where id = $1 and inbound_allowed is distinct from $2", [id, addresses, now]);
+    for (const [id, { addresses, fromName, seen }] of plan.allowed) {
+      const stored = plan.stored.get(id);
+      if (!stored) continue;
+      if (!sameList(stored.allowed, addresses)) {
+        await q.exec(
+          "update trunks set inbound_allowed = $2, inbound_resolved_at = $3 where id = $1 and host = $4 and auth_mode = $5 and inbound_allowed is distinct from $2",
+          [id, addresses, now, stored.host, stored.authMode],
+        );
+      }
+      // A hora de cada endereço muda a cada resposta do nome: grava a parte do nome junto com ela.
+      if (!sameList(stored.fromName, fromName) || !sameSeen(stored.seen, seen)) {
+        await q.exec(
+          "update trunks set inbound_from_name = $2, inbound_from_name_seen = $3::jsonb where id = $1 and host = $4 and auth_mode = $5",
+          [id, fromName, JSON.stringify(seen), stored.host, stored.authMode],
+        );
+      }
     }
   });
   const problems = [...plan.allowed].flatMap(([id, entry]) => (entry.problem === undefined ? [] : [{ id, status: "warn" as const, detail: entry.problem }]));
   await setStatus(deps, problems);
-  for (const { id, detail } of problems) deps.log("error", "could not resolve the provider name of a line; kept its last known addresses", { trunkId: id, detail });
-  const recovered = [...plan.allowed].filter(([id, entry]) => entry.problem === undefined && plan.stored.get(id)?.lastError?.startsWith(UNRESOLVED));
+  for (const { id, detail } of problems) deps.log("error", "the allowed addresses of a line need attention", { trunkId: id, detail });
+  const recovered = [...plan.allowed].filter(([id, entry]) => entry.problem === undefined && isAllowedWarning(plan.stored.get(id)?.lastError));
   if (recovered.length === 0) return;
   await withSystem(deps.db, async (q) => {
     for (const [id] of recovered) {
-      await q.exec("update trunks set status = 'unverified', last_error = null where id = $1 and status = 'warn' and last_error like $2", [id, `${UNRESOLVED}%`]);
+      await q.exec("update trunks set status = 'unverified', last_error = null where id = $1 and status = 'warn' and last_error = $2", [id, plan.stored.get(id)?.lastError]);
     }
   });
 }
@@ -608,8 +751,9 @@ export async function checkTrunks(deps: TrunksDeps): Promise<TrunkHealth[]> {
   const ids = rows.map((row) => row.id);
   // Linha deixada de fora do arquivo continua mostrando o motivo, e não "não carregada".
   const leftOut = new Map(rows.flatMap((row) => (row.last_error?.startsWith(LEFT_OUT) ? [[row.id, row.last_error] as const] : [])));
-  // O nome que não resolveu não derruba a linha (ela segue com o último conjunto), mas pede atenção.
-  const unresolved = new Map(rows.flatMap((row) => (row.last_error?.startsWith(UNRESOLVED) ? [[row.id, row.last_error] as const] : [])));
+  // O aviso do conjunto (nome que não resolveu, conjunto vazio, nome acima do teto) não derruba a
+  // linha, mas pede atenção.
+  const unresolved = new Map(rows.flatMap((row) => (isAllowedWarning(row.last_error) ? [[row.id, row.last_error] as const] : [])));
   let health: TrunkHealth[];
   try {
     const states = new Map((await deps.ari.listEndpoints("PJSIP")).map((endpoint) => [endpoint.resource, endpoint.state ?? "unknown"]));

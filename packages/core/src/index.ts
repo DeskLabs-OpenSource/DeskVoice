@@ -27,6 +27,7 @@ export * from "./retention";
 export * from "./routing";
 export * from "./secrets";
 export * from "./drop-follow-up";
+export * from "./inbound-filter";
 export * from "./spoken-language";
 export * from "./vocabulary";
 export * from "./voicemail";

@@ -88,7 +88,7 @@ const privacy = {
   forgetConfirmYes: "Esquecer {phone}",
   forgetDone: "{phone} foi esquecido. Notas do agente apagadas: {notes}. Pendências fechadas apagadas: {followUps}.",
   historyTitle: "Registro",
-  historyLead: "Quem mudou o prazo ou a gravação, o que saiu pelo prazo, quem exportou os dados de qual telefone, quem apagou dados a pedido de quem ligou o que aconteceu com os links de gravação para quem ligou e quem confirmou que um analista manda o texto da ligação a um fornecedor. Os 50 mais recentes.",
+  historyLead: "Quem mudou o prazo ou a gravação, o que saiu pelo prazo, quem exportou os dados de qual telefone, quem apagou dados a pedido de quem ligou, o que aconteceu com os links de gravação para quem ligou e quem confirmou que um analista manda o texto da ligação a um fornecedor. Os 50 mais recentes.",
   historyEmpty: "Nada registrado ainda.",
   history: {
     transcript_retention_changed: "{who} mudou o prazo de guarda de {from} para {to}.",

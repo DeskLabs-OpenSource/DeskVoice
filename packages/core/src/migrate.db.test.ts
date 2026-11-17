@@ -264,4 +264,65 @@ describe("runMigrations", () => {
     // E a edição do agente volta a passar pelo gatilho de checagem.
     await db.pool.query("update agents set name = 'Recepção 2', agent_handoff_targets = agent_handoff_targets where id = $1", [recepcao]);
   });
+  it("o que veio do nome fica à parte: o conjunto da linha por registro com nome menos os extras, comparados na forma canônica; as outras linhas ficam vazias", async () => {
+    const FROM_NAME = "20261116T161909_enderecos_do_nome_a_parte.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < FROM_NAME) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id ?? "";
+    const trunk = async (host: string, authMode: string, matchExtra: string[], allowed: string[]): Promise<string> =>
+      (
+        await db.pool.query<{ id: string }>(
+          "insert into trunks (organization_id, name, host, auth_mode, match_extra, inbound_allowed, inbound_resolved_at) values ($1, 'L', $2, $3, $4, $5, now()) returning id",
+          [org, host, authMode, matchExtra, allowed],
+        )
+      ).rows[0]?.id ?? "";
+    // Os extras como foram digitados: zeros à esquerda, bloco com bits de host, maiúsculas, porta,
+    // colchetes e IPv4 escrito como IPv6 mapeado. O conjunto da fatia 1 tem tudo canônico. Endereço
+    // que é ao mesmo tempo do nome e extra sai da parte do nome: continua liberado pelo extra e, se o
+    // extra sair, volta na resolução seguinte.
+    const named = await trunk(
+      "sip.operadora.example:5060",
+      "register",
+      ["198.051.100.001", "54.172.60.1/30", "2001:DB8::9", "[2001:db8::8]:5060", "::ffff:198.51.100.7", "203.0.113.200:5080"],
+      ["203.0.113.7", "203.0.113.9", "198.51.100.1", "54.172.60.0/30", "2001:db8::9", "2001:db8::8", "198.51.100.7", "203.0.113.200"],
+    );
+    const withoutExtras = await trunk("sip.outra.example", "register", [], ["203.0.113.30", "2001:db8::30"]);
+    const numeric = await trunk("203.0.113.40", "register", [], ["203.0.113.40"]);
+    const byIp = await trunk("198.51.100.50", "ip", ["198.51.100.51"], ["198.51.100.50", "198.51.100.51"]);
+    const neverResolved = await trunk("sip.nunca.example", "register", ["198.51.100.60"], ["198.51.100.60"]);
+    const brokenExtra = await trunk("sip.lixo.example", "register", ["nome.example", "1.2.3"], ["203.0.113.70"]);
+
+    await copyFile(path.join(REAL_MIGRATIONS, FROM_NAME), path.join(dir, FROM_NAME));
+    expect(await runMigrations(db, dir)).toEqual([FROM_NAME]);
+    const fromName = async (id: string): Promise<string[] | undefined> =>
+      (await db.pool.query<{ inbound_from_name: string[] }>("select inbound_from_name from trunks where id = $1", [id])).rows[0]?.inbound_from_name;
+    expect(await fromName(named)).toEqual(["203.0.113.7", "203.0.113.9"]);
+    expect(await fromName(withoutExtras)).toEqual(["203.0.113.30", "2001:db8::30"]);
+    expect(await fromName(numeric)).toEqual([]);
+    expect(await fromName(byIp)).toEqual([]);
+    expect(await fromName(neverResolved)).toEqual([]);
+    expect(await fromName(brokenExtra)).toEqual(["203.0.113.70"]);
+    // Cada endereço do nome conta como visto na hora em que a fatia 1 gravou o conjunto (a janela de
+    // 24 horas começa daí); a linha sem nada do nome fica sem hora nenhuma.
+    const seen = async (id: string): Promise<{ seen: Record<string, string>; at: Date } | undefined> =>
+      (await db.pool.query<{ seen: Record<string, string>; at: Date }>("select inbound_from_name_seen as seen, inbound_resolved_at as at from trunks where id = $1", [id])).rows[0];
+    const namedSeen = await seen(named);
+    expect(Object.keys(namedSeen?.seen ?? {}).sort()).toEqual(["203.0.113.7", "203.0.113.9"]);
+    for (const at of Object.values(namedSeen?.seen ?? {})) expect(Date.parse(at)).toBe(namedSeen?.at.getTime());
+    expect((await seen(neverResolved))?.seen).toEqual({});
+    expect((await seen(byIp))?.seen).toEqual({});
+    // A função de apoio era da sessão da migration: não fica no banco.
+    expect((await db.pool.query("select 1 from pg_proc where proname = 'endereco_canonico'")).rowCount).toBe(0);
+    // A linha nova nasce com a lista vazia.
+    const fresh = await trunk("sip.nova.example", "register", [], []);
+    expect(await fromName(fresh)).toEqual([]);
+    // O filtro (contrato 11): a linha por registro que já existia começa desligada, com nome ou com
+    // IP no `host`; a linha por IP liga na hora; a linha criada depois nasce ligada, nos dois modos.
+    const filter = async (id: string): Promise<boolean | undefined> =>
+      (await db.pool.query<{ inbound_filter: boolean }>("select inbound_filter from trunks where id = $1", [id])).rows[0]?.inbound_filter;
+    for (const id of [named, withoutExtras, numeric, neverResolved, brokenExtra]) expect(await filter(id)).toBe(false);
+    expect(await filter(byIp)).toBe(true);
+    expect(await filter(fresh)).toBe(true);
+    expect(await filter(await trunk("198.51.100.80", "ip", [], []))).toBe(true);
+  });
 });
