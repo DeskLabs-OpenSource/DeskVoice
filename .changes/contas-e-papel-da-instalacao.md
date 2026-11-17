@@ -1,5 +1,5 @@
 ---
-impact: nothing_changes
+impact: operator_action
 section: changed
 title: A senha passa a morar numa conta, separada da organização, e a atualização fica com quem administra a instalação
 ---
@@ -15,3 +15,17 @@ criada direto no servidor: nela, só os donos ativos da organização mais antig
 atualização, e o registro da instalação guarda isso. Se ninguém mais conseguir pedir, o comando
 `bash install/grant-installation-admin.sh <e-mail>`, rodado de dentro do servidor, devolve o papel a
 uma conta. Crédito: @melgarafael.
+
+## Requer atenção
+
+Depois desta versão, não dá para voltar só trocando a versão. `bash install/update.sh --to 0.27.0`
+termina dizendo que está tudo saudável, mas ninguém consegue entrar no painel, porque a versão
+anterior procura a senha onde ela não está mais. Antes de atualizar, saiba que a volta é pelo
+backup: o atualizador faz um antes de mexer e mostra o caminho no fim, em "Backup de antes da
+atualização". Para voltar, troque a versão e depois restaure esse backup:
+
+    bash install/update.sh --to 0.27.0
+    bash install/restore.sh backups/<o backup de antes da atualização>
+
+A restauração devolve o banco ao momento do backup: o que entrou depois de atualizar (ligações,
+pendências, mudanças feitas no painel) se perde.
