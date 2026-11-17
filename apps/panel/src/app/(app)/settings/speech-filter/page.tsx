@@ -12,7 +12,8 @@ import { useErrorText } from "../../../../ui/errors";
 import { formatDateTime } from "../../../../ui/format";
 import { Badge, Button, Field, Notice, Panel, Select, Skeleton, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
-import { noticeOf, providerName } from "./notice";
+import { providerName } from "./notice";
+import { WhereTheTextGoes } from "./notice-view";
 
 type CheckResult = keyof SpeechFilterDictionary["results"];
 
@@ -68,27 +69,6 @@ function useAction(t: SpeechFilterDictionary) {
     }
   };
   return { ...state, run, fail: (error: string) => setState({ busy: false, error }) };
-}
-
-/** O aviso de para onde vai o texto: só o que a fonte do fornecedor diz, com a página e a data. */
-function WhereTheTextGoes({ model, t }: { model: ModelView; t: SpeechFilterDictionary }) {
-  const locale = useLocale();
-  const notice = noticeOf(t, model, locale);
-  return (
-    <div className="grid gap-1 rounded-sm border border-line bg-surface px-4 py-3" data-testid="speech-filter-notice">
-      <p className="font-bold">{t.noticeTitle}</p>
-      {notice.lines.map((line) => (
-        <p key={line}>{line}</p>
-      ))}
-      {notice.sources.map((source) => (
-        <p key={source.url} className="text-sm text-muted">
-          <a className="underline" href={source.url} target="_blank" rel="noreferrer">
-            {source.text}
-          </a>
-        </p>
-      ))}
-    </div>
-  );
 }
 
 /** A chave de um modelo: só se existe (nunca o valor), o último teste, e trocar ou remover. */
