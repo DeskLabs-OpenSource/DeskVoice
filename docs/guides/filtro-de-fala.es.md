@@ -28,8 +28,8 @@ lo ven.
    queda cifrada en la base y nunca vuelve a la pantalla. La prueba pide la lista de modelos de la
    cuenta, sin costo de tokens, y muestra el resultado (aceptada, rechazada, sin crédito, etc.).
 2. En **Modelo de decisión**, elige **Jev (TypeSafe)**.
-3. Lee el aviso **A dónde va el texto** y marca la confirmación: "El texto de lo que dice la
-   persona en la llamada va a TypeSafe."
+3. Lee el aviso **A dónde va el texto** y marca la confirmación: "El texto de la llamada va a
+   TypeSafe." Lo que va, en detalle, está en "Qué sale del servidor", justo abajo.
 4. Haz clic en **Guardar**. La pantalla pasa a mostrar quién confirmó el envío y cuándo.
 
 Sin la confirmación, Jev no se guarda. Apagar (elegir **Ninguno**) borra la confirmación, y volver a
@@ -59,7 +59,8 @@ updated Nov 19, 2025"), leída el 16/11/2026.
   tiempo que sea razonablemente necesario para prestar el servicio o para sus fines comerciales. La
   política no define plazo.
 - **Borrado:** a pedido, borra esos datos o los guarda de una forma que no identifique a la
-  persona.
+  persona cuando ya no sean razonablemente necesarios, salvo que la ley la obligue a guardarlos por
+  más tiempo.
 - **Lugar:** el servicio está alojado en los Estados Unidos.
 
 El proyecto no leyó el contrato de TypeSafe ni las páginas que piden inicio de sesión.
@@ -69,7 +70,9 @@ El proyecto no leyó el contrato de TypeSafe ni las páginas que piden inicio de
 La página no trae un canal propio para el pedido de borrado. El contacto que da para dudas sobre el
 tratamiento de datos es **privacy@typesafe.ai**. Escribe a esa dirección desde la cuenta de TypeSafe
 de tu organización (la dueña de la clave), di qué datos quieres borrar (por ejemplo, los enviados
-entre dos fechas) y guarda la respuesta.
+entre dos fechas) y guarda la respuesta. Según la política, el borrado depende de dos condiciones:
+que los datos ya no sean razonablemente necesarios para TypeSafe y que ninguna ley la obligue a
+guardarlos por más tiempo. No promete plazo para atender el pedido.
 
 Apagar el filtro no borra lo que ya se envió: solo detiene los envíos nuevos. El borrado de
 DeskVoice (plazo de guarda y pedido de quien llama) tampoco alcanza a TypeSafe.
