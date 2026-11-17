@@ -5,7 +5,7 @@
 > no campo `VoiceSessionConfig.vocabulary`.
 >
 > **Estado (17/11, documento vivo):** fatia 1a (a voz atrás de uma interface, #393) e fatia 1b (a
-> chave e as vozes na tela, #412) na `main`. Fatia 2 (`Brain.chat` em streaming) em PR de rascunho,
+> chave e as vozes na tela, #412) na `main`. Fatia 2 (`Brain.chat` em streaming) no #419,
 > com um ajuste ao contrato da seção 3.2 (o consumo nunca fica sem número). A latência do cérebro na
 > 3.5 segue **não medida**: a bancada existe, e faltaram as chaves. Fatias 3 a 6 não começaram.
 
