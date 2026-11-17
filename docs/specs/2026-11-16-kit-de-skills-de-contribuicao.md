@@ -1,7 +1,8 @@
 # Kit de skills de contribuição: o que o DeskcommCRM tem e o DeskVoice ainda não
 
-- **Estado:** implementado. As cinco fatias estão na `main`: #318 (`ec353ad`), #322 (`30b43b7`),
-  #372 (`4de49bb`), #375 (`d0dcc7d`) e #379 (`0210f1d`). Em `0210f1d`, `pnpm skills:sync` não
+- **Estado:** implementado. As cinco fatias estão na `main`: fatia 1 = #318 (`ec353ad`),
+  fatia 2 = #322 (`30b43b7`), fatia 3 = #372 (`4de49bb`), fatia 4 = #375 (`d0dcc7d`) e
+  fatia 5 = #379 (`0210f1d`). Em `0210f1d`, `pnpm skills:sync` não
   deixa diferença e `pnpm fences` passa. O carregamento numa sessão nova do Claude Code, do Codex
   e do Cursor não foi conferido (seção 7).
 - **Data:** 2026-11-16
@@ -196,10 +197,17 @@ referência roda sem erro no banco de teste; nenhuma cita tabela ou coluna que n
 
 - `deskvoice-agente-de-voz`: diagnosticar e corrigir "as respostas da IA estão ruins", com dados da
   operação. O que existe em `origin/main` hoje e a skill pode usar: o campo `instructions` do
-  agente, o vocabulário pela API (`vocabulary` em `POST`/`PATCH /api/v1/agents`), a análise da
-  ligação no fim (seção da análise em `calls/[id]`, `analysis_not_done`) e a linha do tempo da
-  chamada. O que **ainda não existe** na `main` desta data e a skill diz assim: o campo de
-  vocabulário na tela (PR #290, rascunho). Se o #290 entrar antes da fatia 5, a skill usa a tela.
+  agente, a análise da ligação no fim (seção da análise em `calls/[id]`, `analysis_not_done`) e a
+  linha do tempo da chamada. O que **ainda não existe** na `main` desta data e a skill diz assim:
+  o campo de vocabulário na tela (PR #290, rascunho). Se o #290 entrar antes da fatia 5, a skill
+  usa a tela.
+- **O vocabulário, como o #379 entregou.** Ler continua valendo: a lista atual sai do
+  `GET /api/v1/agents/<id>` (`data.vocabulary`), aberto pela pessoa logada no painel. **Trocar
+  pela API ficou de fora**: a skill não usa `POST`/`PATCH` com a sessão de ninguém nem entrega
+  código para colar no console do navegador, porque esse é o gesto do autoXSS (o golpe de colar
+  código numa sessão de dono ou administrador). Até o #290 entrar, a skill só mostra a lista atual
+  e a nova, recebe o sim e entrega o registro da lista aprovada (agente, data, antes, depois e o
+  sim), para a pessoa aplicar quando a tela existir.
 - Referências adaptadas de `deskcomm-prompt` (diagnóstico, anatomia e antipadrões de instrução),
   reescritas para voz: fala curta, sem markdown, número e e-mail ditos, a falha que tem fala
   (antipadrão 15), o vocabulário como dica que o provedor pode ignorar.
@@ -241,9 +249,10 @@ Líder, com o padrão "fica de fora deste item".
 
 ## 7. Não medido
 
-- **O carregamento do `agents/openai.yaml` pelo Codex não foi conferido** nesta data, nem na
-  documentação do Codex nem numa sessão. O formato vem do DeskcommCRM, que o usa. A fatia 1 confere
-  numa sessão nova do Codex e diz o que viu.
+- **O carregamento do `agents/openai.yaml` pelo Codex não foi conferido**, nem na documentação do
+  Codex nem numa sessão. O formato vem do DeskcommCRM, que o usa. O desenho pedia que a fatia 1
+  conferisse numa sessão nova do Codex, e isso não foi feito em nenhuma das cinco fatias: segue
+  aberto, como diz o estado no topo.
 - Os subagentes e comandos de `.claude/` não foram rodados no DeskVoice. O formato do frontmatter
   (`tools`, `model: inherit`, `description`) vem do DeskcommCRM, não da documentação do Claude Code.
 - Não li por inteiro os arquivos do DeskcommCRM que as fatias adaptam; li o começo de
