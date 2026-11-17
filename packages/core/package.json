@@ -5,7 +5,11 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./phone": "./src/phone.ts",
+    "./drop-follow-up": "./src/drop-follow-up.ts",
+    "./analysts": "./src/analysts.ts",
+    "./inbound-filter": "./src/inbound-filter.ts"
   },
   "dependencies": {
     "pg": "^8.23.1",

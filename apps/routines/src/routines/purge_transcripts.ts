@@ -1,14 +1,15 @@
-import { PURGE_TRANSCRIPTS_TASK, TRANSCRIPT_RETENTION_SETTING, enqueueTask, purgeFollowUps, purgeRecordings, purgeTranscripts, recordOrgEvent, transcriptRetentionOf, withOrg } from "@deskvoice/core";
+import { PURGE_TRANSCRIPTS_TASK, purgeCallerNotes, TRANSCRIPT_RETENTION_SETTING, enqueueTask, purgeFollowUps, purgeRecordings, purgeTranscripts, recordOrgEvent, transcriptRetentionOf, withOrg } from "@deskvoice/core";
 import type { Routine } from "../types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Aplica o prazo de guarda da transcrição de UMA organização: troca o texto das falas mais antigas
- * que o prazo por um marcador, apaga as gravações de áudio da mesma idade e as pendências fechadas
- * há mais tempo que o prazo (contado do fecho; a aberta nunca sai), e registra quantas saíram. Roda uma vez por dia, reagendando a si
- * mesma pela fila (`run_at`), sem timer nem polling. Quem começa a corrente é a tela, ao gravar
- * um prazo; sem prazo gravado, a corrente para e a transcrição fica para sempre, como antes.
+ * que o prazo por um marcador, troca o resumo da chamada de mesma idade pelo marcador dele, apaga as
+ * gravações de áudio da mesma idade, as notas do agente da mesma idade e as pendências fechadas há
+ * mais tempo que o prazo (contado do fecho; a aberta nunca sai), e registra quantas falas e resumos saíram. Roda uma vez por dia,
+ * reagendando a si mesma pela fila (`run_at`), sem timer nem polling. Quem começa a corrente é a tela,
+ * ao gravar um prazo; sem prazo gravado, a corrente para e a transcrição fica para sempre, como antes.
  */
 const routine: Routine = {
   kind: PURGE_TRANSCRIPTS_TASK,
@@ -34,12 +35,15 @@ const routine: Routine = {
       const count = await purgeTranscripts(q, before);
       // A pendência fechada é histórico com texto sobre a pessoa: sai com o mesmo prazo, e o aviso do sino dela sai junto.
       const followUps = await purgeFollowUps(q, before);
+      // A nota do agente é o que a pessoa disse, da mesma natureza da fala: nunca dura mais que ela.
+      // O prazo próprio da memória, que pode ser menor, é da rotina `purge_caller_notes`.
+      const notes = await purgeCallerNotes(q, before);
       // Passagem sem nada a apagar não grava evento: o registro diz o que saiu, não que a rotina passou.
-      if (count > 0 || recordings > 0 || followUps > 0) {
+      if (count > 0 || recordings > 0 || followUps > 0 || notes > 0) {
         await recordOrgEvent(
           q,
           "transcripts_purged",
-          { count, ...(recordings > 0 && { recordings }), ...(followUps > 0 && { followUps }), retentionDays: days, before: before.toISOString() },
+          { count, ...(recordings > 0 && { recordings }), ...(followUps > 0 && { followUps }), ...(notes > 0 && { notes }), retentionDays: days, before: before.toISOString() },
           now,
         );
       }

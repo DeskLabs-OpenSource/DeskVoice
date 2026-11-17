@@ -124,4 +124,205 @@ describe("runMigrations", () => {
       { session_name: "calls-old", phone_e164: "+5511976543210" },
     ]);
   });
+
+  it("as chamadas que já existem herdam o canal do evento, a simulada vira simulada, o resto fica como linha, e a coluna perde o padrão", async () => {
+    const CHANNEL = "20261114T014000_canal_da_chamada.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < CHANNEL) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    const call = async (event: object | null, row: { engine?: string; to?: string } = {}): Promise<string> => {
+      const id = (
+        await db.pool.query<{ id: string }>("insert into calls (organization_id, direction, status, engine, to_e164, started_at) values ($1, 'inbound', 'completed', $2, $3, now()) returning id", [
+          org,
+          row.engine ?? null,
+          row.to ?? null,
+        ])
+      ).rows[0]?.id ?? "";
+      if (event) await db.pool.query("insert into call_events (organization_id, call_id, at, kind, payload) values ($1, $2, now(), 'call_started', $3)", [org, id, event]);
+      return id;
+    };
+    const whatsapp = await call({ direction: "inbound", channel: "whatsapp" });
+    const web = await call({ direction: "inbound", channel: "web", userId: "u" });
+    const phone = await call({ direction: "inbound" });
+    const silent = await call(null);
+    // A simulada do botão não registrava canal: motor simulado e nenhum número chamado.
+    const simulated = await call({ direction: "inbound" }, { engine: "simulated" });
+    // Ligação da linha com agente de motor simulado: tem o número chamado, continua linha.
+    const lineWithSimulatedEngine = await call({ direction: "inbound" }, { engine: "simulated", to: "+553132221100" });
+    // Navegador com agente de motor simulado: o evento manda.
+    const webWithSimulatedEngine = await call({ direction: "inbound", channel: "web" }, { engine: "simulated" });
+    await copyFile(path.join(REAL_MIGRATIONS, CHANNEL), path.join(dir, CHANNEL));
+    expect(await runMigrations(db, dir)).toEqual([CHANNEL]);
+    const channels = new Map((await db.pool.query<{ id: string; channel: string }>("select id, channel from calls")).rows.map((row) => [row.id, row.channel]));
+    expect([whatsapp, web, phone, silent, simulated, lineWithSimulatedEngine, webWithSimulatedEngine].map((id) => channels.get(id))).toEqual([
+      "whatsapp",
+      "web",
+      "phone",
+      "phone",
+      "simulated",
+      "phone",
+      "web",
+    ]);
+    // Sem padrão depois do backfill: quem cria uma chamada diz o canal.
+    await expect(db.pool.query("insert into calls (organization_id, direction, status, started_at) values ($1, 'inbound', 'completed', now())", [org])).rejects.toThrow(/channel/);
+  });
+
+  it("o agente que já existe ganha a lista de termos vazia, o novo sem a coluna também, e a lista não aceita nulo", async () => {
+    const VOCABULARY = "20261114T063000_vocabulario_do_agente.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < VOCABULARY) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Antes', 'simulated')", [org]);
+    await copyFile(path.join(REAL_MIGRATIONS, VOCABULARY), path.join(dir, VOCABULARY));
+    expect(await runMigrations(db, dir)).toEqual([VOCABULARY]);
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Depois', 'simulated')", [org]);
+    const rows = (await db.pool.query<{ name: string; vocabulary: string[] }>("select name, vocabulary from agents order by name")).rows;
+    expect(rows).toEqual([
+      { name: "Antes", vocabulary: [] },
+      { name: "Depois", vocabulary: [] },
+    ]);
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, vocabulary) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/vocabulary/);
+  });
+
+  it("o agente que já existe fica no ambiente normal, o novo sem a coluna também, e o ambiente só aceita normal ou noisy", async () => {
+    const ENVIRONMENT = "20261114T094134_agents_listening_environment.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < ENVIRONMENT) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Antes', 'simulated')", [org]);
+    await copyFile(path.join(REAL_MIGRATIONS, ENVIRONMENT), path.join(dir, ENVIRONMENT));
+    expect(await runMigrations(db, dir)).toEqual([ENVIRONMENT]);
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Depois', 'simulated')", [org]);
+    await db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Obra', 'simulated', 'noisy')", [org]);
+    const rows = (await db.pool.query<{ name: string; listening_environment: string }>("select name, listening_environment from agents order by name")).rows;
+    expect(rows).toEqual([
+      { name: "Antes", listening_environment: "normal" },
+      { name: "Depois", listening_environment: "normal" },
+      { name: "Obra", listening_environment: "noisy" },
+    ]);
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Alto', 'simulated', 'loud')", [org])).rejects.toThrow(/listening_environment/);
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/listening_environment/);
+  });
+  it("o agente que já existe fica com o follow-up da queda desligado, o novo sem a coluna também, e o modo só aceita os quatro valores", async () => {
+    const DROP = "20261116T222817_drop_follow_up.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < DROP) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Antes', 'simulated')", [org]);
+    await copyFile(path.join(REAL_MIGRATIONS, DROP), path.join(dir, DROP));
+    expect(await runMigrations(db, dir)).toEqual([DROP]);
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Depois', 'simulated')", [org]);
+    for (const mode of ["task", "whatsapp", "call_back"]) await db.pool.query("insert into agents (organization_id, name, engine, drop_follow_up) values ($1, $2, 'simulated', $2)", [org, mode]);
+    const rows = (await db.pool.query<{ name: string; drop_follow_up: string }>("select name, drop_follow_up from agents")).rows;
+    expect(Object.fromEntries(rows.map((row) => [row.name, row.drop_follow_up]))).toEqual({ Antes: "off", Depois: "off", task: "task", whatsapp: "whatsapp", call_back: "call_back" });
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, drop_follow_up) values ($1, 'Outro', 'simulated', 'sms')", [org])).rejects.toThrow(/drop_follow_up/);
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, drop_follow_up) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/drop_follow_up/);
+  });
+  it("o aviso que já existe vira aviso à equipe, o agente que já existe fica sem texto, e os dois só aceitam o que o desenho diz", async () => {
+    const WHATSAPP = "20261117T032318_drop_follow_up_whatsapp.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < WHATSAPP) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Antes', 'simulated')", [org]);
+    await db.pool.query("insert into notifications (organization_id, channel, target, body) values ($1, 'whatsapp', '+5531977776666', 'Aviso de antes')", [org]);
+    await copyFile(path.join(REAL_MIGRATIONS, WHATSAPP), path.join(dir, WHATSAPP));
+    expect(await runMigrations(db, dir)).toEqual([WHATSAPP]);
+    expect((await db.pool.query("select drop_follow_up, drop_follow_up_message from agents")).rows).toEqual([{ drop_follow_up: "off", drop_follow_up_message: null }]);
+    expect((await db.pool.query("select audience, target from notifications")).rows).toEqual([{ audience: "team", target: "+5531977776666" }]);
+
+    await db.pool.query("insert into notifications (organization_id, channel, audience, target, body) values ($1, 'whatsapp', 'caller', '+5531988887777', 'Olá')", [org]);
+    await expect(db.pool.query("insert into notifications (organization_id, channel, audience, body) values ($1, 'panel', 'everyone', 'x')", [org])).rejects.toThrow(/audience/);
+    await expect(db.pool.query("insert into notifications (organization_id, channel, audience, body) values ($1, 'panel', null, 'x')", [org])).rejects.toThrow(/audience/);
+    await db.pool.query("update agents set drop_follow_up_message = $1", ["x".repeat(300)]);
+    await expect(db.pool.query("update agents set drop_follow_up_message = $1", ["x".repeat(301)])).rejects.toThrow(/drop_follow_up_message/);
+    await expect(db.pool.query("update agents set drop_follow_up_message = ''")).rejects.toThrow(/drop_follow_up_message/);
+  });
+  it("os destinos de passagem que já apontavam para agente apagado saem da lista, na ordem de antes, em toda organização", async () => {
+    const CLEANUP = "20261116T032848_apagar_agente_tira_destino.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < CLEANUP) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const agent = async (org: string, name: string): Promise<string> =>
+      (await db.pool.query<{ id: string }>("insert into agents (organization_id, name, engine) values ($1, $2, 'simulated') returning id", [org, name])).rows[0]?.id ?? "";
+    const orgA = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id ?? "";
+    const orgB = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('B') returning id")).rows[0]?.id ?? "";
+    const [recepcao, vendas, agenda, suporte] = [await agent(orgA, "Recepção"), await agent(orgA, "Vendas"), await agent(orgA, "Agenda"), await agent(orgA, "Suporte")];
+    const [outra, apagada] = [await agent(orgB, "Outra"), await agent(orgB, "Apagada")];
+    await db.pool.query("update agents set agent_handoff_targets = $2 where id = $1", [recepcao, [suporte, agenda, vendas]]);
+    await db.pool.query("update agents set agent_handoff_targets = $2 where id = $1", [outra, [apagada]]);
+    await db.pool.query("update agents set agent_handoff_targets = $2 where id = $1", [vendas, [agenda]]);
+    // Antes desta mudança, apagar não mexia nas listas: o id ficava lá.
+    await db.pool.query("delete from agents where id = any($1::uuid[])", [[agenda, apagada]]);
+    expect((await db.pool.query("select agent_handoff_targets from agents where id = $1", [recepcao])).rows[0]).toEqual({ agent_handoff_targets: [suporte, agenda, vendas] });
+
+    await copyFile(path.join(REAL_MIGRATIONS, CLEANUP), path.join(dir, CLEANUP));
+    expect(await runMigrations(db, dir)).toEqual([CLEANUP]);
+    const targets = async (id: string): Promise<string[]> => (await db.pool.query<{ agent_handoff_targets: string[] }>("select agent_handoff_targets from agents where id = $1", [id])).rows[0]?.agent_handoff_targets ?? [];
+    expect(await targets(recepcao)).toEqual([suporte, vendas]);
+    expect(await targets(vendas)).toEqual([]);
+    expect(await targets(outra)).toEqual([]);
+    expect(await targets(suporte)).toEqual([]);
+    // E a edição do agente volta a passar pelo gatilho de checagem.
+    await db.pool.query("update agents set name = 'Recepção 2', agent_handoff_targets = agent_handoff_targets where id = $1", [recepcao]);
+  });
+  it("o que veio do nome fica à parte: o conjunto da linha por registro com nome menos os extras, comparados na forma canônica; as outras linhas ficam vazias", async () => {
+    const FROM_NAME = "20261116T161909_enderecos_do_nome_a_parte.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < FROM_NAME) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id ?? "";
+    const trunk = async (host: string, authMode: string, matchExtra: string[], allowed: string[]): Promise<string> =>
+      (
+        await db.pool.query<{ id: string }>(
+          "insert into trunks (organization_id, name, host, auth_mode, match_extra, inbound_allowed, inbound_resolved_at) values ($1, 'L', $2, $3, $4, $5, now()) returning id",
+          [org, host, authMode, matchExtra, allowed],
+        )
+      ).rows[0]?.id ?? "";
+    // Os extras como foram digitados: zeros à esquerda, bloco com bits de host, maiúsculas, porta,
+    // colchetes e IPv4 escrito como IPv6 mapeado. O conjunto da fatia 1 tem tudo canônico. Endereço
+    // que é ao mesmo tempo do nome e extra sai da parte do nome: continua liberado pelo extra e, se o
+    // extra sair, volta na resolução seguinte.
+    const named = await trunk(
+      "sip.operadora.example:5060",
+      "register",
+      ["198.051.100.001", "54.172.60.1/30", "2001:DB8::9", "[2001:db8::8]:5060", "::ffff:198.51.100.7", "203.0.113.200:5080"],
+      ["203.0.113.7", "203.0.113.9", "198.51.100.1", "54.172.60.0/30", "2001:db8::9", "2001:db8::8", "198.51.100.7", "203.0.113.200"],
+    );
+    const withoutExtras = await trunk("sip.outra.example", "register", [], ["203.0.113.30", "2001:db8::30"]);
+    const numeric = await trunk("203.0.113.40", "register", [], ["203.0.113.40"]);
+    const byIp = await trunk("198.51.100.50", "ip", ["198.51.100.51"], ["198.51.100.50", "198.51.100.51"]);
+    const neverResolved = await trunk("sip.nunca.example", "register", ["198.51.100.60"], ["198.51.100.60"]);
+    const brokenExtra = await trunk("sip.lixo.example", "register", ["nome.example", "1.2.3"], ["203.0.113.70"]);
+
+    await copyFile(path.join(REAL_MIGRATIONS, FROM_NAME), path.join(dir, FROM_NAME));
+    expect(await runMigrations(db, dir)).toEqual([FROM_NAME]);
+    const fromName = async (id: string): Promise<string[] | undefined> =>
+      (await db.pool.query<{ inbound_from_name: string[] }>("select inbound_from_name from trunks where id = $1", [id])).rows[0]?.inbound_from_name;
+    expect(await fromName(named)).toEqual(["203.0.113.7", "203.0.113.9"]);
+    expect(await fromName(withoutExtras)).toEqual(["203.0.113.30", "2001:db8::30"]);
+    expect(await fromName(numeric)).toEqual([]);
+    expect(await fromName(byIp)).toEqual([]);
+    expect(await fromName(neverResolved)).toEqual([]);
+    expect(await fromName(brokenExtra)).toEqual(["203.0.113.70"]);
+    // Cada endereço do nome conta como visto na hora em que a fatia 1 gravou o conjunto (a janela de
+    // 24 horas começa daí); a linha sem nada do nome fica sem hora nenhuma.
+    const seen = async (id: string): Promise<{ seen: Record<string, string>; at: Date } | undefined> =>
+      (await db.pool.query<{ seen: Record<string, string>; at: Date }>("select inbound_from_name_seen as seen, inbound_resolved_at as at from trunks where id = $1", [id])).rows[0];
+    const namedSeen = await seen(named);
+    expect(Object.keys(namedSeen?.seen ?? {}).sort()).toEqual(["203.0.113.7", "203.0.113.9"]);
+    for (const at of Object.values(namedSeen?.seen ?? {})) expect(Date.parse(at)).toBe(namedSeen?.at.getTime());
+    expect((await seen(neverResolved))?.seen).toEqual({});
+    expect((await seen(byIp))?.seen).toEqual({});
+    // A função de apoio era da sessão da migration: não fica no banco.
+    expect((await db.pool.query("select 1 from pg_proc where proname = 'endereco_canonico'")).rowCount).toBe(0);
+    // A linha nova nasce com a lista vazia.
+    const fresh = await trunk("sip.nova.example", "register", [], []);
+    expect(await fromName(fresh)).toEqual([]);
+    // O filtro (contrato 11): a linha por registro que já existia começa desligada, com nome ou com
+    // IP no `host`; a linha por IP liga na hora; a linha criada depois nasce ligada, nos dois modos.
+    const filter = async (id: string): Promise<boolean | undefined> =>
+      (await db.pool.query<{ inbound_filter: boolean }>("select inbound_filter from trunks where id = $1", [id])).rows[0]?.inbound_filter;
+    for (const id of [named, withoutExtras, numeric, neverResolved, brokenExtra]) expect(await filter(id)).toBe(false);
+    expect(await filter(byIp)).toBe(true);
+    expect(await filter(fresh)).toBe(true);
+    expect(await filter(await trunk("198.51.100.80", "ip", [], []))).toBe(true);
+  });
 });

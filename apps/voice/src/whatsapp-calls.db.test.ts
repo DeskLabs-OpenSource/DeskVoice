@@ -53,6 +53,9 @@ afterEach(async () => {
   await pump(() => over, "the calls to end");
   channel.close();
   await harness.approvals.close();
+  // Ligação que ficou tocando no falso apareceria no retrato da conexão do próximo teste, e o
+  // processo a atenderia (é o que ele faz com a que tocou com a escuta caída).
+  for (const call of wacalls.calls.values()) wacalls.hangUp(call);
   // A escuta parada não reage a mais nada (`listenWacalls` ignora o que chegar depois de `stop`); o
   // falso derruba o que sobrar aberto, para o próximo teste contar só a dele.
   wacalls.dropStreams();
@@ -83,6 +86,14 @@ const pump = <T>(probe: () => T | Promise<T>, what: string) =>
     time.advance(20);
     return probe();
   }, what);
+/** Derruba o SSE e espera a volta, que traz o `call-list`. */
+async function reconnect(): Promise<void> {
+  wacalls.dropStreams();
+  await waitFor(() => {
+    time.advance(1000);
+    return wacalls.streams() >= 1;
+  }, "the events stream back");
+}
 const answeredCall = async (organizationId: string) => (await waitFor(async () => (await callsOf(app, organizationId)).find((call) => call.status === "in_progress"), "the call in progress")).id;
 
 describe("ligação pelo WhatsApp: entrada e atendimento", { timeout: 60_000 }, () => {
@@ -94,8 +105,13 @@ describe("ligação pelo WhatsApp: entrada e atendimento", { timeout: 60_000 }, 
     expect(callPaths(call)).toEqual(["POST webrtc", "POST accept"]);
     expect(call.offers).toEqual([clientId]);
     expect(call.owner).toBe(clientId);
-    expect(await callOf(app, callId)).toMatchObject({ direction: "inbound", agent_id: agentId, from_e164: CALLER, to_e164: NUMBER, engine: "manual" });
-    expect((await eventsOf(app, callId)).slice(0, 3)).toEqual([
+    expect(await callOf(app, callId)).toMatchObject({ direction: "inbound", channel: "whatsapp", agent_id: agentId, from_e164: CALLER, to_e164: NUMBER, engine: "manual" });
+    // A chamada vira `in_progress` antes de a sessão gravar o aviso: espera os três primeiros eventos.
+    const opening = await waitFor(async () => {
+      const events = await eventsOf(app, callId);
+      return events.length >= 3 ? events.slice(0, 3) : null;
+    }, "the first three events");
+    expect(opening).toEqual([
       { kind: "call_started", payload: { direction: "inbound", from: CALLER, to: NUMBER, agentId, channel: "whatsapp" } },
       { kind: "call_answered", payload: { engine: "manual" } },
       { kind: "recording_notice", payload: { text: expect.any(String) } },
@@ -200,6 +216,18 @@ describe("ligação pelo WhatsApp: entrada e atendimento", { timeout: 60_000 }, 
     expect(await kindsOf(app, failed?.id ?? "")).toEqual(["call_ended"]);
     expect((await notificationsOf(app, organizationId))[0]?.body).toMatch(/não pôde ser atendida.*continuou tocando no celular/);
     expect(callPaths(call)).toEqual(["POST webrtc", "POST accept"]);
+
+    // O WaCalls gravou o nosso dono antes de falhar; o retrato seguinte não a desliga. A sobra de
+    // outro processo, no mesmo retrato, mostra que ele foi lido.
+    expect(call.owner).toMatch(/^deskvoice-call-/);
+    const session = wacalls.byName(wacallsSessionName(organizationId));
+    if (!session) throw new Error("no WaCalls session");
+    const leftover = wacalls.answeredBy(session, "deskvoice-call-00000000-0000-0000-0000-000000000000");
+    await reconnect();
+    await waitFor(() => leftover.status === "ended", "the leftover call ended");
+    expect(callPaths(call)).toEqual(["POST webrtc", "POST accept"]);
+    expect(call.status).toBe("ringing");
+    wacalls.hangUp(call);
   });
 });
 
@@ -252,7 +280,7 @@ describe("ligação pelo WhatsApp: quando o agente não atende, ela segue tocand
     const { organizationId, agentId, ring } = await connected("wa-limit");
     await putSetting(app, organizationId, INBOUND_LIMIT_SETTING, 1, false);
     await withSystem(app, (q) =>
-      q.exec("insert into calls (organization_id, agent_id, direction, from_e164, to_e164, status, started_at) values ($1, $2, 'inbound', '+5531911112222', '+553144445555', 'in_progress', $3)", [
+      q.exec("insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, started_at) values ($1, $2, 'inbound', 'whatsapp', '+5531911112222', '+553144445555', 'in_progress', $3)", [
         organizationId,
         agentId,
         harness.clock.now(),
@@ -279,5 +307,63 @@ describe("ligação pelo WhatsApp: a partida do processo de voz", { timeout: 60_
   it("diz que alguma organização pediu o serviço, para o processo ouvir o WaCalls desde a partida", async () => {
     await connected("wa-wanted");
     expect(await whatsappCallsWanted(app)).toBe(true);
+  });
+});
+
+describe("ligação pelo WhatsApp: a que sobrou de um processo de voz anterior", { timeout: 60_000 }, () => {
+  it("na volta do SSE, desliga no WaCalls a que um processo anterior atendeu; a deste processo e a de outro dono seguem", async () => {
+    const { organizationId, ring } = await connected("wa-sobra");
+    const session = wacalls.byName(wacallsSessionName(organizationId));
+    if (!session) throw new Error("no WaCalls session");
+    const own = ring();
+    await answeredCall(organizationId);
+    const leftover = wacalls.answeredBy(session, "deskvoice-call-00000000-0000-0000-0000-000000000000");
+    const human = wacalls.answeredBy(session, "recepcao-no-navegador");
+
+    await reconnect();
+    await waitFor(() => leftover.status === "ended", "the leftover call ended");
+
+    expect(callPaths(leftover)).toEqual([`DELETE ${leftover.id}`]);
+    expect(callPaths(human)).toEqual([]);
+    expect(callPaths(own).filter((path) => path.startsWith("DELETE"))).toEqual([]);
+    expect(own.status).not.toBe("ended");
+    wacalls.hangUp(human);
+  });
+});
+
+describe("ligação pelo WhatsApp: a que tocou com a escuta caída", { timeout: 60_000 }, () => {
+  const sessionOf = (organizationId: string) => {
+    const session = wacalls.byName(wacallsSessionName(organizationId));
+    if (!session) throw new Error("no WaCalls session");
+    return session;
+  };
+  const leftover = (organizationId: string) => wacalls.answeredBy(sessionOf(organizationId), "deskvoice-call-00000000-0000-0000-0000-000000000000");
+
+  it("o retrato de cada mudança não a atende; o da volta do SSE, sim", async () => {
+    const { organizationId } = await connected("wa-tocou");
+    const quiet = wacalls.ringQuietly(sessionOf(organizationId), `${CALLER.slice(1)}@s.whatsapp.net`);
+
+    // A sobra no mesmo retrato mostra que ele foi lido.
+    const first = leftover(organizationId);
+    wacalls.broadcastCallList();
+    await waitFor(() => first.status === "ended", "the leftover call ended");
+    expect(callPaths(quiet)).toEqual([]);
+
+    await reconnect();
+    await answeredCall(organizationId);
+    expect(callPaths(quiet)).toEqual(["POST webrtc", "POST accept"]);
+    expect(await callsOf(app, organizationId)).toMatchObject([{ from_e164: CALLER, status: "in_progress" }]);
+  });
+
+  it("a recusada segue tocando e não é recusada de novo quando o retrato da volta a mostra", async () => {
+    const { organizationId, ring } = await connected("wa-tocou-recusada", { agent: "none" });
+    const call = ring();
+    await waitFor(async () => (await callsOf(app, organizationId))[0]?.status === "refused", "the refused call");
+
+    const second = leftover(organizationId);
+    await reconnect();
+    await waitFor(() => second.status === "ended", "the leftover call ended");
+    expect(await callsOf(app, organizationId)).toHaveLength(1);
+    expect(callPaths(call)).toEqual([]);
   });
 });

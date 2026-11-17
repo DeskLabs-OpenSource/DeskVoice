@@ -142,12 +142,15 @@ export function sessionCookie(token: string, deps: ServerDeps): string {
 /** Cria a sessão e devolve o token em claro; o banco só recebe o hash. */
 export async function createSession(q: OrgQuery, user: { id: string; organizationId: string }, now: Date): Promise<string> {
   const token = randomBytes(32).toString("base64url");
-  await q.exec("insert into sessions (organization_id, user_id, token_hash, expires_at) values ($1, $2, $3, $4)", [
+  // A conta da sessão vem do vínculo: o par `organization_id` e `user_id` diz onde ela está agora.
+  const created = await q.exec("insert into sessions (organization_id, user_id, account_id, token_hash, expires_at) select $1, $2, account_id, $3, $4 from users where id = $2", [
     user.organizationId,
     user.id,
     hashToken(token),
     new Date(now.getTime() + SESSION_SECONDS * 1000),
   ]);
+  // Vínculo que a organização não enxerga não ganha sessão: antes, a chave estrangeira recusava.
+  if (created !== 1) throw new Error("createSession: the user is not in this organization");
   return token;
 }
 

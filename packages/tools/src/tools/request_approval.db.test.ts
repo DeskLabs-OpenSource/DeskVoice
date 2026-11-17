@@ -2,7 +2,7 @@ import { withSystem, type ApprovalOutcome } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
 import { createFixture, createUser, eventsOf, notificationsOf, putSetting, putWhatsAppConnector, t0, tasksOf, type FakeContext } from "../../test/helpers";
-import { runTool } from "../run-tool";
+import { MAX_REQUEST_APPROVAL_PER_CALL, runTool } from "../run-tool";
 import requestApproval from "./request_approval";
 
 const { app, owner } = openTestDbs();
@@ -158,5 +158,18 @@ describe("request_approval", () => {
     await runTool(requestApproval, asked === undefined ? rest : { ...rest, timeout_seconds: asked }, ctx);
     expect(ctx.waits).toEqual([{ approvalId: expect.any(String), timeoutMs: expected * 1000 }]);
     expect((await approvalRow(ctx.waits[0]?.approvalId ?? ""))?.expires_at).toEqual(new Date(t0.getTime() + expected * 1000));
+  });
+
+  it("conta tentativas: depois de três pedidos negados ou expirados, o quarto não avisa ninguém", async () => {
+    const ctx = await createFixture(app, "approval teto", { onWait: humanDecides("denied") });
+    for (let i = 0; i < MAX_REQUEST_APPROVAL_PER_CALL; i += 1) {
+      expect(await runTool(requestApproval, args, ctx)).toMatchObject({ ok: true, data: { decision: "denied" } });
+    }
+    const refused = await runTool(requestApproval, args, ctx);
+    expect(refused.ok).toBe(false);
+    expect(refused.message).toContain(`limite de ${MAX_REQUEST_APPROVAL_PER_CALL} chamadas a request_approval`);
+    expect(ctx.waits).toHaveLength(MAX_REQUEST_APPROVAL_PER_CALL);
+    const asked = await withSystem(app, (q) => q.one<{ count: string }>("select count(*) as count from approvals where call_id = $1", [ctx.callId]));
+    expect(Number(asked?.count)).toBe(MAX_REQUEST_APPROVAL_PER_CALL);
   });
 });

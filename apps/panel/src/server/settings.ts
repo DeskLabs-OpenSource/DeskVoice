@@ -1,7 +1,21 @@
-import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
+import {
+  type OrgQuery,
+  DEFAULT_INBOUND_LIMIT,
+  DEFAULT_VOICEMAIL_MAX_SECONDS,
+  INBOUND_LIMIT_SETTING,
+  DEFAULT_VOICEMAIL_LANGUAGE,
+  VOICEMAIL_ENABLED_SETTING,
+  VOICEMAIL_LANGUAGE_SETTING,
+  VOICEMAIL_MAX_SECONDS_SETTING,
+  encryptSecret,
+  inboundLimitSchema,
+  voicemailLanguageSchema,
+  voicemailMaxSecondsSchema,
+} from "@deskvoice/core";
 import { z, type ZodType } from "zod";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
-import { OUTCOME_SETTING } from "@deskvoice/voice-engine/types";
+import { ANALYSIS_SETTING, AUTO_TRANSCRIPTION_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, classifyBaseUrlOf, classifyModelOf, engineClassifyTargetSetting, storedClassifyTargetOf } from "@deskvoice/voice-engine/types";
+import { brainKeySetting, findBrain, readStoredModels } from "./brains";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -27,6 +41,8 @@ export interface Setting {
   guard?(previous: unknown): void;
   /** A chave de um motor: ao gravar, ela é testada, e o teste da chave anterior deixa de valer. */
   engine?: VoiceEngine;
+  /** Confere a entrada contra o que já está no banco (lança `ApiError`), antes de `store`. */
+  check?(input: unknown, q: OrgQuery): Promise<void>;
 }
 
 const setting = <T>(definition: SettingDefinition<T>): Setting => ({
@@ -44,9 +60,64 @@ const secretText = setting<string>({
   view: () => CONFIGURED,
 });
 
+/** O destino da classificação como a tela o vê: da chave, só se existe. */
+export function classifyTargetView(stored: unknown): { baseUrl: string | null; model: string | null; apiKey: { configured: boolean } } {
+  const target = storedClassifyTargetOf(stored);
+  return { baseUrl: classifyBaseUrlOf(target.baseUrl) ?? null, model: classifyModelOf(target.model) ?? null, apiKey: { configured: target.apiKey !== undefined } };
+}
+
 const httpUrl = z.url({ protocol: /^https?$/ });
 const storedConnector = z.object({ type: z.string(), url: z.string(), token: z.string() });
 const storedHooks = z.array(z.object({ name: z.string(), url: z.string(), token: z.string().optional() }));
+
+// O destino da classificação: `https` e host público (o processo de rotinas alcança a rede interna),
+// gravado sem a barra final, porque o caminho do provedor é colado depois. O modelo é o nome que o
+// provedor publica. A mesma regra vale na leitura da rotina: endpoint gravado por fora do painel
+// que não passe aqui não recebe pedido nenhum, e modelo que não passe fica no padrão do motor.
+const classifyBaseUrlSchema = z
+  .string()
+  .max(500)
+  .transform((value) => value.trim())
+  .refine((value) => classifyBaseUrlOf(value) !== undefined, "must be a public https URL with no credentials")
+  .transform((value) => value.replace(/\/+$/, ""));
+const classifyModelSchema = z
+  .string()
+  .max(200)
+  .transform((value) => value.trim())
+  .refine((value) => classifyModelOf(value) !== undefined, "model names take letters, digits and . _ : / -");
+
+// Endpoint, modelo e a chave do endpoint juntos, com a regra do conector abaixo: a chave foi dada
+// a um endereço, então chave em branco só mantém a gravada se o endpoint for o mesmo; endpoint novo
+// pede a chave de novo. A chave do motor nunca serve aqui. Sem endpoint não há chave: só o modelo,
+// e a classificação segue no endereço oficial do motor, com a chave do motor — mas só com modelo que
+// o motor saiba precificar (`classifyPricing`): quem cobra é ele, e custo sem preço não é medido.
+// Com endpoint, o modelo é o que o dono quiser: quem cobra é o provedor do endpoint.
+// A configuração é por motor, por isso a função: o preço de cada modelo é do motor.
+const classifyTargetOf = (engine: VoiceEngine): Setting =>
+  setting<{ baseUrl?: string; model?: string; apiKey?: string }>({
+    schema: z.object({ baseUrl: classifyBaseUrlSchema.optional(), model: classifyModelSchema.optional(), apiKey: z.string().trim().min(1).max(500).optional() }),
+    secret: true,
+    store(value, key, previous) {
+      if (value.baseUrl === undefined) {
+        if (value.apiKey !== undefined) throw new ApiError(400, "endpoint_required", "The classification key belongs to an endpoint: enter the endpoint too.");
+        // Sem endpoint, o pedido vai ao provedor do próprio motor, que cobra por ele: modelo que o
+        // motor não sabe precificar seria cobrado com o custo "não medido". Com endpoint, o preço é
+        // do provedor do endpoint e o modelo passa.
+        if (value.model !== undefined && engine.classifyPricing?.(value.model) === undefined)
+          throw new ApiError(
+            400,
+            "classify_model_unmeasured",
+            "Without an endpoint the classification goes to the engine's own provider, which charges for it, and the project does not know this model's price: enter the endpoint, or leave the model empty to use the engine's priced model.",
+          );
+        return value.model === undefined ? {} : { model: value.model };
+      }
+      const kept = storedClassifyTargetOf(previous);
+      const apiKey = value.apiKey ? encryptSecret(value.apiKey, key) : kept.baseUrl === value.baseUrl ? kept.apiKey : undefined;
+      if (apiKey === undefined) throw new ApiError(400, "endpoint_key_required", "When the classification endpoint changes, enter its key again.");
+      return { baseUrl: value.baseUrl, ...(value.model !== undefined && { model: value.model }), apiKey };
+    },
+    view: classifyTargetView,
+  });
 
 // Token em branco numa alteração mantém o que já estava gravado: a tela nunca recebe o valor
 // para devolver, então "não mexi" precisa ser representável. Mas só para o MESMO destino: o token
@@ -99,6 +170,38 @@ const webhooks = setting<Array<{ name: string; url: string; token?: string }>>({
   },
 });
 
+// Quem lê a ligação (desfecho e análise): um cérebro e um modelo da lista guardada dele. Ausente é o
+// motor do agente, como antes. Modelo sem preço conhecido só com `acceptUnmeasured: true`, que a tela
+// manda depois do aviso: o custo da leitura não vai ser medido, e ela só roda em agente com teto.
+// `acceptUnmeasured` não é gravado: ele vale para este pedido, e a rotina relê o preço na leitura.
+const analysisBrainInput = z.object({ brain: z.string().trim().min(1).max(100), model: z.string().trim().min(1).max(300), acceptUnmeasured: z.boolean().optional() });
+const analysisBrain: Setting = {
+  ...setting<z.infer<typeof analysisBrainInput>>({
+    schema: analysisBrainInput,
+    secret: false,
+    store: (value) => ({ brain: value.brain, model: value.model }),
+    view: (stored) => z.object({ brain: z.string(), model: z.string() }).safeParse(stored).data ?? null,
+  }),
+  async check(input, q) {
+    const parsed = analysisBrainInput.safeParse(input);
+    // A forma errada é dita pelo `store`, com o caminho do campo.
+    if (!parsed.success) return;
+    const { brain: brainId, model: modelId, acceptUnmeasured } = parsed.data;
+    const brain = await findBrain(brainId);
+    if (!brain) throw new ApiError(400, "unknown_brain", `"${brainId}" is not a known brain.`);
+    const key = await q.one("select 1 from settings where key = $1", [brainKeySetting(brain.id)]);
+    if (!key) throw new ApiError(400, "brain_no_key", "This brain has no key saved: save and test the key in Settings → Brains first.");
+    const model = (await readStoredModels(q, brain))?.models.find((item) => item.id === modelId);
+    if (!model) throw new ApiError(400, "brain_model_not_listed", "This model is not in the saved list for this brain's key: refresh the list in Settings → Brains.");
+    if (model.price === undefined && acceptUnmeasured !== true)
+      throw new ApiError(
+        400,
+        "brain_model_unmeasured",
+        "This model's price is not known: its cost will not be measured, and it only reads calls of agents with a cost ceiling. Send acceptUnmeasured: true to choose it anyway.",
+      );
+  },
+};
+
 /** A definição da chave, ou `undefined` se a chave não for conhecida. Não existe configuração livre. */
 export async function settingDefinition(key: string): Promise<Setting | undefined> {
   const engines = await listEngines();
@@ -117,11 +220,31 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     // Classificar o desfecho de cada ligação com o motor do agente. Ausente vale desligado: é uma
     // chamada paga ao provedor por ligação, e o dono decide.
     [OUTCOME_SETTING]: { ...plain(z.boolean()), fallback: false },
+    // Analisar cada ligação no fim (nota pela régua, temperatura, objeções). Ausente vale desligado:
+    // a análise vem na mesma chamada paga do desfecho, mais longa, e o dono decide.
+    [ANALYSIS_SETTING]: { ...plain(z.boolean()), fallback: false },
+    // Quem lê a ligação: um cérebro e um modelo. Ausente vale o motor do agente (o de antes).
+    "calls.analysis_brain": analysisBrain,
+    // Transcrever a gravação de uma chamada sem texto, a pedido. Ausente vale desligado: o áudio
+    // gravado vai ao provedor do motor, e cada transcrição é paga.
+    [TRANSCRIPTION_SETTING]: { ...plain(z.boolean()), fallback: false },
+    // Transcrever sozinho, no fim, toda chamada que terminou sem fala. Ausente vale desligado: cada
+    // uma é um pedido pago ao provedor, sem ninguém pedir. Só age com a transcrição acima ligada.
+    [AUTO_TRANSCRIPTION_SETTING]: { ...plain(z.boolean()), fallback: false },
     "network.public_ip": plain(z.ipv4()),
     // Ligações recebidas pela operadora ao mesmo tempo. Ausente vale o teto de fábrica.
     [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },
+    // Caixa postal: desligada de fábrica, o teto do recado em segundos e o idioma do aviso gravado.
+    // Ausentes valem os de fábrica.
+    [VOICEMAIL_ENABLED_SETTING]: { ...plain(z.boolean()), fallback: false },
+    [VOICEMAIL_MAX_SECONDS_SETTING]: { ...plain(voicemailMaxSecondsSchema), fallback: DEFAULT_VOICEMAIL_MAX_SECONDS },
+    [VOICEMAIL_LANGUAGE_SETTING]: { ...plain(voicemailLanguageSchema), fallback: DEFAULT_VOICEMAIL_LANGUAGE },
   };
   // Uma chave por motor que pede chave: motor novo na pasta ganha a configuração sem editar aqui.
   for (const engine of engines) if (!engine.keyless) definitions[engineKeySetting(engine.id)] = { ...secretText, engine };
+  // Onde a classificação do desfecho acontece, por motor, para quem paga um provedor compatível com
+  // OpenAI em vez da OpenAI. A voz em tempo real não muda. Ausente vale o endereço, o modelo e a
+  // chave do motor, que é o de hoje: quem não configura nada não vê diferença no pedido.
+  for (const engine of engines) if (!engine.keyless && engine.classifyTarget) definitions[engineClassifyTargetSetting(engine.id)] = classifyTargetOf(engine);
   return Object.hasOwn(definitions, key) ? definitions[key] : undefined;
 }

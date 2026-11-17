@@ -1,7 +1,7 @@
 import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { createDb, hashPassword, loadConfig, withSystem, type Db } from "@deskvoice/core";
+import { accountExists, createDb, hashPassword, loadConfig, resetAccountPassword, type Db } from "@deskvoice/core";
 import { z } from "zod";
 import { cliArgs } from "./args";
 import { MIN_PASSWORD_LENGTH } from "./create-owner";
@@ -15,7 +15,7 @@ export type ResetPasswordInput = z.input<typeof inputSchema>;
 export type ResetPasswordResult = { changed: true; sessionsClosed: number } | { changed: false; reason: "email_not_found" };
 
 /**
- * Troca a senha de um usuário pelo e-mail e encerra as sessões abertas dele.
+ * Troca a senha da conta pelo e-mail e encerra as sessões abertas dela.
  *
  * Só roda por linha de comando, na própria VPS: quem tem acesso ao servidor já é dono da
  * instalação. Não existe rota de painel para isto de propósito (seria um caminho de tomada de
@@ -26,16 +26,14 @@ export async function resetPassword(db: Db, input: ResetPasswordInput): Promise<
   if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
   const { email, password } = parsed.data;
 
-  const user = await withSystem(db, (q) => q.one<{ id: string }>("select id from users where email = $1", [email]));
-  if (!user) return { changed: false, reason: "email_not_found" };
+  // Antes do hash, que é caro de propósito.
+  if (!(await accountExists(db, email))) return { changed: false, reason: "email_not_found" };
 
-  const passwordHash = await hashPassword(password);
-  return withSystem(db, async (q) => {
-    await q.exec("update users set password_hash = $2 where id = $1", [user.id, passwordHash]);
-    // Sessão aberta com a senha antiga não pode sobreviver à troca: quem perdeu a senha pode tê-la perdido para alguém.
-    const sessionsClosed = await q.exec("delete from sessions where user_id = $1", [user.id]);
-    return { changed: true as const, sessionsClosed };
-  });
+  // A senha é da conta. Sessão aberta com a senha antiga não pode sobreviver à troca: quem perdeu a
+  // senha pode tê-la perdido para alguém. Caem as sessões de todos os vínculos da conta.
+  const sessionsClosed = await resetAccountPassword(db, email, await hashPassword(password));
+  if (sessionsClosed === null) return { changed: false, reason: "email_not_found" };
+  return { changed: true, sessionsClosed };
 }
 
 async function main(): Promise<void> {

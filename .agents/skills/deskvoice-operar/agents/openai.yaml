@@ -1,0 +1,6 @@
+interface:
+  display_name: "Operar uma instalação do DeskVoice"
+  short_description: "Agente, linha, ligação de saída, linha do tempo, custos, WhatsApp, atualização, backup e diagnóstico"
+  default_prompt: "Use a skill deskvoice-operar e me ajude a configurar e entender a minha instalação."
+policy:
+  allow_implicit_invocation: true

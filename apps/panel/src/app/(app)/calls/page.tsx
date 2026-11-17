@@ -9,14 +9,16 @@ import enCommon from "../../../i18n/en/common";
 import es from "../../../i18n/es/calls";
 import esCommon from "../../../i18n/es/common";
 import ptBR from "../../../i18n/pt-BR/calls";
+import { fill } from "../../../i18n/locales";
 import ptBRCommon from "../../../i18n/pt-BR/common";
 import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { useErrorText } from "../../../ui/errors";
-import { formatDateTime, formatDuration, formatMoney, formatPhone, secondsBetween } from "../../../ui/format";
+import { formatCaller, formatDateTime, formatDuration, secondsBetween } from "../../../ui/format";
 import { Badge, Button, EmptyState, Notice, PageHeader, Skeleton, buttonClass, type Tone } from "../../../ui/kit";
 import { useLive, useNow } from "../../../ui/live";
-import type { Agent, Call, CallStatus, Engine, Trunk } from "../../../ui/types";
+import type { Agent, Call, CallListItem, CallStatus, Engine, Trunk } from "../../../ui/types";
+import { Amount } from "../costs/amount-view";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
 const isLive = (call: Call): boolean => call.status === "ringing" || call.status === "in_progress";
@@ -29,7 +31,7 @@ export default function CallsPage() {
   const router = useRouter();
   const errorText = useErrorText();
   const now = useNow();
-  const calls = useApi<Call[]>("/calls");
+  const calls = useApi<CallListItem[]>("/calls");
   const agents = useApi<Agent[]>("/agents");
   const trunks = useApi<Trunk[]>("/trunks");
   const engines = useApi<Engine[]>("/engines");
@@ -121,9 +123,9 @@ export default function CallsPage() {
               >
                 <span className="live-dot" aria-hidden />
                 <div className="grid min-w-0 gap-0.5">
-                  <span className="data truncate text-[1.2rem] font-medium">{formatPhone(call.from) || common.unknownCaller}</span>
+                  <span className="data truncate text-[1.2rem] font-medium">{formatCaller(call, common)}</span>
                   <span className="truncate text-muted">
-                    {call.agentName ?? common.noAgent} · {common.callStatus[call.status]}
+                    {call.channel === "phone" ? "" : `${common.channel[call.channel]} · `}{call.agentName ?? common.noAgent} · {common.callStatus[call.status]}
                   </span>
                 </div>
                 <div className="flex items-center gap-4">
@@ -158,28 +160,47 @@ export default function CallsPage() {
               <p className="text-muted">{t.emptyFilter}</p>
             ) : (
               <div className="overflow-hidden rounded-md border border-line bg-surface">
-                <div className="hidden grid-cols-[1.4fr_1.2fr_1fr_1fr_0.7fr_0.7fr] gap-4 border-b border-line px-5 py-2.5 text-[0.8rem] font-bold text-muted md:grid">
+                <div className="hidden grid-cols-[1.4fr_1.2fr_1fr_1fr_0.7fr_0.7fr_0.5fr] gap-4 border-b border-line px-5 py-2.5 text-[0.8rem] font-bold text-muted md:grid">
                   <span>{t.columns.caller}</span>
                   <span>{t.columns.agent}</span>
                   <span>{t.columns.status}</span>
                   <span>{t.columns.started}</span>
                   <span className="text-right">{t.columns.duration}</span>
                   <span className="text-right">{t.columns.cost}</span>
+                  <span className="text-right">{t.columns.score}</span>
                 </div>
                 {history.map((call) => (
                   <Link
                     key={call.id}
                     href={`/calls/${call.id}`}
-                    className="grid grid-cols-2 items-center gap-x-4 gap-y-1 border-b border-line px-5 py-3 transition-colors duration-[120ms] last:border-b-0 hover:bg-sunken md:grid-cols-[1.4fr_1.2fr_1fr_1fr_0.7fr_0.7fr]"
+                    className="grid grid-cols-2 items-center gap-x-4 gap-y-1 border-b border-line px-5 py-3 transition-colors duration-[120ms] last:border-b-0 hover:bg-sunken md:grid-cols-[1.4fr_1.2fr_1fr_1fr_0.7fr_0.7fr_0.5fr]"
                   >
-                    <span className="data truncate">{formatPhone(call.direction === "outbound" ? call.to : call.from) || common.unknownCaller}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="data truncate">{formatCaller(call, common)}</span>
+                      {call.channel === "phone" ? null : <Badge tone="neutral">{common.channel[call.channel]}</Badge>}
+                    </span>
                     <span className="truncate text-right text-muted md:text-left">{call.agentName ?? common.noAgent}</span>
                     <span>
                       <Badge tone={STATUS_TONE[call.status]}>{common.callStatus[call.status]}</Badge>
                     </span>
                     <span className="data text-right text-muted md:text-left">{formatDateTime(call.startedAt, locale)}</span>
                     <span className="data text-muted md:text-right md:text-ink">{call.endedAt ? formatDuration(secondsBetween(call.answeredAt ?? call.startedAt, call.endedAt)) : ""}</span>
-                    <span className="data text-right">{formatMoney(call.costCents, locale)}</span>
+                    <span className="data text-right">
+                      <Amount cents={call.costCents} unmeasuredCount={call.unmeasuredCount} estimatedCount={call.estimatedCount} />
+                    </span>
+                    {/* A nota é a soma da régua; sem análise (o de fábrica), um traço. No celular ela ocupa a
+                        linha toda, com o rótulo da coluna, para não cair solta no grid de duas colunas. */}
+                    <span className="col-span-2 flex items-center justify-between gap-4 md:col-span-1 md:block md:text-right">
+                      <span className="text-muted md:hidden">{t.columns.score}</span>
+                      {call.analysisScore === null ? (
+                        <span className="data text-muted" title={t.noScore}>
+                          <span aria-hidden="true">—</span>
+                          <span className="sr-only">{t.noScore}</span>
+                        </span>
+                      ) : (
+                        <span className="data">{fill(t.score, { score: String(call.analysisScore) })}</span>
+                      )}
+                    </span>
                   </Link>
                 ))}
               </div>

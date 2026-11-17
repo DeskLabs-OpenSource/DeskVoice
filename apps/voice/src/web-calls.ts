@@ -20,7 +20,7 @@ const CLOSE_BAD_REQUEST = 4400;
 const CLOSE_UNAUTHORIZED = 4401;
 const PATHS = new Set(["/voice-ws", "/"]);
 
-export type WebCallRefusalCode = "agent_not_found" | "agent_disabled" | "engine_not_configured" | "engine_simulated" | "too_many_web_calls";
+export type WebCallRefusalCode = "agent_not_found" | "agent_disabled" | "engine_not_configured" | "engine_not_installed" | "engine_simulated" | "too_many_web_calls";
 /**
  * Chamadas pelo navegador ao mesmo tempo, por organização (as que esperam a conexão contam).
  * Cada chamada já tem teto de custo e de duração; sem este, um laço na tela abriria chamadas sem
@@ -212,13 +212,13 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
           return { code: "engine_simulated", message: "This agent uses the simulated engine, which follows a script and does not talk. Change the agent's voice engine to a real one to call it from the browser." };
         }
         const engine = engines.get(agent.engine);
-        if (!engine) return { code: "engine_not_configured", message: `The voice engine "${agent.engine}" of this agent is not installed.` };
+        if (!engine) return { code: "engine_not_installed", message: `The voice engine "${agent.engine}" of this agent is not available in this installation. Choose another voice engine on the agent's screen.` };
         if (!engine.keyless) {
           const key = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [input.organizationId, engineKeySetting(agent.engine)]);
           if (typeof key?.value !== "string") return { code: "engine_not_configured", message: `No API key is saved for the voice engine ${engine.label}. Save it in the settings before calling.` };
         }
         const call = await q.one<{ id: string }>(
-          "insert into calls (organization_id, agent_id, direction, status, engine, started_at) values ($1, $2, 'inbound', 'ringing', $3, $4) returning id",
+          "insert into calls (organization_id, agent_id, direction, channel, status, engine, started_at) values ($1, $2, 'inbound', 'web', 'ringing', $3, $4) returning id",
           [input.organizationId, input.agentId, agent.engine, clock.now()],
         );
         if (!call) throw new Error("Web call was not created");

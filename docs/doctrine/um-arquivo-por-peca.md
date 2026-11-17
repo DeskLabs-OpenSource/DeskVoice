@@ -27,6 +27,7 @@ O conflito não era de ideias. Era de endereço.
 |---|---|---|
 | Ferramenta que o agente usa na chamada | Um arquivo em `packages/tools/src/tools/` | `loadTools()` lê a pasta |
 | Motor de voz | Um arquivo em `packages/voice-engine/src/engines/` | `loadEngines()` lê a pasta |
+| Voz do pipeline | Um arquivo em `packages/voice-engine/src/synthesizers/` | `loadSynthesizers()` lê a pasta |
 | Rotina pós-chamada | Um arquivo em `apps/routines/src/routines/` | O consumidor da fila lê a pasta |
 | Texto de tela | Um arquivo por funcionalidade e por idioma em `apps/panel/src/i18n/` | Carregado pela funcionalidade |
 | Mudança de banco | Um arquivo novo em `db/migrations/`, com carimbo de tempo | O executor aplica em ordem |

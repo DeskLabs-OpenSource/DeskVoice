@@ -173,6 +173,9 @@ certa. Ou chame pelo nome.
 | Vou criar ou alterar uma ferramenta que o agente usa na chamada | `deskvoice-ferramenta` |
 | Vou adicionar ou alterar um motor de voz | `deskvoice-motor-de-voz` |
 | Tenho uma instalação rodando e preciso atualizar, fazer backup, diagnosticar | `deskvoice-operar` |
+| Quero saber como está a operação: ligações, desfecho, custo, falhas, fila | `deskvoice-metricas` |
+| As respostas da IA estão ruins e quero afinar as instruções ou o vocabulário de um agente | `deskvoice-agente-de-voz` |
+| Vou acrescentar uma peça e preciso saber se ela está viva (a lista do sistema vivo no PR) | `deskvoice-sistema-vivo` |
 
 Editou uma skill? Rode `pnpm skills:sync`. O espelho fora de sincronia reprova no CI.
 
@@ -203,6 +206,7 @@ Rode `pnpm verify` e, se tocou em banco, `pnpm test:db`. Isso cobre:
 - fonte baixada de fora (`next/font/google`, ou o endereço do serviço de fontes num CSS ou numa tela) em vez de versionada no repositório;
 - cor escrita como valor (`#fff`, `rgb(`, `hsl(`, `oklch(`) num `.ts` ou `.tsx` do painel, em vez de um token de `apps/panel/src/design/tokens.css` ([direção do painel](docs/design/direcao-do-painel.md));
 - fragmento de versão inválido;
+- motivo de fim ou de recusa de chamada sem frase na linha do tempo;
 - instalação nova e atualização a partir da última versão;
 - a chamada simulada de ponta a ponta;
 - os caminhos de primeira impressão no navegador, contra a instalação de verdade: entrar, configurar,

@@ -10,7 +10,9 @@ const calls = {
   filterLabel: "Filtrar por estado",
   filterAll: "Todas",
   emptyFilter: "Nenhuma chamada com este estado.",
-  columns: { caller: "Número", agent: "Agente", status: "Estado", started: "Início", duration: "Duração", cost: "Custo" },
+  columns: { caller: "Número", agent: "Agente", status: "Estado", started: "Início", duration: "Duração", cost: "Custo", score: "Nota" },
+  score: "{score}/10",
+  noScore: "Sem análise",
   direction: { inbound: "Recebida", outbound: "Feita pelo agente" },
   empty: {
     title: "Nenhuma chamada ainda.",

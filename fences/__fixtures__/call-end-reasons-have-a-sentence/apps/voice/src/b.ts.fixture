@@ -1,0 +1,2 @@
+export type OutboundRefusalCode = "do_not_call" | "after_hours";
+type Refusal = "no_answer" | "number_blocked";

@@ -59,6 +59,8 @@ export function testSchedule(): { schedule: Schedule; now: () => number; fire(de
 }
 
 export interface AgentOptions {
+  name?: string;
+  roleLabel?: string | null;
   script?: SimulatedScript;
   instructions?: string;
   greeting?: string | null;
@@ -68,6 +70,9 @@ export interface AgentOptions {
   enabled?: boolean;
   maxCallSeconds?: number;
   costCeilingCents?: number;
+  vocabulary?: string[];
+  listeningEnvironment?: "normal" | "noisy";
+  language?: string;
 }
 
 export async function createAgent(app: Db, organizationId: string, options: AgentOptions = {}): Promise<string> {
@@ -75,9 +80,25 @@ export async function createAgent(app: Db, organizationId: string, options: Agen
   const instructions = options.script ? SIMULATED_PREFIX + JSON.stringify(options.script) : (options.instructions ?? "Você é a recepção.");
   await withSystem(app, (q) =>
     q.exec(
-      `insert into agents (id, organization_id, name, instructions, greeting, engine, tools, transfer_to_e164, enabled, max_call_seconds, cost_ceiling_cents)
-       values ($1, $2, 'Recepção', $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [id, organizationId, instructions, options.greeting ?? null, options.engine ?? "simulated", options.tools ?? [], options.transferTo ?? null, options.enabled ?? true, options.maxCallSeconds ?? 600, options.costCeilingCents ?? 500],
+      `insert into agents (id, organization_id, name, instructions, greeting, engine, tools, transfer_to_e164, enabled, max_call_seconds, cost_ceiling_cents, vocabulary, listening_environment, role_label, language)
+       values ($1, $2, coalesce($13, 'Recepção'), $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, '{}'::text[]), coalesce($12, 'normal'), $14, coalesce($15, 'pt-BR'))`,
+      [
+        id,
+        organizationId,
+        instructions,
+        options.greeting ?? null,
+        options.engine ?? "simulated",
+        options.tools ?? [],
+        options.transferTo ?? null,
+        options.enabled ?? true,
+        options.maxCallSeconds ?? 600,
+        options.costCeilingCents ?? 500,
+        options.vocabulary ?? null,
+        options.listeningEnvironment ?? null,
+        options.name ?? null,
+        options.roleLabel ?? null,
+        options.language ?? null,
+      ],
     ),
   );
   return id;
@@ -86,20 +107,33 @@ export async function createAgent(app: Db, organizationId: string, options: Agen
 export async function createTrunk(
   app: Db,
   organizationId: string,
-  options: { host?: string; username?: string | null; password?: string | null; authMode?: "register" | "ip"; callerId?: string | null } = {},
+  options: {
+    host?: string;
+    username?: string | null;
+    password?: string | null;
+    authMode?: "register" | "ip";
+    callerId?: string | null;
+    matchExtra?: string[];
+    outboundHost?: string | null;
+  } = {},
 ): Promise<string> {
   const id = randomUUID();
   const password = options.password === undefined ? "s3nha-do-tronco" : options.password;
   await withSystem(app, (q) =>
-    q.exec("insert into trunks (id, organization_id, name, host, username, secret_enc, auth_mode, caller_id_e164) values ($1, $2, 'Operadora', $3, $4, $5, $6, $7)", [
-      id,
-      organizationId,
-      options.host ?? "sip.operadora.example",
-      options.username === undefined ? "conta100" : options.username,
-      password === null ? null : encryptSecret(password, secretKey),
-      options.authMode ?? "register",
-      options.callerId ?? null,
-    ]),
+    q.exec(
+      "insert into trunks (id, organization_id, name, host, username, secret_enc, auth_mode, caller_id_e164, match_extra, outbound_host) values ($1, $2, 'Operadora', $3, $4, $5, $6, $7, $8, $9)",
+      [
+        id,
+        organizationId,
+        options.host ?? "sip.operadora.example",
+        options.username === undefined ? "conta100" : options.username,
+        password === null ? null : encryptSecret(password, secretKey),
+        options.authMode ?? "register",
+        options.callerId ?? null,
+        options.matchExtra ?? [],
+        options.outboundHost ?? null,
+      ],
+    ),
   );
   return id;
 }
@@ -113,7 +147,7 @@ export async function createPhoneNumber(app: Db, organizationId: string, trunkId
 export async function createCall(app: Db, organizationId: string, agentId: string, at: Date, direction: "inbound" | "outbound" = "inbound"): Promise<string> {
   const id = randomUUID();
   await withSystem(app, (q) =>
-    q.exec("insert into calls (id, organization_id, agent_id, direction, status, started_at) values ($1, $2, $3, $4, 'ringing', $5)", [id, organizationId, agentId, direction, at]),
+    q.exec("insert into calls (id, organization_id, agent_id, direction, channel, status, started_at) values ($1, $2, $3, $4, 'phone', 'ringing', $5)", [id, organizationId, agentId, direction, at]),
   );
   return id;
 }
@@ -129,11 +163,12 @@ export interface CallRow {
   from_e164: string | null;
   to_e164: string | null;
   direction: string;
+  channel: string;
 }
 
 export const callOf = async (app: Db, callId: string): Promise<CallRow> => {
   const row = await withSystem(app, (q) =>
-    q.one<CallRow>("select status, end_reason, engine, cost_cents, answered_at, ended_at, agent_id, from_e164, to_e164, direction from calls where id = $1", [callId]),
+    q.one<CallRow>("select status, end_reason, engine, cost_cents, answered_at, ended_at, agent_id, from_e164, to_e164, direction, channel from calls where id = $1", [callId]),
   );
   if (!row) throw new Error(`Call ${callId} not found`);
   return row;
@@ -149,8 +184,12 @@ export const eventsOf = (app: Db, callId: string): Promise<Array<{ kind: string;
 
 export const kindsOf = async (app: Db, callId: string): Promise<string[]> => (await eventsOf(app, callId)).map((event) => event.kind);
 
-export const ledgerOf = (app: Db, callId: string): Promise<Array<{ engine: string; seconds: number; input_tokens: number; output_tokens: number; cost_cents: number }>> =>
-  withSystem(app, (q) => q.many("select engine, seconds, input_tokens, output_tokens, cost_cents from usage_ledger where call_id = $1 order by at, cost_cents", [callId]));
+export const ledgerOf = (app: Db, callId: string): Promise<Array<{ engine: string; agent_id: string | null; seconds: number; input_tokens: number; output_tokens: number; cost_cents: number }>> =>
+  withSystem(app, (q) => q.many("select engine, agent_id, seconds, input_tokens, output_tokens, cost_cents from usage_ledger where call_id = $1 order by at, cost_cents", [callId]));
+
+/** Para quem o agente pode passar a ligação. Pelo caminho de sistema: o gatilho do banco confere a organização mesmo assim. */
+export const setHandoffTargets = (app: Db, agentId: string, targets: string[]): Promise<number> =>
+  withSystem(app, (q) => q.exec("update agents set agent_handoff_targets = $2 where id = $1", [agentId, targets]));
 
 export const approvalsOf = (app: Db, callId: string): Promise<Array<{ id: string; status: string; question: string }>> =>
   withSystem(app, (q) => q.many("select id, status, question from approvals where call_id = $1", [callId]));
@@ -221,7 +260,8 @@ export interface ManualTransport extends CallTransport {
   transferredTo: string | null;
   /** Teclas que a conversa mandou apertar. */
   sentDtmf: string[];
-  callerAudio(ms: number): void;
+  /** Áudio de quem ligou por `ms`; `peak` acima de zero manda fala em vez de silêncio. */
+  callerAudio(ms: number, peak?: number): void;
   callerHangup(): void;
 }
 
@@ -243,8 +283,10 @@ export function manualTransport(): ManualTransport {
     transfer: async (to) => void (transport.transferredTo = to),
     sendDtmf: async (digits) => void transport.sentDtmf.push(digits),
     close: async () => void (transport.closes += 1),
-    callerAudio(ms) {
-      for (let sent = 0; sent < ms; sent += 20) audio?.(Buffer.alloc(320));
+    callerAudio(ms, peak = 0) {
+      const frame = Buffer.alloc(320);
+      if (peak > 0) for (let i = 0; i + 1 < frame.length; i += 2) frame.writeInt16LE(i % 4 === 0 ? peak : -peak, i);
+      for (let sent = 0; sent < ms; sent += 20) audio?.(frame);
     },
     callerHangup: () => hangup?.(),
   };
@@ -257,18 +299,21 @@ export interface ManualEngine {
   configs: VoiceSessionConfig[];
   keys: string[];
   said: string[];
+  /** Quantas vezes a conversa pediu o fim do turno de quem ligou (a guarda contra o silêncio). */
+  callerTurnsClosed: number;
   toolResults: Array<{ id: string; result: unknown }>;
   audioBytes: number;
   closed: number;
   emit<K extends keyof VoiceSessionEvents>(event: K, ...args: Parameters<VoiceSessionEvents[K]>): void;
 }
 
-export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean } = {}): ManualEngine {
+export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean; connectWhen?: Promise<unknown> } = {}): ManualEngine {
   const handlers = new Map<string, Array<(...args: never[]) => void>>();
   const manual: ManualEngine = {
     configs: [],
     keys: [],
     said: [],
+    callerTurnsClosed: 0,
     toolResults: [],
     audioBytes: 0,
     closed: 0,
@@ -288,11 +333,14 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
         if (options.connectError) throw typeof options.connectError === "string" ? new Error(options.connectError) : options.connectError;
         // O provedor aceitou a conexão e ficou mudo: o `connect` nunca volta.
         if (options.connectHangs) await new Promise(() => undefined);
+        // O provedor demora: a sessão só abre quando o teste soltar.
+        if (options.connectWhen) await options.connectWhen;
         const session: VoiceSession = {
           on: (event, handler) => void handlers.set(event, [...(handlers.get(event) ?? []), handler as (...args: never[]) => void]),
           sendAudio: (pcm) => void (manual.audioBytes += pcm.length),
           sendToolResult: (id, result) => void manual.toolResults.push({ id, result }),
           say: (text) => void manual.said.push(text),
+          closeCallerTurn: () => void (manual.callerTurnsClosed += 1),
           close: async () => void (manual.closed += 1),
         };
         return session;

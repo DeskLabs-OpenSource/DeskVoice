@@ -9,6 +9,17 @@ printf 'agents=3\ncalls=120\nusers=1\n' > "$FAKE_DIR/counts_backup"
 cp "$FAKE_DIR/counts_backup" "$FAKE_DIR/counts_restore"
 position() { grep -n -- "$1" "$FAKE_DIR/calls.log" | head -n 1 | cut -d: -f1; }
 
+# Atrás do Caddy do CRM (issue #221): a rede do proxy dele está no arquivo de publicação. Se o CRM a
+# apagou, o `up` não subiria nada: a atualização para antes do backup, sem mexer em nada.
+printf 'networks:\n  proxy:\n    name: "crm_caddy-sites"\n    external: true\n' >> "$DESKVOICE_DEPLOY_DIR/docker-compose.override.yml"
+: > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.2.0 --yes 2>&1)"; equal "rede do proxy sumiu: a atualização para" 1 "$?"
+contains "rede do proxy sumiu: diz qual e que nada mudou" "$out" "A rede crm_caddy-sites"
+equal "rede do proxy sumiu: nem backup nem migration" 0 "$(grep -cE ' pg_dump |run --rm migrate| up -d' "$FAKE_DIR/calls.log")"
+equal "rede do proxy sumiu: continua na versão de antes" 0.1.0 "$(env_get "$E" DESKVOICE_VERSION)"
+# Com a rede de pé, a atualização segue, e a declaração da rede fica (é ela que mantém a ligação).
+echo crm_caddy-sites > "$FAKE_DIR/networks"
+
 # Atualização que dá certo, numa instalação que veio de uma versão sem agente de atualização.
 A="$DESKVOICE_DEPLOY_DIR/app.env"; env_unset "$E" UPDATE_AGENT_TOKEN
 : > "$FAKE_DIR/calls.log"
@@ -196,6 +207,30 @@ echo 0 > "$FAKE_DIR/migrate_exit"
 out="$(bash "$KIT/update.sh" --to 0.8.0 --yes 2>&1)"
 equal "mesma configuração: não recarrega" 0 "$(reloads)"
 equal "mesma configuração: não reinicia" 0 "$(restarts)"
+# ── Imagens de terceiros: sai a que o Compose da versão de onde se saiu fixava por resumo e o da nova
+#    não fixa mais (issue #163). Só a referência exata; a de outro sistema e a que segue fixada ficam. ──
+pins() { sed -nE 's/^[[:space:]]*image:[[:space:]]*(\$\{[A-Z_]+:-)?([^}[:space:]]+@sha256:[0-9a-f]{64})\}?[[:space:]]*$/\2/p' "$DESKVOICE_DEPLOY_DIR/docker-compose.yml"; }
+OLD_WACALLS="ghcr.io/jotadev66/wacalls@sha256:$(printf 'a%.0s' $(seq 64))"
+OLD_CADDY="caddy:2.10.0-alpine@sha256:$(printf 'b%.0s' $(seq 64))"
+KEPT="$(pins | grep waha)"
+mkdir -p "$FAKE_DIR/git_checkout/main/deploy"
+{ echo "services:"; echo "  wacalls:"; echo "    image: $OLD_WACALLS"; echo "  waha:"; echo "    image: \${WAHA_IMAGE:-$KEPT}"; echo "  caddy:"; echo "    image: $OLD_CADDY"; } > "$FAKE_DIR/git_checkout/main/deploy/docker-compose.yml"
+third() { grep '^rmi .*@sha256:' "$FAKE_DIR/calls.log" | sed 's/^rmi //'; }
+{ echo "$OLD_WACALLS"; echo "$KEPT"; echo postgres:16; } > "$FAKE_DIR/images"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.0 --yes 2>&1)"; equal "terceiros: a atualização sai com zero" 0 "$?"
+equal "terceiros: tenta só as que a versão nova deixou de fixar" "$(printf '%s\n' "$OLD_CADDY" "$OLD_WACALLS")" "$(third)"
+equal "terceiros: sai a antiga; ficam a que segue fixada e a de outro sistema" "$(printf '%s\n' "$KEPT" postgres:16)" "$(cat "$FAKE_DIR/images")"
+contains "terceiros: diz o que saiu" "$out" "Imagens de terceiros que a versão 0.9.0 deixou de usar removidas"
+contains "terceiros: diz que voltar pede internet" "$out" "Voltar para a versão 0.8.0 pede internet"
+lacks "terceiros: a que não estava no disco não vira aviso" "$out" "Não consegui remover a imagem $OLD_CADDY"
+equal "terceiros: nunca força" 0 "$(grep -cE '^rmi (.* )?(-f|--force)( |$)' "$FAKE_DIR/calls.log")"
+# Um contêiner usa a antiga: aviso, e a atualização termina bem.
+{ echo "$OLD_WACALLS"; echo "$KEPT"; } > "$FAKE_DIR/images"; echo "$OLD_WACALLS" > "$FAKE_DIR/rmi_busy"; installed v0.8.0
+env_set "$E" DESKVOICE_VERSION 0.8.0; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.0 --yes 2>&1)"; equal "terceiros em uso: sai com zero" 0 "$?"
+contains "terceiros em uso: avisa, nomeando a imagem" "$out" "Não consegui remover a imagem $OLD_WACALLS"
+equal "terceiros em uso: ela fica" "$(printf '%s\n' "$OLD_WACALLS" "$KEPT")" "$(cat "$FAKE_DIR/images")"
+rm -f "$FAKE_DIR/rmi_busy" "$FAKE_DIR/images"; env_set "$E" DESKVOICE_VERSION 0.8.0
 rm -rf "$FAKE_DIR/git_tags" "$FAKE_DIR/git_checkout" "$FAKE_DIR/asterisk_mounted"; unset FAKE_GIT_WORKTREE
 cp "$ASTERISK_MODEL.original" "$ASTERISK_MODEL"; : > "$FAKE_DIR/calls.log"
 

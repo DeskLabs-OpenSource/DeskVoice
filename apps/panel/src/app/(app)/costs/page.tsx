@@ -8,9 +8,10 @@ import ptBR from "../../../i18n/pt-BR/costs";
 import { useDict, useLocale } from "../../../i18n/provider";
 import { useApi } from "../../../ui/api";
 import { useErrorText } from "../../../ui/errors";
-import { formatDay, formatMoney } from "../../../ui/format";
+import { formatDay } from "../../../ui/format";
 import { Notice, PageHeader, Panel, Skeleton } from "../../../ui/kit";
 import type { Costs } from "../../../ui/types";
+import { Amount } from "./amount-view";
 
 const PERIODS = [7, 30, 90];
 const isoDay = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -62,8 +63,12 @@ export default function CostsPage() {
         <>
           <div className="grid gap-1 border-y border-line py-5">
             <span className="text-[0.8rem] font-bold text-muted">{t.total}</span>
-            <span className="data text-[2.4rem] leading-none font-medium tracking-[-0.03em]">{formatMoney(data.totalCents, locale)}</span>
+            <span className="data text-[2.4rem] leading-none font-medium tracking-[-0.03em]">
+              <Amount cents={data.totalCents} unmeasuredCount={data.unmeasuredCount} estimatedCount={data.estimatedCount} />
+            </span>
           </div>
+          {data.unmeasuredCount > 0 ? <Notice tone="warn">{data.unmeasuredCount === 1 ? t.unmeasuredNoteOne : fill(t.unmeasuredNote, { n: data.unmeasuredCount })}</Notice> : null}
+          {data.estimatedCount > 0 ? <Notice tone="warn">{data.estimatedCount === 1 ? t.estimatedNoteOne : fill(t.estimatedNote, { n: data.estimatedCount })}</Notice> : null}
           <Notice>{t.estimate}</Notice>
           {data.byDay.length === 0 ? <p className="text-muted">{t.empty}</p> : null}
 
@@ -72,22 +77,26 @@ export default function CostsPage() {
               <Panel title={t.byDay}>
                 <ul className="grid gap-2.5">
                   {data.byDay.map((row) => (
-                    <li key={row.day} className="grid grid-cols-[5.5rem_minmax(0,1fr)_5.5rem] items-center gap-4">
+                    <li key={row.day} className="grid grid-cols-[5.5rem_minmax(0,1fr)_minmax(5.5rem,auto)] items-center gap-4">
                       <span className="data text-muted">{formatDay(row.day, locale)}</span>
                       <Bar share={row.costCents / max(data.byDay.map((entry) => entry.costCents))} />
-                      <span className="data text-right">{formatMoney(row.costCents, locale)}</span>
+                      <span className="data text-right">
+                        <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
+                      </span>
                     </li>
                   ))}
                 </ul>
               </Panel>
               <div className="grid gap-6 md:grid-cols-2">
-                <Panel title={t.byAgent}>
+                <Panel title={t.byAgent} description={t.handoffCounts}>
                   <ul className="grid gap-4">
                     {data.byAgent.map((row) => (
                       <li key={row.agentId ?? "deleted"} className="grid gap-1.5">
                         <span className="flex items-baseline justify-between gap-3">
                           <span className="truncate font-bold">{row.name ?? t.deletedAgent}</span>
-                          <span className="data">{formatMoney(row.costCents, locale)}</span>
+                          <span className="data">
+                            <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
+                          </span>
                         </span>
                         <Bar share={row.costCents / max(data.byAgent.map((entry) => entry.costCents))} />
                         <span className="text-[0.87rem] text-muted">{fill(t.calls, { n: row.calls })}</span>
@@ -98,14 +107,17 @@ export default function CostsPage() {
                 <Panel title={t.byEngine}>
                   <ul className="grid gap-4">
                     {data.byEngine.map((row) => (
-                      <li key={row.engine} className="grid gap-1.5">
+                      <li key={`${row.engine}:${row.source ?? ""}`} className="grid gap-1.5">
                         <span className="flex items-baseline justify-between gap-3">
-                          <span className="truncate font-bold">{row.label}</span>
-                          <span className="data">{formatMoney(row.costCents, locale)}</span>
+                          {/* A linha do analista ao vivo sai separada do mesmo modelo usado pelo filtro da fala. */}
+                          <span className="truncate font-bold">{row.source === "analyst" ? fill(t.analystLine, { model: row.label }) : row.label}</span>
+                          <span className="data">
+                            <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
+                          </span>
                         </span>
                         <Bar share={row.costCents / max(data.byEngine.map((entry) => entry.costCents))} />
                         <span className="text-[0.87rem] text-muted">
-                          {fill(t.minutes, { n: Math.round(row.seconds / 60) })}
+                          {row.source === "analyst" ? t.analystNote : fill(t.minutes, { n: Math.round(row.callSeconds / 60) })}
                           {row.priceCheckedOn ? ` · ${fill(t.priceChecked, { date: formatDay(row.priceCheckedOn, locale) })}` : ""}
                         </span>
                         {row.priceSource?.startsWith("http") ? (

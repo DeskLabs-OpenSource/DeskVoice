@@ -100,6 +100,31 @@ describe("verifyAgainstTranscript", () => {
     expect(scoreOf(result.criteria)).toBe(9);
   });
 
+  it("descarta a objeção de citação com menos de três palavras, mesmo que ela esteja na fala", () => {
+    const result = verifyAgainstTranscript(draft({ objections: [objection("sabe?"), objection("caro demais"), objection("caro demais, sabe")] }), transcript);
+    expect(result.objections.map((kept) => kept.quote)).toEqual(["caro demais, sabe"]);
+    expect(result.droppedObjections).toBe(2);
+  });
+
+  it("fala de quem ligou feita só de pontuação não sustenta citação vazia nem só de pontuação", () => {
+    const pontuacao: TranscriptTurn[] = [
+      { speaker: "user", text: "..." },
+      { speaker: "user", text: "?!" },
+      { speaker: "agent", text: "Alô?" },
+    ];
+    const base = draft();
+    const result = verifyAgainstTranscript(
+      draft({
+        criteria: base.criteria.map((criterion) => ({ ...criterion, evidence: criterion.id === "opening" ? "..." : "?!" })),
+        objections: [objection(""), objection("..."), objection("?!"), objection("  ")],
+      }),
+      pontuacao,
+    );
+    expect(result.objections).toEqual([]);
+    expect(result.droppedObjections).toBe(4);
+    expect(result.criteria.every((criterion) => criterion.evidence === "")).toBe(true);
+  });
+
   it("devolve uma análise que passa no schema de gravação", () => {
     expect(callAnalysisSchema.safeParse(verifyAgainstTranscript(draft({ objections: [objection("inventada")] }), transcript)).success).toBe(true);
   });
@@ -137,5 +162,12 @@ describe("storedCallAnalysisSchema", () => {
     expect(callAnalysisSchema.safeParse({ ...full, strengths: ["a", "b", "c", "d"] }).success).toBe(false);
     expect(callAnalysisSchema.safeParse({ ...full, weaknesses: ["x".repeat(201)] }).success).toBe(false);
     expect(callAnalysisSchema.safeParse({ ...full, nextStep: "x".repeat(281) }).success).toBe(false);
+    const objection = { objection: "Preço", quote: "achei caro demais", response: "Ofereceu parcelamento.", handled: "addressed" };
+    expect(callAnalysisSchema.safeParse({ ...full, objections: Array.from({ length: 5 }, () => objection) }).success).toBe(true);
+    expect(callAnalysisSchema.safeParse({ ...full, objections: Array.from({ length: 6 }, () => objection) }).success).toBe(false);
+    for (const field of ["objection", "quote", "response"]) {
+      expect(callAnalysisSchema.safeParse({ ...full, objections: [{ ...objection, [field]: "x".repeat(280) }] }).success, field).toBe(true);
+      expect(callAnalysisSchema.safeParse({ ...full, objections: [{ ...objection, [field]: "x".repeat(281) }] }).success, field).toBe(false);
+    }
   });
 });

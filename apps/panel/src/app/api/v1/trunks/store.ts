@@ -1,8 +1,39 @@
 import { z } from "zod";
 import { ApiError, type ServerDeps } from "../../../../server/context";
+import { inboundAddressProblem } from "../../../../server/trunk-host";
 import { anything, voiceRequest } from "../../../../server/voice";
 
 const applyAnswer = z.object({ applied: z.boolean(), detail: z.string() });
+
+/**
+ * O destino de saída só existe na linha reconhecida por IP; no modo registro a ligação sai pelo
+ * servidor do registro. Recusar na hora de salvar é melhor do que salvar e deixar a linha de fora
+ * da configuração. Os endereços extras de entrada valem nos dois modos: na linha por registro eles
+ * liberam a entrada da operadora que registra por um servidor e entrega por outro (R14).
+ */
+export function requireIpModeForAddresses(authMode: string, outboundHost: string | null): void {
+  if (authMode !== "ip" && outboundHost !== null) {
+    throw new ApiError(400, "validation_error", "An outbound address belongs to a line recognized by IP; with registration the calls go out to the server the line registers with.");
+  }
+}
+
+/**
+ * Os outros endereços de entrada são só numéricos (decisão 0007), nos dois modos: nome fica para o
+ * endereço de saída. Na linha reconhecida por IP o endereço do servidor também. E bloco largo
+ * demais é recusado. A mensagem diz qual campo, sem repetir o valor.
+ */
+export function requireNumericInbound(authMode: string, host: string, matchExtra: readonly string[]): void {
+  const where = authMode === "ip" ? "In a line recognized by IP" : "In a line that registers";
+  for (const [index, value] of [host, ...matchExtra].entries()) {
+    // Na linha por registro o servidor pode ser nome: só os extras passam pela regra.
+    if (index === 0 && authMode !== "ip") continue;
+    const problem = inboundAddressProblem(value);
+    if (problem === null) continue;
+    const field = index === 0 ? "the provider server address" : `the other inbound address ${index}`;
+    if (problem === "name") throw new ApiError(400, "trunk_inbound_name", `${where}, ${field} must be an IP or an address block, not a name.`);
+    throw new ApiError(400, "trunk_block_too_wide", `${where}, ${field} is a block wider than /16 (IPv4) or /32 (IPv6).`);
+  }
+}
 
 /**
  * Pede ao processo de voz que regenere a configuração do Asterisk a partir do banco. Se ele não

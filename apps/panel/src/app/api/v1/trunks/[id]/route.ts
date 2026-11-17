@@ -1,7 +1,7 @@
 import { encryptSecret } from "@deskvoice/core";
 import { ApiError, handle, notFound } from "../../../../../server/context";
 import { TRUNK_COLUMNS, trunkPatch } from "../../../../../server/shapes";
-import { applyTrunks } from "../store";
+import { applyTrunks, requireIpModeForAddresses, requireNumericInbound } from "../store";
 
 export const PATCH = handle(
   {
@@ -10,13 +10,25 @@ export const PATCH = handle(
     after: async (trunk: object | null, { deps, session }) => ({ ...trunk, ...(await applyTrunks(deps, session.organizationId)) }),
   },
   async ({ q, params, body, deps }) => {
-    const current = await q.one<{ name: string; host: string; username: string | null; secretEnc: string | null; authMode: string; callerId: string | null }>(
-      `select name, host, username, secret_enc as "secretEnc", auth_mode as "authMode", caller_id_e164 as "callerId" from trunks where id = $1`,
+    const current = await q.one<{
+      name: string;
+      host: string;
+      username: string | null;
+      secretEnc: string | null;
+      authMode: string;
+      callerId: string | null;
+      matchExtra: string[];
+      outboundHost: string | null;
+    }>(
+      `select name, host, username, secret_enc as "secretEnc", auth_mode as "authMode", caller_id_e164 as "callerId",
+              match_extra as "matchExtra", outbound_host as "outboundHost" from trunks where id = $1`,
       [params.id],
     );
     if (!current) throw notFound();
     const { password, ...rest } = body;
     const merged = { ...current, ...rest };
+    requireIpModeForAddresses(merged.authMode, merged.outboundHost ?? null);
+    requireNumericInbound(merged.authMode, merged.host, merged.matchExtra ?? []);
     // A senha gravada só vale para o destino para o qual foi digitada. Sem isso, quem pode editar a
     // linha apontava o host para um servidor seu e recebia, no registro, a senha do provedor.
     const sameDestination = merged.host === current.host && merged.username === current.username && merged.authMode === current.authMode;
@@ -28,10 +40,18 @@ export const PATCH = handle(
     }
     const next = { ...merged, secretEnc };
     // Linha alterada volta a "não verificada": o teste anterior valia para a configuração antiga.
+    // Trocar o `host` ou o modo zera o conjunto liberado e o que veio do nome (R14, contrato 7): o
+    // conjunto do destino antigo não pode seguir liberado se o nome novo não resolver. Mudar só os
+    // extras não zera nada: o processo de voz já os lê da linha atual. É a única escrita do painel
+    // nessas colunas.
     return q.one(
-      `update trunks set name = $2, host = $3, username = $4, secret_enc = $5, auth_mode = $6, caller_id_e164 = $7, status = 'unverified'
+      `update trunks set name = $2, host = $3, username = $4, secret_enc = $5, auth_mode = $6, caller_id_e164 = $7, match_extra = $8, outbound_host = $9, status = 'unverified',
+              inbound_from_name = case when host is distinct from $3 or auth_mode is distinct from $6 then '{}' else inbound_from_name end,
+              inbound_from_name_seen = case when host is distinct from $3 or auth_mode is distinct from $6 then '{}'::jsonb else inbound_from_name_seen end,
+              inbound_allowed = case when host is distinct from $3 or auth_mode is distinct from $6 then '{}' else inbound_allowed end,
+              inbound_resolved_at = case when host is distinct from $3 or auth_mode is distinct from $6 then null else inbound_resolved_at end
         where id = $1 returning ${TRUNK_COLUMNS}`,
-      [params.id, next.name, next.host, next.username, next.secretEnc, next.authMode, next.callerId],
+      [params.id, next.name, next.host, next.username, next.secretEnc, next.authMode, next.callerId, next.matchExtra ?? [], next.outboundHost ?? null],
     );
   },
 );

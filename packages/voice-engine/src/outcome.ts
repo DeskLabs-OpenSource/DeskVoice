@@ -84,6 +84,11 @@ export function settleOutcome(guess: OutcomeGuess): OutcomeGuess {
  * resposta. Quem muda é só o transporte.
  */
 export function outcomePrompt(input: { transcript: string; tools: readonly string[] }): string {
+  return [...outcomeInstructions(input), "", "Transcrição:", input.transcript].join("\n");
+}
+
+/** As instruções do desfecho, sem a transcrição: o pedido completo (`analysisPrompt`) começa por elas. */
+export function outcomeInstructions(input: { tools: readonly string[] }): string[] {
   const tools = input.tools.length > 0 ? input.tools.join(", ") : "nenhuma";
   return [
     "Você lê a transcrição de uma ligação de atendimento e diz o desfecho comercial dela.",
@@ -101,8 +106,5 @@ export function outcomePrompt(input: { transcript: string; tools: readonly strin
     "- Na dúvida entre duas opções, use unknown com confiança baixa.",
     `- Ferramentas chamadas durante a ligação: ${tools}. Um agendamento confirmado pesa para booked; uma ferramenta que falhou não pesa.`,
     "- Em evidence, copie a fala do CLIENTE que sustenta o desfecho (até 280 caracteres). Em unknown, deixe vazio.",
-    "",
-    "Transcrição:",
-    input.transcript,
-  ].join("\n");
+  ];
 }

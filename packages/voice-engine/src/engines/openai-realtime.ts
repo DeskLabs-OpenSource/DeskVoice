@@ -15,22 +15,68 @@
  *     O 403 de país não atendido não é defeito da chave: trocar a chave não resolve, então tem resultado próprio.
  *   A página do modelo não cita preço; nenhuma página de preço lista essa chamada.
  *
+ * Vocabulário do agente, consultado em 2026-11-13:
+ *   - https://developers.openai.com/api/docs/api-reference/realtime  (`RealtimeAudioConfig.input.transcription.prompt`:
+ *     para `whisper-1`, lista de palavras-chave; para `gpt-4o-transcribe` e variantes, texto livre). Vale para a
+ *     transcrição lateral. O modelo de voz não tem campo de vocabulário: os termos vão também nas `instructions`
+ *     (`instructionsWithVocabulary`).
+ *   - O `keywords` do guia de transcrição (developers.openai.com/api/docs/guides/realtime-transcription) só aparece
+ *     em sessão `type: "transcription"` com `gpt-live-transcribe`. Esta sessão é `type: "realtime"`: não é usado.
+ *
+ * Ambiente barulhento (`listeningEnvironment: "noisy"`), consultado em 2026-11-14, no formato GA da
+ * sessão (`session.type: "realtime"`, campos em `session.audio.input`), que é o deste motor:
+ *   - https://developers.openai.com/api/docs/api-reference/realtime  (`RealtimeAudioConfig.input.noise_reduction`:
+ *     `{ type: "near_field" | "far_field", strength: 0..1 }`, `strength` padrão 1; `near_field` é microfone perto da boca)
+ *   - https://developers.openai.com/api/docs/guides/realtime-vad  (`audio.input.turn_detection` com
+ *     `type: "semantic_vad"`, `eagerness: "auto"` (padrão, igual a `medium`), `create_response` e `interrupt_response`)
+ *   Não confirmado contra o servidor real: que o servidor aceite os dois juntos sem erro, e o efeito
+ *   deles numa ligação com ruído (a bancada da fatia 5 mede).
+ *
  * A API aceita G.711 μ-law (`audio/pcmu`, 8 kHz) na entrada e na saída: a ligação não é reamostrada.
  *
  * Não confirmado contra o servidor real (nenhuma chamada com chave foi feita):
  *   - a taxa do `audio/pcmu` não aparece escrita na referência; G.711 é 8 kHz por definição;
  *   - `gpt-4o-mini-transcribe` como modelo de transcrição da fala de quem ligou (está na lista aceita);
  *   - que a leitura do modelo responda 404 a uma chave sem acesso a ele (a página de erros não lista 404);
- *   - se a leitura do modelo chega a conferir crédito: a resposta "aceita" não promete crédito.
+ *   - se a leitura do modelo chega a conferir crédito: a resposta "aceita" não promete crédito;
+ *   - o efeito do `transcription.prompt` no `gpt-4o-mini-transcribe` (a referência só o descreve para
+ *     `whisper-1` e `gpt-4o-transcribe`);
+ *   - o limite de tamanho do `transcription.prompt` (a referência não publica).
+ *
+ * Sinal de fala e fim de turno forçado (`callerActivity`, `closeCallerTurn`), consultado em 2026-11-14:
+ *   - https://developers.openai.com/api/docs/api-reference/realtime  (`input_audio_buffer.speech_started`,
+ *     `conversation.item.input_audio_transcription.delta`, `input_audio_buffer.commit`, `response.create`,
+ *     `input_audio_buffer.committed` com `item_id`; a transcrição "runs asynchronously with Response
+ *     creation, so this event may come before or after the Response events")
+ *   - https://developers.openai.com/api/docs/guides/realtime-vad  (`server_vad`)
+ *   Não confirmado contra o servidor real: se a OpenAI emite `input_audio_transcription.delta` antes
+ *   do fim do turno (a leitura indica que não; por isso a guarda tem o prazo sem palavras), e se o
+ *   `input_audio_buffer.commit` com a detecção de fala do servidor em curso fecha o turno sem erro.
+ *   Com resposta em curso ou item já fechado, `closeCallerTurn` não faz nada: o `commit` "will produce
+ *   an error if the input audio buffer is empty" (referência), e o servidor já vai responder.
+ *
+ * Orientação ao agente (`guide`), consultado em 2026-11-17:
+ *   - https://developers.openai.com/api/docs/api-reference/realtime  (`conversation.item.create` com
+ *     `{ type: "message", role: "system", content: [{ type: "input_text", text }] }`; o papel `system`
+ *     "can be used to provide additional context or instructions to the model" e, "for smaller
+ *     updates", é o recomendado no lugar de trocar as instruções)
+ *   - https://developers.openai.com/api/docs/guides/realtime-conversations  (a resposta começa por
+ *     `response.create`)
+ *   Por isso `guide` manda o item e **não** manda `response.create`. Com resposta em curso, o item
+ *   espera o `response.done`, para não entrar no meio da fala, e as orientações saem na ordem.
+ *   Não confirmado contra o servidor real: que o item sozinho nunca gere resposta (a documentação não
+ *   diz isso), e se ele deixa a resposta seguinte mais lenta.
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { pcm16ToUlaw, ulawToPcm16 } from "../resample";
+import { instructionsWithVocabulary } from "../vocabulary";
 import { checkKeyOverHttp } from "../key-check";
-import { classifyOutcomeOverHttp } from "../outcome-over-http";
-import { OUTCOME_GUESS_SCHEMA, outcomePrompt, readOutcomeGuess } from "../outcome";
-import type { ClassifyOptions, EnginePricing, KeyCheckResult, Usage, VoiceEngine, VoiceSession } from "../types";
+import { ANALYSIS_SCHEMA, analysisPrompt } from "../analysis";
+import { classifyOptionsFor, classifyOutcomeOverHttp, readClassifyText, transcribeOverHttp } from "../outcome-over-http";
+import { OUTCOME_GUESS_SCHEMA, outcomePrompt } from "../outcome";
+import type { ClassifyOptions, EnginePricing, KeyCheckResult, RecordingTranscriber, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
 const DEFAULT_API_URL = "https://api.openai.com/v1";
@@ -49,6 +95,54 @@ const OUTCOME_PRICING: EnginePricing = {
   checkedOn: "2026-11-13",
   source: "https://developers.openai.com/api/docs/pricing",
 };
+// A tabela de preço dos modelos de classificação que este motor cobra: só entra aqui modelo com
+// preço conferido na página do provedor. Modelo fora daqui só pode ser pedido com endpoint (o preço
+// é do provedor do endpoint); sem endpoint, ele não é aceito ao salvar e, se já estiver gravado, o
+// motor usa o modelo de tabela — cobrar sem medir é o que esta tabela existe para impedir.
+const OUTCOME_PRICING_BY_MODEL = new Map<string, EnginePricing>([[OUTCOME_MODEL, OUTCOME_PRICING]]);
+// Modelo configurado pelo dono e servido por um endpoint (provedor compatível): o projeto não
+// conhece a tabela de preço dele, e um centavo inventado seria pior que nenhum. O consumo em tokens
+// continua no extrato; o custo fica zero até alguém medir o preço desse modelo.
+const OUTCOME_PRICING_UNKNOWN: EnginePricing = {
+  centsPerMillionInputTokens: 0,
+  centsPerMillionCachedInputTokens: 0,
+  centsPerMillionOutputTokens: 0,
+  checkedOn: "2026-11-14",
+  source: "unmeasured: the price of a configured model is not known to the project",
+};
+// O modelo que transcreve a fala de quem ligou durante a chamada, e a gravação depois dela.
+const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+/**
+ * Ambiente barulhento, ponto de partida do desenho (a bancada da fatia 5 pode trocar os valores):
+ * redução de ruído de microfone perto da boca, que é o do telefone, e fim de turno pelo sentido
+ * (`semantic_vad`), que não espera o ruído acabar. A interrupção de verdade continua com o provedor.
+ */
+const NOISY_INPUT = {
+  noise_reduction: { type: "near_field" },
+  turn_detection: { type: "semantic_vad", eagerness: "auto", create_response: true, interrupt_response: true },
+} as const;
+
+/** O `prompt` da transcrição lateral, em texto livre, como a referência pede para a família `gpt-4o-transcribe`. */
+const transcriptionPrompt = (vocabulary: readonly string[]): string => `Names and terms that may appear: ${vocabulary.join(", ")}.`;
+// gpt-4o-mini-transcribe, na seção "Transcription" da página de preços (conferida em 2026-11-13):
+// entrada US$ 1,25 e saída US$ 5,00 por milhão de tokens, e a estimativa de US$ 0,003 por minuto.
+// A linha não separa entrada de áudio e de texto: o preço de entrada vale para os dois. O minuto só
+// conta quando a resposta não traz o consumo em tokens (`usage.type: "duration"` ou sem `usage`).
+const TRANSCRIBE_PRICING: EnginePricing = {
+  centsPerMillionInputTokens: 125,
+  centsPerMillionOutputTokens: 500,
+  centsPerMinute: 0.3,
+  checkedOn: "2026-11-13",
+  source: "https://developers.openai.com/api/docs/pricing",
+};
+// "Files can be up to 25 MB", no guia de fala para texto (developers.openai.com/api/docs/guides/speech-to-text,
+// conferido em 2026-11-13). Em unidades de mil, o limite menor das duas leituras de "MB".
+// Um lado a 8 kHz é 16 kB/s: cerca de 26 minutos.
+const TRANSCRIBE_MAX_BYTES = 25_000_000;
+// `POST /audio/transcriptions` (referência da API, conferida em 2026-11-13): `text`, e `usage` em
+// tokens ou em segundos, conforme o modelo.
+const transcriptionBody = z.object({ text: z.string() });
+const transcriptionUsage = z.object({ usage: z.object({ type: z.literal("tokens"), input_tokens: z.number(), output_tokens: z.number() }) });
 // Vozes do Realtime, conferidas em 2026-11-12 (developers.openai.com, guia de conversas Realtime).
 // A documentação recomenda marin e cedar pela qualidade; ela não descreve o estilo de cada uma.
 const VOICES = [
@@ -87,6 +181,8 @@ const serverEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("response.output_audio.delta"), delta: z.string() }),
   z.object({ type: z.literal("response.output_audio_transcript.done"), transcript: z.string() }),
   z.object({ type: z.literal("conversation.item.input_audio_transcription.completed"), transcript: z.string() }),
+  z.object({ type: z.literal("conversation.item.input_audio_transcription.delta"), item_id: z.string().optional(), delta: z.string() }),
+  z.object({ type: z.literal("input_audio_buffer.committed"), item_id: z.string() }),
   z.object({
     type: z.literal("response.function_call_arguments.done"),
     call_id: z.string(),
@@ -170,6 +266,38 @@ export function usageOf(usage: RealtimeUsage): Usage {
   };
 }
 
+const transcription: RecordingTranscriber = {
+  model: TRANSCRIBE_MODEL,
+  pricing: TRANSCRIBE_PRICING,
+  maxAudioBytes: TRANSCRIBE_MAX_BYTES,
+  transcribe(apiKey, input, options = {}) {
+    // Cópia com buffer próprio: o `Blob` não aceita a vista genérica de `Uint8Array`.
+    const audio = new Uint8Array(input.audio.byteLength);
+    audio.set(input.audio);
+    const form = new FormData();
+    form.set("model", TRANSCRIBE_MODEL);
+    form.set("language", input.language.split("-")[0] ?? input.language);
+    form.set("response_format", "json");
+    form.set("file", new Blob([audio], { type: "audio/wav" }), "gravacao.wav");
+    return transcribeOverHttp(
+      {
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/audio/transcriptions`,
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        model: TRANSCRIBE_MODEL,
+        pricing: TRANSCRIBE_PRICING,
+        read: (body) => transcriptionBody.safeParse(body).data?.text.trim() ?? null,
+        usage: (body) => {
+          const usage = transcriptionUsage.safeParse(body).data?.usage;
+          return usage ? { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } : { seconds: input.seconds };
+        },
+        classify: classifyError,
+      },
+      options,
+    );
+  },
+};
+
 const engine: VoiceEngine = {
   id: "openai-realtime",
   label: "OpenAI Realtime",
@@ -199,6 +327,14 @@ const engine: VoiceEngine = {
     let configured = false;
     let responseActive = false;
     const queuedResponses: object[] = [];
+    // Orientações à espera do fim da resposta em curso, na ordem em que chegaram.
+    const queuedGuidance: string[] = [];
+    let closed = false;
+    // Falas de quem ligou já fechadas num item e ainda sem resposta, e as que já tiveram resposta. A
+    // transcrição corre em paralelo à resposta (referência, `input_audio_transcription`), então um
+    // pedaço dela pode chegar depois: texto de item já respondido não é quem ligou falando agora.
+    const unansweredItems = new Set<string>();
+    const answeredItems = new Set<string>();
 
     let sessionReady: () => void = () => undefined;
     let sessionFailed: (error: Error) => void = () => undefined;
@@ -217,6 +353,17 @@ const engine: VoiceEngine = {
       socket.send({ type: "response.create", response });
     };
 
+    // O item de sistema não pede resposta: é contexto para a próxima, que segue o fluxo normal.
+    const sendGuidance = (): void => {
+      if (closed) {
+        queuedGuidance.length = 0;
+        return;
+      }
+      for (let text = queuedGuidance.shift(); text !== undefined; text = queuedGuidance.shift()) {
+        socket.send({ type: "conversation.item.create", item: { type: "message", role: "system", content: [{ type: "input_text", text }] } });
+      }
+    };
+
     const onMessage = (raw: unknown): void => {
       const parsed = serverEvent.safeParse(raw);
       if (!parsed.success) return;
@@ -228,6 +375,11 @@ const engine: VoiceEngine = {
           break;
         case "response.created":
           responseActive = true;
+          for (const id of unansweredItems) answeredItems.add(id);
+          unansweredItems.clear();
+          break;
+        case "input_audio_buffer.committed":
+          unansweredItems.add(event.item_id);
           break;
         case "response.output_audio.delta":
           emitter.emit("audio", ulawToPcm16(Buffer.from(event.delta, "base64")));
@@ -238,6 +390,9 @@ const engine: VoiceEngine = {
         case "conversation.item.input_audio_transcription.completed":
           if (event.transcript.trim()) emitter.emit("transcript", { speaker: "user", text: event.transcript.trim() });
           break;
+        case "conversation.item.input_audio_transcription.delta":
+          if (event.delta.trim() && !(event.item_id && answeredItems.has(event.item_id))) emitter.emit("callerActivity", { words: true });
+          break;
         case "response.function_call_arguments.done":
           emitter.emit("toolCall", { id: event.call_id, name: event.name, args: parseArguments(event.arguments) });
           break;
@@ -247,11 +402,14 @@ const engine: VoiceEngine = {
           // ponytail: não envia `conversation.item.truncate` (exige saber quantos ms a ponte já tocou);
           // o modelo fica achando que disse a fala inteira. Acrescentar se isso atrapalhar a conversa.
           emitter.emit("interrupted");
+          emitter.emit("callerActivity", { words: false });
           break;
         case "response.done": {
           responseActive = false;
           const usage = event.response.usage;
           if (usage) emitter.emit("usage", usageOf(usage));
+          // A orientação entra antes da próxima resposta da fila: ela é contexto para essa resposta.
+          sendGuidance();
           const next = queuedResponses.shift();
           if (next) requestResponse(next);
           break;
@@ -260,6 +418,8 @@ const engine: VoiceEngine = {
           const error = new Error(`OpenAI Realtime: ${event.error.message}`);
           // Sem isto, um `response.create` recusado deixaria a fila de falas presa para sempre.
           responseActive = false;
+          // Sem resposta em curso, a orientação que esperava sai, para não passar à frente a próxima.
+          sendGuidance();
           if (configured) emitter.emit("error", error);
           else sessionFailed(error);
           break;
@@ -273,7 +433,7 @@ const engine: VoiceEngine = {
       label: "OpenAI Realtime",
       emitter,
       onMessage,
-      onClosed: () => sessionFailed(new Error("OpenAI Realtime: a conexão fechou antes de confirmar a sessão")),
+      onClosed: (detail) => sessionFailed(new Error(`OpenAI Realtime: a conexão fechou antes de confirmar a sessão (${detail})`)),
       timeout: options,
     });
 
@@ -282,13 +442,21 @@ const engine: VoiceEngine = {
       session: {
         type: "realtime",
         // O idioma só existe como parâmetro na transcrição; a fala segue a instrução.
-        instructions: `${config.instructions}\n\nSpeak only in ${config.language}.`,
+        instructions: `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.`,
         output_modalities: ["audio"],
         audio: {
           input: {
             format: AUDIO_FORMAT,
-            transcription: { model: "gpt-4o-mini-transcribe", language: config.language.split("-")[0] },
-            turn_detection: { type: "server_vad", create_response: true, interrupt_response: true },
+            // Sem termos, o `prompt` nem aparece: a sessão fica igual à de antes.
+            transcription: {
+              model: TRANSCRIBE_MODEL,
+              language: config.language.split("-")[0],
+              ...(config.vocabulary && config.vocabulary.length > 0 && { prompt: transcriptionPrompt(config.vocabulary) }),
+            },
+            // Ambiente `normal` ou ausente: a sessão fica igual à de antes.
+            ...(config.listeningEnvironment === "noisy"
+              ? NOISY_INPUT
+              : { turn_detection: { type: "server_vad", create_response: true, interrupt_response: true } }),
           },
           output: { format: AUDIO_FORMAT, voice: config.voiceId ?? DEFAULT_VOICE },
         },
@@ -314,40 +482,78 @@ const engine: VoiceEngine = {
           instructions: `Say exactly the following to the caller, in ${config.language}, without adding anything: "${text}"`,
         });
       },
-      close: () => socket.close(),
+      closeCallerTurn() {
+        // Se o servidor já viu o fim da fala (item fechado à espera da resposta, ou resposta em
+        // curso), ele só está lento: o `commit` de buffer vazio dá `error`, que soltaria a fila de
+        // falas por cima da resposta, e o `response.create` enfileirado faria o agente falar duas vezes.
+        if (responseActive || unansweredItems.size > 0) return;
+        // Fecha o que quem ligou disse num item e pede a resposta: o servidor não viu o fim da fala.
+        socket.send({ type: "input_audio_buffer.commit" });
+        requestResponse({});
+      },
+      guide(text) {
+        if (closed) return;
+        queuedGuidance.push(text);
+        if (!responseActive) sendGuidance();
+      },
+      close() {
+        closed = true;
+        queuedGuidance.length = 0;
+        return socket.close();
+      },
     };
+    emitter.on("closed", () => {
+      closed = true;
+      queuedGuidance.length = 0;
+    });
 
     if (config.greeting) session.say(config.greeting);
     return session;
   },
 
+  analyzes: true,
+
+  classifyTarget: true,
+
+  classifyPricing: (model) => OUTCOME_PRICING_BY_MODEL.get(model),
+
   async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
+    const analyze = input.analyze === true;
+    // O modelo configurado pelo dono é o do pedido, do corpo e do preço; sem ele, o de sempre. Sem
+    // endpoint, quem cobra é o próprio provedor deste motor: modelo fora da tabela de preço sairia
+    // cobrado e contado como "não medido", então ele cai no modelo de tabela (o custo volta a ser
+    // medido). Com endpoint, quem cobra é o outro provedor, e o modelo é o que o dono pediu.
+    const asked = options.model ?? OUTCOME_MODEL;
+    const model = options.baseUrl === undefined && !OUTCOME_PRICING_BY_MODEL.has(asked) ? OUTCOME_MODEL : asked;
+    const pricing =
+      options.baseUrl !== undefined
+        ? options.model === undefined
+          ? OUTCOME_PRICING
+          : OUTCOME_PRICING_UNKNOWN
+        : (OUTCOME_PRICING_BY_MODEL.get(model) ?? OUTCOME_PRICING);
     return classifyOutcomeOverHttp(
       {
         url: `${options.baseUrl ?? DEFAULT_API_URL}/chat/completions`,
         headers: { Authorization: `Bearer ${apiKey}` },
-        model: OUTCOME_MODEL,
-        pricing: OUTCOME_PRICING,
+        model,
+        pricing,
+        // Sem `analyze`, o pedido é exatamente o só de desfecho: quem usa só o desfecho não paga a análise.
         body: JSON.stringify({
-          model: OUTCOME_MODEL,
-          messages: [{ role: "user", content: outcomePrompt(input) }],
-          response_format: { type: "json_schema", json_schema: { name: "desfecho", strict: true, schema: OUTCOME_GUESS_SCHEMA } },
+          model,
+          messages: [{ role: "user", content: analyze ? analysisPrompt(input) : outcomePrompt(input) }],
+          response_format: analyze
+            ? { type: "json_schema", json_schema: { name: "analise", strict: true, schema: ANALYSIS_SCHEMA } }
+            : { type: "json_schema", json_schema: { name: "desfecho", strict: true, schema: OUTCOME_GUESS_SCHEMA } },
         }),
-        read: (body) => {
-          const content = (body as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content;
-          if (typeof content !== "string") return null;
-          try {
-            return readOutcomeGuess(JSON.parse(content));
-          } catch {
-            return null;
-          }
-        },
+        read: (body) => readClassifyText((body as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content, analyze),
         usage: chatUsageOf,
         classify: classifyError,
       },
-      options,
+      classifyOptionsFor(options, analyze),
     );
   },
+
+  transcription,
 
   checkKey(apiKey, options = {}) {
     const model = options.model ?? DEFAULT_MODEL;

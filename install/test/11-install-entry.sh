@@ -85,6 +85,32 @@ out="$(DESKVOICE_DOMAIN="" install)"
 equal "80/443 nossas, sem domínio: só a 80" "80:80 " "$(ports_published)"
 equal "sem domínio: endereço pelo IP" "http://203.0.113.10" "$(env_get "$A" PUBLIC_URL)"
 
+# ── 5. Atrás do Caddy do CRM (issue #221): a rede do proxy dele fica no arquivo de publicação,
+#       e o `up` que recria o Caddy do DeskVoice já o põe nela. ──
+proxy_networks() { sed -n '/^networks:/,$p' "$O"; }
+out="$(DESKVOICE_DOMAIN="" DESKVOICE_PROXY_NETWORK='crm;rm' install)"; equal "rede com nome que não vale: para" 1 "$?"
+contains "rede com nome que não vale: diz qual" "$out" "DESKVOICE_PROXY_NETWORK (crm;rm) não vale"
+before="$(cat "$O")"
+out="$(DESKVOICE_DOMAIN="" DESKVOICE_PROXY_NETWORK=crm_caddy-sites install)"; equal "rede que não existe: para" 1 "$?"
+contains "rede que não existe: diz qual e que nada mudou" "$out" "A rede crm_caddy-sites"
+equal "rede que não existe: o arquivo de publicação fica como estava" "$before" "$(cat "$O")"
+echo crm_caddy-sites > "$FAKE_DIR/networks"
+out="$(DESKVOICE_DOMAIN="" DESKVOICE_PROXY_NETWORK=crm_caddy-sites install)"; equal "com a rede do CRM: zero" 0 "$?"
+equal "com a rede do CRM: declarada como externa, pelo nome medido" "$(printf 'networks:\n  proxy:\n    name: "crm_caddy-sites"\n    external: true')" "$(proxy_networks)"
+contains "com a rede do CRM: o Caddy entra nela com o nome deskvoice" "$(cat "$O")" "aliases: [deskvoice]"
+contains "com a rede do CRM: e continua na rede interna do DeskVoice" "$(cat "$O")" "internal: {}"
+equal "com a rede do CRM: a publicação continua a mesma" "80:80 " "$(ports_published)"
+out="$(DESKVOICE_DOMAIN="" install)"; equal "reinstalar sem a variável: zero" 0 "$?"
+contains "reinstalar sem a variável: a rede gravada fica" "$(proxy_networks)" 'name: "crm_caddy-sites"'
+apply_entry caddy ""   # o que a atualização faz numa instalação de formato antigo
+contains "reescrever a publicação (atualização): a rede gravada fica" "$(proxy_networks)" 'name: "crm_caddy-sites"'
+: > "$FAKE_DIR/networks"
+out="$(DESKVOICE_DOMAIN="" install)"; equal "a rede gravada sumiu: a reinstalação para antes de mexer" 1 "$?"
+contains "a rede gravada sumiu: ensina a tirar" "$out" "DESKVOICE_PROXY_NETWORK=off"
+out="$(DESKVOICE_DOMAIN="" DESKVOICE_PROXY_NETWORK=off install)"; equal "tirar a rede: zero" 0 "$?"
+lacks "tirar a rede: sai do arquivo" "$(cat "$O")" "crm_caddy-sites"
+lacks "tirar a rede: sem bloco de redes" "$(cat "$O")" "networks:"
+
 # A entrada com problema não é escondida no fim da instalação.
 printf 'panel|200\nvoice|502\n' > "$FAKE_DIR/entry_probe"
 out="$(DESKVOICE_DOMAIN="" install)"; equal "voz inalcançável pela entrada: a instalação termina (o painel funciona)" 0 "$?"

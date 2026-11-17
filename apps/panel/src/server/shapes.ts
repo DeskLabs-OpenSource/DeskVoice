@@ -1,4 +1,4 @@
-import { toE164, type OrgQuery } from "@deskvoice/core";
+import { callerMessageBlock, checkVocabulary, DROP_FOLLOW_UP_MESSAGE_MAX, toE164, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError } from "./context";
 import { listEngines } from "./pieces";
@@ -13,6 +13,15 @@ export const phone = z.string().transform((value, ctx) => {
   }
   return e164;
 });
+/** Nomes e termos que o agente deve esperar ouvir; a regra é a de `checkVocabulary`, a mesma da tela. */
+const vocabulary = z.array(z.string()).transform((terms, ctx) => {
+  const checked = checkVocabulary(terms);
+  if (!checked.ok) {
+    ctx.addIssue({ code: "custom", message: checked.reason });
+    return z.NEVER;
+  }
+  return checked.terms;
+});
 /** Vazio ou nulo apaga o telefone. */
 export const optionalPhone = z.union([z.null(), z.literal("").transform(() => null), phone]);
 const optionalText = (max: number) =>
@@ -25,7 +34,9 @@ const optionalText = (max: number) =>
 
 export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions, greeting, engine, voice_id as "voiceId", language, tools,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
-  follow_up_owner_user_id as "followUpOwnerUserId", created_at as "createdAt", updated_at as "updatedAt"`;
+  follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment",
+  agent_handoff_targets as "agentHandoffTargets", drop_follow_up as "dropFollowUp",
+  drop_follow_up_message as "dropFollowUpMessage", analyst_id as "analystId", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -43,6 +54,24 @@ const agentFields = z.object({
   // A pessoa que recebe as pendências que o agente abre; nula é a equipe. A rota confere que ela
   // está ativa (`requireActiveOwner`); a de outra organização nem é vista.
   followUpOwnerUserId: z.uuid().nullable(),
+  vocabulary,
+  // Ambiente de quem liga: `noisy` ajusta a detecção de fala do provedor para ruído de fundo.
+  listeningEnvironment: z.enum(["normal", "noisy"]),
+  // O que acontece quando a ligação cai (desenho do follow-up da ligação que caiu, seção 3.2). O banco
+  // aceita os quatro modos, mas `call_back` só tem caminho nas fatias 3 e 4: é recusado aqui. O
+  // `whatsapp` passa por `requireDropFollowUpMode`, que confere o pré-requisito.
+  dropFollowUp: z.enum(["off", "task", "whatsapp"]),
+  // O texto do WhatsApp para quem ligou: fixo, escrito pelo operador, sem variável. Vazio vale o padrão.
+  dropFollowUpMessage: optionalText(DROP_FOLLOW_UP_MESSAGE_MAX),
+  // Para quem o agente pode passar a ligação (`transfer_to_agent`). A rota confere que cada um é
+  // outro agente desta organização (`requireHandoffTargets`); vazia, a ferramenta não aparece.
+  agentHandoffTargets: z
+    .array(z.uuid())
+    .max(50)
+    .transform((ids) => [...new Set(ids)]),
+  // O analista ao vivo do agente (desenho dos analistas, seção 3.1); nulo é nenhum. A rota confere
+  // que ele é desta organização (`requireAnalyst`).
+  analystId: z.uuid().nullable(),
 });
 export type AgentValues = z.output<typeof agentFields>;
 export const agentPatch = agentFields.partial();
@@ -60,28 +89,46 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   costCeilingCents: 500,
   transferTo: null,
   followUpOwnerUserId: null,
+  vocabulary: [],
+  listeningEnvironment: "normal",
+  agentHandoffTargets: [],
+  dropFollowUp: "off",
+  dropFollowUpMessage: null,
+  analystId: null,
 };
 
-export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId", status,
+export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",
+  match_extra as "matchExtra", outbound_host as "outboundHost", status,
+  inbound_allowed as "inboundAllowed", inbound_resolved_at as "inboundResolvedAt", inbound_filter as "inboundFilter",
   last_check_at as "lastCheckAt", last_error as "lastError", json_build_object('configured', secret_enc is not null) as secret`;
 
 // Host, usuário e senha acabam dentro da configuração gerada do Asterisk: nada de quebra de linha
 // nem de caractere que abra seção ou comentário ali.
+const trunkHost = z.string().trim().refine(isTrunkHost, "must be a host name or IP (optionally with :port), an IPv6 address or a CIDR block");
 const trunkFields = z.object({
   name: z.string().trim().min(1).max(80),
-  host: z.string().trim().refine(isTrunkHost, "must be a host name or IP (optionally with :port), an IPv6 address or a CIDR block"),
+  host: trunkHost,
   username: z.union([z.null(), z.literal("").transform(() => null), z.string().regex(/^[^\s;[\]]{1,80}$/, "cannot contain spaces, ';' or brackets")]),
   password: z.string().regex(/^[^\r\n]{1,200}$/, "cannot be empty or contain line breaks"),
   authMode: z.enum(["register", "ip"]),
   callerId: optionalPhone,
+  // O mesmo provedor entrega a ligação por vários blocos (um por região). Na linha por IP todos
+  // entram no `identify`; na linha por registro só liberam a entrada. Sem lista, vale o `host`.
+  matchExtra: z.array(trunkHost).max(16, "at most 16 extra addresses").optional(),
+  // Nome ou IP do destino das ligações de saída; vazio vale o `host`.
+  outboundHost: z.union([z.null(), z.literal("").transform(() => null), trunkHost]).optional(),
 });
 export const trunkPatch = trunkFields.partial();
 export const trunkCreate = trunkPatch.required({ name: true, host: true, authMode: true });
+// Liga ou desliga o filtro de entrada da linha por registro (R14, contrato 11). Fica fora de
+// `trunkPatch`: salvar o formulário da linha não mexe no filtro.
+export const trunkInboundFilter = z.object({ enabled: z.boolean() });
 
-export const CALL_COLUMNS = `c.id, c.agent_id as "agentId", a.name as "agentName", c.direction, c.from_e164 as "from", c.to_e164 as "to",
+export const CALL_COLUMNS = `c.id, c.agent_id as "agentId", a.name as "agentName", c.direction, c.channel, c.from_e164 as "from", c.to_e164 as "to",
   c.status, c.end_reason as "endReason", c.engine, c.started_at as "startedAt", c.answered_at as "answeredAt", c.ended_at as "endedAt",
   c.cost_cents as "costCents", c.summary,
-  c.outcome, c.outcome_confidence as "outcomeConfidence", c.outcome_evidence as "outcomeEvidence"`;
+  c.outcome, c.outcome_confidence as "outcomeConfidence", c.outcome_evidence as "outcomeEvidence",
+  c.analysis_score as "analysisScore", c.voicemail`;
 export const CALL_STATUSES = ["ringing", "in_progress", "transferred", "completed", "failed", "refused"] as const;
 
 /** O dono das pendências de um agente é uma pessoa ativa da organização; outra coisa é recusada com motivo. */
@@ -89,6 +136,48 @@ export async function requireActiveOwner(q: OrgQuery, userId: string | null | un
   if (userId === null || userId === undefined) return;
   if (!(await q.one("select 1 from users where id = $1 and disabled_at is null for share", [userId]))) {
     throw new ApiError(400, "owner_unavailable", "The follow-up owner must be an active person of this team.");
+  }
+}
+
+/**
+ * O modo `whatsapp` de "Quando a ligação cai" só pode ser escolhido com conector de WhatsApp e com
+ * `whatsapp.trust_caller_id` ligado (seção 3.5 do desenho): sem eles, a mensagem nunca sairia. A
+ * revisão confere de novo na hora de agir, porque o ajuste pode ser desligado depois.
+ */
+export async function requireDropFollowUpMode(q: OrgQuery, mode: string | undefined): Promise<void> {
+  if (mode !== "whatsapp") return;
+  const block = await callerMessageBlock(q);
+  if (block === "whatsapp_not_connected") throw new ApiError(400, "drop_follow_up_whatsapp_not_connected", "Connect WhatsApp in Settings → WhatsApp before choosing to message the caller.");
+  if (block === "caller_id_not_trusted")
+    throw new ApiError(400, "drop_follow_up_caller_id_not_trusted", "Turn on trusting the caller's number in Settings → WhatsApp before choosing to message the caller.");
+}
+
+/**
+ * Os destinos de passagem são outros agentes desta organização. O de outra organização nem é visto
+ * (`withOrg`), e volta o mesmo erro do que não existe; o próprio agente também é recusado. Os
+ * destinos ficam travados até o fim da escrita: apagados no meio, o banco recusaria com
+ * `check_violation`, e a pessoa leria um erro cru.
+ */
+export async function requireHandoffTargets(q: OrgQuery, selfId: string | null, targets: readonly string[] | undefined): Promise<void> {
+  if (!targets || targets.length === 0) return;
+  if (selfId !== null && targets.includes(selfId)) {
+    throw new ApiError(400, "handoff_target_invalid", "An agent cannot hand the call off to itself.");
+  }
+  const found = await q.many<{ id: string }>("select id from agents where id = any($1::uuid[]) for share", [targets]);
+  if (found.length !== targets.length) {
+    throw new ApiError(400, "handoff_target_invalid", "Every handoff target must be another agent of this organization.");
+  }
+}
+
+/**
+ * O analista do agente é um desta organização. O de outra organização nem é visto (`withOrg`), e volta
+ * o mesmo erro do que não existe. Fica travado até o fim da escrita: apagado no meio, o banco recusaria
+ * a chave estrangeira, e a pessoa leria um erro cru.
+ */
+export async function requireAnalyst(q: OrgQuery, analystId: string | null | undefined): Promise<void> {
+  if (analystId === null || analystId === undefined) return;
+  if (!(await q.one("select 1 from analysts where id = $1 for share", [analystId]))) {
+    throw new ApiError(400, "analyst_invalid", "The analyst must be one of this organization.");
   }
 }
 

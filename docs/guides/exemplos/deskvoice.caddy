@@ -1,0 +1,36 @@
+# voz.exemplo.com.br — painel do DeskVoice publicado pelo Caddy do DeskcommCRM
+#
+# Exemplo copiável do guia `docs/guides/na-mesma-vps-do-crm.md`. Copie para a
+# pasta `caddy-sites/` do clone do CRM, com um nome NOVO e a extensão `.caddy`:
+#
+#   cp docs/guides/exemplos/deskvoice.caddy <pasta-do-CRM>/caddy-sites/deskvoice.caddy
+#
+# Não edite o `caddy-sites/README.caddy`: ele é versionado, e arquivo versionado
+# alterado trava a atualização do CRM. Um arquivo novo ao lado dele não trava.
+#
+# Troque o domínio da primeira linha pelo seu (registro A apontando para esta
+# VPS) e confira o destino:
+#
+#   `deskvoice`  é o nome (alias) que o Caddy do DeskVoice recebe na rede do
+#                ponto de extensão, gravado pelo instalador no passo 3 do guia;
+#   `:80`        é a porta de DENTRO do contêiner do Caddy do DeskVoice, que
+#                escuta em HTTP. A 3080 é a porta do host (127.0.0.1:3080) e
+#                serve para conferir de dentro da VPS, não aqui.
+#
+# Só isso. O certificado, o HTTPS e o X-Forwarded-For são do Caddy que lê este
+# arquivo; o Caddy do DeskVoice já comprime e já repassa o `/voice-ws` para o
+# processo de voz, então não há regra separada para a voz.
+#
+# Conferir e recarregar sem reiniciar (na pasta do CRM):
+#
+#   docker compose -f docker-compose.prod.yml exec caddy \
+#     caddy validate --config /etc/caddy/Caddyfile
+#   docker compose -f docker-compose.prod.yml exec caddy \
+#     caddy reload --config /etc/caddy/Caddyfile
+#
+# `reload` e não `restart`: com um arquivo errado o reload recusa, diz a linha e
+# mantém no ar o que já estava; o restart derrubaria o CRM junto.
+
+voz.exemplo.com.br {
+	reverse_proxy deskvoice:80
+}

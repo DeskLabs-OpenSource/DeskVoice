@@ -117,7 +117,11 @@ Os mesmos preços de IA estão no código, com a data e a fonte, em
 
 - **Cada chamada tem custo.** O motor informa o uso, o sistema converte em valor com a tabela de
   preço daquele motor, e o resultado aparece na linha do tempo da chamada.
-- **O painel soma por período.** A tela de custos mostra o total entre duas datas.
+- **O valor abaixo de um centavo existe.** A classificação do desfecho custa cerca de 0,03 centavo,
+  e o extrato guarda essa fração (em micro-centavos, 1 centavo = 1 000 000); o centavo mostrado é a
+  soma do extrato arredondada uma vez só.
+- **O painel soma por período.** A tela de custos mostra o total entre duas datas, arredondado no
+  total e não linha a linha.
 - **O custo mostrado é uma estimativa** calculada a partir do uso informado. A fatura do
   provedor é a verdade. Se a diferença entre as duas for grande, isso é um defeito: abra uma
   issue, com os dois números.
@@ -142,6 +146,10 @@ quem liga recebe sinal de ocupado antes de qualquer gasto com IA, e a recusa apa
 com o motivo. O pior caso de gasto simultâneo passa a ser o teto por chamada vezes esse limite.
 Chamadas pelo navegador têm um limite próprio, de 3 por organização, e as ligações feitas pelo
 agente têm o teto diário de Ligações de saída.
+
+Quando um agente passa a ligação para outro, os limites continuam sendo da ligação: vale o menor
+teto e a menor duração entre os agentes por onde ela passou, com o relógio contado do atendimento.
+Como montar essa equipe, e o custo de cada trecho, está em [equipe de agentes](equipe-de-agentes.md).
 
 Além disso, defina um limite de gasto **na conta do provedor de IA**. É a proteção que não
 depende do DeskVoice.

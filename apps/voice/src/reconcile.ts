@@ -24,6 +24,8 @@ export async function closeOrphanCalls(db: Db, clock: Clock, log: Logger): Promi
         await recordEvent(q, orphan.id, "call_ended", { status: "failed", reason: "process_restarted" }, now);
         const taskId = await enqueueTask(q, { kind: "summarize_call", payload: {}, callId: orphan.id, runAt: now });
         await recordEvent(q, orphan.id, "task_queued", { taskId, kind: "summarize_call" }, now);
+        const reviewId = await enqueueTask(q, { kind: "review_call", payload: {}, callId: orphan.id, runAt: now });
+        await recordEvent(q, orphan.id, "task_queued", { taskId: reviewId, kind: "review_call" }, now);
         return true;
       });
       if (done) closed += 1;

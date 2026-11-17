@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from "@phosphor-icons/react";
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useState, type ReactNode } from "react";
 import enCommon from "../../../../i18n/en/common";
 import en from "../../../../i18n/en/timeline";
 import esCommon from "../../../../i18n/es/common";
@@ -13,11 +13,18 @@ import ptBR from "../../../../i18n/pt-BR/timeline";
 import { useDict, useLocale } from "../../../../i18n/provider";
 import { api, useApi } from "../../../../ui/api";
 import { useErrorText } from "../../../../ui/errors";
-import { formatDateTime, formatDuration, formatMoney, formatPhone, secondsBetween } from "../../../../ui/format";
+import { formatCaller, formatDateTime, formatDuration, formatMoney, secondsBetween } from "../../../../ui/format";
 import { Badge, Button, Notice, Skeleton, TextInput, type Tone } from "../../../../ui/kit";
 import { useLive, useNow } from "../../../../ui/live";
+import { useCanConfigure } from "../../../../ui/me";
+import { lastTemperature } from "../../../../ui/temperature";
 import { Timeline } from "../../../../ui/timeline";
-import type { Call, CallEvent, CallStatus, Engine, FollowUpList } from "../../../../ui/types";
+import { transcribeAlsoClassifies } from "../../../../ui/transcription";
+import { Amount } from "../../costs/amount-view";
+import { AnalysisSection } from "./analysis-section";
+import { CallerHistorySection } from "./caller-history-section";
+import { ShareSection } from "./share-section";
+import type { Analyst, CallDetail, CallerHistory, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
 
@@ -28,10 +35,17 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   const locale = useLocale();
   const errorText = useErrorText();
   const now = useNow();
-  const call = useApi<Call>(`/calls/${id}`);
+  const call = useApi<CallDetail>(`/calls/${id}`);
   const events = useApi<CallEvent[]>(`/calls/${id}/events`);
   const engines = useApi<Engine[]>("/engines");
+  // O rótulo e a orientação das objeções na linha do tempo vêm do cadastro atual dos analistas.
+  const analysts = useApi<Analyst[]>("/analysts");
   const followUps = useApi<FollowUpList>(`/follow-ups?callId=${id}`);
+  const callerHistory = useApi<CallerHistory>(`/calls/${id}/caller-history`);
+  const transcription = useApi<Setting<boolean>>("/settings/calls.transcription_enabled");
+  const outcomeEnabled = useApi<Setting<boolean>>("/settings/calls.outcome_enabled");
+  const analysisEnabled = useApi<Setting<boolean>>("/settings/calls.analysis_enabled");
+  const canConfigure = useCanConfigure();
   useLive((signal) => {
     if (signal.callId !== id) return;
     call.reload();
@@ -57,12 +71,21 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
 
   const data = call.data;
   const live = data.status === "ringing" || data.status === "in_progress";
+  // A transcrição da gravação só se oferece para a chamada encerrada que ficou sem fala nenhuma, com a opção ligada.
+  const silent = events.data !== undefined && !events.data.some((event) => event.kind === "transcript_user" || event.kind === "transcript_agent");
+  const offerTranscription = !live && silent && canConfigure && transcription.data?.value === true;
+  // Transcrever reenfileira o resumo, e o resumo, com o desfecho ou a análise ligados, enfileira a
+  // classificação paga: a tela avisa ao lado do botão antes do clique, não só no extrato depois.
+  const classificationWarning = transcribeAlsoClassifies({ outcome: outcomeEnabled.data?.value === true, analysis: analysisEnabled.data?.value === true });
+  const temperature = events.data ? lastTemperature(events.data) : null;
   const seconds = secondsBetween(data.answeredAt ?? data.startedAt, data.endedAt ?? now);
-  const facts: Array<[string, string, boolean]> = [
+  const facts: Array<[string, ReactNode, boolean]> = [
     [t.facts.agent, data.agentName ?? common.noAgent, false],
     [t.facts.engine, engines.data?.find((engine) => engine.id === data.engine)?.label ?? data.engine ?? "", false],
     [t.facts.duration, formatDuration(seconds), true],
-    [t.facts.cost, formatMoney(data.costCents, locale), true],
+    // O mesmo valor da tela de Custos: com linha de custo não medido, o zero não é grátis, e a
+    // estimativa vem marcada.
+    [t.facts.cost, <Amount key="cost" cents={data.costCents} unmeasuredCount={data.unmeasuredCount} estimatedCount={data.estimatedCount} />, true],
     [t.facts.started, formatDateTime(data.startedAt, locale), true],
   ];
 
@@ -71,11 +94,18 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
       <header className="grid gap-5">
         {back}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <h1 className="data text-[1.75rem] leading-tight font-medium tracking-[-0.02em]">{formatPhone(data.direction === "outbound" ? data.to : data.from) || common.unknownCaller}</h1>
+          <h1 className="data text-[1.75rem] leading-tight font-medium tracking-[-0.02em]">{formatCaller(data, common)}</h1>
           <Badge tone={STATUS_TONE[data.status]} live={live}>
             {common.callStatus[data.status]}
           </Badge>
-          <span className="text-muted">{t.direction[data.direction]}</span>
+          {temperature ? (
+            <span title={t.temperatureBadgeHint}>
+              <Badge tone={temperature.score >= 4 ? "ok" : temperature.score <= 2 ? "warn" : "neutral"}>
+                {fill(t.temperatureBadge, { score: temperature.score.toLocaleString(locale, { maximumFractionDigits: 1 }) })}
+              </Badge>
+            </span>
+          ) : null}
+          <span className="text-muted">{t.direction[data.direction]}{data.channel === "phone" ? "" : ` · ${common.channel[data.channel]}`}</span>
         </div>
         {/* Métricas em linha, separadas por fio: sem grade de cartões. */}
         <dl className="grid grid-cols-2 gap-4 border-y border-line py-4 sm:flex sm:flex-wrap">
@@ -85,11 +115,26 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
               <dd className={`${mono ? "data" : ""} ${live && label === t.facts.duration ? "text-accent-strong" : ""}`}>
                 {value}
                 {label === t.facts.cost && data.costCeilingCents ? <span className="ml-2 font-sans text-[0.8rem] text-muted">{fill(t.facts.ceiling, { value: formatMoney(data.costCeilingCents, locale) })}</span> : null}
+                {/* Com passagem entre agentes, quanto cada um gastou; com um agente só, nada muda. */}
+                {label === t.facts.cost && data.costByAgent.length > 1 ? (
+                  <ul className="mt-1 grid gap-0.5 font-sans text-[0.8rem] text-muted">
+                    <li>{t.facts.byAgent}</li>
+                    {data.costByAgent.map((row) => (
+                      <li key={row.agentId ?? "deleted"}>
+                        {row.name ?? t.facts.deletedAgent} · <span className="data">
+                          <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </dd>
             </div>
           ))}
         </dl>
       </header>
+
+      <CallerHistorySection history={callerHistory.data} t={t} common={common} locale={locale} onChanged={callerHistory.reload} />
 
       {data.outcome ? (
         <section className="grid max-w-[72ch] gap-1.5">
@@ -104,14 +149,19 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
         </section>
       ) : null}
 
-      {data.summary || !live ? (
+      <AnalysisSection call={data} events={events.data} enabled={analysisEnabled.data?.value === true} live={live} t={t} />
+
+      {data.summary || data.summaryPurged || !live ? (
         <section className="grid max-w-[72ch] gap-1.5">
           <h2 className="text-[0.8rem] font-bold text-muted">{t.summaryTitle}</h2>
-          <p className={data.summary ? "text-[1.07rem] leading-relaxed whitespace-pre-line" : "text-muted"}>{data.summary ?? t.summaryPending}</p>
+          <p className={data.summary ? "text-[1.07rem] leading-relaxed whitespace-pre-line" : "text-muted italic"}>
+            {data.summary ?? (data.summaryPurged ? t.summaryPurged : t.summaryPending)}
+          </p>
         </section>
       ) : null}
 
-      {live ? (
+      {/* No recado não há pessoa do time na linha para receber o pedido de não gravar: quem liga ouviu o aviso e pode desligar. */}
+      {live && data.voicemail ? null : live ? (
         <StopRecording
           id={id}
           title={t.stopRecordingTitle}
@@ -121,23 +171,80 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
           hint={t.stopRecordingHint}
         />
       ) : (
-        <Recording id={id} title={t.recordingTitle} missing={t.recordingMissing} />
+        <Recording id={id} title={t.recordingTitle} missing={t.recordingMissing}>
+          {offerTranscription ? (
+            <Transcribe
+              id={id}
+              title={t.transcribeTitle}
+              hint={t.transcribeHint}
+              warning={classificationWarning ? t.transcribeAlsoClassifies : null}
+              send={t.transcribeSend}
+              onDone={() => {
+                call.reload();
+                events.reload();
+              }}
+            />
+          ) : null}
+          {canConfigure ? <ShareSection id={id} /> : null}
+        </Recording>
       )}
 
       {events.error && !events.data ? <Notice tone="fail">{errorText(events.error)}</Notice> : null}
-      {events.data ? <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} followUps={followUps.data?.items} people={followUps.data?.people} /> : <Skeleton lines={4} />}
+      {/* Espera o cadastro dos analistas (ou a falha dele): sem isso, o rótulo da objeção piscaria como "fora do cadastro". */}
+      {events.data && (analysts.data || analysts.error) ? (
+        <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} followUps={followUps.data?.items} people={followUps.data?.people} analysts={analysts.data} />
+      ) : (
+        <Skeleton lines={4} />
+      )}
     </>
   );
 }
 
-/** A gravação da chamada, quando existe. Sem arquivo (chamada antiga, ou gravação desligada), diz isso. */
-function Recording({ id, title, missing }: { id: string; title: string; missing: string }) {
+/**
+ * A gravação da chamada, quando existe. Sem arquivo (chamada antiga, ou gravação desligada), diz isso.
+ * `children` (o pedido de transcrição) só aparece com o arquivo de pé.
+ */
+function Recording({ id, title, missing, children }: { id: string; title: string; missing: string; children?: ReactNode }) {
   const [absent, setAbsent] = useState(false);
   return (
     <section className="grid max-w-[72ch] gap-1.5">
       <h2 className="text-[0.8rem] font-bold text-muted">{title}</h2>
       {absent ? <p className="text-muted">{missing}</p> : <audio controls preload="metadata" src={`/api/v1/calls/${id}/recording`} onError={() => setAbsent(true)} className="w-full" />}
+      {absent ? null : children}
     </section>
+  );
+}
+
+/**
+ * Pede a transcrição da gravação de uma chamada sem texto. O texto chega à linha do tempo; a falha
+ * diz o motivo na frase da tela (sem chave, fora do prazo, teto atingido, sem fala).
+ */
+function Transcribe({ id, title, hint, warning, send, onDone }: { id: string; title: string; hint: string; warning: string | null; send: string; onDone(): void }) {
+  const errorText = useErrorText();
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const request = (): void => {
+    setSending(true);
+    setError(null);
+    void api(`/calls/${id}/transcription`, { method: "POST" })
+      .then(onDone)
+      .catch((failure: unknown) => setError(errorText(failure)))
+      .finally(() => setSending(false));
+  };
+
+  return (
+    <div className="grid gap-1.5 pt-2">
+      <p className="font-bold">{title}</p>
+      <p className="text-[0.85rem] text-muted">{hint}</p>
+      <div>
+        <Button variant="secondary" busy={sending} onClick={request}>
+          {send}
+        </Button>
+      </div>
+      {warning ? <p className="text-[0.85rem] text-muted">{warning}</p> : null}
+      {error ? <Notice tone="fail">{error}</Notice> : null}
+    </div>
   );
 }
 

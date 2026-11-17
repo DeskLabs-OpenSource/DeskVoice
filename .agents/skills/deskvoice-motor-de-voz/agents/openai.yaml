@@ -1,0 +1,6 @@
+interface:
+  display_name: "Adicionar um motor de voz"
+  short_description: "Um provedor de IA que ouve e fala na ligação: um arquivo em packages/voice-engine, PCM16 8 kHz, teste de contrato, preço"
+  default_prompt: "Use a skill deskvoice-motor-de-voz e me ajude a adicionar o motor de voz deste provedor."
+policy:
+  allow_implicit_invocation: true
