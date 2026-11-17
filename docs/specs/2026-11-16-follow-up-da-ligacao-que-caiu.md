@@ -1,6 +1,7 @@
 # Follow-up da ligação que caiu sem conclusão
 
-- **Estado:** desenho. Nenhum código de produto foi escrito.
+- **Estado:** desenho. A fatia 1 está no #367. Os dois pedidos da seção 7 seguem **abertos**, com o
+  padrão sem resposta valendo a partir da fatia 3.
 - **Data:** 2026-11-16
 - **Quem pediu:** o dono, no roteiro de novembro (item R2): "Adicionar sistema de follow-up para
   quando a ligação cair sem ser concluída". A decisão dele em 13/11 foi "deixar configurável, quem
@@ -40,7 +41,11 @@ modelo e lê só a linha da chamada e o tipo e os campos estáveis dos eventos, 
    - (b) `caller_hangup` **com a vez aberta**: no instante em que a linha caiu, quem ligou já
      esperava resposta além do prazo da guarda do silêncio, ou uma ferramenta estava em curso
      (seção 3.1). O `agent_speaking` é gravado, mas **não** conta como queda (decisão de 16/11,
-     depois da 1ª reprovação do #367).
+     depois da 1ª reprovação do #367);
+   - (c) `caller_hangup` **depois do "pode repetir?"**: a guarda já pediu para repetir
+     (`caller_unanswered` com `action: "asked_to_repeat"`), e quem ligou não falou mais até
+     desligar (seção 3.3). É quem esperou mais tempo, e o `openTurn` dele sai `null`, porque a guarda
+     desarma ao pedir (decisão de 17/11, pedida pela revisão do #367).
 3. **Ninguém ficou com o próximo passo na própria ligação.** Não há `transfer_started`,
    `voicemail_left`, `follow_up_created`, `human_notified` nem um `tool_result` de `send_whatsapp`
    com `ok: true`.
@@ -86,6 +91,11 @@ texto de quem ligou; `WITHOUT_WORDS_MS`, 8 s quando não houve texto), sem const
 fatia 5 da R11 medir e ajustar o prazo, esta regra acompanha. Quem desliga com a guarda já tendo
 agido esperou de verdade.
 
+**O `caller_waiting` dura só 4 s** (`AFTER_CLOSE_MS`): ao pedir para repetir, a guarda desarma e a
+vez volta a `null`. Quem esperou mais, ouviu o "pode repetir?" e desligou não sai como vez aberta no
+`call_ended`. Esse caso é contado pela revisão, a partir dos eventos (condição 2(c) e seção 3.3),
+sem mudar a guarda nem o `openTurn`.
+
 **Por que `agent_speaking` não conta** (mesma decisão). Quem desliga no meio da fala do agente é,
 na maior parte, quem já ouviu o que precisava, inclusive a despedida do agente sem `end_call`. A
 regra é fixa e sem modelo, e não tem como separar isso de uma linha que caiu. O valor continua
@@ -114,13 +124,26 @@ O supervisor continua sendo a única revisão depois da ligação. Ele ganha:
 - **o caso 5, `call_dropped`** (**novo** em `REVIEW_CASES`, frase "a ligação caiu no meio da
   conversa"), que é a condição 2(b) da seção 2 com `openTurn` em `caller_waiting` ou `tool_running`,
   **e também** o `internal_error` da condição 2(a) numa ligação recebida e atendida (com `openTurn`
-  nulo no evento). O caso 1 continua **igual a hoje**, sem o `internal_error`: assim o modo `off`
+  nulo no evento), **e também** a condição 2(c), o desligar depois do "pode repetir?" (abaixo). O caso 1 continua **igual a hoje**, sem o `internal_error`: assim o modo `off`
   não muda nada para quem já instalou, e o `internal_error` só age em quem escolheu um modo;
 - **a leitura do modo do agente que atendeu** (`calls.agent_id`). Com passagem entre agentes, vale
   o modo de quem atendeu, o mesmo agente cujo dono recebe a pendência hoje. É uma configuração só,
   e não a soma de várias;
 - a consulta de eventos passa a ler `call_answered`, `transfer_started` e o `openTurn` de
-  `call_ended`.
+  `call_ended`, e, para a condição 2(c), a ordem de `caller_unanswered`, `transcript_user` e
+  `transcript_agent`.
+
+**A condição 2(c), lida dos eventos** (decisão de 17/11). Vale quando o fim é `caller_hangup` e o
+`openTurn` é `null`, há ao menos um `caller_unanswered` com `action: "asked_to_repeat"` e, depois do
+**último** deles:
+- não há nenhum `transcript_user`;
+- há **no máximo um** `transcript_agent`. Esse é o espaço da transcrição do próprio pedido, se o
+  motor gravar uma. A regra conta eventos, sem ler texto. Dois ou mais significam que o agente
+  respondeu de fato, e então não conta.
+
+A ordem é a da linha do tempo (`at`, e o `id` no empate). O evento `drop_follow_up` desse caminho sai
+com `case: "call_dropped"` e `openTurn: "caller_waiting"`: é a leitura da revisão, e o `call_ended`
+continua com `null`, que é o que a sessão viu.
 
 O que cada modo faz com os casos 1 e 5:
 
@@ -347,6 +370,10 @@ Por fatia, com teste:
   vez fechada (o "tchau"); depois do prazo, `caller_waiting` e o caso 5. O `agent_speaking` é
   gravado e não abre nada em nenhum modo. O `internal_error` numa recebida e atendida abre o caso 5
   em `task` e nada em `off`.
+  Depois da revisão de 17/11 do #367: quem ligou fala, espera o "pode repetir?" e desliga sem falar
+  de novo abre o caso 5 em `task` (sessão real com motor manual), também depois de uma espera longa
+  (por exemplo, 20 s). Se quem ligou fala depois do pedido, ou se o agente responde de fato depois
+  dele (dois `transcript_agent`), não abre nada.
 - **F2.** Número em `do_not_call` não recebe mensagem. A segunda queda do mesmo número em menos de 24
   horas cai em pendência. Sem `trust_caller_id`, a rota recusa o modo e a revisão grava
   `mode_unavailable`. O corpo da mensagem é exatamente o texto configurado, sem nada da conversa: o
@@ -387,6 +414,8 @@ Por fatia, com teste:
 
 Dono do pedido: **Arquiteto**. Vai ao lote do Líder, no formato do `GOVERNANCE.md`.
 
+**Situação em 17/11: os dois seguem abertos.** Nenhum trava as fatias 1 e 2.
+
 1. **Tentativas e intervalo da religação.** Opções: (A) fixos no código, 1 tentativa, 30 minutos
    depois; (B) fixos, até 2 tentativas com 30 minutos entre elas; (C) configuráveis na tela, de 1 a
    3, com intervalo mínimo de 30 minutos. **Padrão sem resposta: A**, que vale quando a fatia 3
@@ -404,6 +433,10 @@ Dono do pedido: **Arquiteto**. Vai ao lote do Líder, no formato do `GOVERNANCE.
   ou no meio da fala do agente não conta. O preço é o inverso: a linha que cai enquanto o agente
   fala, ou nos primeiros segundos depois da pergunta de quem ligou, também não conta. Não foi
   medido com que frequência cada um acontece. Uma linha que cai em silêncio, depois da resposta e antes de a pessoa falar, não conta.
+  Com a decisão de 17/11, quem desliga depois do "pode repetir?" sem falar de novo conta, por mais
+  que tenha esperado. O preço é o caso raro de quem disse "tchau", ficou calado na linha mais de
+  6,5 s sem resposta do agente, ouviu o pedido e desligou. Não foi medido se o "pode repetir?" gera
+  um `transcript_agent`: a regra aceita zero ou um.
   A medida vem da fatia 1 em uso: quantos casos 5 por dia, e quantos a equipe fecha como "não era
   queda".
 - Se o `silenceGuard` expõe hoje, sem mudança, o estado "vez de quem ligou aberta". O desenho supõe
