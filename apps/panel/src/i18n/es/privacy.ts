@@ -110,6 +110,8 @@ const privacy: PrivacyDictionary = {
     synthesizer_provider_confirmed: "{who} confirmó que la voz {provider} recibe el texto que el agente dice en la llamada.",
     organization_created: "La administración de la instalación creó esta organización, con el nombre \"{name}\".",
     organization_renamed: "La administración de la instalación renombró esta organización de \"{from}\" a \"{to}\".",
+    organization_suspended: "La administración de la instalación suspendió esta organización. Motivo: {reason}. Tareas canceladas: {n}.",
+    organization_reactivated: "La administración de la instalación reactivó esta organización. Tareas canceladas en la reactivación: {n}.",
     caller_notes_deleted: "{who} olvidó el número terminado en {suffix}. Notas del agente borradas: {notes}. Pendientes cerrados borrados: {followUps}.",
   },
   noteDeleted: "{who} borró una nota del agente.",

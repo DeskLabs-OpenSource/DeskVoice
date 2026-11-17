@@ -18,15 +18,17 @@ export interface OrganizationView {
   name: string;
   createdAt: Date;
   suspendedAt: Date | null;
+  /** O motivo da suspensão, enquanto ela estiver suspensa. */
+  suspendedReason: string | null;
   /** A organização de quem instalou (seção 3.2). */
   founding: boolean;
 }
 
-/** Todas as organizações da instalação: só `id`, nome, criação, estado e se é a fundadora. */
+/** Todas as organizações da instalação: só `id`, nome, criação, estado (com o motivo da suspensão) e se é a fundadora. */
 export function listOrganizations(db: Db): Promise<OrganizationView[]> {
   return withSystem(db, (q) =>
     q.many<OrganizationView>(
-      `select o.id, o.name, o.created_at as "createdAt", o.suspended_at as "suspendedAt",
+      `select o.id, o.name, o.created_at as "createdAt", o.suspended_at as "suspendedAt", o.suspended_reason as "suspendedReason",
               coalesce(o.id = (select (value #>> '{}')::uuid from installation_settings where key = $1), false) as founding
          from organizations o
         order by o.created_at, o.id`,

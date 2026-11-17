@@ -11,7 +11,7 @@ import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus } from "../../../ui/errors";
 import { formatDateTime } from "../../../ui/format";
-import { Badge, Button, EmptyState, Field, Notice, Panel, Skeleton, TextInput } from "../../../ui/kit";
+import { Badge, Button, EmptyState, Field, Notice, Panel, Skeleton, TextArea, TextInput } from "../../../ui/kit";
 import { useInstallationAction } from "./errors";
 
 interface Organization {
@@ -19,7 +19,10 @@ interface Organization {
   name: string;
   createdAt: string;
   suspendedAt: string | null;
+  suspendedReason: string | null;
   founding: boolean;
+  /** A organização em que quem está na tela está agora: ela não pode ser suspensa daqui. */
+  current: boolean;
 }
 interface Person {
   accountId: string;
@@ -181,11 +184,109 @@ function OwnerInvite({ organization, t, onClose }: { organization: { id: string;
   );
 }
 
-function Row({ organization, t, onChanged, onInvite }: { organization: Organization; t: InstallationDictionary["organizations"]; onChanged(): void; onInvite(): void }) {
+const tasksLine = (t: InstallationDictionary["organizations"], n: number): string => (n === 0 ? t.suspendTasksNone : n === 1 ? t.suspendTasksOne : fill(t.suspendTasksMany, { n }));
+
+/**
+ * A confirmação de suspender (lei `destrutivo-pede-confirmacao.md`): nomeia a organização, diz
+ * quantas tarefas serão canceladas e que nada volta sozinho, e pede o motivo.
+ */
+function SuspendConfirm({ organization, t, onDone, onCancel }: { organization: Organization; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
+  const preview = useApi<{ cancelableTasks: number }>(`/installation/organizations/${organization.id}/suspension`);
+  const save = useInstallationAction();
+  const [reason, setReason] = useState("");
+  const size = reason.trim().length;
+  return (
+    <form
+      className="grid gap-3 rounded-xs border border-warn p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save.run(async () => {
+          const result = await api<{ canceledTasks: number }>(`/installation/organizations/${organization.id}/suspension`, { body: { reason: reason.trim() } });
+          onDone(fill(t.suspendedDone, { name: organization.name, n: result.canceledTasks }));
+        });
+      }}
+    >
+      <p className="font-bold">{fill(t.suspendTitle, { name: organization.name })}</p>
+      <p>{fill(t.suspendLead, { name: organization.name })}</p>
+      {preview.data ? (
+        <Notice tone="warn">
+          {tasksLine(t, preview.data.cancelableTasks)} {t.suspendNoReturn}
+        </Notice>
+      ) : (
+        <Skeleton />
+      )}
+      <Field label={t.reasonLabel} hint={t.reasonHint}>
+        <TextArea className="max-w-xl" rows={3} maxLength={500} required value={reason} onChange={(event) => setReason(event.target.value)} />
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="danger" busy={save.busy} disabled={!preview.data || size < 10 || size > 500}>
+          {fill(t.suspendYes, { name: organization.name })}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          {t.cancel}
+        </Button>
+      </div>
+      <ActionStatus action={save} />
+    </form>
+  );
+}
+
+/** A confirmação de reativar: nomeia a organização e diz que nada do que foi cancelado volta. */
+function ReactivateConfirm({ organization, t, onDone, onCancel }: { organization: Organization; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
+  const save = useInstallationAction();
+  return (
+    <div className="grid gap-3 rounded-xs border border-warn p-3">
+      <p className="font-bold">{fill(t.reactivateTitle, { name: organization.name })}</p>
+      <p>{t.reactivateLead}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="primary"
+          busy={save.busy}
+          onClick={() =>
+            void save.run(async () => {
+              const result = await api<{ canceledTasks: number }>(`/installation/organizations/${organization.id}/suspension`, { method: "DELETE" });
+              onDone(fill(t.reactivatedDone, { name: organization.name, n: result.canceledTasks }));
+            })
+          }
+        >
+          {fill(t.reactivateYes, { name: organization.name })}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          {t.cancel}
+        </Button>
+      </div>
+      <ActionStatus action={save} />
+    </div>
+  );
+}
+
+function Row({
+  organization,
+  activeCount,
+  t,
+  onChanged,
+  onInvite,
+  onSuspension,
+}: {
+  organization: Organization;
+  /** Quantas organizações ativas a instalação tem: com uma só, ninguém vê "Suspender". */
+  activeCount: number;
+  t: InstallationDictionary["organizations"];
+  onChanged(): void;
+  onInvite(): void;
+  onSuspension(message: string): void;
+}) {
   const locale = useLocale();
   const save = useInstallationAction();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(organization.name);
+  const [confirming, setConfirming] = useState<"suspend" | "reactivate" | null>(null);
+  // A API recusa as mesmas três; a tela só não oferece o botão que falharia.
+  const canSuspend = !organization.suspendedAt && !organization.current && activeCount > 1;
+  const done = (message: string): void => {
+    setConfirming(null);
+    onSuspension(message);
+  };
   return (
     <li className="grid gap-2 border-b border-line py-3 last:border-b-0">
       {editing ? (
@@ -225,9 +326,23 @@ function Row({ organization, t, onChanged, onInvite }: { organization: Organizat
                 {t.inviteOwner}
               </Button>
             )}
+            {canSuspend ? (
+              <Button variant="ghost" onClick={() => setConfirming("suspend")}>
+                {t.suspend}
+              </Button>
+            ) : null}
+            {organization.suspendedAt ? (
+              <Button variant="ghost" onClick={() => setConfirming("reactivate")}>
+                {t.reactivate}
+              </Button>
+            ) : null}
           </span>
         </div>
       )}
+      {organization.suspendedAt && organization.suspendedReason ? <p className="text-[0.93rem] text-muted">{fill(t.suspendedReason, { reason: organization.suspendedReason })}</p> : null}
+      {organization.current && !organization.suspendedAt && activeCount > 1 ? <p className="text-[0.87rem] text-muted">{t.currentHint}</p> : null}
+      {confirming === "suspend" ? <SuspendConfirm organization={organization} t={t} onDone={done} onCancel={() => setConfirming(null)} /> : null}
+      {confirming === "reactivate" ? <ReactivateConfirm organization={organization} t={t} onDone={done} onCancel={() => setConfirming(null)} /> : null}
       <ActionStatus action={save} />
     </li>
   );
@@ -238,7 +353,9 @@ export default function InstallationOrganizations() {
   const { data, reload } = useApi<Overview>("/installation/organizations");
   const [inviting, setInviting] = useState<{ id: string; name: string } | null>(null);
   const [created, setCreated] = useState<(Created & { name: string }) | null>(null);
+  const [suspension, setSuspension] = useState<string | null>(null);
   const router = useRouter();
+  const activeCount = (data?.organizations ?? []).filter((organization) => !organization.suspendedAt).length;
   return (
     <>
       {created ? (
@@ -250,6 +367,7 @@ export default function InstallationOrganizations() {
           </span>
         </Notice>
       ) : null}
+      {suspension ? <Notice tone="ok">{suspension}</Notice> : null}
       {inviting ? <OwnerInvite organization={inviting} t={t} onClose={() => setInviting(null)} /> : null}
       <Panel title={t.title} description={t.lead}>
         {!data ? (
@@ -259,7 +377,20 @@ export default function InstallationOrganizations() {
         ) : (
           <ul className="grid">
             {data.organizations.map((organization) => (
-              <Row key={organization.id} organization={organization} t={t} onChanged={reload} onInvite={() => setInviting({ id: organization.id, name: organization.name })} />
+              <Row
+                key={organization.id}
+                organization={organization}
+                activeCount={activeCount}
+                t={t}
+                onChanged={reload}
+                onInvite={() => setInviting({ id: organization.id, name: organization.name })}
+                onSuspension={(message) => {
+                  setSuspension(message);
+                  reload();
+                  // Reativar a organização em que a pessoa está tira a tela de suspensa: o servidor relê a sessão.
+                  router.refresh();
+                }}
+              />
             ))}
           </ul>
         )}

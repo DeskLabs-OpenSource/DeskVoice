@@ -11,7 +11,7 @@ const body = z.object({ organizationId: z.string().max(100) });
  * id malformado dão a mesma resposta: 404.
  */
 export const POST = handlePublic({ body }, async ({ request, body, deps }) => {
-  const session = await requireSession(request, deps);
+  const session = await requireSession(request, deps, { allowSuspended: true });
   if (!UUID.test(body.organizationId)) throw notFound();
   const accountId = await accountOfMember(deps.db, session.userId);
   if (!accountId || !(await switchOrganization(deps.db, session.id, accountId, body.organizationId))) throw notFound();

@@ -59,6 +59,16 @@ const common: CommonDictionary = {
   noNumber: { web: "Llamada desde el navegador", simulated: "Llamada simulada" },
   noAgent: "Sin agente",
   readOnly: "Tu rol es de operador: sigues las llamadas y respondes aprobaciones. Para cambiar esta pantalla, habla con un dueño o administrador.",
+  /** Lo que ve quien está en una organización suspendida (sección 3.3 del diseño del R8): el nombre, el motivo y nada más. */
+  suspended: {
+    title: "Esta organización está suspendida",
+    lead: "La administración de esta instalación suspendió {name}. Mientras tanto, no atiende, no hace llamadas y nada de ella aparece aquí.",
+    reason: "Motivo",
+    noReason: "Ningún motivo registrado.",
+    others: "También estás en otras organizaciones:",
+    open: "Entrar en {name}",
+    installation: "Abrir la administración de la instalación",
+  },
   errors: {
     fallback: "No pudimos completar esta acción. Intenta de nuevo en un momento.",
     network: "El panel no respondió. Revisa tu conexión e intenta de nuevo.",
