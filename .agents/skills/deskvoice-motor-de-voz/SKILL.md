@@ -33,6 +33,8 @@ interface VoiceSession {
   sendAudio(pcm16_8k: Buffer): void;                  // áudio de quem ligou
   sendToolResult(id: string, result: unknown): void;
   say(text: string): void;                            // fala pedida pelo sistema (aviso de gravação, desculpa)
+  closeCallerTurn(): void;                            // a guarda do silêncio pede o fim do turno de quem ligou
+  guide?(text: string): void;                         // contexto para o agente, que nunca vira fala (seção 2.1)
   close(): Promise<void>;
 }
 interface VoiceSessionEvents {
@@ -71,6 +73,26 @@ Confira no arquivo antes de escrever: se este resumo divergir, vale o arquivo.
   `../key-check`), e traduza a resposta para o vocabulário fechado de `KeyCheckResult`. Motor sem
   chave devolve `not_needed`. Cite a página da documentação e a data, como no preço.
 - **Nada olha o relógio.**
+
+### 2.1 Orientação ao agente (`guide`, opcional)
+
+`guide(text)` entrega ao agente um contexto (a orientação do analista ao vivo) que **não vira fala
+por si**. O desenho é `docs/specs/2026-11-17-analistas-ao-vivo.md`, seção 3.3.
+
+- **Só declare o método se o provedor documenta um jeito de dar contexto sem pedir resposta e sem
+  cortar a fala em curso.** Sem isso, deixe o método ausente: quem chama vê e registra que o motor
+  não recebe orientação. É o caso do Gemini Live (o comentário de topo dele diz por quê).
+- **Nunca passe por `say`**, nem peça resposta (no OpenAI, nada de `response.create`). A resposta
+  seguinte sai pelo fluxo normal da conversa e já leva o contexto.
+- **Com resposta em curso, espere o fim dela** e solte as orientações na ordem, antes da próxima
+  resposta da fila. Um `error` do provedor que solta a fila de respostas solta também a de
+  orientações.
+- **Depois de `close`, nada sai.**
+- Cite no comentário de topo a página e a data, e o que não foi confirmado contra o servidor real.
+- Teste com o servidor falso: exatamente um item de contexto e nenhum pedido de resposta; a espera
+  pelo fim da resposta, com três orientações na ordem; e um `vi.spyOn(session, "say")` que falha se
+  `guide` chamar `say`. No simulado, o passo `{ sayGuided: { guided, unguided } }` fala `guided` só
+  se chegou orientação desde o passo anterior.
 
 Para WebSocket, reutilize o que já existe: `SessionEmitter` (`../emitter`) entrega os eventos, e
 `openProviderSocket` (`../provider-socket`) abre a conexão e já garante o contrato de fechamento.

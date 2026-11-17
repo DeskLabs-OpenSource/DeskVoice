@@ -55,6 +55,15 @@
  *     `NO_INTERRUPTION` mataria a interrupção de verdade.
  *   Não confirmado contra o servidor real: o efeito desses valores numa ligação com ruído (a bancada
  *   da fatia 5 mede).
+ *
+ * Orientação ao agente (`VoiceSession.guide`): este motor **não** a recebe na v1, e não declara o
+ * método. Consultado em 2026-11-17 (https://aistudio.google.com/api-reference/live):
+ *   - `systemInstruction` só vai no `setup`, no começo da sessão;
+ *   - o `clientContent` "will interrupt any current model generation", e misturar `clientContent` com
+ *     `realtimeInput` "there are no guarantees".
+ *   Entregar a orientação por ali cortaria a fala do agente no meio, e por `realtimeInput.text` ela
+ *   viraria um turno a responder. Quem chama vê o método ausente e registra que o motor não recebe
+ *   orientação (docs/specs/2026-11-17-analistas-ao-vivo.md, seção 3.3).
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
