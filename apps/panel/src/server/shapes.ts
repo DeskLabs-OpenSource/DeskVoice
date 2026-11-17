@@ -1,4 +1,4 @@
-import { callerMessageBlock, checkVocabulary, DROP_FOLLOW_UP_MESSAGE_MAX, toE164, type OrgQuery } from "@deskvoice/core";
+import { callerMessageBlock, checkVocabulary, DROP_FOLLOW_UP_MESSAGE_MAX, ORGANIZATION_SUSPENDED, organizationSuspended, toE164, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError } from "./context";
 import { listEngines } from "./pieces";
@@ -179,6 +179,14 @@ export async function requireAnalyst(q: OrgQuery, analystId: string | null | und
   if (!(await q.one("select 1 from analysts where id = $1 for share", [analystId]))) {
     throw new ApiError(400, "analyst_invalid", "The analyst must be one of this organization.");
   }
+}
+
+/**
+ * A organização da sessão não está suspensa: a suspensa não atende nem pelo navegador nem pela
+ * simulada (seção 3.3 do desenho do R8). Quem mostra a tela de organização suspensa é a fatia 4b.
+ */
+export async function requireActiveOrganization(q: OrgQuery): Promise<void> {
+  if (await organizationSuspended(q)) throw new ApiError(409, ORGANIZATION_SUSPENDED, "This organization is suspended: it does not take calls.");
 }
 
 export async function requireAgent(q: OrgQuery, agentId: string): Promise<void> {

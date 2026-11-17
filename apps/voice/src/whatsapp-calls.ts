@@ -1,10 +1,11 @@
-import { recordEvent, toE164, withOrg, type Clock, type Db } from "@deskvoice/core";
+import { organizationSuspended, recordEvent, spokenLanguageOf, toE164, withOrg, type Clock, type Db } from "@deskvoice/core";
 import type { PeerConfig } from "werift";
 import { startCallSession, type CallSession, type CallSessionDeps } from "./call-session";
 import { inboundLimitReached, limitNoticedLately } from "./inbound";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import type { Schedule } from "./transport";
+import { playUnavailable, type UnavailableJob } from "./unavailable";
 import {
   WacallsError,
   isPaired,
@@ -209,6 +210,10 @@ interface Live {
  *
  * Atendendo: primeiro a troca de SDP, depois o atendimento, como o DeskcommCRM. Se o WaCalls recusar
  * uma das duas, nada foi atendido, e a ligação segue tocando no celular.
+ *
+ * Organização suspensa, antes de olhar o agente: a chamada nasce recusada (`organization_suspended`)
+ * e, pelo mesmo transporte, quem ligou ouve a fala de indisponível e a ligação desliga
+ * (`unavailable.ts`). Nenhum motor abre.
  */
 function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, schedule: Schedule, log: Logger) {
   const { db, clock } = deps;
@@ -243,6 +248,37 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
     });
   }
 
+  /**
+   * Abre o transporte e atende: primeiro a troca de SDP, depois o atendimento. Se algo falhar, solta o
+   * que abriu e lança; nada foi atendido, e a ligação segue tocando no celular.
+   */
+  async function answer(event: { sessionId: string; id: string }, entry: Live, callId: string): Promise<WhatsAppTransport> {
+    // Um dono por ligação no WaCalls: com um id só para o processo, a segunda ligação ao mesmo tempo
+    // receberia 409 (`handlers_call.go:113-116`).
+    const clientId = `${CLIENT_PREFIX}${callId}`;
+    let answered = false;
+    try {
+      const transport = await openWhatsAppTransport(
+        {
+          exchange: (offer) => wacallsAttachPeer(options, event.sessionId, event.id, clientId, offer),
+          // Sem atendimento não há o que desligar: a ligação segue tocando no celular.
+          end: async () => {
+            if (answered) await wacallsEndCall(options, event.sessionId, event.id);
+          },
+        },
+        { schedule, now: deps.now, log, peerConfig: deps.peerConfig },
+      );
+      entry.transport = transport;
+      if (entry.ended) throw new Error("the caller hung up before the call was answered");
+      await wacallsAcceptCall(options, event.sessionId, event.id, clientId);
+      answered = true;
+      return transport;
+    } catch (error) {
+      await entry.transport?.close();
+      throw error;
+    }
+  }
+
   /** Resolve `true` quando a conversa começou: dali em diante, quem tira a ligação de `live` é o fim dela. */
   async function take(event: { sessionId: string; id: string; peer: string; peerPhone?: string }, entry: Live): Promise<boolean> {
     const session = (await wacallsListSessions(options)).find((candidate) => candidate.id === event.sessionId);
@@ -261,6 +297,19 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
     const outcome = await withOrg(db, organizationId, async (q) => {
       const chosen = await q.one<{ agent_id: string | null }>("select agent_id from whatsapp_call_sessions");
       const agentId = chosen?.agent_id ?? null;
+      if (await organizationSuspended(q)) {
+        // O agente só é lido pelo idioma da fala: ligado ou não, não atende.
+        const spoken = agentId ? await q.one<{ language: string | null }>("select language from agents where id = $1", [agentId]) : null;
+        const call = await q.one<{ id: string }>(
+          `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
+           values ($1, $2, 'inbound', 'whatsapp', $3, $4, 'refused', 'organization_suspended', $5, $5) returning id`,
+          [organizationId, agentId, from, to, clock.now()],
+        );
+        if (!call) throw new Error("WhatsApp call was not created");
+        await recordEvent(q, call.id, "call_refused", { reason: "organization_suspended", from, to, channel: "whatsapp" }, clock.now());
+        const unavailable: UnavailableJob = { language: spokenLanguageOf(spoken?.language) };
+        return { callId: call.id, agentId, refusal: null, unavailable };
+      }
       const agent = agentId ? await q.one<{ enabled: boolean }>("select enabled from agents where id = $1", [agentId]) : null;
       let refusal: Refusal | null = !agent ? "no_agent" : !agent.enabled ? "agent_disabled" : null;
       let limit = 0;
@@ -280,36 +329,32 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
         await recordEvent(q, call.id, "call_refused", { reason: refusal, from, to, channel: "whatsapp", ...(overLimit && { limit }) }, clock.now());
         if (!(overLimit && (await limitNoticedLately(q, clock)))) await panelNotice(q, clock, call.id, NOTICE[refusal](from ?? "um número que o WhatsApp não informou", to, limit));
       }
-      return { callId: call.id, agentId, refusal };
+      return { callId: call.id, agentId, refusal, unavailable: null };
     });
+    if (outcome.unavailable) {
+      const { callId, unavailable } = outcome;
+      log("info", "WhatsApp call refused: the organization is suspended", { callId, language: unavailable.language });
+      let transport: WhatsAppTransport;
+      try {
+        transport = await answer(event, entry, callId);
+      } catch (error) {
+        // A chamada já está recusada: sem atendimento, só não houve fala, e ela segue tocando no celular.
+        log("error", "could not answer a WhatsApp call to play the unavailable notice", { callId, error: messageOf(error) });
+        return false;
+      }
+      void playUnavailable(transport, { callId, ...unavailable }, log).finally(() => live.delete(event.id));
+      return true;
+    }
     if (outcome.refusal || !outcome.agentId) {
       log("info", "WhatsApp call not answered", { callId: outcome.callId, reason: outcome.refusal });
       return false;
     }
     const { callId, agentId } = outcome;
 
-    // Um dono por ligação no WaCalls: com um id só para o processo, a segunda ligação ao mesmo tempo
-    // receberia 409 (`handlers_call.go:113-116`).
-    const clientId = `${CLIENT_PREFIX}${callId}`;
-    let answered = false;
     let transport: WhatsAppTransport;
     try {
-      transport = await openWhatsAppTransport(
-        {
-          exchange: (offer) => wacallsAttachPeer(options, event.sessionId, event.id, clientId, offer),
-          // Sem atendimento não há o que desligar: a ligação segue tocando no celular.
-          end: async () => {
-            if (answered) await wacallsEndCall(options, event.sessionId, event.id);
-          },
-        },
-        { schedule, now: deps.now, log, peerConfig: deps.peerConfig },
-      );
-      entry.transport = transport;
-      if (entry.ended) throw new Error("the caller hung up before the call was answered");
-      await wacallsAcceptCall(options, event.sessionId, event.id, clientId);
-      answered = true;
+      transport = await answer(event, entry, callId);
     } catch (error) {
-      await entry.transport?.close();
       const detail = messageOf(error);
       log("error", "could not answer a WhatsApp call", { callId, error: detail });
       await closeUnanswered(

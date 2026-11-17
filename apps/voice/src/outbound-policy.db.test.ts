@@ -132,4 +132,12 @@ describe("checkOutboundAllowed", { timeout: 120_000 }, () => {
     expect(await check(org, "+5531999997777", night)).toMatchObject({ code: "outside_window" });
     expect(await check(org, "+5531999997777", at(NOON_SP.toISOString()))).toMatchObject({ code: "daily_cap_reached" });
   });
+
+  it("organization_suspended: a organização suspensa não liga, nem com a política ligada; a outra da instalação segue", async () => {
+    const suspended = await organization("policy-suspended");
+    const other = await organization("policy-suspended-other");
+    await withSystem(app, (q) => q.exec("update organizations set suspended_at = $2, suspended_reason = 'teste da fatia 4a' where id = $1", [suspended, NOON_SP]));
+    expect(await check(suspended, TO, at(NOON_SP.toISOString()))).toMatchObject({ allowed: false, code: "organization_suspended" });
+    expect(await check(other, TO, at(NOON_SP.toISOString()))).toEqual({ allowed: true });
+  });
 });

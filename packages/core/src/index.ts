@@ -29,6 +29,7 @@ export * from "./secrets";
 export * from "./drop-follow-up";
 export * from "./inbound-filter";
 export * from "./spoken-language";
+export * from "./suspension";
 export * from "./vocabulary";
 export * from "./voicemail";
 export * from "./with-org";

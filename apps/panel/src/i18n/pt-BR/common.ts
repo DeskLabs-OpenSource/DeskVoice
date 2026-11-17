@@ -121,6 +121,7 @@ const common = {
     update_target_changed: "O servidor passou a apontar para outra versão depois que esta tela foi aberta. Confira as notas e confirme de novo.",
     update_notes_missing: "As notas desta versão ainda não estão disponíveis. Tente de novo em alguns minutos.",
     unknown_setting: "Esta configuração não existe nesta versão.",
+    organization_suspended: "Esta organização está suspensa: ela não atende nem faz ligações.",
     outbound_disabled: "As ligações de saída estão desligadas. Ligue em Ligações de saída.",
     outside_window: "Fora do horário permitido para ligações de saída.",
     do_not_call: "Este número está na lista de não ligar.",

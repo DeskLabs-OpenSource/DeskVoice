@@ -345,6 +345,7 @@ const timeline: TimelineDictionary = {
     web_never_connected: "La llamada desde el navegador no llegó a conectarse.",
     whatsapp_answer_failed: "El agente no pudo contestar la llamada por WhatsApp, que siguió sonando en el celular. Revisa la línea Llamadas por WhatsApp en Salud.",
     transfer_unanswered: "La transferencia no fue atendida.",
+    organization_suspended: "La organización estaba suspendida.",
     outbound_disabled: "Las llamadas salientes estaban desactivadas.",
     outside_window: "Fuera del horario permitido para llamadas salientes.",
     do_not_call: "El número está en la lista de no llamar.",

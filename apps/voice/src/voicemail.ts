@@ -1,7 +1,8 @@
-import { readFile, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { enqueueTask, recordEvent, recordingPath, withOrg, type Clock, type Db, type VoicemailLanguage } from "@deskvoice/core";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
+import { readRecordedSpeech } from "./recorded-speech";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording, type RecordingFailureReason, type RecordingOutcome } from "./recording";
 import { SAMPLE_RATE, realSchedule, type CallTransport, type Schedule } from "./transport";
 
@@ -46,27 +47,9 @@ export const BEFORE_MESSAGE_MS = 20_000;
 
 const NOTICE_DIR = new URL("../assets/voicemail-notice/", import.meta.url);
 
-/**
- * O aviso gravado como PCM16 mono a 8 kHz, a forma em que a linha toca. Os arquivos são gerados por
- * `scripts/aviso-da-caixa-postal/gerar.sh`; um arquivo em outro formato é recusado aqui, e não
- * tocado como ruído.
- */
-export async function voicemailNotice(language: VoicemailLanguage): Promise<Buffer> {
-  const wav = await readFile(new URL(`${language}.wav`, NOTICE_DIR));
-  if (wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE") throw new Error(`voicemail notice ${language} is not a WAV file`);
-  let format: { pcm: boolean; channels: number; rate: number; bits: number } | null = null;
-  for (let at = 12; at + 8 <= wav.length; ) {
-    const id = wav.toString("ascii", at, at + 4);
-    const size = wav.readUInt32LE(at + 4);
-    const body = at + 8;
-    if (id === "fmt ") format = { pcm: wav.readUInt16LE(body) === 1, channels: wav.readUInt16LE(body + 2), rate: wav.readUInt32LE(body + 4), bits: wav.readUInt16LE(body + 14) };
-    if (id === "data") {
-      if (!format || !format.pcm || format.channels !== 1 || format.rate !== SAMPLE_RATE || format.bits !== 16) throw new Error(`voicemail notice ${language} is not PCM16 mono at ${SAMPLE_RATE} Hz`);
-      return wav.subarray(body, Math.min(wav.length, body + size));
-    }
-    at = body + size + (size % 2);
-  }
-  throw new Error(`voicemail notice ${language} has no audio`);
+/** O aviso gravado, no formato em que a linha toca (`readRecordedSpeech`). */
+export function voicemailNotice(language: VoicemailLanguage): Promise<Buffer> {
+  return readRecordedSpeech(NOTICE_DIR, "voicemail notice", language);
 }
 
 export interface VoicemailDeps {

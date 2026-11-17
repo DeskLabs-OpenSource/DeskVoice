@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { handle } from "../../../../../server/context";
-import { phone, requireAgent } from "../../../../../server/shapes";
+import { phone, requireActiveOrganization, requireAgent } from "../../../../../server/shapes";
 import { callIdSchema, voiceRequest } from "../../../../../server/voice";
 
 export const POST = handle(
@@ -11,5 +11,8 @@ export const POST = handle(
     after: (_agent, { deps, session, body }) =>
       voiceRequest(deps, "POST", "/calls/simulate", callIdSchema, { organizationId: session.organizationId, agentId: body.agentId, ...(body.from && { fromE164: body.from }) }),
   },
-  ({ q, body }) => requireAgent(q, body.agentId),
+  async ({ q, body }) => {
+    await requireActiveOrganization(q);
+    await requireAgent(q, body.agentId);
+  },
 );

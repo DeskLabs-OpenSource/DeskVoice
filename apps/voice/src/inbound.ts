@@ -7,8 +7,10 @@ import {
   VOICEMAIL_MAX_SECONDS_SETTING,
   callRecordingOf,
   inboundLimitOf,
+  organizationSuspended,
   recordEvent,
   resolveInboundRoute,
+  spokenLanguageOf,
   toE164,
   voicemailEnabledOf,
   voicemailLanguageOf,
@@ -22,6 +24,7 @@ import type { AriChannel, AriClient } from "./ari";
 import type { AsteriskCalls } from "./asterisk-transport";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
+import type { UnavailableJob } from "./unavailable";
 import { BEFORE_MESSAGE_MS, type VoicemailJob, type VoicemailReason } from "./voicemail";
 
 export interface InboundDeps {
@@ -113,6 +116,10 @@ export async function limitNoticedLately(q: OrgQuery, clock: Clock): Promise<boo
  *
  * Também recusa, com sinal de ocupado e antes de qualquer gasto com o motor de voz, quando a
  * organização já tem no teto as ligações recebidas pela operadora em andamento.
+ *
+ * Organização suspensa, antes de tudo isso: a chamada nasce recusada (`organization_suspended`), e o
+ * canal vai para o AudioSocket só para tocar a fala de indisponível e desligar (`unavailable.ts`).
+ * Nenhum motor abre, nenhum recado grava, e o teto não conta, porque a chamada já nasce encerrada.
  */
 export async function handleInbound(deps: InboundDeps, channel: AriChannel): Promise<void> {
   const { db, ari, clock, log } = deps;
@@ -132,6 +139,7 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
 
   const outcome = await withOrg(db, route.organizationId, async (q) => {
     const number = route.phoneNumberId ? await q.one<{ e164: string }>("select e164 from phone_numbers where id = $1", [route.phoneNumberId]) : null;
+    if (await organizationSuspended(q)) return refuseSuspended(q, clock, route, from, number?.e164 ?? dialed, exten);
     const agent = route.agentId ? await q.one<{ enabled: boolean }>("select enabled from agents where id = $1", [route.agentId]) : null;
     const to = number?.e164 ?? dialed;
     let refusal: Refusal | null = !agent ? "no_agent" : !agent.enabled ? "agent_disabled" : null;
@@ -176,8 +184,21 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
       const dialedLabel = to ?? "um número que este tronco não informou";
       if (!noticedLately) await panelNotice(q, clock, call.id, voicemailOverLimit ? VOICEMAIL_LIMIT_NOTICE(dialedLabel, limit) : NOTICE[refusal](dialedLabel, limit));
     }
-    return { callId: call.id, refusal, voicemail };
+    return { callId: call.id, refusal, voicemail, unavailable: null };
   });
+
+  if (outcome.unavailable) {
+    log("info", "inbound call refused: the organization is suspended", { callId: outcome.callId, language: outcome.unavailable.language });
+    deps.calls.expect({ callId: outcome.callId, channelId: channel.id, organizationId: route.organizationId, agentId: null, trunkId: route.trunkId, unavailable: outcome.unavailable });
+    try {
+      await ari.setVariable(channel.id, "AUDIOSOCKET_UUID", outcome.callId);
+      await ari.continueDialplan(channel.id, "deskvoice-audio", "s");
+    } catch (error) {
+      log("error", "could not send the inbound channel to play the unavailable notice", { callId: outcome.callId, error: messageOf(error) });
+      await ari.hangup(channel.id);
+    }
+    return;
+  }
 
   if (outcome.refusal && !outcome.voicemail) {
     log("info", "inbound call refused", { callId: outcome.callId, reason: outcome.refusal });
@@ -204,4 +225,28 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
     // O canal some sem áudio: `channelDestroyed` fecha a chamada como falha.
     await ari.hangup(channel.id);
   }
+}
+
+/**
+ * A recusa da organização suspensa: a chamada nasce `refused`, com o evento, e leva o idioma da fala,
+ * o do agente do número (ou o padrão). O agente só é lido pelo idioma: ligado ou não, não atende.
+ * Sem aviso no painel: quem olharia o painel da organização suspensa é quem a suspensão tirou dele.
+ */
+async function refuseSuspended(
+  q: OrgQuery,
+  clock: Clock,
+  route: { organizationId: string; agentId: string | null },
+  from: string | null,
+  to: string | null,
+  exten: string,
+): Promise<{ callId: string; refusal: null; voicemail: null; unavailable: UnavailableJob }> {
+  const agent = route.agentId ? await q.one<{ language: string | null }>("select language from agents where id = $1", [route.agentId]) : null;
+  const call = await q.one<{ id: string }>(
+    `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
+     values ($1, $2, 'inbound', 'phone', $3, $4, 'refused', 'organization_suspended', $5, $5) returning id`,
+    [route.organizationId, route.agentId, from, to, clock.now()],
+  );
+  if (!call) throw new Error("Inbound call was not created");
+  await recordEvent(q, call.id, "call_refused", { reason: "organization_suspended", from, to, dialed: exten }, clock.now());
+  return { callId: call.id, refusal: null, voicemail: null, unavailable: { language: spokenLanguageOf(agent?.language) } };
 }
