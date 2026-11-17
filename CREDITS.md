@@ -84,6 +84,16 @@ Do kit de contribuição do DeskcommCRM (`deskcomm-contribuir`) vieram também, 
   `gov-implementer.md` e `gov-verifier.md` de lá. As regras duras são as do `AGENTS.md` do
   DeskVoice, que os subagentes leem da `main`, e não as de lá. O laço autônomo e o arquivo de
   estado do de lá ficaram de fora: aqui o estado é o desenho e o PR, e o comando não envia nada.
+- **A leitura de métricas com régua declarada** (`deskvoice-metricas`): a estrutura da skill (a
+  pergunta antes da consulta, a régua ao lado de cada número, `null` não é zero, terminar em ação,
+  o relatório em cinco blocos e a lista do que nunca se faz) e a divisão das referências em acesso
+  e LGPD, consultas, régua e armadilhas vieram, como texto adaptado, da `deskcomm-metricas` de lá.
+  As consultas, as tabelas, as colunas e as armadilhas foram escritas do zero para o banco do
+  DeskVoice (`db/migrations/`), e cada consulta foi rodada no banco de teste antes de entrar.
+- **O procedimento de aplicar o sistema vivo a uma peça** (`deskvoice-sistema-vivo`), como lição e
+  não como texto: a skill que percorre as perguntas da doutrina e nomeia, para cada uma, o artefato
+  que prova a resposta, como a `sistema-vivo` de lá faz na seção do repositório. As perguntas são as
+  da lei do DeskVoice (`docs/doctrine/sistema-vivo.md`), para a qual a skill aponta sem copiar.
 
 O DeskcommCRM é obra de mais de 250 autores de PR. Parte do que está aqui é trabalho deles.
 
