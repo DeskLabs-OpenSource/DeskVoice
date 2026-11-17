@@ -27,6 +27,20 @@ describe("loadBrains", () => {
     for (const brain of brains.values()) expect(brain.keyUrl).toMatch(/^https:\/\//);
   });
 
+  it("`chat` é opcional: OpenAI, OpenRouter e DeepSeek conversam; Anthropic e Gemini continuam válidos sem", async () => {
+    const brains = await loadBrains();
+    const talking = [...brains.values()].filter((brain) => typeof brain.chat === "function").map((brain) => brain.id);
+    expect(talking.sort()).toEqual(["deepseek", "openai", "openrouter"]);
+    expect(brains.get("anthropic")?.chat).toBeUndefined();
+    expect(brains.get("gemini")?.chat).toBeUndefined();
+  });
+
+  it("recusa `chat` que não é função", async () => {
+    dir = await mkdtemp(join(tmpdir(), "deskvoice-brains-"));
+    await writeFile(join(dir, "odd.ts"), fixtureBrain("odd").replace("export default {", 'export default { chat: "sim",'));
+    await expect(loadBrains(dir)).rejects.toThrow(/odd\.ts/);
+  });
+
   it("cérebro novo é só um arquivo novo na pasta; arquivo de teste é ignorado", async () => {
     dir = await mkdtemp(join(tmpdir(), "deskvoice-brains-"));
     await writeFile(join(dir, "fixture.ts"), fixtureBrain("fixture"));
