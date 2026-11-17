@@ -127,6 +127,7 @@ const common: CommonDictionary = {
     update_target_changed: "The server now points to a different version than when this screen was opened. Check the notes and confirm again.",
     update_notes_missing: "The notes of this version are not available yet. Try again in a few minutes.",
     unknown_setting: "This setting does not exist in this version.",
+    organization_suspended: "This organization is suspended: it does not take or make calls.",
     outbound_disabled: "Outbound calls are off. Turn them on in Outbound calls.",
     outside_window: "Outside the hours allowed for outbound calls.",
     do_not_call: "This number is on the do-not-call list.",

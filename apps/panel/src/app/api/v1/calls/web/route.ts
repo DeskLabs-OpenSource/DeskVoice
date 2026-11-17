@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { handle } from "../../../../../server/context";
-import { requireAgent } from "../../../../../server/shapes";
+import { requireActiveOrganization, requireAgent } from "../../../../../server/shapes";
 import { VOICE_SOCKET_PATH, voiceRequest, webCallSchema } from "../../../../../server/voice";
 
 // Chamada pelo navegador: o painel só pede o convite. Quem confere se o agente pode atender
@@ -14,5 +14,8 @@ export const POST = handle(
       return { callId: call.callId, token: call.token, ws: { path: VOICE_SOCKET_PATH } };
     },
   },
-  ({ q, body }) => requireAgent(q, body.agentId),
+  async ({ q, body }) => {
+    await requireActiveOrganization(q);
+    await requireAgent(q, body.agentId);
+  },
 );

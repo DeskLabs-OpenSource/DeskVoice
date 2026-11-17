@@ -1,4 +1,4 @@
-import { decryptSecret, withOrg } from "@deskvoice/core";
+import { decryptSecret, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NOW, SECRET_KEY, call, createCall, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
 import { DELETE as deleteAgent, PATCH as patchAgent } from "./agents/[id]/route";
@@ -783,6 +783,27 @@ describe("voice process", () => {
     panel.voice.respond = () => Response.json({ callId: "11111111-1111-4111-8111-111111111111" });
     const started = await call(simulate, { method: "POST", cookie: operator.cookie, body: { agentId: agent } });
     expect(started.data).toEqual({ callId: "11111111-1111-4111-8111-111111111111" });
+    expect(panel.voice.requests).toEqual([{ url: "http://voice.test/calls/simulate", body: { organizationId: org, agentId: agent } }]);
+  });
+
+  it("a suspended organization takes no browser or simulated call, and the voice process is not even asked; the other organization still calls", async () => {
+    // Seção 3.3 do desenho do R8, fatia 4a: `suspended_at` marcado direto no banco (as ações são da 4b).
+    const suspended = await createOrganization(panel.app, "rules-suspended");
+    const suspendedOwner = (await createUser(panel.app, suspended, "owner")).cookie;
+    const suspendedAgent = ((await call(createAgent, { method: "POST", cookie: suspendedOwner, body: { name: "Suspensa", engine: "simulated" } })).data as { id: string }).id;
+    await withSystem(panel.app, (q) => q.exec("update organizations set suspended_at = now(), suspended_reason = 'teste da fatia 4a' where id = $1", [suspended]));
+    const agent = await newAgent("Demo ativa");
+    panel.voice.requests.length = 0;
+    panel.voice.respond = () => Response.json({ callId: "11111111-1111-4111-8111-111111111111", token: "t", expiresAt: NOW.toISOString() });
+
+    for (const route of [simulate, webCall]) {
+      const refused = await call(route, { method: "POST", cookie: suspendedOwner, body: { agentId: suspendedAgent } });
+      expect([refused.status, refused.code]).toEqual([409, "organization_suspended"]);
+    }
+    expect(panel.voice.requests).toEqual([]);
+
+    const started = await call(simulate, { method: "POST", cookie: owner, body: { agentId: agent } });
+    expect(started.status).toBe(200);
     expect(panel.voice.requests).toEqual([{ url: "http://voice.test/calls/simulate", body: { organizationId: org, agentId: agent } }]);
   });
 

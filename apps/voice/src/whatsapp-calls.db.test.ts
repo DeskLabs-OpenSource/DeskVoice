@@ -11,6 +11,7 @@ import { callOf, callsOf, createAgent, createOrganization, eventsOf, kindsOf, ma
 import { LOOPBACK_PEER, startFakeWacalls, type FakeCall } from "./testing/fake-wacalls";
 import { manualTime, waitFor } from "./testing/helpers";
 import { failureTone } from "./transport";
+import { unavailableNotice } from "./unavailable";
 import { wacallsSessionName } from "./wacalls-client";
 import { createWhatsAppCalls, type WhatsAppCalls } from "./whatsapp-calls";
 
@@ -300,6 +301,44 @@ describe("ligação pelo WhatsApp: quando o agente não atende, ela segue tocand
     const second = ring();
     await refusedBy(organizationId, second);
     expect(callPaths(first)).toEqual(["POST webrtc", "POST accept"]);
+  });
+});
+
+describe("ligação pelo WhatsApp: organização suspensa", { timeout: 60_000 }, () => {
+  it("atende pelo mesmo transporte só para a fala de indisponível, e desliga, sem abrir o motor; a outra organização segue atendendo", async () => {
+    const suspended = await connected("wa-suspended");
+    const active = await connected("wa-suspended-other");
+    await withSystem(app, (q) => q.exec("update organizations set suspended_at = now(), suspended_reason = 'teste da fatia 4a' where id = $1", [suspended.organizationId]));
+
+    const call = suspended.ring();
+    const [refused] = await waitFor(async () => {
+      const rows = await callsOf(app, suspended.organizationId);
+      return rows.length > 0 ? rows : null;
+    }, "the refused call");
+    expect(refused).toMatchObject({ status: "refused", end_reason: "organization_suspended", agent_id: suspended.agentId, from_e164: CALLER, to_e164: NUMBER });
+    expect(await eventsOf(app, refused?.id ?? "")).toEqual([{ kind: "call_refused", payload: { reason: "organization_suspended", from: CALLER, to: NUMBER, channel: "whatsapp" } }]);
+
+    // Atende com um dono próprio, como a conversa; a fala só sai com o áudio de pé, e depois dela, desliga.
+    await waitFor(() => call.status === "connected" || callPaths(call).includes("POST accept"), "the call to be answered");
+    wacalls.connectMedia(call);
+    await pump(() => call.status === "ended", "the DELETE after the notice");
+    expect(callPaths(call)).toEqual(["POST webrtc", "POST accept", `DELETE ${call.id}`]);
+    const notice = await unavailableNotice("pt-BR");
+    const received = Buffer.concat(call.leg?.received ?? []);
+    // A 16 kHz, o dobro de bytes da fala a 8 kHz; o que passa disso é o silêncio entre as falas.
+    expect(received.length).toBeGreaterThanOrEqual(notice.length * 2 - 640);
+    expect(received.some((byte) => byte !== 0)).toBe(true);
+
+    // Nenhum motor, nenhum aviso, e a chamada continua como nasceu.
+    expect(engine.configs).toEqual([]);
+    expect(await notificationsOf(app, suspended.organizationId)).toEqual([]);
+    expect(await callOf(app, refused?.id ?? "")).toMatchObject({ status: "refused", end_reason: "organization_suspended", channel: "whatsapp", engine: null });
+
+    // A outra organização, no mesmo processo: o agente atende, com o motor.
+    const other = active.ring();
+    await answeredCall(active.organizationId);
+    expect(engine.configs).toHaveLength(1);
+    wacalls.connectMedia(other);
   });
 });
 

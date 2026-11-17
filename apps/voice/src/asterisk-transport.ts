@@ -23,6 +23,7 @@ import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import { dtmfTones, type CallTransport } from "./transport";
+import type { UnavailableJob } from "./unavailable";
 import type { VoicemailJob } from "./voicemail";
 
 export interface ExpectedCall {
@@ -39,6 +40,11 @@ export interface ExpectedCall {
    * conversa com o motor de voz.
    */
   voicemail?: VoicemailJob;
+  /**
+   * A organização está suspensa: quem conecta o áudio toca a fala de indisponível e desliga, sem
+   * abrir o motor de voz (`unavailable.ts`). A chamada já está `refused`.
+   */
+  unavailable?: UnavailableJob;
 }
 
 interface TrackedCall extends ExpectedCall {

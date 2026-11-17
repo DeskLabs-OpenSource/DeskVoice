@@ -127,6 +127,7 @@ const common: CommonDictionary = {
     update_target_changed: "El servidor pasó a apuntar a otra versión después de abrir esta pantalla. Revisa las notas y confirma de nuevo.",
     update_notes_missing: "Las notas de esta versión todavía no están disponibles. Intenta de nuevo en unos minutos.",
     unknown_setting: "Esta configuración no existe en esta versión.",
+    organization_suspended: "Esta organización está suspendida: no atiende ni hace llamadas.",
     outbound_disabled: "Las llamadas salientes están desactivadas. Actívalas en Llamadas salientes.",
     outside_window: "Fuera del horario permitido para llamadas salientes.",
     do_not_call: "Este número está en la lista de no llamar.",

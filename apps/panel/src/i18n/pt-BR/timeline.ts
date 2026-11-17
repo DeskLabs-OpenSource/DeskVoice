@@ -352,6 +352,7 @@ const timeline = {
     web_never_connected: "A ligação pelo navegador não chegou a conectar.",
     whatsapp_answer_failed: "O agente não conseguiu atender a ligação pelo WhatsApp, que continuou tocando no celular. Confira a linha Ligação pelo WhatsApp em Saúde.",
     transfer_unanswered: "A transferência não foi atendida.",
+    organization_suspended: "A organização estava suspensa.",
     outbound_disabled: "As ligações de saída estavam desligadas.",
     outside_window: "Fora do horário permitido para ligações de saída.",
     do_not_call: "O número está na lista de não ligar.",
