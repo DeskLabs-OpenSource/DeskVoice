@@ -173,6 +173,12 @@ que algum contêiner usa fica, com um aviso, e a atualização termina bem. Imag
 da versão de destino, a limpeza já roda na primeira atualização para a versão que a traz (vindo
 da 0.1.0, que não passa a vez, só na atualização seguinte para outra versão).
 
+A imagem guardada não basta para voltar de uma versão que mudou o banco de um jeito que a
+anterior não lê. É o caso da 0.28.0: depois de atualizar para ela, voltar para uma versão
+anterior com `update.sh --to` deixa o painel sem login. A volta é trocar a versão e restaurar o
+backup de antes da atualização (`bash install/restore.sh backups/<o backup de antes>`), e o que
+entrou depois de atualizar se perde.
+
 A 0.1.0 é de antes desse mecanismo: quem atualiza a partir dela roda `bash install/update.sh`
 **uma segunda vez** depois de atualizar. Não há o que atualizar; é o atualizador novo gerando o
 segredo do agente, recriando o painel para ele recebê-lo e agendando o agente.
