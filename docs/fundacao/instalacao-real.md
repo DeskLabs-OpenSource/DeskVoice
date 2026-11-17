@@ -66,7 +66,7 @@ A instalação real aconteceu depois da publicação (item 13.5 da conformidade)
 - Instalação do zero, de verdade, pelo comando de uma linha contra uma versão publicada, numa máquina limpa. Só a simulação e a atualização foram exercitadas. (Depois da 0.2.0 a instalação do zero contra a 0.1.0 aconteceu, numa segunda VPS compartilhada: ver "Depois da 0.2.0". Máquina limpa continua sem prova.)
 - Conversa por voz depois da atualização para a 0.1.0.
 - A volta automática do `update.sh` numa VPS.
-- Instalação em processador ARM, que só existe construindo na própria máquina.
+- Instalação em processador ARM. Nas versões sem imagem ARM ela só existe construindo na própria máquina; a partir da primeira versão publicada com imagem ARM ([0017](../decisions/0017-imagens-para-amd64-e-arm64.md)), a instalação puxa, sem que ninguém tenha instalado numa máquina ARM real.
 
 ## Depois da 0.2.0 (2026-11-11)
 
@@ -286,3 +286,60 @@ Os documentos de entrada falam em "VPS de 8 GB e 4 vCPU", mas as seções acima 
 | VPS da parceira, dedicada (AlmaLinux) | 4 | 11699 MiB (seção "Na VPS da parceira") |
 
 "8 GB" é o tamanho vendido. O sistema vê 7940 MiB.
+
+## Primeira passagem entre agentes com motor de voz real, na VPS da parceira (2026-11-16)
+
+Até aqui a passagem entre agentes (0.17.0) e o custo por agente (0.18.0) só tinham sido provados
+com o motor simulado. A prova abaixo foi feita às 14:39 UTC (11:39 BRT) com a 0.19.1, pelo
+caminho da **chamada pelo navegador**, sem operadora e sem WhatsApp. Quem "ligou" foi um script
+rodado dentro do contêiner de voz. Ele pediu o convite à API interna, como o painel pede, e
+conversou pelo WebSocket da chamada com três falas gravadas pela voz sintética do macOS (PCM16
+mono a 8 kHz, em quadros de 20 ms), com silêncio entre elas. Saídas em [`registros/2026-11-16-passagem/`](registros/2026-11-16-passagem/), com os ids trocados por rótulos.
+
+Foram criados dois agentes só para a prova, no motor OpenAI Realtime (`gpt-realtime-2.1`), com teto
+de 40 centavos e 150 s cada: uma recepção, que tinha o financeiro como único destino de passagem,
+e um financeiro, com o rótulo "Teste de passagem". Os agentes que já existiam na instalação não
+foram tocados.
+
+| O que | O que se observou |
+|---|---|
+| Passagem | Feita na **segunda** tentativa. Na primeira, o modelo pediu `transfer_to_agent` com o nome e o rótulo, "Prova Financeiro (Teste de passagem)", copiando a linha das instruções. A ferramenta recusou, e a transcrição da fala seguinte do agente é "Entendi, vou ajustar o destino e encaminhar corretamente" (o áudio não foi ouvido). Na segunda, com o nome só, veio `agent_handoff`, com motivo e resumo. O conserto é o #333 |
+| Depois da passagem | O financeiro abriu com a frase da passagem, respondeu o valor pedido e encerrou com `end_call` depois da despedida de quem ligou. As falas dele levam o `agentId` dele |
+| Duração e desfecho | 63 s, `completed`, motivo `end_call` |
+| Custo | 9 centavos de dólar no `call_ended`. O extrato (`usage_ledger`) da ligação, somado por `agent_id` depois que ela terminou, tem 7 linhas e nenhuma sem agente: 3 da recepção, que somam 5, e 4 do financeiro, que somam 4. Cada linha é a diferença entre dois totais arredondados, por isso há linha de 0 centavo com tokens ([`extrato.txt`](registros/2026-11-16-passagem/extrato.txt)) |
+| Gravação | `recording_saved`, 2,0 MB |
+| Rotinas | `summarize_call` e `review_call` terminaram com `done` |
+
+O que não prova:
+
+- **O custo por agente na tela.** A soma foi conferida no banco, não na tela de custos.
+- **O supervisor de regras fixas.** Ele pula toda ligação sem número, e a chamada pelo navegador não tem número.
+- **A passagem numa ligação por operadora ou pelo WhatsApp.** A passagem troca o agente sem mexer no transporte, então o caminho é o mesmo nos três, mas só o da chamada pelo navegador foi medido.
+- **O painel e o navegador.** O convite foi pedido direto à API interna do processo de voz, sem a sessão do painel nem a rota `/api/v1/calls/web`, e nenhum navegador abriu o microfone.
+- **Fala humana.** As falas eram sintéticas, ditas sem ruído.
+- **O conserto do #333 numa ligação real.** A prova foi antes dele.
+
+## A mesma passagem refeita com a 0.19.2 (2026-11-16)
+
+Às 15:20 UTC, depois de a VPS da parceira ir para a 0.19.2, que traz o conserto do #333, a prova da
+seção anterior foi refeita. Valeram o mesmo caminho (chamada pelo navegador por script, com o
+convite pedido direto à API interna do processo de voz), os mesmos dois agentes, as mesmas três
+falas sintéticas e o mesmo motor. Saídas em
+[`registros/2026-11-16-passagem-0.19.2/`](registros/2026-11-16-passagem-0.19.2/), com os ids trocados por rótulos. A versão é a das imagens em execução: `panel`, `voice` e `routines` na `0.19.2`. O contêiner de voz subiu às 15:19:22 UTC, antes de a ligação começar, às 15:20:00 ([`versao.txt`](registros/2026-11-16-passagem-0.19.2/versao.txt)).
+
+| O que | O que se observou |
+|---|---|
+| Passagem | Na **primeira** tentativa: um `transfer_to_agent` só, com `ok: true`, seguido de `agent_handoff` |
+| Depois da passagem | O financeiro respondeu o valor pedido e encerrou com `end_call`. Pela transcrição, ele se despediu duas vezes: uma frase própria antes da ferramenta e a despedida que a ferramenta mandou dizer |
+| Duração e desfecho | 59 s, `completed`, motivo `end_call` |
+| Custo | 9 centavos de dólar no `call_ended`. O extrato tem 6 linhas, nenhuma sem agente: 2 da recepção, que somam 4, e 4 do financeiro, que somam 5 |
+| Rotinas e gravação | `summarize_call` e `review_call` terminaram com `done`. `recording_saved` com 1,9 MB |
+
+Duas notas valem para as duas provas. A duração vem de `ended_at - started_at` na linha de `calls`.
+O `"seconds": 0` do `call_ended` é o uso medido pelo motor, e o OpenAI Realtime informa tokens, não
+segundos. O valor que o financeiro disse estava nas instruções escritas para ele, e não é invenção do modelo ([`instrucoes.txt`](registros/2026-11-16-passagem-0.19.2/instrucoes.txt), as mesmas nas duas provas).
+
+O que não prova, além do que a seção anterior já lista:
+
+- **O conserto do #333 em ação.** Os argumentos do `transfer_to_agent` não são gravados, porque são texto pessoal. Por isso não se sabe se, desta vez, o modelo escreveu o nome com o rótulo, que é o caso consertado, ou só o nome. O conserto está provado em `agent-handoff.db.test.ts`. Uma ligação mostra só que a passagem saiu de primeira.
+- **Que a passagem de primeira se repete.** Foi uma ligação em cada versão.

@@ -23,6 +23,8 @@ describe("agenda_marcar", () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toContain("falta a confirmação");
+    // Recusa antes de chamar a agenda: a vaga do teto por ligação volta.
+    expect(result.noEffect).toBe(true);
     expect(result.message).toContain("confirmed=true");
     expect(crm.pedidos.marcacoes).toEqual([]);
     expect(crm.compromissos.size).toBe(0);
@@ -34,6 +36,8 @@ describe("agenda_marcar", () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toContain("já passou");
+    // Recusa antes de chamar a agenda: a vaga do teto por ligação volta.
+    expect(result.noEffect).toBe(true);
     expect(crm.pedidos.marcacoes).toEqual([]);
   });
 
@@ -42,6 +46,8 @@ describe("agenda_marcar", () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toContain("não está ligada");
+    // Recusa antes de chamar a agenda: a vaga do teto por ligação volta.
+    expect(result.noEffect).toBe(true);
     expect(result.message).toContain("create_task");
   });
 
@@ -54,6 +60,17 @@ describe("agenda_marcar", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain("não respondeu");
     expect(result.message).toContain("NÃO diga que está marcado");
+    // O CRM pode ter marcado antes de falhar: na dúvida, a vaga fica gasta.
+    expect(result.noEffect).toBeUndefined();
     expect(crm.compromissos.size).toBe(0);
+  });
+
+  it("agente em inglês: a espera sai em inglês", async () => {
+    const ctx = contextoDaAgenda("en");
+
+    const result = await createAgendaMarcar({ agenda: crmSimulado() }).run({ service_type: "Estimate", starts_at: ESCOLHIDO, confirmed: true }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(ctx.said).toEqual(["One moment, I'm booking that for you."]);
   });
 });

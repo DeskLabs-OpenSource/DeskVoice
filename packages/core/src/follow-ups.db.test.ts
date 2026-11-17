@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { createOrganization, openTestDbs } from "../test/helpers";
+import { createAccount } from "./accounts";
 import { assignFollowUp, closeFollowUp, createFollowUp, purgeFollowUps, returnFollowUpsToTeam } from "./follow-ups";
 import type { Db } from "./types";
 import { withOrg, withSystem } from "./with-org";
@@ -26,7 +27,9 @@ async function insert(db: Db, sql: string, params: unknown[]): Promise<string> {
 /** Organização, pessoa, agente (com ela como dono das pendências, ou sem dono) e ligação recebida. */
 async function scene(label: string, options: { ownedBy?: "person" | "team"; direction?: "inbound" | "outbound" } = {}) {
   const org = await createOrganization(app, label);
-  const person = await insert(app, "insert into users (id, organization_id, email, name, password_hash, role) values ($1, $2, $3, 'Pessoa', 'x', 'operator')", [org, `${randomUUID()}@example.com`]);
+  const email = `${randomUUID()}@example.com`;
+  const account = await withSystem(app, (q) => createAccount(q, { email, passwordHash: "x" }));
+  const person = await insert(app, "insert into users (id, organization_id, account_id, email, name, role) values ($1, $2, $3, $4, 'Pessoa', 'operator')", [org, account, email]);
   const agent = await insert(app, "insert into agents (id, organization_id, name, engine, follow_up_owner_user_id) values ($1, $2, 'Recepção', 'simulated', $3)", [
     org,
     options.ownedBy === "team" ? null : person,

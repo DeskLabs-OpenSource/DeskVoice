@@ -15,6 +15,7 @@ import { formatDateTime, formatDay } from "../../../ui/format";
 import { Badge, Button, Field, Notice, Panel, Select, Skeleton, Switch, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import type { Engine, KeyCheck, KeyCheckResult, Setting } from "../../../ui/types";
+import { matchModels } from "./brains/search";
 import { URL_PREFIX, put } from "./setting-api";
 
 const KEY_CHECK_TONE: Record<KeyCheckResult, "ok" | "warn" | "fail" | "neutral"> = {
@@ -71,6 +72,7 @@ function ClassifyTarget({ engine, t, onChanged }: { engine: Engine; t: SettingsD
       <Field label={t.classifyModel} hint={t.classifyModelHint}>
         <TextInput mono autoComplete="off" className="max-w-md" value={model} onChange={(event) => setModel(event.target.value)} />
       </Field>
+      {engine.classifyModelUnmeasured ? <Notice tone="warn">{t.classifyModelUnmeasured}</Notice> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" variant="secondary" busy={save.busy}>
           {t.classifyTargetSave}
@@ -195,6 +197,132 @@ function OutcomeSetting({ t }: { t: SettingsDictionary }) {
   );
 }
 
+interface BrainChoice {
+  brain: string;
+  model: string;
+}
+
+/** O que a tela de Cérebros sabe de cada um: aqui só valem os que têm chave aceita. */
+interface BrainOption {
+  id: string;
+  label: string;
+  configured: boolean;
+  keyCheck: { result: string } | null;
+}
+
+interface BrainModelOption {
+  id: string;
+  label: string;
+  price?: unknown;
+}
+
+/**
+ * Quem lê a ligação (desfecho e análise): o motor do agente, que é o de antes, ou um cérebro e um
+ * modelo da lista guardada dele. Só cérebros com chave aceita aparecem. Modelo sem preço mostra o
+ * aviso fixo antes de salvar, e o aviso continua depois de salvo; a tela só manda
+ * `acceptUnmeasured` para o modelo cujo aviso está na tela.
+ */
+function AnalysisBrain({ t }: { t: SettingsDictionary }) {
+  const canConfigure = useCanConfigure();
+  const setting = useApi<Setting<BrainChoice>>("/settings/calls.analysis_brain");
+  // A lista de cérebros é de quem configura (dono e admin); quem só lê vê a escolha em texto.
+  const brains = useApi<BrainOption[]>(canConfigure ? "/brains" : null);
+  const saved = setting.data?.value ?? null;
+  // `undefined`: ainda o que está salvo. A troca de cérebro limpa o modelo e a busca.
+  const [picked, setPicked] = useState<{ brain: string; model: string } | undefined>(undefined);
+  const [query, setQuery] = useState("");
+  const brain = picked?.brain ?? saved?.brain ?? "";
+  const modelId = picked ? picked.model : (saved?.model ?? "");
+  const models = useApi<{ models: BrainModelOption[] }>(canConfigure && brain ? `/brains/${encodeURIComponent(brain)}/models` : null);
+  const save = useAction();
+  if (!setting.data || (canConfigure && !brains.data && !brains.error)) return <Skeleton lines={2} />;
+
+  const accepted = (brains.data ?? []).filter((option) => option.configured && option.keyCheck?.result === "accepted");
+  const labelOf = (id: string): string => brains.data?.find((option) => option.id === id)?.label ?? id;
+  const list = models.data?.models ?? [];
+  const model = list.find((item) => item.id === modelId);
+  const unmeasured = model !== undefined && model.price === undefined;
+  const shown = matchModels(list, query);
+  // O cérebro salvo sem chave aceita, ou o modelo salvo que sumiu da lista: a rotina não lê a
+  // ligação (nem cai no motor), e a tela diz isso a quem pode trocar.
+  const keyGone = saved !== null && brains.data !== undefined && !accepted.some((option) => option.id === saved.brain);
+  const modelGone = saved !== null && !keyGone && models.data !== undefined && brain === saved.brain && !list.some((item) => item.id === saved.model);
+  const dirty = picked !== undefined && (picked.brain !== (saved?.brain ?? "") || picked.model !== (saved?.model ?? ""));
+
+  if (!canConfigure)
+    return (
+      <Field label={t.brainTitle} hint={t.brainHint}>
+        <p>{saved ? fill(t.brainChosen, { brain: saved.brain, model: saved.model }) : t.brainEngine}</p>
+      </Field>
+    );
+
+  return (
+    <form
+      className="grid gap-3 border-t border-line pt-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const value = brain ? { brain, model: modelId, ...(unmeasured ? { acceptUnmeasured: true } : {}) } : null;
+        void save.run(() => put("calls.analysis_brain", value)).then((ok) => {
+          if (!ok) return;
+          setPicked(undefined);
+          setQuery("");
+          setting.reload();
+        });
+      }}
+    >
+      <Field label={t.brainTitle} hint={t.brainHint}>
+        <Select
+          className="max-w-md"
+          value={brain}
+          onChange={(event) => {
+            setPicked({ brain: event.target.value, model: "" });
+            setQuery("");
+          }}
+        >
+          <option value="">{t.brainEngine}</option>
+          {accepted.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+          {/* O salvo que perdeu a chave continua visível como escolhido, para o aviso abaixo fazer sentido. */}
+          {keyGone && saved ? <option value={saved.brain}>{labelOf(saved.brain)}</option> : null}
+        </Select>
+      </Field>
+      {brains.data && accepted.length === 0 && !saved ? <p className="text-sm text-muted">{t.brainNone}</p> : null}
+      {keyGone && saved ? <Notice tone="fail">{fill(t.brainKeyGone, { brain: labelOf(saved.brain) })}</Notice> : null}
+      {brain && !keyGone ? (
+        <div className="grid max-w-md content-start gap-1.5">
+          <span className="text-[0.87rem] font-bold">{t.brainModel}</span>
+          <div className="grid gap-2">
+            <TextInput type="search" autoComplete="off" aria-label={t.brainSearch} placeholder={t.brainSearch} value={query} onChange={(event) => setQuery(event.target.value)} />
+            {models.data && shown.length === 0 ? <p className="text-sm text-muted">{t.brainSearchEmpty}</p> : null}
+            <Select required aria-label={t.brainModel} value={model ? modelId : ""} onChange={(event) => setPicked({ brain, model: event.target.value })} disabled={!models.data}>
+              <option value="" />
+              {/* O escolhido fica na lista mesmo fora da busca, para o campo não mudar sozinho. */}
+              {(model && !shown.includes(model) ? [model, ...shown] : shown).map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label === item.id ? item.id : `${item.label} (${item.id})`}
+                  {item.price === undefined ? ` · ${t.brainNoPrice}` : ""}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+      ) : null}
+      {modelGone && saved ? <Notice tone="fail">{fill(t.brainModelGone, { model: saved.model })}</Notice> : null}
+      {/* Aviso fixo: aparece ao escolher o modelo sem preço, antes de salvar, e continua depois de salvo. */}
+      {brain && unmeasured ? <Notice tone="warn">{t.brainUnmeasured}</Notice> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="submit" variant="secondary" busy={save.busy} disabled={!dirty || (brain !== "" && !model)}>
+          {t.brainSave}
+        </Button>
+        <ActionStatus action={save} />
+      </div>
+    </form>
+  );
+}
+
 /**
  * Analisar cada ligação no fim: desligado de fábrica. A análise inclui o desfecho e sai na mesma
  * chamada paga ao provedor; quem pode ligar é o dono ou um admin (`useCanConfigure`).
@@ -218,6 +346,7 @@ function AnalysisSetting({ t }: { t: SettingsDictionary }) {
         </div>
         <p>{t.analysisCost}</p>
         <Notice tone={enabled ? "warn" : "neutral"}>{t.analysisData}</Notice>
+        <AnalysisBrain t={t} />
       </div>
     </Panel>
   );

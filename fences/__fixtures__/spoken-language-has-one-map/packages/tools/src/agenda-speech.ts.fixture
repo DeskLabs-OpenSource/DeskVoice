@@ -1,0 +1,10 @@
+const AGENDA_LANGUAGES = ["pt-BR", "en", "es"] as const;
+
+function agendaLanguage(language: string): (typeof AGENDA_LANGUAGES)[number] {
+  const parsed = AGENDA_LANGUAGES.find((known) => known === language);
+  return parsed ?? "pt-BR";
+}
+
+export function agendaWaitLine(language: string): string {
+  return agendaLanguage(language) === "en" ? "One moment." : "Um instante.";
+}

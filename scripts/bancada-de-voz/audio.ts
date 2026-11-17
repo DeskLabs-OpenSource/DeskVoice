@@ -69,7 +69,12 @@ export function regiaoDaFala(valores: ArrayLike<number>, taxaHz: number): { inic
  * fala**. Se a soma estourar, as duas descem juntas (a relação não muda). Devolve a relação medida
  * depois do arredondamento, para ser escrita junto do resultado.
  */
-export function misturar(voz: Float64Array, ruido: Float64Array, snrDb: number, fala: { inicio: number; fim: number }): { mistura: Float64Array; snrMedidoDb: number } {
+export function misturar(
+  voz: Float64Array,
+  ruido: Float64Array,
+  snrDb: number,
+  fala: { inicio: number; fim: number },
+): { mistura: Float64Array; snrMedidoDb: number; ruidoNoNivel: Float64Array; escala: number } {
   if (ruido.length < voz.length) throw new Error("o ruído precisa cobrir a voz inteira");
   const rmsVoz = rms(voz, fala.inicio, fala.fim);
   const rmsRuido = rms(ruido, fala.inicio, fala.fim);
@@ -90,5 +95,5 @@ export function misturar(voz: Float64Array, ruido: Float64Array, snrDb: number, 
     ruidoFinal[i] = ganho * (ruido[i] ?? 0) * escala;
   }
   const snrMedidoDb = 20 * Math.log10(rms(vozFinal, fala.inicio, fala.fim) / rms(ruidoFinal, fala.inicio, fala.fim));
-  return { mistura, snrMedidoDb };
+  return { mistura, snrMedidoDb, ruidoNoNivel: ruidoFinal, escala };
 }

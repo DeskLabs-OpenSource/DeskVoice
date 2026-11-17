@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agendaNotWired, agendaUnavailable } from "../agenda-speech";
+import { agendaNotWired, agendaUnavailable, agendaWaitLine } from "../agenda-speech";
 import { defineTool } from "../define-tool";
 import type { ToolDeps } from "../deps";
 
@@ -25,6 +25,7 @@ export function createAgendaRemarcar(deps: ToolDeps = {}) {
       if (input.confirmed !== true) {
         return {
           ok: false,
+          noEffect: true,
           message:
             "Nada foi remarcado: falta a confirmação da pessoa. Leia em voz alta o novo dia e a nova hora, pergunte se pode trocar " +
             "e, só depois do sim dela, chame de novo com confirmed=true.",
@@ -32,17 +33,18 @@ export function createAgendaRemarcar(deps: ToolDeps = {}) {
       }
 
       const client = deps.agenda;
-      if (!client) return { ok: false, message: agendaNotWired("o horário não foi remarcado") };
+      if (!client) return { ok: false, noEffect: true, message: agendaNotWired("o horário não foi remarcado") };
 
       if (new Date(input.starts_at).getTime() <= ctx.clock.now().getTime()) {
         return {
           ok: false,
+          noEffect: true,
           message:
             "Esse horário já passou, e nada foi remarcado. Confira o dia e a hora com a pessoa e consulte de novo os horários livres.",
         };
       }
 
-      ctx.say("Um instante, estou remarcando.");
+      ctx.say(agendaWaitLine("rescheduling", ctx.language));
       try {
         const appointment = await client.reschedule({
           appointmentId: input.appointment_id,

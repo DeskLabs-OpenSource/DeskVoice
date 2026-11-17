@@ -2,6 +2,7 @@ import { isIP } from "node:net";
 import { isPublicAddress } from "@deskvoice/core";
 import { z } from "zod";
 import type { AnalysisGuess } from "./analysis";
+import type { BrainFailure } from "./brain";
 import type { OutcomeGuess } from "./outcome";
 
 /** Definição de ferramenta no formato que os motores entendem (JSON Schema em `parameters`). */
@@ -84,6 +85,12 @@ export interface VoiceSession {
    * contra o silêncio chama isto quando o provedor não viu o fim do turno.
    */
   closeCallerTurn(): void;
+  /**
+   * Contexto para o agente, que não vira fala por si. Entra pelo mecanismo que o provedor documenta,
+   * nunca por `say`. Sem o método, o motor não aceita orientação, e quem chama registra isso.
+   * Depois de `close`, não manda nada.
+   */
+  guide?(text: string): void;
   close(): Promise<void>;
 }
 
@@ -262,6 +269,57 @@ export interface RecordingTranscriber {
   transcribe(apiKey: string, input: TranscribeInput, options?: ClassifyOptions): Promise<TranscribeResult>;
 }
 
+/**
+ * Uma pergunta fixa ao modelo de decisão (R12, Parte 3). O texto de quem ligou nunca entra aqui:
+ * ele vai no `state`, que é dado. `noul` é sim ou não (a resposta é a probabilidade do sim),
+ * `choice` é uma entre as opções, `score` é um nível de uma escala.
+ */
+export type DecisionQuestion =
+  | { kind: "noul"; instruction: string; criteria?: { true: string; false: string } }
+  | { kind: "choice"; instruction: string; options: Record<string, string> }
+  | { kind: "score"; instruction: string; levels: readonly [string, string, ...string[]] };
+
+export type DecisionAnswer =
+  | { kind: "noul"; value: number }
+  | { kind: "choice"; choice: string; probabilities: Record<string, number>; confidence: number }
+  | { kind: "score"; score: number; probabilities: Record<string, number>; confidence: number };
+
+export interface DecideInput {
+  state: string;
+  questions: Record<string, DecisionQuestion>;
+}
+
+/**
+ * O que o modelo de decisão devolve: as respostas, ou o motivo de não haver, e sempre o consumo e
+ * o custo. `late` é o pedido que passou do prazo e foi cancelado. O custo vem nas duas vistas da
+ * classificação (`ClassifyResult`): um pedido custa milésimos de centavo, e o extrato guarda o
+ * micro-centavo.
+ */
+/**
+ * `costEstimated`: o custo é uma estimativa (o pedido saiu e o consumo não foi lido). Ausente ou
+ * `false`, o custo é o medido pelo consumo que o provedor declarou.
+ */
+export type DecideResult = { model: string; usage: Usage; costCents: number; costMicrocents: number; costEstimated?: boolean; latencyMs: number } & (
+  | { ok: true; answers: Record<string, DecisionAnswer> }
+  | { ok: false; failure: ClassifyFailure | "late"; status: number | null }
+);
+
+/**
+ * Um modelo que decide sobre texto (o filtro da fala de quem ligou; depois, os analistas ao vivo).
+ * Um arquivo por modelo em `deciders/`, descoberto por `loadDecisionModels`.
+ */
+export interface DecisionModel {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  pricing: EnginePricing;
+  keyless?: boolean;
+  /** Nunca lança. Todas as perguntas numa passada só. Passado `timeoutMs`, cancela e devolve `late`. */
+  decide(apiKey: string, input: DecideInput, options?: ClassifyOptions): Promise<DecideResult>;
+  checkKey?(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+}
+
 /** Um trecho de texto da fala de quem ligou, enquanto ela acontece. */
 export interface TranscriptPiece {
   /** O texto do trecho. No parcial, pode mudar no próximo evento. */
@@ -382,6 +440,109 @@ export interface VoiceEngine {
   checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
 }
 
+/**
+ * Uma voz que o sintetizador oferece, lida da conta do operador (R5, voz do pipeline).
+ */
+export interface SynthesizerVoice {
+  id: string;
+  name: string;
+  /** Idiomas que o provedor declara verificados para a voz (`pt-BR`, ...). Vazio quando não declara. */
+  languages: readonly string[];
+  /** Amostra que o provedor hospeda: tocar não gasta crédito. */
+  previewUrl?: string;
+}
+
+export type SynthesizerVoicesResult = { ok: true; voices: SynthesizerVoice[] } | { ok: false; failure: BrainFailure; status: number | null };
+
+/** O preço por caractere, que é como a ElevenLabs cobra. De um modelo, com a fonte e o dia conferido. */
+export interface SynthesizerPricing {
+  centsPerThousandCharacters: number;
+  source: string;
+  /** `AAAA-MM-DD`. */
+  checkedOn: string;
+}
+
+/**
+ * O consumo de uma fala, em incrementos (como `VoiceSessionEvents.usage`): quem mede soma os eventos.
+ * Sai quando o texto **é enviado** ao provedor, e não quando vira áudio: é o que o provedor cobra,
+ * inclusive do que a interrupção descartou. `costMicrocents` ausente é "sem preço conhecido" (o
+ * modelo não está na tabela), nunca zero. `estimated` é sempre verdadeiro enquanto ninguém comparar a
+ * contagem com o consumo da conta.
+ */
+export interface SpeechUsage {
+  characters: number;
+  costMicrocents?: number;
+  estimated: true;
+}
+
+export interface SpeechEvents {
+  /** PCM16 mono 8 kHz, como `VoiceSessionEvents.audio`. */
+  audio(pcm16_8k: Buffer): void;
+  /** O que já virou áudio, em caracteres, acumulado, para cortar a fala do agente na interrupção (fatia 4). */
+  spoken(chars: number): void;
+  /** Incremento do que foi enviado ao provedor, com o custo. */
+  usage(usage: SpeechUsage): void;
+  /** Esta fala terminou de gerar. Não vem depois de `cancel`. */
+  done(): void;
+  error(error: Error): void;
+}
+
+export interface Speech {
+  on<K extends keyof SpeechEvents>(event: K, handler: SpeechEvents[K]): void;
+  /** Texto em pedaços, como o cérebro entrega. `flush` força a geração do que já chegou. */
+  push(text: string, options?: { flush?: boolean }): void;
+  /** Não vem mais texto: o provedor gera o resto e a fala termina com `done`. */
+  end(): void;
+  /** Interrupção: para de gerar e descarta o que não saiu. O que já foi enviado ao provedor é cobrado. */
+  cancel(): void;
+}
+
+/** Por que a fala não abriu, no vocabulário fechado do teste da chave. */
+export type SynthesizerOpenFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
+
+/** A fala não abriu. Quem abre trata como recusa de abertura; o texto do provedor fica só em `message`, para o log. */
+export class SynthesizerOpenError extends Error {
+  readonly reason: SynthesizerOpenFailure;
+  constructor(reason: SynthesizerOpenFailure, message: string) {
+    super(message);
+    this.reason = reason;
+  }
+}
+
+export interface SpeakConfig {
+  voiceId: string;
+  /** BCP 47, ex.: "pt-BR". */
+  language: string;
+  /** Sobrepõe o modelo padrão do sintetizador. */
+  model?: string;
+}
+
+/**
+ * Uma voz do pipeline (R5): recebe texto em pedaços e devolve PCM16 mono 8 kHz. Um arquivo por
+ * provedor em `synthesizers/`, descoberto por `loadSynthesizers`.
+ */
+export interface SpeechSynthesizer {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  /** O modelo usado quando a escolha não diz outro. */
+  defaultModel: string;
+  /** O preço do modelo padrão. */
+  pricing: SynthesizerPricing;
+  /** O preço de um modelo; `undefined` é "sem preço conhecido", nunca zero. */
+  pricingOf(model: string): SynthesizerPricing | undefined;
+  keyless?: boolean;
+  /** Onde a pessoa pega a chave (o link da tela). */
+  keyUrl?: string;
+  /** Nunca lança. */
+  listVoices(apiKey: string, options?: KeyCheckOptions): Promise<SynthesizerVoicesResult>;
+  /** Nunca lança, nunca sintetiza, nunca registra a chave. */
+  checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+  /** Abre uma fala. Lança `SynthesizerOpenError` com o motivo no vocabulário fechado. */
+  speak(config: SpeakConfig, apiKey: string, options?: ConnectOptions): Promise<Speech>;
+}
+
 // Mora aqui, e não em outcome.ts, porque o painel importa valor só por `@deskvoice/voice-engine/types`:
 // o índice puxa load.ts, cujo `new URL("./engines", import.meta.url)` o Turbopack não resolve.
 /**
@@ -416,6 +577,17 @@ export const transcriptionEnabledOf = (stored: unknown): boolean => stored === t
  */
 export const AUTO_TRANSCRIPTION_SETTING = "calls.auto_transcription_enabled";
 export const autoTranscriptionEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
+ * O modelo de decisão que lê a fala de quem ligou durante a chamada, por organização (chave
+ * `calls.decision_model` em `settings`, com o id do modelo). Ausente é desligado, de fábrica: cada
+ * fala vira um pedido pago, com o texto de quem ligou, ao fornecedor do modelo. Só um id de texto liga;
+ * quem confere se o modelo existe nesta instalação é quem o usa.
+ */
+export const DECISION_MODEL_SETTING = "calls.decision_model";
+export const decisionModelOf = (stored: unknown): string | undefined => (typeof stored === "string" && stored.trim() !== "" ? stored.trim() : undefined);
+/** A chave do modelo de decisão, cifrada como a dos motores. É do operador, e nunca a do motor de voz. */
+export const decisionModelKeySetting = (modelId: string): string => `decision_model.${modelId}.api_key`;
 
 /**
  * Endpoint, modelo e chave da **classificação**, por motor, juntos numa configuração só

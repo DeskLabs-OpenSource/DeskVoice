@@ -54,6 +54,18 @@
  *   `input_audio_buffer.commit` com a detecção de fala do servidor em curso fecha o turno sem erro.
  *   Com resposta em curso ou item já fechado, `closeCallerTurn` não faz nada: o `commit` "will produce
  *   an error if the input audio buffer is empty" (referência), e o servidor já vai responder.
+ *
+ * Orientação ao agente (`guide`), consultado em 2026-11-17:
+ *   - https://developers.openai.com/api/docs/api-reference/realtime  (`conversation.item.create` com
+ *     `{ type: "message", role: "system", content: [{ type: "input_text", text }] }`; o papel `system`
+ *     "can be used to provide additional context or instructions to the model" e, "for smaller
+ *     updates", é o recomendado no lugar de trocar as instruções)
+ *   - https://developers.openai.com/api/docs/guides/realtime-conversations  (a resposta começa por
+ *     `response.create`)
+ *   Por isso `guide` manda o item e **não** manda `response.create`. Com resposta em curso, o item
+ *   espera o `response.done`, para não entrar no meio da fala, e as orientações saem na ordem.
+ *   Não confirmado contra o servidor real: que o item sozinho nunca gere resposta (a documentação não
+ *   diz isso), e se ele deixa a resposta seguinte mais lenta.
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
@@ -315,6 +327,9 @@ const engine: VoiceEngine = {
     let configured = false;
     let responseActive = false;
     const queuedResponses: object[] = [];
+    // Orientações à espera do fim da resposta em curso, na ordem em que chegaram.
+    const queuedGuidance: string[] = [];
+    let closed = false;
     // Falas de quem ligou já fechadas num item e ainda sem resposta, e as que já tiveram resposta. A
     // transcrição corre em paralelo à resposta (referência, `input_audio_transcription`), então um
     // pedaço dela pode chegar depois: texto de item já respondido não é quem ligou falando agora.
@@ -336,6 +351,17 @@ const engine: VoiceEngine = {
       }
       responseActive = true;
       socket.send({ type: "response.create", response });
+    };
+
+    // O item de sistema não pede resposta: é contexto para a próxima, que segue o fluxo normal.
+    const sendGuidance = (): void => {
+      if (closed) {
+        queuedGuidance.length = 0;
+        return;
+      }
+      for (let text = queuedGuidance.shift(); text !== undefined; text = queuedGuidance.shift()) {
+        socket.send({ type: "conversation.item.create", item: { type: "message", role: "system", content: [{ type: "input_text", text }] } });
+      }
     };
 
     const onMessage = (raw: unknown): void => {
@@ -382,6 +408,8 @@ const engine: VoiceEngine = {
           responseActive = false;
           const usage = event.response.usage;
           if (usage) emitter.emit("usage", usageOf(usage));
+          // A orientação entra antes da próxima resposta da fila: ela é contexto para essa resposta.
+          sendGuidance();
           const next = queuedResponses.shift();
           if (next) requestResponse(next);
           break;
@@ -390,6 +418,8 @@ const engine: VoiceEngine = {
           const error = new Error(`OpenAI Realtime: ${event.error.message}`);
           // Sem isto, um `response.create` recusado deixaria a fila de falas presa para sempre.
           responseActive = false;
+          // Sem resposta em curso, a orientação que esperava sai, para não passar à frente a próxima.
+          sendGuidance();
           if (configured) emitter.emit("error", error);
           else sessionFailed(error);
           break;
@@ -403,7 +433,7 @@ const engine: VoiceEngine = {
       label: "OpenAI Realtime",
       emitter,
       onMessage,
-      onClosed: () => sessionFailed(new Error("OpenAI Realtime: a conexão fechou antes de confirmar a sessão")),
+      onClosed: (detail) => sessionFailed(new Error(`OpenAI Realtime: a conexão fechou antes de confirmar a sessão (${detail})`)),
       timeout: options,
     });
 
@@ -461,8 +491,21 @@ const engine: VoiceEngine = {
         socket.send({ type: "input_audio_buffer.commit" });
         requestResponse({});
       },
-      close: () => socket.close(),
+      guide(text) {
+        if (closed) return;
+        queuedGuidance.push(text);
+        if (!responseActive) sendGuidance();
+      },
+      close() {
+        closed = true;
+        queuedGuidance.length = 0;
+        return socket.close();
+      },
     };
+    emitter.on("closed", () => {
+      closed = true;
+      queuedGuidance.length = 0;
+    });
 
     if (config.greeting) session.say(config.greeting);
     return session;

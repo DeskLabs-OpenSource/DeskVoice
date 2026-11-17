@@ -214,6 +214,14 @@ describe("gemini-live (contrato com servidor falso)", () => {
     await fake.stop();
     await expect(engine.connect(config, "k", { baseUrl: fake.url })).rejects.toThrow(/não foi possível conectar/);
   });
+
+  it("a recusa antes do setupComplete leva o código e o motivo do provedor", async () => {
+    // Forma medida numa instalação em 2026-11-16, com o crédito pré-pago esgotado.
+    const connecting = engine.connect(config, "k", { baseUrl: fake.url });
+    await fake.waitFor((message) => "setup" in message);
+    fake.refuse(1011, "Your prepayment credits are depleted.");
+    await expect(connecting).rejects.toThrow("Gemini Live: a conexão fechou antes de confirmar a sessão (código 1011; Your prepayment credits are depleted.)");
+  });
 });
 
 describe("gemini-live: teste da chave (contrato com servidor HTTP falso)", () => {

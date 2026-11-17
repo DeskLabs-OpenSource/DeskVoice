@@ -24,6 +24,8 @@ describe("agenda_remarcar", () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toContain("falta a confirmação");
+    // Recusa antes de chamar a agenda: a vaga do teto por ligação volta.
+    expect(result.noEffect).toBe(true);
     expect(crm.pedidos.remarcacoes).toEqual([]);
     expect(crm.compromissos.get(marcado.id)?.startsAt).toBe("2026-11-18T09:00:00-03:00");
   });
@@ -36,5 +38,16 @@ describe("agenda_remarcar", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain("não respondeu");
     expect(result.message).toContain("create_task");
+  });
+
+  it("agente em espanhol: a espera sai em espanhol", async () => {
+    const crm = crmSimulado();
+    const marcado = await crm.book({ serviceType: "Consulta", startsAt: "2026-11-18T09:00:00-03:00", callId: "call-0" });
+    const ctx = contextoDaAgenda("es");
+
+    const result = await createAgendaRemarcar({ agenda: crm }).run({ appointment_id: marcado.id, starts_at: NOVO_HORARIO, confirmed: true }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(ctx.said).toEqual(["Un momento, estoy cambiando la cita."]);
   });
 });

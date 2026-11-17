@@ -53,9 +53,11 @@ Do toque ao pós-chamada. Entre parênteses, o evento que cada passo grava em `c
    SIP e o áudio por RTP, em UDP.
 2. **Entrada.** O Asterisk entrega o controle da chamada a `apps/voice` pela interface ARI. O
    número chamado aponta para um agente. Nasce o registro da chamada (`call_started`).
-3. **Recusa com motivo.** Se o agente não tem motor de voz configurado ou a chave é inválida, a
-   chamada não fica muda: é recusada com o motivo `engine_not_configured` e o painel recebe um
-   aviso (`call_refused`). Antes disso, na entrada, a chamada que passa do limite de ligações
+3. **Recusa com motivo.** Se o agente não tem motor de voz configurado ou a chave não está salva,
+   a chamada não fica muda: é recusada com o motivo `engine_not_configured` e o painel recebe um
+   aviso (`call_refused`). Se a chave está salva e o provedor recusa a sessão (chave recusada,
+   crédito esgotado) ou não é alcançado pela rede da VPS, o motivo é `engine_refused`, e o aviso
+   traz o que o provedor ou a rede disse. Se o provedor não responde no prazo, `engine_not_responding`. Antes disso, na entrada, a chamada que passa do limite de ligações
    recebidas ao mesmo tempo da organização recebe sinal de ocupado, com o motivo
    `inbound_limit_reached`.
 4. **Atendimento.** O áudio passa a trafegar entre o Asterisk e `apps/voice` por AudioSocket: uma

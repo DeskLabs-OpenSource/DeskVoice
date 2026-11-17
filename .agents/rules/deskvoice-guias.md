@@ -14,6 +14,9 @@ casar com uma linha da tabela, carregue a skill ANTES de agir: a pessoa pode nã
 | Vai adicionar ou alterar um motor de voz (provedor de IA de voz) | `deskvoice-motor-de-voz` |
 | Vai instalar numa VPS, ou a instalação falhou: painel não abre, tronco não registra, ligação muda | `deskvoice-instalar` |
 | Tem uma instalação rodando: configurar agente, linha e ligações de saída, ler a linha do tempo de uma chamada, custos, atualizar, backup, diagnóstico | `deskvoice-operar` |
+| Quer saber como está a operação de uma instalação: quantas ligações, desfecho, nota, custo, falhas, fila; pede relatório das ligações | `deskvoice-metricas` |
+| "As respostas da IA estão ruins": o agente fala demais, fala como robô, inventa, transfere tudo, não entende um nome; quer revisar as instruções ou o vocabulário de um agente | `deskvoice-agente-de-voz` |
+| Vai acrescentar ou alterar uma peça (ferramenta, motor, rotina, rota, tela, tabela, evento); "essa peça está viva?", "como preencho a lista do sistema vivo no PR?" | `deskvoice-sistema-vivo` |
 
 Antes da primeira contribuição num clone, rode
 `bash .agents/skills/deskvoice-contribuir/scripts/who-am-i.sh`: se a resposta começar com `mantenedor`,

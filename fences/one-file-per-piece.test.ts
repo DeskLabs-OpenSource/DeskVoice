@@ -5,9 +5,9 @@
 import { describe, it, expect } from "vitest";
 import { REPO_ROOT, expectClean, fixture, isSource, isTest, listFiles, read } from "./_lib";
 
-const PIECE_DIRS = ["packages/tools/src/tools", "packages/voice-engine/src/engines", "packages/voice-engine/src/transcribers", "apps/routines/src/routines"];
+const PIECE_DIRS = ["packages/tools/src/tools", "packages/voice-engine/src/engines", "packages/voice-engine/src/transcribers", "packages/voice-engine/src/synthesizers", "apps/routines/src/routines"];
 // Import estático de uma peça pelo nome: `./tools/end_call`, `../engines/simulated`, `./transcribers/simulated`, `…/src/routines/x`.
-const PIECE_IMPORT = /(?:from|import)\s+["'](?:[^"']*\/)?(?:\.{1,2}|src)\/(tools|engines|transcribers|routines)\/([\w-]+)(?:\.[jt]s)?["']/g;
+const PIECE_IMPORT = /(?:from|import)\s+["'](?:[^"']*\/)?(?:\.{1,2}|src)\/(tools|engines|transcribers|synthesizers|routines)\/([\w-]+)(?:\.[jt]s)?["']/g;
 
 function check(root: string): string[] {
   const violations: string[] = [];
@@ -27,17 +27,19 @@ function check(root: string): string[] {
 }
 
 describe("one-file-per-piece", () => {
-  it("nenhuma lista central de ferramentas, motores, transcritores ou rotinas", () => {
+  it("nenhuma lista central de ferramentas, motores, transcritores, vozes do pipeline ou rotinas", () => {
     expectClean(
       check(REPO_ROOT),
-      "Peça nova é um arquivo novo na pasta dela, e mais nada: `loadTools()`, `loadEngines()`, `loadTranscribers()` e o runner de rotinas descobrem por pasta. Apague a lista e use o carregador.",
+      "Peça nova é um arquivo novo na pasta dela, e mais nada: `loadTools()`, `loadEngines()`, `loadTranscribers()`, `loadSynthesizers()` e o runner de rotinas descobrem por pasta. Apague a lista e use o carregador.",
     );
   });
 
   it("reprova índice na pasta de peças e arquivo que importa cada peça pelo nome", () => {
     expect(check(fixture("one-file-per-piece"))).toEqual([
       "packages/tools/src/tools/index.ts: índice dentro de pasta de peças",
+      "packages/voice-engine/src/synthesizers/index.ts: índice dentro de pasta de peças",
       "packages/tools/src/registry.ts: importa 2 peças pelo nome (tools/end_call, tools/notify_human)",
+      "packages/voice-engine/src/voices.ts: importa 2 peças pelo nome (synthesizers/elevenlabs, synthesizers/simulated)",
     ]);
   });
 });

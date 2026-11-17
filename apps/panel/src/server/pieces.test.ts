@@ -5,6 +5,6 @@ import { listTools } from "./pieces";
 describe("listTools", { timeout: 30_000 }, () => {
   it("oferece para marcar só as ferramentas que funcionam: a agenda sem cliente não aparece", async () => {
     const names = (await listTools()).map((tool) => tool.name).sort();
-    expect(names).toEqual(["call_webhook", "create_task", "end_call", "notify_human", "request_approval", "send_dtmf", "send_whatsapp", "stop_recording", "transfer_to_human"]);
+    expect(names).toEqual(["call_webhook", "create_task", "end_call", "notify_human", "remember_caller_note", "request_approval", "send_dtmf", "send_whatsapp", "stop_recording", "transfer_to_human"]);
   });
 });

@@ -12,7 +12,7 @@ export const POST = handle(
     after: async (trunk: object | null, { deps, session }) => ({ ...trunk, ...(await applyTrunks(deps, session.organizationId)) }),
   },
   ({ q, body, deps }) => {
-    requireIpModeForAddresses(body.authMode, body.matchExtra?.length ?? 0, body.outboundHost ?? null);
+    requireIpModeForAddresses(body.authMode, body.outboundHost ?? null);
     requireNumericInbound(body.authMode, body.host, body.matchExtra ?? []);
     return q.one(
       `insert into trunks (organization_id, name, host, username, secret_enc, auth_mode, caller_id_e164, match_extra, outbound_host)

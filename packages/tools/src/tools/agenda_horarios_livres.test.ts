@@ -66,4 +66,34 @@ describe("agenda_horarios_livres", () => {
     expect(result.message).toContain("não respondeu");
     expect(result.message).toContain("create_task");
   });
+
+  it("agente em inglês: espera e horário em inglês, hora em 12 horas", async () => {
+    const crm = crmSimulado({ timezone: "America/New_York", slots: [{ startsAt: "2026-11-18T09:00:00-05:00", endsAt: "2026-11-18T10:00:00-05:00" }] });
+    const ctx = contextoDaAgenda("en");
+
+    const result = await createAgendaHorariosLivres({ agenda: crm }).run({ service_type: "Estimate" }, ctx);
+
+    expect(ctx.said).toEqual(["One moment, I'm checking the schedule."]);
+    expect(result.message).toContain("Wednesday, 11/18, 9:00");
+    expect(result.message).toContain("AM");
+    expect(result.message).not.toContain("quarta");
+  });
+
+  it("agente em espanhol: espera e horário em espanhol", async () => {
+    const ctx = contextoDaAgenda("es");
+
+    const result = await createAgendaHorariosLivres({ agenda: crmSimulado() }).run({ service_type: "Consulta" }, ctx);
+
+    expect(ctx.said).toEqual(["Un momento, estoy revisando la agenda."]);
+    expect(result.message).toContain("miércoles, 18/11, 09:00");
+  });
+
+  it("idioma fora do mapa cai no pt-BR, como o aviso da caixa postal", async () => {
+    const ctx = contextoDaAgenda("fr");
+
+    const result = await createAgendaHorariosLivres({ agenda: crmSimulado() }).run({ service_type: "Consulta" }, ctx);
+
+    expect(ctx.said).toEqual(["Um instante, estou conferindo a agenda."]);
+    expect(result.message).toContain("quarta-feira, 18/11, 09:00");
+  });
 });

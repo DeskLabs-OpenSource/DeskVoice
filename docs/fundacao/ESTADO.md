@@ -1,8 +1,10 @@
 # Estado da fundação
 
-> Uma linha por fase do método da Fábrica. Retrato de 2026-11-11, commit `f018499`, escrito pela
-> auditoria de conformidade. O DeskVoice foi fundado antes de este arquivo existir: onde o
-> artefato mora em outro caminho, a linha diz qual.
+> Uma linha por fase do método da Fábrica. O primeiro retrato é de 2026-11-11, commit `f018499`, escrito
+> pela auditoria de conformidade. As linhas 6, 8, 9 e 10 foram revistas em 2026-11-16, sobre a `main`
+> em `5c98a0c` (versão 0.19.2), pela sessão que mantém o projeto. As linhas 1 a 5 e a 7 continuam como
+> em 11/11. O DeskVoice foi fundado antes de este arquivo existir: onde o artefato mora em outro
+> caminho, a linha diz qual.
 
 | Fase | Portão | Fechado? | Artefato |
 |---|---|---|---|
@@ -11,8 +13,8 @@
 | 3. Decisões e desenho | Decisões aprovadas, e o desenho dizendo como foi aprovado | Fechado | `docs/specs/2026-11-10-fundacao-design.md` (a linha 3 diz "aprovado pelo dono em conversa") |
 | 4. Contratos | O arquivo existe e cada peça aparece nele | Fechado, com ressalva | `docs/plans/2026-11-10-fundacao.md`, seção "Contratos compartilhados". Tem seção para banco, os três pacotes, API do painel e variáveis; não tem seção própria para `apps/voice` nem `apps/routines` |
 | 5. Construção | Verificação local verde, igual à do CI | Fechado | CI da `main` verde em `fb50506`; `pnpm verify` roda a mesma sequência do job `verify`. Lista do que não rodou: `docs/fundacao/nao-exercitado.md` |
-| 6. Prova montada | Um caminho de ponta a ponta executado, com a saída guardada | Aberto | Nenhuma saída guardada |
+| 6. Prova montada | Um caminho de ponta a ponta executado, com a saída guardada | Fechado, com ressalva | O caminho de quem usa, pelas entradas que ele usa, com as saídas guardadas: a instalação pelo instalador do produto na VPS da parceira, com `install.sh --force --yes` e as respostas por variáveis, depois de a linha única parar no passo 1 e de o Docker ser ligado à mão ([`registros/2026-11-12-vps-parceira/`](registros/2026-11-12-vps-parceira/)) e a atualização pelo botão da tela ([`registros/2026-11-12-atualizacao-pela-tela/`](registros/2026-11-12-atualizacao-pela-tela/)). A ressalva: a conversa com o agente não tem saída guardada por uma entrada de usuário. A ligação com motor real e passagem de 16/11 ([`registros/2026-11-16-passagem-0.19.2/`](registros/2026-11-16-passagem-0.19.2/)) começou por um script direto no processo de voz, sem o painel |
 | 7. Revisão fria | Nenhum bloqueador aberto, e a prova refeita | Aberto | Houve revisão fria em 2026-11-11 (citada em `fences/system-access-is-allowlisted.test.ts`). O parecer não está no repositório |
-| 8. Instalação real | A instalação funcionando, com evidência | Aberto | `docs/fundacao/instalacao-real.md`. Falta: evidência de funcionamento depois do PR #3, outro provedor, servidor recém-criado, modo com perguntas |
-| 9. O dono usa | O registro, e os travamentos corrigidos ou escritos como fora do escopo | Aberto | `docs/fundacao/uso-pelo-dono.md`. Gestão de equipe e conta em correção no ramo `feat/equipe-e-convites` |
-| 10. Publicação e devolução | Produto público, com a primeira versão, e a devolução aberta | Aberto | Público desde 2026-11-11, antes de as fases 6 a 9 fecharem. Sem versão publicada. Lições já devolvidas à Fábrica (commit `30797dc`). Auditoria: `docs/fundacao/conformidade-2026-11-11.md` (57 itens F não conformes) |
+| 8. Instalação real | A instalação funcionando, com evidência | Aberto | `docs/fundacao/instalacao-real.md`. O método pede servidor recém-criado, caminho com perguntas e atualização entre versões publicadas. Só a terceira está provada: a VPS da parceira roda desde a 0.3.0 e foi atualizada por versão até a 0.19.2, inclusive pela tela, com saídas guardadas. Faltam um servidor recém-criado e o modo com perguntas no terminal. Outro provedor também não foi provado: a primeira máquina e a da parceira são da HostGator, e a segunda não tem o provedor anotado |
+| 9. O dono usa | O registro, e os travamentos corrigidos ou escritos como fora do escopo | Aberto | `docs/fundacao/uso-pelo-dono.md`. A gestão de equipe e a conta entraram no PR #5. A demora da resposta pelo WhatsApp foi consertada (#136) e teve a ligação de prova do dono em 15/11. Continua aberta a pergunta sobre a queda do WhatsApp por QR em 12/11 (`device_removed`). O registro não tem uso do dono para cadastrar linha, responder aprovação e ver custo |
+| 10. Publicação e devolução | Produto público, com a primeira versão, e a devolução aberta | Aberto | Público desde 2026-11-11. A primeira versão, a `v0.1.0`, saiu em 11/11, e até 16/11 foram 24 versões, a última a `v0.19.2`. Lições devolvidas à Fábrica (commit `30797dc`). Por que continua aberto: pelo método, item F não conforme impede a publicação sem decisão registrada ou aceite escrito do dono. A última auditoria, `docs/fundacao/conformidade-2026-11-12.md`, tem 46 itens F não conformes, e não há aceite escrito do dono no repositório. A publicação veio antes disso, fora da ordem do método |

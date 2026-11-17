@@ -33,10 +33,12 @@ describe("loadTools", { timeout: 30_000 }, () => {
       "create_task",
       "end_call",
       "notify_human",
+      "remember_caller_note",
       "request_approval",
       "send_dtmf",
       "send_whatsapp",
       "stop_recording",
+      "transfer_to_agent",
       "transfer_to_human",
     ]);
   });

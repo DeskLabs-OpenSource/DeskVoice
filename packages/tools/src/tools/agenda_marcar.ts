@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agendaNotWired, agendaUnavailable } from "../agenda-speech";
+import { agendaNotWired, agendaUnavailable, agendaWaitLine } from "../agenda-speech";
 import { defineTool } from "../define-tool";
 import type { ToolDeps } from "../deps";
 
@@ -22,6 +22,7 @@ export function createAgendaMarcar(deps: ToolDeps = {}) {
       if (input.confirmed !== true) {
         return {
           ok: false,
+          noEffect: true,
           message:
             "Nada foi marcado: falta a confirmação da pessoa. Leia em voz alta o dia e a hora, pergunte se pode marcar e, " +
             "só depois do sim dela, chame de novo com confirmed=true.",
@@ -29,17 +30,18 @@ export function createAgendaMarcar(deps: ToolDeps = {}) {
       }
 
       const client = deps.agenda;
-      if (!client) return { ok: false, message: agendaNotWired("o horário não foi marcado") };
+      if (!client) return { ok: false, noEffect: true, message: agendaNotWired("o horário não foi marcado") };
 
       if (new Date(input.starts_at).getTime() <= ctx.clock.now().getTime()) {
         return {
           ok: false,
+          noEffect: true,
           message:
             "Esse horário já passou, e nada foi marcado. Confira o dia e a hora com a pessoa e consulte de novo os horários livres.",
         };
       }
 
-      ctx.say("Um instante, estou marcando.");
+      ctx.say(agendaWaitLine("booking", ctx.language));
       try {
         const appointment = await client.book({
           serviceType: input.service_type,

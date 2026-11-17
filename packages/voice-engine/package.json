@@ -8,7 +8,8 @@
     ".": "./src/index.ts",
     "./types": "./src/types.ts",
     "./pricing": "./src/pricing.ts",
-    "./transcription": "./src/transcription.ts"
+    "./transcription": "./src/transcription.ts",
+    "./brain": "./src/brain.ts"
   },
   "dependencies": {
     "@deskvoice/core": "workspace:^",

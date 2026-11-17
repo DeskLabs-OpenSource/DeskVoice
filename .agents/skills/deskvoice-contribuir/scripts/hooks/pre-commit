@@ -63,4 +63,8 @@ if git rev-parse -q --verify "$main_ref" >/dev/null 2>&1; then
   done
 fi
 
+# ── Identidade ───────────────────────────────────────────────────────────────
+# Commit assinado pela máquina (root@vps-…) não dá crédito a ninguém. Só avisa; nunca bloqueia.
+bash "$(dirname "$0")/warn-identity.sh" || true
+
 exit "$fail"

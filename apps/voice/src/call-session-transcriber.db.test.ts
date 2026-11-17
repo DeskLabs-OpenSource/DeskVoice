@@ -43,6 +43,7 @@ afterAll(async () => {
 
 interface Scene {
   organizationId: string;
+  agentId: string;
   callId: string;
   transport: ManualTransport;
   harness: SessionHarness;
@@ -59,7 +60,7 @@ async function scene(label: string, agent: AgentOptions, options: { manual?: Man
   const callId = await createCall(app, organizationId, agentId, made.clock.now());
   const transport = manualTransport();
   const start = (transcriberId?: string): CallSession => startCallSession(made.deps, { organizationId, callId, agentId, transport, ...(transcriberId !== undefined && { transcriberId }) });
-  return { organizationId, callId, transport, harness: made, start };
+  return { organizationId, agentId, callId, transport, harness: made, start };
 }
 
 /** O transcritor simulado, com o que o teste precisa ver: as sessões abertas e, por pedaço, quanto o motor já tinha recebido. */
@@ -127,7 +128,7 @@ describe("sem transcritor escolhido, a chamada é a de sempre", { timeout: 120_0
     // O que muda de uma cena para outra são só os ids: a chamada, o agente, a tarefa.
     const call = { ...(await callOf(app, made.callId)), agent_id: "<agent>" };
     const logs = made.harness.logs.map(({ fields, ...entry }) => ({ ...entry, fields: { ...fields, callId: "<call>" } }));
-    return { outcome, events, ledger: await ledgerOf(app, made.callId), call, sentBytes: made.transport.sentBytes, logs };
+    return { outcome, events, ledger: (await ledgerOf(app, made.callId)).map((row) => ({ ...row, agent_id: "<agent>" })), call, sentBytes: made.transport.sentBytes, logs };
   }
 
   it("com peças instaladas e nenhuma pedida: mesmos eventos, mesma ordem, mesmo custo, mesmo áudio e nenhuma peça aberta", async () => {
@@ -233,7 +234,7 @@ describe("com o transcritor simulado", { timeout: 120_000 }, () => {
   it("o consumo da peça entra no custo da chamada, com linha própria no extrato, e conta para o teto", async () => {
     const manual = manualEngine({ keyless: true, centsPerMinute: 100 });
     const piece = manualTranscriber(60);
-    const { callId, start, harness } = await scene("transcriber-cost", { engine: "manual", costCeilingCents: 150 }, { manual, transcribers: [piece.transcriber] });
+    const { agentId, callId, start, harness } = await scene("transcriber-cost", { engine: "manual", costCeilingCents: 150 }, { manual, transcribers: [piece.transcriber] });
     const session = start("simulated");
     await answered(callId);
     await waitFor(() => piece.opened() === 1, "the transcriber to open");
@@ -252,8 +253,8 @@ describe("com o transcritor simulado", { timeout: 120_000 }, () => {
     expect(await session.done).toEqual({ status: "completed", endReason: "cost_ceiling", costCents: 160 });
     expect((await eventsOf(app, callId)).find((event) => event.kind === "cost_ceiling_reached")?.payload).toEqual({ costCents: 160, ceilingCents: 150 });
     expect(await ledgerOf(app, callId)).toEqual([
-      { engine: "transcriber:simulated", seconds: 60, input_tokens: 0, output_tokens: 0, cost_cents: 60 },
-      { engine: "manual", seconds: 60, input_tokens: 0, output_tokens: 0, cost_cents: 100 },
+      { engine: "transcriber:simulated", agent_id: agentId, seconds: 60, input_tokens: 0, output_tokens: 0, cost_cents: 60 },
+      { engine: "manual", agent_id: agentId, seconds: 60, input_tokens: 0, output_tokens: 0, cost_cents: 100 },
     ]);
     expect((await callOf(app, callId)).cost_cents).toBe(160);
     // A duração da chamada é a do motor: o áudio da peça é o mesmo, e não soma tempo.
@@ -280,7 +281,7 @@ describe("falha da peça de transcrição", { timeout: 120_000 }, () => {
     manual.emit("transcript", { speaker: "agent", text: "Sigo aqui." });
     transport.callerHangup();
     expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
-    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "transcriber_failed", "transcript_agent", "call_ended", "task_queued"]);
+    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "transcriber_failed", "transcript_agent", "call_ended", "task_queued", "task_queued"]);
   });
 
   it("a peça não responde no prazo: transcriber_failed com `unreachable`, e a chamada segue", async () => {

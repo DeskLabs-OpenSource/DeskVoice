@@ -10,6 +10,7 @@ import { createAgent, createCall, eventsOf, kindsOf, manualEngine, manualTranspo
 import { waitFor } from "../../../../../voice/src/testing/helpers";
 import { call, createOrganization, createUser, startPanel } from "../../../../test/kit";
 import { POST as stopRoute } from "./calls/[id]/recording/pause/route";
+import { GET as callRoute } from "./calls/[id]/route";
 
 /**
  * O botão do painel contra a chamada de verdade: a rota fala com a API interna do processo de voz,
@@ -142,6 +143,25 @@ describe("o pedido do painel para parar a gravação", { timeout: 120_000 }, () 
     const answer = await stop(operator.cookie, callId);
 
     expect([answer.status, answer.code]).toEqual([422, "call_not_live"]);
+    expect(await pauseOf(callId)).toEqual({ recording_paused_by: null, recording_pause_reason: null, recording_paused_at: null });
+  });
+
+  it("o recado da caixa postal: a API diz que é recado, e o pedido é recusado com o motivo, sem dizer que a chamada terminou", async () => {
+    const organizationId = await createOrganization(panel.app, "panel stop voicemail");
+    const operator = await createUser(panel.app, organizationId, "operator");
+    const agentId = await createAgent(panel.app, organizationId, { engine: "manual" });
+    const callId = await createCall(panel.app, organizationId, agentId, new Date("2026-03-01T15:00:00.000Z"));
+    await withSystem(panel.app, (q) => q.exec("update calls set agent_id = null, voicemail = true, status = 'in_progress' where id = $1", [callId]));
+    const conversation = await createCall(panel.app, organizationId, agentId, new Date("2026-03-01T15:00:00.000Z"));
+
+    // A tela esconde o botão pelo `voicemail` da chamada.
+    expect((await call(callRoute, { cookie: operator.cookie, params: { id: callId } })).data).toMatchObject({ voicemail: true, status: "in_progress" });
+    expect((await call(callRoute, { cookie: operator.cookie, params: { id: conversation } })).data).toMatchObject({ voicemail: false });
+
+    const answer = await stop(operator.cookie, callId);
+
+    expect([answer.status, answer.code]).toEqual([409, "recording_voicemail"]);
+    expect(await kindsOf(panel.app, callId)).not.toContain("recording_paused");
     expect(await pauseOf(callId)).toEqual({ recording_paused_by: null, recording_pause_reason: null, recording_paused_at: null });
   });
 });

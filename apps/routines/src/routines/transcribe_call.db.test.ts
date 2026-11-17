@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
+import { MAX_TASK_ATTEMPTS, encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
 import { AUTO_TRANSCRIPTION_SETTING, TRANSCRIPTION_SETTING, type VoiceEngine } from "@deskvoice/voice-engine";
 import type * as VoiceEngineModule from "@deskvoice/voice-engine";
 import type * as FsPromises from "node:fs/promises";
@@ -159,6 +159,44 @@ describe("a transcrição automática do fim da chamada", () => {
     expect(await resumos(org, callId)).toBe(1);
   });
 
+  it("o recado da caixa postal com o agente desligado ganha texto com a chave do agente do número", async () => {
+    const { org, callId } = await comAgente("Recado");
+    await withSystem(app, async (q) => {
+      await q.exec("update agents set enabled = false where organization_id = $1", [org]);
+      await q.exec("update calls set voicemail = true, status = 'completed', end_reason = 'voicemail' where id = $1", [callId]);
+    });
+    await ligar(org);
+    // A forma que a caixa postal grava: o aviso no canal do agente e, só depois dele, quem ligou.
+    const dir = await gravar(org, callId);
+    const wav = await readFile(path.join(dir, org, `${callId}.wav`));
+    const aviso = 8000 * 1;
+    for (let frame = 0; frame < wav.subarray(44).length / 4; frame += 1) {
+      if (frame < aviso) wav.writeInt16LE(0, 44 + frame * 4);
+      else wav.writeInt16LE(0, 44 + frame * 4 + 2);
+    }
+    await writeFile(path.join(dir, org, `${callId}.wav`), wav);
+
+    await rodar(org, callId, dir);
+
+    expect((await falas(callId)).map((event) => event.kind)).toEqual(["transcript_user", "transcript_agent"]);
+    expect(PROVEDOR.transcribe).toHaveBeenCalledTimes(2);
+    expect(await resumos(org, callId)).toBe(1);
+  });
+
+  it("o recado de um número sem agente não tem chave: não fala com o provedor e ainda enfileira o resumo", async () => {
+    const org = await createOrganization(app, "Recado sem agente");
+    const callId = await createCall(app, org, t0);
+    await withSystem(app, (q) => q.exec("update calls set agent_id = null, voicemail = true, status = 'completed', end_reason = 'voicemail', ended_at = $2 where id = $1", [callId, t0]));
+    await ligar(org);
+    const dir = await gravar(org, callId);
+
+    await rodar(org, callId, dir);
+
+    expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
+    expect(await falas(callId)).toHaveLength(0);
+    expect(await resumos(org, callId)).toBe(1);
+  });
+
   it("desligada de fábrica: não fala com o provedor e ainda enfileira o resumo", async () => {
     const { org, callId } = await comAgente("Desligada");
     const dir = await gravar(org, callId);
@@ -269,5 +307,22 @@ describe("a transcrição automática do fim da chamada", () => {
     expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
     expect((await eventsOf(app, callId)).some((event) => event.kind === "transcription_failed")).toBe(false);
     expect(await resumos(org, callId)).toBe(1);
+  });
+
+  it("falha que esgota as tentativas: na última, o resumo (e o aviso ao dono) sai mesmo sem texto", async () => {
+    const { org, callId } = await comAgente("Esgotou");
+    await ligar(org);
+    const dir = await gravar(org, callId);
+    const deps = depsFor(app, { recordingsDir: dir, fetch: (async () => new Response("{}")) as unknown as typeof fetch });
+    PROVEDOR.transcribe.mockRejectedValueOnce(new Error("rede caiu")).mockRejectedValueOnce(new Error("rede caiu"));
+
+    // Antes da última tentativa, a fila reexecuta: o resumo esperaria o texto da próxima.
+    await expect(transcribeCall.run({ ...task(org, "transcribe_call", {}, callId), attempts: MAX_TASK_ATTEMPTS - 1 }, deps)).rejects.toThrow("rede caiu");
+    expect(await resumos(org, callId)).toBe(0);
+
+    // Na última, a falha continua chegando à fila, e o resumo entra mesmo assim.
+    await expect(transcribeCall.run({ ...task(org, "transcribe_call", {}, callId), attempts: MAX_TASK_ATTEMPTS }, deps)).rejects.toThrow("rede caiu");
+    expect(await resumos(org, callId)).toBe(1);
+    expect(await falas(callId)).toHaveLength(0);
   });
 });

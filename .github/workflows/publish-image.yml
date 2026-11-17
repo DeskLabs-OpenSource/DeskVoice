@@ -1,30 +1,51 @@
 name: publish-image
 
-# Em tag `vX.Y.Z`: constrói e publica uma imagem por processo, para amd64, com a etiqueta
-# `X.Y.Z` (sem `v`), que é o mesmo número que a instalação grava.
+# Em tag `vX.Y.Z`: constrói e publica as três imagens (panel, voice, routines) para `linux/amd64`
+# e `linux/arm64`, com a etiqueta `X.Y.Z` (sem `v`), que é o mesmo número que a instalação grava.
 #
 # O endereço das imagens e a conversão entre a tag do git e a etiqueta da imagem NÃO estão
 # escritos aqui: vêm de deploy/images.env e de install/_common.sh (`image_ref`, `version_of_tag`),
 # os mesmos que o instalador e o atualizador usam. O que este workflow publica e o que a VPS pede
 # saem do mesmo lugar.
 #
-# Só amd64 por enquanto. Construir arm64 por emulação no mesmo passo deixava o amd64 refém: se a
-# emulação estourasse o teto, nada era publicado e a tag já existia. Em ARM a instalação constrói
-# na própria máquina (`--build`). arm64 publicada volta com runner ARM nativo e junção de manifesto.
+# Duas arquiteturas desde a decisão 0017, que revisa a 0013: um job por arquitetura, o arm64 num
+# runner ARM nativo do GitHub (`ubuntu-24.04-arm`, sem custo em repositório público) e não por
+# emulação. As duas rodam em paralelo, cada uma com o seu teto: o amd64 não espera a construção do
+# arm64, e uma arquitetura que falha não derruba a outra.
+#
+# Cada job publica por resumo (`push-by-digest`), num artefato próprio: as duas arquiteturas
+# escrevem a mesma etiqueta, e etiqueta é um ponteiro só — quem chegasse por último apagaria o
+# índice do outro. O job `merge` lê os dois resumos e monta o índice de cada imagem com
+# `docker buildx imagetools create`. Por isso a etiqueta `X.Y.Z` nasce com as duas arquiteturas ou
+# não nasce: versão que sai numa arquitetura só quebra a instalação em ARM no meio da lista de
+# versões, que é o que a 0013 já recusava. O `verify-public` confere as duas antes da release.
 #
 # Não há canal `stable`: a instalação descobre a versão pelas tags do repositório e grava o número.
 # Etiqueta móvel sem leitor acaba usada por alguém.
 #
 # A release do GitHub é publicada aqui, no último job, depois que as três imagens baixam sem
-# credencial: "release publicada" significa "instalável".
+# credencial e têm as duas arquiteturas: "release publicada" significa "instalável".
 #
 # `workflow_dispatch` existe para o release.yml disparar este workflow na tag que ele acabou de
-# criar (tag empurrada pelo GITHUB_TOKEN não aciona `on: push`). Disparado fora de uma tag, recusa.
+# criar (tag empurrada pelo GITHUB_TOKEN não aciona `on: push`). Disparado fora de uma tag, recusa,
+# salvo em ensaio.
+#
+# Ensaio (`ensaio: true`, disparado à mão em qualquer ramo): roda a publicação inteira sem publicar
+# versão. Constrói e envia por resumo, sem etiqueta, para os três repositórios de verdade, nas duas
+# arquiteturas; o `merge` monta os índices com `--dry-run`, que falha se um resumo não está no
+# repositório da sua imagem; o `verify-public` pergunta por cada repositório@resumo sem credencial.
+# Nenhuma etiqueta nasce e a release não roda. Nasceu do corte da 0.12.0, em que este workflow rodou
+# de verdade pela primeira vez já numa tag, e a tag ficou sem imagens.
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      ensaio:
+        description: "Ensaio: constrói e confere sem etiquetar nem publicar a release"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,6 +62,7 @@ jobs:
     outputs:
       dockerfile: ${{ steps.probe.outputs.dockerfile }}
       version: ${{ steps.probe.outputs.version }}
+      ensaio: ${{ steps.probe.outputs.ensaio }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,8 +70,17 @@ jobs:
           fetch-depth: 0
       - name: Há o que publicar?
         id: probe
+        env:
+          ENSAIO: ${{ github.event_name == 'workflow_dispatch' && inputs.ensaio == true }}
         run: |
           source install/_common.sh
+          if [ "${ENSAIO}" = true ]; then
+            # Ensaio: nenhuma etiqueta nasce, então a versão só dá nome ao que se constrói.
+            { echo "ensaio=true"; echo "version=0.0.0-ensaio"; echo "dockerfile=true"; } >> "${GITHUB_OUTPUT}"
+            echo "ENSAIO em ${GITHUB_REF} (${GITHUB_SHA}): constrói e confere, sem etiquetar nem publicar." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          echo "ensaio=false" >> "${GITHUB_OUTPUT}"
           # Versão só sai de commit que está na main. Não há regra de tags no repositório, então
           # qualquer pessoa com escrita consegue empurrar uma tag de qualquer commit: aqui ela não publica.
           git fetch --quiet origin main
@@ -71,20 +102,36 @@ jobs:
             echo "Publicação PULADA: esta tag ainda não tem Dockerfile na raiz." | tee -a "${GITHUB_STEP_SUMMARY}"
           fi
 
-  # As três imagens num job só, no mesmo construtor, uma depois da outra. Voz e rotinas saem do
-  # mesmo estágio `base` (dependências instaladas, pacotes do núcleo): construídas em jobs
-  # separados, cada uma refazia esse estágio e as camadas saíam com resumos diferentes, e a VPS
-  # guardava as duas cópias (cerca de 900 MB a mais na 0.3.0). Aqui o estágio sai uma vez e as
-  # duas imagens dividem as camadas. O `verify-public` confere isso.
+  # Uma matriz de duas linhas: a arquitetura e onde ela é construída. O `ubuntu-24.04-arm` é o
+  # runner ARM do GitHub, nativo e sem emulação; os rótulos `ubuntu-*-arm` não existem em
+  # repositório privado, e este é aberto.
+  #
+  # As três imagens saem no mesmo job e no mesmo construtor, uma depois da outra: voz e rotinas
+  # saem do mesmo estágio `base` (dependências instaladas, pacotes do núcleo) e, construídas em
+  # jobs separados, cada uma refaria esse estágio, com camadas de resumos diferentes — a VPS
+  # guardaria as duas cópias (cerca de 900 MB a mais na 0.3.0). Aqui o estágio sai uma vez por
+  # arquitetura e as duas imagens dividem as camadas. O `verify-public` confere isso nas duas.
   build:
-    name: build
+    name: build (${{ matrix.arch }})
     needs: [probe]
     if: needs.probe.outputs.dockerfile == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: read
       packages: write
+    strategy:
+      # A arquitetura que falha não derruba a construção da outra: o diagnóstico de cada uma fica
+      # inteiro no seu próprio log. Nenhuma das duas publica a etiqueta sozinha.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -101,17 +148,23 @@ jobs:
           VERSION: ${{ needs.probe.outputs.version }}
         run: |
           source install/_common.sh
+          # O `name=` do construtor é o repositório de CADA imagem, sem etiqueta: quem carrega a
+          # etiqueta é o `merge`, depois que os dois resumos existem. Um repositório só para as três
+          # (o do panel) mandava a voz e as rotinas para dentro de deskvoice-panel, e o `merge` não
+          # as achava no repositório delas (corte da 0.12.0, run 43723273704).
           for process in ${APP_SERVICES}; do
-            echo "${process}=$(image_ref "${process}" "${VERSION}")" >> "${GITHUB_OUTPUT}"
+            ref="$(image_ref "${process}" "${VERSION}")"
+            echo "${process}_repo=${ref%:*}" >> "${GITHUB_OUTPUT}"
           done
+      # `push-by-digest`: cada arquitetura vai para o registro pelo resumo do seu manifesto, sem
+      # etiqueta. A etiqueta sai uma vez, no `merge`, com os dois resumos dentro do índice.
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: voice
         with:
           context: .
           target: voice
-          platforms: linux/amd64
-          push: true
-          # Uma etiqueta só, `X.Y.Z`: é o que a instalação grava e o que o atualizador pede.
-          tags: ${{ steps.image.outputs.voice }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ steps.image.outputs.voice_repo }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             APP_VERSION=${{ needs.probe.outputs.version }}
           labels: |
@@ -120,13 +173,12 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: routines
         with:
           context: .
           target: routines
-          platforms: linux/amd64
-          push: true
-          # Uma etiqueta só, `X.Y.Z`: é o que a instalação grava e o que o atualizador pede.
-          tags: ${{ steps.image.outputs.routines }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ steps.image.outputs.routines_repo }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             APP_VERSION=${{ needs.probe.outputs.version }}
           labels: |
@@ -135,13 +187,12 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: panel
         with:
           context: .
           target: panel
-          platforms: linux/amd64
-          push: true
-          # Uma etiqueta só, `X.Y.Z`: é o que a instalação grava e o que o atualizador pede.
-          tags: ${{ steps.image.outputs.panel }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ steps.image.outputs.panel_repo }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             APP_VERSION=${{ needs.probe.outputs.version }}
           labels: |
@@ -149,13 +200,91 @@ jobs:
             org.opencontainers.image.version=${{ needs.probe.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT
+      - name: Resumos das três imagens, para o merge
+        env:
+          VOICE: ${{ steps.voice.outputs.digest }}
+          ROUTINES: ${{ steps.routines.outputs.digest }}
+          PANEL: ${{ steps.panel.outputs.digest }}
+          # A arquitetura vai por variável de shell: escrita no script com a sintaxe de expressão
+          # do workflow, sem as chaves duplas, o bash para com "bad substitution" (corte da 0.12.0).
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          for pair in "voice:${VOICE}" "routines:${ROUTINES}" "panel:${PANEL}"; do
+            process="${pair%%:*}"; digest="${pair#*:}"
+            case "${digest}" in
+              sha256:?*) ;;
+              *) echo "::error::O construtor não devolveu o resumo da imagem ${process} (${ARCH})." ; exit 1 ;;
+            esac
+            printf '%s\n' "${digest}" > "${RUNNER_TEMP}/digests/${process}"
+          done
+          printf 'Resumos (%s):\n' "${ARCH}" >> "${GITHUB_STEP_SUMMARY}"
+          cat "${RUNNER_TEMP}/digests/"* | tee -a "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests
+          retention-days: 1
+          if-no-files-found: error
+
+  # A junção: um índice por imagem, com os dois resumos. Sem este passo a arquitetura que
+  # chegasse por último sobrescreveria a etiqueta da outra, e não haveria índice nenhum.
+  merge:
+    name: merge
+    needs: [probe, build]
+    if: needs.probe.outputs.dockerfile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
+      - name: Juntar os dois resumos no índice de cada imagem
+        env:
+          VERSION: ${{ needs.probe.outputs.version }}
+          ENSAIO: ${{ needs.probe.outputs.ensaio }}
+        run: |
+          source install/_common.sh
+          set -eo pipefail
+          for process in ${APP_SERVICES}; do
+            ref="$(image_ref "${process}" "${VERSION}")"
+            repo="${ref%:*}"
+            digests=()
+            for arch in amd64 arm64; do
+              file="${RUNNER_TEMP}/digests/digests-${arch}/${process}"
+              if [ ! -s "${file}" ]; then
+                echo "::error::Falta o resumo de ${arch} para deskvoice-${process}: a versão não sai com uma arquitetura só, então nada foi etiquetado."
+                exit 1
+              fi
+              digests+=("${repo}@$(cat "${file}")")
+            done
+            # Em ensaio, `--dry-run` monta o índice sem enviar: ele busca cada resumo no repositório
+            # citado e falha se não o acha, que é o par repositório↔resumo que se quer provar.
+            dry_run=()
+            if [ "${ENSAIO}" = true ]; then dry_run=(--dry-run); fi
+            docker buildx imagetools create "${dry_run[@]}" --tag "${ref}" "${digests[@]}"
+            echo "ok${dry_run:+ (ensaio)}: ${ref} (amd64 ${digests[0]#*@}, arm64 ${digests[1]#*@})" | tee -a "${GITHUB_STEP_SUMMARY}"
+          done
 
   # Publicar não basta: a VPS de quem instala baixa sem credencial. Um pacote novo no registro
   # nasce privado, e aí toda instalação para com "não consegui baixar as imagens". Este job não
   # entra no registro: pergunta pelas imagens como a VPS pergunta, e diz o conserto se não as vê.
   verify-public:
     name: verify-public
-    needs: [probe, build]
+    needs: [probe, merge]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -165,7 +294,38 @@ jobs:
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Ensaio: não há etiqueta para perguntar. Pergunta por cada repositório@resumo que os builds
+      # enviaram, sem credencial, como a VPS perguntaria, e confere a arquitetura de cada um.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.probe.outputs.ensaio == 'true'
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
+      - name: Ensaio, cada resumo baixa sem credencial do repositório da sua imagem?
+        if: needs.probe.outputs.ensaio == 'true'
+        env:
+          VERSION: ${{ needs.probe.outputs.version }}
+        run: |
+          source install/_common.sh
+          missing=0
+          for process in ${APP_SERVICES}; do
+            ref="$(image_ref "${process}" "${VERSION}")"
+            repo="${ref%:*}"
+            for arch in amd64 arm64; do
+              digest="$(cat "${RUNNER_TEMP}/digests/digests-${arch}/${process}")"
+              found="$(docker buildx imagetools inspect --raw "${repo}@${digest}" 2>/dev/null \
+                | jq -r 'if .manifests then (.manifests[] | select(.platform.architecture != "unknown") | .platform.architecture) else empty end' \
+                | sort -u | tr '\n' ' ')" || found=""
+              if [ -z "${found}" ] && docker buildx imagetools inspect "${repo}@${digest}" >/dev/null 2>&1; then found="(manifesto único)"; fi
+              case " ${found} " in
+                *" ${arch} "*|*"(manifesto único)"*) echo "ok: ${repo}@${digest} (${arch}: ${found})" | tee -a "${GITHUB_STEP_SUMMARY}" ;;
+                *) missing=1; echo "::error::${repo}@${digest} (${arch}) não baixa sem credencial do repositório de ${process}, ou não é ${arch} (veio: ${found:-nada})." ;;
+              esac
+            done
+          done
+          exit "${missing}"
       - name: As três imagens baixam sem credencial?
+        if: needs.probe.outputs.ensaio != 'true'
         env:
           VERSION: ${{ needs.probe.outputs.version }}
         run: |
@@ -181,29 +341,66 @@ jobs:
             fi
           done
           exit "${missing}"
+      # O índice multiarquitetura não tem `rootfs`: as arquiteturas se conferem nos filhos. É esta
+      # lista que a instalação em ARM consulta ao puxar, então ela tem de estar aqui.
+      - name: Cada imagem tem as duas arquiteturas?
+        if: needs.probe.outputs.ensaio != 'true'
+        env:
+          VERSION: ${{ needs.probe.outputs.version }}
+        run: |
+          source install/_common.sh
+          missing=0
+          for process in ${APP_SERVICES}; do
+            ref="$(image_ref "${process}" "${VERSION}")"
+            found="$(docker buildx imagetools inspect --raw "${ref}" \
+              | jq -r '.manifests[] | select(.platform.architecture != "unknown") | "\(.platform.os)/\(.platform.architecture)"' \
+              | sort -u | tr '\n' ' ')"
+            echo "${process}: ${found:-nenhuma arquitetura}" | tee -a "${GITHUB_STEP_SUMMARY}"
+            for want in linux/amd64 linux/arm64; do
+              case " ${found} " in
+                *" ${want} "*) ;;
+                *) missing=1; echo "::error::${ref} não tem a arquitetura ${want} (tem: ${found:-nenhuma})." ;;
+              esac
+            done
+          done
+          exit "${missing}"
       # Aviso, e não erro: camada repetida custa disco, não quebra instalação, e não segura a
       # versão. Voz e rotinas só diferem no último passo (`COPY apps/<processo>`); se diferem
-      # antes disso, o estágio `base` foi construído duas vezes.
+      # antes disso, o estágio `base` foi construído duas vezes. Vale por arquitetura: a base do
+      # arm64 é a do arm64.
       - name: Voz e rotinas dividem as camadas da base?
+        if: needs.probe.outputs.ensaio != 'true'
         # Se o formato do `imagetools inspect` mudar, este passo falha sozinho e não segura a versão.
         continue-on-error: true
         env:
           VERSION: ${{ needs.probe.outputs.version }}
         run: |
           source install/_common.sh
-          layers() { docker buildx imagetools inspect --format '{{json .Image}}' "$(image_ref "$1" "${VERSION}")" | jq -c '.rootfs.diff_ids'; }
-          voice="$(layers voice)"; routines="$(layers routines)"
-          read -r total shared < <(jq -rn --argjson a "${voice}" --argjson b "${routines}" \
-            '[([$a, $b] | map(length) | max), ([range(0; [$a, $b] | map(length) | min)] | map(select($a[.] == $b[.])) | length)] | @tsv')
-          echo "Voz e rotinas: ${shared} de ${total} camadas iguais." | tee -a "${GITHUB_STEP_SUMMARY}"
-          if [ "${shared}" -lt "$((total - 1))" ]; then
-            echo "::warning::Voz e rotinas dividem só ${shared} de ${total} camadas: o estágio base foi construído mais de uma vez, e a VPS guarda as duas cópias."
-          fi
+          repo_of() { local ref; ref="$(image_ref "$1" "${VERSION}")"; printf '%s' "${ref%:*}"; }
+          digest_of() { # digest_of <processo> <arquitetura>
+            docker buildx imagetools inspect --raw "$(image_ref "$1" "${VERSION}")" \
+              | jq -r --arg arch "$2" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest' \
+              | head -n 1
+          }
+          layers() { docker buildx imagetools inspect "$1@$2" --format '{{json .Image}}' | jq -c '.rootfs.diff_ids'; }
+          for arch in amd64 arm64; do
+            voice="$(layers "$(repo_of voice)" "$(digest_of voice "${arch}")")"
+            routines="$(layers "$(repo_of routines)" "$(digest_of routines "${arch}")")"
+            read -r total shared < <(jq -rn --argjson a "${voice}" --argjson b "${routines}" \
+              '[([$a, $b] | map(length) | max), ([range(0; [$a, $b] | map(length) | min)] | map(select($a[.] == $b[.])) | length)] | @tsv')
+            echo "Voz e rotinas (${arch}): ${shared} de ${total} camadas iguais." | tee -a "${GITHUB_STEP_SUMMARY}"
+            if [ "${shared}" -lt "$((total - 1))" ]; then
+              echo "::warning::Voz e rotinas (${arch}) dividem só ${shared} de ${total} camadas: o estágio base foi construído mais de uma vez, e a VPS guarda as duas cópias."
+            fi
+          done
 
-  # Só agora a versão aparece como release: as imagens existem e baixam sem credencial.
+  # Só agora a versão aparece como release: as imagens existem, baixam sem credencial e têm as
+  # duas arquiteturas.
   release:
     name: release
     needs: [probe, verify-public]
+    # Ensaio não publica release: nenhuma etiqueta nasceu.
+    if: needs.probe.outputs.ensaio != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

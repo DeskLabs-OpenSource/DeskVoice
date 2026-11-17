@@ -1,0 +1,6 @@
+interface:
+  display_name: "Métricas do DeskVoice"
+  short_description: "Ligações, desfecho, nota, custo, falhas e fila, com régua declarada e sem transcrição, nome ou telefone"
+  default_prompt: "Use a skill deskvoice-metricas e me diga como está a operação nos últimos 30 dias."
+policy:
+  allow_implicit_invocation: true

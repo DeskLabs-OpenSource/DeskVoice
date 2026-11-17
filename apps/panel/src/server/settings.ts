@@ -1,7 +1,21 @@
-import { DEFAULT_INBOUND_LIMIT, INBOUND_LIMIT_SETTING, encryptSecret, inboundLimitSchema } from "@deskvoice/core";
+import {
+  type OrgQuery,
+  DEFAULT_INBOUND_LIMIT,
+  DEFAULT_VOICEMAIL_MAX_SECONDS,
+  INBOUND_LIMIT_SETTING,
+  DEFAULT_VOICEMAIL_LANGUAGE,
+  VOICEMAIL_ENABLED_SETTING,
+  VOICEMAIL_LANGUAGE_SETTING,
+  VOICEMAIL_MAX_SECONDS_SETTING,
+  encryptSecret,
+  inboundLimitSchema,
+  voicemailLanguageSchema,
+  voicemailMaxSecondsSchema,
+} from "@deskvoice/core";
 import { z, type ZodType } from "zod";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
 import { ANALYSIS_SETTING, AUTO_TRANSCRIPTION_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, classifyBaseUrlOf, classifyModelOf, engineClassifyTargetSetting, storedClassifyTargetOf } from "@deskvoice/voice-engine/types";
+import { brainKeySetting, findBrain, readStoredModels } from "./brains";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -27,6 +41,8 @@ export interface Setting {
   guard?(previous: unknown): void;
   /** A chave de um motor: ao gravar, ela é testada, e o teste da chave anterior deixa de valer. */
   engine?: VoiceEngine;
+  /** Confere a entrada contra o que já está no banco (lança `ApiError`), antes de `store`. */
+  check?(input: unknown, q: OrgQuery): Promise<void>;
 }
 
 const setting = <T>(definition: SettingDefinition<T>): Setting => ({
@@ -154,6 +170,38 @@ const webhooks = setting<Array<{ name: string; url: string; token?: string }>>({
   },
 });
 
+// Quem lê a ligação (desfecho e análise): um cérebro e um modelo da lista guardada dele. Ausente é o
+// motor do agente, como antes. Modelo sem preço conhecido só com `acceptUnmeasured: true`, que a tela
+// manda depois do aviso: o custo da leitura não vai ser medido, e ela só roda em agente com teto.
+// `acceptUnmeasured` não é gravado: ele vale para este pedido, e a rotina relê o preço na leitura.
+const analysisBrainInput = z.object({ brain: z.string().trim().min(1).max(100), model: z.string().trim().min(1).max(300), acceptUnmeasured: z.boolean().optional() });
+const analysisBrain: Setting = {
+  ...setting<z.infer<typeof analysisBrainInput>>({
+    schema: analysisBrainInput,
+    secret: false,
+    store: (value) => ({ brain: value.brain, model: value.model }),
+    view: (stored) => z.object({ brain: z.string(), model: z.string() }).safeParse(stored).data ?? null,
+  }),
+  async check(input, q) {
+    const parsed = analysisBrainInput.safeParse(input);
+    // A forma errada é dita pelo `store`, com o caminho do campo.
+    if (!parsed.success) return;
+    const { brain: brainId, model: modelId, acceptUnmeasured } = parsed.data;
+    const brain = await findBrain(brainId);
+    if (!brain) throw new ApiError(400, "unknown_brain", `"${brainId}" is not a known brain.`);
+    const key = await q.one("select 1 from settings where key = $1", [brainKeySetting(brain.id)]);
+    if (!key) throw new ApiError(400, "brain_no_key", "This brain has no key saved: save and test the key in Settings → Brains first.");
+    const model = (await readStoredModels(q, brain))?.models.find((item) => item.id === modelId);
+    if (!model) throw new ApiError(400, "brain_model_not_listed", "This model is not in the saved list for this brain's key: refresh the list in Settings → Brains.");
+    if (model.price === undefined && acceptUnmeasured !== true)
+      throw new ApiError(
+        400,
+        "brain_model_unmeasured",
+        "This model's price is not known: its cost will not be measured, and it only reads calls of agents with a cost ceiling. Send acceptUnmeasured: true to choose it anyway.",
+      );
+  },
+};
+
 /** A definição da chave, ou `undefined` se a chave não for conhecida. Não existe configuração livre. */
 export async function settingDefinition(key: string): Promise<Setting | undefined> {
   const engines = await listEngines();
@@ -175,6 +223,8 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     // Analisar cada ligação no fim (nota pela régua, temperatura, objeções). Ausente vale desligado:
     // a análise vem na mesma chamada paga do desfecho, mais longa, e o dono decide.
     [ANALYSIS_SETTING]: { ...plain(z.boolean()), fallback: false },
+    // Quem lê a ligação: um cérebro e um modelo. Ausente vale o motor do agente (o de antes).
+    "calls.analysis_brain": analysisBrain,
     // Transcrever a gravação de uma chamada sem texto, a pedido. Ausente vale desligado: o áudio
     // gravado vai ao provedor do motor, e cada transcrição é paga.
     [TRANSCRIPTION_SETTING]: { ...plain(z.boolean()), fallback: false },
@@ -184,6 +234,11 @@ export async function settingDefinition(key: string): Promise<Setting | undefine
     "network.public_ip": plain(z.ipv4()),
     // Ligações recebidas pela operadora ao mesmo tempo. Ausente vale o teto de fábrica.
     [INBOUND_LIMIT_SETTING]: { ...plain(inboundLimitSchema), fallback: DEFAULT_INBOUND_LIMIT },
+    // Caixa postal: desligada de fábrica, o teto do recado em segundos e o idioma do aviso gravado.
+    // Ausentes valem os de fábrica.
+    [VOICEMAIL_ENABLED_SETTING]: { ...plain(z.boolean()), fallback: false },
+    [VOICEMAIL_MAX_SECONDS_SETTING]: { ...plain(voicemailMaxSecondsSchema), fallback: DEFAULT_VOICEMAIL_MAX_SECONDS },
+    [VOICEMAIL_LANGUAGE_SETTING]: { ...plain(voicemailLanguageSchema), fallback: DEFAULT_VOICEMAIL_LANGUAGE },
   };
   // Uma chave por motor que pede chave: motor novo na pasta ganha a configuração sem editar aqui.
   for (const engine of engines) if (!engine.keyless) definitions[engineKeySetting(engine.id)] = { ...secretText, engine };

@@ -1,23 +1,27 @@
 "use client";
 
-import { Bell, ChartBar, CircleHalf, GearSix, Headset, ListChecks, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UsersThree, Waveform } from "@phosphor-icons/react";
+import { Bell, Buildings, ChartBar, CircleHalf, GearSix, Headset, ListChecks, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UsersThree, Waveform } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import enApprovals from "../i18n/en/approvals";
+import enInstallation from "../i18n/en/installation";
 import en from "../i18n/en/common";
 import esApprovals from "../i18n/es/approvals";
+import esInstallation from "../i18n/es/installation";
 import es from "../i18n/es/common";
 import { LOCALES, LOCALE_COOKIE, THEME_COOKIE, fill } from "../i18n/locales";
 import ptBRApprovals from "../i18n/pt-BR/approvals";
+import ptBRInstallation from "../i18n/pt-BR/installation";
 import ptBR from "../i18n/pt-BR/common";
 import { useDict, useLocale } from "../i18n/provider";
 import { api, useApi } from "./api";
 import { APPROVALS_CHANGED, ApprovalCard, isWaiting } from "./approval";
 import { formatDateTime } from "./format";
 import { useLive, useNow } from "./live";
-import { MeContext } from "./me";
+import { MeContext, useOrganizationChoices, type Membership } from "./me";
 import type { Approval, HealthReport, HealthStatus, Me, PanelNotification } from "./types";
+import { UpdateIndicator } from "./update-indicator";
 
 type Theme = "light" | "dark" | undefined;
 
@@ -180,6 +184,41 @@ function ThemeToggle({ initial }: { initial: Theme }) {
   );
 }
 
+/**
+ * O seletor de organização, no topo. Só existe para quem tem vínculo ativo em mais de uma: com uma
+ * só, `Shell` nem o desenha. A troca muda a sessão no servidor (o cookie é o mesmo) e recarrega a
+ * página na seção em que a pessoa estava, sem o registro aberto, que é da organização de antes.
+ */
+function OrganizationSwitch({ choices }: { choices: Membership[] }) {
+  const t = useDict(ptBR, en, es);
+  const pathname = usePathname();
+  const [busy, setBusy] = useState(false);
+  const current = choices.find((choice) => choice.current);
+  return (
+    <select
+      aria-label={t.shell.organization}
+      value={current?.organizationId ?? ""}
+      disabled={busy}
+      onChange={(event) => {
+        setBusy(true);
+        const section = `/${pathname.split("/")[1] ?? ""}`;
+        void api("/auth/switch", { body: { organizationId: event.target.value } }).then(
+          () => window.location.assign(section === "/" ? "/calls" : section),
+          () => window.location.reload(),
+        );
+      }}
+      className="h-9 w-full min-w-0 cursor-pointer truncate rounded-xs border border-line bg-surface px-2 font-bold"
+    >
+      {current ? null : <option value="" disabled />}
+      {choices.map((choice) => (
+        <option key={choice.organizationId} value={choice.organizationId}>
+          {choice.organizationName}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function Brand() {
   return (
     <Link href="/calls" className="flex items-center gap-2 rounded-xs text-[1.13rem] font-bold tracking-[-0.01em]">
@@ -192,8 +231,10 @@ function Brand() {
 export function Shell({ me, theme, children }: { me: Me; theme: Theme; children: ReactNode }) {
   const t = useDict(ptBR, en, es);
   const tApprovals = useDict(ptBRApprovals, enApprovals, esApprovals);
+  const tInstallation = useDict(ptBRInstallation, enInstallation, esInstallation);
   const pathname = usePathname();
   const now = useNow();
+  const organizations = useOrganizationChoices();
   const approvals = useApi<Approval[]>("/approvals?status=pending");
   useLive(approvals.reload);
   useEffect(() => {
@@ -231,6 +272,17 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
         <span className="truncate font-bold">{me.name}</span>
         <span className="text-[0.8rem] text-muted">{t.roles[me.role]}</span>
       </div>
+      {/* A área da instalação mora aqui, e não na navegação principal: quem não administra nem vê a porta. */}
+      {me.installationAdmin ? (
+        <Link
+          href="/installation"
+          aria-current={pathname === "/installation" || pathname.startsWith("/installation/") ? "page" : undefined}
+          className="flex h-8 basis-full items-center gap-2 rounded-xs px-1 text-[0.87rem] text-muted hover:bg-sunken hover:text-ink aria-[current=page]:font-bold aria-[current=page]:text-ink"
+        >
+          <Buildings size={18} weight="duotone" aria-hidden />
+          <span className="truncate">{tInstallation.menu}</span>
+        </Link>
+      ) : null}
       <div className="mr-auto">
         <LocaleSelect />
       </div>
@@ -256,8 +308,10 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
           <Brand />
           <NotificationBell align="left-0" />
         </div>
+        {organizations ? <OrganizationSwitch choices={organizations} /> : null}
         {nav}
         <div className="mt-auto grid gap-3">
+          <UpdateIndicator />
           <HealthIndicator />
           <div className="border-t border-line pt-3 pl-2">{account}</div>
         </div>
@@ -269,9 +323,11 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
           <div className="mr-auto">
             <Brand />
           </div>
+          <UpdateIndicator showVersion={false} />
           <HealthIndicator />
           <NotificationBell align="right-0" />
         </div>
+        {organizations ? <OrganizationSwitch choices={organizations} /> : null}
         {nav}
       </header>
 

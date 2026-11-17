@@ -23,15 +23,22 @@ import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import { dtmfTones, type CallTransport } from "./transport";
+import type { VoicemailJob } from "./voicemail";
 
 export interface ExpectedCall {
   callId: string;
   /** Canal do Asterisk que carrega a chamada. */
   channelId: string;
   organizationId: string;
-  agentId: string;
+  /** Nulo quando a chamada não tem agente e vai para o recado (`voicemail`). */
+  agentId: string | null;
   /** Tronco por onde a chamada chegou ou saiu; a transferência sai por ele. */
   trunkId: string;
+  /**
+   * A chamada não tem quem atenda: quem conecta o áudio atende a caixa postal em vez de abrir uma
+   * conversa com o motor de voz.
+   */
+  voicemail?: VoicemailJob;
 }
 
 interface TrackedCall extends ExpectedCall {
@@ -63,14 +70,15 @@ export class AsteriskCalls {
   }
 
   /** O AudioSocket conectou. Devolve o transporte da chamada, ou `null` se ninguém a esperava. */
-  attach(connection: AudioSocketConnection): { call: ExpectedCall; transport: CallTransport } | null {
+  attach(connection: AudioSocketConnection): { call: ExpectedCall; transport: CallTransport & { drained(): Promise<void> } } | null {
     const call = this.byCall.get(connection.id);
     if (!call || call.attached) return null;
     call.attached = true;
-    const transport: CallTransport = {
+    const transport: CallTransport & { drained(): Promise<void> } = {
       onAudio: (handler) => connection.onAudio(handler),
       sendAudio: (pcm) => connection.sendAudio(pcm),
       clearAudio: () => connection.clearAudio(),
+      drained: () => connection.drained(),
       onHangup: (handler) =>
         connection.onClose((reason) => {
           if (reason !== "local") handler();

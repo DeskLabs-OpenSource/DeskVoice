@@ -1,5 +1,6 @@
 "use client";
 
+import { inboundFilterOn } from "@deskvoice/core/inbound-filter";
 import { CheckCircle, MinusCircle, PencilSimple, Plus, Pulse, Trash, Warning, XCircle } from "@phosphor-icons/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import enCommon from "../../../i18n/en/common";
@@ -15,7 +16,7 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, TextArea, TextInput, type Tone } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
-import { trunkFailure } from "../../../ui/trunk-status";
+import { allowedView, trunkFailure } from "../../../ui/trunk-status";
 import type { Agent, PhoneNumber, Setting, Trunk } from "../../../ui/types";
 
 type StepStatus = "ok" | "warn" | "fail" | "skipped";
@@ -31,6 +32,56 @@ const STEP_ICON: Record<StepStatus, ReactNode> = {
   fail: <XCircle size={20} weight="duotone" className="text-fail" aria-hidden />,
   skipped: <MinusCircle size={20} weight="duotone" className="text-muted" aria-hidden />,
 };
+
+/**
+ * O nome no `host` (sem a porta), ou `null` quando o host é IP ou bloco. Só decide se a tela mostra
+ * a hora da última atualização dos endereços: quem resolve o nome é o processo de voz, nunca o painel.
+ */
+function hostName(host: string): string | null {
+  const bare = host.trim().replace(/:\d+$/, "");
+  return /^[a-z0-9.-]+$/i.test(bare) && /[a-z]/i.test(bare) ? bare : null;
+}
+
+/**
+ * De onde a central aceita a ligação desta linha, como o processo de voz gravou (R14). É o mesmo
+ * conjunto que vira o filtro da linha na central. Linha ativa com nome que ainda não resolveu fica
+ * sem filtro, e a tela diz isso em vez de dizer que recusa o resto. Na linha por registro, o filtro
+ * se liga e se desliga aqui (contrato 11): a que já existia antes do filtro começa desligada, com o
+ * aviso, que não muda o estado da linha. A linha por IP filtra sempre e não tem botão.
+ */
+function AllowedAddresses({ trunk, t, onSaved }: { trunk: Trunk; t: LineDictionary; onSaved(): void }) {
+  const locale = useLocale();
+  const canConfigure = useCanConfigure();
+  const toggle = useAction();
+  const name = hostName(trunk.host);
+  const allowed = trunk.inboundAllowed ?? [];
+  const byRegistration = trunk.authMode === "register";
+  // O filtro efetivo (contrato 11): a linha por IP filtra sempre, seja qual for a coluna.
+  const switchedOff = !inboundFilterOn(trunk);
+  const view = allowedView(trunk, name !== null);
+  const setFilter = (enabled: boolean): void => {
+    void toggle.run(() => api(`/trunks/${trunk.id}/inbound-filter`, { method: "PATCH", body: { enabled } })).then((ok) => ok && onSaved());
+  };
+  return (
+    <div className="grid gap-1.5 rounded-sm bg-sunken p-4">
+      <p>
+        <span className="font-bold">{t[view.label]}:</span> {view.value === "list" ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{t[view.value]}</span>}
+      </p>
+      {view.others ? <p className="text-[0.87rem]">{t.allowedOthers}</p> : null}
+      {name !== null && trunk.inboundResolvedAt ? <p className="text-[0.87rem] text-muted">{fill(t.allowedResolvedAt, { name, when: formatDateTime(trunk.inboundResolvedAt, locale) })}</p> : null}
+      <p className="text-[0.87rem] text-muted">{t.allowedHint}</p>
+      {view.warning ? <p className="text-[0.87rem] font-bold">{t[view.warning]}</p> : null}
+      {byRegistration && canConfigure ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button busy={toggle.busy} variant={switchedOff ? "primary" : undefined} onClick={() => setFilter(switchedOff)}>
+            {switchedOff ? t.filterOn : t.filterOff}
+          </Button>
+          {toggle.error ? <ActionStatus action={toggle} /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 const ICON_BUTTON = "grid size-9 cursor-pointer place-items-center rounded-xs text-muted hover:bg-sunken";
 
@@ -141,8 +192,8 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
     event.preventDefault();
     void save.run(async () => {
       const { password, matchExtra, outboundHost, ...rest } = draft;
-      // Uma linha por campo; o que ficou em branco não vira endereço. Fora do modo por IP a lista
-      // e o destino de saída não existem: a API recusa, e a tela não manda lixo para lá.
+      // Uma linha por campo; o que ficou em branco não vira endereço. A lista vale nos dois modos;
+      // fora do modo por IP o destino de saída não existe: a API recusa, e a tela não manda lixo.
       const addresses = matchExtra
         .split("\n")
         .map((item) => item.trim())
@@ -151,7 +202,7 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
         method: trunk ? "PATCH" : "POST",
         body: {
           ...rest,
-          matchExtra: rest.authMode === "ip" ? addresses : [],
+          matchExtra: addresses,
           outboundHost: rest.authMode === "ip" && outboundHost.trim() !== "" ? outboundHost.trim() : null,
           ...(password && { password }),
         },
@@ -194,6 +245,11 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
               <Field label={t.password} hint={moved ? t.passwordAgain : trunk?.secret.configured ? t.passwordKept : undefined}>
                 <TextInput mono type="password" value={draft.password} onChange={(event) => set("password", event.target.value)} autoComplete="new-password" required={moved} />
               </Field>
+              {/* A operadora que registra por um servidor e entrega por outro: os endereços de
+                  entrada dela, um por linha. Não mudam como a linha é reconhecida. */}
+              <Field label={t.matchExtra} hint={t.matchExtraRegisterHint}>
+                <TextArea className="data" value={draft.matchExtra} onChange={(event) => set("matchExtra", event.target.value)} rows={3} />
+              </Field>
             </>
           ) : (
             <>
@@ -209,6 +265,7 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
           )}
         </fieldset>
 
+        {trunk ? <AllowedAddresses trunk={trunk} t={t} onSaved={onSaved} /> : null}
         {!applied ? <Notice tone="warn">{t.notApplied}</Notice> : null}
         {/* A linha que ficou de fora da configuração mostra o motivo sem pedir um teste. */}
         {failure && !result ? (
