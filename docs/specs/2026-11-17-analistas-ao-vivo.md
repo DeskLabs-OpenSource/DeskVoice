@@ -67,6 +67,9 @@ consentimento"):
   da TypeSafe estar lida e registrada no guia, como na fatia 7 da R12. Se a página não disser o
   prazo, o pedido volta ao Rafael. Esse pedido é a **DESA-75**, ainda aberta, e o analista espera a
   **mesma resposta** que a tela do filtro.
+- **A chave é o portão.** Nenhum PR grava `decision_model.*.api_key` pelo painel antes da resposta
+  do Rafael na DESA-75. Sem a chave, nada vai à TypeSafe, mesmo com o analista salvo pela API com a
+  confirmação.
 - **Custo desconhecido nunca é zero:** seção 3.4, "Medir".
 
 As fatias 1 e 3 não dependem disso: o simulado (`this-server`) basta para o aceite no CI.
@@ -86,7 +89,7 @@ orientações que se contradizem, sem um caso de uso que pague isso. Se aparecer
 create table analysts (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
-  name text not null,                 -- 1 a 40 caracteres, único na organização
+  name citext not null,               -- 1 a 40 caracteres, único na organização, sem diferença de maiúsculas
   decision_model text not null,       -- id de um DecisionModel instalado (ex.: 'jev')
   temperature boolean not null default true,
   objections jsonb not null default '[]',  -- [{ key, label, guidance }], validado por zod no core
@@ -110,6 +113,12 @@ alter table usage_ledger add column source text;  -- 'analyst' nas linhas do ana
 - `provider_confirmed_by` e `provider_confirmed_at` gravam a confirmação da seção 2.1. A rota os
   preenche com quem salvou e a hora, e recusa um `decision_model` que processa fora do servidor sem
   a confirmação. Trocar o modelo por outro que também processa fora pede a confirmação de novo.
+- Cada confirmação grava, **na mesma transação** do salvamento, o recibo `analyst_provider_confirmed`
+  em `organization_events` (só de acréscimo), com o ator e
+  `{ analystId, analystName, decisionModel, provider, confirmedByName }`, o nome da pessoa no
+  momento. É a prova de quem confirmou quando `provider_confirmed_by` vira nulo porque a pessoa saiu
+  da equipe (`on delete set null`, como todo `*_by`). O recibo aparece no Registro da privacidade,
+  como a mudança do prazo de guarda, e não guarda e-mail nem texto de ligação.
 - `usage_ledger.source` existe porque o filtro e o analista podem usar o mesmo modelo (`jev`). Sem a
   coluna, o extrato não distinguiria um do outro, e o custo do analista "não apareceria".
 

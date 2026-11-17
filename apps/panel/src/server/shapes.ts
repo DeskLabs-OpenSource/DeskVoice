@@ -36,7 +36,7 @@ export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
   follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment",
   agent_handoff_targets as "agentHandoffTargets", drop_follow_up as "dropFollowUp",
-  drop_follow_up_message as "dropFollowUpMessage", created_at as "createdAt", updated_at as "updatedAt"`;
+  drop_follow_up_message as "dropFollowUpMessage", analyst_id as "analystId", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -69,6 +69,9 @@ const agentFields = z.object({
     .array(z.uuid())
     .max(50)
     .transform((ids) => [...new Set(ids)]),
+  // O analista ao vivo do agente (desenho dos analistas, seção 3.1); nulo é nenhum. A rota confere
+  // que ele é desta organização (`requireAnalyst`).
+  analystId: z.uuid().nullable(),
 });
 export type AgentValues = z.output<typeof agentFields>;
 export const agentPatch = agentFields.partial();
@@ -91,6 +94,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   agentHandoffTargets: [],
   dropFollowUp: "off",
   dropFollowUpMessage: null,
+  analystId: null,
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",
@@ -159,6 +163,18 @@ export async function requireHandoffTargets(q: OrgQuery, selfId: string | null, 
   const found = await q.many<{ id: string }>("select id from agents where id = any($1::uuid[]) for share", [targets]);
   if (found.length !== targets.length) {
     throw new ApiError(400, "handoff_target_invalid", "Every handoff target must be another agent of this organization.");
+  }
+}
+
+/**
+ * O analista do agente é um desta organização. O de outra organização nem é visto (`withOrg`), e volta
+ * o mesmo erro do que não existe. Fica travado até o fim da escrita: apagado no meio, o banco recusaria
+ * a chave estrangeira, e a pessoa leria um erro cru.
+ */
+export async function requireAnalyst(q: OrgQuery, analystId: string | null | undefined): Promise<void> {
+  if (analystId === null || analystId === undefined) return;
+  if (!(await q.one("select 1 from analysts where id = $1 for share", [analystId]))) {
+    throw new ApiError(400, "analyst_invalid", "The analyst must be one of this organization.");
   }
 }
 
