@@ -1,0 +1,379 @@
+# Motor de voz em pipeline: transcrição, cérebro e voz escolhíveis, com ElevenLabs (R5)
+
+> Desenho do Arquiteto, 17/11/2026. Roteiro de novembro, item R5 (DESA-13). Depende da R4 (catálogo de
+> cérebros, concluída) e da R12 (transcrição pura, em andamento). A R3 (vocabulário) já está na `main`
+> no campo `VoiceSessionConfig.vocabulary`.
+
+## 1. O problema
+
+Os motores diretos (Gemini Live, OpenAI Realtime) amarram ouvido, cérebro e voz a um provedor só.
+O Rafael pediu três coisas que essa amarração impede: "Adicionar ElevenLabs como modelo de voz", um
+cérebro que responda melhor e um ouvido melhor. O pipeline separa as três peças. Cada uma é escolhida
+na tela do agente, tem o próprio preço e falha sozinha.
+
+O risco número um é a **latência**. Num motor direto, o modelo ouve e fala no mesmo processo. No
+pipeline, cada fala passa por três provedores em série. Se ninguém medir esse tempo, a conversa
+fica lenta sem ninguém perceber.
+
+## 2. O que já existe e o que falta
+
+| Peça | Onde está | O que falta para o pipeline |
+|---|---|---|
+| Ouvido em streaming | Contrato `StreamingTranscriber` + transcritor simulado no **#245** (R12, fatia 2). Ainda **fora da `main`**: entra junto com a fatia 4 da R12 (a peça do vencedor) | Um transcritor real, escolhido pela medida da R12 |
+| Vocabulário | `VoiceSessionConfig.vocabulary` (R3, na `main`); `StreamingTranscriber.maxVocabulary` (#245) | Nada: o pipeline repassa o campo à peça de transcrição |
+| Cérebro | `Brain` em `packages/voice-engine/src/brains/` (R4, na `main`): `listModels` e `completeJson` | **Conversa em streaming com ferramentas.** Hoje o cérebro só faz um pedido JSON fechado, sem ferramentas e sem streaming |
+| Voz | Não existe. A fala é do motor direto | **Contrato de voz** + a ElevenLabs |
+| Custo e teto | `meter` em `apps/voice/src/call-session.ts` aplica um preço por trecho (`engine.pricing`), grava o extrato em `usage_ledger` (com `model`, `cost_measured` e `cost_estimated`) e confere `reachCeiling` | Três linhas por trecho (ouvido, cérebro e voz), cada uma com o próprio preço |
+| Fala de falha | Motor que cai: `engine_failed` + **tom** de falha (`failureTone`). A voz morreu junto e não sobra quem fale | No pipeline, a voz continua viva quando cai o ouvido ou o cérebro. Ela precisa falar |
+
+## 3. O contrato
+
+### 3.1 A voz: `SpeechSynthesizer`, uma peça por arquivo em `packages/voice-engine/src/synthesizers/`
+
+Descoberta pela pasta (`loadSynthesizers`), no mesmo molde de `loadTranscribers` do #245. A cerca
+`fences/one-file-per-piece.test.ts` passa a cobrir a pasta, e a régua de
+`docs/doctrine/um-arquivo-por-peca.md` ganha a linha "Voz do pipeline".
+
+```ts
+export interface SynthesizerVoice {
+  id: string;
+  name: string;
+  /** Idiomas que o provedor declara verificados para a voz (`pt-BR`, ...). Vazio quando não declara. */
+  languages: readonly string[];
+  /** Amostra que o provedor hospeda: tocar não gasta crédito. */
+  previewUrl?: string;
+}
+
+export type SynthesizerVoicesResult =
+  | { ok: true; voices: SynthesizerVoice[] }
+  | { ok: false; failure: BrainFailure; status: number | null };
+
+/** O preço por caractere, que é como a ElevenLabs cobra. */
+export interface SynthesizerPricing {
+  centsPerThousandCharacters: number;
+  source: string;
+  checkedOn: string; // AAAA-MM-DD
+}
+
+export interface SpeechEvents {
+  /** PCM16 mono 8 kHz, como `VoiceSessionEvents.audio`. */
+  audio(pcm16_8k: Buffer): void;
+  /** O que já virou áudio, em caracteres, para cortar a fala do agente na interrupção (fatia 4). */
+  spoken(chars: number): void;
+  /** Esta fala terminou de gerar. */
+  done(): void;
+  error(error: Error): void;
+}
+
+export interface Speech {
+  on<K extends keyof SpeechEvents>(event: K, handler: SpeechEvents[K]): void;
+  /** Texto em pedaços, como o cérebro entrega. `flush` força a geração do que já chegou. */
+  push(text: string, options?: { flush?: boolean }): void;
+  end(): void;
+  /** Interrupção: para de gerar e descarta o que não saiu. O que já foi enviado ao provedor é cobrado. */
+  cancel(): void;
+}
+
+export interface SpeechSynthesizer {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  pricing: SynthesizerPricing;
+  keyless?: boolean;
+  /** Onde a pessoa pega a chave (o link da tela). */
+  keyUrl?: string;
+  listVoices(apiKey: string, options?: KeyCheckOptions): Promise<SynthesizerVoicesResult>;
+  checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+  /** Abre uma fala. Lança `SynthesizerOpenError` com o motivo no vocabulário fechado. */
+  speak(config: { voiceId: string; language: string; model?: string }, apiKey: string, options?: ConnectOptions): Promise<Speech>;
+}
+```
+
+O custo da voz é **caracteres enviados × preço**. A API de streaming da ElevenLabs não devolve o
+consumo na resposta (fonte na seção 7). Por isso a linha do extrato sai com `cost_estimated = true`,
+até uma rodada com a conta real comparar a contagem com o consumo da conta (fatia 1, item 7). Se a
+contagem bater, a marca vira `false` num PR à parte, com a medida.
+
+### 3.2 O cérebro conversa: `Brain.chat`, opcional
+
+```ts
+export interface BrainChatMessage { role: "system" | "user" | "assistant" | "tool"; content: string; toolCallId?: string; toolCalls?: { id: string; name: string; args: string }[] }
+
+export interface BrainChatEvents {
+  /** Texto da resposta, em pedaços, assim que chega. */
+  text(delta: string): void;
+  /** O modelo pediu uma ferramenta. `args` é texto: quem executa valida com zod (convenção 16). */
+  toolCall(call: { id: string; name: string; args: string }): void;
+  /** Consumo do pedido, quando o provedor declara. Sem ele, o custo é estimado pela entrada enviada. */
+  usage(usage: Usage): void;
+  done(): void;
+  error(failure: BrainFailure, status: number | null): void;
+}
+
+export interface BrainChat {
+  on<K extends keyof BrainChatEvents>(event: K, handler: BrainChatEvents[K]): void;
+  /** Interrupção: aborta o pedido em voo. */
+  cancel(): void;
+}
+
+// Em Brain:
+chat?(apiKey: string, request: { model: string; messages: BrainChatMessage[]; tools: ToolSpec[]; timeoutMs: number }, options: { fetch?: typeof fetch }): BrainChat;
+```
+
+Opcional como `classifyOutcome`: cérebro sem `chat` não aparece na lista do pipeline. Primeiro entram
+os três que falam `/chat/completions` com `stream: true` e `tools` (OpenAI, OpenRouter e DeepSeek),
+por um caminho comum em `brain-http.ts`. Anthropic e Gemini ficam para uma fatia à parte.
+
+### 3.3 O motor: `packages/voice-engine/src/engines/pipeline.ts`
+
+Implementa `VoiceEngine` com `id: "pipeline"`. O `connect` recebe, além do `VoiceSessionConfig`, a
+escolha do agente: `{ transcriber, brain, model, synthesizer, voiceId }` e uma chave por peça. As
+chaves são as que já existem: `brain.<id>.api_key` (R4), a do transcritor (R12, fatia 4) e
+`synthesizer.<id>.api_key` (fatia 1b), todas cifradas (convenção 12). A forma exata de passar as
+três chaves sem alargar o `connect` de todos os motores é decisão da fatia 3: a sugestão é um
+`PipelineConnectOptions` que só o pipeline lê.
+
+O laço de um turno:
+
+1. O áudio de quem ligou vai à peça de transcrição. Trecho com texto novo vira `callerActivity({ words: true })`.
+2. O fim do turno é o trecho `final` da peça. Na falta dele, vale a guarda contra o silêncio (R11) pelo
+   `closeCallerTurn`, que o pipeline atende pedindo à peça o fechamento ou usando o último parcial.
+3. A fala final vai ao cérebro (`chat`), com o histórico, as instruções e as ferramentas.
+4. Cada pedaço de texto do cérebro vai direto à voz (`push`), com `flush` no fim de frase. A voz não
+   espera a resposta inteira.
+5. Pedido de ferramenta: o pipeline emite `toolCall`. A resposta volta por `sendToolResult` e reabre o
+   cérebro. Enquanto a ferramenta roda, não há fala de espera na v1 (fica de fora).
+6. `say(text)` vai direto à voz, sem passar pelo cérebro.
+7. `guide(text)` (R6) entra como mensagem `system` no próximo pedido ao cérebro.
+
+**Custo por peça.** Um evento novo e opcional em `VoiceSessionEvents`:
+
+```ts
+/** Só motores com peças separadas. Incremento de uma peça, já com o custo calculado pelo preço dela. */
+pieceUsage(line: { piece: "transcriber" | "brain" | "synthesizer"; id: string; model?: string; usage: Usage; characters?: number; costMicrocents: number; estimated: boolean }): void;
+```
+
+O `meter` do `call-session.ts` grava uma linha de `usage_ledger` por evento: `engine` =
+`<peça>:<id>` (o mesmo rótulo `transcriber:<id>` do #245), `model`, `cost_microcents` e
+`cost_estimated`. Cada linha conta para o teto como hoje. Motor que não emite `pieceUsage` continua
+no caminho de `usage`, sem mudança.
+
+**Teto.** O `reachCeiling` de hoje dispara a despedida. No pipeline, a despedida também custa voz.
+Por isso as três falas fixas da ligação (`FAREWELL.costCeiling`, `costCeilingTransfer` e a fala de
+falha da seção 3.4) são **sintetizadas na abertura** e guardadas em memória. Na hora do teto, o
+áudio já está pronto e não há gasto novo. O custo dessa síntese entra no extrato da ligação que a
+fez. Um cache por processo, com a chave `(sintetizador, voz, modelo, texto)`, evita pagar de novo na
+ligação seguinte com a mesma voz. Antes de cada pedido ao cérebro, o pipeline também confere se o
+pior caso do pedido (entrada enviada + `max_tokens` × preço) passa do que sobra do teto. Se passar,
+o pedido não sai, e a despedida do teto toca. Isso resolve, no pipeline, a pendência da R12 "reserva
+em voo que passa do pior caso".
+
+### 3.4 A falha (antipadrão 15)
+
+| Peça que falha | Quem ligou ouve | O painel recebe |
+|---|---|---|
+| Voz, ao abrir | O tom de falha (o caminho de hoje: `call_refused`/`engine_refused`) | `call_refused`, com `detail` dizendo que foi a voz |
+| Voz, no meio | A fala de falha **pré-sintetizada** e depois o tom. A fala não depende da voz estar viva | `engine_failed` com `piece: "synthesizer"` e o motivo no vocabulário fechado |
+| Ouvido, no meio | A fala de falha, pela voz viva | `engine_failed` com `piece: "transcriber"` |
+| Cérebro, um pedido (prazo, 5xx, 429) | "Desculpe, não consegui responder agora. Pode repetir, por favor?" e a conversa segue | `pipeline_turn_failed` com `piece: "brain"` e o motivo |
+| Cérebro, duas vezes seguidas | A fala de falha | `engine_failed` com `piece: "brain"` |
+
+A fala de falha (texto fixo, no padrão de `FAREWELL`) é: "Estou com um problema técnico e não vou
+conseguir continuar. Se puder, ligue de novo em alguns minutos. Obrigado." Quando há
+`transfer_to_e164`, vale a fala de transferência que já existe. Os eventos usam o vocabulário de
+`KEY_CHECK_RESULTS` e nunca repassam o texto do provedor (o texto vai só ao log). Há frase na linha
+do tempo nos três idiomas: o CI reprova motivo sem frase.
+
+### 3.5 A latência: orçamento e como medir
+
+**O que se mede:** o tempo entre o **fim da fala de quem ligou** e a **primeira amostra de áudio do
+agente entregue ao transporte**. O fim da fala é o `endMs` do trecho final da peça de transcrição,
+convertido para o relógio do pipeline. Quando a peça não informa `endMs`, vale a hora em que o trecho
+final chegou, e o evento leva a marca `endFromArrival: true`.
+
+**Evento por turno:** `pipeline_turn_latency`, com `{ endpointMs, brainFirstTextMs, voiceFirstAudioMs, totalMs, endFromArrival }`.
+`endpointMs` vai do fim da fala ao trecho final. `brainFirstTextMs` vai do pedido ao primeiro texto.
+`voiceFirstAudioMs` vai do primeiro `push` ao primeiro áudio. O relógio é o `Clock` da sessão
+(convenção 10).
+
+**Orçamento (p95 por turno, sem ferramenta):**
+
+| Etapa | Orçamento | De onde vem |
+|---|---|---|
+| Fim da fala → trecho final | 700 ms | A régua da R12 (spec #198) |
+| Pedido → primeiro texto do cérebro | 800 ms | **Não medido.** Meta. A fatia 2 mede na bancada |
+| Primeiro texto → primeiro áudio da voz | 400 ms | **Não medido.** Meta. A fatia 1 mede na bancada |
+| Transporte e ajuste | 100 ms | Pedaço de 20 ms + fila de saída |
+| **Total p95** | **2 000 ms** | Soma. **Meta p50: 1 200 ms** |
+
+Esses números são uma régua a confirmar, e não uma medida. As fatias 1 e 2 medem cada etapa, e a
+fatia 6 mede o total na chamada real. O resultado vai ao PR e a esta seção. **Acima de 2 000 ms no
+p95, a combinação não é proibida, mas a tela do agente mostra o tempo medido** ("Esta combinação
+respondeu em 2,4 s na média das últimas ligações"). Latência que inviabiliza a conversa sem estar dita
+é o fracasso desta frente. Um tempo alto que está à vista é uma escolha do operador.
+
+## 4. As fatias
+
+Cada fatia cabe numa revisão de uma sentada. A trilha de cada fatia é a primeira que liberar. As
+fatias 1a, 1b e 2 **não dependem da R12** e podem começar já.
+
+### Fatia 1a: a voz atrás de uma interface, ElevenLabs e simulada (não espera a R12)
+
+Arquivos: `packages/voice-engine/src/types.ts` (contrato da 3.1), `synthesizers/simulated.ts`,
+`synthesizers/elevenlabs.ts`, `load.ts` (`loadSynthesizers`), `fences/one-file-per-piece.test.ts`,
+`docs/doctrine/um-arquivo-por-peca.md` (uma linha), `scripts/bancada-de-voz/voz.ts` e fragmento.
+Sem migration, sem tela e sem `call-session.ts`.
+
+Aceite:
+1. `elevenlabs.ts` abre `wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input` com
+   `xi-api-key` no cabeçalho, `model_id` e `output_format=pcm_8000`. O PCM sai como PCM16 mono 8 kHz,
+   sem reamostrar. Testes contra um servidor falso (`testing/fake-provider.ts`) cobrem: abertura,
+   pedaços de texto, `flush`, `isFinal`, `cancel` no meio, recusa 401/402/429 mapeada para o
+   vocabulário fechado, e o prazo de abertura.
+2. `listVoices` lê `GET /v2/voices` paginado (`page_size` ≤ 100, `next_page_token`, `has_more`) e
+   valida cada voz com zod (convenção 16). Voz fora da forma é pulada, sem derrubar a lista.
+   `languages` sai de `verified_languages[].locale` ou `.language`.
+3. `checkKey` usa a chamada mais barata que prova a chave sem sintetizar. Quem escolhe a chamada é o
+   Desenvolvedor, com fonte e data no cabeçalho do arquivo.
+4. O preço fica no arquivo com `source` e `checkedOn`, por modelo. Modelo padrão: `eleven_flash_v2_5`.
+   Modelo sem preço na tabela = "sem preço conhecido", nunca zero (regra da R4).
+5. O custo sai como `characters × centsPerThousandCharacters / 1000`, em micro-centavos, sempre com
+   `estimated: true`. Um teste prova que o `cancel` cobra o que já foi enviado, e não zero.
+6. A fala de falha e as despedidas do teto são sintetizadas por uma função
+   `prepareFixedSpeech(synth, voice, texts)`, com cache em memória pela chave da 3.3. Os testes provam:
+   a segunda ligação com a mesma voz não pede de novo; voz diferente pede; e a falha ao preparar é
+   uma recusa de abertura, nunca uma ligação sem fala de falha.
+7. Bancada (`scripts/bancada-de-voz/voz.ts`, fora do CI, no padrão de `orcamento.ts`): mede o tempo
+   do primeiro `push` ao primeiro áudio (p50 e p95 de 30 falas curtas em pt-BR) e compara os
+   caracteres contados com o consumo da conta antes e depois (`character_count` da assinatura, se a
+   API expuser; o Desenvolvedor confere e diz). Ela só roda com a chave do pedido de decisão da
+   seção 6 e com teto próprio. **Sem a chave, o PR diz "não medido"**, e a fatia entra mesmo assim,
+   com os testes contra o servidor falso.
+8. O simulado (`keyless`) gera um tom curto por caractere, sem rede, para os testes das fatias 3 a 5.
+
+Fracasso mesmo funcionando: cobrar zero quando a fala é interrompida; preço sem fonte e data.
+
+### Fatia 1b: credencial e vozes na tela (não espera a R12)
+
+Rota `api/v1/synthesizers/[id]/key` (gravar cifrada, testar, apagar com confirmação nomeando o
+provedor) e `api/v1/synthesizers/[id]/voices` (lista lida da API, sem guardar áudio). A seção
+"Voz" fica em Configurações → Inteligência artificial, ao lado de "Cérebros", com o resultado do
+teste, a lista de vozes com o idioma e a amostra (`previewUrl`, que não gasta crédito). Textos nos
+três idiomas. Settings `synthesizer.<id>.api_key`, sem migration (tabela `settings`).
+Aceite: o operador cola a chave, vê "aceita" ou o motivo, vê as vozes com pt-BR primeiro e ouve a
+amostra. A chave nunca volta para a tela.
+
+### Fatia 2: o cérebro conversa em streaming, com ferramentas (não espera a R12)
+
+`Brain.chat` (3.2) em `brain.ts`, com o caminho comum em `brain-http.ts` (SSE de
+`/chat/completions` com `stream: true`, `tools` e `stream_options.include_usage` onde o provedor
+documenta) para OpenAI, OpenRouter e DeepSeek. Testes contra servidor falso: texto em pedaços,
+`tool_calls` montados a partir dos deltas, consumo no último pedaço, `cancel` que aborta, prazo e
+recusa no vocabulário fechado. A bancada mede o tempo do pedido ao primeiro texto (p50/p95, 30
+pedidos curtos) com as chaves que a R4 já usa. Sem chave, "não medido".
+Fracasso mesmo funcionando: argumento de ferramenta aceito sem zod; custo zero quando o provedor não
+declarou consumo (precisa ser estimado pela entrada, `cost_estimated`, como na R12).
+
+### Fatia 3: o motor pipeline, pelo caminho simulado (ESPERA o #245 na `main`)
+
+`engines/pipeline.ts` costura transcritor, cérebro e voz (3.3). Na escolha do agente entra uma
+migration: `agents.pipeline jsonb` com `{ transcriber, brain, model, synthesizer, voiceId }`, nula
+para quem não usa. O carimbo é a hora real (`date -u +%Y%m%dT%H%M%S`), nunca futura. Em
+`call-session.ts`, entram o `pieceUsage` no `meter`, a falha por peça (3.4) e o
+`pipeline_turn_latency`. Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
+voz simulada: uma ferramenta no meio da conversa, três linhas no extrato e o teto que dispara a
+despedida pré-sintetizada. Quem já instalou não precisa fazer nada: sem `agents.pipeline`, nada muda.
+
+### Fatia 4: interrupção
+
+Fala de quem ligou durante o áudio do agente (`callerActivity` com `words: true`, ou trecho parcial
+com texto) → `speech.cancel()`, `chat.cancel()` e o evento `interrupted`. A fala do agente gravada no
+histórico e na transcrição é cortada no que já saiu (`spoken`). Com ruído (`listeningEnvironment:
+"noisy"`), só texto interrompe; o início de fala sozinho não interrompe (lição da R11). Os testes
+provam o corte, o custo do que já foi enviado e que o próximo pedido ao cérebro leva a fala cortada.
+
+### Fatia 5: a tela do agente
+
+Na tela do agente, "Pipeline" aparece como motor. Ao escolhê-lo, surgem três escolhas: a transcrição,
+o cérebro e o modelo (da lista da R4, só cérebros com `chat`) e a voz (da lista da 1b, com amostra).
+O custo por peça aparece no detalhe da chamada e em Custos. A latência medida (p50 das últimas
+ligações, pelo `pipeline_turn_latency`) aparece ao lado da escolha, com o aviso quando passa do
+orçamento. Chamada pelo navegador (decisão 0008) com o pipeline. Ela entra na prova de primeira
+impressão do CI pelo caminho simulado.
+
+### Fatia 6: o ouvido real e a medida de ponta a ponta (ESPERA a R12)
+
+O transcritor real escolhido pela R12 (fatia 3 da R12) entra no pipeline sem mudança de código no
+motor: é uma peça da pasta. A medida da seção 3.5 na chamada real (30 turnos, uma ferramenta) fica
+registrada no PR e nesta seção. É o aceite da frente.
+
+## 5. O que espera a R12
+
+- **O contrato `StreamingTranscriber` na `main`.** Ele está no #245, que entra junto com a fatia 4 da
+  R12. A fatia 3 deste desenho só começa com ele na `main`. Se a R12 demorar, a alternativa é o #245
+  entrar sozinho antes. Isso é pedido ao maestro, não decisão do Rafael.
+- **O transcritor real.** A fatia 6 espera o vencedor medido da R12 (régua de 700 ms no p95 do trecho
+  final). Hoje a R12 espera a DESA-75 e o crédito do Gemini. Sem vencedor, o pipeline existe e é
+  testado pelo simulado, mas não atende chamada real.
+- **O pedido previsto na DESA-13** ("qual transcrição entra primeiro") **não é feito aqui.** Ele é a
+  própria medida da R12, com o padrão já dito na tarefa: a que o Arquiteto medir melhor em português
+  com vocabulário.
+
+## 6. Pedido de decisão (vai ao lote do Líder)
+
+O dono do pedido é o Arquiteto. O texto está no comentário da DESA-13, no formato do `GOVERNANCE.md`:
+conta e chave da ElevenLabs para a bancada da fatia 1a, com teto de gasto. Padrão sem resposta: a
+fatia 1a entra sem a medida real ("não medido") e a fatia 6 fica presa a essa medida.
+
+## 7. Fontes (conferidas em 17/11/2026)
+
+- WebSocket de streaming: https://elevenlabs.io/docs/api-reference/text-to-speech/v-1-text-to-speech-voice-id-stream-input
+  (`wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input`, cabeçalho `xi-api-key`,
+  primeira mensagem com `text: " "`, `flush`, fechamento com `text: ""`, resposta com `audio`
+  base64 e `isFinal`, alinhamento por caractere opcional, `inactivity_timeout` padrão 20, máximo
+  180). **A página não mostra consumo de caracteres na resposta.**
+- Formatos de saída: https://elevenlabs.io/docs/api-reference/text-to-speech/stream (lista com
+  `pcm_8000`, `ulaw_8000` e `alaw_8000`). A página do WebSocket não lista os valores aceitos.
+  **Não conferido:** se o WebSocket aceita `pcm_8000` e se esse PCM é little-endian assinado de 16
+  bits. A fatia 1a confere contra a conta real ou diz "não conferido".
+- Vozes: https://elevenlabs.io/docs/api-reference/voices/search (`GET /v2/voices`, `page_size` até
+  100, `next_page_token`, `has_more`, `voice_id`, `name`, `category`, `verified_languages[]` com
+  `language`, `model_id`, `locale` e `preview_url`).
+- Preço: https://elevenlabs.io/pricing/api: Flash/Turbo a US$ 0,04 por mil caracteres; v3 e
+  Multilingual v2 a US$ 0,08 por mil, igual em todos os planos. O plano gratuito inclui 20 mil
+  caracteres de Flash/Turbo por mês. **Lido por um resumo automático da página.** O Desenvolvedor
+  confere na página antes de gravar a tabela.
+- **Não conferido:** se o plano gratuito permite uso comercial ou exige atribuição; a latência
+  própria do Flash v2.5 em pt-BR; os limites de conexões simultâneas por plano.
+
+## 8. O que fica de fora
+
+- Fala de espera enquanto uma ferramenta roda.
+- Clonagem de voz e vozes geradas pela tela (só a lista do que a conta já tem).
+- Outras vozes (OpenAI TTS, Google, Piper local): cada uma é um arquivo novo em `synthesizers/`,
+  depois.
+- Cérebros Anthropic e Gemini no `chat` (fatia própria, depois da 2).
+- Escolher a região da ElevenLabs (`api.eu.residency...`). O `processingLocation` diz "não declara"
+  até haver fonte.
+- Guardar o áudio sintetizado em disco ou no banco. O cache é só em memória, por processo.
+
+## 9. Regras de produto
+
+- **Núcleo ou peça opcional?** O motor é núcleo (está no `ROADMAP.md`). A ElevenLabs é uma peça
+  opcional: sem chave, ela não aparece como escolha.
+- **Disparo em massa?** Não. O pipeline atende a mesma chamada que os outros motores, com o mesmo
+  teto e as mesmas regras de saída.
+- **Exige ação de quem já instalou?** Não. Sem `agents.pipeline`, nada muda. A chave da ElevenLabs é
+  do operador, pela tela (sem SSH e sem variável de ambiente).
+- **Recurso pago ou telemetria?** Não há recurso pago nosso. O gasto é do operador com o provedor que
+  ele escolher, medido e com teto, como nos motores diretos.
+
+## 10. Não medido
+
+- Toda a latência da seção 3.5 por etapa. Os números são meta, e as fatias 1a, 2 e 6 medem.
+- Se a contagem de caracteres bate com o consumo da conta ElevenLabs.
+- Se o WebSocket aceita `pcm_8000` (seção 7).
+- Se o `/chat/completions` com `stream: true` + `tools` do OpenRouter e do DeepSeek se comporta como o
+  da OpenAI. A documentação da R4 foi lida para o `completeJson`, não para streaming.
+- O custo por minuto de conversa no pipeline. A fatia 6 calcula a partir do extrato real.
