@@ -25,7 +25,7 @@ continua). A volta é pelo backup que o atualizador fez na ida para esta versão
 mais recente cuja versão é a 0.27.0, e o comando abaixo, rodado na pasta do DeskVoice, mostra
 qual é. Anote o resultado antes de voltar:
 
-    grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1
+    grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1 | xargs dirname
 
 Para voltar, troque a versão e depois restaure esse backup, pelo nome da pasta que o comando
 mostrou:

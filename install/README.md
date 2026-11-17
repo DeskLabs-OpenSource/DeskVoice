@@ -177,7 +177,7 @@ A imagem guardada não basta para voltar de uma versão que mudou o banco de um 
 anterior não lê. É o caso da 0.28.0: depois de atualizar para ela, voltar para uma versão
 anterior com `update.sh --to` deixa o painel sem login. A volta é trocar a versão e restaurar o
 backup feito na ida para a 0.28.0, que é o mais recente com a versão de antes no manifesto
-(`grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1`). Não serve o
+(`grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1 | xargs dirname`). Não serve o
 `restore.sh latest`, nem o backup que o próprio `update.sh --to` faz e mostra no fim: esse já tem
 o banco da 0.28.0. O backup da ida só fica enquanto a rotação o mantiver (os 14 mais recentes), e
 o que entrou depois de atualizar se perde. O passo a passo está na nota da 0.28.0.
