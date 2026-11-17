@@ -8,8 +8,9 @@
 > chave e as vozes na tela, #412) na `main`. Fatia 2 (`Brain.chat` em streaming) no #419,
 > com um ajuste ao contrato da seção 3.2 (o consumo nunca fica sem número). A latência do cérebro na
 > 3.5 segue **não medida**: a bancada existe, e faltaram as chaves. Fatia 2b (`Brain.chat` na
-> Anthropic, com o transporte do streaming separado do formato de cada API) no #423; a 2c
-> (Gemini) não começou. Fatias 3 a 6 não começaram.
+> Anthropic, com o transporte do streaming separado do formato de cada API) no #423; fatia 2c
+> (`Brain.chat` no Gemini, com o campo `providerState` para a assinatura de raciocínio) no PR da
+> DESA-123, sobre o #423. Fatias 3 a 6 não começaram.
 
 ## 1. O problema
 
@@ -112,13 +113,16 @@ contagem bater, a marca vira `false` num PR à parte, com a medida.
 ### 3.2 O cérebro conversa: `Brain.chat`, opcional
 
 ```ts
-export interface BrainChatMessage { role: "system" | "user" | "assistant" | "tool"; content: string; toolCallId?: string; toolCalls?: { id: string; name: string; args: string }[] }
+/** `providerState`: opaco; devolva como veio. Hoje só o Gemini usa (assinatura de raciocínio). Fatia 2c. */
+export interface BrainToolCall { id: string; name: string; args: string; providerState?: string }
+
+export interface BrainChatMessage { role: "system" | "user" | "assistant" | "tool"; content: string; toolCallId?: string; toolCalls?: BrainToolCall[] }
 
 export interface BrainChatEvents {
   /** Texto da resposta, em pedaços, assim que chega. */
   text(delta: string): void;
   /** O modelo pediu uma ferramenta. `args` é texto: quem executa valida com zod (convenção 16). */
-  toolCall(call: { id: string; name: string; args: string }): void;
+  toolCall(call: BrainToolCall): void;
   /** Consumo do pedido: exatamente um por pedido que saiu. `estimated` diz se o provedor declarou. */
   usage(usage: Usage, estimated: boolean): void;
   done(): void;
@@ -150,11 +154,38 @@ documentam, e não ao OpenRouter, que o marca como obsoleto e sem efeito (o cons
 
 Opcional como `classifyOutcome`: cérebro sem `chat` não aparece na lista do pipeline. Primeiro entram
 os três que falam `/chat/completions` com `stream: true` e `tools` (OpenAI, OpenRouter e DeepSeek),
-por um caminho comum em `brain-http.ts`. Anthropic entrou na 2b; o Gemini fica na 2c. Na 2b o
+por um caminho comum em `brain-http.ts`. Anthropic entrou na 2b, e o Gemini na 2c. Na 2b o
 caminho comum foi dividido em transporte (`chatTransport`: o pedido, o prazo, o SSE, o `usage` único e
 a estimativa) e formato (`ChatFormat`: o corpo e a leitura de cada `data:`), e a Anthropic usa o
 transporte com o formato da API de mensagens. O `toolCall` sai quando a ferramenta fecha, antes do fim:
 pode vir `toolCall` e depois `error`, e isso é válido no contrato.
+
+**O Gemini e o campo `providerState` (fatia 2c).** O Gemini usa o mesmo transporte, com o formato de
+`POST /v1beta/models/{model}:streamGenerateContent?alt=sse` e a chave só em `x-goog-api-key`. A fonte
+(https://aistudio.google.com/docs/thought-signatures.md?generate-content=true, lida em 17/11/2026) diz
+que a assinatura de raciocínio é obrigatória: "If you omit a `thought_signature` for the first
+`functionCall` part in any step of the current turn, the request will fail with a 400 error". Ela vem
+**na parte** da `functionCall` (nas paralelas, só na primeira) e volta "exactly as received". Por isso o
+`toolCall` e o `toolCalls[]` ganharam `providerState?: string`: texto opaco do provedor, que quem chama
+devolve na mensagem `assistant` seguinte, junto da chamada, sem ler nem alterar. OpenAI, OpenRouter,
+DeepSeek e Anthropic não emitem e ignoram o campo. A tradução:
+- `system` vai para `systemInstruction`, uma parte por mensagem, na ordem;
+- `assistant` vira `role: "model"`, com uma parte `functionCall` por chamada e a `thoughtSignature` na
+  mesma parte. A primeira `functionCall` de cada passo do turno atual que chega sem `providerState`
+  (histórico de outro cérebro, troca de cérebro no meio da ligação) leva a assinatura fictícia
+  `skip_thought_signature_validator`, que a FAQ da mesma página permite e diz "strongly discouraged".
+  A fictícia nunca vai numa chamada com assinatura de verdade;
+- os `tool` seguidos viram uma só mensagem `user` com uma `functionResponse` cada, na ordem das
+  chamadas e depois de todas elas (intercalar dá 400). O `name` sai da chamada; o `response` é o
+  `content` se for objeto JSON, senão `{ result: content }`;
+- as ferramentas vão em `functionDeclarations[].parametersJsonSchema`, o JSON Schema do `ToolSpec`
+  como está (https://aistudio.google.com/api-reference/generate-content, lida em 17/11/2026);
+- na leitura, `functionCall.args` (objeto) vira texto com `JSON.stringify`, a única exceção a "args como
+  veio". Sem `functionCall.id`, o id é gerado aqui e não volta ao Gemini. A parte `thought: true` conta
+  só na saída estimada. O `usageMetadata` vale o último pedaço, e a saída soma `candidatesTokenCount` e
+  `thoughtsTokenCount`. `STOP` e `MAX_TOKENS` terminam em `done`; os outros `finishReason` (bloqueio,
+  chamada mal formada, assinatura ausente) e o `promptFeedback.blockReason` terminam em
+  `error("unexpected_response", 200)`.
 
 ### 3.3 O motor: `packages/voice-engine/src/engines/pipeline.ts`
 
@@ -489,7 +520,6 @@ Resposta: A, dada pelo Rafael em 17/11, junto com a DESA-103 (seção 9.1).
 - Clonagem de voz e vozes geradas pela tela (só a lista do que a conta já tem).
 - Outras vozes (OpenAI TTS, Google, Piper local): cada uma é um arquivo novo em `synthesizers/`,
   depois.
-- Cérebro Gemini no `chat` (fatia 2c, depois da 2b, que trouxe a Anthropic).
 - Escolher a região da ElevenLabs (`api.eu.residency...`). O `processingLocation` diz "não declara"
   até haver fonte.
 - Guardar o áudio sintetizado em disco ou no banco. O cache é só em memória, por processo.
