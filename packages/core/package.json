@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./phone": "./src/phone.ts"
+    "./phone": "./src/phone.ts",
+    "./drop-follow-up": "./src/drop-follow-up.ts"
   },
   "dependencies": {
     "pg": "^8.23.1",

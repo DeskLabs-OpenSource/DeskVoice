@@ -1,7 +1,8 @@
-import { withOrg, type OrgQuery } from "@deskvoice/core";
+import { MAX_TASK_ATTEMPTS, withOrg, type NotificationAudience, type OrgQuery } from "@deskvoice/core";
 import { loadAllowedWebhooks, loadWhatsAppConnector, postToWebhook, sendWhatsApp } from "@deskvoice/tools";
 import { z } from "zod";
 import type { Routine, RoutineDeps } from "../types";
+import { recordCallerMessageResult } from "./review_call";
 
 const payloadSchema = z.object({ notificationId: z.uuid() });
 
@@ -12,6 +13,7 @@ interface NotificationRow {
   body: string;
   call_id: string | null;
   status: string;
+  audience: NotificationAudience;
 }
 
 /** Fica em `notifications.error` de um aviso ENVIADO: a ressalva de como ele saiu. */
@@ -54,13 +56,21 @@ const routine: Routine = {
   kind: "deliver_notification",
   async run(task, deps) {
     const { notificationId } = payloadSchema.parse(task.payload);
-    const mark = (status: "sent" | "failed", error: string | null): Promise<number> =>
-      withOrg(deps.db, task.organizationId, (q) => q.exec("update notifications set status = $2, error = $3 where id = $1", [notificationId, status, error]));
-
     const notification = await withOrg(deps.db, task.organizationId, (q) =>
-      q.one<NotificationRow>("select id, channel, target, body, call_id, status from notifications where id = $1", [notificationId]),
+      q.one<NotificationRow>("select id, channel, target, body, call_id, status, audience from notifications where id = $1", [notificationId]),
     );
     if (!notification) throw new Error(`Notification ${notificationId} not found`);
+    // A mensagem para quem ligou, quando a ligação caiu (desenho 2026-11-16-follow-up-da-ligacao-que-caiu,
+    // seção 3.5): o resultado vai para a linha do tempo da ligação original, e a que não saiu abre a
+    // pendência de reserva. "Não saiu" é a última tentativa da fila falhar: antes dela, a fila tenta de novo.
+    const callerCall = notification.audience === "caller" ? notification.call_id : null;
+    const mark = (status: "sent" | "failed", error: string | null): Promise<void> =>
+      withOrg(deps.db, task.organizationId, async (q) => {
+        await q.exec("update notifications set status = $2, error = $3 where id = $1", [notificationId, status, error]);
+        if (callerCall === null) return;
+        if (status === "sent") await recordCallerMessageResult(q, callerCall, "whatsapp_sent", deps.clock.now());
+        else if (task.attempts >= MAX_TASK_ATTEMPTS) await recordCallerMessageResult(q, callerCall, "whatsapp_failed", deps.clock.now());
+      });
     // Nova tentativa de uma tarefa cujo envio já tinha saído: não manda duas vezes.
     if (notification.status === "sent") return;
 

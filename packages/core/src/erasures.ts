@@ -160,7 +160,8 @@ export async function countCallerData(q: OrgQuery, options: { dir: string; phone
  * texto da análise, o motivo do pedido para parar a gravação, os argumentos e mensagens de
  * ferramenta, o texto de aprovações e de avisos, as pendências (pelo telefone e pela chamada) e as
  * notas do agente (pelo telefone e pela chamada; estas saem inteiras). O
- * telefone do titular vira nulo nas chamadas, nos eventos e nas pendências.
+ * telefone do titular vira nulo nas chamadas, nos eventos, nas pendências e na mensagem para quem
+ * ligou (`notifications.target` do aviso `caller`).
  *
  * Fica o registro do serviço prestado — horário, duração, custo, desfecho, nota da análise, quem
  * parou a gravação —, porque não é fala de ninguém e sustenta fatura e relatório. Fica também a
@@ -195,7 +196,12 @@ export async function eraseCaller(q: OrgQuery, options: { dir: string; phoneE164
   }
 
   // Os avisos antes das pendências: o filtro dos avisos acha as pendências pelo telefone, que sai delas a seguir.
-  const notifications = await q.exec(`update notifications set body = $3 where ${NOTIFICATIONS_WHERE}`, [phoneE164, ids, ERASED_TEXT]);
+  // A mensagem para quem ligou (`audience = 'caller'`) tem o número do titular no `target`: ele sai
+  // também. O aviso à equipe vai para o número de alguém da equipe, e o `target` dele fica.
+  const notifications = await q.exec(
+    `update notifications set body = $3, target = case when audience = 'caller' then null else target end where ${NOTIFICATIONS_WHERE}`,
+    [phoneE164, ids, ERASED_TEXT],
+  );
   const followUps = await q.exec(`update follow_ups set title = $3, details = '', closing_note = null, caller_e164 = null where ${FOLLOW_UPS_WHERE}`, [
     phoneE164,
     ids,

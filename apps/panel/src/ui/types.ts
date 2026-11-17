@@ -32,10 +32,12 @@ export interface Agent {
   /** Para quem o agente pode passar a ligação (`transfer_to_agent`). Vazia de fábrica. */
   agentHandoffTargets?: string[];
   /**
-   * O que acontece quando a ligação cai. O banco aceita quatro modos; a tela, nesta fatia, oferece
-   * `off` e `task`. Agente gravado antes do campo existir pode chegar sem ele: vale `off`.
+   * O que acontece quando a ligação cai. O banco aceita quatro modos; a tela oferece `off`, `task` e
+   * `whatsapp`. Agente gravado antes do campo existir pode chegar sem ele: vale `off`.
    */
   dropFollowUp?: DropFollowUp;
+  /** O texto do WhatsApp para quem ligou; nulo vale o padrão. */
+  dropFollowUpMessage?: string | null;
 }
 
 export type ListeningEnvironment = "normal" | "noisy";

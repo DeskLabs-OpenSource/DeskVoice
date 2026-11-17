@@ -218,6 +218,25 @@ describe("runMigrations", () => {
     await expect(db.pool.query("insert into agents (organization_id, name, engine, drop_follow_up) values ($1, 'Outro', 'simulated', 'sms')", [org])).rejects.toThrow(/drop_follow_up/);
     await expect(db.pool.query("insert into agents (organization_id, name, engine, drop_follow_up) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/drop_follow_up/);
   });
+  it("o aviso que já existe vira aviso à equipe, o agente que já existe fica sem texto, e os dois só aceitam o que o desenho diz", async () => {
+    const WHATSAPP = "20261117T032318_drop_follow_up_whatsapp.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < WHATSAPP) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Antes', 'simulated')", [org]);
+    await db.pool.query("insert into notifications (organization_id, channel, target, body) values ($1, 'whatsapp', '+5531977776666', 'Aviso de antes')", [org]);
+    await copyFile(path.join(REAL_MIGRATIONS, WHATSAPP), path.join(dir, WHATSAPP));
+    expect(await runMigrations(db, dir)).toEqual([WHATSAPP]);
+    expect((await db.pool.query("select drop_follow_up, drop_follow_up_message from agents")).rows).toEqual([{ drop_follow_up: "off", drop_follow_up_message: null }]);
+    expect((await db.pool.query("select audience, target from notifications")).rows).toEqual([{ audience: "team", target: "+5531977776666" }]);
+
+    await db.pool.query("insert into notifications (organization_id, channel, audience, target, body) values ($1, 'whatsapp', 'caller', '+5531988887777', 'Olá')", [org]);
+    await expect(db.pool.query("insert into notifications (organization_id, channel, audience, body) values ($1, 'panel', 'everyone', 'x')", [org])).rejects.toThrow(/audience/);
+    await expect(db.pool.query("insert into notifications (organization_id, channel, audience, body) values ($1, 'panel', null, 'x')", [org])).rejects.toThrow(/audience/);
+    await db.pool.query("update agents set drop_follow_up_message = $1", ["x".repeat(300)]);
+    await expect(db.pool.query("update agents set drop_follow_up_message = $1", ["x".repeat(301)])).rejects.toThrow(/drop_follow_up_message/);
+    await expect(db.pool.query("update agents set drop_follow_up_message = ''")).rejects.toThrow(/drop_follow_up_message/);
+  });
   it("os destinos de passagem que já apontavam para agente apagado saem da lista, na ordem de antes, em toda organização", async () => {
     const CLEANUP = "20261116T032848_apagar_agente_tira_destino.sql";
     for (const name of await readdir(REAL_MIGRATIONS)) if (name < CLEANUP) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));

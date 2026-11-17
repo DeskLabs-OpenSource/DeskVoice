@@ -340,8 +340,10 @@ Bloco **"Quando a ligação cai"** na tela do agente, perto de "Dono das pendên
 - Quatro opções, nesta ordem: "Não fazer nada" (padrão), "Abrir uma pendência para alguém
   retornar", "Mandar uma mensagem no WhatsApp para quem ligou" e "Ligar de volta".
 - Abaixo das opções, a definição em uma frase: "Conta como queda quando o sistema falha, quando quem
-  ligou fica alguns segundos sem resposta e desliga, ou quando a linha cai durante uma ação do
-  agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta."
+  ligou fica alguns segundos sem resposta e desliga, quando ouve o agente pedir para repetir e
+  desliga sem voltar a falar, ou quando a linha cai durante uma ação do agente. Quem desliga depois
+  de se despedir, ou enquanto o agente fala, não conta." (frase da fatia 2, que passa a citar o caso
+  2(c); pedido da DESA-86)
 - Opção indisponível aparece desabilitada, com o motivo e o caminho para resolver: sem conector de
   WhatsApp; WhatsApp sem confiar no número de quem liga; ligações de saída desligadas.
 - A opção "Ligar de volta" diz quantas tentativas e quando ("1 tentativa, 30 minutos depois, dentro

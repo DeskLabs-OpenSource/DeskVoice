@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./analysis";
 export * from "./caller-history";
+export * from "./caller-message";
 export * from "./caller-memory";
 export * from "./clock";
 export * from "./config";
@@ -21,6 +22,7 @@ export * from "./remembered-text";
 export * from "./retention";
 export * from "./routing";
 export * from "./secrets";
+export * from "./drop-follow-up";
 export * from "./spoken-language";
 export * from "./vocabulary";
 export * from "./voicemail";

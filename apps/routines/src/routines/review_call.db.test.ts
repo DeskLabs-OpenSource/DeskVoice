@@ -1,10 +1,20 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ERASED_TEXT, eraseCaller, recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
+import { DROP_FOLLOW_UP_DEFAULT_MESSAGE, ERASED_TEXT, MAX_TASK_ATTEMPTS, eraseCaller, recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
-import { createOrganization, createUser, depsFor, eventsOf, openTestDbs, t0, task, tasksOf } from "../../test/helpers";
-import reviewCallRoutine, { CASE_PHRASE, TRANSFERRED_DETAILS, reviewCall, reviewDetails, reviewTitle, type ReviewCase } from "./review_call";
+import { createOrganization, createUser, depsFor, eventsOf, fakeFetch, fakeLookup, openTestDbs, putSetting, putWhatsAppConnector, t0, task, tasksOf } from "../../test/helpers";
+import deliverNotification from "./deliver_notification";
+import reviewCallRoutine, {
+  CALLER_MESSAGE_FAILED_DETAILS,
+  CASE_PHRASE,
+  TRANSFERRED_DETAILS,
+  callerMessageFailedTitle,
+  reviewCall,
+  reviewDetails,
+  reviewTitle,
+  type ReviewCase,
+} from "./review_call";
 
 /**
  * O supervisor de regras fixas (desenho 2026-11-13-equipe-de-agentes-e-memoria, seção 4.4, fatia 5;
@@ -532,8 +542,9 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
     }
   });
 
-  it("whatsapp e call_back gravados direto no banco, sem caminho nesta fatia, caem na reserva: a pendência", async () => {
-    for (const mode of ["whatsapp", "call_back"]) {
+  it("call_back gravado direto no banco, sem caminho nesta fatia, cai na reserva: a pendência", async () => {
+    // O `whatsapp` tem caminho desde a fatia 2: os testes dele estão em "o modo whatsapp", abaixo.
+    for (const mode of ["call_back"]) {
       const s = await dropped(`drop reserve ${mode}`, "caller_waiting");
       await setMode(s.org, mode);
       await expectOpened(s, "call_dropped");
@@ -629,5 +640,290 @@ describe("review_call: o desligar depois do \"pode repetir?\"", () => {
     expect(await followUpsOf(off.org)).toEqual([]);
     const transferred = await timed("after ask transfer", [["transfer_started", { to: "+5531999990000" }, 2], ["caller_unanswered", ASK, 8]]);
     expect(await review(transferred)).toBe("no_case");
+  });
+});
+
+describe("review_call: o modo whatsapp (fatia 2)", () => {
+  const NAME = "Joana Prado";
+  const MESSAGE = "Olá. A ligação caiu. Se precisar, ligue de novo.";
+  const review = (org: string, callId: string, now = t0) => withOrg(app, org, (q) => reviewCall(q, callId, now));
+  const drops = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "drop_follow_up").map((event) => event.payload);
+  const results = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "drop_follow_up_result").map((event) => event.payload);
+  const callerNotices = (org: string) =>
+    withSystem(app, (q) =>
+      q.many<{ id: string; channel: string; audience: string; target: string | null; body: string; call_id: string | null; status: string }>(
+        "select id, channel, audience, target, body, call_id, status from notifications where organization_id = $1 and audience = 'caller' order by created_at, id",
+        [org],
+      ),
+    );
+  const deliveries = async (org: string) => (await tasksOf(app, org)).filter((row) => row.kind === "deliver_notification");
+  /** A ligação recebida e atendida em que quem ligou desligou esperando: o caso 5. O nome está na transcrição. */
+  const droppedEvents = (): Ev[] => [
+    ["call_answered", { engine: "simulated" }],
+    ["transcript_user", { text: `Meu nome é ${NAME} e quero o orçamento` }],
+    ["transcript_agent", { text: `Claro, ${NAME}, um instante.` }],
+    ["call_ended", { status: "completed", reason: "caller_hangup", costCents: 0, seconds: 30, openTurn: "caller_waiting" }],
+  ];
+  /** Organização com o pré-requisito (conector e confiança no número) e o agente em `whatsapp`, salvo `ready: false`. */
+  async function whatsappScene(label: string, options: { connector?: boolean; trust?: boolean; message?: string | null; language?: string; channel?: string; events?: Ev[]; endReason?: string } = {}): Promise<Scene> {
+    const s = await scene(label, options.events ?? droppedEvents(), { endReason: options.endReason ?? "caller_hangup", ...(options.channel && { channel: options.channel }) });
+    if (options.connector !== false) await putWhatsAppConnector(app, s.org);
+    if (options.trust !== false) await putSetting(app, s.org, "whatsapp.trust_caller_id", true, false);
+    await withSystem(app, (q) =>
+      q.exec("update agents set drop_follow_up = 'whatsapp', drop_follow_up_message = $2, language = $3 where organization_id = $1", [s.org, options.message ?? null, options.language ?? "pt-BR"]),
+    );
+    return s;
+  }
+  /** Outra ligação do mesmo número, na mesma organização e com o mesmo agente, que também caiu. */
+  async function anotherDrop(org: string, at: Date, channel = "phone"): Promise<string> {
+    const row = await withSystem(app, (q) =>
+      q.one<{ id: string }>(
+        `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
+         select $1, id, 'inbound', $3, $4, '+5531300000000', 'completed', 'caller_hangup', $2, $2 from agents where organization_id = $1 returning id`,
+        [org, at, channel, CALLER],
+      ),
+    );
+    const callId = row?.id ?? "";
+    await withOrg(app, org, async (q) => {
+      for (const [kind, payload] of droppedEvents()) await recordEvent(q, callId, kind, payload, at);
+    });
+    return callId;
+  }
+
+  it("manda o texto padrão ao número de quem ligou pela fila de avisos, sem pendência, e nada da conversa vai junto", async () => {
+    const s = await whatsappScene("wa default");
+    expect(await review(s.org, s.callId)).toBe("messaged");
+    const notices = await callerNotices(s.org);
+    expect(notices).toEqual([
+      { id: expect.any(String), channel: "whatsapp", audience: "caller", target: CALLER, body: DROP_FOLLOW_UP_DEFAULT_MESSAGE["pt-BR"], call_id: s.callId, status: "pending" },
+    ]);
+    expect(notices[0]?.body).not.toContain(NAME);
+    // O caminho de entrega é o de sempre: a tarefa `deliver_notification`, para agora.
+    expect(await deliveries(s.org)).toMatchObject([{ payload: { notificationId: notices[0]?.id }, call_id: s.callId, run_at: t0, status: "queued" }]);
+    expect(await followUpsOf(s.org)).toEqual([]);
+    expect(await drops(s.callId)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "whatsapp_queued", simulated: false, openTurn: "caller_waiting" }]);
+    expect(JSON.stringify(await eventsOf(app, s.callId)).match(/whatsapp_queued/g)).toHaveLength(1);
+  });
+
+  it("o corpo é exatamente o texto configurado: o nome que está na transcrição não entra", async () => {
+    const s = await whatsappScene("wa custom", { message: MESSAGE });
+    await review(s.org, s.callId);
+    const [notice] = await callerNotices(s.org);
+    expect(notice?.body).toBe(MESSAGE);
+    expect(notice?.body).not.toContain(NAME);
+  });
+
+  it("o texto padrão vem na língua do agente que atendeu", async () => {
+    for (const [language, expected] of [["en-US", DROP_FOLLOW_UP_DEFAULT_MESSAGE.en], ["es", DROP_FOLLOW_UP_DEFAULT_MESSAGE.es], ["fr", DROP_FOLLOW_UP_DEFAULT_MESSAGE["pt-BR"]]] as const) {
+      const s = await whatsappScene(`wa language ${language}`, { language });
+      await review(s.org, s.callId);
+      expect((await callerNotices(s.org)).map((notice) => notice.body)).toEqual([expected]);
+    }
+  });
+
+  it("o caso 1 (o motor caiu numa recebida e atendida) também manda a mensagem", async () => {
+    const s = await whatsappScene("wa engine", { events: [["call_answered", { engine: "simulated" }], ["engine_failed", { engine: "x", error: "y" }]], endReason: "engine_failed" });
+    expect(await review(s.org, s.callId)).toBe("messaged");
+    expect(await drops(s.callId)).toEqual([{ case: "engine_failed", mode: "whatsapp", action: "whatsapp_queued", simulated: false, openTurn: null }]);
+    expect(await followUpsOf(s.org)).toEqual([]);
+  });
+
+  it("os casos 2 a 4 não mudam com o modo: abrem a pendência de sempre, sem mensagem", async () => {
+    const s = await whatsappScene("wa case 2", { events: [["call_answered", { engine: "simulated" }], ["tool_called", { name: "transfer_to_human", args: {} }], toolResult("transfer_to_human", false)], endReason: "agent_hangup" });
+    expect(await review(s.org, s.callId)).toBe("opened");
+    expect(await callerNotices(s.org)).toEqual([]);
+    expect(await drops(s.callId)).toEqual([]);
+  });
+
+  it("número na lista de não ligar: nenhuma mensagem e nenhuma pendência", async () => {
+    const s = await whatsappScene("wa dnc");
+    await withSystem(app, (q) => q.exec("insert into do_not_call (organization_id, e164, reason) values ($1, $2, 'Pediu para não ser procurado')", [s.org, CALLER]));
+    expect(await review(s.org, s.callId)).toBe("do_not_call");
+    expect(await callerNotices(s.org)).toEqual([]);
+    expect(await deliveries(s.org)).toEqual([]);
+    expect(await followUpsOf(s.org)).toEqual([]);
+    expect(await drops(s.callId)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "do_not_call", simulated: false, openTurn: "caller_waiting" }]);
+    // Repetir a revisão não muda nada.
+    expect(await review(s.org, s.callId)).toBe("already_reviewed");
+    expect(await drops(s.callId)).toHaveLength(1);
+  });
+
+  it("a segunda queda do mesmo número em menos de 24 horas vira pendência, sem segunda mensagem; depois de 24 horas, sai de novo", async () => {
+    const s = await whatsappScene("wa recent");
+    expect(await review(s.org, s.callId)).toBe("messaged");
+    const later = new Date(t0.getTime() + 23 * 60 * 60 * 1000);
+    const second = await anotherDrop(s.org, later);
+    expect(await review(s.org, second, later)).toBe("opened");
+    expect(await callerNotices(s.org)).toHaveLength(1);
+    expect(await drops(second)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "recent_follow_up", simulated: false, openTurn: "caller_waiting" }]);
+    expect(await followUpsOf(s.org)).toEqual([expect.objectContaining({ call_id: second, title: reviewTitle(CALLER, "call_dropped"), source: "review_call" })]);
+
+    const nextDay = new Date(t0.getTime() + 24 * 60 * 60 * 1000 + 1000);
+    const third = await anotherDrop(s.org, nextDay);
+    expect(await review(s.org, third, nextDay)).toBe("messaged");
+    expect(await callerNotices(s.org)).toHaveLength(2);
+  });
+
+  it("o limite é por organização: outra organização com o mesmo número manda a dela", async () => {
+    const a = await whatsappScene("wa org a");
+    const b = await whatsappScene("wa org b");
+    expect(await review(a.org, a.callId)).toBe("messaged");
+    expect(await review(b.org, b.callId)).toBe("messaged");
+  });
+
+  it("a simulada não conta no limite: a queda de verdade depois dela manda a mensagem", async () => {
+    const s = await whatsappScene("wa simulated then real", { channel: "simulated" });
+    expect(await review(s.org, s.callId)).toBe("simulated");
+    const real = await anotherDrop(s.org, t0);
+    expect(await review(s.org, real)).toBe("messaged");
+  });
+
+  it("duas revisões em paralelo de duas quedas do mesmo número mandam uma mensagem só", async () => {
+    const s = await whatsappScene("wa parallel");
+    const second = await anotherDrop(s.org, t0);
+    const outcomes = await Promise.all([review(s.org, s.callId), review(s.org, second)]);
+    expect(outcomes.sort()).toEqual(["messaged", "opened"]);
+    expect(await callerNotices(s.org)).toHaveLength(1);
+    expect(await followUpsOf(s.org)).toHaveLength(1);
+  });
+
+  it("repetir a revisão não manda a segunda mensagem", async () => {
+    const s = await whatsappScene("wa twice");
+    await run(s.org, s.callId);
+    await run(s.org, s.callId);
+    expect(await callerNotices(s.org)).toHaveLength(1);
+    expect(await deliveries(s.org)).toHaveLength(1);
+    expect(await drops(s.callId)).toHaveLength(1);
+  });
+
+  it("sem trust_caller_id, ou sem conector (o ajuste desligado depois de escolher o modo): mode_unavailable e a pendência de reserva", async () => {
+    for (const [label, options] of [["wa untrusted", { trust: false }], ["wa no connector", { connector: false }], ["wa trust false", { trust: false }]] as const) {
+      const s = await whatsappScene(label, options);
+      if (label === "wa trust false") await putSetting(app, s.org, "whatsapp.trust_caller_id", false, false);
+      expect(await review(s.org, s.callId)).toBe("opened");
+      expect(await callerNotices(s.org)).toEqual([]);
+      expect(await deliveries(s.org)).toEqual([]);
+      expect(await drops(s.callId)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "mode_unavailable", simulated: false, openTurn: "caller_waiting" }]);
+      expect(await followUpsOf(s.org)).toEqual([expect.objectContaining({ call_id: s.callId, title: reviewTitle(CALLER, "call_dropped"), owner_user_id: s.person, source: "review_call" })]);
+    }
+  });
+
+  it("simulada: grava o que teria acontecido, com simulated true, sem aviso, sem tarefa e sem pendência", async () => {
+    const queued = await whatsappScene("wa simulated", { channel: "simulated" });
+    expect(await review(queued.org, queued.callId)).toBe("simulated");
+    expect(await drops(queued.callId)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "whatsapp_queued", simulated: true, openTurn: "caller_waiting" }]);
+
+    const unavailable = await whatsappScene("wa simulated untrusted", { channel: "simulated", trust: false });
+    expect(await review(unavailable.org, unavailable.callId)).toBe("simulated");
+    expect(await drops(unavailable.callId)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "mode_unavailable", simulated: true, openTurn: "caller_waiting" }]);
+
+    const dnc = await whatsappScene("wa simulated dnc", { channel: "simulated" });
+    await withSystem(app, (q) => q.exec("insert into do_not_call (organization_id, e164) values ($1, $2)", [dnc.org, CALLER]));
+    expect(await review(dnc.org, dnc.callId)).toBe("simulated");
+    expect(await drops(dnc.callId)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "do_not_call", simulated: true, openTurn: "caller_waiting" }]);
+
+    for (const s of [queued, unavailable, dnc]) {
+      expect(await callerNotices(s.org)).toEqual([]);
+      expect(await deliveries(s.org)).toEqual([]);
+      expect(await followUpsOf(s.org)).toEqual([]);
+    }
+  });
+
+  it("a vez fechada (o tchau seguido do desligar) não manda nada", async () => {
+    const s = await whatsappScene("wa closed", {
+      events: [["call_answered", { engine: "simulated" }], ["call_ended", { status: "completed", reason: "caller_hangup", costCents: 0, seconds: 30, openTurn: null }]],
+    });
+    expect(await review(s.org, s.callId)).toBe("no_case");
+    expect(await callerNotices(s.org)).toEqual([]);
+  });
+
+  describe("a entrega", () => {
+    const deliver = (org: string, notificationId: string, respond: () => Response, attempts = 1) =>
+      deliverNotification.run({ ...task(org, "deliver_notification", { notificationId }), attempts }, depsFor(app, { fetch: fakeFetch(respond).fetch, lookup: fakeLookup() }));
+    const down = () => new Response("down", { status: 502 });
+    const queuedScene = async (label: string): Promise<Scene & { notice: string }> => {
+      const s = await whatsappScene(label, { message: MESSAGE });
+      await review(s.org, s.callId);
+      const [notice] = await callerNotices(s.org);
+      return { ...s, notice: notice?.id ?? "" };
+    };
+
+    it("a mensagem que sai vai ao número de quem ligou, com o texto do agente, e grava whatsapp_sent", async () => {
+      const s = await queuedScene("wa deliver ok");
+      const net = fakeFetch();
+      await deliverNotification.run(task(s.org, "deliver_notification", { notificationId: s.notice }), depsFor(app, { fetch: net.fetch, lookup: fakeLookup() }));
+      expect(net.requests.map((request) => request.body)).toEqual([{ to: CALLER, text: MESSAGE, callId: s.callId }]);
+      expect(await results(s.callId)).toEqual([{ action: "whatsapp_sent" }]);
+      expect(await followUpsOf(s.org)).toEqual([]);
+    });
+
+    it("a tentativa que falha antes da última não grava nada; a última abre exatamente uma pendência e grava whatsapp_failed", async () => {
+      const s = await queuedScene("wa deliver fail");
+      for (let attempt = 1; attempt < MAX_TASK_ATTEMPTS; attempt += 1) {
+        await expect(deliver(s.org, s.notice, down, attempt)).rejects.toThrow("HTTP 502");
+        expect(await results(s.callId)).toEqual([]);
+        expect(await followUpsOf(s.org)).toEqual([]);
+      }
+      await expect(deliver(s.org, s.notice, down, MAX_TASK_ATTEMPTS)).rejects.toThrow("HTTP 502");
+      expect(await results(s.callId)).toEqual([{ action: "whatsapp_failed" }]);
+      expect(await followUpsOf(s.org)).toEqual([
+        expect.objectContaining({ call_id: s.callId, caller_e164: CALLER, title: callerMessageFailedTitle(CALLER), details: CALLER_MESSAGE_FAILED_DETAILS, owner_user_id: s.person, source: "review_call", status: "open" }),
+      ]);
+      expect(callerMessageFailedTitle(CALLER)).toBe(`Retornar para ${CALLER}: a mensagem para quem ligou não saiu`);
+      // A última tentativa repetida (a fila devolve a tarefa presa) não abre a segunda nem grava de novo.
+      await expect(deliver(s.org, s.notice, down, MAX_TASK_ATTEMPTS)).rejects.toThrow("HTTP 502");
+      expect(await results(s.callId)).toHaveLength(1);
+      expect(await followUpsOf(s.org)).toHaveLength(1);
+    });
+
+    it("a tentativa que falha e depois sai grava só whatsapp_sent, sem pendência", async () => {
+      const s = await queuedScene("wa deliver retry");
+      await expect(deliver(s.org, s.notice, down, 1)).rejects.toThrow("HTTP 502");
+      await deliver(s.org, s.notice, () => new Response("ok"), 2);
+      expect(await results(s.callId)).toEqual([{ action: "whatsapp_sent" }]);
+      expect(await followUpsOf(s.org)).toEqual([]);
+    });
+
+    it("o aviso à equipe que falha não grava resultado nem abre pendência", async () => {
+      const s = await queuedScene("wa deliver team");
+      const team = await withSystem(app, (q) =>
+        q.one<{ id: string }>("insert into notifications (organization_id, call_id, channel, target, body) values ($1, $2, 'whatsapp', '+5531977776666', 'Aviso') returning id", [s.org, s.callId]),
+      );
+      await expect(deliver(s.org, team?.id ?? "", down, MAX_TASK_ATTEMPTS)).rejects.toThrow("HTTP 502");
+      expect(await results(s.callId)).toEqual([]);
+      expect(await followUpsOf(s.org)).toEqual([]);
+    });
+
+    it("a ligação apagada a pedido do titular antes da entrega: o número não sai, e a falha não abre pendência", async () => {
+      const s = await queuedScene("wa deliver erased");
+      const dir = await mkdtemp(join(tmpdir(), "wa-erase-"));
+      await withOrg(app, s.org, (q) => eraseCaller(q, { dir, phoneE164: CALLER, now: t0 }));
+      const net = fakeFetch();
+      await expect(
+        deliverNotification.run({ ...task(s.org, "deliver_notification", { notificationId: s.notice }), attempts: MAX_TASK_ATTEMPTS }, depsFor(app, { fetch: net.fetch, lookup: fakeLookup() })),
+      ).rejects.toThrow("has no target");
+      expect(net.requests).toEqual([]);
+      expect(await results(s.callId)).toEqual([{ action: "whatsapp_failed" }]);
+      expect(await followUpsOf(s.org)).toEqual([]);
+    });
+  });
+
+  it("o apagamento a pedido do titular anula o target da mensagem para quem ligou e não mexe no target do aviso à equipe", async () => {
+    const s = await whatsappScene("wa erase", { message: MESSAGE });
+    await review(s.org, s.callId);
+    const TEAM = "+5531977776666";
+    await withSystem(app, (q) => q.exec("insert into notifications (organization_id, call_id, channel, target, body) values ($1, $2, 'whatsapp', $3, 'Aviso da equipe')", [s.org, s.callId, TEAM]));
+    const dir = await mkdtemp(join(tmpdir(), "wa-erase-"));
+    const counts = await withOrg(app, s.org, (q) => eraseCaller(q, { dir, phoneE164: CALLER, now: t0 }));
+    expect(counts).toMatchObject({ notifications: 2 });
+    const rows = await withSystem(app, (q) =>
+      q.many<{ audience: string; target: string | null; body: string }>("select audience, target, body from notifications where organization_id = $1 order by audience", [s.org]),
+    );
+    // O aviso `team` fica como já ficava: o corpo trocado, o número de quem o recebe mantido.
+    expect(rows).toEqual([
+      { audience: "caller", target: null, body: ERASED_TEXT },
+      { audience: "team", target: TEAM, body: ERASED_TEXT },
+    ]);
+    expect(JSON.stringify(await withSystem(app, (q) => q.many("select * from notifications where organization_id = $1", [s.org])))).not.toContain(CALLER);
   });
 });

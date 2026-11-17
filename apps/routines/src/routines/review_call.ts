@@ -1,4 +1,4 @@
-import { createFollowUp, OPEN_TURNS, recordEvent, withOrg, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
+import { callerMessageBlock, createFollowUp, dropFollowUpDefaultMessage, enqueueTask, lockCall, OPEN_TURNS, recordEvent, withOrg, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
 import type { Routine } from "../types";
 
 /**
@@ -18,7 +18,9 @@ import type { Routine } from "../types";
  * decisão de 17/11), ou o sistema falhou (`internal_error`, que fica fora do caso 1). Ele e o caso 1
  * seguem o modo do agente que atendeu
  * (`agents.drop_follow_up`): em `off`, o padrão, o caso 1 abre a pendência como sempre e o caso 5 não
- * faz nada, e a revisão é a de antes; em `task`, os dois abrem.
+ * faz nada, e a revisão é a de antes; em `task`, os dois abrem; em `whatsapp` (fatia 2, seção 3.5),
+ * os dois mandam ao número de quem ligou o texto fixo do agente, pela fila de avisos, e a pendência
+ * fica de reserva para quando a mensagem não pode sair.
  */
 
 export const REVIEW_CASES = ["engine_failed", "transfer_failed", "caller_hung_up_waiting", "whatsapp_not_sent", "call_dropped"] as const;
@@ -37,6 +39,15 @@ export const CASE_PHRASE: Record<ReviewCase, string> = {
 const DROP_CASES: ReadonlySet<ReviewCase> = new Set<ReviewCase>(["engine_failed", "call_dropped"]);
 
 export const reviewTitle = (caller: string, found: ReviewCase): string => `Retornar para ${caller}: ${CASE_PHRASE[found]}`;
+
+/** A reserva do modo `whatsapp` quando a mensagem para quem ligou falhou na entrega (seção 3.4 do desenho). Texto fixo. */
+export const CALLER_MESSAGE_FAILED_PHRASE = "a mensagem para quem ligou não saiu";
+export const callerMessageFailedTitle = (caller: string): string => `Retornar para ${caller}: ${CALLER_MESSAGE_FAILED_PHRASE}`;
+export const CALLER_MESSAGE_FAILED_DETAILS =
+  "Aberta pelo supervisor de regras fixas: a ligação caiu, e a mensagem no WhatsApp para quem ligou não saiu. Veja a linha do tempo da ligação.";
+
+/** Uma mensagem para quem ligou por número a cada 24 horas, na organização (seção 3.3 do desenho). */
+export const CALLER_MESSAGE_EVERY_MS = 24 * 60 * 60 * 1000;
 /**
  * Os detalhes, também texto fixo. O caso 1 numa ligação que já tinha sido transferida tem frase
  * própria: ali alguém pode ter atendido, mas o sistema não tem como confirmar.
@@ -160,15 +171,58 @@ export function reviewCaseOf(events: readonly ReviewEvent[], endReason: string |
 export interface DropFollowUpPayload {
   case: "engine_failed" | "call_dropped";
   mode: Exclude<DropFollowUpMode, "off">;
-  action: "task_opened";
+  action: DropFollowUpAction;
+  /** Só com `action: "skipped"`. */
+  reason?: DropFollowUpSkip;
   simulated: boolean;
   openTurn: OpenTurn | null;
+}
+export type DropFollowUpAction = "task_opened" | "whatsapp_queued" | "skipped";
+/**
+ * Por que o modo não agiu. `do_not_call`: a pessoa pediu para não ser procurada, e não há pendência.
+ * `mode_unavailable` e `recent_follow_up`: cai na pendência de reserva.
+ */
+export type DropFollowUpSkip = "do_not_call" | "mode_unavailable" | "recent_follow_up";
+
+/** O payload de `drop_follow_up_result` desta fatia: só as ações do WhatsApp. As da religação vêm nas fatias 3 e 4. */
+export interface DropFollowUpResultPayload {
+  action: "whatsapp_sent" | "whatsapp_failed";
+}
+
+/**
+ * O que o modo `whatsapp` faz com uma queda, conferido na hora de agir. A ordem é a do desenho: sem
+ * o pré-requisito, nada sai; número na lista de não ligar não recebe e não vira pendência; número que
+ * já recebeu nas últimas 24 horas não recebe de novo. O limite olha qualquer ligação da organização,
+ * e não a simulada: o número de quem liga pode ser forjado, e sem ele quem quisesse incomodar alguém
+ * ligaria com o número da vítima e desligaria no meio, várias vezes.
+ */
+async function whatsAppAction(q: OrgQuery, caller: string | null, now: Date): Promise<{ action: DropFollowUpAction; reason?: DropFollowUpSkip }> {
+  if ((await callerMessageBlock(q)) !== null) return { action: "skipped", reason: "mode_unavailable" };
+  // Simulada sem número: não há lista nem limite a conferir, e a mensagem teria saído.
+  if (caller === null) return { action: "whatsapp_queued" };
+  // Duas revisões de ligações diferentes do mesmo número, ao mesmo tempo, passariam as duas pelo
+  // limite: a trava por número, até o fim da transação, faz a segunda ver o aviso da primeira.
+  await q.exec("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`drop_follow_up_whatsapp:${q.organizationId}:${caller}`]);
+  if (await q.one("select 1 from do_not_call where organization_id = $1 and e164 = $2", [q.organizationId, caller])) return { action: "skipped", reason: "do_not_call" };
+  // O aviso `caller` nasce na mesma transação do `drop_follow_up` com `whatsapp_queued`, e só nela (a
+  // simulada não cria aviso): contar um é contar o outro, e o índice por data dos avisos limita a busca
+  // às últimas 24 horas.
+  const recent = await q.one(
+    "select 1 from notifications where organization_id = $1 and audience = 'caller' and target = $2 and created_at > $3 limit 1",
+    [q.organizationId, caller, new Date(now.getTime() - CALLER_MESSAGE_EVERY_MS)],
+  );
+  if (recent) return { action: "skipped", reason: "recent_follow_up" };
+  return { action: "whatsapp_queued" };
 }
 
 const openTurnOf = (value: unknown): OpenTurn | null => (OPEN_TURNS as readonly unknown[]).includes(value) ? (value as OpenTurn) : null;
 
-/** O que a revisão fez com a chamada; a fila não usa, os testes sim. `simulated`: a simulada gravou o que teria acontecido. */
-export type ReviewResult = "opened" | "no_case" | "skipped" | "already_reviewed" | "simulated";
+/**
+ * O que a revisão fez com a chamada; a fila não usa, os testes sim. `simulated`: a simulada gravou o
+ * que teria acontecido. `messaged`: a mensagem para quem ligou entrou na fila de avisos.
+ * `do_not_call`: o número está na lista de não ligar, e nada saiu nem foi aberto.
+ */
+export type ReviewResult = "opened" | "no_case" | "skipped" | "already_reviewed" | "simulated" | "messaged" | "do_not_call";
 
 /**
  * Revê uma chamada e abre a pendência, se for o caso, na transação de `q`.
@@ -180,11 +234,22 @@ export type ReviewResult = "opened" | "no_case" | "skipped" | "already_reviewed"
  * alcançada por ele, ou não nasce.
  */
 export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promise<ReviewResult> {
-  const call = await q.one<{ agent_id: string | null; channel: string; direction: "inbound" | "outbound"; erased: boolean; caller: string | null; end_reason: string | null; mode: DropFollowUpMode | null }>(
-    `select agent_id, channel, direction, erased_at is not null as erased, end_reason,
-            case when direction = 'outbound' then to_e164 else from_e164 end as caller,
-            (select drop_follow_up from agents where id = calls.agent_id) as mode
-       from calls where id = $1 for update`,
+  const call = await q.one<{
+    agent_id: string | null;
+    channel: string;
+    direction: "inbound" | "outbound";
+    erased: boolean;
+    caller: string | null;
+    end_reason: string | null;
+    mode: DropFollowUpMode | null;
+    message: string | null;
+    language: string | null;
+  }>(
+    `select c.agent_id, c.channel, c.direction, c.erased_at is not null as erased, c.end_reason,
+            case when c.direction = 'outbound' then c.to_e164 else c.from_e164 end as caller,
+            a.drop_follow_up as mode, a.drop_follow_up_message as message, a.language
+       from calls c left join agents a on a.id = c.agent_id
+      where c.id = $1 for update of c`,
     [callId],
   );
   // A chamada pode ter sumido entre o fim e a revisão (outra organização, ou apagada): nada a fazer,
@@ -199,7 +264,9 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
   if (simulated && mode === "off") return "skipped";
   if (!simulated && call.caller === null) return "skipped";
   if (!simulated && (await q.one("select 1 from follow_ups where call_id = $1 and source = 'review_call'", [callId]))) return "already_reviewed";
-  if (simulated && (await q.one("select 1 from call_events where call_id = $1 and kind = 'drop_follow_up'", [callId]))) return "already_reviewed";
+  // O modo `whatsapp` pode agir sem abrir pendência (a mensagem saiu, ou o número está na lista de não
+  // ligar): o evento é o que marca a revisão feita, e repetir a tarefa não manda a segunda mensagem.
+  if (await q.one("select 1 from call_events where call_id = $1 and kind = 'drop_follow_up'", [callId])) return "already_reviewed";
 
   const events = await q.many<ReviewEvent>(
     `select kind,
@@ -243,33 +310,79 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
   // atender e a ligação feita seguem só no caso 1 de sempre, sem o evento.
   const answeredInbound = call.direction === "inbound" && events.some((event) => event.kind === "call_answered");
   const dropped = DROP_CASES.has(found) && mode !== "off" && answeredInbound;
-  const report = async (): Promise<void> => {
-    if (!dropped) return;
-    // `whatsapp` e `call_back` ainda não têm caminho (fatias 2 a 4) e a rota não os aceita; gravados
-    // direto no banco, caem na reserva, que é a pendência.
-    // Pela condição 2(c), a leitura da revisão é a de quem esperava; o `call_ended` continua `null`.
+  // Pela condição 2(c), a leitura da revisão é a de quem esperava; o `call_ended` continua `null`.
+  const report = (outcome: { action: DropFollowUpAction; reason?: DropFollowUpSkip }): Promise<void> => {
     const payload: DropFollowUpPayload = {
       case: found as DropFollowUpPayload["case"],
       mode: mode as DropFollowUpPayload["mode"],
-      action: "task_opened",
+      action: outcome.action,
+      ...(outcome.reason !== undefined && { reason: outcome.reason }),
       simulated,
       openTurn: found === "call_dropped" && afterAsk ? "caller_waiting" : openTurn,
     };
-    await recordEvent(q, callId, "drop_follow_up", payload, now);
+    return recordEvent(q, callId, "drop_follow_up", payload, now);
   };
+  // `task` abre a pendência. `whatsapp` confere o pré-requisito, a lista e o limite na hora de agir.
+  // `call_back` ainda não tem caminho (fatias 3 e 4) e a rota não o aceita; gravado direto no banco,
+  // cai na reserva, que é a pendência.
+  const outcome = dropped && mode === "whatsapp" ? await whatsAppAction(q, call.caller, now) : { action: "task_opened" as const };
   if (simulated) {
     if (!dropped) return "skipped";
-    await report();
+    await report(outcome);
     return "simulated";
   }
-  if (call.caller === null) return "skipped";
+  const caller = call.caller;
+  if (caller === null) return "skipped";
+  if (outcome.action === "whatsapp_queued") {
+    // O caminho dos avisos (seção 3.5): uma linha em `notifications` e a tarefa `deliver_notification`
+    // de sempre. O corpo é o texto fixo do agente, ou o padrão do sistema na língua dele; nada da
+    // conversa entra, e a revisão nem lê a transcrição.
+    const body = call.message ?? dropFollowUpDefaultMessage(call.language);
+    const notice = await q.one<{ id: string }>(
+      "insert into notifications (organization_id, call_id, channel, audience, target, body, created_at) values ($1, $2, 'whatsapp', 'caller', $3, $4, $5) returning id",
+      [q.organizationId, callId, caller, body, now],
+    );
+    if (!notice) throw new Error(`Caller message for call ${callId} was not created`);
+    await enqueueTask(q, { kind: "deliver_notification", payload: { notificationId: notice.id }, callId, runAt: now });
+    await report(outcome);
+    return "messaged";
+  }
+  // A pessoa pediu para não ser procurada: nem mensagem, nem pendência para alguém retornar.
+  if (outcome.reason === "do_not_call") {
+    await report(outcome);
+    return "do_not_call";
+  }
   await createFollowUp(
     q,
-    { callId, agentId: call.agent_id, title: reviewTitle(call.caller, found), details: reviewDetails(found, events.some((event) => event.kind === "transfer_started")), dueAt: now, origin: { source: "review_call", case: found } },
+    { callId, agentId: call.agent_id, title: reviewTitle(caller, found), details: reviewDetails(found, events.some((event) => event.kind === "transfer_started")), dueAt: now, origin: { source: "review_call", case: found } },
     now,
   );
-  await report();
+  if (dropped) await report(outcome);
   return "opened";
+}
+
+/**
+ * A entrega da mensagem para quem ligou (`notifications.audience = 'caller'`) terminou: grava o
+ * resultado na ligação original (`drop_follow_up_result`, seção 3.7) e, se ela não saiu, abre a
+ * pendência de reserva, a mesma do supervisor (`source = 'review_call'`, uma por ligação). Chamada por
+ * `deliver_notification` no envio que sai e na última tentativa que falha, na transação de `q`.
+ *
+ * Repetir não grava de novo nem abre a segunda pendência. Ligação apagada a pedido do titular não
+ * recebe pendência: ela traria o número de volta.
+ */
+export async function recordCallerMessageResult(q: OrgQuery, callId: string, action: DropFollowUpResultPayload["action"], now: Date): Promise<void> {
+  const { erased } = await lockCall(q, callId);
+  if (await q.one("select 1 from call_events where call_id = $1 and kind = 'drop_follow_up_result'", [callId])) return;
+  await recordEvent(q, callId, "drop_follow_up_result", { action } satisfies DropFollowUpResultPayload, now);
+  if (action !== "whatsapp_failed" || erased) return;
+  const call = await q.one<{ agent_id: string | null; caller: string | null }>("select agent_id, from_e164 as caller from calls where id = $1", [callId]);
+  if (!call?.caller) return;
+  if (await q.one("select 1 from follow_ups where call_id = $1 and source = 'review_call'", [callId])) return;
+  await createFollowUp(
+    q,
+    { callId, agentId: call.agent_id, title: callerMessageFailedTitle(call.caller), details: CALLER_MESSAGE_FAILED_DETAILS, dueAt: now, origin: { source: "review_call", case: "caller_message_failed" } },
+    now,
+  );
 }
 
 const routine: Routine = {

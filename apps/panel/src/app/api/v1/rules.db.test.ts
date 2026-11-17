@@ -138,8 +138,9 @@ describe("agents", () => {
     // Mudar outro campo não mexe no modo.
     expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ dropFollowUp: "task" });
 
-    // WhatsApp e religação só têm caminho nas fatias 2 a 4: a rota recusa, mesmo que o banco aceite.
-    for (const dropFollowUp of ["whatsapp", "call_back", "TASK", "", null, 1]) {
+    // A religação só tem caminho nas fatias 3 e 4: a rota recusa, mesmo que o banco aceite. O WhatsApp
+    // tem o teste próprio, abaixo.
+    for (const dropFollowUp of ["call_back", "TASK", "", null, 1]) {
       const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { dropFollowUp } });
       expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", expect.stringMatching(/dropFollowUp/)]);
     }
@@ -149,6 +150,55 @@ describe("agents", () => {
 
     const back = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { dropFollowUp: "off" } });
     expect([back.status, back.data]).toMatchObject([200, { dropFollowUp: "off" }]);
+  });
+});
+
+describe("agents: a mensagem no WhatsApp para quem ligou (R2, fatia 2)", () => {
+  it("refuses whatsapp without a connector or without trusting the caller id, with the reason, and accepts it with both", async () => {
+    const own = await createOrganization(panel.app, "drop whatsapp");
+    const cookie = (await createUser(panel.app, own, "owner")).cookie;
+    const read = (id: string) => withOrg(panel.app, own, (q) => q.one("select drop_follow_up, drop_follow_up_message from agents where id = $1", [id]));
+    const created = await call(createAgent, { method: "POST", cookie, body: { name: "Queda WA", engine: "simulated" } });
+    expect(created.data).toMatchObject({ dropFollowUp: "off", dropFollowUpMessage: null });
+    const id = (created.data as { id: string }).id;
+    const choose = (body: object) => call(patchAgent, { method: "PATCH", cookie, params: { id }, body });
+
+    const noConnector = await choose({ dropFollowUp: "whatsapp" });
+    expect([noConnector.status, noConnector.code]).toEqual([400, "drop_follow_up_whatsapp_not_connected"]);
+    const onCreate = await call(createAgent, { method: "POST", cookie, body: { name: "Z", engine: "simulated", dropFollowUp: "whatsapp" } });
+    expect([onCreate.status, onCreate.code]).toEqual([400, "drop_follow_up_whatsapp_not_connected"]);
+
+    await call(putSetting, { method: "PUT", cookie, params: { key: "whatsapp.connector" }, body: { value: { type: "webhook", url: "https://hooks.example.test/wa", token: "t" } } });
+    const untrusted = await choose({ dropFollowUp: "whatsapp" });
+    expect([untrusted.status, untrusted.code]).toEqual([400, "drop_follow_up_caller_id_not_trusted"]);
+    await call(putSetting, { method: "PUT", cookie, params: { key: "whatsapp.trust_caller_id" }, body: { value: false } });
+    expect((await choose({ dropFollowUp: "whatsapp" })).code).toBe("drop_follow_up_caller_id_not_trusted");
+    expect(await read(id)).toEqual({ drop_follow_up: "off", drop_follow_up_message: null });
+
+    await call(putSetting, { method: "PUT", cookie, params: { key: "whatsapp.trust_caller_id" }, body: { value: true } });
+    const chosen = await choose({ dropFollowUp: "whatsapp", dropFollowUpMessage: "  Sua ligação caiu. Ligue de novo.  " });
+    expect([chosen.status, chosen.data]).toMatchObject([200, { dropFollowUp: "whatsapp", dropFollowUpMessage: "Sua ligação caiu. Ligue de novo." }]);
+    expect(await read(id)).toEqual({ drop_follow_up: "whatsapp", drop_follow_up_message: "Sua ligação caiu. Ligue de novo." });
+
+    // O ajuste desligado depois: a rota não deixa escolher de novo, mas os outros campos continuam salvando
+    // (a revisão é que grava mode_unavailable e abre a pendência).
+    await call(putSetting, { method: "PUT", cookie, params: { key: "whatsapp.trust_caller_id" }, body: { value: false } });
+    expect((await choose({ dropFollowUp: "whatsapp" })).code).toBe("drop_follow_up_caller_id_not_trusted");
+    expect((await choose({ enabled: false })).data).toMatchObject({ enabled: false, dropFollowUp: "whatsapp" });
+    expect((await choose({ dropFollowUp: "task" })).data).toMatchObject({ dropFollowUp: "task" });
+  });
+
+  it("keeps the message text up to 300 characters, empty as null, and never more", async () => {
+    const id = await newAgent("Queda texto");
+    const patch = (dropFollowUpMessage: unknown) => call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { dropFollowUpMessage } });
+    expect((await patch("x".repeat(300))).status).toBe(200);
+    const tooLong = await patch("x".repeat(301));
+    expect([tooLong.status, tooLong.code, tooLong.message]).toEqual([400, "validation_error", expect.stringMatching(/dropFollowUpMessage/)]);
+    expect(await stored("select char_length(drop_follow_up_message) as n from agents where id = $1", [id])).toEqual({ n: 300 });
+    expect((await patch("   ")).data).toMatchObject({ dropFollowUpMessage: null });
+    expect((await patch(null)).data).toMatchObject({ dropFollowUpMessage: null });
+    // O banco confere o mesmo teto, para o texto gravado fora da rota.
+    await expect(withOrg(panel.app, org, (q) => q.exec("update agents set drop_follow_up_message = $2 where id = $1", [id, "x".repeat(301)]))).rejects.toThrow(/check/);
   });
 });
 
