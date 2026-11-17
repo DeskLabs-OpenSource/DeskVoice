@@ -1,6 +1,9 @@
 # Kit de skills de contribuição: o que o DeskcommCRM tem e o DeskVoice ainda não
 
-- **Estado:** desenho. Nenhum arquivo do kit foi escrito.
+- **Estado:** implementado. As cinco fatias estão na `main`: #318 (`ec353ad`), #322 (`30b43b7`),
+  #372 (`4de49bb`), #375 (`d0dcc7d`) e #379 (`0210f1d`). Em `0210f1d`, `pnpm skills:sync` não
+  deixa diferença e `pnpm fences` passa. O carregamento numa sessão nova do Claude Code, do Codex
+  e do Cursor não foi conferido (seção 7).
 - **Data:** 2026-11-16
 - **Quem pediu:** o dono, no roteiro de novembro (item R9), em 13/11: "o kit de skills de
   contribuição que vai embutido no projeto, para quem clonar o projeto e quiser contribuir já vir
