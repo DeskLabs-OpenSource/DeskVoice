@@ -44,7 +44,9 @@ modelo e lê só a linha da chamada e o tipo e os campos estáveis dos eventos, 
      depois da 1ª reprovação do #367);
    - (c) `caller_hangup` **depois do "pode repetir?"**: a guarda já pediu para repetir
      (`caller_unanswered` com `action: "asked_to_repeat"`), e quem ligou não falou mais até
-     desligar (seção 3.3). É quem esperou mais tempo, e o `openTurn` dele sai `null`, porque a guarda
+     desligar (seção 3.3). "Não falou mais" é um fato da sessão (`callerSpokeAfterAsk`, seção 3.1), e
+     não a ausência de transcrição: a última fala antes do desligar costuma não virar
+     `transcript_user` (decisão de 17/11, depois da 3ª reprovação do #367). É quem esperou mais tempo, e o `openTurn` dele sai `null`, porque a guarda
      desarma ao pedir (decisão de 17/11, pedida pela revisão do #367).
 3. **Ninguém ficou com o próximo passo na própria ligação.** Não há `transfer_started`,
    `voicemail_left`, `follow_up_created`, `human_notified` nem um `tool_result` de `send_whatsapp`
@@ -96,6 +98,23 @@ vez volta a `null`. Quem esperou mais, ouviu o "pode repetir?" e desligou não s
 `call_ended`. Esse caso é contado pela revisão, a partir dos eventos (condição 2(c) e seção 3.3),
 sem mudar a guarda nem o `openTurn`.
 
+**O segundo campo, `callerSpokeAfterAsk`** (decisão de 17/11, depois da 3ª reprovação do #367).
+No mesmo fim por `caller_hangup`, e **só** se a guarda pediu para repetir ao menos uma vez nesta
+ligação, a sessão grava no `call_ended` o booleano `callerSpokeAfterAsk`: `true` se, depois do
+**último** `asked_to_repeat`, chegou ao menos um `callerActivity` com `words: true`; `false` se não.
+Sem pedido na ligação, o campo não é gravado.
+
+- A sessão marca o fato no próprio `on("callerActivity")`, **antes** de a guarda filtrar o sinal
+  (a guarda ignora fala durante o áudio do agente, e quem diz "tchau" por cima do "pode repetir?"
+  falou do mesmo jeito). Vale só o sinal da sessão em curso (`current()`), como hoje.
+- O pedido zera o fato no mesmo instante em que o `caller_unanswered{asked_to_repeat}` é emitido.
+- `words: false` (início de fala sem texto) **não** conta: com ruído contínuo ele nunca para, e a
+  linha ruim é justamente o caso que a 2(c) quer cobrir.
+- É um fato fixo, sem texto. A transcrição sozinha não basta: no Gemini Live o texto de quem ligou
+  só vira `transcript_user` no `flush`, que não acontece no `close()`; no OpenAI Realtime o
+  `completed` chega depois do fim da fala e pode se perder no desligar. As palavras parciais, porém,
+  chegam à sessão como `callerActivity{words: true}`.
+
 **Por que `agent_speaking` não conta** (mesma decisão). Quem desliga no meio da fala do agente é,
 na maior parte, quem já ouviu o que precisava, inclusive a despedida do agente sem `end_call`. A
 regra é fixa e sem modelo, e não tem como separar isso de uma linha que caiu. O valor continua
@@ -134,8 +153,8 @@ O supervisor continua sendo a única revisão depois da ligação. Ele ganha:
   `transcript_agent`.
 
 **A condição 2(c), lida dos eventos** (decisão de 17/11). Vale quando o fim é `caller_hangup` e o
-`openTurn` é `null`, há ao menos um `caller_unanswered` com `action: "asked_to_repeat"` e, depois do
-**último** deles:
+`openTurn` é `null`, o `call_ended` tem `callerSpokeAfterAsk` **igual a `false`** (ausente não vale),
+há ao menos um `caller_unanswered` com `action: "asked_to_repeat"` e, depois do **último** deles:
 - não há nenhum `transcript_user`;
 - há **no máximo um** `transcript_agent`. Esse é o espaço da transcrição do próprio pedido, se o
   motor gravar uma. A regra conta eventos, sem ler texto. Dois ou mais significam que o agente
@@ -374,6 +393,10 @@ Por fatia, com teste:
   de novo abre o caso 5 em `task` (sessão real com motor manual), também depois de uma espera longa
   (por exemplo, 20 s). Se quem ligou fala depois do pedido, ou se o agente responde de fato depois
   dele (dois `transcript_agent`), não abre nada.
+  Depois da 3ª reprovação do #367: quem ligou emite `callerActivity{words: true}` depois do pedido,
+  **sem** `transcript_user`, e desliga logo: não abre nada em nenhum modo (sessão real com motor
+  manual). O mesmo vale com a fala por cima do áudio do pedido. Só `callerActivity{words: false}`
+  depois do pedido continua abrindo o caso 5 em `task`. O `call_ended` sem pedido não tem o campo.
 - **F2.** Número em `do_not_call` não recebe mensagem. A segunda queda do mesmo número em menos de 24
   horas cai em pendência. Sem `trust_caller_id`, a rota recusa o modo e a revisão grava
   `mode_unavailable`. O corpo da mensagem é exatamente o texto configurado, sem nada da conversa: o
@@ -437,6 +460,9 @@ Dono do pedido: **Arquiteto**. Vai ao lote do Líder, no formato do `GOVERNANCE.
   que tenha esperado. O preço é o caso raro de quem disse "tchau", ficou calado na linha mais de
   6,5 s sem resposta do agente, ouviu o pedido e desligou. Não foi medido se o "pode repetir?" gera
   um `transcript_agent`: a regra aceita zero ou um.
+  Não foi medido em ligação real se cada motor entrega `callerActivity{words: true}` para a fala
+  curta antes de quem ligou desligar. Onde não entregar, o "tchau" depois do pedido ainda abre
+  pendência; a fatia 5 da R11 mede isso com os mesmos eventos.
   A medida vem da fatia 1 em uso: quantos casos 5 por dia, e quantos a equipe fecha como "não era
   queda".
 - Se o `silenceGuard` expõe hoje, sem mudança, o estado "vez de quem ligou aberta". O desenho supõe
