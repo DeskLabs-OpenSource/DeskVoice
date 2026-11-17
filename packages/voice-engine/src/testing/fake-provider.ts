@@ -6,19 +6,27 @@ import type { VoiceSession, VoiceSessionEvents } from "../types";
 type Message = Record<string, unknown>;
 type Waiter = { matches: (message: Message) => boolean; resolve: (message: Message) => void };
 
-/** Servidor WebSocket falso, em porta 0, que guarda o que o motor envia e deixa o teste responder. */
-export async function startFakeProvider() {
-  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+/**
+ * Servidor WebSocket falso, em porta 0, que guarda o que o motor envia e deixa o teste responder.
+ * `rejectUpgrade` recusa o aperto de mão com esse status HTTP, como o provedor que recusa a chave.
+ */
+export async function startFakeProvider(options: { rejectUpgrade?: number } = {}) {
+  const server = new WebSocketServer({
+    port: 0,
+    host: "127.0.0.1",
+    ...(options.rejectUpgrade !== undefined ? { verifyClient: (_info: unknown, done: (ok: boolean, code?: number) => void) => done(false, options.rejectUpgrade) } : {}),
+  });
   await once(server, "listening");
   const unread: Message[] = [];
   const waiters: Waiter[] = [];
   let client: WebSocket | undefined;
-  const request = { url: "", authorization: "" };
+  const request: { url: string; authorization: string; headers: Record<string, string | string[] | undefined> } = { url: "", authorization: "", headers: {} };
 
   server.on("connection", (socket, incoming) => {
     client = socket;
     request.url = incoming.url ?? "";
     request.authorization = incoming.headers.authorization ?? "";
+    request.headers = incoming.headers;
     socket.on("message", (data) => {
       const message = JSON.parse(data.toString()) as Message;
       const index = waiters.findIndex((waiter) => waiter.matches(message));
