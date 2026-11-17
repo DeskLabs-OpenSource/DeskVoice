@@ -95,6 +95,8 @@ Números em tabela, prosa curta. Medido às {hora}, para os números que depende
   nem "só para entender".
 - Não roda `select *`, não lê o `payload` inteiro, não copia linha de ligação para arquivo.
 - Não escreve no banco. Nunca.
+- Não desfaz o envelope: a consulta não leva `commit`, `set role`, `reset role` nem
+  `set … read_only`. O `deskvoice` é superusuário; o envelope barra o engano, não quem o desfaz.
 - Não roda consulta sem o filtro `organization_id`, nem fora do envelope (a C0 é a única exceção, e
   devolve só um id).
 - Não compara número de tela com número de consulta sem dizer que as réguas diferem.

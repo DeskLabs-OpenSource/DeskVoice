@@ -1,6 +1,6 @@
 # A régua de cada número, e as armadilhas que distorcem a leitura
 
-Medido no código de `origin/main` em 17/11/2026. Os nomes de tabela e coluna são os de
+Medido no código de `origin/main` em 16/11/2026 (horário de Brasília). Os nomes de tabela e coluna são os de
 `db/migrations/`; se uma migration nova mudar algum, vale a migration.
 
 ## Período
@@ -35,7 +35,7 @@ mesmo período. Não é erro: são réguas diferentes, e o relatório diz qual u
   classificação de uma ligação custa menos de um centavo. Some em micro-centavo e arredonde uma
   vez só, no fim. `usage_ledger.cost_cents` e `calls.cost_cents` são inteiros arredondados: somar
   esses dá outro número.
-- `cost_measured = false`: o provedor não informou uso que dê para precificar. O zero dessa linha
+- `cost_measured = false`: o modelo não tem preço conhecido, ou o consumo não pôde ser medido. O zero dessa linha
   **não é grátis**. Imprima a contagem ao lado da soma, sempre.
 - `cost_estimated = true`: o valor entrou por estimativa e fica acima do real.
 - É estimativa por preço de tabela. A fatura do provedor é a que vale; a operadora (minuto do
@@ -56,9 +56,11 @@ falar em "taxa de atendimento".
 - Fechados por `check` no banco: `calls.status`, `direction`, `channel`, `outcome`;
   `approvals.status`; `tasks.status`; `follow_ups.status`; `notifications.channel` e `status`.
 - Fechado no código: `call_events.kind` (`CALL_EVENT_KINDS` em `packages/core/src/types.ts`).
-- **Aberto**: `calls.end_reason` (a ferramenta `end_call` grava a frase do agente), `tasks.kind`,
-  `usage_ledger.engine` e `model`. Um `group by` pode trazer valor fora de qualquer lista: mostre
-  como está, sem "corrigir", e nunca a frase livre (a C3 a troca por `(frase livre)`).
+- Amarrado por cerca: `calls.end_reason` só recebe códigos, e a cerca
+  `call-end-reasons-have-a-sentence` exige frase no dicionário para cada código escrito. Não há
+  `check` no banco: a C3 troca o que não tiver forma de código por `(frase livre)`, como defesa.
+- **Aberto**: `tasks.kind`, `usage_ledger.engine` e `model`. Um `group by` pode trazer valor fora
+  de qualquer lista: mostre como está, sem "corrigir".
 - A frase de cada código de fim, recusa ou falha está em `apps/panel/src/i18n/pt-BR/timeline.ts`.
 
 ## `null` não é zero

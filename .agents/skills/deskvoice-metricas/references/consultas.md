@@ -105,9 +105,10 @@ select c.status,
  group by 1, 2 order by 3 desc;
 ```
 
-Régua: `end_reason` é código na maior parte das vezes, mas a ferramenta `end_call` grava a frase
-que o agente escreveu. A consulta mostra só o que tem forma de código; a frase vira
-`(frase livre)` e não sai do banco. A frase de cada código está em
+Régua: `end_reason` é código. Todo ponto de escrita grava um código (a ferramenta `end_call`
+grava `end_call`; o motivo que o agente escreve fica nos `args` do `tool_called`), e a cerca
+`call-end-reasons-have-a-sentence` exige uma frase no dicionário para cada um. A troca por
+`(frase livre)` é defesa: se algo fora da forma de código chegar por outro caminho, não sai do banco. A frase de cada código está em
 `apps/panel/src/i18n/pt-BR/timeline.ts`.
 
 ### C4: desfecho das ligações

@@ -55,7 +55,7 @@ ser contado e agregado.
 |---|---|
 | contagem, mediana, média, taxa; `calls.from_e164` só em ligação de saída (`direction = 'outbound'`) e só dentro de `count(distinct …)`; nunca no `select` nem no `group by` | `calls.from_e164` (fora dessa exceção), `calls.to_e164`, `calls.summary`, `calls.outcome_evidence` |
 | `calls.status`, `direction`, `channel`, `outcome`, `outcome_confidence`, `analysis_score`, `voicemail` | `calls.analysis`, menos `criteria[].id` e `criteria[].status` (o `evidence`, os pontos fortes e fracos, as objeções e o próximo passo são texto da ligação) |
-| `calls.end_reason` quando tem forma de código (`^[a-z]+(_[a-z]+)*$`) | `calls.end_reason` com frase livre (a ferramenta `end_call` grava o que o agente escreveu) |
+| `calls.end_reason` quando tem forma de código (`^[a-z]+(_[a-z]+)*$`) | `calls.end_reason` fora da forma de código (o produto grava só códigos, cobrados pela cerca `call-end-reasons-have-a-sentence`; a troca por `(frase livre)` é defesa para o que chegar por outro caminho) |
 | `call_events.kind`, `at`, e do `payload` só `reason` de `call_refused`, `outcome_not_classified`, `analysis_not_done` e `transcription_failed`; `engine` de `engine_failed`; `name` e `ok` de `tool_result`; `approvalId` de `approval_requested` e `approval_decided` (é um id, usado só no `join`) | qualquer outro campo do `payload`: `text` das transcrições, `args` de `tool_called`, `message`, `error`, `detail`, `summary`, `question`, `context`, `from`, `to`, `dialed`, `digits` |
 | `usage_ledger.*` (motor, modelo, segundos, tokens, custo, `cost_measured`, `cost_estimated`) | `caller_notes.*` (recado e número de quem ligou) |
 | `tasks.kind`, `status`, `attempts`, datas | `tasks.payload`, `tasks.last_error` |
