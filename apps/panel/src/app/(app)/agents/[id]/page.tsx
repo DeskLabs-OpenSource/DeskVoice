@@ -49,8 +49,8 @@ const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", 
 /** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
 const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp"];
 
-/** Motores em que a sessão em Barulhento foi provada numa instalação real. */
-const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime"];
+/** Motores em que a sessão em Barulhento foi provada numa instalação real (a sessão abre; o efeito no ruído não foi medido). */
+const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime", "gemini-live"];
 
 const toDraft = (agent: Agent): Draft => ({
   name: agent.name,
@@ -281,7 +281,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </div>
           ) : (
             // Sem o campo, a linha fica: é ela que conta a quem usa outro motor que o modo existe.
-            <p className="mt-4 max-w-md text-[0.87rem] text-muted">{t.listeningEnvironmentOnlyOpenAi}</p>
+            <p className="mt-4 max-w-md text-[0.87rem] text-muted">{t.listeningEnvironmentOnlyProven}</p>
           )}
           {backToNormalPending ? (
             <div className="mt-2 max-w-md">
