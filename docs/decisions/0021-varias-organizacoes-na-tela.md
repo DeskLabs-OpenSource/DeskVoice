@@ -108,5 +108,7 @@ muda. A área da instalação fica no menu da conta.
   mostra o custo do mês por organização, para a agência cobrar por fora.
 - **[dono] Chave de IA da agência para todos os clientes:** **respondido A (17/11):** pode, ligada
   por organização pela administração, com o custo na organização da chamada e o teto dela valendo. A
-  chave própria da organização vem antes. Conferir se os termos de uso do provedor permitem servir a
-  clientes de terceiros é do operador, e o guia da fatia 8 diz isso.
+  chave própria da organização vem antes. Como dizia a recomendação aceita, a chave só começa depois
+  de conferidos os termos de uso de cada provedor, com fonte e data, no PR da fatia 8. O provedor
+  cujos termos proibirem fica fora da chave da instalação. O guia da fatia 8 diz também que
+  conferir os termos do próprio contrato continua sendo do operador.

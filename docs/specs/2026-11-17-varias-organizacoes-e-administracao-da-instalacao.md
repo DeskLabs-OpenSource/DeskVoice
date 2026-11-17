@@ -190,15 +190,17 @@ alter table organizations add column deleting_at timestamptz;   -- a lápide (fa
 **O que a suspensão faz**, numa transação só e por `withOrg` da organização suspensa:
 
 - Marca `suspended_at` e o motivo.
-- Cancela as tarefas `queued` daquela organização que agem em nome dela ou gastam (a religação, o
-  aviso, o webhook, a transcrição, o resumo, a revisão e a classificação), com o motivo
-  `organization_suspended`. A religação combinada há duas semanas não pode sair sozinha no dia da
-  reativação.
+- Cancela **todas** as tarefas `queued` daquela organização, salvo as quatro abaixo, com o motivo
+  `organization_suspended`. Hoje isso pega `follow_up` (o aviso de pendência), `deliver_notification`,
+  `deliver_webhook`, `transcribe_call`, `summarize_call`, `review_call` e `classify_call_outcome`. A
+  regra é "tudo, salvo estas quatro", para um `kind` novo já nascer cancelável. Um aviso de
+  pendência marcado há duas semanas não pode sair sozinho no dia da reativação.
 - **Não cancela as rotinas de guarda e de apagamento** (`purge_transcripts`, `purge_caller_notes`,
   `erase_recordings`) **nem o vencimento de pedidos** (`expire_approval`). Elas não gastam nem falam
   com ninguém de fora, e cumprem o prazo de guarda e o pedido de apagamento de quem ligou, que não
   param porque a agência suspendeu o cliente. As de guarda se reagendam sozinhas: cancelar uma delas
-  quebraria a corrente para sempre (revisão de 17/11, na abertura da fatia 4b).
+  deixaria a organização sem a corrente até alguém gravar o prazo de novo ou nascer uma nota nova
+  (revisão de 17/11, na abertura da fatia 4b).
 - Grava `organization_suspended` em `organization_events` e em `installation_events`.
 
 **E o que passa a valer enquanto ela está suspensa:**
@@ -287,7 +289,7 @@ A lista é curta de propósito. Cada item diz se a organização sobrescreve.
 | `defaults.language` | Idioma do agente e da tela de uma organização nova | Sim, sempre | **Copiado na criação.** Mudar o padrão não mexe em quem já existe |
 | `defaults.timezone` | Fuso de uma organização nova (política de saída e relatórios) | Sim, sempre | Copiado na criação |
 | `defaults.limits` | Os limites com que uma organização nova nasce, inclusive `outbound_allowed` (padrão: `false`) | Não: limite é da administração | Copiado na criação |
-| `engine.<id>.api_key` | Chave de provedor de IA da instalação, cifrada com `encryptSecret` | Sim: a chave própria da organização vem antes | **Valor vivo**, só para as organizações em que a administração ligou "Usar a chave da instalação". Só entra se o pedido 2 for A **e** os termos de uso de cada provedor estiverem conferidos, com fonte e data, no PR da fatia. Sem resposta, vale B, e a chave fica de fora |
+| `engine.<id>.api_key` | Chave de provedor de IA da instalação, cifrada com `encryptSecret` | Sim: a chave própria da organização vem antes | **Valor vivo**, só para as organizações em que a administração ligou "Usar a chave da instalação". Pedido 2 respondido A (17/11). Só entra para o provedor cujos termos de uso estiverem conferidos, com fonte e data, no PR da fatia 8. O provedor cujos termos proibirem fica de fora |
 
 O que **não** entra, com o motivo:
 
@@ -295,7 +297,7 @@ O que **não** entra, com o motivo:
   organização. São escolhas de privacidade do cliente diante de quem liga, e não da agência.
 - O IP público, que já funciona por organização.
 
-**A chave da instalação, se o pedido 2 for A e os termos estiverem conferidos:**
+**A chave da instalação (pedido 2 respondido A), para os provedores com os termos conferidos:**
 
 - O processo de voz procura a chave da organização. Se não achar, e a organização tiver
   `organization_limits.uses_installation_engine_key = true` (coluna que entra junto com esta chave),
@@ -601,14 +603,16 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 
 - `defaults.language` e `defaults.timezone`, copiados na criação.
 - **A chave de IA da instalação** (pedido 2 respondido A em 17/11): `uses_installation_engine_key`,
-  a leitura no processo de voz e a frase na tela de motores. O guia diz que conferir se os termos de
-  uso do provedor permitem uma chave servir a clientes de terceiros é do operador. O DeskVoice não
-  afirma que permitem.
+  a leitura no processo de voz e a frase na tela de motores. **Antes do código da chave**, o PR da
+  fatia confere os termos de uso de cada provedor do catálogo sobre uma chave servir a clientes de
+  terceiros, com fonte e data. O provedor cujos termos proibirem fica fora da chave da instalação. O
+  guia diz também que conferir os termos do próprio contrato continua sendo do operador.
 - **Aceite:** o idioma e o fuso de uma organização nova vêm do padrão, e mudar o padrão não mexe na
   que já existe. Com a chave: uma chamada de uma organização sem chave, com a da instalação ligada,
   grava custo no `usage_ledger` dela e respeita o teto dela. A chave própria da organização vem
-  antes da chave da instalação. O guia tem a frase sobre os termos, e a tela de motores diz qual
-  chave a chamada usa.
+  antes da chave da instalação. O PR traz a conferência dos termos por provedor, com fonte e data,
+  e um provedor fora da lista não usa a chave da instalação. O guia tem a frase sobre os termos, e a
+  tela de motores diz qual chave a chamada usa.
 
 ### Fatia 9: excluir organização
 
