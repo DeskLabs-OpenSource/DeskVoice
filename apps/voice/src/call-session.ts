@@ -189,9 +189,13 @@ interface Leg {
   enabled: Map<string, Tool>;
   guard: SilenceGuard;
   context: ToolContext;
-  usage: Required<Pick<Usage, "seconds" | "inputTokens" | "outputTokens" | "textInputTokens" | "cachedInputTokens" | "textOutputTokens">>;
-  /** O custo do trecho, calculado com o preço do motor dele. */
+  usage: LegUsage;
+  /** O custo do trecho: o do motor, com o preço dele, mais o da peça de transcrição no trecho. */
   costCents: number;
+  /** A peça de transcrição do trecho, aberta ou abrindo (R12, "a peça é do trecho"). Ausente, o trecho não tem peça. */
+  piece?: LegPiece;
+  /** O consumo e o custo da peça neste trecho, com o preço dela. A peça que passa adiante leva só o consumo de depois. */
+  transcriber: { usage: LegUsage; costCents: number };
   /** O último `error` do motor, para explicar um `closed` que venha em seguida. */
   lastError?: Error;
   /** O analista do agente do trecho (fatia 3 da R6), aberto antes do motor. Ausente, nada muda. */
@@ -199,6 +203,28 @@ interface Leg {
   /** As objeções que já orientaram o agente neste trecho: cada uma orienta uma vez só. */
   guided: Set<string>;
 }
+
+type LegUsage = Required<Pick<Usage, "seconds" | "inputTokens" | "outputTokens" | "textInputTokens" | "cachedInputTokens" | "textOutputTokens">>;
+const emptyUsage = (): LegUsage => ({ seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 });
+
+/**
+ * A peça de transcrição de um trecho. Ela passa ao trecho seguinte só com a mesma peça e a mesma
+ * abertura (mesmo idioma, mesmos primeiros termos); nos outros casos fecha na passagem.
+ */
+interface LegPiece {
+  transcriber: StreamingTranscriber;
+  /** O que a peça recebe ao abrir: a regra da passagem compara isto. */
+  config: { language: string; vocabulary: readonly string[] };
+  /** O trecho dono da peça agora: o consumo dela cai nele. Muda só quando a peça passa adiante. */
+  owner: Leg;
+  /** A conexão, depois que abriu. */
+  session?: StreamingTranscription;
+  /** Saiu da linha (fechou numa passagem, no fim ou caiu): o que ela emitir não vale, e se abrir depois disto fecha na hora. */
+  gone: boolean;
+}
+
+/** A peça que o agente de um trecho pede, já com a chave lida, ou a chave que não serve. */
+type PieceChoice = { transcriber: StreamingTranscriber; apiKey: string; config: LegPiece["config"] } | { rejected: string; detail: string };
 
 /** O analista aberto para um trecho: o modelo de decisão, a chave e o cadastro lido no começo do trecho. */
 interface LegAnalyst {
@@ -428,9 +454,6 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   const callCents = (): number => costCents + Math.round(decisionMicrocents / MICROCENTS_PER_CENT);
   /** Os segundos da ligação inteira, somados de todos os trechos (vão em `call_ended`). */
   const usage = { seconds: 0 };
-  /** A peça de transcrição, quando a chamada tem uma e ela abriu. Soma ao custo dos motores. */
-  let transcription: StreamingTranscription | undefined;
-  const transcriberMeter = { usage: { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 }, costCents: 0 };
   const cancelTimers: Array<() => void> = [];
   /** O prazo da duração máxima, que uma passagem pode reagendar para mais cedo. */
   let cancelDuration: () => void = () => undefined;
@@ -481,8 +504,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     try {
       // Fechar o motor entrega a última medição de uso; ela entra no custo gravado abaixo.
       await voice?.close();
-      // A peça também entrega o último consumo ao fechar; sem peça, nada muda aqui.
-      await transcription?.close();
+      // A peça do trecho também entrega o último consumo ao fechar; sem peça, nada muda aqui.
+      if (leg?.piece) await closePiece(leg);
       for (const [kind, payload] of end.events ?? []) await event(kind, payload);
       if (end.notice) await panelNotice(q, clock, callId, end.notice);
       await q.exec("update calls set status = $2, end_reason = $3, ended_at = $4, cost_cents = $5 where id = $1", [callId, end.status, end.endReason, clock.now(), callCents()]);
@@ -618,7 +641,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (reached.transferTo) await event("transfer_started", { to: reached.transferTo, reason: "cost_ceiling" });
   }
 
-  function accumulate(into: Leg["usage"], increment: Usage): void {
+  function accumulate(into: LegUsage, increment: Usage): void {
     into.seconds += increment.seconds ?? 0;
     into.inputTokens += increment.inputTokens ?? 0;
     into.outputTokens += increment.outputTokens ?? 0;
@@ -628,23 +651,24 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   }
 
   /**
-   * Mede um incremento de consumo. Quem consome é o motor do trecho ou, quando a chamada tem uma, a
-   * peça de transcrição, cada um com o preço dele; o custo da chamada é a soma e respeita o teto.
+   * Mede um incremento de consumo no trecho. Quem consome é o motor do trecho ou a peça de
+   * transcrição dele, cada um com o preço dele: o custo do trecho é motor + peça, e o da ligação, a
+   * soma dos trechos, que respeita o teto.
    */
   async function meter(from: Leg, increment: Usage, piece?: { id: string; pricing: EnginePricing }): Promise<void> {
     if (piece) {
-      accumulate(transcriberMeter.usage, increment);
-      transcriberMeter.costCents = estimateCostCents(piece.pricing, transcriberMeter.usage);
+      accumulate(from.transcriber.usage, increment);
+      from.transcriber.costCents = estimateCostCents(piece.pricing, from.transcriber.usage);
     } else {
       usage.seconds += increment.seconds ?? 0;
       accumulate(from.usage, increment);
-      from.costCents = estimateCostCents(from.engine.pricing, from.usage);
     }
+    from.costCents = estimateCostCents(from.engine.pricing, from.usage) + from.transcriber.costCents;
     // Cada trecho é calculado com o preço do motor dele, e o custo da ligação é a soma dos trechos:
     // com dois agentes em motores de preço diferente, um preço só erraria a conta.
     // `usage` é incremento: o custo sai do total somado, e cada linha do extrato leva a diferença.
     // Assim a soma do extrato é sempre o custo da chamada, apesar do arredondamento.
-    const total = legs.reduce((sum, each) => sum + each.costCents, 0) + transcriberMeter.costCents;
+    const total = legs.reduce((sum, each) => sum + each.costCents, 0);
     const delta = total - costCents;
     costCents = total;
     const reached = reachCeiling(callCents());
@@ -1057,8 +1081,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       enabled,
       guard: silenceGuard,
       context: contextFor(row.id, row.language, session),
-      usage: { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 },
+      usage: emptyUsage(),
       costCents: 0,
+      transcriber: { usage: emptyUsage(), costCents: 0 },
       ...(analyst && { analyst }),
       guided: new Set(),
     };
@@ -1173,6 +1198,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const instructions = composeInstructions(next.instructions, targets, handoff, fitted?.items ?? []);
       // O trecho novo usa o analista do agente novo, ou nenhum: o do trecho anterior não passa adiante.
       const nextAnalyst = await openAnalyst(next);
+      // A peça do agente novo, com a chave lida antes da troca: depois dela, nada espera.
+      const nextPiece = await choosePiece(next);
       // A chamada simulada abre o motor simulado na ligação inteira, o trecho do destino inclusive:
       // ela nunca gasta com o provedor nem usa a chave da organização.
       const opened = await connectEngine(overrides?.engineId ?? next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled));
@@ -1205,7 +1232,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
             chars: fitted?.chars ?? rememberedBlock(lead).length,
           })
         : undefined;
-      startLeg(next, opened.engine, opened.voice, enabled, nextAnalyst.analyst);
+      const nextLeg = startLeg(next, opened.engine, opened.voice, enabled, nextAnalyst.analyst);
+      // A peça passa ao trecho novo se for a mesma, com a mesma abertura; senão, a antiga sai da linha
+      // e a nova começa a abrir sem que a passagem espere por ela.
+      const leaving = seatPiece(nextLeg, from, nextPiece);
       const analystProblem = nextAnalyst.problem ? analystProblemEvent(next.id, nextAnalyst.problem) : undefined;
       from.guard.stop();
       visited.push(next);
@@ -1215,6 +1245,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       }
       // Fechar a sessão antiga entrega a última medição dela, que entra no trecho dela.
       await from.voice.close();
+      // A peça que saiu entrega a última medição ao fechar, e ela fica no trecho dela.
+      await leaving;
       await recorded;
       await loaded;
       await analystProblem;
@@ -1249,19 +1281,87 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
 
   /** Por que a peça de transcrição ficou fora da chamada: o vocabulário do teste da chave, ou `closed`. */
   type TranscriberFailure = Exclude<KeyCheckResult, "accepted" | "not_needed"> | "closed";
-  const transcriberFailed = (transcriberId: string, reason: TranscriberFailure, detail: string): void => {
+
+  /** A peça de um trecho ficou de fora; a ligação segue. Depois de uma passagem, o evento leva o agente do trecho, como `transcript_agent`. */
+  function transcriberFailed(owner: Leg, transcriberId: string, reason: TranscriberFailure, detail: string): void {
     // O texto do provedor fica no log, para quem opera; a linha do tempo leva só o código.
-    log("error", "the transcriber is out of this call; the call goes on without it", { transcriber: transcriberId, reason, error: detail });
-    if (!ending) void event("transcriber_failed", { transcriber: transcriberId, reason }).catch(logFailure("could not record a transcriber failure"));
-  };
+    log("error", "the transcriber is out of this call; the call goes on without it", { transcriber: transcriberId, reason, error: detail, agentId: owner.agent.id });
+    const payload = handoffs > 0 ? { transcriber: transcriberId, reason, agentId: owner.agent.id } : { transcriber: transcriberId, reason };
+    if (!ending) void event("transcriber_failed", payload).catch(logFailure("could not record a transcriber failure"));
+  }
 
   /**
-   * Abre a peça de transcrição ao lado do motor, sem que o motor espere por ela: o áudio de quem
-   * ligou continua indo ao motor do mesmo jeito, e só passa a ir também à peça quando ela abre. Se
-   * ela não abre, ou cai no meio, a chamada segue sem ela, e a linha do tempo grava o motivo.
+   * A peça que o agente de um trecho pede. Por enquanto só a chamada simulada pede, e
+   * `CallSessionInput.transcriberId` vale para todos os trechos, como o motor simulado; a coluna do
+   * agente (fatia 4) entra aqui. Sem pedido, nada é lido do banco.
    */
-  async function openTranscription(piece: StreamingTranscriber, apiKey: string, config: { language: string; vocabulary: readonly string[] }, owner: Leg): Promise<void> {
-    const connecting = piece.connect(config, apiKey);
+  async function choosePiece(row: AgentRow): Promise<PieceChoice | undefined> {
+    const transcriberId = input.transcriberId;
+    if (transcriberId === undefined) return undefined;
+    const transcriber = deps.transcribers?.get(transcriberId);
+    if (!transcriber) {
+      log("error", "the call asks for a transcriber that is not installed; going on without it", { transcriber: transcriberId, agentId: row.id });
+      return undefined;
+    }
+    const config = { language: row.language, vocabulary: row.vocabulary.slice(0, transcriber.maxVocabulary) };
+    if (transcriber.keyless) return { transcriber, apiKey: "", config };
+    const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberKeySetting(transcriber.id)]);
+    try {
+      if (typeof stored?.value !== "string") throw new Error("no API key is saved for this transcriber");
+      return { transcriber, apiKey: decryptSecret(stored.value, deps.secretKey), config };
+    } catch (error) {
+      // Sem chave que sirva, a peça não abre: para quem lê a linha do tempo, é a chave recusada.
+      return { rejected: transcriber.id, detail: messageOf(error) };
+    }
+  }
+
+  const sameOpening = (piece: LegPiece, choice: { transcriber: StreamingTranscriber; config: LegPiece["config"] }): boolean =>
+    piece.transcriber.id === choice.transcriber.id &&
+    piece.config.language === choice.config.language &&
+    piece.config.vocabulary.length === choice.config.vocabulary.length &&
+    piece.config.vocabulary.every((term, index) => term === choice.config.vocabulary[index]);
+
+  /** Tira a peça do trecho e a fecha (ou a marca para fechar na hora em que abrir). */
+  function closePiece(owner: Leg): Promise<void> {
+    const piece = owner.piece;
+    owner.piece = undefined;
+    if (!piece) return Promise.resolve();
+    piece.gone = true;
+    return piece.session?.close() ?? Promise.resolve();
+  }
+
+  /**
+   * Põe a peça no trecho que começa (desenho do #198, "a peça é do trecho"). Mesma peça e mesma
+   * abertura: a conexão do trecho anterior passa a este, sem fechar nem reabrir, e o consumo daí em
+   * diante cai aqui. Senão, a do trecho anterior sai da linha, e a deste começa a abrir sem que
+   * ninguém espere. Devolve o fechamento da que saiu.
+   */
+  function seatPiece(next: Leg, from: Leg | undefined, choice: PieceChoice | undefined): Promise<void> {
+    const old = from?.piece;
+    if (from && old && choice && "transcriber" in choice && !old.gone && sameOpening(old, choice)) {
+      from.piece = undefined;
+      old.owner = next;
+      next.piece = old;
+      return Promise.resolve();
+    }
+    const leaving = from ? closePiece(from) : Promise.resolve();
+    if (choice && "rejected" in choice) transcriberFailed(next, choice.rejected, "rejected", choice.detail);
+    else if (choice) {
+      const piece: LegPiece = { transcriber: choice.transcriber, config: choice.config, owner: next, gone: false };
+      next.piece = piece;
+      void openTranscription(piece, choice.apiKey).catch(logFailure("could not open the transcriber"));
+    }
+    return leaving;
+  }
+
+  /**
+   * Abre a peça de transcrição de um trecho ao lado do motor, sem que o motor espere por ela: o áudio
+   * de quem ligou continua indo ao motor do mesmo jeito, e só passa a ir também à peça quando ela
+   * abre. Se ela não abre, ou cai no meio, a ligação segue sem ela, e a linha do tempo grava o motivo.
+   */
+  async function openTranscription(piece: LegPiece, apiKey: string): Promise<void> {
+    const { transcriber } = piece;
+    const connecting = transcriber.connect(piece.config, apiKey);
     let cancelDeadline: () => void = () => undefined;
     const deadline = new Promise<never>((_, reject) => {
       cancelDeadline = schedule(() => reject(new EngineTimeoutError(`the transcriber did not answer in ${CONNECT_TIMEOUT_MS / 1000} s`)), CONNECT_TIMEOUT_MS);
@@ -1272,26 +1372,36 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     } catch (error) {
       if (error instanceof EngineTimeoutError) connecting.then((late) => late.close(), () => undefined);
       const reason = error instanceof TranscriberOpenError ? error.result : error instanceof EngineTimeoutError ? "unreachable" : "unexpected_response";
-      return transcriberFailed(piece.id, reason, messageOf(error));
+      if (piece.owner.piece === piece) piece.owner.piece = undefined;
+      // A peça que já saiu da linha não diz nada na linha do tempo: o trecho dela acabou.
+      if (piece.gone) return void log("error", "a transcriber that already left the line did not open", { transcriber: transcriber.id, error: messageOf(error) });
+      piece.gone = true;
+      return transcriberFailed(piece.owner, transcriber.id, reason, messageOf(error));
     } finally {
       cancelDeadline();
     }
-    if (ending || wrappingUp) return void (await opened.close());
+    // Abriu depois do fim, de uma despedida ou de outra passagem: ninguém vai usá-la.
+    if (piece.gone || ending || wrappingUp) return void (await opened.close());
+    /** A peça está na linha: é a do trecho atual. Eventos de uma peça que já saiu são ignorados. */
+    const current = (): boolean => !piece.gone && leg?.piece === piece;
     let lastText = "";
     opened.on("piece", (said) => {
+      if (!current() || !leg) return;
       // Cada trecho com texto novo é sinal de que quem ligou está falando: a guarda contra o
-      // silêncio passa a ter texto mesmo no motor que só transcreve depois do fim do turno.
-      if (said.text.trim() !== "" && said.text !== lastText) owner.guard.callerActivity({ words: true });
+      // silêncio do trecho atual passa a ter texto mesmo no motor que só transcreve depois do turno.
+      if (said.text.trim() !== "" && said.text !== lastText) leg.guard.callerActivity({ words: true });
       lastText = said.final ? "" : said.text;
     });
-    opened.on("usage", (increment) => void meter(owner, increment, piece).catch(logFailure("could not record transcriber usage")));
-    opened.on("error", (error) => log("error", "transcriber error", { transcriber: piece.id, error: error.message }));
+    // A última medição de uma peça que saiu também conta, no trecho dono dela.
+    opened.on("usage", (increment) => void meter(piece.owner, increment, transcriber).catch(logFailure("could not record transcriber usage")));
+    opened.on("error", (error) => log("error", "transcriber error", { transcriber: transcriber.id, error: error.message }));
     opened.on("closed", (reason) => {
-      if (reason === "client") return;
-      transcription = undefined;
-      transcriberFailed(piece.id, "closed", reason);
+      if (reason === "client" || piece.gone) return;
+      piece.gone = true;
+      if (piece.owner.piece === piece) piece.owner.piece = undefined;
+      transcriberFailed(piece.owner, transcriber.id, "closed", reason);
     });
-    transcription = opened;
+    piece.session = opened;
   }
 
   async function run(): Promise<void> {
@@ -1334,27 +1444,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // O analista do agente (fatia 3 da R6): só com `agents.analyst_id`. Sem ele, nada é lido além da
     // coluna do agente, nenhum pedido sai, e a linha do tempo é a de antes.
     const firstAnalyst = await openAnalyst(first);
-    // A peça de transcrição, quando a chamada pede uma. Sem pedido, nada aqui consulta o banco.
-    let piece: StreamingTranscriber | undefined;
-    let pieceKey = "";
-    /** A chave da peça que não serve: só vira `transcriber_failed` se o motor abrir e a chamada for atendida. */
-    let pieceRejected: { id: string; detail: string } | undefined;
-    if (input.transcriberId !== undefined) {
-      piece = deps.transcribers?.get(input.transcriberId);
-      if (!piece) {
-        log("error", "the call asks for a transcriber that is not installed; going on without it", { transcriber: input.transcriberId });
-      } else if (!piece.keyless) {
-        const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberKeySetting(piece.id)]);
-        try {
-          if (typeof stored?.value !== "string") throw new Error("no API key is saved for this transcriber");
-          pieceKey = decryptSecret(stored.value, deps.secretKey);
-        } catch (error) {
-          // Sem chave que sirva, a peça não abre: para quem lê a linha do tempo, é a chave recusada.
-          pieceRejected = { id: piece.id, detail: messageOf(error) };
-          piece = undefined;
-        }
-      }
-    }
+    // A peça de transcrição do primeiro trecho, quando a chamada pede uma. Sem pedido, nada aqui consulta o banco.
+    const firstPiece = await choosePiece(first);
 
     // Chave ausente ou inválida: a chamada não fica muda. É recusada com evento, aviso e sinal.
     const opened = await connectEngine(
@@ -1404,10 +1495,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       if (ending || wrappingUp) return;
       // O motor recebe primeiro, sem esperar a peça; a peça recebe o mesmo pedaço logo depois.
       voice?.sendAudio(pcm);
-      transcription?.sendAudio(pcm);
+      // A peça do trecho atual, e só depois que abriu.
+      leg?.piece?.session?.sendAudio(pcm);
     });
-    if (pieceRejected) transcriberFailed(pieceRejected.id, "rejected", pieceRejected.detail);
-    if (piece) void openTranscription(piece, pieceKey, { language: first.language, vocabulary: first.vocabulary.slice(0, piece.maxVocabulary) }, firstLeg).catch(logFailure("could not open the transcriber"));
+    void seatPiece(firstLeg, undefined, firstPiece);
     const answered = [
       q.exec("update calls set status = 'in_progress', answered_at = $2, engine = $3 where id = $1", [callId, clock.now(), engineId]),
       event("call_answered", { engine: engineId }),

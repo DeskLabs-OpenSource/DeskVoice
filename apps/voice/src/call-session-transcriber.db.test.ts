@@ -21,6 +21,7 @@ import {
   pricedSimulatedEngine,
   secretKey,
   sessionHarness,
+  setHandoffTargets,
   type AgentOptions,
   type ManualEngine,
   type ManualTransport,
@@ -347,5 +348,214 @@ describe("falha da peça de transcrição", { timeout: 120_000 }, () => {
     expect((await callOf(app, callId)).status).toBe("in_progress");
     transport.callerHangup();
     expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+  });
+});
+
+/**
+ * Peça de transcrição nas mãos do teste, com uma sessão por conexão: o teste vê quantas abriram, o
+ * que cada uma recebeu e quando fechou. `gates[n]` segura a abertura da conexão `n` até ser solto, e
+ * `usageOnClose` é a última medição que a conexão entrega ao fechar, como um serviço de verdade.
+ */
+function handTranscriber(options: { gates?: Array<Promise<unknown> | undefined>; usageOnClose?: number } = {}) {
+  const sessions: Array<{ config: { language: string; vocabulary: readonly string[] }; audioBytes: number; closed: number; emit(event: string, ...args: unknown[]): void }> = [];
+  const transcriber: StreamingTranscriber = {
+    ...createSimulatedTranscriber(),
+    pricing: { centsPerMinute: 60, checkedOn: "2030-05-10", source: "teste" },
+    async connect(config) {
+      const handlers = new Map<string, Array<(...args: never[]) => void>>();
+      const opened = {
+        config,
+        audioBytes: 0,
+        closed: 0,
+        emit(event: string, ...args: unknown[]): void {
+          for (const handler of handlers.get(event) ?? []) (handler as (...values: unknown[]) => void)(...args);
+        },
+      };
+      const gate = options.gates?.[sessions.length];
+      sessions.push(opened);
+      if (gate) await gate;
+      const session: StreamingTranscription = {
+        on: (event, handler) => void handlers.set(event, [...(handlers.get(event) ?? []), handler as (...args: never[]) => void]),
+        sendAudio: (pcm) => void (opened.audioBytes += pcm.length),
+        close: async () => {
+          opened.closed += 1;
+          if (options.usageOnClose !== undefined) opened.emit("usage", { seconds: options.usageOnClose });
+          opened.emit("closed", "client");
+        },
+      };
+      return session;
+    },
+  };
+  return { transcriber, sessions };
+}
+
+const handoff = { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } };
+
+/** Dois agentes em motores de teste, o primeiro passa ao segundo, e a chamada pede a peça (que vale para os dois trechos). */
+async function pair(label: string, agents: { first?: AgentOptions; second?: AgentOptions }, transcribers: Map<string, StreamingTranscriber>) {
+  const first = manualEngine({ id: "first", keyless: true });
+  const second = manualEngine({ id: "second", keyless: true });
+  const organizationId = await createOrganization(app, label);
+  const recepcao = await createAgent(app, organizationId, { name: "Recepção", engine: "first", ...agents.first });
+  const agenda = await createAgent(app, organizationId, { name: "Agendamento", engine: "second", ...agents.second });
+  await setHandoffTargets(app, recepcao, [agenda]);
+  await harness?.approvals.close();
+  const made = await sessionHarness(app, [first.engine, second.engine]);
+  harness = made;
+  made.deps.transcribers = transcribers;
+  const callId = await createCall(app, organizationId, recepcao, made.clock.now());
+  const transport = manualTransport();
+  const session = startCallSession(made.deps, { organizationId, callId, agentId: recepcao, transport, transcriberId: "simulated" });
+  await answered(callId);
+  const handOff = async (): Promise<void> => {
+    first.emit("toolCall", handoff);
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    await waitFor(async () => (await eventsOf(app, callId)).some((event) => event.kind === "tool_result"), "the handoff to finish");
+  };
+  return { callId, transport, session, first, second, ids: { recepcao, agenda }, harness: made, handOff };
+}
+
+const ledgerRows = async (callId: string, engine: string) => (await ledgerOf(app, callId)).filter((row) => row.engine === engine);
+
+describe("a peça é do trecho (passagem entre agentes, desenho do #198)", { timeout: 120_000 }, () => {
+  it("mesma peça e mesma abertura nos dois agentes: a passagem não abre segunda conexão, e o consumo depois dela vai com o agent_id do agente novo", async () => {
+    const piece = handTranscriber();
+    const { callId, transport, session, ids, handOff } = await pair("piece-same", {}, new Map([["simulated", piece.transcriber]]));
+    await waitFor(() => piece.sessions.length === 1, "the piece to open");
+    await tick();
+    const [only] = piece.sessions;
+    if (!only) throw new Error("no piece");
+    transport.callerAudio(20);
+    only.emit("usage", { seconds: 60 });
+    await waitFor(async () => (await ledgerRows(callId, "transcriber:simulated")).length === 1, "the first piece usage");
+
+    await handOff();
+    expect(piece.sessions).toHaveLength(1);
+    expect(only.closed).toBe(0);
+    const before = only.audioBytes;
+    transport.callerAudio(20);
+    expect(only.audioBytes).toBeGreaterThan(before);
+    only.emit("usage", { seconds: 30 });
+    await waitFor(async () => (await ledgerRows(callId, "transcriber:simulated")).length === 2, "the piece usage after the handoff");
+    // O relógio do teste é o mesmo nas duas medições: a ordem é a do segundo, do maior para o menor.
+    expect((await ledgerRows(callId, "transcriber:simulated")).map((row) => ({ agent: row.agent_id, seconds: row.seconds, cents: row.cost_cents })).sort((x, y) => y.seconds - x.seconds)).toEqual([
+      { agent: ids.recepcao, seconds: 60, cents: 60 },
+      { agent: ids.agenda, seconds: 30, cents: 30 },
+    ]);
+    transport.callerHangup();
+    await session.done;
+    expect(only.closed).toBe(1);
+    // O custo da ligação é a soma dos trechos, motor e peça.
+    expect((await callOf(app, callId)).cost_cents).toBe(90);
+  });
+
+  it("de uma peça para nenhuma: a peça fecha na troca, a última medição fica no trecho antigo, e nenhum pedaço de áudio chega a ela depois", async () => {
+    const piece = handTranscriber({ usageOnClose: 12 });
+    // Até a fatia 4, a única entrada é `transcriberId`, que vale para todos os trechos. Para o agente
+    // novo não ter peça, a instalação deixa de achá-la depois do primeiro trecho: é o mesmo caminho
+    // de um agente sem peça (nenhuma escolha para o trecho).
+    let lookups = 0;
+    const installed = new Map([["simulated", piece.transcriber]]);
+    const onlyFirst = new Map(installed);
+    onlyFirst.get = (id: string) => (lookups++ === 0 ? installed.get(id) : undefined);
+    const { callId, transport, session, ids, handOff } = await pair("piece-none", {}, onlyFirst);
+    await waitFor(() => piece.sessions.length === 1, "the piece to open");
+    await tick();
+    const [old] = piece.sessions;
+    if (!old) throw new Error("no piece");
+    transport.callerAudio(20);
+    const heard = old.audioBytes;
+    expect(heard).toBeGreaterThan(0);
+
+    await handOff();
+    expect(lookups).toBe(2);
+    expect(old.closed).toBe(1);
+    expect(piece.sessions).toHaveLength(1);
+    transport.callerAudio(100);
+    expect(old.audioBytes).toBe(heard);
+    // O que a peça antiga ainda disser não vale mais.
+    old.emit("closed", "server_gone");
+    await tick();
+    await waitFor(async () => (await ledgerRows(callId, "transcriber:simulated")).length === 1, "the last piece usage");
+    expect((await ledgerRows(callId, "transcriber:simulated")).map((row) => ({ agent: row.agent_id, seconds: row.seconds }))).toEqual([{ agent: ids.recepcao, seconds: 12 }]);
+    transport.callerHangup();
+    await session.done;
+    expect(await kindsOf(app, callId)).not.toContain("transcriber_failed");
+    expect(old.closed).toBe(1);
+  });
+
+  it("peça diferente que demora a abrir: a passagem conclui sem esperar, a nova recebe áudio quando abre, e a que abre depois do fim fecha na hora", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const piece = handTranscriber({ gates: [undefined, gate] });
+    // O vocabulário do agente novo é outro: a abertura muda, e a peça é outra conexão.
+    const { callId, transport, session, ids, handOff } = await pair("piece-other", { second: { vocabulary: ["Dra. Lima"] } }, new Map([["simulated", piece.transcriber]]));
+    await waitFor(() => piece.sessions.length === 1, "the first piece to open");
+    await tick();
+    await handOff();
+    expect(await (await eventsOf(app, callId)).find((event) => event.kind === "tool_result")?.payload).toMatchObject({ ok: true });
+    const [old, next] = piece.sessions;
+    if (!old || !next) throw new Error("the second piece did not start opening");
+    expect(next.config.vocabulary).toEqual(["Dra. Lima"]);
+    expect(old.closed).toBe(1);
+    transport.callerAudio(20);
+    expect(next.audioBytes).toBe(0);
+    release();
+    await tick();
+    await tick();
+    transport.callerAudio(20);
+    expect(next.audioBytes).toBeGreaterThan(0);
+    next.emit("usage", { seconds: 60 });
+    await waitFor(async () => (await ledgerRows(callId, "transcriber:simulated")).length === 1, "the new piece usage");
+    expect((await ledgerRows(callId, "transcriber:simulated"))[0]?.agent_id).toBe(ids.agenda);
+    transport.callerHangup();
+    await session.done;
+    expect(next.closed).toBe(1);
+
+    // A peça nova só abre depois de a ligação terminar: ela fecha na hora, e nada vai à linha do tempo.
+    let late: () => void = () => undefined;
+    const lateGate = new Promise<void>((resolve) => (late = resolve));
+    const slow = handTranscriber({ gates: [undefined, lateGate] });
+    const after = await pair("piece-after-end", { second: { vocabulary: ["Dra. Lima"] } }, new Map([["simulated", slow.transcriber]]));
+    await waitFor(() => slow.sessions.length === 1, "the first piece to open");
+    await tick();
+    await after.handOff();
+    after.transport.callerHangup();
+    await after.session.done;
+    const pending = slow.sessions[1];
+    if (!pending) throw new Error("the second piece did not start opening");
+    expect(pending.closed).toBe(0);
+    late();
+    await waitFor(() => pending.closed === 1, "the late piece to be closed");
+    expect(pending.audioBytes).toBe(0);
+    expect(await kindsOf(app, after.callId)).not.toContain("transcriber_failed");
+  });
+
+  it("depois da passagem, o texto novo da peça arma a guarda do agente novo", async () => {
+    const piece = handTranscriber();
+    const { callId, transport, session, first, second, ids, harness: h, handOff } = await pair("piece-guard", {}, new Map([["simulated", piece.transcriber]]));
+    await waitFor(() => piece.sessions.length === 1, "the piece to open");
+    await tick();
+    await handOff();
+    const [only] = piece.sessions;
+    if (!only) throw new Error("no piece");
+    const armed = h.timers.held().filter((delay) => delay === AFTER_WORDS_MS).length;
+    transport.callerAudio(20);
+    only.emit("piece", { text: "quero marcar", final: false, alternatives: [] });
+    expect(h.timers.held().filter((delay) => delay === AFTER_WORDS_MS)).toHaveLength(armed + 1);
+    h.clock.advance(AFTER_WORDS_MS);
+    expect(h.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    expect(second.callerTurnsClosed).toBe(1);
+    expect(first.callerTurnsClosed).toBe(0);
+    await waitFor(async () => (await kindsOf(app, callId)).includes("caller_unanswered"), "the guard to act");
+    // A peça cai depois da passagem: `transcriber_failed` leva o agente do trecho, como `transcript_agent`.
+    only.emit("closed", "server_gone");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("transcriber_failed"), "the failure to be recorded");
+    expect((await eventsOf(app, callId)).find((event) => event.kind === "transcriber_failed")?.payload).toEqual({ transcriber: "simulated", reason: "closed", agentId: ids.agenda });
+    const heard = only.audioBytes;
+    transport.callerAudio(20);
+    expect(only.audioBytes).toBe(heard);
+    transport.callerHangup();
+    await session.done;
   });
 });
