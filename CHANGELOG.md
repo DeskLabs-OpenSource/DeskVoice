@@ -3,6 +3,41 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.26.0] - 2026-11-17
+
+### Adicionado
+
+- **Para quem contribui, o Claude Code implementa uma fatia de desenho com um verificador separado** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e contribui. No Claude
+  Code, `/deskvoice-fatia <desenho> <número>` lê a fatia de um desenho de `docs/specs/`, cria um
+  worktree descartável, chama um implementador com o contrato e o aceite palavra por palavra e depois
+  um verificador que não pode escrever e tenta derrubar a entrega, até ele aprovar ou até três
+  voltas. O comando não envia nada ao GitHub: o ramo fica local, e abrir o PR é com a pessoa. O aviso
+  de identidade do commit passa a olhar o e-mail que o commit vai gravar de fato, e não só o do
+  `git config`: some o aviso falso de quem passa o e-mail certo pelo ambiente, e aparece o de quem
+  recebe um `root@` de lá. Crédito: @melgarafael.
+- **Para quem contribui, duas skills novas: ler as métricas com régua declarada e aplicar o sistema vivo a uma peça** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e trabalha com um
+  assistente de código. A skill `deskvoice-metricas` lê como está a operação (ligações, desfecho, nota
+  da análise, custo, falhas, fila, ligações de saída) primeiro pelas telas e depois por consultas só
+  de leitura, filtradas pela organização, sem transcrição, nome ou telefone; cada número sai com
+  período, fuso e definição. A skill `deskvoice-sistema-vivo` percorre as perguntas da doutrina do
+  sistema vivo para uma peça nova e diz onde conferir cada resposta no código, apontando para a lei
+  em vez de copiá-la. A skill de contribuição passa a dizer que o aviso de identidade olha a
+  identidade efetiva do commit, como o gancho já faz. Crédito: @melgarafael.
+- **O agente pode abrir uma pendência quando a ligação cai no meio da conversa** A tela do agente ganha o bloco "Quando a ligação cai", com duas opções: "Não fazer nada", o
+  padrão, e "Abrir uma pendência para alguém retornar". Conta como queda a ligação recebida e
+  atendida em que o sistema falhou, em que quem ligou ficou alguns segundos sem resposta (além do
+  prazo da guarda do silêncio) e desligou (inclusive quem ouviu o agente pedir para repetir e desligou
+  sem voltar a falar), ou em que a linha caiu durante uma ação do agente. Quem desliga depois de se
+  despedir, ou enquanto o agente fala, não conta; também não conta a ligação sem número nem aquela em
+  que alguém já ficou com o próximo passo (transferência, recado, pendência, aviso ou WhatsApp
+  enviado). Com a pendência escolhida, o supervisor
+  abre uma por ligação, para o dono das pendências do agente, e a linha do tempo diz o que aconteceu;
+  o motor de voz que caiu continua abrindo a pendência como hoje. Na ligação simulada, a linha do tempo
+  diz o que teria acontecido, e nada é aberto. O fim da ligação passa a registrar se a vez estava
+  aberta quando quem ligou desligou e, depois de um pedido para repetir, se quem ligou falou de novo.
+  Todo agente que já existe fica em "Não fazer nada", e o comportamento de hoje não muda. Crédito:
+  @melgarafael.
+
 ## [0.25.0] - 2026-11-16
 
 ### Adicionado
