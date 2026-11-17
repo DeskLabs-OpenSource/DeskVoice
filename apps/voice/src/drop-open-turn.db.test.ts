@@ -9,7 +9,20 @@ import { openTestDbs } from "../../../packages/core/test/helpers";
 import { startCallSession } from "./call-session";
 import { reviewCall } from "../../routines/src/routines/review_call";
 import { AFTER_CLOSE_MS, AFTER_WORDS_MS, ASK_TO_REPEAT } from "./silence-guard";
-import { createAgent, createCall, createOrganization, eventsOf, kindsOf, manualEngine, manualTransport, sessionHarness, type ManualEngine, type ManualTransport, type SessionHarness } from "./testing/db";
+import {
+  createAgent,
+  createCall,
+  createOrganization,
+  eventsOf,
+  kindsOf,
+  manualEngine,
+  manualTransport,
+  sessionHarness,
+  setHandoffTargets,
+  type ManualEngine,
+  type ManualTransport,
+  type SessionHarness,
+} from "./testing/db";
 import { waitFor } from "./testing/helpers";
 
 const { app, owner } = openTestDbs();
@@ -49,9 +62,9 @@ interface Scene {
   done: Promise<unknown>;
 }
 
-async function answered(label: string, tools: string[] = [], extra: Tool[] = []): Promise<Scene> {
+async function answered(label: string, tools: string[] = [], extra: Tool[] = [], maxCallSeconds?: number): Promise<Scene> {
   const organizationId = await createOrganization(app, label);
-  const agentId = await createAgent(app, organizationId, { engine: "manual", tools });
+  const agentId = await createAgent(app, organizationId, { engine: "manual", tools, ...(maxCallSeconds !== undefined && { maxCallSeconds }) });
   const manual = manualEngine({ keyless: true });
   harness = await sessionHarness(app, [manual.engine]);
   for (const tool of extra) harness.deps.tools.set(tool.name, tool);
@@ -287,5 +300,88 @@ describe("o desligar depois do \"pode repetir?\" (condição 2(c))", { timeout: 
     expect(r.result).toBe("no_case");
     expect(r.followUps).toEqual([]);
     expect(r.drops).toEqual([]);
+  });
+});
+
+/** Quem ligou falou, o agente não respondeu e a guarda pediu para repetir: o `callerSpokeAfterAsk` passa a valer `false`. */
+async function askToRepeat(engine: ManualEngine, callId: string, asks = 1): Promise<void> {
+  engine.emit("callerActivity", { words: true });
+  engine.emit("transcript", { speaker: "user", text: "Queria saber do meu pedido." });
+  expect(harness?.timers.fire(AFTER_WORDS_MS)).toBe(1);
+  expect(harness?.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+  await waitFor(
+    async () => (await eventsOf(app, callId)).filter((event) => event.kind === "caller_unanswered" && event.payload.action === "asked_to_repeat").length === asks,
+    "the request to repeat",
+  );
+}
+
+// Ressalva Q7 do Verificador no #367: os dois campos só existem no fim por `caller_hangup`.
+describe("o \"pode repetir?\" seguido de outro fim", { timeout: 120_000 }, () => {
+  const MAX_SECONDS = 45;
+  const ends: [string, (s: Scene) => void][] = [
+    ["engine_failed", (s) => s.manual.emit("closed", "error")],
+    ["script_finished", (s) => s.manual.emit("closed", "ended")],
+    [
+      "max_duration",
+      () => {
+        expect(harness?.timers.fire(MAX_SECONDS * 1000)).toBe(1);
+        // A despedida do tempo máximo e o fim dela.
+        expect(harness?.timers.fire(6000)).toBe(1);
+      },
+    ],
+  ];
+
+  for (const [reason, end] of ends) {
+    it(`${reason}: o call_ended não tem openTurn nem callerSpokeAfterAsk`, async () => {
+      const s = await answered(`after-ask then ${reason}`, [], [], MAX_SECONDS);
+      await askToRepeat(s.manual, s.callId);
+      end(s);
+      await s.done;
+      const ended = await endedOf(s.callId);
+      expect(ended).toMatchObject({ reason });
+      expect(ended).not.toHaveProperty("openTurn");
+      expect(ended).not.toHaveProperty("callerSpokeAfterAsk");
+    });
+  }
+});
+
+// Ressalva Q8 do Verificador no #367: vale só o sinal da sessão em curso (`current()`).
+describe("callerSpokeAfterAsk numa passagem entre agentes", { timeout: 120_000 }, () => {
+  async function handedOff(label: string): Promise<{ callId: string; first: ManualEngine; second: ManualEngine; transport: ManualTransport; done: Promise<unknown> }> {
+    const organizationId = await createOrganization(app, label);
+    const first = manualEngine({ id: "first", keyless: true });
+    const second = manualEngine({ id: "second", keyless: true });
+    const reception = await createAgent(app, organizationId, { name: "Recepção", engine: "first" });
+    const scheduling = await createAgent(app, organizationId, { name: "Agendamento", engine: "second" });
+    await setHandoffTargets(app, reception, [scheduling]);
+    harness = await sessionHarness(app, [first.engine, second.engine]);
+    const callId = await createCall(app, organizationId, reception, harness.clock.now());
+    const transport = manualTransport();
+    const session = startCallSession(harness.deps, { organizationId, callId, agentId: reception, transport });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    expect(first.closed).toBe(1);
+    return { callId, first, second, transport, done: session.done };
+  }
+
+  it("a fala que a sessão substituída ainda emite depois do pedido não marca: callerSpokeAfterAsk fica false", async () => {
+    const s = await handedOff("after-ask stale leg");
+    await askToRepeat(s.second, s.callId);
+    // A sessão do primeiro agente já foi fechada, mas ainda emite um sinal de fala com palavras.
+    s.first.emit("callerActivity", { words: true });
+    s.transport.callerHangup();
+    await s.done;
+    const ended = await endedOf(s.callId);
+    expect(ended).toMatchObject({ reason: "caller_hangup", openTurn: null, callerSpokeAfterAsk: false });
+  });
+
+  it("a mesma fala vinda da sessão em curso marca: callerSpokeAfterAsk true", async () => {
+    const s = await handedOff("after-ask current leg");
+    await askToRepeat(s.second, s.callId);
+    s.second.emit("callerActivity", { words: true });
+    s.transport.callerHangup();
+    await s.done;
+    expect(await endedOf(s.callId)).toMatchObject({ reason: "caller_hangup", callerSpokeAfterAsk: true });
   });
 });

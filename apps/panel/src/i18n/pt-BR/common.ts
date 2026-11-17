@@ -92,6 +92,8 @@ const common = {
     whatsapp_connected: "Há um número de WhatsApp conectado por QR Code. Desconecte o número antes de salvar outro conector ou de remover o serviço.",
     handoff_target_invalid: "Um dos agentes marcados em \"Pode passar a ligação para\" não existe mais ou é o próprio agente. Recarregue a página e marque de novo.",
     owner_unavailable: "Essa pessoa não está ativa na equipe. Escolha outra, ou deixe com a equipe.",
+    drop_follow_up_whatsapp_not_connected: "O WhatsApp não está conectado. Conecte em Configurações → WhatsApp antes de escolher a mensagem para quem ligou.",
+    drop_follow_up_caller_id_not_trusted: "A mensagem para quem ligou só sai com \"Confiar no número exibido na ligação\" ligado, em Configurações → WhatsApp. Ligue antes de escolher este modo.",
     caller_notes_retention_above_transcripts: "O prazo da memória não pode passar do prazo de guarda das conversas. Escolha um prazo menor, ou aumente antes o prazo de guarda.",
     follow_up_closed: "Esta pendência já foi fechada por outra pessoa. Atualize a página.",
     whatsapp_calls_unavailable: "O processo de voz deste servidor ainda não tem a chave do serviço de ligação pelo WhatsApp. Rode bash install/update.sh no servidor, uma vez.",

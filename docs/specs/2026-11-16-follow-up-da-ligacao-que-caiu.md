@@ -181,7 +181,7 @@ dos modos `whatsapp` e `call_back` usa o mesmo `source = 'review_call'`.
 sempre que a regra da seção 2 bate e o modo não é `off`. O payload tem só campos fixos:
 `{ case: "engine_failed" | "call_dropped", mode, action, simulated, openTurn }`. `action` é uma
 destas: `task_opened`, `whatsapp_queued`, `call_back_scheduled`, `skipped` (com `reason`:
-`do_not_call`, `mode_unavailable`, `recent_follow_up`). Na simulada, `simulated: true`, e a ação é a
+`do_not_call`, `mode_unavailable`, `recent_follow_up`, `org_limit`). Na simulada, `simulated: true`, e a ação é a
 que teria acontecido. Nenhum texto da conversa entra no evento.
 
 **Um follow-up por número a cada 24 horas.** Antes de mandar mensagem ou agendar religação, a
@@ -190,6 +190,20 @@ revisão confere se o mesmo número já recebeu `whatsapp_queued` ou `call_back_
 cai no caminho da pendência. O motivo é que o número de quem liga pode ser forjado. Sem esse limite,
 quem quisesse incomodar alguém ligaria várias vezes com o número da vítima e desligaria no meio da
 conversa, e a instalação mandaria mensagens ou ligaria para ela.
+
+**Um teto de mensagens por organização protege o número.** No modo `whatsapp`, a organização manda
+no máximo 3 mensagens para quem ligou em 60 minutos corridos e 20 em 24 horas corridas
+(`CALLER_MESSAGE_ORG_PER_HOUR` e `CALLER_MESSAGE_ORG_PER_DAY`, constantes, sem ajuste na tela). A
+contagem usa as linhas de `notifications` com `audience = 'caller'` da organização criadas na janela,
+inclusive as que falharam e as apagadas a pedido do titular (o apagamento anula o `target`, mas a linha
+fica). A simulada não conta, porque não cria aviso. Acima do teto, a revisão grava `skipped` com
+`org_limit` e abre a pendência de reserva, com o título "Retornar para <número>: a mensagem para quem
+ligou passou do teto da organização". Uma trava por organização (`pg_advisory_xact_lock`) segura as
+duas contagens, a do número e a da organização, quando duas revisões correm ao mesmo tempo.
+
+**A ordem no modo `whatsapp`:** lista de não ligar, pré-requisito, 24 horas por número, teto da
+organização. Número na lista não ganha pendência nem quando falta o pré-requisito. O modo `task` não
+muda.
 
 ### 3.4 Pendência (fatia 1)
 
@@ -211,10 +225,15 @@ Por isso:
 
 - **O texto é fixo por agente, escrito pelo operador**, em `agents.drop_follow_up_message`, com no
   máximo 300 caracteres e **sem variável nenhuma**: nem nome, nem horário, nem assunto, nada que
-  venha da conversa. Vazio, vale um texto padrão do dicionário, na língua da organização. Em pt-BR:
-  "Olá. Sua ligação para nós caiu antes de terminarmos. Se ainda precisar, ligue de novo neste
-  número." A tela diz, junto do campo, que o texto vai para o número que ligou, que esse número
-  pode não ser de quem ligou e que nada da conversa deve entrar nele.
+  venha da conversa. Vazio, vale um texto padrão do dicionário, na língua do agente que atendeu, com
+  uma única variável posta pelo sistema: o nome da organização (`organizations.name`), para a
+  mensagem dizer quem escreve. O nome é do operador, e não de quem ligou. Em pt-BR: "Olá, aqui é
+  <organização>. Sua ligação para nós caiu antes de terminarmos. Se ainda precisar, ligue de novo
+  neste número." A tela diz, junto do campo, que o texto vai para o número que ligou, que esse
+  número pode não ser de quem ligou, que nada da conversa deve entrar nele e que ele deve dizer o
+  nome da empresa. Diz também que a mensagem escreve primeiro para um número que pode nunca ter
+  falado com o WhatsApp da central, o que pode levar a restrição ou bloqueio do número, e mostra o
+  teto da organização (seção 3.3).
 - **Só com conector de WhatsApp** (`hasWhatsAppConnector`).
 - **Só com `whatsapp.trust_caller_id` ligado** (`TRUST_CALLER_ID_KEY` em `send_whatsapp.ts`). É o
   ajuste em que a organização já aceitou mandar mensagem ao número de quem ligou sem confirmação
@@ -340,8 +359,10 @@ Bloco **"Quando a ligação cai"** na tela do agente, perto de "Dono das pendên
 - Quatro opções, nesta ordem: "Não fazer nada" (padrão), "Abrir uma pendência para alguém
   retornar", "Mandar uma mensagem no WhatsApp para quem ligou" e "Ligar de volta".
 - Abaixo das opções, a definição em uma frase: "Conta como queda quando o sistema falha, quando quem
-  ligou fica alguns segundos sem resposta e desliga, ou quando a linha cai durante uma ação do
-  agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta."
+  ligou fica alguns segundos sem resposta e desliga, quando ouve o agente pedir para repetir e
+  desliga sem voltar a falar, ou quando a linha cai durante uma ação do agente. Quem desliga depois
+  de se despedir, ou enquanto o agente fala, não conta." (frase da fatia 2, que passa a citar o caso
+  2(c); pedido da DESA-86)
 - Opção indisponível aparece desabilitada, com o motivo e o caminho para resolver: sem conector de
   WhatsApp; WhatsApp sem confiar no número de quem liga; ligações de saída desligadas.
 - A opção "Ligar de volta" diz quantas tentativas e quando ("1 tentativa, 30 minutos depois, dentro

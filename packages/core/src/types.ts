@@ -62,6 +62,7 @@ export const CALL_EVENT_KINDS = [
   "memory_loaded",
   "caller_speech_read",
   "drop_follow_up",
+  "drop_follow_up_result",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];
@@ -76,11 +77,18 @@ export type OpenTurn = (typeof OPEN_TURNS)[number];
 
 /**
  * O que acontece quando a ligação cai, por agente (`agents.drop_follow_up`). O banco já aceita os
- * quatro; `whatsapp` e `call_back` só passam a valer nas fatias 2 a 4 do desenho, e até lá a rota
- * recusa os dois.
+ * quatro; `whatsapp` vale desde a fatia 2 do desenho, e `call_back` só nas fatias 3 e 4: até lá a rota
+ * o recusa.
  */
 export const DROP_FOLLOW_UP_MODES = ["off", "task", "whatsapp", "call_back"] as const;
 export type DropFollowUpMode = (typeof DROP_FOLLOW_UP_MODES)[number];
+
+/**
+ * A quem o aviso se dirige (`notifications.audience`): à equipe, como todo aviso de antes, ou a quem
+ * ligou, que é a mensagem do modo `whatsapp` quando a ligação cai. O apagamento a pedido do titular
+ * anula o `target` do aviso `caller`.
+ */
+export type NotificationAudience = "team" | "caller";
 
 /**
  * O que acontece na organização fora de uma chamada e precisa ficar registrado

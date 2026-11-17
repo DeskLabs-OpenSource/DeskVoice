@@ -1,4 +1,4 @@
-import { checkVocabulary, toE164, type OrgQuery } from "@deskvoice/core";
+import { callerMessageBlock, checkVocabulary, DROP_FOLLOW_UP_MESSAGE_MAX, toE164, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError } from "./context";
 import { listEngines } from "./pieces";
@@ -35,7 +35,8 @@ const optionalText = (max: number) =>
 export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions, greeting, engine, voice_id as "voiceId", language, tools,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
   follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment",
-  agent_handoff_targets as "agentHandoffTargets", drop_follow_up as "dropFollowUp", created_at as "createdAt", updated_at as "updatedAt"`;
+  agent_handoff_targets as "agentHandoffTargets", drop_follow_up as "dropFollowUp",
+  drop_follow_up_message as "dropFollowUpMessage", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -57,8 +58,11 @@ const agentFields = z.object({
   // Ambiente de quem liga: `noisy` ajusta a detecção de fala do provedor para ruído de fundo.
   listeningEnvironment: z.enum(["normal", "noisy"]),
   // O que acontece quando a ligação cai (desenho do follow-up da ligação que caiu, seção 3.2). O banco
-  // aceita os quatro modos, mas só `off` e `task` têm caminho nesta fatia: os outros são recusados aqui.
-  dropFollowUp: z.enum(["off", "task"]),
+  // aceita os quatro modos, mas `call_back` só tem caminho nas fatias 3 e 4: é recusado aqui. O
+  // `whatsapp` passa por `requireDropFollowUpMode`, que confere o pré-requisito.
+  dropFollowUp: z.enum(["off", "task", "whatsapp"]),
+  // O texto do WhatsApp para quem ligou: fixo, escrito pelo operador, sem variável. Vazio vale o padrão.
+  dropFollowUpMessage: optionalText(DROP_FOLLOW_UP_MESSAGE_MAX),
   // Para quem o agente pode passar a ligação (`transfer_to_agent`). A rota confere que cada um é
   // outro agente desta organização (`requireHandoffTargets`); vazia, a ferramenta não aparece.
   agentHandoffTargets: z
@@ -86,6 +90,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   listeningEnvironment: "normal",
   agentHandoffTargets: [],
   dropFollowUp: "off",
+  dropFollowUpMessage: null,
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",
@@ -125,6 +130,19 @@ export async function requireActiveOwner(q: OrgQuery, userId: string | null | un
   if (!(await q.one("select 1 from users where id = $1 and disabled_at is null for share", [userId]))) {
     throw new ApiError(400, "owner_unavailable", "The follow-up owner must be an active person of this team.");
   }
+}
+
+/**
+ * O modo `whatsapp` de "Quando a ligação cai" só pode ser escolhido com conector de WhatsApp e com
+ * `whatsapp.trust_caller_id` ligado (seção 3.5 do desenho): sem eles, a mensagem nunca sairia. A
+ * revisão confere de novo na hora de agir, porque o ajuste pode ser desligado depois.
+ */
+export async function requireDropFollowUpMode(q: OrgQuery, mode: string | undefined): Promise<void> {
+  if (mode !== "whatsapp") return;
+  const block = await callerMessageBlock(q);
+  if (block === "whatsapp_not_connected") throw new ApiError(400, "drop_follow_up_whatsapp_not_connected", "Connect WhatsApp in Settings → WhatsApp before choosing to message the caller.");
+  if (block === "caller_id_not_trusted")
+    throw new ApiError(400, "drop_follow_up_caller_id_not_trusted", "Turn on trusting the caller's number in Settings → WhatsApp before choosing to message the caller.");
 }
 
 /**
