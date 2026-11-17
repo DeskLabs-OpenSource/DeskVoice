@@ -63,9 +63,8 @@ export async function createAccount(q: OrgQuery, account: { email: string; passw
 }
 
 /**
- * Cria a conta e o vínculo `member` dela com a organização, na transação de quem chama. É a única
- * função que grava `users.email`, sempre junto com `accounts.email`. Devolve `null` se o e-mail já
- * tem conta: nada é gravado. `q` tem de ser de `withSystem`.
+ * Cria a conta e o vínculo `member` dela com a organização, na transação de quem chama. Devolve
+ * `null` se o e-mail já tem conta: nada é gravado. `q` tem de ser de `withSystem`.
  */
 export async function createMember(
   q: OrgQuery,
@@ -73,12 +72,23 @@ export async function createMember(
 ): Promise<{ accountId: string; userId: string } | null> {
   const accountId = await createAccount(q, member);
   if (!accountId) return null;
+  const userId = await addMembership(q, { organizationId: member.organizationId, accountId, name: member.name, role: member.role });
+  return { accountId, userId };
+}
+
+/**
+ * Cria o vínculo `member` de uma conta que já existe com uma organização, na transação de quem
+ * chama. É a única função que grava `users.email`, e copia o e-mail da própria conta: as duas
+ * nunca divergem. A conta que já tem vínculo nesta organização faz o banco recusar
+ * (`users_one_membership_idx`); quem chama confere antes. `q` tem de ser de `withSystem`.
+ */
+export async function addMembership(q: OrgQuery, member: { organizationId: string; accountId: string; name: string; role: TeamRole }): Promise<string> {
   const user = await q.one<{ id: string }>(
-    "insert into users (organization_id, account_id, kind, email, name, role) values ($1, $2, 'member', $3, $4, $5) returning id",
-    [member.organizationId, accountId, member.email, member.name, member.role],
+    "insert into users (organization_id, account_id, kind, email, name, role) select $1, a.id, 'member', a.email, $3, $4 from accounts a where a.id = $2 returning id",
+    [member.organizationId, member.accountId, member.name, member.role],
   );
-  if (!user) throw new Error("Insert into users returned no row");
-  return { accountId, userId: user.id };
+  if (!user) throw new Error("addMembership: the account does not exist");
+  return user.id;
 }
 
 /** A conta de um vínculo `member`, ou `null`. */
@@ -137,22 +147,93 @@ function closeSessions(q: OrgQuery, accountId: string, keepSessionId: string | n
 
 /**
  * Apaga a conta que ficou sem nenhum vínculo (de qualquer `kind`). É o passo seguinte à remoção de
- * um membro: sem ele, o e-mail e o hash ficariam numa conta que não entra em lugar nenhum, e um
- * convite novo para o mesmo e-mail cairia em `email_taken`. A conta que ainda tem outro vínculo
- * continua. Se a conta tinha a marca de quem administra a instalação, a perda fica na auditoria.
- * Devolve se apagou.
+ * um membro: sem ele, o e-mail e o hash ficariam numa conta que não entra em lugar nenhum. A conta
+ * que ainda tem outro vínculo continua. Se a conta tinha a marca de quem administra a instalação, a
+ * perda fica na auditoria. Devolve se apagou.
  */
 export function deleteAccountIfOrphan(db: Db, accountId: string, now: Date, detail: { actorAccountId?: string | null; organizationId?: string | null } = {}): Promise<boolean> {
-  return withSystem(db, async (q) => {
-    const gone = await q.one<{ admin: boolean }>(
-      `delete from accounts a where a.id = $1 and not exists (select from users u where u.account_id = a.id)
-       returning a.installation_admin_at is not null as admin`,
+  return withSystem(db, (q) => deleteOrphanAccount(q, accountId, now, { ...detail, source: "member_removed" }));
+}
+
+/** De onde veio a remoção da conta órfã, gravado em `installation_admin_revoked` quando ela tinha a marca. */
+export type OrphanSource = "member_removed" | "orphan_on_invite";
+
+/**
+ * A regra de `deleteAccountIfOrphan`, na transação de quem chama. São as duas pontas da conta
+ * órfã: a remoção do membro (que apaga depois de confirmar, fora da transação, e pode falhar) e o
+ * aceite de um convite novo para o mesmo e-mail, que apaga a conta que sobrou antes de criar a
+ * nova. A marca de quem administra a instalação some com a conta e nunca passa para a nova.
+ * `q` tem de ser de `withSystem`.
+ */
+export async function deleteOrphanAccount(
+  q: OrgQuery,
+  accountId: string,
+  now: Date,
+  detail: { actorAccountId?: string | null; organizationId?: string | null; source: OrphanSource },
+): Promise<boolean> {
+  const gone = await q.one<{ admin: boolean }>(
+    `delete from accounts a where a.id = $1 and not exists (select from users u where u.account_id = a.id)
+     returning a.installation_admin_at is not null as admin`,
+    [accountId],
+  );
+  if (!gone) return false;
+  if (gone.admin) {
+    await recordInstallationEvent(q, now, "installation_admin_revoked", {
+      actorAccountId: detail.actorAccountId,
+      organizationId: detail.organizationId,
+      payload: { account_id: accountId, source: detail.source },
+    });
+  }
+  return true;
+}
+
+/** Uma organização em que a conta tem vínculo `member` ativo: o que o seletor do topo lista. */
+export interface Membership {
+  organizationId: string;
+  organizationName: string;
+}
+
+/**
+ * As organizações em que a conta tem vínculo `member` ativo, por nome. O vínculo `support` (o
+ * "entrar como", da fatia 5) nunca aparece aqui, nem o desativado. Atravessa organizações porque a
+ * conta não tem organização.
+ */
+export function listMemberships(db: Db, accountId: string): Promise<Membership[]> {
+  return withSystem(db, (q) =>
+    q.many<Membership>(
+      `select o.id as "organizationId", o.name as "organizationName"
+         from users u join organizations o on o.id = u.organization_id
+        where u.account_id = $1 and u.kind = 'member' and u.disabled_at is null
+        order by o.name, o.id`,
       [accountId],
+    ),
+  );
+}
+
+/**
+ * Leva a sessão para outra organização da mesma conta (seção 3.1): confere que a conta tem vínculo
+ * `member` ativo no destino e muda `organization_id` e `user_id` na mesma linha de `sessions`. O
+ * cookie não muda. Grava `last_organization_id`, para o próximo login voltar para lá.
+ *
+ * Devolve `false`, sem mudar nada, quando a organização não existe, quando a conta não tem vínculo
+ * nela, quando o vínculo está desativado ou não é `member`, e quando a sessão não é desta conta:
+ * para quem chama, as quatro são o mesmo "não encontrado".
+ */
+export function switchOrganization(db: Db, sessionId: string, accountId: string, organizationId: string): Promise<boolean> {
+  return withSystem(db, async (q) => {
+    const target = await q.one<{ id: string }>(
+      "select id from users where account_id = $1 and organization_id = $2 and kind = 'member' and disabled_at is null",
+      [accountId, organizationId],
     );
-    if (!gone) return false;
-    if (gone.admin) {
-      await recordInstallationEvent(q, now, "installation_admin_revoked", { ...detail, payload: { account_id: accountId, source: "member_removed" } });
-    }
+    if (!target) return false;
+    // A sessão tem de ser da conta: pelo vínculo em que ela está agora, que é o que `findSession` confere.
+    const moved = await q.exec(
+      `update sessions s set organization_id = $3, user_id = $4, account_id = $2
+        where s.id = $1 and exists (select from users cur where cur.id = s.user_id and cur.organization_id = s.organization_id and cur.account_id = $2)`,
+      [sessionId, accountId, organizationId, target.id],
+    );
+    if (moved !== 1) return false;
+    await q.exec("update accounts set last_organization_id = $2 where id = $1", [accountId, organizationId]);
     return true;
   });
 }

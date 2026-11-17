@@ -201,7 +201,7 @@ describe("renaming and the first owner's invite", () => {
     expect(JSON.stringify(recorded)).not.toContain(invite.token);
     expect(await findInviteByToken(app, invite.token, now)).toMatchObject({ email, role: "owner" });
 
-    const accepted = await acceptInvite(app, invite.token, { name: "Dona do Cliente", passwordHash: "senha" }, now);
+    const accepted = await acceptInvite(app, invite.token, { account: "new", name: "Dona do Cliente", passwordHash: "senha" }, now);
     if (!accepted.ok) throw new Error(accepted.reason);
     expect(accepted.organizationId).toBe(result.organizationId);
     const account = (await owner.pool.query<{ id: string }>("select id from accounts where email = $1", [email])).rows[0]?.id ?? "";
@@ -223,7 +223,7 @@ describe("renaming and the first owner's invite", () => {
     // Alguém entrou por outro caminho (SQL na VPS, ou a fatia 3): o convite sem criador deixa de valer.
     await member(org, "operator");
     expect(await findInviteByToken(app, second.token, now)).toBeNull();
-    expect(await acceptInvite(app, second.token, { name: "B", passwordHash: "senha" }, now)).toEqual({ ok: false, reason: "invalid" });
+    expect(await acceptInvite(app, second.token, { account: "new", name: "B", passwordHash: "senha" }, now)).toEqual({ ok: false, reason: "invalid" });
   });
 
   it("keeps the first-owner invite valid when the organization only has a link that is not a member", async () => {
@@ -241,7 +241,7 @@ describe("renaming and the first owner's invite", () => {
     expect(await findInviteByToken(app, invite.token, now)).toMatchObject({ role: "owner" });
     const again = await createFirstOwnerInvite(app, ownerOne.accountId, org, { email: `b-${randomUUID()}@example.test`, name: "B" }, now);
     if (!again.ok) throw new Error(again.reason);
-    const accepted = await acceptInvite(app, again.token, { name: "B", passwordHash: "senha" }, now);
+    const accepted = await acceptInvite(app, again.token, { account: "new", name: "B", passwordHash: "senha" }, now);
     expect(accepted).toMatchObject({ ok: true, organizationId: org });
   });
 
@@ -255,10 +255,10 @@ describe("renaming and the first owner's invite", () => {
 
     expect(await revokeInstallationAdmin(app, adminOne.accountId, ownerOne.accountId, now)).toEqual({ ok: true });
     expect(await findInviteByToken(app, invite.token, now)).toBeNull();
-    expect(await acceptInvite(app, invite.token, { name: "A", passwordHash: "senha" }, now)).toEqual({ ok: false, reason: "invalid" });
+    expect(await acceptInvite(app, invite.token, { account: "new", name: "A", passwordHash: "senha" }, now)).toEqual({ ok: false, reason: "invalid" });
     // A marca de volta devolve o convite: a regra é a de agora, como na tela Equipe.
     expect(await grantInstallationAdminBy(app, adminOne.accountId, ownerOne.email, now)).toMatchObject({ ok: true });
-    expect(await acceptInvite(app, invite.token, { name: "A", passwordHash: "senha" }, now)).toMatchObject({ ok: true, organizationId: result.organizationId });
+    expect(await acceptInvite(app, invite.token, { account: "new", name: "A", passwordHash: "senha" }, now)).toMatchObject({ ok: true, organizationId: result.organizationId });
   });
 
   it("keeps the first-owner invite only while the account that created it administers the installation: the account deleted", async () => {
@@ -279,7 +279,7 @@ describe("renaming and the first owner's invite", () => {
     const row = await withOrg(app, result.organizationId, (q) => q.one("select installation_invite, created_by_account from invites"));
     expect(row).toEqual({ installation_invite: true, created_by_account: null });
     expect(await findInviteByToken(app, invite.token, now)).toBeNull();
-    expect(await acceptInvite(app, invite.token, { name: "A", passwordHash: "senha" }, now)).toEqual({ ok: false, reason: "invalid" });
+    expect(await acceptInvite(app, invite.token, { account: "new", name: "A", passwordHash: "senha" }, now)).toEqual({ ok: false, reason: "invalid" });
   });
 
   it("leaves one live first-owner invite when two are created at the same time", async () => {
@@ -349,10 +349,13 @@ describe("renaming and the first owner's invite", () => {
     ).rejects.toMatchObject({ code: "23514", constraint: "invites_installation_invite_is_owner" });
   });
 
-  it("refuses an e-mail that already has an account and an organization that does not exist", async () => {
+  it("invites an e-mail that already has an account, even the inviter's own, and refuses an organization that does not exist", async () => {
     const { ownerOne } = await singleClient();
     const org = await createOrganization(app, "Vazia");
-    expect(await createFirstOwnerInvite(app, ownerOne.accountId, org, { email: ownerOne.email, name: "Ana" }, now)).toEqual({ ok: false, reason: "email_taken" });
+    // Fatia 3: a conta que já existe aceita com a senha dela; não há mais `email_taken` aqui.
+    const own = await createFirstOwnerInvite(app, ownerOne.accountId, org, { email: ownerOne.email, name: "Ana" }, now);
+    expect(own).toEqual({ ok: true, token: expect.any(String) });
+    expect((await findInviteByToken(app, own.ok ? own.token : "", now))?.existingAccount).toBe(true);
     expect(await createFirstOwnerInvite(app, ownerOne.accountId, randomUUID(), { email: `x-${randomUUID()}@example.test`, name: "X" }, now)).toEqual({ ok: false, reason: "not_found" });
   });
 });

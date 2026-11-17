@@ -91,11 +91,13 @@ describe("the installation area", () => {
     const invite = await call(inviteOwner, { method: "POST", cookie: ownerOne.cookie, params: { id: organizationId }, body: { email: "Dona.Nova@Example.test", name: "Dona" } });
     expect(invite.status).toBe(200);
     expect((invite.data as { link: string }).link).toMatch(/^https:\/\/panel\.test\/invite\/[A-Za-z0-9_-]{43}$/);
-    expect(refusal(await call(inviteOwner, { method: "POST", cookie: ownerOne.cookie, params: { id: organizationId }, body: { email: adminOne.email, name: "X" } }))).toEqual([400, "email_taken"]);
+    // Um e-mail que já tem conta também pode ser convidado (fatia 3): a pessoa aceita com a senha dela.
+    // O convite novo derruba o anterior.
+    expect((await call(inviteOwner, { method: "POST", cookie: ownerOne.cookie, params: { id: organizationId }, body: { email: adminOne.email, name: "X" } })).status).toBe(200);
 
     const events = (await call(listEvents, { cookie: ownerOne.cookie })).data as Array<{ kind: string; organizationId: string | null; actorEmail: string | null }>;
     const ofOrganization = events.filter((event) => event.organizationId === organizationId);
-    expect(ofOrganization.map((event) => event.kind)).toEqual(["first_owner_invited", "organization_renamed", "organization_created"]);
+    expect(ofOrganization.map((event) => event.kind)).toEqual(["first_owner_invited", "first_owner_invited", "organization_renamed", "organization_created"]);
     // O convite guarda quem o gerou: a conta da sessão, e não alguém que a rota escolha.
     expect(ofOrganization[0]?.actorEmail).toBe(ownerOne.email);
   });
