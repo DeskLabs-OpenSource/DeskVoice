@@ -503,7 +503,8 @@ Fica no comentário da DESA-24, no formato do `GOVERNANCE.md`. Resumo:
 
 **Como está (17/11):** o prazo venceu em 17/11 sem resposta aos dois pedidos, e valeu o padrão de
 cada um.
-- **Pedido 1:** o diagnóstico da ligação de 13/11 não é feito. A camada 5 fecha sem ele, e a
+- **Pedido 1:** o diagnóstico da ligação de 13/11 não é feito. O item 5 do objetivo da DESA-24
+  (que pedia esse diagnóstico) fecha sem ele, e a
   hipótese "o provedor não viu o fim do turno por causa do ruído" fica registrada como não provada.
 - **Pedido 2:** vale a decisão 1 da DESA-10, que o Rafael respondeu A em 13/11 (lote DESA-19,
   decisão 2). A medida contra o provedor roda com teto de US$ 5 no total, e a chave de cada motor

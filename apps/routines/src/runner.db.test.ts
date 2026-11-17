@@ -181,15 +181,56 @@ describe("runner", () => {
     const oldDone = await enqueue("greet", new Date(t0.getTime() - 8 * day));
     const recentDone = await enqueue("greet", new Date(t0.getTime() - 6 * day));
     const oldFailed = await enqueue("greet", new Date(t0.getTime() - 8 * day));
+    const oldCanceled = await enqueue("greet", new Date(t0.getTime() - 8 * day));
+    const recentCanceled = await enqueue("greet", new Date(t0.getTime() - 6 * day));
     await withSystem(app, (q) => q.exec("update tasks set status = 'done' where id = any($1)", [[oldDone, recentDone]]));
     await withSystem(app, (q) => q.exec("update tasks set status = 'failed' where id = $1", [oldFailed]));
+    await withSystem(app, (q) => q.exec("update tasks set status = 'canceled', last_error = 'organization_suspended' where id = any($1)", [[oldCanceled, recentCanceled]]));
 
     await start([{ kind: "greet", run: async () => undefined }]);
 
     expect(await taskRow(oldDone)).toBeNull();
     expect(await taskRow(recentDone)).toMatchObject({ status: "done" });
+    // A cancelada pela suspensão (fatia 4b do R8) vai junto com a concluída, e nunca roda.
+    expect(await taskRow(oldCanceled)).toBeNull();
+    expect(await taskRow(recentCanceled)).toMatchObject({ status: "canceled", attempts: 0 });
     // Falha fica: é o registro do que precisa de atenção.
     expect(await taskRow(oldFailed)).toMatchObject({ status: "failed" });
+  });
+
+  it("com uma tarefa vencida de organização suspensa, arma para a próxima elegível, e não para 0 ms", async () => {
+    // Seção 3.3 do desenho do R8: a tarefa cancelável da suspensa fica `queued` e vencida, e o
+    // runner não pode pegá-la. Se a próxima hora não usar a regra de `claimTask`, ele acorda em 0 ms
+    // para sempre.
+    const suspended = await createOrganization(app, "runner-suspended");
+    await withSystem(app, (q) => q.exec("update organizations set suspended_at = $2, suspended_reason = 'teste do runner' where id = $1", [suspended, t0]));
+    const parked = await withOrg(app, suspended, (q) => enqueueTask(q, { kind: "later", payload: {}, runAt: new Date(t0.getTime() - 60_000) }));
+    let ran = 0;
+    await start([{ kind: "later", run: async () => void ran++ }]);
+    const next = await enqueue("later", new Date(t0.getTime() + 60_000));
+
+    await until(() => liveTimer()?.delayMs === 60_000, "a timer armed for the next eligible task");
+    expect(timers.some((timer) => timer.delayMs === 0)).toBe(false);
+
+    fire(liveTimer() as FakeTimer);
+    await until(statusIs(next, "done"), "the eligible task to run");
+    expect(ran).toBe(1);
+    expect(await taskRow(parked)).toMatchObject({ status: "queued", attempts: 0 });
+    // Com outra agendada para daqui a 10 minutos, é para ela que ele se arma de novo, e não para 0 ms.
+    const farther = await enqueue("later", new Date(t0.getTime() + 600_000));
+    await until(() => liveTimer()?.delayMs === 540_000, "a timer armed for the farther eligible task");
+    expect(timers.some((timer) => timer.delayMs === 0)).toBe(false);
+    expect(await taskRow(farther)).toMatchObject({ status: "queued" });
+  });
+
+  it("roda a rotina de guarda da organização suspensa", async () => {
+    const suspended = await createOrganization(app, "runner-suspended-guard");
+    await withSystem(app, (q) => q.exec("update organizations set suspended_at = $2, suspended_reason = 'teste do runner' where id = $1", [suspended, t0]));
+    const guard = await withOrg(app, suspended, (q) => enqueueTask(q, { kind: "purge_transcripts", payload: {}, runAt: t0 }));
+    const seen: string[] = [];
+    await start([{ kind: "purge_transcripts", run: async (task) => void seen.push(task.organizationId) }]);
+    await until(statusIs(guard, "done"), "the guard routine of the suspended organization to run");
+    expect(seen).toEqual([suspended]);
   });
 
   it("close não deixa timer vivo e o runner fechado não pega mais nada", async () => {

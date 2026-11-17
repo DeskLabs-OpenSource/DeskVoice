@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { DEFAULT_RECORDINGS_DIR, createDb, hashToken, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { DEFAULT_RECORDINGS_DIR, ORGANIZATION_SUSPENDED, createDb, hashToken, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { wahaFromEnv, type WahaOptions } from "@deskvoice/tools/waha";
 import type { z, ZodType } from "zod";
 import { trustedProxyHops } from "./client-ip";
@@ -13,6 +13,14 @@ export interface Session {
   role: Role;
   name: string;
   email: string;
+  /** A organização da sessão está suspensa (seção 3.3 do desenho do R8). */
+  suspended: boolean;
+}
+
+/** Quem está numa organização suspensa vê isto, e mais nada (seção 3.3 do desenho do R8). */
+export interface SuspendedOrganization {
+  name: string;
+  reason: string | null;
 }
 
 export interface ServerDeps {
@@ -162,18 +170,34 @@ export async function findSession(deps: ServerDeps, token: string | undefined): 
   if (!token) return null;
   return withSystem(deps.db, (q) =>
     q.one<Session>(
-      `select s.id, s.user_id as "userId", s.organization_id as "organizationId", u.role, u.name, u.email
+      `select s.id, s.user_id as "userId", s.organization_id as "organizationId", u.role, u.name, u.email, o.suspended_at is not null as suspended
          from sessions s join users u on u.id = s.user_id and u.organization_id = s.organization_id
+         join organizations o on o.id = s.organization_id
         where s.token_hash = $1 and s.expires_at > $2 and u.disabled_at is null`,
       [hashToken(token), deps.clock.now()],
     ),
   );
 }
 
-export async function requireSession(request: Request, deps: ServerDeps = serverDeps()): Promise<Session> {
+/**
+ * A sessão de quem pede, ou 401. Com a organização da sessão suspensa, responde 409
+ * `organization_suspended` (seção 3.3 do desenho do R8), a menos que a rota diga
+ * `allowSuspended`: só as da conta (quem sou, sair, senha, trocar de organização) e as da área da
+ * instalação, para quem administra conseguir reativar estando nela. Rota nova nasce fechada.
+ */
+export async function requireSession(request: Request, deps: ServerDeps = serverDeps(), options: { allowSuspended?: boolean } = {}): Promise<Session> {
   const session = await findSession(deps, readCookie(request, SESSION_COOKIE));
   if (!session) throw new ApiError(401, "unauthenticated", "Sign in to continue.");
+  if (session.suspended && !options.allowSuspended) throw new ApiError(409, ORGANIZATION_SUSPENDED, "This organization is suspended.");
   return session;
+}
+
+/** O nome e o motivo da organização suspensa da sessão, para a tela de suspensa; `null` se ela está ativa. */
+export function suspendedOrganization(deps: ServerDeps, session: Session): Promise<SuspendedOrganization | null> {
+  if (!session.suspended) return Promise.resolve(null);
+  return withOrg(deps.db, session.organizationId, (q) =>
+    q.one<SuspendedOrganization>("select name, suspended_reason as reason from organizations where id = $1 and suspended_at is not null", [session.organizationId]),
+  );
 }
 
 export const CONFIG_ROLES: readonly Role[] = ["owner", "admin"];
@@ -207,6 +231,8 @@ interface HandleOptions<S extends ZodType, R> {
   body?: S;
   /** Rota que altera configuração: só `owner` e `admin`. */
   configure?: boolean;
+  /** Rota da conta, que vale mesmo com a organização da sessão suspensa (`requireSession`). */
+  allowSuspended?: boolean;
   /**
    * Roda antes de abrir a transação, já com a sessão, o papel e a entrada conferidos. É onde cabe
    * uma consulta de rede de que a rota depende: destino lento não segura conexão do banco.
@@ -227,7 +253,7 @@ export function handle<S extends ZodType = ZodType<undefined>, R = unknown>(
   return async (request, context) => {
     try {
       const deps = serverDeps();
-      const session = await requireSession(request, deps);
+      const session = await requireSession(request, deps, { allowSuspended: options.allowSuspended === true });
       if (options.configure) requireRole(session);
       const params = (await context.params) ?? {};
       // Id malformado nunca chega ao banco: para quem chama, é só um registro que não existe.

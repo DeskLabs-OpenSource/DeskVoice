@@ -4,7 +4,11 @@ import { ApiError } from "../../../../../server/context";
 import { handleInstallation } from "../handle";
 
 /** A lista de organizações e o que criar mais uma faria com a lista de quem administra a instalação. */
-export const GET = handleInstallation({}, async ({ deps }) => ({ organizations: await listOrganizations(deps.db), creation: await previewNewOrganization(deps.db) }));
+export const GET = handleInstallation({}, async ({ session, deps }) => ({
+  // `current`: a organização em que quem pede está agora, que não pode ser suspensa por ela (seção 3.3).
+  organizations: (await listOrganizations(deps.db)).map((organization) => ({ ...organization, current: organization.id === session.organizationId })),
+  creation: await previewNewOrganization(deps.db),
+}));
 
 const ids = z.array(z.uuid()).max(200);
 const body = z.object({ name: z.string().trim().min(1).max(120), shown: z.object({ granted: ids, losing: ids }), keep: ids });
