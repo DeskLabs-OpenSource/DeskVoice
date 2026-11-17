@@ -71,7 +71,11 @@ export interface BrainChatRequest {
 export interface BrainChatEvents {
   /** Texto da resposta, em pedaços, assim que chega. */
   text(delta: string): void;
-  /** O modelo pediu uma ferramenta, já montada. `args` é texto: quem executa valida com zod (convenção 16). */
+  /**
+   * O modelo pediu uma ferramenta, já montada. `args` é texto: quem executa valida com zod (convenção 16).
+   * Sai assim que a ferramenta fecha, antes do fim do pedido: por isso pode vir `toolCall` e depois
+   * `error`, e isso é válido; quem executa decide se usa uma ferramenta de uma volta que falhou.
+   */
   toolCall(call: { id: string; name: string; args: string }): void;
   /**
    * O consumo do pedido. Todo pedido que saiu emite **exatamente um**, antes de `done` ou `error`, ou
@@ -108,7 +112,7 @@ export interface Brain {
   /** Um pedido com saída em JSON. Nunca lança; nunca registra a chave nem o corpo do provedor. */
   completeJson(apiKey: string, request: BrainJsonRequest, options: { fetch?: typeof fetch }): Promise<BrainJsonResult>;
   /**
-   * A conversa em streaming, com ferramentas (R5, fatia 2). Opcional: cérebro sem `chat` continua
+   * A conversa em streaming, com ferramentas (R5, fatias 2 e 2b). Opcional: cérebro sem `chat` continua
    * válido e só não aparece na lista do pipeline. Nunca lança; nunca registra a chave nem o corpo.
    */
   chat?(apiKey: string, request: BrainChatRequest, options: { fetch?: typeof fetch }): BrainChat;

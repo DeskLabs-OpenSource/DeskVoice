@@ -1,8 +1,9 @@
 /**
- * Bancada do cérebro do pipeline (R5, fatia 2): o tempo do pedido ao primeiro `text` de `Brain.chat`.
+ * Bancada do cérebro do pipeline (R5, fatias 2 e 2b): o tempo do pedido ao primeiro `text` de `Brain.chat`.
  * Fora do CI; só roda com as chaves que a R4 já usa, entregues por canal privado.
  *
  *   # export BANCADA_OPENAI_API_KEY=...  BANCADA_OPENROUTER_API_KEY=...  BANCADA_DEEPSEEK_API_KEY=...
+ *   # export BANCADA_ANTHROPIC_API_KEY=...
  *   pnpm exec tsx scripts/bancada-de-voz/cerebro-primeiro-texto.ts [--modelo openai=gpt-4.1-mini] [--limite 30]
  *
  * O que ela mede, e como:
@@ -20,6 +21,7 @@
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { Brain, BrainChatRequest } from "../../packages/voice-engine/src/brain";
+import anthropic from "../../packages/voice-engine/src/brains/anthropic";
 import deepseek from "../../packages/voice-engine/src/brains/deepseek";
 import openai from "../../packages/voice-engine/src/brains/openai";
 import openrouter from "../../packages/voice-engine/src/brains/openrouter";
@@ -31,6 +33,8 @@ export const CEREBROS: readonly { brain: Brain; variavel: string; modelo: string
   { brain: openai, variavel: "BANCADA_OPENAI_API_KEY", modelo: "gpt-4.1-mini" },
   { brain: openrouter, variavel: "BANCADA_OPENROUTER_API_KEY", modelo: "openai/gpt-4.1-mini" },
   { brain: deepseek, variavel: "BANCADA_DEEPSEEK_API_KEY", modelo: "deepseek-chat" },
+  // O mais barato da tabela `PRICES` de `brains/anthropic.ts` (US$ 1 e US$ 5 por milhão).
+  { brain: anthropic, variavel: "BANCADA_ANTHROPIC_API_KEY", modelo: "claude-haiku-4-5-20251001" },
 ];
 
 export const INSTRUCAO = "Você atende o telefone de uma clínica. Responda em uma frase curta, em português.";
@@ -177,7 +181,7 @@ export async function rodar(
         (r.erros.length > 0 ? `; erros: ${r.erros.join(", ")}` : ""),
     );
   }
-  let texto = `Pedido → primeiro texto do cérebro (R5, fatia 2)\n${linhas.join("\n")}\n`;
+  let texto = `Pedido → primeiro texto do cérebro (R5, fatias 2 e 2b)\n${linhas.join("\n")}\n`;
   // A chave nunca sai na saída, nem dentro de uma mensagem de erro.
   for (const segredo of segredos) texto = texto.split(segredo).join("***");
   return texto;

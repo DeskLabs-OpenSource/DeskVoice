@@ -7,7 +7,9 @@
 > **Estado (17/11, documento vivo):** fatia 1a (a voz atrás de uma interface, #393) e fatia 1b (a
 > chave e as vozes na tela, #412) na `main`. Fatia 2 (`Brain.chat` em streaming) no #419,
 > com um ajuste ao contrato da seção 3.2 (o consumo nunca fica sem número). A latência do cérebro na
-> 3.5 segue **não medida**: a bancada existe, e faltaram as chaves. Fatias 3 a 6 não começaram.
+> 3.5 segue **não medida**: a bancada existe, e faltaram as chaves. Fatia 2b (`Brain.chat` na
+> Anthropic, com o transporte do streaming separado do formato de cada API) em PR de rascunho; a 2c
+> (Gemini) não começou. Fatias 3 a 6 não começaram.
 
 ## 1. O problema
 
@@ -145,7 +147,11 @@ documentam, e não ao OpenRouter, que o marca como obsoleto e sem efeito (o cons
 
 Opcional como `classifyOutcome`: cérebro sem `chat` não aparece na lista do pipeline. Primeiro entram
 os três que falam `/chat/completions` com `stream: true` e `tools` (OpenAI, OpenRouter e DeepSeek),
-por um caminho comum em `brain-http.ts`. Anthropic e Gemini ficam para uma fatia à parte.
+por um caminho comum em `brain-http.ts`. Anthropic entrou na 2b; o Gemini fica na 2c. Na 2b o
+caminho comum foi dividido em transporte (`chatTransport`: o pedido, o prazo, o SSE, o `usage` único e
+a estimativa) e formato (`ChatFormat`: o corpo e a leitura de cada `data:`), e a Anthropic usa o
+transporte com o formato da API de mensagens. O `toolCall` sai quando a ferramenta fecha, antes do fim:
+pode vir `toolCall` e depois `error`, e isso é válido no contrato.
 
 ### 3.3 O motor: `packages/voice-engine/src/engines/pipeline.ts`
 
@@ -227,7 +233,7 @@ final chegou, e o evento leva a marca `endFromArrival: true`.
 | Etapa | Orçamento | De onde vem |
 |---|---|---|
 | Fim da fala → trecho final | 700 ms | A régua da R12 (spec #198) |
-| Pedido → primeiro texto do cérebro | 800 ms | **Não medido.** Meta. A bancada da fatia 2 (`scripts/bancada-de-voz/cerebro-primeiro-texto.ts`) existe; em 17/11 rodou sem nenhuma das chaves (`BANCADA_OPENAI_API_KEY`, `BANCADA_OPENROUTER_API_KEY`, `BANCADA_DEEPSEEK_API_KEY`) |
+| Pedido → primeiro texto do cérebro | 800 ms | **Não medido.** Meta. A bancada da fatia 2 (`scripts/bancada-de-voz/cerebro-primeiro-texto.ts`) existe, com a linha da Anthropic desde a 2b; em 17/11 rodou sem nenhuma das chaves (`BANCADA_OPENAI_API_KEY`, `BANCADA_OPENROUTER_API_KEY`, `BANCADA_DEEPSEEK_API_KEY`, `BANCADA_ANTHROPIC_API_KEY`) |
 | Primeiro texto → primeiro áudio da voz | 400 ms | **Não medido.** Meta. A fatia 1 mede na bancada |
 | Transporte e ajuste | 100 ms | Pedaço de 20 ms + fila de saída |
 | **Total p95** | **2 000 ms** | Soma. **Meta p50: 1 200 ms** |
@@ -480,7 +486,7 @@ Resposta: A, dada pelo Rafael em 17/11, junto com a DESA-103 (seção 9.1).
 - Clonagem de voz e vozes geradas pela tela (só a lista do que a conta já tem).
 - Outras vozes (OpenAI TTS, Google, Piper local): cada uma é um arquivo novo em `synthesizers/`,
   depois.
-- Cérebros Anthropic e Gemini no `chat` (fatia própria, depois da 2).
+- Cérebro Gemini no `chat` (fatia 2c, depois da 2b, que trouxe a Anthropic).
 - Escolher a região da ElevenLabs (`api.eu.residency...`). O `processingLocation` diz "não declara"
   até haver fonte.
 - Guardar o áudio sintetizado em disco ou no banco. O cache é só em memória, por processo.
