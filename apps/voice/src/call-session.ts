@@ -1,4 +1,5 @@
 import {
+  analystObjectionsOf,
   CALL_RECORDING_SETTING,
   CALLER_MEMORY_AGENT_SETTING,
   callerMemoryAgentOf,
@@ -38,6 +39,8 @@ import {
   type ToolResult,
 } from "@deskvoice/tools";
 import {
+  analystQuestions,
+  analystState,
   DECISION_DEADLINE_MS,
   DECISION_MODEL_SETTING,
   EngineTimeoutError,
@@ -46,9 +49,15 @@ import {
   decisionModelKeySetting,
   decisionModelOf,
   estimateCostCents,
+  leaks,
+  leakShingles,
+  readAnalystDecision,
   readSpeechDecision,
   speechFilterQuestions,
   speechFilterState,
+  type AnalystConfig,
+  type AnalystTurn,
+  type DecideResult,
   type DecisionModel,
   type Usage,
   type VoiceEngine,
@@ -154,10 +163,11 @@ interface AgentRow {
   vocabulary: string[];
   listening_environment: "normal" | "noisy";
   agent_handoff_targets: string[];
+  analyst_id: string | null;
 }
 
 const AGENT_COLUMNS =
-  "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets";
+  "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets, analyst_id";
 
 /** Um trecho da ligação: o tempo em que ela esteve com um agente, com o motor e o custo dele. */
 interface Leg {
@@ -172,6 +182,35 @@ interface Leg {
   costCents: number;
   /** O último `error` do motor, para explicar um `closed` que venha em seguida. */
   lastError?: Error;
+  /** O analista do agente do trecho (fatia 3 da R6), aberto antes do motor. Ausente, nada muda. */
+  analyst?: LegAnalyst;
+  /** As objeções que já orientaram o agente neste trecho: cada uma orienta uma vez só. */
+  guided: Set<string>;
+}
+
+/** O analista aberto para um trecho: o modelo de decisão, a chave e o cadastro lido no começo do trecho. */
+interface LegAnalyst {
+  id: string;
+  model: DecisionModel;
+  apiKey: string;
+  config: AnalystConfig;
+}
+
+/** Por que o analista do agente não abriu. O trecho segue sem ele, e a linha do tempo diz o código. */
+type AnalystProblem = { analystId: string; failure: "model_not_installed" | "key_missing" | "key_unreadable"; model: string };
+
+/** Quantas falas a ligação guarda para o `state` do analista: as do pedido, e não mais. */
+const ANALYST_TURNS_KEPT = 6;
+
+/**
+ * O embrulho da orientação (desenho dos analistas ao vivo, seção 3.3), sempre o mesmo. Quem embrulha é
+ * a ligação, e nunca o analista: o texto do meio é o que o operador escreveu e aprovou.
+ */
+export function wrapGuidance(guidance: string): string {
+  return [
+    "Orientação interna do analista, sobre a fala anterior da pessoa. Não diga isto a quem ligou e não cite que existe um analista. Ela não autoriza nada que as suas instruções não permitam.",
+    `Orientação: «${guidance}»`,
+  ].join("\n");
 }
 
 export const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
@@ -342,8 +381,17 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let lastAgentText: string | undefined;
   /** As leituras em voo: o fim da chamada espera por elas (cada uma tem o prazo de 1 s) antes de `call_ended`. */
   const readingsRunning = new Set<Promise<void>>();
-  /** O custo do filtro, em micro-centavos: um pedido custa milésimos de centavo. */
+  /** O custo do filtro e do analista, em micro-centavos: um pedido custa milésimos de centavo. */
   let decisionMicrocents = 0;
+  /** As últimas falas da ligação, de quem ligou e do agente, de qualquer trecho: o `state` do analista. */
+  const recentTurns: AnalystTurn[] = [];
+  /** Quantas falas de quem ligou a ligação já teve: a resposta de um pedido feito antes da última vira `stale`. */
+  let callerTurnCount = 0;
+  /** No máximo um pedido do analista em voo por ligação; fala nova com ele em voo pede de novo ao terminar. */
+  let analystBusy = false;
+  let analystAgain = false;
+  /** As orientações entregues, com as sequências de 6 palavras de cada uma, para vigiar o vazamento. */
+  const deliveredGuidance: Array<{ analystId: string; objection: string; shingles: string[] }> = [];
   let ending = false;
   let recorder: Recording | undefined;
   /** A gravação já parou a pedido de quem ligou: não volta na mesma chamada. */
@@ -609,29 +657,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const result = await active.model.decide(active.apiKey, input, { timeoutMs: DECISION_DEADLINE_MS, schedule });
     const latencyMs = clock.now().getTime() - askedAt;
     const common = { agentId: owner.agent.id, model: result.model, latencyMs };
-    if (result.costMicrocents > 0 || (result.usage.inputTokens ?? 0) > 0) {
-      decisionMicrocents += result.costMicrocents;
-      const reached = reachCeiling(callCents());
-      // Uma linha por pedido, no agente do trecho, com o id do modelo no lugar do motor. O custo
-      // estimado (pedido que saiu sem consumo lido) entra igual no total e no teto, marcado.
-      await q.exec(
-        "insert into usage_ledger (organization_id, call_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, cost_estimated, at) values ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9, $10)",
-        [
-          organizationId,
-          callId,
-          active.model.id,
-          owner.agent.id,
-          result.usage.inputTokens ?? 0,
-          result.usage.outputTokens ?? 0,
-          Math.round(result.costMicrocents / MICROCENTS_PER_CENT),
-          result.costMicrocents,
-          result.costEstimated === true,
-          clock.now(),
-        ],
-      );
-      await q.exec("update calls set cost_cents = $2 where id = $1", [callId, callCents()]);
-      if (reached) await recordCeiling(callCents(), reached);
-    }
+    await chargeDecision(owner, active.model, result, null);
     if (!result.ok) return void (await event("caller_speech_read", { ...common, onTime: false, failure: result.failure, status: result.status }));
     const reading = readSpeechDecision(result.answers, vocabulary);
     const marked = reading.marks.background !== undefined || reading.marks.suggestion !== undefined;
@@ -652,6 +678,155 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       marked,
     });
   }
+
+  /**
+   * O custo de um pedido ao modelo de decisão, do filtro (`source` nulo) ou do analista (`analyst`): uma
+   * linha por pedido, no agente do trecho, com o id do modelo no lugar do motor. Entra no total da
+   * ligação e no teto, que vale para voz, filtro e analista somados. O custo estimado (pedido que saiu
+   * sem consumo lido: atrasado, sem rede, fora da forma) entra igual, marcado. Custo desconhecido nunca
+   * é zero.
+   */
+  async function chargeDecision(owner: Leg, model: DecisionModel, result: DecideResult, source: "analyst" | null): Promise<void> {
+    if (!(result.costMicrocents > 0 || (result.usage.inputTokens ?? 0) > 0)) return;
+    decisionMicrocents += result.costMicrocents;
+    const reached = reachCeiling(callCents());
+    await q.exec(
+      "insert into usage_ledger (organization_id, call_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, cost_estimated, source, at) values ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9, $10, $11)",
+      [
+        organizationId,
+        callId,
+        model.id,
+        owner.agent.id,
+        result.usage.inputTokens ?? 0,
+        result.usage.outputTokens ?? 0,
+        Math.round(result.costMicrocents / MICROCENTS_PER_CENT),
+        result.costMicrocents,
+        result.costEstimated === true,
+        source,
+        clock.now(),
+      ],
+    );
+    await q.exec("update calls set cost_cents = $2 where id = $1", [callId, callCents()]);
+    if (reached) await recordCeiling(callCents(), reached);
+  }
+
+  /** Guarda uma fala para o `state` do analista: só as últimas, de qualquer trecho. */
+  function rememberTurn(turn: AnalystTurn): void {
+    recentTurns.push(turn);
+    if (recentTurns.length > ANALYST_TURNS_KEPT) recentTurns.shift();
+  }
+
+  /**
+   * O analista na ligação (desenho dos analistas ao vivo, seção 3.4). Corre ao lado da conversa:
+   * nada no caminho da voz espera por ele. No máximo um pedido em voo por ligação; fala nova com ele
+   * em voo marca "pergunte de novo ao terminar", e só a última conta. Toda a cadeia corre presa em
+   * `readingsRunning`, para o fim da chamada gravar o que ela disser antes de `call_ended`.
+   */
+  function askAnalyst(): void {
+    if (analystBusy) return void (analystAgain = true);
+    const owner = leg;
+    if (!owner?.analyst || ending) return;
+    analystBusy = true;
+    const asking: Promise<void> = readAnalyst(owner, owner.analyst)
+      .catch(logFailure("could not record the analyst reading"))
+      .finally(() => {
+        readingsRunning.delete(asking);
+        analystBusy = false;
+        if (!analystAgain) return;
+        analystAgain = false;
+        askAnalyst();
+      });
+    readingsRunning.add(asking);
+  }
+
+  async function readAnalyst(owner: Leg, analyst: LegAnalyst): Promise<void> {
+    const askedTurn = callerTurnCount;
+    // A fala de quem ligou vai só no `state`. As perguntas são fixas ou escritas pelo operador.
+    const input = { state: analystState(recentTurns), questions: analystQuestions(analyst.config) };
+    const askedAt = clock.now().getTime();
+    let result: DecideResult;
+    try {
+      result = await analyst.model.decide(analyst.apiKey, input, { timeoutMs: DECISION_DEADLINE_MS, schedule });
+    } catch (error) {
+      // O contrato diz que `decide` nunca lança. Se lançar, o trecho segue sem orientação, e a linha do tempo diz.
+      log("error", "the analyst decision model threw", { error: messageOf(error), model: analyst.model.id });
+      return void (await event("analyst_read", analystRead(owner, analyst, { model: analyst.model.id, latencyMs: clock.now().getTime() - askedAt, onTime: false, failure: "exception", status: null })));
+    }
+    const latencyMs = clock.now().getTime() - askedAt;
+    await chargeDecision(owner, analyst.model, result, "analyst");
+    if (!result.ok) return void (await event("analyst_read", analystRead(owner, analyst, { model: result.model, latencyMs, onTime: false, failure: result.failure, status: result.status })));
+    const reading = readAnalystDecision(result.answers, analyst.config);
+    const read = event(
+      "analyst_read",
+      analystRead(owner, analyst, { model: result.model, latencyMs, onTime: true, temperature: reading.temperature, objection: reading.objection, failure: null, status: null }),
+    );
+    const objection = reading.guidance;
+    // Sem objeção no corte, ou com a mesma que já orientou este trecho: nada mais a fazer.
+    if (!objection || owner.guided.has(objection.key)) return void (await read);
+    const common = { analystId: analyst.id, agentId: owner.agent.id, objection: objection.key };
+    // Outra fala de quem ligou chegou depois do pedido, ou o trecho já é outro: a orientação é velha.
+    if (askedTurn !== callerTurnCount || owner !== leg || ending || wrappingUp) {
+      await read;
+      return void (await event("analyst_guidance", { ...common, outcome: "stale" }));
+    }
+    if (!owner.voice.guide) {
+      await read;
+      return void (await event("analyst_guidance", { ...common, outcome: "engine_unsupported" }));
+    }
+    // Entra pelo `guide`, nunca por `say`: a orientação não vira fala.
+    owner.voice.guide(wrapGuidance(objection.guidance));
+    owner.guided.add(objection.key);
+    deliveredGuidance.push({ analystId: analyst.id, objection: objection.key, shingles: leakShingles(objection.guidance) });
+    await read;
+    await event("analyst_guidance", { ...common, outcome: "delivered" });
+  }
+
+  /** O `analyst_read` sempre com todos os campos, nulos quando não há o que dizer. Nunca leva texto de quem ligou. */
+  function analystRead(
+    owner: Leg,
+    analyst: { id: string },
+    fields: { model: string; latencyMs: number | null; onTime: boolean; temperature?: { score: number; confidence: number } | null; objection?: { key: string | null; confidence: number } | null; failure: string | null; status: number | null },
+  ): Record<string, unknown> {
+    return { analystId: analyst.id, agentId: owner.agent.id, temperature: null, objection: null, ...fields };
+  }
+
+  /** A fala do agente repetiu 6 palavras seguidas de uma orientação entregue: mede o fracasso, sem cortar nada. */
+  function watchLeak(agentId: string, text: string): void {
+    for (const delivered of deliveredGuidance) {
+      if (!leaks(text, delivered.shingles)) continue;
+      void event("analyst_guidance_leaked", { analystId: delivered.analystId, agentId, objection: delivered.objection }).catch(logFailure("could not record a guidance leak"));
+    }
+  }
+
+  /**
+   * Lê o analista do agente e abre o modelo dele, antes do motor do trecho. Sem analista, nada muda.
+   * Modelo não instalado, chave ausente ou ilegível: o trecho segue sem analista, e quem chama grava o
+   * motivo. Na chamada simulada o modelo é o simulado, como no filtro: ela nunca gasta com provedor.
+   */
+  async function openAnalyst(row: AgentRow): Promise<{ analyst?: LegAnalyst; problem?: AnalystProblem }> {
+    if (!row.analyst_id) return {};
+    // Pelo `withOrg` da ligação: analista de outra organização não é encontrado.
+    const stored = await q.one<{ id: string; decision_model: string; temperature: boolean; objections: unknown }>("select id, decision_model, temperature, objections from analysts where id = $1", [row.analyst_id]);
+    if (!stored) return {};
+    // A ligação valida de novo ao ler: um cadastro fora da regra vale como nenhuma objeção.
+    const config: AnalystConfig = { temperature: stored.temperature, objections: analystObjectionsOf(stored.objections) };
+    const modelId = overrides?.engineId ? "simulated" : stored.decision_model;
+    const model = deps.decisionModels?.get(modelId);
+    if (!model) return { problem: { analystId: stored.id, failure: "model_not_installed", model: modelId } };
+    if (model.keyless) return { analyst: { id: stored.id, model, apiKey: "", config } };
+    const key = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, decisionModelKeySetting(model.id)]);
+    if (typeof key?.value !== "string") return { problem: { analystId: stored.id, failure: "key_missing", model: model.id } };
+    try {
+      return { analyst: { id: stored.id, model, apiKey: decryptSecret(key.value, deps.secretKey), config } };
+    } catch {
+      // O motivo da falha de decifrar não vai para a linha do tempo: só o código.
+      return { problem: { analystId: stored.id, failure: "key_unreadable", model: model.id } };
+    }
+  }
+
+  /** O analista foi ligado no agente e não abriu: a linha do tempo diz por quê, e o trecho segue sem ele. */
+  const analystProblemEvent = (agentId: string, problem: AnalystProblem): Promise<void> =>
+    event("analyst_read", { analystId: problem.analystId, agentId, model: problem.model, latencyMs: null, onTime: false, temperature: null, objection: null, failure: problem.failure, status: null });
 
   /** (Re)agenda o fim pela duração máxima, contada de quando a ligação foi atendida. */
   function scheduleDuration(): void {
@@ -829,7 +1004,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * Põe um agente na linha: liga os eventos da sessão dele e o torna o atual. Nada aqui espera: o
    * motor só começa a emitir no próximo ciclo, e os handlers precisam estar no lugar antes da primeira fala.
    */
-  function startLeg(row: AgentRow, legEngine: VoiceEngine, session: VoiceSession, enabled: Map<string, Tool>): Leg {
+  function startLeg(row: AgentRow, legEngine: VoiceEngine, session: VoiceSession, enabled: Map<string, Tool>, analyst?: LegAnalyst): Leg {
     const silenceGuard = createSilenceGuard({
       clock,
       schedule,
@@ -851,6 +1026,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       context: contextFor(row.id, row.language, session),
       usage: { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 },
       costCents: 0,
+      ...(analyst && { analyst }),
+      guided: new Set(),
     };
     // Uma sessão substituída numa passagem já foi fechada; o que ela ainda emitir não vai para a linha.
     const current = (): boolean => leg === self;
@@ -879,7 +1056,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const payload = turn.speaker === "agent" && handoffs > 0 ? { text: turn.text, agentId: row.id } : { text: turn.text };
       const recorded = recordEventWithId(q, callId, turn.speaker === "user" ? "transcript_user" : "transcript_agent", payload, clock.now());
       recorded.catch(logFailure("could not record a transcript"));
-      if (turn.speaker === "agent") return void (lastAgentText = turn.text);
+      if (turn.text.trim() !== "") rememberTurn({ speaker: turn.speaker === "user" ? "user" : "agent", text: turn.text });
+      if (turn.speaker === "agent") {
+        lastAgentText = turn.text;
+        if (deliveredGuidance.length > 0) watchLeak(row.id, turn.text);
+        return;
+      }
+      if (turn.text.trim() !== "") callerTurnCount += 1;
+      // O analista do trecho, só da sessão atual: a pergunta corre ao lado, sem segurar nada.
+      if (self.analyst && current() && !ending && turn.text.trim() !== "") askAnalyst();
       // Com o filtro desligado, nada além da fala; com ele, a pergunta corre ao lado, sem segurar nada.
       if (!filter || ending || turn.text.trim() === "") return;
       const reading: Promise<void> = readCallerSpeech(self, filter, turn.text, recorded)
@@ -953,6 +1138,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const lead = handoffItems(handoff);
       const fitted = memory && fitCallerMemory(memory.notes, memory.followUps, lead);
       const instructions = composeInstructions(next.instructions, targets, handoff, fitted?.items ?? []);
+      // O trecho novo usa o analista do agente novo, ou nenhum: o do trecho anterior não passa adiante.
+      const nextAnalyst = await openAnalyst(next);
       // A chamada simulada abre o motor simulado na ligação inteira, o trecho do destino inclusive:
       // ela nunca gasta com o provedor nem usa a chave da organização.
       const opened = await connectEngine(overrides?.engineId ?? next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled));
@@ -985,7 +1172,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
             chars: fitted?.chars ?? rememberedBlock(lead).length,
           })
         : undefined;
-      startLeg(next, opened.engine, opened.voice, enabled);
+      startLeg(next, opened.engine, opened.voice, enabled, nextAnalyst.analyst);
+      const analystProblem = nextAnalyst.problem ? analystProblemEvent(next.id, nextAnalyst.problem) : undefined;
       from.guard.stop();
       visited.push(next);
       if (next.max_call_seconds < durationLimitSeconds) {
@@ -996,6 +1184,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       await from.voice.close();
       await recorded;
       await loaded;
+      await analystProblem;
       // O teto do novo agente pode ser menor que o custo já gasto: vale na hora, sem esperar outra medição.
       const reached = reachCeiling(callCents());
       if (reached) await recordCeiling(callCents(), reached);
@@ -1062,6 +1251,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // dessa configuração: nenhum pedido sai, e a linha do tempo é a de antes, byte a byte. A chamada
     // simulada nunca gasta com provedor: com o filtro ligado, ela pergunta ao modelo simulado.
     const filterProblem = await openFilter();
+    // O analista do agente (fatia 3 da R6): só com `agents.analyst_id`. Sem ele, nada é lido além da
+    // coluna do agente, nenhum pedido sai, e a linha do tempo é a de antes.
+    const firstAnalyst = await openAnalyst(first);
 
     // Chave ausente ou inválida: a chamada não fica muda. É recusada com evento, aviso e sinal.
     const opened = await connectEngine(
@@ -1104,7 +1296,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // Daqui até o fim do bloco nada espera: o motor só começa a emitir no próximo ciclo, e os
     // handlers e os primeiros eventos precisam estar na fila antes da primeira fala.
     const session = opened.voice;
-    startLeg(first, opened.engine, session, enabled);
+    startLeg(first, opened.engine, session, enabled, firstAnalyst.analyst);
     // O áudio de quem ligou vai para o agente em que a ligação está agora.
     transport.onAudio((pcm) => {
       recorder?.caller(pcm);
@@ -1118,6 +1310,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       ...(memory ? [event("memory_loaded", { noteIds: memory.noteIds, followUpIds: memory.followUpIds, chars: memory.chars })] : []),
       // O filtro foi ligado e não pôde abrir: a linha do tempo diz por quê, e a chamada segue sem ele.
       ...(filterProblem ? [event("caller_speech_read", { onTime: false, failure: filterProblem.failure, model: filterProblem.model })] : []),
+      // O analista foi ligado e não pôde abrir: idem, e o trecho segue sem ele.
+      ...(firstAnalyst.problem ? [analystProblemEvent(first.id, firstAnalyst.problem)] : []),
     ];
     if (call.direction !== "inbound") session.say(recordingNotice);
     answeredAt = clock.now();

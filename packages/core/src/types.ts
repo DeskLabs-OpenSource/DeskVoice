@@ -61,6 +61,9 @@ export const CALL_EVENT_KINDS = [
   "caller_unanswered",
   "memory_loaded",
   "caller_speech_read",
+  "analyst_read",
+  "analyst_guidance",
+  "analyst_guidance_leaked",
   "drop_follow_up",
   "drop_follow_up_result",
 ] as const;
