@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { BrainChat, BrainChatEvents, BrainChatMessage, BrainChatRequest, BrainFailure, BrainJsonResult } from "./brain";
+import type { BrainChat, BrainChatEvents, BrainChatMessage, BrainChatRequest, BrainFailure, BrainJsonResult, BrainToolCall } from "./brain";
 import type { ToolSpec, Usage } from "./types";
 
 /** Prazo da lista de modelos (desenho da R4, seção 3.1). */
@@ -170,7 +170,7 @@ const wasNotSent = (error: unknown): boolean => {
 /** Para onde o formato manda o que leu. Depois do fim (ou de `cancel`), texto e ferramenta não saem mais. */
 export interface ChatSink {
   text(delta: string): void;
-  toolCall(call: { id: string; name: string; args: string }): void;
+  toolCall(call: BrainToolCall): void;
   /** Bytes recebidos que contam na saída estimada (texto, `args`, raciocínio). */
   output(bytes: number): void;
   /** O consumo declarado pelo provedor; o último vale. Sem ele, o fim leva a estimativa. */

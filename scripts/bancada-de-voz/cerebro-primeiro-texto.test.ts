@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PEDIDOS, medirUm, resumir, rodar, type MedidaDoCerebro } from "./cerebro-primeiro-texto";
 import anthropic from "../../packages/voice-engine/src/brains/anthropic";
+import gemini from "../../packages/voice-engine/src/brains/gemini";
 import openai from "../../packages/voice-engine/src/brains/openai";
 
 // Inventada: o teste procura por ela onde não pode aparecer.
@@ -80,6 +81,40 @@ describe("bancada do cérebro: pedido → primeiro texto", () => {
     expect(m.primeiroTextoMs).toBe(250);
     expect(m.estimado).toBe(true);
     expect(m.usage?.inputTokens).toBeGreaterThan(0);
+  });
+
+  it("mede o Gemini no formato dele: o primeiro pedaço com texto para o relógio, e a chave fica no cabeçalho", async () => {
+    const relogio = relogioFalso();
+    const pedidos: string[] = [];
+    const cabecalhos: Record<string, string>[] = [];
+    const fetch = (async (url: string, init: RequestInit) => {
+      pedidos.push(url);
+      cabecalhos.push(init.headers as Record<string, string>);
+      relogio.andar(180);
+      const pedacos = [
+        { candidates: [{ content: { role: "model", parts: [{ text: "", thoughtSignature: "assinatura" }] } }] },
+        { candidates: [{ content: { role: "model", parts: [{ text: "Claro!" }] } }] },
+      ];
+      const corpo = new ReadableStream<Uint8Array>({
+        start(controle) {
+          for (const pedaco of pedacos) controle.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(pedaco)}\r\n\r\n`));
+          init.signal?.addEventListener("abort", () => controle.error(new DOMException("abortado", "AbortError")));
+        },
+      });
+      return new Response(corpo, { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const m = await medirUm(gemini, CHAVE, "gemini-2.5-flash-lite", "Oi", { relogio, fetch });
+    expect(pedidos).toEqual(["https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent?alt=sse"]);
+    expect(pedidos[0]).not.toContain(CHAVE);
+    expect(cabecalhos[0]?.["x-goog-api-key"]).toBe(CHAVE);
+    expect(m.primeiroTextoMs).toBe(180);
+    expect(m.estimado).toBe(true);
+    expect(m.usage?.inputTokens).toBeGreaterThan(0);
+  });
+
+  it("sem a chave do Gemini, a linha dele diz não medido", async () => {
+    const texto = await rodar({});
+    expect(texto).toContain("- gemini (gemini-2.5-flash-lite): não medido (chave não entregue: BANCADA_GEMINI_API_KEY)");
   });
 
   it("sem chave nenhuma, diz não medido em cada cérebro e não chama nada", async () => {
