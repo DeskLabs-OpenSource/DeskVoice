@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { encryptSecret, withSystem, type ApprovalOutcome, type Db } from "@deskvoice/core";
+import { createAccount, encryptSecret, withSystem, type ApprovalOutcome, type Db } from "@deskvoice/core";
 import { createCall, createOrganization } from "../../core/test/helpers";
 import { autoCommitOrgQuery } from "../src/org-query";
 import type { ToolContext } from "../src/types";
@@ -94,14 +94,16 @@ export async function putWhatsAppConnector(app: Db, organizationId: string, type
 
 export async function createUser(app: Db, organizationId: string, whatsapp: string | null): Promise<string> {
   const id = randomUUID();
-  await withSystem(app, (q) =>
-    q.exec("insert into users (id, organization_id, email, name, password_hash, role, whatsapp_e164) values ($1, $2, $3, 'Pessoa', 'x', 'operator', $4)", [
+  await withSystem(app, async (q) => {
+    const accountId = await createAccount(q, { email: `${id}@example.com`, passwordHash: "x" });
+    await q.exec("insert into users (id, organization_id, account_id, email, name, role, whatsapp_e164) values ($1, $2, $3, $4, 'Pessoa', 'operator', $5)", [
       id,
       organizationId,
+      accountId,
       `${id}@example.com`,
       whatsapp,
-    ]),
-  );
+    ]);
+  });
   return id;
 }
 

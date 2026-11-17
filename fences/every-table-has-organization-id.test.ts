@@ -5,7 +5,30 @@
 import { describe, it, expect } from "vitest";
 import { REPO_ROOT, expectClean, fixture, listFiles, read } from "./_lib";
 
-const EXEMPT = new Set(["organizations", "schema_migrations"]);
+// Tabelas da INSTALAÇÃO, que não pertencem a nenhuma organização (R8, seção 3.9 do desenho
+// `docs/specs/2026-11-17-varias-organizacoes-e-administracao-da-instalacao.md`). Cada isenção tem
+// dono, motivo e data de revisão (antipadrão 11), cobrados pelo último teste deste arquivo. As três
+// têm RLS forçado, sem policy, e nenhum direito para `deskvoice_app`: quem confere é o teste de
+// isolamento gerado (`packages/core/test/isolation.db.test.ts`).
+const INSTALLATION_TABLES: Record<string, { owner: string; reason: string; review: string }> = {
+  accounts: {
+    owner: "@DeskLabs-OpenSource/maintainers",
+    reason: "a conta (e-mail e senha) é uma só para todas as organizações em que a pessoa entra",
+    review: "2027-05-17",
+  },
+  installation_settings: {
+    owner: "@DeskLabs-OpenSource/maintainers",
+    reason: "o estado de quem administra a instalação e os padrões da instalação valem acima das organizações",
+    review: "2027-05-17",
+  },
+  installation_events: {
+    owner: "@DeskLabs-OpenSource/maintainers",
+    reason: "a auditoria da instalação registra o que acontece acima das organizações, inclusive a exclusão de uma",
+    review: "2027-05-17",
+  },
+};
+
+const EXEMPT = new Set(["organizations", "schema_migrations", ...Object.keys(INSTALLATION_TABLES)]);
 
 /** Os itens (colunas e restrições) da lista que abre em `start`, separados na vírgula de fora. */
 function definitions(sql: string, start: number): string[] {
@@ -49,7 +72,7 @@ describe("every-table-has-organization-id", () => {
   it("toda tabela das migrations declara organization_id", () => {
     expectClean(
       check(REPO_ROOT),
-      "Acrescente `organization_id uuid not null references organizations(id)` à tabela. Só `organizations` e `schema_migrations` ficam de fora.",
+      "Acrescente `organization_id uuid not null references organizations(id)` à tabela. Só `organizations`, `schema_migrations` e as tabelas da instalação listadas em `INSTALLATION_TABLES` ficam de fora.",
     );
   });
 
@@ -59,5 +82,13 @@ describe("every-table-has-organization-id", () => {
       "db/migrations/20260101T000000_bad.sql: tabela `sessions` não declara a coluna `organization_id uuid not null`",
       "db/migrations/20260101T000000_bad.sql: tabela `drafts` não declara a coluna `organization_id uuid not null`",
     ]);
+  });
+
+  it("cada tabela da instalação isenta tem dono, motivo e data de revisão", () => {
+    for (const [table, exemption] of Object.entries(INSTALLATION_TABLES)) {
+      expect(exemption.owner, table).toMatch(/^@\S+$/);
+      expect(exemption.reason.trim(), table).not.toBe("");
+      expect(exemption.review, table).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
   });
 });

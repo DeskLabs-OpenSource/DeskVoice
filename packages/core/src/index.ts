@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./accounts";
 export * from "./analysis";
 export * from "./caller-history";
 export * from "./caller-message";
@@ -11,6 +12,7 @@ export * from "./share-links";
 export * from "./events";
 export * from "./follow-ups";
 export * from "./inbound-limit";
+export * from "./installation";
 export * from "./invites";
 export * from "./migrate";
 export * from "./password";
