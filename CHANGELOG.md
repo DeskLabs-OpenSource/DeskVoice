@@ -3,6 +3,50 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.28.0] - 2026-11-17
+
+### Requer atenção
+
+- **A senha passa a morar numa conta, separada da organização, e a atualização fica com quem administra a instalação** Depois desta versão, não dá para voltar só trocando a versão. `bash install/update.sh --to 0.27.0`
+  termina dizendo que está tudo saudável, mas ninguém consegue fazer login no painel, porque a
+  versão anterior procura a senha onde ela não está mais (quem já estava com o painel aberto
+  continua). A volta é pelo backup que o atualizador fez na ida para esta versão. Ele é o backup
+  mais recente cuja versão é a 0.27.0, e o comando abaixo, rodado na pasta do DeskVoice, mostra
+  qual é. Anote o resultado antes de voltar:
+
+      grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1 | xargs dirname
+
+  Para voltar, troque a versão e depois restaure esse backup, colando exatamente o que o comando
+  mostrou (ele já começa com `backups/`):
+
+      bash install/update.sh --to 0.27.0
+      bash install/restore.sh <exatamente o que o comando mostrou>
+
+  Não use `restore.sh latest` nem o backup que o `update.sh --to 0.27.0` mostra no fim como
+  "Backup de antes da atualização": esse foi feito na volta, com o banco desta versão, e restaurá-lo
+  não devolve o login. O backup da ida só fica guardado enquanto a rotação o mantiver, que guarda os
+  14 mais recentes. A restauração devolve o banco ao momento desse backup: o que entrou depois de
+  atualizar (ligações, pendências, mudanças feitas no painel) se perde.
+
+### Adicionado
+
+- **Os analistas ao vivo passam a existir no banco e na API** Nada muda numa instalação em funcionamento: nenhuma organização tem analista, nenhum agente usa um, e nenhuma tela os oferece ainda. A API passa a cadastrar analistas, cada um com um nome único na organização (sem diferença de maiúsculas: "Jev" e "jev" são o mesmo), o modelo de decisão que ele usa e até oito objeções com a orientação que o agente receberá, e o agente passa a aceitar um analista desta organização. Um modelo de decisão que manda o texto da ligação para fora do servidor, como o Jev da TypeSafe, só é aceito com a confirmação que nomeia o fornecedor; quem confirmou e quando ficam no analista, e a confirmação entra no Registro da privacidade com o nome da pessoa, que continua lá mesmo se ela sair da equipe. Apagar um analista deixa os agentes sem ele e diz quantos eram. Crédito: @melgarafael.
+- **O motor de voz passa a aceitar uma orientação para o agente que não vira fala** Nada muda numa instalação em funcionamento: é a primeira peça dos analistas ao vivo, e ninguém a usa ainda. O motor OpenAI Realtime passa a aceitar um contexto para o agente durante a ligação, entregue como item de sistema, sem pedir resposta e sem passar pela fala; se o agente estiver falando, a orientação espera a fala acabar. O motor simulado guarda a orientação e ganha um passo de roteiro que fala uma versão ou outra conforme recebeu orientação, para o teste da ligação inteira. O Gemini Live ainda não recebe orientação, porque o caminho que a documentação oferece interromperia a fala do agente. Que o item de sistema sozinho nunca gere resposta no provedor real ainda não foi medido. Crédito: @melgarafael.
+
+### Alterado
+
+- **A senha passa a morar numa conta, separada da organização, e a atualização fica com quem administra a instalação** Quem entra no painel continua entrando com o mesmo e-mail e a mesma senha, na mesma organização e
+  com o mesmo papel. Os aparelhos que já estavam conectados continuam conectados. Nada muda na tela e
+  não há nada a fazer depois de atualizar. Por trás, a senha sai do cadastro da equipe e passa para
+  uma conta que nenhuma tela presa a uma organização consegue ler. É o primeiro passo para uma mesma
+  pessoa cuidar de vários clientes numa instalação só. Pedir a atualização pelo painel passa a ser de
+  quem administra a instalação, e numa instalação com uma organização são as mesmas pessoas de
+  antes: o dono e o administrador. A exceção é a instalação que já tinha mais de uma organização,
+  criada direto no servidor: nela, só os donos ativos da organização mais antiga continuam pedindo a
+  atualização, e o registro da instalação guarda isso. Se ninguém mais conseguir pedir, o comando
+  `bash install/grant-installation-admin.sh <e-mail>`, rodado de dentro do servidor, devolve o papel a
+  uma conta. Crédito: @melgarafael.
+
 ## [0.27.0] - 2026-11-17
 
 ### Adicionado
