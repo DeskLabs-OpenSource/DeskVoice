@@ -1,10 +1,11 @@
 import { handle } from "../../../../server/context";
 
 // Nunca sai daqui resumo de senha nem de convite: as colunas são nomeadas uma a uma.
+// O vínculo de suporte da instalação (`kind = 'support'`) não é da equipe e não aparece na lista.
 export const GET = handle({ configure: true }, async ({ q, session, deps }) => ({
   people: await q.many(
     `select id, name, email::text as email, role, disabled_at is null as active, phone_e164 as phone, whatsapp_e164 as whatsapp, id = $1 as "isYou"
-       from users order by disabled_at is not null, created_at`,
+       from users where kind = 'member' order by disabled_at is not null, created_at`,
     [session.userId],
   ),
   invites: await q.many(

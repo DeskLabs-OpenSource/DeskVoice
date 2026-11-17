@@ -65,7 +65,7 @@ const routine: Routine = {
     await withOrg(deps.db, task.organizationId, async (q) => {
       const row = await q.one<{ id: string; call_id: string | null; status: string; due_at: Date; whatsapp: string | null }>(
         `select f.id, f.call_id, f.status, f.due_at, u.whatsapp_e164 as whatsapp
-           from follow_ups f left join users u on u.id = f.owner_user_id and u.disabled_at is null
+           from follow_ups f left join users u on u.id = f.owner_user_id and u.kind = 'member' and u.disabled_at is null
           where f.id = $1 for update of f`,
         [followUpId],
       );

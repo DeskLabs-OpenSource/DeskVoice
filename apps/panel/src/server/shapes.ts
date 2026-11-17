@@ -131,10 +131,10 @@ export const CALL_COLUMNS = `c.id, c.agent_id as "agentId", a.name as "agentName
   c.analysis_score as "analysisScore", c.voicemail`;
 export const CALL_STATUSES = ["ringing", "in_progress", "transferred", "completed", "failed", "refused"] as const;
 
-/** O dono das pendências de um agente é uma pessoa ativa da organização; outra coisa é recusada com motivo. */
+/** O dono das pendências de um agente é uma pessoa ativa da equipe (nunca o vínculo de suporte); outra coisa é recusada com motivo. */
 export async function requireActiveOwner(q: OrgQuery, userId: string | null | undefined): Promise<void> {
   if (userId === null || userId === undefined) return;
-  if (!(await q.one("select 1 from users where id = $1 and disabled_at is null for share", [userId]))) {
+  if (!(await q.one("select 1 from users where id = $1 and kind = 'member' and disabled_at is null for share", [userId]))) {
     throw new ApiError(400, "owner_unavailable", "The follow-up owner must be an active person of this team.");
   }
 }

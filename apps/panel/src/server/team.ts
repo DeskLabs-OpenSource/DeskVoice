@@ -9,6 +9,8 @@ export interface TeamMember {
 
 /**
  * A pessoa da equipe, travada para alteração. Quem é de outra organização não aparece (RLS): 404.
+ * O vínculo de suporte da instalação (`kind = 'support'`) não é da equipe: também 404, e não conta
+ * entre os donos.
  *
  * Os donos ativos são travados na mesma consulta, sempre na mesma ordem: a regra do último dono
  * precisa deles, e travar "a pessoa, depois os donos" fazia dois donos que se desativam ao mesmo
@@ -17,7 +19,7 @@ export interface TeamMember {
 export async function loadMember(q: OrgQuery, id: string | undefined): Promise<TeamMember> {
   const locked = await q.many<TeamMember>(
     `select id, role, disabled_at is not null as disabled from users
-      where id = $1 or (role = 'owner' and disabled_at is null) order by id for update`,
+      where kind = 'member' and (id = $1 or (role = 'owner' and disabled_at is null)) order by id for update`,
     [id],
   );
   const member = locked.find((row) => row.id === id);
@@ -44,7 +46,7 @@ export function requireOwnerToManage(session: Session, ...roles: Array<Role | un
  */
 export async function requireAnotherOwner(q: OrgQuery, member: TeamMember): Promise<void> {
   if (member.role !== "owner" || member.disabled) return;
-  const owners = await q.many<{ id: string }>("select id from users where role = 'owner' and disabled_at is null");
+  const owners = await q.many<{ id: string }>("select id from users where kind = 'member' and role = 'owner' and disabled_at is null");
   if (!owners.some((owner) => owner.id !== member.id)) {
     throw new ApiError(409, "last_owner", "This is the only active owner. Make another person an owner first.");
   }

@@ -1,0 +1,2 @@
+// Fixture: uma rota numa pasta chamada `test` continua sendo rota.
+export const POST = (q) => q.many("select whatsapp_e164 from users where role = 'owner'");

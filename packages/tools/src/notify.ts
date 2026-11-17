@@ -73,7 +73,8 @@ export async function notifyHumans(ctx: ToolContext, body: NotificationBody, opt
   if (options.whatsapp && (await hasWhatsAppConnector(ctx.q))) {
     const users = await ctx.q.many<{ whatsapp_e164: string }>(
       // Só quem está ativo: quem foi desativado saiu da equipe e não recebe mais dados de chamada.
-      "select distinct whatsapp_e164 from users where organization_id = $1 and whatsapp_e164 is not null and disabled_at is null order by whatsapp_e164",
+      // E só `member`: o vínculo de suporte da instalação nunca é avisado.
+      "select distinct whatsapp_e164 from users where organization_id = $1 and kind = 'member' and whatsapp_e164 is not null and disabled_at is null order by whatsapp_e164",
       [ctx.organizationId],
     );
     for (const user of users) targets.push({ channel: "whatsapp", target: user.whatsapp_e164 });

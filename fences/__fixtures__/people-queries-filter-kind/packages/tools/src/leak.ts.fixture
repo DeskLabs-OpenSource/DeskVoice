@@ -1,0 +1,2 @@
+// Fixture: o aviso que esquece o filtro, numa ferramenta.
+export const targets = (q, org) => q.many('select whatsapp_e164 from users where organization_id = $1', [org]);
