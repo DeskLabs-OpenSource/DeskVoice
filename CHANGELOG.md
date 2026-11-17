@@ -3,6 +3,22 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.27.0] - 2026-11-17
+
+### Adicionado
+
+- **Para quem contribui, uma skill nova para afinar um agente de voz com dados da operação** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e trabalha com um
+  assistente de código. A skill `deskvoice-agente-de-voz` atende o "as respostas da IA estão ruins":
+  diagnostica pela análise da ligação, pela linha do tempo e pela configuração do agente, sem tirar
+  transcrição nem telefone da instalação; revisa as instruções para a fala (frases curtas, sem
+  formatação, número e e-mail ditos, uma fala para quando algo falha); só troca o texto depois de
+  mostrar o antes e o depois e receber o sim da pessoa; e ensina a medir o efeito pela análise das
+  ligações antes e depois da troca, sem afirmar que melhorou. O vocabulário do agente, que ainda não
+  tem campo na tela, é tratado como uma dica que o provedor pode ignorar, e a skill não o troca até a
+  tela existir: registra a lista aprovada para aplicar depois. A skill de métricas passa a
+  apontar para ela. Crédito: @melgarafael.
+- **O agente pode mandar uma mensagem no WhatsApp para quem ligou quando a ligação cai** O bloco "Quando a ligação cai", na tela do agente, ganha a opção "Mandar uma mensagem no WhatsApp para quem ligou", com um campo para o texto, de até 300 caracteres. O texto é fixo, escrito por quem configura, e sai como está: nada da conversa entra nele, porque o número que ligou pode não ser de quem ligou. Vazio, vale um texto padrão na língua do agente, que começa dizendo o nome da organização. A tela avisa que a mensagem escreve primeiro para um número que pode nunca ter falado com o WhatsApp da central, o que pode levar a restrição ou bloqueio do número. A opção só funciona com o WhatsApp conectado e com "Confiar no número exibido na ligação" ligado, em Configurações → WhatsApp; sem isso, aparece desabilitada e diz por quê. Número na lista de não ligar não recebe a mensagem, e cada número recebe no máximo uma a cada 24 horas. Um teto de mensagens por organização protege o número: no máximo 3 por hora e 20 a cada 24 horas. A segunda queda do mesmo número nesse prazo, a mensagem acima do teto, ou a que não pôde sair, abre uma pendência para alguém retornar. A linha do tempo da ligação diz se a mensagem entrou na fila, saiu ou não saiu, e o apagamento a pedido do titular apaga também o número guardado na mensagem. A definição de queda na tela passa a citar o caso de quem ouve o agente pedir para repetir: "Conta como queda quando o sistema falha, quando quem ligou fica alguns segundos sem resposta e desliga, quando ouve o agente pedir para repetir e desliga sem voltar a falar, ou quando a linha cai durante uma ação do agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta." Todo agente que já existe continua no modo que tinha, e nada muda para quem não escolher a opção nova. Crédito: @melgarafael.
+
 ## [0.26.0] - 2026-11-17
 
 ### Adicionado
