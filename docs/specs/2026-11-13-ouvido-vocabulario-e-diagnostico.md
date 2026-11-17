@@ -2,6 +2,15 @@
 
 > Data: 2026-11-13. Roteiro de novembro, item R3 (DESA-10). Autor: Arquiteto.
 > Pedido do dono: "Eu falo Rafael Melgaço, ele entende rafael meu gasto."
+>
+> **Estado (17/11, documento vivo):** fatias 1 e 2 entregues, na `main`. Fatia 1 (subida de taxa
+> sem imagem espelhada) no #161. Fatia 2 (vocabulário de ponta a ponta, sem tela,
+> `VoiceSessionConfig.vocabulary`) no #199. **Falta:** a fatia 3 (o campo na tela) está no #290,
+> em rascunho, com o código aprovado pelo Verificador; sai do rascunho quando as provas de 50 termos
+> de 60 caracteres forem aceitas nos dois motores (o Gemini aceitou `customVocabulary` em 17/11,
+> sem prova do tamanho; a do OpenAI não foi registrada). A fatia 4 (medida contra o provedor, com
+> áudio) não rodou, e a seção "Medida contra o provedor" ainda não existe. O texto abaixo é o
+> desenho como foi escrito antes do código.
 
 ## Problema
 
