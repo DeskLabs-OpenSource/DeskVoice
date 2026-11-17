@@ -19,7 +19,7 @@ async function newOwner(): Promise<{ email: string; userId: string; organization
 }
 
 const passwordHashOf = async (userId: string): Promise<string> => {
-  const row = await withSystem(app, (q) => q.one<{ password_hash: string }>("select password_hash from users where id = $1", [userId]));
+  const row = await withSystem(app, (q) => q.one<{ password_hash: string }>("select a.password_hash from users u join accounts a on a.id = u.account_id where u.id = $1", [userId]));
   if (!row) throw new Error("user not found");
   return row.password_hash;
 };
@@ -31,7 +31,7 @@ describe("resetPassword", () => {
   it("troca a senha e encerra as sessões abertas do usuário", async () => {
     const user = await newOwner();
     await withSystem(app, (q) =>
-      q.exec("insert into sessions (organization_id, user_id, token_hash, expires_at) values ($1, $2, $3, $4)", [
+      q.exec("insert into sessions (organization_id, user_id, account_id, token_hash, expires_at) select $1, $2, account_id, $3, $4 from users where id = $2", [
         user.organizationId,
         user.userId,
         hashToken(randomUUID()),
@@ -65,7 +65,7 @@ describe("resetPassword", () => {
     const other = await newOwner();
     const otherBefore = await passwordHashOf(other.userId);
     await withSystem(app, (q) =>
-      q.exec("insert into sessions (organization_id, user_id, token_hash, expires_at) values ($1, $2, $3, $4)", [
+      q.exec("insert into sessions (organization_id, user_id, account_id, token_hash, expires_at) select $1, $2, account_id, $3, $4 from users where id = $2", [
         other.organizationId,
         other.userId,
         hashToken(randomUUID()),

@@ -1,4 +1,4 @@
-import { returnFollowUpsToTeam } from "@deskvoice/core";
+import { deleteAccountIfOrphan, returnFollowUpsToTeam } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, handle } from "../../../../../../server/context";
 import { roleName } from "../../../../../../server/shapes";
@@ -39,15 +39,34 @@ export const PATCH = handle({ body: z.object({ role: roleName.optional(), disabl
 // Remover de vez só quem nunca decidiu uma aprovação nem fechou uma pendência: o histórico precisa
 // continuar dizendo quem decidiu e quem fechou (a chave estrangeira zeraria `closed_by`). Para os
 // outros, o caminho é desativar. A pendência fechada que sai pelo prazo de guarda deixa de contar.
-export const DELETE = handle({ configure: true }, async ({ q, session, params, deps }) => {
-  const member = await loadMember(q, params.id);
-  requireOwnerToManage(session, member.role);
-  await requireAnotherOwner(q, member);
-  if (await q.one("select 1 from approvals where decided_by = $1 union all select 1 from follow_ups where closed_by = $1 limit 1", [member.id])) {
-    throw new ApiError(409, "has_history", "This person decided approvals or closed follow-ups. Disable the account instead of removing it.");
-  }
-  // Antes de apagar: a remoção zera `created_by` nos convites, e depois disso não daria mais para achá-los.
-  await revokeInvitesCreatedBy(q, member.id, deps.clock.now());
-  await q.exec("delete from users where id = $1", [member.id]);
-  return null;
-});
+export const DELETE = handle(
+  {
+    configure: true,
+    // A conta fica fora do alcance de `deskvoice_app`: ela só sai depois que o vínculo saiu, pelo
+    // papel de sistema. Sem isso, o e-mail fica preso numa conta sem vínculo e o convite novo para
+    // ele cai em `email_taken`. Se este passo falhar, a remoção do vínculo já valeu.
+    after: async (removed: Removed, { deps, session }) => {
+      await deleteAccountIfOrphan(deps.db, removed.accountId, deps.clock.now(), { actorAccountId: removed.actorAccountId, organizationId: session.organizationId });
+      return null;
+    },
+  },
+  async ({ q, session, params, deps }): Promise<Removed> => {
+    const member = await loadMember(q, params.id);
+    requireOwnerToManage(session, member.role);
+    await requireAnotherOwner(q, member);
+    if (await q.one("select 1 from approvals where decided_by = $1 union all select 1 from follow_ups where closed_by = $1 limit 1", [member.id])) {
+      throw new ApiError(409, "has_history", "This person decided approvals or closed follow-ups. Disable the account instead of removing it.");
+    }
+    // Antes de apagar: a remoção zera `created_by` nos convites, e depois disso não daria mais para achá-los.
+    await revokeInvitesCreatedBy(q, member.id, deps.clock.now());
+    const removed = await q.one<{ accountId: string }>("delete from users where id = $1 returning account_id as \"accountId\"", [member.id]);
+    if (!removed) throw new ApiError(404, "not_found", "Not found.");
+    const actor = await q.one<{ accountId: string }>("select account_id as \"accountId\" from users where id = $1", [session.userId]);
+    return { accountId: removed.accountId, actorAccountId: actor?.accountId ?? null };
+  },
+);
+
+interface Removed {
+  accountId: string;
+  actorAccountId: string | null;
+}

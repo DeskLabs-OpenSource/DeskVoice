@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createCall, createOrganization, openTestDbs, waitFor } from "../test/helpers";
 import { purgedCallAnalysisSchema, type CallAnalysis } from "./analysis";
+import { createAccount } from "./accounts";
 import { listen } from "./db";
 import { purgeTranscripts, recordEvent, recordOrgEvent } from "./events";
 import type { CallEventKind, OrgEventKind } from "./types";
@@ -83,9 +84,11 @@ describe("recordOrgEvent", () => {
 
   it("is append-only: neither the application nor the system role changes or deletes a record, but removing the author still clears it", async () => {
     const audited = await createOrganization(app, "events append-only");
+    const account = await withSystem(app, (q) => createAccount(q, { email: `author-${audited}@example.test`, passwordHash: "x" }));
     const author = await withOrg(app, audited, async (q) => {
-      const row = await q.one<{ id: string }>("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, 'Autora', 'x', 'admin') returning id", [
+      const row = await q.one<{ id: string }>("insert into users (organization_id, account_id, email, name, role) values ($1, $2, $3, 'Autora', 'admin') returning id", [
         audited,
+        account,
         `author-${audited}@example.test`,
       ]);
       const id = row?.id ?? "";
