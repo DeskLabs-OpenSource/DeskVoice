@@ -20,6 +20,7 @@ import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextI
 import { useCanConfigure } from "../../../../ui/me";
 import { GUIDED_ENGINES } from "../../settings/analysts/rules";
 import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
+import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
 
 interface Draft {
   name: string;
@@ -37,6 +38,8 @@ interface Draft {
   /** Vazio: as pendências do agente são da equipe. */
   followUpOwner: string;
   listeningEnvironment: ListeningEnvironment;
+  /** O texto da caixa, um termo por linha. Vazio grava `[]`. */
+  vocabulary: string;
   /** Para quem o agente pode passar a ligação; vazia de fábrica. */
   handoffTargets: string[];
   /** O que acontece quando a ligação cai. */
@@ -47,7 +50,9 @@ interface Draft {
   analystId: string;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "" };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "" };
+
+const VOCABULARY_FIELD_ID = "agent-vocabulary";
 
 /** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
 const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp"];
@@ -70,6 +75,7 @@ const toDraft = (agent: Agent): Draft => ({
   enabled: agent.enabled,
   followUpOwner: agent.followUpOwnerUserId ?? "",
   listeningEnvironment: agent.listeningEnvironment ?? "normal",
+  vocabulary: (agent.vocabulary ?? []).join("\n"),
   handoffTargets: agent.agentHandoffTargets ?? [],
   dropFollowUp: agent.dropFollowUp ?? "off",
   dropFollowUpMessage: agent.dropFollowUpMessage ?? "",
@@ -157,8 +163,16 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         : trustCaller.data.value !== true
           ? "not_trusted"
           : null;
-  const submit = (): Promise<boolean> =>
-    save.run(async () => {
+  // A regra é a da API (`checkVocabulary`): a tela diz o erro ao lado do campo e não manda nada.
+  const vocabulary = readVocabulary(draft.vocabulary);
+  const vocabularyError = vocabulary.result.ok ? undefined : vocabularyErrorText(vocabulary.result.problem, t);
+  const submit = (): Promise<boolean> => {
+    if (!vocabulary.result.ok) {
+      document.getElementById(VOCABULARY_FIELD_ID)?.focus();
+      return Promise.resolve(false);
+    }
+    const terms = vocabulary.result.terms;
+    return save.run(async () => {
       const body = {
         name: draft.name,
         roleLabel: draft.roleLabel,
@@ -174,6 +188,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         enabled: draft.enabled,
         followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
         listeningEnvironment: draft.listeningEnvironment,
+        vocabulary: terms,
         agentHandoffTargets: draft.handoffTargets,
         // Um modo que a tela não oferece (gravado fora dela) não volta no salvar: fica como está. O modo
         // que não mudou também não vai: a rota confere o pré-requisito de quem escolhe o `whatsapp`.
@@ -187,6 +202,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       if (isNew) router.replace(`/agents/${saved.id}`);
       else setDraft(toDraft(saved));
     });
+  };
 
   return (
     <form
@@ -225,6 +241,21 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </Field>
             <Field label={t.instructions} hint={t.instructionsHint}>
               <TextArea value={draft.instructions} onChange={(event) => set("instructions", event.target.value)} rows={9} />
+            </Field>
+          </div>
+        </Panel>
+
+        <Panel title={t.vocabulary} description={t.vocabularyLead}>
+          <div className="max-w-xl">
+            <Field label={t.vocabularyField} hint={vocabularyCountText(vocabulary.count, t)} error={vocabularyError}>
+              <TextArea
+                id={VOCABULARY_FIELD_ID}
+                value={draft.vocabulary}
+                onChange={(event) => set("vocabulary", event.target.value)}
+                rows={6}
+                spellCheck={false}
+                aria-invalid={vocabularyError ? true : undefined}
+              />
             </Field>
           </div>
         </Panel>

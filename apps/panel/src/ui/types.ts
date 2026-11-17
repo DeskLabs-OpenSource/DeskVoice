@@ -35,6 +35,8 @@ export interface Agent {
   followUpOwnerUserId: string | null;
   /** Onde quem liga costuma estar. Agente gravado antes do campo existir pode chegar sem ele: vale `normal`. */
   listeningEnvironment?: ListeningEnvironment;
+  /** Nomes e termos que o agente deve esperar ouvir. Vazio: nenhum. */
+  vocabulary?: string[];
   /** Para quem o agente pode passar a ligação (`transfer_to_agent`). Vazia de fábrica. */
   agentHandoffTargets?: string[];
   /**

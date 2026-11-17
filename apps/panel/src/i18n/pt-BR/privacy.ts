@@ -105,6 +105,7 @@ const privacy = {
     caller_memory_changed: "{who} deixou a memória do número no agente {state}.",
     analyst_provider_confirmed: "{who} confirmou que o analista {analyst} manda o texto do que a pessoa fala na ligação para {provider}.",
     decision_model_provider_confirmed: "{who} confirmou que o filtro de fala manda o texto da ligação para {provider}.",
+    synthesizer_provider_confirmed: "{who} confirmou que a voz {provider} recebe o texto que o agente fala na ligação.",
     organization_created: "A administração da instalação criou esta organização, com o nome \"{name}\".",
     organization_renamed: "A administração da instalação renomeou esta organização de \"{from}\" para \"{to}\".",
     organization_suspended: "A administração da instalação suspendeu esta organização. Motivo: {reason}. Tarefas canceladas: {n}.",

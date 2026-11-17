@@ -107,6 +107,7 @@ const privacy: PrivacyDictionary = {
     caller_memory_changed: "{who} dejó la memoria del número en el agente {state}.",
     analyst_provider_confirmed: "{who} confirmó que el analista {analyst} envía el texto de lo que dice quien llama a {provider}.",
     decision_model_provider_confirmed: "{who} confirmó que el filtro de habla envía el texto de la llamada a {provider}.",
+    synthesizer_provider_confirmed: "{who} confirmó que la voz {provider} recibe el texto que el agente dice en la llamada.",
     organization_created: "La administración de la instalación creó esta organización, con el nombre \"{name}\".",
     organization_renamed: "La administración de la instalación renombró esta organización de \"{from}\" a \"{to}\".",
     organization_suspended: "La administración de la instalación suspendió esta organización. Motivo: {reason}. Tareas canceladas: {n}.",
