@@ -1,10 +1,11 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { DecisionModel, VoiceEngine } from "./types";
+import type { DecisionModel, SpeechSynthesizer, VoiceEngine } from "./types";
 
 const DEFAULT_DIR = fileURLToPath(new URL("./engines", import.meta.url));
 const DECIDERS_DIR = fileURLToPath(new URL("./deciders", import.meta.url));
+const SYNTHESIZERS_DIR = fileURLToPath(new URL("./synthesizers", import.meta.url));
 
 const pieceFiles = async (dir: string): Promise<string[]> => (await readdir(dir)).filter((name) => /\.(ts|js)$/.test(name) && !/\.(test|d)\.ts$/.test(name)).sort();
 
@@ -59,4 +60,36 @@ export async function loadDecisionModels(dir: string = DECIDERS_DIR): Promise<Ma
     models.set(model.id, model);
   }
   return models;
+}
+
+function isSpeechSynthesizer(value: unknown): value is SpeechSynthesizer {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<Record<keyof SpeechSynthesizer, unknown>>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.label === "string" &&
+    typeof candidate.defaultModel === "string" &&
+    typeof candidate.pricing === "object" &&
+    typeof candidate.pricingOf === "function" &&
+    typeof candidate.listVoices === "function" &&
+    typeof candidate.checkKey === "function" &&
+    typeof candidate.speak === "function"
+  );
+}
+
+/**
+ * Descobre as vozes do pipeline pela pasta, como os motores: cada arquivo de `synthesizers/`
+ * exporta um `SpeechSynthesizer` como `default`. Voz nova é só um arquivo novo.
+ */
+export async function loadSynthesizers(dir: string = SYNTHESIZERS_DIR): Promise<Map<string, SpeechSynthesizer>> {
+  const synthesizers = new Map<string, SpeechSynthesizer>();
+  for (const file of await pieceFiles(dir)) {
+    const module: { default?: unknown } = await import(pathToFileURL(join(dir, file)).href);
+    const synthesizer = module.default;
+    // Falha alta, como nos motores: uma voz que some em silêncio só seria notada numa ligação muda.
+    if (!isSpeechSynthesizer(synthesizer)) throw new Error(`${file}: o export default não é um SpeechSynthesizer`);
+    if (synthesizers.has(synthesizer.id)) throw new Error(`${file}: id de voz repetido: ${synthesizer.id}`);
+    synthesizers.set(synthesizer.id, synthesizer);
+  }
+  return synthesizers;
 }

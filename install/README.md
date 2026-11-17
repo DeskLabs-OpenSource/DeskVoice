@@ -194,6 +194,15 @@ sudo bash install/agent.sh --install       # instala ou conserta o agendamento
 bash install/agent.sh --install --dry-run  # só diz o que faria
 ```
 
+Quem pede a atualização pela tela é quem administra a instalação. Numa instalação com uma
+organização, são o dono e o administrador. Se ninguém mais consegue pedir, rode de dentro da VPS
+o comando abaixo, e a conta desse e-mail volta a administrar a instalação. Isso fica gravado na
+auditoria da instalação:
+
+```bash
+bash install/grant-installation-admin.sh voce@empresa.com.br
+```
+
 O painel não tem acesso ao Docker do servidor: ele só registra o pedido de atualização. O
 agente passa a cada minuto, fala com o painel **de dentro do contêiner dele** (a rota do agente
 não é alcançável pela internet) e recebe um sim ou um não. Nunca um comando, nunca um número de

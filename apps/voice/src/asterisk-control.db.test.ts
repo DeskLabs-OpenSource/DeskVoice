@@ -247,10 +247,11 @@ describe("endereços liberados por linha", { timeout: 120_000 }, () => {
     expect(await allowedRow(leftOutWithAddress)).toEqual({ inbound_allowed: [], inbound_resolved_at: null });
     expect((await allowedRow(registerName))?.inbound_resolved_at).toEqual(deps.clock.now());
 
-    // O extra da linha por registro não vira `identify`.
+    // O extra da linha por registro não vira `identify`: só entra no filtro do endpoint dela (fatia 2).
     const conf = await readFile(deps.file, "utf8");
     expect(conf).not.toContain(`[trunk-${registerName}-identify]`);
-    expect(conf).not.toContain("198.51.100.150");
+    expect(conf).not.toContain("match=198.51.100.150");
+    expect(conf.split("\n").filter((line) => line.endsWith("198.51.100.150"))).toEqual(["permit=198.51.100.150"]);
   });
 
   it("só grava quando o conjunto muda; nome que não resolve mantém o conjunto e deixa a linha 'warn'; voltando, o aviso sai", async () => {
@@ -296,15 +297,252 @@ describe("endereços liberados por linha", { timeout: 120_000 }, () => {
     };
     expect(await healthOnline()).toMatchObject({ status: "warn", detail: expect.stringContaining("could not be resolved") });
 
-    // Volta a resolver, para outro endereço: grava o novo conjunto com a hora, aplica de novo e tira o aviso.
+    // Volta a resolver, para outro endereço: grava o novo conjunto com a hora, aplica de novo e tira o
+    // aviso. O endereço anterior, visto há minutos, continua na janela de 24 horas (R14, fatia 2).
     answer = ["203.0.113.161"];
     clock.advance(60_000);
     ari.log.length = 0;
     expect(await refreshAllowed(deps)).toBe(true);
     expect(ari.log).toEqual(["reload res_pjsip.so"]);
-    expect(await allowedRow(line)).toEqual({ inbound_allowed: ["203.0.113.161"], inbound_resolved_at: clock.now() });
+    expect(await allowedRow(line)).toEqual({ inbound_allowed: ["203.0.113.160", "203.0.113.161"], inbound_resolved_at: clock.now() });
     expect(await trunkRow(line)).toMatchObject({ status: "unverified", last_error: null });
     expect(await healthOnline()).toMatchObject({ status: "ok" });
+    // Passadas 24 horas sem o nome devolver o anterior, ele sai.
+    clock.advance(24 * 3_600_000);
+    expect(await refreshAllowed(deps)).toBe(true);
+    expect(await allowedRow(line)).toEqual({ inbound_allowed: ["203.0.113.161"], inbound_resolved_at: clock.now() });
+  });
+});
+
+describe("o filtro de entrada por linha (R14, fatia 2)", { timeout: 120_000 }, () => {
+  /** As regras `deny`/`permit` da seção `type=endpoint` de uma linha, como o arquivo gerado as tem. */
+  const aclOf = (conf: string, id: string): string[] =>
+    (conf.split("\n\n").find((block) => block.startsWith(`[trunk-${id}]\ntype=endpoint`)) ?? "").split("\n").filter((line) => /^(deny|permit)=/.test(line));
+  const permitsOf = (conf: string, id: string): string[] => aclOf(conf, id).flatMap((line) => (line.startsWith("permit=") ? [line.slice("permit=".length)] : []));
+  const fromNameOf = async (id: string): Promise<string[] | undefined> =>
+    (await withSystem(app, (q) => q.one<{ inbound_from_name: string[] }>("select inbound_from_name from trunks where id = $1", [id])))?.inbound_from_name;
+  const seenOf = async (id: string): Promise<Record<string, string> | undefined> =>
+    (await withSystem(app, (q) => q.one<{ inbound_from_name_seen: Record<string, string> }>("select inbound_from_name_seen from trunks where id = $1", [id])))?.inbound_from_name_seen;
+  const dnsDown: ResolveName = async (name) => {
+    throw Object.assign(new Error(`queryA ESERVFAIL ${name}`), { code: "ESERVFAIL" });
+  };
+
+  it("isolamento: duas organizações, o mesmo nome de operadora resolvido em horas diferentes; nenhum endereço de uma no endpoint da outra", async () => {
+    const name = `sip.${randomInt(1, 1_000_000)}.compartilhado.example`;
+    const first = await createOrganization(app, "filter-iso-a");
+    const second = await createOrganization(app, "filter-iso-b");
+    const net = `100.${randomInt(64, 128)}.${randomInt(0, 256)}`;
+    const mine = await createTrunk(app, first, { host: name, username: "conta-a" });
+    const mineIp = await createTrunk(app, first, { host: `${net}.10`, username: null, password: null, authMode: "ip" });
+    let answer = ["203.0.113.21"];
+    const resolve: ResolveName = async (asked) => (asked === name ? answer : anyName(asked));
+    const ari = fakeAri();
+    const deps = trunksDeps(ari, path.join(scratch, "filter-iso", "pjsip_trunks.conf"), fakeClock(), resolve);
+    ari.loadsFile = deps.file;
+    await applyTrunks(deps);
+
+    expect(await fromNameOf(mine)).toEqual(["203.0.113.21"]);
+
+    // Mais tarde, a outra organização cadastra a linha dela no mesmo nome, que agora resolve outro
+    // endereço; e na aplicação seguinte o DNS está fora. Cada linha fica com o que o nome DELA
+    // resolveu da última vez (a segunda, gravada como se tivesse resolvido nessa outra hora).
+    answer = ["198.51.100.21"];
+    const theirs = await createTrunk(app, second, { host: name, username: "conta-b" });
+    const theirsIp = await createTrunk(app, second, { host: `${net}.11`, username: null, password: null, authMode: "ip" });
+    await withSystem(app, (q) => q.exec("update trunks set inbound_from_name = $2 where id = $1", [theirs, answer]));
+    await applyTrunks({ ...deps, resolve: async (asked) => (asked === name ? dnsDown(asked) : anyName(asked)) });
+
+    const conf = await readFile(deps.file, "utf8");
+    expect(permitsOf(conf, mine)).toEqual(["203.0.113.21"]);
+    expect(permitsOf(conf, theirs)).toEqual(["198.51.100.21"]);
+    expect(permitsOf(conf, mineIp)).toEqual([`${net}.10`]);
+    expect(permitsOf(conf, theirsIp)).toEqual([`${net}.11`]);
+    for (const [id, other] of [[mine, theirs], [theirs, mine], [mineIp, theirsIp], [theirsIp, mineIp]] as const) {
+      expect(aclOf(conf, id).slice(0, 2)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0"]);
+      for (const address of permitsOf(conf, other)) expect(aclOf(conf, id)).not.toContain(`permit=${address}`);
+    }
+    expect(conf).not.toContain("type=acl");
+  });
+
+  it("DNS fora: o permit é o inbound_allowed gravado; extra removido sai, extra mudado mantém a parte do nome", async () => {
+    const organizationId = await createOrganization(app, "filter-dns");
+    const name = `sip.${randomInt(1, 1_000_000)}.fora.example`;
+    const line = await createTrunk(app, organizationId, { host: name, matchExtra: ["198.51.100.31"] });
+    let resolve: ResolveName = async (asked) => (asked === name ? ["203.0.113.31"] : anyName(asked));
+    const ari = fakeAri();
+    const file = path.join(scratch, "filter-dns", "pjsip_trunks.conf");
+    ari.loadsFile = file;
+    const deps = () => trunksDeps(ari, file, fakeClock(), resolve);
+    await applyTrunks(deps());
+    expect(await fromNameOf(line)).toEqual(["203.0.113.31"]);
+    expect((await allowedRow(line))?.inbound_allowed).toEqual(["203.0.113.31", "198.51.100.31"]);
+
+    resolve = async (asked) => (asked === name ? dnsDown(asked) : anyName(asked));
+    await applyTrunks(deps());
+    const stored = (await allowedRow(line))?.inbound_allowed;
+    expect(permitsOf(await readFile(file, "utf8"), line)).toEqual(stored);
+    expect(await trunkRow(line)).toMatchObject({ status: "warn", last_error: expect.stringContaining("could not be resolved") });
+
+    // Extra removido, DNS ainda fora: sai do permit e da tela.
+    await withSystem(app, (q) => q.exec("update trunks set match_extra = '{}' where id = $1", [line]));
+    await applyTrunks(deps());
+    expect(permitsOf(await readFile(file, "utf8"), line)).toEqual(["203.0.113.31"]);
+    expect((await allowedRow(line))?.inbound_allowed).toEqual(["203.0.113.31"]);
+
+    // Extra mudado, DNS ainda fora: entra o novo, e a parte do nome fica.
+    await withSystem(app, (q) => q.exec("update trunks set match_extra = '{198.51.100.32}' where id = $1", [line]));
+    await applyTrunks(deps());
+    expect(permitsOf(await readFile(file, "utf8"), line)).toEqual(["203.0.113.31", "198.51.100.32"]);
+    expect(await fromNameOf(line)).toEqual(["203.0.113.31"]);
+  });
+
+  it("o conjunto do destino antigo não volta: a gravação do processo de voz só vale se o host e o modo lidos ainda são os da linha", async () => {
+    const organizationId = await createOrganization(app, "filter-race");
+    const name = `sip.${randomInt(1, 1_000_000)}.antigo.example`;
+    const line = await createTrunk(app, organizationId, { host: name });
+    const ari = fakeAri();
+    const file = path.join(scratch, "filter-race", "pjsip_trunks.conf");
+    ari.loadsFile = file;
+    // O nome é resolvido, e no meio a tela troca o host (e zera as colunas, como faz o painel).
+    const resolve: ResolveName = async (asked) => {
+      if (asked === name) {
+        await withSystem(app, (q) => q.exec("update trunks set host = 'sip.novo.example', inbound_from_name = '{}', inbound_from_name_seen = '{}', inbound_allowed = '{}', inbound_resolved_at = null where id = $1", [line]));
+        return ["203.0.113.41"];
+      }
+      return anyName(asked);
+    };
+    await applyTrunks(trunksDeps(ari, file, fakeClock(), resolve));
+    expect(await fromNameOf(line)).toEqual([]);
+    expect(await seenOf(line)).toEqual({});
+    expect(await allowedRow(line)).toEqual({ inbound_allowed: [], inbound_resolved_at: null });
+  });
+
+  it("DNS em rodízio: a parte do nome junta as respostas de 24 horas, gravada com a hora de cada endereço; o que não volta em 24 horas sai", async () => {
+    const organizationId = await createOrganization(app, "filter-window");
+    const name = `sip.${randomInt(1, 1_000_000)}.rodizio.example`;
+    const line = await createTrunk(app, organizationId, { host: name, matchExtra: ["198.51.100.61"] });
+    let answer = ["203.0.113.61", "203.0.113.62"];
+    const resolve: ResolveName = async (asked) => (asked === name ? answer : anyName(asked));
+    const ari = fakeAri();
+    const file = path.join(scratch, "filter-window", "pjsip_trunks.conf");
+    ari.loadsFile = file;
+    const clock = fakeClock();
+    const deps = () => trunksDeps(ari, file, clock, resolve);
+    await applyTrunks(deps());
+    const first = clock.now().toISOString();
+    expect(await seenOf(line)).toEqual({ "203.0.113.61": first, "203.0.113.62": first });
+
+    // Uma hora depois o DNS devolve a outra metade: as duas ficam liberadas.
+    clock.advance(3_600_000);
+    answer = ["203.0.113.63"];
+    await applyTrunks(deps());
+    expect(permitsOf(await readFile(file, "utf8"), line)).toEqual(["203.0.113.61", "203.0.113.62", "203.0.113.63", "198.51.100.61"]);
+    expect(await fromNameOf(line)).toEqual(["203.0.113.61", "203.0.113.62", "203.0.113.63"]);
+    expect(await seenOf(line)).toEqual({ "203.0.113.61": first, "203.0.113.62": first, "203.0.113.63": clock.now().toISOString() });
+    expect((await allowedRow(line))?.inbound_allowed).toEqual(["203.0.113.61", "203.0.113.62", "203.0.113.63", "198.51.100.61"]);
+
+    // 24 horas depois da primeira resposta e mais um pouco: só o que voltou na janela fica.
+    clock.advance(23.5 * 3_600_000);
+    await applyTrunks(deps());
+    expect(permitsOf(await readFile(file, "utf8"), line)).toEqual(["203.0.113.63", "198.51.100.61"]);
+    expect(await seenOf(line)).toEqual({ "203.0.113.63": clock.now().toISOString() });
+
+    // A mesma resposta de novo, 23 horas depois: a lista não muda, mas a hora sim (é gravada), e
+    // por isso o endereço segue liberado 24 horas a partir de agora, mesmo quando o nome passa a
+    // devolver outro.
+    clock.advance(23 * 3_600_000);
+    await applyTrunks(deps());
+    expect(await seenOf(line)).toEqual({ "203.0.113.63": clock.now().toISOString() });
+    clock.advance(2 * 3_600_000);
+    answer = ["203.0.113.64"];
+    await applyTrunks(deps());
+    expect(permitsOf(await readFile(file, "utf8"), line)).toEqual(["203.0.113.63", "203.0.113.64", "198.51.100.61"]);
+  });
+
+  it("nome que nunca resolveu, com extras: a linha sai SEM filtro e fica 'warn'; quando o nome resolve, o filtro liga com o nome e os extras", async () => {
+    const organizationId = await createOrganization(app, "filter-extras-only");
+    const name = `sip.${randomInt(1, 1_000_000)}.so-extras.example`;
+    const line = await createTrunk(app, organizationId, { host: name, matchExtra: ["198.51.100.71"] });
+    let resolve: ResolveName = async (asked) => (asked === name ? dnsDown(asked) : anyName(asked));
+    const ari = fakeAri();
+    const file = path.join(scratch, "filter-extras-only", "pjsip_trunks.conf");
+    ari.loadsFile = file;
+    const deps = () => trunksDeps(ari, file, fakeClock(), resolve);
+    await applyTrunks(deps());
+    expect(aclOf(await readFile(file, "utf8"), line)).toEqual([]);
+    expect(await trunkRow(line)).toMatchObject({ status: "warn", last_error: expect.stringContaining("its filter stays off until the name") });
+    expect((await allowedRow(line))?.inbound_allowed).toEqual([]);
+
+    resolve = async (asked) => (asked === name ? ["203.0.113.71"] : anyName(asked));
+    await applyTrunks(deps());
+    expect(aclOf(await readFile(file, "utf8"), line)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.71", "permit=198.51.100.71"]);
+  });
+
+  it("conjunto vazio de linha ativa: sem deny, e a linha fica 'warn'; o nome resolve, o deny e o permit entram e o aviso sai", async () => {
+    const organizationId = await createOrganization(app, "filter-empty");
+    const name = `sip.${randomInt(1, 1_000_000)}.nunca.example`;
+    const line = await createTrunk(app, organizationId, { host: name });
+    let resolve: ResolveName = async (asked) => (asked === name ? dnsDown(asked) : anyName(asked));
+    const ari = fakeAri();
+    const file = path.join(scratch, "filter-empty", "pjsip_trunks.conf");
+    ari.loadsFile = file;
+    const deps = () => trunksDeps(ari, file, fakeClock(), resolve);
+    expect(await applyTrunks(deps())).toMatchObject({ applied: true });
+    const conf = await readFile(file, "utf8");
+    expect(conf).toContain(`[trunk-${line}]\ntype=endpoint`);
+    expect(aclOf(conf, line)).toEqual([]);
+    expect(await trunkRow(line)).toMatchObject({ status: "warn", last_error: expect.stringContaining("its filter stays off until the name") });
+    expect(await allowedRow(line)).toEqual({ inbound_allowed: [], inbound_resolved_at: null });
+
+    resolve = async (asked) => (asked === name ? ["203.0.113.51"] : anyName(asked));
+    expect(await refreshAllowed(deps())).toBe(true);
+    expect(aclOf(await readFile(file, "utf8"), line)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.51"]);
+    expect(await trunkRow(line)).toMatchObject({ status: "unverified", last_error: null });
+  });
+
+  it("filtro desligado na linha (contrato 11): o conjunto é calculado e gravado para a tela, mas o endpoint sai sem deny e a linha não fica 'warn'; ligado, o filtro entra", async () => {
+    const organizationId = await createOrganization(app, "filter-switched-off");
+    const name = `sip.${randomInt(1, 1_000_000)}.desligado.example`;
+    const line = await createTrunk(app, organizationId, { host: name, matchExtra: ["198.51.100.71"] });
+    await withSystem(app, (q) => q.exec("update trunks set inbound_filter = false where id = $1", [line]));
+    const resolve: ResolveName = async (asked) => (asked === name ? ["203.0.113.71"] : anyName(asked));
+    const ari = fakeAri();
+    const file = path.join(scratch, "filter-switched-off", "pjsip_trunks.conf");
+    ari.loadsFile = file;
+    const deps = () => trunksDeps(ari, file, fakeClock(), resolve);
+    expect(await applyTrunks(deps())).toMatchObject({ applied: true });
+    const conf = await readFile(file, "utf8");
+    expect(conf).toContain(`[trunk-${line}]\ntype=endpoint`);
+    expect(aclOf(conf, line)).toEqual([]);
+    expect((await allowedRow(line))?.inbound_allowed).toEqual(["203.0.113.71", "198.51.100.71"]);
+    expect((await trunkRow(line))?.status).not.toBe("warn");
+
+    await withSystem(app, (q) => q.exec("update trunks set inbound_filter = true where id = $1", [line]));
+    expect(await applyTrunks(deps())).toMatchObject({ applied: true });
+    expect(aclOf(await readFile(file, "utf8"), line)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.71", "permit=198.51.100.71"]);
+  });
+
+  it("a linha por registro com o filtro desligado que passa a IP filtra na hora: o filtro efetivo ignora a coluna (contrato 11)", async () => {
+    const organizationId = await createOrganization(app, "filter-off-to-ip");
+    const name = `sip.${randomInt(1, 1_000_000)}.vira-ip.example`;
+    const line = await createTrunk(app, organizationId, { host: name });
+    await withSystem(app, (q) => q.exec("update trunks set inbound_filter = false where id = $1", [line]));
+    const ari = fakeAri();
+    const file = path.join(scratch, "filter-off-to-ip", "pjsip_trunks.conf");
+    ari.loadsFile = file;
+    const deps = () => trunksDeps(ari, file, fakeClock(), async (asked) => (asked === name ? ["203.0.113.73"] : anyName(asked)));
+    expect(await applyTrunks(deps())).toMatchObject({ applied: true });
+    expect(aclOf(await readFile(file, "utf8"), line)).toEqual([]);
+
+    // A troca de modo como o painel grava: zera o conjunto e NÃO mexe em `inbound_filter`. Endereço
+    // sorteado, para não cair no grupo de outra linha deste banco.
+    const ip = `100.${randomInt(64, 128)}.${randomInt(0, 256)}.${randomInt(1, 255)}`;
+    await withSystem(app, (q) =>
+      q.exec("update trunks set auth_mode = 'ip', host = $2, username = null, secret_enc = null, inbound_allowed = '{}', inbound_from_name = '{}', inbound_resolved_at = null where id = $1", [line, ip]),
+    );
+    expect((await withSystem(app, (q) => q.one<{ inbound_filter: boolean }>("select inbound_filter from trunks where id = $1", [line])))?.inbound_filter).toBe(false);
+    expect(await applyTrunks(deps())).toMatchObject({ applied: true });
+    expect(aclOf(await readFile(file, "utf8"), line)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", `permit=${ip}`]);
   });
 });
 

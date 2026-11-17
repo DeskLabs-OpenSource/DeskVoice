@@ -18,6 +18,7 @@ import speechFilterPtBR from "../../../i18n/pt-BR/speech-filter";
 import { useDict } from "../../../i18n/provider";
 import { ReadOnlyNotice } from "../../../ui/errors";
 import { PageHeader } from "../../../ui/kit";
+import { useMe } from "../../../ui/me";
 
 // A primeira seção é a de `/settings`: os links do painel que mandam cadastrar a chave caem nela.
 const SECTIONS = [
@@ -43,6 +44,8 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
   const analysts = useDict(analystsPtBR, analystsEn, analystsEs);
   const sectionLabel = (key: (typeof SECTIONS)[number]["key"]): string => (key === "brains" ? brains.menu : key === "speechFilter" ? speechFilter.menu : key === "analysts" ? analysts.menu : t.sections[key]);
   const pathname = usePathname();
+  // Com a lista de quem administra a instalação explícita, a atualização sai daqui e vai para a área da instalação.
+  const explicit = useMe()?.installationExplicit === true;
   const nav = useRef<HTMLElement>(null);
   // No celular a seção aberta pode estar fora da faixa visível (Sua conta é a última): traz para a vista.
   useEffect(() => {
@@ -56,7 +59,7 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
         {/* Em tela estreita as seções rolam na horizontal; a linha de baixo fica fora da rolagem. */}
         <div className="min-w-0 border-b border-line">
           <nav ref={nav} aria-label={t.sectionsNav} className="flex gap-1 overflow-x-auto">
-            {SECTIONS.map(({ href, key }) => (
+            {SECTIONS.filter(({ key }) => key !== "system" || !explicit).map(({ href, key }) => (
               <Link
                 key={href}
                 href={href}

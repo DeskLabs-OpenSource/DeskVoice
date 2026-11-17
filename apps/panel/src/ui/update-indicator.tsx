@@ -10,7 +10,7 @@ import { fill } from "../i18n/locales";
 import ptBR from "../i18n/pt-BR/common";
 import { useDict } from "../i18n/provider";
 import { useApi } from "./api";
-import { useCanConfigure } from "./me";
+import { updatePath, useInstallationAdmin, useMe } from "./me";
 import { updateNotice, type UpdateStatus } from "./update-notice";
 
 /** O agente do servidor confere as tags a cada 10 minutos: perguntar mais rápido repete a resposta. */
@@ -30,7 +30,7 @@ const REFRESH_MS = 600_000;
  * mostra a versão sem link: a tela de atualização recusa trocar o que não foi publicado, e prometer
  * o que a tela nega seria pior que não avisar.
  *
- * O destaque é só de quem pode atualizar (dono e administrador); os outros papéis veem a versão
+ * O destaque é só de quem pode atualizar (quem administra a instalação); os outros veem a versão
  * em execução, sem o chamado para uma ação que a tela recusaria.
  *
  * `showVersion: false` é para onde o espaço é curto (o cabeçalho do celular): ali aparece só o
@@ -39,7 +39,8 @@ const REFRESH_MS = 600_000;
 export function UpdateIndicator({ showVersion = true }: { showVersion?: boolean }) {
   const t = useDict(ptBR, en, es).shell;
   const pathname = usePathname();
-  const canUpdate = useCanConfigure();
+  const canUpdate = useInstallationAdmin();
+  const href = updatePath(useMe());
   const { data, reload } = useApi<UpdateStatus>("/system/update");
   useEffect(() => {
     const timer = setInterval(reload, REFRESH_MS);
@@ -55,19 +56,34 @@ export function UpdateIndicator({ showVersion = true }: { showVersion?: boolean 
   const { version, newer } = notice;
   const label = fill(newer ? t.updateAvailable : t.versionShort, { version });
 
-  return (
-    <Link
-      href="/settings/system"
-      aria-current={pathname === "/settings/system" ? "page" : undefined}
-      title={label}
-      className={`flex h-9 min-w-0 items-center gap-2 rounded-xs px-2 text-[0.87rem] hover:bg-sunken hover:text-ink aria-[current=page]:bg-sunken aria-[current=page]:text-ink ${newer ? "font-medium text-accent" : "text-muted"}`}
-    >
+  const className = `flex h-9 min-w-0 items-center gap-2 rounded-xs px-2 text-[0.87rem] ${newer ? "font-medium text-accent" : "text-muted"}`;
+  const content = (
+    <>
       {newer ? (
         <ArrowCircleUp size={16} weight="fill" className="shrink-0" aria-hidden />
       ) : (
         <span className="size-2 shrink-0 rounded-full bg-line-strong" aria-hidden />
       )}
       <span className="truncate">{label}</span>
+    </>
+  );
+  // Depois que a lista de quem administra a instalação fica explícita, a tela de atualizar mora na
+  // área da instalação, e quem não administra só vê a versão, sem link para uma tela que recusaria.
+  if (href === null) {
+    return (
+      <span title={label} className={className}>
+        {content}
+      </span>
+    );
+  }
+  return (
+    <Link
+      href={href}
+      aria-current={pathname === href ? "page" : undefined}
+      title={label}
+      className={`${className} hover:bg-sunken hover:text-ink aria-[current=page]:bg-sunken aria-[current=page]:text-ink`}
+    >
+      {content}
     </Link>
   );
 }

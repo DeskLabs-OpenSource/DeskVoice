@@ -140,6 +140,11 @@ export function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): st
         analyst: typeof p.analystName === "string" ? p.analystName : "",
         provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
       });
+    // Feitos pela administração da instalação, que não tem vínculo aqui: a frase não tem "quem".
+    case "organization_created":
+      return fill(t.history.organization_created, { name: typeof p.name === "string" ? p.name : "" });
+    case "organization_renamed":
+      return fill(t.history.organization_renamed, { from: typeof p.from === "string" ? p.from : "", to: typeof p.to === "string" ? p.to : "" });
   }
 }
 
