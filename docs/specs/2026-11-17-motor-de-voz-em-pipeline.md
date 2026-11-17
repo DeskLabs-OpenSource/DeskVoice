@@ -170,8 +170,11 @@ no caminho de `usage`, sem mudança.
 Por isso as três falas fixas da ligação (`FAREWELL.costCeiling`, `costCeilingTransfer` e a fala de
 falha da seção 3.4) são **sintetizadas na abertura** e guardadas em memória. Na hora do teto, o
 áudio já está pronto e não há gasto novo. O custo dessa síntese entra no extrato da ligação que a
-fez. Um cache por processo, com a chave `(sintetizador, voz, modelo, texto)`, evita pagar de novo na
-ligação seguinte com a mesma voz. Antes de cada pedido ao cérebro, o pipeline também confere se o
+fez. Um cache por processo, com a chave `(organização, sintetizador, voz, modelo, texto)`, evita
+pagar de novo na ligação seguinte com a mesma voz. **O cache não atravessa organizações:** cada
+organização paga e usa só o que a chave dela sintetizou, mesmo quando duas usam o mesmo `voiceId`.
+E a abertura confere a chave da organização a cada ligação, mesmo quando todas as falas vêm do
+cache: chave recusada é recusa de abertura, com ou sem cache. Antes de cada pedido ao cérebro, o pipeline também confere se o
 pior caso do pedido (entrada enviada + `max_tokens` × preço) passa do que sobra do teto. Se passar,
 o pedido não sai, e a despedida do teto toca. Isso resolve, no pipeline, a pendência da R12 "reserva
 em voo que passa do pior caso".
@@ -250,9 +253,12 @@ Aceite:
 5. O custo sai como `characters × centsPerThousandCharacters / 1000`, em micro-centavos, sempre com
    `estimated: true`. Um teste prova que o `cancel` cobra o que já foi enviado, e não zero.
 6. A fala de falha e as despedidas do teto são sintetizadas por uma função
-   `prepareFixedSpeech(synth, voice, texts)`, com cache em memória pela chave da 3.3. Os testes provam:
-   a segunda ligação com a mesma voz não pede de novo; voz diferente pede; e a falha ao preparar é
-   uma recusa de abertura, nunca uma ligação sem fala de falha.
+   `prepareFixedSpeech(synth, voice, texts)`, com cache em memória pela chave da 3.3, que inclui a
+   organização. Os testes provam: a segunda ligação da mesma organização com a mesma voz não pede de
+   novo; voz diferente pede; **duas organizações com o mesmo `voiceId` sintetizam duas vezes, e cada
+   uma paga a sua**; a chave recusada é recusa de abertura mesmo com o cache cheio; e a falha ao
+   preparar é uma recusa de abertura, nunca uma ligação sem fala de falha. (Ajustado em 17/11 pela
+   revisão do #393.)
 7. Bancada (`scripts/bancada-de-voz/sintetizador.ts`, fora do CI, no padrão de `orcamento.ts`): mede o tempo
    do primeiro `push` ao primeiro áudio (p50 e p95 de 30 falas curtas em pt-BR) e compara os
    caracteres contados com o consumo da conta antes e depois (`character_count` da assinatura, se a
