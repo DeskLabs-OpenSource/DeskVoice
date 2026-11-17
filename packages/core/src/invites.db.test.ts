@@ -13,11 +13,11 @@ let orgA: string;
 let orgB: string;
 const creators = new Map<string, string>();
 
-async function member(organizationId: string, role = "owner"): Promise<string> {
+async function member(organizationId: string, role = "owner", kind: "member" | "support" = "member"): Promise<string> {
   const email = `${randomUUID()}@example.test`;
   const account = await withSystem(app, (q) => createAccount(q, { email, passwordHash: "x" }));
   const row = await withOrg(app, organizationId, (q) =>
-    q.one<{ id: string }>("insert into users (organization_id, account_id, email, name, role) values ($1, $2, $3, 'Quem convida', $4) returning id", [organizationId, account, email, role]),
+    q.one<{ id: string }>("insert into users (organization_id, account_id, email, name, role, kind) values ($1, $2, $3, 'Quem convida', $4, $5) returning id", [organizationId, account, email, role, kind]),
   );
   return row?.id ?? "";
 }
@@ -148,6 +148,24 @@ describe("an invite is only as good as whoever created it", () => {
     // Convite de outra pessoa, na mesma organização, não é afetado.
     expect(await findInviteByToken(app, untouched.token, now)).not.toBeNull();
     expect((await acceptInvite(app, untouched.token, { account: "new", name: "Entra", passwordHash: "h" }, now)).ok).toBe(true);
+  });
+
+  // O pior caso: o vínculo que criou o convite está ativo, é dono e só não é da equipe. O mesmo
+  // convite de um vínculo da equipe igual vale: sem o par, o teste passaria sem convite nenhum.
+  it("only a team link backs an invite: the same active owner outside the team leaves it invalid", async () => {
+    for (const kind of ["member", "support"] as const) {
+      const creator = await member(orgA, "owner", kind);
+      const made = await invite(orgA, { created_by: creator, role: "owner" });
+      const valid = kind === "member";
+      expect(await findInviteByToken(app, made.token, now)).toEqual(valid ? expect.objectContaining({ organizationId: orgA, role: "owner" }) : null);
+      const result = await acceptInvite(app, made.token, { account: "new", name: "Entra", passwordHash: "h" }, now);
+      expect(result.ok).toBe(valid);
+      if (!valid) {
+        expect(result).toEqual({ ok: false, reason: "invalid" });
+        expect(await usersWith(made.email)).toEqual([]);
+        expect(await inviteRow(made.id)).toMatchObject({ accepted_at: null });
+      }
+    }
   });
 });
 

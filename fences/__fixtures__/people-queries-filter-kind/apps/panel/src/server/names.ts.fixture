@@ -1,0 +1,4 @@
+// Fixture: a consulta na lista de exceções.
+export const name = (q, id) => q.one("select u.name from users u where u.id = $1", [id]);
+// A exceção vale por consulta: a segunda consulta do mesmo arquivo, sem o filtro, é reprovada.
+export const recipients = (q, org) => q.many("select whatsapp_e164 from users where organization_id = $1", [org]);
