@@ -17,9 +17,14 @@ import type { VoiceEngine, VoiceSession, VoiceSessionConfig, VoiceSessionEvents 
  * O roteiro que termina sem `{ end: true }` deixa a sessão aberta até alguém chamar `close()`.
  * `usage` sai uma vez, no encerramento, com os segundos de áudio falados e recebidos.
  * Nada aqui olha o relógio: o roteiro avança por um agendador injetável (`setImmediate` por padrão).
+ *
+ * Orientação (`guide`): a sessão guarda o texto (`guidance`, para o teste conferir) e nunca o fala.
+ * O passo `{ sayGuided: { guided, unguided } }` fala `guided` se chegou orientação desde que o passo
+ * anterior começou (um `expectUserAudio` começa quando passa a esperar a fala), e `unguided` se não.
  */
 const stepSchema = z.union([
   z.strictObject({ say: z.string() }),
+  z.strictObject({ sayGuided: z.strictObject({ guided: z.string(), unguided: z.string() }) }),
   z.strictObject({ expectUserAudio: z.number().positive(), text: z.string().optional() }),
   z.strictObject({ toolCall: z.strictObject({ name: z.string(), args: z.unknown() }) }),
   z.strictObject({ fail: z.string() }),
@@ -29,6 +34,7 @@ const scriptSchema = z.array(stepSchema);
 
 export type SimulatedStep =
   | { say: string }
+  | { sayGuided: { guided: string; unguided: string } }
   | { expectUserAudio: number; text?: string }
   | { toolCall: { name: string; args?: unknown } }
   | { fail: string }
@@ -69,6 +75,9 @@ type Waiting = { kind: "audio"; remainingMs: number; text?: string } | { kind: "
 export class SimulatedSession implements VoiceSession {
   /** Quantas vezes alguém pediu o fim do turno de quem ligou (`closeCallerTurn`), para o teste conferir. */
   callerTurnsClosed = 0;
+  /** As orientações recebidas por `guide`, na ordem, para o teste conferir. Nenhuma vira fala. */
+  readonly guidance: string[] = [];
+  private guidedSinceStep = false;
   private readonly emitter = new SessionEmitter();
   private index = 0;
   private waiting: Waiting | undefined;
@@ -119,6 +128,12 @@ export class SimulatedSession implements VoiceSession {
     });
   }
 
+  guide(text: string): void {
+    if (this.finished) return;
+    this.guidance.push(text);
+    this.guidedSinceStep = true;
+  }
+
   closeCallerTurn(): void {
     if (!this.finished) this.callerTurnsClosed++;
   }
@@ -141,8 +156,13 @@ export class SimulatedSession implements VoiceSession {
     if (this.finished || this.waiting) return;
     const step = this.script[this.index++];
     if (!step) return;
+    const guided = this.guidedSinceStep;
+    this.guidedSinceStep = false;
     if ("say" in step) {
       this.speak(step.say);
+      this.schedule(() => this.advance());
+    } else if ("sayGuided" in step) {
+      this.speak(guided ? step.sayGuided.guided : step.sayGuided.unguided);
       this.schedule(() => this.advance());
     } else if ("expectUserAudio" in step) {
       this.waiting = { kind: "audio", remainingMs: step.expectUserAudio, text: step.text };
