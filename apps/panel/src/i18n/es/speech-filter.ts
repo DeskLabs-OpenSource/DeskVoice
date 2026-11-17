@@ -42,7 +42,7 @@ const speechFilter: SpeechFilterDictionary = {
     country: "El servicio de {provider} está alojado {country}.",
   },
   countries: { US: "en los Estados Unidos" },
-  providers: { typesafe: "TypeSafe" },
+  providers: { typesafe: "TypeSafe", elevenlabs: "ElevenLabs" },
   retention: {
     typesafe: [
       "TypeSafe guarda los datos personales que recibe, como este texto, durante el tiempo que sea razonablemente necesario para prestar el servicio o para sus fines comerciales, sin plazo definido en la política.",
