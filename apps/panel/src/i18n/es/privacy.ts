@@ -90,7 +90,7 @@ const privacy: PrivacyDictionary = {
   forgetConfirmYes: "Olvidar {phone}",
   forgetDone: "{phone} fue olvidado. Notas del agente borradas: {notes}. Pendientes cerrados borrados: {followUps}.",
   historyTitle: "Registro",
-  historyLead: "Quién cambió el plazo o la grabación, qué salió por el plazo, quién exportó los datos de qué teléfono, quién borró datos a pedido de quien llamó qué pasó con los enlaces de grabación para quien llamó y quién confirmó que un analista envía el texto de la llamada a un proveedor. Los 50 más recientes.",
+  historyLead: "Quién cambió el plazo o la grabación, qué salió por el plazo, quién exportó los datos de qué teléfono, quién borró datos a pedido de quien llamó, qué pasó con los enlaces de grabación para quien llamó y quién confirmó que un analista envía el texto de la llamada a un proveedor. Los 50 más recientes.",
   historyEmpty: "Nada registrado todavía.",
   history: {
     transcript_retention_changed: "{who} cambió el plazo de conservación de {from} a {to}.",
