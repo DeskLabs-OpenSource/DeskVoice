@@ -247,12 +247,14 @@ const timeline = {
       do_not_call: "O número está na lista de não ligar: nenhuma mensagem saiu e nenhuma pendência foi aberta.",
       mode_unavailable: "A mensagem no WhatsApp não pôde sair (falta o WhatsApp conectado ou a confiança no número exibido na ligação). Foi aberta uma pendência para alguém retornar.",
       recent_follow_up: "Este número já recebeu uma mensagem nas últimas 24 horas. Foi aberta uma pendência para alguém retornar.",
+      org_limit: "A organização chegou ao teto de mensagens para quem ligou. Foi aberta uma pendência para alguém retornar.",
       simulated: {
         task_opened: "Ligação simulada: nada foi aberto. Numa ligação de verdade, seria aberta uma pendência para alguém retornar.",
         whatsapp_queued: "Ligação simulada: nada saiu. Numa ligação de verdade, a mensagem no WhatsApp para quem ligou entraria na fila de envio.",
         do_not_call: "Ligação simulada: nada saiu. Numa ligação de verdade, também nada sairia: o número está na lista de não ligar.",
         mode_unavailable: "Ligação simulada: nada saiu. Numa ligação de verdade, a mensagem não poderia sair (falta o WhatsApp conectado ou a confiança no número exibido na ligação), e seria aberta uma pendência para alguém retornar.",
         recent_follow_up: "Ligação simulada: nada saiu. Numa ligação de verdade, este número já recebeu uma mensagem nas últimas 24 horas, e seria aberta uma pendência para alguém retornar.",
+        org_limit: "Ligação simulada: nada saiu. Numa ligação de verdade, a organização já teria chegado ao teto de mensagens para quem ligou, e seria aberta uma pendência para alguém retornar.",
       },
     },
     drop_follow_up_result: {

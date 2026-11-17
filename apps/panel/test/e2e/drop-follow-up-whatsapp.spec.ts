@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { DROP_FOLLOW_UP_DEFAULT_MESSAGE } from "@deskvoice/core/drop-follow-up";
+import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, DROP_FOLLOW_UP_DEFAULT_MESSAGE } from "@deskvoice/core/drop-follow-up";
+import { fill } from "../../src/i18n/locales";
 import agents from "../../src/i18n/pt-BR/agents";
 import common from "../../src/i18n/pt-BR/common";
 import { signIn, unique } from "./session";
@@ -49,8 +50,14 @@ test("WhatsApp para quem ligou: desabilitada com o motivo sem o pré-requisito, 
     await expect(page.getByText(agents.dropFollowUpNotTrusted)).toHaveCount(0);
     await page.getByRole("combobox", { name: agents.dropFollowUp }).selectOption({ label: agents.dropFollowUpWhatsApp });
     const text = page.getByRole("textbox", { name: agents.dropFollowUpMessage });
-    await expect(text).toHaveAttribute("placeholder", DROP_FOLLOW_UP_DEFAULT_MESSAGE["pt-BR"]);
+    // O texto padrão diz quem manda: o nome da organização vem da sessão.
+    const { organizationName } = ((await (await page.request.get("/api/v1/auth/me")).json()) as { data: { organizationName: string } }).data;
+    expect(organizationName).not.toBe("");
+    await expect(text).toHaveAttribute("placeholder", DROP_FOLLOW_UP_DEFAULT_MESSAGE["pt-BR"](organizationName));
     await expect(page.getByText(agents.dropFollowUpMessageWarning)).toBeVisible();
+    // O risco de bloqueio e o teto da organização ficam junto da opção.
+    await expect(page.getByText(agents.dropFollowUpBlockRisk)).toBeVisible();
+    await expect(page.getByText(fill(agents.dropFollowUpMessageLimits, { perHour: CALLER_MESSAGE_ORG_PER_HOUR, perDay: CALLER_MESSAGE_ORG_PER_DAY }))).toBeVisible();
     await text.fill("Sua ligação caiu. Se precisar, ligue de novo.");
     expect(await save(page)).toMatchObject({ dropFollowUp: "whatsapp", dropFollowUpMessage: "Sua ligação caiu. Se precisar, ligue de novo." });
 

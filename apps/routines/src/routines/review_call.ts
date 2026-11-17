@@ -1,4 +1,4 @@
-import { callerMessageBlock, createFollowUp, dropFollowUpDefaultMessage, enqueueTask, lockCall, OPEN_TURNS, recordEvent, withOrg, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
+import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, callerMessageBlock, createFollowUp, dropFollowUpDefaultMessage, enqueueTask, lockCall, OPEN_TURNS, recordEvent, withOrg, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
 import type { Routine } from "../types";
 
 /**
@@ -48,6 +48,14 @@ export const CALLER_MESSAGE_FAILED_DETAILS =
 
 /** Uma mensagem para quem ligou por número a cada 24 horas, na organização (seção 3.3 do desenho). */
 export const CALLER_MESSAGE_EVERY_MS = 24 * 60 * 60 * 1000;
+/** O teto da organização (`CALLER_MESSAGE_ORG_PER_HOUR` e `_PER_DAY`, no núcleo) conta em 60 minutos corridos. */
+const HOUR_MS = 60 * 60 * 1000;
+
+/** A reserva quando a mensagem passou do teto da organização. Texto fixo. */
+export const ORG_LIMIT_PHRASE = "a mensagem para quem ligou passou do teto da organização";
+export const orgLimitTitle = (caller: string): string => `Retornar para ${caller}: ${ORG_LIMIT_PHRASE}`;
+export const ORG_LIMIT_DETAILS =
+  "Aberta pelo supervisor de regras fixas: a ligação caiu, e a mensagem no WhatsApp para quem ligou não saiu porque a organização chegou ao teto de mensagens. Veja a linha do tempo da ligação.";
 /**
  * Os detalhes, também texto fixo. O caso 1 numa ligação que já tinha sido transferida tem frase
  * própria: ali alguém pode ter atendido, mas o sistema não tem como confirmar.
@@ -180,9 +188,9 @@ export interface DropFollowUpPayload {
 export type DropFollowUpAction = "task_opened" | "whatsapp_queued" | "skipped";
 /**
  * Por que o modo não agiu. `do_not_call`: a pessoa pediu para não ser procurada, e não há pendência.
- * `mode_unavailable` e `recent_follow_up`: cai na pendência de reserva.
+ * `mode_unavailable`, `recent_follow_up` e `org_limit`: cai na pendência de reserva.
  */
-export type DropFollowUpSkip = "do_not_call" | "mode_unavailable" | "recent_follow_up";
+export type DropFollowUpSkip = "do_not_call" | "mode_unavailable" | "recent_follow_up" | "org_limit";
 
 /** O payload de `drop_follow_up_result` desta fatia: só as ações do WhatsApp. As da religação vêm nas fatias 3 e 4. */
 export interface DropFollowUpResultPayload {
@@ -190,28 +198,30 @@ export interface DropFollowUpResultPayload {
 }
 
 /**
- * O que o modo `whatsapp` faz com uma queda, conferido na hora de agir. A ordem é a do desenho: sem
- * o pré-requisito, nada sai; número na lista de não ligar não recebe e não vira pendência; número que
- * já recebeu nas últimas 24 horas não recebe de novo. O limite olha qualquer ligação da organização,
- * e não a simulada: o número de quem liga pode ser forjado, e sem ele quem quisesse incomodar alguém
- * ligaria com o número da vítima e desligaria no meio, várias vezes.
+ * O que o modo `whatsapp` faz com uma queda, conferido na hora de agir. A ordem é a do desenho: número
+ * na lista de não ligar não recebe e não vira pendência, nem sem o pré-requisito; sem o pré-requisito,
+ * nada sai; número que já recebeu nas últimas 24 horas não recebe de novo; e acima do teto da
+ * organização também não. O limite por número olha qualquer ligação da organização, e não a simulada.
  */
 async function whatsAppAction(q: OrgQuery, caller: string | null, now: Date): Promise<{ action: DropFollowUpAction; reason?: DropFollowUpSkip }> {
+  if (caller !== null && (await q.one("select 1 from do_not_call where organization_id = $1 and e164 = $2", [q.organizationId, caller]))) return { action: "skipped", reason: "do_not_call" };
   if ((await callerMessageBlock(q)) !== null) return { action: "skipped", reason: "mode_unavailable" };
-  // Simulada sem número: não há lista nem limite a conferir, e a mensagem teria saído.
-  if (caller === null) return { action: "whatsapp_queued" };
-  // Duas revisões de ligações diferentes do mesmo número, ao mesmo tempo, passariam as duas pelo
-  // limite: a trava por número, até o fim da transação, faz a segunda ver o aviso da primeira.
-  await q.exec("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`drop_follow_up_whatsapp:${q.organizationId}:${caller}`]);
-  if (await q.one("select 1 from do_not_call where organization_id = $1 and e164 = $2", [q.organizationId, caller])) return { action: "skipped", reason: "do_not_call" };
+  // Simulada sem número: não há limite por número a conferir. O teto da organização vale para ela também.
+  // Duas revisões ao mesmo tempo passariam as duas pelas contagens: a trava por organização, até o fim
+  // da transação, faz a segunda ver o aviso da primeira, tanto no limite por número quanto no teto.
+  await q.exec("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`drop_follow_up_whatsapp:${q.organizationId}`]);
   // O aviso `caller` nasce na mesma transação do `drop_follow_up` com `whatsapp_queued`, e só nela (a
   // simulada não cria aviso): contar um é contar o outro, e o índice por data dos avisos limita a busca
-  // às últimas 24 horas.
-  const recent = await q.one(
-    "select 1 from notifications where organization_id = $1 and audience = 'caller' and target = $2 and created_at > $3 limit 1",
-    [q.organizationId, caller, new Date(now.getTime() - CALLER_MESSAGE_EVERY_MS)],
+  // às últimas 24 horas. Contam todos, os que falharam e os apagados a pedido do titular (o apagamento
+  // anula o `target`, mas a linha fica).
+  const counts = await q.one<{ hour: number; day: number; same: boolean }>(
+    `select count(*) filter (where created_at > $2)::int as hour, count(*)::int as day, coalesce(bool_or(target = $4), false) as same
+       from notifications
+      where organization_id = $1 and audience = 'caller' and created_at > $3`,
+    [q.organizationId, new Date(now.getTime() - HOUR_MS), new Date(now.getTime() - CALLER_MESSAGE_EVERY_MS), caller],
   );
-  if (recent) return { action: "skipped", reason: "recent_follow_up" };
+  if (caller !== null && counts?.same) return { action: "skipped", reason: "recent_follow_up" };
+  if ((counts?.hour ?? 0) >= CALLER_MESSAGE_ORG_PER_HOUR || (counts?.day ?? 0) >= CALLER_MESSAGE_ORG_PER_DAY) return { action: "skipped", reason: "org_limit" };
   return { action: "whatsapp_queued" };
 }
 
@@ -244,11 +254,12 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
     mode: DropFollowUpMode | null;
     message: string | null;
     language: string | null;
+    organization: string;
   }>(
     `select c.agent_id, c.channel, c.direction, c.erased_at is not null as erased, c.end_reason,
             case when c.direction = 'outbound' then c.to_e164 else c.from_e164 end as caller,
-            a.drop_follow_up as mode, a.drop_follow_up_message as message, a.language
-       from calls c left join agents a on a.id = c.agent_id
+            a.drop_follow_up as mode, a.drop_follow_up_message as message, a.language, o.name as organization
+       from calls c join organizations o on o.id = c.organization_id left join agents a on a.id = c.agent_id
       where c.id = $1 for update of c`,
     [callId],
   );
@@ -335,9 +346,9 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
   if (caller === null) return "skipped";
   if (outcome.action === "whatsapp_queued") {
     // O caminho dos avisos (seção 3.5): uma linha em `notifications` e a tarefa `deliver_notification`
-    // de sempre. O corpo é o texto fixo do agente, ou o padrão do sistema na língua dele; nada da
-    // conversa entra, e a revisão nem lê a transcrição.
-    const body = call.message ?? dropFollowUpDefaultMessage(call.language);
+    // de sempre. O corpo é o texto fixo do agente, ou o padrão do sistema na língua dele, com o nome da
+    // organização; nada da conversa entra, e a revisão nem lê a transcrição.
+    const body = call.message ?? dropFollowUpDefaultMessage(call.language, call.organization);
     const notice = await q.one<{ id: string }>(
       "insert into notifications (organization_id, call_id, channel, audience, target, body, created_at) values ($1, $2, 'whatsapp', 'caller', $3, $4, $5) returning id",
       [q.organizationId, callId, caller, body, now],
@@ -352,9 +363,17 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
     await report(outcome);
     return "do_not_call";
   }
+  const orgLimit = outcome.reason === "org_limit";
   await createFollowUp(
     q,
-    { callId, agentId: call.agent_id, title: reviewTitle(caller, found), details: reviewDetails(found, events.some((event) => event.kind === "transfer_started")), dueAt: now, origin: { source: "review_call", case: found } },
+    {
+      callId,
+      agentId: call.agent_id,
+      title: orgLimit ? orgLimitTitle(caller) : reviewTitle(caller, found),
+      details: orgLimit ? ORG_LIMIT_DETAILS : reviewDetails(found, events.some((event) => event.kind === "transfer_started")),
+      dueAt: now,
+      origin: { source: "review_call", case: found },
+    },
     now,
   );
   if (dropped) await report(outcome);

@@ -466,7 +466,7 @@ export function Timeline({
         const action: DropFollowUpShown =
           p.action === "whatsapp_queued"
             ? "whatsapp_queued"
-            : p.action === "skipped" && (p.reason === "do_not_call" || p.reason === "mode_unavailable" || p.reason === "recent_follow_up")
+            : p.action === "skipped" && (p.reason === "do_not_call" || p.reason === "mode_unavailable" || p.reason === "recent_follow_up" || p.reason === "org_limit")
               ? p.reason
               : "task_opened";
         const done = p.simulated === true ? e.drop_follow_up.simulated[action] : e.drop_follow_up[action];

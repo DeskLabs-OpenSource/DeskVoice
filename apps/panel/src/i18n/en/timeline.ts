@@ -246,12 +246,14 @@ const timeline: TimelineDictionary = {
       do_not_call: "The number is on the do-not-call list: no message went out and no follow-up was opened.",
       mode_unavailable: "The WhatsApp message could not go out (WhatsApp is not connected, or the number shown on the call is not trusted). A follow-up was opened for someone to call back.",
       recent_follow_up: "This number already received a message in the last 24 hours. A follow-up was opened for someone to call back.",
+      org_limit: "The organization reached its cap on messages to callers. A follow-up was opened for someone to call back.",
       simulated: {
         task_opened: "Simulated call: nothing was opened. On a real call, a follow-up would be opened for someone to call back.",
         whatsapp_queued: "Simulated call: nothing went out. On a real call, the WhatsApp message to the caller would be queued to send.",
         do_not_call: "Simulated call: nothing went out. On a real call, nothing would go out either: the number is on the do-not-call list.",
         mode_unavailable: "Simulated call: nothing went out. On a real call, the message could not go out (WhatsApp is not connected, or the number shown on the call is not trusted), and a follow-up would be opened for someone to call back.",
         recent_follow_up: "Simulated call: nothing went out. On a real call, this number already received a message in the last 24 hours, and a follow-up would be opened for someone to call back.",
+        org_limit: "Simulated call: nothing went out. On a real call, the organization would already have reached its cap on messages to callers, and a follow-up would be opened for someone to call back.",
       },
     },
     drop_follow_up_result: {

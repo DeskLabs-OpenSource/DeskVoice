@@ -33,7 +33,7 @@ describe("login", () => {
     expect(result.text).not.toContain(token);
 
     const sessions = await call(me, { cookie: `dv_session=${token}` });
-    expect(sessions.data).toEqual({ name: "Test owner", email: user.email, role: "owner", phone: null, whatsapp: null });
+    expect(sessions.data).toEqual({ name: "Test owner", email: user.email, role: "owner", phone: null, whatsapp: null, organizationName: "auth" });
     expect(hashToken(token)).not.toBe(token);
   });
 

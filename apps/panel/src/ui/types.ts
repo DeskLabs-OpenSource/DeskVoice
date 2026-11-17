@@ -10,6 +10,8 @@ export interface Me {
   role: Role;
   phone?: string | null;
   whatsapp?: string | null;
+  /** O nome da organização; a tela do agente o mostra no texto padrão da mensagem para quem ligou. */
+  organizationName?: string;
 }
 
 export interface Agent {

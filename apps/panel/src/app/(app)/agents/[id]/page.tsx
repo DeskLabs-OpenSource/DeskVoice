@@ -1,6 +1,6 @@
 "use client";
 
-import { DROP_FOLLOW_UP_MESSAGE_MAX, dropFollowUpDefaultMessage } from "@deskvoice/core/drop-follow-up";
+import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, DROP_FOLLOW_UP_MESSAGE_MAX, dropFollowUpDefaultMessage } from "@deskvoice/core/drop-follow-up";
 import { ArrowLeft, Trash } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -18,7 +18,7 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatPhone } from "../../../../ui/format";
 import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
-import type { Agent, DropFollowUp, Engine, ListeningEnvironment, Person, Setting, ToolInfo } from "../../../../ui/types";
+import type { Agent, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
 
 interface Draft {
   name: string;
@@ -90,6 +90,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // O pré-requisito da mensagem no WhatsApp para quem ligou: conector e confiança no número exibido.
   const whatsAppConnector = useApi<Setting<unknown>>("/settings/whatsapp.connector");
   const trustCaller = useApi<Setting<boolean>>("/settings/whatsapp.trust_caller_id");
+  // O nome da organização entra no texto padrão da mensagem para quem ligou.
+  const me = useApi<Me>("/auth/me");
   const save = useAction();
   const remove = useAction();
   const [draft, setDraft] = useState<Draft | null>(isNew ? BLANK : null);
@@ -425,16 +427,17 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           ) : null}
           {draft.dropFollowUp === "whatsapp" ? (
             <div className="mt-4 grid max-w-prose gap-2">
+              <p className="text-[0.87rem] text-muted">{t.dropFollowUpBlockRisk}</p>
               <Field label={t.dropFollowUpMessage} hint={t.dropFollowUpMessageWarning}>
                 <TextArea
                   value={draft.dropFollowUpMessage}
                   onChange={(event) => set("dropFollowUpMessage", event.target.value)}
-                  placeholder={dropFollowUpDefaultMessage(draft.language)}
+                  placeholder={me.data?.organizationName === undefined ? undefined : dropFollowUpDefaultMessage(draft.language, me.data.organizationName)}
                   maxLength={DROP_FOLLOW_UP_MESSAGE_MAX}
                   rows={3}
                 />
               </Field>
-              <p className="text-[0.87rem] text-muted">{t.dropFollowUpMessageLimits}</p>
+              <p className="text-[0.87rem] text-muted">{fill(t.dropFollowUpMessageLimits, { perHour: CALLER_MESSAGE_ORG_PER_HOUR, perDay: CALLER_MESSAGE_ORG_PER_DAY })}</p>
             </div>
           ) : null}
         </Panel>

@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DROP_FOLLOW_UP_DEFAULT_MESSAGE, ERASED_TEXT, MAX_TASK_ATTEMPTS, enqueueTask, eraseCaller, failTask, recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
+import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, DROP_FOLLOW_UP_DEFAULT_MESSAGE, ERASED_TEXT, MAX_TASK_ATTEMPTS, enqueueTask, eraseCaller, failTask, recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
 import { wahaSessionName } from "@deskvoice/tools";
 import { afterAll, describe, expect, it } from "vitest";
 import { createOrganization, createUser, depsFor, eventsOf, fakeFetch, fakeLookup, openTestDbs, putSetting, putWhatsAppConnector, t0, task, tasksOf } from "../../test/helpers";
@@ -9,6 +9,8 @@ import { startFakeWaha } from "../../../../packages/tools/test/fake-waha";
 import deliverNotification, { CALLER_NUMBER_MARK } from "./deliver_notification";
 import reviewCallRoutine, {
   CALLER_MESSAGE_FAILED_DETAILS,
+  ORG_LIMIT_DETAILS,
+  orgLimitTitle,
   CASE_PHRASE,
   TRANSFERRED_DETAILS,
   callerMessageFailedTitle,
@@ -679,12 +681,12 @@ describe("review_call: o modo whatsapp (fatia 2)", () => {
     return s;
   }
   /** Outra ligação do mesmo número, na mesma organização e com o mesmo agente, que também caiu. */
-  async function anotherDrop(org: string, at: Date, channel = "phone"): Promise<string> {
+  async function anotherDrop(org: string, at: Date, channel = "phone", from = CALLER): Promise<string> {
     const row = await withSystem(app, (q) =>
       q.one<{ id: string }>(
         `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
          select $1, id, 'inbound', $3, $4, '+5531300000000', 'completed', 'caller_hangup', $2, $2 from agents where organization_id = $1 returning id`,
-        [org, at, channel, CALLER],
+        [org, at, channel, from],
       ),
     );
     const callId = row?.id ?? "";
@@ -699,9 +701,11 @@ describe("review_call: o modo whatsapp (fatia 2)", () => {
     expect(await review(s.org, s.callId)).toBe("messaged");
     const notices = await callerNotices(s.org);
     expect(notices).toEqual([
-      { id: expect.any(String), channel: "whatsapp", audience: "caller", target: CALLER, body: DROP_FOLLOW_UP_DEFAULT_MESSAGE["pt-BR"], call_id: s.callId, status: "pending" },
+      { id: expect.any(String), channel: "whatsapp", audience: "caller", target: CALLER, body: DROP_FOLLOW_UP_DEFAULT_MESSAGE["pt-BR"]("wa default"), call_id: s.callId, status: "pending" },
     ]);
     expect(notices[0]?.body).not.toContain(NAME);
+    // O texto padrão diz quem manda: o nome da organização (`organizations.name`).
+    expect(notices[0]?.body).toBe("Olá, aqui é wa default. Sua ligação para nós caiu antes de terminarmos. Se ainda precisar, ligue de novo neste número.");
     // O caminho de entrega é o de sempre: a tarefa `deliver_notification`, para agora.
     expect(await deliveries(s.org)).toMatchObject([{ payload: { notificationId: notices[0]?.id }, call_id: s.callId, run_at: t0, status: "queued" }]);
     expect(await followUpsOf(s.org)).toEqual([]);
@@ -721,7 +725,7 @@ describe("review_call: o modo whatsapp (fatia 2)", () => {
     for (const [language, expected] of [["en-US", DROP_FOLLOW_UP_DEFAULT_MESSAGE.en], ["es", DROP_FOLLOW_UP_DEFAULT_MESSAGE.es], ["fr", DROP_FOLLOW_UP_DEFAULT_MESSAGE["pt-BR"]]] as const) {
       const s = await whatsappScene(`wa language ${language}`, { language });
       await review(s.org, s.callId);
-      expect((await callerNotices(s.org)).map((notice) => notice.body)).toEqual([expected]);
+      expect((await callerNotices(s.org)).map((notice) => notice.body)).toEqual([expected(`wa language ${language}`)]);
     }
   });
 
@@ -778,6 +782,128 @@ describe("review_call: o modo whatsapp (fatia 2)", () => {
     const third = await anotherDrop(s.org, nextDay);
     expect(await review(s.org, third, nextDay)).toBe("messaged");
     expect(await callerNotices(s.org)).toHaveLength(2);
+  });
+
+  it("número na lista de não ligar e sem o pré-requisito: do_not_call, e nenhuma pendência", async () => {
+    for (const [label, options] of [["wa dnc untrusted", { trust: false }], ["wa dnc no connector", { connector: false }]] as const) {
+      const s = await whatsappScene(label, options);
+      await withSystem(app, (q) => q.exec("insert into do_not_call (organization_id, e164, reason) values ($1, $2, 'Pediu para não ser procurado')", [s.org, CALLER]));
+      expect(await review(s.org, s.callId)).toBe("do_not_call");
+      expect(await callerNotices(s.org)).toEqual([]);
+      expect(await followUpsOf(s.org)).toEqual([]);
+      expect(await drops(s.callId)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "do_not_call", simulated: false, openTurn: "caller_waiting" }]);
+    }
+  });
+
+  describe("o teto da organização", () => {
+    const MINUTE = 60 * 1000;
+    const numberOf = (i: number): string => `+55319000${String(10000 + i)}`;
+    /** `count` quedas de números diferentes, uma a cada `everyMinutes`, a partir de t0, cada uma revista na hora. */
+    async function messaged(org: string, count: number, everyMinutes: number, first = 0): Promise<string[]> {
+      const ids: string[] = [];
+      for (let i = 0; i < count; i++) {
+        const at = new Date(t0.getTime() + (first + i) * everyMinutes * MINUTE);
+        const callId = await anotherDrop(org, at, "phone", numberOf(first + i));
+        expect(await review(org, callId, at)).toBe("messaged");
+        ids.push(callId);
+      }
+      return ids;
+    }
+    const expectOrgLimit = async (org: string, callId: string, caller: string) => {
+      expect(await drops(callId)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "org_limit", simulated: false, openTurn: "caller_waiting" }]);
+      expect((await followUpsOf(org)).filter((row) => row.call_id === callId)).toEqual([
+        expect.objectContaining({ call_id: callId, title: orgLimitTitle(caller), details: ORG_LIMIT_DETAILS, source: "review_call", status: "open" }),
+      ]);
+      expect((await callerNotices(org)).filter((notice) => notice.call_id === callId)).toEqual([]);
+    };
+
+    it("os valores são os do desenho: 3 por hora e 20 em 24 horas", () => {
+      expect([CALLER_MESSAGE_ORG_PER_HOUR, CALLER_MESSAGE_ORG_PER_DAY]).toEqual([3, 20]);
+    });
+
+    it("a 4ª mensagem dentro da hora vira org_limit com pendência, sem aviso novo; passada a hora, sai de novo", async () => {
+      const s = await whatsappScene("wa org hour");
+      expect(await review(s.org, s.callId)).toBe("messaged");
+      await messaged(s.org, 2, 10, 1);
+      const at = new Date(t0.getTime() + 59 * MINUTE);
+      const fourth = await anotherDrop(s.org, at, "phone", numberOf(90));
+      expect(await review(s.org, fourth, at)).toBe("opened");
+      await expectOrgLimit(s.org, fourth, numberOf(90));
+      expect(await callerNotices(s.org)).toHaveLength(3);
+      expect(await deliveries(s.org)).toHaveLength(3);
+
+      const later = new Date(t0.getTime() + 61 * MINUTE);
+      const fifth = await anotherDrop(s.org, later, "phone", numberOf(91));
+      expect(await review(s.org, fifth, later)).toBe("messaged");
+    });
+
+    it("a 21ª dentro de 24 horas, com as horas espalhadas, vira org_limit; quando a primeira sai da janela, sai de novo", async () => {
+      const s = await whatsappScene("wa org day");
+      // Uma a cada 70 minutos: nunca mais de uma na mesma hora, 20 em 22h10.
+      await messaged(s.org, CALLER_MESSAGE_ORG_PER_DAY, 70);
+      const at = new Date(t0.getTime() + CALLER_MESSAGE_ORG_PER_DAY * 70 * MINUTE);
+      const over = await anotherDrop(s.org, at, "phone", numberOf(90));
+      expect(await review(s.org, over, at)).toBe("opened");
+      await expectOrgLimit(s.org, over, numberOf(90));
+      expect(await callerNotices(s.org)).toHaveLength(CALLER_MESSAGE_ORG_PER_DAY);
+
+      const nextDay = new Date(t0.getTime() + 24 * 60 * MINUTE + 1000);
+      const after = await anotherDrop(s.org, nextDay, "phone", numberOf(91));
+      expect(await review(s.org, after, nextDay)).toBe("messaged");
+    });
+
+    it("a mensagem apagada a pedido do titular e a que falhou continuam contando", async () => {
+      const s = await whatsappScene("wa org erased");
+      const [first, second] = await messaged(s.org, 3, 5);
+      const dir = await mkdtemp(join(tmpdir(), "wa-org-erase-"));
+      await withOrg(app, s.org, (q) => eraseCaller(q, { dir, phoneE164: numberOf(0), now: t0 }));
+      await withSystem(app, (q) => q.exec("update notifications set status = 'failed', error = 'falhou' where call_id = $1", [second]));
+      const rows = await withSystem(app, (q) => q.many<{ call_id: string; target: string | null; status: string }>("select call_id, target, status from notifications where call_id = any($1::uuid[])", [[first, second]]));
+      expect(rows).toEqual(expect.arrayContaining([expect.objectContaining({ call_id: first, target: null }), expect.objectContaining({ call_id: second, status: "failed" })]));
+      const at = new Date(t0.getTime() + 20 * MINUTE);
+      const fourth = await anotherDrop(s.org, at, "phone", numberOf(90));
+      expect(await review(s.org, fourth, at)).toBe("opened");
+      await expectOrgLimit(s.org, fourth, numberOf(90));
+    });
+
+    it("duas revisões ao mesmo tempo no limite (a 3ª e a 4ª, de números diferentes) criam um aviso só", async () => {
+      const s = await whatsappScene("wa org parallel");
+      await messaged(s.org, 2, 5);
+      const at = new Date(t0.getTime() + 15 * MINUTE);
+      const third = await anotherDrop(s.org, at, "phone", numberOf(90));
+      const fourth = await anotherDrop(s.org, at, "phone", numberOf(91));
+      // A primeira revisão termina, mas a transação dela fica aberta: o aviso dela ainda não se vê de fora.
+      // A segunda só pode contar depois que a primeira fechar; sem a trava por organização, ela contaria 2.
+      let reviewed!: () => void;
+      let release!: () => void;
+      const firstDone = new Promise<void>((resolve) => (reviewed = resolve));
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const first = withOrg(app, s.org, async (q) => {
+        const result = await reviewCall(q, third, at);
+        reviewed();
+        await gate;
+        return result;
+      });
+      await firstDone;
+      const second = review(s.org, fourth, at);
+      await Promise.race([second, new Promise((resolve) => setTimeout(resolve, 500))]);
+      release();
+      const outcomes = await Promise.all([first, second]);
+      expect(outcomes).toEqual(["messaged", "opened"]);
+      expect(await callerNotices(s.org)).toHaveLength(3);
+      expect((await drops(third)).concat(await drops(fourth)).map((payload) => (payload as { reason?: string }).reason ?? "queued").sort()).toEqual(["org_limit", "queued"]);
+    });
+
+    it("a simulada acima do teto grava o que teria acontecido, sem pendência", async () => {
+      const s = await whatsappScene("wa org simulated");
+      await messaged(s.org, 3, 5);
+      const at = new Date(t0.getTime() + 20 * MINUTE);
+      const sim = await anotherDrop(s.org, at, "simulated", numberOf(90));
+      expect(await review(s.org, sim, at)).toBe("simulated");
+      expect(await drops(sim)).toEqual([{ case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "org_limit", simulated: true, openTurn: "caller_waiting" }]);
+      expect((await followUpsOf(s.org)).filter((row) => row.call_id === sim)).toEqual([]);
+      expect(await callerNotices(s.org)).toHaveLength(3);
+    });
   });
 
   it("o limite é por organização: outra organização com o mesmo número manda a dela", async () => {
