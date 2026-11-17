@@ -167,6 +167,11 @@ export interface Trunk {
   inboundAllowed: string[];
   /** Quando o conjunto mudou pela última vez (o que a tela mostra quando o `host` é nome). */
   inboundResolvedAt: string | null;
+  /**
+   * Se o filtro de entrada vale para a linha (R14, contrato 11). Começa desligado só na linha por
+   * registro que já existia antes do filtro; a linha por IP filtra sempre.
+   */
+  inboundFilter: boolean;
   status: string;
   lastCheckAt: string | null;
   lastError: string | null;
