@@ -71,7 +71,7 @@ Cada sinal aponta uma causa, e nem toda causa é texto:
 | Nenhum `tool_called` onde devia haver | ferramenta desligada, ou as instruções não mandam usar | ferramentas do agente, depois instruções |
 | `tool_result` com falha e depois silêncio ou desligar | as instruções não dizem o que falar quando a ferramenta não resolve (antipadrão 15) | instruções |
 | `transfer_started` cedo e em quase toda ligação | instrução de "na dúvida, transfira" | instruções |
-| `caller_unanswered` frequente | o agente não percebeu o fim da fala de quem ligou: barulho | campo Ambiente (Barulhento, hoje só no OpenAI Realtime); não é instrução |
+| `caller_unanswered` frequente | o agente não percebeu o fim da fala de quem ligou: barulho | campo Ambiente (Barulhento, hoje no OpenAI Realtime e no Gemini Live); não é instrução |
 | Nome, marca ou termo trocado na fala transcrita | o provedor não reconheceu o termo | vocabulário (é uma dica que o provedor pode ignorar; sem tela até o PR #290, então a lista aprovada fica registrada) e, nas instruções, como dizer o nome |
 | `engine_failed` | o provedor caiu ou a conta parou | Saúde e a chave; skill `deskvoice-operar`, seção 4 |
 | `cost_ceiling_reached` ou fim por tempo máximo | ligação longa: falas compridas, sem encerrar | instruções (fala curta, encerrar) e limites do agente |

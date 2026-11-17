@@ -52,8 +52,8 @@ const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", 
 /** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
 const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp"];
 
-/** Motores em que a sessão em Barulhento foi provada numa instalação real. */
-const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime"];
+/** Motores em que a sessão em Barulhento foi provada numa instalação real (a sessão abre; o efeito no ruído não foi medido). */
+const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime", "gemini-live"];
 
 const toDraft = (agent: Agent): Draft => ({
   name: agent.name,
@@ -143,7 +143,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // Os agentes que podem passar a ligação para este: apagá-lo o tira da lista deles.
   const handingOffHere = others.filter((other) => other.agentHandoffTargets?.includes(id));
   const engine = engines.data?.find((candidate) => candidate.id === draft.engine);
-  // Barulhento só foi provado no OpenAI Realtime. Em outro motor, a opção some; um agente que já
+  // Barulhento foi provado no OpenAI Realtime e no Gemini Live. Em outro motor, a opção some; um agente que já
   // está em Barulhento continua vendo o campo, com um aviso, para não guardar a escolha escondida.
   const noisyProven = NOISY_PROVEN_ENGINES.includes(draft.engine);
   // "Voltar para Normal" mexe só no rascunho: até salvar, o agente atende em Barulhento.
@@ -287,7 +287,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </div>
           ) : (
             // Sem o campo, a linha fica: é ela que conta a quem usa outro motor que o modo existe.
-            <p className="mt-4 max-w-md text-[0.87rem] text-muted">{t.listeningEnvironmentOnlyOpenAi}</p>
+            <p className="mt-4 max-w-md text-[0.87rem] text-muted">{t.listeningEnvironmentOnlyProven}</p>
           )}
           {backToNormalPending ? (
             <div className="mt-2 max-w-md">
