@@ -67,6 +67,14 @@ Do kit de contribuição do DeskcommCRM (`deskcomm-contribuir`) vieram também, 
   (`AGENTS.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`), e o comando daqui só lê: não acolhe, não
   corrige e não publica, ao contrário do de lá. O eixo de self-host do cético ficou de fora: aqui
   quem cobre isso são as regras de produto, que o medidor lê.
+- **A implementação de uma fatia com verificador separado** (`.claude/commands/deskvoice-fatia.md`
+  e os subagentes `deskvoice-implementador` e `deskvoice-verificador`): a divisão entre quem
+  implementa e quem verifica sem poder escrever, o retrato do worktree antes e depois do
+  verificador, o aceite passado palavra por palavra, a menor mudança, a devolução com evidência e a
+  calibração do veto vieram, como texto adaptado, do `deskcomm-gov-loop.md` e dos
+  `gov-implementer.md` e `gov-verifier.md` de lá. As regras duras são as do `AGENTS.md` do
+  DeskVoice, que os subagentes leem da `main`, e não as de lá. O laço autônomo e o arquivo de
+  estado do de lá ficaram de fora: aqui o estado é o desenho e o PR, e o comando não envia nada.
 
 O DeskcommCRM é obra de mais de 250 autores de PR. Parte do que está aqui é trabalho deles.
 
