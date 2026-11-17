@@ -114,8 +114,8 @@ mesma coisa.
 Duas configurações do agente que valem para clínica:
 
 - **Ambiente: Barulhento**, se quem liga costuma estar em lugar com conversa de fundo. Deixa o
-  agente menos sensível a ruído. Funciona nos motores OpenAI Realtime e Gemini Live; em outro
-  motor, a tela diz isso.
+  agente menos sensível a ruído. O modo é aceito pelos motores OpenAI Realtime e Gemini Live; o
+  efeito sobre o ruído ainda não foi medido numa ligação. Em outro motor, a tela diz isso.
 - **Limites por chamada**: duração máxima e teto de custo. Ao atingir um dos dois, o agente avisa
   quem está na linha e encerra. Para clínica, 10 minutos (o padrão de fábrica) é folgado para
   marcar e curto para uma conversa sem rumo.
