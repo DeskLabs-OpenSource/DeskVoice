@@ -138,9 +138,13 @@ Cada volta é assim:
 
    ```bash
    cd "$WT" && { git status --porcelain=v1 --untracked-files=all; git diff HEAD --binary;
-     git ls-files -o --exclude-standard -z | xargs -0 -r sha256sum --; } | sha256sum > "$RUN/retrato-antes-<volta>.txt"
-   cat "$RUN/retrato-antes-<volta>.txt"
+     git ls-files -o --exclude-standard -z | xargs -0 -r git hash-object --; } | git hash-object --stdin > "$RUN/retrato-antes-<volta>.txt"
+   test -s "$RUN/retrato-antes-<volta>.txt" && cat "$RUN/retrato-antes-<volta>.txt" || echo "retrato vazio"
    ```
+
+   O retrato usa só o `git`, que já está na máquina. Se sair `retrato vazio`, ele não serve: pare
+   as voltas e leve isso ao relatório. Ele não vê arquivo ignorado (`.gitignore`) nem nada fora
+   de `$WT`.
 
 3. **`deskvoice-verificador`.** O briefing comum, mais a devolução do implementador, marcada como
    **alegação, não evidência**. Ele devolve `APROVADO` ou `REPROVADO`, com **Não medido**.
@@ -174,7 +178,9 @@ Os ganchos do contribuidor rodam nesse commit, se estiverem armados. Se o `pre-c
 não contorne (`--no-verify` nunca): leve o bloqueio ao relatório.
 
 Sem `APROVADO` (três voltas reprovadas, `BLOQUEADO`, ou o retrato que mudou), não commite. O
-worktree fica como está, e o relatório diz isso.
+worktree fica como está, e o relatório diz isso. Diz também que esse trabalho só existe em
+`/tmp`, que some quando a máquina reinicia (e, no Linux, na limpeza periódica): quem quiser
+guardá-lo copia ou commita antes.
 
 ## Passo 6: a prova de que nada foi ao GitHub, e o relatório
 
@@ -213,12 +219,37 @@ o do verificador, e por quê. Nunca vazio por omissão>
 ```
 
 Termine dizendo à pessoa, em uma linha: onde está o trabalho, que nada foi publicado e que enviar
-é com ela. Para jogar o worktree fora depois, conferindo o caminho antes:
+é com ela.
+
+**O bloco de limpeza vai no fim do relatório, já preenchido.** Nada de `$RUN` ou `$REPO` nele:
+quando a pessoa (ou outra chamada de shell) rodar, essas variáveis não existem mais. Escreva por
+extenso o caminho absoluto da rodada (a saída `rodada=` do Passo 3) e o do repositório (a saída
+`repo=` do Passo 1), uma vez cada, no lugar de `<rodada>` e `<repo>`. Confira as duas linhas
+contra essas saídas antes de imprimir. O bloco tem duas partes, e a segunda só roda depois que
+a pessoa olhou a primeira (lei 2 de `docs/doctrine/operacao-de-agentes.md`):
 
 ```bash
-cd "$REPO"
-case "$RUN" in /tmp/deskvoice-fatia-*) git worktree remove --force "$RUN/wt"; rm -rf -- "$RUN" ;; *) echo "caminho inesperado: $RUN, não apaguei" ;; esac
-git worktree prune; git worktree list
+# 1. Confira o que vai embora: a pasta da rodada, o worktree dentro dela e a lista de worktrees.
+R='<rodada>'; REPO='<repo>'
+ls -la -- "$R" "$R/wt"; git -C "$REPO" worktree list
+
+# 2. Só depois de conferir. A guarda recusa vazio, `..`, subpasta e pasta sem `wt`.
+R='<rodada>'; REPO='<repo>'
+case "$R" in
+  ""|*..*|*/./*|*//*|/tmp/deskvoice-fatia-*/*) echo "caminho recusado: '$R', não apaguei" ;;
+  /tmp/deskvoice-fatia-?*)
+    if [ -d "$R/wt" ] && [ -e "$REPO/.git" ]; then
+      git -C "$REPO" worktree remove --force "$R/wt" && rm -rf -- "$R"
+    else
+      echo "sem '$R/wt' ou sem '$REPO/.git', não apaguei"
+    fi ;;
+  *) echo "fora de /tmp/deskvoice-fatia-: '$R', não apaguei" ;;
+esac
+git -C "$REPO" worktree prune; git -C "$REPO" worktree list
 ```
+
+`R` e `REPO` são definidos na mesma linha do bloco, com o valor escrito por extenso, e a guarda
+recusa o vazio. O `git worktree remove --force` descarta o que não foi commitado: por isso a
+primeira parte vem antes.
 
 O ramo local continua, com o commit: `git branch -D <ramo>` só quando a pessoa disser.
