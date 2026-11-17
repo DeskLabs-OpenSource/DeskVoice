@@ -976,6 +976,26 @@ acréscimos de linha, e quem chegar depois faz o merge da `main`.
   detalhe da chamada. É a fatia da tela de custo que vem depois da 4b da R4. Teste: um período com
   uma linha de cada tipo mostra os dois avisos ao mesmo tempo.
 
+**Ajuste de 17/11 (Arquiteto, com a resposta do Rafael na DESA-75):**
+
+- **Vale a opção A.** Resposta do Rafael em 17/11, 10:55Z, registrada na DESA-75: "Sobre Jev, sem
+  problemas." A tela oferece o Jev, e o filtro continua desligado de fábrica. Ninguém escreve à
+  TypeSafe por enquanto. A 7b começa agora, a partir da `main` atual.
+- **O aviso da tela diz só o que a página diz**, e nada além: a TypeSafe guarda o texto enviado
+  enquanto achar necessário para o serviço ou para fins comerciais, apaga a pedido, e o serviço é
+  hospedado nos EUA. Cita https://typesafe.ai/legal/privacy-policy ("Last updated Nov 19, 2025",
+  lida em 2026-11-16). Não promete prazo, não diz "não treina" como garantia de retenção, e não
+  nomeia outro país. O guia cita a mesma página com a data da leitura e explica como pedir a
+  exclusão à TypeSafe.
+- **Novos itens do aceite da 7b** (regra do board de 17/11, pedida pelo maestro de PRs):
+  - o corpo de todo PR que grave `decision_model.*.api_key` pelo painel **cita a resposta do Rafael
+    na DESA-75** (17/11, 10:55Z, opção A). O Desenvolvedor escreve; o Verificador confere que a
+    citação está lá;
+  - o Verificador e a revisora conferem, frase por frase, que o aviso da tela e o guia nos três
+    idiomas dizem só o que a página diz (as três afirmações acima). Uma frase a mais é fracasso.
+- **A 7a já está na `main`** (#359 e o teste do ramo do prazo no #362). A 7b não refaz a migration
+  nem os testes de custo.
+
 ### Fatia 8: o serviço do Laya
 
 `deploy/laya/` (Dockerfile e servidor HTTP mínimo, com as três primitivas e nada mais), o serviço
