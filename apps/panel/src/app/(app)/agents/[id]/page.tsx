@@ -403,14 +403,25 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </Field>
           </div>
           {whatsAppBlock ? (
-            <div className="mt-3 max-w-prose">
-              <Notice tone={draft.dropFollowUp === "whatsapp" ? "fail" : "neutral"}>
-                <p>{whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}</p>
-                <Link href="/settings/whatsapp" className="font-bold underline-offset-4 hover:underline">
+            // O motivo da opção desabilitada e o caminho para resolver. Vira alerta só quando o modo
+            // escolhido é o que ficou indisponível: aí a mensagem não sai, e cada queda vira pendência.
+            draft.dropFollowUp === "whatsapp" ? (
+              <div className="mt-3 max-w-prose">
+                <Notice tone="fail">
+                  <p>{whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}</p>
+                  <Link href="/settings/whatsapp" className="font-bold underline-offset-4 hover:underline">
+                    {t.dropFollowUpFixLink}
+                  </Link>
+                </Notice>
+              </div>
+            ) : (
+              <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
+                {whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}{" "}
+                <Link href="/settings/whatsapp" className="font-bold text-ink underline-offset-4 hover:underline">
                   {t.dropFollowUpFixLink}
                 </Link>
-              </Notice>
-            </div>
+              </p>
+            )
           ) : null}
           {draft.dropFollowUp === "whatsapp" ? (
             <div className="mt-4 grid max-w-prose gap-2">
