@@ -2,6 +2,7 @@ import { isIP } from "node:net";
 import { isPublicAddress } from "@deskvoice/core";
 import { z } from "zod";
 import type { AnalysisGuess } from "./analysis";
+import type { BrainFailure } from "./brain";
 import type { OutcomeGuess } from "./outcome";
 
 /** Definição de ferramenta no formato que os motores entendem (JSON Schema em `parameters`). */
@@ -373,6 +374,109 @@ export interface VoiceEngine {
    * prova que a chave vale e alcança o modelo de `connect`. Nunca lança, nunca registra a chave.
    */
   checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+}
+
+/**
+ * Uma voz que o sintetizador oferece, lida da conta do operador (R5, voz do pipeline).
+ */
+export interface SynthesizerVoice {
+  id: string;
+  name: string;
+  /** Idiomas que o provedor declara verificados para a voz (`pt-BR`, ...). Vazio quando não declara. */
+  languages: readonly string[];
+  /** Amostra que o provedor hospeda: tocar não gasta crédito. */
+  previewUrl?: string;
+}
+
+export type SynthesizerVoicesResult = { ok: true; voices: SynthesizerVoice[] } | { ok: false; failure: BrainFailure; status: number | null };
+
+/** O preço por caractere, que é como a ElevenLabs cobra. De um modelo, com a fonte e o dia conferido. */
+export interface SynthesizerPricing {
+  centsPerThousandCharacters: number;
+  source: string;
+  /** `AAAA-MM-DD`. */
+  checkedOn: string;
+}
+
+/**
+ * O consumo de uma fala, em incrementos (como `VoiceSessionEvents.usage`): quem mede soma os eventos.
+ * Sai quando o texto **é enviado** ao provedor, e não quando vira áudio: é o que o provedor cobra,
+ * inclusive do que a interrupção descartou. `costMicrocents` ausente é "sem preço conhecido" (o
+ * modelo não está na tabela), nunca zero. `estimated` é sempre verdadeiro enquanto ninguém comparar a
+ * contagem com o consumo da conta.
+ */
+export interface SpeechUsage {
+  characters: number;
+  costMicrocents?: number;
+  estimated: true;
+}
+
+export interface SpeechEvents {
+  /** PCM16 mono 8 kHz, como `VoiceSessionEvents.audio`. */
+  audio(pcm16_8k: Buffer): void;
+  /** O que já virou áudio, em caracteres, acumulado, para cortar a fala do agente na interrupção (fatia 4). */
+  spoken(chars: number): void;
+  /** Incremento do que foi enviado ao provedor, com o custo. */
+  usage(usage: SpeechUsage): void;
+  /** Esta fala terminou de gerar. Não vem depois de `cancel`. */
+  done(): void;
+  error(error: Error): void;
+}
+
+export interface Speech {
+  on<K extends keyof SpeechEvents>(event: K, handler: SpeechEvents[K]): void;
+  /** Texto em pedaços, como o cérebro entrega. `flush` força a geração do que já chegou. */
+  push(text: string, options?: { flush?: boolean }): void;
+  /** Não vem mais texto: o provedor gera o resto e a fala termina com `done`. */
+  end(): void;
+  /** Interrupção: para de gerar e descarta o que não saiu. O que já foi enviado ao provedor é cobrado. */
+  cancel(): void;
+}
+
+/** Por que a fala não abriu, no vocabulário fechado do teste da chave. */
+export type SynthesizerOpenFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
+
+/** A fala não abriu. Quem abre trata como recusa de abertura; o texto do provedor fica só em `message`, para o log. */
+export class SynthesizerOpenError extends Error {
+  readonly reason: SynthesizerOpenFailure;
+  constructor(reason: SynthesizerOpenFailure, message: string) {
+    super(message);
+    this.reason = reason;
+  }
+}
+
+export interface SpeakConfig {
+  voiceId: string;
+  /** BCP 47, ex.: "pt-BR". */
+  language: string;
+  /** Sobrepõe o modelo padrão do sintetizador. */
+  model?: string;
+}
+
+/**
+ * Uma voz do pipeline (R5): recebe texto em pedaços e devolve PCM16 mono 8 kHz. Um arquivo por
+ * provedor em `synthesizers/`, descoberto por `loadSynthesizers`.
+ */
+export interface SpeechSynthesizer {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  /** O modelo usado quando a escolha não diz outro. */
+  defaultModel: string;
+  /** O preço do modelo padrão. */
+  pricing: SynthesizerPricing;
+  /** O preço de um modelo; `undefined` é "sem preço conhecido", nunca zero. */
+  pricingOf(model: string): SynthesizerPricing | undefined;
+  keyless?: boolean;
+  /** Onde a pessoa pega a chave (o link da tela). */
+  keyUrl?: string;
+  /** Nunca lança. */
+  listVoices(apiKey: string, options?: KeyCheckOptions): Promise<SynthesizerVoicesResult>;
+  /** Nunca lança, nunca sintetiza, nunca registra a chave. */
+  checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+  /** Abre uma fala. Lança `SynthesizerOpenError` com o motivo no vocabulário fechado. */
+  speak(config: SpeakConfig, apiKey: string, options?: ConnectOptions): Promise<Speech>;
 }
 
 // Mora aqui, e não em outcome.ts, porque o painel importa valor só por `@deskvoice/voice-engine/types`:
