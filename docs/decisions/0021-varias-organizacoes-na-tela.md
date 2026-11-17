@@ -1,7 +1,10 @@
 # 0021: Várias organizações na tela, e a administração da instalação
 
-- **Estado:** proposta. Vira aceita quando o dono mesclar o PR do desenho. Os itens marcados
-  **[dono]** são os pedidos de decisão da seção 7 do desenho, e cada um diz o que vale sem resposta.
+- **Estado:** proposta. Entrar na `main` não a torna aceita: o merge pode ser feito pela fila.
+  Ela vira **aceita com a palavra do dono**, pedida no lote de decisões junto com os pedidos da seção 7
+  do desenho, e quem registrar a resposta muda esta linha num commit. Enquanto for proposta, as
+  fatias 1 a 7 e a 9 podem andar sobre ela. Os itens marcados **[dono]** são esses pedidos, e cada
+  um diz o que vale sem resposta.
 - **Data:** 2026-11-17
 - **Quem decidiu:** o dono pediu no roteiro de novembro (R8, 13/11/2026). As escolhas abaixo são do
   Arquiteto, no [desenho de várias organizações](../specs/2026-11-17-varias-organizacoes-e-administracao-da-instalacao.md),
@@ -44,12 +47,12 @@ escolhidas no login" esperam o dono, junto com a multiempresa na tela.
 | E-mail | Único na instalação, em `users` | Único na instalação, em `accounts`. Em `users`, único por organização |
 | O que é `users` | A pessoa | O **vínculo** da conta com uma organização, com o papel dela ali |
 | Papéis | Dono, administrador e operador | Os mesmos, em cada organização, mais a **administração da instalação**, que é uma marca na conta, e não um quarto papel de organização |
-| Quem administra a instalação | Não existia | Com uma organização só, todo dono dela. A partir da segunda, uma lista explícita, que nasce com os donos da primeira e nunca fica vazia |
+| Quem administra a instalação | Não existia | Um **estado gravado**, e não a contagem de organizações. Antes da segunda organização, o dono e o administrador da organização de quem instalou (as mesmas pessoas que hoje atualizam). Criar a segunda grava, para sempre, que a lista ficou explícita: ela nasce com os donos da organização fundadora e nunca fica vazia. Excluir ou suspender organizações depois não muda quem administra |
 | Convite para e-mail que já tem conta | Recusado (`email_taken`) | Aceito com a senha da conta. Nenhuma senha nova |
 | Escolher a organização | Não existia | O login entra na última organização usada. A troca é feita na tela, sem sair, e o seletor só aparece para quem tem mais de uma |
 | "Várias empresas escolhidas no login" **[dono]** | Esperando o dono | Continua fora: a conta entra e troca depois. O que entrou foi a troca dentro da tela |
 | Saída de emergência | `install/reset-password.sh` | O mesmo, mais `install/grant-installation-admin.sh` |
-| Entrar como | Não existia | Só quem administra a instalação, com motivo, com prazo de 15, 30 ou 60 minutos, com papel de administrador (nunca dono), gravado na auditoria da instalação e na da organização, e visível na tela Equipe dela |
+| Entrar como | Não existia | Só quem administra a instalação, com motivo, com prazo de 15, 30 ou 60 minutos, com papel de administrador (nunca dono), gravado na auditoria da instalação e na da organização, e visível na tela Equipe dela. O vínculo de suporte não mexe na equipe (convite, papel, desativação), não é escolhido nem avisado, e fica desativado fora do prazo |
 
 O resto da 0009 vale como está: sem cadastro aberto, convite de uso único e com prazo, os tetos de
 tentativa de login, a redefinição de dentro do servidor e a ausência de segundo fator.
@@ -63,7 +66,7 @@ janela ou contorna a lista de não ligar (antipadrão 16).
 ### Quem tem um cliente só não percebe
 
 Uma instalação de antes atualiza sem ação manual. A pessoa entra com a mesma senha, cai na mesma
-organização, com o mesmo papel, e o botão de atualizar continua com ela. A navegação principal não
+organização, com o mesmo papel, e o botão de atualizar continua com ela, seja dona ou administradora. A navegação principal não
 muda. A área da instalação fica no menu da conta.
 
 ## Alternativas descartadas
@@ -92,10 +95,17 @@ muda. A área da instalação fica no menu da conta.
   permissão.
 - **O login e a sessão mudam**, que é caminho sensível. As fatias que tocam neles passam pelo dono.
 - **A exclusão de organização** passa a depender de toda chave estrangeira para `organizations (id)`
-  ter cascata. Um teste gerado do catálogo cobra isso da tabela que nascer depois.
-- **[dono] Linha por IP disputada por clientes diferentes.** A frase de custo da 0007 ("criar uma
-  segunda organização exige acesso à VPS") deixa de ser verdade. Sem resposta ao pedido 3, vale a
+  ter cascata. Um teste gerado do catálogo cobra isso da tabela que nascer depois. As exceções são
+  nomeadas no teste com motivo: o registro da instalação (`installation_events`) e a última
+  organização da conta ficam com `set null`.
+- **Uma terceira forma de tabela de organização:** "a organização lê, o sistema escreve"
+  (`organization_limits`), cobrada pelo teste de isolamento gerado ao lado das tabelas só de
+  acréscimo.
+- **[dono] Linhas por IP de clientes diferentes com faixas que se sobrepõem** (o `host` e os extras
+  da linha por IP). A frase de custo da 0007 ("criar uma segunda organização exige acesso à VPS")
+  deixa de ser verdade. Sem resposta ao pedido 3, vale a
   opção A: a 0007 continua como está, com aviso antes de salvar.
 - **[dono] Cobrança dos clientes:** sem resposta ao pedido 1, fica fora.
-- **[dono] Chave de IA da agência para todos os clientes:** sem resposta ao pedido 2, pode, com o custo
-  na organização da chamada e o teto dela valendo.
+- **[dono] Chave de IA da agência para todos os clientes:** sem resposta ao pedido 2, vale B: cada
+  organização cadastra a própria chave. Com A, a chave só entra depois de conferidos os termos de uso
+  de cada provedor, com o custo na organização da chamada e o teto dela valendo.

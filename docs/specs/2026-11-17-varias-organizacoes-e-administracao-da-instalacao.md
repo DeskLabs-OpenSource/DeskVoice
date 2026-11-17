@@ -2,7 +2,7 @@
 
 - **Estado:** desenho. Nenhuma fatia começou. A decisão que acompanha este texto é a
   [`0021`](../decisions/0021-varias-organizacoes-na-tela.md); onde as duas discordarem, vale a 0021.
-- **Data:** 2026-11-17
+- **Data:** 2026-11-17. Revisão 2 no mesmo dia, depois do parecer da sessão revisora no PR #373.
 - **Quem pediu:** o dono, em 13/11/2026 (roteiro de novembro, item R8): "um sistema multi-tenant com
   um painel de admin para a pessoa poder coordenar [...] o nosso público-alvo usa muito essa questão
   do multi-tenant para gerenciar vários clientes, fazer as configurações gerais de organizações,
@@ -23,9 +23,10 @@ O desenho em seis frases:
 1. **Conta e vínculo se separam.** Nasce `accounts` (e-mail, senha e papel da instalação, sem
    organização). A tabela `users` continua igual e passa a ser o **vínculo** de uma conta com uma
    organização, com o papel que ela tem ali. Nenhuma chave estrangeira que aponta para `users` muda.
-2. **Administração da instalação é uma marca na conta.** Enquanto a instalação tem uma organização
-   só, todo dono dela administra a instalação, como hoje. Quando nasce a segunda, quem administra
-   passa a ser uma lista explícita, e a tela diz quem está nela.
+2. **Administração da instalação é uma marca na conta.** Antes da segunda organização, quem hoje
+   pode atualizar (dono e administrador da organização de quem instalou) administra a instalação,
+   como hoje. Criar a segunda grava, uma vez e para sempre, que a lista ficou explícita, e a tela diz
+   quem está nela.
 3. **A única leitura que atravessa organizações é a lista delas.** A visão geral, os limites e o
    "entrar como" abrem `withOrg` em cada organização, uma de cada vez. O SQL que enxerga mais de uma
    organização fica num módulo só de `packages/core`, com teste próprio.
@@ -65,7 +66,7 @@ Duas coisas que hoje já são da instalação moram na organização de quem ped
   de todos);
 - **o IP público** (`network.public_ip` é lido por organização em `trunks.ts`, e o servidor é um só).
 
-O primeiro precisa mudar de dono (seção 6). O segundo funciona como está e fica fora.
+O primeiro é tratado na 3.11. O segundo funciona como está e fica fora.
 
 ## 2. O que aprendemos do DeskcommCRM
 
@@ -115,7 +116,8 @@ create unique index users_one_membership_idx on users (organization_id, account_
   ela.** Só o papel de sistema a lê, e só por funções de `packages/core/src/accounts.ts`. A senha de
   todas as contas nunca fica ao alcance de uma rota presa a uma organização.
 - `users.kind = 'support'` é o vínculo do "entrar como" (3.6). Esse vínculo não aparece na tela da
-  equipe, não entra na contagem de donos e nunca entra no login.
+  equipe, não entra na contagem de donos, nunca entra no login, nunca é escolhido nem avisado (3.6)
+  e fica com `disabled_at` sempre que não há acesso de suporte vivo.
 
 **A sessão** ganha `account_id`, e o par `organization_id` e `user_id` passa a dizer em que
 organização ela está agora. Trocar de organização é uma função de `packages/core`
@@ -124,20 +126,45 @@ na mesma linha de `sessions`. O cookie não muda.
 
 ### 3.2 Quem administra a instalação
 
-`isInstallationAdmin(db, accountId)` é a única função que responde. A regra:
+`isInstallationAdmin(db, accountId)` é a única função que responde. Ela lê **estado gravado**, e
+nunca a contagem de organizações: a contagem sobe e desce (exclusão, suspensão, lápide), e a regra
+não pode mudar de dono quando ela desce.
+
+O estado mora em `installation_settings` (3.5), que nasce na fatia 1:
+
+| Chave | Valor | Quem grava |
+|---|---|---|
+| `installation.founding_organization_id` | A organização de quem instalou | A migration da fatia 1: a organização com o menor `created_at`. Nunca muda depois |
+| `installation.admins_explicit_at` | Quando a lista ficou explícita | A transação que cria a segunda organização (item 3), ou a migration (abaixo). **Nunca volta a ser apagada** |
+
+A regra:
 
 1. Se a conta tem `installation_admin_at`, administra.
-2. Se a instalação tem **uma organização só**, e a conta é dona ativa dela, administra também. É o
-   que garante que quem tem um cliente só não perde nada: tudo o que um dono faz hoje continua
-   fazendo.
-3. Quando a **segunda** organização é criada, na mesma transação, todo dono ativo da primeira que
-   ainda não tem a marca a recebe. A partir daí a lista é explícita, a tela da instalação a mostra, e
-   o item 2 deixa de valer.
+2. Se `installation.admins_explicit_at` **não** existe, e a conta tem vínculo `member` ativo com
+   papel `owner` ou `admin` em `installation.founding_organization_id`, administra também. São as
+   mesmas pessoas que hoje podem atualizar (`CONFIG_ROLES`), então quem tem um cliente só não perde
+   nada: dono e administrador continuam com o botão de atualizar.
+3. Criar a segunda organização, na mesma transação: todo dono ativo da organização fundadora que
+   ainda não tem a marca a recebe, e grava `installation.admins_explicit_at`. A partir daí só vale o
+   item 1. A tela de criar diz isso antes de confirmar, com os nomes: quem recebe a marca e quem
+   deixa de administrar a instalação (os administradores da fundadora, que quem cria pode pôr na
+   lista na mesma tela).
 
-A migration da fatia 1 não marca ninguém, porque o item 2 já cobre toda instalação de hoje.
+Uma organização que nasça por fora de `packages/core` (SQL direto, na VPS) não muda o estado: o item 2
+continua preso à fundadora, e o dono da organização nova não ganha nada.
 
-Regras da lista: sempre existe pelo menos uma pessoa administrando. Quem administra põe e tira outra
-conta da lista, e não tira a última. Um terceiro papel por cima não existe.
+**A migration da fatia 1** grava `founding_organization_id`. Se a instalação já tem mais de uma
+organização (só possível hoje por quem tem acesso à VPS), ela também grava `admins_explicit_at` e dá a
+marca aos donos ativos da fundadora, e o fragmento da fatia avisa. Com uma organização só, não marca
+ninguém: o item 2 cobre.
+
+**O teste** da fatia 1 cobre: duas organizações, a fundadora excluída ou suspensa, e o dono da que
+sobrou continua sem administrar; o administrador da organização única atualiza; e uma organização
+inserida por SQL direto não dá nada a ninguém.
+
+Regras da lista: depois de explícita, sempre existe pelo menos uma pessoa administrando. Quem
+administra põe e tira outra conta da lista, e não tira a última. Um terceiro papel por cima não
+existe.
 
 **Saída de emergência:** `bash install/grant-installation-admin.sh <e-mail>`, rodado de dentro da
 VPS, dá a marca a uma conta. É o mesmo raciocínio de `install/reset-password.sh`: quem tem acesso
@@ -200,6 +227,15 @@ grant select on organization_limits to deskvoice_app;
 grant select, insert, update, delete on organization_limits to deskvoice_system;
 ```
 
+- **Categoria nova no teste de isolamento gerado: "a organização lê, o sistema escreve".** Hoje o teste
+  (`packages/core/test/isolation.db.test.ts`, "grants change and delete on every table...") exige
+  `select` e `insert` de `deskvoice_app` em toda tabela com `organization_id`, e a fábrica insere por
+  `withOrg`. A fatia 7 cria, ao lado de `APPEND_ONLY_TABLES`, a lista `SYSTEM_WRITTEN_TABLES`, com
+  motivo por tabela. Para essas, o teste cobra `deskvoice_app` = `[select, sem insert, sem update,
+  sem delete]` e `deskvoice_system` = tudo; a fábrica insere pelo papel de sistema; e o caso "a
+  organização muda a própria linha" passa a esperar erro de permissão. A regra não afrouxa para
+  ninguém: só ganha uma terceira forma, cobrada pela máquina.
+
 - Coluna nula = sem limite. Organização sem linha aqui é organização sem limite nenhum, que é o caso
   de toda instalação de hoje.
 - **Limite só aperta.** Nenhum limite da instalação afrouxa uma regra da organização nem uma regra do
@@ -207,10 +243,14 @@ grant select, insert, update, delete on organization_limits to deskvoice_system;
   `false` desliga a saída e trava o interruptor dela. O teto diário por linha, a janela e a lista de
   não ligar não ganham campo aqui (antipadrão 16).
 - **O teto mensal** é conferido no começo de cada chamada (recebida, de saída, pelo navegador e pelo
-  WhatsApp): a soma de `usage_ledger.cost_cents` do mês corrente, no fuso da organização, chegou ao
-  teto → a chamada é recusada com a mesma fala de "indisponível", `end_reason =
+  WhatsApp): a soma de `usage_ledger.cost_microcents` do mês corrente, no fuso da organização,
+  chegou ao teto → a chamada é recusada com a mesma fala de "indisponível", `end_reason =
   spend_cap_reached`, e um aviso no painel (um por janela, como o teto de simultâneas). O teto por
-  chamada do agente continua valendo durante a ligação.
+  chamada do agente continua valendo durante a ligação. A soma é **a mesma da tela de Custos**
+  (`system/costs`, que soma `cost_microcents`), e mora numa função só de `packages/core`, usada pela
+  tela de Custos, pelo teto e pela visão geral (3.7). `cost_cents` é a vista arredondada por linha, e
+  somá-la dá outro número. O teto é guardado em centavos, e a comparação converte o teto, e não a
+  soma.
 - **Linhas e agentes:** criar além do limite é recusado na rota, com a contagem na mensagem. Baixar o
   limite abaixo do que já existe não apaga nada; só impede criar mais.
 - A tela da organização mostra os limites dela em Configurações, só para leitura, com a frase "definido
@@ -235,10 +275,11 @@ A lista é curta de propósito. Cada item diz se a organização sobrescreve.
 
 | Chave | O que é | A organização sobrescreve? | Como vale |
 |---|---|---|---|
+| `installation.founding_organization_id` e `installation.admins_explicit_at` | O estado de quem administra (3.2) | Não | Gravado pela fatia 1 e pela criação da segunda organização |
 | `defaults.language` | Idioma do agente e da tela de uma organização nova | Sim, sempre | **Copiado na criação.** Mudar o padrão não mexe em quem já existe |
 | `defaults.timezone` | Fuso de uma organização nova (política de saída e relatórios) | Sim, sempre | Copiado na criação |
 | `defaults.limits` | Os limites com que uma organização nova nasce, inclusive `outbound_allowed` (padrão: `false`) | Não: limite é da administração | Copiado na criação |
-| `engine.<id>.api_key` | Chave de provedor de IA da instalação, cifrada com `encryptSecret` | Sim: a chave própria da organização vem antes | **Valor vivo**, só para as organizações em que a administração ligou "Usar a chave da instalação". Depende do pedido 2 |
+| `engine.<id>.api_key` | Chave de provedor de IA da instalação, cifrada com `encryptSecret` | Sim: a chave própria da organização vem antes | **Valor vivo**, só para as organizações em que a administração ligou "Usar a chave da instalação". Só entra se o pedido 2 for A **e** os termos de uso de cada provedor estiverem conferidos, com fonte e data, no PR da fatia. Sem resposta, vale B, e a chave fica de fora |
 
 O que **não** entra, com o motivo:
 
@@ -246,7 +287,7 @@ O que **não** entra, com o motivo:
   organização. São escolhas de privacidade do cliente diante de quem liga, e não da agência.
 - O IP público, que já funciona por organização.
 
-**A chave da instalação, se o pedido 2 valer:**
+**A chave da instalação, se o pedido 2 for A e os termos estiverem conferidos:**
 
 - O processo de voz procura a chave da organização. Se não achar, e a organização tiver
   `organization_limits.uses_installation_engine_key = true` (coluna que entra junto com esta chave),
@@ -292,6 +333,21 @@ create table support_accesses (
 - **A organização vê:** na tela Equipe, uma seção "Acessos de suporte", com quem, quando, até
   quando e o motivo, para todos os papéis que veem a tela Equipe. A lista lê `support_accesses` por
   `withOrg`.
+- **O vínculo de suporte não deixa acesso que dure mais que o prazo.** Na sessão de suporte, toda
+  ação sobre a equipe é recusada com `support_session_forbidden`: criar, renovar e cancelar convite,
+  mudar papel, desativar e remover membro (hoje `team/invites`, `team/invites/[id]` e
+  `team/users/[id]`). A recusa mora em `requireRole`, com um parâmetro `support: false` nas rotas da
+  equipe, para a rota nova da equipe nascer recusada. A fatia 5 lista as demais rotas que o papel
+  `admin` alcança e marca, uma por uma, as que criam credencial ou acesso que sobrevive à sessão.
+- **O vínculo de suporte não recebe nem é escolhido.** Ele nasce sem telefone e sem WhatsApp (nada é
+  copiado da conta), fica com `disabled_at` assim que o acesso acaba ou é encerrado, e toda consulta
+  que escolhe pessoa da organização filtra `kind = 'member'`: o resumo por WhatsApp
+  (`apps/routines/src/routines/summarize_call.ts`), os avisos (`packages/tools/src/notify.ts`,
+  `packages/tools/src/tools/send_whatsapp.ts`), a escolha do responsável da pendência
+  (`follow-ups/owners`, `apps/panel/src/server/shapes.ts`, `packages/core/src/follow-ups.ts`) e a
+  contagem de donos (`apps/panel/src/server/team.ts`). Um teste com banco real procura, no código,
+  toda consulta a `users` fora de `packages/core/src/accounts.ts` e reprova a que não filtra `kind`
+  ou não está numa lista curta com motivo.
 
 ### 3.7 Visão geral
 
@@ -314,6 +370,8 @@ são dezenas de transações curtas, o que cabe numa VPS. **Não medido:** o tem
 organizações.
 
 Exportação em CSV fica fora.
+
+O custo do mês e o teto usam a mesma função de soma da 3.4 (`cost_microcents`).
 
 ### 3.8 Auditoria da instalação
 
@@ -344,7 +402,7 @@ organização deixa de existir.
 | Arquivo | O que faz | Por que atravessa |
 |---|---|---|
 | `packages/core/src/accounts.ts` | Login, troca da senha, aceitar convite com conta que já existe, `switchOrganization`, `isInstallationAdmin` | A conta não tem organização |
-| `packages/core/src/installation.ts` | `listOrganizations`, criar, suspender, reativar, a lápide da exclusão, `installation_events`, `installation_settings` | É a camada acima das organizações |
+| `packages/core/src/installation.ts` | `listOrganizations`, criar, suspender, reativar, a lápide da exclusão, `installation_events`, `installation_settings`, `latestUpdateRequest` (3.11) | É a camada acima das organizações |
 | `packages/core/src/queue.ts` | `claimTask` passa a pular organização suspensa | Já atravessava |
 | `packages/core/src/routing.ts` | `resolveInboundRoute` devolve também se a organização está suspensa | Já atravessava |
 
@@ -364,7 +422,7 @@ concedido a ele: se alguém um dia der `grant` por engano, a tabela continua sem
 | Peça | Como separa hoje | O que muda |
 |---|---|---|
 | Linha registrada (usuário e senha) | Pela conta, na organização da linha | Nada |
-| Linha por IP | Decisão 0007: endereço de organizações diferentes derruba as duas | Pedido 3 |
+| Linha por IP | Decisão 0007: faixa de organizações diferentes que se sobrepõe derruba as duas | Pedido 3 |
 | Número de entrada | `phone_numbers` por organização, procurado só dentro da organização do tronco | Nada |
 | WhatsApp (sessão no WAHA) | Uma sessão por organização, `whatsapp_sessions` | Nada. A exclusão desconecta a sessão (fatia 9) |
 | Ligação pelo WhatsApp | `whatsapp_call_sessions` por organização | A suspensão a cobre (3.3) |
@@ -372,8 +430,34 @@ concedido a ele: se alguém um dia der `grant` por engano, a tabela continua sem
 
 O custo assumido da 0007 muda de dono. Ela dizia "quem pode provocar isso é quem administra o
 servidor, porque criar uma segunda organização exige acesso à VPS". Com esta mudança, quem cadastra
-a linha é o dono de uma organização cliente: um cliente pode derrubar a linha por IP de outro só
-cadastrando o mesmo endereço. Isso é o pedido 3.
+a linha é o dono de uma organização cliente: um cliente pode derrubar a linha por IP de outro
+cadastrando um **endereço ou faixa que se sobrepõe** à dele. A regra de hoje, em `trunks.ts`
+(`readInbound` e `overlap`), compara faixas: entram o `host` e os `match_extra` da linha por IP, com
+blocos de até /16. Os extras da linha por registro ficam fora, porque só liberam a entrada. Isso é o
+pedido 3.
+
+**Coerência com a R14.** O desenho da porta da telefonia (PR #320) e a fatia 2 dela (PR #343, aberto
+nesta data) escrevem o filtro de entrada de cada linha a partir de `computeAllowed`. A linha pulada
+pelo conflito não é emitida, então também fica sem filtro. A fatia 10 depende do #343 mesclado,
+porque é ele que define o conjunto de endereços de cada linha.
+
+### 3.11 O pedido de atualização
+
+`update_requests` continua com `organization_id`, e a linha continua sendo da organização de quem
+pediu: `requested_by` aponta para o vínculo dessa pessoa, e o teste de isolamento continua cobrindo a
+tabela. O que muda:
+
+- Só quem administra a instalação (3.2) pede e vê a atualização. A tela sai das Configurações da
+  organização e vai para a área da instalação **quando a lista fica explícita**; antes disso, fica
+  onde está.
+- O estado da atualização é da instalação. A leitura do pedido mais recente, que hoje é feita por
+  `withOrg` e por isso só vê os da própria organização, passa para uma função de
+  `packages/core/src/installation.ts` (`latestUpdateRequest`). Quem pediu de uma organização e trocou
+  para outra continua vendo o andamento.
+- `update_requested` vai para `installation_events`, com a organização e a conta de quem pediu.
+- **A exclusão de organização** (fatia 9) é recusada enquanto houver pedido `requested` ou
+  `running` dela. Os pedidos terminados vão junto com a organização, e o histórico fica no
+  `installation_events`.
 
 ## 4. Critério de aceite (o R8 inteiro)
 
@@ -389,8 +473,8 @@ O que uma pessoa consegue fazer quando terminar:
    prazo, e deixa de valer no prazo. Um teste prova que, na sessão de suporte, nada da organização
    de origem nem de uma terceira aparece em nenhuma rota.
 4. Uma instalação de antes atualiza sem nenhuma ação manual. O CI aplica as migrations sobre um banco
-   da última versão com dados, entra com a conta de antes e encontra a mesma organização, o mesmo
-   papel e o mesmo botão de atualizar.
+   da última versão com dados, entra com a conta de antes, como dono e como administrador, e encontra
+   a mesma organização, o mesmo papel e o mesmo botão de atualizar.
 5. `pnpm verify`, `pnpm test:db` e os testes de tela verdes, e o teste de isolamento gerado cobre as
    tabelas novas que têm `organization_id`.
 
@@ -413,16 +497,20 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 
 - Migration: `accounts`, `users.account_id` (preenchido, depois `not null`), `users.kind`,
   `sessions.account_id`, `password_hash` saindo de `users`, `installation_events`,
-  `organizations.suspended_at` e o motivo (só as colunas, sem uso).
+  `installation_settings` com o estado de 3.2, e `organizations.suspended_at` e o motivo (só as
+  colunas, sem uso).
 - `packages/core/src/accounts.ts` com login, troca de senha e `isInstallationAdmin`. O login, a troca
   de senha, `create-owner` e `reset-password` passam a usar a conta.
 - A atualização (`system/update`) passa a exigir `isInstallationAdmin`. Em toda instalação de hoje
-  isso é o mesmo dono de antes (3.2, item 2).
+  isso são as mesmas pessoas de antes, dono e administrador (3.2, item 2). A leitura do pedido vai
+  para `latestUpdateRequest` (3.11).
 - `install/grant-installation-admin.sh` e o arquivo em `apps/routines/src/cli/`, listado em
   `system-access-allowlist.ts`.
-- Cerca: isenção de `accounts` e `installation_events`, com dono, motivo e data.
+- Cerca: isenção de `accounts`, `installation_settings` e `installation_events`, com dono, motivo e
+  data.
 - **Aceite:** atualização sobre banco com dados, e a mesma pessoa entra, com o mesmo papel, na mesma
-  organização. Um teste lê `accounts` como `deskvoice_app` e recebe erro de permissão.
+  organização, e o dono e o administrador continuam atualizando. Um teste lê `accounts` como
+  `deskvoice_app` e recebe erro de permissão. Os testes do estado gravado de 3.2.
 - **Sensível:** autenticação. Passa pelo dono.
 
 ### Fatia 2: a área da instalação e a lista de organizações
@@ -431,10 +519,13 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
   Administração e Auditoria.
 - Criar e renomear organização. Na organização nova, gerar o convite do primeiro dono (o convite de
   hoje, aberto em `withOrg` da organização nova).
-- Lista de quem administra, com pôr e tirar, e a regra de 3.2, item 3, ao criar a segunda.
+- Lista de quem administra, com pôr e tirar, e a regra de 3.2, item 3, ao criar a segunda: a marca
+  nos donos da fundadora e `installation.admins_explicit_at`, na mesma transação, com a tela dizendo
+  antes quem recebe e quem deixa de administrar.
 - Auditoria: lista de `installation_events`.
 - **Aceite:** com uma organização só, a navegação principal fica idêntica à de antes (teste de tela
-  compara os itens). Criar a segunda grava `organization_created` e marca os donos da primeira.
+  compara os itens). Criar a segunda grava `organization_created`, marca os donos da fundadora e grava
+  o estado explícito. Excluir ou suspender depois não devolve nada a ninguém.
 
 ### Fatia 3: pessoas em várias organizações e a troca
 
@@ -463,9 +554,12 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 
 - `support_accesses`, vínculo `support`, faixa fixa, encerrar, prazo, `findSession` conferindo o
   prazo, as duas pontas da auditoria, a seção "Acessos de suporte" em Equipe.
+- As recusas da sessão de suporte (equipe e credenciais), o vínculo sem telefone e desativado fora do
+  prazo, e o filtro `kind = 'member'` em toda escolha de pessoa (3.6).
 - **Aceite:** o item 3 da seção 4. O teste de vazamento percorre **todas as rotas `GET`** do painel
   numa sessão de suporte, com dado em três organizações, e confere que nenhuma resposta traz `id`
-  de outra.
+  de outra. Outro teste confere, na sessão de suporte, que cada rota da equipe é recusada, e, depois
+  do prazo, que nenhum resumo, aviso ou escolha de responsável alcança o vínculo de suporte.
 - **Sensível:** autenticação e isolamento. Passa pelo dono.
 
 ### Fatia 6: visão geral
@@ -480,17 +574,23 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 - `organization_limits`, a tela de limites na área da instalação, a leitura em Configurações da
   organização, o teto mensal no começo das chamadas, a contagem de linhas e agentes, e a trava da
   saída.
-- `defaults.limits` em `installation_settings` (a tabela nasce aqui), copiado na criação.
-- **Aceite:** um teste por limite. Um teste prova que `outbound_allowed = true` não liga a saída de
+- `defaults.limits` em `installation_settings` (a tabela nasceu na fatia 1), copiado na criação.
+- `SYSTEM_WRITTEN_TABLES` no teste de isolamento gerado (3.4), com `organization_limits` e o motivo.
+- O teto pela soma de `cost_microcents`, na mesma função da tela de Custos.
+- **Aceite:** um teste por limite. O teste gerado prova que `deskvoice_app` não escreve em
+  `organization_limits`. Um teste prova que `outbound_allowed = true` não liga a saída de
   uma organização que a tem desligada.
 
 ### Fatia 8: configurações gerais
 
 - `defaults.language` e `defaults.timezone`, copiados na criação.
-- Se o pedido 2 valer como está: a chave de IA da instalação, `uses_installation_engine_key`, a
-  leitura no processo de voz e a frase na tela de motores.
-- **Aceite:** uma chamada de uma organização sem chave, com a da instalação ligada, grava custo no
-  `usage_ledger` dela e respeita o teto dela.
+- **Só se o pedido 2 for A e os termos de uso de cada provedor estiverem conferidos**, com fonte e
+  data no PR: a chave de IA da instalação, `uses_installation_engine_key`, a leitura no processo de
+  voz e a frase na tela de motores. Sem isso (o padrão sem resposta é B), a fatia 8 entrega só o
+  idioma e o fuso.
+- **Aceite:** o idioma e o fuso de uma organização nova vêm do padrão, e mudar o padrão não mexe na
+  que já existe. Com a chave: uma chamada de uma organização sem chave, com a da instalação ligada,
+  grava custo no `usage_ledger` dela e respeita o teto dela.
 
 ### Fatia 9: excluir organização
 
@@ -499,7 +599,10 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 - Migration que troca toda chave estrangeira para `organizations (id)` por `on delete cascade`,
   gerada a partir do catálogo, e um teste com banco real, também gerado do catálogo, que reprova a
   chave nova que não tiver cascata. Assim, a tabela que nascer depois também é apagada sem ninguém
-  lembrar.
+  lembrar. **Exceções, nomeadas no teste com motivo:** `installation_events.organization_id` e
+  `accounts.last_organization_id` são `on delete set null` de propósito. A primeira guarda o registro
+  da própria exclusão; a segunda só manda o login para outro vínculo.
+- Recusa a exclusão enquanto houver pedido de atualização aberto da organização (3.11).
 - Depois do banco: as gravações da pasta da organização, a sessão do WAHA, o arquivo de linhas do
   Asterisk e as contas que ficaram sem vínculo nenhum e sem a marca da instalação.
 - `installation_events` com nome, motivo e contagens.
@@ -509,8 +612,9 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 
 ### Fatia 10: posse de endereço por IP (depende do pedido 3)
 
-Só entra se o pedido 3 for B. Com A, a 0007 continua como está, e só a frase de custo da 0007 é
-atualizada, na decisão 0021.
+Só entra se o pedido 3 for B, e depois do #343 mesclado (3.10). Cobre a posse da faixa inteira de
+cada linha por IP (`host` e `match_extra`), e não só do `host`. Com A, a 0007 continua como está, e só
+a frase de custo da 0007 é atualizada, na decisão 0021.
 
 ## 6. O que fica de fora
 
@@ -553,7 +657,7 @@ Quantas agências do público cobram por consumo e quantas por mensalidade fixa.
 ### Decisão: a chave de IA da agência pode servir a todos os clientes?
 
 **Quem decide:** dono do projeto
-**O que está parado esperando:** a fatia 8, na parte da chave.
+**O que está parado esperando:** a fatia 8, na parte da chave. O idioma e o fuso andam.
 
 #### Opções
 - **A.** Pode, ligada por organização pela administração. O custo vai para a organização da
@@ -563,27 +667,33 @@ Quantas agências do público cobram por consumo e quantas por mensalidade fixa.
   cliente, e cada repetição é uma cópia cifrada a mais para trocar quando a chave vazar.
 
 #### Recomendação
-A, porque é como a agência já trabalha, e o custo continua medido e com teto por cliente.
+A, porque é como a agência já trabalha, e o custo continua medido e com teto por cliente. Mesmo com
+A, a parte da chave só começa depois de conferidos os termos de uso de cada provedor, com fonte e
+data no PR da fatia 8. Se algum provedor proibir, ele fica fora da chave da instalação.
 
-#### Se ninguém responder em 7 dias, vale: A
+#### Se ninguém responder em 7 dias, vale: B
+Porque os termos não estão conferidos, e o padrão por silêncio não pode ser a opção com risco ainda
+não medido. B não fecha a porta: a agência repete a chave em cada cliente, como hoje.
 
 #### Não medido
-Se os termos de uso de Google e OpenAI permitem uma chave servir a clientes de terceiros: não
-conferido nesta data.
+Se os termos de uso de Google, OpenAI e dos outros provedores do catálogo permitem uma chave servir a
+clientes de terceiros: não conferido nesta data.
 
-### Decisão: linha por IP no mesmo endereço, com clientes diferentes na mesma instalação
+### Decisão: linhas por IP de clientes diferentes com faixas que se sobrepõem, na mesma instalação
 
 **Quem decide:** dono do projeto
 **O que está parado esperando:** a fatia 10. As outras andam.
 
 #### Opções
-- **A.** A 0007 continua como está: endereço disputado por organizações diferentes derruba as linhas
-  por IP das duas. A tela diz isso **antes** de salvar, com confirmação. Só a frase de custo da 0007
+- **A.** A 0007 continua como está: endereço ou faixa de organizações diferentes que se sobrepõe
+  (o `host` e os `match_extra` da linha por IP, em blocos de até /16) derruba as linhas por IP das
+  duas. A tela diz isso **antes** de salvar, com confirmação. Só a frase de custo da 0007
   muda: quem provoca agora pode ser o dono de uma organização cliente. Custo: um cliente pode derrubar
   a linha por IP de outro, e a agência resolve trocando um deles para linha por registro.
-- **B.** Posse pela administração da instalação. A linha por IP nova, num endereço que já é de outra
-  organização, é gravada como "esperando a administração" e não sobe. A que já funcionava continua.
-  A administração decide de quem é o endereço. Custo: uma tela e um estado a mais. Enquanto a decisão
+- **B.** Posse pela administração da instalação. A linha por IP nova, com faixa que se sobrepõe à de
+  outra organização, é gravada como "esperando a administração" e não sobe. A que já funcionava continua.
+  A administração decide de quem é a faixa. Custo: uma tela e um estado a mais, e a fatia depende do
+  #343 (R14), que define o conjunto de endereços de cada linha. Enquanto a decisão
   não vem, se a operadora já mandar as ligações do cliente novo, elas chegam à organização antiga e
   são recusadas ali, e o número de quem ligou fica no histórico da organização errada.
 - **C.** Proibir linha por IP quando a instalação tiver mais de uma organização. Custo: quem usa
@@ -597,7 +707,8 @@ outro em nenhum momento.
 
 #### Não medido
 Quantas operadoras do público autenticam só por IP. Se a operadora manda as ligações antes de o
-cliente terminar o cadastro, o que pesa contra B.
+cliente terminar o cadastro, o que pesa contra B. Quantas instalações usam `match_extra` em bloco
+largo.
 
 ## 8. Riscos e o que não se sabe
 
@@ -605,8 +716,8 @@ cliente terminar o cadastro, o que pesa contra B.
   atualização mostrar que algum processo lê a coluna antiga durante a subida, a coluna sai numa
   migration seguinte, numa versão depois.
 - **O vínculo de suporte com papel `admin`** pode alcançar ações que hoje só o dono faz, se alguma
-  rota usar `CONFIG_ROLES` onde deveria pedir dono. A fatia 5 lista as rotas que o papel `admin`
-  alcança e confere uma por uma.
+  rota usar `CONFIG_ROLES` onde deveria pedir dono. As rotas da equipe já estão recusadas (3.6); a
+  fatia 5 lista as outras que o papel `admin` alcança e confere uma por uma.
 - **A rota pública de saúde** soma as organizações (0006). Com organização suspensa, a soma pode
   dizer "linha caída" por causa de uma linha que está de pé, mas suspensa. A fatia 4 decide se a
   organização suspensa entra na soma, e diz na tela.
@@ -615,7 +726,11 @@ cliente terminar o cadastro, o que pesa contra B.
 
 ## 9. Não medido neste desenho
 
-- Não rodei nenhum teste. Tudo o que está aqui foi lido em `1b6a6c5`, sem executar.
+- Não rodei nenhum teste. A revisão 1 foi lida em `1b6a6c5`; os pontos da revisão 2 foram
+  conferidos na `main` em `f523410`, sem executar.
+- Não conferi se alguma instalação de hoje tem mais de uma organização (o caso da migration em 3.2).
+- A lista de consultas que escolhem pessoa (3.6) saiu de uma busca por `from users`; a fatia 5 a
+  confirma com o teste que procura no código.
 - Não conferi onde mora hoje o idioma e o fuso "da organização". Li `agents.language` e
   `outbound_policy.timezone`; a fatia 8 confere se há outro lugar.
 - Não conferi todas as rotas que o papel `admin` alcança (risco da seção 8).
