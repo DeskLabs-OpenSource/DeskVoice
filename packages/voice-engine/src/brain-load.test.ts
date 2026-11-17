@@ -27,11 +27,10 @@ describe("loadBrains", () => {
     for (const brain of brains.values()) expect(brain.keyUrl).toMatch(/^https:\/\//);
   });
 
-  it("`chat` é opcional: OpenAI, OpenRouter e DeepSeek conversam; Anthropic e Gemini continuam válidos sem", async () => {
+  it("`chat` é opcional: OpenAI, OpenRouter, DeepSeek e Anthropic conversam; Gemini continua válido sem", async () => {
     const brains = await loadBrains();
     const talking = [...brains.values()].filter((brain) => typeof brain.chat === "function").map((brain) => brain.id);
-    expect(talking.sort()).toEqual(["deepseek", "openai", "openrouter"]);
-    expect(brains.get("anthropic")?.chat).toBeUndefined();
+    expect(talking.sort()).toEqual(["anthropic", "deepseek", "openai", "openrouter"]);
     expect(brains.get("gemini")?.chat).toBeUndefined();
   });
 

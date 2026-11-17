@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PEDIDOS, medirUm, resumir, rodar, type MedidaDoCerebro } from "./cerebro-primeiro-texto";
+import anthropic from "../../packages/voice-engine/src/brains/anthropic";
 import openai from "../../packages/voice-engine/src/brains/openai";
 
 // Inventada: o teste procura por ela onde não pode aparecer.
@@ -55,11 +56,38 @@ describe("bancada do cérebro: pedido → primeiro texto", () => {
     expect(m.usage?.inputTokens).toBeGreaterThan(0);
   });
 
+  it("mede a Anthropic no formato dela: o primeiro text_delta para o relógio", async () => {
+    const relogio = relogioFalso();
+    const pedidos: string[] = [];
+    const fetch = (async (url: string, init: RequestInit) => {
+      pedidos.push(url);
+      relogio.andar(250);
+      const eventos = [
+        { type: "message_start", message: { content: [], usage: { input_tokens: 30, output_tokens: 1 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Claro!" } },
+      ];
+      const corpo = new ReadableStream<Uint8Array>({
+        start(controle) {
+          for (const evento of eventos) controle.enqueue(new TextEncoder().encode(`event: ${evento.type}\ndata: ${JSON.stringify(evento)}\n\n`));
+          init.signal?.addEventListener("abort", () => controle.error(new DOMException("abortado", "AbortError")));
+        },
+      });
+      return new Response(corpo, { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const m = await medirUm(anthropic, CHAVE, "claude-haiku-4-5-20251001", "Oi", { relogio, fetch });
+    expect(pedidos).toEqual(["https://api.anthropic.com/v1/messages"]);
+    expect(m.primeiroTextoMs).toBe(250);
+    expect(m.estimado).toBe(true);
+    expect(m.usage?.inputTokens).toBeGreaterThan(0);
+  });
+
   it("sem chave nenhuma, diz não medido em cada cérebro e não chama nada", async () => {
     const texto = await rodar({});
     expect(texto).toContain("- openai (gpt-4.1-mini): não medido (chave não entregue: BANCADA_OPENAI_API_KEY)");
     expect(texto).toContain("não medido (chave não entregue: BANCADA_OPENROUTER_API_KEY)");
     expect(texto).toContain("não medido (chave não entregue: BANCADA_DEEPSEEK_API_KEY)");
+    expect(texto).toContain("- anthropic (claude-haiku-4-5-20251001): não medido (chave não entregue: BANCADA_ANTHROPIC_API_KEY)");
   });
 
   it("com chave, mede e nunca escreve a chave", async () => {

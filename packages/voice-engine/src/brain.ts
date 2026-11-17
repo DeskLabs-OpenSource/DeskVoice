@@ -71,15 +71,24 @@ export interface BrainChatRequest {
 export interface BrainChatEvents {
   /** Texto da resposta, em pedaços, assim que chega. */
   text(delta: string): void;
-  /** O modelo pediu uma ferramenta, já montada. `args` é texto: quem executa valida com zod (convenção 16). */
+  /**
+   * O modelo pediu uma ferramenta, já montada. `args` é texto: quem executa valida com zod (convenção 16).
+   * Sai assim que a ferramenta fecha, antes do fim do pedido: por isso pode vir `toolCall` e depois
+   * `error`, e isso é válido; quem executa decide se usa uma ferramenta de uma volta que falhou.
+   */
   toolCall(call: { id: string; name: string; args: string }): void;
   /**
    * O consumo do pedido. Todo pedido que saiu emite **exatamente um**, antes de `done` ou `error`, ou
    * depois de `cancel`. `estimated: false` quando o provedor declarou; `true` quando não declarou
    * (corte, prazo, `cancel`, provedor que não manda), pela regra do Jev: um token por byte UTF-8 de
    * `messages` + `tools` enviados na entrada, e do texto + `args` recebidos na saída. Resposta de erro
-   * HTTP (fora de 2xx) é recusa e vem sem custo (`{}`, `false`), como no Jev. Pedido que nem saiu (a
-   * rede recusou a conexão) não tem `usage`.
+   * HTTP (fora de 2xx) é recusa e vem com `{}` e `false`, como no Jev. Pedido que nem saiu (a rede
+   * recusou a conexão) não tem `usage`.
+   *
+   * **A regra do `{}` com `false`:** só vale custo zero quando o fim é `error` com status fora de 2xx
+   * (a recusa). Em qualquer outro fim (`done`, `cancel`, ou `error` com status 200 ou `null`), `{}` é
+   * **custo não medido**, nunca zero: é o que sai, por exemplo, quando a Anthropic declara escrita em
+   * cache, que não tem preço na tabela. Quem soma o custo lê o `usage` junto com o fim do pedido.
    */
   usage(usage: Usage, estimated: boolean): void;
   /** O texto terminou. Não vem depois de `error` nem de `cancel`. */
@@ -108,7 +117,7 @@ export interface Brain {
   /** Um pedido com saída em JSON. Nunca lança; nunca registra a chave nem o corpo do provedor. */
   completeJson(apiKey: string, request: BrainJsonRequest, options: { fetch?: typeof fetch }): Promise<BrainJsonResult>;
   /**
-   * A conversa em streaming, com ferramentas (R5, fatia 2). Opcional: cérebro sem `chat` continua
+   * A conversa em streaming, com ferramentas (R5, fatias 2 e 2b). Opcional: cérebro sem `chat` continua
    * válido e só não aparece na lista do pipeline. Nunca lança; nunca registra a chave nem o corpo.
    */
   chat?(apiKey: string, request: BrainChatRequest, options: { fetch?: typeof fetch }): BrainChat;
