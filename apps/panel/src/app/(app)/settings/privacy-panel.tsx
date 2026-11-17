@@ -151,6 +151,10 @@ export function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): st
       return fill(t.history.organization_created, { name: typeof p.name === "string" ? p.name : "" });
     case "organization_renamed":
       return fill(t.history.organization_renamed, { from: typeof p.from === "string" ? p.from : "", to: typeof p.to === "string" ? p.to : "" });
+    case "organization_suspended":
+      return fill(t.history.organization_suspended, { reason: typeof p.reason === "string" ? p.reason : "", n: typeof p.canceled_tasks === "number" ? p.canceled_tasks : 0 });
+    case "organization_reactivated":
+      return fill(t.history.organization_reactivated, { n: typeof p.canceled_tasks === "number" ? p.canceled_tasks : 0 });
   }
 }
 

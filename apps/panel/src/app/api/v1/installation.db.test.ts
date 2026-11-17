@@ -1,12 +1,17 @@
-import { FOUNDING_ORGANIZATION_KEY, withOrg, withSystem } from "@deskvoice/core";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { FOUNDING_ORGANIZATION_KEY, addMembership, enqueueTask, withOrg, withSystem } from "@deskvoice/core";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearInstallationState as clear, openTestDbs } from "../../../../../../packages/core/test/helpers";
-import { NOW, call, createOrganization, createUser, startPanel } from "../../../../test/kit";
+import { NOW, call, createOrganization, createUser, openSession, startPanel } from "../../../../test/kit";
+import { GET as me } from "./auth/me/route";
+import { GET as myOrganizations } from "./auth/organizations/route";
+import { POST as switchOrganization } from "./auth/switch/route";
+import { GET as team } from "./team/route";
 import { DELETE as revokeAdmin } from "./installation/admins/[id]/route";
 import { GET as listAdmins, POST as grantAdmin } from "./installation/admins/route";
 import { GET as listEvents } from "./installation/events/route";
 import { POST as inviteOwner } from "./installation/organizations/[id]/invite/route";
 import { PATCH as renameOrganization } from "./installation/organizations/[id]/route";
+import { DELETE as reactivate, GET as suspensionPreview, POST as suspend } from "./installation/organizations/[id]/suspension/route";
 import { GET as listOrganizations, POST as createOrganizationRoute } from "./installation/organizations/route";
 
 const panel = startPanel();
@@ -61,6 +66,9 @@ describe("who does not administer the installation", () => {
         await call(grantAdmin, { method: "POST", cookie, body: { email: operator.email } }),
         await call(revokeAdmin, { method: "DELETE", cookie, params: { id: await accountOf(ownerOne.email) } }),
         await call(listEvents, { cookie }),
+        await call(suspensionPreview, { cookie, params: { id } }),
+        await call(suspend, { method: "POST", cookie, params: { id }, body: { reason: "Um motivo comprido o bastante" } }),
+        await call(reactivate, { method: "DELETE", cookie, params: { id } }),
         // Sem corpo válido: a recusa vem antes da leitura da entrada.
         await call(createOrganizationRoute, { method: "POST", cookie, body: {} }),
       ];
@@ -122,5 +130,119 @@ describe("the installation area", () => {
     expect(listed.admins.map((admin) => admin.email).sort()).toEqual([ownerOne.email, adminOne.email].sort());
     expect((await call(revokeAdmin, { method: "DELETE", cookie: adminOne.cookie, params: { id: ownerAccount } })).status).toBe(200);
     expect(refusal(await call(listAdmins, { cookie: ownerOne.cookie }))).toEqual([403, "forbidden"]);
+  });
+});
+
+describe("suspending and reactivating (fatia 4b)", () => {
+  const REASON = "Contrato encerrado em novembro";
+  const tasksOf = async (organizationId: string) =>
+    withSystem(panel.app, (q) => q.many<{ kind: string; status: string; last_error: string | null }>("select kind, status, last_error from tasks where organization_id = $1 order by created_at, kind", [organizationId]));
+  // A fila é uma só para o banco inteiro: a tarefa daqui não pode sobrar para a rotina de outro arquivo.
+  const queued: string[] = [];
+  const enqueue = async (organizationId: string, kind: string) => {
+    queued.push(organizationId);
+    return withOrg(panel.app, organizationId, (q) => enqueueTask(q, { kind, payload: {}, runAt: NOW }));
+  };
+  afterEach(async () => {
+    const organizations = queued.splice(0);
+    await withSystem(panel.app, (q) => q.exec("delete from tasks where organization_id = any($1::uuid[])", [organizations]));
+  });
+
+  /** A fundadora e o cliente A, criado pela tela; quem administra é o dono da fundadora, que entra também em A. */
+  async function twoClients() {
+    const { founding, ownerOne, operator } = await singleClient();
+    const before = await overview(ownerOne.cookie);
+    const created = await call(createOrganizationRoute, { method: "POST", cookie: ownerOne.cookie, body: { name: "Cliente A", shown: shown(before.creation), keep: [] } });
+    const { organizationId: a } = created.data as { organizationId: string };
+    const onlyA = await createUser(panel.app, a, "owner");
+    const adminInA = await withSystem(panel.app, async (q) => addMembership(q, { organizationId: a, accountId: await accountOf(ownerOne.email), name: "Ana em A", role: "owner" }));
+    return { founding, a, ownerOne, operator, onlyA, adminInA: await openSession(panel.app, a, adminInA) };
+  }
+
+  it("suspends A from the installation area: cancels A's cancelable tasks, keeps the guard routine, and A's people see only the suspension", async () => {
+    const { founding, a, ownerOne, operator, onlyA, adminInA } = await twoClients();
+    await enqueue(a, "deliver_notification");
+    await enqueue(a, "purge_transcripts");
+    await enqueue(founding, "deliver_notification");
+
+    // Quem não administra a instalação: 403, sem nada mudar.
+    expect(refusal(await call(suspend, { method: "POST", cookie: operator.cookie, params: { id: a }, body: { reason: REASON } }))).toEqual([403, "forbidden"]);
+    expect(refusal(await call(suspend, { method: "POST", cookie: onlyA.cookie, params: { id: a }, body: { reason: REASON } }))).toEqual([403, "forbidden"]);
+
+    // As recusas de quem administra.
+    expect(refusal(await call(suspend, { method: "POST", cookie: ownerOne.cookie, params: { id: a }, body: { reason: "curto" } }))).toEqual([400, "invalid_suspension_reason"]);
+    expect(refusal(await call(suspend, { method: "POST", cookie: ownerOne.cookie, params: { id: a }, body: { reason: "x".repeat(501) } }))).toEqual([400, "invalid_suspension_reason"]);
+    expect(refusal(await call(suspend, { method: "POST", cookie: ownerOne.cookie, params: { id: founding }, body: { reason: REASON } }))).toEqual([409, "suspend_own_organization"]);
+    expect(refusal(await call(suspend, { method: "POST", cookie: ownerOne.cookie, params: { id: "00000000-0000-4000-8000-000000000000" }, body: { reason: REASON } }))).toEqual([404, "not_found"]);
+    expect(refusal(await call(reactivate, { method: "DELETE", cookie: ownerOne.cookie, params: { id: a } }))).toEqual([409, "organization_not_suspended"]);
+
+    // A confirmação diz quantas serão canceladas; a lista diz qual é a da sessão.
+    expect((await call(suspensionPreview, { cookie: ownerOne.cookie, params: { id: a } })).data).toEqual({ cancelableTasks: 1 });
+    const listed = (await overview(ownerOne.cookie)).organizations as unknown as Array<{ id: string; current: boolean; suspendedAt: string | null }>;
+    expect(listed.find((organization) => organization.id === founding)?.current).toBe(true);
+    expect(listed.find((organization) => organization.id === a)?.current).toBe(false);
+
+    const suspended = await call(suspend, { method: "POST", cookie: ownerOne.cookie, params: { id: a }, body: { reason: `  ${REASON}  ` } });
+    expect([suspended.status, suspended.data]).toEqual([200, { ok: true, canceledTasks: 1 }]);
+    expect(refusal(await call(suspend, { method: "POST", cookie: ownerOne.cookie, params: { id: a }, body: { reason: REASON } }))).toEqual([409, "organization_already_suspended"]);
+    expect(await tasksOf(a)).toEqual([
+      { kind: "deliver_notification", status: "canceled", last_error: "organization_suspended" },
+      { kind: "purge_transcripts", status: "queued", last_error: null },
+    ]);
+    expect((await tasksOf(founding)).map((task) => task.status)).toEqual(["queued"]);
+
+    // Quem é só de A: as rotas da organização respondem 409; as da conta continuam.
+    expect(refusal(await call(team, { cookie: onlyA.cookie }))).toEqual([409, "organization_suspended"]);
+    expect(refusal(await call(me, { cookie: onlyA.cookie }))).toEqual([409, "organization_suspended"]);
+    expect((await call(myOrganizations, { cookie: onlyA.cookie })).data).toEqual([{ organizationId: a, organizationName: "Cliente A", current: true }]);
+    // Quem tem outra organização troca para ela.
+    expect((await call(switchOrganization, { method: "POST", cookie: adminInA, body: { organizationId: founding } })).status).toBe(200);
+    expect((await call(team, { cookie: adminInA })).status).toBe(200);
+
+    // As duas auditorias.
+    const events = (await call(listEvents, { cookie: ownerOne.cookie })).data as Array<{ kind: string; organizationId: string | null; actorEmail: string | null; payload: Record<string, unknown> }>;
+    expect(events.filter((event) => event.organizationId === a && event.kind === "organization_suspended")).toEqual([
+      expect.objectContaining({ actorEmail: ownerOne.email, payload: { reason: REASON, canceled_tasks: 1 } }),
+    ]);
+    const orgEvents = await withSystem(panel.app, (q) =>
+      q.many<{ kind: string; payload: Record<string, unknown> }>("select kind, payload from organization_events where organization_id = $1 and kind like 'organization_s%'", [a]),
+    );
+    expect(orgEvents).toEqual([{ kind: "organization_suspended", payload: { reason: REASON, canceled_tasks: 1 } }]);
+  });
+
+  it("who administers the installation, standing in suspended A, still reaches the area and reactivates A; nothing canceled comes back", async () => {
+    const { a, ownerOne, onlyA, adminInA } = await twoClients();
+    await enqueue(a, "follow_up");
+    expect((await call(suspend, { method: "POST", cookie: ownerOne.cookie, params: { id: a }, body: { reason: REASON } })).data).toEqual({ ok: true, canceledTasks: 1 });
+    // Entrou durante a suspensão: a reativação a cancela.
+    await enqueue(a, "deliver_webhook");
+
+    expect(refusal(await call(team, { cookie: adminInA }))).toEqual([409, "organization_suspended"]);
+    const listed = (await call(listOrganizations, { cookie: adminInA })).data as { organizations: Array<{ id: string; current: boolean; suspendedReason: string | null }> };
+    expect(listed.organizations.find((organization) => organization.id === a)).toMatchObject({ current: true, suspendedReason: REASON });
+
+    const reactivated = await call(reactivate, { method: "DELETE", cookie: adminInA, params: { id: a } });
+    expect([reactivated.status, reactivated.data]).toEqual([200, { ok: true, canceledTasks: 1 }]);
+    expect((await tasksOf(a)).map((task) => [task.kind, task.status])).toEqual([
+      ["follow_up", "canceled"],
+      ["deliver_webhook", "canceled"],
+    ]);
+    expect((await call(team, { cookie: onlyA.cookie })).status).toBe(200);
+    expect((await call(me, { cookie: onlyA.cookie })).status).toBe(200);
+
+    const events = (await call(listEvents, { cookie: ownerOne.cookie })).data as Array<{ kind: string; organizationId: string | null; payload: Record<string, unknown> }>;
+    expect(events.filter((event) => event.organizationId === a).map((event) => event.kind).slice(0, 2)).toEqual(["organization_reactivated", "organization_suspended"]);
+  });
+
+  it("refuses suspending the last active organization of the installation", async () => {
+    const { founding, a, ownerOne, adminInA } = await twoClients();
+    await call(suspend, { method: "POST", cookie: ownerOne.cookie, params: { id: a }, body: { reason: REASON } });
+    // O banco de teste é compartilhado: as outras organizações ativas ficam suspensas só aqui dentro.
+    const rows = await withSystem(panel.app, (q) => q.many<{ id: string }>("update organizations set suspended_at = $2 where suspended_at is null and id <> $1 returning id", [founding, NOW]));
+    try {
+      expect(refusal(await call(suspend, { method: "POST", cookie: adminInA, params: { id: founding }, body: { reason: REASON } }))).toEqual([409, "last_active_organization"]);
+    } finally {
+      await withSystem(panel.app, (q) => q.exec("update organizations set suspended_at = null where id = any($1::uuid[])", [rows.map((row) => row.id)]));
+    }
   });
 });

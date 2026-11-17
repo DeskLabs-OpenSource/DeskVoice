@@ -6,7 +6,7 @@ import { newPassword } from "../../../../../server/shapes";
 
 const body = z.object({ current: z.string().min(1).max(1000), new: newPassword });
 
-export const POST = handle({ body }, async ({ session, body, deps }) => {
+export const POST = handle({ body, allowSuspended: true }, async ({ session, body, deps }) => {
   const now = deps.clock.now();
   // Mesmo limite do login: uma sessão roubada não vira tentativa ilimitada de adivinhar a senha.
   const key = `password:${session.userId}`;

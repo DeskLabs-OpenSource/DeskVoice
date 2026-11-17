@@ -107,6 +107,8 @@ const privacy = {
     decision_model_provider_confirmed: "{who} confirmou que o filtro de fala manda o texto da ligação para {provider}.",
     organization_created: "A administração da instalação criou esta organização, com o nome \"{name}\".",
     organization_renamed: "A administração da instalação renomeou esta organização de \"{from}\" para \"{to}\".",
+    organization_suspended: "A administração da instalação suspendeu esta organização. Motivo: {reason}. Tarefas canceladas: {n}.",
+    organization_reactivated: "A administração da instalação reativou esta organização. Tarefas canceladas na reativação: {n}.",
     caller_notes_deleted: "{who} esqueceu o número terminado em {suffix}. Notas do agente apagadas: {notes}. Pendências fechadas apagadas: {followUps}.",
   },
   noteDeleted: "{who} apagou uma nota do agente.",

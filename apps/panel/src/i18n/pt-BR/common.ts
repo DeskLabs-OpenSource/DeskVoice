@@ -58,6 +58,16 @@ const common = {
   noNumber: { web: "Chamada pelo navegador", simulated: "Chamada simulada" },
   noAgent: "Sem agente",
   readOnly: "Seu papel é de operador: você acompanha chamadas e responde aprovações. Para alterar esta tela, fale com um dono ou administrador.",
+  /** A tela de quem está numa organização suspensa (seção 3.3 do desenho do R8): o nome, o motivo e mais nada. */
+  suspended: {
+    title: "Esta organização está suspensa",
+    lead: "A administração desta instalação suspendeu {name}. Enquanto isso, ela não atende, não faz ligações e nada dela aparece aqui.",
+    reason: "Motivo",
+    noReason: "Nenhum motivo registrado.",
+    others: "Você também está em outras organizações:",
+    open: "Entrar em {name}",
+    installation: "Abrir a administração da instalação",
+  },
   errors: {
     fallback: "Não conseguimos concluir essa ação. Tente de novo em instantes.",
     network: "O painel não respondeu. Confira sua conexão e tente de novo.",

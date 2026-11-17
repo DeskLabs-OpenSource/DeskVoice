@@ -1,4 +1,4 @@
-import { claimTask, completeTask, failTask, listenTasks, recordEvent, withOrg, withSystem, type ClaimedTask } from "@deskvoice/core";
+import { claimTask, completeTask, failTask, listenTasks, nextTaskRunAt, recordEvent, withOrg, withSystem, type ClaimedTask } from "@deskvoice/core";
 import type { Logger } from "./log";
 import type { Routine, RoutineDeps } from "./types";
 
@@ -86,9 +86,9 @@ export async function startRunner(options: RunnerOptions): Promise<Runner> {
           await execute(task);
         }
         // Tarefa agendada e tarefa reagendada depois de falha não avisam quando a hora chega:
-        // o runner dorme até a mais próxima.
-        const next = await withSystem(db, (q) => q.one<{ run_at: Date | null }>("select min(run_at) as run_at from tasks where status = 'queued'"));
-        arm(next?.run_at ? next.run_at.getTime() - clock.now().getTime() : undefined);
+        // o runner dorme até a mais próxima que ele pode pegar (a de organização suspensa espera).
+        const next = await nextTaskRunAt(db);
+        arm(next ? next.getTime() - clock.now().getTime() : undefined);
       } catch (cause) {
         log("error", "queue pass failed; will retry", { error: messageOf(cause) });
         arm(RETRY_AFTER_ERROR_MS);
@@ -114,9 +114,11 @@ export async function startRunner(options: RunnerOptions): Promise<Runner> {
   );
   if (recovered > 0) log("info", "stale running tasks returned to the queue", { count: recovered });
 
-  // Faxina barata, uma vez por partida: tarefa concluída há mais de 7 dias não serve mais a
-  // ninguém. A idade é medida pelo `run_at`, que é o que a tabela guarda.
-  const purged = await withSystem(db, (q) => q.exec(`delete from tasks where status = 'done' and run_at < $1::timestamptz - make_interval(days => $2)`, [clock.now(), DONE_RETENTION_DAYS]));
+  // Faxina barata, uma vez por partida: tarefa concluída ou cancelada há mais de 7 dias não serve
+  // mais a ninguém. A idade é medida pelo `run_at`, que é o que a tabela guarda.
+  const purged = await withSystem(db, (q) =>
+    q.exec(`delete from tasks where status in ('done', 'canceled') and run_at < $1::timestamptz - make_interval(days => $2)`, [clock.now(), DONE_RETENTION_DAYS]),
+  );
   if (purged > 0) log("info", "old finished tasks deleted", { count: purged });
 
   const stopListening = await listenTasks(db, wake, options.onFatal);

@@ -8,7 +8,7 @@ import { handlePublic, notFound, requireSession } from "../../../../../server/co
  * transação da organização enquanto a do sistema roda.
  */
 export const GET = handlePublic({}, async ({ request, deps }) => {
-  const session = await requireSession(request, deps);
+  const session = await requireSession(request, deps, { allowSuspended: true });
   const accountId = await accountOfMember(deps.db, session.userId);
   if (!accountId) throw notFound();
   const memberships = await listMemberships(deps.db, accountId);
