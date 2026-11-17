@@ -6,6 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createOrganization, openTestDbs } from "../test/helpers";
 import {
   accountOfMember,
+  addMembership,
   changeMemberPassword,
   checkMemberPassword,
   createAccount,
@@ -14,7 +15,9 @@ import {
   findLoginAccount,
   grantInstallationAdmin,
   isInstallationAdmin,
+  listMemberships,
   resetAccountPassword,
+  switchOrganization,
 } from "./accounts";
 import { createDb } from "./db";
 import { ADMINS_EXPLICIT_KEY, FOUNDING_ORGANIZATION_KEY, recordFoundingOrganization } from "./installation";
@@ -251,6 +254,146 @@ describe("deleteAccountIfOrphan (removing the last link)", () => {
       { kind: "installation_admin_granted", source: "command" },
       { kind: "installation_admin_revoked", source: "member_removed" },
     ]);
+  });
+});
+
+// Fatia 3 do R8: a mesma conta em várias organizações.
+describe("one account in several organizations (fatia 3)", () => {
+  const link = (organizationId: string, accountId: string, role: TeamRole = "operator") =>
+    withSystem(app, (q) => addMembership(q, { organizationId, accountId, name: `Vínculo ${role}`, role }));
+  const openSession = async (userId: string): Promise<string> => {
+    const id = randomUUID();
+    await withSystem(app, (q) =>
+      q.exec("insert into sessions (id, organization_id, user_id, account_id, token_hash, expires_at) select $1, organization_id, id, account_id, $3, $4 from users where id = $2", [
+        id,
+        userId,
+        randomUUID(),
+        new Date(now.getTime() + 86_400_000),
+      ]),
+    );
+    return id;
+  };
+  const sessionRow = async (id: string) => (await owner.pool.query("select organization_id, user_id, account_id from sessions where id = $1", [id])).rows[0];
+  const lastOrganization = async (accountId: string) => (await owner.pool.query("select last_organization_id from accounts where id = $1", [accountId])).rows[0]?.last_organization_id;
+
+  it("the second link copies the e-mail of the account, and one account has at most one link per organization", async () => {
+    const a = await createOrganization(app, "Vínculo A");
+    const b = await createOrganization(app, "Vínculo B");
+    const person = await member(a, "owner");
+    await link(b, person.accountId);
+    const rows = await owner.pool.query("select organization_id, email::text as email from users where account_id = $1 order by organization_id", [person.accountId]);
+    expect(rows.rows.map((row) => row.email)).toEqual([person.email, person.email]);
+    await expect(link(b, person.accountId)).rejects.toMatchObject({ code: "23505" });
+  });
+
+  it("lists only the active member links: never a disabled one, a support one, or one of another account", async () => {
+    const a = await createOrganization(app, "Lista A");
+    const b = await createOrganization(app, "Lista B");
+    const c = await createOrganization(app, "Lista C");
+    const d = await createOrganization(app, "Lista D");
+    const person = await member(a, "owner");
+    await link(b, person.accountId, "admin");
+    const disabled = await link(c, person.accountId);
+    await withOrg(app, c, (q) => q.exec("update users set disabled_at = $2 where id = $1", [disabled, now]));
+    await withOrg(app, d, (q) =>
+      q.exec("insert into users (organization_id, account_id, kind, email, name, role) values ($1, $2, 'support', $3, 'Suporte', 'admin')", [d, person.accountId, person.email]),
+    );
+    await member(d, "owner");
+
+    expect(await listMemberships(app, person.accountId)).toEqual([
+      { organizationId: a, organizationName: "Lista A" },
+      { organizationId: b, organizationName: "Lista B" },
+    ]);
+    expect(await listMemberships(app, randomUUID())).toEqual([]);
+  });
+
+  it("switches the same session row to another organization of the account, and remembers it for the next sign-in", async () => {
+    const a = await createOrganization(app, "Troca A");
+    const b = await createOrganization(app, "Troca B");
+    const person = await member(a, "owner");
+    const inB = await link(b, person.accountId, "operator");
+    const session = await openSession(person.userId);
+
+    expect(await switchOrganization(app, session, person.accountId, b)).toBe(true);
+    expect(await sessionRow(session)).toEqual({ organization_id: b, user_id: inB, account_id: person.accountId });
+    expect(await lastOrganization(person.accountId)).toBe(b);
+    expect((await findLoginAccount(app, person.email))?.member).toMatchObject({ id: inB, organizationId: b, role: "operator" });
+
+    expect(await switchOrganization(app, session, person.accountId, a)).toBe(true);
+    expect(await sessionRow(session)).toEqual({ organization_id: a, user_id: person.userId, account_id: person.accountId });
+  });
+
+  it("answers the same false, changing nothing, for an organization without a link, a disabled or support link, one that does not exist, and someone else's session", async () => {
+    const a = await createOrganization(app, "Recusa A");
+    const none = await createOrganization(app, "Recusa sem");
+    const disabledOrg = await createOrganization(app, "Recusa desativado");
+    const supportOrg = await createOrganization(app, "Recusa suporte");
+    const person = await member(a, "owner");
+    await member(none, "owner");
+    const disabled = await link(disabledOrg, person.accountId);
+    await withOrg(app, disabledOrg, (q) => q.exec("update users set disabled_at = $2 where id = $1", [disabled, now]));
+    await withOrg(app, supportOrg, (q) =>
+      q.exec("insert into users (organization_id, account_id, kind, email, name, role) values ($1, $2, 'support', $3, 'Suporte', 'admin')", [supportOrg, person.accountId, person.email]),
+    );
+    const session = await openSession(person.userId);
+    const before = await sessionRow(session);
+
+    for (const target of [none, disabledOrg, supportOrg, randomUUID()]) expect(await switchOrganization(app, session, person.accountId, target)).toBe(false);
+    // A sessão de outra conta não muda, nem para uma organização em que a conta tem vínculo.
+    const stranger = await member(a, "operator");
+    const strangerSession = await openSession(stranger.userId);
+    const target = await createOrganization(app, "Recusa alheia");
+    await link(target, person.accountId);
+    expect(await switchOrganization(app, strangerSession, person.accountId, target)).toBe(false);
+
+    expect(await sessionRow(session)).toEqual(before);
+    expect(await sessionRow(strangerSession)).toEqual({ organization_id: a, user_id: stranger.userId, account_id: stranger.accountId });
+    expect(await lastOrganization(person.accountId)).toBeNull();
+  });
+
+  it("sign-in goes back to the last organization used, and to the oldest active link when that one is disabled", async () => {
+    const oldest = await createOrganization(app, "Login mais antiga");
+    const middle = await createOrganization(app, "Login do meio");
+    const last = await createOrganization(app, "Login última");
+    const person = await member(oldest, "owner");
+    const inMiddle = await link(middle, person.accountId);
+    const inLast = await link(last, person.accountId);
+    expect((await findLoginAccount(app, person.email))?.member).toMatchObject({ id: person.userId, organizationId: oldest });
+
+    const session = await openSession(person.userId);
+    expect(await switchOrganization(app, session, person.accountId, last)).toBe(true);
+    expect((await findLoginAccount(app, person.email))?.member).toMatchObject({ id: inLast, organizationId: last });
+
+    await withOrg(app, last, (q) => q.exec("update users set disabled_at = $2 where id = $1", [inLast, now]));
+    expect((await findLoginAccount(app, person.email))?.member).toMatchObject({ id: person.userId, organizationId: oldest });
+    expect(inMiddle).not.toBe(person.userId);
+  });
+
+  it("changing the password closes the sessions of the account in every organization but the one that changed it", async () => {
+    const a = await createOrganization(app, "Senha A");
+    const b = await createOrganization(app, "Senha B");
+    const person = await member(a, "owner", "antiga");
+    const inB = await link(b, person.accountId);
+    const kept = await openSession(inB);
+    await openSession(inB);
+    await openSession(person.userId);
+    const switched = await openSession(person.userId);
+    expect(await switchOrganization(app, switched, person.accountId, b)).toBe(true);
+
+    expect(await changeMemberPassword(app, inB, "nova", kept)).toBe(3);
+    const left = await owner.pool.query("select id from sessions where account_id = $1", [person.accountId]);
+    expect(left.rows.map((row) => row.id)).toEqual([kept]);
+    expect(await checkMemberPassword(app, person.userId, "nova", textCompare)).toBe(true);
+  });
+
+  it("removing the link in one organization keeps the account that has another", async () => {
+    const a = await createOrganization(app, "Remove A");
+    const b = await createOrganization(app, "Remove B");
+    const person = await member(a, "operator", "dela");
+    await link(b, person.accountId);
+    await withOrg(app, a, (q) => q.exec("delete from users where id = $1", [person.userId]));
+    expect(await deleteAccountIfOrphan(app, person.accountId, now)).toBe(false);
+    expect(await findLoginAccount(app, person.email)).toMatchObject({ accountId: person.accountId, passwordHash: "dela", member: { organizationId: b } });
   });
 });
 

@@ -44,6 +44,28 @@ export interface Agent {
   dropFollowUp?: DropFollowUp;
   /** O texto do WhatsApp para quem ligou; nulo vale o padrão. */
   dropFollowUpMessage?: string | null;
+  /** O analista ao vivo do agente (R6); nulo é "Nenhum", o de fábrica. */
+  analystId?: string | null;
+}
+
+/** Uma objeção do analista: a `key` é o que os eventos guardam; o rótulo e a orientação são do operador. */
+export interface AnalystObjection {
+  key: string;
+  label: string;
+  guidance: string;
+}
+
+/** O analista ao vivo (desenho R6, seção 3.1), como `/analysts` devolve. */
+export interface Analyst {
+  id: string;
+  name: string;
+  decisionModel: string;
+  temperature: boolean;
+  objections: AnalystObjection[];
+  providerConfirmedBy: string | null;
+  /** O nome de hoje de quem confirmou o envio ao fornecedor; nulo se a pessoa saiu da equipe. */
+  providerConfirmedByName: string | null;
+  providerConfirmedAt: string | null;
 }
 
 export type ListeningEnvironment = "normal" | "noisy";
@@ -296,7 +318,8 @@ export interface Costs {
   estimatedCount: number;
   byDay: Array<{ day: string; costCents: number; billedSeconds: number; unmeasuredCount: number; estimatedCount: number }>;
   byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number; unmeasuredCount: number; estimatedCount: number }>;
-  byEngine: Array<{ engine: string; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
+  /** `source` é `analyst` na linha do analista ao vivo (R6), separada do mesmo modelo usado pelo filtro da fala. */
+  byEngine: Array<{ engine: string; source: "analyst" | null; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
 }
 
 export interface Setting<T> {

@@ -1,6 +1,6 @@
 import { ApiError, handle } from "../../../../../server/context";
 import { centsOf, ESTIMATED_COUNT, LEDGER_AGENT, UNMEASURED_COUNT } from "../../../../../server/costs";
-import { listEngines } from "../../../../../server/pieces";
+import { listDecisionModels, listEngines } from "../../../../../server/pieces";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_DAYS = 30;
@@ -46,8 +46,11 @@ export const GET = handle({}, async ({ q, url, deps }) => {
   // atendeu, como antes. A ligação conta no dia em que terminou, no fuso da organização, como o resto
   // do quadro: uma ligação com linhas do extrato em dois dias (o desfecho classificado depois da
   // meia-noite) não aparece inteira nos dois períodos.
-  const byEngine = await q.many<{ engine: string; microcents: string; seconds: number; unmeasured: number; estimated: number }>(
-    `with scoped as (select l.engine, l.call_id, l.cost_microcents, l.cost_measured, l.cost_estimated ${scope}),
+  // O analista ao vivo (R6) grava as linhas dele com `source = 'analyst'` e o modelo de decisão em
+  // `engine`, o mesmo do filtro da fala: a linha do analista sai separada pelo `source`, e não tem
+  // minutos (o modelo de decisão não atende trecho nenhum).
+  const byEngine = await q.many<{ engine: string; source: string | null; microcents: string; seconds: number; unmeasured: number; estimated: number }>(
+    `with scoped as (select l.engine, l.source, l.call_id, l.cost_microcents, l.cost_measured, l.cost_estimated ${scope}),
           ended as (
             select c.id, c.engine, c.answered_at, c.ended_at,
                    exists (select 1 from call_events h where h.call_id = c.id and h.kind = 'agent_handoff' and not (h.payload ? 'engine')) as untold
@@ -65,13 +68,16 @@ export const GET = handle({}, async ({ q, url, deps }) => {
             select engine, starts_at, coalesce(lead(starts_at) over (partition by call_id order by seq), ended_at) as ends_at from legs),
           answered as (
             select engine, coalesce(sum(extract(epoch from (ends_at - starts_at))), 0)::int as seconds from timed group by 1)
-     select s.engine, coalesce(sum(s.cost_microcents), 0)::text as microcents, coalesce(a.seconds, 0)::int as seconds,
+     select s.engine, s.source, coalesce(sum(s.cost_microcents), 0)::text as microcents, coalesce(a.seconds, 0)::int as seconds,
             count(*) filter (where not s.cost_measured)::int as unmeasured, count(*) filter (where s.cost_estimated)::int as estimated
-       from scoped s left join answered a on a.engine = s.engine
-      group by s.engine, a.seconds order by coalesce(sum(s.cost_microcents), 0) desc`,
+       from scoped s left join answered a on a.engine = s.engine and s.source is null
+      group by s.engine, s.source, a.seconds order by coalesce(sum(s.cost_microcents), 0) desc`,
     range,
   );
   const engines = new Map((await listEngines()).map((engine) => [engine.id, engine]));
+  // O filtro da fala e o analista gravam o modelo de decisão em `engine`: o nome e o preço vêm dele.
+  const deciders = new Map((await listDecisionModels()).map((model) => [model.id, model]));
+  const pieceOf = (id: string) => engines.get(id) ?? deciders.get(id);
   return {
     from,
     to,
@@ -89,13 +95,15 @@ export const GET = handle({}, async ({ q, url, deps }) => {
     byAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents), calls: row.calls, unmeasuredCount: row.unmeasured, estimatedCount: row.estimated })),
     byEngine: byEngine.map((row) => ({
       engine: row.engine,
+      // `analyst` nas linhas do analista ao vivo; nulo no resto (voz, filtro, classificação).
+      source: row.source === "analyst" ? ("analyst" as const) : null,
       costCents: centsOf(row.microcents),
       callSeconds: row.seconds,
       unmeasuredCount: row.unmeasured,
       estimatedCount: row.estimated,
-      label: engines.get(row.engine)?.label ?? row.engine,
-      priceCheckedOn: engines.get(row.engine)?.pricing.checkedOn ?? null,
-      priceSource: engines.get(row.engine)?.pricing.source ?? null,
+      label: pieceOf(row.engine)?.label ?? row.engine,
+      priceCheckedOn: pieceOf(row.engine)?.pricing.checkedOn ?? null,
+      priceSource: pieceOf(row.engine)?.pricing.source ?? null,
     })),
   };
 });

@@ -10,6 +10,9 @@ const costs = {
   byAgent: "Por agente",
   byEngine: "Por motor de voz",
   calls: "Chamadas: {n}",
+  /** A linha do analista ao vivo. `{model}` é o nome do modelo de decisão. */
+  analystLine: "Analista · {model}",
+  analystNote: "Pedidos do analista ao vivo, a cada fala de quem ligou",
   minutes: "{n} min",
   priceChecked: "Preço conferido em {date}",
   priceSource: "Fonte do preço",

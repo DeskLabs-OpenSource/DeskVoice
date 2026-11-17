@@ -23,6 +23,13 @@ const agents = {
   engine: "Motor de voz",
   engineNoKey: "Este motor ainda não tem chave cadastrada. Sem ela o agente não atende: a chamada é recusada com um aviso, em vez de ficar muda.",
   engineKeyLink: "Cadastrar a chave",
+  analyst: "Analista",
+  analystLead: "Um analista lê a conversa enquanto ela acontece, dá a temperatura e passa ao agente a orientação que você escreveu para cada objeção.",
+  analystHint: "Um agente tem um analista ou nenhum.",
+  analystNone: "Nenhum",
+  /** `{engine}` é o nome do motor. */
+  analystEngineUnsupported: "{engine}: este motor ainda não recebe orientação: o analista mede, mas não orienta.",
+  analystLink: "Cadastrar e editar analistas",
   engineSimulated: "O motor simulado segue um roteiro fixo, sem custo. Serve para demonstração e teste.",
   voiceId: "Voz",
   voiceHint: "As vozes do motor escolhido. Teste numa ligação: cada voz soa diferente em português.",

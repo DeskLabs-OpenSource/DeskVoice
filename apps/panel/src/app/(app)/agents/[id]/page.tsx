@@ -18,7 +18,8 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatPhone } from "../../../../ui/format";
 import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
-import type { Agent, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
+import { GUIDED_ENGINES } from "../../settings/analysts/rules";
+import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
 
 interface Draft {
   name: string;
@@ -42,9 +43,11 @@ interface Draft {
   dropFollowUp: DropFollowUp;
   /** O texto do WhatsApp para quem ligou; vazio vale o padrão. */
   dropFollowUpMessage: string;
+  /** O analista ao vivo; vazio é "Nenhum", o de fábrica. */
+  analystId: string;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "" };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "" };
 
 /** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
 const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp"];
@@ -70,6 +73,7 @@ const toDraft = (agent: Agent): Draft => ({
   handoffTargets: agent.agentHandoffTargets ?? [],
   dropFollowUp: agent.dropFollowUp ?? "off",
   dropFollowUpMessage: agent.dropFollowUpMessage ?? "",
+  analystId: agent.analystId ?? "",
 });
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -86,6 +90,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const owners = useApi<Person[]>("/follow-ups/owners");
   // Os outros agentes da organização, para "Pode passar a ligação para". A lista vem da sessão (`withOrg`).
   const team = useApi<Agent[]>("/agents");
+  const analysts = useApi<Analyst[]>("/analysts");
   const defaultEngine = useApi<Setting<string>>(isNew ? "/settings/engine.default" : null);
   // O pré-requisito da mensagem no WhatsApp para quem ligou: conector e confiança no número exibido.
   const whatsAppConnector = useApi<Setting<unknown>>("/settings/whatsapp.connector");
@@ -174,6 +179,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         // que não mudou também não vai: a rota confere o pré-requisito de quem escolhe o `whatsapp`.
         ...(DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) && (isNew || draft.dropFollowUp !== savedDropFollowUp) && { dropFollowUp: draft.dropFollowUp }),
         dropFollowUpMessage: draft.dropFollowUpMessage,
+        analystId: draft.analystId === "" ? null : draft.analystId,
       };
       const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       setSavedEnvironment(saved.listeningEnvironment ?? "normal");
@@ -301,6 +307,30 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </div>
           ) : null}
           {engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
+        </Panel>
+
+        <Panel title={t.analyst} description={t.analystLead}>
+          <Field label={t.analyst} hint={t.analystHint}>
+            <Select value={draft.analystId} onChange={(event) => set("analystId", event.target.value)} className="max-w-sm">
+              <option value="">{t.analystNone}</option>
+              {analysts.data?.map((analyst) => (
+                <option key={analyst.id} value={analyst.id}>
+                  {analyst.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {/* O motor sem `guide` (o Gemini Live, desenho R6, seção 3.3): o analista lê, mas a orientação não chega. */}
+          {draft.analystId !== "" && draft.engine !== "" && !GUIDED_ENGINES.includes(draft.engine) ? (
+            <div className="mt-4 max-w-md">
+              <Notice tone="warn">
+                <p>{fill(t.analystEngineUnsupported, { engine: engine?.label ?? draft.engine })}</p>
+              </Notice>
+            </div>
+          ) : null}
+          <Link href="/settings/analysts" className="mt-4 inline-block text-[0.87rem] font-bold text-muted underline-offset-4 hover:text-ink hover:underline">
+            {t.analystLink}
+          </Link>
         </Panel>
 
         <Panel title={t.tools} description={t.toolsLead}>

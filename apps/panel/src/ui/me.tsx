@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import { useApi } from "./api";
 import type { Me } from "./types";
 
 export const MeContext = createContext<Me | null>(null);
@@ -24,4 +25,21 @@ export const useInstallationAdmin = (): boolean => useContext(MeContext)?.instal
 export function updatePath(me: Me | null): string | null {
   if (!me?.installationExplicit) return "/settings/system";
   return me.installationAdmin ? "/installation/update" : null;
+}
+
+/** Uma organização em que a conta tem vínculo ativo (`GET /auth/organizations`). */
+export interface Membership {
+  organizationId: string;
+  organizationName: string;
+  current: boolean;
+}
+
+/**
+ * As organizações para o seletor do topo, ou `null` quando ele não aparece: com um vínculo ativo só
+ * (o caso de quase todo mundo), enquanto a lista carrega e se ela falhar. Quem tem um cliente só
+ * não vê nada novo.
+ */
+export function useOrganizationChoices(): Membership[] | null {
+  const { data } = useApi<Membership[]>("/auth/organizations");
+  return data && data.length > 1 ? data : null;
 }
