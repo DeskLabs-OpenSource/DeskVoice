@@ -147,7 +147,12 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
    - O endpoint só ganha `deny`/`permit` com `inbound_filter = true` **e** o conjunto do contrato
      8 permitindo. Com `false`, sai como hoje, sem `deny` e sem `permit`.
    - A linha por IP liga na hora e não tem botão: ela já só era reconhecida pelo `host` e pelos
-     extras, que são o mesmo conjunto do `permit`, e não perde nada.
+     extras, que são o mesmo conjunto do `permit`, e não perde nada. **A coluna só vale para a
+     linha por registro.** O filtro efetivo é `auth_mode = 'ip'` **ou** `inbound_filter = true`:
+     o render, o plano e a tela leem esse valor, nunca a coluna crua. Assim a linha por registro
+     com o filtro desligado que passa a IP filtra na hora, e a linha por IP que volta a registro
+     reencontra o valor que a coluna tinha (`true`, se ninguém desligou). (Achado do Verificador
+     no `563e5f5`: sem essa regra, a linha ficava por IP, sem filtro e sem botão.)
    - A linha por registro com `inbound_filter = false` mostra, no bloco "Aceita ligações de", o
      aviso "Filtro desligado nesta linha: a central aceita a ligação dela de qualquer endereço.
      Confira os endereços acima e ligue o filtro", e o botão **Ligar o filtro**. Com o filtro
@@ -156,13 +161,15 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
      a linha funciona; o `warn` continua só para os contratos 8 e 9. Textos nos 3 idiomas.
    - O botão é um `PATCH` da linha que só grava `inbound_filter`, só para linha por registro, só
      da organização de quem pede (a mesma checagem das outras gravações da linha). Trocar o `host`
-     ou o modo não mexe em `inbound_filter`.
+     ou o modo não grava em `inbound_filter`; a troca para IP liga o filtro pela regra acima, não
+     pela coluna.
    - O fragmento diz que nenhuma linha que já existe é cortada: as por IP passam a filtrar sem
      perder nada, e as por registro ficam sem filtro até alguém ligar na tela.
    - Testes: a migration desliga a linha por registro antiga e mantém a por IP ligada; a linha por
      registro criada depois nasce ligada; com o filtro desligado e o conjunto cheio, o endpoint
      sai sem `deny`; o botão de uma organização não muda a linha de outra; o botão recusa a linha
-     por IP; o e2e mede `200` na linha por registro desligada e `401` (`Not match Endpoint ACL`)
+     por IP; a linha por registro desligada que passa a IP sai com `deny`/`permit` (no render e em
+     `test:db`, desligando **antes** de trocar o modo); o e2e mede `200` na linha por registro desligada e `401` (`Not match Endpoint ACL`)
      depois de ligar.
    - **Medida antes da versão que levar o PR** (condição da sessão revisora, vale em qualquer
      opção): instalar a última versão publicada, cadastrar uma linha por registro (o registrar
