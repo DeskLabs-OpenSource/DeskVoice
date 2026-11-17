@@ -32,8 +32,10 @@ lo ven.
    TypeSafe." Lo que va, en detalle, está en "Qué sale del servidor", justo abajo.
 4. Haz clic en **Guardar**. La pantalla pasa a mostrar quién confirmó el envío y cuándo.
 
-Sin la confirmación, Jev no se guarda. Apagar (elegir **Ninguno**) borra la confirmación, y volver a
-encender pide otra.
+Sin la confirmación, Jev no se guarda. Cada confirmación nueva deja un recibo en **Configuración →
+Privacidad**, en el registro: quién confirmó, cuándo y a qué proveedor va el texto. Apagar (elegir
+**Ninguno**) o cambiar de modelo quita la confirmación vigente, y volver a encender pide otra; el
+recibo queda en el registro.
 
 ## Qué sale del servidor
 

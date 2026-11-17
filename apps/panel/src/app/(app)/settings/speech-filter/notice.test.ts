@@ -31,7 +31,7 @@ describe("o aviso de para onde vai o texto", () => {
 
   it.each(DICTIONARIES)("do Jev, diz as três coisas da página da TypeSafe e cita a página com a data (%s)", (locale, t) => {
     const notice = noticeOf(t, jev, locale);
-    // Guarda enquanto achar necessário (sem prazo), apaga a pedido, e é hospedado nos EUA. Só isso.
+    // Guarda enquanto for razoavelmente necessário (sem prazo), apaga a pedido, e é hospedado nos EUA. Só isso.
     expect(notice.lines).toEqual([...(t.retention.typesafe ?? []), t.location.country.replace("{provider}", "TypeSafe").replace("{country}", t.countries.US ?? "")]);
     expect(notice.lines).toHaveLength(3);
     // A página da retenção é a mesma do lugar: uma fonte só, com a data dela e a da leitura.

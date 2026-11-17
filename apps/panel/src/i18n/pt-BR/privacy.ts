@@ -88,7 +88,7 @@ const privacy = {
   forgetConfirmYes: "Esquecer {phone}",
   forgetDone: "{phone} foi esquecido. Notas do agente apagadas: {notes}. Pendências fechadas apagadas: {followUps}.",
   historyTitle: "Registro",
-  historyLead: "Quem mudou o prazo ou a gravação, o que saiu pelo prazo, quem exportou os dados de qual telefone, quem apagou dados a pedido de quem ligou, o que aconteceu com os links de gravação para quem ligou e quem confirmou que um analista manda o texto da ligação a um fornecedor. Os 50 mais recentes.",
+  historyLead: "Quem mudou o prazo ou a gravação, o que saiu pelo prazo, quem exportou os dados de qual telefone, quem apagou dados a pedido de quem ligou, o que aconteceu com os links de gravação para quem ligou e quem confirmou que um analista ou o filtro de fala manda o texto da ligação a um fornecedor. Os 50 mais recentes.",
   historyEmpty: "Nada registrado ainda.",
   history: {
     transcript_retention_changed: "{who} mudou o prazo de guarda de {from} para {to}.",
@@ -104,6 +104,7 @@ const privacy = {
     caller_notes_retention_changed: "{who} mudou o prazo da memória de {from} para {to}.",
     caller_memory_changed: "{who} deixou a memória do número no agente {state}.",
     analyst_provider_confirmed: "{who} confirmou que o analista {analyst} manda o texto do que a pessoa fala na ligação para {provider}.",
+    decision_model_provider_confirmed: "{who} confirmou que o filtro de fala manda o texto da ligação para {provider}.",
     caller_notes_deleted: "{who} esqueceu o número terminado em {suffix}. Notas do agente apagadas: {notes}. Pendências fechadas apagadas: {followUps}.",
   },
   noteDeleted: "{who} apagou uma nota do agente.",

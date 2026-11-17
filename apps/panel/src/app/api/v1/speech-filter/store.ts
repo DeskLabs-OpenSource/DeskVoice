@@ -1,4 +1,4 @@
-import { decryptSecret, encryptSecret, type OrgQuery } from "@deskvoice/core";
+import { decryptSecret, encryptSecret, recordOrgEvent, type OrgQuery } from "@deskvoice/core";
 // Pelo caminho dos tipos: o índice do pacote carrega a descoberta por pasta, que não existe no pacote do Next.
 import { DECISION_MODEL_SETTING, decisionModelKeySetting, decisionModelOf, type DecisionModel, type ProcessingLocation } from "@deskvoice/voice-engine/types";
 import { z } from "zod";
@@ -125,8 +125,13 @@ export async function saveSpeechFilter(q: OrgQuery, session: Session, now: Date,
         `${model.label} sends the text of what the caller says to "${model.provider}", outside this server. Confirm it with confirmedProvider: "${model.provider}".`,
       );
     }
-    if (body.confirmedProvider !== undefined) {
+    // Só a confirmação nova é gravada: salvar de novo o mesmo modelo já confirmado mantém quem
+    // confirmou e quando, e não deixa outro recibo.
+    if (body.confirmedProvider !== undefined && !confirmed) {
       await upsert(q, DECISION_MODEL_CONFIRMATION_SETTING, { model: model.id, provider: model.provider, userId: session.userId, name: session.name, at: now.toISOString() }, false, now);
+      // O recibo, na mesma transação, só de acréscimo e com o nome do momento. A `settings` acima é a
+      // trava de agora e sai ao desligar ou trocar de modelo; o recibo fica no Registro da privacidade.
+      await recordOrgEvent(q, "decision_model_provider_confirmed", { decisionModel: model.id, provider: model.provider, confirmedByName: session.name }, now, session.userId);
     }
   } else {
     await q.exec("delete from settings where key = $1", [DECISION_MODEL_CONFIRMATION_SETTING]);

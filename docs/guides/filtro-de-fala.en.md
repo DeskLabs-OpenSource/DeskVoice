@@ -32,8 +32,10 @@ In **Settings → Speech filter**. Only an owner or admin changes it; the other 
    TypeSafe." What goes, in detail, is under "What leaves the server", just below.
 4. Click **Save**. The screen then shows who confirmed the sending and when.
 
-Without the confirmation, Jev is not saved. Turning it off (choosing **None**) deletes the
-confirmation, and turning it on again asks for a new one.
+Without the confirmation, Jev is not saved. Each new confirmation leaves a receipt in **Settings →
+Privacy**, in the log: who confirmed, when, and which provider the text goes to. Turning it off
+(choosing **None**) or switching models removes the current confirmation, and turning it on again
+asks for a new one; the receipt stays in the log.
 
 ## What leaves the server
 

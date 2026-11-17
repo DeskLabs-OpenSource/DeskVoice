@@ -30,8 +30,10 @@ Em **Configurações → Filtro de fala**. Só dono ou administrador muda; os ou
    TypeSafe." O que vai, em detalhe, está em "O que sai do servidor", logo abaixo.
 4. Clique em **Salvar**. A tela passa a mostrar quem confirmou o envio e quando.
 
-Sem a confirmação, o Jev não salva. Desligar (escolher **Nenhum**) apaga a confirmação, e ligar de
-novo pede outra.
+Sem a confirmação, o Jev não salva. Cada confirmação nova deixa um recibo em **Configurações →
+Privacidade**, no registro: quem confirmou, quando e para qual fornecedor vai o texto. Desligar
+(escolher **Nenhum**) ou trocar de modelo tira a confirmação vigente, e ligar de novo pede outra; o
+recibo fica no registro.
 
 ## O que sai do servidor
 

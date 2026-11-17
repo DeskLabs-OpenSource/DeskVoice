@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import commonEn from "../../../i18n/en/common";
 import en from "../../../i18n/en/privacy";
 import commonEs from "../../../i18n/es/common";
+import speechFilterEn from "../../../i18n/en/speech-filter";
+import speechFilterEs from "../../../i18n/es/speech-filter";
+import speechFilterPtBR from "../../../i18n/pt-BR/speech-filter";
 import es from "../../../i18n/es/privacy";
 import { fill, type Locale } from "../../../i18n/locales";
 import commonPtBR from "../../../i18n/pt-BR/common";
@@ -18,7 +21,7 @@ import { forgetTarget } from "../../../ui/forget-target";
 import { notesRetentionNeedsConfirm, notesRetentionProblem } from "../../../ui/notes-retention";
 
 type Kind = keyof PrivacyDictionary["history"];
-interface Entry {
+export interface Entry {
   id: string;
   at: string;
   kind: Kind;
@@ -76,8 +79,15 @@ const hasErasable = (counts: ErasureCounts): boolean => counts.calls + counts.fo
 const countsLine = ({ calls, events, followUps, notifications, approvals, notes, recordings }: ErasureCounts, t: PrivacyDictionary): string =>
   fill(t.erasureCounts, { calls, events, followUps, notifications, approvals, notes, recordings });
 
+/**
+ * O nome do fornecedor como a tela o escreve (o mesmo do aviso do filtro e do analista), e nunca o id
+ * gravado no recibo: "TypeSafe", e não "typesafe". Fornecedor sem nome conhecido sai como foi gravado.
+ */
+const PROVIDER_NAMES: Record<Locale, Record<string, string>> = { "pt-BR": speechFilterPtBR.providers, en: speechFilterEn.providers, es: speechFilterEs.providers };
+export const providerLabel = (provider: string, locale: Locale): string => PROVIDER_NAMES[locale][provider] ?? provider;
+
 /** Uma linha do registro, na voz da tela. */
-function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
+export function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
   const p = entry.payload;
   const span = (value: unknown): string => (typeof value === "number" ? fill(t.days, { n: value }) : t.forever);
   const who = entry.actorName ?? t.removedPerson;
@@ -129,6 +139,12 @@ function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
         who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
         analyst: typeof p.analystName === "string" ? p.analystName : "",
         provider: typeof p.provider === "string" ? p.provider : "",
+      });
+    case "decision_model_provider_confirmed":
+      // O recibo do filtro de fala: fica mesmo depois de desligar ou trocar de modelo.
+      return fill(t.history.decision_model_provider_confirmed, {
+        who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
+        provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
       });
   }
 }

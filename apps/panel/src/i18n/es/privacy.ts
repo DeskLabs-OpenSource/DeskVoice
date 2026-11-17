@@ -90,7 +90,7 @@ const privacy: PrivacyDictionary = {
   forgetConfirmYes: "Olvidar {phone}",
   forgetDone: "{phone} fue olvidado. Notas del agente borradas: {notes}. Pendientes cerrados borrados: {followUps}.",
   historyTitle: "Registro",
-  historyLead: "Quién cambió el plazo o la grabación, qué salió por el plazo, quién exportó los datos de qué teléfono, quién borró datos a pedido de quien llamó, qué pasó con los enlaces de grabación para quien llamó y quién confirmó que un analista envía el texto de la llamada a un proveedor. Los 50 más recientes.",
+  historyLead: "Quién cambió el plazo o la grabación, qué salió por el plazo, quién exportó los datos de qué teléfono, quién borró datos a pedido de quien llamó, qué pasó con los enlaces de grabación para quien llamó y quién confirmó que un analista o el filtro de habla envía el texto de la llamada a un proveedor. Los 50 más recientes.",
   historyEmpty: "Nada registrado todavía.",
   history: {
     transcript_retention_changed: "{who} cambió el plazo de conservación de {from} a {to}.",
@@ -106,6 +106,7 @@ const privacy: PrivacyDictionary = {
     caller_notes_retention_changed: "{who} cambió el plazo de la memoria de {from} a {to}.",
     caller_memory_changed: "{who} dejó la memoria del número en el agente {state}.",
     analyst_provider_confirmed: "{who} confirmó que el analista {analyst} envía el texto de lo que dice quien llama a {provider}.",
+    decision_model_provider_confirmed: "{who} confirmó que el filtro de habla envía el texto de la llamada a {provider}.",
     caller_notes_deleted: "{who} olvidó el número terminado en {suffix}. Notas del agente borradas: {notes}. Pendientes cerrados borrados: {followUps}.",
   },
   noteDeleted: "{who} borró una nota del agente.",
