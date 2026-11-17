@@ -135,17 +135,22 @@ export async function chatCompletionJson(
 // ---------------------------------------------------------------------------------------------
 // A conversa em streaming (R5, fatia 2; desenho docs/specs/2026-11-17-motor-de-voz-em-pipeline.md, 3.2).
 //
-// `POST /chat/completions` com `stream: true`, na forma da OpenAI, que OpenRouter e DeepSeek seguem:
-// eventos SSE `data: {chunk}`, um por linha, terminados por `data: [DONE]`. Cada pedaço traz
-// `choices[0].delta.content` (texto) e `choices[0].delta.tool_calls[]` (ferramentas aos pedaços, pelo
-// `index`: o primeiro pedaço de cada chamada traz `id` e `function.name`, os seguintes só pedaços de
-// `function.arguments`). O consumo vem em `usage`, no último pedaço antes do `[DONE]`.
+// Duas partes (fatia 2b). O **transporte** (`chatTransport`) é comum: o `fetch` com prazo e
+// `AbortController`, o leitor de SSE, o "pedido não saiu", a recusa HTTP sem custo, o `usage` único,
+// a estimativa pelo Jev e o "nunca lança". O **formato** (`ChatFormat`) é de cada API: monta o corpo e
+// lê cada `data:`, devolvendo texto, ferramentas, consumo declarado, fim ou falha.
+//
+// O formato `/chat/completions` (`chatStream`), na forma da OpenAI, que OpenRouter e DeepSeek seguem:
+// `POST` com `stream: true`, eventos SSE `data: {chunk}`, um por linha, terminados por `data: [DONE]`.
+// Cada pedaço traz `choices[0].delta.content` (texto) e `choices[0].delta.tool_calls[]` (ferramentas aos
+// pedaços, pelo `index`: o primeiro pedaço de cada chamada traz `id` e `function.name`, os seguintes só
+// pedaços de `function.arguments`). O consumo vem em `usage`, no último pedaço antes do `[DONE]`.
 // Linha que não começa por `data:` (comentário `: OPENROUTER PROCESSING`, `event:`, linha vazia) é
 // ignorada, como o SSE manda. Cada provedor cita a própria página no arquivo dele.
 // ---------------------------------------------------------------------------------------------
 
 /** Quantos bytes UTF-8 o texto tem: a contagem da estimativa, um token por byte (a regra do Jev). */
-const utf8Bytes = (text: string): number => Buffer.byteLength(text, "utf8");
+export const utf8Bytes = (text: string): number => Buffer.byteLength(text, "utf8");
 
 /**
  * A conexão nem abriu: o pedido não saiu e não há consumo. Os códigos são os do `cause` do `fetch`
@@ -161,6 +166,34 @@ const wasNotSent = (error: unknown): boolean => {
   const code = codeOf(error);
   return typeof code === "string" && NOT_SENT.has(code);
 };
+
+/** Para onde o formato manda o que leu. Depois do fim (ou de `cancel`), texto e ferramenta não saem mais. */
+export interface ChatSink {
+  text(delta: string): void;
+  toolCall(call: { id: string; name: string; args: string }): void;
+  /** Bytes recebidos que contam na saída estimada (texto, `args`, raciocínio). */
+  output(bytes: number): void;
+  /** O consumo declarado pelo provedor; o último vale. Sem ele, o fim leva a estimativa. */
+  declare(usage: Usage): void;
+}
+
+/** O que um `data:` deu: seguir, o fim normal, ou uma falha no vocabulário fechado (o status é o do 200). */
+export type ChatStep = "more" | "end" | { failure: BrainFailure };
+
+/** O formato de uma API de conversa: o pedido e a leitura de cada `data:`. */
+export interface ChatFormat {
+  /** Cabeçalhos próprios (a chave). O transporte junta `content-type` e `accept`. */
+  headers: Record<string, string>;
+  /**
+   * O corpo do pedido e a entrada estimada (um token por byte do que foi enviado). `null` é pedido
+   * mal formado por quem chama: vira `error("unexpected_response", null)`, sem envio e sem `usage`.
+   */
+  request: { body: unknown; inputTokens: number } | null;
+  /** A recusa de um status fora de 2xx, como o `completeJson` do mesmo cérebro. */
+  failureOf: (status: number, body: unknown) => BrainFailure;
+  /** Um leitor novo por resposta: guarda o estado da leitura (ferramentas aos pedaços, consumo). */
+  reader(): (data: string, sink: ChatSink) => ChatStep;
+}
 
 const wireMessage = (message: BrainChatMessage): Record<string, unknown> => {
   if (message.role === "tool") return { role: "tool", content: message.content, tool_call_id: message.toolCallId ?? "" };
@@ -218,26 +251,10 @@ export interface ChatStreamOptions {
   usageOf: (chunk: unknown) => Usage;
 }
 
-type Handlers = { [K in keyof BrainChatEvents]: BrainChatEvents[K][] };
+const BAD: ChatStep = { failure: "unexpected_response" };
 
-/**
- * A conversa em streaming. Nunca lança: toda falha vira `error(failure, status)`. Nunca registra a
- * chave nem o corpo do provedor. O pedido sai no giro seguinte à chamada, então quem registra os
- * ouvintes logo após `chat` não perde nenhum evento; `cancel` antes disso não envia nada e não tem
- * consumo. Ver `BrainChatEvents` para a regra do consumo.
- */
-export function chatStream(url: string, apiKey: string, request: BrainChatRequest, options: ChatStreamOptions): BrainChat {
-  const handlers: Handlers = { text: [], toolCall: [], usage: [], done: [], error: [] };
-  const emit = <K extends keyof BrainChatEvents>(event: K, ...args: Parameters<BrainChatEvents[K]>): void => {
-    for (const handler of handlers[event]) {
-      try {
-        (handler as (...values: unknown[]) => void)(...args);
-      } catch {
-        // A exceção de quem escuta é de quem escuta: não derruba o pedido nem vira falha do provedor.
-      }
-    }
-  };
-
+/** O formato `/chat/completions`, na forma da OpenAI. */
+function completionsFormat(apiKey: string, request: BrainChatRequest, options: ChatStreamOptions): ChatFormat {
   const messages = request.messages.map(wireMessage);
   const tools = request.tools.map(wireTool);
   const body = {
@@ -250,6 +267,98 @@ export function chatStream(url: string, apiKey: string, request: BrainChatReques
   };
   // A estimativa da entrada: o que foi enviado em `messages` e `tools`, um token por byte.
   const inputTokens = utf8Bytes(JSON.stringify(messages)) + (tools.length > 0 ? utf8Bytes(JSON.stringify(tools)) : 0);
+
+  return {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    request: { body, inputTokens },
+    failureOf: options.failureOf,
+    reader() {
+      const calls = new Map<number, { id: string; name: string; args: string }>();
+      let callsSent = false;
+
+      /** As ferramentas montadas, inteiras e na ordem do `index`, uma vez só. Falso se alguma veio sem id ou nome. */
+      const sendCalls = (sink: ChatSink): boolean => {
+        if (callsSent) return true;
+        callsSent = true;
+        const ordered = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
+        if (ordered.some((call) => call.id === "" || call.name === "")) return false;
+        for (const call of ordered) sink.toolCall({ id: call.id, name: call.name, args: call.args });
+        return true;
+      };
+
+      return (data, sink) => {
+        // O `[DONE]` fecha as ferramentas que ainda não saíram.
+        if (data === "[DONE]") return sendCalls(sink) ? "end" : BAD;
+        let json: unknown;
+        try {
+          json = JSON.parse(data);
+        } catch {
+          return BAD;
+        }
+        const chunk = streamChunk.safeParse(json);
+        if (!chunk.success || (chunk.data.error !== undefined && chunk.data.error !== null)) return BAD;
+        if (typeof chunk.data.usage === "object" && chunk.data.usage !== null) {
+          const usage = options.usageOf(json);
+          if (usage.outputTokens !== undefined) sink.declare(usage);
+        }
+        for (const choice of chunk.data.choices ?? []) {
+          if (choice.finish_reason === "error") return BAD;
+          const delta = choice.delta;
+          sink.output(utf8Bytes(delta?.reasoning_content ?? "") + utf8Bytes(delta?.reasoning ?? ""));
+          if (delta?.content) {
+            sink.output(utf8Bytes(delta.content));
+            sink.text(delta.content);
+          }
+          for (const piece of delta?.tool_calls ?? []) {
+            const call = calls.get(piece.index) ?? { id: "", name: "", args: "" };
+            if (piece.id && call.id === "") call.id = piece.id;
+            if (piece.function?.name && call.name === "") call.name = piece.function.name;
+            if (piece.function?.arguments) {
+              call.args += piece.function.arguments;
+              sink.output(utf8Bytes(piece.function.arguments));
+            }
+            // Pedaço de ferramenta depois do fim declarado é forma que o provedor não documenta.
+            if (callsSent) return BAD;
+            calls.set(piece.index, call);
+          }
+          // O fim da escolha fecha as ferramentas: quem executa não espera o `[DONE]`.
+          if (choice.finish_reason && !sendCalls(sink)) return BAD;
+        }
+        return "more";
+      };
+    },
+  };
+}
+
+/**
+ * A conversa em streaming no formato `/chat/completions`. Nunca lança: toda falha vira
+ * `error(failure, status)`. Ver `chatTransport`.
+ */
+export function chatStream(url: string, apiKey: string, request: BrainChatRequest, options: ChatStreamOptions): BrainChat {
+  return chatTransport(url, request, completionsFormat(apiKey, request, options), { fetch: options.fetch });
+}
+
+type Handlers = { [K in keyof BrainChatEvents]: BrainChatEvents[K][] };
+
+/**
+ * O transporte da conversa em streaming, comum a todo formato. Nunca lança: toda falha vira
+ * `error(failure, status)`. Nunca registra a chave nem o corpo do provedor. O pedido sai no giro
+ * seguinte à chamada, então quem registra os ouvintes logo após `chat` não perde nenhum evento;
+ * `cancel` antes disso não envia nada e não tem consumo. Ver `BrainChatEvents` para a regra do consumo.
+ */
+export function chatTransport(url: string, request: BrainChatRequest, format: ChatFormat, options: { fetch?: typeof fetch }): BrainChat {
+  const handlers: Handlers = { text: [], toolCall: [], usage: [], done: [], error: [] };
+  const emit = <K extends keyof BrainChatEvents>(event: K, ...args: Parameters<BrainChatEvents[K]>): void => {
+    for (const handler of handlers[event]) {
+      try {
+        (handler as (...values: unknown[]) => void)(...args);
+      } catch {
+        // A exceção de quem escuta é de quem escuta: não derruba o pedido nem vira falha do provedor.
+      }
+    }
+  };
+
+  const inputTokens = format.request?.inputTokens ?? 0;
   let outputBytes = 0;
   const estimate = (): Usage => ({ inputTokens, outputTokens: outputBytes });
 
@@ -281,13 +390,15 @@ export function chatStream(url: string, apiKey: string, request: BrainChatReques
   let sent = false;
   const run = async (): Promise<void> => {
     if (finished) return;
+    // Pedido mal formado por quem chama: nada sai, nada a cobrar.
+    if (format.request === null) return finish(null, false, () => emit("error", "unexpected_response", null));
     sent = true;
     let response: Response;
     try {
       response = await (options.fetch ?? fetch)(url, {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json", accept: "text/event-stream" },
-        body: JSON.stringify(body),
+        headers: { ...format.headers, "content-type": "application/json", accept: "text/event-stream" },
+        body: JSON.stringify(format.request.body),
         signal: controller.signal,
       });
     } catch (error) {
@@ -309,7 +420,7 @@ export function chatStream(url: string, apiKey: string, request: BrainChatReques
       if (timedOut) return fail("unreachable", null);
       // Recusa do pedido (fora de 2xx): sem custo, como no Jev (`deciders/jev.ts`).
       const { status } = response;
-      return finish({}, false, () => emit("error", options.failureOf(status, errorBody), status));
+      return finish({}, false, () => emit("error", format.failureOf(status, errorBody), status));
     }
 
     const { status } = response;
@@ -318,63 +429,21 @@ export function chatStream(url: string, apiKey: string, request: BrainChatReques
     const decoder = new TextDecoder();
     let buffer = "";
     let declared: Usage | null = null;
-    const calls = new Map<number, { id: string; name: string; args: string }>();
-    let callsSent = false;
-
-    /** As ferramentas montadas, inteiras e na ordem do `index`, uma vez só. Falso se alguma veio sem id ou nome. */
-    const sendCalls = (): boolean => {
-      if (callsSent) return true;
-      callsSent = true;
-      const ordered = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
-      if (ordered.some((call) => call.id === "" || call.name === "")) return false;
-      for (const call of ordered) {
-        if (finished) return true;
-        emit("toolCall", { id: call.id, name: call.name, args: call.args });
-      }
-      return true;
+    const sink: ChatSink = {
+      text(delta) {
+        if (!finished) emit("text", delta);
+      },
+      toolCall(call) {
+        if (!finished) emit("toolCall", call);
+      },
+      output(bytes) {
+        outputBytes += bytes;
+      },
+      declare(usage) {
+        declared = usage;
+      },
     };
-
-    /** Um evento `data:`. `more` segue lendo, `end` é o `[DONE]`, `bad` é pedaço quebrado ou erro do provedor. */
-    const onData = (data: string): "more" | "end" | "bad" => {
-      if (data === "[DONE]") return "end";
-      let json: unknown;
-      try {
-        json = JSON.parse(data);
-      } catch {
-        return "bad";
-      }
-      const chunk = streamChunk.safeParse(json);
-      if (!chunk.success || (chunk.data.error !== undefined && chunk.data.error !== null)) return "bad";
-      if (typeof chunk.data.usage === "object" && chunk.data.usage !== null) {
-        const usage = options.usageOf(json);
-        if (usage.outputTokens !== undefined) declared = usage;
-      }
-      for (const choice of chunk.data.choices ?? []) {
-        if (choice.finish_reason === "error") return "bad";
-        const delta = choice.delta;
-        outputBytes += utf8Bytes(delta?.reasoning_content ?? "") + utf8Bytes(delta?.reasoning ?? "");
-        if (delta?.content) {
-          outputBytes += utf8Bytes(delta.content);
-          if (finished) return "more";
-          emit("text", delta.content);
-        }
-        for (const piece of delta?.tool_calls ?? []) {
-          const call = calls.get(piece.index) ?? { id: "", name: "", args: "" };
-          if (piece.id && call.id === "") call.id = piece.id;
-          if (piece.function?.name && call.name === "") call.name = piece.function.name;
-          if (piece.function?.arguments) {
-            call.args += piece.function.arguments;
-            outputBytes += utf8Bytes(piece.function.arguments);
-          }
-          // Pedaço de ferramenta depois do fim declarado é forma que o provedor não documenta.
-          if (callsSent) return "bad";
-          calls.set(piece.index, call);
-        }
-        // O fim da escolha fecha as ferramentas: quem executa não espera o `[DONE]`.
-        if (choice.finish_reason && !sendCalls()) return "bad";
-      }
-      return "more";
-    };
+    const read = format.reader();
 
     try {
       for (;;) {
@@ -387,25 +456,19 @@ export function chatStream(url: string, apiKey: string, request: BrainChatReques
           const line = buffer.slice(0, newline).replace(/\r$/, "");
           buffer = buffer.slice(newline + 1);
           if (!line.startsWith("data:")) continue;
-          const result = onData(line.slice(5).trim());
+          const result = read(line.slice(5).trim(), sink);
           if (finished) return;
-          if (result === "bad") {
-            void reader.cancel().catch(() => undefined);
-            return fail("unexpected_response", status);
-          }
-          if (result === "end") {
-            void reader.cancel().catch(() => undefined);
-            if (!sendCalls()) return fail("unexpected_response", status);
-            if (finished) return;
-            const usage: Usage | null = declared;
-            return finish(usage ?? estimate(), usage === null, () => emit("done"));
-          }
+          if (result === "more") continue;
+          void reader.cancel().catch(() => undefined);
+          if (result !== "end") return fail(result.failure, status);
+          const usage: Usage | null = declared;
+          return finish(usage ?? estimate(), usage === null, () => emit("done"));
         }
       }
     } catch {
       return stopped(status);
     }
-    // O corpo acabou sem `[DONE]`: cortado no meio.
+    // O corpo acabou sem o fim do formato: cortado no meio.
     return stopped(status);
   };
 
