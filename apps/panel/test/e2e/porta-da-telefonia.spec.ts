@@ -74,6 +74,7 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
   const probe = await SipProbe.open(host);
   let trunkId: string | null = null;
   let registerId: string | null = null;
+  let switchId: string | null = null;
   await signIn(page);
   try {
     // Sem linha no endereço da sonda: a central recusa (M1, origem que não casa com linha).
@@ -164,10 +165,51 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
     const stillOpen = await until(probe, host, `trunk-${registerId}`, (answer) => answer.status === 200);
     measured("linha por registro com nome que não resolve e um extra (198.51.100.78): continua sem filtro, apresentando-se como a linha", stillOpen);
     expect(stillOpen.status).toBe(200);
-    asteriskSaid([...seen, unfiltered, stillOpen]);
+
+    // O filtro da linha por registro (contrato 11), numa linha cujo nome resolve: `postgres` é o
+    // nome do serviço do banco na rede interna da instalação, que o DNS do Docker responde ao
+    // processo de voz. O registro vai para lá e não tem resposta (nada escuta SIP no banco), e o
+    // `permit` fica com o endereço interno do banco, que não é o da sonda. A linha nova nasce com o
+    // filtro ligado; desligado pela tela, a sonda que se apresenta como a linha passa; religado, é
+    // recusada pelo filtro.
+    const switchName = `${name} filtro`;
+    const withName = await page.request.post("/api/v1/trunks", {
+      data: { name: switchName, host: "postgres", username: "sonda", password: `sonda-${unique()}${unique()}`, authMode: "register" },
+    });
+    expect(withName.status()).toBe(200);
+    const born = ((await withName.json()) as { data: { id: string; inboundFilter: boolean } }).data;
+    switchId = born.id;
+    expect(born.inboundFilter).toBe(true);
+    await expect
+      .poll(async () => ((await (await page.request.get("/api/v1/trunks")).json()) as { data: Array<{ id: string; inboundAllowed: string[] }> }).data.find((entry) => entry.id === switchId)?.inboundAllowed.length ?? 0, {
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(0);
+    await page.reload();
+    const switchPanel = section(page, switchName);
+    await expect(switchPanel).toContainText(line.allowedOthers);
+    const bornOn = await until(probe, host, `trunk-${switchId}`, (answer) => answer.answered && answer.status !== 200);
+    measured("contrato 11: linha por registro nova (nome que resolve), filtro ligado, apresentando-se como a linha", bornOn);
+    expect(bornOn.status).toBe(401);
+
+    await switchPanel.getByRole("button", { name: line.filterOff, exact: true }).click();
+    await expect(switchPanel).toContainText(line.filterSwitchedOff);
+    await expect(switchPanel).not.toContainText(line.allowedOthers);
+    const switchedOff = await until(probe, host, `trunk-${switchId}`, (answer) => answer.status === 200);
+    measured("contrato 11: mesma linha com o filtro desligado pela tela, apresentando-se como a linha", switchedOff);
+    expect(switchedOff.status).toBe(200);
+
+    await switchPanel.getByRole("button", { name: line.filterOn, exact: true }).click();
+    await expect(switchPanel).not.toContainText(line.filterSwitchedOff);
+    await expect(switchPanel.getByRole("button", { name: line.filterOff, exact: true })).toBeVisible();
+    const switchedOn = await until(probe, host, `trunk-${switchId}`, (answer) => answer.answered && answer.status !== 200);
+    measured("contrato 11: mesma linha com o filtro religado pela tela, apresentando-se como a linha", switchedOn);
+    expect(switchedOn.status).toBe(401);
+    asteriskSaid([...seen, unfiltered, stillOpen, bornOn, switchedOff, switchedOn]);
   } finally {
     await probe.close();
     if (trunkId) await page.request.delete(`/api/v1/trunks/${trunkId}`);
     if (registerId) await page.request.delete(`/api/v1/trunks/${registerId}`);
+    if (switchId) await page.request.delete(`/api/v1/trunks/${switchId}`);
   }
 });

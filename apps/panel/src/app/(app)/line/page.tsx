@@ -44,22 +44,40 @@ function hostName(host: string): string | null {
 /**
  * De onde a central aceita a ligação desta linha, como o processo de voz gravou (R14). É o mesmo
  * conjunto que vira o filtro da linha na central. Linha ativa com nome que ainda não resolveu fica
- * sem filtro, e a tela diz isso em vez de dizer que recusa o resto.
+ * sem filtro, e a tela diz isso em vez de dizer que recusa o resto. Na linha por registro, o filtro
+ * se liga e se desliga aqui (contrato 11): a que já existia antes do filtro começa desligada, com o
+ * aviso, que não muda o estado da linha. A linha por IP filtra sempre e não tem botão.
  */
-function AllowedAddresses({ trunk, t }: { trunk: Trunk; t: LineDictionary }) {
+function AllowedAddresses({ trunk, t, onSaved }: { trunk: Trunk; t: LineDictionary; onSaved(): void }) {
   const locale = useLocale();
+  const canConfigure = useCanConfigure();
+  const toggle = useAction();
   const name = hostName(trunk.host);
   const allowed = trunk.inboundAllowed ?? [];
-  const unfiltered = filterOff(trunk, name !== null);
+  const byRegistration = trunk.authMode === "register";
+  const switchedOff = byRegistration && trunk.inboundFilter === false;
+  const unfiltered = !switchedOff && filterOff(trunk, name !== null);
+  const setFilter = (enabled: boolean): void => {
+    void toggle.run(() => api(`/trunks/${trunk.id}/inbound-filter`, { method: "PATCH", body: { enabled } })).then((ok) => ok && onSaved());
+  };
   return (
     <div className="grid gap-1.5 rounded-sm bg-sunken p-4">
       <p>
         <span className="font-bold">{t.allowed}:</span>{" "}
         {allowed.length > 0 ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{unfiltered ? t.allowedEmpty : t.allowedNone}</span>}
       </p>
-      {allowed.length > 0 ? <p className="text-[0.87rem]">{t.allowedOthers}</p> : null}
+      {allowed.length > 0 && !switchedOff ? <p className="text-[0.87rem]">{t.allowedOthers}</p> : null}
       {name !== null && trunk.inboundResolvedAt ? <p className="text-[0.87rem] text-muted">{fill(t.allowedResolvedAt, { name, when: formatDateTime(trunk.inboundResolvedAt, locale) })}</p> : null}
       <p className="text-[0.87rem] text-muted">{t.allowedHint}</p>
+      {switchedOff ? <p className="text-[0.87rem] font-bold">{t.filterSwitchedOff}</p> : null}
+      {byRegistration && canConfigure ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button busy={toggle.busy} variant={switchedOff ? "primary" : undefined} onClick={() => setFilter(switchedOff)}>
+            {switchedOff ? t.filterOn : t.filterOff}
+          </Button>
+          {toggle.error ? <ActionStatus action={toggle} /> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -246,7 +264,7 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
           )}
         </fieldset>
 
-        {trunk ? <AllowedAddresses trunk={trunk} t={t} /> : null}
+        {trunk ? <AllowedAddresses trunk={trunk} t={t} onSaved={onSaved} /> : null}
         {!applied ? <Notice tone="warn">{t.notApplied}</Notice> : null}
         {/* A linha que ficou de fora da configuração mostra o motivo sem pedir um teste. */}
         {failure && !result ? (

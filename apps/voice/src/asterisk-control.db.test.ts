@@ -499,6 +499,28 @@ describe("o filtro de entrada por linha (R14, fatia 2)", { timeout: 120_000 }, (
     expect(aclOf(await readFile(file, "utf8"), line)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.51"]);
     expect(await trunkRow(line)).toMatchObject({ status: "unverified", last_error: null });
   });
+
+  it("filtro desligado na linha (contrato 11): o conjunto é calculado e gravado para a tela, mas o endpoint sai sem deny e a linha não fica 'warn'; ligado, o filtro entra", async () => {
+    const organizationId = await createOrganization(app, "filter-switched-off");
+    const name = `sip.${randomInt(1, 1_000_000)}.desligado.example`;
+    const line = await createTrunk(app, organizationId, { host: name, matchExtra: ["198.51.100.71"] });
+    await withSystem(app, (q) => q.exec("update trunks set inbound_filter = false where id = $1", [line]));
+    const resolve: ResolveName = async (asked) => (asked === name ? ["203.0.113.71"] : anyName(asked));
+    const ari = fakeAri();
+    const file = path.join(scratch, "filter-switched-off", "pjsip_trunks.conf");
+    ari.loadsFile = file;
+    const deps = () => trunksDeps(ari, file, fakeClock(), resolve);
+    expect(await applyTrunks(deps())).toMatchObject({ applied: true });
+    const conf = await readFile(file, "utf8");
+    expect(conf).toContain(`[trunk-${line}]\ntype=endpoint`);
+    expect(aclOf(conf, line)).toEqual([]);
+    expect((await allowedRow(line))?.inbound_allowed).toEqual(["203.0.113.71", "198.51.100.71"]);
+    expect((await trunkRow(line))?.status).not.toBe("warn");
+
+    await withSystem(app, (q) => q.exec("update trunks set inbound_filter = true where id = $1", [line]));
+    expect(await applyTrunks(deps())).toMatchObject({ applied: true });
+    expect(aclOf(await readFile(file, "utf8"), line)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.71", "permit=198.51.100.71"]);
+  });
 });
 
 describe("ligação de saída", { timeout: 120_000 }, () => {

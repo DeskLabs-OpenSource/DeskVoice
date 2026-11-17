@@ -16,6 +16,7 @@ import { GET as getSetting, PUT as putSetting } from "./settings/[key]/route";
 import { GET as costs } from "./system/costs/route";
 import { GET as health } from "./system/health/route";
 import { POST as checkTrunk } from "./trunks/[id]/check/route";
+import { PATCH as switchTrunkFilter } from "./trunks/[id]/inbound-filter/route";
 import { DELETE as deleteTrunk, PATCH as patchTrunk } from "./trunks/[id]/route";
 import { GET as listTrunks, POST as createTrunk } from "./trunks/route";
 
@@ -588,6 +589,45 @@ describe("removing and correcting lines and numbers", () => {
     await resolved();
     expect((await patch({ authMode: "ip", host: "203.0.113.70", username: null })).status).toBe(200);
     expect(await columns()).toEqual(zeroed);
+  });
+
+  it("the filter of a line by registration is born on, the button switches only it, and saving the line never touches it (R14, contract 11)", async () => {
+    const created = await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Filtro", host: "sip.filtro.example.test", username: "5533", password: "senha-longa", authMode: "register" } });
+    expect(created.status).toBe(200);
+    const id = (created.data as { id: string }).id;
+    expect(created.data).toMatchObject({ inboundFilter: true });
+    const filter = async (): Promise<unknown> => (await stored("select inbound_filter from trunks where id = $1", [id]))?.inbound_filter;
+    // O que o processo de voz teria gravado: o botão não mexe nisso, nem no estado da linha.
+    await withOrg(panel.app, org, (q) => q.exec("update trunks set inbound_allowed = '{203.0.113.9}', status = 'ok', last_error = null where id = $1", [id]));
+    const others = () => stored("select name, host, username, auth_mode, match_extra, inbound_allowed, status, secret_enc is not null as secret from trunks where id = $1", [id]);
+    const before = await others();
+    const button = (enabled: unknown, cookie = owner) => call(switchTrunkFilter, { method: "PATCH", cookie, params: { id }, body: { enabled } });
+
+    const off = await button(false);
+    expect(off.status).toBe(200);
+    expect(off.data).toMatchObject({ id, inboundFilter: false });
+    expect(await filter()).toBe(false);
+    expect(await others()).toEqual(before);
+    // Quem não configura não liga nem desliga o filtro, e um corpo que não é sim ou não é recusado.
+    expect((await button(true, operator.cookie)).status).toBe(403);
+    expect((await button("yes")).code).toBe("validation_error");
+    expect(await filter()).toBe(false);
+
+    // Salvar a linha, trocar o `host` ou trocar o modo não mexe no filtro.
+    expect((await call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body: { name: "Filtro de novo" } })).status).toBe(200);
+    expect((await call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body: { host: "sip.outro-filtro.example.test", password: "senha-longa" } })).status).toBe(200);
+    expect(await filter()).toBe(false);
+    expect((await button(true)).data).toMatchObject({ inboundFilter: true });
+    expect(await filter()).toBe(true);
+
+    // A linha por IP filtra sempre: o botão é recusado e nada muda.
+    expect((await call(patchTrunk, { method: "PATCH", cookie: owner, params: { id }, body: { authMode: "ip", host: "203.0.113.71", username: null } })).status).toBe(200);
+    expect(await filter()).toBe(true);
+    const refused = await button(false);
+    expect([refused.status, refused.code]).toEqual([409, "filter_always_on"]);
+    expect(await filter()).toBe(true);
+    const ipLine = await call(createTrunk, { method: "POST", cookie: owner, body: { name: "Por IP com filtro", host: "203.0.113.72", authMode: "ip" } });
+    expect(ipLine.data).toMatchObject({ inboundFilter: true });
   });
 
   it("in a line recognized by IP, the inbound addresses are numeric and the block has a floor; a name only goes in the outbound address", async () => {

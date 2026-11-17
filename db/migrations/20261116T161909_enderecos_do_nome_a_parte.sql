@@ -8,6 +8,13 @@ alter table trunks add column inbound_from_name text[] not null default '{}';
 -- hora ISO 8601). A parte do nome é a união das respostas das últimas 24 horas, para que um DNS que
 -- devolve só uma parte dos endereços a cada consulta não faça o filtro oscilar.
 alter table trunks add column inbound_from_name_seen jsonb not null default '{}';
+-- Se o filtro de entrada vale para a linha (R14, contrato 11). A linha criada depois desta versão
+-- nasce com o filtro ligado, porque quem cadastra vê na tela de onde a central aceita a ligação. Na
+-- linha por registro que já existe, ele começa desligado: a operadora que registra por um servidor e
+-- entrega por outro seria cortada na atualização. Quem confere a lista liga na tela. A linha por IP
+-- liga na hora: ela já só era reconhecida pelo `host` e pelos extras, o mesmo conjunto do filtro.
+alter table trunks add column inbound_filter boolean not null default true;
+update trunks set inbound_filter = false where auth_mode = 'register';
 
 -- A linha por registro com nome no `host` já tem o conjunto gravado pela fatia 1: o que veio do nome
 -- é esse conjunto menos os `match_extra` dela. O conjunto está na forma canônica, mas os extras são

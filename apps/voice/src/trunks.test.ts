@@ -628,6 +628,21 @@ describe("o filtro de entrada por linha (R14, fatia 2)", () => {
     expect(conf.split("\n").filter((line) => /^(deny|permit)=/.test(line))).toHaveLength(8);
   });
 
+  it("com o filtro desligado na linha (contrato 11), o conjunto cheio sai sem deny e sem permit; ausente vale ligado", () => {
+    const allowed = new Map([
+      [A, ["203.0.113.7", "198.51.100.1"]],
+      [B, ["198.51.100.20"]],
+    ]);
+    const off = renderTrunksConf([{ ...register, inboundFilter: false }, byIp], allowed).conf;
+    expect(acl(off, A)).toEqual([]);
+    expect(acl(off, B)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=198.51.100.20"]);
+    // O resto do endpoint é o mesmo da linha sem conjunto: o filtro desligado só tira o deny e o permit.
+    expect(endpointOf(off, A)).toEqual(endpointOf(renderTrunksConf([register, byIp]).conf, A));
+    const on = renderTrunksConf([{ ...register, inboundFilter: true }, byIp], allowed).conf;
+    expect(acl(on, A)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.7", "permit=198.51.100.1"]);
+    expect(acl(renderTrunksConf([register, byIp], allowed).conf, A)).toEqual(acl(on, A));
+  });
+
   it("nome, bloco largo demais e repetição nunca viram permit; o que sobra é canônico", () => {
     const { conf } = renderTrunksConf([byIp], new Map([[B, ["198.051.100.020", "nome.example", "10.0.0.0/8", "::/0", "198.51.100.20", "2001:DB8::1"]]]));
     expect(acl(conf, B)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=198.51.100.20", "permit=2001:db8::1"]);

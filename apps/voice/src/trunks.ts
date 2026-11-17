@@ -44,6 +44,13 @@ export interface TrunkConfig {
    * entra no `identify`.
    */
   outboundHost?: string | null;
+  /**
+   * Se o filtro de entrada vale para esta linha (`trunks.inbound_filter`, R14 contrato 11). Com
+   * `false`, o endpoint sai sem `deny` e sem `permit`, mesmo com o conjunto cheio: é a linha por
+   * registro que já existia antes do filtro, até alguém conferir a lista e ligar na tela. Ausente
+   * vale `true`.
+   */
+  inboundFilter?: boolean;
 }
 
 export type TrunkHealth = { id: string; status: "ok" | "warn" | "fail"; detail: string };
@@ -215,7 +222,8 @@ const overlap = (a: Inbound, b: Inbound): boolean => a.hosts.some((mine) => b.ho
 /**
  * O arquivo inteiro. Tronco que não pode ser escrito fica de fora, com o motivo em `skipped`.
  * `allowed` é o conjunto liberado de cada linha, calculado por `computeAllowed` na mesma aplicação:
- * vira o `deny` e os `permit` do endpoint. Linha sem conjunto (vazio ou ausente) sai sem filtro.
+ * vira o `deny` e os `permit` do endpoint. Linha sem conjunto (vazio ou ausente) ou com o filtro
+ * desligado (`inboundFilter: false`) sai sem filtro.
  *
  * As linhas válidas de endereço numérico são agrupadas por sobreposição de endereço (ver o
  * comentário no topo do arquivo), item por item: uma linha com vários blocos pertence a todos os
@@ -265,7 +273,9 @@ export function renderTrunksConf(
     if (!identify && entry.trunk.authMode === "ip") skipped.push({ id: entry.trunk.id, reason: SHARED_HOST_REASON });
     else {
       // O `permit` passa de novo pela regra do contrato 2: só IP ou bloco, nunca bloco largo demais.
-      sections.push(renderTrunk(entry.trunk, entry.inbound, identify, canonicalAddresses(allowed.get(entry.trunk.id) ?? [])));
+      // Com o filtro desligado na linha (contrato 11), nada de `permit`: o endpoint sai sem filtro.
+      const permit = entry.trunk.inboundFilter === false ? [] : canonicalAddresses(allowed.get(entry.trunk.id) ?? []);
+      sections.push(renderTrunk(entry.trunk, entry.inbound, identify, permit));
       emitted.push(entry.trunk.id);
     }
   }
@@ -576,10 +586,11 @@ async function planTrunks(deps: TrunksDeps): Promise<TrunksPlan> {
       inbound_allowed: string[] | null;
       inbound_from_name: string[] | null;
       inbound_from_name_seen: SeenAt | null;
+      inbound_filter: boolean;
       last_error: string | null;
       public_ip: unknown;
     }>(
-      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host, t.inbound_allowed, t.inbound_from_name, t.inbound_from_name_seen, t.last_error,
+      `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host, t.inbound_allowed, t.inbound_from_name, t.inbound_from_name_seen, t.inbound_filter, t.last_error,
               (select s.value from settings s where s.organization_id = t.organization_id and s.key = 'network.public_ip') as public_ip
          from trunks t order by t.id`,
     ),
@@ -598,6 +609,7 @@ async function planTrunks(deps: TrunksDeps): Promise<TrunksPlan> {
         matchExtra: (row.match_extra ?? []).map((extra) => extra.trim()).filter((extra) => extra !== ""),
         outboundHost: row.outbound_host?.trim() || null,
         publicIp: typeof row.public_ip === "string" ? row.public_ip : deps.publicIp,
+        inboundFilter: row.inbound_filter,
       });
     } catch (error) {
       unreadable.push({ id: row.id, reason: `the saved password cannot be read (${messageOf(error)})` });

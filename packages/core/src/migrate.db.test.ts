@@ -282,5 +282,13 @@ describe("runMigrations", () => {
     // A linha nova nasce com a lista vazia.
     const fresh = await trunk("sip.nova.example", "register", [], []);
     expect(await fromName(fresh)).toEqual([]);
+    // O filtro (contrato 11): a linha por registro que já existia começa desligada, com nome ou com
+    // IP no `host`; a linha por IP liga na hora; a linha criada depois nasce ligada, nos dois modos.
+    const filter = async (id: string): Promise<boolean | undefined> =>
+      (await db.pool.query<{ inbound_filter: boolean }>("select inbound_filter from trunks where id = $1", [id])).rows[0]?.inbound_filter;
+    for (const id of [named, withoutExtras, numeric, neverResolved, brokenExtra]) expect(await filter(id)).toBe(false);
+    expect(await filter(byIp)).toBe(true);
+    expect(await filter(fresh)).toBe(true);
+    expect(await filter(await trunk("198.51.100.80", "ip", [], []))).toBe(true);
   });
 });
