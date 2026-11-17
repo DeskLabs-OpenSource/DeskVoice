@@ -17,6 +17,13 @@ const costs: CostsDictionary = {
   priceSource: "Fuente del precio",
   deletedAgent: "Agente borrado",
   handoffCounts: "Una llamada que se pasó a otro agente cuenta para cada agente.",
+  unmeasured: "No medido",
+  unmeasuredPart: "+ parte no medida",
+  unmeasuredNote: "{n} líneas del extracto de este período no tienen costo medido: el modelo no tiene precio conocido, o el consumo no pudo medirse. Lo que costaron no está en los valores de abajo. Solo aparece en la factura del proveedor.",
+  unmeasuredNoteOne: "1 línea del extracto de este período no tiene costo medido: el modelo no tiene precio conocido, o el consumo no pudo medirse. Lo que costó no está en los valores de abajo. Solo aparece en la factura del proveedor.",
+  includesEstimate: "incluye estimación",
+  estimatedNote: "{n} líneas del extracto de este período tienen costo estimado, porque el consumo de esa lectura no se leyó. La estimación cuenta en el total y en el tope, y está hecha para quedar por encima del real.",
+  estimatedNoteOne: "1 línea del extracto de este período tiene costo estimado, porque el consumo de esa lectura no se leyó. La estimación cuenta en el total y en el tope, y está hecha para quedar por encima del real.",
 };
 
 export default costs;

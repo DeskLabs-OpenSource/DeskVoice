@@ -44,6 +44,11 @@ O que mudou entre o #114 e a primeira fatia de memória, e onde está no texto a
   agente dentro de um bloco delimitado e escapado, e a memória nunca muda a configuração da ligação
   (0020, "Regras que valem em toda fatia"). Isso vale para a fatia 6 e para o resumo da passagem da
   fatia 4.
+- **Fatia 6:** a chave é `caller_memory.agent`, mudada só por `PUT /privacy/caller-memory`. Com
+  passagem, o motivo, o resumo, as notas e as pendências ficam num único bloco, e o destino recebe os
+  mesmos itens, carregados uma vez. O teto de 1 500 caracteres conta o bloco da memória inteiro, com a
+  frase fixa e os marcadores. A chamada simulada não lê a memória: o roteiro do motor simulado passa
+  intacto, e por isso a medida do bloco é feita com o motor de teste que guarda as instruções.
 
 ## 0. Em uma página
 

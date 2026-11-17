@@ -1,4 +1,4 @@
-import { hashPassword, withOrg, withSystem } from "@deskvoice/core";
+import { findLoginAccount, hashPassword, withOrg } from "@deskvoice/core";
 import { z } from "zod";
 import { UNKNOWN_IP, addressBucket, clientIp } from "../../../../../server/client-ip";
 import { ApiError, Reply, createSession, handlePublic, sessionCookie } from "../../../../../server/context";
@@ -47,18 +47,14 @@ export const POST = handlePublic({ body }, async ({ request, body, deps }) => {
     taken.push(key);
   }
 
-  // Único uso de `withSystem` aqui: o e-mail é o que diz qual é a organização.
-  const user = await withSystem(deps.db, (q) =>
-    q.one<{ id: string; organizationId: string; passwordHash: string; name: string; role: string; disabled: boolean }>(
-      `select id, organization_id as "organizationId", password_hash as "passwordHash", name, role, disabled_at is not null as disabled from users where email = $1`,
-      [body.email],
-    ),
-  );
+  // A conta é achada pelo e-mail, e é ela que diz qual é a organização (packages/core/src/accounts.ts).
+  const account = await findLoginAccount(deps.db, body.email);
   decoyHash ??= hashPassword("decoy");
-  const valid = await deps.verifyPassword(body.password, user?.passwordHash ?? (await decoyHash));
-  // Conta desativada passa pela mesma conferência de senha e recebe a mesma resposta de senha
-  // errada: nem o tempo nem o texto dizem que a conta existe.
-  if (!user || !valid || user.disabled) {
+  const valid = await deps.verifyPassword(body.password, account?.passwordHash ?? (await decoyHash));
+  // Conta sem vínculo ativo (desativada) passa pela mesma conferência de senha e recebe a mesma
+  // resposta de senha errada: nem o tempo nem o texto dizem que a conta existe.
+  const user = account?.member;
+  if (!user || !valid) {
     // A reserva fica: é ela que conta a falha. Uma mensagem só para e-mail e senha.
     throw new ApiError(401, "invalid_credentials", "E-mail or password is incorrect.");
   }

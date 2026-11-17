@@ -1,0 +1,5 @@
+import { spokenLanguageOf } from "./spoken-language";
+
+export function voicemailLanguageOf(stored: unknown): string {
+  return spokenLanguageOf(stored);
+}

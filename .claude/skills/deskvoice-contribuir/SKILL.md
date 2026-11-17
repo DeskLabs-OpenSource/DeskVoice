@@ -55,7 +55,7 @@ bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh
 
 | Hook | Recusa | Só avisa |
 |---|---|---|
-| `pre-commit` | chave com formato conhecido e `.env` no commit; migration fora de `AAAAMMDDTHHMMSS_slug.sql`, com carimbo repetido, ou edição de migration já publicada | e-mail de máquina no `git config` (`root@…`, `@localhost`, `@vps…`, `@srv…`, `@….local`) ou vazio: o commit não daria crédito a ninguém (`scripts/hooks/warn-identity.sh`) |
+| `pre-commit` | chave com formato conhecido e `.env` no commit; migration fora de `AAAAMMDDTHHMMSS_slug.sql`, com carimbo repetido, ou edição de migration já publicada | e-mail de máquina na identidade efetiva do commit (`root@…`, `@localhost`, `@vps…`, `@srv…`, `@….local`) ou vazio: o commit não daria crédito a ninguém (`scripts/hooks/warn-identity.sh`) |
 | `pre-push` | push direto na `main` | ramo atrasado em relação a `origin/main` |
 
 Os hooks são copiados da `main` (`upstream/main`, senão `origin/main`) para dentro do `.git` e

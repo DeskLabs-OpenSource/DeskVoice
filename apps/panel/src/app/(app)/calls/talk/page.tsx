@@ -11,13 +11,14 @@ import esCommon from "../../../../i18n/es/common";
 import es from "../../../../i18n/es/talk";
 import ptBRCommon from "../../../../i18n/pt-BR/common";
 import ptBR from "../../../../i18n/pt-BR/talk";
-import { useDict, useLocale } from "../../../../i18n/provider";
+import { useDict } from "../../../../i18n/provider";
 import { ApiFailure, api, useApi } from "../../../../ui/api";
-import { formatDuration, formatMoney } from "../../../../ui/format";
+import { formatDuration } from "../../../../ui/format";
 import { Badge, Button, EmptyState, Field, Notice, Panel, Select, Skeleton, buttonClass, type Tone } from "../../../../ui/kit";
 import { useLive, useNow } from "../../../../ui/live";
 import { Timeline } from "../../../../ui/timeline";
-import type { Agent, Call, CallEvent, CallStatus, Engine } from "../../../../ui/types";
+import { Amount } from "../../costs/amount-view";
+import type { Agent, CallDetail, CallEvent, CallStatus, Engine } from "../../../../ui/types";
 
 type Phase = "idle" | "starting" | "live" | "ended";
 const LAST_AGENT = "dv_talk_agent";
@@ -42,7 +43,6 @@ const FixLink = ({ href, children }: { href: string; children: ReactNode }) => (
 export default function TalkPage() {
   const t = useDict(ptBR, en, es);
   const common = useDict(ptBRCommon, enCommon, esCommon);
-  const locale = useLocale();
   const now = useNow();
   const agents = useApi<Agent[]>("/agents");
   const engines = useApi<Engine[]>("/engines");
@@ -58,7 +58,7 @@ export default function TalkPage() {
   const voice = useRef<VoiceCall | null>(null);
   const answered = useRef(false);
 
-  const call = useApi<Call>(callId ? `/calls/${callId}` : null);
+  const call = useApi<CallDetail>(callId ? `/calls/${callId}` : null);
   const events = useApi<CallEvent[]>(callId ? `/calls/${callId}/events` : null);
   useLive((signal) => {
     if (signal.callId !== callId) return;
@@ -293,7 +293,7 @@ export default function TalkPage() {
               </div>
               <div className="grid gap-1">
                 <dt className="text-[0.8rem] font-bold text-muted">{t.ended.cost}</dt>
-                <dd className="data text-[1.2rem]">{call.data ? formatMoney(call.data.costCents, locale) : ""}</dd>
+                <dd className="data text-[1.2rem]">{call.data ? <Amount cents={call.data.costCents} unmeasuredCount={call.data.unmeasuredCount} estimatedCount={call.data.estimatedCount} /> : ""}</dd>
               </div>
             </dl>
             <div className="flex flex-wrap items-center gap-3 border-t border-line pt-5">

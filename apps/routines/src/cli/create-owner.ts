@@ -1,7 +1,7 @@
 import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { createDb, hashPassword, loadConfig, withSystem, type Db } from "@deskvoice/core";
+import { accountExists, createDb, createMember, hashPassword, loadConfig, recordFoundingOrganization, withSystem, type Db } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
 import { z } from "zod";
 import { cliArgs } from "./args";
@@ -32,16 +32,16 @@ const EXAMPLE_AGENT = {
 
 /**
  * Cria a organização, o dono, a política de ligações de saída (desligada) e um agente de exemplo.
- * E-mail já cadastrado não cria nada. Entrada inválida (senha curta, e-mail ruim) lança erro.
+ * Se for a primeira organização da instalação, grava-a como a fundadora. E-mail que já tem conta
+ * não cria nada. Entrada inválida (senha curta, e-mail ruim) lança erro.
  */
 export async function createOwner(db: Db, input: OwnerInput): Promise<CreateOwnerResult> {
   const parsed = inputSchema.safeParse(input);
   if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
   const { email, name, organization, password } = parsed.data;
 
-  const emailTaken = (): Promise<boolean> => withSystem(db, async (q) => (await q.one("select 1 from users where email = $1", [email])) !== null);
   // Antes do hash, que é caro de propósito: repetir o comando não gasta um segundo à toa.
-  if (await emailTaken()) return { created: false, reason: "email_exists" };
+  if (await accountExists(db, email)) return { created: false, reason: "email_exists" };
 
   const passwordHash = await hashPassword(password);
   // As ferramentas vêm da pasta: o agente de exemplo nasce com todas as que funcionam, sem lista aqui,
@@ -56,12 +56,15 @@ export async function createOwner(db: Db, input: OwnerInput): Promise<CreateOwne
       return row.id;
     };
     const organizationId = await insert("insert into organizations (name) values ($1) returning id", [organization]);
-    const userId = await insert("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, $3, $4, 'owner') returning id", [
-      organizationId,
-      email,
-      name,
-      passwordHash,
-    ]);
+    // A conta e o vínculo de dono, pela função que grava os dois juntos.
+    const member = await createMember(q, { organizationId, email, name, passwordHash, role: "owner" });
+    // Entre a conferência acima e aqui outra execução criou a conta: lançar desfaz a organização.
+    if (!member) throw new Error(`já existe uma conta com o e-mail ${email}`);
+    const userId = member.userId;
+    // Numa instalação nova a migration não achou organização: a primeira criada aqui é a fundadora, e
+    // o dono dela administra a instalação (seção 3.2 do desenho do R8). Se a fundadora já existe,
+    // nada muda: uma organização nova não dá papel na instalação a ninguém.
+    await recordFoundingOrganization(q, organizationId);
     await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, false)", [organizationId]);
     const agentId = await insert(
       "insert into agents (organization_id, name, role_label, instructions, greeting, engine, language, tools) values ($1, $2, $3, $4, $5, 'simulated', 'pt-BR', $6) returning id",
@@ -88,7 +91,7 @@ async function main(): Promise<void> {
     process.stdout.write(
       result.created
         ? `Organização "${values.organization}" criada, com ${values.email} como dono e o agente de exemplo "${EXAMPLE_AGENT.name}".\n`
-        : `Já existe um usuário com o e-mail ${values.email}. Nada foi criado nem alterado.\n`,
+        : `Já existe uma conta com o e-mail ${values.email}. Nada foi criado nem alterado.\n`,
     );
   } finally {
     await db.close();

@@ -64,4 +64,13 @@ describe("agenda_marcar", () => {
     expect(result.noEffect).toBeUndefined();
     expect(crm.compromissos.size).toBe(0);
   });
+
+  it("agente em inglês: a espera sai em inglês", async () => {
+    const ctx = contextoDaAgenda("en");
+
+    const result = await createAgendaMarcar({ agenda: crmSimulado() }).run({ service_type: "Estimate", starts_at: ESCOLHIDO, confirmed: true }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(ctx.said).toEqual(["One moment, I'm booking that for you."]);
+  });
 });

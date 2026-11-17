@@ -1,6 +1,6 @@
 import { PURGED_SUMMARY_TEXT, storedCallAnalysisSchema } from "@deskvoice/core";
 import { handle, notFound } from "../../../../../server/context";
-import { centsOf, LEDGER_AGENT } from "../../../../../server/costs";
+import { centsOf, ESTIMATED_COUNT, LEDGER_AGENT, UNMEASURED_COUNT } from "../../../../../server/costs";
 import { CALL_COLUMNS } from "../../../../../server/shapes";
 
 export const GET = handle({}, async ({ q, params }) => {
@@ -20,10 +20,17 @@ export const GET = handle({}, async ({ q, params }) => {
   // O custo de cada agente da ligação, na ordem em que ele gastou, com o mesmo agente por linha da
   // tela de Custos. Arredondado uma vez por agente, a partir dos micro-centavos do extrato. A tela só
   // mostra a lista quando há mais de um agente.
-  const byAgent = await q.many<{ agentId: string | null; name: string | null; microcents: string }>(
-    `select ${LEDGER_AGENT} as "agentId", a.name, coalesce(sum(l.cost_microcents), 0)::text as microcents
+  const byAgent = await q.many<{ agentId: string | null; name: string | null; microcents: string; unmeasured: number; estimated: number }>(
+    `select ${LEDGER_AGENT} as "agentId", a.name, coalesce(sum(l.cost_microcents), 0)::text as microcents,
+            ${UNMEASURED_COUNT} as unmeasured, ${ESTIMATED_COUNT} as estimated
        from usage_ledger l join calls c on c.id = l.call_id left join agents a on a.id = ${LEDGER_AGENT}
       where l.call_id = $1 group by 1, 2 order by min(l.at), 1`,
+    [params.id],
+  );
+  // Quantas linhas do extrato da ligação não têm custo medido (com alguma, o valor não é o gasto
+  // inteiro) e quantas têm custo estimado (com alguma, o valor inclui uma estimativa).
+  const ledger = await q.one<{ unmeasured: number; estimated: number }>(
+    `select ${UNMEASURED_COUNT} as unmeasured, ${ESTIMATED_COUNT} as estimated from usage_ledger l where l.call_id = $1`,
     [params.id],
   );
   return {
@@ -32,6 +39,14 @@ export const GET = handle({}, async ({ q, params }) => {
     summaryPurged,
     analysis: parsed?.success ? parsed.data : null,
     analysisUnreadable: parsed !== null && !parsed.success,
-    costByAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents) })),
+    costByAgent: byAgent.map((row) => ({
+      agentId: row.agentId,
+      name: row.name,
+      costCents: centsOf(row.microcents),
+      unmeasuredCount: row.unmeasured,
+      estimatedCount: row.estimated,
+    })),
+    unmeasuredCount: ledger?.unmeasured ?? 0,
+    estimatedCount: ledger?.estimated ?? 0,
   };
 });

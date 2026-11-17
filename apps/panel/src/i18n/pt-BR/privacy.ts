@@ -38,6 +38,15 @@ const privacy = {
   notesConfirmTitle: "Apagar as notas com mais de {days} dias?",
   notesConfirmBody: "As notas mais velhas que o novo prazo saem em instantes, e daí em diante uma vez por dia. O que sai não volta.",
   notesConfirmYes: "Apagar e guardar por {days} dias",
+  memoryTitle: "Memória do número no agente",
+  memoryLead:
+    "Com a chave ligada, o agente começa cada ligação sabendo as notas guardadas sobre o número e os títulos das pendências abertas dele. Vale para as ligações recebidas e para as que o sistema disca. Nunca entram o resumo nem as falas de ligações anteriores. Vem desligada.",
+  memorySwitch: "Entregar ao agente a memória do número",
+  memorySpoofed:
+    "O número exibido pode ser forjado. Quem ligar com o número de outra pessoa pode ouvir do agente o que está nas notas dela: o agente é instruído a não as ler para quem ligou, mas isso não é garantia.",
+  memoryCost:
+    "O bloco tem no máximo 1 500 caracteres, com até 10 notas e 5 pendências, e o gasto entra no teto de custo de cada ligação. Ligar ou desligar não apaga nota: elas seguem o prazo da memória acima. Vale a partir da próxima ligação.",
+  memoryStates: { on: "ligada", off: "desligada" },
   exportTitle: "Dados de uma pessoa que ligou",
   exportLead:
     "Quando alguém pede o que a central guarda sobre ela, informe o telefone. Sai um arquivo com as chamadas desse número nesta organização, os eventos delas, as pendências desse número, abertas e fechadas, as notas do agente sobre ele e a entrada na lista de não ligar. A fala que já saiu pelo prazo aparece como apagada. Cada chamada diz se tem gravação; o áudio não vai no arquivo e se ouve na tela da chamada.",
@@ -79,7 +88,7 @@ const privacy = {
   forgetConfirmYes: "Esquecer {phone}",
   forgetDone: "{phone} foi esquecido. Notas do agente apagadas: {notes}. Pendências fechadas apagadas: {followUps}.",
   historyTitle: "Registro",
-  historyLead: "Quem mudou o prazo ou a gravação, o que saiu pelo prazo, quem exportou os dados de qual telefone, quem apagou dados a pedido de quem ligou e o que aconteceu com os links de gravação para quem ligou. Os 50 mais recentes.",
+  historyLead: "Quem mudou o prazo ou a gravação, o que saiu pelo prazo, quem exportou os dados de qual telefone, quem apagou dados a pedido de quem ligou o que aconteceu com os links de gravação para quem ligou e quem confirmou que um analista manda o texto da ligação a um fornecedor. Os 50 mais recentes.",
   historyEmpty: "Nada registrado ainda.",
   history: {
     transcript_retention_changed: "{who} mudou o prazo de guarda de {from} para {to}.",
@@ -93,6 +102,8 @@ const privacy = {
     share_revoked: "{who} revogou os links da gravação de uma chamada. Links revogados: {count}.",
     caller_notes_purged: "As notas do agente com mais de {days} dias foram apagadas pelo prazo da memória. Notas apagadas: {count}.",
     caller_notes_retention_changed: "{who} mudou o prazo da memória de {from} para {to}.",
+    caller_memory_changed: "{who} deixou a memória do número no agente {state}.",
+    analyst_provider_confirmed: "{who} confirmou que o analista {analyst} manda o texto do que a pessoa fala na ligação para {provider}.",
     caller_notes_deleted: "{who} esqueceu o número terminado em {suffix}. Notas do agente apagadas: {notes}. Pendências fechadas apagadas: {followUps}.",
   },
   noteDeleted: "{who} apagou uma nota do agente.",

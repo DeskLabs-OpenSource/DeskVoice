@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createOrganization, openTestDbs } from "../test/helpers";
+import { createAccount } from "./accounts";
 import { TEAM_ROLES, acceptInvite, canManageRole, findInviteByToken } from "./invites";
 import { hashToken } from "./password";
-import { withOrg } from "./with-org";
+import { withOrg, withSystem } from "./with-org";
 
 const { app, owner } = openTestDbs();
 const now = new Date("2026-03-01T15:00:00.000Z");
@@ -13,8 +14,10 @@ let orgB: string;
 const creators = new Map<string, string>();
 
 async function member(organizationId: string, role = "owner"): Promise<string> {
+  const email = `${randomUUID()}@example.test`;
+  const account = await withSystem(app, (q) => createAccount(q, { email, passwordHash: "x" }));
   const row = await withOrg(app, organizationId, (q) =>
-    q.one<{ id: string }>("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, 'Quem convida', 'x', $3) returning id", [organizationId, `${randomUUID()}@example.test`, role]),
+    q.one<{ id: string }>("insert into users (organization_id, account_id, email, name, role) values ($1, $2, $3, 'Quem convida', $4) returning id", [organizationId, account, email, role]),
   );
   return row?.id ?? "";
 }
@@ -44,7 +47,7 @@ async function invite(organizationId: string, overrides: Record<string, unknown>
 }
 
 const usersWith = async (email: string): Promise<Array<Record<string, unknown>>> =>
-  (await owner.pool.query("select organization_id, name, role, password_hash from users where email = $1", [email])).rows;
+  (await owner.pool.query("select u.organization_id, u.name, u.role, u.kind, a.password_hash from users u join accounts a on a.id = u.account_id and a.email = u.email where u.email = $1", [email])).rows;
 const inviteRow = async (id: string): Promise<Record<string, unknown> | undefined> =>
   (await owner.pool.query("select accepted_at, accepted_user_id, revoked_at from invites where id = $1", [id])).rows[0];
 
@@ -70,7 +73,7 @@ describe("acceptInvite", () => {
     const { token, email, id } = await invite(orgA, { role: "admin" });
     const result = await acceptInvite(app, token, { name: "Bia Lima", passwordHash: "hash-1" }, now);
     expect(result).toEqual({ ok: true, userId: expect.any(String), organizationId: orgA });
-    expect(await usersWith(email)).toEqual([{ organization_id: orgA, name: "Bia Lima", role: "admin", password_hash: "hash-1" }]);
+    expect(await usersWith(email)).toEqual([{ organization_id: orgA, name: "Bia Lima", role: "admin", kind: "member", password_hash: "hash-1" }]);
     expect(await inviteRow(id)).toEqual({ accepted_at: now, accepted_user_id: result.ok ? result.userId : "", revoked_at: null });
 
     expect(await findInviteByToken(app, token, now)).toBeNull();
@@ -97,7 +100,8 @@ describe("acceptInvite", () => {
 
   it("says the e-mail is taken, in any organization, and leaves the invite pending", async () => {
     const taken = `${randomUUID()}@example.test`;
-    await withOrg(app, orgB, (q) => q.exec("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, 'Já existe', 'x', 'operator')", [orgB, taken]));
+    const account = await withSystem(app, (q) => createAccount(q, { email: taken, passwordHash: "x" }));
+    await withOrg(app, orgB, (q) => q.exec("insert into users (organization_id, account_id, email, name, role) values ($1, $2, $3, 'Já existe', 'operator')", [orgB, account, taken]));
     const { token, id } = await invite(orgA, { email: taken });
     expect(await acceptInvite(app, token, { name: "X", passwordHash: "h" }, now)).toEqual({ ok: false, reason: "email_taken" });
     expect(await inviteRow(id)).toEqual({ accepted_at: null, accepted_user_id: null, revoked_at: null });

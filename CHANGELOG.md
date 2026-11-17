@@ -3,6 +3,162 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.27.0] - 2026-11-17
+
+### Adicionado
+
+- **Para quem contribui, uma skill nova para afinar um agente de voz com dados da operação** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e trabalha com um
+  assistente de código. A skill `deskvoice-agente-de-voz` atende o "as respostas da IA estão ruins":
+  diagnostica pela análise da ligação, pela linha do tempo e pela configuração do agente, sem tirar
+  transcrição nem telefone da instalação; revisa as instruções para a fala (frases curtas, sem
+  formatação, número e e-mail ditos, uma fala para quando algo falha); só troca o texto depois de
+  mostrar o antes e o depois e receber o sim da pessoa; e ensina a medir o efeito pela análise das
+  ligações antes e depois da troca, sem afirmar que melhorou. O vocabulário do agente, que ainda não
+  tem campo na tela, é tratado como uma dica que o provedor pode ignorar, e a skill não o troca até a
+  tela existir: registra a lista aprovada para aplicar depois. A skill de métricas passa a
+  apontar para ela. Crédito: @melgarafael.
+- **O agente pode mandar uma mensagem no WhatsApp para quem ligou quando a ligação cai** O bloco "Quando a ligação cai", na tela do agente, ganha a opção "Mandar uma mensagem no WhatsApp para quem ligou", com um campo para o texto, de até 300 caracteres. O texto é fixo, escrito por quem configura, e sai como está: nada da conversa entra nele, porque o número que ligou pode não ser de quem ligou. Vazio, vale um texto padrão na língua do agente, que começa dizendo o nome da organização. A tela avisa que a mensagem escreve primeiro para um número que pode nunca ter falado com o WhatsApp da central, o que pode levar a restrição ou bloqueio do número. A opção só funciona com o WhatsApp conectado e com "Confiar no número exibido na ligação" ligado, em Configurações → WhatsApp; sem isso, aparece desabilitada e diz por quê. Número na lista de não ligar não recebe a mensagem, e cada número recebe no máximo uma a cada 24 horas. Um teto de mensagens por organização protege o número: no máximo 3 por hora e 20 a cada 24 horas. A segunda queda do mesmo número nesse prazo, a mensagem acima do teto, ou a que não pôde sair, abre uma pendência para alguém retornar. A linha do tempo da ligação diz se a mensagem entrou na fila, saiu ou não saiu, e o apagamento a pedido do titular apaga também o número guardado na mensagem. A definição de queda na tela passa a citar o caso de quem ouve o agente pedir para repetir: "Conta como queda quando o sistema falha, quando quem ligou fica alguns segundos sem resposta e desliga, quando ouve o agente pedir para repetir e desliga sem voltar a falar, ou quando a linha cai durante uma ação do agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta." Todo agente que já existe continua no modo que tinha, e nada muda para quem não escolher a opção nova. Crédito: @melgarafael.
+
+## [0.26.0] - 2026-11-17
+
+### Adicionado
+
+- **Para quem contribui, o Claude Code implementa uma fatia de desenho com um verificador separado** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e contribui. No Claude
+  Code, `/deskvoice-fatia <desenho> <número>` lê a fatia de um desenho de `docs/specs/`, cria um
+  worktree descartável, chama um implementador com o contrato e o aceite palavra por palavra e depois
+  um verificador que não pode escrever e tenta derrubar a entrega, até ele aprovar ou até três
+  voltas. O comando não envia nada ao GitHub: o ramo fica local, e abrir o PR é com a pessoa. O aviso
+  de identidade do commit passa a olhar o e-mail que o commit vai gravar de fato, e não só o do
+  `git config`: some o aviso falso de quem passa o e-mail certo pelo ambiente, e aparece o de quem
+  recebe um `root@` de lá. Crédito: @melgarafael.
+- **Para quem contribui, duas skills novas: ler as métricas com régua declarada e aplicar o sistema vivo a uma peça** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e trabalha com um
+  assistente de código. A skill `deskvoice-metricas` lê como está a operação (ligações, desfecho, nota
+  da análise, custo, falhas, fila, ligações de saída) primeiro pelas telas e depois por consultas só
+  de leitura, filtradas pela organização, sem transcrição, nome ou telefone; cada número sai com
+  período, fuso e definição. A skill `deskvoice-sistema-vivo` percorre as perguntas da doutrina do
+  sistema vivo para uma peça nova e diz onde conferir cada resposta no código, apontando para a lei
+  em vez de copiá-la. A skill de contribuição passa a dizer que o aviso de identidade olha a
+  identidade efetiva do commit, como o gancho já faz. Crédito: @melgarafael.
+- **O agente pode abrir uma pendência quando a ligação cai no meio da conversa** A tela do agente ganha o bloco "Quando a ligação cai", com duas opções: "Não fazer nada", o
+  padrão, e "Abrir uma pendência para alguém retornar". Conta como queda a ligação recebida e
+  atendida em que o sistema falhou, em que quem ligou ficou alguns segundos sem resposta (além do
+  prazo da guarda do silêncio) e desligou (inclusive quem ouviu o agente pedir para repetir e desligou
+  sem voltar a falar), ou em que a linha caiu durante uma ação do agente. Quem desliga depois de se
+  despedir, ou enquanto o agente fala, não conta; também não conta a ligação sem número nem aquela em
+  que alguém já ficou com o próximo passo (transferência, recado, pendência, aviso ou WhatsApp
+  enviado). Com a pendência escolhida, o supervisor
+  abre uma por ligação, para o dono das pendências do agente, e a linha do tempo diz o que aconteceu;
+  o motor de voz que caiu continua abrindo a pendência como hoje. Na ligação simulada, a linha do tempo
+  diz o que teria acontecido, e nada é aberto. O fim da ligação passa a registrar se a vez estava
+  aberta quando quem ligou desligou e, depois de um pedido para repetir, se quem ligou falou de novo.
+  Todo agente que já existe fica em "Não fazer nada", e o comportamento de hoje não muda. Crédito:
+  @melgarafael.
+
+## [0.25.0] - 2026-11-16
+
+### Adicionado
+
+- **A lista de Chamadas e a tela de Custos dizem o que não foi medido e o que é estimativa** Na lista de Chamadas, a ligação em que nada pôde ser medido não aparece mais como R$ 0,00: ali
+  está escrito "Não medido", e a ligação com uma parte sem medida mostra o valor com "+ parte não
+  medida", como já fazia a tela de Custos. A linha do extrato com custo estimado agora aparece marcada
+  com "inclui estimativa" na lista, no detalhe da chamada e em Custos (no total, no dia, no agente e
+  no motor), e um aviso em Custos explica que a estimativa conta no total e no teto e é feita para
+  ficar acima do real. Hoje a linha estimada só nasce do filtro da fala (um pedido cujo consumo não
+  foi lido), e o filtro vem desligado: quem não o ligou não vê essa marca. O aviso do custo não
+  medido deixa de culpar o provedor: ele diz que o consumo não pôde ser medido. Na API,
+  `GET /api/v1/calls` ganha `unmeasuredCount` e `estimatedCount` em cada ligação;
+  `GET /api/v1/calls/{id}` ganha `estimatedCount` no total e os dois campos em cada agente de
+  `costByAgent`; e `GET /api/v1/system/costs` ganha `estimatedCount` no total e em cada dia, agente e
+  motor. Os campos de antes não mudam. Nada a configurar em instalações existentes. Crédito:
+  @melgarafael.
+
+## [0.24.0] - 2026-11-16
+
+### Adicionado
+
+- **Quem lê a ligação se escolhe na tela, e o custo não medido aparece como não medido** Na seção da análise, em Configurações, "Quem lê a ligação" escolhe entre o motor do agente (o
+  padrão, como antes) e um cérebro com chave aceita em Configurações → Cérebros, com um modelo da
+  lista dele, buscável por nome. Ao escolher um modelo sem preço conhecido, um aviso diz, antes de
+  salvar e depois de salvo, que o custo da análise não vai ser medido e que ela só roda nas ligações
+  de agentes com teto de custo. Se o cérebro escolhido perde a chave, ou o modelo sai da lista, a tela
+  diz que as ligações não estão sendo lidas. Remover a chave do cérebro escolhido avisa isso antes.
+  Em Custos e na tela da chamada, a ligação lida por um modelo sem preço conhecido, ou cujo consumo não pôde ser medido, mostra "não medido", e nunca
+  um custo zero como se fosse grátis. Na API, `GET /api/v1/system/costs` ganha `unmeasuredCount` no
+  total e em cada dia, agente e motor, e `GET /api/v1/calls/{id}` ganha `unmeasuredCount` no total da
+  chamada: quantas linhas do extrato não têm custo medido. Os campos de antes não mudam. A lista de modelos de um cérebro que falha ao ser relida
+  continua a guardada, marcada como velha. Sem escolha, nada muda em instalações existentes. Crédito: @melgarafael.
+
+### Corrigido
+
+- **O pedido do filtro da fala que falha grava um custo estimado, e não zero** Quando o filtro da fala de quem liga pergunta ao Jev e a resposta chega atrasada, não chega por
+  falta de rede ou chega fora da forma, o extrato de custo ganha uma linha com uma estimativa pelo
+  texto enviado, marcada como estimada, e ela entra no total da ligação e no teto de custo do agente.
+  Antes, esse pedido não deixava custo nenhum. O filtro continua nascendo desligado: quem não o
+  ligou não vê nada diferente, e as linhas que já estão no extrato ficam como estão. Nada muda em
+  instalações existentes. Crédito: @melgarafael.
+- **O agente configurado como en-US ou es-MX fala inglês ou espanhol também na passagem e na agenda** Com o idioma do agente escrito com região (`en-US`, `es-MX`), a saudação da passagem entre agentes e as falas das ferramentas de agenda saíam em português, porque cada uma escolhia o idioma por um mapa de três valores e o que ficava fora dele caía no pt-BR. Agora as duas leem o idioma pelo prefixo, num único lugar: `en-US` fala inglês, `es-MX` fala espanhol, e `pt-BR`, `en` e `es` continuam exatamente como eram. Idioma que as falas não têm, campo vazio ou texto qualquer seguem no português, sem erro. O aviso da caixa postal continua no idioma escolhido em Configurações › Chamadas, sem mudança. Nada a configurar em instalações existentes. Achado na revisão do #344. Crédito: @webtecnica.
+
+## [0.23.1] - 2026-11-16
+
+### Corrigido
+
+- **A memória do número chega ao agente sem o telefone no título da pendência e dentro do teto também na passagem** Com a memória do número ligada, a pendência que o supervisor abre ("Retornar para +55…: o caso") chegava ao agente com o telefone de quem ligou no título. Agora o agente recebe "Retornar para este número: o caso", e outro telefone que apareça no título vira "[número]". O título salvo não muda, e a tela das pendências continua mostrando o número. Na passagem entre agentes, o teto de 1 500 caracteres passa a valer para o bloco inteiro que o agente de destino recebe, com o motivo e o resumo da passagem: as notas mais velhas saem primeiro, o motivo e o resumo nunca são cortados, e a linha do tempo registra de novo o que o agente de destino recebeu, só com a contagem e o tamanho. Com a memória desligada, que é como ela vem, nada muda. Achado na revisão do #327. Crédito: @melgarafael.
+
+## [0.23.0] - 2026-11-16
+
+### Adicionado
+
+- **O desfecho e a análise da ligação podem ser lidos por um cérebro escolhido** Com a chave de um cérebro salva em Configurações → Cérebros, a configuração `calls.analysis_brain`
+  escolhe um cérebro e um modelo da lista dele para ler as ligações: o desfecho e a análise passam a
+  sair desse modelo, na frente do motor de voz e do endpoint de classificação. O extrato de custo
+  ganha o modelo cobrado e a marca de custo medido. Um modelo sem preço conhecido só é aceito com
+  confirmação, só lê ligações de agentes com teto de custo, e a linha dele no extrato fica marcada
+  como custo não medido; o total da ligação e o de Custos ainda contam esse custo como zero, e as telas não avisam. Se o cérebro escolhido ficar sem chave, sumir ou o modelo sair da
+  lista, a ligação não é lida, a linha do tempo diz por quê, e nada vai ao motor de voz. A escolha ainda não tem tela; hoje é pela API do painel, com
+  `PUT /api/v1/settings/calls.analysis_brain`. Sem escolha, tudo segue como antes. Nada muda em instalações
+  existentes. Crédito: @melgarafael.
+
+## [0.22.0] - 2026-11-16
+
+### Adicionado
+
+- **Cérebros, uma tela para as chaves e os modelos de texto de cada provedor** Em Configurações → Cérebros, quem configura a instalação cola a chave da Anthropic, da OpenAI, do
+  Gemini, da DeepSeek ou do OpenRouter e vê na hora o resultado do teste e a lista de modelos de texto
+  que aquela chave alcança, lida do provedor. Cada modelo mostra o preço de entrada e de saída por
+  milhão de tokens, com a fonte e a data, ou a marca "sem preço conhecido"; os modelos da DeepSeek ficam sem preço, porque ela cobra conforme
+  a hora do pedido. A chave fica cifrada no
+  servidor e não volta à tela, e trocar ou remover a chave apaga a lista da anterior. A lista é relida
+  pelo botão Atualizar lista e quando passa de um dia. A chave do cérebro é separada da chave do motor
+  de voz. Ainda nenhum cérebro lê a ligação: a escolha para a análise vem numa próxima versão. Nada
+  muda em instalações existentes. Crédito: @melgarafael.
+- **A base do filtro da fala de quem liga, desligada de fábrica** O processo de voz ganhou o filtro que lê o texto do que a pessoa disse e o marca, sem nunca apagar nem trocar a fala: a marca "pode ser fala de fundo" e a sugestão de leitura de um nome do vocabulário do agente ("leitura provável: Melgaço") ficam ao lado do texto ouvido, e o custo de cada pedido entra no extrato da chamada. Ele nasce desligado, e ainda não há tela para ligá-lo: quem já instalou não vê diferença nenhuma, nenhum texto sai do servidor e nenhuma linha nova aparece na linha do tempo. A escolha do modelo, a chave e a confirmação do envio do texto ao fornecedor chegam com a tela, na próxima entrega. Crédito: @deskcomm-bot.
+
+## [0.21.0] - 2026-11-16
+
+### Adicionado
+
+- **Base do catálogo de cérebros, com OpenAI e OpenRouter** O DeskVoice ganha a peça que lista os modelos de texto que uma chave da OpenAI ou do OpenRouter
+  alcança, lida da API do provedor e nunca de uma lista fixa, com o preço de cada modelo, a fonte e a
+  data, ou a marca de preço não conhecido. Ainda não há tela nem uso na ligação: os dois chegam nas
+  próximas entregas do catálogo. Nada muda em instalações existentes. Crédito: @melgarafael.
+- **Para quem contribui, o Claude Code ganha uma triagem de PR que só lê** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e revisa PRs. No
+  Claude Code, `/deskvoice-triagem-de-pr <número>` baixa o PR num worktree descartável, mede o diff
+  contra a régua da `main` (o que o CI não vê, os antipadrões e as regras de produto), roda a suíte
+  se a pessoa autorizar, passa o resultado por um cético e imprime um rascunho de parecer no formato
+  do `GOVERNANCE.md`, com o que não foi medido. Ele não publica nada no GitHub: quem publica, se
+  quiser, é a pessoa. PR que toca instalador, workflow, imagem, dependências, autenticação,
+  isolamento ou atualização sai com "pede segunda leitura de um mantenedor". Crédito: @melgarafael.
+- **O agente pode começar a ligação sabendo as notas e as pendências abertas do número** Em Configurações, no painel de privacidade, junto do prazo da memória, há uma chave nova: "Entregar
+  ao agente a memória do número". Ligada, o agente começa cada ligação, recebida ou feita pelo
+  sistema, com as notas guardadas sobre o número (até 10, dentro do prazo da memória) e os títulos
+  das pendências abertas dele (até 5), num bloco de no máximo 1 500 caracteres, que ele recebe como
+  dado e não como instrução. O resumo e as falas de ligações anteriores nunca entram, nem as notas e
+  pendências de chamadas simuladas. A linha do tempo da chamada mostra quantas notas e pendências
+  entraram, sem o texto. A tela avisa que o número exibido pode ser forjado e que o agente pode
+  repetir o que sabe para quem fingir ser a pessoa. Só dono ou administrador muda a chave, e cada
+  mudança fica no histórico de privacidade. Ela vem desligada: para quem já instalou, nada muda até
+  alguém ligá-la. Crédito: @melgarafael.
+
 ## [0.20.0] - 2026-11-16
 
 ### Adicionado

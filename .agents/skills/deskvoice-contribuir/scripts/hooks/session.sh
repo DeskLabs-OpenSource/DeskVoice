@@ -45,6 +45,6 @@ fi
 cat <<TXT
 [DeskVoice] Clone de contribuidor. Antes de codar ou commitar, carregue a skill deskvoice-contribuir:
 ela mede antes do PR o que a revisão mede depois. Hooks de git: $hooks.
-Outras skills: deskvoice-doutrina, deskvoice-ferramenta, deskvoice-motor-de-voz, deskvoice-instalar, deskvoice-operar.
+Outras skills: deskvoice-doutrina, deskvoice-sistema-vivo, deskvoice-ferramenta, deskvoice-motor-de-voz, deskvoice-instalar, deskvoice-operar, deskvoice-metricas, deskvoice-agente-de-voz.
 TXT
 exit 0

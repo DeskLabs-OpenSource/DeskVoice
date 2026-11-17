@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agendaNotWired, agendaUnavailable } from "../agenda-speech";
+import { agendaNotWired, agendaUnavailable, agendaWaitLine } from "../agenda-speech";
 import { defineTool } from "../define-tool";
 import type { ToolDeps } from "../deps";
 
@@ -44,7 +44,7 @@ export function createAgendaRemarcar(deps: ToolDeps = {}) {
         };
       }
 
-      ctx.say("Um instante, estou remarcando.");
+      ctx.say(agendaWaitLine("rescheduling", ctx.language));
       try {
         const appointment = await client.reschedule({
           appointmentId: input.appointment_id,

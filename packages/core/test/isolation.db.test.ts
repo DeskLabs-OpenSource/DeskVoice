@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createAccount } from "../src/accounts";
 import type { OrgQuery } from "../src/types";
 import { createDb } from "../src/db";
 import { withOrg, withSystem } from "../src/with-org";
@@ -12,15 +13,40 @@ type Factory = (organizationId: string, parents: Record<string, Row>) => Row;
 const at = new Date("2026-01-15T12:00:00Z");
 const unique = (prefix: string): string => `${prefix}-${randomUUID()}`;
 
+// A conta não pertence a organização nenhuma e só o papel de sistema a cria: a fábrica de `users`
+// pega uma destas, feitas antes. Cada vínculo precisa de uma conta própria (`users_one_membership_idx`
+// e o e-mail único).
+const { app, owner } = openTestDbs();
+const spareAccounts: string[] = [];
+for (let i = 0; i < 6; i++) {
+  const id = await withSystem(app, (q) => createAccount(q, { email: `${unique("account")}@example.com`, passwordHash: "x" }));
+  if (!id) throw new Error("could not create a test account");
+  spareAccounts.push(id);
+}
+const nextAccount = (): string => {
+  const id = spareAccounts.pop();
+  if (!id) throw new Error("isolation.db.test.ts ran out of spare accounts: create more above");
+  return id;
+};
+
 // Uma fábrica por tabela com `organization_id`, em ordem de dependência. Tabela nova sem fábrica
 // reprova este arquivo: é assim que ela é obrigada a entrar no teste de isolamento.
 const factories: Record<string, Factory> = {
-  users: (organization_id) => ({ organization_id, email: `${unique("user")}@example.com`, name: "User", password_hash: "x", role: "owner" }),
-  sessions: (organization_id, p) => ({ organization_id, user_id: p.users?.id, token_hash: unique("token"), expires_at: at }),
+  users: (organization_id) => ({ organization_id, account_id: nextAccount(), email: `${unique("user")}@example.com`, name: "User", role: "owner" }),
+  sessions: (organization_id, p) => ({ organization_id, user_id: p.users?.id, account_id: p.users?.account_id, token_hash: unique("token"), expires_at: at }),
   invites: (organization_id, p) => ({ organization_id, email: `${unique("invite")}@example.com`, name: "Invited", role: "operator", token_hash: unique("invite-token"), expires_at: at, created_by: p.users?.id }),
   settings: (organization_id) => ({ organization_id, key: unique("key"), value: { on: true } }),
   trunks: (organization_id) => ({ organization_id, name: "Trunk", host: "sip.example.com", auth_mode: "register" }),
-  agents: (organization_id) => ({ organization_id, name: "Agent", engine: "simulated" }),
+  analysts: (organization_id, p) => ({
+    organization_id,
+    name: unique("analyst").slice(0, 40),
+    decision_model: "jev",
+    provider_confirmed_by: p.users?.id,
+    provider_confirmed_at: at,
+    created_at: at,
+    updated_at: at,
+  }),
+  agents: (organization_id, p) => ({ organization_id, name: "Agent", engine: "simulated", analyst_id: p.analysts?.id }),
   phone_numbers: (organization_id, p) => ({ organization_id, trunk_id: p.trunks?.id, e164: `+55${Math.floor(1e10 + Math.random() * 9e10)}`, agent_id: p.agents?.id }),
   calls: (organization_id, p) => ({ organization_id, agent_id: p.agents?.id, direction: "inbound", channel: "phone", status: "ringing", started_at: at }),
   call_events: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, at, kind: "call_started", payload: {} }),
@@ -50,7 +76,11 @@ const factories: Record<string, Factory> = {
   }),
 };
 
-const UNSCOPED_TABLES = ["organizations", "schema_migrations"];
+// Tabelas da INSTALAÇÃO (R8, seção 3.9): sem `organization_id`, com RLS forçado e sem policy, e sem
+// nenhum direito para `deskvoice_app`. A senha de todas as contas nunca fica ao alcance de uma rota
+// presa a uma organização. O papel de sistema lê e acrescenta; nenhuma delas se apaga por ele.
+const INSTALLATION_TABLES = ["accounts", "installation_settings", "installation_events"];
+const UNSCOPED_TABLES = ["organizations", "schema_migrations", ...INSTALLATION_TABLES];
 const RLS_VIOLATION = "42501";
 
 // Tabelas só de acréscimo: os papéis de aplicação e de sistema leem e inserem, e nunca alteram nem
@@ -62,8 +92,6 @@ const APPEND_ONLY_TABLES: Record<string, string> = {
 };
 const isAppendOnly = (table: string): boolean => Object.hasOwn(APPEND_ONLY_TABLES, table);
 const PERMISSION_DENIED = { code: "42501", message: expect.stringMatching(/permission denied/) };
-
-const { app, owner } = openTestDbs();
 
 // A lista de tabelas vem do catálogo do Postgres, nunca de lista escrita à mão.
 const catalog = await owner.pool.query<{ name: string; has_org: boolean; rls: boolean; forced: boolean; pk: string[] }>(`
@@ -78,7 +106,9 @@ const catalog = await owner.pool.query<{ name: string; has_org: boolean; rls: bo
    where n.nspname = 'public' and c.relkind in ('r', 'p')
    order by c.relname`);
 const tables = catalog.rows;
-const scoped = tables.filter((t) => t.has_org);
+// `installation_events.organization_id` existe, mas aceita nulo e não isola nada: o registro é da
+// instalação e sobrevive à exclusão da organização. As tabelas da instalação ficam fora das escopadas.
+const scoped = tables.filter((t) => t.has_org && !INSTALLATION_TABLES.includes(t.name));
 const pkOf = new Map(tables.map((t) => [t.name, t.pk]));
 
 const ident = (name: string): string => `"${name.replaceAll('"', '""')}"`;
@@ -149,8 +179,10 @@ describe("schema", () => {
     expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(UNSCOPED_TABLES));
   });
 
-  it("has organization_id on every table except organizations and schema_migrations", () => {
-    expect(tables.filter((t) => !t.has_org).map((t) => t.name).sort()).toEqual([...UNSCOPED_TABLES].sort());
+  it("has organization_id on every table except organizations, schema_migrations and the installation tables", () => {
+    expect(tables.filter((t) => !scoped.includes(t)).map((t) => t.name).sort()).toEqual([...UNSCOPED_TABLES].sort());
+    // Fora as da instalação, só `organizations` e `schema_migrations` ficam sem `organization_id`.
+    expect(tables.filter((t) => !t.has_org && !INSTALLATION_TABLES.includes(t.name)).map((t) => t.name).sort()).toEqual(["organizations", "schema_migrations"]);
   });
 
   it("forces row level security on every product table", () => {
@@ -206,6 +238,43 @@ describe("schema", () => {
       const changes = !isAppendOnly(row.name);
       expect([row.can_select, row.can_insert, row.can_update, row.can_delete], `${row.name} as ${row.role}`).toEqual([true, true, changes, changes]);
     }
+  });
+
+  it("keeps the installation tables out of reach of the application role, and lets the system role only read and add (and drop an account left without a link)", async () => {
+    const privileges = await owner.pool.query<{ name: string; role: string; can_select: boolean; can_insert: boolean; can_update: boolean; can_delete: boolean; can_truncate: boolean }>(
+      `select t.name, r.role,
+              has_table_privilege(r.role, format('public.%I', t.name), 'select') as can_select,
+              has_table_privilege(r.role, format('public.%I', t.name), 'insert') as can_insert,
+              has_table_privilege(r.role, format('public.%I', t.name), 'update') as can_update,
+              has_table_privilege(r.role, format('public.%I', t.name), 'delete') as can_delete,
+              has_table_privilege(r.role, format('public.%I', t.name), 'truncate') as can_truncate
+         from unnest($1::text[]) as t(name), unnest(array['deskvoice_app', 'deskvoice_system']) as r(role)`,
+      [INSTALLATION_TABLES],
+    );
+    // A conta e as configurações mudam (senha, marca, padrão); a auditoria só cresce.
+    const SYSTEM_UPDATES: Record<string, boolean> = { accounts: true, installation_settings: true, installation_events: false };
+    // Só a conta sai, e só quando fica sem vínculo (`deleteAccountIfOrphan`). A configuração e a
+    // auditoria nunca são apagadas pelo produto.
+    const SYSTEM_DELETES: Record<string, boolean> = { accounts: true, installation_settings: false, installation_events: false };
+    expect(privileges.rows).toHaveLength(INSTALLATION_TABLES.length * 2);
+    for (const row of privileges.rows) {
+      const expected = row.role === "deskvoice_app" ? [false, false, false, false, false] : [true, true, SYSTEM_UPDATES[row.name], SYSTEM_DELETES[row.name], false];
+      expect([row.can_select, row.can_insert, row.can_update, row.can_delete, row.can_truncate], `${row.name} as ${row.role}`).toEqual(expected);
+    }
+    // Sem policy: um `grant` dado por engano ao papel de aplicação continuaria sem linha visível.
+    for (const table of INSTALLATION_TABLES) expect(tables.find((t) => t.name === table), table).toMatchObject({ rls: true, forced: true });
+  });
+
+  it("refuses to show any account, password included, to the application role, inside or outside an organization", async () => {
+    await expect(app.pool.query("select email, password_hash from accounts")).rejects.toMatchObject(PERMISSION_DENIED);
+    await expect(withOrg(app, orgA, (q) => q.many("select password_hash from accounts"))).rejects.toMatchObject(PERMISSION_DENIED);
+    for (const table of ["installation_settings", "installation_events"]) {
+      await expect(withOrg(app, orgA, (q) => q.many(`select * from ${ident(table)}`))).rejects.toMatchObject(PERMISSION_DENIED);
+    }
+    // O vínculo continua visível pela organização, sem senha: a coluna saiu de `users`.
+    const columns = await owner.pool.query<{ name: string }>("select column_name::text as name from information_schema.columns where table_schema = 'public' and table_name = 'users'");
+    expect(columns.rows.map((c) => c.name)).not.toContain("password_hash");
+    expect(columns.rows.map((c) => c.name)).toEqual(expect.arrayContaining(["account_id", "kind"]));
   });
 
   it("has a factory for every table with organization_id, and no stale factory", () => {

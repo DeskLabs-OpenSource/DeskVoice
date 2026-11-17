@@ -2,7 +2,7 @@ import { toE164 } from "@deskvoice/core";
 import { z } from "zod";
 import { askApproval } from "../approval";
 import { WahaError } from "../connectors/waha";
-import { loadWhatsAppConnector, sendWhatsApp } from "../connectors/whatsapp";
+import { loadWhatsAppConnector, sendWhatsApp, TRUST_CALLER_ID_KEY } from "../connectors/whatsapp";
 import { defineTool } from "../define-tool";
 import { configSecretKey, type ToolDeps } from "../deps";
 import { readSetting } from "../settings";
@@ -16,8 +16,7 @@ export const MAX_WHATSAPP_PER_CALL = 5;
  * O mesmo número do `request_approval` no `runTool`.
  */
 export const MAX_WHATSAPP_APPROVALS_PER_CALL = 3;
-/** Ajuste da organização: `true` faz o envio para quem ligou sair sem confirmação humana. */
-export const TRUST_CALLER_ID_KEY = "whatsapp.trust_caller_id";
+export { TRUST_CALLER_ID_KEY };
 const CONFIRMATION_TIMEOUT_SECONDS = 120;
 const FORGET_AFTER_MS = 60_000;
 

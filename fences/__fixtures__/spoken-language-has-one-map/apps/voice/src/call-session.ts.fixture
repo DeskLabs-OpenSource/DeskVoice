@@ -1,0 +1,10 @@
+const HANDOFF_GREETINGS: Record<string, string> = {
+  "pt-BR": "Oi, vou continuar o seu atendimento a partir daqui.",
+  en: "Hi, I'll take it from here and continue helping you.",
+  es: "Hola, voy a continuar con su atención a partir de aquí.",
+};
+
+export function handoffGreetingFor(language: string): string {
+  const known = Object.keys(HANDOFF_GREETINGS).includes(language);
+  return HANDOFF_GREETINGS[known ? language : "pt-BR"] ?? "";
+}

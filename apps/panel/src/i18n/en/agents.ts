@@ -68,6 +68,20 @@ const agents: AgentsDictionary = {
   followUpOwner: "Owner of this agent's follow-ups",
   followUpOwnerTeam: "The team (everyone sees it)",
   followUpOwnerHint: "If the person is disabled, their open follow-ups go back to the team.",
+  dropFollowUp: "When the call drops",
+  dropFollowUpOff: "Do nothing",
+  dropFollowUpTask: "Open a follow-up for someone to call back",
+  dropFollowUpOther: "Another mode, saved outside this screen",
+  dropFollowUpWhatsApp: "Send a WhatsApp message to the caller",
+  dropFollowUpWhatsAppUnavailable: "unavailable",
+  dropFollowUpNotConnected: "The WhatsApp message is unavailable: WhatsApp is not connected.",
+  dropFollowUpNotTrusted: "The WhatsApp message is unavailable: \"Trust the number shown on the call\" is off. Once the call has dropped there is no one to ask for confirmation, so the message only goes out with that option on.",
+  dropFollowUpFixLink: "Open Settings → WhatsApp",
+  dropFollowUpBlockRisk: "This message writes first to a number that may never have talked to this WhatsApp. As the WhatsApp screen says, that can lead to the number being restricted or blocked.",
+  dropFollowUpMessage: "Message text",
+  dropFollowUpMessageWarning: "The text goes to the number that called, and that number may not belong to the caller: someone can use another person's number, or call from a landline answered by someone else. Do not write anything from the conversation: no name, no subject, no time. The text goes out as it is, with nothing replaced: say the company name in it. If empty, the default text shown in the field is used, and it already carries the organization name.",
+  dropFollowUpMessageLimits: "At most one message per number every 24 hours, and the do-not-call list applies to it. A cap on messages per organization protects the number: at most {perHour} per hour and {perDay} every 24 hours. If the message cannot go out, a follow-up is opened for someone to call back.",
+  dropFollowUpDefinition: "A call counts as dropped when the system fails, when the caller goes a few seconds without an answer and hangs up, when the caller hears the agent ask them to repeat and hangs up without speaking again, or when the line goes down during an agent action. Hanging up after saying goodbye, or while the agent is speaking, does not count.",
 };
 
 export default agents;

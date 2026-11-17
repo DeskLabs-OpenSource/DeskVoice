@@ -66,6 +66,20 @@ const agents = {
   followUpOwner: "Dono das pendências deste agente",
   followUpOwnerTeam: "A equipe (aparece para todo mundo)",
   followUpOwnerHint: "Se a pessoa for desativada, as pendências abertas dela voltam para a equipe.",
+  dropFollowUp: "Quando a ligação cai",
+  dropFollowUpOff: "Não fazer nada",
+  dropFollowUpTask: "Abrir uma pendência para alguém retornar",
+  dropFollowUpOther: "Outro modo, gravado fora desta tela",
+  dropFollowUpWhatsApp: "Mandar uma mensagem no WhatsApp para quem ligou",
+  dropFollowUpWhatsAppUnavailable: "indisponível",
+  dropFollowUpNotConnected: "A mensagem no WhatsApp está indisponível: o WhatsApp não está conectado.",
+  dropFollowUpNotTrusted: "A mensagem no WhatsApp está indisponível: \"Confiar no número exibido na ligação\" está desligado. Depois que a ligação cai, não há a quem pedir confirmação, e a mensagem só sai com essa opção ligada.",
+  dropFollowUpFixLink: "Abrir Configurações → WhatsApp",
+  dropFollowUpBlockRisk: "Esta mensagem escreve primeiro para um número que pode nunca ter falado com o WhatsApp da central. Como diz a tela do WhatsApp, isso pode levar a restrição ou bloqueio do número.",
+  dropFollowUpMessage: "Texto da mensagem",
+  dropFollowUpMessageWarning: "O texto vai para o número que ligou, e esse número pode não ser de quem ligou: alguém pode usar o número de outra pessoa, ou ligar de um fixo atendido por outra. Não escreva nada da conversa: nem nome, nem assunto, nem horário. O texto sai como está, sem trocar nada: diga nele o nome da empresa. Vazio, vale o texto padrão, que aparece no campo e já leva o nome da organização.",
+  dropFollowUpMessageLimits: "No máximo uma mensagem por número a cada 24 horas, e a lista de não ligar vale para ela. Um teto de mensagens por organização protege o número: no máximo {perHour} por hora e {perDay} a cada 24 horas. Se a mensagem não puder sair, abre uma pendência para alguém retornar.",
+  dropFollowUpDefinition: "Conta como queda quando o sistema falha, quando quem ligou fica alguns segundos sem resposta e desliga, quando ouve o agente pedir para repetir e desliga sem voltar a falar, ou quando a linha cai durante uma ação do agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta.",
 };
 
 export default agents;

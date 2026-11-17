@@ -10,6 +10,8 @@ export interface Me {
   role: Role;
   phone?: string | null;
   whatsapp?: string | null;
+  /** O nome da organização; a tela do agente o mostra no texto padrão da mensagem para quem ligou. */
+  organizationName?: string;
 }
 
 export interface Agent {
@@ -31,9 +33,17 @@ export interface Agent {
   listeningEnvironment?: ListeningEnvironment;
   /** Para quem o agente pode passar a ligação (`transfer_to_agent`). Vazia de fábrica. */
   agentHandoffTargets?: string[];
+  /**
+   * O que acontece quando a ligação cai. O banco aceita quatro modos; a tela oferece `off`, `task` e
+   * `whatsapp`. Agente gravado antes do campo existir pode chegar sem ele: vale `off`.
+   */
+  dropFollowUp?: DropFollowUp;
+  /** O texto do WhatsApp para quem ligou; nulo vale o padrão. */
+  dropFollowUpMessage?: string | null;
 }
 
 export type ListeningEnvironment = "normal" | "noisy";
+export type DropFollowUp = "off" | "task" | "whatsapp" | "call_back";
 
 export type CallStatus = "ringing" | "in_progress" | "transferred" | "completed" | "failed" | "refused";
 export interface Call {
@@ -66,6 +76,14 @@ export interface Call {
   costCeilingCents?: number | null;
 }
 
+/** Uma linha da lista de Chamadas: as contagens do extrato da ligação vêm ao lado do valor, como no detalhe. */
+export interface CallListItem extends Call {
+  /** Quantas linhas do extrato da ligação não têm custo medido: com alguma, o zero não é grátis. */
+  unmeasuredCount: number;
+  /** Quantas linhas do extrato da ligação têm custo estimado: com alguma, o valor inclui uma estimativa. */
+  estimatedCount: number;
+}
+
 /** O detalhe de uma chamada: a análise inteira, que a lista não traz. */
 export interface CallDetail extends Call {
   /** Lida com `storedCallAnalysisSchema`; `null` também quando não pôde ser lida. */
@@ -77,7 +95,11 @@ export interface CallDetail extends Call {
   /** O conteúdo saiu a pedido do titular (`calls.erased_at`). */
   erased: boolean;
   /** O custo de cada agente da ligação, na ordem em que gastou; `name: null` é agente apagado. A tela mostra com mais de um. */
-  costByAgent: Array<{ agentId: string | null; name: string | null; costCents: number }>;
+  costByAgent: Array<{ agentId: string | null; name: string | null; costCents: number; unmeasuredCount: number; estimatedCount: number }>;
+  /** Quantas linhas do extrato da ligação não têm custo medido (modelo sem preço, ou consumo que não pôde ser medido): com alguma, o zero não é grátis. */
+  unmeasuredCount: number;
+  /** Quantas linhas do extrato da ligação têm custo estimado: com alguma, o valor inclui uma estimativa. */
+  estimatedCount: number;
 }
 
 /** O bloco "Este número" da tela da chamada (`GET /calls/:id/caller-history`). `phone: null`: a chamada não tem número, e o bloco não aparece. */
@@ -264,9 +286,13 @@ export interface Costs {
   from: string;
   to: string;
   totalCents: number;
-  byDay: Array<{ day: string; costCents: number; billedSeconds: number }>;
-  byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number }>;
-  byEngine: Array<{ engine: string; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null }>;
+  /** Quantas linhas do extrato do período não têm custo medido; cada soma abaixo leva a sua. Com alguma, o valor ali não é o gasto inteiro. */
+  unmeasuredCount: number;
+  /** Quantas linhas do extrato do período têm custo estimado; cada soma abaixo leva a sua. A estimativa entra no valor, acima do real. */
+  estimatedCount: number;
+  byDay: Array<{ day: string; costCents: number; billedSeconds: number; unmeasuredCount: number; estimatedCount: number }>;
+  byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number; unmeasuredCount: number; estimatedCount: number }>;
+  byEngine: Array<{ engine: string; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
 }
 
 export interface Setting<T> {

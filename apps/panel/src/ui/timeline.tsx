@@ -49,6 +49,8 @@ function Card({ title, tone, children }: { title: ReactNode; tone?: "accent" | "
 }
 
 type TimelineDictionary = typeof ptBR;
+/** O que a linha do tempo diz de um `drop_follow_up`: a ação, ou o motivo de não ter agido. */
+type DropFollowUpShown = keyof TimelineDictionary["events"]["drop_follow_up"]["simulated"];
 
 /**
  * "Ligação não analisada: <motivo>", do payload de `analysis_not_done`. A mesma frase serve à linha
@@ -449,6 +451,36 @@ export function Timeline({
         const said = p.action === "asked_to_repeat" ? e.caller_unanswered.asked_to_repeat : e.caller_unanswered.turn_closed;
         const seconds = (Number(p.waitedMs) / 1000).toLocaleString(locale, { maximumFractionDigits: 1 });
         return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(said, { seconds })}</Quiet> };
+      }
+      case "memory_loaded":
+        // Só os ids e o tamanho: o texto das notas fica na tabela delas, onde o prazo o alcança.
+        return {
+          ...base,
+          tone: "neutral",
+          icon: ListChecks,
+          body: <Quiet>{fill(e.memory_loaded, { notes: Array.isArray(p.noteIds) ? p.noteIds.length : 0, followUps: Array.isArray(p.followUpIds) ? p.followUpIds.length : 0, chars: typeof p.chars === "number" ? p.chars : 0 })}</Quiet>,
+        };
+      case "drop_follow_up": {
+        // Só campos fixos: o caso e o que foi feito, ou o que teria sido feito na simulada.
+        const what = p.case === "engine_failed" ? e.drop_follow_up.engine_failed : e.drop_follow_up.call_dropped;
+        const action: DropFollowUpShown =
+          p.action === "whatsapp_queued"
+            ? "whatsapp_queued"
+            : p.action === "skipped" && (p.reason === "do_not_call" || p.reason === "mode_unavailable" || p.reason === "recent_follow_up" || p.reason === "org_limit")
+              ? p.reason
+              : "task_opened";
+        const done = p.simulated === true ? e.drop_follow_up.simulated[action] : e.drop_follow_up[action];
+        return { ...base, tone: "accent", icon: PhoneX, body: <Quiet><span className="font-bold text-ink">{what}</span> {done}</Quiet> };
+      }
+      case "drop_follow_up_result": {
+        // A mensagem para quem ligou saiu ou não; as ações da religação chegam nas fatias 3 e 4.
+        const sent = p.action === "whatsapp_sent";
+        return {
+          ...base,
+          tone: sent ? "ok" : "fail",
+          icon: sent ? CheckCircle : XCircle,
+          body: <Quiet>{sent ? e.drop_follow_up_result.whatsapp_sent : e.drop_follow_up_result.whatsapp_failed}</Quiet>,
+        };
       }
       default:
         return { ...base, tone: "neutral", body: <Quiet>{e.unknown} <span className="data">{event.kind}</span></Quiet> };

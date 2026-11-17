@@ -1,5 +1,5 @@
 import { handle, notFound } from "../../../../../server/context";
-import { AGENT_COLUMNS, agentPatch, requireActiveOwner, requireHandoffTargets, type AgentValues } from "../../../../../server/shapes";
+import { AGENT_COLUMNS, agentPatch, requireActiveOwner, requireDropFollowUpMode, requireAnalyst, requireHandoffTargets, type AgentValues } from "../../../../../server/shapes";
 import { updateAgent } from "../store";
 
 export const GET = handle({}, async ({ q, params }) => {
@@ -13,6 +13,8 @@ export const PATCH = handle({ body: agentPatch, configure: true }, async ({ q, p
   if (!current) throw notFound();
   await requireActiveOwner(q, body.followUpOwnerUserId);
   await requireHandoffTargets(q, params.id ?? null, body.agentHandoffTargets);
+  await requireDropFollowUpMode(q, body.dropFollowUp);
+  await requireAnalyst(q, body.analystId);
   return updateAgent(q, params.id ?? "", { ...current, ...body }, deps.clock.now());
 });
 

@@ -1,3 +1,4 @@
+import { createMember } from "./accounts";
 import { hashToken } from "./password";
 import type { Db } from "./types";
 import { withSystem } from "./with-org";
@@ -67,7 +68,7 @@ class EmailTaken extends Error {}
 export async function acceptInvite(db: Db, token: string, account: { name: string; passwordHash: string }, now: Date): Promise<AcceptInviteResult> {
   try {
     return await withSystem(db, async (q) => {
-      const invite = await q.one<{ id: string; organizationId: string; email: string; role: string }>(
+      const invite = await q.one<{ id: string; organizationId: string; email: string; role: TeamRole }>(
         `update invites i set accepted_at = $2
           where token_hash = $1 and accepted_at is null and revoked_at is null and expires_at > $2 and ${CREATOR_STILL_MANAGES}
           returning id, organization_id as "organizationId", email::text as email, role`,
@@ -75,16 +76,18 @@ export async function acceptInvite(db: Db, token: string, account: { name: strin
       );
       if (!invite) return { ok: false, reason: "invalid" };
 
-      const user = await q.one<{ id: string }>(
-        `insert into users (organization_id, email, name, password_hash, role) values ($1, $2, $3, $4, $5)
-         on conflict (email) do nothing returning id`,
-        [invite.organizationId, invite.email, account.name, account.passwordHash, invite.role],
-      );
-      // O e-mail é único na instalação. Lançar desfaz a marca de aceito: o convite continua valendo
-      // para quando o conflito for resolvido.
-      if (!user) throw new EmailTaken();
-      await q.exec("update invites set accepted_user_id = $2 where id = $1", [invite.id, user.id]);
-      return { ok: true, userId: user.id, organizationId: invite.organizationId };
+      const member = await createMember(q, {
+        organizationId: invite.organizationId,
+        email: invite.email,
+        name: account.name,
+        passwordHash: account.passwordHash,
+        role: invite.role,
+      });
+      // O e-mail já tem conta. Lançar desfaz a marca de aceito: o convite continua valendo para
+      // quando o conflito for resolvido. Aceitar com a conta que já existe é da fatia 3 do R8.
+      if (!member) throw new EmailTaken();
+      await q.exec("update invites set accepted_user_id = $2 where id = $1", [invite.id, member.userId]);
+      return { ok: true, userId: member.userId, organizationId: invite.organizationId };
     });
   } catch (error) {
     if (error instanceof EmailTaken) return { ok: false, reason: "email_taken" };

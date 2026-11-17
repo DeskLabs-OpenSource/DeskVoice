@@ -7,3 +7,8 @@ export * from "./analysis";
 export * from "./transcription";
 export { createSimulatedEngine, setSimulatedScript, SIMULATED_PREFIX } from "./engines/simulated";
 export type { SimulatedScript, SimulatedStep } from "./engines/simulated";
+export * from "./brain";
+export { loadBrains } from "./brain-load";
+export * from "./speech-filter";
+export { createSimulatedDecider, neutralAnswers } from "./deciders/simulated";
+export type { SimulatedDecision } from "./deciders/simulated";
