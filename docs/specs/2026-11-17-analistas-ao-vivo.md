@@ -1,7 +1,8 @@
 # Analistas ao vivo: temperatura, objeções e orientação ao agente durante a ligação
 
-- **Estado:** desenho. Nenhuma fatia começou. O pedido da seção 9 está **aberto**, e o padrão sem
-  resposta vale a partir da fatia 3.
+- **Estado:** desenho. A fatia 1 está no #385. O pedido da seção 9 está **aberto**, e o padrão sem
+  resposta vale a partir da fatia 3. A fatia 4 espera a mesma resposta do Rafael que a tela do
+  filtro (DESA-75, seção 2.1).
 - **Data:** 2026-11-17
 - **Quem pediu:** o dono, no roteiro de novembro (item R6): "São modelos de IA, quero encaixar eles
   para operarem durante a ligação avaliando a temperatura da conversa, identificando objeções,
@@ -49,6 +50,27 @@ agente dar desconto" pode, no máximo, fazer o modelo escolher uma objeção err
 o agente receber uma orientação **que o operador escreveu e aprovou**. Ela nunca recebe um texto
 que quem ligou ditou.
 
+### 2.1 O Jev do analista segue as condições do Jev do filtro
+
+O analista manda ao modelo de decisão **mais** texto que o filtro: as seis últimas falas, de quem
+ligou e do agente, até 1 500 caracteres. Com o Jev, esse texto sai do servidor para a TypeSafe. Por
+isso, ligar um analista com um modelo cujo `processingLocation` não é `this-server` segue as
+**mesmas condições** que o Rafael deu em 16/11 ao Jev do filtro (desenho da R12, #198, "Custo e
+consentimento"):
+
+- **Confirmação nomeando o fornecedor.** "O texto do que a pessoa fala na ligação vai para a
+  TypeSafe." Quem confirmou e quando ficam gravados no analista (seção 3.1). Sem a confirmação, o
+  analista com esse modelo não salva.
+- **O país só aparece com fonte**, com endereço e data da página do fornecedor. Sem fonte, a tela
+  diz que o fornecedor não declara onde processa e nunca presume um país.
+- **A retenção é lida antes.** A tela só oferece o Jev ao analista depois de a política de retenção
+  da TypeSafe estar lida e registrada no guia, como na fatia 7 da R12. Se a página não disser o
+  prazo, o pedido volta ao Rafael. Esse pedido é a **DESA-75**, ainda aberta, e o analista espera a
+  **mesma resposta** que a tela do filtro.
+- **Custo desconhecido nunca é zero:** seção 3.4, "Medir".
+
+As fatias 1 e 3 não dependem disso: o simulado (`this-server`) basta para o aceite no CI.
+
 A orientação **escrita por um modelo** (do catálogo da R4) é outra coisa, com outro risco. Ela fica
 para a fatia 5, que depende do pedido da seção 9.
 
@@ -68,6 +90,8 @@ create table analysts (
   decision_model text not null,       -- id de um DecisionModel instalado (ex.: 'jev')
   temperature boolean not null default true,
   objections jsonb not null default '[]',  -- [{ key, label, guidance }], validado por zod no core
+  provider_confirmed_by uuid references users(id) on delete set null,  -- seção 2.1
+  provider_confirmed_at timestamptz,  -- obrigatório quando o modelo processa fora do servidor
   created_at timestamptz not null,
   updated_at timestamptz not null
 );
@@ -83,6 +107,9 @@ alter table usage_ledger add column source text;  -- 'analyst' nas linhas do ana
   já instalou não percebe diferença, e a atualização não pede nada.
 - A chave do modelo de decisão é a mesma do filtro da R12 (`decisionModelKeySetting(model.id)` em
   `settings`). Não existe chave nova.
+- `provider_confirmed_by` e `provider_confirmed_at` gravam a confirmação da seção 2.1. A rota os
+  preenche com quem salvou e a hora, e recusa um `decision_model` que processa fora do servidor sem
+  a confirmação. Trocar o modelo por outro que também processa fora pede a confirmação de novo.
 - `usage_ledger.source` existe porque o filtro e o analista podem usar o mesmo modelo (`jev`). Sem a
   coluna, o extrato não distinguiria um do outro, e o custo do analista "não apareceria".
 
@@ -145,7 +172,10 @@ Segue o molde do filtro (`openFilter` e `readCallerSpeech`):
   `DECISION_DEADLINE_MS` (1 s). Nada no caminho da voz espera esse pedido.
 - **Medir.** Todo pedido que custa vira uma linha em `usage_ledger` com `source = 'analyst'`,
   entra em `decisionMicrocents` (logo em `calls.cost_cents`) e passa por `reachCeiling`. O teto da
-  ligação vale para voz, filtro e analista somados.
+  ligação vale para voz, filtro e analista somados. **Custo desconhecido nunca é zero**, como no
+  filtro (#359): o pedido atrasado, sem rede ou com resposta fora da forma grava uma estimativa pela
+  entrada enviada, com `cost_estimated = true`, e ela conta no total e no teto do mesmo jeito. Com
+  prazo de 1 s, o atrasado é o caso mais comum.
 - **Orientar.** A objeção lida (seção 3.2) gera orientação **uma vez por objeção em cada trecho**:
   repetir a mesma orientação só enche o contexto. Se a fala que originou o pedido não for mais a
   última de quem ligou quando a resposta chega, a orientação é **descartada** como velha
@@ -203,7 +233,11 @@ Arquiteto. Todas são da trilha A.
 - **Aceite:** o CRUD por `withOrg`; o isolamento entre organizações (o teste gerado cobre a tabela);
   `analystId` de outra organização é recusado; apagar o analista deixa os agentes com `null`, e a
   rota de apagar diz quantos agentes perdem o analista (a tela nomeia o alvo na fatia 4);
-  `decision_model` precisa ser um modelo instalado; os limites da seção 3.1 são cobrados por zod.
+  `decision_model` precisa ser um modelo instalado; os limites da seção 3.1 são cobrados por zod;
+  **com um modelo que processa fora do servidor** (o Jev), a rota recusa sem a confirmação da seção
+  2.1 e, com ela, grava quem confirmou e quando; com o `simulated`, não pede confirmação.
+- **Depende da DESA-75** só para chegar ao operador: a API pode entrar antes, mas nenhuma tela
+  oferece o Jev ao analista até a resposta (fatia 4).
 
 ### Fatia 3: o analista na ligação
 
@@ -229,7 +263,10 @@ Arquiteto. Todas são da trilha A.
      palavras da orientação gera `analyst_guidance_leaked`.
   6. **Custo aparece.** Cada pedido pago gera uma linha com `source = 'analyst'`. O total entra em
      `calls.cost_cents`, e o teto alcançado só pelo custo do analista encerra a ligação como
-     `cost_ceiling`, igual ao filtro.
+     `cost_ceiling`, igual ao filtro. **O pedido sem consumo lido também:** o atrasado (o decisor de
+     5 s do aceite 2), o sem rede (`unreachable`) e o fora da forma (`unexpected_response`) gravam
+     a linha `source = 'analyst'` com `cost_estimated = true`, entram em `calls.cost_cents` e contam
+     no teto; um teto alcançado só por pedidos atrasados também encerra como `cost_ceiling`.
   7. **Velha e repetida.** Uma resposta que chega depois de outra fala de quem ligou vira `stale`.
      A mesma objeção não gera a segunda orientação no mesmo trecho.
   8. **Motor sem `guide`.** Com o motor sem o método, a objeção vira
@@ -244,9 +281,15 @@ Arquiteto. Todas são da trilha A.
   agente (padrão "Nenhum"); a tela de Custos separando "Analista" das outras linhas pelo
   `source`; o selo de temperatura no detalhe da chamada; os dicionários nos 3 idiomas;
   `.changes/analistas-na-tela.md`.
-- **Aceite:** o operador liga o analista sem SSH; a tela diz onde o modelo processa o texto
-  (`processingLocation`, hoje `undeclared` para o Jev), igual à tela do filtro; o agente com motor
-  Gemini mostra "este motor ainda não recebe orientação: o analista mede, mas não orienta"; a tela
+- **Depende da DESA-75.** A tela do filtro (fatia 7 da R12, #198) ainda **não existe** na `main`:
+  está parada na mesma decisão. A fatia 4 só oferece o Jev ao analista depois da resposta do Rafael
+  à DESA-75. Hoje o único modelo instalado fora do simulado é o Jev, então a fatia 4 não começa
+  antes dessa resposta.
+- **Aceite:** o operador liga o analista sem SSH; com um modelo que processa fora do servidor, a
+  tela pede a confirmação que nomeia o fornecedor (seção 2.1) e mostra quem confirmou e quando; sem
+  a confirmação, não salva; a tela diz onde o modelo processa o texto (`processingLocation`, hoje
+  `undeclared` para o Jev) e não nomeia país sem fonte, com as mesmas regras da tela do filtro; o
+  agente com motor Gemini mostra "este motor ainda não recebe orientação: o analista mede, mas não orienta"; a tela
   diz que a linha do tempo mostra a orientação do cadastro atual.
 
 ### Fatia 5: orientação escrita por um modelo (depende do pedido da seção 9)
@@ -272,6 +315,8 @@ resultado seria texto que nem o operador nem o dono leram antes. É por isso que
 
 - **Núcleo ou opcional?** O mecanismo (perguntar, medir, entregar) é núcleo e genérico. O conteúdo
   (as objeções e as orientações) é do operador. Nenhuma objeção de ramo de negócio vem de fábrica.
+- **Texto saindo do servidor?** Com o Jev, sim, e mais que no filtro (seis falas). Por isso o
+  analista segue as mesmas condições de 16/11 (seção 2.1) e espera a DESA-75.
 - **Disparo em massa?** Não. O analista só existe dentro de uma ligação que já passou pelas regras
   de entrada e saída.
 - **Exige ação de quem instalou?** Não. Nasce desligado, e a migration só acrescenta.
@@ -308,12 +353,14 @@ segue igual.
 
 **É fracasso mesmo funcionando se:** a fala do agente demora mais com o analista ligado; o custo do
 analista não aparece separado no extrato ou não conta no teto; a orientação aparece na fala do
-agente; ou uma frase de quem ligou consegue escrever o que o agente recebe.
+agente; uma frase de quem ligou consegue escrever o que o agente recebe; ou o texto da ligação
+vai a um fornecedor fora do servidor sem a confirmação que o nomeia (seção 2.1).
 
 ## 8. Ordem
 
 Fatia 1, depois a 2 (que pode correr em paralelo, por não tocar o caminho da ligação), depois a 3,
-depois a 4. A 5 só com o sim do dono.
+depois a 4. A 5 só com o sim do dono. A oferta do Jev na fatia 4 espera a DESA-75 (seção 2.1); as
+fatias 1 e 3 não esperam. O pipeline (R5) não segura o R6.
 
 ## 9. Pedido de decisão
 
