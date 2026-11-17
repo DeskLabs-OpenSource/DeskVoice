@@ -19,6 +19,21 @@ interface NotificationRow {
 /** Fica em `notifications.error` de um aviso ENVIADO: a ressalva de como ele saiu. */
 const UNVERIFIED_ADDRESS = "sent without the WhatsApp service confirming the address of the number (check-exists unavailable)";
 
+/** O que entra no lugar do número de quem ligou no texto de erro da mensagem para ele. */
+export const CALLER_NUMBER_MARK = "[number]";
+
+/**
+ * O texto de erro da mensagem para quem ligou sem o número dele, nas duas formas em que um conector o
+ * repete (`+5531...` e só os dígitos, como no `chatId` do WAHA). O erro vai para `notifications.error`,
+ * `tasks.last_error`, o evento `task_finished` e o log; o apagamento a pedido do titular também limpa
+ * os três primeiros, e isto é a defesa a mais. O aviso à equipe guarda o erro como sempre.
+ */
+export function withoutCallerNumber(message: string, target: string | null): string {
+  if (!target) return message;
+  const digits = target.replace(/\D/g, "");
+  return [target, digits].filter((form) => form.length > 0).reduce((text, form) => text.split(form).join(CALLER_NUMBER_MARK), message);
+}
+
 /**
  * Lê do banco o que a entrega precisa e devolve o envio pronto, que responde uma ressalva ou
  * `null`. A chamada de rede fica fora da transação: destino lento não segura conexão do banco.
@@ -79,8 +94,15 @@ const routine: Routine = {
       const send = await withOrg(deps.db, task.organizationId, (q) => prepare(q, notification, deps));
       note = await send();
     } catch (error) {
-      await mark("failed", error instanceof Error ? error.message : String(error));
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (notification.audience !== "caller") {
+        await mark("failed", message);
+        throw error;
+      }
+      // Sem `cause`: o runner grava só a mensagem, mas o log pode ler a causa, e ela traz o número.
+      const hidden = withoutCallerNumber(message, notification.target);
+      await mark("failed", hidden);
+      throw new Error(hidden);
     }
     await mark("sent", note);
   },

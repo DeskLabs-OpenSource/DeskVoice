@@ -1,10 +1,12 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DROP_FOLLOW_UP_DEFAULT_MESSAGE, ERASED_TEXT, MAX_TASK_ATTEMPTS, eraseCaller, recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
+import { DROP_FOLLOW_UP_DEFAULT_MESSAGE, ERASED_TEXT, MAX_TASK_ATTEMPTS, enqueueTask, eraseCaller, failTask, recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
+import { wahaSessionName } from "@deskvoice/tools";
 import { afterAll, describe, expect, it } from "vitest";
 import { createOrganization, createUser, depsFor, eventsOf, fakeFetch, fakeLookup, openTestDbs, putSetting, putWhatsAppConnector, t0, task, tasksOf } from "../../test/helpers";
-import deliverNotification from "./deliver_notification";
+import { startFakeWaha } from "../../../../packages/tools/test/fake-waha";
+import deliverNotification, { CALLER_NUMBER_MARK } from "./deliver_notification";
 import reviewCallRoutine, {
   CALLER_MESSAGE_FAILED_DETAILS,
   CASE_PHRASE,
@@ -21,7 +23,9 @@ import reviewCallRoutine, {
  * registro 0020, 5A). Cada chamada é montada pelos eventos, como o processo de voz os grava.
  */
 const { app, owner } = openTestDbs();
+const waha = await startFakeWaha();
 afterAll(async () => {
+  await waha.stop();
   await app.close();
   await owner.close();
 });
@@ -665,8 +669,8 @@ describe("review_call: o modo whatsapp (fatia 2)", () => {
     ["call_ended", { status: "completed", reason: "caller_hangup", costCents: 0, seconds: 30, openTurn: "caller_waiting" }],
   ];
   /** Organização com o pré-requisito (conector e confiança no número) e o agente em `whatsapp`, salvo `ready: false`. */
-  async function whatsappScene(label: string, options: { connector?: boolean; trust?: boolean; message?: string | null; language?: string; channel?: string; events?: Ev[]; endReason?: string } = {}): Promise<Scene> {
-    const s = await scene(label, options.events ?? droppedEvents(), { endReason: options.endReason ?? "caller_hangup", ...(options.channel && { channel: options.channel }) });
+  async function whatsappScene(label: string, options: { connector?: boolean; trust?: boolean; message?: string | null; language?: string; channel?: string; events?: Ev[]; endReason?: string; direction?: "inbound" | "outbound" } = {}): Promise<Scene> {
+    const s = await scene(label, options.events ?? droppedEvents(), { endReason: options.endReason ?? "caller_hangup", ...(options.channel && { channel: options.channel }), ...(options.direction && { direction: options.direction }) });
     if (options.connector !== false) await putWhatsAppConnector(app, s.org);
     if (options.trust !== false) await putSetting(app, s.org, "whatsapp.trust_caller_id", true, false);
     await withSystem(app, (q) =>
@@ -726,6 +730,18 @@ describe("review_call: o modo whatsapp (fatia 2)", () => {
     expect(await review(s.org, s.callId)).toBe("messaged");
     expect(await drops(s.callId)).toEqual([{ case: "engine_failed", mode: "whatsapp", action: "whatsapp_queued", simulated: false, openTurn: null }]);
     expect(await followUpsOf(s.org)).toEqual([]);
+  });
+
+  it("o caso 1 da ligação feita e o da recusa antes de atender não mandam mensagem: abrem a pendência de sempre, sem drop_follow_up", async () => {
+    const outbound = await whatsappScene("wa engine outbound", { events: [["call_answered", { engine: "simulated" }], ["engine_failed", { engine: "x", error: "y" }]], endReason: "engine_failed", direction: "outbound" });
+    const refused = await whatsappScene("wa engine refused", { events: [["call_refused", { reason: "engine_not_configured" }]], endReason: "engine_failed" });
+    for (const s of [outbound, refused]) {
+      expect(await review(s.org, s.callId)).toBe("opened");
+      expect(await callerNotices(s.org)).toEqual([]);
+      expect(await deliveries(s.org)).toEqual([]);
+      expect(await drops(s.callId)).toEqual([]);
+      expect(await followUpsOf(s.org)).toEqual([expect.objectContaining({ call_id: s.callId, source: "review_call", status: "open" })]);
+    }
   });
 
   it("os casos 2 a 4 não mudam com o modo: abrem a pendência de sempre, sem mensagem", async () => {
@@ -925,5 +941,102 @@ describe("review_call: o modo whatsapp (fatia 2)", () => {
       { audience: "team", target: TEAM, body: ERASED_TEXT },
     ]);
     expect(JSON.stringify(await withSystem(app, (q) => q.many("select * from notifications where organization_id = $1", [s.org])))).not.toContain(CALLER);
+  });
+
+  describe("o número de quem ligou no texto de erro da entrega", () => {
+    const DIGITS = CALLER.replace(/\D/g, "");
+    /** Tudo o que a ligação guarda nos avisos, nas tarefas e nos eventos, linha inteira, em texto. */
+    const everythingOf = async (org: string, callId: string): Promise<string> =>
+      JSON.stringify(
+        await withSystem(app, async (q) => [
+          await q.many("select * from notifications where organization_id = $1 and call_id = $2", [org, callId]),
+          await q.many("select * from tasks where organization_id = $1 and (call_id = $2 or payload->>'notificationId' in (select id::text from notifications where call_id = $2))", [org, callId]),
+          await q.many("select * from call_events where call_id = $1", [callId]),
+        ]),
+      );
+    const deliveryTaskOf = async (notice: string): Promise<string> =>
+      (await withSystem(app, (q) => q.one<{ id: string }>("select id from tasks where kind = 'deliver_notification' and payload->>'notificationId' = $1", [notice])))?.id ?? "";
+    const erase = async (org: string) => {
+      const dir = await mkdtemp(join(tmpdir(), "wa-erase-"));
+      return withOrg(app, org, (q) => eraseCaller(q, { dir, phoneE164: CALLER, now: t0 }));
+    };
+
+    it("WAHA responde 'is not on WhatsApp' na última tentativa, e o apagamento: o número não fica em notifications, tasks nem call_events", async () => {
+      const s = await whatsappScene("wa erase waha error", { message: MESSAGE, connector: false });
+      await putSetting(app, s.org, "whatsapp.connector", { type: "waha" }, false);
+      waha.connect(wahaSessionName(s.org), "553133330000");
+      expect(await review(s.org, s.callId)).toBe("messaged");
+      const [notice] = await callerNotices(s.org);
+      const taskId = await deliveryTaskOf(notice?.id ?? "");
+      // A última tentativa, como o runner a faz: reivindica, roda, registra a falha na tarefa e o `task_finished`.
+      await withSystem(app, (q) => q.exec("update tasks set status = 'running', attempts = $2 where id = $1", [taskId, MAX_TASK_ATTEMPTS]));
+      const thrown: unknown = await deliverNotification
+        .run({ ...task(s.org, "deliver_notification", { notificationId: notice?.id }, s.callId), id: taskId, attempts: MAX_TASK_ATTEMPTS }, depsFor(app, { fetch: fakeFetch().fetch, lookup: fakeLookup(), waha: waha.options }))
+        .then(() => null, (error: unknown) => error);
+      const error = thrown instanceof Error ? thrown.message : String(thrown);
+      // Na origem: o erro da mensagem para quem ligou já não traz o número.
+      expect(error).toBe(`${CALLER_NUMBER_MARK} is not on WhatsApp`);
+      expect(waha.sent.filter((sent) => sent.chatId.startsWith(DIGITS))).toEqual([]);
+      await failTask(app, taskId, error, t0);
+      await withOrg(app, s.org, (q) => recordEvent(q, s.callId, "task_finished", { taskId, kind: "deliver_notification", outcome: "failed", attempt: MAX_TASK_ATTEMPTS, error }, t0));
+      expect(await results(s.callId)).toEqual([{ action: "whatsapp_failed" }]);
+      expect((await callerNotices(s.org))[0]).toMatchObject({ status: "failed", target: CALLER });
+
+      await erase(s.org);
+      const after = await everythingOf(s.org, s.callId);
+      expect(after).not.toContain(CALLER);
+      expect(after).not.toContain(DIGITS);
+    });
+
+    it("o apagamento limpa o erro com o número no aviso caller, na tarefa e no task_finished, e o erro do aviso à equipe fica", async () => {
+      // O erro com o número gravado como um conector o escreveria sem a troca na origem: o apagamento não depende dela.
+      const s = await queuedCaller("wa erase planted error");
+      const TEAM = "+5531977776666";
+      const team = await withSystem(app, (q) =>
+        q.one<{ id: string }>("insert into notifications (organization_id, call_id, channel, target, body, status, error) values ($1, $2, 'whatsapp', $3, 'Aviso', 'failed', $4) returning id", [
+          s.org,
+          s.callId,
+          TEAM,
+          `${TEAM} is not on WhatsApp`,
+        ]),
+      );
+      const callerTask = await deliveryTaskOf(s.notice);
+      const teamTask = await withOrg(app, s.org, (q) => enqueueTask(q, { kind: "deliver_notification", payload: { notificationId: team?.id }, callId: s.callId, runAt: t0 }));
+      const leak = `${CALLER} is not on WhatsApp (chatId ${DIGITS}@c.us)`;
+      await withSystem(app, async (q) => {
+        await q.exec("update notifications set status = 'failed', error = $2 where id = $1", [s.notice, leak]);
+        await q.exec("update tasks set status = 'failed', last_error = $2 where id = $1", [callerTask, leak]);
+        await q.exec("update tasks set status = 'failed', last_error = $2 where id = $1", [teamTask, `${TEAM} is not on WhatsApp`]);
+      });
+      await withOrg(app, s.org, async (q) => {
+        await recordEvent(q, s.callId, "task_finished", { taskId: callerTask, kind: "deliver_notification", outcome: "failed", attempt: MAX_TASK_ATTEMPTS, error: leak }, t0);
+        await recordEvent(q, s.callId, "task_finished", { taskId: teamTask, kind: "deliver_notification", outcome: "failed", attempt: MAX_TASK_ATTEMPTS, error: `${TEAM} is not on WhatsApp` }, t0);
+      });
+      expect(await everythingOf(s.org, s.callId)).toContain(CALLER);
+
+      await erase(s.org);
+      const after = await everythingOf(s.org, s.callId);
+      expect(after).not.toContain(CALLER);
+      expect(after).not.toContain(DIGITS);
+      const rows = await withSystem(app, async (q) => ({
+        notices: await q.many("select audience, error from notifications where call_id = $1 order by audience", [s.callId]),
+        tasks: await q.many("select id, last_error from tasks where id = any($1::uuid[]) order by id", [[callerTask, teamTask]]),
+      }));
+      expect(rows.notices).toEqual([
+        { audience: "caller", error: ERASED_TEXT },
+        { audience: "team", error: `${TEAM} is not on WhatsApp` },
+      ]);
+      expect(Object.fromEntries(rows.tasks.map((row) => [row.id, row.last_error]))).toEqual({ [callerTask]: ERASED_TEXT, [teamTask]: `${TEAM} is not on WhatsApp` });
+      const finished = (await eventsOf(app, s.callId)).filter((event) => event.kind === "task_finished").map((event) => event.payload as Record<string, unknown>);
+      expect(finished.find((payload) => payload.taskId === callerTask)).toEqual({ taskId: callerTask, kind: "deliver_notification", outcome: "failed", attempt: MAX_TASK_ATTEMPTS, erased: true });
+      expect(finished.find((payload) => payload.taskId === teamTask)).toMatchObject({ error: `${TEAM} is not on WhatsApp` });
+    });
+
+    async function queuedCaller(label: string): Promise<Scene & { notice: string }> {
+      const s = await whatsappScene(label, { message: MESSAGE });
+      await review(s.org, s.callId);
+      const [notice] = await callerNotices(s.org);
+      return { ...s, notice: notice?.id ?? "" };
+    }
   });
 });
