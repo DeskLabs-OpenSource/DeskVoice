@@ -1,0 +1,6 @@
+import { handle } from "../../../../../../server/context";
+
+// support: false
+export const POST = handle({ configure: true /* support: false */ }, async () => ({ url: "https://panel.test/s/x" }));
+
+export const DELETE = handle({ configure: true }, async () => null);

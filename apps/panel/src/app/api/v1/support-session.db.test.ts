@@ -1,0 +1,194 @@
+// A sessão de suporte da instalação (`users.kind = 'support'`, R8 seção 3.6) entra como `admin`, mas
+// não convida, não mexe na equipe nem na conta e não cria nada que dure mais que ela. As rotas vêm
+// da tabela `fences/support-session-routes.ts`, nunca de uma lista copiada aqui: cada linha `forbid`
+// é chamada com a sessão de suporte, que recebe 403 sem o banco mudar, e com um `admin` da equipe
+// igual, que não recebe essa recusa. Sem o par, o teste passaria com tudo recusado.
+//
+// Nenhum código de produção cria o vínculo nem a sessão de suporte nesta fatia: os dois nascem por
+// SQL, aqui.
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { createAccount, hashToken, recordingPath, withOrg, withSystem } from "@deskvoice/core";
+import { afterAll, describe, expect, it } from "vitest";
+import { SUPPORT_SESSION_ROUTES, type SupportSessionRoute } from "../../../../../../fences/support-session-routes";
+import { SESSION_COOKIE, SUPPORT_SESSION_FORBIDDEN, type RouteContext } from "../../../server/context";
+import { NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, startPanel, type Result } from "../../../../test/kit";
+import { POST as invite } from "./team/invites/route";
+
+const panel = startPanel();
+afterAll(() => panel.close());
+
+type Handler = (request: Request, context: RouteContext) => Promise<Response>;
+
+async function handlerOf(row: SupportSessionRoute): Promise<Handler> {
+  // O caminho vem da tabela: o import com variável precisa do caminho inteiro.
+  const module = (await import(/* @vite-ignore */ path.join(import.meta.dirname, row.route, "route.ts"))) as Partial<Record<string, Handler>>;
+  const handler = module[row.method];
+  if (!handler) throw new Error(`${row.method} ${row.route}: the route does not export this method`);
+  return handler;
+}
+
+/** Marca a conta como quem administra a instalação: o vínculo de suporte, na 5c, é de uma conta assim. */
+async function administers(accountId: string): Promise<void> {
+  await withSystem(panel.app, (q) => q.exec("update accounts set installation_admin_at = $2 where id = $1", [accountId, NOW]));
+}
+
+/**
+ * Uma organização com um `admin` da equipe e um vínculo de suporte `admin` com sessão, os dois
+ * criados aqui, e mais o que as rotas precisam encontrar (pessoas da equipe, convite, ligação).
+ */
+async function scene(label: string) {
+  const org = await createOrganization(panel.app, `Suporte ${label}`);
+  await createUser(panel.app, org, "owner");
+  const member = await createUser(panel.app, org, "admin");
+  const memberAccount = (await withSystem(panel.app, (q) => q.one<{ id: string }>("select account_id as id from users where id = $1", [member.id])))?.id ?? "";
+  await administers(memberAccount);
+
+  const supportEmail = `support-${randomUUID()}@example.test`;
+  const supportAccount = await withSystem(panel.app, (q) => createAccount(q, { email: supportEmail, passwordHash: PASSWORD }));
+  if (!supportAccount) throw new Error("the support link's account was not created");
+  await administers(supportAccount);
+  const support = await insert(
+    panel.app,
+    org,
+    "insert into users (organization_id, account_id, email, name, role, kind) values ($1, $2, $3, 'Suporte da instalação', 'admin', 'support') returning id",
+    [org, supportAccount, supportEmail],
+  );
+  const token = randomBytes(32).toString("base64url");
+  await insert(panel.app, org, "insert into sessions (organization_id, user_id, account_id, token_hash, expires_at) values ($1, $2, $3, $4, $5) returning id", [
+    org,
+    support,
+    supportAccount,
+    hashToken(token),
+    new Date(NOW.getTime() + 60 * 60 * 1000),
+  ]);
+
+  const operator = await createUser(panel.app, org, "operator");
+  const callId = await createCall(panel.app, org, NOW);
+  // O link público só se cria para ligação com gravação no disco.
+  const audio = recordingPath(panel.deps.recordingsDir, org, callId);
+  await mkdir(path.dirname(audio), { recursive: true });
+  await writeFile(audio, Buffer.from("RIFF"));
+  const created = await call(invite, { method: "POST", cookie: member.cookie, body: { email: `invited-${randomUUID()}@example.test`, name: "Convidada", role: "operator" } });
+  const data = created.data as { id: string; link: string };
+  const other = await createOrganization(panel.app, `Outra ${label}`);
+  return {
+    org,
+    other,
+    member,
+    support: { id: support, cookie: `${SESSION_COOKIE}=${token}` },
+    operator,
+    callId,
+    invite: { id: data.id, token: data.link.split("/invite/")[1] ?? "" },
+  };
+}
+type Scene = Awaited<ReturnType<typeof scene>>;
+
+interface Prepared {
+  params: Record<string, string>;
+  body?: unknown;
+  /** O `admin` da equipe consegue: o pedido é de verdade, e só a sessão de suporte é recusada. */
+  works?: true;
+}
+
+/**
+ * O pedido de cada linha que precisa de um registro de verdade para valer. Não é a lista de rotas:
+ * a linha que não está aqui é chamada com `id` sorteado e corpo vazio, e precisa ser recusada igual.
+ */
+const REQUESTS: Record<string, (s: Scene) => Prepared> = {
+  "POST team/invites": () => ({ params: {}, body: { email: `invited-${randomUUID()}@example.test`, name: "Nova", role: "admin" }, works: true }),
+  "DELETE team/invites/[id]": (s) => ({ params: { id: s.invite.id }, works: true }),
+  "PATCH team/users/[id]": (s) => ({ params: { id: s.operator.id }, body: { role: "admin" }, works: true }),
+  "DELETE team/users/[id]": (s) => ({ params: { id: s.operator.id }, works: true }),
+  "POST invites/[token]/accept": (s) => ({ params: { token: s.invite.token }, body: { name: "Convidada", password: "a-long-enough-password" }, works: true }),
+  "POST installation/organizations/[id]/invite": (s) => ({ params: { id: s.other }, body: { email: `owner-${randomUUID()}@example.test`, name: "Dona" }, works: true }),
+  "POST installation/admins": () => ({ params: {}, body: { email: `admin-${randomUUID()}@example.test` } }),
+  "POST auth/password": () => ({ params: {}, body: { current: PASSWORD, new: "another-long-enough-password" }, works: true }),
+  "PATCH auth/me": () => ({ params: {}, body: { phone: "+5531999990002", whatsapp: "+5531999990002" }, works: true }),
+  "POST auth/switch": (s) => ({ params: {}, body: { organizationId: s.other } }),
+  "POST calls/[id]/share": (s) => ({ params: { id: s.callId }, body: {}, works: true }),
+  "PUT settings/[key]": () => ({ params: { key: "whatsapp.connector" }, body: { value: { type: "webhook", url: "https://hooks.example.test/in", token: "hook-token" } }, works: true }),
+};
+
+function fallback(row: SupportSessionRoute): Prepared {
+  const params: Record<string, string> = {};
+  for (const [, name] of row.route.matchAll(/\[(\w+)\]/g)) params[name ?? ""] = name === "id" ? randomUUID() : "x";
+  return { params, body: {} };
+}
+
+/**
+ * Uma impressão de todo o banco: cada tabela que o papel de sistema lê, linha a linha. Os testes com
+ * banco rodam um arquivo de cada vez, então o que mudar entre duas leituras foi a requisição.
+ */
+async function fingerprint(): Promise<Record<string, string>> {
+  return withSystem(panel.app, async (q) => {
+    const tables = await q.many<{ name: string }>(
+      "select format('%I.%I', schemaname, tablename) as name from pg_tables where schemaname = 'public' and has_table_privilege(format('%I.%I', schemaname, tablename), 'select') order by 1",
+    );
+    const out: Record<string, string> = {};
+    for (const { name } of tables) {
+      const rows = await q.many<{ line: string }>(`select t::text as line from ${name} t`);
+      out[name] = createHash("sha256").update(rows.map((row) => row.line).sort().join("\n")).digest("hex");
+    }
+    return out;
+  });
+}
+
+const sent = (handler: Handler, method: string, cookie: string, request: Prepared): Promise<Result> =>
+  call(handler, { method, cookie, params: request.params, ...(request.body !== undefined && { body: request.body }) });
+
+const forbidden = SUPPORT_SESSION_ROUTES.filter((row) => row.rule === "forbid");
+
+describe("a support session", () => {
+  it("has rows to refuse, and every prepared request names a row of the table", () => {
+    expect(forbidden.length).toBeGreaterThan(0);
+    for (const id of Object.keys(REQUESTS)) expect(forbidden.map((row) => `${row.method} ${row.route}`)).toContain(id);
+  });
+
+  it.each(forbidden.map((row) => [`${row.method} ${row.route}`, row] as const))("is refused at %s, before anything is written; a team admin is not", async (id, row) => {
+    const s = await scene(id);
+    const handler = await handlerOf(row);
+    const request = (REQUESTS[id] ?? (() => fallback(row)))(s);
+
+    const before = await fingerprint();
+    const refused = await sent(handler, row.method, s.support.cookie, request);
+    expect([refused.status, refused.code]).toEqual([403, SUPPORT_SESSION_FORBIDDEN]);
+    expect(await fingerprint()).toEqual(before);
+    // Nada saiu para o processo de voz, o WAHA ou o agente: a recusa vem antes do `before` e do `after`.
+    expect(panel.voice.requests).toEqual([]);
+
+    const answered = await sent(handler, row.method, s.member.cookie, request);
+    expect(answered.code).not.toBe(SUPPORT_SESSION_FORBIDDEN);
+    if (request.works) expect([answered.status, answered.code]).toEqual([200, undefined]);
+    panel.voice.requests.length = 0;
+  });
+
+  // Duas linhas `allow`, lidas da tabela: a sessão de suporte faz o trabalho de um `admin` ali.
+  const allowed = (route: string, method: string): SupportSessionRoute => {
+    const row = SUPPORT_SESSION_ROUTES.find((r) => r.route === route && r.method === method);
+    expect(row?.rule).toBe("allow");
+    return row as SupportSessionRoute;
+  };
+
+  it("adds a number to the do-not-call list, like any admin", async () => {
+    const s = await scene("do-not-call");
+    const result = await sent(await handlerOf(allowed("do-not-call", "POST")), "POST", s.support.cookie, { params: {}, body: { numbers: ["+5531988887777"] } });
+    expect([result.status, result.code]).toEqual([200, undefined]);
+    const stored = await withOrg(panel.app, s.org, (q) => q.one<{ n: number }>("select count(*)::int as n from do_not_call where e164 = '+5531988887777'"));
+    expect(stored?.n).toBe(1);
+  });
+
+  it("changes the transcript retention, like any admin", async () => {
+    const s = await scene("retention");
+    const result = await sent(await handlerOf(allowed("privacy/retention", "PUT")), "PUT", s.support.cookie, { params: {}, body: { days: null } });
+    expect([result.status, result.code]).toEqual([200, undefined]);
+  });
+
+  it("is still a session: who am I answers, and only routes that say `support: false` refuse it", async () => {
+    const s = await scene("me");
+    const { GET: me } = await import("./auth/me/route");
+    const result = await call(me, { cookie: s.support.cookie });
+    expect(result.status).toBe(200);
+  });
+});

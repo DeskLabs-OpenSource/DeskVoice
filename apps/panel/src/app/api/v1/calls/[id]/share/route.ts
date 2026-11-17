@@ -25,7 +25,7 @@ export const GET = handle({ configure: true }, async ({ q, deps, params }) => {
  * Sem gravação no disco não há o que entregar: 409, em vez de um link que promete áudio e devolve
  * vazio. Chamada apagada a pedido do titular também não gera link.
  */
-export const POST = handle({ body, configure: true }, async ({ q, session, deps, params }) => {
+export const POST = handle({ support: false, body, configure: true }, async ({ q, session, deps, params }) => {
   const id = params.id ?? "";
   const call = await q.one<{ id: string; erased_at: Date | null }>("select id, erased_at from calls where id = $1", [id]);
   if (!call) throw notFound();

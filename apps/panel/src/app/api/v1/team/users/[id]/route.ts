@@ -6,7 +6,7 @@ import { loadMember, requireAnotherOwner, requireOwnerToManage, revokeInvitesCre
 
 const PERSON = `id, name, email::text as email, role, disabled_at is null as active`;
 
-export const PATCH = handle({ body: z.object({ role: roleName.optional(), disabled: z.boolean().optional() }), configure: true }, async ({ q, session, params, body, deps }) => {
+export const PATCH = handle({ support: false, body: z.object({ role: roleName.optional(), disabled: z.boolean().optional() }), configure: true }, async ({ q, session, params, body, deps }) => {
   const member = await loadMember(q, params.id);
   requireOwnerToManage(session, member.role, body.role);
   const role = body.role ?? member.role;
@@ -41,6 +41,7 @@ export const PATCH = handle({ body: z.object({ role: roleName.optional(), disabl
 // outros, o caminho é desativar. A pendência fechada que sai pelo prazo de guarda deixa de contar.
 export const DELETE = handle(
   {
+    support: false,
     configure: true,
     // A conta fica fora do alcance de `deskvoice_app`: ela só sai depois que o vínculo saiu, pelo
     // papel de sistema. Sem isso, o e-mail fica preso numa conta sem vínculo e o convite novo para
