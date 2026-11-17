@@ -3,6 +3,16 @@
 > Roteiro de novembro, item R11 (DESA-24). Desenho do Arquiteto, 14/11/2026.
 > Toca o mesmo caminho do áudio que o desenho do ouvido (#160, R3) e a transcrição pura (R12).
 > Os pontos de contato estão na seção "Onde esta frente toca as outras".
+>
+> **Estado (17/11, documento vivo):** quase tudo entregue, na `main`. Fatia 1 (sinal de fala e
+> guarda contra o silêncio) no #192, com os testes do acompanhamento no #214. Fatia 2 (ambiente de
+> ponta a ponta, sem tela) no #200. Fatia 3 (o campo na tela) no #202, com os ajustes do #241 e do
+> #242. Fatia 4 (medida da redução local) no #256, e fatia 4b no #294: a fatia "ligar" não existe
+> (veja "Medida da fatia 4b e a decisão sobre ligar"). Fatia 5, o script da bancada, sem rodada
+> paga, no #301. Fatia 6 (o Barulhento também no Gemini Live) no #403, na 0.32.0. **Falta:** a
+> rodada da fatia 5 com áudio contra os provedores (pedida ao board em 17/11, Gemini primeiro), a
+> seção "Medida contra o provedor" com a tabela dela, e o ajuste dos prazos da guarda e dos valores
+> do modo "noisy" que essa tabela decidir. Até lá, "melhorou" não foi medido.
 
 ## Problema
 
