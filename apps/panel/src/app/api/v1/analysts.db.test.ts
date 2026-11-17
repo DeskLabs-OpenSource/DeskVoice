@@ -209,7 +209,9 @@ describe("modelo que processa fora do servidor (o Jev)", () => {
   it("com a confirmação, grava quem confirmou e quando, e o recibo na mesma transação", async () => {
     panel.clock.at = new Date(NOW.getTime() + 60_000);
     const analyst = await newAnalyst(admin.cookie, { name: "Jev confirmado", decisionModel: "jev", confirmedProvider: "typesafe", objections: [price] });
-    expect(analyst).toMatchObject({ providerConfirmedBy: admin.id, providerConfirmedAt: panel.clock.at.toISOString() });
+    // A tela mostra quem confirmou pelo nome de hoje (fatia 4); o recibo guarda o do momento.
+    expect(analyst).toMatchObject({ providerConfirmedBy: admin.id, providerConfirmedByName: "Test admin", providerConfirmedAt: panel.clock.at.toISOString() });
+    expect((await call(getAnalyst, { cookie: owner, params: { id: analyst.id } })).data).toMatchObject({ providerConfirmedByName: "Test admin" });
     const [receipt, ...more] = await receipts(org, analyst.id);
     expect(more).toEqual([]);
     expect(receipt).toEqual({
@@ -244,7 +246,7 @@ describe("modelo que processa fora do servidor (o Jev)", () => {
   it("com o simulado, não pede confirmação nem grava recibo; voltar ao Jev pede de novo", async () => {
     const analyst = await newAnalyst(owner, { name: "Vai e volta", decisionModel: "jev", confirmedProvider: "typesafe" });
     const local = await call(patchAnalyst, { method: "PATCH", cookie: owner, params: { id: analyst.id }, body: { decisionModel: "simulated", confirmedProvider: "typesafe" } });
-    expect([local.status, local.data]).toMatchObject([200, { decisionModel: "simulated", providerConfirmedBy: null, providerConfirmedAt: null }]);
+    expect([local.status, local.data]).toMatchObject([200, { decisionModel: "simulated", providerConfirmedBy: null, providerConfirmedByName: null, providerConfirmedAt: null }]);
     const simulated = await newAnalyst(owner, { name: "Só simulado", decisionModel: "simulated", confirmedProvider: "none" });
     expect(await receipts(org, simulated.id)).toEqual([]);
     expect(await receipts(org, analyst.id)).toHaveLength(1);
@@ -259,6 +261,8 @@ describe("modelo que processa fora do servidor (o Jev)", () => {
     expect((await call(removeMember, { method: "DELETE", cookie: owner, params: { id: leaving.id } })).status).toBe(200);
 
     expect(await analystRow(org, analyst.id)).toMatchObject({ provider_confirmed_by: null, provider_confirmed_at: NOW });
+    // A tela diz "uma pessoa que não está mais na equipe": o nome some com a pessoa, e a hora fica.
+    expect((await call(getAnalyst, { cookie: owner, params: { id: analyst.id } })).data).toMatchObject({ providerConfirmedBy: null, providerConfirmedByName: null, providerConfirmedAt: NOW.toISOString() });
     const [receipt] = await receipts(org, analyst.id);
     expect(receipt).toMatchObject({ actor_user_id: null, payload: { confirmedByName: "Test admin", provider: "typesafe", analystName: "Quem saiu" } });
     // A confirmação continua valendo para o mesmo modelo: a hora fica, e editar não pede de novo.

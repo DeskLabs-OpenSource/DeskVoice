@@ -138,7 +138,7 @@ export function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): st
       return fill(t.history.analyst_provider_confirmed, {
         who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
         analyst: typeof p.analystName === "string" ? p.analystName : "",
-        provider: typeof p.provider === "string" ? p.provider : "",
+        provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
       });
     case "decision_model_provider_confirmed":
       // O recibo do filtro de fala: fica mesmo depois de desligar ou trocar de modelo.

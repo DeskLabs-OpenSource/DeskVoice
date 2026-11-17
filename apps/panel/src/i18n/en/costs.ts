@@ -12,6 +12,8 @@ const costs: CostsDictionary = {
   byAgent: "By agent",
   byEngine: "By voice engine",
   calls: "Calls: {n}",
+  analystLine: "Analyst · {model}",
+  analystNote: "Live analyst requests, on each caller turn",
   minutes: "{n} min",
   priceChecked: "Price checked on {date}",
   priceSource: "Price source",

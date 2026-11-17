@@ -4,6 +4,8 @@ const timeline: TimelineDictionary = {
   back: "Llamadas",
   live: "En vivo",
   liveHint: "La línea de tiempo se actualiza sola mientras ocurre la llamada.",
+  temperatureBadge: "Temperatura {score} de 5",
+  temperatureBadgeHint: "La última temperatura que el analista leyó en esta llamada, de 1 (fría: quiere terminar o no tiene interés) a 5 (caliente: quiere seguir adelante).",
   facts: { agent: "Agente", engine: "Motor de voz", duration: "Duración", cost: "Costo estimado", ceiling: "tope de {value}", byAgent: "Por agente:", deletedAgent: "Agente borrado", started: "Inicio", direction: "Sentido" },
   direction: { inbound: "Recibida", outbound: "Hecha por el agente" },
   outcomeTitle: "Lo que dejó esta llamada",
@@ -259,8 +261,13 @@ const timeline: TimelineDictionary = {
     analyst_guidance: {
       delivered: "El agente recibió la orientación del analista para la objeción {objection}.",
       stale: "La orientación para la objeción {objection} se descartó: quien llamó ya había hablado de nuevo.",
-      engine_unsupported: "El analista reconoció la objeción {objection}, pero este motor de voz todavía no recibe orientación. El analista mide, pero no orienta.",
+      engine_unsupported: "Objeción reconocida: {objection}, no entregada.",
+      engineUnsupportedWhy: "Este motor de voz todavía no recibe orientación: el analista mide, pero no orienta.",
+      current: "Orientación en el registro actual: “{guidance}”",
+      currentNote: "La línea de tiempo muestra la orientación del registro actual. Si se editó después de esta llamada, aquí aparece el texto nuevo.",
     },
+    analyst_objection_removed: "una objeción que ya no está en el registro",
+    analyst_objection_unread: "una objeción (no se pudo leer el registro de analistas)",
     analyst_guidance_leaked: "La intervención del agente repitió partes de la orientación para la objeción {objection}. La orientación no debería decirse a quien llamó.",
     caller_unanswered: {
       turn_closed: "Quien llamó estuvo {seconds} s sin respuesta, quizás por ruido en la línea. Se pidió al agente que respondiera a lo que escuchó.",

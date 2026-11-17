@@ -4,6 +4,8 @@ const timeline: TimelineDictionary = {
   back: "Calls",
   live: "Live",
   liveHint: "The timeline updates by itself while the call happens.",
+  temperatureBadge: "Temperature {score} of 5",
+  temperatureBadgeHint: "The last temperature the analyst read in this call, from 1 (cold: wants to end or has no interest) to 5 (warm: wants to move forward).",
   facts: { agent: "Agent", engine: "Voice engine", duration: "Duration", cost: "Estimated cost", ceiling: "ceiling of {value}", byAgent: "By agent:", deletedAgent: "Deleted agent", started: "Started", direction: "Direction" },
   direction: { inbound: "Received", outbound: "Placed by the agent" },
   outcomeTitle: "What this call left behind",
@@ -259,8 +261,13 @@ const timeline: TimelineDictionary = {
     analyst_guidance: {
       delivered: "The agent received the analyst's guidance for the objection {objection}.",
       stale: "The guidance for the objection {objection} was dropped: the caller had already spoken again.",
-      engine_unsupported: "The analyst recognized the objection {objection}, but this voice engine does not take guidance yet. The analyst measures, but does not guide.",
+      engine_unsupported: "Objection recognized: {objection}, not delivered.",
+      engineUnsupportedWhy: "This voice engine does not take guidance yet: the analyst measures, but does not guide.",
+      current: "Guidance in the current settings: “{guidance}”",
+      currentNote: "The timeline shows the guidance in the current settings. If it was edited after this call, the new text appears here.",
     },
+    analyst_objection_removed: "an objection that is no longer in the settings",
+    analyst_objection_unread: "an objection (the analyst settings could not be read)",
     analyst_guidance_leaked: "The agent's speech repeated parts of the guidance for the objection {objection}. Guidance should not be said to the caller.",
     caller_unanswered: {
       turn_closed: "The caller went {seconds} s without an answer, possibly because of noise on the line. The agent was asked to answer what it heard.",
