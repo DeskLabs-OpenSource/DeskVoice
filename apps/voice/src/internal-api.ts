@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { RecordingStop } from "@deskvoice/tools";
 import { z, type ZodType } from "zod";
 import { messageOf, silentLogger, type Logger } from "./log";
 import type { TrunkHealth } from "./trunks";
@@ -19,9 +20,11 @@ export interface InternalApiHandlers {
   health(): Promise<VoiceHealth>;
   applyTrunks(input: { organizationId: string }): Promise<object>;
   outbound(input: { organizationId: string; agentId: string; toE164: string }): Promise<{ callId: string } | Refusal>;
-  simulate(input: { organizationId: string; agentId: string }): Promise<{ callId: string } | Refusal>;
+  simulate(input: { organizationId: string; agentId: string; fromE164?: string | null }): Promise<{ callId: string } | Refusal>;
   /** Chamada pelo navegador: cria a chamada e o token de uso único que abre o WebSocket dela. */
   web(input: { organizationId: string; agentId: string; userId: string }): Promise<{ callId: string; token: string; expiresInSeconds: number } | Refusal>;
+  /** Para a gravação de uma chamada em curso, a pedido de quem está no painel. */
+  stopRecording(input: { organizationId: string; callId: string; userId: string; reason: string | null }): Promise<{ recording: RecordingStop } | Refusal>;
   /** Ligação pelo WhatsApp: o estado do número no WaCalls, conectar por QR Code e desconectar. */
   whatsappCalls: WhatsAppCallsHandlers;
 }
@@ -38,8 +41,9 @@ export interface InternalApiOptions {
 const MAX_BODY_BYTES = 64 * 1024;
 const organization = z.strictObject({ organizationId: z.uuid() });
 const outbound = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), toE164: z.string().min(1).max(40) });
-const simulate = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid() });
+const simulate = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), fromE164: z.string().regex(/^\+[1-9]\d{7,14}$/).nullable().optional() });
 const web = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), userId: z.uuid() });
+const stopRecording = z.strictObject({ organizationId: z.uuid(), callId: z.uuid(), userId: z.uuid(), reason: z.string().max(300).nullable() });
 
 class HttpError extends Error {
   constructor(
@@ -103,6 +107,10 @@ export function startInternalApi(options: InternalApiOptions): Promise<{ port: n
     if (whatsappCalls) {
       const result = await handlers.whatsappCalls[whatsappCalls](await readJson(request, organization));
       return { status: "session" in result ? 200 : 409, body: result };
+    }
+    if (key === "POST /calls/recording/stop") {
+      const result = await handlers.stopRecording(await readJson(request, stopRecording));
+      return { status: "recording" in result ? 200 : 409, body: result };
     }
     if (key === "POST /calls/web") {
       const result = await handlers.web(await readJson(request, web));

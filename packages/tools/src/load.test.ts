@@ -23,9 +23,24 @@ export default {
 
 // Estes testes importam a árvore inteira do pacote a frio; em máquina carregada isso passa dos 5 s padrão.
 describe("loadTools", { timeout: 30_000 }, () => {
-  it("descobre as sete ferramentas da fundação, cada uma com o nome do próprio arquivo", async () => {
+  it("descobre as ferramentas da pasta, cada uma com o nome do próprio arquivo", async () => {
     const tools = await loadTools();
-    expect([...tools.keys()].sort()).toEqual(["call_webhook", "create_task", "end_call", "notify_human", "request_approval", "send_whatsapp", "transfer_to_human"]);
+    expect([...tools.keys()].sort()).toEqual([
+      "agenda_horarios_livres",
+      "agenda_marcar",
+      "agenda_remarcar",
+      "call_webhook",
+      "create_task",
+      "end_call",
+      "notify_human",
+      "remember_caller_note",
+      "request_approval",
+      "send_dtmf",
+      "send_whatsapp",
+      "stop_recording",
+      "transfer_to_agent",
+      "transfer_to_human",
+    ]);
   });
 
   it("toda ferramenta entrega ao motor um JSON Schema de objeto e uma descrição que diz quando NÃO usar", async () => {

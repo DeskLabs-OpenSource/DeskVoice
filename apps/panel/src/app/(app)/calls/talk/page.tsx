@@ -11,13 +11,14 @@ import esCommon from "../../../../i18n/es/common";
 import es from "../../../../i18n/es/talk";
 import ptBRCommon from "../../../../i18n/pt-BR/common";
 import ptBR from "../../../../i18n/pt-BR/talk";
-import { useDict, useLocale } from "../../../../i18n/provider";
+import { useDict } from "../../../../i18n/provider";
 import { ApiFailure, api, useApi } from "../../../../ui/api";
-import { formatDuration, formatMoney } from "../../../../ui/format";
+import { formatDuration } from "../../../../ui/format";
 import { Badge, Button, EmptyState, Field, Notice, Panel, Select, Skeleton, buttonClass, type Tone } from "../../../../ui/kit";
 import { useLive, useNow } from "../../../../ui/live";
 import { Timeline } from "../../../../ui/timeline";
-import type { Agent, Call, CallEvent, CallStatus, Engine } from "../../../../ui/types";
+import { Amount } from "../../costs/amount-view";
+import type { Agent, Analyst, CallDetail, CallEvent, CallStatus, Engine } from "../../../../ui/types";
 
 type Phase = "idle" | "starting" | "live" | "ended";
 const LAST_AGENT = "dv_talk_agent";
@@ -42,10 +43,11 @@ const FixLink = ({ href, children }: { href: string; children: ReactNode }) => (
 export default function TalkPage() {
   const t = useDict(ptBR, en, es);
   const common = useDict(ptBRCommon, enCommon, esCommon);
-  const locale = useLocale();
   const now = useNow();
   const agents = useApi<Agent[]>("/agents");
   const engines = useApi<Engine[]>("/engines");
+  // O rótulo e a orientação das objeções na linha do tempo vêm do cadastro atual dos analistas.
+  const analysts = useApi<Analyst[]>("/analysts");
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [agentId, setAgentId] = useState("");
@@ -58,7 +60,7 @@ export default function TalkPage() {
   const voice = useRef<VoiceCall | null>(null);
   const answered = useRef(false);
 
-  const call = useApi<Call>(callId ? `/calls/${callId}` : null);
+  const call = useApi<CallDetail>(callId ? `/calls/${callId}` : null);
   const events = useApi<CallEvent[]>(callId ? `/calls/${callId}/events` : null);
   useLive((signal) => {
     if (signal.callId !== callId) return;
@@ -123,7 +125,7 @@ export default function TalkPage() {
   const problemFix =
     problem === "engine_not_configured" ? (
       <FixLink href="/settings">{t.fix.settings}</FixLink>
-    ) : (problem === "engine_simulated" || problem === "agent_disabled") && agent ? (
+    ) : (problem === "engine_simulated" || problem === "engine_not_installed" || problem === "agent_disabled") && agent ? (
       <FixLink href={`/agents/${agent.id}`}>{t.fix.agent}</FixLink>
     ) : problem === "agent_not_found" ? (
       <FixLink href="/agents">{t.fix.agents}</FixLink>
@@ -141,7 +143,7 @@ export default function TalkPage() {
     <section className="grid gap-4">
       <h2 className="text-[1.07rem] font-bold">{t.transcript}</h2>
       {events.data?.length === 0 && phase !== "ended" ? <p className="text-muted">{t.transcriptWaiting}</p> : null}
-      {events.data ? <Timeline events={events.data} live={phase === "live"} agentName={agent?.name ?? ""} /> : <Skeleton lines={2} />}
+      {events.data && (analysts.data || analysts.error) ? <Timeline events={events.data} live={phase === "live"} agentName={agent?.name ?? ""} analysts={analysts.data} /> : <Skeleton lines={2} />}
     </section>
   ) : null;
 
@@ -293,7 +295,7 @@ export default function TalkPage() {
               </div>
               <div className="grid gap-1">
                 <dt className="text-[0.8rem] font-bold text-muted">{t.ended.cost}</dt>
-                <dd className="data text-[1.2rem]">{call.data ? formatMoney(call.data.costCents, locale) : ""}</dd>
+                <dd className="data text-[1.2rem]">{call.data ? <Amount cents={call.data.costCents} unmeasuredCount={call.data.unmeasuredCount} estimatedCount={call.data.estimatedCount} /> : ""}</dd>
               </div>
             </dl>
             <div className="flex flex-wrap items-center gap-3 border-t border-line pt-5">

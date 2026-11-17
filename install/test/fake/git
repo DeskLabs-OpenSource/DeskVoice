@@ -18,6 +18,8 @@ case " $* " in
   *" tag --list "*) cat "$FAKE_DIR/git_tags" ;;
   *" status --porcelain "*) ;;
   *" symbolic-ref "*) echo main ;;
+  # O arquivo de outra versão (`show <ref>:<caminho>`): o de $FAKE_DIR/git_checkout/<ref>/<caminho>.
+  *" show "*) spec="${*: -1}"; cat "$FAKE_DIR/git_checkout/${spec%%:*}/${spec#*:}" 2>/dev/null ;;
   # Trocar o código: se o teste preparou $FAKE_DIR/git_checkout/<ref> e disse onde fica a cópia
   # de trabalho ($FAKE_GIT_WORKTREE), os arquivos de lá vão por cima dela, como numa troca de versão.
   *" checkout "*)

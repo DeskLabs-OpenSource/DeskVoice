@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createCall, createOrganization, openTestDbs, waitFor } from "../test/helpers";
+import { purgedCallAnalysisSchema, type CallAnalysis } from "./analysis";
+import { createAccount } from "./accounts";
 import { listen } from "./db";
 import { purgeTranscripts, recordEvent, recordOrgEvent } from "./events";
 import type { CallEventKind, OrgEventKind } from "./types";
@@ -82,9 +84,11 @@ describe("recordOrgEvent", () => {
 
   it("is append-only: neither the application nor the system role changes or deletes a record, but removing the author still clears it", async () => {
     const audited = await createOrganization(app, "events append-only");
+    const account = await withSystem(app, (q) => createAccount(q, { email: `author-${audited}@example.test`, passwordHash: "x" }));
     const author = await withOrg(app, audited, async (q) => {
-      const row = await q.one<{ id: string }>("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, 'Autora', 'x', 'admin') returning id", [
+      const row = await q.one<{ id: string }>("insert into users (organization_id, account_id, email, name, role) values ($1, $2, $3, 'Autora', 'admin') returning id", [
         audited,
+        account,
         `author-${audited}@example.test`,
       ]);
       const id = row?.id ?? "";
@@ -139,6 +143,120 @@ describe("purgeTranscripts", () => {
       ["recording_notice", { text: "Olá." }],
     ]);
     expect((await eventsOf(theirs)).map((row) => row.payload)).toEqual([{ text: "Olá." }]);
+  });
+});
+
+describe("purgeTranscripts and the call analysis", () => {
+  const analysis: CallAnalysis = {
+    rubricVersion: 1,
+    model: "gemini-test",
+    criteria: [
+      { id: "opening", status: "met", evidence: "Boa tarde, aqui é a recepção." },
+      { id: "discovery", status: "partial", evidence: "O que a senhora precisa?" },
+      { id: "objections", status: "met", evidence: "Achei caro." },
+      { id: "accuracy", status: "missed", evidence: "" },
+      { id: "closing", status: "met", evidence: "Fica marcado para terça." },
+    ],
+    temperature: { start: "cold", middle: "warm", end: "hot" },
+    objections: [
+      { objection: "Preço", quote: "Achei caro.", response: "Ofereceu parcelamento.", handled: "addressed" },
+      { objection: "Horário", quote: "Só posso de manhã.", response: "Marcou de manhã.", handled: "partial" },
+    ],
+    strengths: ["Confirmou o horário."],
+    weaknesses: ["Não disse o preço total."],
+    nextStep: "Lembrar a consulta na segunda.",
+    droppedObjections: 1,
+  };
+  const texts = [
+    ...analysis.criteria.map((criterion) => criterion.evidence).filter((text) => text !== ""),
+    ...analysis.objections.flatMap((objection) => [objection.objection, objection.quote, objection.response]),
+    ...analysis.strengths,
+    ...analysis.weaknesses,
+    analysis.nextStep,
+  ];
+  const analysisOf = async (call: string) =>
+    (await owner.pool.query<{ analysis: unknown; analysis_score: number | null }>("select analysis, analysis_score from calls where id = $1", [call])).rows[0];
+
+  it("keeps rubric, temperature and objection count before the deadline, drops every text, and leaves later calls and other organizations alone", async () => {
+    const older = new Date(at.getTime() - 1);
+    const purgedCall = await createCall(app, org, older);
+    const keptCall = await createCall(app, org, at);
+    const foreignCall = await createCall(app, otherOrg, older);
+    for (const call of [purgedCall, keptCall, foreignCall]) {
+      await owner.pool.query("update calls set analysis = $2, analysis_score = 7 where id = $1", [call, JSON.stringify(analysis)]);
+    }
+
+    await withOrg(app, org, (q) => purgeTranscripts(q, at));
+
+    const purged = await analysisOf(purgedCall);
+    expect(purged?.analysis).toEqual({
+      rubricVersion: 1,
+      model: "gemini-test",
+      criteria: analysis.criteria.map(({ id, status }) => ({ id, status })),
+      temperature: { start: "cold", middle: "warm", end: "hot" },
+      objectionCount: 2,
+      purged: true,
+    });
+    expect(purgedCallAnalysisSchema.safeParse(purged?.analysis).success).toBe(true);
+    const stored = JSON.stringify(purged?.analysis);
+    for (const text of texts) expect(stored).not.toContain(text);
+    // A nota é a soma dos status que ficaram, não é fala de ninguém.
+    expect(purged?.analysis_score).toBe(7);
+
+    expect(await analysisOf(keptCall)).toEqual({ analysis, analysis_score: 7 });
+    expect(await analysisOf(foreignCall)).toEqual({ analysis, analysis_score: 7 });
+  });
+
+  it("does not rewrite an analysis that was already purged, and leaves calls without analysis as null", async () => {
+    const older = new Date(at.getTime() - 1);
+    const call = await createCall(app, org, older);
+    const never = await createCall(app, org, older);
+    await owner.pool.query("update calls set analysis = $2, analysis_score = 7 where id = $1", [call, JSON.stringify(analysis)]);
+
+    await withOrg(app, org, (q) => purgeTranscripts(q, at));
+    const first = await analysisOf(call);
+    // Uma expurgada com um campo a mais mostra se o segundo passo a reescreveria.
+    await owner.pool.query("update calls set analysis = analysis || '{\"marker\": 1}'::jsonb where id = $1", [call]);
+    await withOrg(app, org, (q) => purgeTranscripts(q, at));
+
+    expect((await analysisOf(call))?.analysis).toEqual({ ...(first?.analysis as object), marker: 1 });
+    expect(await analysisOf(never)).toEqual({ analysis: null, analysis_score: null });
+  });
+});
+
+describe("purgeTranscripts and the request to stop recording", () => {
+  const PEDIDO = "Não quero que essa conversa fique gravada.";
+  const pauseOf = async (call: string) =>
+    (await owner.pool.query("select recording_paused_at, recording_paused_by, recording_pause_reason from calls where id = $1", [call])).rows[0];
+
+  it("drops the caller's words from the call and from the event before the deadline, keeps when and by whom, and leaves later calls and other organizations alone", async () => {
+    const older = new Date(at.getTime() - 1);
+    const purgedCall = await createCall(app, org, older);
+    const keptCall = await createCall(app, org, at);
+    const foreignCall = await createCall(app, otherOrg, older);
+    for (const [organization, call, when] of [
+      [org, purgedCall, older],
+      [org, keptCall, at],
+      [otherOrg, foreignCall, older],
+    ] as const) {
+      await owner.pool.query("update calls set recording_paused_at = $2, recording_paused_by = 'agent', recording_pause_reason = $3 where id = $1", [call, when, PEDIDO]);
+      await owner.pool.query("insert into call_events (organization_id, call_id, at, kind, payload) values ($1, $2, $3, 'recording_paused', $4)", [
+        organization,
+        call,
+        when,
+        JSON.stringify({ by: "agent", reason: PEDIDO }),
+      ]);
+    }
+
+    await withOrg(app, org, (q) => purgeTranscripts(q, at));
+    await withOrg(app, org, (q) => purgeTranscripts(q, at));
+
+    expect(await pauseOf(purgedCall)).toEqual({ recording_paused_at: older, recording_paused_by: "agent", recording_pause_reason: null });
+    expect((await eventsOf(purgedCall)).map((row) => row.payload)).toEqual([{ by: "agent", reasonPurged: true }]);
+    for (const call of [keptCall, foreignCall]) {
+      expect((await pauseOf(call))?.recording_pause_reason).toBe(PEDIDO);
+      expect((await eventsOf(call)).map((row) => row.payload)).toEqual([{ by: "agent", reason: PEDIDO }]);
+    }
   });
 });
 

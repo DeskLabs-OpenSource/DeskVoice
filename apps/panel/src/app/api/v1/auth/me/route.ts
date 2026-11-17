@@ -5,8 +5,14 @@ import { optionalPhone } from "../../../../../server/shapes";
 
 const COLUMNS = `name, email, role, phone_e164 as phone, whatsapp_e164 as whatsapp`;
 
+// O nome da organização vai junto: a tela do agente o mostra no texto padrão da mensagem para quem ligou.
 async function me(q: OrgQuery, session: Session) {
-  const row = await q.one(`select ${COLUMNS} from users where id = $1`, [session.userId]);
+  const row = await q.one(
+    `select u.name, u.email, u.role, u.phone_e164 as phone, u.whatsapp_e164 as whatsapp, o.name as "organizationName"
+       from users u join organizations o on o.id = u.organization_id
+      where u.id = $1`,
+    [session.userId],
+  );
   if (!row) throw notFound();
   return row;
 }

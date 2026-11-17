@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { encryptSecret, withSystem, type ApprovalOutcome, type Db } from "@deskvoice/core";
+import { createAccount, encryptSecret, withSystem, type ApprovalOutcome, type Db } from "@deskvoice/core";
 import { createCall, createOrganization } from "../../core/test/helpers";
 import { autoCommitOrgQuery } from "../src/org-query";
 import type { ToolContext } from "../src/types";
@@ -41,6 +41,7 @@ export async function createFixture(
     organizationId,
     agentId,
     callId,
+    language: "pt-BR",
     q: autoCommitOrgQuery(app, organizationId),
     clock: { now: () => now },
     said: [],
@@ -58,6 +59,7 @@ export async function createFixture(
       hangup: async () => {
         ctx.hangups += 1;
       },
+      pauseRecording: async () => "not_recording",
     },
     say: (text) => {
       ctx.said.push(text);
@@ -92,14 +94,16 @@ export async function putWhatsAppConnector(app: Db, organizationId: string, type
 
 export async function createUser(app: Db, organizationId: string, whatsapp: string | null): Promise<string> {
   const id = randomUUID();
-  await withSystem(app, (q) =>
-    q.exec("insert into users (id, organization_id, email, name, password_hash, role, whatsapp_e164) values ($1, $2, $3, 'Pessoa', 'x', 'operator', $4)", [
+  await withSystem(app, async (q) => {
+    const accountId = await createAccount(q, { email: `${id}@example.com`, passwordHash: "x" });
+    await q.exec("insert into users (id, organization_id, account_id, email, name, role, whatsapp_e164) values ($1, $2, $3, $4, 'Pessoa', 'operator', $5)", [
       id,
       organizationId,
+      accountId,
       `${id}@example.com`,
       whatsapp,
-    ]),
-  );
+    ]);
+  });
   return id;
 }
 
@@ -131,3 +135,63 @@ export const fakeLookup =
   (table: Record<string, string[]> = {}) =>
   async (host: string): Promise<string[]> =>
     table[host] ?? ["93.184.216.34"];
+
+/**
+ * Dá à chamada da fixture um número e uma história: `calls` ligações anteriores do mesmo número e
+ * uma pendência aberta para cada título. Para os testes da linha "Este número já ligou…".
+ * `simulatedCalls`: simuladas com o mesmo número, que a linha não conta como ligação.
+ */
+export async function seedCallerHistory(
+  app: Db,
+  ctx: FakeContext,
+  phone: string,
+  history: { calls: number; openFollowUps: string[]; simulatedCalls?: number; simulatedFollowUps?: string[]; notes?: string[]; simulatedNotes?: string[] },
+): Promise<string[]> {
+  return withSystem(app, async (q) => {
+    await q.exec("update calls set from_e164 = $2 where id = $1", [ctx.callId, phone]);
+    const ids: string[] = [];
+    for (let index = 0; index < history.calls; index += 1) {
+      const id = randomUUID();
+      await q.exec(
+        "insert into calls (id, organization_id, agent_id, direction, channel, status, from_e164, summary, started_at, ended_at) values ($1, $2, $3, 'inbound', 'phone', 'completed', $4, $5, $6, $6)",
+        [id, ctx.organizationId, ctx.agentId, phone, `Resumo ${index}: a pessoa contou um detalhe pessoal.`, new Date(t0.getTime() - (index + 1) * 86_400_000)],
+      );
+      ids.push(id);
+    }
+    // A pendência e a nota de simulada nascem na primeira simulada (#291).
+    const simulatedIds: string[] = [];
+    for (let index = 0; index < (history.simulatedCalls ?? 0); index += 1) {
+      const id = randomUUID();
+      await q.exec(
+        "insert into calls (id, organization_id, agent_id, direction, channel, status, engine, from_e164, started_at, ended_at) values ($1, $2, $3, 'inbound', 'simulated', 'completed', 'simulated', $4, $5, $5)",
+        [id, ctx.organizationId, ctx.agentId, phone, new Date(t0.getTime() - (index + 1) * 3_600_000)],
+      );
+      simulatedIds.push(id);
+    }
+    for (const [index, title] of (history.simulatedFollowUps ?? []).entries()) {
+      await q.exec("insert into follow_ups (organization_id, call_id, caller_e164, title, due_at, created_at) values ($1, $2, $3, $4, $5, $5)", [
+        ctx.organizationId,
+        simulatedIds[0],
+        phone,
+        title,
+        new Date(t0.getTime() - (index + 1) * 60_000),
+      ]);
+    }
+    const note = (callId: string | undefined, text: string) =>
+      q.exec("insert into caller_notes (organization_id, call_id, caller_e164, text, created_at) values ($1, $2, $3, $4, $5)", [ctx.organizationId, callId, phone, text, t0]);
+    for (const text of history.notes ?? []) await note(ids[0] ?? ctx.callId, text);
+    for (const text of history.simulatedNotes ?? []) await note(simulatedIds[0], text);
+    // Prazos em sequência: a linha cita as pendências na ordem do prazo.
+    for (const [index, title] of history.openFollowUps.entries()) {
+      await q.exec("insert into follow_ups (organization_id, call_id, caller_e164, title, due_at, created_at) values ($1, $2, $3, $4, $5, $6)", [
+        ctx.organizationId,
+        ids[0] ?? null,
+        phone,
+        title,
+        new Date(t0.getTime() + (index + 1) * 60_000),
+        t0,
+      ]);
+    }
+    return ids;
+  });
+}

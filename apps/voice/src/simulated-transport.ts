@@ -5,6 +5,8 @@ export interface SimulatedTransport extends CallTransport {
   readonly spokenMs: number;
   /** Destino da transferência, se houve. */
   readonly transferredTo: string | null;
+  /** Teclas que o agente apertou no menu do outro lado. */
+  readonly sentDtmf: string[];
   /** `hangup`, `transfer` ou `close` já foi chamado. */
   readonly ended: boolean;
   /** Quem ligou desliga. */
@@ -23,6 +25,7 @@ export function createSimulatedTransport(options: { schedule?: Schedule } = {}):
   /** Fala entregue que ainda não teria tocado: cai 20 ms a cada quadro de quem ligou. */
   let pendingMs = 0;
   let transferredTo: string | null = null;
+  const sentDtmf: string[] = [];
   let ended = false;
   let cancelFeed: (() => void) | undefined;
   let hangupHandler: (() => void) | undefined;
@@ -38,6 +41,9 @@ export function createSimulatedTransport(options: { schedule?: Schedule } = {}):
   return {
     get spokenMs() {
       return (spokenBytes / 2 / SAMPLE_RATE) * 1000;
+    },
+    get sentDtmf() {
+      return sentDtmf;
     },
     get transferredTo() {
       return transferredTo;
@@ -78,6 +84,10 @@ export function createSimulatedTransport(options: { schedule?: Schedule } = {}):
       await drained();
       transferredTo = toE164;
       stop();
+    },
+    async sendDtmf(digits) {
+      if (ended) return;
+      sentDtmf.push(digits);
     },
     async close() {
       stop();

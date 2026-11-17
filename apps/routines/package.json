@@ -8,7 +8,8 @@
     "start": "tsx src/main.ts",
     "migrate": "tsx src/cli/migrate.ts",
     "create-owner": "tsx src/cli/create-owner.ts",
-    "reset-password": "tsx src/cli/reset-password.ts"
+    "reset-password": "tsx src/cli/reset-password.ts",
+    "grant-installation-admin": "tsx src/cli/grant-installation-admin.ts"
   },
   "dependencies": {
     "@deskvoice/core": "workspace:^",

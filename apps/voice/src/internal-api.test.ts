@@ -18,6 +18,7 @@ async function api(token: string | undefined, overrides: Partial<InternalApiHand
     outbound: async (input) => (calls.push(["outbound", input]), { callId: "call-1" }),
     simulate: async (input) => (calls.push(["simulate", input]), { callId: "call-2" }),
     web: async (input) => (calls.push(["web", input]), { callId: "call-3", token: "tok", expiresInSeconds: 60 }),
+    stopRecording: async (input) => (calls.push(["stopRecording", input]), { recording: "stopped" }),
     whatsappCalls: {
       state: async (input) => (calls.push(["whatsappCalls.state", input]), { session: null }),
       connect: async (input) => (calls.push(["whatsappCalls.connect", input]), { code: "wacalls_unreachable", message: "down" }),
@@ -140,5 +141,23 @@ describe("API interna", { timeout: 60_000 }, () => {
 
     const refusing = await api("segredo-interno", { web: async () => ({ code: "engine_simulated", message: "Change the agent's voice engine." }) });
     expect(await refusing.request("POST", "/calls/web", { token: "segredo-interno", body })).toEqual({ status: 409, body: { code: "engine_simulated", message: "Change the agent's voice engine." } });
+  });
+
+  it("POST /calls/recording/stop: exige o token, valida o corpo, devolve o que a chamada respondeu e repassa a recusa como 409", async () => {
+    const CALL = "0d000000-0000-4000-8000-000000000004";
+    const USER = "0c000000-0000-4000-8000-000000000003";
+    const body = { organizationId: ORG, callId: CALL, userId: USER, reason: "Pediu para não gravar" };
+    const { request, calls } = await api("segredo-interno");
+    expect((await request("POST", "/calls/recording/stop", { body })).status).toBe(401);
+    for (const bad of [{ organizationId: ORG, callId: CALL, userId: USER }, { ...body, callId: "x" }, { ...body, reason: "x".repeat(301) }, { ...body, extra: 1 }]) {
+      expect((await request("POST", "/calls/recording/stop", { token: "segredo-interno", body: bad })).status).toBe(400);
+    }
+    expect(calls).toEqual([]);
+    expect(await request("POST", "/calls/recording/stop", { token: "segredo-interno", body: { ...body, reason: null } })).toEqual({ status: 200, body: { recording: "stopped" } });
+    expect(calls).toEqual([["stopRecording", { ...body, reason: null }]]);
+    await close?.();
+
+    const ended = await api("segredo-interno", { stopRecording: async () => ({ code: "call_not_live", message: "This call is not in progress in the voice process." }) });
+    expect(await ended.request("POST", "/calls/recording/stop", { token: "segredo-interno", body })).toEqual({ status: 409, body: { code: "call_not_live", message: expect.any(String) } });
   });
 });

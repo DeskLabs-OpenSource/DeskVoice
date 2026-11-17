@@ -4,7 +4,11 @@ A ligação pelo WhatsApp faz o agente atender quem liga para a empresa pelo Wha
 ferramentas, aviso de gravação e tetos da ligação pelo telefone. Instale o serviço, conecte o número
 e escolha o agente que atende. Em Chamadas, a ligação pelo WhatsApp aparece como uma ligação
 recebida, com o número de quem ligou. Quando o WhatsApp esconde o número (`@lid`), o que hoje é o
-caso comum, quem liga aparece como número não identificado: a correção depende do WaCalls. A ligação ainda não tem um canal "WhatsApp" próprio na lista e na linha do tempo.
+caso comum, vale o telefone que a própria chamada informa, sem confirmação do WhatsApp, como o número
+que a operadora repassa. Quem repassa esse telefone é a imagem do WaCalls que o kit usa, um fork com o
+conserto (JotaDev66/WaCalls#69) até os autores o publicarem; com a imagem oficial (d16a076), quem
+liga com o número oculto apareceria como número não identificado. Provado numa ligação real em
+13/11/2026. A ligação ainda não tem um canal "WhatsApp" próprio na lista e na linha do tempo.
 
 O desenho completo, com o que se sabe e o que não se sabe, está em
 [`docs/specs/2026-11-12-ligacao-pelo-whatsapp.md`](../specs/2026-11-12-ligacao-pelo-whatsapp.md).

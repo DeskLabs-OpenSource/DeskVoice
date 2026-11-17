@@ -195,7 +195,7 @@ ensure_wacalls() {
   return "$created"
 }
 # A imagem do WaCalls que ESTA instalação usa, por resumo, como o Docker a guarda. Sai do Compose.
-wacalls_image_ref() { sed -n 's/^ *image: \(ghcr\.io\/jotadev66\/wacalls@sha256:[0-9a-f]\{64\}\)$/\1/p' "$DEPLOY_DIR/docker-compose.yml" | head -n 1; }
+wacalls_image_ref() { sed -n 's/^ *image: \(ghcr\.io\/[a-z0-9-]*\/wacalls@sha256:[0-9a-f]\{64\}\)$/\1/p' "$DEPLOY_DIR/docker-compose.yml" | head -n 1; }
 
 # Grava os três arquivos de ambiente. Segredo que já existe fica como está; o resto é
 # regravado com o que foi decidido nesta execução.
@@ -396,8 +396,9 @@ pick_free_port() {  # pick_free_port <primeira candidata> < lista de portas em u
 # O arquivo é reescrito por inteiro: o que uma versão antiga publicava (painel e voz em duas
 # portas) some na reinstalação, e o `up` seguinte recria os contêineres sem a porta antiga.
 write_proxy_override() {
-  local tmp site="$1" trusted="$2" port
+  local tmp site="$1" trusted="$2" port network
   shift 2
+  network="$(proxy_network)"
   tmp="$(mktemp "$PROXY_OVERRIDE.XXXXXX")"
   {
     echo "# Gerado pelo instalador. Não edite: rode bash install/install.sh para mudar."
@@ -408,9 +409,38 @@ write_proxy_override() {
     echo "      CADDY_TRUSTED_PROXIES: \"$trusted\""
     echo "    ports:"
     for port in "$@"; do echo "      - \"$port\""; done
+    if [ -n "$network" ]; then
+      echo "    networks:"
+      echo "      internal: {}"
+      echo "      proxy:"
+      echo "        aliases: [deskvoice]"
+      echo "networks:"
+      echo "  proxy:"
+      echo "    name: \"$network\""
+      echo "    external: true"
+    fi
   } > "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$PROXY_OVERRIDE"
+}
+# A rede Docker do proxy de outro sistema desta VPS (o `_caddy-sites` do CRM, no guia
+# docs/guides/na-mesma-vps-do-crm.md) em que o Caddy do DeskVoice entra com o nome `deskvoice`.
+# Declarada no arquivo de publicação, a ligação sobrevive a todo `up` que recria o contêiner
+# (atualização, volta, restauração), em vez de se perder como o `docker network connect` à mão
+# (issue #221). DESKVOICE_PROXY_NETWORK=<rede> grava, `off` tira, e vazio mantém a gravada.
+proxy_network() {
+  case "${DESKVOICE_PROXY_NETWORK:-}" in
+    off) ;;
+    "") if [ -f "$PROXY_OVERRIDE" ]; then sed -n 's/^    name: "\(.*\)"$/\1/p' "$PROXY_OVERRIDE" | head -n 1; fi ;;
+    *) echo "$DESKVOICE_PROXY_NETWORK" ;;
+  esac
+}
+# A rede gravada que o Docker não conhece mais (o outro sistema a apagou): sem ela, o `up` do
+# Compose para inteiro, e nenhum serviço do DeskVoice sobe. Devolve o nome, ou nada.
+missing_proxy_network() {
+  local network
+  network="$(proxy_network)"
+  if [ -n "$network" ] && ! docker network inspect "$network" >/dev/null 2>&1; then echo "$network"; fi
 }
 # O que o arquivo de publicação diz hoje, para a reinstalação manter a porta que o proxy do
 # operador (ou o túnel) já conhece. Lê o formato atual (Caddy, porta 80 de dentro) e o antigo
@@ -604,6 +634,31 @@ image_repo() {  # image_repo <panel|voice|routines> → o nome sem a etiqueta
 }
 image_ref() {  # image_ref <panel|voice|routines> <versão> → o nome completo, igual ao do Compose
   printf '%s:%s\n' "$(image_repo "$1")" "$2"
+}
+# published_arm64 <versão> → 0: o índice publicado da versão lista arm64; 1: o registro respondeu e
+# não lista (versão de antes da 0017, ou sem imagem); 2: não deu para perguntar (sem curl, sem rede).
+# Pergunta como o `docker pull` pergunta: token anônimo de leitura e o índice da etiqueta. Basta o
+# painel: o publish-image.yml etiqueta as três juntas, e o verify-public confere as duas
+# arquiteturas em cada uma antes da release.
+# ponytail: o caminho do token é o do ghcr.io, o único registro em que o workflow publica.
+published_arm64() {
+  local repo host path token reply
+  have curl || return 2
+  repo="$(image_repo panel)"; host="${repo%%/*}"; path="${repo#*/}"
+  token="$(curl -fsS --max-time 10 "https://$host/token?scope=repository:$path:pull" 2>/dev/null | sed -n 's/.*"token" *: *"\([^"]*\)".*/\1/p')" || return 2
+  [ -n "$token" ] || return 2
+  reply="$(curl -sS --max-time 10 -w '\n%{http_code}' -H "Authorization: Bearer $token" \
+    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+    "https://$host/v2/$path/manifests/$1" 2>/dev/null)" || return 2
+  case "${reply##*$'\n'}" in
+    200) printf '%s\n' "$reply" | grep -Eq '"architecture"[[:space:]]*:[[:space:]]*"arm64"' && return 0; return 1 ;;
+    404) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+# A frase de quando a versão não tem imagem ARM: a mesma no instalador e no atualizador.
+no_arm64_image() {  # no_arm64_image <versão> <arquitetura>
+  printf 'A versão %s do DeskVoice não tem imagem publicada para processador ARM (%s): as imagens ARM existem a partir da primeira versão publicada com elas.\n' "$1" "$2"
 }
 
 # A versão publicada mais recente é a maior tag final do clone. O Compose e o kit vêm do mesmo

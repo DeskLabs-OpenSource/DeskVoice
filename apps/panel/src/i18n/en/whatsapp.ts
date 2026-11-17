@@ -32,7 +32,7 @@ const whatsapp: WhatsAppDictionary = {
   riskTitle: "Before you connect",
   risk: "This connection uses an unofficial WhatsApp client, not Meta's official API. WhatsApp may restrict or block the number without warning. Use a number dedicated to this, never your personal one or the company's main one.",
   riskStrangers:
-    "What most often leads to a block is writing first to someone who has never talked to the number. The agent only sends to whoever is on the call or to the team, and a message to the caller asks for a person's confirmation. Keep it to a few messages per hour.",
+    "What most often leads to a block is writing first to someone who has never talked to the number. The agent only sends to whoever is on the call or to the team, and a message to the caller asks for a person's confirmation. The exception is an agent set to send a message after a dropped call: that message goes out on its own, at most one per number every 24 hours and within the organization cap. Keep it to a few messages per hour.",
   connect: "Connect",
   replaceConfirm:
     "A WhatsApp connector is already configured ({type}, {url}). Connecting a number replaces that connector now and erases the stored token. If the QR code is not scanned, sending by WhatsApp stays stopped until you connect a number or configure the connector again.",

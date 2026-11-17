@@ -1,0 +1,3 @@
+services:
+  wacalls:
+    image: registro.example/projeto/wacalls:develop

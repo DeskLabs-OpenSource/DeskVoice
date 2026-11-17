@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { verifyPassword, withSystem } from "@deskvoice/core";
+import { FOUNDING_ORGANIZATION_KEY, findLoginAccount, isInstallationAdmin, verifyPassword, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs, tasksOf } from "../../test/helpers";
 import { createOwner } from "./create-owner";
@@ -21,10 +21,11 @@ describe("createOwner", () => {
 
     const row = await withSystem(app, (q) =>
       q.one<Record<string, unknown>>(
-        `select o.name as organization, u.id as user_id, u.name, u.role, u.password_hash, p.enabled as outbound_enabled,
+        `select o.name as organization, u.id as user_id, u.name, u.role, u.kind, acc.email::text as account_email, acc.password_hash, acc.installation_admin_at, p.enabled as outbound_enabled,
                 a.id as agent_id, a.name as agent, a.engine, a.language, a.greeting, a.instructions, a.tools, a.enabled as agent_enabled
            from organizations o
            join users u on u.organization_id = o.id
+           join accounts acc on acc.id = u.account_id
            join outbound_policy p on p.organization_id = o.id
            join agents a on a.organization_id = o.id
           where o.id = $1`,
@@ -36,13 +37,17 @@ describe("createOwner", () => {
       user_id: result.userId,
       name: "Rafa",
       role: "owner",
+      kind: "member",
+      account_email: data.email,
+      // A marca fica nula: quem administra é a regra da fundadora (seção 3.2), e não uma marca dada aqui.
+      installation_admin_at: null,
       outbound_enabled: false,
       agent_id: result.agentId,
       agent: "Recepção",
       engine: "simulated",
       language: "pt-BR",
       agent_enabled: true,
-      tools: ["call_webhook", "create_task", "end_call", "notify_human", "request_approval", "send_whatsapp", "transfer_to_human"],
+      tools: ["call_webhook", "create_task", "end_call", "notify_human", "request_approval", "send_dtmf", "send_whatsapp", "stop_recording", "transfer_to_human"],
     });
     expect(row?.greeting).toMatch(/Olá/);
     expect(row?.instructions).toMatch(/português do Brasil/);
@@ -67,6 +72,24 @@ describe("createOwner", () => {
     await expect(createOwner(app, data)).rejects.toThrow(/pelo menos 10 caracteres/);
     expect(await countUsers(data.email)).toBe(0);
     expect((await createOwner(app, { ...data, password: "1234567890" })).created).toBe(true);
+  });
+
+  it("garante que a instalação tem fundadora, e uma organização criada depois não muda quem administra", async () => {
+    const founding = (): Promise<unknown> => withSystem(app, async (q) => (await q.one<{ value: unknown }>("select value from installation_settings where key = $1", [FOUNDING_ORGANIZATION_KEY]))?.value);
+    const first = input();
+    const created = await createOwner(app, first);
+    if (!created.created) throw new Error("expected the owner to be created");
+    // Num banco sem fundadora, é esta; se outro arquivo já criou uma, ela fica (o teste de
+    // `recordFoundingOrganization`, em packages/core, prova as duas pontas).
+    const before = await founding();
+    expect(typeof before).toBe("string");
+
+    const second = input();
+    const again = await createOwner(app, second);
+    if (!again.created) throw new Error("expected the owner to be created");
+    expect(await founding()).toBe(before);
+    const administers = async (email: string): Promise<boolean> => isInstallationAdmin(app, (await findLoginAccount(app, email))?.accountId ?? "");
+    expect(await administers(second.email)).toBe(false);
   });
 
   it("recusa e-mail inválido", async () => {

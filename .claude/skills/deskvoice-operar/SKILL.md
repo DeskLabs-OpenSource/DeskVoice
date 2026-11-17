@@ -26,7 +26,7 @@ Não invente tela, campo ou número: confira no painel da pessoa, ou no código
 | Número de transferência | Para onde vai quando precisa de uma pessoa. Sem ele, `transfer_to_human` não tem destino |
 
 Ferramentas da fundação: `end_call`, `transfer_to_human`, `notify_human`, `request_approval`,
-`send_whatsapp`, `call_webhook`, `create_task`.
+`send_whatsapp`, `send_dtmf`, `call_webhook`, `create_task`.
 
 **Teste sempre ligando.** Mudou as instruções? Ligue, faça o caso difícil e leia a linha do tempo.
 

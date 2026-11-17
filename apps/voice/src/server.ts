@@ -1,11 +1,11 @@
 import { whatsappCallsWanted, type Clock, type Db } from "@deskvoice/core";
 import type { Tool } from "@deskvoice/tools";
-import type { VoiceEngine } from "@deskvoice/voice-engine";
+import type { DecisionModel, VoiceEngine } from "@deskvoice/voice-engine";
 import { createApprovalWaiter } from "./approvals";
 import type { AriClient, AriEvent } from "./ari";
 import { AsteriskCalls } from "./asterisk-transport";
 import { startAudioSocketServer } from "./audiosocket";
-import { startCallSession, type CallSession, type CallSessionDeps } from "./call-session";
+import { startCallSession, stopRecordingOfLiveCall, type CallSession, type CallSessionDeps } from "./call-session";
 import { handleInbound } from "./inbound";
 import { startInternalApi } from "./internal-api";
 import { messageOf, silentLogger, type Logger } from "./log";
@@ -14,8 +14,9 @@ import { removePartialRecordings } from "./recording";
 import { closeOrphanCalls } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
 import { realSchedule, type Schedule } from "./transport";
-import { applyTrunks, checkTrunks, type TrunksDeps } from "./trunks";
+import { applyTrunks, checkTrunks, REFRESH_ALLOWED_MS, refreshAllowed, resolveSipName, type ResolveName, type TrunksDeps } from "./trunks";
 import type { WacallsOptions } from "./wacalls-client";
+import { startVoicemailSession, type VoicemailSession } from "./voicemail";
 import { startWebCalls } from "./web-calls";
 import { createWhatsAppCalls } from "./whatsapp-calls";
 
@@ -24,6 +25,8 @@ export interface VoiceServerDeps {
   clock: Clock;
   engines: Map<string, VoiceEngine>;
   tools: Map<string, Tool>;
+  /** Os modelos de decisão do filtro da fala (R12, fatia 6). Sem eles, o filtro não liga. */
+  decisionModels?: Map<string, DecisionModel>;
   ari: AriClient;
   secretKey: Buffer;
   audioSocketPort: number;
@@ -39,6 +42,8 @@ export interface VoiceServerDeps {
   trunksOwner?: { uid: number; gid: number };
   host?: string;
   schedule?: Schedule;
+  /** Resolve o nome no `host` da linha por registro. Sem ele, vai ao DNS de verdade (`resolveSipName`). */
+  resolveName?: ResolveName;
   /** Acesso ao WaCalls da instalação (ligação pelo WhatsApp). Sem token, o recurso não existe aqui. */
   wacalls?: WacallsOptions;
   /** Relógio monotônico da cadência de áudio, em ms. */
@@ -71,16 +76,27 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     if (removed > 0) log("info", "removed partial recordings left by a previous process", { removed });
   }
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
-  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir };
-  const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, log };
+  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir, decisionModels: deps.decisionModels };
+  const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, resolve: deps.resolveName ?? resolveSipName, log };
   const calls = new AsteriskCalls({ ari, db, clock, log });
   const sessions = new Set<CallSession>();
+  // Recados em curso, com o ciclo de vida próprio: não são conversas, e não atendem a pedido de
+  // parar gravação (`stopRecordingOfLiveCall`).
+  const voicemails = new Set<VoicemailSession>();
 
   const track = (session: CallSession): void => {
     sessions.add(session);
     void session.done.then((outcome) => {
       sessions.delete(session);
       log("info", "call ended", { ...outcome });
+    });
+  };
+
+  const trackVoicemail = (session: VoicemailSession): void => {
+    voicemails.add(session);
+    void session.done.then((outcome) => {
+      voicemails.delete(session);
+      log("info", "voicemail ended", { ...outcome });
     });
   };
 
@@ -100,6 +116,21 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
         return;
       }
       const { call, transport } = attached;
+      if (call.voicemail) {
+        trackVoicemail(
+          startVoicemailSession(
+            { db, clock, recordingsDir: deps.recordingsDir, schedule: deps.schedule, log },
+            { organizationId: call.organizationId, callId: call.callId, ...call.voicemail, transport },
+          ),
+        );
+        return;
+      }
+      if (!call.agentId) {
+        // Sem agente e sem recado: não deveria existir. Fechar devolve o canal à Stasis, que desliga.
+        log("error", "audiosocket connection for a call with neither agent nor voicemail; closing", { callId: call.callId });
+        connection.close();
+        return;
+      }
       track(startCallSession(sessionDeps, { organizationId: call.organizationId, callId: call.callId, agentId: call.agentId, transport }));
     },
   });
@@ -128,6 +159,20 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     );
   ari.onConnected(reapply);
   reapply();
+  // O nome da linha por registro pode passar a resolver para outro endereço sem ninguém mexer na
+  // tela: de 5 em 5 minutos o conjunto liberado é recalculado, e aplicado de novo se mudou.
+  const schedule = deps.schedule ?? realSchedule;
+  let stopRefresh = (): void => undefined;
+  let closed = false;
+  const refreshLater = (): void => {
+    if (closed) return;
+    stopRefresh = schedule(() => {
+      void refreshAllowed(trunksDeps)
+        .catch((error: unknown) => log("error", "could not refresh the addresses of the lines", { error: messageOf(error) }))
+        .finally(refreshLater);
+    }, REFRESH_ALLOWED_MS);
+  };
+  refreshLater();
 
   // Não depende do Asterisk: nem a chamada pelo navegador nem a ligação pelo WhatsApp passam por ele.
   const whatsappCalls = createWhatsAppCalls(deps.wacalls ?? { token: "" }, {
@@ -155,6 +200,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
       applyTrunks: () => applyTrunks(trunksDeps),
       outbound: (input) => startOutboundCall({ db, ari, clock, calls, log }, input),
       web: (input) => webCalls.request(input),
+      stopRecording: (input) => stopRecordingOfLiveCall(sessions, input),
       whatsappCalls,
       async simulate(input) {
         const started = await startSimulatedCall(sessionDeps, input);
@@ -171,11 +217,15 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     webPort: webCalls.port,
     calls,
     async close() {
+      closed = true;
+      stopRefresh();
       ari.close();
       whatsappCalls.close();
       await api.close();
       for (const session of sessions) session.stop("shutdown");
+      for (const session of voicemails) session.stop("shutdown");
       await Promise.all([...sessions].map((session) => session.done));
+      await Promise.all([...voicemails].map((session) => session.done));
       await audioSocket.close();
       await webCalls.close();
       await approvals.close();

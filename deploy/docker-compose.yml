@@ -205,7 +205,9 @@ services:
   # (DESKVOICE_WHATSAPP_CALLS=on). Memória e disco com o serviço de pé ainda NÃO foram medidos.
   wacalls:
     profiles: ["whatsapp-calls"]
-    image: ghcr.io/jotadev66/wacalls@sha256:9ff52ef9455cf42125a911c38bb8c855f0cc205516cada2054e5c05546909022
+    # Imagem do fork DeskLabs-OpenSource/WaCalls: d16a076 dos autores mais o conserto do caller_pn
+    # (9507c56, proposto em JotaDev66/WaCalls#69), até eles publicarem o conserto. O resto é igual.
+    image: ghcr.io/desklabs-opensource/wacalls@sha256:74612a1d175bca3eed00cc5a6958fc7c0d593f44b8f8cbe01e59b228ba867508
     restart: unless-stopped
     # Teto, e não medição: é o que o DeskcommCRM usa com a mesma imagem. Sem teto, um serviço que
     # cresce leva a máquina inteira; com ele, cai só quem estourou e o `restart` o traz de volta.

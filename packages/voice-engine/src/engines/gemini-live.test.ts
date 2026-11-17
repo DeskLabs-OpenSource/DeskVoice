@@ -43,6 +43,46 @@ describe("gemini-live (contrato com servidor falso)", () => {
     });
   });
 
+  // A abertura de hoje, gravada como texto: agente sem termos não pode mandar ao provedor nada além disto.
+  const SETUP_SEM_VOCABULARIO =
+    '{"setup":{"model":"models/modelo-x","generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Sulafat"}}}},' +
+    '"systemInstruction":{"parts":[{"text":"Você atende a clínica.\\n\\nSpeak only in pt-BR."}]},' +
+    '"tools":[{"functionDeclarations":[{"name":"end_call","description":"Encerra a ligação","parametersJsonSchema":{"type":"object","properties":{}}}]}],' +
+    '"inputAudioTranscription":{"languageCodes":["pt-BR"]},"outputAudioTranscription":{}}}';
+
+  it.each([["ausente", undefined], ["vazio", []]])("vocabulário %s: a abertura é byte a byte a de antes", async (_, vocabulary) => {
+    const { setup } = await openSession({ vocabulary });
+    expect(JSON.stringify(setup)).toBe(SETUP_SEM_VOCABULARIO);
+  });
+
+  it("vocabulário: os termos vão ao customVocabulary da transcrição e à instrução, antes do idioma", async () => {
+    const { setup } = await openSession({ vocabulary: ["Melgaço", "DeskVoice"] });
+    expect(setup).toMatchObject({
+      setup: {
+        systemInstruction: {
+          parts: [{ text: "Você atende a clínica.\n\nNames and terms that may come up in this call, spelled as written: Melgaço; DeskVoice.\n\nSpeak only in pt-BR." }],
+        },
+      },
+    });
+    expect((setup.setup as Record<string, unknown>).inputAudioTranscription).toEqual({ languageCodes: ["pt-BR"], customVocabulary: ["Melgaço", "DeskVoice"] });
+  });
+
+  it.each([["ausente", undefined], ["normal", "normal" as const]])("ambiente %s: a abertura é byte a byte a de antes", async (_, listeningEnvironment) => {
+    const { setup } = await openSession({ listeningEnvironment });
+    expect(JSON.stringify(setup)).toBe(SETUP_SEM_VOCABULARIO);
+  });
+
+  it("ambiente barulhento: início de fala pouco sensível, fim sensível e 300 ms, sem tocar na interrupção", async () => {
+    const { setup } = await openSession({ listeningEnvironment: "noisy" });
+    const { realtimeInputConfig, ...rest } = setup.setup as Record<string, unknown>;
+    expect(realtimeInputConfig).toEqual({
+      automaticActivityDetection: { startOfSpeechSensitivity: "START_SENSITIVITY_LOW", endOfSpeechSensitivity: "END_SENSITIVITY_HIGH", prefixPaddingMs: 300 },
+    });
+    // `activityHandling` fica no padrão (a fala de verdade interrompe); o resto é o de sempre.
+    expect(JSON.stringify(setup)).not.toContain("activityHandling");
+    expect(rest).toEqual((JSON.parse(SETUP_SEM_VOCABULARIO) as { setup: unknown }).setup);
+  });
+
   it("só devolve a sessão depois do setupComplete e faz o agente falar primeiro", async () => {
     let connected = false;
     const connecting = engine.connect(config, "k", { baseUrl: fake.url }).then((session) => {
@@ -105,6 +145,29 @@ describe("gemini-live (contrato com servidor falso)", () => {
     await expect(interrupted).resolves.toEqual([]);
   });
 
+  it("sinal de fala de quem ligou: transcrição interina ou definitiva com texto vira { words: true }, sem entrar no texto da fala", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    const signals: Array<{ words: boolean }> = [];
+    const transcripts: string[] = [];
+    session.on("callerActivity", (signal) => signals.push(signal));
+    session.on("transcript", (turn) => transcripts.push(`${turn.speaker}: ${turn.text}`));
+    fake.send({ serverContent: { interimInputTranscription: { text: "quero" } } });
+    fake.send({ serverContent: { interimInputTranscription: { text: " " } } });
+    fake.send({ serverContent: { inputTranscription: { text: "quero marcar" } } });
+    const done = nextEvent(session, "transcript");
+    fake.send({ serverContent: { turnComplete: true } });
+    await done;
+    expect(signals).toEqual([{ words: true }, { words: true }]);
+    // A interina só avisa: o texto da fala é o definitivo.
+    expect(transcripts).toEqual(["user: quero marcar"]);
+  });
+
+  it("closeCallerTurn manda audioStreamEnd", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    session.closeCallerTurn();
+    expect(await fake.waitFor((message) => "realtimeInput" in message)).toEqual({ realtimeInput: { audioStreamEnd: true } });
+  });
+
   it("mensagem fora do formato é ignorada sem derrubar a sessão", async () => {
     const { session } = await openSession();
     const errors: Error[] = [];
@@ -150,6 +213,14 @@ describe("gemini-live (contrato com servidor falso)", () => {
     await expect(connecting).rejects.toThrow(/antes de confirmar a sessão/);
     await fake.stop();
     await expect(engine.connect(config, "k", { baseUrl: fake.url })).rejects.toThrow(/não foi possível conectar/);
+  });
+
+  it("a recusa antes do setupComplete leva o código e o motivo do provedor", async () => {
+    // Forma medida numa instalação em 2026-11-16, com o crédito pré-pago esgotado.
+    const connecting = engine.connect(config, "k", { baseUrl: fake.url });
+    await fake.waitFor((message) => "setup" in message);
+    fake.refuse(1011, "Your prepayment credits are depleted.");
+    await expect(connecting).rejects.toThrow("Gemini Live: a conexão fechou antes de confirmar a sessão (código 1011; Your prepayment credits are depleted.)");
   });
 });
 
@@ -214,7 +285,7 @@ describe("gemini-live: desfecho da ligação (contrato com servidor HTTP falso)"
       status: 200,
       body: { candidates: [{ content: { parts: [{ text: JSON.stringify(palpite) }] } }], usageMetadata: { promptTokenCount: 1_000_000, candidatesTokenCount: 60_000, thoughtsTokenCount: 40_000 } },
     });
-    expect(await classify()).toEqual({ ok: true, guess: palpite, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 100_000 }, costCents: 55 });
+    expect(await classify()).toEqual({ ok: true, guess: palpite, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 100_000 }, costCents: 55, costMicrocents: 55_000_000 });
     expect(http.requests[0]).toMatchObject({ method: "POST", url: "/models/gemini-3.5-flash-lite:generateContent", headers: { "x-goog-api-key": "chave-de-teste" } });
   });
 
@@ -224,12 +295,12 @@ describe("gemini-live: desfecho da ligação (contrato com servidor HTTP falso)"
     ["400 sem motivo de chave (schema recusado)", "unexpected_response", { status: 400, body: { error: { code: 400 } } }],
   ] as const)("%s vira %s, sem custo", async (_, failure, reply) => {
     http.respond(reply);
-    expect(await classify()).toEqual({ ok: false, failure, status: reply.status, model: "gemini-3.5-flash-lite", usage: {}, costCents: 0 });
+    expect(await classify()).toEqual({ ok: false, failure, status: reply.status, model: "gemini-3.5-flash-lite", usage: {}, costCents: 0, costMicrocents: 0 });
   });
 
   it("um 200 fora da forma é falha, mas o que foi cobrado vem junto", async () => {
     http.respond({ status: 200, body: { candidates: [{ content: { parts: [{ text: "não é JSON" }] } }], usageMetadata: { promptTokenCount: 1_000_000 } } });
-    expect(await classify()).toEqual({ ok: false, failure: "unexpected_response", status: 200, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 0 }, costCents: 30 });
+    expect(await classify()).toEqual({ ok: false, failure: "unexpected_response", status: 200, model: "gemini-3.5-flash-lite", usage: { inputTokens: 1_000_000, outputTokens: 0 }, costCents: 30, costMicrocents: 30_000_000 });
   });
 
   it("sem resposta no prazo é provedor fora do ar", async () => {

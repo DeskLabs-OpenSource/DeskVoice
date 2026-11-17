@@ -1,5 +1,33 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, open, readdir, rename, rm, statfs } from "node:fs/promises";
 import path from "node:path";
+
+/**
+ * O que a gravação deixou no disco quando fechou: o tamanho final e a impressão digital do arquivo.
+ *
+ * A impressão serve para conferir se uma cópia do `.wav` (mandada por e-mail, guardada fora do
+ * servidor) é igual ao arquivo que esta instalação gravou. Não prova nada contra quem administra o
+ * servidor: ela fica no mesmo banco, na mesma máquina que o áudio. `null` quando a leitura para
+ * calculá-la falhou: a gravação está salva do mesmo jeito, e a linha do tempo diz que a impressão
+ * não pôde ser calculada.
+ */
+export type RecordingOutcome = { bytes: number; sha256: string | null; sha256Error?: string };
+
+/**
+ * A impressão digital lida do arquivo já fechado, por stream: uma hora de conversa passa de 100 MB,
+ * e o fim da chamada não é lugar para carregar isso na memória.
+ */
+async function sha256Of(file: string): Promise<string> {
+  const digest = createHash("sha256");
+  await new Promise<void>((resolve, reject) => {
+    createReadStream(file)
+      .on("data", (bloco) => digest.update(bloco))
+      .on("error", reject)
+      .on("end", resolve);
+  });
+  return digest.digest("hex");
+}
 
 /**
  * Abaixo deste espaço livre na pasta das gravações, a chamada não é gravada. As gravações dividem
@@ -85,6 +113,9 @@ export function createRecorder(now: () => number, sink?: (stereo: Buffer) => voi
   const kept: Buffer[] = [];
   const write = sink ?? ((stereo: Buffer) => void kept.push(stereo));
   let flushed = 0;
+  // Depois da pausa o áudio não entra mais, mas o que já estava guardado sai: o pedido de quem
+  // ligou tem de estar no arquivo.
+  let paused = false;
 
   const bytesAt = (ms: number): number => Math.max(0, Math.floor((ms * BYTES_PER_MS) / 2) * 2);
   const elapsedBytes = (): number => bytesAt(now() - startedAt);
@@ -112,11 +143,13 @@ export function createRecorder(now: () => number, sink?: (stereo: Buffer) => voi
 
   return {
     caller(pcm: Buffer): void {
+      if (paused) return;
       // Áudio de quem ligou chega no tempo real; um buraco (rede, mudo) vira silêncio.
       caller.append(Math.max(caller.end, elapsedBytes() - pcm.length), pcm);
       settle();
     },
     agent(pcm: Buffer): void {
+      if (paused) return;
       agent.append(Math.max(agent.end, elapsedBytes()), pcm);
       settle();
     },
@@ -125,6 +158,15 @@ export function createRecorder(now: () => number, sink?: (stereo: Buffer) => voi
       agent.truncate(elapsedBytes());
     },
     end,
+    /**
+     * Para de aceitar áudio e devolve quantos bytes de áudio a gravação tem até aqui — o trecho
+     * inteiro, inclusive o pedido que acabou de ser feito. Chamar de novo não muda nada.
+     */
+    pause(): number {
+      if (paused) return flushed * 2;
+      paused = true;
+      return end();
+    },
     /** O WAV pronto, ou `null` se ninguém falou nada. Só sem `sink`. */
     wav(): Buffer | null {
       const bytes = end();
@@ -139,8 +181,13 @@ export interface Recording {
   caller(pcm: Buffer): void;
   agent(pcm: Buffer): void;
   clear(): void;
+  /**
+   * Para de gravar, deixando no arquivo tudo o que foi dito até aqui. Espera os blocos chegarem ao
+   * disco antes de resolver: quem chamou pode contar que o pedido está salvo.
+   */
+  pause(): Promise<void>;
   /** Fecha o arquivo. Com áudio, acerta o cabeçalho e troca `.part` por `.wav`; sem, ou com falha, apaga o `.part`. */
-  finish(): Promise<boolean>;
+  finish(): Promise<RecordingOutcome | false>;
 }
 
 /** O espaço livre na pasta das gravações, criando-a se ainda não existe. */
@@ -222,6 +269,7 @@ export async function startRecording(
     sampleRate,
   );
 
+  let paused = false;
   return {
     // Depois da falha, nada mais é gravado: nem o trecho que ainda podia mudar fica em memória.
     caller: (pcm) => {
@@ -231,6 +279,15 @@ export async function startRecording(
       if (failure === undefined) recorder.agent(pcm);
     },
     clear: () => recorder.clear(),
+    async pause() {
+      if (paused) return;
+      paused = true;
+      const bytes = recorder.pause();
+      if (bytes > 0) append(wavHeader(bytes, sampleRate), 0);
+      // O pedido de quem ligou pode estar no último bloco, ainda na fila: só resolve depois que ele
+      // entrou no arquivo.
+      await writing;
+    },
     async finish() {
       closing = true;
       const bytes = recorder.end();
@@ -243,7 +300,16 @@ export async function startRecording(
         return false;
       }
       await rename(partial, file);
-      return true;
+      // Daqui em diante a gravação está salva, e nada mais pode fazê-la contar como perdida. O tamanho
+      // sai da conta, e não de um `stat` que poderia falhar: o arquivo é o cabeçalho de 44 bytes mais
+      // os bytes de áudio que o próprio cabeçalho declara. A impressão é um extra: se a leitura falhar,
+      // ela vira `null`, e o motivo vai junto para o log e a linha do tempo (issue 278).
+      const size = WAV_HEADER_BYTES + bytes;
+      try {
+        return { bytes: size, sha256: await sha256Of(file) };
+      } catch (error) {
+        return { bytes: size, sha256: null, sha256Error: error instanceof Error ? error.message : String(error) };
+      }
     },
   };
 }
@@ -269,8 +335,10 @@ export async function removePartialRecordings(dir: string): Promise<number> {
   return removed;
 }
 
+const WAV_HEADER_BYTES = 44;
+
 function wavHeader(dataBytes: number, sampleRate: number): Buffer {
-  const header = Buffer.alloc(44);
+  const header = Buffer.alloc(WAV_HEADER_BYTES);
   header.write("RIFF", 0);
   header.writeUInt32LE(36 + dataBytes, 4);
   header.write("WAVE", 8);

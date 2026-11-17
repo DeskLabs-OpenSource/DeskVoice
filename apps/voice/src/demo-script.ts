@@ -3,6 +3,14 @@ import type { SimulatedScript } from "@deskvoice/voice-engine";
 /** As ferramentas que o roteiro usa. A chamada simulada as habilita, seja qual for a lista do agente. */
 export const DEMO_TOOLS = ["create_task", "notify_human", "request_approval", "transfer_to_human", "end_call"];
 
+/**
+ * A nota do agente vem desligada (registro 0020, 1A): o roteiro só a usa, e a simulada só a habilita,
+ * quando o agente a tem marcada. Assim a simulada mostra a nota a quem a ligou, e não guarda dado novo
+ * para quem não escolheu.
+ */
+export const DEMO_NOTE_TOOL = "remember_caller_note";
+export const DEMO_NOTE = "Prefere ser atendida às sextas de manhã.";
+
 /** Quanto a aprovação da demonstração espera por alguém no painel antes de valer o padrão do operador (negar, se ele não mudou). */
 export const DEMO_APPROVAL_TIMEOUT_SECONDS = 60;
 
@@ -16,8 +24,9 @@ export const DEMO_APPROVAL_TIMEOUT_SECONDS = 60;
  *
  * `greet`: fala a saudação do roteiro, depois do aviso; falso quando o agente já tem a dele.
  * `canTransfer`: o agente tem número de transferência; sem ele o roteiro termina em despedida.
+ * `note`: o agente tem `remember_caller_note` marcada; o roteiro guarda uma nota sobre quem ligou.
  */
-export function demoScript(options: { greet: boolean; canTransfer: boolean }): SimulatedScript {
+export function demoScript(options: { greet: boolean; canTransfer: boolean; note?: boolean }): SimulatedScript {
   return [
     ...(options.greet ? [{ say: "Clínica Bem Viver, bom dia. Aqui é a Lia, assistente virtual da recepção. Como posso ajudar?" }] : []),
     {
@@ -35,6 +44,7 @@ export function demoScript(options: { greet: boolean; canTransfer: boolean }): S
         },
       },
     },
+    ...(options.note ? [{ toolCall: { name: DEMO_NOTE_TOOL, args: { text: DEMO_NOTE } } }] : []),
     {
       toolCall: {
         name: "notify_human",

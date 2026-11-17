@@ -30,7 +30,7 @@ export async function createOrganization(app: Db, label: string): Promise<string
 export async function createCall(app: Db, organizationId: string, startedAt: Date): Promise<string> {
   const id = randomUUID();
   await withSystem(app, (q) =>
-    q.exec("insert into calls (id, organization_id, direction, status, started_at) values ($1, $2, 'inbound', 'in_progress', $3)", [id, organizationId, startedAt]),
+    q.exec("insert into calls (id, organization_id, direction, channel, status, started_at) values ($1, $2, 'inbound', 'phone', 'in_progress', $3)", [id, organizationId, startedAt]),
   );
   return id;
 }
@@ -42,4 +42,35 @@ export async function waitFor(condition: () => boolean, what: string, timeoutMs 
     if (performance.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+/**
+ * Grava a lista de destinos de passagem sem o gatilho que confere a organização, como um banco mexido à
+ * mão: é como o teste prova que a leitura também confere. Só o dono do schema (`owner`) consegue, e numa
+ * transação só, para nenhuma outra conexão ver a tabela sem o gatilho.
+ */
+export async function forceHandoffTargets(owner: Db, agentId: string, targets: string[]): Promise<void> {
+  const client = await owner.pool.connect();
+  try {
+    await client.query("begin");
+    await client.query("alter table agents disable trigger agents_handoff_targets_check");
+    await client.query("update agents set agent_handoff_targets = $2 where id = $1", [agentId, targets]);
+    await client.query("alter table agents enable trigger agents_handoff_targets_check");
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Devolve a instalação ao começo: sem fundadora, sem lista explícita e sem marca em conta nenhuma.
+ * Quem administra a instalação é estado GLOBAL, e os arquivos de banco rodam em série no mesmo banco.
+ * Só o dono do schema (`owner`) apaga: o produto nunca apaga `installation.admins_explicit_at`.
+ */
+export async function clearInstallationState(owner: Db): Promise<void> {
+  await owner.pool.query("delete from installation_settings where key in ('installation.founding_organization_id', 'installation.admins_explicit_at')");
+  await owner.pool.query("update accounts set installation_admin_at = null where installation_admin_at is not null");
 }

@@ -12,7 +12,9 @@ const calls: CallsDictionary = {
   filterLabel: "Filter by status",
   filterAll: "All",
   emptyFilter: "No call with this status.",
-  columns: { caller: "Number", agent: "Agent", status: "Status", started: "Started", duration: "Duration", cost: "Cost" },
+  columns: { caller: "Number", agent: "Agent", status: "Status", started: "Started", duration: "Duration", cost: "Cost", score: "Score" },
+  score: "{score}/10",
+  noScore: "No analysis",
   direction: { inbound: "Received", outbound: "Placed by the agent" },
   empty: {
     title: "No calls yet.",

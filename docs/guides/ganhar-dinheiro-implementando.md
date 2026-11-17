@@ -45,6 +45,15 @@ Para quem **não** vender, pelo menos no começo:
 - **Quem quer demitir a equipe.** O sistema foi desenhado com o humano no meio. Vendido como
   substituição, ele decepciona.
 
+## Guias por ramo
+
+O primeiro ramo com guia próprio é o de clínicas, o que mais pede cuidado com dado de saúde:
+[clínicas e consultórios](clinicas-e-consultorios.md) traz as instruções do agente de recepção
+prontas, cada limite com a frase que ele deve dizer, o que não pode ser gravado nem repetido, o
+roteiro de teste do primeiro dia e o que existe hoje de agenda. Os outros ramos da tabela acima
+ainda não têm guia; até terem, o roteiro é este guia de implantação mais o de
+[conformidade no Brasil](conformidade-brasil.md).
+
 ## Como descobrir se vale a pena para o cliente
 
 Antes de propor preço, faça três perguntas ao dono do negócio:
@@ -124,8 +133,9 @@ redige contratos.
   dono ou administrador muda, e a gravação vem desligada. E diga quem atende o pedido de uma
   pessoa que quer os próprios dados: a tela exporta tudo de um telefone, menos o áudio, que sai à
   parte, chamada por chamada.
-- **O que o prazo de guarda não apaga.** O resumo da chamada, os argumentos das ferramentas e os
-  backups já feitos ficam. Escreva isso, para ninguém prometer um apagamento que não acontece.
+- **O que o prazo de guarda não apaga.** Os argumentos das ferramentas e os backups já feitos ficam;
+  o resumo da chamada, esse sai junto com a transcrição da mesma chamada. Escreva isso, para ninguém
+  prometer um apagamento que não acontece.
 - **No nome de quem ficam o número e o tronco.** A recomendação é no nome do cliente, como as
   outras contas (veja "Custos de terceiros"). Se ficarem no seu, o contrato diz como passam a ele.
 - **O risco de bloqueio do WhatsApp.** A conexão por QR Code usa um cliente não oficial, e o

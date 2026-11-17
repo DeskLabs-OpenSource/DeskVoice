@@ -30,7 +30,7 @@ const whatsapp = {
   riskTitle: "Antes de conectar",
   risk: "Esta conexão usa um cliente não oficial do WhatsApp, e não a API oficial da Meta. O WhatsApp pode restringir ou bloquear o número, sem aviso. Use um número dedicado a isto, nunca o seu pessoal nem o principal da empresa.",
   riskStrangers:
-    "O que mais leva a bloqueio é escrever primeiro para quem nunca falou com o número. O agente só envia para quem está na ligação ou para a equipe, e a mensagem para quem ligou pede a confirmação de uma pessoa. Mantenha poucas mensagens por hora.",
+    "O que mais leva a bloqueio é escrever primeiro para quem nunca falou com o número. O agente só envia para quem está na ligação ou para a equipe, e a mensagem para quem ligou pede a confirmação de uma pessoa. A exceção é o agente no modo de mensagem depois da queda: ali a mensagem sai sozinha, no máximo uma por número a cada 24 horas e dentro do teto da organização. Mantenha poucas mensagens por hora.",
   connect: "Conectar",
   replaceConfirm:
     "Já existe um conector de WhatsApp configurado ({type}, {url}). Ao conectar um número, esse conector é substituído agora e o token gravado é apagado. Se o QR Code não for lido, o envio por WhatsApp fica parado até você conectar um número ou configurar o conector de novo.",

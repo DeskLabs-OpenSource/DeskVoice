@@ -23,7 +23,8 @@ interface ProviderSocketOptions {
   emitter: SessionEmitter;
   /** Recebe cada mensagem já decodificada de JSON; validar o formato é de quem chama. */
   onMessage(message: unknown): void;
-  onClosed?(): void;
+  /** Fechamento que o cliente não pediu, com o detalhe (erro, código e motivo do provedor). */
+  onClosed?(detail: string): void;
   /** Prazo para a conexão abrir, e o agendador dele. */
   timeout?: Pick<ConnectOptions, "readyTimeoutMs" | "schedule">;
 }
@@ -92,7 +93,7 @@ export function openProviderSocket(options: ProviderSocketOptions): Promise<Prov
         reject(new Error(`${label}: não foi possível conectar (${detail})`));
         return;
       }
-      options.onClosed?.();
+      options.onClosed?.(detail);
       if (closedByClient) {
         emitter.emit("closed", "client");
         return;

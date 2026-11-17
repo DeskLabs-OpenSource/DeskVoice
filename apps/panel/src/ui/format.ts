@@ -21,6 +21,16 @@ export function formatPhone(e164: string | null | undefined): string {
   return match ? `+55 ${match[1]} ${match[2]}-${match[3]}` : e164;
 }
 
+/** Quem está do outro lado: o número, ou o que a chamada é quando não há número (navegador, simulada). */
+export function formatCaller(
+  call: { direction: "inbound" | "outbound"; channel: "phone" | "web" | "whatsapp" | "simulated"; from: string | null; to: string | null },
+  words: { unknownCaller: string; noNumber: { web: string; simulated: string } },
+): string {
+  const phone = formatPhone(call.direction === "outbound" ? call.to : call.from);
+  if (phone) return phone;
+  return call.channel === "web" || call.channel === "simulated" ? words.noNumber[call.channel] : words.unknownCaller;
+}
+
 export function formatClock(iso: string, locale: Locale): string {
   return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(iso));
 }

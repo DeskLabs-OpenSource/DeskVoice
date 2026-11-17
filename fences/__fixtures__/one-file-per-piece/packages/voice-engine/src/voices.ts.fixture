@@ -1,0 +1,4 @@
+import elevenlabs from "./synthesizers/elevenlabs";
+import simulated from "./synthesizers/simulated";
+
+export const synthesizers = [elevenlabs, simulated];

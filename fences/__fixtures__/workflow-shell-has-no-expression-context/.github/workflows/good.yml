@@ -1,0 +1,15 @@
+name: good
+on: push
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64]
+    steps:
+      - name: pela variável de shell
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: echo "${ARCH} ${{ matrix.arch }} ${RUNNER_TEMP}"

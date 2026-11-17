@@ -10,6 +10,13 @@
  *   - https://ai.google.dev/gemini-api/docs/speech-generation  (lista de vozes)
  *   - https://ai.google.dev/gemini-api/docs/pricing  (preços)
  *
+ * Vocabulário do agente, consultado em 2026-11-13 (ai.google.dev/api/live redireciona para
+ * aistudio.google.com/api-reference/live):
+ *   - `AudioTranscriptionConfig.customVocabulary[]`: "A list of custom vocabulary phrases to bias the speech
+ *     recognition model toward recognizing specific terms". Vale para a transcrição lateral; a página não diz
+ *     formato, limite de quantidade nem de tamanho. O modelo de voz não tem campo de vocabulário no `setup`:
+ *     os termos vão também na instrução de sistema (`instructionsWithVocabulary`).
+ *
  * Teste da chave (`checkKey`), consultado em 2026-11-12 (ai.google.dev redireciona para aistudio.google.com):
  *   - https://ai.google.dev/api/models  (`GET /v1beta/models/{model}`: lê os dados do modelo, não gera nada)
  *   - https://ai.google.dev/gemini-api/docs/api-key  (a chave vai no cabeçalho `x-goog-api-key`)
@@ -20,38 +27,95 @@
  * Não confirmado contra o servidor real (nenhuma chamada com chave foi feita):
  *   - o código de uma chave inválida na API de modelos: a página de erros diz 401, e a forma antiga
  *     da API respondia 400 com `API_KEY_INVALID`; as duas são tratadas como chave recusada;
- *   - se a leitura do modelo confere crédito (402) ou só a chave: a resposta "aceita" não promete crédito;
+ *   - se a leitura do modelo confere crédito (402) ou só a chave: a resposta "aceita" não promete crédito.
+ *     Medido em 2026-11-16 numa instalação: com o crédito pré-pago esgotado, a leitura do modelo aceitou
+ *     a chave, e a Live API fechou o socket antes do `setupComplete` com código 1011 e o motivo "Your
+ *     prepayment credits are depleted…". Esse motivo chega ao `connect` pelo `onClosed`;
  *   - `responseModalities`/`speechConfig` vão dentro de `setup.generationConfig`, como na referência da
  *     API; o exemplo do guia de WebSocket mostra `responseModalities` direto em `setup`;
  *   - `inputAudioTranscription.languageCodes` (está na referência; os guias só mostram `{}`);
+ *   - `inputAudioTranscription.customVocabulary` aceito pela Live API (está na referência, nenhum guia mostra),
+ *     e o efeito dele no reconhecimento;
  *   - se `usageMetadata` é por turno ou acumulado na sessão. Aqui é tratado como incremento.
+ *
+ * Sinal de fala e fim de turno forçado (`callerActivity`, `closeCallerTurn`), consultado em 2026-11-14:
+ *   - https://aistudio.google.com/api-reference/live  (`serverContent.interimInputTranscription`,
+ *     `serverContent.inputTranscription`, `realtimeInput.audioStreamEnd`, que só vale com a detecção
+ *     automática de fala ligada, como aqui, e reabre quando chega áudio de novo)
+ *   Não confirmado contra o servidor real: se o Gemini manda `interimInputTranscription` sem que se
+ *   peça, e com que frequência; se `audioStreamEnd` o faz responder ao que ouviu, ou só esvazia o que
+ *   estava guardado. `voiceActivity` não entra: a referência não diz se ele é início de fala.
+ *
+ * Ambiente barulhento (`listeningEnvironment: "noisy"`), consultado em 2026-11-14 na referência v1beta
+ * (https://aistudio.google.com/api-reference/live, `setup.realtimeInputConfig`):
+ *   - `automaticActivityDetection.startOfSpeechSensitivity`: `START_SENSITIVITY_HIGH` (padrão) ou `_LOW`;
+ *   - `automaticActivityDetection.endOfSpeechSensitivity`: `END_SENSITIVITY_HIGH` (padrão) ou `_LOW`;
+ *   - `automaticActivityDetection.prefixPaddingMs` (int32);
+ *   - `activityHandling`: `START_OF_ACTIVITY_INTERRUPTS` (padrão) ou `NO_INTERRUPTION`. Fica no padrão:
+ *     `NO_INTERRUPTION` mataria a interrupção de verdade.
+ *   Não confirmado contra o servidor real: o efeito desses valores numa ligação com ruído (a bancada
+ *   da fatia 5 mede).
+ *
+ * Orientação ao agente (`VoiceSession.guide`): este motor **não** a recebe na v1, e não declara o
+ * método. Consultado em 2026-11-17 (https://aistudio.google.com/api-reference/live):
+ *   - `systemInstruction` só vai no `setup`, no começo da sessão;
+ *   - o `clientContent` "will interrupt any current model generation", e misturar `clientContent` com
+ *     `realtimeInput` "there are no guarantees".
+ *   Entregar a orientação por ali cortaria a fala do agente no meio, e por `realtimeInput.text` ela
+ *   viraria um turno a responder. Quem chama vê o método ausente e registra que o motor não recebe
+ *   orientação (docs/specs/2026-11-17-analistas-ao-vivo.md, seção 3.3).
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
 import { awaitSessionReady, openProviderSocket } from "../provider-socket";
 import { resample } from "../resample";
+import { instructionsWithVocabulary } from "../vocabulary";
 import { checkKeyOverHttp } from "../key-check";
-import { classifyOutcomeOverHttp } from "../outcome-over-http";
-import { OUTCOME_GUESS_SCHEMA_GOOGLE, outcomePrompt, readOutcomeGuess } from "../outcome";
-import type { ClassifyOptions, EnginePricing, Usage, VoiceEngine, VoiceSession } from "../types";
+import { ANALYSIS_SCHEMA_GOOGLE, analysisPrompt } from "../analysis";
+import { classifyOptionsFor, classifyOutcomeOverHttp, readClassifyText, transcribeOverHttp } from "../outcome-over-http";
+import { OUTCOME_GUESS_SCHEMA_GOOGLE, outcomePrompt } from "../outcome";
+import type { ClassifyOptions, EnginePricing, RecordingTranscriber, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+/**
+ * Ambiente barulhento, ponto de partida do desenho (a bancada da fatia 5 pode trocar os valores):
+ * início de fala menos sensível (menos início falso, que é a interrupção falsa) com 300 ms de fala
+ * antes de confirmar, e fim de fala sensível, que não espera o ruído acabar. `activityHandling` não
+ * aparece: fica no padrão, em que a fala de verdade interrompe o agente.
+ */
+const NOISY_REALTIME_INPUT = {
+  automaticActivityDetection: {
+    startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
+    endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
+    prefixPaddingMs: 300,
+  },
+} as const;
 const DEFAULT_API_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_MODEL = "gemini-3.8-live";
 const DEFAULT_VOICE = "Sulafat";
-// Modelo de texto que classifica o desfecho: o mais barato da linha estável de texto. A página de
+// Modelo de texto que classifica o desfecho e transcreve a gravação: o mais barato da linha estável de texto. A página de
 // preços e a de modelos (conferidas em 2026-11-13) não listam `gemini-3.5-flash`, só o
 // `gemini-3.5-flash-lite`. Trocar de modelo é trocar o preço abaixo junto, numa versão.
-const OUTCOME_MODEL = "gemini-3.5-flash-lite";
+const TEXT_MODEL = "gemini-3.5-flash-lite";
 // gemini-3.5-flash-lite, por milhão de tokens: entrada US$ 0,30 e saída US$ 2,50, com o raciocínio
-// incluído na saída. O cache implícito custaria menos; cobrar tudo como entrada nova superestima.
-const OUTCOME_PRICING: EnginePricing = {
+// incluído na saída. A linha de entrada diz "text / image / video / audio" (conferida em 2026-11-13):
+// o áudio da gravação custa o mesmo que o texto. O cache implícito custaria menos; cobrar tudo como entrada nova superestima.
+const TEXT_PRICING: EnginePricing = {
   centsPerMillionInputTokens: 30,
   centsPerMillionOutputTokens: 250,
   checkedOn: "2026-11-13",
   source: "https://ai.google.dev/gemini-api/docs/pricing",
 };
+// "Maximum request size is 20 MB total (including prompts and all files)", na página de áudio
+// (aistudio.google.com/docs/audio, conferida em 2026-11-13). A página de formas de envio diz 100 MB
+// para dados embutidos; vale a menor. O áudio vai em base64 (4/3 do tamanho), com folga para o
+// pedido: cerca de 15 minutos de um lado a 8 kHz.
+const TRANSCRIBE_MAX_BYTES = Math.floor(((20_000_000 - 100_000) * 3) / 4);
+/** Transcrever, não resumir: resumo e desfecho são outras peças, com outro dono. */
+const TRANSCRIBE_PROMPT =
+  "Transcreva a fala deste áudio literalmente, no idioma em que foi dita, sem resumir, sem comentar, sem traduzir e sem marcar quem fala. Se não houver fala, responda com um texto vazio.";
+const generateText = z.object({ candidates: z.array(z.object({ content: z.object({ parts: z.array(z.object({ text: z.string().optional() })) }) })).min(1) });
 const generateUsage = z.object({
   usageMetadata: z.object({ promptTokenCount: z.number(), candidatesTokenCount: z.number().optional(), thoughtsTokenCount: z.number().optional() }),
 });
@@ -114,6 +178,7 @@ const serverMessage = z.object({
       turnComplete: z.boolean().optional(),
       interrupted: z.boolean().optional(),
       inputTranscription: transcription.optional(),
+      interimInputTranscription: transcription.optional(),
       outputTranscription: transcription.optional(),
     })
     .optional(),
@@ -136,6 +201,34 @@ const saysInvalidKey = (body: unknown): boolean =>
 function literalSpeech(text: string, language: string): string {
   return `Say exactly the following to the caller, in ${language}, without adding anything: "${text}"`;
 }
+
+const recordingTranscriber: RecordingTranscriber = {
+  model: TEXT_MODEL,
+  pricing: TEXT_PRICING,
+  maxAudioBytes: TRANSCRIBE_MAX_BYTES,
+  transcribe(apiKey, input, options = {}) {
+    return transcribeOverHttp(
+      {
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(TEXT_MODEL)}:generateContent`,
+        // No cabeçalho, e não na URL: endereço de pedido costuma ir para log de proxy.
+        headers: { "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ inlineData: { mimeType: "audio/wav", data: Buffer.from(input.audio).toString("base64") } }, { text: TRANSCRIBE_PROMPT }] }],
+          generationConfig: { temperature: 0 },
+        }),
+        model: TEXT_MODEL,
+        pricing: TEXT_PRICING,
+        read: (body) => {
+          const parsed = generateText.safeParse(body);
+          return parsed.success ? (parsed.data.candidates[0]?.content.parts ?? []).map((part) => part.text ?? "").join("").trim() : null;
+        },
+        usage: generateUsageOf,
+        classify: (status, body) => (status === 400 && saysInvalidKey(body) ? "rejected" : undefined),
+      },
+      options,
+    );
+  },
+};
 
 const engine: VoiceEngine = {
   id: "gemini-live",
@@ -187,6 +280,11 @@ const engine: VoiceEngine = {
       if (serverContent) {
         // A transcrição chega em fragmentos; o contrato entrega a fala inteira de cada turno.
         if (serverContent.inputTranscription?.text) userText += serverContent.inputTranscription.text;
+        // A interina não entra no texto da fala (a definitiva chega em `inputTranscription`): só avisa
+        // que quem ligou está falando.
+        if (serverContent.interimInputTranscription?.text?.trim() || serverContent.inputTranscription?.text?.trim()) {
+          emitter.emit("callerActivity", { words: true });
+        }
         if (serverContent.modelTurn || serverContent.outputTranscription) flush("user");
         if (serverContent.outputTranscription?.text) agentText += serverContent.outputTranscription.text;
         for (const part of serverContent.modelTurn?.parts ?? []) {
@@ -225,7 +323,7 @@ const engine: VoiceEngine = {
       label: "Gemini Live",
       emitter,
       onMessage,
-      onClosed: () => setupFailed(new Error("Gemini Live: a conexão fechou antes de confirmar a sessão (chave ou modelo inválido?)")),
+      onClosed: (detail) => setupFailed(new Error(`Gemini Live: a conexão fechou antes de confirmar a sessão (${detail})`)),
       timeout: options,
     });
 
@@ -238,7 +336,7 @@ const engine: VoiceEngine = {
         },
         // Os modelos de áudio nativo não aceitam código de idioma para a fala; a documentação manda
         // restringir o idioma pela instrução de sistema.
-        systemInstruction: { parts: [{ text: `${config.instructions}\n\nSpeak only in ${config.language}.` }] },
+        systemInstruction: { parts: [{ text: `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.` }] },
         ...(config.tools.length > 0 && {
           tools: [
             {
@@ -250,8 +348,14 @@ const engine: VoiceEngine = {
             },
           ],
         }),
-        inputAudioTranscription: { languageCodes: [config.language] },
+        // Sem termos, o campo nem aparece: o setup fica igual ao de antes.
+        inputAudioTranscription: {
+          languageCodes: [config.language],
+          ...(config.vocabulary && config.vocabulary.length > 0 && { customVocabulary: [...config.vocabulary] }),
+        },
         outputAudioTranscription: {},
+        // Ambiente `normal` ou ausente: o campo nem aparece, e o setup fica igual ao de antes.
+        ...(config.listeningEnvironment === "noisy" && { realtimeInputConfig: NOISY_REALTIME_INPUT }),
       },
     });
     await awaitSessionReady(ready, socket, { label: "Gemini Live", emitter, timeout: options });
@@ -278,6 +382,10 @@ const engine: VoiceEngine = {
       say(text) {
         socket.send({ realtimeInput: { text: literalSpeech(text, config.language) } });
       },
+      closeCallerTurn() {
+        // O áudio seguinte de quem ligou reabre o fluxo, sem mensagem a mais.
+        socket.send({ realtimeInput: { audioStreamEnd: true } });
+      },
       close: () => socket.close(),
     };
 
@@ -285,33 +393,31 @@ const engine: VoiceEngine = {
     return session;
   },
 
+  analyzes: true,
+
   async classifyOutcome(apiKey, input, options: ClassifyOptions = {}) {
+    const analyze = input.analyze === true;
     return classifyOutcomeOverHttp(
       {
-        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(OUTCOME_MODEL)}:generateContent`,
-        model: OUTCOME_MODEL,
-        pricing: OUTCOME_PRICING,
+        url: `${options.baseUrl ?? DEFAULT_API_URL}/models/${encodeURIComponent(TEXT_MODEL)}:generateContent`,
+        model: TEXT_MODEL,
+        pricing: TEXT_PRICING,
         // No cabeçalho, e não na URL: endereço de pedido costuma ir para log de proxy.
         headers: { "x-goog-api-key": apiKey },
+        // Sem `analyze`, o pedido é exatamente o só de desfecho: quem usa só o desfecho não paga a análise.
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: outcomePrompt(input) }] }],
-          generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: OUTCOME_GUESS_SCHEMA_GOOGLE },
+          contents: [{ role: "user", parts: [{ text: analyze ? analysisPrompt(input) : outcomePrompt(input) }] }],
+          generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: analyze ? ANALYSIS_SCHEMA_GOOGLE : OUTCOME_GUESS_SCHEMA_GOOGLE },
         }),
-        read: (body) => {
-          const text = (body as { candidates?: { content?: { parts?: { text?: unknown }[] } }[] }).candidates?.[0]?.content?.parts?.[0]?.text;
-          if (typeof text !== "string") return null;
-          try {
-            return readOutcomeGuess(JSON.parse(text));
-          } catch {
-            return null;
-          }
-        },
+        read: (body) => readClassifyText((body as { candidates?: { content?: { parts?: { text?: unknown }[] } }[] }).candidates?.[0]?.content?.parts?.[0]?.text, analyze),
         usage: generateUsageOf,
         classify: (status, body) => (status === 400 && saysInvalidKey(body) ? "rejected" : undefined),
       },
-      options,
+      classifyOptionsFor(options, analyze),
     );
   },
+
+  transcription: recordingTranscriber,
 
   checkKey(apiKey, options = {}) {
     const model = options.model ?? DEFAULT_MODEL;

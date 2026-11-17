@@ -370,7 +370,13 @@ describe("disconnecting and failing", () => {
 });
 
 describe("the WhatsApp service exists only on the server of whoever asked for it", () => {
-  const nobodyWants = () => withSystem(panel.app, (q) => q.exec("update whatsapp_sessions set service_wanted = false"));
+  // As duas tabelas de serviço, como em `update.db.test.ts`: `whatsappCalls` vem de
+  // `whatsapp_call_sessions`, que outro arquivo de teste pode ter deixado ligada.
+  const nobodyWants = () =>
+    withSystem(panel.app, async (q) => {
+      await q.exec("update whatsapp_sessions set service_wanted = false");
+      await q.exec("update whatsapp_call_sessions set service_wanted = false");
+    });
   const answer = async (whatsapp?: unknown) => (await agentSays(whatsapp)).data;
 
   it("by default it is not installed: the screen says so, nothing is asked of WAHA and the agent hears no", async () => {

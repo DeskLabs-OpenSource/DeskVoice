@@ -3,8 +3,9 @@ import { withOrg } from "@deskvoice/core";
 import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
+import { DEMO_NOTE_TOOL, demoScript } from "./demo-script";
 import { startSimulatedCall } from "./simulate";
-import { createAgent, createOrganization, kindsOf, sessionHarness, simulatedSpeechMs } from "./testing/db";
+import { callOf, createAgent, createOrganization, kindsOf, sessionHarness, simulatedSpeechMs } from "./testing/db";
 import { manualTime, waitFor } from "./testing/helpers";
 
 const { app, owner } = openTestDbs();
@@ -60,5 +61,70 @@ describe("chamada simulada no ritmo de uma ligação (issue #111)", { timeout: 1
     expect(gap).toBeLessThan(heardMs + 200 + 100);
     expect(call.transport.ended).toBe(true);
     await harness.approvals.close();
+  });
+
+  it("a simulada fica registrada como simulada, na coluna e no começo da linha do tempo, e não como linha telefônica", async () => {
+    const organizationId = await createOrganization(app, "simulate-channel");
+    const agentId = await createAgent(app, organizationId);
+    const harness = await sessionHarness(app);
+    const call = await startSimulatedCall(harness.deps, { organizationId, agentId }, { script: [{ end: true }], tools: [] });
+    if ("code" in call) throw new Error(call.message);
+    expect((await callOf(app, call.callId)).channel).toBe("simulated");
+    await waitFor(async () => (await kindsOf(app, call.callId)).includes("call_started"), "the call to start");
+    const started = await withOrg(app, organizationId, (q) =>
+      q.one<{ payload: { channel?: string } }>("select payload from call_events where call_id = $1 and kind = 'call_started'", [call.callId]),
+    );
+    expect(started?.payload.channel).toBe("simulated");
+    await call.session.done;
+    await harness.approvals.close();
+  });
+});
+
+describe("chamada simulada com o número de quem liga", { timeout: 120_000 }, () => {
+  it("grava o número como o de uma recebida, com o canal simulado que a memória do número marca e não conta", async () => {
+    const organizationId = await createOrganization(app, "simulate-from");
+    const agentId = await createAgent(app, organizationId);
+    const harness = await sessionHarness(app);
+    const script: SimulatedScript = [{ say: "Bom dia." }, { end: true }];
+    const call = await startSimulatedCall(harness.deps, { organizationId, agentId, fromE164: "+5531922221111" }, { script, tools: [] });
+    if ("code" in call) throw new Error(call.message);
+    const row = await withOrg(app, organizationId, (q) => q.one<{ direction: string; channel: string; from_e164: string | null }>("select direction, channel, from_e164 from calls where id = $1", [call.callId]));
+    expect(row).toEqual({ direction: "inbound", channel: "simulated", from_e164: "+5531922221111" });
+    call.transport.callerHangup();
+    await call.session.done;
+    await harness.approvals.close();
+  });
+});
+
+describe("a nota do agente na simulada (fatia 3, #291)", { timeout: 120_000 }, () => {
+  const PHONE = "+5531922221112";
+  const script: SimulatedScript = [{ toolCall: { name: "remember_caller_note", args: { text: "Nota da simulada." } } }, { end: true }];
+  const simulateWith = async (tools: string[], label: string) => {
+    const organizationId = await createOrganization(app, label);
+    const agentId = await createAgent(app, organizationId, { tools });
+    const harness = await sessionHarness(app);
+    // Sem `tools` nas opções: vale o que a simulada habilita a partir do agente.
+    const call = await startSimulatedCall(harness.deps, { organizationId, agentId, fromE164: PHONE }, { script });
+    if ("code" in call) throw new Error(call.message);
+    await call.session.done;
+    await harness.approvals.close();
+    const notes = await withOrg(app, organizationId, (q) => q.many<{ call_id: string; caller_e164: string }>("select call_id, caller_e164 from caller_notes"));
+    return { callId: call.callId, notes };
+  };
+
+  it("o agente com a ferramenta marcada anota na simulada, com o número de quem ligou", async () => {
+    const { callId, notes } = await simulateWith(["remember_caller_note"], "simulate-note-on");
+    expect(notes).toEqual([{ call_id: callId, caller_e164: PHONE }]);
+  });
+
+  it("sem a ferramenta marcada, a simulada não a habilita, e nada é anotado", async () => {
+    const { notes } = await simulateWith([], "simulate-note-off");
+    expect(notes).toEqual([]);
+  });
+
+  it("o roteiro de demonstração só anota quando o agente tem a ferramenta", () => {
+    const steps = (note: boolean) => JSON.stringify(demoScript({ greet: true, canTransfer: false, note }));
+    expect(steps(true)).toContain(DEMO_NOTE_TOOL);
+    expect(steps(false)).not.toContain(DEMO_NOTE_TOOL);
   });
 });

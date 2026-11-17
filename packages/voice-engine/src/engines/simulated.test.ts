@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VoiceSession, VoiceSessionConfig } from "../types";
-import defaultEngine, { createSimulatedEngine, setSimulatedScript, SIMULATED_PREFIX, type SimulatedScript } from "./simulated";
+import defaultEngine, { createSimulatedEngine, setSimulatedScript, SIMULATED_PREFIX, type SimulatedScript, type SimulatedSession } from "./simulated";
 
 const config: VoiceSessionConfig = { instructions: "Você é a recepção.", language: "pt-BR", tools: [] };
 const audio = (ms: number): Buffer => Buffer.alloc(ms * 16);
@@ -116,5 +116,89 @@ describe("motor simulado", () => {
     const log = record(session);
     await new Promise<void>((resolve) => session.on("closed", () => resolve()));
     expect(log.at(-1)).toBe("closed ended");
+  });
+
+  it("quem ligou falando no roteiro vira callerActivity com palavras, e closeCallerTurn fica registrado", async () => {
+    const scheduler = manualScheduler();
+    const engine = createSimulatedEngine({ schedule: scheduler.schedule });
+    setSimulatedScript([{ expectUserAudio: 40, text: "alô" }, { say: "Oi" }]);
+    const session = await engine.connect(config, "");
+    const signals: Array<{ words: boolean }> = [];
+    session.on("callerActivity", (signal) => signals.push(signal));
+    scheduler.flush();
+    session.sendAudio(audio(20));
+    session.sendAudio(audio(20));
+    scheduler.flush();
+    // Fora da vez de quem ligou, o áudio que chega não é fala do roteiro.
+    session.sendAudio(audio(20));
+    expect(signals).toEqual([{ words: true }, { words: true }]);
+
+    session.closeCallerTurn();
+    expect((session as SimulatedSession).callerTurnsClosed).toBe(1);
+  });
+  describe("orientação (guide e sayGuided)", () => {
+    it("sayGuided fala a versão orientada só com orientação recebida desde o passo anterior", async () => {
+      const scheduler = manualScheduler();
+      const engine = createSimulatedEngine({ schedule: scheduler.schedule });
+      setSimulatedScript([
+        { expectUserAudio: 20, text: "achei caro demais" },
+        { sayGuided: { guided: "Orientado", unguided: "Livre" } },
+        { expectUserAudio: 20, text: "e o prazo?" },
+        { sayGuided: { guided: "Orientado 2", unguided: "Livre 2" } },
+      ]);
+      const session = await engine.connect(config, "");
+      const log = record(session);
+      // Quem chama orienta ao ouvir a fala de quem ligou, como fará a ligação.
+      session.on("transcript", (turn) => {
+        if (turn.text === "achei caro demais") session.guide?.("Reforce o que está incluso.");
+      });
+      scheduler.flush();
+      session.sendAudio(audio(20));
+      scheduler.flush();
+      session.sendAudio(audio(20));
+      scheduler.flush();
+      expect(log.filter((line) => !line.startsWith("audio"))).toEqual([
+        "user: achei caro demais",
+        "agent: Orientado",
+        "user: e o prazo?",
+        // A orientação já foi usada: sem outra, o passo seguinte fala a versão livre.
+        "agent: Livre 2",
+      ]);
+      expect((session as SimulatedSession).guidance).toEqual(["Reforce o que está incluso."]);
+    });
+
+    it("orientação de antes do passo anterior não conta", async () => {
+      const scheduler = manualScheduler();
+      const engine = createSimulatedEngine({ schedule: scheduler.schedule });
+      setSimulatedScript([{ expectUserAudio: 20 }, { say: "Um momento" }, { sayGuided: { guided: "Orientado", unguided: "Livre" } }]);
+      const session = await engine.connect(config, "");
+      const log = record(session);
+      scheduler.flush();
+      session.guide?.("velha");
+      session.sendAudio(audio(20));
+      scheduler.flush();
+      expect(log.filter((line) => line.startsWith("agent"))).toEqual(["agent: Um momento", "agent: Livre"]);
+    });
+
+    it("guide nunca vira fala: não chama say nem emite transcrição ou áudio; depois de close, nada", async () => {
+      const scheduler = manualScheduler();
+      const engine = createSimulatedEngine({ schedule: scheduler.schedule });
+      setSimulatedScript([{ expectUserAudio: 1000 }]);
+      const session = await engine.connect(config, "");
+      const log = record(session);
+      const say = vi.spyOn(session, "say");
+      scheduler.flush();
+      session.guide?.("Não ofereça desconto.");
+      scheduler.flush();
+      expect(say).not.toHaveBeenCalled();
+      expect(log).toEqual([]);
+      await session.close();
+      session.guide?.("depois do fim");
+      expect((session as SimulatedSession).guidance).toEqual(["Não ofereça desconto."]);
+    });
+
+    it("recusa sayGuided sem as duas versões", () => {
+      expect(() => setSimulatedScript([{ sayGuided: { guided: "só uma" } } as never])).toThrow();
+    });
   });
 });

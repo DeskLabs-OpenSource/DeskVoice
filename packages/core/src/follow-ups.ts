@@ -1,3 +1,4 @@
+import { ERASED_TEXT } from "./erasures";
 import { recordEvent } from "./events";
 import { enqueueTask } from "./queue";
 import type { OrgQuery } from "./types";
@@ -48,13 +49,22 @@ async function activePerson(q: OrgQuery, userId: string): Promise<string | null>
 }
 
 /**
+ * Quem abriu a pendência, quando não foi a ferramenta `create_task`: o supervisor de regras fixas
+ * (`review_call`), com o caso que ele achou. Vai na coluna `source` e no evento, nunca em texto livre.
+ */
+export interface FollowUpOrigin {
+  source: "review_call";
+  case: string;
+}
+
+/**
  * Cria a pendência nascida numa ligação e marca o lembrete na fila para `dueAt`. O dono vem da
  * configuração do agente ("Dono das pendências"), nunca do modelo; sem dono, ou com o dono
  * desativado, a pendência é da equipe. O telefone é o de quem está do outro lado da linha.
  */
 export async function createFollowUp(
   q: OrgQuery,
-  input: { callId: string; agentId: string; title: string; details: string; dueAt: Date },
+  input: { callId: string; agentId: string | null; title: string; details: string; dueAt: Date; origin?: FollowUpOrigin },
   now: Date,
 ): Promise<{ id: string; ownerUserId: string | null; taskId: string }> {
   const origin = await q.one<{ configured: string | null; caller: string | null }>(
@@ -66,12 +76,13 @@ export async function createFollowUp(
   if (!origin) throw new Error(`Call ${input.callId} not found in this organization: the follow-up was not created`);
   const owner = origin.configured === null ? null : await activePerson(q, origin.configured);
   const row = await q.one<{ id: string } & Snapshot>(
-    `insert into follow_ups (organization_id, call_id, caller_e164, title, details, owner_user_id, due_at, created_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8) returning id, call_id, owner_user_id, due_at, status`,
-    [q.organizationId, input.callId, origin.caller, input.title, input.details, owner, input.dueAt, now],
+    `insert into follow_ups (organization_id, call_id, caller_e164, title, details, owner_user_id, due_at, created_at, source)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id, call_id, owner_user_id, due_at, status`,
+    [q.organizationId, input.callId, origin.caller, input.title, input.details, owner, input.dueAt, now, input.origin?.source ?? null],
   );
   if (!row) throw new Error("Follow-up was not created");
-  await recordEvent(q, input.callId, "follow_up_created", eventOf(row.id, row), now);
+  const by = input.origin === undefined ? {} : { source: input.origin.source, case: input.origin.case };
+  await recordEvent(q, input.callId, "follow_up_created", eventOf(row.id, row, by), now);
   const taskId = await enqueueTask(q, { kind: FOLLOW_UP_TASK, payload: { followUpId: row.id, stage: "due" satisfies FollowUpStage }, callId: input.callId, runAt: input.dueAt });
   return { id: row.id, ownerUserId: row.owner_user_id, taskId };
 }
@@ -100,9 +111,11 @@ export async function closeFollowUp(
   now: Date,
 ): Promise<CloseResult> {
   const row = await q.one<Snapshot>(
-    `update follow_ups set status = $2, closing_note = $3, closed_by = $4, closed_at = $5
+    // Pendência apagada a pedido do titular fecha sem nota: um novo pedido não a acharia mais (sem
+    // telefone, e a chamada dela já apagada), então texto escrito agora ficaria para sempre.
+    `update follow_ups set status = $2, closing_note = case when title = $6 then null else $3 end, closed_by = $4, closed_at = $5
       where id = $1 and status = 'open' returning call_id, owner_user_id, due_at, status`,
-    [id, close.status, close.note, close.closedBy, now],
+    [id, close.status, close.note, close.closedBy, now, ERASED_TEXT],
   );
   if (!row) return (await q.one("select 1 from follow_ups where id = $1", [id])) ? "already_closed" : "not_found";
   if (row.call_id) await recordEvent(q, row.call_id, "follow_up_closed", eventOf(id, row, { closedBy: close.closedBy }), now);

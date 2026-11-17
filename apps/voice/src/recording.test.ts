@@ -1,8 +1,24 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type * as Fs from "node:fs";
 import { MAX_QUEUED_AUDIO_SECONDS, createRecorder, removePartialRecordings, startRecording, type RecordingFailureReason } from "./recording";
+
+/** A leitura que calcula a impressão digital, sabotável: o resto do arquivo usa o `node:fs` real. */
+const leitura = vi.hoisted(() => ({ falha: false }));
+vi.mock("node:fs", async (importOriginal) => {
+  const real = await importOriginal<typeof Fs>();
+  return {
+    ...real,
+    createReadStream: ((...args: Parameters<typeof real.createReadStream>) => {
+      const stream = real.createReadStream(...args);
+      if (leitura.falha) queueMicrotask(() => stream.destroy(Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" })));
+      return stream;
+    }) as typeof real.createReadStream,
+  };
+});
 
 const frame = (value: number, ms = 20): Buffer => Buffer.alloc((ms * 16_000) / 1000, 0).fill(Buffer.from(Int16Array.of(value).buffer));
 const channel = (wav: Buffer, side: 0 | 1): number[] => {
@@ -12,6 +28,25 @@ const channel = (wav: Buffer, side: 0 | 1): number[] => {
 };
 
 describe("gravação da chamada", () => {
+  it("pausar a pedido guarda o que já foi dito — o pedido — e não grava o depois", () => {
+    let t = 0;
+    const rec = createRecorder(() => t);
+    t = 20;
+    rec.caller(frame(100)); // a frase em que a pessoa pediu para não ser gravada
+    const guardado = rec.pause();
+    expect(guardado).toBeGreaterThan(0);
+    t = 60;
+    rec.caller(frame(300)); // depois do pedido: não entra no arquivo
+
+    const wav = rec.wav();
+    expect(wav).not.toBeNull();
+    const left = channel(wav!, 0);
+    expect(left).toContain(100);
+    expect(left).not.toContain(300);
+    // Pausar de novo não muda o que já está guardado.
+    expect(rec.pause()).toBe(guardado);
+  });
+
   it("WAV estéreo 8 kHz: quem ligou à esquerda, agente à direita, cada um no seu tempo", () => {
     let t = 0;
     const rec = createRecorder(() => t);
@@ -141,12 +176,33 @@ describe("gravação em disco", () => {
     expect(await readdir(path.dirname(file))).toEqual(["call.wav.part"]);
     expect((await readFile(`${file}.part`)).length).toBeGreaterThan(44); // já há áudio no disco
 
-    expect(await recording.finish()).toBe(true);
+    const desfecho = await recording.finish();
+    expect(desfecho).toMatchObject({ bytes: expect.any(Number), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(await readdir(path.dirname(file))).toEqual(["call.wav"]);
     const wav = await readFile(file);
+    // O hash tem de ser o do arquivo no disco, não um valor qualquer: é a prova de integridade.
+    if (desfecho === false) throw new Error("a gravação devia ter fechado");
+    expect(createHash("sha256").update(wav).digest("hex")).toBe(desfecho.sha256);
+    expect(desfecho.bytes).toBe(wav.length);
     expect(wav.readUInt32LE(4)).toBe(wav.length - 8);
     expect(wav.readUInt32LE(40)).toBe(wav.length - 44);
     expect(wav.readUInt32LE(40)).toBe(150 * 320 * 2); // 3 s, dois canais
+  });
+
+  it("a leitura da impressão digital falha: a gravação conta como salva, com sha256 null, e o .wav fica (issue 278)", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recording-"));
+    const file = path.join(dir, "org", "call.wav");
+    let t = 0;
+    const recording = await startRecording(file, () => t);
+    for (; t < 3000; t += 20) recording.caller(frame(7));
+    leitura.falha = true;
+    try {
+      const desfecho = await recording.finish();
+      expect(desfecho).toEqual({ bytes: (await readFile(file)).length, sha256: null, sha256Error: "EIO: i/o error, read" });
+    } finally {
+      leitura.falha = false;
+    }
+    expect(await readdir(path.dirname(file))).toEqual(["call.wav"]);
   });
 
   it("sem áudio nenhum, o .part some e não fica .wav", async () => {
@@ -257,7 +313,8 @@ describe("gravação em disco", () => {
     await speak(recording, clock, (MAX_QUEUED_AUDIO_SECONDS + 1) * 1000);
     release();
     await speak(recording, clock, 30_000);
-    expect(await recording.finish()).toBe(true);
+    // Disco simulado: o arquivo real fica vazio, mas o desfecho continua trazendo a impressão digital.
+    expect(await recording.finish()).toMatchObject({ bytes: expect.any(Number), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(failures).toEqual([]);
     const audio = written.filter((block) => block.at >= 44).reduce((sum, block) => sum + block.data.length, 0);
     expect(audio).toBe(30 * 8000 * 4);

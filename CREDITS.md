@@ -39,9 +39,76 @@ como código, as regras da ligação pelo WhatsApp:
   seção 8) para as próximas fatias. O cliente do DeskVoice (`apps/voice/src/wacalls-client.ts`)
   foi escrito do zero, a partir do contrato que o desenho leu no código do WaCalls.
 
+Do módulo LGPD do DeskcommCRM veio, como lição de desenho e não como código, o apagamento a
+pedido do titular (`packages/core/src/erasures.ts`): anonimizar o conteúdo em vez de apagar o
+registro do serviço prestado, mostrar a prévia do que sai antes de apagar e deixar um recibo de
+quem pediu. A adaptação ao DeskVoice é de @webtecnica, no PR #171.
+
+Do catálogo de modelos de IA do DeskcommCRM (`app/api/v1/ai/credentials`,
+`ai/providers/[provider]/models`, `cron/sync-model-catalog`, `ModelPicker.tsx` e
+`lib/ai/provider-validators.ts`, lidos em `9dea1ee`) vieram, como lição e não como código, os
+cérebros do DeskVoice (`packages/voice-engine/src/brains/` e `/settings/brains`): os endereços e
+cabeçalhos de listagem de modelos de cada provedor (de `provider-validators.ts`), conferidos depois
+na documentação de cada um, a chave por provedor guardada cifrada com teste ao salvar e a busca de
+modelo sem acento e sem caixa. Os arquivos foram escritos do zero, um por provedor: os de `brains/`
+nos PRs #336 e #346, a tela `/settings/brains` no #350, depois ajustada no #358.
+
+O filtro de entrada por linha da central de telefonia (cada linha só aceita a ligação dos endereços
+dela) nasceu da medição de @webtecnica numa instalação real, que mostrou a central respondendo a
+SIP de qualquer origem, e da proposta do PR #267. A forma escolhida pelo dono (decisão da
+issue #274) filtra na central a partir das linhas cadastradas, em vez de fechar a porta; nenhum
+código do #267 foi reaproveitado.
+
 Da fábrica do DeskcommCRM vieram a contribuição guiada por skills, o lançamento por fragmentos,
 a forma do instalador e as doutrinas de sistema vivo, versionamento e ação destrutiva, aqui
 reescritas para telefonia.
+
+Do kit de contribuição do DeskcommCRM (`deskcomm-contribuir`) vieram também, no roteiro R9:
+
+- **O `agents/openai.yaml` de cada skill**, o arquivo que apresenta a skill ao Codex: a forma
+  (quatro campos) veio de lá; o texto de cada um foi escrito aqui, a partir da skill do DeskVoice.
+- **O aviso de identidade no commit** (`warn-identity.sh`): texto adaptado do
+  `avisar-identidade.sh` de lá, com o mesmo comportamento (avisa e nunca bloqueia).
+- **As referências do pré-voo e da receita local**, como lição de estrutura e não como texto: uma
+  página que explica cada item do script de pré-voo, e outra com o passo a passo para rodar na
+  própria máquina o que o CI roda. O conteúdo foi escrito a partir do `preflight.sh` e do
+  `package.json` do DeskVoice.
+- **A triagem de PR só lendo** (`.claude/commands/deskvoice-triagem-de-pr.md` e os subagentes
+  `deskvoice-triagem-medidor`, `deskvoice-triagem-reprodutor` e `deskvoice-triagem-cetico`): a
+  divisão em medidor, reprodutor e cético, o formato de devolução de cada um e as regras duras
+  (exit medido direto, `grep` vazio com controle positivo, presença de símbolo não é
+  comportamento, sabotagem restaurada byte a byte, a tabela de recusa automática) vieram, como
+  texto adaptado, do `triagem-de-pr.md` e dos `triagem-*.md` de lá. A régua é a do DeskVoice
+  (`AGENTS.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`), e o comando daqui só lê: não acolhe, não
+  corrige e não publica, ao contrário do de lá. O eixo de self-host do cético ficou de fora: aqui
+  quem cobre isso são as regras de produto, que o medidor lê.
+- **A implementação de uma fatia com verificador separado** (`.claude/commands/deskvoice-fatia.md`
+  e os subagentes `deskvoice-implementador` e `deskvoice-verificador`): a divisão entre quem
+  implementa e quem verifica sem poder escrever, o retrato do worktree antes e depois do
+  verificador, o aceite passado palavra por palavra, a menor mudança, a devolução com evidência e a
+  calibração do veto vieram, como texto adaptado, do `deskcomm-gov-loop.md` e dos
+  `gov-implementer.md` e `gov-verifier.md` de lá. As regras duras são as do `AGENTS.md` do
+  DeskVoice, que os subagentes leem da `main`, e não as de lá. O laço autônomo e o arquivo de
+  estado do de lá ficaram de fora: aqui o estado é o desenho e o PR, e o comando não envia nada.
+- **A leitura de métricas com régua declarada** (`deskvoice-metricas`): a estrutura da skill (a
+  pergunta antes da consulta, a régua ao lado de cada número, `null` não é zero, terminar em ação,
+  o relatório em cinco blocos e a lista do que nunca se faz) e a divisão das referências em acesso
+  e LGPD, consultas, régua e armadilhas vieram, como texto adaptado, da `deskcomm-metricas` de lá.
+  As consultas, as tabelas, as colunas e as armadilhas foram escritas do zero para o banco do
+  DeskVoice (`db/migrations/`), e cada consulta foi rodada no banco de teste antes de entrar.
+- **O procedimento de aplicar o sistema vivo a uma peça** (`deskvoice-sistema-vivo`), como lição e
+  não como texto: a skill que percorre as perguntas da doutrina e nomeia, para cada uma, o artefato
+  que prova a resposta, como a `sistema-vivo` de lá faz na seção do repositório. As perguntas são as
+  da lei do DeskVoice (`docs/doctrine/sistema-vivo.md`), para a qual a skill aponta sem copiar.
+- **O afinar do agente com dados** (`deskvoice-agente-de-voz`): a estrutura da skill (o
+  diagnóstico antes da reescrita, a tabela de sinal, causa provável e onde mexer, o antes e o depois
+  mostrados à pessoa antes de trocar, uma mudança por vez, medir depois pela data da troca e a lista
+  do que nunca se faz) e a divisão das referências em diagnóstico e em anatomia e antipadrões, com o
+  checklist de revisão, vieram, como texto adaptado, da `deskcomm-prompt` de lá (lida em `7769d21`).
+  O conteúdo foi reescrito para voz a partir do código do DeskVoice: o que `composeInstructions`
+  monta, as falas fixas do sistema, a régua da análise da ligação, a linha do tempo e o vocabulário.
+  Os portões de saída, as versões de prompt, o botão Testar e as consultas de lá ficaram de fora,
+  porque aqui não existem.
 
 O DeskcommCRM é obra de mais de 250 autores de PR. Parte do que está aqui é trabalho deles.
 
@@ -62,9 +129,14 @@ Sobre o WAHA: a imagem publicada pelos autores (`devlikeapro/waha`) é referenci
 com versão e resumo fixos, e nunca republicada. O DeskVoice fala com ele pela API HTTP. O WAHA
 não é afiliado ao WhatsApp nem à Meta, e o DeskVoice não é afiliado ao WAHA.
 
-Sobre o WaCalls: a imagem publicada pelos autores (`ghcr.io/jotadev66/wacalls`, canal `develop`) é
-referenciada pelo Compose, fixada por resumo, e nunca republicada. O DeskVoice fala com ele pela API
-HTTP e pelo SSE, só a partir do processo de voz. O WaCalls, de JotaDev66 e Joseph Fernandes, traz o
+Sobre o WaCalls: o Compose usa uma imagem construída do fork
+[DeskLabs-OpenSource/WaCalls](https://github.com/DeskLabs-OpenSource/WaCalls)
+(`ghcr.io/desklabs-opensource/wacalls`, fixada por resumo). O fork é o commit `d16a076` dos autores
+com um conserto, o `caller_pn` da oferta repassado como `peerPhone` para quem liga com o número
+oculto. O conserto foi proposto aos autores em
+[JotaDev66/WaCalls#69](https://github.com/JotaDev66/WaCalls/pull/69), e a imagem volta a ser a deles
+quando eles o publicarem. O código do fork é público, sob a mesma licença MIT. O DeskVoice fala com
+ele pela API HTTP e pelo SSE, só a partir do processo de voz. O WaCalls, de JotaDev66 e Joseph Fernandes, traz o
 codec MLow sob a licença MIT de origem e usa a biblioteca `whatsmeow` (MPL-2.0). Ele não é afiliado
 ao WhatsApp nem à Meta, e o DeskVoice não é afiliado ao WaCalls.
 
@@ -86,6 +158,22 @@ O painel usa [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/)
 Institute, e [IBM Plex Mono](https://github.com/IBM/plex), da IBM, as duas sob a SIL Open Font
 License 1.1. Os arquivos ficam em `apps/panel/src/app/fonts/`, com a licença de cada uma ao lado.
 São o subconjunto latino publicado pelo [Fontsource](https://fontsource.org) 5.3.0, sem alteração.
+
+## Aviso gravado da caixa postal
+
+O aviso que a caixa postal toca antes do recado (`apps/voice/assets/voicemail-notice/`) foi
+sintetizado em 15/11/2026 com o [Piper](https://github.com/OHF-Voice/piper1-gpl) 1.8.0 (GPL-3.0),
+que roda fora do repositório: só o áudio que ele produz está aqui, não o programa. As vozes vêm de
+[rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (repositório MIT), e a licença
+de cada base foi conferida no `MODEL_CARD` de cada voz:
+
+| Idioma | Voz | Base de treino |
+|---|---|---|
+| pt-BR | `pt_BR-cadu-medium` | OHF-Voice/voice-datasets, CC0 (afinada sobre a voz rdh, CC0) |
+| inglês | `en_US-ljspeech-medium` | LJ Speech, domínio público |
+| espanhol | `es_ES-davefx-medium` | OHF-Voice/voice-datasets, CC0 (afinada sobre a voz rdh, CC0) |
+
+O comando que gera os três arquivos é `scripts/aviso-da-caixa-postal/gerar.sh`.
 
 ## Provedores de IA
 
