@@ -501,12 +501,17 @@ Fica no comentário da DESA-24, no formato do `GOVERNANCE.md`. Resumo:
    DESA-10 disser. Se nada for dito, a bancada não roda, e o PR de cada fatia diz que o "antes e
    depois" contra o provedor não foi medido.
 
-**Como está (15/11):** os dois pedidos seguem sem resposta, e o prazo do padrão vence em 17/11.
-A decisão 1 da DESA-10, que o pedido 2 segue no padrão B, já saiu: o Rafael respondeu A em 13/11
-(lote DESA-19, decisão 2). A medida contra o provedor roda com teto de US$ 5 no total, e a chave de
-cada motor chega por canal privado. Até a resposta ou o prazo, e até a chave chegar, a fatia 5 só
-prepara o script, testado sem rede: nenhuma chamada paga. Se o pedido 2 vier C, o script fica sem
-rodada, e o "antes e depois" sai como não medido.
+**Como está (17/11):** o prazo venceu em 17/11 sem resposta aos dois pedidos, e valeu o padrão de
+cada um.
+- **Pedido 1:** o diagnóstico da ligação de 13/11 não é feito. A camada 5 fecha sem ele, e a
+  hipótese "o provedor não viu o fim do turno por causa do ruído" fica registrada como não provada.
+- **Pedido 2:** vale a decisão 1 da DESA-10, que o Rafael respondeu A em 13/11 (lote DESA-19,
+  decisão 2). A medida contra o provedor roda com teto de US$ 5 no total, e a chave de cada motor
+  chega por canal privado.
+
+A rodada da fatia 5 foi pedida ao board em 17/11, com o Gemini primeiro, e espera a chave chegar a
+quem roda. Até lá, nenhuma chamada paga sai daqui, e o "antes e depois" contra o provedor segue
+não medido.
 
 ## Não medido (deste documento)
 
