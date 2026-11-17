@@ -84,6 +84,12 @@ export interface VoiceSession {
    * contra o silêncio chama isto quando o provedor não viu o fim do turno.
    */
   closeCallerTurn(): void;
+  /**
+   * Contexto para o agente, que não vira fala por si. Entra pelo mecanismo que o provedor documenta,
+   * nunca por `say`. Sem o método, o motor não aceita orientação, e quem chama registra isso.
+   * Depois de `close`, não manda nada.
+   */
+  guide?(text: string): void;
   close(): Promise<void>;
 }
 
