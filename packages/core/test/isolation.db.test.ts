@@ -231,7 +231,7 @@ describe("schema", () => {
     }
   });
 
-  it("keeps the installation tables out of reach of the application role, and lets the system role only read and add", async () => {
+  it("keeps the installation tables out of reach of the application role, and lets the system role only read and add (and drop an account left without a link)", async () => {
     const privileges = await owner.pool.query<{ name: string; role: string; can_select: boolean; can_insert: boolean; can_update: boolean; can_delete: boolean; can_truncate: boolean }>(
       `select t.name, r.role,
               has_table_privilege(r.role, format('public.%I', t.name), 'select') as can_select,
@@ -244,9 +244,12 @@ describe("schema", () => {
     );
     // A conta e as configurações mudam (senha, marca, padrão); a auditoria só cresce.
     const SYSTEM_UPDATES: Record<string, boolean> = { accounts: true, installation_settings: true, installation_events: false };
+    // Só a conta sai, e só quando fica sem vínculo (`deleteAccountIfOrphan`). A configuração e a
+    // auditoria nunca são apagadas pelo produto.
+    const SYSTEM_DELETES: Record<string, boolean> = { accounts: true, installation_settings: false, installation_events: false };
     expect(privileges.rows).toHaveLength(INSTALLATION_TABLES.length * 2);
     for (const row of privileges.rows) {
-      const expected = row.role === "deskvoice_app" ? [false, false, false, false, false] : [true, true, SYSTEM_UPDATES[row.name], false, false];
+      const expected = row.role === "deskvoice_app" ? [false, false, false, false, false] : [true, true, SYSTEM_UPDATES[row.name], SYSTEM_DELETES[row.name], false];
       expect([row.can_select, row.can_insert, row.can_update, row.can_delete, row.can_truncate], `${row.name} as ${row.role}`).toEqual(expected);
     }
     // Sem policy: um `grant` dado por engano ao papel de aplicação continuaria sem linha visível.

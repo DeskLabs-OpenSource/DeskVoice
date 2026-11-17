@@ -27,7 +27,8 @@ create table accounts (
 );
 alter table accounts enable row level security;
 alter table accounts force row level security;
-grant select, insert, update on accounts to deskvoice_system;
+-- `delete`: a conta que fica sem nenhum vínculo some junto com o último (`deleteAccountIfOrphan`).
+grant select, insert, update, delete on accounts to deskvoice_system;
 
 -- Uma conta por usuário. Até aqui o e-mail era único na instalação, então a correspondência é de um
 -- para um e não há conflito a resolver.

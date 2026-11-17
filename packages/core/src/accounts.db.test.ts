@@ -10,6 +10,7 @@ import {
   checkMemberPassword,
   createAccount,
   createMember,
+  deleteAccountIfOrphan,
   findLoginAccount,
   grantInstallationAdmin,
   isInstallationAdmin,
@@ -208,6 +209,51 @@ describe("the account behind sign-in and password", () => {
 // A atualização de uma instalação de antes desta fatia, com dados (critério 4 do desenho do R8).
 // O banco é próprio: aplica as migrations anteriores a esta, grava o que uma instalação real tem e
 // aplica o resto por cima, com o executor de verdade.
+describe("deleteAccountIfOrphan (removing the last link)", () => {
+  const accountRow = (accountId: string) => withSystem(app, (q) => q.one("select id from accounts where id = $1", [accountId]));
+  const dropLink = (organizationId: string, userId: string) => withOrg(app, organizationId, (q) => q.exec("delete from users where id = $1", [userId]));
+
+  it("deletes the account only when no link is left, of any kind", async () => {
+    const org = await createOrganization(app, "Órfã");
+    const other = await createOrganization(app, "Órfã, outra");
+    const person = await member(org, "operator");
+    // O segundo vínculo é `support`: ele também segura a conta.
+    await withOrg(app, other, (q) =>
+      q.exec("insert into users (organization_id, account_id, kind, email, name, role) values ($1, $2, 'support', $3, 'Suporte', 'operator')", [
+        other,
+        person.accountId,
+        `support-${randomUUID()}@example.test`,
+      ]),
+    );
+
+    expect(await deleteAccountIfOrphan(app, person.accountId, now)).toBe(false);
+    await dropLink(org, person.userId);
+    expect(await deleteAccountIfOrphan(app, person.accountId, now)).toBe(false);
+    expect(await accountRow(person.accountId)).not.toBeNull();
+
+    await withOrg(app, other, (q) => q.exec("delete from users where account_id = $1", [person.accountId]));
+    expect(await deleteAccountIfOrphan(app, person.accountId, now)).toBe(true);
+    expect(await accountRow(person.accountId)).toBeNull();
+    expect(await deleteAccountIfOrphan(app, person.accountId, now)).toBe(false);
+  });
+
+  it("records the loss of the installation mark in the installation audit", async () => {
+    const org = await createOrganization(app, "Órfã com marca");
+    const person = await member(org, "owner");
+    expect(await grantInstallationAdmin(app, person.email, now)).toMatchObject({ granted: true });
+    await dropLink(org, person.userId);
+
+    expect(await deleteAccountIfOrphan(app, person.accountId, now, { organizationId: org })).toBe(true);
+    const events = await withSystem(app, (q) =>
+      q.many<{ kind: string; source: string }>("select kind, payload->>'source' as source from installation_events where payload->>'account_id' = $1 order by at, id", [person.accountId]),
+    );
+    expect(events).toEqual([
+      { kind: "installation_admin_granted", source: "command" },
+      { kind: "installation_admin_revoked", source: "member_removed" },
+    ]);
+  });
+});
+
 describe("upgrade over a database with data", () => {
   const roleUrl = (variable: string, dbName: string): string => {
     const url = new URL(process.env[variable] ?? "");

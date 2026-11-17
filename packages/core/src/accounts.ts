@@ -11,8 +11,9 @@ import { withSystem } from "./with-org";
  * papel de sistema a lê, e só por este arquivo. A senha de todas as contas nunca fica ao alcance de
  * uma rota presa a uma organização.
  *
- * Toda consulta de vínculo aqui filtra `kind = 'member'`. O vínculo `support` (o "entrar como", da
- * fatia 5) não entra no login, não confere senha e não dá papel na instalação.
+ * O login, a senha e o papel da instalação filtram `kind = 'member'`. O vínculo `support` (o "entrar
+ * como", da fatia 5) não entra no login, não confere senha e não dá papel na instalação. A exceção é
+ * `deleteAccountIfOrphan`: ali qualquer vínculo segura a conta.
  */
 
 export interface LoginAccount {
@@ -132,6 +133,28 @@ export function resetAccountPassword(db: Db, email: string, passwordHash: string
 function closeSessions(q: OrgQuery, accountId: string, keepSessionId: string | null): Promise<number> {
   // Pelo vínculo, e não por `sessions.account_id`: a sessão de qualquer vínculo da conta cai.
   return q.exec("delete from sessions s using users u where u.id = s.user_id and u.account_id = $1 and s.id is distinct from $2", [accountId, keepSessionId]);
+}
+
+/**
+ * Apaga a conta que ficou sem nenhum vínculo (de qualquer `kind`). É o passo seguinte à remoção de
+ * um membro: sem ele, o e-mail e o hash ficariam numa conta que não entra em lugar nenhum, e um
+ * convite novo para o mesmo e-mail cairia em `email_taken`. A conta que ainda tem outro vínculo
+ * continua. Se a conta tinha a marca de quem administra a instalação, a perda fica na auditoria.
+ * Devolve se apagou.
+ */
+export function deleteAccountIfOrphan(db: Db, accountId: string, now: Date, detail: { actorAccountId?: string | null; organizationId?: string | null } = {}): Promise<boolean> {
+  return withSystem(db, async (q) => {
+    const gone = await q.one<{ admin: boolean }>(
+      `delete from accounts a where a.id = $1 and not exists (select from users u where u.account_id = a.id)
+       returning a.installation_admin_at is not null as admin`,
+      [accountId],
+    );
+    if (!gone) return false;
+    if (gone.admin) {
+      await recordInstallationEvent(q, now, "installation_admin_revoked", { ...detail, payload: { account_id: accountId, source: "member_removed" } });
+    }
+    return true;
+  });
 }
 
 /**
