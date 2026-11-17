@@ -5,12 +5,12 @@
 > no campo `VoiceSessionConfig.vocabulary`.
 >
 > **Estado (17/11, documento vivo):** fatia 1a (a voz atrás de uma interface, #393) e fatia 1b (a
-> chave e as vozes na tela, #412) na `main`. Fatia 2 (`Brain.chat` em streaming) no #419,
+> chave e as vozes na tela, #412) na `main`. Fatia 2 (`Brain.chat` em streaming, #419) na `main`,
 > com um ajuste ao contrato da seção 3.2 (o consumo nunca fica sem número). A latência do cérebro na
 > 3.5 segue **não medida**: a bancada existe, e faltaram as chaves. Fatia 2b (`Brain.chat` na
-> Anthropic, com o transporte do streaming separado do formato de cada API) no #423; fatia 2c
-> (`Brain.chat` no Gemini, com o campo `providerState` para a assinatura de raciocínio) no PR da
-> DESA-123, sobre o #423. Fatias 3 a 6 não começaram.
+> Anthropic, com o transporte do streaming separado do formato de cada API, #423) na `main`; fatia 2c
+> (`Brain.chat` no Gemini, com o campo `providerState` para a assinatura de raciocínio) no #425.
+> Fatias 3 a 6 não começaram.
 
 ## 1. O problema
 
