@@ -104,6 +104,8 @@ const privacy = {
     caller_notes_retention_changed: "{who} mudou o prazo da memória de {from} para {to}.",
     caller_memory_changed: "{who} deixou a memória do número no agente {state}.",
     analyst_provider_confirmed: "{who} confirmou que o analista {analyst} manda o texto do que a pessoa fala na ligação para {provider}.",
+    organization_created: "A administração da instalação criou esta organização, com o nome \"{name}\".",
+    organization_renamed: "A administração da instalação renomeou esta organização de \"{from}\" para \"{to}\".",
     caller_notes_deleted: "{who} esqueceu o número terminado em {suffix}. Notas do agente apagadas: {notes}. Pendências fechadas apagadas: {followUps}.",
   },
   noteDeleted: "{who} apagou uma nota do agente.",

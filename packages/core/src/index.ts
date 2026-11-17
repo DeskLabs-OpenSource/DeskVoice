@@ -16,6 +16,7 @@ export * from "./inbound-limit";
 export * from "./installation";
 export * from "./invites";
 export * from "./migrate";
+export * from "./organizations";
 export * from "./password";
 export * from "./phone";
 export * from "./public-address";
