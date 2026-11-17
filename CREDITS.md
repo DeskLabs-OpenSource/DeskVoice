@@ -94,6 +94,15 @@ Do kit de contribuição do DeskcommCRM (`deskcomm-contribuir`) vieram também, 
   não como texto: a skill que percorre as perguntas da doutrina e nomeia, para cada uma, o artefato
   que prova a resposta, como a `sistema-vivo` de lá faz na seção do repositório. As perguntas são as
   da lei do DeskVoice (`docs/doctrine/sistema-vivo.md`), para a qual a skill aponta sem copiar.
+- **O afinar do agente com dados** (`deskvoice-agente-de-voz`): a estrutura da skill (o
+  diagnóstico antes da reescrita, a tabela de sinal, causa provável e onde mexer, o antes e o depois
+  mostrados à pessoa antes de trocar, uma mudança por vez, medir depois pela data da troca e a lista
+  do que nunca se faz) e a divisão das referências em diagnóstico e em anatomia e antipadrões, com o
+  checklist de revisão, vieram, como texto adaptado, da `deskcomm-prompt` de lá (lida em `7769d21`).
+  O conteúdo foi reescrito para voz a partir do código do DeskVoice: o que `composeInstructions`
+  monta, as falas fixas do sistema, a régua da análise da ligação, a linha do tempo e o vocabulário.
+  Os portões de saída, as versões de prompt, o botão Testar e as consultas de lá ficaram de fora,
+  porque aqui não existem.
 
 O DeskcommCRM é obra de mais de 250 autores de PR. Parte do que está aqui é trabalho deles.
 

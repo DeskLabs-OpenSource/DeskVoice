@@ -66,7 +66,7 @@ antes de afirmar.
 | Sintoma | Consultas | O que costuma explicar | Próximo passo |
 |---|---|---|---|
 | "Atende pouco", "perde ligação" | C1, C2, C3, C10 | recusa por `inbound_limit_reached`, `agent_disabled`, `engine_not_configured`, `no_agent`; pico fora do horário de quem atende | linha e agente: skill `deskvoice-operar`, seções 1 e 2; tronco: skill `deskvoice-instalar` |
-| "Resolve pouco", "a IA está respondendo mal" | C4, C7, C9 | critério da rubrica com muito `missed`; desfecho não classificado por chave ou crédito (C9) | a skill que afina o agente de voz ainda não existe (`deskvoice-agente-de-voz`, fatia 5 do kit de skills, desenho no PR #317). Até lá: instruções do agente pela skill `deskvoice-operar`, seção 1, e a linha do tempo de algumas ligações com nota baixa, lidas pela pessoa na tela |
+| "Resolve pouco", "a IA está respondendo mal" | C4, C7, C9 | critério da rubrica com muito `missed`; desfecho não classificado por chave ou crédito (C9) | skill `deskvoice-agente-de-voz`: diagnóstico pela análise e pela linha do tempo, instruções novas só com o sim da pessoa, e a medida antes e depois |
 | "Passa tudo para pessoa" | C8 | instrução que manda transferir "na dúvida"; aprovação que expira (`expired`) porque ninguém decide | skill `deskvoice-operar`, seção 4 ("Transferiu sem motivo", "Ficou esperando e desligou") |
 | "Custa caro" | tela Custos, C5, C6 | modelo caro no desfecho ou na análise; ligação longa; `sem_custo_medido` escondendo gasto | skill `deskvoice-operar`, seção 5 |
 | "Cai no meio", "falha" | C10 | `engine_failed` concentrado num motor; ferramenta sem conector (`tool_result` com `ok` falso) | Saúde; skill `deskvoice-operar`, seção 4; ferramenta: skill `deskvoice-ferramenta` |
