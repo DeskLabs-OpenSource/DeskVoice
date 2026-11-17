@@ -303,6 +303,29 @@ sem a guarda:
 O resultado vira a seção "Medida contra o provedor", com data, modelo, número de frases e custo. É
 ela que ajusta os prazos da guarda e os valores do modo "noisy". "Melhorou" só com essa tabela.
 
+### Fatia 6: o Barulhento também no Gemini Live (aberta em 17/11)
+
+Em 17/11, a mantenedora provou na vps-deskvoice, na 0.28.0 (`gemini-live`, modelo
+`gemini-3.8-live`), que o Gemini aceita a sessão com o Barulhento, sozinho e junto do
+`customVocabulary` (comentário no #290, 11:32Z). É o mesmo nível de prova que liberou o OpenAI na
+fatia 3: a sessão abre, e o efeito no ruído fica para a rodada da fatia 5.
+
+O que muda é só a tela. O motor (`NOISY_REALTIME_INPUT` em `gemini-live.ts`) e a API já aceitam
+`noisy` desde a fatia 2:
+- `NOISY_PROVEN_ENGINES` em `apps/panel/src/app/(app)/agents/[id]/page.tsx` passa a ter
+  `gemini-live`. O `simulated` (e o motor em pipeline da R5, quando existir) continua fora, com o
+  aviso e o "Voltar para Normal" da issue #213;
+- os textos das três línguas (`listeningEnvironmentHint`, `listeningEnvironmentUnproven`,
+  `listeningEnvironmentOnlyOpenAi`, que pode trocar de nome) passam a citar os dois motores;
+- o e2e `listening-environment.spec.ts` cobre a escolha no Gemini e mantém um motor fora da lista.
+
+Aceite: num agente com Gemini Live, a pessoa escolhe "Barulhento", salva, recarrega e vê a escolha.
+Num motor fora da lista, o campo continua escondido, e um agente que já está em Barulhento ali vê o
+aviso.
+
+Fracasso mesmo funcionando: um texto que promete que o Barulhento "ignora o ruído" no Gemini (isso
+não foi medido), ou o aviso sumir para o motor que não foi provado.
+
 ### Áudio de teste (vale para a 4 e a 5)
 
 - **Voz:** sintética, gerada por TTS. Nunca voz de pessoa real, nem gravação de ligação.
@@ -396,7 +419,7 @@ Sem redução, a perda debaixo de ruído dá 0,0 em todos os casos, e o controle
 esse é exatamente o caso da ligação de 13/11. O que menos corta, o RNNoise, perde de 4 a 11 dB nos
 quadros fracos, o que é quatro a onze vezes a régua. Ligar um deles cortaria a fala baixa de quem
 ligou, e isso é o "fracasso mesmo funcionando" da tarefa. A camada 2 termina medida, sem nada
-ligado no produto. Para o ruído, o que vale é a camada 1 (o modo Barulhento, só no OpenAI), a guarda
+ligado no produto. Para o ruído, o que vale é a camada 1 (o modo Barulhento, no OpenAI e, desde a fatia 6, no Gemini), a guarda
 contra o silêncio da fatia 1 e a medida contra o provedor da fatia 5.
 
 A decisão não depende dos dois limites conhecidos da régua:
