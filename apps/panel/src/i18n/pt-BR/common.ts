@@ -35,6 +35,8 @@ const common = {
     openCall: "Ver a ligação",
     followUpOpen: "Ver a pendência",
     followUpGone: "Pendência apagada pelo prazo de guarda.",
+    /** O seletor do topo, só para quem tem vínculo ativo em mais de uma organização. */
+    organization: "Organização",
   },
   roles: { owner: "Dono", admin: "Administrador", operator: "Operador" },
   health: {
@@ -69,6 +71,9 @@ const common = {
     invalid_json: "O pedido chegou incompleto. Tente de novo.",
     already_exists: "Já existe um registro com esses dados.",
     invalid_credentials: "E-mail ou senha incorretos.",
+    existing_account: "Este e-mail já tem conta. Entre com a senha que você já usa.",
+    no_account: "Este e-mail não tem mais conta. Escolha uma senha nova.",
+    already_member: "Esta conta já está nesta organização. Se ela foi desativada, quem é dono ou administrador a reativa na tela Equipe.",
     too_many_attempts: "Muitas tentativas de entrada. Espere alguns minutos e tente de novo.",
     voice_unavailable: "O processo de voz não respondeu. Veja no indicador de saúde, no menu, o que está parado. O que você salvou continua salvo.",
     engine_not_configured: "Este agente usa um motor de voz sem chave cadastrada. Cadastre a chave em Configurações → Inteligência artificial.",

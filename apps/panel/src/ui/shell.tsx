@@ -19,7 +19,7 @@ import { api, useApi } from "./api";
 import { APPROVALS_CHANGED, ApprovalCard, isWaiting } from "./approval";
 import { formatDateTime } from "./format";
 import { useLive, useNow } from "./live";
-import { MeContext } from "./me";
+import { MeContext, useOrganizationChoices, type Membership } from "./me";
 import type { Approval, HealthReport, HealthStatus, Me, PanelNotification } from "./types";
 import { UpdateIndicator } from "./update-indicator";
 
@@ -184,6 +184,41 @@ function ThemeToggle({ initial }: { initial: Theme }) {
   );
 }
 
+/**
+ * O seletor de organização, no topo. Só existe para quem tem vínculo ativo em mais de uma: com uma
+ * só, `Shell` nem o desenha. A troca muda a sessão no servidor (o cookie é o mesmo) e recarrega a
+ * página na seção em que a pessoa estava, sem o registro aberto, que é da organização de antes.
+ */
+function OrganizationSwitch({ choices }: { choices: Membership[] }) {
+  const t = useDict(ptBR, en, es);
+  const pathname = usePathname();
+  const [busy, setBusy] = useState(false);
+  const current = choices.find((choice) => choice.current);
+  return (
+    <select
+      aria-label={t.shell.organization}
+      value={current?.organizationId ?? ""}
+      disabled={busy}
+      onChange={(event) => {
+        setBusy(true);
+        const section = `/${pathname.split("/")[1] ?? ""}`;
+        void api("/auth/switch", { body: { organizationId: event.target.value } }).then(
+          () => window.location.assign(section === "/" ? "/calls" : section),
+          () => window.location.reload(),
+        );
+      }}
+      className="h-9 w-full min-w-0 cursor-pointer truncate rounded-xs border border-line bg-surface px-2 font-bold"
+    >
+      {current ? null : <option value="" disabled />}
+      {choices.map((choice) => (
+        <option key={choice.organizationId} value={choice.organizationId}>
+          {choice.organizationName}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function Brand() {
   return (
     <Link href="/calls" className="flex items-center gap-2 rounded-xs text-[1.13rem] font-bold tracking-[-0.01em]">
@@ -199,6 +234,7 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
   const tInstallation = useDict(ptBRInstallation, enInstallation, esInstallation);
   const pathname = usePathname();
   const now = useNow();
+  const organizations = useOrganizationChoices();
   const approvals = useApi<Approval[]>("/approvals?status=pending");
   useLive(approvals.reload);
   useEffect(() => {
@@ -272,6 +308,7 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
           <Brand />
           <NotificationBell align="left-0" />
         </div>
+        {organizations ? <OrganizationSwitch choices={organizations} /> : null}
         {nav}
         <div className="mt-auto grid gap-3">
           <UpdateIndicator />
@@ -290,6 +327,7 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
           <HealthIndicator />
           <NotificationBell align="right-0" />
         </div>
+        {organizations ? <OrganizationSwitch choices={organizations} /> : null}
         {nav}
       </header>
 
