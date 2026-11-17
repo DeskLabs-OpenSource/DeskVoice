@@ -521,6 +521,29 @@ describe("o filtro de entrada por linha (R14, fatia 2)", { timeout: 120_000 }, (
     expect(await applyTrunks(deps())).toMatchObject({ applied: true });
     expect(aclOf(await readFile(file, "utf8"), line)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=203.0.113.71", "permit=198.51.100.71"]);
   });
+
+  it("a linha por registro com o filtro desligado que passa a IP filtra na hora: o filtro efetivo ignora a coluna (contrato 11)", async () => {
+    const organizationId = await createOrganization(app, "filter-off-to-ip");
+    const name = `sip.${randomInt(1, 1_000_000)}.vira-ip.example`;
+    const line = await createTrunk(app, organizationId, { host: name });
+    await withSystem(app, (q) => q.exec("update trunks set inbound_filter = false where id = $1", [line]));
+    const ari = fakeAri();
+    const file = path.join(scratch, "filter-off-to-ip", "pjsip_trunks.conf");
+    ari.loadsFile = file;
+    const deps = () => trunksDeps(ari, file, fakeClock(), async (asked) => (asked === name ? ["203.0.113.73"] : anyName(asked)));
+    expect(await applyTrunks(deps())).toMatchObject({ applied: true });
+    expect(aclOf(await readFile(file, "utf8"), line)).toEqual([]);
+
+    // A troca de modo como o painel grava: zera o conjunto e NÃO mexe em `inbound_filter`. Endereço
+    // sorteado, para não cair no grupo de outra linha deste banco.
+    const ip = `100.${randomInt(64, 128)}.${randomInt(0, 256)}.${randomInt(1, 255)}`;
+    await withSystem(app, (q) =>
+      q.exec("update trunks set auth_mode = 'ip', host = $2, username = null, secret_enc = null, inbound_allowed = '{}', inbound_from_name = '{}', inbound_resolved_at = null where id = $1", [line, ip]),
+    );
+    expect((await withSystem(app, (q) => q.one<{ inbound_filter: boolean }>("select inbound_filter from trunks where id = $1", [line])))?.inbound_filter).toBe(false);
+    expect(await applyTrunks(deps())).toMatchObject({ applied: true });
+    expect(aclOf(await readFile(file, "utf8"), line)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", `permit=${ip}`]);
+  });
 });
 
 describe("ligação de saída", { timeout: 120_000 }, () => {

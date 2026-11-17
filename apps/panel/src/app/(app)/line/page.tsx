@@ -1,5 +1,6 @@
 "use client";
 
+import { inboundFilterOn } from "@deskvoice/core/inbound-filter";
 import { CheckCircle, MinusCircle, PencilSimple, Plus, Pulse, Trash, Warning, XCircle } from "@phosphor-icons/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import enCommon from "../../../i18n/en/common";
@@ -55,7 +56,8 @@ function AllowedAddresses({ trunk, t, onSaved }: { trunk: Trunk; t: LineDictiona
   const name = hostName(trunk.host);
   const allowed = trunk.inboundAllowed ?? [];
   const byRegistration = trunk.authMode === "register";
-  const switchedOff = byRegistration && trunk.inboundFilter === false;
+  // O filtro efetivo (contrato 11): a linha por IP filtra sempre, seja qual for a coluna.
+  const switchedOff = !inboundFilterOn(trunk);
   const unfiltered = !switchedOff && filterOff(trunk, name !== null);
   const setFilter = (enabled: boolean): void => {
     void toggle.run(() => api(`/trunks/${trunk.id}/inbound-filter`, { method: "PATCH", body: { enabled } })).then((ok) => ok && onSaved());

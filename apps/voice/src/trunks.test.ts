@@ -643,6 +643,13 @@ describe("o filtro de entrada por linha (R14, fatia 2)", () => {
     expect(acl(renderTrunksConf([register, byIp], allowed).conf, A)).toEqual(acl(on, A));
   });
 
+  it("a linha por IP filtra sempre, mesmo com a coluna desligada (filtro efetivo, contrato 11)", () => {
+    // A linha por registro com o filtro desligado que passa a IP leva a coluna `false` junto.
+    const allowed = new Map([[B, ["198.51.100.20"]]]);
+    const { conf } = renderTrunksConf([{ ...byIp, inboundFilter: false }], allowed);
+    expect(acl(conf, B)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=198.51.100.20"]);
+  });
+
   it("nome, bloco largo demais e repetição nunca viram permit; o que sobra é canônico", () => {
     const { conf } = renderTrunksConf([byIp], new Map([[B, ["198.051.100.020", "nome.example", "10.0.0.0/8", "::/0", "198.51.100.20", "2001:DB8::1"]]]));
     expect(acl(conf, B)).toEqual(["deny=0.0.0.0/0.0.0.0", "deny=::/0", "permit=198.51.100.20", "permit=2001:db8::1"]);
