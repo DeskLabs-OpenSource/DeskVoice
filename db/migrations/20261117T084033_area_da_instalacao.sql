@@ -13,3 +13,6 @@ grant update (value, updated_at) on installation_settings to deskvoice_system;
 -- Com a marca, o convite só vale enquanto a organização não tem nenhum vínculo (`invites.ts`).
 alter table invites add column installation_invite boolean not null default false;
 alter table invites add constraint invites_installation_invite_has_no_creator check (not installation_invite or created_by is null);
+-- O convite da administração só abre a organização com um dono. Hoje o SQL de `invites.ts` já
+-- limita isso, mas o banco recusa a combinação por conta própria.
+alter table invites add constraint invites_installation_invite_is_owner check (not installation_invite or role = 'owner');

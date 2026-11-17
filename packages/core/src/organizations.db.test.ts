@@ -236,6 +236,20 @@ describe("renaming and the first owner's invite", () => {
     ).rejects.toMatchObject({ code: "23514" });
   });
 
+  it("refuses an installation invite with any role other than owner, in the database itself", async () => {
+    const org = await createOrganization(app, "Vazia");
+    await expect(
+      withOrg(app, org, (q) =>
+        q.exec("insert into invites (organization_id, email, name, role, token_hash, expires_at, created_by, installation_invite) values ($1, $2, 'Z', 'operator', $3, $4, null, true)", [
+          org,
+          `z-${randomUUID()}@example.test`,
+          hashToken(`v-${randomUUID()}`),
+          new Date(now.getTime() + 86_400_000),
+        ]),
+      ),
+    ).rejects.toMatchObject({ code: "23514", constraint: "invites_installation_invite_is_owner" });
+  });
+
   it("refuses an e-mail that already has an account and an organization that does not exist", async () => {
     const { ownerOne } = await singleClient();
     const org = await createOrganization(app, "Vazia");
