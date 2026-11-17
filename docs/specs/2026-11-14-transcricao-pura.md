@@ -579,10 +579,13 @@ A imagem do Laya é uma quarta imagem publicada pelo projeto, e publicá-la muda
   - **desligado de fábrica e ligado por organização**, na configuração `calls.decision_model` da
     tabela `settings` (a mesma forma de `calls.transcription_enabled`). A chave do Jev é do
     operador, guardada como configuração secreta da organização;
-  - ligar pede **confirmação nomeando o fornecedor**: "O texto do que a pessoa fala na ligação vai
-    para a TypeSafe." O país só entra no aviso se a fonte do fornecedor o declarar, com endereço e
-    data; sem fonte, o aviso diz que o fornecedor não declara onde processa, e nunca presume os
-    EUA (condição da revisora no #349, 16/11). Quem confirmou e quando ficam gravados;
+  - ligar pede **confirmação nomeando o fornecedor**: "O texto da ligação vai para a TypeSafe." (a
+    frase da tela do filtro, entregue no #395; a frase mais longa, "O texto do que a pessoa fala na
+    ligação vai para a TypeSafe.", é a do analista, no #396). O país só entra no aviso se a fonte do
+    fornecedor o declarar, com endereço e data; sem fonte, o aviso diz que o fornecedor não declara
+    onde processa, e nunca presume os EUA (condição da revisora no #349, 16/11). Quem confirmou e
+    quando ficam gravados, e um **recibo no Registro da privacidade** (entregue no #395) guarda isso
+    depois que o filtro é desligado;
   - **a política de retenção de dados da TypeSafe é lida e registrada**, com endereço e data da
     leitura, no guia `docs/guides/filtro-de-fala.md`, **antes da entrega** da fatia 7. Se a página não
     existir ou não disser quanto tempo o texto fica guardado, o guia e o aviso da tela dizem isso,

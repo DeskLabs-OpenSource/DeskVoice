@@ -1,6 +1,7 @@
 # Várias organizações e a administração da instalação
 
-- **Estado:** desenho. Nenhuma fatia começou. A decisão que acompanha este texto é a
+- **Estado (17/11, documento vivo):** na `main`, a fatia 1 (#384), a fatia 2 (#387), a fatia 3
+  (#402) e a fatia 4a (#408). A fatia 4b é a próxima. Os pedidos da seção 7 foram respondidos. A decisão que acompanha este texto é a
   [`0021`](../decisions/0021-varias-organizacoes-na-tela.md); onde as duas discordarem, vale a 0021.
 - **Data:** 2026-11-17. Revisão 2 no mesmo dia, depois do parecer da sessão revisora no PR #373.
 - **Quem pediu:** o dono, em 13/11/2026 (roteiro de novembro, item R8): "um sistema multi-tenant com
@@ -189,8 +190,15 @@ alter table organizations add column deleting_at timestamptz;   -- a lápide (fa
 **O que a suspensão faz**, numa transação só e por `withOrg` da organização suspensa:
 
 - Marca `suspended_at` e o motivo.
-- Cancela as tarefas `queued` daquela organização, com o motivo `organization_suspended`. A religação
-  combinada há duas semanas não pode sair sozinha no dia da reativação.
+- Cancela as tarefas `queued` daquela organização que agem em nome dela ou gastam (a religação, o
+  aviso, o webhook, a transcrição, o resumo, a revisão e a classificação), com o motivo
+  `organization_suspended`. A religação combinada há duas semanas não pode sair sozinha no dia da
+  reativação.
+- **Não cancela as rotinas de guarda e de apagamento** (`purge_transcripts`, `purge_caller_notes`,
+  `erase_recordings`) **nem o vencimento de pedidos** (`expire_approval`). Elas não gastam nem falam
+  com ninguém de fora, e cumprem o prazo de guarda e o pedido de apagamento de quem ligou, que não
+  param porque a agência suspendeu o cliente. As de guarda se reagendam sozinhas: cancelar uma delas
+  quebraria a corrente para sempre (revisão de 17/11, na abertura da fatia 4b).
 - Grava `organization_suspended` em `organization_events` e em `installation_events`.
 
 **E o que passa a valer enquanto ela está suspensa:**
@@ -201,7 +209,7 @@ alter table organizations add column deleting_at timestamptz;   -- a lápide (fa
 | Ligação pelo WhatsApp | A mesma fala, pelo mesmo transporte | `apps/voice/src/whatsapp-calls.ts` |
 | Chamada pelo navegador e simulada | Recusadas com a mensagem de organização suspensa | rotas `calls/web` e `calls/simulate` |
 | Ligação de saída | `checkOutboundAllowed` recusa com `organization_suspended` | a porta única de saída |
-| Fila | `claimTask` não reivindica tarefa de organização suspensa. A tarefa que entrar depois fica na fila e é cancelada na reativação, com o mesmo motivo | `packages/core/src/queue.ts` |
+| Fila | `claimTask` não reivindica tarefa de organização suspensa, salvo as rotinas de guarda, de apagamento e de vencimento de pedidos, que continuam rodando. A tarefa que entrar depois fica na fila e é cancelada na reativação, com o mesmo motivo. O runner calcula a próxima hora de acordar com a mesma regra, para não acordar sem parar por uma tarefa que não pode pegar | `packages/core/src/queue.ts`, `apps/routines/src/runner.ts` |
 | Linhas | **Continuam registradas.** Tirar a linha do ar faria quem liga ouvir o erro da operadora, e não a fala | `trunks.ts` não muda |
 | Mensagem de WhatsApp | Não responde, e grava evento | sem resposta automática, que seria disparo |
 | Painel | Quem só tem vínculo com ela vê a tela "Esta organização está suspensa", com o motivo, e mais nada. Quem tem outras organizações troca para elas | `requireSession` |
@@ -551,6 +559,12 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 - **Aceite:** o item 2 da seção 4, com a recusa vinda da operadora e do WhatsApp, e uma tarefa
   agendada que não roda.
 - **Sensível:** telefonia e fila. Passa pelo dono.
+- **Dividida em duas** (17/11), porque não cabia numa revisão de uma sentada, e porque o botão não
+  pode existir antes de todo caminho obedecer:
+  - **4a (#408, na `main`):** todo caminho obedece a `suspended_at`, sem nada visível.
+  - **4b:** as ações de suspender e reativar na área da instalação, a transação de 3.3 (com o
+    cancelamento das tarefas e as rotinas de guarda que continuam), a confirmação nomeando a
+    organização e a tela "Esta organização está suspensa".
 
 ### Fatia 5: entrar como e o rastro
 
@@ -586,13 +600,15 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 ### Fatia 8: configurações gerais
 
 - `defaults.language` e `defaults.timezone`, copiados na criação.
-- **Só se o pedido 2 for A e os termos de uso de cada provedor estiverem conferidos**, com fonte e
-  data no PR: a chave de IA da instalação, `uses_installation_engine_key`, a leitura no processo de
-  voz e a frase na tela de motores. Sem isso (o padrão sem resposta é B), a fatia 8 entrega só o
-  idioma e o fuso.
+- **A chave de IA da instalação** (pedido 2 respondido A em 17/11): `uses_installation_engine_key`,
+  a leitura no processo de voz e a frase na tela de motores. O guia diz que conferir se os termos de
+  uso do provedor permitem uma chave servir a clientes de terceiros é do operador. O DeskVoice não
+  afirma que permitem.
 - **Aceite:** o idioma e o fuso de uma organização nova vêm do padrão, e mudar o padrão não mexe na
   que já existe. Com a chave: uma chamada de uma organização sem chave, com a da instalação ligada,
-  grava custo no `usage_ledger` dela e respeita o teto dela.
+  grava custo no `usage_ledger` dela e respeita o teto dela. A chave própria da organização vem
+  antes da chave da instalação. O guia tem a frase sobre os termos, e a tela de motores diz qual
+  chave a chamada usa.
 
 ### Fatia 9: excluir organização
 
@@ -612,11 +628,18 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
   outra organização continua com as mesmas contagens.
 - **Sensível:** apaga dado. Passa pelo dono.
 
-### Fatia 10: posse de endereço por IP (depende do pedido 3)
+### Fatia 10: o aviso de faixa sobreposta (pedido 3 respondido A)
 
-Só entra se o pedido 3 for B, e depois do #343 mesclado (3.10). Cobre a posse da faixa inteira de
-cada linha por IP (`host` e `match_extra`), e não só do `host`. Com A, a 0007 continua como está, e só
-a frase de custo da 0007 é atualizada, na decisão 0021.
+O pedido 3 foi respondido A em 17/11: não existe posse de endereço pela administração, e a 0007
+continua como está. A frase de custo da 0007 foi atualizada na 0021. O que resta é o aviso **antes
+de salvar**, com confirmação, quando a linha por IP de uma organização tem uma faixa (`host` e
+`match_extra`) que se sobrepõe à de outra organização da instalação. O #343 já está na `main`.
+
+- **Aceite:** com duas organizações, salvar uma linha por IP cuja faixa cruza a da outra mostra o
+  aviso e pede confirmação. A tela não diz o nome nem o endereço da outra organização: diz só que
+  existe uma linha de outra organização na mesma faixa, e que as duas param.
+- **Fracasso mesmo funcionando:** o aviso vaza dado da outra organização; o aviso aparece depois de
+  salvar.
 
 ## 6. O que fica de fora
 
@@ -631,6 +654,10 @@ a frase de custo da 0007 é atualizada, na decisão 0021.
 - Qualquer limite que aumente o que uma organização pode discar.
 
 ## 7. Pedidos de decisão
+
+**Respondidos em 17/11/2026, às 17:11Z** (DESA-89): "Pode seguir com recomendação". Valem a 0021
+aceita (pedido 0), a cobrança fora (pedido 1, A), a chave da agência servindo aos clientes (pedido 2,
+A) e a 0007 como está (pedido 3, A). O texto dos pedidos fica abaixo como registro.
 
 Os três vão para o lote do Líder, no formato do `GOVERNANCE.md`. Enquanto não houver resposta, as
 fatias 1 a 7 e a 9 andam: nenhuma depende deles.
@@ -721,8 +748,10 @@ largo.
   rota usar `CONFIG_ROLES` onde deveria pedir dono. As rotas da equipe já estão recusadas (3.6); a
   fatia 5 lista as outras que o papel `admin` alcança e confere uma por uma.
 - **A rota pública de saúde** soma as organizações (0006). Com organização suspensa, a soma pode
-  dizer "linha caída" por causa de uma linha que está de pé, mas suspensa. A fatia 4 decide se a
-  organização suspensa entra na soma, e diz na tela.
+  dizer "linha caída" por causa de uma linha que está de pé, mas suspensa. **Decidido na abertura da
+  fatia 4b:** a suspensão não muda a linha da operadora na saúde. A linha da organização suspensa
+  continua registrada (3.3), e a saúde mede o registro. Quem quer saber se a organização atende olha
+  o estado dela na área da instalação.
 - **A cópia de `users.email`** pode divergir de `accounts.email` se alguém escrever fora da função de
   `packages/core`. Hoje não existe troca de e-mail na tela; quando existir, nasce nessa função.
 

@@ -1,10 +1,9 @@
 # 0021: Várias organizações na tela, e a administração da instalação
 
-- **Estado:** proposta. Entrar na `main` não a torna aceita: o merge pode ser feito pela fila.
-  Ela vira **aceita com a palavra do dono**, pedida no lote de decisões junto com os pedidos da seção 7
-  do desenho, e quem registrar a resposta muda esta linha num commit. Enquanto for proposta, as
-  fatias 1 a 7 e a 9 podem andar sobre ela. Os itens marcados **[dono]** são esses pedidos, e cada
-  um diz o que vale sem resposta.
+- **Estado:** aceita. O dono respondeu ao lote de decisões em 17/11/2026, às 17:11Z: "Pode seguir
+  com recomendação". Valeu a recomendação de cada pedido da seção 7 do desenho: esta decisão aceita,
+  a cobrança fora (A), a chave de IA da agência servindo aos clientes (A) e a 0007 como está para as
+  linhas por IP (A). Os itens marcados **[dono]** abaixo dizem o que ficou valendo.
 - **Data:** 2026-11-17
 - **Quem decidiu:** o dono pediu no roteiro de novembro (R8, 13/11/2026). As escolhas abaixo são do
   Arquiteto, no [desenho de várias organizações](../specs/2026-11-17-varias-organizacoes-e-administracao-da-instalacao.md),
@@ -103,9 +102,11 @@ muda. A área da instalação fica no menu da conta.
   acréscimo.
 - **[dono] Linhas por IP de clientes diferentes com faixas que se sobrepõem** (o `host` e os extras
   da linha por IP). A frase de custo da 0007 ("criar uma segunda organização exige acesso à VPS")
-  deixa de ser verdade. Sem resposta ao pedido 3, vale a
-  opção A: a 0007 continua como está, com aviso antes de salvar.
-- **[dono] Cobrança dos clientes:** sem resposta ao pedido 1, fica fora.
-- **[dono] Chave de IA da agência para todos os clientes:** sem resposta ao pedido 2, vale B: cada
-  organização cadastra a própria chave. Com A, a chave só entra depois de conferidos os termos de uso
-  de cada provedor, com o custo na organização da chamada e o teto dela valendo.
+  deixa de ser verdade. **Respondido A (17/11):** a 0007 continua como está, com aviso antes de
+  salvar. Quem provoca a sobreposição agora pode ser o dono de uma organização cliente.
+- **[dono] Cobrança dos clientes:** **respondido A (17/11):** fica fora deste roteiro. A visão geral
+  mostra o custo do mês por organização, para a agência cobrar por fora.
+- **[dono] Chave de IA da agência para todos os clientes:** **respondido A (17/11):** pode, ligada
+  por organização pela administração, com o custo na organização da chamada e o teto dela valendo. A
+  chave própria da organização vem antes. Conferir se os termos de uso do provedor permitem servir a
+  clientes de terceiros é do operador, e o guia da fatia 8 diz isso.
