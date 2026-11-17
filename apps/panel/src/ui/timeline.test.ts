@@ -123,4 +123,79 @@ describe("linha do tempo", () => {
       expect(html).not.toContain(ptBR.events.speech_marks.note);
     });
   });
+
+  describe("o analista ao vivo (R6, fatia 4)", () => {
+    const at = "2026-11-17T12:00:00.000Z";
+    const analysts = [
+      {
+        id: "an-1",
+        name: "Jev",
+        decisionModel: "jev",
+        temperature: true,
+        objections: [{ key: "preco", label: "Preço", guidance: "Reforce o que está incluso; não ofereça desconto." }],
+        providerConfirmedBy: null,
+        providerConfirmedByName: null,
+        providerConfirmedAt: null,
+      },
+    ];
+    const render = (events: Array<{ id: string; kind: string; payload: Record<string, unknown> }>, withAnalysts: { list: typeof analysts | undefined } = { list: analysts }): string =>
+      renderToStaticMarkup(createElement(Timeline, { events: events.map((event) => ({ ...event, at })) as never, live: false, agentName: "Ana", analysts: withAnalysts.list }));
+    const read = { analystId: "an-1", agentId: "ag-1", model: "jev", latencyMs: 300, onTime: true, temperature: { score: 2, confidence: 0.9 }, objection: { key: "preco", confidence: 0.95 }, failure: null, status: 200 };
+
+    it("a linha mostra o rótulo do cadastro (Preço), e nunca a key (preco)", () => {
+      const html = render([
+        { id: "1", kind: "analyst_read", payload: read },
+        { id: "2", kind: "analyst_guidance", payload: { analystId: "an-1", agentId: "ag-1", objection: "preco", outcome: "delivered" } },
+        { id: "3", kind: "analyst_guidance_leaked", payload: { analystId: "an-1", agentId: "ag-1", objection: "preco" } },
+      ]);
+      expect(html).toContain("Objeção reconhecida: Preço (confiança 95%).");
+      expect(html).toContain("O agente recebeu a orientação do analista para a objeção Preço.");
+      expect(html).toContain("repetiu trechos da orientação para a objeção Preço.");
+      expect(html).not.toMatch(/\bpreco\b/);
+    });
+
+    it("a orientação entregue mostra o texto do cadastro atual, com o limite escrito ao lado (seção 3.5)", () => {
+      const html = render([{ id: "1", kind: "analyst_guidance", payload: { analystId: "an-1", agentId: "ag-1", objection: "preco", outcome: "delivered" } }]);
+      expect(html).toContain("Orientação no cadastro atual: “Reforce o que está incluso; não ofereça desconto.”");
+      expect(html).toContain(ptBR.events.analyst_guidance.currentNote);
+    });
+
+    it("a objeção que saiu do cadastro diz isso no lugar do rótulo, sem mostrar a key crua", () => {
+      const gone = [{ ...analysts[0]!, objections: [] }];
+      const html = render(
+        [
+          { id: "1", kind: "analyst_read", payload: read },
+          { id: "2", kind: "analyst_guidance", payload: { analystId: "an-1", agentId: "ag-1", objection: "preco", outcome: "delivered" } },
+        ],
+        { list: gone },
+      );
+      expect(html).toContain(`Objeção reconhecida: ${ptBR.events.analyst_objection_removed} (confiança 95%).`);
+      expect(html).not.toContain(ptBR.events.analyst_guidance.currentNote);
+      expect(html).not.toMatch(/\bpreco\b/);
+      // O analista apagado: o mesmo.
+      expect(render([{ id: "1", kind: "analyst_read", payload: read }], { list: [] })).toContain(ptBR.events.analyst_objection_removed);
+      // Sem o cadastro (não carregou), a tela não presume que a objeção saiu, e também não mostra a key.
+      const unread = render([{ id: "1", kind: "analyst_read", payload: read }], { list: undefined });
+      expect(unread).toContain(ptBR.events.analyst_objection_unread);
+      expect(unread).not.toMatch(/\bpreco\b/);
+    });
+
+    it("no motor sem orientação, a explicação aparece uma vez por chamada, e cada objeção fica numa linha curta", () => {
+      const analystsTwo = [{ ...analysts[0]!, objections: [...analysts[0]!.objections, { key: "prazo", label: "Prazo", guidance: "Diga o prazo de entrega." }] }];
+      const unsupported = (id: string, objection: string) => ({ id, kind: "analyst_guidance", payload: { analystId: "an-1", agentId: "ag-1", objection, outcome: "engine_unsupported" } });
+      const html = render([unsupported("1", "preco"), unsupported("2", "prazo"), unsupported("3", "preco")], { list: analystsTwo });
+      expect(html.split(ptBR.events.analyst_guidance.engineUnsupportedWhy)).toHaveLength(2);
+      expect(html.split("Objeção reconhecida: Preço, não entregue.")).toHaveLength(3);
+      expect(html).toContain("Objeção reconhecida: Prazo, não entregue.");
+    });
+
+    it("a objeção abaixo do corte também usa o rótulo; fora da lista, diz isso", () => {
+      const html = render([
+        { id: "1", kind: "analyst_read", payload: { ...read, objection: { key: "preco", confidence: 0.6 } } },
+        { id: "2", kind: "analyst_read", payload: { ...read, objection: { key: null, confidence: 0.9 } } },
+      ]);
+      expect(html).toContain("Objeção possível: Preço, com confiança 60%");
+      expect(html).toContain(ptBR.events.analyst_read.objectionOutside);
+    });
+  });
 });

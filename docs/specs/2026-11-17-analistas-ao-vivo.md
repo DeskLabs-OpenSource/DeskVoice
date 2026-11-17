@@ -65,8 +65,8 @@ consentimento"):
   diz que o fornecedor não declara onde processa e nunca presume um país.
 - **A retenção é lida antes.** A tela só oferece o Jev ao analista depois de a política de retenção
   da TypeSafe estar lida e registrada no guia, como na fatia 7 da R12. Se a página não disser o
-  prazo, o pedido volta ao Rafael. Esse pedido é a **DESA-75**, ainda aberta, e o analista espera a
-  **mesma resposta** que a tela do filtro.
+  prazo, o pedido volta ao Rafael. Esse pedido é a **DESA-75**, respondida pelo Rafael em 17/11, às
+  10:55Z, com a opção A ("Sobre Jev, sem problemas"). A mesma resposta vale para o analista.
 - **A chave é o portão.** Nenhum PR grava `decision_model.*.api_key` pelo painel antes da resposta
   do Rafael na DESA-75. Sem a chave, nada vai à TypeSafe, mesmo com o analista salvo pela API com a
   confirmação.
@@ -201,7 +201,7 @@ Segue o molde do filtro (`openFilter` e `readCallerSpeech`):
 
 | Tipo | Campos | Nunca leva |
 |---|---|---|
-| `analyst_read` | `analystId`, `agentId`, `model`, `latencyMs`, `onTime`, `temperature` (`{ score, confidence }` ou nulo), `objection` (`{ key, confidence }` ou nulo), `failure`, `status` | texto de quem ligou |
+| `analyst_read` | `analystId`, `agentId`, `model`, `latencyMs`, `onTime`, `temperature` (`{ score, confidence }` ou nulo), `objection` (`{ key, confidence }` ou nulo; `key` é nula quando o modelo escolheu uma opção fora da lista do operador), `failure`, `status` | texto de quem ligou |
 | `analyst_guidance` | `analystId`, `agentId`, `objection` (key), `outcome`: `delivered`, `stale` ou `engine_unsupported` | texto de quem ligou |
 | `analyst_guidance_leaked` | `analystId`, `agentId`, `objection` | a fala do agente (já está no `transcript_agent`) |
 

@@ -18,7 +18,7 @@ import { Badge, Button, EmptyState, Field, Notice, Panel, Select, Skeleton, butt
 import { useLive, useNow } from "../../../../ui/live";
 import { Timeline } from "../../../../ui/timeline";
 import { Amount } from "../../costs/amount-view";
-import type { Agent, CallDetail, CallEvent, CallStatus, Engine } from "../../../../ui/types";
+import type { Agent, Analyst, CallDetail, CallEvent, CallStatus, Engine } from "../../../../ui/types";
 
 type Phase = "idle" | "starting" | "live" | "ended";
 const LAST_AGENT = "dv_talk_agent";
@@ -46,6 +46,8 @@ export default function TalkPage() {
   const now = useNow();
   const agents = useApi<Agent[]>("/agents");
   const engines = useApi<Engine[]>("/engines");
+  // O rótulo e a orientação das objeções na linha do tempo vêm do cadastro atual dos analistas.
+  const analysts = useApi<Analyst[]>("/analysts");
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [agentId, setAgentId] = useState("");
@@ -141,7 +143,7 @@ export default function TalkPage() {
     <section className="grid gap-4">
       <h2 className="text-[1.07rem] font-bold">{t.transcript}</h2>
       {events.data?.length === 0 && phase !== "ended" ? <p className="text-muted">{t.transcriptWaiting}</p> : null}
-      {events.data ? <Timeline events={events.data} live={phase === "live"} agentName={agent?.name ?? ""} /> : <Skeleton lines={2} />}
+      {events.data && (analysts.data || analysts.error) ? <Timeline events={events.data} live={phase === "live"} agentName={agent?.name ?? ""} analysts={analysts.data} /> : <Skeleton lines={2} />}
     </section>
   ) : null;
 

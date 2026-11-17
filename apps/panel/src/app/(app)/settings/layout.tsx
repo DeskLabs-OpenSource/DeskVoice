@@ -9,8 +9,11 @@ import brainsEs from "../../../i18n/es/brains";
 import es from "../../../i18n/es/settings";
 import brainsPtBR from "../../../i18n/pt-BR/brains";
 import ptBR from "../../../i18n/pt-BR/settings";
+import analystsEn from "../../../i18n/en/analysts";
 import speechFilterEn from "../../../i18n/en/speech-filter";
+import analystsEs from "../../../i18n/es/analysts";
 import speechFilterEs from "../../../i18n/es/speech-filter";
+import analystsPtBR from "../../../i18n/pt-BR/analysts";
 import speechFilterPtBR from "../../../i18n/pt-BR/speech-filter";
 import { useDict } from "../../../i18n/provider";
 import { ReadOnlyNotice } from "../../../ui/errors";
@@ -21,6 +24,7 @@ const SECTIONS = [
   { href: "/settings", key: "ai" },
   { href: "/settings/brains", key: "brains" },
   { href: "/settings/speech-filter", key: "speechFilter" },
+  { href: "/settings/analysts", key: "analysts" },
   { href: "/settings/calls", key: "calls" },
   { href: "/settings/whatsapp", key: "whatsapp" },
   { href: "/settings/integrations", key: "integrations" },
@@ -36,7 +40,8 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
   // O nome da seção de cérebros mora no dicionário dela, junto com a tela.
   const brains = useDict(brainsPtBR, brainsEn, brainsEs);
   const speechFilter = useDict(speechFilterPtBR, speechFilterEn, speechFilterEs);
-  const sectionLabel = (key: (typeof SECTIONS)[number]["key"]): string => (key === "brains" ? brains.menu : key === "speechFilter" ? speechFilter.menu : t.sections[key]);
+  const analysts = useDict(analystsPtBR, analystsEn, analystsEs);
+  const sectionLabel = (key: (typeof SECTIONS)[number]["key"]): string => (key === "brains" ? brains.menu : key === "speechFilter" ? speechFilter.menu : key === "analysts" ? analysts.menu : t.sections[key]);
   const pathname = usePathname();
   const nav = useRef<HTMLElement>(null);
   // No celular a seção aberta pode estar fora da faixa visível (Sua conta é a última): traz para a vista.

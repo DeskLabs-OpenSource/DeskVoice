@@ -2,6 +2,9 @@ const timeline = {
   back: "Chamadas",
   live: "Ao vivo",
   liveHint: "A linha do tempo atualiza sozinha enquanto a chamada acontece.",
+  /** O selo do detalhe da chamada: a última temperatura lida a tempo pelo analista. */
+  temperatureBadge: "Temperatura {score} de 5",
+  temperatureBadgeHint: "A última temperatura que o analista leu nesta ligação, de 1 (fria: quer encerrar ou não tem interesse) a 5 (quente: quer seguir adiante).",
   facts: { agent: "Agente", engine: "Motor de voz", duration: "Duração", cost: "Custo estimado", ceiling: "teto de {value}", byAgent: "Por agente:", deletedAgent: "Agente apagado", started: "Início", direction: "Sentido" },
   direction: { inbound: "Recebida", outbound: "Feita pelo agente" },
   outcomeTitle: "O que ficou desta ligação",
@@ -260,8 +263,17 @@ const timeline = {
     analyst_guidance: {
       delivered: "O agente recebeu a orientação do analista para a objeção {objection}.",
       stale: "A orientação para a objeção {objection} foi descartada: quem ligou já tinha falado de novo.",
-      engine_unsupported: "O analista reconheceu a objeção {objection}, mas este motor de voz ainda não recebe orientação. O analista mede, mas não orienta.",
+      /** Uma linha por objeção; a explicação do motor (`engineUnsupportedWhy`) aparece uma vez por chamada. */
+      engine_unsupported: "Objeção reconhecida: {objection}, não entregue.",
+      engineUnsupportedWhy: "Este motor de voz ainda não recebe orientação: o analista mede, mas não orienta.",
+      /** `{guidance}` é o texto do cadastro de hoje, não o da hora da ligação (desenho R6, seção 3.5). */
+      current: "Orientação no cadastro atual: “{guidance}”",
+      currentNote: "A linha do tempo mostra a orientação do cadastro atual. Se ela foi editada depois desta ligação, aparece aqui o texto novo.",
     },
+    /** No lugar do rótulo, quando a objeção (ou o analista) saiu do cadastro depois da ligação. */
+    analyst_objection_removed: "uma objeção que não está mais no cadastro",
+    /** Sem o cadastro (não carregou): a tela não mostra a chave crua. */
+    analyst_objection_unread: "uma objeção (o cadastro dos analistas não pôde ser lido)",
     analyst_guidance_leaked: "A fala do agente repetiu trechos da orientação para a objeção {objection}. A orientação não deveria ser dita a quem ligou.",
     caller_unanswered: {
       turn_closed: "Quem ligou ficou {seconds} s sem resposta, talvez por barulho na linha. O agente foi chamado a responder ao que ouviu.",

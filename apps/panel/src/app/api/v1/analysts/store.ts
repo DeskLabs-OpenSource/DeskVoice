@@ -4,8 +4,10 @@ import { z } from "zod";
 import { ApiError, type Session } from "../../../../server/context";
 import { listDecisionModels } from "../../../../server/pieces";
 
+/** Com o nome de hoje de quem confirmou (a tela o mostra); o recibo no Registro guarda o nome do momento. */
 export const ANALYST_COLUMNS = `id, name, decision_model as "decisionModel", temperature, objections,
   provider_confirmed_by as "providerConfirmedBy", provider_confirmed_at as "providerConfirmedAt",
+  (select u.name from users u where u.id = provider_confirmed_by) as "providerConfirmedByName",
   created_at as "createdAt", updated_at as "updatedAt"`;
 
 export interface AnalystRow {

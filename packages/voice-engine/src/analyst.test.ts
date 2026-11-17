@@ -24,6 +24,15 @@ describe("analystState", () => {
     expect(state.endsWith("\nPessoa: achei caro demais")).toBe(true);
   });
 
+  it("o limite exato: 1 500 caracteres passam inteiros, 1 501 perdem o primeiro (P21b)", () => {
+    // "Pessoa: " tem 8 caracteres.
+    const exact = analystState([{ speaker: "user", text: "a".repeat(ANALYST_STATE_MAX - 8) }]);
+    expect(exact).toBe(`Pessoa: ${"a".repeat(ANALYST_STATE_MAX - 8)}`);
+    const over = analystState([{ speaker: "user", text: "a".repeat(ANALYST_STATE_MAX - 7) }]);
+    expect(over).toHaveLength(ANALYST_STATE_MAX);
+    expect(over).toBe(`essoa: ${"a".repeat(ANALYST_STATE_MAX - 7)}`);
+  });
+
   it("o corte não deixa meio emoji no começo", () => {
     const state = analystState([{ speaker: "user", text: "😀".repeat(1000) }]);
     expect(state.length).toBeLessThanOrEqual(ANALYST_STATE_MAX);
