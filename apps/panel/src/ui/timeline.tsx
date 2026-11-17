@@ -458,6 +458,12 @@ export function Timeline({
           icon: ListChecks,
           body: <Quiet>{fill(e.memory_loaded, { notes: Array.isArray(p.noteIds) ? p.noteIds.length : 0, followUps: Array.isArray(p.followUpIds) ? p.followUpIds.length : 0, chars: typeof p.chars === "number" ? p.chars : 0 })}</Quiet>,
         };
+      case "drop_follow_up": {
+        // Só campos fixos: o caso e o que foi feito, ou o que teria sido feito na simulada.
+        const what = p.case === "engine_failed" ? e.drop_follow_up.engine_failed : e.drop_follow_up.call_dropped;
+        const done = p.simulated === true ? e.drop_follow_up.simulated : e.drop_follow_up.task_opened;
+        return { ...base, tone: "accent", icon: PhoneX, body: <Quiet><span className="font-bold text-ink">{what}</span> {done}</Quiet> };
+      }
       default:
         return { ...base, tone: "neutral", body: <Quiet>{e.unknown} <span className="data">{event.kind}</span></Quiet> };
     }

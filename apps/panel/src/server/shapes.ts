@@ -35,7 +35,7 @@ const optionalText = (max: number) =>
 export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions, greeting, engine, voice_id as "voiceId", language, tools,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
   follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment",
-  agent_handoff_targets as "agentHandoffTargets", created_at as "createdAt", updated_at as "updatedAt"`;
+  agent_handoff_targets as "agentHandoffTargets", drop_follow_up as "dropFollowUp", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -56,6 +56,9 @@ const agentFields = z.object({
   vocabulary,
   // Ambiente de quem liga: `noisy` ajusta a detecção de fala do provedor para ruído de fundo.
   listeningEnvironment: z.enum(["normal", "noisy"]),
+  // O que acontece quando a ligação cai (desenho do follow-up da ligação que caiu, seção 3.2). O banco
+  // aceita os quatro modos, mas só `off` e `task` têm caminho nesta fatia: os outros são recusados aqui.
+  dropFollowUp: z.enum(["off", "task"]),
   // Para quem o agente pode passar a ligação (`transfer_to_agent`). A rota confere que cada um é
   // outro agente desta organização (`requireHandoffTargets`); vazia, a ferramenta não aparece.
   agentHandoffTargets: z
@@ -82,6 +85,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   vocabulary: [],
   listeningEnvironment: "normal",
   agentHandoffTargets: [],
+  dropFollowUp: "off",
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",

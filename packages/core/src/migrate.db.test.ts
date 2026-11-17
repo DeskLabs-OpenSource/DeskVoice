@@ -203,6 +203,21 @@ describe("runMigrations", () => {
     await expect(db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Alto', 'simulated', 'loud')", [org])).rejects.toThrow(/listening_environment/);
     await expect(db.pool.query("insert into agents (organization_id, name, engine, listening_environment) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/listening_environment/);
   });
+  it("o agente que já existe fica com o follow-up da queda desligado, o novo sem a coluna também, e o modo só aceita os quatro valores", async () => {
+    const DROP = "20261116T222817_drop_follow_up.sql";
+    for (const name of await readdir(REAL_MIGRATIONS)) if (name < DROP) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));
+    await runMigrations(db, dir);
+    const org = (await db.pool.query<{ id: string }>("insert into organizations (name) values ('A') returning id")).rows[0]?.id;
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Antes', 'simulated')", [org]);
+    await copyFile(path.join(REAL_MIGRATIONS, DROP), path.join(dir, DROP));
+    expect(await runMigrations(db, dir)).toEqual([DROP]);
+    await db.pool.query("insert into agents (organization_id, name, engine) values ($1, 'Depois', 'simulated')", [org]);
+    for (const mode of ["task", "whatsapp", "call_back"]) await db.pool.query("insert into agents (organization_id, name, engine, drop_follow_up) values ($1, $2, 'simulated', $2)", [org, mode]);
+    const rows = (await db.pool.query<{ name: string; drop_follow_up: string }>("select name, drop_follow_up from agents")).rows;
+    expect(Object.fromEntries(rows.map((row) => [row.name, row.drop_follow_up]))).toEqual({ Antes: "off", Depois: "off", task: "task", whatsapp: "whatsapp", call_back: "call_back" });
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, drop_follow_up) values ($1, 'Outro', 'simulated', 'sms')", [org])).rejects.toThrow(/drop_follow_up/);
+    await expect(db.pool.query("insert into agents (organization_id, name, engine, drop_follow_up) values ($1, 'Nulo', 'simulated', null)", [org])).rejects.toThrow(/drop_follow_up/);
+  });
   it("os destinos de passagem que já apontavam para agente apagado saem da lista, na ordem de antes, em toda organização", async () => {
     const CLEANUP = "20261116T032848_apagar_agente_tira_destino.sql";
     for (const name of await readdir(REAL_MIGRATIONS)) if (name < CLEANUP) await copyFile(path.join(REAL_MIGRATIONS, name), path.join(dir, name));

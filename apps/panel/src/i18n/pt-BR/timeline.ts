@@ -239,6 +239,12 @@ const timeline = {
       asked_to_repeat: "O agente seguia calado {seconds} s depois da última fala de quem ligou e pediu para a pessoa repetir.",
     },
     memory_loaded: "O agente recebeu a memória do número: {notes} notas e {followUps} pendências, {chars} caracteres.",
+    drop_follow_up: {
+      engine_failed: "A ligação caiu porque o sistema falhou.",
+      call_dropped: "A ligação caiu no meio da conversa.",
+      task_opened: "Foi aberta uma pendência para alguém retornar.",
+      simulated: "Ligação simulada: nada foi aberto. Numa ligação de verdade, seria aberta uma pendência para alguém retornar.",
+    },
     unknown: "Evento",
   },
   reasons: {

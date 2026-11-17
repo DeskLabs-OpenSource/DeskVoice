@@ -125,6 +125,31 @@ describe("agents", () => {
     const back = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { listeningEnvironment: "normal" } });
     expect([back.status, back.data]).toMatchObject([200, { listeningEnvironment: "normal" }]);
   });
+
+  it("keeps what happens when the call drops: off when absent, task when chosen, and refuses the modes this slice has no path for", async () => {
+    const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Queda", engine: "simulated" } });
+    expect(created.data).toMatchObject({ dropFollowUp: "off" });
+    const id = (created.data as { id: string }).id;
+    expect(await stored("select drop_follow_up from agents where id = $1", [id])).toEqual({ drop_follow_up: "off" });
+
+    const task = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { dropFollowUp: "task" } });
+    expect([task.status, task.data]).toMatchObject([200, { dropFollowUp: "task" }]);
+    expect(await stored("select drop_follow_up from agents where id = $1", [id])).toEqual({ drop_follow_up: "task" });
+    // Mudar outro campo não mexe no modo.
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ dropFollowUp: "task" });
+
+    // WhatsApp e religação só têm caminho nas fatias 2 a 4: a rota recusa, mesmo que o banco aceite.
+    for (const dropFollowUp of ["whatsapp", "call_back", "TASK", "", null, 1]) {
+      const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { dropFollowUp } });
+      expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", expect.stringMatching(/dropFollowUp/)]);
+    }
+    const refusedOnCreate = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Z", engine: "simulated", dropFollowUp: "call_back" } });
+    expect([refusedOnCreate.status, refusedOnCreate.code]).toEqual([400, "validation_error"]);
+    expect(await stored("select drop_follow_up from agents where id = $1", [id])).toEqual({ drop_follow_up: "task" });
+
+    const back = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { dropFollowUp: "off" } });
+    expect([back.status, back.data]).toMatchObject([200, { dropFollowUp: "off" }]);
+  });
 });
 
 describe("secrets", () => {
