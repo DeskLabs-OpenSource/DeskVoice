@@ -110,6 +110,12 @@ alter table usage_ledger add column source text;  -- 'analyst' nas linhas do ana
 - `provider_confirmed_by` e `provider_confirmed_at` gravam a confirmação da seção 2.1. A rota os
   preenche com quem salvou e a hora, e recusa um `decision_model` que processa fora do servidor sem
   a confirmação. Trocar o modelo por outro que também processa fora pede a confirmação de novo.
+- Cada confirmação grava, **na mesma transação** do salvamento, o recibo `analyst_provider_confirmed`
+  em `organization_events` (só de acréscimo), com o ator e
+  `{ analystId, analystName, decisionModel, provider, confirmedByName }`, o nome da pessoa no
+  momento. É a prova de quem confirmou quando `provider_confirmed_by` vira nulo porque a pessoa saiu
+  da equipe (`on delete set null`, como todo `*_by`). O recibo aparece no Registro da privacidade,
+  como a mudança do prazo de guarda, e não guarda e-mail nem texto de ligação.
 - `usage_ledger.source` existe porque o filtro e o analista podem usar o mesmo modelo (`jev`). Sem a
   coluna, o extrato não distinguiria um do outro, e o custo do analista "não apareceria".
 

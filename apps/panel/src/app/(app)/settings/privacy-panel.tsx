@@ -123,6 +123,13 @@ function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
     }
     case "caller_memory_changed":
       return fill(t.history.caller_memory_changed, { who, state: p.to === true ? t.memoryStates.on : t.memoryStates.off });
+    case "analyst_provider_confirmed":
+      // O nome de quem confirmou vem do recibo, gravado no momento: a pessoa pode ter saído da equipe.
+      return fill(t.history.analyst_provider_confirmed, {
+        who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
+        analyst: typeof p.analystName === "string" ? p.analystName : "",
+        provider: typeof p.provider === "string" ? p.provider : "",
+      });
   }
 }
 
