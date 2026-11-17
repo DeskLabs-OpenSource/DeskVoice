@@ -26,6 +26,7 @@ export const PEOPLE_QUERIES_ALLOWLIST: PeopleQueryException[] = [
   { file: "apps/panel/src/app/api/v1/team/route.ts", query: "left join users u on u.id = i.created_by", reason: "mostra o nome de quem criou o convite" },
   { file: "apps/panel/src/app/api/v1/team/users/[id]/route.ts", query: "delete from users where id = $1", reason: "remove pelo id que `loadMember` já achou entre os `member`" },
   { file: "apps/panel/src/app/api/v1/team/users/[id]/route.ts", query: "select account_id as \"accountId\" from users where id = $1", reason: "a conta de quem faz o pedido, pelo id da sessão" },
+  { file: "apps/panel/src/app/api/v1/whatsapp/test/route.ts", query: "select whatsapp_e164 as whatsapp from users where id = $1", reason: "o WhatsApp da própria pessoa da sessão, para a mensagem de teste" },
   { file: "apps/panel/src/server/context.ts", query: "insert into sessions", reason: "cria a sessão do vínculo que o login já escolheu" },
   { file: "apps/panel/src/server/context.ts", query: "from sessions s join users u on u.id = s.user_id", reason: "acha a pessoa da sessão pelo hash do token" },
   { file: "apps/panel/src/server/follow-ups.ts", query: "left join users o on o.id = f.owner_user_id left join users c on c.id = f.closed_by", reason: "mostra o nome do responsável e de quem fechou" },

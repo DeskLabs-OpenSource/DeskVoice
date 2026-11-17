@@ -4,13 +4,15 @@
 //   `kind = 'member'` faria quem dá suporte receber resumo, virar responsável ou contar como dono.
 // revisar em: 2027-05-17
 import { describe, it, expect } from "vitest";
-import { REPO_ROOT, expectClean, fixture, isSource, isTest, listFiles, read } from "./_lib";
+import { REPO_ROOT, expectClean, fixture, isSource, listFiles, read } from "./_lib";
 import { PEOPLE_QUERIES_ALLOWLIST, type PeopleQueryException } from "./people-queries-allowlist";
 
 // `accounts.ts` é a porta das contas: ela cria e lê vínculos de qualquer `kind` de propósito.
 const EXEMPT = new Set(["packages/core/src/accounts.ts"]);
-// Auxiliares de teste montam organizações inteiras: ficam fora, como os próprios testes.
-const isTestSupport = (file: string): boolean => isTest(file) || /(^|\/)testing\//.test(file);
+// Os testes e os auxiliares de teste (a pasta `test/` na raiz do pacote e as pastas `testing/`)
+// montam organizações inteiras: ficam fora. Só a raiz do pacote: `isTest` pularia também uma rota
+// como `api/v1/whatsapp/test/route.ts`.
+const isTestSupport = (file: string): boolean => /\.test\.tsx?$/.test(file) || /^(apps|packages)\/[^/]+\/test\//.test(file) || /(^|\/)testing\//.test(file);
 
 // Palavras que, logo depois de `users`, não são apelido da tabela.
 const NOT_ALIAS = new Set([
@@ -159,12 +161,14 @@ describe("people-queries-filter-kind", () => {
       "apps/panel/src/app/api/v1/leak/route.ts: lê `users` sem `kind = 'member'`: select c.id from users c join users m on m.organization_id = c.organization_id where m.kind = 'member'",
       "apps/panel/src/app/api/v1/leak/route.ts: lê `users` sem `kind = 'member'`: select id from users where disabled_at is null",
       "apps/panel/src/app/api/v1/leak/route.ts: lê `users` sem `kind = 'member'`: select name from users where id in (select actor_id from call_events where kind = 'follow_up_created')",
+      "apps/panel/src/app/api/v1/whatsapp/test/route.ts: lê `users` sem `kind = 'member'`: select whatsapp_e164 from users where role = 'owner'",
       "packages/tools/src/leak.ts: lê `users` sem `kind = 'member'`: select whatsapp_e164 from users where organization_id = $1",
     ]);
     expect(check(root, [{ ...listed, reason: "nome" }, { file: "apps/voice/src/gone.ts", query: "from users", reason: "arquivo que já não existe mais" }])).toEqual([
       "apps/panel/src/app/api/v1/leak/route.ts: lê `users` sem `kind = 'member'`: select c.id from users c join users m on m.organization_id = c.organization_id where m.kind = 'member'",
       "apps/panel/src/app/api/v1/leak/route.ts: lê `users` sem `kind = 'member'`: select id from users where disabled_at is null",
       "apps/panel/src/app/api/v1/leak/route.ts: lê `users` sem `kind = 'member'`: select name from users where id in (select actor_id from call_events where kind = 'follow_up_created')",
+      "apps/panel/src/app/api/v1/whatsapp/test/route.ts: lê `users` sem `kind = 'member'`: select whatsapp_e164 from users where role = 'owner'",
       "apps/panel/src/server/names.ts: o motivo da exceção \"select u.name from users u where u.id = $1\" é curto demais",
       "apps/voice/src/gone.ts: a exceção \"from users\" não acha mais consulta sem filtro (remova a linha)",
       "packages/tools/src/leak.ts: lê `users` sem `kind = 'member'`: select whatsapp_e164 from users where organization_id = $1",
