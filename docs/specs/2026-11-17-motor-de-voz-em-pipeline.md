@@ -288,7 +288,17 @@ O dado que vai para a ElevenLabs (seção 9.1) entra nesta fatia:
   `docs/guides/voz.md` (três idiomas), **antes da entrega** desta fatia. Se a página não disser quanto
   tempo o texto fica guardado, o guia e o aviso dizem isso, e o pedido volta ao Rafael antes de a tela
   oferecer a ElevenLabs;
-- apagar a chave apaga a confirmação. Uma chave nova pede confirmação nova.
+- cada confirmação nova grava também o **recibo** `synthesizer_provider_confirmed` em
+  `organization_events`, na mesma transação, no molde do `analyst_provider_confirmed` (#386):
+  `actor_user_id` de quem confirmou e payload `{ synthesizerId, provider, confirmedByName }`, com o
+  nome gravado no momento. O tipo entra em `ORG_EVENT_KINDS` (`packages/core`), sem migration, e a
+  linha aparece no histórico de Privacidade, nos três idiomas. O recibo é só de acréscimo: a
+  `settings` diz se a chave de hoje está confirmada, e o recibo guarda quem confirmou e quando,
+  mesmo depois de a pessoa sair da equipe ou de a chave ser apagada. (Ajustado em 17/11 pela
+  revisão do #390.) Teste: confirmar grava um recibo, com o nome e sem e-mail; testar de novo a
+  mesma chave não grava outro; apagar a chave apaga a confirmação da `settings` e deixa o recibo; a
+  gravação recusada por falta de confirmação (422) não grava recibo;
+- apagar a chave apaga a confirmação. Uma chave nova pede confirmação nova, com recibo novo.
 Sobra da 1a (achado do Verificador 2 no #393): um teste em `synthesizers/elevenlabs.test.ts` prova
 que o fechamento 1000 depois do `end()`, sem `isFinal`, termina em `done`, e não em `error`.
 
@@ -466,8 +476,8 @@ opção A do pedido 6.2, e vale enquanto ele não for respondido:
 
 - **A confirmação nomeia o fornecedor e diz o que vai:** "O texto que o agente fala na ligação vai
   para a ElevenLabs. Ele pode repetir o que a pessoa disse, como nome, endereço e telefone." Quem
-  confirmou e quando ficam gravados (fatia 1b). A transcrição usa a mesma forma: "O áudio da pessoa
-  na ligação vai para <fornecedor>."
+  confirmou e quando ficam gravados, com recibo em `organization_events` (fatia 1b). A transcrição
+  usa a mesma forma: "O áudio da pessoa na ligação vai para <fornecedor>."
 - **O país só aparece com fonte**, com endereço e data da página do fornecedor. A ElevenLabs entra
   com `processingLocation: undeclared`, e a tela diz que ela não declara onde processa.
 - **A retenção é lida antes:** no guia `docs/guides/voz.md`, antes da entrega da fatia 1b. Sem prazo
