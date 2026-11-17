@@ -24,9 +24,11 @@
  * Uma resposta de erro HTTP (fora de 2xx: 401, 429, 529, 400, 422) é recusa do pedido e fica sem
  * custo, como antes; essa escolha não está medida na página do fornecedor.
  *
- * Onde o texto é processado: nenhuma das páginas lidas em 16/11/2026 diz o país (o acordo de
- * tratamento de dados, typesafe.ai/legal/data-processing, fala em transferência internacional sem
- * nomear o lugar). Por isso `undeclared`, e a tela diz isso, até alguém achar a fonte.
+ * Onde o texto é processado: a política de privacidade, https://typesafe.ai/legal/privacy-policy
+ * ("Last updated Nov 19, 2025", lida em 16/11/2026 e de novo em 17/11/2026), diz em *International
+ * Visitors* que o serviço é hospedado nos Estados Unidos ("The Services are hosted in the United
+ * States"). Por isso `US`, com a página e a data como fonte (desenho R12, fatia 7b). Antes dessa
+ * leitura era `undeclared`: nenhuma página de documentação diz o país.
  *
  * A chave nunca sai em erro, resultado ou log: o resultado é só o vocabulário fechado e o status.
  */
@@ -99,7 +101,8 @@ const jev: DecisionModel = {
   id: "jev",
   label: "Jev (TypeSafe)",
   provider: "typesafe",
-  processingLocation: { kind: "undeclared" },
+  // Fonte: a seção "International Visitors" da política, lida em 16/11/2026 (ver o cabeçalho).
+  processingLocation: { kind: "country", country: "US", source: { url: "https://typesafe.ai/legal/privacy-policy", checkedOn: "2026-11-16" } },
   pricing: JEV_PRICING,
 
   async decide(apiKey: string, input: DecideInput, options = {}): Promise<DecideResult> {

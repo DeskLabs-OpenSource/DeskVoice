@@ -390,16 +390,30 @@ describe("6. o custo aparece e conta no teto", { timeout: 120_000 }, () => {
     /** O Jev de verdade, com o `fetch` do teste no lugar da rede. */
     function jevWith(reply: "hang" | "network" | { status: number; body: unknown }) {
       const sent: Array<{ state: string; questions: Record<string, unknown> }> = [];
+      const auths: Array<string | null> = [];
       const fetch = (async (_url: string, init: RequestInit) => {
         sent.push(JSON.parse(String(init.body)) as { state: string; questions: Record<string, unknown> });
+        auths.push(new Headers(init.headers).get("authorization"));
         // O "sem rede" é o `fetch` que lança; nunca uma resposta 529 (nota do desenho de 17/11).
         if (reply === "network") throw new TypeError("fetch failed");
         if (reply === "hang") return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
         return new Response(JSON.stringify(reply.body), { status: reply.status });
       }) as unknown as typeof globalThis.fetch;
       const model: DecisionModel = { ...jev, decide: (apiKey, input, options) => jev.decide(apiKey, input, { ...options, fetch }) };
-      return { model, sent };
+      return { model, sent, auths };
     }
+
+    it("a chave que vai ao Jev é a gravada, decifrada, no authorization (P26)", async () => {
+      const fake = jevWith("network");
+      const made = await scene("analyst-jev-key", { models: [fake.model], analyst: { decisionModel: "jev" } });
+      await putSetting(app, made.organizationId, decisionModelKeySetting("jev"), encryptSecret(JEV_KEY, secretKey));
+      const session = await talk(made, "achei caro demais");
+      await reads(made.callId, 1);
+      made.transport.callerHangup();
+      await session.done;
+      expect(fake.auths).toEqual([`Bearer ${JEV_KEY}`]);
+      expect(JSON.stringify(made.harness.logs)).not.toContain(JEV_KEY);
+    });
 
     // Uma fala longa de três bytes por caractere enche o `state` (1 500 caracteres, 4 500 bytes): cada
     // estimativa fica perto de 0,02 centavo, e o teto de 1 centavo cai depois de umas 25 falas.
@@ -466,6 +480,26 @@ describe("6. o custo aparece e conta no teto", { timeout: 120_000 }, () => {
   });
 });
 
+describe("as falas que o analista lê", { timeout: 120_000 }, () => {
+  it("o state leva só as 6 últimas falas da ligação, de quem ligou e do agente (ANALYST_TURNS_KEPT, P21c)", async () => {
+    const decider = scripted();
+    const made = await scene("analyst-turns-kept", { models: [decider.model] });
+    const session = made.start();
+    await answered(made.callId);
+    for (let turn = 1; turn <= 4; turn += 1) {
+      made.manual.emit("transcript", { speaker: "agent", text: `agente ${turn}` });
+      made.manual.emit("transcript", { speaker: "user", text: `pessoa ${turn}` });
+      await reads(made.callId, turn);
+    }
+    made.transport.callerHangup();
+    await session.done;
+    expect(decider.inputs).toHaveLength(4);
+    expect(decider.inputs[1]?.state).toBe(["Agente: agente 1", "Pessoa: pessoa 1", "Agente: agente 2", "Pessoa: pessoa 2"].join("\n"));
+    // Oito falas na ligação: o pedido da última leva as seis mais novas, e as duas primeiras ficam de fora.
+    expect(decider.inputs[3]?.state).toBe(["Agente: agente 2", "Pessoa: pessoa 2", "Agente: agente 3", "Pessoa: pessoa 3", "Agente: agente 4", "Pessoa: pessoa 4"].join("\n"));
+  });
+});
+
 describe("7. velha e repetida", { timeout: 120_000 }, () => {
   it("a resposta que chega depois de outra fala de quem ligou vira stale; a última fala é perguntada de novo", async () => {
     const decider = scripted((input) => ({ answers: objectionAnswer("preco", 0.95), ...(lastCallerText(input) === "achei caro" && { delayMs: 500 }) }));
@@ -521,6 +555,26 @@ describe("o fim da chamada", { timeout: 120_000 }, () => {
   });
 });
 
+describe("a fala em espera quando a chamada acaba", { timeout: 120_000 }, () => {
+  it("não vira pergunta nem custo: só o pedido que já estava em voo conta (P28)", async () => {
+    const decider = priced(10_000, () => ({ answers: objectionAnswer("preco", 0.95), delayMs: 500 }));
+    const made = await scene("analyst-pending-at-end", { models: [decider.model] });
+    const session = await talk(made, "achei caro");
+    await waitFor(async () => made.harness.timers.held().includes(500), "the reading in flight");
+    // Fala nova com o pedido em voo: fica marcada para perguntar ao terminar. A chamada acaba antes.
+    made.manual.emit("transcript", { speaker: "user", text: "muito caro mesmo" });
+    await waitFor(async () => (await kindsOf(app, made.callId)).filter((kind) => kind === "transcript_user").length === 2, "the second caller turn");
+    made.transport.callerHangup();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    made.harness.timers.fire(500);
+    await session.done;
+    expect(decider.inputs.map(lastCallerText)).toEqual(["achei caro"]);
+    expect(await readsOf(made.callId)).toHaveLength(1);
+    expect((await ledgerOf(made.callId)).filter((row) => row.source === "analyst")).toHaveLength(1);
+    expect(made.manual.guides).toEqual([]);
+  });
+});
+
 describe("8. motor sem guide", { timeout: 120_000 }, () => {
   it("a objeção vira analyst_guidance (engine_unsupported), e a ligação segue", async () => {
     const decider = scripted(() => ({ answers: objectionAnswer("preco", 0.95) }));
@@ -539,7 +593,7 @@ describe("8. motor sem guide", { timeout: 120_000 }, () => {
 });
 
 describe("9. a passagem entre agentes", { timeout: 120_000 }, () => {
-  async function handoffScene(label: string, secondAnalyst: "none" | "other") {
+  async function handoffScene(label: string, secondAnalyst: "none" | "other" | "same") {
     const decider = scripted((input) => ({ answers: objectionAnswer(JSON.stringify(input.questions).includes("prazo") && lastCallerText(input).includes("prazo") ? "prazo" : "preco", 0.95) }));
     const first = guidedManual({ id: "first" });
     const second = guidedManual({ id: "second" });
@@ -549,7 +603,7 @@ describe("9. a passagem entre agentes", { timeout: 120_000 }, () => {
     await setHandoffTargets(app, reception, [sales]);
     const receptionAnalyst = await createAnalyst(organizationId, { objections: [PRECO] });
     await attach(reception, receptionAnalyst);
-    const salesAnalyst = secondAnalyst === "other" ? await createAnalyst(organizationId, { objections: [PRAZO] }) : null;
+    const salesAnalyst = secondAnalyst === "other" ? await createAnalyst(organizationId, { objections: [PRAZO] }) : secondAnalyst === "same" ? receptionAnalyst : null;
     if (salesAnalyst) await attach(sales, salesAnalyst);
     await harness?.approvals.close();
     harness = await sessionHarness(app, [first.engine, second.engine]);
@@ -565,6 +619,20 @@ describe("9. a passagem entre agentes", { timeout: 120_000 }, () => {
     second.emit("transcript", { speaker: "user", text: "e o prazo de entrega?" });
     return { decider, first, second, callId, transport, session, reception, sales, receptionAnalyst, salesAnalyst };
   }
+
+  it("a mesma objeção em dois trechos sai duas vezes, uma por trecho (P14)", async () => {
+    const made = await handoffScene("analyst-handoff-same", "same");
+    await reads(made.callId, 2);
+    await waitFor(async () => (await guidanceOf(made.callId)).length === 2, "the second guidance");
+    made.transport.callerHangup();
+    await made.session.done;
+    expect((await guidanceOf(made.callId)).map((payload) => [payload.agentId, payload.objection, payload.outcome])).toEqual([
+      [made.reception, "preco", "delivered"],
+      [made.sales, "preco", "delivered"],
+    ]);
+    expect(made.first.guides).toEqual([wrapGuidance(PRECO.guidance)]);
+    expect(made.second.guides).toEqual([wrapGuidance(PRECO.guidance)]);
+  });
 
   it("o trecho novo sem analista não pergunta nada", async () => {
     const made = await handoffScene("analyst-handoff-none", "none");

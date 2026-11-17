@@ -288,8 +288,10 @@ describe("o Jev na chamada", { timeout: 120_000 }, () => {
   /** `readUntilLate`: a resposta chega, e o corpo só termina de ser lido depois que o prazo vence. */
   function jevWith(reply: { status: number; body?: unknown; readUntilLate?: true } | "hang" | "network") {
     const sent: unknown[] = [];
+    const auths: Array<string | null> = [];
     const fetch = (async (_url: string, init: RequestInit) => {
       sent.push(JSON.parse(String(init.body)));
+      auths.push(new Headers(init.headers).get("authorization"));
       if (reply === "network") throw new TypeError("fetch failed");
       if (reply === "hang") return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
       const response = new Response(JSON.stringify(reply.body), { status: reply.status });
@@ -297,14 +299,14 @@ describe("o Jev na chamada", { timeout: 120_000 }, () => {
       return response;
     }) as unknown as typeof globalThis.fetch;
     const model: DecisionModel = { ...jev, decide: (apiKey, input, options) => jev.decide(apiKey, input, { ...options, fetch }) };
-    return { model, sent };
+    return { model, sent, auths };
   }
 
   async function jevScene(label: string, reply: Parameters<typeof jevWith>[0], key: string | null = JEV_KEY) {
     const fake = jevWith(reply);
     const made = await scene(label, { models: [fake.model], setting: "jev" });
     if (key !== null) await putSetting(app, made.organizationId, decisionModelKeySetting("jev"), encryptSecret(key, secretKey));
-    return { ...made, sent: fake.sent };
+    return { ...made, sent: fake.sent, auths: fake.auths };
   }
 
   const okBody = {
@@ -327,6 +329,8 @@ describe("o Jev na chamada", { timeout: 120_000 }, () => {
     // Milésimos de centavo: o total arredondado da ligação é o da voz.
     expect(outcome.costCents).toBe(10);
     expect(JSON.stringify(made.harness.logs)).not.toContain(JEV_KEY);
+    // A chave que vai ao Jev é a gravada, decifrada (herdado do parecer da fatia 3 da R6, P26).
+    expect(made.auths).toEqual([`Bearer ${JEV_KEY}`]);
   });
 
   it("fora do ar: a chamada segue, e a linha do tempo diz unreachable", async () => {

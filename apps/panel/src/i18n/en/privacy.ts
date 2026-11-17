@@ -90,7 +90,7 @@ const privacy: PrivacyDictionary = {
   forgetConfirmYes: "Forget {phone}",
   forgetDone: "{phone} was forgotten. Agent notes deleted: {notes}. Closed follow-ups deleted: {followUps}.",
   historyTitle: "Record",
-  historyLead: "Who changed the period or the recording, what was removed by it, who exported the data of which phone, who erased data at a caller's request, what happened to the recording links for callers, and who confirmed that an analyst sends the call text to a provider. The 50 most recent.",
+  historyLead: "Who changed the period or the recording, what was removed by it, who exported the data of which phone, who erased data at a caller's request, what happened to the recording links for callers, and who confirmed that an analyst or the speech filter sends the call text to a provider. The 50 most recent.",
   historyEmpty: "Nothing recorded yet.",
   history: {
     transcript_retention_changed: "{who} changed the retention period from {from} to {to}.",
@@ -106,6 +106,7 @@ const privacy: PrivacyDictionary = {
     caller_notes_retention_changed: "{who} changed the memory period from {from} to {to}.",
     caller_memory_changed: "{who} turned the caller memory for the agent {state}.",
     analyst_provider_confirmed: "{who} confirmed that the analyst {analyst} sends the text of what the caller says to {provider}.",
+    decision_model_provider_confirmed: "{who} confirmed that the speech filter sends the call's text to {provider}.",
     organization_created: "The installation administration created this organization, named \"{name}\".",
     organization_renamed: "The installation administration renamed this organization from \"{from}\" to \"{to}\".",
     caller_notes_deleted: "{who} forgot the number ending in {suffix}. Agent notes deleted: {notes}. Closed follow-ups deleted: {followUps}.",

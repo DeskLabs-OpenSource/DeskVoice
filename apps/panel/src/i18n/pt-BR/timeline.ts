@@ -2,6 +2,9 @@ const timeline = {
   back: "Chamadas",
   live: "Ao vivo",
   liveHint: "A linha do tempo atualiza sozinha enquanto a chamada acontece.",
+  /** O selo do detalhe da chamada: a última temperatura lida a tempo pelo analista. */
+  temperatureBadge: "Temperatura {score} de 5",
+  temperatureBadgeHint: "A última temperatura que o analista leu nesta ligação, de 1 (fria: quer encerrar ou não tem interesse) a 5 (quente: quer seguir adiante).",
   facts: { agent: "Agente", engine: "Motor de voz", duration: "Duração", cost: "Custo estimado", ceiling: "teto de {value}", byAgent: "Por agente:", deletedAgent: "Agente apagado", started: "Início", direction: "Sentido" },
   direction: { inbound: "Recebida", outbound: "Feita pelo agente" },
   outcomeTitle: "O que ficou desta ligação",
@@ -260,8 +263,17 @@ const timeline = {
     analyst_guidance: {
       delivered: "O agente recebeu a orientação do analista para a objeção {objection}.",
       stale: "A orientação para a objeção {objection} foi descartada: quem ligou já tinha falado de novo.",
-      engine_unsupported: "O analista reconheceu a objeção {objection}, mas este motor de voz ainda não recebe orientação. O analista mede, mas não orienta.",
+      /** Uma linha por objeção; a explicação do motor (`engineUnsupportedWhy`) aparece uma vez por chamada. */
+      engine_unsupported: "Objeção reconhecida: {objection}, não entregue.",
+      engineUnsupportedWhy: "Este motor de voz ainda não recebe orientação: o analista mede, mas não orienta.",
+      /** `{guidance}` é o texto do cadastro de hoje, não o da hora da ligação (desenho R6, seção 3.5). */
+      current: "Orientação no cadastro atual: “{guidance}”",
+      currentNote: "A linha do tempo mostra a orientação do cadastro atual. Se ela foi editada depois desta ligação, aparece aqui o texto novo.",
     },
+    /** No lugar do rótulo, quando a objeção (ou o analista) saiu do cadastro depois da ligação. */
+    analyst_objection_removed: "uma objeção que não está mais no cadastro",
+    /** Sem o cadastro (não carregou): a tela não mostra a chave crua. */
+    analyst_objection_unread: "uma objeção (o cadastro dos analistas não pôde ser lido)",
     analyst_guidance_leaked: "A fala do agente repetiu trechos da orientação para a objeção {objection}. A orientação não deveria ser dita a quem ligou.",
     caller_unanswered: {
       turn_closed: "Quem ligou ficou {seconds} s sem resposta, talvez por barulho na linha. O agente foi chamado a responder ao que ouviu.",
@@ -289,6 +301,29 @@ const timeline = {
     drop_follow_up_result: {
       whatsapp_sent: "A mensagem no WhatsApp para quem ligou saiu.",
       whatsapp_failed: "A mensagem no WhatsApp para quem ligou não saiu.",
+    },
+    // O filtro da fala (R12): ele só marca e sugere. O texto ouvido fica intacto ao lado.
+    speech_marks: {
+      background: "Pode ser fala de fundo (confiança {confidence})",
+      suggestion: "Leitura provável: {term} (confiança {confidence})",
+      note: "Sugestão do filtro de fala. O texto acima é o que foi ouvido, sem mudança.",
+    },
+    caller_speech_read: {
+      finished: "Observação do filtro de fala, depois do turno: a pessoa tinha terminado o pensamento (confiança {confidence}). Não mudou nada na ligação.",
+      late: "O filtro de fala não respondeu no prazo de 1 s para esta fala. Não mudou nada na ligação.",
+      failed: "O filtro de fala não leu esta fala ({reason}). A ligação seguiu sem ele.",
+      reasons: {
+        model_not_installed: "o modelo escolhido não existe nesta versão",
+        key_missing: "falta a chave do modelo, em Configurações → Filtro de fala",
+        key_unreadable: "a chave salva não pôde ser lida; salve a chave de novo em Configurações → Filtro de fala",
+        rejected: "o fornecedor recusou a chave",
+        model_unavailable: "o modelo não está disponível nesta conta",
+        no_credit: "a conta do fornecedor está sem crédito",
+        region_unavailable: "o fornecedor não atende a região deste servidor",
+        rate_limited: "o fornecedor pediu para esperar",
+        unreachable: "o fornecedor não foi alcançado",
+        unexpected_response: "o fornecedor respondeu fora do esperado",
+      },
     },
     unknown: "Evento",
   },

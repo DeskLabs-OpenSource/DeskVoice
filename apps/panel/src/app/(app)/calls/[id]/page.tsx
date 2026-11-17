@@ -17,13 +17,14 @@ import { formatCaller, formatDateTime, formatDuration, formatMoney, secondsBetwe
 import { Badge, Button, Notice, Skeleton, TextInput, type Tone } from "../../../../ui/kit";
 import { useLive, useNow } from "../../../../ui/live";
 import { useCanConfigure } from "../../../../ui/me";
+import { lastTemperature } from "../../../../ui/temperature";
 import { Timeline } from "../../../../ui/timeline";
 import { transcribeAlsoClassifies } from "../../../../ui/transcription";
 import { Amount } from "../../costs/amount-view";
 import { AnalysisSection } from "./analysis-section";
 import { CallerHistorySection } from "./caller-history-section";
 import { ShareSection } from "./share-section";
-import type { CallDetail, CallerHistory, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
+import type { Analyst, CallDetail, CallerHistory, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
 
@@ -37,6 +38,8 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   const call = useApi<CallDetail>(`/calls/${id}`);
   const events = useApi<CallEvent[]>(`/calls/${id}/events`);
   const engines = useApi<Engine[]>("/engines");
+  // O rótulo e a orientação das objeções na linha do tempo vêm do cadastro atual dos analistas.
+  const analysts = useApi<Analyst[]>("/analysts");
   const followUps = useApi<FollowUpList>(`/follow-ups?callId=${id}`);
   const callerHistory = useApi<CallerHistory>(`/calls/${id}/caller-history`);
   const transcription = useApi<Setting<boolean>>("/settings/calls.transcription_enabled");
@@ -74,6 +77,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   // Transcrever reenfileira o resumo, e o resumo, com o desfecho ou a análise ligados, enfileira a
   // classificação paga: a tela avisa ao lado do botão antes do clique, não só no extrato depois.
   const classificationWarning = transcribeAlsoClassifies({ outcome: outcomeEnabled.data?.value === true, analysis: analysisEnabled.data?.value === true });
+  const temperature = events.data ? lastTemperature(events.data) : null;
   const seconds = secondsBetween(data.answeredAt ?? data.startedAt, data.endedAt ?? now);
   const facts: Array<[string, ReactNode, boolean]> = [
     [t.facts.agent, data.agentName ?? common.noAgent, false],
@@ -94,6 +98,13 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
           <Badge tone={STATUS_TONE[data.status]} live={live}>
             {common.callStatus[data.status]}
           </Badge>
+          {temperature ? (
+            <span title={t.temperatureBadgeHint}>
+              <Badge tone={temperature.score >= 4 ? "ok" : temperature.score <= 2 ? "warn" : "neutral"}>
+                {fill(t.temperatureBadge, { score: temperature.score.toLocaleString(locale, { maximumFractionDigits: 1 }) })}
+              </Badge>
+            </span>
+          ) : null}
           <span className="text-muted">{t.direction[data.direction]}{data.channel === "phone" ? "" : ` · ${common.channel[data.channel]}`}</span>
         </div>
         {/* Métricas em linha, separadas por fio: sem grade de cartões. */}
@@ -179,7 +190,12 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
       )}
 
       {events.error && !events.data ? <Notice tone="fail">{errorText(events.error)}</Notice> : null}
-      {events.data ? <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} followUps={followUps.data?.items} people={followUps.data?.people} /> : <Skeleton lines={4} />}
+      {/* Espera o cadastro dos analistas (ou a falha dele): sem isso, o rótulo da objeção piscaria como "fora do cadastro". */}
+      {events.data && (analysts.data || analysts.error) ? (
+        <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} followUps={followUps.data?.items} people={followUps.data?.people} analysts={analysts.data} />
+      ) : (
+        <Skeleton lines={4} />
+      )}
     </>
   );
 }
