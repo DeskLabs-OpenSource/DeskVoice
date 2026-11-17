@@ -69,8 +69,8 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
   endereço **para de receber** até alguém incluir o endereço na tela. Por isso o fragmento da fatia
   2 é `operator_action`, com o `## Requer atenção` dizendo onde ver e o que incluir. Ninguém edita
   arquivo, e ninguém precisa de SSH. **Isso fere a restrição do dono** ("quem já tem operadora não
-  perde a linha"), como mostrou a sessão revisora no #343. A saída está no contrato 11, pendente
-  da escolha do dono.
+  perde a linha"), como mostrou a sessão revisora no #343. A saída está no contrato 11 (opção 1,
+  escolhida pelo dono em 17/11).
 
 ## 3. Contrato
 
@@ -135,11 +135,11 @@ já gera a partir das linhas (`applyTrunks`, em `apps/voice/src/trunks.ts`), e n
    uma queda do DNS de mais de 24 h, a primeira resposta boa vence tudo o que é antigo de uma vez,
    e num DNS de rodízio o `permit` encolhe para esse pedaço até as próximas respostas (observação
    do Verificador; aceito, porque o caso é raro e a tela mostra o conjunto).
-11. **Quem já tem operadora não perde a linha na atualização.** **Pendente da escolha do dono**
-   (pedido de decisão da R14, opção 1 recomendada). A sessão revisora mostrou que, com o filtro
-   ligando sozinho na atualização, a linha por registro cuja operadora entrega por outro servidor
-   é cortada, e o `operator_action` avisa do corte mas não o evita. **Se a escolha for a opção 1,
-   o contrato é este** (não implementar antes da resposta):
+11. **Quem já tem operadora não perde a linha na atualização.** **Decidido: opção 1**
+   (o dono seguiu a recomendação em 17/11; pedido de decisão da R14). A sessão revisora mostrou
+   que, com o filtro ligando sozinho na atualização, a linha por registro cuja operadora entrega
+   por outro servidor é cortada, e o `operator_action` avisa do corte mas não o evita. O contrato
+   é este:
    - Coluna nova `trunks.inbound_filter boolean not null default true`, na mesma migration de
      `inbound_from_name` (ainda não mesclada). A migration grava `false` nas linhas por registro
      que já existem; as linhas por IP ficam `true`. A linha por registro criada depois da
