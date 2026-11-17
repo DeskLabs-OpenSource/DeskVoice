@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
+import ptBR from "../../../../i18n/pt-BR/speech-filter";
+import { noticeOf } from "../speech-filter/notice";
 import { objectionKeyFor } from "./objection-key";
 import { GUIDED_ENGINES, needsConfirmation, offeredModels, type DecisionModelView } from "./rules";
 
 const jev: DecisionModelView = { id: "jev", label: "Jev", provider: "typesafe", processingLocation: { kind: "undeclared" }, keyless: false, key: { configured: true } };
+// O Jev como a rota o devolve desde o #395: país com fonte.
+const jevUS: DecisionModelView = {
+  ...jev,
+  processingLocation: { kind: "country", country: "US", source: { url: "https://typesafe.ai/legal/privacy-policy", checkedOn: "2026-11-16" } },
+};
 const local: DecisionModelView = { id: "local", label: "Local", provider: "local", processingLocation: { kind: "this-server" }, keyless: true, key: { configured: false } };
 
 describe("a tela de analistas", () => {
@@ -20,6 +27,17 @@ describe("a tela de analistas", () => {
     expect(needsConfirmation(jev, { decisionModel: "jev", providerConfirmedAt: null })).toBe(true);
     expect(needsConfirmation(jev, { decisionModel: "jev", providerConfirmedAt: at })).toBe(false);
     expect(needsConfirmation(local, null)).toBe(false);
+  });
+
+  it("o Jev de hoje (US, com fonte) pede a confirmação, e o país aparece junto com a fonte", () => {
+    expect(needsConfirmation(jevUS, null)).toBe(true);
+    expect(needsConfirmation(jevUS, { decisionModel: "jev", providerConfirmedAt: null })).toBe(true);
+    expect(needsConfirmation(jevUS, { decisionModel: "jev", providerConfirmedAt: "2026-11-17T11:00:00.000Z" })).toBe(false);
+    const withCountry = noticeOf(ptBR, jevUS, "pt-BR");
+    expect(withCountry.lines).toContain("O serviço da TypeSafe é hospedado nos Estados Unidos.");
+    expect(withCountry.sources.map((source) => source.url)).toContain("https://typesafe.ai/legal/privacy-policy");
+    const withoutSource = noticeOf(ptBR, jev, "pt-BR");
+    expect(withoutSource.lines.join(" ")).not.toMatch(/estados unidos/i);
   });
 
   it("o Gemini Live não recebe orientação; o OpenAI Realtime e o simulado recebem", () => {

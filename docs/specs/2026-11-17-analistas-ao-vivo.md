@@ -290,14 +290,13 @@ Arquiteto. Todas são da trilha A.
   agente (padrão "Nenhum"); a tela de Custos separando "Analista" das outras linhas pelo
   `source`; o selo de temperatura no detalhe da chamada; os dicionários nos 3 idiomas;
   `.changes/analistas-na-tela.md`.
-- **Depende da DESA-75.** A tela do filtro (fatia 7 da R12, #198) ainda **não existe** na `main`:
-  está parada na mesma decisão. A fatia 4 só oferece o Jev ao analista depois da resposta do Rafael
-  à DESA-75. Hoje o único modelo instalado fora do simulado é o Jev, então a fatia 4 não começa
-  antes dessa resposta.
+- **A DESA-75 foi respondida** pelo Rafael em 17/11 (opção A). A tela do filtro, que grava a chave
+  do modelo de decisão e mostra o aviso do fornecedor, é o #395 (fatia 7b da R12). A fatia 4 só lê
+  se a chave existe e reaproveita esse aviso.
 - **Aceite:** o operador liga o analista sem SSH; com um modelo que processa fora do servidor, a
   tela pede a confirmação que nomeia o fornecedor (seção 2.1) e mostra quem confirmou e quando; sem
-  a confirmação, não salva; a tela diz onde o modelo processa o texto (`processingLocation`, hoje
-  `undeclared` para o Jev) e não nomeia país sem fonte, com as mesmas regras da tela do filtro; o
+  a confirmação, não salva; a tela diz onde o modelo processa o texto (`processingLocation`: para o Jev,
+  `US`, com fonte, desde o #395) e não nomeia país sem fonte, com as mesmas regras da tela do filtro; o
   agente com motor Gemini mostra "este motor ainda não recebe orientação: o analista mede, mas não orienta"; a tela
   diz que a linha do tempo mostra a orientação do cadastro atual.
 
