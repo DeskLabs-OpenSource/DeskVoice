@@ -1,6 +1,8 @@
 # Catálogo de cérebros: provedores e modelos de texto atuais, escolhidos na tela
 
-- **Estado:** desenho. Nenhum código de produto foi escrito.
+- **Estado:** entregue, na `main`. Fatia 1 no #336, fatia 2 no #346, fatia 3 no #350, fatia 4a no
+  #354, fatia 4b no #358 e o acompanhamento da tela de Custos no #368. O texto abaixo é o desenho
+  como foi escrito antes do código, com as correções feitas durante as fatias.
 - **Data:** 2026-11-16
 - **Quem pediu:** o dono, no roteiro de novembro (item R4): "Adicionar modelos de IA pro cérebro de
   resposta do agente (os mesmos que tem no Deskcomm): Gemini, Anthropic, OpenAI, DeepSeek,
@@ -140,6 +142,9 @@ Descoberta: `loadBrains(dir?)` em `packages/voice-engine/src/brain-load.ts` (**n
 `loadEngines`: arquivo cujo `default` não é um `Brain` falha alto; id repetido falha alto.
 
 ### 3.2 Os provedores (fatias 1 e 2)
+
+> **Não medido no desenho.** Os endereços e cabeçalhos desta tabela foram escritos antes do código.
+> O que vale é o bloco de fontes, com URL e data, no topo de cada arquivo de `brains/`.
 
 | Arquivo | Listar modelos | Pedido em JSON | De onde vem o preço |
 |---|---|---|---|
@@ -420,6 +425,9 @@ A licença e a frequência de atualização do models.dev; quantos preços dele 
 provedor.
 
 ## 8. Não medido
+
+> **Não medido no desenho.** Esta lista é de quando o desenho foi escrito, antes do código. O que
+> cada fatia deixou de medir está no PR dela e na DESA-12.
 
 - Os endereços, cabeçalhos e formas de resposta da seção 3.2 vêm da referência em `9dea1ee`, não da
   documentação de cada provedor nesta data. O Desenvolvedor confere e escreve a fonte e a data.
