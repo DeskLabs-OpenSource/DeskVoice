@@ -66,7 +66,8 @@ test("a mesma pessoa em duas organizações: aceita o segundo convite com a senh
   // O primeiro convite cria a conta, com a senha nova. Com um vínculo só, não há seletor.
   await page.goto(pathOf(firstLink));
   await expect(page.getByRole("heading", { level: 1, name: invite.title })).toBeVisible();
-  await page.getByLabel(invite.password, { exact: true }).fill(password);
+  // O nome acessível do campo com dica inclui a dica, por isso o nome inteiro.
+  await page.getByRole("textbox", { name: `${invite.password} ${invite.passwordHint}`, exact: true }).fill(password);
   await page.getByLabel(invite.repeat, { exact: true }).fill(password);
   let listed = organizationsListed(page);
   await page.getByRole("button", { name: invite.submit, exact: true }).click();
@@ -78,7 +79,7 @@ test("a mesma pessoa em duas organizações: aceita o segundo convite com a senh
   await page.goto(pathOf(secondLink));
   await expect(page.getByText(fill(invite.existingLead, { email, organization: second }), { exact: true })).toBeVisible();
   await expect(page.getByLabel(invite.repeat, { exact: true })).toHaveCount(0);
-  await page.getByLabel(invite.existingPassword, { exact: true }).fill(password);
+  await page.getByRole("textbox", { name: `${invite.existingPassword} ${invite.existingHint}`, exact: true }).fill(password);
   listed = organizationsListed(page);
   await page.getByRole("button", { name: invite.existingSubmit, exact: true }).click();
   await expect(page).toHaveURL(/\/calls$/);
