@@ -176,8 +176,11 @@ da 0.1.0, que não passa a vez, só na atualização seguinte para outra versão
 A imagem guardada não basta para voltar de uma versão que mudou o banco de um jeito que a
 anterior não lê. É o caso da 0.28.0: depois de atualizar para ela, voltar para uma versão
 anterior com `update.sh --to` deixa o painel sem login. A volta é trocar a versão e restaurar o
-backup de antes da atualização (`bash install/restore.sh backups/<o backup de antes>`), e o que
-entrou depois de atualizar se perde.
+backup feito na ida para a 0.28.0, que é o mais recente com a versão de antes no manifesto
+(`grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1`). Não serve o
+`restore.sh latest`, nem o backup que o próprio `update.sh --to` faz e mostra no fim: esse já tem
+o banco da 0.28.0. O backup da ida só fica enquanto a rotação o mantiver (os 14 mais recentes), e
+o que entrou depois de atualizar se perde. O passo a passo está na nota da 0.28.0.
 
 A 0.1.0 é de antes desse mecanismo: quem atualiza a partir dela roda `bash install/update.sh`
 **uma segunda vez** depois de atualizar. Não há o que atualizar; é o atualizador novo gerando o
