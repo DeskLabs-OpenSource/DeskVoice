@@ -3,6 +3,19 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.33.0] - 2026-11-17
+
+### Adicionado
+
+- **A organização suspensa deixa de atender, de ligar e de rodar a fila** Nada muda numa instalação em funcionamento: nenhuma organização está suspensa, e nenhuma tela suspende ainda (o botão vem numa versão seguinte). Quando uma organização estiver suspensa, a ligação que chegar a um número dela, pela operadora ou pelo WhatsApp, é atendida e ouve "Este número está temporariamente indisponível. Por favor, tente mais tarde.", no idioma do agente do número (português, inglês ou espanhol), e desliga. Nenhum motor de voz é aberto, então não há custo, e a fala não diz o motivo. A chamada aparece como recusada, com a frase "A organização estava suspensa." na linha do tempo. A chamada pelo navegador, a simulada e a ligação de saída são recusadas. As tarefas agendadas dela ficam na fila sem rodar, e nada é cancelado. As linhas continuam registradas na central, e as outras organizações da instalação seguem normais. Crédito: @melgarafael.
+- **Nomes e termos na tela do agente, como dica de reconhecimento ao provedor de voz** A tela do agente ganha o campo "Nomes e termos": nomes de pessoas, da empresa, de produtos e termos
+  que quem liga costuma dizer, um por linha, com o contador "N de 50". A lista vai ao provedor de voz
+  como dica para reconhecer essas palavras na transcrição, e o provedor pode não seguir a dica. A
+  regra é a mesma da API (até 50 termos de até 60 caracteres, sem linha em branco, sem repetição e sem
+  `<`, `>` ou caractere de controle), e o erro aparece ao lado do campo, sem salvar. Quem não
+  preencher não vê diferença: o agente continua sem vocabulário.
+  Crédito: @melgarafael.
+
 ## [0.32.0] - 2026-11-17
 
 ### Adicionado
