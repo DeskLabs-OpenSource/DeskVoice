@@ -88,6 +88,29 @@ describe("elevenlabs (contrato com servidor falso)", () => {
     expect(seen.usage.map((u) => u.characters)).toEqual([9]);
   });
 
+  it("fechamento 1000 depois do end, sem nenhum isFinal, termina em done e não em error", async () => {
+    const { speech, seen, fake: server } = await openSpeech();
+    speech.push("Até logo.", { flush: true });
+    speech.end();
+    await server.waitFor(text(""));
+    // Áudio sem isFinal; depois o provedor fecha normalmente. Nenhuma mensagem leva isFinal.
+    server.send({ audio: Buffer.from([1, 0]).toString("base64") });
+    await until(() => seen.audio.length === 1);
+    server.refuse(1000, "");
+    await until(() => seen.done === 1);
+    expect(seen.errors).toEqual([]);
+    expect(seen.audio).toEqual([Buffer.from([1, 0])]);
+  });
+
+  it("fechamento 1000 sem end antes continua sendo error, sem done", async () => {
+    const { speech, seen, fake: server } = await openSpeech();
+    speech.push("Oi");
+    server.refuse(1000, "");
+    await until(() => seen.errors.length === 1);
+    expect(seen.errors[0]?.message).toMatch(/caiu antes do fim \(código 1000/);
+    expect(seen.done).toBe(0);
+  });
+
   it("custo: caracteres × preço do modelo, sempre estimado; Flash a 4 ¢ e multilingual a 8 ¢ por mil", async () => {
     const flash = await openSpeech();
     flash.speech.push("Bom dia");
