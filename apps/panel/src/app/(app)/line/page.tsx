@@ -66,12 +66,12 @@ function AllowedAddresses({ trunk, t, onSaved }: { trunk: Trunk; t: LineDictiona
     <div className="grid gap-1.5 rounded-sm bg-sunken p-4">
       <p>
         <span className="font-bold">{t.allowed}:</span>{" "}
-        {allowed.length > 0 ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{unfiltered ? t.allowedEmpty : t.allowedNone}</span>}
+        {allowed.length > 0 ? <span className="data">{allowed.join(", ")}</span> : <span className="text-muted">{switchedOff ? t.allowedAny : unfiltered ? t.allowedEmpty : t.allowedNone}</span>}
       </p>
       {allowed.length > 0 && !switchedOff ? <p className="text-[0.87rem]">{t.allowedOthers}</p> : null}
       {name !== null && trunk.inboundResolvedAt ? <p className="text-[0.87rem] text-muted">{fill(t.allowedResolvedAt, { name, when: formatDateTime(trunk.inboundResolvedAt, locale) })}</p> : null}
       <p className="text-[0.87rem] text-muted">{t.allowedHint}</p>
-      {switchedOff ? <p className="text-[0.87rem] font-bold">{t.filterSwitchedOff}</p> : null}
+      {switchedOff ? <p className="text-[0.87rem] font-bold">{allowed.length > 0 ? t.filterSwitchedOff : t.filterSwitchedOffEmpty}</p> : null}
       {byRegistration && canConfigure ? (
         <div className="flex flex-wrap items-center gap-3">
           <Button busy={toggle.busy} variant={switchedOff ? "primary" : undefined} onClick={() => setFilter(switchedOff)}>
