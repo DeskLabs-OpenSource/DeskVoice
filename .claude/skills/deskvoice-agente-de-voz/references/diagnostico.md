@@ -108,19 +108,16 @@ ambiente, ferramentas ligadas, número de transferência, para quem ele pode pas
 duração máxima e teto de custo. As **Instruções** e a **Saudação** ela copia da tela, para a
 revisão (SKILL.md, Passo 2).
 
-O vocabulário **não aparece na tela** (o campo vem no PR #290, em rascunho). Para ver a lista
-atual, a pessoa abre, logada no painel, o endereço `<painel>/api/v1/agents/<id>`: a resposta é
-`{"ok": true, "data": {...}}`, e a lista está em `data.vocabulary`. A resposta traz também as
-instruções e o número de transferência: ela copia só o que for pedido.
+O **vocabulário** fica na mesma tela, no campo **Nomes e termos**, um termo por linha, com o
+contador "N de 50". A pessoa copia a lista atual dali.
 
-## 5. O vocabulário, até a tela existir
+## 5. O vocabulário
 
-**Hoje, sem tela e sem troca pela skill.** O campo na tela do agente ainda não existe (PR #290,
-rascunho). Até o #290 entrar, o vocabulário **não se troca pela skill**: você não ensina a pessoa a
-trocar a lista por outro caminho, e não entrega código para ela rodar no console do navegador. Um
-trecho colado no console de uma sessão de dono ou administrador faz tudo o que essa sessão faz,
-inclusive apagar agentes; é o roteiro do golpe que os navegadores tentam barrar, e uma skill
-oficial não torna esse gesto normal. Se o #290 entrar, use a tela e deixe esta seção de lado.
+**Onde se troca.** Na tela do agente, no campo **Nomes e termos**, e só ali. Você não ensina a
+pessoa a trocar a lista por outro caminho, e não entrega código para ela rodar no console do
+navegador. Um trecho colado no console de uma sessão de dono ou administrador faz tudo o que essa
+sessão faz, inclusive apagar agentes; é o roteiro do golpe que os navegadores tentam barrar, e uma
+skill oficial não torna esse gesto normal.
 
 **O que ele faz.** É a lista de nomes e termos que o agente deve esperar ouvir, escritos como se
 escrevem ("Clínica Bem Viver", "Dra. Taís Quirino"). O DeskVoice leva a lista a dois lugares: a
@@ -132,19 +129,19 @@ quando o provedor tem um (cabeçalho de cada motor em `packages/voice-engine/src
 que o nome vai ser ouvido certo, e não ensina pronúncia: como dizer um nome difícil vai nas
 instruções, por extenso.
 
-**As regras** (`checkVocabulary`, em `packages/core/src/vocabulary.ts`), as mesmas que a tela vai
-usar, para a lista já nascer válida: até 50 termos; até 60 caracteres cada; sem quebra de linha,
+**As regras** (`checkVocabulary`, em `packages/core/src/vocabulary.ts`), as mesmas que a tela
+usa, para a lista já nascer válida: até 50 termos; até 60 caracteres cada; sem quebra de linha,
 caractere de controle, `<` ou `>`; sem termo repetido (maiúscula e minúscula contam como o mesmo);
 espaço nas pontas é aparado.
 
-**O que fazer agora**, quando o diagnóstico aponta o vocabulário:
+**O que fazer**, quando o diagnóstico aponta o vocabulário:
 
 1. Monte com a pessoa a lista nova **inteira** (a lista da tela vai substituir a atual, não somar),
    e mostre a lista atual (seção 4) e a nova, com o porquê de cada termo, como no Passo 2 da skill.
-2. Com o sim dela para aquela lista, entregue um registro para ela guardar: o agente, a data, a
-   lista atual, a lista nova e o sim. É o que ela aplica quando a tela existir, e o "antes" para
-   voltar.
-3. O que já tem tela segue: **como dizer** o nome difícil vai nas instruções, por extenso, com o
+2. Com o sim dela para aquela lista, ela troca no campo **Nomes e termos** e salva. Se a tela
+   recusar, o motivo e a linha aparecem ao lado do campo: ajuste com ela e mostre de novo. Guarde
+   a lista atual: é o "antes" para voltar, e a hora em que ela salvou é a régua do Passo 4.
+3. Junto, se for o caso: **como dizer** o nome difícil vai nas instruções, por extenso, com o
    mesmo antes e depois e o mesmo sim (antipadrão "Lista de nomes difíceis no meio das instruções",
    em [`anatomia-e-antipadroes.md`](anatomia-e-antipadroes.md)).
 
