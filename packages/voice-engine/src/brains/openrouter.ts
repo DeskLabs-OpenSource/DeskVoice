@@ -1,6 +1,6 @@
 /**
- * Cérebro OpenRouter: os modelos de texto que a chave alcança, com o preço da própria lista, e um
- * pedido com saída em JSON.
+ * Cérebro OpenRouter: os modelos de texto que a chave alcança, com o preço da própria lista, um
+ * pedido com saída em JSON e a conversa em streaming, com ferramentas (`chat`, R5 fatia 2).
  *
  * Documentação oficial consultada em 2026-11-16:
  *   - https://openrouter.ai/docs/api-reference/api-keys/get-current-key  (`GET /api/v1/key`,
@@ -16,6 +16,13 @@
  *   - https://openrouter.ai/docs/api-reference/chat-completion  (`POST /api/v1/chat/completions`,
  *     `response_format: { type: "json_schema", json_schema: { name, schema } }`, `choices[].message.content`,
  *     `usage.prompt_tokens`, `completion_tokens` e `prompt_tokens_details.cached_tokens`)
+ *   - a mesma página de `chat-completion`, conferida em 2026-11-17, para `chat`: `stream_options.include_usage`
+ *     está lá, mas marcado "Deprecated: This field has no effect. Full usage details are always included."
+ *     Por isso `chat` **não** o manda: não muda nada, e campo obsoleto pode virar recusa.
+ *   - https://openrouter.ai/docs/api-reference/streaming  (conferida em 2026-11-17: comentários SSE como
+ *     `: OPENROUTER PROCESSING`, a ignorar; o consumo vem num pedaço extra antes do `[DONE]`, que repete o
+ *     `finish_reason`; erro depois do 200 vem no topo do pedaço, com `finish_reason: "error"`; cancelar é
+ *     abortar a conexão, e só alguns provedores param de cobrar)
  *   - https://openrouter.ai/docs/api-reference/errors  (400 parâmetro, 401 chave inválida ou desativada,
  *     402 sem crédito, 403 moderação ou guarda, 408 prazo, 429 limite, 502 e 503 modelo ou provedor fora;
  *     erro no meio da geração pode vir com 200 e `error` no corpo)
@@ -34,7 +41,7 @@
  */
 import { z } from "zod";
 import type { Brain, BrainFailure, BrainModel, BrainPrice } from "../brain";
-import { LIST_TIMEOUT_MS, brainFailureByStatus, chatCompletionJson, parseEach, requestJson } from "../brain-http";
+import { LIST_TIMEOUT_MS, brainFailureByStatus, chatCompletionJson, chatStream, chatUsageOf, parseEach, requestJson } from "../brain-http";
 
 const API_URL = "https://openrouter.ai/api/v1";
 const MODELS_URL = `${API_URL}/models`;
@@ -156,6 +163,15 @@ const brain: Brain = {
 
   completeJson(apiKey, request, options) {
     return chatCompletionJson(`${API_URL}/chat/completions`, apiKey, request, { fetch: options.fetch, failureOf: completionFailureOf });
+  },
+
+  chat(apiKey, request, options) {
+    return chatStream(`${API_URL}/chat/completions`, apiKey, request, {
+      fetch: options.fetch,
+      failureOf: completionFailureOf,
+      includeUsage: false,
+      usageOf: chatUsageOf,
+    });
   },
 };
 

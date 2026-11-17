@@ -3,6 +3,13 @@
 > Desenho do Arquiteto, 17/11/2026. Roteiro de novembro, item R5 (DESA-13). Depende da R4 (catálogo de
 > cérebros, concluída) e da R12 (transcrição pura, em andamento). A R3 (vocabulário) já está na `main`
 > no campo `VoiceSessionConfig.vocabulary`.
+>
+> **Estado (17/11, documento vivo):** fatia 1a (a voz atrás de uma interface, #393) e fatia 1b (a
+> chave e as vozes na tela, #412) na `main`. Fatia 2 (`Brain.chat` em streaming) no #419,
+> com um ajuste ao contrato da seção 3.2 (o consumo nunca fica sem número). A latência do cérebro na
+> 3.5 segue **não medida**: a bancada existe, e faltaram as chaves. Fatia 2b (`Brain.chat` na
+> Anthropic, com o transporte do streaming separado do formato de cada API) no #423; a 2c
+> (Gemini) não começou. Fatias 3 a 6 não começaram.
 
 ## 1. O problema
 
@@ -112,8 +119,8 @@ export interface BrainChatEvents {
   text(delta: string): void;
   /** O modelo pediu uma ferramenta. `args` é texto: quem executa valida com zod (convenção 16). */
   toolCall(call: { id: string; name: string; args: string }): void;
-  /** Consumo do pedido, quando o provedor declara. Sem ele, o custo é estimado pela entrada enviada. */
-  usage(usage: Usage): void;
+  /** Consumo do pedido: exatamente um por pedido que saiu. `estimated` diz se o provedor declarou. */
+  usage(usage: Usage, estimated: boolean): void;
   done(): void;
   error(failure: BrainFailure, status: number | null): void;
 }
@@ -128,9 +135,26 @@ export interface BrainChat {
 chat?(apiKey: string, request: { model: string; messages: BrainChatMessage[]; tools: ToolSpec[]; timeoutMs: number }, options: { fetch?: typeof fetch }): BrainChat;
 ```
 
+**O consumo nunca fica sem número (ajuste da fatia 2, DESA-113).** Todo pedido que saiu emite
+**exatamente um** `usage` antes do fim (`done`, `error`, ou depois do `cancel`). Quando o provedor
+declarou o consumo no último pedaço, vai `estimated: false`. Quando não declarou (corte, prazo,
+`cancel`, provedor que não manda), vai `estimated: true`, pela regra do Jev (`deciders/jev.ts`): a
+entrada é um token por byte UTF-8 de `messages` + `tools` enviados, e a saída, um por byte do texto, do
+raciocínio e dos `args` já recebidos. A resposta de erro HTTP (fora de 2xx) é recusa e vem com
+`usage({}, false)`, como no Jev. Esse `{}` com `false` só vale custo zero quando o fim é `error` com
+status fora de 2xx; em qualquer outro fim (`done`, `cancel`, ou `error` com status 200 ou `null`), é
+**custo não medido**, nunca zero (no #423: a escrita em cache que a Anthropic declarar). Quem soma o
+custo lê o `usage` junto com o fim, como o `brainCost` da R4 lê o status. O pedido que nem saiu (a rede recusou a conexão, ou `cancel` no
+mesmo giro de `chat`) não tem `usage`. `stream_options.include_usage` vai à OpenAI e à DeepSeek, que o
+documentam, e não ao OpenRouter, que o marca como obsoleto e sem efeito (o consumo vem sempre).
+
 Opcional como `classifyOutcome`: cérebro sem `chat` não aparece na lista do pipeline. Primeiro entram
 os três que falam `/chat/completions` com `stream: true` e `tools` (OpenAI, OpenRouter e DeepSeek),
-por um caminho comum em `brain-http.ts`. Anthropic e Gemini ficam para uma fatia à parte.
+por um caminho comum em `brain-http.ts`. Anthropic entrou na 2b; o Gemini fica na 2c. Na 2b o
+caminho comum foi dividido em transporte (`chatTransport`: o pedido, o prazo, o SSE, o `usage` único e
+a estimativa) e formato (`ChatFormat`: o corpo e a leitura de cada `data:`), e a Anthropic usa o
+transporte com o formato da API de mensagens. O `toolCall` sai quando a ferramenta fecha, antes do fim:
+pode vir `toolCall` e depois `error`, e isso é válido no contrato.
 
 ### 3.3 O motor: `packages/voice-engine/src/engines/pipeline.ts`
 
@@ -212,7 +236,7 @@ final chegou, e o evento leva a marca `endFromArrival: true`.
 | Etapa | Orçamento | De onde vem |
 |---|---|---|
 | Fim da fala → trecho final | 700 ms | A régua da R12 (spec #198) |
-| Pedido → primeiro texto do cérebro | 800 ms | **Não medido.** Meta. A fatia 2 mede na bancada |
+| Pedido → primeiro texto do cérebro | 800 ms | **Não medido.** Meta. A bancada da fatia 2 (`scripts/bancada-de-voz/cerebro-primeiro-texto.ts`) existe, com a linha da Anthropic desde a 2b; em 17/11 rodou sem nenhuma das chaves (`BANCADA_OPENAI_API_KEY`, `BANCADA_OPENROUTER_API_KEY`, `BANCADA_DEEPSEEK_API_KEY`, `BANCADA_ANTHROPIC_API_KEY`) |
 | Primeiro texto → primeiro áudio da voz | 400 ms | **Não medido.** Meta. A fatia 1 mede na bancada |
 | Transporte e ajuste | 100 ms | Pedaço de 20 ms + fila de saída |
 | **Total p95** | **2 000 ms** | Soma. **Meta p50: 1 200 ms** |
@@ -465,7 +489,7 @@ Resposta: A, dada pelo Rafael em 17/11, junto com a DESA-103 (seção 9.1).
 - Clonagem de voz e vozes geradas pela tela (só a lista do que a conta já tem).
 - Outras vozes (OpenAI TTS, Google, Piper local): cada uma é um arquivo novo em `synthesizers/`,
   depois.
-- Cérebros Anthropic e Gemini no `chat` (fatia própria, depois da 2).
+- Cérebro Gemini no `chat` (fatia 2c, depois da 2b, que trouxe a Anthropic).
 - Escolher a região da ElevenLabs (`api.eu.residency...`). O `processingLocation` diz "não declara"
   até haver fonte.
 - Guardar o áudio sintetizado em disco ou no banco. O cache é só em memória, por processo.
