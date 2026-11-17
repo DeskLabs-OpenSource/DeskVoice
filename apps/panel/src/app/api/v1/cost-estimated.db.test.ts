@@ -29,12 +29,13 @@ async function team(label: string) {
       "insert into calls (organization_id, agent_id, direction, channel, status, started_at, answered_at, ended_at, engine, cost_cents) values ($1, $2, 'inbound', 'phone', 'completed', $3, $3, $4, 'simulated', 0) returning id",
       [organizationId, agentId, at(0), at(60)],
     );
-  const line = (callId: string, engine: string, microcents: number, cost: "measured" | "unmeasured" | "estimated"): Promise<string> =>
+  // `lineAgent` é o agente da linha depois de uma passagem; sem ele, a linha é do agente da ligação.
+  const line = (callId: string, engine: string, microcents: number, cost: "measured" | "unmeasured" | "estimated", lineAgent: string | null = null): Promise<string> =>
     insert(
       panel.app,
       organizationId,
-      "insert into usage_ledger (organization_id, call_id, engine, model, seconds, cost_cents, cost_microcents, cost_measured, cost_estimated, at) values ($1, $2, $3, $4, 0, round($5::numeric / 1000000)::int, $5, $6, $7, $8) returning id",
-      [organizationId, callId, engine, engine.startsWith("brain:") ? "modelo" : null, microcents, cost !== "unmeasured", cost === "estimated", at(90)],
+      "insert into usage_ledger (organization_id, call_id, agent_id, engine, model, seconds, cost_cents, cost_microcents, cost_measured, cost_estimated, at) values ($1, $2, $3, $4, $5, 0, round($6::numeric / 1000000)::int, $6, $7, $8, $9) returning id",
+      [organizationId, callId, lineAgent, engine, engine.startsWith("brain:") ? "modelo" : null, microcents, cost !== "unmeasured", cost === "estimated", at(90)],
     );
   return { cookie, agentId, newCall, line };
 }
@@ -98,6 +99,20 @@ describe("custo estimado na tela", () => {
     const read = (await call(costs, { cookie })).data as Costs;
     expect(read).toMatchObject({ totalCents: 30, estimatedCount: 1, unmeasuredCount: 1 });
     expect((await call(getCall, { cookie, params: { id: callId } })).data).toMatchObject({ estimatedCount: 1, unmeasuredCount: 1 });
+  });
+
+  it("na ligação com passagem, o agente de destino só com linha não medida diz isso no detalhe, e não aparece como R$ 0,00 medido", async () => {
+    const { cookie, agentId, newCall, line } = await team("passagem nao medida");
+    const destino = ((await call(createAgent, { method: "POST", cookie, body: { name: "Agente destino", engine: "simulated" } })).data as { id: string }).id;
+    const callId = await newCall();
+    await line(callId, "simulated", 12 * CENT, "measured");
+    await line(callId, "brain:openai", 0, "unmeasured", destino);
+
+    const detail = (await call(getCall, { cookie, params: { id: callId } })).data as { unmeasuredCount: number; costByAgent: Array<Counts & { agentId: string | null }> };
+    expect(detail.unmeasuredCount).toBe(1);
+    expect(detail.costByAgent).toHaveLength(2);
+    expect(detail.costByAgent).toContainEqual(expect.objectContaining({ agentId, costCents: 12, unmeasuredCount: 0, estimatedCount: 0 }));
+    expect(detail.costByAgent).toContainEqual(expect.objectContaining({ agentId: destino, costCents: 0, unmeasuredCount: 1, estimatedCount: 0 }));
   });
 });
 
