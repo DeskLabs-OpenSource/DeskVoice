@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { clearInstallationState as clear, createOrganization, openTestDbs } from "../test/helpers";
 import { createMember, grantInstallationAdminBy, isInstallationAdmin, listInstallationAdmins, revokeInstallationAdmin } from "./accounts";
 import { acceptInvite, findInviteByToken } from "./invites";
+import { hashToken } from "./password";
 import { FOUNDING_ORGANIZATION_KEY, adminsExplicit, listInstallationEvents, requestInstallationUpdate } from "./installation";
 import { addOrganization, createFirstOwnerInvite, listOrganizations, previewNewOrganization, renameOrganization } from "./organizations";
 import { withOrg, withSystem } from "./with-org";
@@ -191,6 +192,48 @@ describe("renaming and the first owner's invite", () => {
 
     // Depois do primeiro dono, quem convida é ele.
     expect(await createFirstOwnerInvite(app, result.organizationId, { email: `outro-${randomUUID()}@example.test`, name: "Outro" }, now)).toEqual({ ok: false, reason: "has_members" });
+  });
+
+  it("keeps one first-owner invite at a time, valid only while the organization has nobody", async () => {
+    await singleClient();
+    const org = await createOrganization(app, "Vazia");
+    const first = await createFirstOwnerInvite(app, org, { email: `a-${randomUUID()}@example.test`, name: "A" }, now);
+    const second = await createFirstOwnerInvite(app, org, { email: `b-${randomUUID()}@example.test`, name: "B" }, now);
+    if (!first.ok || !second.ok) throw new Error("invite not created");
+    // O novo derruba o anterior, mesmo de outro e-mail: dois links vivos fariam dois "primeiros" donos.
+    expect(await findInviteByToken(app, first.token, now)).toBeNull();
+    expect(await findInviteByToken(app, second.token, now)).toMatchObject({ role: "owner" });
+    // Alguém entrou por outro caminho (SQL na VPS, ou a fatia 3): o convite sem criador deixa de valer.
+    await member(org, "operator");
+    expect(await findInviteByToken(app, second.token, now)).toBeNull();
+    expect(await acceptInvite(app, second.token, { name: "B", passwordHash: "senha" }, now)).toEqual({ ok: false, reason: "invalid" });
+  });
+
+  it("does not revive an ordinary invite whose creator left: the null creator alone is not the mark", async () => {
+    const org = await createOrganization(app, "Vazia");
+    const token = `t-${randomUUID()}`;
+    await withOrg(app, org, (q) =>
+      q.exec("insert into invites (organization_id, email, name, role, token_hash, expires_at, created_by) values ($1, $2, 'X', 'owner', $3, $4, null)", [
+        org,
+        `x-${randomUUID()}@example.test`,
+        hashToken(token),
+        new Date(now.getTime() + 86_400_000),
+      ]),
+    );
+    expect(await findInviteByToken(app, token, now)).toBeNull();
+    // E a marca não convive com um criador: o convite de alguém da equipe nunca vira convite da administração.
+    const creator = await member(org, "owner");
+    await expect(
+      withOrg(app, org, (q) =>
+        q.exec("insert into invites (organization_id, email, name, role, token_hash, expires_at, created_by, installation_invite) values ($1, $2, 'Y', 'owner', $3, $4, $5, true)", [
+          org,
+          `y-${randomUUID()}@example.test`,
+          hashToken(`u-${randomUUID()}`),
+          new Date(now.getTime() + 86_400_000),
+          creator.userId,
+        ]),
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
   });
 
   it("refuses an e-mail that already has an account and an organization that does not exist", async () => {

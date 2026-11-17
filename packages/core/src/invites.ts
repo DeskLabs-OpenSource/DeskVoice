@@ -38,9 +38,17 @@ export type AcceptInviteResult = { ok: true; userId: string; organizationId: str
 // outro dono e foi rebaixado não deixa para trás um convite que hoje não poderia emitir.
 // A expressão abaixo é `canManageRole` escrita em SQL; o teste dos nove pares de papel compara as
 // duas, para que nunca divirjam.
-const CREATOR_STILL_MANAGES = `exists (select from users c
+//
+// A exceção é o convite do primeiro dono, gerado pela administração da instalação (seção 3.3 do
+// desenho do R8), que não tem vínculo na organização e por isso não tem criador: ele vale só
+// enquanto a organização não tem nenhum vínculo `member`. O primeiro aceite o encerra, e o de
+// qualquer outro convite da administração também. Ele é marcado por coluna própria, e não pelo
+// `created_by` nulo, que continua querendo dizer "o criador saiu da equipe".
+const CREATOR_STILL_MANAGES = `(exists (select from users c
    where c.organization_id = i.organization_id and c.id = i.created_by and c.disabled_at is null
-     and (c.role = 'owner' or (c.role = 'admin' and i.role <> 'owner')))`;
+     and (c.role = 'owner' or (c.role = 'admin' and i.role <> 'owner')))
+   or (i.installation_invite and i.role = 'owner'
+       and not exists (select from users m where m.organization_id = i.organization_id and m.kind = 'member')))`;
 
 /**
  * O convite que este token abre, ou `null`. Inexistente, vencido, já aceito, revogado e de

@@ -138,17 +138,20 @@ export type FirstOwnerInviteResult = { ok: true; token: string } | { ok: false; 
  *
  * Só para organização sem nenhum vínculo `member`: depois do primeiro dono, quem convida é ele, pela
  * tela Equipe. E-mail que já tem conta é recusado, porque o convite de hoje não aceita conta que já
- * existe (isso é a fatia 3). Convidar de novo invalida o link anterior. Devolve o token em claro; o
- * banco só recebe o hash.
+ * existe (isso é a fatia 3). Convidar de novo invalida o link anterior. O convite é marcado
+ * `installation_invite`: sem criador na organização, ele só vale enquanto ela não tem ninguém
+ * (`CREATOR_STILL_MANAGES`, em `invites.ts`). Devolve o token em claro; o banco só recebe o hash.
  */
 export async function createFirstOwnerInvite(db: Db, organizationId: string, invite: { email: string; name: string }, now: Date): Promise<FirstOwnerInviteResult> {
   if (await accountExists(db, invite.email)) return { ok: false, reason: "email_taken" };
   return withOrg(db, organizationId, async (q) => {
     if (!(await q.one("select 1 from organizations where id = $1", [organizationId]))) return { ok: false, reason: "not_found" };
     if (await q.one("select 1 from users where kind = 'member' limit 1")) return { ok: false, reason: "has_members" };
-    await q.exec("update invites set revoked_at = $2 where email = $1 and accepted_at is null and revoked_at is null", [invite.email, now]);
+    // Um convite do primeiro dono por vez: o novo derruba o anterior, de qualquer e-mail. Dois
+    // links vivos para a organização vazia deixariam duas pessoas entrarem como "primeiro" dono.
+    await q.exec("update invites set revoked_at = $2 where (email = $1 or installation_invite) and accepted_at is null and revoked_at is null", [invite.email, now]);
     const token = randomBytes(32).toString("base64url");
-    await q.exec("insert into invites (organization_id, email, name, role, token_hash, expires_at, created_by) values ($1, $2, $3, 'owner', $4, $5, null)", [
+    await q.exec("insert into invites (organization_id, email, name, role, token_hash, expires_at, created_by, installation_invite) values ($1, $2, $3, 'owner', $4, $5, null, true)", [
       organizationId,
       invite.email,
       invite.name,
