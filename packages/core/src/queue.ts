@@ -18,15 +18,19 @@ export async function enqueueTask(q: OrgQuery, task: { kind: string; payload: ob
   return row.id;
 }
 
+// A tarefa de organização suspensa não é elegível: fica `queued`, sem rodar e sem ser cancelada
+// aqui. Quem cancela é a suspensão, na transação dela (seção 3.3 do desenho do R8).
+const ACTIVE_ORGANIZATION = "not exists (select 1 from organizations o where o.id = tasks.organization_id and o.suspended_at is not null)";
+
 /**
- * Reivindica a tarefa elegível mais antiga de qualquer organização, ou devolve `null`.
+ * Reivindica a tarefa elegível mais antiga de qualquer organização ativa, ou devolve `null`.
  * `skip locked` garante que dois processos nunca recebem a mesma.
  */
 export async function claimTask(db: Db, now: Date): Promise<ClaimedTask | null> {
   const row = await withSystem(db, (q) =>
     q.one<{ id: string; organization_id: string; call_id: string | null; kind: string; payload: Record<string, unknown>; attempts: number }>(
       `update tasks set status = 'running', attempts = attempts + 1
-        where id = (select id from tasks where status = 'queued' and run_at <= $1
+        where id = (select id from tasks where status = 'queued' and run_at <= $1 and ${ACTIVE_ORGANIZATION}
                      order by run_at, created_at for update skip locked limit 1)
         returning id, organization_id, call_id, kind, payload, attempts`,
       [now],
@@ -78,9 +82,12 @@ export function listenTasks(db: Db, onWake: () => void, onError?: (error: Error)
  * vivo, escutando e travado numa rotina. Como ele executa uma tarefa por vez, a próxima vencida
  * fica esperando, e em 10 minutos a saúde falha. Teto conhecido: uma rotina travada sem nenhuma
  * outra tarefa vencida atrás dela não aparece, porque não atrasa ninguém.
+ *
+ * A tarefa de organização suspensa fica de fora: ela espera de propósito, e contá-la acusaria a
+ * fila de travada.
  */
 export async function queueHealth(db: Db, now: Date): Promise<{ listeners: number; oldestDueAt: Date | null }> {
   const listeners = await countListeners(db, TASKS_CHANNEL);
-  const row = await withSystem(db, (q) => q.one<{ at: Date | null }>("select min(run_at) as at from tasks where status = 'queued' and run_at <= $1", [now]));
+  const row = await withSystem(db, (q) => q.one<{ at: Date | null }>(`select min(run_at) as at from tasks where status = 'queued' and run_at <= $1 and ${ACTIVE_ORGANIZATION}`, [now]));
   return { listeners, oldestDueAt: row?.at ?? null };
 }

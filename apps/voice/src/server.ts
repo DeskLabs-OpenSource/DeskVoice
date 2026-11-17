@@ -16,6 +16,7 @@ import { startSimulatedCall } from "./simulate";
 import { realSchedule, type Schedule } from "./transport";
 import { applyTrunks, checkTrunks, REFRESH_ALLOWED_MS, refreshAllowed, resolveSipName, type ResolveName, type TrunksDeps } from "./trunks";
 import type { WacallsOptions } from "./wacalls-client";
+import { playUnavailable } from "./unavailable";
 import { startVoicemailSession, type VoicemailSession } from "./voicemail";
 import { startWebCalls } from "./web-calls";
 import { createWhatsAppCalls } from "./whatsapp-calls";
@@ -116,6 +117,10 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
         return;
       }
       const { call, transport } = attached;
+      if (call.unavailable) {
+        void playUnavailable(transport, { callId: call.callId, ...call.unavailable }, log);
+        return;
+      }
       if (call.voicemail) {
         trackVoicemail(
           startVoicemailSession(

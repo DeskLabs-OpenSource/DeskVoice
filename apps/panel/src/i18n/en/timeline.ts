@@ -345,6 +345,7 @@ const timeline: TimelineDictionary = {
     web_never_connected: "The browser call never connected.",
     whatsapp_answer_failed: "The agent could not answer the WhatsApp call, which kept ringing on the phone. Check the WhatsApp calls line in Health.",
     transfer_unanswered: "The transfer was not answered.",
+    organization_suspended: "The organization was suspended.",
     outbound_disabled: "Outbound calls were off.",
     outside_window: "Outside the hours allowed for outbound calls.",
     do_not_call: "The number is on the do-not-call list.",

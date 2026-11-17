@@ -170,4 +170,24 @@ describe("queue", () => {
     await claimTask(app, t0);
     expect((await queueHealth(app, t0)).oldestDueAt).toEqual(plus(-1000));
   });
+
+  it("does not claim the task of a suspended organization, and leaves it queued; the other organization's task runs", async () => {
+    // Seção 3.3 do desenho do R8: a fila não roda para a organização suspensa. A tarefa não é
+    // cancelada aqui (quem cancela é a transação da suspensão, na fatia 4b): fica na fila, intacta.
+    const suspended = await createOrganization(app, "queue-suspended");
+    await owner.pool.query("update organizations set suspended_at = $2, suspended_reason = 'teste da fatia 4a' where id = $1", [suspended, t0]);
+    const parked = await withOrg(app, suspended, (q) => enqueueTask(q, { kind: "follow_up_call", payload: {}, runAt: plus(-60_000) }));
+    const runs = await enqueue("summarize_call", t0);
+
+    expect((await claimTask(app, t0))?.id).toBe(runs);
+    expect(await claimTask(app, t0)).toBeNull();
+    expect(await taskRow(parked)).toMatchObject({ status: "queued", attempts: 0, last_error: null, run_at: plus(-60_000) });
+    // A que espera de propósito não acusa a fila de travada na Saúde.
+    expect((await queueHealth(app, t0)).oldestDueAt).toBeNull();
+
+    // Sem a marca, a mesma tarefa volta a ser elegível, sem nada a refazer.
+    await owner.pool.query("update organizations set suspended_at = null, suspended_reason = null where id = $1", [suspended]);
+    expect((await queueHealth(app, t0)).oldestDueAt).toEqual(plus(-60_000));
+    expect(await claimTask(app, t0)).toMatchObject({ id: parked, organizationId: suspended });
+  });
 });
