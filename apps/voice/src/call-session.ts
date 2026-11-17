@@ -131,6 +131,12 @@ interface Ending {
    * soltar as ferramentas e parar a guarda. Vai para `call_ended.openTurn`; ausente, o campo não é gravado.
    */
   openTurn?: OpenTurn | null;
+  /**
+   * Só no fim por `caller_hangup` e só se a guarda pediu para repetir nesta ligação: quem ligou deu
+   * sinal de fala com palavras depois do último pedido. Vai para `call_ended.callerSpokeAfterAsk`;
+   * ausente, o campo não é gravado.
+   */
+  callerSpokeAfterAsk?: boolean;
 }
 
 interface AgentRow {
@@ -368,6 +374,13 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   /** A menor duração máxima entre os agentes por onde a ligação passou, em segundos. */
   let durationLimitSeconds = 0;
   const toolsRunning = new Set<Promise<void>>();
+  /**
+   * O "pode repetir?" desta ligação (desenho do follow-up da ligação que caiu, seção 3.1): `undefined`
+   * sem pedido; depois dele, se quem ligou deu `callerActivity{words: true}` desde o último pedido.
+   * É um fato da sessão, e não a ausência de transcrição: a última fala antes do desligar costuma
+   * não virar `transcript_user`.
+   */
+  let callerSpokeAfterAsk: boolean | undefined;
   const callEnded = new AbortController();
   let resolveDone: (outcome: CallOutcome) => void = () => undefined;
   const done = new Promise<CallOutcome>((resolve) => (resolveDone = resolve));
@@ -412,6 +425,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         costCents: callCents(),
         seconds: Math.round(usage.seconds),
         ...(end.openTurn !== undefined && { openTurn: end.openTurn }),
+        ...(end.callerSpokeAfterAsk !== undefined && { callerSpokeAfterAsk: end.callerSpokeAfterAsk }),
       });
       const taskId = await enqueueTask(q, { kind: "summarize_call", payload: {}, callId, runAt: clock.now() });
       await event("task_queued", { taskId, kind: "summarize_call" });
@@ -822,7 +836,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       closeCallerTurn: () => session.closeCallerTurn(),
       // `wrapUp` e `finish` param a guarda: depois disso ela não chama nada.
       say: (text) => session.say(text),
-      acted: (report) => void event("caller_unanswered", report).catch(logFailure("could not record an unanswered caller")),
+      acted: (report) => {
+        // O pedido zera o fato no mesmo instante do `caller_unanswered`: vale só a fala depois do último.
+        if (report.action === "asked_to_repeat") callerSpokeAfterAsk = false;
+        void event("caller_unanswered", report).catch(logFailure("could not record an unanswered caller"));
+      },
     });
     const self: Leg = {
       agent: row,
@@ -837,7 +855,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // Uma sessão substituída numa passagem já foi fechada; o que ela ainda emitir não vai para a linha.
     const current = (): boolean => leg === self;
     session.on("callerActivity", (signal) => {
-      if (current()) silenceGuard.callerActivity(signal);
+      if (!current()) return;
+      // Antes do filtro da guarda, que ignora fala durante o áudio do agente: quem diz "tchau" por cima
+      // do "pode repetir?" falou do mesmo jeito. Início de fala sem texto (`words: false`) não conta.
+      if (signal.words && callerSpokeAfterAsk === false) callerSpokeAfterAsk = true;
+      silenceGuard.callerActivity(signal);
     });
     session.on("audio", (pcm) => {
       if (!current()) return;
@@ -1011,7 +1033,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     visited.push(first);
 
     await event("call_started", { direction: call.direction, from: call.from_e164, to: call.to_e164, agentId, ...input.started });
-    transport.onHangup(() => void finish({ status: "completed", endReason: "caller_hangup", callerGone: true, openTurn: openTurnNow() }));
+    transport.onHangup(() => void finish({ status: "completed", endReason: "caller_hangup", callerGone: true, openTurn: openTurnNow(), callerSpokeAfterAsk }));
 
     const engineId = overrides?.engineId ?? first.engine;
     const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);

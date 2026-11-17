@@ -76,6 +76,8 @@ describe("openTurn no fim por caller_hangup", { timeout: 120_000 }, () => {
     const ended = await endedOf(s.callId);
     expect(ended).toMatchObject({ reason: "caller_hangup" });
     expect(ended).toHaveProperty("openTurn", null);
+    // Sem "pode repetir?" na ligação, o fato da sessão não é gravado.
+    expect(ended).not.toHaveProperty("callerSpokeAfterAsk");
   });
 
   it("agent_speaking: a fala do agente ainda estava tocando quando a linha caiu", async () => {
@@ -197,6 +199,7 @@ describe("o desligar depois do \"pode repetir?\" (condição 2(c))", { timeout: 
       const r = await hangUpAndReview(s);
       expect(r.ended).toMatchObject({ reason: "caller_hangup" });
       expect(r.ended).toHaveProperty("openTurn", null);
+      expect(r.ended).toHaveProperty("callerSpokeAfterAsk", false);
       expect(r.result).toBe("opened");
       expect(r.followUps).toEqual([{ title: "Retornar para +5511988887777: a ligação caiu no meio da conversa" }]);
       expect(r.drops).toEqual([{ case: "call_dropped", mode: "task", action: "task_opened", simulated: false, openTurn: "caller_waiting" }]);
@@ -222,6 +225,59 @@ describe("o desligar depois do \"pode repetir?\" (condição 2(c))", { timeout: 
     expect(r.result).toBe("no_case");
     expect(r.followUps).toEqual([]);
     expect(r.drops).toEqual([]);
+  });
+
+  // Decisão de 17/11, depois da 3ª reprovação do #367: "não falou mais" é o fato da sessão
+  // (`callerSpokeAfterAsk`), e não a falta de `transcript_user`, que costuma se perder no desligar.
+  it("words:true depois do pedido, sem transcrição, e o desligar 0,8 s depois: não abre nada", async () => {
+    const s = await ask("after-ask words no transcript", "task");
+    s.manual.emit("callerActivity", { words: true });
+    harness?.clock.advance(800);
+    const r = await hangUpAndReview(s);
+    expect(r.ended).toHaveProperty("openTurn", null);
+    expect(r.ended).toHaveProperty("callerSpokeAfterAsk", true);
+    expect(r.result).toBe("no_case");
+    expect(r.followUps).toEqual([]);
+    expect(r.drops).toEqual([]);
+  });
+
+  it("a fala por cima do áudio do pedido (que a guarda ignora) também conta: não abre nada", async () => {
+    const s = await ask("after-ask words over audio", "task");
+    // O áudio do "pode repetir?" (0,5 s) ainda toca quando quem ligou fala: a guarda ignora o sinal.
+    s.manual.emit("audio", Buffer.alloc(16 * 500));
+    s.manual.emit("callerActivity", { words: true });
+    // O áudio já tocou inteiro no desligar: a vez está fechada, e só o fato da sessão separa.
+    harness?.clock.advance(800);
+    const r = await hangUpAndReview(s);
+    expect(r.ended).toHaveProperty("openTurn", null);
+    expect(r.ended).toHaveProperty("callerSpokeAfterAsk", true);
+    expect(r.result).toBe("no_case");
+    expect(r.followUps).toEqual([]);
+    expect(r.drops).toEqual([]);
+  });
+
+  it("vale o último pedido: falar depois do 1º e ficar calado depois do 2º abre o caso 5", async () => {
+    const s = await ask("after-ask second ask", "task");
+    s.manual.emit("callerActivity", { words: true });
+    // Quem ligou falou, e o agente de novo não respondeu: a guarda pede outra vez, e o fato zera.
+    expect(harness?.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    expect(harness?.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+    await waitFor(async () => (await eventsOf(app, s.callId)).filter((event) => event.kind === "caller_unanswered" && event.payload.action === "asked_to_repeat").length === 2, "the second request to repeat");
+    const r = await hangUpAndReview(s);
+    expect(r.ended).toHaveProperty("callerSpokeAfterAsk", false);
+    expect(r.result).toBe("opened");
+  });
+
+  it("só words:false depois do pedido (ruído, sem palavras): abre o caso 5 em task", async () => {
+    const s = await ask("after-ask noise only", "task");
+    s.manual.emit("callerActivity", { words: false });
+    harness?.clock.advance(800);
+    s.manual.emit("callerActivity", { words: false });
+    const r = await hangUpAndReview(s);
+    expect(r.ended).toHaveProperty("openTurn", null);
+    expect(r.ended).toHaveProperty("callerSpokeAfterAsk", false);
+    expect(r.result).toBe("opened");
+    expect(r.drops).toEqual([{ case: "call_dropped", mode: "task", action: "task_opened", simulated: false, openTurn: "caller_waiting" }]);
   });
 
   it("modo off: o mesmo desligar não abre nada", async () => {

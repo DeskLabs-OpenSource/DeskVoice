@@ -81,7 +81,8 @@ export interface TurnEvent {
 }
 
 /**
- * A condição 2(c) (decisão de 17/11): a guarda pediu para repetir (`caller_unanswered` com
+ * A parte da condição 2(c) lida dos eventos (decisão de 17/11; a revisão exige também
+ * `call_ended.callerSpokeAfterAsk === false`): a guarda pediu para repetir (`caller_unanswered` com
  * `action: "asked_to_repeat"`) e, depois do **último** pedido, quem ligou não falou (nenhum
  * `transcript_user`) e o agente não respondeu de fato (no máximo um `transcript_agent`, o espaço da
  * transcrição do próprio pedido). Conta eventos, sem ler texto.
@@ -211,13 +212,21 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
       order by id`,
     [callId],
   );
-  // Só o campo estável de `call_ended`, como os outros: a vez aberta no instante do desligar.
-  const ended = await q.one<{ open_turn: unknown }>("select payload->'openTurn' as open_turn from call_events where call_id = $1 and kind = 'call_ended' order by id desc limit 1", [callId]);
+  // Só os campos estáveis de `call_ended`, como os outros: a vez aberta no instante do desligar e se
+  // quem ligou falou depois do último "pode repetir?".
+  const ended = await q.one<{ open_turn: unknown; spoke_after_ask: unknown }>(
+    "select payload->'openTurn' as open_turn, payload->'callerSpokeAfterAsk' as spoke_after_ask from call_events where call_id = $1 and kind = 'call_ended' order by id desc limit 1",
+    [callId],
+  );
   const openTurn = openTurnOf(ended?.open_turn);
-  // A condição 2(c) só olha o tipo dos eventos de vez e o `action` do pedido, nunca o texto.
+  // A condição 2(c) só olha o fato da sessão, o tipo dos eventos de vez e o `action` do pedido, nunca o
+  // texto. "Quem ligou não falou mais" é `callerSpokeAfterAsk` igual a `false`: a falta de
+  // `transcript_user` não prova, porque a última fala antes do desligar costuma não virar transcrição.
+  // O campo ausente (ligação gravada antes dele, ou sem pedido) não vale.
   const afterAsk =
     call.end_reason === "caller_hangup" &&
     openTurn === null &&
+    ended?.spoke_after_ask === false &&
     hungUpAfterAsk(
       await q.many<TurnEvent>(
         `select kind, case when kind = 'caller_unanswered' then payload->>'action' end as action

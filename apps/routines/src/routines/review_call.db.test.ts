@@ -557,13 +557,17 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
 describe("review_call: o desligar depois do \"pode repetir?\"", () => {
   const ASK = { action: "asked_to_repeat", waitedMs: 6500, words: true };
   const at = (seconds: number) => new Date(t0.getTime() + seconds * 1000);
-  /** A ligação com cada evento no instante dado, gravados nesta ordem (o `id` segue a lista). */
-  async function timed(label: string, events: [CallEventKind, object, number][], openTurn: string | null = null): Promise<Scene> {
+  /**
+   * A ligação com cada evento no instante dado, gravados nesta ordem (o `id` segue a lista). `spoke` é
+   * o `call_ended.callerSpokeAfterAsk`, que a sessão grava como `false` quando houve pedido e quem ligou
+   * não deu sinal com palavras depois dele; `null` deixa o campo de fora.
+   */
+  async function timed(label: string, events: [CallEventKind, object, number][], openTurn: string | null = null, spoke: boolean | null = false): Promise<Scene> {
     const s = await scene(label, [], { endReason: "caller_hangup" });
     await withSystem(app, (q) => q.exec("update agents set drop_follow_up = 'task' where organization_id = $1", [s.org]));
     await withOrg(app, s.org, async (q) => {
       for (const [kind, payload, seconds] of [["call_answered", { engine: "simulated" }, 0], ...events] as [CallEventKind, object, number][]) await recordEvent(q, s.callId, kind, payload, at(seconds));
-      await recordEvent(q, s.callId, "call_ended", { status: "completed", reason: "caller_hangup", costCents: 0, seconds: 40, openTurn }, at(40));
+      await recordEvent(q, s.callId, "call_ended", { status: "completed", reason: "caller_hangup", costCents: 0, seconds: 40, openTurn, ...(spoke !== null && { callerSpokeAfterAsk: spoke }) }, at(40));
     });
     return s;
   }
@@ -606,6 +610,16 @@ describe("review_call: o desligar depois do \"pode repetir?\"", () => {
     // A vez gravada como agent_speaking não entra pela condição 2(c).
     const speaking = await timed("after ask speaking", [["caller_unanswered", ASK, 8]], "agent_speaking");
     expect(await review(speaking)).toBe("no_case");
+  });
+
+  it("só callerSpokeAfterAsk igual a false vale: true (quem ligou falou sem virar transcrição) e ausente não abrem", async () => {
+    const spoke = await timed("after ask spoke no transcript", [["caller_unanswered", ASK, 8]], null, true);
+    expect(await review(spoke)).toBe("no_case");
+    expect(await drops(spoke.callId)).toEqual([]);
+    const absent = await timed("after ask no field", [["caller_unanswered", ASK, 8]], null, null);
+    expect(await review(absent)).toBe("no_case");
+    expect(await drops(absent.callId)).toEqual([]);
+    expect(await followUpsOf(absent.org)).toEqual([]);
   });
 
   it("modo off e alguém com o próximo passo: nada", async () => {
