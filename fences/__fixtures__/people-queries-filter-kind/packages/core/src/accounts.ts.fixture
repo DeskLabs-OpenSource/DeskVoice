@@ -1,0 +1,2 @@
+// Fixture: a porta das contas lê vínculo de qualquer kind, de propósito.
+export const links = (q, account) => q.many("select id from users where account_id = $1", [account]);

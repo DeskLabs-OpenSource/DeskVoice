@@ -1,0 +1,2 @@
+// Fixture: a consulta na lista de exceções.
+export const name = (q, id) => q.one("select u.name from users u where u.id = $1", [id]);
