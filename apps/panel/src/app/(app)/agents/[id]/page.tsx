@@ -138,7 +138,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // Os agentes que podem passar a ligação para este: apagá-lo o tira da lista deles.
   const handingOffHere = others.filter((other) => other.agentHandoffTargets?.includes(id));
   const engine = engines.data?.find((candidate) => candidate.id === draft.engine);
-  // Barulhento só foi provado no OpenAI Realtime. Em outro motor, a opção some; um agente que já
+  // Barulhento foi provado no OpenAI Realtime e no Gemini Live. Em outro motor, a opção some; um agente que já
   // está em Barulhento continua vendo o campo, com um aviso, para não guardar a escolha escondida.
   const noisyProven = NOISY_PROVEN_ENGINES.includes(draft.engine);
   // "Voltar para Normal" mexe só no rascunho: até salvar, o agente atende em Barulhento.
