@@ -50,14 +50,23 @@ export interface BrainListOptions {
   today: string;
 }
 
+/** Uma ferramenta pedida pelo modelo. `args` é texto, exatamente como o modelo pediu. */
+export interface BrainToolCall {
+  id: string;
+  name: string;
+  args: string;
+  /** Opaco; devolva como veio. Hoje só o Gemini usa (assinatura de raciocínio). */
+  providerState?: string;
+}
+
 /** Uma mensagem da conversa com o cérebro. `args` é texto, exatamente como o modelo pediu. */
 export interface BrainChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   /** Em `tool`: a chamada que este resultado responde. */
   toolCallId?: string;
-  /** Em `assistant`: as ferramentas que o modelo pediu nesta volta. */
-  toolCalls?: { id: string; name: string; args: string }[];
+  /** Em `assistant`: as ferramentas que o modelo pediu nesta volta, como vieram em `toolCall` (com `providerState`). */
+  toolCalls?: BrainToolCall[];
 }
 
 export interface BrainChatRequest {
@@ -76,7 +85,7 @@ export interface BrainChatEvents {
    * Sai assim que a ferramenta fecha, antes do fim do pedido: por isso pode vir `toolCall` e depois
    * `error`, e isso é válido; quem executa decide se usa uma ferramenta de uma volta que falhou.
    */
-  toolCall(call: { id: string; name: string; args: string }): void;
+  toolCall(call: BrainToolCall): void;
   /**
    * O consumo do pedido. Todo pedido que saiu emite **exatamente um**, antes de `done` ou `error`, ou
    * depois de `cancel`. `estimated: false` quando o provedor declarou; `true` quando não declarou
@@ -117,7 +126,7 @@ export interface Brain {
   /** Um pedido com saída em JSON. Nunca lança; nunca registra a chave nem o corpo do provedor. */
   completeJson(apiKey: string, request: BrainJsonRequest, options: { fetch?: typeof fetch }): Promise<BrainJsonResult>;
   /**
-   * A conversa em streaming, com ferramentas (R5, fatias 2 e 2b). Opcional: cérebro sem `chat` continua
+   * A conversa em streaming, com ferramentas (R5, fatias 2, 2b e 2c). Opcional: cérebro sem `chat` continua
    * válido e só não aparece na lista do pipeline. Nunca lança; nunca registra a chave nem o corpo.
    */
   chat?(apiKey: string, request: BrainChatRequest, options: { fetch?: typeof fetch }): BrainChat;
