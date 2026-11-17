@@ -263,7 +263,7 @@ Aceite:
    do primeiro `push` ao primeiro áudio (p50 e p95 de 30 falas curtas em pt-BR) e compara os
    caracteres contados com o consumo da conta antes e depois (`character_count` da assinatura, se a
    API expuser; o Desenvolvedor confere e diz). Ela só roda com a chave do pedido de decisão da
-   seção 6 e com teto próprio. **Sem a chave, o PR diz "não medido"**, e a fatia entra mesmo assim,
+   seção 6.1 e com teto próprio. **Sem a chave, o PR diz "não medido"**, e a fatia entra mesmo assim,
    com os testes contra o servidor falso.
 8. O simulado (`keyless`) gera um tom curto por caractere, sem rede, para os testes das fatias 3 a 5.
 
@@ -278,6 +278,17 @@ teste, a lista de vozes com o idioma e a amostra (`previewUrl`, que não gasta c
 três idiomas. Settings `synthesizer.<id>.api_key`, sem migration (tabela `settings`).
 Aceite: o operador cola a chave, vê "aceita" ou o motivo, vê as vozes com pt-BR primeiro e ouve a
 amostra. A chave nunca volta para a tela.
+O dado que vai para a ElevenLabs (seção 9.1) entra nesta fatia:
+- gravar a chave pede a **confirmação nomeando o fornecedor**, com o texto da seção 9.1. Quem
+  confirmou e quando ficam em `synthesizer.elevenlabs.consent` (`{ userId, confirmedAt }`, tabela
+  `settings`, por organização). Sem a confirmação, a rota recusa a chave (422), e o teste prova isso;
+- o aviso não nomeia país: com `processingLocation: undeclared`, a tela diz que a ElevenLabs não
+  declara onde processa. Teste: o texto da tela não contém nome de país;
+- a política de retenção da ElevenLabs é lida e registrada, com endereço e data da leitura, no guia
+  `docs/guides/voz.md` (três idiomas), **antes da entrega** desta fatia. Se a página não disser quanto
+  tempo o texto fica guardado, o guia e o aviso dizem isso, e o pedido volta ao Rafael antes de a tela
+  oferecer a ElevenLabs;
+- apagar a chave apaga a confirmação. Uma chave nova pede confirmação nova.
 Sobra da 1a (achado do Verificador 2 no #393): um teste em `synthesizers/elevenlabs.test.ts` prova
 que o fechamento 1000 depois do `end()`, sem `isFinal`, termina em `done`, e não em `error`.
 
@@ -304,6 +315,9 @@ despedida pré-sintetizada. Quem já instalou não precisa fazer nada: sem `agen
 A fala aberta e parada morre no `inactivity_timeout` da ElevenLabs (20 s) com `error`. Esta fatia
 decide e testa: ou abre a fala só quando o cérebro começa a responder, ou trata esse `error` como
 fim sem falha.
+A 3.3 confere a chave da organização em toda abertura, mesmo com o cache cheio (nota da revisora no
+#390). Isso pode ser um pedido a mais antes do primeiro áudio. Esta fatia diz quanto ele pesa na 3.5,
+ou mostra que a própria abertura da fala já serve de prova da chave e dispensa o pedido.
 
 ### Fatia 4: interrupção
 
@@ -321,6 +335,10 @@ O custo por peça aparece no detalhe da chamada e em Custos. A latência medida 
 ligações, pelo `pipeline_turn_latency`) aparece ao lado da escolha, com o aviso quando passa do
 orçamento. Chamada pelo navegador (decisão 0008) com o pipeline. Ela entra na prova de primeira
 impressão do CI pelo caminho simulado.
+Ao lado de cada escolha que não roda neste servidor (transcrição e voz), a tela repete o aviso da
+seção 9.1 e diz se já foi confirmado, por quem e quando. O servidor recusa salvar um agente com uma
+peça cujo `processingLocation` não é `this-server` e que não tem confirmação gravada (422, com o motivo
+na tela). O teste prova a recusa pela API, sem a tela.
 
 ### Fatia 6: o ouvido real e a medida de ponta a ponta (ESPERA a R12)
 
@@ -340,11 +358,56 @@ registrada no PR e nesta seção. É o aceite da frente.
   própria medida da R12, com o padrão já dito na tarefa: a que o Arquiteto medir melhor em português
   com vocabulário.
 
-## 6. Pedido de decisão (vai ao lote do Líder)
+## 6. Pedidos de decisão (vão ao lote do Líder)
 
-O dono do pedido é o Arquiteto. O texto está no comentário da DESA-13, no formato do `GOVERNANCE.md`:
-conta e chave da ElevenLabs para a bancada da fatia 1a, com teto de gasto. Padrão sem resposta: a
-fatia 1a entra sem a medida real ("não medido") e a fatia 6 fica presa a essa medida.
+O dono dos dois pedidos é o Arquiteto.
+
+### 6.1 A conta e a chave da ElevenLabs para a bancada
+
+O texto está no comentário da DESA-13, no formato do `GOVERNANCE.md`: conta e chave da ElevenLabs
+para a bancada da fatia 1a, com teto de gasto. Padrão sem resposta: a fatia 1a entra sem a medida
+real ("não medido") e a fatia 6 fica presa a essa medida.
+
+### 6.2 O texto e o áudio da ligação que saem para a voz e para a transcrição
+
+```markdown
+## Decisão: as condições de 16/11 do Jev valem para a voz e a transcrição do pipeline?
+
+**Quem decide:** dono do projeto
+**O que está parado esperando:** a fatia 1b (a confirmação ao gravar a chave) e a fatia 5 (a
+recusa de salvar o agente sem confirmação). As fatias 1a, 2, 3 e 4 não esperam.
+
+### Opções
+- **A.** As mesmas condições do Jev (desenho da R12, #198, "Custo e consentimento"), para cada
+  peça do pipeline que não roda neste servidor e é escolhida à parte: a voz (ElevenLabs) e a
+  transcrição. Confirmação nomeando o fornecedor, com quem e quando; país só com fonte; retenção
+  lida antes. O cérebro segue a R4, sem confirmação, como hoje. Custo: um passo a mais ao gravar a
+  chave, um guia com a retenção de cada fornecedor e um teste por peça.
+- **B.** As condições valem também para o cérebro no pipeline. Custo: a tela do agente passa a
+  pedir uma confirmação que os cérebros da R4 e os motores diretos (Gemini Live, OpenAI Realtime,
+  que recebem o áudio inteiro) não pedem. Quem já usa um cérebro da R4 não é tocado, porque o pedido
+  vale só no pipeline.
+- **C.** Só o aviso, sem confirmação gravada, como nos cérebros da R4. Custo: a ElevenLabs recebe o
+  texto que repete nome, endereço e telefone de quem ligou sem registro de quem aceitou isso, ao
+  contrário do Jev, que recebe menos.
+
+### Recomendação
+A, porque a voz e a transcrição são peças escolhidas à parte, como o Jev, e a pessoa que liga tem o
+mesmo dado em jogo. Igualar o cérebro (B) é uma revisão da R4 e dos motores diretos, e merece pedido
+próprio, não uma carona neste.
+
+### Se ninguém responder em 5 dias, vale: A
+
+### Não medido
+- A política de retenção da ElevenLabs não foi lida. Também não conferi se a conta comum tem um
+  modo sem retenção, nem o preço dele.
+- Não conferi se a página da ElevenLabs declara o país do processamento.
+- Não conferi se o desenho da R12 (#198) já pede confirmação para a peça de transcrição. Ele diz
+  que "nada sai do servidor sem o operador ligar e confirmar", mas o texto da confirmação só existe
+  para o Jev.
+```
+
+Enquanto não há resposta, o desenho segue a opção A (seção 9.1).
 
 ## 7. Fontes (conferidas em 17/11/2026)
 
@@ -362,10 +425,11 @@ fatia 1a entra sem a medida real ("não medido") e a fatia 6 fica presa a essa m
   `language`, `model_id`, `locale` e `preview_url`).
 - Preço: https://elevenlabs.io/pricing/api: Flash/Turbo a US$ 0,04 por mil caracteres; v3 e
   Multilingual v2 a US$ 0,08 por mil, igual em todos os planos. O plano gratuito inclui 20 mil
-  caracteres de Flash/Turbo por mês. **Lido por um resumo automático da página.** O Desenvolvedor
-  confere na página antes de gravar a tabela.
-- **Não conferido:** se o plano gratuito permite uso comercial ou exige atribuição; a latência
-  própria do Flash v2.5 em pt-BR; os limites de conexões simultâneas por plano.
+  caracteres de Flash/Turbo por mês. Conferido no HTML da página pelo #393 e pela revisora do
+  #390, em 17/11/2026.
+- **Não conferido:** a política de retenção do texto enviado à ElevenLabs e o país do processamento
+  (a fatia 1b lê os dois, seção 9.1); se o plano gratuito permite uso comercial ou exige
+  atribuição; a latência própria do Flash v2.5 em pt-BR; os limites de conexões simultâneas por plano.
 
 ## 8. O que fica de fora
 
@@ -389,6 +453,34 @@ fatia 1a entra sem a medida real ("não medido") e a fatia 6 fica presa a essa m
 - **Recurso pago ou telemetria?** Não há recurso pago nosso. O gasto é do operador com o provedor que
   ele escolher, medido e com teto, como nos motores diretos.
 
+### 9.1 O dado de quem ligou que sai do servidor
+
+A voz recebe o texto que o agente fala. Ao confirmar, o agente repete o que quem ligou disse: nome,
+endereço, telefone e horário. A transcrição recebe o áudio de quem ligou. As duas peças são
+escolhidas à parte do cérebro, como o Jev do filtro.
+
+O desenho segue as condições que o Rafael deu em 16/11 ao Jev (desenho da R12, #198, "Custo e
+consentimento"), as mesmas que o desenho dos analistas
+([`2026-11-17-analistas-ao-vivo.md`](2026-11-17-analistas-ao-vivo.md), seção 2.1) já usa. Isso é a
+opção A do pedido 6.2, e vale enquanto ele não for respondido:
+
+- **A confirmação nomeia o fornecedor e diz o que vai:** "O texto que o agente fala na ligação vai
+  para a ElevenLabs. Ele pode repetir o que a pessoa disse, como nome, endereço e telefone." Quem
+  confirmou e quando ficam gravados (fatia 1b). A transcrição usa a mesma forma: "O áudio da pessoa
+  na ligação vai para <fornecedor>."
+- **O país só aparece com fonte**, com endereço e data da página do fornecedor. A ElevenLabs entra
+  com `processingLocation: undeclared`, e a tela diz que ela não declara onde processa.
+- **A retenção é lida antes:** no guia `docs/guides/voz.md`, antes da entrega da fatia 1b. Sem prazo
+  na página, o pedido volta ao Rafael.
+- **A chave é o portão.** Sem chave, nada sai. Com a chave, o agente não salva com a peça sem a
+  confirmação (fatia 5).
+- **O cérebro segue a R4**, sem confirmação, como nos motores diretos. Mudar isso é a opção B do
+  pedido 6.2.
+- **A confirmação da transcrição é da R12.** Se o #198 não a trouxer até a fatia 6, a fatia 6 a
+  traz, na mesma forma da 1b.
+
+A bancada (fatia 1a) usa só texto sintético, sem dado de ninguém.
+
 ## 10. Não medido
 
 - Toda a latência da seção 3.5 por etapa. Os números são meta, e as fatias 1a, 2 e 6 medem.
@@ -397,3 +489,4 @@ fatia 1a entra sem a medida real ("não medido") e a fatia 6 fica presa a essa m
 - Se o `/chat/completions` com `stream: true` + `tools` do OpenRouter e do DeepSeek se comporta como o
   da OpenAI. A documentação da R4 foi lida para o `completeJson`, não para streaming.
 - O custo por minuto de conversa no pipeline. A fatia 6 calcula a partir do extrato real.
+- A política de retenção e o país do processamento da ElevenLabs (seção 9.1). A fatia 1b lê os dois.
