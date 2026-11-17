@@ -110,6 +110,17 @@ describe("creating the second organization (seção 3.2, item 3)", () => {
     expect(await administers(late.accountId)).toBe(true);
   });
 
+  it("refuses when a founding owner appears after the screen was shown, and that owner gets no mark", async () => {
+    const { founding, ownerOne } = await singleClient();
+    const shown = await shownFor();
+    // Só a lista de quem RECEBE a marca muda: quem perde continua igual. Ele ganharia a área sem ter aparecido.
+    const lateOwner = await member(founding, "owner", "Dona Tardia");
+    expect(await addOrganization(app, { name: "Cliente", actorAccountId: ownerOne.accountId, shown, keep: [] }, now)).toEqual({ ok: false, reason: "admins_changed" });
+    expect(await marked(lateOwner.accountId)).toBe(false);
+    expect(await marked(ownerOne.accountId)).toBe(false);
+    expect(await adminsExplicit(app)).toBe(false);
+  });
+
   it("leaves nothing behind when the transaction breaks in the middle", async () => {
     const { ownerOne, adminOne } = await singleClient();
     const organizations = (await listOrganizations(app)).length;
@@ -209,6 +220,25 @@ describe("renaming and the first owner's invite", () => {
     expect(await acceptInvite(app, second.token, { name: "B", passwordHash: "senha" }, now)).toEqual({ ok: false, reason: "invalid" });
   });
 
+  it("keeps the first-owner invite valid when the organization only has a link that is not a member", async () => {
+    await singleClient();
+    const org = await createOrganization(app, "Vazia");
+    const invite = await createFirstOwnerInvite(app, org, { email: `a-${randomUUID()}@example.test`, name: "A" }, now);
+    if (!invite.ok) throw new Error(invite.reason);
+    // Um vínculo `support` (o "entrar como", fatia 5) não é alguém da equipe: a organização segue sem ninguém.
+    const support = (await owner.pool.query<{ id: string }>("insert into accounts (email, password_hash) values ($1, 'x') returning id", [`suporte-${randomUUID()}@example.test`])).rows[0]?.id;
+    await owner.pool.query("insert into users (organization_id, account_id, kind, email, name, role) values ($1, $2, 'support', $3, 'Suporte', 'admin')", [
+      org,
+      support,
+      `suporte-${randomUUID()}@example.test`,
+    ]);
+    expect(await findInviteByToken(app, invite.token, now)).toMatchObject({ role: "owner" });
+    const again = await createFirstOwnerInvite(app, org, { email: `b-${randomUUID()}@example.test`, name: "B" }, now);
+    if (!again.ok) throw new Error(again.reason);
+    const accepted = await acceptInvite(app, again.token, { name: "B", passwordHash: "senha" }, now);
+    expect(accepted).toMatchObject({ ok: true, organizationId: org });
+  });
+
   it("does not revive an ordinary invite whose creator left: the null creator alone is not the mark", async () => {
     const org = await createOrganization(app, "Vazia");
     const token = `t-${randomUUID()}`;
@@ -279,6 +309,20 @@ describe("the list of who administers (seção 3.2, regras da lista)", () => {
     const audit = await listInstallationEvents(app);
     expect(audit[0]).toMatchObject({ kind: "installation_admin_revoked", actorEmail: adminOne.email, subjectEmail: ownerOne.email, payload: { source: "panel" } });
     expect(audit[1]).toMatchObject({ kind: "installation_admin_granted", actorEmail: ownerOne.email, subjectEmail: adminOne.email });
+  });
+
+  it("does not count a marked account without an active member link as someone left to administer", async () => {
+    const { ownerOne, adminOne } = await singleClient();
+    const result = await addOrganization(app, { name: "Cliente", actorAccountId: ownerOne.accountId, shown: await shownFor(), keep: [adminOne.accountId] }, now);
+    if (!result.ok) throw new Error(result.reason);
+    // B tem a marca, mas o único vínculo dele foi desativado: não entra no painel (`findLoginAccount`).
+    await owner.pool.query("update users set disabled_at = $2 where id = $1", [adminOne.userId, now]);
+    expect(await marked(adminOne.accountId)).toBe(true);
+    expect(await revokeInstallationAdmin(app, ownerOne.accountId, ownerOne.accountId, now)).toEqual({ ok: false, reason: "last_admin" });
+    expect(await marked(ownerOne.accountId)).toBe(true);
+    // Com o vínculo de volta, B conta, e A pode sair.
+    await owner.pool.query("update users set disabled_at = null where id = $1", [adminOne.userId]);
+    expect(await revokeInstallationAdmin(app, ownerOne.accountId, ownerOne.accountId, now)).toEqual({ ok: true });
   });
 
   it("before the list is explicit, lists the founding owner and admin by role, and a removed mark keeps the role's right", async () => {

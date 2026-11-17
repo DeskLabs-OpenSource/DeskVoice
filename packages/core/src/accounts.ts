@@ -299,6 +299,8 @@ export type RevokeResult = { ok: true } | { ok: false; reason: "not_found" | "la
  * Tira a marca de uma conta. Recusa (`last_admin`) quando, sem ela, ninguém mais administraria a
  * instalação: depois de explícita, a lista nunca fica vazia. Enquanto a lista não é explícita, a
  * conta que também é dona ou administradora da fundadora continua administrando pela regra dela.
+ * Só conta quem consegue entrar no painel: a marca sem vínculo `member` ativo (a condição de
+ * `findLoginAccount`) não administra pela tela, e não impede a recusa.
  */
 export function revokeInstallationAdmin(db: Db, actorAccountId: string, accountId: string, now: Date): Promise<RevokeResult> {
   return withSystem(db, async (q) => {
@@ -308,7 +310,8 @@ export function revokeInstallationAdmin(db: Db, actorAccountId: string, accountI
     const others = await q.one<{ n: number }>(
       `select count(*)::int as n from accounts a
         where a.id <> $1
-          and (a.installation_admin_at is not null
+          and ((a.installation_admin_at is not null
+                and exists (select from users u where u.account_id = a.id and u.kind = 'member' and u.disabled_at is null))
                or (not exists (select from installation_settings where key = $2)
                    and exists (select from users u
                                  join installation_settings s on s.key = $3 and u.organization_id = (s.value #>> '{}')::uuid
