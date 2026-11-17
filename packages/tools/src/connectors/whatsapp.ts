@@ -1,4 +1,4 @@
-import { decryptSecret, type OrgQuery } from "@deskvoice/core";
+import { decryptSecret, TRUST_CALLER_ID_KEY, WHATSAPP_CONNECTOR_KEY, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
 import { safeFetch, type SafeFetchOptions, type SafeResponse } from "../net/safe-fetch";
 import { connectorBody, connectorHeaders } from "./http-request";
@@ -6,7 +6,7 @@ import { readSetting } from "../settings";
 import { sendViaDeskcomm } from "./deskcomm";
 import { sendViaWaha, wahaFromEnv, wahaSessionName, type WahaOptions } from "./waha";
 
-export const WHATSAPP_CONNECTOR_KEY = "whatsapp.connector";
+export { TRUST_CALLER_ID_KEY, WHATSAPP_CONNECTOR_KEY };
 
 // Como fica em `settings`: `token` cifrado com `encryptSecret`, o resto em claro. O tipo `waha` (o
 // número conectado por QR Code) não tem `url` nem `token`: o endereço e a chave são da instalação,

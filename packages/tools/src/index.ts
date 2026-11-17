@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./define-tool";
 export * from "./deps";
+export * from "./handoff";
 export * from "./load";
 export * from "./org-query";
 export * from "./run-tool";

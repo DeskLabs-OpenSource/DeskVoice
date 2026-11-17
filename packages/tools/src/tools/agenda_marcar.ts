@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agendaNotWired, agendaUnavailable } from "../agenda-speech";
+import { agendaNotWired, agendaUnavailable, agendaWaitLine } from "../agenda-speech";
 import { defineTool } from "../define-tool";
 import type { ToolDeps } from "../deps";
 
@@ -41,7 +41,7 @@ export function createAgendaMarcar(deps: ToolDeps = {}) {
         };
       }
 
-      ctx.say("Um instante, estou marcando.");
+      ctx.say(agendaWaitLine("booking", ctx.language));
       try {
         const appointment = await client.book({
           serviceType: input.service_type,

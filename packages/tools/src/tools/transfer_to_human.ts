@@ -1,7 +1,7 @@
 import { recordEvent } from "@deskvoice/core";
 import { z } from "zod";
 import { defineTool } from "../define-tool";
-import { notifyHumans } from "../notify";
+import { notifyHumans, withCallerContext } from "../notify";
 
 export default defineTool({
   name: "transfer_to_human",
@@ -33,7 +33,9 @@ export default defineTool({
       };
     }
     await recordEvent(ctx.q, ctx.callId, "transfer_started", { to, reason: input.reason, summary: input.summary }, ctx.clock.now());
-    await notifyHumans(ctx, `Ligação transferida para ${to}. Motivo: ${input.reason}\n\n${input.summary}`, { whatsapp: false });
+    // Quem recebe a transferência lê no aviso que o número já ligou. O aviso da transferência é só de painel.
+    const body = await withCallerContext(ctx, `Ligação transferida para ${to}. Motivo: ${input.reason}\n\n${input.summary}`);
+    await notifyHumans(ctx, body.panel, { whatsapp: false });
     await ctx.telephony.transfer(to);
     return { ok: true, message: "Transferência iniciada; o atendente recebeu o seu resumo. Não diga mais nada: a pessoa já está sendo conectada." };
   },

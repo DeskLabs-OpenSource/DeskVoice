@@ -3,6 +3,471 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.32.0] - 2026-11-17
+
+### Adicionado
+
+- **A mesma pessoa em várias organizações, com troca pelo topo da tela** Uma pessoa pode estar em mais de uma organização com a mesma conta. Quando o convite chega para um e-mail que já tem conta, a página pede a senha que a pessoa já usa, e não uma senha nova. O nome e o papel valem só naquela organização. O convite do primeiro dono, gerado na área da instalação, também aceita um e-mail que já tem conta, inclusive o de quem administra. Quem tem vínculo ativo em mais de uma organização ganha um seletor no topo da tela, e a troca acontece sem sair do painel. Quem tem uma organização só não vê nada novo. O login volta para a última organização usada, ou para a mais antiga se a última tiver sido desativada. Cada vínculo é independente dos outros. Desativar a pessoa numa organização não mexe nas outras, e removê-la de uma organização mantém a conta enquanto ela estiver em outra. A troca de senha encerra as outras sessões da conta em todas as organizações. Uma conta que tenha ficado sem nenhuma organização é tratada como conta nova no próximo convite: a pessoa define uma senha nova, e nada da conta antiga passa para ela. Crédito: @melgarafael.
+
+### Alterado
+
+- **O ambiente Barulhento também aparece nos agentes do Gemini Live** Na tela do agente, a escolha do ambiente de quem liga (Normal ou Barulhento) passa a aparecer também no motor Gemini Live, além do OpenAI Realtime. O que foi provado, numa instalação real com a 0.28.0 e o modelo `gemini-3.8-live`, é que o Gemini aceita a sessão em Barulhento, sozinho e junto do vocabulário do agente: a sessão abre. O que não foi medido é o efeito do Barulhento no ruído, em qualquer motor, e a prova do Gemini foi feita sem áudio de entrada. Nada muda para quem já instalou: o agente continua no ambiente que tinha. Nos outros motores, como o simulado, o campo continua escondido, e um agente que já está em Barulhento ali continua vendo o aviso e o botão "Voltar para Normal". Crédito: @melgarafael.
+
+## [0.31.0] - 2026-11-17
+
+### Adicionado
+
+- **O analista ao vivo ganha tela própria, campo no agente, linha separada em Custos e selo de temperatura** Nada muda para quem já instalou: nenhum agente tem analista, e o campo novo do agente nasce em "Nenhum". Em Configurações há uma seção nova, **Analistas**, onde o dono ou o administrador cria o analista, dá o nome, escolhe o modelo de decisão (só os que têm a chave salva, na tela do Filtro de fala), liga a temperatura e escreve as objeções, cada uma com o rótulo e a orientação que o agente recebe. Com o Jev, a tela mostra o mesmo aviso do filtro, só com o que a política de privacidade da TypeSafe diz, e pede a confirmação "O texto do que a pessoa fala na ligação vai para a TypeSafe."; sem ela, não salva, e a tela mostra quem confirmou e quando. Apagar um analista pede confirmação com o nome dele e dos agentes que ficam sem analista. Na tela do agente, o campo **Analista** liga o analista; com o motor Gemini Live, a tela avisa que este motor ainda não recebe orientação: o analista mede, mas não orienta. Na linha do tempo, a objeção aparece pelo rótulo do cadastro, e a orientação entregue aparece com o texto do cadastro atual (se ela foi editada depois, aparece o texto novo, e a tela diz isso); no motor sem orientação, a explicação aparece uma vez por chamada. O detalhe da chamada ganha um selo com a última temperatura lida, de 1 a 5. Em Custos, os pedidos do analista aparecem numa linha própria, separada do mesmo modelo usado pelo filtro de fala. Crédito: @melgarafael.
+- **O filtro de fala ganha tela própria em Configurações, e as marcas aparecem na linha do tempo** Nada muda para quem já instalou: o filtro de fala nasce desligado, e desligado a ligação é a mesma de antes. Em Configurações há uma seção nova, **Filtro de fala**, onde o dono ou o administrador salva e testa a chave do Jev (da TypeSafe) e o liga. Ligar pede a confirmação "O texto da ligação vai para a TypeSafe.", depois de um aviso que diz só o que a política de privacidade da TypeSafe diz (lida em 16/11/2026): a TypeSafe guarda os dados pessoais que recebe, como esse texto, pelo tempo que for razoavelmente necessário para prestar o serviço ou para os fins comerciais dela, sem prazo definido na política; a pedido, apaga esses dados ou os guarda de um jeito que não identifique a pessoa, quando eles não forem mais razoavelmente necessários, salvo se a lei a obrigar a guardá-los por mais tempo; e o serviço é hospedado nos Estados Unidos. A tela mostra quem confirmou e quando, e cada confirmação nova deixa um recibo no Registro da privacidade, que fica mesmo depois de desligar; os outros papéis veem e não mudam. O filtro só marca e sugere: na linha do tempo, a marca "pode ser fala de fundo" e a "leitura provável" de um termo do vocabulário aparecem embaixo da fala, que continua como foi ouvida, e a decisão que chegou tarde aparece como observação. Como pedir a exclusão à TypeSafe está no guia `docs/guides/filtro-de-fala.md` (também em inglês e espanhol). Crédito: @melgarafael.
+
+### Corrigido
+
+- **A tela da linha diz o que a central faz com o filtro desligado** Na linha por registro com o filtro desligado, a caixa "Aceita ligações de" se contradizia. Com endereços na lista, ela dizia "Aceita ligações de" a lista e, logo abaixo, que a central aceitava de qualquer endereço: agora a lista aparece como "Com o filtro ligado, aceitaria só de". Com a lista vazia, ela dizia ao mesmo tempo "nenhum endereço" e "qualquer endereço": agora, se a linha está na central com um nome que ainda não resolveu, a tela diz que ela aceita de qualquer endereço e que, mesmo com o filtro ligado, continua aceitando até o nome resolver; se a linha ainda não foi aplicada ou ficou de fora, a tela diz que ela não aceita ligação por enquanto e que, quando for aplicada, vai aceitar de qualquer endereço. As três línguas dizem a mesma coisa, e os estados com o filtro ligado não mudam. Crédito: @melgarafael.
+
+## [0.30.0] - 2026-11-17
+
+### Adicionado
+
+- **Área da instalação, para quem cuida de vários clientes num servidor só** Quem administra a instalação ganha "Administrar a instalação" no bloco da conta, ao lado do idioma e do botão de sair. A área tem três telas. Em Organizações, você lista, cria e renomeia organizações, e cada organização nova gera na hora o convite do primeiro dono. Esse convite guarda quem o gerou, fica na Auditoria e só vale enquanto essa conta administra a instalação. Em Administração, você vê quem administra a instalação e põe ou tira pessoas, mas a última pessoa da lista nunca sai. Em Auditoria fica registrado tudo o que foi feito ali, inclusive cada pedido de atualização. Quem tem um cliente só não vê nada novo na navegação principal. Numa instalação com uma organização, o dono e o administrador continuam administrando e atualizando como antes. Criar a segunda organização fixa a lista de quem administra a instalação, e isso não volta atrás. Antes de confirmar, a tela mostra os nomes de quem passa a administrar (os donos da primeira organização) e de quem deixa de administrar (os administradores dela), e você pode manter esses administradores na lista na mesma tela. A partir daí, a tela de atualização sai das Configurações e passa para a área da instalação. O dono de uma organização cliente não ganha a área da instalação. Crédito: @melgarafael.
+- **A voz da ElevenLabs existe como peça do motor, ainda sem tela** Nada muda numa instalação em funcionamento: nenhum agente usa a voz nova, e nenhuma tela a oferece. A ElevenLabs entra como uma peça do motor de voz: recebe o texto aos pedaços e devolve o áudio no formato do telefone. O custo é contado pelos caracteres enviados, com o preço publicado pela ElevenLabs e a data em que ele foi conferido, e é sempre marcado como estimado, porque a ElevenLabs não informa o consumo na resposta. Uma fala interrompida cobra o que já tinha sido enviado. A função `prepareFixedSpeech` também fica disponível: ela sintetiza de uma vez um conjunto de falas fixas, guarda o áudio na memória, separado por organização, e trata qualquer falha, inclusive a chave recusada, como recusa de abertura. Crédito: @melgarafael.
+
+## [0.29.0] - 2026-11-17
+
+### Requer atenção
+
+- **A central só aceita a ligação de uma linha que vem dos endereços dela** Nenhuma linha que já existe é cortada na atualização. A linha por IP passa a filtrar sem perder
+  nada: ela já só era reconhecida pelo endereço do servidor e pelos endereços extras, que são a mesma
+  lista do filtro. A linha por registro que já existe fica sem filtro, como antes, até alguém ligar
+  na tela: a tela mostra "Filtro desligado nesta linha" e o botão "Ligar o filtro". A linha por
+  registro cadastrada depois da atualização já nasce com o filtro ligado.
+
+  Depois de atualizar, abra Linha telefônica e, em cada linha por registro, confira a lista "Aceita
+  ligações de". Se a sua operadora registra a linha por um servidor e entrega as ligações por outro,
+  inclua os endereços de entrega em "Endereços extras de onde as ligações chegam" e salve antes de
+  ligar o filtro. Depois clique em "Ligar o filtro". Se as ligações de uma linha pararem de chegar
+  depois de ligar o filtro, inclua o endereço que falta em Endereços extras ou use "Desligar o filtro".
+
+### Adicionado
+
+- **O analista acompanha a ligação, mede a temperatura, reconhece a objeção e orienta o agente** Nada muda numa instalação em funcionamento: nenhum agente tem analista, e quem não tem não faz nenhum pedido a mais. Com um analista no agente (por enquanto só pela API), a cada fala de quem ligou ele pergunta ao modelo de decisão a temperatura da conversa e qual das objeções cadastradas a pessoa levantou. A fala vai só como dado: as perguntas e as opções são fixas ou escritas pelo operador, e uma escolha fora da lista não orienta e não é guardada. Quando a objeção é reconhecida com confiança de 80% ou mais, o agente recebe a orientação que o operador escreveu para ela, uma vez por objeção em cada trecho da ligação, por um caminho que não vira fala. Nada na voz espera o analista: o pedido tem prazo de 1 segundo, e a resposta que chega depois de uma nova fala de quem ligou é descartada como velha. Se o analista falhar, a ligação segue igual, e a linha do tempo diz por quê. Se a fala do agente repetir seis palavras seguidas da orientação, a linha do tempo registra o vazamento. O custo de cada pedido entra no extrato marcado como do analista, soma no custo da ligação e conta no teto do agente, junto com a voz e o filtro da fala. O pedido sem consumo lido (atrasado, sem rede ou com resposta fora da forma) entra por estimativa, marcada. Uma resposta de sobrecarga do Jev (HTTP 529) é resposta, e não falta de rede: fica sem custo e não conta no teto. O motor Gemini Live ainda não recebe orientação: o analista mede, mas não orienta. Com o motor OpenAI Realtime, que o item de sistema sozinho nunca gere resposta, e que a orientação mude de fato a resposta do agente, ainda não foi medido numa ligação real. Crédito: @melgarafael.
+
+### Alterado
+
+- **A central só aceita a ligação de uma linha que vem dos endereços dela** A central de telefonia passa a filtrar a entrada linha por linha: cada linha só aceita ligações
+  dos endereços que a tela mostra em "Aceita ligações de", e a ligação que se apresenta como aquela
+  linha vinda de qualquer outro endereço é recusada. Na linha por IP, valem o endereço do servidor e
+  os endereços extras; na linha por registro, o IP do servidor ou, quando ele é um nome, os endereços
+  que o nome devolveu nas últimas 24 horas (até 16), mais os endereços extras. Juntar as respostas
+  de 24 horas evita recusar uma ligação válida quando o DNS da operadora devolve só uma parte dos
+  endereços a cada consulta. O endereço liberado para a linha de uma organização nunca entra na linha
+  de outra. Se o nome da operadora deixar de resolver, a linha continua aceitando os endereços que o
+  nome tinha, mas um endereço extra que você removeu deixa de ser aceito na hora. Enquanto o nome de
+  uma linha por registro nunca tiver resolvido, o filtro dessa linha fica desligado, mesmo com
+  endereços extras, e a tela diz isso. Na linha por registro, o filtro se liga e se desliga na tela,
+  com os botões "Ligar o filtro" e "Desligar o filtro"; a linha por IP filtra sempre. A porta 5060
+  continua publicada como antes, e nada muda no instalador nem no arquivo `.env`. Crédito:
+  @webtecnica, pela medição numa instalação real que mostrou a central respondendo a qualquer origem.
+
+## [0.28.0] - 2026-11-17
+
+### Requer atenção
+
+- **A senha passa a morar numa conta, separada da organização, e a atualização fica com quem administra a instalação** Depois desta versão, não dá para voltar só trocando a versão. `bash install/update.sh --to 0.27.0`
+  termina dizendo que está tudo saudável, mas ninguém consegue fazer login no painel, porque a
+  versão anterior procura a senha onde ela não está mais (quem já estava com o painel aberto
+  continua). A volta é pelo backup que o atualizador fez na ida para esta versão. Ele é o backup
+  mais recente cuja versão é a 0.27.0, e o comando abaixo, rodado na pasta do DeskVoice, mostra
+  qual é. Anote o resultado antes de voltar:
+
+      grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1 | xargs dirname
+
+  Para voltar, troque a versão e depois restaure esse backup, colando exatamente o que o comando
+  mostrou (ele já começa com `backups/`):
+
+      bash install/update.sh --to 0.27.0
+      bash install/restore.sh <exatamente o que o comando mostrou>
+
+  Não use `restore.sh latest` nem o backup que o `update.sh --to 0.27.0` mostra no fim como
+  "Backup de antes da atualização": esse foi feito na volta, com o banco desta versão, e restaurá-lo
+  não devolve o login. O backup da ida só fica guardado enquanto a rotação o mantiver, que guarda os
+  14 mais recentes. A restauração devolve o banco ao momento desse backup: o que entrou depois de
+  atualizar (ligações, pendências, mudanças feitas no painel) se perde.
+
+### Adicionado
+
+- **Os analistas ao vivo passam a existir no banco e na API** Nada muda numa instalação em funcionamento: nenhuma organização tem analista, nenhum agente usa um, e nenhuma tela os oferece ainda. A API passa a cadastrar analistas, cada um com um nome único na organização (sem diferença de maiúsculas: "Jev" e "jev" são o mesmo), o modelo de decisão que ele usa e até oito objeções com a orientação que o agente receberá, e o agente passa a aceitar um analista desta organização. Um modelo de decisão que manda o texto da ligação para fora do servidor, como o Jev da TypeSafe, só é aceito com a confirmação que nomeia o fornecedor; quem confirmou e quando ficam no analista, e a confirmação entra no Registro da privacidade com o nome da pessoa, que continua lá mesmo se ela sair da equipe. Apagar um analista deixa os agentes sem ele e diz quantos eram. Crédito: @melgarafael.
+- **O motor de voz passa a aceitar uma orientação para o agente que não vira fala** Nada muda numa instalação em funcionamento: é a primeira peça dos analistas ao vivo, e ninguém a usa ainda. O motor OpenAI Realtime passa a aceitar um contexto para o agente durante a ligação, entregue como item de sistema, sem pedir resposta e sem passar pela fala; se o agente estiver falando, a orientação espera a fala acabar. O motor simulado guarda a orientação e ganha um passo de roteiro que fala uma versão ou outra conforme recebeu orientação, para o teste da ligação inteira. O Gemini Live ainda não recebe orientação, porque o caminho que a documentação oferece interromperia a fala do agente. Que o item de sistema sozinho nunca gere resposta no provedor real ainda não foi medido. Crédito: @melgarafael.
+
+### Alterado
+
+- **A senha passa a morar numa conta, separada da organização, e a atualização fica com quem administra a instalação** Quem entra no painel continua entrando com o mesmo e-mail e a mesma senha, na mesma organização e
+  com o mesmo papel. Os aparelhos que já estavam conectados continuam conectados. Nada muda na tela e
+  não há nada a fazer depois de atualizar. Por trás, a senha sai do cadastro da equipe e passa para
+  uma conta que nenhuma tela presa a uma organização consegue ler. É o primeiro passo para uma mesma
+  pessoa cuidar de vários clientes numa instalação só. Pedir a atualização pelo painel passa a ser de
+  quem administra a instalação, e numa instalação com uma organização são as mesmas pessoas de
+  antes: o dono e o administrador. A exceção é a instalação que já tinha mais de uma organização,
+  criada direto no servidor: nela, só os donos ativos da organização mais antiga continuam pedindo a
+  atualização, e o registro da instalação guarda isso. Se ninguém mais conseguir pedir, o comando
+  `bash install/grant-installation-admin.sh <e-mail>`, rodado de dentro do servidor, devolve o papel a
+  uma conta. Crédito: @melgarafael.
+
+## [0.27.0] - 2026-11-17
+
+### Adicionado
+
+- **Para quem contribui, uma skill nova para afinar um agente de voz com dados da operação** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e trabalha com um
+  assistente de código. A skill `deskvoice-agente-de-voz` atende o "as respostas da IA estão ruins":
+  diagnostica pela análise da ligação, pela linha do tempo e pela configuração do agente, sem tirar
+  transcrição nem telefone da instalação; revisa as instruções para a fala (frases curtas, sem
+  formatação, número e e-mail ditos, uma fala para quando algo falha); só troca o texto depois de
+  mostrar o antes e o depois e receber o sim da pessoa; e ensina a medir o efeito pela análise das
+  ligações antes e depois da troca, sem afirmar que melhorou. O vocabulário do agente, que ainda não
+  tem campo na tela, é tratado como uma dica que o provedor pode ignorar, e a skill não o troca até a
+  tela existir: registra a lista aprovada para aplicar depois. A skill de métricas passa a
+  apontar para ela. Crédito: @melgarafael.
+- **O agente pode mandar uma mensagem no WhatsApp para quem ligou quando a ligação cai** O bloco "Quando a ligação cai", na tela do agente, ganha a opção "Mandar uma mensagem no WhatsApp para quem ligou", com um campo para o texto, de até 300 caracteres. O texto é fixo, escrito por quem configura, e sai como está: nada da conversa entra nele, porque o número que ligou pode não ser de quem ligou. Vazio, vale um texto padrão na língua do agente, que começa dizendo o nome da organização. A tela avisa que a mensagem escreve primeiro para um número que pode nunca ter falado com o WhatsApp da central, o que pode levar a restrição ou bloqueio do número. A opção só funciona com o WhatsApp conectado e com "Confiar no número exibido na ligação" ligado, em Configurações → WhatsApp; sem isso, aparece desabilitada e diz por quê. Número na lista de não ligar não recebe a mensagem, e cada número recebe no máximo uma a cada 24 horas. Um teto de mensagens por organização protege o número: no máximo 3 por hora e 20 a cada 24 horas. A segunda queda do mesmo número nesse prazo, a mensagem acima do teto, ou a que não pôde sair, abre uma pendência para alguém retornar. A linha do tempo da ligação diz se a mensagem entrou na fila, saiu ou não saiu, e o apagamento a pedido do titular apaga também o número guardado na mensagem. A definição de queda na tela passa a citar o caso de quem ouve o agente pedir para repetir: "Conta como queda quando o sistema falha, quando quem ligou fica alguns segundos sem resposta e desliga, quando ouve o agente pedir para repetir e desliga sem voltar a falar, ou quando a linha cai durante uma ação do agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta." Todo agente que já existe continua no modo que tinha, e nada muda para quem não escolher a opção nova. Crédito: @melgarafael.
+
+## [0.26.0] - 2026-11-17
+
+### Adicionado
+
+- **Para quem contribui, o Claude Code implementa uma fatia de desenho com um verificador separado** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e contribui. No Claude
+  Code, `/deskvoice-fatia <desenho> <número>` lê a fatia de um desenho de `docs/specs/`, cria um
+  worktree descartável, chama um implementador com o contrato e o aceite palavra por palavra e depois
+  um verificador que não pode escrever e tenta derrubar a entrega, até ele aprovar ou até três
+  voltas. O comando não envia nada ao GitHub: o ramo fica local, e abrir o PR é com a pessoa. O aviso
+  de identidade do commit passa a olhar o e-mail que o commit vai gravar de fato, e não só o do
+  `git config`: some o aviso falso de quem passa o e-mail certo pelo ambiente, e aparece o de quem
+  recebe um `root@` de lá. Crédito: @melgarafael.
+- **Para quem contribui, duas skills novas: ler as métricas com régua declarada e aplicar o sistema vivo a uma peça** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e trabalha com um
+  assistente de código. A skill `deskvoice-metricas` lê como está a operação (ligações, desfecho, nota
+  da análise, custo, falhas, fila, ligações de saída) primeiro pelas telas e depois por consultas só
+  de leitura, filtradas pela organização, sem transcrição, nome ou telefone; cada número sai com
+  período, fuso e definição. A skill `deskvoice-sistema-vivo` percorre as perguntas da doutrina do
+  sistema vivo para uma peça nova e diz onde conferir cada resposta no código, apontando para a lei
+  em vez de copiá-la. A skill de contribuição passa a dizer que o aviso de identidade olha a
+  identidade efetiva do commit, como o gancho já faz. Crédito: @melgarafael.
+- **O agente pode abrir uma pendência quando a ligação cai no meio da conversa** A tela do agente ganha o bloco "Quando a ligação cai", com duas opções: "Não fazer nada", o
+  padrão, e "Abrir uma pendência para alguém retornar". Conta como queda a ligação recebida e
+  atendida em que o sistema falhou, em que quem ligou ficou alguns segundos sem resposta (além do
+  prazo da guarda do silêncio) e desligou (inclusive quem ouviu o agente pedir para repetir e desligou
+  sem voltar a falar), ou em que a linha caiu durante uma ação do agente. Quem desliga depois de se
+  despedir, ou enquanto o agente fala, não conta; também não conta a ligação sem número nem aquela em
+  que alguém já ficou com o próximo passo (transferência, recado, pendência, aviso ou WhatsApp
+  enviado). Com a pendência escolhida, o supervisor
+  abre uma por ligação, para o dono das pendências do agente, e a linha do tempo diz o que aconteceu;
+  o motor de voz que caiu continua abrindo a pendência como hoje. Na ligação simulada, a linha do tempo
+  diz o que teria acontecido, e nada é aberto. O fim da ligação passa a registrar se a vez estava
+  aberta quando quem ligou desligou e, depois de um pedido para repetir, se quem ligou falou de novo.
+  Todo agente que já existe fica em "Não fazer nada", e o comportamento de hoje não muda. Crédito:
+  @melgarafael.
+
+## [0.25.0] - 2026-11-16
+
+### Adicionado
+
+- **A lista de Chamadas e a tela de Custos dizem o que não foi medido e o que é estimativa** Na lista de Chamadas, a ligação em que nada pôde ser medido não aparece mais como R$ 0,00: ali
+  está escrito "Não medido", e a ligação com uma parte sem medida mostra o valor com "+ parte não
+  medida", como já fazia a tela de Custos. A linha do extrato com custo estimado agora aparece marcada
+  com "inclui estimativa" na lista, no detalhe da chamada e em Custos (no total, no dia, no agente e
+  no motor), e um aviso em Custos explica que a estimativa conta no total e no teto e é feita para
+  ficar acima do real. Hoje a linha estimada só nasce do filtro da fala (um pedido cujo consumo não
+  foi lido), e o filtro vem desligado: quem não o ligou não vê essa marca. O aviso do custo não
+  medido deixa de culpar o provedor: ele diz que o consumo não pôde ser medido. Na API,
+  `GET /api/v1/calls` ganha `unmeasuredCount` e `estimatedCount` em cada ligação;
+  `GET /api/v1/calls/{id}` ganha `estimatedCount` no total e os dois campos em cada agente de
+  `costByAgent`; e `GET /api/v1/system/costs` ganha `estimatedCount` no total e em cada dia, agente e
+  motor. Os campos de antes não mudam. Nada a configurar em instalações existentes. Crédito:
+  @melgarafael.
+
+## [0.24.0] - 2026-11-16
+
+### Adicionado
+
+- **Quem lê a ligação se escolhe na tela, e o custo não medido aparece como não medido** Na seção da análise, em Configurações, "Quem lê a ligação" escolhe entre o motor do agente (o
+  padrão, como antes) e um cérebro com chave aceita em Configurações → Cérebros, com um modelo da
+  lista dele, buscável por nome. Ao escolher um modelo sem preço conhecido, um aviso diz, antes de
+  salvar e depois de salvo, que o custo da análise não vai ser medido e que ela só roda nas ligações
+  de agentes com teto de custo. Se o cérebro escolhido perde a chave, ou o modelo sai da lista, a tela
+  diz que as ligações não estão sendo lidas. Remover a chave do cérebro escolhido avisa isso antes.
+  Em Custos e na tela da chamada, a ligação lida por um modelo sem preço conhecido, ou cujo consumo não pôde ser medido, mostra "não medido", e nunca
+  um custo zero como se fosse grátis. Na API, `GET /api/v1/system/costs` ganha `unmeasuredCount` no
+  total e em cada dia, agente e motor, e `GET /api/v1/calls/{id}` ganha `unmeasuredCount` no total da
+  chamada: quantas linhas do extrato não têm custo medido. Os campos de antes não mudam. A lista de modelos de um cérebro que falha ao ser relida
+  continua a guardada, marcada como velha. Sem escolha, nada muda em instalações existentes. Crédito: @melgarafael.
+
+### Corrigido
+
+- **O pedido do filtro da fala que falha grava um custo estimado, e não zero** Quando o filtro da fala de quem liga pergunta ao Jev e a resposta chega atrasada, não chega por
+  falta de rede ou chega fora da forma, o extrato de custo ganha uma linha com uma estimativa pelo
+  texto enviado, marcada como estimada, e ela entra no total da ligação e no teto de custo do agente.
+  Antes, esse pedido não deixava custo nenhum. O filtro continua nascendo desligado: quem não o
+  ligou não vê nada diferente, e as linhas que já estão no extrato ficam como estão. Nada muda em
+  instalações existentes. Crédito: @melgarafael.
+- **O agente configurado como en-US ou es-MX fala inglês ou espanhol também na passagem e na agenda** Com o idioma do agente escrito com região (`en-US`, `es-MX`), a saudação da passagem entre agentes e as falas das ferramentas de agenda saíam em português, porque cada uma escolhia o idioma por um mapa de três valores e o que ficava fora dele caía no pt-BR. Agora as duas leem o idioma pelo prefixo, num único lugar: `en-US` fala inglês, `es-MX` fala espanhol, e `pt-BR`, `en` e `es` continuam exatamente como eram. Idioma que as falas não têm, campo vazio ou texto qualquer seguem no português, sem erro. O aviso da caixa postal continua no idioma escolhido em Configurações › Chamadas, sem mudança. Nada a configurar em instalações existentes. Achado na revisão do #344. Crédito: @webtecnica.
+
+## [0.23.1] - 2026-11-16
+
+### Corrigido
+
+- **A memória do número chega ao agente sem o telefone no título da pendência e dentro do teto também na passagem** Com a memória do número ligada, a pendência que o supervisor abre ("Retornar para +55…: o caso") chegava ao agente com o telefone de quem ligou no título. Agora o agente recebe "Retornar para este número: o caso", e outro telefone que apareça no título vira "[número]". O título salvo não muda, e a tela das pendências continua mostrando o número. Na passagem entre agentes, o teto de 1 500 caracteres passa a valer para o bloco inteiro que o agente de destino recebe, com o motivo e o resumo da passagem: as notas mais velhas saem primeiro, o motivo e o resumo nunca são cortados, e a linha do tempo registra de novo o que o agente de destino recebeu, só com a contagem e o tamanho. Com a memória desligada, que é como ela vem, nada muda. Achado na revisão do #327. Crédito: @melgarafael.
+
+## [0.23.0] - 2026-11-16
+
+### Adicionado
+
+- **O desfecho e a análise da ligação podem ser lidos por um cérebro escolhido** Com a chave de um cérebro salva em Configurações → Cérebros, a configuração `calls.analysis_brain`
+  escolhe um cérebro e um modelo da lista dele para ler as ligações: o desfecho e a análise passam a
+  sair desse modelo, na frente do motor de voz e do endpoint de classificação. O extrato de custo
+  ganha o modelo cobrado e a marca de custo medido. Um modelo sem preço conhecido só é aceito com
+  confirmação, só lê ligações de agentes com teto de custo, e a linha dele no extrato fica marcada
+  como custo não medido; o total da ligação e o de Custos ainda contam esse custo como zero, e as telas não avisam. Se o cérebro escolhido ficar sem chave, sumir ou o modelo sair da
+  lista, a ligação não é lida, a linha do tempo diz por quê, e nada vai ao motor de voz. A escolha ainda não tem tela; hoje é pela API do painel, com
+  `PUT /api/v1/settings/calls.analysis_brain`. Sem escolha, tudo segue como antes. Nada muda em instalações
+  existentes. Crédito: @melgarafael.
+
+## [0.22.0] - 2026-11-16
+
+### Adicionado
+
+- **Cérebros, uma tela para as chaves e os modelos de texto de cada provedor** Em Configurações → Cérebros, quem configura a instalação cola a chave da Anthropic, da OpenAI, do
+  Gemini, da DeepSeek ou do OpenRouter e vê na hora o resultado do teste e a lista de modelos de texto
+  que aquela chave alcança, lida do provedor. Cada modelo mostra o preço de entrada e de saída por
+  milhão de tokens, com a fonte e a data, ou a marca "sem preço conhecido"; os modelos da DeepSeek ficam sem preço, porque ela cobra conforme
+  a hora do pedido. A chave fica cifrada no
+  servidor e não volta à tela, e trocar ou remover a chave apaga a lista da anterior. A lista é relida
+  pelo botão Atualizar lista e quando passa de um dia. A chave do cérebro é separada da chave do motor
+  de voz. Ainda nenhum cérebro lê a ligação: a escolha para a análise vem numa próxima versão. Nada
+  muda em instalações existentes. Crédito: @melgarafael.
+- **A base do filtro da fala de quem liga, desligada de fábrica** O processo de voz ganhou o filtro que lê o texto do que a pessoa disse e o marca, sem nunca apagar nem trocar a fala: a marca "pode ser fala de fundo" e a sugestão de leitura de um nome do vocabulário do agente ("leitura provável: Melgaço") ficam ao lado do texto ouvido, e o custo de cada pedido entra no extrato da chamada. Ele nasce desligado, e ainda não há tela para ligá-lo: quem já instalou não vê diferença nenhuma, nenhum texto sai do servidor e nenhuma linha nova aparece na linha do tempo. A escolha do modelo, a chave e a confirmação do envio do texto ao fornecedor chegam com a tela, na próxima entrega. Crédito: @deskcomm-bot.
+
+## [0.21.0] - 2026-11-16
+
+### Adicionado
+
+- **Base do catálogo de cérebros, com OpenAI e OpenRouter** O DeskVoice ganha a peça que lista os modelos de texto que uma chave da OpenAI ou do OpenRouter
+  alcança, lida da API do provedor e nunca de uma lista fixa, com o preço de cada modelo, a fonte e a
+  data, ou a marca de preço não conhecido. Ainda não há tela nem uso na ligação: os dois chegam nas
+  próximas entregas do catálogo. Nada muda em instalações existentes. Crédito: @melgarafael.
+- **Para quem contribui, o Claude Code ganha uma triagem de PR que só lê** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e revisa PRs. No
+  Claude Code, `/deskvoice-triagem-de-pr <número>` baixa o PR num worktree descartável, mede o diff
+  contra a régua da `main` (o que o CI não vê, os antipadrões e as regras de produto), roda a suíte
+  se a pessoa autorizar, passa o resultado por um cético e imprime um rascunho de parecer no formato
+  do `GOVERNANCE.md`, com o que não foi medido. Ele não publica nada no GitHub: quem publica, se
+  quiser, é a pessoa. PR que toca instalador, workflow, imagem, dependências, autenticação,
+  isolamento ou atualização sai com "pede segunda leitura de um mantenedor". Crédito: @melgarafael.
+- **O agente pode começar a ligação sabendo as notas e as pendências abertas do número** Em Configurações, no painel de privacidade, junto do prazo da memória, há uma chave nova: "Entregar
+  ao agente a memória do número". Ligada, o agente começa cada ligação, recebida ou feita pelo
+  sistema, com as notas guardadas sobre o número (até 10, dentro do prazo da memória) e os títulos
+  das pendências abertas dele (até 5), num bloco de no máximo 1 500 caracteres, que ele recebe como
+  dado e não como instrução. O resumo e as falas de ligações anteriores nunca entram, nem as notas e
+  pendências de chamadas simuladas. A linha do tempo da chamada mostra quantas notas e pendências
+  entraram, sem o texto. A tela avisa que o número exibido pode ser forjado e que o agente pode
+  repetir o que sabe para quem fingir ser a pessoa. Só dono ou administrador muda a chave, e cada
+  mudança fica no histórico de privacidade. Ela vem desligada: para quem já instalou, nada muda até
+  alguém ligá-la. Crédito: @melgarafael.
+
+## [0.20.0] - 2026-11-16
+
+### Adicionado
+
+- **A tela da linha mostra de quais endereços a central vai aceitar a ligação dela** Cada linha telefônica passa a mostrar "Vai aceitar ligações de: …", com os endereços de onde a
+  central vai aceitar a ligação daquela operadora quando o filtro de entrada for ligado: na linha por
+  IP, o endereço do servidor e os endereços extras; na linha por registro, o IP do servidor ou, quando
+  ele é um nome, os endereços para os quais o nome resolve (com a hora da última atualização). O
+  processo de voz recalcula a lista a cada vez que as linhas são aplicadas e de 5 em 5 minutos; se o
+  nome deixar de resolver, a lista fica como estava e a linha pede atenção com o motivo. O campo de
+  endereços extras aparece também na linha por registro, para a operadora que registra por um servidor
+  e entrega a ligação por outro: na linha por registro ele só vai valer para a entrada, e a linha continua
+  reconhecida pelo registro. Nada muda no que a central aceita: hoje ela ainda aceita ligações de
+  qualquer endereço, e a tela diz isso; a lista é o que um filtro futuro vai liberar, mostrada antes
+  de ele existir. Crédito: @melgarafael.
+
+### Alterado
+
+- **Os hooks de contribuição armados não mudam com o ramo em que você está** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e contribui. O
+  `arm-hooks.sh` da skill `deskvoice-contribuir` agora copia os hooks de git da `main` para dentro
+  do `.git` do clone, e eles ficam iguais em qualquer ramo e em qualquer worktree; quando os hooks
+  mudarem na `main`, rode `git fetch` e arme de novo. Se você já tinha armado os hooks, rode de novo
+  `bash .agents/skills/deskvoice-contribuir/scripts/arm-hooks.sh`, e o lembrete de início de sessão
+  avisa enquanto isso não for feito. Crédito: @melgarafael.
+
+## [0.19.2] - 2026-11-16
+
+### Corrigido
+
+- **O motor de voz que não está disponível na instalação não manda mais cadastrar a chave** Quando o agente aponta para um motor de voz que a instalação não tem, a ligação recusada e a tela
+  "Falar com o agente" agora dizem que o motor não está disponível nesta instalação e mandam escolher
+  outro motor na tela do agente, em vez de mandar cadastrar a chave. Na linha do tempo, a recusa por
+  motor que não está pronto deixa de afirmar "sem chave cadastrada" quando a chave existe e não pôde
+  ser lida, e aponta para o aviso do painel, que traz o motivo. A ligação sem chave cadastrada continua
+  com o aviso de antes. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+- **A passagem entre agentes aceita o destino escrito com o rótulo, como aparece nas instruções** As instruções do agente listam cada destino de passagem com o nome e, entre parênteses, o rótulo
+  dele, como "Financeiro (Cobrança)". Numa ligação real, o agente pediu a passagem com a linha inteira
+  e ela foi recusada na primeira tentativa; pela transcrição, o agente disse em seguida que ia
+  ajustar o destino. Agora o nome com o rótulo, como listado, também passa a ligação. Destino fora da lista
+  continua recusado. Nada a fazer em instalações existentes. Crédito: @melgarafael.
+
+## [0.19.1] - 2026-11-16
+
+### Adicionado
+
+- **Para quem contribui, as skills aparecem no Codex e o guia de contribuição explica o pré-voo** Nada muda para quem opera uma instalação: isto é para quem clona o projeto e contribui. Cada skill
+  de `.agents/skills/` ganhou `agents/openai.yaml`, o arquivo pelo qual o Codex mostra a skill e a
+  carrega sozinho, e uma cerca reprova a skill nova que nascer sem ele. A skill `deskvoice-contribuir`
+  ganhou duas referências: o pré-voo item a item (o que cada linha do `preflight.sh` quer dizer e o
+  que fazer quando ela acusa) e a receita para rodar na própria máquina os testes de banco, a chamada
+  simulada e os testes de tela. O hook `pre-commit` passa a avisar, sem bloquear, quando o commit vai
+  sair com e-mail de máquina (`root@vps-…`), que não dá crédito a ninguém no GitHub. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A ligação recusada pelo provedor de voz diz o motivo dele e não manda mais cadastrar uma chave que já existe** Quando o provedor de voz recusava a sessão com a chave cadastrada, por exemplo porque o crédito
+  pré-pago acabou ou porque recusou a chave, ou quando a VPS não alcançava o provedor pela rede, a
+  ligação era registrada como "motor de voz sem chave cadastrada", e o aviso no painel mandava
+  cadastrar a chave sem dizer o que o provedor respondeu (no Gemini, ainda sugeria "chave ou modelo
+  inválido?"). Agora esses casos têm motivo próprio na linha do tempo, "o provedor do motor de voz
+  recusou a sessão ou não foi alcançado", e o aviso no painel traz o código e o motivo que o provedor
+  ou a rede deu, como "Your prepayment credits are depleted" quando o crédito pré-pago do Google
+  acabou, e manda conferir o crédito e os limites na conta do provedor, a chave e a rede da VPS. O
+  mesmo motivo do provedor passa a aparecer no aviso quando o OpenAI Realtime fecha a conexão antes de
+  confirmar a sessão. A ligação sem chave cadastrada continua com o aviso de antes. Nada a fazer em
+  instalações existentes. Crédito: @melgarafael.
+
+## [0.19.0] - 2026-11-16
+
+### Adicionado
+
+- **A ligação que termina sem próximo passo abre uma pendência sozinha** A partir desta versão, quatro tipos de ligação abrem sozinhos uma pendência "Retornar para +55…",
+  com o caso numa frase, o link da ligação, dono, prazo e lembrete como qualquer pendência: o motor
+  de voz caiu ou não estava pronto; a transferência para uma pessoa falhou e ninguém foi avisado; quem
+  ligou desligou esperando uma aprovação; a mensagem de WhatsApp não saiu e ninguém abriu pendência. O
+  dono é o configurado no agente que atendeu ("Dono das pendências"), ou a equipe. Quem faz isso é uma
+  revisão por regras fixas, depois de cada ligação: não usa inteligência artificial, não gasta e não lê
+  o que foi dito. Há no máximo uma pendência dessas por ligação, e ela não vem de ligação simulada, de
+  recusa por regra da organização nem de ligação sem número. Não há interruptor: quem já instalou passa
+  a ver essas pendências em Pendências sem configurar nada, e elas saem no apagamento a pedido do
+  titular e na exportação como as outras. Crédito: @melgarafael.
+
+## [0.18.0] - 2026-11-16
+
+### Alterado
+
+- **Custos e a tela da chamada mostram quanto cada agente gastou numa ligação com passagem** Numa ligação passada de um agente para outro, a tela de Custos põe o custo de cada trecho no agente
+  em que a ligação estava, e não mais tudo no que atendeu. Se o agente de um trecho for apagado, o
+  custo desse trecho volta para o agente que atendeu; só fica em "Agente apagado" quando o que atendeu
+  também foi apagado. A tela da chamada segue a mesma regra. Uma ligação com passagem conta para cada
+  agente na contagem de chamadas, e a tela diz isso. Os minutos de cada motor de voz também saem dos
+  trechos: uma ligação que começou num motor e passou para um agente de outro motor divide a duração
+  entre os dois. A tela da chamada mostra, abaixo do custo, quanto cada agente gastou, quando a
+  ligação passou por mais de um. O total do período não muda. Quem nunca usou a passagem vê Custos
+  igual a antes; a passagem gravada antes desta versão continua com os minutos inteiros no motor que
+  atendeu, porque o evento dela não guardava o motor. Apagar dois agentes de uma vez não recusa mais a
+  limpeza da lista "Pode passar a ligação para". Crédito: @melgarafael.
+
+## [0.17.0] - 2026-11-16
+
+### Adicionado
+
+- **O agente passa a ligação para outro agente no meio da conversa** Na tela do agente, "Pode passar a ligação para" lista os outros agentes da organização, com nome e
+  papel. Marcado um deles, o agente pode passar a ligação para ele no meio da conversa: a sessão do
+  próximo abre antes de a atual fechar, e ele continua a partir de um resumo, com as instruções, as
+  ferramentas, a voz e o motor dele. A regra de quando passar fica escrita nas instruções, são no
+  máximo 3 passagens por ligação, passar não zera o tempo nem o custo (vale a menor duração e o menor
+  teto entre os agentes por onde ela passou), e no extrato o custo de cada trecho fica com o agente em
+  que ela estava. A linha do tempo mostra a passagem (de quem, para
+  quem, o motivo e o resumo recolhido), e as falas seguintes levam o nome do novo agente. Apagar um
+  agente o tira da lista dos outros, que continuam editáveis; a chamada simulada usa o motor simulado
+  também no agente que recebe, sem custo de provedor; e quem desliga durante a troca tem a ligação
+  solta na hora. A passagem foi provada só com o motor simulado, ainda não numa ligação com provedor
+  de voz; se o provedor recusar a sessão do próximo agente, o agente atual continua na linha. A lista
+  vem vazia, e quem não marcar nada não vê mudança no atendimento. Crédito: @melgarafael.
+
+### Alterado
+
+- **O aviso do instalador sobre o firewalld diz o que foi medido com a regra do DOCKER-USER** Com o `firewalld` ativo, o instalador já avisava que ele não filtra as portas publicadas pelo Docker, e dizia que a regra na cadeia `DOCKER-USER` tinha sido medida só com o `ufw`. Agora ela foi medida também com o `firewalld`, numa VPS AlmaLinux: fecha a porta TCP, mas some ao reiniciar a máquina e deixa a porta aberta por alguns segundos a cada `firewall-cmd --reload`. O aviso passa a dizer isso, e a medida está em `docs/fundacao/ufw-e-docker.md`. Nada muda numa instalação. Crédito: @melgarafael.
+
+## [0.16.0] - 2026-11-16
+
+### Adicionado
+
+- **Bancada de voz prepara o antes e depois do ambiente barulhento contra o OpenAI e o Gemini** Uma medida manual nova na bancada de voz (`scripts/bancada-de-voz/ambiente-barulhento.ts`) toca
+  para cada motor de hoje, no ritmo de uma ligação, frases sintéticas no meio de obra, música e
+  conversa, nos modos "normal" e "barulhento", com e sem a guarda contra o silêncio. Ela mede o tempo
+  até o agente responder, conta as interrupções falsas pelo evento do motor e confere que a guarda
+  não fala por cima de uma frase longa. Exige um teto de gasto e, sem a chave do motor, não gera áudio
+  nem abre sessão. Ainda não rodou contra o provedor: espera a chave. Nada muda numa instalação: não
+  roda no CI e não entra na imagem. Crédito: @melgarafael.
+- **Bancada de voz mede a redução de ruído por quadro, debaixo de ruído e em fluxo** A medida manual da redução de ruído na bancada de voz (`scripts/bancada-de-voz/`) passa a medir a
+  fala baixa quadro a quadro (o quarto mais fraco dos quadros de 20 ms com fala, acima de 1 dB de
+  perda média reprova), a mesma fala baixa debaixo de obra, música e conversa de fundo (só a parte da saída que é voz, sem o ruído que sobra), e a CPU com o
+  áudio entregue em pedaços de 20 ms, um de cada vez, como a ponte manda. Só RNNoise e DeepFilterNet;
+  o DeepFilterNet em fluxo usa o plugin de tempo real que o próprio projeto publica, baixado à parte.
+  Nenhum deles entra no produto: não roda no CI, não entra na imagem e não muda nada numa instalação.
+  Crédito: @melgarafael.
+- **Apagar uma nota do agente e "Esquecer este número"** Cada nota do agente no bloco "Este número", na tela da chamada, ganha o botão "Apagar", que pede
+  confirmação antes de apagar. Em Configurações → Privacidade, o dono ou administrador ganha
+  "Esquecer este número": informa o telefone, e a confirmação nomeia o número e diz o que fica. Saem
+  as notas do agente sobre esse número e as pendências fechadas dele (feitas ou canceladas). Ficam as
+  ligações e as falas, que seguem o prazo de guarda das conversas, e as pendências abertas, que são
+  trabalho em curso. Também fica o texto que o agente mandou para `create_task` antes da 0.7.0, nos
+  argumentos gravados na linha do tempo daquelas chamadas e nos avisos antigos do sino, e os avisos
+  de transferência e de recado da 0.14.0 em diante, que copiam os títulos das pendências abertas na
+  hora da ligação: esses avisos são da ligação, e não da pendência. Para apagar o conteúdo das
+  ligações, o caminho continua sendo o apagamento a pedido de quem ligou. O registro da página de
+  Privacidade mostra quem apagou uma nota e quem esqueceu o número terminado em quais quatro dígitos,
+  com as contagens e nunca o texto nem o número inteiro. Nada muda sem clique e confirmação.
+  Crédito: @melgarafael.
+
+## [0.15.0] - 2026-11-15
+
+### Adicionado
+
+- **O agente pode guardar notas sobre quem ligou, com prazo, exportação e apagamento** A ferramenta nova `remember_caller_note` deixa o agente anotar o que a pessoa disse e importa para a
+  próxima ligação ("prefere de manhã", "o pedido é o 4471"). Ela vem desligada: nada muda até alguém
+  marcá-la na tela do agente, e o agente de exemplo não nasce com ela. A nota guarda o telefone da
+  própria ligação, nunca um número dito pelo modelo; a ligação sem número não anota, e cada ligação
+  guarda no máximo 10 notas de até 300 caracteres. A equipe vê as notas no bloco "Este número" da tela
+  da chamada, cada uma com o link da ligação em que nasceu; o agente ainda não as recebe, e nenhuma
+  nota entra em aviso, evento ou na linha do tempo. As notas saem sozinhas pelo prazo da memória, de
+  90 dias se ninguém escolher outro, ajustável de 30 a 365 dias no bloco novo "Memória entre chamadas",
+  em Configurações (só dono ou administrador), e nunca duram mais que o prazo de guarda das conversas.
+  A exportação dos dados de um telefone passa a trazer as notas dele, e o apagamento a pedido de quem
+  ligou as apaga e as conta na prévia e no recibo. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A pendência criada numa chamada simulada não entra mais no aviso do cliente real** Quando alguém da equipe simulava uma chamada com o número de um cliente e o agente abria uma
+  pendência, ela aparecia no aviso de transferência e no de `notify_human` desse cliente (no painel e
+  no WhatsApp) como se fosse dele. Agora o aviso só conta e só cita o que nasceu em ligação de verdade.
+  No bloco "Este número", a pendência nascida numa simulada passa a aparecer com a marca "Simulada",
+  como a chamada simulada já aparecia, e a nota nascida numa simulada aparece com a mesma marca. A pendência criada pela tela, sem ligação,
+  continua contando. Corrige a #291. Crédito: @melgarafael.
+
+## [0.14.0] - 2026-11-15
+
+### Adicionado
+
+- **Bancada de voz mede a redução de ruído local em 8 kHz, fora do produto** A bancada de voz (`scripts/bancada-de-voz/`) ganha uma medida manual da redução de ruído que
+  poderia rodar na VPS antes do provedor: SpeexDSP, RNNoise e DeepFilterNet, em áudio de telefone
+  (8 kHz) com voz sintética e ruído gerado. Ela mostra o atraso, a CPU, quanto cada um tira de obra,
+  música e conversa de fundo, e quanto corta da fala baixa, medido na frase inteira. Nenhum deles
+  entra no produto: não roda no CI, não entra na imagem e não muda nada numa instalação.
+  Crédito: @melgarafael.
+- **A tela da chamada mostra as ligações anteriores do mesmo número** Quem atualiza passa a ver, na tela de cada chamada, o bloco "Este número": as ligações anteriores
+  do mesmo telefone (data, agente, desfecho e link) e as pendências abertas dele, sem procurar na
+  lista de Chamadas. Não há interruptor, porque é leitura do que a equipe já via (registro 0020). O
+  aviso de transferência e o de `notify_human` ganham uma linha como "Este número já ligou 3 vezes;
+  1 pendência aberta: …". Pelo WhatsApp, essa linha leva só as contagens, nunca o título da
+  pendência. Nada disso chega ao agente: as instruções e as ferramentas da ligação não mudam.
+  Chamada sem número não mostra o bloco, e a ligação apagada a pedido do titular não aparece. A
+  chamada simulada aparece na lista com a marca "Simulada" e não entra no "já ligou" dos avisos,
+  porque qualquer pessoa da equipe pode simular com o número de um cliente. O histórico casa o número
+  exatamente como ficou gravado: o mesmo cliente com o número escrito de outro jeito (com e sem o
+  nono dígito, pela linha e pelo WhatsApp) pode aparecer como dois números, e o que a linha
+  telefônica entrega não foi conferido. Crédito: @melgarafael.
+
 ## [0.13.1] - 2026-11-15
 
 ### Adicionado

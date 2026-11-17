@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agendaNotWired, agendaUnavailable, speakSlot } from "../agenda-speech";
+import { agendaNotWired, agendaUnavailable, agendaWaitLine, speakSlot } from "../agenda-speech";
 import { defineTool } from "../define-tool";
 import type { ToolDeps } from "../deps";
 
@@ -50,7 +50,7 @@ export function createAgendaHorariosLivres(deps: ToolDeps = {}) {
         };
       }
 
-      ctx.say("Um instante, estou conferindo a agenda.");
+      ctx.say(agendaWaitLine("checking", ctx.language));
       try {
         const agenda = await client.freeSlots({
           serviceType: input.service_type,
@@ -72,7 +72,7 @@ export function createAgendaHorariosLivres(deps: ToolDeps = {}) {
 
         const spoken = agenda.slots
           .slice(0, SPOKEN_SLOTS)
-          .map((slot) => speakSlot(slot.startsAt, agenda.timezone))
+          .map((slot) => speakSlot(slot.startsAt, agenda.timezone, ctx.language))
           .join("; ");
         return {
           ok: true,

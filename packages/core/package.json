@@ -6,6 +6,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./phone": "./src/phone.ts",
+    "./drop-follow-up": "./src/drop-follow-up.ts",
+    "./analysts": "./src/analysts.ts",
+    "./inbound-filter": "./src/inbound-filter.ts",
     "./vocabulary": "./src/vocabulary.ts"
   },
   "dependencies": {

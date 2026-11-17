@@ -231,6 +231,8 @@ export function startVoicemailSession(deps: VoicemailDeps, input: VoicemailInput
         // a chave do agente do número) e o aviso ao responsável saem dele.
         const taskId = await enqueueTask(q, { kind: "summarize_call", payload: {}, callId, runAt: clock.now() });
         await recordEvent(q, callId, "task_queued", { taskId, kind: "summarize_call" }, clock.now());
+        const reviewId = await enqueueTask(q, { kind: "review_call", payload: {}, callId, runAt: clock.now() });
+        await recordEvent(q, callId, "task_queued", { taskId: reviewId, kind: "review_call" }, clock.now());
         // A impressão digital só do arquivo que ficou: silêncio apagado não tem o que conferir depois.
         if (saved && file) await recordEvent(q, callId, "recording_saved", { bytes: saved.bytes, sha256: saved.sha256 }, clock.now());
       });

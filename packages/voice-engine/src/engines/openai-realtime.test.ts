@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pcm16ToUlaw } from "../resample";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
 import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
@@ -168,6 +168,92 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     expect(queued).toMatchObject({ response: { instructions: expect.stringContaining("Esta ligação é gravada") } });
   });
 
+  describe("orientação (guide)", () => {
+    const MARCADOR = Buffer.alloc(320, 7);
+    const marcador = pcm16ToUlaw(MARCADOR).toString("base64");
+    /** Tudo o que o motor mandar ao servidor falso até o áudio-marcador, na ordem. */
+    function recordUntilMarker() {
+      const seen: Array<Record<string, unknown>> = [];
+      const reached = fake.waitFor((message) => {
+        if (message.type === "input_audio_buffer.append" && message.audio === marcador) return true;
+        seen.push(message);
+        return false;
+      });
+      return { seen, reached };
+    }
+    const systemItem = (text: string) => ({
+      type: "conversation.item.create",
+      item: { type: "message", role: "system", content: [{ type: "input_text", text }] },
+    });
+
+    it("manda exatamente um item de sistema e nenhum response.create, sem passar por say", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      const say = vi.spyOn(session, "say");
+      const { seen, reached } = recordUntilMarker();
+      session.guide?.("Reforce o que está incluso.");
+      session.sendAudio(MARCADOR);
+      await reached;
+      expect(seen).toEqual([systemItem("Reforce o que está incluso.")]);
+      expect(say).not.toHaveBeenCalled();
+    });
+
+    it("com resposta em curso, espera o response.done e solta as orientações na ordem, antes da próxima resposta", async () => {
+      const { session } = await openSession();
+      await fake.waitFor(ofType("response.create")); // saudação: resposta em curso
+      session.guide?.("primeira");
+      session.guide?.("segunda");
+      session.guide?.("terceira");
+      session.say("marcador de fala"); // fica na fila de respostas
+      const before = recordUntilMarker();
+      session.sendAudio(MARCADOR);
+      await before.reached;
+      expect(before.seen).toEqual([]);
+
+      const after = recordUntilMarker();
+      fake.send({ type: "response.done", response: {} });
+      // O motor processa o response.done antes do próximo evento: o marcador vem depois.
+      const interrupted = nextEvent(session, "interrupted");
+      fake.send({ type: "input_audio_buffer.speech_started" });
+      await interrupted;
+      session.sendAudio(MARCADOR);
+      await after.reached;
+      expect(after.seen.map((m) => (m.type === "response.create" ? "response.create" : m))).toEqual([
+        systemItem("primeira"),
+        systemItem("segunda"),
+        systemItem("terceira"),
+        "response.create",
+      ]);
+    });
+
+    it("erro do provedor solta a orientação que esperava, sem pedir resposta", async () => {
+      const { session } = await openSession();
+      await fake.waitFor(ofType("response.create"));
+      session.guide?.("depois do erro");
+      const after = recordUntilMarker();
+      const failed = nextEvent(session, "error");
+      fake.send({ type: "error", error: { message: "recusado" } });
+      await failed;
+      session.sendAudio(MARCADOR);
+      await after.reached;
+      expect(after.seen).toEqual([systemItem("depois do erro")]);
+    });
+
+    it("depois de close, nada sai: nem a orientação na fila, nem uma nova", async () => {
+      const { session } = await openSession();
+      await fake.waitFor(ofType("response.create"));
+      const seen: Array<Record<string, unknown>> = [];
+      void fake.waitFor((message) => {
+        seen.push(message);
+        return false;
+      });
+      session.guide?.("na fila");
+      await session.close();
+      session.guide?.("depois do fim");
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(seen.filter((m) => m.type === "conversation.item.create")).toEqual([]);
+    });
+  });
+
   it("interrupção do usuário vira interrupted", async () => {
     const { session } = await openSession();
     const interrupted = nextEvent(session, "interrupted");
@@ -260,6 +346,13 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     await fake.waitFor(ofType("session.update"));
     fake.send({ type: "error", error: { message: "modelo inexistente" } });
     await expect(connecting).rejects.toThrow("OpenAI Realtime: modelo inexistente");
+  });
+
+  it("fechamento antes da sessão confirmada leva o código e o motivo do provedor", async () => {
+    const connecting = engine.connect(config, "sk", { baseUrl: fake.url });
+    await fake.waitFor(ofType("session.update"));
+    fake.refuse(1008, "quota exceeded");
+    await expect(connecting).rejects.toThrow("OpenAI Realtime: a conexão fechou antes de confirmar a sessão (código 1008; quota exceeded)");
   });
 
   it("queda do socket vira error seguido de closed", async () => {

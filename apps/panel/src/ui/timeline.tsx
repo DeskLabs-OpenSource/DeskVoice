@@ -10,7 +10,7 @@ import ptBR from "../i18n/pt-BR/timeline";
 import { useDict, useLocale } from "../i18n/provider";
 import { classifyReasonCode } from "./classify-reason";
 import { formatClock, formatDateTime, formatPhone } from "./format";
-import type { CallEvent, FollowUp, Person } from "./types";
+import type { Analyst, CallEvent, FollowUp, Person } from "./types";
 
 type NodeTone = "neutral" | "accent" | "ok" | "fail" | "speech" | "speech-agent";
 interface Row {
@@ -49,6 +49,8 @@ function Card({ title, tone, children }: { title: ReactNode; tone?: "accent" | "
 }
 
 type TimelineDictionary = typeof ptBR;
+/** O que a linha do tempo diz de um `drop_follow_up`: a ação, ou o motivo de não ter agido. */
+type DropFollowUpShown = keyof TimelineDictionary["events"]["drop_follow_up"]["simulated"];
 
 /**
  * "Ligação não analisada: <motivo>", do payload de `analysis_not_done`. A mesma frase serve à linha
@@ -58,6 +60,25 @@ export function analysisNotDoneText(e: TimelineDictionary["events"], payload: Re
   const code = classifyReasonCode(payload);
   const known = Object.hasOwn(e.analysis_not_done_reasons, code) ? e.analysis_not_done_reasons[code] : undefined;
   return fill(e.analysis_not_done, { reason: known ? fill(known, { model: text(payload.model) }) : code });
+}
+
+/**
+ * As marcas do filtro da fala presas à fala de quem ligou (`read` no payload): "pode ser fundo" e a
+ * leitura provável. São sugestão: o texto ouvido fica acima, como foi gravado.
+ */
+function SpeechMarks({ read, e, confidence }: { read: unknown; e: TimelineDictionary["events"]; confidence(value: number | null): string }) {
+  if (typeof read !== "object" || read === null) return null;
+  const marks = read as { background?: { confidence?: unknown }; suggestion?: { term?: unknown; confidence?: unknown } };
+  const background = typeof marks.background?.confidence === "number" ? marks.background.confidence : null;
+  const suggestion = typeof marks.suggestion?.term === "string" && typeof marks.suggestion.confidence === "number" ? marks.suggestion : null;
+  if (background === null && suggestion === null) return null;
+  return (
+    <div className="mt-1 grid gap-0.5 border-t border-line pt-1 text-[0.8rem] text-muted">
+      {background !== null ? <p>{fill(e.speech_marks.background, { confidence: confidence(background) })}</p> : null}
+      {suggestion !== null ? <p>{fill(e.speech_marks.suggestion, { term: String(suggestion.term), confidence: confidence(Number(suggestion.confidence)) })}</p> : null}
+      <p className="italic">{e.speech_marks.note}</p>
+    </div>
+  );
 }
 
 const Quiet = ({ children }: { children: ReactNode }) => <p className="pt-1 text-muted">{children}</p>;
@@ -74,6 +95,7 @@ export function Timeline({
   agentName,
   followUps = [],
   people = [],
+  analysts,
 }: {
   events: CallEvent[];
   live: boolean;
@@ -82,6 +104,12 @@ export function Timeline({
   followUps?: FollowUp[];
   /** Nomes de quem aparece nos eventos de pendência (dono, quem fechou). */
   people?: Person[];
+  /**
+   * Os analistas de hoje: os eventos do analista guardam só a `key` da objeção, e o rótulo e a
+   * orientação vêm do cadastro atual (desenho R6, seção 3.5). Sem a lista (não carregou), a tela diz
+   * "uma objeção" e nunca mostra a `key` crua.
+   */
+  analysts?: Analyst[];
 }) {
   const t = useDict(ptBR, en, es);
   const locale = useLocale();
@@ -92,10 +120,32 @@ export function Timeline({
     return Object.hasOwn(t.reasons, key) ? t.reasons[key as keyof typeof t.reasons] : key;
   };
 
-  const rows: Row[] = pairTools(events).map(({ event, result }, index, all): Row => {
+  // Depois de uma passagem, a fala do agente leva o id de quem falou (`agentId`); o nome vem da
+  // própria passagem, que guarda de quem e para quem ela foi.
+  const handoffNames = new Map<string, string>();
+  for (const event of events) {
+    if (event.kind !== "agent_handoff") continue;
+    for (const side of [event.payload.from, event.payload.to]) {
+      if (typeof side === "object" && side !== null && "id" in side && "name" in side) handoffNames.set(text(side.id), text(side.name));
+    }
+  }
+  const speakerOf = (payload: Record<string, unknown>): string => (text(payload.agentId) ? handoffNames.get(text(payload.agentId)) : undefined) ?? (agentName || t.speakers.agent);
+  const sideName = (side: unknown): string => (typeof side === "object" && side !== null && "name" in side ? text(side.name) : "");
+
+  const objectionOf = (analystId: unknown, key: unknown) => analysts?.find((analyst) => analyst.id === analystId)?.objections.find((objection) => objection.key === key);
+  const objectionName = (analystId: unknown, key: unknown): string => objectionOf(analystId, key)?.label ?? (analysts ? e.analyst_objection_removed : e.analyst_objection_unread);
+  // "Este motor ainda não recebe orientação" aparece uma vez por chamada, na primeira objeção não entregue.
+  const firstUnsupported = events.find((event) => event.kind === "analyst_guidance" && event.payload.outcome === "engine_unsupported")?.id;
+
+  const confidence = (value: number | null): string => (value ?? 0).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // A leitura do filtro que chegou a tempo e não deixou observação já está presa à fala, como marca.
+  const shown = events.filter((event) => !(event.kind === "caller_speech_read" && event.payload.onTime === true && (event.payload.finished === null || event.payload.finished === undefined)));
+
+  const rows: Row[] = pairTools(shown).map(({ event, result }, index, all): Row => {
     const p = event.payload;
     const base = { key: event.id, at: event.at };
-    const previous = all[index - 1]?.event.kind;
+    const previousEvent = all[index - 1]?.event;
+    const previous = previousEvent?.kind;
     switch (event.kind) {
       case "transcript_user":
       case "transcript_agent": {
@@ -106,9 +156,12 @@ export function Timeline({
           side: user ? "left" : undefined,
           body: (
             <div className={`grid max-w-[46ch] gap-0.5 rounded-md px-4 py-2.5 ${user ? "bg-sunken" : "border border-line bg-surface"}`}>
-              {previous !== event.kind ? <span className="text-[0.8rem] font-bold text-muted">{user ? t.speakers.user : agentName || t.speakers.agent}</span> : null}
+              {previous !== event.kind || (!user && text(previousEvent?.payload.agentId) !== text(p.agentId)) ? (
+                <span className="text-[0.8rem] font-bold text-muted">{user ? t.speakers.user : speakerOf(p)}</span>
+              ) : null}
               {p.purged === true ? <p className="text-muted italic">{p.erased === true ? e.transcript_erased : e.transcript_purged}</p> : <p className="leading-relaxed">{text(p.text)}</p>}
               {p.source === "stt" ? <p className="text-[0.8rem] text-muted">{e.transcript_from_recording}</p> : null}
+              {user && p.purged !== true ? <SpeechMarks read={p.read} e={e} confidence={confidence} /> : null}
             </div>
           ),
         };
@@ -216,6 +269,26 @@ export function Timeline({
               {text(p.reason) ? <p className="text-muted">{text(p.reason)}</p> : null}
               {text(p.summary) ? <p className="text-[0.87rem] text-muted">{text(p.summary)}</p> : null}
               {p.erased === true ? <Erased>{e.erased}</Erased> : null}
+            </Card>
+          ),
+        };
+      case "agent_handoff":
+        // O motivo e o resumo saem com o prazo de guarda e com o apagamento a pedido do titular: o
+        // cartão fica só com de quem e para quem.
+        return {
+          ...base,
+          tone: "accent",
+          icon: ArrowsLeftRight,
+          body: (
+            <Card title={fill(e.agent_handoff, { to: sideName(p.to) })}>
+              <p className="text-muted">{fill(e.agent_handoff_from, { from: sideName(p.from) })}</p>
+              {text(p.reason) ? <p className="text-muted">{text(p.reason)}</p> : null}
+              {text(p.summary) ? (
+                <details className="text-[0.87rem] text-muted">
+                  <summary className="cursor-pointer font-bold hover:text-ink">{e.agent_handoff_summary}</summary>
+                  <p className="mt-1 whitespace-pre-line">{text(p.summary)}</p>
+                </details>
+              ) : null}
             </Card>
           ),
         };
@@ -414,6 +487,90 @@ export function Timeline({
         const said = p.action === "asked_to_repeat" ? e.caller_unanswered.asked_to_repeat : e.caller_unanswered.turn_closed;
         const seconds = (Number(p.waitedMs) / 1000).toLocaleString(locale, { maximumFractionDigits: 1 });
         return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(said, { seconds })}</Quiet> };
+      }
+      case "memory_loaded":
+        // Só os ids e o tamanho: o texto das notas fica na tabela delas, onde o prazo o alcança.
+        return {
+          ...base,
+          tone: "neutral",
+          icon: ListChecks,
+          body: <Quiet>{fill(e.memory_loaded, { notes: Array.isArray(p.noteIds) ? p.noteIds.length : 0, followUps: Array.isArray(p.followUpIds) ? p.followUpIds.length : 0, chars: typeof p.chars === "number" ? p.chars : 0 })}</Quiet>,
+        };
+      case "analyst_read": {
+        // Só números e a chave da objeção: o evento nunca leva texto de quem ligou. A tela troca a chave
+        // pelo rótulo do cadastro.
+        if (p.onTime !== true) {
+          const code = text(p.failure);
+          const known = Object.hasOwn(e.analyst_read.failures, code) ? e.analyst_read.failures[code] : undefined;
+          return { ...base, tone: "neutral", icon: Gauge, body: <Quiet>{fill(e.analyst_read.failed, { reason: known ? fill(known, { model: text(p.model) }) : code })}</Quiet> };
+        }
+        const percent = (value: unknown): string => Math.round(Number(value) * 100).toString();
+        const temperature = typeof p.temperature === "object" && p.temperature !== null ? (p.temperature as Record<string, unknown>) : null;
+        const objection = typeof p.objection === "object" && p.objection !== null ? (p.objection as Record<string, unknown>) : null;
+        const parts = [e.analyst_read.read];
+        if (temperature) parts.push(fill(e.analyst_read.temperature, { score: Number(temperature.score).toLocaleString(locale, { maximumFractionDigits: 1 }), confidence: percent(temperature.confidence) }));
+        if (objection && objection.key === null) parts.push(e.analyst_read.objectionOutside);
+        else if (objection && text(objection.key) !== "none") {
+          const said = Number(objection.confidence) >= 0.8 ? e.analyst_read.objection : e.analyst_read.objectionBelowCut;
+          parts.push(fill(said, { objection: objectionName(p.analystId, objection.key), confidence: percent(objection.confidence) }));
+        } else if (objection) parts.push(e.analyst_read.noObjection);
+        return { ...base, tone: "neutral", icon: Gauge, body: <Quiet>{parts.join(" ")}</Quiet> };
+      }
+      case "analyst_guidance": {
+        const outcome = p.outcome === "delivered" || p.outcome === "stale" ? p.outcome : "engine_unsupported";
+        const said = fill(e.analyst_guidance[outcome], { objection: objectionName(p.analystId, p.objection) });
+        // A orientação entregue mostra o texto do cadastro de hoje, com o limite escrito ao lado.
+        const current = outcome === "delivered" ? objectionOf(p.analystId, p.objection) : undefined;
+        return {
+          ...base,
+          tone: outcome === "delivered" ? "accent" : "neutral",
+          icon: SealQuestion,
+          body: (
+            <div className="grid max-w-[52ch] gap-1 pt-1 text-muted">
+              <p>{said}</p>
+              {outcome === "engine_unsupported" && event.id === firstUnsupported ? <p>{e.analyst_guidance.engineUnsupportedWhy}</p> : null}
+              {current ? (
+                <>
+                  <p className="text-ink">{fill(e.analyst_guidance.current, { guidance: current.guidance })}</p>
+                  <p className="text-[0.8rem] italic">{e.analyst_guidance.currentNote}</p>
+                </>
+              ) : null}
+            </div>
+          ),
+        };
+      }
+      case "analyst_guidance_leaked":
+        return { ...base, tone: "fail", icon: WarningOctagon, body: <Quiet>{fill(e.analyst_guidance_leaked, { objection: objectionName(p.analystId, p.objection) })}</Quiet> };
+      case "drop_follow_up": {
+        // Só campos fixos: o caso e o que foi feito, ou o que teria sido feito na simulada.
+        const what = p.case === "engine_failed" ? e.drop_follow_up.engine_failed : e.drop_follow_up.call_dropped;
+        const action: DropFollowUpShown =
+          p.action === "whatsapp_queued"
+            ? "whatsapp_queued"
+            : p.action === "skipped" && (p.reason === "do_not_call" || p.reason === "mode_unavailable" || p.reason === "recent_follow_up" || p.reason === "org_limit")
+              ? p.reason
+              : "task_opened";
+        const done = p.simulated === true ? e.drop_follow_up.simulated[action] : e.drop_follow_up[action];
+        return { ...base, tone: "accent", icon: PhoneX, body: <Quiet><span className="font-bold text-ink">{what}</span> {done}</Quiet> };
+      }
+      case "drop_follow_up_result": {
+        // A mensagem para quem ligou saiu ou não; as ações da religação chegam nas fatias 3 e 4.
+        const sent = p.action === "whatsapp_sent";
+        return {
+          ...base,
+          tone: sent ? "ok" : "fail",
+          icon: sent ? CheckCircle : XCircle,
+          body: <Quiet>{sent ? e.drop_follow_up_result.whatsapp_sent : e.drop_follow_up_result.whatsapp_failed}</Quiet>,
+        };
+      }
+      case "caller_speech_read": {
+        // Só o que não virou marca na fala: a decisão tardia (o "terminou", que chega depois do turno),
+        // o pedido que venceu o prazo e o filtro que não abriu. Nada disso mudou a ligação.
+        const finished = typeof p.finished === "object" && p.finished !== null && "confidence" in p.finished ? Number(p.finished.confidence) : null;
+        const code = text(p.failure);
+        const known = Object.hasOwn(e.caller_speech_read.reasons, code) ? e.caller_speech_read.reasons[code as keyof typeof e.caller_speech_read.reasons] : code;
+        const said = p.onTime === true ? fill(e.caller_speech_read.finished, { confidence: confidence(finished) }) : code === "late" ? e.caller_speech_read.late : fill(e.caller_speech_read.failed, { reason: known });
+        return { ...base, tone: "neutral", icon: SealQuestion, body: <Quiet>{said}</Quiet> };
       }
       default:
         return { ...base, tone: "neutral", body: <Quiet>{e.unknown} <span className="data">{event.kind}</span></Quiet> };

@@ -1,4 +1,4 @@
-import { withOrg, withSystem } from "@deskvoice/core";
+import { FOUNDING_ORGANIZATION_KEY, grantInstallationAdmin, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { AGENT_TOKEN, NOW, PASSWORD, call, createOrganization, createUser, startPanel } from "../../../../test/kit";
 import { loginLimiter } from "../../../server/rate-limit";
@@ -38,9 +38,22 @@ beforeEach(async () => {
 afterAll(() => panel.close());
 
 type Person = Awaited<ReturnType<typeof createUser>>;
-/** Uma organização com dono. Por padrão o agente já falou: anunciou a 0.1.0 instalada e a 0.2.0 como alvo. */
-const newOrg = async (label: string, agentSpoke = true): Promise<{ org: string; owner: Person }> => {
+/**
+ * Quem administra a instalação é estado gravado e global (seção 3.2 do desenho do R8). O teste faz
+ * de conta que esta organização é a de quem instalou, como a do `create-owner` numa instalação nova.
+ * O produto nunca troca a fundadora: só o teste.
+ */
+const makeFounding = (org: string): Promise<number> =>
+  withSystem(panel.app, (q) =>
+    q.exec("insert into installation_settings (key, value) values ($1, to_jsonb($2::text)) on conflict (key) do update set value = excluded.value", [FOUNDING_ORGANIZATION_KEY, org]),
+  );
+/**
+ * Uma organização com dono, que por padrão é a fundadora. Por padrão o agente já falou: anunciou a
+ * 0.1.0 instalada e a 0.2.0 como alvo.
+ */
+const newOrg = async (label: string, agentSpoke = true, founding = true): Promise<{ org: string; owner: Person }> => {
   const org = await createOrganization(panel.app, label);
+  if (founding) await makeFounding(org);
   const owner = await createUser(panel.app, org, "owner");
   if (agentSpoke) await speak();
   return { org, owner };
@@ -138,6 +151,18 @@ describe("who can ask for an update", () => {
     expect((await state(operator.cookie)).request?.status).toBe("requested");
   });
 
+  it("never lets the owner of an organization that is not the founding one ask, and shows the request to whoever administers", async () => {
+    const founding = await newOrg("update founding");
+    // Inserida por SQL direto, sem passar pelo `create-owner`: não dá papel na instalação a ninguém.
+    const other = await createOrganization(panel.app, "update other client");
+    const otherOwner = await createUser(panel.app, other, "owner");
+    const otherAdmin = await createUser(panel.app, other, "admin");
+    for (const person of [otherOwner, otherAdmin]) expect(refusal(await ask(person.cookie))).toEqual([403, "forbidden"]);
+    expect((await ask(founding.owner.cookie)).status).toBe(200);
+    // O pedido é da instalação: a outra organização vê o andamento, sem o detalhe do servidor.
+    expect((await state(otherOwner.cookie)).request).toMatchObject({ status: "requested", detail: null });
+  });
+
   it("asks for the password again, and counts wrong attempts like the login does", async () => {
     const { owner } = await newOrg("update password");
     expect(refusal(await ask(owner.cookie, {}))).toEqual([400, "validation_error"]);
@@ -159,7 +184,10 @@ describe("who can ask for an update", () => {
 describe("one request at a time, and every request ends", () => {
   it("keeps a single open request in the whole installation", async () => {
     const first = await newOrg("update single A");
-    const second = await newOrg("update single B");
+    const second = await newOrg("update single B", true, false);
+    // A segunda organização não é a fundadora: o dono dela só pede porque recebeu a marca.
+    expect(refusal(await ask(second.owner.cookie))).toEqual([403, "forbidden"]);
+    await grantInstallationAdmin(panel.app, second.owner.email, NOW);
     expect((await ask(first.owner.cookie)).status).toBe(200);
     expect(refusal(await ask(first.owner.cookie))).toEqual([409, "update_in_progress"]);
     expect(refusal(await ask(second.owner.cookie))).toEqual([409, "update_in_progress"]);
@@ -262,7 +290,9 @@ describe("nobody is updated to a version they did not confirm", () => {
   it("refuses a confirmation for a version other than the one the agent announced last", async () => {
     const silent = await newOrg("update no agent", false);
     expect(refusal(await ask(silent.owner.cookie))).toEqual([409, "update_target_changed"]);
-    const { owner } = await newOrg("update stale screen");
+    const { owner } = await newOrg("update stale screen", true, false);
+    // A segunda organização do teste não é a fundadora: o dono dela pede porque recebeu a marca.
+    await grantInstallationAdmin(panel.app, owner.email, NOW);
     await speak({ version: "0.1.0", target: "0.3.0" });
     expect(refusal(await ask(owner.cookie))).toEqual([409, "update_target_changed"]);
     await speak({ version: "0.2.0" });

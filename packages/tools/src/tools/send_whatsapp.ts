@@ -2,7 +2,7 @@ import { toE164 } from "@deskvoice/core";
 import { z } from "zod";
 import { askApproval } from "../approval";
 import { WahaError } from "../connectors/waha";
-import { loadWhatsAppConnector, sendWhatsApp } from "../connectors/whatsapp";
+import { loadWhatsAppConnector, sendWhatsApp, TRUST_CALLER_ID_KEY } from "../connectors/whatsapp";
 import { defineTool } from "../define-tool";
 import { configSecretKey, type ToolDeps } from "../deps";
 import { readSetting } from "../settings";
@@ -16,8 +16,7 @@ export const MAX_WHATSAPP_PER_CALL = 5;
  * O mesmo número do `request_approval` no `runTool`.
  */
 export const MAX_WHATSAPP_APPROVALS_PER_CALL = 3;
-/** Ajuste da organização: `true` faz o envio para quem ligou sair sem confirmação humana. */
-export const TRUST_CALLER_ID_KEY = "whatsapp.trust_caller_id";
+export { TRUST_CALLER_ID_KEY };
 const CONFIRMATION_TIMEOUT_SECONDS = 120;
 const FORGET_AFTER_MS = 60_000;
 
@@ -129,7 +128,7 @@ export function createSendWhatsApp(deps: ToolDeps = {}) {
         const connector = await loadWhatsAppConnector(ctx.q, (deps.secretKey ?? configSecretKey)());
         if (connector === null) {
           return refused(
-            "O envio por WhatsApp não está configurado nesta central, e nada foi enviado. Diga à pessoa que não consegue mandar mensagem agora e passe a informação por voz; se for importante, deixe um aviso para a equipe (notify_human).",
+            "O envio por WhatsApp não está configurado nesta central, e nada foi enviado. Diga à pessoa que não consegue mandar mensagem agora e passe a informação por voz; se for importante, anote para a equipe cuidar depois (create_task).",
           );
         }
 

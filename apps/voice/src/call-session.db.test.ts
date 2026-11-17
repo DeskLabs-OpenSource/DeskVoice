@@ -74,7 +74,7 @@ describe("motor que cai no meio da chamada (Review Focus 1)", { timeout: 120_000
 
     const events = await eventsOf(app, callId);
     expect(events.map((event) => event.kind)).toEqual([
-      "call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "transfer_started", "call_ended", "task_queued",
+      "call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "transfer_started", "call_ended", "task_queued", "task_queued",
     ]);
     expect(events[5]?.payload).toEqual({ engine: "simulated", error: "OpenAI Realtime: a conexão caiu (código 1006)" });
     expect(events[6]?.payload).toEqual({ to: "+5531988887777", reason: "engine_failed" });
@@ -97,7 +97,7 @@ describe("motor que cai no meio da chamada (Review Focus 1)", { timeout: 120_000
     const { organizationId, callId, transport, start } = await scene("engine-fail-hangup", { script });
     expect(await start().done).toMatchObject({ status: "failed", endReason: "engine_failed" });
 
-    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "call_ended", "task_queued"]);
+    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "transcript_agent", "transcript_agent", "engine_failed", "call_ended", "task_queued", "task_queued"]);
     expect(await callOf(app, callId)).toMatchObject({ status: "failed", end_reason: "engine_failed", ended_at: expect.any(Date) });
     expect(transport.transferredTo).toBeNull();
     expect(transport.hangups).toBe(1);
@@ -124,10 +124,15 @@ describe("motor que cai no meio da chamada (Review Focus 1)", { timeout: 120_000
 });
 
 describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, () => {
-  async function refused(label: string, manual: ManualEngine, setup: (organizationId: string) => Promise<void> = async () => undefined) {
+  async function refused(
+    label: string,
+    manual: ManualEngine,
+    setup: (organizationId: string) => Promise<void> = async () => undefined,
+    endReason: "engine_not_configured" | "engine_refused" = "engine_not_configured",
+  ) {
     const made = await scene(label, { engine: "manual", greeting: "Bom dia.", transferTo: "+5531988887777" }, manual);
     await setup(made.organizationId);
-    expect(await made.start().done).toEqual({ status: "refused", endReason: "engine_not_configured", costCents: 0 });
+    expect(await made.start().done).toEqual({ status: "refused", endReason, costCents: 0 });
     return made;
   }
 
@@ -136,7 +141,7 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     const { organizationId, callId, transport } = await refused("engine-no-key", manual);
 
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_refused", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_refused", "call_ended", "task_queued", "task_queued"]);
     expect(events[1]?.payload).toEqual({ reason: "engine_not_configured", engine: "manual", detail: "no API key is saved for this voice engine" });
     expect(await callOf(app, callId)).toMatchObject({ status: "refused", end_reason: "engine_not_configured", answered_at: null, ended_at: expect.any(Date) });
     // O motor nem foi chamado, e quem ligou ouviu o sinal antes de a ligação cair.
@@ -165,17 +170,28 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
 
   it("chave inválida (o provedor recusa a sessão): recusa com o que o provedor disse", async () => {
     const manual = manualEngine({ connectError: "OpenAI Realtime: não foi possível conectar (código 401)" });
-    const { callId, transport } = await refused("engine-invalid-key", manual, (organizationId) =>
-      putSetting(app, organizationId, "engine.manual.api_key", encryptSecret("sk-errada", secretKey)),
+    const { organizationId, callId, transport } = await refused(
+      "engine-invalid-key",
+      manual,
+      (organizationId) => putSetting(app, organizationId, "engine.manual.api_key", encryptSecret("sk-errada", secretKey)),
+      "engine_refused",
     );
     expect(manual.keys).toEqual(["sk-errada"]);
-    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ reason: "engine_not_configured", detail: expect.stringContaining("código 401") });
+    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ reason: "engine_refused", detail: expect.stringContaining("código 401") });
     expect(transport.hangups).toBe(1);
+    // A chave existe e foi enviada: o aviso não manda cadastrá-la, manda conferir a conta e a chave no provedor.
+    const notice = (await notificationsOf(app, organizationId))[0]?.body ?? "";
+    expect(notice).toMatch(/recusou a sessão ou não foi alcançado: .*código 401/);
+    expect(notice).toMatch(/crédito/);
+    expect(notice).not.toMatch(/Cadastre/);
   });
 
-  it("motor que não existe nesta instalação: recusa", async () => {
-    const { callId } = await refused("engine-unknown", manualEngine({ id: "outro" }));
-    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ detail: 'the voice engine "manual" is not installed' });
+  it("motor que não existe nesta instalação: recusa, e o aviso manda escolher outro motor, não cadastrar a chave", async () => {
+    const { organizationId, callId } = await refused("engine-unknown", manualEngine({ id: "outro" }));
+    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ reason: "engine_not_configured", detail: 'the voice engine "manual" is not installed' });
+    const notice = (await notificationsOf(app, organizationId))[0]?.body ?? "";
+    expect(notice).toMatch(/não está disponível nesta instalação: .*Escolha outro motor de voz na tela do agente/);
+    expect(notice).not.toMatch(/Cadastre/);
   });
 
   it("com a chave cadastrada, o motor recebe a chave decifrada, as instruções, a voz, o idioma e as ferramentas do agente", async () => {
@@ -295,7 +311,7 @@ describe("provedor de IA que não responde", { timeout: 120_000 }, () => {
     expect(harness.timers.fire(15_000)).toBe(1);
     expect(await session.done).toEqual({ status: "refused", endReason: "engine_not_responding", costCents: 0 });
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_refused", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_refused", "call_ended", "task_queued", "task_queued"]);
     expect(events[1]?.payload).toEqual({ reason: "engine_not_responding", engine: "manual", detail: expect.stringContaining("did not answer in 15 s") });
     expect(await callOf(app, callId)).toMatchObject({ status: "refused", end_reason: "engine_not_responding" });
     expect(transport.sentBytes).toBe(failureTone().length);
@@ -782,7 +798,7 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
 
     expect(harness.timers.fire(6000)).toBe(1);
     expect(await session.done).toMatchObject({ status: "completed", endReason: "max_duration" });
-    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "call_ended", "task_queued"]);
+    expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice", "call_ended", "task_queued", "task_queued"]);
     expect((await eventsOf(app, callId))[3]?.payload).toMatchObject({ status: "completed", reason: "max_duration" });
     expect(transport.hangups).toBe(1);
     expect(transport.transferredTo).toBeNull();
@@ -791,7 +807,7 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
 
   it("teto de custo sem número de transferência: soma os incrementos de uso, grava o evento, despede e encerra", async () => {
     const manual = manualEngine({ keyless: true, centsPerMinute: 100 });
-    const { callId, transport, start, harness } = await scene("ceiling-cost", { engine: "manual", costCeilingCents: 150 }, manual);
+    const { callId, agentId, transport, start, harness } = await scene("ceiling-cost", { engine: "manual", costCeilingCents: 150 }, manual);
     const session = start();
     await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
 
@@ -809,14 +825,14 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
     expect(harness.timers.fire(6000)).toBe(1);
     expect(await session.done).toEqual({ status: "completed", endReason: "cost_ceiling", costCents: 160 });
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "call_ended", "task_queued", "task_queued"]);
     expect(events[3]?.payload).toEqual({ costCents: 150, ceilingCents: 150 });
     expect(events[4]?.payload).toEqual({ status: "completed", reason: "cost_ceiling", costCents: 160, seconds: 96 });
-    // O extrato tem uma linha por medição, e a soma dele é o custo da chamada.
+    // O extrato tem uma linha por medição, cada uma no agente da ligação, e a soma dele é o custo da chamada.
     expect(await ledgerOf(app, callId)).toEqual([
-      { engine: "manual", seconds: 6, input_tokens: 0, output_tokens: 0, cost_cents: 10 },
-      { engine: "manual", seconds: 30, input_tokens: 0, output_tokens: 500, cost_cents: 50 },
-      { engine: "manual", seconds: 60, input_tokens: 1000, output_tokens: 0, cost_cents: 100 },
+      { engine: "manual", agent_id: agentId, seconds: 6, input_tokens: 0, output_tokens: 0, cost_cents: 10 },
+      { engine: "manual", agent_id: agentId, seconds: 30, input_tokens: 0, output_tokens: 500, cost_cents: 50 },
+      { engine: "manual", agent_id: agentId, seconds: 60, input_tokens: 1000, output_tokens: 0, cost_cents: 100 },
     ]);
     expect((await callOf(app, callId)).cost_cents).toBe(160);
     expect(transport.hangups).toBe(1);
@@ -833,7 +849,7 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
     harness.timers.fire(6000);
     expect(await session.done).toEqual({ status: "transferred", endReason: "cost_ceiling", costCents: 102 });
     const events = await eventsOf(app, callId);
-    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "transfer_started", "call_ended", "task_queued"]);
+    expect(events.map((event) => event.kind)).toEqual(["call_started", "call_answered", "recording_notice", "cost_ceiling_reached", "transfer_started", "call_ended", "task_queued", "task_queued"]);
     expect(events[4]?.payload).toEqual({ to: "+5531988887777", reason: "cost_ceiling" });
     expect(transport.transferredTo).toBe("+5531988887777");
   });

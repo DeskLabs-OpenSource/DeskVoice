@@ -14,10 +14,11 @@ import ptBRCommon from "../../../i18n/pt-BR/common";
 import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { useErrorText } from "../../../ui/errors";
-import { formatCaller, formatDateTime, formatDuration, formatMoney, secondsBetween } from "../../../ui/format";
+import { formatCaller, formatDateTime, formatDuration, secondsBetween } from "../../../ui/format";
 import { Badge, Button, EmptyState, Notice, PageHeader, Skeleton, buttonClass, type Tone } from "../../../ui/kit";
 import { useLive, useNow } from "../../../ui/live";
-import type { Agent, Call, CallStatus, Engine, Trunk } from "../../../ui/types";
+import type { Agent, Call, CallListItem, CallStatus, Engine, Trunk } from "../../../ui/types";
+import { Amount } from "../costs/amount-view";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
 const isLive = (call: Call): boolean => call.status === "ringing" || call.status === "in_progress";
@@ -30,7 +31,7 @@ export default function CallsPage() {
   const router = useRouter();
   const errorText = useErrorText();
   const now = useNow();
-  const calls = useApi<Call[]>("/calls");
+  const calls = useApi<CallListItem[]>("/calls");
   const agents = useApi<Agent[]>("/agents");
   const trunks = useApi<Trunk[]>("/trunks");
   const engines = useApi<Engine[]>("/engines");
@@ -184,7 +185,9 @@ export default function CallsPage() {
                     </span>
                     <span className="data text-right text-muted md:text-left">{formatDateTime(call.startedAt, locale)}</span>
                     <span className="data text-muted md:text-right md:text-ink">{call.endedAt ? formatDuration(secondsBetween(call.answeredAt ?? call.startedAt, call.endedAt)) : ""}</span>
-                    <span className="data text-right">{formatMoney(call.costCents, locale)}</span>
+                    <span className="data text-right">
+                      <Amount cents={call.costCents} unmeasuredCount={call.unmeasuredCount} estimatedCount={call.estimatedCount} />
+                    </span>
                     {/* A nota é a soma da régua; sem análise (o de fábrica), um traço. No celular ela ocupa a
                         linha toda, com o rótulo da coluna, para não cair solta no grid de duas colunas. */}
                     <span className="col-span-2 flex items-center justify-between gap-4 md:col-span-1 md:block md:text-right">

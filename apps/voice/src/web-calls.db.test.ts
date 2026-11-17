@@ -93,6 +93,7 @@ async function scene(label: string, agent: AgentOptions): Promise<Scene> {
     publicIp: null,
     host: "127.0.0.1",
     schedule: timers.schedule,
+    resolveName: async () => ["192.0.2.53"],
     now: timers.now,
   });
   const internalPort = server.internalPort;
@@ -147,7 +148,7 @@ async function call(made: Scene): Promise<{ callId: string; token: string; clien
   return { callId: body.callId ?? "", token: body.token ?? "", client };
 }
 
-const ended = (callId: string) => waitFor(async () => (await kindsOf(app, callId)).includes("task_queued"), "the call to end");
+const ended = (callId: string) => waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "task_queued").length === 2, "the call to end");
 const typesOf = (client: Browser): string[] => client.messages.map((message) => message.type ?? "");
 
 describe("chamada pelo navegador", { timeout: 120_000 }, () => {
@@ -213,6 +214,7 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
       "tool_result",
       "call_ended",
       "task_queued",
+      "task_queued",
       "recording_saved",
     ]);
     expect(events[0]?.payload).toEqual({ direction: "inbound", from: null, to: null, agentId: made.agentId, channel: "web", userId: USER });
@@ -238,7 +240,7 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect(wav.readUInt32LE(24)).toBe(8000);
     expect(wav.readUInt32LE(40) / 4).toBeGreaterThanOrEqual((spokenMs / 20) * 160);
     // A impressão digital na linha do tempo é a do arquivo que ficou no disco.
-    expect(events[18]?.payload).toEqual({ bytes: wav.length, sha256: createHash("sha256").update(wav).digest("hex") });
+    expect(events[19]?.payload).toEqual({ bytes: wav.length, sha256: createHash("sha256").update(wav).digest("hex") });
 
     const health = (await (await fetch(`http://127.0.0.1:${server?.internalPort}/health`)).json()) as Record<string, { status: string; detail: string }>;
     expect(health.web).toEqual({ status: "ok", detail: expect.stringContaining(String(server?.webPort)) });
@@ -331,7 +333,7 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
 
     const events = await eventsOf(app, callId);
     expect(events.map((event) => event.kind)).toEqual([
-      "call_started", "call_answered", "recording_notice", "transcript_agent", "tool_called", "approval_requested", "transcript_agent", "tool_result", "call_ended", "task_queued",
+      "call_started", "call_answered", "recording_notice", "transcript_agent", "tool_called", "approval_requested", "transcript_agent", "tool_result", "call_ended", "task_queued", "task_queued",
     ]);
     expect(events[8]?.payload).toMatchObject({ status: "completed", reason: "caller_hangup" });
     expect(await callOf(app, callId)).toMatchObject({ status: "completed", end_reason: "caller_hangup" });
@@ -423,7 +425,7 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect(await ask(disabled)).toMatchObject({ status: 409, body: { code: "agent_disabled" } });
     expect(await ask(simulated)).toEqual({ status: 409, body: { code: "engine_simulated", message: expect.stringMatching(/simulated engine.*Change the agent's voice engine/) } });
     expect(await ask(noKey)).toMatchObject({ status: 409, body: { code: "engine_not_configured" } });
-    expect(await ask(unknownEngine)).toMatchObject({ status: 409, body: { code: "engine_not_configured" } });
+    expect(await ask(unknownEngine)).toMatchObject({ status: 409, body: { code: "engine_not_installed", message: expect.stringMatching(/not available in this installation.*Choose another voice engine/) } });
     expect((await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER }, null)).status).toBe(401);
     expect((await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER }, "errado")).status).toBe(401);
     expect((await made.post({ organizationId: made.organizationId, agentId: made.agentId })).status).toBe(400);

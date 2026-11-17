@@ -453,7 +453,7 @@ fi
 # docker, e a porta publicada pelo Docker continua respondendo, mesmo com rich rule reject na zona
 # public; a porta escutada pelo host fica fechada. Por isso nenhum firewall-cmd aqui: não mudaria nada.
 if have firewall-cmd && [ "$($SUDO firewall-cmd --state 2>/dev/null || true)" = running ]; then
-  warn "O firewall firewalld está ativo, e ele não filtra as portas que o Docker publica: 5060/udp e ${rtp_start}-${rtp_end}/udp chegam aos contêineres com ele ligado, e uma regra dele não as fecha. Não é por ele que uma ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor da VPS, se ele tiver um. A regra na cadeia DOCKER-USER foi medida com o ufw, não com o firewalld (ver docs/fundacao/ufw-e-docker.md)."
+  warn "O firewall firewalld está ativo, e ele não filtra as portas que o Docker publica: 5060/udp e ${rtp_start}-${rtp_end}/udp chegam aos contêineres com ele ligado, e uma regra dele não as fecha. Não é por ele que uma ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor da VPS, se ele tiver um. Com o firewalld ativo, a regra na cadeia DOCKER-USER fechou uma porta TCP de prova (medido em 15/11/2026), mas some ao reiniciar a máquina e deixa a porta aberta por alguns segundos a cada firewall-cmd --reload; em UDP, que é o da telefonia, ela não foi medida com o firewalld (ver docs/fundacao/ufw-e-docker.md)."
   info "A prova da ligação continua sendo de fora: a primeira ligação e o teste da tela Linha do painel."
 fi
 
