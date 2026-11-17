@@ -33,7 +33,6 @@ export const PEOPLE_QUERIES_ALLOWLIST: PeopleQueryException[] = [
   { file: "apps/panel/src/server/synthesizers.ts", query: "select u.name from users u where u.id::text = $1", reason: "mostra o nome de quem deu o consentimento" },
   { file: "packages/core/src/caller-history.ts", query: "left join users u on u.id = f.owner_user_id", reason: "mostra o nome do responsável da pendência aberta" },
   { file: "packages/core/src/installation.ts", query: "(select account_id from users where id = $2)", reason: "a conta do vínculo que a mesma consulta já filtrou como `member`" },
-  { file: "packages/core/src/invites.ts", query: "exists (select from users c", reason: "confere que quem criou o convite ainda gere; a sessão de suporte não convida (fatia 5b)" },
   { file: "packages/core/src/invites.ts", query: "exists (select from users u where u.account_id =", reason: "a conta tem algum vínculo, de qualquer `kind`, de propósito" },
   { file: "packages/core/src/invites.ts", query: "select 1 from users where organization_id = $1 and account_id = $2", reason: "um vínculo por conta e organização (`users_one_membership_idx`); o caso do suporte é da 5c" },
   { file: "packages/core/src/share-links.ts", query: "left join users u on u.id = s.created_by", reason: "mostra o nome de quem criou o link" },

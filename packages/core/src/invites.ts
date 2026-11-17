@@ -52,7 +52,7 @@ export type AcceptInviteResult =
 // estas duas funções atravessam organizações (papel de sistema) e moram aqui, com teste, em vez
 // de espalhadas no painel. A busca é sempre pelo resumo do token; o token em claro só existe no link.
 //
-// Um convite só vale enquanto quem o criou está ativo na equipe. Sem isso, a pessoa cria um
+// Um convite só vale enquanto quem o criou está ativo na equipe, num vínculo da equipe (`kind = 'member'`). Sem isso, a pessoa cria um
 // convite para si mesma, é desativada e volta pelo link. O painel já revoga os convites ao
 // desativar ou remover alguém; a condição aqui é a defesa que vale mesmo se um caminho novo
 // esquecer de revogar. Criador removido deixa `created_by` nulo, e nulo também não vale.
@@ -73,7 +73,7 @@ export type AcceptInviteResult =
 // criador saiu da equipe". Os dois ramos são exclusivos: o da equipe exige que não haja a marca, e o
 // banco recusa a marca junto com um criador da equipe.
 const CREATOR_STILL_MANAGES = `((not i.installation_invite and exists (select from users c
-   where c.organization_id = i.organization_id and c.id = i.created_by and c.disabled_at is null
+   where c.organization_id = i.organization_id and c.id = i.created_by and c.kind = 'member' and c.disabled_at is null
      and (c.role = 'owner' or (c.role = 'admin' and i.role <> 'owner'))))
    or (i.installation_invite and i.role = 'owner' and i.created_by is null and i.created_by_account is not null
        and ${administersInstallationSql("i.created_by_account")}
