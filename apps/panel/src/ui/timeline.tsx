@@ -460,6 +460,31 @@ export function Timeline({
           icon: ListChecks,
           body: <Quiet>{fill(e.memory_loaded, { notes: Array.isArray(p.noteIds) ? p.noteIds.length : 0, followUps: Array.isArray(p.followUpIds) ? p.followUpIds.length : 0, chars: typeof p.chars === "number" ? p.chars : 0 })}</Quiet>,
         };
+      case "analyst_read": {
+        // Só números e a chave da objeção: o evento nunca leva texto de quem ligou.
+        if (p.onTime !== true) {
+          const code = text(p.failure);
+          const known = Object.hasOwn(e.analyst_read.failures, code) ? e.analyst_read.failures[code] : undefined;
+          return { ...base, tone: "neutral", icon: Gauge, body: <Quiet>{fill(e.analyst_read.failed, { reason: known ? fill(known, { model: text(p.model) }) : code })}</Quiet> };
+        }
+        const percent = (value: unknown): string => Math.round(Number(value) * 100).toString();
+        const temperature = typeof p.temperature === "object" && p.temperature !== null ? (p.temperature as Record<string, unknown>) : null;
+        const objection = typeof p.objection === "object" && p.objection !== null ? (p.objection as Record<string, unknown>) : null;
+        const parts = [e.analyst_read.read];
+        if (temperature) parts.push(fill(e.analyst_read.temperature, { score: Number(temperature.score).toLocaleString(locale, { maximumFractionDigits: 1 }), confidence: percent(temperature.confidence) }));
+        if (objection && objection.key === null) parts.push(e.analyst_read.objectionOutside);
+        else if (objection && text(objection.key) !== "none") {
+          const said = Number(objection.confidence) >= 0.8 ? e.analyst_read.objection : e.analyst_read.objectionBelowCut;
+          parts.push(fill(said, { objection: text(objection.key), confidence: percent(objection.confidence) }));
+        } else if (objection) parts.push(e.analyst_read.noObjection);
+        return { ...base, tone: "neutral", icon: Gauge, body: <Quiet>{parts.join(" ")}</Quiet> };
+      }
+      case "analyst_guidance": {
+        const outcome = p.outcome === "delivered" || p.outcome === "stale" ? p.outcome : "engine_unsupported";
+        return { ...base, tone: outcome === "delivered" ? "accent" : "neutral", icon: SealQuestion, body: <Quiet>{fill(e.analyst_guidance[outcome], { objection: text(p.objection) })}</Quiet> };
+      }
+      case "analyst_guidance_leaked":
+        return { ...base, tone: "fail", icon: WarningOctagon, body: <Quiet>{fill(e.analyst_guidance_leaked, { objection: text(p.objection) })}</Quiet> };
       case "drop_follow_up": {
         // Só campos fixos: o caso e o que foi feito, ou o que teria sido feito na simulada.
         const what = p.case === "engine_failed" ? e.drop_follow_up.engine_failed : e.drop_follow_up.call_dropped;

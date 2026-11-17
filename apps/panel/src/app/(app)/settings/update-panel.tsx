@@ -13,7 +13,7 @@ import { api, useApi } from "../../../ui/api";
 import { useAction, useErrorText } from "../../../ui/errors";
 import { formatDateTime, splitInlineCode } from "../../../ui/format";
 import { Button, Field, Notice, Panel, Skeleton, TextInput, type Tone } from "../../../ui/kit";
-import { useCanConfigure } from "../../../ui/me";
+import { useInstallationAdmin } from "../../../ui/me";
 
 // Iguais em todo idioma: são comandos e caminhos, não frases.
 const INSTALL_AGENT = "sudo bash install/agent.sh --install";
@@ -85,7 +85,8 @@ export function UpdatePanel() {
   const common = useDict(commonPtBR, commonEn, commonEs);
   const locale = useLocale();
   const errorText = useErrorText();
-  const canConfigure = useCanConfigure();
+  // O botão segue quem administra a instalação (seção 3.2 do desenho do R8), e não o papel na organização.
+  const canUpdate = useInstallationAdmin();
   const state = useApi<UpdateState>("/system/update");
   const ask = useAction();
   const [confirming, setConfirming] = useState(false);
@@ -192,14 +193,14 @@ export function UpdatePanel() {
           </div>
         ) : null}
 
-        {canConfigure && running.updatable && target && offer.notesReady && !open && !confirming ? (
+        {canUpdate && running.updatable && target && offer.notesReady && !open && !confirming ? (
           <div className="flex flex-wrap items-center gap-3">
             <Button variant="primary" onClick={() => setConfirming(true)}>
               {fill(t.start, { to: target })}
             </Button>
           </div>
         ) : null}
-        {canConfigure && running.updatable && target && offer.notesReady && !open && confirming ? (
+        {canUpdate && running.updatable && target && offer.notesReady && !open && confirming ? (
           <Notice tone="fail">
             <p>{fill(t.confirm, { from: running.version, to: target })}</p>
             <form

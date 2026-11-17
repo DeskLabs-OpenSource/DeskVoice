@@ -53,6 +53,12 @@ na documentação de cada um, a chave por provedor guardada cifrada com teste ao
 modelo sem acento e sem caixa. Os arquivos foram escritos do zero, um por provedor: os de `brains/`
 nos PRs #336 e #346, a tela `/settings/brains` no #350, depois ajustada no #358.
 
+O filtro de entrada por linha da central de telefonia (cada linha só aceita a ligação dos endereços
+dela) nasceu da medição de @webtecnica numa instalação real, que mostrou a central respondendo a
+SIP de qualquer origem, e da proposta do PR #267. A forma escolhida pelo dono (decisão da
+issue #274) filtra na central a partir das linhas cadastradas, em vez de fechar a porta; nenhum
+código do #267 foi reaproveitado.
+
 Da fábrica do DeskcommCRM vieram a contribuição guiada por skills, o lançamento por fragmentos,
 a forma do instalador e as doutrinas de sistema vivo, versionamento e ação destrutiva, aqui
 reescritas para telefonia.
