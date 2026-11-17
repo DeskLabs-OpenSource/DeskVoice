@@ -5,6 +5,17 @@
 > possível o que a pessoa falou". E sobre o ditado do computador: "Eu quero essa pureza no DeskVoice."
 > Este desenho cruza o caminho do áudio do ouvido (#160, R3, DESA-10) e do ambiente barulhento
 > (#182, R11, DESA-24). Os pontos de contato estão em "Onde esta frente toca as outras".
+>
+> **Estado (17/11, documento vivo):** a medida e o filtro estão na `main`; a peça de transcrição
+> ainda não. Entregue: fatia 1 (bancada sem chave nova) no #201, fatia 1b (externos e Jev na
+> bancada) no #262, fatia 1c (o filtro com resposta esperada) no #281, fatia 6 (o filtro na chamada,
+> com o Jev) no #349, com os testes do #353 e do #362, fatia 7a (custo do Jev não lido) no #359 e
+> fatia 7b (o filtro na tela e as marcas na linha do tempo) no #395. **Falta:** a medida dos
+> transcritores externos com chave (Deepgram, AssemblyAI e Soniox: chaves não entregues); a fatia 2
+> (o contrato e o transcritor simulado), no #245, que fica parada com o trabalho guardado no ramo,
+> porque só entra junto com as fatias 3 e 4; as fatias 3, 4 e 5, que esperam o vencedor da medida;
+> as fatias 8 e 9 (o Laya), que esperam o pedido de decisão 4 (sem resposta até 23/11, a fatia 8
+> não começa). O texto abaixo é o desenho, com as correções feitas durante as fatias.
 
 ## Problema
 
