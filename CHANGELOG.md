@@ -3,6 +3,16 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.32.0] - 2026-11-17
+
+### Adicionado
+
+- **A mesma pessoa em várias organizações, com troca pelo topo da tela** Uma pessoa pode estar em mais de uma organização com a mesma conta. Quando o convite chega para um e-mail que já tem conta, a página pede a senha que a pessoa já usa, e não uma senha nova. O nome e o papel valem só naquela organização. O convite do primeiro dono, gerado na área da instalação, também aceita um e-mail que já tem conta, inclusive o de quem administra. Quem tem vínculo ativo em mais de uma organização ganha um seletor no topo da tela, e a troca acontece sem sair do painel. Quem tem uma organização só não vê nada novo. O login volta para a última organização usada, ou para a mais antiga se a última tiver sido desativada. Cada vínculo é independente dos outros. Desativar a pessoa numa organização não mexe nas outras, e removê-la de uma organização mantém a conta enquanto ela estiver em outra. A troca de senha encerra as outras sessões da conta em todas as organizações. Uma conta que tenha ficado sem nenhuma organização é tratada como conta nova no próximo convite: a pessoa define uma senha nova, e nada da conta antiga passa para ela. Crédito: @melgarafael.
+
+### Alterado
+
+- **O ambiente Barulhento também aparece nos agentes do Gemini Live** Na tela do agente, a escolha do ambiente de quem liga (Normal ou Barulhento) passa a aparecer também no motor Gemini Live, além do OpenAI Realtime. O que foi provado, numa instalação real com a 0.28.0 e o modelo `gemini-3.8-live`, é que o Gemini aceita a sessão em Barulhento, sozinho e junto do vocabulário do agente: a sessão abre. O que não foi medido é o efeito do Barulhento no ruído, em qualquer motor, e a prova do Gemini foi feita sem áudio de entrada. Nada muda para quem já instalou: o agente continua no ambiente que tinha. Nos outros motores, como o simulado, o campo continua escondido, e um agente que já está em Barulhento ali continua vendo o aviso e o botão "Voltar para Normal". Crédito: @melgarafael.
+
 ## [0.31.0] - 2026-11-17
 
 ### Adicionado
