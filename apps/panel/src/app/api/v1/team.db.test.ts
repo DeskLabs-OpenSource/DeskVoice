@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { findInviteByToken, hashToken, withOrg } from "@deskvoice/core";
+import { findInviteByToken, hashToken, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, openSession, startPanel } from "../../../../test/kit";
 import { loginLimiter } from "../../../server/rate-limit";
@@ -417,5 +417,46 @@ describe("changing my password", () => {
     expect((await call(me, { cookie: otherDevice })).status).toBe(401);
     expect((await signIn(person.email, "a-brand-new-password")).status).toBe(200);
     expect((await signIn(person.email, PASSWORD)).status).toBe(401);
+  });
+});
+
+describe("removing a person frees the e-mail", () => {
+  const accountsWith = (email: string) => withSystem(panel.app, (q) => q.many("select id from accounts where email = $1", [email]));
+
+  it("removes the account with the last link, and the same e-mail can be invited, accepted and sign in with the new password", async () => {
+    const { owner } = await newOrg("team remove and reinvite");
+    const first = await newInvite(owner.cookie, "operator");
+    expect((await call(acceptInvite, { method: "POST", params: { token: first.token }, body: { name: "Primeira vez", password: "the-first-password" } })).status).toBe(200);
+    const person = ((await call(team, { cookie: owner.cookie })).data as { people: Array<{ id: string; email: string }> }).people.find((entry) => entry.email === first.email);
+    expect(person).toBeDefined();
+    expect(await accountsWith(first.email)).toHaveLength(1);
+
+    expect((await remove(owner.cookie, person?.id ?? "")).status).toBe(200);
+    expect(await accountsWith(first.email)).toEqual([]);
+    expect(refusal(await signIn(first.email, "the-first-password"))).toEqual([401, "invalid_credentials"]);
+
+    const again = await newInvite(owner.cookie, "admin", first.email);
+    expect(again.result.status).toBe(200);
+    expect((await call(acceptInvite, { method: "POST", params: { token: again.token }, body: { name: "Segunda vez", password: "the-second-password" } })).status).toBe(200);
+    expect((await signIn(first.email, "the-second-password")).status).toBe(200);
+    expect((await signIn(first.email, "the-first-password")).status).toBe(401);
+    expect(await accountsWith(first.email)).toHaveLength(1);
+  });
+
+  it("keeps the account that still has a link with another organization", async () => {
+    const { org, owner } = await newOrg("team remove keeps account");
+    const other = await createOrganization(panel.app, "team remove keeps account, other");
+    const operator = await createUser(panel.app, org, "operator");
+    // Dois vínculos da mesma conta só nascem pelo produto na fatia 3; aqui, por SQL. `users.email` é
+    // único na instalação até lá, então o segundo vínculo leva outro e-mail na linha do vínculo.
+    const accountId = (await stored(org, "select account_id from users where id = $1", [operator.id])) as { account_id: string };
+    await withOrg(panel.app, other, (q) =>
+      q.exec("insert into users (organization_id, account_id, email, name, role) values ($1, $2, $3, 'Outro vínculo', 'operator')", [other, accountId.account_id, `link-${randomUUID()}@example.test`]),
+    );
+
+    expect((await remove(owner.cookie, operator.id)).status).toBe(200);
+    expect(await accountsWith(operator.email)).toHaveLength(1);
+    // O login segue para o vínculo que sobrou.
+    expect((await signIn(operator.email, PASSWORD)).status).toBe(200);
   });
 });
