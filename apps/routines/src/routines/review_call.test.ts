@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { CASE_PHRASE, REVIEW_CASES, TRANSFERRED_DETAILS, reviewCaseOf, reviewDetails, reviewTitle, type ReviewEvent } from "./review_call";
+import { CASE_PHRASE, REVIEW_CASES, TRANSFERRED_DETAILS, hungUpAfterAsk, reviewCaseOf, reviewDetails, reviewTitle, type ReviewEvent, type TurnEvent } from "./review_call";
 
 const ev = (kind: string, extra: Partial<ReviewEvent> = {}): ReviewEvent => ({ kind, name: null, ok: null, reason: null, approvalId: null, ...extra });
 
@@ -62,5 +62,31 @@ describe("review_call: as regras fixas", () => {
     expect(reviewCaseOf([...answered, ev("tool_result", { name: "send_whatsapp", ok: true })], "caller_hangup", inbound("caller_waiting"))).toBeNull();
     // A aprovação pendente continua no caso 3, que vem antes.
     expect(reviewCaseOf([...answered, ev("approval_requested")], "caller_hangup", inbound("tool_running"))).toBe("caller_hung_up_waiting");
+  });
+
+  it("condição 2(c): o desligar depois do \"pode repetir?\" conta só com a vez nula e no caller_hangup", () => {
+    const answered = [ev("call_answered")];
+    const after = { direction: "inbound" as const, openTurn: null, afterAsk: true };
+    expect(reviewCaseOf(answered, "caller_hangup", after)).toBe("call_dropped");
+    expect(reviewCaseOf(answered, "caller_hangup", { ...after, afterAsk: false })).toBeNull();
+    expect(reviewCaseOf(answered, "caller_hangup", { ...after, openTurn: "agent_speaking" })).toBeNull();
+    expect(reviewCaseOf(answered, "end_call", after)).toBeNull();
+    expect(reviewCaseOf(answered, "caller_hangup", { ...after, direction: "outbound" })).toBeNull();
+    expect(reviewCaseOf([], "caller_hangup", after)).toBeNull();
+    expect(reviewCaseOf([...answered, ev("follow_up_created")], "caller_hangup", after)).toBeNull();
+  });
+
+  it("hungUpAfterAsk: depois do último pedido, nenhuma fala de quem ligou e no máximo um transcript_agent", () => {
+    const t = (kind: TurnEvent["kind"], action: string | null = null): TurnEvent => ({ kind, action });
+    const ask = t("caller_unanswered", "asked_to_repeat");
+    expect(hungUpAfterAsk([])).toBe(false);
+    expect(hungUpAfterAsk([t("transcript_user"), t("caller_unanswered", "turn_closed")])).toBe(false);
+    expect(hungUpAfterAsk([t("transcript_user"), ask])).toBe(true);
+    expect(hungUpAfterAsk([ask, t("transcript_agent")])).toBe(true);
+    expect(hungUpAfterAsk([ask, t("transcript_agent"), t("transcript_agent")])).toBe(false);
+    expect(hungUpAfterAsk([ask, t("transcript_user")])).toBe(false);
+    // Vale o último pedido; o turn_closed depois dele não conta como fala.
+    expect(hungUpAfterAsk([ask, t("transcript_user"), ask, t("caller_unanswered", "turn_closed")])).toBe(true);
+    expect(hungUpAfterAsk([ask, t("transcript_agent"), t("transcript_agent"), ask])).toBe(true);
   });
 });

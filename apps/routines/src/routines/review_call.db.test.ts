@@ -548,3 +548,72 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
     expect(await followUpsOf(s.org)).toEqual([]);
   });
 });
+
+/**
+ * A condição 2(c) (decisão de 17/11): `caller_hangup` com a vez nula, depois do "pode repetir?", sem
+ * fala de quem ligou e com no máximo um `transcript_agent` depois do último pedido. A ordem é `at`, e
+ * o `id` no empate. A sessão real está em `apps/voice/src/drop-open-turn.db.test.ts`.
+ */
+describe("review_call: o desligar depois do \"pode repetir?\"", () => {
+  const ASK = { action: "asked_to_repeat", waitedMs: 6500, words: true };
+  const at = (seconds: number) => new Date(t0.getTime() + seconds * 1000);
+  /** A ligação com cada evento no instante dado, gravados nesta ordem (o `id` segue a lista). */
+  async function timed(label: string, events: [CallEventKind, object, number][], openTurn: string | null = null): Promise<Scene> {
+    const s = await scene(label, [], { endReason: "caller_hangup" });
+    await withSystem(app, (q) => q.exec("update agents set drop_follow_up = 'task' where organization_id = $1", [s.org]));
+    await withOrg(app, s.org, async (q) => {
+      for (const [kind, payload, seconds] of [["call_answered", { engine: "simulated" }, 0], ...events] as [CallEventKind, object, number][]) await recordEvent(q, s.callId, kind, payload, at(seconds));
+      await recordEvent(q, s.callId, "call_ended", { status: "completed", reason: "caller_hangup", costCents: 0, seconds: 40, openTurn }, at(40));
+    });
+    return s;
+  }
+  const review = (s: Scene) => withOrg(app, s.org, (q) => reviewCall(q, s.callId, t0));
+  const drops = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "drop_follow_up").map((event) => event.payload);
+
+  it("abre o caso 5 com openTurn caller_waiting no evento, e o call_ended fica null", async () => {
+    const s = await timed("after ask opens", [["transcript_user", { text: "Joana" }, 1], ["caller_unanswered", ASK, 8], ["transcript_agent", { text: "Pode repetir?" }, 9]]);
+    expect(await review(s)).toBe("opened");
+    expect((await followUpsOf(s.org)).map((row) => row.title)).toEqual([reviewTitle(CALLER, "call_dropped")]);
+    expect(await drops(s.callId)).toEqual([{ case: "call_dropped", mode: "task", action: "task_opened", simulated: false, openTurn: "caller_waiting" }]);
+    expect(JSON.stringify(await drops(s.callId))).not.toContain("Joana");
+    expect((await eventsOf(app, s.callId)).find((event) => event.kind === "call_ended")?.payload).toHaveProperty("openTurn", null);
+  });
+
+  it("vale o último pedido: falar depois de um pedido e ficar calado depois do segundo conta", async () => {
+    const s = await timed("after last ask", [["caller_unanswered", ASK, 8], ["transcript_user", { text: "Oi" }, 10], ["caller_unanswered", ASK, 18]]);
+    expect(await review(s)).toBe("opened");
+  });
+
+  it("a ordem é por at, não pelo id: a fala gravada depois, mas de antes do pedido, não impede", async () => {
+    const s = await timed("after ask order", [["caller_unanswered", ASK, 8], ["transcript_user", { text: "Oi" }, 5]]);
+    expect(await review(s)).toBe("opened");
+    const later = await timed("after ask order later", [["transcript_user", { text: "Oi" }, 12], ["caller_unanswered", ASK, 8]]);
+    expect(await review(later)).toBe("no_case");
+  });
+
+  it("não abre: fala de quem ligou, dois transcript_agent, sem pedido, só turn_closed, ou outro motivo do fim", async () => {
+    const cases: [string, [CallEventKind, object, number][]][] = [
+      ["spoke", [["caller_unanswered", ASK, 8], ["transcript_user", { text: "Oi" }, 9]]],
+      ["answered", [["caller_unanswered", ASK, 8], ["transcript_agent", { text: "a" }, 9], ["transcript_agent", { text: "b" }, 10]]],
+      ["no ask", [["transcript_user", { text: "Oi" }, 1]]],
+      ["closed only", [["caller_unanswered", { action: "turn_closed", waitedMs: 2500, words: true }, 3]]],
+    ];
+    for (const [label, events] of cases) {
+      const s = await timed(`after ask ${label}`, events);
+      expect(await review(s), label).toBe("no_case");
+      expect(await drops(s.callId), label).toEqual([]);
+    }
+    // A vez gravada como agent_speaking não entra pela condição 2(c).
+    const speaking = await timed("after ask speaking", [["caller_unanswered", ASK, 8]], "agent_speaking");
+    expect(await review(speaking)).toBe("no_case");
+  });
+
+  it("modo off e alguém com o próximo passo: nada", async () => {
+    const off = await timed("after ask off", [["caller_unanswered", ASK, 8]]);
+    await withSystem(app, (q) => q.exec("update agents set drop_follow_up = 'off' where organization_id = $1", [off.org]));
+    expect(await review(off)).toBe("no_case");
+    expect(await followUpsOf(off.org)).toEqual([]);
+    const transferred = await timed("after ask transfer", [["transfer_started", { to: "+5531999990000" }, 2], ["caller_unanswered", ASK, 8]]);
+    expect(await review(transferred)).toBe("no_case");
+  });
+});

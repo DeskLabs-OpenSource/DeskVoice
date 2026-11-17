@@ -14,7 +14,8 @@ import type { Routine } from "../types";
  *
  * O caso 5, `call_dropped` (desenho 2026-11-16-follow-up-da-ligacao-que-caiu, seções 2 e 3.3), é a
  * ligação recebida e atendida que caiu: quem ligou desligou com a vez aberta (`caller_waiting` ou
- * `tool_running`), ou o sistema falhou (`internal_error`, que fica fora do caso 1). Ele e o caso 1
+ * `tool_running`), quem ligou desligou depois do "pode repetir?" sem falar de novo (condição 2(c),
+ * decisão de 17/11), ou o sistema falhou (`internal_error`, que fica fora do caso 1). Ele e o caso 1
  * seguem o modo do agente que atendeu
  * (`agents.drop_follow_up`): em `off`, o padrão, o caso 1 abre a pendência como sempre e o caso 5 não
  * faz nada, e a revisão é a de antes; em `task`, os dois abrem.
@@ -68,6 +69,31 @@ export interface DropFacts {
   direction: "inbound" | "outbound";
   /** `call_ended.openTurn`: só existe no fim por `caller_hangup`. */
   openTurn: OpenTurn | null;
+  /** A condição 2(c): veja `hungUpAfterAsk`. Ausente vale `false`. */
+  afterAsk?: boolean;
+}
+
+/** Os eventos da condição 2(c), na ordem da linha do tempo (`at`, e o `id` no empate). Só o tipo e `action`. */
+export interface TurnEvent {
+  kind: "caller_unanswered" | "transcript_user" | "transcript_agent";
+  /** `payload.action` de `caller_unanswered`. */
+  action: string | null;
+}
+
+/**
+ * A condição 2(c) (decisão de 17/11): a guarda pediu para repetir (`caller_unanswered` com
+ * `action: "asked_to_repeat"`) e, depois do **último** pedido, quem ligou não falou (nenhum
+ * `transcript_user`) e o agente não respondeu de fato (no máximo um `transcript_agent`, o espaço da
+ * transcrição do próprio pedido). Conta eventos, sem ler texto.
+ */
+export function hungUpAfterAsk(events: readonly TurnEvent[]): boolean {
+  let last = -1;
+  events.forEach((event, index) => {
+    if (event.kind === "caller_unanswered" && event.action === "asked_to_repeat") last = index;
+  });
+  if (last < 0) return false;
+  const after = events.slice(last + 1);
+  return !after.some((event) => event.kind === "transcript_user") && after.filter((event) => event.kind === "transcript_agent").length <= 1;
 }
 
 /**
@@ -109,7 +135,11 @@ export function reviewCaseOf(events: readonly ReviewEvent[], endReason: string |
   // além do prazo da guarda (`caller_waiting`) ou durante uma ação do agente (`tool_running`). A vez
   // fechada (`null`) é o "obrigado, tchau"; o `agent_speaking` é gravado e não conta, porque quem
   // desliga enquanto o agente fala, na maior parte, já ouviu o que precisava (decisão de 16/11).
-  const droppedLine = endReason === "internal_error" || (endReason === "caller_hangup" && (drop?.openTurn === "caller_waiting" || drop?.openTurn === "tool_running"));
+  // Ou, com a vez fechada (`null`), desligou depois do "pode repetir?" sem falar de novo: a guarda
+  // desarma ao pedir, e a espera longa só aparece nos eventos (condição 2(c), decisão de 17/11).
+  const droppedLine =
+    endReason === "internal_error" ||
+    (endReason === "caller_hangup" && (drop?.openTurn === "caller_waiting" || drop?.openTurn === "tool_running" || (drop?.openTurn === null && drop.afterAsk === true)));
   if (
     drop?.direction === "inbound" &&
     droppedLine &&
@@ -184,7 +214,20 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
   // Só o campo estável de `call_ended`, como os outros: a vez aberta no instante do desligar.
   const ended = await q.one<{ open_turn: unknown }>("select payload->'openTurn' as open_turn from call_events where call_id = $1 and kind = 'call_ended' order by id desc limit 1", [callId]);
   const openTurn = openTurnOf(ended?.open_turn);
-  const found = reviewCaseOf(events, call.end_reason, { direction: call.direction, openTurn });
+  // A condição 2(c) só olha o tipo dos eventos de vez e o `action` do pedido, nunca o texto.
+  const afterAsk =
+    call.end_reason === "caller_hangup" &&
+    openTurn === null &&
+    hungUpAfterAsk(
+      await q.many<TurnEvent>(
+        `select kind, case when kind = 'caller_unanswered' then payload->>'action' end as action
+           from call_events
+          where call_id = $1 and kind in ('caller_unanswered', 'transcript_user', 'transcript_agent')
+          order by at, id`,
+        [callId],
+      ),
+    );
+  const found = reviewCaseOf(events, call.end_reason, { direction: call.direction, openTurn, afterAsk });
   // Em `off`, o caso 5 não faz nada: a revisão é a de antes da fatia.
   if (found === null || (found === "call_dropped" && mode === "off")) return "no_case";
   // `drop_follow_up` só para a ligação recebida e atendida (seção 2, condição 1): a recusa antes de
@@ -195,7 +238,14 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
     if (!dropped) return;
     // `whatsapp` e `call_back` ainda não têm caminho (fatias 2 a 4) e a rota não os aceita; gravados
     // direto no banco, caem na reserva, que é a pendência.
-    const payload: DropFollowUpPayload = { case: found as DropFollowUpPayload["case"], mode: mode as DropFollowUpPayload["mode"], action: "task_opened", simulated, openTurn };
+    // Pela condição 2(c), a leitura da revisão é a de quem esperava; o `call_ended` continua `null`.
+    const payload: DropFollowUpPayload = {
+      case: found as DropFollowUpPayload["case"],
+      mode: mode as DropFollowUpPayload["mode"],
+      action: "task_opened",
+      simulated,
+      openTurn: found === "call_dropped" && afterAsk ? "caller_waiting" : openTurn,
+    };
     await recordEvent(q, callId, "drop_follow_up", payload, now);
   };
   if (simulated) {

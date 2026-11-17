@@ -1,12 +1,14 @@
 // A vez aberta no instante em que quem ligou desligou (desenho 2026-11-16-follow-up-da-ligacao-que-caiu,
 // seção 3.1): uma sessão de verdade, com o motor nas mãos do teste e banco real. O valor precisa ser
 // lido antes de `finish` soltar as ferramentas e parar a guarda: depois, tudo pareceria fechado.
+import { withOrg, withSystem } from "@deskvoice/core";
 import type { Tool } from "@deskvoice/tools";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { startCallSession } from "./call-session";
-import { AFTER_WORDS_MS } from "./silence-guard";
+import { reviewCall } from "../../routines/src/routines/review_call";
+import { AFTER_CLOSE_MS, AFTER_WORDS_MS, ASK_TO_REPEAT } from "./silence-guard";
 import { createAgent, createCall, createOrganization, eventsOf, kindsOf, manualEngine, manualTransport, sessionHarness, type ManualEngine, type ManualTransport, type SessionHarness } from "./testing/db";
 import { waitFor } from "./testing/helpers";
 
@@ -40,6 +42,7 @@ function slowTool(): { tool: Tool; release(): void; started: () => boolean } {
 }
 
 interface Scene {
+  organizationId: string;
   callId: string;
   manual: ManualEngine;
   transport: ManualTransport;
@@ -56,7 +59,7 @@ async function answered(label: string, tools: string[] = [], extra: Tool[] = [])
   const transport = manualTransport();
   const session = startCallSession(harness.deps, { organizationId, callId, agentId, transport });
   await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
-  return { callId, manual, transport, done: session.done };
+  return { organizationId, callId, manual, transport, done: session.done };
 }
 
 const endedOf = async (callId: string): Promise<Record<string, unknown> | undefined> => (await eventsOf(app, callId)).find((event) => event.kind === "call_ended")?.payload;
@@ -152,5 +155,81 @@ describe("openTurn fora do caller_hangup", { timeout: 120_000 }, () => {
     const ended = await endedOf(s.callId);
     expect(ended).toMatchObject({ reason: "engine_failed" });
     expect(ended).not.toHaveProperty("openTurn");
+  });
+});
+
+/**
+ * A condição 2(c) (decisão de 17/11): quem ligou falou, esperou, ouviu o "pode repetir?" e desligou.
+ * A guarda desarma ao pedir, e o `openTurn` sai `null`; a revisão conta o caso pelos eventos.
+ */
+describe("o desligar depois do \"pode repetir?\" (condição 2(c))", { timeout: 120_000 }, () => {
+  const ask = async (label: string, mode: "off" | "task"): Promise<Scene> => {
+    const s = await answered(label);
+    await withSystem(app, async (q) => {
+      await q.exec("update calls set from_e164 = '+5511988887777' where id = $1", [s.callId]);
+      await q.exec("update agents set drop_follow_up = $2 where organization_id = $1", [s.organizationId, mode]);
+    });
+    s.manual.emit("callerActivity", { words: true });
+    s.manual.emit("transcript", { speaker: "user", text: "Queria saber do meu pedido." });
+    expect(harness?.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    expect(harness?.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+    expect(s.manual.said).toContain(ASK_TO_REPEAT);
+    await waitFor(async () => (await eventsOf(app, s.callId)).some((event) => event.kind === "caller_unanswered" && event.payload.action === "asked_to_repeat"), "the request to repeat");
+    return s;
+  };
+  const hangUpAndReview = async (s: Scene) => {
+    s.transport.callerHangup();
+    await s.done;
+    const now = harness?.clock.now();
+    if (!now) throw new Error("no harness");
+    const result = await withOrg(app, s.organizationId, (q) => reviewCall(q, s.callId, now));
+    const events = await eventsOf(app, s.callId);
+    const followUps = await withSystem(app, (q) => q.many<{ title: string }>("select title from follow_ups where call_id = $1", [s.callId]));
+    return { result, ended: events.find((event) => event.kind === "call_ended")?.payload, drops: events.filter((event) => event.kind === "drop_follow_up").map((event) => event.payload), followUps };
+  };
+
+  it("modo task: desligar sem falar de novo abre o caso 5, logo depois do pedido e depois de 20 s", async () => {
+    for (const waitMs of [0, 20_000]) {
+      const s = await ask(`after-ask task ${waitMs}`, "task");
+      // A transcrição do próprio pedido, se o motor gravar uma: a regra aceita no máximo uma.
+      s.manual.emit("transcript", { speaker: "agent", text: ASK_TO_REPEAT });
+      harness?.clock.advance(waitMs);
+      const r = await hangUpAndReview(s);
+      expect(r.ended).toMatchObject({ reason: "caller_hangup" });
+      expect(r.ended).toHaveProperty("openTurn", null);
+      expect(r.result).toBe("opened");
+      expect(r.followUps).toEqual([{ title: "Retornar para +5511988887777: a ligação caiu no meio da conversa" }]);
+      expect(r.drops).toEqual([{ case: "call_dropped", mode: "task", action: "task_opened", simulated: false, openTurn: "caller_waiting" }]);
+      await harness?.approvals.close();
+      harness = undefined;
+    }
+  });
+
+  it("quem ligou fala depois do pedido: não abre nada", async () => {
+    const s = await ask("after-ask spoke", "task");
+    s.manual.emit("transcript", { speaker: "user", text: "Meu pedido." });
+    const r = await hangUpAndReview(s);
+    expect(r.result).toBe("no_case");
+    expect(r.followUps).toEqual([]);
+    expect(r.drops).toEqual([]);
+  });
+
+  it("dois transcript_agent depois do pedido (o agente respondeu de fato): não abre nada", async () => {
+    const s = await ask("after-ask answered", "task");
+    s.manual.emit("transcript", { speaker: "agent", text: ASK_TO_REPEAT });
+    s.manual.emit("transcript", { speaker: "agent", text: "Encontrei o seu pedido." });
+    const r = await hangUpAndReview(s);
+    expect(r.result).toBe("no_case");
+    expect(r.followUps).toEqual([]);
+    expect(r.drops).toEqual([]);
+  });
+
+  it("modo off: o mesmo desligar não abre nada", async () => {
+    const s = await ask("after-ask off", "off");
+    harness?.clock.advance(20_000);
+    const r = await hangUpAndReview(s);
+    expect(r.result).toBe("no_case");
+    expect(r.followUps).toEqual([]);
+    expect(r.drops).toEqual([]);
   });
 });
