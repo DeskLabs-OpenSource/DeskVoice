@@ -20,6 +20,7 @@ const line: LineDictionary = {
   matchExtraRegisterHint:
     "One per line: IP or block (54.172.60.0/30), never a name. Only for a carrier that registers the line through one server and delivers the call from another: the line is still recognized by the registration, and these addresses join the list the server accepts calls from.",
   allowed: "Accepts calls from",
+  allowedIfOn: "With the filter on, it would accept only from",
   allowedNone: "no address yet. The list appears once the line is applied (Save line or Test line); a failed line accepts no calls.",
   allowedAny: "any address, because this line's filter is off.",
   allowedOthers: "The server refuses calls for this line that come from any other address.",
@@ -27,7 +28,8 @@ const line: LineDictionary = {
   allowedResolvedAt: "Addresses of the name {name} updated on {when}.",
   allowedHint: "If calls from this carrier stop arriving, it may be delivering from another address: add it to Extra addresses.",
   filterSwitchedOff: "Filter off on this line: the server accepts its calls from any address. Check the addresses above and turn the filter on.",
-  filterSwitchedOffEmpty: "Filter off on this line: the server accepts its calls from any address. Turn the filter on.",
+  filterSwitchedOffEmpty: "Filter off on this line: the server accepts its calls from any address. Even with the filter on, it keeps accepting them from any address until the name resolves.",
+  filterSwitchedOffPending: "Filter off on this line: once the line is applied, the server will accept its calls from any address.",
   filterOn: "Turn the filter on",
   filterOff: "Turn the filter off",
   outboundHost: "Address for outbound calls (optional)",

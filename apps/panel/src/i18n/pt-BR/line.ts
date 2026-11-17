@@ -18,6 +18,7 @@ const line = {
   matchExtraRegisterHint:
     "Um por linha: IP ou bloco (54.172.60.0/30), nunca nome. Só para a operadora que registra a linha por um servidor e entrega a ligação por outro: a linha continua reconhecida pelo registro, e estes endereços entram na lista de quem a central aceita.",
   allowed: "Aceita ligações de",
+  allowedIfOn: "Com o filtro ligado, aceitaria só de",
   allowedNone: "nenhum endereço por enquanto. A lista aparece quando a linha é aplicada (Salvar linha ou Testar linha); a linha com falha não aceita ligação.",
   allowedAny: "qualquer endereço, porque o filtro desta linha está desligado.",
   allowedOthers: "A central recusa a ligação desta linha que vier de qualquer outro endereço.",
@@ -25,7 +26,8 @@ const line = {
   allowedResolvedAt: "Endereços do nome {name} atualizados em {when}.",
   allowedHint: "Se as ligações desta operadora pararem de chegar, ela pode estar entregando de outro endereço: inclua-o em Endereços extras.",
   filterSwitchedOff: "Filtro desligado nesta linha: a central aceita a ligação dela de qualquer endereço. Confira os endereços acima e ligue o filtro.",
-  filterSwitchedOffEmpty: "Filtro desligado nesta linha: a central aceita a ligação dela de qualquer endereço. Ligue o filtro.",
+  filterSwitchedOffEmpty: "Filtro desligado nesta linha: a central aceita a ligação dela de qualquer endereço. Mesmo com o filtro ligado, ela continua aceitando de qualquer endereço até o nome resolver.",
+  filterSwitchedOffPending: "Filtro desligado nesta linha: quando a linha for aplicada, a central vai aceitar a ligação dela de qualquer endereço.",
   filterOn: "Ligar o filtro",
   filterOff: "Desligar o filtro",
   outboundHost: "Endereço para as ligações de saída (opcional)",

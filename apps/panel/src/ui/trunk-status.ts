@@ -1,3 +1,4 @@
+import { inboundFilterOn } from "@deskvoice/core/inbound-filter";
 import type { Trunk } from "./types";
 
 /**
@@ -26,4 +27,41 @@ export function filterOff(trunk: Pick<Trunk, "status" | "lastError" | "inboundAl
   if (!hostIsName || (trunk.inboundAllowed ?? []).length > 0) return false;
   if (trunk.status !== "warn" && trunk.status !== "fail" && trunk.status !== "ok") return false;
   return !(trunk.lastError ?? "").startsWith(LEFT_OUT);
+}
+
+/** O que a caixa "Aceita ligações de" mostra: as chaves do dicionário da linha, escolhidas aqui. */
+export interface AllowedView {
+  /** O rótulo antes da lista: o que a central aceita agora, ou o que o filtro aceitaria se ligado. */
+  label: "allowed" | "allowedIfOn";
+  /** A lista de endereços, ou a frase no lugar dela quando a lista está vazia. */
+  value: "list" | "allowedAny" | "allowedEmpty" | "allowedNone";
+  /** Se a tela diz que a central recusa os outros endereços. */
+  others: boolean;
+  /** O aviso em negrito da linha por registro com o filtro desligado. */
+  warning: null | "filterSwitchedOff" | "filterSwitchedOffEmpty" | "filterSwitchedOffPending";
+}
+
+/**
+ * Uma frase só, e verdadeira sobre o que a central faz agora, em cada estado da linha (R14). A
+ * linha por IP filtra sempre e fica nos três primeiros. Com a lista vazia, `filterOff` diz se a
+ * linha está na central (nome que nunca resolveu: aceita de qualquer endereço, com o filtro ligado
+ * ou desligado, porque sem endereço a central não recusa nada) ou fora dela (não aceita ligação).
+ *
+ * | filtro    | lista             | rótulo e valor          | aviso                    |
+ * |-----------|-------------------|-------------------------|--------------------------|
+ * | ligado    | com endereços     | allowed: lista + outros | nenhum                   |
+ * | ligado    | vazia, na central | allowed: allowedEmpty   | nenhum                   |
+ * | ligado    | vazia, fora       | allowed: allowedNone    | nenhum                   |
+ * | desligado | com endereços     | allowedIfOn: lista      | filterSwitchedOff        |
+ * | desligado | vazia, na central | allowed: allowedAny     | filterSwitchedOffEmpty   |
+ * | desligado | vazia, fora       | allowed: allowedNone    | filterSwitchedOffPending |
+ */
+export function allowedView(trunk: Pick<Trunk, "authMode" | "inboundFilter" | "status" | "lastError" | "inboundAllowed">, hostIsName: boolean): AllowedView {
+  const on = inboundFilterOn(trunk);
+  if ((trunk.inboundAllowed ?? []).length > 0) {
+    return on ? { label: "allowed", value: "list", others: true, warning: null } : { label: "allowedIfOn", value: "list", others: false, warning: "filterSwitchedOff" };
+  }
+  const inServer = filterOff(trunk, hostIsName);
+  if (on) return { label: "allowed", value: inServer ? "allowedEmpty" : "allowedNone", others: false, warning: null };
+  return inServer ? { label: "allowed", value: "allowedAny", others: false, warning: "filterSwitchedOffEmpty" } : { label: "allowed", value: "allowedNone", others: false, warning: "filterSwitchedOffPending" };
 }
