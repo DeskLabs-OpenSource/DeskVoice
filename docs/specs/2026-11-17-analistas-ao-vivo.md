@@ -86,7 +86,7 @@ orientações que se contradizem, sem um caso de uso que pague isso. Se aparecer
 create table analysts (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
-  name text not null,                 -- 1 a 40 caracteres, único na organização
+  name citext not null,               -- 1 a 40 caracteres, único na organização, sem diferença de maiúsculas
   decision_model text not null,       -- id de um DecisionModel instalado (ex.: 'jev')
   temperature boolean not null default true,
   objections jsonb not null default '[]',  -- [{ key, label, guidance }], validado por zod no core

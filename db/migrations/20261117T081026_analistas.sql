@@ -6,7 +6,8 @@
 create table analysts (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations (id) on delete cascade,
-  name text not null check (char_length(name) between 1 and 40),
+  -- `citext`, como o e-mail: "Jev" e "jev" são o mesmo nome na organização.
+  name citext not null check (char_length(name) between 1 and 40),
   -- Id de um modelo de decisão instalado (`deciders/`). Quem confere é a rota, ao salvar.
   decision_model text not null,
   temperature boolean not null default true,

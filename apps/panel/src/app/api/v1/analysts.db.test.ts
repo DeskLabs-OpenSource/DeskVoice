@@ -128,6 +128,17 @@ describe("o cadastro do analista", () => {
     await newAnalyst(otherOwner, { name: "Único", decisionModel: "simulated" });
   });
 
+  it("o nome é único sem diferença de maiúsculas, no POST e no PATCH; outra organização pode usar a mesma grafia", async () => {
+    await newAnalyst(owner, { name: "Jev", decisionModel: "simulated" });
+    const created = await call(createAnalyst, { method: "POST", cookie: owner, body: { name: "jev", decisionModel: "simulated" } });
+    expect([created.status, created.code]).toEqual([409, "already_exists"]);
+    const other = await newAnalyst(owner, { name: "Outro nome", decisionModel: "simulated" });
+    const renamed = await call(patchAnalyst, { method: "PATCH", cookie: owner, params: { id: other.id }, body: { name: "jev" } });
+    expect([renamed.status, renamed.code]).toEqual([409, "already_exists"]);
+    expect(await analystRow(org, other.id)).toMatchObject({ name: "Outro nome" });
+    await newAnalyst(otherOwner, { name: "jev", decisionModel: "simulated" });
+  });
+
   it("o modelo de decisão precisa estar instalado", async () => {
     for (const decisionModel of ["laya", "", "JEV"]) {
       const result = await call(createAnalyst, { method: "POST", cookie: owner, body: { name: `M ${decisionModel}`, decisionModel } });
