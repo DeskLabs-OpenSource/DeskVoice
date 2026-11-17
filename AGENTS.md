@@ -174,6 +174,7 @@ certa. Ou chame pelo nome.
 | Vou adicionar ou alterar um motor de voz | `deskvoice-motor-de-voz` |
 | Tenho uma instalação rodando e preciso atualizar, fazer backup, diagnosticar | `deskvoice-operar` |
 | Quero saber como está a operação: ligações, desfecho, custo, falhas, fila | `deskvoice-metricas` |
+| As respostas da IA estão ruins e quero afinar as instruções ou o vocabulário de um agente | `deskvoice-agente-de-voz` |
 | Vou acrescentar uma peça e preciso saber se ela está viva (a lista do sistema vivo no PR) | `deskvoice-sistema-vivo` |
 
 Editou uma skill? Rode `pnpm skills:sync`. O espelho fora de sincronia reprova no CI.
