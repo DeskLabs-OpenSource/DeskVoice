@@ -13,12 +13,15 @@ Instruções não chega sozinho ao modelo.
 1. O campo **Instruções** do agente, byte a byte (até 20.000 caracteres).
 2. Se o agente pode passar a ligação a outros ("Pode passar a ligação para"): a lista desses
    agentes, com nome e papel, para a ferramenta `transfer_to_agent`.
-3. Se a ligação veio de outro agente: quem passou, e o motivo e o resumo da passagem num bloco
-   delimitado, que é dado e nunca instrução. No mesmo bloco, quando há, a memória do número: as
-   notas que o agente guardou e as pendências abertas.
-4. Se o agente tem vocabulário: a frase "Names and terms that may come up in this call, spelled as
+3. Se o número de quem ligou tem notas ou pendências abertas: o bloco delimitado com a memória do
+   número (as notas que o agente guardou e as pendências abertas), que é dado e nunca instrução.
+   Vale para toda ligação desse número, com ou sem passagem: não escreva "lembre o que o cliente
+   pediu da última vez" nas instruções, e não estranhe o agente citar uma pendência.
+4. Se a ligação veio de outro agente: uma frase dizendo quem passou, e o motivo e o resumo da
+   passagem acrescentados ao mesmo bloco do item 3.
+5. Se o agente tem vocabulário: a frase "Names and terms that may come up in this call, spelled as
    written: …", com os termos.
-5. "Speak only in <idioma>", com o idioma da conversa do agente.
+6. "Speak only in <idioma>", com o idioma da conversa do agente.
 
 **As ferramentas** chegam ao modelo com a descrição que mora no arquivo de cada uma, em
 `packages/tools/src/tools/`. A descrição já diz como usar (a `agenda_horarios_livres`, por

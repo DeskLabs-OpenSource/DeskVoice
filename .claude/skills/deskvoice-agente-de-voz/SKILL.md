@@ -72,7 +72,7 @@ Cada sinal aponta uma causa, e nem toda causa é texto:
 | `tool_result` com falha e depois silêncio ou desligar | as instruções não dizem o que falar quando a ferramenta não resolve (antipadrão 15) | instruções |
 | `transfer_started` cedo e em quase toda ligação | instrução de "na dúvida, transfira" | instruções |
 | `caller_unanswered` frequente | o agente não percebeu o fim da fala de quem ligou: barulho | campo Ambiente (Barulhento, hoje só no OpenAI Realtime); não é instrução |
-| Nome, marca ou termo trocado na fala transcrita | o provedor não reconheceu o termo | vocabulário (é uma dica que o provedor pode ignorar) |
+| Nome, marca ou termo trocado na fala transcrita | o provedor não reconheceu o termo | vocabulário (é uma dica que o provedor pode ignorar; sem tela até o PR #290, então a lista aprovada fica registrada) e, nas instruções, como dizer o nome |
 | `engine_failed` | o provedor caiu ou a conta parou | Saúde e a chave; skill `deskvoice-operar`, seção 4 |
 | `cost_ceiling_reached` ou fim por tempo máximo | ligação longa: falas compridas, sem encerrar | instruções (fala curta, encerrar) e limites do agente |
 
@@ -104,10 +104,11 @@ Com o sim, quem salva é a pessoa, na tela do agente (campo Instruções, depois
 e a hora em que ela salvou: é a régua do "antes" e do "depois".
 
 O **vocabulário** é diferente: **o campo de vocabulário na tela ainda não existe** na `main`. Ele
-vem no PR #290, que está em rascunho. Hoje o vocabulário só se troca pela API
-(`PATCH /api/v1/agents/<id>`, campo `vocabulary`), com a sessão de quem está logado; o passo a passo
-e as regras do campo estão em [`references/diagnostico.md`](references/diagnostico.md), seção 5. A
-regra do sim vale igual: lista atual, lista nova, o sim.
+vem no PR #290, que está em rascunho. Até ele entrar, **o vocabulário não se troca pela skill**:
+você mostra a lista atual e a nova, recebe o sim e entrega à pessoa o registro da lista aprovada (o
+agente, a data, o antes, o depois e o sim), para ela aplicar quando a tela existir. O **como dizer**
+um nome difícil tem tela: vai nas instruções, com o mesmo sim. As regras do campo e o registro
+estão em [`references/diagnostico.md`](references/diagnostico.md), seção 5.
 
 Depois de salvar, teste **ligando**: Chamadas → **Falar com o agente** (`/calls/talk`) conversa com
 o motor de verdade, pelo navegador, e custa como uma ligação. Faça o caso que incomodava e leia a
@@ -138,6 +139,9 @@ sim.
   jeito.
 - Não salva por conta própria: nada de `PATCH` com a sessão de alguém, nada de `update agents` no
   banco.
+- Não entrega código para a pessoa rodar no console do navegador, nem para "só trocar o
+  vocabulário": colar código numa sessão de dono ou administrador é o gesto do golpe, e quem cola
+  não lê o que cola.
 - Não diz que melhorou. Diz o que mediu, com a régua, e o que não mediu.
 - Não pede cookie, senha nem chave de IA.
 - Não lê nem pede transcrição, resumo, texto da análise, nome ou telefone de quem ligou, e não

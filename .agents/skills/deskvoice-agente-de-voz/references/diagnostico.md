@@ -113,11 +113,14 @@ atual, a pessoa abre, logada no painel, o endereço `<painel>/api/v1/agents/<id>
 `{"ok": true, "data": {...}}`, e a lista está em `data.vocabulary`. A resposta traz também as
 instruções e o número de transferência: ela copia só o que for pedido.
 
-## 5. O vocabulário pela API
+## 5. O vocabulário, até a tela existir
 
-**Hoje, sem tela.** O campo `vocabulary` existe em `POST /api/v1/agents` e em
-`PATCH /api/v1/agents/<id>`; o campo na tela do agente ainda não existe (PR #290, rascunho). Se o
-#290 entrar, use a tela e deixe esta seção de lado.
+**Hoje, sem tela e sem troca pela skill.** O campo na tela do agente ainda não existe (PR #290,
+rascunho). Até o #290 entrar, o vocabulário **não se troca pela skill**: você não ensina a pessoa a
+trocar a lista por outro caminho, e não entrega código para ela rodar no console do navegador. Um
+trecho colado no console de uma sessão de dono ou administrador faz tudo o que essa sessão faz,
+inclusive apagar agentes; é o roteiro do golpe que os navegadores tentam barrar, e uma skill
+oficial não torna esse gesto normal. Se o #290 entrar, use a tela e deixe esta seção de lado.
 
 **O que ele faz.** É a lista de nomes e termos que o agente deve esperar ouvir, escritos como se
 escrevem ("Clínica Bem Viver", "Dra. Taís Quirino"). O DeskVoice leva a lista a dois lugares: a
@@ -130,26 +133,20 @@ que o nome vai ser ouvido certo, e não ensina pronúncia: como dizer um nome di
 instruções, por extenso.
 
 **As regras** (`checkVocabulary`, em `packages/core/src/vocabulary.ts`), as mesmas que a tela vai
-usar: até 50 termos; até 60 caracteres cada; sem quebra de linha, caractere de controle, `<` ou
-`>`; sem termo repetido (maiúscula e minúscula contam como o mesmo); espaço nas pontas é aparado.
-A recusa vem com o motivo, em inglês.
+usar, para a lista já nascer válida: até 50 termos; até 60 caracteres cada; sem quebra de linha,
+caractere de controle, `<` ou `>`; sem termo repetido (maiúscula e minúscula contam como o mesmo);
+espaço nas pontas é aparado.
 
-**Como trocar**, depois do sim da pessoa para a lista nova inteira: o `PATCH` **substitui a lista
-inteira** (mande a lista completa, não só o termo novo; `[]` apaga todos). Só dono e administrador
-podem. A pessoa, logada no painel, abre o console do navegador (F12 → Console) na página do painel
-e roda, com o id do agente e a lista que ela aprovou:
+**O que fazer agora**, quando o diagnóstico aponta o vocabulário:
 
-```js
-await (await fetch("/api/v1/agents/<id>", {
-  method: "PATCH",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ vocabulary: ["Clínica Bem Viver", "Dra. Taís Quirino"] }),
-})).json()
-```
-
-A resposta `{"ok": true, ...}` traz a lista gravada em `data.vocabulary`; `{"ok": false, "error":
-{...}}` traz o motivo. Quem roda é ela, no navegador dela: você não pede cookie nem roda o pedido.
-A lista vale a partir da próxima ligação.
+1. Monte com a pessoa a lista nova **inteira** (a lista da tela vai substituir a atual, não somar),
+   e mostre a lista atual (seção 4) e a nova, com o porquê de cada termo, como no Passo 2 da skill.
+2. Com o sim dela para aquela lista, entregue um registro para ela guardar: o agente, a data, a
+   lista atual, a lista nova e o sim. É o que ela aplica quando a tela existir, e o "antes" para
+   voltar.
+3. O que já tem tela segue: **como dizer** o nome difícil vai nas instruções, por extenso, com o
+   mesmo antes e depois e o mesmo sim (antipadrão "Lista de nomes difíceis no meio das instruções",
+   em [`anatomia-e-antipadroes.md`](anatomia-e-antipadroes.md)).
 
 ## 6. Antes e depois
 
@@ -210,7 +207,11 @@ with b as (
      and c.started_at >= :'mudanca'::timestamptz - make_interval(days => :'dias'::int)
      and c.started_at <  :'mudanca'::timestamptz + make_interval(days => :'dias'::int)
 )
-select lado, 'fim: ' || coalesce(end_reason, '(sem motivo)') as sinal, count(*) as ligacoes
+select lado,
+       'fim: ' || case when end_reason is null then '(sem motivo)'
+                       when end_reason ~ '^[a-z]+(_[a-z]+)*$' then end_reason
+                       else '(frase livre)' end as sinal,
+       count(*) as ligacoes
   from b group by 1, 2
 union all
 select b.lado, e.kind, count(distinct e.call_id)
