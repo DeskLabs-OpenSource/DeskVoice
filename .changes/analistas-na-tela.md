@@ -1,7 +1,0 @@
----
-impact: new_capability
-section: added
-title: O analista ao vivo ganha tela própria, campo no agente, linha separada em Custos e selo de temperatura
----
-
-Nada muda para quem já instalou: nenhum agente tem analista, e o campo novo do agente nasce em "Nenhum". Em Configurações há uma seção nova, **Analistas**, onde o dono ou o administrador cria o analista, dá o nome, escolhe o modelo de decisão (só os que têm a chave salva, na tela do Filtro de fala), liga a temperatura e escreve as objeções, cada uma com o rótulo e a orientação que o agente recebe. Com o Jev, a tela mostra o mesmo aviso do filtro, só com o que a política de privacidade da TypeSafe diz, e pede a confirmação "O texto do que a pessoa fala na ligação vai para a TypeSafe."; sem ela, não salva, e a tela mostra quem confirmou e quando. Apagar um analista pede confirmação com o nome dele e dos agentes que ficam sem analista. Na tela do agente, o campo **Analista** liga o analista; com o motor Gemini Live, a tela avisa que este motor ainda não recebe orientação: o analista mede, mas não orienta. Na linha do tempo, a objeção aparece pelo rótulo do cadastro, e a orientação entregue aparece com o texto do cadastro atual (se ela foi editada depois, aparece o texto novo, e a tela diz isso); no motor sem orientação, a explicação aparece uma vez por chamada. O detalhe da chamada ganha um selo com a última temperatura lida, de 1 a 5. Em Custos, os pedidos do analista aparecem numa linha própria, separada do mesmo modelo usado pelo filtro de fala. Crédito: @melgarafael.
