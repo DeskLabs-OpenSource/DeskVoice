@@ -282,12 +282,17 @@ O dado que vai para a ElevenLabs (seção 9.1) entra nesta fatia:
 - gravar a chave pede a **confirmação nomeando o fornecedor**, com o texto da seção 9.1. Quem
   confirmou e quando ficam em `synthesizer.elevenlabs.consent` (`{ userId, confirmedAt }`, tabela
   `settings`, por organização). Sem a confirmação, a rota recusa a chave (422), e o teste prova isso;
-- o aviso não nomeia país: com `processingLocation: undeclared`, a tela diz que a ElevenLabs não
-  declara onde processa. Teste: o texto da tela não contém nome de país;
-- a política de retenção da ElevenLabs é lida e registrada, com endereço e data da leitura, no guia
-  `docs/guides/voz.md` (três idiomas), **antes da entrega** desta fatia. Se a página não disser quanto
-  tempo o texto fica guardado, o guia e o aviso dizem isso, e o pedido volta ao Rafael antes de a tela
-  oferecer a ElevenLabs;
+- o aviso diz o que as páginas da ElevenLabs dizem, sem inventar nem esconder (resposta A da
+  DESA-103, 17/11, ver 9.1): o texto fica no histórico dela até alguém apagar a geração ou a conta;
+  depois de apagado, fica até 30 dias em cópia de segurança; os registros de depuração e moderação
+  não têm prazo; o dado fica **guardado nos EUA**. Onde ela **processa** continua não declarado
+  (`processingLocation: undeclared`), e a tela diz isso. Teste: o único nome de país no texto da
+  tela é o do armazenamento, e ele aparece junto do endereço e da data da fonte; o aviso não some
+  com a chave gravada;
+- o guia `docs/guides/voz.md` (três idiomas) registra a leitura, **antes da entrega** desta fatia:
+  endereço, data e trecho de cada página (seção 7, "Retenção da ElevenLabs"), e diz que o modo sem
+  retenção da ElevenLabs é só do plano Enterprise. Se, na entrega, a página tiver mudado e disser
+  outra coisa, o guia e o aviso seguem a página nova e a mudança é contada no PR;
 - cada confirmação nova grava também o **recibo** `synthesizer_provider_confirmed` em
   `organization_events`, na mesma transação, no molde do `analyst_provider_confirmed` (#386):
   `actor_user_id` de quem confirmou e payload `{ synthesizerId, provider, confirmedByName }`, com o
@@ -299,8 +304,14 @@ O dado que vai para a ElevenLabs (seção 9.1) entra nesta fatia:
   mesma chave não grava outro; apagar a chave apaga a confirmação da `settings` e deixa o recibo; a
   gravação recusada por falta de confirmação (422) não grava recibo;
 - apagar a chave apaga a confirmação. Uma chave nova pede confirmação nova, com recibo novo.
-Sobra da 1a (achado do Verificador 2 no #393): um teste em `synthesizers/elevenlabs.test.ts` prova
-que o fechamento 1000 depois do `end()`, sem `isFinal`, termina em `done`, e não em `error`.
+A sobra da 1a (o teste do fechamento 1000 depois do `end()`) saiu desta fatia e foi feita à parte
+(DESA-104, #407).
+O corpo do PR cita a resposta do Rafael na DESA-103 ("pode seguir com sua recomendação", 17/11,
+17:11Z), e o Verificador confere a citação. Os arquivos que a fatia toca ficam em `apps/panel`
+(rotas `api/v1/synthesizers/[id]/key` e `voices`, a seção "Voz" em `settings`, o histórico de
+Privacidade e os textos em `i18n`), em `packages/core/src/types.ts` (`ORG_EVENT_KINDS`), no máximo
+em `packages/voice-engine/src/synthesizers/` (ler a lista de vozes) e em `docs/guides/voz.md`. Não
+toca `apps/voice` nem `call-session.ts`, nem migration.
 
 ### Fatia 2: o cérebro conversa em streaming, com ferramentas (não espera a R12)
 
@@ -417,7 +428,7 @@ próprio, não uma carona neste.
   para o Jev.
 ```
 
-Enquanto não há resposta, o desenho segue a opção A (seção 9.1).
+Resposta: A, dada pelo Rafael em 17/11, junto com a DESA-103 (seção 9.1).
 
 ## 7. Fontes (conferidas em 17/11/2026)
 
@@ -437,8 +448,15 @@ Enquanto não há resposta, o desenho segue a opção A (seção 9.1).
   Multilingual v2 a US$ 0,08 por mil, igual em todos os planos. O plano gratuito inclui 20 mil
   caracteres de Flash/Turbo por mês. Conferido no HTML da página pelo #393 e pela revisora do
   #390, em 17/11/2026.
-- **Não conferido:** a política de retenção do texto enviado à ElevenLabs e o país do processamento
-  (a fatia 1b lê os dois, seção 9.1); se o plano gratuito permite uso comercial ou exige
+- **Retenção da ElevenLabs** (lida pelo Desenvolvedor em 17/11/2026, 15:50 UTC, na DESA-101):
+  - https://elevenlabs.io/docs/eleven-api/resources/zero-retention-mode: o texto e o áudio de TTS
+    ficam no histórico por padrão; a API apaga gerações, mas "debugging and moderation logs may
+    still retain data"; depois de apagar, "retained in backups for up to 30 days"; o modo sem
+    retenção é só para Enterprise.
+  - https://elevenlabs.io/privacy-policy (atualizada em 9/10/2026): guarda "for as long as you have
+    an account with us"; "your personal information will be transferred to the United States for
+    storage".
+- **Não conferido:** onde a ElevenLabs processa; os Termos de Serviço e o DPA; se o plano gratuito permite uso comercial ou exige
   atribuição; a latência própria do Flash v2.5 em pt-BR; os limites de conexões simultâneas por plano.
 
 ## 8. O que fica de fora
@@ -472,16 +490,21 @@ escolhidas à parte do cérebro, como o Jev do filtro.
 O desenho segue as condições que o Rafael deu em 16/11 ao Jev (desenho da R12, #198, "Custo e
 consentimento"), as mesmas que o desenho dos analistas
 ([`2026-11-17-analistas-ao-vivo.md`](2026-11-17-analistas-ao-vivo.md), seção 2.1) já usa. Isso é a
-opção A do pedido 6.2, e vale enquanto ele não for respondido:
+opção A do pedido 6.2, respondida pelo Rafael em 17/11 (DESA-103):
 
 - **A confirmação nomeia o fornecedor e diz o que vai:** "O texto que o agente fala na ligação vai
   para a ElevenLabs. Ele pode repetir o que a pessoa disse, como nome, endereço e telefone." Quem
   confirmou e quando ficam gravados, com recibo em `organization_events` (fatia 1b). A transcrição
   usa a mesma forma: "O áudio da pessoa na ligação vai para <fornecedor>."
 - **O país só aparece com fonte**, com endereço e data da página do fornecedor. A ElevenLabs entra
-  com `processingLocation: undeclared`, e a tela diz que ela não declara onde processa.
-- **A retenção é lida antes:** no guia `docs/guides/voz.md`, antes da entrega da fatia 1b. Sem prazo
-  na página, o pedido volta ao Rafael.
+  com `processingLocation: undeclared`, e a tela diz que ela não declara onde processa. O
+  armazenamento nos EUA tem fonte (política de privacidade, atualizada em 9/10/2026) e aparece como
+  armazenamento, não como lugar de processamento.
+- **A retenção é lida antes:** no guia `docs/guides/voz.md`, antes da entrega da fatia 1b. A página
+  não dá prazo para o texto, e o pedido foi ao Rafael (DESA-103). Ele respondeu A em 17/11: a tela
+  oferece a ElevenLabs, e o aviso diz o que a página diz (histórico até apagar, 30 dias de cópia,
+  registros sem prazo, armazenamento nos EUA). A opção de o DeskVoice apagar a fala do histórico
+  depois de cada ligação ficou para depois de uma medida, fora da 1b.
 - **A chave é o portão.** Sem chave, nada sai. Com a chave, o agente não salva com a peça sem a
   confirmação (fatia 5).
 - **O cérebro segue a R4**, sem confirmação, como nos motores diretos. Mudar isso é a opção B do
@@ -499,4 +522,7 @@ A bancada (fatia 1a) usa só texto sintético, sem dado de ninguém.
 - Se o `/chat/completions` com `stream: true` + `tools` do OpenRouter e do DeepSeek se comporta como o
   da OpenAI. A documentação da R4 foi lida para o `completeJson`, não para streaming.
 - O custo por minuto de conversa no pipeline. A fatia 6 calcula a partir do extrato real.
-- A política de retenção e o país do processamento da ElevenLabs (seção 9.1). A fatia 1b lê os dois.
+- O país do processamento da ElevenLabs: a política diz só onde guarda (EUA). Os Termos de Serviço,
+  o DPA e a página de segurança não foram lidos; algum deles pode dar prazo ou país.
+- Se as gerações do WebSocket `stream-input` aparecem no histórico da conta (seria a base da opção
+  de apagar depois da ligação).
