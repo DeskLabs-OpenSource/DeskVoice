@@ -77,10 +77,19 @@ diga isso e siga pelo disco.
 
 ## Passo 2: a fatia, palavra por palavra
 
-Ache no desenho a seção da fatia `N` (um título que começa com "Fatia N") e copie-a **inteira**,
-do título até o próximo título do mesmo nível ou acima. Ela tem de ter o contrato e o aceite. Se
-não tem um dos dois, pare e diga à pessoa: sem aceite escrito, o verificador não tem contra o que
-medir.
+Ache no desenho tudo o que é da fatia `N` e copie **inteiro**. Os desenhos daqui escrevem isso
+de dois jeitos, e às vezes dos dois ao mesmo tempo:
+
+- uma seção com título próprio ("Fatia N…"): do título até o próximo título do mesmo nível ou
+  acima;
+- uma linha numa tabela de fatias (o que entra, a prova), mais as seções que dizem a que fatia
+  pertencem no título ou no texto ("3.1 Banco (fatia 1)"): a linha, com o cabeçalho da tabela, e
+  cada uma dessas seções.
+
+O que você copiou tem de dizer **o que entra** (o contrato) e **como se prova** (o aceite, a
+prova ou o critério de aceite). Se falta um dos dois, pare e diga à pessoa: sem aceite escrito, o
+verificador não tem contra o que medir. Se o desenho chama o aceite por outro nome, diga qual
+trecho você tratou como aceite.
 
 Copie também, palavra por palavra, toda seção do desenho que vale para todas as fatias (regras
 comuns, o que fica de fora, "fracasso mesmo funcionando") e toda seção que o texto da fatia cita.
