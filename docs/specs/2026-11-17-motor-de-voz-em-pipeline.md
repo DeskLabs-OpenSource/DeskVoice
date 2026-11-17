@@ -8,7 +8,7 @@
 > chave e as vozes na tela, #412) na `main`. Fatia 2 (`Brain.chat` em streaming) no #419,
 > com um ajuste ao contrato da seção 3.2 (o consumo nunca fica sem número). A latência do cérebro na
 > 3.5 segue **não medida**: a bancada existe, e faltaram as chaves. Fatia 2b (`Brain.chat` na
-> Anthropic, com o transporte do streaming separado do formato de cada API) em PR de rascunho; a 2c
+> Anthropic, com o transporte do streaming separado do formato de cada API) no #423; a 2c
 > (Gemini) não começou. Fatias 3 a 6 não começaram.
 
 ## 1. O problema
@@ -140,8 +140,11 @@ chat?(apiKey: string, request: { model: string; messages: BrainChatMessage[]; to
 declarou o consumo no último pedaço, vai `estimated: false`. Quando não declarou (corte, prazo,
 `cancel`, provedor que não manda), vai `estimated: true`, pela regra do Jev (`deciders/jev.ts`): a
 entrada é um token por byte UTF-8 de `messages` + `tools` enviados, e a saída, um por byte do texto, do
-raciocínio e dos `args` já recebidos. A resposta de erro HTTP (fora de 2xx) é recusa e vem sem custo
-(`usage({}, false)`), como no Jev. O pedido que nem saiu (a rede recusou a conexão, ou `cancel` no
+raciocínio e dos `args` já recebidos. A resposta de erro HTTP (fora de 2xx) é recusa e vem com
+`usage({}, false)`, como no Jev. Esse `{}` com `false` só vale custo zero quando o fim é `error` com
+status fora de 2xx; em qualquer outro fim (`done`, `cancel`, ou `error` com status 200 ou `null`), é
+**custo não medido**, nunca zero (no #423: a escrita em cache que a Anthropic declarar). Quem soma o
+custo lê o `usage` junto com o fim, como o `brainCost` da R4 lê o status. O pedido que nem saiu (a rede recusou a conexão, ou `cancel` no
 mesmo giro de `chat`) não tem `usage`. `stream_options.include_usage` vai à OpenAI e à DeepSeek, que o
 documentam, e não ao OpenRouter, que o marca como obsoleto e sem efeito (o consumo vem sempre).
 

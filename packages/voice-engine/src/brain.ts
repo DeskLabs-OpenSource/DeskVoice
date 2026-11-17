@@ -82,8 +82,13 @@ export interface BrainChatEvents {
    * depois de `cancel`. `estimated: false` quando o provedor declarou; `true` quando não declarou
    * (corte, prazo, `cancel`, provedor que não manda), pela regra do Jev: um token por byte UTF-8 de
    * `messages` + `tools` enviados na entrada, e do texto + `args` recebidos na saída. Resposta de erro
-   * HTTP (fora de 2xx) é recusa e vem sem custo (`{}`, `false`), como no Jev. Pedido que nem saiu (a
-   * rede recusou a conexão) não tem `usage`.
+   * HTTP (fora de 2xx) é recusa e vem com `{}` e `false`, como no Jev. Pedido que nem saiu (a rede
+   * recusou a conexão) não tem `usage`.
+   *
+   * **A regra do `{}` com `false`:** só vale custo zero quando o fim é `error` com status fora de 2xx
+   * (a recusa). Em qualquer outro fim (`done`, `cancel`, ou `error` com status 200 ou `null`), `{}` é
+   * **custo não medido**, nunca zero: é o que sai, por exemplo, quando a Anthropic declara escrita em
+   * cache, que não tem preço na tabela. Quem soma o custo lê o `usage` junto com o fim do pedido.
    */
   usage(usage: Usage, estimated: boolean): void;
   /** O texto terminou. Não vem depois de `error` nem de `cancel`. */

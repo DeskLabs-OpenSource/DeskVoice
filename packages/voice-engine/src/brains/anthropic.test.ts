@@ -728,6 +728,52 @@ describe("brains/anthropic: chat em streaming", () => {
     expect(got.events).toEqual([["text", "Oi"], ["usage", {}, false], ["done"]]);
   });
 
+  /**
+   * A leitura do consumo que o contrato `BrainChatEvents.usage` manda fazer: `{}` com `false` só vale
+   * custo zero quando o fim é `error` com status fora de 2xx (recusa); em qualquer outro fim, é custo
+   * não medido. É a leitura que o `meter` da fatia 3 faz; o teste prende os dois lados dela.
+   */
+  function costOf(events: ChatEvent[]): "zero" | "not_measured" | "declared" | "estimated" {
+    const usages = events.filter(([name]) => name === "usage");
+    expect(usages).toHaveLength(1);
+    const [, usage, estimated] = usages[0] as [string, Usage, boolean];
+    if (estimated) return "estimated";
+    if (Object.keys(usage).length > 0) return "declared";
+    const end = events.at(-1);
+    const refused = end?.[0] === "error" && typeof end[2] === "number" && (end[2] < 200 || end[2] > 299);
+    return refused ? "zero" : "not_measured";
+  }
+
+  it("contrato: usage({}, false) só vale zero junto de error fora de 2xx; a escrita em cache é não medida", async () => {
+    const cache = await chatServer((_req, res) =>
+      sseReply(res, [
+        ev("message_start", { message: { content: [], usage: { input_tokens: 10, cache_creation_input_tokens: 2000, output_tokens: 1 } } }),
+        textStart(0),
+        textDelta(0, "Oi"),
+        stop(0),
+        messageDelta({ output_tokens: 4 }),
+        MESSAGE_STOP,
+      ]),
+    );
+    const cached = collectChat(openChat(cache));
+    await cached.ended;
+    expect(cached.events.filter(([name]) => name === "usage")).toEqual([["usage", {}, false]]);
+    expect(cached.events.at(-1)).toEqual(["done"]);
+    expect(cached.events.some(([name, , status]) => name === "error" && typeof status === "number" && (status < 200 || status > 299))).toBe(false);
+    expect(costOf(cached.events)).toBe("not_measured");
+
+    const refusal = await chatServer((_req, res) =>
+      res.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ type: "error", error: { type: "authentication_error", message: "x" } })),
+    );
+    const refused = collectChat(openChat(refusal));
+    await refused.ended;
+    expect(refused.events).toEqual([
+      ["usage", {}, false],
+      ["error", "rejected", 401],
+    ]);
+    expect(costOf(refused.events)).toBe("zero");
+  });
+
   it("ferramenta aberta no message_stop e pedaço de ferramenta sem bloco aberto são resposta quebrada", async () => {
     for (const pieces of [
       [START, toolStart(0, "toolu_a", "agendar"), jsonDelta(0, "{}"), messageDelta({ output_tokens: 1 }), MESSAGE_STOP],
