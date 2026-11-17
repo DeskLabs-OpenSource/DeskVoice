@@ -75,6 +75,7 @@ const installation: InstallationDictionary = {
       installation_admin_revoked: "{who} removed {subject} from the installation administration.",
       organization_created: "{who} created the organization {org}.",
       organization_renamed: "{who} renamed the organization from \"{from}\" to \"{to}\".",
+      first_owner_invited: "{who} created the first owner's invite for the organization {org}.",
       organization_suspended: "{who} suspended the organization {org}.",
       organization_reactivated: "{who} reactivated the organization {org}.",
       organization_deleted: "{who} deleted the organization {org}.",

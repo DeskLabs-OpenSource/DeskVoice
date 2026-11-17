@@ -7,10 +7,11 @@ const body = z.object({ email: z.string().trim().toLowerCase().max(320).pipe(z.e
 
 /**
  * O convite do primeiro dono de uma organização ainda sem ninguém. É o convite da tela Equipe, aceito
- * pela mesma página; depois do primeiro dono, quem convida é ele.
+ * pela mesma página; depois do primeiro dono, quem convida é ele. O convite guarda a conta de quem o
+ * gerou e só vale enquanto ela administra a instalação.
  */
-export const POST = handleInstallation({ body }, async ({ body, params, url, deps }) => {
-  const result = await createFirstOwnerInvite(deps.db, params.id ?? "", body, deps.clock.now());
+export const POST = handleInstallation({ body }, async ({ body, params, url, accountId, deps }) => {
+  const result = await createFirstOwnerInvite(deps.db, accountId, params.id ?? "", body, deps.clock.now());
   if (!result.ok) {
     if (result.reason === "not_found") throw notFound();
     if (result.reason === "has_members") throw new ApiError(409, "organization_has_members", "This organization already has people. Its owner invites the others on the Team screen.");

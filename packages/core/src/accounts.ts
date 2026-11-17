@@ -170,17 +170,27 @@ export function deleteAccountIfOrphan(db: Db, accountId: string, now: Date, deta
  */
 export function isInstallationAdmin(db: Db, accountId: string): Promise<boolean> {
   return withSystem(db, async (q) => {
-    const row = await q.one<{ administers: boolean }>(
-      `select exists (select from accounts a where a.id = $1 and a.installation_admin_at is not null)
-           or (not exists (select from installation_settings where key = $3)
-               and exists (select from users u
-                             join installation_settings s on s.key = $2 and u.organization_id = (s.value #>> '{}')::uuid
-                            where u.account_id = $1 and u.kind = 'member' and u.disabled_at is null and u.role in ('owner', 'admin')))
-           as administers`,
-      [accountId, FOUNDING_ORGANIZATION_KEY, ADMINS_EXPLICIT_KEY],
-    );
+    const row = await q.one<{ administers: boolean }>(`select ${administersInstallationSql("$1")} as administers`, [accountId]);
     return row?.administers === true;
   });
+}
+
+/**
+ * A regra de `isInstallationAdmin` escrita em SQL, para quem precisa dela dentro de outra consulta
+ * (o convite do primeiro dono, em `invites.ts`). Uma fonte só: as duas nunca divergem. `account` é
+ * uma expressão SQL do código (um parâmetro ou uma coluna), nunca texto de fora. Pelo papel de sistema.
+ */
+export function administersInstallationSql(account: string): string {
+  return `(exists (select from accounts a where a.id = ${account} and a.installation_admin_at is not null)
+     or (not exists (select from installation_settings where key = ${sqlLiteral(ADMINS_EXPLICIT_KEY)})
+         and exists (select from users u
+                       join installation_settings s on s.key = ${sqlLiteral(FOUNDING_ORGANIZATION_KEY)} and u.organization_id = (s.value #>> '{}')::uuid
+                      where u.account_id = ${account} and u.kind = 'member' and u.disabled_at is null and u.role in ('owner', 'admin'))))`;
+}
+
+function sqlLiteral(value: string): string {
+  if (!/^[a-z_.]+$/.test(value)) throw new Error(`sqlLiteral: unexpected key ${JSON.stringify(value)}`);
+  return `'${value}'`;
 }
 
 export type GrantInstallationAdminResult = { granted: true; accountId: string } | { granted: false; reason: "email_not_found" | "already_granted" };

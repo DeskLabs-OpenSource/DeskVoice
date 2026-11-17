@@ -75,6 +75,7 @@ const installation = {
       installation_admin_revoked: "{who} tirou {subject} da administração da instalação.",
       organization_created: "{who} criou a organização {org}.",
       organization_renamed: "{who} renomeou a organização de \"{from}\" para \"{to}\".",
+      first_owner_invited: "{who} gerou o convite do primeiro dono da organização {org}.",
       organization_suspended: "{who} suspendeu a organização {org}.",
       organization_reactivated: "{who} reativou a organização {org}.",
       organization_deleted: "{who} excluiu a organização {org}.",

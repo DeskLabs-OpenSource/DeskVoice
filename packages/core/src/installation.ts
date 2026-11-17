@@ -13,6 +13,7 @@ export const INSTALLATION_EVENT_KINDS = [
   "installation_admin_revoked",
   "organization_created",
   "organization_renamed",
+  "first_owner_invited",
   "organization_suspended",
   "organization_reactivated",
   "organization_deleted",

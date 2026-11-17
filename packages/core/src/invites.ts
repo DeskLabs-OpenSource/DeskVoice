@@ -1,4 +1,4 @@
-import { createMember } from "./accounts";
+import { administersInstallationSql, createMember } from "./accounts";
 import { hashToken } from "./password";
 import type { Db } from "./types";
 import { withSystem } from "./with-org";
@@ -40,14 +40,20 @@ export type AcceptInviteResult = { ok: true; userId: string; organizationId: str
 // duas, para que nunca divirjam.
 //
 // A exceção é o convite do primeiro dono, gerado pela administração da instalação (seção 3.3 do
-// desenho do R8), que não tem vínculo na organização e por isso não tem criador: ele vale só
-// enquanto a organização não tem nenhum vínculo `member`. O primeiro aceite o encerra, e o de
-// qualquer outro convite da administração também. Ele é marcado por coluna própria, e não pelo
-// `created_by` nulo, que continua querendo dizer "o criador saiu da equipe".
-const CREATOR_STILL_MANAGES = `(exists (select from users c
+// desenho do R8), que não tem vínculo na organização e por isso não tem criador NELA. Ele guarda a
+// conta que o gerou (`created_by_account`) e vale só enquanto:
+// - a organização não tem nenhum vínculo `member` (o primeiro aceite o encerra, e o de qualquer
+//   outro convite da administração também);
+// - essa conta ainda administra a instalação, pela mesma regra de `isInstallationAdmin`. Conta que
+//   saiu da lista, ou que foi apagada (a coluna fica nula), não deixa link vivo para trás.
+// Ele é marcado por coluna própria, e não pelo `created_by` nulo, que continua querendo dizer "o
+// criador saiu da equipe". Os dois ramos são exclusivos: o da equipe exige que não haja a marca, e o
+// banco recusa a marca junto com um criador da equipe.
+const CREATOR_STILL_MANAGES = `((not i.installation_invite and exists (select from users c
    where c.organization_id = i.organization_id and c.id = i.created_by and c.disabled_at is null
-     and (c.role = 'owner' or (c.role = 'admin' and i.role <> 'owner')))
-   or (i.installation_invite and i.role = 'owner'
+     and (c.role = 'owner' or (c.role = 'admin' and i.role <> 'owner'))))
+   or (i.installation_invite and i.role = 'owner' and i.created_by is null and i.created_by_account is not null
+       and ${administersInstallationSql("i.created_by_account")}
        and not exists (select from users m where m.organization_id = i.organization_id and m.kind = 'member')))`;
 
 /**

@@ -93,8 +93,11 @@ describe("the installation area", () => {
     expect((invite.data as { link: string }).link).toMatch(/^https:\/\/panel\.test\/invite\/[A-Za-z0-9_-]{43}$/);
     expect(refusal(await call(inviteOwner, { method: "POST", cookie: ownerOne.cookie, params: { id: organizationId }, body: { email: adminOne.email, name: "X" } }))).toEqual([400, "email_taken"]);
 
-    const events = (await call(listEvents, { cookie: ownerOne.cookie })).data as Array<{ kind: string; organizationId: string | null }>;
-    expect(events.filter((event) => event.organizationId === organizationId).map((event) => event.kind)).toEqual(["organization_renamed", "organization_created"]);
+    const events = (await call(listEvents, { cookie: ownerOne.cookie })).data as Array<{ kind: string; organizationId: string | null; actorEmail: string | null }>;
+    const ofOrganization = events.filter((event) => event.organizationId === organizationId);
+    expect(ofOrganization.map((event) => event.kind)).toEqual(["first_owner_invited", "organization_renamed", "organization_created"]);
+    // O convite guarda quem o gerou: a conta da sessão, e não alguém que a rota escolha.
+    expect(ofOrganization[0]?.actorEmail).toBe(ownerOne.email);
   });
 
   it("refuses creating when the list changed since the screen opened", async () => {

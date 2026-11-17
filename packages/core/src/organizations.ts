@@ -134,30 +134,41 @@ export type FirstOwnerInviteResult = { ok: true; token: string } | { ok: false; 
 /**
  * O convite do primeiro dono de uma organização criada pela administração. É o convite de hoje, na
  * tabela `invites` e aceito pela mesma página, aberto em `withOrg` da organização: nada aqui
- * atravessa organizações, além de saber se o e-mail já tem conta.
+ * atravessa organizações, além de saber se o e-mail já tem conta e de gravar a auditoria.
  *
  * Só para organização sem nenhum vínculo `member`: depois do primeiro dono, quem convida é ele, pela
  * tela Equipe. E-mail que já tem conta é recusado, porque o convite de hoje não aceita conta que já
  * existe (isso é a fatia 3). Convidar de novo invalida o link anterior. O convite é marcado
- * `installation_invite`: sem criador na organização, ele só vale enquanto ela não tem ninguém
- * (`CREATOR_STILL_MANAGES`, em `invites.ts`). Devolve o token em claro; o banco só recebe o hash.
+ * `installation_invite` e guarda a conta de quem o gerou (`created_by_account`): ele só vale
+ * enquanto a organização não tem ninguém e essa conta administra a instalação
+ * (`CREATOR_STILL_MANAGES`, em `invites.ts`). Grava `first_owner_invited` na auditoria da
+ * instalação, sem o token. Devolve o token em claro; o banco só recebe o hash.
  */
-export async function createFirstOwnerInvite(db: Db, organizationId: string, invite: { email: string; name: string }, now: Date): Promise<FirstOwnerInviteResult> {
+export async function createFirstOwnerInvite(db: Db, actorAccountId: string, organizationId: string, invite: { email: string; name: string }, now: Date): Promise<FirstOwnerInviteResult> {
   if (await accountExists(db, invite.email)) return { ok: false, reason: "email_taken" };
   return withOrg(db, organizationId, async (q) => {
-    if (!(await q.one("select 1 from organizations where id = $1", [organizationId]))) return { ok: false, reason: "not_found" };
+    // A trava da organização vem antes de tudo: duas chamadas ao mesmo tempo passariam juntas pela
+    // revogação abaixo e deixariam dois links vivos. `no key update`, e não `update`, porque o evento
+    // de auditoria (outra conexão, logo abaixo) aponta para esta organização por chave estrangeira,
+    // que pede `key share` na mesma linha: com `for update` a transação esperaria por si mesma.
+    if (!(await q.one("select 1 from organizations where id = $1 for no key update", [organizationId]))) return { ok: false, reason: "not_found" };
     if (await q.one("select 1 from users where kind = 'member' limit 1")) return { ok: false, reason: "has_members" };
     // Um convite do primeiro dono por vez: o novo derruba o anterior, de qualquer e-mail. Dois
     // links vivos para a organização vazia deixariam duas pessoas entrarem como "primeiro" dono.
     await q.exec("update invites set revoked_at = $2 where (email = $1 or installation_invite) and accepted_at is null and revoked_at is null", [invite.email, now]);
     const token = randomBytes(32).toString("base64url");
-    await q.exec("insert into invites (organization_id, email, name, role, token_hash, expires_at, created_by, installation_invite) values ($1, $2, $3, 'owner', $4, $5, null, true)", [
-      organizationId,
-      invite.email,
-      invite.name,
-      hashToken(token),
-      new Date(now.getTime() + FIRST_OWNER_INVITE_DAYS * 86_400_000),
-    ]);
+    const created = await q.one<{ id: string }>(
+      `insert into invites (organization_id, email, name, role, token_hash, expires_at, created_by, installation_invite, created_by_account)
+       values ($1, $2, $3, 'owner', $4, $5, null, true, $6) returning id`,
+      [organizationId, invite.email, invite.name, hashToken(token), new Date(now.getTime() + FIRST_OWNER_INVITE_DAYS * 86_400_000), actorAccountId],
+    );
+    if (!created) throw new Error("createFirstOwnerInvite: the invite was not created");
+    // A auditoria da instalação só se grava pelo papel de sistema, em outra conexão. Ela confirma
+    // antes deste convite: se ela falhar, o convite é desfeito; o contrário (auditoria sem convite)
+    // só acontece se a confirmação final falhar, e o registro a mais não dá acesso a ninguém.
+    await withSystem(db, (system) =>
+      recordInstallationEvent(system, now, "first_owner_invited", { actorAccountId, organizationId, payload: { invite_id: created.id, email: invite.email } }),
+    );
     return { ok: true, token };
   });
 }
