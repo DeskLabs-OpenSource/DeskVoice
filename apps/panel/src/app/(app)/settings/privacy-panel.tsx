@@ -140,6 +140,12 @@ export function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): st
         analyst: typeof p.analystName === "string" ? p.analystName : "",
         provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
       });
+    case "decision_model_provider_confirmed":
+      // O recibo do filtro de fala: fica mesmo depois de desligar ou trocar de modelo.
+      return fill(t.history.decision_model_provider_confirmed, {
+        who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
+        provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
+      });
     // Feitos pela administração da instalação, que não tem vínculo aqui: a frase não tem "quem".
     case "organization_created":
       return fill(t.history.organization_created, { name: typeof p.name === "string" ? p.name : "" });

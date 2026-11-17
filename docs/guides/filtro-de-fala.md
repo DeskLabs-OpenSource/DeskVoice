@@ -26,12 +26,14 @@ Em **Configurações → Filtro de fala**. Só dono ou administrador muda; os ou
    cifrada no banco e nunca volta para a tela. O teste pede a lista de modelos da conta, sem custo
    de token, e diz o resultado (aceita, recusada, sem crédito, e assim por diante).
 2. Em **Modelo de decisão**, escolha **Jev (TypeSafe)**.
-3. Leia o aviso **Para onde vai o texto** e marque a confirmação: "O texto do que a pessoa fala na
-   ligação vai para a TypeSafe."
+3. Leia o aviso **Para onde vai o texto** e marque a confirmação: "O texto da ligação vai para a
+   TypeSafe." O que vai, em detalhe, está em "O que sai do servidor", logo abaixo.
 4. Clique em **Salvar**. A tela passa a mostrar quem confirmou o envio e quando.
 
-Sem a confirmação, o Jev não salva. Desligar (escolher **Nenhum**) apaga a confirmação, e ligar de
-novo pede outra.
+Sem a confirmação, o Jev não salva. Cada confirmação nova deixa um recibo em **Configurações →
+Privacidade**, no registro: quem confirmou, quando e para qual fornecedor vai o texto. Desligar
+(escolher **Nenhum**) ou trocar de modelo tira a confirmação vigente, e ligar de novo pede outra; o
+recibo fica no registro.
 
 ## O que sai do servidor
 
@@ -56,7 +58,8 @@ Fonte: a política de privacidade da TypeSafe,
   razoavelmente necessário para prestar o serviço ou para os fins comerciais dela. A política não
   define prazo.
 - **Exclusão:** a pedido, ela apaga esses dados ou os guarda de um jeito que não identifique a
-  pessoa.
+  pessoa, quando eles não forem mais razoavelmente necessários, salvo se a lei a obrigar a
+  guardá-los por mais tempo.
 - **Lugar:** o serviço é hospedado nos Estados Unidos.
 
 O projeto não leu o contrato da TypeSafe nem as páginas que pedem login.
@@ -66,7 +69,9 @@ O projeto não leu o contrato da TypeSafe nem as páginas que pedem login.
 A página não traz um canal próprio para o pedido de exclusão. O contato que ela dá para dúvidas
 sobre o tratamento dos dados é **privacy@typesafe.ai**. Escreva para esse endereço a partir da
 conta da TypeSafe da sua organização (a dona da chave), diga quais dados quer apagados (por exemplo,
-os enviados entre duas datas) e guarde a resposta.
+os enviados entre duas datas) e guarde a resposta. Pela política, a exclusão depende de duas
+condições: os dados não serem mais razoavelmente necessários para a TypeSafe, e nenhuma lei a
+obrigar a guardá-los por mais tempo. Ela não promete prazo para atender.
 
 Desligar o filtro não apaga o que já foi enviado: só para os envios novos. O apagamento do
 DeskVoice (prazo de guarda e pedido de quem ligou) também não alcança a TypeSafe.

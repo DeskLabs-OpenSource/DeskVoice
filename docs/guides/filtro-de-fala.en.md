@@ -28,12 +28,14 @@ In **Settings → Speech filter**. Only an owner or admin changes it; the other 
    database and never comes back to the screen. The test asks for the account's model list, with no
    token cost, and shows the result (accepted, rejected, no credit, and so on).
 2. Under **Decision model**, choose **Jev (TypeSafe)**.
-3. Read the **Where the text goes** notice and tick the confirmation: "The text of what the caller
-   says goes to TypeSafe."
+3. Read the **Where the text goes** notice and tick the confirmation: "The call's text goes to
+   TypeSafe." What goes, in detail, is under "What leaves the server", just below.
 4. Click **Save**. The screen then shows who confirmed the sending and when.
 
-Without the confirmation, Jev is not saved. Turning it off (choosing **None**) deletes the
-confirmation, and turning it on again asks for a new one.
+Without the confirmation, Jev is not saved. Each new confirmation leaves a receipt in **Settings →
+Privacy**, in the log: who confirmed, when, and which provider the text goes to. Turning it off
+(choosing **None**) or switching models removes the current confirmation, and turning it on again
+asks for a new one; the receipt stays in the log.
 
 ## What leaves the server
 
@@ -59,7 +61,8 @@ Source: TypeSafe's privacy policy, <https://typesafe.ai/legal/privacy-policy> ("
   reasonably necessary to provide the service or for its business or commercial purposes. The
   policy sets no period.
 - **Deletion:** on request, it deletes this data or keeps it in a form that does not identify the
-  person.
+  person once it is no longer reasonably necessary, unless the law requires it to keep the data
+  longer.
 - **Location:** the service is hosted in the United States.
 
 The project has not read TypeSafe's contract or the pages that require a login.
@@ -69,7 +72,9 @@ The project has not read TypeSafe's contract or the pages that require a login.
 The page gives no specific channel for a deletion request. The contact it gives for questions
 about data processing is **privacy@typesafe.ai**. Write to that address from your organization's
 TypeSafe account (the one that owns the key), say which data you want deleted (for example, what was
-sent between two dates), and keep the answer.
+sent between two dates), and keep the answer. Under the policy, deletion depends on two conditions:
+the data is no longer reasonably necessary to TypeSafe, and no law requires it to keep the data
+longer. It promises no time to act on the request.
 
 Turning the filter off does not delete what was already sent: it only stops new sending.
 DeskVoice's own deletion (retention period and caller requests) does not reach TypeSafe either.

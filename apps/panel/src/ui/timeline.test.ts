@@ -118,6 +118,20 @@ describe("linha do tempo", () => {
       expect(html).not.toContain("Pode ser fala de fundo");
     });
 
+    it("a leitura que chegou a tempo, sem observação, não vira a linha \"terminou (0,00)\"", () => {
+      // Com `finished` nulo e com `finished` ausente: as duas formas do payload a tempo.
+      for (const finished of [{ finished: null }, {}]) {
+        const html = render([
+          { id: "1", kind: "transcript_user", payload: { text: "bom dia" } },
+          { id: "2", kind: "caller_speech_read", payload: { onTime: true, marked: false, background: 0, ...finished } },
+        ]);
+        expect(html).toContain("bom dia");
+        expect(html).not.toContain("tinha terminado o pensamento");
+        expect(html).not.toContain("0,00");
+        expect(html).not.toContain(ptBR.events.unknown);
+      }
+    });
+
     it("sem filtro, a fala sai como antes: nenhuma marca", () => {
       const html = render([{ id: "1", kind: "transcript_user", payload: { text: "bom dia" } }]);
       expect(html).not.toContain(ptBR.events.speech_marks.note);

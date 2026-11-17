@@ -8,7 +8,7 @@ const speechFilter: SpeechFilterDictionary = {
   model: "Decision model",
   none: "None (off)",
   confirmedBy: "Sending confirmed by {who} on {when}.",
-  confirm: "The text of what the caller says goes to {provider}.",
+  confirm: "The call's text goes to {provider}.",
   confirmRequired: "Tick the confirmation to turn this model on.",
   save: "Save",
   saved: "Saved.",
@@ -46,7 +46,7 @@ const speechFilter: SpeechFilterDictionary = {
   retention: {
     typesafe: [
       "TypeSafe keeps the personal data it receives, such as this text, for as long as reasonably necessary to provide the service or for its business or commercial purposes, with no period set in the policy.",
-      "On request, it deletes this data or keeps it in a form that does not identify the person.",
+      "On request, it deletes this data or keeps it in a form that does not identify the person once it is no longer reasonably necessary, unless the law requires it to keep the data longer.",
     ],
   },
   retentionUnread: "The project has not read this provider's retention policy.",

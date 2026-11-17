@@ -9,7 +9,7 @@ const speechFilter = {
   /** `{who}` é o nome de quem confirmou; `{when}`, a data e a hora no idioma da tela. */
   confirmedBy: "Envio confirmado por {who} em {when}.",
   /** A confirmação nomeando o fornecedor (desenho R12, "Custo e consentimento"). `{provider}` é o nome dele. */
-  confirm: "O texto do que a pessoa fala na ligação vai para a {provider}.",
+  confirm: "O texto da ligação vai para a {provider}.",
   confirmRequired: "Marque a confirmação para ligar este modelo.",
   save: "Salvar",
   saved: "Salvo.",
@@ -57,7 +57,7 @@ const speechFilter = {
   retention: {
     typesafe: [
       "A TypeSafe guarda os dados pessoais que recebe, como esse texto, pelo tempo que for razoavelmente necessário para prestar o serviço ou para os fins comerciais dela, sem prazo definido na política.",
-      "A pedido, ela apaga esses dados ou os guarda de um jeito que não identifique a pessoa.",
+      "A pedido, ela apaga esses dados ou os guarda de um jeito que não identifique a pessoa, quando eles não forem mais razoavelmente necessários, salvo se a lei a obrigar a guardá-los por mais tempo.",
     ],
   } as Record<string, string[]>,
   retentionUnread: "A política de retenção deste fornecedor não foi lida pelo projeto.",
