@@ -15,6 +15,11 @@ const invite: InviteDictionary = {
   invalidTitle: "Esta invitación ya no vale.",
   invalidBody: "El enlace puede haber vencido, haberse usado ya o haber sido cancelado. Pide una invitación nueva a quien te invitó.",
   signIn: "Ya tengo cuenta: entrar",
+  existingLead: "Ya tienes cuenta con {email}. Entra con la contraseña que ya usas para aceptar la invitación de {organization}.",
+  existingName: "Tu nombre en {organization}",
+  existingPassword: "Tu contraseña",
+  existingHint: "La misma con la que entras al panel.",
+  existingSubmit: "Aceptar la invitación y entrar",
 };
 
 export default invite;
