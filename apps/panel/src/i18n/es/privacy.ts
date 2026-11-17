@@ -107,6 +107,8 @@ const privacy: PrivacyDictionary = {
     caller_memory_changed: "{who} dejó la memoria del número en el agente {state}.",
     analyst_provider_confirmed: "{who} confirmó que el analista {analyst} envía el texto de lo que dice quien llama a {provider}.",
     decision_model_provider_confirmed: "{who} confirmó que el filtro de habla envía el texto de la llamada a {provider}.",
+    organization_created: "La administración de la instalación creó esta organización, con el nombre \"{name}\".",
+    organization_renamed: "La administración de la instalación renombró esta organización de \"{from}\" a \"{to}\".",
     caller_notes_deleted: "{who} olvidó el número terminado en {suffix}. Notas del agente borradas: {notes}. Pendientes cerrados borrados: {followUps}.",
   },
   noteDeleted: "{who} borró una nota del agente.",

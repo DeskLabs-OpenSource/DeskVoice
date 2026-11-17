@@ -36,6 +36,7 @@ O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medi
 | `tempo-real.ts` | o envio em pedaços de 20 ms no ritmo do relógio (provado em `tempo-real.test.ts` com relógio falso) |
 | `linhas.ts` | linha estreita (`resample` a 8 kHz; μ-law onde o motor do OpenAI usaria) e larga (16 kHz) |
 | `voz.ts` | voz sintética (Piper) e conversa de fundo; licença de cada voz no cabeçalho |
+| `sintetizador.ts` | a voz do pipeline (R5, fatia 1a): tempo do primeiro `push` ao primeiro áudio da ElevenLabs (p50/p95 de 30 falas) e caracteres contados contra o `character_count` da conta. Só com `BANCADA_ELEVENLABS_API_KEY` e `--teto-usd`; o resumo é testado em `sintetizador.test.ts` |
 | `ruido.ts` | obra e música geradas, com semente fixa ("Áudio de teste" do desenho da DESA-24) |
 | `audio.ts` | WAV, trecho da fala e mistura pela relação voz/ruído sobre o RMS |
 | `orcamento.ts` | o teto: quem vai gastar reserva o pior caso antes do pedido, e a reserva conta até virar o valor real; assim nem pedidos simultâneos passam do teto (`orcamento.test.ts`) |

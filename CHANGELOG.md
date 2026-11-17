@@ -3,6 +3,50 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.30.0] - 2026-11-17
+
+### Adicionado
+
+- **Área da instalação, para quem cuida de vários clientes num servidor só** Quem administra a instalação ganha "Administrar a instalação" no bloco da conta, ao lado do idioma e do botão de sair. A área tem três telas. Em Organizações, você lista, cria e renomeia organizações, e cada organização nova gera na hora o convite do primeiro dono. Esse convite guarda quem o gerou, fica na Auditoria e só vale enquanto essa conta administra a instalação. Em Administração, você vê quem administra a instalação e põe ou tira pessoas, mas a última pessoa da lista nunca sai. Em Auditoria fica registrado tudo o que foi feito ali, inclusive cada pedido de atualização. Quem tem um cliente só não vê nada novo na navegação principal. Numa instalação com uma organização, o dono e o administrador continuam administrando e atualizando como antes. Criar a segunda organização fixa a lista de quem administra a instalação, e isso não volta atrás. Antes de confirmar, a tela mostra os nomes de quem passa a administrar (os donos da primeira organização) e de quem deixa de administrar (os administradores dela), e você pode manter esses administradores na lista na mesma tela. A partir daí, a tela de atualização sai das Configurações e passa para a área da instalação. O dono de uma organização cliente não ganha a área da instalação. Crédito: @melgarafael.
+- **A voz da ElevenLabs existe como peça do motor, ainda sem tela** Nada muda numa instalação em funcionamento: nenhum agente usa a voz nova, e nenhuma tela a oferece. A ElevenLabs entra como uma peça do motor de voz: recebe o texto aos pedaços e devolve o áudio no formato do telefone. O custo é contado pelos caracteres enviados, com o preço publicado pela ElevenLabs e a data em que ele foi conferido, e é sempre marcado como estimado, porque a ElevenLabs não informa o consumo na resposta. Uma fala interrompida cobra o que já tinha sido enviado. A função `prepareFixedSpeech` também fica disponível: ela sintetiza de uma vez um conjunto de falas fixas, guarda o áudio na memória, separado por organização, e trata qualquer falha, inclusive a chave recusada, como recusa de abertura. Crédito: @melgarafael.
+
+## [0.29.0] - 2026-11-17
+
+### Requer atenção
+
+- **A central só aceita a ligação de uma linha que vem dos endereços dela** Nenhuma linha que já existe é cortada na atualização. A linha por IP passa a filtrar sem perder
+  nada: ela já só era reconhecida pelo endereço do servidor e pelos endereços extras, que são a mesma
+  lista do filtro. A linha por registro que já existe fica sem filtro, como antes, até alguém ligar
+  na tela: a tela mostra "Filtro desligado nesta linha" e o botão "Ligar o filtro". A linha por
+  registro cadastrada depois da atualização já nasce com o filtro ligado.
+
+  Depois de atualizar, abra Linha telefônica e, em cada linha por registro, confira a lista "Aceita
+  ligações de". Se a sua operadora registra a linha por um servidor e entrega as ligações por outro,
+  inclua os endereços de entrega em "Endereços extras de onde as ligações chegam" e salve antes de
+  ligar o filtro. Depois clique em "Ligar o filtro". Se as ligações de uma linha pararem de chegar
+  depois de ligar o filtro, inclua o endereço que falta em Endereços extras ou use "Desligar o filtro".
+
+### Adicionado
+
+- **O analista acompanha a ligação, mede a temperatura, reconhece a objeção e orienta o agente** Nada muda numa instalação em funcionamento: nenhum agente tem analista, e quem não tem não faz nenhum pedido a mais. Com um analista no agente (por enquanto só pela API), a cada fala de quem ligou ele pergunta ao modelo de decisão a temperatura da conversa e qual das objeções cadastradas a pessoa levantou. A fala vai só como dado: as perguntas e as opções são fixas ou escritas pelo operador, e uma escolha fora da lista não orienta e não é guardada. Quando a objeção é reconhecida com confiança de 80% ou mais, o agente recebe a orientação que o operador escreveu para ela, uma vez por objeção em cada trecho da ligação, por um caminho que não vira fala. Nada na voz espera o analista: o pedido tem prazo de 1 segundo, e a resposta que chega depois de uma nova fala de quem ligou é descartada como velha. Se o analista falhar, a ligação segue igual, e a linha do tempo diz por quê. Se a fala do agente repetir seis palavras seguidas da orientação, a linha do tempo registra o vazamento. O custo de cada pedido entra no extrato marcado como do analista, soma no custo da ligação e conta no teto do agente, junto com a voz e o filtro da fala. O pedido sem consumo lido (atrasado, sem rede ou com resposta fora da forma) entra por estimativa, marcada. Uma resposta de sobrecarga do Jev (HTTP 529) é resposta, e não falta de rede: fica sem custo e não conta no teto. O motor Gemini Live ainda não recebe orientação: o analista mede, mas não orienta. Com o motor OpenAI Realtime, que o item de sistema sozinho nunca gere resposta, e que a orientação mude de fato a resposta do agente, ainda não foi medido numa ligação real. Crédito: @melgarafael.
+
+### Alterado
+
+- **A central só aceita a ligação de uma linha que vem dos endereços dela** A central de telefonia passa a filtrar a entrada linha por linha: cada linha só aceita ligações
+  dos endereços que a tela mostra em "Aceita ligações de", e a ligação que se apresenta como aquela
+  linha vinda de qualquer outro endereço é recusada. Na linha por IP, valem o endereço do servidor e
+  os endereços extras; na linha por registro, o IP do servidor ou, quando ele é um nome, os endereços
+  que o nome devolveu nas últimas 24 horas (até 16), mais os endereços extras. Juntar as respostas
+  de 24 horas evita recusar uma ligação válida quando o DNS da operadora devolve só uma parte dos
+  endereços a cada consulta. O endereço liberado para a linha de uma organização nunca entra na linha
+  de outra. Se o nome da operadora deixar de resolver, a linha continua aceitando os endereços que o
+  nome tinha, mas um endereço extra que você removeu deixa de ser aceito na hora. Enquanto o nome de
+  uma linha por registro nunca tiver resolvido, o filtro dessa linha fica desligado, mesmo com
+  endereços extras, e a tela diz isso. Na linha por registro, o filtro se liga e se desliga na tela,
+  com os botões "Ligar o filtro" e "Desligar o filtro"; a linha por IP filtra sempre. A porta 5060
+  continua publicada como antes, e nada muda no instalador nem no arquivo `.env`. Crédito:
+  @webtecnica, pela medição numa instalação real que mostrou a central respondendo a qualquer origem.
+
 ## [0.28.0] - 2026-11-17
 
 ### Requer atenção

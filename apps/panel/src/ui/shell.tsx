@@ -1,15 +1,18 @@
 "use client";
 
-import { Bell, ChartBar, CircleHalf, GearSix, Headset, ListChecks, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UsersThree, Waveform } from "@phosphor-icons/react";
+import { Bell, Buildings, ChartBar, CircleHalf, GearSix, Headset, ListChecks, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UsersThree, Waveform } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import enApprovals from "../i18n/en/approvals";
+import enInstallation from "../i18n/en/installation";
 import en from "../i18n/en/common";
 import esApprovals from "../i18n/es/approvals";
+import esInstallation from "../i18n/es/installation";
 import es from "../i18n/es/common";
 import { LOCALES, LOCALE_COOKIE, THEME_COOKIE, fill } from "../i18n/locales";
 import ptBRApprovals from "../i18n/pt-BR/approvals";
+import ptBRInstallation from "../i18n/pt-BR/installation";
 import ptBR from "../i18n/pt-BR/common";
 import { useDict, useLocale } from "../i18n/provider";
 import { api, useApi } from "./api";
@@ -193,6 +196,7 @@ function Brand() {
 export function Shell({ me, theme, children }: { me: Me; theme: Theme; children: ReactNode }) {
   const t = useDict(ptBR, en, es);
   const tApprovals = useDict(ptBRApprovals, enApprovals, esApprovals);
+  const tInstallation = useDict(ptBRInstallation, enInstallation, esInstallation);
   const pathname = usePathname();
   const now = useNow();
   const approvals = useApi<Approval[]>("/approvals?status=pending");
@@ -232,6 +236,17 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
         <span className="truncate font-bold">{me.name}</span>
         <span className="text-[0.8rem] text-muted">{t.roles[me.role]}</span>
       </div>
+      {/* A área da instalação mora aqui, e não na navegação principal: quem não administra nem vê a porta. */}
+      {me.installationAdmin ? (
+        <Link
+          href="/installation"
+          aria-current={pathname === "/installation" || pathname.startsWith("/installation/") ? "page" : undefined}
+          className="flex h-8 basis-full items-center gap-2 rounded-xs px-1 text-[0.87rem] text-muted hover:bg-sunken hover:text-ink aria-[current=page]:font-bold aria-[current=page]:text-ink"
+        >
+          <Buildings size={18} weight="duotone" aria-hidden />
+          <span className="truncate">{tInstallation.menu}</span>
+        </Link>
+      ) : null}
       <div className="mr-auto">
         <LocaleSelect />
       </div>

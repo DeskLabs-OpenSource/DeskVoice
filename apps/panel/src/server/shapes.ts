@@ -99,7 +99,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",
   match_extra as "matchExtra", outbound_host as "outboundHost", status,
-  inbound_allowed as "inboundAllowed", inbound_resolved_at as "inboundResolvedAt",
+  inbound_allowed as "inboundAllowed", inbound_resolved_at as "inboundResolvedAt", inbound_filter as "inboundFilter",
   last_check_at as "lastCheckAt", last_error as "lastError", json_build_object('configured', secret_enc is not null) as secret`;
 
 // Host, usuário e senha acabam dentro da configuração gerada do Asterisk: nada de quebra de linha
@@ -120,6 +120,9 @@ const trunkFields = z.object({
 });
 export const trunkPatch = trunkFields.partial();
 export const trunkCreate = trunkPatch.required({ name: true, host: true, authMode: true });
+// Liga ou desliga o filtro de entrada da linha por registro (R14, contrato 11). Fica fora de
+// `trunkPatch`: salvar o formulário da linha não mexe no filtro.
+export const trunkInboundFilter = z.object({ enabled: z.boolean() });
 
 export const CALL_COLUMNS = `c.id, c.agent_id as "agentId", a.name as "agentName", c.direction, c.channel, c.from_e164 as "from", c.to_e164 as "to",
   c.status, c.end_reason as "endReason", c.engine, c.started_at as "startedAt", c.answered_at as "answeredAt", c.ended_at as "endedAt",
