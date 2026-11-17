@@ -138,6 +138,7 @@ const common: CommonDictionary = {
     update_notes_missing: "Las notas de esta versión todavía no están disponibles. Intenta de nuevo en unos minutos.",
     unknown_setting: "Esta configuración no existe en esta versión.",
     organization_suspended: "Esta organización está suspendida: no atiende ni hace llamadas.",
+    support_session_forbidden: "La sesión de soporte de la instalación no hace este cambio. Pídeselo a un dueño o administrador del equipo.",
     outbound_disabled: "Las llamadas salientes están desactivadas. Actívalas en Llamadas salientes.",
     outside_window: "Fuera del horario permitido para llamadas salientes.",
     do_not_call: "Este número está en la lista de no llamar.",

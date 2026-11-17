@@ -67,21 +67,22 @@ export const SUPPORT_SESSION_ROUTES: SupportSessionRoute[] = [
   forbid("whatsapp-calls/service", "POST", "dúvida: liga o serviço de ligação pelo WhatsApp da instalação inteira"),
   allow("whatsapp-calls", "PATCH", "configuração do canal que já existe, não cria acesso"),
 
-  // Chaves de provedor: configuração da organização, não acesso de pessoa.
-  allow("brains/[brain]/key", "PUT", "chave do provedor é configuração da organização, não dá acesso à pessoa"),
+  // Chaves de provedor: gravar a chave é `forbid`; apagar e conferir não criam destino novo.
+  forbid("brains/[brain]/key", "PUT", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
   allow("brains/[brain]/key", "DELETE", "apaga a chave do provedor, não cria acesso"),
   allow("brains/[brain]/models/refresh", "POST", "relê a lista de modelos do provedor"),
-  allow("synthesizers/[synthesizer]/key", "PUT", "chave do provedor é configuração da organização, não dá acesso à pessoa"),
+  forbid("synthesizers/[synthesizer]/key", "PUT", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
   allow("synthesizers/[synthesizer]/key", "POST", "confere a chave do provedor"),
   allow("synthesizers/[synthesizer]/key", "DELETE", "apaga a chave do provedor, não cria acesso"),
-  allow("speech-filter/[model]/key", "PUT", "chave do provedor é configuração da organização, não dá acesso à pessoa"),
+  forbid("speech-filter/[model]/key", "PUT", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
   allow("speech-filter/[model]/key", "DELETE", "apaga a chave do provedor, não cria acesso"),
   allow("speech-filter", "PUT", "configuração do filtro de fala da organização"),
   allow("engines/[engine]/key-check", "POST", "confere a chave do motor, não grava acesso"),
 
-  // Atendimento: configuração e operação da organização, o motivo de existir suporte.
-  allow("agents", "POST", "configuração de atendente da organização"),
-  allow("agents/[id]", "PATCH", "configuração de atendente; responsável só entre vínculos `member` (5a)"),
+  // Atendimento: configuração e operação da organização, o motivo de existir suporte. Criar e editar
+  // atendente e tronco é `forbid`: apontam a ligação para um destino que sobrevive à sessão.
+  forbid("agents", "POST", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
+  forbid("agents/[id]", "PATCH", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
   allow("agents/[id]", "DELETE", "configuração de atendente da organização"),
   allow("analysts", "POST", "configuração de analista da organização"),
   allow("analysts/[id]", "PATCH", "configuração de analista da organização"),
@@ -102,8 +103,8 @@ export const SUPPORT_SESSION_ROUTES: SupportSessionRoute[] = [
   allow("phone-numbers", "POST", "configuração de número da organização"),
   allow("phone-numbers/[id]", "PATCH", "configuração de número da organização"),
   allow("phone-numbers/[id]", "DELETE", "configuração de número da organização"),
-  allow("trunks", "POST", "configuração de telefonia da organização, como a chave de provedor"),
-  allow("trunks/[id]", "PATCH", "configuração de telefonia da organização"),
+  forbid("trunks", "POST", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
+  forbid("trunks/[id]", "PATCH", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
   allow("trunks/[id]", "DELETE", "configuração de telefonia da organização"),
   allow("trunks/[id]/check", "POST", "confere o tronco, não grava acesso"),
   allow("trunks/[id]/inbound-filter", "PATCH", "filtro de entrada do tronco da organização"),

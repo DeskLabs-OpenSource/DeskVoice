@@ -8,7 +8,7 @@ export const GET = handle({}, async ({ q, params }) => {
   return agent;
 });
 
-export const PATCH = handle({ body: agentPatch, configure: true }, async ({ q, params, body, deps }) => {
+export const PATCH = handle({ support: false, body: agentPatch, configure: true }, async ({ q, params, body, deps }) => {
   const current = await q.one<AgentValues>(`select ${AGENT_COLUMNS} from agents where id = $1`, [params.id]);
   if (!current) throw notFound();
   await requireActiveOwner(q, body.followUpOwnerUserId);

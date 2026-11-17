@@ -15,6 +15,9 @@ import { SUPPORT_SESSION_ROUTES, type SupportSessionRoute } from "../../../../..
 import { SESSION_COOKIE, SUPPORT_SESSION_FORBIDDEN, type RouteContext } from "../../../server/context";
 import { NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, startPanel, type Result } from "../../../../test/kit";
 import { POST as invite } from "./team/invites/route";
+import en from "../../../i18n/en/common";
+import es from "../../../i18n/es/common";
+import ptBR from "../../../i18n/pt-BR/common";
 
 const panel = startPanel();
 afterAll(() => panel.close());
@@ -73,6 +76,8 @@ async function scene(label: string) {
   const created = await call(invite, { method: "POST", cookie: member.cookie, body: { email: `invited-${randomUUID()}@example.test`, name: "Convidada", role: "operator" } });
   const data = created.data as { id: string; link: string };
   const other = await createOrganization(panel.app, `Outra ${label}`);
+  const trunk = await insert(panel.app, org, "insert into trunks (organization_id, name, host, auth_mode) values ($1, 'Operadora', '203.0.113.62', 'ip') returning id", [org]);
+  const agent = await insert(panel.app, org, "insert into agents (organization_id, name, engine) values ($1, 'Recepção', 'simulated') returning id", [org]);
   return {
     org,
     other,
@@ -80,6 +85,8 @@ async function scene(label: string) {
     support: { id: support, cookie: `${SESSION_COOKIE}=${token}` },
     operator,
     callId,
+    trunk,
+    agent,
     invite: { id: data.id, token: data.link.split("/invite/")[1] ?? "" },
   };
 }
@@ -108,6 +115,13 @@ const REQUESTS: Record<string, (s: Scene) => Prepared> = {
   "PATCH auth/me": () => ({ params: {}, body: { phone: "+5531999990002", whatsapp: "+5531999990002" }, works: true }),
   "POST auth/switch": (s) => ({ params: {}, body: { organizationId: s.other } }),
   "POST calls/[id]/share": (s) => ({ params: { id: s.callId }, body: {}, works: true }),
+  "PUT brains/[brain]/key": () => ({ params: { brain: "openrouter" }, body: { apiKey: "sk-or-key-for-the-test" }, works: true }),
+  "PUT synthesizers/[synthesizer]/key": () => ({ params: { synthesizer: "elevenlabs" }, body: { apiKey: "el-key-for-the-test", confirmedProvider: "elevenlabs" }, works: true }),
+  "PUT speech-filter/[model]/key": () => ({ params: { model: "jev" }, body: { apiKey: "ts-key-for-the-test" }, works: true }),
+  "POST trunks": () => ({ params: {}, body: { name: "Nova operadora", host: "203.0.113.61", authMode: "ip" }, works: true }),
+  "PATCH trunks/[id]": (s) => ({ params: { id: s.trunk }, body: { name: "Operadora renomeada" }, works: true }),
+  "POST agents": () => ({ params: {}, body: { name: "Vendas", engine: "simulated" }, works: true }),
+  "PATCH agents/[id]": (s) => ({ params: { id: s.agent }, body: { name: "Recepção renomeada" }, works: true }),
   "PUT settings/[key]": () => ({ params: { key: "whatsapp.connector" }, body: { value: { type: "webhook", url: "https://hooks.example.test/in", token: "hook-token" } }, works: true }),
 };
 
@@ -144,6 +158,10 @@ describe("a support session", () => {
   it("has rows to refuse, and every prepared request names a row of the table", () => {
     expect(forbidden.length).toBeGreaterThan(0);
     for (const id of Object.keys(REQUESTS)) expect(forbidden.map((row) => `${row.method} ${row.route}`)).toContain(id);
+  });
+
+  it("has its refusal written in the three dictionaries", () => {
+    for (const dictionary of [ptBR, en, es]) expect(dictionary.errors[SUPPORT_SESSION_FORBIDDEN]).toMatch(/\S/);
   });
 
   it.each(forbidden.map((row) => [`${row.method} ${row.route}`, row] as const))("is refused at %s, before anything is written; a team admin is not", async (id, row) => {

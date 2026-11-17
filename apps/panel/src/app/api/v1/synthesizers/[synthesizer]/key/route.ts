@@ -15,6 +15,7 @@ interface Saved {
  */
 export const PUT = handle(
   {
+    support: false,
     body: synthesizerKeyInput,
     configure: true,
     after: async ({ synthesizer, stored }: Saved, { deps, session, org }) => ({ configured: true, check: await testSynthesizerKey(deps, org, session.organizationId, synthesizer, stored) }),

@@ -7,6 +7,7 @@ export const GET = handle({}, ({ q }) => q.many(`select ${TRUNK_COLUMNS} from tr
 
 export const POST = handle(
   {
+    support: false,
     body: trunkCreate,
     configure: true,
     after: async (trunk: object | null, { deps, session }) => ({ ...trunk, ...(await applyTrunks(deps, session.organizationId)) }),
