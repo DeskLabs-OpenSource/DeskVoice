@@ -67,6 +67,9 @@ consentimento"):
   da TypeSafe estar lida e registrada no guia, como na fatia 7 da R12. Se a página não disser o
   prazo, o pedido volta ao Rafael. Esse pedido é a **DESA-75**, ainda aberta, e o analista espera a
   **mesma resposta** que a tela do filtro.
+- **A chave é o portão.** Nenhum PR grava `decision_model.*.api_key` pelo painel antes da resposta
+  do Rafael na DESA-75. Sem a chave, nada vai à TypeSafe, mesmo com o analista salvo pela API com a
+  confirmação.
 - **Custo desconhecido nunca é zero:** seção 3.4, "Medir".
 
 As fatias 1 e 3 não dependem disso: o simulado (`this-server`) basta para o aceite no CI.
