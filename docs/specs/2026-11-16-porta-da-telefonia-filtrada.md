@@ -1,6 +1,13 @@
 # Porta da telefonia filtrada: a central só aceita SIP das linhas cadastradas
 
-- **Estado:** desenho. Nenhum código de produto foi escrito.
+- **Estado (17/11, documento vivo):** o filtro está entregue, na `main`. Fatia 1 (o conjunto
+  liberado, sem filtrar) no #325. Fatia 2 (o filtro, com a sonda SIP e o contrato 11) no #343. O
+  ajuste da tela da linha com o filtro desligado e a lista vazia no #399. **Falta:** a fatia 3
+  ("sem linha, sem SIP", com as medidas M4 a M6) nunca foi aberta, e a R14 foi fechada sem ela:
+  hoje, sem linha, a central ainda responde, com a recusa por falta de endpoint (limite em 6). A
+  fatia 4 (a prova da atualização com linha no CI) é mudança de workflow e fica com o dono. Fazer a
+  central recusar quando o filtro está ligado e a lista está vazia também é pedido ao dono. O texto
+  abaixo é o desenho como foi escrito antes do código, com o contrato 11 acrescentado na fatia 2.
 - **Data:** 2026-11-16
 - **Quem pediu:** o dono, na decisão da issue #274 (opção **A**), roteiro de novembro, item R14.
 - **Origem:** a medição de @webtecnica numa instalação real e o PR #267. Crédito em todos os
