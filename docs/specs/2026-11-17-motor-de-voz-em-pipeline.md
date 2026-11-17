@@ -60,7 +60,9 @@ export interface SpeechEvents {
   audio(pcm16_8k: Buffer): void;
   /** O que já virou áudio, em caracteres, para cortar a fala do agente na interrupção (fatia 4). */
   spoken(chars: number): void;
-  /** Esta fala terminou de gerar. */
+  /** Incremento do que foi ENVIADO ao provedor, com o custo. É por aqui que o `cancel` cobra. */
+  usage(usage: SpeechUsage): void; // { characters; costMicrocents?; estimated: true }
+  /** Esta fala terminou de gerar. Não vem depois de `cancel`. */
   done(): void;
   error(error: Error): void;
 }
@@ -79,7 +81,12 @@ export interface SpeechSynthesizer {
   label: string;
   provider: string;
   processingLocation: ProcessingLocation;
+  /** O modelo usado quando a escolha não diz outro. */
+  defaultModel: string;
+  /** O preço do modelo padrão. */
   pricing: SynthesizerPricing;
+  /** O preço de um modelo; `undefined` é "sem preço conhecido", nunca zero. */
+  pricingOf(model: string): SynthesizerPricing | undefined;
   keyless?: boolean;
   /** Onde a pessoa pega a chave (o link da tela). */
   keyUrl?: string;
@@ -222,8 +229,10 @@ fatias 1a, 1b e 2 **não dependem da R12** e podem começar já.
 
 Arquivos: `packages/voice-engine/src/types.ts` (contrato da 3.1), `synthesizers/simulated.ts`,
 `synthesizers/elevenlabs.ts`, `load.ts` (`loadSynthesizers`), `fences/one-file-per-piece.test.ts`,
-`docs/doctrine/um-arquivo-por-peca.md` (uma linha), `scripts/bancada-de-voz/voz.ts` e fragmento.
-Sem migration, sem tela e sem `call-session.ts`.
+`docs/doctrine/um-arquivo-por-peca.md` (uma linha), `synthesis.ts` (`prepareFixedSpeech`),
+`testing/fake-provider.ts` (registro dos cabeçalhos e `rejectUpgrade`),
+`scripts/bancada-de-voz/sintetizador.ts` (o nome `voz.ts` já é do Piper, #201) e fragmento.
+Sem migration, sem tela e sem `call-session.ts`. (Ajustado em 17/11 pelo que o #393 encontrou.)
 
 Aceite:
 1. `elevenlabs.ts` abre `wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input` com
@@ -244,7 +253,7 @@ Aceite:
    `prepareFixedSpeech(synth, voice, texts)`, com cache em memória pela chave da 3.3. Os testes provam:
    a segunda ligação com a mesma voz não pede de novo; voz diferente pede; e a falha ao preparar é
    uma recusa de abertura, nunca uma ligação sem fala de falha.
-7. Bancada (`scripts/bancada-de-voz/voz.ts`, fora do CI, no padrão de `orcamento.ts`): mede o tempo
+7. Bancada (`scripts/bancada-de-voz/sintetizador.ts`, fora do CI, no padrão de `orcamento.ts`): mede o tempo
    do primeiro `push` ao primeiro áudio (p50 e p95 de 30 falas curtas em pt-BR) e compara os
    caracteres contados com o consumo da conta antes e depois (`character_count` da assinatura, se a
    API expuser; o Desenvolvedor confere e diz). Ela só roda com a chave do pedido de decisão da
@@ -263,6 +272,8 @@ teste, a lista de vozes com o idioma e a amostra (`previewUrl`, que não gasta c
 três idiomas. Settings `synthesizer.<id>.api_key`, sem migration (tabela `settings`).
 Aceite: o operador cola a chave, vê "aceita" ou o motivo, vê as vozes com pt-BR primeiro e ouve a
 amostra. A chave nunca volta para a tela.
+Sobra da 1a (achado do Verificador 2 no #393): um teste em `synthesizers/elevenlabs.test.ts` prova
+que o fechamento 1000 depois do `end()`, sem `isFinal`, termina em `done`, e não em `error`.
 
 ### Fatia 2: o cérebro conversa em streaming, com ferramentas (não espera a R12)
 
@@ -284,6 +295,9 @@ para quem não usa. O carimbo é a hora real (`date -u +%Y%m%dT%H%M%S`), nunca f
 `pipeline_turn_latency`. Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
 voz simulada: uma ferramenta no meio da conversa, três linhas no extrato e o teto que dispara a
 despedida pré-sintetizada. Quem já instalou não precisa fazer nada: sem `agents.pipeline`, nada muda.
+A fala aberta e parada morre no `inactivity_timeout` da ElevenLabs (20 s) com `error`. Esta fatia
+decide e testa: ou abre a fala só quando o cérebro começa a responder, ou trata esse `error` como
+fim sem falha.
 
 ### Fatia 4: interrupção
 
