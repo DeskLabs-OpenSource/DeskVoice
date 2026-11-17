@@ -15,6 +15,9 @@ import analystsEs from "../../../i18n/es/analysts";
 import speechFilterEs from "../../../i18n/es/speech-filter";
 import analystsPtBR from "../../../i18n/pt-BR/analysts";
 import speechFilterPtBR from "../../../i18n/pt-BR/speech-filter";
+import voiceEn from "../../../i18n/en/voice";
+import voiceEs from "../../../i18n/es/voice";
+import voicePtBR from "../../../i18n/pt-BR/voice";
 import { useDict } from "../../../i18n/provider";
 import { ReadOnlyNotice } from "../../../ui/errors";
 import { PageHeader } from "../../../ui/kit";
@@ -24,6 +27,7 @@ import { useMe } from "../../../ui/me";
 const SECTIONS = [
   { href: "/settings", key: "ai" },
   { href: "/settings/brains", key: "brains" },
+  { href: "/settings/voice", key: "voice" },
   { href: "/settings/speech-filter", key: "speechFilter" },
   { href: "/settings/analysts", key: "analysts" },
   { href: "/settings/calls", key: "calls" },
@@ -42,7 +46,8 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
   const brains = useDict(brainsPtBR, brainsEn, brainsEs);
   const speechFilter = useDict(speechFilterPtBR, speechFilterEn, speechFilterEs);
   const analysts = useDict(analystsPtBR, analystsEn, analystsEs);
-  const sectionLabel = (key: (typeof SECTIONS)[number]["key"]): string => (key === "brains" ? brains.menu : key === "speechFilter" ? speechFilter.menu : key === "analysts" ? analysts.menu : t.sections[key]);
+  const voice = useDict(voicePtBR, voiceEn, voiceEs);
+  const sectionLabel = (key: (typeof SECTIONS)[number]["key"]): string => (key === "brains" ? brains.menu : key === "voice" ? voice.menu : key === "speechFilter" ? speechFilter.menu : key === "analysts" ? analysts.menu : t.sections[key]);
   const pathname = usePathname();
   // Com a lista de quem administra a instalação explícita, a atualização sai daqui e vai para a área da instalação.
   const explicit = useMe()?.installationExplicit === true;

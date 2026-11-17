@@ -146,6 +146,12 @@ export function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): st
         who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
         provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
       });
+    case "synthesizer_provider_confirmed":
+      // O recibo da voz do pipeline: fica depois de a chave ser apagada ou de a pessoa sair da equipe.
+      return fill(t.history.synthesizer_provider_confirmed, {
+        who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
+        provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
+      });
     // Feitos pela administração da instalação, que não tem vínculo aqui: a frase não tem "quem".
     case "organization_created":
       return fill(t.history.organization_created, { name: typeof p.name === "string" ? p.name : "" });
