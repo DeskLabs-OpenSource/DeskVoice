@@ -37,6 +37,7 @@ O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medi
 | `linhas.ts` | linha estreita (`resample` a 8 kHz; μ-law onde o motor do OpenAI usaria) e larga (16 kHz) |
 | `voz.ts` | voz sintética (Piper) e conversa de fundo; licença de cada voz no cabeçalho |
 | `sintetizador.ts` | a voz do pipeline (R5, fatia 1a): tempo do primeiro `push` ao primeiro áudio da ElevenLabs (p50/p95 de 30 falas) e caracteres contados contra o `character_count` da conta. Só com `BANCADA_ELEVENLABS_API_KEY` e `--teto-usd`; o resumo é testado em `sintetizador.test.ts` |
+| `cerebro-primeiro-texto.ts` | o cérebro do pipeline (R5, fatias 2 e 2b): tempo da chamada de `Brain.chat` ao primeiro texto (p50/p95 de 30 pedidos curtos, sintéticos, sem ferramenta), na OpenAI, no OpenRouter, na DeepSeek e na Anthropic (`claude-haiku-4-5-20251001`, o mais barato da tabela). Cancela cada pedido no primeiro texto. Só com `BANCADA_OPENAI_API_KEY`, `BANCADA_OPENROUTER_API_KEY`, `BANCADA_DEEPSEEK_API_KEY` ou `BANCADA_ANTHROPIC_API_KEY`; sem chave, diz "não medido" e sai 0. Modelo por `--modelo openai=gpt-4.1-mini` (repetível) e `--limite N`. Testada em `cerebro-primeiro-texto.test.ts` |
 | `ruido.ts` | obra e música geradas, com semente fixa ("Áudio de teste" do desenho da DESA-24) |
 | `audio.ts` | WAV, trecho da fala e mistura pela relação voz/ruído sobre o RMS |
 | `orcamento.ts` | o teto: quem vai gastar reserva o pior caso antes do pedido, e a reserva conta até virar o valor real; assim nem pedidos simultâneos passam do teto (`orcamento.test.ts`) |

@@ -1,5 +1,6 @@
 /**
- * Cérebro OpenAI: os modelos de texto que a chave alcança e um pedido com saída em JSON.
+ * Cérebro OpenAI: os modelos de texto que a chave alcança, um pedido com saída em JSON e a conversa
+ * em streaming, com ferramentas (`chat`, R5 fatia 2).
  *
  * Documentação oficial consultada em 2026-11-16:
  *   - https://developers.openai.com/api/reference/resources/models/methods/list  (`GET /v1/models`,
@@ -13,6 +14,13 @@
  *   - https://developers.openai.com/api/docs/guides/error-codes  (401 chave inválida ou revogada, 403 país não
  *     atendido, 429 que é limite de pedidos OU falta de crédito pelo `error.code`, 5xx do lado deles;
  *     a mesma leitura do motor `openai-realtime.ts`, conferida lá em 2026-11-12)
+ *   - https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events
+ *     (conferida em 2026-11-17, para `chat`: `delta.tool_calls[]` com `index`, `id`, `type` e
+ *     `function.name`/`function.arguments` opcionais; `usage` nulo em todo pedaço menos o último)
+ *   - a mesma página de `POST /v1/chat/completions` acima, conferida em 2026-11-17: `stream_options.include_usage`
+ *     existe ("If set, an additional chunk will be streamed before the `data: [DONE]` message. The `usage`
+ *     field on this chunk shows the token usage statistics for the entire request, and the `choices` field
+ *     will always be an empty array"). Sem ele, o streaming não declara consumo: por isso `chat` o manda.
  *   - https://developers.openai.com/api/docs/pricing  (preços, aba "Standard", tabela de tokens de texto)
  *
  * Endereços e cabeçalhos iguais aos do desenho (seção 3.2).
@@ -24,7 +32,7 @@
  */
 import { z } from "zod";
 import type { Brain, BrainFailure, BrainModel, BrainPrice } from "../brain";
-import { LIST_TIMEOUT_MS, brainFailureByStatus, chatCompletionJson, parseEach, requestJson } from "../brain-http";
+import { LIST_TIMEOUT_MS, brainFailureByStatus, chatCompletionJson, chatStream, chatUsageOf, parseEach, requestJson } from "../brain-http";
 
 const API_URL = "https://api.openai.com/v1";
 const PRICING_SOURCE = "https://developers.openai.com/api/docs/pricing";
@@ -133,6 +141,10 @@ const brain: Brain = {
 
   completeJson(apiKey, request, options) {
     return chatCompletionJson(`${API_URL}/chat/completions`, apiKey, request, { fetch: options.fetch, failureOf });
+  },
+
+  chat(apiKey, request, options) {
+    return chatStream(`${API_URL}/chat/completions`, apiKey, request, { fetch: options.fetch, failureOf, includeUsage: true, usageOf: chatUsageOf });
   },
 };
 

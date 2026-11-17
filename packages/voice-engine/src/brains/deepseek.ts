@@ -1,5 +1,6 @@
 /**
- * Cérebro DeepSeek: os modelos de texto que a chave alcança e um pedido com saída em JSON.
+ * Cérebro DeepSeek: os modelos de texto que a chave alcança, um pedido com saída em JSON e a conversa
+ * em streaming, com ferramentas (`chat`, R5 fatia 2).
  *
  * Documentação oficial consultada em 2026-11-16:
  *   - https://api-docs.deepseek.com/  (endereço base `https://api.deepseek.com`, `Authorization: Bearer`)
@@ -11,6 +12,12 @@
  *     pode ser nulo; `usage.prompt_tokens` é a soma de `prompt_cache_hit_tokens` e
  *     `prompt_cache_miss_tokens`, que o esquema põe em `prompt_tokens_details` e o exemplo põe direto em
  *     `usage`; `prompt_tokens_details.cached_tokens`)
+ *   - a mesma página de `create-chat-completion`, conferida em 2026-11-17, para `chat`: `stream_options`
+ *     ("Must be set together with `stream: true`") com `include_usage` ("If set to `true`, all chunks in
+ *     the stream will include a `usage` field, whose value is `null` on every chunk except the last one");
+ *     o último pedaço antes do `[DONE]` traz o consumo do pedido inteiro, com ou sem a opção;
+ *     `delta.tool_calls[]` com `index`, e o primeiro pedaço de cada chamada traz `id`, `type` e `function`;
+ *     `delta.reasoning_content` só no modo de raciocínio
  *   - https://api-docs.deepseek.com/quick_start/error_codes  (400 formato, 401 chave errada, 402 sem saldo,
  *     422 parâmetro, 429 limite, 500 erro deles, 503 sobrecarga)
  *   - https://api-docs.deepseek.com/quick_start/pricing  (preços)
@@ -30,7 +37,7 @@
  */
 import { z } from "zod";
 import type { Brain, BrainFailure, BrainModel } from "../brain";
-import { LIST_TIMEOUT_MS, brainFailureByStatus, parseEach, requestJson } from "../brain-http";
+import { LIST_TIMEOUT_MS, brainFailureByStatus, chatStream, parseEach, requestJson } from "../brain-http";
 import type { Usage } from "../types";
 
 const API_URL = "https://api.deepseek.com";
@@ -128,6 +135,16 @@ const brain: Brain = {
     const text = chatBody.safeParse(response.body).data?.choices[0]?.message.content;
     if (typeof text !== "string" || text.trim() === "") return { ok: false, failure: "unexpected_response", status: response.status, model, usage };
     return { ok: true, text, model, usage };
+  },
+
+  chat(apiKey, request, options) {
+    // `include_usage` é documentado (ver o cabeçalho): vai, e o consumo vem no último pedaço.
+    return chatStream(`${API_URL}/chat/completions`, apiKey, request, {
+      fetch: options.fetch,
+      failureOf: completionFailureOf,
+      includeUsage: true,
+      usageOf,
+    });
   },
 };
 
