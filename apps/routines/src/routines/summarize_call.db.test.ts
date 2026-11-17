@@ -1,4 +1,4 @@
-import { recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
+import { createAccount, recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ANALYSIS_SETTING, AUTO_TRANSCRIPTION_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING } from "@deskvoice/voice-engine";
 import { createCall, createOrganization, depsFor, openTestDbs, putSetting, putWhatsAppConnector, t0, task, tasksOf } from "../../test/helpers";
@@ -144,9 +144,10 @@ describe("o dono recebe o aviso de fim de ligação pelo WhatsApp", () => {
   // `createOrganization` cria a organização sem gente dentro: quem atende é criado aqui,
   // como dono, porque é ele que recebe o resumo. `createUser` do kit cria operador — não serve.
   const dono = (organizationId: string, e164: string | null): Promise<number> =>
-    withSystem(app, (q) =>
-      q.exec("insert into users (organization_id, email, name, password_hash, role, whatsapp_e164) values ($1, $2, 'Dono', 'x', 'owner', $3)", [
+    withSystem(app, async (q) =>
+      q.exec("insert into users (organization_id, account_id, email, name, role, whatsapp_e164) values ($1, $2, $3, 'Dono', 'owner', $4)", [
         organizationId,
+        await createAccount(q, { email: `dono-${organizationId}@example.com`, passwordHash: "x" }),
         `dono-${organizationId}@example.com`,
         e164,
       ]),

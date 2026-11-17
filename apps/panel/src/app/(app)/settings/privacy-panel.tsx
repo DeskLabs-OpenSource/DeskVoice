@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import commonEn from "../../../i18n/en/common";
 import en from "../../../i18n/en/privacy";
 import commonEs from "../../../i18n/es/common";
+import speechFilterEn from "../../../i18n/en/speech-filter";
+import speechFilterEs from "../../../i18n/es/speech-filter";
+import speechFilterPtBR from "../../../i18n/pt-BR/speech-filter";
 import es from "../../../i18n/es/privacy";
 import { fill, type Locale } from "../../../i18n/locales";
 import commonPtBR from "../../../i18n/pt-BR/common";
@@ -18,7 +21,7 @@ import { forgetTarget } from "../../../ui/forget-target";
 import { notesRetentionNeedsConfirm, notesRetentionProblem } from "../../../ui/notes-retention";
 
 type Kind = keyof PrivacyDictionary["history"];
-interface Entry {
+export interface Entry {
   id: string;
   at: string;
   kind: Kind;
@@ -31,6 +34,7 @@ interface Privacy {
   minDays: number;
   maxDays: number;
   notesRetention: NotesRetention;
+  callerMemoryAgent: boolean;
   history: Entry[];
 }
 interface NotesRetention {
@@ -75,8 +79,15 @@ const hasErasable = (counts: ErasureCounts): boolean => counts.calls + counts.fo
 const countsLine = ({ calls, events, followUps, notifications, approvals, notes, recordings }: ErasureCounts, t: PrivacyDictionary): string =>
   fill(t.erasureCounts, { calls, events, followUps, notifications, approvals, notes, recordings });
 
+/**
+ * O nome do fornecedor como a tela o escreve (o mesmo do aviso do filtro e do analista), e nunca o id
+ * gravado no recibo: "TypeSafe", e não "typesafe". Fornecedor sem nome conhecido sai como foi gravado.
+ */
+const PROVIDER_NAMES: Record<Locale, Record<string, string>> = { "pt-BR": speechFilterPtBR.providers, en: speechFilterEn.providers, es: speechFilterEs.providers };
+export const providerLabel = (provider: string, locale: Locale): string => PROVIDER_NAMES[locale][provider] ?? provider;
+
 /** Uma linha do registro, na voz da tela. */
-function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
+export function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
   const p = entry.payload;
   const span = (value: unknown): string => (typeof value === "number" ? fill(t.days, { n: value }) : t.forever);
   const who = entry.actorName ?? t.removedPerson;
@@ -120,6 +131,26 @@ function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
       const notesSpan = (value: unknown, fallback: string): string => (typeof value === "number" ? fill(t.days, { n: value }) : fallback);
       return fill(t.history.caller_notes_retention_changed, { who, from: notesSpan(p.from, t.factoryDefault), to: notesSpan(p.to, t.factoryDefault) });
     }
+    case "caller_memory_changed":
+      return fill(t.history.caller_memory_changed, { who, state: p.to === true ? t.memoryStates.on : t.memoryStates.off });
+    case "analyst_provider_confirmed":
+      // O nome de quem confirmou vem do recibo, gravado no momento: a pessoa pode ter saído da equipe.
+      return fill(t.history.analyst_provider_confirmed, {
+        who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
+        analyst: typeof p.analystName === "string" ? p.analystName : "",
+        provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
+      });
+    case "decision_model_provider_confirmed":
+      // O recibo do filtro de fala: fica mesmo depois de desligar ou trocar de modelo.
+      return fill(t.history.decision_model_provider_confirmed, {
+        who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
+        provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
+      });
+    // Feitos pela administração da instalação, que não tem vínculo aqui: a frase não tem "quem".
+    case "organization_created":
+      return fill(t.history.organization_created, { name: typeof p.name === "string" ? p.name : "" });
+    case "organization_renamed":
+      return fill(t.history.organization_renamed, { from: typeof p.from === "string" ? p.from : "", to: typeof p.to === "string" ? p.to : "" });
   }
 }
 
@@ -166,6 +197,7 @@ export function PrivacyPanel() {
   const [forgotten, setForgotten] = useState<Forgotten | null>(null);
   const [forgetInvalid, setForgetInvalid] = useState<string | null>(null);
   const notesSaver = useAction();
+  const memorySaver = useAction();
   const [notesDays, setNotesDays] = useState("");
   const [notesProblem, setNotesProblem] = useState<string | null>(null);
   // O prazo da memória que espera confirmação: encurtar apaga as notas mais velhas.
@@ -179,7 +211,7 @@ export function PrivacyPanel() {
   if (!canConfigure) return null;
   if (state.error && !state.data) return <Notice tone="fail">{errorText(state.error)}</Notice>;
   if (!state.data) return <Skeleton lines={2} />;
-  const { retentionDays: current, recording, minDays, maxDays, notesRetention, history } = state.data;
+  const { retentionDays: current, recording, minDays, maxDays, notesRetention, callerMemoryAgent, history } = state.data;
 
   const store = (next: number | null): void =>
     void save.run(() => api("/privacy/retention", { method: "PUT", body: { days: next } })).then((ok) => {
@@ -196,6 +228,10 @@ export function PrivacyPanel() {
   // Ligar e desligar não apagam nada (o que já foi gravado segue o prazo): sem confirmação.
   const setRecording = (enabled: boolean): void =>
     void recorder.run(() => api("/privacy/recording", { method: "PUT", body: { enabled } })).then(state.reload);
+
+  // Ligar e desligar não apagam nota: sem confirmação. O aviso do número forjado fica sempre à vista.
+  const setCallerMemory = (enabled: boolean): void =>
+    void memorySaver.run(() => api("/privacy/caller-memory", { method: "PUT", body: { enabled } })).then(state.reload);
 
   return (
     <>
@@ -308,6 +344,17 @@ export function PrivacyPanel() {
             </Notice>
           )}
         </form>
+      </Panel>
+
+      <Panel title={t.memoryTitle} description={t.memoryLead}>
+        <div className="grid max-w-xl gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Switch checked={callerMemoryAgent} onChange={setCallerMemory} label={t.memorySwitch} disabled={memorySaver.busy} />
+            <ActionStatus action={memorySaver} />
+          </div>
+          <Notice tone="warn">{t.memorySpoofed}</Notice>
+          <Notice>{t.memoryCost}</Notice>
+        </div>
       </Panel>
 
       <Panel title={t.exportTitle} description={t.exportLead}>

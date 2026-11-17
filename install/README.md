@@ -173,6 +173,15 @@ que algum contêiner usa fica, com um aviso, e a atualização termina bem. Imag
 da versão de destino, a limpeza já roda na primeira atualização para a versão que a traz (vindo
 da 0.1.0, que não passa a vez, só na atualização seguinte para outra versão).
 
+A imagem guardada não basta para voltar de uma versão que mudou o banco de um jeito que a
+anterior não lê. É o caso da 0.28.0: depois de atualizar para ela, voltar para uma versão
+anterior com `update.sh --to` deixa o painel sem login. A volta é trocar a versão e restaurar o
+backup feito na ida para a 0.28.0, que é o mais recente com a versão de antes no manifesto
+(`grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1 | xargs dirname`). Não serve o
+`restore.sh latest`, nem o backup que o próprio `update.sh --to` faz e mostra no fim: esse já tem
+o banco da 0.28.0. O backup da ida só fica enquanto a rotação o mantiver (os 14 mais recentes), e
+o que entrou depois de atualizar se perde. O passo a passo está na nota da 0.28.0.
+
 A 0.1.0 é de antes desse mecanismo: quem atualiza a partir dela roda `bash install/update.sh`
 **uma segunda vez** depois de atualizar. Não há o que atualizar; é o atualizador novo gerando o
 segredo do agente, recriando o painel para ele recebê-lo e agendando o agente.
@@ -183,6 +192,15 @@ segredo do agente, recriando o painel para ele recebê-lo e agendando o agente.
 bash install/agent.sh                      # uma passada (é o que o agendamento chama)
 sudo bash install/agent.sh --install       # instala ou conserta o agendamento
 bash install/agent.sh --install --dry-run  # só diz o que faria
+```
+
+Quem pede a atualização pela tela é quem administra a instalação. Numa instalação com uma
+organização, são o dono e o administrador. Se ninguém mais consegue pedir, rode de dentro da VPS
+o comando abaixo, e a conta desse e-mail volta a administrar a instalação. Isso fica gravado na
+auditoria da instalação:
+
+```bash
+bash install/grant-installation-admin.sh voce@empresa.com.br
 ```
 
 O painel não tem acesso ao Docker do servidor: ele só registra o pedido de atualização. O

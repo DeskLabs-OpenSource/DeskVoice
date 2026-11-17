@@ -31,6 +31,9 @@ export interface ErasureCounts {
 
 const ERASED = `'{"erased": true}'::jsonb`;
 
+/** As tarefas `deliver_notification` das mensagens para quem ligou (`audience = 'caller'`) das chamadas `$1`. */
+const CALLER_NOTICE_TASKS = `kind = 'deliver_notification' and payload->>'notificationId' in (select id::text from notifications where audience = 'caller' and call_id = any($1::uuid[]))`;
+
 /**
  * O que sai dos eventos das chamadas apagadas, regra por regra: cada uma diz quais eventos alcança e
  * como fica o payload. Fica o fato (tipo, horário, nome da ferramenta, para quem transferiu, quem
@@ -51,6 +54,9 @@ const EVENT_RULES: ReadonlyArray<{ where: string; set: string }> = [
   // A passagem entre agentes: o motivo e o resumo são texto livre do modelo sobre quem ligou. Ficam os ids e os nomes dos agentes.
   { where: "kind = 'agent_handoff' and payload ?| array['reason', 'summary']", set: `(payload - array['reason', 'summary']) || ${ERASED}` },
   { where: "kind = 'dtmf_sent' and payload ? 'digits'", set: `(payload - 'digits') || ${ERASED}` },
+  // O erro da entrega da mensagem para quem ligou pode repetir o número (o WAHA diz "<número> is not on
+  // WhatsApp"). A tarefa e o aviso estão em `CALLER_NOTICE_TASKS`; o erro da entrega do aviso à equipe fica.
+  { where: `kind = 'task_finished' and payload ? 'error' and payload->>'taskId' in (select id::text from tasks where ${CALLER_NOTICE_TASKS})`, set: `(payload - 'error') || ${ERASED}` },
   // O telefone do titular em qualquer evento (`call_started`, `call_refused`) vira nulo; o da linha da empresa fica.
   { where: "payload->>'from' = $2", set: `jsonb_set(payload, '{from}', 'null'::jsonb) || ${ERASED}` },
   { where: "payload->>'to' = $2", set: `jsonb_set(payload, '{to}', 'null'::jsonb) || ${ERASED}` },
@@ -160,7 +166,9 @@ export async function countCallerData(q: OrgQuery, options: { dir: string; phone
  * texto da análise, o motivo do pedido para parar a gravação, os argumentos e mensagens de
  * ferramenta, o texto de aprovações e de avisos, as pendências (pelo telefone e pela chamada) e as
  * notas do agente (pelo telefone e pela chamada; estas saem inteiras). O
- * telefone do titular vira nulo nas chamadas, nos eventos e nas pendências.
+ * telefone do titular vira nulo nas chamadas, nos eventos, nas pendências e na mensagem para quem
+ * ligou (`notifications.target` do aviso `caller`); o erro da entrega dessa mensagem, que pode
+ * repetir o número, sai do aviso, da tarefa e do evento `task_finished`.
  *
  * Fica o registro do serviço prestado — horário, duração, custo, desfecho, nota da análise, quem
  * parou a gravação —, porque não é fala de ninguém e sustenta fatura e relatório. Fica também a
@@ -195,7 +203,18 @@ export async function eraseCaller(q: OrgQuery, options: { dir: string; phoneE164
   }
 
   // Os avisos antes das pendências: o filtro dos avisos acha as pendências pelo telefone, que sai delas a seguir.
-  const notifications = await q.exec(`update notifications set body = $3 where ${NOTIFICATIONS_WHERE}`, [phoneE164, ids, ERASED_TEXT]);
+  // A mensagem para quem ligou (`audience = 'caller'`) tem o número do titular no `target` e pode tê-lo
+  // no texto de erro da entrega (o WAHA diz "<número> is not on WhatsApp"): os dois saem, e o erro da
+  // tarefa de entrega também. O aviso à equipe vai para o número de alguém da equipe, e o `target` e o
+  // erro dele ficam.
+  await q.exec(`update tasks set last_error = $2 where last_error is not null and ${CALLER_NOTICE_TASKS}`, [ids, ERASED_TEXT]);
+  const notifications = await q.exec(
+    `update notifications set body = $3,
+       target = case when audience = 'caller' then null else target end,
+       error = case when audience = 'caller' and error is not null then $3 else error end
+     where ${NOTIFICATIONS_WHERE}`,
+    [phoneE164, ids, ERASED_TEXT],
+  );
   const followUps = await q.exec(`update follow_ups set title = $3, details = '', closing_note = null, caller_e164 = null where ${FOLLOW_UPS_WHERE}`, [
     phoneE164,
     ids,

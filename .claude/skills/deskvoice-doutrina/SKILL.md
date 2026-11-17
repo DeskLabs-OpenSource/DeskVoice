@@ -67,7 +67,8 @@ cobra e onde ler o porquê. Se este resumo discordar da lei, vale a lei.
   entra lá, não como texto solto.
 - Falha nunca termina em silêncio: uma fala para quem está na linha e um evento para o painel.
 - `console.log` em código de produto é reprovado pelo lint.
-- Lei: [`sistema-vivo.md`](../../../docs/doctrine/sistema-vivo.md).
+- Lei: [`sistema-vivo.md`](../../../docs/doctrine/sistema-vivo.md). Para aplicá-la a uma peça nova, pergunta por
+  pergunta e com onde conferir cada resposta no código: skill `deskvoice-sistema-vivo`.
 
 ## 7. Relógio injetado
 

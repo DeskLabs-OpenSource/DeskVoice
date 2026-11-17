@@ -40,6 +40,15 @@ const privacy: PrivacyDictionary = {
   notesConfirmTitle: "Delete the notes older than {days} days?",
   notesConfirmBody: "Notes older than the new period are deleted in a moment, and then once a day. What is deleted does not come back.",
   notesConfirmYes: "Delete and keep for {days} days",
+  memoryTitle: "Caller memory for the agent",
+  memoryLead:
+    "With this on, the agent starts each call knowing the notes saved about the number and the titles of its open follow-ups. It applies to incoming calls and to the calls the system places. The summary and the words of earlier calls never go in. It is off by default.",
+  memorySwitch: "Give the agent the caller's memory",
+  memorySpoofed:
+    "The displayed number can be spoofed. Someone calling with another person's number may hear from the agent what is in that person's notes: the agent is told not to read them to the caller, but that is not a guarantee.",
+  memoryCost:
+    "The block has at most 1,500 characters, with up to 10 notes and 5 follow-ups, and what it costs counts toward each call's cost ceiling. Turning it on or off deletes no note: notes follow the memory period above. It applies from the next call.",
+  memoryStates: { on: "on", off: "off" },
   exportTitle: "Data about a caller",
   exportLead:
     "When someone asks what the phone system keeps about them, enter the phone number. You get a file with the calls from that number in this organization, their events, the follow-ups for that number, open and closed, the agent notes about it and the do-not-call entry. Speech already removed by the retention period appears as deleted. Each call says whether it has a recording; the audio is not in the file and can be played on the call page.",
@@ -81,7 +90,7 @@ const privacy: PrivacyDictionary = {
   forgetConfirmYes: "Forget {phone}",
   forgetDone: "{phone} was forgotten. Agent notes deleted: {notes}. Closed follow-ups deleted: {followUps}.",
   historyTitle: "Record",
-  historyLead: "Who changed the period or the recording, what was removed by it, who exported the data of which phone, who erased data at a caller's request, and what happened to the recording links for callers. The 50 most recent.",
+  historyLead: "Who changed the period or the recording, what was removed by it, who exported the data of which phone, who erased data at a caller's request, what happened to the recording links for callers, and who confirmed that an analyst or the speech filter sends the call text to a provider. The 50 most recent.",
   historyEmpty: "Nothing recorded yet.",
   history: {
     transcript_retention_changed: "{who} changed the retention period from {from} to {to}.",
@@ -95,6 +104,11 @@ const privacy: PrivacyDictionary = {
     share_revoked: "{who} revoked the recording links of a call. Links revoked: {count}.",
     caller_notes_purged: "Agent notes older than {days} days were deleted by the memory period. Notes deleted: {count}.",
     caller_notes_retention_changed: "{who} changed the memory period from {from} to {to}.",
+    caller_memory_changed: "{who} turned the caller memory for the agent {state}.",
+    analyst_provider_confirmed: "{who} confirmed that the analyst {analyst} sends the text of what the caller says to {provider}.",
+    decision_model_provider_confirmed: "{who} confirmed that the speech filter sends the call's text to {provider}.",
+    organization_created: "The installation administration created this organization, named \"{name}\".",
+    organization_renamed: "The installation administration renamed this organization from \"{from}\" to \"{to}\".",
     caller_notes_deleted: "{who} forgot the number ending in {suffix}. Agent notes deleted: {notes}. Closed follow-ups deleted: {followUps}.",
   },
   noteDeleted: "{who} deleted an agent note.",

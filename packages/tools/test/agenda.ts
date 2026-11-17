@@ -65,7 +65,7 @@ export function crmSimulado(options: { slots?: AgendaSlot[]; timezone?: string }
 }
 
 /** Contexto de uma ligação: relógio fixo, `say` gravado e banco que reprova quem ousar consultá-lo. */
-export function contextoDaAgenda(): ToolContext & { said: string[] } {
+export function contextoDaAgenda(language = "pt-BR"): ToolContext & { said: string[] } {
   const said: string[] = [];
   const naoUsaBanco = async (): Promise<never> => {
     throw new Error("as ferramentas de agenda não consultam o banco");
@@ -74,6 +74,7 @@ export function contextoDaAgenda(): ToolContext & { said: string[] } {
     organizationId: "org-1",
     callId: "call-1",
     agentId: "agent-1",
+    language,
     q: { organizationId: "org-1", many: naoUsaBanco, one: naoUsaBanco, exec: naoUsaBanco },
     clock: { now: () => AGORA },
     telephony: {

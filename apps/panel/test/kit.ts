@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { hashPassword, verifyPassword, withOrg, type Db } from "@deskvoice/core";
+import { createAccount, hashPassword, verifyPassword, withOrg, withSystem, type Db } from "@deskvoice/core";
 import { vi } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { SESSION_COOKIE, createSession, setServerDeps, type Role, type RouteContext, type ServerDeps } from "../src/server/context";
@@ -72,12 +72,14 @@ export async function createUser(app: Db, organizationId: string, role: Role): P
   passwordHash ??= hashPassword(PASSWORD);
   const hash = await passwordHash;
   const email = `${role}-${randomUUID()}@example.test`;
+  // A conta só o papel de sistema cria; o vínculo nasce pela organização, como antes.
+  const accountId = await withSystem(app, (q) => createAccount(q, { email, passwordHash: hash }));
   return withOrg(app, organizationId, async (q) => {
-    const row = await q.one<{ id: string }>("insert into users (organization_id, email, name, password_hash, role) values ($1, $2, $3, $4, $5) returning id", [
+    const row = await q.one<{ id: string }>("insert into users (organization_id, account_id, email, name, role) values ($1, $2, $3, $4, $5) returning id", [
       organizationId,
+      accountId,
       email,
       `Test ${role}`,
-      hash,
       role,
     ]);
     const id = row?.id ?? "";

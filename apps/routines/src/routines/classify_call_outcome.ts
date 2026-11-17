@@ -1,22 +1,38 @@
 import { RUBRIC_VERSION, callAnalysisSchema, decryptSecret, recordEvent, scoreOf, verifyAgainstTranscript, withOrg, type OrgQuery, type TranscriptTurn } from "@deskvoice/core";
 import {
+  ANALYSIS_SCHEMA,
+  ANALYSIS_SCHEMA_GOOGLE,
   ANALYSIS_SETTING,
   MICROCENTS_PER_CENT,
+  OUTCOME_GUESS_SCHEMA,
+  OUTCOME_GUESS_SCHEMA_GOOGLE,
   OUTCOME_SETTING,
   ANALYSIS_TIMEOUT_MS,
   analysisEnabledOf,
+  analysisPrompt,
   classifyDestinationOf,
   engineClassifyTargetSetting,
+  estimateCostMicrocents,
+  loadBrains,
   loadEngines,
   outcomeEnabledOf,
+  outcomePrompt,
+  readAnalysisGuess,
+  readOutcomeGuess,
   settleOutcome,
+  type AnalysisGuess,
+  type Brain,
+  type BrainPrice,
   type CallOutcome,
   type ClassifyDestinationRefusal,
   type ClassifyFailure,
   type ClassifyResult,
   type ClassifyTarget,
+  type OutcomeGuess,
+  type Usage,
 } from "@deskvoice/voice-engine";
 import { safeFetch, UnsafeDestinationError } from "@deskvoice/tools";
+import { z } from "zod";
 import type { Routine, RoutineDeps } from "../types";
 
 /** Mesmo nome que o painel usa: a chave do motor, cifrada. */
@@ -25,8 +41,45 @@ const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_k
 /** Uma ligação longa não precisa inteira: o desfecho mora no fim da conversa. */
 const TRANSCRIPT_LIMIT = 6000;
 
+/**
+ * Os motivos do cérebro escolhido para ler a ligação (`calls.analysis_brain`). Cada um tem frase na
+ * linha do tempo, nas três línguas, nos dois eventos (`outcome_not_classified` e `analysis_not_done`).
+ * - `brain_unavailable`: o cérebro não foi descoberto, ou o modelo saiu da lista guardada dele.
+ * - `brain_no_key`: o cérebro escolhido não tem chave. O `no_key` fala do motor de voz e mentiria aqui.
+ * - `brain_unmeasured_without_ceiling`: modelo sem preço conhecido e agente sem teto de custo.
+ */
+type BrainRefusal = "brain_unavailable" | "brain_no_key" | "brain_unmeasured_without_ceiling";
+
 /** Por que a análise não foi pedida, ou não foi gravada. */
-type AnalysisNotDoneReason = "no_speech" | "no_key" | "engine_cannot_analyze" | "cost_ceiling" | ClassifyFailure | ClassifyDestinationRefusal;
+type AnalysisNotDoneReason = "no_speech" | "no_key" | "engine_cannot_analyze" | "cost_ceiling" | ClassifyFailure | ClassifyDestinationRefusal | BrainRefusal;
+
+/** Mesmos nomes que o painel usa (`apps/panel/src/server/settings.ts` e `brains.ts`). */
+const ANALYSIS_BRAIN_SETTING = "calls.analysis_brain";
+const brainKeySetting = (brainId: string): string => `brain.${brainId}.api_key`;
+const brainModelsSetting = (brainId: string): string => `brain.${brainId}.models`;
+
+/** A escolha gravada pelo painel. Fora da forma (banco editado à mão) é cérebro indisponível, nunca o motor. */
+const analysisBrainChoice = z.object({ brain: z.string().min(1), model: z.string().min(1) });
+
+// A lista guardada do cérebro, lida de novo aqui: o preço que vale é o da lista **no momento da
+// leitura**. Só o que a rotina usa; o painel valida a forma inteira ao gravar.
+const cents = z.number().finite().nonnegative();
+const storedBrainModels = z.object({
+  models: z.array(
+    z.object({
+      id: z.string(),
+      price: z
+        .object({
+          centsPerMillionInputTokens: cents,
+          centsPerMillionOutputTokens: cents,
+          centsPerMillionCachedInputTokens: cents.optional(),
+          source: z.string(),
+          checkedOn: z.string(),
+        })
+        .optional(),
+    }),
+  ),
+});
 
 // O prazo do pedido só de desfecho; o completo, com a análise, tem o dele (`ANALYSIS_TIMEOUT_MS`).
 const OUTCOME_TIMEOUT_MS = 10_000;
@@ -58,8 +111,18 @@ function guardedFetch(deps: RoutineDeps, timeoutMs: number): { fetch: typeof fet
   return { fetch: guarded, refused: () => refused };
 }
 
+/** O cérebro escolhido para ler esta ligação, já conferido: descoberto, com o modelo na lista e com chave. */
+interface PorCerebro {
+  brain: Brain;
+  model: string;
+  /** O preço da lista guardada no momento da leitura. Ausente é "não conhecido", nunca zero. */
+  price?: BrainPrice;
+}
+
 interface Pendente {
   engineId: string;
+  /** Com `calls.analysis_brain` gravado, quem lê é o cérebro, e nunca o motor. */
+  cerebro?: PorCerebro;
   /** A chave que vai no pedido, cifrada: a do endpoint configurado, ou a do motor sem endpoint. */
   stored: string;
   /** Endpoint e modelo da classificação gravados pelo dono; vazio é o padrão do motor. */
@@ -76,6 +139,31 @@ interface Pendente {
 
 const notAnalyzed = (q: OrgQuery, callId: string, reason: AnalysisNotDoneReason, details: object, at: Date): Promise<void> =>
   recordEvent(q, callId, "analysis_not_done", { reason, ...details }, at);
+
+/** A leitura do texto JSON que o cérebro devolveu, a mesma de `readClassifyText` nos motores. */
+function readBrainText(text: string, analyze: boolean): { guess: OutcomeGuess; analysis?: AnalysisGuess } | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (analyze) return readAnalysisGuess(raw);
+  const guess = readOutcomeGuess(raw);
+  return guess ? { guess } : null;
+}
+
+/**
+ * O custo de uma leitura do cérebro. Medido só com preço conhecido **e** consumo declarado: um
+ * resultado sem `usage`, ou com `usage` sem `inputTokens` (a DeepSeek sem preço, o Haiku 5.5 com
+ * preço por faixa, a escrita em cache da Anthropic), é custo desconhecido, nunca zero. Um erro HTTP
+ * que não é 200 não foi cobrado: o zero dele é medido.
+ */
+function brainCost(result: { ok: boolean; status?: number | null; usage: Usage }, price: BrainPrice | undefined): { costMicrocents: number; costMeasured: boolean } {
+  const charged = result.ok || result.status === 200 || result.status === null;
+  const costMeasured = !charged || (price !== undefined && typeof result.usage.inputTokens === "number");
+  return { costMicrocents: costMeasured && price !== undefined ? estimateCostMicrocents(price, result.usage) : 0, costMeasured };
+}
 
 /**
  * Diz o que aconteceu na ligação — o desfecho comercial, não o relato técnico — e, com a análise
@@ -109,6 +197,12 @@ const notAnalyzed = (q: OrgQuery, callId: string, reason: AnalysisNotDoneReason,
  * unidade de antes. Falha do provedor e teto
  * atingido viram `outcome_not_classified` (desfecho pedido) e `analysis_not_done` (análise pedida)
  * na linha do tempo, cada um com o motivo.
+ *
+ * Com `calls.analysis_brain` gravado (`{ brain, model }`), quem lê é o cérebro escolhido, para o
+ * desfecho e para a análise, na frente do motor e do `classify_target`, com a chave do cérebro e o
+ * preço da lista guardada dele. Sem fallback para o motor: cérebro indisponível ou sem chave não lê,
+ * e a linha do tempo diz por quê. Modelo sem preço só lê ligação de agente com teto, e a linha do
+ * extrato fica `cost_measured = false` (desenho `docs/specs/2026-11-16-catalogo-de-cerebros.md`, 3.5).
  *
  * Roda depois de `summarize_call`, que é quem enfileira. A chamada ao provedor acontece fora da
  * transação (leva até trinta segundos) e não lança: falha não devolve a tarefa à fila para pagar de novo.
@@ -155,6 +249,41 @@ const routine: Routine = {
       if (falas.length === 0) {
         if (analysis) await notAnalyzed(q, callId, "no_speech", { engine: agent.engine }, now);
         return null;
+      }
+
+      // O cérebro escolhido pelo dono passa na frente do motor e do `classify_target`, para o
+      // desfecho e para a análise (a mesma chamada paga). Sem fallback: cérebro que não dá para
+      // usar não lê a ligação, e a linha do tempo diz por quê. Cair no motor pagaria um provedor
+      // que o dono deixou de escolher. Ausente, tudo segue como antes, linha por linha.
+      const escolha = await q.one<{ value: unknown }>("select value from settings where key = $1", [ANALYSIS_BRAIN_SETTING]);
+      if (escolha) {
+        const choice = analysisBrainChoice.safeParse(escolha.value).data;
+        const details = { brain: choice?.brain ?? null, model: choice?.model ?? null };
+        const refuse = async (reason: BrainRefusal | "cost_ceiling", extra: object = {}): Promise<null> => {
+          if (outcome) await recordEvent(q, callId, "outcome_not_classified", { reason, ...details, ...extra }, now);
+          if (analysis) await notAnalyzed(q, callId, reason, { ...details, ...extra }, now);
+          return null;
+        };
+        if (agent.cost_ceiling_cents > 0 && call.cost_cents >= agent.cost_ceiling_cents) return refuse("cost_ceiling", { costCents: call.cost_cents, ceilingCents: agent.cost_ceiling_cents });
+        const brain = choice ? (await loadBrains()).get(choice.brain) : undefined;
+        const lista = brain ? await q.one<{ value: unknown }>("select value from settings where key = $1", [brainModelsSetting(brain.id)]) : null;
+        const listed = choice ? storedBrainModels.safeParse(lista?.value).data?.models.find((model) => model.id === choice.model) : undefined;
+        if (!brain || !choice || !listed) return refuse("brain_unavailable");
+        const chave = await q.one<{ value: unknown }>("select value from settings where key = $1", [brainKeySetting(brain.id)]);
+        if (typeof chave?.value !== "string") return refuse("brain_no_key");
+        // Sem preço, o gasto não é medido: só lê ligação de agente com teto (padrão A do pedido 1).
+        if (listed.price === undefined && agent.cost_ceiling_cents <= 0) return refuse("brain_unmeasured_without_ceiling");
+        return {
+          engineId: agent.engine,
+          cerebro: { brain, model: choice.model, ...(listed.price !== undefined && { price: listed.price }) },
+          stored: chave.value,
+          target: {},
+          outcome,
+          analysis,
+          turns,
+          transcript: analysis ? falas.join("\n") : falas.join("\n").slice(-TRANSCRIPT_LIMIT),
+          tools: toolNames,
+        };
       }
 
       // O motor simulado não lê conversa e não declara análise: o desfecho segue como sempre.
@@ -211,16 +340,47 @@ const routine: Routine = {
     });
     if (!pendente) return;
 
-    const engine = engines.get(pendente.engineId);
-    if (!engine?.classifyOutcome) return;
+    let result: ClassifyResult;
+    let guarded: ReturnType<typeof guardedFetch> | undefined;
+    // Só no caminho do cérebro: o que vai a mais no extrato e nos eventos.
+    let porCerebro: { brain: string; costMeasured: boolean } | undefined;
+    if (pendente.cerebro) {
+      const { brain, model, price } = pendente.cerebro;
+      const input = { transcript: pendente.transcript, tools: pendente.tools };
+      // O mesmo pedido e os mesmos esquemas do motor; o cérebro só troca o transporte.
+      const answer = await brain.completeJson(
+        decryptSecret(pendente.stored, deps.secretKey),
+        {
+          model,
+          prompt: pendente.analysis ? analysisPrompt(input) : outcomePrompt(input),
+          schema: pendente.analysis
+            ? { name: "analise", strict: ANALYSIS_SCHEMA, google: ANALYSIS_SCHEMA_GOOGLE }
+            : { name: "desfecho", strict: OUTCOME_GUESS_SCHEMA, google: OUTCOME_GUESS_SCHEMA_GOOGLE },
+          timeoutMs: pendente.analysis ? ANALYSIS_TIMEOUT_MS : OUTCOME_TIMEOUT_MS,
+        },
+        { fetch: deps.fetch },
+      );
+      const reading = answer.ok ? readBrainText(answer.text, pendente.analysis) : null;
+      const cost = brainCost(answer, price);
+      porCerebro = { brain: brain.id, costMeasured: cost.costMeasured };
+      const common = { model: answer.model, usage: answer.usage, costMicrocents: cost.costMicrocents, costCents: Math.round(cost.costMicrocents / MICROCENTS_PER_CENT) };
+      result = !answer.ok
+        ? { ...common, ok: false, failure: answer.failure, status: answer.status }
+        : reading === null
+          ? { ...common, ok: false, failure: "unexpected_response", status: 200 }
+          : { ...common, ok: true, ...reading };
+    } else {
+      const engine = engines.get(pendente.engineId);
+      if (!engine?.classifyOutcome) return;
 
-    // Endpoint configurado vai pela guarda de rede; o endereço oficial do motor, como antes.
-    const guarded = pendente.target.baseUrl !== undefined ? guardedFetch(deps, pendente.analysis ? ANALYSIS_TIMEOUT_MS : OUTCOME_TIMEOUT_MS) : undefined;
-    const result: ClassifyResult = await engine.classifyOutcome(
-      decryptSecret(pendente.stored, deps.secretKey),
-      { transcript: pendente.transcript, tools: pendente.tools, ...(pendente.analysis ? { analyze: true } : {}) },
-      { fetch: guarded?.fetch ?? deps.fetch, ...pendente.target },
-    );
+      // Endpoint configurado vai pela guarda de rede; o endereço oficial do motor, como antes.
+      guarded = pendente.target.baseUrl !== undefined ? guardedFetch(deps, pendente.analysis ? ANALYSIS_TIMEOUT_MS : OUTCOME_TIMEOUT_MS) : undefined;
+      result = await engine.classifyOutcome(
+        decryptSecret(pendente.stored, deps.secretKey),
+        { transcript: pendente.transcript, tools: pendente.tools, ...(pendente.analysis ? { analyze: true } : {}) },
+        { fetch: guarded?.fetch ?? deps.fetch, ...pendente.target },
+      );
+    }
 
     const now = deps.clock.now();
     await withOrg(deps.db, task.organizationId, async (q) => {
@@ -235,7 +395,18 @@ const routine: Routine = {
       // unidade em que uma leitura de 0,03 centavo existe; o `cost_cents` da linha é essa medida
       // arredondada, e o da chamada é o extrato somado e arredondado **uma vez só** — cobrar um
       // centavo por leitura daria trinta vezes o valor de tabela.
-      if (inputTokens > 0 || outputTokens > 0 || costMicrocents > 0) {
+      // No cérebro, a linha leva o modelo cobrado e se o custo foi medido. Custo desconhecido entra
+      // mesmo sem token declarado: é a linha que diz "não medido", em vez de um zero que parece grátis.
+      if (porCerebro && (inputTokens > 0 || outputTokens > 0 || costMicrocents > 0 || !porCerebro.costMeasured)) {
+        await q.exec(
+          "insert into usage_ledger (organization_id, call_id, engine, model, cost_measured, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+          [q.organizationId, callId, `brain:${porCerebro.brain}`, result.model, porCerebro.costMeasured, inputTokens, outputTokens, costCents, costMicrocents, now],
+        );
+        await q.exec(
+          "update calls set cost_cents = round((select coalesce(sum(cost_microcents), 0) from usage_ledger where call_id = $1)::numeric / 1000000) where id = $1",
+          [callId],
+        );
+      } else if (!porCerebro && (inputTokens > 0 || outputTokens > 0 || costMicrocents > 0)) {
         await q.exec(
           "insert into usage_ledger (organization_id, call_id, engine, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8)",
           [q.organizationId, callId, pendente.engineId, inputTokens, outputTokens, Math.round(costCents), costMicrocents, now],
@@ -250,7 +421,9 @@ const routine: Routine = {
       // Dois eventos quando as duas funções estão ligadas: cada um diz o que não aconteceu.
       const failed = async (reason: ClassifyFailure | ClassifyDestinationRefusal, status: number | null): Promise<void> => {
         // `endpoint` diz à tela que a chave do pedido era a do endpoint configurado, não a do motor.
-        const details = { engine: pendente.engineId, model: result.model, status, costCents, ...(pendente.target.baseUrl !== undefined && { endpoint: true }) };
+        const details = porCerebro
+          ? { brain: porCerebro.brain, model: result.model, status, costCents, costMeasured: porCerebro.costMeasured }
+          : { engine: pendente.engineId, model: result.model, status, costCents, ...(pendente.target.baseUrl !== undefined && { endpoint: true }) };
         if (pendente.outcome) await recordEvent(q, callId, "outcome_not_classified", { reason, ...details }, now);
         if (pendente.analysis) await notAnalyzed(q, callId, reason, details, now);
       };
@@ -285,7 +458,20 @@ const routine: Routine = {
         [callId, JSON.stringify(analysis), score, now],
       );
       if (written === 0) return;
-      await recordEvent(q, callId, "call_analyzed", { score, rubricVersion: analysis.rubricVersion, model: result.model, costCents, droppedObjections: analysis.droppedObjections }, now);
+      await recordEvent(
+        q,
+        callId,
+        "call_analyzed",
+        {
+          score,
+          rubricVersion: analysis.rubricVersion,
+          model: result.model,
+          costCents,
+          droppedObjections: analysis.droppedObjections,
+          ...(porCerebro && { brain: porCerebro.brain, costMeasured: porCerebro.costMeasured }),
+        },
+        now,
+      );
     });
   },
 };

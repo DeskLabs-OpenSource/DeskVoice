@@ -64,3 +64,13 @@ export async function forceHandoffTargets(owner: Db, agentId: string, targets: s
     client.release();
   }
 }
+
+/**
+ * Devolve a instalação ao começo: sem fundadora, sem lista explícita e sem marca em conta nenhuma.
+ * Quem administra a instalação é estado GLOBAL, e os arquivos de banco rodam em série no mesmo banco.
+ * Só o dono do schema (`owner`) apaga: o produto nunca apaga `installation.admins_explicit_at`.
+ */
+export async function clearInstallationState(owner: Db): Promise<void> {
+  await owner.pool.query("delete from installation_settings where key in ('installation.founding_organization_id', 'installation.admins_explicit_at')");
+  await owner.pool.query("update accounts set installation_admin_at = null where installation_admin_at is not null");
+}

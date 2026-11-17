@@ -10,11 +10,21 @@ const costs = {
   byAgent: "Por agente",
   byEngine: "Por motor de voz",
   calls: "Chamadas: {n}",
+  /** A linha do analista ao vivo. `{model}` é o nome do modelo de decisão. */
+  analystLine: "Analista · {model}",
+  analystNote: "Pedidos do analista ao vivo, a cada fala de quem ligou",
   minutes: "{n} min",
   priceChecked: "Preço conferido em {date}",
   priceSource: "Fonte do preço",
   deletedAgent: "Agente apagado",
   handoffCounts: "Uma ligação com passagem conta para cada agente.",
+  unmeasured: "Não medido",
+  unmeasuredPart: "+ parte não medida",
+  unmeasuredNote: "{n} linhas do extrato deste período não têm custo medido: o modelo não tem preço conhecido, ou o consumo não pôde ser medido. O gasto delas não entra nos valores abaixo. Ele aparece só na fatura do provedor.",
+  unmeasuredNoteOne: "1 linha do extrato deste período não tem custo medido: o modelo não tem preço conhecido, ou o consumo não pôde ser medido. O gasto dela não entra nos valores abaixo. Ele aparece só na fatura do provedor.",
+  includesEstimate: "inclui estimativa",
+  estimatedNote: "{n} linhas do extrato deste período têm custo estimado, porque o consumo daquela leitura não foi lido. A estimativa conta no total e no teto, e é feita para ficar acima do real.",
+  estimatedNoteOne: "1 linha do extrato deste período tem custo estimado, porque o consumo daquela leitura não foi lido. A estimativa conta no total e no teto, e é feita para ficar acima do real.",
 };
 
 export default costs;

@@ -124,10 +124,15 @@ describe("motor que cai no meio da chamada (Review Focus 1)", { timeout: 120_000
 });
 
 describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, () => {
-  async function refused(label: string, manual: ManualEngine, setup: (organizationId: string) => Promise<void> = async () => undefined) {
+  async function refused(
+    label: string,
+    manual: ManualEngine,
+    setup: (organizationId: string) => Promise<void> = async () => undefined,
+    endReason: "engine_not_configured" | "engine_refused" = "engine_not_configured",
+  ) {
     const made = await scene(label, { engine: "manual", greeting: "Bom dia.", transferTo: "+5531988887777" }, manual);
     await setup(made.organizationId);
-    expect(await made.start().done).toEqual({ status: "refused", endReason: "engine_not_configured", costCents: 0 });
+    expect(await made.start().done).toEqual({ status: "refused", endReason, costCents: 0 });
     return made;
   }
 
@@ -165,17 +170,28 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
 
   it("chave inválida (o provedor recusa a sessão): recusa com o que o provedor disse", async () => {
     const manual = manualEngine({ connectError: "OpenAI Realtime: não foi possível conectar (código 401)" });
-    const { callId, transport } = await refused("engine-invalid-key", manual, (organizationId) =>
-      putSetting(app, organizationId, "engine.manual.api_key", encryptSecret("sk-errada", secretKey)),
+    const { organizationId, callId, transport } = await refused(
+      "engine-invalid-key",
+      manual,
+      (organizationId) => putSetting(app, organizationId, "engine.manual.api_key", encryptSecret("sk-errada", secretKey)),
+      "engine_refused",
     );
     expect(manual.keys).toEqual(["sk-errada"]);
-    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ reason: "engine_not_configured", detail: expect.stringContaining("código 401") });
+    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ reason: "engine_refused", detail: expect.stringContaining("código 401") });
     expect(transport.hangups).toBe(1);
+    // A chave existe e foi enviada: o aviso não manda cadastrá-la, manda conferir a conta e a chave no provedor.
+    const notice = (await notificationsOf(app, organizationId))[0]?.body ?? "";
+    expect(notice).toMatch(/recusou a sessão ou não foi alcançado: .*código 401/);
+    expect(notice).toMatch(/crédito/);
+    expect(notice).not.toMatch(/Cadastre/);
   });
 
-  it("motor que não existe nesta instalação: recusa", async () => {
-    const { callId } = await refused("engine-unknown", manualEngine({ id: "outro" }));
-    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ detail: 'the voice engine "manual" is not installed' });
+  it("motor que não existe nesta instalação: recusa, e o aviso manda escolher outro motor, não cadastrar a chave", async () => {
+    const { organizationId, callId } = await refused("engine-unknown", manualEngine({ id: "outro" }));
+    expect((await eventsOf(app, callId))[1]?.payload).toMatchObject({ reason: "engine_not_configured", detail: 'the voice engine "manual" is not installed' });
+    const notice = (await notificationsOf(app, organizationId))[0]?.body ?? "";
+    expect(notice).toMatch(/não está disponível nesta instalação: .*Escolha outro motor de voz na tela do agente/);
+    expect(notice).not.toMatch(/Cadastre/);
   });
 
   it("com a chave cadastrada, o motor recebe a chave decifrada, as instruções, a voz, o idioma e as ferramentas do agente", async () => {

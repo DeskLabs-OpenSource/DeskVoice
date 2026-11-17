@@ -3,6 +3,10 @@ import { defineTool } from "../define-tool";
 import { handoffTargetsOf, MAX_AGENT_HANDOFFS_PER_CALL } from "../handoff";
 
 const sameName = (a: string, b: string): boolean => a.trim().toLocaleLowerCase("und") === b.trim().toLocaleLowerCase("und");
+// As instruções listam o destino como "Nome (rótulo)", e o modelo às vezes copia a linha inteira:
+// medido numa ligação real com o OpenAI Realtime. O nome com o rótulo, como listado, também vale.
+const named = (target: { name: string; roleLabel: string | null }, given: string): boolean =>
+  sameName(target.name, given) || (!!target.roleLabel?.trim() && sameName(`${target.name.trim()} (${target.roleLabel.trim()})`, given));
 
 /**
  * Passa a ligação para outro agente da organização (fatia 4a do desenho de 13/11, seção 4.2). Quem
@@ -33,7 +37,7 @@ export default defineTool({
       return { ok: false, noEffect: true, message: "Esta ligação não pode ser passada para outro agente, então ela NÃO foi passada. Continue o atendimento você mesmo." };
     }
     const { self, targets } = await handoffTargetsOf(ctx.q, ctx.agentId);
-    const matches = targets.filter((target) => sameName(target.name, input.agent));
+    const matches = targets.filter((target) => named(target, input.agent));
     const names = targets.map((target) => target.name).join(", ");
     if (matches.length === 0) {
       if (self && sameName(self.name, input.agent)) {

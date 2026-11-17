@@ -1,5 +1,6 @@
 "use client";
 
+import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, DROP_FOLLOW_UP_MESSAGE_MAX, dropFollowUpDefaultMessage } from "@deskvoice/core/drop-follow-up";
 import { ArrowLeft, Trash } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -17,7 +18,8 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatPhone } from "../../../../ui/format";
 import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
-import type { Agent, Engine, ListeningEnvironment, Person, Setting, ToolInfo } from "../../../../ui/types";
+import { GUIDED_ENGINES } from "../../settings/analysts/rules";
+import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
 
 interface Draft {
   name: string;
@@ -37,12 +39,21 @@ interface Draft {
   listeningEnvironment: ListeningEnvironment;
   /** Para quem o agente pode passar a ligação; vazia de fábrica. */
   handoffTargets: string[];
+  /** O que acontece quando a ligação cai. */
+  dropFollowUp: DropFollowUp;
+  /** O texto do WhatsApp para quem ligou; vazio vale o padrão. */
+  dropFollowUpMessage: string;
+  /** O analista ao vivo; vazio é "Nenhum", o de fábrica. */
+  analystId: string;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", handoffTargets: [] };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "" };
 
-/** Motores em que a sessão em Barulhento foi provada numa instalação real. */
-const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime"];
+/** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
+const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp"];
+
+/** Motores em que a sessão em Barulhento foi provada numa instalação real (a sessão abre; o efeito no ruído não foi medido). */
+const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime", "gemini-live"];
 
 const toDraft = (agent: Agent): Draft => ({
   name: agent.name,
@@ -60,6 +71,9 @@ const toDraft = (agent: Agent): Draft => ({
   followUpOwner: agent.followUpOwnerUserId ?? "",
   listeningEnvironment: agent.listeningEnvironment ?? "normal",
   handoffTargets: agent.agentHandoffTargets ?? [],
+  dropFollowUp: agent.dropFollowUp ?? "off",
+  dropFollowUpMessage: agent.dropFollowUpMessage ?? "",
+  analystId: agent.analystId ?? "",
 });
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -76,7 +90,13 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const owners = useApi<Person[]>("/follow-ups/owners");
   // Os outros agentes da organização, para "Pode passar a ligação para". A lista vem da sessão (`withOrg`).
   const team = useApi<Agent[]>("/agents");
+  const analysts = useApi<Analyst[]>("/analysts");
   const defaultEngine = useApi<Setting<string>>(isNew ? "/settings/engine.default" : null);
+  // O pré-requisito da mensagem no WhatsApp para quem ligou: conector e confiança no número exibido.
+  const whatsAppConnector = useApi<Setting<unknown>>("/settings/whatsapp.connector");
+  const trustCaller = useApi<Setting<boolean>>("/settings/whatsapp.trust_caller_id");
+  // O nome da organização entra no texto padrão da mensagem para quem ligou.
+  const me = useApi<Me>("/auth/me");
   const save = useAction();
   const remove = useAction();
   const [draft, setDraft] = useState<Draft | null>(isNew ? BLANK : null);
@@ -84,12 +104,16 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // O que está gravado no servidor. `agent.data` não se atualiza sozinho depois de salvar, então o
   // aviso de rascunho precisa da cópia que o próprio salvar devolve.
   const [savedEnvironment, setSavedEnvironment] = useState<ListeningEnvironment>("normal");
+  // O modo gravado: o salvar só manda o modo quando ele mudou. Um agente já em `whatsapp` cujo
+  // pré-requisito foi desligado depois continua salvando os outros campos, e a rota não o recusa.
+  const [savedDropFollowUp, setSavedDropFollowUp] = useState<DropFollowUp>("off");
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void => setDraft((current) => (current ? { ...current, [key]: value } : current));
 
   useEffect(() => {
     if (agent.data) {
       setDraft(toDraft(agent.data));
       setSavedEnvironment(agent.data.listeningEnvironment ?? "normal");
+      setSavedDropFollowUp(agent.data.dropFollowUp ?? "off");
     }
   }, [agent.data]);
   // Agente novo já nasce com o motor padrão da instalação; sem padrão, o primeiro da lista.
@@ -119,11 +143,20 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // Os agentes que podem passar a ligação para este: apagá-lo o tira da lista deles.
   const handingOffHere = others.filter((other) => other.agentHandoffTargets?.includes(id));
   const engine = engines.data?.find((candidate) => candidate.id === draft.engine);
-  // Barulhento só foi provado no OpenAI Realtime. Em outro motor, a opção some; um agente que já
+  // Barulhento foi provado no OpenAI Realtime e no Gemini Live. Em outro motor, a opção some; um agente que já
   // está em Barulhento continua vendo o campo, com um aviso, para não guardar a escolha escondida.
   const noisyProven = NOISY_PROVEN_ENGINES.includes(draft.engine);
   // "Voltar para Normal" mexe só no rascunho: até salvar, o agente atende em Barulhento.
   const backToNormalPending = savedEnvironment === "noisy" && draft.listeningEnvironment === "normal";
+  // Por que a mensagem no WhatsApp está indisponível, a mesma ordem da rota; `undefined` enquanto carrega.
+  const whatsAppBlock: "not_connected" | "not_trusted" | null | undefined =
+    whatsAppConnector.data === undefined || trustCaller.data === undefined
+      ? undefined
+      : whatsAppConnector.data.value === null
+        ? "not_connected"
+        : trustCaller.data.value !== true
+          ? "not_trusted"
+          : null;
   const submit = (): Promise<boolean> =>
     save.run(async () => {
       const body = {
@@ -142,9 +175,15 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
         listeningEnvironment: draft.listeningEnvironment,
         agentHandoffTargets: draft.handoffTargets,
+        // Um modo que a tela não oferece (gravado fora dela) não volta no salvar: fica como está. O modo
+        // que não mudou também não vai: a rota confere o pré-requisito de quem escolhe o `whatsapp`.
+        ...(DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) && (isNew || draft.dropFollowUp !== savedDropFollowUp) && { dropFollowUp: draft.dropFollowUp }),
+        dropFollowUpMessage: draft.dropFollowUpMessage,
+        analystId: draft.analystId === "" ? null : draft.analystId,
       };
       const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       setSavedEnvironment(saved.listeningEnvironment ?? "normal");
+      setSavedDropFollowUp(saved.dropFollowUp ?? "off");
       if (isNew) router.replace(`/agents/${saved.id}`);
       else setDraft(toDraft(saved));
     });
@@ -248,7 +287,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </div>
           ) : (
             // Sem o campo, a linha fica: é ela que conta a quem usa outro motor que o modo existe.
-            <p className="mt-4 max-w-md text-[0.87rem] text-muted">{t.listeningEnvironmentOnlyOpenAi}</p>
+            <p className="mt-4 max-w-md text-[0.87rem] text-muted">{t.listeningEnvironmentOnlyProven}</p>
           )}
           {backToNormalPending ? (
             <div className="mt-2 max-w-md">
@@ -268,6 +307,30 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             </div>
           ) : null}
           {engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
+        </Panel>
+
+        <Panel title={t.analyst} description={t.analystLead}>
+          <Field label={t.analyst} hint={t.analystHint}>
+            <Select value={draft.analystId} onChange={(event) => set("analystId", event.target.value)} className="max-w-sm">
+              <option value="">{t.analystNone}</option>
+              {analysts.data?.map((analyst) => (
+                <option key={analyst.id} value={analyst.id}>
+                  {analyst.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {/* O motor sem `guide` (o Gemini Live, desenho R6, seção 3.3): o analista lê, mas a orientação não chega. */}
+          {draft.analystId !== "" && draft.engine !== "" && !GUIDED_ENGINES.includes(draft.engine) ? (
+            <div className="mt-4 max-w-md">
+              <Notice tone="warn">
+                <p>{fill(t.analystEngineUnsupported, { engine: engine?.label ?? draft.engine })}</p>
+              </Notice>
+            </div>
+          ) : null}
+          <Link href="/settings/analysts" className="mt-4 inline-block text-[0.87rem] font-bold text-muted underline-offset-4 hover:text-ink hover:underline">
+            {t.analystLink}
+          </Link>
         </Panel>
 
         <Panel title={t.tools} description={t.toolsLead}>
@@ -350,6 +413,63 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               ))}
             </Select>
           </Field>
+          <div className="mt-4">
+            <Field label={t.dropFollowUp} hint={t.dropFollowUpDefinition}>
+              <Select
+                value={draft.dropFollowUp}
+                onChange={(event) => set("dropFollowUp", DROP_FOLLOW_UP_OFFERED.find((mode) => mode === event.target.value) ?? "off")}
+                className="max-w-sm"
+              >
+                <option value="off">{t.dropFollowUpOff}</option>
+                <option value="task">{t.dropFollowUpTask}</option>
+                {/* Indisponível: desabilitada, e o motivo e o caminho aparecem logo abaixo. Já escolhida, continua visível. */}
+                <option value="whatsapp" disabled={whatsAppBlock !== null && draft.dropFollowUp !== "whatsapp"}>
+                  {whatsAppBlock ? `${t.dropFollowUpWhatsApp} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpWhatsApp}
+                </option>
+                {DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) ? null : (
+                  <option value={draft.dropFollowUp} disabled>
+                    {t.dropFollowUpOther}
+                  </option>
+                )}
+              </Select>
+            </Field>
+          </div>
+          {whatsAppBlock ? (
+            // O motivo da opção desabilitada e o caminho para resolver. Vira alerta só quando o modo
+            // escolhido é o que ficou indisponível: aí a mensagem não sai, e cada queda vira pendência.
+            draft.dropFollowUp === "whatsapp" ? (
+              <div className="mt-3 max-w-prose">
+                <Notice tone="fail">
+                  <p>{whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}</p>
+                  <Link href="/settings/whatsapp" className="font-bold underline-offset-4 hover:underline">
+                    {t.dropFollowUpFixLink}
+                  </Link>
+                </Notice>
+              </div>
+            ) : (
+              <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
+                {whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}{" "}
+                <Link href="/settings/whatsapp" className="font-bold text-ink underline-offset-4 hover:underline">
+                  {t.dropFollowUpFixLink}
+                </Link>
+              </p>
+            )
+          ) : null}
+          {draft.dropFollowUp === "whatsapp" ? (
+            <div className="mt-4 grid max-w-prose gap-2">
+              <p className="text-[0.87rem] text-muted">{t.dropFollowUpBlockRisk}</p>
+              <Field label={t.dropFollowUpMessage} hint={t.dropFollowUpMessageWarning}>
+                <TextArea
+                  value={draft.dropFollowUpMessage}
+                  onChange={(event) => set("dropFollowUpMessage", event.target.value)}
+                  placeholder={me.data?.organizationName === undefined ? undefined : dropFollowUpDefaultMessage(draft.language, me.data.organizationName)}
+                  maxLength={DROP_FOLLOW_UP_MESSAGE_MAX}
+                  rows={3}
+                />
+              </Field>
+              <p className="text-[0.87rem] text-muted">{fill(t.dropFollowUpMessageLimits, { perHour: CALLER_MESSAGE_ORG_PER_HOUR, perDay: CALLER_MESSAGE_ORG_PER_DAY })}</p>
+            </div>
+          ) : null}
         </Panel>
       </fieldset>
 

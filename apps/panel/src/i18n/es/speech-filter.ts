@@ -1,0 +1,57 @@
+import type { SpeechFilterDictionary } from "../pt-BR/speech-filter";
+
+const speechFilter: SpeechFilterDictionary = {
+  menu: "Filtro de habla",
+  title: "Filtro de habla",
+  lead: "Un modelo de decisión lee el texto de lo que dice la persona en la llamada y marca lo que puede ser habla de fondo, o sugiere la lectura probable de un término del vocabulario del agente. Solo marca y sugiere: nunca borra ni cambia lo que dijo la persona. Viene apagado.",
+  guide: "Cómo funciona, qué sale del servidor y cómo pedir el borrado: docs/guides/filtro-de-fala.es.md",
+  model: "Modelo de decisión",
+  none: "Ninguno (apagado)",
+  confirmedBy: "Envío confirmado por {who} el {when}.",
+  confirm: "El texto de la llamada va a {provider}.",
+  confirmRequired: "Marca la confirmación para encender este modelo.",
+  save: "Guardar",
+  saved: "Guardado.",
+  keyNeeded: "Guarda y prueba la clave de este modelo antes de encenderlo.",
+  keysTitle: "Claves de los modelos",
+  keyOf: "Clave de {model}",
+  keySaved: "Clave guardada",
+  keyMissing: "Sin clave",
+  keyNew: "Pega la clave nueva para cambiarla",
+  keySave: "Guardar y probar",
+  remove: "Quitar la clave",
+  removeInUse: "Apaga el filtro antes de quitar la clave del modelo en uso.",
+  neverTested: "La clave aún no se ha probado.",
+  savedNotTested: "Clave guardada. La prueba quedó para dentro de unos minutos: se alcanzó el límite de pruebas.",
+  tested: "Probada el {when}: {result}",
+  results: {
+    accepted: "aceptada.",
+    rejected: "el proveedor rechazó la clave. Revisa que se haya copiado entera y que no haya sido revocada.",
+    model_unavailable: "la clave vale, pero la cuenta no tiene acceso al modelo.",
+    no_credit: "la clave vale, pero la cuenta no tiene crédito.",
+    region_unavailable: "el proveedor no atiende el país o la región de este servidor.",
+    rate_limited: "el proveedor pidió esperar. Inténtalo de nuevo en unos minutos.",
+    unreachable: "no se pudo alcanzar al proveedor. Revisa que el servidor llegue a internet.",
+    unexpected_response: "el proveedor respondió de forma inesperada. Inténtalo más tarde.",
+    not_needed: "este modelo no pide clave.",
+  },
+  noticeTitle: "A dónde va el texto",
+  location: {
+    "this-server": "Este modelo corre en este servidor: el texto no sale de aquí.",
+    undeclared: "{provider} no declara dónde procesa el texto.",
+    country: "El servicio de {provider} está alojado {country}.",
+  },
+  countries: { US: "en los Estados Unidos" },
+  providers: { typesafe: "TypeSafe" },
+  retention: {
+    typesafe: [
+      "TypeSafe guarda los datos personales que recibe, como este texto, durante el tiempo que sea razonablemente necesario para prestar el servicio o para sus fines comerciales, sin plazo definido en la política.",
+      "A pedido, borra esos datos o los guarda de una forma que no identifique a la persona cuando ya no sean razonablemente necesarios, salvo que la ley la obligue a guardarlos por más tiempo.",
+    ],
+  },
+  retentionUnread: "El proyecto no ha leído la política de retención de este proveedor.",
+  source: "Fuente: política de privacidad del proveedor (actualizada el {updated}), leída el {read}.",
+  locationSource: "Fuente del lugar: página del proveedor, leída el {read}.",
+};
+
+export default speechFilter;

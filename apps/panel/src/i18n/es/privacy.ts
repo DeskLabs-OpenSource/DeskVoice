@@ -40,6 +40,15 @@ const privacy: PrivacyDictionary = {
   notesConfirmTitle: "¿Borrar las notas con más de {days} días?",
   notesConfirmBody: "Las notas más viejas que el nuevo plazo salen en instantes, y desde entonces una vez por día. Lo que sale no vuelve.",
   notesConfirmYes: "Borrar y guardar por {days} días",
+  memoryTitle: "Memoria del número en el agente",
+  memoryLead:
+    "Con esta opción encendida, el agente empieza cada llamada sabiendo las notas guardadas sobre el número y los títulos de sus pendientes abiertos. Vale para las llamadas recibidas y para las que el sistema marca. Nunca entran el resumen ni lo dicho en llamadas anteriores. Viene apagada.",
+  memorySwitch: "Entregar al agente la memoria del número",
+  memorySpoofed:
+    "El número mostrado puede ser falsificado. Quien llame con el número de otra persona puede oír del agente lo que está en las notas de ella: el agente tiene la instrucción de no leerlas a quien llama, pero eso no es garantía.",
+  memoryCost:
+    "El bloque tiene como máximo 1500 caracteres, con hasta 10 notas y 5 pendientes, y el gasto entra en el tope de costo de cada llamada. Encender o apagar no borra notas: siguen el plazo de la memoria de arriba. Vale a partir de la próxima llamada.",
+  memoryStates: { on: "encendida", off: "apagada" },
   exportTitle: "Datos de una persona que llamó",
   exportLead:
     "Cuando alguien pide lo que la central guarda sobre ella, ingrese el teléfono. Sale un archivo con las llamadas de ese número en esta organización, sus eventos, los pendientes de ese número, abiertos y cerrados, las notas del agente sobre él y la entrada en la lista de no llamar. Lo dicho que ya salió por el plazo aparece como borrado. Cada llamada dice si tiene grabación; el audio no va en el archivo y se escucha en la pantalla de la llamada.",
@@ -81,7 +90,7 @@ const privacy: PrivacyDictionary = {
   forgetConfirmYes: "Olvidar {phone}",
   forgetDone: "{phone} fue olvidado. Notas del agente borradas: {notes}. Pendientes cerrados borrados: {followUps}.",
   historyTitle: "Registro",
-  historyLead: "Quién cambió el plazo o la grabación, qué salió por el plazo, quién exportó los datos de qué teléfono, quién borró datos a pedido de quien llamó y qué pasó con los enlaces de grabación para quien llamó. Los 50 más recientes.",
+  historyLead: "Quién cambió el plazo o la grabación, qué salió por el plazo, quién exportó los datos de qué teléfono, quién borró datos a pedido de quien llamó, qué pasó con los enlaces de grabación para quien llamó y quién confirmó que un analista o el filtro de habla envía el texto de la llamada a un proveedor. Los 50 más recientes.",
   historyEmpty: "Nada registrado todavía.",
   history: {
     transcript_retention_changed: "{who} cambió el plazo de conservación de {from} a {to}.",
@@ -95,6 +104,11 @@ const privacy: PrivacyDictionary = {
     share_revoked: "{who} revocó los enlaces de grabación de una llamada. Enlaces revocados: {count}.",
     caller_notes_purged: "Las notas del agente con más de {days} días se borraron por el plazo de la memoria. Notas borradas: {count}.",
     caller_notes_retention_changed: "{who} cambió el plazo de la memoria de {from} a {to}.",
+    caller_memory_changed: "{who} dejó la memoria del número en el agente {state}.",
+    analyst_provider_confirmed: "{who} confirmó que el analista {analyst} envía el texto de lo que dice quien llama a {provider}.",
+    decision_model_provider_confirmed: "{who} confirmó que el filtro de habla envía el texto de la llamada a {provider}.",
+    organization_created: "La administración de la instalación creó esta organización, con el nombre \"{name}\".",
+    organization_renamed: "La administración de la instalación renombró esta organización de \"{from}\" a \"{to}\".",
     caller_notes_deleted: "{who} olvidó el número terminado en {suffix}. Notas del agente borradas: {notes}. Pendientes cerrados borrados: {followUps}.",
   },
   noteDeleted: "{who} borró una nota del agente.",

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Afinar o agente de voz"
+  short_description: "Diagnóstico pela análise e pela linha do tempo, texto novo com antes e depois e o sim da pessoa, medida depois"
+  default_prompt: "Use a skill deskvoice-agente-de-voz e me ajude: as respostas do meu agente de voz estão ruins."
+policy:
+  allow_implicit_invocation: true
