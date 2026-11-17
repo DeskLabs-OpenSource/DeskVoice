@@ -1,0 +1,6 @@
+interface:
+  display_name: "Sistema vivo numa peça nova"
+  short_description: "As perguntas da doutrina do sistema vivo, em ordem, com onde conferir cada resposta no código"
+  default_prompt: "Use a skill deskvoice-sistema-vivo e confira se esta peça está viva antes do PR."
+policy:
+  allow_implicit_invocation: true

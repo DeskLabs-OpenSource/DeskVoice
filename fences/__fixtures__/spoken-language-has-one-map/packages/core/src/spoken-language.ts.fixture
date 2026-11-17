@@ -1,0 +1,12 @@
+export const SPOKEN_LANGUAGES = ["pt-BR", "en", "es"] as const;
+export type SpokenLanguage = (typeof SPOKEN_LANGUAGES)[number];
+export const DEFAULT_SPOKEN_LANGUAGE: SpokenLanguage = "pt-BR";
+
+export function spokenLanguageOf(stored: unknown): SpokenLanguage {
+  if (typeof stored !== "string") return DEFAULT_SPOKEN_LANGUAGE;
+  const tag = stored.trim().toLowerCase();
+  const exact = SPOKEN_LANGUAGES.find((language) => language.toLowerCase() === tag);
+  if (exact) return exact;
+  const prefix = SPOKEN_LANGUAGES.find((language) => language.split("-")[0] === tag.split("-")[0]);
+  return prefix ?? DEFAULT_SPOKEN_LANGUAGE;
+}

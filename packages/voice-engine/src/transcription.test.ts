@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitRecording } from "./transcription";
+import { recordingSideEstimate, splitRecording } from "./transcription";
 
 function wav(channels: number, samples: number[], extra?: Buffer): Uint8Array {
   const data = Buffer.alloc(samples.length * 2);
@@ -48,5 +48,18 @@ describe("splitRecording", () => {
   it("recusa o que não é estéreo PCM16: sem os dois canais não se sabe quem falou", () => {
     expect(splitRecording(wav(1, [1, 2, 3]))).toBeNull();
     expect(splitRecording(new Uint8Array(Buffer.from("nada disso é um wav, nem de longe")))).toBeNull();
+  });
+});
+
+describe("recordingSideEstimate", () => {
+  it("só pelo tamanho do arquivo, dá o mesmo lado e a mesma duração que separar a gravação", () => {
+    const file = wav(2, Array.from({ length: 8000 * 2 }, (_, index) => (index % 2 === 0 ? 5 : -5)));
+    const sides = splitRecording(file);
+    expect(recordingSideEstimate(file.byteLength)).toEqual({ sideBytes: sides?.sideBytes, seconds: sides?.seconds });
+  });
+
+  it("arquivo que não passa do cabeçalho não tem estimativa", () => {
+    expect(recordingSideEstimate(44)).toBeNull();
+    expect(recordingSideEstimate(0)).toBeNull();
   });
 });

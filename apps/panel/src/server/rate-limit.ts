@@ -65,4 +65,8 @@ export function createRateLimiter(defaultMax = MAX_ATTEMPTS, defaultWindowMs = W
   };
 }
 
-export const loginLimiter = createRateLimiter();
+// Um mapa só no processo, em `globalThis` pela mesma razão das dependências em `context.ts`: o Next
+// pode carregar este módulo mais de uma vez, e o login e o aceite de convite com a conta que já
+// existe precisam contar as falhas no mesmo lugar.
+const store = globalThis as { __deskvoiceLoginLimiter?: ReturnType<typeof createRateLimiter> };
+export const loginLimiter = (store.__deskvoiceLoginLimiter ??= createRateLimiter());

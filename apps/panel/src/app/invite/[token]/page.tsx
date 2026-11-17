@@ -22,9 +22,14 @@ interface Invite {
   email: string;
   name: string;
   role: Role;
+  /** O e-mail já tem conta: a pessoa aceita com a senha que já usa, sem criar outra. */
+  existingAccount: boolean;
 }
 
-/** Pública: quem chega aqui ainda não tem conta. Mesmo visual da tela de entrada. */
+/**
+ * Pública: quem chega aqui ainda não tem sessão. Mesmo visual da tela de entrada. Se o e-mail do
+ * convite já tem conta, a página pede a senha dessa conta, e não uma nova.
+ */
 export default function InvitePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const t = useDict(ptBR, en, es);
@@ -49,7 +54,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    if (form.get("password") !== form.get("repeat")) return setError(t.mismatch);
+    if (!invite?.existingAccount && form.get("password") !== form.get("repeat")) return setError(t.mismatch);
     setBusy(true);
     setError("");
     try {
@@ -58,7 +63,16 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
     } catch (failure) {
       // O convite deixou de valer no meio do caminho: a tela vira a explicação única.
       if (failure instanceof ApiFailure && failure.code === "invite_invalid") setProblem(failure);
-      else setError(errorText(failure));
+      else {
+        // O e-mail ganhou ou perdeu a conta desde que a página abriu: o formulário muda de caso, sem
+        // aproveitar a senha digitada para o outro.
+        if (failure instanceof ApiFailure && (failure.code === "existing_account" || failure.code === "no_account")) {
+          const existingAccount = failure.code === "existing_account";
+          // A chave do formulário muda com o caso: ele volta vazio.
+          setInvite((current) => (current ? { ...current, existingAccount } : current));
+        }
+        setError(errorText(failure));
+      }
       setBusy(false);
     }
   };
@@ -91,7 +105,9 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
           <>
             <div className="grid gap-1">
               <h1 className="text-[1.75rem] leading-tight font-bold tracking-[-0.01em]">{t.title}</h1>
-              <p className="text-muted">{fill(t.lead, { organization: invite.organizationName })}</p>
+              <p className="text-muted">
+                {invite.existingAccount ? fill(t.existingLead, { email: invite.email, organization: invite.organizationName }) : fill(t.lead, { organization: invite.organizationName })}
+              </p>
             </div>
             <dl className="grid gap-3 border-y border-line py-4">
               {[
@@ -105,18 +121,26 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
                 </div>
               ))}
             </dl>
-            <form onSubmit={(event) => void submit(event)} className="grid gap-4">
-              <Field label={t.name}>
+            <form key={invite.existingAccount ? "existing" : "new"} onSubmit={(event) => void submit(event)} className="grid gap-4">
+              <Field label={invite.existingAccount ? fill(t.existingName, { organization: invite.organizationName }) : t.name}>
                 <TextInput value={name} onChange={(event) => setName(event.target.value)} required maxLength={120} autoComplete="name" />
               </Field>
-              <Field label={t.password} hint={t.passwordHint}>
-                <TextInput name="password" type="password" minLength={10} required autoComplete="new-password" />
-              </Field>
-              <Field label={t.repeat} error={error}>
-                <TextInput name="repeat" type="password" minLength={10} required autoComplete="new-password" />
-              </Field>
+              {invite.existingAccount ? (
+                <Field label={t.existingPassword} hint={t.existingHint} error={error}>
+                  <TextInput name="password" type="password" required autoComplete="current-password" />
+                </Field>
+              ) : (
+                <>
+                  <Field label={t.password} hint={t.passwordHint}>
+                    <TextInput name="password" type="password" minLength={10} required autoComplete="new-password" />
+                  </Field>
+                  <Field label={t.repeat} error={error}>
+                    <TextInput name="repeat" type="password" minLength={10} required autoComplete="new-password" />
+                  </Field>
+                </>
+              )}
               <Button type="submit" variant="primary" busy={busy} className="mt-2">
-                {t.submit}
+                {invite.existingAccount ? t.existingSubmit : t.submit}
               </Button>
             </form>
           </>

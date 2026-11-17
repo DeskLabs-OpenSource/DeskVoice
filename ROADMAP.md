@@ -71,7 +71,6 @@ Tamanhos: **P** cabe em um PR pequeno. **M** pede alguns PRs ou um PR com teste 
 | URA por voz | M | Encaminhar para o agente certo antes de a conversa começar | Entrada de chamadas em `apps/voice`. O protocolo AudioSocket já entrega os dígitos teclados |
 | Transferência assistida | M | Quem recebe a ligação já sabe do que se trata | Ferramenta `transfer_to_human` em `packages/tools` e a parte de telefonia do contexto da ferramenta |
 | Painel de supervisão ao vivo | M | Ver as chamadas em andamento e intervir | `apps/panel`, sobre o fluxo de eventos da API |
-| Imagens ARM | P | VPS ARM costuma custar menos | Construção das imagens em `.github/` e os arquivos de `deploy/` |
 | Instalação atrás de Traefik | M | Muitas VPS já têm um proxy ocupando as portas 80 e 443 | `install/` e `deploy/` |
 | Ferramentas carregadas de fora do repositório | G | Ferramenta de nicho não entra no núcleo, e hoje só existe mantendo um fork | Descoberta por pasta em `packages/tools`. Pede desenho antes |
 | Traduções | P | A tela nasce em português, inglês e espanhol, e os documentos ainda não acompanham tudo | Dicionários em `apps/panel/src/i18n/` e os documentos da raiz |

@@ -1,12 +1,36 @@
-import { hashToken } from "@deskvoice/core";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { NOW, PASSWORD, call, createOrganization, createUser, startPanel } from "../../../../test/kit";
+import { randomUUID } from "node:crypto";
+import { addMembership, grantInstallationAdmin, hashPassword, hashToken, withSystem } from "@deskvoice/core";
+import type * as Core from "@deskvoice/core";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { NOW, PASSWORD, call, createCall, createOrganization, createUser, openSession, startPanel } from "../../../../test/kit";
 import { loginLimiter } from "../../../server/rate-limit";
 import { GET as listAgents } from "./agents/route";
 import { POST as login } from "./auth/login/route";
 import { POST as logout } from "./auth/logout/route";
 import { GET as me } from "./auth/me/route";
+import { GET as listOrganizations } from "./auth/organizations/route";
+import { POST as changePassword } from "./auth/password/route";
+import { POST as switchOrganization } from "./auth/switch/route";
+import { GET as getCall } from "./calls/[id]/route";
+import { GET as listCalls } from "./calls/route";
 import { GET as stream } from "./events/stream/route";
+import { POST as acceptInvite } from "./invites/[token]/accept/route";
+import { GET as openInvite } from "./invites/[token]/route";
+import { POST as createInvite } from "./team/invites/route";
+import { GET as listTeam } from "./team/route";
+import { DELETE as removeMember, PATCH as changeMember } from "./team/users/[id]/route";
+
+// A limpeza da conta órfã roda depois da remoção, fora da transação, e pode falhar. O teste da conta
+// órfã liga a falha; nos outros, a função de verdade roda.
+const orphanCleanup = vi.hoisted(() => ({ fail: false }));
+vi.mock("@deskvoice/core", async (importOriginal) => {
+  const real = await importOriginal<typeof Core>();
+  return {
+    ...real,
+    deleteAccountIfOrphan: (...args: Parameters<typeof real.deleteAccountIfOrphan>) =>
+      orphanCleanup.fail ? Promise.reject(new Error("the account cleanup failed (test)")) : real.deleteAccountIfOrphan(...args),
+  };
+});
 
 const panel = startPanel();
 let user: Awaited<ReturnType<typeof createUser>>;
@@ -33,7 +57,7 @@ describe("login", () => {
     expect(result.text).not.toContain(token);
 
     const sessions = await call(me, { cookie: `dv_session=${token}` });
-    expect(sessions.data).toEqual({ name: "Test owner", email: user.email, role: "owner", phone: null, whatsapp: null });
+    expect(sessions.data).toEqual({ name: "Test owner", email: user.email, role: "owner", phone: null, whatsapp: null, organizationName: "auth" });
     expect(hashToken(token)).not.toBe(token);
   });
 
@@ -173,5 +197,251 @@ describe("session", () => {
     const out = await call(logout, { method: "POST", cookie: fresh.cookie });
     expect(out.headers.get("set-cookie")).toContain("Max-Age=0");
     expect((await call(me, { cookie: fresh.cookie })).status).toBe(401);
+  });
+});
+
+// Fatia 3 do R8: a mesma pessoa em várias organizações.
+const inviteBy = async (cookie: string, email: string, role = "operator"): Promise<string> => {
+  const created = await call(createInvite, { method: "POST", cookie, body: { email, name: "Convidada", role } });
+  expect(created.status).toBe(200);
+  return (created.data as { link: string }).link.split("/invite/")[1] ?? "";
+};
+const accept = (token: string, password: string, ip = "203.0.113.50", name = "Nome no vínculo") =>
+  call(acceptInvite, { method: "POST", params: { token }, body: { name, password }, headers: { "x-forwarded-for": ip } });
+const cookieOf = (result: { headers: Headers }): string => (result.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+const linkTo = async (organizationId: string, email: string, role: "owner" | "admin" | "operator" = "operator"): Promise<string> =>
+  withSystem(panel.app, async (q) => {
+    const account = await q.one<{ id: string }>("select id from accounts where email = $1", [email]);
+    return addMembership(q, { organizationId, accountId: account?.id ?? "", name: `Vínculo ${role}`, role });
+  });
+
+describe("an invite for an e-mail that already has an account", () => {
+  it("says existingAccount only behind a valid token, asks for the password the account has, and the session lands in the new organization", async () => {
+    const a = await createOrganization(panel.app, "auth convite A");
+    const b = await createOrganization(panel.app, "auth convite B");
+    const ownerA = await createUser(panel.app, a, "owner");
+    const person = await createUser(panel.app, b, "operator");
+    const token = await inviteBy(ownerA.cookie, person.email, "admin");
+
+    const shown = await call(openInvite, { params: { token } });
+    expect(shown.data).toMatchObject({ email: person.email, existingAccount: true });
+    // Token inválido: a mesma resposta de antes, sem nada sobre o e-mail.
+    const invalid = await call(openInvite, { params: { token: `${token}x` } });
+    expect([invalid.status, invalid.code, invalid.data]).toEqual([404, "invite_invalid", undefined]);
+    expect(invalid.text).not.toContain("existingAccount");
+
+    // A senha que a conta já tem pode ser de antes da regra de senha nova: não passa por ela.
+    const oldShort = "curta";
+    const shortHash = await hashPassword(oldShort);
+    await withSystem(panel.app, (q) => q.exec("update accounts set password_hash = $2 where email = $1", [person.email, shortHash]));
+    const accepted = await accept(token, oldShort);
+    expect(accepted.status).toBe(200);
+    const session = cookieOf(accepted);
+    expect((await call(me, { cookie: session })).data).toMatchObject({ email: person.email, role: "admin", name: "Nome no vínculo", organizationName: "auth convite A" });
+    // O convite foi gasto, e a pessoa continua na organização de antes com a mesma senha.
+    expect((await call(openInvite, { params: { token } })).status).toBe(404);
+    expect((await call(me, { cookie: person.cookie })).data).toMatchObject({ organizationName: "auth convite B" });
+    // O próximo login volta para a organização do convite.
+    const again = await signIn(person.email, oldShort);
+    expect((await call(me, { cookie: cookieOf(again) })).data).toMatchObject({ organizationName: "auth convite A" });
+  });
+
+  it("a wrong password is 401 and does not spend the invite; an account already in the organization is 409", async () => {
+    const a = await createOrganization(panel.app, "auth convite errado");
+    const ownerA = await createUser(panel.app, a, "owner");
+    const person = await createUser(panel.app, await createOrganization(panel.app, "auth convite errado B"), "operator");
+    const token = await inviteBy(ownerA.cookie, person.email);
+    const wrong = await accept(token, "not the password");
+    expect([wrong.status, wrong.code]).toEqual([401, "invalid_credentials"]);
+    expect((await call(openInvite, { params: { token } })).status).toBe(200);
+
+    const member = await createUser(panel.app, a, "operator");
+    // Desativada também conta: o caminho dela é a reativação na tela Equipe.
+    await call(changeMember, { method: "PATCH", cookie: ownerA.cookie, params: { id: member.id }, body: { disabled: true } });
+    const dup = await withSystem(panel.app, async (q) => {
+      const tokenText = `dup-${member.id}`;
+      await q.exec("insert into invites (organization_id, email, name, role, token_hash, expires_at, created_by) values ($1, $2, 'X', 'operator', $3, $4, $5)", [
+        a,
+        member.email,
+        hashToken(tokenText),
+        new Date(NOW.getTime() + 86_400_000),
+        ownerA.id,
+      ]);
+      return tokenText;
+    });
+    const already = await accept(dup, PASSWORD);
+    expect([already.status, already.code]).toEqual([409, "already_member"]);
+    expect((await call(openInvite, { params: { token: dup } })).status).toBe(200);
+  });
+
+  it("a new account still needs a password that follows the rule", async () => {
+    const ownerA = await createUser(panel.app, await createOrganization(panel.app, "auth convite novo"), "owner");
+    const token = await inviteBy(ownerA.cookie, `nova-${randomUUID()}@example.test`);
+    expect((await call(openInvite, { params: { token } })).data).toMatchObject({ existingAccount: false });
+    const short = await accept(token, "curta");
+    expect([short.status, short.code]).toEqual([400, "validation_error"]);
+    expect((await accept(token, "uma senha nova e longa")).status).toBe(200);
+  });
+});
+
+describe("the invite password and the login limit are one limit", () => {
+  it("the sixth wrong password of the same pair is refused, and the login of the same e-mail is held too", async () => {
+    const ownerA = await createUser(panel.app, await createOrganization(panel.app, "auth limite convite"), "owner");
+    const person = await createUser(panel.app, await createOrganization(panel.app, "auth limite convite B"), "operator");
+    const token = await inviteBy(ownerA.cookie, person.email);
+    const ip = "198.51.100.77";
+
+    const verifier = countingVerifier();
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) statuses.push((await accept(token, "wrong", ip)).status);
+    verifier.restore();
+    expect(statuses).toEqual([401, 401, 401, 401, 401, 429]);
+    expect(verifier.calls).toBe(5);
+
+    const login = await signIn(person.email, PASSWORD, ip);
+    expect([login.status, login.code]).toEqual([429, "too_many_attempts"]);
+    // O convite não foi gasto por nenhuma das tentativas.
+    expect((await call(openInvite, { params: { token } })).status).toBe(200);
+  });
+
+  it("five wrong sign-ins hold the invite of the same e-mail from the same address, even with the right password", async () => {
+    const ownerA = await createUser(panel.app, await createOrganization(panel.app, "auth limite login"), "owner");
+    const person = await createUser(panel.app, await createOrganization(panel.app, "auth limite login B"), "operator");
+    const token = await inviteBy(ownerA.cookie, person.email);
+    const ip = "198.51.100.78";
+    expect(await fail(person.email, fiveTimes(ip))).toEqual(Array<number>(5).fill(401));
+
+    const held = await accept(token, PASSWORD, ip);
+    expect([held.status, held.code]).toEqual([429, "too_many_attempts"]);
+    expect((await accept(token, PASSWORD, "203.0.113.79")).status).toBe(200);
+  });
+});
+
+describe("the orphan account left by a failed cleanup (nota da revisora)", () => {
+  afterEach(() => void (orphanCleanup.fail = false));
+
+  it("invited again, the person sets a new password and signs in with it; the old one does not work and the installation mark does not come back", async () => {
+    const a = await createOrganization(panel.app, "auth órfã");
+    const ownerA = await createUser(panel.app, a, "owner");
+    const person = await createUser(panel.app, a, "operator");
+    expect(await grantInstallationAdmin(panel.app, person.email, NOW)).toMatchObject({ granted: true });
+
+    orphanCleanup.fail = true;
+    const removed = await call(removeMember, { method: "DELETE", cookie: ownerA.cookie, params: { id: person.id } });
+    orphanCleanup.fail = false;
+    expect(removed.status).toBe(500);
+    // A remoção do vínculo valeu; a conta ficou, sem vínculo, com o hash antigo e a marca.
+    const left = await withSystem(panel.app, (q) => q.one<{ admin: boolean }>("select installation_admin_at is not null as admin from accounts where email = $1", [person.email]));
+    expect(left).toEqual({ admin: true });
+
+    const token = await inviteBy(ownerA.cookie, person.email);
+    expect((await call(openInvite, { params: { token } })).data).toMatchObject({ existingAccount: false });
+    expect((await accept(token, "a brand new password")).status).toBe(200);
+
+    expect((await signIn(person.email, "a brand new password")).status).toBe(200);
+    expect((await signIn(person.email, PASSWORD)).status).toBe(401);
+    const account = await withSystem(panel.app, (q) => q.one<{ admin: boolean }>("select installation_admin_at is not null as admin from accounts where email = $1", [person.email]));
+    expect(account).toEqual({ admin: false });
+  });
+});
+
+describe("switching organization", () => {
+  it("lists the active member links, moves the same cookie to another organization, and answers 404 for any organization without an active link", async () => {
+    const a = await createOrganization(panel.app, "auth troca A");
+    const b = await createOrganization(panel.app, "auth troca B");
+    const stranger = await createOrganization(panel.app, "auth troca alheia");
+    const disabledOrg = await createOrganization(panel.app, "auth troca desativada");
+    const person = await createUser(panel.app, a, "owner");
+    await linkTo(b, person.email, "admin");
+    const disabled = await linkTo(disabledOrg, person.email);
+    await withSystem(panel.app, (q) => q.exec("update users set disabled_at = $2 where id = $1", [disabled, NOW]));
+
+    expect((await call(listOrganizations, { cookie: person.cookie })).data).toEqual([
+      { organizationId: a, organizationName: "auth troca A", current: true },
+      { organizationId: b, organizationName: "auth troca B", current: false },
+    ]);
+    for (const organizationId of [stranger, disabledOrg, "00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+      const refused = await call(switchOrganization, { method: "POST", cookie: person.cookie, body: { organizationId } });
+      expect([refused.status, refused.code]).toEqual([404, "not_found"]);
+    }
+    expect((await call(switchOrganization, { method: "POST", body: { organizationId: b } })).status).toBe(401);
+
+    const switched = await call(switchOrganization, { method: "POST", cookie: person.cookie, body: { organizationId: b } });
+    expect(switched.status).toBe(200);
+    expect(switched.headers.get("set-cookie")).toBeNull();
+    expect((await call(me, { cookie: person.cookie })).data).toMatchObject({ role: "admin", organizationName: "auth troca B" });
+    expect((await call(listOrganizations, { cookie: person.cookie })).data).toEqual([
+      { organizationId: a, organizationName: "auth troca A", current: false },
+      { organizationId: b, organizationName: "auth troca B", current: true },
+    ]);
+  });
+
+  it("one organization only: the list has one item, so the screen shows no selector", async () => {
+    const alone = await createUser(panel.app, await createOrganization(panel.app, "auth troca uma"), "operator");
+    expect((await call(listOrganizations, { cookie: alone.cookie })).data).toEqual([expect.objectContaining({ current: true })]);
+  });
+
+  // Isolamento depois da troca: uma rota de leitura de cada tabela principal da equipe e das
+  // chamadas. `team` lê `users` e `invites`; `calls` lê `calls`; `calls/[id]` é o detalhe.
+  it("after switching to B, the team and the calls of A are not visible on any of these reads", async () => {
+    const a = await createOrganization(panel.app, "auth isolamento A");
+    const b = await createOrganization(panel.app, "auth isolamento B");
+    const ownerA = await createUser(panel.app, a, "owner");
+    const person = await createUser(panel.app, a, "admin");
+    const inB = await linkTo(b, person.email, "admin");
+    const callA = await createCall(panel.app, a, NOW);
+    const callB = await createCall(panel.app, b, NOW);
+    await inviteBy(ownerA.cookie, `pendente-a-${randomUUID()}@example.test`);
+
+    expect((await call(switchOrganization, { method: "POST", cookie: person.cookie, body: { organizationId: b } })).status).toBe(200);
+    const team = (await call(listTeam, { cookie: person.cookie })).data as { people: Array<{ id: string }>; invites: unknown[] };
+    expect(team.people.map((row) => row.id)).toEqual([inB]);
+    expect(team.invites).toEqual([]);
+    const calls = (await call(listCalls, { cookie: person.cookie })).data as Array<{ id: string }>;
+    expect(calls.map((row) => row.id)).toEqual([callB]);
+    expect((await call(getCall, { cookie: person.cookie, params: { id: callA } })).status).toBe(404);
+    expect((await call(getCall, { cookie: person.cookie, params: { id: callB } })).status).toBe(200);
+  });
+});
+
+describe("links are independent across organizations", () => {
+  it("disabling the link in A closes only the sessions of that link: the session of the same account in B goes on", async () => {
+    const a = await createOrganization(panel.app, "auth independente A");
+    const b = await createOrganization(panel.app, "auth independente B");
+    const ownerA = await createUser(panel.app, a, "owner");
+    const person = await createUser(panel.app, a, "operator");
+    const inB = await linkTo(b, person.email);
+    const inBSession = await openSession(panel.app, b, inB);
+
+    expect((await call(changeMember, { method: "PATCH", cookie: ownerA.cookie, params: { id: person.id }, body: { disabled: true } })).status).toBe(200);
+    expect((await call(me, { cookie: person.cookie })).status).toBe(401);
+    expect((await call(me, { cookie: inBSession })).data).toMatchObject({ organizationName: "auth independente B" });
+    expect(((await call(listOrganizations, { cookie: inBSession })).data as unknown[]).length).toBe(1);
+  });
+
+  it("removing the link in A keeps the account, which still signs in to B", async () => {
+    const a = await createOrganization(panel.app, "auth remove A");
+    const b = await createOrganization(panel.app, "auth remove B");
+    const ownerA = await createUser(panel.app, a, "owner");
+    const person = await createUser(panel.app, a, "operator");
+    await linkTo(b, person.email);
+    expect((await call(removeMember, { method: "DELETE", cookie: ownerA.cookie, params: { id: person.id } })).status).toBe(200);
+    const again = await signIn(person.email, PASSWORD);
+    expect(again.status).toBe(200);
+    expect((await call(me, { cookie: cookieOf(again) })).data).toMatchObject({ organizationName: "auth remove B" });
+  });
+
+  it("changing the password ends the sessions of the account in every organization but the one that changed it", async () => {
+    const a = await createOrganization(panel.app, "auth senha A");
+    const b = await createOrganization(panel.app, "auth senha B");
+    const person = await createUser(panel.app, a, "operator");
+    const inB = await linkTo(b, person.email);
+    const inBSession = await openSession(panel.app, b, inB);
+    const otherInA = await openSession(panel.app, a, person.id);
+
+    expect((await call(changePassword, { method: "POST", cookie: inBSession, body: { current: PASSWORD, new: "another long password" } })).status).toBe(200);
+    expect((await call(me, { cookie: inBSession })).status).toBe(200);
+    expect((await call(me, { cookie: person.cookie })).status).toBe(401);
+    expect((await call(me, { cookie: otherInA })).status).toBe(401);
   });
 });

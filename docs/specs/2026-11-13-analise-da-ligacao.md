@@ -1,6 +1,8 @@
 # Análise da ligação no fim: nota com régua, temperatura e objeções
 
-- **Estado:** desenho. Nenhum código de produto foi escrito.
+- **Estado:** entregue, na `main`. Fatia 1 no #149, fatia 2 no #181 e fatia 3 no #194. Depois, o
+  #354 (R4, fatia 4a) passou a poder rodar a análise no cérebro escolhido. O texto abaixo é o
+  desenho como foi escrito antes do código.
 - **Data:** 2026-11-13
 - **Quem pediu:** o dono, no roteiro de novembro (item R1). Ele quer que um analista de IA
   "traga uma análise completa" de cada ligação no fim. A análise ao vivo é outro item (R6), e a
@@ -291,6 +293,9 @@ nasce com o padrão.
   resposta: a régua da seção 3.3, versão 1.
 
 ## 8. Não medido
+
+> **Não medido no desenho.** Esta lista é de quando o desenho foi escrito, antes do código. O que
+> cada fatia deixou de medir está no PR dela.
 
 - Se o `responseSchema` do Gemini aceita o schema aninhado da análise (listas de objetos), e se o
   modo `strict` do OpenAI aceita o schema inteiro. Não conferi a documentação dos dois hoje; a fatia 2

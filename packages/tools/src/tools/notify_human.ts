@@ -1,7 +1,7 @@
 import { recordEvent } from "@deskvoice/core";
 import { z } from "zod";
 import { defineTool } from "../define-tool";
-import { notifyHumans } from "../notify";
+import { notifyHumans, withCallerContext } from "../notify";
 
 const URGENCY_LABEL = { low: "Aviso", normal: "Aviso", high: "URGENTE" } as const;
 
@@ -14,7 +14,9 @@ export default defineTool({
     urgency: z.enum(["low", "normal", "high"]).default("normal").describe("high só quando alguém precisa agir ainda hoje."),
   }),
   async run(input, ctx) {
-    const channels = await notifyHumans(ctx, `${URGENCY_LABEL[input.urgency]}: ${input.message}`, { whatsapp: true });
+    // A linha "Este número já ligou…" vai só no aviso: o evento e a resposta ao modelo ficam sem ela.
+    const body = await withCallerContext(ctx, `${URGENCY_LABEL[input.urgency]}: ${input.message}`);
+    const channels = await notifyHumans(ctx, body, { whatsapp: true });
     await recordEvent(ctx.q, ctx.callId, "human_notified", { message: input.message, urgency: input.urgency, channels }, ctx.clock.now());
     return {
       ok: true,

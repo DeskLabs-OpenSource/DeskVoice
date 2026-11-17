@@ -36,8 +36,11 @@ mesmo, por sua conta. O que foi provado em cada um:
 - **Ubuntu**: é o sistema em que a instalação foi provada e o que a VPS da parceira entrega.
 - **AlmaLinux 9**: instalado numa VPS da parceira em 12/11/2026 (AlmaLinux 9.8), com o serviço do
   Docker ligado à mão (`systemctl enable --now docker`), porque ele veio instalado e desligado.
-  Agora o instalador liga esse serviço sozinho quando o encontra parado; essa correção ainda não
-  rodou numa máquina real.
+  O instalador passou a ligar esse serviço sozinho quando o encontra parado, e isso foi provado na
+  mesma VPS em 15/11/2026: com o Docker desligado (`systemctl disable --now docker.socket docker`),
+  o instalador da 0.13.0 disse que o Docker não respondia, ligou o serviço e seguiu até o fim, com
+  a mesma publicação e o WhatsApp conectado. Desde 13/11 essa VPS também é atualizada pelo
+  `install/update.sh`, da 0.9.0 até a 0.13.0.
 - **Rocky Linux 9**: aceito por ser da mesma família do AlmaLinux, e não provado.
 - **RHEL**: fora da lista até uma instalação provar. Ele pede assinatura ativa para o `dnf`
   baixar pacotes, um passo que ninguém mediu.
@@ -170,6 +173,15 @@ que algum contêiner usa fica, com um aviso, e a atualização termina bem. Imag
 da versão de destino, a limpeza já roda na primeira atualização para a versão que a traz (vindo
 da 0.1.0, que não passa a vez, só na atualização seguinte para outra versão).
 
+A imagem guardada não basta para voltar de uma versão que mudou o banco de um jeito que a
+anterior não lê. É o caso da 0.28.0: depois de atualizar para ela, voltar para uma versão
+anterior com `update.sh --to` deixa o painel sem login. A volta é trocar a versão e restaurar o
+backup feito na ida para a 0.28.0, que é o mais recente com a versão de antes no manifesto
+(`grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1 | xargs dirname`). Não serve o
+`restore.sh latest`, nem o backup que o próprio `update.sh --to` faz e mostra no fim: esse já tem
+o banco da 0.28.0. O backup da ida só fica enquanto a rotação o mantiver (os 14 mais recentes), e
+o que entrou depois de atualizar se perde. O passo a passo está na nota da 0.28.0.
+
 A 0.1.0 é de antes desse mecanismo: quem atualiza a partir dela roda `bash install/update.sh`
 **uma segunda vez** depois de atualizar. Não há o que atualizar; é o atualizador novo gerando o
 segredo do agente, recriando o painel para ele recebê-lo e agendando o agente.
@@ -180,6 +192,15 @@ segredo do agente, recriando o painel para ele recebê-lo e agendando o agente.
 bash install/agent.sh                      # uma passada (é o que o agendamento chama)
 sudo bash install/agent.sh --install       # instala ou conserta o agendamento
 bash install/agent.sh --install --dry-run  # só diz o que faria
+```
+
+Quem pede a atualização pela tela é quem administra a instalação. Numa instalação com uma
+organização, são o dono e o administrador. Se ninguém mais consegue pedir, rode de dentro da VPS
+o comando abaixo, e a conta desse e-mail volta a administrar a instalação. Isso fica gravado na
+auditoria da instalação:
+
+```bash
+bash install/grant-installation-admin.sh voce@empresa.com.br
 ```
 
 O painel não tem acesso ao Docker do servidor: ele só registra o pedido de atualização. O
@@ -360,6 +381,12 @@ e as linhas que o instalador imprime já trazem as duas:
 
 Se o seu proxy tinha uma regra separada para `/voice-ws` apontando para outra porta (era assim
 até a versão anterior), apague-a. Agora é tudo no mesmo destino.
+
+Se quem ocupa as portas 80 e 443 é o **Caddy do DeskcommCRM**, instalado nesta mesma VPS, o
+`127.0.0.1:3080` do host não serve: o Caddy dele roda em contêiner e precisa enxergar o DeskVoice
+pela rede Docker do ponto de extensão dele (`caddy-sites/`). O passo a passo medido, com o
+arquivo `.caddy` de exemplo, está em
+[`docs/guides/na-mesma-vps-do-crm.md`](../docs/guides/na-mesma-vps-do-crm.md).
 
 Se quem ocupa é a porta `5060/udp` ou a faixa de áudio, é outro programa de telefonia. Descubra
 com `sudo ss -lunp | grep :5060`, pare esse programa e rode o instalador de novo.

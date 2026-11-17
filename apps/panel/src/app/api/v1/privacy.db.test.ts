@@ -1,6 +1,6 @@
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { recordingPath, withOrg } from "@deskvoice/core";
+import { createFollowUp, recordingPath, withOrg } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { NOW, call, createCall, createOrganization, createUser, startPanel } from "../../../../test/kit";
 import { POST as exportRecord } from "./privacy/export/route";
@@ -198,7 +198,7 @@ describe("exporting what the organization keeps about a phone", () => {
     expect(data.content).not.toContain(foreignCall);
     expect(data.content).not.toContain("outra empresa");
 
-    expect(await orgEvents(mine)).toEqual([{ kind: "caller_data_exported", actor_user_id: admin.id, payload: { phone: PHONE, calls: 1, events: 2, doNotCall: true, followUps: 1 } }]);
+    expect(await orgEvents(mine)).toEqual([{ kind: "caller_data_exported", actor_user_id: admin.id, payload: { phone: PHONE, calls: 1, events: 2, doNotCall: true, followUps: 1, notes: 0 } }]);
     expect(await orgEvents(theirs)).toEqual([]);
     const shown = (await call(privacy, { cookie: admin.cookie })).data as Privacy;
     expect(shown.history).toMatchObject([{ kind: "caller_data_exported", actorName: "Test admin", payload: { phone: PHONE } }]);
@@ -221,11 +221,30 @@ describe("exporting what the organization keeps about a phone", () => {
     expect(data.content).not.toContain("RIFF");
   });
 
+  it("brings the follow-up opened by the fixed-rule supervisor (review_call), like any other", async () => {
+    const org = await createOrganization(panel.app, "privacy export review");
+    const owner = await createUser(panel.app, org, "owner");
+    const callId = await createCall(panel.app, org, NOW);
+    // O mesmo caminho de escrita da rotina `review_call` (apps/routines), com a origem do supervisor.
+    const opened = await withOrg(panel.app, org, async (q) => {
+      await q.exec("update calls set from_e164 = $2, status = 'failed', ended_at = $3 where id = $1", [callId, PHONE, NOW]);
+      return createFollowUp(
+        q,
+        { callId, agentId: null, title: `Retornar para ${PHONE}: o motor de voz caiu ou não estava pronto`, details: "Aberta pelo supervisor.", dueAt: NOW, origin: { source: "review_call", case: "engine_failed" } },
+        NOW,
+      );
+    });
+    const data = (await exportPhone(owner.cookie, PHONE)).data as { counts: unknown; content: string };
+    expect(data.counts).toMatchObject({ followUps: 1 });
+    const lines = data.content.trimEnd().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.filter((line) => line.type === "follow_up")).toEqual([expect.objectContaining({ followUp: opened.id, call: callId, phone: PHONE, title: `Retornar para ${PHONE}: o motor de voz caiu ou não estava pronto` })]);
+  });
+
   it("records the lookup even when nothing is found, and refuses what is not a phone", async () => {
     const org = await createOrganization(panel.app, "privacy export empty");
     const owner = await createUser(panel.app, org, "owner");
     expect((await exportPhone(owner.cookie, "+5531988887777")).data).toMatchObject({ counts: { calls: 0, events: 0, doNotCall: false, followUps: 0 }, content: "" });
     expect(refusal(await exportPhone(owner.cookie, "não é telefone"))).toEqual([400, "validation_error"]);
-    expect((await orgEvents(org)).map((event) => event.payload)).toEqual([{ phone: "+5531988887777", calls: 0, events: 0, doNotCall: false, followUps: 0 }]);
+    expect((await orgEvents(org)).map((event) => event.payload)).toEqual([{ phone: "+5531988887777", calls: 0, events: 0, doNotCall: false, followUps: 0, notes: 0 }]);
   });
 });

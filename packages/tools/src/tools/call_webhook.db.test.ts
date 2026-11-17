@@ -2,7 +2,7 @@ import { encryptSecret } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
 import { createFixture, eventsOf, fakeFetch, fakeLookup, putSetting, secretKey } from "../../test/helpers";
-import { runTool } from "../run-tool";
+import { MAX_CALL_WEBHOOK_PER_CALL, runTool } from "../run-tool";
 import { createCallWebhook } from "./call_webhook";
 
 const { app, owner } = openTestDbs();
@@ -83,5 +83,20 @@ describe("call_webhook", () => {
     const ctx = await createFixture(app, "webhook vazio");
     const result = await runTool(tool(fakeFetch()), { name: "qualquer" }, ctx);
     expect(result.message).toMatch(/Nenhuma integração está cadastrada/);
+  });
+
+  it("o destino que responde erro já recebeu o POST: a vaga do teto fica gasta, também depois de a memória esquecer", async () => {
+    const ctx = await fixture("webhook teto");
+    const net = fakeFetch(() => new Response("erro", { status: 500 }));
+    // Nome que não existe não chama nada e não gasta vaga.
+    expect(await runTool(tool(net), { name: "nao_existe" }, ctx)).toMatchObject({ ok: false, noEffect: true });
+    for (let i = 0; i < MAX_CALL_WEBHOOK_PER_CALL; i += 1) expect((await runTool(tool(net), { name: "abrir_chamado" }, ctx)).ok).toBe(false);
+    expect(net.requests).toHaveLength(MAX_CALL_WEBHOOK_PER_CALL);
+
+    expect((await runTool(tool(net), { name: "abrir_chamado" }, ctx)).message).toContain(`limite de ${MAX_CALL_WEBHOOK_PER_CALL} chamadas a call_webhook`);
+    // Um minuto parado: a conta volta do banco, que guardou as vagas gastas.
+    ctx.advance(60_000);
+    expect((await runTool(tool(net), { name: "abrir_chamado" }, ctx)).message).toContain(`limite de ${MAX_CALL_WEBHOOK_PER_CALL} chamadas a call_webhook`);
+    expect(net.requests).toHaveLength(MAX_CALL_WEBHOOK_PER_CALL);
   });
 });

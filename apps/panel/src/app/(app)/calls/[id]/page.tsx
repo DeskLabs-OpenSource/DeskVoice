@@ -17,9 +17,14 @@ import { formatCaller, formatDateTime, formatDuration, formatMoney, secondsBetwe
 import { Badge, Button, Notice, Skeleton, TextInput, type Tone } from "../../../../ui/kit";
 import { useLive, useNow } from "../../../../ui/live";
 import { useCanConfigure } from "../../../../ui/me";
+import { lastTemperature } from "../../../../ui/temperature";
 import { Timeline } from "../../../../ui/timeline";
+import { transcribeAlsoClassifies } from "../../../../ui/transcription";
+import { Amount } from "../../costs/amount-view";
 import { AnalysisSection } from "./analysis-section";
-import type { CallDetail, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
+import { CallerHistorySection } from "./caller-history-section";
+import { ShareSection } from "./share-section";
+import type { Analyst, CallDetail, CallerHistory, CallEvent, CallStatus, Engine, FollowUpList, Setting } from "../../../../ui/types";
 
 const STATUS_TONE: Record<CallStatus, Tone> = { ringing: "accent", in_progress: "accent", transferred: "ok", completed: "neutral", failed: "fail", refused: "warn" };
 
@@ -33,8 +38,12 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   const call = useApi<CallDetail>(`/calls/${id}`);
   const events = useApi<CallEvent[]>(`/calls/${id}/events`);
   const engines = useApi<Engine[]>("/engines");
+  // O rótulo e a orientação das objeções na linha do tempo vêm do cadastro atual dos analistas.
+  const analysts = useApi<Analyst[]>("/analysts");
   const followUps = useApi<FollowUpList>(`/follow-ups?callId=${id}`);
+  const callerHistory = useApi<CallerHistory>(`/calls/${id}/caller-history`);
   const transcription = useApi<Setting<boolean>>("/settings/calls.transcription_enabled");
+  const outcomeEnabled = useApi<Setting<boolean>>("/settings/calls.outcome_enabled");
   const analysisEnabled = useApi<Setting<boolean>>("/settings/calls.analysis_enabled");
   const canConfigure = useCanConfigure();
   useLive((signal) => {
@@ -65,12 +74,18 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
   // A transcrição da gravação só se oferece para a chamada encerrada que ficou sem fala nenhuma, com a opção ligada.
   const silent = events.data !== undefined && !events.data.some((event) => event.kind === "transcript_user" || event.kind === "transcript_agent");
   const offerTranscription = !live && silent && canConfigure && transcription.data?.value === true;
+  // Transcrever reenfileira o resumo, e o resumo, com o desfecho ou a análise ligados, enfileira a
+  // classificação paga: a tela avisa ao lado do botão antes do clique, não só no extrato depois.
+  const classificationWarning = transcribeAlsoClassifies({ outcome: outcomeEnabled.data?.value === true, analysis: analysisEnabled.data?.value === true });
+  const temperature = events.data ? lastTemperature(events.data) : null;
   const seconds = secondsBetween(data.answeredAt ?? data.startedAt, data.endedAt ?? now);
-  const facts: Array<[string, string, boolean]> = [
+  const facts: Array<[string, ReactNode, boolean]> = [
     [t.facts.agent, data.agentName ?? common.noAgent, false],
     [t.facts.engine, engines.data?.find((engine) => engine.id === data.engine)?.label ?? data.engine ?? "", false],
     [t.facts.duration, formatDuration(seconds), true],
-    [t.facts.cost, formatMoney(data.costCents, locale), true],
+    // O mesmo valor da tela de Custos: com linha de custo não medido, o zero não é grátis, e a
+    // estimativa vem marcada.
+    [t.facts.cost, <Amount key="cost" cents={data.costCents} unmeasuredCount={data.unmeasuredCount} estimatedCount={data.estimatedCount} />, true],
     [t.facts.started, formatDateTime(data.startedAt, locale), true],
   ];
 
@@ -83,6 +98,13 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
           <Badge tone={STATUS_TONE[data.status]} live={live}>
             {common.callStatus[data.status]}
           </Badge>
+          {temperature ? (
+            <span title={t.temperatureBadgeHint}>
+              <Badge tone={temperature.score >= 4 ? "ok" : temperature.score <= 2 ? "warn" : "neutral"}>
+                {fill(t.temperatureBadge, { score: temperature.score.toLocaleString(locale, { maximumFractionDigits: 1 }) })}
+              </Badge>
+            </span>
+          ) : null}
           <span className="text-muted">{t.direction[data.direction]}{data.channel === "phone" ? "" : ` · ${common.channel[data.channel]}`}</span>
         </div>
         {/* Métricas em linha, separadas por fio: sem grade de cartões. */}
@@ -93,11 +115,26 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
               <dd className={`${mono ? "data" : ""} ${live && label === t.facts.duration ? "text-accent-strong" : ""}`}>
                 {value}
                 {label === t.facts.cost && data.costCeilingCents ? <span className="ml-2 font-sans text-[0.8rem] text-muted">{fill(t.facts.ceiling, { value: formatMoney(data.costCeilingCents, locale) })}</span> : null}
+                {/* Com passagem entre agentes, quanto cada um gastou; com um agente só, nada muda. */}
+                {label === t.facts.cost && data.costByAgent.length > 1 ? (
+                  <ul className="mt-1 grid gap-0.5 font-sans text-[0.8rem] text-muted">
+                    <li>{t.facts.byAgent}</li>
+                    {data.costByAgent.map((row) => (
+                      <li key={row.agentId ?? "deleted"}>
+                        {row.name ?? t.facts.deletedAgent} · <span className="data">
+                          <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </dd>
             </div>
           ))}
         </dl>
       </header>
+
+      <CallerHistorySection history={callerHistory.data} t={t} common={common} locale={locale} onChanged={callerHistory.reload} />
 
       {data.outcome ? (
         <section className="grid max-w-[72ch] gap-1.5">
@@ -114,14 +151,17 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
 
       <AnalysisSection call={data} events={events.data} enabled={analysisEnabled.data?.value === true} live={live} t={t} />
 
-      {data.summary || !live ? (
+      {data.summary || data.summaryPurged || !live ? (
         <section className="grid max-w-[72ch] gap-1.5">
           <h2 className="text-[0.8rem] font-bold text-muted">{t.summaryTitle}</h2>
-          <p className={data.summary ? "text-[1.07rem] leading-relaxed whitespace-pre-line" : "text-muted"}>{data.summary ?? t.summaryPending}</p>
+          <p className={data.summary ? "text-[1.07rem] leading-relaxed whitespace-pre-line" : "text-muted italic"}>
+            {data.summary ?? (data.summaryPurged ? t.summaryPurged : t.summaryPending)}
+          </p>
         </section>
       ) : null}
 
-      {live ? (
+      {/* No recado não há pessoa do time na linha para receber o pedido de não gravar: quem liga ouviu o aviso e pode desligar. */}
+      {live && data.voicemail ? null : live ? (
         <StopRecording
           id={id}
           title={t.stopRecordingTitle}
@@ -137,6 +177,7 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
               id={id}
               title={t.transcribeTitle}
               hint={t.transcribeHint}
+              warning={classificationWarning ? t.transcribeAlsoClassifies : null}
               send={t.transcribeSend}
               onDone={() => {
                 call.reload();
@@ -144,11 +185,17 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
               }}
             />
           ) : null}
+          {canConfigure ? <ShareSection id={id} /> : null}
         </Recording>
       )}
 
       {events.error && !events.data ? <Notice tone="fail">{errorText(events.error)}</Notice> : null}
-      {events.data ? <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} followUps={followUps.data?.items} people={followUps.data?.people} /> : <Skeleton lines={4} />}
+      {/* Espera o cadastro dos analistas (ou a falha dele): sem isso, o rótulo da objeção piscaria como "fora do cadastro". */}
+      {events.data && (analysts.data || analysts.error) ? (
+        <Timeline events={events.data} live={live} agentName={data.agentName ?? ""} followUps={followUps.data?.items} people={followUps.data?.people} analysts={analysts.data} />
+      ) : (
+        <Skeleton lines={4} />
+      )}
     </>
   );
 }
@@ -172,7 +219,7 @@ function Recording({ id, title, missing, children }: { id: string; title: string
  * Pede a transcrição da gravação de uma chamada sem texto. O texto chega à linha do tempo; a falha
  * diz o motivo na frase da tela (sem chave, fora do prazo, teto atingido, sem fala).
  */
-function Transcribe({ id, title, hint, send, onDone }: { id: string; title: string; hint: string; send: string; onDone(): void }) {
+function Transcribe({ id, title, hint, warning, send, onDone }: { id: string; title: string; hint: string; warning: string | null; send: string; onDone(): void }) {
   const errorText = useErrorText();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -195,6 +242,7 @@ function Transcribe({ id, title, hint, send, onDone }: { id: string; title: stri
           {send}
         </Button>
       </div>
+      {warning ? <p className="text-[0.85rem] text-muted">{warning}</p> : null}
       {error ? <Notice tone="fail">{error}</Notice> : null}
     </div>
   );

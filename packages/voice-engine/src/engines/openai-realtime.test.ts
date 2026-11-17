@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pcm16ToUlaw } from "../resample";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
 import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
-import type { KeyCheckOptions, VoiceSessionConfig } from "../types";
+import type { ClassifyOptions, KeyCheckOptions, VoiceSessionConfig } from "../types";
 import { estimateCostCents } from "../pricing";
 import engine, { usageOf } from "./openai-realtime";
 
@@ -44,6 +44,53 @@ describe("openai-realtime (contrato com servidor falso)", () => {
         tools: [{ type: "function", name: "end_call", description: "Encerra a ligação", parameters: { type: "object" } }],
       },
     });
+  });
+
+  // A abertura de hoje, gravada como texto: agente sem termos não pode mandar ao provedor nada além disto.
+  const SESSAO_SEM_VOCABULARIO =
+    '{"type":"session.update","session":{"type":"realtime","instructions":"Você atende a clínica.\\n\\nSpeak only in pt-BR.","output_modalities":["audio"],' +
+    '"audio":{"input":{"format":{"type":"audio/pcmu"},"transcription":{"model":"gpt-4o-mini-transcribe","language":"pt"},' +
+    '"turn_detection":{"type":"server_vad","create_response":true,"interrupt_response":true}},"output":{"format":{"type":"audio/pcmu"},"voice":"marin"}},' +
+    '"tools":[{"type":"function","name":"end_call","description":"Encerra a ligação","parameters":{"type":"object","properties":{}}}]}}';
+
+  it.each([["ausente", undefined], ["vazio", []]])("vocabulário %s: a abertura é byte a byte a de antes", async (_, vocabulary) => {
+    const { update } = await openSession({ vocabulary });
+    expect(JSON.stringify(update)).toBe(SESSAO_SEM_VOCABULARIO);
+  });
+
+  it("vocabulário: os termos vão ao prompt da transcrição e às instruções, antes do idioma", async () => {
+    const { update } = await openSession({ vocabulary: ["Melgaço", "DeskVoice"] });
+    expect(update).toMatchObject({
+      session: {
+        instructions: "Você atende a clínica.\n\nNames and terms that may come up in this call, spelled as written: Melgaço; DeskVoice.\n\nSpeak only in pt-BR.",
+      },
+    });
+    const session = update.session as { audio: { input: { transcription: unknown } } };
+    expect(session.audio.input.transcription).toEqual({
+      model: "gpt-4o-mini-transcribe",
+      language: "pt",
+      prompt: "Names and terms that may appear: Melgaço, DeskVoice.",
+    });
+  });
+
+  it.each([["ausente", undefined], ["normal", "normal" as const]])("ambiente %s: a abertura é byte a byte a de antes", async (_, listeningEnvironment) => {
+    const { update } = await openSession({ listeningEnvironment });
+    expect(JSON.stringify(update)).toBe(SESSAO_SEM_VOCABULARIO);
+  });
+
+  it("ambiente barulhento: redução de ruído near_field e fim de turno pelo sentido, com a interrupção do provedor", async () => {
+    const { update } = await openSession({ listeningEnvironment: "noisy" });
+    const session = update.session as { audio: { input: Record<string, unknown> } };
+    expect(session.audio.input).toEqual({
+      format: { type: "audio/pcmu" },
+      transcription: { model: "gpt-4o-mini-transcribe", language: "pt" },
+      noise_reduction: { type: "near_field" },
+      turn_detection: { type: "semantic_vad", eagerness: "auto", create_response: true, interrupt_response: true },
+    });
+    // Só a entrada de áudio muda: o resto da abertura é o de sempre.
+    const { audio: _audio, ...rest } = update.session as Record<string, unknown>;
+    const { audio: _today, ...todayRest } = (JSON.parse(SESSAO_SEM_VOCABULARIO) as { session: Record<string, unknown> }).session;
+    expect(rest).toEqual(todayRest);
   });
 
   it("custo separa áudio, texto e cache, como a OpenAI cobra", () => {
@@ -121,11 +168,164 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     expect(queued).toMatchObject({ response: { instructions: expect.stringContaining("Esta ligação é gravada") } });
   });
 
+  describe("orientação (guide)", () => {
+    const MARCADOR = Buffer.alloc(320, 7);
+    const marcador = pcm16ToUlaw(MARCADOR).toString("base64");
+    /** Tudo o que o motor mandar ao servidor falso até o áudio-marcador, na ordem. */
+    function recordUntilMarker() {
+      const seen: Array<Record<string, unknown>> = [];
+      const reached = fake.waitFor((message) => {
+        if (message.type === "input_audio_buffer.append" && message.audio === marcador) return true;
+        seen.push(message);
+        return false;
+      });
+      return { seen, reached };
+    }
+    const systemItem = (text: string) => ({
+      type: "conversation.item.create",
+      item: { type: "message", role: "system", content: [{ type: "input_text", text }] },
+    });
+
+    it("manda exatamente um item de sistema e nenhum response.create, sem passar por say", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      const say = vi.spyOn(session, "say");
+      const { seen, reached } = recordUntilMarker();
+      session.guide?.("Reforce o que está incluso.");
+      session.sendAudio(MARCADOR);
+      await reached;
+      expect(seen).toEqual([systemItem("Reforce o que está incluso.")]);
+      expect(say).not.toHaveBeenCalled();
+    });
+
+    it("com resposta em curso, espera o response.done e solta as orientações na ordem, antes da próxima resposta", async () => {
+      const { session } = await openSession();
+      await fake.waitFor(ofType("response.create")); // saudação: resposta em curso
+      session.guide?.("primeira");
+      session.guide?.("segunda");
+      session.guide?.("terceira");
+      session.say("marcador de fala"); // fica na fila de respostas
+      const before = recordUntilMarker();
+      session.sendAudio(MARCADOR);
+      await before.reached;
+      expect(before.seen).toEqual([]);
+
+      const after = recordUntilMarker();
+      fake.send({ type: "response.done", response: {} });
+      // O motor processa o response.done antes do próximo evento: o marcador vem depois.
+      const interrupted = nextEvent(session, "interrupted");
+      fake.send({ type: "input_audio_buffer.speech_started" });
+      await interrupted;
+      session.sendAudio(MARCADOR);
+      await after.reached;
+      expect(after.seen.map((m) => (m.type === "response.create" ? "response.create" : m))).toEqual([
+        systemItem("primeira"),
+        systemItem("segunda"),
+        systemItem("terceira"),
+        "response.create",
+      ]);
+    });
+
+    it("erro do provedor solta a orientação que esperava, sem pedir resposta", async () => {
+      const { session } = await openSession();
+      await fake.waitFor(ofType("response.create"));
+      session.guide?.("depois do erro");
+      const after = recordUntilMarker();
+      const failed = nextEvent(session, "error");
+      fake.send({ type: "error", error: { message: "recusado" } });
+      await failed;
+      session.sendAudio(MARCADOR);
+      await after.reached;
+      expect(after.seen).toEqual([systemItem("depois do erro")]);
+    });
+
+    it("depois de close, nada sai: nem a orientação na fila, nem uma nova", async () => {
+      const { session } = await openSession();
+      await fake.waitFor(ofType("response.create"));
+      const seen: Array<Record<string, unknown>> = [];
+      void fake.waitFor((message) => {
+        seen.push(message);
+        return false;
+      });
+      session.guide?.("na fila");
+      await session.close();
+      session.guide?.("depois do fim");
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(seen.filter((m) => m.type === "conversation.item.create")).toEqual([]);
+    });
+  });
+
   it("interrupção do usuário vira interrupted", async () => {
     const { session } = await openSession();
     const interrupted = nextEvent(session, "interrupted");
     fake.send({ type: "input_audio_buffer.speech_started", audio_start_ms: 10, item_id: "item_1" });
     await expect(interrupted).resolves.toEqual([]);
+  });
+
+  it("sinal de fala de quem ligou: início de fala vira { words: false } e transcrição parcial com texto vira { words: true }", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    const signals: Array<{ words: boolean }> = [];
+    session.on("callerActivity", (signal) => signals.push(signal));
+    const interrupted = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started", audio_start_ms: 100, item_id: "i1" });
+    await interrupted;
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: "i1", content_index: 0, delta: "   " });
+    const words = nextEvent(session, "callerActivity");
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: "i1", content_index: 0, delta: "quero marcar" });
+    await words;
+    // O pedaço só de espaço não conta como palavra.
+    expect(signals).toEqual([{ words: false }, { words: true }]);
+  });
+
+  it("transcrição atrasada de uma fala que já teve resposta não vira callerActivity; a de um item novo vira", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    const signals: Array<{ words: boolean }> = [];
+    session.on("callerActivity", (signal) => signals.push(signal));
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: "i1" });
+    fake.send({ type: "response.created", response: {} });
+    // A referência: a transcrição corre em paralelo à resposta e pode chegar depois dela.
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: "i1", content_index: 0, delta: "quero marcar" });
+    const fresh = nextEvent(session, "callerActivity");
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: "i2", content_index: 0, delta: "e mais uma coisa" });
+    await fresh;
+    expect(signals).toEqual([{ words: true }]);
+  });
+
+  it("closeCallerTurn fecha o áudio de quem ligou num item e pede a resposta", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    session.closeCallerTurn();
+    const commit = await fake.waitFor((message) => message.type === "input_audio_buffer.commit" || message.type === "response.create");
+    expect(commit).toEqual({ type: "input_audio_buffer.commit" });
+    expect(await fake.waitFor(ofType("response.create"))).toEqual({ type: "response.create", response: {} });
+  });
+
+  it("closeCallerTurn com uma resposta em curso não manda commit nem pede outra resposta", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: "i1" });
+    fake.send({ type: "response.created", response: {} });
+    const interrupted = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await interrupted; // o motor já processou o response.created
+    session.closeCallerTurn();
+    fake.send({ type: "response.done", response: {} });
+    const done = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await done; // o motor já processou o response.done (e soltaria a fila aqui)
+    session.say("marcador");
+    // A primeira mensagem de commit ou de resposta é a do say: closeCallerTurn não deixou nada.
+    const first = await fake.waitFor((m) => m.type === "input_audio_buffer.commit" || m.type === "response.create");
+    expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining("marcador") } });
+  });
+
+  it("closeCallerTurn com o item já fechado pelo servidor, antes do response.created, não faz nada", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: "i1" });
+    const interrupted = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await interrupted;
+    session.closeCallerTurn();
+    session.say("marcador");
+    const first = await fake.waitFor((m) => m.type === "input_audio_buffer.commit" || m.type === "response.create");
+    expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining("marcador") } });
   });
 
   it("evento error do provedor vira error sem fechar; mensagem fora do formato é ignorada", async () => {
@@ -146,6 +346,13 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     await fake.waitFor(ofType("session.update"));
     fake.send({ type: "error", error: { message: "modelo inexistente" } });
     await expect(connecting).rejects.toThrow("OpenAI Realtime: modelo inexistente");
+  });
+
+  it("fechamento antes da sessão confirmada leva o código e o motivo do provedor", async () => {
+    const connecting = engine.connect(config, "sk", { baseUrl: fake.url });
+    await fake.waitFor(ofType("session.update"));
+    fake.refuse(1008, "quota exceeded");
+    await expect(connecting).rejects.toThrow("OpenAI Realtime: a conexão fechou antes de confirmar a sessão (código 1008; quota exceeded)");
   });
 
   it("queda do socket vira error seguido de closed", async () => {
@@ -209,5 +416,69 @@ describe("openai-realtime: teste da chave (contrato com servidor HTTP falso)", (
     expect((await check({ schedule: expireAtOnce })).result).toBe("unreachable");
     await http.stop();
     expect((await check()).result).toBe("unreachable");
+  });
+});
+
+
+/**
+ * O destino da classificação: com `baseUrl` e `model` no pedido, o motor vai ao provedor compatível;
+ * sem eles, vai à OpenAI com o modelo de sempre. O corpo é lido do próprio pedido, não do servidor.
+ */
+describe("openai-realtime: desfecho da ligação (o destino vem de quem chama)", () => {
+  const palpite = { outcome: "booked", confidence: 0.9, evidence: "Pode marcar quinta." };
+  const usar = (uso: object = { prompt_tokens: 1_000_000, completion_tokens: 0 }) => {
+    const pedidos: Array<{ url: string; model: string }> = [];
+    const fetchFalso = (async (url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { model: string };
+      pedidos.push({ url, model: body.model });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(palpite) } }], usage: uso }), { status: 200 });
+    }) as unknown as typeof fetch;
+    return { pedidos, fetch: fetchFalso };
+  };
+  const classify = (options: ClassifyOptions = {}) => {
+    const run = engine.classifyOutcome;
+    if (!run) throw new Error("openai-realtime classifies the outcome");
+    return run("chave-de-teste", { transcript: "Cliente: Pode marcar quinta.", tools: [] }, options);
+  };
+
+  it("provedor compatível: o endpoint e o modelo configurados são os do pedido, e o preço não é inventado", async () => {
+    const { pedidos, fetch } = usar();
+    const result = await classify({ fetch, baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" });
+
+    expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat" }]);
+    // O preço do modelo configurado não é conhecido: o consumo entra, o custo fica zero.
+    expect(result).toEqual({ ok: true, guess: palpite, model: "deepseek-chat", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 0, costMicrocents: 0 });
+  });
+
+  it("sem configuração: o pedido é o de hoje, na OpenAI e no modelo de sempre", async () => {
+    const { pedidos, fetch } = usar();
+    const result = await classify({ fetch });
+
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano" }]);
+    // 1 milhão de entrada a US$ 0,05 por milhão: 5 centavos, como antes de o modelo ser configurável.
+    expect(result).toEqual({ ok: true, guess: palpite, model: "gpt-5-nano", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 5, costMicrocents: 5_000_000 });
+  });
+
+  it("sem endpoint, o modelo de tabela é o do pedido, e o preço é o dele", async () => {
+    const { pedidos, fetch } = usar();
+    const result = await classify({ fetch, model: "gpt-5-nano" });
+
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano" }]);
+    expect(result).toEqual({ ok: true, guess: palpite, model: "gpt-5-nano", usage: { inputTokens: 1_000_000, outputTokens: 0, cachedInputTokens: 0 }, costCents: 5, costMicrocents: 5_000_000 });
+  });
+
+  it("sem endpoint, modelo fora da tabela de preço cai no modelo medido: o provedor não cobra sem medida", async () => {
+    const { pedidos, fetch } = usar();
+    // Configuração que já estava gravada antes da recusa no painel: `gpt-5-mini` não está na tabela.
+    const result = await classify({ fetch, model: "gpt-5-mini" });
+
+    expect(pedidos).toEqual([{ url: "https://api.openai.com/v1/chat/completions", model: "gpt-5-nano" }]);
+    expect(result).toMatchObject({ model: "gpt-5-nano", costCents: 5, costMicrocents: 5_000_000 });
+  });
+
+  it("a tabela de preço do motor só tem o modelo conferido: é o que o painel consulta ao salvar", () => {
+    expect(engine.classifyPricing?.("gpt-5-nano")).toMatchObject({ centsPerMillionInputTokens: 5 });
+    expect(engine.classifyPricing?.("gpt-5-mini")).toBeUndefined();
+    expect(engine.classifyPricing?.("deepseek-chat")).toBeUndefined();
   });
 });

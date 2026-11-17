@@ -72,8 +72,17 @@ check "rotação não apaga pasta alheia" test -d "$B/minhas-coisas"
 refuse "rotação inválida é recusada" bash "$KIT/backup.sh" --keep 0
 rmdir "$B/20200101-000000" "$B/minhas-coisas"
 
-# ── restore com contagens iguais ──
+# ── a rede do proxy do outro sistema sumiu (issue #221): o `up` do fim não subiria nada ──
 printf 'agents=3\ncalls=120\nusers=1\n' > "$FAKE_DIR/counts_restore"
+O="$DESKVOICE_DEPLOY_DIR/docker-compose.override.yml"; had_override=0; if [ -f "$O" ]; then had_override=1; cp "$O" "$SANDBOX/override.antes"; fi
+printf 'networks:\n  proxy:\n    name: "crm_caddy-sites"\n    external: true\n' >> "$O"
+: > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/restore.sh" --yes "$dir" 2>&1)"; equal "rede do proxy sumiu: a restauração para" 1 "$?"
+contains "rede do proxy sumiu: diz qual e que nada mudou" "$out" "A rede crm_caddy-sites"
+equal "rede do proxy sumiu: não para serviço nem mexe no banco" 0 "$(grep -cE ' stop | pg_restore |alter database' "$FAKE_DIR/calls.log")"
+if [ "$had_override" = 1 ]; then cp "$SANDBOX/override.antes" "$O"; else rm "$O"; fi
+
+# ── restore com contagens iguais ──
 : > "$FAKE_DIR/calls.log"
 out="$(bash "$KIT/restore.sh" --yes "$dir" 2>&1)"; equal "restore com contagens iguais sai com zero" 0 "$?"
 contains "diz restaurado" "$out" "Restaurado:"

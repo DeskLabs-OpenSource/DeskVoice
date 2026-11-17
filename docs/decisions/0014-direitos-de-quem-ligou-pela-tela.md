@@ -36,8 +36,32 @@ A consulta de exportação e a ideia do marcador vêm do trabalho de @webtecnica
 - O registro de exportação guarda o telefone exportado, em texto, no banco da organização: é o que permite dizer depois quem tirou o dado de quem. Ele não sai com o prazo da transcrição.
 - A busca da exportação é pelo número. Quem ligou de outro telefone precisa de uma exportação por número.
 
+### Emenda de 2026-11-14: o resumo entra no prazo
+
+O item das consequências que diz que o resumo da chamada não sai com o prazo deixou de valer. O texto
+acima fica como registro do que foi decidido em 12/11. O gatilho desta revisão foi a
+[issue #138](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/138), aberta na revisão dos PRs
+#133 e #134: o resumo guarda as falas de quem ligou em linhas "Cliente: …" e, vencido o prazo, a
+transcrição sumia e o resumo continuava com parte do que a pessoa disse.
+
+O que vale agora:
+
+- **O resumo sai com a transcrição da mesma chamada.** `purgeTranscripts` troca `calls.summary` pelo
+  marcador `PURGED_SUMMARY_TEXT` nas chamadas começadas antes do limite, que é o mesmo critério de data
+  das outras cópias da conversa na linha da chamada (`outcome_evidence`, `analysis`). A linha da
+  chamada fica: sai o texto, não o registro de que houve chamada.
+- **A contagem do evento soma os dois.** O `count` de `transcripts_purged` conta as falas e os resumos
+  trocados na passagem. O resumo já trocado não é reescrito nem recontado, e o resumo de uma chamada
+  apagada a pedido do titular não é tocado: ele já tem o marcador do apagamento.
+- **A tela diz o que aconteceu.** A tela da chamada mostra, no lugar do resumo, que ele saiu com o
+  prazo; a tela de privacidade e o guia de conformidade dizem o mesmo. Os argumentos das ferramentas
+  continuam fora do prazo.
+- **A exportação não muda.** Enquanto o resumo existir, o arquivo do telefone o traz; depois do prazo,
+  traz o marcador, como já acontece com a fala expurgada.
+
 ## Quando revisar
 
-- Quando alguém pedir que o resumo ou os argumentos de ferramenta também saiam com o prazo.
+- Quando alguém pedir que os argumentos de ferramenta também saiam com o prazo. (O resumo, pedido na
+  emenda de 14/11, já sai.)
 - Quando o registro de eventos da organização precisar de prazo próprio.
 - Em qualquer caso, até 2027-05-12.

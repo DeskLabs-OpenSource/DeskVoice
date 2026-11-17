@@ -10,6 +10,8 @@ export interface ApprovalRequest {
   timeoutSeconds: number;
   /** O que o agente diz a quem está na linha enquanto espera. */
   say: string;
+  /** A ferramenta que pede, quando não é o `request_approval`: vai no `approval_requested`, para ela contar os próprios pedidos. */
+  tool?: string;
 }
 
 export interface ApprovalAnswer {
@@ -52,7 +54,7 @@ export async function askApproval(ctx: ToolContext, request: ApprovalRequest): P
     ctx.q,
     ctx.callId,
     "approval_requested",
-    { approvalId: approval.id, question: request.question, context: request.context, defaultOnTimeout: request.defaultOnTimeout, expiresAt: expiresAt.toISOString() },
+    { approvalId: approval.id, question: request.question, context: request.context, defaultOnTimeout: request.defaultOnTimeout, expiresAt: expiresAt.toISOString(), ...(request.tool !== undefined && { tool: request.tool }) },
     ctx.clock.now(),
   );
   ctx.say(request.say);

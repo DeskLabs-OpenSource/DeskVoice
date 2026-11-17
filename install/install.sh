@@ -31,6 +31,10 @@
 #                              quando o painel sai por uma porta local (sem domínio, ou 80/443 de outro proxy)
 #   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar. Só aceita yes; com o
 #                              ufw inativo, não tem efeito, e o instalador diz
+#   DESKVOICE_PROXY_NETWORK    opcional: a rede Docker do proxy de outro sistema desta VPS (exemplo:
+#                              deskcommcrm_caddy-sites). O Caddy do DeskVoice entra nela com o nome deskvoice,
+#                              e a ligação sobrevive às atualizações. Vazio mantém a gravada; off tira
+#                              (guia docs/guides/na-mesma-vps-do-crm.md)
 #   DESKVOICE_RTP_START / DESKVOICE_RTP_END   opcional: outra faixa de portas de áudio
 #   DESKVOICE_VERSION          opcional: uma versão publicada específica (exemplo: 0.3.0), em vez da mais recente.
 #                              Não combina com --build, que constrói o código desta pasta: as duas juntas param com erro
@@ -48,7 +52,7 @@ while [ $# -gt 0 ]; do
     --build) BUILD=1 ;;
     --adopt) DESKVOICE_ADOPT=yes ;;
     --answers) answers_file="${2:-}"; shift ;;
-    -h|--help) sed -n '2,39p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Veja as opções com: bash install/install.sh --help" ;;
   esac
   shift
@@ -76,6 +80,9 @@ if [ -n "${DESKVOICE_PANEL_LOCAL_ONLY:-}" ] && [ -n "${DESKVOICE_PANEL_PUBLIC_HT
 fi
 if [ -n "${DESKVOICE_PANEL_PORT:-}" ]; then
   valid_port "$DESKVOICE_PANEL_PORT" >/dev/null || die "A porta do painel em DESKVOICE_PANEL_PORT ($DESKVOICE_PANEL_PORT) não vale." "Use um número de 1 a 65535, ou não defina a variável."
+fi
+if [ -n "${DESKVOICE_PROXY_NETWORK:-}" ] && ! [[ "$DESKVOICE_PROXY_NETWORK" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+  die "O nome de rede em DESKVOICE_PROXY_NETWORK ($DESKVOICE_PROXY_NETWORK) não vale." "Use o nome que o docker network ls mostra (exemplo: deskcommcrm_caddy-sites), off para tirar a rede gravada, ou não defina a variável."
 fi
 if [ "$BUILD" = 1 ] && [ -n "${DESKVOICE_VERSION:-}" ]; then
   die "DESKVOICE_VERSION=$DESKVOICE_VERSION e --build pedem coisas diferentes: a primeira, as imagens publicadas dessa versão; a segunda, imagens construídas nesta máquina a partir do código desta pasta." "Escolha um dos dois e rode de novo: tire a variável para construir aqui, ou tire o --build para instalar a versão publicada."
@@ -150,7 +157,7 @@ else blocker "Este sistema (${os_id:-$(uname -s)} ${os_version}) não está entr
 
 arch="$(uname -m)"
 if arch_supported "$arch"; then ok "Processador: $arch"
-else blocker "O processador desta máquina ($arch) não tem imagem do DeskVoice." "use uma VPS x86_64 (amd64); em ARM de 64 bits (arm64) só construindo aqui, com --build"; fi
+else blocker "O processador desta máquina ($arch) não tem imagem do DeskVoice." "use uma VPS x86_64 (amd64) ou ARM de 64 bits (arm64); para construir nesta máquina, rode com --build"; fi
 
 if [ -r /proc/meminfo ]; then
   ram_mb="$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)"
@@ -233,9 +240,19 @@ if is_version "$version" && is_clone && [ "$DRY_RUN" != 1 ]; then
     blocker "O código desta pasta não é o da versão $version, que é a que seria instalada." "vá para a versão e rode de novo: git -C $REPO_DIR checkout $tag && bash install/install.sh  — ou, para rodar o código desta pasta de propósito, construa aqui: bash install/install.sh --build"
   fi
 fi
-# As imagens publicadas são para x86_64. Em ARM a instalação existe, mas construindo aqui.
+# Desde a 0017 a imagem publicada é um índice com amd64 e arm64, mas as versões de antes dela só
+# têm amd64. Em ARM, pergunta ao registro se esta versão tem arm64 antes de baixar: sem isso, a
+# frase clara vira o erro cru do `docker pull`. Quem quer o código desta pasta constrói com
+# `--build`, e aí a versão é `local`, não um número.
 if is_version "$version"; then
-  case "$arch" in aarch64|arm64) blocker "Ainda não há imagem publicada do DeskVoice para processador ARM ($arch)." "use uma VPS x86_64, ou construa nesta máquina: bash install/install.sh --build" ;; esac
+  case "$arch" in aarch64|arm64)
+    arm64_rc=0; published_arm64 "$version" || arm64_rc=$?
+    case "$arm64_rc" in
+      0) ok "Imagem ARM: a versão $version tem imagem publicada para arm64" ;;
+      1) blocker "$(no_arm64_image "$version" "$arch")" "use uma VPS x86_64, ou construa nesta máquina: bash install/install.sh --build" ;;
+      *) warn "Não consegui perguntar ao registro de imagens se a versão $version tem imagem para ARM. Sigo: se o download falhar, construa nesta máquina com bash install/install.sh --build" ;;
+    esac ;;
+  esac
 fi
 # O Compose dá preferência à variável do terminal sobre o arquivo: as duas têm de dizer o mesmo.
 export DESKVOICE_VERSION="$version"
@@ -436,7 +453,7 @@ fi
 # docker, e a porta publicada pelo Docker continua respondendo, mesmo com rich rule reject na zona
 # public; a porta escutada pelo host fica fechada. Por isso nenhum firewall-cmd aqui: não mudaria nada.
 if have firewall-cmd && [ "$($SUDO firewall-cmd --state 2>/dev/null || true)" = running ]; then
-  warn "O firewall firewalld está ativo, e ele não filtra as portas que o Docker publica: 5060/udp e ${rtp_start}-${rtp_end}/udp chegam aos contêineres com ele ligado, e uma regra dele não as fecha. Não é por ele que uma ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor da VPS, se ele tiver um. A regra na cadeia DOCKER-USER foi medida com o ufw, não com o firewalld (ver docs/fundacao/ufw-e-docker.md)."
+  warn "O firewall firewalld está ativo, e ele não filtra as portas que o Docker publica: 5060/udp e ${rtp_start}-${rtp_end}/udp chegam aos contêineres com ele ligado, e uma regra dele não as fecha. Não é por ele que uma ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor da VPS, se ele tiver um. Com o firewalld ativo, a regra na cadeia DOCKER-USER fechou uma porta TCP de prova (medido em 15/11/2026), mas some ao reiniciar a máquina e deixa a porta aberta por alguns segundos a cada firewall-cmd --reload; em UDP, que é o da telefonia, ela não foi medida com o firewalld (ver docs/fundacao/ufw-e-docker.md)."
   info "A prova da ligação continua sendo de fora: a primeira ligação e o teste da tela Linha do painel."
 fi
 
@@ -467,6 +484,8 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+missing_network="$(missing_proxy_network)"
+[ -z "$missing_network" ] || die "A rede $missing_network, em que o Caddy do DeskVoice entra para o proxy do outro sistema publicar o painel, não existe nesta máquina, e sem ela nenhum serviço sobe. Nada foi alterado." "Confira o nome com docker network ls (passo 2 do guia docs/guides/na-mesma-vps-do-crm.md) e rode de novo com DESKVOICE_PROXY_NETWORK=<rede>. Para deixar de usar a rede: DESKVOICE_PROXY_NETWORK=off bash install/install.sh"
 write_env_files "$public_url" "$public_ip" "$panel_domain" "$rtp_start" "$rtp_end"
 # Entrada única: só o Caddy publica porta. Reescreve por inteiro o arquivo de publicação (o de
 # uma versão antiga publicava painel e voz em duas portas), define quantos proxies o painel

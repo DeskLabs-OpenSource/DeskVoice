@@ -5,6 +5,7 @@ import { DELETE as deleteAgent, GET as getAgent, PATCH as patchAgent } from "./a
 import { GET as listAgents } from "./agents/route";
 import { POST as decide } from "./approvals/[id]/decide/route";
 import { GET as listApprovals } from "./approvals/route";
+import { GET as callerHistory } from "./calls/[id]/caller-history/route";
 import { GET as callEvents } from "./calls/[id]/events/route";
 import { GET as getCall } from "./calls/[id]/route";
 import { POST as outbound } from "./calls/outbound/route";
@@ -18,12 +19,13 @@ import { POST as readNotification } from "./notifications/[id]/read/route";
 import { DELETE as deleteNumber, PATCH as patchNumber } from "./phone-numbers/[id]/route";
 import { POST as createNumber } from "./phone-numbers/route";
 import { POST as checkTrunk } from "./trunks/[id]/check/route";
+import { PATCH as switchTrunkFilter } from "./trunks/[id]/inbound-filter/route";
 import { DELETE as deleteTrunk, PATCH as patchTrunk } from "./trunks/[id]/route";
 
 const panel = startPanel();
 let orgB: string;
 let intruder: string;
-let theirs: { agent: string; call: string; approval: string; trunk: string; number: string; notification: string; followUp: string };
+let theirs: { agent: string; call: string; approval: string; trunk: string; registerTrunk: string; number: string; notification: string; followUp: string };
 let mine: { agent: string; trunk: string };
 
 beforeAll(async () => {
@@ -42,6 +44,13 @@ beforeAll(async () => {
     agent,
     call: callId,
     trunk,
+    // Linha por registro com o filtro desligado: o botão de outra organização não pode ligá-lo (R14, contrato 11).
+    registerTrunk: await insert(
+      panel.app,
+      orgB,
+      "insert into trunks (organization_id, name, host, auth_mode, username, inbound_filter) values ($1, 'Theirs by registration', 'sip.theirs.example.test', 'register', '5532', false) returning id",
+      [orgB],
+    ),
     approval: await insert(
       panel.app,
       orgB,
@@ -61,6 +70,7 @@ const snapshot = () =>
     agent: await q.one("select name, enabled from agents where id = $1", [theirs.agent]),
     approval: await q.one("select status, decided_by from approvals where id = $1", [theirs.approval]),
     trunk: await q.one("select name, host, status from trunks where id = $1", [theirs.trunk]),
+    registerTrunk: await q.one("select inbound_filter, status from trunks where id = $1", [theirs.registerTrunk]),
     number: await q.one("select agent_id, e164 from phone_numbers where id = $1", [theirs.number]),
     notification: await q.one("select read_at from notifications where id = $1", [theirs.notification]),
     followUp: await q.one("select owner_user_id, status, closing_note from follow_ups where id = $1", [theirs.followUp]),
@@ -77,8 +87,11 @@ describe("a user of organization A, through every route that takes an id", () =>
       ["DELETE agent", call(deleteAgent, { ...as, method: "DELETE", params: { id: theirs.agent } })],
       ["GET call", call(getCall, { ...as, params: { id: theirs.call } })],
       ["GET call events", call(callEvents, { ...as, params: { id: theirs.call } })],
+      ["GET caller history", call(callerHistory, { ...as, params: { id: theirs.call } })],
       ["decide approval", call(decide, { ...as, method: "POST", params: { id: theirs.approval }, body: { decision: "approved" } })],
       ["PATCH trunk", call(patchTrunk, { ...as, method: "PATCH", params: { id: theirs.trunk }, body: { host: "evil.example.test" } })],
+      ["switch the filter of their line", call(switchTrunkFilter, { ...as, method: "PATCH", params: { id: theirs.registerTrunk }, body: { enabled: true } })],
+      ["switch the filter of their IP line", call(switchTrunkFilter, { ...as, method: "PATCH", params: { id: theirs.trunk }, body: { enabled: false } })],
       ["check trunk", call(checkTrunk, { ...as, method: "POST", params: { id: theirs.trunk } })],
       ["PATCH number", call(patchNumber, { ...as, method: "PATCH", params: { id: theirs.number }, body: { agentId: mine.agent } })],
       ["correct their number", call(patchNumber, { ...as, method: "PATCH", params: { id: theirs.number }, body: { number: "(31) 97777-0000" } })],

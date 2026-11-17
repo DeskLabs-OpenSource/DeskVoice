@@ -3,7 +3,7 @@
 // andamento com um pedido esperando resposta. Dados inventados.
 //
 //   DATABASE_URL=... SYSTEM_DATABASE_URL=... pnpm --filter @deskvoice/panel exec tsx scripts/seed-demo.ts
-import { createDb, createFollowUp, hashPassword, recordEvent, systemClock, withOrg, withSystem, type CallEventKind, type OrgQuery } from "@deskvoice/core";
+import { accountExists, createDb, createFollowUp, createMember, hashPassword, recordEvent, recordFoundingOrganization, systemClock, withOrg, withSystem, type CallEventKind, type OrgQuery } from "@deskvoice/core";
 
 const EMAIL = "demo@deskvoice.test";
 const PASSWORD = "deskvoice-demo";
@@ -28,16 +28,21 @@ async function timeline(q: OrgQuery, callId: string, startedAt: Date, steps: Ste
 }
 
 try {
-  // Só a criação da organização atravessa organizações; todo o resto roda preso a ela.
-  const organizationId = await withSystem(db, async (q) => {
-    if (await q.one("select 1 from users where email = $1", [EMAIL])) throw new Error(`The demo is already seeded: ${EMAIL} exists. Use a fresh database.`);
-    return id(q, "insert into organizations (name) values ('Clínica Aurora (demonstração)') returning id", []);
-  });
+  if (await accountExists(db, EMAIL)) throw new Error(`The demo is already seeded: ${EMAIL} exists. Use a fresh database.`);
   const passwordHash = await hashPassword(PASSWORD);
+  // Só a criação da organização e da conta da dona atravessa organizações; todo o resto roda preso a ela.
+  const { organizationId, owner } = await withSystem(db, async (q) => {
+    const organizationId = await id(q, "insert into organizations (name) values ('Clínica Aurora (demonstração)') returning id", []);
+    const member = await createMember(q, { organizationId, email: EMAIL, name: "Marina Duarte", passwordHash, role: "owner" });
+    if (!member) throw new Error(`The demo is already seeded: ${EMAIL} exists. Use a fresh database.`);
+    // Como o `create-owner`: num banco novo, a organização da demonstração é a fundadora.
+    await recordFoundingOrganization(q, organizationId);
+    return { organizationId, owner: member.userId };
+  });
 
   await withOrg(db, organizationId, async (q) => {
     const org = q.organizationId;
-    const owner = await id(q, "insert into users (organization_id, email, name, password_hash, role, phone_e164) values ($1, $2, 'Marina Duarte', $3, 'owner', '+5531988880001') returning id", [org, EMAIL, passwordHash]);
+    await q.exec("update users set phone_e164 = '+5531988880001' where id = $1", [owner]);
 
     const agentSql = `insert into agents (organization_id, name, role_label, instructions, greeting, engine, tools, transfer_to_e164, enabled)
                       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`;
@@ -61,7 +66,7 @@ try {
 
     const callSql = `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, engine, started_at, answered_at, ended_at, cost_cents, summary)
                      values ($1, $2, 'inbound', 'phone', $3, '+553132221100', $4, $5, $6, $7, $8, $9, $10, $11) returning id`;
-    const usageSql = "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, at) values ($1, $2, $3, $4, $5, $6, $7, $8) returning id";
+    const usageSql = "insert into usage_ledger (organization_id, call_id, engine, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, ($7::int)::bigint * 1000000, $8) returning id";
 
     // 1. A chamada completa: remarcação com isenção de taxa aprovada, tarefa e transferência.
     const started = ago(42 * 60);

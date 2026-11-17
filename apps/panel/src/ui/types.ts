@@ -10,6 +10,12 @@ export interface Me {
   role: Role;
   phone?: string | null;
   whatsapp?: string | null;
+  /** O nome da organização; a tela do agente o mostra no texto padrão da mensagem para quem ligou. */
+  organizationName?: string;
+  /** Se a conta administra a instalação (`isInstallationAdmin`, seção 3.2 do desenho do R8). */
+  installationAdmin?: boolean;
+  /** Se a lista de quem administra a instalação já é explícita: a tela de atualizar mora na área da instalação. */
+  installationExplicit?: boolean;
 }
 
 export interface Agent {
@@ -27,7 +33,43 @@ export interface Agent {
   costCeilingCents: number;
   transferTo: string | null;
   followUpOwnerUserId: string | null;
+  /** Onde quem liga costuma estar. Agente gravado antes do campo existir pode chegar sem ele: vale `normal`. */
+  listeningEnvironment?: ListeningEnvironment;
+  /** Para quem o agente pode passar a ligação (`transfer_to_agent`). Vazia de fábrica. */
+  agentHandoffTargets?: string[];
+  /**
+   * O que acontece quando a ligação cai. O banco aceita quatro modos; a tela oferece `off`, `task` e
+   * `whatsapp`. Agente gravado antes do campo existir pode chegar sem ele: vale `off`.
+   */
+  dropFollowUp?: DropFollowUp;
+  /** O texto do WhatsApp para quem ligou; nulo vale o padrão. */
+  dropFollowUpMessage?: string | null;
+  /** O analista ao vivo do agente (R6); nulo é "Nenhum", o de fábrica. */
+  analystId?: string | null;
 }
+
+/** Uma objeção do analista: a `key` é o que os eventos guardam; o rótulo e a orientação são do operador. */
+export interface AnalystObjection {
+  key: string;
+  label: string;
+  guidance: string;
+}
+
+/** O analista ao vivo (desenho R6, seção 3.1), como `/analysts` devolve. */
+export interface Analyst {
+  id: string;
+  name: string;
+  decisionModel: string;
+  temperature: boolean;
+  objections: AnalystObjection[];
+  providerConfirmedBy: string | null;
+  /** O nome de hoje de quem confirmou o envio ao fornecedor; nulo se a pessoa saiu da equipe. */
+  providerConfirmedByName: string | null;
+  providerConfirmedAt: string | null;
+}
+
+export type ListeningEnvironment = "normal" | "noisy";
+export type DropFollowUp = "off" | "task" | "whatsapp" | "call_back";
 
 export type CallStatus = "ringing" | "in_progress" | "transferred" | "completed" | "failed" | "refused";
 export interface Call {
@@ -55,7 +97,17 @@ export interface Call {
   outcomeEvidence: string | null;
   /** A nota de 0 a 10, soma da régua (`scoreOf`). `null` = sem análise. */
   analysisScore: number | null;
+  /** Atendida pela caixa postal (decisão 0018): não há pessoa do time na linha. */
+  voicemail: boolean;
   costCeilingCents?: number | null;
+}
+
+/** Uma linha da lista de Chamadas: as contagens do extrato da ligação vêm ao lado do valor, como no detalhe. */
+export interface CallListItem extends Call {
+  /** Quantas linhas do extrato da ligação não têm custo medido: com alguma, o zero não é grátis. */
+  unmeasuredCount: number;
+  /** Quantas linhas do extrato da ligação têm custo estimado: com alguma, o valor inclui uma estimativa. */
+  estimatedCount: number;
 }
 
 /** O detalhe de uma chamada: a análise inteira, que a lista não traz. */
@@ -64,8 +116,41 @@ export interface CallDetail extends Call {
   analysis: StoredCallAnalysis | null;
   /** Havia análise gravada, mas fora da forma: a tela diz isso em vez de mostrar a seção. */
   analysisUnreadable: boolean;
+  /** O resumo saiu com o prazo de guarda (`calls.summary` virou marcador). */
+  summaryPurged: boolean;
   /** O conteúdo saiu a pedido do titular (`calls.erased_at`). */
   erased: boolean;
+  /** O custo de cada agente da ligação, na ordem em que gastou; `name: null` é agente apagado. A tela mostra com mais de um. */
+  costByAgent: Array<{ agentId: string | null; name: string | null; costCents: number; unmeasuredCount: number; estimatedCount: number }>;
+  /** Quantas linhas do extrato da ligação não têm custo medido (modelo sem preço, ou consumo que não pôde ser medido): com alguma, o zero não é grátis. */
+  unmeasuredCount: number;
+  /** Quantas linhas do extrato da ligação têm custo estimado: com alguma, o valor inclui uma estimativa. */
+  estimatedCount: number;
+}
+
+/** O bloco "Este número" da tela da chamada (`GET /calls/:id/caller-history`). `phone: null`: a chamada não tem número, e o bloco não aparece. */
+export interface CallerHistory {
+  phone: string | null;
+  callCount: number;
+  simulatedCallCount: number;
+  calls: Array<{
+    id: string;
+    startedAt: string;
+    agentName: string | null;
+    direction: "inbound" | "outbound";
+    status: CallStatus;
+    outcome: string | null;
+    summary: string | null;
+    summaryPurged: boolean;
+    erased: boolean;
+    simulated: boolean;
+  }>;
+  openFollowUpCount: number;
+  simulatedOpenFollowUpCount: number;
+  openFollowUps: Array<{ id: string; callId: string | null; title: string; dueAt: string; ownerName: string | null; simulated: boolean }>;
+  noteCount: number;
+  simulatedNoteCount: number;
+  notes: Array<{ id: string; callId: string; text: string; createdAt: string; simulated: boolean }>;
 }
 
 export interface CallEvent {
@@ -96,6 +181,23 @@ export interface Trunk {
   username: string | null;
   authMode: "register" | "ip";
   callerId: string | null;
+  /** Endereços extras de onde as ligações chegam, além do `host` (nos dois modos). */
+  matchExtra: string[];
+  /** Destino das ligações de saída, quando difere do `host`; `null` vale o `host`. */
+  outboundHost: string | null;
+  /**
+   * De quais endereços a central aceita a ligação desta linha, como o processo de voz calculou e
+   * gravou. O painel nunca resolve nome: mostra o que está aqui. Vazio na linha ainda não aplicada
+   * ou deixada de fora da configuração.
+   */
+  inboundAllowed: string[];
+  /** Quando o conjunto mudou pela última vez (o que a tela mostra quando o `host` é nome). */
+  inboundResolvedAt: string | null;
+  /**
+   * Se o filtro de entrada vale para a linha (R14, contrato 11). Começa desligado só na linha por
+   * registro que já existia antes do filtro; a linha por IP filtra sempre.
+   */
+  inboundFilter: boolean;
   status: string;
   lastCheckAt: string | null;
   lastError: string | null;
@@ -121,6 +223,16 @@ export interface Engine {
   provider: string;
   processingLocation: ProcessingLocation;
   requiresKey: boolean;
+  /** O motor aceita endpoint e modelo próprios na classificação (provedor compatível com OpenAI). */
+  classifyTarget: boolean;
+  /** O endpoint da classificação gravado, ou `null` para o do motor. */
+  baseUrl: string | null;
+  /** O modelo da classificação gravado, ou `null` para o do motor. */
+  classifyModel: string | null;
+  /** O modelo gravado, sem endpoint, não está na tabela de preço: a classificação usa o do motor. */
+  classifyModelUnmeasured: boolean;
+  /** O endpoint da classificação tem a chave dele gravada (o valor nunca chega à tela). */
+  classifyKeyConfigured: boolean;
   /** Vozes do provedor; vazia quando o motor não oferece escolha (o simulado). */
   voices: EngineVoice[];
   defaultVoice: string | null;
@@ -200,9 +312,14 @@ export interface Costs {
   from: string;
   to: string;
   totalCents: number;
-  byDay: Array<{ day: string; costCents: number; seconds: number }>;
-  byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number }>;
-  byEngine: Array<{ engine: string; label: string; costCents: number; seconds: number; priceCheckedOn: string | null; priceSource: string | null }>;
+  /** Quantas linhas do extrato do período não têm custo medido; cada soma abaixo leva a sua. Com alguma, o valor ali não é o gasto inteiro. */
+  unmeasuredCount: number;
+  /** Quantas linhas do extrato do período têm custo estimado; cada soma abaixo leva a sua. A estimativa entra no valor, acima do real. */
+  estimatedCount: number;
+  byDay: Array<{ day: string; costCents: number; billedSeconds: number; unmeasuredCount: number; estimatedCount: number }>;
+  byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number; unmeasuredCount: number; estimatedCount: number }>;
+  /** `source` é `analyst` na linha do analista ao vivo (R6), separada do mesmo modelo usado pelo filtro da fala. */
+  byEngine: Array<{ engine: string; source: "analyst" | null; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
 }
 
 export interface Setting<T> {

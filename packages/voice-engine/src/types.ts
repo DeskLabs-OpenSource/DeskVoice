@@ -1,4 +1,8 @@
+import { isIP } from "node:net";
+import { isPublicAddress } from "@deskvoice/core";
+import { z } from "zod";
 import type { AnalysisGuess } from "./analysis";
+import type { BrainFailure } from "./brain";
 import type { OutcomeGuess } from "./outcome";
 
 /** Definição de ferramenta no formato que os motores entendem (JSON Schema em `parameters`). */
@@ -16,7 +20,24 @@ export interface VoiceSessionConfig {
   /** BCP 47, ex.: "pt-BR". */
   language: string;
   tools: ToolSpec[];
+  /**
+   * Nomes e termos que podem aparecer na ligação, já conferidos pela regra de `@deskvoice/core`
+   * (`checkVocabulary`). É dica de reconhecimento, que o provedor pode ignorar, e não garantia de
+   * que o agente vá entender. Vazia ou ausente, o motor envia ao provedor o mesmo de antes. O motor
+   * em pipeline (R5) reaproveita este campo no serviço de transcrição dele.
+   */
+  vocabulary?: readonly string[];
+  /**
+   * Ambiente de quem liga. `noisy` ajusta a detecção de fala do provedor para ruído de fundo (obra,
+   * música, pessoas falando): o fim de turno não espera o ruído acabar, e o ruído interrompe menos.
+   * `normal` ou ausente, o motor envia ao provedor o mesmo de antes. Os valores de `noisy` são ponto
+   * de partida (docs/specs/2026-11-14-ambiente-barulhento.md); o efeito real não foi medido.
+   */
+  listeningEnvironment?: ListeningEnvironment;
 }
+
+/** Como o agente ajusta a detecção de fala do provedor. `normal` é o de sempre. */
+export type ListeningEnvironment = "normal" | "noisy";
 
 export interface Usage {
   seconds?: number;
@@ -36,6 +57,15 @@ export interface VoiceSessionEvents {
   toolCall(call: { id: string; name: string; args: unknown }): void;
   /** O usuário falou por cima: quem toca o áudio deve descartar o que ainda não saiu. */
   interrupted(): void;
+  /**
+   * Há sinal de que quem ligou está falando: início de fala detectado pelo provedor, ou um pedaço
+   * novo de transcrição. Vem muitas vezes por turno. Não diz quando a fala acabou: é o que a guarda
+   * contra o silêncio precisa saber, e é o que o provedor erra com ruído.
+   *
+   * `words` é verdadeiro quando o sinal é texto novo da transcrição de quem ligou, e falso quando é
+   * só detecção de início de fala.
+   */
+  callerActivity(signal: { words: boolean }): void;
   /** Incremento desde o último `usage` (não é acumulado): quem mede custo soma os eventos. */
   usage(usage: Usage): void;
   /** Seguido de `closed` quando é fatal; sozinho, a sessão continua. */
@@ -50,6 +80,17 @@ export interface VoiceSession {
   sendToolResult(id: string, result: unknown): void;
   /** Pede ao motor uma fala com este conteúdo (aviso de gravação, desculpa, espera). */
   say(text: string): void;
+  /**
+   * Pede ao provedor que dê por encerrada a fala de quem ligou e responda ao que ouviu. A guarda
+   * contra o silêncio chama isto quando o provedor não viu o fim do turno.
+   */
+  closeCallerTurn(): void;
+  /**
+   * Contexto para o agente, que não vira fala por si. Entra pelo mecanismo que o provedor documenta,
+   * nunca por `say`. Sem o método, o motor não aceita orientação, e quem chama registra isso.
+   * Depois de `close`, não manda nada.
+   */
+  guide?(text: string): void;
   close(): Promise<void>;
 }
 
@@ -175,17 +216,26 @@ export interface ClassifyOptions {
   schedule?: (fn: () => void, delayMs: number) => () => void;
   /** Sobrepõe a URL da API HTTP do provedor (testes apontam para um servidor falso). */
   baseUrl?: string;
+  /**
+   * Sobrepõe o modelo do pedido de classificação. Sem ele, o modelo do motor — o mesmo de antes
+   * desta opção existir. Só a classificação lê: a voz em tempo real tem o modelo dela.
+   */
+  model?: string;
 }
 
 /** Por que a classificação não leu um desfecho: o vocabulário do teste da chave, menos o que não é falha. */
 export type ClassifyFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
 
 /**
- * O que a classificação devolve: o palpite, ou o motivo de não haver um. Nos dois casos, o consumo
+ * O que a classificação devolve: o palpite, ou o motivo de não haver. Nos dois casos, o consumo
  * que o provedor declarou e o custo dele pelo preço do modelo de texto, para entrar no custo da
  * chamada (um 200 fora da forma também foi cobrado).
+ *
+ * O custo vem em duas vistas do mesmo número: `costMicrocents`, a exata, e `costCents`, ela
+ * arredondada para cima. Quem lê uma ligação custa cerca de 0,03 centavo, então quem grava o
+ * extrato usa o micro-centavo e arredonda uma vez só, no total da chamada.
  */
-export type ClassifyResult = { model: string; usage: Usage; costCents: number } & (
+export type ClassifyResult = { model: string; usage: Usage; costCents: number; costMicrocents: number } & (
   // `analysis` só no pedido completo, já na forma e antes da checagem contra a transcrição.
   | { ok: true; guess: OutcomeGuess; analysis?: AnalysisGuess }
   // `status` é o HTTP da resposta; `null` quando ela não veio (prazo, rede).
@@ -219,6 +269,57 @@ export interface RecordingTranscriber {
   transcribe(apiKey: string, input: TranscribeInput, options?: ClassifyOptions): Promise<TranscribeResult>;
 }
 
+/**
+ * Uma pergunta fixa ao modelo de decisão (R12, Parte 3). O texto de quem ligou nunca entra aqui:
+ * ele vai no `state`, que é dado. `noul` é sim ou não (a resposta é a probabilidade do sim),
+ * `choice` é uma entre as opções, `score` é um nível de uma escala.
+ */
+export type DecisionQuestion =
+  | { kind: "noul"; instruction: string; criteria?: { true: string; false: string } }
+  | { kind: "choice"; instruction: string; options: Record<string, string> }
+  | { kind: "score"; instruction: string; levels: readonly [string, string, ...string[]] };
+
+export type DecisionAnswer =
+  | { kind: "noul"; value: number }
+  | { kind: "choice"; choice: string; probabilities: Record<string, number>; confidence: number }
+  | { kind: "score"; score: number; probabilities: Record<string, number>; confidence: number };
+
+export interface DecideInput {
+  state: string;
+  questions: Record<string, DecisionQuestion>;
+}
+
+/**
+ * O que o modelo de decisão devolve: as respostas, ou o motivo de não haver, e sempre o consumo e
+ * o custo. `late` é o pedido que passou do prazo e foi cancelado. O custo vem nas duas vistas da
+ * classificação (`ClassifyResult`): um pedido custa milésimos de centavo, e o extrato guarda o
+ * micro-centavo.
+ */
+/**
+ * `costEstimated`: o custo é uma estimativa (o pedido saiu e o consumo não foi lido). Ausente ou
+ * `false`, o custo é o medido pelo consumo que o provedor declarou.
+ */
+export type DecideResult = { model: string; usage: Usage; costCents: number; costMicrocents: number; costEstimated?: boolean; latencyMs: number } & (
+  | { ok: true; answers: Record<string, DecisionAnswer> }
+  | { ok: false; failure: ClassifyFailure | "late"; status: number | null }
+);
+
+/**
+ * Um modelo que decide sobre texto (o filtro da fala de quem ligou; depois, os analistas ao vivo).
+ * Um arquivo por modelo em `deciders/`, descoberto por `loadDecisionModels`.
+ */
+export interface DecisionModel {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  pricing: EnginePricing;
+  keyless?: boolean;
+  /** Nunca lança. Todas as perguntas numa passada só. Passado `timeoutMs`, cancela e devolve `late`. */
+  decide(apiKey: string, input: DecideInput, options?: ClassifyOptions): Promise<DecideResult>;
+  checkKey?(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;
@@ -242,6 +343,21 @@ export interface VoiceEngine {
    */
   classifyOutcome?(apiKey: string, input: ClassifyInput, options?: ClassifyOptions): Promise<ClassifyResult>;
   /**
+   * Verdadeiro para motor cujo `classifyOutcome` aceita destino próprio na classificação: `baseUrl`
+   * e `model` de `ClassifyOptions`. Só esses motores ganham, no painel, os campos de endpoint e
+   * modelo; motor sem a declaração classifica no endereço oficial dele.
+   */
+  classifyTarget?: boolean;
+  /**
+   * O preço, por milhão de tokens, que este motor cobra por um modelo de classificação — quando o
+   * projeto o conhece. É o que autoriza gravar um modelo **sem** endpoint: sem endpoint o pedido vai
+   * ao próprio provedor do motor, que cobra, e o custo só é medido se o preço do modelo estiver
+   * aqui. O painel recusa ao salvar o modelo fora daqui, e o motor, na hora do pedido, troca o
+   * modelo gravado por fora pelo modelo de tabela (o medido). Modelo com endpoint não precisa disto:
+   * quem cobra é o provedor do endpoint.
+   */
+  classifyPricing?(model: string): EnginePricing | undefined;
+  /**
    * Verdadeiro para motor cujo `classifyOutcome` atende `analyze` e devolve a análise da ligação.
    * Motor sem a declaração não analisa, e a rotina registra o motivo na linha do tempo.
    */
@@ -258,6 +374,109 @@ export interface VoiceEngine {
    * prova que a chave vale e alcança o modelo de `connect`. Nunca lança, nunca registra a chave.
    */
   checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+}
+
+/**
+ * Uma voz que o sintetizador oferece, lida da conta do operador (R5, voz do pipeline).
+ */
+export interface SynthesizerVoice {
+  id: string;
+  name: string;
+  /** Idiomas que o provedor declara verificados para a voz (`pt-BR`, ...). Vazio quando não declara. */
+  languages: readonly string[];
+  /** Amostra que o provedor hospeda: tocar não gasta crédito. */
+  previewUrl?: string;
+}
+
+export type SynthesizerVoicesResult = { ok: true; voices: SynthesizerVoice[] } | { ok: false; failure: BrainFailure; status: number | null };
+
+/** O preço por caractere, que é como a ElevenLabs cobra. De um modelo, com a fonte e o dia conferido. */
+export interface SynthesizerPricing {
+  centsPerThousandCharacters: number;
+  source: string;
+  /** `AAAA-MM-DD`. */
+  checkedOn: string;
+}
+
+/**
+ * O consumo de uma fala, em incrementos (como `VoiceSessionEvents.usage`): quem mede soma os eventos.
+ * Sai quando o texto **é enviado** ao provedor, e não quando vira áudio: é o que o provedor cobra,
+ * inclusive do que a interrupção descartou. `costMicrocents` ausente é "sem preço conhecido" (o
+ * modelo não está na tabela), nunca zero. `estimated` é sempre verdadeiro enquanto ninguém comparar a
+ * contagem com o consumo da conta.
+ */
+export interface SpeechUsage {
+  characters: number;
+  costMicrocents?: number;
+  estimated: true;
+}
+
+export interface SpeechEvents {
+  /** PCM16 mono 8 kHz, como `VoiceSessionEvents.audio`. */
+  audio(pcm16_8k: Buffer): void;
+  /** O que já virou áudio, em caracteres, acumulado, para cortar a fala do agente na interrupção (fatia 4). */
+  spoken(chars: number): void;
+  /** Incremento do que foi enviado ao provedor, com o custo. */
+  usage(usage: SpeechUsage): void;
+  /** Esta fala terminou de gerar. Não vem depois de `cancel`. */
+  done(): void;
+  error(error: Error): void;
+}
+
+export interface Speech {
+  on<K extends keyof SpeechEvents>(event: K, handler: SpeechEvents[K]): void;
+  /** Texto em pedaços, como o cérebro entrega. `flush` força a geração do que já chegou. */
+  push(text: string, options?: { flush?: boolean }): void;
+  /** Não vem mais texto: o provedor gera o resto e a fala termina com `done`. */
+  end(): void;
+  /** Interrupção: para de gerar e descarta o que não saiu. O que já foi enviado ao provedor é cobrado. */
+  cancel(): void;
+}
+
+/** Por que a fala não abriu, no vocabulário fechado do teste da chave. */
+export type SynthesizerOpenFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
+
+/** A fala não abriu. Quem abre trata como recusa de abertura; o texto do provedor fica só em `message`, para o log. */
+export class SynthesizerOpenError extends Error {
+  readonly reason: SynthesizerOpenFailure;
+  constructor(reason: SynthesizerOpenFailure, message: string) {
+    super(message);
+    this.reason = reason;
+  }
+}
+
+export interface SpeakConfig {
+  voiceId: string;
+  /** BCP 47, ex.: "pt-BR". */
+  language: string;
+  /** Sobrepõe o modelo padrão do sintetizador. */
+  model?: string;
+}
+
+/**
+ * Uma voz do pipeline (R5): recebe texto em pedaços e devolve PCM16 mono 8 kHz. Um arquivo por
+ * provedor em `synthesizers/`, descoberto por `loadSynthesizers`.
+ */
+export interface SpeechSynthesizer {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  /** O modelo usado quando a escolha não diz outro. */
+  defaultModel: string;
+  /** O preço do modelo padrão. */
+  pricing: SynthesizerPricing;
+  /** O preço de um modelo; `undefined` é "sem preço conhecido", nunca zero. */
+  pricingOf(model: string): SynthesizerPricing | undefined;
+  keyless?: boolean;
+  /** Onde a pessoa pega a chave (o link da tela). */
+  keyUrl?: string;
+  /** Nunca lança. */
+  listVoices(apiKey: string, options?: KeyCheckOptions): Promise<SynthesizerVoicesResult>;
+  /** Nunca lança, nunca sintetiza, nunca registra a chave. */
+  checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+  /** Abre uma fala. Lança `SynthesizerOpenError` com o motivo no vocabulário fechado. */
+  speak(config: SpeakConfig, apiKey: string, options?: ConnectOptions): Promise<Speech>;
 }
 
 // Mora aqui, e não em outcome.ts, porque o painel importa valor só por `@deskvoice/voice-engine/types`:
@@ -285,3 +504,117 @@ export const analysisEnabledOf = (stored: unknown): boolean => stored === true;
  */
 export const TRANSCRIPTION_SETTING = "calls.transcription_enabled";
 export const transcriptionEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
+ * Transcrever sozinho, ao fim da chamada, a gravação que terminou sem fala nenhuma (chave
+ * `calls.auto_transcription_enabled`). Ausente é desligada, de fábrica: cada chamada sem texto vira
+ * um pedido pago ao provedor, sem ninguém pedir. Só vale com `calls.transcription_enabled` também
+ * ligada, que é a licença para o áudio sair para o provedor. Só `true` liga.
+ */
+export const AUTO_TRANSCRIPTION_SETTING = "calls.auto_transcription_enabled";
+export const autoTranscriptionEnabledOf = (stored: unknown): boolean => stored === true;
+
+/**
+ * O modelo de decisão que lê a fala de quem ligou durante a chamada, por organização (chave
+ * `calls.decision_model` em `settings`, com o id do modelo). Ausente é desligado, de fábrica: cada
+ * fala vira um pedido pago, com o texto de quem ligou, ao fornecedor do modelo. Só um id de texto liga;
+ * quem confere se o modelo existe nesta instalação é quem o usa.
+ */
+export const DECISION_MODEL_SETTING = "calls.decision_model";
+export const decisionModelOf = (stored: unknown): string | undefined => (typeof stored === "string" && stored.trim() !== "" ? stored.trim() : undefined);
+/** A chave do modelo de decisão, cifrada como a dos motores. É do operador, e nunca a do motor de voz. */
+export const decisionModelKeySetting = (modelId: string): string => `decision_model.${modelId}.api_key`;
+
+/**
+ * Endpoint, modelo e chave da **classificação**, por motor, juntos numa configuração só
+ * (`engine.<id>.classify_target` em `settings`).
+ *
+ * Existem porque a classificação é a tarefa em que o provedor compatível com OpenAI (DeepSeek,
+ * Qwen, OpenRouter, Groq) resolve: uma chamada curta, saída em JSON, uma vez por ligação. Sem
+ * eles, quem não tem chave OpenAI ou Google não classifica nada. A voz em tempo real continua nos
+ * endpoints oficiais: provedor compatível não oferece áudio bidirecional.
+ *
+ * Ausentes valem o padrão do motor, que é o de hoje: OpenAI em `https://api.openai.com/v1`, com
+ * `gpt-5-nano` e a chave do motor. Com endpoint, a chave é a dele (`apiKey`, cifrada), dada a esse
+ * endereço: a chave do motor nunca vai a um endpoint configurado, e trocar o endpoint pede a chave
+ * de novo. Só o modelo, sem endpoint, continua na OpenAI com a chave do motor — e só se o motor
+ * souber o preço dele (`classifyPricing`): o painel recusa gravar outro, e o motor usa o modelo de
+ * tabela quando um já gravado cai fora dela, para não cobrar sem medir.
+ */
+export const engineClassifyTargetSetting = (engineId: string): string => `engine.${engineId}.classify_target`;
+
+/** O destino da classificação, quando o dono configurou um; vazio é o padrão do motor. */
+export interface ClassifyTarget {
+  baseUrl?: string;
+  model?: string;
+}
+
+/** Como a configuração fica gravada: só os campos de texto, sem validar o conteúdo. `apiKey` vem cifrada. */
+export interface StoredClassifyTarget {
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+}
+
+// Campo que não é texto, ou vazio, é como se não estivesse gravado.
+const storedText = z.string().min(1).optional().catch(undefined);
+const storedClassifyTarget = z.object({ baseUrl: storedText, model: storedText, apiKey: storedText }).catch({});
+
+export const storedClassifyTargetOf = (stored: unknown): StoredClassifyTarget => storedClassifyTarget.parse(stored);
+
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
+
+/**
+ * O endereço serve como destino da classificação? Só `https`, porque a chave do provedor vai no
+ * cabeçalho e um `http` a entregaria em claro; sem usuário e senha na URL; e, quando o host é um
+ * IP, só IP público, pela mesma lista da guarda de rede dos conectores. Nome de host é conferido
+ * de novo na hora do pedido, com o DNS resolvido, pela própria guarda.
+ */
+export const isClassifyBaseUrl = (value: string): boolean => {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (url.protocol !== "https:" || host === "" || url.username !== "" || url.password !== "") return false;
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  return isIP(host) === 0 || isPublicAddress(host);
+};
+
+/** O endereço gravado, sem a barra final (o caminho é colado depois), ou `undefined` se não serve. */
+export const classifyBaseUrlOf = (stored: unknown): string | undefined => {
+  if (typeof stored !== "string") return undefined;
+  const value = stored.trim().replace(/\/+$/, "");
+  return isClassifyBaseUrl(value) ? value : undefined;
+};
+
+/** O nome do modelo: o que o provedor publica (`deepseek-chat`, `qwen/qwen3-32b`), ou `undefined`. */
+export const classifyModelOf = (stored: unknown): string | undefined => {
+  if (typeof stored !== "string") return undefined;
+  const value = stored.trim();
+  return MODEL_NAME.test(value) ? value : undefined;
+};
+
+/** Por que a classificação não sai para o endpoint configurado. */
+export type ClassifyDestinationRefusal =
+  /** O endpoint gravado não é `https` público (foi gravado por fora do painel), ou a guarda de rede o recusou na hora. */
+  | "endpoint_refused"
+  /** Há endpoint, mas não a chave dele: a do motor não serve, porque foi dada a outro endereço. */
+  | "endpoint_key_missing";
+
+/**
+ * Para onde a rotina manda a classificação, lido do que está gravado. Sem endpoint, o padrão do
+ * motor (e o modelo, se válido), com a chave do motor. Com endpoint, só se ele for válido e tiver
+ * a chave dele, que volta em `endpointKey`, ainda cifrada; senão, o motivo de não sair nada.
+ * Modelo inválido cai no padrão do motor.
+ */
+export const classifyDestinationOf = (
+  stored: unknown,
+): { ok: true; target: ClassifyTarget; endpointKey?: string } | { ok: false; reason: ClassifyDestinationRefusal } => {
+  const { baseUrl: storedBaseUrl, model: storedModel, apiKey } = storedClassifyTargetOf(stored);
+  const model = classifyModelOf(storedModel);
+  const withModel = model !== undefined ? { model } : {};
+  if (storedBaseUrl === undefined) return { ok: true, target: withModel };
+  const baseUrl = classifyBaseUrlOf(storedBaseUrl);
+  if (baseUrl === undefined) return { ok: false, reason: "endpoint_refused" };
+  if (apiKey === undefined) return { ok: false, reason: "endpoint_key_missing" };
+  return { ok: true, target: { baseUrl, ...withModel }, endpointKey: apiKey };
+};
