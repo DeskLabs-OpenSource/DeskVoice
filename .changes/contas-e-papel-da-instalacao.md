@@ -27,11 +27,11 @@ qual é. Anote o resultado antes de voltar:
 
     grep -l '^version=0.27.0$' backups/*/manifest.txt | sort | tail -n 1 | xargs dirname
 
-Para voltar, troque a versão e depois restaure esse backup, pelo nome da pasta que o comando
-mostrou:
+Para voltar, troque a versão e depois restaure esse backup, colando exatamente o que o comando
+mostrou (ele já começa com `backups/`):
 
     bash install/update.sh --to 0.27.0
-    bash install/restore.sh backups/<a pasta que o comando mostrou>
+    bash install/restore.sh <exatamente o que o comando mostrou>
 
 Não use `restore.sh latest` nem o backup que o `update.sh --to 0.27.0` mostra no fim como
 "Backup de antes da atualização": esse foi feito na volta, com o banco desta versão, e restaurá-lo
