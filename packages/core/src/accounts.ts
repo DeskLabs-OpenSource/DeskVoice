@@ -200,3 +200,131 @@ export function grantInstallationAdmin(db: Db, email: string, now: Date): Promis
     return { granted: true, accountId: account.id };
   });
 }
+
+/**
+ * Trava da lista de quem administra a instalação. Pôr, tirar e a criação da segunda organização
+ * passam por ela, na transação de quem chama: duas pessoas tirando uma à outra ao mesmo tempo não
+ * deixam a lista vazia. `q` tem de ser de `withSystem`.
+ */
+export async function lockInstallationAdmins(q: OrgQuery): Promise<void> {
+  await q.exec("select pg_advisory_xact_lock(hashtext('deskvoice.installation_admins'))");
+}
+
+/** Uma pessoa, como a área da instalação a mostra: a conta e o nome do vínculo mais antigo. */
+export interface InstallationPerson {
+  accountId: string;
+  email: string;
+  name: string;
+}
+
+/**
+ * Para onde vai a lista quando ela ficar explícita (seção 3.2, item 3), lido da fundadora:
+ * - `granted`: os donos ativos que ainda não têm a marca, e que vão recebê-la;
+ * - `losing`: os administradores ativos sem a marca, que deixam de administrar a instalação.
+ *
+ * Com a lista já explícita, as duas listas vêm vazias: criar outra organização não muda ninguém.
+ * `q` tem de ser de `withSystem`.
+ */
+export async function explicitAdminsTransition(q: OrgQuery): Promise<{ explicit: boolean; granted: InstallationPerson[]; losing: InstallationPerson[] }> {
+  const explicit = (await q.one("select 1 from installation_settings where key = $1", [ADMINS_EXPLICIT_KEY])) !== null;
+  if (explicit) return { explicit, granted: [], losing: [] };
+  const rows = await q.many<InstallationPerson & { role: TeamRole }>(
+    `select a.id as "accountId", a.email::text as email, u.name, u.role
+       from users u
+       join installation_settings s on s.key = $1 and u.organization_id = (s.value #>> '{}')::uuid
+       join accounts a on a.id = u.account_id
+      where u.kind = 'member' and u.disabled_at is null and u.role in ('owner', 'admin') and a.installation_admin_at is null
+      order by u.name, a.email`,
+    [FOUNDING_ORGANIZATION_KEY],
+  );
+  const person = ({ accountId, email, name }: InstallationPerson): InstallationPerson => ({ accountId, email, name });
+  return { explicit, granted: rows.filter((row) => row.role === "owner").map(person), losing: rows.filter((row) => row.role === "admin").map(person) };
+}
+
+/**
+ * Dá a marca a uma conta e grava `installation_admin_granted`. Devolve se deu (a conta que já tinha
+ * a marca fica como estava). `q` tem de ser de `withSystem`, com a trava da lista.
+ */
+export async function markInstallationAdmin(q: OrgQuery, accountId: string, now: Date, detail: { actorAccountId: string | null; source: string }): Promise<boolean> {
+  const marked = await q.exec("update accounts set installation_admin_at = $2 where id = $1 and installation_admin_at is null", [accountId, now]);
+  if (marked === 0) return false;
+  await recordInstallationEvent(q, now, "installation_admin_granted", { actorAccountId: detail.actorAccountId, payload: { account_id: accountId, source: detail.source } });
+  return true;
+}
+
+export interface InstallationAdmin extends InstallationPerson {
+  /** Quando recebeu a marca, ou `null` se administra só pela regra da fundadora (lista ainda não explícita). */
+  since: string | null;
+}
+
+/**
+ * Quem administra a instalação, com a mesma regra de `isInstallationAdmin`: as contas com a marca e,
+ * enquanto a lista não é explícita, o dono e o administrador ativos da fundadora.
+ */
+export function listInstallationAdmins(db: Db): Promise<{ explicit: boolean; admins: InstallationAdmin[] }> {
+  return withSystem(db, async (q) => {
+    const explicit = (await q.one("select 1 from installation_settings where key = $1", [ADMINS_EXPLICIT_KEY])) !== null;
+    const admins = await q.many<InstallationAdmin>(
+      `select a.id as "accountId", a.email::text as email,
+              coalesce((select u.name from users u where u.account_id = a.id and u.kind = 'member' order by u.created_at, u.id limit 1), '') as name,
+              a.installation_admin_at as since
+         from accounts a
+        where a.installation_admin_at is not null
+           or (not $2::boolean and exists (select from users u
+                                    join installation_settings s on s.key = $1 and u.organization_id = (s.value #>> '{}')::uuid
+                                   where u.account_id = a.id and u.kind = 'member' and u.disabled_at is null and u.role in ('owner', 'admin')))
+        order by name, a.email`,
+      [FOUNDING_ORGANIZATION_KEY, explicit],
+    );
+    return { explicit, admins: admins.map((admin) => ({ ...admin, since: admin.since === null ? null : new Date(admin.since).toISOString() })) };
+  });
+}
+
+export type GrantByAdminResult = { ok: true; accountId: string } | { ok: false; reason: "email_not_found" | "already_granted" };
+
+/** Quem administra põe outra conta na lista, pelo e-mail dela (seção 3.2, regras da lista). */
+export function grantInstallationAdminBy(db: Db, actorAccountId: string, email: string, now: Date): Promise<GrantByAdminResult> {
+  return withSystem(db, async (q) => {
+    await lockInstallationAdmins(q);
+    const account = await q.one<{ id: string }>("select id from accounts where email = $1", [email]);
+    if (!account) return { ok: false, reason: "email_not_found" };
+    if (!(await markInstallationAdmin(q, account.id, now, { actorAccountId, source: "panel" }))) return { ok: false, reason: "already_granted" };
+    return { ok: true, accountId: account.id };
+  });
+}
+
+export type RevokeResult = { ok: true } | { ok: false; reason: "not_found" | "last_admin" };
+
+/**
+ * Tira a marca de uma conta. Recusa (`last_admin`) quando, sem ela, ninguém mais administraria a
+ * instalação: depois de explícita, a lista nunca fica vazia. Enquanto a lista não é explícita, a
+ * conta que também é dona ou administradora da fundadora continua administrando pela regra dela.
+ */
+export function revokeInstallationAdmin(db: Db, actorAccountId: string, accountId: string, now: Date): Promise<RevokeResult> {
+  return withSystem(db, async (q) => {
+    await lockInstallationAdmins(q);
+    const target = await q.one("select 1 from accounts where id = $1 and installation_admin_at is not null", [accountId]);
+    if (!target) return { ok: false, reason: "not_found" };
+    const others = await q.one<{ n: number }>(
+      `select count(*)::int as n from accounts a
+        where a.id <> $1
+          and (a.installation_admin_at is not null
+               or (not exists (select from installation_settings where key = $2)
+                   and exists (select from users u
+                                 join installation_settings s on s.key = $3 and u.organization_id = (s.value #>> '{}')::uuid
+                                where u.account_id = a.id and u.kind = 'member' and u.disabled_at is null and u.role in ('owner', 'admin'))))`,
+      [accountId, ADMINS_EXPLICIT_KEY, FOUNDING_ORGANIZATION_KEY],
+    );
+    // Enquanto não é explícita, a própria conta pode continuar pela regra da fundadora: não é a última.
+    const keepsByRole = await q.one(
+      `select 1 from users u join installation_settings s on s.key = $2 and u.organization_id = (s.value #>> '{}')::uuid
+        where u.account_id = $1 and u.kind = 'member' and u.disabled_at is null and u.role in ('owner', 'admin')
+          and not exists (select from installation_settings where key = $3)`,
+      [accountId, FOUNDING_ORGANIZATION_KEY, ADMINS_EXPLICIT_KEY],
+    );
+    if ((others?.n ?? 0) === 0 && !keepsByRole) return { ok: false, reason: "last_admin" };
+    await q.exec("update accounts set installation_admin_at = null where id = $1", [accountId]);
+    await recordInstallationEvent(q, now, "installation_admin_revoked", { actorAccountId, payload: { account_id: accountId, source: "panel" } });
+    return { ok: true };
+  });
+}

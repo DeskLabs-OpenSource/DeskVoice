@@ -231,7 +231,7 @@ describe("schema", () => {
     }
   });
 
-  it("keeps the installation tables out of reach of the application role, and lets the system role only read and add (and drop an account left without a link)", async () => {
+  it("keeps the installation tables out of reach of the application role, and lets the system role only read and add (and drop an account left without a link, and change a setting's value but never its key)", async () => {
     const privileges = await owner.pool.query<{ name: string; role: string; can_select: boolean; can_insert: boolean; can_update: boolean; can_delete: boolean; can_truncate: boolean }>(
       `select t.name, r.role,
               has_table_privilege(r.role, format('public.%I', t.name), 'select') as can_select,
@@ -242,8 +242,9 @@ describe("schema", () => {
          from unnest($1::text[]) as t(name), unnest(array['deskvoice_app', 'deskvoice_system']) as r(role)`,
       [INSTALLATION_TABLES],
     );
-    // A conta e as configurações mudam (senha, marca, padrão); a auditoria só cresce.
-    const SYSTEM_UPDATES: Record<string, boolean> = { accounts: true, installation_settings: true, installation_events: false };
+    // A conta muda (senha, marca); a auditoria só cresce. A configuração muda só no valor, e por
+    // coluna: a tabela inteira fica sem `update` (conferido logo abaixo, coluna por coluna).
+    const SYSTEM_UPDATES: Record<string, boolean> = { accounts: true, installation_settings: false, installation_events: false };
     // Só a conta sai, e só quando fica sem vínculo (`deleteAccountIfOrphan`). A configuração e a
     // auditoria nunca são apagadas pelo produto.
     const SYSTEM_DELETES: Record<string, boolean> = { accounts: true, installation_settings: false, installation_events: false };
@@ -252,6 +253,23 @@ describe("schema", () => {
       const expected = row.role === "deskvoice_app" ? [false, false, false, false, false] : [true, true, SYSTEM_UPDATES[row.name], SYSTEM_DELETES[row.name], false];
       expect([row.can_select, row.can_insert, row.can_update, row.can_delete, row.can_truncate], `${row.name} as ${row.role}`).toEqual(expected);
     }
+    // O papel de sistema muda o valor de uma configuração, nunca a chave: trocar a chave de
+    // `installation.admins_explicit_at` desfaria a lista explícita sem apagar a linha (seção 3.2).
+    const columns = await owner.pool.query<{ name: string; role: string; can_update: boolean }>(
+      `select c.name, r.role, has_column_privilege(r.role, 'public.installation_settings', c.name, 'update') as can_update
+         from unnest(array['key', 'value', 'secret', 'updated_at']) as c(name), unnest(array['deskvoice_app', 'deskvoice_system']) as r(role)
+        order by r.role, c.name`,
+    );
+    expect(columns.rows.map((row) => `${row.role}.${row.name}=${row.can_update}`)).toEqual([
+      "deskvoice_app.key=false",
+      "deskvoice_app.secret=false",
+      "deskvoice_app.updated_at=false",
+      "deskvoice_app.value=false",
+      "deskvoice_system.key=false",
+      "deskvoice_system.secret=false",
+      "deskvoice_system.updated_at=true",
+      "deskvoice_system.value=true",
+    ]);
     // Sem policy: um `grant` dado por engano ao papel de aplicação continuaria sem linha visível.
     for (const table of INSTALLATION_TABLES) expect(tables.find((t) => t.name === table), table).toMatchObject({ rls: true, forced: true });
   });

@@ -1,10 +1,10 @@
-import { accountOfMember, checkMemberPassword, isInstallationAdmin, latestUpdateRequest, type Db } from "@deskvoice/core";
+import { accountOfMember, checkMemberPassword, isInstallationAdmin, latestUpdateRequest, requestInstallationUpdate, type Db } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, handle, notFound } from "../../../../../server/context";
 import type { Published } from "../../../../../server/releases";
 import { loginLimiter } from "../../../../../server/rate-limit";
 import { compareVersions, isPublishedVersion, publishedReleases } from "../../../../../server/releases";
-import { AGENT_SILENT_MINUTES, REQUEST_COLUMNS, expireStaleUpdates } from "../../../../../server/update";
+import { AGENT_SILENT_MINUTES, expireStaleUpdates } from "../../../../../server/update";
 
 /**
  * Quem administra a instalação (seção 3.2 do desenho do R8). Numa instalação de um cliente só são
@@ -94,10 +94,8 @@ export const POST = handle(
     }
     await expireStaleUpdates(deps);
     try {
-      return await q.one(
-        `insert into update_requests (organization_id, requested_by, from_version, target_version, requested_at) values ($1, $2, $3, $4, $5) returning ${REQUEST_COLUMNS}`,
-        [session.organizationId, session.userId, deps.appVersion, body.target, now],
-      );
+      // O pedido e `update_requested` na auditoria da instalação, na mesma transação (seção 3.11).
+      return await requestInstallationUpdate(deps.db, { organizationId: session.organizationId, userId: session.userId, fromVersion: deps.appVersion, targetVersion: body.target }, now);
     } catch (error) {
       // Quem garante "um pedido aberto por vez" é o índice único do banco, não uma consulta antes.
       if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {

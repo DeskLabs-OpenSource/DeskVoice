@@ -123,6 +123,11 @@ function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): string {
     }
     case "caller_memory_changed":
       return fill(t.history.caller_memory_changed, { who, state: p.to === true ? t.memoryStates.on : t.memoryStates.off });
+    // Feitos pela administração da instalação, que não tem vínculo aqui: a frase não tem "quem".
+    case "organization_created":
+      return fill(t.history.organization_created, { name: typeof p.name === "string" ? p.name : "" });
+    case "organization_renamed":
+      return fill(t.history.organization_renamed, { from: typeof p.from === "string" ? p.from : "", to: typeof p.to === "string" ? p.to : "" });
   }
 }
 

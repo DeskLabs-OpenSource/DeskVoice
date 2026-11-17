@@ -105,6 +105,8 @@ const privacy: PrivacyDictionary = {
     caller_notes_purged: "Agent notes older than {days} days were deleted by the memory period. Notes deleted: {count}.",
     caller_notes_retention_changed: "{who} changed the memory period from {from} to {to}.",
     caller_memory_changed: "{who} turned the caller memory for the agent {state}.",
+    organization_created: "The installation administration created this organization, named \"{name}\".",
+    organization_renamed: "The installation administration renamed this organization from \"{from}\" to \"{to}\".",
     caller_notes_deleted: "{who} forgot the number ending in {suffix}. Agent notes deleted: {notes}. Closed follow-ups deleted: {followUps}.",
   },
   noteDeleted: "{who} deleted an agent note.",

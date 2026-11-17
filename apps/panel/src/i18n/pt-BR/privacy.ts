@@ -103,6 +103,8 @@ const privacy = {
     caller_notes_purged: "As notas do agente com mais de {days} dias foram apagadas pelo prazo da memória. Notas apagadas: {count}.",
     caller_notes_retention_changed: "{who} mudou o prazo da memória de {from} para {to}.",
     caller_memory_changed: "{who} deixou a memória do número no agente {state}.",
+    organization_created: "A administração da instalação criou esta organização, com o nome \"{name}\".",
+    organization_renamed: "A administração da instalação renomeou esta organização de \"{from}\" para \"{to}\".",
     caller_notes_deleted: "{who} esqueceu o número terminado em {suffix}. Notas do agente apagadas: {notes}. Pendências fechadas apagadas: {followUps}.",
   },
   noteDeleted: "{who} apagou uma nota do agente.",
