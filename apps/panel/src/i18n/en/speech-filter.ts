@@ -1,0 +1,57 @@
+import type { SpeechFilterDictionary } from "../pt-BR/speech-filter";
+
+const speechFilter: SpeechFilterDictionary = {
+  menu: "Speech filter",
+  title: "Speech filter",
+  lead: "A decision model reads the text of what the caller says and marks what may be background speech, or suggests the likely reading of a term in the agent's vocabulary. It only marks and suggests: it never deletes or changes what the person said. It comes turned off.",
+  guide: "How it works, what leaves the server and how to ask for deletion: docs/guides/filtro-de-fala.en.md",
+  model: "Decision model",
+  none: "None (off)",
+  confirmedBy: "Sending confirmed by {who} on {when}.",
+  confirm: "The text of what the caller says goes to {provider}.",
+  confirmRequired: "Tick the confirmation to turn this model on.",
+  save: "Save",
+  saved: "Saved.",
+  keyNeeded: "Save and test this model's key before turning it on.",
+  keysTitle: "Model keys",
+  keyOf: "{model} key",
+  keySaved: "Key saved",
+  keyMissing: "No key",
+  keyNew: "Paste the new key to replace it",
+  keySave: "Save and test",
+  remove: "Remove the key",
+  removeInUse: "Turn the filter off before removing the key of the model in use.",
+  neverTested: "The key has not been tested yet.",
+  savedNotTested: "Key saved. The test was postponed for a few minutes: the test limit was reached.",
+  tested: "Tested on {when}: {result}",
+  results: {
+    accepted: "accepted.",
+    rejected: "the provider rejected the key. Check that it was copied whole and has not been revoked.",
+    model_unavailable: "the key is valid, but the account has no access to the model.",
+    no_credit: "the key is valid, but the account has no credit.",
+    region_unavailable: "the provider does not serve this server's country or region.",
+    rate_limited: "the provider asked to wait. Try again in a few minutes.",
+    unreachable: "the provider could not be reached. Check that the server reaches the internet.",
+    unexpected_response: "the provider answered in an unexpected form. Try again later.",
+    not_needed: "this model takes no key.",
+  },
+  noticeTitle: "Where the text goes",
+  location: {
+    "this-server": "This model runs on this server: the text does not leave it.",
+    undeclared: "{provider} does not declare where it processes the text.",
+    country: "{provider}'s service is hosted {country}.",
+  },
+  countries: { US: "in the United States" },
+  providers: { typesafe: "TypeSafe" },
+  retention: {
+    typesafe: [
+      "TypeSafe keeps the personal data it receives, such as this text, for as long as reasonably necessary to provide the service or for its business or commercial purposes, with no period set in the policy.",
+      "On request, it deletes this data or keeps it in a form that does not identify the person.",
+    ],
+  },
+  retentionUnread: "The project has not read this provider's retention policy.",
+  source: "Source: the provider's privacy policy (last updated {updated}), read on {read}.",
+  locationSource: "Source for the location: the provider's page, read on {read}.",
+};
+
+export default speechFilter;

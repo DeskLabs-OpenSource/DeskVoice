@@ -260,6 +260,28 @@ const timeline: TimelineDictionary = {
       whatsapp_sent: "El mensaje de WhatsApp a quien llamó salió.",
       whatsapp_failed: "El mensaje de WhatsApp a quien llamó no salió.",
     },
+    speech_marks: {
+      background: "Puede ser habla de fondo (confianza {confidence})",
+      suggestion: "Lectura probable: {term} (confianza {confidence})",
+      note: "Sugerencia del filtro de habla. El texto de arriba es lo que se oyó, sin cambios.",
+    },
+    caller_speech_read: {
+      finished: "Observación del filtro de habla, después del turno: la persona había terminado la idea (confianza {confidence}). No cambió nada en la llamada.",
+      late: "El filtro de habla no respondió en el plazo de 1 s para esta frase. No cambió nada en la llamada.",
+      failed: "El filtro de habla no leyó esta frase ({reason}). La llamada siguió sin él.",
+      reasons: {
+        model_not_installed: "el modelo elegido no existe en esta versión",
+        key_missing: "falta la clave del modelo, en Configuración → Filtro de habla",
+        key_unreadable: "la clave guardada no se pudo leer; guarda la clave de nuevo en Configuración → Filtro de habla",
+        rejected: "el proveedor rechazó la clave",
+        model_unavailable: "el modelo no está disponible en esta cuenta",
+        no_credit: "la cuenta del proveedor no tiene crédito",
+        region_unavailable: "el proveedor no atiende la región de este servidor",
+        rate_limited: "el proveedor pidió esperar",
+        unreachable: "no se pudo alcanzar al proveedor",
+        unexpected_response: "el proveedor respondió de forma inesperada",
+      },
+    },
     unknown: "Evento",
   },
   reasons: {

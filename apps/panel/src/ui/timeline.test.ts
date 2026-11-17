@@ -84,4 +84,43 @@ describe("linha do tempo", () => {
   it(`os textos de "Pode passar a ligação para" dizem o limite de ${MAX_AGENT_HANDOFFS_PER_CALL} passagens, nos três idiomas`, () => {
     for (const dictionary of [ptBRAgents, enAgents, esAgents]) expect(dictionary.handoffMax).toContain(String(MAX_AGENT_HANDOFFS_PER_CALL));
   });
+
+  describe("o filtro da fala", () => {
+    const at = "2026-11-17T12:00:00.000Z";
+    const render = (events: Array<{ id: string; kind: string; payload: Record<string, unknown> }>): string =>
+      renderToStaticMarkup(createElement(Timeline, { events: events.map((event) => ({ ...event, at })) as never, live: false, agentName: "Ana" }));
+
+    it("a marca de fundo e a sugestão aparecem como sugestão, com o texto ouvido intacto ao lado", () => {
+      const html = render([
+        { id: "1", kind: "transcript_user", payload: { text: "quero falar com o meu gasto", read: { background: { confidence: 0.82 }, suggestion: { term: "Melgaço", confidence: 0.91 } } } },
+        { id: "2", kind: "caller_speech_read", payload: { onTime: true, marked: true, background: 0.82, reading: { confidence: 0.91, suggested: true }, finished: null } },
+      ]);
+      // O texto ouvido fica como foi gravado; a leitura provável vem ao lado, sem trocá-lo.
+      expect(html).toContain("quero falar com o meu gasto");
+      expect(html).toContain("Pode ser fala de fundo (confiança 0,82)");
+      expect(html).toContain("Leitura provável: Melgaço (confiança 0,91)");
+      expect(html).toContain(ptBR.events.speech_marks.note);
+      // A leitura a tempo, sem observação, não vira uma linha a mais.
+      expect(html).not.toContain(ptBR.events.unknown);
+    });
+
+    it("a decisão tardia aparece como observação, e o prazo vencido e a falha dizem que nada mudou", () => {
+      const html = render([
+        { id: "1", kind: "transcript_user", payload: { text: "era isso" } },
+        { id: "2", kind: "caller_speech_read", payload: { onTime: true, marked: false, background: 0, finished: { confidence: 0.93, observation: true } } },
+        { id: "3", kind: "caller_speech_read", payload: { onTime: false, failure: "late", status: null } },
+        { id: "4", kind: "caller_speech_read", payload: { onTime: false, failure: "key_missing", model: "jev" } },
+      ]);
+      expect(html).toContain("era isso");
+      expect(html).toContain("a pessoa tinha terminado o pensamento (confiança 0,93). Não mudou nada na ligação.");
+      expect(html).toContain(ptBR.events.caller_speech_read.late);
+      expect(html).toContain("O filtro de fala não leu esta fala (falta a chave do modelo, em Configurações → Filtro de fala). A ligação seguiu sem ele.");
+      expect(html).not.toContain("Pode ser fala de fundo");
+    });
+
+    it("sem filtro, a fala sai como antes: nenhuma marca", () => {
+      const html = render([{ id: "1", kind: "transcript_user", payload: { text: "bom dia" } }]);
+      expect(html).not.toContain(ptBR.events.speech_marks.note);
+    });
+  });
 });

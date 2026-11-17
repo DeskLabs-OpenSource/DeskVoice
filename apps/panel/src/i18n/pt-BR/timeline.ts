@@ -261,6 +261,29 @@ const timeline = {
       whatsapp_sent: "A mensagem no WhatsApp para quem ligou saiu.",
       whatsapp_failed: "A mensagem no WhatsApp para quem ligou não saiu.",
     },
+    // O filtro da fala (R12): ele só marca e sugere. O texto ouvido fica intacto ao lado.
+    speech_marks: {
+      background: "Pode ser fala de fundo (confiança {confidence})",
+      suggestion: "Leitura provável: {term} (confiança {confidence})",
+      note: "Sugestão do filtro de fala. O texto acima é o que foi ouvido, sem mudança.",
+    },
+    caller_speech_read: {
+      finished: "Observação do filtro de fala, depois do turno: a pessoa tinha terminado o pensamento (confiança {confidence}). Não mudou nada na ligação.",
+      late: "O filtro de fala não respondeu no prazo de 1 s para esta fala. Não mudou nada na ligação.",
+      failed: "O filtro de fala não leu esta fala ({reason}). A ligação seguiu sem ele.",
+      reasons: {
+        model_not_installed: "o modelo escolhido não existe nesta versão",
+        key_missing: "falta a chave do modelo, em Configurações → Filtro de fala",
+        key_unreadable: "a chave salva não pôde ser lida; salve a chave de novo em Configurações → Filtro de fala",
+        rejected: "o fornecedor recusou a chave",
+        model_unavailable: "o modelo não está disponível nesta conta",
+        no_credit: "a conta do fornecedor está sem crédito",
+        region_unavailable: "o fornecedor não atende a região deste servidor",
+        rate_limited: "o fornecedor pediu para esperar",
+        unreachable: "o fornecedor não foi alcançado",
+        unexpected_response: "o fornecedor respondeu fora do esperado",
+      },
+    },
     unknown: "Evento",
   },
   reasons: {

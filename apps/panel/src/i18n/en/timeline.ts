@@ -260,6 +260,28 @@ const timeline: TimelineDictionary = {
       whatsapp_sent: "The WhatsApp message to the caller went out.",
       whatsapp_failed: "The WhatsApp message to the caller did not go out.",
     },
+    speech_marks: {
+      background: "May be background speech (confidence {confidence})",
+      suggestion: "Likely reading: {term} (confidence {confidence})",
+      note: "Suggestion from the speech filter. The text above is what was heard, unchanged.",
+    },
+    caller_speech_read: {
+      finished: "Speech filter observation, after the turn: the person had finished the thought (confidence {confidence}). It changed nothing in the call.",
+      late: "The speech filter did not answer within 1 s for this utterance. It changed nothing in the call.",
+      failed: "The speech filter did not read this utterance ({reason}). The call went on without it.",
+      reasons: {
+        model_not_installed: "the chosen model does not exist in this version",
+        key_missing: "the model's key is missing, in Settings → Speech filter",
+        key_unreadable: "the saved key could not be read; save the key again in Settings → Speech filter",
+        rejected: "the provider rejected the key",
+        model_unavailable: "the model is not available on this account",
+        no_credit: "the provider account has no credit",
+        region_unavailable: "the provider does not serve this server's region",
+        rate_limited: "the provider asked to wait",
+        unreachable: "the provider could not be reached",
+        unexpected_response: "the provider answered in an unexpected form",
+      },
+    },
     unknown: "Event",
   },
   reasons: {
