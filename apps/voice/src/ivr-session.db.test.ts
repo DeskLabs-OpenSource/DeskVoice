@@ -2,7 +2,7 @@
 // as ações (T2, T3), o tempo e a tecla inválida (T4), a privacidade da tecla (T5) e cada linha da
 // tabela de falhas do desenho (T6). O caminho inteiro, com o AudioSocket, fica em `ivr.db.test.ts`.
 import { randomUUID } from "node:crypto";
-import { loadIvrMenu, withOrg, withSystem, type IvrMenu } from "@deskvoice/core";
+import { loadIvrMenu, withOrg, withSystem, type Db, type IvrMenu } from "@deskvoice/core";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf } from "../../../packages/tools/test/helpers";
@@ -373,7 +373,7 @@ describe("URA: toda falha tem uma fala e um evento (T6)", { timeout: 60_000 }, (
     expect(await notificationsOf(app, h.organizationId)).toMatchObject([{ body: expect.stringContaining("não tem nenhuma opção que leve a uma pessoa") }]);
   });
 
-  it("agente da opção desligado na hora da escolha: a fala `failed`, a pessoa e `ivr_failed { agent_disabled }`", async () => {
+  it("U8: agente da opção desligado na hora da escolha: a fala `failed`, a pessoa e `ivr_failed { agent_disabled }`", async () => {
     const h = await answer("ivr-agent-off", (agents) => ({
       options: [
         { digit: "1", label: "Recepção", action: "agent", agentId: agents.off },
@@ -464,6 +464,10 @@ describe("URA: o erro inesperado também vai à pessoa (DESA-181)", { timeout: 6
     // Nenhuma tecla no log do erro: só a chamada, o menu e a mensagem.
     expect(Object.keys(JSON.parse(failure[0] ?? "{}")).sort()).toEqual(["callId", "error", "level", "menuId", "message"]);
     for (const digit of digits) expect(JSON.parse(failure[0] ?? "{}").error).not.toContain(digit);
+    // S7b: nem na linha inteira (a mensagem, as chaves, o nível). Os ids da chamada e do menu saem
+    // antes, porque um UUID pode ter qualquer dígito por acaso.
+    const line = (failure[0] ?? "").replaceAll(h.callId, "").replaceAll(h.menu.id, "");
+    for (const digit of digits) expect(line).not.toContain(digit);
   };
 
   it("U1: o 1º anúncio não sai (`sendAudio` lança): a fala `failed` e a pessoa", async () => {
@@ -511,5 +515,142 @@ describe("URA: o erro inesperado também vai à pessoa (DESA-181)", { timeout: 6
     expect(await callOf(app, h.callId)).toMatchObject({ status: "failed", end_reason: "ivr_failed" });
     expect((await eventsOf(app, h.callId)).filter((event) => event.kind === "ivr_failed").map((event) => event.payload)).toEqual([{ reason: "unexpected" }]);
     expect(await kinds(h.callId)).not.toContain("transfer_started");
+  });
+});
+
+/** O banco de verdade, mas a consulta que casa com `pattern` lança, como um banco que caiu no meio. */
+function dbFailingOn(pattern: RegExp): Db {
+  const pool = new Proxy(app.pool, {
+    get(target, property, receiver) {
+      if (property !== "connect") return Reflect.get(target, property, receiver);
+      return async () => {
+        const client = await target.connect();
+        return new Proxy(client, {
+          get(inner, key) {
+            const value = Reflect.get(inner, key, inner) as unknown;
+            if (key !== "query") return typeof value === "function" ? value.bind(inner) : value;
+            return (sql: unknown, ...rest: unknown[]) =>
+              typeof sql === "string" && pattern.test(sql) ? Promise.reject(new Error("the database is gone")) : (inner.query as (...args: unknown[]) => unknown)(sql, ...rest);
+          },
+        });
+      };
+    },
+  });
+  return { ...app, pool };
+}
+
+const ivrFailures = async (callId: string): Promise<unknown[]> => (await eventsOf(app, callId)).filter((event) => event.kind === "ivr_failed").map((event) => event.payload);
+const releaseErrors = (h: Harness): string[] => h.logs.filter((line) => line.includes("could not release the telephony side of the ivr")).map((line) => String(JSON.parse(line).step));
+
+describe("URA: a falha na passagem e a telefonia sempre solta (DESA-187)", { timeout: 60_000 }, () => {
+  const unhandled: unknown[] = [];
+  const listen = (reason: unknown): void => void unhandled.push(reason);
+  beforeEach(() => {
+    unhandled.length = 0;
+    process.on("unhandledRejection", listen);
+  });
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    process.off("unhandledRejection", listen);
+    expect(unhandled).toEqual([]);
+  });
+
+  it("U7: o banco cai ao passar ao agente: a fala `failed`, a pessoa e `ivr_failed { handoff_failed }`, não `agent_disabled`", async () => {
+    const h = await answer("ivr-u7", STANDARD, { db: dbFailingOn(/select enabled from agents/) });
+    await promptPlayed(h, 1);
+    h.transport.press("1");
+    expect(await h.session.done).toEqual({ result: "failed", endReason: "ivr_failed" });
+    expect(h.handedOff).toEqual([]);
+    expect(sameAudio(h.transport.sent.at(-1), await ivrNotice("pt-BR", "failed"))).toBe(true);
+    expect(h.transport).toMatchObject({ transferredTo: PERSON, hangups: 0, closes: 0 });
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "transferred", end_reason: "ivr_failed", agent_id: null });
+    expect((await eventsOf(app, h.callId)).filter((event) => event.kind.startsWith("ivr_")).map((event) => [event.kind, event.payload])).toEqual([
+      ["ivr_started", { menu_id: h.menu.id }],
+      ["ivr_option_chosen", { digit: "1", label: "Recepção", action: "agent", elapsed_ms: expect.any(Number) }],
+      ["ivr_failed", { reason: "handoff_failed" }],
+    ]);
+    expect(h.logs.some((line) => line.includes('"level":"error"') && line.includes("could not hand the call to the agent") && line.includes("the database is gone"))).toBe(true);
+  });
+
+  it("U9: a fala de falha lança (`sendAudio`), com pessoa: a ligação é transferida mesmo assim", async () => {
+    const h = await answer("ivr-u9-person", (agents) => ({ ...STANDARD(agents), prompt: null }), { rig: failingSend(1) });
+    expect(await h.session.done).toEqual({ result: "failed", endReason: "ivr_failed" });
+    expect(h.transport).toMatchObject({ transferredTo: PERSON, hangups: 0, closes: 0 });
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "transferred", end_reason: "ivr_failed" });
+    expect(await ivrFailures(h.callId)).toEqual([{ reason: "prompt_unreadable" }]);
+    expect(releaseErrors(h)).toEqual(["speech"]);
+  });
+
+  it("U9: a fala de falha lança, sem pessoa: a ligação é desligada mesmo assim", async () => {
+    const h = await answer("ivr-u9-alone", (agents) => ({ options: [{ digit: "1", label: "Recepção", action: "agent", agentId: agents.on }] }), { rig: failingSend(1) });
+    expect(await h.session.done).toEqual({ result: "failed", endReason: "ivr_failed" });
+    expect(h.transport).toMatchObject({ transferredTo: null, hangups: 1, closes: 0 });
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "failed", end_reason: "ivr_failed" });
+    expect(releaseErrors(h)).toEqual(["speech"]);
+  });
+
+  /** A transferência (e, se `hangupToo`, o desligar) lança, como um canal que o Asterisk já perdeu. */
+  const brokenTransfer =
+    (hangupToo: boolean) =>
+    (transport: KeypadFake): void => {
+      transport.transfer = async () => {
+        throw new Error("the channel is gone");
+      };
+      if (hangupToo) {
+        transport.hangup = async () => {
+          throw new Error("the channel is gone");
+        };
+      }
+    };
+
+  it("U10: a transferência lança: desliga, e o banco diz `failed` com `ivr_failed { transfer_failed }`", async () => {
+    const h = await answer("ivr-u10", STANDARD, { rig: brokenTransfer(false) });
+    await promptPlayed(h, 1);
+    h.transport.press("2");
+    await h.session.done;
+    expect(h.transport).toMatchObject({ transferredTo: null, hangups: 1, closes: 0 });
+    // O `end_reason` fica o que era; o status não mente.
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "failed", end_reason: "transferred" });
+    expect(await ivrFailures(h.callId)).toEqual([{ reason: "transfer_failed" }]);
+    expect(releaseErrors(h)).toEqual(["transfer"]);
+  });
+
+  it("U10: a transferência da falha também: a fala, o desligar, `failed` e os dois motivos", async () => {
+    const h = await answer("ivr-u10-failure", (agents) => ({ ...STANDARD(agents), prompt: null }), { rig: brokenTransfer(false) });
+    expect(await h.session.done).toEqual({ result: "failed", endReason: "ivr_failed" });
+    expect(h.transport).toMatchObject({ hangups: 1, closes: 0 });
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "failed", end_reason: "ivr_failed" });
+    expect(await ivrFailures(h.callId)).toEqual([{ reason: "prompt_unreadable" }, { reason: "transfer_failed" }]);
+  });
+
+  it("U10: a transferência e o desligar lançam: `close()` de reserva", async () => {
+    const h = await answer("ivr-u10-close", STANDARD, { rig: brokenTransfer(true) });
+    await promptPlayed(h, 1);
+    h.transport.press("2");
+    await h.session.done;
+    expect(h.transport).toMatchObject({ transferredTo: null, hangups: 0, closes: 1 });
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "failed" });
+    expect(releaseErrors(h)).toEqual(["transfer", "hangup"]);
+  });
+
+  it("U10: o desligar da opção `hangup` lança: `close()` de reserva", async () => {
+    const h = await answer("ivr-u10-hangup", STANDARD, { rig: brokenTransfer(true) });
+    await promptPlayed(h, 1);
+    h.transport.press("9");
+    expect(await h.session.done).toEqual({ result: "hangup", endReason: "ivr_hangup" });
+    expect(h.transport).toMatchObject({ hangups: 0, closes: 1 });
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "completed", end_reason: "ivr_hangup" });
+    expect(await ivrFailures(h.callId)).toEqual([]);
+    expect(releaseErrors(h)).toEqual(["hangup"]);
+  });
+
+  it("a segunda escrita que falha não prende a ligação: desliga e deixa `log error`", async () => {
+    const h = await answer("ivr-u10-db", STANDARD, { rig: brokenTransfer(false), db: dbFailingOn(/update calls set status = 'failed'/) });
+    await promptPlayed(h, 1);
+    h.transport.press("2");
+    await h.session.done;
+    expect(h.transport).toMatchObject({ hangups: 1 });
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "transferred" });
+    expect(h.logs.some((line) => line.includes("could not record the failed ivr transfer"))).toBe(true);
   });
 });

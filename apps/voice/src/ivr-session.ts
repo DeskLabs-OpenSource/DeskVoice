@@ -90,7 +90,12 @@ export interface IvrSession {
   stop(reason: string): void;
 }
 
-type IvrFailure = "prompt_unreadable" | "no_person_exit" | "agent_disabled" | "unexpected";
+/**
+ * `agent_disabled`: o banco leu o agente desligado (ou a opção ficou sem agente). `handoff_failed`: o
+ * banco falhou ao gravar a passagem, e o agente pode estar ligado. `transfer_failed`: a transferência
+ * para a pessoa lançou, e a ligação foi desligada (grava-se depois do desfecho, numa segunda escrita).
+ */
+type IvrFailure = "prompt_unreadable" | "no_person_exit" | "agent_disabled" | "handoff_failed" | "transfer_failed" | "unexpected";
 
 interface Ending {
   result: IvrResult;
@@ -156,10 +161,37 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
     }
   };
 
+  /** Um passo de soltar a telefonia: `false` se lançou (com `log error`, sem a tecla). */
+  const release = async (step: "speech" | "transfer" | "hangup" | "close", work: () => unknown): Promise<boolean> => {
+    try {
+      await work();
+      return true;
+    } catch (error) {
+      log("error", "could not release the telephony side of the ivr", { step, error: messageOf(error) });
+      return false;
+    }
+  };
+
+  /**
+   * A transferência lançou depois de o banco gravar `transferred`: o desfecho gravado não pode mentir.
+   * Uma segunda escrita, best effort, grava `ivr_failed { transfer_failed }` e `status = failed`; o
+   * `end_reason` fica o que era.
+   */
+  const transferFailed = async (): Promise<void> => {
+    try {
+      await withOrg(db, organizationId, async (q) => {
+        await recordEvent(q, callId, "ivr_failed", { reason: "transfer_failed" satisfies IvrFailure }, clock.now());
+        await q.exec("update calls set status = 'failed' where id = $1", [callId]);
+      });
+    } catch (error) {
+      log("error", "could not record the failed ivr transfer", { error: messageOf(error) });
+    }
+  };
+
   /**
    * O único encerramento pela URA: roda uma vez, por qualquer caminho. Grava o desfecho, avisa no
    * painel quando é falha, põe o resumo e a revisão na fila como toda chamada que termina, e solta a
-   * telefonia mesmo que o banco falhe.
+   * telefonia mesmo que o banco, a fala ou a transferência falhem (DESA-187).
    */
   async function end(ending: Ending): Promise<void> {
     if (settled) return;
@@ -182,16 +214,22 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
     } catch (error) {
       log("error", "could not record the end of the ivr", { error: messageOf(error) });
     }
-    // Ninguém fica pendurado: a telefonia é solta mesmo se o banco falhou acima.
-    try {
-      if (ending.callerGone) await transport.close();
-      else {
-        if (ending.speech) transport.sendAudio(await speechOf(ending.speech));
-        if (ending.transferTo) await transport.transfer(ending.transferTo);
-        else await transport.hangup();
+    // Ninguém fica pendurado: a telefonia é solta mesmo se o banco falhou acima, e cada passo tem o
+    // seu `try`, para que a fala que lança não impeça a transferência nem o desligar.
+    if (ending.callerGone) await release("close", () => transport.close());
+    else {
+      if (ending.speech) {
+        const speech = await speechOf(ending.speech);
+        await release("speech", () => transport.sendAudio(speech));
       }
-    } catch (error) {
-      log("error", "could not release the telephony side of the ivr", { error: messageOf(error) });
+      const transferTo = ending.transferTo;
+      const released = transferTo ? await release("transfer", () => transport.transfer(transferTo)) : await release("hangup", () => transport.hangup());
+      if (!released) {
+        if (transferTo) await transferFailed();
+        // A reserva: se nem a transferência nem o desligar saíram, desliga; se o desligar também lança, fecha.
+        const hungUp = transferTo ? await release("hangup", () => transport.hangup()) : false;
+        if (!hungUp) await release("close", () => transport.close());
+      }
     }
     log("info", "ivr ended", { result: ending.result, endReason: ending.endReason });
     resolveDone({ result: ending.result, endReason: ending.endReason });
@@ -233,7 +271,9 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
       });
     } catch (error) {
       log("error", "could not hand the call to the agent", { error: messageOf(error) });
-      enabled = false;
+      // O agente pode estar ligado: o que falhou foi gravar. O motivo diz isso, não `agent_disabled`.
+      if (settled) return;
+      return failToPerson("handoff_failed", [["ivr_option_chosen", chosen]]);
     }
     // Quem ligou desligou enquanto o banco gravava: a URA já encerrou.
     if (settled) return;

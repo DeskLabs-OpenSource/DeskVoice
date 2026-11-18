@@ -47,7 +47,7 @@ const ivr: IvrDictionary = {
   upload: "Upload announcement",
   replace: "Replace announcement",
   converting: "Converting the file…",
-  unreadable: "The browser could not open this file. Try an MP3 or a WAV.",
+  unreadable: "The browser could not open this file, or it has no sound (under 0.2 s). Try an MP3 or a WAV.",
   tooLong: "This file lasts {seconds} s. The announcement can be at most 60 seconds.",
   listen: "Listen to the announcement",
   answers: "Answered by",
