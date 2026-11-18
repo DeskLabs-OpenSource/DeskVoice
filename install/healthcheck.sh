@@ -122,7 +122,10 @@ else
   login_code="$(printf '%s\n' "$login_line" | awk -F'|' '$1 == "login" { print $2; exit }')"
   login_why="$(printf '%s\n' "$login_line" | awk -F'|' '$1 == "login" { print $3; exit }')"
   case "$login_code" in
-    400|401) add login "Login do painel" 1 ok "a rota de login responde e recusa credencial que não existe (HTTP $login_code)" ;;
+    401) add login "Login do painel" 1 ok "a rota de login responde e recusa credencial que não existe (HTTP $login_code)" ;;
+    # 400 sai da leitura do corpo, antes de qualquer consulta ao banco: não prova o login. Aviso, e
+    # não falha, para uma sonda desatualizada não fazer o update.sh voltar uma atualização boa.
+    400) add login "Login do painel" 1 aviso "a rota de login recusou o formato do pedido da sonda (HTTP 400) antes de consultar o banco: não deu para conferir o login. Rode de novo depois de atualizar o kit" ;;
     # Limite de tentativas: não é erro de servidor, e também não prova que o login chega ao banco.
     429) add login "Login do painel" 1 aviso "o login está recusando pelos próprios limites de tentativa (HTTP 429): não deu para conferir se ele chega ao banco. Rode de novo em alguns minutos" ;;
     2[0-9][0-9]) add login "Login do painel" 1 falha "o login aceitou uma credencial que não existe (HTTP $login_code): a tela está aberta para quem não devia. Rode bash install/diagnose.sh" ;;
