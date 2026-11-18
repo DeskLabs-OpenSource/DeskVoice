@@ -161,6 +161,19 @@ describe("review_call no modo call_back: o agendamento", () => {
     expect(await review(s.org, third, new Date(t0.getTime() + 25 * 60 * 60_000))).toBe("call_back_scheduled");
   });
 
+  it("duas revisões em paralelo de duas quedas do mesmo número agendam uma religação só", async () => {
+    // Não há índice único por número: quem segura é a trava por organização em callBackAction.
+    for (let round = 0; round < 5; round++) {
+      const s = await dropped(`cb parallel ${round}`);
+      const second = await callIn(s, hangup("caller_waiting"));
+      const outcomes = await Promise.all([review(s.org, s.callId), review(s.org, second)]);
+      expect(outcomes.sort()).toEqual(["call_back_scheduled", "opened"]);
+      expect(await callBacksOf(s.org)).toHaveLength(1);
+      expect((await tasksOf(app, s.org)).filter((row) => row.kind === "call_back")).toHaveLength(1);
+      expect(await followUpsOf(s.org)).toHaveLength(1);
+    }
+  });
+
   it("um follow-up por número vale entre os modos: a mensagem do WhatsApp conta para a religação, e a religação para a mensagem", async () => {
     const s = await dropped("cb after message");
     await withSystem(app, (q) => q.exec("insert into notifications (organization_id, channel, audience, target, body, created_at) values ($1, 'whatsapp', 'caller', $2, 'x', $3)", [s.org, CALLER, t0]));
