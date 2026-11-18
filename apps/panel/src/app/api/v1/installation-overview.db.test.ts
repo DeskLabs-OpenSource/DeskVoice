@@ -221,6 +221,17 @@ describe("installation overview", () => {
     expect(rowD.trunk?.check).toEqual(await healthLine(d.person.cookie, "trunk"));
   });
 
+  it("an own key whose last test was inconclusive is 'own key' in the colour of the organization's health (warn)", async () => {
+    const e = await organization("E", null);
+    await e.setting("engine.openai-realtime.api_key", "cifrada", true);
+    await e.setting("engine.openai-realtime.key_check", { result: "rate_limited", model: "gpt-realtime", checkedAt: "2026-03-19T10:00:00.000Z" }, false);
+    const admin = await createUser(panel.app, e.org, "admin");
+    await administers(await accountOf(admin.id));
+    const row = rowOf(await read(admin.cookie), e.org);
+    expect([row.engine.state, row.engine.check.status, row.engine.check.reason]).toEqual(["own_key", "warn", "engine_check_inconclusive"]);
+    expect(row.engine.check).toEqual(await healthLine(e.person.cookie, "engine"));
+  });
+
   it("calls the voice process once, and says it did not answer instead of zero lines down", async () => {
     const { a, b, admin } = await scene();
     const requests: string[] = [];

@@ -7,7 +7,7 @@ import { fill } from "../../../../i18n/locales";
 import ptBR from "../../../../i18n/pt-BR/installation";
 import { useDict } from "../../../../i18n/provider";
 import { useApi } from "../../../../ui/api";
-import { Badge, Panel, Skeleton, type Tone } from "../../../../ui/kit";
+import { Badge, Panel, Skeleton } from "../../../../ui/kit";
 import { Amount } from "../../costs/amount-view";
 
 type Status = "ok" | "warn" | "fail";
@@ -26,8 +26,6 @@ interface Overview {
   organizations: Row[];
 }
 
-const ENGINE_TONE: Record<Row["engine"]["state"], Tone> = { own_key: "ok", no_key: "warn", key_failed: "fail" };
-
 function Cell({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="grid gap-0.5">
@@ -39,7 +37,8 @@ function Cell({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * A visão geral da instalação (seção 3.7 do desenho do R8): uma linha por organização, com os números
- * que a tela de cada uma mostra. Só de leitura e sem exportação.
+ * que a tela de cada uma mostra. Só de leitura e sem exportação. As cores da Linha e do Motor são as da
+ * Saúde da organização (`check.status`); o texto do Motor vem do estado da chave.
  */
 export default function InstallationOverview() {
   const t = useDict(ptBR, en, es).overview;
@@ -76,7 +75,7 @@ export default function InstallationOverview() {
                   )}
                 </Cell>
                 <Cell label={t.engine}>
-                  <Badge tone={ENGINE_TONE[row.engine.state]}>{t.engineStates[row.engine.state]}</Badge>
+                  <Badge tone={row.engine.check.status}>{t.engineStates[row.engine.state]}</Badge>
                 </Cell>
                 <Cell label={t.queue}>
                   <span className={row.queue.late + row.queue.failedLast24h > 0 ? "text-warn" : undefined}>{fill(t.queueCounts, { late: row.queue.late, failed: row.queue.failedLast24h })}</span>
