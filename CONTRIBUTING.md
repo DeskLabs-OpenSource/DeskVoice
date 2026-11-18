@@ -105,7 +105,7 @@ Três tarefas são dos mantenedores, e não suas. Não segure o PR por causa del
 |---|---|
 | Fragmento de notas de versão em `.changes/` | Quem escreve a nota precisa saber o que o dono de uma VPS terá de fazer. Se você souber escrever, ótimo. Se não, mande sem |
 | Conflito com a `main` | A `main` anda rápido. Trazer o seu ramo até ela é trabalho de quem faz o merge |
-| Carimbo de tempo da migration | Se outra migration entrou antes da sua, o carimbo é ajustado na fila. Não renomeie por conta própria depois de aberto o PR |
+| Carimbo de tempo da migration | Se outra migration entrou antes da sua, o carimbo é ajustado na fila. Não renomeie por conta própria depois de aberto o PR. Ao criar, use a hora real, nunca uma futura: a regra está no [`AGENTS.md`](AGENTS.md), em "Convenções críticas" |
 
 Se a revisão acha algo a ajustar, quem ajusta somos nós. Você não recebe pedido de correção.
 Abrimos um PR nosso com os seus commits como estão, você como autor de cada um, e o ajuste num

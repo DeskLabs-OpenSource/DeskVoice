@@ -42,6 +42,6 @@ describe("routine classification on suspension", { timeout: 30_000 }, () => {
       .filter(([, side]) => side === "keeps_running")
       .map(([kind]) => kind)
       .sort();
-    expect(running).toEqual(["erase_recordings", "expire_approval", "purge_caller_notes", "purge_transcripts"]);
+    expect(running).toEqual(["end_support_access", "erase_recordings", "expire_approval", "purge_caller_notes", "purge_transcripts"]);
   });
 });

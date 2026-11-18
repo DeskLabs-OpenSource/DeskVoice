@@ -232,6 +232,21 @@ describe("pairing the number by QR code", () => {
     expect(paths.some((path) => path.endsWith("/pair"))).toBe(false);
   });
 
+  it("WhatsApp ends the pairing before any code: pairing_failed, not a code nobody read", async () => {
+    const { org, owner } = await upOrg("calls refused");
+    wacalls.state.refusePairing = true;
+    try {
+      expect((await start(owner.cookie)).data).toMatchObject({ status: "starting" });
+      wacalls.expire(sessionOf(org));
+      await expect.poll(async () => (await state(owner.cookie)).failure).toBe("pairing_failed");
+    } finally {
+      wacalls.state.refusePairing = false;
+    }
+    const sent = await notices(org);
+    expect(sent).toContain("A conexão da ligação pelo WhatsApp não foi concluída: o WhatsApp encerrou a tentativa antes de mostrar o QR Code. Tente de novo em Configurações → WhatsApp. Se acontecer de novo, atualize o DeskVoice.");
+    expect(sent.some((body) => body.includes("não foi lido a tempo"))).toBe(false);
+  });
+
   it("the phone unlinked the device: failed, with the 14-day hint in the notice and a warning health line", async () => {
     const { org, owner } = await upOrg("calls dropped");
     await start(owner.cookie);

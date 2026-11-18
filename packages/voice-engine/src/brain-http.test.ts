@@ -151,6 +151,17 @@ const settle = async (): Promise<void> => {
   for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
 };
 
+describe("brainFailureByStatus: a regra geral do status no cérebro", () => {
+  it.each([500, 502, 503, 529])("%i é erro do lado do provedor (provider_error)", (status) => {
+    expect(brainFailureByStatus(status)).toBe("provider_error");
+  });
+
+  it("408 (prazo esgotado) e sem status (sem resposta) continuam unreachable", () => {
+    expect(brainFailureByStatus(408)).toBe("unreachable");
+    expect(brainFailureByStatus(null)).toBe("unreachable");
+  });
+});
+
 describe("chatStream: o pedido", () => {
   it("manda stream, ferramentas, mensagens na forma da OpenAI e include_usage só quando pedido", async () => {
     const fake = await fakeServer((_req, res) => stream(res, [DONE]));
@@ -328,8 +339,8 @@ describe("chatStream: a resposta", () => {
       [401, "rejected"],
       [402, "no_credit"],
       [429, "rate_limited"],
-      [500, "unreachable"],
-      [503, "unreachable"],
+      [500, "provider_error"],
+      [503, "provider_error"],
     ];
     for (const [code, failure] of cases) {
       status = code;

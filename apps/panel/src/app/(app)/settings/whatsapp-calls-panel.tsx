@@ -18,7 +18,7 @@ import type { Agent } from "../../../ui/types";
 import { QrCodeBox, RemovalConfirm, ServiceStates, useServicePolling, type ServiceData } from "./optional-service";
 
 interface WhatsAppCallsState extends ServiceData {
-  failure: "logged_out" | "qr_expired" | "missing" | null;
+  failure: "logged_out" | "qr_expired" | "pairing_failed" | "missing" | null;
   phone: string | null;
   connectedAt: string | null;
   agentId: string | null;

@@ -3,6 +3,30 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.37.2] - 2026-11-18
+
+### Adicionado
+
+- **A base do acesso de suporte da instalação, ainda sem tela** Preparação interna para o acesso de suporte da administração da instalação. Nenhuma tela muda, e ninguém ganha acesso de suporte sem uma ação de quem administra a instalação. A atualização só acrescenta ao banco: uma tabela com os acessos de suporte de cada organização e uma coluna na sessão. Por trás, quem administra a instalação já pode entrar numa organização como suporte, sempre com motivo (de 10 a 500 caracteres) e prazo (15, 30 ou 60 minutos), com papel de administrador e nunca de dono, sem telefone e sem WhatsApp. O acesso não se renova: acaba quando a pessoa encerra ou quando o prazo vence, mesmo que ela não faça mais nada, e a sessão volta para a organização de onde a pessoa veio. O início e o fim ficam registrados nas duas pontas, no histórico da organização e na auditoria da instalação, com o motivo e o prazo. Durante o suporte, a sessão fica dentro da organização do cliente: não abre outro acesso, não troca de organização, não usa a área da instalação, e nenhuma leitura do painel traz dado de outra organização. Quem já é da equipe da organização entra pelo seletor, e não como suporte. Crédito: @melgarafael.
+
+### Alterado
+
+- **A senha recusada no aceite do convite tem uma mensagem só** Quando a senha não é aceita no convite, a página mostra uma mensagem só, que diz as duas saídas: quem já tem conta digita a senha dela, quem não tem escolhe uma senha nova com no mínimo 10 caracteres. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A ligação pelo WhatsApp volta a mostrar o QR Code** O WhatsApp passou a recusar a versão do cliente que o serviço de ligação pelo WhatsApp (WaCalls) usava. Desde então, "Conectar" ficava em "preparando a conexão" sem nunca mostrar o QR Code, e um número já conectado que caísse não voltava. A imagem do WaCalls agora é a do fork da DeskLabs com o cliente atual, e a atualização a baixa sozinha em quem tem o serviço ligado. Se o pareamento terminar com erro de novo, a tela diz que falhou em vez de esperar para sempre. Depois de atualizar, quem ficou preso em "preparando a conexão" ou com o número desconectado clica em "Conectar de novo" em Configurações → WhatsApp e lê o QR Code. Crédito: @melgarafael.
+
+## [0.37.1] - 2026-11-18
+
+### Alterado
+
+- **A página do convite não muda conforme o e-mail** A página do convite passa a ser a mesma para toda pessoa convidada: o nome, a senha e a repetição da senha, com uma dica só. Quem já tem conta no DeskVoice digita a senha que já usa; quem não tem escolhe uma senha nova, com no mínimo 10 caracteres. Depois do envio, se a senha não for aceita, a página diz o que fazer. A senha antiga de uma conta continua valendo no convite, mesmo curta, e a tentativa errada conta no mesmo limite da tela de entrada. Nada a configurar. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A visão geral da instalação separa a linha que pede atenção da linha caída, e pinta o motor como a Saúde** Na Visão geral da área da instalação, a coluna Linha deixa de contar como caída a linha que só tem um aviso (por exemplo, carregada mas com o provedor ainda não conferido): ela aparece como ", N pedem atenção", e "caídas" passa a contar só as linhas de fato fora do ar. O selo do Motor passa a ter a mesma cor da linha do motor na Saúde da organização: com chave própria e o último teste da chave sem resposta conclusiva, ele fica amarelo, e não verde. Nada a configurar. Crédito: @melgarafael.
+
 ## [0.37.0] - 2026-11-18
 
 ### Adicionado

@@ -2,12 +2,11 @@
 // da visão geral é o que a rota da própria organização devolve (`system/costs` para o custo do mês,
 // `system/health` para a linha e o motor). O teste compara as duas respostas, não um número escrito
 // à mão.
-import { randomBytes, randomUUID } from "node:crypto";
-import { createAccount, enqueueTask, hashToken, withOrg, withSystem } from "@deskvoice/core";
+import { randomUUID } from "node:crypto";
+import { enqueueTask, startSupportAccess, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { clearInstallationState as clear, openTestDbs } from "../../../../../../packages/core/test/helpers";
-import { PASSWORD, call, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
-import { SESSION_COOKIE } from "../../../server/context";
+import { call, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
 import type { HealthCheck } from "../../../server/health";
 import { GET as overview } from "./installation/overview/route";
 import { GET as costs } from "./system/costs/route";
@@ -35,7 +34,7 @@ interface Row {
   suspendedAt: string | null;
   calls: { from: string; to: string; count: number };
   cost: { from: string; to: string; cents: number; unmeasuredCount: number; estimatedCount: number };
-  trunk: { connected: number; down: number; check: HealthCheck } | null;
+  trunk: { connected: number; attention: number; down: number; check: HealthCheck } | null;
   engine: { state: "own_key" | "no_key" | "key_failed"; check: HealthCheck };
   queue: { late: number; failedLast24h: number };
 }
@@ -180,15 +179,56 @@ describe("installation overview", () => {
       { from: "2026-02-19", to: "2026-03-20", count: 3 },
       { from: "2026-02-20", to: "2026-03-21", count: 1 },
     ]);
-    expect([rowA.trunk, rowB.trunk].map((trunk) => [trunk?.connected, trunk?.down])).toEqual([
-      [1, 1],
-      [0, 1],
+    // A linha em aviso de B pede atenção; não caiu.
+    expect([rowA.trunk, rowB.trunk].map((trunk) => [trunk?.connected, trunk?.attention, trunk?.down])).toEqual([
+      [1, 0, 1],
+      [0, 1, 0],
     ]);
     expect([rowA.engine.state, rowB.engine.state]).toEqual(["key_failed", "no_key"]);
     expect([rowA.queue, rowB.queue]).toEqual([
       { late: 1, failedLast24h: 1 },
       { late: 0, failedLast24h: 0 },
     ]);
+  });
+
+  it("a line with a warning needs attention and is not counted as down; only a failing line is", async () => {
+    const c = await organization("C", null);
+    const d = await organization("D", null);
+    const [cUp, cWarn, cDown, dUp, dWarn] = [await c.trunk(), await c.trunk(), await c.trunk(), await d.trunk(), await d.trunk()];
+    panel.voice.respond = (url) => {
+      if (url === "http://voice.test/health")
+        return Response.json({
+          asterisk: { status: "ok", detail: "connected" },
+          trunks: [
+            { id: cUp, status: "ok", detail: "The provider answers." },
+            { id: cWarn, status: "warn", detail: "Not checked yet." },
+            { id: cDown, status: "fail", detail: "The provider does not answer." },
+            { id: dUp, status: "ok", detail: "The provider answers." },
+            { id: dWarn, status: "warn", detail: "The address set needs attention." },
+          ],
+        });
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const admin = await createUser(panel.app, c.org, "admin");
+    await administers(await accountOf(admin.id));
+    const data = await read(admin.cookie);
+    const [rowC, rowD] = [rowOf(data, c.org), rowOf(data, d.org)];
+    expect([rowC.trunk?.connected, rowC.trunk?.attention, rowC.trunk?.down, rowC.trunk?.check.status]).toEqual([1, 1, 1, "fail"]);
+    expect([rowD.trunk?.connected, rowD.trunk?.attention, rowD.trunk?.down, rowD.trunk?.check.status]).toEqual([1, 1, 0, "warn"]);
+    // A cor é a da Saúde de cada uma.
+    expect(rowC.trunk?.check).toEqual(await healthLine(c.person.cookie, "trunk"));
+    expect(rowD.trunk?.check).toEqual(await healthLine(d.person.cookie, "trunk"));
+  });
+
+  it("an own key whose last test was inconclusive is 'own key' in the colour of the organization's health (warn)", async () => {
+    const e = await organization("E", null);
+    await e.setting("engine.openai-realtime.api_key", "cifrada", true);
+    await e.setting("engine.openai-realtime.key_check", { result: "rate_limited", model: "gpt-realtime", checkedAt: "2026-03-19T10:00:00.000Z" }, false);
+    const admin = await createUser(panel.app, e.org, "admin");
+    await administers(await accountOf(admin.id));
+    const row = rowOf(await read(admin.cookie), e.org);
+    expect([row.engine.state, row.engine.check.status, row.engine.check.reason]).toEqual(["own_key", "warn", "engine_check_inconclusive"]);
+    expect(row.engine.check).toEqual(await healthLine(e.person.cookie, "engine"));
   });
 
   it("calls the voice process once, and says it did not answer instead of zero lines down", async () => {
@@ -222,25 +262,16 @@ describe("installation overview", () => {
       expect([result.status, result.code]).toEqual([403, "forbidden"]);
     }
 
-    // O vínculo de suporte de uma conta que administra a instalação (seção 3.6).
-    const email = `support-${randomUUID()}@example.test`;
-    const account = await withSystem(panel.app, (q) => createAccount(q, { email, passwordHash: PASSWORD }));
-    if (!account) throw new Error("the support account was not created");
+    // O acesso de suporte (seção 3.6): quem administra a instalação, `member` da organização de
+    // casa, entra em B pela própria sessão, com `startSupportAccess`, como na tela.
+    const home = await createOrganization(panel.app, "Casa do suporte");
+    const supporter = await createUser(panel.app, home, "owner");
+    const account = (await withSystem(panel.app, (q) => q.one<{ id: string }>("select account_id as id from users where id = $1", [supporter.id])))?.id ?? "";
     await administers(account);
-    const support = await insert(panel.app, b.org, "insert into users (organization_id, account_id, email, name, role, kind) values ($1, $2, $3, 'Suporte da instalação', 'admin', 'support') returning id", [
-      b.org,
-      account,
-      email,
-    ]);
-    const token = randomBytes(32).toString("base64url");
-    await insert(panel.app, b.org, "insert into sessions (organization_id, user_id, account_id, token_hash, expires_at) values ($1, $2, $3, $4, $5) returning id", [
-      b.org,
-      support,
-      account,
-      hashToken(token),
-      new Date(NOW.getTime() + HOUR),
-    ]);
-    const result = await call(overview, { cookie: `${SESSION_COOKIE}=${token}` });
+    const sessionId = (await withSystem(panel.app, (q) => q.one<{ id: string }>("select id from sessions where user_id = $1", [supporter.id])))?.id ?? "";
+    const started = await startSupportAccess(panel.app, { actorAccountId: account, sessionId, organizationId: b.org, reason: "Ajuda com a configuração", minutes: 60 }, NOW);
+    if (!started.ok) throw new Error(`the support access did not start: ${started.reason}`);
+    const result = await call(overview, { cookie: supporter.cookie });
     expect([result.status, result.code]).toEqual([403, "support_session_forbidden"]);
   });
 });

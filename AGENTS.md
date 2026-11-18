@@ -98,7 +98,10 @@ São as regras de forma do desenho da fundação. Cada uma tem uma cerca ou um t
 
 1. **Um caminho de schema.** Mudança de banco é um arquivo novo em `db/migrations`, com nome
    `<AAAAMMDDTHHMMSS>_<slug>.sql`. Só para frente. Migration publicada nunca é editada. Não
-   existe baseline. Lei: [`um-caminho-de-schema.md`](docs/doctrine/um-caminho-de-schema.md).
+   existe baseline. O carimbo é a hora real em que você cria o arquivo, em UTC
+   (`date -u +%Y%m%dT%H%M%S`), e nunca uma hora futura: o executor aplica as migrations em ordem
+   de nome, e um carimbo adiante faz a instalação nova rodar as migrations fora de ordem e quebrar
+   o `install.sh`. Lei: [`um-caminho-de-schema.md`](docs/doctrine/um-caminho-de-schema.md).
 2. **Um arquivo por peça.** Ferramenta, motor de voz, rotina e dicionário de tela são
    descobertos por pasta. Se o seu PR precisa editar uma lista central para registrar uma peça,
    pare: a lista não deveria existir. Lei: [`um-arquivo-por-peca.md`](docs/doctrine/um-arquivo-por-peca.md).

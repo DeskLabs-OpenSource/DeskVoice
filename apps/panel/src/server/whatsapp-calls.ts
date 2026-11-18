@@ -18,7 +18,7 @@ import { notice, type ConnectionStatus, type Org } from "./whatsapp";
  * compara o que o WaCalls diz com o último estado gravado; é nessa comparação que "conectou" e
  * "caiu" viram aviso.
  */
-export type CallsFailure = "logged_out" | "qr_expired" | "missing";
+export type CallsFailure = "logged_out" | "qr_expired" | "pairing_failed" | "missing";
 
 export interface WhatsAppCallsView extends ServiceView {
   /** `false`: o processo de voz não tem o token do WaCalls (atualizado por um atualizador antigo, ou desenvolvimento). */
@@ -114,8 +114,11 @@ function fromVoice(state: VoiceState, before: Row): Pick<Row, "status" | "failur
   if (session.status === "connected") return { status: "connected", failure: null };
   if (session.status === "qr") return { status: "qr", failure: null };
   if (session.status === "starting") return { status: "starting", failure: null };
-  // `logged_out` antes de conectar é o código que venceu; depois, o aparelho que foi desvinculado.
-  return { status: "failed", failure: before.status === "qr" || before.status === "starting" ? "qr_expired" : "logged_out" };
+  // `logged_out` com o QR na tela é o código que venceu; antes de algum QR, o pareamento que o WhatsApp
+  // encerrou (o cliente recusado, por exemplo); depois de conectar, o aparelho que foi desvinculado.
+  if (before.status === "qr") return { status: "failed", failure: "qr_expired" };
+  if (before.status === "starting") return { status: "failed", failure: "pairing_failed" };
+  return { status: "failed", failure: "logged_out" };
 }
 
 /** Grava o que o WaCalls disse e avisa quando o estado mudou. A linha é travada: duas consultas juntas não geram dois avisos. */
@@ -146,6 +149,8 @@ async function record(q: OrgQuery, now: Date, state: VoiceState): Promise<Row | 
       now,
       `O número${number} desconectou da ligação pelo WhatsApp. Conecte de novo em Configurações → WhatsApp. O WhatsApp desconecta os aparelhos vinculados quando o celular principal fica mais de 14 dias sem uso.`,
     );
+  } else if (next.status === "failed" && next.failure === "pairing_failed") {
+    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o WhatsApp encerrou a tentativa antes de mostrar o QR Code. Tente de novo em Configurações → WhatsApp. Se acontecer de novo, atualize o DeskVoice.");
   } else if (next.status === "failed") {
     await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Configurações → WhatsApp.");
   }
