@@ -4,7 +4,7 @@ const installation = {
   title: "Administração da instalação",
   lead: "O que vale para o servidor inteiro: as organizações, quem administra e o registro do que foi feito aqui. Cada organização continua vendo só o que é dela.",
   sectionsNav: "Seções da administração da instalação",
-  sections: { organizations: "Organizações", admins: "Administração", audit: "Auditoria", update: "Atualização" },
+  sections: { organizations: "Organizações", overview: "Visão geral", admins: "Administração", audit: "Auditoria", update: "Atualização" },
 
   organizations: {
     title: "Organizações",
@@ -78,6 +78,24 @@ const installation = {
     addLead: "A pessoa já precisa ter uma conta nesta instalação (ter entrado em alguma organização).",
     email: "E-mail da conta",
     add: "Pôr na lista",
+  },
+
+  overview: {
+    title: "Visão geral",
+    lead: "Como vai cada organização, numa linha só: os mesmos números que a tela de cada uma mostra em Custos e em Saúde. O custo do mês vai do dia 1 até hoje, no fuso de cada organização.",
+    empty: "Nenhuma organização ainda.",
+    active: "Ativa",
+    suspended: "Suspensa",
+    calls: "Chamadas nos últimos 30 dias",
+    cost: "Custo do mês",
+    trunk: "Linha",
+    trunkCounts: "{connected} conectadas, {down} caídas",
+    trunkNone: "Nenhuma linha cadastrada",
+    voiceDown: "O processo de voz não respondeu",
+    engine: "Motor",
+    engineStates: { own_key: "Com chave própria", no_key: "Sem chave", key_failed: "Chave com falha" },
+    queue: "Fila",
+    queueCounts: "{late} em atraso, {failed} com falha nas últimas 24 horas",
   },
 
   audit: {

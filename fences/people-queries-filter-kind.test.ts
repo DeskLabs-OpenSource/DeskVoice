@@ -4,15 +4,15 @@
 //   `kind = 'member'` faria quem dá suporte receber resumo, virar responsável ou contar como dono.
 // revisar em: 2027-05-17
 import { describe, it, expect } from "vitest";
-import { REPO_ROOT, expectClean, fixture, isSource, listFiles, read } from "./_lib";
+import { REPO_ROOT, expectClean, fixture, isSource, isTest, listFiles, read } from "./_lib";
 import { PEOPLE_QUERIES_ALLOWLIST, type PeopleQueryException } from "./people-queries-allowlist";
 
 // `accounts.ts` é a porta das contas: ela cria e lê vínculos de qualquer `kind` de propósito.
 const EXEMPT = new Set(["packages/core/src/accounts.ts"]);
 // Os testes e os auxiliares de teste (a pasta `test/` na raiz do pacote e as pastas `testing/`)
-// montam organizações inteiras: ficam fora. Só a raiz do pacote: `isTest` pularia também uma rota
-// como `api/v1/whatsapp/test/route.ts`.
-const isTestSupport = (file: string): boolean => /\.test\.tsx?$/.test(file) || /^(apps|packages)\/[^/]+\/test\//.test(file) || /(^|\/)testing\//.test(file);
+// montam organizações inteiras: ficam fora. `isTest` só pula a pasta `test/` da raiz do pacote, e
+// uma rota como `api/v1/whatsapp/test/route.ts` é lida.
+const isTestSupport = (file: string): boolean => isTest(file) || /(^|\/)testing\//.test(file);
 
 // Palavras que, logo depois de `users`, não são apelido da tabela.
 const NOT_ALIAS = new Set([
