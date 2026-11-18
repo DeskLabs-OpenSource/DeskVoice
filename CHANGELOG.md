@@ -3,6 +3,21 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.37.0] - 2026-11-18
+
+### Adicionado
+
+- **A checagem de saúde avisa quando a rede do proxy não está gravada** O `install/healthcheck.sh` ganhou a linha "Rede do proxy". Quando existe nesta máquina a rede de proxy de outro sistema (a `*_caddy-sites` de um CRM na mesma VPS) e ela não está gravada no arquivo de publicação, a linha avisa e traz o comando para gravá-la. É o caso de quem ligou o Caddy à rede à mão, antes da 0.11.0: essa ligação se perde quando o contêiner é recriado, e o domínio do painel passa a responder 502. A linha também avisa quando a rede gravada não existe mais. É só aviso: não muda o código de saída e não há nada a configurar em instalações que já têm a rede gravada. Crédito: @webtecnica.
+- **A administração da instalação ganha uma visão geral das organizações** Na área da instalação, a seção nova "Visão geral" mostra uma linha por organização: se está ativa ou suspensa, as chamadas dos últimos 30 dias, o custo do mês (com as marcas "inclui estimativa" e "não medido", como em Custos), quantas linhas estão conectadas e quantas caídas, o estado da chave do motor e a fila (tarefas em atraso e com falha nas últimas 24 horas). Cada número é o mesmo que a tela da própria organização mostra em Custos e em Saúde. Quando o processo de voz não responde, a coluna Linha diz isso, em vez de mostrar zero linhas caídas. A sessão de suporte não abre esta seção. Nada a configurar. Crédito: @melgarafael.
+
+### Alterado
+
+- **O upgrade do WebSocket da chamada pela web confere o convite antes de abrir** O endereço da chamada pelo navegador passa a conferir o convite antes de abrir o WebSocket. Pedido sem convite, com convite errado ou já usado recebe uma resposta HTTP comum (401, ou 404 fora do caminho da chamada) e nenhum WebSocket abre. A exceção é o convite vencido, na primeira tentativa e até 30 minutos depois do prazo: ele abre e fecha logo, com o código 4401, para a tela dizer que venceu. Depois disso, ou na segunda tentativa, nem abre. Quem liga pelo painel não percebe diferença na conversa. Nada a configurar. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A linha de telefonia da Saúde conta só as linhas da organização** Numa instalação com mais de uma organização, a linha de telefonia da tela Saúde contava as linhas de todas elas. Agora conta só as da organização em que a pessoa está. A checagem de saúde sem sessão, usada pelo instalador, continua olhando a instalação inteira. Nada a configurar. Crédito: @melgarafael.
+
 ## [0.36.1] - 2026-11-18
 
 ### Alterado
