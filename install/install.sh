@@ -31,6 +31,11 @@
 #                              quando o painel sai por uma porta local (sem domínio, ou 80/443 de outro proxy)
 #   DESKVOICE_APPLY_UFW=yes    opcional: aplica as regras no firewall ufw sem perguntar. Só aceita yes; com o
 #                              ufw inativo, não tem efeito, e o instalador diz
+#   DESKVOICE_DOCKER_USER_DROP opcional: portas que o Docker publica e que devem ficar fechadas para fora,
+#                              na forma do ufw (exemplo: "5060/udp" ou "5060/udp 10000:10200/udp"). A regra
+#                              vai para a cadeia DOCKER-USER e é reposta no boot e ao reiniciar o Docker
+#                              (ver docs/fundacao/ufw-e-docker.md). Fechar 5060/udp deixa a telefonia muda:
+#                              só feche a porta de onde as ligações NÃO vêm
 #   DESKVOICE_PROXY_NETWORK    opcional: a rede Docker do proxy de outro sistema desta VPS (exemplo:
 #                              deskcommcrm_caddy-sites). O Caddy do DeskVoice entra nela com o nome deskvoice,
 #                              e a ligação sobrevive às atualizações. Vazio mantém a gravada; off tira
@@ -52,7 +57,7 @@ while [ $# -gt 0 ]; do
     --build) BUILD=1 ;;
     --adopt) DESKVOICE_ADOPT=yes ;;
     --answers) answers_file="${2:-}"; shift ;;
-    -h|--help) sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,47p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Não conheço a opção $1." "Veja as opções com: bash install/install.sh --help" ;;
   esac
   shift
@@ -78,6 +83,10 @@ done
 if [ -n "${DESKVOICE_PANEL_LOCAL_ONLY:-}" ] && [ -n "${DESKVOICE_PANEL_PUBLIC_HTTP:-}" ]; then
   die "DESKVOICE_PANEL_LOCAL_ONLY=yes e DESKVOICE_PANEL_PUBLIC_HTTP=yes pedem coisas opostas (painel só nesta VPS, e painel na internet por HTTP)." "Escolha uma das duas e rode de novo."
 fi
+# A porta que vai para o DOCKER-USER é conferida aqui, antes de qualquer coisa ser gravada.
+for spec in ${DESKVOICE_DOCKER_USER_DROP:-}; do
+  docker_user_spec_valid "$spec" || die "A porta '$spec' em DESKVOICE_DOCKER_USER_DROP não vale." "Use a forma do ufw: 5060/udp, ou uma faixa 10000:10200/udp. Para não fechar nada, não defina a variável."
+done
 if [ -n "${DESKVOICE_PANEL_PORT:-}" ]; then
   valid_port "$DESKVOICE_PANEL_PORT" >/dev/null || die "A porta do painel em DESKVOICE_PANEL_PORT ($DESKVOICE_PANEL_PORT) não vale." "Use um número de 1 a 65535, ou não defina a variável."
 fi
@@ -453,8 +462,24 @@ fi
 # docker, e a porta publicada pelo Docker continua respondendo, mesmo com rich rule reject na zona
 # public; a porta escutada pelo host fica fechada. Por isso nenhum firewall-cmd aqui: não mudaria nada.
 if have firewall-cmd && [ "$($SUDO firewall-cmd --state 2>/dev/null || true)" = running ]; then
-  warn "O firewall firewalld está ativo, e ele não filtra as portas que o Docker publica: 5060/udp e ${rtp_start}-${rtp_end}/udp chegam aos contêineres com ele ligado, e uma regra dele não as fecha. Não é por ele que uma ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor da VPS, se ele tiver um. Com o firewalld ativo, a regra na cadeia DOCKER-USER fechou uma porta TCP de prova (medido em 15/11/2026), mas some ao reiniciar a máquina e deixa a porta aberta por alguns segundos a cada firewall-cmd --reload; em UDP, que é o da telefonia, ela não foi medida com o firewalld (ver docs/fundacao/ufw-e-docker.md)."
+  warn "O firewall firewalld está ativo, e ele não filtra as portas que o Docker publica: 5060/udp e ${rtp_start}-${rtp_end}/udp chegam aos contêineres com ele ligado, e uma regra dele não as fecha. Não é por ele que uma ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor da VPS, se ele tiver um. Com o firewalld ativo, a regra na cadeia DOCKER-USER fechou uma porta TCP de prova (medido em 15/11/2026), mas some ao reiniciar a máquina e deixa a porta aberta por alguns segundos a cada firewall-cmd --reload; em UDP, que é o da telefonia, ela não foi medida com o firewalld. Para a regra ficar de pé depois de reiniciar, o kit a escreve e a repõe no boot: DESKVOICE_DOCKER_USER_DROP=5060/udp (ver docs/fundacao/ufw-e-docker.md)."
   info "A prova da ligação continua sendo de fora: a primeira ligação e o teste da tela Linha do painel."
+fi
+# A regra que fecha de verdade uma porta publicada pelo Docker é a da cadeia DOCKER-USER (medida
+# com o ufw e com o firewalld: docs/fundacao/ufw-e-docker.md, issue #142). Ela nasce só quando as
+# portas são pedidas: fechar 5060/udp por conta própria deixaria a telefonia muda.
+docker_user_drop="${DESKVOICE_DOCKER_USER_DROP:-}"
+# Adotar: o serviço gravado roda o docker-user.sh da pasta antiga, que sumiu, e no boot seguinte a
+# regra sumiria calada. Ele é regravado daqui, com as portas que já tem.
+if [ -z "$docker_user_drop" ] && [ -n "$adopt_from" ]; then docker_user_drop="$(docker_user_unit_specs)"; fi
+if [ -n "$docker_user_drop" ]; then
+  if [ "$DRY_RUN" = 1 ]; then
+    would "fechar no DOCKER-USER ${docker_user_drop}, e gravar o serviço do systemd que repõe a regra no boot"
+  else
+    info "Fechando no DOCKER-USER: ${docker_user_drop}"
+    # shellcheck disable=SC2086  # lista separada por espaço, já conferida no começo do script ou gravada pelo kit
+    bash "$KIT_DIR/docker-user.sh" apply $docker_user_drop || die "Não consegui escrever a regra na cadeia DOCKER-USER." "Rode à mão: bash install/docker-user.sh apply $docker_user_drop"
+  fi
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════

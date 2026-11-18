@@ -348,6 +348,17 @@ valid_port() {
   local re='^[0-9]{1,5}$'
   [[ "$1" =~ $re ]] && [ "$((10#$1))" -ge 1 ] && [ "$((10#$1))" -le 65535 ] || { echo "porta inválida: use um número de 1 a 65535"; return 1; }
 }
+# A forma da porta na cadeia DOCKER-USER, a mesma do ufw: `porta` ou `min:max`, e /tcp ou /udp.
+docker_user_spec_valid() {
+  local re='^[0-9]{1,5}(:[0-9]{1,5})?/(tcp|udp)$'
+  [[ "$1" =~ $re ]] || return 1
+  local ports="${1%/*}" min max=""
+  min="${ports%%:*}"
+  case "$ports" in *:*) max="${ports##*:}" ;; esac
+  valid_port "$min" >/dev/null || return 1
+  [ -z "$max" ] || valid_port "$max" >/dev/null || return 1
+  [ -z "$max" ] || [ "$((10#$min))" -le "$((10#$max))" ] || return 1
+}
 valid_name() {
   local v="$1"
   case "$v" in ""|" "*|*" ") echo "o nome ficou vazio ou tem espaço sobrando no começo ou no fim"; return 1 ;; esac
@@ -772,6 +783,11 @@ AGENT_UNIT="deskvoice-agent"
 SYSTEMD_DIR="${DESKVOICE_SYSTEMD_DIR:-/etc/systemd/system}"
 SYSTEMD_RUN_DIR="${DESKVOICE_SYSTEMD_RUN_DIR:-/run/systemd/system}"
 CRON_DIR="${DESKVOICE_CRON_DIR:-/etc/cron.d}"
+DOCKER_USER_UNIT_FILE="$SYSTEMD_DIR/deskvoice-docker-user.service"
+docker_user_unit_specs() {  # as portas gravadas no serviço do DOCKER-USER: é a lista que ele repõe no boot
+  [ -f "$DOCKER_USER_UNIT_FILE" ] || return 0
+  sed -n 's|^ExecStart=.*/docker-user\.sh apply \(.*\)$|\1|p' "$DOCKER_USER_UNIT_FILE"
+}
 agent_scheduler() {  # → systemd | cron | none
   if have systemctl && [ -d "$SYSTEMD_RUN_DIR" ]; then echo systemd
   elif [ -d "$CRON_DIR" ]; then echo cron
