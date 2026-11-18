@@ -75,13 +75,13 @@ test("a mesma pessoa em duas organizações: aceita o segundo convite com a senh
   await listed;
   await expect(page.getByRole("combobox", { name: common.shell.organization })).toHaveCount(0);
 
-  // O segundo convite pede a senha que a conta já tem, sem o campo de repetir.
+  // O segundo convite mostra a mesma página: a pessoa digita duas vezes a senha que a conta já tem.
   await page.goto(pathOf(secondLink));
-  await expect(page.getByText(fill(invite.existingLead, { email, organization: second }), { exact: true })).toBeVisible();
-  await expect(page.getByLabel(invite.repeat, { exact: true })).toHaveCount(0);
-  await page.getByRole("textbox", { name: `${invite.existingPassword} ${invite.existingHint}`, exact: true }).fill(password);
+  await expect(page.getByText(fill(invite.lead, { organization: second }), { exact: true })).toBeVisible();
+  await page.getByRole("textbox", { name: `${invite.password} ${invite.passwordHint}`, exact: true }).fill(password);
+  await page.getByLabel(invite.repeat, { exact: true }).fill(password);
   listed = organizationsListed(page);
-  await page.getByRole("button", { name: invite.existingSubmit, exact: true }).click();
+  await page.getByRole("button", { name: invite.submit, exact: true }).click();
   await expect(page).toHaveURL(/\/calls$/);
   await listed;
 
