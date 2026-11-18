@@ -66,6 +66,11 @@ export const CALL_EVENT_KINDS = [
   "analyst_guidance_leaked",
   "drop_follow_up",
   "drop_follow_up_result",
+  "ivr_started",
+  "ivr_option_chosen",
+  "ivr_no_choice",
+  "ivr_failed",
+  "ivr_ended",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];
