@@ -213,6 +213,30 @@ export interface PhoneNumber {
   trunkId: string;
   agentId: string | null;
   agentName?: string | null;
+  /** `ai`: atende o agente. `ivr`: atende o menu por teclas `ivrMenuId`. */
+  mode?: "ai" | "ivr";
+  ivrMenuId?: string | null;
+}
+
+export interface IvrOption {
+  digit: string;
+  label: string;
+  action: "agent" | "transfer" | "hangup";
+  agentId: string | null;
+  transferTo: string | null;
+}
+
+/** Um menu por teclas como a API o lê: nunca o áudio, só a duração do anúncio. */
+export interface IvrMenu {
+  id: string;
+  name: string;
+  language: "pt-BR" | "en" | "es";
+  timeoutMs: number;
+  maxAttempts: number;
+  onNoChoice: "person" | "hangup";
+  promptAudioMs: number | null;
+  updatedAt: string;
+  options: IvrOption[];
 }
 
 export type KeyCheck = KeyCheckView;

@@ -3,7 +3,7 @@ import { handle } from "../../../../server/context";
 import { phone } from "../../../../server/shapes";
 import { refusingDuplicates } from "./store";
 
-const NUMBER_COLUMNS = `n.id, n.e164, n.trunk_id as "trunkId", n.agent_id as "agentId", a.name as "agentName"`;
+const NUMBER_COLUMNS = `n.id, n.e164, n.trunk_id as "trunkId", n.agent_id as "agentId", a.name as "agentName", n.mode, n.ivr_menu_id as "ivrMenuId"`;
 
 export const GET = handle({}, ({ q }) => q.many(`select ${NUMBER_COLUMNS} from phone_numbers n left join agents a on a.id = n.agent_id order by n.e164`));
 

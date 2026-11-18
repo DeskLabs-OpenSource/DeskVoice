@@ -266,12 +266,62 @@ export function Timeline({
           body: (
             <Card title={e.transfer_started}>
               {text(p.to) ? <p className="data">{fill(e.transfer_to, { to: formatPhone(text(p.to)) })}</p> : null}
-              {text(p.reason) ? <p className="text-muted">{text(p.reason)}</p> : null}
+              {/* A transferência pelo menu por teclas grava o código `ivr`, que vira frase; o motivo
+                  escrito pelo agente segue como ele escreveu. */}
+              {text(p.reason) ? <p className="text-muted">{p.reason === "ivr" ? e.transfer_reason_ivr : text(p.reason)}</p> : null}
               {text(p.summary) ? <p className="text-[0.87rem] text-muted">{text(p.summary)}</p> : null}
               {p.erased === true ? <Erased>{e.erased}</Erased> : null}
             </Card>
           ),
         };
+      // O menu por teclas (#223). Só a tecla de uma opção que existe chega aqui (`ivr_option_chosen`);
+      // a tecla que não é opção nunca é gravada, e a tela não tem o que mostrar dela.
+      case "ivr_started":
+        return { ...base, tone: "neutral", icon: DotsNine, body: <Quiet>{e.ivr_started}</Quiet> };
+      case "ivr_option_chosen": {
+        const action = p.action === "agent" || p.action === "transfer" || p.action === "hangup" ? p.action : null;
+        const seconds = Math.max(0, Math.round(Number(p.elapsed_ms) / 1000)) || 0;
+        return {
+          ...base,
+          tone: "accent",
+          icon: DotsNine,
+          body: (
+            <Card title={fill(e.ivr_option_chosen, { digit: text(p.digit), label: text(p.label), seconds })}>{action ? <p className="text-muted">{e.ivr_option_action[action]}</p> : null}</Card>
+          ),
+        };
+      }
+      case "ivr_no_choice": {
+        const attempt = typeof p.attempt === "number" ? p.attempt : 0;
+        return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(p.kind === "invalid" ? e.ivr_no_choice.invalid : e.ivr_no_choice.timeout, { attempt })}</Quiet> };
+      }
+      case "ivr_failed": {
+        const code = text(p.reason);
+        const said = Object.hasOwn(e.ivr_failed_reasons, code) ? e.ivr_failed_reasons[code as keyof typeof e.ivr_failed_reasons] : e.ivr_failed_unknown;
+        // As duas falhas que pedem mexer no menu também deixam um aviso no painel (o sino).
+        const noticed = code === "prompt_unreadable" || code === "no_person_exit";
+        return {
+          ...base,
+          tone: "fail",
+          icon: WarningOctagon,
+          body: (
+            <Card tone="fail" title={e.ivr_failed}>
+              <p className="text-muted">{said}</p>
+              {noticed ? <p className="text-[0.87rem] font-bold">{e.ivr_failed_notice}</p> : null}
+            </Card>
+          ),
+        };
+      }
+      case "ivr_ended": {
+        const said =
+          p.reason === "no_choice"
+            ? p.then === "person"
+              ? e.ivr_ended.no_choice_person
+              : e.ivr_ended.no_choice_hangup
+            : p.reason === "option_hangup" || p.reason === "caller_hangup" || p.reason === "stopped"
+              ? e.ivr_ended[p.reason]
+              : null;
+        return { ...base, tone: "neutral", icon: PhoneX, body: <Quiet>{said ?? e.call_ended}</Quiet> };
+      }
       case "agent_handoff":
         // O motivo e o resumo saem com o prazo de guarda e com o apagamento a pedido do titular: o
         // cartão fica só com de quem e para quem.

@@ -29,3 +29,25 @@ export function parseRecordedSpeech(wav: Buffer, label: string): Buffer {
   throw new Error(`${label} has no audio`);
 }
 
+
+/**
+ * O inverso de `parseRecordedSpeech`: embrulha o PCM16 mono a 8 kHz num WAV de 44 bytes de
+ * cabeçalho. É como o painel devolve o anúncio do menu por teclas para o "Ouvir".
+ */
+export function recordedSpeechWav(pcm: Buffer): Buffer {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8, "ascii");
+  header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(RECORDED_SPEECH_SAMPLE_RATE, 24);
+  header.writeUInt32LE(RECORDED_SPEECH_SAMPLE_RATE * 2, 28); // bytes por segundo
+  header.writeUInt16LE(2, 32); // bytes por quadro
+  header.writeUInt16LE(16, 34); // bits por amostra
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
