@@ -37,16 +37,19 @@ export const SUPPORT_SESSION_ROUTES: SupportSessionRoute[] = [
   // A conta e a sessão.
   forbid("auth/password", "POST", "troca a senha da conta de quem administra a instalação"),
   forbid("auth/me", "PATCH", "o vínculo de suporte nasce sem telefone e sem WhatsApp e assim fica"),
-  forbid("auth/switch", "POST", "dúvida: leva a sessão para outra organização; a saída da de suporte é da 5c"),
+  forbid("auth/switch", "POST", "leva a sessão para outra organização; a saída da sessão de suporte é `auth/support/end`"),
+  allow("auth/support/end", "POST", "encerra o acesso de suporte da própria sessão e a leva de volta à organização da conta"),
   allow("auth/login", "POST", "rota sem sessão: o login só escolhe vínculo `member`"),
   allow("auth/logout", "POST", "encerra a própria sessão, não cria nada"),
 
-  // A área da instalação age pela conta, não pelo vínculo de suporte.
+  // A área da instalação age pela conta, não pelo vínculo de suporte. `handleInstallation` recusa a
+  // sessão de suporte em toda rota, a de leitura também; a linha daqui é para a escrita.
   forbid("installation/organizations/[id]/invite", "POST", "o vínculo de suporte não convida, nem pela área da instalação"),
   forbid("installation/organizations", "POST", "cria organização com convite de dono: acesso que sobrevive"),
-  forbid("installation/organizations/[id]", "PATCH", "dúvida: a área da instalação age pela conta, não pelo vínculo de suporte"),
-  forbid("installation/organizations/[id]/suspension", "POST", "dúvida: suspender é ato da conta que administra, não do vínculo de suporte"),
-  forbid("installation/organizations/[id]/suspension", "DELETE", "dúvida: reativar é ato da conta que administra, não do vínculo de suporte"),
+  forbid("installation/organizations/[id]", "PATCH", "a área da instalação age pela conta, fora da sessão de suporte"),
+  forbid("installation/organizations/[id]/suspension", "POST", "suspender é ato da conta que administra, fora da sessão de suporte"),
+  forbid("installation/organizations/[id]/suspension", "DELETE", "reativar é ato da conta que administra, fora da sessão de suporte"),
+  forbid("installation/organizations/[id]/support", "POST", "uma sessão de suporte não abre outra; a área da instalação age pela conta"),
   forbid("installation/admins", "POST", "dá o papel da instalação a uma conta: acesso que sobrevive"),
   forbid("installation/admins/[id]", "DELETE", "mexe em quem administra a instalação"),
 

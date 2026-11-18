@@ -2,7 +2,7 @@
 // contado nem listado pelo painel. Cada caso roda também com um `member` igual, que precisa
 // aparecer: sem o par, o teste passaria com a lista vazia.
 import { randomUUID } from "node:crypto";
-import { createAccount, createFollowUp, withOrg, withSystem } from "@deskvoice/core";
+import { createAccount, createFollowUp, endSupportAccess, startSupportAccess, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
 import { PATCH as patchAgent } from "./agents/[id]/route";
@@ -14,14 +14,33 @@ import { DELETE as removeUser, PATCH as patchUser } from "./team/users/[id]/rout
 const panel = startPanel();
 afterAll(() => panel.close());
 
-type Kind = "member" | "support";
-const KINDS: Kind[] = ["support", "member"];
+// `support` é o vínculo no pior caso, por SQL. `support-live` e `support-ended` são o vínculo de
+// verdade, criado por `startSupportAccess` (fatia 5c): durante o acesso e depois do prazo.
+type Kind = "member" | "support" | "support-live" | "support-ended";
+const KINDS: Kind[] = ["support", "support-live", "support-ended", "member"];
+
+/** O vínculo de suporte como a produção o cria: quem administra a instalação entra pela própria sessão. */
+async function started(org: string, ended: boolean): Promise<string> {
+  const home = await createOrganization(panel.app, "Casa do suporte");
+  const supporter = await createUser(panel.app, home, "owner");
+  const ids = await withSystem(panel.app, (q) =>
+    q.one<{ accountId: string; sessionId: string }>('select u.account_id as "accountId", s.id as "sessionId" from users u join sessions s on s.user_id = u.id where u.id = $1', [supporter.id]),
+  );
+  if (!ids) throw new Error("the supporter has no session");
+  await withSystem(panel.app, (q) => q.exec("update accounts set installation_admin_at = $2 where id = $1", [ids.accountId, NOW]));
+  const access = await startSupportAccess(panel.app, { actorAccountId: ids.accountId, sessionId: ids.sessionId, organizationId: org, reason: "Ajuda com a pendência", minutes: 15 }, NOW);
+  if (!access.ok) throw new Error(access.reason);
+  if (ended) await endSupportAccess(panel.app, access.supportAccessId, new Date(NOW.getTime() + 16 * 60_000), "expired");
+  return access.userId;
+}
 
 /**
  * Um vínculo criado por SQL, no pior caso: com telefone, WhatsApp e ativo (`disabled_at` nulo).
  * A fatia 5c nunca cria o de suporte assim; aqui ele existe para provar que nenhuma escolha o alcança.
  */
 async function link(org: string, kind: Kind, role: "owner" | "admin" | "operator"): Promise<string> {
+  // O vínculo de verdade é sempre `admin`, nunca `owner`: o papel pedido não vale para ele.
+  if (kind === "support-live" || kind === "support-ended") return started(org, kind === "support-ended");
   const email = `${kind}-${randomUUID()}@example.test`;
   const accountId = await withSystem(panel.app, (q) => createAccount(q, { email, passwordHash: PASSWORD }));
   return insert(
