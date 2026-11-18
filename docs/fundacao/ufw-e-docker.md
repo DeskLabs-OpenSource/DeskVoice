@@ -310,12 +310,21 @@ em outro provedor), com `curl -m 6`. A regra é a mesma da seção 5:
 
 ### A regra que sobrevive ao reinício, do jeito que o kit faz
 
-Duas coisas esvaziam a `DOCKER-USER`: o boot da máquina e o reinício do serviço do Docker, que
-recria as cadeias dele. Por isso a regra que o kit escreve (`install/docker-user.sh`) não é só um
+O boot da máquina esvazia a `DOCKER-USER`: a cadeia é do kernel e nasce vazia. Se o reinício do
+serviço do Docker também a esvazia depende do Docker: no 29.9.3, medido em 18/11/2026, **não**
+esvaziou (tabela abaixo). Por isso a regra que o kit escreve (`install/docker-user.sh`) não é só um
 `iptables -I`: ela deixa um serviço do systemd, `deskvoice-docker-user.service`, com
 `After=docker.service` e `PartOf=docker.service`. O systemd chama o mesmo script depois de o Docker
-subir, no boot e a cada reinício do serviço dele, e o script confere antes de inserir — rodar duas
-vezes não duplica regra, e a porta que saiu da lista é reaberta.
+subir, no boot e a cada reinício do serviço dele, e o script confere antes de inserir: nos dois casos,
+ele só repõe o que falta ("já estava fechada"), rodar duas vezes não duplica regra, e a porta que saiu
+da lista é reaberta.
+
+O `apply` liga o serviço e o deixa ativo na hora (`systemctl enable --now --no-block`): o `PartOf` só
+chama de novo uma unidade ativa, e sem isso um reinício do Docker entre o `apply` e o próximo boot
+não o chamaria. O `--no-block` é porque o próprio serviço roda o `apply`, e um *start* da unidade de
+dentro dela esperaria por ele mesmo. O `apply` sem portas desliga e para o serviço
+(`systemctl disable --now`) antes de apagar o arquivo dele, e a unidade não fica na memória do
+systemd.
 
 A escolha foi a persistência do próprio instalador, e não uma *direct rule* do `firewalld`
 (`firewall-cmd --permanent --direct --add-rule ...`), por dois motivos: a regra que fecha a porta é
@@ -323,10 +332,11 @@ a da cadeia do **Docker**, e o `firewalld` não é o dono dela; e o kit já usa 
 precisa acontecer sozinho (o timer do agente de atualização). A *direct rule* também não foi medida
 aqui, e o que não se mede não entra.
 
-O que **é** medido é o que a regra faz (as duas tabelas acima). O serviço do systemd é novo: o
-`bash install/test/run.sh` cobre o script com um `iptables` de mentira — aplicar duas vezes, a
-cadeia esvaziada pelo reinício, o serviço repondo a regra, e o `--dry-run` não tocando em nada —, mas
-uma máquina de verdade reiniciada com ele ainda não foi medida. O `firewall-cmd --reload` continua
+O que **é** medido é o que a regra faz (as duas tabelas acima) e, desde 18/11/2026, o serviço numa
+máquina reiniciada (a segunda tabela abaixo). O `bash install/test/run.sh` cobre o script com um
+`iptables` e um `systemctl` de mentira: aplicar duas vezes, a cadeia esvaziada, o serviço repondo a
+regra, o serviço ligado e ativo pelo `apply`, desligado e parado antes de apagado, e o `--dry-run` não
+tocando em nada. O `firewall-cmd --reload` continua
 com a janela de alguns segundos descrita acima: ela é do Docker refazendo as cadeias dele, e a regra
 está listada o tempo todo.
 
@@ -376,8 +386,8 @@ Os limites da forma nova, os conhecidos:
   `-m physdev` o pede ao kernel (`xt_physdev`, também pelo `iptables-nft`). Medido em 18/11/2026: a
   primeira regra com `physdev` carregou o módulo, com `bridge-nf-call-iptables=1`, e o `apply` sem
   portas não o descarregou. Com ele, o tráfego de ponte de todos os contêineres passa a atravessar a
-  `FORWARD` e o `conntrack` até o reboot, e o serviço o carrega de novo no boot (o boot não foi
-  medido). Numa VPS só do DeskVoice, a checagem de saúde ficou igual com o módulo no ar: as pontes
+  `FORWARD` e o `conntrack` até o reboot, e o serviço o carrega de novo no boot (medido na segunda
+  rodada, abaixo). Numa VPS só do DeskVoice, a checagem de saúde ficou igual com o módulo no ar: as pontes
   do Docker têm os `ACCEPT` dele. O que mais pesa, e não foi medido: numa máquina com outra ponte que
   não é do Docker (libvirt, LXD), o tráfego entre as máquinas dela passa a cair na política da
   `FORWARD`, que o Docker deixa em `DROP`, e pode parar. O `physdev` fica porque, sem ele, com o
@@ -409,11 +419,28 @@ do PR #426: `iptables` 1.8.10 (nf_tables), kernel 5.14.0 (el9_8), Docker 29.9.3 
 | `apply` sem portas | reabre, esvazia a cadeia e apaga o serviço; o `br_netfilter` continua carregado |
 | checagem de saúde da 0.35.0 com o `br_netfilter` carregado | igual à de antes |
 
-Continua sem medição: o reinício da máquina e o do Docker com o serviço ligado (`PartOf`); a família
-`docker+` com tráfego (os contadores dela ficaram em 0); o hairpin, porque o `userland-proxy` estava
-ligado; o tráfego roteado direto ao IP do contêiner; UDP de saída e UDP entre contêineres; IPv6; o
-`firewalld` ativo; uma máquina com outra ponte que não é do Docker, ou com a saída para fora numa
-ponte `br-*`. Para esses casos, o que existe é o raciocínio acima e o `bash install/test/run.sh`, que
+O reinício da máquina e o do Docker, com o serviço, foram medidos na mesma VPS em 18/11/2026, das
+19:18 às 19:24 UTC ([2ª rodada no PR #426](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/426#issuecomment-6989139786)),
+com a 0.37.1: Docker 29.9.3, kernel 5.14 (el9), `firewalld` inativo, `br_netfilter` não carregado
+antes, um contêiner numa rede `br-*` publicando `48080/tcp` e `48506/udp`, sondado de fora e de dentro.
+
+| Passo | De fora | `DOCKER-USER` |
+|---|---|---|
+| `apply 48080/tcp 48506/udp` | **sem resposta** nas duas | 4 regras |
+| `systemctl restart docker`, serviço ligado mas ainda inativo | sem resposta | as mesmas 4: o Docker **não** esvaziou a cadeia |
+| reinício da máquina | **sem resposta** | as mesmas 4, repostas pelo serviço na subida |
+| `systemctl restart docker`, serviço ativo | sem resposta | as mesmas 4; o serviço foi chamado (`PartOf`) e disse "já estava fechada" |
+| `apply` sem portas | n/a | vazia; o arquivo da unidade sumiu, mas ela ficou "active (exited)" na memória do systemd (corrigido depois: o `apply` agora para a unidade antes de apagar) |
+
+A checagem de saúde ficou igual em todos os passos, e o contêiner respondeu de dentro o tempo todo.
+Nessa rodada, o `apply` não carregou o `br_netfilter`; depois do reinício, com o serviço, ele estava
+carregado. Por que a primeira rodada o carregou no `apply` e esta não, não foi investigado.
+
+Continua sem medição: um Docker que esvazie a cadeia ao reiniciar; o serviço ativo pelo próprio
+`apply` (`enable --now`), que veio depois da rodada; a família `docker+` com tráfego (os contadores
+dela ficaram em 0); o hairpin, porque o `userland-proxy` estava ligado; o tráfego roteado direto ao
+IP do contêiner; UDP de saída e UDP entre contêineres; IPv6; o `firewalld` ativo; uma máquina com
+outra ponte que não é do Docker, ou com a saída para fora numa ponte `br-*`. Para esses casos, o que existe é o raciocínio acima e o `bash install/test/run.sh`, que
 lê as regras escritas e decide, pacote a pacote, o que elas barram.
 
 Uma porta é `porta` ou `min:max`, seguida de `/tcp` ou `/udp`, a mesma forma do `ufw`:
