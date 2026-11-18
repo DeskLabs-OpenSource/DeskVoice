@@ -1,4 +1,4 @@
-import { administersInstallationSql } from "./accounts";
+import { administersInstallationSql, openSupportAccessesOf } from "./accounts";
 import { recordInstallationEvent } from "./installation";
 import { ORG_EVENT_KINDS, type Db, type OrgEventKind, type OrgQuery } from "./types";
 import { withOrg, withSystem } from "./with-org";
@@ -16,6 +16,11 @@ import { withOrg, withSystem } from "./with-org";
  * O acesso acaba por três caminhos, e nenhum depende do outro: o encerrar (`endSupportAccess` com
  * `ended`), a primeira requisição depois do prazo (`findSession` do painel, com `expired`) e a
  * tarefa `end_support_access`, enfileirada para a hora do prazo. Rodar o fim de novo não grava nada.
+ *
+ * Acaba também, com `revoked`, quando a conta deixa de cumprir `supportAllowedSql`: deixa de
+ * administrar a instalação ou perde o último vínculo `member` ativo. Na hora, onde isso acontece
+ * pelo painel (`endSupportAccessesIfNotAllowed`), e na próxima requisição da sessão (`findSession`),
+ * que cobre qualquer outro caminho.
  */
 
 /** Os prazos aceitos, em minutos. Não se renova: acabou, começa outro, com motivo novo. */
@@ -29,7 +34,21 @@ export const SUPPORT_REASON_MAX = 500;
 /** O tipo da tarefa que encerra o acesso na hora do prazo. */
 export const END_SUPPORT_ACCESS_TASK = "end_support_access";
 
-export type SupportAccessEndCause = "ended" | "expired";
+export type SupportAccessEndCause = "ended" | "expired" | "revoked";
+
+/**
+ * A regra de quem pode estar numa sessão de suporte, em SQL, numa fonte só: a conta administra a
+ * instalação (`administersInstallationSql`) e tem pelo menos um vínculo `member` ativo, para onde a
+ * sessão volta. `account` é uma expressão SQL do código (um parâmetro ou uma coluna da consulta de
+ * fora), nunca texto de fora. Ela é lida uma vez, num alias próprio: os nomes das consultas de
+ * dentro não a escondem. Pelo papel de sistema.
+ */
+export function supportAllowedSql(account: string): string {
+  return `(select ${administersInstallationSql("support_rule.account_id")}
+            and exists (select from users support_home
+                         where support_home.account_id = support_rule.account_id and support_home.kind = 'member' and support_home.disabled_at is null)
+     from (select ${account} as account_id) support_rule)`;
+}
 
 export interface StartSupportAccessInput {
   /** A conta de quem pede. É ela, e não o vínculo, que administra a instalação. */
@@ -164,26 +183,55 @@ export async function startSupportAccess(db: Db, input: StartSupportAccessInput,
 
 /**
  * Encerra um acesso de suporte, numa transação só. Devolve `false`, sem gravar nada, se ele já
- * acabou, se não existe, ou se a causa é `expired` e o prazo ainda não passou.
+ * acabou, se não existe, ou se a causa é `expired` e o prazo ainda não passou. Com `revoked`,
+ * `actorAccountId` é quem tirou a administração (nulo quando quem nota é a sessão).
  */
-export function endSupportAccess(db: Db, supportAccessId: string, now: Date, cause: SupportAccessEndCause): Promise<boolean> {
-  return withSystem(db, (q) => endInTransaction(q, supportAccessId, now, cause));
+export function endSupportAccess(db: Db, supportAccessId: string, now: Date, cause: SupportAccessEndCause, actorAccountId: string | null = null): Promise<boolean> {
+  return withSystem(db, (q) => endInTransaction(q, supportAccessId, now, cause, actorAccountId));
 }
 
 /**
- * Sair durante o suporte: encerra o acesso (`ended`) e apaga a sessão que saiu, numa transação só.
- * As outras sessões do mesmo acesso, se houver, voltam como em `endSupportAccess`.
+ * Sair: apaga a sessão do token, em qualquer estado (vencida, de pessoa desativada, de suporte já
+ * encerrado), numa transação só. Se ela está num acesso de suporte ainda aberto, encerra o acesso
+ * antes: `expired` se o prazo passou, `ended` se não. Token desconhecido não faz nada.
  */
-export function signOutSupportSession(db: Db, session: { id: string; supportAccessId: string }, now: Date): Promise<void> {
+export function signOut(db: Db, tokenHash: string, now: Date): Promise<void> {
   return withSystem(db, async (q) => {
-    await endInTransaction(q, session.supportAccessId, now, "ended");
-    await q.exec("delete from sessions where id = $1", [session.id]);
+    const session = await q.one<{ supportAccessId: string | null; expired: boolean }>(
+      `select sa.id as "supportAccessId", coalesce(sa.expires_at <= $2, false) as expired
+         from sessions s
+         left join support_accesses sa on sa.organization_id = s.organization_id and sa.id = s.support_access_id and sa.ended_at is null
+        where s.token_hash = $1
+        for update of s`,
+      [tokenHash, now],
+    );
+    if (session?.supportAccessId) await endInTransaction(q, session.supportAccessId, now, session.expired ? "expired" : "ended");
+    await q.exec("delete from sessions where token_hash = $1", [tokenHash]);
   });
 }
 
 /**
+ * Encerra com `revoked` todo acesso aberto dos vínculos de suporte da conta, se ela não cumpre mais
+ * `supportAllowedSql`. Quem tira a administração ou desativa um vínculo chama isto logo depois;
+ * `actorAccountId` é quem fez. Devolve quantos acessos encerrou. `endSupportAccessesIfNotAllowedIn`
+ * roda na transação de quem chama, pelo papel de sistema.
+ */
+export function endSupportAccessesIfNotAllowed(db: Db, accountId: string, now: Date, actorAccountId: string | null): Promise<number> {
+  return withSystem(db, (q) => endSupportAccessesIfNotAllowedIn(q, accountId, now, actorAccountId));
+}
+
+export async function endSupportAccessesIfNotAllowedIn(q: OrgQuery, accountId: string, now: Date, actorAccountId: string | null): Promise<number> {
+  const rule = await q.one<{ allowed: boolean }>(`select ${supportAllowedSql("$1::uuid")} as allowed`, [accountId]);
+  if (rule?.allowed === true) return 0;
+  let ended = 0;
+  for (const id of await openSupportAccessesOf(q, accountId)) if (await endInTransaction(q, id, now, "revoked", actorAccountId)) ended += 1;
+  return ended;
+}
+
+/**
  * O fim do acesso, na transação de quem chama (pelo papel de sistema):
- * - grava `ended_at`: `now` quando a pessoa encerra, e `expires_at` quando o prazo vence;
+ * - grava `ended_at`: `now` quando a pessoa encerra ou a administração acaba (nunca depois do
+ *   prazo), e `expires_at` quando o prazo vence;
  * - põe `disabled_at` no vínculo de suporte;
  * - grava `support_access_ended` nas duas auditorias, com a causa;
  * - leva toda sessão que estava no acesso de volta para a organização em que o login da conta
@@ -192,11 +240,11 @@ export function signOutSupportSession(db: Db, session: { id: string; supportAcce
  *
  * `where ended_at is null`: só um caminho grava o fim. Os outros não acham linha e não gravam nada.
  */
-async function endInTransaction(q: OrgQuery, supportAccessId: string, now: Date, cause: SupportAccessEndCause): Promise<boolean> {
+async function endInTransaction(q: OrgQuery, supportAccessId: string, now: Date, cause: SupportAccessEndCause, revokedBy: string | null = null): Promise<boolean> {
   const ended = await q.one<{ organizationId: string; userId: string; endedAt: Date }>(
     `update support_accesses
         set ended_at = case when $3::text = 'expired' then expires_at else least($2::timestamptz, expires_at) end
-      where id = $1 and ended_at is null and ($3::text = 'ended' or expires_at <= $2::timestamptz)
+      where id = $1 and ended_at is null and ($3::text <> 'expired' or expires_at <= $2::timestamptz)
       returning organization_id as "organizationId", user_id as "userId", ended_at as "endedAt"`,
     [supportAccessId, now, cause],
   );
@@ -211,10 +259,11 @@ async function endInTransaction(q: OrgQuery, supportAccessId: string, now: Date,
   const accountId = link.accountId;
 
   const detail = { support_access_id: supportAccessId, cause, ended_at: ended.endedAt.toISOString() };
-  // Quem encerrou foi a pessoa do suporte; o prazo vencido não tem quem.
+  // Quem encerrou foi a pessoa do suporte; o prazo vencido não tem quem; a revogação tem, na
+  // instalação, quem tirou a administração (a organização não o conhece).
   await recordOrgEventIn(q, ended.organizationId, "support_access_ended", detail, now, cause === "ended" ? ended.userId : null);
   await recordInstallationEvent(q, now, "support_access_ended", {
-    actorAccountId: cause === "ended" ? accountId : null,
+    actorAccountId: cause === "ended" ? accountId : cause === "revoked" ? revokedBy : null,
     organizationId: ended.organizationId,
     payload: detail,
   });

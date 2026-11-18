@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { DEFAULT_RECORDINGS_DIR, ORGANIZATION_SUSPENDED, createDb, endSupportAccess, hashToken, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { DEFAULT_RECORDINGS_DIR, ORGANIZATION_SUSPENDED, createDb, endSupportAccess, hashToken, supportAllowedSql, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { wahaFromEnv, type WahaOptions } from "@deskvoice/tools/waha";
 import type { z, ZodType } from "zod";
 import { trustedProxyHops } from "./client-ip";
@@ -178,15 +178,18 @@ export async function createSession(q: OrgQuery, user: { id: string; organizatio
  * A sessão de suporte da instalação (seção 3.6 do desenho do R8) só vale com o acesso dela vivo, e
  * a mesma consulta confere: o vínculo `support` sem acesso, ou com o acesso encerrado, não é
  * sessão. Com o prazo vencido, encerra o acesso (`endSupportAccess`, `expired`) e devolve `null`:
- * a sessão volta para a organização da conta, e a próxima requisição já cai lá.
+ * a sessão volta para a organização da conta, e a próxima requisição já cai lá. Com a conta fora
+ * de `supportAllowedSql` (não administra mais a instalação, ou não tem vínculo `member` ativo),
+ * faz o mesmo, com `revoked`.
  */
 export async function findSession(deps: ServerDeps, token: string | undefined): Promise<Session | null> {
   if (!token) return null;
   const now = deps.clock.now();
   const found = await withSystem(deps.db, (q) =>
-    q.one<Session & { expired: boolean }>(
+    q.one<Session & { expired: boolean; allowed: boolean }>(
       `select s.id, s.user_id as "userId", s.organization_id as "organizationId", u.role, u.name, u.email, o.suspended_at is not null as suspended,
-              u.kind = 'support' as support, s.support_access_id as "supportAccessId", coalesce(sa.expires_at <= $2, false) as expired
+              u.kind = 'support' as support, s.support_access_id as "supportAccessId", coalesce(sa.expires_at <= $2, false) as expired,
+              u.kind = 'member' or ${supportAllowedSql("s.account_id")} as allowed
          from sessions s join users u on u.id = s.user_id and u.organization_id = s.organization_id
          join organizations o on o.id = s.organization_id
          left join support_accesses sa on sa.organization_id = s.organization_id and sa.id = s.support_access_id and sa.user_id = s.user_id and sa.ended_at is null
@@ -196,9 +199,15 @@ export async function findSession(deps: ServerDeps, token: string | undefined): 
     ),
   );
   if (!found) return null;
-  const { expired, ...session } = found;
+  const { expired, allowed, ...session } = found;
   if (expired) {
     await endSupportAccess(deps.db, session.supportAccessId ?? "", now, "expired");
+    return null;
+  }
+  // A conta deixou de administrar a instalação, ou perdeu o último vínculo `member` ativo, por um
+  // caminho que não encerrou o acesso: ele acaba aqui, como `revoked`, sem quem.
+  if (!allowed) {
+    await endSupportAccess(deps.db, session.supportAccessId ?? "", now, "revoked");
     return null;
   }
   return session;

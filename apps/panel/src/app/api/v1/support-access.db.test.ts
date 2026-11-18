@@ -1,6 +1,7 @@
 // O acesso de suporte da instalação pelas rotas (R8 seção 3.6, fatia 5c), sem tela: entrar com
 // motivo e prazo, encerrar, e o que acontece depois do prazo. A conta que dá suporte é `member` em A
 // e entra em B; C é uma terceira organização.
+import { randomUUID } from "node:crypto";
 import { withOrg, withSystem, type ClaimedTask } from "@deskvoice/core";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { SECRET_KEY, NOW, call, createOrganization, createUser, startPanel, type Result } from "../../../../test/kit";
@@ -12,12 +13,14 @@ import { GET as myOrganizations } from "./auth/organizations/route";
 import { POST as endSupport } from "./auth/support/end/route";
 import { POST as switchOrganization } from "./auth/switch/route";
 import { GET as owners } from "./follow-ups/owners/route";
+import { DELETE as revokeAdmin } from "./installation/admins/[id]/route";
 import { GET as installationAdmins } from "./installation/admins/route";
 import { GET as installationEvents } from "./installation/events/route";
 import { GET as organizations } from "./installation/organizations/route";
 import { GET as suspensionPreview } from "./installation/organizations/[id]/suspension/route";
 import { POST as support } from "./installation/organizations/[id]/support/route";
 import { GET as team } from "./team/route";
+import { DELETE as removePerson, PATCH as changePerson } from "./team/users/[id]/route";
 
 const panel = startPanel();
 afterAll(() => panel.close());
@@ -63,6 +66,29 @@ const orgEvents = (organizationId: string, kind: string) =>
   withOrg(panel.app, organizationId, (q) => q.many<{ payload: Record<string, unknown> }>("select payload from organization_events where kind = $1", [kind]));
 const installationEventsOf = (organizationId: string, kind: string) =>
   withSystem(panel.app, (q) => q.many<{ payload: Record<string, unknown> }>("select payload from installation_events where organization_id = $1 and kind = $2", [organizationId, kind]));
+const clearsCookie = (result: Result) => expect(result.headers.get("set-cookie")).toMatch(/^dv_session=; .*Max-Age=0/);
+/** O acesso, o vínculo e as sessões da conta, pelo papel de sistema. */
+function accessState(organizationId: string, accountId: string) {
+  return withSystem(panel.app, (q) =>
+    q.one<{ endedAt: Date | null; disabled: boolean; sessions: number }>(
+      `select sa.ended_at as "endedAt", u.disabled_at is not null as disabled, (select count(*)::int from sessions where account_id = $2) as sessions
+         from support_accesses sa join users u on u.id = sa.user_id where sa.organization_id = $1`,
+      [organizationId, accountId],
+    ),
+  );
+}
+/** O fim do acesso nas duas pontas: a causa, e quem, de cada lado. */
+const endTrail = async (organizationId: string) => ({
+  organization: await withOrg(panel.app, organizationId, (q) =>
+    q.many<{ actor: string | null; cause: unknown }>("select actor_user_id as actor, payload->>'cause' as cause from organization_events where kind = 'support_access_ended'"),
+  ),
+  installation: await withSystem(panel.app, (q) =>
+    q.many<{ actor: string | null; cause: unknown }>(
+      "select actor_account_id as actor, payload->>'cause' as cause from installation_events where organization_id = $1 and kind = 'support_access_ended'",
+      [organizationId],
+    ),
+  ),
+});
 
 describe("entering an organization as installation support", () => {
   it("moves the session into the organization as an admin, with the reason and the deadline", async () => {
@@ -160,8 +186,44 @@ describe("ending the support access", () => {
 
   it("signing out of a member session is as before", async () => {
     const s = await scene("logout member");
-    expect(refusal(await call(logout, { method: "POST", cookie: s.supporter.cookie }))).toEqual([200, undefined]);
+    const out = await call(logout, { method: "POST", cookie: s.supporter.cookie });
+    expect(refusal(out)).toEqual([200, undefined]);
+    clearsCookie(out);
     expect(await whereAmI(s.supporter.cookie)).toBe(401);
+  });
+
+  it("signing out after the deadline, as the first request, ends the access as expired and removes the session", async () => {
+    const s = await scene("logout late");
+    const account = await accountOf(s.supporter.id);
+    await enter(s.supporter.cookie, s.b, { reason: REASON, minutes: 15 });
+    panel.clock.at = after(16);
+    const out = await call(logout, { method: "POST", cookie: s.supporter.cookie });
+    expect(refusal(out)).toEqual([200, undefined]);
+    clearsCookie(out);
+    expect(await accessState(s.b, account)).toEqual({ endedAt: after(15), disabled: true, sessions: 0 });
+    expect(await endTrail(s.b)).toEqual({ organization: [{ actor: null, cause: "expired" }], installation: [{ actor: null, cause: "expired" }] });
+  });
+
+  it("signing out after the request that already ended the access removes the session that went home, and writes no second end", async () => {
+    const s = await scene("logout after");
+    const account = await accountOf(s.supporter.id);
+    await enter(s.supporter.cookie, s.b, { reason: REASON, minutes: 15 });
+    panel.clock.at = after(16);
+    expect((await call(me, { cookie: s.supporter.cookie })).status).toBe(401);
+    const out = await call(logout, { method: "POST", cookie: s.supporter.cookie });
+    expect(refusal(out)).toEqual([200, undefined]);
+    clearsCookie(out);
+    expect(await accessState(s.b, account)).toEqual({ endedAt: after(15), disabled: true, sessions: 0 });
+    expect(await endTrail(s.b)).toEqual({ organization: [{ actor: null, cause: "expired" }], installation: [{ actor: null, cause: "expired" }] });
+  });
+
+  it.each([
+    ["without a cookie", undefined],
+    ["with an unknown token", "dv_session=not-a-token"],
+  ])("signing out %s clears the cookie and never answers 401", async (_label, cookie) => {
+    const out = await call(logout, { method: "POST", cookie });
+    expect(refusal(out)).toEqual([200, undefined]);
+    clearsCookie(out);
   });
 
   it("works in a suspended organization", async () => {
@@ -228,5 +290,62 @@ describe("after the deadline", () => {
     panel.clock.at = after(20);
     expect(await whereAmI(s.supporter.cookie)).toBe("A queue only");
     expect(await orgEvents(s.b, "support_access_ended")).toHaveLength(1);
+  });
+});
+
+describe("losing what support needs ends the access", () => {
+  /** `admin`, um segundo dono em A, e a conta de quem dá suporte. */
+  async function revocable(label: string) {
+    const s = await scene(label);
+    const otherOwner = await createUser(panel.app, s.a, "owner");
+    await withSystem(panel.app, async (q) => q.exec("update accounts set installation_admin_at = $2 where id = $1", [await accountOf(s.plain.id), NOW]));
+    await enter(s.supporter.cookie, s.b);
+    panel.clock.at = after(5);
+    return { ...s, otherOwner, account: await accountOf(s.supporter.id) };
+  }
+
+  it("another admin revokes the account: the access ends at once, revoked, with who revoked on the installation side", async () => {
+    const s = await revocable("revoke");
+    expect(refusal(await call(revokeAdmin, { method: "DELETE", cookie: s.plain.cookie, params: { id: s.account } }))).toEqual([200, undefined]);
+    // Sem nenhum pedido da sessão de suporte.
+    expect(await accessState(s.b, s.account)).toEqual({ endedAt: after(5), disabled: true, sessions: 1 });
+    expect(await endTrail(s.b)).toEqual({ organization: [{ actor: null, cause: "revoked" }], installation: [{ actor: await accountOf(s.plain.id), cause: "revoked" }] });
+    expect(await whereAmI(s.supporter.cookie)).toBe("A revoke");
+  });
+
+  it("disabling the account's member link in its home organization ends the access, revoked, and removes the session", async () => {
+    const s = await revocable("disable");
+    expect(refusal(await call(changePerson, { method: "PATCH", cookie: s.otherOwner.cookie, params: { id: s.supporter.id }, body: { disabled: true } }))).toEqual([200, undefined]);
+    expect(await accessState(s.b, s.account)).toEqual({ endedAt: after(5), disabled: true, sessions: 0 });
+    expect(await endTrail(s.b)).toEqual({ organization: [{ actor: null, cause: "revoked" }], installation: [{ actor: await accountOf(s.otherOwner.id), cause: "revoked" }] });
+    expect(await whereAmI(s.supporter.cookie)).toBe(401);
+  });
+
+  it("removing the account's member link ends the access the same way", async () => {
+    const s = await revocable("remove");
+    expect(refusal(await call(removePerson, { method: "DELETE", cookie: s.otherOwner.cookie, params: { id: s.supporter.id } }))).toEqual([200, undefined]);
+    expect(await accessState(s.b, s.account)).toEqual({ endedAt: after(5), disabled: true, sessions: 0 });
+    expect(await endTrail(s.b)).toEqual({ organization: [{ actor: null, cause: "revoked" }], installation: [{ actor: await accountOf(s.otherOwner.id), cause: "revoked" }] });
+    expect(await whereAmI(s.supporter.cookie)).toBe(401);
+  });
+
+  it("the session itself notices a revocation that skipped the core: the next request ends it, revoked, and never lands in the client", async () => {
+    const s = await revocable("direct");
+    await withSystem(panel.app, (q) => q.exec("update accounts set installation_admin_at = null where id = $1", [s.account]));
+    expect((await call(me, { cookie: s.supporter.cookie })).status).toBe(401);
+    expect(await accessState(s.b, s.account)).toEqual({ endedAt: after(5), disabled: true, sessions: 1 });
+    expect(await endTrail(s.b)).toEqual({ organization: [{ actor: null, cause: "revoked" }], installation: [{ actor: null, cause: "revoked" }] });
+    expect(await whereAmI(s.supporter.cookie)).toBe("A direct");
+  });
+
+  it("an account that still administers and still has another active member link keeps the access when one link is disabled", async () => {
+    const s = await revocable("keeps");
+    await withSystem(panel.app, (q) =>
+      q.exec("insert into users (organization_id, account_id, email, name, role) values ($1, $2, $3, 'Outro vínculo', 'operator')", [s.c, s.account, `link-${randomUUID()}@example.test`]),
+    );
+    expect(refusal(await call(changePerson, { method: "PATCH", cookie: s.otherOwner.cookie, params: { id: s.supporter.id }, body: { disabled: true } }))).toEqual([200, undefined]);
+    expect(await accessState(s.b, s.account)).toEqual({ endedAt: null, disabled: false, sessions: 1 });
+    expect(await endTrail(s.b)).toEqual({ organization: [], installation: [] });
+    expect(await whereAmI(s.supporter.cookie)).toBe("B keeps");
   });
 });
