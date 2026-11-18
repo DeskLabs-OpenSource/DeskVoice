@@ -90,6 +90,19 @@ async function newNumber(): Promise<string> {
   return (created.data as { id: string }).id;
 }
 
+/** Alguém do banco espera uma trava numa consulta que contém `text`. */
+async function someoneWaitsOn(text: string, timeoutMs = 3000): Promise<boolean> {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    const waiting = await withOrg(panel.app, org, (q) =>
+      q.one<{ n: number }>("select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and position($1 in query) > 0", [text]),
+    );
+    if ((waiting?.n ?? 0) > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
+
 describe("T11: o menu sem tecla para uma pessoa", () => {
   it("não nasce: a criação recusa, e nada fica gravado", async () => {
     const refused = await call(createMenu, { method: "POST", cookie: owner, body: { name: "Sem saída", options: [{ digit: "1", label: "Sair", action: "hangup" }] } });
@@ -216,6 +229,32 @@ describe("T11: o que está em uso não some", () => {
     expect(await stored("select name from agents where id = $1", [agent])).toEqual({ name: "Financeiro IA" });
     await call(putOptions, { method: "PUT", cookie: owner, params: { id: menu }, body: [PERSON] });
     expect((await call(deleteAgent, { method: "DELETE", cookie: owner, params: { id: agent } })).status).toBe(200);
+  });
+
+  it("a tecla gravada entre a conferência e o apagamento do agente dá a mesma recusa, com o menu, e não um erro cru", async () => {
+    const agent = await newAgent("Agente da corrida");
+    const menu = await newMenu("Menu da corrida");
+    let release: () => void = () => undefined;
+    let wrote: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const didWrite = new Promise<void>((resolve) => (wrote = resolve));
+    // Outra transação põe o agente numa tecla e ainda não confirmou: a conferência da rota não a vê.
+    const saving = withOrg(panel.app, org, async (q) => {
+      await q.exec("insert into ivr_options (organization_id, menu_id, digit, label, action, agent_id) values ($1, $2, '3', 'Corrida', 'agent', $3)", [org, menu, agent]);
+      wrote();
+      await held;
+    });
+    await didWrite;
+    const deleting = call(deleteAgent, { method: "DELETE", cookie: owner, params: { id: agent } });
+    try {
+      expect(await someoneWaitsOn("delete from agents")).toBe(true);
+    } finally {
+      release();
+    }
+    await saving;
+    const refused = await deleting;
+    expect([refused.status, refused.code, refused.message]).toEqual([409, "agent_in_ivr_menu", "Menu da corrida"]);
+    expect(await stored("select name from agents where id = $1", [agent])).toEqual({ name: "Agente da corrida" });
   });
 
   it("o menu que atende um número não é apagado: o erro diz o número; o menu solto sai", async () => {
