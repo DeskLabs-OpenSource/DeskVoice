@@ -2,24 +2,21 @@ import type { InviteDictionary } from "../pt-BR/invite";
 
 const invite: InviteDictionary = {
   title: "Te invitaron",
-  lead: "Crea tu contraseña para entrar al panel de {organization}.",
+  lead: "Para entrar al panel de {organization}, escribe la contraseña dos veces.",
   company: "Empresa",
   email: "Correo",
   role: "Rol",
   name: "Tu nombre",
   password: "Contraseña",
-  passwordHint: "Al menos 10 caracteres.",
+  passwordHint: "Si este correo ya tiene cuenta en DeskVoice, usa su contraseña. Si no, elige una contraseña nueva, de al menos 10 caracteres.",
   repeat: "Repite la contraseña",
+  wrongPassword: "Si este correo ya tiene cuenta, usa su contraseña.",
+  newPasswordRule: "Una contraseña nueva necesita al menos 10 caracteres.",
   mismatch: "Las dos contraseñas no son iguales.",
-  submit: "Crear mi cuenta y entrar",
+  submit: "Aceptar la invitación y entrar",
   invalidTitle: "Esta invitación ya no vale.",
   invalidBody: "El enlace puede haber vencido, haberse usado ya o haber sido cancelado. Pide una invitación nueva a quien te invitó.",
   signIn: "Ya tengo cuenta: entrar",
-  existingLead: "Ya tienes cuenta con {email}. Entra con la contraseña que ya usas para aceptar la invitación de {organization}.",
-  existingName: "Tu nombre en {organization}",
-  existingPassword: "Tu contraseña",
-  existingHint: "La misma con la que entras al panel.",
-  existingSubmit: "Aceptar la invitación y entrar",
 };
 
 export default invite;

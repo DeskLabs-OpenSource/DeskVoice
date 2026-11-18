@@ -215,8 +215,43 @@ const linkTo = async (organizationId: string, email: string, role: "owner" | "ad
     return addMembership(q, { organizationId, accountId: account?.id ?? "", name: `Vínculo ${role}`, role });
   });
 
+// A resposta do convite é a mesma para todo e-mail: só estes campos.
+const INVITE_KEYS = ["organizationName", "email", "name", "role"];
+const headersOf = (result: { headers: Headers }): [string, string][] => [...result.headers.entries()];
+
+describe("the invite page does not change with the e-mail", () => {
+  it("the same token answers the same status, text and headers before and after the e-mail gets an account in another organization", async () => {
+    const ownerA = await createUser(panel.app, await createOrganization(panel.app, "auth convite igual A"), "owner");
+    const ownerB = await createUser(panel.app, await createOrganization(panel.app, "auth convite igual B"), "owner");
+    const email = `igual-${randomUUID()}@example.test`;
+    const token = await inviteBy(ownerA.cookie, email, "admin");
+
+    const before = await call(openInvite, { params: { token } });
+    expect(before.status).toBe(200);
+    expect(Object.keys(before.data as object)).toEqual(INVITE_KEYS);
+
+    // O e-mail ganha conta pela outra organização, com uma senha nova.
+    const password = "a senha da conta em B";
+    expect((await accept(await inviteBy(ownerB.cookie, email), password)).status).toBe(200);
+
+    const after = await call(openInvite, { params: { token } });
+    expect(after.status).toBe(before.status);
+    expect(after.text).toBe(before.text);
+    expect(headersOf(after)).toEqual(headersOf(before));
+    for (const shown of [before.text, after.text]) {
+      expect(shown).not.toContain("existingAccount");
+      expect(shown).not.toContain("existing");
+    }
+
+    // A diferença só aparece no envio da senha: a da conta entra na organização do convite.
+    const accepted = await accept(token, password);
+    expect(accepted.status).toBe(200);
+    expect((await call(me, { cookie: cookieOf(accepted) })).data).toMatchObject({ email, role: "admin", organizationName: "auth convite igual A" });
+  });
+});
+
 describe("an invite for an e-mail that already has an account", () => {
-  it("says existingAccount only behind a valid token, asks for the password the account has, and the session lands in the new organization", async () => {
+  it("does not say the account exists, takes the password the account has, and the session lands in the new organization", async () => {
     const a = await createOrganization(panel.app, "auth convite A");
     const b = await createOrganization(panel.app, "auth convite B");
     const ownerA = await createUser(panel.app, a, "owner");
@@ -224,7 +259,8 @@ describe("an invite for an e-mail that already has an account", () => {
     const token = await inviteBy(ownerA.cookie, person.email, "admin");
 
     const shown = await call(openInvite, { params: { token } });
-    expect(shown.data).toMatchObject({ email: person.email, existingAccount: true });
+    expect(shown.data).toMatchObject({ email: person.email });
+    expect(Object.keys(shown.data as object)).toEqual(INVITE_KEYS);
     // Token inválido: a mesma resposta de antes, sem nada sobre o e-mail.
     const invalid = await call(openInvite, { params: { token: `${token}x` } });
     expect([invalid.status, invalid.code, invalid.data]).toEqual([404, "invite_invalid", undefined]);
@@ -277,7 +313,7 @@ describe("an invite for an e-mail that already has an account", () => {
   it("a new account still needs a password that follows the rule", async () => {
     const ownerA = await createUser(panel.app, await createOrganization(panel.app, "auth convite novo"), "owner");
     const token = await inviteBy(ownerA.cookie, `nova-${randomUUID()}@example.test`);
-    expect((await call(openInvite, { params: { token } })).data).toMatchObject({ existingAccount: false });
+    expect(Object.keys((await call(openInvite, { params: { token } })).data as object)).toEqual(INVITE_KEYS);
     const short = await accept(token, "curta");
     expect([short.status, short.code]).toEqual([400, "validation_error"]);
     expect((await accept(token, "uma senha nova e longa")).status).toBe(200);
@@ -335,7 +371,7 @@ describe("the orphan account left by a failed cleanup (nota da revisora)", () =>
     expect(left).toEqual({ admin: true });
 
     const token = await inviteBy(ownerA.cookie, person.email);
-    expect((await call(openInvite, { params: { token } })).data).toMatchObject({ existingAccount: false });
+    expect(Object.keys((await call(openInvite, { params: { token } })).data as object)).toEqual(INVITE_KEYS);
     expect((await accept(token, "a brand new password")).status).toBe(200);
 
     expect((await signIn(person.email, "a brand new password")).status).toBe(200);
