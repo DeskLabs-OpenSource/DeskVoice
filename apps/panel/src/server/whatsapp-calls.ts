@@ -154,10 +154,12 @@ async function record(q: OrgQuery, now: Date, state: VoiceState): Promise<Row | 
 
 /**
  * O estado para a tela. Com uma conexão em curso, pergunta ao processo de voz e grava o que mudou.
- * `withQr: false` é a leitura da saúde, que roda em toda aba aberta a cada minuto: sem a imagem.
+ * `withQr` é obrigatório: toda chamada decide se a resposta leva o QR Code. `false` é a leitura da
+ * saúde, que roda em toda aba aberta a cada minuto, e a da sessão de suporte, que vê o estado do
+ * canal mas nunca recebe material de pareamento (`!session.support`).
  */
-export async function observeCalls(deps: ServerDeps, org: Org, organizationId: string, options: { withQr?: boolean } = {}): Promise<WhatsAppCallsView> {
-  const withQr = options.withQr ?? true;
+export async function observeCalls(deps: ServerDeps, org: Org, organizationId: string, options: { withQr: boolean }): Promise<WhatsAppCallsView> {
+  const { withQr } = options;
   const stored = await org((q) => readCallsStored(q, deps.clock.now()));
   // Sem o serviço de pé não há WaCalls, e sem pedido nenhum não existe sessão nele.
   if (stored.service !== "running" || !stored.row) return view(stored, true);
@@ -191,7 +193,7 @@ export async function connectCalls(deps: ServerDeps, org: Org, session: Session,
       [q.organizationId, sessionName(session.organizationId), state.session?.id ?? null, now],
     ),
   );
-  return observeCalls(deps, org, session.organizationId);
+  return observeCalls(deps, org, session.organizationId, { withQr: !session.support });
 }
 
 /** Desvincula o aparelho (ele some de "Aparelhos conectados") e apaga a sessão no WaCalls. */
@@ -268,5 +270,5 @@ export async function changeCallsService(deps: ServerDeps, org: Org, session: Se
         : `${session.name} pediu a remoção do serviço de ligação pelo WhatsApp deste servidor. A memória e o disco são liberados em instantes.`,
     );
   });
-  return observeCalls(deps, org, session.organizationId);
+  return observeCalls(deps, org, session.organizationId, { withQr: !session.support });
 }

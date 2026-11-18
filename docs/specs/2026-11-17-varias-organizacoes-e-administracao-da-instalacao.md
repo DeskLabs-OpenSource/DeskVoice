@@ -349,6 +349,10 @@ create table support_accesses (
   `team/users/[id]`). A recusa mora em `requireRole`, com um parâmetro `support: false` nas rotas da
   equipe, para a rota nova da equipe nascer recusada. A fatia 5 lista as demais rotas que o papel
   `admin` alcança e marca, uma por uma, as que criam credencial ou acesso que sobrevive à sessão.
+  A mesma régua vale para a leitura: a sessão de suporte vê o estado dos canais, mas nunca recebe
+  material de pareamento nem segredo (hoje, o QR Code de `whatsapp` e `whatsapp-calls` sai como
+  `null`). Confirmação feita durante o suporte (por exemplo, o recibo do provedor do analista) fica
+  em nome do vínculo de suporte, como qualquer outra ação.
 - **O vínculo de suporte não recebe nem é escolhido.** Ele nasce sem telefone e sem WhatsApp (nada é
   copiado da conta), fica com `disabled_at` assim que o acesso acaba ou é encerrado, e toda consulta
   que escolhe pessoa da organização filtra `kind = 'member'`: o resumo por WhatsApp

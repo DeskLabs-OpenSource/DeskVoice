@@ -1,0 +1,11 @@
+import { handle } from "../../../../../server/context";
+
+export const GET = handle({}, async () => []);
+
+export const POST = handle(
+  {
+    support: false,
+    configure: true,
+  },
+  async () => null,
+);

@@ -69,6 +69,7 @@ const body = z.object({ password: z.string().min(1).max(1000), target: z.string(
 const consulted = new WeakMap<object, Published>();
 export const POST = handle(
   {
+    support: false,
     body,
     before: async ({ body, deps, session }) => {
       if (!(await administers(deps.db, session.userId))) throw new ApiError(403, "forbidden", "Your role cannot change this. Ask an owner or admin.");

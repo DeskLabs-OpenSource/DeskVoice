@@ -141,11 +141,12 @@ async function record(q: OrgQuery, now: Date, session: WahaSession | null): Prom
  * O estado para a tela. Com uma conexão em curso, pergunta ao WAHA e grava o que mudou: é essa
  * gravação que gera o aviso "o WhatsApp caiu" mesmo com Configurações fechada.
  *
- * `withQr: false` é a leitura da saúde, que roda em toda aba aberta a cada minuto: ela não busca a
- * imagem do QR Code, que só a tela de Configurações mostra.
+ * `withQr` é obrigatório: toda chamada decide se a resposta leva o QR Code. `false` é a leitura da
+ * saúde, que roda em toda aba aberta a cada minuto e não busca a imagem, e a da sessão de suporte,
+ * que vê o estado do canal mas nunca recebe material de pareamento (`!session.support`).
  */
-export async function observe(deps: ServerDeps, org: Org, organizationId: string, options: { withQr?: boolean } = {}): Promise<WhatsAppView> {
-  const withQr = options.withQr ?? true;
+export async function observe(deps: ServerDeps, org: Org, organizationId: string, options: { withQr: boolean }): Promise<WhatsAppView> {
+  const { withQr } = options;
   const stored = await org((q) => readStored(q, deps.clock.now()));
   if (!deps.waha.apiKey) return view(stored, false);
   // Sem o serviço de pé não há WAHA, e sem pedido nenhum não existe sessão nele: não há o que perguntar.
@@ -210,7 +211,7 @@ export async function connect(deps: ServerDeps, org: Org, session: Session, stor
       [q.organizationId, CONNECTOR_KEY, JSON.stringify({ type: "waha" }), now],
     );
   });
-  return observe(deps, org, session.organizationId);
+  return observe(deps, org, session.organizationId, { withQr: !session.support });
 }
 
 /** Desfaz o pareamento (o aparelho some de "Dispositivos conectados"), para a sessão e tira o conector. */
@@ -255,7 +256,7 @@ export async function changeService(deps: ServerDeps, org: Org, session: Session
     }
   }
   await org((q) => setServiceWanted(q, session, wanted, deps.clock.now()));
-  return observe(deps, org, session.organizationId);
+  return observe(deps, org, session.organizationId, { withQr: !session.support });
 }
 
 function assertRemovable(row: Row | null): void {

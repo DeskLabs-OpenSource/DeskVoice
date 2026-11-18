@@ -15,6 +15,13 @@ export interface Session {
   email: string;
   /** A organização da sessão está suspensa (seção 3.3 do desenho do R8). */
   suspended: boolean;
+  /**
+   * A sessão é de um vínculo de suporte da instalação (`users.kind = 'support'`, seção 3.6 do
+   * desenho do R8). Ela não convida, não mexe na equipe nem na conta e não cria nada que dure mais
+   * que ela: a rota que poderia diz `support: false` (`requireRole`), e a tabela
+   * `fences/support-session-routes.ts` diz qual rota é qual.
+   */
+  support: boolean;
 }
 
 /** Quem está numa organização suspensa vê isto, e mais nada (seção 3.3 do desenho do R8). */
@@ -170,7 +177,8 @@ export async function findSession(deps: ServerDeps, token: string | undefined): 
   if (!token) return null;
   return withSystem(deps.db, (q) =>
     q.one<Session>(
-      `select s.id, s.user_id as "userId", s.organization_id as "organizationId", u.role, u.name, u.email, o.suspended_at is not null as suspended
+      `select s.id, s.user_id as "userId", s.organization_id as "organizationId", u.role, u.name, u.email, o.suspended_at is not null as suspended,
+              u.kind = 'support' as support
          from sessions s join users u on u.id = s.user_id and u.organization_id = s.organization_id
          join organizations o on o.id = s.organization_id
         where s.token_hash = $1 and s.expires_at > $2 and u.disabled_at is null`,
@@ -201,9 +209,23 @@ export function suspendedOrganization(deps: ServerDeps, session: Session): Promi
 }
 
 export const CONFIG_ROLES: readonly Role[] = ["owner", "admin"];
+export const ALL_ROLES: readonly Role[] = ["owner", "admin", "operator"];
 
-/** Único lugar que decide o que cada papel pode. Sem `allowed`, exige quem altera configuração. */
-export function requireRole(session: Session, allowed: readonly Role[] = CONFIG_ROLES): void {
+export const SUPPORT_SESSION_FORBIDDEN = "support_session_forbidden";
+
+/** O que a rota diz da sessão de suporte da instalação: `false` = ela não faz isto. */
+export interface SupportOption {
+  support?: false;
+}
+
+/**
+ * Único lugar que decide o que cada papel pode. Sem `allowed`, exige quem altera configuração.
+ * Com `support: false`, a sessão de suporte da instalação recebe 403 `support_session_forbidden`
+ * antes de o papel ser conferido: ela entra como `admin`, mas não convida, não mexe na equipe nem
+ * na conta e não cria acesso que sobreviva a ela (seção 3.6 do desenho do R8).
+ */
+export function requireRole(session: Session, allowed: readonly Role[] = CONFIG_ROLES, options: SupportOption = {}): void {
+  if (options.support === false && session.support) throw new ApiError(403, SUPPORT_SESSION_FORBIDDEN, "A support session cannot do this.");
   if (!allowed.includes(session.role)) throw new ApiError(403, "forbidden", "Your role cannot change this. Ask an owner or admin.");
 }
 
@@ -227,7 +249,7 @@ export interface AfterArgs<B> extends Base<B> {
   org<T>(fn: (q: OrgQuery) => Promise<T>): Promise<T>;
 }
 
-interface HandleOptions<S extends ZodType, R> {
+interface HandleOptions<S extends ZodType, R> extends SupportOption {
   body?: S;
   /** Rota que altera configuração: só `owner` e `admin`. */
   configure?: boolean;
@@ -254,7 +276,9 @@ export function handle<S extends ZodType = ZodType<undefined>, R = unknown>(
     try {
       const deps = serverDeps();
       const session = await requireSession(request, deps, { allowSuspended: options.allowSuspended === true });
-      if (options.configure) requireRole(session);
+      // A recusa da sessão de suporte vem antes da entrada, do `before` e da transação: nada é
+      // gravado nem chamado lá fora.
+      if (options.configure || options.support === false) requireRole(session, options.configure ? CONFIG_ROLES : ALL_ROLES, { support: options.support });
       const params = (await context.params) ?? {};
       // Id malformado nunca chega ao banco: para quem chama, é só um registro que não existe.
       if (params.id !== undefined && !UUID.test(params.id)) throw new ApiError(404, "not_found", "Not found.");
@@ -269,15 +293,24 @@ export function handle<S extends ZodType = ZodType<undefined>, R = unknown>(
   };
 }
 
-/** Rota pública (login, saúde): mesma validação e mesmo envelope, sem sessão. */
+/**
+ * Rota pública (login, saúde): mesma validação e mesmo envelope, sem sessão. Com `support: false`,
+ * quem chega com uma sessão de suporte da instalação no cookie recebe 403 antes de qualquer coisa;
+ * sem sessão, ou com a de um `member`, a rota segue como antes.
+ */
 export function handlePublic<S extends ZodType = ZodType<undefined>>(
-  options: { body?: S },
+  options: { body?: S } & SupportOption,
   fn: (args: { request: Request; body: z.output<S>; deps: ServerDeps; params: Record<string, string> }) => Promise<unknown>,
 ): (request: Request, context?: RouteContext) => Promise<Response> {
   return async (request, context) => {
     try {
+      const deps = serverDeps();
+      if (options.support === false) {
+        const session = await findSession(deps, readCookie(request, SESSION_COOKIE));
+        if (session) requireRole(session, ALL_ROLES, { support: false });
+      }
       const params = (await context?.params) ?? {};
-      return success(await fn({ request, body: await parseBody(request, options.body), deps: serverDeps(), params }));
+      return success(await fn({ request, body: await parseBody(request, options.body), deps, params }));
     } catch (error) {
       return failure(error);
     }

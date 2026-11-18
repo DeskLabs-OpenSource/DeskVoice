@@ -23,7 +23,7 @@ const body = z.object({ name: z.string().trim().min(1).max(120).optional(), phon
 
 // Cada pessoa edita o próprio contato, em qualquer papel: é para onde vão os avisos e os pedidos
 // de aprovação fora do painel. Campo ausente fica como está; vazio apaga.
-export const PATCH = handle({ body }, async ({ q, session, body }) => {
+export const PATCH = handle({ support: false, body }, async ({ q, session, body }) => {
   const current = await q.one<{ name: string; phone: string | null; whatsapp: string | null }>(`select ${COLUMNS} from users where id = $1`, [session.userId]);
   if (!current) throw notFound();
   await q.exec("update users set name = $2, phone_e164 = $3, whatsapp_e164 = $4 where id = $1", [
