@@ -1,0 +1,16 @@
+# Gerado pelo instalador do DeskVoice. Não edite: rode bash install/docker-user.sh apply <portas>.
+# A cadeia DOCKER-USER nasce vazia quando o Docker sobe (boot e reinício do serviço), e é ela que
+# decide o que entra numa porta publicada. Este serviço repõe a regra logo depois do Docker.
+[Unit]
+Description=DeskVoice: a regra do DOCKER-USER que fecha as portas publicadas pelo Docker
+After=docker.service
+Wants=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/env bash ${DOCKER_USER_SCRIPT} apply ${DOCKER_USER_PORTS}
+
+[Install]
+WantedBy=multi-user.target
