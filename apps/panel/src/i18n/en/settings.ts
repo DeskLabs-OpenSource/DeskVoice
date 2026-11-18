@@ -4,6 +4,12 @@ const settings: SettingsDictionary = {
   title: "Settings",
   lead: "Keys and connections the agents use. What is secret stays encrypted on your server and is never shown on screen again.",
   sectionsNav: "Settings sections",
+  limits: {
+    title: "Limits",
+    lead: "Set by the installation administration. To change them, talk to whoever administers the installation.",
+    trunks: "Phone lines: {used} of {limit}",
+    agents: "Agents: {used} of {limit}",
+  },
   sections: {
     ai: "Artificial intelligence",
     calls: "Calls",

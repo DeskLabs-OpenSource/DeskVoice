@@ -2,6 +2,13 @@ const settings = {
   title: "Configurações",
   lead: "Chaves e conexões que os agentes usam. O que é segredo fica cifrado no seu servidor e não volta a aparecer na tela.",
   sectionsNav: "Seções de Configurações",
+  /** Os limites da organização, só para leitura (seção 3.4 do desenho do R8). Só aparece com algum limite. */
+  limits: {
+    title: "Limites",
+    lead: "Definido pela administração da instalação. Para mudar, fale com quem administra a instalação.",
+    trunks: "Linhas telefônicas: {used} de {limit}",
+    agents: "Agentes: {used} de {limit}",
+  },
   sections: {
     ai: "Inteligência artificial",
     calls: "Ligações",

@@ -12,7 +12,7 @@ import { api, useApi } from "../../../ui/api";
 import { ActionStatus } from "../../../ui/errors";
 import { formatDateTime } from "../../../ui/format";
 import { Badge, Button, EmptyState, Field, Notice, Panel, Skeleton, TextArea, TextInput } from "../../../ui/kit";
-import { useInstallationAction } from "./errors";
+import { useInstallationAction, useInstallationErrorText } from "./errors";
 
 interface Organization {
   id: string;
@@ -260,6 +260,70 @@ function ReactivateConfirm({ organization, t, onDone, onCancel }: { organization
   );
 }
 
+interface Limits {
+  maxTrunks: number | null;
+  maxAgents: number | null;
+  usage: { trunks: number; agents: number };
+}
+type LimitsDraft = { maxTrunks: string; maxAgents: string };
+
+// Vazio é sem limite. O resto vai como número, e a API recusa o que não for inteiro de 0 para cima.
+const limitField = (value: number | null): string => (value === null ? "" : String(value));
+const limitValue = (field: string): number | null => (field.trim() === "" ? null : Number(field));
+
+/**
+ * Os limites da organização (seção 3.4 do desenho do R8): linhas telefônicas e agentes, com quanto
+ * ela já usa. Só os dois campos que já valem; a saída e o teto do mês entram com as fatias deles.
+ */
+function LimitsForm({ organization, t, onDone, onCancel }: { organization: Organization; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
+  const current = useApi<Limits>(`/installation/organizations/${organization.id}/limits`);
+  const errorText = useInstallationErrorText();
+  if (current.error && !current.data) return <Notice tone="fail">{errorText(current.error)}</Notice>;
+  if (!current.data) return <Skeleton />;
+  return <LimitsFields organization={organization} limits={current.data} t={t} onDone={onDone} onCancel={onCancel} />;
+}
+
+function LimitsFields({ organization, limits, t, onDone, onCancel }: { organization: Organization; limits: Limits; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
+  const save = useInstallationAction();
+  const [draft, setDraft] = useState<LimitsDraft>({ maxTrunks: limitField(limits.maxTrunks), maxAgents: limitField(limits.maxAgents) });
+  const usage = (used: number, limit: string): string => (limit.trim() === "" ? fill(t.limitsUsageUnlimited, { used }) : fill(t.limitsUsage, { used, limit: limit.trim() }));
+  const fields = [
+    { key: "maxTrunks", label: t.limitsTrunks, used: limits.usage.trunks },
+    { key: "maxAgents", label: t.limitsAgents, used: limits.usage.agents },
+  ] as const;
+  return (
+    <form
+      className="grid gap-3 rounded-xs border border-line p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save.run(async () => {
+          await api(`/installation/organizations/${organization.id}/limits`, { method: "PUT", body: { maxTrunks: limitValue(draft.maxTrunks), maxAgents: limitValue(draft.maxAgents) } });
+          onDone(fill(t.limitsSaved, { name: organization.name }));
+        });
+      }}
+    >
+      <p className="font-bold">{fill(t.limitsTitle, { name: organization.name })}</p>
+      <p>{t.limitsLead}</p>
+      <div className="flex flex-wrap gap-4">
+        {fields.map((field) => (
+          <Field key={field.key} label={field.label} hint={`${usage(field.used, draft[field.key])} ${t.limitsEmptyHint}`}>
+            <TextInput className="w-32" type="number" inputMode="numeric" min={0} step={1} value={draft[field.key]} onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })} />
+          </Field>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="primary" busy={save.busy}>
+          {t.save}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          {t.cancel}
+        </Button>
+      </div>
+      <ActionStatus action={save} />
+    </form>
+  );
+}
+
 function Row({
   organization,
   activeCount,
@@ -267,6 +331,7 @@ function Row({
   onChanged,
   onInvite,
   onSuspension,
+  onLimits,
 }: {
   organization: Organization;
   /** Quantas organizações ativas a instalação tem: com uma só, ninguém vê "Suspender". */
@@ -275,12 +340,13 @@ function Row({
   onChanged(): void;
   onInvite(): void;
   onSuspension(message: string): void;
+  onLimits(message: string): void;
 }) {
   const locale = useLocale();
   const save = useInstallationAction();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(organization.name);
-  const [confirming, setConfirming] = useState<"suspend" | "reactivate" | null>(null);
+  const [confirming, setConfirming] = useState<"suspend" | "reactivate" | "limits" | null>(null);
   // A API recusa as mesmas três; a tela só não oferece o botão que falharia.
   const canSuspend = !organization.suspendedAt && !organization.current && activeCount > 1;
   const done = (message: string): void => {
@@ -326,6 +392,9 @@ function Row({
                 {t.inviteOwner}
               </Button>
             )}
+            <Button variant="ghost" onClick={() => setConfirming("limits")}>
+              {t.limits}
+            </Button>
             {canSuspend ? (
               <Button variant="ghost" onClick={() => setConfirming("suspend")}>
                 {t.suspend}
@@ -342,6 +411,17 @@ function Row({
       {organization.suspendedAt && organization.suspendedReason ? <p className="text-[0.93rem] text-muted">{fill(t.suspendedReason, { reason: organization.suspendedReason })}</p> : null}
       {organization.current && !organization.suspendedAt && activeCount > 1 ? <p className="text-[0.87rem] text-muted">{t.currentHint}</p> : null}
       {confirming === "suspend" ? <SuspendConfirm organization={organization} t={t} onDone={done} onCancel={() => setConfirming(null)} /> : null}
+      {confirming === "limits" ? (
+        <LimitsForm
+          organization={organization}
+          t={t}
+          onDone={(message) => {
+            setConfirming(null);
+            onLimits(message);
+          }}
+          onCancel={() => setConfirming(null)}
+        />
+      ) : null}
       {confirming === "reactivate" ? <ReactivateConfirm organization={organization} t={t} onDone={done} onCancel={() => setConfirming(null)} /> : null}
       <ActionStatus action={save} />
     </li>
@@ -353,7 +433,8 @@ export default function InstallationOrganizations() {
   const { data, reload } = useApi<Overview>("/installation/organizations");
   const [inviting, setInviting] = useState<{ id: string; name: string } | null>(null);
   const [created, setCreated] = useState<(Created & { name: string }) | null>(null);
-  const [suspension, setSuspension] = useState<string | null>(null);
+  // A frase do que acabou de acontecer numa organização: a suspensão, a reativação ou os limites salvos.
+  const [notice, setNotice] = useState<string | null>(null);
   const router = useRouter();
   const activeCount = (data?.organizations ?? []).filter((organization) => !organization.suspendedAt).length;
   return (
@@ -367,7 +448,7 @@ export default function InstallationOrganizations() {
           </span>
         </Notice>
       ) : null}
-      {suspension ? <Notice tone="ok">{suspension}</Notice> : null}
+      {notice ? <Notice tone="ok">{notice}</Notice> : null}
       {inviting ? <OwnerInvite organization={inviting} t={t} onClose={() => setInviting(null)} /> : null}
       <Panel title={t.title} description={t.lead}>
         {!data ? (
@@ -384,8 +465,9 @@ export default function InstallationOrganizations() {
                 t={t}
                 onChanged={reload}
                 onInvite={() => setInviting({ id: organization.id, name: organization.name })}
+                onLimits={setNotice}
                 onSuspension={(message) => {
-                  setSuspension(message);
+                  setNotice(message);
                   reload();
                   // Reativar a organização em que a pessoa está tira a tela de suspensa: o servidor relê a sessão.
                   router.refresh();
