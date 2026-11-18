@@ -543,10 +543,9 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 
 ### Fatia 3: pessoas em várias organizações e a troca
 
-- Convite para um e-mail que já tem conta: a página do convite pede a senha dessa conta, e não uma
-  senha nova. A resposta não diz se a conta existe antes de a pessoa abrir um convite válido.
-- Pendente de decisão do dono: a página do convite. Até a resposta, o comportamento fica como está,
-  e nenhuma fatia muda isso antes dela.
+- Convite para um e-mail que já tem conta: o aceite usa a senha que a conta já tem, e não cria uma
+  senha nova, sem que a página mude antes do envio.
+- Decidido em 18/11: a página do convite não muda conforme o e-mail até a pessoa enviar a senha.
 - Seletor de organização no topo, só para quem tem mais de um vínculo ativo. `switchOrganization`.
 - Login volta para `last_organization_id`, ou para o vínculo mais antigo.
 - Desativar o vínculo numa organização não mexe nos outros. Trocar a senha encerra as sessões da

@@ -35,7 +35,7 @@ interface Row {
   suspendedAt: string | null;
   calls: { from: string; to: string; count: number };
   cost: { from: string; to: string; cents: number; unmeasuredCount: number; estimatedCount: number };
-  trunk: { connected: number; down: number; check: HealthCheck } | null;
+  trunk: { connected: number; attention: number; down: number; check: HealthCheck } | null;
   engine: { state: "own_key" | "no_key" | "key_failed"; check: HealthCheck };
   queue: { late: number; failedLast24h: number };
 }
@@ -180,15 +180,56 @@ describe("installation overview", () => {
       { from: "2026-02-19", to: "2026-03-20", count: 3 },
       { from: "2026-02-20", to: "2026-03-21", count: 1 },
     ]);
-    expect([rowA.trunk, rowB.trunk].map((trunk) => [trunk?.connected, trunk?.down])).toEqual([
-      [1, 1],
-      [0, 1],
+    // A linha em aviso de B pede atenção; não caiu.
+    expect([rowA.trunk, rowB.trunk].map((trunk) => [trunk?.connected, trunk?.attention, trunk?.down])).toEqual([
+      [1, 0, 1],
+      [0, 1, 0],
     ]);
     expect([rowA.engine.state, rowB.engine.state]).toEqual(["key_failed", "no_key"]);
     expect([rowA.queue, rowB.queue]).toEqual([
       { late: 1, failedLast24h: 1 },
       { late: 0, failedLast24h: 0 },
     ]);
+  });
+
+  it("a line with a warning needs attention and is not counted as down; only a failing line is", async () => {
+    const c = await organization("C", null);
+    const d = await organization("D", null);
+    const [cUp, cWarn, cDown, dUp, dWarn] = [await c.trunk(), await c.trunk(), await c.trunk(), await d.trunk(), await d.trunk()];
+    panel.voice.respond = (url) => {
+      if (url === "http://voice.test/health")
+        return Response.json({
+          asterisk: { status: "ok", detail: "connected" },
+          trunks: [
+            { id: cUp, status: "ok", detail: "The provider answers." },
+            { id: cWarn, status: "warn", detail: "Not checked yet." },
+            { id: cDown, status: "fail", detail: "The provider does not answer." },
+            { id: dUp, status: "ok", detail: "The provider answers." },
+            { id: dWarn, status: "warn", detail: "The address set needs attention." },
+          ],
+        });
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const admin = await createUser(panel.app, c.org, "admin");
+    await administers(await accountOf(admin.id));
+    const data = await read(admin.cookie);
+    const [rowC, rowD] = [rowOf(data, c.org), rowOf(data, d.org)];
+    expect([rowC.trunk?.connected, rowC.trunk?.attention, rowC.trunk?.down, rowC.trunk?.check.status]).toEqual([1, 1, 1, "fail"]);
+    expect([rowD.trunk?.connected, rowD.trunk?.attention, rowD.trunk?.down, rowD.trunk?.check.status]).toEqual([1, 1, 0, "warn"]);
+    // A cor é a da Saúde de cada uma.
+    expect(rowC.trunk?.check).toEqual(await healthLine(c.person.cookie, "trunk"));
+    expect(rowD.trunk?.check).toEqual(await healthLine(d.person.cookie, "trunk"));
+  });
+
+  it("an own key whose last test was inconclusive is 'own key' in the colour of the organization's health (warn)", async () => {
+    const e = await organization("E", null);
+    await e.setting("engine.openai-realtime.api_key", "cifrada", true);
+    await e.setting("engine.openai-realtime.key_check", { result: "rate_limited", model: "gpt-realtime", checkedAt: "2026-03-19T10:00:00.000Z" }, false);
+    const admin = await createUser(panel.app, e.org, "admin");
+    await administers(await accountOf(admin.id));
+    const row = rowOf(await read(admin.cookie), e.org);
+    expect([row.engine.state, row.engine.check.status, row.engine.check.reason]).toEqual(["own_key", "warn", "engine_check_inconclusive"]);
+    expect(row.engine.check).toEqual(await healthLine(e.person.cookie, "engine"));
   });
 
   it("calls the voice process once, and says it did not answer instead of zero lines down", async () => {

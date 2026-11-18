@@ -11,7 +11,7 @@ const body = z.object({ name: z.string().trim().min(1).max(120), password: z.str
 
 const REFUSALS: Record<Exclude<AcceptInviteResult, { ok: true }>["reason"], () => ApiError> = {
   invalid: INVALID_INVITE,
-  // O e-mail ganhou conta, ou a perdeu, desde que a página abriu: ela pergunta de novo e muda o formulário.
+  // O e-mail ganhou conta, ou a perdeu, entre a leitura do convite e o aceite: a página mostra o caso.
   existing_account: () => new ApiError(409, "existing_account", "This e-mail already has an account. Enter the password you already use."),
   no_account: () => new ApiError(409, "no_account", "This e-mail has no account anymore. Choose a new password."),
   invalid_credentials: () => new ApiError(401, "invalid_credentials", "E-mail or password is incorrect."),

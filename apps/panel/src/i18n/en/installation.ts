@@ -91,6 +91,7 @@ const installation: InstallationDictionary = {
     cost: "This month's cost",
     trunk: "Line",
     trunkCounts: "{connected} connected, {down} down",
+    trunkAttention: ", {attention} need attention",
     trunkNone: "No line registered",
     voiceDown: "The voice process did not answer",
     engine: "Engine",
