@@ -1,8 +1,7 @@
 import { queueHealth, withOrg, withSystem, type OrgQuery } from "@deskvoice/core";
 import { ApiError, SESSION_COOKIE, findSession, handlePublic, readCookie, type Session } from "../../../../../server/context";
-import { keyCheckSetting, readKeyCheck } from "../../../../../server/engine-key";
+import { readEngineKeys } from "../../../../../server/engine-key";
 import { agentLine, anonymousEngineLine, databaseLine, engineLine, healthReport, panelLine, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappCallsLine, whatsappLine, type EngineKeys, type HealthCheck, type HealthId } from "../../../../../server/health";
-import { listEngines } from "../../../../../server/pieces";
 import { voiceHealthSchema, voiceRequest, type VoiceHealth } from "../../../../../server/voice";
 import { observe, type WhatsAppView } from "../../../../../server/whatsapp";
 import { observeCalls, type WhatsAppCallsView } from "../../../../../server/whatsapp-calls";
@@ -21,21 +20,6 @@ import { observeCalls, type WhatsAppCallsView } from "../../../../../server/what
 export const GET = handlePublic({}, async ({ request, deps }) => {
   const now = deps.clock.now();
   const lines: Partial<Record<HealthId, HealthCheck>> = { panel: panelLine() };
-
-  const labels = new Map((await listEngines()).map((engine) => [keyCheckSetting(engine.id), engine.label]));
-  // Só o código do último teste de cada chave: a chave mesma nunca sai do banco por aqui.
-  const readEngineKeys = async (q: OrgQuery): Promise<EngineKeys> => {
-    const rows = await q.many<{ key: string; value: unknown }>(
-      "select key, case when secret then null else value end as value from settings where key like 'engine.%.api_key' or key like 'engine.%.key_check'",
-    );
-    return {
-      keys: rows.filter((row) => row.key.endsWith(".api_key")).length,
-      checks: rows.flatMap((row) => {
-        const check = readKeyCheck(row.value);
-        return check ? [{ engine: labels.get(row.key) ?? row.key, check }] : [];
-      }),
-    };
-  };
 
   const token = readCookie(request, SESSION_COOKIE);
   let session: Session | null = null;
