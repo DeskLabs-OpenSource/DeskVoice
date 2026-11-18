@@ -48,9 +48,10 @@ mesmo, por sua conta. O que foi provado em cada um:
 Sem Docker, o instalador oferece o script oficial (`get.docker.com`), que também atende AlmaLinux
 e Rocky Linux. Com o `firewalld` ativo, o instalador avisa e segue: ele não filtra as portas que o
 Docker publica (medido de fora em 13/11/2026, ver `docs/fundacao/ufw-e-docker.md`), então não é por
-ele que uma ligação fica muda, nem é ele que fecha a porta. Com o SELinux em `Enforcing` e o Docker
-rodando com ele ligado, o instalador também avisa e segue: esse caso não foi provado. Nos dois, a
-prova é a primeira ligação e o teste da tela Linha.
+ele que uma ligação fica muda, nem é ele que fecha a porta — quem fecha é a cadeia `DOCKER-USER`, e
+o `install/docker-user.sh` a escreve de um jeito que sobrevive ao reinício. Com o SELinux em
+`Enforcing` e o Docker rodando com ele ligado, o instalador também avisa e segue: esse caso não foi
+provado. Nos dois, a prova é a primeira ligação e o teste da tela Linha.
 
 ## Ordem de uso
 
@@ -85,6 +86,7 @@ e número) e o agente. Nada disso é pedido no terminal.
 | `restore.sh` | Substitui o banco por um backup. Pede que você digite `RESTAURAR` | Compara a contagem de cada tabela com o manifesto do backup, antes e depois de trocar o banco |
 | `update.sh` | Mostra versão atual e alvo, faz backup, troca a versão, baixa as imagens dela, aplica as migrations e confere a saúde. Nunca constrói imagem | Se as imagens não baixam, para sem alterar nada. Se uma peça essencial não responder, volta para a versão anterior e restaura o banco do backup |
 | `agent.sh` | O agente da atualização pela tela. Passa a cada minuto (o instalador agenda), anuncia ao painel a versão instalada, lê **um sim ou um não** e, se for sim, roda o `update.sh` e devolve o resultado. `--install` instala ou conserta o agendamento | Antes de anunciar, confere que esta pasta é a dona da instalação. Depois de aceitar um pedido, toda saída entrega um resultado; o que não deu para entregar fica guardado para a passada seguinte |
+| `docker-user.sh` | Fecha, na cadeia `DOCKER-USER`, portas que o Docker publica — nem o `ufw` nem o `firewalld` filtram essas portas. A regra é reposta no boot e ao reiniciar o Docker por um serviço do systemd, e rodar de novo não duplica nada | Confere na própria cadeia, antes e depois de escrever, que a regra está lá e é uma só por porta. Sem portas no comando, reabre e apaga o serviço |
 | `diagnose.sh` | Gera um arquivo de texto para você enviar a quem for ajudar | Senhas, chaves e tokens saem como `***`; e-mails e telefones saem encurtados |
 | `test/run.sh` | Testes do próprio kit. Não precisam de Docker | Sai com erro se qualquer verificação falhar |
 
@@ -110,6 +112,7 @@ Respostas para o modo `--yes` (variável de ambiente ou linha `CHAVE=valor` do a
 | `DESKVOICE_OWNER_NAME`, `DESKVOICE_OWNER_EMAIL`, `DESKVOICE_OWNER_PASSWORD` | O primeiro usuário (dono). Senha com 10 caracteres ou mais |
 | `DESKVOICE_PUBLIC_IP` | Só se a descoberta automática do IP falhar |
 | `DESKVOICE_APPLY_UFW=yes` | Aplica as regras no firewall `ufw` sem perguntar. Só aceita `yes`: outro valor para com erro. Com o `ufw` inativo, não tem efeito, e o instalador diz. As portas de telefonia são publicadas pelo Docker, que passa por fora do `ufw`: estas regras só valem onde quem escuta é o host, e não é por falta delas que a ligação fica muda. Para fechar uma porta publicada pelo Docker, use o firewall do provedor, se ele tiver um, ou uma regra na cadeia `DOCKER-USER` da máquina. Ver [O ufw não filtra as portas que o Docker publica](../docs/fundacao/ufw-e-docker.md) |
+| `DESKVOICE_DOCKER_USER_DROP` | Portas que o Docker publica e que devem ficar fechadas para fora, na forma do `ufw`: `5060/udp`, ou uma faixa `10000:10200/udp`, separadas por espaço. A regra vai para a cadeia `DOCKER-USER` e é reposta no boot e ao reiniciar o Docker (`install/docker-user.sh`). **Fechar `5060/udp` deixa a telefonia muda**: só feche a porta de onde as ligações não vêm. Vazio, nada é fechado. Ver [O ufw não filtra as portas que o Docker publica](../docs/fundacao/ufw-e-docker.md) |
 | `DESKVOICE_RTP_START`, `DESKVOICE_RTP_END` | Outra faixa de portas de áudio (padrão 10000 a 10200) |
 | `DESKVOICE_VERSION` | Uma versão publicada específica (exemplo: `0.3.0`), em vez da mais recente. Junto de `--build`, que constrói o código desta pasta, para com erro |
 | `DESKVOICE_ADOPT=yes` (ou `--adopt`) | Esta pasta adota a instalação desta máquina, feita a partir de uma pasta que não existe mais. Ver abaixo, em "Pasta movida" |

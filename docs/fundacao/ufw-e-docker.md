@@ -304,10 +304,52 @@ em outro provedor), com `curl -m 6`. A regra é a mesma da seção 5:
   `firewalld`. Isso não foi medido por dentro.
 - **A regra criada à mão não sobrevive ao reinício.** `iptables -I` só vale até a máquina desligar;
   depois do boot, a `DOCKER-USER` voltou vazia e a porta voltou a responder. Quem quiser a regra
-  depois de reiniciar precisa recriá-la no boot, por exemplo num serviço do systemd que rode depois
-  do Docker. Isso não foi medido.
+  depois de reiniciar precisa recriá-la no boot — é o que o kit passou a fazer, na seção seguinte.
 - Os serviços do DeskVoice voltaram sozinhos depois do reinício, com a checagem de saúde verde e o
   WhatsApp de ligação reconectado em segundos.
+
+### A regra que sobrevive ao reinício, do jeito que o kit faz
+
+Duas coisas esvaziam a `DOCKER-USER`: o boot da máquina e o reinício do serviço do Docker, que
+recria as cadeias dele. Por isso a regra que o kit escreve (`install/docker-user.sh`) não é só um
+`iptables -I`: ela deixa um serviço do systemd, `deskvoice-docker-user.service`, com
+`After=docker.service` e `PartOf=docker.service`. O systemd chama o mesmo script depois de o Docker
+subir, no boot e a cada reinício do serviço dele, e o script confere antes de inserir — rodar duas
+vezes não duplica regra, e a porta que saiu da lista é reaberta.
+
+A escolha foi a persistência do próprio instalador, e não uma *direct rule* do `firewalld`
+(`firewall-cmd --permanent --direct --add-rule ...`), por dois motivos: a regra que fecha a porta é
+a da cadeia do **Docker**, e o `firewalld` não é o dono dela; e o kit já usa o systemd para o que
+precisa acontecer sozinho (o timer do agente de atualização). A *direct rule* também não foi medida
+aqui, e o que não se mede não entra.
+
+O que **é** medido é o que a regra faz (as duas tabelas acima). O serviço do systemd é novo: o
+`bash install/test/run.sh` cobre o script com um `iptables` de mentira — aplicar duas vezes, a
+cadeia esvaziada pelo reinício, o serviço repondo a regra, e o `--dry-run` não tocando em nada —, mas
+uma máquina de verdade reiniciada com ele ainda não foi medida. O `firewall-cmd --reload` continua
+com a janela de alguns segundos descrita acima: ela é do Docker refazendo as cadeias dele, e a regra
+está listada o tempo todo.
+
+Uma porta é `porta` ou `min:max`, seguida de `/tcp` ou `/udp`, a mesma forma do `ufw`:
+
+```
+# numa VPS com o Docker publicando 5061/tcp, por exemplo
+$ bash install/docker-user.sh apply 5061/tcp
+  ✓ porta fechada: 5061/tcp
+  ✓ regra reposta no boot e ao reiniciar o Docker (deskvoice-docker-user.service)
+
+$ bash install/docker-user.sh apply 5061/tcp      # de novo: não duplica
+  já estava fechada: 5061/tcp
+
+$ bash install/docker-user.sh show
+  -p tcp -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
+  no boot, o serviço repõe: 5061/tcp
+
+$ bash install/docker-user.sh apply              # sem portas: reabre e apaga o serviço
+```
+
+O instalador chama esse script quando recebe `DESKVOICE_DOCKER_USER_DROP`, e não fecha nada sem
+ele: fechar `5060/udp` deixa a telefonia muda, porque é por ela que as ligações entram.
 
 Em qualquer VPS com o SSH fora da porta 22, ligar o `firewalld` corta o acesso: a zona `public` de
 fábrica libera o serviço `ssh`, que é a porta 22. Antes de ligar (ou antes de um `--reload`),

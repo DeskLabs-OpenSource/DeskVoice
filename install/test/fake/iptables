@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# iptables de mentira: guarda as regras da cadeia DOCKER-USER num arquivo, para o teste contar
+# quantas ficaram e em que ordem. O que ele entende é só o que o kit usa (-C, -I, -D, -S, -L).
+# $FAKE_DIR/no_docker_user faz a cadeia não existir, como numa máquina com o Docker parado.
+echo "iptables $*" >> "$FAKE_DIR/calls.log"
+state="$FAKE_DIR/iptables_DOCKER-USER"
+
+verb=""; rest=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -w|--wait) shift; while [ $# -gt 0 ] && [[ "${1:-}" =~ ^[0-9]+$ ]]; do shift; done ;;
+    -t|--table) shift 2 ;;
+    -C|-I|-A|-D|-S|-L) verb="$1"; shift ;;
+    *) rest+=("$1"); shift ;;
+  esac
+done
+chain="${rest[0]:-}"
+line="$(printf '%s ' "${rest[@]:1}")"; line="${line% }"
+
+[ "$chain" = "DOCKER-USER" ] || { echo "iptables: cadeia desconhecida: $chain" >&2; exit 1; }
+if [ -f "$FAKE_DIR/no_docker_user" ]; then
+  echo "iptables: No chain/target/match by that name." >&2
+  exit 1
+fi
+touch "$state"
+
+case "$verb" in
+  -S|-L)
+    echo "-N DOCKER-USER"
+    echo "-A DOCKER-USER -j RETURN"
+    cat "$state"
+    ;;
+  -C)
+    grep -Fxq -- "$line" "$state"
+    ;;
+  -I|-A)
+    # A posição (o `1` do -I ... 1) é decorativa aqui: toda inserção vai para o começo.
+    case "$line" in [0-9]*\ *) line="${line#* }" ;; esac
+    { printf '%s\n' "$line"; cat "$state"; } > "$state.novo" && mv "$state.novo" "$state"
+    ;;
+  -D)
+    grep -Fxq -- "$line" "$state" || { echo "iptables: Bad rule (does a matching rule exist in that chain?)." >&2; exit 1; }
+    awk -v r="$line" 'BEGIN { done = 0 } $0 == r && !done { done = 1; next } { print }' "$state" > "$state.novo" && mv "$state.novo" "$state"
+    ;;
+  *)
+    echo "iptables de mentira: verbo '$verb' não entendido" >&2; exit 1 ;;
+esac
