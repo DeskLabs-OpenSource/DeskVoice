@@ -49,6 +49,13 @@ export interface CallTransport {
 }
 
 /**
+ * O transporte com teclado: quem precisa da tecla de quem liga (a URA, `ivr-session.ts`) exige
+ * `onDtmf` no tipo, e o canal que não tem (a ligação pelo WhatsApp) não serve a ela sem o compilador
+ * reclamar.
+ */
+export type KeypadTransport = CallTransport & Required<Pick<CallTransport, "onDtmf">>;
+
+/**
  * Três bipes curtos. É o que quem está na linha ouve quando não há motor de voz para falar
  * (chave ausente, motor que caiu): o processo não tem como sintetizar fala sozinho, e sinal
  * sonoro seguido de transferência ou desligamento é melhor que silêncio.
