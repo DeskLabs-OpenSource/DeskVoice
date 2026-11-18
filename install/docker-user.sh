@@ -54,18 +54,30 @@ ipt() { $SUDO iptables -w 5 "$@"; }
 $SUDO sh -c 'command -v iptables' >/dev/null 2>&1 || die "Não achei o comando iptables nesta máquina." "Instale o pacote do iptables (no AlmaLinux: $SUDO dnf install -y iptables) e rode de novo."
 ipt -S DOCKER-USER >/dev/null 2>&1 || die "A cadeia DOCKER-USER não existe nesta máquina: quem a cria é o Docker, quando sobe." "Ligue o Docker e rode de novo: $SUDO systemctl start docker"
 
-rule_args() {  # em RULE: os argumentos da regra de uma porta. O --ctorigdstport é o que enxerga a
-               # porta de fora: na DOCKER-USER o pacote já passou pelo DNAT do Docker.
-  RULE=(-p "$(printf '%s' "${1#*/}")" -m conntrack --ctorigdstport "$(printf '%s' "${1%/*}")" --ctdir ORIGINAL -j DROP)
+# A regra de uma porta vai em RULE. O --ctorigdstport enxerga a porta de fora: na DOCKER-USER o
+# pacote já passou pelo DNAT do Docker. O --ctstate DNAT deixa a regra só para o que chegou por esse
+# DNAT, que é o que vem de fora para uma porta publicada: sem ele, ela também casava com a conexão
+# que o contêiner abre para fora com destino à mesma porta (fechar 5061/tcp cortaria o SIP-TLS do
+# Asterisk para a operadora). Excluir as pontes do Docker pediria uma regra a mais (um RETURN para
+# docker+ e br-+) para gerenciar, e casar a interface de fora não serve, porque ela muda de máquina
+# para máquina. Em LEGACY, a forma de antes (sem o --ctstate), que o kit tira onde a achar.
+rule_args() {
+  local proto="${1#*/}" port="${1%/*}"
+  RULE=(-p "$proto" -m conntrack --ctstate DNAT --ctorigdstport "$port" --ctdir ORIGINAL -j DROP)
+  LEGACY=(-p "$proto" -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL -j DROP)
 }
 current_rules() {  # as regras desta máquina na DOCKER-USER, uma por linha
   $SUDO iptables -w 5 -S DOCKER-USER 2>/dev/null | grep -- '--ctorigdstport' || true
 }
-remove_rule() {  # remove_rule <spec>, todas as cópias; a criada à mão pode ter mais de uma
-  rule_args "$1"
-  while ipt -C DOCKER-USER "${RULE[@]}" >/dev/null 2>&1; do
-    ipt -D DOCKER-USER "${RULE[@]}" >/dev/null || break
+delete_all() {  # delete_all <regra...>: todas as cópias; a criada à mão pode ter mais de uma
+  while ipt -C DOCKER-USER "$@" >/dev/null 2>&1; do
+    ipt -D DOCKER-USER "$@" >/dev/null || break
   done
+}
+remove_rule() {  # remove_rule <spec>: a regra, nas duas formas
+  rule_args "$1"
+  delete_all "${RULE[@]}"
+  delete_all "${LEGACY[@]}"
 }
 apply_rule() {  # apply_rule <spec>: fecha a porta, uma regra só
   rule_args "$1"
@@ -76,6 +88,14 @@ apply_rule() {  # apply_rule <spec>: fecha a porta, uma regra só
   else
     ipt -I DOCKER-USER 1 "${RULE[@]}" >/dev/null || die "Não consegui escrever a regra de $1 na cadeia DOCKER-USER." "Rode à mão: $SUDO iptables -I DOCKER-USER 1 ${RULE[*]}"
     ok "porta fechada: $1"
+  fi
+  # A forma antiga sai depois de a nova estar escrita: a porta não fica aberta entre as duas.
+  ipt -C DOCKER-USER "${LEGACY[@]}" >/dev/null 2>&1 || return 0
+  if [ "$DRY_RUN_RULE" = 1 ]; then
+    info "[simulação] faria: trocar a regra antiga de $1, que também barrava o que os contêineres abrem para fora"
+  else
+    delete_all "${LEGACY[@]}"
+    ok "regra antiga trocada: $1 (ela também barrava o que os contêineres abrem para fora)"
   fi
 }
 

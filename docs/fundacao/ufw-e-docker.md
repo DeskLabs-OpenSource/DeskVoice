@@ -330,6 +330,31 @@ uma máquina de verdade reiniciada com ele ainda não foi medida. O `firewall-cm
 com a janela de alguns segundos descrita acima: ela é do Docker refazendo as cadeias dele, e a regra
 está listada o tempo todo.
 
+A regra que o kit escreve não é, letra por letra, a medida acima. Ela leva um `--ctstate DNAT` a
+mais:
+
+```
+-p tcp -m conntrack --ctstate DNAT --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
+```
+
+O motivo é a direção. A `DOCKER-USER` vê os dois sentidos do tráfego dos contêineres, e
+`--ctorigdstport N --ctdir ORIGINAL` sozinho também casa com a conexão que o **contêiner** abre para
+fora com destino à porta `N`: fechar `5061/tcp` cortaria o SIP-TLS que o Asterisk abre para a
+operadora, e fechar `5060/udp` cortaria o registro dele num provedor que escuta na 5060. Quem chega
+de fora a uma porta publicada passa pela regra de `DNAT` do Docker (seção 6); quem sai do contêiner
+passa por `MASQUERADE`, e não por `DNAT`. O `--ctstate DNAT` deixa a regra só para o primeiro caso.
+As alternativas ficaram de fora: excluir as pontes do Docker (`docker0`, `br-*`) não cabe numa regra
+só, e um `RETURN` antes dela seria mais uma regra para gerenciar e remover; e casar a interface de
+fora (`-i eth0`) não serve, porque o nome dela muda de máquina para máquina.
+
+O que foi medido e o que não foi: as tabelas acima mediram a forma **sem** o `--ctstate DNAT`, que
+fechou a porta publicada em TCP e em UDP. A forma nova não foi medida numa máquina de verdade —
+nem que ela continua fechando a porta de fora, nem que deixa passar a conexão de saída do
+contêiner. O que está provado é o raciocínio acima e o `bash install/test/run.sh`, que confere a
+forma escrita com um `iptables` de mentira. Quem já tinha a regra antiga (escrita à mão, ou por
+uma versão de teste deste script) não precisa fazer nada: ao aplicar, e a cada boot pelo serviço,
+o script escreve a nova e tira todas as cópias da antiga, nessa ordem.
+
 Uma porta é `porta` ou `min:max`, seguida de `/tcp` ou `/udp`, a mesma forma do `ufw`:
 
 ```
@@ -342,7 +367,7 @@ $ bash install/docker-user.sh apply 5061/tcp      # de novo: não duplica
   já estava fechada: 5061/tcp
 
 $ bash install/docker-user.sh show
-  -p tcp -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
+  -p tcp -m conntrack --ctstate DNAT --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
   no boot, o serviço repõe: 5061/tcp
 
 $ bash install/docker-user.sh apply              # sem portas: reabre e apaga o serviço

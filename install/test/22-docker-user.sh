@@ -22,6 +22,10 @@ boot() {  # o que o systemd faz no boot: roda o ExecStart do serviço gravado
 out="$(tool apply 5060/udp)"; equal "apply: sai com zero" 0 "$?"
 equal "apply: uma regra" 1 "$(rules)"
 contains "apply: diz que fechou" "$out" "porta fechada: 5060/udp"
+# Só o que passou pelo DNAT do Docker (o que chega de fora a uma porta publicada): sem o --ctstate,
+# a regra também casava com a conexão que o contêiner abre para fora com destino à mesma porta.
+equal "apply: a regra só casa com o que chega pelo DNAT do Docker" \
+  "-p udp -m conntrack --ctstate DNAT --ctorigdstport 5060 --ctdir ORIGINAL -j DROP" "$(cat "$STATE")"
 check "apply: gravou o serviço do boot" test -f "$UNIT"
 contains "serviço: roda depois do Docker" "$(cat "$UNIT")" "After=docker.service"
 contains "serviço: é chamado de novo quando o Docker reinicia" "$(cat "$UNIT")" "PartOf=docker.service"
@@ -58,8 +62,8 @@ contains "serviço: passa a repor só a que ficou" "$(cat "$UNIT")" "apply 5060/
 
 # ── A regra criada à mão, mais de uma vez, não ganha uma terceira: aplicar confere antes ──
 rm -f "$STATE"
-iptables -w 5 -I DOCKER-USER 1 -p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP >/dev/null 2>&1
-iptables -w 5 -I DOCKER-USER 1 -p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP >/dev/null 2>&1
+iptables -w 5 -I DOCKER-USER 1 -p udp -m conntrack --ctstate DNAT --ctorigdstport 5060 --ctdir ORIGINAL -j DROP >/dev/null 2>&1
+iptables -w 5 -I DOCKER-USER 1 -p udp -m conntrack --ctstate DNAT --ctorigdstport 5060 --ctdir ORIGINAL -j DROP >/dev/null 2>&1
 equal "cópias da regra à mão: duas" 2 "$(rules)"
 out="$(tool apply 5060/udp)"; equal "cópias da regra à mão: sai com zero" 0 "$?"
 contains "cópias da regra à mão: diz que já estava" "$out" "já estava fechada"
@@ -110,8 +114,26 @@ out="$(tool apply 5060/udp)"; equal "sem a cadeia DOCKER-USER: para com erro" 1 
 contains "sem a cadeia DOCKER-USER: aponta o Docker" "$out" "quem a cria é o Docker"
 rm -f "$FAKE_DIR/no_docker_user"
 
-# ── Tirar as portas: some a regra e some o serviço ──
+# ── A regra no formato de antes (sem --ctstate DNAT), de quem já a tinha: o kit põe a nova no lugar ──
+legacy() { grep -- '--ctorigdstport' "$STATE" | grep -vc -- '--ctstate DNAT' || true; }
+LEGACY_RULE="-p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP"
+rm -f "$STATE"
+# shellcheck disable=SC2086  # a regra é uma lista de argumentos, de propósito
+{ iptables -w 5 -I DOCKER-USER 1 $LEGACY_RULE; iptables -w 5 -I DOCKER-USER 1 $LEGACY_RULE; } >/dev/null 2>&1
+equal "formato antigo: duas cópias" 2 "$(legacy)"
+before="$(cat "$STATE")"
+out="$(tool --dry-run apply 5060/udp)"; equal "formato antigo, simulação: sai com zero" 0 "$?"
+equal "formato antigo, simulação: não mexeu nas regras" "$before" "$(cat "$STATE")"
+contains "formato antigo, simulação: diz que trocaria" "$out" "[simulação] faria: trocar a regra antiga de 5060/udp"
+out="$(tool apply 5060/udp)"; equal "formato antigo: sai com zero" 0 "$?"
+equal "formato antigo: nenhuma cópia antiga fica" 0 "$(legacy)"
+equal "formato antigo: fica uma regra, a nova" 1 "$(rules)"
+contains "formato antigo: diz que trocou" "$out" "regra antiga trocada: 5060/udp"
+
+# ── Tirar as portas: some a regra e some o serviço, e a do formato antigo junto ──
 out="$(tool apply 5060/udp)"; equal "volta a fechar: zero" 0 "$?"
+# shellcheck disable=SC2086
+iptables -w 5 -I DOCKER-USER 1 $LEGACY_RULE >/dev/null 2>&1
 out="$(tool apply)"; equal "sem portas: sai com zero" 0 "$?"
 equal "sem portas: nenhuma regra do kit" 0 "$(rules)"
 refuse "sem portas: o serviço do boot foi apagado" test -f "$UNIT"
