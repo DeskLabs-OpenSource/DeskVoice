@@ -1,13 +1,21 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 import { recordEvent, withOrg, type Clock, type Db } from "@deskvoice/core";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket } from "ws";
 import { engineKeySetting, startCallSession, type CallSession, type CallSessionDeps } from "./call-session";
 import { messageOf, type Logger } from "./log";
 import { realSchedule, type Schedule } from "./transport";
 import { createWebTransport } from "./web-transport";
 
 export const WEB_TOKEN_TTL_SECONDS = 60;
+/**
+ * Quanto tempo um convite vencido pelo prazo continua reconhecido. Dentro disso, quem recebeu o
+ * convite e conecta tarde (aba suspensa, rede lenta) ainda ouve que ele venceu; depois, é só um
+ * token que não vale.
+ */
+export const EXPIRED_INVITE_MEMORY_MS = 30 * 60 * 1000;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 // Acima disto o `ws` derruba a conexão antes de a mensagem chegar inteira à memória.
 const HARD_MESSAGE_BYTES = 1024 * 1024;
@@ -67,7 +75,25 @@ interface Slot {
   released: boolean;
 }
 
+/** Um convite vencido pelo prazo: só o digest, sem token e sem chamada. */
+interface Remembered {
+  digest: Buffer;
+  forget: () => void;
+}
+
+/**
+ * Um token que bateu. Com `entry`, é um convite válido. Com `expired`, bateu num convite vencido,
+ * cuja chamada já foi fechada.
+ */
+type Redeemed = { entry: Pending } | { expired: true };
+
 const digestOf = (token: string): Buffer => createHash("sha256").update(token).digest();
+
+/** Recusa o upgrade com uma resposta HTTP comum: sem convite válido, não há WebSocket. */
+function refuseUpgrade(socket: Duplex, status: 401 | 404, reason: string): void {
+  socket.once("finish", () => socket.destroy());
+  socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+}
 
 /**
  * Chamada pelo navegador: a pessoa fala no microfone, pelo painel, com o agente. É uma chamada
@@ -76,13 +102,15 @@ const digestOf = (token: string): Buffer => createHash("sha256").update(token).d
  *
  * O WebSocket é público e aceita qualquer `Origin`: o que protege é o token. Ele é emitido pela
  * API interna a pedido de uma sessão autenticada do painel, vale 60 s, serve uma vez, fica só na
- * memória deste processo e está preso a uma chamada já criada.
+ * memória deste processo e está preso a uma chamada já criada. O convite é conferido antes do
+ * upgrade: sem convite válido, a resposta é HTTP comum (401 ou 404) e nenhum WebSocket abre.
  */
 export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
   const { db, clock, log } = deps;
   const schedule = deps.schedule ?? realSchedule;
   const now = deps.now ?? (() => performance.now());
   const pending = new Set<Pending>();
+  const expired = new Set<Remembered>();
   // Vagas ocupadas por organização: pedidos esperando a conexão mais chamadas em andamento.
   const occupied = new Map<string, number>();
   const reserve = (organizationId: string): Slot | null => {
@@ -100,19 +128,27 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
   };
 
   /** Gasta o token: devolve a chamada dele e o apaga. Depois disso ele não vale mais. */
-  function redeem(token: string | null): Pending | null {
+  function redeem(token: string | null): Redeemed | null {
     if (!token) return null;
     const given = digestOf(token);
     let found: Pending | null = null;
+    let stale: Remembered | null = null;
     // Compara com todos, em tempo constante: o tempo da resposta não diz quão perto o chute chegou.
     for (const entry of pending) if (timingSafeEqual(entry.digest, given)) found = entry;
+    for (const entry of expired) if (timingSafeEqual(entry.digest, given)) stale = entry;
+    if (stale) {
+      // Vencido e lembrado: vale uma vez para dizer que venceu, depois é esquecido.
+      expired.delete(stale);
+      stale.forget();
+      return { expired: true };
+    }
     if (!found) return null;
     pending.delete(found);
     found.cancelExpiry();
-    if (clock.now().getTime() < found.expiresAt) return found;
-    // Vencido: a chamada dele é fechada agora, sem esperar o timer.
+    if (clock.now().getTime() < found.expiresAt) return { entry: found };
+    // Vencido antes de o timer disparar: a chamada dele é fechada agora.
     closeNeverConnected(found);
-    return null;
+    return { expired: true };
   }
 
   /** A tela pediu a chamada e nunca conectou: ela não fica "tocando" para sempre. */
@@ -129,26 +165,56 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
 
   const expire = (entry: Pending): void => {
     if (!pending.delete(entry)) return;
-    neverConnected(entry).catch((error: unknown) => log("error", "could not close a web call that never connected", { callId: entry.callId, error: messageOf(error) }));
+    closeNeverConnected(entry);
   };
 
-  const server = new WebSocketServer({ port: deps.port, host: deps.host, maxPayload: HARD_MESSAGE_BYTES });
-  await new Promise<void>((resolve, reject) => {
-    server.once("listening", resolve);
-    server.once("error", reject);
-  });
-  server.on("error", (error) => log("error", "web call server error", { error: error.message }));
+  /** O prazo do convite venceu: a chamada fecha e o digest fica lembrado por um tempo. */
+  const timedOut = (entry: Pending): void => {
+    if (!pending.has(entry)) return;
+    expire(entry);
+    const remembered: Remembered = { digest: entry.digest, forget: () => undefined };
+    remembered.forget = schedule(() => expired.delete(remembered), EXPIRED_INVITE_MEMORY_MS);
+    expired.add(remembered);
+  };
 
-  server.on("connection", (socket, request) => {
+  const server = new WebSocketServer({ noServer: true, maxPayload: HARD_MESSAGE_BYTES });
+  // Pedido HTTP sem upgrade: aqui só se fala WebSocket.
+  const http = createServer((_request, response) => {
+    response.writeHead(426, { Connection: "close", "Content-Length": "0" });
+    response.end();
+  });
+  http.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on("error", (error) => log("error", "web call socket error", { error: error.message }));
     const url = new URL(request.url ?? "/", "http://voice");
-    const entry = PATHS.has(url.pathname) ? redeem(url.searchParams.get("token")) : null;
-    if (!entry) {
-      // Token ausente, errado, vencido ou já usado: fecha e nada mais. Um token vencido cuja
-      // chamada ainda está "tocando" é fechado aqui mesmo, sem esperar o prazo.
-      socket.close(CLOSE_UNAUTHORIZED);
-      return;
-    }
+    // Caminho que não é o da chamada: o token nem é olhado.
+    if (!PATHS.has(url.pathname)) return refuseUpgrade(socket, 404, "Not Found");
+    // Token ausente, errado ou já usado: nada de WebSocket.
+    const redeemed = redeem(url.searchParams.get("token"));
+    if (!redeemed) return refuseUpgrade(socket, 401, "Unauthorized");
+    // Vencido, mas de quem recebeu o convite: abre e fecha com 4401, para a tela dizer que o
+    // convite venceu. A chamada dele já foi fechada; não há vaga nem chamada a devolver.
+    if ("expired" in redeemed) return server.handleUpgrade(request, socket, head, (ws) => ws.close(CLOSE_UNAUTHORIZED));
+    const { entry } = redeemed;
+    // O token já foi gasto. Se o handshake não completa (cabeçalho inválido, socket caiu antes),
+    // a chamada dele é fechada e a vaga volta, em vez de ficar tocando até ninguém.
+    let connected = false;
+    socket.once("close", () => {
+      if (!connected) closeNeverConnected(entry);
+    });
+    server.handleUpgrade(request, socket, head, (ws) => {
+      connected = true;
+      onConnection(ws, entry);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    http.once("listening", resolve);
+    http.once("error", reject);
+    http.listen(deps.port, deps.host);
+  });
+  http.on("error", (error) => log("error", "web call server error", { error: error.message }));
+
+  function onConnection(socket: WebSocket, entry: Pending): void {
+    socket.on("error", (error) => log("error", "web call socket error", { error: error.message }));
 
     const transport = createWebTransport(socket, { schedule, now });
     const openedAt = now();
@@ -191,10 +257,10 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
     deps.onSession(session);
     void session.done.then((outcome) => transport.end(outcome.status, outcome.endReason)).finally(() => release(entry.slot));
     socket.send(JSON.stringify({ type: "ready", callId: entry.callId }));
-  });
+  }
 
   return {
-    port: (server.address() as AddressInfo).port,
+    port: (http.address() as AddressInfo).port,
 
     async request(input) {
       const { engines } = deps.session;
@@ -244,20 +310,24 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
         cancelExpiry: () => undefined,
         slot,
       };
-      entry.cancelExpiry = schedule(() => expire(entry), WEB_TOKEN_TTL_SECONDS * 1000);
+      entry.cancelExpiry = schedule(() => timedOut(entry), WEB_TOKEN_TTL_SECONDS * 1000);
       pending.add(entry);
       return { callId: prepared.callId, token, expiresInSeconds: WEB_TOKEN_TTL_SECONDS };
     },
 
-    health: () => ({ status: "ok", detail: `Listening for browser calls on port ${(server.address() as AddressInfo | null)?.port ?? deps.port}.` }),
+    health: () => ({ status: "ok", detail: `Listening for browser calls on port ${(http.address() as AddressInfo | null)?.port ?? deps.port}.` }),
 
     async close() {
       for (const entry of pending) entry.cancelExpiry();
       for (const entry of [...pending]) expire(entry);
+      for (const remembered of expired) remembered.forget();
+      expired.clear();
+      // As conversas já foram encerradas por quem chama; o que sobrar aberto é derrubado.
+      for (const client of server.clients) client.terminate();
+      server.close();
       await new Promise<void>((resolve) => {
-        server.close(() => resolve());
-        // As conversas já foram encerradas por quem chama; o que sobrar aberto é derrubado.
-        for (const client of server.clients) client.terminate();
+        http.close(() => resolve());
+        http.closeAllConnections();
       });
     },
   };

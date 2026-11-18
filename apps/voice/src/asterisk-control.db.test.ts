@@ -223,7 +223,9 @@ describe("endereços liberados por linha", { timeout: 120_000 }, () => {
     const organizationId = await createOrganization(app, "allowed-formats");
     // Endereços próprios desta rodada: uma linha por IP de rodada anterior no mesmo banco (outra
     // organização) tiraria a deste caso do arquivo pela regra de endereço compartilhado.
-    const net = `100.${randomInt(64, 128)}.${randomInt(0, 256)}`;
+    // Fora de 100.64/16: o rules.db.test.ts do painel grava uma linha 100.64.0.0/16 no mesmo banco, e
+    // a sobreposição tiraria a linha deste caso do arquivo (falhou assim no CI em 18/11, 1 vez em 64).
+    const net = `100.${randomInt(65, 128)}.${randomInt(0, 256)}`;
     const v6 = `2001:db8:${randomInt(1, 0xffff).toString(16)}::140`;
     const ip = { username: null, password: null, authMode: "ip" as const };
     const byIp = await createTrunk(app, organizationId, { ...ip, host: `${net}.140` });
@@ -331,7 +333,8 @@ describe("o filtro de entrada por linha (R14, fatia 2)", { timeout: 120_000 }, (
     const name = `sip.${randomInt(1, 1_000_000)}.compartilhado.example`;
     const first = await createOrganization(app, "filter-iso-a");
     const second = await createOrganization(app, "filter-iso-b");
-    const net = `100.${randomInt(64, 128)}.${randomInt(0, 256)}`;
+    // Fora de 100.64/16, pelo mesmo motivo do caso dos endereços liberados.
+    const net = `100.${randomInt(65, 128)}.${randomInt(0, 256)}`;
     const mine = await createTrunk(app, first, { host: name, username: "conta-a" });
     const mineIp = await createTrunk(app, first, { host: `${net}.10`, username: null, password: null, authMode: "ip" });
     let answer = ["203.0.113.21"];
@@ -536,7 +539,7 @@ describe("o filtro de entrada por linha (R14, fatia 2)", { timeout: 120_000 }, (
 
     // A troca de modo como o painel grava: zera o conjunto e NÃO mexe em `inbound_filter`. Endereço
     // sorteado, para não cair no grupo de outra linha deste banco.
-    const ip = `100.${randomInt(64, 128)}.${randomInt(0, 256)}.${randomInt(1, 255)}`;
+    const ip = `100.${randomInt(65, 128)}.${randomInt(0, 256)}.${randomInt(1, 255)}`;
     await withSystem(app, (q) =>
       q.exec("update trunks set auth_mode = 'ip', host = $2, username = null, secret_enc = null, inbound_allowed = '{}', inbound_from_name = '{}', inbound_resolved_at = null where id = $1", [line, ip]),
     );

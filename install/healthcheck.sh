@@ -203,6 +203,29 @@ if [ "$only_essential" = 0 ]; then
     esac
   fi
 
+  # ── Rede do proxy: a ligação declarada sobrevive ao recreate; a manual, não ──
+  # Instalação anterior à 0.11.0 ligava o Caddy à rede do outro sistema com `docker network connect`.
+  # Essa ligação não fica em arquivo nenhum: o contêiner recriado (atualização, volta, restauração ou
+  # reinício da máquina) nasce fora da rede, e o domínio do painel passa a responder 502 sem que nada
+  # aqui dentro pareça errado. Aviso, não falha: o produto funciona; o que se perde é a publicação.
+  # Só a rede existir não prova a ligação à mão: o guia também documenta o proxy do CRM entrando na
+  # deskvoice_internal, e ali a _caddy-sites existe sem precisar ser gravada. Por isso o aviso diz o
+  # que viu e traz a consequência como condição.
+  proxy_declared="$(proxy_network)"
+  proxy_missing="$(missing_proxy_network)"
+  proxy_found="$(redes_de_proxy | tr '\n' ' ' | sed 's/ *$//')"
+  if [ -n "$proxy_missing" ]; then
+    add proxy "Rede do proxy" 0 aviso "a rede gravada $proxy_missing não existe mais nesta máquina: com ela faltando, o próximo início do DeskVoice não sobe serviço nenhum. Suba o outro sistema, que recria a rede, ou deixe de usá-la: DESKVOICE_PROXY_NETWORK=off bash install/install.sh"
+  elif [ -n "$proxy_declared" ]; then
+    add proxy "Rede do proxy" 0 ok "o Caddy entra em $proxy_declared pelo nome deskvoice; a ligação sobrevive a atualização, volta e reinício"
+  elif [ -z "$proxy_found" ]; then
+    add proxy "Rede do proxy" 0 ok "esta instalação não usa o proxy de outro sistema (é o padrão)"
+  elif [ "$(printf '%s\n' "$proxy_found" | wc -w)" -eq 1 ]; then
+    add proxy "Rede do proxy" 0 aviso "existe a rede $proxy_found nesta máquina e ela não está gravada. Se o painel é publicado pelo proxy dessa rede, a ligação foi feita à mão e se perde quando o Caddy for recriado, e o domínio passa a responder 502. Para gravá-la: DESKVOICE_PROXY_NETWORK=$proxy_found bash install/install.sh"
+  else
+    add proxy "Rede do proxy" 0 aviso "existem redes de proxy nesta máquina ($proxy_found) e nenhuma está gravada. Se o painel é publicado pelo proxy de uma delas, grave essa: DESKVOICE_PROXY_NETWORK=<rede> bash install/install.sh"
+  fi
+
   # ── WhatsApp por QR Code: o serviço, que só existe na instalação que o pediu pela tela ──
   # "Não instalado" é o estado normal, nunca falha. Instalado, é perguntado a partir do painel,
   # que é quem fala com ele; qualquer resposta HTTP abaixo de 500 conta. Se há um número conectado,
