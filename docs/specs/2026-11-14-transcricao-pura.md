@@ -1035,8 +1035,10 @@ publicada; antes disso, ligar o Laya pela tela baixaria uma imagem que não exis
 
 `deploy/laya/` (Dockerfile e servidor HTTP mínimo, com as três primitivas e nada mais), o serviço
 `laya` no `docker-compose.yml` no perfil `laya` (rede interna, sem porta, `mem_limit`, `cpus`,
-`healthcheck`, imagem `${DESKVOICE_IMAGE_PREFIX}/deskvoice-laya:${DESKVOICE_VERSION}`), `laya` no
-`image_ref` de `install/_common.sh`, `deciders/laya.ts` e a medida do serviço com o teto de CPU.
+`healthcheck`, imagem `${DESKVOICE_IMAGE_PREFIX}/deskvoice-laya:${DESKVOICE_VERSION}`),
+`deciders/laya.ts` e a medida do serviço com o teto de CPU. O `image_ref` de `install/_common.sh` é
+genérico (`image_ref laya <versão>` já dá o nome certo) e não muda; só o comentário dele passa a
+citar o `laya`.
 O `laya` fica **fora de `APP_SERVICES`** (`install/_common.sh`): essa lista é o que o `update.sh`
 e o instalador baixam, e com o Laya nela toda atualização baixaria a imagem.
 **Não toca `.github/`.** A imagem é construída localmente para os testes e a medida. Caminho
@@ -1062,8 +1064,9 @@ Aceite:
 
 **Quem roda cada item do aceite.** O usuário `paperclip`, onde o Desenvolvedor e o Verificador
 rodam, não tem Docker, e o job `images` do CI não constrói `deploy/laya/`. Dar Docker ao
-`paperclip` não entra nesta fatia (seria um pedido de decisão ao Rafael, e a recomendação é
-contra). A divisão segue a DESA-148:
+`paperclip` não entra nesta fatia: o pedido está na DESA-148. O Arquiteto recomendou dar o
+Docker, e o board seguiu a B, que não muda permissão. A opção A equivale a root e só valeria com o
+sim direto do Rafael, nunca pelo board. A divisão segue a DESA-148:
 
 | Item do aceite | Quem roda | Onde |
 |---|---|---|
