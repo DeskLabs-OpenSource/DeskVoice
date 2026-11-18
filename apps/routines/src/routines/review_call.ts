@@ -416,8 +416,8 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
   };
   // `task` abre a pendência. `whatsapp` confere o pré-requisito, a lista e o limite na hora de agir.
   // `call_back` confere a lista, a política ligada e o limite por número, e agenda; a política inteira
-  // é conferida de novo na hora de discar. A rota do painel ainda não aceita `call_back` (fatia 4):
-  // nesta fatia o modo só é alcançável pelo banco.
+  // é conferida de novo na hora de discar. A rota do painel só aceita `call_back` com a política de
+  // saída ligada (fatia 4); se a política for desligada depois, a revisão grava `mode_unavailable`.
   const outcome =
     dropped && mode === "whatsapp"
       ? await whatsAppAction(q, call.caller, now)
