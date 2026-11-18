@@ -82,11 +82,15 @@ export interface KeypadFake extends IvrTransport {
   holdPlayback: boolean;
   finishPlaying(): void;
   press(digit: string): void;
+  /** O áudio de quem ligou. Como no AudioSocket: sem handler, o quadro fica guardado e vai ao próximo `onAudio`. */
+  hear(pcm: Buffer): void;
   callerHangup(): void;
 }
 
 export function keypadFake(): KeypadFake {
   let dtmf: ((digit: string) => void) | undefined;
+  let audio: ((pcm: Buffer) => void) | undefined;
+  const held: Buffer[] = [];
   const hangupHandlers: Array<() => void> = [];
   const waiting: Array<() => void> = [];
   const release = (): void => {
@@ -100,7 +104,10 @@ export function keypadFake(): KeypadFake {
     transferredTo: null,
     hangupHandlers: 0,
     holdPlayback: false,
-    onAudio: () => undefined,
+    onAudio(handler) {
+      audio = handler;
+      for (const pcm of held.splice(0)) handler(pcm);
+    },
     sendAudio: (pcm) => void fake.sent.push(pcm),
     clearAudio() {
       fake.cleared += 1;
@@ -118,6 +125,10 @@ export function keypadFake(): KeypadFake {
     close: async () => void (fake.closes += 1),
     finishPlaying: release,
     press: (digit) => dtmf?.(digit),
+    hear(pcm) {
+      if (audio) audio(pcm);
+      else held.push(pcm);
+    },
     callerHangup() {
       for (const handler of hangupHandlers) handler();
     },

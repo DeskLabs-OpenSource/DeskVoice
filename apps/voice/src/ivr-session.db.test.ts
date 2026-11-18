@@ -109,6 +109,24 @@ describe("URA: as ações", { timeout: 60_000 }, () => {
     expect(h.transport).toMatchObject({ hangups: 0, closes: 0, transferredTo: null });
   });
 
+  it("o áudio de quem ouve o menu é descartado: a conversa que assume não recebe nada de antes da passagem", async () => {
+    const heardByAgent: Buffer[] = [];
+    const h = await answer("ivr-audio-dropped", STANDARD, {
+      startAgent: (_agentId, keypad) => keypad.onAudio((pcm) => void heardByAgent.push(pcm)),
+    });
+    await promptPlayed(h, 1);
+    const during = Buffer.alloc(320, 1);
+    h.transport.hear(during);
+    h.transport.hear(during);
+    h.transport.press("1");
+    expect(await h.session.done).toEqual({ result: "agent", endReason: null });
+    expect(heardByAgent).toEqual([]);
+    // O que chega depois da passagem é da conversa.
+    const after = Buffer.alloc(320, 2);
+    h.transport.hear(after);
+    expect(heardByAgent).toEqual([after]);
+  });
+
   it("T3: a opção `transfer` transfere para o número dela, e `hangup` desliga", async () => {
     const transfer = await answer("ivr-transfer", STANDARD);
     await promptPlayed(transfer, 1);
@@ -209,18 +227,86 @@ function stringsIn(value: unknown, out: string[] = []): string[] {
   return out;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const KEY = /[0-9*#]/;
+
+/**
+ * A lista do que a URA pode escrever no log: cada mensagem é um texto fixo (sem nada interpolado), e
+ * cada campo, um destes nomes. Mensagem nova ou campo novo derruba o T5 até entrar aqui de propósito.
+ */
+const IVR_LOG_MESSAGES = new Set([
+  "ivr started",
+  "ivr ended",
+  "ivr handed the call to the agent",
+  "could not read the recorded ivr notice; playing the failure tone",
+  "could not record the start of the ivr",
+  "could not record an ivr event",
+  "could not record the end of the ivr",
+  "could not release the telephony side of the ivr",
+  "could not hand the call to the agent",
+  "ivr session failed",
+]);
+const IVR_LOG_FIELDS = new Set(["level", "message", "callId", "menuId", "agentId", "options", "result", "endReason", "kind", "language", "error"]);
+
+/**
+ * A lista do que um evento da chamada pode levar, em qualquer `kind`: os nomes de campo e os valores
+ * de texto fixos. Fora estes, um texto só pode ser uuid, o número de destino do menu ou o rótulo da
+ * opção; `digit` só existe em `ivr_option_chosen`.
+ */
+const EVENT_FIELDS = new Set(["menu_id", "digit", "label", "action", "elapsed_ms", "attempt", "kind", "reason", "then", "to", "status", "costCents", "seconds", "taskId"]);
+const EVENT_NUMBERS = new Set(["elapsed_ms", "attempt", "costCents", "seconds"]);
+const EVENT_WORDS = new Set([
+  // ação da opção e desfecho da URA
+  "agent", "transfer", "hangup", "timeout", "invalid", "no_choice", "person", "caller_hangup", "option_hangup", "stopped",
+  "prompt_unreadable", "no_person_exit", "agent_disabled", "ivr",
+  // status e motivo do fim da chamada
+  "transferred", "completed", "failed", "ivr_failed", "ivr_no_choice", "ivr_hangup", "internal_error",
+  // tarefas da fila
+  "summarize_call", "review_call",
+]);
+
+/** O que há de errado no payload de um evento, pela lista do permitido. Vazio: nada. */
+function eventOutsideAllowList(kind: string, payload: Record<string, unknown>, allowed: { to: string; label: string; chosen: string | null }): string[] {
+  const wrong: string[] = [];
+  for (const [field, value] of Object.entries(payload)) {
+    if (!EVENT_FIELDS.has(field)) wrong.push(`field ${field}`);
+    else if (field === "digit") {
+      if (kind !== "ivr_option_chosen" || value !== allowed.chosen) wrong.push(`digit ${JSON.stringify(value)}`);
+    } else if (EVENT_NUMBERS.has(field)) {
+      if (typeof value !== "number") wrong.push(`${field} ${JSON.stringify(value)}`);
+    } else if (typeof value !== "string") wrong.push(`${field} ${JSON.stringify(value)}`);
+    else if (!(UUID.test(value) || value === allowed.to || value === allowed.label || EVENT_WORDS.has(value))) wrong.push(`${field} ${JSON.stringify(value)}`);
+  }
+  return wrong;
+}
+
+/** O que há de errado numa linha de log, pela lista do permitido. Vazio: nada. */
+function logOutsideAllowList(line: Record<string, unknown>, optionCount: number): string[] {
+  const wrong: string[] = [];
+  if (typeof line.message !== "string" || !IVR_LOG_MESSAGES.has(line.message)) wrong.push(`message ${JSON.stringify(line.message)}`);
+  for (const [field, value] of Object.entries(line)) {
+    if (!IVR_LOG_FIELDS.has(field)) wrong.push(`field ${field}`);
+    else if (field === "options") {
+      if (value !== optionCount) wrong.push(`options ${JSON.stringify(value)}`);
+    } else if (typeof value !== "string") wrong.push(`${field} ${JSON.stringify(value)}`);
+    else if (!UUID.test(value) && KEY.test(value)) wrong.push(`${field} ${JSON.stringify(value)}`);
+  }
+  return wrong;
+}
+
 describe("URA: a tecla de quem liga não fica guardada (T5)", { timeout: 60_000 }, () => {
   const TYPED = "12345678909#";
+  const LABEL = "Atendimento";
 
   for (const variant of [
     { name: "nenhuma tecla é opção", option: "*", chosen: null },
     { name: "uma tecla é opção", option: "5", chosen: "5" },
   ] as const) {
-    it(`quem liga digita ${TYPED} (${variant.name}): nenhum evento, log ou transcrição leva a sequência nem tecla além da opção reconhecida`, async () => {
+    it(`quem liga digita ${TYPED} (${variant.name}): eventos, logs e transcrição só levam o que está na lista do permitido`, async () => {
       const h = await answer(`ivr-privacy-${variant.option}`, () => ({
         maxAttempts: 5,
         onNoChoice: "person",
-        options: [{ digit: variant.option, label: "Atendimento", action: "transfer", transferE164: PERSON }],
+        options: [{ digit: variant.option, label: LABEL, action: "transfer", transferE164: PERSON }],
       }));
       await promptPlayed(h, 1);
       for (const digit of TYPED) {
@@ -230,24 +316,24 @@ describe("URA: a tecla de quem liga não fica guardada (T5)", { timeout: 60_000 
       }
       await h.session.done;
 
+      // Os eventos da chamada inteira, não só os da URA.
       const events = await eventsOf(app, h.callId);
-      const pressed = new Set(TYPED);
+      expect(events.map((event) => event.kind)).toContain("call_ended");
       for (const event of events) {
-        const texts = stringsIn(event.payload);
-        expect(texts.join(" "), event.kind).not.toContain(TYPED.slice(0, 11));
-        expect(texts.filter((text) => text === "digit" || text === "digits" || text === "dtmf"), event.kind).toEqual(event.kind === "ivr_option_chosen" ? ["digit"] : []);
-        const keys = texts.filter((text) => pressed.has(text));
-        expect(keys, event.kind).toEqual(event.kind === "ivr_option_chosen" ? [variant.chosen] : []);
+        expect(eventOutsideAllowList(event.kind, event.payload, { to: PERSON, label: LABEL, chosen: variant.chosen }), `${event.kind} ${JSON.stringify(event.payload)}`).toEqual([]);
+        expect(stringsIn(event.payload).join(" "), event.kind).not.toContain(TYPED.slice(0, 11));
       }
-      expect(events.filter((event) => event.kind === "ivr_option_chosen")).toHaveLength(variant.chosen ? 1 : 0);
+      expect(events.filter((event) => event.kind === "ivr_option_chosen").map((event) => event.payload.digit)).toEqual(variant.chosen ? [variant.chosen] : []);
+      // `attempt` é a contagem das tentativas, em ordem, e nada além dela.
+      const attempts = events.filter((event) => event.kind === "ivr_no_choice").map((event) => event.payload.attempt);
+      expect(attempts).toEqual(attempts.map((_, index) => index + 1));
       expect(events.filter((event) => event.kind.startsWith("transcript_"))).toEqual([]);
+      expect(await notificationsOf(app, h.organizationId)).toEqual([]);
 
       expect(h.logs.length).toBeGreaterThan(0);
       for (const line of h.logs) {
+        expect(logOutsideAllowList(JSON.parse(line) as Record<string, unknown>, h.menu.options.length), line).toEqual([]);
         expect(line).not.toContain(TYPED.slice(0, 11));
-        expect(line).not.toMatch(/"(digit|digits|dtmf|key|keys)"/);
-        const fields = stringsIn(JSON.parse(line));
-        expect(fields.filter((text) => pressed.has(text)), line).toEqual([]);
       }
     });
   }
