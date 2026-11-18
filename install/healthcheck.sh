@@ -203,6 +203,23 @@ if [ "$only_essential" = 0 ]; then
     esac
   fi
 
+  # ── Rede do proxy: a ligação declarada sobrevive ao recreate; a manual, não ──
+  # Instalação anterior à 0.11.0 ligava o Caddy à rede do outro sistema com `docker network connect`.
+  # Essa ligação não fica em arquivo nenhum: o contêiner recriado (atualização, volta, restauração ou
+  # reinício da máquina) nasce fora da rede, e o domínio do painel passa a responder 502 sem que nada
+  # aqui dentro pareça errado. Aviso, não falha: o produto funciona; o que se perde é a publicação.
+  proxy_declared="$(proxy_network)"
+  proxy_found="$(redes_de_proxy | tr '\n' ' ' | sed 's/ *$//')"
+  if [ -n "$proxy_declared" ]; then
+    add proxy "Rede do proxy" 0 ok "o Caddy entra em $proxy_declared pelo nome deskvoice; a ligação sobrevive a atualização, volta e reinício"
+  elif [ -z "$proxy_found" ]; then
+    add proxy "Rede do proxy" 0 ok "esta instalação não usa o proxy de outro sistema (é o padrão)"
+  elif [ "$(printf '%s\n' "$proxy_found" | wc -w)" -eq 1 ]; then
+    add proxy "Rede do proxy" 0 aviso "existe a rede $proxy_found nesta máquina e ela não está gravada: a ligação é a de antes da 0.11.0 (docker network connect), e o painel cai para 502 quando o Caddy for recriado. Rode: DESKVOICE_PROXY_NETWORK=$proxy_found bash install/install.sh"
+  else
+    add proxy "Rede do proxy" 0 aviso "existem redes de proxy nesta máquina ($proxy_found) e nenhuma está gravada: escolha a que publica o painel. Rode: DESKVOICE_PROXY_NETWORK=<rede> bash install/install.sh"
+  fi
+
   # ── WhatsApp por QR Code: o serviço, que só existe na instalação que o pediu pela tela ──
   # "Não instalado" é o estado normal, nunca falha. Instalado, é perguntado a partir do painel,
   # que é quem fala com ele; qualquer resposta HTTP abaixo de 500 conta. Se há um número conectado,

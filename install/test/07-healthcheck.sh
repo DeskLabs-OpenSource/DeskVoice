@@ -7,13 +7,32 @@ line() { printf '%s\n' "$out" | grep "$1" | head -n 1; }
 
 # Instalação nova: tudo no ar, linha e motor ainda por configurar.
 out="$(bash "$H" 2>&1)"; equal "instalação nova sem linha nem chave: sai com zero" 0 "$?"
-equal "uma linha por peça (17 peças)" 17 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
+equal "uma linha por peça (18 peças)" 18 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
 for piece in Painel Banco "Painel → banco" "Login do painel" Asterisk "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
 contains "linha não cadastrada é aviso, não falha" "$(line 'Linha telefônica')" "aviso"
 contains "linha não cadastrada traz o detalhe" "$(line 'Linha telefônica')" "nenhuma linha cadastrada ainda"
 contains "motor sem chave é aviso, não falha" "$(line 'Motor de voz')" "aviso"
 contains "portas: honesto sobre o que não prova" "$(line 'Portas UDP')" "não prova que o provedor deixa passar"
 lacks "não resume tudo num ok" "$out" "tudo ok"
+
+# Rede do proxy: máquina sem proxy de outro sistema é o caso normal; com rede existente e NÃO gravada,
+# aparece o aviso — é a instalação anterior à 0.11.0, em que a ligação se perde no recreate.
+OV="$DESKVOICE_DEPLOY_DIR/docker-compose.override.yml"
+cp "$OV" "$SANDBOX/override.before" 2>/dev/null || true
+contains "rede do proxy: máquina sem proxy de outro sistema é o caso normal" "$(line 'Rede do proxy')" "não usa o proxy de outro sistema"
+printf '%s\n' deskcommcrm_caddy-sites > "$FAKE_DIR/networks"
+out="$(bash "$H" 2>&1)"
+contains "rede de proxy fora do arquivo de publicação é aviso, não falha" "$(line 'Rede do proxy')" "aviso"
+contains "o aviso nomeia a rede" "$(line 'Rede do proxy')" "existe a rede deskcommcrm_caddy-sites"
+contains "o aviso manda rodar o instalador com a rede" "$(line 'Rede do proxy')" "DESKVOICE_PROXY_NETWORK=deskcommcrm_caddy-sites bash install/install.sh"
+bash "$H" --essential >/dev/null 2>&1; equal "o aviso da rede não derruba a checagem essencial" 0 "$?"
+# Gravada no arquivo de publicação (o que o install.sh faz), a mesma rede fica ok.
+( source "$KIT/_common.sh"; DESKVOICE_PROXY_NETWORK=deskcommcrm_caddy-sites apply_entry caddy voz.exemplo.com.br ) >/dev/null 2>&1
+out="$(bash "$H" 2>&1)"
+contains "rede gravada é ok" "$(line 'Rede do proxy')" "o Caddy entra em deskcommcrm_caddy-sites"
+lacks "rede gravada não avisa sobre ligação manual" "$(line 'Rede do proxy')" "não está gravada"
+cp "$SANDBOX/override.before" "$OV" 2>/dev/null || true
+rm -f "$FAKE_DIR/networks"
 
 # Linha cadastrada e quebrada: falha, mas não é peça essencial.
 printf '%s\n' 'panel|ok|respondendo' 'trunk|fail|registro recusado pela operadora (401)' 'engine|ok|gemini-live' > "$FAKE_DIR/panel_health"
@@ -191,7 +210,7 @@ lacks "tudo certo: nenhuma falha" "$out" "falha "
 json="$(bash "$H" --json 2>&1)"
 contains "json: código de saída" "$json" '{"exit_code":0,"checks":['
 contains "json: peça com estado e detalhe" "$json" '{"id":"trunk","name":"Linha telefônica","essential":false,"status":"ok","detail":"registrado"}'
-equal "json: dezessete peças" 17 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
+equal "json: dezoito peças" 18 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
 if command -v python3 >/dev/null 2>&1; then check "json: é JSON válido" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$json"; fi
 printf '%s\n' 'panel|ok|diz "aspas" e \barra' 'trunk|ok|x' 'engine|ok|y' > "$FAKE_DIR/panel_health"
 if command -v python3 >/dev/null 2>&1; then check "json: escapa aspas e barra" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(bash "$H" --json 2>&1)"; fi

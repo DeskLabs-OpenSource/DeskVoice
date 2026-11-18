@@ -453,6 +453,14 @@ missing_proxy_network() {
   network="$(proxy_network)"
   if [ -n "$network" ] && ! docker network inspect "$network" >/dev/null 2>&1; then echo "$network"; fi
 }
+# As redes de proxy de outro sistema que EXISTEM nesta máquina (`*_caddy-sites`), uma por linha.
+# Serve para o aviso da instalação anterior à 0.11.0: há rede de proxy aqui e o arquivo de publicação
+# não a declara, então a ligação foi feita com `docker network connect` e some no próximo recreate.
+redes_de_proxy() {
+  have docker || return 0
+  # shellcheck disable=SC2016  # {{.Name}} é do Docker, não do shell
+  docker network ls --format '{{.Name}}' 2>/dev/null | grep '_caddy-sites$' || true
+}
 # O que o arquivo de publicação diz hoje, para a reinstalação manter a porta que o proxy do
 # operador (ou o túnel) já conhece. Lê o formato atual (Caddy, porta 80 de dentro) e o antigo
 # (painel direto, porta 3000 de dentro). Devolve "<endereço> <porta>" ou nada.
