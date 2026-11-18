@@ -8,6 +8,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 source "$KIT/_common.sh"; set +e; trap - ERR
 UNIT="$DESKVOICE_SYSTEMD_DIR/deskvoice-docker-user.service"
 STATE="$FAKE_DIR/iptables_DOCKER-USER"
+# Cada porta tem duas regras, uma por família de ponte do Docker (docker0 e as br-* do Compose).
 rules() { if [ -f "$STATE" ]; then grep -c -- '--ctorigdstport' "$STATE" || true; else echo 0; fi; }
 calls() { grep -c -- "$1" "$FAKE_DIR/calls.log"; }
 tool() { bash "$KIT/docker-user.sh" "$@" 2>&1; }
@@ -20,12 +21,14 @@ boot() {  # o que o systemd faz no boot: roda o ExecStart do serviço gravado
 # ── Aplicar fecha a porta, e aplicar de novo não duplica ──
 : > "$FAKE_DIR/calls.log"
 out="$(tool apply 5060/udp)"; equal "apply: sai com zero" 0 "$?"
-equal "apply: uma regra" 1 "$(rules)"
+equal "apply: duas regras, uma por ponte" 2 "$(rules)"
 contains "apply: diz que fechou" "$out" "porta fechada: 5060/udp"
-# Só o que passou pelo DNAT do Docker (o que chega de fora a uma porta publicada): sem o --ctstate,
-# a regra também casava com a conexão que o contêiner abre para fora com destino à mesma porta.
-equal "apply: a regra só casa com o que chega pelo DNAT do Docker" \
-  "-p udp -m conntrack --ctstate DNAT --ctorigdstport 5060 --ctdir ORIGINAL -j DROP" "$(cat "$STATE")"
+# Só o que vai para dentro de uma ponte do Docker sem ter vindo dela: sem o par de interfaces, a
+# regra também casava com a conexão que o contêiner abre para fora com destino à mesma porta.
+check "apply: a regra da br-* só barra o que entra na ponte vindo de fora dela" \
+  grep -qFx -- "! -i br-+ -o br-+ -p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP" "$STATE"
+check "apply: a regra da docker0 só barra o que entra na ponte vindo de fora dela" \
+  grep -qFx -- "! -i docker+ -o docker+ -p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP" "$STATE"
 check "apply: gravou o serviço do boot" test -f "$UNIT"
 contains "serviço: roda depois do Docker" "$(cat "$UNIT")" "After=docker.service"
 contains "serviço: é chamado de novo quando o Docker reinicia" "$(cat "$UNIT")" "PartOf=docker.service"
@@ -35,39 +38,40 @@ contains "serviço: repõe a mesma porta" "$(cat "$UNIT")" "apply 5060/udp"
 equal "serviço: ligado no boot" 1 "$(calls '^systemctl enable deskvoice-docker-user.service')"
 
 out="$(tool apply 5060/udp)"; equal "apply duas vezes: sai com zero" 0 "$?"
-equal "apply duas vezes: continua uma regra" 1 "$(rules)"
+equal "apply duas vezes: continua com as duas" 2 "$(rules)"
 contains "apply duas vezes: diz que já estava" "$out" "já estava fechada: 5060/udp"
 
 # ── Depois de reiniciar a máquina: a cadeia volta vazia, e o serviço do boot repõe ──
 rm -f "$STATE"; equal "reinício: a cadeia volta vazia" 0 "$(rules)"
 out="$(boot)"; equal "reinício: o serviço do boot repõe a regra" 0 "$?"
-equal "reinício: uma regra, de novo" 1 "$(rules)"
+equal "reinício: as duas, de novo" 2 "$(rules)"
 
 # ── Reload do firewalld: a regra fica (medido), e aplicar de novo não duplica ──
 out="$(tool apply 5060/udp)"; equal "reload: aplicar de novo sai com zero" 0 "$?"
-equal "reload: continua uma regra" 1 "$(rules)"
+equal "reload: continua com as duas" 2 "$(rules)"
 
 # ── Reiniciar o Docker também esvazia a cadeia: o mesmo serviço é chamado de novo ──
 rm -f "$STATE"; out="$(boot)"; equal "docker reiniciado: o serviço repõe a regra" 0 "$?"
-equal "docker reiniciado: uma regra" 1 "$(rules)"
+equal "docker reiniciado: as duas" 2 "$(rules)"
 
 # ── Duas portas: uma regra cada, e a que sai da lista é reaberta ──
 out="$(tool apply 5060/udp 10000:10200/udp)"; equal "duas portas: sai com zero" 0 "$?"
-equal "duas portas: duas regras" 2 "$(rules)"
+equal "duas portas: quatro regras" 4 "$(rules)"
 contains "duas portas: a faixa foi para conntrack como min:max" "$(cat "$STATE")" "--ctorigdstport 10000:10200"
 out="$(tool apply 5060/udp)"; equal "porta que sai da lista: sai com zero" 0 "$?"
-equal "porta que sai da lista: fica uma regra" 1 "$(rules)"
+equal "porta que sai da lista: ficam as duas da 5060" 2 "$(rules)"
 contains "porta que sai da lista: diz que reabriu" "$out" "porta reaberta: 10000:10200/udp"
 contains "serviço: passa a repor só a que ficou" "$(cat "$UNIT")" "apply 5060/udp"
 
 # ── A regra criada à mão, mais de uma vez, não ganha uma terceira: aplicar confere antes ──
 rm -f "$STATE"
-iptables -w 5 -I DOCKER-USER 1 -p udp -m conntrack --ctstate DNAT --ctorigdstport 5060 --ctdir ORIGINAL -j DROP >/dev/null 2>&1
-iptables -w 5 -I DOCKER-USER 1 -p udp -m conntrack --ctstate DNAT --ctorigdstport 5060 --ctdir ORIGINAL -j DROP >/dev/null 2>&1
-equal "cópias da regra à mão: duas" 2 "$(rules)"
+for bridge in docker+ br-+ docker+ br-+; do
+  iptables -w 5 -I DOCKER-USER 1 ! -i "$bridge" -o "$bridge" -p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP >/dev/null 2>&1
+done
+equal "cópias da regra à mão: duas de cada" 4 "$(rules)"
 out="$(tool apply 5060/udp)"; equal "cópias da regra à mão: sai com zero" 0 "$?"
 contains "cópias da regra à mão: diz que já estava" "$out" "já estava fechada"
-equal "cópias da regra à mão: o kit não soma uma terceira" 2 "$(rules)"
+equal "cópias da regra à mão: o kit não soma uma terceira" 4 "$(rules)"
 
 # ── show: lista a regra e o que o serviço repõe ──
 out="$(tool show)"; equal "show: sai com zero" 0 "$?"
@@ -108,14 +112,14 @@ for bad in 5060 5060/sctp 5060:10200 70000/tcp 10200:10000/udp; do
   out="$(tool apply "$bad")"; equal "porta '$bad': recusa" 1 "$?"
   contains "porta '$bad': diz a forma aceita" "$out" "Use a forma do ufw"
 done
-equal "porta inválida: nada foi escrito" 2 "$(rules)"
+equal "porta inválida: nada foi escrito" 4 "$(rules)"
 touch "$FAKE_DIR/no_docker_user"
 out="$(tool apply 5060/udp)"; equal "sem a cadeia DOCKER-USER: para com erro" 1 "$?"
 contains "sem a cadeia DOCKER-USER: aponta o Docker" "$out" "quem a cria é o Docker"
 rm -f "$FAKE_DIR/no_docker_user"
 
-# ── A regra no formato de antes (sem --ctstate DNAT), de quem já a tinha: o kit põe a nova no lugar ──
-legacy() { grep -- '--ctorigdstport' "$STATE" | grep -vc -- '--ctstate DNAT' || true; }
+# ── A regra no formato de antes (sem as interfaces), de quem já a tinha: o kit põe a nova no lugar, e diz ──
+legacy() { grep -c -- '^-p udp -m conntrack --ctorigdstport' "$STATE" || true; }
 LEGACY_RULE="-p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP"
 rm -f "$STATE"
 # shellcheck disable=SC2086  # a regra é uma lista de argumentos, de propósito
@@ -127,8 +131,8 @@ equal "formato antigo, simulação: não mexeu nas regras" "$before" "$(cat "$ST
 contains "formato antigo, simulação: diz que trocaria" "$out" "[simulação] faria: trocar a regra antiga de 5060/udp"
 out="$(tool apply 5060/udp)"; equal "formato antigo: sai com zero" 0 "$?"
 equal "formato antigo: nenhuma cópia antiga fica" 0 "$(legacy)"
-equal "formato antigo: fica uma regra, a nova" 1 "$(rules)"
-contains "formato antigo: diz que trocou" "$out" "regra antiga trocada: 5060/udp"
+equal "formato antigo: ficam as duas novas" 2 "$(rules)"
+contains "formato antigo: diz que trocou" "$out" "Troquei a regra antiga de 5060/udp"
 
 # ── Tirar as portas: some a regra e some o serviço, e a do formato antigo junto ──
 out="$(tool apply 5060/udp)"; equal "volta a fechar: zero" 0 "$?"

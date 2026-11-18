@@ -54,16 +54,19 @@ ipt() { $SUDO iptables -w 5 "$@"; }
 $SUDO sh -c 'command -v iptables' >/dev/null 2>&1 || die "Não achei o comando iptables nesta máquina." "Instale o pacote do iptables (no AlmaLinux: $SUDO dnf install -y iptables) e rode de novo."
 ipt -S DOCKER-USER >/dev/null 2>&1 || die "A cadeia DOCKER-USER não existe nesta máquina: quem a cria é o Docker, quando sobe." "Ligue o Docker e rode de novo: $SUDO systemctl start docker"
 
-# A regra de uma porta vai em RULE. O --ctorigdstport enxerga a porta de fora: na DOCKER-USER o
-# pacote já passou pelo DNAT do Docker. O --ctstate DNAT deixa a regra só para o que chegou por esse
-# DNAT, que é o que vem de fora para uma porta publicada: sem ele, ela também casava com a conexão
-# que o contêiner abre para fora com destino à mesma porta (fechar 5061/tcp cortaria o SIP-TLS do
-# Asterisk para a operadora). Excluir as pontes do Docker pediria uma regra a mais (um RETURN para
-# docker+ e br-+) para gerenciar, e casar a interface de fora não serve, porque ela muda de máquina
-# para máquina. Em LEGACY, a forma de antes (sem o --ctstate), que o kit tira onde a achar.
-rule_args() {
+# Uma porta tem uma regra por família de ponte do Docker (docker0 e as br-* das redes do Compose),
+# em RULE: a que barra o que vai para dentro da ponte (-o) sem ter vindo dela (! -i). O que chega de
+# fora a um contêiner, pelo DNAT da porta publicada ou roteado direto ao IP dele, sai pela ponte; a
+# conexão que o contêiner abre para fora sai pela interface de fora, e a resposta dela volta na
+# direção REPLY: nenhuma das duas casa. Sem o par de interfaces, a regra também barrava a conexão de
+# saída (fechar 5061/tcp cortaria o SIP-TLS do Asterisk para a operadora). As duas famílias não
+# cabem numa regra só (o curinga do iptables é só de sufixo), e a interface de fora muda de máquina
+# para máquina. O --ctorigdstport enxerga a porta de fora: na DOCKER-USER o pacote já passou pelo
+# DNAT do Docker. Em LEGACY, a forma de antes (sem as interfaces), que o kit troca onde a achar.
+BRIDGES="docker+ br-+"
+rule_args() {  # rule_args <spec> <ponte>
   local proto="${1#*/}" port="${1%/*}"
-  RULE=(-p "$proto" -m conntrack --ctstate DNAT --ctorigdstport "$port" --ctdir ORIGINAL -j DROP)
+  RULE=(! -i "$2" -o "$2" -p "$proto" -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL -j DROP)
   LEGACY=(-p "$proto" -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL -j DROP)
 }
 current_rules() {  # as regras desta máquina na DOCKER-USER, uma por linha
@@ -74,28 +77,31 @@ delete_all() {  # delete_all <regra...>: todas as cópias; a criada à mão pode
     ipt -D DOCKER-USER "$@" >/dev/null || break
   done
 }
-remove_rule() {  # remove_rule <spec>: a regra, nas duas formas
-  rule_args "$1"
-  delete_all "${RULE[@]}"
+remove_rule() {  # remove_rule <spec>: as regras da porta, e a da forma antiga
+  local bridge
+  for bridge in $BRIDGES; do rule_args "$1" "$bridge"; delete_all "${RULE[@]}"; done
   delete_all "${LEGACY[@]}"
 }
-apply_rule() {  # apply_rule <spec>: fecha a porta, uma regra só
-  rule_args "$1"
-  if ipt -C DOCKER-USER "${RULE[@]}" >/dev/null 2>&1; then
-    dim "já estava fechada: $1"
-  elif [ "$DRY_RUN_RULE" = 1 ]; then
-    info "[simulação] faria: $SUDO iptables -I DOCKER-USER 1 ${RULE[*]}"
-  else
-    ipt -I DOCKER-USER 1 "${RULE[@]}" >/dev/null || die "Não consegui escrever a regra de $1 na cadeia DOCKER-USER." "Rode à mão: $SUDO iptables -I DOCKER-USER 1 ${RULE[*]}"
-    ok "porta fechada: $1"
-  fi
-  # A forma antiga sai depois de a nova estar escrita: a porta não fica aberta entre as duas.
+apply_rule() {  # apply_rule <spec>: fecha a porta, uma regra por ponte
+  local bridge missing=0
+  for bridge in $BRIDGES; do
+    rule_args "$1" "$bridge"
+    ipt -C DOCKER-USER "${RULE[@]}" >/dev/null 2>&1 && continue
+    missing=1
+    if [ "$DRY_RUN_RULE" = 1 ]; then info "[simulação] faria: $SUDO iptables -I DOCKER-USER 1 ${RULE[*]}"
+    else ipt -I DOCKER-USER 1 "${RULE[@]}" >/dev/null || die "Não consegui escrever a regra de $1 na cadeia DOCKER-USER." "Rode à mão: $SUDO iptables -I DOCKER-USER 1 ${RULE[*]}"; fi
+  done
+  if [ "$missing" = 0 ]; then dim "já estava fechada: $1"
+  elif [ "$DRY_RUN_RULE" != 1 ]; then ok "porta fechada: $1"; fi
+  # A forma antiga sai depois de a nova estar escrita: a porta não fica aberta entre as duas. Ela
+  # pode ter sido escrita à mão (a documentação ensinava essa), e a nova não barra tudo o que ela
+  # barrava: por isso a troca é dita, nunca calada.
   ipt -C DOCKER-USER "${LEGACY[@]}" >/dev/null 2>&1 || return 0
   if [ "$DRY_RUN_RULE" = 1 ]; then
-    info "[simulação] faria: trocar a regra antiga de $1, que também barrava o que os contêineres abrem para fora"
+    info "[simulação] faria: trocar a regra antiga de $1 (${LEGACY[*]}) pela nova"
   else
     delete_all "${LEGACY[@]}"
-    ok "regra antiga trocada: $1 (ela também barrava o que os contêineres abrem para fora)"
+    warn "Troquei a regra antiga de $1 (${LEGACY[*]}) pela nova. A antiga também barrava a conexão que um contêiner abre para fora com destino a essa porta e o tráfego entre contêineres da mesma rede; a nova só barra o que entra numa ponte do Docker (docker0, br-*) vindo de fora dela."
   fi
 }
 
@@ -154,8 +160,8 @@ case "$VERB" in
 esac
 
 [ "$DRY_RUN_RULE" = 1 ] && exit 0
-# A conferência é a mesma que o teste usa: uma regra por porta, e a regra está lá.
-for spec in $SPECS; do
-  rule_args "$spec"
+# A conferência é a mesma que o teste usa: as regras de cada porta estão lá.
+for spec in $SPECS; do for bridge in $BRIDGES; do
+  rule_args "$spec" "$bridge"
   ipt -C DOCKER-USER "${RULE[@]}" >/dev/null 2>&1 || die "Escrevi a regra de $spec, mas ela não está na cadeia DOCKER-USER." "Rode de novo e, se repetir, veja: $SUDO iptables -S DOCKER-USER"
-done
+done; done
