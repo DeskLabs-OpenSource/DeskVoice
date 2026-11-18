@@ -1,3 +1,4 @@
+import { costTotal } from "@deskvoice/core";
 import { ApiError, handle } from "../../../../../server/context";
 import { centsOf, ESTIMATED_COUNT, LEDGER_AGENT, UNMEASURED_COUNT } from "../../../../../server/costs";
 import { listDecisionModels, listEngines } from "../../../../../server/pieces";
@@ -17,7 +18,7 @@ export const GET = handle({}, async ({ q, url, deps }) => {
     cross join (select coalesce((select timezone from outbound_policy), 'America/Sao_Paulo') as zone) z
     where (l.at at time zone z.zone)::date between $1::date and $2::date`;
   const range = [from, to];
-  // Em série: as três consultas dividem a conexão da transação.
+  // Em série: as consultas dividem a conexão da transação.
   const byDay = await q.many<{ day: string; microcents: string; seconds: number; unmeasured: number; estimated: number }>(
     `select to_char((l.at at time zone z.zone)::date, 'YYYY-MM-DD') as day, coalesce(sum(l.cost_microcents), 0)::text as microcents, sum(l.seconds)::int as seconds,
             ${UNMEASURED_COUNT} as unmeasured, ${ESTIMATED_COUNT} as estimated
@@ -74,6 +75,8 @@ export const GET = handle({}, async ({ q, url, deps }) => {
       group by s.engine, s.source, a.seconds order by coalesce(sum(s.cost_microcents), 0) desc`,
     range,
   );
+  // O total vem da soma de `packages/core`, a mesma da visão geral da instalação e do teto do mês.
+  const total = await costTotal(q, { from, to });
   const engines = new Map((await listEngines()).map((engine) => [engine.id, engine]));
   // O filtro da fala e o analista gravam o modelo de decisão em `engine`: o nome e o preço vêm dele.
   const deciders = new Map((await listDecisionModels()).map((model) => [model.id, model]));
@@ -83,12 +86,12 @@ export const GET = handle({}, async ({ q, url, deps }) => {
     to,
     // O total arredonda a soma inteira, não a soma dos totais de cada motor: um centavo a menos de
     // erro, e o mesmo número que o extrato do período diz.
-    totalCents: centsOf(byDay.reduce((sum, row) => sum + Number(row.microcents), 0)),
+    totalCents: centsOf(total.microcents),
     // Cada soma diz quantas linhas do extrato dela não têm custo medido: o zero delas não é grátis, e
     // a tela diz "não medido" onde a contagem passa de zero.
-    unmeasuredCount: byDay.reduce((sum, row) => sum + row.unmeasured, 0),
+    unmeasuredCount: total.unmeasuredCount,
     // E quantas têm custo estimado: esse entra no valor, acima do real, e a tela diz "inclui estimativa".
-    estimatedCount: byDay.reduce((sum, row) => sum + row.estimated, 0),
+    estimatedCount: total.estimatedCount,
     // Dois nomes, porque são duas medidas: `billedSeconds` é o uso que os motores declararam para
     // cobrar (o OpenAI Realtime declara token, não segundo), e `callSeconds` é a duração das ligações.
     byDay: byDay.map((row) => ({ day: row.day, costCents: centsOf(row.microcents), billedSeconds: row.seconds, unmeasuredCount: row.unmeasured, estimatedCount: row.estimated })),

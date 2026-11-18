@@ -3,7 +3,8 @@ import { decryptSecret, type OrgQuery } from "@deskvoice/core";
 import { KEY_CHECK_RESULTS, type VoiceEngine } from "@deskvoice/voice-engine/types";
 import { z } from "zod";
 import type { ServerDeps } from "./context";
-import { engineKeySetting } from "./pieces";
+import type { EngineKeys } from "./health";
+import { engineKeySetting, listEngines } from "./pieces";
 import { createRateLimiter } from "./rate-limit";
 
 /**
@@ -45,4 +46,23 @@ export async function testEngineKey(deps: ServerDeps, org: Org, organizationId: 
     ),
   );
   return view;
+}
+
+/**
+ * As chaves de motor da transação e o último teste de cada uma, para a linha do motor da saúde
+ * (`engineLine`) e a coluna Motor da visão geral da instalação: a mesma leitura nas duas. Só o
+ * código do último teste: a chave mesma nunca sai do banco por aqui.
+ */
+export async function readEngineKeys(q: OrgQuery): Promise<EngineKeys> {
+  const labels = new Map((await listEngines()).map((engine) => [keyCheckSetting(engine.id), engine.label]));
+  const rows = await q.many<{ key: string; value: unknown }>(
+    "select key, case when secret then null else value end as value from settings where key like 'engine.%.api_key' or key like 'engine.%.key_check'",
+  );
+  return {
+    keys: rows.filter((row) => row.key.endsWith(".api_key")).length,
+    checks: rows.flatMap((row) => {
+      const check = readKeyCheck(row.value);
+      return check ? [{ engine: labels.get(row.key) ?? row.key, check }] : [];
+    }),
+  };
 }
