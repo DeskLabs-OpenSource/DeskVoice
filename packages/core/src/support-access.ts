@@ -171,6 +171,17 @@ export function endSupportAccess(db: Db, supportAccessId: string, now: Date, cau
 }
 
 /**
+ * Sair durante o suporte: encerra o acesso (`ended`) e apaga a sessão que saiu, numa transação só.
+ * As outras sessões do mesmo acesso, se houver, voltam como em `endSupportAccess`.
+ */
+export function signOutSupportSession(db: Db, session: { id: string; supportAccessId: string }, now: Date): Promise<void> {
+  return withSystem(db, async (q) => {
+    await endInTransaction(q, session.supportAccessId, now, "ended");
+    await q.exec("delete from sessions where id = $1", [session.id]);
+  });
+}
+
+/**
  * O fim do acesso, na transação de quem chama (pelo papel de sistema):
  * - grava `ended_at`: `now` quando a pessoa encerra, e `expires_at` quando o prazo vence;
  * - põe `disabled_at` no vínculo de suporte;

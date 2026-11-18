@@ -13,10 +13,11 @@ import { hashToken, recordInstallationEvent, recordingPath, withOrg, withSystem 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { QR_PNG, startFakeWaha } from "../../../../../../packages/tools/test/fake-waha";
 import { AGENT_TOKEN, NOW, call, createCall, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
-import type { RouteContext } from "../../../server/context";
+import { createSession, type RouteContext } from "../../../server/context";
 import { PUT as putBrainKey } from "./brains/[brain]/key/route";
 import { POST as support } from "./installation/organizations/[id]/support/route";
 import { PUT as putSetting } from "./settings/[key]/route";
+import { GET as systemUpdate } from "./system/update/route";
 import { POST as agentSays } from "./system/agent/route";
 import { POST as connectCalls } from "./whatsapp-calls/connect/route";
 import { POST as callsService } from "./whatsapp-calls/service/route";
@@ -64,13 +65,13 @@ const NOT_CALLED: Record<string, string> = {};
  * Tabelas cujas linhas são da instalação, mesmo tendo `organization_id`, com o motivo: o `id` delas
  * pode aparecer para qualquer sessão. Entrada nova é decisão de revisão.
  */
-const INSTALLATION_ROWS: Record<string, string> = {
-  update_requests: "o pedido de atualização é da instalação (seção 3.11): toda sessão vê o mais recente, de qualquer organização",
-};
+const INSTALLATION_ROWS: Record<string, string> = {};
 
 const LEAK_KEY = `sk-or-leak-${randomUUID()}`;
 const HOOK_TOKEN = `hook-${randomUUID()}`;
 const PAIRING = "2@pairing-material-for-the-leak-test";
+const AGENT_FAILURE = `agent-failure-${randomUUID()}`;
+const REQUEST_DETAIL = `request-detail-${randomUUID()}`;
 
 interface Seeded {
   org: string;
@@ -190,6 +191,7 @@ let a: Seeded;
 let b: Seeded;
 let c: Seeded;
 let supporterCookie: string;
+let supporterHomeCookie: string;
 let forbidden: Map<string, string>;
 let secrets: string[];
 
@@ -198,11 +200,13 @@ beforeAll(async () => {
   a = await seed("Origem A");
   b = await seed("Cliente B");
   c = await seed("Terceira C");
-  // Um pedido de atualização de A, a linha que a instalação inteira vê (`INSTALLATION_ROWS`).
-  await insert(panel.app, a.org, "insert into update_requests (organization_id, requested_by, status, from_version, target_version) values ($1, $2, 'succeeded', '0.1.0', '0.2.0') returning id", [
+  // Um pedido de atualização de A, com detalhe: o estado da atualização é da instalação.
+  await insert(
+    panel.app,
     a.org,
-    a.owner.id,
-  ]);
+    "insert into update_requests (organization_id, requested_by, status, from_version, target_version, detail) values ($1, $2, 'succeeded', '0.1.0', '0.2.0', $3) returning id",
+    [a.org, a.owner.id, REQUEST_DETAIL],
+  );
 
   // Os segredos de B, gravados por quem pode: uma chave de provedor e o token de um gancho.
   expect((await call(putBrainKey, { method: "PUT", cookie: b.owner.cookie, params: { brain: "openrouter" }, body: { apiKey: LEAK_KEY } })).status).toBe(200);
@@ -226,11 +230,15 @@ beforeAll(async () => {
   const entered = await call(support, { method: "POST", cookie: supporter.cookie, params: { id: b.org }, body: { reason: "Conferir os canais do cliente", minutes: 60 } });
   expect(entered.status).toBe(200);
   supporterCookie = supporter.cookie;
+  // Uma segunda sessão da mesma conta, em A, fora do suporte: o controle de `system/update`.
+  const homeToken = await withOrg(panel.app, a.org, (q) => createSession(q, { id: supporter.id, organizationId: a.org }, NOW));
+  supporterHomeCookie = `${supporter.cookie.split("=")[0]}=${homeToken}`;
+  await withSystem(panel.app, (q) => q.exec("update update_agent_status set last_failure_at = $1, last_failure_detail = $2 where organization_id = any($3::uuid[])", [NOW, AGENT_FAILURE, [a.org, b.org]]));
 
   forbidden = await idsOf([a.org, c.org]);
   for (const seeded of [a, c]) forbidden.set(seeded.name, "organization name");
   const tokenOf = (cookie: string): string => cookie.split("=").slice(1).join("=");
-  secrets = [LEAK_KEY, HOOK_TOKEN, PAIRING, QR_PNG, "data:image", tokenOf(supporterCookie), ...[a, b, c].flatMap((seeded) => [seeded.inviteToken, seeded.shareToken, tokenOf(seeded.owner.cookie)])];
+  secrets = [LEAK_KEY, HOOK_TOKEN, PAIRING, AGENT_FAILURE, REQUEST_DETAIL, QR_PNG, "data:image", tokenOf(supporterCookie), ...[a, b, c].flatMap((seeded) => [seeded.inviteToken, seeded.shareToken, tokenOf(seeded.owner.cookie)])];
 });
 
 /** O que a resposta traz que não podia: `id` ou nome de A e de C, ou segredo. */
@@ -271,6 +279,17 @@ describe("a support session, on every GET route of the panel", () => {
     expect(calls.text).toContain(b.callId);
     const whatsapp = await read(await handlerOf("api/v1/whatsapp"), "api/v1/whatsapp", {}, supporterCookie);
     expect(whatsapp.text).toContain('"status":"qr"');
+  });
+
+  it("does not read the installation's update state: no request and no agent failure detail", async () => {
+    const result = await call(systemUpdate, { cookie: supporterCookie });
+    expect(result.status).toBe(200);
+    const data = result.data as { request: unknown; agent: { lastFailureDetail: string | null } | null };
+    expect(data.request).toBeNull();
+    expect(data.agent?.lastFailureDetail ?? null).toBeNull();
+    // A mesma conta, na sessão dela em A, administra a instalação e lê os dois.
+    const home = await call(systemUpdate, { cookie: supporterHomeCookie });
+    expect(home.data).toMatchObject({ request: { detail: REQUEST_DETAIL }, agent: { lastFailureDetail: AGENT_FAILURE } });
   });
 
   it("would catch a leak: a member of A, on the same routes, gets A's ids and the client's owner gets the QR Code", async () => {

@@ -333,7 +333,9 @@ create table support_accesses (
   dono e não muda a própria lista de suporte.
 - A sessão passa para a organização pelo mesmo `switchOrganization`, com `support_access_id`. A
   conferência da sessão (`findSession`) passa a recusar a sessão de suporte depois de `expires_at`
-  ou de `ended_at`, e então volta a sessão para a organização de origem.
+  ou de `ended_at`, e então volta a sessão para onde o login a levaria: `last_organization_id`, se a
+  conta tem ali vínculo `member` ativo, ou o vínculo `member` ativo mais antigo. Sem nenhum, a sessão
+  é apagada.
 - Toda a tela mostra uma faixa fixa: "Você está dando suporte a <organização> até <hora>. Motivo:
   <motivo>." Com o botão "Encerrar".
 - A ação feita durante o suporte fica gravada com o `user_id` do vínculo de suporte. O nome que

@@ -6,6 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { SECRET_KEY, NOW, call, createOrganization, createUser, startPanel, type Result } from "../../../../test/kit";
 import endSupportAccessRoutine from "../../../../../routines/src/routines/end_support_access";
 import { SUPPORT_SESSION_FORBIDDEN } from "../../../server/context";
+import { POST as logout } from "./auth/logout/route";
 import { GET as me } from "./auth/me/route";
 import { GET as myOrganizations } from "./auth/organizations/route";
 import { POST as endSupport } from "./auth/support/end/route";
@@ -134,6 +135,33 @@ describe("ending the support access", () => {
     expect(await installationEventsOf(s.b, "support_access_ended")).toEqual([{ payload: expect.objectContaining({ cause: "ended" }) }]);
     const link = await withSystem(panel.app, (q) => q.one<{ disabled: boolean }>("select disabled_at is not null as disabled from users where organization_id = $1 and kind = 'support'", [s.b]));
     expect(link?.disabled).toBe(true);
+  });
+
+  it("signing out of a support session ends the access at once: ended, link disabled, one trail on each side", async () => {
+    const s = await scene("logout");
+    await enter(s.supporter.cookie, s.b);
+    const access = await withSystem(panel.app, (q) => q.one<{ id: string }>("select id from support_accesses where organization_id = $1", [s.b]));
+    panel.clock.at = after(5);
+    expect(refusal(await call(logout, { method: "POST", cookie: s.supporter.cookie }))).toEqual([200, undefined]);
+    expect(await whereAmI(s.supporter.cookie)).toBe(401);
+    const state = await withSystem(panel.app, (q) =>
+      q.one<{ endedAt: Date | null; disabled: boolean; sessions: number }>(
+        `select sa.ended_at as "endedAt", u.disabled_at is not null as disabled, (select count(*)::int from sessions where support_access_id = sa.id or user_id = sa.user_id) as sessions
+           from support_accesses sa join users u on u.id = sa.user_id where sa.id = $1`,
+        [access?.id],
+      ),
+    );
+    expect(state).toEqual({ endedAt: after(5), disabled: true, sessions: 0 });
+    // A tarefa da fila, que roda depois, não acha nada para encerrar.
+    await endSupportAccessRoutine.run(await queuedEnd(s.b), { db: panel.app, clock: { now: () => after(31) }, secretKey: SECRET_KEY });
+    expect(await orgEvents(s.b, "support_access_ended")).toEqual([{ payload: expect.objectContaining({ cause: "ended", ended_at: after(5).toISOString() }) }]);
+    expect(await installationEventsOf(s.b, "support_access_ended")).toEqual([{ payload: expect.objectContaining({ cause: "ended" }) }]);
+  });
+
+  it("signing out of a member session is as before", async () => {
+    const s = await scene("logout member");
+    expect(refusal(await call(logout, { method: "POST", cookie: s.supporter.cookie }))).toEqual([200, undefined]);
+    expect(await whereAmI(s.supporter.cookie)).toBe(401);
   });
 
   it("works in a suspended organization", async () => {
