@@ -13,14 +13,28 @@ import { createAccount, hashToken, recordingPath, withOrg, withSystem } from "@d
 import { afterAll, describe, expect, it } from "vitest";
 import { SUPPORT_SESSION_ROUTES, type SupportSessionRoute } from "../../../../../../fences/support-session-routes";
 import { SESSION_COOKIE, SUPPORT_SESSION_FORBIDDEN, type RouteContext } from "../../../server/context";
-import { NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, startPanel, type Result } from "../../../../test/kit";
+import { QR_PNG, startFakeWaha } from "../../../../../../packages/tools/test/fake-waha";
+import { AGENT_TOKEN, NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, startPanel, type Result } from "../../../../test/kit";
+import type { WhatsAppView } from "../../../server/whatsapp";
+import type { WhatsAppCallsView } from "../../../server/whatsapp-calls";
+import { POST as agentSays } from "./system/agent/route";
 import { POST as invite } from "./team/invites/route";
+import { POST as connectCalls } from "./whatsapp-calls/connect/route";
+import { PATCH as chooseCallsAgent, GET as readCalls } from "./whatsapp-calls/route";
+import { POST as callsService } from "./whatsapp-calls/service/route";
+import { POST as connectWhatsApp } from "./whatsapp/connect/route";
+import { GET as readWhatsApp } from "./whatsapp/route";
+import { POST as whatsappService } from "./whatsapp/service/route";
 import en from "../../../i18n/en/common";
 import es from "../../../i18n/es/common";
 import ptBR from "../../../i18n/pt-BR/common";
 
 const panel = startPanel();
-afterAll(() => panel.close());
+const waha = await startFakeWaha();
+afterAll(async () => {
+  await waha.stop();
+  await panel.close();
+});
 
 type Handler = (request: Request, context: RouteContext) => Promise<Response>;
 
@@ -209,5 +223,43 @@ describe("a support session", () => {
     const { GET: me } = await import("./auth/me/route");
     const result = await call(me, { cookie: s.support.cookie });
     expect(result.status).toBe(200);
+  });
+  // A leitura também tem régua: a sessão de suporte vê o estado dos canais, mas nunca recebe o
+  // material de pareamento. As duas conexões ficam em "qr" de verdade, pedidas pelo `admin` da equipe.
+  it("sees both WhatsApp channels waiting for the QR Code, but never gets the code; a team admin does", async () => {
+    const s = await scene("pairing");
+    const respond = panel.voice.respond;
+    panel.deps.waha = waha.options;
+    panel.voice.respond = () => Response.json({ session: { id: "wacalls-pairing", status: "qr", qr: "2@pairing-material-for-the-test", phone: null } });
+    try {
+      const running = { state: "running" };
+      for (const service of [whatsappService, callsService]) expect((await call(service, { method: "POST", cookie: s.member.cookie, body: { wanted: true } })).status).toBe(200);
+      await call(agentSays, { method: "POST", body: { version: "0.5.0", whatsapp: running, whatsappCalls: running }, headers: { authorization: `Bearer ${AGENT_TOKEN}` } });
+      expect((await call(connectWhatsApp, { method: "POST", cookie: s.member.cookie, body: {} })).data).toMatchObject({ status: "qr" });
+      expect((await call(connectCalls, { method: "POST", cookie: s.member.cookie, body: {} })).data).toMatchObject({ status: "qr" });
+
+      const readings = {
+        "GET whatsapp": (cookie: string) => call(readWhatsApp, { cookie }),
+        "GET whatsapp-calls": (cookie: string) => call(readCalls, { cookie }),
+        "PATCH whatsapp-calls": (cookie: string) => call(chooseCallsAgent, { method: "PATCH", cookie, body: { agentId: s.agent } }),
+      };
+      for (const [id, read] of Object.entries(readings)) {
+        const support = await read(s.support.cookie);
+        expect([id, support.status, support.code]).toEqual([id, 200, undefined]);
+        expect([id, (support.data as WhatsAppView | WhatsAppCallsView).status, (support.data as WhatsAppView | WhatsAppCallsView).qr]).toEqual([id, "qr", null]);
+        const member = await read(s.member.cookie);
+        expect([id, (member.data as WhatsAppView | WhatsAppCallsView).status]).toEqual([id, "qr"]);
+        expect([id, (member.data as WhatsAppView | WhatsAppCallsView).qr]).toEqual([id, id.endsWith("whatsapp") ? `data:image/png;base64,${QR_PNG}` : expect.stringMatching(/^data:image\/svg\+xml;base64,/)]);
+      }
+    } finally {
+      panel.deps.waha = { apiKey: "" };
+      panel.voice.respond = respond;
+      panel.voice.requests.length = 0;
+      // O banco é um só para os testes de banco: o pedido dos serviços não vaza para os outros arquivos.
+      await withSystem(panel.app, async (q) => {
+        await q.exec("update whatsapp_sessions set service_wanted = false");
+        await q.exec("update whatsapp_call_sessions set service_wanted = false");
+      });
+    }
   });
 });
