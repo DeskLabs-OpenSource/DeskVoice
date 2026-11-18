@@ -1,7 +1,8 @@
 # Follow-up da ligação que caiu sem conclusão
 
-- **Estado:** desenho. A fatia 1 está no #367. Os dois pedidos da seção 7 seguem **abertos**, com o
-  padrão sem resposta valendo a partir da fatia 3.
+- **Estado:** desenho. A fatia 1 está no #367. Os dois pedidos da seção 7 foram decididos em 18/11
+  (DESA-121). A fatia 3 (a religação, sem tela) está no #455, e a fatia 4 (a religação na tela), no PR
+  que sai junto com ele.
 - **Data:** 2026-11-16
 - **Quem pediu:** o dono, no roteiro de novembro (item R2): "Adicionar sistema de follow-up para
   quando a ligação cair sem ser concluída". A decisão dele em 13/11 foi "deixar configurável, quem

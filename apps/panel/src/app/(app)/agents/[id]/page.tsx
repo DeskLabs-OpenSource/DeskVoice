@@ -55,7 +55,7 @@ const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", 
 const VOCABULARY_FIELD_ID = "agent-vocabulary";
 
 /** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
-const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp"];
+const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp", "call_back"];
 
 /** Motores em que a sessão em Barulhento foi provada numa instalação real (a sessão abre; o efeito no ruído não foi medido). */
 const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime", "gemini-live"];
@@ -101,6 +101,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // O pré-requisito da mensagem no WhatsApp para quem ligou: conector e confiança no número exibido.
   const whatsAppConnector = useApi<Setting<unknown>>("/settings/whatsapp.connector");
   const trustCaller = useApi<Setting<boolean>>("/settings/whatsapp.trust_caller_id");
+  // O pré-requisito da religação: as ligações de saída ligadas (`outbound_policy.enabled`).
+  const outboundPolicy = useApi<{ enabled: boolean }>("/outbound-policy");
   // O nome da organização entra no texto padrão da mensagem para quem ligou.
   const me = useApi<Me>("/auth/me");
   const save = useAction();
@@ -163,6 +165,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         : trustCaller.data.value !== true
           ? "not_trusted"
           : null;
+  // Por que a religação está indisponível, a mesma conferência da rota; `undefined` enquanto carrega.
+  const callBackBlock: "outbound_disabled" | null | undefined = outboundPolicy.data === undefined ? undefined : outboundPolicy.data.enabled ? null : "outbound_disabled";
   // A regra é a da API (`checkVocabulary`): a tela diz o erro ao lado do campo e não manda nada.
   const vocabulary = readVocabulary(draft.vocabulary);
   const vocabularyError = vocabulary.result.ok ? undefined : vocabularyErrorText(vocabulary.result.problem, t);
@@ -457,6 +461,9 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 <option value="whatsapp" disabled={whatsAppBlock !== null && draft.dropFollowUp !== "whatsapp"}>
                   {whatsAppBlock ? `${t.dropFollowUpWhatsApp} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpWhatsApp}
                 </option>
+                <option value="call_back" disabled={callBackBlock !== null && draft.dropFollowUp !== "call_back"}>
+                  {callBackBlock ? `${t.dropFollowUpCallBack} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpCallBack}
+                </option>
                 {DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) ? null : (
                   <option value={draft.dropFollowUp} disabled>
                     {t.dropFollowUpOther}
@@ -485,6 +492,33 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 </Link>
               </p>
             )
+          ) : null}
+          {callBackBlock ? (
+            // Como o WhatsApp: o motivo e o caminho; alerta só quando a religação já é o modo escolhido.
+            draft.dropFollowUp === "call_back" ? (
+              <div className="mt-3 max-w-prose">
+                <Notice tone="fail">
+                  <p>{t.dropFollowUpOutboundDisabled}</p>
+                  <Link href="/outbound" className="font-bold underline-offset-4 hover:underline">
+                    {t.dropFollowUpOutboundLink}
+                  </Link>
+                </Notice>
+              </div>
+            ) : (
+              <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
+                {t.dropFollowUpOutboundDisabled}{" "}
+                <Link href="/outbound" className="font-bold text-ink underline-offset-4 hover:underline">
+                  {t.dropFollowUpOutboundLink}
+                </Link>
+              </p>
+            )
+          ) : null}
+          {draft.dropFollowUp === "call_back" ? (
+            // Quantas tentativas e quando (fixos no código, seção 3.6), e a lista de não ligar.
+            <div className="mt-4 grid max-w-prose gap-2">
+              <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackHow}</p>
+              <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackDoNotCall}</p>
+            </div>
           ) : null}
           {draft.dropFollowUp === "whatsapp" ? (
             <div className="mt-4 grid max-w-prose gap-2">
