@@ -56,7 +56,8 @@ export function brainFailureByStatus(status: number | null): BrainFailure {
   if (status === 401 || status === 403) return "rejected";
   if (status === 402) return "no_credit";
   if (status === 429) return "rate_limited";
-  if (status === 408 || status >= 500) return "unreachable";
+  if (status === 408) return "unreachable";
+  if (status >= 500) return "provider_error";
   return "unexpected_response";
 }
 

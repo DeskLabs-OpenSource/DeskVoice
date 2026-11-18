@@ -32,6 +32,7 @@ const speechFilter: SpeechFilterDictionary = {
     region_unavailable: "el proveedor no atiende el país o la región de este servidor.",
     rate_limited: "el proveedor pidió esperar. Inténtalo de nuevo en unos minutos.",
     unreachable: "no se pudo alcanzar al proveedor. Revisa que el servidor llegue a internet.",
+    provider_error: "el proveedor respondió con un error de su lado. Suele pasarse solo: inténtalo de nuevo en unos minutos.",
     unexpected_response: "el proveedor respondió de forma inesperada. Inténtalo más tarde.",
     not_needed: "este modelo no pide clave.",
   },

@@ -23,7 +23,7 @@ export function byStatus(status: number): KeyCheckResult {
   if (status === 404) return "model_unavailable";
   if (status === 402) return "no_credit";
   if (status === 429) return "rate_limited";
-  if (status >= 500) return "unreachable";
+  if (status >= 500) return "provider_error";
   return "unexpected_response";
 }
 

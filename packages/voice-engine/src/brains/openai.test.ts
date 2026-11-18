@@ -120,8 +120,8 @@ describe("brains/openai: lista de modelos", () => {
     [429, { error: { code: "insufficient_quota" } }, "no_credit"],
     [429, { error: { type: "insufficient_quota" } }, "no_credit"],
     [429, { error: { code: "rate_limit_exceeded" } }, "rate_limited"],
-    [500, {}, "unreachable"],
-    [503, {}, "unreachable"],
+    [500, {}, "provider_error"],
+    [503, {}, "provider_error"],
     [404, {}, "unexpected_response"],
     [400, {}, "unexpected_response"],
   ] as const)("status %i com %j é %s", async (status, body, failure) => {
@@ -181,7 +181,7 @@ describe("brains/openai: pedido em JSON", () => {
   it.each([
     [401, "rejected"],
     [429, "rate_limited"],
-    [500, "unreachable"],
+    [500, "provider_error"],
     [404, "unexpected_response"],
   ] as const)("status %i é %s", async (status, failure) => {
     const { fetch } = fakeFetch({ status, body: { error: { message: `chave ${KEY} recusada`, code: "x" } } });
@@ -279,7 +279,7 @@ describe("brains/openai: chat em streaming", () => {
       [429, { error: { code: "rate_limit_exceeded" } }, "rate_limited"],
       [403, { error: { code: "unsupported_country_region_territory" } }, "region_unavailable"],
       [401, {}, "rejected"],
-      [500, {}, "unreachable"],
+      [500, {}, "provider_error"],
     ];
     for (const [status, body, failure] of cases) {
       const { fetch } = sseFetch({ status, body: JSON.stringify(body) });

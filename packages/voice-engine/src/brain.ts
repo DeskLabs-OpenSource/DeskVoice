@@ -24,7 +24,7 @@ export interface BrainModel {
 }
 
 /** O vocabulário fechado de `KEY_CHECK_RESULTS`, menos `not_needed` e `model_unavailable`. */
-export type BrainFailure = "rejected" | "no_credit" | "region_unavailable" | "rate_limited" | "unreachable" | "unexpected_response";
+export type BrainFailure = "rejected" | "no_credit" | "region_unavailable" | "rate_limited" | "unreachable" | "provider_error" | "unexpected_response";
 
 export type BrainModelsResult = { ok: true; models: BrainModel[] } | { ok: false; failure: BrainFailure; status: number | null };
 
