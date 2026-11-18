@@ -36,3 +36,4 @@ export * from "./suspension";
 export * from "./vocabulary";
 export * from "./voicemail";
 export * from "./with-org";
+export * from "./support-access";
