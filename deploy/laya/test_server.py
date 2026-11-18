@@ -4,12 +4,15 @@ de verdade, numa porta livre. Rodam sem torch, sem Docker e sem rede:
   python3 -I -m unittest discover -s deploy/laya -p 'test_*.py'
 (o `scripts/laya-servico.test.ts` roda isto dentro do `pnpm test`).
 """
+import io
 import json
 import os
 import sys
 import tempfile
 import threading
+import types
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -106,7 +109,8 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.running.call("POST", "/v1/decide", raw=b"not json")[0], 400)
         self.assertEqual(self.running.call("POST", "/v1/decide", raw=b"x" * (server.MAX_BODY_BYTES + 1))[0], 413)
         self.assertEqual(self.running.call("POST", "/v1/systemone", {"state": "x", "questions": QUESTIONS})[0], 404)
-        self.assertEqual(self.running.call("GET", "/docs")[0], 404)
+        for path in ("/docs", "/metrics", "/", "/health/x", "/v1/decide"):
+            self.assertEqual(self.running.call("GET", path), (404, {"error": "not_found"}), path)
         self.assertEqual(self.seen, [])
 
     def test_the_error_never_carries_the_callers_text(self):
@@ -156,6 +160,77 @@ class ServerTest(unittest.TestCase):
         finally:
             release.set()
             first.join()
+
+
+# Os resumos da revisão fixa (`LAYA_REVISION` no Dockerfile), escritos aqui à mão: trocar um deles no
+# `weights.sha256` derruba o teste, em vez de passar adiante para o `Router`.
+PINNED_DIGESTS = {
+    "encoder/config.json": "83f6916d13ef0f556ac461f28308dc2bffa7ebeadee8ec9e2db5812020ea5bb4",
+    "model.safetensors": "9d628fd971b700382ac6f65920a86f149777b2e748e0c955fb3b19695aa8f204",
+    "rl_agent_config.json": "25061739243b617ad88d1219ba6f8a9c86c5881ca28df024fa2d9b3b2fcc30c6",
+    "tokenizer/tokenizer_config.json": "6c6b2d8e3c84ce0e671c129cd6b374b235d6f9863042a5836358d00a89bbb5a1",
+    "tokenizer/tokenizer.json": "609d8f4c067cd3950f88594c5a802616cea245823836ef5848ee4fc40aab5b6f",
+}
+
+
+class Exited(Exception):
+    pass
+
+
+class LoadTest(unittest.TestCase):
+    """`load()` com `laya` e `torch` falsos: os pesos são conferidos de novo ao carregar."""
+
+    def run_load(self, router):
+        torch = types.ModuleType("torch")
+        torch.set_num_threads = lambda n: None
+        laya = types.ModuleType("laya")
+        laya.Router = router
+        exits = []
+
+        def fake_exit(code):
+            exits.append(code)
+            raise Exited()
+
+        holder = {}
+        with mock.patch.dict(sys.modules, {"torch": torch, "laya": laya}), \
+                mock.patch.dict(os.environ, {"LAYA_REVISION": "e333cb7", "LAYA_THREADS": "2"}), \
+                mock.patch.object(server.os, "_exit", fake_exit), \
+                mock.patch.object(server, "version", lambda name: "0.4.31"), \
+                mock.patch.object(sys, "stderr", io.StringIO()):
+            try:
+                server.load(holder)
+            except Exited:
+                pass
+        return holder, exits
+
+    def test_load_hands_the_pinned_digests_to_the_router(self):
+        seen = []
+
+        class Router:
+            def __init__(self, **kwargs):
+                seen.append(kwargs)
+
+            def predict(self, state, questions, model=None):
+                return laya_like(state, questions)
+
+        holder, exits = self.run_load(Router)
+        self.assertEqual(exits, [])
+        self.assertIn("laya", holder)
+        self.assertEqual(len(seen), 1)
+        here = os.path.dirname(os.path.abspath(__file__))
+        self.assertEqual(seen[0]["sha256_digests"], {"multilingual": server.read_digests(os.path.join(here, "weights.sha256"))})
+        self.assertEqual(seen[0]["sha256_digests"], {"multilingual": PINNED_DIGESTS})
+        self.assertEqual(seen[0]["revision"], "e333cb7")
+
+    def test_load_refuses_and_exits_1_when_the_router_refuses_the_weights(self):
+        class Router:
+            def __init__(self, **kwargs):
+                raise ValueError("SHA-256 mismatch for model.safetensors; refusing to load it")
+
+        holder, exits = self.run_load(Router)
+        self.assertEqual(exits, [1])
+        self.assertNotIn("laya", holder)
+        self.assertEqual(holder["error"], "ValueError")
 
 
 class HelpersTest(unittest.TestCase):
