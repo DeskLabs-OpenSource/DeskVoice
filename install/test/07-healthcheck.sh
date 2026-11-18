@@ -25,12 +25,20 @@ out="$(bash "$H" 2>&1)"
 contains "rede de proxy fora do arquivo de publicação é aviso, não falha" "$(line 'Rede do proxy')" "aviso"
 contains "o aviso nomeia a rede" "$(line 'Rede do proxy')" "existe a rede deskcommcrm_caddy-sites"
 contains "o aviso manda rodar o instalador com a rede" "$(line 'Rede do proxy')" "DESKVOICE_PROXY_NETWORK=deskcommcrm_caddy-sites bash install/install.sh"
+contains "o aviso traz a consequência como condição" "$(line 'Rede do proxy')" "Se o painel é publicado pelo proxy dessa rede"
 bash "$H" --essential >/dev/null 2>&1; equal "o aviso da rede não derruba a checagem essencial" 0 "$?"
 # Gravada no arquivo de publicação (o que o install.sh faz), a mesma rede fica ok.
 ( source "$KIT/_common.sh"; DESKVOICE_PROXY_NETWORK=deskcommcrm_caddy-sites apply_entry caddy voz.exemplo.com.br ) >/dev/null 2>&1
 out="$(bash "$H" 2>&1)"
 contains "rede gravada é ok" "$(line 'Rede do proxy')" "o Caddy entra em deskcommcrm_caddy-sites"
 lacks "rede gravada não avisa sobre ligação manual" "$(line 'Rede do proxy')" "não está gravada"
+# Gravada e ausente do Docker (o outro sistema foi derrubado): o próximo início não sobe nada.
+: > "$FAKE_DIR/networks"
+out="$(bash "$H" 2>&1)"
+contains "rede gravada que sumiu é aviso" "$(line 'Rede do proxy')" "aviso"
+contains "o aviso nomeia a rede gravada que sumiu" "$(line 'Rede do proxy')" "a rede gravada deskcommcrm_caddy-sites não existe mais"
+lacks "rede gravada que sumiu não diz que sobrevive" "$(line 'Rede do proxy')" "sobrevive"
+bash "$H" --essential >/dev/null 2>&1; equal "a rede que sumiu não derruba a checagem essencial" 0 "$?"
 cp "$SANDBOX/override.before" "$OV" 2>/dev/null || true
 rm -f "$FAKE_DIR/networks"
 
