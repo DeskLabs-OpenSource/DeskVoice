@@ -65,8 +65,9 @@ const whatsappCalls: WhatsAppCallsDictionary = {
     logged_out:
       "El número se desconectó: el dispositivo fue quitado en Dispositivos vinculados, en el teléfono, o WhatsApp cerró la conexión. WhatsApp desconecta los dispositivos vinculados cuando el teléfono principal pasa más de 14 días sin uso.",
     qr_expired: "El código QR no se leyó a tiempo, y el intento se cerró.",
+    pairing_failed: "WhatsApp cerró el intento antes de mostrar el código QR. Inténtalo de nuevo. Si vuelve a ocurrir, actualiza DeskVoice.",
     missing:
-      "El servicio de llamadas por WhatsApp ya no tiene los datos de esta conexión. Esto ocurre después de restaurar una copia, de cambiar de servidor o de reinstalar el servicio, porque el emparejamiento no entra en la copia.",
+      "El servicio de llamadas por WhatsApp ya no tiene esta conexión. Esto ocurre cuando se reinicia con un intento que no llegó a emparejarse, y también después de restaurar una copia, de cambiar de servidor o de reinstalar el servicio, porque el emparejamiento no entra en la copia.",
   },
   reconnect: "Conectar de nuevo",
   newCode: "Generar un código nuevo",
