@@ -7,8 +7,8 @@ line() { printf '%s\n' "$out" | grep "$1" | head -n 1; }
 
 # Instalação nova: tudo no ar, linha e motor ainda por configurar.
 out="$(bash "$H" 2>&1)"; equal "instalação nova sem linha nem chave: sai com zero" 0 "$?"
-equal "uma linha por peça (16 peças)" 16 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
-for piece in Painel Banco "Painel → banco" Asterisk "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
+equal "uma linha por peça (17 peças)" 17 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
+for piece in Painel Banco "Painel → banco" "Login do painel" Asterisk "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
 contains "linha não cadastrada é aviso, não falha" "$(line 'Linha telefônica')" "aviso"
 contains "linha não cadastrada traz o detalhe" "$(line 'Linha telefônica')" "nenhuma linha cadastrada ainda"
 contains "motor sem chave é aviso, não falha" "$(line 'Motor de voz')" "aviso"
@@ -36,6 +36,7 @@ printf '%s\n' postgres asterisk voice routines caddy > "$FAKE_DIR/running"
 out="$(bash "$H" 2>&1)"; equal "painel parado: código 1" 1 "$?"
 contains "painel parado é falha" "$(line 'Painel')" "falha"
 contains "sem painel, a linha fica como não consultada" "$(line 'Linha telefônica')" "não deu para consultar"
+contains "sem painel, o login não é conferido" "$(line 'Login do painel')" "não deu para conferir porque o painel não respondeu"
 contains "banco continua sendo conferido direto" "$(line 'Banco')" "ok"
 bash "$H" --essential >/dev/null 2>&1; equal "painel parado derruba a checagem essencial" 1 "$?"
 printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"
@@ -59,6 +60,39 @@ contains "painel sem chegar ao banco: é falha" "$(line 'Painel → banco')" "fa
 contains "painel sem chegar ao banco: diz o motivo" "$(line 'Painel → banco')" "o banco não respondeu ao painel"
 contains "painel sem chegar ao banco: o Postgres em si segue ok" "$(line 'Banco')" "ok"
 bash "$H" --essential >/dev/null 2>&1; equal "painel sem chegar ao banco: reprova no modo essencial (provoca a volta da atualização)" 1 "$?"
+
+# Login do painel: a rota de saúde pode responder "painel ok, banco ok" e o login dar 500 — foi
+# assim que uma volta de versão quebrou a entrada e a instalação disse "com todas as peças
+# essenciais respondendo" (issue #392). A sonda pede o login de verdade, com uma credencial que
+# não existe, e o certo é 401 (recusa), nunca 5xx.
+ok_lines > "$FAKE_DIR/panel_health"
+out="$(bash "$H" 2>&1)"; equal "login recusando credencial que não existe: zero" 0 "$?"
+contains "login recusado é ok" "$(line 'Login do painel')" "ok"
+contains "login ok diz o que provou" "$(line 'Login do painel')" "recusa credencial que não existe (HTTP 401)"
+check "a sonda do login pergunta à rota de login do próprio painel" grep -q "127.0.0.1:3000/api/v1/auth/login" "$FAKE_DIR/calls.log"
+echo 'login|500' > "$FAKE_DIR/login_health"
+out="$(bash "$H" 2>&1)"; equal "login com erro de servidor: código 1" 1 "$?"
+contains "login com erro de servidor é falha" "$(line 'Login do painel')" "falha "
+contains "login com erro de servidor diz o código" "$(line 'Login do painel')" "erro de servidor (HTTP 500)"
+contains "login com erro de servidor diz que ninguém entra" "$(line 'Login do painel')" "ninguém consegue entrar"
+contains "o painel segue ok: a rota de saúde não vê o login" "$(line 'Painel ')" "ok"
+bash "$H" --essential >/dev/null 2>&1; equal "login quebrado reprova no modo essencial (provoca a volta da atualização)" 1 "$?"
+echo 'login|429' > "$FAKE_DIR/login_health"
+out="$(bash "$H" 2>&1)"; equal "login limitado não é falha" 0 "$?"
+contains "login limitado é aviso, e diz o que não provou" "$(line 'Login do painel')" "aviso"
+contains "login limitado não finge ter conferido" "$(line 'Login do painel')" "não deu para conferir se ele chega ao banco"
+echo 'login|400' > "$FAKE_DIR/login_health"
+out="$(bash "$H" 2>&1)"; equal "login recusando o formato da sonda não é falha" 0 "$?"
+contains "login recusando o formato é aviso" "$(line 'Login do painel')" "aviso"
+contains "login recusando o formato não finge ter conferido" "$(line 'Login do painel')" "não deu para conferir o login"
+echo 'login|200' > "$FAKE_DIR/login_health"
+out="$(bash "$H" 2>&1)"; equal "login aceitando credencial que não existe: código 1" 1 "$?"
+contains "login aberto é falha" "$(line 'Login do painel')" "aceitou uma credencial que não existe"
+echo 'login|0|connect ECONNREFUSED 127.0.0.1:3000' > "$FAKE_DIR/login_health"
+out="$(bash "$H" 2>&1)"; equal "rota de login muda: código 1" 1 "$?"
+contains "rota de login muda diz o motivo" "$(line 'Login do painel')" "ECONNREFUSED"
+rm "$FAKE_DIR/login_health"
+ok_lines > "$FAKE_DIR/panel_health"
 ok_lines | sed 's/^routines|ok|em dia$/routines|fail|nenhum processo de rotinas está conectado ao banco esperando tarefas/' > "$FAKE_DIR/panel_health"
 out="$(bash "$H" 2>&1)"; equal "rotinas sem escutar a fila: código 2" 2 "$?"
 contains "rotinas sem escutar a fila: é falha" "$(line 'Rotinas → fila')" "falha "
@@ -157,7 +191,7 @@ lacks "tudo certo: nenhuma falha" "$out" "falha "
 json="$(bash "$H" --json 2>&1)"
 contains "json: código de saída" "$json" '{"exit_code":0,"checks":['
 contains "json: peça com estado e detalhe" "$json" '{"id":"trunk","name":"Linha telefônica","essential":false,"status":"ok","detail":"registrado"}'
-equal "json: dezesseis peças" 16 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
+equal "json: dezessete peças" 17 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
 if command -v python3 >/dev/null 2>&1; then check "json: é JSON válido" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$json"; fi
 printf '%s\n' 'panel|ok|diz "aspas" e \barra' 'trunk|ok|x' 'engine|ok|y' > "$FAKE_DIR/panel_health"
 if command -v python3 >/dev/null 2>&1; then check "json: escapa aspas e barra" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(bash "$H" --json 2>&1)"; fi

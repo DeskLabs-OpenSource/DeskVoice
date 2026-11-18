@@ -79,7 +79,7 @@ e número) e o agente. Nada disso é pedido no terminal.
 | Script | O que faz | O que ele confere antes de dizer que deu certo |
 |---|---|---|
 | `start.sh` | Roda no seu computador, antes do servidor: diz o que é preciso e entrega o comando seguinte | Não altera nada. Só mostra o link da parceira se conseguiu ler o endereço de `partner.env` |
-| `install.sh` | Confere a máquina e a rede, faz poucas perguntas, gera os segredos, baixa as imagens da versão publicada mais recente, sobe tudo e cria o primeiro usuário. Pode ser rodado de novo: retoma de onde parou e nunca troca um segredo que já existe | Cada peça essencial respondendo (painel, banco, painel → banco, Asterisk, worker de voz, controle da telefonia, rotinas) |
+| `install.sh` | Confere a máquina e a rede, faz poucas perguntas, gera os segredos, baixa as imagens da versão publicada mais recente, sobe tudo e cria o primeiro usuário. Pode ser rodado de novo: retoma de onde parou e nunca troca um segredo que já existe | Cada peça essencial respondendo (painel, banco, painel → banco, login do painel, Asterisk, worker de voz, controle da telefonia, rotinas) |
 | `healthcheck.sh` | Uma linha por peça, com estado e detalhe. `--json` para monitoramento | Não resume: mostra qual peça está fora |
 | `backup.sh` | Copia o banco, os três arquivos de ambiente e a configuração gerada do Asterisk para `backups/<data>/` | Restaura o dump num banco de rascunho e conta as linhas de cada tabela |
 | `restore.sh` | Substitui o banco por um backup. Pede que você digite `RESTAURAR` | Compara a contagem de cada tabela com o manifesto do backup, antes e depois de trocar o banco |
@@ -305,9 +305,17 @@ ele as ligações seguem atendidas, e resumos e avisos esperam na fila até ele 
 restauraria o banco do backup por um defeito que pode ser de antes da atualização. O processo
 de rotinas parado continua sendo peça essencial, na linha "Rotinas".
 
+A linha "Login do painel" pede o login de verdade, de dentro do contêiner do painel, com uma
+credencial que não existe: o certo é a rota recusar (401), e um erro de servidor (5xx) é `falha`.
+Ela existe porque a rota de saúde pode responder "painel ok, banco ok" enquanto ninguém consegue
+entrar — foi o que aconteceu numa volta de versão que trocou a coluna que o login lê. Não cria
+usuário nem guarda senha, e o e-mail muda a cada execução para não gastar o limite de tentativas
+do login. Quando o próprio limite responde (429), a linha fica em `aviso`: ela diz que não
+conseguiu conferir, em vez de fingir que conferiu. É peça essencial.
+
 Código de saída: `0` sem falha, `1` se falhou peça essencial (painel, banco, painel → banco,
-Asterisk, worker de voz, controle da telefonia, rotinas), `2` se falhou outra (rotinas → fila,
-linha, motor de voz, entrada única, WhatsApp, portas, disco).
+login do painel, Asterisk, worker de voz, controle da telefonia, rotinas), `2` se falhou outra
+(rotinas → fila, linha, motor de voz, entrada única, WhatsApp, portas, disco).
 
 ### `backup.sh` e `restore.sh`
 
