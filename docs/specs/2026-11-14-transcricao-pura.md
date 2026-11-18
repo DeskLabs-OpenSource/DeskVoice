@@ -1037,6 +1037,8 @@ publicada; antes disso, ligar o Laya pela tela baixaria uma imagem que não exis
 `laya` no `docker-compose.yml` no perfil `laya` (rede interna, sem porta, `mem_limit`, `cpus`,
 `healthcheck`, imagem `${DESKVOICE_IMAGE_PREFIX}/deskvoice-laya:${DESKVOICE_VERSION}`), `laya` no
 `image_ref` de `install/_common.sh`, `deciders/laya.ts` e a medida do serviço com o teto de CPU.
+O `laya` fica **fora de `APP_SERVICES`** (`install/_common.sh`): essa lista é o que o `update.sh`
+e o instalador baixam, e com o Laya nela toda atualização baixaria a imagem.
 **Não toca `.github/`.** A imagem é construída localmente para os testes e a medida. Caminho
 sensível: imagem nova, e `install/_common.sh`, que pede segunda leitura.
 
@@ -1049,14 +1051,39 @@ Aceite:
   uma e com três chamadas, memória e núcleos. E a mesma medida do áudio de uma chamada simulada com
   e sem o Laya ocupado, para mostrar que ele não atrapalha a voz. Se atrapalhar, o teto desce e o
   número de "a tempo" cai, e o PR diz isso;
-- o tamanho da imagem e se ela constrói em arm64 (os dois itens "não medido" da decisão 4) estão no
-  corpo do PR. Se ela não construir em arm64, o PR para e diz isso, porque a etiqueta da versão
-  nasce com as duas arquiteturas ou não nasce (decisão 0017);
+- o tamanho da imagem (um dos itens "não medido" da decisão 4) está no corpo do PR. O arm64, o
+  outro, fica como "não medido" na 8a e é cobrado no ensaio da 8b (tabela abaixo), porque a etiqueta
+  da versão nasce com as duas arquiteturas ou não nasce (decisão 0017);
 - sem o perfil, `docker compose config` e a lista de imagens que o `update.sh` baixa não mudam
   para quem já instalou (teste);
 - o mesmo conjunto da rodada 3 roda contra o serviço e dá o mesmo acerto, com tolerância de 2 pontos;
 - o corpo do PR traz, pronto para a 8b, o trecho que o `publish-image.yml` precisa (a quarta imagem
   na matriz, no `merge` e no `verify-public`), como texto, sem commit em `.github/`.
+
+**Quem roda cada item do aceite.** O usuário `paperclip`, onde o Desenvolvedor e o Verificador
+rodam, não tem Docker, e o job `images` do CI não constrói `deploy/laya/`. Dar Docker ao
+`paperclip` não entra nesta fatia (seria um pedido de decisão ao Rafael, e a recomendação é
+contra). A divisão segue a DESA-148:
+
+| Item do aceite | Quem roda | Onde |
+|---|---|---|
+| Código do servidor, `deciders/laya.ts`, testes de unidade e de rota | Desenvolvedor, conferido pelo Verificador | `paperclip`, sem Docker, e o CI |
+| Licença dos pesos e do pacote, com fonte e data, no `CREDITS.md` | Desenvolvedor, conferido pelo Verificador | leitura, sem Docker |
+| Revisão dos pesos e imagens de base fixadas por resumo | Desenvolvedor escreve; Verificador lê o Dockerfile | leitura, sem Docker |
+| Construir a imagem (amd64) e o tamanho dela | mantenedora (`rafaelmelgaco-bf`) | vps-deskvoice |
+| Subir sem rede para fora e responder | mantenedora | vps-deskvoice, sem mexer no firewall do host (rede do Compose sem saída) |
+| Medida com o teto de CPU (p50/p95, uma e três chamadas, memória, núcleos, áudio com e sem o Laya ocupado) | mantenedora | vps-deskvoice |
+| Rodada 3 contra o serviço, tolerância de 2 pontos | mantenedora | vps-deskvoice |
+| `docker compose config` e a lista do `update.sh` sem o perfil | mantenedora; a lista do `update.sh` também tem teste sem Docker (`install/test/`), que o Desenvolvedor escreve | vps-deskvoice e o CI |
+| Construir em arm64 | **não medido na 8a**: ligar o binfmt (QEMU) pede o sim do Rafael. Passa ao ensaio da 8b, que constrói as duas arquiteturas | run de ensaio da 8b |
+
+Na vps-deskvoice a mantenedora mede **sem mexer no firewall e sem reiniciar** nada: a imagem é
+construída e sobe ao lado da instalação, no perfil `laya`, e sai depois. Os números voltam ao corpo
+do PR com a data, o head medido e o nome de quem mediu. Se a mantenedora não puder medir algum
+item, ele vai para o ensaio da 8b ou fica como "não medido" no PR, e o PR diz qual.
+
+Como o arm64 passa à 8b, a regra da etiqueta com as duas arquiteturas (decisão 0017) é cobrada lá:
+se o ensaio não construir em arm64, a 8b para, e a 9 não entra.
 
 #### Fatia 8b: a publicação da quarta imagem (dono)
 
@@ -1187,6 +1214,12 @@ nas decisoes necessarias" (registrado pelo board às 16:35Z).
 - **Imagem do Laya (decisão 4): A.** Ela nasce em `deploy/laya/`, e o `publish-image.yml` publica
   a quarta imagem a cada versão. O PR que muda o workflow só entra com o link de um run de ensaio e
   com o `actionlint` (nota do maestro de 17/11). Está nas fatias 8a e 8b.
+- **"Fixada por resumo no Compose" saiu do texto aprovado.** A opção A do pedido 4 dizia que a
+  imagem do Laya seria fixada por resumo no Compose. Isso saiu pela correção de 18/11 (seção da
+  imagem): as três imagens do projeto usam a etiqueta da versão no Compose, porque o resumo só é
+  conhecido depois que o `publish-image.yml` publica, e o Compose da mesma versão já precisa
+  apontar para ela. O resumo fixo segue só para as imagens de terceiros, e, no Laya, para os pesos e
+  as imagens de base do Dockerfile.
 
 ## Pedido de decisão 4: onde a imagem do Laya é publicada (respondido em 18/11: A)
 
