@@ -17,7 +17,7 @@ interface Row {
   suspendedAt: string | null;
   calls: { count: number };
   cost: { cents: number; unmeasuredCount: number; estimatedCount: number };
-  trunk: { connected: number; down: number; check: { status: Status } } | null;
+  trunk: { connected: number; attention: number; down: number; check: { status: Status } } | null;
   engine: { state: "own_key" | "no_key" | "key_failed"; check: { status: Status } };
   queue: { late: number; failedLast24h: number };
 }
@@ -66,10 +66,13 @@ export default function InstallationOverview() {
                 <Cell label={t.trunk}>
                   {row.trunk === null ? (
                     <Badge tone="warn">{t.voiceDown}</Badge>
-                  ) : row.trunk.connected + row.trunk.down === 0 ? (
+                  ) : row.trunk.connected + row.trunk.attention + row.trunk.down === 0 ? (
                     <span className="text-muted">{t.trunkNone}</span>
                   ) : (
-                    <Badge tone={row.trunk.check.status}>{fill(t.trunkCounts, { connected: row.trunk.connected, down: row.trunk.down })}</Badge>
+                    <Badge tone={row.trunk.check.status}>
+                      {fill(t.trunkCounts, { connected: row.trunk.connected, down: row.trunk.down })}
+                      {row.trunk.attention > 0 ? fill(t.trunkAttention, { attention: row.trunk.attention }) : null}
+                    </Badge>
                   )}
                 </Cell>
                 <Cell label={t.engine}>

@@ -90,6 +90,7 @@ const installation = {
     cost: "Custo do mês",
     trunk: "Linha",
     trunkCounts: "{connected} conectadas, {down} caídas",
+    trunkAttention: ", {attention} pedem atenção",
     trunkNone: "Nenhuma linha cadastrada",
     voiceDown: "O processo de voz não respondeu",
     engine: "Motor",
