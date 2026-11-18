@@ -371,30 +371,50 @@ Os limites da forma nova, os conhecidos:
   fora de `docker*` e `br-*`. A rede do Compose do DeskVoice não escolhe nome.
 - **Hairpin, falha fechada:** com o `userland-proxy` do Docker desligado, a conexão de um contêiner
   ao IP público da própria máquina, na porta fechada, também é roteada para dentro da ponte e é
-  barrada. Não abre entrada.
+  barrada. Não abre entrada. Não medido: na bancada abaixo o `userland-proxy` estava ligado.
 - **O módulo `br_netfilter`:** aplicar a regra o carrega, se ele ainda não estiver carregado: o
-  `-m physdev` o pede ao kernel (`xt_physdev`, também pelo `iptables-nft`). Ele nasce com
-  `bridge-nf-call-iptables=1`, e o tráfego de ponte de todos os contêineres passa a atravessar a
-  `FORWARD` e o `conntrack`. O módulo fica carregado até o reboot (o `apply` sem portas não o
-  descarrega), e o serviço o carrega de novo no boot. O que mais pesa: numa máquina com outra ponte
-  que não é do Docker (libvirt, LXD), o tráfego entre as máquinas dela passa a cair na política da
-  `FORWARD`, que o Docker deixa em `DROP`, e pode parar. Numa VPS só do DeskVoice isso não acontece,
-  porque as pontes do Docker têm os `ACCEPT` dele. O `physdev` fica mesmo assim porque, sem ele, com
-  o módulo carregado (por esta regra ou pelo próprio Docker), a regra barraria o tráfego entre
-  contêineres da mesma rede na porta fechada. Isso vem da leitura do kernel e ainda não foi medido;
-  a medida está pedida.
+  `-m physdev` o pede ao kernel (`xt_physdev`, também pelo `iptables-nft`). Medido em 18/11/2026: a
+  primeira regra com `physdev` carregou o módulo, com `bridge-nf-call-iptables=1`, e o `apply` sem
+  portas não o descarregou. Com ele, o tráfego de ponte de todos os contêineres passa a atravessar a
+  `FORWARD` e o `conntrack` até o reboot, e o serviço o carrega de novo no boot (o boot não foi
+  medido). Numa VPS só do DeskVoice, a checagem de saúde ficou igual com o módulo no ar: as pontes
+  do Docker têm os `ACCEPT` dele. O que mais pesa, e não foi medido: numa máquina com outra ponte que
+  não é do Docker (libvirt, LXD), o tráfego entre as máquinas dela passa a cair na política da
+  `FORWARD`, que o Docker deixa em `DROP`, e pode parar. O `physdev` fica porque, sem ele, com o
+  módulo carregado (por esta regra ou pelo próprio Docker), a regra barraria o tráfego entre
+  contêineres da mesma rede na porta fechada; com ele, esse tráfego passou (medido em TCP).
+- **Para descarregar o `br_netfilter` à mão:** `rmmod br_netfilter`, ou reinicie a máquina. Nunca
+  `modprobe -r br_netfilter`: ele também descarrega o módulo `bridge` e derruba todas as redes do
+  Docker até um `systemctl restart docker`. Medido: desfazer assim deixou a VPS de teste cerca de
+  2 minutos sem as redes do Docker.
 
 Quem já tinha a regra antiga (escrita à mão, como esta página ensinava, ou por uma versão de teste
 deste script) é avisado: ao aplicar, e a cada boot pelo serviço, o script escreve as novas, tira
 todas as cópias da antiga, nessa ordem, e diz que trocou.
 
-O que foi medido e o que não foi: as tabelas acima mediram a forma **sem** as interfaces, que fechou
-a porta publicada em TCP e em UDP. A forma nova não foi medida numa máquina de verdade: nem que ela
-continua fechando a porta de fora, nem que deixa passar a conexão de saída do contêiner, nem o
-tráfego roteado direto ao IP dele, nem o comportamento do `physdev` com e sem o módulo
-`br_netfilter` carregado. O que está provado é o raciocínio acima e o `bash install/test/run.sh`,
-que lê as regras escritas e decide, pacote a pacote, o que elas barram: de fora pela `eth0` e por
-uma ponte do host `br-host`, a saída do contêiner, o tráfego entre contêineres da mesma rede.
+As tabelas das seções 5 e 6 e a do `firewalld` mediram a forma antiga, **sem** as interfaces. A
+forma nova foi medida em 18/11/2026, entre 02:47 e 02:52 UTC, numa VPS de teste, sobre o `5a6bb00`
+do PR #426: `iptables` 1.8.10 (nf_tables), kernel 5.14.0 (el9_8), Docker 29.9.3 sem `daemon.json`,
+`userland-proxy` ligado, `firewalld` inativo e `br_netfilter` não carregado antes. Uma rede de prova
+`br-*`, com um servidor publicando `48080/tcp` e `48506/udp` e um cliente na mesma rede.
+
+| Situação | Resultado |
+|---|---|
+| de fora, `48080/tcp` e `48506/udp`, sem a regra | respondem |
+| de fora, as mesmas portas, com a regra | **sem resposta**; o contador da regra `br-+` subiu (13 pacotes em TCP, 1 em UDP) |
+| o contêiner abre conexão para um host externo na `48080/tcp`, com a regra | passa |
+| contêiner para contêiner da mesma rede na `48080/tcp`, com o `br_netfilter` carregado | passa |
+| `apply` das duas portas | 4 regras (porta × ponte), serviço gravado e ligado |
+| `apply` de novo | não duplica |
+| `apply` sem portas | reabre, esvazia a cadeia e apaga o serviço; o `br_netfilter` continua carregado |
+| checagem de saúde da 0.35.0 com o `br_netfilter` carregado | igual à de antes |
+
+Continua sem medição: o reinício da máquina e o do Docker com o serviço ligado (`PartOf`); a família
+`docker+` com tráfego (os contadores dela ficaram em 0); o hairpin, porque o `userland-proxy` estava
+ligado; o tráfego roteado direto ao IP do contêiner; UDP de saída e UDP entre contêineres; IPv6; o
+`firewalld` ativo; uma máquina com outra ponte que não é do Docker, ou com a saída para fora numa
+ponte `br-*`. Para esses casos, o que existe é o raciocínio acima e o `bash install/test/run.sh`, que
+lê as regras escritas e decide, pacote a pacote, o que elas barram.
 
 Uma porta é `porta` ou `min:max`, seguida de `/tcp` ou `/udp`, a mesma forma do `ufw`:
 

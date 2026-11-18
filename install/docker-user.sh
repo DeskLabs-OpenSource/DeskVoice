@@ -64,15 +64,18 @@ ipt -S DOCKER-USER >/dev/null 2>&1 || die "A cadeia DOCKER-USER não existe nest
 # porta da ponte, e o ! --physdev-is-bridged o deixa de fora. O que fica sem cobertura é uma ponte do
 # Docker com nome escolhido à mão (fora de docker* e br-*); a do Compose do DeskVoice não escolhe nome.
 # Com o userland-proxy desligado, a conexão de um contêiner ao IP público desta máquina na porta
-# fechada (hairpin) também é barrada: falha fechada, não abre entrada.
+# fechada (hairpin) também é barrada: falha fechada, não abre entrada (não medido).
 # O -m physdev carrega o br_netfilter (xt_physdev, também pelo iptables-nft), se ele ainda não
-# estiver carregado, com bridge-nf-call-iptables=1: o tráfego de ponte de todos os contêineres passa
-# a atravessar a FORWARD e o conntrack, até o reboot (o apply sem portas não o descarrega), e o
-# serviço o carrega de novo no boot. Numa máquina com outra ponte que não é do Docker (libvirt, LXD),
-# o tráfego entre as máquinas dela passa a cair na política da FORWARD, que o Docker deixa em DROP, e
-# pode parar; numa VPS só do DeskVoice, as pontes do Docker têm os ACCEPT dele. O physdev fica porque,
-# sem ele, com o módulo carregado (por esta regra ou pelo Docker), a regra barraria o tráfego entre
-# contêineres da mesma rede na porta. Leitura do kernel, ainda não medida (docs/fundacao/ufw-e-docker.md).
+# estiver carregado, com bridge-nf-call-iptables=1, e o apply sem portas não o descarrega (medido em
+# 18/11/2026): o tráfego de ponte de todos os contêineres passa a atravessar a FORWARD e o conntrack
+# até o reboot, e o serviço o carrega de novo no boot. Numa VPS só do DeskVoice a checagem de saúde
+# ficou igual com ele (medido). Numa máquina com outra ponte que não é do Docker (libvirt, LXD), o
+# tráfego entre as máquinas dela passa a cair na política da FORWARD, que o Docker deixa em DROP, e
+# pode parar (não medido). O physdev fica porque, sem ele, com o módulo carregado, a regra barraria o
+# tráfego entre contêineres da mesma rede na porta; com ele, esse tráfego passou (medido em TCP).
+# Para descarregar o módulo à mão: rmmod br_netfilter, ou reiniciar. Nunca modprobe -r br_netfilter:
+# ele descarrega também o bridge e derruba as redes do Docker até um systemctl restart docker (medido).
+# O que foi e o que não foi medido está em docs/fundacao/ufw-e-docker.md.
 # O --ctorigdstport enxerga a porta de fora: na DOCKER-USER o pacote já passou pelo DNAT do Docker.
 # Em LEGACY, a forma de antes (sem as interfaces), que o kit troca onde a achar.
 BRIDGES="docker+ br-+"
