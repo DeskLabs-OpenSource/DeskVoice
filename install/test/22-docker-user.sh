@@ -26,7 +26,9 @@ check "apply: gravou o serviço do boot" test -f "$UNIT"
 contains "serviço: roda depois do Docker" "$(cat "$UNIT")" "After=docker.service"
 contains "serviço: é chamado de novo quando o Docker reinicia" "$(cat "$UNIT")" "PartOf=docker.service"
 contains "serviço: repõe a mesma porta" "$(cat "$UNIT")" "apply 5060/udp"
-equal "serviço: ligado no boot" 1 "$(calls 'enable deskvoice-docker-user.service')"
+# Conta a chamada de dentro (o `sudo` de mentira também loga a dele: "sudo -n systemctl ..."),
+# assim o teste mede o mesmo com o kit rodando como root e como quem precisa de sudo.
+equal "serviço: ligado no boot" 1 "$(calls '^systemctl enable deskvoice-docker-user.service')"
 
 out="$(tool apply 5060/udp)"; equal "apply duas vezes: sai com zero" 0 "$?"
 equal "apply duas vezes: continua uma regra" 1 "$(rules)"
@@ -91,7 +93,7 @@ out="$(tool apply 5060/udp)"; equal "volta a fechar: zero" 0 "$?"
 out="$(tool apply)"; equal "sem portas: sai com zero" 0 "$?"
 equal "sem portas: nenhuma regra do kit" 0 "$(rules)"
 refuse "sem portas: o serviço do boot foi apagado" test -f "$UNIT"
-contains "sem portas: diz que desligou" "$(grep -c 'disable deskvoice-docker-user.service' "$FAKE_DIR/calls.log")" "1"
+equal "sem portas: desliga o serviço" 1 "$(calls '^systemctl disable deskvoice-docker-user.service')"
 
 # ── install.sh: a variável fecha a porta, e a simulação não fecha nada ──
 export DESKVOICE_DOMAIN="" DESKVOICE_ORG_NAME="Clínica Exemplo" DESKVOICE_OWNER_NAME="Ana Exemplo"
