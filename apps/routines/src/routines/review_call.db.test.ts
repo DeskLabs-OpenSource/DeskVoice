@@ -548,14 +548,15 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
     }
   });
 
-  it("call_back gravado direto no banco, sem caminho nesta fatia, cai na reserva: a pendência", async () => {
-    // O `whatsapp` tem caminho desde a fatia 2: os testes dele estão em "o modo whatsapp", abaixo.
-    for (const mode of ["call_back"]) {
-      const s = await dropped(`drop reserve ${mode}`, "caller_waiting");
-      await setMode(s.org, mode);
-      await expectOpened(s, "call_dropped");
-      expect((await dropEvents(s.callId)).map((event) => event.payload)).toEqual([{ case: "call_dropped", mode, action: "task_opened", simulated: false, openTurn: "caller_waiting" }]);
-    }
+  it("call_back sem a política de saída ligada: o modo está indisponível, e a reserva é a pendência", async () => {
+    // O `whatsapp` tem caminho desde a fatia 2: os testes dele estão em "o modo whatsapp", abaixo. O
+    // `call_back` com a política ligada (fatia 3) está em `call_back.db.test.ts`.
+    const s = await dropped("drop reserve call_back", "caller_waiting");
+    await setMode(s.org, "call_back");
+    await expectOpened(s, "call_dropped");
+    expect((await dropEvents(s.callId)).map((event) => event.payload)).toEqual([
+      { case: "call_dropped", mode: "call_back", action: "skipped", reason: "mode_unavailable", simulated: false, openTurn: "caller_waiting" },
+    ]);
   });
 
   it("um openTurn fora da lista não conta como vez aberta", async () => {

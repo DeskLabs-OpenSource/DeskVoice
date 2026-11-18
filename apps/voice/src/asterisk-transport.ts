@@ -17,7 +17,7 @@
  * Lição do módulo de voz do DeskcommCRM (MIT, mesmo autor; ver CREDITS.md): a mídia nunca passa
  * por bridge + externalMedia. Por isso a transferência é do dialplan, e não uma bridge da ARI.
  */
-import { lockCall, recordEvent, withOrg, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { enqueueTask, lockCall, recordEvent, withOrg, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
@@ -152,7 +152,13 @@ export class AsteriskCalls {
       // O áudio nunca conectou: chamada de saída que ninguém atendeu, ou quem ligou desistiu antes.
       await withOrg(db, call.organizationId, async (q) => {
         const ended = await q.exec("update calls set status = 'failed', end_reason = 'no_answer', ended_at = $2 where id = $1 and status = 'ringing'", [call.callId, clock.now()]);
-        if (ended === 1) await recordEvent(q, call.callId, "call_ended", { status: "failed", reason: "no_answer", cause: cause ?? null }, clock.now());
+        if (ended === 1) {
+          await recordEvent(q, call.callId, "call_ended", { status: "failed", reason: "no_answer", cause: cause ?? null }, clock.now());
+          // Este fim não passa por `finish`: a revisão é enfileirada aqui. Na religação, é ela quem grava
+          // o "não atendida" na ligação original e decide a reserva; nas outras, não há caso a abrir.
+          const reviewId = await enqueueTask(q, { kind: "review_call", payload: {}, callId: call.callId, runAt: clock.now() });
+          await recordEvent(q, call.callId, "task_queued", { taskId: reviewId, kind: "review_call" }, clock.now());
+        }
       });
     } else if (call.transferTo) {
       // A transferência atendida termina assim, desligue quem desligar. Sem o atendimento, foi quem

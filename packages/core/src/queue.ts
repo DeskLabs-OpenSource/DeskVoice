@@ -38,6 +38,7 @@ export const TASK_KIND_ON_SUSPENSION = {
   erase_recordings: "keeps_running",
   expire_approval: "keeps_running",
   classify_call_outcome: "canceled",
+  call_back: "canceled",
   deliver_notification: "canceled",
   deliver_webhook: "canceled",
   follow_up: "canceled",

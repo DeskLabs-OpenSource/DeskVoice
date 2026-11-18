@@ -4,6 +4,7 @@ import type { DecisionModel, VoiceEngine } from "@deskvoice/voice-engine";
 import { createApprovalWaiter } from "./approvals";
 import type { AriClient, AriEvent } from "./ari";
 import { AsteriskCalls } from "./asterisk-transport";
+import { startCallBacks } from "./call-backs";
 import { startAudioSocketServer } from "./audiosocket";
 import { startCallSession, stopRecordingOfLiveCall, type CallSession, type CallSessionDeps } from "./call-session";
 import { handleInbound } from "./inbound";
@@ -216,6 +217,10 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     },
   });
 
+  // A religação da ligação que caiu: escuta o canal `call_backs` e varre o que ficou `due`. Disca só
+  // por `startOutboundCall`, com a política conferida na hora de discar (`call-backs.ts`).
+  const callBacks = await startCallBacks({ db, ari, clock, calls, log, schedule: deps.schedule });
+
   return {
     audioSocketPort: audioSocket.port,
     internalPort: api.port,
@@ -224,6 +229,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     async close() {
       closed = true;
       stopRefresh();
+      await callBacks.close();
       ari.close();
       whatsappCalls.close();
       await api.close();
