@@ -25,9 +25,15 @@ export type Confirmation = z.infer<typeof storedConfirmation>;
 /**
  * Os modelos que a tela oferece. O simulado fica de fora: ele responde o neutro sem ler nada, serve a
  * teste e à chamada simulada (que o usa sozinha), e numa ligação real seria um filtro de mentira.
+ *
+ * O Laya também fica de fora, por enquanto (desenho R12, fatia 8a): a peça existe, mas a imagem dele
+ * ainda não é publicada, e a frase sobre o acerto medido na bancada ainda não está ao lado da opção.
+ * A fatia 9 tira este filtro e põe a frase.
  */
+const NOT_OFFERED: ReadonlySet<string> = new Set(["simulated", "laya"]);
+
 export async function offeredModels(): Promise<DecisionModel[]> {
-  return (await listDecisionModels()).filter((model) => model.id !== "simulated").toSorted((a, b) => a.label.localeCompare(b.label));
+  return (await listDecisionModels()).filter((model) => !NOT_OFFERED.has(model.id)).toSorted((a, b) => a.label.localeCompare(b.label));
 }
 
 async function offeredModel(id: string): Promise<DecisionModel> {
