@@ -28,6 +28,29 @@ Não invente tela, campo ou número: confira no painel da pessoa, ou no código
 Ferramentas da fundação: `end_call`, `transfer_to_human`, `notify_human`, `request_approval`,
 `send_whatsapp`, `send_dtmf`, `call_webhook`, `create_task`.
 
+### Perguntar à equipe algo de sim ou não
+
+O `request_approval` também serve para o agente perguntar à equipe algo que só ela sabe, com a
+pessoa na linha e sem transferir: "o doutor atende sábado?", "ainda há vaga hoje à tarde?". A
+pergunta vai para a tela Aprovações (e para quem recebe os avisos), e quem responde clica em
+aprovar ou negar. O agente recebe a resposta e a repassa.
+
+| O que saber | Como é |
+|---|---|
+| Respostas | `approved` (sim), `denied` (não) ou `expired` (ninguém respondeu no prazo). Não há texto livre de volta: escreva a pergunta de modo que "aprovar" signifique "sim" |
+| Prazo | De 30 a 300 segundos, 120 sem valor. A pessoa fica esperando na linha esse tempo |
+| Sem resposta | Vale o que o operador escolheu em Configurações → Ligações → "Pedido de aprovação sem resposta". O padrão é negar. **Se estiver em aprovar, um prazo vencido vira "sim"**: o agente diria que o doutor atende sábado sem ninguém ter confirmado. Para usar a ferramenta assim, deixe em negar |
+| Teto | 3 pedidos por ligação; acima disso a ferramenta não roda |
+| Quando serve | Só se houver alguém olhando o painel naquele instante. Sem isso, a pessoa espera à toa: prefira `create_task` ou `notify_human` e a equipe retorna |
+
+Sugestão de frase para as instruções do agente:
+
+> Se a pessoa perguntar algo sobre agenda ou atendimento que você não sabe (por exemplo, se o
+> doutor atende sábado), use `request_approval` com uma pergunta de sim ou não para a equipe, como
+> "O doutor atende neste sábado?", e no contexto diga quem perguntou e para quê. Se aprovarem, a
+> resposta é sim; se negarem, é não. Se ninguém responder, não afirme nada: diga que a equipe vai
+> confirmar e retornar.
+
 **Teste sempre ligando.** Mudou as instruções? Ligue, faça o caso difícil e leia a linha do tempo.
 
 ## 2. Configurar a linha (tela Linha telefônica)
