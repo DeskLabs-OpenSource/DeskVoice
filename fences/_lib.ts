@@ -43,7 +43,13 @@ export function exists(root: string, file: string): boolean {
 }
 
 export const isSource = (file: string): boolean => /\.(ts|tsx|mts|js|mjs|jsx)$/.test(file);
-export const isTest = (file: string): boolean => /\.test\.tsx?$/.test(file) || /(^|\/)test\//.test(file);
+/**
+ * Arquivo de teste: `*.test.ts(x)` em qualquer lugar, ou qualquer arquivo na pasta `test/` da raiz
+ * de um pacote (`apps/<pacote>/test/`, `packages/<pacote>/test/`). Uma pasta `test` mais funda é
+ * código de produção, como a rota `apps/panel/src/app/api/v1/whatsapp/test/route.ts`, e as cercas
+ * precisam lê-la.
+ */
+export const isTest = (file: string): boolean => /\.test\.tsx?$/.test(file) || /^(apps|packages)\/[^/]+\/test\//.test(file);
 
 /**
  * Copia `fences/__fixtures__/<name>` para uma pasta temporária e devolve o caminho, que serve de

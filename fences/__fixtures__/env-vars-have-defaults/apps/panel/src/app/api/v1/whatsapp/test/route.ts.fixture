@@ -1,0 +1,2 @@
+// Rota de produção numa pasta chamada `test`: a cerca precisa lê-la.
+export const target = process.env.ROUTE_IN_TEST_DIR;

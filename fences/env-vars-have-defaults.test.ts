@@ -47,8 +47,9 @@ describe("env-vars-have-defaults", () => {
     );
   });
 
-  it("reprova variável fora da lista em cada forma de leitura", () => {
+  it("reprova variável fora da lista em cada forma de leitura, inclusive numa rota dentro de uma pasta `test`", () => {
     expect(check(fixture("env-vars-have-defaults"), { DATABASE_URL: "generated" })).toEqual([
+      "apps/panel/src/app/api/v1/whatsapp/test/route.ts: lê ROUTE_IN_TEST_DIR, que não está em fences/env-allowlist.ts",
       "apps/voice/src/feature.ts: lê NEW_FEATURE_FLAG, que não está em fences/env-allowlist.ts",
       "apps/voice/src/feature.ts: lê BRACKET_VAR, que não está em fences/env-allowlist.ts",
       "apps/voice/src/feature.ts: lê DESTRUCTURED_VAR, que não está em fences/env-allowlist.ts",
