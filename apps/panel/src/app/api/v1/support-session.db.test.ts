@@ -122,6 +122,7 @@ const REQUESTS: Record<string, (s: Scene) => Prepared> = {
   "PATCH trunks/[id]": (s) => ({ params: { id: s.trunk }, body: { name: "Operadora renomeada" }, works: true }),
   "POST agents": () => ({ params: {}, body: { name: "Vendas", engine: "simulated" }, works: true }),
   "PATCH agents/[id]": (s) => ({ params: { id: s.agent }, body: { name: "Recepção renomeada" }, works: true }),
+  "PUT outbound-policy": () => ({ params: {}, body: { enabled: true, purpose: "Retorno a quem pediu", legalBasis: "Consentimento", dailyCapPerLine: 2000 }, works: true }),
   "PUT settings/[key]": () => ({ params: { key: "whatsapp.connector" }, body: { value: { type: "webhook", url: "https://hooks.example.test/in", token: "hook-token" } }, works: true }),
 };
 

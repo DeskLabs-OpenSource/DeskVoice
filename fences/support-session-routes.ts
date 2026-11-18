@@ -65,7 +65,7 @@ export const SUPPORT_SESSION_ROUTES: SupportSessionRoute[] = [
   forbid("whatsapp-calls/connect", "POST", "pareia um número por QR Code: canal que sobrevive à sessão"),
   allow("whatsapp-calls/disconnect", "POST", "desliga o canal, não cria acesso"),
   forbid("whatsapp-calls/service", "POST", "dúvida: liga o serviço de ligação pelo WhatsApp da instalação inteira"),
-  allow("whatsapp-calls", "PATCH", "configuração do canal que já existe, não cria acesso"),
+  allow("whatsapp-calls", "PATCH", "só escolhe entre atendentes que já existem na organização, não cria destino"),
 
   // Chaves de provedor: gravar a chave é `forbid`; apagar e conferir não criam destino novo.
   forbid("brains/[brain]/key", "PUT", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
@@ -99,7 +99,7 @@ export const SUPPORT_SESSION_ROUTES: SupportSessionRoute[] = [
   allow("follow-ups/[id]", "PATCH", "edita um retorno; responsável só entre vínculos `member` (5a)"),
   allow("follow-ups/[id]/close", "POST", "fecha um retorno"),
   allow("notifications/[id]/read", "POST", "marca um aviso como lido"),
-  allow("outbound-policy", "PUT", "política de ligação de saída da organização"),
+  forbid("outbound-policy", "PUT", "a política de saída da organização fica depois da sessão"),
   allow("phone-numbers", "POST", "configuração de número da organização"),
   allow("phone-numbers/[id]", "PATCH", "configuração de número da organização"),
   allow("phone-numbers/[id]", "DELETE", "configuração de número da organização"),

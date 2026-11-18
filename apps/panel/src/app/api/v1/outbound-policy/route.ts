@@ -36,7 +36,7 @@ const read = async (q: OrgQuery): Promise<Policy> => (await q.one<Policy>(`selec
 
 export const GET = handle({}, ({ q }) => read(q));
 
-export const PUT = handle({ body: fields.partial(), configure: true }, async ({ q, body }) => {
+export const PUT = handle({ body: fields.partial(), configure: true, support: false }, async ({ q, body }) => {
   const next = { ...(await read(q)), ...body };
   if (next.enabled && (!next.purpose || !next.legalBasis)) {
     throw new ApiError(400, "purpose_required", "To turn outbound calls on, state the purpose and the legal basis.");
