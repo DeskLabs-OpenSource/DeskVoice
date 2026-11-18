@@ -76,6 +76,11 @@ out="$(tool --dry-run apply 5060/udp 5061/tcp)"; equal "simulação: sai com zer
 contains "simulação: mostra a regra que escreveria" "$out" "[simulação] faria:"
 equal "simulação: não mexeu nas regras" "$before" "$(cat "$STATE")"
 equal "simulação: não chamou o systemd" 0 "$(calls '^systemctl ')"
+# A porta que sai da lista também: na simulação, a reabertura só é dita.
+out="$(tool --dry-run apply 5061/tcp)"; equal "simulação, porta saindo da lista: sai com zero" 0 "$?"
+equal "simulação, porta saindo da lista: a regra da 5060/udp continua" "$before" "$(cat "$STATE")"
+contains "simulação, porta saindo da lista: diz que reabriria" "$out" "[simulação] faria: reabrir 5060/udp"
+equal "simulação, porta saindo da lista: nenhum -D" 0 "$(calls '^iptables .*-D ')"
 
 # ── Quem instala sem ser root, pelo sudo: conferir a cadeia e achar o comando pedem o mesmo
 # privilégio de escrever. Como root não há sudo a simular, e o caso não roda. ──

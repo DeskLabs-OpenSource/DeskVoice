@@ -127,7 +127,9 @@ case "$VERB" in
   apply)
     # As portas de antes que saíram da lista perdem a regra: o serviço passa a ser a lista nova.
     for old in $(unit_specs); do
-      case " $SPECS " in *" $old "*) ;; *) remove_rule "$old"; [ "$DRY_RUN_RULE" = 1 ] || ok "porta reaberta: $old (saiu da lista)";; esac
+      case " $SPECS " in *" $old "*) continue ;; esac
+      if [ "$DRY_RUN_RULE" = 1 ]; then info "[simulação] faria: reabrir $old (saiu da lista)"
+      else remove_rule "$old"; ok "porta reaberta: $old (saiu da lista)"; fi
     done
     for spec in $SPECS; do apply_rule "$spec"; done
     # shellcheck disable=SC2086  # cada porta é um argumento: a lista é separada por espaço de propósito
