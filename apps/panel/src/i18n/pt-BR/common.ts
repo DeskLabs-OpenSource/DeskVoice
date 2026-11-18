@@ -81,8 +81,6 @@ const common = {
     invalid_json: "O pedido chegou incompleto. Tente de novo.",
     already_exists: "Já existe um registro com esses dados.",
     invalid_credentials: "E-mail ou senha incorretos.",
-    existing_account: "Este e-mail já tem conta. Entre com a senha que você já usa.",
-    no_account: "Este e-mail não tem mais conta. Escolha uma senha nova.",
     already_member: "Esta conta já está nesta organização. Se ela foi desativada, quem é dono ou administrador a reativa na tela Equipe.",
     too_many_attempts: "Muitas tentativas de entrada. Espere alguns minutos e tente de novo.",
     voice_unavailable: "O processo de voz não respondeu. Veja no indicador de saúde, no menu, o que está parado. O que você salvou continua salvo.",

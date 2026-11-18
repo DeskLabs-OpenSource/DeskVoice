@@ -82,8 +82,6 @@ const common: CommonDictionary = {
     invalid_json: "The request arrived incomplete. Try again.",
     already_exists: "A record with these values already exists.",
     invalid_credentials: "E-mail or password is incorrect.",
-    existing_account: "This e-mail already has an account. Enter the password you already use.",
-    no_account: "This e-mail no longer has an account. Choose a new password.",
     already_member: "This account is already in this organization. If it was disabled, an owner or admin can enable it on the Team screen.",
     too_many_attempts: "Too many sign-in attempts. Wait a few minutes and try again.",
     voice_unavailable: "The voice process did not answer. See in the health indicator, in the menu, what is stopped. What you saved is still saved.",

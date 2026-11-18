@@ -106,6 +106,7 @@ const KEY_CHECK_LINE: Record<KeyCheckView["result"], "fail" | "warn" | "ok"> = {
   region_unavailable: "fail",
   rate_limited: "warn",
   unreachable: "warn",
+  provider_error: "warn",
   unexpected_response: "warn",
   accepted: "ok",
   not_needed: "ok",

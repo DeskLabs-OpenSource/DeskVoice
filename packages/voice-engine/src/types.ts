@@ -143,8 +143,10 @@ export const KEY_CHECK_RESULTS = [
   "region_unavailable",
   /** O provedor pediu para esperar (limite de pedidos). */
   "rate_limited",
-  /** Sem resposta no prazo, sem rede, ou erro do lado do provedor (5xx). */
+  /** Sem resposta: prazo esgotado, DNS, conexão recusada ou derrubada. */
   "unreachable",
+  /** O provedor respondeu, com erro do lado dele (5xx). */
+  "provider_error",
   /** O provedor respondeu algo que não é o que a documentação descreve. */
   "unexpected_response",
   /** O motor não usa chave. */

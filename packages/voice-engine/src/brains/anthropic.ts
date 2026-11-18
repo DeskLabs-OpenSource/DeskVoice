@@ -277,13 +277,14 @@ const deltaEvent = z.object({ usage: z.record(z.string(), z.unknown()).nullish()
 /**
  * O erro no meio do SSE, pelo tipo; o texto (`error.message`) nunca é lido. Sem status HTTP próprio: o
  * do evento é o 200 já recebido. `overloaded_error` é `rate_limited` (o desenho da 2b), embora o 529 da
- * resposta HTTP caia em `unreachable` pela regra geral, como no `completeJson`.
+ * resposta HTTP caia em `provider_error` pela regra geral, como no `completeJson`.
  */
 export const streamFailureOf = (type: string | null | undefined): BrainFailure => {
   if (type === "billing_error") return "no_credit";
   if (type === "overloaded_error" || type === "rate_limit_error") return "rate_limited";
   if (type === "authentication_error" || type === "permission_error") return "rejected";
-  if (type === "api_error" || type === "timeout_error") return "unreachable";
+  if (type === "api_error") return "provider_error";
+  if (type === "timeout_error") return "unreachable";
   return "unexpected_response";
 };
 const streamError = z.object({ error: z.object({ type: z.string().nullish() }).nullish() });

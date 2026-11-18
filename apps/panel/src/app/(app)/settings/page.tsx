@@ -26,6 +26,7 @@ const KEY_CHECK_TONE: Record<KeyCheckResult, "ok" | "warn" | "fail" | "neutral">
   region_unavailable: "fail",
   rate_limited: "warn",
   unreachable: "warn",
+  provider_error: "warn",
   unexpected_response: "warn",
   not_needed: "neutral",
 };

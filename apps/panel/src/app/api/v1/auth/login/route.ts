@@ -1,13 +1,9 @@
-import { findLoginAccount, hashPassword, withOrg } from "@deskvoice/core";
+import { findLoginAccount, withOrg } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, Reply, createSession, handlePublic, sessionCookie } from "../../../../../server/context";
-import { reservePasswordAttempt } from "../../../../../server/login-limit";
+import { decoyHash, reservePasswordAttempt } from "../../../../../server/login-limit";
 
 const body = z.object({ email: z.string().trim().toLowerCase().min(3).max(320), password: z.string().min(1).max(1000) });
-
-// Quando o e-mail não existe, a senha é conferida contra este hash: a resposta demora o mesmo
-// que a de um e-mail cadastrado, e o tempo não entrega quem tem conta.
-let decoyHash: Promise<string> | undefined;
 
 export const POST = handlePublic({ body }, async ({ request, body, deps }) => {
   const now = deps.clock.now();
@@ -17,8 +13,8 @@ export const POST = handlePublic({ body }, async ({ request, body, deps }) => {
 
   // A conta é achada pelo e-mail, e é ela que diz qual é a organização (packages/core/src/accounts.ts).
   const account = await findLoginAccount(deps.db, body.email);
-  decoyHash ??= hashPassword("decoy");
-  const valid = await deps.verifyPassword(body.password, account?.passwordHash ?? (await decoyHash));
+  // Sem conta, a senha é conferida contra o hash de isca (`server/login-limit.ts`).
+  const valid = await deps.verifyPassword(body.password, account?.passwordHash ?? (await decoyHash()));
   // Conta sem vínculo ativo (desativada) passa pela mesma conferência de senha e recebe a mesma
   // resposta de senha errada: nem o tempo nem o texto dizem que a conta existe.
   const user = account?.member;

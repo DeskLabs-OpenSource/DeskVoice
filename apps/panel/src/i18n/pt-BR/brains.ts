@@ -29,6 +29,7 @@ const brains = {
     region_unavailable: "o provedor não atende o país ou a região deste servidor. Trocar a chave não resolve.",
     rate_limited: "o provedor pediu para esperar (limite de pedidos da conta). Tente de novo em alguns minutos.",
     unreachable: "o provedor não respondeu a tempo, ou está fora do ar. Confira se o servidor tem acesso à internet e tente de novo.",
+    provider_error: "o provedor respondeu com erro do lado dele. Costuma passar sozinho: tente de novo em alguns minutos.",
     unexpected_response: "o provedor respondeu algo que o DeskVoice não reconhece. Tente de novo; se continuar, abra uma issue no repositório.",
   },
   errors: {
