@@ -2,7 +2,7 @@ import { queueHealth, withOrg, withSystem, type OrgQuery } from "@deskvoice/core
 import { ApiError, SESSION_COOKIE, findSession, handlePublic, readCookie, type Session } from "../../../../../server/context";
 import { readEngineKeys } from "../../../../../server/engine-key";
 import { agentLine, anonymousEngineLine, databaseLine, engineLine, healthReport, panelLine, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappCallsLine, whatsappLine, type EngineKeys, type HealthCheck, type HealthId } from "../../../../../server/health";
-import { voiceHealthSchema, voiceRequest, type VoiceHealth } from "../../../../../server/voice";
+import { organizationTrunks, voiceHealthSchema, voiceRequest, type VoiceHealth } from "../../../../../server/voice";
 import { observe, type WhatsAppView } from "../../../../../server/whatsapp";
 import { observeCalls, type WhatsAppCallsView } from "../../../../../server/whatsapp-calls";
 
@@ -49,8 +49,12 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
   lines.telephony = telephonyLine(voice);
   lines.routines = routinesLine(database ? await queueHealth(deps.db, now) : null, now);
 
+  // Sem sessão, a linha de telefonia soma a instalação inteira, como o `healthcheck.sh` espera.
+  let trunks = voice;
   if (session) {
     const org = <T>(run: (q: OrgQuery) => Promise<T>): Promise<T> => withOrg(deps.db, session.organizationId, run);
+    // Com sessão, só as linhas da organização dela: as de outra organização não entram na conta.
+    if (voice) trunks = await org((q) => organizationTrunks(q, voice));
     const agent = await org((q) => q.one<{ lastSeenAt: Date }>(`select last_seen_at as "lastSeenAt" from update_agent_status`));
     lines.agent = agentLine({ lastSeenAt: agent?.lastSeenAt ?? null }, now);
     let whatsapp: WhatsAppView | "down";
@@ -78,7 +82,7 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
     lines.whatsapp_calls = whatsappCallsLine(null);
   }
 
-  lines.trunk = trunkLine(voice);
+  lines.trunk = trunkLine(trunks);
   const engine = engineLine(engineKeys);
   lines.engine = session ? engine : anonymousEngineLine(engine);
   const report = healthReport(lines);
