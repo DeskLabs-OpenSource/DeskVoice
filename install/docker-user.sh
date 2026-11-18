@@ -29,7 +29,7 @@ VERB=""; SPECS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN_RULE=1 ;;
-    -h|--help) sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     apply|show) [ -z "$VERB" ] || die "Só um comando por vez: recebi '$1' depois de '$VERB'." "Rode: bash install/docker-user.sh --help"
                 VERB="$1" ;;
     -*) die "Não conheço a opção $1." "Veja as opções com: bash install/docker-user.sh --help" ;;
@@ -38,7 +38,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-[ -n "$VERB" ] || { sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
+[ -n "$VERB" ] || { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
 
 SUDO=""; if [ "$(id -u)" != 0 ] && have sudo; then SUDO="sudo"; fi
 UNIT_NAME="deskvoice-docker-user"
