@@ -468,13 +468,17 @@ fi
 # A regra que fecha de verdade uma porta publicada pelo Docker é a da cadeia DOCKER-USER (medida
 # com o ufw e com o firewalld: docs/fundacao/ufw-e-docker.md, issue #142). Ela nasce só quando as
 # portas são pedidas: fechar 5060/udp por conta própria deixaria a telefonia muda.
-if [ -n "${DESKVOICE_DOCKER_USER_DROP:-}" ]; then
+docker_user_drop="${DESKVOICE_DOCKER_USER_DROP:-}"
+# Adotar: o serviço gravado roda o docker-user.sh da pasta antiga, que sumiu, e no boot seguinte a
+# regra sumiria calada. Ele é regravado daqui, com as portas que já tem.
+if [ -z "$docker_user_drop" ] && [ -n "$adopt_from" ]; then docker_user_drop="$(docker_user_unit_specs)"; fi
+if [ -n "$docker_user_drop" ]; then
   if [ "$DRY_RUN" = 1 ]; then
-    would "fechar no DOCKER-USER ${DESKVOICE_DOCKER_USER_DROP}, e gravar o serviço do systemd que repõe a regra no boot"
+    would "fechar no DOCKER-USER ${docker_user_drop}, e gravar o serviço do systemd que repõe a regra no boot"
   else
-    info "Fechando no DOCKER-USER: ${DESKVOICE_DOCKER_USER_DROP}"
-    # shellcheck disable=SC2086  # lista separada por espaço, já conferida no começo do script
-    bash "$KIT_DIR/docker-user.sh" apply $DESKVOICE_DOCKER_USER_DROP || die "Não consegui escrever a regra na cadeia DOCKER-USER." "Rode à mão: bash install/docker-user.sh apply $DESKVOICE_DOCKER_USER_DROP"
+    info "Fechando no DOCKER-USER: ${docker_user_drop}"
+    # shellcheck disable=SC2086  # lista separada por espaço, já conferida no começo do script ou gravada pelo kit
+    bash "$KIT_DIR/docker-user.sh" apply $docker_user_drop || die "Não consegui escrever a regra na cadeia DOCKER-USER." "Rode à mão: bash install/docker-user.sh apply $docker_user_drop"
   fi
 fi
 

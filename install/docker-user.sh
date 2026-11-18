@@ -42,7 +42,7 @@ done
 
 SUDO=""; if [ "$(id -u)" != 0 ] && have sudo; then SUDO="sudo"; fi
 UNIT_NAME="deskvoice-docker-user"
-UNIT_FILE="$SYSTEMD_DIR/$UNIT_NAME.service"
+UNIT_FILE="$DOCKER_USER_UNIT_FILE"
 
 for spec in $SPECS; do
   docker_user_spec_valid "$spec" || die "A porta '$spec' não vale." "Use a forma do ufw: 5060/udp, ou uma faixa 10000:10200/udp."
@@ -60,10 +60,6 @@ rule_args() {  # em RULE: os argumentos da regra de uma porta. O --ctorigdstport
 }
 current_rules() {  # as regras desta máquina na DOCKER-USER, uma por linha
   $SUDO iptables -w 5 -S DOCKER-USER 2>/dev/null | grep -- '--ctorigdstport' || true
-}
-unit_specs() {  # as portas gravadas no serviço: é a lista que ele repõe no boot
-  [ -f "$UNIT_FILE" ] || return 0
-  sed -n 's|^ExecStart=.*/docker-user\.sh apply \(.*\)$|\1|p' "$UNIT_FILE"
 }
 remove_rule() {  # remove_rule <spec>, todas as cópias; a criada à mão pode ter mais de uma
   rule_args "$1"
@@ -122,11 +118,11 @@ install_unit() {  # install_unit <portas...>: o serviço que repõe a regra depo
 case "$VERB" in
   show)
     current_rules | sed 's/^-A DOCKER-USER //' | sed 's/^/  /'
-    if [ -f "$UNIT_FILE" ]; then info "no boot, o serviço repõe: $(unit_specs)"; fi
+    if [ -f "$UNIT_FILE" ]; then info "no boot, o serviço repõe: $(docker_user_unit_specs)"; fi
     ;;
   apply)
     # As portas de antes que saíram da lista perdem a regra: o serviço passa a ser a lista nova.
-    for old in $(unit_specs); do
+    for old in $(docker_user_unit_specs); do
       case " $SPECS " in *" $old "*) continue ;; esac
       if [ "$DRY_RUN_RULE" = 1 ]; then info "[simulação] faria: reabrir $old (saiu da lista)"
       else remove_rule "$old"; ok "porta reaberta: $old (saiu da lista)"; fi

@@ -238,7 +238,9 @@ perder os dados: copie `deploy/.env`, `deploy/app.env` e `deploy/migrate.env` da
 do backup dela) para a nova e rode `DESKVOICE_ADOPT=yes bash install/install.sh`. Sem esses três
 arquivos o instalador para: os segredos seriam outros, e o banco que já existe recusaria a
 conexão. Com eles, tira os contêineres criados pela pasta antiga e os recria a partir da nova; os
-volumes, onde ficam os dados, têm o nome fixo do projeto e são os mesmos. Com a pasta dona ainda
+volumes, onde ficam os dados, têm o nome fixo do projeto e são os mesmos. Se havia portas fechadas
+no `DOCKER-USER`, o serviço que as repõe no boot é regravado para rodar o script da pasta nova, com
+as mesmas portas, sem precisar de `DESKVOICE_DOCKER_USER_DROP`. Com a pasta dona ainda
 existindo, a opção para com erro: duas pastas mandariam nos mesmos contêineres.
 
 `--build` é para quem desenvolve. Imagem construída na VPS não é a que o projeto testou e

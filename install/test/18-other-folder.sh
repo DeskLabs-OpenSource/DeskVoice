@@ -79,14 +79,21 @@ mv "$FAKE_DIR/ss_udp.antes" "$FAKE_DIR/ss_udp"
 cp -p "$D/.env" "$D/app.env" "$D/migrate.env" "$N/"
 secrets_before="$(cat "$N/.env" "$N/app.env" "$N/migrate.env" | grep -E 'PASSWORD|SECRET|TOKEN' | cksum)"
 echo 1 > "$FAKE_DIR/users_count"; : > "$FAKE_DIR/calls.log"
-out="$(adopt)"; equal "adotar com os arquivos de ambiente: termina bem" 0 "$?"
+# O serviço do DOCKER-USER foi gravado pela pasta antiga, e o ExecStart aponta para o script de lá,
+# que sumiu. Adotar sem DESKVOICE_DOCKER_USER_DROP regrava o serviço daqui, com as portas que ele tem.
+DU_UNIT="$DESKVOICE_SYSTEMD_DIR/deskvoice-docker-user.service"
+printf 'ExecStart=/usr/bin/env bash %s/install/docker-user.sh apply 5060/udp\n' "$(dirname "$GONE")" > "$DU_UNIT"
+out="$(unset DESKVOICE_DOCKER_USER_DROP; adopt)"; equal "adotar com os arquivos de ambiente: termina bem" 0 "$?"
+equal "adotar: o serviço do DOCKER-USER aponta para esta pasta, com as mesmas portas" \
+  "ExecStart=/usr/bin/env bash $KIT/docker-user.sh apply 5060/udp" "$(grep '^ExecStart=' "$DU_UNIT")"
 contains "adotar: diz de que pasta adotou" "$out" "feita a partir de $GONE"
 equal "adotar: os segredos são os da pasta antiga" "$secrets_before" "$(cat "$N/.env" "$N/app.env" "$N/migrate.env" | grep -E 'PASSWORD|SECRET|TOKEN' | cksum)"
 equal "adotar: tira os contêineres antigos uma vez" 1 "$(grep -c ' down --remove-orphans' "$FAKE_DIR/calls.log")"
 equal "adotar: nenhum volume é apagado" 0 "$(grep -cE ' volume rm| down .*(-v|--volumes)' "$FAKE_DIR/calls.log")"
 # Os volumes têm o nome do projeto, e não da pasta: ninguém troca o nome do projeto, que é fixo.
 equal "adotar: o nome do projeto é o fixo" 1 "$(grep -cx 'name: deskvoice' "$N/docker-compose.yml")"
-equal "adotar: nenhum comando troca o nome do projeto" 0 "$(grep -cE ' -p | --project-name' "$FAKE_DIR/calls.log")"
+# Só as chamadas do Docker: o -p do iptables (o protocolo da regra do DOCKER-USER) não conta.
+equal "adotar: nenhum comando troca o nome do projeto" 0 "$(grep -vE '^(iptables|sudo) ' "$FAKE_DIR/calls.log" | grep -cE ' -p | --project-name')"
 first_down="$(grep -n ' down ' "$FAKE_DIR/calls.log" | head -n 1 | cut -d: -f1)"
 first_up="$(grep -n ' up -d' "$FAKE_DIR/calls.log" | head -n 1 | cut -d: -f1)"
 check "adotar: os contêineres são tirados antes de subirem daqui" test "${first_down:-0}" -gt 0 -a "${first_down:-0}" -lt "${first_up:-0}"

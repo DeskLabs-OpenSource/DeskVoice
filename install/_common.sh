@@ -783,6 +783,11 @@ AGENT_UNIT="deskvoice-agent"
 SYSTEMD_DIR="${DESKVOICE_SYSTEMD_DIR:-/etc/systemd/system}"
 SYSTEMD_RUN_DIR="${DESKVOICE_SYSTEMD_RUN_DIR:-/run/systemd/system}"
 CRON_DIR="${DESKVOICE_CRON_DIR:-/etc/cron.d}"
+DOCKER_USER_UNIT_FILE="$SYSTEMD_DIR/deskvoice-docker-user.service"
+docker_user_unit_specs() {  # as portas gravadas no serviço do DOCKER-USER: é a lista que ele repõe no boot
+  [ -f "$DOCKER_USER_UNIT_FILE" ] || return 0
+  sed -n 's|^ExecStart=.*/docker-user\.sh apply \(.*\)$|\1|p' "$DOCKER_USER_UNIT_FILE"
+}
 agent_scheduler() {  # → systemd | cron | none
   if have systemctl && [ -d "$SYSTEMD_RUN_DIR" ]; then echo systemd
   elif [ -d "$CRON_DIR" ]; then echo cron
