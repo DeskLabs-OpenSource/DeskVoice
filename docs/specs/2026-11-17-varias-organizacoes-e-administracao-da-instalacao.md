@@ -546,6 +546,7 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 - Convite para um e-mail que já tem conta: o aceite usa a senha que a conta já tem, e não cria uma
   senha nova, sem que a página mude antes do envio.
 - Decidido em 18/11: a página do convite não muda conforme o e-mail até a pessoa enviar a senha.
+- Enquanto o convite não é aceito, a recusa da senha é a mesma para todo e-mail.
 - Seletor de organização no topo, só para quem tem mais de um vínculo ativo. `switchOrganization`.
 - Login volta para `last_organization_id`, ou para o vínculo mais antigo.
 - Desativar o vínculo numa organização não mexe nos outros. Trocar a senha encerra as sessões da
