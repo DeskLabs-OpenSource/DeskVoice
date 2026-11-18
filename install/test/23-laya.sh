@@ -24,7 +24,7 @@ lacks "o Laya não lê o app.env" "$laya_block" "env_file"
 lacks "o Laya não recebe chave nem segredo" "$laya_block" "KEY"
 contains "o Laya tem teto de memória" "$laya_block" "mem_limit: 3g"
 # shellcheck disable=SC2016  # procura o texto literal do Compose
-contains "o Laya tem teto de CPU, com padrão" "$laya_block" 'cpus: "${LAYA_CPUS:-2}"'
+contains "o Laya tem teto de CPU, com padrão" "$laya_block" 'cpus: "${LAYA_CPUS:-3}"'
 contains "o Laya tem healthcheck" "$laya_block" "healthcheck:"
 contains "o Laya só fica na rede interna" "$laya_block" "networks: [internal]"
 lacks "o Laya não monta volume" "$laya_block" "volumes:"
@@ -33,8 +33,10 @@ lacks "o Laya não monta volume" "$laya_block" "volumes:"
 : > "$FAKE_DIR/calls.log"
 out="$(bash "$KIT/update.sh" --to 0.2.0 --yes 2>&1)"; equal "a atualização sai com zero" 0 "$?"
 contains "a atualização baixa os três processos" "$(grep ' pull ' "$FAKE_DIR/calls.log")" "pull -q panel voice routines"
-lacks "a atualização não baixa, não constrói e não sobe o Laya" "$(cat "$FAKE_DIR/calls.log")" "laya"
-lacks "a atualização não liga o perfil do Laya" "$(cat "$FAKE_DIR/calls.log")" "--profile laya"
+# Os caminhos saem do registro antes da busca: uma pasta com "laya" no nome não derruba o teste.
+calls="$(cat "$FAKE_DIR/calls.log")"; calls="${calls//"$SANDBOX"/}"; calls="${calls//"$REPO"/}"
+lacks "a atualização não baixa, não constrói e não sobe o Laya" "$calls" "laya"
+lacks "a atualização não liga o perfil do Laya" "$calls" "--profile laya"
 lacks "a atualização não escreve a marca do Laya" "$(cat "$DESKVOICE_DEPLOY_DIR/.env")" "LAYA"
 
 finish

@@ -28,12 +28,14 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1+c
 # Os pesos: o checkpoint multilíngue de convaiinnovations/laya, na revisão em que a bancada mediu a
 # rodada 3 (15/11/2026). As três revisões que o repositório teve entre 14 e 15/11 trazem os mesmos
 # arquivos dessa subpasta (resumos conferidos em 18/11/2026). Arquivo que não bate com o resumo
-# para o build.
+# para o build. O cache fica com o usuário do processo (uid 10001, criado abaixo), na mesma camada,
+# para o Hugging Face não avisar Permission denied ao subir, sem duplicar os pesos na imagem.
 ENV LAYA_REVISION=e333cb7c823cd1787276228260f56d02fbf5180b
 COPY weights.sha256 ./
 RUN python -I -c "from huggingface_hub import snapshot_download; print(snapshot_download('convaiinnovations/laya', revision='${LAYA_REVISION}', allow_patterns=['multilingual/rl_agent_config.json', 'multilingual/model.safetensors', 'multilingual/tokenizer/*', 'multilingual/encoder/*']))" > /tmp/weights-dir \
  && cd "$(cat /tmp/weights-dir)" && sha256sum -c /opt/laya/weights.sha256 \
- && rm /tmp/weights-dir
+ && rm /tmp/weights-dir \
+ && chown -R 10001 /opt/laya/hf
 
 # Daqui em diante, nada sai: sem os pesos certos na imagem, o carregamento falha em vez de baixar.
 ENV HF_HUB_OFFLINE=1 \

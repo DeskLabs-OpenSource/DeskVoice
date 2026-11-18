@@ -251,13 +251,14 @@ services:
     # segue sem filtro.
     mem_limit: 3g
     # O teto de CPU existe para o Laya não tirar processador do áudio das ligações: a rodada 3 mediu
-    # 2,07 núcleos com uma chamada e 2,85 com três, numa VPS de 4. O padrão 2 ainda NÃO foi medido
-    # com a voz ao lado; a medida da fatia 8a é que o confirma ou o desce.
-    cpus: "${LAYA_CPUS:-2}"
+    # 2,07 núcleos com uma chamada e 2,85 com três, numa VPS de 4. A medida da fatia 8a (18/11/2026)
+    # fixou o padrão em 3: com teto 3 passou em todas as réguas; com 2, só 1% das passadas chegou a
+    # tempo com três chamadas.
+    cpus: "${LAYA_CPUS:-3}"
     environment:
       # As linhas de cálculo do torch acompanham o teto (arredondado para baixo): mais linhas que
       # núcleos só disputariam a mesma fatia de CPU.
-      LAYA_THREADS: "${LAYA_CPUS:-2}"
+      LAYA_THREADS: "${LAYA_CPUS:-3}"
     healthcheck:
       # 200 só depois de o modelo carregar. A imagem traz o Python.
       test: ["CMD", "python", "-I", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]

@@ -125,7 +125,7 @@ mesma, com os núcleos e a memória lidos do `/health` do serviço:
 
 ```bash
 docker build --target laya -t deskvoice-laya:local deploy/laya
-docker run -d --rm --name laya-bancada -p 127.0.0.1:8000:8000 --cpus 2 --memory 3g -e LAYA_THREADS=2 deskvoice-laya:local
+docker run -d --rm --name laya-bancada -p 127.0.0.1:8000:8000 --cpus 3 --memory 3g -e LAYA_THREADS=3 deskvoice-laya:local
 BANCADA_LAYA_URL=http://127.0.0.1:8000 pnpm exec tsx scripts/bancada-de-voz/medir.ts --teto-usd 0 --servicos nenhum --decisor laya
 ```
 
