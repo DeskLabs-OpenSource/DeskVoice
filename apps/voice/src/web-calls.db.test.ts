@@ -1,7 +1,8 @@
 // Chamada pelo navegador, de ponta a ponta: a API interna entrega o token, um cliente WebSocket de
 // verdade faz o papel da tela, o motor segue um roteiro e o banco é real.
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { recordingPath, withSystem } from "@deskvoice/core";
@@ -140,6 +141,30 @@ function browser(token: string | undefined, route = "/voice-ws"): Browser {
   return client;
 }
 
+/**
+ * Um pedido de upgrade cru, sem cliente WebSocket: devolve a linha de status da resposta. Com
+ * `key: false` o pedido sai sem `Sec-WebSocket-Key`, um handshake que não completa.
+ */
+function rawUpgrade(route: string, options: { key?: boolean } = {}): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(server?.webPort ?? 0, "127.0.0.1");
+    let received = "";
+    socket.on("connect", () => {
+      // Como um cliente de verdade: 16 bytes ao acaso, em base64.
+      const key = options.key === false ? "" : `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}\r\n`;
+      socket.write(`GET ${route} HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n${key}Origin: https://painel.exemplo.test\r\n\r\n`);
+    });
+    socket.on("data", (chunk: Buffer) => {
+      received += chunk.toString("latin1");
+    });
+    socket.on("error", reject);
+    socket.on("close", () => resolve(received.split("\r\n")[0] ?? ""));
+    // Se o servidor abrisse o WebSocket, a conexão ficaria de pé: a linha 101 basta para o teste.
+    socket.setTimeout(2_000, () => socket.destroy());
+  });
+}
+const tokenRoute = (token: string | undefined, route = "/voice-ws"): string => `${route}${token === undefined ? "" : `?token=${encodeURIComponent(token)}`}`;
+
 async function call(made: Scene): Promise<{ callId: string; token: string; client: Browser }> {
   const { status, body } = await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER });
   expect(status).toBe(200);
@@ -255,33 +280,34 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect(client.messages[0]?.type).toBe("ready");
   });
 
-  it("token ausente, errado, vencido, já usado ou em caminho estranho: fecha com 4401 e a chamada não começa", async () => {
+  it("token ausente, errado, já usado ou em caminho estranho: resposta HTTP 401 ou 404, nunca 101, e a chamada não começa", async () => {
     const made = await scene("web-token", { script: [{ expectUserAudio: 100_000 }] });
     const request = async () => (await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER })).body;
-    const refused = async (client: Browser): Promise<void> => {
-      await waitFor(() => client.closed !== undefined, "the socket to be closed");
-      expect(client.closed).toBe(4401);
-      expect(client.messages).toEqual([]);
-      expect(client.audioBytes).toBe(0);
-    };
 
     const first = await request();
-    await refused(browser(undefined));
-    await refused(browser(""));
-    await refused(browser("token-inventado"));
-    await refused(browser(`${first.token}x`));
-    await refused(browser(first.token?.slice(0, -1)));
+    expect(await rawUpgrade(tokenRoute(undefined))).toBe("HTTP/1.1 401 Unauthorized");
+    expect(await rawUpgrade(tokenRoute(""))).toBe("HTTP/1.1 401 Unauthorized");
+    expect(await rawUpgrade(tokenRoute("token-inventado"))).toBe("HTTP/1.1 401 Unauthorized");
+    expect(await rawUpgrade(tokenRoute(`${first.token}x`))).toBe("HTTP/1.1 401 Unauthorized");
+    expect(await rawUpgrade(tokenRoute(first.token?.slice(0, -1)))).toBe("HTTP/1.1 401 Unauthorized");
+    // O cliente WebSocket de verdade nem chega a abrir.
+    const stranger = browser("token-inventado");
+    await waitFor(() => stranger.closed !== undefined, "the socket to be refused");
+    expect(stranger.closed).toBe(1006);
+    expect(stranger.messages).toEqual([]);
     // Nada disso gastou o token nem começou a chamada.
     expect(await kindsOf(app, first.callId ?? "")).toEqual([]);
 
-    // Caminho que não é o da chamada: recusado, e o token nem é olhado.
-    await refused(browser(first.token, "/outra-coisa"));
+    // Caminho que não é o da chamada: 404, e o token nem é olhado.
+    expect(await rawUpgrade(tokenRoute(first.token, "/outra-coisa"))).toBe("HTTP/1.1 404 Not Found");
     expect((await callOf(app, first.callId ?? "")).status).toBe("ringing");
+    // Pedido HTTP comum, sem upgrade: aqui só se fala WebSocket.
+    expect((await fetch(`http://127.0.0.1:${server?.webPort}/voice-ws`)).status).toBe(426);
 
     // O token vale uma vez: a segunda conexão com ele é recusada, e a primeira segue.
     const good = browser(first.token);
     await waitFor(() => good.messages[0], "the ready message");
-    await refused(browser(first.token));
+    expect(await rawUpgrade(tokenRoute(first.token))).toBe("HTTP/1.1 401 Unauthorized");
     expect(good.closed).toBeUndefined();
     await waitFor(async () => (await kindsOf(app, first.callId ?? "")).includes("call_answered"), "the call to be answered");
     expect((await kindsOf(app, first.callId ?? "")).filter((kind) => kind === "call_started")).toHaveLength(1);
@@ -294,11 +320,34 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect(onSecond.messages[0]).toEqual({ type: "ready", callId: second.callId });
     expect((await callOf(app, third.callId ?? "")).status).toBe("ringing");
 
-    // Vencido: 60 s depois o token não vale, e a chamada dele é fechada em vez de ficar tocando.
+    // Vencido, de quem recebeu o convite: abre e fecha com 4401, para a tela dizer que o convite
+    // venceu, e a chamada dele é fechada em vez de ficar tocando.
     made.clock.advance(60_000);
-    await refused(browser(third.token));
+    const late = browser(third.token);
+    await waitFor(() => late.closed !== undefined, "the socket to be closed");
+    expect(late.closed).toBe(4401);
+    expect(late.messages).toEqual([]);
+    expect(late.audioBytes).toBe(0);
     await waitFor(async () => (await callOf(app, third.callId ?? "")).status === "failed", "the expired call to be closed");
     expect(await callOf(app, third.callId ?? "")).toMatchObject({ status: "failed", end_reason: "web_never_connected" });
+  });
+
+  it("convite válido com handshake que não completa: a chamada fecha como nunca conectada e a vaga do teto volta", async () => {
+    const made = await scene("web-bad-handshake", { script: [{ expectUserAudio: 100_000 }] });
+    const ask = () => made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER });
+    const first = (await ask()).body;
+    expect((await ask()).status).toBe(200);
+    expect((await ask()).status).toBe(200);
+    expect((await ask()).status).toBe(409);
+
+    // Sem `Sec-WebSocket-Key`: o token é gasto e o handshake falha.
+    expect(await rawUpgrade(tokenRoute(first.token), { key: false })).toMatch(/^HTTP\/1\.1 400 /);
+    await waitFor(async () => (await callOf(app, first.callId ?? "")).status === "failed", "the call to be closed");
+    expect(await callOf(app, first.callId ?? "")).toMatchObject({ status: "failed", end_reason: "web_never_connected" });
+    expect(await kindsOf(app, first.callId ?? "")).toEqual(["call_ended"]);
+    // A vaga voltou sem esperar o prazo do token, e o token não vale mais.
+    expect((await ask()).status).toBe(200);
+    expect(await rawUpgrade(tokenRoute(first.token))).toBe("HTTP/1.1 401 Unauthorized");
   });
 
   it("nunca conectou em 60 s: a chamada é fechada como falha, com evento, uma vez só", async () => {
@@ -311,10 +360,8 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     await waitFor(async () => (await callOf(app, callId)).status === "failed", "the call to be closed");
     expect(await callOf(app, callId)).toMatchObject({ status: "failed", end_reason: "web_never_connected", ended_at: made.clock.now() });
     expect(await eventsOf(app, callId)).toEqual([{ kind: "call_ended", payload: { status: "failed", reason: "web_never_connected", channel: "web" } }]);
-    // O token morreu junto.
-    const late = browser(body.token);
-    await waitFor(() => late.closed !== undefined, "the socket to be closed");
-    expect(late.closed).toBe(4401);
+    // O token morreu junto: o upgrade nem abre.
+    expect(await rawUpgrade(tokenRoute(body.token))).toBe("HTTP/1.1 401 Unauthorized");
     expect(await kindsOf(app, callId)).toEqual(["call_ended"]);
   });
 
