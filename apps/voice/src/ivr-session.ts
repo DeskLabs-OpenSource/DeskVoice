@@ -24,6 +24,11 @@ import { failureTone, realSchedule, type CallTransport, type KeypadTransport, ty
  * `scripts/fala-da-ura/gerar.sh`), porque a URA não depende de chave de IA. Se a fala não se lê, quem
  * está na linha ouve os três bipes de `failureTone`.
  *
+ * **O erro inesperado também vai à pessoa.** Toda entrada assíncrona da sessão (o começo, a espera, a
+ * tecla, a passagem à IA, o desligar e o `stop`) passa por `guard`, que leva qualquer rejeição a
+ * `failUnexpected`: a fala `failed`, a pessoa do menu (ou desligar, se ela sumiu) e
+ * `ivr_failed { unexpected }`. Nenhuma ligação fica muda por uma promessa sem `catch`.
+ *
  * **A passagem à IA.** A opção `agent` grava o agente na chamada e abre a conversa no mesmo
  * transporte (`startAgent`). Antes, a URA neutraliza os próprios handlers: a tecla vira no-op e o
  * desligar que ela registrou passa a ignorar, porque no Asterisk o `onHangup` acumula ouvintes. Daí
@@ -85,7 +90,7 @@ export interface IvrSession {
   stop(reason: string): void;
 }
 
-type IvrFailure = "prompt_unreadable" | "no_person_exit" | "agent_disabled";
+type IvrFailure = "prompt_unreadable" | "no_person_exit" | "agent_disabled" | "unexpected";
 
 interface Ending {
   result: IvrResult;
@@ -200,6 +205,20 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
     return end({ result: "failed", status: "transferred", endReason: "ivr_failed", speech: "failed", transferTo: person.transferE164, events: [...events, failed], notice });
   };
 
+  /**
+   * A porta única do erro inesperado: `log error` (só a mensagem do erro, nunca uma tecla) e a pessoa.
+   * Depois que a URA decidiu, não faz nada além do log (o `end()` já protege).
+   */
+  const failUnexpected = (error: unknown): Promise<void> => {
+    log("error", "ivr session failed", { error: messageOf(error) });
+    return failToPerson("unexpected", []);
+  };
+
+  /** Toda promessa da sessão que ninguém espera passa por aqui, em vez de `void`. */
+  const guard = (work: Promise<void>): void => {
+    work.catch(failUnexpected).catch((error: unknown) => log("error", "could not end the ivr after an unexpected failure", { error: messageOf(error) }));
+  };
+
   /** A opção `agent`: o agente precisa estar ligado na hora; a conversa assume no mesmo transporte. */
   async function handOff(option: IvrOption, chosen: object): Promise<void> {
     await begun;
@@ -219,23 +238,24 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
     // Quem ligou desligou enquanto o banco gravava: a URA já encerrou.
     if (settled) return;
     if (!enabled || !option.agentId) return failToPerson("agent_disabled", [["ivr_option_chosen", chosen]]);
-    settled = true;
     cancelWait?.();
-    // Daqui em diante a chamada é da conversa: a tecla e o desligar da URA não fazem mais nada.
+    // Daqui em diante a tecla é da conversa. `phase = "deciding"` já segurava a tecla até aqui.
     transport.onDtmf(() => undefined);
-    log("info", "ivr handed the call to the agent", { agentId: option.agentId });
+    // `settled` só depois de a conversa abrir: se ela lança, a URA ainda encerra e vai à pessoa.
     deps.startAgent(option.agentId, transport);
+    settled = true;
+    log("info", "ivr handed the call to the agent", { agentId: option.agentId });
     resolveDone({ result: "agent", endReason: null });
   }
 
   function choose(option: IvrOption): void {
     phase = "deciding";
     const chosen = chosenPayload(option, elapsed());
-    if (option.action === "agent") return void handOff(option, chosen);
+    if (option.action === "agent") return guard(handOff(option, chosen));
     if (option.action === "transfer" && option.transferE164) {
-      return void end({ result: "transfer", status: "transferred", endReason: "transferred", transferTo: option.transferE164, events: [["ivr_option_chosen", chosen]] });
+      return guard(end({ result: "transfer", status: "transferred", endReason: "transferred", transferTo: option.transferE164, events: [["ivr_option_chosen", chosen]] }));
     }
-    void end({ result: "hangup", status: "completed", endReason: "ivr_hangup", events: [["ivr_option_chosen", chosen], ["ivr_ended", { reason: "option_hangup" }]] });
+    guard(end({ result: "hangup", status: "completed", endReason: "ivr_hangup", events: [["ivr_option_chosen", chosen], ["ivr_ended", { reason: "option_hangup" }]] }));
   }
 
   async function noChoice(kind: "timeout" | "invalid"): Promise<void> {
@@ -263,7 +283,7 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
     if (settled || attempt !== mine || phase !== "prompt") return;
     phase = "waiting";
     cancelWait = schedule(() => {
-      if (!settled && attempt === mine && phase === "waiting") void noChoice("timeout");
+      if (!settled && attempt === mine && phase === "waiting") guard(noChoice("timeout"));
     }, menu.timeoutMs);
   }
 
@@ -274,7 +294,7 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
     cancelWait?.();
     const option = menu.options.find((candidate) => candidate.digit === digit);
     if (option) choose(option);
-    else void noChoice("invalid");
+    else guard(noChoice("invalid"));
   }
 
   async function run(): Promise<void> {
@@ -309,16 +329,13 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
   transport.onDtmf(press);
   transport.onHangup(() => {
     if (settled) return;
-    void end({ result: "caller_hangup", status: "completed", endReason: "caller_hangup", callerGone: true, events: [["ivr_ended", { reason: "caller_hangup" }]] });
+    guard(end({ result: "caller_hangup", status: "completed", endReason: "caller_hangup", callerGone: true, events: [["ivr_ended", { reason: "caller_hangup" }]] }));
   });
 
-  run().catch((error: unknown) => {
-    log("error", "ivr session failed", { error: messageOf(error) });
-    return end({ result: "failed", status: "failed", endReason: "internal_error", speech: "failed", events: [] });
-  });
+  guard(run());
 
   return {
     done,
-    stop: (reason) => void end({ result: "stopped", status: "completed", endReason: reason, events: [["ivr_ended", { reason: "stopped" }]] }),
+    stop: (reason) => guard(end({ result: "stopped", status: "completed", endReason: reason, events: [["ivr_ended", { reason: "stopped" }]] })),
   };
 }

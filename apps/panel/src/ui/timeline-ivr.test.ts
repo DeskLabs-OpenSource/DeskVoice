@@ -61,6 +61,16 @@ describe("linha do tempo do menu por teclas", () => {
     expect(es.reasons.ivr_failed).not.toMatch(/aviso/);
   });
 
+  it("o erro inesperado tem frase nos três idiomas e não aponta para um aviso no painel", () => {
+    for (const [locale, dictionary] of [["pt-BR", ptBR], ["en", en], ["es", es]] as const) {
+      const html = visible(render([event("1", "ivr_failed", { reason: "unexpected" })], locale)).replaceAll("&#x27;", "'");
+      expect(dictionary.events.ivr_failed_reasons.unexpected, locale).toBeTruthy();
+      expect(html).toContain(dictionary.events.ivr_failed_reasons.unexpected);
+      expect(html).not.toContain(dictionary.events.ivr_failed_unknown);
+      expect(html).not.toContain(dictionary.events.ivr_failed_notice);
+    }
+  });
+
   it("o fim pelo menu tem frase para cada motivo", () => {
     const html = render([
       event("1", "ivr_ended", { reason: "no_choice", then: "person" }),

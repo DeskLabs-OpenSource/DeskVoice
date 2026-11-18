@@ -151,6 +151,7 @@ const timeline = {
       prompt_unreadable: "O anúncio do menu não pôde ser tocado. Quem ligou ouviu a fala de falha e foi passado para a pessoa do menu (ou desligado, se não havia pessoa).",
       no_person_exit: "O menu não tinha nenhuma tecla que levasse a uma pessoa. Quem ligou ouviu a fala de falha, e a ligação foi encerrada.",
       agent_disabled: "O agente da opção escolhida estava desligado. Quem ligou ouviu a fala de falha e foi passado para a pessoa do menu (ou desligado, se não havia pessoa). Ligue o agente, ou troque a tecla, em Linha telefônica.",
+      unexpected: "Um erro inesperado no menu. Quem ligou ouviu a fala de falha e foi passado para a pessoa do menu (ou desligado, se não havia pessoa).",
     },
     ivr_failed_unknown: "Quem ligou ouviu a fala de falha.",
     ivr_failed_notice: "Há um aviso sobre isso em Avisos (o sino, no alto da tela), com o que fazer no menu.",
