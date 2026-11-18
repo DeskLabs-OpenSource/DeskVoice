@@ -1,0 +1,2 @@
+// Auxiliar da pasta `test/` na raiz do pacote: é teste e fica de fora.
+export const url = process.env.TEST_HELPER_ONLY;

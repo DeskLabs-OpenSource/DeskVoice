@@ -7,6 +7,7 @@ export * from "./caller-message";
 export * from "./caller-memory";
 export * from "./clock";
 export * from "./config";
+export * from "./costs";
 export * from "./db";
 export * from "./erasures";
 export * from "./share-links";
