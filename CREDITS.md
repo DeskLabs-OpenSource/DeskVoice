@@ -157,7 +157,8 @@ sobre o codificador [mmBERT-base](https://huggingface.co/jhu-clsp/mmBERT-base), 
 licença MIT. A imagem também leva o pacote [`laya`](https://pypi.org/project/laya/) 0.4.31 (Apache
 2.0), o [PyTorch](https://pytorch.org) de CPU (licença BSD e as das partes que ele inclui) e as
 bibliotecas do Hugging Face `transformers`, `tokenizers`, `safetensors` e `huggingface_hub` (Apache
-2.0). As versões estão em `deploy/laya/requirements.txt`. O servidor HTTP da imagem
+2.0). As versões estão em `deploy/laya/requirements.txt`, e a do PyTorch, em
+`deploy/laya/requirements-torch.txt`. O servidor HTTP da imagem
 (`deploy/laya/server.py`) foi escrito do zero para o DeskVoice, e o pacote traz um servidor próprio
 que não é usado.
 
