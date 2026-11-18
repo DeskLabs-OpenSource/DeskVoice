@@ -163,6 +163,31 @@ function rawUpgrade(route: string, options: { key?: boolean } = {}): Promise<str
     socket.setTimeout(2_000, () => socket.destroy());
   });
 }
+/**
+ * Uma conexão TCP que fica de pé: manda `request` e depois não diz mais nada, nem responde ao
+ * fechamento do WebSocket. `closed` resolve quando o servidor derruba a conexão.
+ */
+function hangingConnection(request: string): Promise<{ received: () => string; closed: Promise<void> }> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(server?.webPort ?? 0, "127.0.0.1");
+    let received = "";
+    const closed = new Promise<void>((done) => socket.on("close", () => done()));
+    socket.on("data", (chunk: Buffer) => {
+      received += chunk.toString("latin1");
+    });
+    socket.on("error", () => undefined);
+    socket.on("connect", () => {
+      socket.write(request);
+      resolve({ received: () => received, closed });
+    });
+    socket.once("error", reject);
+  });
+}
+const upgradeRequest = (route: string): string =>
+  `GET ${route} HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${randomBytes(16).toString("base64")}\r\n\r\n`;
+/** Falha em vez de pendurar o teste quando a promessa não resolve no prazo. */
+const within = <T>(promise: Promise<T>, ms: number, what: string): Promise<T> =>
+  Promise.race([promise, new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error(`${what} did not happen in ${ms} ms`)), ms))]);
 const tokenRoute = (token: string | undefined, route = "/voice-ws"): string => `${route}${token === undefined ? "" : `?token=${encodeURIComponent(token)}`}`;
 
 async function call(made: Scene): Promise<{ callId: string; token: string; client: Browser }> {
@@ -350,19 +375,57 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect(await rawUpgrade(tokenRoute(first.token))).toBe("HTTP/1.1 401 Unauthorized");
   });
 
-  it("nunca conectou em 60 s: a chamada é fechada como falha, com evento, uma vez só", async () => {
+  it("nunca conectou em 60 s: a chamada é fechada como falha, com evento, uma vez só, e a vaga volta", async () => {
     const made = await scene("web-never", { script: [{ expectUserAudio: 100_000 }] });
-    const { body } = await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER });
+    const ask = () => made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER });
+    const { body } = await ask();
     const callId = body.callId ?? "";
+    expect((await ask()).status).toBe(200);
+    expect((await ask()).status).toBe(200);
+    expect((await ask()).status).toBe(409);
     expect(made.timers.held()).toContain(60_000);
     made.clock.advance(60_000);
-    expect(made.timers.fire(60_000)).toBe(1);
+    expect(made.timers.fire(60_000)).toBe(3);
     await waitFor(async () => (await callOf(app, callId)).status === "failed", "the call to be closed");
     expect(await callOf(app, callId)).toMatchObject({ status: "failed", end_reason: "web_never_connected", ended_at: made.clock.now() });
     expect(await eventsOf(app, callId)).toEqual([{ kind: "call_ended", payload: { status: "failed", reason: "web_never_connected", channel: "web" } }]);
-    // O token morreu junto: o upgrade nem abre.
+    await waitFor(async () => (await ask()).status === 200, "a slot to come back after the token expired");
+
+    // A tela conecta depois do prazo: abre e fecha com 4401, para dizer que o convite venceu.
+    const late = browser(body.token);
+    await waitFor(() => late.closed !== undefined, "the socket to be closed");
+    expect(late.closed).toBe(4401);
+    expect(late.messages).toEqual([]);
+    expect(await kindsOf(app, callId)).toEqual(["call_ended"]);
+    // O convite vencido também vale uma vez só: na segunda, nem abre.
     expect(await rawUpgrade(tokenRoute(body.token))).toBe("HTTP/1.1 401 Unauthorized");
     expect(await kindsOf(app, callId)).toEqual(["call_ended"]);
+  });
+
+  it("convite vencido é lembrado por 30 min: depois disso, o upgrade nem abre", async () => {
+    const made = await scene("web-forgotten", { script: [{ expectUserAudio: 100_000 }] });
+    const { body } = await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER });
+    made.clock.advance(60_000);
+    expect(made.timers.fire(60_000)).toBe(1);
+    await waitFor(async () => (await callOf(app, body.callId ?? "")).status === "failed", "the call to be closed");
+    expect(made.timers.held()).toContain(30 * 60_000);
+    made.clock.advance(30 * 60_000);
+    expect(made.timers.fire(30 * 60_000)).toBe(1);
+    expect(await rawUpgrade(tokenRoute(body.token))).toBe("HTTP/1.1 401 Unauthorized");
+    expect(await kindsOf(app, body.callId ?? "")).toEqual(["call_ended"]);
+  });
+
+  it("close() derruba o que estiver aberto: conexão com cabeçalho pela metade e WebSocket que não responde ao fechamento", async () => {
+    const made = await scene("web-close", { script: [{ expectUserAudio: 100_000 }] });
+    const { body } = await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER });
+    const half = await hangingConnection("GET /voice-ws HTTP/1.1\r\nHost: 127.0.0.1\r\n");
+    const open = await hangingConnection(upgradeRequest(tokenRoute(body.token)));
+    await waitFor(() => open.received().startsWith("HTTP/1.1 101 "), "the WebSocket to open");
+    await waitFor(async () => (await kindsOf(app, body.callId ?? "")).includes("call_answered"), "the call to be answered");
+
+    await within(server?.close() ?? Promise.resolve(), 5_000, "close()");
+    server = undefined;
+    await within(Promise.all([half.closed, open.closed]), 2_000, "both connections closing");
   });
 
   it("navegador fecha o socket no meio de uma espera: a chamada é encerrada uma vez só, como desligamento", async () => {
