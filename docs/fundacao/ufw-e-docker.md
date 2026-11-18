@@ -334,37 +334,53 @@ A regra que o kit escreve não é, letra por letra, a medida acima. Cada porta g
 família de ponte do Docker (`docker0` e as `br-*` das redes do Compose, como a do DeskVoice):
 
 ```
-! -i docker+ -o docker+ -p tcp -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
-! -i br-+ -o br-+ -p tcp -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
+-o docker+ -p tcp -m physdev ! --physdev-is-bridged -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
+-o br-+ -p tcp -m physdev ! --physdev-is-bridged -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
 ```
 
 O motivo é a direção. A `DOCKER-USER` vê os dois sentidos do tráfego dos contêineres, e
 `--ctorigdstport N --ctdir ORIGINAL` sozinho também casa com a conexão que o **contêiner** abre para
 fora com destino à porta `N`: fechar `5061/tcp` cortaria o SIP-TLS que o Asterisk abre para a
-operadora, e fechar `5060/udp` cortaria o registro dele num provedor que escuta na 5060. O par de
-interfaces separa os dois sentidos: o que chega de fora a um contêiner sai pela ponte (`-o`) sem ter
-vindo dela (`! -i`), tanto pelo `DNAT` da porta publicada (seção 6) quanto roteado direto ao IP do
-contêiner; a conexão que o contêiner abre sai pela interface de fora, e a resposta dela volta na
-direção `REPLY`. O tráfego entre contêineres da mesma rede também deixa de ser barrado.
+operadora, e fechar `5060/udp` cortaria o registro dele num provedor que escuta na 5060.
 
-As alternativas ficaram de fora. `--ctstate DNAT` caberia numa regra só, mas deixaria passar o que
-chega roteado direto ao IP do contêiner, sem passar pelo `DNAT`. Um `RETURN` antes da regra para
-`-i docker+` e `-i br-+` isentaria tudo o que sai dos contêineres de qualquer regra abaixo dele,
-inclusive das escritas por outra pessoa. Casar a interface de fora (`-i eth0`) não serve, porque o
-nome dela muda de máquina para máquina. As duas famílias de ponte não cabem numa regra só: o curinga
-do `iptables` é só de sufixo.
+O que separa os dois sentidos é a interface de **saída**. O que chega de fora a um contêiner, pelo
+`DNAT` da porta publicada (seção 6) ou roteado direto ao IP dele, é roteado para dentro da ponte do
+contêiner (`-o`), qualquer que seja a interface por onde entrou. A conexão que o contêiner abre sai
+pela interface de fora, e a resposta dela volta na direção `REPLY`: nenhuma das duas casa. O tráfego
+entre contêineres da mesma rede não é roteado, é passado de uma porta da ponte para outra, e o
+`! --physdev-is-bridged` o deixa de fora.
 
-O que a regra nova barra a menos que a antiga: uma ponte com nome escolhido à mão
-(`com.docker.network.bridge.name`), fora de `docker*` e `br-*`; a rede do Compose do DeskVoice não
-escolhe nome. Quem já tinha a regra antiga (escrita à mão, como esta página ensinava, ou por uma
-versão de teste deste script) é avisado: ao aplicar, e a cada boot pelo serviço, o script escreve as
-novas, tira todas as cópias da antiga, nessa ordem, e diz que trocou.
+As alternativas ficaram de fora, e cada uma por uma brecha:
+
+- `--ctstate DNAT` caberia numa regra só, mas deixaria passar o que chega roteado direto ao IP do
+  contêiner, sem passar pelo `DNAT`.
+- Isentar o que **entra** pelas pontes (`! -i br-+ -o br-+`, ou um `RETURN` para `-i br-+`) faz o
+  nome da interface de entrada abrir caminho: numa máquina com uma ponte do host chamada `br-algo`
+  (libvirt, LXD, rede montada à mão), o que chega de fora por ela passaria. O `RETURN` ainda isentaria
+  tudo o que sai dos contêineres de qualquer regra abaixo dele, inclusive das escritas por outra pessoa.
+- Ler o nome exato das pontes no Docker na hora de aplicar envelhece: uma rede recriada muda de nome,
+  e o serviço só reaplica no boot e a cada reinício do Docker.
+- Casar a interface de fora (`-i eth0`) não serve, porque o nome dela muda de máquina para máquina.
+
+Os limites da forma nova, os dois conhecidos:
+
+- **Falha fechada:** se a saída da máquina para fora é ela mesma uma ponte chamada `docker*` ou
+  `br-*`, a conexão do contêiner para a porta fechada também é barrada. Não abre entrada; corta essa
+  saída, como a forma antiga cortava em qualquer máquina.
+- **Fica aberta:** uma ponte do Docker com nome escolhido à mão (`com.docker.network.bridge.name`),
+  fora de `docker*` e `br-*`. A rede do Compose do DeskVoice não escolhe nome.
+
+Quem já tinha a regra antiga (escrita à mão, como esta página ensinava, ou por uma versão de teste
+deste script) é avisado: ao aplicar, e a cada boot pelo serviço, o script escreve as novas, tira
+todas as cópias da antiga, nessa ordem, e diz que trocou.
 
 O que foi medido e o que não foi: as tabelas acima mediram a forma **sem** as interfaces, que fechou
 a porta publicada em TCP e em UDP. A forma nova não foi medida numa máquina de verdade: nem que ela
 continua fechando a porta de fora, nem que deixa passar a conexão de saída do contêiner, nem o
-tráfego roteado direto ao IP dele. O que está provado é o raciocínio acima e o
-`bash install/test/run.sh`, que confere a forma escrita com um `iptables` de mentira.
+tráfego roteado direto ao IP dele, nem o comportamento do `physdev` com e sem o módulo
+`br_netfilter` carregado. O que está provado é o raciocínio acima e o `bash install/test/run.sh`,
+que lê as regras escritas e decide, pacote a pacote, o que elas barram: de fora pela `eth0` e por
+uma ponte do host `br-host`, a saída do contêiner, o tráfego entre contêineres da mesma rede.
 
 Uma porta é `porta` ou `min:max`, seguida de `/tcp` ou `/udp`, a mesma forma do `ufw`:
 
@@ -378,8 +394,8 @@ $ bash install/docker-user.sh apply 5061/tcp      # de novo: não duplica
   já estava fechada: 5061/tcp
 
 $ bash install/docker-user.sh show
-  ! -i br-+ -o br-+ -p tcp -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
-  ! -i docker+ -o docker+ -p tcp -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
+  -o br-+ -p tcp -m physdev ! --physdev-is-bridged -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
+  -o docker+ -p tcp -m physdev ! --physdev-is-bridged -m conntrack --ctorigdstport 5061 --ctdir ORIGINAL -j DROP
   no boot, o serviço repõe: 5061/tcp
 
 $ bash install/docker-user.sh apply              # sem portas: reabre e apaga o serviço

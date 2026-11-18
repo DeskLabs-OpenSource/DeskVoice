@@ -55,18 +55,20 @@ $SUDO sh -c 'command -v iptables' >/dev/null 2>&1 || die "Não achei o comando i
 ipt -S DOCKER-USER >/dev/null 2>&1 || die "A cadeia DOCKER-USER não existe nesta máquina: quem a cria é o Docker, quando sobe." "Ligue o Docker e rode de novo: $SUDO systemctl start docker"
 
 # Uma porta tem uma regra por família de ponte do Docker (docker0 e as br-* das redes do Compose),
-# em RULE: a que barra o que vai para dentro da ponte (-o) sem ter vindo dela (! -i). O que chega de
-# fora a um contêiner, pelo DNAT da porta publicada ou roteado direto ao IP dele, sai pela ponte; a
-# conexão que o contêiner abre para fora sai pela interface de fora, e a resposta dela volta na
-# direção REPLY: nenhuma das duas casa. Sem o par de interfaces, a regra também barrava a conexão de
-# saída (fechar 5061/tcp cortaria o SIP-TLS do Asterisk para a operadora). As duas famílias não
-# cabem numa regra só (o curinga do iptables é só de sufixo), e a interface de fora muda de máquina
-# para máquina. O --ctorigdstport enxerga a porta de fora: na DOCKER-USER o pacote já passou pelo
-# DNAT do Docker. Em LEGACY, a forma de antes (sem as interfaces), que o kit troca onde a achar.
+# em RULE: a que barra o que é roteado para dentro da ponte (-o). O que chega de fora a um contêiner,
+# pelo DNAT da porta publicada ou roteado direto ao IP dele, sai pela ponte, venha pela interface que
+# vier: nenhuma isenção depende do nome da interface de entrada, e uma ponte do host chamada br-algo
+# não abre caminho. A conexão que o contêiner abre para fora sai pela interface de fora, e a resposta
+# dela volta na direção REPLY: nenhuma das duas casa (fechar 5061/tcp não corta o SIP-TLS do Asterisk
+# para a operadora). O tráfego entre contêineres da mesma rede não é roteado, é passado de porta a
+# porta da ponte, e o ! --physdev-is-bridged o deixa de fora. O que fica sem cobertura é uma ponte do
+# Docker com nome escolhido à mão (fora de docker* e br-*); a do Compose do DeskVoice não escolhe nome.
+# O --ctorigdstport enxerga a porta de fora: na DOCKER-USER o pacote já passou pelo DNAT do Docker.
+# Em LEGACY, a forma de antes (sem as interfaces), que o kit troca onde a achar.
 BRIDGES="docker+ br-+"
 rule_args() {  # rule_args <spec> <ponte>
   local proto="${1#*/}" port="${1%/*}"
-  RULE=(! -i "$2" -o "$2" -p "$proto" -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL -j DROP)
+  RULE=(-o "$2" -p "$proto" -m physdev ! --physdev-is-bridged -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL -j DROP)
   LEGACY=(-p "$proto" -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL -j DROP)
 }
 current_rules() {  # as regras desta máquina na DOCKER-USER, uma por linha
@@ -101,7 +103,7 @@ apply_rule() {  # apply_rule <spec>: fecha a porta, uma regra por ponte
     info "[simulação] faria: trocar a regra antiga de $1 (${LEGACY[*]}) pela nova"
   else
     delete_all "${LEGACY[@]}"
-    warn "Troquei a regra antiga de $1 (${LEGACY[*]}) pela nova. A antiga também barrava a conexão que um contêiner abre para fora com destino a essa porta e o tráfego entre contêineres da mesma rede; a nova só barra o que entra numa ponte do Docker (docker0, br-*) vindo de fora dela."
+    warn "Troquei a regra antiga de $1 (${LEGACY[*]}) pela nova. A antiga também barrava a conexão que um contêiner abre para fora com destino a essa porta e o tráfego entre contêineres da mesma rede; a nova só barra o que é roteado para dentro de uma ponte do Docker (docker0, br-*)."
   fi
 }
 

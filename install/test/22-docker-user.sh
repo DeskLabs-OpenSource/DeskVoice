@@ -12,6 +12,38 @@ STATE="$FAKE_DIR/iptables_DOCKER-USER"
 rules() { if [ -f "$STATE" ]; then grep -c -- '--ctorigdstport' "$STATE" || true; else echo 0; fi; }
 calls() { grep -c -- "$1" "$FAKE_DIR/calls.log"; }
 tool() { bash "$KIT/docker-user.sh" "$@" 2>&1; }
+# O que as regras da cadeia fazem com um pacote, lido das próprias regras: o iptables de mentira só
+# guarda texto, e é aqui que a direção é posta à prova. Entende só o que o kit escreve; o resto para.
+#   drops <entra por> <sai por> <passado na ponte: sim|nao> <proto> <porta de destino original>
+iface_is() { case "$2" in "${1%+}"*) [ "${1%+}" != "$1" ] || [ "$1" = "$2" ] ;; *) return 1 ;; esac; }
+drops() {
+  local in="$1" out="$2" bridged="$3" proto="$4" port="$5" line neg hit t
+  [ -f "$STATE" ] || return 1
+  while IFS= read -r line; do
+    # shellcheck disable=SC2086  # a regra se divide em palavras de propósito; o set -f evita curinga
+    set -f; set -- $line; set +f
+    neg=0; hit=1
+    while [ $# -gt 0 ]; do
+      t=1
+      case "$1" in
+        '!') neg=1; shift; continue ;;
+        -i) iface_is "$2" "$in" || t=0; shift ;;
+        -o) iface_is "$2" "$out" || t=0; shift ;;
+        -p) [ "$2" = "$proto" ] || t=0; shift ;;
+        --physdev-is-bridged) [ "$bridged" = sim ] || t=0 ;;
+        --ctorigdstport) [ "$port" -ge "${2%:*}" ] && [ "$port" -le "${2#*:}" ] || t=0; shift ;;
+        --ctdir) [ "$2" = ORIGINAL ] || t=0; shift ;;
+        -m|-j) shift ;;
+        *) echo "drops: não entendo '$1'" >&2; return 2 ;;
+      esac
+      if [ "$neg" = 1 ]; then t=$((1 - t)); neg=0; fi
+      [ "$t" = 1 ] || hit=0
+      shift
+    done
+    [ "$hit" = 0 ] || return 0
+  done < "$STATE"
+  return 1
+}
 boot() {  # o que o systemd faz no boot: roda o ExecStart do serviço gravado
   local line; line="$(sed -n 's/^ExecStart=//p' "$UNIT")"
   [ -n "$line" ] || { echo "sem ExecStart em $UNIT"; return 1; }
@@ -23,12 +55,18 @@ boot() {  # o que o systemd faz no boot: roda o ExecStart do serviço gravado
 out="$(tool apply 5060/udp)"; equal "apply: sai com zero" 0 "$?"
 equal "apply: duas regras, uma por ponte" 2 "$(rules)"
 contains "apply: diz que fechou" "$out" "porta fechada: 5060/udp"
-# Só o que vai para dentro de uma ponte do Docker sem ter vindo dela: sem o par de interfaces, a
-# regra também casava com a conexão que o contêiner abre para fora com destino à mesma porta.
-check "apply: a regra da br-* só barra o que entra na ponte vindo de fora dela" \
-  grep -qFx -- "! -i br-+ -o br-+ -p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP" "$STATE"
-check "apply: a regra da docker0 só barra o que entra na ponte vindo de fora dela" \
-  grep -qFx -- "! -i docker+ -o docker+ -p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP" "$STATE"
+# A direção: o que chega de fora é barrado venha pela interface que vier, inclusive por uma ponte do
+# host chamada br-host, que não é do Docker; o que o contêiner abre para fora, e o que passa entre
+# contêineres da mesma rede, não. br-0123456789ab é a ponte de uma rede do Compose.
+check "direção: de fora pela eth0 até o contêiner, barrado" drops eth0 br-0123456789ab nao udp 5060
+check "direção: de fora por uma ponte do host br-host até o contêiner, barrado" drops br-host br-0123456789ab nao udp 5060
+check "direção: de fora até um contêiner da docker0, barrado" drops eth0 docker0 nao udp 5060
+refuse "direção: o contêiner abrindo para fora, na mesma porta, passa" drops br-0123456789ab eth0 nao udp 5060
+# O limite, que falha fechado: se a saída da máquina para fora é ela mesma uma ponte chamada br-algo,
+# a conexão do contêiner para essa porta também é barrada. Não abre entrada; corta só essa saída.
+check "limite: com a saída para fora numa ponte br-host, a conexão do contêiner é barrada" drops br-0123456789ab br-host nao udp 5060
+refuse "direção: entre contêineres da mesma rede, passa" drops br-0123456789ab br-0123456789ab sim udp 5060
+refuse "direção: outra porta, de fora, passa" drops eth0 br-0123456789ab nao udp 5061
 check "apply: gravou o serviço do boot" test -f "$UNIT"
 contains "serviço: roda depois do Docker" "$(cat "$UNIT")" "After=docker.service"
 contains "serviço: é chamado de novo quando o Docker reinicia" "$(cat "$UNIT")" "PartOf=docker.service"
@@ -66,7 +104,7 @@ contains "serviço: passa a repor só a que ficou" "$(cat "$UNIT")" "apply 5060/
 # ── A regra criada à mão, mais de uma vez, não ganha uma terceira: aplicar confere antes ──
 rm -f "$STATE"
 for bridge in docker+ br-+ docker+ br-+; do
-  iptables -w 5 -I DOCKER-USER 1 ! -i "$bridge" -o "$bridge" -p udp -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP >/dev/null 2>&1
+  iptables -w 5 -I DOCKER-USER 1 -o "$bridge" -p udp -m physdev ! --physdev-is-bridged -m conntrack --ctorigdstport 5060 --ctdir ORIGINAL -j DROP >/dev/null 2>&1
 done
 equal "cópias da regra à mão: duas de cada" 4 "$(rules)"
 out="$(tool apply 5060/udp)"; equal "cópias da regra à mão: sai com zero" 0 "$?"
