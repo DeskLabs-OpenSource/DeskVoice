@@ -7,9 +7,10 @@ import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
 import type { CallSession } from "./call-session";
 import { silentLogger } from "./log";
-import { callOf, callsOf, createAgent, createOrganization, eventsOf, kindsOf, manualEngine, secretKey, sessionHarness, type ManualEngine, type SessionHarness } from "./testing/db";
+import { callOf, callsOf, createAgent, createOrganization, createPhoneNumber, createTrunk, eventsOf, kindsOf, manualEngine, secretKey, sessionHarness, type ManualEngine, type SessionHarness } from "./testing/db";
 import { LOOPBACK_PEER, startFakeWacalls, type FakeCall } from "./testing/fake-wacalls";
 import { manualTime, waitFor } from "./testing/helpers";
+import { answerByMenu, createIvrMenu } from "./testing/ivr";
 import { failureTone } from "./transport";
 import { unavailableNotice } from "./unavailable";
 import { wacallsSessionName } from "./wacalls-client";
@@ -404,5 +405,22 @@ describe("ligação pelo WhatsApp: a que tocou com a escuta caída", { timeout: 
     await waitFor(() => second.status === "ended", "the leftover call ended");
     expect(await callsOf(app, organizationId)).toHaveLength(1);
     expect(callPaths(call)).toEqual([]);
+  });
+});
+
+describe("ligação pelo WhatsApp: o menu por teclas fica de fora (T9 da URA, #223)", { timeout: 60_000 }, () => {
+  it("a organização com um número da operadora em `ivr` atende o WhatsApp pelo agente do WhatsApp, como sempre", async () => {
+    const { organizationId, agentId, ring } = await connected("wa-ivr-number");
+    const trunkId = await createTrunk(app, organizationId);
+    const phoneNumberId = await createPhoneNumber(app, organizationId, trunkId, "+553133339090", agentId);
+    const menuId = await createIvrMenu(app, organizationId, { options: [{ digit: "1", label: "Pessoa", action: "transfer", transferE164: "+5531977776666" }] });
+    await answerByMenu(app, phoneNumberId, menuId);
+
+    ring();
+    const callId = await answeredCall(organizationId);
+    expect(await callOf(app, callId)).toMatchObject({ channel: "whatsapp", agent_id: agentId, engine: "manual" });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the agent to answer");
+    expect((await kindsOf(app, callId)).filter((kind) => kind.startsWith("ivr_"))).toEqual([]);
+    expect(engine.configs).toHaveLength(1);
   });
 });
