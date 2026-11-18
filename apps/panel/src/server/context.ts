@@ -95,6 +95,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Os números da recusa, para a tela montar a frase na língua dela (o limite e a contagem). */
+    readonly detail?: Record<string, string | number>,
   ) {
     super(message);
   }
@@ -114,8 +116,9 @@ function success(result: unknown): Response {
 }
 
 export function failure(error: unknown): Response {
-  const send = (status: number, code: string, message: string): Response => Response.json({ ok: false, error: { code, message } }, { status });
-  if (error instanceof ApiError) return send(error.status, error.code, error.message);
+  const send = (status: number, code: string, message: string, detail?: Record<string, string | number>): Response =>
+    Response.json({ ok: false, error: detail ? { code, message, detail } : { code, message } }, { status });
+  if (error instanceof ApiError) return send(error.status, error.code, error.message, error.detail);
   const pgCode = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
   if (pgCode === "23505") return send(409, "already_exists", "A record with these values already exists.");
   // Chave estrangeira composta com a organização: apontar para linha de outra organização cai aqui.

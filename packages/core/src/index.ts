@@ -16,6 +16,7 @@ export * from "./follow-ups";
 export * from "./inbound-limit";
 export * from "./installation";
 export * from "./invites";
+export * from "./limits";
 export * from "./migrate";
 export * from "./organizations";
 export * from "./password";
