@@ -18,7 +18,7 @@ const REFUSALS: Record<Exclude<AcceptInviteResult, { ok: true }>["reason"], () =
   already_member: () => new ApiError(409, "already_member", "This account is already in this organization. If it was disabled, an owner or admin can enable it on the Team screen."),
 };
 
-export const POST = handlePublic({ body }, async ({ request, params, body, deps }) => {
+export const POST = handlePublic({ support: false, body }, async ({ request, params, body, deps }) => {
   const forgive = guardInviteAttempt(request, deps);
   const now = deps.clock.now();
   const token = params.token ?? "";

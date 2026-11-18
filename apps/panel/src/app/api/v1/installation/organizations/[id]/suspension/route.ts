@@ -28,7 +28,7 @@ const SUSPEND_REFUSALS = {
 } as const;
 
 /** Suspende: marca, cancela as tarefas canceláveis e grava nas duas auditorias, numa transação só. */
-export const POST = handleInstallation({ body }, async ({ body, params, accountId, session, deps }) => {
+export const POST = handleInstallation({ support: false, body }, async ({ body, params, accountId, session, deps }) => {
   const result = await suspendOrganization(deps.db, { organizationId: params.id ?? "", actorAccountId: accountId, sessionOrganizationId: session.organizationId, reason: body.reason }, deps.clock.now());
   if (result.ok) return result;
   if (result.reason === "not_found") throw notFound();
@@ -37,7 +37,7 @@ export const POST = handleInstallation({ body }, async ({ body, params, accountI
 });
 
 /** Reativa. Nada do que a suspensão cancelou volta; o que entrou durante ela é cancelado agora. */
-export const DELETE = handleInstallation({}, async ({ params, accountId, deps }) => {
+export const DELETE = handleInstallation({ support: false }, async ({ params, accountId, deps }) => {
   const result = await reactivateOrganization(deps.db, { organizationId: params.id ?? "", actorAccountId: accountId }, deps.clock.now());
   if (result.ok) return result;
   if (result.reason === "not_found") throw notFound();

@@ -10,7 +10,7 @@ const body = z.object({ organizationId: z.string().max(100) });
  * tela recarrega. Organização que não existe, sem vínculo, com vínculo desativado ou de suporte, e
  * id malformado dão a mesma resposta: 404.
  */
-export const POST = handlePublic({ body }, async ({ request, body, deps }) => {
+export const POST = handlePublic({ support: false, body }, async ({ request, body, deps }) => {
   const session = await requireSession(request, deps, { allowSuspended: true });
   if (!UUID.test(body.organizationId)) throw notFound();
   const accountId = await accountOfMember(deps.db, session.userId);

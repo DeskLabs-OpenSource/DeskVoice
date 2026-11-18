@@ -5,6 +5,7 @@ import { applyTrunks, requireIpModeForAddresses, requireNumericInbound } from ".
 
 export const PATCH = handle(
   {
+    support: false,
     body: trunkPatch,
     configure: true,
     after: async (trunk: object | null, { deps, session }) => ({ ...trunk, ...(await applyTrunks(deps, session.organizationId)) }),

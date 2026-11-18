@@ -17,7 +17,7 @@ const body = z.object({ name: z.string().trim().min(1).max(120), shown: z.object
  * Cria a organização. Na segunda, a lista de quem administra fica explícita na mesma transação
  * (seção 3.2, item 3), e `shown` é o que a tela mostrou antes de confirmar.
  */
-export const POST = handleInstallation({ body }, async ({ body, accountId, deps }) => {
+export const POST = handleInstallation({ support: false, body }, async ({ body, accountId, deps }) => {
   const result = await addOrganization(deps.db, { name: body.name, actorAccountId: accountId, shown: body.shown, keep: body.keep }, deps.clock.now());
   if (result.ok) return result;
   if (result.reason === "admins_changed") throw new ApiError(409, "installation_admins_changed", "Who administers the installation changed since this screen was opened. Reload and confirm again.");

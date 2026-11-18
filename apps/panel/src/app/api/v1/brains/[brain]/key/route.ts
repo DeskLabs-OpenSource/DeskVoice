@@ -21,6 +21,7 @@ async function brainOf(params: Record<string, string>): Promise<Brain> {
  */
 export const PUT = handle(
   {
+    support: false,
     body: z.object({ apiKey: z.string().trim().min(1).max(500) }),
     configure: true,
     after: async ({ brain, stored }: Saved, { deps, session, org }) => {
