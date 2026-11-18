@@ -8,9 +8,6 @@ const invite = {
   password: "Senha",
   passwordHint: "Se este e-mail já tem conta no DeskVoice, use a senha dela. Se não, escolha uma senha nova, com no mínimo 10 caracteres.",
   repeat: "Repita a senha",
-  /** Depois do envio, com a senha recusada: a página pode dizer o caso, sem mudar o formulário. */
-  wrongPassword: "Se este e-mail já tem conta, use a senha dela.",
-  newPasswordRule: "A senha nova precisa ter no mínimo 10 caracteres.",
   mismatch: "As duas senhas não são iguais.",
   submit: "Aceitar o convite e entrar",
   invalidTitle: "Este convite não vale mais.",
