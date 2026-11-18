@@ -10,8 +10,6 @@ const invite: InviteDictionary = {
   password: "Contraseña",
   passwordHint: "Si este correo ya tiene cuenta en DeskVoice, usa su contraseña. Si no, elige una contraseña nueva, de al menos 10 caracteres.",
   repeat: "Repite la contraseña",
-  wrongPassword: "Si este correo ya tiene cuenta, usa su contraseña.",
-  newPasswordRule: "Una contraseña nueva necesita al menos 10 caracteres.",
   mismatch: "Las dos contraseñas no son iguales.",
   submit: "Aceptar la invitación y entrar",
   invalidTitle: "Esta invitación ya no vale.",

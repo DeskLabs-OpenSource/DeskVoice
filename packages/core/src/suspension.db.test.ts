@@ -47,7 +47,7 @@ const installationEvents = async (organizationId: string) =>
 const suspend = (organizationId: string, reason = REASON, sessionOrganizationId = session) =>
   suspendOrganization(app, { organizationId, actorAccountId: actor, sessionOrganizationId, reason }, t0);
 
-/** As quatro que continuam e três canceláveis, todas vencidas. */
+/** As que continuam (`KEEPS_RUNNING_WHEN_SUSPENDED`) e três canceláveis, todas vencidas. */
 async function fillQueue(organizationId: string): Promise<void> {
   for (const kind of [...KEEPS_RUNNING_WHEN_SUSPENDED, "follow_up", "deliver_notification", "summarize_call"]) await enqueue(organizationId, kind);
 }
@@ -87,12 +87,12 @@ describe("suspending an organization", () => {
     expect(after.find((task) => task.id === running)?.status).toBe("running");
     expect(await tasksOf(b)).toEqual(bBefore);
 
-    // A fila pega as quatro de guarda de A e as sete de B, e nenhuma cancelada.
+    // A fila pega as de guarda de A e todas as de B, e nenhuma cancelada.
     const claimed: { organizationId: string; kind: string }[] = [];
     for (let task = await claimTask(app, t0); task !== null; task = await claimTask(app, t0)) claimed.push({ organizationId: task.organizationId, kind: task.kind });
     expect(claimed.filter((task) => task.organizationId === a).map((task) => task.kind).sort()).toEqual([...KEEPS_RUNNING_WHEN_SUSPENDED].sort());
-    expect(claimed.filter((task) => task.organizationId === b)).toHaveLength(7);
-    expect(claimed).toHaveLength(11);
+    expect(claimed.filter((task) => task.organizationId === b)).toHaveLength(KEEPS_RUNNING_WHEN_SUSPENDED.length + 3);
+    expect(claimed).toHaveLength(2 * KEEPS_RUNNING_WHEN_SUSPENDED.length + 3);
 
     expect(await orgEvents(a)).toEqual([{ kind: "organization_suspended", actor_user_id: null, payload: { reason: REASON, canceled_tasks: 3 } }]);
     expect(await installationEvents(a)).toEqual([{ kind: "organization_suspended", actor_account_id: actor, payload: { reason: REASON, canceled_tasks: 3 } }]);

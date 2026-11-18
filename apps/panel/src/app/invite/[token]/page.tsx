@@ -63,9 +63,8 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
     } catch (failure) {
       // O convite deixou de valer no meio do caminho: a tela vira a explicação única.
       if (failure instanceof ApiFailure && failure.code === "invite_invalid") setProblem(failure);
-      // Depois do envio a resposta pode dizer o caso; o formulário continua o mesmo.
-      else if (failure instanceof ApiFailure && failure.code === "invalid_credentials") setError(`${errorText(failure)} ${t.wrongPassword}`);
-      else if (failure instanceof ApiFailure && failure.code === "validation_error") setError(t.newPasswordRule);
+      // A senha recusada tem uma mensagem só, que serve para quem tem conta e para quem não tem.
+      else if (failure instanceof ApiFailure && failure.code === "invite_password_refused") setError(t.passwordHint);
       else setError(errorText(failure));
       setBusy(false);
     }

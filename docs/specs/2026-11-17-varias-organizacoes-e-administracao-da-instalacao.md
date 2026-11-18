@@ -333,7 +333,11 @@ create table support_accesses (
   dono e não muda a própria lista de suporte.
 - A sessão passa para a organização pelo mesmo `switchOrganization`, com `support_access_id`. A
   conferência da sessão (`findSession`) passa a recusar a sessão de suporte depois de `expires_at`
-  ou de `ended_at`, e então volta a sessão para a organização de origem.
+  ou de `ended_at`, e então volta a sessão para onde o login a levaria: `last_organization_id`, se a
+  conta tem ali vínculo `member` ativo, ou o vínculo `member` ativo mais antigo. Sem nenhum, a sessão
+  é apagada.
+- O acesso acaba também quando a conta deixa de administrar a instalação ou perde o último vínculo
+  de equipe ativo.
 - Toda a tela mostra uma faixa fixa: "Você está dando suporte a <organização> até <hora>. Motivo:
   <motivo>." Com o botão "Encerrar".
 - A ação feita durante o suporte fica gravada com o `user_id` do vínculo de suporte. O nome que
@@ -546,6 +550,7 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 - Convite para um e-mail que já tem conta: o aceite usa a senha que a conta já tem, e não cria uma
   senha nova, sem que a página mude antes do envio.
 - Decidido em 18/11: a página do convite não muda conforme o e-mail até a pessoa enviar a senha.
+- Enquanto o convite não é aceito, a recusa da senha é a mesma para todo e-mail.
 - Seletor de organização no topo, só para quem tem mais de um vínculo ativo. `switchOrganization`.
 - Login volta para `last_organization_id`, ou para o vínculo mais antigo.
 - Desativar o vínculo numa organização não mexe nos outros. Trocar a senha encerra as sessões da
