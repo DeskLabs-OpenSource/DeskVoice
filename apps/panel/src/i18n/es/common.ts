@@ -82,8 +82,6 @@ const common: CommonDictionary = {
     invalid_json: "El pedido llegó incompleto. Intenta de nuevo.",
     already_exists: "Ya existe un registro con estos datos.",
     invalid_credentials: "Correo o contraseña incorrectos.",
-    existing_account: "Este correo ya tiene cuenta. Entra con la contraseña que ya usas.",
-    no_account: "Este correo ya no tiene cuenta. Elige una contraseña nueva.",
     already_member: "Esta cuenta ya está en esta organización. Si fue desactivada, quien es dueño o administrador la reactiva en la pantalla Equipo.",
     too_many_attempts: "Demasiados intentos de entrada. Espera unos minutos e intenta de nuevo.",
     voice_unavailable: "El proceso de voz no respondió. Mira en el indicador de salud, en el menú, qué está detenido. Lo que guardaste sigue guardado.",

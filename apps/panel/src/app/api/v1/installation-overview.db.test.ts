@@ -2,12 +2,11 @@
 // da visão geral é o que a rota da própria organização devolve (`system/costs` para o custo do mês,
 // `system/health` para a linha e o motor). O teste compara as duas respostas, não um número escrito
 // à mão.
-import { randomBytes, randomUUID } from "node:crypto";
-import { createAccount, enqueueTask, hashToken, withOrg, withSystem } from "@deskvoice/core";
+import { randomUUID } from "node:crypto";
+import { enqueueTask, startSupportAccess, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { clearInstallationState as clear, openTestDbs } from "../../../../../../packages/core/test/helpers";
-import { PASSWORD, call, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
-import { SESSION_COOKIE } from "../../../server/context";
+import { call, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
 import type { HealthCheck } from "../../../server/health";
 import { GET as overview } from "./installation/overview/route";
 import { GET as costs } from "./system/costs/route";
@@ -263,25 +262,16 @@ describe("installation overview", () => {
       expect([result.status, result.code]).toEqual([403, "forbidden"]);
     }
 
-    // O vínculo de suporte de uma conta que administra a instalação (seção 3.6).
-    const email = `support-${randomUUID()}@example.test`;
-    const account = await withSystem(panel.app, (q) => createAccount(q, { email, passwordHash: PASSWORD }));
-    if (!account) throw new Error("the support account was not created");
+    // O acesso de suporte (seção 3.6): quem administra a instalação, `member` da organização de
+    // casa, entra em B pela própria sessão, com `startSupportAccess`, como na tela.
+    const home = await createOrganization(panel.app, "Casa do suporte");
+    const supporter = await createUser(panel.app, home, "owner");
+    const account = (await withSystem(panel.app, (q) => q.one<{ id: string }>("select account_id as id from users where id = $1", [supporter.id])))?.id ?? "";
     await administers(account);
-    const support = await insert(panel.app, b.org, "insert into users (organization_id, account_id, email, name, role, kind) values ($1, $2, $3, 'Suporte da instalação', 'admin', 'support') returning id", [
-      b.org,
-      account,
-      email,
-    ]);
-    const token = randomBytes(32).toString("base64url");
-    await insert(panel.app, b.org, "insert into sessions (organization_id, user_id, account_id, token_hash, expires_at) values ($1, $2, $3, $4, $5) returning id", [
-      b.org,
-      support,
-      account,
-      hashToken(token),
-      new Date(NOW.getTime() + HOUR),
-    ]);
-    const result = await call(overview, { cookie: `${SESSION_COOKIE}=${token}` });
+    const sessionId = (await withSystem(panel.app, (q) => q.one<{ id: string }>("select id from sessions where user_id = $1", [supporter.id])))?.id ?? "";
+    const started = await startSupportAccess(panel.app, { actorAccountId: account, sessionId, organizationId: b.org, reason: "Ajuda com a configuração", minutes: 60 }, NOW);
+    if (!started.ok) throw new Error(`the support access did not start: ${started.reason}`);
+    const result = await call(overview, { cookie: supporter.cookie });
     expect([result.status, result.code]).toEqual([403, "support_session_forbidden"]);
   });
 });

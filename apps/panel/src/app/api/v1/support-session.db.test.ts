@@ -4,15 +4,15 @@
 // é chamada com a sessão de suporte, que recebe 403 sem o banco mudar, e com um `admin` da equipe
 // igual, que não recebe essa recusa. Sem o par, o teste passaria com tudo recusado.
 //
-// Nenhum código de produção cria o vínculo nem a sessão de suporte nesta fatia: os dois nascem por
-// SQL, aqui.
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+// O vínculo e a sessão de suporte nascem como em produção: a conta que administra a instalação
+// entra pela própria sessão, de outra organização, com `startSupportAccess`.
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
-import { createAccount, hashToken, recordingPath, withOrg, withSystem } from "@deskvoice/core";
+import { recordingPath, startSupportAccess, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { SUPPORT_SESSION_ROUTES, type SupportSessionRoute } from "../../../../../../fences/support-session-routes";
-import { SESSION_COOKIE, SUPPORT_SESSION_FORBIDDEN, type RouteContext } from "../../../server/context";
+import { SUPPORT_SESSION_FORBIDDEN, type RouteContext } from "../../../server/context";
 import { QR_PNG, startFakeWaha } from "../../../../../../packages/tools/test/fake-waha";
 import { AGENT_TOKEN, NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, startPanel, type Result } from "../../../../test/kit";
 import type { WhatsAppView } from "../../../server/whatsapp";
@@ -62,24 +62,15 @@ async function scene(label: string) {
   const memberAccount = (await withSystem(panel.app, (q) => q.one<{ id: string }>("select account_id as id from users where id = $1", [member.id])))?.id ?? "";
   await administers(memberAccount);
 
-  const supportEmail = `support-${randomUUID()}@example.test`;
-  const supportAccount = await withSystem(panel.app, (q) => createAccount(q, { email: supportEmail, passwordHash: PASSWORD }));
-  if (!supportAccount) throw new Error("the support link's account was not created");
+  // Quem dá suporte é `member` de outra organização (a de casa) e entra nesta pela própria sessão.
+  const home = await createOrganization(panel.app, `Casa ${label}`);
+  const supporter = await createUser(panel.app, home, "owner");
+  const supportAccount = (await withSystem(panel.app, (q) => q.one<{ id: string }>("select account_id as id from users where id = $1", [supporter.id])))?.id ?? "";
   await administers(supportAccount);
-  const support = await insert(
-    panel.app,
-    org,
-    "insert into users (organization_id, account_id, email, name, role, kind) values ($1, $2, $3, 'Suporte da instalação', 'admin', 'support') returning id",
-    [org, supportAccount, supportEmail],
-  );
-  const token = randomBytes(32).toString("base64url");
-  await insert(panel.app, org, "insert into sessions (organization_id, user_id, account_id, token_hash, expires_at) values ($1, $2, $3, $4, $5) returning id", [
-    org,
-    support,
-    supportAccount,
-    hashToken(token),
-    new Date(NOW.getTime() + 60 * 60 * 1000),
-  ]);
+  const sessionId = (await withSystem(panel.app, (q) => q.one<{ id: string }>("select id from sessions where user_id = $1", [supporter.id])))?.id ?? "";
+  const started = await startSupportAccess(panel.app, { actorAccountId: supportAccount, sessionId, organizationId: org, reason: "Ajuda com a configuração", minutes: 60 }, NOW);
+  if (!started.ok) throw new Error(`the support access did not start: ${started.reason}`);
+  const support = started.userId;
 
   const operator = await createUser(panel.app, org, "operator");
   const callId = await createCall(panel.app, org, NOW);
@@ -96,7 +87,7 @@ async function scene(label: string) {
     org,
     other,
     member,
-    support: { id: support, cookie: `${SESSION_COOKIE}=${token}` },
+    support: { id: support, cookie: supporter.cookie },
     operator,
     callId,
     trunk,
@@ -250,6 +241,13 @@ describe("a support session", () => {
         const member = await read(s.member.cookie);
         expect([id, (member.data as WhatsAppView | WhatsAppCallsView).status]).toEqual([id, "qr"]);
         expect([id, (member.data as WhatsAppView | WhatsAppCallsView).qr]).toEqual([id, id.endsWith("whatsapp") ? `data:image/png;base64,${QR_PNG}` : expect.stringMatching(/^data:image\/svg\+xml;base64,/)]);
+      }
+      // `connect` e `service` devolvem o estado com o QR Code a quem pode parear. Com as duas
+      // conexões em "qr" de verdade, a sessão de suporte é recusada antes de qualquer resposta.
+      const pairing = { "POST whatsapp/connect": connectWhatsApp, "POST whatsapp-calls/connect": connectCalls, "POST whatsapp/service": whatsappService, "POST whatsapp-calls/service": callsService };
+      for (const [id, route] of Object.entries(pairing)) {
+        const refused = await call(route, { method: "POST", cookie: s.support.cookie, body: id.endsWith("service") ? { wanted: true } : {} });
+        expect([id, refused.status, refused.code, refused.text.includes("data:image")]).toEqual([id, 403, SUPPORT_SESSION_FORBIDDEN, false]);
       }
     } finally {
       panel.deps.waha = { apiKey: "" };

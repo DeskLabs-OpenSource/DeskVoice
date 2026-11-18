@@ -18,8 +18,10 @@ export interface InstallationArgs<B> {
  * Embrulho das rotas da área da instalação (seção 3.9 do desenho do R8). Confere o papel da
  * instalação (`isInstallationAdmin`) antes de qualquer outra coisa: quem não administra recebe 403
  * em toda rota, antes de a entrada ser lida. Vale mesmo com a organização da sessão suspensa
- * (seção 3.3): quem administra precisa alcançar a área para reativá-la. Com `support: false`, a
- * sessão de suporte da instalação recebe 403 `support_session_forbidden` antes disso (seção 3.6).
+ * (seção 3.3): quem administra precisa alcançar a área para reativá-la. A sessão de suporte da
+ * instalação recebe 403 `support_session_forbidden` antes disso, em toda rota, `GET` incluído
+ * (seção 3.6): a área da instalação age pela conta, fora da sessão de suporte. A rota de escrita
+ * diz `support: false` também, para a tabela `fences/support-session-routes.ts` conferir.
  *
  * Não abre transação nenhuma. As rotas chamam só funções de `packages/core`, que abrem o papel de
  * sistema elas mesmas, ou `withOrg` na organização-alvo. O painel não abre o papel de sistema aqui.
@@ -32,7 +34,9 @@ export function handleInstallation<S extends ZodType = ZodType<undefined>>(
     try {
       const deps = serverDeps();
       const session = await requireSession(request, deps, { allowSuspended: true });
-      if (options.support === false) requireRole(session, ALL_ROLES, { support: false });
+      // A sessão de suporte fica dentro da organização do cliente: nenhuma rota da instalação a
+      // atende, nem a de leitura. Quem quer a área da instalação encerra o suporte antes.
+      if (session.support) requireRole(session, ALL_ROLES, { support: false });
       const accountId = await accountOfMember(deps.db, session.userId);
       if (!accountId || !(await isInstallationAdmin(deps.db, accountId))) throw new ApiError(403, "forbidden", "Only who administers the installation can do this.");
       const params = (await context.params) ?? {};

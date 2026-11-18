@@ -2,7 +2,7 @@
 // da ligação nem o lembrete da pendência pelo WhatsApp. O mesmo caso com um `member` igual mostra
 // que ele recebe: sem o par, o teste passaria com ninguém recebendo nada.
 import { randomUUID } from "node:crypto";
-import { createAccount, createFollowUp, withOrg, withSystem, type ClaimedTask } from "@deskvoice/core";
+import { createAccount, createFollowUp, endSupportAccess, startSupportAccess, withOrg, withSystem, type ClaimedTask } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { createCall, createOrganization, depsFor, notificationsOf, openTestDbs, putSetting, putWhatsAppConnector, t0, task, tasksOf } from "../../test/helpers";
 import followUp from "./follow_up";
@@ -14,11 +14,14 @@ afterAll(async () => {
   await owner.close();
 });
 
-type Kind = "member" | "support";
+// `support` é o vínculo no pior caso, por SQL. `support-live` e `support-ended` são o vínculo de
+// verdade, criado por `startSupportAccess` (fatia 5c): durante o acesso e depois do prazo.
+type Kind = "member" | "support" | "support-live" | "support-ended";
 const WHATSAPP = "+5531988880077";
 
 /** O vínculo no pior caso: com telefone, WhatsApp e ativo (`disabled_at` nulo). */
 async function link(organizationId: string, kind: Kind, role: "owner" | "admin"): Promise<string> {
+  if (kind === "support-live" || kind === "support-ended") return started(organizationId, kind === "support-ended");
   const id = randomUUID();
   await withSystem(app, async (q) => {
     const accountId = await createAccount(q, { email: `${id}@example.com`, passwordHash: "x" });
@@ -31,10 +34,36 @@ async function link(organizationId: string, kind: Kind, role: "owner" | "admin")
   return id;
 }
 
+/** O vínculo de suporte como a produção o cria: a conta tem WhatsApp no vínculo de casa, e ele não vem. */
+async function started(organizationId: string, ended: boolean): Promise<string> {
+  const home = await createOrganization(app, "Casa do suporte");
+  const email = `${randomUUID()}@example.com`;
+  const ids = await withSystem(app, async (q) => {
+    const accountId = await createAccount(q, { email, passwordHash: "x" });
+    await q.exec("update accounts set installation_admin_at = $2 where id = $1", [accountId, t0]);
+    const user = await q.one<{ id: string }>(
+      "insert into users (organization_id, account_id, email, name, role, phone_e164, whatsapp_e164) values ($1, $2, $3, 'Pessoa', 'owner', $4, $4) returning id",
+      [home, accountId, email, WHATSAPP],
+    );
+    const session = await q.one<{ id: string }>("insert into sessions (organization_id, user_id, account_id, token_hash, expires_at) values ($1, $2, $3, $4, $5) returning id", [
+      home,
+      user?.id,
+      accountId,
+      `token-${randomUUID()}`,
+      new Date(t0.getTime() + 86_400_000),
+    ]);
+    return { accountId: accountId ?? "", sessionId: session?.id ?? "" };
+  });
+  const access = await startSupportAccess(app, { ...ids, actorAccountId: ids.accountId, organizationId, reason: "Ajuda com o resumo", minutes: 15 }, t0);
+  if (!access.ok) throw new Error(access.reason);
+  if (ended) await endSupportAccess(app, access.supportAccessId, new Date(t0.getTime() + 16 * 60_000), "expired");
+  return access.userId;
+}
+
 const whatsappTargets = async (org: string): Promise<Array<string | null>> =>
   (await notificationsOf(app, org)).filter((notification) => notification.channel === "whatsapp").map((notification) => notification.target);
 
-describe.each<Kind>(["support", "member"])("a %s link with WhatsApp, for the routines", (kind) => {
+describe.each<Kind>(["support", "support-live", "support-ended", "member"])("a %s link with WhatsApp, for the routines", (kind) => {
   const reached = kind === "member";
 
   it(reached ? "receives the end-of-call notice as the owner" : "never receives the end-of-call notice, even as the only owner", async () => {
