@@ -14,8 +14,9 @@
 > transcritores externos com chave (Deepgram, AssemblyAI e Soniox: chaves não entregues); a fatia 2
 > (o contrato e o transcritor simulado), no #245, que fica parada com o trabalho guardado no ramo,
 > porque só entra junto com as fatias 3 e 4; as fatias 3, 4 e 5, que esperam o vencedor da medida;
-> as fatias 8 e 9 (o Laya), que esperam o pedido de decisão 4 (sem resposta até 23/11, a fatia 8
-> não começa). O texto abaixo é o desenho, com as correções feitas durante as fatias.
+> as fatias 8 e 9 (o Laya). O pedido de decisão 4 foi respondido em 18/11 (opção A, imagem
+> publicada por este repositório), e a fatia 8 foi dividida em 8a e 8b. O texto abaixo é o desenho,
+> com as correções feitas durante as fatias.
 
 ## Problema
 
@@ -571,7 +572,17 @@ WhatsApp (WAHA) e do de ligação pelo WhatsApp (WaCalls), lido em `deploy/docke
   vem da rodada 3; se uma rodada nova mudar o número, a frase muda junto.
 
 A imagem do Laya é uma quarta imagem publicada pelo projeto, e publicá-la muda o
-`publish-image.yml`. Mudar workflow é do dono: é o **pedido de decisão 4**, no fim do documento.
+`publish-image.yml`. Mudar workflow é do dono: foi o **pedido de decisão 4**, respondido em 18/11
+com a opção A (seção "Decisões do Rafael (18/11/2026)").
+
+**Correção de 18/11 (leitura do `publish-image.yml` e do `docker-compose.yml` em `origin/main`
+`7c4222d`):** as três imagens do projeto não são fixadas por resumo no Compose. Elas usam a etiqueta
+da versão (`${DESKVOICE_IMAGE_PREFIX}/deskvoice-<nome>:${DESKVOICE_VERSION}`), com o endereço em
+`deploy/images.env` e o nome em `image_ref` (`install/_common.sh`), e o `verify-public` confere as
+duas arquiteturas antes da release. O resumo fixo no Compose é só das imagens de terceiros (WAHA,
+WaCalls, Asterisk, Caddy, Postgres). A imagem do Laya segue as três do projeto, e não as de
+terceiros: `deskvoice-laya`, com a mesma etiqueta da versão. O que continua fixado por resumo são
+os **pesos dentro da imagem** (a revisão do Hugging Face) e as imagens de base do Dockerfile.
 
 ### Custo e consentimento (16/11)
 
@@ -1012,21 +1023,56 @@ acréscimos de linha, e quem chegar depois faz o merge da `main`.
 
 ### Fatia 8: o serviço do Laya
 
+O pedido de decisão 4 foi respondido em 18/11: **A**, a imagem nasce em `deploy/laya/` e é
+publicada pelo `publish-image.yml`. A fatia é dividida em duas, porque a mudança de workflow não
+pode sair de um agente desta empresa: a conta do robô não tem escopo de workflow, e mudar
+`.github/workflows` é do dono.
+
+**Ordem de merge:** 8a → 8b → 9. A 9 só entra numa versão em que a imagem `deskvoice-laya` já é
+publicada; antes disso, ligar o Laya pela tela baixaria uma imagem que não existe.
+
+#### Fatia 8a: a imagem, o serviço e a peça (Desenvolvedor)
+
 `deploy/laya/` (Dockerfile e servidor HTTP mínimo, com as três primitivas e nada mais), o serviço
 `laya` no `docker-compose.yml` no perfil `laya` (rede interna, sem porta, `mem_limit`, `cpus`,
-`healthcheck`), `deciders/laya.ts` e a medida do serviço com o teto de CPU. **Só começa depois do
-pedido de decisão 4** (onde a imagem é publicada). Caminho sensível: imagem nova.
+`healthcheck`, imagem `${DESKVOICE_IMAGE_PREFIX}/deskvoice-laya:${DESKVOICE_VERSION}`), `laya` no
+`image_ref` de `install/_common.sh`, `deciders/laya.ts` e a medida do serviço com o teto de CPU.
+**Não toca `.github/`.** A imagem é construída localmente para os testes e a medida. Caminho
+sensível: imagem nova, e `install/_common.sh`, que pede segunda leitura.
 
 Aceite:
-- os pesos estão na imagem, numa revisão fixa conferida por resumo, e o contêiner sobe sem rede
-  para fora (teste: sobe e responde com a saída para a internet bloqueada);
+- os pesos estão na imagem, numa revisão fixa conferida por resumo, e as imagens de base do
+  Dockerfile são fixadas por resumo. O contêiner sobe sem rede para fora (teste: sobe e responde
+  com a saída para a internet bloqueada);
 - a licença dos pesos e do pacote está conferida, com fonte e data, e citada no `CREDITS.md`;
 - medida no corpo do PR, com o teto de CPU escolhido: p50 e p95 da passada de três perguntas, com
   uma e com três chamadas, memória e núcleos. E a mesma medida do áudio de uma chamada simulada com
   e sem o Laya ocupado, para mostrar que ele não atrapalha a voz. Se atrapalhar, o teto desce e o
   número de "a tempo" cai, e o PR diz isso;
-- sem o perfil, `docker compose config` não muda para quem já instalou (teste);
-- o mesmo conjunto da rodada 3 roda contra o serviço e dá o mesmo acerto, com tolerância de 2 pontos.
+- o tamanho da imagem e se ela constrói em arm64 (os dois itens "não medido" da decisão 4) estão no
+  corpo do PR. Se ela não construir em arm64, o PR para e diz isso, porque a etiqueta da versão
+  nasce com as duas arquiteturas ou não nasce (decisão 0017);
+- sem o perfil, `docker compose config` e a lista de imagens que o `update.sh` baixa não mudam
+  para quem já instalou (teste);
+- o mesmo conjunto da rodada 3 roda contra o serviço e dá o mesmo acerto, com tolerância de 2 pontos;
+- o corpo do PR traz, pronto para a 8b, o trecho que o `publish-image.yml` precisa (a quarta imagem
+  na matriz, no `merge` e no `verify-public`), como texto, sem commit em `.github/`.
+
+#### Fatia 8b: a publicação da quarta imagem (dono)
+
+A mudança no `publish-image.yml`, a partir do trecho que a 8a deixou no PR. Quem escreve é a
+mantenedora ou o Rafael. O Arquiteto e o Verificador leem.
+
+Aceite (regra dos workflows de publicação, nota do maestro em 17/11):
+- o PR só entra com o **link de um run de ensaio** (`workflow_dispatch` com `ensaio: true`, que já
+  existe no workflow) que constrói as quatro imagens nas duas arquiteturas, monta os índices com
+  `--dry-run` e passa no `verify-public`;
+- o PR só entra com o **`actionlint` limpo** sobre o workflow mudado;
+- o pacote `deskvoice-laya` no GHCR está público antes do ensaio. Um pacote novo nasce privado, e o
+  `verify-public` pergunta sem credencial. **Não medido:** não conferi o padrão de visibilidade do
+  pacote novo nesta organização;
+- uma versão sem mudança no Laya continua construindo a imagem dele (o workflow publica todas a
+  cada versão). O tempo que isso soma ao `publish-image` vai no corpo do PR, medido no ensaio.
 
 ### Fatia 9: o Laya no instalador, no agente e na tela
 
@@ -1133,7 +1179,16 @@ Pelo terminal do orquestrador (comentário do board na DESA-25):
 A chave do Gemini foi cadastrada na instalação real; as provas no provedor (vocabulário e modo
 barulhento no Gemini) são da mantenedora, como a do OpenAI, e não desta frente.
 
-## Pedido de decisão 4: onde a imagem do Laya é publicada
+## Decisões do Rafael (18/11/2026)
+
+No lote DESA-121, item 1, o Rafael respondeu em 18/11, 16:30Z: "Pode seguir com sua recomendação
+nas decisoes necessarias" (registrado pelo board às 16:35Z).
+
+- **Imagem do Laya (decisão 4): A.** Ela nasce em `deploy/laya/`, e o `publish-image.yml` publica
+  a quarta imagem a cada versão. O PR que muda o workflow só entra com o link de um run de ensaio e
+  com o `actionlint` (nota do maestro de 17/11). Está nas fatias 8a e 8b.
+
+## Pedido de decisão 4: onde a imagem do Laya é publicada (respondido em 18/11: A)
 
 **Dono do pedido: Arquiteto.**
 **Quem decide:** dono do projeto (mudança de workflow)
