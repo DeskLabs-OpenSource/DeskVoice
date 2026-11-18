@@ -362,13 +362,27 @@ As alternativas ficaram de fora, e cada uma por uma brecha:
   e o serviço só reaplica no boot e a cada reinício do Docker.
 - Casar a interface de fora (`-i eth0`) não serve, porque o nome dela muda de máquina para máquina.
 
-Os limites da forma nova, os dois conhecidos:
+Os limites da forma nova, os conhecidos:
 
 - **Falha fechada:** se a saída da máquina para fora é ela mesma uma ponte chamada `docker*` ou
   `br-*`, a conexão do contêiner para a porta fechada também é barrada. Não abre entrada; corta essa
   saída, como a forma antiga cortava em qualquer máquina.
 - **Fica aberta:** uma ponte do Docker com nome escolhido à mão (`com.docker.network.bridge.name`),
   fora de `docker*` e `br-*`. A rede do Compose do DeskVoice não escolhe nome.
+- **Hairpin, falha fechada:** com o `userland-proxy` do Docker desligado, a conexão de um contêiner
+  ao IP público da própria máquina, na porta fechada, também é roteada para dentro da ponte e é
+  barrada. Não abre entrada.
+- **O módulo `br_netfilter`:** aplicar a regra o carrega, se ele ainda não estiver carregado: o
+  `-m physdev` o pede ao kernel (`xt_physdev`, também pelo `iptables-nft`). Ele nasce com
+  `bridge-nf-call-iptables=1`, e o tráfego de ponte de todos os contêineres passa a atravessar a
+  `FORWARD` e o `conntrack`. O módulo fica carregado até o reboot (o `apply` sem portas não o
+  descarrega), e o serviço o carrega de novo no boot. O que mais pesa: numa máquina com outra ponte
+  que não é do Docker (libvirt, LXD), o tráfego entre as máquinas dela passa a cair na política da
+  `FORWARD`, que o Docker deixa em `DROP`, e pode parar. Numa VPS só do DeskVoice isso não acontece,
+  porque as pontes do Docker têm os `ACCEPT` dele. O `physdev` fica mesmo assim porque, sem ele, com
+  o módulo carregado (por esta regra ou pelo próprio Docker), a regra barraria o tráfego entre
+  contêineres da mesma rede na porta fechada. Isso vem da leitura do kernel e ainda não foi medido;
+  a medida está pedida.
 
 Quem já tinha a regra antiga (escrita à mão, como esta página ensinava, ou por uma versão de teste
 deste script) é avisado: ao aplicar, e a cada boot pelo serviço, o script escreve as novas, tira
