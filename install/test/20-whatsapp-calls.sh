@@ -28,7 +28,7 @@ env_unset "$E" WACALLS_ADMIN_PASSWORD
 # ── O Compose ──
 block="$(awk '/^  wacalls:/ { on = 1; next } on && /^  [a-z-]+:/ { on = 0 } on' "$C")"
 contains "o WaCalls fica no perfil próprio: não sobe por padrão" "$block" 'profiles: ["whatsapp-calls"]'
-contains "imagem do fork com o conserto do caller_pn, fixada por resumo" "$block" "image: ghcr.io/desklabs-opensource/wacalls@sha256:74612a1d175bca3eed00cc5a6958fc7c0d593f44b8f8cbe01e59b228ba867508"
+contains "imagem do fork com o whatsmeow atual, fixada por resumo" "$block" "image: ghcr.io/desklabs-opensource/wacalls@sha256:03f9e47fadc1afa909f512bbdda0fa4091d4646310f9a76ce3c752f05eafd1ff"
 lacks "não publica porta nenhuma, nem TCP nem UDP" "$block" "ports:"
 lacks "não fixa porta UDP de áudio nesta fatia" "$block" "WACALLS_WEBRTC_UDP_PORT"
 lacks "não anuncia IP público: o par do áudio é o processo de voz, na rede interna" "$block" "WACALLS_PUBLIC_IP"
@@ -43,7 +43,7 @@ equal "o token chega só à voz e ao WaCalls" "voice wacalls " "$(services_with 
 equal "o usuário do administrador, só ao WaCalls" "wacalls " "$(services_with WACALLS_ADMIN_USER)"
 equal "a senha do administrador, só ao WaCalls" "wacalls " "$(services_with WACALLS_ADMIN_PASSWORD)"
 equal "ninguém espera o WaCalls para subir" "" "$(grep -n 'wacalls: { condition' "$C")"
-equal "a imagem que o kit remove é a do Compose" "ghcr.io/desklabs-opensource/wacalls@sha256:74612a1d175bca3eed00cc5a6958fc7c0d593f44b8f8cbe01e59b228ba867508" "$(wacalls_image_ref)"
+equal "a imagem que o kit remove é a do Compose" "ghcr.io/desklabs-opensource/wacalls@sha256:03f9e47fadc1afa909f512bbdda0fa4091d4646310f9a76ce3c752f05eafd1ff" "$(wacalls_image_ref)"
 
 # ── Por padrão o serviço não existe ──
 profile_calls() { grep -c -- '--profile whatsapp-calls' "$FAKE_DIR/calls.log"; }

@@ -23,6 +23,9 @@
  *   sintetizar (não gasta caractere) e é a mesma permissão que a tela usa para listar as vozes.
  *   `GET /v1/models` não serve: a página não diz que exige chave. Não prova o modelo: o modelo vem
  *   da tabela de preço abaixo, e não da conta.
+ *   Leitura de 18/11/2026 (incidente da ElevenLabs): o `/v2/voices` deu 502 com e sem chave, e o
+ *   teste fica nele, sem plano B. O `/v1/voices` responde 200 sem chave (aceitaria qualquer chave);
+ *   o `/v1/user` prova a chave, mas não a permissão de vozes. O 502 sai como `provider_error`.
  * - Preço: tabela abaixo.
  */
 import WebSocket from "ws";

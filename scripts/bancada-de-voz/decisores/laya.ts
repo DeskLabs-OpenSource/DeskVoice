@@ -10,6 +10,11 @@
  * Fontes, conferidas em 14/11/2026: huggingface.co/convaiinnovations/laya (cartão e licença
  * Apache 2.0) e o pacote `laya` no PyPI (Apache 2.0).
  * Ambiente: BANCADA_PYTHON (venv com `laya` e `torch` de CPU). Os pesos baixam no primeiro uso.
+ *
+ * Ou contra o serviço (R12, fatia 8a): com `BANCADA_LAYA_URL` (por exemplo `http://127.0.0.1:8000`,
+ * o contêiner de `deploy/laya/`), os mesmos pedidos vão por HTTP ao `/v1/decide`, e os núcleos e a
+ * memória vêm do `/health` do serviço (tempo de CPU e memória máxima do processo). A URL vence o
+ * Python, e a tabela é a mesma: é assim que se confere que o serviço acerta o que a bancada acertou.
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -23,7 +28,8 @@ const CONCORRENCIAS = [1, 3] as const;
 const SaidaDoLaya = z.object({
   versao: z.string(),
   modelo: z.string(),
-  carregamento_s: z.number(),
+  /** `null` contra o serviço: o modelo carregou antes, quando o contêiner subiu. */
+  carregamento_s: z.number().nullable(),
   memoria_mb: z.number(),
   por_concorrencia: z.record(
     z.string(),
@@ -51,6 +57,56 @@ function executarNoPython(python: string): Executar {
     });
 }
 
+const EntradaDoAjudante = z.object({
+  pedidos: z.array(z.object({ estado: z.string(), perguntas: z.record(z.string(), z.unknown()) })),
+  aquecimento: z.number().int().nonnegative(),
+  concorrencias: z.array(z.number().int().positive()),
+});
+const SaudeDoServico = z.object({ ok: z.literal(true), model: z.string(), revision: z.string(), package: z.string(), cpu_s: z.number(), max_rss_mb: z.number() });
+
+/**
+ * O mesmo papel do `laya_local.py`, contra o serviço por HTTP: aquece, e com N chamadas
+ * simultâneas cada uma das N linhas executa todos os pedidos. Os núcleos ocupados são o tempo de CPU
+ * do processo do serviço (do `/health`) dividido pelo tempo de parede de cada concorrência.
+ */
+export function executarPorHttp(url: string, buscar: typeof fetch = fetch): Executar {
+  const base = url.replace(/\/+$/, "");
+  const saude = async () => SaudeDoServico.parse(await (await buscar(`${base}/health`)).json());
+  const pedir = async (i: number, pedido: z.infer<typeof EntradaDoAjudante>["pedidos"][number]) => {
+    const inicio = performance.now();
+    try {
+      const resposta = await buscar(`${base}/v1/decide`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ state: pedido.estado, questions: pedido.perguntas }) });
+      const corpo = (await resposta.json()) as { answers?: Record<string, unknown>; error?: string };
+      const ms = performance.now() - inicio;
+      if (!resposta.ok || corpo.answers === undefined) return { i, ms, erro: `HTTP ${resposta.status}${corpo.error ? ` ${corpo.error}` : ""}` };
+      return { i, ms, respostas: corpo.answers };
+    } catch (erro) {
+      return { i, ms: performance.now() - inicio, erro: erro instanceof Error ? erro.name : "erro" };
+    }
+  };
+  return async (texto) => {
+    const entrada = EntradaDoAjudante.parse(JSON.parse(texto));
+    await saude();
+    for (const [i, pedido] of entrada.pedidos.slice(0, entrada.aquecimento).entries()) await pedir(i, pedido);
+    const porConcorrencia: SaidaDoLaya["por_concorrencia"] = {};
+    for (const n of entrada.concorrencias) {
+      const resultados: SaidaDoLaya["por_concorrencia"][string]["resultados"] = [];
+      const cpu0 = (await saude()).cpu_s;
+      const parede0 = performance.now();
+      await Promise.all(
+        Array.from({ length: n }, async () => {
+          for (const [i, pedido] of entrada.pedidos.entries()) resultados.push(await pedir(i, pedido));
+        }),
+      );
+      const parede = (performance.now() - parede0) / 1000;
+      porConcorrencia[String(n)] = { nucleos_ocupados: ((await saude()).cpu_s - cpu0) / parede, resultados };
+    }
+    const fim = await saude();
+    const saida: SaidaDoLaya = { versao: fim.package, modelo: `${fim.model}@${fim.revision} (serviço em ${base})`, carregamento_s: null, memoria_mb: fim.max_rss_mb, por_concorrencia: porConcorrencia };
+    return JSON.stringify(saida);
+  };
+}
+
 /** Lê o resultado de um pedido. Resposta fora do esquema conta como falha, com a pergunta. */
 function registro(pedido: PedidoDoFiltro, r: SaidaDoLaya["por_concorrencia"][string]["resultados"][number]): Registro {
   if (r.erro !== undefined || r.respostas === undefined) return { pedido, ms: r.ms, ok: false, motivo: `erro do Laya (${r.erro ?? "sem respostas"})` };
@@ -63,13 +119,18 @@ function registro(pedido: PedidoDoFiltro, r: SaidaDoLaya["por_concorrencia"][str
   return { pedido, ms: r.ms, ok: true, respostas };
 }
 
-/** Roda a medida e devolve a tabela em Markdown. Sem `BANCADA_PYTHON` (e sem `executar`), diz que não mediu. */
+/**
+ * Roda a medida e devolve a tabela em Markdown. Sem `executar`, usa o serviço (`BANCADA_LAYA_URL`) ou
+ * o Python (`BANCADA_PYTHON`), nessa ordem; sem nenhum dos dois, diz que não mediu.
+ */
 export async function medirLaya(itens: readonly ItemDoFiltro[], vocabulario: readonly string[], executar?: Executar): Promise<string> {
+  const url = process.env.BANCADA_LAYA_URL;
   const python = process.env.BANCADA_PYTHON;
-  if (!executar && !python) return "Laya: não medido (BANCADA_PYTHON não definido).";
+  const escolhido = executar ?? (url ? executarPorHttp(url) : python ? executarNoPython(python) : undefined);
+  if (!escolhido) return "Laya: não medido (nem BANCADA_LAYA_URL nem BANCADA_PYTHON definido).";
   const pedidos = pedidosDoFiltro(itens, vocabulario);
   const entrada = JSON.stringify({ pedidos: pedidos.map((p) => ({ estado: p.estado, perguntas: p.perguntas })), aquecimento: AQUECIMENTO, concorrencias: CONCORRENCIAS });
-  const r = SaidaDoLaya.parse(JSON.parse(await (executar ?? executarNoPython(python as string))(entrada)));
+  const r = SaidaDoLaya.parse(JSON.parse(await escolhido(entrada)));
   const porConcorrencia = new Map<number, Registro[]>();
   const nucleos: string[] = [];
   for (const [n, c] of Object.entries(r.por_concorrencia)) {
@@ -84,7 +145,7 @@ export async function medirLaya(itens: readonly ItemDoFiltro[], vocabulario: rea
     nucleos.push(`${n} chamada(s): ${c.nucleos_ocupados.toFixed(2)}`);
   }
   return [
-    `Modelo: ${r.modelo}, pacote laya ${r.versao}, CPU. Carregamento: ${r.carregamento_s.toFixed(1)} s. Memória máxima do processo: ${Math.round(r.memoria_mb)} MB. Núcleos ocupados: ${nucleos.join("; ")}. ${AQUECIMENTO} pedidos de aquecimento, fora da tabela.`,
+    `Modelo: ${r.modelo}, pacote laya ${r.versao}, CPU. Carregamento: ${r.carregamento_s === null ? "antes da medida, quando o serviço subiu" : `${r.carregamento_s.toFixed(1)} s`}. Memória máxima do processo: ${Math.round(r.memoria_mb)} MB. Núcleos ocupados: ${nucleos.join("; ")}. ${AQUECIMENTO} pedidos de aquecimento, fora da tabela.`,
     "",
     tabelaDoFiltro(porConcorrencia),
   ].join("\n");

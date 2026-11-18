@@ -81,7 +81,8 @@ export async function startFakeWacalls() {
   const sessions = new Map<string, FakeSession>();
   const requests: Array<{ method: string; path: string; query: string; authorization: string | undefined }> = [];
   const streams = new Set<ServerResponse>();
-  const state = { down: false, nextId: 1, refuseAccept: false };
+  // `refusePairing`: a próxima sessão fica em "connecting" sem QR, como quando o WhatsApp recusa o cliente.
+  const state = { down: false, nextId: 1, refuseAccept: false, refusePairing: false };
   const calls = new Map<string, FakeCall>();
   let nextCall = 1;
 
@@ -132,9 +133,9 @@ export async function startFakeWacalls() {
       }
       if (method === "GET" && url.pathname === "/api/sessions") return json(response, 200, { sessions: listOf() });
       if (method === "POST" && url.pathname === "/api/sessions") {
-        const session: FakeSession = { id: `s${state.nextId++}`, name: body?.name ?? "", jid: "", state: "qr", paired: false, qrCount: 0 };
+        const session: FakeSession = { id: `s${state.nextId++}`, name: body?.name ?? "", jid: "", state: state.refusePairing ? "connecting" : "qr", paired: false, qrCount: 0 };
         sessions.set(session.id, session);
-        qr(session);
+        if (!state.refusePairing) qr(session);
         // O id só chega depois do primeiro código, como no WaCalls de verdade.
         await new Promise((resolve) => setImmediate(resolve));
         return json(response, 201, { id: session.id, name: session.name });

@@ -31,7 +31,7 @@ export const brainKeyCheckSetting = (brainId: string): string => `brain.${brainI
 /** A lista de modelos que a chave em vigor alcança, como o provedor devolveu no último teste. */
 export const brainModelsSetting = (brainId: string): string => `brain.${brainId}.models`;
 
-const BRAIN_FAILURES = ["rejected", "no_credit", "region_unavailable", "rate_limited", "unreachable", "unexpected_response"] as const satisfies readonly BrainFailure[];
+const BRAIN_FAILURES = ["rejected", "no_credit", "region_unavailable", "rate_limited", "unreachable", "provider_error", "unexpected_response"] as const satisfies readonly BrainFailure[];
 // Se `BrainFailure` ganhar um código, esta linha deixa de compilar até a lista (e a frase da tela) acompanhar.
 type Missing = Exclude<BrainFailure, (typeof BRAIN_FAILURES)[number]>;
 const everyFailureListed: Missing extends never ? true : false = true;

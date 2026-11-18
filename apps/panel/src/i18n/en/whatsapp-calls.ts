@@ -65,8 +65,9 @@ const whatsappCalls: WhatsAppCallsDictionary = {
     logged_out:
       "The number disconnected: the device was removed in Linked devices, on the phone, or WhatsApp ended the connection. WhatsApp disconnects linked devices when the main phone goes unused for more than 14 days.",
     qr_expired: "The QR code was not read in time, and the attempt was ended.",
+    pairing_failed: "WhatsApp ended the attempt before showing the QR code. Try again. If it happens again, update DeskVoice.",
     missing:
-      "The WhatsApp calls service no longer has the data of this connection. This happens after restoring a backup, moving servers or reinstalling the service, because the pairing is not in the backup.",
+      "The WhatsApp calls service no longer has this connection. This happens when it restarts with an attempt that never paired, and also after restoring a backup, moving servers or reinstalling the service, because the pairing is not in the backup.",
   },
   reconnect: "Connect again",
   newCode: "Generate a new code",
