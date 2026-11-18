@@ -3,7 +3,7 @@
 // tabela de falhas do desenho (T6). O caminho inteiro, com o AudioSocket, fica em `ivr.db.test.ts`.
 import { randomUUID } from "node:crypto";
 import { loadIvrMenu, withOrg, withSystem, type IvrMenu } from "@deskvoice/core";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf } from "../../../packages/tools/test/helpers";
 import { ivrNotice, startIvrSession, type IvrDeps, type IvrNoticeKind } from "./ivr-session";
@@ -42,7 +42,8 @@ interface Harness {
 }
 
 /** Uma organização, o menu, uma chamada tocando e a URA atendendo. `options` recebe o id de um agente ligado. */
-async function answer(label: string, build: (agents: { on: string; off: string }) => MenuOptions, extra: Partial<IvrDeps> & { hold?: boolean } = {}): Promise<Harness> {
+async function answer(label: string, build: (agents: { on: string; off: string }) => MenuOptions, options: Partial<IvrDeps> & { hold?: boolean; rig?: (transport: KeypadFake, menu: IvrMenu) => void } = {}): Promise<Harness> {
+  const { hold, rig, ...extra } = options;
   const organizationId = await createOrganization(app, label);
   const agents = { on: await createAgent(app, organizationId), off: await createAgent(app, organizationId, { enabled: false }) };
   const menuId = await createIvrMenu(app, organizationId, build(agents));
@@ -50,7 +51,8 @@ async function answer(label: string, build: (agents: { on: string; off: string }
   if (!menu) throw new Error("menu not found");
   const callId = await ringingCall(organizationId);
   const transport = keypadFake();
-  transport.holdPlayback = extra.hold ?? false;
+  transport.holdPlayback = hold ?? false;
+  rig?.(transport, menu);
   const timers = testSchedule();
   const logs: string[] = [];
   const log: Logger = (level, message, fields) => void logs.push(JSON.stringify({ level, message, ...fields }));
@@ -413,5 +415,101 @@ describe("URA: toda falha tem uma fala e um evento (T6)", { timeout: 60_000 }, (
       }
     }
     expect(promptTone().length).toBe(16_000);
+  });
+});
+
+/** O `sendAudio` da vez `n` lança; os outros saem normalmente. `before` roda antes de lançar. */
+const failingSend =
+  (n: number, before: (menu: IvrMenu) => void = () => undefined) =>
+  (transport: KeypadFake, menu: IvrMenu): void => {
+    const send = transport.sendAudio;
+    let calls = 0;
+    transport.sendAudio = (pcm) => {
+      calls += 1;
+      if (calls === n) {
+        before(menu);
+        throw new Error("the audio socket is gone");
+      }
+      send(pcm);
+    };
+  };
+
+describe("URA: o erro inesperado também vai à pessoa (DESA-181)", { timeout: 60_000 }, () => {
+  const unhandled: unknown[] = [];
+  const listen = (reason: unknown): void => void unhandled.push(reason);
+  beforeEach(() => {
+    unhandled.length = 0;
+    process.on("unhandledRejection", listen);
+  });
+  afterEach(async () => {
+    // U6: nenhuma rejeição sem tratamento em nenhum dos caminhos.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    process.off("unhandledRejection", listen);
+    expect(unhandled).toEqual([]);
+  });
+
+  /** O desfecho comum: a fala `failed`, a pessoa, `ivr_failed { unexpected }` e o log sem tecla. */
+  const wentToPerson = async (h: Harness, digits: string[] = []): Promise<void> => {
+    expect(await h.session.done).toEqual({ result: "failed", endReason: "ivr_failed" });
+    expect(sameAudio(h.transport.sent.at(-1), await ivrNotice("pt-BR", "failed"))).toBe(true);
+    expect(h.transport).toMatchObject({ transferredTo: PERSON, hangups: 0 });
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "transferred", end_reason: "ivr_failed" });
+    const events = await eventsOf(app, h.callId);
+    expect(events.filter((event) => event.kind === "ivr_failed").map((event) => event.payload)).toEqual([{ reason: "unexpected" }]);
+    expect(events.find((event) => event.kind === "transfer_started")?.payload).toEqual({ to: PERSON, reason: "ivr" });
+    expect(await notificationsOf(app, h.organizationId)).toEqual([]);
+    const failure = h.logs.filter((line) => line.includes('"level":"error"') && line.includes("ivr session failed"));
+    expect(failure).toHaveLength(1);
+    expect(failure[0]).toContain("the audio socket is gone");
+    // Nenhuma tecla no log do erro: só a chamada, o menu e a mensagem.
+    expect(Object.keys(JSON.parse(failure[0] ?? "{}")).sort()).toEqual(["callId", "error", "level", "menuId", "message"]);
+    for (const digit of digits) expect(JSON.parse(failure[0] ?? "{}").error).not.toContain(digit);
+  };
+
+  it("U1: o 1º anúncio não sai (`sendAudio` lança): a fala `failed` e a pessoa", async () => {
+    const h = await answer("ivr-u1", STANDARD, { rig: failingSend(1) });
+    await wentToPerson(h);
+    expect(h.transport.sent).toHaveLength(1);
+  });
+
+  it("U2: a repetição depois do tempo acabar não sai: o mesmo desfecho, e a ligação não fica muda", async () => {
+    const h = await answer("ivr-u2", STANDARD, { rig: failingSend(2) });
+    await promptPlayed(h, 1);
+    expect(h.timers.fire(h.menu.timeoutMs)).toBe(1);
+    await wentToPerson(h);
+    expect(await kinds(h.callId)).toContain("ivr_no_choice");
+  });
+
+  it("U3: a repetição depois de uma tecla que não é opção não sai: o mesmo desfecho", async () => {
+    const h = await answer("ivr-u3", STANDARD, { rig: failingSend(2) });
+    await promptPlayed(h, 1);
+    h.transport.press("7");
+    await wentToPerson(h, ["7"]);
+    expect((await eventsOf(app, h.callId)).find((event) => event.kind === "ivr_no_choice")?.payload).toEqual({ attempt: 1, kind: "invalid" });
+  });
+
+  it("U4: a conversa não abre (`startAgent` lança): o mesmo desfecho, e `done` resolve `failed`, não `agent`", async () => {
+    const h = await answer("ivr-u4", STANDARD, {
+      startAgent: () => {
+        throw new Error("the audio socket is gone");
+      },
+    });
+    await promptPlayed(h, 1);
+    h.transport.press("1");
+    await wentToPerson(h, ["1"]);
+    expect((await eventsOf(app, h.callId)).filter((event) => event.kind.startsWith("ivr_")).map((event) => event.kind)).toEqual(["ivr_started", "ivr_option_chosen", "ivr_failed"]);
+  });
+
+  it("U5: o erro inesperado num menu que ficou sem pessoa: a fala `failed`, desliga e `ivr_failed { unexpected }`", async () => {
+    const dropPeople = (menu: IvrMenu): void => {
+      menu.options = menu.options.filter((option) => option.action !== "transfer");
+    };
+    const h = await answer("ivr-u5", STANDARD, { rig: failingSend(1, dropPeople) });
+    expect(await h.session.done).toEqual({ result: "failed", endReason: "ivr_failed" });
+    expect(sameAudio(h.transport.sent.at(-1), await ivrNotice("pt-BR", "failed"))).toBe(true);
+    expect(h.transport).toMatchObject({ transferredTo: null, hangups: 1 });
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "failed", end_reason: "ivr_failed" });
+    expect((await eventsOf(app, h.callId)).filter((event) => event.kind === "ivr_failed").map((event) => event.payload)).toEqual([{ reason: "unexpected" }]);
+    expect(await kinds(h.callId)).not.toContain("transfer_started");
   });
 });
