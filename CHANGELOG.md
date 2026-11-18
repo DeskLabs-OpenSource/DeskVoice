@@ -3,6 +3,12 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.36.1] - 2026-11-18
+
+### Alterado
+
+- **Dependências atualizadas no banco de dados e no serviço de voz** O banco de dados passa do Postgres 17.11 para o 17.12, na mesma linha 17, sem mudar o formato dos dados. O serviço de voz passa a usar a versão mais nova da biblioteca que mantém as conexões em tempo real. Nada a fazer: a atualização normal já baixa as imagens novas. Crédito: @dependabot.
+
 ## [0.36.0] - 2026-11-18
 
 ### Adicionado
