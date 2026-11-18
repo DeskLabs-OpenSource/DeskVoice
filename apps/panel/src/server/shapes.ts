@@ -1,5 +1,6 @@
-import { callerMessageBlock, checkVocabulary, DROP_FOLLOW_UP_MESSAGE_MAX, ORGANIZATION_SUSPENDED, organizationSuspended, toE164, type OrgQuery } from "@deskvoice/core";
+import { agentAnalysisBrain, type AgentAnalysisBrain, callerMessageBlock, checkVocabulary, DROP_FOLLOW_UP_MESSAGE_MAX, ORGANIZATION_SUSPENDED, organizationSuspended, toE164, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
+import { checkAnalysisBrain } from "./brains";
 import { ApiError } from "./context";
 import { listEngines } from "./pieces";
 import { isTrunkHost } from "./trunk-host";
@@ -36,7 +37,7 @@ export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
   follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment",
   agent_handoff_targets as "agentHandoffTargets", drop_follow_up as "dropFollowUp",
-  drop_follow_up_message as "dropFollowUpMessage", analyst_id as "analystId", created_at as "createdAt", updated_at as "updatedAt"`;
+  drop_follow_up_message as "dropFollowUpMessage", analyst_id as "analystId", analysis_brain as "analysisBrain", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -72,9 +73,13 @@ const agentFields = z.object({
   // O analista ao vivo do agente (desenho dos analistas, seção 3.1); nulo é nenhum. A rota confere
   // que ele é desta organização (`requireAnalyst`).
   analystId: z.uuid().nullable(),
+  // Quem lê a ligação deste agente (R4, fatia 5); nulo segue a organização (`calls.analysis_brain`).
+  // A rota confere o cérebro e o modelo (`requireAnalysisBrain`) com a mesma regra da organização.
+  analysisBrain: agentAnalysisBrain.nullable(),
 });
 export type AgentValues = z.output<typeof agentFields>;
-export const agentPatch = agentFields.partial();
+// `acceptUnmeasured` vale só para este pedido, como em `calls.analysis_brain`: não é gravado.
+export const agentPatch = agentFields.partial().extend({ acceptUnmeasured: z.boolean().optional() });
 export const agentCreate = agentPatch.required({ name: true, engine: true });
 
 export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
@@ -95,6 +100,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   dropFollowUp: "off",
   dropFollowUpMessage: null,
   analystId: null,
+  analysisBrain: null,
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",
@@ -179,6 +185,15 @@ export async function requireAnalyst(q: OrgQuery, analystId: string | null | und
   if (!(await q.one("select 1 from analysts where id = $1 for share", [analystId]))) {
     throw new ApiError(400, "analyst_invalid", "The analyst must be one of this organization.");
   }
+}
+
+/**
+ * O cérebro que o agente escolheu para ler a ligação passa pela mesma conferência da escolha da
+ * organização (`checkAnalysisBrain`). Nulo (segue a organização) e o motor do agente não pedem nada.
+ */
+export async function requireAnalysisBrain(q: OrgQuery, choice: AgentAnalysisBrain | null | undefined, acceptUnmeasured: boolean | undefined): Promise<void> {
+  if (choice?.kind !== "brain") return;
+  await checkAnalysisBrain(q, { brain: choice.brain, model: choice.model, acceptUnmeasured });
 }
 
 /**

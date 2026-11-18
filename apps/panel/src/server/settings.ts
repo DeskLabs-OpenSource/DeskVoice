@@ -15,7 +15,7 @@ import {
 import { z, type ZodType } from "zod";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
 import { ANALYSIS_SETTING, AUTO_TRANSCRIPTION_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, classifyBaseUrlOf, classifyModelOf, engineClassifyTargetSetting, storedClassifyTargetOf } from "@deskvoice/voice-engine/types";
-import { brainKeySetting, findBrain, readStoredModels } from "./brains";
+import { checkAnalysisBrain } from "./brains";
 import { ApiError } from "./context";
 import { engineKeySetting, listEngines } from "./pieces";
 
@@ -185,20 +185,7 @@ const analysisBrain: Setting = {
   async check(input, q) {
     const parsed = analysisBrainInput.safeParse(input);
     // A forma errada é dita pelo `store`, com o caminho do campo.
-    if (!parsed.success) return;
-    const { brain: brainId, model: modelId, acceptUnmeasured } = parsed.data;
-    const brain = await findBrain(brainId);
-    if (!brain) throw new ApiError(400, "unknown_brain", `"${brainId}" is not a known brain.`);
-    const key = await q.one("select 1 from settings where key = $1", [brainKeySetting(brain.id)]);
-    if (!key) throw new ApiError(400, "brain_no_key", "This brain has no key saved: save and test the key in Settings → Brains first.");
-    const model = (await readStoredModels(q, brain))?.models.find((item) => item.id === modelId);
-    if (!model) throw new ApiError(400, "brain_model_not_listed", "This model is not in the saved list for this brain's key: refresh the list in Settings → Brains.");
-    if (model.price === undefined && acceptUnmeasured !== true)
-      throw new ApiError(
-        400,
-        "brain_model_unmeasured",
-        "This model's price is not known: its cost will not be measured, and it only reads calls of agents with a cost ceiling. Send acceptUnmeasured: true to choose it anyway.",
-      );
+    if (parsed.success) await checkAnalysisBrain(q, parsed.data);
   },
 };
 

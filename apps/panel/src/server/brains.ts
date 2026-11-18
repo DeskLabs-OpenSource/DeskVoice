@@ -2,7 +2,7 @@ import { decryptSecret, encryptSecret, type OrgQuery } from "@deskvoice/core";
 // Pelo caminho dos tipos: o índice do pacote carrega a descoberta por pasta, que não existe no pacote do Next.
 import type { Brain, BrainFailure, BrainModel } from "@deskvoice/voice-engine/brain";
 import { z } from "zod";
-import type { ServerDeps } from "./context";
+import { ApiError, type ServerDeps } from "./context";
 import { createRateLimiter } from "./rate-limit";
 
 // `loadBrains()` lê a pasta em tempo de execução, e dentro do pacote compilado do Next essa pasta não
@@ -154,3 +154,24 @@ export async function testBrainKey(deps: ServerDeps, org: Org, organizationId: s
 }
 
 export const isStale = (models: StoredBrainModels, now: Date): boolean => now.getTime() - new Date(models.fetchedAt).getTime() > MODELS_MAX_AGE_MS;
+
+/**
+ * Confere a escolha de quem lê a ligação, a da organização (`calls.analysis_brain`) e a de cada agente
+ * (`agents.analysis_brain`): uma regra só, para as duas não divergirem. O cérebro é descoberto, tem
+ * chave salva e o modelo está na lista guardada dela; modelo sem preço conhecido só com
+ * `acceptUnmeasured: true`, que a tela manda depois do aviso. Lança `ApiError` com o motivo.
+ */
+export async function checkAnalysisBrain(q: OrgQuery, choice: { brain: string; model: string; acceptUnmeasured?: boolean | undefined }): Promise<void> {
+  const brain = await findBrain(choice.brain);
+  if (!brain) throw new ApiError(400, "unknown_brain", `"${choice.brain}" is not a known brain.`);
+  const key = await q.one("select 1 from settings where key = $1", [brainKeySetting(brain.id)]);
+  if (!key) throw new ApiError(400, "brain_no_key", "This brain has no key saved: save and test the key in Settings → Brains first.");
+  const model = (await readStoredModels(q, brain))?.models.find((item) => item.id === choice.model);
+  if (!model) throw new ApiError(400, "brain_model_not_listed", "This model is not in the saved list for this brain's key: refresh the list in Settings → Brains.");
+  if (model.price === undefined && choice.acceptUnmeasured !== true)
+    throw new ApiError(
+      400,
+      "brain_model_unmeasured",
+      "This model's price is not known: its cost will not be measured, and it only reads calls of agents with a cost ceiling. Send acceptUnmeasured: true to choose it anyway.",
+    );
+}
