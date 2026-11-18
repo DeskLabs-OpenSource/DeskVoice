@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { inKeyOrder, personExitOf } from "./ivr";
-import { parseRecordedSpeech } from "./recorded-speech";
+import { parseRecordedSpeech, recordedSpeechWav } from "./recorded-speech";
 
 /** Um WAV mínimo, com o formato pedido, e um bloco extra antes do áudio (como o `LIST` de muitos editores). */
 function wav(options: { format?: number; channels?: number; rate?: number; bits?: number; data?: Buffer; extra?: boolean } = {}): Buffer {
@@ -35,6 +35,13 @@ describe("parseRecordedSpeech: o parser único de fala gravada", () => {
     for (const other of [{ rate: 44_100 }, { channels: 2 }, { bits: 8 }, { format: 3 }]) {
       expect(() => parseRecordedSpeech(wav(other), "anúncio"), JSON.stringify(other)).toThrow("anúncio is not PCM16 mono at 8000 Hz");
     }
+  });
+
+  it("lê de volta o WAV que `recordedSpeechWav` escreve, com o mesmo PCM", () => {
+    const pcm = Buffer.from([9, 0, 8, 0, 7, 0]);
+    const written = recordedSpeechWav(pcm);
+    expect(written.length).toBe(44 + pcm.length);
+    expect(parseRecordedSpeech(written, "anúncio")).toEqual(pcm);
   });
 
   it("recusa o que não é WAV e o WAV sem áudio", () => {

@@ -25,6 +25,12 @@ export const IVR_DIGITS = "1234567890*#";
 export const IVR_MAX_PROMPT_MS = 60_000;
 export const IVR_MAX_PROMPT_BYTES = 960_000;
 
+/** Os limites da tabela (`check`s da migration), para a API e a tela dizerem o mesmo que o banco. */
+export const IVR_NAME_MAX = 60;
+export const IVR_LABEL_MAX = 60;
+export const IVR_TIMEOUT_MS = { min: 2000, max: 15_000, default: 5000 } as const;
+export const IVR_ATTEMPTS = { min: 1, max: 5, default: 3 } as const;
+
 export interface IvrOption {
   digit: string;
   label: string;
