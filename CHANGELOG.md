@@ -3,6 +3,58 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.37.1] - 2026-11-18
+
+### Alterado
+
+- **A página do convite não muda conforme o e-mail** A página do convite passa a ser a mesma para toda pessoa convidada: o nome, a senha e a repetição da senha, com uma dica só. Quem já tem conta no DeskVoice digita a senha que já usa; quem não tem escolhe uma senha nova, com no mínimo 10 caracteres. Depois do envio, se a senha não for aceita, a página diz o que fazer. A senha antiga de uma conta continua valendo no convite, mesmo curta, e a tentativa errada conta no mesmo limite da tela de entrada. Nada a configurar. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A visão geral da instalação separa a linha que pede atenção da linha caída, e pinta o motor como a Saúde** Na Visão geral da área da instalação, a coluna Linha deixa de contar como caída a linha que só tem um aviso (por exemplo, carregada mas com o provedor ainda não conferido): ela aparece como ", N pedem atenção", e "caídas" passa a contar só as linhas de fato fora do ar. O selo do Motor passa a ter a mesma cor da linha do motor na Saúde da organização: com chave própria e o último teste da chave sem resposta conclusiva, ele fica amarelo, e não verde. Nada a configurar. Crédito: @melgarafael.
+
+## [0.37.0] - 2026-11-18
+
+### Adicionado
+
+- **A checagem de saúde avisa quando a rede do proxy não está gravada** O `install/healthcheck.sh` ganhou a linha "Rede do proxy". Quando existe nesta máquina a rede de proxy de outro sistema (a `*_caddy-sites` de um CRM na mesma VPS) e ela não está gravada no arquivo de publicação, a linha avisa e traz o comando para gravá-la. É o caso de quem ligou o Caddy à rede à mão, antes da 0.11.0: essa ligação se perde quando o contêiner é recriado, e o domínio do painel passa a responder 502. A linha também avisa quando a rede gravada não existe mais. É só aviso: não muda o código de saída e não há nada a configurar em instalações que já têm a rede gravada. Crédito: @webtecnica.
+- **A administração da instalação ganha uma visão geral das organizações** Na área da instalação, a seção nova "Visão geral" mostra uma linha por organização: se está ativa ou suspensa, as chamadas dos últimos 30 dias, o custo do mês (com as marcas "inclui estimativa" e "não medido", como em Custos), quantas linhas estão conectadas e quantas caídas, o estado da chave do motor e a fila (tarefas em atraso e com falha nas últimas 24 horas). Cada número é o mesmo que a tela da própria organização mostra em Custos e em Saúde. Quando o processo de voz não responde, a coluna Linha diz isso, em vez de mostrar zero linhas caídas. A sessão de suporte não abre esta seção. Nada a configurar. Crédito: @melgarafael.
+
+### Alterado
+
+- **O upgrade do WebSocket da chamada pela web confere o convite antes de abrir** O endereço da chamada pelo navegador passa a conferir o convite antes de abrir o WebSocket. Pedido sem convite, com convite errado ou já usado recebe uma resposta HTTP comum (401, ou 404 fora do caminho da chamada) e nenhum WebSocket abre. A exceção é o convite vencido, na primeira tentativa e até 30 minutos depois do prazo: ele abre e fecha logo, com o código 4401, para a tela dizer que venceu. Depois disso, ou na segunda tentativa, nem abre. Quem liga pelo painel não percebe diferença na conversa. Nada a configurar. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A linha de telefonia da Saúde conta só as linhas da organização** Numa instalação com mais de uma organização, a linha de telefonia da tela Saúde contava as linhas de todas elas. Agora conta só as da organização em que a pessoa está. A checagem de saúde sem sessão, usada pelo instalador, continua olhando a instalação inteira. Nada a configurar. Crédito: @melgarafael.
+
+## [0.36.1] - 2026-11-18
+
+### Alterado
+
+- **Dependências atualizadas no banco de dados e no serviço de voz** O banco de dados passa do Postgres 17.11 para o 17.12, na mesma linha 17, sem mudar o formato dos dados. O serviço de voz passa a usar a versão mais nova da biblioteca que mantém as conexões em tempo real. Nada a fazer: a atualização normal já baixa as imagens novas. Crédito: @dependabot.
+
+## [0.36.0] - 2026-11-18
+
+### Adicionado
+
+- **O cérebro da Anthropic também conversa em pedaços, ainda sem ligação** Nada muda numa instalação em funcionamento: nenhuma ligação usa a conversa nova, e o pedido em JSON da Anthropic, o único caminho em uso, continua igual. O cérebro da Anthropic ganha a mesma conversa em pedaços que a OpenAI, o OpenRouter e a DeepSeek já têm: o texto chega assim que o modelo o gera, as ferramentas pedidas chegam montadas, o pedido pode ser interrompido no meio, e o consumo sempre vem com número, declarado ou estimado. Quem usa a Anthropic na análise das ligações terá o cérebro disponível no motor de voz em pipeline. Crédito: @melgarafael.
+- **O cérebro da OpenAI, do OpenRouter e da DeepSeek conversa em pedaços, ainda sem ligação** Nada muda numa instalação em funcionamento: nenhuma ligação usa a conversa nova, e nenhum cérebro é chamado de outro jeito. Os cérebros da OpenAI, do OpenRouter e da DeepSeek ganham uma conversa em que o texto chega em pedaços, assim que o provedor o gera, as ferramentas pedidas pelo modelo chegam montadas, e o pedido pode ser interrompido no meio. É a peça que o motor de voz em pipeline vai usar. O consumo de cada pedido sempre vem com número: o que o provedor declarou ou, quando ele não declarou (interrupção, prazo), uma estimativa marcada como tal, pela entrada enviada e pela saída recebida. Crédito: @melgarafael.
+- **O cérebro do Gemini também conversa em pedaços, ainda sem ligação** Nada muda numa instalação em funcionamento: nenhuma ligação usa a conversa nova, e o pedido em JSON do Gemini, o único caminho em uso, continua igual. O cérebro do Gemini ganha a mesma conversa em pedaços que a OpenAI, o OpenRouter, a DeepSeek e a Anthropic já têm: o texto chega assim que o modelo o gera, as ferramentas pedidas chegam montadas, o pedido pode ser interrompido no meio, e o consumo sempre vem com número, declarado ou estimado. A ferramenta pedida pelo Gemini traz a assinatura de raciocínio que ele exige de volta na volta seguinte, e quem conversa a devolve sem mexer nela. Quem usa o Gemini na análise das ligações terá o cérebro disponível no motor de voz em pipeline. Crédito: @melgarafael.
+- **A regra do DOCKER-USER que fecha uma porta publicada pelo Docker passa a ter um serviço do systemd para repô-la** Nada muda numa instalação em funcionamento: nada é fechado sem ser pedido. A cadeia `DOCKER-USER` é a única que fecha uma porta publicada pelo Docker — nem o `ufw` nem o `firewalld` filtram essas portas —, e a regra escrita à mão sumia ao reiniciar a máquina, porque o Docker recria as cadeias dele vazias. O `install/docker-user.sh` escreve essa regra e deixa um serviço do systemd (`deskvoice-docker-user.service`, `After=docker.service`, `PartOf=docker.service`) feito para repô-la no boot e a cada reinício do Docker, um retorno ainda não medido numa máquina de verdade; rodar de novo não duplica regra, e a porta que sai da lista é reaberta. O instalador chama o script quando recebe `DESKVOICE_DOCKER_USER_DROP` (`5060/udp`, `10000:10200/udp`), e a mensagem do `firewalld` passa a apontar para ele. A janela de alguns segundos depois de `firewall-cmd --reload` continua: ela é do Docker refazendo as cadeias, não da regra. A regra só barra o que é roteado para dentro de uma ponte do Docker (`docker0`, `br-*`), venha pela interface que vier, e não a conexão que um contêiner abre para fora com destino à mesma porta (o SIP-TLS do Asterisk para a operadora, por exemplo). Medida numa VPS de teste em 18/11/2026, com o Docker de fábrica e o firewalld inativo: de fora, a porta fecha em TCP e em UDP; a conexão de saída do contêiner e a conversa entre contêineres da mesma rede continuam passando, em TCP; aplicar de novo não duplica. O script troca a regra no formato antigo pela nova onde a achar, avisando. Fechar uma porta carrega o módulo `br_netfilter`, que fica até reiniciar a máquina; numa máquina com outra ponte que não é do Docker (libvirt, LXD), o tráfego dela passa a cair no filtro do Docker e pode parar, um efeito ainda não medido. UDP de saída e entre contêineres, o reinício e o firewalld ativo seguem sem medição; IPv6 também, e fica fora do script. Crédito: @webtecnica.
+
+### Alterado
+
+- **O painel já sabe o que uma sessão de suporte da instalação não pode fazer** Preparação interna para o acesso de suporte da administração da instalação, que ainda não existe. A sessão do painel passa a saber se é de um vínculo de suporte, e as ações que convidam, mexem na equipe ou na conta, ou criam algo que dura mais que a sessão (convite, aceitar convite, papel e remoção de pessoas, senha, telefone e WhatsApp do perfil, link público da ligação, conector e ganchos, pareamento do WhatsApp, gravar chave de provedor, criar e editar tronco e atendente, a política de ligação de saída, e a área da instalação) respondem que a sessão de suporte não pode fazer isso, com a frase nos três idiomas. Hoje ninguém tem esse vínculo, então nenhuma tela nem rota muda para ninguém, e a atualização não mexe no banco. Toda rota de escrita do painel está numa tabela com a decisão e o motivo, e uma verificação nova no CI reprova a rota nova que não está nela, e a rota marcada como recusada que não recusa. Crédito: @melgarafael.
+- **As escolhas de pessoa da organização consideram só quem é da equipe** Preparação interna para o acesso de suporte da administração da instalação, que ainda não existe. Toda consulta que escolhe, conta ou lista pessoas da organização para agir ou avisar passa a considerar só quem é da equipe: o resumo da ligação e os avisos pelo WhatsApp, os números que o agente aceita como "da equipe" no `send_whatsapp`, a escolha do responsável da pendência (na tela, no agente e no lembrete), a contagem de donos e a lista da tela Equipe. Hoje todo vínculo é da equipe, então nenhuma lista, aviso ou escolha muda para ninguém, e a atualização não mexe no banco. Uma verificação nova no CI reprova a consulta nova que lê as pessoas da organização sem esse filtro, a menos que ela esteja numa lista curta de exceções, cada uma com o motivo (mostrar o nome de quem agiu, ler a própria sessão). Crédito: @melgarafael.
+
+### Corrigido
+
+- **A checagem de saúde deixa de dizer que está tudo certo com o login do painel quebrado** A checagem de saúde passou a pedir o login de verdade, com uma credencial que não existe, e
+  recusa dizer que está tudo bem quando a rota responde erro de servidor: uma volta de versão que
+  quebrou a entrada do painel agora acusa na hora e provoca a volta da atualização, em vez de
+  terminar "com todas as peças essenciais respondendo". Nada a configurar. Crédito: @webtecnica.
+
 ## [0.35.0] - 2026-11-17
 
 ### Adicionado

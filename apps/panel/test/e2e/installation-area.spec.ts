@@ -38,7 +38,7 @@ test("com uma organização só, a navegação principal é a de antes, e a áre
   await expect(page).toHaveURL(/\/installation$/);
   await expect(page.getByRole("heading", { level: 1, name: installation.title })).toBeVisible();
   const sections = page.getByRole("navigation", { name: installation.sectionsNav }).getByRole("link");
-  await expect(sections).toHaveText([installation.sections.organizations, installation.sections.admins, installation.sections.audit]);
+  await expect(sections).toHaveText([installation.sections.organizations, installation.sections.overview, installation.sections.admins, installation.sections.audit]);
   await expect(page.getByText(installation.organizations.founding, { exact: true })).toBeVisible();
 
   await sections.filter({ hasText: installation.sections.admins }).click();

@@ -11,6 +11,7 @@ import { useMe } from "../../../ui/me";
 
 const SECTIONS = [
   { href: "/installation", key: "organizations" },
+  { href: "/installation/overview", key: "overview" },
   { href: "/installation/admins", key: "admins" },
   { href: "/installation/audit", key: "audit" },
   { href: "/installation/update", key: "update" },

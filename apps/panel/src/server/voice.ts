@@ -1,3 +1,4 @@
+import type { OrgQuery } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
 import { ApiError, type ServerDeps } from "./context";
 
@@ -7,6 +8,17 @@ export const voiceHealthSchema = z.object({
   trunks: z.array(z.object({ id: z.string(), status, detail: z.string() })),
 });
 export type VoiceHealth = z.infer<typeof voiceHealthSchema>;
+
+/**
+ * O que o processo de voz diz das linhas, só com as da organização da transação. O processo de voz
+ * confere todas as linhas da instalação (`checkTrunks`) e não sabe de organização: a tela de saúde e
+ * a visão geral da instalação filtram por aqui, pelos `id` que a organização enxerga em `trunks`.
+ */
+export async function organizationTrunks(q: OrgQuery, voice: VoiceHealth): Promise<VoiceHealth> {
+  const own = new Set((await q.many<{ id: string }>("select id from trunks")).map((row) => row.id));
+  return { ...voice, trunks: voice.trunks.filter((line) => own.has(line.id)) };
+}
+
 export const callIdSchema = z.object({ callId: z.string() });
 export const anything = z.unknown();
 

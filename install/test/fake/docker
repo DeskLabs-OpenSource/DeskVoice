@@ -100,6 +100,7 @@ case "$args" in
   " rmi "*) if grep -qx "$last" "$FAKE_DIR/rmi_busy" 2>/dev/null; then echo "Error response from daemon: conflict: unable to remove repository reference \"$last\" (must force) - container cid is using its referenced image" >&2; exit 1; fi
     grep -vx "$last" "$FAKE_DIR/images" > "$FAKE_DIR/images.next" 2>/dev/null; mv "$FAKE_DIR/images.next" "$FAKE_DIR/images"; exit 0 ;;
   # As redes que existem: uma por linha em $FAKE_DIR/networks.
+  " network ls"*) answer networks; exit 0 ;;
   " network inspect "*) grep -qx "$last" "$FAKE_DIR/networks" 2>/dev/null; exit $? ;;
   *" logs "*) answer logs; exit 0 ;;
   # Criar o dono: guarda a senha que veio pela entrada padrão e passa a existir um usuário.

@@ -5,7 +5,7 @@ const installation: InstallationDictionary = {
   title: "Installation administration",
   lead: "What applies to the whole server: the organizations, who administers it and the record of what was done here. Each organization still sees only its own data.",
   sectionsNav: "Installation administration sections",
-  sections: { organizations: "Organizations", admins: "Administration", audit: "Audit", update: "Update" },
+  sections: { organizations: "Organizations", overview: "Overview", admins: "Administration", audit: "Audit", update: "Update" },
 
   organizations: {
     title: "Organizations",
@@ -79,6 +79,25 @@ const installation: InstallationDictionary = {
     addLead: "The person must already have an account on this installation (have joined some organization).",
     email: "Account e-mail",
     add: "Add to the list",
+  },
+
+  overview: {
+    title: "Overview",
+    lead: "How each organization is doing, one line each: the same numbers its own screens show in Costs and Health. The month's cost runs from the 1st to today, in each organization's time zone.",
+    empty: "No organizations yet.",
+    active: "Active",
+    suspended: "Suspended",
+    calls: "Calls in the last 30 days",
+    cost: "This month's cost",
+    trunk: "Line",
+    trunkCounts: "{connected} connected, {down} down",
+    trunkAttention: ", {attention} need attention",
+    trunkNone: "No line registered",
+    voiceDown: "The voice process did not answer",
+    engine: "Engine",
+    engineStates: { own_key: "Own key", no_key: "No key", key_failed: "Key failing" },
+    queue: "Queue",
+    queueCounts: "{late} late, {failed} failed in the last 24 hours",
   },
 
   audit: {

@@ -114,6 +114,23 @@ export async function failTask(db: Db, taskId: string, error: string, now: Date)
   return { status: row.status, runAt: row.run_at };
 }
 
+/**
+ * A fila da organização da transação, para a visão geral da instalação (seção 3.7 do desenho do R8):
+ * `late` são as tarefas `queued` com o `run_at` vencido, e `failedLast24h` as `failed` cujo `run_at`
+ * cai nas últimas 24 horas. `tasks` não guarda quando a tarefa falhou: `failTask` mantém o `run_at`
+ * da última tentativa ao marcá-la `failed`. É a hora em que a última tentativa estava marcada, e não
+ * a hora da falha; com a fila atrasada, a diferença é o atraso.
+ */
+export async function organizationQueue(q: OrgQuery, now: Date): Promise<{ late: number; failedLast24h: number }> {
+  const row = await q.one<{ late: number; failed: number }>(
+    `select count(*) filter (where status = 'queued' and run_at <= $1)::int as late,
+            count(*) filter (where status = 'failed' and run_at >= $1::timestamptz - interval '24 hours')::int as failed
+       from tasks`,
+    [now],
+  );
+  return { late: row?.late ?? 0, failedLast24h: row?.failed ?? 0 };
+}
+
 const TASKS_CHANNEL = "tasks";
 
 /** Acorda `onWake` a cada tarefa enfileirada. Devolve a função que encerra a escuta. */
