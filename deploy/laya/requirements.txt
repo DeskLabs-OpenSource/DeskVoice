@@ -1,0 +1,46 @@
+# As dependências do servidor do Laya, com a versão exata: as mesmas do venv em que a bancada mediu
+# a rodada 3 (15/11/2026), para o acerto do serviço ser comparável ao da bancada. O `torch` vem do
+# índice de CPU do PyTorch, num passo à parte do Dockerfile; aqui ele só fica preso à versão.
+laya==0.4.31
+torch==2.14.1
+transformers==5.20.2
+tokenizers==0.23.3
+safetensors==0.8.0
+huggingface-hub==2.4.0
+hf-xet==1.8.0
+numpy==2.2.6
+vegaml==0.16.1
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.11
+regex==2026.9.29
+pyyaml==6.0.3
+packaging==26.3
+filelock==4.1.0
+fsspec==2026.9.0
+tqdm==4.70.1
+typing-extensions==4.16.0
+sympy==1.14.0
+mpmath==1.3.0
+networkx==3.4.2
+jinja2==3.1.6
+markupsafe==3.0.3
+pydantic==2.14.3
+pydantic-core==2.50.4
+annotated-types==0.8.0
+annotated-doc==0.0.6
+typing-inspection==0.4.5
+httpx2==2.14.0
+httpcore2==2.14.0
+h11==0.16.0
+idna==3.20
+anyio==4.16.0
+click==8.5.1
+typer==0.29.1
+rich==15.0.0
+markdown-it-py==4.3.0
+mdurl==0.1.2
+pygments==2.21.0
+shellingham==1.5.4
+truststore==0.10.5
+setuptools==84.2.1

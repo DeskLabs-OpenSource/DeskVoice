@@ -48,7 +48,7 @@ O que a bancada imprime é só a tabela agregada, o gasto e o que ficou sem medi
 | `servicos/_externo.ts` | o que os externos têm em comum: conexão, leitura por zod, fechamento com prazo, chave fora de todo erro |
 | `servicos/externos.test.ts` | os três contra um servidor WebSocket falso, sem chave: roda no `pnpm verify` |
 | `dependencias.ts` | `zod` e `ws`, pegos de `packages/voice-engine` (sem dependência nova na raiz) |
-| `decisores/laya.ts` | o Laya: acerto, latência e CPU, sobre o conjunto do filtro. `laya_local.py` só executa os pedidos que recebe (`laya.test.ts`, com o ajudante trocado por um falso) |
+| `decisores/laya.ts` | o Laya: acerto, latência e CPU, sobre o conjunto do filtro. `laya_local.py` só executa os pedidos que recebe (`laya.test.ts`, com o ajudante trocado por um falso); com `BANCADA_LAYA_URL`, os mesmos pedidos vão ao serviço de `deploy/laya/` por HTTP |
 | `decisores/jev.ts` | o Jev: os mesmos pedidos do Laya, com acerto e latência (`jev.test.ts`, contra um servidor HTTP falso) |
 | `filtro-na-chamada.ts` | a medida da fatia 6 da R12: o filtro **do produto** (`deciders/jev.ts`, as perguntas de `speech-filter.ts`, o prazo de 1 s) sobre o conjunto do filtro, com a leitura por tipo de item, o fundo como marca, p50 e p95 e quantas decisões chegaram a tempo. Teto próprio de US$ 0,05 por rodada (`filtro-na-chamada.test.ts`, com um decisor falso que erra de propósito) |
 | `reducao-de-ruido.ts` | a medida da redução de ruído local em 8 kHz (fatias 4 e 4b da DESA-24): só mede, não liga nada |
@@ -118,6 +118,16 @@ deixou de valer: a bancada não abre pedido novo, espera os que estão em voo e 
 
 `--decisor laya,jev` mede os dois sobre o conjunto do filtro inteiro (o `--limite` e o `--casos`
 são das frases da transcrição, e não valem para ele).
+
+Contra o serviço do Laya (R12, fatia 8a), em vez do venv: suba o contêiner de `deploy/laya/` com a
+porta só no loopback e aponte a bancada para ele. A URL vence o `BANCADA_PYTHON`, e a tabela é a
+mesma, com os núcleos e a memória lidos do `/health` do serviço:
+
+```bash
+docker build --target laya -t deskvoice-laya:local deploy/laya
+docker run -d --rm --name laya-bancada -p 127.0.0.1:8000:8000 --cpus 2 --memory 3g -e LAYA_THREADS=2 deskvoice-laya:local
+BANCADA_LAYA_URL=http://127.0.0.1:8000 pnpm exec tsx scripts/bancada-de-voz/medir.ts --teto-usd 0 --servicos nenhum --decisor laya
+```
 
 ## Como cada número é medido
 

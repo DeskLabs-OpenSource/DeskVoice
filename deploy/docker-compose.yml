@@ -2,8 +2,8 @@
 #
 # Quem publica porta no host: só o Caddy (a entrada única do painel e da voz do navegador) e o
 # Asterisk (SIP e RTP, UDP). Postgres, painel, voz, rotinas, o WAHA (WhatsApp), o WaCalls (ligação
-# pelo WhatsApp) e a ARI do Asterisk ficam na rede interna, e painel e voz NUNCA publicam porta:
-# tudo o que é web entra pelo Caddy.
+# pelo WhatsApp), o Laya (filtro local) e a ARI do Asterisk ficam na rede interna, e painel e voz
+# NUNCA publicam porta: tudo o que é web entra pelo Caddy.
 #
 # As portas do Caddy não estão neste arquivo. O instalador as grava em
 # `docker-compose.override.yml`, porque dependem da máquina: 80/443 quando estão livres, ou
@@ -228,6 +228,43 @@ services:
     volumes:
       # O pareamento do número. Perder este volume obriga a ler o QR Code de novo. Não entra no backup.
       - wacalls-data:/data
+    networks: [internal]
+    logging: *logging
+
+  # O Laya (Convai Innovations, pesos abertos, Apache-2.0): o modelo de decisão que roda nesta
+  # máquina, como opção do filtro da fala (desenho R12, decisão 3 e fatia 8a). Imagem do próprio
+  # projeto (deploy/laya/), com os pesos dentro dela, numa revisão fixa conferida por resumo: o
+  # contêiner não baixa nada ao subir.
+  #
+  # Só na rede interna, sem porta publicada: quem fala com ele é o processo de voz, em
+  # http://laya:8000 (packages/voice-engine/src/deciders/laya.ts). Não lê o app.env nem recebe chave.
+  #
+  # Fica num perfil: NÃO sobe nem é baixado por padrão, e fica fora de APP_SERVICES
+  # (install/_common.sh), que é a lista que a atualização baixa. Quem já instalou não é surpreendido.
+  laya:
+    profiles: ["laya"]
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-laya:${DESKVOICE_VERSION:-dev}
+    build: { context: ./laya, target: laya }
+    restart: unless-stopped
+    # Teto, e não reserva. A bancada mediu 2,3 GB de memória máxima do processo com três chamadas
+    # simultâneas (rodada 3, 15/11/2026, fora do contêiner). Estourar derruba só o Laya, e a chamada
+    # segue sem filtro.
+    mem_limit: 3g
+    # O teto de CPU existe para o Laya não tirar processador do áudio das ligações: a rodada 3 mediu
+    # 2,07 núcleos com uma chamada e 2,85 com três, numa VPS de 4. O padrão 2 ainda NÃO foi medido
+    # com a voz ao lado; a medida da fatia 8a é que o confirma ou o desce.
+    cpus: "${LAYA_CPUS:-2}"
+    environment:
+      # As linhas de cálculo do torch acompanham o teto (arredondado para baixo): mais linhas que
+      # núcleos só disputariam a mesma fatia de CPU.
+      LAYA_THREADS: "${LAYA_CPUS:-2}"
+    healthcheck:
+      # 200 só depois de o modelo carregar. A imagem traz o Python.
+      test: ["CMD", "python", "-I", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
     networks: [internal]
     logging: *logging
 
