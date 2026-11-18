@@ -38,3 +38,27 @@ export async function costTotal(q: OrgQuery, range: DayRange): Promise<CostTotal
   );
   return { microcents: Number(row?.microcents ?? 0), unmeasuredCount: row?.unmeasured ?? 0, estimatedCount: row?.estimated ?? 0 };
 }
+
+/**
+ * Os dias da organização da transação em `now`, no fuso dela: hoje, o dia 1 do mês corrente e o
+ * começo da janela de 30 dias contando hoje (a mesma largura da janela padrão da tela de Custos).
+ */
+export async function organizationDays(q: OrgQuery, now: Date): Promise<{ today: string; monthStart: string; last30From: string }> {
+  const row = await q.one<{ today: string; month: string; since: string }>(
+    `select to_char(d, 'YYYY-MM-DD') as today, to_char(d - (extract(day from d)::int - 1), 'YYYY-MM-DD') as month, to_char(d - 29, 'YYYY-MM-DD') as since
+       from (select ($1::timestamptz at time zone z.zone)::date as d from ${ORGANIZATION_ZONE} z) t`,
+    [now],
+  );
+  if (!row) throw new Error("organizationDays: no row");
+  return { today: row.today, monthStart: row.month, last30From: row.since };
+}
+
+/** Quantas ligações da organização da transação começaram no período, pelo dia no fuso dela. */
+export async function callCount(q: OrgQuery, range: DayRange): Promise<number> {
+  const row = await q.one<{ count: number }>(
+    `select count(*)::int as count from calls c cross join ${ORGANIZATION_ZONE} z
+      where (c.started_at at time zone z.zone)::date between $1::date and $2::date`,
+    [range.from, range.to],
+  );
+  return row?.count ?? 0;
+}
