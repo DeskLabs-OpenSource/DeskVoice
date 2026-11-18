@@ -48,12 +48,12 @@ for spec in $SPECS; do
   docker_user_spec_valid "$spec" || die "A porta '$spec' não vale." "Use a forma do ufw: 5060/udp, ou uma faixa 10000:10200/udp."
 done
 
-have iptables || die "Não achei o comando iptables nesta máquina." "Instale o pacote do iptables (no AlmaLinux: $SUDO dnf install -y iptables) e rode de novo."
-if have iptables && ! iptables -w 5 -S DOCKER-USER >/dev/null 2>&1; then
-  die "A cadeia DOCKER-USER não existe nesta máquina: quem a cria é o Docker, quando sobe." "Ligue o Docker e rode de novo: $SUDO systemctl start docker"
-fi
-
 ipt() { $SUDO iptables -w 5 "$@"; }
+# As duas conferências usam o mesmo privilégio da escrita: sem root, o iptables recusa até ler a
+# cadeia, e no Debian ele mora em /usr/sbin, que só entra no PATH pelo sudo.
+$SUDO sh -c 'command -v iptables' >/dev/null 2>&1 || die "Não achei o comando iptables nesta máquina." "Instale o pacote do iptables (no AlmaLinux: $SUDO dnf install -y iptables) e rode de novo."
+ipt -S DOCKER-USER >/dev/null 2>&1 || die "A cadeia DOCKER-USER não existe nesta máquina: quem a cria é o Docker, quando sobe." "Ligue o Docker e rode de novo: $SUDO systemctl start docker"
+
 rule_args() {  # em RULE: os argumentos da regra de uma porta. O --ctorigdstport é o que enxerga a
                # porta de fora: na DOCKER-USER o pacote já passou pelo DNAT do Docker.
   RULE=(-p "$(printf '%s' "${1#*/}")" -m conntrack --ctorigdstport "$(printf '%s' "${1%/*}")" --ctdir ORIGINAL -j DROP)

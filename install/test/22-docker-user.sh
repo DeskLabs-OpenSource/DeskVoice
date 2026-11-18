@@ -77,6 +77,23 @@ contains "simulação: mostra a regra que escreveria" "$out" "[simulação] fari
 equal "simulação: não mexeu nas regras" "$before" "$(cat "$STATE")"
 equal "simulação: não chamou o systemd" 0 "$(calls '^systemctl ')"
 
+# ── Quem instala sem ser root, pelo sudo: conferir a cadeia e achar o comando pedem o mesmo
+# privilégio de escrever. Como root não há sudo a simular, e o caso não roda. ──
+if [ "$(id -u)" != 0 ]; then
+  saved="$(cat "$STATE")"; touch "$FAKE_DIR/iptables_needs_root"
+  out="$(tool apply 5060/udp)"; equal "sem root: sai com zero" 0 "$?"
+  lacks "sem root: não acha que a cadeia falta" "$out" "não existe nesta máquina"
+  # No Debian o iptables mora em /usr/sbin, fora do PATH de quem não é root; o sudo o acha.
+  SBIN="$SANDBOX/sbin"; NOSBIN="$SANDBOX/nosbin"; mkdir -p "$SBIN" "$NOSBIN"
+  ln -s "$TEST_DIR/fake/iptables" "$SBIN/iptables"
+  for f in "$TEST_DIR"/fake/*; do [ "${f##*/}" = iptables ] || ln -s "$f" "$NOSBIN/"; done
+  echo "$SBIN" > "$FAKE_DIR/sudo_path"
+  out="$(PATH="$NOSBIN:${PATH#"$TEST_DIR/fake:"}" tool apply 5060/udp)"; equal "sem /usr/sbin no PATH: sai com zero" 0 "$?"
+  lacks "sem /usr/sbin no PATH: acha o iptables pelo sudo" "$out" "Não achei o comando iptables"
+  rm -f "$FAKE_DIR/iptables_needs_root" "$FAKE_DIR/sudo_path"
+  printf '%s\n' "$saved" > "$STATE"
+fi
+
 # ── Porta inválida e cadeia que não existe: para com o conserto, sem tocar em nada ──
 for bad in 5060 5060/sctp 5060:10200 70000/tcp 10200:10000/udp; do
   out="$(tool apply "$bad")"; equal "porta '$bad': recusa" 1 "$?"

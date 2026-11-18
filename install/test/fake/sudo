@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # sudo de mentira: nenhum teste pede privilégio de verdade. Registra e roda o comando como está;
 # com $FAKE_DIR/sudo_fail, recusa (como o sudo que pediria senha e não tem terminal).
+# O comando roda "como root" (FAKE_AS_ROOT=1, que o iptables de mentira lê), e com o PATH do sudo:
+# $FAKE_DIR/sudo_path vai na frente, como o secure_path põe /usr/sbin, que fica fora do PATH de quem
+# não é root no Debian.
 echo "sudo $*" >> "$FAKE_DIR/calls.log"
 if [ "${1:-}" = "-n" ]; then shift; fi
 if [ -f "$FAKE_DIR/sudo_fail" ]; then exit 1; fi
+export FAKE_AS_ROOT=1
+if [ -f "$FAKE_DIR/sudo_path" ]; then PATH="$(cat "$FAKE_DIR/sudo_path"):$PATH"; export PATH; fi
 exec "$@"
