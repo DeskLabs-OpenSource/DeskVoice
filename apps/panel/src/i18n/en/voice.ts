@@ -32,6 +32,7 @@ const voice: VoiceDictionary = {
     region_unavailable: "the provider does not serve this server's country or region.",
     rate_limited: "the provider asked to wait. Try again in a few minutes.",
     unreachable: "the provider could not be reached. Check that the server can reach the internet.",
+    provider_error: "the provider answered with an error on its side. It usually clears up on its own: try again in a few minutes.",
     unexpected_response: "the provider answered in an unexpected way. Try again later.",
     not_needed: "this voice takes no key.",
   },

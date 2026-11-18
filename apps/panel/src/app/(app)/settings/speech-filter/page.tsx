@@ -47,6 +47,7 @@ const CHECK_TONE: Record<CheckResult, "ok" | "warn" | "fail"> = {
   region_unavailable: "fail",
   rate_limited: "warn",
   unreachable: "warn",
+  provider_error: "warn",
   unexpected_response: "warn",
 };
 
