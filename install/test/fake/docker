@@ -32,6 +32,11 @@ case "$args" in
   # A sonda da entrada única (painel, voz e a rota do agente, pelo Caddy). Vem antes da conversa do
   # agente porque também cita a rota dele.
   *" exec -T panel node "*"voice-ws"*) if [ -f "$FAKE_DIR/entry_probe" ]; then cat "$FAKE_DIR/entry_probe"; else printf 'panel|200\nvoice|426\nagent|404|0\n'; fi; exit 0 ;;
+  # A sonda do login da checagem de saúde, que fala com o painel direto (sem passar pelo Caddy) e
+  # não lê credencial de ninguém: responde $FAKE_DIR/login_health; sem o arquivo, responde o que o
+  # painel saudável responde a uma credencial que não existe — 401. Vem antes do login do
+  # instalador, que lê a senha pela entrada padrão.
+  *" exec -T panel node "*"127.0.0.1:3000/api/v1/auth/login"*) cat >/dev/null; if [ -f "$FAKE_DIR/login_health" ]; then cat "$FAKE_DIR/login_health"; else echo 'login|401'; fi; exit 0 ;;
   # O login de verdade no fim da instalação: guarda o que chegou pela entrada padrão (e-mail e
   # senha) e responde o que estiver em $FAKE_DIR/login_probe; sem o arquivo, "entrou".
   *" exec -T panel node "*"auth/login"*) cat > "$FAKE_DIR/login_stdin"; if [ -f "$FAKE_DIR/login_probe" ]; then cat "$FAKE_DIR/login_probe"; else echo 'ok|200'; fi; exit 0 ;;

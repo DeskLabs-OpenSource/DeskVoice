@@ -8,7 +8,7 @@
 #
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
 # Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, painel → banco,
-# Asterisk, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
+# login do painel, Asterisk, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
 # linha, motor de voz, entrada única, WhatsApp, ligação pelo WhatsApp, portas, disco). O agente de atualização nunca é
 # falha: no máximo, aviso.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -97,6 +97,41 @@ fi
 # O Postgres aceitar conexão (linha "Banco") não prova que o painel entra nele: a senha do papel da
 # aplicação, que as migrations redefinem, ou a rede podem estar erradas. Sem isso não há nem login.
 from_panel panel_database "Painel → banco" 1 database
+
+# ── Login do painel ──
+# A rota de saúde responde "painel ok, banco ok" mesmo quando ninguém consegue entrar: ela lê o
+# banco por outro caminho, e uma volta de versão que trocou a coluna que o login lê passou pela
+# instalação "com todas as peças essenciais respondendo" (issue #392). Esta sonda faz o pedido de
+# login de verdade, de dentro do contêiner, com uma credencial que não existe: o certo é 401, e um
+# 5xx é o defeito. Não cria usuário nem guarda senha, e o e-mail é novo a cada execução para não
+# gastar o limite de tentativas do login (5 por par e-mail+endereço, 50 por e-mail). Uma tentativa
+# só: a checagem não repete.
+login_js() {
+  cat <<JS
+const t=require('crypto').randomUUID();
+const b=JSON.stringify({email:'saude-'+t+'@invalid',password:t});
+fetch('http://127.0.0.1:3000/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:b,signal:AbortSignal.timeout(8000)})
+ .then(r=>console.log('login|'+r.status))
+ .catch(e=>console.log('login|0|'+String(e.message)));
+JS
+}
+if ! running panel || [ -z "$panel_lines" ] || [ -n "$(piece unreachable 1)" ]; then
+  add login "Login do painel" 1 aviso "não deu para conferir porque o painel não respondeu; resolva o painel primeiro"
+else
+  login_line="$(dc exec -T panel node -e "$(login_js)" </dev/null 2>/dev/null || true)"
+  login_code="$(printf '%s\n' "$login_line" | awk -F'|' '$1 == "login" { print $2; exit }')"
+  login_why="$(printf '%s\n' "$login_line" | awk -F'|' '$1 == "login" { print $3; exit }')"
+  case "$login_code" in
+    400|401) add login "Login do painel" 1 ok "a rota de login responde e recusa credencial que não existe (HTTP $login_code)" ;;
+    # Limite de tentativas: não é erro de servidor, e também não prova que o login chega ao banco.
+    429) add login "Login do painel" 1 aviso "o login está recusando pelos próprios limites de tentativa (HTTP 429): não deu para conferir se ele chega ao banco. Rode de novo em alguns minutos" ;;
+    2[0-9][0-9]) add login "Login do painel" 1 falha "o login aceitou uma credencial que não existe (HTTP $login_code): a tela está aberta para quem não devia. Rode bash install/diagnose.sh" ;;
+    5[0-9][0-9]) add login "Login do painel" 1 falha "o login do painel responde erro de servidor (HTTP $login_code): ninguém consegue entrar na tela, mesmo com a saúde dizendo que o painel e o banco respondem. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 panel" ;;
+    0) add login "Login do painel" 1 falha "o painel não respondeu à rota de login (${login_why:-sem resposta})" ;;
+    "") add login "Login do painel" 1 falha "a sonda do login não devolveu resposta (${login_line:-sem saída})" ;;
+    *) add login "Login do painel" 1 falha "a rota de login respondeu HTTP $login_code em vez de recusar a credencial: o login não está confiável. Rode bash install/diagnose.sh" ;;
+  esac
+fi
 
 # ── Worker de voz e rotinas ──
 if ! running voice; then
