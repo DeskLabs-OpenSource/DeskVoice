@@ -17,6 +17,9 @@ export type OverviewEngine = "own_key" | "no_key" | "key_failed";
  * `readEngineKeys` e `engineLine` (Saúde). Fora desta fatia: o teto do mês (7) e a chave da
  * instalação (8).
  *
+ * A linha conta em três: `connected` (`ok`), `attention` (`warn`: carregada sem conferir, ou o
+ * conjunto de endereços pede atenção) e `down` (só `fail`). A linha em aviso não caiu.
+ *
  * O processo de voz é chamado uma vez por pedido. Se ele não responder, `trunk` vem nulo em toda
  * organização, e a tela diz que ele não respondeu, nunca "0 caídas".
  */
@@ -47,7 +50,8 @@ export const GET = handleInstallation({ support: false }, async ({ deps }) => {
           cost: { ...month, cents: centsOf(cost.microcents), unmeasuredCount: cost.unmeasuredCount, estimatedCount: cost.estimatedCount },
           trunk: trunks && {
             connected: trunks.trunks.filter((line) => line.status === "ok").length,
-            down: trunks.trunks.filter((line) => line.status !== "ok").length,
+            attention: trunks.trunks.filter((line) => line.status === "warn").length,
+            down: trunks.trunks.filter((line) => line.status === "fail").length,
             check: trunkLine(trunks),
           },
           engine: { state: engineState(engine), check: engine },
