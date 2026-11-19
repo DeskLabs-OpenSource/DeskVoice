@@ -63,6 +63,7 @@ const factories: Record<string, Factory> = {
   call_events: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, at, kind: "call_started", payload: {} }),
   approvals: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, question: "Pode?", default_on_timeout: "denied", expires_at: at }),
   tasks: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, kind: "isolation_probe", payload: {}, status: "done" }),
+  call_backs: (organization_id, p) => ({ organization_id, origin_call_id: p.calls?.id, to_e164: "+5531999990000", attempt: 1, due_at: at, created_at: at }),
   follow_ups: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, title: "Retornar", owner_user_id: p.users?.id, due_at: at, created_at: at }),
   notifications: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, follow_up_id: p.follow_ups?.id, channel: "panel", body: "Aviso" }),
   caller_notes: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, caller_e164: "+5531999990000", text: "Nota", created_at: at }),

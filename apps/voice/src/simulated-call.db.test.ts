@@ -357,6 +357,10 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     ari.emit({ type: "ChannelDestroyed", channel: { id: "canal-x" }, cause_txt: "User busy" });
     await waitFor(async () => (await callOf(app, callId)).status === "failed", "the call to be marked failed");
     expect(await callOf(app, callId)).toMatchObject({ status: "failed", end_reason: "no_answer" });
-    expect(await eventsOf(app, callId)).toEqual([{ kind: "call_ended", payload: { status: "failed", reason: "no_answer", cause: "User busy" } }]);
+    // O fim sem áudio não passa por `finish`: a revisão é enfileirada ali mesmo (a religação depende dela).
+    expect(await eventsOf(app, callId)).toEqual([
+      { kind: "call_ended", payload: { status: "failed", reason: "no_answer", cause: "User busy" } },
+      { kind: "task_queued", payload: { kind: "review_call", taskId: expect.any(String) } },
+    ]);
   });
 });

@@ -57,10 +57,9 @@ const agentFields = z.object({
   vocabulary,
   // Ambiente de quem liga: `noisy` ajusta a detecção de fala do provedor para ruído de fundo.
   listeningEnvironment: z.enum(["normal", "noisy"]),
-  // O que acontece quando a ligação cai (desenho do follow-up da ligação que caiu, seção 3.2). O banco
-  // aceita os quatro modos, mas `call_back` só tem caminho nas fatias 3 e 4: é recusado aqui. O
-  // `whatsapp` passa por `requireDropFollowUpMode`, que confere o pré-requisito.
-  dropFollowUp: z.enum(["off", "task", "whatsapp"]),
+  // O que acontece quando a ligação cai (desenho do follow-up da ligação que caiu, seção 3.2). O
+  // `whatsapp` e o `call_back` passam por `requireDropFollowUpMode`, que confere o pré-requisito.
+  dropFollowUp: z.enum(["off", "task", "whatsapp", "call_back"]),
   // O texto do WhatsApp para quem ligou: fixo, escrito pelo operador, sem variável. Vazio vale o padrão.
   dropFollowUpMessage: optionalText(DROP_FOLLOW_UP_MESSAGE_MAX),
   // Para quem o agente pode passar a ligação (`transfer_to_agent`). A rota confere que cada um é
@@ -141,10 +140,19 @@ export async function requireActiveOwner(q: OrgQuery, userId: string | null | un
 
 /**
  * O modo `whatsapp` de "Quando a ligação cai" só pode ser escolhido com conector de WhatsApp e com
- * `whatsapp.trust_caller_id` ligado (seção 3.5 do desenho): sem eles, a mensagem nunca sairia. A
- * revisão confere de novo na hora de agir, porque o ajuste pode ser desligado depois.
+ * `whatsapp.trust_caller_id` ligado (seção 3.5 do desenho): sem eles, a mensagem nunca sairia. O modo
+ * `call_back` só pode ser escolhido com as ligações de saída ligadas (`outbound_policy.enabled`, seção
+ * 3.6): a tela desabilitada não é a única barreira. A revisão confere de novo na hora de agir, porque
+ * o ajuste pode ser desligado depois, e a religação passa pela política inteira na hora de discar.
  */
 export async function requireDropFollowUpMode(q: OrgQuery, mode: string | undefined): Promise<void> {
+  if (mode === "call_back") {
+    // Trava a linha da política até o fim da escrita: desligada no meio, a escolha não passa.
+    const policy = await q.one<{ enabled: boolean }>("select enabled from outbound_policy for share");
+    if (policy?.enabled !== true)
+      throw new ApiError(400, "drop_follow_up_outbound_disabled", "Turn outbound calls on in Outbound calls, stating the purpose and the legal basis, before choosing to call the caller back.");
+    return;
+  }
   if (mode !== "whatsapp") return;
   const block = await callerMessageBlock(q);
   if (block === "whatsapp_not_connected") throw new ApiError(400, "drop_follow_up_whatsapp_not_connected", "Connect WhatsApp in Settings → WhatsApp before choosing to message the caller.");

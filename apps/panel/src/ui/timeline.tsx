@@ -9,7 +9,7 @@ import { fill } from "../i18n/locales";
 import ptBR from "../i18n/pt-BR/timeline";
 import { useDict, useLocale } from "../i18n/provider";
 import { classifyReasonCode } from "./classify-reason";
-import { formatClock, formatDateTime, formatPhone } from "./format";
+import { formatClock, formatDateTime, formatMoney, formatPhone } from "./format";
 import type { Analyst, CallEvent, FollowUp, Person } from "./types";
 
 type NodeTone = "neutral" | "accent" | "ok" | "fail" | "speech" | "speech-agent";
@@ -51,6 +51,13 @@ function Card({ title, tone, children }: { title: ReactNode; tone?: "accent" | "
 type TimelineDictionary = typeof ptBR;
 /** O que a linha do tempo diz de um `drop_follow_up`: a ação, ou o motivo de não ter agido. */
 type DropFollowUpShown = keyof TimelineDictionary["events"]["drop_follow_up"]["simulated"];
+/** O motivo de recusa da religação (`refusalCode`), em frase fixa; o código fora da lista vira `unknown`, nunca texto cru. */
+type CallBackRefusalShown = keyof TimelineDictionary["events"]["drop_follow_up_result"]["refusals"];
+/** As ações da religação em `drop_follow_up_result` (seção 3.7 do desenho). */
+const CALL_BACK_RESULTS = ["call_back_placed", "call_back_refused", "call_back_expired", "call_back_answered", "call_back_not_answered"] as const;
+type CallBackResultShown = (typeof CALL_BACK_RESULTS)[number];
+const isCallBackResult = (action: unknown): action is CallBackResultShown => (CALL_BACK_RESULTS as readonly unknown[]).includes(action);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * "Ligação não analisada: <motivo>", do payload de `analysis_not_done`. A mesma frase serve à linha
@@ -594,17 +601,54 @@ export function Timeline({
       case "drop_follow_up": {
         // Só campos fixos: o caso e o que foi feito, ou o que teria sido feito na simulada.
         const what = p.case === "engine_failed" ? e.drop_follow_up.engine_failed : e.drop_follow_up.call_dropped;
+        // No modo `call_back`, o agendamento e os motivos de não agendar têm frase própria: a do
+        // WhatsApp falaria de uma mensagem que nunca existiu.
+        const callBack = p.mode === "call_back";
+        const skipped = p.action === "skipped" && (p.reason === "do_not_call" || p.reason === "mode_unavailable" || p.reason === "recent_follow_up" || p.reason === "org_limit") ? p.reason : null;
         const action: DropFollowUpShown =
           p.action === "whatsapp_queued"
             ? "whatsapp_queued"
-            : p.action === "skipped" && (p.reason === "do_not_call" || p.reason === "mode_unavailable" || p.reason === "recent_follow_up" || p.reason === "org_limit")
-              ? p.reason
-              : "task_opened";
+            : p.action === "call_back_scheduled"
+              ? "call_back_scheduled"
+              : callBack && (skipped === "do_not_call" || skipped === "mode_unavailable" || skipped === "recent_follow_up")
+                ? `call_back_${skipped}`
+                : skipped ?? "task_opened";
         const done = p.simulated === true ? e.drop_follow_up.simulated[action] : e.drop_follow_up[action];
         return { ...base, tone: "accent", icon: PhoneX, body: <Quiet><span className="font-bold text-ink">{what}</span> {done}</Quiet> };
       }
       case "drop_follow_up_result": {
-        // A mensagem para quem ligou saiu ou não; as ações da religação chegam nas fatias 3 e 4.
+        if (isCallBackResult(p.action)) {
+          // A religação (seção 3.7): cada ação com frase própria, só de campos fixos (tentativa, código,
+          // custo), com o link para a religação quando ela chegou a existir. Nada da conversa.
+          const r = e.drop_follow_up_result;
+          const attempt = typeof p.attempt === "number" ? p.attempt : 1;
+          const code = text(p.refusalCode);
+          const refusal: CallBackRefusalShown = Object.hasOwn(r.refusals, code) ? (code as CallBackRefusalShown) : "unknown";
+          const said = fill(r[p.action], { attempt, reason: r.refusals[refusal] });
+          const cost = typeof p.costCents === "number" ? fill(r.cost, { cost: formatMoney(p.costCents, locale) }) : null;
+          const callId = text(p.callId);
+          const good = p.action === "call_back_answered" || p.action === "call_back_placed";
+          return {
+            ...base,
+            tone: good ? "ok" : p.action === "call_back_not_answered" ? "neutral" : "fail",
+            icon: p.action === "call_back_placed" ? PhoneOutgoing : good ? CheckCircle : XCircle,
+            body: (
+              <Quiet>
+                {said}
+                {cost ? ` ${cost}` : null}
+                {UUID.test(callId) ? (
+                  <>
+                    {" "}
+                    <Link href={`/calls/${callId}`} className="font-bold text-ink underline-offset-4 hover:underline">
+                      {r.link}
+                    </Link>
+                  </>
+                ) : null}
+              </Quiet>
+            ),
+          };
+        }
+        // A mensagem para quem ligou saiu ou não.
         const sent = p.action === "whatsapp_sent";
         return {
           ...base,

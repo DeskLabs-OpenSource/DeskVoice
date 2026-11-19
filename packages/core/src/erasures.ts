@@ -166,7 +166,7 @@ export async function countCallerData(q: OrgQuery, options: { dir: string; phone
  * texto da análise, o motivo do pedido para parar a gravação, os argumentos e mensagens de
  * ferramenta, o texto de aprovações e de avisos, as pendências (pelo telefone e pela chamada) e as
  * notas do agente (pelo telefone e pela chamada; estas saem inteiras). O
- * telefone do titular vira nulo nas chamadas, nos eventos, nas pendências e na mensagem para quem
+ * telefone do titular vira nulo nas chamadas, nos eventos, nas pendências, na religação (`call_backs.to_e164`) e na mensagem para quem
  * ligou (`notifications.target` do aviso `caller`); o erro da entrega dessa mensagem, que pode
  * repetir o número, sai do aviso, da tarefa e do evento `task_finished`.
  *
@@ -225,6 +225,13 @@ export async function eraseCaller(q: OrgQuery, options: { dir: string; phoneE164
   // A nota é o que a pessoa disse: sai inteira, e não trocada por marcador (como no prazo da memória).
   const notes = await q.exec(`delete from caller_notes where ${NOTES_WHERE}`, [phoneE164, ids]);
   const approvals = await q.exec(`update approvals set question = $2, context = ${ERASED} where call_id = any($1::uuid[])`, [ids, ERASED_TEXT]);
+  // A religação guarda o número de quem ligou (`call_backs.to_e164`): sai, e a que ainda não saiu fica
+  // cancelada, porque sem o número não há a quem ligar.
+  await q.exec(
+    `update call_backs set to_e164 = null, status = case when status in ('scheduled', 'due') then 'cancelled' else status end
+      where origin_call_id = any($1::uuid[]) or to_e164 = $2`,
+    [ids, phoneE164],
+  );
 
   const calls = await q.exec(
     `update calls set

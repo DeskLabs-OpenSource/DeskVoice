@@ -3,6 +3,7 @@ import {
   CALL_RECORDING_SETTING,
   CALLER_MEMORY_AGENT_SETTING,
   callerMemoryAgentOf,
+  callBackInstruction,
   callRecordingOf,
   decryptSecret,
   enqueueTask,
@@ -1217,7 +1218,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   async function run(): Promise<void> {
     const first = (await q.one<AgentRow>(`select ${AGENT_COLUMNS} from agents where id = $1`, [agentId])) ?? undefined;
     agent = first;
-    const call = await q.one<{ direction: "inbound" | "outbound"; from_e164: string | null; to_e164: string | null }>("select direction, from_e164, to_e164 from calls where id = $1", [callId]);
+    const call = await q.one<{ direction: "inbound" | "outbound"; from_e164: string | null; to_e164: string | null; call_back_of: string | null }>(
+      "select direction, from_e164, to_e164, call_back_of from calls where id = $1",
+      [callId],
+    );
     if (!first || !call) throw new Error(`Agent ${agentId} or call ${callId} not found in organization ${organizationId}`);
     visited.push(first);
 
@@ -1237,7 +1241,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
 
     const targets = await targetsOf(first);
     const enabled = enabledToolsFor(overrides?.tools ?? first.tools, targets);
-    const baseInstructions = overrides?.instructions ?? first.instructions;
+    // A religação da ligação que caiu (desenho 2026-11-16-follow-up-da-ligacao-que-caiu, seção 3.6): uma
+    // linha fixa, na língua do agente, somada às instruções. Nada da conversa anterior entra por aqui.
+    const ownInstructions = overrides?.instructions ?? first.instructions;
+    const baseInstructions =
+      call.call_back_of !== null && !ownInstructions.startsWith(SIMULATED_PREFIX) ? `${ownInstructions}\n\n${callBackInstruction(first.language)}` : ownInstructions;
     // A memória do número no agente (registro 0020, item 4): só com a chave da organização ligada, em
     // qualquer direção. Lida uma vez, antes do motor, como a gravação; desligada, nada é lido, e as
     // instruções são as de antes, byte a byte. O roteiro do motor simulado não recebe bloco (ele
