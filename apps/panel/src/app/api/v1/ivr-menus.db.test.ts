@@ -214,9 +214,12 @@ describe("T11: o anúncio", () => {
 
   it("U12: recusa o anúncio com menos de 200 ms (`ivr_prompt_too_short`), e aceita os 200 ms exatos", async () => {
     const menu = await newMenu("Curto");
-    // 199 ms: 1592 amostras a 8 kHz. Um WAV de uma amostra (o arquivo mudo que a tela já recusa) também.
+    // 199 ms: 1592 amostras a 8 kHz. 1599 amostras são 199,875 ms, que arredondados dariam 200 (fatia
+    // 1e: a rota compara antes de arredondar). Um WAV de uma amostra (o arquivo mudo que a tela já
+    // recusa) também.
     for (const [samples, ms] of [
       [1592, 199],
+      [1599, 199],
       [1, 0],
     ] as const) {
       const short = await upload(menu, wav({ samples }));
