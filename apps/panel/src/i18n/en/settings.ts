@@ -10,6 +10,7 @@ const settings: SettingsDictionary = {
     trunks: "Phone lines: {used} of {limit}",
     agents: "Agents: {used} of {limit}",
     outboundLocked: "Outbound calls blocked by the installation administration",
+    spendCap: "Monthly spending cap: {spent} of {cap} (approximate: it includes estimated cost and leaves out what could not be measured)",
   },
   sections: {
     ai: "Artificial intelligence",

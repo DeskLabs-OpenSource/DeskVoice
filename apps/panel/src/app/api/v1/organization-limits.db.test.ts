@@ -37,7 +37,7 @@ async function scene() {
   const home = await createOrganization(panel.app, `Instalação ${randomUUID().slice(0, 8)}`);
   const admin = await createUser(panel.app, home, "owner");
   await withSystem(panel.app, async (q) => q.exec("update accounts set installation_admin_at = now() where id = $1", [await accountOf(admin.id)]));
-  const setLimits = (body: { maxTrunks: number | null; maxAgents: number | null; outboundAllowed?: boolean }) => call(writeLimits, { method: "PUT", cookie: admin.cookie, params: { id: org }, body });
+  const setLimits = (body: { maxTrunks: number | null; maxAgents: number | null; outboundAllowed?: boolean; monthlySpendCapCents?: number | null }) => call(writeLimits, { method: "PUT", cookie: admin.cookie, params: { id: org }, body });
   const trunk = () => call(createTrunk, { method: "POST", cookie: person.cookie, body: { name: "Linha", host: "203.0.113.70", authMode: "ip" } });
   const agent = () => call(createAgent, { method: "POST", cookie: person.cookie, body: { name: "Recepção", engine: "simulated" } });
   const count = async (table: "trunks" | "agents"): Promise<number> =>
@@ -106,7 +106,7 @@ describe("organization limits", () => {
   it("records the change in the installation audit, only with what changed, and shows the usage", async () => {
     const s = await scene();
     await s.trunk();
-    expect((await s.setLimits({ maxTrunks: 2, maxAgents: 5 })).data).toEqual({ maxTrunks: 2, maxAgents: 5, outboundAllowed: true });
+    expect((await s.setLimits({ maxTrunks: 2, maxAgents: 5 })).data).toEqual({ maxTrunks: 2, maxAgents: 5, outboundAllowed: true, monthlySpendCapCents: null });
     expect((await s.setLimits({ maxTrunks: 2, maxAgents: null })).status).toBe(200);
     // Nada mudou: nada se grava.
     expect((await s.setLimits({ maxTrunks: 2, maxAgents: null })).status).toBe(200);
@@ -122,9 +122,17 @@ describe("organization limits", () => {
       { actor, payload: { before: { max_agents: 5 }, after: { max_agents: null } } },
     ]);
     const read = await call(readLimits, { cookie: s.admin.cookie, params: { id: s.org } });
-    expect(read.data).toEqual({ maxTrunks: 2, maxAgents: null, outboundAllowed: true, outboundPolicyEnabled: false, usage: { trunks: 1, agents: 0 } });
-    // A organização lê os próprios, só para leitura.
-    expect((await call(ownLimits, { cookie: s.person.cookie })).data).toEqual({ maxTrunks: 2, maxAgents: null, usage: { trunks: 1, agents: 0 } });
+    expect(read.data).toEqual({
+      maxTrunks: 2,
+      maxAgents: null,
+      outboundAllowed: true,
+      monthlySpendCapCents: null,
+      outboundPolicyEnabled: false,
+      usage: { trunks: 1, agents: 0 },
+      monthCost: { from: expect.any(String), to: expect.any(String), cents: 0, unmeasuredCount: 0, estimatedCount: 0 },
+    });
+    // A organização lê os próprios, só para leitura. Sem teto, o gasto do mês nem é somado.
+    expect((await call(ownLimits, { cookie: s.person.cookie })).data).toEqual({ maxTrunks: 2, maxAgents: null, monthlySpendCapCents: null, monthCost: null, usage: { trunks: 1, agents: 0 } });
   });
 
   it("refuses the limits routes to a session without the installation role, an unknown organization and an unknown field", async () => {
@@ -135,7 +143,7 @@ describe("organization limits", () => {
     }
     expect((await call(readLimits, { cookie: s.admin.cookie, params: { id: randomUUID() } })).status).toBe(404);
     expect((await call(writeLimits, { method: "PUT", cookie: s.admin.cookie, params: { id: randomUUID() }, body: { maxTrunks: 1, maxAgents: 1 } })).status).toBe(404);
-    for (const body of [{ maxTrunks: 1, maxAgents: 1, outboundAllowed: null }, { maxTrunks: 1, maxAgents: 1, outboundAllowed: "false" }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 100 }, { maxTrunks: -1, maxAgents: 1 }, { maxTrunks: 1.5, maxAgents: 1 }]) {
+    for (const body of [{ maxTrunks: 1, maxAgents: 1, outboundAllowed: null }, { maxTrunks: 1, maxAgents: 1, outboundAllowed: "false" }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: -1 }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 1.5 }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: "100" }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 2_147_483_648 }, { maxTrunks: 1, maxAgents: 1, nope: 1 }, { maxTrunks: -1, maxAgents: 1 }, { maxTrunks: 1.5, maxAgents: 1 }]) {
       expect((await call(writeLimits, { method: "PUT", cookie: s.admin.cookie, params: { id: s.org }, body })).code).toBe("validation_error");
     }
     expect(await withSystem(panel.app, (q) => q.one("select 1 from organization_limits where organization_id = $1", [s.org]))).toBeNull();
@@ -157,7 +165,7 @@ describe("organization limits", () => {
 
   it("changes nothing for an organization without limits: no row, and creating works", async () => {
     const s = await scene();
-    expect((await call(ownLimits, { cookie: s.person.cookie })).data).toEqual({ maxTrunks: null, maxAgents: null, usage: { trunks: 0, agents: 0 } });
+    expect((await call(ownLimits, { cookie: s.person.cookie })).data).toEqual({ maxTrunks: null, maxAgents: null, monthlySpendCapCents: null, monthCost: null, usage: { trunks: 0, agents: 0 } });
     for (let i = 0; i < 3; i++) expect((await s.agent()).status).toBe(200);
     expect(await withSystem(panel.app, (q) => q.one("select 1 from organization_limits where organization_id = $1", [s.org]))).toBeNull();
   });
@@ -175,7 +183,7 @@ describe("outbound lock", () => {
     expect((await call(writePolicy, { method: "PUT", cookie: s.person.cookie, body: turnOn })).status).toBe(200);
     const before = await policyRow(s.org);
     expect(before).toMatchObject({ enabled: true });
-    expect((await s.setLimits({ maxTrunks: null, maxAgents: null, outboundAllowed: false })).data).toEqual({ maxTrunks: null, maxAgents: null, outboundAllowed: false });
+    expect((await s.setLimits({ maxTrunks: null, maxAgents: null, outboundAllowed: false })).data).toEqual({ maxTrunks: null, maxAgents: null, outboundAllowed: false, monthlySpendCapCents: null });
     expect(await policyRow(s.org)).toEqual(before);
     expect((await call(readLimits, { cookie: s.admin.cookie, params: { id: s.org } })).data).toMatchObject({ outboundAllowed: false, outboundPolicyEnabled: true });
     // Sem `outboundAllowed`, o pedido não mexe na trava.
@@ -232,5 +240,49 @@ describe("outbound lock", () => {
     );
     expect(column.rows).toEqual([{ can_update: false, can_insert: false }]);
     expect((await call(readPolicy, { cookie: s.person.cookie })).data).toMatchObject({ lockedByInstallation: true });
+  });
+});
+
+// O teto de gasto do mês (R8, seção 3.4, fatia 7c): a rota da instalação grava e lê o teto, com o gasto
+// do mês ao lado, e a organização lê os dois. A conferência no começo das chamadas é do processo de voz.
+describe("monthly spending cap", () => {
+  /** Uma linha do extrato de hoje (o relógio do painel de teste) na organização, numa chamada dela. */
+  async function spend(org: string, microcents: number, extra: { estimated?: boolean; measured?: boolean } = {}): Promise<void> {
+    await withSystem(panel.app, async (q) => {
+      const old = await q.one<{ id: string }>("insert into calls (organization_id, direction, channel, status, started_at, ended_at) values ($1, 'inbound', 'simulated', 'completed', $2, $2) returning id", [org, panel.clock.at]);
+      await q.exec(
+        "insert into usage_ledger (organization_id, call_id, engine, cost_cents, cost_microcents, cost_estimated, cost_measured, at) values ($1, $2, 'simulated', round($3::numeric / 1000000)::int, $3, $4, $5, $6)",
+        [org, old?.id, microcents, extra.estimated ?? false, extra.measured ?? true, panel.clock.at],
+      );
+    });
+  }
+
+  it("the installation PUT records the cap with before and after, and both reads show it with the month's spending (the Costs sum)", async () => {
+    const s = await scene();
+    await spend(s.org, 1_234_567_890, { estimated: true });
+    await spend(s.org, 0, { measured: false });
+    expect((await s.setLimits({ maxTrunks: null, maxAgents: null, monthlySpendCapCents: 5000 })).data).toEqual({ maxTrunks: null, maxAgents: null, outboundAllowed: true, monthlySpendCapCents: 5000 });
+    const read = await call(readLimits, { cookie: s.admin.cookie, params: { id: s.org } });
+    expect(read.data).toMatchObject({ monthlySpendCapCents: 5000, monthCost: { cents: 1235, unmeasuredCount: 1, estimatedCount: 1 } });
+    expect((await call(ownLimits, { cookie: s.person.cookie })).data).toMatchObject({ monthlySpendCapCents: 5000, monthCost: { cents: 1235, unmeasuredCount: 1, estimatedCount: 1 } });
+    // Sem o campo, o teto fica como estava; com null, sai.
+    await s.setLimits({ maxTrunks: 1, maxAgents: null });
+    expect((await call(readLimits, { cookie: s.admin.cookie, params: { id: s.org } })).data).toMatchObject({ monthlySpendCapCents: 5000 });
+    await s.setLimits({ maxTrunks: 1, maxAgents: null, monthlySpendCapCents: null });
+    expect((await call(ownLimits, { cookie: s.person.cookie })).data).toMatchObject({ monthlySpendCapCents: null, monthCost: null });
+    const events = await withSystem(panel.app, (q) =>
+      q.many<{ payload: unknown }>("select payload from installation_events where kind = 'organization_limits_changed' and organization_id = $1 order by id", [s.org]),
+    );
+    expect(events.map((event) => event.payload)).toEqual([
+      { before: { monthly_spend_cap_cents: null }, after: { monthly_spend_cap_cents: 5000 } },
+      { before: { max_trunks: null }, after: { max_trunks: 1 } },
+      { before: { monthly_spend_cap_cents: 5000 }, after: { monthly_spend_cap_cents: null } },
+    ]);
+  });
+
+  it("accepts 0, the cap that refuses every call", async () => {
+    const s = await scene();
+    expect((await s.setLimits({ maxTrunks: null, maxAgents: null, monthlySpendCapCents: 0 })).data).toMatchObject({ monthlySpendCapCents: 0 });
+    expect((await call(ownLimits, { cookie: s.person.cookie })).data).toMatchObject({ monthlySpendCapCents: 0, monthCost: { cents: 0 } });
   });
 });

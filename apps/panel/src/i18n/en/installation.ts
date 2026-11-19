@@ -64,6 +64,10 @@ const installation: InstallationDictionary = {
     limitsOutboundHint: "Blocking does not change the organization's choice: it is kept and applies again when outbound calls are unblocked.",
     limitsOutboundReturnsOn: "Outbound calls for this organization come back as it left them: on.",
     limitsOutboundReturnsOff: "Outbound calls for this organization come back as it left them: off.",
+    limitsSpendCap: "Monthly spending cap, in dollars",
+    limitsSpendCapSpent: "Spent this month: {spent}.",
+    limitsSpendCapApprox: "Approximate: it includes estimated cost and leaves out what could not be measured. At the cap, every new call is refused (a call in progress goes on).",
+    limitsSpendCapInvalid: "The monthly spending cap must be an amount in dollars, like 50 or 49.90, or be left empty.",
     suspendedReason: "Reason: {reason}",
     suspendTitle: "Suspend the organization {name}?",
     suspendLead: "While suspended, {name} does not answer (callers hear that the number is unavailable), makes no calls, and people who only belong to it see just the suspension notice, with the reason. Its lines stay registered. Retention and erasure of caller data keep running.",
@@ -115,6 +119,9 @@ const installation: InstallationDictionary = {
     engineStates: { own_key: "Own key", no_key: "No key", key_failed: "Key failing" },
     queue: "Queue",
     queueCounts: "{late} late, {failed} failed in the last 24 hours",
+    spendCap: "Monthly cap",
+    spendCapOf: "{spent} of {cap}",
+    spendCapNone: "No cap",
   },
 
   audit: {
