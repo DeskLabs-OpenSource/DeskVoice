@@ -1,13 +1,8 @@
+import { IVR_MIN_PROMPT_MS } from "@deskvoice/core/ivr";
 import { ApiFailure } from "./api";
 
 /** A taxa da linha: o anúncio sai do navegador já em PCM16 mono a 8 kHz, como o servidor exige. */
 export const ANNOUNCEMENT_SAMPLE_RATE = 8000;
-
-/**
- * O anúncio mais curto que se aceita. Um arquivo que o navegador "abre" com duração zero (ou quase)
- * viraria um WAV de uma amostra: silêncio salvo como anúncio. Abaixo disto, recusa.
- */
-export const MIN_ANNOUNCEMENT_MS = 200;
 
 /**
  * Amostras de -1 a 1 viram um WAV PCM16 mono, com o cabeçalho de 44 bytes que o
@@ -42,8 +37,8 @@ export function pcm16Wav(samples: Float32Array, sampleRate = ANNOUNCEMENT_SAMPLE
 /**
  * O arquivo que o operador já tem (WAV, MP3, M4A) vira o WAV da linha: o navegador decodifica
  * (`decodeAudioData`), mistura para mono e reamostra a 8 kHz (`OfflineAudioContext`). Devolve o WAV
- * e a duração. O que o navegador não abre, ou abre com menos de `MIN_ANNOUNCEMENT_MS`, é recusado
- * aqui, com `null`.
+ * e a duração. O que o navegador não abre, ou abre com menos de `IVR_MIN_PROMPT_MS` (o mesmo número da
+ * rota do upload), é recusado aqui, com `null`.
  */
 export async function convertAnnouncement(file: Blob): Promise<{ wav: Blob; ms: number } | null> {
   const AudioContextClass = window.AudioContext;
@@ -56,7 +51,7 @@ export async function convertAnnouncement(file: Blob): Promise<{ wav: Blob; ms: 
   } finally {
     void decoder.close();
   }
-  if (!(decoded.duration * 1000 >= MIN_ANNOUNCEMENT_MS)) return null;
+  if (!(decoded.duration * 1000 >= IVR_MIN_PROMPT_MS)) return null;
   const frames = Math.max(1, Math.ceil(decoded.duration * ANNOUNCEMENT_SAMPLE_RATE));
   const offline = new OfflineAudioContext(1, frames, ANNOUNCEMENT_SAMPLE_RATE);
   const source = offline.createBufferSource();

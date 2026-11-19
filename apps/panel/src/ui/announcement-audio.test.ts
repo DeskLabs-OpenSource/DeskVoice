@@ -1,6 +1,6 @@
-import { parseRecordedSpeech } from "@deskvoice/core";
+import { IVR_MIN_PROMPT_MS, parseRecordedSpeech } from "@deskvoice/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { convertAnnouncement, MIN_ANNOUNCEMENT_MS, pcm16Wav } from "./announcement-audio";
+import { convertAnnouncement, pcm16Wav } from "./announcement-audio";
 
 describe("o anúncio convertido no navegador", () => {
   it("sai num WAV que o parser estrito do servidor aceita, com as amostras em PCM16", () => {
@@ -52,7 +52,7 @@ describe("convertAnnouncement recusa o anúncio sem som", () => {
   });
 
   it("200 ms ou mais: converte, com a duração", async () => {
-    browserDecoding(MIN_ANNOUNCEMENT_MS / 1000);
+    browserDecoding(IVR_MIN_PROMPT_MS / 1000);
     const converted = await convertAnnouncement(new Blob([new Uint8Array(8)]));
     expect(converted?.ms).toBe(200);
     expect(converted?.wav.size).toBe(44 + 1600 * 2);
