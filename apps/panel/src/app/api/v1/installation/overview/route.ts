@@ -1,4 +1,4 @@
-import { callCount, costTotal, listOrganizations, organizationDays, organizationQueue, withOrg } from "@deskvoice/core";
+import { callCount, costTotal, listOrganizations, organizationDays, organizationLimits, organizationQueue, withOrg } from "@deskvoice/core";
 import { ApiError } from "../../../../../server/context";
 import { centsOf } from "../../../../../server/costs";
 import { readEngineKeys } from "../../../../../server/engine-key";
@@ -14,8 +14,8 @@ export type OverviewEngine = "own_key" | "no_key" | "key_failed";
  * números que a tela de cada uma mostra. A lista de organizações é a única leitura que atravessa;
  * cada número vem de um `withOrg` da própria organização, pelas mesmas funções da tela dela: o custo
  * por `costTotal` (Custos), a linha por `organizationTrunks` e `trunkLine` e o motor por
- * `readEngineKeys` e `engineLine` (Saúde). Fora desta fatia: o teto do mês (7) e a chave da
- * instalação (8).
+ * `readEngineKeys` e `engineLine` (Saúde). O teto do mês (fatia 7c) vem de `organization_limits` e é
+ * comparado com o mesmo custo do mês. Fora desta fatia: a chave da instalação (8).
  *
  * A linha conta em três: `connected` (`ok`), `attention` (`warn`: carregada sem conferir, ou o
  * conjunto de endereços pede atenção) e `down` (só `fail`). A linha em aviso não caiu.
@@ -48,6 +48,7 @@ export const GET = handleInstallation({ support: false }, async ({ deps }) => {
           suspendedAt: organization.suspendedAt,
           calls: { ...last30, count: await callCount(q, last30) },
           cost: { ...month, cents: centsOf(cost.microcents), unmeasuredCount: cost.unmeasuredCount, estimatedCount: cost.estimatedCount },
+          spendCapCents: (await organizationLimits(q)).monthlySpendCapCents,
           trunk: trunks && {
             connected: trunks.trunks.filter((line) => line.status === "ok").length,
             attention: trunks.trunks.filter((line) => line.status === "warn").length,

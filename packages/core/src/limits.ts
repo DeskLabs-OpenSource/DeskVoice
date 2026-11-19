@@ -1,3 +1,4 @@
+import { costTotal, organizationDays, type CostTotal, type DayRange } from "./costs";
 import { recordInstallationEvent } from "./installation";
 import type { Db, OrgQuery } from "./types";
 import { withOrg, withSystem } from "./with-org";
@@ -13,8 +14,8 @@ import { withOrg, withSystem } from "./with-org";
  * Fatia 7a: valem `maxTrunks` e `maxAgents`. Fatia 7b: vale `outboundAllowed`, a trava da saída.
  * `true` não liga a saída, só deixa a organização decidir; `false` desliga a saída e trava o
  * interruptor dela, sem escrever em `outbound_policy`, e quem confere é `checkOutboundAllowed` (a porta
- * única do processo de voz) e a rota da política. `monthlySpendCapCents` (7c) é lido aqui porque a linha
- * já o tem, mas ninguém o grava nem o confere ainda.
+ * única do processo de voz) e a rota da política. Fatia 7c: vale `monthlySpendCapCents`, o teto de gasto
+ * do mês, conferido no começo de cada chamada por `spendCapReached`.
  */
 export interface OrganizationLimits {
   monthlySpendCapCents: number | null;
@@ -32,8 +33,12 @@ export const ORGANIZATION_LIMIT_REACHED = "organization_limit_reached";
 /** A recusa da trava da saída (7b), igual no processo de voz e na rota da política. */
 export const OUTBOUND_NOT_ALLOWED = "outbound_not_allowed";
 
-/** O que se deixa mudar. A 7c abre a coluna dela. `outboundAllowed` não aceita nulo: a coluna é `not null`. */
+/** A recusa do teto de gasto do mês (7c), igual nas quatro portas e em `calls.end_reason`. */
+export const SPEND_CAP_REACHED = "spend_cap_reached";
+
+/** O que se deixa mudar. `outboundAllowed` não aceita nulo: a coluna é `not null`. */
 export interface OrganizationLimitsPatch {
+  monthlySpendCapCents?: number | null;
   maxTrunks?: number | null;
   maxAgents?: number | null;
   outboundAllowed?: boolean;
@@ -42,7 +47,7 @@ export interface OrganizationLimitsPatch {
 const NO_LIMITS: OrganizationLimits = { monthlySpendCapCents: null, maxTrunks: null, maxAgents: null, outboundAllowed: true };
 
 // Coluna e tabela de cada coisa com limite. Texto fixo daqui: nada de fora entra no SQL.
-const COLUMN_OF = { maxTrunks: "max_trunks", maxAgents: "max_agents", outboundAllowed: "outbound_allowed" } as const;
+const COLUMN_OF = { monthlySpendCapCents: "monthly_spend_cap_cents", maxTrunks: "max_trunks", maxAgents: "max_agents", outboundAllowed: "outbound_allowed" } as const;
 const TABLE_OF: Record<LimitKind, { table: string; field: "maxTrunks" | "maxAgents" }> = {
   trunks: { table: "trunks", field: "maxTrunks" },
   agents: { table: "agents", field: "maxAgents" },
@@ -75,6 +80,39 @@ export async function assertBelowLimit(q: OrgQuery, kind: LimitKind): Promise<Be
   return count >= limit ? { ok: false, kind, count, limit } : { ok: true };
 }
 
+export interface MonthCost extends DayRange, CostTotal {}
+
+/**
+ * O custo do mês corrente da organização da transação, do dia 1 até hoje, no fuso dela: a mesma
+ * `costTotal` da tela de Custos e da visão geral da instalação, nunca outra soma.
+ */
+export async function monthCost(q: OrgQuery, now: Date): Promise<MonthCost> {
+  const days = await organizationDays(q, now);
+  const month = { from: days.monthStart, to: days.today };
+  return { ...month, ...(await costTotal(q, month)) };
+}
+
+export type SpendCapCheck = { reached: false } | { reached: true; capCents: number; spentMicrocents: number };
+
+/**
+ * O teto de gasto do mês (seção 3.4 do desenho do R8, fatia 7c), conferido no começo de cada chamada,
+ * na transação da organização (`withOrg`). Sem linha de limites ou com a coluna nula, não há teto e
+ * nada é somado: a instalação sem teto não paga a consulta. Com teto, soma o mês por `monthCost` e
+ * recusa quando a soma chegou ao teto. A comparação converte o teto para microcentavos, e nunca
+ * arredonda a soma; teto 0 recusa toda chamada.
+ *
+ * A soma inclui o custo estimado e não inclui o que não pôde ser medido: o teto é aproximado. A
+ * chamada em andamento não é cortada quando a soma passa do teto; quem a limita é o teto por chamada
+ * do agente.
+ */
+export async function spendCapReached(q: OrgQuery, now: Date): Promise<SpendCapCheck> {
+  if (q.organizationId === "") throw new Error("spendCapReached: needs a transaction of the organization (withOrg)");
+  const capCents = (await organizationLimits(q)).monthlySpendCapCents;
+  if (capCents === null) return { reached: false };
+  const spentMicrocents = (await monthCost(q, now)).microcents;
+  return spentMicrocents >= capCents * 1_000_000 ? { reached: true, capCents, spentMicrocents } : { reached: false };
+}
+
 export interface OrganizationLimitsView {
   limits: OrganizationLimits;
   /** Quanto a organização já usa de cada coisa com limite. */
@@ -93,17 +131,20 @@ export async function organizationLimitsUsage(q: OrgQuery): Promise<Organization
 export interface InstallationLimitsView extends OrganizationLimitsView {
   /** A escolha da organização em `outbound_policy` (sem linha, desligada). Lida, nunca escrita daqui. */
   outboundPolicyEnabled: boolean;
+  /** O custo do mês corrente, a soma que o teto confere (`monthCost`). */
+  monthCost: MonthCost;
 }
 
 /**
  * Os limites e o uso de uma organização, para a área da instalação, com a escolha dela sobre a saída
- * (a tela diz, antes de destravar, como a saída volta). `null` se ela não existe.
+ * (a tela diz, antes de destravar, como a saída volta) e com o custo do mês ao lado do teto. `null` se
+ * ela não existe.
  */
-export function organizationLimitsView(db: Db, organizationId: string): Promise<InstallationLimitsView | null> {
+export function organizationLimitsView(db: Db, organizationId: string, now: Date): Promise<InstallationLimitsView | null> {
   return withOrg(db, organizationId, async (q) => {
     if (!(await q.one("select 1 from organizations where id = $1", [organizationId]))) return null;
     const policy = await q.one<{ enabled: boolean }>("select enabled from outbound_policy where organization_id = $1", [organizationId]);
-    return { ...(await organizationLimitsUsage(q)), outboundPolicyEnabled: policy?.enabled ?? false };
+    return { ...(await organizationLimitsUsage(q)), outboundPolicyEnabled: policy?.enabled ?? false, monthCost: await monthCost(q, now) };
   });
 }
 

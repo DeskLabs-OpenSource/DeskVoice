@@ -1,4 +1,4 @@
-import { CALL_BACK_COLUMNS, CALL_BACK_INTERVAL_MINUTES, CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, callerMessageBlock, createFollowUp, dropFollowUpDefaultMessage, enqueueTask, lockCall, OPEN_TURNS, organizationLimits, recordEvent, scheduleCallBack, settleCallBack, withOrg, type CallBackRow, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
+import { CALL_BACK_COLUMNS, CALL_BACK_INTERVAL_MINUTES, CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, callerMessageBlock, createFollowUp, dropFollowUpDefaultMessage, enqueueTask, lockCall, OPEN_TURNS, organizationLimits, recordEvent, scheduleCallBack, settleCallBack, spendCapReached, withOrg, type CallBackRow, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
 import type { Routine } from "../types";
 
 /**
@@ -244,7 +244,7 @@ const lockFollowUpsOfOrganization = (q: OrgQuery): Promise<number> => q.exec("se
 /**
  * O que o modo `call_back` faz com uma queda, conferido na hora de agendar (seção 3.6, passo 1). A ordem
  * é a do WhatsApp: número na lista de não ligar não recebe e não vira pendência; sem a política de saída
- * ligada, ou com as ligações de saída bloqueadas pela instalação, o modo está indisponível; número que já recebeu religação ou mensagem nas últimas 24 horas
+ * ligada, com as ligações de saída bloqueadas pela instalação, ou com o teto de gasto do mês atingido, o modo está indisponível; número que já recebeu religação ou mensagem nas últimas 24 horas
  * não recebe de novo. Só a ligação pelo telefone (`channel = 'phone'`) é religada; a do WhatsApp cai
  * na reserva, como o modo indisponível. A simulada confere o mesmo e não insere nada.
  *
@@ -260,6 +260,9 @@ async function callBackAction(q: OrgQuery, caller: string | null, channel: strin
   // é a conferência da política: a religação já agendada passa pela porta única, `checkOutboundAllowed`,
   // que recusa com `outbound_not_allowed`.
   if (!(await organizationLimits(q)).outboundAllowed) return { action: "skipped", reason: "mode_unavailable" };
+  // O teto de gasto do mês (fatia 7c), do mesmo jeito: no teto, nem agenda. Quem confere na hora de discar
+  // é a porta única, que recusa com `spend_cap_reached`.
+  if ((await spendCapReached(q, now)).reached) return { action: "skipped", reason: "mode_unavailable" };
   if (caller === null) return { action: "call_back_scheduled" };
   await lockFollowUpsOfOrganization(q);
   const since = new Date(now.getTime() - CALLER_MESSAGE_EVERY_MS);

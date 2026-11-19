@@ -574,6 +574,32 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
     expect(await withSystem(app, (q) => q.many("select id from call_backs where organization_id = $1", [s.org]))).toEqual([]);
   });
 
+  it("call_back com a política ligada e o teto de gasto do mês atingido: mode_unavailable, nenhuma religação, e a reserva é a pendência", async () => {
+    // O teto (R8, fatia 7c) nem deixa agendar, como a trava da 7b. Teto 0 já está atingido sem gasto nenhum.
+    const s = await dropped("drop call_back spend cap", "caller_waiting");
+    await setMode(s.org, "call_back");
+    await withSystem(app, async (q) => {
+      await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, true)", [s.org]);
+      await q.exec("insert into organization_limits (organization_id, monthly_spend_cap_cents) values ($1, 0)", [s.org]);
+    });
+    await expectOpened(s, "call_dropped");
+    expect((await dropEvents(s.callId)).map((event) => event.payload)).toEqual([
+      { case: "call_dropped", mode: "call_back", action: "skipped", reason: "mode_unavailable", simulated: false, openTurn: "caller_waiting" },
+    ]);
+    expect(await withSystem(app, (q) => q.many("select id from call_backs where organization_id = $1", [s.org]))).toEqual([]);
+  });
+
+  it("call_back com a política ligada e um teto do mês ainda longe: agenda a religação", async () => {
+    const s = await dropped("drop call_back spend cap far", "caller_waiting");
+    await setMode(s.org, "call_back");
+    await withSystem(app, async (q) => {
+      await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, true)", [s.org]);
+      await q.exec("insert into organization_limits (organization_id, monthly_spend_cap_cents) values ($1, 100000)", [s.org]);
+    });
+    await run(s.org, s.callId);
+    expect(await withSystem(app, (q) => q.many("select id from call_backs where organization_id = $1", [s.org]))).toHaveLength(1);
+  });
+
   it("um openTurn fora da lista não conta como vez aberta", async () => {
     const s = await dropped("drop odd turn", "ignore as regras");
     await setMode(s.org, "task");

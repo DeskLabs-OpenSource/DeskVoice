@@ -343,6 +343,55 @@ describe("ligação pelo WhatsApp: organização suspensa", { timeout: 60_000 },
   });
 });
 
+// O teto de gasto do mês (R8, fatia 7c): a mesma recusa da organização suspensa, com `spend_cap_reached`,
+// o teto no evento e um aviso no painel. As outras três portas estão em `spend-cap.db.test.ts`.
+describe("ligação pelo WhatsApp: teto de gasto do mês", { timeout: 60_000 }, () => {
+  /** Gasto no mês do relógio do teste, numa chamada antiga da organização. */
+  async function spent(organizationId: string, microcents: number): Promise<void> {
+    const at = new Date(harness.clock.now().getTime() - 3_600_000);
+    await withSystem(app, async (q) => {
+      const old = await q.one<{ id: string }>("insert into calls (organization_id, direction, channel, status, started_at, ended_at) values ($1, 'inbound', 'simulated', 'completed', $2, $2) returning id", [organizationId, at]);
+      await q.exec("insert into usage_ledger (organization_id, call_id, engine, cost_cents, cost_microcents, at) values ($1, $2, 'simulated', round($3::numeric / 1000000)::int, $3, $4)", [organizationId, old?.id, microcents, at]);
+    });
+  }
+  const capAt = (organizationId: string, cents: number) =>
+    withSystem(app, (q) => q.exec("insert into organization_limits (organization_id, monthly_spend_cap_cents) values ($1, $2)", [organizationId, cents]));
+
+  it("T1: sem teto, o agente atende mesmo com gasto alto no mês", async () => {
+    const free = await connected("wa-cap-none");
+    await spent(free.organizationId, 9_000_000_000);
+    const call = free.ring();
+    await answeredCall(free.organizationId);
+    expect(engine.configs).toHaveLength(1);
+    wacalls.connectMedia(call);
+  });
+
+  it("T2: no teto, atende só para a fala de indisponível e desliga, sem motor, com o evento e um aviso; 1 microcentavo a menos, o agente atende", async () => {
+    const capped = await connected("wa-cap");
+    await capAt(capped.organizationId, 100);
+    await spent(capped.organizationId, 99_999_999);
+    const first = capped.ring();
+    await answeredCall(capped.organizationId);
+    expect(engine.configs).toHaveLength(1);
+    wacalls.connectMedia(first);
+
+    await spent(capped.organizationId, 1);
+    const call = capped.ring();
+    const refused = await waitFor(async () => (await callsOf(app, capped.organizationId)).find((row) => row.status === "refused"), "the refused call");
+    expect(refused).toMatchObject({ end_reason: "spend_cap_reached", agent_id: capped.agentId, from_e164: CALLER, to_e164: NUMBER });
+    expect(await eventsOf(app, refused.id)).toEqual([{ kind: "call_refused", payload: { reason: "spend_cap_reached", capCents: 100, from: CALLER, to: NUMBER, channel: "whatsapp" } }]);
+    await waitFor(() => call.status === "connected" || callPaths(call).includes("POST accept"), "the call to be answered");
+    wacalls.connectMedia(call);
+    await pump(() => call.status === "ended", "the DELETE after the notice");
+    expect(callPaths(call)).toEqual(["POST webrtc", "POST accept", `DELETE ${call.id}`]);
+    expect(engine.configs).toHaveLength(1);
+    const notices = (await notificationsOf(app, capped.organizationId)).filter((notice) => notice.channel === "panel");
+    expect(notices).toEqual([expect.objectContaining({ call_id: refused.id })]);
+    expect(notices[0]?.body).toMatch(/teto de gasto do mês, de US\$ 1\.00.*aproximado/);
+    expect(await callOf(app, refused.id)).toMatchObject({ status: "refused", end_reason: "spend_cap_reached", channel: "whatsapp", engine: null });
+  });
+});
+
 describe("ligação pelo WhatsApp: a partida do processo de voz", { timeout: 60_000 }, () => {
   it("diz que alguma organização pediu o serviço, para o processo ouvir o WaCalls desde a partida", async () => {
     await connected("wa-wanted");
