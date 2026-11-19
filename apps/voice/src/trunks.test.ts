@@ -14,6 +14,7 @@ import {
   NAME_IN_IP_MODE_REASON,
   OUTBOUND_BLOCK_REASON,
   OUTBOUND_ONLY_IN_IP_MODE_REASON,
+  plannedLinesChanged,
   MAX_FROM_NAME,
   RESOLVE_TIMEOUT_MS,
   renderTrunksConf,
@@ -836,5 +837,21 @@ describe("o filtro de entrada por linha (R14, fatia 2)", () => {
       ).get(A);
       expect(future?.fromName).toEqual(["203.0.113.1", "203.0.113.2"]);
     });
+  });
+});
+
+describe("plannedLinesChanged (R8, fatia 9b)", () => {
+  const plan = (...ids: string[]) => ({ stored: new Map(ids.map((id) => [id, { allowed: [], fromName: [], seen: {}, lastError: null, host: "h", authMode: "register" }])) });
+
+  it("a line that leaves the plan, or comes in, changes the set; the same lines in another order do not", () => {
+    const applied = "a,b,c";
+    expect(plannedLinesChanged(applied, plan("c", "a", "b"))).toBe(false);
+    expect(plannedLinesChanged(applied, plan("a", "c"))).toBe(true);
+    expect(plannedLinesChanged(applied, plan("a", "b", "c", "d"))).toBe(true);
+  });
+
+  it("with nothing applied yet by this process, the clock applies", () => {
+    expect(plannedLinesChanged(undefined, plan())).toBe(true);
+    expect(plannedLinesChanged(undefined, plan("a"))).toBe(true);
   });
 });

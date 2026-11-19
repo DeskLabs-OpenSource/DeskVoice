@@ -38,7 +38,9 @@ async function scene() {
   const admin = await createUser(panel.app, home, "owner");
   await withSystem(panel.app, async (q) => q.exec("update accounts set installation_admin_at = now() where id = $1", [await accountOf(admin.id)]));
   const setLimits = (body: { maxTrunks: number | null; maxAgents: number | null; outboundAllowed?: boolean; monthlySpendCapCents?: number | null }) => call(writeLimits, { method: "PUT", cookie: admin.cookie, params: { id: org }, body });
-  const trunk = () => call(createTrunk, { method: "POST", cookie: person.cookie, body: { name: "Linha", host: "203.0.113.70", authMode: "ip" } });
+  // `confirmOverlap`: o banco de teste guarda linhas de outras organizações de outros testes, e a
+  // faixa pode cruzar a delas. O aviso tem teste próprio (`trunk-overlap.db.test.ts`).
+  const trunk = () => call(createTrunk, { method: "POST", cookie: person.cookie, body: { name: "Linha", host: "203.0.113.70", authMode: "ip", confirmOverlap: true } });
   const agent = () => call(createAgent, { method: "POST", cookie: person.cookie, body: { name: "Recepção", engine: "simulated" } });
   const count = async (table: "trunks" | "agents"): Promise<number> =>
     (await withSystem(panel.app, (q) => q.one<{ n: number }>(`select count(*)::int as n from ${table} where organization_id = $1`, [org])))?.n ?? -1;
@@ -99,7 +101,7 @@ describe("organization limits", () => {
     const s = await scene();
     await s.setLimits({ maxTrunks: 0, maxAgents: 0 });
     const other = await createUser(panel.app, s.home, "owner");
-    expect((await call(createTrunk, { method: "POST", cookie: other.cookie, body: { name: "Linha", host: "203.0.113.71", authMode: "ip" } })).status).toBe(200);
+    expect((await call(createTrunk, { method: "POST", cookie: other.cookie, body: { name: "Linha", host: "203.0.113.71", authMode: "ip", confirmOverlap: true } })).status).toBe(200);
     expect((await call(createAgent, { method: "POST", cookie: other.cookie, body: { name: "Recepção", engine: "simulated" } })).status).toBe(200);
   });
 

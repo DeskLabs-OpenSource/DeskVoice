@@ -1,5 +1,7 @@
+import { recordTrunkOverlapRefused, trunkOverlapWarning } from "@deskvoice/core";
 import { z } from "zod";
-import { ApiError, type ServerDeps } from "../../../../server/context";
+import { ApiError, type ServerDeps, type Session } from "../../../../server/context";
+import { createRateLimiter } from "../../../../server/rate-limit";
 import { inboundAddressProblem } from "../../../../server/trunk-host";
 import { anything, voiceRequest } from "../../../../server/voice";
 
@@ -33,6 +35,45 @@ export function requireNumericInbound(authMode: string, host: string, matchExtra
     if (problem === "name") throw new ApiError(400, "trunk_inbound_name", `${where}, ${field} must be an IP or an address block, not a name.`);
     throw new ApiError(400, "trunk_block_too_wide", `${where}, ${field} is a block wider than /16 (IPv4) or /32 (IPv6).`);
   }
+}
+
+/**
+ * Quantas conferências de faixa cada organização faz por minuto. Cada conferência gasta uma
+ * tentativa, com resposta sim ou não. Em memória, como o limite do login (`rate-limit.ts`).
+ */
+export const TRUNK_OVERLAP_CHECKS_PER_MINUTE = 10;
+export const trunkOverlapLimiter = createRateLimiter(TRUNK_OVERLAP_CHECKS_PER_MINUTE, 60 * 1000);
+
+/**
+ * Antes de gravar, o aviso de faixa sobreposta (R8, fatia 10): se a linha tiraria do ar uma linha
+ * por IP (desta ou de outra organização) que hoje está no ar, a gravação para e a tela pergunta.
+ * A resposta não diz qual linha, de quem nem em que endereço: só que existe uma. Com a confirmação,
+ * salva como sempre, sem conferir. Quem chama só confere quando o endereço, os extras ou o modo
+ * mudam.
+ *
+ * Cada conferência gasta uma tentativa do limite da organização; acima dele, 429 sem conferir.
+ * Cada recusa grava `trunk_overlap_refused` na auditoria da instalação, fora da transação da linha
+ * (`recordTrunkOverlapRefused`): o evento fica mesmo com a resposta 409 e nada salvo.
+ */
+export async function requireOverlapConfirmed(
+  deps: ServerDeps,
+  organizationId: string,
+  session: Session,
+  candidate: { id?: string; host: string; authMode: "register" | "ip"; matchExtra?: readonly string[] | null },
+  confirmed: boolean | undefined,
+): Promise<void> {
+  if (confirmed === true) return;
+  const now = deps.clock.now();
+  if (!trunkOverlapLimiter.take(organizationId, now)) {
+    throw new ApiError(429, "too_many_attempts", "Too many attempts. Wait a minute and try again.");
+  }
+  if (!(await trunkOverlapWarning(deps.db, organizationId, candidate)).stops) return;
+  await recordTrunkOverlapRefused(deps.db, now, organizationId, session.userId);
+  throw new ApiError(
+    409,
+    "trunk_overlap_unconfirmed",
+    "Another organization of this installation has a line in a range that overlaps this one. If you save, the lines recognized by IP of both stop receiving calls until one of them changes its address.",
+  );
 }
 
 /**

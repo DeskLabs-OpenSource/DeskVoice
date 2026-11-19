@@ -13,11 +13,11 @@ import { randomUUID } from "node:crypto";
 import { promises as dns } from "node:dns";
 import { chmod, chown, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { decryptSecret, inboundFilterOn, withSystem, type Clock, type Db } from "@deskvoice/core";
+import { addressPlaces, decryptSecret, inboundFilterOn, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import { messageOf, type Logger } from "./log";
 import { realSchedule, type Schedule } from "./transport";
-import { hostsOverlap, isBlockTooWide, parseTrunkHost, type TrunkHost } from "./trunk-host";
+import { isBlockTooWide, parseTrunkHost, type TrunkHost } from "./trunk-host";
 
 export const DEFAULT_TRUNKS_FILE = "/asterisk-generated/pjsip_trunks.conf";
 
@@ -190,8 +190,6 @@ interface Inbound {
   host: TrunkHost;
   /** Blocos canônicos e sem repetição: cada um vira uma linha `match=` do `identify`. */
   matches: string[];
-  /** Os mesmos endereços como faixas, para a comparação de sobreposição. */
-  hosts: TrunkHost[];
   /** Destino da ligação de saída; `null` quando a linha só recebe. */
   destination: TrunkHost | null;
 }
@@ -206,18 +204,14 @@ interface Inbound {
  */
 function readInbound(trunk: TrunkConfig, host: TrunkHost): Inbound {
   const matches: string[] = [];
-  const hosts: TrunkHost[] = [];
   for (const value of [trunk.host, ...(trunk.authMode === "ip" ? (trunk.matchExtra ?? []) : [])]) {
     const parsed = parseTrunkHost(value);
     if (parsed?.kind !== "address") continue;
-    hosts.push(parsed);
     if (!matches.includes(parsed.match)) matches.push(parsed.match);
   }
   const destination = parseTrunkHost(trunk.outboundHost ?? trunk.host);
-  return { host, matches, hosts, destination: destination !== null && destination.uri !== null ? destination : null };
+  return { host, matches, destination: destination !== null && destination.uri !== null ? destination : null };
 }
-
-const overlap = (a: Inbound, b: Inbound): boolean => a.hosts.some((mine) => b.hosts.some((theirs) => hostsOverlap(mine, theirs)));
 
 /**
  * O arquivo inteiro. Tronco que não pode ser escrito fica de fora, com o motivo em `skipped`.
@@ -240,37 +234,21 @@ export function renderTrunksConf(
   allowed: ReadonlyMap<string, readonly string[]> = new Map(),
 ): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
   const skipped: Array<{ id: string; reason: string }> = [];
-  const valid: Array<{ trunk: TrunkConfig; inbound: Inbound; group: number }> = [];
+  const valid: Array<{ trunk: TrunkConfig; inbound: Inbound }> = [];
   for (const trunk of [...trunks].sort((a, b) => a.id.localeCompare(b.id))) {
     const host = parseTrunkHost(trunk.host);
     const reason = trunkProblem(trunk);
     if (reason !== null || !host) skipped.push({ id: trunk.id, reason: reason ?? "the host cannot be read" });
-    else valid.push({ trunk, inbound: readInbound(trunk, host), group: valid.length });
+    else valid.push({ trunk, inbound: readInbound(trunk, host) });
   }
 
-  // Sobreposição não é transitiva (um bloco liga dois endereços que não se tocam): os grupos são
-  // os componentes conexos. ponytail: O(n²), sobra para as dezenas de linhas de uma instalação.
-  for (let merged = true; merged; ) {
-    merged = false;
-    for (const a of valid) {
-      for (const b of valid) {
-        if (a.group !== b.group && overlap(a.inbound, b.inbound)) {
-          const from = Math.max(a.group, b.group);
-          const to = Math.min(a.group, b.group);
-          for (const entry of valid) if (entry.group === from) entry.group = to;
-          merged = true;
-        }
-      }
-    }
-  }
-
+  // A regra do grupo mora em `packages/core` (`addressPlaces`): o painel usa a mesma para avisar,
+  // antes de salvar, que a linha vai tirar do ar a linha por IP de outra organização.
+  const places = addressPlaces(valid.map((entry) => entry.trunk));
   const sections: string[] = [];
   const emitted: string[] = [];
   for (const entry of valid) {
-    const group = valid.filter((other) => other.group === entry.group);
-    const oneOrganization = group.every((other) => other.trunk.organizationId === entry.trunk.organizationId);
-    // `valid` está em ordem de id: o primeiro do grupo é o de menor id.
-    const identify = oneOrganization && group[0] === entry;
+    const identify = places.get(entry.trunk.id)?.identify ?? false;
     if (!identify && entry.trunk.authMode === "ip") skipped.push({ id: entry.trunk.id, reason: SHARED_HOST_REASON });
     else {
       // O `permit` passa de novo pela regra do contrato 2: só IP ou bloco, nunca bloco largo demais.
@@ -559,7 +537,7 @@ async function setStatus(deps: TrunksDeps, updates: TrunkHealth[]): Promise<void
   });
 }
 
-interface TrunksPlan {
+export interface TrunksPlan {
   conf: string;
   skipped: Array<{ id: string; reason: string }>;
   emitted: string[];
@@ -593,7 +571,11 @@ async function planTrunks(deps: TrunksDeps): Promise<TrunksPlan> {
     }>(
       `select t.id, t.organization_id, t.host, t.username, t.secret_enc, t.auth_mode, t.match_extra, t.outbound_host, t.inbound_allowed, t.inbound_from_name, t.inbound_from_name_seen, t.inbound_filter, t.last_error,
               (select s.value from settings s where s.organization_id = t.organization_id and s.key = 'network.public_ip') as public_ip
-         from trunks t order by t.id`,
+         from trunks t
+        -- A linha da organização com lápide (exclusão pedida, R8 fatia 9b) sai do arquivo antes da
+        -- cascata: o relógio de 5 minutos percebe que o conjunto de linhas mudou e aplica de novo.
+        where not exists (select from organizations o where o.id = t.organization_id and o.deleting_at is not null)
+        order by t.id`,
     ),
   );
   const unreadable: Array<{ id: string; reason: string }> = [];
@@ -686,6 +668,12 @@ async function recordAllowed(deps: TrunksDeps, plan: TrunksPlan): Promise<void> 
 export async function refreshAllowed(deps: TrunksDeps): Promise<boolean> {
   const plan = await planTrunks(deps);
   const changed = [...plan.allowed].some(([id, entry]) => !sameList(plan.stored.get(id)?.allowed ?? [], entry.addresses));
+  const linesChanged = plannedLinesChanged(lastPlanned.get(deps), plan);
+  if (linesChanged) {
+    const result = await applyTrunks(deps);
+    deps.log(result.applied ? "info" : "error", "the set of lines changed; trunks applied again", { applied: result.applied, detail: result.detail });
+    return true;
+  }
   if (changed) {
     const result = await applyTrunks(deps);
     deps.log(result.applied ? "info" : "error", "the addresses of a line changed; trunks applied again", { applied: result.applied, detail: result.detail });
@@ -693,6 +681,19 @@ export async function refreshAllowed(deps: TrunksDeps): Promise<boolean> {
   }
   await recordAllowed(deps, plan);
   return false;
+}
+
+/**
+ * Os ids das linhas do último plano aplicado, por `TrunksDeps` (um por processo de voz). É o que faz
+ * o relógio de 5 minutos perceber a linha que saiu do plano sem ninguém salvar nada: a da
+ * organização com lápide (R8, fatia 9b). Sem plano aplicado ainda, o relógio aplica.
+ */
+const lastPlanned = new WeakMap<TrunksDeps, string>();
+const plannedIds = (plan: Pick<TrunksPlan, "stored">): string => [...plan.stored.keys()].sort().join(",");
+
+/** Se o conjunto de ids das linhas planejadas é outro que o do último plano aplicado. */
+export function plannedLinesChanged(previous: string | undefined, plan: Pick<TrunksPlan, "stored">): boolean {
+  return previous !== plannedIds(plan);
 }
 
 /** De quanto em quanto tempo o processo de voz resolve de novo os nomes das linhas. */
@@ -705,6 +706,7 @@ export const REFRESH_ALLOWED_MS = 5 * 60_000;
 export async function applyTrunks(deps: TrunksDeps): Promise<{ applied: boolean; detail: string; skipped: Array<{ id: string; reason: string }> }> {
   const plan = await planTrunks(deps);
   const written = await writeFileAtomic(deps.file, plan.conf, deps.owner);
+  lastPlanned.set(deps, plannedIds(plan));
   if (written.chownError !== undefined) {
     deps.log("error", "could not hand the lines file to the Asterisk user; left it readable by everyone (0644) instead", { file: deps.file, owner: deps.owner, error: written.chownError });
   }
