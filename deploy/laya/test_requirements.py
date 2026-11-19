@@ -59,15 +59,26 @@ def requirements(name):
 
 PIP_EXE = re.compile(r"pip(?:3(?:\.\d+)?)?")
 PIP_WORD = re.compile(r"pip(?![A-Za-z_])")
-# Toda palavra feita só de `;`, `&` e `|` é um separador de comandos (`&&`, `||`, `;`, `|`, `&`, `;;`,
-# `|&` e qualquer junção deles que o shlex entregue numa palavra só).
+# O shlex entrega numa palavra só toda sequência dos caracteres `()<>;&|`. Tirados os parênteses, o
+# que sobra feito só de `;`, `&` e `|` é um separador de comandos (`&&`, `||`, `;`, `|`, `&`, `;;`, `|&`,
+# e também `||(`, `;(`, `)||`, `)&&(`); o que tem `<` ou `>` é redireção (`>&`, `&>`, `>|`).
+PUNCTUATION = re.compile(r"[()<>;&|]+")
 OPERATOR = re.compile(r"[;&|]+")
+
+
+def separator(token):
+    """O separador que a palavra carrega (sem os parênteses colados), ou None se ela não é separador."""
+    if not PUNCTUATION.fullmatch(token):
+        return None
+    rest = token.replace("(", "").replace(")", "")
+    return rest if OPERATOR.fullmatch(rest) else None
 REQUIREMENTS = {"requirements-torch.txt", "requirements.txt"}
 
 
 def dockerfile_runs():
     """Cada RUN do Dockerfile como lista de comandos (cada um, a lista de palavras) e os operadores
-    entre eles. As palavras saem do `shlex`, que respeita as aspas e separa `&&`, `||`, `;`, `|` e `&`."""
+    entre eles. As palavras saem do `shlex`, que respeita as aspas e separa `&&`, `||`, `;`, `|` e `&`
+    (mesmo colados num parêntese, como em `||(true)`)."""
     with open(os.path.join(HERE, "Dockerfile"), encoding="utf-8") as f:
         text = f.read()
     runs = []
@@ -79,8 +90,9 @@ def dockerfile_runs():
         lexer.whitespace_split = True
         commands, operators, current = [], [], []
         for token in lexer:
-            if OPERATOR.fullmatch(token):
-                operators.append(token)
+            op = separator(token)
+            if op is not None:
+                operators.append(op)
                 commands.append(current)
                 current = []
             else:
