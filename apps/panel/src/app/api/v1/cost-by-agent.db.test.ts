@@ -290,3 +290,43 @@ describe("isolamento", () => {
     expect((await x.readCall(callX)).costByAgent).toHaveLength(2);
   });
 });
+
+// Ajuste 1 da fatia 1e da URA: com a URA, `answered_at` é a hora em que a URA atendeu, e o tempo de
+// menu não é minuto do motor. O primeiro trecho começa no `call_answered` só quando a ligação tem
+// `ivr_started`; sem URA, nada muda.
+describe("Custos com URA", () => {
+  it("URA→IA com 30 s de menu e 5 s de conversa dá 5 s ao motor; a ligação sem URA continua contando do `answered_at`", async () => {
+    const { organizationId, agent, newCall, line, readCosts } = await team("cost-by-agent-ivr");
+    const recepcao = await agent("Recepção");
+    const event = (callId: string, kind: "ivr_started" | "call_answered", payload: Record<string, unknown>, second: number): Promise<void> =>
+      withOrg(panel.app, organizationId, (q) => recordEvent(q, callId, kind, payload, at(second)));
+    // A URA atende no segundo 0, a IA no 30, e a ligação acaba no 35.
+    const ivr = await newCall(recepcao, "openai-realtime", 0, 35);
+    await event(ivr, "ivr_started", { menu_id: "00000000-0000-0000-0000-000000000000" }, 0);
+    await event(ivr, "call_answered", { engine: "openai-realtime" }, 30);
+    await line(ivr, recepcao, "openai-realtime", 3 * CENT, 34);
+    // Sem URA, o `call_answered` fora do `answered_at` não muda nada: 40 s, como antes.
+    const plain = await newCall(recepcao, "gemini-live", 100, 140);
+    await event(plain, "call_answered", { engine: "gemini-live" }, 110);
+    await line(plain, recepcao, "gemini-live", 2 * CENT, 139);
+    // A ligação de URA que não chegou à IA (sem `call_answered`) fica como hoje: do `answered_at`.
+    const menuOnly = await newCall(recepcao, "simulated", 200, 220);
+    await event(menuOnly, "ivr_started", { menu_id: "00000000-0000-0000-0000-000000000000" }, 200);
+    await line(menuOnly, null, "simulated", CENT, 219);
+
+    const read = await readCosts();
+    expect(shape(read).byEngine).toEqual(
+      expect.arrayContaining([
+        { engine: "openai-realtime", costCents: 3, callSeconds: 5 },
+        { engine: "gemini-live", costCents: 2, callSeconds: 40 },
+        { engine: "simulated", costCents: 1, callSeconds: 20 },
+      ]),
+    );
+    expect(read.byEngine).toHaveLength(3);
+    // Fora a ligação com URA e IA, a tela dá o mesmo que a de antes da 4c.
+    const old = (await before(organizationId, { from: "2026-01-31", to: "2026-03-01" })).byEngine;
+    expect(shape(read).byEngine.filter(({ engine }) => engine !== "openai-realtime")).toEqual(old.filter(({ engine }) => engine !== "openai-realtime"));
+    expect(old.find(({ engine }) => engine === "openai-realtime")?.callSeconds).toBe(35);
+    expect(read.totalCents).toBe(6);
+  });
+});
