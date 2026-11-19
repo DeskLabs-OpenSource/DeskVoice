@@ -8,21 +8,7 @@ import { useApi } from "../../../../ui/api";
 import { Field, Notice, Panel, Select, TextInput } from "../../../../ui/kit";
 import type { Setting } from "../../../../ui/types";
 import { matchModels } from "../../settings/brains/search";
-import { modelRequired, type AnalysisDraft } from "./analysis-choice";
-
-/** O que a lista de Cérebros diz de cada um: aqui só valem os que têm chave aceita. */
-interface BrainOption {
-  id: string;
-  label: string;
-  configured: boolean;
-  keyCheck: { result: string } | null;
-}
-
-interface BrainModelOption {
-  id: string;
-  label: string;
-  price?: unknown;
-}
+import { analysisView, type AnalysisDraft, type BrainModelOption, type BrainOption } from "./analysis-choice";
 
 // Valores do seletor que não são cérebro: os ids de cérebro são nomes de pasta, sem "@".
 const ENGINE_VALUE = "@engine";
@@ -57,20 +43,16 @@ export function AgentBrains({
   // A lista de cérebros é de quem configura (dono e admin); quem só lê vê a escolha em texto.
   const brains = useApi<BrainOption[]>(canConfigure ? "/brains" : null);
   const [query, setQuery] = useState("");
-  const brain = analysis.kind === "brain" ? analysis.brain : "";
-  const modelId = analysis.kind === "brain" ? analysis.model : "";
-  const models = useApi<{ models: BrainModelOption[] }>(canConfigure && brain ? `/brains/${encodeURIComponent(brain)}/models` : null);
+  const chosenBrain = analysis.kind === "brain" ? analysis.brain : "";
+  const models = useApi<{ models: BrainModelOption[] }>(canConfigure && chosenBrain ? `/brains/${encodeURIComponent(chosenBrain)}/models` : null);
 
-  const labelOf = (id: string): string => brains.data?.find((option) => option.id === id)?.label ?? id;
-  const accepted = (brains.data ?? []).filter((option) => option.configured && option.keyCheck?.result === "accepted");
-  const list = models.data?.models ?? [];
-  const model = list.find((item) => item.id === modelId);
-  const unmeasured = model !== undefined && model.price === undefined;
+  // Toda regra dos avisos (e o `required` do Modelo) sai de `analysisView`, que tem teste; aqui só se lê.
+  const { brain, modelId, accepted, models: list, model, keyGone, modelGone, unmeasured, required, labelOf, unmeasuredOf } = analysisView({
+    analysis,
+    brains: brains.data,
+    models: models.data?.models,
+  });
   const shown = matchModels(list, query);
-  // O cérebro escolhido sem chave aceita, ou o modelo que saiu da lista: a rotina não lê a ligação
-  // deste agente, nem passa para a escolha da organização ou para o motor.
-  const keyGone = brain !== "" && brains.data !== undefined && !accepted.some((option) => option.id === brain);
-  const modelGone = brain !== "" && !keyGone && modelId !== "" && models.data !== undefined && model === undefined;
 
   const orgValue = organization.data?.value ?? null;
   const today = orgValue ? fill(t.readChosen, { brain: labelOf(orgValue.brain), model: orgValue.model }) : t.readOrganizationEngine;
@@ -135,12 +117,11 @@ export function AgentBrains({
                 <TextInput type="search" autoComplete="off" aria-label={t.readSearch} placeholder={t.readSearch} value={query} onChange={(event) => setQuery(event.target.value)} />
                 {models.data && shown.length === 0 ? <p className="text-sm text-muted">{t.readSearchEmpty}</p> : null}
                 <Select
-                  required={modelRequired(analysis)}
+                  required={required}
                   aria-label={t.readModel}
                   value={model ? modelId : ""}
                   onChange={(event) => {
-                    const next = list.find((item) => item.id === event.target.value);
-                    onChange({ kind: "brain", brain, model: event.target.value }, next !== undefined && next.price === undefined);
+                    onChange({ kind: "brain", brain, model: event.target.value }, unmeasuredOf(event.target.value));
                   }}
                   disabled={!models.data}
                 >
@@ -158,7 +139,7 @@ export function AgentBrains({
           ) : null}
           {modelGone ? <Notice tone="fail">{fill(t.readModelGone, { model: modelId })}</Notice> : null}
           {/* Aviso fixo: aparece ao escolher o modelo sem preço, antes de salvar, e continua depois de salvo. */}
-          {unmeasured && !keyGone ? (
+          {unmeasured ? (
             <Notice tone="warn">
               <p>{t.readUnmeasured}</p>
               {costCeilingCents <= 0 ? <p className="font-bold">{t.readUnmeasuredNoCeiling}</p> : null}
