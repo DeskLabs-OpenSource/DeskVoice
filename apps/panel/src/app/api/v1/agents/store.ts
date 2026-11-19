@@ -1,4 +1,5 @@
 import type { OrgQuery } from "@deskvoice/core";
+import { requireBelowLimit } from "../../../../server/limits";
 import { AGENT_COLUMNS, type AgentValues } from "../../../../server/shapes";
 
 const values = (agent: AgentValues): unknown[] => [
@@ -24,7 +25,9 @@ const values = (agent: AgentValues): unknown[] => [
   agent.analysisBrain === null ? null : JSON.stringify(agent.analysisBrain),
 ];
 
-export function insertAgent(q: OrgQuery, agent: AgentValues) {
+/** Todo agente novo entra por aqui, e daqui nunca sem conferir o limite da organização (seção 3.4 do R8). */
+export async function insertAgent(q: OrgQuery, agent: AgentValues) {
+  await requireBelowLimit(q, "agents");
   return q.one(
     `insert into agents (organization_id, name, role_label, instructions, greeting, engine, voice_id, language, tools, enabled,
                          max_call_seconds, cost_ceiling_cents, transfer_to_e164, follow_up_owner_user_id, vocabulary,

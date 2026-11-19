@@ -6,6 +6,7 @@ import es from "../i18n/es/common";
 import ptBR from "../i18n/pt-BR/common";
 import { useDict } from "../i18n/provider";
 import { ApiFailure } from "./api";
+import { limitReachedText } from "./limit-reached";
 import { Notice } from "./kit";
 import { useCanConfigure } from "./me";
 
@@ -14,9 +15,12 @@ const WITH_DETAIL = new Set(["validation_error", "invalid_numbers", "ivr_menu_in
 
 /** Traduz uma falha da API para a frase da tela: o que aconteceu e o que fazer. */
 export function useErrorText(): (error: unknown) => string {
-  const t = useDict(ptBR, en, es).errors;
+  const common = useDict(ptBR, en, es);
+  const t = common.errors;
   return (error) => {
     if (!(error instanceof ApiFailure)) return t.fallback;
+    const limit = limitReachedText(error.code, error.detail, common.limitReached);
+    if (limit) return limit;
     const text = Object.hasOwn(t, error.code) ? t[error.code as keyof typeof t] : t.fallback;
     return WITH_DETAIL.has(error.code) ? `${text} ${error.message}` : text;
   };

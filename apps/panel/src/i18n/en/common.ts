@@ -69,6 +69,10 @@ const common: CommonDictionary = {
     open: "Go to {name}",
     installation: "Open the installation administration",
   },
+  limitReached: {
+    trunks: "This organization already has {count} phone lines; the limit set by the installation administration is {limit}.",
+    agents: "This organization already has {count} agents; the limit set by the installation administration is {limit}.",
+  },
   errors: {
     fallback: "We could not complete this action. Try again in a moment.",
     unknown_brain: "That brain does not exist on this installation. Choose another one for who reads the call.",
@@ -150,6 +154,7 @@ const common: CommonDictionary = {
     unknown_setting: "This setting does not exist in this version.",
     organization_suspended: "This organization is suspended: it does not take or make calls.",
     support_session_forbidden: "The installation's support session cannot make this change. Ask an owner or administrator on the team.",
+    organization_limit_reached: "This organization has reached the limit set by the installation administration.",
     outbound_disabled: "Outbound calls are off. Turn them on in Outbound calls.",
     outside_window: "Outside the hours allowed for outbound calls.",
     do_not_call: "This number is on the do-not-call list.",

@@ -68,6 +68,11 @@ const common = {
     open: "Entrar em {name}",
     installation: "Abrir a administração da instalação",
   },
+  /** A recusa de criar além do limite da organização (seção 3.4 do desenho do R8), com a contagem. */
+  limitReached: {
+    trunks: "Esta organização já tem {count} linhas telefônicas; o limite definido pela administração da instalação é {limit}.",
+    agents: "Esta organização já tem {count} agentes; o limite definido pela administração da instalação é {limit}.",
+  },
   errors: {
     fallback: "Não conseguimos concluir essa ação. Tente de novo em instantes.",
     unknown_brain: "Esse cérebro não existe nesta instalação. Escolha outro em quem lê a ligação.",
@@ -149,6 +154,7 @@ const common = {
     unknown_setting: "Esta configuração não existe nesta versão.",
     organization_suspended: "Esta organização está suspensa: ela não atende nem faz ligações.",
     support_session_forbidden: "A sessão de suporte da instalação não faz esta alteração. Peça a um dono ou administrador da equipe.",
+    organization_limit_reached: "Esta organização chegou ao limite definido pela administração da instalação.",
     outbound_disabled: "As ligações de saída estão desligadas. Ligue em Ligações de saída.",
     outside_window: "Fora do horário permitido para ligações de saída.",
     do_not_call: "Este número está na lista de não ligar.",
