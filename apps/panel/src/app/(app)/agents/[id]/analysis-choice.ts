@@ -46,3 +46,83 @@ export function analysisPatch(
 export function modelRequired(draft: AnalysisDraft): boolean {
   return draft.kind === "brain" && draft.model === "";
 }
+
+/** O que a lista de Cérebros diz de cada um: na escolha só valem os que têm chave aceita. */
+export interface BrainOption {
+  id: string;
+  label: string;
+  configured: boolean;
+  keyCheck: { result: string } | null;
+}
+
+export interface BrainModelOption {
+  id: string;
+  label: string;
+  price?: unknown;
+}
+
+/** O que a tela mostra de quem lê a ligação, calculado só aqui para o teste alcançar cada regra. */
+export interface AnalysisView {
+  /** O cérebro escolhido, ou `""` fora da escolha de cérebro. */
+  brain: string;
+  /** O modelo escolhido, ou `""`. */
+  modelId: string;
+  /** Os cérebros que o seletor oferece: configurados e com chave aceita. */
+  accepted: BrainOption[];
+  /** Os modelos do cérebro escolhido; vazia enquanto a lista carrega. */
+  models: BrainModelOption[];
+  /** O modelo escolhido, se ele está na lista do cérebro. */
+  model: BrainModelOption | undefined;
+  /** O cérebro escolhido está sem chave aceita (só com a lista de cérebros carregada). */
+  keyGone: boolean;
+  /** O modelo escolhido saiu da lista do cérebro (só com a lista de modelos carregada e a chave aceita). */
+  modelGone: boolean;
+  /** O aviso de modelo sem preço: o escolhido está na lista sem preço, e a chave não sumiu. */
+  unmeasured: boolean;
+  /** O seletor de Modelo barra o salvar (ver `modelRequired`). */
+  required: boolean;
+  /** O rótulo de um cérebro pela lista; o id quando ele não está nela, ou a lista não carregou. */
+  labelOf(id: string): string;
+  /** Se escolher este modelo agora mostra o aviso de sem preço (o `acceptUnmeasured` do `onChange`). */
+  unmeasuredOf(id: string): boolean;
+}
+
+/**
+ * As regras dos avisos de quem lê a ligação. `brains` e `models` chegam `undefined` enquanto a lista
+ * carrega e para quem só lê: lista que não chegou nunca acende aviso. O cérebro sem chave aceita, ou o
+ * modelo que saiu da lista: a rotina não lê a ligação deste agente, nem passa para a escolha da
+ * organização ou para o motor.
+ */
+export function analysisView({
+  analysis,
+  brains,
+  models,
+}: {
+  analysis: AnalysisDraft;
+  brains: BrainOption[] | undefined;
+  models: BrainModelOption[] | undefined;
+}): AnalysisView {
+  const brain = analysis.kind === "brain" ? analysis.brain : "";
+  const modelId = analysis.kind === "brain" ? analysis.model : "";
+  const accepted = (brains ?? []).filter((option) => option.configured && option.keyCheck?.result === "accepted");
+  const list = models ?? [];
+  const model = list.find((item) => item.id === modelId);
+  const keyGone = brain !== "" && brains !== undefined && !accepted.some((option) => option.id === brain);
+  const modelGone = brain !== "" && !keyGone && modelId !== "" && models !== undefined && model === undefined;
+  return {
+    brain,
+    modelId,
+    accepted,
+    models: list,
+    model,
+    keyGone,
+    modelGone,
+    unmeasured: model !== undefined && model.price === undefined && !keyGone,
+    required: modelRequired(analysis),
+    labelOf: (id) => brains?.find((option) => option.id === id)?.label ?? id,
+    unmeasuredOf: (id) => {
+      const next = list.find((item) => item.id === id);
+      return next !== undefined && next.price === undefined;
+    },
+  };
+}
