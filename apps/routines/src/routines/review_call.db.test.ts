@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, DROP_FOLLOW_UP_DEFAULT_MESSAGE, ERASED_TEXT, MAX_TASK_ATTEMPTS, enqueueTask, eraseCaller, failTask, recordEvent, withOrg, withSystem, type CallEventKind } from "@deskvoice/core";
+import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, DROP_FOLLOW_UP_DEFAULT_MESSAGE, ERASED_TEXT, MAX_TASK_ATTEMPTS, enqueueTask, eraseCaller, failTask, recordEvent, withOrg, withSystem, type CallEventKind, type OrgQuery } from "@deskvoice/core";
 import { wahaSessionName } from "@deskvoice/tools";
 import { afterAll, describe, expect, it } from "vitest";
 import { createOrganization, createUser, depsFor, eventsOf, fakeFetch, fakeLookup, openTestDbs, putSetting, putWhatsAppConnector, t0, task, tasksOf } from "../../test/helpers";
@@ -597,6 +597,32 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
       await q.exec("insert into organization_limits (organization_id, monthly_spend_cap_cents) values ($1, 100000)", [s.org]);
     });
     await run(s.org, s.callId);
+    expect(await withSystem(app, (q) => q.many("select id from call_backs where organization_id = $1", [s.org]))).toHaveLength(1);
+  });
+
+  it("call_back sem teto: a pré-checagem lê os limites uma vez só e não soma o extrato", async () => {
+    // Critério de fracasso da 7c: a organização sem teto não ganha consulta. A trava e o teto vêm da mesma
+    // leitura de `organization_limits`, passada a `spendCapReached` (o par da saída está em
+    // `apps/voice/src/spend-cap.db.test.ts`).
+    const s = await dropped("drop call_back no cap count", "caller_waiting");
+    await setMode(s.org, "call_back");
+    await withSystem(app, async (q) => {
+      await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, true)", [s.org]);
+      await q.exec("insert into organization_limits (organization_id, max_agents) values ($1, 5)", [s.org]);
+    });
+    const sql = await withOrg(app, s.org, async (q) => {
+      const seen: string[] = [];
+      const counted: OrgQuery = {
+        organizationId: q.organizationId,
+        one: (text, params) => (seen.push(text), q.one(text, params)),
+        many: (text, params) => (seen.push(text), q.many(text, params)),
+        exec: (text, params) => (seen.push(text), q.exec(text, params)),
+      };
+      expect(await reviewCall(counted, s.callId, t0)).toBe("call_back_scheduled");
+      return seen;
+    });
+    expect(sql.filter((text) => /organization_limits/.test(text))).toHaveLength(1);
+    expect(sql.filter((text) => /usage_ledger/.test(text))).toEqual([]);
     expect(await withSystem(app, (q) => q.many("select id from call_backs where organization_id = $1", [s.org]))).toHaveLength(1);
   });
 
