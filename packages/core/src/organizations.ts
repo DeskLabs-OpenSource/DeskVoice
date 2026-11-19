@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { explicitAdminsTransition, lockInstallationAdmins, markInstallationAdmin, type InstallationPerson } from "./accounts";
 import { ADMINS_EXPLICIT_KEY, FOUNDING_ORGANIZATION_KEY, recordInstallationEvent } from "./installation";
+import { copyDefaultLimits } from "./limits";
 import { hashToken } from "./password";
 import { ORG_EVENT_KINDS, type Db, type OrgEventKind, type OrgQuery } from "./types";
 import { withOrg, withSystem } from "./with-org";
@@ -71,6 +72,8 @@ export type AddOrganizationResult =
 /**
  * Cria uma organização, numa transação só:
  * - a organização, com a política de saída desligada, como toda organização;
+ * - a linha de limites dela, com o padrão `defaults.limits` COPIADO (seção 3.5): sem padrão gravado,
+ *   nenhum limite e a saída travada. Mudar o padrão depois não mexe nela;
  * - `organization_created` na auditoria da instalação e na da organização;
  * - se a lista de quem administra ainda não é explícita (é a segunda organização): a marca para todo
  *   dono ativo da fundadora que não a tem, para os administradores escolhidos em `keep`, e
@@ -96,6 +99,7 @@ export function addOrganization(db: Db, input: AddOrganizationInput, now: Date):
     if (!created) throw new Error("Insert into organizations returned no row");
     const organizationId = created.id;
     await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, false)", [organizationId]);
+    await copyDefaultLimits(q, organizationId, now);
     await recordInstallationEvent(q, now, "organization_created", { actorAccountId: input.actorAccountId, organizationId, payload: { name } });
     await recordOrgEventFor(q, organizationId, "organization_created", { name }, now);
 

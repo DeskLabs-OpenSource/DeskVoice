@@ -1,7 +1,7 @@
 import { organizationLimitsView, setOrganizationLimits } from "@deskvoice/core";
-import { z } from "zod";
 import { notFound } from "../../../../../../../server/context";
 import { centsOf } from "../../../../../../../server/costs";
+import { limitsBody } from "../../../../../../../server/limits";
 import { handleInstallation } from "../../../handle";
 
 /**
@@ -31,18 +31,11 @@ export const GET = handleInstallation({ support: false }, async ({ params, deps 
   };
 });
 
-// `null` tira o limite. `outboundAllowed` é sim ou não, nunca nulo (a coluna é `not null`). O teto do
-// mês é em centavos (de dólar, a moeda do extrato), até o maior `integer` do Postgres. Campo
-// desconhecido é recusado.
-const limit = z.number().int().min(0).max(1_000_000).nullable();
-const spendCap = z.number().int().min(0).max(2_147_483_647).nullable();
-const body = z.object({ maxTrunks: limit, maxAgents: limit, outboundAllowed: z.boolean().optional(), monthlySpendCapCents: spendCap.optional() }).strict();
-
 /**
  * Grava os limites e `organization_limits_changed` na auditoria da instalação. A trava da saída não
  * escreve em `outbound_policy`: a escolha da organização fica como ela deixou.
  */
-export const PUT = handleInstallation({ support: false, body }, async ({ body, params, accountId, deps }) => {
+export const PUT = handleInstallation({ support: false, body: limitsBody }, async ({ body, params, accountId, deps }) => {
   const result = await setOrganizationLimits(deps.db, params.id ?? "", body, accountId, deps.clock.now());
   if (!result.ok) throw notFound();
   return { maxTrunks: result.limits.maxTrunks, maxAgents: result.limits.maxAgents, outboundAllowed: result.limits.outboundAllowed, monthlySpendCapCents: result.limits.monthlySpendCapCents };
