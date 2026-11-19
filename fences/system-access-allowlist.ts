@@ -17,4 +17,5 @@ export const SYSTEM_ACCESS_ALLOWLIST: Record<string, string> = {
   "apps/routines/src/runner.ts": "a fila atravessa organizações: devolve tarefa presa e acha a próxima agendada",
   "apps/voice/src/reconcile.ts": "na partida, fecha chamadas órfãs de qualquer organização que ficaram sem processo",
   "apps/voice/src/trunks.ts": "o arquivo de linhas do Asterisk reúne os troncos de todas as organizações",
+  "apps/voice/src/whatsapp-calls-deletion.ts": "despareia no WaCalls as organizações com lápide: acha as que ainda têm sessão, atravessando organizações",
 };

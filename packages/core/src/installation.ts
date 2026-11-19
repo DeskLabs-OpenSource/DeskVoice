@@ -21,6 +21,7 @@ export const INSTALLATION_EVENT_KINDS = [
   "organization_reactivated",
   "organization_deletion_started",
   "organization_deleted",
+  "call_to_deleted_organization",
   "organization_limits_changed",
   "installation_setting_changed",
   "support_access_started",
@@ -284,7 +285,7 @@ export type ExecuteOrganizationDeletionResult =
   /** A organização foi apagada agora. */
   | { status: "deleted"; counts: Record<string, number>; deletedAccounts: number }
   /** Um passo de fora do banco falhou: nada do banco foi apagado, e a rotina tenta de novo. */
-  | { status: "retry"; step: "whatsapp" | "recordings"; error: string }
+  | { status: "retry"; step: "whatsapp" | "whatsapp_calls" | "recordings"; error: string }
   /** A organização não tem lápide, ou já foi apagada: não há o que fazer, e nada foi tocado. */
   | { status: "nothing_to_do" };
 
@@ -308,6 +309,11 @@ const CASCADED_TABLES_SQL = `
  * 2. a sessão do WhatsApp (`deps.endWhatsAppSession`). Com o WAHA fora do ar, para aqui e devolve
  *    `retry`, sem apagar o banco: uma sessão viva sem dona deixaria o aparelho em "Dispositivos
  *    conectados";
+ *    depois, a ligação pelo WhatsApp (fatia 9b2): enquanto `whatsapp_call_sessions` tiver
+ *    `wacalls_session_id`, devolve `retry` (`whatsapp_calls`). Só o processo de voz tem o token do
+ *    WaCalls, e é ele quem despareia a organização com lápide e limpa a linha
+ *    (`apps/voice/src/whatsapp-calls-deletion.ts`). Apagar antes levaria a linha junto, e sem ela o
+ *    agente do servidor pode desligar o WaCalls com o aparelho ainda vinculado;
  * 3. a pasta das gravações (`<recordingsDir>/<id>`), inteira. Pasta que não existe conta como feito;
  * 4. `delete from organizations ... and deleting_at is not null`, pelo papel de sistema, e a cascata
  *    da 9a apaga o resto;
@@ -334,6 +340,10 @@ export async function executeOrganizationDeletion(deps: OrganizationDeletionDeps
     return { status: "retry", step: "whatsapp", error: error instanceof Error ? error.message : String(error) };
   }
   await deps.afterStep?.(2);
+
+  // A ligação pelo WhatsApp: espera o processo de voz desparear (fatia 9b2).
+  const pairedCalls = await withSystem(deps.db, (q) => q.one("select 1 from whatsapp_call_sessions where organization_id = $1 and wacalls_session_id is not null", [organizationId]));
+  if (pairedCalls) return { status: "retry", step: "whatsapp_calls", error: "waiting for the voice process to unpair WhatsApp calls" };
 
   try {
     await rm(path.join(deps.recordingsDir, organizationId), { recursive: true, force: true });
@@ -385,4 +395,24 @@ export async function executeOrganizationDeletion(deps: OrganizationDeletionDeps
     });
     return { status: "deleted", counts, deletedAccounts: accounts };
   });
+}
+
+/**
+ * A organização não existe mais (a cascata da exclusão passou)? Pelo papel de sistema, porque não
+ * há organização para abrir. Só um sim ou não (fatia 9b2: a ligação pelo WhatsApp que chega para a
+ * sessão de uma organização apagada não pode gravar em `calls`, ou a chave cairia).
+ */
+export async function organizationGone(db: Db, organizationId: string): Promise<boolean> {
+  return withSystem(db, async (q) => (await q.one("select 1 from organizations where id = $1", [organizationId])) === null);
+}
+
+/**
+ * Registra, na auditoria da instalação, que uma ligação pelo WhatsApp chegou para uma organização já
+ * apagada e ouviu a fala de indisponível (fatia 9b2). Só o id da organização e o canal: nem o número
+ * de quem ligou, nem o de destino, nem o id do WaCalls.
+ */
+export async function recordCallToDeletedOrganization(db: Db, organizationId: string, now: Date): Promise<void> {
+  await withSystem(db, (q) =>
+    recordInstallationEvent(q, now, "call_to_deleted_organization", { organizationId: null, payload: { organization_id: organizationId, channel: "whatsapp" } }),
+  );
 }
