@@ -3,6 +3,10 @@ const outbound = {
   lead: "As regras das ligações que o agente faz, em vez de receber.",
   offTitle: "As ligações de saída estão desligadas.",
   onTitle: "As ligações de saída estão ligadas.",
+  /** A trava da administração da instalação (seção 3.4 do R8, fatia 7b). */
+  lockedTitle: "As ligações de saída estão bloqueadas.",
+  locked: "A administração da instalação bloqueou as ligações de saída desta organização.",
+  lockedKept: "A sua escolha fica guardada como está e volta a valer quando a administração desbloquear.",
   why: "Elas nascem desligadas de propósito. Uma central que disca sozinha pode incomodar quem não pediu contato, fazer o provedor bloquear a sua linha e trazer responsabilidade legal para você. Por isso, antes de ligar, o DeskVoice pede que você declare para que vai usar as ligações e com que base.",
   noMass: "O DeskVoice não importa lista para discagem em massa. Cada ligação de saída nasce de uma conversa ou de uma tarefa.",
   purpose: "Finalidade",

@@ -93,7 +93,7 @@ describe("setOrganizationLimits", () => {
       { before: { max_trunks: null }, after: { max_trunks: 3 } },
       { before: { max_trunks: 3 }, after: { max_trunks: null } },
     ]);
-    // A coluna da saída, que esta fatia não grava, segue no padrão.
+    // A coluna da saída, que este pedido não mudou, segue no padrão.
     expect((await owner.pool.query("select max_trunks, max_agents, outbound_allowed, monthly_spend_cap_cents from organization_limits where organization_id = $1", [org])).rows).toEqual([
       { max_trunks: null, max_agents: null, outbound_allowed: true, monthly_spend_cap_cents: null },
     ]);
@@ -104,6 +104,28 @@ describe("setOrganizationLimits", () => {
     const org = await createOrganization(app, `limits-${randomUUID()}`);
     for (const value of [-1, 1.5, Number.NaN]) {
       await expect(setOrganizationLimits(app, org, { maxAgents: value }, actor, NOW)).rejects.toThrow(/non-negative integer/);
+    }
+  });
+
+  it("records the outbound lock with before and after, refuses null, and does not write the organization's policy (7b)", async () => {
+    const org = await createOrganization(app, `limits-${randomUUID()}`);
+    await withSystem(app, (q) => q.exec("insert into outbound_policy (organization_id, enabled, purpose, legal_basis) values ($1, true, 'confirmar consultas', 'consentimento')", [org]));
+    const policy = () => owner.pool.query("select * from outbound_policy where organization_id = $1", [org]).then((result) => result.rows);
+    const before = await policy();
+    expect(await setOrganizationLimits(app, org, { outboundAllowed: false }, actor, NOW)).toEqual({
+      ok: true,
+      limits: { monthlySpendCapCents: null, maxTrunks: null, maxAgents: null, outboundAllowed: false },
+    });
+    await setOrganizationLimits(app, org, { outboundAllowed: false }, actor, NOW);
+    await setOrganizationLimits(app, org, { outboundAllowed: true }, actor, NOW);
+    const events = await owner.pool.query("select payload from installation_events where kind = 'organization_limits_changed' and organization_id = $1 order by id", [org]);
+    expect(events.rows.map((row) => row.payload)).toEqual([
+      { before: { outbound_allowed: true }, after: { outbound_allowed: false } },
+      { before: { outbound_allowed: false }, after: { outbound_allowed: true } },
+    ]);
+    expect(await policy()).toEqual(before);
+    for (const value of [null, "false", 0]) {
+      await expect(setOrganizationLimits(app, org, { outboundAllowed: value as unknown as boolean }, actor, NOW)).rejects.toThrow(/true or false/);
     }
   });
 });

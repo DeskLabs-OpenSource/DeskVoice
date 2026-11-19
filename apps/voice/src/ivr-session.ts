@@ -174,14 +174,17 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
 
   /**
    * A transferência lançou depois de o banco gravar `transferred`: o desfecho gravado não pode mentir.
-   * Uma segunda escrita, best effort, grava `ivr_failed { transfer_failed }` e `status = failed`; o
-   * `end_reason` fica o que era.
+   * Uma segunda escrita, best effort, grava `ivr_failed { transfer_failed }` e, na mesma instrução,
+   * `status = failed` e `end_reason = ivr_failed` (falhou, e o motivo é a URA). O `call_ended` que já
+   * saiu com `transferred` fica como está: a linha do tempo é append-only e conta a ordem real
+   * (`transfer_started`, `call_ended`, `ivr_failed { transfer_failed }`). A escrita roda na
+   * organização da chamada (`withOrg`), e a RLS não deixa o `update` alcançar outra.
    */
   const transferFailed = async (): Promise<void> => {
     try {
       await withOrg(db, organizationId, async (q) => {
         await recordEvent(q, callId, "ivr_failed", { reason: "transfer_failed" satisfies IvrFailure }, clock.now());
-        await q.exec("update calls set status = 'failed' where id = $1", [callId]);
+        await q.exec("update calls set status = 'failed', end_reason = 'ivr_failed' where id = $1", [callId]);
       });
     } catch (error) {
       log("error", "could not record the failed ivr transfer", { error: messageOf(error) });

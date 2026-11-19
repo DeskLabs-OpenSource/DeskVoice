@@ -10,6 +10,7 @@ import { PATCH as editAgent } from "./agents/[id]/route";
 import { POST as createAgent } from "./agents/route";
 import { GET as readLimits, PUT as writeLimits } from "./installation/organizations/[id]/limits/route";
 import { GET as ownLimits } from "./organization-limits/route";
+import { GET as readPolicy, PUT as writePolicy } from "./outbound-policy/route";
 import { POST as createTrunk } from "./trunks/route";
 
 const panel = startPanel();
@@ -36,7 +37,7 @@ async function scene() {
   const home = await createOrganization(panel.app, `Instalação ${randomUUID().slice(0, 8)}`);
   const admin = await createUser(panel.app, home, "owner");
   await withSystem(panel.app, async (q) => q.exec("update accounts set installation_admin_at = now() where id = $1", [await accountOf(admin.id)]));
-  const setLimits = (body: { maxTrunks: number | null; maxAgents: number | null }) => call(writeLimits, { method: "PUT", cookie: admin.cookie, params: { id: org }, body });
+  const setLimits = (body: { maxTrunks: number | null; maxAgents: number | null; outboundAllowed?: boolean }) => call(writeLimits, { method: "PUT", cookie: admin.cookie, params: { id: org }, body });
   // `confirmOverlap`: o banco de teste guarda linhas de outras organizações de outros testes, e a
   // faixa pode cruzar a delas. O aviso tem teste próprio (`trunk-overlap.db.test.ts`).
   const trunk = () => call(createTrunk, { method: "POST", cookie: person.cookie, body: { name: "Linha", host: "203.0.113.70", authMode: "ip", confirmOverlap: true } });
@@ -107,7 +108,7 @@ describe("organization limits", () => {
   it("records the change in the installation audit, only with what changed, and shows the usage", async () => {
     const s = await scene();
     await s.trunk();
-    expect((await s.setLimits({ maxTrunks: 2, maxAgents: 5 })).data).toEqual({ maxTrunks: 2, maxAgents: 5 });
+    expect((await s.setLimits({ maxTrunks: 2, maxAgents: 5 })).data).toEqual({ maxTrunks: 2, maxAgents: 5, outboundAllowed: true });
     expect((await s.setLimits({ maxTrunks: 2, maxAgents: null })).status).toBe(200);
     // Nada mudou: nada se grava.
     expect((await s.setLimits({ maxTrunks: 2, maxAgents: null })).status).toBe(200);
@@ -123,7 +124,7 @@ describe("organization limits", () => {
       { actor, payload: { before: { max_agents: 5 }, after: { max_agents: null } } },
     ]);
     const read = await call(readLimits, { cookie: s.admin.cookie, params: { id: s.org } });
-    expect(read.data).toEqual({ maxTrunks: 2, maxAgents: null, usage: { trunks: 1, agents: 0 } });
+    expect(read.data).toEqual({ maxTrunks: 2, maxAgents: null, outboundAllowed: true, outboundPolicyEnabled: false, usage: { trunks: 1, agents: 0 } });
     // A organização lê os próprios, só para leitura.
     expect((await call(ownLimits, { cookie: s.person.cookie })).data).toEqual({ maxTrunks: 2, maxAgents: null, usage: { trunks: 1, agents: 0 } });
   });
@@ -136,7 +137,7 @@ describe("organization limits", () => {
     }
     expect((await call(readLimits, { cookie: s.admin.cookie, params: { id: randomUUID() } })).status).toBe(404);
     expect((await call(writeLimits, { method: "PUT", cookie: s.admin.cookie, params: { id: randomUUID() }, body: { maxTrunks: 1, maxAgents: 1 } })).status).toBe(404);
-    for (const body of [{ maxTrunks: 1, maxAgents: 1, outboundAllowed: false }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 100 }, { maxTrunks: -1, maxAgents: 1 }, { maxTrunks: 1.5, maxAgents: 1 }]) {
+    for (const body of [{ maxTrunks: 1, maxAgents: 1, outboundAllowed: null }, { maxTrunks: 1, maxAgents: 1, outboundAllowed: "false" }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 100 }, { maxTrunks: -1, maxAgents: 1 }, { maxTrunks: 1.5, maxAgents: 1 }]) {
       expect((await call(writeLimits, { method: "PUT", cookie: s.admin.cookie, params: { id: s.org }, body })).code).toBe("validation_error");
     }
     expect(await withSystem(panel.app, (q) => q.one("select 1 from organization_limits where organization_id = $1", [s.org]))).toBeNull();
@@ -161,5 +162,77 @@ describe("organization limits", () => {
     expect((await call(ownLimits, { cookie: s.person.cookie })).data).toEqual({ maxTrunks: null, maxAgents: null, usage: { trunks: 0, agents: 0 } });
     for (let i = 0; i < 3; i++) expect((await s.agent()).status).toBe(200);
     expect(await withSystem(panel.app, (q) => q.one("select 1 from organization_limits where organization_id = $1", [s.org]))).toBeNull();
+  });
+});
+
+// A trava da saída (R8, seção 3.4, fatia 7b): `false` desliga a saída e trava o interruptor da
+// organização, sem escrever na política dela. Quem garante na ligação é `checkOutboundAllowed`
+// (testado no processo de voz); aqui, a rota da instalação e a da política.
+describe("outbound lock", () => {
+  const policyRow = (org: string) => withSystem(panel.app, (q) => q.one("select * from outbound_policy where organization_id = $1", [org]));
+  const turnOn = { enabled: true, purpose: "Confirmar consultas marcadas pelos pacientes", legalBasis: "Consentimento no cadastro" };
+
+  it("T5: the installation PUT records outboundAllowed before and after, and does not change the organization's policy", async () => {
+    const s = await scene();
+    expect((await call(writePolicy, { method: "PUT", cookie: s.person.cookie, body: turnOn })).status).toBe(200);
+    const before = await policyRow(s.org);
+    expect(before).toMatchObject({ enabled: true });
+    expect((await s.setLimits({ maxTrunks: null, maxAgents: null, outboundAllowed: false })).data).toEqual({ maxTrunks: null, maxAgents: null, outboundAllowed: false });
+    expect(await policyRow(s.org)).toEqual(before);
+    expect((await call(readLimits, { cookie: s.admin.cookie, params: { id: s.org } })).data).toMatchObject({ outboundAllowed: false, outboundPolicyEnabled: true });
+    // Sem `outboundAllowed`, o pedido não mexe na trava.
+    await s.setLimits({ maxTrunks: 3, maxAgents: null });
+    expect((await call(readLimits, { cookie: s.admin.cookie, params: { id: s.org } })).data).toMatchObject({ maxTrunks: 3, outboundAllowed: false });
+    await s.setLimits({ maxTrunks: 3, maxAgents: null, outboundAllowed: true });
+    expect(await policyRow(s.org)).toEqual(before);
+    const events = await withSystem(panel.app, (q) =>
+      q.many<{ payload: unknown }>("select payload from installation_events where kind = 'organization_limits_changed' and organization_id = $1 order by id", [s.org]),
+    );
+    expect(events.map((event) => event.payload)).toEqual([
+      { before: { outbound_allowed: true }, after: { outbound_allowed: false } },
+      { before: { max_trunks: null }, after: { max_trunks: 3 } },
+      { before: { outbound_allowed: false }, after: { outbound_allowed: true } },
+    ]);
+    // Destravada, a organização volta como tinha deixado: ligada, e a rota não diz trava.
+    expect((await call(readPolicy, { cookie: s.person.cookie })).data).toMatchObject({ enabled: true, lockedByInstallation: false });
+  });
+
+  it("T4: with the lock, turning outbound on is refused with 409; turning it off and changing the window work", async () => {
+    const s = await scene();
+    expect((await call(readPolicy, { cookie: s.person.cookie })).data).toMatchObject({ enabled: false, lockedByInstallation: false });
+    await s.setLimits({ maxTrunks: null, maxAgents: null, outboundAllowed: false });
+    expect((await call(readPolicy, { cookie: s.person.cookie })).data).toMatchObject({ enabled: false, lockedByInstallation: true });
+    const refused = await call(writePolicy, { method: "PUT", cookie: s.person.cookie, body: turnOn });
+    expect(refused).toMatchObject({ status: 409, code: "outbound_not_allowed" });
+    expect(refused.message).toBe("Outbound calls were turned off for this organization by the installation administration.");
+    expect(await policyRow(s.org)).toBeNull();
+    expect((await call(writePolicy, { method: "PUT", cookie: s.person.cookie, body: { enabled: false } })).status).toBe(200);
+    const window = await call(writePolicy, { method: "PUT", cookie: s.person.cookie, body: { windowStart: "08:00", windowEnd: "18:00", dailyCapPerLine: 50, purpose: "Retorno de chamados" } });
+    expect(window.status).toBe(200);
+    expect(window.data).toMatchObject({ enabled: false, windowStart: "08:00", windowEnd: "18:00", dailyCapPerLine: 50, purpose: "Retorno de chamados", lockedByInstallation: true });
+    // A organização que tinha a saída ligada antes da trava também não religa por aqui.
+    await s.setLimits({ maxTrunks: null, maxAgents: null, outboundAllowed: true });
+    expect((await call(writePolicy, { method: "PUT", cookie: s.person.cookie, body: turnOn })).status).toBe(200);
+    await s.setLimits({ maxTrunks: null, maxAgents: null, outboundAllowed: false });
+    expect((await call(writePolicy, { method: "PUT", cookie: s.person.cookie, body: turnOn })).code).toBe("outbound_not_allowed");
+    expect((await call(writePolicy, { method: "PUT", cookie: s.person.cookie, body: { enabled: false } })).status).toBe(200);
+    expect(await policyRow(s.org)).toMatchObject({ enabled: false });
+  });
+
+  it("T6: the organization cannot write outbound_allowed, not even by SQL of the application role", async () => {
+    const s = await scene();
+    await s.setLimits({ maxTrunks: null, maxAgents: null, outboundAllowed: false });
+    for (const sql of [
+      "update organization_limits set outbound_allowed = true",
+      `insert into organization_limits (organization_id, outbound_allowed) values ('${s.org}', true) on conflict (organization_id) do update set outbound_allowed = true`,
+    ]) {
+      await expect(withOrg(panel.app, s.org, (q) => q.exec(sql))).rejects.toMatchObject({ code: "42501" });
+    }
+    // Nem por permissão de coluna: o teste gerado de isolamento confere a tabela; aqui, a coluna.
+    const column = await owner.pool.query<{ can_update: boolean; can_insert: boolean }>(
+      "select has_column_privilege('deskvoice_app', 'public.organization_limits', 'outbound_allowed', 'update') as can_update, has_column_privilege('deskvoice_app', 'public.organization_limits', 'outbound_allowed', 'insert') as can_insert",
+    );
+    expect(column.rows).toEqual([{ can_update: false, can_insert: false }]);
+    expect((await call(readPolicy, { cookie: s.person.cookie })).data).toMatchObject({ lockedByInstallation: true });
   });
 });

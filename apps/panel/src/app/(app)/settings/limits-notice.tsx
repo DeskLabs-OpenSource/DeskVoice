@@ -16,17 +16,21 @@ interface OrganizationLimits {
 
 /**
  * Os limites que a administração da instalação definiu para esta organização (seção 3.4 do desenho
- * do R8), só para leitura. Sem limite nenhum, nada aparece: quem já instalou não vê diferença.
+ * do R8), só para leitura, com a trava da saída (fatia 7b), que vem de `/outbound-policy`. Sem limite
+ * nenhum e sem trava, nada aparece: quem já instalou não vê diferença.
  */
 export function LimitsNotice() {
   const t = useDict(ptBR, en, es).limits;
   const { data } = useApi<OrganizationLimits>("/organization-limits");
-  if (!data || (data.maxTrunks === null && data.maxAgents === null)) return null;
+  const outbound = useApi<{ lockedByInstallation: boolean }>("/outbound-policy");
+  const outboundLocked = outbound.data?.lockedByInstallation === true;
+  if (!data || (data.maxTrunks === null && data.maxAgents === null && !outboundLocked)) return null;
   return (
     <Panel title={t.title} description={t.lead}>
       <ul className="grid gap-1">
         {data.maxTrunks === null ? null : <li>{fill(t.trunks, { used: data.usage.trunks, limit: data.maxTrunks })}</li>}
         {data.maxAgents === null ? null : <li>{fill(t.agents, { used: data.usage.agents, limit: data.maxAgents })}</li>}
+        {outboundLocked ? <li>{t.outboundLocked}</li> : null}
       </ul>
     </Panel>
   );

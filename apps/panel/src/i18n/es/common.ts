@@ -132,6 +132,7 @@ const common: CommonDictionary = {
     ivr_menu_in_use: "Este menú por teclas atiende estos números. Cambia su atención a la IA, o a otro menú, antes de borrar el menú:",
     agent_in_ivr_menu: "Este agente es la acción de una tecla en estos menús por teclas. Cambia la tecla a otro agente, u otra acción, antes de eliminar el agente:",
     ivr_prompt_format: "El anuncio debe llegar como WAV PCM de 16 bits, mono, a 8000 Hz. La pantalla convierte WAV, MP3 y M4A; si el navegador no abrió el archivo, conviértelo a MP3 e inténtalo de nuevo.",
+    ivr_prompt_too_short: "El anuncio dura menos de 0,2 segundos, o sea, no tiene sonido. Graba un anuncio con la voz e inténtalo de nuevo.",
     ivr_prompt_too_long: "El anuncio dura más de 60 segundos. Graba un anuncio más corto.",
     ivr_prompt_too_large: "El anuncio pasa de 1 MB después de convertido, lo que equivale a más de 60 segundos. Graba un anuncio más corto.",
     trunk_inbound_name:
@@ -155,6 +156,7 @@ const common: CommonDictionary = {
     organization_suspended: "Esta organización está suspendida: no atiende ni hace llamadas.",
     support_session_forbidden: "La sesión de soporte de la instalación no hace este cambio. Pídeselo a un dueño o administrador del equipo.",
     organization_limit_reached: "Esta organización llegó al límite definido por la administración de la instalación.",
+    outbound_not_allowed: "La administración de la instalación bloqueó las llamadas salientes de esta organización.",
     outbound_disabled: "Las llamadas salientes están desactivadas. Actívalas en Llamadas salientes.",
     outside_window: "Fuera del horario permitido para llamadas salientes.",
     do_not_call: "Este número está en la lista de no llamar.",
