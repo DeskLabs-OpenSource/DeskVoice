@@ -205,6 +205,12 @@ describe("T11: o anúncio", () => {
     const menu = await newMenu("Comprido");
     const long = await upload(menu, wav({ samples: 60 * 8000 + 8 }));
     expect([long.status, long.code]).toEqual([400, "ivr_prompt_too_long"]);
+    // 480 001 e 480 003 amostras são 60 000,125 ms e 60 000,375 ms, que arredondados dariam 60 000 e
+    // passariam (ajuste 1 da fatia 1e: o máximo compara antes de arredondar).
+    for (const samples of [60 * 8000 + 1, 60 * 8000 + 3]) {
+      const over = await upload(menu, wav({ samples }));
+      expect([over.status, over.code]).toEqual([400, "ivr_prompt_too_long"]);
+    }
     const huge = await upload(menu, Buffer.concat([wav({ samples: 0 }), Buffer.alloc(1024 * 1024)]));
     expect([huge.status, huge.code]).toEqual([413, "ivr_prompt_too_large"]);
     expect(await stored("select prompt_audio_ms from ivr_menus where id = $1", [menu])).toEqual({ prompt_audio_ms: null });
@@ -214,9 +220,12 @@ describe("T11: o anúncio", () => {
 
   it("U12: recusa o anúncio com menos de 200 ms (`ivr_prompt_too_short`), e aceita os 200 ms exatos", async () => {
     const menu = await newMenu("Curto");
-    // 199 ms: 1592 amostras a 8 kHz. Um WAV de uma amostra (o arquivo mudo que a tela já recusa) também.
+    // 199 ms: 1592 amostras a 8 kHz. 1599 amostras são 199,875 ms, que arredondados dariam 200 (fatia
+    // 1e: a rota compara antes de arredondar). Um WAV de uma amostra (o arquivo mudo que a tela já
+    // recusa) também.
     for (const [samples, ms] of [
       [1592, 199],
+      [1599, 199],
       [1, 0],
     ] as const) {
       const short = await upload(menu, wav({ samples }));
