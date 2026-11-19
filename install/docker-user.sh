@@ -13,7 +13,9 @@
 # Duas coisas que a regra criada à mão não tem, e esta tem (medido em 15/11/2026, issue #142):
 #   - ela volta sozinha depois de reiniciar a máquina: a cadeia DOCKER-USER nasce vazia no boot, e
 #     um serviço do systemd (deskvoice-docker-user.service) roda depois do Docker e a recria;
-#     reiniciar o Docker também esvazia a cadeia, e o mesmo serviço é chamado de novo (PartOf);
+#     o mesmo serviço roda de novo a cada reinício do Docker (PartOf). Se esse reinício esvazia a
+#     cadeia depende do Docker (o 29.9.3 não esvaziou, medido em 18/11/2026): nos dois casos, o
+#     serviço só repõe o que falta;
 #   - rodar duas vezes não duplica nada: cada porta tem uma regra só, conferida antes de inserir.
 #
 # Fechar 5060/udp deixa a telefonia muda: quem fecha a porta é quem sabe de onde vêm as ligações
@@ -29,7 +31,7 @@ VERB=""; SPECS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN_RULE=1 ;;
-    -h|--help) sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     apply|show) [ -z "$VERB" ] || die "Só um comando por vez: recebi '$1' depois de '$VERB'." "Rode: bash install/docker-user.sh --help"
                 VERB="$1" ;;
     -*) die "Não conheço a opção $1." "Veja as opções com: bash install/docker-user.sh --help" ;;
@@ -38,7 +40,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-[ -n "$VERB" ] || { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
+[ -n "$VERB" ] || { sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
 
 SUDO=""; if [ "$(id -u)" != 0 ] && have sudo; then SUDO="sudo"; fi
 UNIT_NAME="deskvoice-docker-user"
@@ -122,8 +124,10 @@ apply_rule() {  # apply_rule <spec>: fecha a porta, uma regra por ponte
 
 remove_unit() {
   [ -f "$UNIT_FILE" ] || return 0
-  if [ "$DRY_RUN_RULE" = 1 ]; then info "[simulação] faria: apagar $UNIT_FILE e desligar $UNIT_NAME.service"; return 0; fi
-  if have systemctl; then $SUDO systemctl disable "$UNIT_NAME.service" >/dev/null 2>&1 || true; fi
+  if [ "$DRY_RUN_RULE" = 1 ]; then info "[simulação] faria: desligar e parar $UNIT_NAME.service e apagar $UNIT_FILE"; return 0; fi
+  # Desligar e parar antes de apagar: depois do rm, a unidade ficaria na memória do systemd como
+  # "active (exited)", com o arquivo não encontrado, até o próximo boot.
+  if have systemctl; then $SUDO systemctl disable --now "$UNIT_NAME.service" >/dev/null 2>&1 || true; fi
   $SUDO rm -f "$UNIT_FILE" || die "Não consegui apagar $UNIT_FILE." "Rode à mão: $SUDO rm -f $UNIT_FILE"
   if have systemctl; then $SUDO systemctl daemon-reload >/dev/null 2>&1 || true; fi
 }
@@ -152,7 +156,13 @@ install_unit() {  # install_unit <portas...>: o serviço que repõe a regra depo
     root_systemctl daemon-reload >/dev/null 2>&1 || true
   fi
   rm -f "$tmp"
-  root_systemctl enable "$UNIT_NAME.service" >/dev/null 2>&1 || { warn "Gravei $UNIT_FILE, mas não consegui ligá-lo no boot. Rode uma vez: $SUDO systemctl enable $UNIT_NAME.service"; return 0; }
+  # --now: o PartOf só chama de novo uma unidade ativa; sem ele, entre o apply e o boot, um reinício do
+  # Docker não chamaria o serviço. --no-block é obrigatório: o próprio serviço roda este script e chega
+  # aqui, e um start da unidade de dentro do ExecStart dela esperaria por ele mesmo (oneshot, sem
+  # prazo), travando o boot. Com ele, o pedido entra na fila do systemd e o script segue.
+  # A corrida do serviço rodando enquanto este apply termina é benigna: todas as regras já estão
+  # escritas, e ele só confere ("já estava fechada").
+  root_systemctl enable --now --no-block "$UNIT_NAME.service" >/dev/null 2>&1 || { warn "Gravei $UNIT_FILE, mas não consegui ligá-lo. Rode uma vez: $SUDO systemctl enable --now $UNIT_NAME.service"; return 0; }
   ok "regra reposta no boot e ao reiniciar o Docker ($UNIT_NAME.service)"
 }
 
