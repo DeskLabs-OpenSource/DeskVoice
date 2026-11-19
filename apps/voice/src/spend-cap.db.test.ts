@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CALL_RECORDING_SETTING, VOICEMAIL_ENABLED_SETTING, withOrg, withSystem } from "@deskvoice/core";
+import { CALL_RECORDING_SETTING, VOICEMAIL_ENABLED_SETTING, withOrg, withSystem, type OrgQuery } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -229,6 +229,17 @@ describe("teto de gasto do mês: a ligação pela operadora", { timeout: 120_000
     expect((await panelNotices(capped.organizationId)).filter((notice) => notice.body.includes("teto de gasto")).map((notice) => notice.call_id).sort()).toEqual([first.callId, third.callId].sort());
   });
 
+  it("suspensa e no teto: a recusa é `organization_suspended`, sem o aviso do teto", async () => {
+    // Sonda I1 do Verificador 2 (DESA-213): cai com o teto conferido antes da suspensão.
+    const capped = await line("cap-suspended", "+553130000096");
+    await capAt(capped.organizationId, 0);
+    await withSystem(app, (q) => q.exec("update organizations set suspended_at = now(), suspended_reason = 'teste' where id = $1", [capped.organizationId]));
+    const { ari } = await voice(fakeClock());
+    const r = await ring(ari, capped.trunkId, "553130000096");
+    expect(await callOf(app, r.callId)).toMatchObject({ status: "refused", end_reason: "organization_suspended" });
+    expect(await panelNotices(capped.organizationId)).toEqual([]);
+  });
+
   it("T5: o aviso do teto não cala o de simultâneas", async () => {
     const org = await line("cap-notice-other", "+553130000007");
     const clock = fakeClock();
@@ -265,6 +276,22 @@ describe("teto de gasto do mês: a ligação de saída", { timeout: 120_000 }, (
     expect(ari.originated).toHaveLength(2);
     expect((await callsOf(app, capped.organizationId)).filter((call) => call.end_reason === "spend_cap_reached")).toMatchObject([{ status: "refused" }]);
     expect(await panelNotices(capped.organizationId)).toEqual([]);
+  });
+
+  it("sem teto, a porta lê os limites uma vez só: a 7c não soma consulta (6, como antes dela)", async () => {
+    // Critério de fracasso da 7c: a organização sem teto não ganha consulta por chamada. A trava e o teto
+    // vêm da mesma leitura de `organization_limits`, passada a `spendCapReached`.
+    const free = await line("cap-out-count", "+553130000013");
+    await withSystem(app, (q) => q.exec("insert into organization_limits (organization_id, max_agents) values ($1, 5)", [free.organizationId]));
+    const sql = await withOrg(app, free.organizationId, async (q) => {
+      const seen: string[] = [];
+      const counted = { organizationId: q.organizationId, one: (t: string, p?: unknown[]) => (seen.push(t), q.one(t, p)), many: (t: string, p?: unknown[]) => (seen.push(t), q.many(t, p)), exec: (t: string, p?: unknown[]) => (seen.push(t), q.exec(t, p)) } as OrgQuery;
+      expect(await checkOutboundAllowed(counted, "+5531911112222", fakeClock())).toMatchObject({ allowed: true });
+      return seen;
+    });
+    expect(sql.filter((text) => /organization_limits/.test(text))).toHaveLength(1);
+    expect(sql.filter((text) => /usage_ledger/.test(text))).toEqual([]);
+    expect(sql).toHaveLength(6);
   });
 
   it("a ordem: suspensa e trava da saída vêm antes do teto, e o teto vem antes da política", async () => {

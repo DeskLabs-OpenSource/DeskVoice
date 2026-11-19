@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createOrganization, openTestDbs } from "../test/helpers";
 import { createAccount } from "./accounts";
 import { costTotal, organizationDays } from "./costs";
-import { monthCost, setOrganizationLimits, spendCapReached } from "./limits";
+import { monthCost, organizationLimits, setOrganizationLimits, spendCapReached } from "./limits";
 import type { OrgQuery } from "./types";
 import { withOrg, withSystem } from "./with-org";
 
@@ -120,6 +120,35 @@ describe("spendCapReached", () => {
     // 28/02 15h30 em UTC = 01/03 00h30 em Tóquio.
     await spend(org, 100_000_000, new Date("2026-02-28T15:30:00.000Z"));
     expect(await check(org)).toEqual({ reached: true, capCents: 100, spentMicrocents: 100_000_000 });
+  });
+
+  it("T3: na virada do mês, o `now` também é lido no fuso da organização: 01/04 01h em UTC ainda é 31/03 em São Paulo, e o gasto de março conta", async () => {
+    // Sonda P5 do Verificador 2 (DESA-213): cai com os dias do mês em UTC dentro de `monthCost`.
+    const org = await organization("America/Sao_Paulo");
+    await cap(org, 5);
+    await spend(org, 5_000_000, new Date("2026-03-20T12:00:00.000Z"));
+    expect(await withOrg(app, org.id, (q) => spendCapReached(q, new Date("2026-04-01T01:00:00.000Z")))).toEqual({ reached: true, capCents: 5, spentMicrocents: 5_000_000 });
+  });
+
+  it("com os limites já lidos pela porta, não relê `organization_limits`: sem teto, nenhuma consulta", async () => {
+    const org = await organization();
+    await spend(org, 10_000_000_000, NOW);
+    await setOrganizationLimits(app, org.id, { maxAgents: 3 }, actor, NOW);
+    await withOrg(app, org.id, async (q) => {
+      const limits = await organizationLimits(q);
+      const spy = watched(q);
+      expect(await spendCapReached(spy.q, NOW, limits)).toEqual({ reached: false });
+      expect(spy.sql).toEqual([]);
+    });
+    // Com teto, os limites passados valem: só a soma do mês é lida, nunca os limites de novo.
+    await cap(org, 1);
+    await withOrg(app, org.id, async (q) => {
+      const limits = await organizationLimits(q);
+      const sql: string[] = [];
+      const counted = { organizationId: q.organizationId, one: (t: string, p?: unknown[]) => (sql.push(t), q.one(t, p)), many: (t: string, p?: unknown[]) => (sql.push(t), q.many(t, p)), exec: (t: string, p?: unknown[]) => (sql.push(t), q.exec(t, p)) } as OrgQuery;
+      expect(await spendCapReached(counted, NOW, limits)).toMatchObject({ reached: true, capCents: 1 });
+      expect(sql.filter((text) => /organization_limits/.test(text))).toEqual([]);
+    });
   });
 
   it("T4: o gasto da organização B não conta no teto da A", async () => {

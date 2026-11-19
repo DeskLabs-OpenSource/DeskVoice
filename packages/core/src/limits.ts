@@ -104,10 +104,13 @@ export type SpendCapCheck = { reached: false } | { reached: true; capCents: numb
  * A soma inclui o custo estimado e não inclui o que não pôde ser medido: o teto é aproximado. A
  * chamada em andamento não é cortada quando a soma passa do teto; quem a limita é o teto por chamada
  * do agente.
+ *
+ * `limits`, quando a porta já leu `organizationLimits(q)` na mesma transação (a saída e a religação, para
+ * a trava): o teto vem dele, sem reler, e a organização sem teto não ganha consulta nenhuma.
  */
-export async function spendCapReached(q: OrgQuery, now: Date): Promise<SpendCapCheck> {
+export async function spendCapReached(q: OrgQuery, now: Date, limits?: OrganizationLimits): Promise<SpendCapCheck> {
   if (q.organizationId === "") throw new Error("spendCapReached: needs a transaction of the organization (withOrg)");
-  const capCents = (await organizationLimits(q)).monthlySpendCapCents;
+  const capCents = (limits ?? (await organizationLimits(q))).monthlySpendCapCents;
   if (capCents === null) return { reached: false };
   const spentMicrocents = (await monthCost(q, now)).microcents;
   return spentMicrocents >= capCents * 1_000_000 ? { reached: true, capCents, spentMicrocents } : { reached: false };

@@ -259,10 +259,11 @@ async function callBackAction(q: OrgQuery, caller: string | null, channel: strin
   // A trava da instalação (fatia 7b): com as ligações de saída bloqueadas, nem agenda. Isto também não
   // é a conferência da política: a religação já agendada passa pela porta única, `checkOutboundAllowed`,
   // que recusa com `outbound_not_allowed`.
-  if (!(await organizationLimits(q)).outboundAllowed) return { action: "skipped", reason: "mode_unavailable" };
+  const limits = await organizationLimits(q);
+  if (!limits.outboundAllowed) return { action: "skipped", reason: "mode_unavailable" };
   // O teto de gasto do mês (fatia 7c), do mesmo jeito: no teto, nem agenda. Quem confere na hora de discar
-  // é a porta única, que recusa com `spend_cap_reached`.
-  if ((await spendCapReached(q, now)).reached) return { action: "skipped", reason: "mode_unavailable" };
+  // é a porta única, que recusa com `spend_cap_reached`. Os limites já lidos vão junto: sem releitura.
+  if ((await spendCapReached(q, now, limits)).reached) return { action: "skipped", reason: "mode_unavailable" };
   if (caller === null) return { action: "call_back_scheduled" };
   await lockFollowUpsOfOrganization(q);
   const since = new Date(now.getTime() - CALLER_MESSAGE_EVERY_MS);

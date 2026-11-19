@@ -41,12 +41,13 @@ function localMinutes(at: Date, timeZone: string): number {
  * Depois da suspensão, a trava da administração da instalação (`organization_limits.outbound_allowed`,
  * seção 3.4, fatia 7b): `false` recusa antes de ler a política, que fica como a organização deixou.
  * Sem linha de limites, a trava não existe e vale a política, como antes. Depois da trava, o teto de
- * gasto do mês (fatia 7c, `spendCapReached`): sem teto, nada é somado.
+ * gasto do mês (fatia 7c, `spendCapReached`), com os limites já lidos: sem teto, nada é somado nem relido.
  */
 export async function checkOutboundAllowed(q: OrgQuery, toE164Input: string, clock: Clock, lineE164?: string | null): Promise<OutboundDecision> {
   if (await organizationSuspended(q)) return refuse(ORGANIZATION_SUSPENDED, "This organization is suspended: it does not make calls.");
-  if (!(await organizationLimits(q)).outboundAllowed) return refuse(OUTBOUND_NOT_ALLOWED, "Outbound calls were turned off for this organization by the installation administration.");
-  if ((await spendCapReached(q, clock.now())).reached) return refuse(SPEND_CAP_REACHED, "This organization reached its monthly spending cap. The installation administration can change the cap.");
+  const limits = await organizationLimits(q);
+  if (!limits.outboundAllowed) return refuse(OUTBOUND_NOT_ALLOWED, "Outbound calls were turned off for this organization by the installation administration.");
+  if ((await spendCapReached(q, clock.now(), limits)).reached) return refuse(SPEND_CAP_REACHED, "This organization reached its monthly spending cap. The installation administration can change the cap.");
   const policy = await q.one<PolicyRow>(
     "select enabled, daily_cap_per_line, window_start::text, window_end::text, max_attempts_per_contact, timezone from outbound_policy where organization_id = $1 for update",
     [q.organizationId],

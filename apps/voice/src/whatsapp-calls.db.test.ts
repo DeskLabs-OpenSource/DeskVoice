@@ -390,6 +390,44 @@ describe("ligação pelo WhatsApp: teto de gasto do mês", { timeout: 60_000 }, 
     expect(notices[0]?.body).toMatch(/teto de gasto do mês, de US\$ 1\.00.*aproximado/);
     expect(await callOf(app, refused.id)).toMatchObject({ status: "refused", end_reason: "spend_cap_reached", channel: "whatsapp", engine: null });
   });
+  it("duas recusas pelo teto em 10 minutos, com um aviso de simultâneas antes: um aviso do teto só", async () => {
+    // Sonda W1 do Verificador 2 (DESA-213): cai com o aviso pelo `end_reason` genérico (o de simultâneas
+    // calaria o do teto: 0 avisos) e com o aviso sem janela (2 avisos).
+    const capped = await connected("wa-cap-window");
+    await capAt(capped.organizationId, 0);
+    const before = new Date(harness.clock.now().getTime() - 60_000);
+    await withSystem(app, async (q) => {
+      const busy = await q.one<{ id: string }>(
+        "insert into calls (organization_id, direction, channel, status, end_reason, started_at, ended_at) values ($1, 'inbound', 'whatsapp', 'refused', 'inbound_limit_reached', $2, $2) returning id",
+        [capped.organizationId, before],
+      );
+      await q.exec("insert into notifications (organization_id, call_id, channel, target, body, created_at) values ($1, $2, 'panel', null, 'ocupado', $3)", [capped.organizationId, busy?.id, before]);
+    });
+    for (let n = 1; n <= 2; n += 1) {
+      const call = capped.ring();
+      await waitFor(async () => (await callsOf(app, capped.organizationId)).filter((row) => row.end_reason === "spend_cap_reached").length === n, `refusal ${n}`);
+      await waitFor(() => call.status === "connected" || callPaths(call).includes("POST accept"), "the call to be answered");
+      wacalls.connectMedia(call);
+      await pump(() => call.status === "ended", "the DELETE after the notice");
+    }
+    const notices = (await notificationsOf(app, capped.organizationId)).filter((notice) => notice.channel === "panel" && /teto de gasto/.test(notice.body));
+    expect(notices).toHaveLength(1);
+    expect(engine.configs).toHaveLength(0);
+  });
+
+  it("suspensa e no teto: a recusa é `organization_suspended`, sem o aviso do teto", async () => {
+    // Sonda W2 do Verificador 2 (DESA-213): cai com o teto conferido antes da suspensão.
+    const capped = await connected("wa-cap-suspended");
+    await capAt(capped.organizationId, 0);
+    await withSystem(app, (q) => q.exec("update organizations set suspended_at = now(), suspended_reason = 'teste' where id = $1", [capped.organizationId]));
+    const call = capped.ring();
+    const refused = await waitFor(async () => (await callsOf(app, capped.organizationId)).find((row) => row.status === "refused"), "the refused call");
+    await waitFor(() => call.status === "connected" || callPaths(call).includes("POST accept"), "the call to be answered");
+    wacalls.connectMedia(call);
+    await pump(() => call.status === "ended", "the DELETE after the notice");
+    expect(refused.end_reason).toBe("organization_suspended");
+    expect((await notificationsOf(app, capped.organizationId)).filter((notice) => notice.channel === "panel")).toEqual([]);
+  });
 });
 
 describe("ligação pelo WhatsApp: a partida do processo de voz", { timeout: 60_000 }, () => {
