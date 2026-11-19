@@ -1,4 +1,4 @@
-import { CALL_BACK_COLUMNS, CALL_BACK_INTERVAL_MINUTES, CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, callerMessageBlock, createFollowUp, dropFollowUpDefaultMessage, enqueueTask, lockCall, OPEN_TURNS, recordEvent, scheduleCallBack, settleCallBack, withOrg, type CallBackRow, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
+import { CALL_BACK_COLUMNS, CALL_BACK_INTERVAL_MINUTES, CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, callerMessageBlock, createFollowUp, dropFollowUpDefaultMessage, enqueueTask, lockCall, OPEN_TURNS, organizationLimits, recordEvent, scheduleCallBack, settleCallBack, withOrg, type CallBackRow, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
 import type { Routine } from "../types";
 
 /**
@@ -244,7 +244,7 @@ const lockFollowUpsOfOrganization = (q: OrgQuery): Promise<number> => q.exec("se
 /**
  * O que o modo `call_back` faz com uma queda, conferido na hora de agendar (seção 3.6, passo 1). A ordem
  * é a do WhatsApp: número na lista de não ligar não recebe e não vira pendência; sem a política de saída
- * ligada, o modo está indisponível; número que já recebeu religação ou mensagem nas últimas 24 horas
+ * ligada, ou com as ligações de saída bloqueadas pela instalação, o modo está indisponível; número que já recebeu religação ou mensagem nas últimas 24 horas
  * não recebe de novo. Só a ligação pelo telefone (`channel = 'phone'`) é religada; a do WhatsApp cai
  * na reserva, como o modo indisponível. A simulada confere o mesmo e não insere nada.
  *
@@ -256,6 +256,10 @@ async function callBackAction(q: OrgQuery, caller: string | null, channel: strin
   if (channel !== "phone" && channel !== "simulated") return { action: "skipped", reason: "mode_unavailable" };
   const policy = await q.one<{ enabled: boolean }>("select enabled from outbound_policy where organization_id = $1", [q.organizationId]);
   if (!policy?.enabled) return { action: "skipped", reason: "mode_unavailable" };
+  // A trava da instalação (fatia 7b): com as ligações de saída bloqueadas, nem agenda. Isto também não
+  // é a conferência da política: a religação já agendada passa pela porta única, `checkOutboundAllowed`,
+  // que recusa com `outbound_not_allowed`.
+  if (!(await organizationLimits(q)).outboundAllowed) return { action: "skipped", reason: "mode_unavailable" };
   if (caller === null) return { action: "call_back_scheduled" };
   await lockFollowUpsOfOrganization(q);
   const since = new Date(now.getTime() - CALLER_MESSAGE_EVERY_MS);

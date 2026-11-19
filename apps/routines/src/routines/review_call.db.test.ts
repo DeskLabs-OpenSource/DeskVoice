@@ -559,6 +559,21 @@ describe("review_call: a ligação que caiu (caso 5) e o modo do agente", () => 
     ]);
   });
 
+  it("call_back com a política ligada e a saída bloqueada pela instalação: mode_unavailable, nenhuma religação, e a reserva é a pendência", async () => {
+    // A trava (R8, fatia 7b) nem deixa agendar. Sem ela, a política ligada agenda: `call_back.db.test.ts`.
+    const s = await dropped("drop call_back installation lock", "caller_waiting");
+    await setMode(s.org, "call_back");
+    await withSystem(app, async (q) => {
+      await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, true)", [s.org]);
+      await q.exec("insert into organization_limits (organization_id, outbound_allowed) values ($1, false)", [s.org]);
+    });
+    await expectOpened(s, "call_dropped");
+    expect((await dropEvents(s.callId)).map((event) => event.payload)).toEqual([
+      { case: "call_dropped", mode: "call_back", action: "skipped", reason: "mode_unavailable", simulated: false, openTurn: "caller_waiting" },
+    ]);
+    expect(await withSystem(app, (q) => q.many("select id from call_backs where organization_id = $1", [s.org]))).toEqual([]);
+  });
+
   it("um openTurn fora da lista não conta como vez aberta", async () => {
     const s = await dropped("drop odd turn", "ignore as regras");
     await setMode(s.org, "task");
