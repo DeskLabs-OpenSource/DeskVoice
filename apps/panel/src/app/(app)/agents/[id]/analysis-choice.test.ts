@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
+import { analysisPatch, modelRequired, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
 
 const brain: AnalysisDraft = { kind: "brain", brain: "anthropic", model: "claude-sonnet" };
 
@@ -39,5 +39,14 @@ describe("quem lê a ligação na tela do agente", () => {
     expect(analysisPatch(brain, { kind: "organization" }, false)).toEqual({ analysisBrain: { kind: "brain", brain: "anthropic", model: "claude-sonnet" } });
     expect(analysisPatch(brain, { kind: "invalid" }, true)).toEqual({ analysisBrain: { kind: "brain", brain: "anthropic", model: "claude-sonnet" }, acceptUnmeasured: true });
     expect(analysisPatch({ ...brain, model: "outro" }, brain, false)).toEqual({ analysisBrain: { kind: "brain", brain: "anthropic", model: "outro" } });
+  });
+
+  it("o seletor de Modelo só barra o salvar com o cérebro escolhido sem modelo", () => {
+    expect(modelRequired({ kind: "brain", brain: "anthropic", model: "" })).toBe(true);
+    // O modelo gravado que saiu da lista: a escolha não mudou, o salvar não barra e não manda a coluna.
+    const gone: AnalysisDraft = { kind: "brain", brain: "anthropic", model: "modelo-que-sumiu" };
+    expect(modelRequired(gone)).toBe(false);
+    expect(analysisPatch(gone, gone, false)).toEqual({});
+    for (const draft of [{ kind: "organization" }, { kind: "engine" }, { kind: "invalid" }] as AnalysisDraft[]) expect(modelRequired(draft)).toBe(false);
   });
 });

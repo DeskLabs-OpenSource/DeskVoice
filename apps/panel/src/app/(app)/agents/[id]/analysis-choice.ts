@@ -37,3 +37,12 @@ export function analysisPatch(
   if (draft.kind === "engine") return { analysisBrain: { kind: "engine" } };
   return { analysisBrain: { kind: "brain", brain: draft.brain, model: draft.model }, ...(acceptUnmeasured && { acceptUnmeasured: true as const }) };
 }
+
+/**
+ * Se o seletor de Modelo barra o salvar da página: só com o cérebro escolhido sem modelo. O modelo
+ * gravado que saiu da lista do cérebro não barra: salvar outro campo grava esse campo e não regrava a
+ * coluna (`analysisPatch` não manda nada), e o aviso do modelo que sumiu continua na tela.
+ */
+export function modelRequired(draft: AnalysisDraft): boolean {
+  return draft.kind === "brain" && draft.model === "";
+}

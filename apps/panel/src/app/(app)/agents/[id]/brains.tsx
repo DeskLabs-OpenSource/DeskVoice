@@ -8,7 +8,7 @@ import { useApi } from "../../../../ui/api";
 import { Field, Notice, Panel, Select, TextInput } from "../../../../ui/kit";
 import type { Setting } from "../../../../ui/types";
 import { matchModels } from "../../settings/brains/search";
-import type { AnalysisDraft } from "./analysis-choice";
+import { modelRequired, type AnalysisDraft } from "./analysis-choice";
 
 /** O que a lista de Cérebros diz de cada um: aqui só valem os que têm chave aceita. */
 interface BrainOption {
@@ -135,7 +135,7 @@ export function AgentBrains({
                 <TextInput type="search" autoComplete="off" aria-label={t.readSearch} placeholder={t.readSearch} value={query} onChange={(event) => setQuery(event.target.value)} />
                 {models.data && shown.length === 0 ? <p className="text-sm text-muted">{t.readSearchEmpty}</p> : null}
                 <Select
-                  required
+                  required={modelRequired(analysis)}
                   aria-label={t.readModel}
                   value={model ? modelId : ""}
                   onChange={(event) => {
