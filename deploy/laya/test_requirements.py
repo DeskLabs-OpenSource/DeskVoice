@@ -61,10 +61,12 @@ PIP_EXE = re.compile(r"pip(?:3(?:\.\d+)?)?")
 PIP_WORD = re.compile(r"pip(?![A-Za-z_])")
 # O shlex entrega numa palavra só toda sequência dos caracteres `()<>;&|` (`||(`, `)&&(`, `||>`, `;<`,
 # `>||`). Tirados os parênteses, a palavra é cortada da esquerda para a direita, sempre na peça mais
-# longa: `&&`, `||`, `;`, `|` e `&` são separadores de comandos; `&>`, `&>>`, `>&`, `<&`, `>|`, `>>`,
-# `<<`, `<<-`, `<>`, `<` e `>` são redireção. Assim `||>` é `||` e `>`, e `>||` é `>|` e `|`.
+# longa: `&&`, `||`, `;`, `|` e `&` são separadores de comandos; `>&`, `<&`, `>|`, `>>`, `<<`, `<<-`,
+# `<>`, `<` e `>` são redireção. Assim `||>` é `||` e `>`, e `>||` é `>|` e `|`. O Dockerfile não tem
+# `SHELL`, então o RUN roda no `/bin/sh` (dash), que não conhece `&>`: lá `&>` é `&` (segundo plano)
+# mais `>`, e `&>>` é `&` mais `>>`.
 PUNCTUATION = re.compile(r"[()<>;&|]+")
-PIECE = re.compile(r"&&|\|\||&>>?|[<>]&|>\||>>|<<-?|<>|[<>;&|]")
+PIECE = re.compile(r"&&|\|\||[<>]&|>\||>>|<<-?|<>|[<>;&|]")
 SEPARATORS = {"&&", "||", ";", "|", "&"}
 
 
