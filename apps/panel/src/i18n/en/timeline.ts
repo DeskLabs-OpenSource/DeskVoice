@@ -246,6 +246,7 @@ const timeline: TimelineDictionary = {
     outcome_not_classified_status: "Provider response: HTTP {status}",
     call_analyzed: "Call analyzed: score {score} out of 10",
     analysis_not_done: "Call not analyzed: {reason}",
+    choice_agent: "(agent's choice)",
     analysis_not_done_reasons: {
       no_speech: "the call had no speech to analyze",
       no_key: "the agent's voice engine has no key saved",

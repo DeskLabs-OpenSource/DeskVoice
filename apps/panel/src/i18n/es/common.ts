@@ -71,6 +71,10 @@ const common: CommonDictionary = {
   },
   errors: {
     fallback: "No pudimos completar esta acción. Intenta de nuevo en un momento.",
+    unknown_brain: "Ese cerebro no existe en esta instalación. Elige otro para quién lee la llamada.",
+    brain_no_key: "Ese cerebro no tiene clave guardada. Guarda y prueba la clave en Configuración → Cerebros antes de elegirlo.",
+    brain_model_not_listed: "Ese modelo no está en la lista guardada del cerebro. Actualiza la lista en Configuración → Cerebros.",
+    brain_model_unmeasured: "El precio de ese modelo no se conoce. Elige el modelo de nuevo para ver el aviso y guardar.",
     network: "El panel no respondió. Revisa tu conexión e intenta de nuevo.",
     internal_error: "Tuvimos un problema en el servidor. No se cambió nada. Intenta de nuevo en un momento.",
     unauthenticated: "Tu sesión venció. Entra de nuevo para continuar.",

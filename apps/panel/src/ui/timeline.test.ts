@@ -216,6 +216,26 @@ describe("linha do tempo", () => {
       expect(html).toContain(ptBR.events.analyst_read.objectionOutside);
     });
   });
+  describe("de quem é a escolha do cérebro (R4, fatia 5)", () => {
+    const at = "2026-11-18T12:00:00.000Z";
+    const render = (kind: string, payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind, at, payload }], live: false, agentName: "Vendas" }));
+    const brain = { brain: "anthropic", model: "claude-sonnet" };
+
+    it.each([
+      ["call_analyzed", { score: 8, rubricVersion: 1, costCents: 1, droppedObjections: 0, ...brain, costMeasured: true }, "Ligação analisada: nota 8 de 10"],
+      ["outcome_not_classified", { reason: "brain_no_key", ...brain }, ptBR.events.outcome_not_classified],
+      ["analysis_not_done", { reason: "brain_no_key", ...brain }, "Ligação não analisada: o cérebro escolhido não tem chave cadastrada"],
+    ])("%s com a escolha do agente diz \"(escolha do agente)\"; com a da organização ou do motor, nada muda", (kind, payload, frase) => {
+      expect(render(kind, { ...payload, choiceFrom: "agent" })).toContain(`${frase} (escolha do agente)`);
+      for (const other of [{ ...payload, choiceFrom: "organization" }, payload]) {
+        const html = render(kind, other);
+        expect(html).toContain(frase);
+        expect(html).not.toContain("(escolha do agente)");
+        expect(html).not.toContain("escolha da organização");
+      }
+    });
+  });
 
   describe("a religação da ligação que caiu (R2, fatia 4)", () => {
     const at = "2026-11-18T12:00:00.000Z";

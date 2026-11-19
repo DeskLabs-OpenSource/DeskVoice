@@ -248,6 +248,7 @@ const timeline = {
     outcome_not_classified_status: "Resposta do provedor: HTTP {status}",
     call_analyzed: "Ligação analisada: nota {score} de 10",
     analysis_not_done: "Ligação não analisada: {reason}",
+    choice_agent: "(escolha do agente)",
     analysis_not_done_reasons: {
       no_speech: "a ligação não teve fala para analisar",
       no_key: "o motor de voz do agente não tem chave cadastrada",

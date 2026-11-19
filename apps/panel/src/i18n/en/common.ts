@@ -71,6 +71,10 @@ const common: CommonDictionary = {
   },
   errors: {
     fallback: "We could not complete this action. Try again in a moment.",
+    unknown_brain: "That brain does not exist on this installation. Choose another one for who reads the call.",
+    brain_no_key: "That brain has no saved key. Save and test the key in Settings → Brains before choosing it.",
+    brain_model_not_listed: "That model is not in the brain's saved list. Refresh the list in Settings → Brains.",
+    brain_model_unmeasured: "That model's price is not known. Choose the model again to see the warning and save.",
     network: "The panel did not answer. Check your connection and try again.",
     internal_error: "We had a problem on the server. Nothing was changed. Try again in a moment.",
     unauthenticated: "Your session expired. Sign in again to continue.",

@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./accounts";
 export * from "./analysis";
+export * from "./agent-analysis-brain";
 export * from "./analysts";
 export * from "./call-backs";
 export * from "./caller-history";
