@@ -52,6 +52,11 @@ export async function startFakeWaha() {
       if (!session) return { status: 404, body: { message: "Session not found" } };
       const action = lifecycle[2];
       if (method === "GET" && !action) return { status: 200, body: { name, ...session } };
+      if (method === "DELETE" && !action) {
+        // A resposta do WAHA aqui não está documentada: vazia, para o cliente provar que não a lê.
+        sessions.delete(name);
+        return { status: 200, body: "" };
+      }
       if (method === "PUT" && !action) {
         session.config = record?.config ?? {};
         return { status: 200, body: { name, ...session } };

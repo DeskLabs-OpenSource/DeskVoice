@@ -86,9 +86,11 @@ interface Call {
   body?: unknown;
   /** Códigos HTTP de erro que, nesta chamada, significam "já está assim". */
   tolerate?: number[];
+  /** A resposta de sucesso não interessa (e o formato dela não está documentado): não é lida. */
+  ignoreBody?: boolean;
 }
 
-async function call<T>(options: WahaOptions, path: string, schema: z.ZodType<T>, { method = "GET", body, tolerate = [] }: Call = {}): Promise<T | null> {
+async function call<T>(options: WahaOptions, path: string, schema: z.ZodType<T>, { method = "GET", body, tolerate = [], ignoreBody = false }: Call = {}): Promise<T | null> {
   if (!options.apiKey) throw new WahaError("not_configured", "This installation has no WAHA key (WAHA_API_KEY): WhatsApp by QR code is not available");
   let response: Response;
   let text: string;
@@ -110,6 +112,7 @@ async function call<T>(options: WahaOptions, path: string, schema: z.ZodType<T>,
   if (response.status === 401) throw new WahaError("unauthorized", "WAHA refused the installation key", 401);
   if (response.status === 404) throw new WahaError("session_not_found", `WAHA has no such session (${method} ${path})`, 404);
   if (!response.ok) throw new WahaError("rejected", `WAHA answered HTTP ${response.status} to ${method} ${path}`, response.status);
+  if (ignoreBody) return null;
   let json: unknown;
   try {
     json = JSON.parse(text);
@@ -160,6 +163,26 @@ export async function wahaStopSession(options: WahaOptions, name: string): Promi
 /** Apaga o pareamento. Com a sessão conectada, o aparelho também some de "Dispositivos conectados". */
 export async function wahaLogoutSession(options: WahaOptions, name: string): Promise<void> {
   await call(options, `${sessionPath(name)}/logout`, anyObject, { method: "POST", body: {}, tolerate: [404, ...ALREADY] });
+}
+
+/**
+ * Apaga a sessão do WAHA, com o pareamento e a configuração. Sessão que não existe já está apagada.
+ * O corpo da resposta não é lido: a documentação não diz o que o `DELETE` devolve.
+ */
+export async function wahaDeleteSession(options: WahaOptions, name: string): Promise<void> {
+  await call(options, sessionPath(name), anyObject, { method: "DELETE", tolerate: [404, ...ALREADY], ignoreBody: true });
+}
+
+/**
+ * Desfaz a sessão de uma organização que está sendo excluída (fatia 9b do R8): `logout` (com a
+ * sessão conectada, o aparelho some de "Dispositivos conectados"), depois `stop` e `delete`. Cada
+ * passo trata "não existe" como feito, então repetir depois de um reinício não falha. WAHA fora do
+ * ar, chave recusada e erro do WAHA lançam: quem chama tenta de novo mais tarde.
+ */
+export async function wahaEndSession(options: WahaOptions, name: string): Promise<void> {
+  await wahaLogoutSession(options, name);
+  await wahaStopSession(options, name);
+  await wahaDeleteSession(options, name);
 }
 
 /** O QR Code atual, como imagem PNG em base64. Só existe com a sessão em `SCAN_QR_CODE`. */

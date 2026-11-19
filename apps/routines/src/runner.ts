@@ -1,5 +1,6 @@
 import { claimTask, completeTask, failTask, listenTasks, nextTaskRunAt, recordEvent, withOrg, withSystem, type ClaimedTask } from "@deskvoice/core";
 import type { Logger } from "./log";
+import { createOrganizationDeletions } from "./organization-deletions";
 import type { Routine, RoutineDeps } from "./types";
 
 /** Agenda `fn` para daqui a `delayMs` e devolve como cancelar. Injetável: teste não espera tempo real. */
@@ -43,6 +44,7 @@ export async function startRunner(options: RunnerOptions): Promise<Runner> {
   let wakeRequested = false;
   let draining: Promise<void> | undefined;
   let cancelTimer: (() => void) | undefined;
+  const deletions = createOrganizationDeletions(options, log);
 
   const arm = (delayMs: number | undefined): void => {
     cancelTimer?.();
@@ -82,13 +84,17 @@ export async function startRunner(options: RunnerOptions): Promise<Runner> {
     while (wakeRequested && !closed) {
       wakeRequested = false;
       try {
+        // A exclusão de organização com lápide (R8, fatia 9b): na partida e a cada volta, antes da
+        // fila. A que parou (o WAHA fora do ar) só é tentada de novo em 1 minuto.
+        const deletionIn = await deletions.run();
         for (let task = await claimTask(db, clock.now()); task !== null && !closed; task = await claimTask(db, clock.now())) {
           await execute(task);
         }
         // Tarefa agendada e tarefa reagendada depois de falha não avisam quando a hora chega:
         // o runner dorme até a mais próxima que ele pode pegar (a de organização suspensa espera).
         const next = await nextTaskRunAt(db);
-        arm(next ? next.getTime() - clock.now().getTime() : undefined);
+        const taskIn = next ? next.getTime() - clock.now().getTime() : undefined;
+        arm(deletionIn === undefined ? taskIn : Math.min(taskIn ?? deletionIn, deletionIn));
       } catch (cause) {
         log("error", "queue pass failed; will retry", { error: messageOf(cause) });
         arm(RETRY_AFTER_ERROR_MS);
