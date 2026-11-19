@@ -347,6 +347,7 @@ const timeline: TimelineDictionary = {
       refusals: {
         organization_suspended: "the organization is suspended",
         outbound_disabled: "outbound calls are off",
+        outbound_not_allowed: "the installation administration blocked outbound calls",
         outside_window: "it was outside the outbound calling hours",
         do_not_call: "the number is on the do-not-call list",
         daily_cap_reached: "the line reached its daily call limit",

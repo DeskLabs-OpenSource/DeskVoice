@@ -353,6 +353,7 @@ const timeline = {
       refusals: {
         organization_suspended: "a organização está suspensa",
         outbound_disabled: "as ligações de saída estão desligadas",
+        outbound_not_allowed: "a administração da instalação bloqueou as ligações de saída",
         outside_window: "estava fora do horário das ligações de saída",
         do_not_call: "o número está na lista de não ligar",
         daily_cap_reached: "a linha chegou ao teto de ligações do dia",
