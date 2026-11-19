@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analysisPatch, analysisView, modelRequired, toAnalysisDraft, type AnalysisDraft, type BrainModelOption, type BrainOption } from "./analysis-choice";
+import { analysisPatch, analysisStatus, analysisView, modelRequired, toAnalysisDraft, type AnalysisDraft, type BrainModelOption, type BrainOption } from "./analysis-choice";
 
 const brain: AnalysisDraft = { kind: "brain", brain: "anthropic", model: "claude-sonnet" };
 
@@ -134,5 +134,39 @@ describe("os avisos de quem lê a ligação (analysisView)", () => {
   it("o seletor oferece só os cérebros configurados com chave aceita", () => {
     const view = analysisView({ analysis: { kind: "organization" }, brains: [anthropic, { ...openai, keyCheck: { result: "rejected" } }, { ...openai, id: "x", configured: false }], models: undefined });
     expect(view.accepted).toEqual([anthropic]);
+  });
+});
+
+describe("o que quem só lê vê da escolha gravada (analysisStatus, a regra de analysisView no servidor)", () => {
+  const accepted: BrainOption = { id: "anthropic", label: "Anthropic", configured: true, keyCheck: { result: "accepted" } };
+  const refused: BrainOption = { ...accepted, keyCheck: { result: "invalid_key" } };
+  const priced: BrainModelOption = { id: "claude-sonnet", label: "Claude Sonnet", price: { input: 3, output: 15 } };
+  const noPrice: BrainModelOption = { id: "claude-sem-preco", label: "Claude sem preço" };
+  const status = (analysis: AnalysisDraft, brains: BrainOption[] | undefined, models: BrainModelOption[] | undefined) => analysisStatus({ analysis, brains, models });
+
+  it("fora da escolha de cérebro: a escolha, sem rótulo, modelo nem aviso", () => {
+    for (const choice of ["organization", "engine", "invalid"] as const) {
+      expect(status({ kind: choice } as AnalysisDraft, [refused], [noPrice])).toEqual({ choice, brainLabel: null, model: null, problems: [] });
+    }
+  });
+
+  it("o cérebro com chave aceita e modelo com preço: o rótulo, sem aviso", () => {
+    expect(status(brain, [accepted], [priced])).toEqual({ choice: "brain", brainLabel: "Anthropic", model: "claude-sonnet", problems: [] });
+  });
+
+  it("cada aviso de analysisView, pelo nome", () => {
+    expect(status(brain, [refused], [priced]).problems).toEqual(["key_gone"]);
+    expect(status(brain, [{ ...accepted, configured: false }], [priced]).problems).toEqual(["key_gone"]);
+    expect(status(brain, [accepted], [noPrice]).problems).toEqual(["model_gone"]);
+    expect(status({ kind: "brain", brain: "anthropic", model: "claude-sem-preco" }, [accepted], [noPrice]).problems).toEqual(["unmeasured"]);
+  });
+
+  it("chave recusada e modelo fora da lista: só a chave, como na tela de quem configura", () => {
+    expect(status(brain, [refused], [noPrice]).problems).toEqual(["key_gone"]);
+    expect(analysisView({ analysis: brain, brains: [refused], models: [noPrice] })).toMatchObject({ keyGone: true, modelGone: false, unmeasured: false });
+  });
+
+  it("o cérebro que não é mais descoberto: chave perdida, com o id no lugar do rótulo", () => {
+    expect(status({ kind: "brain", brain: "sumiu", model: "m" }, [accepted], undefined)).toEqual({ choice: "brain", brainLabel: "sumiu", model: "m", problems: ["key_gone"] });
   });
 });
