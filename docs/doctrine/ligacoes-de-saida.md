@@ -88,6 +88,8 @@ O argumento "meu caso de uso é legítimo" não muda a resposta. Lembrete de con
 de entrega e retorno de contato pedido cabem dentro dos limites. O que não cabe é volume, e
 volume é exatamente o que os limites existem para impedir.
 
+A religação de uma ligação **recebida** que caiu antes de terminar também cabe. Ela não é discador: não parte de lista, e cada religação nasce de uma ligação que a própria pessoa fez. É no máximo uma por ligação e uma por número a cada 24 horas, sempre pela checagem, dentro da janela do dia, sem ser empurrada para a próxima. Religação nunca gera religação.
+
 ## O que o projeto não faz por você
 
 - **Não interpreta a lei.** O DeskVoice entrega controles. Qual base legal vale para a sua

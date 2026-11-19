@@ -1,11 +1,15 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { CALL_BACK_REFUSAL_CODES } from "@deskvoice/core";
 import { MAX_AGENT_HANDOFFS_PER_CALL } from "@deskvoice/tools";
 import { describe, expect, it } from "vitest";
 import enAgents from "../i18n/en/agents";
 import esAgents from "../i18n/es/agents";
 import ptBRAgents from "../i18n/pt-BR/agents";
+import enTimeline from "../i18n/en/timeline";
+import esTimeline from "../i18n/es/timeline";
 import ptBR from "../i18n/pt-BR/timeline";
+import { formatMoney } from "./format";
 import { Timeline } from "./timeline";
 
 const sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
@@ -210,6 +214,130 @@ describe("linha do tempo", () => {
       ]);
       expect(html).toContain("Objeção possível: Preço, com confiança 60%");
       expect(html).toContain(ptBR.events.analyst_read.objectionOutside);
+    });
+  });
+  describe("de quem é a escolha do cérebro (R4, fatia 5)", () => {
+    const at = "2026-11-18T12:00:00.000Z";
+    const render = (kind: string, payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind, at, payload }], live: false, agentName: "Vendas" }));
+    const brain = { brain: "anthropic", model: "claude-sonnet" };
+
+    it.each([
+      ["call_analyzed", { score: 8, rubricVersion: 1, costCents: 1, droppedObjections: 0, ...brain, costMeasured: true }, "Ligação analisada: nota 8 de 10"],
+      ["outcome_not_classified", { reason: "brain_no_key", ...brain }, ptBR.events.outcome_not_classified],
+      ["analysis_not_done", { reason: "brain_no_key", ...brain }, "Ligação não analisada: o cérebro escolhido não tem chave cadastrada"],
+    ])("%s com a escolha do agente diz \"(escolha do agente)\"; com a da organização ou do motor, nada muda", (kind, payload, frase) => {
+      expect(render(kind, { ...payload, choiceFrom: "agent" })).toContain(`${frase} (escolha do agente)`);
+      for (const other of [{ ...payload, choiceFrom: "organization" }, payload]) {
+        const html = render(kind, other);
+        expect(html).toContain(frase);
+        expect(html).not.toContain("(escolha do agente)");
+        expect(html).not.toContain("escolha da organização");
+      }
+    });
+  });
+
+  describe("a religação da ligação que caiu (R2, fatia 4)", () => {
+    const at = "2026-11-18T12:00:00.000Z";
+    const CALL_BACK = "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b";
+    const r = ptBR.events.drop_follow_up_result;
+    const d = ptBR.events.drop_follow_up;
+    const render = (kind: string, payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind, at, payload }], live: false, agentName: "Ana" }));
+    // O que nenhuma frase da religação pode dizer: a do WhatsApp, a da pendência e o evento desconhecido.
+    // A pendência de reserva é aberta de verdade quando a religação não pode ser agendada, e a frase
+    // dela termina com a mesma oração da pendência: ali, `task_opened` sozinha é que não pode aparecer.
+    const notOtherModes = (html: string, { opensTask = false } = {}) => {
+      const others = [r.whatsapp_sent, r.whatsapp_failed, d.whatsapp_queued, d.mode_unavailable, d.recent_follow_up, d.do_not_call, ptBR.events.unknown];
+      for (const other of opensTask ? others : [...others, d.task_opened]) expect(html).not.toContain(other);
+    };
+    const link = `href="/calls/${CALL_BACK}"`;
+
+    it("o agendamento tem frase própria, também na simulada, e nunca cai na pendência", () => {
+      const scheduled = render("drop_follow_up", { case: "call_dropped", mode: "call_back", action: "call_back_scheduled", simulated: false, openTurn: "caller_waiting" });
+      expect(scheduled).toContain(d.call_back_scheduled);
+      notOtherModes(scheduled);
+      const simulated = render("drop_follow_up", { case: "call_dropped", mode: "call_back", action: "call_back_scheduled", simulated: true, openTurn: "caller_waiting" });
+      expect(simulated).toContain(d.simulated.call_back_scheduled);
+      expect(simulated).not.toContain(d.simulated.task_opened);
+    });
+
+    it("os motivos de não agendar no modo religação falam da religação, não da mensagem", () => {
+      for (const reason of ["do_not_call", "mode_unavailable", "recent_follow_up"] as const) {
+        const html = render("drop_follow_up", { case: "engine_failed", mode: "call_back", action: "skipped", reason, simulated: false });
+        expect(html).toContain(d[`call_back_${reason}`]);
+        notOtherModes(html, { opensTask: reason !== "do_not_call" });
+        const sim = render("drop_follow_up", { case: "engine_failed", mode: "call_back", action: "skipped", reason, simulated: true });
+        expect(sim).toContain(d.simulated[`call_back_${reason}`]);
+        expect(sim).not.toContain(d.simulated[reason]);
+      }
+    });
+
+    it("o modo WhatsApp e o modo pendência continuam com as frases de antes", () => {
+      expect(render("drop_follow_up", { case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "mode_unavailable", simulated: false })).toContain(d.mode_unavailable);
+      expect(render("drop_follow_up", { case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "recent_follow_up", simulated: true })).toContain(d.simulated.recent_follow_up);
+      expect(render("drop_follow_up", { case: "call_dropped", mode: "task", action: "task_opened", simulated: false })).toContain(d.task_opened);
+      expect(render("drop_follow_up_result", { action: "whatsapp_sent" })).toContain(r.whatsapp_sent);
+      expect(render("drop_follow_up_result", { action: "whatsapp_failed" })).toContain(r.whatsapp_failed);
+    });
+
+    it("a tentativa que saiu diz isso, com o link para a religação", () => {
+      const html = render("drop_follow_up_result", { action: "call_back_placed", attempt: 1, callId: CALL_BACK });
+      expect(html).toContain("A religação saiu (tentativa 1).");
+      expect(html).toContain(link);
+      expect(html).toContain(r.link);
+      notOtherModes(html);
+    });
+
+    it("atendida e não atendida dizem o resultado, o custo da religação e o link", () => {
+      const answered = render("drop_follow_up_result", { action: "call_back_answered", attempt: 1, callId: CALL_BACK, costCents: 37 });
+      expect(answered).toContain("A religação foi atendida (tentativa 1).");
+      expect(answered).toContain(`Custo da religação: ${formatMoney(37, "pt-BR")}.`);
+      expect(answered).toContain(link);
+      notOtherModes(answered);
+      const notAnswered = render("drop_follow_up_result", { action: "call_back_not_answered", attempt: 1, callId: CALL_BACK, costCents: 0 });
+      expect(notAnswered).toContain("A religação não foi atendida (tentativa 1).");
+      expect(notAnswered).toContain(`Custo da religação: ${formatMoney(0, "pt-BR")}.`);
+      expect(notAnswered).toContain(link);
+      notOtherModes(notAnswered);
+    });
+
+    it("cada código de recusa tem frase fixa, com o link só quando a chamada chegou a existir", () => {
+      for (const code of CALL_BACK_REFUSAL_CODES) {
+        const html = render("drop_follow_up_result", { action: "call_back_refused", attempt: 1, refusalCode: code });
+        expect(html).toContain(`A religação não saiu (tentativa 1): ${r.refusals[code]}.`);
+        expect(html).not.toContain(code);
+        expect(html).not.toContain("href=");
+        notOtherModes(html);
+      }
+      const withCall = render("drop_follow_up_result", { action: "call_back_refused", attempt: 1, refusalCode: "outside_window", callId: CALL_BACK });
+      expect(withCall).toContain(link);
+      // Um código que esta versão não conhece vira frase fixa, nunca o código cru.
+      const unknown = render("drop_follow_up_result", { action: "call_back_refused", attempt: 1, refusalCode: "novo_codigo" });
+      expect(unknown).toContain(r.refusals.unknown);
+      expect(unknown).not.toContain("novo_codigo");
+    });
+
+    it("a expirada diz que o processo de voz não discou, sem link", () => {
+      const html = render("drop_follow_up_result", { action: "call_back_expired", attempt: 1 });
+      expect(html).toContain("A religação não saiu (tentativa 1): o processo de voz não discou a tempo.");
+      expect(html).not.toContain("href=");
+      notOtherModes(html);
+    });
+
+    it("nenhuma frase da religação mostra texto que não seja dela: campo estranho no payload não aparece", () => {
+      for (const action of ["call_back_placed", "call_back_refused", "call_back_expired", "call_back_answered", "call_back_not_answered"]) {
+        const html = render("drop_follow_up_result", { action, attempt: 1, callId: "<script>Maria</script>", refusalCode: "do_not_call", costCents: 10, text: "Maria Souza", summary: "Maria Souza" });
+        expect(html).not.toContain("Maria");
+        // `callId` que não é um id não vira link.
+        expect(html).not.toContain("href=");
+      }
+    });
+
+    it("os três dicionários têm frase para todo código de recusa", () => {
+      for (const dict of [ptBR, enTimeline, esTimeline]) {
+        for (const code of CALL_BACK_REFUSAL_CODES) expect(dict.events.drop_follow_up_result.refusals[code]).toMatch(/\S/);
+      }
     });
   });
 });

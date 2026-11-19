@@ -1,4 +1,4 @@
-import { RUBRIC_VERSION, callAnalysisSchema, decryptSecret, recordEvent, scoreOf, verifyAgainstTranscript, withOrg, type OrgQuery, type TranscriptTurn } from "@deskvoice/core";
+import { RUBRIC_VERSION, agentAnalysisBrain, callAnalysisSchema, decryptSecret, recordEvent, scoreOf, verifyAgainstTranscript, withOrg, type OrgQuery, type TranscriptTurn } from "@deskvoice/core";
 import {
   ANALYSIS_SCHEMA,
   ANALYSIS_SCHEMA_GOOGLE,
@@ -115,6 +115,8 @@ function guardedFetch(deps: RoutineDeps, timeoutMs: number): { fetch: typeof fet
 interface PorCerebro {
   brain: Brain;
   model: string;
+  /** De quem é a escolha: do agente (`agents.analysis_brain`) ou da organização (`calls.analysis_brain`). */
+  choiceFrom: "agent" | "organization";
   /** O preço da lista guardada no momento da leitura. Ausente é "não conhecido", nunca zero. */
   price?: BrainPrice;
 }
@@ -198,6 +200,10 @@ function brainCost(result: { ok: boolean; status?: number | null; usage: Usage }
  * atingido viram `outcome_not_classified` (desfecho pedido) e `analysis_not_done` (análise pedida)
  * na linha do tempo, cada um com o motivo.
  *
+ * Cada agente pode ter a escolha dele (`agents.analysis_brain`, desenho da R4 fatia 5): nula segue a
+ * da organização; `{ kind: "engine" }` é o motor do agente; `{ kind: "brain" }`, um cérebro e um
+ * modelo. A do agente vale sozinha: falhando, não cai na da organização nem no motor.
+ *
  * Com `calls.analysis_brain` gravado (`{ brain, model }`), quem lê é o cérebro escolhido, para o
  * desfecho e para a análise, na frente do motor e do `classify_target`, com a chave do cérebro e o
  * preço da lista guardada dele. Sem fallback para o motor: cérebro indisponível ou sem chave não lê,
@@ -231,7 +237,12 @@ const routine: Routine = {
       let analysis = analysisOn && !call.analyzed;
       if ((!outcome && !analysis) || call.agent_id === null) return null;
 
-      const agent = await q.one<{ engine: string; cost_ceiling_cents: number }>("select engine, cost_ceiling_cents from agents where id = $1", [call.agent_id]);
+      // `follows_org` vem do banco: o `null` do JSON gravado à mão chega aqui como `null` também, e é
+      // escolha fora da forma, não "segue a organização".
+      const agent = await q.one<{ engine: string; cost_ceiling_cents: number; analysis_brain: unknown; follows_org: boolean }>(
+        "select engine, cost_ceiling_cents, analysis_brain, analysis_brain is null as follows_org from agents where id = $1",
+        [call.agent_id],
+      );
       if (!agent) return null;
       const now = deps.clock.now();
 
@@ -251,14 +262,25 @@ const routine: Routine = {
         return null;
       }
 
-      // O cérebro escolhido pelo dono passa na frente do motor e do `classify_target`, para o
-      // desfecho e para a análise (a mesma chamada paga). Sem fallback: cérebro que não dá para
-      // usar não lê a ligação, e a linha do tempo diz por quê. Cair no motor pagaria um provedor
-      // que o dono deixou de escolher. Ausente, tudo segue como antes, linha por linha.
-      const escolha = await q.one<{ value: unknown }>("select value from settings where key = $1", [ANALYSIS_BRAIN_SETTING]);
+      // O cérebro escolhido passa na frente do motor e do `classify_target`, para o desfecho e para a
+      // análise (a mesma chamada paga). A escolha que vale é resolvida uma vez: a do agente
+      // (`agents.analysis_brain`), e, nula, a da organização (`calls.analysis_brain`). Sem fallback:
+      // cérebro que não dá para usar não lê a ligação, e a linha do tempo diz por quê. Cair na escolha
+      // da organização ou no motor pagaria um provedor que o dono deixou de escolher. O agente com
+      // `{ kind: "engine" }` lê pelo motor mesmo com cérebro na organização. Nada escolhido, tudo
+      // segue como antes, linha por linha.
+      let escolha: { choiceFrom: "agent" | "organization"; value: unknown } | null = null;
+      if (!agent.follows_org) {
+        const doAgente = agentAnalysisBrain.safeParse(agent.analysis_brain).data;
+        // Fora da forma (gravada à mão) é cérebro indisponível, nunca a organização nem o motor.
+        if (doAgente?.kind !== "engine") escolha = { choiceFrom: "agent", value: doAgente ?? null };
+      } else {
+        const daOrganizacao = await q.one<{ value: unknown }>("select value from settings where key = $1", [ANALYSIS_BRAIN_SETTING]);
+        if (daOrganizacao) escolha = { choiceFrom: "organization", value: daOrganizacao.value };
+      }
       if (escolha) {
         const choice = analysisBrainChoice.safeParse(escolha.value).data;
-        const details = { brain: choice?.brain ?? null, model: choice?.model ?? null };
+        const details = { brain: choice?.brain ?? null, model: choice?.model ?? null, choiceFrom: escolha.choiceFrom };
         const refuse = async (reason: BrainRefusal | "cost_ceiling", extra: object = {}): Promise<null> => {
           if (outcome) await recordEvent(q, callId, "outcome_not_classified", { reason, ...details, ...extra }, now);
           if (analysis) await notAnalyzed(q, callId, reason, { ...details, ...extra }, now);
@@ -275,7 +297,7 @@ const routine: Routine = {
         if (listed.price === undefined && agent.cost_ceiling_cents <= 0) return refuse("brain_unmeasured_without_ceiling");
         return {
           engineId: agent.engine,
-          cerebro: { brain, model: choice.model, ...(listed.price !== undefined && { price: listed.price }) },
+          cerebro: { brain, model: choice.model, choiceFrom: escolha.choiceFrom, ...(listed.price !== undefined && { price: listed.price }) },
           stored: chave.value,
           target: {},
           outcome,
@@ -343,9 +365,9 @@ const routine: Routine = {
     let result: ClassifyResult;
     let guarded: ReturnType<typeof guardedFetch> | undefined;
     // Só no caminho do cérebro: o que vai a mais no extrato e nos eventos.
-    let porCerebro: { brain: string; costMeasured: boolean } | undefined;
+    let porCerebro: { brain: string; costMeasured: boolean; choiceFrom: "agent" | "organization" } | undefined;
     if (pendente.cerebro) {
-      const { brain, model, price } = pendente.cerebro;
+      const { brain, model, price, choiceFrom } = pendente.cerebro;
       const input = { transcript: pendente.transcript, tools: pendente.tools };
       // O mesmo pedido e os mesmos esquemas do motor; o cérebro só troca o transporte.
       const answer = await brain.completeJson(
@@ -362,7 +384,7 @@ const routine: Routine = {
       );
       const reading = answer.ok ? readBrainText(answer.text, pendente.analysis) : null;
       const cost = brainCost(answer, price);
-      porCerebro = { brain: brain.id, costMeasured: cost.costMeasured };
+      porCerebro = { brain: brain.id, costMeasured: cost.costMeasured, choiceFrom };
       const common = { model: answer.model, usage: answer.usage, costMicrocents: cost.costMicrocents, costCents: Math.round(cost.costMicrocents / MICROCENTS_PER_CENT) };
       result = !answer.ok
         ? { ...common, ok: false, failure: answer.failure, status: answer.status }
@@ -422,7 +444,7 @@ const routine: Routine = {
       const failed = async (reason: ClassifyFailure | ClassifyDestinationRefusal, status: number | null): Promise<void> => {
         // `endpoint` diz à tela que a chave do pedido era a do endpoint configurado, não a do motor.
         const details = porCerebro
-          ? { brain: porCerebro.brain, model: result.model, status, costCents, costMeasured: porCerebro.costMeasured }
+          ? { brain: porCerebro.brain, model: result.model, status, costCents, costMeasured: porCerebro.costMeasured, choiceFrom: porCerebro.choiceFrom }
           : { engine: pendente.engineId, model: result.model, status, costCents, ...(pendente.target.baseUrl !== undefined && { endpoint: true }) };
         if (pendente.outcome) await recordEvent(q, callId, "outcome_not_classified", { reason, ...details }, now);
         if (pendente.analysis) await notAnalyzed(q, callId, reason, details, now);
@@ -468,7 +490,7 @@ const routine: Routine = {
           model: result.model,
           costCents,
           droppedObjections: analysis.droppedObjections,
-          ...(porCerebro && { brain: porCerebro.brain, costMeasured: porCerebro.costMeasured }),
+          ...(porCerebro && { brain: porCerebro.brain, costMeasured: porCerebro.costMeasured, choiceFrom: porCerebro.choiceFrom }),
         },
         now,
       );

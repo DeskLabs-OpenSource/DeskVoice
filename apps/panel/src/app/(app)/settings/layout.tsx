@@ -22,6 +22,7 @@ import { useDict } from "../../../i18n/provider";
 import { ReadOnlyNotice } from "../../../ui/errors";
 import { PageHeader } from "../../../ui/kit";
 import { useMe } from "../../../ui/me";
+import { LimitsNotice } from "./limits-notice";
 
 // A primeira seção é a de `/settings`: os links do painel que mandam cadastrar a chave caem nela.
 const SECTIONS = [
@@ -79,6 +80,8 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
       </div>
       {/* O próprio contato e a senha qualquer papel edita; nas outras seções, quem não configura só lê. */}
       {pathname === ACCOUNT ? null : <ReadOnlyNotice />}
+      {/* Os limites da organização, definidos pela administração da instalação; sem nenhum, nada aparece. */}
+      {pathname === ACCOUNT ? null : <LimitsNotice />}
       {children}
     </>
   );

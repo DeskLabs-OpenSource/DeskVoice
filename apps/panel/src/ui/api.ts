@@ -7,12 +7,14 @@ export class ApiFailure extends Error {
     readonly code: string,
     message: string,
     readonly status: number,
+    /** Os números da recusa, quando a API os manda (o limite da organização e a contagem). */
+    readonly detail?: Record<string, string | number>,
   ) {
     super(message);
   }
 }
 
-type Envelope<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
+type Envelope<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string; detail?: Record<string, string | number> } };
 
 /** Chama a API do painel e devolve `data`; qualquer falha vira `ApiFailure` com o código da API. */
 export async function api<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -31,7 +33,7 @@ export async function api<T>(path: string, options: { method?: string; body?: un
   if (envelope.ok) return envelope.data;
   // Sessão vencida no meio do uso: volta para a entrada em vez de mostrar erro em cada bloco.
   if (response.status === 401 && !path.startsWith("/auth/")) window.location.assign("/login");
-  throw new ApiFailure(envelope.error.code, envelope.error.message, response.status);
+  throw new ApiFailure(envelope.error.code, envelope.error.message, response.status, envelope.error.detail);
 }
 
 export interface Loaded<T> {
