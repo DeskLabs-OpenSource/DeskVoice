@@ -34,6 +34,7 @@ export const CALL_BACK_REFUSALS_BEFORE_CALL = ["invalid_number", "agent_not_foun
 export const CALL_BACK_REFUSAL_CODES = [
   "organization_suspended",
   "outbound_disabled",
+  "outbound_not_allowed",
   "outside_window",
   "do_not_call",
   "daily_cap_reached",
@@ -62,6 +63,7 @@ export const CALL_BACK_FAILED_REASON: Record<CallBackRefusalCode | "not_answered
   expired: "o processo de voz não discou a tempo",
   organization_suspended: "a organização está suspensa",
   outbound_disabled: "as ligações de saída estão desligadas",
+  outbound_not_allowed: "a administração da instalação bloqueou as ligações de saída",
   outside_window: "estava fora do horário das ligações de saída",
   do_not_call: "o número está na lista de não ligar",
   daily_cap_reached: "a linha chegou ao teto de ligações do dia",

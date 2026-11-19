@@ -3,6 +3,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { withSystem } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
 import type { SimulatedScript } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -183,6 +184,9 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     expect(payloads[15]).toEqual({ status: "transferred", reason: "transferred", costCents: cost, seconds: Math.round(seconds) });
     expect(await ledgerOf(app, callId)).toEqual([{ engine: "simulated", agent_id: payloads[0]?.agentId, seconds: Math.round(seconds), input_tokens: 0, output_tokens: 0, cost_cents: cost }]);
     expect(await callOf(app, callId)).toMatchObject({ status: "transferred", end_reason: "transferred", engine: "simulated", cost_cents: cost, answered_at: expect.any(Date), ended_at: clock.now() });
+    // Sem URA, `answered_at` é a hora em que a conversa atendeu, como antes da fatia 1e.
+    const answered = await withSystem(app, (q) => q.one<{ at: Date }>("select at from call_events where call_id = $1 and kind = 'call_answered'", [callId]));
+    expect((await callOf(app, callId)).answered_at).toEqual(answered?.at);
 
     const tasks = (await tasksOf(app, organizationId)).filter((task) => task.kind === "summarize_call");
     expect(tasks).toMatchObject([{ kind: "summarize_call", payload: {}, status: "queued", call_id: callId }]);

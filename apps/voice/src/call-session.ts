@@ -1311,7 +1311,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       if (!ending && !wrappingUp) voice?.sendAudio(pcm);
     });
     const answered = [
-      q.exec("update calls set status = 'in_progress', answered_at = $2, engine = $3 where id = $1", [callId, clock.now(), engineId]),
+      // A URA já atendeu e gravou `answered_at` (`ivr-session.ts`): a duração conta desde ali, com o menu,
+      // e não do começo da conversa. Sem URA, `answered_at` está vazio e fica com a hora de agora.
+      q.exec("update calls set status = 'in_progress', answered_at = coalesce(answered_at, $2), engine = $3 where id = $1", [callId, clock.now(), engineId]),
       event("call_answered", { engine: engineId }),
       event("recording_notice", { text: recordingNotice }),
       // Os ids e o tamanho, nunca o texto: `call_events` não sai com o prazo da memória.

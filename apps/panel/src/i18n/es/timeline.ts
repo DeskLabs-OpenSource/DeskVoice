@@ -347,6 +347,7 @@ const timeline: TimelineDictionary = {
       refusals: {
         organization_suspended: "la organización está suspendida",
         outbound_disabled: "las llamadas salientes están desactivadas",
+        outbound_not_allowed: "la administración de la instalación bloqueó las llamadas salientes",
         outside_window: "estaba fuera del horario de las llamadas salientes",
         do_not_call: "el número está en la lista de no llamar",
         daily_cap_reached: "la línea llegó al tope diario de llamadas",
@@ -414,6 +415,7 @@ const timeline: TimelineDictionary = {
     ivr_no_choice: "Quien llamó no eligió una opción válida en el menú por teclas, y la llamada terminó.",
     ivr_failed: "El menú por teclas no pudo atender la llamada. El motivo está en la línea de tiempo, justo arriba.",
     outbound_disabled: "Las llamadas salientes estaban desactivadas.",
+    outbound_not_allowed: "La administración de la instalación había bloqueado las llamadas salientes de esta organización.",
     outside_window: "Fuera del horario permitido para llamadas salientes.",
     do_not_call: "El número está en la lista de no llamar.",
     daily_cap_reached: "Se había alcanzado el tope diario de llamadas de esta línea.",

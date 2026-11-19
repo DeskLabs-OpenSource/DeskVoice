@@ -1,4 +1,4 @@
-import type { OrgQuery } from "@deskvoice/core";
+import { organizationLimits, OUTBOUND_NOT_ALLOWED, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, handle } from "../../../../server/context";
 
@@ -34,15 +34,27 @@ const DEFAULTS: Policy = {
 
 const read = async (q: OrgQuery): Promise<Policy> => (await q.one<Policy>(`select ${COLUMNS} from outbound_policy`)) ?? DEFAULTS;
 
-export const GET = handle({}, ({ q }) => read(q));
+/**
+ * A trava da administração da instalação (seção 3.4 do R8, fatia 7b). Com ela, a saída não liga, e a
+ * política guarda a escolha da organização como estava: quando a trava sai, vale de novo essa escolha.
+ */
+const lockedByInstallation = async (q: OrgQuery): Promise<boolean> => !(await organizationLimits(q)).outboundAllowed;
+
+export const GET = handle({}, async ({ q }) => ({ ...(await read(q)), lockedByInstallation: await lockedByInstallation(q) }));
 
 export const PUT = handle({ body: fields.partial(), configure: true, support: false }, async ({ q, body }) => {
+  const locked = await lockedByInstallation(q);
+  // Só ligar é recusado. Desligar e mudar janela, teto e finalidade continuam valendo com a trava.
+  // A porta que garante é `checkOutboundAllowed`, no processo de voz; esta recusa só não deixa a tela mentir.
+  if (locked && body.enabled === true) {
+    throw new ApiError(409, OUTBOUND_NOT_ALLOWED, "Outbound calls were turned off for this organization by the installation administration.");
+  }
   const next = { ...(await read(q)), ...body };
   if (next.enabled && (!next.purpose || !next.legalBasis)) {
     throw new ApiError(400, "purpose_required", "To turn outbound calls on, state the purpose and the legal basis.");
   }
   if (next.windowStart >= next.windowEnd) throw new ApiError(400, "validation_error", "windowEnd: must be later than windowStart");
-  return q.one(
+  const saved = await q.one<Policy>(
     `insert into outbound_policy (organization_id, enabled, purpose, legal_basis, daily_cap_per_line, window_start, window_end, max_attempts_per_contact, timezone)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      on conflict (organization_id) do update set enabled = excluded.enabled, purpose = excluded.purpose, legal_basis = excluded.legal_basis,
@@ -51,4 +63,5 @@ export const PUT = handle({ body: fields.partial(), configure: true, support: fa
      returning ${COLUMNS}`,
     [q.organizationId, next.enabled, next.purpose || null, next.legalBasis || null, next.dailyCapPerLine, next.windowStart, next.windowEnd, next.maxAttemptsPerContact, next.timezone],
   );
+  return { ...saved, lockedByInstallation: locked };
 });

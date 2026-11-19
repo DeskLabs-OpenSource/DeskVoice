@@ -1,8 +1,10 @@
 import { withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
+import { AsteriskCalls } from "./asterisk-transport";
+import { startOutboundCall } from "./outbound";
 import { checkOutboundAllowed, type OutboundDecision } from "./outbound-policy";
-import { createOrganization } from "./testing/db";
+import { callsOf, createAgent, createOrganization, createPhoneNumber, createTrunk, eventsOf, fakeAri, fakeClock } from "./testing/db";
 
 const { app, owner } = openTestDbs();
 afterAll(async () => {
@@ -139,5 +141,82 @@ describe("checkOutboundAllowed", { timeout: 120_000 }, () => {
     await withSystem(app, (q) => q.exec("update organizations set suspended_at = $2, suspended_reason = 'teste da fatia 4a' where id = $1", [suspended, NOON_SP]));
     expect(await check(suspended, TO, at(NOON_SP.toISOString()))).toMatchObject({ allowed: false, code: "organization_suspended" });
     expect(await check(other, TO, at(NOON_SP.toISOString()))).toEqual({ allowed: true });
+  });
+
+  // A trava da administração da instalação (seção 3.4 do R8, fatia 7b). Gravada direto no banco, pelo
+  // papel de sistema: quem grava pela tela é a rota da instalação, testada no painel.
+  const lock = (organizationId: string, outboundAllowed: boolean) =>
+    withSystem(app, (q) =>
+      q.exec(
+        "insert into organization_limits (organization_id, outbound_allowed) values ($1, $2) on conflict (organization_id) do update set outbound_allowed = excluded.outbound_allowed",
+        [organizationId, outboundAllowed],
+      ),
+    );
+
+  it("T1: outbound_allowed = true não liga a saída de quem a tem desligada; com a política ligada, permite", async () => {
+    const off = await organization("lock-true-off", { enabled: false });
+    await lock(off, true);
+    expect(await check(off, TO, at(NOON_SP.toISOString()))).toMatchObject({ allowed: false, code: "outbound_disabled" });
+    const none = await organization("lock-true-none", null);
+    await lock(none, true);
+    expect(await check(none, TO, at(NOON_SP.toISOString()))).toMatchObject({ allowed: false, code: "outbound_disabled" });
+    const on = await organization("lock-true-on");
+    await lock(on, true);
+    expect(await check(on, TO, at(NOON_SP.toISOString()))).toEqual({ allowed: true });
+  });
+
+  it("T2: outbound_allowed = false recusa com a política ligada, antes da política; a política fica como estava", async () => {
+    const org = await organization("lock-false");
+    const other = await organization("lock-false-other");
+    await lock(org, false);
+    expect(await check(org, TO, at(NOON_SP.toISOString()))).toEqual({
+      allowed: false,
+      code: "outbound_not_allowed",
+      message: "Outbound calls were turned off for this organization by the installation administration.",
+    });
+    // A trava vem antes de não ligar e da janela: a recusa é dela, e não da política.
+    await withSystem(app, (q) => q.exec("insert into do_not_call (organization_id, e164) values ($1, $2)", [org, TO]));
+    expect(await check(org, TO, at("2030-05-10T05:00:00Z"))).toMatchObject({ code: "outbound_not_allowed" });
+    expect(await withSystem(app, (q) => q.one("select enabled from outbound_policy where organization_id = $1", [org]))).toEqual({ enabled: true });
+    expect(await check(other, "+5531999997777", at(NOON_SP.toISOString()))).toEqual({ allowed: true });
+    // Destravar devolve a escolha da organização.
+    await lock(org, true);
+    expect(await check(org, "+5531999997777", at(NOON_SP.toISOString()))).toEqual({ allowed: true });
+  });
+
+  it("T2: pela porta única, a ligação nasce recusada com o motivo, e nenhum canal é originado", async () => {
+    const line = async (label: string, number: string) => {
+      const organizationId = await createOrganization(app, label);
+      const agentId = await createAgent(app, organizationId);
+      const trunkId = await createTrunk(app, organizationId, { callerId: number });
+      await createPhoneNumber(app, organizationId, trunkId, number, agentId);
+      await withSystem(app, (q) =>
+        q.exec("insert into outbound_policy (organization_id, enabled, window_start, window_end, timezone) values ($1, true, '00:00', '23:59', 'UTC')", [organizationId]),
+      );
+      return { organizationId, agentId };
+    };
+    const locked = await line("lock-outbound", "+553177776666");
+    const free = await line("lock-outbound-other", "+553177775555");
+    await lock(locked.organizationId, false);
+    const ari = fakeAri();
+    const clock = fakeClock();
+    const deps = { db: app, ari, clock, calls: new AsteriskCalls({ ari, db: app, clock, log: () => undefined }), log: () => undefined };
+
+    const refused = await startOutboundCall(deps, { organizationId: locked.organizationId, agentId: locked.agentId, toE164: "+5531911112222" });
+    expect(refused).toMatchObject({ code: "outbound_not_allowed" });
+    const calls = await callsOf(app, locked.organizationId);
+    expect(calls).toMatchObject([{ direction: "outbound", status: "refused", end_reason: "outbound_not_allowed" }]);
+    expect(await eventsOf(app, calls[0]?.id ?? "")).toEqual([{ kind: "call_refused", payload: { reason: "outbound_not_allowed", message: expect.any(String), to: "+5531911112222" } }]);
+    expect(ari.originated).toEqual([]);
+
+    expect(await startOutboundCall(deps, { organizationId: free.organizationId, agentId: free.agentId, toE164: "+5531911112222" })).toMatchObject({ callId: expect.any(String) });
+    expect(ari.originated).toHaveLength(1);
+  });
+
+  it("T3: suspensa e travada, a recusa é da suspensão", async () => {
+    const org = await organization("lock-suspended");
+    await lock(org, false);
+    await withSystem(app, (q) => q.exec("update organizations set suspended_at = $2, suspended_reason = 'teste da fatia 7b' where id = $1", [org, NOON_SP]));
+    expect(await check(org, TO, at(NOON_SP.toISOString()))).toMatchObject({ allowed: false, code: "organization_suspended" });
   });
 });

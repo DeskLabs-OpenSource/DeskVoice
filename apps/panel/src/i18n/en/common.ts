@@ -132,6 +132,7 @@ const common: CommonDictionary = {
     ivr_menu_in_use: "This keypad menu answers these numbers. Switch them to AI, or to another menu, before deleting the menu:",
     agent_in_ivr_menu: "This agent is the action of a key in these keypad menus. Point the key to another agent, or another action, before removing the agent:",
     ivr_prompt_format: "The announcement must arrive as 16-bit PCM WAV, mono, at 8000 Hz. The screen converts WAV, MP3 and M4A; if the browser could not open the file, convert it to MP3 and try again.",
+    ivr_prompt_too_short: "The announcement is shorter than 0.2 seconds, so it has no sound. Record an announcement with speech and try again.",
     ivr_prompt_too_long: "The announcement is longer than 60 seconds. Record a shorter one.",
     ivr_prompt_too_large: "The announcement is larger than 1 MB after conversion, which means more than 60 seconds. Record a shorter one.",
     trunk_inbound_name:
@@ -155,6 +156,7 @@ const common: CommonDictionary = {
     organization_suspended: "This organization is suspended: it does not take or make calls.",
     support_session_forbidden: "The installation's support session cannot make this change. Ask an owner or administrator on the team.",
     organization_limit_reached: "This organization has reached the limit set by the installation administration.",
+    outbound_not_allowed: "The installation administration blocked outbound calls for this organization.",
     outbound_disabled: "Outbound calls are off. Turn them on in Outbound calls.",
     outside_window: "Outside the hours allowed for outbound calls.",
     do_not_call: "This number is on the do-not-call list.",

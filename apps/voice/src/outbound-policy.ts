@@ -1,6 +1,6 @@
-import { ORGANIZATION_SUSPENDED, organizationSuspended, toE164, type Clock, type OrgQuery } from "@deskvoice/core";
+import { ORGANIZATION_SUSPENDED, organizationLimits, organizationSuspended, OUTBOUND_NOT_ALLOWED, toE164, type Clock, type OrgQuery } from "@deskvoice/core";
 
-export type OutboundRefusalCode = "organization_suspended" | "outbound_disabled" | "outside_window" | "do_not_call" | "daily_cap_reached" | "attempts_exhausted";
+export type OutboundRefusalCode = "organization_suspended" | "outbound_not_allowed" | "outbound_disabled" | "outside_window" | "do_not_call" | "daily_cap_reached" | "attempts_exhausted";
 export type OutboundDecision = { allowed: true } | { allowed: false; code: OutboundRefusalCode; message: string };
 
 interface PolicyRow {
@@ -38,9 +38,13 @@ function localMinutes(at: Date, timeZone: string): number {
  * o teto diário conta todas as ligações de saída da organização.
  *
  * A organização suspensa não liga, com a política ligada ou não (seção 3.3 do desenho do R8).
+ * Depois da suspensão, a trava da administração da instalação (`organization_limits.outbound_allowed`,
+ * seção 3.4, fatia 7b): `false` recusa antes de ler a política, que fica como a organização deixou.
+ * Sem linha de limites, a trava não existe e vale a política, como antes.
  */
 export async function checkOutboundAllowed(q: OrgQuery, toE164Input: string, clock: Clock, lineE164?: string | null): Promise<OutboundDecision> {
   if (await organizationSuspended(q)) return refuse(ORGANIZATION_SUSPENDED, "This organization is suspended: it does not make calls.");
+  if (!(await organizationLimits(q)).outboundAllowed) return refuse(OUTBOUND_NOT_ALLOWED, "Outbound calls were turned off for this organization by the installation administration.");
   const policy = await q.one<PolicyRow>(
     "select enabled, daily_cap_per_line, window_start::text, window_end::text, max_attempts_per_contact, timezone from outbound_policy where organization_id = $1 for update",
     [q.organizationId],

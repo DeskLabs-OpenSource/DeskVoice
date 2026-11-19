@@ -10,8 +10,11 @@ import { withOrg, withSystem } from "./with-org";
  * Organização sem linha não tem limite nenhum, e coluna nula também é "sem limite". Limite só aperta:
  * baixar abaixo do que já existe não apaga nada, só impede criar mais.
  *
- * Fatia 7a: valem `maxTrunks` e `maxAgents`. `outboundAllowed` (7b) e `monthlySpendCapCents` (7c)
- * são lidos aqui porque a linha já os tem, mas ninguém os grava nem os confere ainda.
+ * Fatia 7a: valem `maxTrunks` e `maxAgents`. Fatia 7b: vale `outboundAllowed`, a trava da saída.
+ * `true` não liga a saída, só deixa a organização decidir; `false` desliga a saída e trava o
+ * interruptor dela, sem escrever em `outbound_policy`, e quem confere é `checkOutboundAllowed` (a porta
+ * única do processo de voz) e a rota da política. `monthlySpendCapCents` (7c) é lido aqui porque a linha
+ * já o tem, mas ninguém o grava nem o confere ainda.
  */
 export interface OrganizationLimits {
   monthlySpendCapCents: number | null;
@@ -26,17 +29,21 @@ export type LimitKind = "trunks" | "agents";
 /** O código da recusa, igual na rota de linhas e na de agentes. */
 export const ORGANIZATION_LIMIT_REACHED = "organization_limit_reached";
 
-/** O que esta fatia deixa mudar. A 7b e a 7c abrem as colunas delas. */
+/** A recusa da trava da saída (7b), igual no processo de voz e na rota da política. */
+export const OUTBOUND_NOT_ALLOWED = "outbound_not_allowed";
+
+/** O que se deixa mudar. A 7c abre a coluna dela. `outboundAllowed` não aceita nulo: a coluna é `not null`. */
 export interface OrganizationLimitsPatch {
   maxTrunks?: number | null;
   maxAgents?: number | null;
+  outboundAllowed?: boolean;
 }
 
 const NO_LIMITS: OrganizationLimits = { monthlySpendCapCents: null, maxTrunks: null, maxAgents: null, outboundAllowed: true };
 
 // Coluna e tabela de cada coisa com limite. Texto fixo daqui: nada de fora entra no SQL.
-const COLUMN_OF = { maxTrunks: "max_trunks", maxAgents: "max_agents" } as const;
-const TABLE_OF: Record<LimitKind, { table: string; field: keyof typeof COLUMN_OF }> = {
+const COLUMN_OF = { maxTrunks: "max_trunks", maxAgents: "max_agents", outboundAllowed: "outbound_allowed" } as const;
+const TABLE_OF: Record<LimitKind, { table: string; field: "maxTrunks" | "maxAgents" }> = {
   trunks: { table: "trunks", field: "maxTrunks" },
   agents: { table: "agents", field: "maxAgents" },
 };
@@ -83,24 +90,40 @@ export async function organizationLimitsUsage(q: OrgQuery): Promise<Organization
   return { limits: await organizationLimits(q), usage: { trunks: usage?.trunks ?? 0, agents: usage?.agents ?? 0 } };
 }
 
-/** Os limites e o uso de uma organização, para a área da instalação. `null` se ela não existe. */
-export function organizationLimitsView(db: Db, organizationId: string): Promise<OrganizationLimitsView | null> {
-  return withOrg(db, organizationId, async (q) => ((await q.one("select 1 from organizations where id = $1", [organizationId])) ? organizationLimitsUsage(q) : null));
+export interface InstallationLimitsView extends OrganizationLimitsView {
+  /** A escolha da organização em `outbound_policy` (sem linha, desligada). Lida, nunca escrita daqui. */
+  outboundPolicyEnabled: boolean;
+}
+
+/**
+ * Os limites e o uso de uma organização, para a área da instalação, com a escolha dela sobre a saída
+ * (a tela diz, antes de destravar, como a saída volta). `null` se ela não existe.
+ */
+export function organizationLimitsView(db: Db, organizationId: string): Promise<InstallationLimitsView | null> {
+  return withOrg(db, organizationId, async (q) => {
+    if (!(await q.one("select 1 from organizations where id = $1", [organizationId]))) return null;
+    const policy = await q.one<{ enabled: boolean }>("select enabled from outbound_policy where organization_id = $1", [organizationId]);
+    return { ...(await organizationLimitsUsage(q)), outboundPolicyEnabled: policy?.enabled ?? false };
+  });
 }
 
 export type SetOrganizationLimitsResult = { ok: true; limits: OrganizationLimits } | { ok: false; reason: "not_found" };
 
 const isLimit = (value: unknown): value is number | null => value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+const isValid = (field: keyof typeof COLUMN_OF, value: unknown): boolean => (field === "outboundAllowed" ? typeof value === "boolean" : isLimit(value));
 
 /**
  * Grava os limites de uma organização, pelo papel de sistema (a organização não escreve na tabela).
  * Faz o upsert só das colunas do `patch` e grava `organization_limits_changed` na auditoria da
  * instalação, na mesma transação, com o antes e o depois só das colunas que mudaram e com quem mudou.
  * Nada mudou, nada se grava. `null` tira o limite. Quem confere o papel da instalação é a rota.
+ * `outboundAllowed` grava só a trava: `outbound_policy`, a escolha da organização, fica como ela deixou.
  */
 export async function setOrganizationLimits(db: Db, organizationId: string, patch: OrganizationLimitsPatch, actorAccountId: string, now: Date): Promise<SetOrganizationLimitsResult> {
   const fields = (Object.keys(COLUMN_OF) as (keyof typeof COLUMN_OF)[]).filter((field) => Object.hasOwn(patch, field) && patch[field] !== undefined);
-  for (const field of fields) if (!isLimit(patch[field])) throw new Error(`setOrganizationLimits: ${field} must be a non-negative integer or null`);
+  for (const field of fields) {
+    if (!isValid(field, patch[field])) throw new Error(`setOrganizationLimits: ${field} must be ${field === "outboundAllowed" ? "true or false" : "a non-negative integer or null"}`);
+  }
   return withSystem(db, async (q): Promise<SetOrganizationLimitsResult> => {
     // A mesma trava de `assertBelowLimit`: duas mudanças juntas não gravam um "antes" que já passou.
     if (!(await q.one("select 1 as locked from organizations where id = $1 for no key update", [organizationId]))) return { ok: false, reason: "not_found" };
