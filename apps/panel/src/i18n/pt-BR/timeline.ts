@@ -353,6 +353,7 @@ const timeline = {
       refusals: {
         organization_suspended: "a organização está suspensa",
         outbound_disabled: "as ligações de saída estão desligadas",
+        outbound_not_allowed: "a administração da instalação bloqueou as ligações de saída",
         outside_window: "estava fora do horário das ligações de saída",
         do_not_call: "o número está na lista de não ligar",
         daily_cap_reached: "a linha chegou ao teto de ligações do dia",
@@ -421,6 +422,7 @@ const timeline = {
     ivr_no_choice: "Quem ligou não escolheu uma opção válida no menu por teclas, e a ligação foi encerrada.",
     ivr_failed: "O menu por teclas não pôde atender a ligação. O motivo está na linha do tempo, logo acima.",
     outbound_disabled: "As ligações de saída estavam desligadas.",
+    outbound_not_allowed: "A administração da instalação tinha bloqueado as ligações de saída desta organização.",
     outside_window: "Fora do horário permitido para ligações de saída.",
     do_not_call: "O número está na lista de não ligar.",
     daily_cap_reached: "O teto diário de ligações desta linha tinha sido atingido.",

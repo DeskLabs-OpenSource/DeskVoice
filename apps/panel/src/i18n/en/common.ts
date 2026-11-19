@@ -156,6 +156,7 @@ const common: CommonDictionary = {
     organization_suspended: "This organization is suspended: it does not take or make calls.",
     support_session_forbidden: "The installation's support session cannot make this change. Ask an owner or administrator on the team.",
     organization_limit_reached: "This organization has reached the limit set by the installation administration.",
+    outbound_not_allowed: "The installation administration blocked outbound calls for this organization.",
     outbound_disabled: "Outbound calls are off. Turn them on in Outbound calls.",
     outside_window: "Outside the hours allowed for outbound calls.",
     do_not_call: "This number is on the do-not-call list.",

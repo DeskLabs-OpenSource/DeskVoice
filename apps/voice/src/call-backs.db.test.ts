@@ -8,6 +8,7 @@ import {
   CALL_BACK_INTERVAL_MINUTES,
   CALL_BACK_MAX_ATTEMPTS,
   CALL_BACK_MIN_INTERVAL_MINUTES,
+  CALL_BACK_REFUSAL_CODES,
   callBackFailedTitle,
   recordEvent,
   withOrg,
@@ -76,6 +77,19 @@ describe("as constantes da religação (decisão de 18/11, DESA-121, pedido 1 = 
         q.exec("insert into call_backs (organization_id, origin_call_id, agent_id, to_e164, attempt, due_at, created_at) values ($1, $2, $3, $4, 4, $5, $5)", [s.organizationId, s.originId, s.agentId, CALLER, s.clock.now()]),
       ),
     ).rejects.toThrow(/call_backs_attempt_check/);
+  });
+
+  it("o banco aceita todo código de CALL_BACK_REFUSAL_CODES, inclusive outbound_not_allowed, e recusa um inventado", async () => {
+    const s = await scene("cb refusal codes");
+    expect(CALL_BACK_REFUSAL_CODES).toContain("outbound_not_allowed");
+    const id = await withSystem(app, (q) =>
+      q.one<{ id: string }>(
+        "insert into call_backs (organization_id, origin_call_id, agent_id, to_e164, attempt, due_at, status, refusal_code, created_at) values ($1, $2, $3, $4, 1, $5, 'refused', 'outbound_not_allowed', $5) returning id",
+        [s.organizationId, s.originId, s.agentId, CALLER, s.clock.now()],
+      ),
+    );
+    for (const code of CALL_BACK_REFUSAL_CODES) await withSystem(app, (q) => q.exec("update call_backs set refusal_code = $2 where id = $1", [id?.id, code]));
+    await expect(withSystem(app, (q) => q.exec("update call_backs set refusal_code = 'phone_on_fire' where id = $1", [id?.id]))).rejects.toThrow(/call_backs_refusal_code_check/);
   });
 });
 
@@ -208,6 +222,25 @@ describe("a discagem da religação", { timeout: 120_000 }, () => {
       expect(await s.followUps()).toEqual([{ call_id: s.originId, title: callBackFailedTitle(CALLER, code as "outbound_disabled") }]);
     });
   }
+
+  // A trava da instalação (R8, fatia 7b, ajuste 1): a religação travada é recusada pela porta única com o
+  // próprio código, e nunca aparece como defeito da telefonia (`originate_failed`).
+  it("a instalação trava a saída entre o agendamento e a hora de discar: outbound_not_allowed, sem discar, com a pendência e sem log de código inesperado", async () => {
+    const s = await scene("cb installation lock");
+    const id = await s.due();
+    await withSystem(app, (q) => q.exec("insert into organization_limits (organization_id, outbound_allowed) values ($1, false)", [s.organizationId]));
+    const logs: Array<{ level: string; message: string }> = [];
+    await placeCallBack({ ...s.deps, log: (level, message) => void logs.push({ level, message }) }, s.organizationId, id);
+    expect(s.ari.originated).toEqual([]);
+    const refused = (await s.outboundCalls()).find((call) => call.call_back_of === s.originId);
+    expect(refused).toMatchObject({ status: "refused", end_reason: "outbound_not_allowed" });
+    expect(await s.rows()).toEqual([expect.objectContaining({ status: "refused", refusal_code: "outbound_not_allowed", result_call_id: refused?.id })]);
+    expect(await s.results()).toEqual([{ action: "call_back_refused", attempt: 1, callId: refused?.id, refusalCode: "outbound_not_allowed" }]);
+    const followUps = await s.followUps();
+    expect(followUps).toEqual([{ call_id: s.originId, title: callBackFailedTitle(CALLER, "outbound_not_allowed") }]);
+    expect(followUps[0]?.title).toContain("a administração da instalação bloqueou");
+    expect(logs.filter((entry) => entry.level === "error")).toEqual([]);
+  });
 
   it("o número posto na lista de não ligar entre o agendamento e a hora de discar nunca é discado, e não abre pendência", async () => {
     const s = await scene("cb do not call later");
