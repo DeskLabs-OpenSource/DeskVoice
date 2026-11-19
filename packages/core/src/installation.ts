@@ -241,11 +241,40 @@ export interface OrganizationDeletionDeps {
   recordingsDir: string;
   /**
    * Desfaz a sessão do WhatsApp da organização no WAHA (`logout`, depois `stop` e `delete`). Sessão
-   * que não existe conta como feito; lançar é "tentar de novo", e o banco não é apagado.
+   * que não existe conta como feito; lançar é "tentar de novo", e o banco não é apagado. O WAHA fora
+   * do ar conta como feito quando nenhuma organização quer o serviço (`endWhatsAppSessionUnlessUnused`).
    */
   endWhatsAppSession(organizationId: string): Promise<void>;
   /** Só para o teste interromper a execução depois de um passo, como faria um reinício. */
   afterStep?: (step: OrganizationDeletionStep) => Promise<void> | void;
+}
+
+/**
+ * Alguma organização da instalação quer o serviço do WhatsApp (`whatsapp_sessions.service_wanted`),
+ * a que tem lápide inclusive. Só um sim ou não, pelo papel de sistema.
+ */
+export async function whatsappServiceWanted(db: Db): Promise<boolean> {
+  return withSystem(db, async (q) => (await q.one("select 1 as wanted from whatsapp_sessions where service_wanted limit 1")) !== null);
+}
+
+/**
+ * O passo 2 da exclusão com o WAHA que não está de pé (ajuste 1 da 9b). O WAHA fica no perfil
+ * `whatsapp` do compose e não sobe por padrão, e o instalador gera a chave sempre: sem isto, a
+ * instalação sem WhatsApp ficaria com a lápide para sempre.
+ *
+ * `end` desfaz a sessão; `isUnreachable` diz se a falha foi o WAHA não responder (fora do ar ou sem
+ * resposta a tempo). Essa falha conta como feito quando nenhuma organização quer o serviço: assim o
+ * agente do kit não sobe o WAHA, desligar o serviço exige desconectar antes (o logout acontece aí), e
+ * o WAHA só retoma sessão que estava rodando. Com alguma organização querendo, ou com qualquer outra
+ * falha (chave recusada, erro do WAHA), lança, e a exclusão tenta de novo.
+ */
+export async function endWhatsAppSessionUnlessUnused(db: Db, end: () => Promise<void>, isUnreachable: (error: unknown) => boolean): Promise<void> {
+  try {
+    await end();
+  } catch (error) {
+    if (isUnreachable(error) && !(await whatsappServiceWanted(db))) return;
+    throw error;
+  }
 }
 
 /** Os passos com efeito, na ordem: 2 é o WAHA, 3 as gravações, 4 o `delete`, 5 as contas. */

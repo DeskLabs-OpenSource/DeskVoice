@@ -1,5 +1,5 @@
-import { DEFAULT_RECORDINGS_DIR, executeOrganizationDeletion, withSystem, type Db } from "@deskvoice/core";
-import { wahaEndSession, wahaFromEnv, wahaSessionName } from "@deskvoice/tools/waha";
+import { DEFAULT_RECORDINGS_DIR, endWhatsAppSessionUnlessUnused, executeOrganizationDeletion, withSystem, type Db } from "@deskvoice/core";
+import { WahaError, wahaEndSession, wahaFromEnv, wahaSessionName } from "@deskvoice/tools/waha";
 import type { Logger } from "./log";
 import type { RoutineDeps } from "./types";
 
@@ -29,6 +29,9 @@ export interface OrganizationDeletions {
   run(): Promise<number | undefined>;
 }
 
+/** O WAHA não respondeu: fora do ar ou sem resposta a tempo. Resposta de erro (5xx, 401) não é isto. */
+export const wahaUnreachable = (error: unknown): boolean => error instanceof WahaError && (error.code === "unreachable" || error.code === "timeout");
+
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
@@ -41,7 +44,8 @@ export function createOrganizationDeletions(deps: RoutineDeps, log: Logger): Org
     const options = deps.waha ?? wahaFromEnv();
     // Sem a chave, este processo nunca falou com um WAHA: não há sessão para desfazer.
     if (!options.apiKey) return;
-    await wahaEndSession(options, wahaSessionName(organizationId));
+    // WAHA fora do ar, com nenhuma organização querendo o serviço, conta como feito (ajuste 1 da 9b).
+    await endWhatsAppSessionUnlessUnused(deps.db, () => wahaEndSession(options, wahaSessionName(organizationId)), wahaUnreachable);
   };
 
   return {

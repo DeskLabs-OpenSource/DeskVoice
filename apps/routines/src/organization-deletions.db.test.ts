@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createServer } from "node:net";
 import { createAccount, requestOrganizationDeletion, withSystem } from "@deskvoice/core";
 import { wahaSessionName } from "@deskvoice/tools";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -45,8 +46,8 @@ function fire(timer: FakeTimer): void {
 let recordings: string;
 let actor: string;
 let runners: Runner[] = [];
-const start = async (): Promise<Runner> => {
-  const runner = await startRunner({ db: app, clock, secretKey, schedule, recordingsDir: recordings, waha: waha.options, routines: new Map([["routine_deletion_wake", { kind: "routine_deletion_wake", run: async () => undefined }]]) });
+const start = async (wahaOptions = waha.options): Promise<Runner> => {
+  const runner = await startRunner({ db: app, clock, secretKey, schedule, recordingsDir: recordings, waha: wahaOptions, routines: new Map([["routine_deletion_wake", { kind: "routine_deletion_wake", run: async () => undefined }]]) });
   runners.push(runner);
   return runner;
 };
@@ -152,5 +153,38 @@ describe("the organization deletion routine", () => {
     fire(liveTimer() as FakeTimer);
     await until(async () => !(await orgExists(org.id)), "the organization to be deleted once WAHA is back");
     expect(logouts(org.id)).toBe(2);
+  });
+
+  // Ajuste 1 da 9b: o WAHA que não está de pé (o perfil `whatsapp` desligado), com a chave gerada
+  // pelo instalador. A rotina fala com uma porta fechada de verdade: é o `unreachable` do cliente.
+  it("with WAHA not running and nobody wanting WhatsApp, finishes; with someone wanting it, waits", async () => {
+    const closed = await new Promise<number>((resolve) => {
+      const server = createServer().listen(0, "127.0.0.1", () => {
+        const { port } = server.address() as { port: number };
+        server.close(() => resolve(port));
+      });
+    });
+    const off = { ...waha.options, baseUrl: `http://127.0.0.1:${closed}` };
+    const wanted = await sql<{ id: string }>("update whatsapp_sessions set service_wanted = false where service_wanted returning id");
+    try {
+      const org = await suspendedOrg("rotina WAHA desligado");
+      // Quem quer o serviço é outra organização: a rotina espera.
+      const other = await createOrganization(app, `rotina quer WhatsApp ${randomUUID().slice(0, 8)}`);
+      await sql("insert into whatsapp_sessions (organization_id, session_name, service_wanted) values ($1, $2, true) returning id", [other, wahaSessionName(other)]);
+      await askToDelete(org);
+      await start(off);
+      await until(() => liveTimer()?.delayMs === DELETION_RETRY_MS, "a timer armed one minute ahead");
+      expect(await orgExists(org.id)).toBe(true);
+      expect(await exists(path.join(recordings, org.id))).toBe(true);
+
+      // Ninguém mais quer: na próxima volta, a exclusão termina sem o WAHA.
+      await sql("update whatsapp_sessions set service_wanted = false where organization_id = $1 returning id", [other]);
+      fire(liveTimer() as FakeTimer);
+      await until(async () => !(await orgExists(org.id)), "the organization to be deleted with WAHA not running");
+      expect(await exists(path.join(recordings, org.id))).toBe(false);
+      expect(logouts(org.id)).toBe(0);
+    } finally {
+      await sql("update whatsapp_sessions set service_wanted = true where id = any($1::uuid[]) returning id", [wanted.map((row) => row.id)]);
+    }
   });
 });

@@ -11,6 +11,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addMembership, createAccount, findLoginAccount } from "../src/accounts";
 import {
+  endWhatsAppSessionUnlessUnused,
   executeOrganizationDeletion,
   requestOrganizationDeletion,
   type OrganizationDeletionDeps,
@@ -39,16 +40,31 @@ const orgTables = (
      order by 1`)
 ).rows.map((row) => row.name);
 
-/** O WAHA falso: anota cada organização cuja sessão foi desfeita, e cai quando `down`. */
+/**
+ * O WAHA falso: anota cada organização cuja sessão foi desfeita. `down = "unreachable"` é o WAHA que
+ * não responde (fora do ar, ou o perfil `whatsapp` desligado); `down = "error"`, o que responde com
+ * erro (5xx, chave recusada).
+ */
+class FakeWahaError extends Error {
+  constructor(readonly unreachable: boolean) {
+    super(unreachable ? "Could not reach WAHA (POST /api/sessions/x/logout)" : "WAHA answered 500 to POST /api/sessions/x/logout");
+  }
+}
 function fakeWaha() {
   const ended: string[] = [];
   const waha = {
     ended,
-    down: false,
-    endWhatsAppSession: async (organizationId: string): Promise<void> => {
-      if (waha.down) throw new Error("Could not reach WAHA (POST /api/sessions/x/logout)");
-      ended.push(organizationId);
-    },
+    down: false as false | "unreachable" | "error",
+    endWhatsAppSession: (organizationId: string): Promise<void> =>
+      // O mesmo caminho da rotina: o WAHA que não responde conta como feito se ninguém quer o serviço.
+      endWhatsAppSessionUnlessUnused(
+        app,
+        async () => {
+          if (waha.down) throw new FakeWahaError(waha.down === "unreachable");
+          ended.push(organizationId);
+        },
+        (error) => error instanceof FakeWahaError && error.unreachable,
+      ),
   };
   return waha;
 }
@@ -60,6 +76,22 @@ const deps = (waha: ReturnType<typeof fakeWaha>, afterStep?: (step: Organization
   endWhatsAppSession: waha.endWhatsAppSession,
   afterStep,
 });
+
+const wantWhatsApp = (organizationId: string): Promise<unknown> =>
+  owner.pool.query("update whatsapp_sessions set service_wanted = true where organization_id = $1", [organizationId]);
+
+/**
+ * Roda `fn` com nenhuma organização da instalação querendo o WhatsApp. O banco é um só para os
+ * arquivos (em série): as linhas que outro arquivo deixou com `service_wanted` voltam como estavam.
+ */
+async function withNobodyWantingWhatsApp(fn: () => Promise<void>): Promise<void> {
+  const { rows } = await owner.pool.query<{ id: string }>("update whatsapp_sessions set service_wanted = false where service_wanted returning id");
+  try {
+    await fn();
+  } finally {
+    await owner.pool.query("update whatsapp_sessions set service_wanted = true where id = any($1::uuid[])", [rows.map((row) => row.id)]);
+  }
+}
 
 interface Org {
   id: string;
@@ -331,15 +363,17 @@ describe("executeOrganizationDeletion", () => {
     await expectDeleted(a, { org: b, snapshot }, countsA);
   });
 
-  it("with WAHA down, it stops before the database; when WAHA is back, it finishes", async () => {
+  // W2 (ajuste 1 da 9b), e o teste "WAHA fora" do desenho: com alguma organização querendo o serviço.
+  it("W2: with WAHA not answering and B wanting WhatsApp, it stops before the database; when WAHA is back, it finishes", async () => {
     const a = await buildOrg("WAHA fora A", { suspended: true });
     const b = await buildOrg("WAHA fora B", { suspended: false });
+    await wantWhatsApp(b.id);
     const countsA = await countsOf(a.id);
     const snapshot = await snapshotOf(b.id);
     expect(await request(a)).toEqual({ ok: true });
 
     const waha = fakeWaha();
-    waha.down = true;
+    waha.down = "unreachable";
     expect(await executeOrganizationDeletion(deps(waha), a.id)).toEqual({ status: "retry", step: "whatsapp", error: expect.stringContaining("Could not reach WAHA") });
     expect(await countsOf(a.id)).toEqual(countsA);
     expect(await orgRow(a.id)).toMatchObject({ deleting_at: now });
@@ -350,6 +384,57 @@ describe("executeOrganizationDeletion", () => {
     expect(await executeOrganizationDeletion(deps(waha), a.id)).toMatchObject({ status: "deleted" });
     expect(waha.ended).toEqual([a.id]);
     await expectDeleted(a, { org: b, snapshot }, countsA);
+  });
+
+  it("W1: with WAHA not answering and nobody wanting WhatsApp, the deletion finishes", async () => {
+    await withNobodyWantingWhatsApp(async () => {
+      const a = await buildOrg("WAHA desligado A", { suspended: true });
+      const b = await buildOrg("WAHA desligado B", { suspended: false });
+      const countsA = await countsOf(a.id);
+      const snapshot = await snapshotOf(b.id);
+      expect(await request(a)).toEqual({ ok: true });
+
+      const waha = fakeWaha();
+      waha.down = "unreachable";
+      expect(await executeOrganizationDeletion(deps(waha), a.id)).toMatchObject({ status: "deleted", counts: countsA });
+      expect(waha.ended).toEqual([]);
+      await expectDeleted(a, { org: b, snapshot }, countsA);
+    });
+  });
+
+  it("W3: with WAHA not answering and only A itself (the tombstoned one) wanting WhatsApp, it stops before the database", async () => {
+    await withNobodyWantingWhatsApp(async () => {
+      const a = await buildOrg("WAHA fora só A", { suspended: true });
+      await wantWhatsApp(a.id);
+      const countsA = await countsOf(a.id);
+      expect(await request(a)).toEqual({ ok: true });
+
+      const waha = fakeWaha();
+      waha.down = "unreachable";
+      expect(await executeOrganizationDeletion(deps(waha), a.id)).toEqual({ status: "retry", step: "whatsapp", error: expect.stringContaining("Could not reach WAHA") });
+      expect(await countsOf(a.id)).toEqual(countsA);
+      expect(await exists(path.join(recordings, a.id))).toBe(true);
+
+      // Deixa a instalação sem lápide pendente para os outros testes.
+      waha.down = false;
+      expect(await executeOrganizationDeletion(deps(waha), a.id)).toMatchObject({ status: "deleted" });
+    });
+  });
+
+  it("with WAHA answering an error (5xx, refused key) and nobody wanting WhatsApp, it still stops before the database", async () => {
+    await withNobodyWantingWhatsApp(async () => {
+      const a = await buildOrg("WAHA erro A", { suspended: true });
+      const countsA = await countsOf(a.id);
+      expect(await request(a)).toEqual({ ok: true });
+
+      const waha = fakeWaha();
+      waha.down = "error";
+      expect(await executeOrganizationDeletion(deps(waha), a.id)).toEqual({ status: "retry", step: "whatsapp", error: expect.stringContaining("WAHA answered 500") });
+      expect(await countsOf(a.id)).toEqual(countsA);
+
+      waha.down = false;
+      expect(await executeOrganizationDeletion(deps(waha), a.id)).toMatchObject({ status: "deleted" });
+    });
   });
 
   it("deletes only the accounts of A that were left with no link and without the installation mark", async () => {
