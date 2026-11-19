@@ -149,6 +149,8 @@ const timeline: TimelineDictionary = {
       prompt_unreadable: "The menu announcement could not be played. The caller heard the failure message and was passed to the menu's person (or hung up, if there was no person).",
       no_person_exit: "The menu had no key leading to a person. The caller heard the failure message, and the call was ended.",
       agent_disabled: "The agent of the chosen option was turned off. The caller heard the failure message and was passed to the menu's person (or hung up, if there was no person). Turn the agent on, or change the key, under Phone line.",
+      handoff_failed: "The agent of the chosen option could not take over because of a failure saving the call. The caller heard the failure message and was passed to the menu's person (or hung up, if there was no person).",
+      transfer_failed: "The transfer to the menu's person did not complete. The call was ended.",
       unexpected: "An unexpected error in the menu. The caller heard the failure message and was passed to the menu's person (or hung up, if there was no person).",
     },
     ivr_failed_unknown: "The caller heard the failure message.",

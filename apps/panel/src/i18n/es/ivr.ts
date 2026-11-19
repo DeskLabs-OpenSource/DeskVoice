@@ -47,7 +47,7 @@ const ivr: IvrDictionary = {
   upload: "Subir anuncio",
   replace: "Cambiar anuncio",
   converting: "Convirtiendo el archivo…",
-  unreadable: "El navegador no pudo abrir este archivo. Prueba un MP3 o un WAV.",
+  unreadable: "El navegador no pudo abrir este archivo, o no tiene sonido (menos de 0,2 s). Prueba un MP3 o un WAV.",
   tooLong: "Este archivo dura {seconds} s. El anuncio puede durar como máximo 60 segundos.",
   listen: "Escuchar el anuncio",
   answers: "Atiende",

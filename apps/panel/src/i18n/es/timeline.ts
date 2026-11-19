@@ -149,6 +149,8 @@ const timeline: TimelineDictionary = {
       prompt_unreadable: "El anuncio del menú no se pudo reproducir. Quien llamó oyó el mensaje de falla y pasó a la persona del menú (o se colgó, si no había persona).",
       no_person_exit: "El menú no tenía ninguna tecla que llevara a una persona. Quien llamó oyó el mensaje de falla, y la llamada terminó.",
       agent_disabled: "El agente de la opción elegida estaba desactivado. Quien llamó oyó el mensaje de falla y pasó a la persona del menú (o se colgó, si no había persona). Activa el agente, o cambia la tecla, en Línea telefónica.",
+      handoff_failed: "El agente de la opción elegida no pudo atender por una falla al guardar la llamada. Quien llamó oyó el mensaje de falla y pasó a la persona del menú (o se colgó, si no había persona).",
+      transfer_failed: "La transferencia a la persona del menú no se completó. La llamada terminó.",
       unexpected: "Un error inesperado en el menú. Quien llamó oyó el mensaje de falla y pasó a la persona del menú (o se colgó, si no había persona).",
     },
     ivr_failed_unknown: "Quien llamó oyó el mensaje de falla.",
