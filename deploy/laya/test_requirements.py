@@ -6,7 +6,8 @@ rede e sem Docker:
 
 T1 lê os dois arquivos de requisitos e o Dockerfile. No Dockerfile, todo comando pip (`pip`, `pip3`,
 `pip3.12`, `python -m pip`, `python3 -I -m pip`) conta: cada install precisa do resumo, só de roda e de
-uma das duas listas; o `pip check` vem depois do último install; nenhum RUN com pip tem `||`; e o
+uma das duas listas; o `pip check` vem depois do último install; no RUN com pip, só `&&` liga
+comandos (`||`, `;`, `|` e `&` deixariam o RUN sair com o código do último comando); e o
 torch vem só do índice de CPU (`--index-url`, nunca `--extra-index-url`). T2 monta uma roda mínima e confere que o pip,
 com as mesmas opções do Dockerfile, aceita o resumo certo e recusa o trocado.
 """
@@ -58,13 +59,15 @@ def requirements(name):
 
 PIP_EXE = re.compile(r"pip(?:3(?:\.\d+)?)?")
 PIP_WORD = re.compile(r"pip(?![A-Za-z_])")
-OPERATORS = {"&&", "||", ";", "|", "&", ";;", "|&"}
+# Toda palavra feita só de `;`, `&` e `|` é um separador de comandos (`&&`, `||`, `;`, `|`, `&`, `;;`,
+# `|&` e qualquer junção deles que o shlex entregue numa palavra só).
+OPERATOR = re.compile(r"[;&|]+")
 REQUIREMENTS = {"requirements-torch.txt", "requirements.txt"}
 
 
 def dockerfile_runs():
     """Cada RUN do Dockerfile como lista de comandos (cada um, a lista de palavras) e os operadores
-    entre eles. As palavras saem do `shlex`, que respeita as aspas e separa `&&`, `||`, `;` e `|`."""
+    entre eles. As palavras saem do `shlex`, que respeita as aspas e separa `&&`, `||`, `;`, `|` e `&`."""
     with open(os.path.join(HERE, "Dockerfile"), encoding="utf-8") as f:
         text = f.read()
     runs = []
@@ -76,7 +79,7 @@ def dockerfile_runs():
         lexer.whitespace_split = True
         commands, operators, current = [], [], []
         for token in lexer:
-            if token in OPERATORS:
+            if OPERATOR.fullmatch(token):
                 operators.append(token)
                 commands.append(current)
                 current = []
@@ -139,8 +142,10 @@ class T1Static(unittest.TestCase):
         installs = [words for sub, words, _ in commands if sub == "install"]
         for sub, words, operators in commands:
             self.assertIn(sub, ("install", "check"), "pip com subcomando inesperado: %r" % words)
-            # `||` engole a falha: `pip check || true` ou `pip install ... || ...` não param o build.
-            self.assertNotIn("||", operators, "RUN com pip não pode ter ||: %r" % words)
+            # O RUN sai com o código do último comando: `pip check || true`, `pip check; true`,
+            # `pip check | cat` e `pip check & true` engolem a falha. Só `&&` para no primeiro erro.
+            others = [op for op in operators if op != "&&"]
+            self.assertEqual(others, [], "no RUN com pip, só && liga comandos: %r em %r" % (others, words))
         for words in installs:
             self.assertIn("--require-hashes", words, words)
             self.assertIn("--only-binary=:all:", words, words)
