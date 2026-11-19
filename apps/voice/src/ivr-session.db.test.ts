@@ -245,10 +245,11 @@ const IVR_LOG_MESSAGES = new Set([
   "could not record an ivr event",
   "could not record the end of the ivr",
   "could not release the telephony side of the ivr",
+  "could not record the failed ivr transfer",
   "could not hand the call to the agent",
   "ivr session failed",
 ]);
-const IVR_LOG_FIELDS = new Set(["level", "message", "callId", "menuId", "agentId", "options", "result", "endReason", "kind", "language", "error"]);
+const IVR_LOG_FIELDS = new Set(["level", "message", "callId", "menuId", "agentId", "options", "result", "endReason", "kind", "language", "error", "step"]);
 
 /**
  * A lista do que um evento da chamada pode levar, em qualquer `kind`: os nomes de campo e os valores
@@ -603,15 +604,19 @@ describe("URA: a falha na passagem e a telefonia sempre solta (DESA-187)", { tim
       }
     };
 
-  it("U10: a transferência lança: desliga, e o banco diz `failed` com `ivr_failed { transfer_failed }`", async () => {
+  it("U10/U13: a transferência lança: desliga, e o banco diz `failed` e `ivr_failed`, com `ivr_failed { transfer_failed }` depois do `call_ended`", async () => {
     const h = await answer("ivr-u10", STANDARD, { rig: brokenTransfer(false) });
     await promptPlayed(h, 1);
     h.transport.press("2");
     await h.session.done;
     expect(h.transport).toMatchObject({ transferredTo: null, hangups: 1, closes: 0 });
-    // O `end_reason` fica o que era; o status não mente.
-    expect(await callOf(app, h.callId)).toMatchObject({ status: "failed", end_reason: "transferred" });
+    // U13: o desfecho é coerente: falhou, e o motivo é a URA.
+    expect(await callOf(app, h.callId)).toMatchObject({ status: "failed", end_reason: "ivr_failed" });
     expect(await ivrFailures(h.callId)).toEqual([{ reason: "transfer_failed" }]);
+    // O `call_ended` que já saiu fica como foi gravado (append-only); a falha vem depois dele.
+    const events = await eventsOf(app, h.callId);
+    expect(events.map((event) => event.kind).filter((kind) => ["transfer_started", "call_ended", "ivr_failed"].includes(kind))).toEqual(["transfer_started", "call_ended", "ivr_failed"]);
+    expect(events.find((event) => event.kind === "call_ended")?.payload).toMatchObject({ status: "transferred", reason: "transferred" });
     expect(releaseErrors(h)).toEqual(["transfer"]);
   });
 
@@ -652,5 +657,101 @@ describe("URA: a falha na passagem e a telefonia sempre solta (DESA-187)", { tim
     expect(h.transport).toMatchObject({ hangups: 1 });
     expect(await callOf(app, h.callId)).toMatchObject({ status: "transferred" });
     expect(h.logs.some((line) => line.includes("could not record the failed ivr transfer"))).toBe(true);
+  });
+});
+
+describe("URA: o log de soltar a telefonia não leva a tecla nem o número de destino (S7d)", { timeout: 60_000 }, () => {
+  /** Cada passo lança sozinho, com uma mensagem fixa: o que aparecer de tecla ou de número veio da URA. */
+  const gone = async (): Promise<never> => {
+    throw new Error("the channel is gone");
+  };
+
+  for (const step of [
+    {
+      step: "speech",
+      // A tecla 7 não é opção; com uma tentativa só e `onNoChoice: hangup`, a fala "sem escolha" sai (e lança).
+      build: (agents: { on: string; off: string }): MenuOptions => ({ ...STANDARD(agents), maxAttempts: 1, onNoChoice: "hangup" }),
+      digit: "7",
+      rig: (transport: KeypadFake): void => {
+        const send = transport.sendAudio;
+        let calls = 0;
+        transport.sendAudio = (pcm) => {
+          calls += 1;
+          if (calls === 2) throw new Error("the audio socket is gone");
+          send(pcm);
+        };
+      },
+      after: undefined,
+    },
+    { step: "transfer", build: STANDARD, digit: "2", rig: (transport: KeypadFake): void => void (transport.transfer = gone), after: undefined },
+    { step: "hangup", build: STANDARD, digit: "9", rig: (transport: KeypadFake): void => void (transport.hangup = gone), after: undefined },
+    // Quem liga digita e desliga: a URA só fecha o socket, e o `close()` lança.
+    { step: "close", build: STANDARD, digit: "7", rig: (transport: KeypadFake): void => void (transport.close = gone), after: (transport: KeypadFake): void => transport.callerHangup() },
+  ] as const) {
+    it(`o passo \`${step.step}\` lança: o \`log error\` sai pela lista do T5, sem a tecla ${step.digit} e sem ${PERSON}`, async () => {
+      const h = await answer(`ivr-s7d-${step.step}`, step.build, { rig: step.rig });
+      await promptPlayed(h, 1);
+      h.transport.press(step.digit);
+      step.after?.(h.transport);
+      await h.session.done;
+
+      expect(releaseErrors(h)).toEqual([step.step]);
+      for (const raw of h.logs) {
+        const line = JSON.parse(raw) as Record<string, unknown>;
+        expect(logOutsideAllowList(line, h.menu.options.length), raw).toEqual([]);
+      }
+      const released = h.logs.filter((line) => line.includes('"level":"error"') && line.includes("could not release the telephony side of the ivr"));
+      expect(released).toHaveLength(1);
+      // Os ids da chamada e do menu saem antes, porque um UUID pode ter qualquer dígito por acaso.
+      const line = (released[0] ?? "").replaceAll(h.callId, "").replaceAll(h.menu.id, "");
+      expect(line).not.toContain(step.digit);
+      expect(line).not.toContain(PERSON);
+      expect(line).not.toContain(PERSON.slice(1));
+    });
+  }
+});
+
+describe("URA: a segunda escrita fica na organização da chamada (cross-org)", { timeout: 60_000 }, () => {
+  const snapshot = async (callId: string): Promise<unknown> => ({
+    call: await withSystem(app, (q) => q.one("select * from calls where id = $1", [callId])),
+    events: await withSystem(app, (q) => q.many("select * from call_events where call_id = $1 order by id", [callId])),
+  });
+
+  it("a `transferFailed` da organização A não muda nenhuma linha de `calls` nem de `call_events` da B", async () => {
+    // B: uma chamada que a URA transferiu de verdade (o mesmo desfecho que a segunda escrita de A troca).
+    const b = await answer("ivr-xorg-b", STANDARD);
+    await promptPlayed(b, 1);
+    b.transport.press("2");
+    await b.session.done;
+    const callsOfB = async (): Promise<unknown> => withSystem(app, (q) => q.many("select * from calls where organization_id = $1 order by id", [b.organizationId]));
+    const eventsOfB = async (): Promise<unknown> => withSystem(app, (q) => q.many("select e.* from call_events e join calls c on c.id = e.call_id where c.organization_id = $1 order by e.id", [b.organizationId]));
+    const before = { calls: await callsOfB(), events: await eventsOfB(), one: await snapshot(b.callId) };
+
+    const a = await answer("ivr-xorg-a", STANDARD, { rig: (transport) => void (transport.transfer = async () => Promise.reject(new Error("the channel is gone"))) });
+    await promptPlayed(a, 1);
+    a.transport.press("2");
+    await a.session.done;
+
+    expect(await callOf(app, a.callId)).toMatchObject({ status: "failed", end_reason: "ivr_failed" });
+    expect(await ivrFailures(a.callId)).toEqual([{ reason: "transfer_failed" }]);
+    expect({ calls: await callsOfB(), events: await eventsOfB(), one: await snapshot(b.callId) }).toEqual(before);
+    expect(await callOf(app, b.callId)).toMatchObject({ status: "transferred", end_reason: "transferred" });
+  });
+});
+
+describe("URA: o menu trocado no meio da chamada (P2)", { timeout: 60_000 }, () => {
+  it("as opções editadas durante a chamada em `ivr` não mudam a chamada: ela segue com o menu que leu no começo", async () => {
+    const h = await answer("ivr-p2", STANDARD);
+    await promptPlayed(h, 1);
+    // O operador edita o menu agora: a tecla 2 passa a outra pessoa, e a 9 deixa de existir.
+    await withSystem(app, async (q) => {
+      await q.exec("update ivr_options set transfer_e164 = $2, label = 'Outro' where menu_id = $1 and digit = '2'", [h.menu.id, OTHER_PERSON]);
+      await q.exec("delete from ivr_options where menu_id = $1 and digit = '9'", [h.menu.id]);
+      await q.exec("update ivr_menus set updated_at = now() where id = $1", [h.menu.id]);
+    });
+    h.transport.press("2");
+    expect(await h.session.done).toEqual({ result: "transfer", endReason: "transferred" });
+    expect(h.transport.transferredTo).toBe(PERSON);
+    expect((await eventsOf(app, h.callId)).find((event) => event.kind === "ivr_option_chosen")?.payload).toMatchObject({ digit: "2", label: "Financeiro" });
   });
 });
