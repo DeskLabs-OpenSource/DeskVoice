@@ -87,8 +87,8 @@ describe("brains/deepseek: lista de modelos", () => {
     [403, "rejected"],
     [402, "no_credit"],
     [429, "rate_limited"],
-    [500, "unreachable"],
-    [503, "unreachable"],
+    [500, "provider_error"],
+    [503, "provider_error"],
     [404, "unexpected_response"],
     [422, "unexpected_response"],
   ] as const)("status %i é %s", async (status, failure) => {
@@ -158,7 +158,7 @@ describe("brains/deepseek: pedido em JSON", () => {
     [404, "unexpected_response"],
     [422, "unexpected_response"],
     [429, "rate_limited"],
-    [503, "unreachable"],
+    [503, "provider_error"],
   ] as const)("status %i é %s", async (status, failure) => {
     const { fetch } = fakeFetch({ status, body: { error: { message: `chave ${KEY} recusada` } } });
     expect(await brain.completeJson(KEY, REQUEST, { fetch })).toEqual({ ok: false, failure, status, model: "deepseek-flash", usage: {} });
@@ -255,7 +255,7 @@ describe("brains/deepseek: chat em streaming", () => {
       [401, {}, "rejected"],
       [404, {}, "unexpected_response"],
       [429, {}, "rate_limited"],
-      [503, {}, "unreachable"],
+      [503, {}, "provider_error"],
     ];
     for (const [status, body, failure] of cases) {
       const { fetch } = sseFetch({ status, body: JSON.stringify(body) });

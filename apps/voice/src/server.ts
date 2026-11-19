@@ -7,6 +7,7 @@ import { AsteriskCalls } from "./asterisk-transport";
 import { startAudioSocketServer } from "./audiosocket";
 import { startCallSession, stopRecordingOfLiveCall, type CallSession, type CallSessionDeps } from "./call-session";
 import { handleInbound } from "./inbound";
+import { startIvrSession, type IvrSession } from "./ivr-session";
 import { startInternalApi } from "./internal-api";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { startOutboundCall } from "./outbound";
@@ -84,6 +85,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   // Recados em curso, com o ciclo de vida próprio: não são conversas, e não atendem a pedido de
   // parar gravação (`stopRecordingOfLiveCall`).
   const voicemails = new Set<VoicemailSession>();
+  // Menus por teclas em curso. Depois da passagem à conversa, a chamada é dela (`sessions`).
+  const ivrs = new Set<IvrSession>();
 
   const track = (session: CallSession): void => {
     sessions.add(session);
@@ -98,6 +101,14 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     void session.done.then((outcome) => {
       voicemails.delete(session);
       log("info", "voicemail ended", { ...outcome });
+    });
+  };
+
+  const trackIvr = (session: IvrSession): void => {
+    ivrs.add(session);
+    void session.done.then((outcome) => {
+      ivrs.delete(session);
+      log("info", "ivr finished", { ...outcome });
     });
   };
 
@@ -119,6 +130,24 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
       const { call, transport } = attached;
       if (call.unavailable) {
         void playUnavailable(transport, { callId: call.callId, ...call.unavailable }, log);
+        return;
+      }
+      if (call.ivr) {
+        const { organizationId, callId } = call;
+        trackIvr(
+          startIvrSession(
+            {
+              db,
+              clock,
+              schedule: deps.schedule,
+              now: deps.now,
+              log,
+              // A opção `agent`: a conversa abre no mesmo transporte, e passa a ser acompanhada como toda conversa.
+              startAgent: (agentId, keypad) => track(startCallSession(sessionDeps, { organizationId, callId, agentId, transport: keypad })),
+            },
+            { organizationId, callId, ...call.ivr, transport },
+          ),
+        );
         return;
       }
       if (call.voicemail) {
@@ -229,8 +258,10 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
       await api.close();
       for (const session of sessions) session.stop("shutdown");
       for (const session of voicemails) session.stop("shutdown");
+      for (const session of ivrs) session.stop("shutdown");
       await Promise.all([...sessions].map((session) => session.done));
       await Promise.all([...voicemails].map((session) => session.done));
+      await Promise.all([...ivrs].map((session) => session.done));
       await audioSocket.close();
       await webCalls.close();
       await approvals.close();

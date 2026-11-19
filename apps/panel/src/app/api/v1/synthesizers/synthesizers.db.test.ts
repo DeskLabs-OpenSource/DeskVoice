@@ -7,6 +7,7 @@ import { decryptSecret, withOrg } from "@deskvoice/core";
 import { loadSynthesizers } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOW, SECRET_KEY, call, createOrganization, createUser, startPanel } from "../../../../../test/kit";
+import voiceText from "../../../../i18n/pt-BR/voice";
 import { listAllSynthesizers, synthesizerKeyCheckLimiter, synthesizerVoicesLimiter } from "../../../../server/synthesizers";
 import { GET as getPrivacy } from "../privacy/route";
 import { DELETE as removeMember } from "../team/users/[id]/route";
@@ -237,6 +238,23 @@ describe("a chave da voz, com a confirmação e o recibo", () => {
     const voices = await call(getVoices, { cookie: owner.cookie, params: { synthesizer: "elevenlabs" } });
     expect(voices.data).toEqual({ configured: true, voices: [], failure: { result: "rejected", status: 401 } });
     expect(voices.text).not.toContain("nope");
+  });
+
+  it("o 502 da ElevenLabs no /v2/voices é erro do fornecedor (provider_error), e a tela não manda conferir a internet", async () => {
+    // O caso de 18/11: o fornecedor respondeu 502 com página de proxy, e a tela dizia que ele não foi alcançado.
+    panel.clock.at = new Date("2026-03-04T08:00:00.000Z");
+    elevenlabs = { status: 502, body: null };
+    const retested = await call(retestKey, { method: "POST", cookie: owner.cookie, params: { synthesizer: "elevenlabs" } });
+    expect([retested.status, retested.data]).toEqual([200, { configured: true, check: { result: "provider_error", model: "eleven_flash_v2_5", checkedAt: "2026-03-04T08:00:00.000Z" } }]);
+    expect((await settingsOf(org)).find((row) => row.key === "synthesizer.elevenlabs.key_check")?.value).toEqual({ result: "provider_error", model: "eleven_flash_v2_5", checkedAt: "2026-03-04T08:00:00.000Z" });
+    const all = await call(listAll, { cookie: owner.cookie });
+    const keyCheck = (all.data as Array<{ keyCheck: { result: keyof typeof voiceText.results } | null }>)[0]?.keyCheck;
+    expect(keyCheck?.result).toBe("provider_error");
+    // A frase que o cartão da voz escreve para esse resultado (`t.results[check.result]`).
+    expect(voiceText.results[keyCheck?.result ?? "unreachable"]).toBe("o fornecedor respondeu com erro do lado dele. Costuma passar sozinho: tente de novo em alguns minutos.");
+
+    const voices = await call(getVoices, { cookie: owner.cookie, params: { synthesizer: "elevenlabs" } });
+    expect(voices.data).toEqual({ configured: true, voices: [], failure: { result: "provider_error", status: 502 } });
   });
 
   it("apagar a chave apaga a confirmação e o teste, e deixa os recibos", async () => {

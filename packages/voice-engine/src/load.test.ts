@@ -49,10 +49,11 @@ describe("loadEngines", () => {
 });
 
 describe("loadDecisionModels", () => {
-  it("descobre o Jev e o simulado pela pasta deciders/; só o simulado não tem chave", async () => {
+  it("descobre o Jev, o Laya e o simulado pela pasta deciders/; só o Jev pede chave", async () => {
     const models = await loadDecisionModels();
-    expect([...models.keys()].sort()).toEqual(["jev", "simulated"]);
+    expect([...models.keys()].sort()).toEqual(["jev", "laya", "simulated"]);
     expect(models.get("simulated")?.keyless).toBe(true);
+    expect(models.get("laya")?.keyless).toBe(true);
     expect(models.get("jev")?.keyless).toBeFalsy();
     for (const model of models.values()) expect(model.pricing.checkedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });

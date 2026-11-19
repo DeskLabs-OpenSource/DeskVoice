@@ -140,12 +140,13 @@ describe("o cadastro do analista", () => {
   });
 
   it("o modelo de decisão precisa estar instalado", async () => {
-    for (const decisionModel of ["laya", "", "JEV"]) {
+    // `nao_instalado` não existe em deciders/. O Laya serviu de exemplo até a fatia 8a, que o instalou.
+    for (const decisionModel of ["nao_instalado", "", "JEV"]) {
       const result = await call(createAnalyst, { method: "POST", cookie: owner, body: { name: `M ${decisionModel}`, decisionModel } });
       expect([result.status, result.code]).toEqual([400, "validation_error"]);
     }
     const analyst = await newAnalyst(owner, { name: "Instalado", decisionModel: "simulated" });
-    const patched = await call(patchAnalyst, { method: "PATCH", cookie: owner, params: { id: analyst.id }, body: { decisionModel: "laya" } });
+    const patched = await call(patchAnalyst, { method: "PATCH", cookie: owner, params: { id: analyst.id }, body: { decisionModel: "nao_instalado" } });
     expect([patched.status, patched.code]).toEqual([400, "validation_error"]);
     expect(await analystRow(org, analyst.id)).toMatchObject({ decision_model: "simulated" });
   });

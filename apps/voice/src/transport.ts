@@ -35,9 +35,25 @@ export interface CallTransport {
    * não tem como mandar tom (a ligação pelo WhatsApp) não declara, e a ferramenta se recusa.
    */
   sendDtmf?(digits: string): Promise<void>;
+  /**
+   * Tecla apertada por quem ligou. Opcional pelo mesmo motivo de `sendDtmf`, ao contrário: o canal
+   * que não tem teclado (a ligação pelo WhatsApp) não declara.
+   *
+   * O Asterisk já entrega isto no AudioSocket há tempo (`audiosocket.ts`), mas o contrato da
+   * conversa não expunha — a tecla chegava ao processo e morria ali. É a peça que falta para um
+   * menu por teclas (URA) existir sem mexer no resto do motor de voz.
+   */
+  onDtmf?(handler: (digit: string) => void): void;
   /** Solta a telefonia na hora, sem esperar fala pendente. */
   close(): Promise<void>;
 }
+
+/**
+ * O transporte com teclado: quem precisa da tecla de quem liga (a URA, `ivr-session.ts`) exige
+ * `onDtmf` no tipo, e o canal que não tem (a ligação pelo WhatsApp) não serve a ela sem o compilador
+ * reclamar.
+ */
+export type KeypadTransport = CallTransport & Required<Pick<CallTransport, "onDtmf">>;
 
 /**
  * Três bipes curtos. É o que quem está na linha ouve quando não há motor de voz para falar

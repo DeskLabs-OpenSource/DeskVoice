@@ -142,6 +142,17 @@ que tenta tudo.
 
 Na tela Linha, aponte o número para o agente.
 
+**Ou atenda por um menu por teclas.** Na mesma tela, em Menus por teclas, crie um menu: o nome, o
+idioma das falas, o anúncio (um WAV, MP3 ou M4A de até 60 segundos, que o navegador converte) e o
+que cada tecla faz: ir para um agente de IA, ir para uma pessoa (transferir para um número) ou
+desligar. Todo menu precisa de ao menos uma tecla que leve a uma pessoa: o painel não salva o menu
+sem ela, e é para lá que a ligação vai quando quem liga não escolhe nada ou quando algo falha. No
+número, troque "Atende: IA" por "Menu por teclas" e escolha o menu; ele só aceita um menu que já
+tenha anúncio. Sem nenhuma tecla para um agente, o menu funciona sem chave de IA. A linha do tempo
+mostra a opção escolhida e o tempo até a escolha; a sequência que a pessoa digitou nunca é gravada,
+só a tecla de uma opção que existe. Ficam de fora, por enquanto: submenu, ramal, horário comercial,
+o menu na ligação pelo WhatsApp e o anúncio gerado a partir de texto.
+
 ### 8. Ligue
 
 Do seu celular, ligue para o número. Enquanto fala, deixe aberta a tela Chamadas: a ligação

@@ -34,7 +34,7 @@ equal "só painel, voz e rotinas recebem a chave em texto puro" "panel voice rou
 contains "o WAHA recebe o hash, com o prefixo que o faz comparar por hash" "$(cat "$C")" 'WAHA_API_KEY: "sha512:${WAHA_API_KEY_SHA512:-}"'
 waha_block="$(awk '/^  waha:/ { on = 1; next } on && /^  [a-z-]+:/ { on = 0 } on' "$C")"
 contains "o WAHA fica num perfil: não sobe por padrão" "$waha_block" 'profiles: ["whatsapp"]'
-equal "só os dois serviços de WhatsApp ficam em perfil" 2 "$(grep -c 'profiles:' "$C")"
+equal "só os serviços opcionais (os dois de WhatsApp e o Laya) ficam em perfil" 3 "$(grep -c 'profiles:' "$C")"
 lacks "o WAHA não publica porta" "$waha_block" "ports:"
 lacks "o WAHA não lê o app.env" "$waha_block" "env_file"
 contains "o WAHA tem teto de memória" "$waha_block" "mem_limit: 1280m"

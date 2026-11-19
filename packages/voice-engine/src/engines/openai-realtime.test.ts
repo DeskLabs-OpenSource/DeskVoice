@@ -403,7 +403,7 @@ describe("openai-realtime: teste da chave (contrato com servidor HTTP falso)", (
     ["429 sem crédito", "no_credit", { status: 429, body: { error: { code: "credit_balance_exhausted", type: "insufficient_quota" } } }],
     ["429 com teto de gasto", "no_credit", { status: 429, body: { error: { code: "project_spend_limit_exceeded" } } }],
     ["429 de cota (só o tipo)", "no_credit", { status: 429, body: { error: { code: null, type: "insufficient_quota" } } }],
-    ["500", "unreachable", { status: 500, body: { error: { code: "server_error" } } }],
+    ["500", "provider_error", { status: 500, body: { error: { code: "server_error" } } }],
     ["400", "unexpected_response", { status: 400, body: { error: { code: "invalid_value" } } }],
     ["200 fora do formato", "unexpected_response", { status: 200, body: { id: "x", object: "list" } }],
   ] as const)("%s vira %s", async (_, result, reply) => {

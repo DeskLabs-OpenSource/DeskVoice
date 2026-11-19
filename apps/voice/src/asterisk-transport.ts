@@ -22,7 +22,8 @@ import { trunkEndpointName, type AriClient } from "./ari";
 import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
-import { dtmfTones, type CallTransport } from "./transport";
+import type { IvrJob } from "./ivr-session";
+import { dtmfTones, type KeypadTransport } from "./transport";
 import type { UnavailableJob } from "./unavailable";
 import type { VoicemailJob } from "./voicemail";
 
@@ -45,6 +46,12 @@ export interface ExpectedCall {
    * abrir o motor de voz (`unavailable.ts`). A chamada já está `refused`.
    */
   unavailable?: UnavailableJob;
+  /**
+   * O número atende pelo menu por teclas (`mode = 'ivr'`): quem conecta o áudio abre a URA
+   * (`ivr-session.ts`) com o menu já lido, em vez da conversa. A chamada nasce sem agente; a opção
+   * `agent` grava o dela.
+   */
+  ivr?: IvrJob;
 }
 
 interface TrackedCall extends ExpectedCall {
@@ -76,12 +83,14 @@ export class AsteriskCalls {
   }
 
   /** O AudioSocket conectou. Devolve o transporte da chamada, ou `null` se ninguém a esperava. */
-  attach(connection: AudioSocketConnection): { call: ExpectedCall; transport: CallTransport & { drained(): Promise<void> } } | null {
+  attach(connection: AudioSocketConnection): { call: ExpectedCall; transport: KeypadTransport & { drained(): Promise<void> } } | null {
     const call = this.byCall.get(connection.id);
     if (!call || call.attached) return null;
     call.attached = true;
-    const transport: CallTransport & { drained(): Promise<void> } = {
+    const transport: KeypadTransport & { drained(): Promise<void> } = {
       onAudio: (handler) => connection.onAudio(handler),
+      // A tecla chega em banda, pelo mesmo AudioSocket do áudio (a ARI não a entrega a canal fora da Stasis).
+      onDtmf: (handler) => connection.onDtmf(handler),
       sendAudio: (pcm) => connection.sendAudio(pcm),
       clearAudio: () => connection.clearAudio(),
       drained: () => connection.drained(),

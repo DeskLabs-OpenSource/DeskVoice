@@ -188,8 +188,8 @@ describe("brains/openrouter: lista de modelos", () => {
     [403, "rejected"],
     [408, "unreachable"],
     [429, "rate_limited"],
-    [500, "unreachable"],
-    [502, "unreachable"],
+    [500, "provider_error"],
+    [502, "provider_error"],
     [400, "unexpected_response"],
   ] as const)("/key com status %i é %s", async (status, failure) => {
     const { fetch } = fakeFetch({ key: { status, body: { error: { code: status, message: `algo sobre ${KEY}` } } } });
@@ -198,7 +198,7 @@ describe("brains/openrouter: lista de modelos", () => {
 
   it("/models falhando depois da chave aceita traz o motivo dele", async () => {
     const { fetch } = fakeFetch({ key: KEY_OK, models: { status: 503, body: {} } });
-    expect(await brain.listModels(KEY, { fetch, today: TODAY })).toEqual({ ok: false, failure: "unreachable", status: 503 });
+    expect(await brain.listModels(KEY, { fetch, today: TODAY })).toEqual({ ok: false, failure: "provider_error", status: 503 });
     const forma = fakeFetch({ key: KEY_OK, models: { status: 200, body: { data: "não é lista" } } });
     expect(await brain.listModels(KEY, { fetch: forma.fetch, today: TODAY })).toEqual({ ok: false, failure: "unexpected_response", status: 200 });
   });
@@ -261,8 +261,8 @@ describe("brains/openrouter: pedido em JSON", () => {
     [403, "unexpected_response"],
     [408, "unreachable"],
     [429, "rate_limited"],
-    [502, "unreachable"],
-    [503, "unreachable"],
+    [502, "provider_error"],
+    [503, "provider_error"],
     [400, "unexpected_response"],
   ] as const)("status %i é %s", async (status, failure) => {
     const { fetch } = fakeFetch({ chat: { status, body: { error: { code: status, message: `algo sobre ${KEY}` } } } });
@@ -360,7 +360,7 @@ describe("brains/openrouter: chat em streaming", () => {
       [403, {}, "unexpected_response"],
       [401, {}, "rejected"],
       [429, {}, "rate_limited"],
-      [502, {}, "unreachable"],
+      [502, {}, "provider_error"],
     ];
     for (const [status, body, failure] of cases) {
       const { fetch } = sseFetch({ status, body: JSON.stringify(body) });

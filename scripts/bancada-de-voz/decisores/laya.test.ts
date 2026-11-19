@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { carregarConjunto, vocabularioDoConjunto } from "../conjunto";
 import { carregarFiltro, pedidosDoFiltro, type ItemDoFiltro } from "../filtro";
 import { corpoDoPedido } from "./jev";
-import { medirLaya } from "./laya";
+import { executarPorHttp, medirLaya } from "./laya";
 
 const vocabulario = vocabularioDoConjunto(carregarConjunto());
 const filtro = carregarFiltro(vocabulario).itens;
@@ -59,13 +59,59 @@ describe("medirLaya", () => {
     expect(tabela).toContain("1× sem resposta do tipo pedido para leitura");
   });
 
-  it("sem BANCADA_PYTHON não mede", async () => {
-    const anterior = process.env.BANCADA_PYTHON;
+  it("sem BANCADA_LAYA_URL nem BANCADA_PYTHON não mede", async () => {
+    const anterior = { python: process.env.BANCADA_PYTHON, url: process.env.BANCADA_LAYA_URL };
     delete process.env.BANCADA_PYTHON;
+    delete process.env.BANCADA_LAYA_URL;
     try {
-      expect(await medirLaya(itens, vocabulario)).toBe("Laya: não medido (BANCADA_PYTHON não definido).");
+      expect(await medirLaya(itens, vocabulario)).toBe("Laya: não medido (nem BANCADA_LAYA_URL nem BANCADA_PYTHON definido).");
     } finally {
-      if (anterior !== undefined) process.env.BANCADA_PYTHON = anterior;
+      if (anterior.python !== undefined) process.env.BANCADA_PYTHON = anterior.python;
+      if (anterior.url !== undefined) process.env.BANCADA_LAYA_URL = anterior.url;
     }
+  });
+});
+
+describe("medirLaya contra o serviço (fatia 8a)", () => {
+  /** O serviço de deploy/laya/ falso: `/health` com o tempo de CPU que cresce a cada pedido, e `/v1/decide`. */
+  function servicoFalso(responder: (corpo: { state: string; questions: Record<string, { type: string }> }) => Response) {
+    const chamadas: Array<{ url: string; corpo?: unknown }> = [];
+    let cpu = 10;
+    const buscar = (async (url: string, init?: RequestInit) => {
+      const corpo = init?.body ? JSON.parse(String(init.body)) : undefined;
+      chamadas.push({ url, corpo });
+      if (url.endsWith("/health")) return Response.json({ ok: true, model: "convaiinnovations/laya/multilingual", revision: "e333cb7", package: "0.4.31", cpu_s: cpu, max_rss_mb: 2300 });
+      cpu += 0.05;
+      return responder(corpo);
+    }) as unknown as typeof fetch;
+    return { buscar, chamadas };
+  }
+  const certo = (corpo: { questions: Record<string, { type: string }> }) =>
+    Response.json({ model: "m", answers: Object.fromEntries(Object.entries(corpo.questions).map(([nome, q]) => [nome, q.type === "choice" ? { type: "choice", choice: "Melgaço", confidence: 0.9 } : { type: "noul", noul: 0.9 }])) });
+
+  it("manda ao /v1/decide os mesmos pedidos que o Jev recebe, e a tabela é a mesma do ajudante", async () => {
+    const { buscar, chamadas } = servicoFalso(certo);
+    const tabela = await medirLaya(itens, vocabulario, executarPorHttp("http://laya.teste:8000/", buscar));
+    const pedidos = pedidosDoFiltro(itens, vocabulario);
+    const decididos = chamadas.filter((c) => c.url === "http://laya.teste:8000/v1/decide").map((c) => c.corpo as { state: string; questions: unknown });
+    // 3 de aquecimento, depois 1 linha e 3 linhas, cada uma com todos os pedidos.
+    expect(decididos).toHaveLength(3 + pedidos.length * (1 + 3));
+    expect(decididos.slice(3, 3 + pedidos.length).map((c) => corpoDoPedido({ estado: c.state, perguntas: c.questions } as never))).toEqual(pedidos.map((p) => corpoDoPedido(p)));
+    expect(tabela).toContain("Modelo: convaiinnovations/laya/multilingual@e333cb7 (serviço em http://laya.teste:8000), pacote laya 0.4.31");
+    expect(tabela).toContain("Carregamento: antes da medida, quando o serviço subiu.");
+    expect(tabela).toContain("Memória máxima do processo: 2300 MB");
+    expect(tabela).toContain("| 1 | leitura | 1 | 1/1 (100%) | 1/1 (100%) |");
+    expect(tabela).toMatch(/Núcleos ocupados: 1 chamada\(s\): \d+\.\d\d; 3 chamada\(s\): \d+\.\d\d/);
+  });
+
+  it("o serviço ocupado ou fora da forma conta como falha do pedido, com o status", async () => {
+    const { buscar } = servicoFalso(() => Response.json({ error: "busy" }, { status: 503 }));
+    const tabela = await medirLaya(itens.slice(0, 1), vocabulario, executarPorHttp("http://laya.teste:8000", buscar));
+    expect(tabela).toContain("erro do Laya (HTTP 503 busy)");
+  });
+
+  it("serviço que não responde ao /health para a medida, em vez de medir nada", async () => {
+    const buscar = (async () => Response.json({ ok: false, error: "loading" }, { status: 503 })) as unknown as typeof fetch;
+    await expect(medirLaya(itens, vocabulario, executarPorHttp("http://laya.teste:8000", buscar))).rejects.toThrow();
   });
 });

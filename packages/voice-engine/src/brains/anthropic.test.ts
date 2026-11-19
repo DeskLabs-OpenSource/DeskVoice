@@ -157,8 +157,8 @@ describe("brains/anthropic: lista de modelos", () => {
     [402, { type: "error", error: { type: "billing_error" } }, "no_credit"],
     [400, { type: "error", error: { type: "billing_error" } }, "no_credit"],
     [429, { type: "error", error: { type: "rate_limit_error" } }, "rate_limited"],
-    [500, { type: "error", error: { type: "api_error" } }, "unreachable"],
-    [529, { type: "error", error: { type: "overloaded_error" } }, "unreachable"],
+    [500, { type: "error", error: { type: "api_error" } }, "provider_error"],
+    [529, { type: "error", error: { type: "overloaded_error" } }, "provider_error"],
     [404, { type: "error", error: { type: "not_found_error" } }, "unexpected_response"],
     [400, { type: "error", error: { type: "invalid_request_error" } }, "unexpected_response"],
   ] as const)("status %i com %j é %s", async (status, body, failure) => {
@@ -256,7 +256,7 @@ describe("brains/anthropic: pedido em JSON", () => {
     [403, "permission_error", "unexpected_response"],
     [404, "not_found_error", "unexpected_response"],
     [429, "rate_limit_error", "rate_limited"],
-    [529, "overloaded_error", "unreachable"],
+    [529, "overloaded_error", "provider_error"],
     [400, "invalid_request_error", "unexpected_response"],
   ] as const)("status %i (%s) é %s", async (status, type, failure) => {
     const { fetch } = fakeFetch({ status, body: { type: "error", error: { type, message: `chave ${KEY} recusada` } } });
@@ -657,8 +657,8 @@ describe("brains/anthropic: chat em streaming", () => {
     [402, "billing_error", "no_credit"],
     [400, "billing_error", "no_credit"],
     [429, "rate_limit_error", "rate_limited"],
-    [529, "overloaded_error", "unreachable"],
-    [500, "api_error", "unreachable"],
+    [529, "overloaded_error", "provider_error"],
+    [500, "api_error", "provider_error"],
     [404, "not_found_error", "unexpected_response"],
   ])("7. HTTP %i (%s) vira %s, como no completeJson; a recusa vem sem custo", async (status, type, failure) => {
     const fake = await chatServer((_req, res) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ type: "error", error: { type, message: `segredo ${CHAT_KEY}` } })));
@@ -685,7 +685,7 @@ describe("brains/anthropic: chat em streaming", () => {
   it.each([
     ["overloaded_error", "rate_limited"],
     ["billing_error", "no_credit"],
-    ["api_error", "unreachable"],
+    ["api_error", "provider_error"],
     ["tipo_novo", "unexpected_response"],
   ])("o evento error (%s) no meio do SSE vira %s, pelo tipo, nunca pelo texto", async (type, failure) => {
     const fake = await chatServer((_req, res) => sseReply(res, [START, textStart(0), textDelta(0, "Oi"), `event: error\ndata: ${JSON.stringify({ type: "error", error: { type, message: "Overloaded" } })}\n\n`, MESSAGE_STOP]));

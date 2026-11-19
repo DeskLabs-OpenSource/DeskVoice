@@ -3,6 +3,42 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.38.0] - 2026-11-18
+
+### Adicionado
+
+- **A imagem e o serviço do Laya existem, desligados** O DeskVoice ganhou a imagem do Laya, o modelo de decisão de pesos abertos que pode rodar na própria
+  VPS como opção do filtro da fala, e o serviço dele no Compose, num perfil que vem desligado. Quem já
+  instalou não vê nada mudar: a atualização não baixa a imagem, o Compose não sobe o serviço, e a tela
+  do filtro da fala ainda não oferece o Laya. Ligá-lo pela tela e pelo instalador vem numa versão
+  seguinte, depois que a imagem passar a ser publicada. Nada a configurar. Crédito: @melgarafael.
+- **O número pode atender por um menu por teclas** Em Linha telefônica, a nova seção Menus por teclas cria um menu de um nível: quem liga ouve um anúncio e aperta uma tecla, que leva a um agente de IA, a uma pessoa (transferência para um número) ou desliga. O anúncio é um arquivo de áudio que você já tem (WAV, MP3 ou M4A, até 60 segundos), convertido no navegador; o botão Ouvir toca o que ficou salvo. Todo menu precisa de ao menos uma tecla que leve a uma pessoa, e é para ela que a ligação vai quando quem liga não escolhe nada depois das tentativas (ou o menu avisa e desliga, se você preferir) e quando algo falha, com uma fala gravada no idioma do menu. Sem nenhuma tecla para um agente, o menu funciona sem chave de IA. No número, troque "Atende: IA" por "Menu por teclas" e escolha um menu que já tenha anúncio. A linha do tempo mostra a opção escolhida, o tempo até a escolha e as tentativas sem escolha; a sequência digitada nunca é gravada, só a tecla de uma opção que existe. O anúncio fica no banco: o prazo de guarda e o apagamento a pedido de quem ligou não o apagam, e a cópia de segurança do banco o leva. Todo número que já existe continua atendido pela IA até você mudar. A ligação pelo WhatsApp não passa pelo menu. Crédito: @webtecnica.
+
+### Corrigido
+
+- **O erro do fornecedor não aparece mais como falta de internet** Quando o fornecedor de voz, de cérebro, de motor ou do filtro de fala responde com erro do lado dele
+  (um 5xx, como na queda da ElevenLabs de 18/11), o teste da chave agora diz que o fornecedor
+  respondeu com erro do lado dele e que costuma passar sozinho, para tentar de novo em alguns minutos.
+  A linha do tempo diz só que o fornecedor respondeu com erro do lado dele. Antes, a tela dizia que ele
+  não foi alcançado e mandava conferir a internet do servidor. Quando de fato não há resposta, a frase
+  de conferir a rede continua a mesma. Nada a fazer: os testes de chave já gravados mantêm a frase
+  antiga até o próximo teste. Relatado pelo Rafael. Crédito: @melgarafael.
+- **A ligação pelo WhatsApp diz quando o pareamento terminou antes do QR Code** Quando o WhatsApp encerrava a tentativa de conexão antes de mostrar o QR Code, a tela e o aviso diziam que o QR Code não tinha sido lido a tempo. Agora dizem que o WhatsApp encerrou a tentativa antes do QR Code, e sugerem tentar de novo e, se repetir, atualizar o DeskVoice. O texto de quando o serviço não tem mais a conexão passa a citar também o reinício com uma tentativa que não chegou a parear, além do backup restaurado, da troca de servidor e da reinstalação. Nada a configurar. Crédito: @melgarafael.
+
+## [0.37.2] - 2026-11-18
+
+### Adicionado
+
+- **A base do acesso de suporte da instalação, ainda sem tela** Preparação interna para o acesso de suporte da administração da instalação. Nenhuma tela muda, e ninguém ganha acesso de suporte sem uma ação de quem administra a instalação. A atualização só acrescenta ao banco: uma tabela com os acessos de suporte de cada organização e uma coluna na sessão. Por trás, quem administra a instalação já pode entrar numa organização como suporte, sempre com motivo (de 10 a 500 caracteres) e prazo (15, 30 ou 60 minutos), com papel de administrador e nunca de dono, sem telefone e sem WhatsApp. O acesso não se renova: acaba quando a pessoa encerra ou quando o prazo vence, mesmo que ela não faça mais nada, e a sessão volta para a organização de onde a pessoa veio. O início e o fim ficam registrados nas duas pontas, no histórico da organização e na auditoria da instalação, com o motivo e o prazo. Durante o suporte, a sessão fica dentro da organização do cliente: não abre outro acesso, não troca de organização, não usa a área da instalação, e nenhuma leitura do painel traz dado de outra organização. Quem já é da equipe da organização entra pelo seletor, e não como suporte. Crédito: @melgarafael.
+
+### Alterado
+
+- **A senha recusada no aceite do convite tem uma mensagem só** Quando a senha não é aceita no convite, a página mostra uma mensagem só, que diz as duas saídas: quem já tem conta digita a senha dela, quem não tem escolhe uma senha nova com no mínimo 10 caracteres. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A ligação pelo WhatsApp volta a mostrar o QR Code** O WhatsApp passou a recusar a versão do cliente que o serviço de ligação pelo WhatsApp (WaCalls) usava. Desde então, "Conectar" ficava em "preparando a conexão" sem nunca mostrar o QR Code, e um número já conectado que caísse não voltava. A imagem do WaCalls agora é a do fork da DeskLabs com o cliente atual, e a atualização a baixa sozinha em quem tem o serviço ligado. Se o pareamento terminar com erro de novo, a tela diz que falhou em vez de esperar para sempre. Depois de atualizar, quem ficou preso em "preparando a conexão" ou com o número desconectado clica em "Conectar de novo" em Configurações → WhatsApp e lê o QR Code. Crédito: @melgarafael.
+
 ## [0.37.1] - 2026-11-18
 
 ### Alterado
