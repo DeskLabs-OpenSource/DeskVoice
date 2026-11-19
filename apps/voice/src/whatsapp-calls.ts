@@ -5,6 +5,8 @@ import {
   organizationSuspended,
   recordCallToDeletedOrganization,
   recordEvent,
+  SPEND_CAP_REACHED,
+  spendCapReached,
   spokenLanguageOf,
   toE164,
   withOrg,
@@ -13,7 +15,7 @@ import {
 } from "@deskvoice/core";
 import type { PeerConfig } from "werift";
 import { startCallSession, type CallSession, type CallSessionDeps } from "./call-session";
-import { inboundLimitReached, limitNoticedLately } from "./inbound";
+import { inboundLimitReached, limitNoticedLately, SPEND_CAP_NOTICE } from "./inbound";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import type { Schedule } from "./transport";
@@ -226,6 +228,9 @@ interface Live {
  * Organização suspensa, antes de olhar o agente: a chamada nasce recusada (`organization_suspended`)
  * e, pelo mesmo transporte, quem ligou ouve a fala de indisponível e a ligação desliga
  * (`unavailable.ts`). Nenhum motor abre.
+ *
+ * Teto de gasto do mês atingido (fatia 7c), logo depois da suspensão: a mesma recusa, com
+ * `spend_cap_reached`, e um aviso no painel por janela de 10 minutos. Sem teto, nada é somado.
  */
 function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, schedule: Schedule, log: Logger) {
   const { db, clock } = deps;
@@ -347,18 +352,26 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
     const outcome = await withOrg(db, organizationId, async (q) => {
       const chosen = await q.one<{ agent_id: string | null }>("select agent_id from whatsapp_call_sessions");
       const agentId = chosen?.agent_id ?? null;
-      if (await organizationSuspended(q)) {
+      const suspended = await organizationSuspended(q);
+      const cap = suspended ? null : await spendCapReached(q, clock.now());
+      if (suspended || cap?.reached) {
+        const reason = suspended ? "organization_suspended" : SPEND_CAP_REACHED;
+        const capCents = cap?.reached ? cap.capCents : undefined;
         // O agente só é lido pelo idioma da fala: ligado ou não, não atende.
         const spoken = agentId ? await q.one<{ language: string | null }>("select language from agents where id = $1", [agentId]) : null;
         const call = await q.one<{ id: string }>(
           `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
-           values ($1, $2, 'inbound', 'whatsapp', $3, $4, 'refused', 'organization_suspended', $5, $5) returning id`,
-          [organizationId, agentId, from, to, clock.now()],
+           values ($1, $2, 'inbound', 'whatsapp', $3, $4, 'refused', $6, $5, $5) returning id`,
+          [organizationId, agentId, from, to, clock.now(), reason],
         );
         if (!call) throw new Error("WhatsApp call was not created");
-        await recordEvent(q, call.id, "call_refused", { reason: "organization_suspended", from, to, channel: "whatsapp" }, clock.now());
+        await recordEvent(q, call.id, "call_refused", { reason, from, to, channel: "whatsapp", ...(capCents !== undefined && { capCents }) }, clock.now());
+        // A suspensa não avisa (quem olharia o painel é quem a suspensão tirou dele); o teto avisa uma vez por janela.
+        if (capCents !== undefined && !(await limitNoticedLately(q, clock, SPEND_CAP_REACHED))) {
+          await panelNotice(q, clock, call.id, SPEND_CAP_NOTICE(`${to}, pelo WhatsApp`, capCents));
+        }
         const unavailable: UnavailableJob = { language: spokenLanguageOf(spoken?.language) };
-        return { callId: call.id, agentId, refusal: null, unavailable };
+        return { callId: call.id, agentId, refusal: null, unavailable, unavailableReason: reason };
       }
       const agent = agentId ? await q.one<{ enabled: boolean }>("select enabled from agents where id = $1", [agentId]) : null;
       let refusal: Refusal | null = !agent ? "no_agent" : !agent.enabled ? "agent_disabled" : null;
@@ -379,11 +392,11 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
         await recordEvent(q, call.id, "call_refused", { reason: refusal, from, to, channel: "whatsapp", ...(overLimit && { limit }) }, clock.now());
         if (!(overLimit && (await limitNoticedLately(q, clock)))) await panelNotice(q, clock, call.id, NOTICE[refusal](from ?? "um número que o WhatsApp não informou", to, limit));
       }
-      return { callId: call.id, agentId, refusal, unavailable: null };
+      return { callId: call.id, agentId, refusal, unavailable: null, unavailableReason: null };
     });
     if (outcome.unavailable) {
       const { callId, unavailable } = outcome;
-      log("info", "WhatsApp call refused: the organization is suspended", { callId, language: unavailable.language });
+      log("info", "WhatsApp call refused with the unavailable notice", { callId, reason: outcome.unavailableReason, language: unavailable.language });
       let transport: WhatsAppTransport;
       try {
         transport = await answer(event, entry, callId);

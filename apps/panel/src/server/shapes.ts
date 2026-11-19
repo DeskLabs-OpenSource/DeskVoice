@@ -123,7 +123,9 @@ const trunkFields = z.object({
   // Nome ou IP do destino das ligações de saída; vazio vale o `host`.
   outboundHost: z.union([z.null(), z.literal("").transform(() => null), trunkHost]).optional(),
 });
-export const trunkPatch = trunkFields.partial();
+// `confirmOverlap`: a pessoa leu o aviso de que a faixa cruza a de outra organização (R8, fatia 10)
+// e salva mesmo assim. Não é coluna: só libera a gravação.
+export const trunkPatch = trunkFields.extend({ confirmOverlap: z.boolean().optional() }).partial();
 export const trunkCreate = trunkPatch.required({ name: true, host: true, authMode: true });
 // Liga ou desliga o filtro de entrada da linha por registro (R14, contrato 11). Fica fora de
 // `trunkPatch`: salvar o formulário da linha não mexe no filtro.

@@ -37,6 +37,7 @@ interface Row {
   trunk: { connected: number; attention: number; down: number; check: HealthCheck } | null;
   engine: { state: "own_key" | "no_key" | "key_failed"; check: HealthCheck };
   queue: { late: number; failedLast24h: number };
+  spendCapCents: number | null;
 }
 interface Overview {
   voiceAnswered: boolean;
@@ -189,6 +190,15 @@ describe("installation overview", () => {
       { late: 1, failedLast24h: 1 },
       { late: 0, failedLast24h: 0 },
     ]);
+  });
+
+  it("the monthly cap column (7c): null without a cap, the cap in cents with it, next to the same month's cost", async () => {
+    const { a, b, admin } = await scene();
+    await withSystem(panel.app, (q) => q.exec("insert into organization_limits (organization_id, monthly_spend_cap_cents) values ($1, 5000)", [b.org]));
+    await withSystem(panel.app, (q) => q.exec("insert into organization_limits (organization_id, max_agents) values ($1, 3)", [a.org]));
+    const data = await read(admin.cookie);
+    expect([rowOf(data, a.org).spendCapCents, rowOf(data, b.org).spendCapCents]).toEqual([null, 5000]);
+    expect(rowOf(data, b.org).cost.cents).toBe(8);
   });
 
   it("a line with a warning needs attention and is not counted as down; only a failing line is", async () => {

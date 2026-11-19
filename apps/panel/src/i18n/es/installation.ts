@@ -64,6 +64,10 @@ const installation: InstallationDictionary = {
     limitsOutboundHint: "Bloquear no cambia la elección de la organización: queda guardada y vuelve a valer cuando se desbloqueen las llamadas salientes.",
     limitsOutboundReturnsOn: "Las llamadas salientes de esta organización vuelven como ella las dejó: activadas.",
     limitsOutboundReturnsOff: "Las llamadas salientes de esta organización vuelven como ella las dejó: desactivadas.",
+    limitsSpendCap: "Tope de gasto del mes, en dólares",
+    limitsSpendCapSpent: "Gastado este mes: {spent}.",
+    limitsSpendCapApprox: "Aproximado: incluye costo estimado y no incluye lo que no se pudo medir. En el tope, toda llamada nueva se rechaza (la que está en curso sigue).",
+    limitsSpendCapInvalid: "El tope de gasto del mes debe ser un valor en dólares, como 50 o 49.90, o quedar vacío.",
     suspendedReason: "Motivo: {reason}",
     suspendTitle: "¿Suspender la organización {name}?",
     suspendLead: "Mientras esté suspendida, {name} no atiende (quien llama oye que el número no está disponible), no hace llamadas, y quien es solo de ella ve únicamente el aviso de suspendida, con el motivo. Las líneas siguen registradas. La retención y el borrado de datos de quien llamó siguen funcionando.",
@@ -115,6 +119,9 @@ const installation: InstallationDictionary = {
     engineStates: { own_key: "Con clave propia", no_key: "Sin clave", key_failed: "Clave con falla" },
     queue: "Cola",
     queueCounts: "{late} atrasadas, {failed} con falla en las últimas 24 horas",
+    spendCap: "Tope del mes",
+    spendCapOf: "{spent} de {cap}",
+    spendCapNone: "Sin tope",
   },
 
   audit: {
@@ -139,6 +146,7 @@ const installation: InstallationDictionary = {
       support_access_started: "{who} empezó un acceso de soporte en {org}.",
       support_access_ended: "El acceso de soporte de {who} en {org} terminó.",
       update_requested: "{who} pidió la actualización a la versión {target}, desde {org}.",
+      trunk_overlap_refused: "{who} intentó guardar en {org} una línea cuyo rango se cruza con el de otra organización. La pantalla pidió confirmación.",
     },
     sources: {
       command: "por el comando dentro del servidor",
