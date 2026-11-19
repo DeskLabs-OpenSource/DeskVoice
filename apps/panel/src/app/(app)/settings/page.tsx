@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import commonEn from "../../../i18n/en/common";
 import en from "../../../i18n/en/settings";
@@ -218,6 +219,33 @@ interface BrainModelOption {
 }
 
 /**
+ * Os agentes com escolha própria de quem lê a ligação (`analysisBrain` não nulo): para eles, o padrão
+ * da organização não vale. Nenhum, nada aparece.
+ */
+function OwnChoices({ t }: { t: SettingsDictionary }) {
+  const locale = useLocale();
+  const agents = useApi<Array<{ id: string; name: string; analysisBrain?: unknown }>>("/agents");
+  const own = (agents.data ?? []).filter((agent) => agent.analysisBrain !== null && agent.analysisBrain !== undefined);
+  if (own.length === 0) return null;
+  const names = new Intl.ListFormat(locale, { type: "conjunction" }).formatToParts(own.map((agent) => agent.name));
+  let next = 0;
+  return (
+    <p className="text-sm">
+      {own.length === 1 ? t.brainAgentsOwnOne : fill(t.brainAgentsOwnMany, { count: own.length })}{" "}
+      {names.map((part, index) => {
+        if (part.type !== "element") return <span key={index}>{part.value}</span>;
+        const agent = own[next++];
+        return agent ? (
+          <Link key={index} className="font-bold underline underline-offset-4" href={`/agents/${agent.id}`}>
+            {part.value}
+          </Link>
+        ) : null;
+      })}
+    </p>
+  );
+}
+
+/**
  * Quem lê a ligação (desfecho e análise): o motor do agente, que é o de antes, ou um cérebro e um
  * modelo da lista guardada dele. Só cérebros com chave aceita aparecem. Modelo sem preço mostra o
  * aviso fixo antes de salvar, e o aviso continua depois de salvo; a tela só manda
@@ -252,9 +280,12 @@ function AnalysisBrain({ t }: { t: SettingsDictionary }) {
 
   if (!canConfigure)
     return (
-      <Field label={t.brainTitle} hint={t.brainHint}>
-        <p>{saved ? fill(t.brainChosen, { brain: saved.brain, model: saved.model }) : t.brainEngine}</p>
-      </Field>
+      <div className="grid gap-2">
+        <Field label={t.brainTitle} hint={t.brainHint}>
+          <p>{saved ? fill(t.brainChosen, { brain: saved.brain, model: saved.model }) : t.brainEngine}</p>
+        </Field>
+        <OwnChoices t={t} />
+      </div>
     );
 
   return (
@@ -290,6 +321,7 @@ function AnalysisBrain({ t }: { t: SettingsDictionary }) {
           {keyGone && saved ? <option value={saved.brain}>{labelOf(saved.brain)}</option> : null}
         </Select>
       </Field>
+      <OwnChoices t={t} />
       {brains.data && accepted.length === 0 && !saved ? <p className="text-sm text-muted">{t.brainNone}</p> : null}
       {keyGone && saved ? <Notice tone="fail">{fill(t.brainKeyGone, { brain: labelOf(saved.brain) })}</Notice> : null}
       {brain && !keyGone ? (

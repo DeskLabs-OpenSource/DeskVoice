@@ -130,6 +130,8 @@ describe("brain keys and model lists", () => {
       keyCheck: { result: "accepted", status: 200, checkedAt: NOW.toISOString() },
       modelCount: 2,
       fetchedAt: NOW.toISOString(),
+      // Nenhum agente escolheu este cérebro para ler as ligações dele.
+      agents: [],
     });
     expect(all.data).toContainEqual(expect.objectContaining({ id: "anthropic", configured: false, keyCheck: null, modelCount: null }));
 

@@ -21,6 +21,11 @@ import { useCanConfigure } from "../../../../ui/me";
 import { GUIDED_ENGINES } from "../../settings/analysts/rules";
 import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
 import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
+import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
+import { AgentBrains } from "./brains";
+
+/** O agente como a API devolve, com quem lê a ligação dele (R4, fatia 5): nulo segue a organização. */
+type AgentWithBrain = Agent & { analysisBrain?: unknown };
 
 interface Draft {
   name: string;
@@ -48,19 +53,21 @@ interface Draft {
   dropFollowUpMessage: string;
   /** O analista ao vivo; vazio é "Nenhum", o de fábrica. */
   analystId: string;
+  /** Quem lê a ligação depois que ela termina; de fábrica, igual à organização. */
+  analysis: AnalysisDraft;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "" };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "", analysis: { kind: "organization" } };
 
 const VOCABULARY_FIELD_ID = "agent-vocabulary";
 
 /** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
-const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp"];
+const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp", "call_back"];
 
 /** Motores em que a sessão em Barulhento foi provada numa instalação real (a sessão abre; o efeito no ruído não foi medido). */
 const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime", "gemini-live"];
 
-const toDraft = (agent: Agent): Draft => ({
+const toDraft = (agent: AgentWithBrain): Draft => ({
   name: agent.name,
   roleLabel: agent.roleLabel ?? "",
   greeting: agent.greeting ?? "",
@@ -80,6 +87,7 @@ const toDraft = (agent: Agent): Draft => ({
   dropFollowUp: agent.dropFollowUp ?? "off",
   dropFollowUpMessage: agent.dropFollowUpMessage ?? "",
   analystId: agent.analystId ?? "",
+  analysis: toAnalysisDraft(agent.analysisBrain),
 });
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -90,7 +98,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const router = useRouter();
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
-  const agent = useApi<Agent>(isNew ? null : `/agents/${id}`);
+  const agent = useApi<AgentWithBrain>(isNew ? null : `/agents/${id}`);
   const engines = useApi<Engine[]>("/engines");
   const tools = useApi<ToolInfo[]>("/tools");
   const owners = useApi<Person[]>("/follow-ups/owners");
@@ -101,6 +109,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // O pré-requisito da mensagem no WhatsApp para quem ligou: conector e confiança no número exibido.
   const whatsAppConnector = useApi<Setting<unknown>>("/settings/whatsapp.connector");
   const trustCaller = useApi<Setting<boolean>>("/settings/whatsapp.trust_caller_id");
+  // O pré-requisito da religação: as ligações de saída ligadas (`outbound_policy.enabled`).
+  const outboundPolicy = useApi<{ enabled: boolean }>("/outbound-policy");
   // O nome da organização entra no texto padrão da mensagem para quem ligou.
   const me = useApi<Me>("/auth/me");
   const save = useAction();
@@ -113,6 +123,10 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // O modo gravado: o salvar só manda o modo quando ele mudou. Um agente já em `whatsapp` cujo
   // pré-requisito foi desligado depois continua salvando os outros campos, e a rota não o recusa.
   const [savedDropFollowUp, setSavedDropFollowUp] = useState<DropFollowUp>("off");
+  // Quem lê a ligação, como está gravado: o salvar só manda a escolha quando ela mudou.
+  const [savedAnalysis, setSavedAnalysis] = useState<AnalysisDraft>({ kind: "organization" });
+  // O modelo escolhido não tem preço e o aviso dele está na tela: só então o salvar manda `acceptUnmeasured`.
+  const [acceptUnmeasured, setAcceptUnmeasured] = useState(false);
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void => setDraft((current) => (current ? { ...current, [key]: value } : current));
 
   useEffect(() => {
@@ -120,6 +134,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       setDraft(toDraft(agent.data));
       setSavedEnvironment(agent.data.listeningEnvironment ?? "normal");
       setSavedDropFollowUp(agent.data.dropFollowUp ?? "off");
+      setSavedAnalysis(toAnalysisDraft(agent.data.analysisBrain));
     }
   }, [agent.data]);
   // Agente novo já nasce com o motor padrão da instalação; sem padrão, o primeiro da lista.
@@ -163,6 +178,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         : trustCaller.data.value !== true
           ? "not_trusted"
           : null;
+  // Por que a religação está indisponível, a mesma conferência da rota; `undefined` enquanto carrega.
+  const callBackBlock: "outbound_disabled" | null | undefined = outboundPolicy.data === undefined ? undefined : outboundPolicy.data.enabled ? null : "outbound_disabled";
   // A regra é a da API (`checkVocabulary`): a tela diz o erro ao lado do campo e não manda nada.
   const vocabulary = readVocabulary(draft.vocabulary);
   const vocabularyError = vocabulary.result.ok ? undefined : vocabularyErrorText(vocabulary.result.problem, t);
@@ -195,10 +212,12 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         ...(DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) && (isNew || draft.dropFollowUp !== savedDropFollowUp) && { dropFollowUp: draft.dropFollowUp }),
         dropFollowUpMessage: draft.dropFollowUpMessage,
         analystId: draft.analystId === "" ? null : draft.analystId,
+        ...analysisPatch(draft.analysis, savedAnalysis, acceptUnmeasured),
       };
-      const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
+      const saved = await api<AgentWithBrain>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       setSavedEnvironment(saved.listeningEnvironment ?? "normal");
       setSavedDropFollowUp(saved.dropFollowUp ?? "off");
+      setSavedAnalysis(toAnalysisDraft(saved.analysisBrain));
       if (isNew) router.replace(`/agents/${saved.id}`);
       else setDraft(toDraft(saved));
     });
@@ -340,6 +359,19 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           {engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
         </Panel>
 
+        <AgentBrains
+          t={t}
+          engineLabel={engine?.label ?? draft.engine}
+          analysis={draft.analysis}
+          onChange={(next, accept) => {
+            set("analysis", next);
+            setAcceptUnmeasured(accept);
+          }}
+          costCeilingCents={Math.round(Number(draft.costCeiling.replace(",", ".")) * 100)}
+          analyst={analysts.data?.find((candidate) => candidate.id === draft.analystId) ?? null}
+          canConfigure={canConfigure}
+        />
+
         <Panel title={t.analyst} description={t.analystLead}>
           <Field label={t.analyst} hint={t.analystHint}>
             <Select value={draft.analystId} onChange={(event) => set("analystId", event.target.value)} className="max-w-sm">
@@ -457,6 +489,9 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 <option value="whatsapp" disabled={whatsAppBlock !== null && draft.dropFollowUp !== "whatsapp"}>
                   {whatsAppBlock ? `${t.dropFollowUpWhatsApp} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpWhatsApp}
                 </option>
+                <option value="call_back" disabled={callBackBlock !== null && draft.dropFollowUp !== "call_back"}>
+                  {callBackBlock ? `${t.dropFollowUpCallBack} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpCallBack}
+                </option>
                 {DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) ? null : (
                   <option value={draft.dropFollowUp} disabled>
                     {t.dropFollowUpOther}
@@ -485,6 +520,33 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 </Link>
               </p>
             )
+          ) : null}
+          {callBackBlock ? (
+            // Como o WhatsApp: o motivo e o caminho; alerta só quando a religação já é o modo escolhido.
+            draft.dropFollowUp === "call_back" ? (
+              <div className="mt-3 max-w-prose">
+                <Notice tone="fail">
+                  <p>{t.dropFollowUpOutboundDisabled}</p>
+                  <Link href="/outbound" className="font-bold underline-offset-4 hover:underline">
+                    {t.dropFollowUpOutboundLink}
+                  </Link>
+                </Notice>
+              </div>
+            ) : (
+              <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
+                {t.dropFollowUpOutboundDisabled}{" "}
+                <Link href="/outbound" className="font-bold text-ink underline-offset-4 hover:underline">
+                  {t.dropFollowUpOutboundLink}
+                </Link>
+              </p>
+            )
+          ) : null}
+          {draft.dropFollowUp === "call_back" ? (
+            // Quantas tentativas e quando (fixos no código, seção 3.6), e a lista de não ligar.
+            <div className="mt-4 grid max-w-prose gap-2">
+              <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackHow}</p>
+              <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackDoNotCall}</p>
+            </div>
           ) : null}
           {draft.dropFollowUp === "whatsapp" ? (
             <div className="mt-4 grid max-w-prose gap-2">

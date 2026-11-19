@@ -15,6 +15,7 @@ const brains = {
   removeConfirm: "Remover a chave de {brain}? A lista de modelos de {brain} também é apagada. A chave removida não pode ser recuperada.",
   removeYes: "Remover a chave de {brain}",
   removeChosen: "{brain} é quem lê as ligações hoje (modelo {model}). Sem a chave, as ligações deixam de ser lidas até a chave voltar ou você escolher outro em \"Quem lê a ligação\", na seção da análise. Elas não passam para o motor do agente.",
+  removeAgents: "A análise das ligações de {agents} vai parar: esses agentes escolheram {brain} para ler as ligações deles. Elas não passam para a escolha da organização nem para o motor do agente.",
   cancel: "Cancelar",
   neverTested: "A chave ainda não foi testada. Use Atualizar lista para testar.",
   /** `{when}` é a data do teste, formatada no idioma da tela; `{result}`, uma frase de `results`. */

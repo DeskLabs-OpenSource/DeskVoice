@@ -122,6 +122,10 @@ export interface CallDetail extends Call {
   summaryPurged: boolean;
   /** O conteúdo saiu a pedido do titular (`calls.erased_at`). */
   erased: boolean;
+  /** A ligação que caiu, quando esta é a religação dela (`calls.call_back_of`); nula nas outras. */
+  callBackOf: string | null;
+  /** Quando a ligação original começou; nula se ela não é vista. */
+  callBackOfStartedAt: string | null;
   /** O custo de cada agente da ligação, na ordem em que gastou; `name: null` é agente apagado. A tela mostra com mais de um. */
   costByAgent: Array<{ agentId: string | null; name: string | null; costCents: number; unmeasuredCount: number; estimatedCount: number }>;
   /** Quantas linhas do extrato da ligação não têm custo medido (modelo sem preço, ou consumo que não pôde ser medido): com alguma, o zero não é grátis. */

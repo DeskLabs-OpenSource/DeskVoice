@@ -18,8 +18,13 @@ export type OutboundResult = { callId: string } | { code: string; message: strin
  * Origina uma ligação do agente para `toE164`. Só depois de `checkOutboundAllowed`: não existe
  * outro caminho que origine chamada. A recusa da política também fica gravada, como chamada
  * `refused` com o evento `call_refused`, para quem audita ver o que foi tentado.
+ *
+ * `callBackOf` é a religação da ligação que caiu (desenho 2026-11-16-follow-up-da-ligacao-que-caiu,
+ * seção 3.6): a chamada nasce com `calls.call_back_of` no mesmo insert, e a política é conferida aqui,
+ * na hora de discar, como em qualquer ligação de saída. Só o processo de voz passa o campo
+ * (`call-backs.ts`); a API interna não o aceita.
  */
-export async function startOutboundCall(deps: OutboundDeps, input: { organizationId: string; agentId: string; toE164: string }): Promise<OutboundResult> {
+export async function startOutboundCall(deps: OutboundDeps, input: { organizationId: string; agentId: string; toE164: string; callBackOf?: string }): Promise<OutboundResult> {
   const { db, ari, clock, log } = deps;
   const to = toE164(input.toE164);
   if (!to) return { code: "invalid_number", message: "The destination is not a valid phone number." };
@@ -42,9 +47,9 @@ export async function startOutboundCall(deps: OutboundDeps, input: { organizatio
 
     const decision = await checkOutboundAllowed(q, to, clock, trunk.caller_id_e164);
     const call = await q.one<{ id: string }>(
-      `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
-       values ($1, $2, 'outbound', 'phone', $3, $4, $5, $6, $7, $8) returning id`,
-      [input.organizationId, input.agentId, trunk.caller_id_e164, to, decision.allowed ? "ringing" : "refused", decision.allowed ? null : decision.code, clock.now(), decision.allowed ? null : clock.now()],
+      `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at, call_back_of)
+       values ($1, $2, 'outbound', 'phone', $3, $4, $5, $6, $7, $8, $9) returning id`,
+      [input.organizationId, input.agentId, trunk.caller_id_e164, to, decision.allowed ? "ringing" : "refused", decision.allowed ? null : decision.code, clock.now(), decision.allowed ? null : clock.now(), input.callBackOf ?? null],
     );
     if (!call) throw new Error("Outbound call was not created");
     if (!decision.allowed) {
