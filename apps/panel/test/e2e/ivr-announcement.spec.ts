@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import common from "../../src/i18n/pt-BR/common";
 import ivr from "../../src/i18n/pt-BR/ivr";
 import { signIn, unique } from "./session";
 
@@ -172,5 +173,23 @@ test("arquivo que não é áudio, e áudio com menos de 0,2 s: recusados com a f
   await expect(again.getByText(ivr.unreadable)).toBeVisible();
 
   expect(uploads).toEqual([]);
+  expect((await menuOf(page, menu.id)).promptAudioMs).toBeNull();
+});
+
+test("a rota recusa o anúncio com menos de 0,2 s (`ivr_prompt_too_short`): a tela mostra a frase dele, e não a genérica", async ({ page }) => {
+  const menu = await createMenu(page);
+  const row = await rowOf(page, menu);
+  // A tela recusa antes de subir; para chegar à recusa da rota, o PUT sai da tela com o tom de 1 s e
+  // chega ao servidor de verdade com um WAV de 0,1 s no lugar.
+  await page.route(`**/api/v1/ivr-menus/${menu.id}/audio`, (route) =>
+    route.request().method() === "PUT" ? route.continue({ postData: shortWav(100) }) : route.continue(),
+  );
+  const refused = page.waitForResponse((response) => response.request().method() === "PUT" && response.url().endsWith(`/api/v1/ivr-menus/${menu.id}/audio`));
+  await row.locator('input[type="file"]').setInputFiles({ name: "tom-1s.mp3", mimeType: "audio/mpeg", buffer: await fixture("tom-1s.mp3") });
+  const response = await refused;
+  expect(response.status()).toBe(400);
+  expect(((await response.json()) as { error: { code: string } }).error.code).toBe("ivr_prompt_too_short");
+  await expect(row.getByText(common.errors.ivr_prompt_too_short)).toBeVisible();
+  await expect(row.getByText(common.errors.fallback)).toHaveCount(0);
   expect((await menuOf(page, menu.id)).promptAudioMs).toBeNull();
 });

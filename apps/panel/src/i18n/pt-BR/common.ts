@@ -122,6 +122,7 @@ const common = {
     ivr_menu_in_use: "Este menu por teclas atende estes números. Troque o atendimento deles para a IA, ou para outro menu, antes de apagar o menu:",
     agent_in_ivr_menu: "Este agente é a ação de uma tecla nestes menus por teclas. Troque a tecla para outro agente, ou outra ação, antes de remover o agente:",
     ivr_prompt_format: "O anúncio precisa chegar como WAV PCM de 16 bits, mono, a 8000 Hz. A tela converte WAV, MP3 e M4A; se o navegador não abriu o arquivo, converta-o para MP3 e tente de novo.",
+    ivr_prompt_too_short: "O anúncio tem menos de 0,2 segundo, ou seja, não tem som. Grave um anúncio com a fala e tente de novo.",
     ivr_prompt_too_long: "O anúncio passa de 60 segundos. Grave um anúncio mais curto.",
     ivr_prompt_too_large: "O anúncio passa de 1 MB depois de convertido, o que equivale a mais de 60 segundos. Grave um anúncio mais curto.",
     trunk_inbound_name:
