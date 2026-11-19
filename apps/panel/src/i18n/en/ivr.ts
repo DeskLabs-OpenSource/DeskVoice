@@ -49,6 +49,8 @@ const ivr: IvrDictionary = {
   converting: "Converting the file…",
   unreadable: "The browser could not open this file, or it has no sound (under 0.2 s). Try an MP3 or a WAV.",
   tooLong: "This file lasts {seconds} s. The announcement can be at most 60 seconds.",
+  /** A frase do código `ivr_prompt_too_short` da rota do upload (menos de 200 ms). */
+  tooShort: "This announcement lasts under 0.2 s, which means it has no sound. Record an announcement with speech and try again.",
   listen: "Listen to the announcement",
   answers: "Answered by",
   answersAi: "AI (the agent)",

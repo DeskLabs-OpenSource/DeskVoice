@@ -47,6 +47,8 @@ const ivr = {
   converting: "Convertendo o arquivo…",
   unreadable: "O navegador não conseguiu abrir este arquivo, ou ele não tem som (menos de 0,2 s). Tente um MP3 ou um WAV.",
   tooLong: "Este arquivo tem {seconds} s. O anúncio pode ter no máximo 60 segundos.",
+  /** A frase do código `ivr_prompt_too_short` da rota do upload (menos de 200 ms). */
+  tooShort: "Este anúncio tem menos de 0,2 s, o que quer dizer que não tem som. Grave um anúncio com a fala e tente de novo.",
   listen: "Ouvir o anúncio",
   answers: "Atende",
   answersAi: "IA (o agente)",

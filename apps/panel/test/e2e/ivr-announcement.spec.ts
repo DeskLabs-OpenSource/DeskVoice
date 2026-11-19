@@ -16,6 +16,8 @@ import { signIn, unique } from "./session";
 /** Ao lado do spec, sem depender de ESM ou CommonJS. */
 const fixture = (name: string): Promise<Buffer> => readFile(path.join(path.dirname(test.info().file), "fixtures", name));
 const TOLERANCE_MS = 50;
+/** O que o banco gravou em `prompt_audio_ms` para o tom de 1 s: 1000 ms ± 100 (o desenho da 1d). */
+const STORED_TOLERANCE_MS = 100;
 const MIN_MS = 200;
 
 interface Menu {
@@ -49,8 +51,36 @@ const uploadsOf = (page: Page, menu: Menu): string[] => {
   return seen;
 };
 
-/** O WAV que o servidor devolve: PCM16 mono a 8 kHz, e a duração dele em ms. */
-const savedWav = async (page: Page, menu: Menu): Promise<number> => {
+/**
+ * O conteúdo do que foi gravado, e não só "passou": o `prompt_audio_ms` que o banco guardou, o WAV
+ * que o "Ouvir" devolve com a mesma duração, e o som dentro dele. O tom de 440 Hz cruza o zero
+ * ~880 vezes por segundo; silêncio não cruza, e um sinal com a taxa errada cruza em outro ritmo.
+ */
+const expectToneOfOneSecond = async (page: Page, menu: Menu): Promise<void> => {
+  const stored = (await menuOf(page, menu.id)).promptAudioMs;
+  expect(stored, "prompt_audio_ms gravado").not.toBeNull();
+  expect(Math.abs((stored ?? 0) - 1000), `prompt_audio_ms ${stored}`).toBeLessThanOrEqual(STORED_TOLERANCE_MS);
+  const { ms, pcm } = await savedWav(page, menu);
+  expect(ms).toBe(stored);
+  expect(Math.abs(ms - 1000), `${ms} ms`).toBeLessThanOrEqual(TOLERANCE_MS);
+  // Com histerese: o chiado perto do zero (o atraso do decodificador) não conta como cruzamento.
+  let peak = 0;
+  let crossings = 0;
+  let side = 0;
+  for (let i = 0; i < pcm.length / 2; i += 1) {
+    const sample = pcm.readInt16LE(i * 2);
+    peak = Math.max(peak, Math.abs(sample));
+    const now = sample > 500 ? 1 : sample < -500 ? -1 : side;
+    if (side !== 0 && now !== side) crossings += 1;
+    side = now;
+  }
+  expect(peak, "o anúncio tem som").toBeGreaterThan(1000);
+  const perSecond = (crossings * 1000) / ms;
+  expect(Math.abs(perSecond - 880), `${Math.round(perSecond)} cruzamentos por segundo`).toBeLessThanOrEqual(80);
+};
+
+/** O WAV que o servidor devolve: PCM16 mono a 8 kHz, a duração dele em ms e as amostras. */
+const savedWav = async (page: Page, menu: Menu): Promise<{ ms: number; pcm: Buffer }> => {
   const response = await page.request.get(`/api/v1/ivr-menus/${menu.id}/audio`);
   expect(response.status()).toBe(200);
   const wav = await response.body();
@@ -60,7 +90,8 @@ const savedWav = async (page: Page, menu: Menu): Promise<number> => {
   expect(wav.readUInt16LE(22), "mono").toBe(1);
   expect(wav.readUInt32LE(24), "8 kHz").toBe(8000);
   expect(wav.readUInt16LE(34), "16 bits").toBe(16);
-  return Math.round((wav.readUInt32LE(40) / 2 / 8000) * 1000);
+  const pcm = wav.subarray(44, 44 + wav.readUInt32LE(40));
+  return { ms: Math.round((pcm.length / 2 / 8000) * 1000), pcm };
 };
 
 /** Um WAV PCM16 mono a 8 kHz com `ms` de silêncio: o navegador abre, mas é curto demais. */
@@ -86,20 +117,19 @@ test.beforeEach(async ({ page }) => {
   await signIn(page);
 });
 
-test("anúncio em MP3: salvo como WAV PCM16 mono a 8 kHz, com 1 s", async ({ page }) => {
+test("anúncio em MP3: salvo como WAV PCM16 mono a 8 kHz, com 1 s gravado e o tom dentro", async ({ page }) => {
   const menu = await createMenu(page);
   const row = await rowOf(page, menu);
   const saved = page.waitForResponse((response) => response.request().method() === "PUT" && response.url().endsWith(`/api/v1/ivr-menus/${menu.id}/audio`));
   await row.locator('input[type="file"]').setInputFiles({ name: "tom-1s.mp3", mimeType: "audio/mpeg", buffer: await fixture("tom-1s.mp3") });
   expect((await saved).status()).toBe(200);
-  const ms = await savedWav(page, menu);
-  expect(Math.abs(ms - 1000), `${ms} ms`).toBeLessThanOrEqual(TOLERANCE_MS);
-  expect((await menuOf(page, menu.id)).promptAudioMs).toBe(ms);
+  await expectToneOfOneSecond(page, menu);
   await expect(row.getByText(ivr.unreadable)).toHaveCount(0);
 });
 
 test("anúncio em M4A (AAC): convertido com 1 s, ou recusado com a frase; nunca silêncio", async ({ page }) => {
   const menu = await createMenu(page);
+  const uploads = uploadsOf(page, menu);
   const row = await rowOf(page, menu);
   const saved = page
     .waitForResponse((response) => response.request().method() === "PUT" && response.url().endsWith(`/api/v1/ivr-menus/${menu.id}/audio`))
@@ -116,10 +146,12 @@ test("anúncio em M4A (AAC): convertido com 1 s, ou recusado com a frase; nunca 
   test.info().annotations.push({ type: "m4a", description: outcome.kind });
   if (outcome.kind === "saved") {
     expect(outcome.status).toBe(200);
-    const ms = await savedWav(page, menu);
-    expect(ms).toBeGreaterThanOrEqual(MIN_MS);
-    expect(Math.abs(ms - 1000), `${ms} ms`).toBeLessThanOrEqual(TOLERANCE_MS);
+    expect((await menuOf(page, menu.id)).promptAudioMs).toBeGreaterThanOrEqual(MIN_MS);
+    await expectToneOfOneSecond(page, menu);
   } else {
+    // Sem codec AAC: a frase na tela, nada subiu e nada foi gravado.
+    await expect(row.getByText(ivr.unreadable)).toBeVisible();
+    expect(uploads).toEqual([]);
     expect((await menuOf(page, menu.id)).promptAudioMs).toBeNull();
   }
 });
