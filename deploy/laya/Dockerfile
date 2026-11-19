@@ -4,8 +4,9 @@
 # ou, à parte: docker build --target laya -t deskvoice-laya:local deploy/laya
 #
 # Tudo o que entra está fixado: a base por resumo (índice multiarquitetura, amd64 e arm64), as
-# dependências Python pela versão exata (requirements.txt) e os pesos por revisão do Hugging Face
-# e pelo resumo de cada arquivo (weights.sha256). O build é o único momento com rede: o contêiner
+# dependências Python pela versão exata e pelo resumo de cada roda (requirements-torch.txt e
+# requirements.txt) e os pesos por revisão do Hugging Face e pelo resumo de cada arquivo
+# (weights.sha256). O build é o único momento com rede: o contêiner
 # não baixa nada ao subir.
 
 # python:3.12.16-slim-bookworm, resumo do índice lido no Docker Hub em 18/11/2026.
@@ -20,10 +21,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /opt/laya
 
 # O torch de CPU (sem as bibliotecas de GPU, que dobrariam a imagem) vem do índice do PyTorch, num
-# passo só dele; o resto vem do PyPI, e o torch já instalado satisfaz o `torch==2.14.1` da lista.
-COPY requirements.txt ./
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1+cpu \
- && pip install -r requirements.txt
+# passo só dele e sem as dependências (elas estão no requirements.txt); o resto vem do PyPI, e o
+# torch já instalado satisfaz o que o pede. Os dois só aceitam roda com o resumo da lista
+# (`--require-hashes`) e nunca constroem do código-fonte (`--only-binary=:all:`): o build isolado
+# baixaria setuptools e wheel sem resumo. O `pip check` para o build se faltar alguma dependência.
+COPY requirements-torch.txt requirements.txt ./
+RUN pip install --require-hashes --only-binary=:all: --no-deps --index-url https://download.pytorch.org/whl/cpu -r requirements-torch.txt \
+ && pip install --require-hashes --only-binary=:all: -r requirements.txt \
+ && pip check
 
 # Os pesos: o checkpoint multilíngue de convaiinnovations/laya, na revisão em que a bancada mediu a
 # rodada 3 (15/11/2026). As três revisões que o repositório teve entre 14 e 15/11 trazem os mesmos
