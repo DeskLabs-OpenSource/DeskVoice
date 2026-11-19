@@ -23,6 +23,12 @@ export const IVR_DIGITS = "1234567890*#";
 
 /** O anúncio dura no máximo 60 s: 960 000 bytes de PCM16 a 8 kHz (o `check` da tabela). */
 export const IVR_MAX_PROMPT_MS = 60_000;
+/**
+ * E no mínimo 200 ms. Um arquivo que o navegador "abre" com duração zero (ou quase) viraria um WAV de
+ * uma amostra: silêncio salvo como anúncio. A tela (`announcement-audio.ts`) e a rota do upload
+ * recusam abaixo disto, com este mesmo número.
+ */
+export const IVR_MIN_PROMPT_MS = 200;
 export const IVR_MAX_PROMPT_BYTES = 960_000;
 
 /** Os limites da tabela (`check`s da migration), para a API e a tela dizerem o mesmo que o banco. */

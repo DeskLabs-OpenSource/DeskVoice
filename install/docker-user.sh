@@ -135,7 +135,7 @@ remove_unit() {
 install_unit() {  # install_unit <portas...>: o serviço que repõe a regra depois do boot e do Docker
   if [ $# -eq 0 ]; then remove_unit; return 0; fi
   if [ "$DRY_RUN_RULE" = 1 ]; then
-    info "[simulação] faria: gravar $UNIT_FILE com 'apply $*' e ligá-lo no boot (systemd)"
+    info "[simulação] faria: gravar $UNIT_FILE com 'apply $*' e ligá-lo agora e no boot (systemctl enable --now)"
     return 0
   fi
   if ! { have systemctl && [ -d "$SYSTEMD_RUN_DIR" ]; }; then

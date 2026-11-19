@@ -212,6 +212,33 @@ describe("T11: o anúncio", () => {
     expect([exact.status, exact.data?.promptAudioMs]).toEqual([200, 60_000]);
   });
 
+  it("U12: recusa o anúncio com menos de 200 ms (`ivr_prompt_too_short`), e aceita os 200 ms exatos", async () => {
+    const menu = await newMenu("Curto");
+    // 199 ms: 1592 amostras a 8 kHz. Um WAV de uma amostra (o arquivo mudo que a tela já recusa) também.
+    for (const [samples, ms] of [
+      [1592, 199],
+      [1, 0],
+    ] as const) {
+      const short = await upload(menu, wav({ samples }));
+      expect([short.status, short.code, short.message]).toEqual([400, "ivr_prompt_too_short", `The announcement lasts ${ms} ms; it must last at least 200 ms.`]);
+    }
+    expect(await stored("select prompt_audio, prompt_audio_ms from ivr_menus where id = $1", [menu])).toEqual({ prompt_audio: null, prompt_audio_ms: null });
+    const exact = await upload(menu, wav({ samples: 1600 }));
+    expect([exact.status, exact.data?.promptAudioMs]).toEqual([200, 200]);
+  });
+
+  it("P3: o `GET` de um menu não devolve os bytes do anúncio, só `promptAudioMs`", async () => {
+    const menu = await newMenu("Sem bytes");
+    expect((await upload(menu, wav({ samples: 8000 }))).status).toBe(200);
+    const read = await call(getMenu, { cookie: owner, params: { id: menu } });
+    expect(read.status).toBe(200);
+    expect(read.text).not.toMatch(/"prompt_?audio"\s*:/i);
+    expect(read.data).toMatchObject({ id: menu, promptAudioMs: 1000 });
+    expect(Object.keys(read.data as Record<string, unknown>).sort()).toEqual(
+      ["createdAt", "id", "language", "maxAttempts", "name", "onNoChoice", "options", "promptAudioMs", "timeoutMs", "updatedAt"].sort(),
+    );
+  });
+
   it("só quem configura sobe o anúncio", async () => {
     const menu = await newMenu("Papel");
     const refused = await upload(menu, wav(), { cookie: operator });
