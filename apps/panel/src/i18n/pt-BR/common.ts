@@ -75,6 +75,10 @@ const common = {
   },
   errors: {
     fallback: "Não conseguimos concluir essa ação. Tente de novo em instantes.",
+    unknown_brain: "Esse cérebro não existe nesta instalação. Escolha outro em quem lê a ligação.",
+    brain_no_key: "Esse cérebro não tem chave salva. Salve e teste a chave em Configurações → Cérebros antes de escolhê-lo.",
+    brain_model_not_listed: "Esse modelo não está na lista guardada do cérebro. Atualize a lista em Configurações → Cérebros.",
+    brain_model_unmeasured: "O preço desse modelo não é conhecido. Escolha o modelo de novo para ver o aviso e salvar.",
     network: "O painel não respondeu. Confira sua conexão e tente de novo.",
     internal_error: "Tivemos um problema no servidor. Nada foi alterado. Tente de novo em instantes.",
     unauthenticated: "Sua sessão expirou. Entre de novo para continuar.",
@@ -112,6 +116,7 @@ const common = {
     owner_unavailable: "Essa pessoa não está ativa na equipe. Escolha outra, ou deixe com a equipe.",
     drop_follow_up_whatsapp_not_connected: "O WhatsApp não está conectado. Conecte em Configurações → WhatsApp antes de escolher a mensagem para quem ligou.",
     drop_follow_up_caller_id_not_trusted: "A mensagem para quem ligou só sai com \"Confiar no número exibido na ligação\" ligado, em Configurações → WhatsApp. Ligue antes de escolher este modo.",
+    drop_follow_up_outbound_disabled: "As ligações de saída estão desligadas. Ligue-as em Ligações de saída, declarando finalidade e base legal, antes de escolher ligar de volta.",
     caller_notes_retention_above_transcripts: "O prazo da memória não pode passar do prazo de guarda das conversas. Escolha um prazo menor, ou aumente antes o prazo de guarda.",
     follow_up_closed: "Esta pendência já foi fechada por outra pessoa. Atualize a página.",
     whatsapp_calls_unavailable: "O processo de voz deste servidor ainda não tem a chave do serviço de ligação pelo WhatsApp. Rode bash install/update.sh no servidor, uma vez.",

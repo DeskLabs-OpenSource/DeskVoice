@@ -883,7 +883,7 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
     // mais 100 mil de saída a 40: 5 + 4 = 9 centavos.
     expect(await extratoDe(callId)).toEqual([{ engine: "brain:openai", model: "gpt-5-mini", cost_measured: true, input_tokens: 1_000_000, output_tokens: 100_000, cost_microcents: 9_000_000 }]);
     expect((await custoDe(callId)).call).toBe(9);
-    expect(await eventosDe(callId, "call_analyzed")).toEqual([{ score: NOTA, rubricVersion: 1, model: "gpt-5-mini", costCents: 9, droppedObjections: 0, brain: "openai", costMeasured: true }]);
+    expect(await eventosDe(callId, "call_analyzed")).toEqual([{ score: NOTA, rubricVersion: 1, model: "gpt-5-mini", costCents: 9, droppedObjections: 0, brain: "openai", costMeasured: true, choiceFrom: "organization" }]);
     expect((await analiseDe(callId))?.outcome).toBe("booked");
     // A chave nunca aparece num evento.
     expect(JSON.stringify(await eventsOf(app, callId))).not.toContain(CHAVE_DO_CEREBRO);
@@ -934,7 +934,7 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
 
     expect(fetch).not.toHaveBeenCalled();
     expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
-    const evento = { reason: "brain_unavailable", brain: cerebro, model: modelo };
+    const evento = { reason: "brain_unavailable", brain: cerebro, model: modelo, choiceFrom: "organization" };
     expect(await falhasDe(callId)).toEqual([evento]);
     expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
     expect(await extratoDe(callId)).toEqual([]);
@@ -957,7 +957,7 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
 
     expect(fetch).not.toHaveBeenCalled();
     expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
-    const evento = { reason: "brain_unavailable", brain: null, model: null };
+    const evento = { reason: "brain_unavailable", brain: null, model: null, choiceFrom: "organization" };
     expect(await falhasDe(callId)).toEqual([evento]);
     expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
     expect(await extratoDe(callId)).toEqual([]);
@@ -974,7 +974,7 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
 
     expect(fetch).not.toHaveBeenCalled();
     expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
-    const evento = { reason: "brain_no_key", brain: CEREBRO.id, model: COM_PRECO.id };
+    const evento = { reason: "brain_no_key", brain: CEREBRO.id, model: COM_PRECO.id, choiceFrom: "organization" };
     expect(await falhasDe(callId)).toEqual([evento]);
     expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
   });
@@ -991,7 +991,7 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
 
     expect(fetch).not.toHaveBeenCalled();
     expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
-    const evento = { reason: "brain_unmeasured_without_ceiling", brain: CEREBRO.id, model: SEM_PRECO.id };
+    const evento = { reason: "brain_unmeasured_without_ceiling", brain: CEREBRO.id, model: SEM_PRECO.id, choiceFrom: "organization" };
     expect(await falhasDe(callId)).toEqual([evento]);
     expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
   });
@@ -1005,7 +1005,7 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
     await roda(org, callId, openai(completa()));
 
     expect(await extratoDe(callId)).toEqual([{ engine: `brain:${CEREBRO.id}`, model: SEM_PRECO.id, cost_measured: false, input_tokens: 1000, output_tokens: 100, cost_microcents: 0 }]);
-    expect(await eventosDe(callId, "call_analyzed")).toEqual([{ score: NOTA, rubricVersion: 1, model: SEM_PRECO.id, costCents: 0, droppedObjections: 0, brain: CEREBRO.id, costMeasured: false }]);
+    expect(await eventosDe(callId, "call_analyzed")).toEqual([{ score: NOTA, rubricVersion: 1, model: SEM_PRECO.id, costCents: 0, droppedObjections: 0, brain: CEREBRO.id, costMeasured: false, choiceFrom: "organization" }]);
   });
 
   it("modelo com preço e agente sem teto: lê normalmente, com o custo medido", async () => {
@@ -1030,7 +1030,7 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
     await roda(org, callId, openai(completa()));
 
     expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
-    expect(await falhasDe(callId)).toEqual([{ reason: "cost_ceiling", brain: CEREBRO.id, model: COM_PRECO.id, costCents: 500, ceilingCents: 500 }]);
+    expect(await falhasDe(callId)).toEqual([{ reason: "cost_ceiling", brain: CEREBRO.id, model: COM_PRECO.id, choiceFrom: "organization", costCents: 500, ceilingCents: 500 }]);
   });
 
   describe("custo desconhecido, nunca zero medido", () => {
@@ -1054,7 +1054,7 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
 
       await roda(org, callId, openai(completa()));
 
-      const evento = { reason: "unreachable", brain: CEREBRO.id, model: COM_PRECO.id, status: null, costCents: 0, costMeasured: false };
+      const evento = { reason: "unreachable", brain: CEREBRO.id, model: COM_PRECO.id, status: null, costCents: 0, costMeasured: false, choiceFrom: "organization" };
       expect(await falhasDe(callId)).toEqual([evento]);
       expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
       expect(await extratoDe(callId)).toEqual([{ engine: `brain:${CEREBRO.id}`, model: COM_PRECO.id, cost_measured: false, input_tokens: 0, output_tokens: 0, cost_microcents: 0 }]);
@@ -1068,7 +1068,7 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
 
       await roda(org, callId, openai(completa()));
 
-      expect(await falhasDe(callId)).toEqual([{ reason: "rejected", brain: CEREBRO.id, model: SEM_PRECO.id, status: 401, costCents: 0, costMeasured: true }]);
+      expect(await falhasDe(callId)).toEqual([{ reason: "rejected", brain: CEREBRO.id, model: SEM_PRECO.id, status: 401, costCents: 0, costMeasured: true, choiceFrom: "organization" }]);
       expect(await extratoDe(callId)).toEqual([]);
     });
 
@@ -1164,5 +1164,229 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
     // Sem a escolha, o destino que continuou gravado volta a valer.
     expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat", authorization: `Bearer ${CHAVE_DO_ENDPOINT}` }]);
     expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+  });
+
+  describe("a escolha de cada agente (agents.analysis_brain)", () => {
+    const OUTRO_COM_PRECO: BrainModel = { id: "outro-modelo-com-preco", label: "Outro com preço", price: { ...PRECO, centsPerMillionInputTokens: 10 } };
+
+    /** Grava a escolha no agente da ligação como o painel faria; um valor qualquer simula o banco editado à mão. */
+    const escolheNoAgente = (callId: string, valor: unknown): Promise<number> =>
+      withSystem(app, (q) => q.exec("update agents set analysis_brain = $2::jsonb where id = (select agent_id from calls where id = $1)", [callId, JSON.stringify(valor)]));
+
+    /** Outro agente na mesma organização, com uma ligação dele e a conversa de sempre. */
+    const outroAgente = async (org: string, nome: string): Promise<string> => {
+      const agentId = await withSystem(app, async (q) => (await q.one<{ id: string }>("insert into agents (organization_id, name, engine) values ($1, $2, $3) returning id", [org, nome, MOTOR]))?.id as string);
+      const callId = await createCall(app, org, t0);
+      await withSystem(app, (q) => q.exec("update calls set agent_id = $2 where id = $1", [callId, agentId]));
+      await conversa(org, callId);
+      return callId;
+    };
+
+    /** O cérebro falso responde a análise completa com o modelo que foi pedido: o extrato diz quem leu. */
+    const cerebroEcoa = (usage: object = { inputTokens: 1000, outputTokens: 100 }): void => {
+      CEREBRO.completeJson.mockImplementationOnce(async (_chave: string, pedido: { model: string }) => ({ ok: true, text: JSON.stringify(completa()), model: pedido.model, usage }));
+    };
+
+    it("T1: dois agentes com modelos diferentes: cada ligação é lida pelo modelo do próprio agente, e a organização não é usada", async () => {
+      const { org, callId: deVendas } = await pronta("agente t1");
+      const deSuporte = await outroAgente(org, "Suporte");
+      await comCerebro(org, CEREBRO.id, [COM_PRECO, OUTRO_COM_PRECO]);
+      // A organização escolheu outro cérebro: com os dois agentes escolhendo, ele não recebe nada.
+      await comCerebro(org, "openai", [{ id: "gpt-5-mini", label: "GPT-5 mini", price: PRECO }]);
+      await escolhe(org, "openai", "gpt-5-mini");
+      await escolheNoAgente(deVendas, { kind: "brain", brain: CEREBRO.id, model: COM_PRECO.id });
+      await escolheNoAgente(deSuporte, { kind: "brain", brain: CEREBRO.id, model: OUTRO_COM_PRECO.id });
+      const fetch = openai(completa());
+
+      cerebroEcoa();
+      await roda(org, deVendas, fetch);
+      expect(CEREBRO.completeJson.mock.calls.at(-1)?.[1]).toMatchObject({ model: COM_PRECO.id });
+      cerebroEcoa();
+      await roda(org, deSuporte, fetch);
+      expect(CEREBRO.completeJson.mock.calls.at(-1)?.[1]).toMatchObject({ model: OUTRO_COM_PRECO.id });
+
+      expect(fetch).not.toHaveBeenCalled();
+      // 1 000 de entrada e 100 de saída: a 5 e 40 centavos por milhão, 9 000 µ¢; a 10 e 40, 14 000 µ¢.
+      expect(await extratoDe(deVendas)).toEqual([{ engine: `brain:${CEREBRO.id}`, model: COM_PRECO.id, cost_measured: true, input_tokens: 1000, output_tokens: 100, cost_microcents: 9_000 }]);
+      expect(await extratoDe(deSuporte)).toEqual([{ engine: `brain:${CEREBRO.id}`, model: OUTRO_COM_PRECO.id, cost_measured: true, input_tokens: 1000, output_tokens: 100, cost_microcents: 14_000 }]);
+      expect((await eventosDe(deVendas, "call_analyzed"))[0]).toMatchObject({ brain: CEREBRO.id, model: COM_PRECO.id, choiceFrom: "agent" });
+      expect((await eventosDe(deSuporte, "call_analyzed"))[0]).toMatchObject({ brain: CEREBRO.id, model: OUTRO_COM_PRECO.id, choiceFrom: "agent" });
+    });
+
+    it("T2 e T8: o agente sem escolha (coluna nula, como toda linha que já existia) segue a organização", async () => {
+      const { org, callId } = await pronta("agente t2");
+      expect(await withSystem(app, async (q) => (await q.one<{ n: string }>("select count(*) as n from agents where organization_id = $1 and analysis_brain is not null", [org]))?.n)).toBe("0");
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolhe(org, CEREBRO.id, COM_PRECO.id);
+      cerebroEcoa();
+      const fetch = openai(completa());
+
+      await roda(org, callId, fetch);
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(CEREBRO.completeJson.mock.calls.at(-1)?.[1]).toMatchObject({ model: COM_PRECO.id });
+      expect((await eventosDe(callId, "call_analyzed"))[0]).toMatchObject({ brain: CEREBRO.id, model: COM_PRECO.id, choiceFrom: "organization" });
+    });
+
+    it("T3: o agente com o motor dele lê pelo motor, mesmo com um cérebro escolhido na organização", async () => {
+      const { org, callId } = await pronta("agente t3");
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolhe(org, CEREBRO.id, COM_PRECO.id);
+      await escolheNoAgente(callId, { kind: "engine" });
+      const calls = CEREBRO.completeJson.mock.calls.length;
+      const fetch = openai(completa());
+
+      await roda(org, callId, fetch);
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+      expect(await extratoDe(callId)).toEqual([{ engine: MOTOR, model: null, cost_measured: true, input_tokens: 1_000_000, output_tokens: 100_000, cost_microcents: CUSTO_MICRO }]);
+      // O caminho do motor não muda: o evento é o de antes, sem cérebro e sem de quem é a escolha.
+      expect(await eventosDe(callId, "call_analyzed")).toEqual([{ score: NOTA, rubricVersion: 1, model: "gpt-5-nano", costCents: CUSTO, droppedObjections: 0 }]);
+    });
+
+    it("T3: o motor do agente segue o classify_target da organização, como o motor de hoje", async () => {
+      const { org, callId } = await pronta("agente t3 destino");
+      await comDestino(org, { baseUrl: "https://api.deepseek.com/v1", modelo: "deepseek-chat", chave: CHAVE_DO_ENDPOINT });
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolhe(org, CEREBRO.id, COM_PRECO.id);
+      await escolheNoAgente(callId, { kind: "engine" });
+      const { fetch, pedidos } = pedidoCom(completa());
+
+      await roda(org, callId, fetch);
+
+      expect(pedidos).toEqual([{ url: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat", authorization: `Bearer ${CHAVE_DO_ENDPOINT}` }]);
+    });
+
+    it("T4: a chave do cérebro do agente foi removida: brain_no_key, e nada sai, nem pela organização nem pelo motor", async () => {
+      const { org, callId } = await pronta("agente t4");
+      // A organização tem outro cérebro, com chave: ele não é usado.
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolhe(org, CEREBRO.id, COM_PRECO.id);
+      await comCerebro(org, "anthropic", [{ id: "claude-sonnet-com-preco", label: "Sonnet", price: PRECO }], false);
+      await escolheNoAgente(callId, { kind: "brain", brain: "anthropic", model: "claude-sonnet-com-preco" });
+      const calls = CEREBRO.completeJson.mock.calls.length;
+      const fetch = openai(completa());
+
+      await roda(org, callId, fetch);
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+      const evento = { reason: "brain_no_key", brain: "anthropic", model: "claude-sonnet-com-preco", choiceFrom: "agent" };
+      expect(await falhasDe(callId)).toEqual([evento]);
+      expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
+      expect(await extratoDe(callId)).toEqual([]);
+    });
+
+    it("o modelo do agente saiu da lista guardada: brain_unavailable, e a organização não é usada", async () => {
+      const { org, callId } = await pronta("agente modelo saiu");
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolhe(org, CEREBRO.id, COM_PRECO.id);
+      await escolheNoAgente(callId, { kind: "brain", brain: CEREBRO.id, model: "modelo-que-saiu" });
+      const calls = CEREBRO.completeJson.mock.calls.length;
+      const fetch = openai(completa());
+
+      await roda(org, callId, fetch);
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+      expect(await falhasDe(callId)).toEqual([{ reason: "brain_unavailable", brain: CEREBRO.id, model: "modelo-que-saiu", choiceFrom: "agent" }]);
+    });
+
+    it("F3: o cérebro escolhido pelo agente sumiu da pasta: brain_unavailable, e nada sai, nem pela organização nem pelo motor", async () => {
+      const { org, callId } = await pronta("agente cerebro sumiu");
+      // A organização tem um cérebro descoberto, com chave e modelo: cair nela leria a ligação por ele.
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolhe(org, CEREBRO.id, COM_PRECO.id);
+      // A lista e a chave do cérebro que sumiu continuam salvas: só a pasta dele não existe mais.
+      await comCerebro(org, "cerebro-que-sumiu", [COM_PRECO]);
+      await escolheNoAgente(callId, { kind: "brain", brain: "cerebro-que-sumiu", model: COM_PRECO.id });
+      const calls = CEREBRO.completeJson.mock.calls.length;
+      const fetch = openai(completa());
+
+      await roda(org, callId, fetch);
+
+      // Nem o motor (o `fetch` do caminho do motor) nem o cérebro da organização recebem pedido.
+      expect(fetch).not.toHaveBeenCalled();
+      expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+      const evento = { reason: "brain_unavailable", brain: "cerebro-que-sumiu", model: COM_PRECO.id, choiceFrom: "agent" };
+      expect(await falhasDe(callId)).toEqual([evento]);
+      expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
+      expect(await extratoDe(callId)).toEqual([]);
+      expect(await eventosDe(callId, "call_analyzed")).toEqual([]);
+    });
+
+    it.each([
+      ["sem o kind", { brain: "cerebro-falso", model: "modelo-com-preco" }],
+      ["um kind desconhecido", { kind: "organization" }],
+      ["cérebro sem o modelo", { kind: "brain", brain: "cerebro-falso" }],
+      ["o motor com um campo a mais", { kind: "engine", brain: "cerebro-falso" }],
+      ["um texto solto", "engine"],
+      ["uma lista", [null]],
+      ["o null do JSON (não o nulo da coluna)", null],
+    ])("T5: a coluna fora da forma (%s, gravada à mão) é brain_unavailable, sem cair na organização nem no motor", async (_caso, valor) => {
+      const { org, callId } = await pronta(`agente t5 ${JSON.stringify(valor)}`);
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolhe(org, CEREBRO.id, COM_PRECO.id);
+      await escolheNoAgente(callId, valor);
+      const calls = CEREBRO.completeJson.mock.calls.length;
+      const fetch = openai(completa());
+
+      await roda(org, callId, fetch);
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+      const evento = { reason: "brain_unavailable", brain: null, model: null, choiceFrom: "agent" };
+      expect(await falhasDe(callId)).toEqual([evento]);
+      expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
+      expect(await extratoDe(callId)).toEqual([]);
+    });
+
+    it("T6: modelo sem preço no agente sem teto é recusado; no agente com teto, é lido com o custo não medido", async () => {
+      const semTetoLigacao = await pronta("agente t6 sem teto");
+      await semTeto(semTetoLigacao.org);
+      await comCerebro(semTetoLigacao.org, CEREBRO.id, [SEM_PRECO]);
+      await escolheNoAgente(semTetoLigacao.callId, { kind: "brain", brain: CEREBRO.id, model: SEM_PRECO.id });
+      const calls = CEREBRO.completeJson.mock.calls.length;
+
+      await roda(semTetoLigacao.org, semTetoLigacao.callId, openai(completa()));
+
+      expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+      expect(await falhasDe(semTetoLigacao.callId)).toEqual([{ reason: "brain_unmeasured_without_ceiling", brain: CEREBRO.id, model: SEM_PRECO.id, choiceFrom: "agent" }]);
+
+      const comTeto = await pronta("agente t6 com teto");
+      await comCerebro(comTeto.org, CEREBRO.id, [SEM_PRECO]);
+      await escolheNoAgente(comTeto.callId, { kind: "brain", brain: CEREBRO.id, model: SEM_PRECO.id });
+      cerebroEcoa();
+
+      await roda(comTeto.org, comTeto.callId, openai(completa()));
+
+      expect(await extratoDe(comTeto.callId)).toEqual([{ engine: `brain:${CEREBRO.id}`, model: SEM_PRECO.id, cost_measured: false, input_tokens: 1000, output_tokens: 100, cost_microcents: 0 }]);
+      expect((await eventosDe(comTeto.callId, "call_analyzed"))[0]).toMatchObject({ costCents: 0, costMeasured: false, choiceFrom: "agent" });
+    });
+
+    it("no teto do agente, a escolha do agente também não é chamada", async () => {
+      const { org, callId } = await pronta("agente no teto");
+      await withSystem(app, (q) => q.exec("update calls set cost_cents = 500 where id = $1", [callId]));
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolheNoAgente(callId, { kind: "brain", brain: CEREBRO.id, model: COM_PRECO.id });
+      const calls = CEREBRO.completeJson.mock.calls.length;
+
+      await roda(org, callId, openai(completa()));
+
+      expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+      expect(await falhasDe(callId)).toEqual([{ reason: "cost_ceiling", brain: CEREBRO.id, model: COM_PRECO.id, choiceFrom: "agent", costCents: 500, ceilingCents: 500 }]);
+    });
+
+    it("falha do provedor na escolha do agente: o evento diz que a escolha era do agente", async () => {
+      const { org, callId } = await pronta("agente falha provedor");
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolheNoAgente(callId, { kind: "brain", brain: CEREBRO.id, model: COM_PRECO.id });
+      CEREBRO.completeJson.mockResolvedValueOnce({ ok: false, failure: "rejected", status: 401, model: COM_PRECO.id, usage: {} });
+
+      await roda(org, callId, openai(completa()));
+
+      expect(await falhasDe(callId)).toEqual([{ reason: "rejected", brain: CEREBRO.id, model: COM_PRECO.id, status: 401, costCents: 0, costMeasured: true, choiceFrom: "agent" }]);
+    });
   });
 });

@@ -139,13 +139,12 @@ describe("agents", () => {
     // Mudar outro campo não mexe no modo.
     expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ dropFollowUp: "task" });
 
-    // A religação só tem caminho nas fatias 3 e 4: a rota recusa, mesmo que o banco aceite. O WhatsApp
-    // tem o teste próprio, abaixo.
-    for (const dropFollowUp of ["call_back", "TASK", "", null, 1]) {
+    // O WhatsApp e a religação têm o teste próprio, abaixo.
+    for (const dropFollowUp of ["TASK", "", null, 1]) {
       const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { dropFollowUp } });
       expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", expect.stringMatching(/dropFollowUp/)]);
     }
-    const refusedOnCreate = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Z", engine: "simulated", dropFollowUp: "call_back" } });
+    const refusedOnCreate = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Z", engine: "simulated", dropFollowUp: "callback" } });
     expect([refusedOnCreate.status, refusedOnCreate.code]).toEqual([400, "validation_error"]);
     expect(await stored("select drop_follow_up from agents where id = $1", [id])).toEqual({ drop_follow_up: "task" });
 
@@ -200,6 +199,46 @@ describe("agents: a mensagem no WhatsApp para quem ligou (R2, fatia 2)", () => {
     expect((await patch(null)).data).toMatchObject({ dropFollowUpMessage: null });
     // O banco confere o mesmo teto, para o texto gravado fora da rota.
     await expect(withOrg(panel.app, org, (q) => q.exec("update agents set drop_follow_up_message = $2 where id = $1", [id, "x".repeat(301)]))).rejects.toThrow(/check/);
+  });
+});
+
+describe("agents: a religação (R2, fatia 4)", () => {
+  it("refuses call_back while outbound calls are off, even called directly, and accepts it once they are on", async () => {
+    const own = await createOrganization(panel.app, "drop call back");
+    const cookie = (await createUser(panel.app, own, "owner")).cookie;
+    const read = (id: string) => withOrg(panel.app, own, (q) => q.one("select drop_follow_up from agents where id = $1", [id]));
+    const created = await call(createAgent, { method: "POST", cookie, body: { name: "Queda religação", engine: "simulated" } });
+    const id = (created.data as { id: string }).id;
+    const choose = (body: object) => call(patchAgent, { method: "PATCH", cookie, params: { id }, body });
+
+    // A organização nasce com a política desligada: a rota recusa com o código próprio, na criação e na edição.
+    const off = await choose({ dropFollowUp: "call_back" });
+    expect([off.status, off.code]).toEqual([400, "drop_follow_up_outbound_disabled"]);
+    const onCreate = await call(createAgent, { method: "POST", cookie, body: { name: "Z", engine: "simulated", dropFollowUp: "call_back" } });
+    expect([onCreate.status, onCreate.code]).toEqual([400, "drop_follow_up_outbound_disabled"]);
+    expect(await read(id)).toEqual({ drop_follow_up: "off" });
+    // Sem linha em `outbound_policy` (instalação antiga), vale a padrão: desligada.
+    await withOrg(panel.app, own, (q) => q.exec("delete from outbound_policy"));
+    expect((await choose({ dropFollowUp: "call_back" })).code).toBe("drop_follow_up_outbound_disabled");
+
+    const on = await call(putPolicy, { method: "PUT", cookie, body: { enabled: true, purpose: "Retornar ligações que caíram", legalBasis: "Legítimo interesse" } });
+    expect(on.status).toBe(200);
+    const chosen = await choose({ dropFollowUp: "call_back" });
+    expect([chosen.status, chosen.data]).toMatchObject([200, { dropFollowUp: "call_back" }]);
+    expect(await read(id)).toEqual({ drop_follow_up: "call_back" });
+    const createdOn = await call(createAgent, { method: "POST", cookie, body: { name: "Queda religação 2", engine: "simulated", dropFollowUp: "call_back" } });
+    expect(createdOn.data).toMatchObject({ dropFollowUp: "call_back" });
+    // A política ligada desta organização não vale para outra, que continua com a dela desligada.
+    const elsewhere = await newAgent("Queda religação de outra");
+    expect((await stored<boolean>("select enabled from outbound_policy"))?.enabled ?? false).toBe(false);
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id: elsewhere }, body: { dropFollowUp: "call_back" } })).code).toBe("drop_follow_up_outbound_disabled");
+
+    // A política desligada depois: a rota não deixa escolher de novo, mas os outros campos continuam
+    // salvando (a revisão é que grava mode_unavailable e abre a pendência, fatia 3).
+    await call(putPolicy, { method: "PUT", cookie, body: { enabled: false } });
+    expect((await choose({ dropFollowUp: "call_back" })).code).toBe("drop_follow_up_outbound_disabled");
+    expect((await choose({ enabled: false })).data).toMatchObject({ enabled: false, dropFollowUp: "call_back" });
+    expect((await choose({ dropFollowUp: "task" })).data).toMatchObject({ dropFollowUp: "task" });
   });
 });
 

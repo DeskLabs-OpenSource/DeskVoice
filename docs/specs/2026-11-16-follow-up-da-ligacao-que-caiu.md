@@ -1,7 +1,8 @@
 # Follow-up da ligação que caiu sem conclusão
 
-- **Estado:** desenho. A fatia 1 está no #367. Os dois pedidos da seção 7 seguem **abertos**, com o
-  padrão sem resposta valendo a partir da fatia 3.
+- **Estado:** desenho. A fatia 1 está no #367. Os dois pedidos da seção 7 foram decididos em 18/11
+  (DESA-121). A fatia 3 (a religação, sem tela) está no #455, e a fatia 4 (a religação na tela), no PR
+  que sai junto com ele.
 - **Data:** 2026-11-16
 - **Quem pediu:** o dono, no roteiro de novembro (item R2): "Adicionar sistema de follow-up para
   quando a ligação cair sem ser concluída". A decisão dele em 13/11 foi "deixar configurável, quem
@@ -328,7 +329,7 @@ Além delas, continuam valendo as tentativas por pessoa e o teto diário por lin
 `checkOutboundAllowed`, que contam a religação como qualquer ligação de saída.
 
 **Tentativas e intervalo.** Os valores são fixos no código, **1 tentativa, 30 minutos depois do fim**,
-até o dono decidir (seção 7). O intervalo nunca fica abaixo de 30 minutos, e a religação nunca é
+por decisão de 18/11. O intervalo nunca fica abaixo de 30 minutos, e a religação nunca é
 empurrada para a próxima janela. Uma queda às 19h50, com janela até 20h, é recusada com
 `outside_window` e vira pendência. Ligar no dia seguinte para quem não pediu incomoda mais do que
 ajuda, e uma pessoa da equipe decide melhor.
@@ -458,7 +459,7 @@ Por fatia, com teste:
 
 Dono do pedido: **Arquiteto**. Vai ao lote do Líder, no formato do `GOVERNANCE.md`.
 
-**Situação em 17/11: os dois seguem abertos.** Nenhum trava as fatias 1 e 2.
+Decidido em 18/11 (DESA-121): pedido 1 = A; pedido 2 = A.
 
 1. **Tentativas e intervalo da religação.** Opções: (A) fixos no código, 1 tentativa, 30 minutos
    depois; (B) fixos, até 2 tentativas com 30 minutos entre elas; (C) configuráveis na tela, de 1 a

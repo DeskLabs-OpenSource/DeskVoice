@@ -107,6 +107,15 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
           ) : null}
           <span className="text-muted">{t.direction[data.direction]}{data.channel === "phone" ? "" : ` · ${common.channel[data.channel]}`}</span>
         </div>
+        {data.callBackOf ? (
+          // A religação da ligação que caiu: de qual ligação ela é o retorno, com o caminho de volta.
+          <p className="text-muted">
+            {data.callBackOfStartedAt ? fill(t.callBackOf, { time: formatDateTime(data.callBackOfStartedAt, locale) }) : t.callBackOfUnknown}{" "}
+            <Link href={`/calls/${data.callBackOf}`} className="font-bold text-ink underline-offset-4 hover:underline">
+              {t.callBackOfLink}
+            </Link>
+          </p>
+        ) : null}
         {/* Métricas em linha, separadas por fio: sem grade de cartões. */}
         <dl className="grid grid-cols-2 gap-4 border-y border-line py-4 sm:flex sm:flex-wrap">
           {facts.map(([label, value, mono]) => (
