@@ -122,6 +122,7 @@ contains "show: diz o que o boot repõe" "$out" "no boot, o serviço repõe: 506
 before="$(cat "$STATE")"; : > "$FAKE_DIR/calls.log"
 out="$(tool --dry-run apply 5060/udp 5061/tcp)"; equal "simulação: sai com zero" 0 "$?"
 contains "simulação: mostra a regra que escreveria" "$out" "[simulação] faria:"
+contains "simulação: diz que o serviço ficaria ativo agora e no boot" "$out" "ligá-lo agora e no boot"
 equal "simulação: não mexeu nas regras" "$before" "$(cat "$STATE")"
 equal "simulação: não chamou o systemd" 0 "$(calls '^systemctl ')"
 # A porta que sai da lista também: na simulação, a reabertura só é dita.
