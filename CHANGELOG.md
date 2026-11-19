@@ -3,6 +3,22 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.40.0] - 2026-11-19
+
+### Adicionado
+
+- **Quem administra a instalação pode bloquear as ligações de saída de uma organização** Na área da instalação, em Organizações › Limites, o campo Ligações de saída bloqueia as ligações de saída da organização: com o bloqueio, nenhuma ligação de saída dela nasce, por nenhum caminho, nem a religação de uma ligação que caiu. A tela de Ligações de saída da organização e Configurações › Limites dizem que a administração da instalação bloqueou, e uma religação que já estava agendada não sai e vira uma pendência que diz o mesmo motivo. O bloqueio não muda a escolha da organização: desbloquear devolve a saída como ela tinha deixado, ligada ou desligada, e a tela diz qual antes de salvar. A mudança fica registrada na Auditoria da instalação. Nada muda para quem já instalou: sem o bloqueio, nenhuma saída é bloqueada e nenhuma tela mostra o aviso. Crédito: @melgarafael.
+
+### Alterado
+
+- **Apagar uma organização no banco leva junto todas as linhas dela** Toda chave estrangeira para a organização passa a apagar em cascata, menos duas que ficam vazias de propósito: o registro da instalação guarda a própria exclusão, e a conta só deixa de lembrar o último vínculo. Ainda não há como excluir organização pelo painel; esta mudança só prepara o banco, e ninguém vê diferença. Um teste gerado do catálogo reprova a tabela nova que nascer sem cascata. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A simulação do DOCKER-USER diz que o serviço ficaria ativo já, e não só no boot** O `bash install/docker-user.sh --dry-run apply <portas>` agora diz que gravaria o serviço `deskvoice-docker-user` e o ligaria agora e no boot, igual ao que o `apply` de verdade faz desde a versão anterior. Antes, a simulação dizia só "no boot". Muda apenas o texto; nada a fazer. Crédito: @webtecnica.
+- **Na URA, a rota do anúncio recusa anúncio com menos de 200 ms, e a transferência que falha fica gravada como falha da URA** A rota que recebe o anúncio do menu por teclas passa a recusar o anúncio com menos de 200 ms (0,2 segundo), que tocaria como silêncio, com o código `ivr_prompt_too_short`: antes, só a tela recusava, e quem subia o WAV pela API conseguia salvar um anúncio mudo. A tela e a rota usam o mesmo limite. Quando o processo de voz não consegue transferir a ligação para a pessoa do menu, a chamada continua "Falhou", e o motivo gravado (`end_reason`, que a API devolve) passa a ser `ivr_failed`, em vez de `transferred`; a linha do tempo continua mostrando a transferência pedida, o fim da ligação e, depois, a frase "A transferência para a pessoa do menu não completou". Os anúncios já salvos não mudam. Nada a configurar. Crédito: @melgarafael.
+- **Na URA, a duração da ligação passada à IA conta desde o atendimento do menu, e a rota do anúncio recusa 199,9 ms** Quando a URA passa a ligação para um agente de IA, a hora de atendimento da chamada (`answered_at`, que a API devolve como `answeredAt`) fica sendo a hora em que a URA atendeu, e não mais a hora em que a IA começou a falar. A duração mostrada no painel passa a incluir o tempo no menu, que é o tempo que a pessoa passou na linha. Os minutos de cada motor, em Custos, continuam contando desde que a IA atendeu: o tempo no menu não entra neles. A ligação sem URA não muda. As ligações já gravadas não mudam. A rota que recebe o anúncio do menu passava um áudio de 199,5 a 199,9 ms, porque arredondava a duração antes de comparar com o mínimo de 200 ms. Agora ela compara a duração medida, sem arredondar, e recusa esse áudio com `ivr_prompt_too_short`. O máximo de 60 s também: um áudio de 60 000,1 ms agora é recusado com `ivr_prompt_too_long`. Nada a configurar. Crédito: @melgarafael.
+
 ## [0.39.0] - 2026-11-19
 
 ### Adicionado
