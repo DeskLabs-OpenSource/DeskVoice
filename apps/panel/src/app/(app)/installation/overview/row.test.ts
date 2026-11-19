@@ -12,6 +12,7 @@ const base: OverviewRowView = {
   suspendedAt: null,
   calls: { count: 3 },
   cost: { cents: 120, unmeasuredCount: 0, estimatedCount: 0 },
+  spendCapCents: null,
   trunk: { connected: 1, attention: 0, down: 0, check: { status: "ok" } },
   engine: { state: "own_key", check: { status: "ok" } },
   queue: { late: 0, failedLast24h: 0 },
@@ -50,5 +51,13 @@ describe("a linha da visão geral", () => {
     const html = render({ ...base, trunk: null });
     expect(html).toContain("O processo de voz não respondeu");
     expect(html).not.toContain("conectadas");
+  });
+
+  it("o teto do mês: \"Sem teto\" sem teto, e o gasto do mês de o teto com ele (fatia 7c)", () => {
+    expect(render(base)).toContain("Sem teto");
+    const html = render({ ...base, spendCapCents: 5000 });
+    expect(html).toContain("Teto do mês");
+    expect(html).toMatch(/US\$\s?1,20 de US\$\s?50,00/);
+    expect(html).not.toContain("Sem teto");
   });
 });

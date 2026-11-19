@@ -9,6 +9,7 @@ const settings = {
     trunks: "Linhas telefônicas: {used} de {limit}",
     agents: "Agentes: {used} de {limit}",
     outboundLocked: "Ligações de saída bloqueadas pela administração da instalação",
+    spendCap: "Teto de gasto do mês: {spent} de {cap} (aproximado: inclui custo estimado e não inclui o que não pôde ser medido)",
   },
   sections: {
     ai: "Inteligência artificial",

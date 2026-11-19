@@ -63,6 +63,10 @@ const installation = {
     limitsOutboundHint: "Bloquear não muda a escolha da organização: ela fica guardada e volta a valer quando a saída for desbloqueada.",
     limitsOutboundReturnsOn: "A saída desta organização volta como ela deixou: ligada.",
     limitsOutboundReturnsOff: "A saída desta organização volta como ela deixou: desligada.",
+    limitsSpendCap: "Teto de gasto do mês, em dólares",
+    limitsSpendCapSpent: "Gasto neste mês: {spent}.",
+    limitsSpendCapApprox: "Aproximado: inclui custo estimado e não inclui o que não pôde ser medido. No teto, toda ligação nova é recusada (a que está em andamento continua).",
+    limitsSpendCapInvalid: "O teto de gasto do mês precisa ser um valor em dólares, como 50 ou 49.90, ou ficar vazio.",
     suspendedReason: "Motivo: {reason}",
     suspendTitle: "Suspender a organização {name}?",
     suspendLead: "Enquanto suspensa, {name} não atende (quem liga ouve que o número está indisponível), não faz ligações, e quem é só dela vê apenas o aviso de suspensa, com o motivo. As linhas continuam registradas. A guarda e o apagamento de dados de quem ligou continuam rodando.",
@@ -114,6 +118,9 @@ const installation = {
     engineStates: { own_key: "Com chave própria", no_key: "Sem chave", key_failed: "Chave com falha" },
     queue: "Fila",
     queueCounts: "{late} em atraso, {failed} com falha nas últimas 24 horas",
+    spendCap: "Teto do mês",
+    spendCapOf: "{spent} de {cap}",
+    spendCapNone: "Sem teto",
   },
 
   audit: {
