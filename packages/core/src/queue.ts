@@ -134,6 +134,15 @@ export async function organizationQueue(q: OrgQuery, now: Date): Promise<{ late:
 
 const TASKS_CHANNEL = "tasks";
 
+/**
+ * Acorda o consumidor da fila quando a transação de `q` confirmar, sem enfileirar tarefa. É o que a
+ * lápide da exclusão de organização usa: a rotina que termina a exclusão roda a cada volta do
+ * runner, e a lápide não é uma tarefa (a tarefa seria da organização e sumiria na cascata).
+ */
+export async function wakeTaskRunner(q: OrgQuery): Promise<void> {
+  await q.exec("select pg_notify($1, '')", [TASKS_CHANNEL]);
+}
+
 /** Acorda `onWake` a cada tarefa enfileirada. Devolve a função que encerra a escuta. */
 export function listenTasks(db: Db, onWake: () => void, onError?: (error: Error) => void): Promise<() => Promise<void>> {
   return listen(db, TASKS_CHANNEL, () => onWake(), onError);

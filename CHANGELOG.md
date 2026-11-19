@@ -3,6 +3,17 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.41.0] - 2026-11-19
+
+### Adicionado
+
+- **Antes de salvar uma linha cuja faixa cruza a de outra organização, a tela de Linhas avisa e pede confirmação** Quando a instalação tem mais de uma organização e alguém salva uma linha cujo endereço (o servidor do provedor e, na linha por IP, os endereços extras) cruza a faixa de uma linha de outra organização, de modo que alguma linha por IP sairia do ar, a tela de Linhas para antes de salvar e diz que existe uma linha de outra organização na mesma faixa e que, salvando, as linhas por IP das duas param de receber chamadas até uma delas mudar o endereço. Salvar mesmo assim grava como antes; Voltar não grava nada. O aviso não diz qual linha, de que organização nem em que endereço. A regra é a mesma que o processo de voz já usava para deixar essas linhas de fora do arquivo do Asterisk, agora num lugar só. Nada muda para quem tem uma organização só, e mudar só o nome de uma linha nunca pergunta. Quem usa a API recebe `409` com `trunk_overlap_unconfirmed` e confirma com `confirmOverlap: true` no corpo. Quando a tela pede essa confirmação, a tentativa aparece na Auditoria da instalação. Cada organização confere a faixa até 10 vezes por minuto; acima disso a API responde `429` com `too_many_attempts`, e a tela pede para esperar um minuto. Crédito: @melgarafael.
+- **Quem administra a instalação pode pôr um teto de gasto do mês em cada organização** Na área da instalação, em Organizações › Limites, o campo Teto de gasto do mês (em dólares, a moeda do custo que o DeskVoice mede) mostra ao lado quanto a organização já gastou no mês, a mesma soma da tela de Custos. Quando a soma do mês, no fuso da organização, chega ao teto, toda chamada nova dela é recusada no começo, antes de abrir o motor de voz: a recebida pela linha telefônica e pelo WhatsApp ouve a fala de indisponível, sem caixa postal; a de saída, a religação e a chamada pelo navegador não saem, com o motivo na tela e na linha do tempo. O painel da organização recebe um aviso por janela de 10 minutos. A chamada em andamento não é cortada, e o teto de custo por chamada do agente continua valendo. O valor é aproximado: inclui custo estimado e não inclui o que não pôde ser medido. A organização vê o teto e o gasto do mês em Configurações › Limites, e a Visão geral da instalação ganha a coluna Teto do mês. A mudança fica registrada na Auditoria da instalação. Nada muda para quem já instalou: sem teto, nenhuma chamada é recusada e nada a mais é somado. Crédito: @melgarafael.
+
+### Alterado
+
+- **A exclusão de organização ganha a lápide e a rotina que termina a limpeza** Por dentro, a exclusão de uma organização suspensa passa a existir: ela fica marcada como "excluindo", não pode mais ser reativada, e a rotina de fundo desconecta o WhatsApp de mensagens dela (a ligação pelo WhatsApp é desfeita numa próxima versão), apaga as gravações, apaga tudo dela no banco, apaga as contas que ficaram sem nenhuma organização e deixa o registro na auditoria da instalação, com as contagens. Se o servidor reiniciar no meio, a rotina retoma de onde parou. A linha de telefone da organização sai do Asterisk em até 5 minutos. Ainda não há botão nem rota para pedir a exclusão (vem na próxima fatia), então ninguém vê diferença. Crédito: @melgarafael.
+
 ## [0.40.0] - 2026-11-19
 
 ### Adicionado

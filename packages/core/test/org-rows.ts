@@ -62,9 +62,18 @@ export function organizationFactories(nextAccount: () => string): Record<string,
       updated_at: at,
     }),
     agents: (organization_id, p) => ({ organization_id, name: "Agent", engine: "simulated", analyst_id: p.analysts?.id }),
-    phone_numbers: (organization_id, p) => ({ organization_id, trunk_id: p.trunks?.id, e164: `+55${Math.floor(1e10 + Math.random() * 9e10)}`, agent_id: p.agents?.id }),
     // O menu por teclas (#223). O anúncio vai junto: é o `bytea` que a RLS tem de esconder da outra organização.
     ivr_menus: (organization_id) => ({ organization_id, name: "Menu", prompt_audio: Buffer.alloc(16), prompt_audio_ms: 1, created_at: at, updated_at: at }),
+    // O número atende o menu (`mode = 'ivr'`): a chave dele para `ivr_menus` é `on delete restrict`, e a
+    // cascata da exclusão de organização tem de passar por ela (nota da revisora no #480).
+    phone_numbers: (organization_id, p) => ({
+      organization_id,
+      trunk_id: p.trunks?.id,
+      e164: `+55${Math.floor(1e10 + Math.random() * 9e10)}`,
+      agent_id: p.agents?.id,
+      mode: "ivr",
+      ivr_menu_id: p.ivr_menus?.id,
+    }),
     ivr_options: (organization_id, p) => ({ organization_id, menu_id: p.ivr_menus?.id, digit: "1", label: "Atendente", action: "agent", agent_id: p.agents?.id }),
     calls: (organization_id, p) => ({ organization_id, agent_id: p.agents?.id, direction: "inbound", channel: "phone", status: "ringing", started_at: at }),
     call_events: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, at, kind: "call_started", payload: {} }),
