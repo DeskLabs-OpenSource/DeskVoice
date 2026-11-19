@@ -4,13 +4,17 @@ rede e sem Docker:
   python3 -I -m unittest discover -s deploy/laya -p 'test_*.py'
 (o `scripts/laya-servico.test.ts` roda isto dentro do `pnpm test`).
 
-T1 lê os dois arquivos de requisitos e o Dockerfile. T2 monta uma roda mínima e confere que o pip,
+T1 lê os dois arquivos de requisitos e o Dockerfile. No Dockerfile, todo comando pip (`pip`, `pip3`,
+`pip3.12`, `python -m pip`, `python3 -I -m pip`) conta: cada install precisa do resumo, só de roda e de
+uma das duas listas; o `pip check` vem depois do último install; nenhum RUN com pip tem `||`; e o
+torch vem só do índice de CPU (`--index-url`, nunca `--extra-index-url`). T2 monta uma roda mínima e confere que o pip,
 com as mesmas opções do Dockerfile, aceita o resumo certo e recusa o trocado.
 """
 import base64
 import hashlib
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -52,12 +56,69 @@ def requirements(name):
     return out
 
 
-def pip_installs():
-    """Os comandos `pip install` dos RUN do Dockerfile, um por item."""
+PIP_EXE = re.compile(r"pip(?:3(?:\.\d+)?)?")
+PIP_WORD = re.compile(r"pip(?![A-Za-z_])")
+OPERATORS = {"&&", "||", ";", "|", "&", ";;", "|&"}
+REQUIREMENTS = {"requirements-torch.txt", "requirements.txt"}
+
+
+def dockerfile_runs():
+    """Cada RUN do Dockerfile como lista de comandos (cada um, a lista de palavras) e os operadores
+    entre eles. As palavras saem do `shlex`, que respeita as aspas e separa `&&`, `||`, `;` e `|`."""
     with open(os.path.join(HERE, "Dockerfile"), encoding="utf-8") as f:
         text = f.read()
-    commands = re.split(r"&&|;|\n", "\n".join(logical_lines(text)))
-    return [c.strip() for c in commands if re.search(r"\bpip\s+install\b", c)], [c.strip() for c in commands if re.search(r"\bpip\s+check\b", c)]
+    runs = []
+    for line in logical_lines(text):
+        keyword, _, body = line.partition(" ")
+        if keyword.upper() != "RUN":
+            continue
+        lexer = shlex.shlex(body, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        commands, operators, current = [], [], []
+        for token in lexer:
+            if token in OPERATORS:
+                operators.append(token)
+                commands.append(current)
+                current = []
+            else:
+                current.append(token)
+        commands.append(current)
+        runs.append(([c for c in commands if c], operators))
+    return text, runs
+
+
+def pip_commands():
+    """Os comandos pip dos RUN, na ordem do arquivo, como (subcomando, palavras, operadores do RUN).
+
+    Reconhece `pip`, `pip3`, `pip3.12` (com ou sem caminho), `python -m pip`, `python3 -m pip`,
+    `python -I -m pip` e `-mpip`. O subcomando é a primeira palavra depois do pip que não começa com
+    `-`. Toda palavra `pip` do arquivo (fora dos comentários) tem de ser um desses comandos: o que
+    não deu para ler (um `sh -c "pip3 install x"`, um heredoc) faz o teste falhar, e não passar."""
+    text, runs = dockerfile_runs()
+    found = []
+    for commands, operators in runs:
+        for words in commands:
+            for i, word in enumerate(words):
+                if PIP_EXE.fullmatch(word.rsplit("/", 1)[-1]) or word == "-mpip":
+                    rest = [w for w in words[i + 1:] if not w.startswith("-")]
+                    found.append((rest[0] if rest else None, words[i + 1:], operators))
+                    break
+    seen = len(PIP_WORD.findall("\n".join(logical_lines(text))))
+    if seen != len(found):
+        raise AssertionError(
+            "o Dockerfile cita pip %d vez(es), mas só %d viraram comando lido: %r" % (seen, len(found), found)
+        )
+    return found
+
+
+def option_value(words, name):
+    """O valor de `--opção valor` ou `--opção=valor`; None se a opção não está lá."""
+    for i, word in enumerate(words):
+        if word == name and i + 1 < len(words):
+            return words[i + 1]
+        if word.startswith(name + "="):
+            return word[len(name) + 1:]
+    return None
 
 
 class T1Static(unittest.TestCase):
@@ -74,17 +135,32 @@ class T1Static(unittest.TestCase):
         self.assertGreaterEqual(len(set(hashes)), 2, "x86_64 e aarch64: pelo menos dois resumos")
 
     def test_dockerfile_installs_only_by_hash(self):
-        installs, checks = pip_installs()
+        commands = pip_commands()
+        installs = [words for sub, words, _ in commands if sub == "install"]
+        for sub, words, operators in commands:
+            self.assertIn(sub, ("install", "check"), "pip com subcomando inesperado: %r" % words)
+            # `||` engole a falha: `pip check || true` ou `pip install ... || ...` não param o build.
+            self.assertNotIn("||", operators, "RUN com pip não pode ter ||: %r" % words)
+        for words in installs:
+            self.assertIn("--require-hashes", words, words)
+            self.assertIn("--only-binary=:all:", words, words)
+            self.assertIn(option_value(words, "-r"), REQUIREMENTS, "install sem -r de uma das duas listas: %r" % words)
         self.assertEqual(len(installs), 2, installs)
-        for command in installs:
-            self.assertIn("--require-hashes", command.split(), command)
-            self.assertIn("--only-binary=:all:", command.split(), command)
         torch, rest = installs
-        self.assertIn("requirements-torch.txt", torch)
-        self.assertIn("--no-deps", torch.split(), torch)
-        self.assertIn("https://download.pytorch.org/whl/cpu", torch)
-        self.assertIn("requirements.txt", rest.split())
-        self.assertEqual(len(checks), 1, "falta o pip check depois dos dois pip install")
+        self.assertEqual(option_value(torch, "-r"), "requirements-torch.txt", torch)
+        self.assertIn("--no-deps", torch, torch)
+        self.assertEqual(option_value(torch, "--index-url"), "https://download.pytorch.org/whl/cpu", torch)
+        self.assertFalse(
+            [w for w in torch if w.startswith("--extra-index-url")], "o torch vem só do índice de CPU: %r" % torch
+        )
+        self.assertEqual(option_value(rest, "-r"), "requirements.txt", rest)
+
+    def test_dockerfile_pip_check_after_last_install(self):
+        subs = [sub for sub, _, _ in pip_commands()]
+        self.assertIn("install", subs)
+        last_install = max(i for i, sub in enumerate(subs) if sub == "install")
+        self.assertEqual(subs.count("check"), 1, "um pip check só, e ele tem de vir depois do último install: %r" % subs)
+        self.assertGreater(subs.index("check"), last_install, "o pip check vem antes do último install: %r" % subs)
 
 
 def make_wheel(folder):
