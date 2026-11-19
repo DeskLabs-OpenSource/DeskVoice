@@ -30,7 +30,7 @@ describe("quem lê a ligação na tela do agente", () => {
   });
 
   it("a escolha fora da forma nunca volta no salvar", () => {
-    expect(analysisPatch({ kind: "invalid" }, { kind: "invalid" }, false)).toEqual({});
+    for (const saved of [{ kind: "invalid" }, { kind: "organization" }, { kind: "engine" }, brain] as AnalysisDraft[]) expect(analysisPatch({ kind: "invalid" }, saved, true)).toEqual({});
   });
 
   it("a escolha que mudou vai na forma da API, e o aceite do modelo sem preço só com o cérebro", () => {
