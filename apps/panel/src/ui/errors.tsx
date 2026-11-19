@@ -11,7 +11,7 @@ import { Notice } from "./kit";
 import { useCanConfigure } from "./me";
 
 // Códigos cuja mensagem da API traz o detalhe que a pessoa precisa (qual campo, quais números).
-const WITH_DETAIL = new Set(["validation_error", "invalid_numbers"]);
+const WITH_DETAIL = new Set(["validation_error", "invalid_numbers", "ivr_menu_in_use", "agent_in_ivr_menu"]);
 
 /** Traduz uma falha da API para a frase da tela: o que aconteceu e o que fazer. */
 export function useErrorText(): (error: unknown) => string {

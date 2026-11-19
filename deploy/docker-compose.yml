@@ -2,8 +2,8 @@
 #
 # Quem publica porta no host: só o Caddy (a entrada única do painel e da voz do navegador) e o
 # Asterisk (SIP e RTP, UDP). Postgres, painel, voz, rotinas, o WAHA (WhatsApp), o WaCalls (ligação
-# pelo WhatsApp) e a ARI do Asterisk ficam na rede interna, e painel e voz NUNCA publicam porta:
-# tudo o que é web entra pelo Caddy.
+# pelo WhatsApp), o Laya (filtro local) e a ARI do Asterisk ficam na rede interna, e painel e voz
+# NUNCA publicam porta: tudo o que é web entra pelo Caddy.
 #
 # As portas do Caddy não estão neste arquivo. O instalador as grava em
 # `docker-compose.override.yml`, porque dependem da máquina: 80/443 quando estão livres, ou
@@ -205,9 +205,11 @@ services:
   # (DESKVOICE_WHATSAPP_CALLS=on). Memória e disco com o serviço de pé ainda NÃO foram medidos.
   wacalls:
     profiles: ["whatsapp-calls"]
-    # Imagem do fork DeskLabs-OpenSource/WaCalls: d16a076 dos autores mais o conserto do caller_pn
-    # (9507c56, proposto em JotaDev66/WaCalls#69), até eles publicarem o conserto. O resto é igual.
-    image: ghcr.io/desklabs-opensource/wacalls@sha256:74612a1d175bca3eed00cc5a6958fc7c0d593f44b8f8cbe01e59b228ba867508
+    # Imagem do fork DeskLabs-OpenSource/WaCalls, que é onde o WaCalls é mantido para o DeskVoice e o
+    # DeskcommCRM: os autores originais não aceitam mais PRs. a6f66b9 = d16a076 dos autores, o
+    # conserto do caller_pn (9507c56), o whatsmeow de 16/11/2026 (o WhatsApp recusava o de julho com
+    # "Client outdated (405)") e a falha de pareamento visível em vez de "connecting" para sempre.
+    image: ghcr.io/desklabs-opensource/wacalls@sha256:03f9e47fadc1afa909f512bbdda0fa4091d4646310f9a76ce3c752f05eafd1ff
     restart: unless-stopped
     # Teto, e não medição: é o que o DeskcommCRM usa com a mesma imagem. Sem teto, um serviço que
     # cresce leva a máquina inteira; com ele, cai só quem estourou e o `restart` o traz de volta.
@@ -228,6 +230,44 @@ services:
     volumes:
       # O pareamento do número. Perder este volume obriga a ler o QR Code de novo. Não entra no backup.
       - wacalls-data:/data
+    networks: [internal]
+    logging: *logging
+
+  # O Laya (Convai Innovations, pesos abertos, Apache-2.0): o modelo de decisão que roda nesta
+  # máquina, como opção do filtro da fala (desenho R12, decisão 3 e fatia 8a). Imagem do próprio
+  # projeto (deploy/laya/), com os pesos dentro dela, numa revisão fixa conferida por resumo: o
+  # contêiner não baixa nada ao subir.
+  #
+  # Só na rede interna, sem porta publicada: quem fala com ele é o processo de voz, em
+  # http://laya:8000 (packages/voice-engine/src/deciders/laya.ts). Não lê o app.env nem recebe chave.
+  #
+  # Fica num perfil: NÃO sobe nem é baixado por padrão, e fica fora de APP_SERVICES
+  # (install/_common.sh), que é a lista que a atualização baixa. Quem já instalou não é surpreendido.
+  laya:
+    profiles: ["laya"]
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-laya:${DESKVOICE_VERSION:-dev}
+    build: { context: ./laya, target: laya }
+    restart: unless-stopped
+    # Teto, e não reserva. A bancada mediu 2,3 GB de memória máxima do processo com três chamadas
+    # simultâneas (rodada 3, 15/11/2026, fora do contêiner). Estourar derruba só o Laya, e a chamada
+    # segue sem filtro.
+    mem_limit: 3g
+    # O teto de CPU existe para o Laya não tirar processador do áudio das ligações: a rodada 3 mediu
+    # 2,07 núcleos com uma chamada e 2,85 com três, numa VPS de 4. A medida da fatia 8a (18/11/2026)
+    # fixou o padrão em 3: com teto 3 passou em todas as réguas; com 2, só 1% das passadas chegou a
+    # tempo com três chamadas.
+    cpus: "${LAYA_CPUS:-3}"
+    environment:
+      # As linhas de cálculo do torch acompanham o teto (arredondado para baixo): mais linhas que
+      # núcleos só disputariam a mesma fatia de CPU.
+      LAYA_THREADS: "${LAYA_CPUS:-3}"
+    healthcheck:
+      # 200 só depois de o modelo carregar. A imagem traz o Python.
+      test: ["CMD", "python", "-I", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
     networks: [internal]
     logging: *logging
 

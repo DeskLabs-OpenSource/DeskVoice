@@ -1,6 +1,7 @@
 import { ADMINS_EXPLICIT_KEY, FOUNDING_ORGANIZATION_KEY, recordInstallationEvent } from "./installation";
 import type { TeamRole } from "./invites";
 import type { Db, OrgQuery } from "./types";
+import { endSupportAccessesIfNotAllowedIn } from "./support-access";
 import { withSystem } from "./with-org";
 
 /**
@@ -261,6 +262,22 @@ export function isInstallationAdmin(db: Db, accountId: string): Promise<boolean>
  * (o convite do primeiro dono, em `invites.ts`). Uma fonte só: as duas nunca divergem. `account` é
  * uma expressão SQL do código (um parâmetro ou uma coluna), nunca texto de fora. Pelo papel de sistema.
  */
+/**
+ * Os acessos de suporte ainda abertos dos vínculos `support` da conta, travados para encerrar
+ * (`endSupportAccessesIfNotAllowedIn`, em `support-access.ts`). Na transação de quem chama, pelo
+ * papel de sistema.
+ */
+export async function openSupportAccessesOf(q: OrgQuery, accountId: string): Promise<string[]> {
+  const rows = await q.many<{ id: string }>(
+    `select sa.id from support_accesses sa join users u on u.id = sa.user_id and u.organization_id = sa.organization_id
+      where u.account_id = $1 and u.kind = 'support' and sa.ended_at is null
+      order by sa.id
+      for update of sa`,
+    [accountId],
+  );
+  return rows.map((row) => row.id);
+}
+
 export function administersInstallationSql(account: string): string {
   return `(exists (select from accounts a where a.id = ${account} and a.installation_admin_at is not null)
      or (not exists (select from installation_settings where key = ${sqlLiteral(ADMINS_EXPLICIT_KEY)})
@@ -419,6 +436,8 @@ export function revokeInstallationAdmin(db: Db, actorAccountId: string, accountI
     if ((others?.n ?? 0) === 0 && !keepsByRole) return { ok: false, reason: "last_admin" };
     await q.exec("update accounts set installation_admin_at = null where id = $1", [accountId]);
     await recordInstallationEvent(q, now, "installation_admin_revoked", { actorAccountId, payload: { account_id: accountId, source: "panel" } });
+    // Quem deixa de administrar sai do suporte na hora (`revoked`), se não continua pela regra da fundadora.
+    await endSupportAccessesIfNotAllowedIn(q, accountId, now, actorAccountId);
     return { ok: true };
   });
 }

@@ -34,6 +34,14 @@ const nextAccount = (): string => {
 const factories: Record<string, Factory> = {
   users: (organization_id) => ({ organization_id, account_id: nextAccount(), email: `${unique("user")}@example.com`, name: "User", role: "owner" }),
   sessions: (organization_id, p) => ({ organization_id, user_id: p.users?.id, account_id: p.users?.account_id, token_hash: unique("token"), expires_at: at }),
+  // O vínculo de suporte de verdade nasce por `startSupportAccess`; aqui basta um vínculo da organização.
+  support_accesses: (organization_id, p) => ({
+    organization_id,
+    user_id: p.users?.id,
+    reason: "Ajuda com a linha da operadora",
+    started_at: at,
+    expires_at: new Date(at.getTime() + 15 * 60_000),
+  }),
   invites: (organization_id, p) => ({ organization_id, email: `${unique("invite")}@example.com`, name: "Invited", role: "operator", token_hash: unique("invite-token"), expires_at: at, created_by: p.users?.id }),
   settings: (organization_id) => ({ organization_id, key: unique("key"), value: { on: true } }),
   trunks: (organization_id) => ({ organization_id, name: "Trunk", host: "sip.example.com", auth_mode: "register" }),
@@ -48,6 +56,9 @@ const factories: Record<string, Factory> = {
   }),
   agents: (organization_id, p) => ({ organization_id, name: "Agent", engine: "simulated", analyst_id: p.analysts?.id }),
   phone_numbers: (organization_id, p) => ({ organization_id, trunk_id: p.trunks?.id, e164: `+55${Math.floor(1e10 + Math.random() * 9e10)}`, agent_id: p.agents?.id }),
+  // O menu por teclas (#223). O anúncio vai junto: é o `bytea` que a RLS tem de esconder da outra organização.
+  ivr_menus: (organization_id) => ({ organization_id, name: "Menu", prompt_audio: Buffer.alloc(16), prompt_audio_ms: 1, created_at: at, updated_at: at }),
+  ivr_options: (organization_id, p) => ({ organization_id, menu_id: p.ivr_menus?.id, digit: "1", label: "Atendente", action: "agent", agent_id: p.agents?.id }),
   calls: (organization_id, p) => ({ organization_id, agent_id: p.agents?.id, direction: "inbound", channel: "phone", status: "ringing", started_at: at }),
   call_events: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, at, kind: "call_started", payload: {} }),
   approvals: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, question: "Pode?", default_on_timeout: "denied", expires_at: at }),

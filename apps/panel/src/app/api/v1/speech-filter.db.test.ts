@@ -49,7 +49,7 @@ const setting = (organizationId: string, key: string) =>
   withOrg(panel.app, organizationId, async (q) => (await q.one<{ value: unknown; secret: boolean }>("select value, secret from settings where key = $1", [key])) ?? null);
 
 describe("o filtro da fala na tela", () => {
-  it("nasce desligado, oferece o Jev e não oferece o simulado", async () => {
+  it("nasce desligado, oferece o Jev e não oferece o simulado nem o Laya", async () => {
     const view = await read(owner);
     expect(view.model).toBeNull();
     expect(view.confirmation).toBeNull();
@@ -63,6 +63,13 @@ describe("o filtro da fala na tela", () => {
     });
     const simulated = await call(putFilter, { method: "PUT", cookie: owner, body: { model: "simulated" } });
     expect([simulated.status, simulated.code]).toEqual([400, "unknown_decision_model"]);
+    // O Laya está instalado como peça (fatia 8a), mas a tela só o oferece na fatia 9: nem lista,
+    // nem liga, nem salva chave.
+    const laya = await call(putFilter, { method: "PUT", cookie: owner, body: { model: "laya" } });
+    expect([laya.status, laya.code]).toEqual([400, "unknown_decision_model"]);
+    const layaKey = await call(putKey, { method: "PUT", cookie: owner, params: { model: "laya" }, body: { apiKey: "x" } });
+    expect([layaKey.status, layaKey.code]).toEqual([400, "unknown_decision_model"]);
+    expect(await setting(org, DECISION_MODEL_SETTING)).toBeNull();
   });
 
   it("só dono e administrador mudam: o operador lê, e não liga, nem salva ou remove chave", async () => {

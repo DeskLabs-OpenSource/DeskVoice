@@ -1,3 +1,4 @@
+import { hashPassword } from "@deskvoice/core";
 import { UNKNOWN_IP, addressBucket, clientIp } from "./client-ip";
 import { ApiError, type ServerDeps } from "./context";
 import { loginLimiter } from "./rate-limit";
@@ -65,4 +66,15 @@ export function reservePasswordAttempt(email: string, request: Request, deps: Se
       for (const key of taken) loginLimiter.release(key, now);
     },
   };
+}
+
+// Quando não há conta para conferir, a senha é conferida contra este hash: a resposta custa o mesmo
+// resumo de senha que a de um e-mail cadastrado, e o tempo não entrega quem tem conta. Usado pelo
+// login e pelo aceite de convite.
+let decoy: Promise<string> | undefined;
+
+/** O hash de isca, calculado uma vez por processo. */
+export function decoyHash(): Promise<string> {
+  decoy ??= hashPassword("decoy");
+  return decoy;
 }

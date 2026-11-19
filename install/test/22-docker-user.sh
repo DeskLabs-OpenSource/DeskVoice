@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# A regra da cadeia DOCKER-USER (issue #142): uma regra por porta, e ela volta depois do que
-# esvazia a cadeia — o reinício da máquina e o reinício do Docker, que a recriam vazia. O reload do
+# A regra da cadeia DOCKER-USER (issue #142): uma regra por porta, e ela volta depois do boot, que
+# recria a cadeia vazia, e do reinício do Docker, se ele a esvaziar (o 29.9.3 não esvaziou). O reload do
 # firewalld não a apaga (medido em 15/11/2026), então o caso do reload aqui é o de depois dele: a
 # cadeia ainda tem a regra, e aplicar de novo não duplica.
 # O iptables e o systemctl são de mentira: o teste não toca no firewall nem no systemd da máquina.
@@ -73,7 +73,9 @@ contains "serviço: é chamado de novo quando o Docker reinicia" "$(cat "$UNIT")
 contains "serviço: repõe a mesma porta" "$(cat "$UNIT")" "apply 5060/udp"
 # Conta a chamada de dentro (o `sudo` de mentira também loga a dele: "sudo -n systemctl ..."),
 # assim o teste mede o mesmo com o kit rodando como root e como quem precisa de sudo.
-equal "serviço: ligado no boot" 1 "$(calls '^systemctl enable deskvoice-docker-user.service')"
+# --now: o serviço fica ativo já, e o PartOf o chama num reinício do Docker antes do próximo boot.
+# --no-block: o serviço roda este mesmo apply, e um start de dentro dele esperaria por ele mesmo.
+equal "serviço: ligado no boot e já ativo, sem esperar pelo start" 1 "$(calls '^systemctl enable --now --no-block deskvoice-docker-user.service$')"
 
 out="$(tool apply 5060/udp)"; equal "apply duas vezes: sai com zero" 0 "$?"
 equal "apply duas vezes: continua com as duas" 2 "$(rules)"
@@ -88,7 +90,7 @@ equal "reinício: as duas, de novo" 2 "$(rules)"
 out="$(tool apply 5060/udp)"; equal "reload: aplicar de novo sai com zero" 0 "$?"
 equal "reload: continua com as duas" 2 "$(rules)"
 
-# ── Reiniciar o Docker também esvazia a cadeia: o mesmo serviço é chamado de novo ──
+# ── Um Docker que esvazie a cadeia ao reiniciar: o mesmo serviço é chamado de novo e repõe ──
 rm -f "$STATE"; out="$(boot)"; equal "docker reiniciado: o serviço repõe a regra" 0 "$?"
 equal "docker reiniciado: as duas" 2 "$(rules)"
 
@@ -176,10 +178,35 @@ contains "formato antigo: diz que trocou" "$out" "Troquei a regra antiga de 5060
 out="$(tool apply 5060/udp)"; equal "volta a fechar: zero" 0 "$?"
 # shellcheck disable=SC2086
 iptables -w 5 -I DOCKER-USER 1 $LEGACY_RULE >/dev/null 2>&1
-out="$(tool apply)"; equal "sem portas: sai com zero" 0 "$?"
+# O systemctl de mentira, embrulhado só aqui: anota se o arquivo da unidade ainda existia quando o
+# disable chegou. Parar depois do rm deixa a unidade na memória do systemd, sem arquivo.
+SHIM="$SANDBOX/shim"; mkdir -p "$SHIM"
+cat > "$SHIM/systemctl" <<SHIM_EOF
+#!/usr/bin/env bash
+case " \$* " in *" disable "*) if [ -f "$UNIT" ]; then echo "unidade com arquivo no disable" >> "\$FAKE_DIR/calls.log"; fi ;; esac
+exec "$TEST_DIR/fake/systemctl" "\$@"
+SHIM_EOF
+chmod +x "$SHIM/systemctl"
+: > "$FAKE_DIR/calls.log"
+out="$(PATH="$SHIM:$PATH" tool apply)"; equal "sem portas: sai com zero" 0 "$?"
 equal "sem portas: nenhuma regra do kit" 0 "$(rules)"
 refuse "sem portas: o serviço do boot foi apagado" test -f "$UNIT"
-equal "sem portas: desliga o serviço" 1 "$(calls '^systemctl disable deskvoice-docker-user.service')"
+equal "sem portas: desliga e para o serviço" 1 "$(calls '^systemctl disable --now deskvoice-docker-user.service$')"
+equal "sem portas: o disable chega com o arquivo da unidade ainda lá" 1 "$(calls '^unidade com arquivo no disable$')"
+# A ordem no log: o disable vem antes do daemon-reload que segue o rm.
+disable_at="$(grep -n -m1 '^systemctl disable --now ' "$FAKE_DIR/calls.log" | cut -d: -f1)"
+reload_at="$(grep -n '^systemctl daemon-reload' "$FAKE_DIR/calls.log" | tail -n 1 | cut -d: -f1)"
+check "sem portas: o disable vem antes do daemon-reload" test "${disable_at:-999999}" -lt "${reload_at:-0}"
+
+# ── --help: o cabeçalho inteiro, e só ele ──
+for help in --help ""; do
+  # shellcheck disable=SC2086  # sem argumento nenhum, de propósito, no segundo caso
+  out="$(tool $help)"; equal "ajuda '${help:-sem comando}': sai com zero" 0 "$?"
+  contains "ajuda '${help:-sem comando}': começa no cabeçalho" "$out" "A regra da cadeia DOCKER-USER"
+  contains "ajuda '${help:-sem comando}': vai até a última linha dele" "$out" "não fecha o que não foi medido (issue #142)."
+  lacks "ajuda '${help:-sem comando}': não passa do cabeçalho" "$out" "source"
+  lacks "ajuda '${help:-sem comando}': não mostra o shebang" "$out" "#!/usr/bin/env"
+done
 
 # ── install.sh: a variável fecha a porta, e a simulação não fecha nada ──
 export DESKVOICE_DOMAIN="" DESKVOICE_ORG_NAME="Clínica Exemplo" DESKVOICE_OWNER_NAME="Ana Exemplo"

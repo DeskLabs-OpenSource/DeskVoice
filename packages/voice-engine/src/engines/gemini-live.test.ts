@@ -249,7 +249,7 @@ describe("gemini-live: teste da chave (contrato com servidor HTTP falso)", () =>
     ["404", "model_unavailable", { status: 404, body: { error: { code: "model_not_found" } } }],
     ["402", "no_credit", { status: 402, body: { error: { code: "payment_required" } } }],
     ["429", "rate_limited", { status: 429, body: { error: { code: "rate_limit_exceeded" } } }],
-    ["503", "unreachable", { status: 503, body: "<html>indisponível</html>" }],
+    ["503", "provider_error", { status: 503, body: "<html>indisponível</html>" }],
     ["400 sem motivo de chave", "unexpected_response", { status: 400, body: { error: { code: "invalid_request" } } }],
     ["200 fora do formato", "unexpected_response", { status: 200, body: { models: [] } }],
     ["200 que não é JSON", "unexpected_response", { status: 200, body: "ok" }],

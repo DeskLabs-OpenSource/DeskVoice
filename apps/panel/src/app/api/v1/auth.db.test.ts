@@ -21,14 +21,20 @@ import { GET as listTeam } from "./team/route";
 import { DELETE as removeMember, PATCH as changeMember } from "./team/users/[id]/route";
 
 // A limpeza da conta órfã roda depois da remoção, fora da transação, e pode falhar. O teste da conta
-// órfã liga a falha; nos outros, a função de verdade roda.
-const orphanCleanup = vi.hoisted(() => ({ fail: false }));
+// órfã liga a falha; nos outros, a função de verdade roda. O teste da corrida do convite liga
+// `staleInvite`: a leitura do convite diz o contrário do que a conta é, como se ela tivesse ganhado
+// ou perdido a conta entre a leitura e o aceite.
+const orphanCleanup = vi.hoisted(() => ({ fail: false, staleInvite: false }));
 vi.mock("@deskvoice/core", async (importOriginal) => {
   const real = await importOriginal<typeof Core>();
   return {
     ...real,
     deleteAccountIfOrphan: (...args: Parameters<typeof real.deleteAccountIfOrphan>) =>
       orphanCleanup.fail ? Promise.reject(new Error("the account cleanup failed (test)")) : real.deleteAccountIfOrphan(...args),
+    findInviteByToken: async (...args: Parameters<typeof real.findInviteByToken>) => {
+      const found = await real.findInviteByToken(...args);
+      return found && orphanCleanup.staleInvite ? { ...found, existingAccount: !found.existingAccount } : found;
+    },
   };
 });
 
@@ -282,13 +288,13 @@ describe("an invite for an e-mail that already has an account", () => {
     expect((await call(me, { cookie: cookieOf(again) })).data).toMatchObject({ organizationName: "auth convite A" });
   });
 
-  it("a wrong password is 401 and does not spend the invite; an account already in the organization is 409", async () => {
+  it("a wrong password is the one refusal and does not spend the invite; an account already in the organization is 409", async () => {
     const a = await createOrganization(panel.app, "auth convite errado");
     const ownerA = await createUser(panel.app, a, "owner");
     const person = await createUser(panel.app, await createOrganization(panel.app, "auth convite errado B"), "operator");
     const token = await inviteBy(ownerA.cookie, person.email);
     const wrong = await accept(token, "not the password");
-    expect([wrong.status, wrong.code]).toEqual([401, "invalid_credentials"]);
+    expect([wrong.status, wrong.code]).toEqual([401, "invite_password_refused"]);
     expect((await call(openInvite, { params: { token } })).status).toBe(200);
 
     const member = await createUser(panel.app, a, "operator");
@@ -315,8 +321,86 @@ describe("an invite for an e-mail that already has an account", () => {
     const token = await inviteBy(ownerA.cookie, `nova-${randomUUID()}@example.test`);
     expect(Object.keys((await call(openInvite, { params: { token } })).data as object)).toEqual(INVITE_KEYS);
     const short = await accept(token, "curta");
-    expect([short.status, short.code]).toEqual([400, "validation_error"]);
+    expect([short.status, short.code]).toEqual([401, "invite_password_refused"]);
     expect((await accept(token, "uma senha nova e longa")).status).toBe(200);
+  });
+});
+
+describe("while the invite is not accepted, the password refusal is the same for every e-mail", () => {
+  // O limite das rotas de convite por IP (`server/invite-guard.ts`) também para no sexto erro: ele
+  // é desfeito a cada envio para que o 429 medido aqui seja o do limite do login.
+  const acceptPastTheGuard = async (token: string, password: string, ip: string) => {
+    const sent = await accept(token, password, ip);
+    loginLimiter.clear(`invite:${ip}`);
+    return sent;
+  };
+
+  it("an e-mail with an account and one without answer the same status and body, spend the same limit and check the same number of hashes", async () => {
+    const a = await createOrganization(panel.app, "auth recusa igual");
+    const ownerA = await createUser(panel.app, a, "owner");
+    const withAccount = await createUser(panel.app, await createOrganization(panel.app, "auth recusa igual B"), "operator");
+    const withoutAccount = `sem-conta-${randomUUID()}@example.test`;
+    const tokens = { with: await inviteBy(ownerA.cookie, withAccount.email), without: await inviteBy(ownerA.cookie, withoutAccount) };
+    const ip = "198.51.100.90";
+    // Só senhas fora da regra de senha nova: no e-mail sem conta, uma de 10+ cria a conta e gasta o convite.
+    const passwords = ["x", "123456789", "curta", "a", "nove-ch9", "123456789"];
+    const real = panel.deps.verifyPassword;
+    const answers = { with: [] as unknown[], without: [] as unknown[] };
+    const hashes = { with: 0, without: 0 };
+    for (const side of ["with", "without"] as const) {
+      panel.deps.verifyPassword = async (...args) => {
+        hashes[side] += 1;
+        return real(...args);
+      };
+      for (const password of passwords) {
+        const sent = await acceptPastTheGuard(tokens[side], password, ip);
+        answers[side].push([sent.status, sent.text.replaceAll(tokens[side], "<token>").replaceAll(side === "with" ? withAccount.email : withoutAccount, "<email>")]);
+      }
+    }
+    panel.deps.verifyPassword = real;
+
+    expect(answers.without).toEqual(answers.with);
+    expect(answers.with.map((answer) => (answer as [number])[0])).toEqual([401, 401, 401, 401, 401, 429]);
+    expect(hashes.without).toBe(hashes.with);
+    expect(hashes.with).toBe(5);
+    // Os dois convites seguem pendentes, e o e-mail sem conta continua sem conta.
+    expect((await call(openInvite, { params: { token: tokens.with } })).status).toBe(200);
+    expect((await call(openInvite, { params: { token: tokens.without } })).status).toBe(200);
+    expect(await withSystem(panel.app, (q) => q.one("select id from accounts where email = $1", [withoutAccount]))).toBeNull();
+
+    // E segue valendo: a senha da conta entra; a senha nova de 10+ cria a conta.
+    loginLimiter.clear();
+    expect((await accept(tokens.with, PASSWORD, ip)).status).toBe(200);
+    expect((await accept(tokens.without, "uma senha nova e longa", ip)).status).toBe(200);
+    expect((await signIn(withoutAccount, "uma senha nova e longa")).status).toBe(200);
+  });
+
+  it("the account that appears or goes away between reading the invite and accepting it gets the same refusal, counted", async () => {
+    const ownerA = await createUser(panel.app, await createOrganization(panel.app, "auth recusa corrida"), "owner");
+    const person = await createUser(panel.app, await createOrganization(panel.app, "auth recusa corrida B"), "operator");
+    const nobody = `corrida-${randomUUID()}@example.test`;
+    const gained = await inviteBy(ownerA.cookie, person.email);
+    const lost = await inviteBy(ownerA.cookie, nobody);
+    const plain = await accept(await inviteBy(ownerA.cookie, `outra-${randomUUID()}@example.test`), "x");
+    expect([plain.status, plain.code]).toEqual([401, "invite_password_refused"]);
+
+    orphanCleanup.staleInvite = true;
+    let raced: Awaited<ReturnType<typeof accept>>[];
+    try {
+      // Lido sem conta, aceito com a conta já criada (`existing_account`); lido com conta, aceito sem ela (`no_account`).
+      raced = [await acceptPastTheGuard(gained, "uma senha nova e longa", "198.51.100.91"), await acceptPastTheGuard(lost, "qualquer senha", "198.51.100.92")];
+    } finally {
+      orphanCleanup.staleInvite = false;
+    }
+    for (const refused of raced) expect([refused.status, refused.text]).toEqual([plain.status, plain.text]);
+    expect((await call(openInvite, { params: { token: gained } })).status).toBe(200);
+    expect((await call(openInvite, { params: { token: lost } })).status).toBe(200);
+    // A recusa da corrida ficou contada no limite do e-mail, como as outras.
+    const verifier = countingVerifier();
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) statuses.push((await acceptPastTheGuard(gained, "wrong", "198.51.100.91")).status);
+    verifier.restore();
+    expect(statuses).toEqual([401, 401, 401, 401, 429]);
   });
 });
 

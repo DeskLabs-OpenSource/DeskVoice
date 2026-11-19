@@ -56,6 +56,7 @@ const settings: SettingsDictionary = {
     region_unavailable: "el proveedor no atiende el país o la región de este servidor. Cambiar la clave no lo resuelve: usa otro motor de voz, o un servidor en un país atendido.",
     rate_limited: "el proveedor pidió esperar (límite de solicitudes de la cuenta). Vuelve a probar en unos minutos.",
     unreachable: "el proveedor no respondió en 10 segundos, o está caído. Revisa que el servidor tenga acceso a internet y vuelve a probar.",
+    provider_error: "el proveedor respondió con un error de su lado. Suele pasarse solo: inténtalo de nuevo en unos minutos.",
     unexpected_response: "el proveedor respondió algo que DeskVoice no reconoce. Vuelve a probar; si sigue, abre un issue en el repositorio.",
     not_needed: "este motor no pide clave.",
   },

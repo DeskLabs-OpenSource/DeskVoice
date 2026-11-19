@@ -27,6 +27,7 @@ const brains: BrainsDictionary = {
     region_unavailable: "el proveedor no atiende el país o la región de este servidor. Cambiar la clave no lo resuelve.",
     rate_limited: "el proveedor pidió esperar (límite de pedidos de la cuenta). Intente de nuevo en unos minutos.",
     unreachable: "el proveedor no respondió a tiempo, o está fuera de servicio. Verifique que el servidor tenga acceso a internet e intente de nuevo.",
+    provider_error: "el proveedor respondió con un error de su lado. Suele pasarse solo: intente de nuevo en unos minutos.",
     unexpected_response: "el proveedor respondió algo que DeskVoice no reconoce. Intente de nuevo; si continúa, abra un issue en el repositorio.",
   },
   errors: {

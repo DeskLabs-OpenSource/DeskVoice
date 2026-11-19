@@ -56,6 +56,7 @@ const settings: SettingsDictionary = {
     region_unavailable: "the provider does not serve this server's country or region. A new key will not fix it: use another voice engine, or a server in a supported country.",
     rate_limited: "the provider asked to wait (the account's request limit). Test again in a few minutes.",
     unreachable: "the provider did not answer within 10 seconds, or is down. Check that the server can reach the internet and test again.",
+    provider_error: "the provider answered with an error on its side. It usually clears up on its own: try again in a few minutes.",
     unexpected_response: "the provider answered something DeskVoice does not recognize. Test again; if it keeps happening, open an issue in the repository.",
     not_needed: "this engine needs no key.",
   },
