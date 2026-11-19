@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { fill } from "../../../../i18n/locales";
+import { useLocale } from "../../../../i18n/provider";
 import type { InstallationDictionary } from "../../../../i18n/pt-BR/installation";
+import { formatMoney } from "../../../../ui/format";
 import { Badge } from "../../../../ui/kit";
 import { Amount } from "../../costs/amount-view";
 
@@ -11,6 +13,8 @@ export interface OverviewRowView {
   suspendedAt: string | null;
   calls: { count: number };
   cost: { cents: number; unmeasuredCount: number; estimatedCount: number };
+  /** O teto de gasto do mês (fatia 7c), em centavos de dólar; `null` é sem teto. */
+  spendCapCents: number | null;
   trunk: { connected: number; attention: number; down: number; check: { status: Status } } | null;
   engine: { state: "own_key" | "no_key" | "key_failed"; check: { status: Status } };
   queue: { late: number; failedLast24h: number };
@@ -31,6 +35,7 @@ function Cell({ label, children }: { label: string; children: ReactNode }) {
  * do estado da chave.
  */
 export function OverviewRow({ row, t }: { row: OverviewRowView; t: InstallationDictionary["overview"] }) {
+  const locale = useLocale();
   return (
     <li className="grid gap-2 border-b border-line py-3 last:border-b-0">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -41,6 +46,13 @@ export function OverviewRow({ row, t }: { row: OverviewRowView; t: InstallationD
         <Cell label={t.calls}>{row.calls.count}</Cell>
         <Cell label={t.cost}>
           <Amount cents={row.cost.cents} unmeasuredCount={row.cost.unmeasuredCount} estimatedCount={row.cost.estimatedCount} />
+        </Cell>
+        <Cell label={t.spendCap}>
+          {row.spendCapCents === null ? (
+            <span className="text-muted">{t.spendCapNone}</span>
+          ) : (
+            fill(t.spendCapOf, { spent: formatMoney(row.cost.cents, locale), cap: formatMoney(row.spendCapCents, locale) })
+          )}
         </Cell>
         <Cell label={t.trunk}>
           {row.trunk === null ? (

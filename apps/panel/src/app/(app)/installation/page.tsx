@@ -10,9 +10,10 @@ import ptBR, { type InstallationDictionary } from "../../../i18n/pt-BR/installat
 import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus } from "../../../ui/errors";
-import { formatDateTime } from "../../../ui/format";
+import { formatDateTime, formatMoney } from "../../../ui/format";
 import { Badge, Button, EmptyState, Field, Notice, Panel, Select, Skeleton, TextArea, TextInput } from "../../../ui/kit";
 import { useInstallationAction, useInstallationErrorText } from "./errors";
+import { spendCapField, spendCapValue } from "./spend-cap";
 
 interface Organization {
   id: string;
@@ -267,9 +268,13 @@ interface Limits {
   outboundAllowed: boolean;
   /** A escolha da organização sobre a saída, lida e nunca escrita daqui. */
   outboundPolicyEnabled: boolean;
+  /** O teto de gasto do mês (7c), em centavos de dólar, a moeda do extrato. `null`: sem teto. */
+  monthlySpendCapCents: number | null;
   usage: { trunks: number; agents: number };
+  /** O gasto do mês, a mesma soma da tela de Custos e do teto, já arredondado para centavos. */
+  monthCost: { cents: number };
 }
-type LimitsDraft = { maxTrunks: string; maxAgents: string; outboundAllowed: boolean };
+type LimitsDraft = { maxTrunks: string; maxAgents: string; outboundAllowed: boolean; monthlySpendCap: string };
 
 // Vazio é sem limite. O resto vai como número, e a API recusa o que não for inteiro de 0 para cima.
 const limitField = (value: number | null): string => (value === null ? "" : String(value));
@@ -277,8 +282,8 @@ const limitValue = (field: string): number | null => (field.trim() === "" ? null
 
 /**
  * Os limites da organização (seção 3.4 do desenho do R8): linhas telefônicas e agentes, com quanto
- * ela já usa, e a trava da saída (7b), com a escolha da organização ao lado. O teto do mês entra com
- * a fatia dele.
+ * ela já usa, a trava da saída (7b), com a escolha da organização ao lado, e o teto de gasto do mês
+ * (7c), com o gasto do mês ao lado.
  */
 function LimitsForm({ organization, t, onDone, onCancel }: { organization: Organization; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
   const current = useApi<Limits>(`/installation/organizations/${organization.id}/limits`);
@@ -290,7 +295,14 @@ function LimitsForm({ organization, t, onDone, onCancel }: { organization: Organ
 
 function LimitsFields({ organization, limits, t, onDone, onCancel }: { organization: Organization; limits: Limits; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
   const save = useInstallationAction();
-  const [draft, setDraft] = useState<LimitsDraft>({ maxTrunks: limitField(limits.maxTrunks), maxAgents: limitField(limits.maxAgents), outboundAllowed: limits.outboundAllowed });
+  const locale = useLocale();
+  const [draft, setDraft] = useState<LimitsDraft>({
+    maxTrunks: limitField(limits.maxTrunks),
+    maxAgents: limitField(limits.maxAgents),
+    outboundAllowed: limits.outboundAllowed,
+    monthlySpendCap: spendCapField(limits.monthlySpendCapCents),
+  });
+  const [capInvalid, setCapInvalid] = useState(false);
   // Destravar devolve a escolha da organização: a tela diz qual, antes de salvar.
   const unblocking = !limits.outboundAllowed && draft.outboundAllowed;
   const usage = (used: number, limit: string): string => (limit.trim() === "" ? fill(t.limitsUsageUnlimited, { used }) : fill(t.limitsUsage, { used, limit: limit.trim() }));
@@ -303,8 +315,14 @@ function LimitsFields({ organization, limits, t, onDone, onCancel }: { organizat
       className="grid gap-3 rounded-xs border border-line p-3"
       onSubmit={(event) => {
         event.preventDefault();
+        const cap = spendCapValue(draft.monthlySpendCap);
+        setCapInvalid(!cap.ok);
+        if (!cap.ok) return;
         void save.run(async () => {
-          await api(`/installation/organizations/${organization.id}/limits`, { method: "PUT", body: { maxTrunks: limitValue(draft.maxTrunks), maxAgents: limitValue(draft.maxAgents), outboundAllowed: draft.outboundAllowed } });
+          await api(`/installation/organizations/${organization.id}/limits`, {
+            method: "PUT",
+            body: { maxTrunks: limitValue(draft.maxTrunks), maxAgents: limitValue(draft.maxAgents), outboundAllowed: draft.outboundAllowed, monthlySpendCapCents: cap.cents },
+          });
           onDone(fill(t.limitsSaved, { name: organization.name }));
         });
       }}
@@ -323,7 +341,11 @@ function LimitsFields({ organization, limits, t, onDone, onCancel }: { organizat
             <option value="blocked">{t.limitsOutboundBlocked}</option>
           </Select>
         </Field>
+        <Field label={t.limitsSpendCap} hint={`${fill(t.limitsSpendCapSpent, { spent: formatMoney(limits.monthCost.cents, locale) })} ${t.limitsSpendCapApprox} ${t.limitsEmptyHint}`}>
+          <TextInput className="w-32" mono inputMode="decimal" value={draft.monthlySpendCap} onChange={(event) => setDraft({ ...draft, monthlySpendCap: event.target.value })} />
+        </Field>
       </div>
+      {capInvalid ? <Notice tone="fail">{t.limitsSpendCapInvalid}</Notice> : null}
       {unblocking ? <Notice>{limits.outboundPolicyEnabled ? t.limitsOutboundReturnsOn : t.limitsOutboundReturnsOff}</Notice> : null}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary" busy={save.busy}>

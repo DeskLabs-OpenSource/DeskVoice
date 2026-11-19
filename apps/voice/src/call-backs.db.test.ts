@@ -79,9 +79,10 @@ describe("as constantes da religação (decisão de 18/11, DESA-121, pedido 1 = 
     ).rejects.toThrow(/call_backs_attempt_check/);
   });
 
-  it("o banco aceita todo código de CALL_BACK_REFUSAL_CODES, inclusive outbound_not_allowed, e recusa um inventado", async () => {
+  it("o banco aceita todo código de CALL_BACK_REFUSAL_CODES, inclusive outbound_not_allowed e spend_cap_reached, e recusa um inventado", async () => {
     const s = await scene("cb refusal codes");
     expect(CALL_BACK_REFUSAL_CODES).toContain("outbound_not_allowed");
+    expect(CALL_BACK_REFUSAL_CODES).toContain("spend_cap_reached");
     const id = await withSystem(app, (q) =>
       q.one<{ id: string }>(
         "insert into call_backs (organization_id, origin_call_id, agent_id, to_e164, attempt, due_at, status, refusal_code, created_at) values ($1, $2, $3, $4, 1, $5, 'refused', 'outbound_not_allowed', $5) returning id",
@@ -239,6 +240,25 @@ describe("a discagem da religação", { timeout: 120_000 }, () => {
     const followUps = await s.followUps();
     expect(followUps).toEqual([{ call_id: s.originId, title: callBackFailedTitle(CALLER, "outbound_not_allowed") }]);
     expect(followUps[0]?.title).toContain("a administração da instalação bloqueou");
+    expect(logs.filter((entry) => entry.level === "error")).toEqual([]);
+  });
+
+  // O teto de gasto do mês (R8, fatia 7c): a religação travada pelo teto é recusada pela porta única com o
+  // próprio código, e nunca aparece como defeito da telefonia (`originate_failed`).
+  it("T7: o teto do mês é atingido entre o agendamento e a hora de discar: spend_cap_reached, sem discar, com a pendência e sem log de código inesperado", async () => {
+    const s = await scene("cb spend cap");
+    const id = await s.due();
+    await withSystem(app, (q) => q.exec("insert into organization_limits (organization_id, monthly_spend_cap_cents) values ($1, 0)", [s.organizationId]));
+    const logs: Array<{ level: string; message: string }> = [];
+    await placeCallBack({ ...s.deps, log: (level, message) => void logs.push({ level, message }) }, s.organizationId, id);
+    expect(s.ari.originated).toEqual([]);
+    const refused = (await s.outboundCalls()).find((call) => call.call_back_of === s.originId);
+    expect(refused).toMatchObject({ status: "refused", end_reason: "spend_cap_reached" });
+    expect(await s.rows()).toEqual([expect.objectContaining({ status: "refused", refusal_code: "spend_cap_reached", result_call_id: refused?.id })]);
+    expect(await s.results()).toEqual([{ action: "call_back_refused", attempt: 1, callId: refused?.id, refusalCode: "spend_cap_reached" }]);
+    const followUps = await s.followUps();
+    expect(followUps).toEqual([{ call_id: s.originId, title: callBackFailedTitle(CALLER, "spend_cap_reached") }]);
+    expect(followUps[0]?.title).toContain("teto de gasto do mês");
     expect(logs.filter((entry) => entry.level === "error")).toEqual([]);
   });
 
