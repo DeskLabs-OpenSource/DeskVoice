@@ -474,7 +474,7 @@ describe("6. o custo aparece e conta no teto", { timeout: 120_000 }, () => {
       await reads(made.callId, 1);
       made.transport.callerHangup();
       await session.done;
-      expect(await readsOf(made.callId)).toEqual([expect.objectContaining({ onTime: false, failure: "unreachable", status: 529 })]);
+      expect(await readsOf(made.callId)).toEqual([expect.objectContaining({ onTime: false, failure: "provider_error", status: 529 })]);
       expect((await ledgerOf(made.callId)).filter((row) => row.engine === "jev")).toEqual([]);
     });
   });

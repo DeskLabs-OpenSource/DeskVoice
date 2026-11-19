@@ -162,8 +162,8 @@ describe("brains/gemini: lista de modelos", () => {
     [403, {}, "rejected"],
     [402, {}, "no_credit"],
     [429, {}, "rate_limited"],
-    [500, {}, "unreachable"],
-    [503, {}, "unreachable"],
+    [500, {}, "provider_error"],
+    [503, {}, "provider_error"],
     [404, {}, "unexpected_response"],
   ] as const)("status %i com %j é %s", async (status, body, failure) => {
     const { fetch } = fakeFetch({ status, body });
@@ -227,7 +227,7 @@ describe("brains/gemini: pedido em JSON", () => {
     [403, {}, "unexpected_response"],
     [404, {}, "unexpected_response"],
     [429, {}, "rate_limited"],
-    [503, {}, "unreachable"],
+    [503, {}, "provider_error"],
     [400, {}, "unexpected_response"],
   ] as const)("status %i com %j é %s", async (status, body, failure) => {
     const { fetch } = fakeFetch({ status, body });
@@ -700,8 +700,8 @@ describe("brains/gemini: chat em streaming", () => {
     [401, "UNAUTHENTICATED", "rejected"],
     [402, "PAYMENT_REQUIRED", "no_credit"],
     [429, "RESOURCE_EXHAUSTED", "rate_limited"],
-    [500, "INTERNAL", "unreachable"],
-    [503, "UNAVAILABLE", "unreachable"],
+    [500, "INTERNAL", "provider_error"],
+    [503, "UNAVAILABLE", "provider_error"],
     [403, "PERMISSION_DENIED", "unexpected_response"],
     [404, "NOT_FOUND", "unexpected_response"],
   ])("9c. HTTP %i (%s) vira %s, como no completeJson; a recusa vem sem custo", async (status, code, failure) => {
@@ -730,7 +730,7 @@ describe("brains/gemini: chat em streaming", () => {
 
   it.each([
     [429, "rate_limited"],
-    [500, "unreachable"],
+    [500, "provider_error"],
     [400, "unexpected_response"],
   ])("9e. erro no meio do SSE (code %i) vira %s, pelo código, nunca pelo texto", async (code, failure) => {
     const fake = await chatServer((_req, res) =>
@@ -777,7 +777,7 @@ describe("brains/gemini: chat em streaming", () => {
     expect(got.events).toEqual([
       ["toolCall", { id: "fc-1", name: "agendar", args: '{"dia":"terça"}', providerState: "A" }],
       ["usage", { inputTokens: expect.any(Number), outputTokens: chatBytes('{"dia":"terça"}') }, true],
-      ["error", "unreachable", 200],
+      ["error", "provider_error", 200],
     ]);
   });
 

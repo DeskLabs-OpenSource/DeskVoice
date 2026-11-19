@@ -166,7 +166,7 @@ describe("brain keys and model lists", () => {
     // A chave nova não alcança o provedor agora: a lista da anterior não pode aparecer como dela.
     openrouterKey = { status: 503, body: {} };
     const replaced = await save(owner, OTHER_KEY);
-    expect((replaced.data as { check: unknown }).check).toEqual({ result: "unreachable", status: 503, checkedAt: NOW.toISOString() });
+    expect((replaced.data as { check: unknown }).check).toEqual({ result: "provider_error", status: 503, checkedAt: NOW.toISOString() });
     expect((await settingsOf(org)).map((row) => row.key)).toEqual(["brain.openrouter.api_key", "brain.openrouter.key_check"]);
     expect((await models(owner)).data).toEqual({ fetchedAt: null, models: [], stale: false });
     expect((await brainsOf(owner)).find((brain) => brain.id === "openrouter")).toMatchObject({ configured: true, modelCount: null, fetchedAt: null });
@@ -265,7 +265,7 @@ describe("brain keys and model lists", () => {
         fetchedAt: NOW.toISOString(),
         stale: true,
         models: [{ id: "vendor/modelo-com-preco" }, { id: "vendor/modelo-tarifa-por-pedido" }],
-        check: { result: failure.status === 401 ? "rejected" : "unreachable", status: failure.status },
+        check: { result: failure.status === 401 ? "rejected" : "provider_error", status: failure.status },
       });
       // A lista guardada não foi tocada; o teste da chave, sim.
       expect((await settingsOf(org)).find((row) => row.key === "brain.openrouter.models")?.value).toEqual(before);

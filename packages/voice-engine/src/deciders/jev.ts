@@ -91,8 +91,8 @@ function ourAnswer(answer: z.infer<typeof answerSchema>): DecisionAnswer {
 }
 
 function failureOf(status: number): ClassifyFailure {
-  // 529 é a sobrecarga do Jev: para quem usa, o mesmo que o provedor fora do ar.
-  if (status === 529) return "unreachable";
+  // 529 é a sobrecarga do Jev: o provedor respondeu, com erro do lado dele.
+  if (status === 529) return "provider_error";
   const result = byStatus(status);
   return result === "accepted" || result === "not_needed" ? "unexpected_response" : result;
 }
@@ -174,7 +174,7 @@ const jev: DecisionModel = {
         model: options.model ?? MODEL,
         // Aceita só quando o modelo usado está na lista da conta; uma lista sem ele é resposta fora do esperado.
         accepted: modelsSchema.refine((body) => body.models.some((each) => each.name === (options.model ?? MODEL))),
-        classify: (status): KeyCheckResult | undefined => (status === 529 ? "unreachable" : undefined),
+        classify: (status): KeyCheckResult | undefined => (status === 529 ? "provider_error" : undefined),
       },
       options,
     );

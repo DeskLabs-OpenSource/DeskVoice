@@ -89,7 +89,7 @@ describe("Jev: nunca lança, e a chave nunca sai", () => {
   const cases: Array<[string, Parameters<typeof fakeFetch>[0], string, number | null]> = [
     ["chave recusada (401)", { status: 401, body: { detail: "Invalid API key" } }, "rejected", 401],
     ["limite (429)", { status: 429, body: { detail: "rate" } }, "rate_limited", 429],
-    ["sobrecarga (529)", { status: 529, body: {} }, "unreachable", 529],
+    ["sobrecarga (529)", { status: 529, body: {} }, "provider_error", 529],
     ["pedido fora da regra (422)", { status: 422, body: { detail: [] } }, "unexpected_response", 422],
     ["sem rede", "network", "unreachable", null],
     ["corpo que não é JSON", { status: 200, body: "<html>" }, "unexpected_response", 200],
@@ -216,6 +216,6 @@ describe("Jev: o teste da chave", () => {
   it("chave recusada, lista sem o modelo e sobrecarga, no vocabulário fechado", async () => {
     expect((await jev.checkKey?.(KEY, { fetch: fakeFetch({ status: 401, body: { detail: "no" } }).fetch }))?.result).toBe("rejected");
     expect((await jev.checkKey?.(KEY, { fetch: fakeFetch({ status: 200, body: { models: [{ name: "outro" }] } }).fetch }))?.result).toBe("unexpected_response");
-    expect((await jev.checkKey?.(KEY, { fetch: fakeFetch({ status: 529, body: {} }).fetch }))?.result).toBe("unreachable");
+    expect((await jev.checkKey?.(KEY, { fetch: fakeFetch({ status: 529, body: {} }).fetch }))?.result).toBe("provider_error");
   });
 });

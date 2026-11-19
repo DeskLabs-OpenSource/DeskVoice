@@ -144,6 +144,30 @@ Sobre o Asterisk: o DeskVoice conversa com ele por interfaces de rede (ARI e Aud
 contém código do Asterisk. O Asterisk continua sob a licença dele, e o DeskVoice sob MIT. O
 protocolo AudioSocket faz parte do Asterisk e é obra dos seus autores.
 
+## Modelo de pesos abertos embutido numa imagem do projeto
+
+| Projeto | Papel no DeskVoice | Licença |
+|---|---|---|
+| [Laya](https://huggingface.co/convaiinnovations/laya), da Convai Innovations | Modelo de decisão opcional do filtro da fala, que roda nesta máquina (imagem `deskvoice-laya`, de `deploy/laya/`, no perfil `laya` do Compose, desligado de fábrica) | Apache 2.0 |
+
+A imagem `deskvoice-laya` leva, sem modificar, o checkpoint multilíngue do repositório
+`convaiinnovations/laya` no Hugging Face, na revisão `e333cb7c823cd1787276228260f56d02fbf5180b`,
+com cada arquivo conferido pelo resumo de `deploy/laya/weights.sha256`. Esse checkpoint foi treinado
+sobre o codificador [mmBERT-base](https://huggingface.co/jhu-clsp/mmBERT-base), da JHU CLSP, sob
+licença MIT. A imagem também leva o pacote [`laya`](https://pypi.org/project/laya/) 0.4.31 (Apache
+2.0), o [PyTorch](https://pytorch.org) de CPU (licença BSD e as das partes que ele inclui) e as
+bibliotecas do Hugging Face `transformers`, `tokenizers`, `safetensors` e `huggingface_hub` (Apache
+2.0). As versões estão em `deploy/laya/requirements.txt`, e a do PyTorch, em
+`deploy/laya/requirements-torch.txt`. O servidor HTTP da imagem
+(`deploy/laya/server.py`) foi escrito do zero para o DeskVoice, e o pacote traz um servidor próprio
+que não é usado.
+
+Fontes das licenças, lidas em 18/11/2026: o cartão do modelo na revisão fixada
+(`huggingface.co/convaiinnovations/laya/raw/e333cb7c823cd1787276228260f56d02fbf5180b/README.md`,
+`license: apache-2.0`), a página do mmBERT-base na API do Hugging Face (`license: mit`), a página do
+pacote no PyPI (`pypi.org/pypi/laya/0.4.31/json`, `Apache-2.0`) e os metadados dos pacotes
+instalados no ambiente da bancada. A Convai Innovations não é afiliada ao DeskVoice.
+
 ## Bibliotecas
 
 O DeskVoice é construído sobre [Node.js](https://nodejs.org),

@@ -424,7 +424,7 @@ describe("classify_call_outcome", () => {
       ["401", erro(401), { reason: "rejected", status: 401, costCents: 0 }],
       ["modelo inexistente", erro(404, { error: { code: "model_not_found" } }), { reason: "model_unavailable", status: 404, costCents: 0 }],
       ["sem crédito", erro(429, { error: { code: "insufficient_quota" } }), { reason: "no_credit", status: 429, costCents: 0 }],
-      ["fora do ar", erro(500), { reason: "unreachable", status: 500, costCents: 0 }],
+      ["fora do ar", erro(500), { reason: "provider_error", status: 500, costCents: 0 }],
       ["rede", vi.fn(async () => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof globalThis.fetch, { reason: "unreachable", status: null, costCents: 0 }],
       // Um 200 fora da forma foi cobrado: o custo entra, e o desfecho fica para depois.
       ["fora do schema", openai({ outcome: "comprou", confidence: 2, evidence: "" }), { reason: "unexpected_response", status: 200, costCents: CUSTO }],
@@ -699,7 +699,7 @@ describe("classify_call_outcome: análise da ligação", () => {
   it("provedor falhando: com as duas chaves, os dois eventos; só com a análise, só o dela", async () => {
     const casos: Array<[string, typeof globalThis.fetch, Record<string, unknown>]> = [
       ["401", erro(401), { reason: "rejected", status: 401, costCents: 0 }],
-      ["fora do ar", erro(500), { reason: "unreachable", status: 500, costCents: 0 }],
+      ["fora do ar", erro(500), { reason: "provider_error", status: 500, costCents: 0 }],
       // Fora da forma foi cobrado: o custo entra uma vez, e nada é gravado, nem o desfecho.
       ["seis objeções", openai(completa({ objections: Array.from({ length: 6 }, () => OBJECAO) })), { reason: "unexpected_response", status: 200, costCents: CUSTO }],
       ["só o desfecho", openai({ outcome: "booked", confidence: 0.9, evidence: "Então pode marcar para terça." }), { reason: "unexpected_response", status: 200, costCents: CUSTO }],

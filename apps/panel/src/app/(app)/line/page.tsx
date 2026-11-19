@@ -17,7 +17,8 @@ import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, TextArea, TextInput, type Tone } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import { allowedView, trunkFailure } from "../../../ui/trunk-status";
-import type { Agent, PhoneNumber, Setting, Trunk } from "../../../ui/types";
+import type { Agent, IvrMenu, PhoneNumber, Setting, Trunk } from "../../../ui/types";
+import { IvrMenusPanel, NumberAnswer } from "./ivr-menus";
 
 type StepStatus = "ok" | "warn" | "fail" | "skipped";
 interface CheckResult {
@@ -85,8 +86,27 @@ function AllowedAddresses({ trunk, t, onSaved }: { trunk: Trunk; t: LineDictiona
 
 const ICON_BUTTON = "grid size-9 cursor-pointer place-items-center rounded-xs text-muted hover:bg-sunken";
 
-/** Um número da linha: troca quem atende, corrige o número digitado errado e remove, com confirmação. */
-function NumberRow({ entry, trunkName, t, cancel, agentOptions, onChanged }: { entry: PhoneNumber; trunkName: string; t: LineDictionary; cancel: string; agentOptions: ReactNode; onChanged(): void }) {
+/**
+ * Um número da linha: troca quem atende (o agente, ou um menu por teclas), corrige o número digitado
+ * errado e remove, com confirmação.
+ */
+function NumberRow({
+  entry,
+  trunkName,
+  t,
+  cancel,
+  agentOptions,
+  menus,
+  onChanged,
+}: {
+  entry: PhoneNumber;
+  trunkName: string;
+  t: LineDictionary;
+  cancel: string;
+  agentOptions: ReactNode;
+  menus: IvrMenu[];
+  onChanged(): void;
+}) {
   const canConfigure = useCanConfigure();
   const action = useAction();
   const [mode, setMode] = useState<"view" | "edit" | "remove">("view");
@@ -103,9 +123,16 @@ function NumberRow({ entry, trunkName, t, cancel, agentOptions, onChanged }: { e
       <div className="grid items-center gap-x-4 gap-y-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
         <span className="data text-[1.07rem]">{pretty}</span>
         <span className="text-muted">{trunkName}</span>
-        <Select aria-label={t.answeredBy} disabled={!canConfigure} value={entry.agentId ?? ""} onChange={(event) => run(() => api(`/phone-numbers/${entry.id}`, { method: "PATCH", body: { agentId: event.target.value || null } }))}>
-          {agentOptions}
-        </Select>
+        <NumberAnswer
+          entry={entry}
+          menus={menus}
+          onChange={(body) => run(() => api(`/phone-numbers/${entry.id}`, { method: "PATCH", body }))}
+          agentSelect={
+            <Select aria-label={t.answeredBy} disabled={!canConfigure} value={entry.agentId ?? ""} onChange={(event) => run(() => api(`/phone-numbers/${entry.id}`, { method: "PATCH", body: { agentId: event.target.value || null } }))}>
+              {agentOptions}
+            </Select>
+          }
+        />
         {canConfigure ? (
           <div className="flex gap-1">
             <button
@@ -337,6 +364,7 @@ export default function LinePage() {
   const trunks = useApi<Trunk[]>("/trunks");
   const numbers = useApi<PhoneNumber[]>("/phone-numbers");
   const agents = useApi<Agent[]>("/agents");
+  const menus = useApi<IvrMenu[]>("/ivr-menus");
   const publicIp = useApi<Setting<string>>("/settings/network.public_ip");
   const [adding, setAdding] = useState(false);
   const [ip, setIp] = useState("");
@@ -393,7 +421,16 @@ export default function LinePage() {
           {numbers.data?.length ? (
             <ul className="grid">
               {numbers.data.map((entry) => (
-                <NumberRow key={entry.id} entry={entry} trunkName={list.find((trunk) => trunk.id === entry.trunkId)?.name ?? ""} t={t} cancel={cancel} agentOptions={agentOptions} onChanged={numbers.reload} />
+                <NumberRow
+                  key={entry.id}
+                  entry={entry}
+                  trunkName={list.find((trunk) => trunk.id === entry.trunkId)?.name ?? ""}
+                  t={t}
+                  cancel={cancel}
+                  agentOptions={agentOptions}
+                  menus={menus.data ?? []}
+                  onChanged={numbers.reload}
+                />
               ))}
             </ul>
           ) : null}
@@ -436,6 +473,16 @@ export default function LinePage() {
           {addNumber.error ? <Notice tone="fail">{addNumber.error}</Notice> : null}
         </div>
       </Panel>
+
+      <IvrMenusPanel
+        menus={menus.data}
+        agents={agents.data ?? []}
+        numbers={numbers.data ?? []}
+        onChanged={() => {
+          menus.reload();
+          numbers.reload();
+        }}
+      />
 
       <Panel title={t.helpTitle} description={t.helpBody}>
         <div className="grid gap-5">

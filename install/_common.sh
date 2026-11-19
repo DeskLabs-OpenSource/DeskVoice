@@ -20,6 +20,8 @@ GENERATED_DIR="$DEPLOY_DIR/asterisk/generated"
 PROXY_OVERRIDE="$DEPLOY_DIR/docker-compose.override.yml"
 DB_USER="deskvoice"
 DB_NAME="deskvoice"
+# O `laya` fica de fora de propósito: esta lista é o que a atualização e o instalador baixam, e o
+# Laya só é baixado quando alguém o liga (desenho R12, fatia 8a).
 APP_SERVICES="panel voice routines"
 
 # ── Mensagens ────────────────────────────────────────────────────────────────
@@ -648,10 +650,12 @@ is_version() {  # 0 = número de versão no formato único (X.Y.Z, ou X.Y.Z-rc.1
   [[ "$1" =~ $re ]]
 }
 image_prefix() { env_get "$IMAGES_FILE" DESKVOICE_IMAGE_PREFIX; }
-image_repo() {  # image_repo <panel|voice|routines> → o nome sem a etiqueta
+# O `laya` (deploy/laya/) também é imagem do projeto e usa os dois: image_ref laya <versão>. Ele
+# fica fora de APP_SERVICES, porque está num perfil do Compose que vem desligado.
+image_repo() {  # image_repo <panel|voice|routines|laya> → o nome sem a etiqueta
   printf '%s/deskvoice-%s\n' "$(image_prefix)" "$1"
 }
-image_ref() {  # image_ref <panel|voice|routines> <versão> → o nome completo, igual ao do Compose
+image_ref() {  # image_ref <panel|voice|routines|laya> <versão> → o nome completo, igual ao do Compose
   printf '%s:%s\n' "$(image_repo "$1")" "$2"
 }
 # published_arm64 <versão> → 0: o índice publicado da versão lista arm64; 1: o registro respondeu e

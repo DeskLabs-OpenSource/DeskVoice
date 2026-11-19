@@ -66,7 +66,7 @@ O="$D/docker-compose.override.yml"
 services_with_ports() { awk '/^  [a-z-]+:/ { s = $1 } /^    ports:/ { print s }' "$1" | tr -d ':' | tr '\n' ' '; }
 equal "compose base: só o Asterisk publica porta (o Caddy recebe as dele do instalador)" "asterisk " "$(services_with_ports "$REPO/deploy/docker-compose.yml")"
 lacks "compose base: o Caddy não é mais opcional" "$(awk '/^  caddy:/ { on = 1; next } on && /^  [a-z-]+:/ { on = 0 } on' "$REPO/deploy/docker-compose.yml")" "profiles:"
-equal "compose base: só os serviços de WhatsApp ficam num perfil" "waha wacalls " "$(awk '/^  [a-z-]+:/ { s = $1 } /^    profiles:/ { print s }' "$REPO/deploy/docker-compose.yml" | tr -d ':' | tr '\n' ' ')"
+equal "compose base: só os serviços opcionais (os dois de WhatsApp e o Laya) ficam num perfil" "waha wacalls laya " "$(awk '/^  [a-z-]+:/ { s = $1 } /^    profiles:/ { print s }' "$REPO/deploy/docker-compose.yml" | tr -d ':' | tr '\n' ' ')"
 contains "o Caddy encaminha a voz do navegador" "$(cat "$REPO/deploy/Caddyfile")" "reverse_proxy voice:8091"
 contains "o Caddy encaminha o resto ao painel" "$(cat "$REPO/deploy/Caddyfile")" "reverse_proxy panel:3000"
 hops() { env_get "$D/app.env" TRUSTED_PROXY_HOPS; }
