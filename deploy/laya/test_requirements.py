@@ -59,26 +59,31 @@ def requirements(name):
 
 PIP_EXE = re.compile(r"pip(?:3(?:\.\d+)?)?")
 PIP_WORD = re.compile(r"pip(?![A-Za-z_])")
-# O shlex entrega numa palavra só toda sequência dos caracteres `()<>;&|`. Tirados os parênteses, o
-# que sobra feito só de `;`, `&` e `|` é um separador de comandos (`&&`, `||`, `;`, `|`, `&`, `;;`, `|&`,
-# e também `||(`, `;(`, `)||`, `)&&(`); o que tem `<` ou `>` é redireção (`>&`, `&>`, `>|`).
+# O shlex entrega numa palavra só toda sequência dos caracteres `()<>;&|` (`||(`, `)&&(`, `||>`, `;<`,
+# `>||`). Tirados os parênteses, a palavra é cortada da esquerda para a direita, sempre na peça mais
+# longa: `&&`, `||`, `;`, `|` e `&` são separadores de comandos; `&>`, `&>>`, `>&`, `<&`, `>|`, `>>`,
+# `<<`, `<<-`, `<>`, `<` e `>` são redireção. Assim `||>` é `||` e `>`, e `>||` é `>|` e `|`.
 PUNCTUATION = re.compile(r"[()<>;&|]+")
-OPERATOR = re.compile(r"[;&|]+")
+PIECE = re.compile(r"&&|\|\||&>>?|[<>]&|>\||>>|<<-?|<>|[<>;&|]")
+SEPARATORS = {"&&", "||", ";", "|", "&"}
 
 
-def separator(token):
-    """O separador que a palavra carrega (sem os parênteses colados), ou None se ela não é separador."""
+def separators(token):
+    """Os separadores que a palavra carrega, na ordem; lista vazia se ela não é só pontuação ou se
+    só tem redireção (e parênteses)."""
     if not PUNCTUATION.fullmatch(token):
-        return None
-    rest = token.replace("(", "").replace(")", "")
-    return rest if OPERATOR.fullmatch(rest) else None
+        return []
+    pieces = PIECE.findall(token.replace("(", "").replace(")", ""))
+    return [piece for piece in pieces if piece in SEPARATORS]
+
+
 REQUIREMENTS = {"requirements-torch.txt", "requirements.txt"}
 
 
 def dockerfile_runs():
     """Cada RUN do Dockerfile como lista de comandos (cada um, a lista de palavras) e os operadores
     entre eles. As palavras saem do `shlex`, que respeita as aspas e separa `&&`, `||`, `;`, `|` e `&`
-    (mesmo colados num parêntese, como em `||(true)`)."""
+    (mesmo colados num parêntese ou numa redireção, como em `||(true)` e `||>/dev/null`)."""
     with open(os.path.join(HERE, "Dockerfile"), encoding="utf-8") as f:
         text = f.read()
     runs = []
@@ -90,9 +95,9 @@ def dockerfile_runs():
         lexer.whitespace_split = True
         commands, operators, current = [], [], []
         for token in lexer:
-            op = separator(token)
-            if op is not None:
-                operators.append(op)
+            ops = separators(token)
+            if ops:
+                operators.extend(ops)
                 commands.append(current)
                 current = []
             else:
