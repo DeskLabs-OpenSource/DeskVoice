@@ -6,8 +6,11 @@ import { CALL_COLUMNS } from "../../../../../server/shapes";
 export const GET = handle({}, async ({ q, params }) => {
   const call = await q.one<Record<string, unknown> & { analysis: unknown; summary: string | null }>(
     `select ${CALL_COLUMNS}, a.max_call_seconds as "maxCallSeconds", a.cost_ceiling_cents as "costCeilingCents",
-            c.analysis, c.erased_at is not null as "erased"
-       from calls c left join agents a on a.id = c.agent_id where c.id = $1`,
+            c.analysis, c.erased_at is not null as "erased",
+            -- A religação aponta para a ligação que caiu (desenho do follow-up, seção 3.6): o cabeçalho diz
+            -- "Retorno da ligação de <hora>", com o link. Só o id e a hora; nada da original.
+            c.call_back_of as "callBackOf", o.started_at as "callBackOfStartedAt"
+       from calls c left join agents a on a.id = c.agent_id left join calls o on o.id = c.call_back_of where c.id = $1`,
     [params.id],
   );
   if (!call) throw notFound();

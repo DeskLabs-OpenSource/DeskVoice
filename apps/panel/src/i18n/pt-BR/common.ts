@@ -111,6 +111,7 @@ const common = {
     owner_unavailable: "Essa pessoa não está ativa na equipe. Escolha outra, ou deixe com a equipe.",
     drop_follow_up_whatsapp_not_connected: "O WhatsApp não está conectado. Conecte em Configurações → WhatsApp antes de escolher a mensagem para quem ligou.",
     drop_follow_up_caller_id_not_trusted: "A mensagem para quem ligou só sai com \"Confiar no número exibido na ligação\" ligado, em Configurações → WhatsApp. Ligue antes de escolher este modo.",
+    drop_follow_up_outbound_disabled: "As ligações de saída estão desligadas. Ligue-as em Ligações de saída, declarando finalidade e base legal, antes de escolher ligar de volta.",
     caller_notes_retention_above_transcripts: "O prazo da memória não pode passar do prazo de guarda das conversas. Escolha um prazo menor, ou aumente antes o prazo de guarda.",
     follow_up_closed: "Esta pendência já foi fechada por outra pessoa. Atualize a página.",
     whatsapp_calls_unavailable: "O processo de voz deste servidor ainda não tem a chave do serviço de ligação pelo WhatsApp. Rode bash install/update.sh no servidor, uma vez.",

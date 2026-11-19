@@ -40,6 +40,7 @@ export const TASK_KIND_ON_SUSPENSION = {
   // O fim do acesso de suporte vale com a organização suspensa: o suporte serve justamente a ela.
   end_support_access: "keeps_running",
   classify_call_outcome: "canceled",
+  call_back: "canceled",
   deliver_notification: "canceled",
   deliver_webhook: "canceled",
   follow_up: "canceled",

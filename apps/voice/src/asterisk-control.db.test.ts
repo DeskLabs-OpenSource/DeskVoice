@@ -628,7 +628,8 @@ describe("ligação de saída", { timeout: 120_000 }, () => {
     expect(ari.originated).toEqual([]);
     const failed = await callsOf(app, organizationId);
     expect(failed).toMatchObject([{ status: "failed", end_reason: "no_answer" }]);
-    expect(await kindsOf(app, failed[0]?.id ?? "")).toEqual(["call_ended"]);
+    // O fim sem áudio não passa por `finish`: a revisão é enfileirada ali mesmo (a religação depende dela).
+    expect(await kindsOf(app, failed[0]?.id ?? "")).toEqual(["call_ended", "task_queued"]);
   });
 });
 

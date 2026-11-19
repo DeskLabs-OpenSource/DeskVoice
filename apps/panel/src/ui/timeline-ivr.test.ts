@@ -82,3 +82,26 @@ describe("linha do tempo do menu por teclas", () => {
     for (const said of Object.values(ptBR.events.ivr_ended)) expect(html).toContain(said);
   });
 });
+
+describe("as falhas da passagem e da transferência (DESA-187)", () => {
+  it("`handoff_failed` e `transfer_failed` têm frase nos três idiomas, sem apontar para um aviso", () => {
+    for (const [locale, dictionary] of [["pt-BR", ptBR], ["en", en], ["es", es]] as const) {
+      for (const reason of ["handoff_failed", "transfer_failed"] as const) {
+        const html = visible(render([event("1", "ivr_failed", { reason })], locale)).replaceAll("&#x27;", "'");
+        expect(dictionary.events.ivr_failed_reasons[reason], `${locale} ${reason}`).toBeTruthy();
+        expect(html).toContain(dictionary.events.ivr_failed_reasons[reason]);
+        expect(html).not.toContain(dictionary.events.ivr_failed_unknown);
+        expect(html).not.toContain(dictionary.events.ivr_failed_notice);
+      }
+    }
+    // A falha do banco não se confunde com o agente desligado.
+    expect(ptBR.events.ivr_failed_reasons.handoff_failed).not.toBe(ptBR.events.ivr_failed_reasons.agent_disabled);
+    expect(ptBR.events.ivr_failed_reasons.handoff_failed).not.toMatch(/desligado\. /);
+  });
+
+  it("os três dicionários têm as mesmas chaves em `ivr_failed_reasons`", () => {
+    const keys = (dictionary: typeof ptBR): string[] => Object.keys(dictionary.events.ivr_failed_reasons).sort();
+    expect(keys(en)).toEqual(keys(ptBR));
+    expect(keys(es)).toEqual(keys(ptBR));
+  });
+});

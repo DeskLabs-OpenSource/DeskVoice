@@ -112,6 +112,7 @@ const common: CommonDictionary = {
     owner_unavailable: "Esa persona no está activa en el equipo. Elige a otra, o déjalo con el equipo.",
     drop_follow_up_whatsapp_not_connected: "WhatsApp no está conectado. Conéctalo en Configuración → WhatsApp antes de elegir el mensaje a quien llamó.",
     drop_follow_up_caller_id_not_trusted: "El mensaje a quien llamó solo sale con \"Confiar en el número que aparece en la llamada\" activado, en Configuración → WhatsApp. Actívalo antes de elegir este modo.",
+    drop_follow_up_outbound_disabled: "Las llamadas salientes están desactivadas. Actívalas en Llamadas salientes, declarando la finalidad y la base legal, antes de elegir devolver la llamada.",
     caller_notes_retention_above_transcripts: "El plazo de la memoria no puede superar el plazo de conservación de las conversaciones. Elige un plazo menor, o aumenta antes el plazo de conservación.",
     follow_up_closed: "Otra persona ya cerró este pendiente. Actualiza la página.",
     whatsapp_calls_unavailable: "El proceso de voz de este servidor todavía no tiene la clave del servicio de llamadas por WhatsApp. Ejecuta bash install/update.sh en el servidor, una vez.",

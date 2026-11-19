@@ -45,7 +45,7 @@ const ivr = {
   upload: "Subir anúncio",
   replace: "Trocar anúncio",
   converting: "Convertendo o arquivo…",
-  unreadable: "O navegador não conseguiu abrir este arquivo. Tente um MP3 ou um WAV.",
+  unreadable: "O navegador não conseguiu abrir este arquivo, ou ele não tem som (menos de 0,2 s). Tente um MP3 ou um WAV.",
   tooLong: "Este arquivo tem {seconds} s. O anúncio pode ter no máximo 60 segundos.",
   listen: "Ouvir o anúncio",
   answers: "Atende",

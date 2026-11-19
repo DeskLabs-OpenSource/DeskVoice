@@ -31,3 +31,31 @@ export const DROP_FOLLOW_UP_DEFAULT_MESSAGE: Record<SpokenLanguage, (organizatio
 
 /** O texto padrão na língua de um agente (`agents.language`, texto livre como `en-US`), com o nome da organização. */
 export const dropFollowUpDefaultMessage = (agentLanguage: unknown, organization: string): string => DROP_FOLLOW_UP_DEFAULT_MESSAGE[spokenLanguageOf(agentLanguage)](organization);
+
+/**
+ * A religação (modo `call_back`, desenho 2026-11-16-follow-up-da-ligacao-que-caiu, seção 3.6; decisão de
+ * 18/11, DESA-121, pedido 1 = A): **1 tentativa, 30 minutos depois do fim da ligação**, dentro da
+ * janela das ligações de saída, sem ser empurrada para a próxima. Fixos no código, sem ajuste na tela.
+ *
+ * O teto é 3 (`CALL_BACK_MAX_ATTEMPTS`), e o intervalo nunca fica abaixo de 30 minutos: um teste trava
+ * os dois, e o banco confere o mesmo teto em `call_backs.attempt`.
+ */
+export const CALL_BACK_ATTEMPTS = 1;
+export const CALL_BACK_INTERVAL_MINUTES = 30;
+export const CALL_BACK_MAX_ATTEMPTS = 3;
+export const CALL_BACK_MIN_INTERVAL_MINUTES = 30;
+/** A religação `due` que o processo de voz não discou em 1 hora (voz parada) vira `expired`, sem discar. */
+export const CALL_BACK_EXPIRE_AFTER_MINUTES = 60;
+
+/**
+ * A linha fixa somada às instruções do agente quando a ligação é uma religação (`calls.call_back_of`
+ * não nulo), na língua do agente (`spokenLanguageOf`). Nada da conversa anterior entra por aqui.
+ */
+export const CALL_BACK_INSTRUCTION: Record<SpokenLanguage, string> = {
+  "pt-BR": "Esta é uma ligação de retorno: uma ligação deste número para cá caiu antes de terminar. Apresente-se, diga que está retornando e pergunte se a pessoa ainda precisa de ajuda.",
+  en: "This is a return call: a call from this number to us dropped before it ended. Introduce yourself, say that you are calling back, and ask whether the person still needs help.",
+  es: "Esta es una llamada de retorno: una llamada de este número hacia nosotros se cortó antes de terminar. Preséntese, diga que está devolviendo la llamada y pregunte si la persona todavía necesita ayuda.",
+};
+
+/** A linha da religação na língua de um agente (`agents.language`, texto livre como `en-US`). */
+export const callBackInstruction = (agentLanguage: unknown): string => CALL_BACK_INSTRUCTION[spokenLanguageOf(agentLanguage)];

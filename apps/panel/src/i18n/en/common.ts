@@ -112,6 +112,7 @@ const common: CommonDictionary = {
     owner_unavailable: "This person is not active in the team. Pick someone else, or leave it with the team.",
     drop_follow_up_whatsapp_not_connected: "WhatsApp is not connected. Connect it in Settings → WhatsApp before choosing to message the caller.",
     drop_follow_up_caller_id_not_trusted: "The message to the caller only goes out with \"Trust the number shown on the call\" turned on, in Settings → WhatsApp. Turn it on before choosing this mode.",
+    drop_follow_up_outbound_disabled: "Outbound calls are off. Turn them on in Outbound calls, stating the purpose and the legal basis, before choosing to call back.",
     caller_notes_retention_above_transcripts: "The memory period cannot be longer than the conversation retention period. Pick a shorter period, or raise the retention period first.",
     follow_up_closed: "Someone else already closed this follow-up. Refresh the page.",
     whatsapp_calls_unavailable: "The voice process of this server does not have the key of the WhatsApp calls service yet. Run bash install/update.sh on the server, once.",
