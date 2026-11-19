@@ -3,7 +3,12 @@
 Description=DeskVoice: passada do agente de atualização, a cada minuto
 
 [Timer]
-OnCalendar=minutely
+# Conta tempo decorrido, e não a hora do relógio. Em máquina cujo relógio de hardware guarda a hora
+# local (timedatectl mostra "RTC in local TZ: yes"), o boot sobe horas adiantado, o
+# chrony volta o relógio, e o timer pela hora do calendário ficava marcado para horas depois: o painel
+# deixava de ouvir o agente até lá. O tempo decorrido não pula.
+OnActiveSec=1min
+OnUnitActiveSec=1min
 RandomizedDelaySec=15s
 AccuracySec=5s
 

@@ -239,7 +239,10 @@ contains "a unidade roda o agente desta pasta" "$unit" "ExecStart=/usr/bin/env b
 contains "a unidade roda como o dono da pasta" "$unit" "User=$(owner_of "$REPO")"
 # shellcheck disable=SC2016  # procura o texto literal
 lacks "nenhuma variável do modelo sobra sem trocar" "$unit" '${'
-contains "o timer passa a cada minuto" "$(cat "$units/deskvoice-agent.timer")" "OnCalendar=minutely"
+contains "o timer passa a cada minuto" "$(cat "$units/deskvoice-agent.timer")" "OnUnitActiveSec=1min"
+contains "o timer começa um minuto depois de ligado" "$(cat "$units/deskvoice-agent.timer")" "OnActiveSec=1min"
+# A hora do relógio pula no boot de máquina com o relógio de hardware em hora local; o tempo decorrido, não.
+lacks "o timer não conta pela hora do relógio" "$(cat "$units/deskvoice-agent.timer")" "OnCalendar="
 contains "o timer tem um atraso aleatório pequeno" "$(cat "$units/deskvoice-agent.timer")" "RandomizedDelaySec=15s"
 equal "liga o timer" 1 "$(grep -c '^systemctl enable --now deskvoice-agent.timer' "$FAKE_DIR/calls.log")"
 equal "recarrega o systemd uma vez" 1 "$(grep -c '^systemctl daemon-reload' "$FAKE_DIR/calls.log")"
