@@ -68,6 +68,7 @@ const line = {
   overlapWarning: "Existe uma linha de outra organização desta instalação numa faixa que cruza esta. Se você salvar, as linhas por IP das duas param de receber chamadas, até uma delas mudar o endereço.",
   overlapSave: "Salvar mesmo assim",
   overlapBack: "Voltar",
+  overlapTooMany: "Muitas tentativas. Espere um minuto e tente de novo.",
   lineHasNumbers: "Esta linha ainda tem números ligados a ela: {n}. Remova esses números antes de remover a linha.",
   editNumber: "Corrigir o número {number}",
   saveNumber: "Salvar número",

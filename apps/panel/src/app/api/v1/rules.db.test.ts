@@ -1,5 +1,5 @@
 import { decryptSecret, withOrg, withSystem } from "@deskvoice/core";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { NOW, SECRET_KEY, call, createCall, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
 import { DELETE as deleteAgent, PATCH as patchAgent } from "./agents/[id]/route";
 import { POST as createAgent } from "./agents/route";
@@ -19,6 +19,7 @@ import { POST as checkTrunk } from "./trunks/[id]/check/route";
 import { PATCH as switchTrunkFilter } from "./trunks/[id]/inbound-filter/route";
 import { DELETE as deleteTrunk, PATCH as patchTrunk } from "./trunks/[id]/route";
 import { GET as listTrunks, POST as createTrunk } from "./trunks/route";
+import { trunkOverlapLimiter } from "./trunks/store";
 
 const panel = startPanel();
 let org: string;
@@ -34,6 +35,10 @@ beforeAll(async () => {
   // pedirem confirmação conforme a ordem dos arquivos. O aviso tem teste próprio.
   await withSystem(panel.app, (q) => q.exec("delete from trunks where organization_id <> $1", [org]));
 });
+// O limite por minuto da conferência de faixa é do processo, por organização, e o relógio de teste
+// é fixo: este arquivo cria e edita dezenas de linhas na mesma organização no mesmo "minuto". Cada
+// teste começa com o limite zerado. O limite tem teste próprio (`trunk-overlap.db.test.ts`).
+beforeEach(() => trunkOverlapLimiter.clear());
 afterAll(() => panel.close());
 
 const stored = <T>(sql: string, params: unknown[] = []) => withOrg(panel.app, org, (q) => q.one<Record<string, T>>(sql, params));

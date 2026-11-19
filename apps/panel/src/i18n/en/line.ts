@@ -70,6 +70,7 @@ const line: LineDictionary = {
   overlapWarning: "Another organization of this installation has a line in a range that overlaps this one. If you save, the lines recognized by IP of both stop receiving calls, until one of them changes its address.",
   overlapSave: "Save anyway",
   overlapBack: "Go back",
+  overlapTooMany: "Too many attempts. Wait a minute and try again.",
   lineHasNumbers: "This line still has numbers attached to it: {n}. Remove those numbers before removing the line.",
   editNumber: "Correct the number {number}",
   saveNumber: "Save number",

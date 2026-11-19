@@ -67,3 +67,72 @@ test("faixa que cruza a de outra organização: a tela pergunta antes de salvar,
   expect(created).toBeDefined();
   expect((await page.request.delete(`/api/v1/trunks/${created?.id}`)).ok()).toBe(true);
 });
+
+test("T12: com a caixa aberta, mudar o endereço fecha a caixa, e salvar confere de novo, sem a confirmação da caixa anterior", async ({ page }) => {
+  const name = `Faixa ${unique()}`;
+  const sent: Array<Record<string, unknown>> = [];
+  await page.route("**/api/v1/trunks", async (route, request: Request) => {
+    if (request.method() !== "POST") return route.continue();
+    const body = request.postDataJSON() as Record<string, unknown>;
+    sent.push(body);
+    if (body.confirmOverlap !== true) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify(OVERLAP) });
+    return route.continue();
+  });
+
+  await signIn(page);
+  await page.goto("/line");
+  const form = section(page, line.newLine);
+  await form.getByLabel(label(line.name)).fill(name);
+  await form.getByLabel(label(line.host)).fill("192.0.2.78");
+  await form.getByLabel(label(line.authMode)).selectOption({ label: line.authIp });
+  await form.getByRole("button", { name: line.saveLine }).click();
+  const warning = form.getByRole("alert");
+  await expect(warning).toHaveText(line.overlapWarning);
+
+  // O formulário mudou com a caixa aberta: a caixa fecha, e "Salvar mesmo assim" some com ela.
+  await form.getByLabel(label(line.host)).fill("192.0.2.79");
+  await expect(warning).toHaveCount(0);
+  await expect(form.getByRole("button", { name: line.overlapSave, exact: true })).toHaveCount(0);
+
+  // Salvar de novo confere o endereço novo: o pedido sai sem a confirmação.
+  await form.getByRole("button", { name: line.saveLine }).click();
+  await expect(warning).toHaveText(line.overlapWarning);
+  expect(sent).toHaveLength(2);
+  expect(sent[1]).toMatchObject({ host: "192.0.2.79" });
+  expect(sent[1]).not.toHaveProperty("confirmOverlap");
+
+  // "Salvar mesmo assim" reenvia exatamente o corpo que recebeu o 409, com a confirmação.
+  await form.getByRole("button", { name: line.overlapSave, exact: true }).click();
+  await expect(section(page, name)).toBeVisible();
+  expect(sent).toHaveLength(3);
+  expect(sent[2]).toEqual({ ...sent[1], confirmOverlap: true });
+
+  const listed = (await (await page.request.get("/api/v1/trunks")).json()) as { data: Array<{ id: string; name: string }> };
+  const created = listed.data.find((trunk) => trunk.name === name);
+  expect(created).toBeDefined();
+  expect((await page.request.delete(`/api/v1/trunks/${created?.id}`)).ok()).toBe(true);
+});
+
+test("acima do limite por minuto, a tela mostra o erro e não salva", async ({ page }) => {
+  const name = `Faixa ${unique()}`;
+  await page.route("**/api/v1/trunks", async (route, request: Request) => {
+    if (request.method() !== "POST") return route.continue();
+    return route.fulfill({
+      status: 429,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: false, error: { code: "too_many_attempts", message: "Too many attempts. Wait a minute and try again." } }),
+    });
+  });
+
+  await signIn(page);
+  await page.goto("/line");
+  const form = section(page, line.newLine);
+  await form.getByLabel(label(line.name)).fill(name);
+  await form.getByLabel(label(line.host)).fill("192.0.2.80");
+  await form.getByLabel(label(line.authMode)).selectOption({ label: line.authIp });
+  await form.getByRole("button", { name: line.saveLine }).click();
+  await expect(form.getByText(line.overlapTooMany, { exact: true })).toBeVisible();
+  await expect(form.getByText(line.overlapWarning)).toHaveCount(0);
+  await expect(form.getByText(common.actions.saved, { exact: true })).toHaveCount(0);
+  await expect(section(page, name)).toHaveCount(0);
+});

@@ -10,7 +10,7 @@ export const PATCH = handle(
     configure: true,
     after: async (trunk: object | null, { deps, session }) => ({ ...trunk, ...(await applyTrunks(deps, session.organizationId)) }),
   },
-  async ({ q, params, body, deps }) => {
+  async ({ q, params, body, deps, session }) => {
     const current = await q.one<{
       name: string;
       host: string;
@@ -34,7 +34,7 @@ export const PATCH = handle(
     // de uma linha que já está num grupo misto não pergunta nada.
     const sameExtras = (merged.matchExtra ?? []).join("\n") === (current.matchExtra ?? []).join("\n");
     if (merged.host !== current.host || merged.authMode !== current.authMode || !sameExtras) {
-      await requireOverlapConfirmed(deps, q.organizationId, { id: params.id, host: merged.host, authMode: merged.authMode, matchExtra: merged.matchExtra }, confirmOverlap);
+      await requireOverlapConfirmed(deps, q.organizationId, session, { id: params.id, host: merged.host, authMode: merged.authMode, matchExtra: merged.matchExtra }, confirmOverlap);
     }
     // A senha gravada só vale para o destino para o qual foi digitada. Sem isso, quem pode editar a
     // linha apontava o host para um servidor seu e recebia, no registro, a senha do provedor.

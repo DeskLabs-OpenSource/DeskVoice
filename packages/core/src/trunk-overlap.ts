@@ -2,6 +2,7 @@
 // para montar o arquivo do Asterisk (`renderTrunksConf`), e o painel a usa para avisar, ANTES de
 // salvar, que uma linha vai tirar do ar a linha por IP de outra organização. Se as duas regras
 // fossem escritas duas vezes, o aviso e o arquivo divergiriam um dia sem ninguém ver.
+import { recordInstallationEvent } from "./installation";
 import type { Db } from "./types";
 import { withSystem } from "./with-org";
 import { hostsOverlap, isBlockTooWide, parseTrunkHost, type TrunkHost } from "./trunk-host";
@@ -159,4 +160,20 @@ export async function trunkOverlapWarning(
   const outBefore = ipTrunksOutByOverlap(before);
   const outAfter = ipTrunksOutByOverlap(after);
   return { stops: [...outAfter].some((id) => !outBefore.has(id)) };
+}
+
+/**
+ * Grava na auditoria da instalação que a organização recebeu a pergunta da faixa sobreposta
+ * (`trunk_overlap_refused`). Roda numa transação própria (`withSystem`), fora da transação da
+ * linha: o evento fica gravado mesmo com a resposta 409 e nada salvo. Leva só a organização e a
+ * conta de quem tentou; o `payload` é vazio.
+ */
+export async function recordTrunkOverlapRefused(db: Db, at: Date, organizationId: string, userId: string): Promise<void> {
+  await withSystem(db, async (q) => {
+    const person = await q.one<{ accountId: string }>(`select account_id as "accountId" from users where id = $1 and organization_id = $2 and kind = 'member'`, [
+      userId,
+      organizationId,
+    ]);
+    await recordInstallationEvent(q, at, "trunk_overlap_refused", { actorAccountId: person?.accountId ?? null, organizationId, payload: {} });
+  });
 }

@@ -13,11 +13,11 @@ export const POST = handle(
     configure: true,
     after: async (trunk: object | null, { deps, session }) => ({ ...trunk, ...(await applyTrunks(deps, session.organizationId)) }),
   },
-  async ({ q, body, deps }) => {
+  async ({ q, body, deps, session }) => {
     requireIpModeForAddresses(body.authMode, body.outboundHost ?? null);
     requireNumericInbound(body.authMode, body.host, body.matchExtra ?? []);
     await requireBelowLimit(q, "trunks");
-    await requireOverlapConfirmed(deps, q.organizationId, body, body.confirmOverlap);
+    await requireOverlapConfirmed(deps, q.organizationId, session, body, body.confirmOverlap);
     return q.one(
       `insert into trunks (organization_id, name, host, username, secret_enc, auth_mode, caller_id_e164, match_extra, outbound_host)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning ${TRUNK_COLUMNS}`,

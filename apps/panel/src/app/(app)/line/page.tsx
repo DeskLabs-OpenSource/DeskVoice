@@ -208,10 +208,18 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
   });
   const [applied, setApplied] = useState(true);
   // A API recusou com `trunk_overlap_unconfirmed`: nada foi gravado, e a tela pergunta antes.
-  // "back": a pessoa voltou sem salvar, e a tela não diz "Salvo.".
-  const [overlap, setOverlap] = useState<"asking" | "back" | null>(null);
+  // "back": a pessoa voltou sem salvar, e a tela não diz "Salvo.". "limited": a API recusou com
+  // `too_many_attempts` (limite por minuto da conferência), e nada foi gravado.
+  const [overlap, setOverlap] = useState<"asking" | "back" | "limited" | null>(null);
+  // O corpo que recebeu o 409. "Salvar mesmo assim" reenvia exatamente ele, nunca o formulário do
+  // momento: se o formulário muda com a caixa aberta, a caixa fecha e o corpo guardado sai.
+  const [refused, setRefused] = useState<Record<string, unknown> | null>(null);
   const [result, setResult] = useState<CheckResult | null>(null);
-  const set = (key: keyof typeof draft, value: string): void => setDraft((current) => ({ ...current, [key]: value }));
+  const set = (key: keyof typeof draft, value: string): void => {
+    setRefused(null);
+    setOverlap((current) => (current === "asking" ? null : current));
+    setDraft((current) => ({ ...current, [key]: value }));
+  };
   // Destino mudou: a senha gravada não acompanha (a API recusa), então a tela já pede a nova.
   const moved = trunk !== null && trunk.secret.configured && (draft.host !== trunk.host || draft.username !== (trunk.username ?? ""));
   const status = result?.status ?? trunk?.status ?? "unverified";
@@ -220,35 +228,37 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    send(false);
+    const { password, matchExtra, outboundHost, ...rest } = draft;
+    // Uma linha por campo; o que ficou em branco não vira endereço. A lista vale nos dois modos;
+    // fora do modo por IP o destino de saída não existe: a API recusa, e a tela não manda lixo.
+    const addresses = matchExtra
+      .split("\n")
+      .map((item) => item.trim())
+      .filter((item) => item !== "");
+    send({
+      ...rest,
+      matchExtra: addresses,
+      outboundHost: rest.authMode === "ip" && outboundHost.trim() !== "" ? outboundHost.trim() : null,
+      ...(password && { password }),
+    });
   };
 
-  const send = (confirmOverlap: boolean): void => {
+  const send = (body: Record<string, unknown>): void => {
     setOverlap(null);
+    setRefused(null);
     void save.run(async () => {
-      const { password, matchExtra, outboundHost, ...rest } = draft;
-      // Uma linha por campo; o que ficou em branco não vira endereço. A lista vale nos dois modos;
-      // fora do modo por IP o destino de saída não existe: a API recusa, e a tela não manda lixo.
-      const addresses = matchExtra
-        .split("\n")
-        .map((item) => item.trim())
-        .filter((item) => item !== "");
       let saved: Trunk;
       try {
-        saved = await api<Trunk>(trunk ? `/trunks/${trunk.id}` : "/trunks", {
-          method: trunk ? "PATCH" : "POST",
-          body: {
-            ...rest,
-            matchExtra: addresses,
-            outboundHost: rest.authMode === "ip" && outboundHost.trim() !== "" ? outboundHost.trim() : null,
-            ...(password && { password }),
-            ...(confirmOverlap && { confirmOverlap: true }),
-          },
-        });
+        saved = await api<Trunk>(trunk ? `/trunks/${trunk.id}` : "/trunks", { method: trunk ? "PATCH" : "POST", body });
       } catch (failure) {
         // Faixa que cruza a de outra organização: a linha NÃO foi salva. A caixa abaixo pergunta.
         if (failure instanceof ApiFailure && failure.code === "trunk_overlap_unconfirmed") {
+          setRefused(body);
           setOverlap("asking");
+          return;
+        }
+        if (failure instanceof ApiFailure && failure.code === "too_many_attempts") {
+          setOverlap("limited");
           return;
         }
         throw failure;
@@ -312,11 +322,11 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
         </fieldset>
 
         {trunk ? <AllowedAddresses trunk={trunk} t={t} onSaved={onSaved} /> : null}
-        {overlap === "asking" ? (
+        {overlap === "asking" && refused ? (
           <Notice tone="warn">
             <p role="alert">{t.overlapWarning}</p>
             <div className="mt-1 flex flex-wrap gap-2">
-              <Button variant="danger" busy={save.busy} onClick={() => send(true)}>
+              <Button variant="danger" busy={save.busy} onClick={() => send({ ...refused, confirmOverlap: true })}>
                 {t.overlapSave}
               </Button>
               <Button variant="ghost" onClick={() => setOverlap("back")}>
@@ -357,6 +367,7 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
               </Button>
             ) : null}
             {overlap === null ? <ActionStatus action={save} /> : null}
+            {overlap === "limited" ? <Notice tone="fail">{t.overlapTooMany}</Notice> : null}
             {test.error ? <ActionStatus action={test} /> : null}
             {trunk?.lastCheckAt && !result ? <span className="text-[0.87rem] text-muted">{fill(t.lastCheck, { when: formatDateTime(trunk.lastCheckAt, locale) })}</span> : null}
             {trunk && !confirming ? (

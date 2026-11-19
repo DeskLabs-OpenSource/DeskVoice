@@ -130,6 +130,7 @@ const installation: InstallationDictionary = {
       support_access_started: "{who} started a support access in {org}.",
       support_access_ended: "The support access of {who} in {org} ended.",
       update_requested: "{who} requested the update to version {target}, from {org}.",
+      trunk_overlap_refused: "{who} tried to save in {org} a line whose range overlaps that of another organization. The screen asked for confirmation.",
     },
     sources: {
       command: "through the command on the server",
