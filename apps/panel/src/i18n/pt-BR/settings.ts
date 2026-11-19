@@ -8,6 +8,7 @@ const settings = {
     lead: "Definido pela administração da instalação. Para mudar, fale com quem administra a instalação.",
     trunks: "Linhas telefônicas: {used} de {limit}",
     agents: "Agentes: {used} de {limit}",
+    outboundLocked: "Ligações de saída bloqueadas pela administração da instalação",
   },
   sections: {
     ai: "Inteligência artificial",

@@ -9,6 +9,7 @@ const settings: SettingsDictionary = {
     lead: "Definido por la administración de la instalación. Para cambiarlos, habla con quien administra la instalación.",
     trunks: "Líneas telefónicas: {used} de {limit}",
     agents: "Agentes: {used} de {limit}",
+    outboundLocked: "Llamadas salientes bloqueadas por la administración de la instalación",
   },
   sections: {
     ai: "Inteligencia artificial",

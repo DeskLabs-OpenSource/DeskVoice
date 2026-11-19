@@ -150,6 +150,7 @@ const common = {
     organization_suspended: "Esta organização está suspensa: ela não atende nem faz ligações.",
     support_session_forbidden: "A sessão de suporte da instalação não faz esta alteração. Peça a um dono ou administrador da equipe.",
     organization_limit_reached: "Esta organização chegou ao limite definido pela administração da instalação.",
+    outbound_not_allowed: "A administração da instalação bloqueou as ligações de saída desta organização.",
     outbound_disabled: "As ligações de saída estão desligadas. Ligue em Ligações de saída.",
     outside_window: "Fora do horário permitido para ligações de saída.",
     do_not_call: "Este número está na lista de não ligar.",

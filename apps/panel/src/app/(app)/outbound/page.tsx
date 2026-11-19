@@ -17,6 +17,9 @@ import { Button, Field, Notice, PageHeader, Panel, Skeleton, TextArea, TextInput
 import { useCanConfigure } from "../../../ui/me";
 import type { OutboundPolicy } from "../../../ui/types";
 
+/** A política, com a trava da administração da instalação (seção 3.4 do R8, fatia 7b). */
+type Policy = OutboundPolicy & { lockedByInstallation: boolean };
+
 interface Blocked {
   e164: string;
   reason: string | null;
@@ -27,7 +30,7 @@ export default function OutboundPage() {
   const common = useDict(commonPtBR, commonEn, commonEs);
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
-  const policy = useApi<OutboundPolicy>("/outbound-policy");
+  const policy = useApi<Policy>("/outbound-policy");
   const blocked = useApi<Blocked[]>("/do-not-call");
   const [draft, setDraft] = useState<OutboundPolicy | null>(null);
   const [paste, setPaste] = useState({ numbers: "", reason: "" });
@@ -44,6 +47,8 @@ export default function OutboundPage() {
   if (policy.error && !policy.data) return <Notice tone="fail">{errorText(policy.error)}</Notice>;
   if (!draft || !policy.data) return <Skeleton lines={4} />;
   const enabled = policy.data.enabled;
+  // Com a trava, o interruptor fica desabilitado; quem garante é a rota e a porta única do processo de voz.
+  const locked = policy.data.lockedByInstallation;
   const set = <K extends keyof OutboundPolicy>(key: K, value: OutboundPolicy[K]): void => setDraft({ ...draft, [key]: value });
   const put = (body: Partial<OutboundPolicy>) => async (): Promise<void> => {
     await api("/outbound-policy", { method: "PUT", body });
@@ -55,7 +60,7 @@ export default function OutboundPage() {
       <PageHeader title={t.title} lead={t.lead} />
       <ReadOnlyNotice />
 
-      <Panel title={enabled ? t.onTitle : t.offTitle} tone={enabled ? "accent" : undefined}>
+      <Panel title={locked ? t.lockedTitle : enabled ? t.onTitle : t.offTitle} tone={enabled && !locked ? "accent" : undefined}>
         <form
           className="grid gap-5"
           onSubmit={(event) => {
@@ -63,6 +68,12 @@ export default function OutboundPage() {
             void toggle.run(put({ enabled: true, purpose: draft.purpose, legalBasis: draft.legalBasis }));
           }}
         >
+          {locked ? (
+            <Notice tone="warn">
+              <p>{t.locked}</p>
+              <p>{t.lockedKept}</p>
+            </Notice>
+          ) : null}
           <div className="grid max-w-[72ch] gap-3 text-muted">
             <p className="flex items-start gap-3">
               <ShieldCheck size={22} weight="duotone" className="mt-0.5 shrink-0" aria-hidden />
@@ -80,11 +91,11 @@ export default function OutboundPage() {
           </fieldset>
           {canConfigure ? (
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" variant={enabled ? "secondary" : "primary"} busy={toggle.busy} icon={enabled ? null : <PhoneOutgoing size={18} weight="duotone" aria-hidden />}>
+              <Button type="submit" variant={enabled ? "secondary" : "primary"} busy={toggle.busy} disabled={locked} icon={enabled ? null : <PhoneOutgoing size={18} weight="duotone" aria-hidden />}>
                 {enabled ? t.saveDeclaration : t.turnOn}
               </Button>
               {enabled ? (
-                <Button variant="ghost" onClick={() => void toggle.run(put({ enabled: false }))}>
+                <Button variant="ghost" disabled={locked} onClick={() => void toggle.run(put({ enabled: false }))}>
                   {t.turnOff}
                 </Button>
               ) : null}

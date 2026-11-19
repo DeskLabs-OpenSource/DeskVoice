@@ -388,6 +388,7 @@ const timeline = {
     ivr_no_choice: "Quem ligou não escolheu uma opção válida no menu por teclas, e a ligação foi encerrada.",
     ivr_failed: "O menu por teclas não pôde atender a ligação. O motivo está na linha do tempo, logo acima.",
     outbound_disabled: "As ligações de saída estavam desligadas.",
+    outbound_not_allowed: "A administração da instalação tinha bloqueado as ligações de saída desta organização.",
     outside_window: "Fora do horário permitido para ligações de saída.",
     do_not_call: "O número está na lista de não ligar.",
     daily_cap_reached: "O teto diário de ligações desta linha tinha sido atingido.",

@@ -381,6 +381,7 @@ const timeline: TimelineDictionary = {
     ivr_no_choice: "The caller did not choose a valid option in the keypad menu, and the call was ended.",
     ivr_failed: "The keypad menu could not answer the call. The reason is in the timeline, just above.",
     outbound_disabled: "Outbound calls were off.",
+    outbound_not_allowed: "The installation administration had blocked outbound calls for this organization.",
     outside_window: "Outside the hours allowed for outbound calls.",
     do_not_call: "The number is on the do-not-call list.",
     daily_cap_reached: "The daily call limit of this line had been reached.",

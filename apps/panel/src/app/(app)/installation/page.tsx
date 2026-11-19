@@ -11,7 +11,7 @@ import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus } from "../../../ui/errors";
 import { formatDateTime } from "../../../ui/format";
-import { Badge, Button, EmptyState, Field, Notice, Panel, Skeleton, TextArea, TextInput } from "../../../ui/kit";
+import { Badge, Button, EmptyState, Field, Notice, Panel, Select, Skeleton, TextArea, TextInput } from "../../../ui/kit";
 import { useInstallationAction, useInstallationErrorText } from "./errors";
 
 interface Organization {
@@ -263,9 +263,13 @@ function ReactivateConfirm({ organization, t, onDone, onCancel }: { organization
 interface Limits {
   maxTrunks: number | null;
   maxAgents: number | null;
+  /** A trava da saída (7b): `true` deixa a organização decidir, `false` bloqueia. */
+  outboundAllowed: boolean;
+  /** A escolha da organização sobre a saída, lida e nunca escrita daqui. */
+  outboundPolicyEnabled: boolean;
   usage: { trunks: number; agents: number };
 }
-type LimitsDraft = { maxTrunks: string; maxAgents: string };
+type LimitsDraft = { maxTrunks: string; maxAgents: string; outboundAllowed: boolean };
 
 // Vazio é sem limite. O resto vai como número, e a API recusa o que não for inteiro de 0 para cima.
 const limitField = (value: number | null): string => (value === null ? "" : String(value));
@@ -273,7 +277,8 @@ const limitValue = (field: string): number | null => (field.trim() === "" ? null
 
 /**
  * Os limites da organização (seção 3.4 do desenho do R8): linhas telefônicas e agentes, com quanto
- * ela já usa. Só os dois campos que já valem; a saída e o teto do mês entram com as fatias deles.
+ * ela já usa, e a trava da saída (7b), com a escolha da organização ao lado. O teto do mês entra com
+ * a fatia dele.
  */
 function LimitsForm({ organization, t, onDone, onCancel }: { organization: Organization; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
   const current = useApi<Limits>(`/installation/organizations/${organization.id}/limits`);
@@ -285,7 +290,9 @@ function LimitsForm({ organization, t, onDone, onCancel }: { organization: Organ
 
 function LimitsFields({ organization, limits, t, onDone, onCancel }: { organization: Organization; limits: Limits; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
   const save = useInstallationAction();
-  const [draft, setDraft] = useState<LimitsDraft>({ maxTrunks: limitField(limits.maxTrunks), maxAgents: limitField(limits.maxAgents) });
+  const [draft, setDraft] = useState<LimitsDraft>({ maxTrunks: limitField(limits.maxTrunks), maxAgents: limitField(limits.maxAgents), outboundAllowed: limits.outboundAllowed });
+  // Destravar devolve a escolha da organização: a tela diz qual, antes de salvar.
+  const unblocking = !limits.outboundAllowed && draft.outboundAllowed;
   const usage = (used: number, limit: string): string => (limit.trim() === "" ? fill(t.limitsUsageUnlimited, { used }) : fill(t.limitsUsage, { used, limit: limit.trim() }));
   const fields = [
     { key: "maxTrunks", label: t.limitsTrunks, used: limits.usage.trunks },
@@ -297,7 +304,7 @@ function LimitsFields({ organization, limits, t, onDone, onCancel }: { organizat
       onSubmit={(event) => {
         event.preventDefault();
         void save.run(async () => {
-          await api(`/installation/organizations/${organization.id}/limits`, { method: "PUT", body: { maxTrunks: limitValue(draft.maxTrunks), maxAgents: limitValue(draft.maxAgents) } });
+          await api(`/installation/organizations/${organization.id}/limits`, { method: "PUT", body: { maxTrunks: limitValue(draft.maxTrunks), maxAgents: limitValue(draft.maxAgents), outboundAllowed: draft.outboundAllowed } });
           onDone(fill(t.limitsSaved, { name: organization.name }));
         });
       }}
@@ -310,7 +317,14 @@ function LimitsFields({ organization, limits, t, onDone, onCancel }: { organizat
             <TextInput className="w-32" type="number" inputMode="numeric" min={0} step={1} value={draft[field.key]} onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })} />
           </Field>
         ))}
+        <Field label={t.limitsOutbound} hint={`${limits.outboundPolicyEnabled ? t.limitsOutboundPolicyOn : t.limitsOutboundPolicyOff} ${t.limitsOutboundHint}`}>
+          <Select value={draft.outboundAllowed ? "decide" : "blocked"} onChange={(event) => setDraft({ ...draft, outboundAllowed: event.target.value === "decide" })}>
+            <option value="decide">{t.limitsOutboundDecide}</option>
+            <option value="blocked">{t.limitsOutboundBlocked}</option>
+          </Select>
+        </Field>
       </div>
+      {unblocking ? <Notice>{limits.outboundPolicyEnabled ? t.limitsOutboundReturnsOn : t.limitsOutboundReturnsOff}</Notice> : null}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary" busy={save.busy}>
           {t.save}
