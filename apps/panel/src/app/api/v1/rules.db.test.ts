@@ -29,6 +29,10 @@ beforeAll(async () => {
   org = await createOrganization(panel.app, "rules");
   owner = (await createUser(panel.app, org, "owner")).cookie;
   operator = await createUser(panel.app, org, "operator");
+  // O aviso de faixa sobreposta (R8, fatia 10) olha as linhas da instalação inteira. As que outros
+  // arquivos deixaram no banco descartável, de outras organizações, fariam as linhas por IP daqui
+  // pedirem confirmação conforme a ordem dos arquivos. O aviso tem teste próprio.
+  await withSystem(panel.app, (q) => q.exec("delete from trunks where organization_id <> $1", [org]));
 });
 afterAll(() => panel.close());
 

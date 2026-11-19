@@ -123,7 +123,8 @@ const REQUESTS: Record<string, (s: Scene) => Prepared> = {
   "PUT brains/[brain]/key": () => ({ params: { brain: "openrouter" }, body: { apiKey: "sk-or-key-for-the-test" }, works: true }),
   "PUT synthesizers/[synthesizer]/key": () => ({ params: { synthesizer: "elevenlabs" }, body: { apiKey: "el-key-for-the-test", confirmedProvider: "elevenlabs" }, works: true }),
   "PUT speech-filter/[model]/key": () => ({ params: { model: "jev" }, body: { apiKey: "ts-key-for-the-test" }, works: true }),
-  "POST trunks": () => ({ params: {}, body: { name: "Nova operadora", host: "203.0.113.61", authMode: "ip" }, works: true }),
+  // `confirmOverlap`: cada cena cria a mesma linha em outra organização (o aviso tem teste próprio).
+  "POST trunks": () => ({ params: {}, body: { name: "Nova operadora", host: "203.0.113.61", authMode: "ip", confirmOverlap: true }, works: true }),
   "PATCH trunks/[id]": (s) => ({ params: { id: s.trunk }, body: { name: "Operadora renomeada" }, works: true }),
   "POST agents": () => ({ params: {}, body: { name: "Vendas", engine: "simulated" }, works: true }),
   "PATCH agents/[id]": (s) => ({ params: { id: s.agent }, body: { name: "Recepção renomeada" }, works: true }),

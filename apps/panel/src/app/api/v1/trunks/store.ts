@@ -1,3 +1,4 @@
+import { trunkOverlapWarning } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, type ServerDeps } from "../../../../server/context";
 import { inboundAddressProblem } from "../../../../server/trunk-host";
@@ -32,6 +33,28 @@ export function requireNumericInbound(authMode: string, host: string, matchExtra
     const field = index === 0 ? "the provider server address" : `the other inbound address ${index}`;
     if (problem === "name") throw new ApiError(400, "trunk_inbound_name", `${where}, ${field} must be an IP or an address block, not a name.`);
     throw new ApiError(400, "trunk_block_too_wide", `${where}, ${field} is a block wider than /16 (IPv4) or /32 (IPv6).`);
+  }
+}
+
+/**
+ * Antes de gravar, o aviso de faixa sobreposta (R8, fatia 10): se a linha tiraria do ar uma linha
+ * por IP (desta ou de outra organização) que hoje está no ar, a gravação para e a tela pergunta.
+ * A resposta não diz qual linha, de quem nem em que endereço: só que existe uma. Com a confirmação,
+ * salva como sempre. Quem chama só confere quando o endereço, os extras ou o modo mudam.
+ */
+export async function requireOverlapConfirmed(
+  deps: ServerDeps,
+  organizationId: string,
+  candidate: { id?: string; host: string; authMode: "register" | "ip"; matchExtra?: readonly string[] | null },
+  confirmed: boolean | undefined,
+): Promise<void> {
+  if (confirmed === true) return;
+  if ((await trunkOverlapWarning(deps.db, organizationId, candidate)).stops) {
+    throw new ApiError(
+      409,
+      "trunk_overlap_unconfirmed",
+      "Another organization of this installation has a line in a range that overlaps this one. If you save, the lines recognized by IP of both stop receiving calls until one of them changes its address.",
+    );
   }
 }
 

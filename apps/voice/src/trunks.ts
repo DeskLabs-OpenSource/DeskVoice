@@ -13,11 +13,11 @@ import { randomUUID } from "node:crypto";
 import { promises as dns } from "node:dns";
 import { chmod, chown, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { decryptSecret, inboundFilterOn, withSystem, type Clock, type Db } from "@deskvoice/core";
+import { addressPlaces, decryptSecret, inboundFilterOn, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { trunkEndpointName, type AriClient } from "./ari";
 import { messageOf, type Logger } from "./log";
 import { realSchedule, type Schedule } from "./transport";
-import { hostsOverlap, isBlockTooWide, parseTrunkHost, type TrunkHost } from "./trunk-host";
+import { isBlockTooWide, parseTrunkHost, type TrunkHost } from "./trunk-host";
 
 export const DEFAULT_TRUNKS_FILE = "/asterisk-generated/pjsip_trunks.conf";
 
@@ -190,8 +190,6 @@ interface Inbound {
   host: TrunkHost;
   /** Blocos canônicos e sem repetição: cada um vira uma linha `match=` do `identify`. */
   matches: string[];
-  /** Os mesmos endereços como faixas, para a comparação de sobreposição. */
-  hosts: TrunkHost[];
   /** Destino da ligação de saída; `null` quando a linha só recebe. */
   destination: TrunkHost | null;
 }
@@ -206,18 +204,14 @@ interface Inbound {
  */
 function readInbound(trunk: TrunkConfig, host: TrunkHost): Inbound {
   const matches: string[] = [];
-  const hosts: TrunkHost[] = [];
   for (const value of [trunk.host, ...(trunk.authMode === "ip" ? (trunk.matchExtra ?? []) : [])]) {
     const parsed = parseTrunkHost(value);
     if (parsed?.kind !== "address") continue;
-    hosts.push(parsed);
     if (!matches.includes(parsed.match)) matches.push(parsed.match);
   }
   const destination = parseTrunkHost(trunk.outboundHost ?? trunk.host);
-  return { host, matches, hosts, destination: destination !== null && destination.uri !== null ? destination : null };
+  return { host, matches, destination: destination !== null && destination.uri !== null ? destination : null };
 }
-
-const overlap = (a: Inbound, b: Inbound): boolean => a.hosts.some((mine) => b.hosts.some((theirs) => hostsOverlap(mine, theirs)));
 
 /**
  * O arquivo inteiro. Tronco que não pode ser escrito fica de fora, com o motivo em `skipped`.
@@ -240,37 +234,21 @@ export function renderTrunksConf(
   allowed: ReadonlyMap<string, readonly string[]> = new Map(),
 ): { conf: string; skipped: Array<{ id: string; reason: string }>; emitted: string[] } {
   const skipped: Array<{ id: string; reason: string }> = [];
-  const valid: Array<{ trunk: TrunkConfig; inbound: Inbound; group: number }> = [];
+  const valid: Array<{ trunk: TrunkConfig; inbound: Inbound }> = [];
   for (const trunk of [...trunks].sort((a, b) => a.id.localeCompare(b.id))) {
     const host = parseTrunkHost(trunk.host);
     const reason = trunkProblem(trunk);
     if (reason !== null || !host) skipped.push({ id: trunk.id, reason: reason ?? "the host cannot be read" });
-    else valid.push({ trunk, inbound: readInbound(trunk, host), group: valid.length });
+    else valid.push({ trunk, inbound: readInbound(trunk, host) });
   }
 
-  // Sobreposição não é transitiva (um bloco liga dois endereços que não se tocam): os grupos são
-  // os componentes conexos. ponytail: O(n²), sobra para as dezenas de linhas de uma instalação.
-  for (let merged = true; merged; ) {
-    merged = false;
-    for (const a of valid) {
-      for (const b of valid) {
-        if (a.group !== b.group && overlap(a.inbound, b.inbound)) {
-          const from = Math.max(a.group, b.group);
-          const to = Math.min(a.group, b.group);
-          for (const entry of valid) if (entry.group === from) entry.group = to;
-          merged = true;
-        }
-      }
-    }
-  }
-
+  // A regra do grupo mora em `packages/core` (`addressPlaces`): o painel usa a mesma para avisar,
+  // antes de salvar, que a linha vai tirar do ar a linha por IP de outra organização.
+  const places = addressPlaces(valid.map((entry) => entry.trunk));
   const sections: string[] = [];
   const emitted: string[] = [];
   for (const entry of valid) {
-    const group = valid.filter((other) => other.group === entry.group);
-    const oneOrganization = group.every((other) => other.trunk.organizationId === entry.trunk.organizationId);
-    // `valid` está em ordem de id: o primeiro do grupo é o de menor id.
-    const identify = oneOrganization && group[0] === entry;
+    const identify = places.get(entry.trunk.id)?.identify ?? false;
     if (!identify && entry.trunk.authMode === "ip") skipped.push({ id: entry.trunk.id, reason: SHARED_HOST_REASON });
     else {
       // O `permit` passa de novo pela regra do contrato 2: só IP ou bloco, nunca bloco largo demais.

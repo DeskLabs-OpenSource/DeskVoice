@@ -11,7 +11,7 @@ import { fill } from "../../../i18n/locales";
 import ptBRCommon from "../../../i18n/pt-BR/common";
 import ptBR, { type LineDictionary } from "../../../i18n/pt-BR/line";
 import { useDict, useLocale } from "../../../i18n/provider";
-import { api, useApi } from "../../../ui/api";
+import { api, ApiFailure, useApi } from "../../../ui/api";
 import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../ui/errors";
 import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, TextArea, TextInput, type Tone } from "../../../ui/kit";
@@ -207,6 +207,9 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
     outboundHost: trunk?.outboundHost ?? "",
   });
   const [applied, setApplied] = useState(true);
+  // A API recusou com `trunk_overlap_unconfirmed`: nada foi gravado, e a tela pergunta antes.
+  // "back": a pessoa voltou sem salvar, e a tela não diz "Salvo.".
+  const [overlap, setOverlap] = useState<"asking" | "back" | null>(null);
   const [result, setResult] = useState<CheckResult | null>(null);
   const set = (key: keyof typeof draft, value: string): void => setDraft((current) => ({ ...current, [key]: value }));
   // Destino mudou: a senha gravada não acompanha (a API recusa), então a tela já pede a nova.
@@ -217,6 +220,11 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
+    send(false);
+  };
+
+  const send = (confirmOverlap: boolean): void => {
+    setOverlap(null);
     void save.run(async () => {
       const { password, matchExtra, outboundHost, ...rest } = draft;
       // Uma linha por campo; o que ficou em branco não vira endereço. A lista vale nos dois modos;
@@ -225,15 +233,26 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
         .split("\n")
         .map((item) => item.trim())
         .filter((item) => item !== "");
-      const saved = await api<Trunk>(trunk ? `/trunks/${trunk.id}` : "/trunks", {
-        method: trunk ? "PATCH" : "POST",
-        body: {
-          ...rest,
-          matchExtra: addresses,
-          outboundHost: rest.authMode === "ip" && outboundHost.trim() !== "" ? outboundHost.trim() : null,
-          ...(password && { password }),
-        },
-      });
+      let saved: Trunk;
+      try {
+        saved = await api<Trunk>(trunk ? `/trunks/${trunk.id}` : "/trunks", {
+          method: trunk ? "PATCH" : "POST",
+          body: {
+            ...rest,
+            matchExtra: addresses,
+            outboundHost: rest.authMode === "ip" && outboundHost.trim() !== "" ? outboundHost.trim() : null,
+            ...(password && { password }),
+            ...(confirmOverlap && { confirmOverlap: true }),
+          },
+        });
+      } catch (failure) {
+        // Faixa que cruza a de outra organização: a linha NÃO foi salva. A caixa abaixo pergunta.
+        if (failure instanceof ApiFailure && failure.code === "trunk_overlap_unconfirmed") {
+          setOverlap("asking");
+          return;
+        }
+        throw failure;
+      }
       setApplied(saved.applied !== false);
       setResult(null);
       set("password", "");
@@ -293,6 +312,19 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
         </fieldset>
 
         {trunk ? <AllowedAddresses trunk={trunk} t={t} onSaved={onSaved} /> : null}
+        {overlap === "asking" ? (
+          <Notice tone="warn">
+            <p role="alert">{t.overlapWarning}</p>
+            <div className="mt-1 flex flex-wrap gap-2">
+              <Button variant="danger" busy={save.busy} onClick={() => send(true)}>
+                {t.overlapSave}
+              </Button>
+              <Button variant="ghost" onClick={() => setOverlap("back")}>
+                {t.overlapBack}
+              </Button>
+            </div>
+          </Notice>
+        ) : null}
         {!applied ? <Notice tone="warn">{t.notApplied}</Notice> : null}
         {/* A linha que ficou de fora da configuração mostra o motivo sem pedir um teste. */}
         {failure && !result ? (
@@ -324,7 +356,7 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
                 {t.test}
               </Button>
             ) : null}
-            <ActionStatus action={save} />
+            {overlap === null ? <ActionStatus action={save} /> : null}
             {test.error ? <ActionStatus action={test} /> : null}
             {trunk?.lastCheckAt && !result ? <span className="text-[0.87rem] text-muted">{fill(t.lastCheck, { when: formatDateTime(trunk.lastCheckAt, locale) })}</span> : null}
             {trunk && !confirming ? (

@@ -1,7 +1,7 @@
 import { encryptSecret } from "@deskvoice/core";
 import { ApiError, handle, notFound } from "../../../../../server/context";
 import { TRUNK_COLUMNS, trunkPatch } from "../../../../../server/shapes";
-import { applyTrunks, requireIpModeForAddresses, requireNumericInbound } from "../store";
+import { applyTrunks, requireIpModeForAddresses, requireNumericInbound, requireOverlapConfirmed } from "../store";
 
 export const PATCH = handle(
   {
@@ -16,7 +16,7 @@ export const PATCH = handle(
       host: string;
       username: string | null;
       secretEnc: string | null;
-      authMode: string;
+      authMode: "register" | "ip";
       callerId: string | null;
       matchExtra: string[];
       outboundHost: string | null;
@@ -26,10 +26,16 @@ export const PATCH = handle(
       [params.id],
     );
     if (!current) throw notFound();
-    const { password, ...rest } = body;
+    const { password, confirmOverlap, ...rest } = body;
     const merged = { ...current, ...rest };
     requireIpModeForAddresses(merged.authMode, merged.outboundHost ?? null);
     requireNumericInbound(merged.authMode, merged.host, merged.matchExtra ?? []);
+    // Só confere quem mexe no que agrupa as linhas: o endereço, os extras ou o modo. Trocar o nome
+    // de uma linha que já está num grupo misto não pergunta nada.
+    const sameExtras = (merged.matchExtra ?? []).join("\n") === (current.matchExtra ?? []).join("\n");
+    if (merged.host !== current.host || merged.authMode !== current.authMode || !sameExtras) {
+      await requireOverlapConfirmed(deps, q.organizationId, { id: params.id, host: merged.host, authMode: merged.authMode, matchExtra: merged.matchExtra }, confirmOverlap);
+    }
     // A senha gravada só vale para o destino para o qual foi digitada. Sem isso, quem pode editar a
     // linha apontava o host para um servidor seu e recebia, no registro, a senha do provedor.
     const sameDestination = merged.host === current.host && merged.username === current.username && merged.authMode === current.authMode;
