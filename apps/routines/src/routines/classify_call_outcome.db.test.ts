@@ -1293,6 +1293,29 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
       expect(await falhasDe(callId)).toEqual([{ reason: "brain_unavailable", brain: CEREBRO.id, model: "modelo-que-saiu", choiceFrom: "agent" }]);
     });
 
+    it("F3: o cérebro escolhido pelo agente sumiu da pasta: brain_unavailable, e nada sai, nem pela organização nem pelo motor", async () => {
+      const { org, callId } = await pronta("agente cerebro sumiu");
+      // A organização tem um cérebro descoberto, com chave e modelo: cair nela leria a ligação por ele.
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolhe(org, CEREBRO.id, COM_PRECO.id);
+      // A lista e a chave do cérebro que sumiu continuam salvas: só a pasta dele não existe mais.
+      await comCerebro(org, "cerebro-que-sumiu", [COM_PRECO]);
+      await escolheNoAgente(callId, { kind: "brain", brain: "cerebro-que-sumiu", model: COM_PRECO.id });
+      const calls = CEREBRO.completeJson.mock.calls.length;
+      const fetch = openai(completa());
+
+      await roda(org, callId, fetch);
+
+      // Nem o motor (o `fetch` do caminho do motor) nem o cérebro da organização recebem pedido.
+      expect(fetch).not.toHaveBeenCalled();
+      expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+      const evento = { reason: "brain_unavailable", brain: "cerebro-que-sumiu", model: COM_PRECO.id, choiceFrom: "agent" };
+      expect(await falhasDe(callId)).toEqual([evento]);
+      expect(await eventosDe(callId, "analysis_not_done")).toEqual([evento]);
+      expect(await extratoDe(callId)).toEqual([]);
+      expect(await eventosDe(callId, "call_analyzed")).toEqual([]);
+    });
+
     it.each([
       ["sem o kind", { brain: "cerebro-falso", model: "modelo-com-preco" }],
       ["um kind desconhecido", { kind: "organization" }],

@@ -81,6 +81,9 @@ function SpeechMarks({ read, e, confidence }: { read: unknown; e: TimelineDictio
   );
 }
 
+/** "(escolha do agente)" quando o cérebro que leu (ou não leu) a ligação foi o escolhido no agente. */
+const byAgent = (e: TimelineDictionary["events"], payload: Record<string, unknown>): string => (payload.choiceFrom === "agent" ? ` ${e.choice_agent}` : "");
+
 const Quiet = ({ children }: { children: ReactNode }) => <p className="pt-1 text-muted">{children}</p>;
 /** O lugar do texto que saiu a pedido de quem ligou (`erased` no payload). */
 const Erased = ({ children }: { children: ReactNode }) => <p className="text-[0.87rem] text-muted italic">{children}</p>;
@@ -470,7 +473,7 @@ export function Timeline({
           tone: "fail",
           icon: SealQuestion,
           body: (
-            <Card tone="fail" title={e.outcome_not_classified}>
+            <Card tone="fail" title={`${e.outcome_not_classified}${byAgent(e, p)}`}>
               <p className="text-muted">{body ? fill(body, { model: text(p.model) }) : text(p.reason)}</p>
               {typeof p.status === "number" ? <p className="data text-[0.87rem] text-muted">{fill(e.outcome_not_classified_status, { status: String(p.status) })}</p> : null}
             </Card>
@@ -478,14 +481,14 @@ export function Timeline({
         };
       }
       case "call_analyzed":
-        return { ...base, tone: "ok", icon: Gauge, body: <Quiet><span className="font-bold text-ink">{fill(e.call_analyzed, { score: String(p.score) })}</span></Quiet> };
+        return { ...base, tone: "ok", icon: Gauge, body: <Quiet><span className="font-bold text-ink">{fill(e.call_analyzed, { score: String(p.score) })}{byAgent(e, p)}</span></Quiet> };
       case "analysis_not_done":
         return {
           ...base,
           tone: "fail",
           icon: Gauge,
           body: (
-            <Card tone="fail" title={analysisNotDoneText(e, p)}>
+            <Card tone="fail" title={`${analysisNotDoneText(e, p)}${byAgent(e, p)}`}>
               {typeof p.status === "number" ? <p className="data text-[0.87rem] text-muted">{fill(e.outcome_not_classified_status, { status: String(p.status) })}</p> : null}
             </Card>
           ),

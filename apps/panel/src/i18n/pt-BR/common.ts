@@ -70,6 +70,10 @@ const common = {
   },
   errors: {
     fallback: "Não conseguimos concluir essa ação. Tente de novo em instantes.",
+    unknown_brain: "Esse cérebro não existe nesta instalação. Escolha outro em quem lê a ligação.",
+    brain_no_key: "Esse cérebro não tem chave salva. Salve e teste a chave em Configurações → Cérebros antes de escolhê-lo.",
+    brain_model_not_listed: "Esse modelo não está na lista guardada do cérebro. Atualize a lista em Configurações → Cérebros.",
+    brain_model_unmeasured: "O preço desse modelo não é conhecido. Escolha o modelo de novo para ver o aviso e salvar.",
     network: "O painel não respondeu. Confira sua conexão e tente de novo.",
     internal_error: "Tivemos um problema no servidor. Nada foi alterado. Tente de novo em instantes.",
     unauthenticated: "Sua sessão expirou. Entre de novo para continuar.",

@@ -241,6 +241,7 @@ const timeline: TimelineDictionary = {
     outcome_not_classified_status: "Respuesta del proveedor: HTTP {status}",
     call_analyzed: "Llamada analizada: nota {score} de 10",
     analysis_not_done: "Llamada no analizada: {reason}",
+    choice_agent: "(elección del agente)",
     analysis_not_done_reasons: {
       no_speech: "la llamada no tuvo habla para analizar",
       no_key: "el motor de voz del agente no tiene clave registrada",
