@@ -37,30 +37,36 @@ export const GET = handle({}, async ({ q, url, deps }) => {
       where (l.at at time zone z.zone)::date between $1::date and $2::date group by 1, 2 order by 3 desc`,
     range,
   );
-  // Os minutos de cada motor são a duração dos trechos que ele atendeu, e não o `seconds` do
-  // extrato: esse é o uso que o motor declara para cobrar, e o OpenAI Realtime cobra por token e
-  // declara zero segundo (issue #244). O primeiro trecho vai do atendimento à primeira passagem, com
-  // o motor da ligação (`calls.engine`); cada passagem abre um trecho com o motor gravado no evento
-  // `agent_handoff`, que acaba na passagem seguinte ou no fim da ligação. Sem passagem, é a ligação
-  // inteira, como antes. A passagem gravada antes da fatia 4c não guarda o motor, e o motor atual do
-  // agente não serve (ele pode ter sido editado depois): essa ligação fica inteira no motor que
-  // atendeu, como antes. A ligação conta no dia em que terminou, no fuso da organização, como o resto
-  // do quadro: uma ligação com linhas do extrato em dois dias (o desfecho classificado depois da
-  // meia-noite) não aparece inteira nos dois períodos.
+  // Os minutos de cada motor são a duração dos trechos que ele atendeu, e não o `seconds` do extrato:
+  // esse é o uso que o motor declara para cobrar, e o OpenAI Realtime cobra por token e declara zero
+  // segundo (issue #244). O primeiro trecho vai do atendimento à primeira passagem, com o motor da
+  // ligação (`calls.engine`). Na ligação que passou pela URA, `answered_at` é a hora em que a URA
+  // atendeu (fatia 1e), e o tempo de menu não é do motor: o primeiro trecho começa no evento
+  // `call_answered`, quando a IA atendeu. Sem `ivr_started`, ou na ligação de URA que não chegou à IA
+  // (sem `call_answered`), ele começa em `answered_at`, como antes. Cada passagem abre um trecho com
+  // o motor gravado no evento `agent_handoff`, que acaba na passagem seguinte ou no fim da ligação.
+  // Sem passagem, é a ligação inteira, como antes. A passagem gravada antes da fatia 4c não guarda o
+  // motor, e o motor atual do agente não serve (ele pode ter sido editado depois): essa ligação fica
+  // inteira no motor que atendeu, como antes. A ligação conta no dia em que terminou, no fuso da
+  // organização, como o resto do quadro: uma ligação com linhas do extrato em dois dias (o desfecho
+  // classificado depois da meia-noite) não aparece inteira nos dois períodos.
   // O analista ao vivo (R6) grava as linhas dele com `source = 'analyst'` e o modelo de decisão em
   // `engine`, o mesmo do filtro da fala: a linha do analista sai separada pelo `source`, e não tem
   // minutos (o modelo de decisão não atende trecho nenhum).
   const byEngine = await q.many<{ engine: string; source: string | null; microcents: string; seconds: number; unmeasured: number; estimated: number }>(
     `with scoped as (select l.engine, l.source, l.call_id, l.cost_microcents, l.cost_measured, l.cost_estimated ${scope}),
           ended as (
-            select c.id, c.engine, c.answered_at, c.ended_at,
+            select c.id, c.engine, c.ended_at,
+                   case when exists (select 1 from call_events i where i.call_id = c.id and i.kind = 'ivr_started')
+                        then coalesce((select min(a.at) from call_events a where a.call_id = c.id and a.kind = 'call_answered'), c.answered_at)
+                        else c.answered_at end as starts_at,
                    exists (select 1 from call_events h where h.call_id = c.id and h.kind = 'agent_handoff' and not (h.payload ? 'engine')) as untold
               from calls c
              cross join (select coalesce((select timezone from outbound_policy), 'America/Sao_Paulo') as zone) z
              where c.answered_at is not null and c.ended_at is not null
                and (c.ended_at at time zone z.zone)::date between $1::date and $2::date),
           legs as (
-            select e.id as call_id, e.engine, e.answered_at as starts_at, 0::bigint as seq, e.ended_at from ended e
+            select e.id as call_id, e.engine, e.starts_at, 0::bigint as seq, e.ended_at from ended e
             union all
             select h.call_id, h.payload->>'engine', h.at, h.id, e.ended_at
               from call_events h join ended e on e.id = h.call_id

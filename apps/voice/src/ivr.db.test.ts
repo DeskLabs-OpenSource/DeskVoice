@@ -59,12 +59,12 @@ async function line(label: string, number: string, options: { agentOnNumber?: bo
   return { organizationId, agentId, trunkId, phoneNumberId, menuId };
 }
 
-async function voice(): Promise<FakeAri> {
+async function voice(clock = fakeClock()): Promise<FakeAri> {
   const ari = fakeAri();
   const timers = testSchedule();
   server = await startVoiceServer({
     db: app,
-    clock: fakeClock(),
+    clock,
     engines: new Map([["simulated", pricedSimulatedEngine(60)]]),
     tools: await loadTools(),
     ari,
@@ -134,6 +134,33 @@ describe("URA de ponta a ponta, pelo AudioSocket", { timeout: 120_000 }, () => {
     expect(ended).toHaveLength(1);
     expect(ended[0]?.payload).toMatchObject({ reason: "caller_hangup" });
     expect(await callsOf(app, organizationId)).toMatchObject([{ status: "completed", end_reason: "caller_hangup" }]);
+  });
+
+  it("T11 (fatia 1e): a passagem à conversa não regrava `answered_at`; a duração conta desde o atendimento da URA, com o menu", async () => {
+    const { trunkId } = await line("ivr-e2e-answered", "+553133331122");
+    const clock = fakeClock();
+    const ari = await voice(clock);
+    const { callId, asterisk } = await ring(ari, trunkId, "553133331122", "canal-ura-atendida");
+
+    await waitFor(async () => (await ivrKinds(callId)).includes("ivr_started"), "ivr_started");
+    const byIvr = clock.now();
+    expect(await callOf(app, callId)).toMatchObject({ status: "in_progress", answered_at: byIvr });
+
+    // Quem ligou passa 30 s no menu antes de escolher.
+    clock.advance(30_000);
+    const byAgent = clock.now();
+    asterisk.send(DTMF, Buffer.from("1"));
+    await waitFor(async () => (await eventsOf(app, callId)).some((event) => event.kind === "call_answered"), "the conversation to answer");
+    const answered = await withSystem(app, (q) => q.one<{ at: Date }>("select at from call_events where call_id = $1 and kind = 'call_answered'", [callId]));
+    expect(answered?.at).toEqual(byAgent);
+    expect(await callOf(app, callId)).toMatchObject({ status: "in_progress", engine: "simulated", answered_at: byIvr });
+
+    clock.advance(5_000);
+    asterisk.hangup();
+    await waitFor(async () => (await callOf(app, callId)).ended_at !== null, "the call to end");
+    const call = await callOf(app, callId);
+    // 30 s de menu e 5 s de conversa: a duração do painel (`ended_at - answered_at`) é 35 s, e não 5.
+    expect((call.ended_at as Date).getTime() - (call.answered_at as Date).getTime()).toBe(35_000);
   });
 
   it("T3 pelo Asterisk: a tecla 2 transfere pelo caminho de sempre; sem resposta, os eventos e o aviso de hoje", async () => {

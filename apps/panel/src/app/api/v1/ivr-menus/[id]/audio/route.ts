@@ -55,9 +55,12 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
       throw new ApiError(400, "ivr_prompt_format", `${error instanceof Error ? error.message : "the announcement could not be read"}. Expected ${FORMAT}.`);
     }
     if (pcm.length < 2 || pcm.length % 2 !== 0) throw new ApiError(400, "ivr_prompt_format", `The announcement has no audio. Expected ${FORMAT}.`);
-    const ms = Math.round((pcm.length / 2 / RECORDED_SPEECH_SAMPLE_RATE) * 1000);
-    if (ms < IVR_MIN_PROMPT_MS) throw new ApiError(400, "ivr_prompt_too_short", `The announcement lasts ${ms} ms; it must last at least ${IVR_MIN_PROMPT_MS} ms.`);
-    if (ms > IVR_MAX_PROMPT_MS) throw new ApiError(400, "ivr_prompt_too_long", `The announcement lasts ${Math.ceil(ms / 1000)} s; the limit is 60 s.`);
+    // O piso compara a duração medida, sem arredondar: 199,9 ms arredondado daria 200 e passaria.
+    const measuredMs = (pcm.length / 2 / RECORDED_SPEECH_SAMPLE_RATE) * 1000;
+    if (measuredMs < IVR_MIN_PROMPT_MS) throw new ApiError(400, "ivr_prompt_too_short", `The announcement lasts ${Math.floor(measuredMs)} ms; it must last at least ${IVR_MIN_PROMPT_MS} ms.`);
+    // O máximo compara a duração medida, antes de arredondar: 60 000,4 ms passa do limite.
+    if (measuredMs > IVR_MAX_PROMPT_MS) throw new ApiError(400, "ivr_prompt_too_long", `The announcement lasts ${Math.ceil(measuredMs / 1000)} s; the limit is 60 s.`);
+    const ms = Math.round(measuredMs);
     const saved = await withOrg(deps.db, session.organizationId, (q) =>
       q.one<{ id: string; promptAudioMs: number }>(`update ivr_menus set prompt_audio = $2, prompt_audio_ms = $3, updated_at = $4 where id = $1 returning id, prompt_audio_ms as "promptAudioMs"`, [
         id,
