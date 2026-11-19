@@ -252,6 +252,12 @@ grant select, insert, update, delete on organization_limits to deskvoice_system;
   produto. `outbound_allowed = true` não liga a saída; só deixa a organização decidir, como hoje.
   `false` desliga a saída e trava o interruptor dela. O teto diário por linha, a janela e a lista de
   não ligar não ganham campo aqui (antipadrão 16).
+- **A trava não vale para a transferência a uma pessoa da equipe.** A transferência (o número do
+  agente, `transfer_to_e164`, ou a opção "pessoa" da URA) é a mesma ligação, que já começou, e não
+  uma ligação nova: disca o número da própria equipe, que a organização configurou, enquanto quem
+  está na linha espera. Não interrompe ninguém que não pediu, não parte de lista e acontece quando o
+  atendimento termina. Por isso não passa por `checkOutboundAllowed`, como já não passava pela política de
+  saída, e a trava da 7b não a desliga. Quem quer cortar a transferência apaga o número no agente.
 - **O teto mensal** é conferido no começo de cada chamada (recebida, de saída, pelo navegador e pelo
   WhatsApp): a soma de `usage_ledger.cost_microcents` do mês corrente, no fuso da organização,
   chegou ao teto → a chamada é recusada com a mesma fala de "indisponível", `end_reason =
