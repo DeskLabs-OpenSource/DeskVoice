@@ -257,7 +257,7 @@ grant select, insert, update, delete on organization_limits to deskvoice_system;
   uma ligação nova: disca o número da própria equipe, que a organização configurou, enquanto quem
   está na linha espera. Não interrompe ninguém que não pediu, não parte de lista e acontece quando o
   atendimento termina. Por isso não passa por `checkOutboundAllowed`, como já não passava pela política de
-  saída, e a trava da 7b não a desliga. Quem quer cortar a transferência apaga o número no agente.
+  saída, e a trava da 7b não a desliga. Quem quer cortar a transferência apaga o número no agente ou tira a opção da URA.
 - **O teto mensal** é conferido no começo de cada chamada (recebida, de saída, pelo navegador e pelo
   WhatsApp): a soma de `usage_ledger.cost_microcents` do mês corrente, no fuso da organização,
   chegou ao teto → a chamada é recusada com a mesma fala de "indisponível", `end_reason =
