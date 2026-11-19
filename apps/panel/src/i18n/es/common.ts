@@ -69,6 +69,10 @@ const common: CommonDictionary = {
     open: "Entrar en {name}",
     installation: "Abrir la administración de la instalación",
   },
+  limitReached: {
+    trunks: "Esta organización ya tiene {count} líneas telefónicas; el límite definido por la administración de la instalación es {limit}.",
+    agents: "Esta organización ya tiene {count} agentes; el límite definido por la administración de la instalación es {limit}.",
+  },
   errors: {
     fallback: "No pudimos completar esta acción. Intenta de nuevo en un momento.",
     unknown_brain: "Ese cerebro no existe en esta instalación. Elige otro para quién lee la llamada.",
@@ -150,6 +154,7 @@ const common: CommonDictionary = {
     unknown_setting: "Esta configuración no existe en esta versión.",
     organization_suspended: "Esta organización está suspendida: no atiende ni hace llamadas.",
     support_session_forbidden: "La sesión de soporte de la instalación no hace este cambio. Pídeselo a un dueño o administrador del equipo.",
+    organization_limit_reached: "Esta organización llegó al límite definido por la administración de la instalación.",
     outbound_disabled: "Las llamadas salientes están desactivadas. Actívalas en Llamadas salientes.",
     outside_window: "Fuera del horario permitido para llamadas salientes.",
     do_not_call: "Este número está en la lista de no llamar.",
