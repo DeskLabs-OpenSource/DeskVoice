@@ -29,6 +29,13 @@ test("com uma organização só, a navegação principal é a de antes, e a áre
   // O item de Aprovações pode trazer a contagem ao lado do nome.
   await expect(main.getByRole("link")).toHaveText(MAIN_NAV_BEFORE.map((label) => new RegExp(`^${escape(label)}\\d*$`)));
   await expect(main).not.toContainText(installation.menu);
+  // Os itens moram em quatro grupos, na ordem do desenho da central de configuração (parte 1), e o
+  // título do grupo é rótulo: nunca link.
+  await expect(main.getByRole("group")).toHaveCount(4);
+  for (const [group, count] of [[common.navGroups.attend, 3], [common.navGroups.build, 3], [common.navGroups.follow, 1], [common.navGroups.organization, 2]] as const) {
+    await expect(main.getByRole("group", { name: group }).getByRole("link")).toHaveCount(count);
+  }
+  await expect(main.getByRole("link", { name: common.navGroups.attend })).toHaveCount(0);
 
   // A tela de atualizar continua onde estava enquanto a lista não é explícita.
   await page.goto("/settings/system");
