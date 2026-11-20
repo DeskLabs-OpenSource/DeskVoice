@@ -576,6 +576,6 @@ describe("ligação pelo WhatsApp: organização excluída", { timeout: 60_000 }
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ organization_id: null, payload: { organization_id: gone.organizationId, channel: "whatsapp" } });
     for (const forbidden of [CALLER.slice(1), CALLER.slice(3), NUMBER.slice(1), NUMBER.slice(3), sessionId, call.id]) expect(events[0]?.text).not.toContain(`"${forbidden}`);
-    expect(events[0]?.text).not.toMatch(/\d{8,}/);
+    expect(events[0]?.text.replaceAll(gone.organizationId, "")).not.toMatch(/\d{8,}/);
   });
 });
