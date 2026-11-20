@@ -478,3 +478,42 @@ describe("executeOrganizationDeletion", () => {
     expect(await snapshotOf(b.id)).toEqual(snapshot);
   });
 });
+
+// A ligação pelo WhatsApp (fatia 9b2): só o processo de voz tem o token do WaCalls, e a rotina espera
+// a linha de `whatsapp_call_sessions` ficar sem `wacalls_session_id`.
+describe("executeOrganizationDeletion waits for the voice process to unpair WhatsApp calls", () => {
+  const pairCalls = (organizationId: string): Promise<unknown> =>
+    owner.pool.query("update whatsapp_call_sessions set wacalls_session_id = 's-pareada', status = 'connected', phone_e164 = '+553133330000' where organization_id = $1", [organizationId]);
+
+  it("E1: with wacalls_session_id set, it returns retry / whatsapp_calls; the database and the folder of A are intact, and WAHA was already undone", async () => {
+    const a = await buildOrg("WaCalls pareado A", { suspended: true });
+    await pairCalls(a.id);
+    const before = await snapshotOf(a.id);
+    expect(await request(a)).toEqual({ ok: true });
+
+    const waha = fakeWaha();
+    expect(await executeOrganizationDeletion(deps(waha), a.id)).toEqual({ status: "retry", step: "whatsapp_calls", error: "waiting for the voice process to unpair WhatsApp calls" });
+    expect(waha.ended).toEqual([a.id]);
+    expect(await snapshotOf(a.id)).toEqual(before);
+    expect(await orgRow(a.id)).toMatchObject({ deleting_at: now });
+    expect(await exists(path.join(recordings, a.id))).toBe(true);
+    expect(await eventsOf("organization_deleted", a.id)).toEqual([]);
+
+    // E2: o processo de voz limpou a linha; a mesma chamada termina, com um evento só.
+    await owner.pool.query("update whatsapp_call_sessions set wacalls_session_id = null, status = 'disconnected', phone_e164 = null where organization_id = $1", [a.id]);
+    expect(await executeOrganizationDeletion(deps(waha), a.id)).toMatchObject({ status: "deleted" });
+    expect(await orgRow(a.id)).toBeNull();
+    expect(await eventsOf("organization_deleted", a.id)).toHaveLength(1);
+  });
+
+  it("E3: a row without wacalls_session_id, or no row at all, does not hold the deletion back", async () => {
+    const withNull = await buildOrg("WaCalls nulo", { suspended: true });
+    const withoutRow = await buildOrg("WaCalls sem linha", { suspended: true });
+    await owner.pool.query("delete from whatsapp_call_sessions where organization_id = $1", [withoutRow.id]);
+    for (const org of [withNull, withoutRow]) {
+      expect(await request(org)).toEqual({ ok: true });
+      expect(await executeOrganizationDeletion(deps(fakeWaha()), org.id)).toMatchObject({ status: "deleted" });
+      expect(await eventsOf("organization_deleted", org.id)).toHaveLength(1);
+    }
+  });
+});

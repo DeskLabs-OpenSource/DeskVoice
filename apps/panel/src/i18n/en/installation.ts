@@ -140,6 +140,7 @@ const installation: InstallationDictionary = {
       organization_suspended: "{who} suspended the organization {org}.",
       organization_reactivated: "{who} reactivated the organization {org}.",
       organization_deleted: "{who} deleted the organization {org}.",
+      call_to_deleted_organization: "A WhatsApp call came in for the deleted organization {orgId} and heard the unavailable notice.",
       organization_limits_changed: "{who} changed the limits of the organization {org}.",
       installation_setting_changed: "{who} changed an installation setting.",
       support_access_started: "{who} started a support access in {org}.",
