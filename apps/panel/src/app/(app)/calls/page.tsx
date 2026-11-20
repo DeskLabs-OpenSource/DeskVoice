@@ -68,7 +68,7 @@ export default function CallsPage() {
   const steps = [
     { label: t.empty.steps.agent, href: "/agents", done: (agents.data?.length ?? 0) > 0 },
     { label: t.empty.steps.line, href: "/line", done: (trunks.data?.length ?? 0) > 0 },
-    { label: t.empty.steps.engine, href: "/settings", done: engines.data?.some((engine) => engine.requiresKey && engine.keyConfigured) ?? false },
+    { label: t.empty.steps.engine, href: "/settings/ai", done: engines.data?.some((engine) => engine.requiresKey && engine.keyConfigured) ?? false },
   ];
 
   return (

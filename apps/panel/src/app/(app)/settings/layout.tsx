@@ -24,9 +24,9 @@ import { PageHeader } from "../../../ui/kit";
 import { useMe } from "../../../ui/me";
 import { LimitsNotice } from "./limits-notice";
 
-// A primeira seção é a de `/settings`: os links do painel que mandam cadastrar a chave caem nela.
+// A primeira seção é a de `/settings/ai`: os links do painel que mandam cadastrar a chave caem nela.
 const SECTIONS = [
-  { href: "/settings", key: "ai" },
+  { href: "/settings/ai", key: "ai" },
   { href: "/settings/brains", key: "brains" },
   { href: "/settings/voice", key: "voice" },
   { href: "/settings/speech-filter", key: "speechFilter" },
