@@ -9,14 +9,14 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CALL_RECORDING_SETTING, VOICEMAIL_ENABLED_SETTING, withOrg, withSystem, type OrgQuery } from "@deskvoice/core";
+import { CALL_RECORDING_SETTING, INBOUND_LIMIT_SETTING, VOICEMAIL_ENABLED_SETTING, withOrg, withSystem, type Db, type OrgQuery } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
 import { AsteriskCalls } from "./asterisk-transport";
-import { limitNoticedLately, SPEND_CAP_NOTICE } from "./inbound";
+import { inboundLimitReached, limitNoticedLately, SPEND_CAP_NOTICE } from "./inbound";
 import { startOutboundCall } from "./outbound";
 import { checkOutboundAllowed } from "./outbound-policy";
 import { startVoiceServer, type VoiceServer } from "./server";
@@ -77,7 +77,7 @@ async function spent(organizationId: string, microcents: number): Promise<void> 
 }
 
 /** O processo de voz com um motor que conta quantas vezes foi aberto. */
-async function voice(clock = fakeClock()): Promise<{ ari: FakeAri; opened: () => number; web: (body: object) => Promise<{ status: number; body: Record<string, unknown> }> }> {
+async function voice(clock = fakeClock(), db: Db = app): Promise<{ ari: FakeAri; opened: () => number; web: (body: object) => Promise<{ status: number; body: Record<string, unknown> }> }> {
   const simulated = pricedSimulatedEngine(60);
   let opened = 0;
   const counting: VoiceEngine = {
@@ -92,7 +92,7 @@ async function voice(clock = fakeClock()): Promise<{ ari: FakeAri; opened: () =>
   const ari = fakeAri();
   const timers = testSchedule();
   server = await startVoiceServer({
-    db: app,
+    db,
     clock,
     engines: new Map([
       ["simulated", { ...counting, id: "simulated" }],
@@ -308,8 +308,43 @@ describe("teto de gasto do mês: a ligação de saída", { timeout: 120_000 }, (
   });
 });
 
+/**
+ * O `Db` do processo de voz com um espião nas consultas da aplicação (`withOrg`): o texto de cada uma,
+ * na ordem. Zera com `sql.length = 0` antes do trecho medido.
+ */
+function countingDb(db: Db): { db: Db; sql: string[] } {
+  const sql: string[] = [];
+  const bound = <T extends object>(target: T, prop: string | symbol) => {
+    const value = Reflect.get(target, prop) as unknown;
+    return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+  };
+  const pool = new Proxy(db.pool, {
+    get(target, prop) {
+      if (prop !== "connect") return bound(target, prop);
+      return async () => {
+        const client = await target.connect();
+        return new Proxy(client, {
+          get(inner, key) {
+            if (key !== "query") return bound(inner, key);
+            return (text: string | { text: string }, ...rest: unknown[]) => {
+              sql.push(typeof text === "string" ? text : text.text);
+              return (inner.query as (...args: unknown[]) => unknown)(text, ...rest);
+            };
+          },
+        });
+      };
+    },
+  });
+  return { db: { pool, systemPool: db.systemPool, close: () => db.close() }, sql };
+}
+
 describe("teto de gasto do mês: a chamada pelo navegador", { timeout: 120_000 }, () => {
-  it("T1/T2: sem teto abre; no teto é recusada com `spend_cap_reached`, sem linha em `calls`; 1 microcentavo a menos abre", async () => {
+  const MESSAGE = { code: "spend_cap_reached", message: "This organization reached its monthly spending cap. The installation administration can change the cap." };
+  const webRows = (organizationId: string) =>
+    withSystem(app, (q) => q.many<{ id: string; status: string; end_reason: string | null }>("select id, status, end_reason from calls where organization_id = $1 and channel = 'web' order by started_at, id", [organizationId]));
+  const refusedRows = async (organizationId: string) => (await webRows(organizationId)).filter((row) => row.status === "refused");
+
+  it("T1/T2: sem teto abre; no teto é recusada com `spend_cap_reached` e grava a linha recusada com `call_refused`; 1 microcentavo a menos abre", async () => {
     const free = await createOrganization(app, `cap-web-none-${randomUUID()}`);
     const freeAgent = await createAgent(app, free, { engine: "roteiro" });
     const capped = await createOrganization(app, `cap-web-${randomUUID()}`);
@@ -317,21 +352,116 @@ describe("teto de gasto do mês: a chamada pelo navegador", { timeout: 120_000 }
     await spent(free, 9_000_000_000);
     await capAt(capped, 100);
     await spent(capped, 99_999_999);
-    const { web } = await voice();
-    const rows = () => withSystem(app, (q) => q.many("select id from calls where organization_id = $1 and channel = 'web'", [capped]));
+    const clock = fakeClock();
+    const { web } = await voice(clock);
 
     expect((await web({ organizationId: free, agentId: freeAgent, userId: USER })).status).toBe(200);
     expect((await web({ organizationId: capped, agentId: cappedAgent, userId: USER })).status).toBe(200);
-    expect(await rows()).toHaveLength(1);
+    expect(await webRows(capped)).toMatchObject([{ status: "ringing" }]);
+    expect(await refusedRows(free)).toEqual([]);
 
     await spent(capped, 1);
     const refused = await web({ organizationId: capped, agentId: cappedAgent, userId: USER });
-    expect(refused).toEqual({ status: 409, body: { code: "spend_cap_reached", message: expect.stringMatching(/monthly spending cap/) } });
-    expect(await rows()).toHaveLength(1);
+    // A resposta à tela é a de antes da linha do tempo: o mesmo código, a mesma frase, sem `callId`.
+    expect(refused).toEqual({ status: 409, body: MESSAGE });
+    const [row, ...others] = await refusedRows(capped);
+    expect(others).toEqual([]);
+    expect(await callOf(app, row?.id ?? "")).toMatchObject({
+      status: "refused",
+      end_reason: "spend_cap_reached",
+      direction: "inbound",
+      channel: "web",
+      agent_id: cappedAgent,
+      from_e164: null,
+      to_e164: null,
+      ended_at: clock.now(),
+    });
+    const events = await eventsOf(app, row?.id ?? "");
+    expect(events).toEqual([{ kind: "call_refused", payload: { reason: "spend_cap_reached", channel: "web", userId: USER, capCents: 100 } }]);
+    expect(JSON.stringify(events)).not.toMatch(/\+\d{8,}/);
+    // Sem aviso no painel nesta fatia: quem clicou viu a recusa na tela.
     expect(await panelNotices(capped)).toEqual([]);
     // A vaga de simultâneas não fica presa pela recusa: com o teto tirado, duas mais abrem (a terceira das três).
     await withSystem(app, (q) => q.exec("update organization_limits set monthly_spend_cap_cents = null where organization_id = $1", [capped]));
     expect((await web({ organizationId: capped, agentId: cappedAgent, userId: USER })).status).toBe(200);
     expect((await web({ organizationId: capped, agentId: cappedAgent, userId: USER })).status).toBe(200);
+    expect(await web({ organizationId: capped, agentId: cappedAgent, userId: USER })).toMatchObject({ status: 409, body: { code: "too_many_web_calls" } });
+  });
+
+  it("no teto, o agente que não existe na organização grava `agent_id` nulo e a recusa é a mesma", async () => {
+    const capped = await createOrganization(app, `cap-web-noagent-${randomUUID()}`);
+    const other = await createOrganization(app, `cap-web-other-${randomUUID()}`);
+    const foreignAgent = await createAgent(app, other, { engine: "roteiro" });
+    await capAt(capped, 0);
+    const { web } = await voice();
+
+    expect(await web({ organizationId: capped, agentId: randomUUID(), userId: USER })).toEqual({ status: 409, body: MESSAGE });
+    expect(await web({ organizationId: capped, agentId: foreignAgent, userId: USER })).toEqual({ status: 409, body: MESSAGE });
+    const rows = await refusedRows(capped);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(await callOf(app, row.id)).toMatchObject({ status: "refused", end_reason: "spend_cap_reached", agent_id: null });
+    expect(await webRows(other)).toEqual([]);
+  });
+
+  it("só o teto grava: `agent_disabled` e `agent_not_found` com o teto ainda não atingido, nenhuma linha", async () => {
+    const org = await createOrganization(app, `cap-web-disabled-${randomUUID()}`);
+    const disabled = await createAgent(app, org, { engine: "roteiro", enabled: false });
+    await capAt(org, 100);
+    await spent(org, 99_999_999);
+    const { web } = await voice();
+
+    expect(await web({ organizationId: org, agentId: disabled, userId: USER })).toMatchObject({ status: 409, body: { code: "agent_disabled" } });
+    expect(await web({ organizationId: org, agentId: randomUUID(), userId: USER })).toMatchObject({ status: 409, body: { code: "agent_not_found" } });
+    expect(await webRows(org)).toEqual([]);
+  });
+
+  it("sem teto, ou com o teto ainda não atingido, a chamada pelo navegador faz as mesmas consultas de antes", async () => {
+    // Critério de fracasso: a organização sem teto não ganha consulta, e a recusa só soma as dela.
+    const free = await createOrganization(app, `cap-web-count-${randomUUID()}`);
+    const freeAgent = await createAgent(app, free, { engine: "roteiro" });
+    const below = await createOrganization(app, `cap-web-count-below-${randomUUID()}`);
+    const belowAgent = await createAgent(app, below, { engine: "roteiro" });
+    await capAt(below, 100);
+    await spent(below, 99_999_999);
+    const spy = countingDb(app);
+    const { web } = await voice(fakeClock(), spy.db);
+
+    const measured = async (body: object) => {
+      spy.sql.length = 0;
+      const response = await web(body);
+      return { response, sql: [...spy.sql] };
+    };
+    const opened = await measured({ organizationId: free, agentId: freeAgent, userId: USER });
+    expect(opened.response.status).toBe(200);
+    // begin, set_config, organization_limits, agente, chamada, commit: como antes desta fatia.
+    expect(opened.sql).toHaveLength(6);
+    expect(opened.sql.filter((text) => /usage_ledger/.test(text))).toEqual([]);
+    const disabledOne = await measured({ organizationId: free, agentId: randomUUID(), userId: USER });
+    expect(disabledOne.response.body.code).toBe("agent_not_found");
+    expect(disabledOne.sql).toHaveLength(5);
+
+    const belowCap = await measured({ organizationId: below, agentId: belowAgent, userId: USER });
+    expect(belowCap.response.status).toBe(200);
+    expect(belowCap.sql).toHaveLength(8);
+    expect(belowCap.sql.filter((text) => /usage_ledger/.test(text))).toHaveLength(1);
+    expect(await refusedRows(free)).toEqual([]);
+    expect(await refusedRows(below)).toEqual([]);
+  });
+
+  it("a linha recusada não ocupa vaga no teto de recebidas ao mesmo tempo", async () => {
+    const org = await createOrganization(app, `cap-web-slot-${randomUUID()}`);
+    const agentId = await createAgent(app, org, { engine: "roteiro" });
+    await capAt(org, 0);
+    await putSetting(app, org, INBOUND_LIMIT_SETTING, 1, false);
+    const clock = fakeClock();
+    const { web } = await voice(clock);
+    expect(await web({ organizationId: org, agentId, userId: USER })).toEqual({ status: 409, body: MESSAGE });
+    expect(await refusedRows(org)).toHaveLength(1);
+    expect(await withOrg(app, org, (q) => inboundLimitReached(q, clock))).toEqual({ reached: false, limit: 1 });
+    // O controle: uma recebida pela operadora tocando, com número, ocupa a única vaga.
+    await withSystem(app, (q) =>
+      q.exec("insert into calls (organization_id, direction, channel, from_e164, to_e164, status, started_at) values ($1, 'inbound', 'phone', '+5531999998888', '+553130000099', 'ringing', $2)", [org, clock.now()]),
+    );
+    expect(await withOrg(app, org, (q) => inboundLimitReached(q, clock))).toEqual({ reached: true, limit: 1 });
   });
 });
