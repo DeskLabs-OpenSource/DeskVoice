@@ -26,15 +26,18 @@ test("na lateral a 1280×720, o popover do sino abre inteiro, a lateral não rol
   expect(box.x + box.width).toBeLessThanOrEqual(1280);
   expect(box.y + box.height).toBeLessThanOrEqual(720);
 
-  // Inteiro: o retângulo não diz se um ancestral com rolagem corta o popover, mas o ponto diz. Cada
-  // canto (2 px para dentro) e o meio precisam cair no próprio popover, e não na lateral ou na tela.
+  // Inteiro: o retângulo não diz se um ancestral com rolagem corta o popover, nem se a tela o cobre,
+  // mas o ponto diz. Cada canto e o meio precisam cair no próprio popover, e não na lateral ou na
+  // tela. Os cantos ficam 16 px para dentro: o raio do rounded-md é 12 px, e mais rente cairia fora
+  // da curva, no que está atrás.
   const inside = await popover.evaluate((element) => {
     const rect = element.getBoundingClientRect();
+    const inset = 16;
     const points: Array<[number, number]> = [
-      [rect.left + 2, rect.top + 2],
-      [rect.right - 2, rect.top + 2],
-      [rect.left + 2, rect.bottom - 2],
-      [rect.right - 2, rect.bottom - 2],
+      [rect.left + inset, rect.top + inset],
+      [rect.right - inset, rect.top + inset],
+      [rect.left + inset, rect.bottom - inset],
+      [rect.right - inset, rect.bottom - inset],
       [rect.left + rect.width / 2, rect.top + rect.height / 2],
     ];
     return points.map(([x, y]) => element.contains(document.elementFromPoint(x, y)));
