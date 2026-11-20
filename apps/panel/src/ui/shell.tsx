@@ -339,7 +339,9 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
     <MeContext.Provider value={me}>
     <div className="min-h-dvh lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
       <aside className="hidden border-r border-line bg-surface lg:block">
-        <div className="sticky top-0 flex h-dvh flex-col gap-6 px-3 py-5">
+        {/* z-10: o conteúdo da tela (main.rise) guarda um transform da animação de entrada e, sem
+            isso, seria pintado por cima do popover do sino onde ele passa da lateral. */}
+        <div className="sticky top-0 z-10 flex h-dvh flex-col gap-6 px-3 py-5">
         <div className="flex items-center justify-between pr-1 pl-3">
           <Brand />
           <NotificationBell align="left-0" />
