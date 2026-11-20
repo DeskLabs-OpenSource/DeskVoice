@@ -35,11 +35,11 @@ const whatsappCalls = {
   riskTitle: "Antes de conectar",
   risk: "A ligação pelo WhatsApp usa um cliente não oficial (o WaCalls), que conecta o número como mais um aparelho, e não a API oficial da Meta. O WhatsApp pode restringir ou bloquear o número, sem aviso. Use um número dedicado ao atendimento, nunca o seu pessoal.",
   devices:
-    "O WhatsApp aceita até quatro aparelhos conectados a um número, e as ligações tocam em todos eles. Este serviço ocupa um desses lugares. Com mais de quatro aparelhos (contas com Meta Verified, por exemplo), as ligações tocam só no celular, e este serviço deixa de recebê-las.",
+    "Quem decide em que aparelhos a ligação toca é o WhatsApp. Com aparelhos conectados demais, ela toca só no celular, e este serviço deixa de recebê-la. Este serviço ocupa um lugar: deixe no máximo dois outros aparelhos conectados ao número e faça uma ligação de teste depois de conectar.",
   messagesNumber:
     "O número {phone} está conectado para mensagens, em WhatsApp. Se você conectar o mesmo número aqui, serão dois aparelhos conectados ao mesmo WhatsApp: se o número for bloqueado, as mensagens e as ligações param juntas.",
   sameNumber:
-    "Este número também está conectado para mensagens. São dois aparelhos conectados ao mesmo WhatsApp. Se o número for bloqueado, as mensagens e as ligações param juntas. O WhatsApp aceita até quatro aparelhos conectados; com mais que isso, as ligações tocam só no celular.",
+    "Este número também está conectado para mensagens. São dois aparelhos conectados ao mesmo WhatsApp. Se o número for bloqueado, as mensagens e as ligações param juntas. Com aparelhos conectados demais, as ligações tocam só no celular.",
   connect: "Conectar",
   starting: "Preparando a conexão. O QR Code aparece em alguns segundos.",
   qrTitle: "Leia o código com o celular do número",
