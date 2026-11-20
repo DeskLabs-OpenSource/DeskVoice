@@ -49,6 +49,8 @@ const agents: AgentsDictionary = {
   readUnmeasuredNoCeiling: "Este agente no tiene tope de costo: con este modelo, sus llamadas no se van a leer.",
   readKeyGone: "El cerebro elegido ({brain}) no tiene clave aceptada. Las llamadas de este agente no se leen hasta que la clave vuelva o la elección cambie; no pasan a la elección de la organización ni al motor.",
   readModelGone: "El modelo elegido ({model}) ya no está en la lista de ese cerebro. Las llamadas de este agente no se leen hasta que la elección cambie.",
+  readKeyGoneAsk: "El cerebro elegido ({brain}) no tiene clave aceptada. Las llamadas de este agente no se leen hasta que la clave vuelva o la elección cambie; no pasan a la elección de la organización ni al motor. Pide a un dueño o administrador que guarde la clave de nuevo o cambie la elección.",
+  readModelGoneAsk: "El modelo elegido ({model}) ya no está en la lista de ese cerebro. Las llamadas de este agente no se leen hasta que la elección cambie. Pide a un dueño o administrador que cambie la elección.",
   readInvalid: "La elección guardada en este agente no es válida. Sus llamadas no se leen hasta que elijas de nuevo.",
   readInvalidOption: "Elección no válida",
   liveAnalyst: "Acompaña la llamada en vivo: el analista {name}",
