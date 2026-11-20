@@ -29,7 +29,7 @@ export default function Settings() {
   const trunks = useApi<Trunk[]>("/trunks");
   const engines = useApi<Engine[]>("/engines");
   // Como no bloco do WhatsApp: só quem configura lê o estado da conexão.
-  const whatsapp = useApi<Pick<ServiceData, "service" | "status">>(canConfigure ? "/whatsapp" : null);
+  const whatsapp = useApi<Pick<ServiceData, "available" | "service" | "status">>(canConfigure ? "/whatsapp" : null);
   const webhooks = useApi<Setting<unknown[]>>("/settings/webhooks.allowed");
   return (
     <SettingsHub

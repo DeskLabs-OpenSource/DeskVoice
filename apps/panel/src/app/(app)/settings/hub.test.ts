@@ -19,7 +19,7 @@ const card = (html: string, key: string): string => {
   expect(start, key).toBeGreaterThan(-1);
   return html.slice(start, html.indexOf("</a>", start));
 };
-const whatsapp = (service: ServiceData["service"], status: ServiceData["status"]) => whatsappState({ service, status });
+const whatsapp = (service: ServiceData["service"], status: ServiceData["status"], available = true) => whatsappState({ available, service, status });
 
 describe("o estado dos cartões da central", () => {
   it("WhatsApp: pronto só com a sessão conectada", () => {
@@ -30,6 +30,17 @@ describe("o estado dos cartões da central", () => {
     expect(whatsappState(undefined)).toBeNull();
   });
 
+  it("WhatsApp: conectado com o serviço fora do ar não é pronto (o status gravado não basta)", () => {
+    for (const service of ["preparing", "failed", "removing"] as const) expect(whatsapp(service, "connected"), service).toBe("missing");
+    expect(whatsapp("absent", "connected")).toBe("off");
+  });
+
+  it("WhatsApp: conectado com o serviço indisponível não é pronto", () => {
+    expect(whatsapp("running", "connected", false)).toBe("missing");
+    expect(whatsapp("failed", "connected", false)).toBe("missing");
+    expect(whatsapp("absent", "disconnected", false)).toBe("off");
+  });
+
   it("com o WhatsApp no QR ou desconectado, o cartão não diz pronto", () => {
     for (const status of ["qr", "disconnected"] as const) {
       const html = card(render({ whatsapp: whatsapp("running", status) }), "whatsapp");
@@ -37,6 +48,12 @@ describe("o estado dos cartões da central", () => {
       expect(html, status).toContain(`>${t.state.missing}<`);
     }
     expect(card(render({ whatsapp: whatsapp("running", "connected") }), "whatsapp")).toContain(`>${t.state.ready}<`);
+  });
+
+  it("com o serviço do WhatsApp em falha e o status gravado conectado, o cartão não diz pronto", () => {
+    const html = card(render({ whatsapp: whatsapp("failed", "connected") }), "whatsapp");
+    expect(html).not.toContain(`>${t.state.ready}<`);
+    expect(html).toContain(`>${t.state.missing}<`);
   });
 
   it("motores: pronto com chave, falta algo sem, nada sem leitura", () => {
