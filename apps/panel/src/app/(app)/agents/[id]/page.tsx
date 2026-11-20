@@ -507,7 +507,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               <div className="mt-3 max-w-prose">
                 <Notice tone="fail">
                   <p>{whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}</p>
-                  <Link href="/settings/whatsapp" className="font-bold underline-offset-4 hover:underline">
+                  <Link href={whatsAppBlock === "not_connected" ? "/settings/whatsapp" : "/settings/whatsapp#avancado"} className="font-bold underline-offset-4 hover:underline">
                     {t.dropFollowUpFixLink}
                   </Link>
                 </Notice>
@@ -515,7 +515,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             ) : (
               <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
                 {whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}{" "}
-                <Link href="/settings/whatsapp" className="font-bold text-ink underline-offset-4 hover:underline">
+                <Link href={whatsAppBlock === "not_connected" ? "/settings/whatsapp" : "/settings/whatsapp#avancado"} className="font-bold text-ink underline-offset-4 hover:underline">
                   {t.dropFollowUpFixLink}
                 </Link>
               </p>

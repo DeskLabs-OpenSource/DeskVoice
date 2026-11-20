@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import common from "../../src/i18n/pt-BR/common";
 import { fill } from "../../src/i18n/locales";
 import privacy from "../../src/i18n/pt-BR/privacy";
+import settings from "../../src/i18n/pt-BR/settings";
 import timeline from "../../src/i18n/pt-BR/timeline";
 import { formatPhone } from "../../src/ui/format";
 import { signIn, unique } from "./session";
@@ -89,6 +90,10 @@ test("passo 2: esquecer um número nomeia o número, diz o que fica, apaga as no
 
   await page.goto("/settings/privacy");
   const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: privacy.forgetTitle, exact: true }) });
+  // Exportar, esquecer e apagar ficam no Avançado, fechado ao abrir a tela.
+  await expect(panel.getByLabel(privacy.forgetPhone)).toBeHidden();
+  await expect(page.getByLabel(privacy.exportPhone)).toBeHidden();
+  await page.getByText(settings.advanced, { exact: true }).click();
   // O número inválido é recusado antes de a confirmação abrir.
   await panel.getByLabel(privacy.forgetPhone).fill("999990000");
   await panel.getByRole("button", { name: privacy.forgetRun, exact: true }).click();

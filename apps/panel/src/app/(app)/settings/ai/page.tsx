@@ -16,6 +16,7 @@ import { formatDateTime, formatDay } from "../../../../ui/format";
 import { Badge, Button, Field, Notice, Panel, Select, Skeleton, Switch, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
 import type { Engine, KeyCheck, KeyCheckResult, Setting } from "../../../../ui/types";
+import { Advanced } from "../advanced";
 import { matchModels } from "../brains/search";
 import { URL_PREFIX, put } from "../setting-api";
 
@@ -154,7 +155,11 @@ function EngineKey({ engine, t, cancel, onChanged }: { engine: Engine; t: Settin
         </form>
       ) : null}
       {engine.requiresKey && engine.keyConfigured ? <KeyCheckStatus check={engine.keyCheck} t={t} /> : null}
-      {engine.classifyTarget && canConfigure ? <ClassifyTarget engine={engine} t={t} onChanged={onChanged} /> : null}
+      {engine.classifyTarget && canConfigure ? (
+        <Advanced>
+          <ClassifyTarget engine={engine} t={t} onChanged={onChanged} />
+        </Advanced>
+      ) : null}
       {testPostponed ? <Notice tone="warn">{t.keySavedNotTested}</Notice> : null}
       {test.error ? <Notice tone="fail">{test.error}</Notice> : null}
       {canConfigure && engine.keyConfigured && confirming ? (

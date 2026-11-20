@@ -173,6 +173,7 @@ const settings = {
   voicemailMaxSecondsHint: "De 5 a 300, contados depois do aviso. O valor de fábrica é 60. O recado termina 4 segundos depois da última fala.",
   saveVoicemail: "Salvar caixa postal",
   saveInboundLimit: "Salvar limite",
+  advanced: "Avançado",
 };
 
 export default settings;
