@@ -385,7 +385,8 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     expect((await ask()).status).toBe(409);
     expect(made.timers.held()).toContain(60_000);
     made.clock.advance(60_000);
-    expect(made.timers.fire(60_000)).toBe(3);
+    // Os três prazos das chamadas, e a volta do despareamento da ligação pelo WhatsApp (9b2), também de 60 s.
+    expect(made.timers.fire(60_000)).toBe(3 + 1);
     await waitFor(async () => (await callOf(app, callId)).status === "failed", "the call to be closed");
     expect(await callOf(app, callId)).toMatchObject({ status: "failed", end_reason: "web_never_connected", ended_at: made.clock.now() });
     expect(await eventsOf(app, callId)).toEqual([{ kind: "call_ended", payload: { status: "failed", reason: "web_never_connected", channel: "web" } }]);
@@ -406,7 +407,8 @@ describe("chamada pelo navegador", { timeout: 120_000 }, () => {
     const made = await scene("web-forgotten", { script: [{ expectUserAudio: 100_000 }] });
     const { body } = await made.post({ organizationId: made.organizationId, agentId: made.agentId, userId: USER });
     made.clock.advance(60_000);
-    expect(made.timers.fire(60_000)).toBe(1);
+    // O prazo da chamada, e a volta do despareamento da ligação pelo WhatsApp (9b2).
+    expect(made.timers.fire(60_000)).toBe(1 + 1);
     await waitFor(async () => (await callOf(app, body.callId ?? "")).status === "failed", "the call to be closed");
     expect(made.timers.held()).toContain(30 * 60_000);
     made.clock.advance(30 * 60_000);

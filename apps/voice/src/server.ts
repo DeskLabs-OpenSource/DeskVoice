@@ -22,6 +22,7 @@ import { playUnavailable } from "./unavailable";
 import { startVoicemailSession, type VoicemailSession } from "./voicemail";
 import { startWebCalls } from "./web-calls";
 import { createWhatsAppCalls } from "./whatsapp-calls";
+import { unpairDeletingOrganizations, WHATSAPP_CALLS_UNPAIR_MS } from "./whatsapp-calls-deletion";
 
 export interface VoiceServerDeps {
   db: Db;
@@ -219,6 +220,18 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   // partida, e não só quando alguém abre a tela. Se o WaCalls ainda está subindo, a escuta tenta de novo.
   if (await whatsappCallsWanted(db)) whatsappCalls.listen();
 
+  // A organização com lápide que ainda tem sessão no WaCalls: este processo é o único com o token,
+  // e a rotina da exclusão espera a linha ficar limpa (fatia 9b2). Na partida e de minuto em minuto,
+  // sem abrir o SSE e sem depender do Asterisk.
+  let stopUnpair = (): void => undefined;
+  const unpairLater = (): void => {
+    if (closed) return;
+    stopUnpair = schedule(() => {
+      void unpairDeletingOrganizations({ db, options: deps.wacalls ?? { token: "" }, log, now: () => clock.now() }).finally(unpairLater);
+    }, WHATSAPP_CALLS_UNPAIR_MS);
+  };
+  void unpairDeletingOrganizations({ db, options: deps.wacalls ?? { token: "" }, log, now: () => clock.now() }).finally(unpairLater);
+
   const webCalls = await startWebCalls({ db, clock, session: sessionDeps, port: deps.webPort, host: deps.host, schedule: deps.schedule, now: deps.now, log, onSession: track });
 
   const api = await startInternalApi({
@@ -258,6 +271,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     async close() {
       closed = true;
       stopRefresh();
+      stopUnpair();
       await callBacks.close();
       ari.close();
       whatsappCalls.close();

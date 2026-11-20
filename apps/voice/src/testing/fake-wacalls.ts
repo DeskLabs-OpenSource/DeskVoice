@@ -82,7 +82,8 @@ export async function startFakeWacalls() {
   const requests: Array<{ method: string; path: string; query: string; authorization: string | undefined }> = [];
   const streams = new Set<ServerResponse>();
   // `refusePairing`: a próxima sessão fica em "connecting" sem QR, como quando o WhatsApp recusa o cliente.
-  const state = { down: false, nextId: 1, refuseAccept: false, refusePairing: false };
+  // `hangMs`: cada pedido espera isso antes de responder, para o cliente estourar o limite dele.
+  const state = { down: false, nextId: 1, refuseAccept: false, refusePairing: false, hangMs: 0 };
   const calls = new Map<string, FakeCall>();
   let nextCall = 1;
 
@@ -118,6 +119,7 @@ export async function startFakeWacalls() {
       const url = new URL(request.url ?? "/", "http://wacalls");
       const method = request.method ?? "GET";
       requests.push({ method, path: url.pathname, query: url.search, authorization: request.headers.authorization });
+      if (state.hangMs > 0) await new Promise((resolve) => setTimeout(resolve, state.hangMs));
       if (state.down) return json(response, 503, { error: "down" });
       if (url.pathname === "/healthz") return json(response, 200, { ok: true });
       if (request.headers.authorization !== `Bearer ${WACALLS_TOKEN}`) return json(response, 401, { error: "unauthorized" });

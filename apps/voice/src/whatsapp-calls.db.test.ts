@@ -2,7 +2,7 @@
 // e um par WebRTC de verdade no papel do dele, com o canal `pcm` a 16 kHz), o motor nas mãos do
 // teste e o banco real.
 import { encryptSecret, INBOUND_LIMIT_SETTING, whatsappCallsWanted, withSystem } from "@deskvoice/core";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
 import type { CallSession } from "./call-session";
@@ -509,5 +509,73 @@ describe("ligação pelo WhatsApp: o menu por teclas fica de fora (T9 da URA, #2
     await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the agent to answer");
     expect((await kindsOf(app, callId)).filter((kind) => kind.startsWith("ivr_"))).toEqual([]);
     expect(engine.configs).toHaveLength(1);
+  });
+});
+
+// A exclusão de organização (R8, fatia 9b2): quem liga no meio dela, ou depois, sempre ouve a fala.
+describe("ligação pelo WhatsApp: organização excluída", { timeout: 60_000 }, () => {
+  /** Os pedidos ao falso sobre a sessão, em ordem, com a ligação e a sessão pelo nome. */
+  const sessionPaths = (sessionId: string, call: FakeCall): string[] =>
+    wacalls.requests
+      .filter((request) => request.path.split("/")[3] === sessionId)
+      .map((request) => {
+        const [, , , , kind, id, action] = request.path.split("/");
+        if (kind === "calls") return `${request.method} ${action ?? (id === call.id ? "call" : id)}`;
+        return `${request.method} ${kind ?? "session"}`;
+      });
+
+  it("F1: com a lápide gravada (suspensa, deleting_at), a ligação nasce recusada como organization_suspended, ouve a fala e desliga", async () => {
+    const deleting = await connected("wa-deleting");
+    await withSystem(app, (q) =>
+      q.exec("update organizations set suspended_at = now(), suspended_reason = 'teste da 9b2', deleting_at = now(), deleting_reason = 'teste da 9b2' where id = $1", [deleting.organizationId]),
+    );
+    // Sem lápide para trás, nem se o teste cair: o processo de voz de outro arquivo a desfaria.
+    onTestFinished(async () => void (await withSystem(app, (q) => q.exec("delete from organizations where id = $1", [deleting.organizationId]))));
+    const call = deleting.ring();
+    const [refused] = await waitFor(async () => {
+      const rows = await callsOf(app, deleting.organizationId);
+      return rows.length > 0 ? rows : null;
+    }, "the refused call");
+    expect(refused).toMatchObject({ status: "refused", end_reason: "organization_suspended" });
+    await waitFor(() => callPaths(call).includes("POST accept"), "the call to be answered");
+    wacalls.connectMedia(call);
+    await pump(() => call.status === "ended", "the DELETE after the notice");
+    expect(callPaths(call)).toEqual(["POST webrtc", "POST accept", `DELETE ${call.id}`]);
+    expect(Buffer.concat(call.leg?.received ?? []).some((byte) => byte !== 0)).toBe(true);
+    expect(engine.configs).toEqual([]);
+  });
+
+  it("F2: a organização já apagada: atende, toca a fala no idioma padrão, desliga, não grava em calls, registra sem telefone e despareia depois da fala", async () => {
+    const gone = await connected("wa-deleted");
+    const sessionId = wacalls.byName(wacallsSessionName(gone.organizationId))?.id ?? "";
+    // A cascata passou, e a sessão ficou viva no WaCalls.
+    await withSystem(app, (q) => q.exec("delete from organizations where id = $1", [gone.organizationId]));
+    const before = await withSystem(app, (q) => q.one<{ n: number }>("select count(*)::int as n from calls"));
+
+    const call = gone.ring();
+    await waitFor(() => callPaths(call).includes("POST accept"), "the call to be answered");
+    expect(call.owner).toMatch(/^deskvoice-call-[0-9a-f-]{36}$/);
+    wacalls.connectMedia(call);
+    await pump(() => call.status === "ended", "the DELETE after the notice");
+    await waitFor(() => !wacalls.sessions.has(sessionId), "the session to be unpaired");
+
+    // A fala inteira, no idioma padrão, antes de desligar; e só depois o logout e o delete da sessão.
+    const notice = await unavailableNotice("pt-BR");
+    expect(Buffer.concat(call.leg?.received ?? []).length).toBeGreaterThanOrEqual(notice.length * 2 - 640);
+    expect(sessionPaths(sessionId, call)).toEqual(["POST webrtc", "POST accept", "DELETE call", "POST logout", "DELETE session"]);
+    expect(engine.configs).toEqual([]);
+
+    // Nenhuma linha nova em `calls`, e o registro da instalação sem número nem id do WaCalls.
+    expect(await withSystem(app, (q) => q.one<{ n: number }>("select count(*)::int as n from calls"))).toEqual(before);
+    const events = await withSystem(app, (q) =>
+      q.many<{ organization_id: string | null; payload: Record<string, unknown>; text: string }>(
+        "select organization_id, payload, payload::text as text from installation_events where kind = 'call_to_deleted_organization' and payload->>'organization_id' = $1",
+        [gone.organizationId],
+      ),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ organization_id: null, payload: { organization_id: gone.organizationId, channel: "whatsapp" } });
+    for (const forbidden of [CALLER.slice(1), CALLER.slice(3), NUMBER.slice(1), NUMBER.slice(3), sessionId, call.id]) expect(events[0]?.text).not.toContain(`"${forbidden}`);
+    expect(events[0]?.text).not.toMatch(/\d{8,}/);
   });
 });
