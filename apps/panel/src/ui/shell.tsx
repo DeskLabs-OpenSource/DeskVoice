@@ -339,15 +339,17 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
     <MeContext.Provider value={me}>
     <div className="min-h-dvh lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
       <aside className="hidden border-r border-line bg-surface lg:block">
-        {/* Rola quando a janela é baixa: com os títulos de grupo, o bloco da conta não cabe sempre em 720 px. */}
-        <div className="sticky top-0 flex h-dvh flex-col gap-6 overflow-y-auto px-3 py-5">
+        <div className="sticky top-0 flex h-dvh flex-col gap-6 px-3 py-5">
         <div className="flex items-center justify-between pr-1 pl-3">
           <Brand />
           <NotificationBell align="left-0" />
         </div>
         {organizations ? <OrganizationSwitch choices={organizations} /> : null}
-        {nav}
-        <div className="mt-auto grid gap-3">
+        {/* Quando a janela é baixa, só a lista do menu rola: o bloco da conta fica sempre à vista, e o
+            sino fica fora de qualquer contêiner com rolagem, que cortaria o popover dos avisos. A folga
+            de 4 px nas bordas não deixa a rolagem cortar o anel de foco dos itens. */}
+        <div className="-m-1 min-h-0 flex-1 overflow-y-auto p-1">{nav}</div>
+        <div className="grid gap-3">
           <UpdateIndicator />
           <HealthIndicator />
           <div className="border-t border-line pt-3 pl-2">{account}</div>
