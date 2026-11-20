@@ -21,7 +21,7 @@ test("configurar: os blocos de uma instalação nova aparecem, e o limite de lig
   await page.goto("/settings");
   await expect(page.getByRole("heading", { level: 1, name: settings.title })).toBeVisible();
 
-  // Inteligência artificial, a seção de `/settings`: numa instalação nova nenhuma chave foi cadastrada.
+  // Inteligência artificial, a seção de `/settings/ai` (`/settings` leva a ela): numa instalação nova nenhuma chave foi cadastrada.
   await expect(sectionLink(page, settings.sections.ai)).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: settings.enginesTitle, exact: true })).toBeVisible();
   await expect(page.getByText(settings.keyMissing, { exact: true }).first()).toBeVisible();
@@ -64,7 +64,7 @@ test("seções de Configurações: a navegação leva a cada uma, e Configuraç�
     { name: settings.sections.privacy, path: "/settings/privacy", heading: privacy.retentionTitle },
     { name: settings.sections.system, path: "/settings/system", heading: update.title },
     { name: settings.sections.account, path: "/settings/account", heading: settings.passwordTitle },
-    { name: settings.sections.ai, path: "/settings", heading: settings.enginesTitle },
+    { name: settings.sections.ai, path: "/settings/ai", heading: settings.enginesTitle },
   ];
   for (const section of sections) {
     await openSection(page, section.name, section.path);
@@ -73,6 +73,14 @@ test("seções de Configurações: a navegação leva a cada uma, e Configuraç�
     await expect(page.getByRole("navigation", { name: settings.sectionsNav }).locator('[aria-current="page"]')).toHaveCount(1);
     await expect(page.getByRole("navigation", { name: common.shell.mainNav }).getByRole("link", { name: common.nav.settings })).toHaveAttribute("aria-current", "page");
   }
+});
+
+test("o endereço antigo: /settings leva à tela de IA em /settings/ai, sem perder a query nem o #", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/settings?origem=favorito&aba=1&aba=2#motores");
+  await expect(page).toHaveURL(/\/settings\/ai\?origem=favorito&aba=1&aba=2#motores$/);
+  await expect(sectionLink(page, settings.sections.ai)).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: settings.enginesTitle, exact: true })).toBeVisible();
 });
 
 // Item 8.10 da régua: o teste da chave do motor, provado sem chave real. Nenhum pedido sai para um
