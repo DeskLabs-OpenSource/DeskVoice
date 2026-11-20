@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import calls from "../../src/i18n/pt-BR/calls";
 import common from "../../src/i18n/pt-BR/common";
 import privacy from "../../src/i18n/pt-BR/privacy";
 import settings from "../../src/i18n/pt-BR/settings";
@@ -18,10 +19,10 @@ async function openSection(page: Page, name: string, path: string): Promise<void
 
 test("configurar: os blocos de uma instalação nova aparecem, e o limite de ligações recebidas persiste", async ({ page }) => {
   await signIn(page);
-  await page.goto("/settings");
+  await page.goto("/settings/ai");
   await expect(page.getByRole("heading", { level: 1, name: settings.title })).toBeVisible();
 
-  // Inteligência artificial, a seção de `/settings/ai` (`/settings` leva a ela): numa instalação nova nenhuma chave foi cadastrada.
+  // Inteligência artificial, a seção de `/settings/ai`: numa instalação nova nenhuma chave foi cadastrada.
   await expect(sectionLink(page, settings.sections.ai)).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: settings.enginesTitle, exact: true })).toBeVisible();
   await expect(page.getByText(settings.keyMissing, { exact: true }).first()).toBeVisible();
@@ -75,12 +76,92 @@ test("seções de Configurações: a navegação leva a cada uma, e Configuraç�
   }
 });
 
-test("o endereço antigo: /settings leva à tela de IA em /settings/ai, sem perder a query nem o #", async ({ page }) => {
+/** Troca o `data` de uma leitura `GET` da API, mantendo o resto da resposta de verdade. */
+async function rewrite<T>(page: Page, path: string, change: (data: T) => T): Promise<void> {
+  await page.route(`**/api/v1${path}`, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = (await response.json()) as { ok: boolean; data: T };
+    await route.fulfill({ response, json: body.ok ? { ...body, data: change(body.data) } : body });
+  });
+}
+
+type EngineRead = { requiresKey: boolean; keyConfigured: boolean };
+const hubCard = (page: Page, key: string) => page.locator(`[data-card="${key}"]`);
+const firstSteps = (page: Page) => page.getByRole("region", { name: settings.hub.firstSteps.title });
+
+test("a central em /settings: nenhuma aba marcada, e cada cartão abre a tela que já existe", async ({ page }) => {
   await signIn(page);
-  await page.goto("/settings?origem=favorito&aba=1&aba=2#motores");
-  await expect(page).toHaveURL(/\/settings\/ai\?origem=favorito&aba=1&aba=2#motores$/);
-  await expect(sectionLink(page, settings.sections.ai)).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: settings.enginesTitle, exact: true })).toBeVisible();
+  await page.goto("/settings");
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByRole("heading", { level: 1, name: settings.title })).toBeVisible();
+  await expect(hubCard(page, "engines")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: settings.sectionsNav }).locator('[aria-current="page"]')).toHaveCount(0);
+  const cards = [
+    { key: "engines", path: "/settings/ai", heading: settings.enginesTitle },
+    { key: "brains", path: "/settings/brains" },
+    { key: "voice", path: "/settings/voice" },
+    { key: "speechFilter", path: "/settings/speech-filter" },
+    { key: "analysts", path: "/settings/analysts" },
+    { key: "outcome", path: "/settings/ai", heading: settings.outcomeTitle },
+    { key: "whatsapp", path: "/settings/whatsapp", heading: whatsapp.title },
+    { key: "webhooks", path: "/settings/integrations", heading: settings.webhooksTitle },
+    { key: "rules", path: "/settings/calls", heading: settings.inboundLimitTitle },
+    { key: "privacy", path: "/settings/privacy", heading: privacy.retentionTitle },
+    { key: "system", path: "/settings/system", heading: update.title },
+  ];
+  for (const card of cards) {
+    await page.goto("/settings");
+    await hubCard(page, card.key).click();
+    await expect(page).toHaveURL(new RegExp(`${card.path}$`));
+    if (card.heading) await expect(page.getByRole("heading", { name: card.heading, exact: true })).toBeVisible();
+  }
+});
+
+test("Primeiros passos: numa organização nova os três passos estão pendentes, e com agente, linha e chave o cartão some", async ({ page }) => {
+  await signIn(page);
+  // A organização nova, pelas três leituras que o cartão faz: sem agente, sem linha, sem chave.
+  await rewrite<unknown[]>(page, "/agents", () => []);
+  await rewrite<unknown[]>(page, "/trunks", () => []);
+  await rewrite<EngineRead[]>(page, "/engines", (engines) => engines.map((engine) => ({ ...engine, keyConfigured: false })));
+  await page.goto("/settings");
+  const card = firstSteps(page);
+  await expect(card).toBeVisible();
+  for (const label of Object.values(calls.empty.steps)) await expect(card.getByRole("link").filter({ hasText: label })).toContainText(calls.empty.todo);
+  await expect(hubCard(page, "engines")).toContainText(settings.hub.state.missing);
+
+  // Agente, linha e chave: o cartão some, e o de Motores de voz diz pronto, da mesma leitura.
+  await page.unrouteAll({ behavior: "wait" });
+  await rewrite<unknown[]>(page, "/agents", (agents) => (agents.length > 0 ? agents : [{ id: "e2e" }]));
+  await rewrite<unknown[]>(page, "/trunks", (trunks) => (trunks.length > 0 ? trunks : [{ id: "e2e" }]));
+  await rewrite<EngineRead[]>(page, "/engines", (engines) => {
+    const keyed = engines.findIndex((engine) => engine.requiresKey);
+    return engines.map((engine, index) => (index === keyed ? { ...engine, keyConfigured: true } : engine));
+  });
+  const read = ["/agents", "/trunks", "/engines"].map((path) => page.waitForResponse((response) => new URL(response.url()).pathname === `/api/v1${path}`));
+  await page.reload();
+  await Promise.all(read);
+  await expect(hubCard(page, "engines")).toContainText(settings.hub.state.ready);
+  await expect(firstSteps(page)).toHaveCount(0);
+});
+
+test("o cartão do WhatsApp: com o QR por ler ou desconectado não diz pronto; sem o serviço, desligado", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/settings");
+  // Na instalação do CI o serviço não vem instalado.
+  await expect(hubCard(page, "whatsapp")).toContainText(settings.hub.state.off);
+  for (const status of ["qr", "disconnected", "connected"] as const) {
+    await page.unrouteAll({ behavior: "wait" });
+    await rewrite<Record<string, unknown>>(page, "/whatsapp", (data) => ({ ...data, available: true, service: "running", status }));
+    await page.reload();
+    const card = hubCard(page, "whatsapp");
+    if (status === "connected") {
+      await expect(card).toContainText(settings.hub.state.ready);
+    } else {
+      await expect(card).toContainText(settings.hub.state.missing);
+      await expect(card).not.toContainText(settings.hub.state.ready);
+    }
+  }
 });
 
 // Item 8.10 da régua: o teste da chave do motor, provado sem chave real. Nenhum pedido sai para um
@@ -100,7 +181,7 @@ test("testar a chave: o motor simulado não pede chave, e um motor sem chave sal
   expect(((await missing.json()) as { error: { code: string } }).error.code).toBe("engine_key_missing");
 
   // Na tela: sem chave salva não há o que testar, então o botão não aparece.
-  await page.goto("/settings");
+  await page.goto("/settings/ai");
   await expect(page.getByText(settings.keyMissing, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: settings.keyTest, exact: true })).toHaveCount(0);
 });

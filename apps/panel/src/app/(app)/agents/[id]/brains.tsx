@@ -8,7 +8,7 @@ import { useApi } from "../../../../ui/api";
 import { Field, Notice, Panel, Select, TextInput } from "../../../../ui/kit";
 import type { Setting } from "../../../../ui/types";
 import { matchModels } from "../../settings/brains/search";
-import { analysisView, type AnalysisDraft, type BrainModelOption, type BrainOption } from "./analysis-choice";
+import { analysisView, type AnalysisDraft, type AnalysisStatus, type BrainModelOption, type BrainOption } from "./analysis-choice";
 
 // Valores do seletor que não são cérebro: os ids de cérebro são nomes de pasta, sem "@".
 const ENGINE_VALUE = "@engine";
@@ -22,6 +22,7 @@ const INVALID_VALUE = "@invalid";
  * no painel dele; aqui só é citado, com o link.
  */
 export function AgentBrains({
+  agentId,
   t,
   engineLabel,
   analysis,
@@ -30,6 +31,8 @@ export function AgentBrains({
   analyst,
   canConfigure,
 }: {
+  /** `null` no agente novo, que ainda não tem escolha gravada. */
+  agentId: string | null;
   t: AgentsDictionary;
   engineLabel: string;
   analysis: AnalysisDraft;
@@ -40,18 +43,23 @@ export function AgentBrains({
   canConfigure: boolean;
 }) {
   const organization = useApi<Setting<{ brain: string; model: string }>>("/settings/calls.analysis_brain");
-  // A lista de cérebros é de quem configura (dono e admin); quem só lê vê a escolha em texto.
+  // A lista de cérebros é de quem configura (dono e admin); quem só lê vê a escolha em texto, com o
+  // rótulo e os avisos da escolha gravada, que `analysis-status` calcula pela mesma `analysisView`.
   const brains = useApi<BrainOption[]>(canConfigure ? "/brains" : null);
+  const status = useApi<AnalysisStatus>(canConfigure || agentId === null ? null : `/agents/${encodeURIComponent(agentId)}/analysis-status`);
   const [query, setQuery] = useState("");
   const chosenBrain = analysis.kind === "brain" ? analysis.brain : "";
   const models = useApi<{ models: BrainModelOption[] }>(canConfigure && chosenBrain ? `/brains/${encodeURIComponent(chosenBrain)}/models` : null);
 
   // Toda regra dos avisos (e o `required` do Modelo) sai de `analysisView`, que tem teste; aqui só se lê.
-  const { brain, modelId, accepted, models: list, model, keyGone, modelGone, unmeasured, required, labelOf, unmeasuredOf } = analysisView({
-    analysis,
-    brains: brains.data,
-    models: models.data?.models,
-  });
+  const view = analysisView({ analysis, brains: brains.data, models: models.data?.models });
+  const { brain, modelId, accepted, models: list, model, required, unmeasuredOf } = view;
+  // Para quem só lê, os avisos vêm da rota, que vale para a escolha gravada (a única que essa tela tem).
+  const problems = status.data?.problems ?? [];
+  const keyGone = canConfigure ? view.keyGone : problems.includes("key_gone");
+  const modelGone = canConfigure ? view.modelGone : problems.includes("model_gone");
+  const unmeasured = canConfigure ? view.unmeasured : problems.includes("unmeasured");
+  const labelOf = (id: string): string => (!canConfigure && id === brain && status.data?.brainLabel ? status.data.brainLabel : view.labelOf(id));
   const shown = matchModels(list, query);
 
   const orgValue = organization.data?.value ?? null;
@@ -109,7 +117,7 @@ export function AgentBrains({
             )}
           </Field>
           {analysis.kind === "invalid" ? <Notice tone="fail">{t.readInvalid}</Notice> : null}
-          {keyGone ? <Notice tone="fail">{fill(t.readKeyGone, { brain: labelOf(brain) })}</Notice> : null}
+          {keyGone ? <Notice tone="fail">{fill(canConfigure ? t.readKeyGone : t.readKeyGoneAsk, { brain: labelOf(brain) })}</Notice> : null}
           {canConfigure && brain && !keyGone ? (
             <div className="grid max-w-md content-start gap-1.5">
               <span className="text-[0.87rem] font-bold">{t.readModel}</span>
@@ -137,7 +145,7 @@ export function AgentBrains({
               </div>
             </div>
           ) : null}
-          {modelGone ? <Notice tone="fail">{fill(t.readModelGone, { model: modelId })}</Notice> : null}
+          {modelGone ? <Notice tone="fail">{fill(canConfigure ? t.readModelGone : t.readModelGoneAsk, { model: modelId })}</Notice> : null}
           {/* Aviso fixo: aparece ao escolher o modelo sem preço, antes de salvar, e continua depois de salvo. */}
           {unmeasured ? (
             <Notice tone="warn">
