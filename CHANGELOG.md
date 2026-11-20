@@ -3,6 +3,17 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.41.2] - 2026-11-20
+
+### Alterado
+
+- **A exclusão de organização também desfaz a ligação pelo WhatsApp** Por dentro, a exclusão de uma organização passa a desconectar também o número da ligação pelo WhatsApp: o processo de voz tira o aparelho vinculado do celular e apaga a sessão no serviço de ligações, e a rotina só apaga a organização depois disso. Se o serviço de ligações estiver fora do ar e nenhuma organização usar a ligação pelo WhatsApp, a exclusão segue sem ele. Quem ligar pelo WhatsApp para o número de uma organização já excluída ouve o aviso de indisponível, e a auditoria da instalação registra o fato, sem o número de quem ligou. Ainda não há botão nem rota para pedir a exclusão (vem na próxima fatia), então ninguém vê diferença. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A Saúde só diz que a ligação pelo WhatsApp funciona depois que uma ligação chega** Com o número conectado e o agente escolhido, a linha da ligação pelo WhatsApp na Saúde dizia "funcionando" mesmo quando o WhatsApp entregava as ligações só ao celular. Agora ela fica em aviso até chegar uma ligação pelo WhatsApp depois da conexão, e então mostra a hora da última. A tela de conexão e o guia deixam de afirmar que até quatro aparelhos conectados recebem a ligação: num relato com quatro aparelhos, contando o DeskVoice, ela tocou só no celular. A recomendação passa a ser deixar no máximo dois outros aparelhos conectados ao número e fazer uma ligação de teste. Nada a fazer em instalações existentes; quem já tem o número conectado e nenhuma ligação recebida desde então passa a ver o aviso até a primeira ligação. Crédito: @aleflores35, pelo relato.
+- **A chamada pelo navegador recusada pelo teto de gasto do mês aparece em Chamadas, com o motivo na linha do tempo** Quando a organização chega ao teto de gasto do mês, a tentativa de chamar um agente pelo navegador passa a ficar registrada em Chamadas como recusada, com "a organização chegou ao teto de gasto do mês" na linha do tempo, como já acontecia com a ligação pela linha telefônica e pelo WhatsApp. Antes, só quem clicou via a recusa, na própria tela. As outras recusas do navegador (agente desligado, motor sem chave) continuam aparecendo só na tela de quem clicou, e a recusa não ocupa vaga de chamadas ao mesmo tempo. A soma do mês que o teto confere a cada chamada também ficou mais leve: passa a ler só a fatia do período no extrato, e não o extrato inteiro da organização, com o mesmo total na tela de Custos, na visão geral da instalação e no teto. Nada a fazer para quem já instalou. Crédito: @melgarafael.
+
 ## [0.41.1] - 2026-11-19
 
 ### Corrigido

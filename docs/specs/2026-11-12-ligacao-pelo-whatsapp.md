@@ -304,6 +304,13 @@ conferidas em 12/11/2026). WAHA e WaCalls ocupam dois desses quatro. Com mais de
 ou Meta One), **a ligação só toca no celular principal**, e o WaCalls deixa de receber: a tela precisa
 dizer isso.
 
+> **Revisto em 20/11/2026 (#489).** Uma conta WhatsApp Business com quatro aparelhos vinculados,
+> contando o WaCalls, recebeu a ligação só no celular, e o WhatsApp Web parou de tocar. O "até
+> quatro recebem em todos" acima não se sustenta como regra: pode ser que o celular entre na conta,
+> ou que a regra seja outra para a conta Business. A causa não foi confirmada. A tela e o guia
+> passaram a recomendar no máximo dois outros aparelhos além do DeskVoice, e a Saúde só dá a linha
+> como ok depois de uma ligação pelo WhatsApp recebida desde a conexão.
+
 **O DeskcommCRM roda os dois no mesmo número** por decisão de produto, com o risco aceito (spec 18,
 §1.2, item 1), e mediu ligações numa VPS em 15/09/2026 com o WAHA da mesma organização de pé
 (spec 18, §4.1). Não há medição publicada de bloqueio por isso.
