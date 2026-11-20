@@ -74,7 +74,12 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
       if (!(error instanceof ApiError)) throw error;
       calls = "down";
     }
-    lines.whatsapp_calls = whatsappCallsLine(calls);
+    // A prova de que o WhatsApp entrega a ligação a este aparelho: uma chamada dele desde a conexão.
+    const since = calls !== "down" && calls.status === "connected" ? calls.connectedAt : null;
+    const lastCall = since
+      ? await org((q) => q.one<{ at: Date | null }>(`select max(started_at) as at from calls where channel = 'whatsapp' and started_at >= $1`, [since]))
+      : null;
+    lines.whatsapp_calls = whatsappCallsLine(calls, lastCall?.at ?? null);
   } else if (!database && token) {
     // Sem banco não se confere a sessão: para a tela, as linhas da organização dizem por que faltam.
     lines.agent = agentLine(null, now);

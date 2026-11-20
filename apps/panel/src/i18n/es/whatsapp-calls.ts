@@ -37,11 +37,11 @@ const whatsappCalls: WhatsAppCallsDictionary = {
   riskTitle: "Antes de conectar",
   risk: "Las llamadas por WhatsApp usan un cliente no oficial (WaCalls), que conecta el número como un dispositivo más, y no la API oficial de Meta. WhatsApp puede restringir o bloquear el número, sin aviso. Usa un número dedicado a la atención, nunca el tuyo personal.",
   devices:
-    "WhatsApp acepta hasta cuatro dispositivos vinculados a un número, y las llamadas suenan en todos. Este servicio ocupa uno de esos lugares. Con más de cuatro dispositivos (cuentas con Meta Verified, por ejemplo), las llamadas suenan solo en el teléfono, y este servicio deja de recibirlas.",
+    "WhatsApp decide en qué dispositivos suena la llamada. Con demasiados dispositivos vinculados, suena solo en el teléfono, y este servicio deja de recibirla. Este servicio ocupa un lugar: deja como máximo otros dos dispositivos vinculados al número y haz una llamada de prueba después de conectar.",
   messagesNumber:
     "El número {phone} está conectado para mensajes, en WhatsApp. Si conectas el mismo número aquí, habrá dos dispositivos vinculados al mismo WhatsApp: si el número es bloqueado, los mensajes y las llamadas se detienen juntos.",
   sameNumber:
-    "Este número también está conectado para mensajes. Son dos dispositivos vinculados al mismo WhatsApp. Si el número es bloqueado, los mensajes y las llamadas se detienen juntos. WhatsApp acepta hasta cuatro dispositivos vinculados; con más que eso, las llamadas suenan solo en el teléfono.",
+    "Este número también está conectado para mensajes. Son dos dispositivos vinculados al mismo WhatsApp. Si el número es bloqueado, los mensajes y las llamadas se detienen juntos. Con demasiados dispositivos vinculados, las llamadas suenan solo en el teléfono.",
   connect: "Conectar",
   starting: "Preparando la conexión. El código QR aparece en unos segundos.",
   qrTitle: "Lee el código con el teléfono del número",
