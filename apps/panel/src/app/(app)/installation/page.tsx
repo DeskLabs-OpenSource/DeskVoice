@@ -379,7 +379,18 @@ function LimitsFields({ organization, limits, t, onDone, onCancel }: { organizat
  * Os limites com que uma organização nova nasce (seção 3.5 do desenho do R8, fatia 7d), com os mesmos
  * campos dos limites de uma organização. Valem só para as criadas daqui em diante.
  */
-function DefaultLimitsPanel({ defaults, t, onSaved }: { defaults: DefaultLimits; t: InstallationDictionary["organizations"]; onSaved(message: string): void }) {
+function DefaultLimitsPanel({
+  defaults,
+  organization,
+  t,
+  onSaved,
+}: {
+  defaults: DefaultLimits;
+  /** O resto do padrão (`GET /installation/defaults/organization`, fatia 8a): por ora, o fuso. */
+  organization: OrganizationDefaults;
+  t: InstallationDictionary["organizations"];
+  onSaved(message: string): void;
+}) {
   const save = useInstallationAction();
   const [draft, setDraft] = useState<LimitsDraft>({
     maxTrunks: limitField(defaults.maxTrunks),
@@ -434,7 +445,46 @@ function DefaultLimitsPanel({ defaults, t, onSaved }: { defaults: DefaultLimits;
         </div>
         <ActionStatus action={save} />
       </form>
+      <DefaultTimezoneForm timezone={organization.timezone} t={t} onSaved={onSaved} />
     </Panel>
+  );
+}
+
+/** O padrão das organizações novas além dos limites (`installation/defaults/organization`). */
+interface OrganizationDefaults {
+  /** `null`: sem padrão, a nova nasce em America/Sao_Paulo, como sempre. */
+  timezone: string | null;
+}
+
+/**
+ * O fuso com que uma organização nova nasce (seção 3.5 do desenho do R8, fatia 8a): copiado para a
+ * política de saída dela na criação. Vazio tira o padrão. O servidor confere o nome com o mesmo
+ * validador do fuso da política de saída.
+ */
+function DefaultTimezoneForm({ timezone, t, onSaved }: { timezone: string | null; t: InstallationDictionary["organizations"]; onSaved(message: string): void }) {
+  const save = useInstallationAction();
+  const [draft, setDraft] = useState(timezone ?? "");
+  return (
+    <form
+      className="mt-4 grid gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save.run(async () => {
+          await api("/installation/defaults/organization", { method: "PUT", body: { timezone: draft.trim() === "" ? null : draft.trim() } });
+          onSaved(t.defaultsSaved);
+        });
+      }}
+    >
+      <Field label={t.defaultsTimezone} hint={t.defaultsTimezoneHint}>
+        <TextInput className="max-w-md" mono value={draft} onChange={(event) => setDraft(event.target.value)} />
+      </Field>
+      <div>
+        <Button type="submit" variant="primary" busy={save.busy}>
+          {t.save}
+        </Button>
+      </div>
+      <ActionStatus action={save} />
+    </form>
   );
 }
 
@@ -546,6 +596,7 @@ export default function InstallationOrganizations() {
   const t = useDict(ptBR, en, es).organizations;
   const { data, reload } = useApi<Overview>("/installation/organizations");
   const defaults = useApi<DefaultLimits>("/installation/defaults/limits");
+  const organizationDefaults = useApi<OrganizationDefaults>("/installation/defaults/organization");
   const [inviting, setInviting] = useState<{ id: string; name: string } | null>(null);
   const [created, setCreated] = useState<(Created & { name: string }) | null>(null);
   // A frase do que acabou de acontecer numa organização: a suspensão, a reativação ou os limites salvos.
@@ -607,13 +658,15 @@ export default function InstallationOrganizations() {
           }}
         />
       ) : null}
-      {defaults.data ? (
+      {defaults.data && organizationDefaults.data ? (
         <DefaultLimitsPanel
           defaults={defaults.data}
+          organization={organizationDefaults.data}
           t={t}
           onSaved={(message) => {
             setNotice(message);
             defaults.reload();
+            organizationDefaults.reload();
           }}
         />
       ) : null}

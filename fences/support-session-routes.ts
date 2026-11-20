@@ -52,6 +52,7 @@ export const SUPPORT_SESSION_ROUTES: SupportSessionRoute[] = [
   forbid("installation/organizations/[id]/support", "POST", "uma sessão de suporte não abre outra; a área da instalação age pela conta"),
   forbid("installation/organizations/[id]/limits", "PUT", "muda o limite da organização: ato da conta que administra a instalação, fora da sessão de suporte"),
   forbid("installation/defaults/limits", "PUT", "muda os limites com que nasce toda organização nova: ato da conta que administra a instalação, fora da sessão de suporte"),
+  forbid("installation/defaults/organization", "PUT", "muda o fuso com que nasce toda organização nova: ato da conta que administra a instalação, fora da sessão de suporte"),
   forbid("installation/admins", "POST", "dá o papel da instalação a uma conta: acesso que sobrevive"),
   forbid("installation/admins/[id]", "DELETE", "mexe em quem administra a instalação"),
 
