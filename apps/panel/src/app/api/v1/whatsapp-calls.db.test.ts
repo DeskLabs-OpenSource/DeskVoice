@@ -182,7 +182,7 @@ describe("pairing the number by QR code", () => {
     expect(await withOrg(panel.app, org, (q) => q.one("select wacalls_session_id as id from whatsapp_call_sessions"))).toEqual({ id: sessionOf(org).id });
   });
 
-  it("the owner chooses the agent that answers: the health line turns ok, and nobody again turns it back to a warning", async () => {
+  it("the owner chooses the agent: the health line stays a warning until a WhatsApp call arrives, then turns ok, and nobody again turns it back", async () => {
     const { org, owner } = await upOrg("calls agent");
     await start(owner.cookie);
     wacalls.scan(sessionOf(org), "5531988887777");
@@ -190,7 +190,17 @@ describe("pairing the number by QR code", () => {
     const agentId = await insert(panel.app, org, "insert into agents (organization_id, name, engine) values ($1, 'Recepção', 'simulated') returning id", [org]);
     const chosen = await call(choose, { method: "PATCH", cookie: owner.cookie, body: { agentId } });
     expect(chosen.data).toMatchObject({ status: "connected", agentId });
-    expect(await healthLine(owner.cookie)).toMatchObject({ status: "ok", reason: "whatsapp_calls_connected" });
+    // Pareado e com agente não prova que o WhatsApp entrega a ligação a este aparelho (#489).
+    const unconfirmed = { status: "warn", reason: "whatsapp_calls_unconfirmed", params: { when: NOW.toISOString() } };
+    expect(await healthLine(owner.cookie)).toMatchObject(unconfirmed);
+    const addCall = (channel: string, startedAt: Date): Promise<string> =>
+      insert(panel.app, org, "insert into calls (organization_id, direction, channel, status, started_at) values ($1, 'inbound', $2, 'completed', $3) returning id", [org, channel, startedAt]);
+    // Ligação pela linha telefônica, e ligação pelo WhatsApp de antes da conexão: nenhuma conta.
+    await addCall("phone", NOW);
+    await addCall("whatsapp", new Date(NOW.getTime() - 60_000));
+    expect(await healthLine(owner.cookie)).toMatchObject(unconfirmed);
+    await addCall("whatsapp", NOW);
+    expect(await healthLine(owner.cookie)).toMatchObject({ status: "ok", reason: "whatsapp_calls_connected", params: { when: NOW.toISOString() } });
     expect((await call(choose, { method: "PATCH", cookie: owner.cookie, body: { agentId: null } })).data).toMatchObject({ agentId: null });
     expect(await healthLine(owner.cookie)).toMatchObject({ status: "warn", reason: "whatsapp_calls_no_agent" });
   });

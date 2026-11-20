@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
-import { recordEvent, withOrg, type Clock, type Db } from "@deskvoice/core";
+import { recordEvent, SPEND_CAP_REACHED, spendCapReached, withOrg, type Clock, type Db } from "@deskvoice/core";
 import { WebSocketServer, type WebSocket } from "ws";
 import { engineKeySetting, startCallSession, type CallSession, type CallSessionDeps } from "./call-session";
 import { messageOf, type Logger } from "./log";
@@ -28,7 +28,7 @@ const CLOSE_BAD_REQUEST = 4400;
 const CLOSE_UNAUTHORIZED = 4401;
 const PATHS = new Set(["/voice-ws", "/"]);
 
-export type WebCallRefusalCode = "agent_not_found" | "agent_disabled" | "engine_not_configured" | "engine_not_installed" | "engine_simulated" | "too_many_web_calls";
+export type WebCallRefusalCode = "agent_not_found" | "agent_disabled" | "engine_not_configured" | "engine_not_installed" | "engine_simulated" | "too_many_web_calls" | "spend_cap_reached";
 /**
  * Chamadas pelo navegador ao mesmo tempo, por organização (as que esperam a conexão contam).
  * Cada chamada já tem teto de custo e de duração; sem este, um laço na tela abriria chamadas sem
@@ -270,6 +270,26 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
         return { code: "too_many_web_calls", message: `This organization already has ${MAX_WEB_CALLS_PER_ORGANIZATION} browser calls at the same time. End one of them, or wait a minute, and call again.` };
       }
       const prepared = await withOrg(db, input.organizationId, async (q): Promise<{ callId: string } | { code: WebCallRefusalCode; message: string }> => {
+        // O teto de gasto do mês (fatia 7c), antes do agente. Sem teto, nada é somado. Só esta recusa
+        // vira linha `refused` com `call_refused`, como na operadora e no WhatsApp: o teto é um estado
+        // da organização, que quem administra precisa ver na linha do tempo. As outras recusas daqui
+        // são configuração de quem clicou e ficam só na tela dele. A linha nasce sem telefone e já
+        // encerrada, então não ocupa vaga em teto de simultâneas; a do navegador, reservada acima sem
+        // esperar o banco, é devolvida logo abaixo. A resposta à tela não muda (sem `callId`).
+        const cap = await spendCapReached(q, clock.now());
+        if (cap.reached) {
+          const now = clock.now();
+          // O agente só é lido pela chave estrangeira: o de outra organização ou o apagado fica nulo.
+          const known = await q.one<{ id: string }>("select id from agents where id = $1", [input.agentId]);
+          const refused = await q.one<{ id: string }>(
+            `insert into calls (organization_id, agent_id, direction, channel, status, end_reason, started_at, ended_at)
+             values ($1, $2, 'inbound', 'web', 'refused', $3, $4, $4) returning id`,
+            [input.organizationId, known?.id ?? null, SPEND_CAP_REACHED, now],
+          );
+          if (!refused) throw new Error("Refused web call was not created");
+          await recordEvent(q, refused.id, "call_refused", { reason: SPEND_CAP_REACHED, channel: "web", userId: input.userId, capCents: cap.capCents }, now);
+          return { code: SPEND_CAP_REACHED, message: "This organization reached its monthly spending cap. The installation administration can change the cap." };
+        }
         const agent = await q.one<{ enabled: boolean; engine: string }>("select enabled, engine from agents where id = $1", [input.agentId]);
         if (!agent) return { code: "agent_not_found", message: "This agent does not exist in this organization." };
         if (!agent.enabled) return { code: "agent_disabled", message: "This agent is turned off." };

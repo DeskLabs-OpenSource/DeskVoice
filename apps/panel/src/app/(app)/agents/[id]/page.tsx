@@ -350,7 +350,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             <div className="mt-4">
               <Notice tone="warn">
                 <p>{t.engineNoKey}</p>
-                <Link href="/settings" className="font-bold underline underline-offset-4">
+                <Link href="/settings/ai" className="font-bold underline underline-offset-4">
                   {t.engineKeyLink}
                 </Link>
               </Notice>

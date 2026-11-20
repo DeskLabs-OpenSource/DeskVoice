@@ -316,6 +316,39 @@ describe("endereços liberados por linha", { timeout: 120_000 }, () => {
   });
 });
 
+describe("a linha da organização com lápide (R8, fatia 9b)", { timeout: 120_000 }, () => {
+  it("sai do arquivo no relógio de 5 minutos, sem ninguém salvar nada: o conjunto de linhas mudou, e o relógio aplica de novo", async () => {
+    const keeps = await createOrganization(app, "trunks-deleting-keeps");
+    const leaving = await createOrganization(app, "trunks-deleting");
+    const kept = await createTrunk(app, keeps, { host: "sip.fica.example", username: "conta-fica", password: "s3nha" });
+    const gone = await createTrunk(app, leaving, { host: "sip.sai.example", username: "conta-sai", password: "s3nha" });
+    const ari = fakeAri();
+    const deps = trunksDeps(ari, path.join(scratch, "deleting", "pjsip_trunks.conf"));
+    ari.loadsFile = deps.file;
+    await applyTrunks(deps);
+    expect(await readFile(deps.file, "utf8")).toContain(`[trunk-${gone}]`);
+
+    // Nada mudou: o relógio não aplica.
+    ari.log.length = 0;
+    expect(await refreshAllowed(deps)).toBe(false);
+    expect(ari.log).toEqual([]);
+
+    // A lápide: os endereços das linhas que ficam são os mesmos, só o conjunto de linhas mudou.
+    await withSystem(app, (q) => q.exec("update organizations set suspended_at = now(), suspended_reason = 'teste da lápide', deleting_at = now() where id = $1", [leaving]));
+    expect(await refreshAllowed(deps)).toBe(true);
+    expect(ari.log).toEqual(["reload res_pjsip.so"]);
+    const conf = await readFile(deps.file, "utf8");
+    expect(conf).not.toContain(gone);
+    expect(conf).toContain(`[trunk-${kept}]`);
+
+    // Aplicado, o próximo relógio volta a não aplicar.
+    ari.log.length = 0;
+    expect(await refreshAllowed(deps)).toBe(false);
+    expect(ari.log).toEqual([]);
+    await withSystem(app, (q) => q.exec("delete from organizations where id = $1", [leaving]));
+  });
+});
+
 describe("o filtro de entrada por linha (R14, fatia 2)", { timeout: 120_000 }, () => {
   /** As regras `deny`/`permit` da seção `type=endpoint` de uma linha, como o arquivo gerado as tem. */
   const aclOf = (conf: string, id: string): string[] =>

@@ -1,5 +1,5 @@
 import { recordOrgEvent } from "./events";
-import { recordInstallationEvent } from "./installation";
+import { ORGANIZATION_STATE_LOCK_SQL, SUSPENSION_REASON_MAX, SUSPENSION_REASON_MIN, recordInstallationEvent } from "./installation";
 import { KEEPS_RUNNING_WHEN_SUSPENDED, TASK_CANCELED_BY_SUSPENSION } from "./queue";
 import type { Db, OrgQuery } from "./types";
 import { withOrg, withSystem } from "./with-org";
@@ -24,15 +24,6 @@ export async function organizationSuspended(q: OrgQuery): Promise<boolean> {
   return row?.suspended ?? false;
 }
 
-/** O motivo da suspensão, em caracteres, depois de tirar os espaços das pontas (seção 3.3). */
-export const SUSPENSION_REASON_MIN = 10;
-export const SUSPENSION_REASON_MAX = 500;
-
-// Uma suspensão por vez na instalação: duas ao mesmo tempo, em organizações diferentes, leriam
-// cada uma a outra como ativa e deixariam a instalação sem nenhuma. A trava é da transação e cai
-// no fim dela, com a suspensão já confirmada.
-const SUSPENSION_LOCK_SQL = "select pg_advisory_xact_lock(hashtextextended('deskvoice:organization_suspension', 0))";
-
 // Cancela as tarefas `queued` da organização da transação que a suspensão cancela. `$1` são os
 // tipos que continuam rodando, `$2` o motivo. A RLS prende o `update` à organização de `withOrg`.
 const CANCEL_QUEUED_SQL = "update tasks set status = 'canceled', last_error = $2 where status = 'queued' and not (kind = any($1::text[]))";
@@ -41,7 +32,7 @@ export type SuspendOrganizationResult =
   | { ok: true; canceledTasks: number }
   | { ok: false; reason: "invalid_reason" | "own_organization" | "not_found" | "already_suspended" | "last_active_organization" };
 
-export type ReactivateOrganizationResult = { ok: true; canceledTasks: number } | { ok: false; reason: "not_found" | "not_suspended" };
+export type ReactivateOrganizationResult = { ok: true; canceledTasks: number } | { ok: false; reason: "not_found" | "not_suspended" | "deleting" };
 
 /**
  * Suspende uma organização (seção 3.3 do desenho do R8), numa transação só, por `withOrg` dela:
@@ -67,7 +58,7 @@ export async function suspendOrganization(
   if (reason.length < SUSPENSION_REASON_MIN || reason.length > SUSPENSION_REASON_MAX) return { ok: false, reason: "invalid_reason" };
   if (input.organizationId === input.sessionOrganizationId) return { ok: false, reason: "own_organization" };
   return withOrg(db, input.organizationId, async (q): Promise<SuspendOrganizationResult> => {
-    await q.exec(SUSPENSION_LOCK_SQL);
+    await q.exec(ORGANIZATION_STATE_LOCK_SQL);
     // `no key update`, e não `update`: o evento da instalação (outra conexão, logo abaixo) aponta
     // para esta organização por chave estrangeira e pede `key share` na mesma linha.
     const current = await q.one<{ suspended: boolean }>("select suspended_at is not null as suspended from organizations where id = $1 for no key update", [input.organizationId]);
@@ -98,11 +89,18 @@ export async function suspendOrganization(
  * motivo, cancela as tarefas canceláveis que ficaram `queued` (entraram durante a suspensão), com o
  * mesmo motivo, e grava `organization_reactivated` nas duas auditorias. Nada do que foi cancelado
  * volta: a tarefa `canceled` não é elegível para a fila.
+ *
+ * A organização com lápide (`deleting_at`, fatia 9b) é recusada com `deleting`: não existe desfazer
+ * a exclusão. A trava da linha (`for no key update`) espera o pedido de exclusão que estiver no meio.
  */
 export async function reactivateOrganization(db: Db, input: { organizationId: string; actorAccountId: string }, now: Date): Promise<ReactivateOrganizationResult> {
   return withOrg(db, input.organizationId, async (q): Promise<ReactivateOrganizationResult> => {
-    const current = await q.one<{ suspended: boolean }>("select suspended_at is not null as suspended from organizations where id = $1 for no key update", [input.organizationId]);
+    const current = await q.one<{ suspended: boolean; deleting: boolean }>(
+      "select suspended_at is not null as suspended, deleting_at is not null as deleting from organizations where id = $1 for no key update",
+      [input.organizationId],
+    );
     if (!current) return { ok: false, reason: "not_found" };
+    if (current.deleting) return { ok: false, reason: "deleting" };
     if (!current.suspended) return { ok: false, reason: "not_suspended" };
     // Cancela antes de reativar: entre as duas linhas, a fila ainda vê a organização suspensa.
     const canceledTasks = await q.exec(CANCEL_QUEUED_SQL, [KEEPS_RUNNING_WHEN_SUSPENDED, TASK_CANCELED_BY_SUSPENSION]);

@@ -30,16 +30,36 @@ const setCookie = (name: string, value: string): void => {
   document.cookie = `${name}=${value}; path=/; max-age=${value ? YEAR : 0}; samesite=lax`;
 };
 
+// O menu em grupos (central de configuração, parte 1). O título do grupo é rótulo, e nunca link nem
+// parada de foco: quem navega pelo teclado passa só pelos itens, como antes.
 const NAV = [
-  { href: "/calls", key: "calls", icon: PhoneCall },
-  { href: "/approvals", key: "approvals", icon: SealQuestion },
-  { href: "/follow-ups", key: "followUps", icon: ListChecks },
-  { href: "/agents", key: "agents", icon: Headset },
-  { href: "/line", key: "line", icon: PlugsConnected },
-  { href: "/outbound", key: "outbound", icon: PhoneOutgoing },
-  { href: "/costs", key: "costs", icon: ChartBar },
-  { href: "/team", key: "team", icon: UsersThree },
-  { href: "/settings", key: "settings", icon: GearSix },
+  {
+    key: "attend",
+    items: [
+      { href: "/calls", key: "calls", icon: PhoneCall },
+      { href: "/approvals", key: "approvals", icon: SealQuestion },
+      { href: "/follow-ups", key: "followUps", icon: ListChecks },
+    ],
+  },
+  {
+    key: "build",
+    items: [
+      { href: "/agents", key: "agents", icon: Headset },
+      { href: "/line", key: "line", icon: PlugsConnected },
+      { href: "/outbound", key: "outbound", icon: PhoneOutgoing },
+    ],
+  },
+  {
+    key: "follow",
+    items: [{ href: "/costs", key: "costs", icon: ChartBar }],
+  },
+  {
+    key: "organization",
+    items: [
+      { href: "/team", key: "team", icon: UsersThree },
+      { href: "/settings", key: "settings", icon: GearSix },
+    ],
+  },
 ] as const;
 
 const DOT: Record<HealthStatus, string> = { ok: "bg-ok", warn: "bg-warn", fail: "bg-fail" };
@@ -245,24 +265,40 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
   const waiting = (approvals.data ?? []).filter((approval) => isWaiting(approval, now)).sort((a, b) => a.expiresAt.localeCompare(b.expiresAt));
   const first = waiting[0];
 
+  // Equipe só aparece para quem pode gerir: operador não vê a porta. Um grupo que fica vazio some
+  // inteiro, com o título.
+  const groups = NAV.map((group) => ({ key: group.key, items: group.items.filter((item) => item.key !== "team" || me.role !== "operator") })).filter((group) => group.items.length > 0);
   const nav = (
-    <nav aria-label={t.shell.mainNav} className="flex gap-1 overflow-x-auto lg:grid lg:overflow-visible">
-      {/* Equipe só aparece para quem pode gerir: operador não vê a porta. */}
-      {NAV.filter((item) => item.key !== "team" || me.role !== "operator").map(({ href, key, icon: Icon }) => {
-        const active = pathname === href || pathname.startsWith(`${href}/`);
-        return (
-          <Link
-            key={href}
-            href={href}
-            aria-current={active ? "page" : undefined}
-            className={`flex h-10 shrink-0 items-center gap-2.5 rounded-xs px-3 transition-colors duration-[120ms] ease-out ${active ? "bg-sunken font-bold text-ink" : "text-muted hover:bg-sunken hover:text-ink"}`}
-          >
-            <Icon size={20} weight="duotone" aria-hidden />
-            <span className="whitespace-nowrap">{t.nav[key]}</span>
-            {key === "approvals" && waiting.length > 0 ? <span className="data ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[0.75rem] font-medium text-on-accent">{waiting.length}</span> : null}
-          </Link>
-        );
-      })}
+    <nav aria-label={t.shell.mainNav} className="flex items-center gap-1 overflow-x-auto lg:grid lg:items-stretch lg:gap-3 lg:overflow-visible">
+      {groups.map((group, index) => (
+        // No celular o menu é uma faixa que rola de lado: o título sai e fica uma linha fina entre os
+        // grupos. Na lateral, o título aparece em cima dos itens, menor e apagado.
+        <div
+          key={group.key}
+          role="group"
+          aria-labelledby={`nav-group-${group.key}`}
+          className={`flex shrink-0 items-center gap-1 lg:grid lg:items-stretch ${index > 0 ? "border-l border-line pl-1 lg:border-l-0 lg:pl-0" : ""}`}
+        >
+          <span id={`nav-group-${group.key}`} className="hidden px-3 pb-0.5 text-[0.8rem] text-muted lg:block">
+            {t.navGroups[group.key]}
+          </span>
+          {group.items.map(({ href, key, icon: Icon }) => {
+            const active = pathname === href || pathname.startsWith(`${href}/`);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`flex h-10 shrink-0 items-center gap-2.5 rounded-xs px-3 transition-colors duration-[120ms] ease-out ${active ? "bg-sunken font-bold text-ink" : "text-muted hover:bg-sunken hover:text-ink"}`}
+              >
+                <Icon size={20} weight="duotone" aria-hidden />
+                <span className="whitespace-nowrap">{t.nav[key]}</span>
+                {key === "approvals" && waiting.length > 0 ? <span className="data ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[0.75rem] font-medium text-on-accent">{waiting.length}</span> : null}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 
@@ -303,14 +339,19 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
     <MeContext.Provider value={me}>
     <div className="min-h-dvh lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
       <aside className="hidden border-r border-line bg-surface lg:block">
-        <div className="sticky top-0 flex h-dvh flex-col gap-6 px-3 py-5">
+        {/* z-10: o conteúdo da tela (main.rise) guarda um transform da animação de entrada e, sem
+            isso, seria pintado por cima do popover do sino onde ele passa da lateral. */}
+        <div className="sticky top-0 z-10 flex h-dvh flex-col gap-6 px-3 py-5">
         <div className="flex items-center justify-between pr-1 pl-3">
           <Brand />
           <NotificationBell align="left-0" />
         </div>
         {organizations ? <OrganizationSwitch choices={organizations} /> : null}
-        {nav}
-        <div className="mt-auto grid gap-3">
+        {/* Quando a janela é baixa, só a lista do menu rola: o bloco da conta fica sempre à vista, e o
+            sino fica fora de qualquer contêiner com rolagem, que cortaria o popover dos avisos. A folga
+            de 4 px nas bordas não deixa a rolagem cortar o anel de foco dos itens. */}
+        <div className="-m-1 min-h-0 flex-1 overflow-y-auto p-1">{nav}</div>
+        <div className="grid gap-3">
           <UpdateIndicator />
           <HealthIndicator />
           <div className="border-t border-line pt-3 pl-2">{account}</div>

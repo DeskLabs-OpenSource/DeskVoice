@@ -1,7 +1,21 @@
-import { organizationSuspended, recordEvent, spokenLanguageOf, toE164, withOrg, type Clock, type Db } from "@deskvoice/core";
+import { randomUUID } from "node:crypto";
+import {
+  DEFAULT_SPOKEN_LANGUAGE,
+  organizationGone,
+  organizationSuspended,
+  recordCallToDeletedOrganization,
+  recordEvent,
+  SPEND_CAP_REACHED,
+  spendCapReached,
+  spokenLanguageOf,
+  toE164,
+  withOrg,
+  type Clock,
+  type Db,
+} from "@deskvoice/core";
 import type { PeerConfig } from "werift";
 import { startCallSession, type CallSession, type CallSessionDeps } from "./call-session";
-import { inboundLimitReached, limitNoticedLately } from "./inbound";
+import { inboundLimitReached, limitNoticedLately, SPEND_CAP_NOTICE } from "./inbound";
 import { messageOf, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import type { Schedule } from "./transport";
@@ -214,6 +228,9 @@ interface Live {
  * Organização suspensa, antes de olhar o agente: a chamada nasce recusada (`organization_suspended`)
  * e, pelo mesmo transporte, quem ligou ouve a fala de indisponível e a ligação desliga
  * (`unavailable.ts`). Nenhum motor abre.
+ *
+ * Teto de gasto do mês atingido (fatia 7c), logo depois da suspensão: a mesma recusa, com
+ * `spend_cap_reached`, e um aviso no painel por janela de 10 minutos. Sem teto, nada é somado.
  */
 function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, schedule: Schedule, log: Logger) {
   const { db, clock } = deps;
@@ -279,6 +296,40 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
     }
   }
 
+  /**
+   * A ligação para a sessão de uma organização que não existe mais (fatia 9b2). Nada vai para
+   * `calls` nem `call_events`; a auditoria da instalação registra o fato, sem número nenhum e sem id
+   * do WaCalls. Quem ligou ouve a fala de indisponível no idioma padrão (o agente sumiu junto), e,
+   * depois dela, a sessão é desfeita no WaCalls: ela não tem mais dona.
+   */
+  async function answerDeleted(event: { sessionId: string; id: string }, entry: Live, organizationId: string, session: WacallsSession): Promise<boolean> {
+    await recordCallToDeletedOrganization(db, organizationId, clock.now());
+    // Sem chamada no banco, a referência da ligação (e do dono no WaCalls) é um id novo.
+    const reference = randomUUID();
+    log("info", "WhatsApp call to a deleted organization: playing the unavailable notice", { organizationId, reference });
+    const unpair = async (): Promise<void> => {
+      try {
+        // Nesta ordem: sair com a sessão pareada é o que tira o aparelho do celular.
+        if (isPaired(session)) await wacallsLogoutSession(options, session.id);
+        await wacallsDeleteSession(options, session.id);
+      } catch (error) {
+        log("error", "could not unpair the WhatsApp calls session of a deleted organization", { organizationId, error: messageOf(error) });
+      }
+    };
+    let transport: WhatsAppTransport;
+    try {
+      transport = await answer(event, entry, reference);
+    } catch (error) {
+      log("error", "could not answer a WhatsApp call to a deleted organization to play the unavailable notice", { organizationId, error: messageOf(error) });
+      await unpair();
+      return false;
+    }
+    void playUnavailable(transport, { callId: reference, language: DEFAULT_SPOKEN_LANGUAGE }, log)
+      .finally(unpair)
+      .finally(() => live.delete(event.id));
+    return true;
+  }
+
   /** Resolve `true` quando a conversa começou: dali em diante, quem tira a ligação de `live` é o fim dela. */
   async function take(event: { sessionId: string; id: string; peer: string; peerPhone?: string }, entry: Live): Promise<boolean> {
     const session = (await wacallsListSessions(options)).find((candidate) => candidate.id === event.sessionId);
@@ -294,21 +345,33 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
     const callerPhone = phoneOfJid(event.peer) ?? phoneOfJid(event.peerPhone);
     const from = callerPhone ? toE164(callerPhone) : null;
 
+    // A organização já foi apagada, e a sessão dela ainda tocou (o WaCalls voltou depois de a
+    // exclusão seguir sem ele, ou uma corrida). Antes de qualquer `withOrg`: a chave de `calls` cairia.
+    if (session && (await organizationGone(db, organizationId))) return answerDeleted(event, entry, organizationId, session);
+
     const outcome = await withOrg(db, organizationId, async (q) => {
       const chosen = await q.one<{ agent_id: string | null }>("select agent_id from whatsapp_call_sessions");
       const agentId = chosen?.agent_id ?? null;
-      if (await organizationSuspended(q)) {
+      const suspended = await organizationSuspended(q);
+      const cap = suspended ? null : await spendCapReached(q, clock.now());
+      if (suspended || cap?.reached) {
+        const reason = suspended ? "organization_suspended" : SPEND_CAP_REACHED;
+        const capCents = cap?.reached ? cap.capCents : undefined;
         // O agente só é lido pelo idioma da fala: ligado ou não, não atende.
         const spoken = agentId ? await q.one<{ language: string | null }>("select language from agents where id = $1", [agentId]) : null;
         const call = await q.one<{ id: string }>(
           `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
-           values ($1, $2, 'inbound', 'whatsapp', $3, $4, 'refused', 'organization_suspended', $5, $5) returning id`,
-          [organizationId, agentId, from, to, clock.now()],
+           values ($1, $2, 'inbound', 'whatsapp', $3, $4, 'refused', $6, $5, $5) returning id`,
+          [organizationId, agentId, from, to, clock.now(), reason],
         );
         if (!call) throw new Error("WhatsApp call was not created");
-        await recordEvent(q, call.id, "call_refused", { reason: "organization_suspended", from, to, channel: "whatsapp" }, clock.now());
+        await recordEvent(q, call.id, "call_refused", { reason, from, to, channel: "whatsapp", ...(capCents !== undefined && { capCents }) }, clock.now());
+        // A suspensa não avisa (quem olharia o painel é quem a suspensão tirou dele); o teto avisa uma vez por janela.
+        if (capCents !== undefined && !(await limitNoticedLately(q, clock, SPEND_CAP_REACHED))) {
+          await panelNotice(q, clock, call.id, SPEND_CAP_NOTICE(`${to}, pelo WhatsApp`, capCents));
+        }
         const unavailable: UnavailableJob = { language: spokenLanguageOf(spoken?.language) };
-        return { callId: call.id, agentId, refusal: null, unavailable };
+        return { callId: call.id, agentId, refusal: null, unavailable, unavailableReason: reason };
       }
       const agent = agentId ? await q.one<{ enabled: boolean }>("select enabled from agents where id = $1", [agentId]) : null;
       let refusal: Refusal | null = !agent ? "no_agent" : !agent.enabled ? "agent_disabled" : null;
@@ -329,11 +392,11 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
         await recordEvent(q, call.id, "call_refused", { reason: refusal, from, to, channel: "whatsapp", ...(overLimit && { limit }) }, clock.now());
         if (!(overLimit && (await limitNoticedLately(q, clock)))) await panelNotice(q, clock, call.id, NOTICE[refusal](from ?? "um número que o WhatsApp não informou", to, limit));
       }
-      return { callId: call.id, agentId, refusal, unavailable: null };
+      return { callId: call.id, agentId, refusal, unavailable: null, unavailableReason: null };
     });
     if (outcome.unavailable) {
       const { callId, unavailable } = outcome;
-      log("info", "WhatsApp call refused: the organization is suspended", { callId, language: unavailable.language });
+      log("info", "WhatsApp call refused with the unavailable notice", { callId, reason: outcome.unavailableReason, language: unavailable.language });
       let transport: WhatsAppTransport;
       try {
         transport = await answer(event, entry, callId);

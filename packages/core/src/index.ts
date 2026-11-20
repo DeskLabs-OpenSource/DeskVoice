@@ -34,6 +34,8 @@ export * from "./routing";
 export * from "./secrets";
 export * from "./drop-follow-up";
 export * from "./inbound-filter";
+export * from "./trunk-host";
+export * from "./trunk-overlap";
 export * from "./spoken-language";
 export * from "./suspension";
 export * from "./vocabulary";

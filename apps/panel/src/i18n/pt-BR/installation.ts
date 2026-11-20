@@ -63,6 +63,10 @@ const installation = {
     limitsOutboundHint: "Bloquear não muda a escolha da organização: ela fica guardada e volta a valer quando a saída for desbloqueada.",
     limitsOutboundReturnsOn: "A saída desta organização volta como ela deixou: ligada.",
     limitsOutboundReturnsOff: "A saída desta organização volta como ela deixou: desligada.",
+    limitsSpendCap: "Teto de gasto do mês, em dólares",
+    limitsSpendCapSpent: "Gasto neste mês: {spent}.",
+    limitsSpendCapApprox: "Aproximado: inclui custo estimado e não inclui o que não pôde ser medido. No teto, toda ligação nova é recusada (a que está em andamento continua).",
+    limitsSpendCapInvalid: "O teto de gasto do mês precisa ser um valor em dólares, como 50 ou 49.90, ou ficar vazio.",
     suspendedReason: "Motivo: {reason}",
     suspendTitle: "Suspender a organização {name}?",
     suspendLead: "Enquanto suspensa, {name} não atende (quem liga ouve que o número está indisponível), não faz ligações, e quem é só dela vê apenas o aviso de suspensa, com o motivo. As linhas continuam registradas. A guarda e o apagamento de dados de quem ligou continuam rodando.",
@@ -114,6 +118,9 @@ const installation = {
     engineStates: { own_key: "Com chave própria", no_key: "Sem chave", key_failed: "Chave com falha" },
     queue: "Fila",
     queueCounts: "{late} em atraso, {failed} com falha nas últimas 24 horas",
+    spendCap: "Teto do mês",
+    spendCapOf: "{spent} de {cap}",
+    spendCapNone: "Sem teto",
   },
 
   audit: {
@@ -123,7 +130,7 @@ const installation = {
     more: "Ver mais antigos",
     system: "a instalação",
     gone: "organização excluída",
-    /** `{who}` é o e-mail de quem fez; `{org}`, a organização; `{subject}`, a conta que recebeu ou perdeu a marca. */
+    /** `{who}` é o e-mail de quem fez; `{org}`, a organização; `{subject}`, a conta que recebeu ou perdeu a marca; `{orgId}`, o começo do id da organização que já foi apagada. */
     kinds: {
       installation_admin_granted: "{who} pôs {subject} na administração da instalação.",
       installation_admin_revoked: "{who} tirou {subject} da administração da instalação.",
@@ -133,11 +140,13 @@ const installation = {
       organization_suspended: "{who} suspendeu a organização {org}.",
       organization_reactivated: "{who} reativou a organização {org}.",
       organization_deleted: "{who} excluiu a organização {org}.",
+      call_to_deleted_organization: "Uma ligação pelo WhatsApp chegou para a organização excluída {orgId} e ouviu o aviso de indisponível.",
       organization_limits_changed: "{who} mudou os limites da organização {org}.",
       installation_setting_changed: "{who} mudou uma configuração da instalação.",
       support_access_started: "{who} começou um acesso de suporte em {org}.",
       support_access_ended: "O acesso de suporte de {who} em {org} acabou.",
       update_requested: "{who} pediu a atualização para a versão {target}, a partir de {org}.",
+      trunk_overlap_refused: "{who} tentou salvar em {org} uma linha cuja faixa cruza a de outra organização. A tela pediu confirmação.",
     },
     sources: {
       command: "pelo comando de dentro do servidor",
