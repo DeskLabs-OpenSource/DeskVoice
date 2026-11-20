@@ -360,6 +360,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         </Panel>
 
         <AgentBrains
+          agentId={isNew ? null : id}
           t={t}
           engineLabel={engine?.label ?? draft.engine}
           analysis={draft.analysis}

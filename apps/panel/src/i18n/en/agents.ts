@@ -49,6 +49,8 @@ const agents: AgentsDictionary = {
   readUnmeasuredNoCeiling: "This agent has no cost ceiling: with this model, its calls will not be read.",
   readKeyGone: "The chosen brain ({brain}) has no accepted key. This agent's calls are not read until the key is back or the choice changes; they do not move to the organization's choice or to the engine.",
   readModelGone: "The chosen model ({model}) is no longer in that brain's list. This agent's calls are not read until the choice changes.",
+  readKeyGoneAsk: "The chosen brain ({brain}) has no accepted key. This agent's calls are not read until the key is back or the choice changes; they do not move to the organization's choice or to the engine. Ask an owner or administrator to save the key again or change the choice.",
+  readModelGoneAsk: "The chosen model ({model}) is no longer in that brain's list. This agent's calls are not read until the choice changes. Ask an owner or administrator to change the choice.",
   readInvalid: "The choice saved on this agent is not valid. Its calls are not read until you choose again.",
   readInvalidOption: "Invalid choice",
   liveAnalyst: "Follows the call live: the analyst {name}",

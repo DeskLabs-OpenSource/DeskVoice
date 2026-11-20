@@ -3,6 +3,18 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.41.3] - 2026-11-20
+
+### Alterado
+
+- **O operador vê o nome do cérebro que lê as ligações do agente e os avisos quando a escolha deixa de funcionar** Na tela do agente, quem tem o papel de operador passa a ver o nome do cérebro escolhido para ler as
+  ligações, no lugar do código dele, e os mesmos avisos de quem configura: o cérebro sem chave aceita,
+  o modelo que saiu da lista e o modelo sem preço conhecido. O aviso diz para pedir a um dono ou
+  administrador que mude a escolha. O operador continua sem poder mudá-la, e nada da chave chega à tela
+  dele. Nada a configurar. Crédito: @melgarafael.
+- **O menu lateral do painel separa os itens em grupos** O menu lateral do painel passa a mostrar os itens em quatro grupos com título: Atendimento (Chamadas, Aprovações, Pendências), Montar (Agentes, Linha telefônica, Ligações de saída), Acompanhar (Custos) e Organização (Equipe, Configurações). Os itens, a ordem e os endereços continuam os mesmos, e os favoritos seguem funcionando. No celular, onde o menu é uma faixa que rola de lado, os grupos ficam separados por uma linha fina. O operador continua sem ver Equipe. Nada a fazer ao atualizar. Crédito: @melgarafael.
+- **A tela de inteligência artificial de Configurações passa a morar em /settings/ai** As chaves dos motores, o desfecho, a análise e a transcrição continuam na mesma tela, com os mesmos valores salvos, mas o endereço dela agora é `/settings/ai`. Quem abre `/settings`, por um favorito ou por um link antigo, chega a ela direto, com a mesma query e o mesmo `#`. Os avisos de Chamadas, de "Falar com o agente" e da tela do agente que mandam cadastrar a chave apontam para o endereço novo. É o primeiro passo para Configurações virar uma central de cartões. Crédito: @melgarafael.
+
 ## [0.41.2] - 2026-11-20
 
 ### Alterado
