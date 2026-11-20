@@ -39,7 +39,7 @@ test("com uma organização só, a navegação principal é a de antes, e a áre
 
   // A tela de atualizar continua onde estava enquanto a lista não é explícita.
   await page.goto("/settings/system");
-  await expect(page.getByRole("navigation", { name: settings.sectionsNav }).getByRole("link", { name: settings.sections.system })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: settings.sections.system, exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: installation.menu }).click();
   await expect(page).toHaveURL(/\/installation$/);

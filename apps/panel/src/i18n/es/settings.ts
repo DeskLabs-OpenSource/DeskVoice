@@ -3,7 +3,6 @@ import type { SettingsDictionary } from "../pt-BR/settings";
 const settings: SettingsDictionary = {
   title: "Configuración",
   lead: "Claves y conexiones que usan los agentes. Lo que es secreto queda cifrado en tu servidor y no vuelve a aparecer en pantalla.",
-  sectionsNav: "Secciones de Configuración",
   /** La central de Configuración en `/settings` (parte 3 del diseño de la central de configuración). */
   hub: {
     firstSteps: { title: "Primeros pasos", lead: "Lo que falta antes de la primera llamada. Esta tarjeta desaparece cuando los tres pasos estén hechos." },

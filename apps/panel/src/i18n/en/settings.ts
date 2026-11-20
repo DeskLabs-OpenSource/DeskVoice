@@ -3,7 +3,6 @@ import type { SettingsDictionary } from "../pt-BR/settings";
 const settings: SettingsDictionary = {
   title: "Settings",
   lead: "Keys and connections the agents use. What is secret stays encrypted on your server and is never shown on screen again.",
-  sectionsNav: "Settings sections",
   /** The Settings hub at `/settings` (part 3 of the settings hub design). */
   hub: {
     firstSteps: { title: "First steps", lead: "What is left before the first call. This card goes away once the three steps are done." },

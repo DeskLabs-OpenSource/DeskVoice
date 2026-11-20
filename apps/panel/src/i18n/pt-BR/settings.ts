@@ -1,7 +1,6 @@
 const settings = {
   title: "Configurações",
   lead: "Chaves e conexões que os agentes usam. O que é segredo fica cifrado no seu servidor e não volta a aparecer na tela.",
-  sectionsNav: "Seções de Configurações",
   /** A central de Configurações em `/settings` (parte 3 do desenho da central de configuração). */
   hub: {
     firstSteps: { title: "Primeiros passos", lead: "O que falta antes da primeira ligação. Este cartão some quando os três passos estiverem feitos." },
