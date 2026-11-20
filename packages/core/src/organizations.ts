@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { explicitAdminsTransition, lockInstallationAdmins, markInstallationAdmin, type InstallationPerson } from "./accounts";
 import { ADMINS_EXPLICIT_KEY, FOUNDING_ORGANIZATION_KEY, recordInstallationEvent } from "./installation";
 import { copyDefaultLimits } from "./limits";
-import { defaultTimezone } from "./organization-defaults";
+import { defaultLanguage, defaultTimezone } from "./organization-defaults";
 import { hashToken } from "./password";
 import { ORG_EVENT_KINDS, type Db, type OrgEventKind, type OrgQuery } from "./types";
 import { withOrg, withSystem } from "./with-org";
@@ -74,7 +74,9 @@ export type AddOrganizationResult =
  * Cria uma organização, numa transação só:
  * - a organização, com a política de saída desligada, como toda organização, e com o fuso
  *   `defaults.timezone` COPIADO para `outbound_policy.timezone` (seção 3.5): sem padrão gravado, o
- *   padrão da coluna, como antes. Mudar o padrão depois não mexe nela;
+ *   padrão da coluna, como antes, e com o idioma `defaults.language` COPIADO para
+ *   `organizations.language` (sem padrão, nulo, e os formulários propõem pt-BR). Mudar o padrão
+ *   depois não mexe nela;
  * - a linha de limites dela, com o padrão `defaults.limits` COPIADO (seção 3.5): sem padrão gravado,
  *   nenhum limite e a saída travada. Mudar o padrão depois não mexe nela;
  * - `organization_created` na auditoria da instalação e na da organização;
@@ -98,7 +100,8 @@ export function addOrganization(db: Db, input: AddOrganizationInput, now: Date):
       return { ok: false, reason: "invalid_keep" };
     }
 
-    const created = await q.one<{ id: string }>("insert into organizations (name, created_at) values ($1, $2) returning id", [name, now]);
+    // O idioma `defaults.language` COPIADO; sem padrão, nulo, que é o que a coluna (sem valor padrão) já daria.
+    const created = await q.one<{ id: string }>("insert into organizations (name, created_at, language) values ($1, $2, $3) returning id", [name, now, await defaultLanguage(q)]);
     if (!created) throw new Error("Insert into organizations returned no row");
     const organizationId = created.id;
     const timezone = await defaultTimezone(q);

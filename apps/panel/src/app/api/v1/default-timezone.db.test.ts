@@ -52,7 +52,7 @@ async function scene() {
 describe("the time zone a new organization starts with", () => {
   it("Z1: without a stored default, the new one starts in America/Sao_Paulo, as before, and nothing is stored", async () => {
     const s = await scene();
-    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual({ timezone: null });
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual({ timezone: null, language: null });
     expect(await zoneOf(await s.create())).toBe("America/Sao_Paulo");
     expect(await storedDefault()).toEqual([]);
   });
@@ -61,8 +61,8 @@ describe("the time zone a new organization starts with", () => {
     const s = await scene();
     const foundingBefore = await zoneOf(s.founding);
     const existingBefore = await zoneOf(s.existing);
-    expect(await s.setDefault({ timezone: "Asia/Tokyo" })).toMatchObject({ status: 200, data: { timezone: "Asia/Tokyo" } });
-    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual({ timezone: "Asia/Tokyo" });
+    expect(await s.setDefault({ timezone: "Asia/Tokyo" })).toMatchObject({ status: 200, data: { timezone: "Asia/Tokyo", language: null } });
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual({ timezone: "Asia/Tokyo", language: null });
     const org = await s.create();
     expect(await zoneOf(org)).toBe("Asia/Tokyo");
 
@@ -71,7 +71,7 @@ describe("the time zone a new organization starts with", () => {
     expect(await zoneOf(await s.create())).toBe("Europe/Lisbon");
 
     // Tirar o padrão: a próxima volta a nascer como sempre, e a que já nasceu continua no dela.
-    expect(await s.setDefault({ timezone: null })).toMatchObject({ status: 200, data: { timezone: null } });
+    expect(await s.setDefault({ timezone: null })).toMatchObject({ status: 200, data: { timezone: null, language: null } });
     expect(await zoneOf(await s.create())).toBe("America/Sao_Paulo");
     expect(await zoneOf(org)).toBe("Asia/Tokyo");
     expect(await zoneOf(s.founding)).toBe(foundingBefore);
@@ -80,7 +80,7 @@ describe("the time zone a new organization starts with", () => {
 
   it("Z3: an unknown time zone is refused with 400, as the outbound policy refuses it, and nothing is stored", async () => {
     const s = await scene();
-    for (const body of [{ timezone: "Mars/Olympus_Mons" }, { timezone: "" }, { timezone: "america/sao paulo" }, { timezone: 3 }, {}, { timezone: "Asia/Tokyo", language: "en" }]) {
+    for (const body of [{ timezone: "Mars/Olympus_Mons" }, { timezone: "" }, { timezone: "america/sao paulo" }, { timezone: 3 }, {}, { timezone: "Asia/Tokyo", other: "x" }]) {
       expect(await s.setDefault(body)).toMatchObject({ status: 400, code: "validation_error" });
     }
     expect(await storedDefault()).toEqual([]);
@@ -136,7 +136,7 @@ describe("the time zone a new organization starts with", () => {
   it("a key written by hand with something that is not a known time zone counts as no default", async () => {
     const s = await scene();
     await system("insert into installation_settings (key, value) values ('defaults.timezone', to_jsonb('Mars/Olympus_Mons'::text)) returning key");
-    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual({ timezone: null });
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual({ timezone: null, language: null });
     expect(await zoneOf(await s.create())).toBe("America/Sao_Paulo");
   });
 

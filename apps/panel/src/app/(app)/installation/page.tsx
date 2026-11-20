@@ -14,6 +14,7 @@ import { formatDateTime, formatMoney } from "../../../ui/format";
 import { Badge, Button, EmptyState, Field, Notice, Panel, Select, Skeleton, TextArea, TextInput } from "../../../ui/kit";
 import { bornWithText, type DefaultLimits } from "./born-with";
 import { useInstallationAction, useInstallationErrorText } from "./errors";
+import type { OrganizationLanguage } from "../../../ui/proposed-language";
 import { spendCapField, spendCapValue } from "./spend-cap";
 
 interface Organization {
@@ -386,7 +387,7 @@ function DefaultLimitsPanel({
   onSaved,
 }: {
   defaults: DefaultLimits;
-  /** O resto do padrão (`GET /installation/defaults/organization`, fatia 8a): por ora, o fuso. */
+  /** O resto do padrão (`GET /installation/defaults/organization`, fatia 8a): o fuso e o idioma. */
   organization: OrganizationDefaults;
   t: InstallationDictionary["organizations"];
   onSaved(message: string): void;
@@ -445,7 +446,7 @@ function DefaultLimitsPanel({
         </div>
         <ActionStatus action={save} />
       </form>
-      <DefaultTimezoneForm timezone={organization.timezone} t={t} onSaved={onSaved} />
+      <DefaultOrganizationForm defaults={organization} t={t} onSaved={onSaved} />
     </Panel>
   );
 }
@@ -454,29 +455,45 @@ function DefaultLimitsPanel({
 interface OrganizationDefaults {
   /** `null`: sem padrão, a nova nasce em America/Sao_Paulo, como sempre. */
   timezone: string | null;
+  /** `null`: sem padrão, a nova nasce sem idioma, e o agente novo e o menu novo dela propõem pt-BR. */
+  language: OrganizationLanguage | null;
 }
 
+const ORGANIZATION_LANGUAGES: readonly OrganizationLanguage[] = ["pt-BR", "en", "es"];
+
 /**
- * O fuso com que uma organização nova nasce (seção 3.5 do desenho do R8, fatia 8a): copiado para a
- * política de saída dela na criação. Vazio tira o padrão. O servidor confere o nome com o mesmo
+ * O fuso e o idioma com que uma organização nova nasce (seção 3.5 do desenho do R8, fatia 8a): o fuso
+ * é copiado para a política de saída dela na criação, e o idioma para `organizations.language`, que o
+ * agente novo e o menu novo propõem. Vazio tira o padrão. O servidor confere o fuso com o mesmo
  * validador do fuso da política de saída.
  */
-function DefaultTimezoneForm({ timezone, t, onSaved }: { timezone: string | null; t: InstallationDictionary["organizations"]; onSaved(message: string): void }) {
+function DefaultOrganizationForm({ defaults, t, onSaved }: { defaults: OrganizationDefaults; t: InstallationDictionary["organizations"]; onSaved(message: string): void }) {
   const save = useInstallationAction();
-  const [draft, setDraft] = useState(timezone ?? "");
+  const [timezone, setTimezone] = useState(defaults.timezone ?? "");
+  const [language, setLanguage] = useState<OrganizationLanguage | "">(defaults.language ?? "");
   return (
     <form
       className="mt-4 grid gap-3"
       onSubmit={(event) => {
         event.preventDefault();
         void save.run(async () => {
-          await api("/installation/defaults/organization", { method: "PUT", body: { timezone: draft.trim() === "" ? null : draft.trim() } });
+          await api("/installation/defaults/organization", { method: "PUT", body: { timezone: timezone.trim() === "" ? null : timezone.trim(), language: language === "" ? null : language } });
           onSaved(t.defaultsSaved);
         });
       }}
     >
       <Field label={t.defaultsTimezone} hint={t.defaultsTimezoneHint}>
-        <TextInput className="max-w-md" mono value={draft} onChange={(event) => setDraft(event.target.value)} />
+        <TextInput className="max-w-md" mono value={timezone} onChange={(event) => setTimezone(event.target.value)} />
+      </Field>
+      <Field label={t.defaultsLanguage} hint={t.defaultsLanguageHint}>
+        <Select className="max-w-md" value={language} onChange={(event) => setLanguage(event.target.value as OrganizationLanguage | "")}>
+          <option value="">{t.defaultsLanguageNone}</option>
+          {ORGANIZATION_LANGUAGES.map((each) => (
+            <option key={each} value={each}>
+              {t.defaultsLanguages[each]}
+            </option>
+          ))}
+        </Select>
       </Field>
       <div>
         <Button type="submit" variant="primary" busy={save.busy}>
