@@ -269,7 +269,7 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
   // inteiro, com o título.
   const groups = NAV.map((group) => ({ key: group.key, items: group.items.filter((item) => item.key !== "team" || me.role !== "operator") })).filter((group) => group.items.length > 0);
   const nav = (
-    <nav aria-label={t.shell.mainNav} className="flex items-center gap-1 overflow-x-auto lg:grid lg:items-stretch lg:gap-4 lg:overflow-visible">
+    <nav aria-label={t.shell.mainNav} className="flex items-center gap-1 overflow-x-auto lg:grid lg:items-stretch lg:gap-3 lg:overflow-visible">
       {groups.map((group, index) => (
         // No celular o menu é uma faixa que rola de lado: o título sai e fica uma linha fina entre os
         // grupos. Na lateral, o título aparece em cima dos itens, menor e apagado.
@@ -279,7 +279,7 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
           aria-labelledby={`nav-group-${group.key}`}
           className={`flex shrink-0 items-center gap-1 lg:grid lg:items-stretch ${index > 0 ? "border-l border-line pl-1 lg:border-l-0 lg:pl-0" : ""}`}
         >
-          <span id={`nav-group-${group.key}`} className="hidden px-3 pb-1 text-[0.8rem] text-muted lg:block">
+          <span id={`nav-group-${group.key}`} className="hidden px-3 pb-0.5 text-[0.8rem] text-muted lg:block">
             {t.navGroups[group.key]}
           </span>
           {group.items.map(({ href, key, icon: Icon }) => {
@@ -339,7 +339,8 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
     <MeContext.Provider value={me}>
     <div className="min-h-dvh lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
       <aside className="hidden border-r border-line bg-surface lg:block">
-        <div className="sticky top-0 flex h-dvh flex-col gap-6 px-3 py-5">
+        {/* Rola quando a janela é baixa: com os títulos de grupo, o bloco da conta não cabe sempre em 720 px. */}
+        <div className="sticky top-0 flex h-dvh flex-col gap-6 overflow-y-auto px-3 py-5">
         <div className="flex items-center justify-between pr-1 pl-3">
           <Brand />
           <NotificationBell align="left-0" />
