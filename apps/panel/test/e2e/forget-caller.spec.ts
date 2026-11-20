@@ -92,7 +92,7 @@ test("passo 2: esquecer um número nomeia o número, diz o que fica, apaga as no
   const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: privacy.forgetTitle, exact: true }) });
   // Exportar, esquecer e apagar ficam no Avançado, fechado ao abrir a tela.
   await expect(panel.getByLabel(privacy.forgetPhone)).toBeHidden();
-  await expect(page.getByLabel(privacy.exportPhone)).toBeHidden();
+  await expect(page.locator("section").filter({ has: page.getByRole("heading", { name: privacy.exportTitle, exact: true }) }).getByLabel(privacy.exportPhone)).toBeHidden();
   await page.getByText(settings.advanced, { exact: true }).click();
   // O número inválido é recusado antes de a confirmação abrir.
   await panel.getByLabel(privacy.forgetPhone).fill("999990000");
