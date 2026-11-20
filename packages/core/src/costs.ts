@@ -26,6 +26,11 @@ export interface CostTotal {
  * O custo de um período da organização da transação (seção 3.4 do desenho do R8). Uma soma só, para
  * a tela de Custos (`system/costs`), a visão geral da instalação e o teto do mês: o mesmo número em
  * todo lugar. O dia de cada linha do extrato é o do fuso da organização, não o do servidor.
+ *
+ * O filtro pela data local decide o dia. O intervalo sobre `l.at`, com um dia de folga de cada lado
+ * e fixado em UTC por escrito (nunca o fuso da sessão do Postgres), só corta o que nunca entraria:
+ * qualquer fuso real fica entre −12 h e +14 h. É ele que deixa a soma ler pelo índice
+ * `usage_ledger_org_at_idx` só a fatia do período, e não o extrato inteiro da organização.
  */
 export async function costTotal(q: OrgQuery, range: DayRange): Promise<CostTotal> {
   const row = await q.one<{ microcents: string; unmeasured: number; estimated: number }>(
@@ -33,7 +38,9 @@ export async function costTotal(q: OrgQuery, range: DayRange): Promise<CostTotal
             count(*) filter (where not l.cost_measured)::int as unmeasured,
             count(*) filter (where l.cost_estimated)::int as estimated
        from usage_ledger l cross join ${ORGANIZATION_ZONE} z
-      where (l.at at time zone z.zone)::date between $1::date and $2::date`,
+      where (l.at at time zone z.zone)::date between $1::date and $2::date
+        and l.at >= ($1::date - 1)::timestamp at time zone 'UTC'
+        and l.at < ($2::date + 2)::timestamp at time zone 'UTC'`,
     [range.from, range.to],
   );
   return { microcents: Number(row?.microcents ?? 0), unmeasuredCount: row?.unmeasured ?? 0, estimatedCount: row?.estimated ?? 0 };
