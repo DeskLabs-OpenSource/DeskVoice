@@ -10,6 +10,12 @@ const common = {
     team: "Equipe",
     settings: "Configurações",
   },
+  navGroups: {
+    attend: "Atendimento",
+    build: "Montar",
+    follow: "Acompanhar",
+    organization: "Organização",
+  },
   actions: {
     save: "Salvar",
     saving: "Salvando.",

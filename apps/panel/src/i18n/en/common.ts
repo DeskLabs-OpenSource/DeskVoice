@@ -12,6 +12,12 @@ const common: CommonDictionary = {
     team: "Team",
     settings: "Settings",
   },
+  navGroups: {
+    attend: "Service",
+    build: "Build",
+    follow: "Monitor",
+    organization: "Organization",
+  },
   actions: {
     save: "Save",
     saving: "Saving.",
