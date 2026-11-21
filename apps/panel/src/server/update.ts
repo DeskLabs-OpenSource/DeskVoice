@@ -126,18 +126,20 @@ export function isAgent(request: Request, deps: ServerDeps): boolean {
   return timingSafeEqual(digest(given), digest(deps.agentToken));
 }
 
-const STARTED = "A atualização do DeskVoice começou. O sistema fica fora do ar por alguns minutos, e as chamadas em andamento caem. O resultado aparece em Administrar a instalação → Atualização.";
-const FINISHED: Record<NonNullable<AgentReport["result"]>["outcome"] | "expired" | "superseded", (version: string) => string> = {
+export const STARTED = "A atualização do DeskVoice começou. O sistema fica fora do ar por alguns minutos, e as chamadas em andamento caem. Quem administra a instalação acompanha o resultado em Administrar a instalação → Atualização.";
+export const FINISHED: Record<NonNullable<AgentReport["result"]>["outcome"] | "expired" | "superseded", (version: string) => string> = {
   succeeded: (version) => `A atualização do DeskVoice terminou: o sistema está na versão ${version}.`,
   nothing_to_do: () => "O pedido de atualização terminou sem mudança: o servidor já estava na versão publicada mais recente.",
-  rolled_back: () => "A atualização do DeskVoice não foi aplicada: o sistema segue na versão anterior e está respondendo. O motivo está em Administrar a instalação → Atualização.",
-  failed: () => "A atualização do DeskVoice falhou e o sistema pode não ter voltado inteiro. Veja o que aconteceu em Administrar a instalação → Atualização e confira o servidor.",
-  superseded: () => "O pedido de atualização do DeskVoice não foi executado: saiu uma versão mais nova depois que ele foi feito, e ninguém confirmou essa. Nada foi alterado. Veja as notas em Administrar a instalação → Atualização e peça de novo.",
-  expired: () => "O pedido de atualização do DeskVoice venceu sem resultado. Veja em Administrar a instalação → Atualização o que aconteceu; outro pedido já pode ser feito.",
+  rolled_back: () => "A atualização do DeskVoice não foi aplicada: o sistema segue na versão anterior e está respondendo. Quem administra a instalação vê o motivo em Administrar a instalação → Atualização.",
+  failed: () => "A atualização do DeskVoice falhou e o sistema pode não ter voltado inteiro. Quem administra a instalação vê o que aconteceu em Administrar a instalação → Atualização e confere o servidor.",
+  superseded: () => "O pedido de atualização do DeskVoice não foi executado: saiu uma versão mais nova depois que ele foi feito, e ninguém confirmou essa. Nada foi alterado. Quem administra a instalação vê as notas em Administrar a instalação → Atualização e pode pedir de novo.",
+  expired: () => "O pedido de atualização do DeskVoice venceu sem resultado. Quem administra a instalação vê o que aconteceu em Administrar a instalação → Atualização; outro pedido já pode ser feito.",
 };
 
 interface Notice {
   body: string;
+  /** Só o aviso de atualização tem assunto: é ele que ganha, no sino, o link para quem administra a instalação. */
+  subject?: "installation_update";
 }
 
 const SERVICE_NOTICE: Record<"whatsapp" | "whatsappCalls", Record<(typeof WHATSAPP_SERVICE_STATES)[number], string>> = {
@@ -166,7 +168,7 @@ async function expireStale(q: OrgQuery, now: Date): Promise<Notice[]> {
       where (status = 'requested' and requested_at < $2) or (status = 'running' and accepted_at < $3)`,
     [now, minutesAgo(PICKUP_MINUTES), minutesAgo(RUN_MINUTES)],
   );
-  return expired > 0 ? [{ body: FINISHED.expired("") }] : [];
+  return expired > 0 ? [{ body: FINISHED.expired(""), subject: "installation_update" }] : [];
 }
 
 /** O aviso vai para o painel de toda organização: a atualização derruba o sistema de todas. */
@@ -176,8 +178,11 @@ async function leaveNotices(deps: ServerDeps, notices: Notice[]): Promise<void> 
   const organizations = await withSystem(deps.db, (q) => q.many<{ id: string }>("select id from organizations"));
   for (const { id } of organizations) {
     await withOrg(deps.db, id, async (q) => {
-      for (const { body } of notices) {
-        const row = await q.one<{ id: string }>("insert into notifications (organization_id, channel, body, created_at) values ($1, 'panel', $2, $3) returning id", [id, body, now]);
+      for (const { body, subject } of notices) {
+        const row = await q.one<{ id: string }>(
+          "insert into notifications (organization_id, channel, body, subject, created_at) values ($1, 'panel', $2, $3, $4) returning id",
+          [id, body, subject ?? null, now],
+        );
         if (row) await enqueueTask(q, { kind: "deliver_notification", payload: { notificationId: row.id }, runAt: now });
       }
     });
@@ -238,7 +243,7 @@ export async function agentCheckIn(deps: ServerDeps, report: AgentReport): Promi
           where id = (select id from update_requests where accepted_at is not null and status in ('running', 'expired') order by accepted_at desc limit 1)`,
         [report.result.outcome, now, report.result.toVersion ?? null, report.result.detail, report.result.outputKept ?? false],
       );
-      if (closed > 0) notices.push({ body: FINISHED[report.result.outcome](report.result.toVersion ?? report.version) });
+      if (closed > 0) notices.push({ body: FINISHED[report.result.outcome](report.result.toVersion ?? report.version), subject: "installation_update" });
     }
 
     notices.push(...(await expireStale(q, now)));
@@ -250,9 +255,9 @@ export async function agentCheckIn(deps: ServerDeps, report: AgentReport): Promi
         where status = 'requested' and target_version is distinct from $2 returning status`,
       [now, target],
     );
-    for (const { status } of outdated) notices.push({ body: FINISHED[status]("") });
+    for (const { status } of outdated) notices.push({ body: FINISHED[status](""), subject: "installation_update" });
     const accepted = await q.exec("update update_requests set status = 'running', accepted_at = $1 where status = 'requested'", [now]);
-    if (accepted > 0) notices.push({ body: STARTED });
+    if (accepted > 0) notices.push({ body: STARTED, subject: "installation_update" });
     return { update: accepted > 0, ...wanted, notices };
   });
   // O pedido já foi aceito: um aviso que não entrou não pode custar a resposta ao agente.

@@ -40,6 +40,7 @@ const common = {
     markRead: "Marcar como lido",
     openCall: "Ver a ligação",
     followUpOpen: "Ver a pendência",
+    openUpdate: "Ver a atualização",
     followUpGone: "Pendência apagada pelo prazo de guarda.",
     /** O seletor do topo, só para quem tem vínculo ativo em mais de uma organização. */
     organization: "Organização",

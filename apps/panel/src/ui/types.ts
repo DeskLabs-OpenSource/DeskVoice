@@ -293,6 +293,8 @@ export interface PanelNotification {
   followUpId: string | null;
   followUpTitle: string | null;
   followUpStatus: FollowUpStatus | null;
+  /** Só o aviso de atualização tem assunto; o sino dá a ele o link para quem administra a instalação. */
+  subject: "installation_update" | null;
 }
 
 export type FollowUpStatus = "open" | "done" | "canceled";
