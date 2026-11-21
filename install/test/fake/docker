@@ -29,6 +29,13 @@ case "$args" in
   *" ps "*) answer ps_output; exit 0 ;;
   *" pg_isready "*) exit "$(cat "$FAKE_DIR/pg_isready_exit" 2>/dev/null || echo 0)" ;;
   *"core show uptime"*) echo "System uptime: 3 minutes"; exit 0 ;;
+  # O módulo de NAT do PJSIP, como o Asterisk 20 lista: "Running"; com $FAKE_DIR/asterisk_nat_down,
+  # "Not Running" (o que a imagem fixada mostrava com o modules.conf dela).
+  *"module show like res_pjsip_nat"*)
+    printf '%-30s %-40s %-10s %-11s %s\n' Module Description 'Use Count' Status 'Support Level'
+    if [ -f "$FAKE_DIR/asterisk_nat_down" ]; then st='Not Running'; else st=Running; fi
+    printf '%-30s %-40s %-10s %-11s %s\n' res_pjsip_nat.so 'PJSIP NAT Support' 0 "$st" core
+    echo '1 modules loaded'; exit 0 ;;
   # A sonda da entrada única (painel, voz e a rota do agente, pelo Caddy). Vem antes da conversa do
   # agente porque também cita a rota dele.
   *" exec -T panel node "*"voice-ws"*) if [ -f "$FAKE_DIR/entry_probe" ]; then cat "$FAKE_DIR/entry_probe"; else printf 'panel|200\nvoice|426\nagent|404|0\n'; fi; exit 0 ;;

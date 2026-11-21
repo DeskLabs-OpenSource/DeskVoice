@@ -8,7 +8,7 @@
 #
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
 # Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, painel → banco,
-# login do painel, Asterisk, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
+# login do painel, Asterisk, SIP atrás de NAT, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
 # linha, motor de voz, entrada única, WhatsApp, ligação pelo WhatsApp, portas, disco). O agente de atualização nunca é
 # falha: no máximo, aviso.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -70,6 +70,16 @@ if ! running asterisk; then
   add asterisk "Asterisk" 1 falha "o contêiner do Asterisk não está rodando. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 asterisk"
 elif uptime="$(dc exec -T asterisk asterisk -rx 'core show uptime' 2>/dev/null | head -n 1)" && [ -n "$uptime" ]; then
   add asterisk "Asterisk" 1 ok "$uptime"
+  # ── SIP atrás de NAT: sem o res_pjsip_nat, force_rport e rewrite_contact, que toda linha traz no
+  #    pjsip.conf, não fazem efeito, e o Asterisk sobe "saudável" assim mesmo. Na imagem fixada, com
+  #    o modules.conf dela (autoload de todos os res_pjsip_*), ele ficava sem vaga no teto de módulos
+  #    do pjproject ("Too many modules registered"). Essencial: o install.sh e a volta da atualização
+  #    esperam por ela, e uma imagem que não carrega o módulo não passa calada. ──
+  if dc exec -T asterisk asterisk -rx 'module show like res_pjsip_nat' 2>/dev/null | awk '$1 == "res_pjsip_nat.so" && / Running/ && !/Not Running/ { found = 1 } END { exit !found }'; then
+    add sip_nat "SIP atrás de NAT" 1 ok "o módulo res_pjsip_nat do Asterisk está em execução: force_rport e rewrite_contact valem"
+  else
+    add sip_nat "SIP atrás de NAT" 1 falha "o módulo res_pjsip_nat do Asterisk não está em execução: force_rport e rewrite_contact não valem, e uma linha atrás de NAT liga e fica muda. Rode bash install/install.sh; se continuar: docker compose -f deploy/docker-compose.yml logs asterisk | grep -i 'too many modules'"
+  fi
 else
   add asterisk "Asterisk" 1 falha "o Asterisk está rodando mas não responde a comandos"
 fi

@@ -7,8 +7,8 @@ line() { printf '%s\n' "$out" | grep "$1" | head -n 1; }
 
 # Instalação nova: tudo no ar, linha e motor ainda por configurar.
 out="$(bash "$H" 2>&1)"; equal "instalação nova sem linha nem chave: sai com zero" 0 "$?"
-equal "uma linha por peça (18 peças)" 18 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
-for piece in Painel Banco "Painel → banco" "Login do painel" Asterisk "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
+equal "uma linha por peça (19 peças)" 19 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
+for piece in Painel Banco "Painel → banco" "Login do painel" Asterisk "SIP atrás de NAT" "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
 contains "linha não cadastrada é aviso, não falha" "$(line 'Linha telefônica')" "aviso"
 contains "linha não cadastrada traz o detalhe" "$(line 'Linha telefônica')" "nenhuma linha cadastrada ainda"
 contains "motor sem chave é aviso, não falha" "$(line 'Motor de voz')" "aviso"
@@ -150,7 +150,28 @@ bash "$H" --essential >/dev/null 2>&1; equal "voz sem conversar com o Asterisk: 
 printf 'asterisk|ok|PJSIP 20.20.1\n' > "$FAKE_DIR/voice_health"
 out="$(bash "$H" 2>&1)"; equal "voz conversando com o Asterisk: código 0" 0 "$?"
 contains "voz conversando com o Asterisk: diz ok" "$out" "ok     Controle da telefonia"
+# SIP atrás de NAT: sem o res_pjsip_nat em execução, force_rport e rewrite_contact das linhas não
+# valem, e o Asterisk segue respondendo "ok". É essencial: o install.sh e a volta da atualização
+# esperam por ela. "Not Running" contém "Running": o caso precisa reprovar mesmo assim.
+out="$(bash "$H" 2>&1)"
+contains "módulo de NAT em execução: ok" "$(line 'SIP atrás de NAT')" "ok "
+check "a checagem pergunta ao Asterisk pelo módulo" grep -q "exec -T asterisk asterisk -rx module show like res_pjsip_nat" "$FAKE_DIR/calls.log"
+json="$(bash "$H" --json 2>&1)"
+contains "json: sip_nat ok, essencial" "$json" '{"id":"sip_nat","name":"SIP atrás de NAT","essential":true,"status":"ok",'
+touch "$FAKE_DIR/asterisk_nat_down"
+out="$(bash "$H" 2>&1)"; equal "módulo de NAT parado: código 1" 1 "$?"
+contains "módulo de NAT parado é falha" "$(line 'SIP atrás de NAT')" "falha "
+contains "módulo de NAT parado diz o efeito" "$(line 'SIP atrás de NAT')" "uma linha atrás de NAT liga e fica muda"
+contains "módulo de NAT parado diz o que fazer" "$(line 'SIP atrás de NAT')" "grep -i 'too many modules'"
+contains "módulo de NAT parado: o Asterisk em si segue ok" "$(line 'Asterisk ')" "ok "
+json="$(bash "$H" --json 2>&1)"; equal "json com o módulo de NAT parado: código 1" 1 "$?"
+contains "json: sip_nat falha" "$json" '{"id":"sip_nat","name":"SIP atrás de NAT","essential":true,"status":"falha",'
+contains "json: o código de saída diz 1" "$json" '{"exit_code":1,'
+bash "$H" --essential >/dev/null 2>&1; equal "módulo de NAT parado reprova no modo essencial (provoca a volta da atualização)" 1 "$?"
+rm "$FAKE_DIR/asterisk_nat_down"
 printf '%s\n' postgres panel voice routines caddy > "$FAKE_DIR/running"; bash "$H" >/dev/null 2>&1; equal "Asterisk parado: código 1" 1 "$?"
+contains "Asterisk parado: a linha de NAT não é perguntada" "$(bash "$H" 2>&1)" "Asterisk"
+lacks "Asterisk parado: sem linha de NAT" "$(bash "$H" 2>&1)" "SIP atrás de NAT"
 printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"
 
 # Portas UDP.
@@ -218,7 +239,7 @@ lacks "tudo certo: nenhuma falha" "$out" "falha "
 json="$(bash "$H" --json 2>&1)"
 contains "json: código de saída" "$json" '{"exit_code":0,"checks":['
 contains "json: peça com estado e detalhe" "$json" '{"id":"trunk","name":"Linha telefônica","essential":false,"status":"ok","detail":"registrado"}'
-equal "json: dezoito peças" 18 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
+equal "json: dezenove peças" 19 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
 if command -v python3 >/dev/null 2>&1; then check "json: é JSON válido" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$json"; fi
 printf '%s\n' 'panel|ok|diz "aspas" e \barra' 'trunk|ok|x' 'engine|ok|y' > "$FAKE_DIR/panel_health"
 if command -v python3 >/dev/null 2>&1; then check "json: escapa aspas e barra" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(bash "$H" --json 2>&1)"; fi
