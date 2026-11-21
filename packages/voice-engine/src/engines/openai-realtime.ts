@@ -326,6 +326,8 @@ const engine: VoiceEngine = {
   // projeto regional escolhido pelo operador, o lugar de processamento depende da conta dele.
   // Fonte: developers.openai.com/api/docs/guides/your-data (consultado em 12/11/2026).
   processingLocation: { kind: "undeclared" },
+  // O marco de fim da vez que `callerTurnEnded` emite (veja acima).
+  callerTurnSource: "vad",
   voices: VOICES,
   defaultVoice: DEFAULT_VOICE,
   pricing: {

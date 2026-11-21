@@ -31,6 +31,7 @@ import {
   ledgerOf,
   manualEngine,
   manualTransport,
+  type ManualTransport,
   pricedSimulatedEngine,
   secretKey,
   sessionHarness,
@@ -707,8 +708,8 @@ describe("latência por turno (item 6 da segunda leva Vapi)", { timeout: 120_000
   };
   const latencyOf = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "turn_latency").map((event) => event.payload);
 
-  async function answeredScene(label: string, agent: AgentOptions = { engine: "manual" }, direction: "inbound" | "outbound" = "inbound") {
-    const manual = manualEngine({ keyless: true });
+  async function answeredScene(label: string, agent: AgentOptions = { engine: "manual" }, direction: "inbound" | "outbound" = "inbound", engine: Parameters<typeof manualEngine>[0] = {}) {
+    const manual = manualEngine({ keyless: true, ...engine });
     const made = await scene(label, agent, manual, direction);
     const session = made.start();
     await waitFor(async () => (await kindsOf(app, made.callId)).includes("call_answered"), "the call to be answered");
@@ -849,6 +850,36 @@ describe("latência por turno (item 6 da segunda leva Vapi)", { timeout: 120_000
     expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 0, p50Ms: null, p90Ms: null, maxMs: null, toolTurns: 0, toolP50Ms: null, guardTurns: 1 }]);
     const kinds = await kindsOf(app, callId);
     expect(kinds.indexOf("turn_latency")).toBe(kinds.indexOf("call_ended") - 1);
+  });
+
+  it("D: um turno medido e a despedida (end_call): a despedida não entra em guardTurns", async () => {
+    // O motor declara o marco: com a despedida em `guardActed`, a vez contaria mesmo sem marco aberto.
+    const { callId, manual, session, harness } = await answeredScene("latency-d-farewell", { engine: "manual", tools: ["end_call"] }, "inbound", { callerTurnSource: "vad" });
+    turn(manual, harness.clock, 800);
+    harness.clock.advance(5000);
+    manual.emit("callerTurnEnded", { source: "vad" });
+    manual.emit("toolCall", { id: "t1", name: "end_call", args: { reason: "A cliente se despediu.", farewell: "Até logo!" } });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    // O modelo fala a despedida.
+    harness.clock.advance(400);
+    answer(manual);
+    expect(harness.timers.fire(6000)).toBe(1);
+    expect(await session.done).toMatchObject({ endReason: "end_call" });
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 800, p90Ms: 800, maxMs: 800, toolTurns: 1, toolP50Ms: 400, guardTurns: 0 }]);
+  });
+
+  it("D: um turno medido e o teto de duração: a despedida do teto não entra em guardTurns", async () => {
+    const { callId, manual, session, harness } = await answeredScene("latency-d-ceiling", { engine: "manual", maxCallSeconds: 45 }, "inbound", { callerTurnSource: "vad" });
+    turn(manual, harness.clock, 800);
+    harness.clock.advance(5000);
+    manual.emit("callerTurnEnded", { source: "vad" });
+    expect(harness.timers.fire(45_000)).toBe(1);
+    expect(manual.said).toEqual([expect.stringContaining("tempo máximo")]);
+    harness.clock.advance(300);
+    answer(manual);
+    expect(harness.timers.fire(6000)).toBe(1);
+    expect(await session.done).toMatchObject({ endReason: "max_duration" });
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 800, p90Ms: 800, maxMs: 800, toolTurns: 0, toolP50Ms: null, guardTurns: 0 }]);
   });
 
   it("L4: o say do aviso de gravação (chamada de saída) não fecha turno nenhum", async () => {
@@ -1076,34 +1107,50 @@ describe("guarda contra o silêncio com o motor OpenAI (servidor falso)", { time
     await session.done;
   });
 
+  /** Quem ligou fala e o servidor fecha o item; a transcrição arma a guarda. */
+  const callerSpeaks = async (harness: SessionHarness, item: string): Promise<void> => {
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    fake.send({ type: "input_audio_buffer.speech_stopped" });
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: item });
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: item, delta: "Quero marcar uma consulta" });
+    await waitFor(() => harness.timers.held().includes(AFTER_WORDS_MS), "the guard to arm on the caller words");
+  };
+  /** O servidor responde: o primeiro áudio chega ao transporte. */
+  const serverAnswers = async (transport: ManualTransport): Promise<void> => {
+    const sent = transport.sentBytes;
+    fake.send({ type: "response.created", response: {} });
+    fake.send({ type: "response.output_audio.delta", delta: Buffer.alloc(160, 0xff).toString("base64") });
+    await waitFor(() => transport.sentBytes > sent, "the agent audio");
+    fake.send({ type: "response.done", response: {} });
+  };
+  /**
+   * Um turno de barulho: o servidor vê o início da fala e nunca o fim (sem `speech_stopped`, sem item
+   * fechado). A guarda fecha a vez aos 8 s, e o motor age: manda o `commit` e pede a resposta.
+   * `stoppedAfter`: o servidor manda o `speech_stopped` depois do `commit` manual.
+   */
+  const noiseClosed = async (harness: SessionHarness, stoppedAfter: boolean): Promise<void> => {
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await waitFor(() => harness.timers.held().includes(WITHOUT_WORDS_MS), "the guard to arm on the noise");
+    harness.clock.advance(WITHOUT_WORDS_MS);
+    expect(harness.timers.fire(WITHOUT_WORDS_MS)).toBe(1);
+    await fake.waitFor((message) => message.type === "input_audio_buffer.commit");
+    if (stoppedAfter) fake.send({ type: "input_audio_buffer.speech_stopped" });
+    harness.clock.advance(1000);
+  };
+  const noiseUnanswered = [{ action: "turn_closed", waitedMs: WITHOUT_WORDS_MS, words: false }];
+
   it("L3a: o servidor fecha o item e responde em 3000 ms: a guarda fecha a vez sem o motor agir, e o turno lento entra na conta", async () => {
     const { callId, transport, session, harness } = await openaiCall("latency-openai-slow");
-    /** Quem ligou fala e o servidor fecha o item; a transcrição arma a guarda. */
-    const callerSpeaks = async (item: string): Promise<void> => {
-      fake.send({ type: "input_audio_buffer.speech_started" });
-      fake.send({ type: "input_audio_buffer.speech_stopped" });
-      fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: item });
-      fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: item, delta: "Quero marcar uma consulta" });
-      await waitFor(() => harness.timers.held().includes(AFTER_WORDS_MS), "the guard to arm on the caller words");
-    };
-    /** O servidor responde: o primeiro áudio chega ao transporte. */
-    const serverAnswers = async (): Promise<void> => {
-      const sent = transport.sentBytes;
-      fake.send({ type: "response.created", response: {} });
-      fake.send({ type: "response.output_audio.delta", delta: Buffer.alloc(160, 0xff).toString("base64") });
-      await waitFor(() => transport.sentBytes > sent, "the agent audio");
-      fake.send({ type: "response.done", response: {} });
-    };
-    await callerSpeaks("i1");
+    await callerSpeaks(harness, "i1");
     harness.clock.advance(800);
-    await serverAnswers();
+    await serverAnswers(transport);
     harness.clock.advance(5000);
-    await callerSpeaks("i2");
+    await callerSpeaks(harness, "i2");
     // O servidor está lento: a guarda fecha a vez, e o motor não manda nada (o item já está fechado).
     harness.clock.advance(AFTER_WORDS_MS);
     expect(harness.timers.fire(AFTER_WORDS_MS)).toBe(1);
     harness.clock.advance(3000 - AFTER_WORDS_MS);
-    await serverAnswers();
+    await serverAnswers(transport);
     transport.callerHangup();
     await session.done;
     expect(fake.hasUnread((message) => message.type === "input_audio_buffer.commit")).toBe(false);
@@ -1111,6 +1158,40 @@ describe("guarda contra o silêncio com o motor OpenAI (servidor falso)", { time
     expect(events.filter((event) => event.kind === "caller_unanswered").map((event) => event.payload)).toEqual([{ action: "turn_closed", waitedMs: AFTER_WORDS_MS, words: true }]);
     expect(events.filter((event) => event.kind === "turn_latency").map((event) => event.payload)).toEqual([
       { engine: "openai-realtime", source: "vad", turns: 2, p50Ms: 800, p90Ms: 3000, maxMs: 3000, toolTurns: 0, toolP50Ms: null, guardTurns: 0 },
+    ]);
+  });
+
+  for (const stoppedAfter of [false, true]) {
+    it(`${stoppedAfter ? "A2" : "A1"}: 800 ms e um turno de barulho que a guarda fecha${stoppedAfter ? ", com o speech_stopped depois do commit" : ""}: turns 1 e guardTurns 1`, async () => {
+      const { callId, transport, session, harness } = await openaiCall(`latency-openai-noise-${stoppedAfter ? "a2" : "a1"}`);
+      await callerSpeaks(harness, "i1");
+      harness.clock.advance(800);
+      await serverAnswers(transport);
+      harness.clock.advance(5000);
+      await noiseClosed(harness, stoppedAfter);
+      await serverAnswers(transport);
+      transport.callerHangup();
+      await session.done;
+      const events = await eventsOf(app, callId);
+      expect(events.filter((event) => event.kind === "caller_unanswered").map((event) => event.payload)).toEqual(noiseUnanswered);
+      // O turno de barulho não tem marco antes do `commit`: conta na hora em que o motor agiu, e o
+      // `speech_stopped` que vier depois é o mesmo turno. Com 1 turno medido, os máximos são os dele.
+      expect(events.filter((event) => event.kind === "turn_latency").map((event) => event.payload)).toEqual([
+        { engine: "openai-realtime", source: "vad", turns: 1, p50Ms: 800, p90Ms: 800, maxMs: 800, toolTurns: 0, toolP50Ms: null, guardTurns: 1 },
+      ]);
+    });
+  }
+
+  it("B: a ligação só com barulho grava um turn_latency com turns 0, guardTurns 1 e os máximos null", async () => {
+    const { callId, transport, session, harness } = await openaiCall("latency-openai-noise-only");
+    await noiseClosed(harness, false);
+    await serverAnswers(transport);
+    transport.callerHangup();
+    await session.done;
+    const events = await eventsOf(app, callId);
+    expect(events.filter((event) => event.kind === "caller_unanswered").map((event) => event.payload)).toEqual(noiseUnanswered);
+    expect(events.filter((event) => event.kind === "turn_latency").map((event) => event.payload)).toEqual([
+      { engine: "openai-realtime", source: "vad", turns: 0, p50Ms: null, p90Ms: null, maxMs: null, toolTurns: 0, toolP50Ms: null, guardTurns: 1 },
     ]);
   });
 

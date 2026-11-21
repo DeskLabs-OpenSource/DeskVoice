@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { encryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
-import { createSimulatedEngine, SIMULATED_PREFIX, type SimulatedScript, type VoiceEngine, type VoiceSession, type VoiceSessionConfig, type VoiceSessionEvents } from "@deskvoice/voice-engine";
+import { createSimulatedEngine, SIMULATED_PREFIX, type CallerTurnSource, type SimulatedScript, type VoiceEngine, type VoiceSession, type VoiceSessionConfig, type VoiceSessionEvents } from "@deskvoice/voice-engine";
 import { createOrganization } from "../../../../packages/core/test/helpers";
 import { secretKey, t0 } from "../../../../packages/tools/test/helpers";
 import { createApprovalWaiter, type ApprovalWaiter } from "../approvals";
@@ -318,7 +318,7 @@ export interface ManualEngine {
   emit<K extends keyof VoiceSessionEvents>(event: K, ...args: Parameters<VoiceSessionEvents[K]>): void;
 }
 
-export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean; connectWhen?: Promise<unknown> } = {}): ManualEngine {
+export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean; connectWhen?: Promise<unknown>; callerTurnSource?: CallerTurnSource } = {}): ManualEngine {
   const handlers = new Map<string, Array<(...args: never[]) => void>>();
   const manual: ManualEngine = {
     configs: [],
@@ -340,6 +340,7 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
       processingLocation: { kind: "this-server" },
       keyless: options.keyless ?? false,
       pricing: { centsPerMinute: options.centsPerMinute ?? 100, checkedOn: "2030-05-10", source: "teste" },
+      ...(options.callerTurnSource && { callerTurnSource: options.callerTurnSource }),
       async connect(config, apiKey) {
         manual.configs.push(config);
         manual.keys.push(apiKey);

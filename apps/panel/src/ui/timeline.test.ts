@@ -367,6 +367,9 @@ describe("linha do tempo", () => {
     expect(some).toContain("Resposta do agente (OpenAI Realtime): metade dos turnos em até 0,8 s, o mais lento medido em 3,0 s (2 turnos). 3 turnos sem medida: a guarda contra o silêncio agiu.");
     const one = render({ engine: "gemini-live", source: "transcript", turns: 1, p50Ms: 650, p90Ms: 650, maxMs: 650, toolTurns: 0, toolP50Ms: null, guardTurns: 1 });
     expect(one).toContain(`o mais lento medido em 0,7 s (1 turno). ${ptBR.events.turn_latency.approximate} 1 turno sem medida: a guarda contra o silêncio agiu.`);
+    // Um turno medido e um turno de barulho que a guarda fechou sem marco (o A1 da sessão): "medido" e a contagem.
+    const noisy = render({ engine: "openai-realtime", source: "vad", turns: 1, p50Ms: 800, p90Ms: 800, maxMs: 800, toolTurns: 0, toolP50Ms: null, guardTurns: 1 });
+    expect(noisy).toContain("o mais lento medido em 0,8 s (1 turno). 1 turno sem medida: a guarda contra o silêncio agiu.");
     // Sem turno medido: só a contagem, sem número nem a marca de aproximada.
     const none = render({ engine: "gemini-live", source: "transcript", turns: 0, p50Ms: null, p90Ms: null, maxMs: null, toolTurns: 0, toolP50Ms: null, guardTurns: 2 });
     expect(none).toContain("2 turnos sem medida: a guarda contra o silêncio agiu.");

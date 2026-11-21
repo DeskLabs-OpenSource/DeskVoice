@@ -35,22 +35,43 @@ describe("latência por turno: a conta", () => {
     expect(meter.summary()).toBeNull();
   });
 
+  it("a guarda agiu sem marco aberto: conta 1 na hora com o motor e o source da perna; sem source declarado, não conta; o marco depois não soma", () => {
+    const clock = fakeClock();
+    const meter = createTurnLatencyMeter(clock);
+    // Barulho: o provedor não viu o fim da fala, e a guarda fecha a vez sem marco nenhum.
+    meter.guardActed({ engine: "openai-realtime", source: "vad" });
+    expect(meter.summary()).toMatchObject({ engine: "openai-realtime", source: "vad", turns: 0, guardTurns: 1 });
+    // O `speech_stopped` que chega depois do `commit`, antes da resposta: o mesmo turno.
+    meter.callerTurnEnded("openai-realtime", "vad", false);
+    clock.advance(1000);
+    meter.guardActed({ engine: "openai-realtime", source: "vad" });
+    meter.agentAudioDelivered();
+    expect(meter.summary()).toMatchObject({ turns: 0, guardTurns: 1 });
+
+    // Motor que não declara o marco (o simulado): a vez fechada sem marco não conta.
+    const bare = createTurnLatencyMeter(clock);
+    bare.guardActed({ engine: "simulated", source: undefined });
+    bare.agentAudioDelivered();
+    expect(bare.summary()).toBeNull();
+  });
+
   it("a guarda agiu: o turno sai sem valor e conta uma vez em guardTurns; só com eles, o evento sai com turns 0 e os máximos null", () => {
     const clock = fakeClock();
     const meter = createTurnLatencyMeter(clock);
+    const gemini = { engine: "gemini-live", source: "transcript" } as const;
     meter.callerTurnEnded("gemini-live", "transcript", false);
     clock.advance(2500);
     // Fechamento e pedido para repetir no mesmo turno, com a transcrição atrasada no meio.
-    meter.guardActed();
+    meter.guardActed(gemini);
     meter.callerTurnEnded("gemini-live", "transcript", false);
     clock.advance(4000);
-    meter.guardActed();
+    meter.guardActed(gemini);
     clock.advance(500);
     meter.agentAudioDelivered();
     expect(meter.summary()).toEqual({ engine: "gemini-live", source: "transcript", turns: 0, p50Ms: null, p90Ms: null, maxMs: null, toolTurns: 0, toolP50Ms: null, guardTurns: 1 });
     // Depois da fala do agente, o próximo turno é outro.
     meter.callerTurnEnded("gemini-live", "transcript", false);
-    meter.guardActed();
+    meter.guardActed(gemini);
     meter.agentAudioDelivered();
     meter.callerTurnEnded("gemini-live", "transcript", false);
     clock.advance(600);

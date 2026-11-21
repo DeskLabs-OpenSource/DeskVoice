@@ -11,8 +11,9 @@ import type { CallerTurnSource } from "@deskvoice/voice-engine";
  * Não entram na conta:
  *   - o turno em que a guarda contra o silêncio agiu (o motor fechou a vez à força, ou a guarda pediu
  *     para repetir), que já tem `caller_unanswered`: ele sai sem valor e é contado em `guardTurns`,
- *     uma vez por turno. Quando o motor diz que não agiu (`closeCallerTurn` devolveu `false`: o
- *     provedor já tinha fechado a vez e só está lento), o turno segue e conta normalmente;
+ *     uma vez por turno, haja marco ou não (sem marco, com o motor da perna). Quando o motor diz
+ *     que não agiu (`closeCallerTurn` devolveu `false`: o provedor já tinha fechado a vez e só está
+ *     lento), o turno segue e conta normalmente;
  *   - a fala do próprio sistema (`say`: aviso de gravação, despedida, teto, a fala de uma ferramenta);
  *   - o turno em que uma ferramenta rodou: esse vai em separado, porque mede o webhook e não o motor.
  *
@@ -53,8 +54,13 @@ export interface TurnLatencyMeter {
    * A guarda contra o silêncio agiu: o motor fechou a vez à força, ou a guarda pediu para repetir.
    * Como `notAnswer`, e o turno de quem ligou vai para `guardTurns`, uma vez só, mesmo com o
    * fechamento e o pedido no mesmo turno. Quem chama só chama quando o motor agiu.
+   *
+   * `turn` é o motor da perna em curso e o marco que ele emite (`VoiceEngine.callerTurnSource`). Com
+   * marco aberto, o turno conta com o motor e o `source` do marco. Sem marco (o provedor não viu o fim
+   * da fala, como no barulho), conta na hora com os de `turn`; sem `source` declarado, não conta. O
+   * marco que chegar depois, antes de o agente falar, é o mesmo turno e não soma de novo.
    */
-  guardActed(): void;
+  guardActed(turn: { engine: string; source: CallerTurnSource | undefined }): void;
   /** Quem ligou falou por cima: o marco de antes já não é o fim da vez dele. */
   interrupted(): void;
   /** Um pedaço de áudio do agente foi entregue ao transporte. */
@@ -76,7 +82,8 @@ export function createTurnLatencyMeter(clock: Clock): TurnLatencyMeter {
   let skipNext = false;
   /**
    * A guarda agiu e o agente ainda não falou depois: é o mesmo turno de quem ligou. `counted` diz se
-   * ele já entrou em `guardTurns` (só entra se houve marco, antes ou depois de a guarda agir).
+   * ele já entrou em `guardTurns` (na hora em que a guarda agiu, ou no marco que chegou depois, quando
+   * o motor não declara o `source`).
    */
   let guarded: { counted: boolean } | undefined;
   const samples: Sample[] = [];
@@ -104,9 +111,10 @@ export function createTurnLatencyMeter(clock: Clock): TurnLatencyMeter {
       open = undefined;
       skipNext = true;
     },
-    guardActed() {
+    guardActed(turn) {
       guarded ??= { counted: false };
       if (open) countGuarded(open);
+      else if (turn.source) countGuarded({ engine: turn.engine, source: turn.source });
       open = undefined;
       skipNext = true;
     },

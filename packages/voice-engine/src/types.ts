@@ -371,6 +371,13 @@ export interface VoiceEngine {
   /** Verdadeiro para motores que não precisam de chave (o simulado). */
   keyless?: boolean;
   pricing: EnginePricing;
+  /**
+   * O marco de fim da vez de quem ligou que este motor emite (`callerTurnEnded`): sempre o mesmo por
+   * motor. A sessão usa isto quando a guarda contra o silêncio fecha uma vez que não teve marco (o
+   * provedor não viu o fim da fala): o turno conta em `guardTurns` com este motor e este `source`.
+   * Motor sem a declaração: a vez que a guarda fecha sem marco não conta em lugar nenhum.
+   */
+  callerTurnSource?: CallerTurnSource;
   connect(config: VoiceSessionConfig, apiKey: string, options?: ConnectOptions): Promise<VoiceSession>;
   /**
    * Lê a conversa e diz o desfecho comercial dela, com a confiança e a fala que o sustenta.

@@ -1027,6 +1027,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * motor só começa a emitir no próximo ciclo, e os handlers precisam estar no lugar antes da primeira fala.
    */
   function startLeg(row: AgentRow, legEngine: VoiceEngine, session: VoiceSession, enabled: Map<string, Tool>, analyst?: LegAnalyst): Leg {
+    // O turno que a guarda tira sem marco aberto conta com o motor desta perna e o marco que ele emite.
+    const guardTurn = { engine: legEngine.id, source: legEngine.callerTurnSource };
     const silenceGuard = createSilenceGuard({
       clock,
       schedule,
@@ -1034,11 +1036,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // turno vai para `guardTurns`. Com `false`, o motor não mandou nada (o provedor já tinha fechado
       // a vez, só está lento), e o turno segue aberto, como um turno comum.
       closeCallerTurn: () => {
-        if (session.closeCallerTurn() !== false) latency.guardActed();
+        if (session.closeCallerTurn() !== false) latency.guardActed(guardTurn);
       },
       // `wrapUp` e `finish` param a guarda: depois disso ela não chama nada.
       say: (text) => {
-        latency.guardActed();
+        latency.guardActed(guardTurn);
         session.say(text);
       },
       acted: (report) => {

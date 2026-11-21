@@ -340,6 +340,8 @@ const engine: VoiceEngine = {
   // resposta para quem precisa de região é usar Vertex AI com `europe-west1` e semelhantes.
   // Enquanto não houver declaração, o honesto é dizer que não se sabe.
   processingLocation: { kind: "undeclared" },
+  // O marco de fim da vez que `callerTurnEnded` emite (veja acima).
+  callerTurnSource: "transcript",
   voices: VOICES,
   defaultVoice: DEFAULT_VOICE,
   pricing: {
