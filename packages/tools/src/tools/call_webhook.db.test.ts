@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { encryptSecret } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
@@ -32,7 +33,7 @@ describe("call_webhook", () => {
 
     expect(result).toMatchObject({ ok: true, data: { status: 200, body: '{"status":"enviado"}', truncated: false } });
     expect(net.requests).toEqual([
-      { url: "https://erp.example.com/orders", method: "POST", headers: { authorization: "Bearer erp-token", "content-type": "application/json" }, body: { callId: ctx.callId, pedido: "1234" } },
+      { url: "https://erp.example.com/orders", method: "POST", headers: { authorization: "Bearer erp-token", "content-type": "application/json", "idempotency-key": expect.stringMatching(/^[0-9a-f]{64}$/) }, body: { callId: ctx.callId, pedido: "1234" } },
     ]);
   });
 
@@ -40,7 +41,7 @@ describe("call_webhook", () => {
     const ctx = await fixture("webhook sem token");
     const net = fakeFetch();
     expect((await runTool(tool(net), { name: "abrir_chamado" }, ctx)).ok).toBe(true);
-    expect(net.requests[0]?.headers).toEqual({ "content-type": "application/json" });
+    expect(net.requests[0]?.headers).toEqual({ "content-type": "application/json", "idempotency-key": expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(net.requests[0]?.body).toEqual({ callId: ctx.callId });
   });
 
@@ -98,5 +99,70 @@ describe("call_webhook", () => {
     ctx.advance(60_000);
     expect((await runTool(tool(net), { name: "abrir_chamado" }, ctx)).message).toContain(`limite de ${MAX_CALL_WEBHOOK_PER_CALL} chamadas a call_webhook`);
     expect(net.requests).toHaveLength(MAX_CALL_WEBHOOK_PER_CALL);
+  });
+
+  it("destino que passa do prazo: desfecho desconhecido, não erro, e a frase fica na linha do tempo", async () => {
+    const ctx = await fixture("webhook lento");
+    let calls = 0;
+    // Servidor falso lento: só "responde" quando o prazo aborta o pedido.
+    const slow: typeof fetch = (_input, init) => {
+      calls += 1;
+      return new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)));
+    };
+    const result = await runTool(createCallWebhook({ fetch: slow, lookup: fakeLookup(), timeoutMs: 5, secretKey: () => secretKey }), { name: "abrir_chamado", payload: { assunto: "x" } }, ctx);
+
+    expect(calls).toBe(1);
+    expect(result).toEqual({
+      ok: false,
+      outcome: "unknown",
+      message: 'A integração "abrir_chamado" não respondeu a tempo. Não sei se o pedido foi registrado. NÃO chame de novo sem antes confirmar com a pessoa; diga que vai verificar.',
+    });
+    const last = (await eventsOf(app, ctx.callId)).at(-1);
+    expect(last?.kind).toBe("tool_result");
+    expect(last?.payload).toMatchObject({ name: "call_webhook", ok: false, outcome: "unknown", message: expect.stringContaining("não respondeu a tempo"), spent: true });
+    // Não é a falha genérica: nada de "Não consegui concluir" nem detalhe de erro.
+    expect(last?.payload.error).toBeUndefined();
+  });
+
+  it("falha de rede segue como erro genérico, sem desfecho desconhecido", async () => {
+    const ctx = await fixture("webhook rede");
+    const down: typeof fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const result = await runTool(createCallWebhook({ fetch: down, lookup: fakeLookup(), secretKey: () => secretKey }), { name: "abrir_chamado" }, ctx);
+    expect(result).toEqual({ ok: false, message: expect.stringMatching(/^Não consegui concluir/) });
+    expect((await eventsOf(app, ctx.callId)).at(-1)?.payload).not.toHaveProperty("outcome");
+  });
+
+  it("Idempotency-Key: sha256 de ligação, nome e payload com chaves ordenadas; muda com o argumento e com a ligação", async () => {
+    const ctx = await fixture("webhook chave");
+    const other = await fixture("webhook chave outra");
+    const net = fakeFetch();
+    const keyOf = async (fixtureCtx: typeof ctx, payload: Record<string, unknown>) => {
+      await runTool(tool(net), { name: "abrir_chamado", payload }, fixtureCtx);
+      return net.requests.at(-1)?.headers["idempotency-key"];
+    };
+
+    const first = await keyOf(ctx, { pedido: "1234", cliente: { nome: "Ana", id: 7 } });
+    const expected = createHash("sha256").update(`${ctx.callId}\nabrir_chamado\n{"cliente":{"id":7,"nome":"Ana"},"pedido":"1234"}`).digest("hex");
+    expect(first).toBe(expected);
+    // Mesma chamada de novo: mesma chave.
+    expect(await keyOf(ctx, { pedido: "1234", cliente: { nome: "Ana", id: 7 } })).toBe(first);
+    // Chaves em outra ordem, em todo nível: mesma chave.
+    expect(await keyOf(ctx, { cliente: { id: 7, nome: "Ana" }, pedido: "1234" })).toBe(first);
+    // Argumento diferente: outra chave.
+    expect(await keyOf(ctx, { pedido: "1235", cliente: { nome: "Ana", id: 7 } })).not.toBe(first);
+    // Outra ligação, mesmos dados: outra chave.
+    expect(await keyOf(other, { pedido: "1234", cliente: { nome: "Ana", id: 7 } })).not.toBe(first);
+  });
+
+  it("Idempotency-Key muda com a integração", async () => {
+    const ctx = await fixture("webhook chave nome");
+    const net = fakeFetch();
+    await runTool(tool(net), { name: "abrir_chamado", payload: { a: 1 } }, ctx);
+    await runTool(tool(net), { name: "consultar_pedido", payload: { a: 1 } }, ctx);
+    const [a, b] = net.requests.map((request) => request.headers["idempotency-key"]);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(a).not.toBe(b);
   });
 });
