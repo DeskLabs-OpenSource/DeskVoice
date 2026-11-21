@@ -257,6 +257,32 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     await session.done;
   });
 
+  it("offeredTools do contexto sai do que o motor recebeu no trecho: a agenda marcada mas sem cliente não entra", async () => {
+    let seen: ReadonlySet<string> | undefined;
+    const probe: Tool = {
+      name: "sonda",
+      description: "Lê o contexto (teste).",
+      parameters: { type: "object", properties: {} },
+      inputSchema: z.object({}),
+      run: async (_input, ctx) => {
+        seen = ctx.offeredTools;
+        return { ok: true, message: "ok" };
+      },
+    };
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("offered-tools", { engine: "manual", tools: ["sonda", "agenda_horarios_livres", "create_task", "notify_human", "nao_existe"] }, manual);
+    made.harness.deps.tools.set(probe.name, probe);
+    const session = made.start();
+    await waitFor(() => manual.configs.length === 1, "the engine to connect");
+    expect(made.harness.deps.tools.get("agenda_horarios_livres")?.available).toBe(false);
+    manual.emit("toolCall", { id: "t1", name: "sonda", args: {} });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    expect([...(seen ?? [])].sort()).toEqual(manual.configs[0]?.tools.map((tool) => tool.name).sort());
+    expect([...(seen ?? [])].sort()).toEqual(["create_task", "notify_human", "sonda"]);
+    made.transport.callerHangup();
+    await session.done;
+  });
+
   it("o vocabulário do agente chega ao motor; sem termos, chega a lista vazia", async () => {
     const manual = manualEngine({ keyless: true });
     const made = await scene("engine-vocabulary", { engine: "manual", vocabulary: ["Melgaço", "DeskVoice"] }, manual);
