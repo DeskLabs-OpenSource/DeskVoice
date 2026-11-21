@@ -1,5 +1,5 @@
 import { costTotal, organizationDays, type CostTotal, type DayRange } from "./costs";
-import { recordInstallationEvent } from "./installation";
+import { DEFAULT_LIMITS_KEY, recordInstallationEvent } from "./installation";
 import type { Db, OrgQuery } from "./types";
 import { withOrg, withSystem } from "./with-org";
 
@@ -186,4 +186,83 @@ export async function setOrganizationLimits(db: Db, organizationId: string, patc
     await recordInstallationEvent(q, now, "organization_limits_changed", { actorAccountId, organizationId, payload: { before, after } });
     return { ok: true, limits: { ...current, ...Object.fromEntries(changed.map((field) => [field, patch[field] ?? null])) } };
   });
+}
+
+/**
+ * O padrão de fábrica dos limites de uma organização nova (seção 3.5 do desenho do R8, fatia 7d):
+ * nenhum limite, e a saída travada. Vale enquanto `defaults.limits` não foi gravada.
+ */
+export const FACTORY_DEFAULT_LIMITS: OrganizationLimits = { monthlySpendCapCents: null, maxTrunks: null, maxAgents: null, outboundAllowed: false };
+
+// Uma chave gravada à mão com campo estranho não vira limite: o campo que não passa volta ao de fábrica.
+function readDefaults(value: unknown): OrganizationLimits {
+  const stored = value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const limits = { ...FACTORY_DEFAULT_LIMITS };
+  for (const field of Object.keys(COLUMN_OF) as (keyof typeof COLUMN_OF)[]) {
+    if (Object.hasOwn(stored, field) && isValid(field, stored[field])) Object.assign(limits, { [field]: stored[field] });
+  }
+  return limits;
+}
+
+/**
+ * Os limites com que uma organização nova nasce (`defaults.limits` em `installation_settings`). Sem a
+ * chave, o padrão de fábrica: nenhum limite e a saída travada. `q` tem de ser de `withSystem`.
+ */
+export async function defaultLimits(q: OrgQuery): Promise<OrganizationLimits> {
+  const row = await q.one<{ value: unknown }>("select value from installation_settings where key = $1", [DEFAULT_LIMITS_KEY]);
+  return row ? readDefaults(row.value) : { ...FACTORY_DEFAULT_LIMITS };
+}
+
+/** `defaultLimits` pelo papel de sistema, para a rota da área da instalação, que não abre esse papel. */
+export function readDefaultLimits(db: Db): Promise<OrganizationLimits> {
+  return withSystem(db, (q) => defaultLimits(q));
+}
+
+/** Uma mudança do padrão por vez: duas juntas não gravam um "antes" que já passou. */
+const DEFAULT_LIMITS_LOCK_SQL = "select pg_advisory_xact_lock(hashtextextended('deskvoice:defaults.limits', 0))";
+
+/**
+ * Grava os limites com que uma organização nova nasce, pelo papel de sistema, e
+ * `installation_setting_changed` na auditoria da instalação, na mesma transação, com a chave, o antes e
+ * o depois só dos campos que mudaram e com quem mudou. As regras dos campos são as de
+ * `setOrganizationLimits`. Nada mudou, nada se grava. A chave guarda os quatro campos.
+ *
+ * Vale só para as organizações criadas daqui em diante: `addOrganization` COPIA o padrão para a linha
+ * da organização nova, e mudar o padrão depois não mexe em nenhuma organização que já existe.
+ */
+export async function setDefaultLimits(db: Db, patch: OrganizationLimitsPatch, actorAccountId: string, now: Date): Promise<OrganizationLimits> {
+  const fields = (Object.keys(COLUMN_OF) as (keyof typeof COLUMN_OF)[]).filter((field) => Object.hasOwn(patch, field) && patch[field] !== undefined);
+  for (const field of fields) {
+    if (!isValid(field, patch[field])) throw new Error(`setDefaultLimits: ${field} must be ${field === "outboundAllowed" ? "true or false" : "a non-negative integer or null"}`);
+  }
+  return withSystem(db, async (q) => {
+    await q.exec(DEFAULT_LIMITS_LOCK_SQL);
+    const current = await defaultLimits(q);
+    const changed = fields.filter((field) => current[field] !== patch[field]);
+    if (changed.length === 0) return current;
+    const next: OrganizationLimits = { ...current, ...Object.fromEntries(changed.map((field) => [field, patch[field] ?? null])) };
+    await q.exec(
+      "insert into installation_settings (key, value, updated_at) values ($1, $2, $3) on conflict (key) do update set value = excluded.value, updated_at = excluded.updated_at",
+      [DEFAULT_LIMITS_KEY, next, now],
+    );
+    const before = Object.fromEntries(changed.map((field) => [COLUMN_OF[field], current[field]]));
+    const after = Object.fromEntries(changed.map((field) => [COLUMN_OF[field], next[field]]));
+    await recordInstallationEvent(q, now, "installation_setting_changed", { actorAccountId, payload: { key: DEFAULT_LIMITS_KEY, before, after } });
+    return next;
+  });
+}
+
+/**
+ * Grava a linha de limites da organização que acabou de nascer, com o padrão COPIADO (seção 3.5). Só
+ * `addOrganization` chama, na transação dela: a fundadora, as que já existem, `create-owner` e a
+ * demonstração não passam por aqui e continuam sem linha. `q` tem de ser de `withSystem`.
+ */
+export async function copyDefaultLimits(q: OrgQuery, organizationId: string, now: Date): Promise<OrganizationLimits> {
+  const limits = await defaultLimits(q);
+  await q.exec(
+    `insert into organization_limits (organization_id, updated_at, monthly_spend_cap_cents, max_trunks, max_agents, outbound_allowed)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [organizationId, now, limits.monthlySpendCapCents, limits.maxTrunks, limits.maxAgents, limits.outboundAllowed],
+  );
+  return limits;
 }

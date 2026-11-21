@@ -33,6 +33,8 @@ export type InstallationEventKind = (typeof INSTALLATION_EVENT_KINDS)[number];
 
 /** A organização de quem instalou. Gravada uma vez e nunca mais trocada (seção 3.2). */
 export const FOUNDING_ORGANIZATION_KEY = "installation.founding_organization_id";
+/** Os limites com que uma organização nova nasce (seção 3.5; `defaultLimits` em `limits.ts`). */
+export const DEFAULT_LIMITS_KEY = "defaults.limits";
 /** Quando a lista de quem administra ficou explícita. Nunca volta a ser apagada (seção 3.2). */
 export const ADMINS_EXPLICIT_KEY = "installation.admins_explicit_at";
 

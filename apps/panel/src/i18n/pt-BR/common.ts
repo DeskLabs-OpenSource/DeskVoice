@@ -43,6 +43,8 @@ const common = {
     followUpGone: "Pendência apagada pelo prazo de guarda.",
     /** O seletor do topo, só para quem tem vínculo ativo em mais de uma organização. */
     organization: "Organização",
+    /** No bloco da conta: a tela da própria conta, `/settings/account`. */
+    myAccount: "Minha conta",
   },
   roles: { owner: "Dono", admin: "Administrador", operator: "Operador" },
   health: {
@@ -154,8 +156,8 @@ const common = {
     call_erased: "Esta chamada foi apagada a pedido de quem ligou. Não há o que compartilhar.",
     no_recording: "Esta chamada não tem gravação guardada, então não há link para criar.",
     trunk_has_numbers: "Esta linha ainda tem números ligados a ela. Remova os números antes de remover a linha.",
-    update_in_progress: "Já existe um pedido de atualização em andamento neste servidor. Acompanhe em Configurações → Sistema.",
-    update_unavailable: "Este servidor não roda uma versão publicada, então não atualiza pela tela. Veja em Configurações → Sistema como atualizar pelo terminal.",
+    update_in_progress: "Já existe um pedido de atualização em andamento neste servidor. Acompanhe em Administrar a instalação → Atualização.",
+    update_unavailable: "Este servidor não roda uma versão publicada, então não atualiza pela tela. Veja em Administrar a instalação → Atualização como atualizar pelo terminal.",
     update_target_changed: "O servidor passou a apontar para outra versão depois que esta tela foi aberta. Confira as notas e confirme de novo.",
     update_notes_missing: "As notas desta versão ainda não estão disponíveis. Tente de novo em alguns minutos.",
     unknown_setting: "Esta configuração não existe nesta versão.",
@@ -169,7 +171,7 @@ const common = {
     caller_call_live: "Há uma chamada em andamento com este número. Nada foi apagado. Espere a chamada terminar e tente de novo.",
     daily_cap_reached: "O teto diário de ligações desta linha foi atingido.",
     attempts_exhausted: "O limite de tentativas para esta pessoa foi atingido.",
-    transcription_disabled: "A transcrição da gravação está desligada. Ligue em Configurações → Inteligência artificial.",
+    transcription_disabled: "A transcrição da gravação está desligada. Ligue em Configurações → Desfecho, análise e transcrição.",
     transcription_call_erased: "Esta chamada foi apagada a pedido de quem ligou e não recebe texto novo.",
     transcription_outside_retention: "Esta chamada passou do prazo de guarda da transcrição e não recebe texto novo.",
     transcription_has_text: "Esta chamada já tem transcrição. Atualize a página.",

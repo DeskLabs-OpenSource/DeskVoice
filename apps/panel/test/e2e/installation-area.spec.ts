@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 import common from "../../src/i18n/pt-BR/common";
 import installation from "../../src/i18n/pt-BR/installation";
-import settings from "../../src/i18n/pt-BR/settings";
-import { signIn } from "./session";
+import update from "../../src/i18n/pt-BR/update";
+import { signIn, unique } from "./session";
 
 // A navegação principal de antes da área da instalação (R8, fatia 2), escrita aqui por extenso: um
 // item novo nela reprova este teste, e não passa despercebido por vir da mesma lista do menu.
@@ -37,17 +37,57 @@ test("com uma organização só, a navegação principal é a de antes, e a áre
   }
   await expect(main.getByRole("link", { name: common.navGroups.attend })).toHaveCount(0);
 
-  // A tela de atualizar continua onde estava enquanto a lista não é explícita.
+  // A tela de atualizar mora só na área da instalação, também com a lista implícita (central de
+  // configuração, parte 8): o endereço antigo leva o dono da fundadora até ela, e a Central não tem
+  // mais o cartão "Sistema".
   await page.goto("/settings/system");
-  await expect(page.getByRole("navigation", { name: settings.sectionsNav }).getByRole("link", { name: settings.sections.system })).toBeVisible();
+  await expect(page).toHaveURL(/\/installation\/update$/);
+  await expect(page.getByRole("heading", { name: update.title, exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: installation.sectionsNav }).getByRole("link", { name: installation.sections.update })).toHaveAttribute("aria-current", "page");
+  await page.goto("/settings");
+  await expect(page.locator('[data-card="engines"]')).toBeVisible();
+  await expect(page.locator('[data-card="system"]')).toHaveCount(0);
 
   await page.getByRole("link", { name: installation.menu }).click();
   await expect(page).toHaveURL(/\/installation$/);
   await expect(page.getByRole("heading", { level: 1, name: installation.title })).toBeVisible();
   const sections = page.getByRole("navigation", { name: installation.sectionsNav }).getByRole("link");
-  await expect(sections).toHaveText([installation.sections.organizations, installation.sections.overview, installation.sections.admins, installation.sections.audit]);
+  await expect(sections).toHaveText([installation.sections.organizations, installation.sections.overview, installation.sections.admins, installation.sections.audit, installation.sections.update]);
   await expect(page.getByText(installation.organizations.founding, { exact: true })).toBeVisible();
 
   await sections.filter({ hasText: installation.sections.admins }).click();
   await expect(page.getByText(installation.admins.implicit)).toBeVisible();
+});
+
+// Quem não administra a instalação (aqui, um operador da fundadora com a lista implícita): o endereço
+// antigo da tela de atualizar volta à central, sem cartão "Sistema", a versão aparece sem link, e a
+// área da instalação responde "não encontrado" (central de configuração, parte 8).
+test("quem não administra a instalação não chega à tela de atualizar por nenhum caminho", async ({ page }) => {
+  const id = unique();
+  const email = `operador-${id}@example.test`;
+  const password = `senha de teste ${id}`;
+  await signIn(page);
+  const created = await page.request.post("/api/v1/team/invites", { data: { email, name: `Operador ${id}`, role: "operator" } });
+  expect(created.status(), "the owner could not invite an operator").toBe(200);
+  const token = ((await created.json()) as { data: { link: string } }).data.link.split("/invite/")[1] ?? "";
+  await page.context().clearCookies();
+  const accepted = await page.request.post(`/api/v1/invites/${token}/accept`, { data: { name: `Operador ${id}`, password } });
+  expect(accepted.status(), "the operator could not accept the invite").toBe(200);
+
+  await page.goto("/settings/system");
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.locator('[data-card="engines"]')).toBeVisible();
+  await expect(page.locator('[data-card="system"]')).toHaveCount(0);
+
+  const aside = page.locator("aside");
+  // O indicador mostra a versão em execução, e não é link.
+  const version = aside.getByText(new RegExp(`^${escape(common.shell.versionShort.split("{version}")[0] ?? "")}`));
+  await expect(version).toBeVisible();
+  await expect(aside.getByRole("link").filter({ has: version })).toHaveCount(0);
+  await expect(aside.locator('a[href="/installation/update"], a[href="/settings/system"]')).toHaveCount(0);
+  await expect(aside.getByRole("link", { name: installation.menu })).toHaveCount(0);
+
+  const response = await page.goto("/installation/update");
+  expect(response?.status()).toBe(404);
+  await expect(page.getByRole("heading", { name: update.title, exact: true })).toHaveCount(0);
 });

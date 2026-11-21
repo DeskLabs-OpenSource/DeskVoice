@@ -3,7 +3,6 @@ import type { SettingsDictionary } from "../pt-BR/settings";
 const settings: SettingsDictionary = {
   title: "Settings",
   lead: "Keys and connections the agents use. What is secret stays encrypted on your server and is never shown on screen again.",
-  sectionsNav: "Settings sections",
   /** The Settings hub at `/settings` (part 3 of the settings hub design). */
   hub: {
     firstSteps: { title: "First steps", lead: "What is left before the first call. This card goes away once the three steps are done." },
@@ -19,7 +18,6 @@ const settings: SettingsDictionary = {
       webhooks: { title: "Webhooks", lead: "The only addresses an agent can call during a call." },
       rules: { title: "Call rules", lead: "Simultaneous calls, voicemail and approval requests with no answer." },
       privacy: { title: "Privacy and data", lead: "Recording, retention and what the organization keeps about callers." },
-      system: { title: "System", lead: "The version this server runs and the update." },
     },
     state: { ready: "Ready", missing: "Something missing", off: "Off" },
   },
@@ -37,7 +35,6 @@ const settings: SettingsDictionary = {
     whatsapp: "WhatsApp",
     integrations: "Integrations",
     privacy: "Privacy",
-    system: "System",
     account: "Your account",
   },
   enginesTitle: "Voice engines",

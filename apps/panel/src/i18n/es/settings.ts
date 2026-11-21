@@ -3,7 +3,6 @@ import type { SettingsDictionary } from "../pt-BR/settings";
 const settings: SettingsDictionary = {
   title: "Configuración",
   lead: "Claves y conexiones que usan los agentes. Lo que es secreto queda cifrado en tu servidor y no vuelve a aparecer en pantalla.",
-  sectionsNav: "Secciones de Configuración",
   /** La central de Configuración en `/settings` (parte 3 del diseño de la central de configuración). */
   hub: {
     firstSteps: { title: "Primeros pasos", lead: "Lo que falta antes de la primera llamada. Esta tarjeta desaparece cuando los tres pasos estén hechos." },
@@ -19,7 +18,6 @@ const settings: SettingsDictionary = {
       webhooks: { title: "Webhooks", lead: "Las únicas direcciones que un agente puede llamar durante una llamada." },
       rules: { title: "Reglas de las llamadas", lead: "Llamadas simultáneas, buzón de voz y solicitud de aprobación sin respuesta." },
       privacy: { title: "Privacidad y datos", lead: "Grabación, plazo de conservación y lo que la organización guarda de quien llamó." },
-      system: { title: "Sistema", lead: "La versión que ejecuta este servidor y la actualización." },
     },
     state: { ready: "Listo", missing: "Falta algo", off: "Apagado" },
   },
@@ -37,7 +35,6 @@ const settings: SettingsDictionary = {
     whatsapp: "WhatsApp",
     integrations: "Integraciones",
     privacy: "Privacidad",
-    system: "Sistema",
     account: "Tu cuenta",
   },
   enginesTitle: "Motores de voz",

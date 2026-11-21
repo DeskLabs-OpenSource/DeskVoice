@@ -1,7 +1,6 @@
 const settings = {
   title: "Configurações",
   lead: "Chaves e conexões que os agentes usam. O que é segredo fica cifrado no seu servidor e não volta a aparecer na tela.",
-  sectionsNav: "Seções de Configurações",
   /** A central de Configurações em `/settings` (parte 3 do desenho da central de configuração). */
   hub: {
     firstSteps: { title: "Primeiros passos", lead: "O que falta antes da primeira ligação. Este cartão some quando os três passos estiverem feitos." },
@@ -17,7 +16,6 @@ const settings = {
       webhooks: { title: "Webhooks", lead: "Os únicos endereços que um agente pode chamar durante uma ligação." },
       rules: { title: "Regras das ligações", lead: "Ligações simultâneas, correio de voz e pedido de aprovação sem resposta." },
       privacy: { title: "Privacidade e dados", lead: "Gravação, prazo de guarda e o que a organização guarda de quem ligou." },
-      system: { title: "Sistema", lead: "A versão que este servidor roda e a atualização." },
     },
     state: { ready: "Pronto", missing: "Falta algo", off: "Desligado" },
   },
@@ -36,7 +34,6 @@ const settings = {
     whatsapp: "WhatsApp",
     integrations: "Integrações",
     privacy: "Privacidade",
-    system: "Sistema",
     account: "Sua conta",
   },
   enginesTitle: "Motores de voz",

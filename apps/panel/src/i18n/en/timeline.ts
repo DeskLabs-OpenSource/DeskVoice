@@ -167,6 +167,7 @@ const timeline: TimelineDictionary = {
     },
     engine_failed: "The voice engine failed",
     engine_failed_body: "The caller heard a warning tone and was transferred or disconnected, never left in silence. Check the key and the provider status in Settings → Artificial intelligence.",
+    engine_resumed: "The connection to the voice engine provider was renewed mid-call, without ending the conversation.",
     call_refused: "Call refused",
     voicemail_left: "Message recorded",
     voicemail_none: "Voicemail answered, no message",

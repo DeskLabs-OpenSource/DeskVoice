@@ -12,6 +12,7 @@ import { api, useApi } from "../../../ui/api";
 import { ActionStatus } from "../../../ui/errors";
 import { formatDateTime, formatMoney } from "../../../ui/format";
 import { Badge, Button, EmptyState, Field, Notice, Panel, Select, Skeleton, TextArea, TextInput } from "../../../ui/kit";
+import { bornWithText, type DefaultLimits } from "./born-with";
 import { useInstallationAction, useInstallationErrorText } from "./errors";
 import { spendCapField, spendCapValue } from "./spend-cap";
 
@@ -63,8 +64,21 @@ function People({ title, people, t, children }: { title: string; people: Person[
 }
 
 /** Criar uma organização. Na segunda, a tela diz antes, com os nomes, quem recebe e quem perde a administração. */
-function NewOrganization({ creation, t, onCreated }: { creation: Overview["creation"]; t: InstallationDictionary["organizations"]; onCreated(name: string, created: Created): void }) {
+function NewOrganization({
+  creation,
+  defaults,
+  t,
+  onCreated,
+}: {
+  creation: Overview["creation"];
+  /** O padrão com que ela nasce, mostrado antes de criar. `undefined` enquanto carrega. */
+  defaults: DefaultLimits | undefined;
+  t: InstallationDictionary["organizations"];
+  onCreated(name: string, created: Created): void;
+}) {
   const save = useInstallationAction();
+  const locale = useLocale();
+  const bornWith = defaults ? <p className="text-muted">{bornWithText(defaults, t, (cents) => formatMoney(cents, locale))}</p> : null;
   const [name, setName] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [keep, setKeep] = useState<string[]>([]);
@@ -95,6 +109,7 @@ function NewOrganization({ creation, t, onCreated }: { creation: Overview["creat
         <Field label={t.nameLabel}>
           <TextInput className="max-w-md" maxLength={120} value={name} onChange={(event) => setName(event.target.value)} disabled={confirming} />
         </Field>
+        {bornWith}
         {confirming ? (
           <div className="grid gap-3 rounded-xs border border-warn p-3">
             <p className="font-bold">{t.creating}</p>
@@ -360,6 +375,69 @@ function LimitsFields({ organization, limits, t, onDone, onCancel }: { organizat
   );
 }
 
+/**
+ * Os limites com que uma organização nova nasce (seção 3.5 do desenho do R8, fatia 7d), com os mesmos
+ * campos dos limites de uma organização. Valem só para as criadas daqui em diante.
+ */
+function DefaultLimitsPanel({ defaults, t, onSaved }: { defaults: DefaultLimits; t: InstallationDictionary["organizations"]; onSaved(message: string): void }) {
+  const save = useInstallationAction();
+  const [draft, setDraft] = useState<LimitsDraft>({
+    maxTrunks: limitField(defaults.maxTrunks),
+    maxAgents: limitField(defaults.maxAgents),
+    outboundAllowed: defaults.outboundAllowed,
+    monthlySpendCap: spendCapField(defaults.monthlySpendCapCents),
+  });
+  const [capInvalid, setCapInvalid] = useState(false);
+  const fields = [
+    { key: "maxTrunks", label: t.limitsTrunks },
+    { key: "maxAgents", label: t.limitsAgents },
+  ] as const;
+  return (
+    <Panel title={t.defaultsTitle} description={t.defaultsLead}>
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const cap = spendCapValue(draft.monthlySpendCap);
+          setCapInvalid(!cap.ok);
+          if (!cap.ok) return;
+          void save.run(async () => {
+            await api("/installation/defaults/limits", {
+              method: "PUT",
+              body: { maxTrunks: limitValue(draft.maxTrunks), maxAgents: limitValue(draft.maxAgents), outboundAllowed: draft.outboundAllowed, monthlySpendCapCents: cap.cents },
+            });
+            onSaved(t.defaultsSaved);
+          });
+        }}
+      >
+        <div className="flex flex-wrap gap-4">
+          {fields.map((field) => (
+            <Field key={field.key} label={field.label} hint={t.limitsEmptyHint}>
+              <TextInput className="w-32" type="number" inputMode="numeric" min={0} step={1} value={draft[field.key]} onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })} />
+            </Field>
+          ))}
+          <Field label={t.limitsOutbound} hint={t.defaultsOutboundHint}>
+            <Select value={draft.outboundAllowed ? "decide" : "blocked"} onChange={(event) => setDraft({ ...draft, outboundAllowed: event.target.value === "decide" })}>
+              <option value="decide">{t.limitsOutboundDecide}</option>
+              <option value="blocked">{t.limitsOutboundBlocked}</option>
+            </Select>
+          </Field>
+          <Field label={t.limitsSpendCap} hint={`${t.limitsSpendCapApprox} ${t.limitsEmptyHint}`}>
+            <TextInput className="w-32" mono inputMode="decimal" value={draft.monthlySpendCap} onChange={(event) => setDraft({ ...draft, monthlySpendCap: event.target.value })} />
+          </Field>
+        </div>
+        {capInvalid ? <Notice tone="fail">{t.limitsSpendCapInvalid}</Notice> : null}
+        <div>
+          <Button type="submit" variant="primary" busy={save.busy}>
+            {t.save}
+          </Button>
+        </div>
+        <ActionStatus action={save} />
+      </form>
+    </Panel>
+  );
+}
+
 function Row({
   organization,
   activeCount,
@@ -467,6 +545,7 @@ function Row({
 export default function InstallationOrganizations() {
   const t = useDict(ptBR, en, es).organizations;
   const { data, reload } = useApi<Overview>("/installation/organizations");
+  const defaults = useApi<DefaultLimits>("/installation/defaults/limits");
   const [inviting, setInviting] = useState<{ id: string; name: string } | null>(null);
   const [created, setCreated] = useState<(Created & { name: string }) | null>(null);
   // A frase do que acabou de acontecer numa organização: a suspensão, a reativação ou os limites salvos.
@@ -516,6 +595,7 @@ export default function InstallationOrganizations() {
       {data ? (
         <NewOrganization
           creation={data.creation}
+          defaults={defaults.data}
           t={t}
           onCreated={(name, result) => {
             setCreated({ ...result, name });
@@ -524,6 +604,16 @@ export default function InstallationOrganizations() {
             // A lista de quem administra pode ter ficado explícita: a tela de atualizar muda de lugar, e
             // quem cria pode ter deixado de administrar. O servidor relê a sessão sem perder o convite aberto.
             if (!data.creation.explicit) router.refresh();
+          }}
+        />
+      ) : null}
+      {defaults.data ? (
+        <DefaultLimitsPanel
+          defaults={defaults.data}
+          t={t}
+          onSaved={(message) => {
+            setNotice(message);
+            defaults.reload();
           }}
         />
       ) : null}
