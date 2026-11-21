@@ -142,6 +142,18 @@ describe("safeFetch", () => {
     expect(error).not.toBeInstanceOf(SafeFetchTimeoutError);
     await expect(safeFetch("http://10.0.0.1/x", {}, { fetch: neverFetch, lookup: fakeLookup(), timeoutMs: 1 })).rejects.toThrow(UnsafeDestinationError);
   });
+
+  it("destino recusado pela guarda depois de o prazo esgotar segue recusado, e não vira tempo esgotado", async () => {
+    // Como o undici faz quando o `guardedLookup` recusa na conexão: embrulha em "fetch failed".
+    // A recusa chega só depois do prazo, com o sinal já abortado.
+    const lateRefusal: typeof globalThis.fetch = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      throw new TypeError("fetch failed", { cause: new UnsafeDestinationError("late.example.com resolves to non-public address 10.0.0.1") });
+    };
+    const error = await safeFetch("https://late.example.com/x", {}, { fetch: lateRefusal, lookup: fakeLookup(), timeoutMs: 5 }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UnsafeDestinationError);
+    expect(error).not.toBeInstanceOf(SafeFetchTimeoutError);
+  });
 });
 
 describe("isPublicAddress", () => {
