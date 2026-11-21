@@ -20,4 +20,11 @@ describe("a frase de com o que a organização nova nasce", () => {
       "Ela nasce com: até 2 linhas telefônicas, até 0 agentes, teto de US$ 0.00 por mês, saída a critério dela.",
     );
   });
+
+  it("1 is singular in the three languages", () => {
+    const one = { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: null, outboundAllowed: false };
+    expect(bornWithText(one, ptBR.organizations, money)).toBe("Ela nasce com: até 1 linha telefônica, até 1 agente, sem teto de gasto, saída travada.");
+    expect(bornWithText(one, en.organizations, money)).toBe("It starts with: up to 1 phone line, up to 1 agent, no spending cap, outbound locked.");
+    expect(bornWithText(one, es.organizations, money)).toBe("Nace con: hasta 1 línea telefónica, hasta 1 agente, sin tope de gasto, salida bloqueada.");
+  });
 });

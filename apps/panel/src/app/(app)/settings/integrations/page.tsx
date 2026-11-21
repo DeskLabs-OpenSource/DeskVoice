@@ -25,13 +25,15 @@ interface Hook {
   tokenKept?: boolean;
   /** Como está no campo; vai como número ao salvar. */
   timeoutSeconds: string;
+  /** Recebe o relatório de cada ligação (`events: ["call.report"]`). Desligado de fábrica. */
+  report: boolean;
 }
 
 export default function IntegrationsSettings() {
   const t = useDict(ptBR, en, es);
   const common = useDict(commonPtBR, commonEn, commonEs);
   const canConfigure = useCanConfigure();
-  const webhooks = useApi<Setting<Array<{ name: string; url: string; token: { configured: boolean }; timeoutSeconds?: number }>>>("/settings/webhooks.allowed");
+  const webhooks = useApi<Setting<Array<{ name: string; url: string; token: { configured: boolean }; timeoutSeconds?: number; events?: string[] }>>>("/settings/webhooks.allowed");
   const saveHooks = useAction();
   const [hooks, setHooks] = useState<Hook[]>([]);
   // A remoção espera confirmação: o botão só abre o pedido, nunca remove.
@@ -43,6 +45,7 @@ export default function IntegrationsSettings() {
           url: hook.url,
           tokenKept: hook.token.configured,
           timeoutSeconds: String(hook.timeoutSeconds ?? WEBHOOK_DEFAULT_TIMEOUT_SECONDS),
+          report: hook.events?.includes("call.report") === true,
         })));
   }, [webhooks.data]);
 
@@ -58,7 +61,7 @@ export default function IntegrationsSettings() {
         className="grid gap-4"
         onSubmit={(event) => {
           event.preventDefault();
-          const value = hooks.map((hook) => ({ name: hook.name, url: hook.url, ...(hook.token && { token: hook.token }), timeoutSeconds: Number(hook.timeoutSeconds) }));
+          const value = hooks.map((hook) => ({ name: hook.name, url: hook.url, ...(hook.token && { token: hook.token }), timeoutSeconds: Number(hook.timeoutSeconds), events: hook.report ? ["call.report"] : [] }));
           void saveHooks.run(() => put("webhooks.allowed", value)).then(webhooks.reload);
         }}
       >
@@ -98,6 +101,10 @@ export default function IntegrationsSettings() {
                   <X size={16} weight="bold" aria-hidden />
                 </button>
               </div>
+              <label className="flex items-center gap-2 text-[0.93rem]">
+                <input type="checkbox" checked={hook.report} onChange={(event) => setHook(index, { report: event.target.checked })} />
+                {t.hookReport}
+              </label>
               {removingHook === index ? (
                 <Notice tone="fail">
                   <p>{fill(t.removeHookConfirm, { name: hook.name || hook.url })}</p>
@@ -116,7 +123,7 @@ export default function IntegrationsSettings() {
         </fieldset>
         {canConfigure ? (
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="ghost" icon={<Plus size={18} weight="bold" aria-hidden />} onClick={() => setHooks([...hooks, { name: "", url: "", timeoutSeconds: String(WEBHOOK_DEFAULT_TIMEOUT_SECONDS) }])}>
+            <Button variant="ghost" icon={<Plus size={18} weight="bold" aria-hidden />} onClick={() => setHooks([...hooks, { name: "", url: "", timeoutSeconds: String(WEBHOOK_DEFAULT_TIMEOUT_SECONDS), report: false }])}>
               {t.addHook}
             </Button>
             <Button type="submit" busy={saveHooks.busy}>
