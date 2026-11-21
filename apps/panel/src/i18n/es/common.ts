@@ -169,7 +169,7 @@ const common: CommonDictionary = {
     caller_call_live: "Hay una llamada en curso con este número. No se borró nada. Espere a que la llamada termine e intente de nuevo.",
     daily_cap_reached: "Se alcanzó el tope diario de llamadas de esta línea.",
     attempts_exhausted: "Se alcanzó el límite de intentos para esta persona.",
-    transcription_disabled: "La transcripción de la grabación está apagada. Enciéndala en Configuración → Inteligencia artificial.",
+    transcription_disabled: "La transcripción de la grabación está apagada. Enciéndala en Configuración → Desenlace, análisis y transcripción.",
     transcription_call_erased: "Esta llamada fue borrada a pedido de quien llamó y no recibe texto nuevo.",
     transcription_outside_retention: "Esta llamada superó el plazo de conservación de la transcripción y no recibe texto nuevo.",
     transcription_has_text: "Esta llamada ya tiene transcripción. Actualice la página.",

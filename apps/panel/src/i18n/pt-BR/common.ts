@@ -169,7 +169,7 @@ const common = {
     caller_call_live: "Há uma chamada em andamento com este número. Nada foi apagado. Espere a chamada terminar e tente de novo.",
     daily_cap_reached: "O teto diário de ligações desta linha foi atingido.",
     attempts_exhausted: "O limite de tentativas para esta pessoa foi atingido.",
-    transcription_disabled: "A transcrição da gravação está desligada. Ligue em Configurações → Inteligência artificial.",
+    transcription_disabled: "A transcrição da gravação está desligada. Ligue em Configurações → Desfecho, análise e transcrição.",
     transcription_call_erased: "Esta chamada foi apagada a pedido de quem ligou e não recebe texto novo.",
     transcription_outside_retention: "Esta chamada passou do prazo de guarda da transcrição e não recebe texto novo.",
     transcription_has_text: "Esta chamada já tem transcrição. Atualize a página.",
