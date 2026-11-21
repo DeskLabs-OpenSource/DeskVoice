@@ -189,6 +189,7 @@ const settings: SettingsDictionary = {
   voicemailMaxSecondsHint: "De 5 a 300, contados después del aviso. El valor de fábrica es 60. El mensaje termina 4 segundos después de la última voz.",
   saveVoicemail: "Guardar buzón de voz",
   saveInboundLimit: "Guardar límite",
+  advanced: "Avanzado",
 };
 
 export default settings;

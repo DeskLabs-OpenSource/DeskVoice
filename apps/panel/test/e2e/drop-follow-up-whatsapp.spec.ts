@@ -3,6 +3,7 @@ import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, DROP_FOLLOW_UP
 import { fill } from "../../src/i18n/locales";
 import agents from "../../src/i18n/pt-BR/agents";
 import common from "../../src/i18n/pt-BR/common";
+import settings from "../../src/i18n/pt-BR/settings";
 import { signIn, unique } from "./session";
 
 // "Quando a ligação cai", a opção do WhatsApp para quem ligou (desenho
@@ -43,6 +44,20 @@ test("WhatsApp para quem ligou: desabilitada com o motivo sem o pré-requisito, 
     await page.reload();
     await expect(page.getByText(agents.dropFollowUpNotTrusted)).toBeVisible();
     await expect(page.getByRole("combobox", { name: agents.dropFollowUp }).locator('option[value="whatsapp"]')).toBeDisabled();
+    // O caminho leva a "Confiar no número", que fica no Avançado: o link traz a âncora, e o bloco chega aberto.
+    await expect(page.getByRole("link", { name: agents.dropFollowUpFixLink })).toHaveAttribute("href", "/settings/whatsapp#avancado");
+    await page.getByRole("link", { name: agents.dropFollowUpFixLink }).click();
+    await expect(page).toHaveURL(/\/settings\/whatsapp#avancado$/);
+    await expect(page.getByRole("switch", { name: settings.trustCallerSwitch })).toBeVisible();
+    // A pessoa continua podendo fechar o bloco.
+    await page.locator("#avancado > summary").click();
+    await expect(page.getByRole("switch", { name: settings.trustCallerSwitch })).toBeHidden();
+    // Sem a âncora, a tela abre com o Avançado fechado: o conector externo e a chave não aparecem.
+    await page.goto("/settings/whatsapp");
+    await expect(page.getByRole("heading", { name: settings.whatsappTitle, exact: true })).toBeVisible();
+    await expect(page.getByLabel(settings.url, { exact: true })).toBeHidden();
+    await expect(page.getByRole("switch", { name: settings.trustCallerSwitch })).toBeHidden();
+    await page.goto(`/agents/${agentId}`);
 
     // Com os dois, a opção vale, e o campo do texto aparece com o aviso e o texto padrão como exemplo.
     await putSetting(page, "whatsapp.trust_caller_id", true);
@@ -66,6 +81,7 @@ test("WhatsApp para quem ligou: desabilitada com o motivo sem o pré-requisito, 
     await page.reload();
     await expect(page.getByRole("combobox", { name: agents.dropFollowUp })).toHaveValue("whatsapp");
     await expect(page.getByRole("alert").filter({ hasText: agents.dropFollowUpNotTrusted })).toBeVisible();
+    await expect(page.getByRole("alert").getByRole("link", { name: agents.dropFollowUpFixLink })).toHaveAttribute("href", "/settings/whatsapp#avancado");
   } finally {
     await putSetting(page, "whatsapp.trust_caller_id", null);
     await putSetting(page, "whatsapp.connector", null);

@@ -3,6 +3,13 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.41.4] - 2026-11-21
+
+### Alterado
+
+- **Configurações abre numa central de cartões, com o estado de cada área** Quem abre Configurações agora vê uma central de cartões em vez de cair direto na tela de inteligência artificial. Cada cartão diz em uma frase o que a área faz e abre a tela de sempre: Motores de voz, Cérebros, Voz e Filtro de fala; Analistas e Desfecho, análise e transcrição; WhatsApp e Webhooks; Regras das ligações, Privacidade e dados e Sistema. Alguns cartões mostram o estado da área: Motores de voz diz "Pronto" quando algum motor tem chave; o WhatsApp diz "Pronto" só com o número conectado, "Desligado" sem o serviço e "Falta algo" no resto, e só para quem configura; Webhooks diz "Desligado" sem nenhum endereço. Enquanto falta criar um agente, conectar a linha ou cadastrar a chave de um motor, o cartão "Primeiros passos" aparece no topo, com os mesmos passos da tela de Chamadas, e some quando os três estão feitos. A barra de seções continua no alto, e um favorito antigo para `/settings` abre a central, a um clique da tela de inteligência artificial. Nada a fazer ao atualizar. Crédito: @melgarafael.
+- **Os ajustes técnicos de Configurações ficam num bloco "Avançado", fechado ao abrir a tela** Quatro ajustes técnicos passam para um bloco "Avançado", que começa fechado: o endereço, a chave e o modelo da classificação, na tela de inteligência artificial; o conector externo de WhatsApp e "Confiar no número exibido na ligação", na tela de WhatsApp; e exportar, esquecer e apagar os dados de um número, na tela de Privacidade. Nenhum valor salvo muda, e cada ajuste continua lendo e gravando o mesmo lugar. O aviso da tela do agente que pede para ligar "Confiar no número" agora leva à tela de WhatsApp com o "Avançado" já aberto; o aviso de WhatsApp não conectado continua levando à tela de WhatsApp, onde está a conexão. Crédito: @melgarafael.
+
 ## [0.41.3] - 2026-11-20
 
 ### Alterado
