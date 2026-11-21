@@ -141,7 +141,7 @@ lacks "atualização: voz deixa de publicar porta" "$(cat "$O")" "8091"
 lacks "atualização: VOICE_WEB_PUBLIC_PORT sai" "$(cat "$A")" "VOICE_WEB_PUBLIC_PORT"
 equal "atualização: 1 salto por túnel" 1 "$(env_get "$A" TRUSTED_PROXY_HOPS)"
 
-# ── O Asterisk monta cinco arquivos um a um: a atualização os regrava, e ele precisa passar a usar
+# ── O Asterisk monta seis arquivos um a um: a atualização os regrava, e ele precisa passar a usar
 #    a configuração nova sem derrubar ligação. Com um clone (git de mentira) cuja versão de destino
 #    traz um modelo do Asterisk diferente. ──
 ASTERISK_MODEL="$DESKVOICE_DEPLOY_DIR/asterisk/extensions.conf"; GEN="$DESKVOICE_DEPLOY_DIR/asterisk/generated"
@@ -207,6 +207,39 @@ echo 0 > "$FAKE_DIR/migrate_exit"
 out="$(bash "$KIT/update.sh" --to 0.8.0 --yes 2>&1)"
 equal "mesma configuração: não recarrega" 0 "$(reloads)"
 equal "mesma configuração: não reinicia" 0 "$(restarts)"
+# A lista de módulos só vale na partida: modules.conf mudado reinicia o Asterisk, e não recarrega
+# (não há módulo que o releia). Sem o contêiner preso ao arquivo antigo: o caminho do pendente.
+rm -rf "$FAKE_DIR/asterisk_mounted"
+MODULES_MODEL="$DESKVOICE_DEPLOY_DIR/asterisk/modules.conf"; cp "$MODULES_MODEL" "$FAKE_DIR/git_checkout/main/deploy/asterisk/modules.conf"
+mkdir -p "$FAKE_DIR/git_checkout/v0.9.5/deploy/asterisk"
+cp "$FAKE_DIR/git_checkout/v0.8.0/deploy/asterisk/extensions.conf" "$FAKE_DIR/git_checkout/v0.9.5/deploy/asterisk/"
+{ cat "$MODULES_MODEL"; echo "; modelo da v0.9.5"; } > "$FAKE_DIR/git_checkout/v0.9.5/deploy/asterisk/modules.conf"
+{ echo v0.9.5; cat "$FAKE_DIR/git_tags"; } > "$FAKE_DIR/git_tags.next"; mv "$FAKE_DIR/git_tags.next" "$FAKE_DIR/git_tags"
+inode_before="$(inode "$GEN/modules.conf")"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.5 --yes 2>&1)"; equal "modules.conf mudou: a atualização termina bem" 0 "$?"
+contains "modules.conf mudou: o disco tem o modelo novo" "$(cat "$GEN/modules.conf")" "; modelo da v0.9.5"
+equal "modules.conf mudou: regravado no lugar" "$inode_before" "$(inode "$GEN/modules.conf")"
+equal "modules.conf mudou: reinicia o Asterisk uma vez" 1 "$(restarts)"
+equal "modules.conf mudou: não recarrega" 0 "$(reloads)"
+contains "modules.conf mudou: diz por que reinicia" "$out" "Reiniciando o Asterisk: a lista de módulos do Asterisk só vale na partida"
+refuse "modules.conf mudou: nada fica pendente" test -e "$GEN/.reload-pending"
+cp "$FAKE_DIR/git_checkout/v0.9.5/deploy/asterisk/modules.conf" "$FAKE_DIR/git_checkout/main/deploy/asterisk/modules.conf"
+# O contêiner preso a um modules.conf antigo (o caminho que já existe): reinicia, sem recarregar.
+# (De volta "na 0.8.0", com o mesmo modelo: a versão de destino igual à instalada não faz nada.)
+mkdir -p "$FAKE_DIR/asterisk_mounted"; cp "$GEN"/*.conf "$FAKE_DIR/asterisk_mounted/"; echo "; de antes" >> "$FAKE_DIR/asterisk_mounted/modules.conf"
+env_set "$E" DESKVOICE_VERSION 0.8.0; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.5 --yes 2>&1)"; equal "modules.conf preso ao arquivo antigo: a atualização termina bem" 0 "$?"
+equal "modules.conf preso ao arquivo antigo: reinicia o Asterisk uma vez" 1 "$(restarts)"
+equal "modules.conf preso ao arquivo antigo: não recarrega" 0 "$(reloads)"
+contains "modules.conf preso ao arquivo antigo: diz por quê" "$out" "o contêiner ainda lê a versão antiga de modules.conf"
+# Uma atualização que não muda o modules.conf: nem recarrega nem reinicia (o modules.conf não
+# reinicia toda atualização).
+env_set "$E" DESKVOICE_VERSION 0.8.0; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.5 --yes 2>&1)"; equal "mesmo modules.conf: a atualização termina bem" 0 "$?"
+contains "mesmo modules.conf: a atualização foi feita" "$out" "0.9.5"
+equal "mesmo modules.conf: não reinicia" 0 "$(restarts)"
+equal "mesmo modules.conf: não recarrega" 0 "$(reloads)"
+env_set "$E" DESKVOICE_VERSION 0.8.0
 # ── Imagens de terceiros: sai a que o Compose da versão de onde se saiu fixava por resumo e o da nova
 #    não fixa mais (issue #163). Só a referência exata; a de outro sistema e a que segue fixada ficam. ──
 pins() { sed -nE 's/^[[:space:]]*image:[[:space:]]*(\$\{[A-Z_]+:-)?([^}[:space:]]+@sha256:[0-9a-f]{64})\}?[[:space:]]*$/\2/p' "$DESKVOICE_DEPLOY_DIR/docker-compose.yml"; }

@@ -1,0 +1,7 @@
+---
+impact: nothing_changes
+section: fixed
+title: O ajuste de NAT das linhas passa a valer, e a checagem de saúde reprova quando um módulo SIP não carrega
+---
+
+Na imagem do Asterisk que o DeskVoice usa, com todos os módulos SIP dela ligados, o limite de módulos do PJSIP estourava na partida ("Too many modules registered") e o último módulo SIP a carregar ficava parado. Qual depende da máquina: numa delas era o `res_pjsip_nat`, e o `force_rport` e o `rewrite_contact` de toda linha não faziam efeito, e uma linha atrás de NAT ligava e ficava muda. O DeskVoice agora traz o próprio `modules.conf`, igual ao da imagem, mas sem três módulos SIP que ele não usa e que ocupam vaga nesse limite (SIP por WebSocket, mensagem de texto por SIP e o histórico de pacotes), e o `bash install/healthcheck.sh` ganha a linha essencial "Módulos SIP", que reprova se qualquer módulo SIP estiver parado ou se o log da partida tiver o estouro. A atualização reinicia o Asterisk **uma vez**, porque a montagem nova recria o contêiner, e as ligações em andamento nesse momento caem: vale atualizar fora do horário de ligações. Depois dela, uma linha atrás de NAT que "ligava e ficava muda" pode passar a ter áudio, sem nada a fazer. Quem troca a imagem por `ASTERISK_IMAGE`: se a imagem escolhida não carregar algum módulo SIP, a checagem de saúde reprova e a atualização volta para a versão anterior, e a linha "Módulos SIP" diz qual módulo falta. Crédito: @melgarafael.
