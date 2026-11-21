@@ -11,6 +11,7 @@ import {
   transcriptionEnabledOf,
 } from "@deskvoice/voice-engine";
 import type { Routine } from "../types";
+import { enqueueCallReports } from "./deliver_webhook";
 import { hasSpeech } from "./transcribe_call";
 
 export interface CallDigest {
@@ -146,7 +147,9 @@ const routine: Routine = {
       // pronto. As duas desligadas (de fábrica), nem entra na fila.
       const outcomeOn = outcomeEnabledOf(valueOf(OUTCOME_SETTING));
       const analysisOn = analysisEnabledOf(valueOf(ANALYSIS_SETTING));
+      // O relatório aos webhooks que o pedem sai depois da leitura; sem leitura, sai daqui.
       if (outcomeOn || analysisOn) await enqueueTask(q, { kind: "classify_call_outcome", payload: {}, callId });
+      else await enqueueCallReports(q, callId, deps.clock.now());
     });
   },
 };

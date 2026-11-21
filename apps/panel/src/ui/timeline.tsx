@@ -542,6 +542,26 @@ export function Timeline({
         const failed = p.outcome === "failed" || text(p.error) !== "";
         return { ...base, tone: failed ? "fail" : "ok", icon: failed ? XCircle : CheckCircle, body: <Quiet>{failed ? e.task_failed : e.task_finished}{text(p.kind) ? `: ${t.names[text(p.kind)] ?? text(p.kind)}` : ""}</Quiet> };
       }
+      case "webhook_delivered":
+        return { ...base, tone: "ok", icon: CheckCircle, body: <Quiet>{fill(e.webhook_delivered, { name: text(p.name), status: String(p.status) })}</Quiet> };
+      case "webhook_failed": {
+        // O relatório da ligação (fatia 4 da pesquisa Vapi): o motivo no vocabulário fechado, e se a fila tenta de novo.
+        const code = text(p.reason);
+        const known = Object.hasOwn(e.webhook_failed_reasons, code) ? e.webhook_failed_reasons[code] : undefined;
+        const attempt = { attempt: String(p.attempt) };
+        const next = code === "not_registered" || code === "erased" ? null : p.retrying === true ? fill(e.webhook_failed_retrying, attempt) : fill(e.webhook_failed_gave_up, attempt);
+        return {
+          ...base,
+          tone: "fail",
+          icon: XCircle,
+          body: (
+            <Card tone="fail" title={fill(e.webhook_failed, { name: text(p.name) })}>
+              <p className="text-muted">{known ? fill(known, { status: String(p.status) }) : code}</p>
+              {next ? <p className="text-[0.87rem] text-muted">{next}</p> : null}
+            </Card>
+          ),
+        };
+      }
       case "caller_unanswered": {
         // A guarda contra o silêncio agiu: o ruído escondeu do provedor o fim da fala de quem ligou.
         const said = p.action === "asked_to_repeat" ? e.caller_unanswered.asked_to_repeat : e.caller_unanswered.turn_closed;
