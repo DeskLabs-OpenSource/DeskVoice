@@ -82,6 +82,7 @@ A regra tem três consequências práticas:
 | `fences-have-owner-and-review-date` | Toda cerca tem dono, motivo e data de revisão |
 | `ui-text-lives-in-dictionaries` | Texto de tela só em dicionário |
 | `release-fragments-are-valid` | Fragmento de versão bem formado. Veja [versionamento](versionamento.md) |
+| `released-fragments-do-not-return` | Fragmento que uma versão já publicou e apagou não volta para `.changes/` (o título já está no `CHANGELOG.md`) |
 | `one-file-per-piece` | Nenhum arquivo-índice nas pastas de ferramentas, motores e rotinas. Veja [um arquivo por peça](um-arquivo-por-peca.md) |
 | `workflows-cancel-superseded-runs` | Um run de CI por PR: o novo cancela o anterior |
 | `welcome-does-not-checkout` | O workflow de acolhida, que roda com permissão do repositório, nunca baixa código de fork |
