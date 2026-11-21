@@ -1032,6 +1032,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     };
     // Uma sessão substituída numa passagem já foi fechada; o que ela ainda emitir não vai para a linha.
     const current = (): boolean => leg === self;
+    // Cada sessão conta o que tocou do zero: na passagem de agente, a fala do anterior não é desta.
+    const spokenAtStart = transport.playedMs?.() ?? 0;
     session.on("callerActivity", (signal) => {
       if (!current()) return;
       // Antes do filtro da guarda, que ignora fala durante o áudio do agente: quem diz "tchau" por cima
@@ -1049,6 +1051,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("interrupted", () => {
       if (!current()) return;
       silenceGuard.agentInterrupted();
+      // Antes de descartar: o motor corta no histórico o que quem ligou não chegou a ouvir.
+      const spoken = transport.playedMs?.();
+      if (spoken !== undefined) session.played?.(spoken - spokenAtStart);
       transport.clearAudio();
       recorder?.clear();
     });
@@ -1084,6 +1089,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     });
     // A última medição de uma sessão substituída também conta, e no trecho dela.
     session.on("usage", (increment) => void meter(self, increment).catch(logFailure("could not record usage")));
+    // O motor trocou a conexão com o provedor sem fechar a sessão: só fica registrado.
+    session.on("resumed", () => {
+      if (!current()) return;
+      event("engine_resumed", { engine: legEngine.id }).catch(logFailure("could not record the engine resumption"));
+    });
     // `error` sozinho não é fatal: fica guardado para explicar um `closed` que venha em seguida.
     session.on("error", (error) => {
       self.lastError = error;

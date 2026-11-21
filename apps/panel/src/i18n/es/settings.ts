@@ -3,7 +3,24 @@ import type { SettingsDictionary } from "../pt-BR/settings";
 const settings: SettingsDictionary = {
   title: "Configuración",
   lead: "Claves y conexiones que usan los agentes. Lo que es secreto queda cifrado en tu servidor y no vuelve a aparecer en pantalla.",
-  sectionsNav: "Secciones de Configuración",
+  /** La central de Configuración en `/settings` (parte 3 del diseño de la central de configuración). */
+  hub: {
+    firstSteps: { title: "Primeros pasos", lead: "Lo que falta antes de la primera llamada. Esta tarjeta desaparece cuando los tres pasos estén hechos." },
+    groups: { ai: "Inteligencia artificial", during: "Durante y después de la llamada", channels: "Canales" },
+    cards: {
+      engines: { title: "Motores de voz", lead: "El modelo de IA que escucha y habla en la llamada, y la clave de cada proveedor." },
+      brains: { title: "Cerebros", lead: "El modelo de texto que lee la llamada después de que termina, con clave propia." },
+      voice: { title: "Voz", lead: "La voz del agente en el motor en pipeline, separada del cerebro y de la transcripción." },
+      speechFilter: { title: "Filtro de habla", lead: "Marca lo que puede ser habla de fondo en lo que dice la persona. Viene apagado." },
+      analysts: { title: "Analistas", lead: "Leen la conversación mientras ocurre, dan la temperatura y reconocen objeciones." },
+      outcome: { title: "Desenlace, análisis y transcripción", lead: "Lo que el panel registra de cada llamada después de que termina." },
+      whatsapp: { title: "WhatsApp", lead: "El número conectado por código QR, por donde salen los avisos y los mensajes del agente." },
+      webhooks: { title: "Webhooks", lead: "Las únicas direcciones que un agente puede llamar durante una llamada." },
+      rules: { title: "Reglas de las llamadas", lead: "Llamadas simultáneas, buzón de voz y solicitud de aprobación sin respuesta." },
+      privacy: { title: "Privacidad y datos", lead: "Grabación, plazo de conservación y lo que la organización guarda de quien llamó." },
+    },
+    state: { ready: "Listo", missing: "Falta algo", off: "Apagado" },
+  },
   limits: {
     title: "Límites",
     lead: "Definido por la administración de la instalación. Para cambiarlos, habla con quien administra la instalación.",
@@ -18,7 +35,6 @@ const settings: SettingsDictionary = {
     whatsapp: "WhatsApp",
     integrations: "Integraciones",
     privacy: "Privacidad",
-    system: "Sistema",
     account: "Tu cuenta",
   },
   enginesTitle: "Motores de voz",
@@ -171,6 +187,7 @@ const settings: SettingsDictionary = {
   voicemailMaxSecondsHint: "De 5 a 300, contados después del aviso. El valor de fábrica es 60. El mensaje termina 4 segundos después de la última voz.",
   saveVoicemail: "Guardar buzón de voz",
   saveInboundLimit: "Guardar límite",
+  advanced: "Avanzado",
 };
 
 export default settings;

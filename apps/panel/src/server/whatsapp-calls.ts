@@ -140,7 +140,7 @@ async function record(q: OrgQuery, now: Date, state: VoiceState): Promise<Row | 
       q,
       now,
       before.agentId
-        ? `Ligação pelo WhatsApp: número${number} conectado. O agente escolhido atende as ligações pelo WhatsApp a partir de agora.`
+        ? `Ligação pelo WhatsApp: número${number} conectado. Ligue de outro número para conferir que o agente escolhido atende: se tocar só no celular, o WhatsApp não entregou a ligação a este aparelho.`
         : `Ligação pelo WhatsApp: número${number} conectado. Escolha em Configurações o agente que atende; até lá, as ligações continuam tocando no celular.`,
     );
   } else if (next.status === "failed" && before.status === "connected") {

@@ -1,7 +1,24 @@
 const settings = {
   title: "Configurações",
   lead: "Chaves e conexões que os agentes usam. O que é segredo fica cifrado no seu servidor e não volta a aparecer na tela.",
-  sectionsNav: "Seções de Configurações",
+  /** A central de Configurações em `/settings` (parte 3 do desenho da central de configuração). */
+  hub: {
+    firstSteps: { title: "Primeiros passos", lead: "O que falta antes da primeira ligação. Este cartão some quando os três passos estiverem feitos." },
+    groups: { ai: "Inteligência artificial", during: "Durante e depois da ligação", channels: "Canais" },
+    cards: {
+      engines: { title: "Motores de voz", lead: "O modelo de IA que escuta e fala na ligação, e a chave de cada provedor." },
+      brains: { title: "Cérebros", lead: "O modelo de texto que lê a ligação depois que ela termina, com chave própria." },
+      voice: { title: "Voz", lead: "A voz do agente no motor em pipeline, separada do cérebro e da transcrição." },
+      speechFilter: { title: "Filtro de fala", lead: "Marca o que pode ser fala de fundo no que a pessoa diz. Vem desligado." },
+      analysts: { title: "Analistas", lead: "Leem a conversa enquanto ela acontece, dão a temperatura e reconhecem objeções." },
+      outcome: { title: "Desfecho, análise e transcrição", lead: "O que o painel registra de cada ligação depois que ela termina." },
+      whatsapp: { title: "WhatsApp", lead: "O número conectado por QR Code, por onde saem os avisos e as mensagens do agente." },
+      webhooks: { title: "Webhooks", lead: "Os únicos endereços que um agente pode chamar durante uma ligação." },
+      rules: { title: "Regras das ligações", lead: "Ligações simultâneas, correio de voz e pedido de aprovação sem resposta." },
+      privacy: { title: "Privacidade e dados", lead: "Gravação, prazo de guarda e o que a organização guarda de quem ligou." },
+    },
+    state: { ready: "Pronto", missing: "Falta algo", off: "Desligado" },
+  },
   /** Os limites da organização, só para leitura (seção 3.4 do desenho do R8). Só aparece com algum limite. */
   limits: {
     title: "Limites",
@@ -17,7 +34,6 @@ const settings = {
     whatsapp: "WhatsApp",
     integrations: "Integrações",
     privacy: "Privacidade",
-    system: "Sistema",
     account: "Sua conta",
   },
   enginesTitle: "Motores de voz",
@@ -173,6 +189,7 @@ const settings = {
   voicemailMaxSecondsHint: "De 5 a 300, contados depois do aviso. O valor de fábrica é 60. O recado termina 4 segundos depois da última fala.",
   saveVoicemail: "Salvar caixa postal",
   saveInboundLimit: "Salvar limite",
+  advanced: "Avançado",
 };
 
 export default settings;

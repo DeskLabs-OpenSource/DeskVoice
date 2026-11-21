@@ -3,7 +3,24 @@ import type { SettingsDictionary } from "../pt-BR/settings";
 const settings: SettingsDictionary = {
   title: "Settings",
   lead: "Keys and connections the agents use. What is secret stays encrypted on your server and is never shown on screen again.",
-  sectionsNav: "Settings sections",
+  /** The Settings hub at `/settings` (part 3 of the settings hub design). */
+  hub: {
+    firstSteps: { title: "First steps", lead: "What is left before the first call. This card goes away once the three steps are done." },
+    groups: { ai: "Artificial intelligence", during: "During and after the call", channels: "Channels" },
+    cards: {
+      engines: { title: "Voice engines", lead: "The AI model that listens and speaks on the call, and the key of each provider." },
+      brains: { title: "Brains", lead: "The text model that reads the call after it ends, with a key of its own." },
+      voice: { title: "Voice", lead: "The agent's voice on the pipeline engine, separate from the brain and the transcription." },
+      speechFilter: { title: "Speech filter", lead: "Flags what may be background speech in what the person says. Comes off." },
+      analysts: { title: "Analysts", lead: "Read the conversation as it happens, give the temperature and recognize objections." },
+      outcome: { title: "Outcome, analysis and transcription", lead: "What the panel records about each call after it ends." },
+      whatsapp: { title: "WhatsApp", lead: "The number connected by QR code, through which the alerts and the agent's messages go out." },
+      webhooks: { title: "Webhooks", lead: "The only addresses an agent can call during a call." },
+      rules: { title: "Call rules", lead: "Simultaneous calls, voicemail and approval requests with no answer." },
+      privacy: { title: "Privacy and data", lead: "Recording, retention and what the organization keeps about callers." },
+    },
+    state: { ready: "Ready", missing: "Something missing", off: "Off" },
+  },
   limits: {
     title: "Limits",
     lead: "Set by the installation administration. To change them, talk to whoever administers the installation.",
@@ -18,7 +35,6 @@ const settings: SettingsDictionary = {
     whatsapp: "WhatsApp",
     integrations: "Integrations",
     privacy: "Privacy",
-    system: "System",
     account: "Your account",
   },
   enginesTitle: "Voice engines",
@@ -171,6 +187,7 @@ const settings: SettingsDictionary = {
   voicemailMaxSecondsHint: "From 5 to 300, counted after the notice. The factory value is 60. The message ends 4 seconds after the last speech.",
   saveVoicemail: "Save voicemail",
   saveInboundLimit: "Save limit",
+  advanced: "Advanced",
 };
 
 export default settings;

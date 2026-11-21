@@ -147,7 +147,7 @@ export const POST = handle(
     const callId = params.id ?? "";
     const enabled = await q.one<{ value: unknown }>("select value from settings where key = $1", [TRANSCRIPTION_SETTING]);
     if (!transcriptionEnabledOf(enabled?.value)) {
-      throw new ApiError(409, "transcription_disabled", "Recording transcription is off. Turn it on in Settings → Artificial intelligence.");
+      throw new ApiError(409, "transcription_disabled", "Recording transcription is off. Turn it on in Settings → Outcome, analysis and transcription.");
     }
 
     const call = await q.one<{ engine: string | null; agent_id: string | null; started_at: Date; ended_at: Date | null; cost_cents: number }>(

@@ -29,6 +29,25 @@ case "$args" in
   *" ps "*) answer ps_output; exit 0 ;;
   *" pg_isready "*) exit "$(cat "$FAKE_DIR/pg_isready_exit" 2>/dev/null || echo 0)" ;;
   *"core show uptime"*) echo "System uptime: 3 minutes"; exit 0 ;;
+  # Os módulos PJSIP, como o Asterisk 20 lista: todos "Running". Os nomes (sem .so), um por linha,
+  # em $FAKE_DIR/asterisk_pjsip_down saem "Not Running"; os de $FAKE_DIR/asterisk_pjsip_absent não
+  # aparecem (o que o noload faz, ou uma imagem sem o módulo).
+  *"module show like pjsip"*)
+    printf '%-40s %-40s %-10s %-11s %s\n' Module Description 'Use Count' Status 'Support Level'
+    n=0
+    for m in chan_pjsip res_pjsip res_pjsip_session res_pjsip_pubsub res_pjsip_sdp_rtp res_pjsip_nat \
+      res_pjsip_outbound_registration res_pjsip_authenticator_digest res_pjsip_outbound_authenticator_digest \
+      res_pjsip_endpoint_identifier_ip res_pjsip_endpoint_identifier_user res_pjsip_endpoint_identifier_anonymous \
+      res_pjsip_registrar res_pjsip_refer res_pjsip_caller_id res_pjsip_logger res_pjsip_dlg_options; do
+      if grep -qx "$m" "$FAKE_DIR/asterisk_pjsip_absent" 2>/dev/null; then continue; fi
+      if grep -qx "$m" "$FAKE_DIR/asterisk_pjsip_down" 2>/dev/null; then st='Not Running'; else st=Running; fi
+      printf '%-40s %-40s %-10s %-11s %s\n' "$m.so" 'PJSIP Module' 0 "$st" core; n=$((n + 1))
+    done
+    echo "$n modules loaded"; exit 0 ;;
+  # A hora de partida do contêiner: $FAKE_DIR/asterisk_started, ou uma fixa.
+  " inspect -f {{.State.StartedAt}} "*) if [ -f "$FAKE_DIR/asterisk_started" ]; then cat "$FAKE_DIR/asterisk_started"; else echo 2026-11-21T12:00:00.123456789Z; fi; exit 0 ;;
+  # O log do contêiner desde a partida: $FAKE_DIR/asterisk_logs (vazio, sem o arquivo).
+  " logs --since "*) answer asterisk_logs; exit 0 ;;
   # A sonda da entrada única (painel, voz e a rota do agente, pelo Caddy). Vem antes da conversa do
   # agente porque também cita a rota dele.
   *" exec -T panel node "*"voice-ws"*) if [ -f "$FAKE_DIR/entry_probe" ]; then cat "$FAKE_DIR/entry_probe"; else printf 'panel|200\nvoice|426\nagent|404|0\n'; fi; exit 0 ;;

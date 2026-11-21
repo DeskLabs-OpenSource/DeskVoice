@@ -14,6 +14,7 @@ import ptBRCommon from "../../../i18n/pt-BR/common";
 import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { useErrorText } from "../../../ui/errors";
+import { firstSteps } from "../../../ui/first-steps";
 import { formatCaller, formatDateTime, formatDuration, secondsBetween } from "../../../ui/format";
 import { Badge, Button, EmptyState, Notice, PageHeader, Skeleton, buttonClass, type Tone } from "../../../ui/kit";
 import { useLive, useNow } from "../../../ui/live";
@@ -65,11 +66,7 @@ export default function CallsPage() {
   const live = all.filter(isLive);
   const history = all.filter((call) => !isLive(call) && (filter === "all" || call.status === filter));
   const empty = calls.data !== undefined && all.length === 0;
-  const steps = [
-    { label: t.empty.steps.agent, href: "/agents", done: (agents.data?.length ?? 0) > 0 },
-    { label: t.empty.steps.line, href: "/line", done: (trunks.data?.length ?? 0) > 0 },
-    { label: t.empty.steps.engine, href: "/settings", done: engines.data?.some((engine) => engine.requiresKey && engine.keyConfigured) ?? false },
-  ];
+  const steps = firstSteps({ agents: agents.data, trunks: trunks.data, engines: engines.data }).map((step) => ({ ...step, label: t.empty.steps[step.key] }));
 
   return (
     <>

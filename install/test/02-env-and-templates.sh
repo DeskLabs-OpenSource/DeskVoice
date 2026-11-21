@@ -50,16 +50,47 @@ equal "pasta com a senha da ARI fechada para outros usuários" 700 "$(mode_of "$
 # que ele monta precisa sair legível, qualquer que seja o umask. Achado na primeira instalação
 # real: o plano de discagem e a ARI não carregaram e a checagem dizia "ok".
 ( umask 077
-  chmod 600 "$D/asterisk/extensions.conf" "$D/asterisk/http.conf"
+  chmod 600 "$D/asterisk/extensions.conf" "$D/asterisk/http.conf" "$D/asterisk/modules.conf"
   rm -rf "$G"
   source "$KIT/_common.sh"; render_asterisk_config )
-for f in extensions.conf http.conf ari.conf rtp.conf pjsip.conf; do
+for f in extensions.conf http.conf ari.conf rtp.conf pjsip.conf modules.conf; do
   check "umask 077: $f existe na pasta montada" test -s "$G/$f"
   equal "umask 077: $f legível pelo Asterisk" 644 "$(mode_of "$G/$f")"
 done
 equal "umask 077: a pasta continua fechada para outros usuários da VPS" 700 "$(mode_of "$G")"
 contains "o plano de discagem montado é o do repositório" "$(cat "$G/extensions.conf")" "Stasis(deskvoice,inbound)"
+# A lista de módulos do Asterisk sai do kit, não da imagem: sem ela, o res_pjsip_nat ficava sem vaga
+# no teto de módulos do pjproject, e force_rport e rewrite_contact das linhas não valiam.
+check "o modules.conf montado é o do repositório" cmp -s "$REPO/deploy/asterisk/modules.conf" "$G/modules.conf"
+contains "o compose monta o modules.conf gerado" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/generated/modules.conf:/etc/asterisk/modules.conf:ro"
+for m in res_pjsip_transport_websocket res_pjsip_messaging res_pjsip_history; do
+  check "o modules.conf deixa fora o PJSIP sem uso que ocupa vaga no teto: $m" grep -qx "noload = $m.so" "$G/modules.conf"
+done
+# Presença e caixa postal assinada não ocupam vaga (medido): tirá-los só mudaria mais para quem já
+# instalou. Os cinco sem lista ficam até decisão do Arquiteto.
+for m in res_pjsip_pidf_body_generator res_pjsip_xpidf_body_generator res_pjsip_dialog_info_body_generator res_pjsip_mwi res_pjsip_mwi_body_generator res_pjsip_exten_state res_pjsip_publish_asterisk res_pjsip_phoneprov_provider res_pjsip_dlg_options res_pjsip_empty_info res_pjsip_maintenance res_pjsip_rfc3329 res_pjsip_sips_contact; do
+  refuse "o modules.conf não mexe em $m" grep -Eq "^[[:space:]]*noload[[:space:]]*=>?[[:space:]]*$m\.so" "$G/modules.conf"
+done
+for m in res_pjsip res_pjsip_pubsub chan_pjsip res_pjsip_session res_pjsip_sdp_rtp res_pjsip_nat res_pjsip_outbound_registration res_pjsip_authenticator_digest res_pjsip_outbound_authenticator_digest res_pjsip_endpoint_identifier_ip res_pjsip_endpoint_identifier_user res_pjsip_endpoint_identifier_anonymous res_pjsip_registrar res_pjsip_acl res_pjsip_caller_id res_pjsip_rfc3326 res_pjsip_dtmf_info res_pjsip_diversion res_pjsip_header_funcs res_pjsip_logger res_pjsip_refer; do
+  refuse "o modules.conf nunca deixa fora $m" grep -Eq "^[[:space:]]*noload[[:space:]]*=>?[[:space:]]*$m\.so" "$G/modules.conf"
+done
+refuse "o modules.conf não exige o res_pjsip_nat (sem ele o Asterisk não subiria)" grep -Eq '^[[:space:]]*require[^=]*=>?[[:space:]]*res_pjsip_nat' "$G/modules.conf"
+check "o modules.conf mantém o autoload da imagem" grep -qx 'autoload=yes' "$G/modules.conf"
 lacks "o compose não monta mais arquivo direto do repositório" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/extensions.conf"
+# Sem o modelo do modules.conf, só a volta da atualização segue (a versão anterior pode ser de antes
+# dele). Na instalação, e em toda chamada sem --rollback, é repositório incompleto, como os outros.
+mv "$D/asterisk/modules.conf" "$D/asterisk/modules.conf.fora"
+out="$( ( source "$KIT/_common.sh"; render_asterisk_config ) 2>&1 )"; equal "sem o modelo do modules.conf, a instalação falha" 1 "$?"
+contains "... dizendo qual modelo falta" "$out" "Não achei o modelo $D/asterisk/modules.conf"
+check "... e não apaga o modules.conf já gerado" test -s "$G/modules.conf"
+( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1; equal "sem o modelo do modules.conf, a volta segue" 0 "$?"
+refuse "... e o modules.conf gerado sai (o Compose da versão anterior não o monta)" test -e "$G/modules.conf"
+mv "$D/asterisk/modules.conf.fora" "$D/asterisk/modules.conf"
+mv "$D/asterisk/rtp.conf.tmpl" "$D/asterisk/rtp.conf.tmpl.fora"
+( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1; equal "na volta, os outros modelos continuam obrigatórios" 1 "$?"
+mv "$D/asterisk/rtp.conf.tmpl.fora" "$D/asterisk/rtp.conf.tmpl"
+( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1
+check "na volta, com o modelo no disco, o modules.conf é gerado" cmp -s "$REPO/deploy/asterisk/modules.conf" "$G/modules.conf"
 
 # ── Entrada única: só o Caddy do DeskVoice publica porta, nos dois modos ──
 O="$D/docker-compose.override.yml"

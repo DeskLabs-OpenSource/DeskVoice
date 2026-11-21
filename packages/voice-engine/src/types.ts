@@ -70,6 +70,12 @@ export interface VoiceSessionEvents {
   usage(usage: Usage): void;
   /** Seguido de `closed` quando é fatal; sozinho, a sessão continua. */
   error(error: Error): void;
+  /**
+   * O motor trocou a conexão com o provedor por uma nova, retomando a mesma conversa, sem fechar a
+   * sessão (o provedor avisou que ia fechar a de antes, ou ela caiu). Só informa: nada muda para quem
+   * chama, e o consumo da conexão nova continua chegando em `usage`.
+   */
+  resumed(): void;
   closed(reason: string): void;
 }
 
@@ -91,6 +97,12 @@ export interface VoiceSession {
    * Depois de `close`, não manda nada.
    */
   guide?(text: string): void;
+  /**
+   * Quanto da fala desta sessão já tocou para quem ligou, em ms, acumulado desde o início da sessão.
+   * Quem toca o áudio chama na interrupção, antes de descartar o resto, para o motor cortar no
+   * histórico o que não chegou a tocar. Sem o método, o motor não corta e nada muda.
+   */
+  played?(ms: number): void;
   close(): Promise<void>;
 }
 

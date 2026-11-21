@@ -30,6 +30,7 @@ const MAX_BURST_FRAMES = 3;
 // Teto do áudio guardado à espera de quem ouça: 5 s.
 const MAX_HELD_FRAMES = 250;
 const HANDSHAKE_TIMEOUT_MS = 5000;
+const PCM16_BYTES_PER_MS = FRAME_BYTES / FRAME_MS;
 
 /** `hangup`: o Asterisk avisou o fim. `closed`: a conexão caiu sem aviso. `local`: fechamos nós. */
 export type AudioSocketCloseReason = "hangup" | "closed" | "protocol_error" | "local";
@@ -49,6 +50,13 @@ export interface AudioSocketConnection {
    */
   sendTone(pcm16_8k: Buffer): Promise<void>;
   clearAudio(): void;
+  /**
+   * Quanto de fala (`sendAudio`) já saiu no socket nesta conexão, em ms, acumulado. Conta os quadros
+   * escritos, nunca o que está na fila; os tons de `sendTone` e o silêncio que completa o último
+   * quadro não contam. É o que quem ligou de fato pôde ouvir: o motor usa para cortar no histórico a
+   * fala interrompida.
+   */
+  spokenMs(): number;
   /** Resolve quando tudo o que foi enfileirado saiu (ou a conexão fechou). */
   drained(): Promise<void>;
   close(): void;
@@ -95,6 +103,8 @@ class Connection implements AudioSocketConnection {
   private cancelTick: (() => void) | undefined;
   private epoch = 0;
   private sent = 0;
+  // Bytes de fala já escritos no socket (PCM16 8 kHz: 16 bytes por ms).
+  private spokenBytes = 0;
   private drainWaiters: Array<() => void> = [];
 
   constructor(
@@ -155,6 +165,10 @@ class Connection implements AudioSocketConnection {
     this.queue = Buffer.alloc(0);
   }
 
+  spokenMs(): number {
+    return this.spokenBytes / PCM16_BYTES_PER_MS;
+  }
+
   drained(): Promise<void> {
     if (!this.pacing) return Promise.resolve();
     return new Promise((resolve) => this.drainWaiters.push(resolve));
@@ -192,6 +206,7 @@ class Connection implements AudioSocketConnection {
     while (wrote < due && this.queue.length >= FRAME_BYTES) {
       this.socket.write(frame(FRAME.AUDIO, this.queue.subarray(0, FRAME_BYTES)));
       this.queue = this.queue.subarray(FRAME_BYTES);
+      this.spokenBytes += FRAME_BYTES;
       wrote += 1;
     }
     if (due > 0 && wrote === 0 && this.queue.length > 0) {
@@ -199,6 +214,8 @@ class Connection implements AudioSocketConnection {
       // silêncio, senão a última sílaba ficaria presa na fila.
       const last = Buffer.alloc(FRAME_BYTES);
       this.queue.copy(last);
+      // Só a fala conta: o silêncio que completa o quadro não é fala do agente.
+      this.spokenBytes += this.queue.length;
       this.queue = Buffer.alloc(0);
       this.socket.write(frame(FRAME.AUDIO, last));
       wrote = 1;

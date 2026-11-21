@@ -199,6 +199,39 @@ describe("servidor AudioSocket", { timeout: 60_000 }, () => {
     expect(client.frames[2]?.payload[0]).toBe(6);
   });
 
+  it("spokenMs conta só os quadros de fala que saíram: não a fila, não os tons, não o silêncio que completa o quadro", async () => {
+    const { time, connection, client } = await identified();
+    const audio = (): number => client.frames.filter((frame) => frame.type === 0x10).length;
+    expect(connection.spokenMs()).toBe(0);
+    // 1 s de fala na fila (50 quadros): só o primeiro saiu.
+    connection.sendAudio(pcm(50, 4));
+    await waitFor(() => audio() === 1, "the first frame");
+    expect(connection.spokenMs()).toBe(20);
+    for (let expected = 2; expected <= 4; expected++) {
+      time.advance(20);
+      await waitFor(() => audio() === expected, `frame ${expected}`);
+    }
+    expect(connection.spokenMs()).toBe(80);
+    // O tom passa à frente da fala e sai, mas não é fala.
+    const tone = connection.sendTone(pcm(2, 9));
+    for (let expected = 5; expected <= 6; expected++) {
+      time.advance(20);
+      await waitFor(() => audio() === expected, `tone frame ${expected}`);
+    }
+    await tone;
+    expect(connection.spokenMs()).toBe(80);
+    // A interrupção descarta a fila: o que não saiu nunca conta.
+    connection.clearAudio();
+    time.advance(1000);
+    await connection.drained();
+    expect(connection.spokenMs()).toBe(80);
+    // Meio quadro de fala sai completado com silêncio: contam os 10 ms de fala, não os 20 do quadro.
+    connection.sendAudio(Buffer.alloc(160, 5));
+    time.advance(20);
+    await waitFor(() => audio() === 7, "the padded frame");
+    expect(connection.spokenMs()).toBe(90);
+  });
+
   it("o tom de tecla passa à frente da fala pendente e o clearAudio não o apaga", async () => {
     const { time, connection, client } = await identified();
     connection.sendAudio(pcm(10, 4));
