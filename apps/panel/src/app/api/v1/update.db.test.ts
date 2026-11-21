@@ -3,7 +3,8 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { AGENT_TOKEN, NOW, PASSWORD, call, createOrganization, createUser, startPanel } from "../../../../test/kit";
 import { loginLimiter } from "../../../server/rate-limit";
 import { clearReleaseCache } from "../../../server/releases";
-import { PICKUP_MINUTES, RUN_MINUTES } from "../../../server/update";
+import { FINISHED, PICKUP_MINUTES, RUN_MINUTES, STARTED } from "../../../server/update";
+import { GET as listNotifications } from "./notifications/route";
 import { POST as agent } from "./system/agent/route";
 import { GET as readUpdate, POST as requestUpdate } from "./system/update/route";
 
@@ -256,6 +257,56 @@ describe("one request at a time, and every request ends", () => {
     expect((await state(owner.cookie)).request?.status).toBe("expired");
     await speak({ version: "0.2.0", result: { outcome: "succeeded", toVersion: "0.2.0", detail: "" } });
     expect((await state(owner.cookie)).request).toMatchObject({ status: "succeeded", toVersion: "0.2.0" });
+  });
+});
+
+describe("the update notice says who can follow it", () => {
+  const subjects = (org: string) =>
+    withOrg(panel.app, org, (q) => q.many<{ body: string; subject: string | null }>("select body, subject from notifications where channel = 'panel' order by created_at, id"));
+
+  it("marks every update notice, from the start to each way it ends, and the bell route hands the mark over", async () => {
+    const { org, owner } = await newOrg("update notice subject");
+    await ask(owner.cookie);
+    await speak();
+    await speak({ version: "0.2.0", target: "0.3.0", result: { outcome: "rolled_back", detail: "" } });
+    // Vencido sem ser pego, e trocado por uma versão mais nova antes de ser pego.
+    publish(release("0.3.0"), release("0.2.0"));
+    await ask(owner.cookie, { password: PASSWORD, target: "0.3.0" });
+    later(PICKUP_MINUTES + 1);
+    await speak({ version: "0.2.0", target: "0.3.0" });
+    await ask(owner.cookie, { password: PASSWORD, target: "0.3.0" });
+    later(1);
+    await speak({ version: "0.2.0", target: "0.4.0" });
+    const rows = await subjects(org);
+    expect(rows.map((row) => row.body)).toEqual([
+      expect.stringContaining("começou"),
+      expect.stringContaining("não foi aplicada"),
+      expect.stringContaining("venceu"),
+      expect.stringContaining("versão mais nova"),
+    ]);
+    expect(rows.map((row) => row.subject)).toEqual(Array(4).fill("installation_update"));
+    const shown = (await call(listNotifications, { cookie: owner.cookie })).data as Array<{ body: string; subject: string | null }>;
+    expect(shown).toHaveLength(4);
+    expect(shown.every((notice) => notice.subject === "installation_update")).toBe(true);
+  });
+
+  it("leaves the WhatsApp service notice without the update mark", async () => {
+    const { org } = await newOrg("update notice service");
+    // Só o que mudou vira aviso: passar por "failed" garante que "running" é mudança, venha o banco como vier.
+    await speak({ version: "0.1.0", target: "0.2.0", whatsapp: { state: "failed", reason: "pull_failed" } });
+    await speak({ version: "0.1.0", target: "0.2.0", whatsapp: { state: "running" } });
+    const rows = await subjects(org);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((row) => row.body.includes("WhatsApp") && row.subject === null)).toBe(true);
+  });
+
+  it("never sends the reader to Administrar a instalação without saying who goes there, in any update text", () => {
+    const bodies = [STARTED, ...Object.values(FINISHED).map((text) => text("0.2.0"))];
+    // STARTED e os seis desfechos de FINISHED; um texto novo entra na conta sozinho.
+    expect(bodies.length).toBeGreaterThanOrEqual(7);
+    const pointing = bodies.flatMap((body) => body.split(/(?<=\.)\s+/)).filter((sentence) => sentence.includes("Administrar a instalação"));
+    expect(pointing.length).toBeGreaterThanOrEqual(5);
+    for (const sentence of pointing) expect(sentence).toContain("Quem administra a instalação");
   });
 });
 
