@@ -141,6 +141,8 @@ const settings = {
   hookUrl: "Endereço",
   hookToken: "Token (opcional)",
   hookTokenKept: "Token configurado",
+  hookTimeout: "Prazo de resposta (segundos)",
+  hookTimeoutHint: "Quanto o agente espera cada webhook responder, de 1 a {max} segundos. Durante a ligação, a pessoa fica na linha esse tempo. Sem resposta no prazo, o agente avisa que vai verificar e não repete o pedido sem confirmar com a pessoa.",
   addHook: "Adicionar webhook",
   removeHook: "Remover {name}",
   removeHookConfirm: "Remover o webhook {name}? Depois que você salvar a lista, os agentes deixam de poder chamar este endereço e o token dele é apagado.",
