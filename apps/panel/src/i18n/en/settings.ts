@@ -35,7 +35,6 @@ const settings: SettingsDictionary = {
     whatsapp: "WhatsApp",
     integrations: "Integrations",
     privacy: "Privacy",
-    system: "System",
     account: "Your account",
   },
   enginesTitle: "Voice engines",

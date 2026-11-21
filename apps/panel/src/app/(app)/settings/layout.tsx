@@ -41,7 +41,6 @@ const SECTIONS = [
   { href: "/settings/whatsapp", key: "whatsapp" },
   { href: "/settings/integrations", key: "integrations" },
   { href: "/settings/privacy", key: "privacy" },
-  { href: "/settings/system", key: "system" },
   { href: "/settings/account", key: "account" },
 ] as const;
 

@@ -34,7 +34,6 @@ const settings = {
     whatsapp: "WhatsApp",
     integrations: "Integrações",
     privacy: "Privacidade",
-    system: "Sistema",
     account: "Sua conta",
   },
   enginesTitle: "Motores de voz",
