@@ -41,6 +41,12 @@ export interface ToolContext {
    * a ferramenta não cancela (um teste, uma rotina).
    */
   signal?: AbortSignal;
+  /**
+   * Os nomes das ferramentas que o motor recebeu neste trecho (as que a sessão de fato ofereceu: a
+   * marcada mas tirada por `available === false` não entra). A ferramenta que manda o modelo usar outra
+   * só a cita se ela estiver aqui. Ausente: quem roda a ferramenta não ofereceu nenhuma (um teste, uma rotina).
+   */
+  offeredTools?: ReadonlySet<string>;
 }
 
 /** Um agente para quem a ligação pode passar, como a sessão o leu do banco. */

@@ -137,13 +137,72 @@ describe("call_webhook", () => {
     expect(result).toEqual({
       ok: false,
       outcome: "unknown",
-      message: 'A integração "abrir_chamado" não respondeu a tempo. Não sei se o pedido foi registrado. NÃO chame de novo sem antes confirmar com a pessoa; diga que vai verificar.',
+      message:
+        'A integração "abrir_chamado" não respondeu a tempo. Não sei se o pedido foi registrado. NÃO chame de novo sem confirmar com a pessoa. Diga à pessoa que não foi possível confirmar agora e que ela pode ligar de novo mais tarde para saber. Não diga que alguém vai entrar em contato: ninguém foi avisado.',
     });
     const last = (await eventsOf(app, ctx.callId)).at(-1);
     expect(last?.kind).toBe("tool_result");
     expect(last?.payload).toMatchObject({ name: "call_webhook", ok: false, outcome: "unknown", message: expect.stringContaining("não respondeu a tempo"), spent: true });
     // Não é a falha genérica: nada de "Não consegui concluir" nem detalhe de erro.
     expect(last?.payload.error).toBeUndefined();
+  });
+
+  describe("destino que passa do prazo: a frase só manda usar a ferramenta que o motor recebeu", () => {
+    const slow: typeof fetch = (_input, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)));
+    const promise = /verific|retorno|vamos te ligar|ligaremos|entraremos em contato/i;
+
+    /** Roda o webhook lento com as ferramentas dadas e devolve a `message` gravada no `tool_result`. */
+    async function recorded(label: string, offeredTools?: ReadonlySet<string>): Promise<string> {
+      const ctx = await fixture(label);
+      const run = await runTool(createCallWebhook({ fetch: slow, lookup: fakeLookup(), timeoutMs: 5, secretKey: () => secretKey }), { name: "abrir_chamado" }, { ...ctx, ...(offeredTools && { offeredTools }) });
+      expect(run).toMatchObject({ ok: false, outcome: "unknown" });
+      const last = (await eventsOf(app, ctx.callId)).at(-1);
+      expect(last?.kind).toBe("tool_result");
+      expect(last?.payload).toMatchObject({ name: "call_webhook", ok: false, outcome: "unknown", message: run.message });
+      const message = String(last?.payload.message);
+      expect(message).toContain("Não sei se o pedido foi registrado");
+      expect(message).toContain("NÃO chame de novo sem confirmar com a pessoa");
+      return message;
+    }
+
+    it("T1 com create_task: manda abrir a pendência para conferir a integração", async () => {
+      const message = await recorded("webhook prazo T1", new Set(["call_webhook", "create_task", "end_call"]));
+      expect(message).toContain('Abra com create_task uma pendência para conferir se a integração "abrir_chamado" registrou o pedido');
+      expect(message).toContain("a equipe vai conferir e dar retorno");
+      expect(message).not.toContain("notify_human");
+    });
+
+    it("T2 só com notify_human: manda avisar a equipe, sem citar create_task", async () => {
+      const message = await recorded("webhook prazo T2", new Set(["call_webhook", "notify_human"]));
+      expect(message).toContain('Avise a equipe com notify_human que a integração "abrir_chamado" não respondeu');
+      expect(message).toContain("a equipe vai conferir");
+      expect(message).not.toContain("create_task");
+    });
+
+    it("T3 com as duas: vale create_task", async () => {
+      const message = await recorded("webhook prazo T3", new Set(["notify_human", "call_webhook", "create_task"]));
+      expect(message).toContain("Abra com create_task");
+      expect(message).not.toContain("notify_human");
+    });
+
+    it("T4 sem nenhuma das duas: não promete retorno e diz que a pessoa pode ligar de novo", async () => {
+      const message = await recorded("webhook prazo T4", new Set(["call_webhook", "end_call", "transfer_to_human"]));
+      expect(message).toContain("pode ligar de novo mais tarde");
+      expect(message).not.toMatch(promise);
+      expect(message).not.toMatch(/create_task|notify_human/);
+    });
+
+    it("T5 sem offeredTools (teste, rotina): igual a T4", async () => {
+      const message = await recorded("webhook prazo T5");
+      expect(message).toBe(await recorded("webhook prazo T5b", new Set(["call_webhook"])));
+      expect(message).not.toMatch(promise);
+    });
+
+    it("a descrição não promete verificar: manda seguir a resposta da ferramenta", () => {
+      const { description } = createCallWebhook();
+      expect(description).toContain("Se a integração não responder a tempo, não chame de novo: siga o que a resposta da ferramenta disser.");
+      expect(description).not.toMatch(/verific/i);
+    });
   });
 
   it("o prazo gravado no webhook vale: servidor que responde em 12 s dá desconhecido com 10 e responde com 15", { timeout: 30_000 }, async () => {
