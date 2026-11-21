@@ -47,7 +47,7 @@ Dispositivos conectados, um aparelho que não seja o DeskVoice e ligue de novo.
 
 ## Instalar o serviço
 
-Em **Configurações → WhatsApp**, no bloco Ligação pelo WhatsApp, um dono ou administrador clica em "Instalar o serviço de
+Em **Linha telefônica**, no bloco Ligação pelo WhatsApp, um dono ou administrador clica em "Instalar o serviço de
 ligação pelo WhatsApp". O painel só grava o pedido; o agente do servidor (`install/agent.sh`, uma
 passada por minuto) confere o disco (1,2 GB livres), baixa a imagem e sobe o serviço. A tela
 acompanha.
