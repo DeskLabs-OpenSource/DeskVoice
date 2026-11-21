@@ -134,6 +134,8 @@ describe("the limits a new organization starts with", () => {
       { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 1.5 },
       { maxTrunks: -1, maxAgents: 1 },
       { maxTrunks: 1.5, maxAgents: 1 },
+      { maxTrunks: 1_000_001, maxAgents: 1 },
+      { maxTrunks: 1, maxAgents: 1_000_001 },
       { maxTrunks: 1, maxAgents: 1, nope: 1 },
       { maxAgents: 1 },
     ]) {
@@ -142,12 +144,42 @@ describe("the limits a new organization starts with", () => {
     expect(await storedDefault()).toBe(0);
   });
 
+  it("the PUT accepts the ceiling itself, the same one the read checks, and stores those numbers", async () => {
+    const s = await scene();
+    const atCeiling = { maxTrunks: 1_000_000, maxAgents: 1_000_000, monthlySpendCapCents: 2_147_483_647, outboundAllowed: false };
+    expect((await s.setDefaults(atCeiling)).status).toBe(200);
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual(atCeiling);
+    expect(await limitsRow(await s.create())).toEqual(atCeiling);
+  });
+
   it("a key written by hand with a strange field falls back to the factory value for that field, never to outbound allowed", async () => {
     const s = await scene();
     await system("insert into installation_settings (key, value) values ('defaults.limits', $1) returning key", [{ maxTrunks: 4, maxAgents: -1, monthlySpendCapCents: "100", outboundAllowed: "yes" }]);
     const factoryForStrange = { maxTrunks: 4, maxAgents: null, monthlySpendCapCents: null, outboundAllowed: false };
     expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual(factoryForStrange);
     expect(await limitsRow(await s.create())).toEqual(factoryForStrange);
+  });
+
+  it("a key written by hand above the ceiling falls back to the factory value for that field, and the organization is still created", async () => {
+    const s = await scene();
+    // 2^53 - 1 de propósito: acima disso o JSON.parse do node já perde a precisão.
+    await system("insert into installation_settings (key, value) values ('defaults.limits', $1) returning key", [
+      { maxTrunks: 2_147_483_648, maxAgents: 3, monthlySpendCapCents: Number.MAX_SAFE_INTEGER, outboundAllowed: true },
+    ]);
+    const bornWith = { maxTrunks: null, maxAgents: 3, monthlySpendCapCents: null, outboundAllowed: true };
+    // A criação primeiro: sem o teto na leitura, é ela que cai (o insert estoura o integer).
+    expect(await limitsRow(await s.create())).toEqual(bornWith);
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual(bornWith);
+  });
+
+  it("the ceiling itself is a limit, one above it is not", async () => {
+    const s = await scene();
+    await system("insert into installation_settings (key, value) values ('defaults.limits', $1) returning key", [
+      { maxTrunks: 1_000_000, maxAgents: 1_000_001, monthlySpendCapCents: 2_147_483_647, outboundAllowed: false },
+    ]);
+    const bornWith = { maxTrunks: 1_000_000, maxAgents: null, monthlySpendCapCents: 2_147_483_647, outboundAllowed: false };
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual(bornWith);
+    expect(await limitsRow(await s.create())).toEqual(bornWith);
   });
 
   it("only who administers the installation reads or changes the default", async () => {

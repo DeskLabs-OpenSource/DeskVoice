@@ -153,8 +153,20 @@ export function organizationLimitsView(db: Db, organizationId: string, now: Date
 
 export type SetOrganizationLimitsResult = { ok: true; limits: OrganizationLimits } | { ok: false; reason: "not_found" };
 
-const isLimit = (value: unknown): value is number | null => value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
-const isValid = (field: keyof typeof COLUMN_OF, value: unknown): boolean => (field === "outboundAllowed" ? typeof value === "boolean" : isLimit(value));
+/** O teto de `maxTrunks` e `maxAgents`: a rota e o core usam este número, e nenhum outro. */
+export const MAX_COUNT_LIMIT = 1_000_000;
+
+/** O teto de `monthlySpendCapCents`, em centavos: o maior `integer` do Postgres, o tipo da coluna. */
+export const MAX_SPEND_CAP_CENTS = 2_147_483_647;
+
+const isLimit = (value: unknown, max: number): value is number | null => value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= max);
+// As três portas (`setOrganizationLimits`, `setDefaultLimits` e a leitura de `defaults.limits`) passam por aqui.
+const isValid = (field: keyof typeof COLUMN_OF, value: unknown): boolean => {
+  if (field === "outboundAllowed") return typeof value === "boolean";
+  return isLimit(value, field === "monthlySpendCapCents" ? MAX_SPEND_CAP_CENTS : MAX_COUNT_LIMIT);
+};
+const ruleOf = (field: keyof typeof COLUMN_OF): string =>
+  field === "outboundAllowed" ? "true or false" : `a non-negative integer up to ${field === "monthlySpendCapCents" ? MAX_SPEND_CAP_CENTS : MAX_COUNT_LIMIT}, or null`;
 
 /**
  * Grava os limites de uma organização, pelo papel de sistema (a organização não escreve na tabela).
@@ -166,7 +178,7 @@ const isValid = (field: keyof typeof COLUMN_OF, value: unknown): boolean => (fie
 export async function setOrganizationLimits(db: Db, organizationId: string, patch: OrganizationLimitsPatch, actorAccountId: string, now: Date): Promise<SetOrganizationLimitsResult> {
   const fields = (Object.keys(COLUMN_OF) as (keyof typeof COLUMN_OF)[]).filter((field) => Object.hasOwn(patch, field) && patch[field] !== undefined);
   for (const field of fields) {
-    if (!isValid(field, patch[field])) throw new Error(`setOrganizationLimits: ${field} must be ${field === "outboundAllowed" ? "true or false" : "a non-negative integer or null"}`);
+    if (!isValid(field, patch[field])) throw new Error(`setOrganizationLimits: ${field} must be ${ruleOf(field)}`);
   }
   return withSystem(db, async (q): Promise<SetOrganizationLimitsResult> => {
     // A mesma trava de `assertBelowLimit`: duas mudanças juntas não gravam um "antes" que já passou.
@@ -194,7 +206,8 @@ export async function setOrganizationLimits(db: Db, organizationId: string, patc
  */
 export const FACTORY_DEFAULT_LIMITS: OrganizationLimits = { monthlySpendCapCents: null, maxTrunks: null, maxAgents: null, outboundAllowed: false };
 
-// Uma chave gravada à mão com campo estranho não vira limite: o campo que não passa volta ao de fábrica.
+// Uma chave gravada à mão com campo estranho não vira limite: o campo que não passa (tipo errado, ou acima
+// do teto, que a coluna `integer` não guardaria) volta ao de fábrica, e a criação da organização não falha.
 function readDefaults(value: unknown): OrganizationLimits {
   const stored = value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   const limits = { ...FACTORY_DEFAULT_LIMITS };
@@ -233,7 +246,7 @@ const DEFAULT_LIMITS_LOCK_SQL = "select pg_advisory_xact_lock(hashtextextended('
 export async function setDefaultLimits(db: Db, patch: OrganizationLimitsPatch, actorAccountId: string, now: Date): Promise<OrganizationLimits> {
   const fields = (Object.keys(COLUMN_OF) as (keyof typeof COLUMN_OF)[]).filter((field) => Object.hasOwn(patch, field) && patch[field] !== undefined);
   for (const field of fields) {
-    if (!isValid(field, patch[field])) throw new Error(`setDefaultLimits: ${field} must be ${field === "outboundAllowed" ? "true or false" : "a non-negative integer or null"}`);
+    if (!isValid(field, patch[field])) throw new Error(`setDefaultLimits: ${field} must be ${ruleOf(field)}`);
   }
   return withSystem(db, async (q) => {
     await q.exec(DEFAULT_LIMITS_LOCK_SQL);
