@@ -71,6 +71,8 @@ pnpm exec tsx scripts/release.ts cut --major    # só por decisão do dono
 ```
 
 A cerca `fences/release-fragments-are-valid.test.ts` reprova fragmento inválido no `pnpm verify`.
+A cerca `fences/released-fragments-do-not-return.test.ts` reprova o fragmento cujo título já está
+no `CHANGELOG.md`: a versão já o publicou e apagou, e ele voltou por um PR antigo. Apague-o do PR.
 O corte de verdade acontece no workflow `release` (`.github/workflows/release.yml`): ele abre o PR
 `release/X.Y.Z`, e o merge desse PR cria a tag.
 
