@@ -307,11 +307,48 @@ describe("gemini-live (contrato com servidor falso)", () => {
       expect(order[1]).toBe("closed socket_closed");
     });
 
-    it("retomada recusada: uma tentativa só, e a sessão cai com error seguido de closed", async () => {
+    it("goAway e retomada recusada: a ligação segue pela conexão de antes até o provedor fechá-la", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      const { order } = watch(session);
+      const agentAudio: Buffer[] = [];
+      session.on("audio", (pcm) => agentAudio.push(pcm));
+      fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
+      fake.send({ goAway: { timeLeft: "10s" } });
+      await fake.waitFor(setupWithHandle);
+      // Sai durante a troca: espera, e com a recusa vai para a conexão de antes, na ordem.
+      for (let i = 1; i <= 3; i++) session.sendAudio(Buffer.alloc(1600, i));
+      session.closeCallerTurn();
+      fake.refuse(1008, "session not found");
+      const held: Record<string, unknown>[] = [];
+      for (let i = 0; i < 4; i++) held.push(await fake.waitFor((m) => "realtimeInput" in m));
+      expect(held.map((message) => fake.connectionOf(message))).toEqual([0, 0, 0, 0]);
+      expect(held.slice(0, 3).map((m) => Buffer.from((m as { realtimeInput: { audio: { data: string } } }).realtimeInput.audio.data, "base64")[0])).toEqual([1, 2, 3]);
+      expect(held[3]).toEqual({ realtimeInput: { audioStreamEnd: true } });
+      // A sessão não fechou: a conexão de antes segue sendo a atual, nos dois sentidos.
+      expect(order).toEqual([]);
+      expect(fake.isOpen(0)).toBe(true);
+      fake.sendOn(0, { serverContent: { modelTurn: { parts: [{ inlineData: { data: Buffer.alloc(960).toString("base64"), mimeType: "audio/pcm;rate=24000" } }] } } });
+      await vi.waitFor(() => expect(agentAudio).toHaveLength(1));
+      session.sendAudio(Buffer.alloc(1600, 4));
+      expect(fake.connectionOf(await fake.waitFor((m) => "realtimeInput" in m))).toBe(0);
+      // O prazo acaba e o provedor fecha a de antes: aí a sessão cai, e ninguém tenta de novo.
+      const closed = nextEvent(session, "closed");
+      fake.drop(0);
+      await closed;
+      expect(order).toHaveLength(2);
+      expect(order[0]).toMatch(/^error Gemini Live: a conexão caiu/);
+      expect(order[1]).toBe("closed socket_closed");
+      expect(fake.connections()).toBe(2);
+      await session.close();
+      expect(order).toHaveLength(2);
+    });
+
+    it("queda e retomada recusada: uma tentativa só, e a sessão cai já com error seguido de closed", async () => {
       const { session } = await openSession({ greeting: undefined });
       const { order } = watch(session);
       fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
-      fake.send({ goAway: {} });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      fake.drop();
       await fake.waitFor(setupWithHandle);
       const closed = nextEvent(session, "closed");
       fake.refuse(1008, "session not found");
@@ -319,11 +356,44 @@ describe("gemini-live (contrato com servidor falso)", () => {
       expect(order).toHaveLength(2);
       expect(order[0]).toMatch(/^error Gemini Live: a conexão ia fechar e a retomada da sessão falhou .*session not found/);
       expect(order[1]).toBe("closed socket_closed");
-      // A conexão de antes também sai, e ninguém tenta de novo.
-      await vi.waitFor(() => expect(fake.isOpen(0)).toBe(false));
       expect(fake.connections()).toBe(2);
       await session.close();
       expect(order).toHaveLength(2);
+    });
+
+    it("depois que a nova confirma, a fala da conexão que saiu é descartada e o consumo dela ainda conta", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      const { order, usage } = watch(session);
+      const agentAudio: Buffer[] = [];
+      const transcripts: string[] = [];
+      session.on("audio", (pcm) => agentAudio.push(pcm));
+      session.on("transcript", ({ speaker, text }) => transcripts.push(`${speaker}: ${text}`));
+      fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
+      fake.send({ goAway: {} });
+      await fake.waitFor(setupWithHandle);
+      // No instante da confirmação, a de antes ainda está aberta do lado do provedor e manda fala,
+      // texto e consumo (a fila do socket mantém a ordem: o consumo chega depois da fala).
+      session.on("resumed", () => {
+        fake.sendOn(0, {
+          serverContent: {
+            modelTurn: { parts: [{ inlineData: { data: Buffer.alloc(960).toString("base64"), mimeType: "audio/pcm;rate=24000" } }] },
+            outputTranscription: { text: "fala velha" },
+            turnComplete: true,
+          },
+        });
+        fake.sendOn(0, { usageMetadata: { promptTokenCount: 11, responseTokenCount: 5 } });
+      });
+      fake.send({ setupComplete: {} });
+      await nextEvent(session, "resumed");
+      await vi.waitFor(() => expect(usage).toEqual({ inputTokens: 11, outputTokens: 5 }));
+      expect(agentAudio).toHaveLength(0);
+      expect(transcripts).toEqual([]);
+      // A nova fala normalmente.
+      fake.send({ serverContent: { outputTranscription: { text: "fala nova" }, modelTurn: { parts: [{ inlineData: { data: Buffer.alloc(960).toString("base64"), mimeType: "audio/pcm;rate=24000" } }] }, turnComplete: true } });
+      await vi.waitFor(() => expect(transcripts).toEqual(["agent: fala nova"]));
+      expect(agentAudio).toHaveLength(1);
+      expect(order).toEqual(["resumed"]);
+      await session.close();
     });
 
     it("close() no meio da troca fecha as duas conexões, com um closed client só", async () => {

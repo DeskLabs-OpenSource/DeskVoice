@@ -265,6 +265,8 @@ interface Connection {
   retired: boolean;
   /** Já houve uma tentativa de retomada a partir desta conexão. */
   resumeTried: boolean;
+  /** O socket desta conexão já fechou. */
+  closed: boolean;
   /** O último `error` da conexão, que explica o fechamento que vem em seguida. */
   error?: Error;
 }
@@ -417,6 +419,7 @@ const engine: VoiceEngine = {
 
     /** Fechamento de uma conexão. Só o da atual decide alguma coisa; o das outras já foi tratado. */
     const onConnectionClosed = (conn: Connection, reason: string): void => {
+      conn.closed = true;
       if (conn !== current || ended) return;
       if (reason === "client") {
         if (closing) {
@@ -436,7 +439,7 @@ const engine: VoiceEngine = {
 
     const open = async (resumeHandle: string | undefined): Promise<Connection> => {
       const events = new SessionEmitter();
-      const conn: Connection = { events, socket: undefined, retired: false, resumeTried: false };
+      const conn: Connection = { events, socket: undefined, retired: false, resumeTried: false, closed: false };
       opening = conn;
       let setupDone: () => void = () => undefined;
       let setupFailed: (error: Error) => void = () => undefined;
@@ -474,8 +477,10 @@ const engine: VoiceEngine = {
     };
 
     /**
-     * Troca a conexão por uma nova com o handle, sem `closed`: uma tentativa por conexão. Falhou, a
-     * sessão cai como antes (`error` + `closed`), e o que estava guardado é descartado.
+     * Troca a conexão por uma nova com o handle, sem `closed`: uma tentativa por conexão. Falhou com a
+     * conexão de antes ainda aberta (o `goAway` dá um prazo), a ligação segue por ela até o provedor
+     * fechá-la, e o que estava guardado vai para ela; quando ela fechar, a sessão cai como antes. Falhou
+     * com ela já fechada (a queda), a sessão cai já (`error` + `closed`), e o guardado é descartado.
      */
     const resume = async (old: Connection): Promise<void> => {
       old.resumeTried = true;
@@ -486,8 +491,16 @@ const engine: VoiceEngine = {
       } catch (cause) {
         swapping = false;
         opening = undefined;
+        if (closing) {
+          held = [];
+          return;
+        }
+        if (!old.closed && !ended) {
+          for (const { message } of held) old.socket?.send(message);
+          held = [];
+          return;
+        }
         held = [];
-        if (closing) return;
         fail(new Error(`Gemini Live: a conexão ia fechar e a retomada da sessão falhou (${cause instanceof Error ? cause.message : String(cause)})`));
         old.retired = true;
         void old.socket?.close();

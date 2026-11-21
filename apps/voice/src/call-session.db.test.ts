@@ -747,16 +747,27 @@ describe("retomada do motor Gemini no meio da ligação (servidor falso)", { tim
     expect(ledger.reduce((sum, row) => sum + row.output_tokens, 0)).toBe(600);
   });
 
-  it("retomada recusada: engine_failed como antes, sem engine_resumed", async () => {
-    const { callId, session } = await geminiCall("gemini-resume-refused");
+  it("goAway e retomada recusada: a ligação segue pela conexão de antes, e quando ela fecha vem engine_failed, sem engine_resumed", async () => {
+    const { callId, transport, session } = await geminiCall("gemini-resume-refused");
     fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
-    fake.send({ goAway: {} });
+    fake.send({ goAway: { timeLeft: "10s" } });
     await fake.waitFor((message) => "setup" in message);
+    // Quem ligou fala durante a troca; com a recusa, o áudio guardado vai pela conexão de antes.
+    transport.callerAudio(100, 1000);
     fake.refuse(1008, "session not found");
+    const audio = await fake.waitFor((message) => JSON.stringify(message).includes('"audio":{"data"'));
+    expect(fake.connectionOf(audio)).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect((await callOf(app, callId)).status).toBe("in_progress");
+    expect(await kindsOf(app, callId)).not.toContain("engine_failed");
+
+    // O provedor fecha a de antes quando o prazo acaba: aí a ligação cai, como antes.
+    fake.drop(0);
     expect(await session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
     const kinds = await kindsOf(app, callId);
     expect(kinds).toContain("engine_failed");
     expect(kinds).not.toContain("engine_resumed");
+    expect(fake.connections()).toBe(2);
   });
 });
 
