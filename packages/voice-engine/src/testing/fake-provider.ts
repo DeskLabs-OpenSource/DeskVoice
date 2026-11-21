@@ -54,6 +54,8 @@ export async function startFakeProvider(options: { rejectUpgrade?: number } = {}
       if (index !== -1) return Promise.resolve(unread.splice(index, 1)[0] as Message);
       return new Promise((resolve) => waiters.push({ matches, resolve }));
     },
+    /** Alguma mensagem do motor ainda não lida satisfaz o predicado (sem consumir nada). */
+    hasUnread: (matches: (message: Message) => boolean): boolean => unread.some(matches),
     /** Manda na conexão mais recente. */
     send(message: unknown): void {
       client?.send(typeof message === "string" ? message : JSON.stringify(message));

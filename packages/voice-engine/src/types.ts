@@ -55,6 +55,11 @@ export interface VoiceSessionEvents {
   audio(pcm16_8k: Buffer): void;
   transcript(turn: { speaker: "user" | "agent"; text: string }): void;
   toolCall(call: { id: string; name: string; args: unknown }): void;
+  /**
+   * O provedor desistiu destas chamadas de ferramenta (o Gemini avisa com `toolCallCancellation`,
+   * em geral porque quem ligou falou por cima): o resultado delas não deve ir em `sendToolResult`.
+   */
+  toolCallCancelled(ids: string[]): void;
   /** O usuário falou por cima: quem toca o áudio deve descartar o que ainda não saiu. */
   interrupted(): void;
   /**
