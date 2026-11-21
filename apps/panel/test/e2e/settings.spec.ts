@@ -102,6 +102,89 @@ test("a ligação pelo WhatsApp mora em Linha telefônica, e Configurações ›
   await expect(page.locator("#ligacao-pelo-whatsapp").getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeInViewport();
 });
 
+const fakeId = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const FAKE_TRUNKS = [1, 2, 3].map((n) => ({
+  id: fakeId(n),
+  name: `Linha simulada ${n}`,
+  host: `192.0.2.${n}`,
+  username: `ramal${n}`,
+  authMode: "register",
+  callerId: null,
+  matchExtra: [],
+  outboundHost: null,
+  inboundAllowed: [],
+  inboundResolvedAt: null,
+  inboundFilter: true,
+  status: "ok",
+  lastCheckAt: null,
+  lastError: null,
+  secret: { configured: true },
+  applied: true,
+}));
+const FAKE_NUMBERS = Array.from({ length: 8 }, (_, n) => ({
+  id: fakeId(100 + n),
+  e164: `+55313222110${n}`,
+  trunkId: fakeId(1 + (n % 3)),
+  agentId: null,
+  agentName: null,
+  mode: "ai",
+  ivrMenuId: null,
+}));
+const FAKE_MENUS = [1, 2, 3].map((n) => ({
+  id: fakeId(200 + n),
+  name: `Menu simulado ${n}`,
+  language: "pt-BR",
+  timeoutMs: 5000,
+  maxAttempts: 2,
+  onNoChoice: "person",
+  promptAudioMs: null,
+  updatedAt: "2026-11-21T00:00:00.000Z",
+  options: ["1", "2", "3"].map((digit) => ({ digit, label: `Opção ${digit}`, action: "hangup", agentId: null, transferTo: null })),
+}));
+
+/**
+ * Segura as três leituras dos blocos acima da ligação pelo WhatsApp (linhas, números e menus) por
+ * mais de um segundo, e devolve listas que fazem esses blocos crescerem bem além da tela: é o
+ * empurrão que o "mudou para…" sofreria numa instalação com dados. Só a tela vê as listas.
+ */
+async function holdAboveReads(page: Page): Promise<void> {
+  const lists: Record<string, unknown[]> = { trunks: FAKE_TRUNKS, "phone-numbers": FAKE_NUMBERS, "ivr-menus": FAKE_MENUS };
+  for (const [path, list] of Object.entries(lists)) {
+    await page.route(`**/api/v1/${path}`, async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      await route.fulfill({ json: { ok: true, data: list } });
+    });
+  }
+}
+
+/** Espera as leituras chegarem, confere que os blocos de cima empurraram o da ligação para baixo da dobra, e exige o título na tela. */
+async function expectAnchorShownAfterReads(page: Page): Promise<void> {
+  await expect(page.getByText(FAKE_MENUS[2]?.name ?? "", { exact: true }).first()).toBeAttached();
+  await expect(page.getByRole("heading", { name: FAKE_TRUNKS[2]?.name ?? "", exact: true })).toBeAttached();
+  const anchor = page.locator("#ligacao-pelo-whatsapp");
+  const fold = page.viewportSize()?.height ?? 0;
+  // Sem isto o teste não prova nada: o bloco tem de estar mais abaixo do que cabe numa tela.
+  expect(await anchor.evaluate((element) => element.getBoundingClientRect().top + window.scrollY)).toBeGreaterThan(fold * 2);
+  await expect(anchor.getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeInViewport();
+}
+
+test("chegar em /line#ligacao-pelo-whatsapp com as leituras de cima atrasadas e grandes: o bloco fica na tela depois que elas chegam", async ({ page }) => {
+  await signIn(page);
+  await holdAboveReads(page);
+
+  // Pelo link do "mudou para…", que navega dentro do painel.
+  await page.goto("/settings/whatsapp");
+  await page.getByRole("status").filter({ hasText: settings.movedWhatsAppCalls }).getByRole("link", { name: settings.movedLink, exact: true }).click();
+  await expect(page).toHaveURL(/\/line#ligacao-pelo-whatsapp$/);
+  await expectAnchorShownAfterReads(page);
+
+  // Direto pelo endereço, como quem abre o link guardado.
+  await page.goto("/settings");
+  await page.goto("/line#ligacao-pelo-whatsapp");
+  await expectAnchorShownAfterReads(page);
+});
+
 test("o aviso de gravação mora em Privacidade e dados, acima da gravação; Regras das ligações aponta para lá, e salvar o texto persiste", async ({ page }) => {
   await signIn(page);
   const before = ((await (await page.request.get(RECORDING_NOTICE)).json()) as { data: { value: string | null } }).data.value;
