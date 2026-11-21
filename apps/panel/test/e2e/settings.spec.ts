@@ -1,13 +1,14 @@
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import agents from "../../src/i18n/pt-BR/agents";
 import commonEn from "../../src/i18n/en/common";
 import commonEs from "../../src/i18n/es/common";
 import { LOCALE_COOKIE } from "../../src/i18n/locales";
 import calls from "../../src/i18n/pt-BR/calls";
 import common from "../../src/i18n/pt-BR/common";
+import line from "../../src/i18n/pt-BR/line";
 import privacy from "../../src/i18n/pt-BR/privacy";
 import settings from "../../src/i18n/pt-BR/settings";
 import update from "../../src/i18n/pt-BR/update";
@@ -48,7 +49,8 @@ test("configurar: os blocos de uma instalação nova aparecem, e o limite de lig
   await expect(blockHeading(page, whatsapp.title)).toBeVisible();
   await expect(page.getByText(whatsapp.serviceAbsent, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: whatsapp.installService, exact: true })).toBeVisible();
-  // Ligação pelo WhatsApp: também opcional, também não vem instalada.
+  // Ligação pelo WhatsApp: também opcional, também não vem instalada. Mora em Linha telefônica.
+  await page.goto("/line");
   await expect(page.getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeVisible();
   await expect(page.getByText(whatsappCalls.serviceAbsent, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: whatsappCalls.installService, exact: true })).toBeVisible();
@@ -66,6 +68,202 @@ test("configurar: os blocos de uma instalação nova aparecem, e o limite de lig
 
   await page.reload();
   await expect(page.getByLabel(settings.inboundLimit)).toHaveValue(next);
+});
+
+/** Entra como um operador novo, pelo aceite do convite, que já abre a sessão dele. */
+async function signInAsOperator(page: Page): Promise<void> {
+  const id = unique();
+  const email = `operador-${id}@example.test`;
+  const password = `senha de teste ${id}`;
+  await signIn(page);
+  const created = await page.request.post("/api/v1/team/invites", { data: { email, name: `Operador ${id}`, role: "operator" } });
+  expect(created.status(), "the owner could not invite an operator").toBe(200);
+  const token = ((await created.json()) as { data: { link: string } }).data.link.split("/invite/")[1] ?? "";
+  await page.context().clearCookies();
+  const accepted = await page.request.post(`/api/v1/invites/${token}/accept`, { data: { name: `Operador ${id}`, password } });
+  expect(accepted.status(), "the operator could not accept the invite").toBe(200);
+}
+
+const RECORDING_NOTICE = "/api/v1/settings/recording_notice.text";
+
+test("a ligação pelo WhatsApp mora em Linha telefônica, e Configurações › WhatsApp aponta para lá por uma versão", async ({ page }) => {
+  await signIn(page);
+  // B1: o bloco está na Linha, e numa tela só.
+  await page.goto("/line");
+  await expect(page.locator("#ligacao-pelo-whatsapp").getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: whatsappCalls.installService, exact: true })).toBeVisible();
+
+  // B2: em WhatsApp, o bloco saiu e o "mudou para…" leva até ele.
+  await openSection(page, "whatsapp", "/settings/whatsapp", settings.sections.whatsapp);
+  await expect(blockHeading(page, whatsapp.title)).toBeVisible();
+  await expect(page.getByRole("heading", { name: whatsappCalls.title, exact: true })).toHaveCount(0);
+  const moved = page.getByRole("status").filter({ hasText: settings.movedWhatsAppCalls });
+  await expect(moved).toBeVisible();
+  await moved.getByRole("link", { name: settings.movedLink, exact: true }).click();
+  await expect(page).toHaveURL(/\/line#ligacao-pelo-whatsapp$/);
+  await expect(page.locator("#ligacao-pelo-whatsapp").getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeInViewport();
+});
+
+const fakeId = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const FAKE_TRUNKS = [1, 2, 3].map((n) => ({
+  id: fakeId(n),
+  name: `Linha simulada ${n}`,
+  host: `192.0.2.${n}`,
+  username: `ramal${n}`,
+  authMode: "register",
+  callerId: null,
+  matchExtra: [],
+  outboundHost: null,
+  inboundAllowed: [],
+  inboundResolvedAt: null,
+  inboundFilter: true,
+  status: "ok",
+  lastCheckAt: null,
+  lastError: null,
+  secret: { configured: true },
+  applied: true,
+}));
+const FAKE_NUMBERS = Array.from({ length: 8 }, (_, n) => ({
+  id: fakeId(100 + n),
+  e164: `+55313222110${n}`,
+  trunkId: fakeId(1 + (n % 3)),
+  agentId: null,
+  agentName: null,
+  mode: "ai",
+  ivrMenuId: null,
+}));
+const FAKE_MENUS = [1, 2, 3].map((n) => ({
+  id: fakeId(200 + n),
+  name: `Menu simulado ${n}`,
+  language: "pt-BR",
+  timeoutMs: 5000,
+  maxAttempts: 2,
+  onNoChoice: "person",
+  promptAudioMs: null,
+  updatedAt: "2026-11-21T00:00:00.000Z",
+  options: ["1", "2", "3"].map((digit) => ({ digit, label: `Opção ${digit}`, action: "hangup", agentId: null, transferTo: null })),
+}));
+
+/**
+ * Segura as três leituras dos blocos acima da ligação pelo WhatsApp (linhas, números e menus) por
+ * mais de um segundo, e devolve listas que fazem esses blocos crescerem bem além da tela: é o
+ * empurrão que o "mudou para…" sofreria numa instalação com dados. Só a tela vê as listas.
+ */
+async function holdAboveReads(page: Page): Promise<void> {
+  const lists: Record<string, unknown[]> = { trunks: FAKE_TRUNKS, "phone-numbers": FAKE_NUMBERS, "ivr-menus": FAKE_MENUS };
+  for (const [path, list] of Object.entries(lists)) {
+    await page.route(`**/api/v1/${path}`, async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      await route.fulfill({ json: { ok: true, data: list } });
+    });
+  }
+}
+
+/** Espera as leituras chegarem e confere que os blocos de cima empurraram o da ligação para baixo da dobra. */
+async function expectAboveReadsPushedAnchorDown(page: Page): Promise<Locator> {
+  await expect(page.getByText(FAKE_MENUS[2]?.name ?? "", { exact: true }).first()).toBeAttached();
+  await expect(page.getByRole("heading", { name: FAKE_TRUNKS[2]?.name ?? "", exact: true })).toBeAttached();
+  const anchor = page.locator("#ligacao-pelo-whatsapp");
+  const fold = page.viewportSize()?.height ?? 0;
+  // Sem isto o teste não prova nada: o bloco tem de estar mais abaixo do que cabe numa tela.
+  expect(await anchor.evaluate((element) => element.getBoundingClientRect().top + window.scrollY)).toBeGreaterThan(fold * 2);
+  return anchor;
+}
+
+/** Depois das leituras, o título do bloco da ligação pelo WhatsApp está na tela. */
+async function expectAnchorShownAfterReads(page: Page): Promise<void> {
+  const anchor = await expectAboveReadsPushedAnchorDown(page);
+  await expect(anchor.getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeInViewport();
+}
+
+test("pelo \"mudou para…\" até /line#ligacao-pelo-whatsapp, com as leituras de cima atrasadas e grandes: o bloco fica na tela depois que elas chegam", async ({ page }) => {
+  await signIn(page);
+  await holdAboveReads(page);
+  await page.goto("/settings/whatsapp");
+  await page.getByRole("status").filter({ hasText: settings.movedWhatsAppCalls }).getByRole("link", { name: settings.movedLink, exact: true }).click();
+  await expect(page).toHaveURL(/\/line#ligacao-pelo-whatsapp$/);
+  await expectAnchorShownAfterReads(page);
+});
+
+test("direto em /line#ligacao-pelo-whatsapp, com as leituras de cima atrasadas e grandes: o bloco fica na tela depois que elas chegam", async ({ page }) => {
+  await signIn(page);
+  await holdAboveReads(page);
+  // Como quem abre o link guardado: a página carrega do zero, já com o endereço do bloco.
+  await page.goto("/line#ligacao-pelo-whatsapp");
+  await expectAnchorShownAfterReads(page);
+});
+
+test("em /line sem endereço de bloco, com as mesmas leituras atrasadas e grandes: a página fica no topo, e o bloco da ligação pelo WhatsApp fora da tela", async ({ page }) => {
+  await signIn(page);
+  await holdAboveReads(page);
+  await page.goto("/line");
+  const anchor = await expectAboveReadsPushedAnchorDown(page);
+  await expect(page.getByRole("heading", { name: line.title, exact: true })).toBeInViewport();
+  await expect(anchor).not.toBeInViewport();
+});
+
+test("o aviso de gravação mora em Privacidade e dados, acima da gravação; Regras das ligações aponta para lá, e salvar o texto persiste", async ({ page }) => {
+  await signIn(page);
+  const before = ((await (await page.request.get(RECORDING_NOTICE)).json()) as { data: { value: string | null } }).data.value;
+  try {
+    // B4: em Regras das ligações, o bloco saiu e o "mudou para…" leva até ele.
+    await openSection(page, "rules", "/settings/calls", settings.sections.calls);
+    await expect(page.getByRole("heading", { name: settings.recordingTitle, exact: true })).toHaveCount(0);
+    const moved = page.getByRole("status").filter({ hasText: settings.movedRecordingNotice });
+    await expect(moved).toBeVisible();
+    await moved.getByRole("link", { name: settings.movedLink, exact: true }).click();
+    await expect(page).toHaveURL(/\/settings\/privacy#aviso-de-gravacao$/);
+    const block = page.locator("#aviso-de-gravacao");
+    await expect(block.getByRole("heading", { name: settings.recordingTitle, exact: true })).toBeInViewport();
+
+    // B3: logo acima da gravação das chamadas, o primeiro bloco do painel de privacidade.
+    const headings = page.getByRole("main").getByRole("heading", { level: 2 });
+    await expect(headings.nth(0)).toHaveText(settings.recordingTitle);
+    await expect(headings.nth(1)).toHaveText(privacy.recordingTitle);
+
+    // Salvar o texto funciona, e ele volta depois de recarregar.
+    const text = `Esta ligação é atendida por uma assistente virtual ${unique()}.`;
+    const field = block.getByLabel(settings.recordingText);
+    await expect(field).toHaveValue(before ?? "");
+    await field.fill(text);
+    await block.getByRole("button", { name: settings.saveRecording, exact: true }).click();
+    await expect(block.getByRole("status").filter({ hasText: common.actions.saved })).toBeVisible();
+    await page.reload();
+    await expect(page.locator("#aviso-de-gravacao").getByLabel(settings.recordingText)).toHaveValue(text);
+  } finally {
+    await page.request.put(RECORDING_NOTICE, { data: { value: before } });
+  }
+});
+
+test("o operador lê o aviso de gravação em Privacidade e dados, vê para onde ele foi, e não vê a ligação pelo WhatsApp", async ({ page }) => {
+  const text = `Aviso lido pelo operador ${unique()}.`;
+  await signIn(page);
+  const before = ((await (await page.request.get(RECORDING_NOTICE)).json()) as { data: { value: string | null } }).data.value;
+  expect((await page.request.put(RECORDING_NOTICE, { data: { value: text } })).status()).toBe(200);
+  try {
+    await signInAsOperator(page);
+    // B4, para o operador: o "mudou para…" é para todos, e leva ao texto, que ele lê sem editar.
+    await page.goto("/settings/calls");
+    await page.getByRole("status").filter({ hasText: settings.movedRecordingNotice }).getByRole("link", { name: settings.movedLink, exact: true }).click();
+    await expect(page).toHaveURL(/\/settings\/privacy#aviso-de-gravacao$/);
+    const field = page.locator("#aviso-de-gravacao").getByLabel(settings.recordingText);
+    await expect(field).toHaveValue(text);
+    await expect(field).toBeDisabled();
+    await expect(page.getByRole("button", { name: settings.saveRecording, exact: true })).toHaveCount(0);
+
+    // A ligação pelo WhatsApp continua só para quem configura: nem na Linha, nem o "mudou para…".
+    await page.goto("/line");
+    await expect(page.getByRole("heading", { level: 1, name: line.title, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: whatsappCalls.title, exact: true })).toHaveCount(0);
+    await page.goto("/settings/whatsapp");
+    await expect(page.getByRole("heading", { level: 1, name: settings.sections.whatsapp, exact: true })).toBeVisible();
+    await expect(page.getByText(settings.movedWhatsAppCalls)).toHaveCount(0);
+  } finally {
+    await page.context().clearCookies();
+    await signIn(page);
+    await page.request.put(RECORDING_NOTICE, { data: { value: before } });
+  }
 });
 
 test("subtelas de Configurações: sem barra de abas, com o nome no título e \"← Configurações\" de volta à central", async ({ page }) => {

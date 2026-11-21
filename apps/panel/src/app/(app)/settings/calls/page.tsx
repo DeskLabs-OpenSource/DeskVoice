@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import en from "../../../../i18n/en/settings";
 import es from "../../../../i18n/es/settings";
@@ -7,9 +8,10 @@ import ptBR from "../../../../i18n/pt-BR/settings";
 import { useDict } from "../../../../i18n/provider";
 import { useApi } from "../../../../ui/api";
 import { ActionStatus, useAction } from "../../../../ui/errors";
-import { Button, Field, Notice, Panel, Select, Switch, TextArea, TextInput } from "../../../../ui/kit";
+import { Button, Field, Notice, Panel, Select, Switch, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
 import type { Setting } from "../../../../ui/types";
+import { RECORDING_NOTICE_ANCHOR } from "../recording-notice-panel";
 import { put } from "../setting-api";
 
 export default function CallsSettings() {
@@ -17,7 +19,6 @@ export default function CallsSettings() {
   const canConfigure = useCanConfigure();
   const inboundLimit = useApi<Setting<number>>("/settings/inbound.max_concurrent_calls");
   const onTimeout = useApi<Setting<"denied" | "approved">>("/settings/approvals.default_on_timeout");
-  const recording = useApi<Setting<string>>("/settings/recording_notice.text");
   const voicemail = useApi<Setting<boolean>>("/settings/voicemail.enabled");
   const voicemailSeconds = useApi<Setting<number>>("/settings/voicemail.max_seconds");
   const voicemailLanguage = useApi<Setting<"pt-BR" | "en" | "es">>("/settings/voicemail.language");
@@ -25,18 +26,15 @@ export default function CallsSettings() {
   const privacy = useApi<{ recording: boolean }>(canConfigure ? "/privacy" : null);
   const saveInboundLimit = useAction();
   const saveOnTimeout = useAction();
-  const saveRecording = useAction();
   const saveVoicemail = useAction();
   const saveVoicemailSeconds = useAction();
   const saveVoicemailLanguage = useAction();
   const [limit, setLimit] = useState("");
-  const [notice, setNotice] = useState("");
   const [maxSeconds, setMaxSeconds] = useState("");
 
   useEffect(() => {
     if (inboundLimit.data?.value != null) setLimit(String(inboundLimit.data.value));
   }, [inboundLimit.data]);
-  useEffect(() => setNotice(recording.data?.value ?? ""), [recording.data]);
   useEffect(() => {
     if (voicemailSeconds.data?.value != null) setMaxSeconds(String(voicemailSeconds.data.value));
   }, [voicemailSeconds.data]);
@@ -131,27 +129,15 @@ export default function CallsSettings() {
         </div>
       </Panel>
 
-      <Panel title={t.recordingTitle} description={t.recordingLead}>
-        <form
-          className="grid gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveRecording.run(() => put("recording_notice.text", notice.trim() || null)).then(recording.reload);
-          }}
-        >
-          <Field label={t.recordingText}>
-            <TextArea rows={3} disabled={!canConfigure} placeholder={t.recordingExample} value={notice} onChange={(event) => setNotice(event.target.value)} maxLength={500} />
-          </Field>
-          {canConfigure ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" busy={saveRecording.busy}>
-                {t.saveRecording}
-              </Button>
-              <ActionStatus action={saveRecording} />
-            </div>
-          ) : null}
-        </form>
-      </Panel>
+      {/* Por uma versão: o aviso de gravação mudou para Privacidade e dados. Todos o liam aqui, todos veem para onde foi. */}
+      <Notice>
+        <p>
+          {t.movedRecordingNotice}{" "}
+          <Link className="font-bold underline underline-offset-4" href={`/settings/privacy#${RECORDING_NOTICE_ANCHOR}`}>
+            {t.movedLink}
+          </Link>
+        </p>
+      </Notice>
     </>
   );
 }
