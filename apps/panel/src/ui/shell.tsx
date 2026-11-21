@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Buildings, ChartBar, CircleHalf, GearSix, Headset, ListChecks, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UsersThree, Waveform } from "@phosphor-icons/react";
+import { Bell, Buildings, ChartBar, CircleHalf, GearSix, Headset, ListChecks, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UserCircle, UsersThree, Waveform } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -61,6 +61,8 @@ const NAV = [
     ],
   },
 ] as const;
+
+const ACCOUNT = "/settings/account";
 
 const DOT: Record<HealthStatus, string> = { ok: "bg-ok", warn: "bg-warn", fail: "bg-fail" };
 
@@ -283,7 +285,8 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
             {t.navGroups[group.key]}
           </span>
           {group.items.map(({ href, key, icon: Icon }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`);
+            // A própria conta mora no bloco da conta: nela, quem fica marcado é "Minha conta".
+            const active = (pathname === href || pathname.startsWith(`${href}/`)) && pathname !== ACCOUNT;
             return (
               <Link
                 key={href}
@@ -308,6 +311,16 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
         <span className="truncate font-bold">{me.name}</span>
         <span className="text-[0.8rem] text-muted">{t.roles[me.role]}</span>
       </div>
+      {/* A própria conta (contato e senha), que qualquer papel edita: mora aqui desde que Configurações
+          virou uma central sem barra de abas (central de configuração, parte 4). A rota é a de sempre. */}
+      <Link
+        href={ACCOUNT}
+        aria-current={pathname === ACCOUNT ? "page" : undefined}
+        className="flex h-8 basis-full items-center gap-2 rounded-xs px-1 text-[0.87rem] text-muted hover:bg-sunken hover:text-ink aria-[current=page]:font-bold aria-[current=page]:text-ink"
+      >
+        <UserCircle size={18} weight="duotone" aria-hidden />
+        <span className="truncate">{t.shell.myAccount}</span>
+      </Link>
       {/* A área da instalação mora aqui, e não na navegação principal: quem não administra nem vê a porta. */}
       {me.installationAdmin ? (
         <Link
