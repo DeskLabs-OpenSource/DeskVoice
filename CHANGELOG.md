@@ -3,6 +3,26 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.43.0] - 2026-11-21
+
+### Adicionado
+
+- **Uma organização nova já nasce no fuso e no idioma que a administração da instalação escolheu** Na área da instalação, em Organizações, a seção "Padrões para organizações novas" ganhou o fuso e o idioma com que cada organização nova nasce. O fuso, em nome IANA como America/Sao_Paulo, é o da janela de ligações e o do mês de custo da organização nova, que pode trocá-lo depois na política de saída; um fuso que não existe é recusado. O idioma (português, inglês ou espanhol) é o que o formulário de agente novo e o de menu novo dessa organização propõem: agentes e menus que já existem não mudam, e a língua da tela continua sendo a de cada navegador. Sem padrão escolhido, a organização nova nasce em America/Sao_Paulo e propõe português, como antes, e as que já existem também seguem assim. A organização nova recebe uma cópia: mudar o padrão depois não mexe no fuso, no mês de custo nem no idioma de nenhuma organização que já existe. A mudança do padrão aparece na Auditoria da instalação. Crédito: @melgarafael.
+
+### Alterado
+
+- **O aviso de atualização no sino diz quem pode seguir, e quem administra a instalação ganha o link "Ver a atualização"** O aviso de atualização continua chegando ao sino de toda organização, porque a atualização derruba o sistema de todas. O texto agora diz quem acompanha o resultado: "Quem administra a instalação … em Administrar a instalação → Atualização". Quem administra a instalação vê no aviso o link "Ver a atualização", que leva a `/installation/update`. Quem não administra lê o aviso sem link, e não cai mais numa tela que não abre. Os avisos já gravados ficam como estavam, sem link. Os avisos do serviço de WhatsApp não mudam. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+### Corrigido
+
+- **No Gemini Live, a ferramenta que o Google cancela não tem mais o resultado entregue ao modelo** Quando quem ligou fala por cima do agente enquanto uma ferramenta roda, o Gemini Live pode avisar que desistiu daquela chamada. Antes, o aviso era ignorado, e o resultado da ferramenta ia ao modelo assim mesmo, quando ele já não o esperava. Agora o resultado da chamada cancelada é descartado, e a linha do tempo da ligação mostra que o motor desistiu da ferramenta. O que a ferramenta já tinha feito continua feito e registrado: um webhook que já recebeu o pedido, por exemplo, não é desfeito. Isso foi conferido contra um servidor falso. Não se sabe com que frequência o aviso vem numa ligação real. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+## [0.42.1] - 2026-11-21
+
+### Corrigido
+
+- **O ajuste de NAT das linhas passa a valer, e a checagem de saúde reprova quando um módulo SIP não carrega** Na imagem do Asterisk que o DeskVoice usa, com todos os módulos SIP dela ligados, o limite de módulos do PJSIP estourava na partida ("Too many modules registered") e o último módulo SIP a carregar ficava parado. Qual depende da máquina: numa delas era o `res_pjsip_nat`, e o `force_rport` e o `rewrite_contact` de toda linha não faziam efeito, e uma linha atrás de NAT ligava e ficava muda. O DeskVoice agora traz o próprio `modules.conf`, igual ao da imagem, mas sem três módulos SIP que ele não usa e que ocupam vaga nesse limite (SIP por WebSocket, mensagem de texto por SIP e o histórico de pacotes), e o `bash install/healthcheck.sh` ganha a linha essencial "Módulos SIP", que reprova se qualquer módulo SIP estiver parado ou se o log da partida tiver o estouro. A atualização reinicia o Asterisk **uma vez**, porque a montagem nova recria o contêiner, e as ligações em andamento nesse momento caem: vale atualizar fora do horário de ligações. Depois dela, uma linha atrás de NAT que "ligava e ficava muda" pode passar a ter áudio, sem nada a fazer. Quem troca a imagem por `ASTERISK_IMAGE`: se a imagem escolhida não carregar algum módulo SIP, a checagem de saúde reprova e a atualização volta para a versão anterior, e a linha "Módulos SIP" diz qual módulo falta. Crédito: @melgarafael.
+
 ## [0.42.0] - 2026-11-21
 
 ### Adicionado

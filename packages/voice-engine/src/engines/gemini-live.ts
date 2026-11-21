@@ -74,6 +74,15 @@
  *   handle alcança uma chamada de ferramenta em curso (a página não diz quando `resumable` é falso);
  *   se o `usageMetadata` da conexão nova recomeça do zero (aqui, como antes, é incremento e soma).
  *
+ * Cancelamento de ferramenta (`toolCallCancelled`), consultado em 2026-11-21
+ * (https://aistudio.google.com/api-reference/live, `BidiGenerateContentToolCallCancellation`): o
+ * servidor avisa que as chamadas de ferramenta com estes `ids` "should not have been executed and
+ * should be cancelled"; "This message occurs only in cases where the clients interrupt server turns";
+ * se houve efeito, "clients may attempt to undo the tool calls". Aqui o motor só repassa os `ids`:
+ * quem roda a ferramenta descarta o resultado, e o efeito que já saiu não é desfeito.
+ *   Não confirmado contra o servidor real: com que frequência o aviso vem numa ligação, e se o modelo
+ *   reclama de um resultado que chegue mesmo assim.
+ *
  * Orientação ao agente (`VoiceSession.guide`): este motor **não** a recebe na v1, e não declara o
  * método. Consultado em 2026-11-17 (https://aistudio.google.com/api-reference/live):
  *   - `systemInstruction` só vai no `setup`, no começo da sessão;
@@ -208,6 +217,7 @@ const serverMessage = z.object({
   toolCall: z
     .object({ functionCalls: z.array(z.object({ id: z.string().optional(), name: z.string(), args: z.unknown() })) })
     .optional(),
+  toolCallCancellation: z.object({ ids: z.array(z.string()) }).optional(),
   usageMetadata: z
     .object({ promptTokenCount: z.number().optional(), responseTokenCount: z.number().optional() })
     .optional(),
@@ -364,7 +374,7 @@ const engine: VoiceEngine = {
     };
 
     const onMessage = (conn: Connection, message: ServerMessage): void => {
-      const { serverContent, toolCall, usageMetadata, sessionResumptionUpdate, goAway } = message;
+      const { serverContent, toolCall, toolCallCancellation, usageMetadata, sessionResumptionUpdate, goAway } = message;
       // O consumo de qualquer conexão conta, inclusive o da que já saiu: o provedor cobrou.
       if (usageMetadata) {
         emitter.emit("usage", {
@@ -411,6 +421,9 @@ const engine: VoiceEngine = {
           emitter.emit("toolCall", { id, name: call.name, args: call.args ?? {} });
         }
       }
+
+      // O modelo desistiu destas chamadas: quem roda a ferramenta descarta o resultado.
+      if (toolCallCancellation && toolCallCancellation.ids.length > 0) emitter.emit("toolCallCancelled", toolCallCancellation.ids);
 
       // O provedor avisa que vai fechar esta conexão: a troca começa já, e esta segue até a nova abrir.
       // Sem handle não há o que retomar, e a conexão cai como antes quando o prazo acabar.

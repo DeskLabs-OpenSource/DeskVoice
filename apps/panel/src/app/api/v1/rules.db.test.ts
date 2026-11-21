@@ -814,7 +814,7 @@ describe("my contact", () => {
     expect(before.data).toMatchObject({ role: "operator", phone: null, whatsapp: null });
 
     const saved = await call(patchMe, { method: "PATCH", cookie: operator.cookie, body: { name: "  Ana Operadora ", phone: "(31) 98888-1111", whatsapp: "031988882222" } });
-    expect(saved.data).toEqual({ name: "Ana Operadora", email: operator.email, role: "operator", phone: "+5531988881111", whatsapp: "+5531988882222", organizationName: "rules" });
+    expect(saved.data).toEqual({ name: "Ana Operadora", email: operator.email, role: "operator", phone: "+5531988881111", whatsapp: "+5531988882222", organizationName: "rules", organizationLanguage: null });
     expect((await call(getMe, { cookie: operator.cookie })).data).toEqual(saved.data);
     expect(await stored("select phone_e164, whatsapp_e164 from users where id = $1", [operator.id])).toEqual({ phone_e164: "+5531988881111", whatsapp_e164: "+5531988882222" });
     // O dono, na mesma organização, não foi tocado.
