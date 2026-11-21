@@ -44,6 +44,7 @@ const common: CommonDictionary = {
     followUpOpen: "Ver el pendiente",
     followUpGone: "Pendiente borrado por el plazo de conservación.",
     organization: "Organización",
+    myAccount: "Mi cuenta",
   },
   roles: { owner: "Dueño", admin: "Administrador", operator: "Operador" },
   health: {

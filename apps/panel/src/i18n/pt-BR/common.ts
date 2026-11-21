@@ -43,6 +43,8 @@ const common = {
     followUpGone: "Pendência apagada pelo prazo de guarda.",
     /** O seletor do topo, só para quem tem vínculo ativo em mais de uma organização. */
     organization: "Organização",
+    /** No bloco da conta: a tela da própria conta, `/settings/account`. */
+    myAccount: "Minha conta",
   },
   roles: { owner: "Dono", admin: "Administrador", operator: "Operador" },
   health: {

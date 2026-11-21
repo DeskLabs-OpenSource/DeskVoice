@@ -44,6 +44,7 @@ const common: CommonDictionary = {
     followUpOpen: "See the follow-up",
     followUpGone: "Follow-up deleted by the retention period.",
     organization: "Organization",
+    myAccount: "My account",
   },
   roles: { owner: "Owner", admin: "Administrator", operator: "Operator" },
   health: {

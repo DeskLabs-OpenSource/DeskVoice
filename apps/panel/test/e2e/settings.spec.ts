@@ -1,5 +1,11 @@
+import { existsSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import agents from "../../src/i18n/pt-BR/agents";
+import commonEn from "../../src/i18n/en/common";
+import commonEs from "../../src/i18n/es/common";
+import { LOCALE_COOKIE } from "../../src/i18n/locales";
 import calls from "../../src/i18n/pt-BR/calls";
 import common from "../../src/i18n/pt-BR/common";
 import privacy from "../../src/i18n/pt-BR/privacy";
@@ -9,31 +15,35 @@ import whatsapp from "../../src/i18n/pt-BR/whatsapp";
 import whatsappCalls from "../../src/i18n/pt-BR/whatsapp-calls";
 import { signIn, unique } from "./session";
 
-const sectionLink = (page: Page, name: string) => page.getByRole("navigation", { name: settings.sectionsNav }).getByRole("link", { name, exact: true });
+const hubCard = (page: Page, key: string) => page.locator(`[data-card="${key}"]`);
+/** O link "← Configurações" de uma subtela: fica no conteúdo, e não no menu. */
+const backLink = (page: Page) => page.getByRole("main").getByRole("link", { name: common.nav.settings, exact: true });
 
-/** Vai à seção pela navegação de Configurações, como quem usa, e confere que ela ficou marcada. */
-async function openSection(page: Page, name: string, path: string): Promise<void> {
-  await sectionLink(page, name).click();
+/** Um título de bloco dentro da subtela. O título da tela (h1) fica de fora: em WhatsApp, os dois têm o mesmo nome. */
+const blockHeading = (page: Page, name: string) => page.getByRole("heading", { name, exact: true }).and(page.locator(":not(h1)"));
+
+/** Vai à subtela pelo cartão da central, como quem usa, e confere que ela chegou com o nome e o caminho de volta. */
+async function openSection(page: Page, card: string, path: string, title: string): Promise<void> {
+  await page.goto("/settings");
+  await hubCard(page, card).click();
   await expect(page).toHaveURL(new RegExp(`${path}$`));
-  await expect(sectionLink(page, name)).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
+  await expect(backLink(page)).toBeVisible();
 }
 
 test("configurar: os blocos de uma instalação nova aparecem, e o limite de ligações recebidas persiste", async ({ page }) => {
   await signIn(page);
-  await page.goto("/settings/ai");
-  await expect(page.getByRole("heading", { level: 1, name: settings.title })).toBeVisible();
-
   // Inteligência artificial, a seção de `/settings/ai`: numa instalação nova nenhuma chave foi cadastrada.
-  await expect(sectionLink(page, settings.sections.ai)).toHaveAttribute("aria-current", "page");
+  await openSection(page, "engines", "/settings/ai", settings.sections.ai);
   await expect(page.getByRole("heading", { name: settings.enginesTitle, exact: true })).toBeVisible();
   await expect(page.getByText(settings.keyMissing, { exact: true }).first()).toBeVisible();
   // Versão e atualização: o bloco carregou (a versão em execução foi lida), e não ficou no esqueleto.
-  await openSection(page, settings.sections.system, "/settings/system");
+  await openSection(page, "system", "/settings/system", settings.sections.system);
   await expect(page.getByRole("heading", { name: update.title, exact: true })).toBeVisible();
   await expect(page.getByText(update.running, { exact: true })).toBeVisible();
   // WhatsApp: o serviço é opcional e não vem instalado.
-  await openSection(page, settings.sections.whatsapp, "/settings/whatsapp");
-  await expect(page.getByRole("heading", { name: whatsapp.title, exact: true })).toBeVisible();
+  await openSection(page, "whatsapp", "/settings/whatsapp", settings.sections.whatsapp);
+  await expect(blockHeading(page, whatsapp.title)).toBeVisible();
   await expect(page.getByText(whatsapp.serviceAbsent, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: whatsapp.installService, exact: true })).toBeVisible();
   // Ligação pelo WhatsApp: também opcional, também não vem instalada.
@@ -41,7 +51,7 @@ test("configurar: os blocos de uma instalação nova aparecem, e o limite de lig
   await expect(page.getByText(whatsappCalls.serviceAbsent, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: whatsappCalls.installService, exact: true })).toBeVisible();
 
-  await openSection(page, settings.sections.calls, "/settings/calls");
+  await openSection(page, "rules", "/settings/calls", settings.sections.calls);
   await expect(page.getByRole("heading", { name: settings.inboundLimitTitle, exact: true })).toBeVisible();
   const limit = page.getByLabel(settings.inboundLimit);
   // Espera o valor gravado chegar ao campo antes de trocar: senão a resposta atrasada sobrescreve a digitação.
@@ -56,25 +66,78 @@ test("configurar: os blocos de uma instalação nova aparecem, e o limite de lig
   await expect(page.getByLabel(settings.inboundLimit)).toHaveValue(next);
 });
 
-test("seções de Configurações: a navegação leva a cada uma, e Configurações segue marcada no menu", async ({ page }) => {
+test("subtelas de Configurações: sem barra de abas, com o nome no título e \"← Configurações\" de volta à central", async ({ page }) => {
+  await signIn(page);
+  const sections = [
+    { card: "rules", path: "/settings/calls", title: settings.sections.calls, heading: settings.approvalTitle },
+    { card: "whatsapp", path: "/settings/whatsapp", title: settings.sections.whatsapp, heading: settings.whatsappTitle },
+    { card: "webhooks", path: "/settings/integrations", title: settings.sections.integrations, heading: settings.webhooksTitle },
+    { card: "privacy", path: "/settings/privacy", title: settings.sections.privacy, heading: privacy.retentionTitle },
+    { card: "system", path: "/settings/system", title: settings.sections.system, heading: update.title },
+    { card: "engines", path: "/settings/ai", title: settings.sections.ai, heading: settings.enginesTitle },
+  ];
+  const mainNav = page.getByRole("navigation", { name: common.shell.mainNav });
+  for (const section of sections) {
+    await openSection(page, section.card, section.path, section.title);
+    await expect(blockHeading(page, section.heading)).toBeVisible();
+    // A barra de abas saiu: nenhuma navegação dentro do conteúdo.
+    await expect(page.getByRole("main").getByRole("navigation")).toHaveCount(0);
+    await expect(mainNav.getByRole("link", { name: common.nav.settings })).toHaveAttribute("aria-current", "page");
+    // O caminho de volta leva à central.
+    await backLink(page).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(hubCard(page, section.card)).toBeVisible();
+  }
+});
+
+test("Minha conta: mora no bloco da conta, abre /settings/account e é a única marcada nela", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/calls");
+  const aside = page.locator("aside");
+  await aside.getByRole("link", { name: common.shell.myAccount, exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/account$/);
+  await expect(page.getByRole("heading", { level: 1, name: settings.sections.account, exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: settings.passwordTitle, exact: true })).toBeVisible();
+  await expect(backLink(page)).toBeVisible();
+  await expect(aside.getByRole("link", { name: common.shell.myAccount, exact: true })).toHaveAttribute("aria-current", "page");
+  // Na própria conta, Configurações não fica marcada no menu: uma marca só.
+  await expect(page.getByRole("navigation", { name: common.shell.mainNav }).getByRole("link", { name: common.nav.settings })).not.toHaveAttribute("aria-current", "page");
+  await expect(aside.locator('[aria-current="page"]')).toHaveCount(1);
+});
+
+for (const [locale, dictionary] of [["pt-BR", common], ["en", commonEn], ["es", commonEs]] as const) {
+  test(`Minha conta no celular, em ${locale}: o bloco da conta, embaixo da tela, leva a /settings/account`, async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.context().addCookies([{ name: LOCALE_COOKIE, value: locale, url: baseURL ?? "http://127.0.0.1:3080" }]);
+    await signIn(page);
+    await page.goto("/calls");
+    // A lateral não aparece no celular: o link é o do bloco da conta no fim da página.
+    await expect(page.locator("aside")).toBeHidden();
+    const link = page.getByRole("link", { name: dictionary.shell.myAccount, exact: true });
+    await expect(link).toHaveCount(1);
+    await link.click();
+    await expect(page).toHaveURL(/\/settings\/account$/);
+  });
+}
+
+// O fracasso que o desenho pede para conferir: uma tela de Configurações sem caminho de chegada.
+// A lista vem das pastas com `page.tsx`, e não escrita aqui: uma subtela nova sem cartão reprova.
+const SETTINGS_DIR = fileURLToPath(new URL("../../src/app/(app)/settings", import.meta.url));
+const SUBSCREENS = readdirSync(SETTINGS_DIR, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && existsSync(path.join(SETTINGS_DIR, entry.name, "page.tsx")))
+  .map((entry) => `/settings/${entry.name}`);
+
+test("nenhuma tela de Configurações fica órfã: cada subtela tem um cartão na central, e a conta tem o bloco da conta", async ({ page }) => {
+  expect(SUBSCREENS).toHaveLength(11);
   await signIn(page);
   await page.goto("/settings");
-  const sections = [
-    { name: settings.sections.calls, path: "/settings/calls", heading: settings.approvalTitle },
-    { name: settings.sections.whatsapp, path: "/settings/whatsapp", heading: settings.whatsappTitle },
-    { name: settings.sections.integrations, path: "/settings/integrations", heading: settings.webhooksTitle },
-    { name: settings.sections.privacy, path: "/settings/privacy", heading: privacy.retentionTitle },
-    { name: settings.sections.system, path: "/settings/system", heading: update.title },
-    { name: settings.sections.account, path: "/settings/account", heading: settings.passwordTitle },
-    { name: settings.sections.ai, path: "/settings/ai", heading: settings.enginesTitle },
-  ];
-  for (const section of sections) {
-    await openSection(page, section.name, section.path);
-    await expect(page.getByRole("heading", { name: section.heading, exact: true })).toBeVisible();
-    // Uma seção marcada por vez.
-    await expect(page.getByRole("navigation", { name: settings.sectionsNav }).locator('[aria-current="page"]')).toHaveCount(1);
-    await expect(page.getByRole("navigation", { name: common.shell.mainNav }).getByRole("link", { name: common.nav.settings })).toHaveAttribute("aria-current", "page");
-  }
+  await expect(hubCard(page, "engines")).toBeVisible();
+  const cards = await page.locator("[data-card]").evaluateAll((links) => links.map((link) => new URL((link as HTMLAnchorElement).href).pathname));
+  const account = await page.locator("aside").getByRole("link", { name: common.shell.myAccount, exact: true }).getAttribute("href");
+  // "Sistema" só tem cartão enquanto a lista de quem administra a instalação não é explícita, que é
+  // o caso do CI. Explícita, a tela redireciona para a área da instalação e não precisa de cartão.
+  const reached = new Set([...cards, account]);
+  expect(SUBSCREENS.filter((screen) => !reached.has(screen))).toEqual([]);
 });
 
 /** Troca o `data` de uma leitura `GET` da API, mantendo o resto da resposta de verdade. */
@@ -88,16 +151,17 @@ async function rewrite<T>(page: Page, path: string, change: (data: T) => T): Pro
 }
 
 type EngineRead = { requiresKey: boolean; keyConfigured: boolean };
-const hubCard = (page: Page, key: string) => page.locator(`[data-card="${key}"]`);
 const firstSteps = (page: Page) => page.getByRole("region", { name: settings.hub.firstSteps.title });
 
-test("a central em /settings: nenhuma aba marcada, e cada cartão abre a tela que já existe", async ({ page }) => {
+test("a central em /settings: sem barra de abas, e cada cartão abre a tela que já existe", async ({ page }) => {
   await signIn(page);
   await page.goto("/settings");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByRole("heading", { level: 1, name: settings.title })).toBeVisible();
   await expect(hubCard(page, "engines")).toBeVisible();
-  await expect(page.getByRole("navigation", { name: settings.sectionsNav }).locator('[aria-current="page"]')).toHaveCount(0);
+  // A central não tem barra de abas nem o caminho de volta, que é das subtelas.
+  await expect(page.getByRole("main").getByRole("navigation")).toHaveCount(0);
+  await expect(backLink(page)).toHaveCount(0);
   const cards = [
     { key: "engines", path: "/settings/ai", heading: settings.enginesTitle },
     { key: "brains", path: "/settings/brains" },
@@ -115,7 +179,7 @@ test("a central em /settings: nenhuma aba marcada, e cada cartão abre a tela qu
     await page.goto("/settings");
     await hubCard(page, card.key).click();
     await expect(page).toHaveURL(new RegExp(`${card.path}$`));
-    if (card.heading) await expect(page.getByRole("heading", { name: card.heading, exact: true })).toBeVisible();
+    if (card.heading) await expect(blockHeading(page, card.heading)).toBeVisible();
   }
 });
 
@@ -199,9 +263,8 @@ test("depois da ligação: o opcional ligado antes aparece ligado na tela nova, 
     // Antes: o que a tela de IA gravava ao ligar cada opcional (`put(chave, true)`), pela mesma rota.
     for (const key of OPTIONALS) await putSetting(page, key, true);
 
-    await page.goto("/settings");
-    await hubCard(page, "outcome").click();
-    await expect(page).toHaveURL(/\/settings\/after-call$/);
+    await openSection(page, "outcome", "/settings/after-call", settings.hub.cards.outcome.title);
+    await expect(blockHeading(page, settings.outcomeTitle)).toBeVisible();
     for (const label of [settings.outcomeSwitch, settings.analysisSwitch, settings.transcriptionSwitch, settings.autoTranscriptionSwitch])
       await expect(page.getByRole("switch", { name: label, exact: true }), label).toHaveAttribute("aria-checked", "true");
 
