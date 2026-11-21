@@ -32,6 +32,15 @@ export class UnsafeDestinationError extends Error {
   override name = "UnsafeDestinationError";
 }
 
+/**
+ * O destino não respondeu dentro do prazo. Não é erro do destino nem da rede: o pedido pode ter
+ * chegado e sido registrado do outro lado, e quem chama não sabe. Por isso é uma classe à parte,
+ * para quem chama não tratar o "não sei" como "falhou".
+ */
+export class SafeFetchTimeoutError extends Error {
+  override name = "SafeFetchTimeoutError";
+}
+
 const TIMEOUT_MS = 10_000;
 const MAX_BYTES = 16 * 1024;
 const MAX_REDIRECTS = 3;
@@ -124,7 +133,19 @@ export async function safeFetch(target: string, request: SafeRequest = {}, optio
 
 async function follow(target: string, request: SafeRequest, doFetch: Fetch, lookup: HostLookup, options: SafeFetchOptions): Promise<SafeResponse> {
   // Um prazo só para a operação inteira, saltos e leitura do corpo incluídos.
-  const signal = AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS);
+  const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    return await followWithin(target, request, doFetch, lookup, options, signal);
+  } catch (error) {
+    // Destino recusado pela guarda continua recusado, mesmo que o prazo tenha passado no meio.
+    const unsafe = error instanceof UnsafeDestinationError || (error instanceof Error && error.cause instanceof UnsafeDestinationError);
+    if (signal.aborted && !unsafe) throw new SafeFetchTimeoutError(`Destination did not answer within the timeout (${timeoutMs} ms)`, { cause: error });
+    throw error;
+  }
+}
+
+async function followWithin(target: string, request: SafeRequest, doFetch: Fetch, lookup: HostLookup, options: SafeFetchOptions, signal: AbortSignal): Promise<SafeResponse> {
   let url = target;
   let { method = "GET", headers = {}, body } = request;
 
