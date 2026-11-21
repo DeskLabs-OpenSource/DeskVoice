@@ -55,6 +55,11 @@
  *   Com resposta em curso ou item já fechado, `closeCallerTurn` não faz nada: o `commit` "will produce
  *   an error if the input audio buffer is empty" (referência), e o servidor já vai responder.
  *
+ * Fim da vez de quem ligou (`callerTurnEnded`, a latência por turno): `input_audio_buffer.speech_stopped`,
+ * o par de `speech_started` na detecção de fala do servidor (`server_vad`). Não reli a página para
+ * este evento: o nome vem da mesma referência acima, e os campos dele (`audio_end_ms`, `item_id`)
+ * não são lidos. O instante que conta é o da chegada, no relógio de quem mede.
+ *
  * Corte da fala interrompida (`played`), consultado em 2026-11-20:
  *   - https://developers.openai.com/api/reference/resources/realtime/client-events
  *     (`conversation.item.truncate` com `item_id`, `content_index: 0` e `audio_end_ms` inteiro; "audio_end_ms
@@ -202,6 +207,7 @@ const serverEvent = z.discriminatedUnion("type", [
     arguments: z.string(),
   }),
   z.object({ type: z.literal("input_audio_buffer.speech_started") }),
+  z.object({ type: z.literal("input_audio_buffer.speech_stopped") }),
   z.object({
     type: z.literal("response.done"),
     response: z.object({
@@ -427,6 +433,10 @@ const engine: VoiceEngine = {
           // com `played`, e o corte no histórico sai de lá.
           emitter.emit("interrupted");
           emitter.emit("callerActivity", { words: false });
+          break;
+        case "input_audio_buffer.speech_stopped":
+          // O fim da fala que a detecção do provedor viu: é o marco da latência por turno.
+          emitter.emit("callerTurnEnded", { source: "vad" });
           break;
         case "response.done": {
           responseActive = false;

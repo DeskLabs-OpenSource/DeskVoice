@@ -341,6 +341,25 @@ describe("linha do tempo", () => {
     });
   });
 
+  it("a latência por turno vira uma linha: metade dos turnos, o mais lento e quantos turnos, com o nome do motor", () => {
+    const render = (payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind: "turn_latency", at: "2026-11-21T12:00:00.000Z", payload }], live: false, agentName: "Ana" }));
+    const openai = render({ engine: "openai-realtime", source: "vad", turns: 3, p50Ms: 800, p90Ms: 1200, maxMs: 1200, toolTurns: 1, toolP50Ms: 2500 });
+    expect(openai).toContain("Resposta do agente (OpenAI Realtime): metade dos turnos em até 0,8 s, o mais lento em 1,2 s (3 turnos).");
+    expect(openai).not.toContain(ptBR.events.turn_latency.approximate);
+    expect(openai).not.toContain("openai-realtime");
+    expect(openai).not.toContain(ptBR.events.unknown);
+    // O Gemini não avisa o fim da fala: a linha diz que a medida é aproximada.
+    const gemini = render({ engine: "gemini-live", source: "transcript", turns: 1, p50Ms: 650, p90Ms: 650, maxMs: 650, toolTurns: 0, toolP50Ms: null });
+    expect(gemini).toContain("Resposta do agente (Gemini Live): metade dos turnos em até 0,7 s, o mais lento em 0,7 s (1 turno).");
+    expect(gemini).toContain(ptBR.events.turn_latency.approximate);
+    for (const dict of [ptBR, enTimeline, esTimeline]) {
+      for (const key of ["line", "turnsOne", "turnsMany", "approximate"] as const) expect(dict.events.turn_latency[key]).toMatch(/\S/);
+    }
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.turn_latency.line)).size).toBe(3);
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.turn_latency.approximate)).size).toBe(3);
+  });
+
   it("a retomada do motor tem frase nos três idiomas, sem o id do motor nem o tipo cru", () => {
     const html = renderToStaticMarkup(
       createElement(Timeline, {

@@ -69,6 +69,7 @@ import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import { createSilenceGuard, type SilenceGuard } from "./silence-guard";
+import { createTurnLatencyMeter } from "./turn-latency";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
 
@@ -428,6 +429,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   /** A menor duração máxima entre os agentes por onde a ligação passou, em segundos. */
   let durationLimitSeconds = 0;
   const toolsRunning = new Set<Promise<void>>();
+  /** A latência por turno (item 6 da segunda leva Vapi): cada turno fica aqui, e vira um `turn_latency` só no fim. */
+  const latency = createTurnLatencyMeter(clock);
   /**
    * O "pode repetir?" desta ligação (desenho do follow-up da ligação que caiu, seção 3.1): `undefined`
    * sem pedido; depois dele, se quem ligou deu `callerActivity{words: true}` desde o último pedido.
@@ -473,6 +476,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       for (const [kind, payload] of end.events ?? []) await event(kind, payload);
       if (end.notice) await panelNotice(q, clock, callId, end.notice);
       await q.exec("update calls set status = $2, end_reason = $3, ended_at = $4, cost_cents = $5 where id = $1", [callId, end.status, end.endReason, clock.now(), callCents()]);
+      // Um evento por ligação, antes do fim; sem turno medido, nenhum.
+      const turnLatency = latency.summary();
+      if (turnLatency) await event("turn_latency", turnLatency);
       await event("call_ended", {
         status: end.status,
         reason: end.endReason,
@@ -571,7 +577,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     wrappingUp = true;
     guard?.stop();
     // Sem texto: o modelo já vai falar a despedida (o resultado da ferramenta pediu), e só se espera.
-    if (farewell) voice?.say(farewell);
+    if (farewell) {
+      latency.notAnswer();
+      voice?.say(farewell);
+    }
     cancelTimers.push(schedule(() => void finish(end), FAREWELL_MS));
   }
 
@@ -874,7 +883,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // Fala pela sessão do próprio trecho, e só enquanto ela é a atual: a ferramenta de um trecho já
     // substituído numa passagem não fala na voz do agente seguinte.
     say(text) {
-      if (!ending && leg?.voice === session) session.say(text);
+      if (ending || leg?.voice !== session) return;
+      latency.notAnswer();
+      session.say(text);
     },
     waitForApproval: (approvalId, timeoutMs) =>
       deps.approvals.wait(
@@ -1019,9 +1030,16 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const silenceGuard = createSilenceGuard({
       clock,
       schedule,
-      closeCallerTurn: () => session.closeCallerTurn(),
+      // A resposta forçada pela guarda e o pedido para repetir não entram na latência por turno.
+      closeCallerTurn: () => {
+        latency.notAnswer();
+        session.closeCallerTurn();
+      },
       // `wrapUp` e `finish` param a guarda: depois disso ela não chama nada.
-      say: (text) => session.say(text),
+      say: (text) => {
+        latency.notAnswer();
+        session.say(text);
+      },
       acted: (report) => {
         // O pedido zera o fato no mesmo instante do `caller_unanswered`: vale só a fala depois do último.
         if (report.action === "asked_to_repeat") callerSpokeAfterAsk = false;
@@ -1052,16 +1070,24 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       if (signal.words && callerSpokeAfterAsk === false) callerSpokeAfterAsk = true;
       silenceGuard.callerActivity(signal);
     });
+    // O marco da latência por turno. Ferramenta em curso agora, de qualquer trecho: o turno mede o webhook.
+    session.on("callerTurnEnded", (signal) => {
+      if (!current()) return;
+      latency.callerTurnEnded(legEngine.id, signal.source, toolsRunning.size > 0);
+    });
     session.on("audio", (pcm) => {
       if (!current()) return;
       silenceGuard.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
       if (ending) return;
       transport.sendAudio(pcm);
+      // A latência conta até o áudio entregue ao transporte, e não até o que o motor mandou.
+      latency.agentAudioDelivered();
       recorder?.agent(pcm);
     });
     session.on("interrupted", () => {
       if (!current()) return;
       silenceGuard.agentInterrupted();
+      latency.interrupted();
       // Antes de descartar: o motor corta no histórico o que quem ligou não chegou a ouvir.
       const spoken = transport.playedMs?.();
       if (spoken !== undefined) session.played?.(spoken - spokenAtStart);
@@ -1092,6 +1118,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("toolCall", (toolCall) => {
       // Ferramenta em curso, aprovação em espera inclusive: a guarda não age até ela acabar.
       silenceGuard.toolStarted();
+      if (current()) latency.toolStarted();
       const running: Promise<void> = handleToolCall(self, toolCall).finally(() => {
         toolsRunning.delete(running);
         silenceGuard.toolFinished();
@@ -1355,7 +1382,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // O analista foi ligado e não pôde abrir: idem, e o trecho segue sem ele.
       ...(firstAnalyst.problem ? [analystProblemEvent(first.id, firstAnalyst.problem)] : []),
     ];
-    if (call.direction !== "inbound") session.say(recordingNotice);
+    if (call.direction !== "inbound") {
+      latency.notAnswer();
+      session.say(recordingNotice);
+    }
     answeredAt = clock.now();
     durationLimitSeconds = first.max_call_seconds;
     scheduleDuration();

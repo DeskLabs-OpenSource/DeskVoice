@@ -171,6 +171,14 @@ const timeline = {
     engine_failed: "O motor de voz falhou",
     engine_failed_body: "Quem estava na linha ouviu um sinal de aviso e foi transferido ou desligado, sem ficar em silêncio. Confira a chave e a situação do provedor em Configurações → Inteligência artificial.",
     engine_resumed: "A conexão com o provedor do motor de voz foi renovada no meio da ligação, sem encerrar a conversa.",
+    turn_latency: {
+      line: "Resposta do agente ({engine}): metade dos turnos em até {p50} s, o mais lento em {max} s ({turns}).",
+      turnsOne: "1 turno",
+      turnsMany: "{count} turnos",
+      approximate: "Medida aproximada: este motor não avisa o fim da fala, e a espera real é um pouco maior.",
+      /** O nome do motor como a tela de agentes mostra; o motor fora da lista aparece pelo id. */
+      engines: { "openai-realtime": "OpenAI Realtime", "gemini-live": "Gemini Live", simulated: "o motor simulado" } as Record<string, string>,
+    },
     call_refused: "Chamada recusada",
     voicemail_left: "Recado gravado",
     voicemail_none: "Caixa postal atendeu, sem recado",

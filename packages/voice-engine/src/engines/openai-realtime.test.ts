@@ -156,6 +156,20 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     expect(await fake.waitFor(ofType("response.create"))).toEqual({ type: "response.create", response: {} });
   });
 
+  it("speech_stopped vira callerTurnEnded com source vad, uma vez; speech_started não", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    const ended: Array<{ source: string }> = [];
+    session.on("callerTurnEnded", (signal) => ended.push(signal));
+    const interrupted = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started", audio_start_ms: 100, item_id: "i1" });
+    await interrupted;
+    expect(ended).toEqual([]);
+    const stopped = nextEvent(session, "callerTurnEnded");
+    fake.send({ type: "input_audio_buffer.speech_stopped", audio_end_ms: 900, item_id: "i1" });
+    expect((await stopped)[0]).toEqual({ source: "vad" });
+    expect(ended).toEqual([{ source: "vad" }]);
+  });
+
   it("say() durante uma resposta em curso espera o response.done", async () => {
     const { session } = await openSession();
     await fake.waitFor(ofType("response.create")); // saudação

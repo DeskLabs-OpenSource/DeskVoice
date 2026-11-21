@@ -50,6 +50,9 @@ export interface Usage {
   textOutputTokens?: number;
 }
 
+/** De onde veio o marco de fim da vez de quem ligou (`callerTurnEnded`). */
+export type CallerTurnSource = "vad" | "transcript";
+
 export interface VoiceSessionEvents {
   /** Fala do agente. Sempre PCM16 mono 8 kHz, em pedaços de qualquer tamanho. */
   audio(pcm16_8k: Buffer): void;
@@ -71,6 +74,18 @@ export interface VoiceSessionEvents {
    * só detecção de início de fala.
    */
   callerActivity(signal: { words: boolean }): void;
+  /**
+   * A vez de quem ligou acabou, pelo que o motor sabe agora. É o marco da latência por turno: quem
+   * mede (a sessão, com o relógio dela) conta daqui até o primeiro áudio do agente que sai para a
+   * linha. Pode vir mais de uma vez antes da resposta: vale o último. Opcional para o motor: sem
+   * ele, não há medida, e nada quebra.
+   *
+   * `source` diz de onde veio o marco. `vad`: o provedor detectou o fim da fala (OpenAI,
+   * `input_audio_buffer.speech_stopped`). `transcript`: o provedor não avisa o fim da fala, e o
+   * marco é o pedaço mais recente da transcrição de quem ligou (Gemini); a transcrição chega depois
+   * do fim real da fala, então a medida sai menor que a espera de verdade.
+   */
+  callerTurnEnded(signal: { source: CallerTurnSource }): void;
   /** Incremento desde o último `usage` (não é acumulado): quem mede custo soma os eventos. */
   usage(usage: Usage): void;
   /** Seguido de `closed` quando é fatal; sozinho, a sessão continua. */

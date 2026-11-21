@@ -693,6 +693,131 @@ describe("guarda contra o silêncio: a janela do áudio e o desligar", { timeout
   });
 });
 
+describe("latência por turno (item 6 da segunda leva Vapi)", { timeout: 120_000 }, () => {
+  /** Uma resposta do agente: dois pedaços de 20 ms. Só o primeiro fecha o turno. */
+  const answer = (manual: ManualEngine): void => {
+    manual.emit("audio", Buffer.alloc(320));
+    manual.emit("audio", Buffer.alloc(320));
+  };
+  /** Um turno: quem ligou termina, o relógio anda `ms`, o agente responde. */
+  const turn = (manual: ManualEngine, clock: SessionHarness["clock"], ms: number): void => {
+    manual.emit("callerTurnEnded", { source: "vad" });
+    clock.advance(ms);
+    answer(manual);
+  };
+  const latencyOf = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "turn_latency").map((event) => event.payload);
+
+  async function answeredScene(label: string, agent: AgentOptions = { engine: "manual" }, direction: "inbound" | "outbound" = "inbound") {
+    const manual = manualEngine({ keyless: true });
+    const made = await scene(label, agent, manual, direction);
+    const session = made.start();
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("call_answered"), "the call to be answered");
+    return { ...made, manual, session };
+  }
+
+  it("L1: três turnos de 400, 800 e 1200 ms viram um evento só, antes de call_ended, com p50 800 e máximo 1200", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l1");
+    turn(manual, harness.clock, 400);
+    turn(manual, harness.clock, 1200);
+    turn(manual, harness.clock, 800);
+    // O áudio que continua a mesma resposta, sem marco novo, não abre turno.
+    harness.clock.advance(5000);
+    answer(manual);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 3, p50Ms: 800, p90Ms: 1200, maxMs: 1200, toolTurns: 0, toolP50Ms: null }]);
+    const kinds = await kindsOf(app, callId);
+    expect(kinds.indexOf("turn_latency")).toBe(kinds.indexOf("call_ended") - 1);
+  });
+
+  it("vale o último marco antes da resposta, e a interrupção apaga o marco de antes", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-last-mark");
+    manual.emit("callerTurnEnded", { source: "vad" });
+    harness.clock.advance(3000);
+    turn(manual, harness.clock, 500);
+    // Quem ligou falou por cima depois de um marco: sem marco novo, a próxima fala não fecha turno.
+    manual.emit("callerTurnEnded", { source: "vad" });
+    manual.emit("interrupted");
+    harness.clock.advance(2000);
+    answer(manual);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 500, p90Ms: 500, maxMs: 500, toolTurns: 0, toolP50Ms: null }]);
+  });
+
+  it("L2: o turno em que uma ferramenta rodou vai para toolTurns, e não para turns, mesmo com a ferramenta começada antes do fim da fala", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l2", { engine: "manual", tools: ["request_approval"] });
+    turn(manual, harness.clock, 600);
+    // A ferramenta começa entre o fim da fala e a resposta.
+    manual.emit("callerTurnEnded", { source: "vad" });
+    manual.emit("toolCall", { id: "t1", name: "nao_instalada", args: {} });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    harness.clock.advance(2500);
+    answer(manual);
+    // A ferramenta já está em curso (aprovação em espera) quando quem ligou termina de falar.
+    manual.emit("toolCall", { id: "t2", name: "request_approval", args: { question: "Posso dar 10% de desconto?", context: "Cliente antiga." } });
+    await waitFor(async () => (await approvalsOf(app, callId)).some((candidate) => candidate.status === "pending"), "the approval to wait");
+    // A ferramenta pede ao motor a fala de espera (`say`): ela toca, e não é resposta a ninguém.
+    expect(manual.said).toHaveLength(1);
+    answer(manual);
+    turn(manual, harness.clock, 900);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 600, p90Ms: 600, maxMs: 600, toolTurns: 2, toolP50Ms: 900 }]);
+  });
+
+  it("L3: a resposta forçada pela guarda contra o silêncio não entra, com o marco antes ou depois do fechamento", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l3");
+    // Marco antes: o provedor viu o fim da fala, mas não respondeu, e a guarda fechou o turno.
+    manual.emit("callerTurnEnded", { source: "vad" });
+    manual.emit("callerActivity", { words: true });
+    harness.clock.advance(AFTER_WORDS_MS);
+    expect(harness.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    expect(manual.callerTurnsClosed).toBe(1);
+    harness.clock.advance(300);
+    answer(manual);
+    // Marco depois: a transcrição chega depois do fechamento (como no Gemini), antes da resposta forçada.
+    harness.clock.advance(5000);
+    manual.emit("callerActivity", { words: true });
+    harness.clock.advance(AFTER_WORDS_MS);
+    expect(harness.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    expect(manual.callerTurnsClosed).toBe(2);
+    turn(manual, harness.clock, 300);
+    // Um turno de verdade, para o evento existir.
+    harness.clock.advance(5000);
+    turn(manual, harness.clock, 700);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 700, p90Ms: 700, maxMs: 700, toolTurns: 0, toolP50Ms: null }]);
+  });
+
+  it("L4: o say do aviso de gravação (chamada de saída) não fecha turno nenhum", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l4", { engine: "manual", greeting: "Bom dia." }, "outbound");
+    await waitFor(() => manual.said.length === 1, "the recording notice");
+    // Quem atendeu diz "alô" enquanto o aviso ainda não começou a tocar: o áudio é o do aviso.
+    turn(manual, harness.clock, 200);
+    harness.clock.advance(5000);
+    turn(manual, harness.clock, 700);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 700, p90Ms: 700, maxMs: 700, toolTurns: 0, toolP50Ms: null }]);
+  });
+
+  it("sem turno medido, nenhum evento; o áudio que não chega ao transporte (a ligação já terminando) não fecha turno", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-none");
+    manual.emit("callerTurnEnded", { source: "vad" });
+    transport.callerHangup();
+    // O motor ainda manda áudio depois do desligar: ele não sai para a linha, e não é resposta.
+    harness.clock.advance(400);
+    const sent = transport.sentBytes;
+    answer(manual);
+    expect(transport.sentBytes).toBe(sent);
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([]);
+    expect(await kindsOf(app, callId)).toContain("call_ended");
+  });
+});
+
 describe("retomada do motor Gemini no meio da ligação (servidor falso)", { timeout: 120_000 }, () => {
   let fake: Awaited<ReturnType<typeof startFakeProvider>>;
   afterEach(() => fake.stop());
@@ -748,6 +873,17 @@ describe("retomada do motor Gemini no meio da ligação (servidor falso)", { tim
     expect(ledger.every((row) => row.engine === "gemini-live" && row.agent_id === agentId)).toBe(true);
     expect(ledger.reduce((sum, row) => sum + row.input_tokens, 0)).toBe(3000);
     expect(ledger.reduce((sum, row) => sum + row.output_tokens, 0)).toBe(600);
+  });
+
+  it("latência por turno no Gemini: o marco é a transcrição de quem ligou, e o evento diz que a medida é aproximada", async () => {
+    const { callId, transport, session } = await geminiCall("gemini-latency");
+    fake.send({ serverContent: { inputTranscription: { text: "quero remarcar" } } });
+    fake.send({ serverContent: { modelTurn: { parts: [{ inlineData: { data: Buffer.alloc(960).toString("base64"), mimeType: "audio/pcm;rate=24000" } }] } } });
+    await waitFor(() => transport.sentBytes > 0, "the agent audio");
+    transport.callerHangup();
+    await session.done;
+    const latency = (await eventsOf(app, callId)).filter((event) => event.kind === "turn_latency").map((event) => event.payload);
+    expect(latency).toEqual([{ engine: "gemini-live", source: "transcript", turns: 1, p50Ms: 0, p90Ms: 0, maxMs: 0, toolTurns: 0, toolP50Ms: null }]);
   });
 
   it("goAway e retomada recusada: a ligação segue pela conexão de antes, e quando ela fecha vem engine_failed, sem engine_resumed", async () => {

@@ -43,6 +43,7 @@ export const CALL_EVENT_KINDS = [
   "agent_handoff",
   "engine_failed",
   "engine_resumed",
+  "turn_latency",
   "call_refused",
   "voicemail_left",
   "voicemail_failed",
