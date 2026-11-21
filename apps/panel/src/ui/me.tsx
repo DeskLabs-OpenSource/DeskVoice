@@ -19,12 +19,12 @@ export const useMe = (): Me | null => useContext(MeContext);
 export const useInstallationAdmin = (): boolean => useContext(MeContext)?.installationAdmin === true;
 
 /**
- * Onde mora a tela de atualizar: nas Configurações enquanto a lista de quem administra a instalação
- * não é explícita, e na área da instalação depois (seção 3.11). `null`: esta pessoa não tem acesso a ela.
+ * Onde mora a tela de atualizar: só na área da instalação, com a lista de quem a administra explícita
+ * ou não (central de configuração, parte 8). `null`: esta pessoa não administra a instalação, e o
+ * indicador mostra a versão sem link.
  */
 export function updatePath(me: Me | null): string | null {
-  if (!me?.installationExplicit) return "/settings/system";
-  return me.installationAdmin ? "/installation/update" : null;
+  return me?.installationAdmin ? "/installation/update" : null;
 }
 
 /** Uma organização em que a conta tem vínculo ativo (`GET /auth/organizations`). */

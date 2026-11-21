@@ -1,13 +1,17 @@
-import { adminsExplicit } from "@deskvoice/core";
+import { accountOfMember, isInstallationAdmin } from "@deskvoice/core";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { serverDeps } from "../../../../server/context";
-import { UpdatePanel } from "../update-panel";
+import { SESSION_COOKIE, findSession, serverDeps } from "../../../../server/context";
 
 /**
- * A tela de atualizar. Depois que a lista de quem administra a instalação fica explícita, ela mora
- * na área da instalação (seção 3.11 do desenho do R8); antes disso, fica aqui, como sempre esteve.
+ * O endereço antigo da tela de atualizar (central de configuração, parte 8). A tela mora só na área
+ * da instalação: quem a administra vai para lá, e quem não administra (ou está sem sessão) volta à
+ * central de Configurações. A conferência é a mesma do layout da área, para os dois lados nunca
+ * discordarem e um mandar ao outro.
  */
 export default async function SystemSettings() {
-  if (await adminsExplicit(serverDeps().db)) redirect("/installation/update");
-  return <UpdatePanel />;
+  const deps = serverDeps();
+  const session = await findSession(deps, (await cookies()).get(SESSION_COOKIE)?.value);
+  const accountId = session ? await accountOfMember(deps.db, session.userId) : null;
+  redirect(accountId && (await isInstallationAdmin(deps.db, accountId)) ? "/installation/update" : "/settings");
 }

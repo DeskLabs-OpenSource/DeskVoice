@@ -126,14 +126,14 @@ export function isAgent(request: Request, deps: ServerDeps): boolean {
   return timingSafeEqual(digest(given), digest(deps.agentToken));
 }
 
-const STARTED = "A atualização do DeskVoice começou. O sistema fica fora do ar por alguns minutos, e as chamadas em andamento caem. O resultado aparece em Configurações → Sistema.";
+const STARTED = "A atualização do DeskVoice começou. O sistema fica fora do ar por alguns minutos, e as chamadas em andamento caem. O resultado aparece em Administrar a instalação → Atualização.";
 const FINISHED: Record<NonNullable<AgentReport["result"]>["outcome"] | "expired" | "superseded", (version: string) => string> = {
   succeeded: (version) => `A atualização do DeskVoice terminou: o sistema está na versão ${version}.`,
   nothing_to_do: () => "O pedido de atualização terminou sem mudança: o servidor já estava na versão publicada mais recente.",
-  rolled_back: () => "A atualização do DeskVoice não foi aplicada: o sistema segue na versão anterior e está respondendo. O motivo está em Configurações → Sistema.",
-  failed: () => "A atualização do DeskVoice falhou e o sistema pode não ter voltado inteiro. Veja o que aconteceu em Configurações → Sistema e confira o servidor.",
-  superseded: () => "O pedido de atualização do DeskVoice não foi executado: saiu uma versão mais nova depois que ele foi feito, e ninguém confirmou essa. Nada foi alterado. Veja as notas em Configurações → Sistema e peça de novo.",
-  expired: () => "O pedido de atualização do DeskVoice venceu sem resultado. Veja em Configurações → Sistema o que aconteceu; outro pedido já pode ser feito.",
+  rolled_back: () => "A atualização do DeskVoice não foi aplicada: o sistema segue na versão anterior e está respondendo. O motivo está em Administrar a instalação → Atualização.",
+  failed: () => "A atualização do DeskVoice falhou e o sistema pode não ter voltado inteiro. Veja o que aconteceu em Administrar a instalação → Atualização e confira o servidor.",
+  superseded: () => "O pedido de atualização do DeskVoice não foi executado: saiu uma versão mais nova depois que ele foi feito, e ninguém confirmou essa. Nada foi alterado. Veja as notas em Administrar a instalação → Atualização e peça de novo.",
+  expired: () => "O pedido de atualização do DeskVoice venceu sem resultado. Veja em Administrar a instalação → Atualização o que aconteceu; outro pedido já pode ser feito.",
 };
 
 interface Notice {

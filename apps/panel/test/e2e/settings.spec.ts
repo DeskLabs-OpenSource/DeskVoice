@@ -38,8 +38,10 @@ test("configurar: os blocos de uma instalação nova aparecem, e o limite de lig
   await openSection(page, "engines", "/settings/ai", settings.sections.ai);
   await expect(page.getByRole("heading", { name: settings.enginesTitle, exact: true })).toBeVisible();
   await expect(page.getByText(settings.keyMissing, { exact: true }).first()).toBeVisible();
-  // Versão e atualização: o bloco carregou (a versão em execução foi lida), e não ficou no esqueleto.
-  await openSection(page, "system", "/settings/system", settings.sections.system);
+  // Versão e atualização: o endereço antigo leva o dono à área da instalação (parte 8), e o bloco
+  // carregou (a versão em execução foi lida), e não ficou no esqueleto.
+  await page.goto("/settings/system");
+  await expect(page).toHaveURL(/\/installation\/update$/);
   await expect(page.getByRole("heading", { name: update.title, exact: true })).toBeVisible();
   await expect(page.getByText(update.running, { exact: true })).toBeVisible();
   // WhatsApp: o serviço é opcional e não vem instalado.
@@ -256,7 +258,6 @@ test("subtelas de Configurações: sem barra de abas, com o nome no título e \"
     { card: "whatsapp", path: "/settings/whatsapp", title: settings.sections.whatsapp, heading: settings.whatsappTitle },
     { card: "webhooks", path: "/settings/integrations", title: settings.sections.integrations, heading: settings.webhooksTitle },
     { card: "privacy", path: "/settings/privacy", title: settings.sections.privacy, heading: privacy.retentionTitle },
-    { card: "system", path: "/settings/system", title: settings.sections.system, heading: update.title },
     { card: "engines", path: "/settings/ai", title: settings.sections.ai, heading: settings.enginesTitle },
     { card: "outcome", path: "/settings/after-call", title: settings.hub.cards.outcome.title, heading: settings.outcomeTitle },
   ];
@@ -311,6 +312,9 @@ const SUBSCREENS = readdirSync(SETTINGS_DIR, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && existsSync(path.join(SETTINGS_DIR, entry.name, "page.tsx")))
   .map((entry) => `/settings/${entry.name}`);
 
+/** A subtela que só redireciona (central de configuração, parte 8): o endereço antigo da tela de atualizar. */
+const REDIRECT_ONLY = "/settings/system";
+
 test("nenhuma tela de Configurações fica órfã: cada subtela tem um cartão na central, e a conta tem o bloco da conta", async ({ page }) => {
   expect(SUBSCREENS).toHaveLength(12);
   await signIn(page);
@@ -318,9 +322,11 @@ test("nenhuma tela de Configurações fica órfã: cada subtela tem um cartão n
   await expect(hubCard(page, "engines")).toBeVisible();
   const cards = await page.locator("[data-card]").evaluateAll((links) => links.map((link) => new URL((link as HTMLAnchorElement).href).pathname));
   const account = await page.locator("aside").getByRole("link", { name: common.shell.myAccount, exact: true }).getAttribute("href");
-  // "Sistema" só tem cartão enquanto a lista de quem administra a instalação não é explícita, que é
-  // o caso do CI. Explícita, a tela redireciona para a área da instalação e não precisa de cartão.
-  const reached = new Set([...cards, account]);
+  // "/settings/system" não tem cartão: só redireciona, para a área da instalação ou de volta à central
+  // (parte 8). Ela fica de fora pelo nome, e o redirecionamento tem o teste dele em
+  // `installation-area.spec.ts`.
+  expect(cards).not.toContain(REDIRECT_ONLY);
+  const reached = new Set([...cards, account, REDIRECT_ONLY]);
   expect(SUBSCREENS.filter((screen) => !reached.has(screen))).toEqual([]);
 });
 
@@ -357,7 +363,6 @@ test("a central em /settings: sem barra de abas, e cada cartão abre a tela que 
     { key: "webhooks", path: "/settings/integrations", heading: settings.webhooksTitle },
     { key: "rules", path: "/settings/calls", heading: settings.inboundLimitTitle },
     { key: "privacy", path: "/settings/privacy", heading: privacy.retentionTitle },
-    { key: "system", path: "/settings/system", heading: update.title },
   ];
   for (const card of cards) {
     await page.goto("/settings");

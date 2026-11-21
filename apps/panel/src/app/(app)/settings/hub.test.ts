@@ -11,7 +11,7 @@ import { enginesState, webhooksState, whatsappState } from "./hub-state";
 import type { ServiceData } from "./optional-service";
 
 const t = settings.hub;
-const base: HubView = { steps: null, engines: null, whatsapp: null, webhooks: null, system: true };
+const base: HubView = { steps: null, engines: null, whatsapp: null, webhooks: null };
 const render = (view: Partial<HubView>): string => renderToStaticMarkup(createElement(SettingsHub, { view: { ...base, ...view }, t, steps: calls.empty }));
 /** O trecho de um cartão: do `data-card` até o fim do link. */
 const card = (html: string, key: string): string => {
@@ -82,19 +82,19 @@ describe("o estado dos cartões da central", () => {
       webhooks: "/settings/integrations",
       rules: "/settings/calls",
       privacy: "/settings/privacy",
-      system: "/settings/system",
     };
     for (const [key, href] of Object.entries(hrefs)) {
       const start = html.lastIndexOf("<a", html.indexOf(`data-card="${key}"`));
       expect(html.slice(start, html.indexOf(">", start)), key).toContain(`href="${href}"`);
     }
-    for (const key of ["brains", "voice", "speechFilter", "analysts", "outcome", "rules", "privacy", "system"]) {
+    for (const key of ["brains", "voice", "speechFilter", "analysts", "outcome", "rules", "privacy"]) {
       for (const state of Object.values(t.state)) expect(card(html, key), key).not.toContain(`>${state}<`);
     }
   });
 
-  it("o cartão Sistema segue a regra da aba, e Primeiros passos some sem passos", () => {
-    expect(render({ system: false })).not.toContain('data-card="system"');
+  it("não há cartão Sistema (a atualização mora na área da instalação), e Primeiros passos some sem passos", () => {
+    expect(render({})).not.toContain('data-card="system"');
+    expect(render({})).not.toContain('href="/settings/system"');
     expect(render({})).not.toContain(t.firstSteps.title);
     const html = render({ steps: firstSteps({ agents: [], trunks: [], engines: [] }) });
     expect(html).toContain(t.firstSteps.title);
