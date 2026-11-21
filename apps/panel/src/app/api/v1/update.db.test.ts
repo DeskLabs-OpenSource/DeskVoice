@@ -268,6 +268,8 @@ describe("the update notice says who can follow it", () => {
     const { org, owner } = await newOrg("update notice subject");
     await ask(owner.cookie);
     await speak();
+    // Um minuto entre cada aviso: a lista sai em ordem de criação, e o id não desempata.
+    later(1);
     await speak({ version: "0.2.0", target: "0.3.0", result: { outcome: "rolled_back", detail: "" } });
     // Vencido sem ser pego, e trocado por uma versão mais nova antes de ser pego.
     publish(release("0.3.0"), release("0.2.0"));
