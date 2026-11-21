@@ -61,6 +61,7 @@ export const CALL_EVENT_KINDS = [
   "call_analyzed",
   "analysis_not_done",
   "caller_unanswered",
+  "caller_idle",
   "memory_loaded",
   "caller_speech_read",
   "analyst_read",

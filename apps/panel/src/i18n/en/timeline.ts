@@ -320,6 +320,11 @@ const timeline: TimelineDictionary = {
       turn_closed: "The caller went {seconds} s without an answer, possibly because of noise on the line. The agent was asked to answer what it heard.",
       asked_to_repeat: "The agent was still silent {seconds} s after the caller last spoke, and asked them to repeat.",
     },
+    caller_idle: {
+      asked: "The caller stayed silent for {seconds} s after the agent spoke, and the agent asked whether they were still on the line.",
+      asked_again: "The caller was still silent {seconds} s after the agent spoke, and the agent reminded them they only need to speak.",
+      ended: "The caller stayed silent for {seconds} s, and the agent said goodbye and ended the call.",
+    },
     memory_loaded: "The agent received the caller's memory: {notes} notes and {followUps} follow-ups, {chars} characters.",
     drop_follow_up: {
       engine_failed: "The call dropped because the system failed.",
@@ -415,6 +420,7 @@ const timeline: TimelineDictionary = {
     end_call: "The agent ended the conversation.",
     transferred: "The call was transferred.",
     max_duration: "The call reached the maximum duration set on the agent.",
+    caller_silent: "The caller stayed silent, and the agent ended the call after asking twice whether they were still on the line.",
     cost_ceiling: "The call reached the cost ceiling set on the agent.",
     engine_failed: "The voice engine failed.",
     script_finished: "The simulation script ended.",

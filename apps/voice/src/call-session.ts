@@ -68,6 +68,7 @@ import {
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
+import { CALLER_SILENT, createCallerIdleGuard, type CallerIdleGuard } from "./caller-idle";
 import { createSilenceGuard, type SilenceGuard } from "./silence-guard";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
@@ -177,6 +178,8 @@ interface Leg {
   voice: VoiceSession;
   enabled: Map<string, Tool>;
   guard: SilenceGuard;
+  /** A guarda do "ainda está aí?" (item 9 da segunda leva Vapi). */
+  idle: CallerIdleGuard;
   context: ToolContext;
   usage: Required<Pick<Usage, "seconds" | "inputTokens" | "outputTokens" | "textInputTokens" | "cachedInputTokens" | "textOutputTokens">>;
   /** O custo do trecho, calculado com o preço do motor dele. */
@@ -365,6 +368,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let voice: VoiceSession | undefined;
   /** A guarda contra o silêncio (antipadrão 15). Existe a partir de quando o motor conecta. */
   let guard: SilenceGuard | undefined;
+  /** A guarda do "ainda está aí?", do trecho atual. Existe a partir de quando o motor conecta. */
+  let idleGuard: CallerIdleGuard | undefined;
   /** O trecho da ligação em curso: um por agente por onde ela passou. */
   let leg: Leg | undefined;
   /** Todos os trechos, o atual inclusive: o custo da ligação é a soma dos custos deles. */
@@ -458,6 +463,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (ending) return;
     ending = true;
     guard?.stop();
+    // A ligação que encerra (a transferência para a equipe inclusive) não pergunta mais "ainda está
+    // aí?". Um estado de espera da transferência que não encerre a sessão para esta guarda ao entrar nele.
+    idleGuard?.stop();
     resolveRecordingDecided();
     for (const cancel of cancelTimers) cancel();
     cancelDuration();
@@ -570,6 +578,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (ending || wrappingUp) return;
     wrappingUp = true;
     guard?.stop();
+    idleGuard?.stop();
     // Sem texto: o modelo já vai falar a despedida (o resultado da ferramenta pediu), e só se espera.
     if (farewell) voice?.say(farewell);
     cancelTimers.push(schedule(() => void finish(end), FAREWELL_MS));
@@ -1030,12 +1039,22 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         void event("caller_unanswered", report).catch(logFailure("could not record an unanswered caller"));
       },
     });
+    const idle = createCallerIdleGuard({
+      clock,
+      schedule,
+      // `wrapUp` e `finish` param a guarda, e a passagem para a do trecho antigo: depois disso ela não chama nada.
+      say: (text) => session.say(text),
+      end: (farewell) => wrapUp(farewell, { status: "completed", endReason: CALLER_SILENT }),
+      acted: (report) => void event("caller_idle", report).catch(logFailure("could not record a silent caller")),
+      silenceArmed: () => silenceGuard.armed(),
+    });
     const self: Leg = {
       agent: row,
       engine: legEngine,
       voice: session,
       enabled,
       guard: silenceGuard,
+      idle,
       context: contextFor(row.id, row.language, session, enabled),
       usage: { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 },
       costCents: 0,
@@ -1053,10 +1072,13 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // do "pode repetir?" falou do mesmo jeito. Início de fala sem texto (`words: false`) não conta.
       if (signal.words && callerSpokeAfterAsk === false) callerSpokeAfterAsk = true;
       silenceGuard.callerActivity(signal);
+      // Com ou sem palavras, e mesmo por cima da fala do agente: quem ligou está na linha.
+      idle.callerActivity();
     });
     session.on("audio", (pcm) => {
       if (!current()) return;
       silenceGuard.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
+      idle.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
       if (ending) return;
       transport.sendAudio(pcm);
       recorder?.agent(pcm);
@@ -1064,6 +1086,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("interrupted", () => {
       if (!current()) return;
       silenceGuard.agentInterrupted();
+      idle.agentInterrupted();
       // Antes de descartar: o motor corta no histórico o que quem ligou não chegou a ouvir.
       const spoken = transport.playedMs?.();
       if (spoken !== undefined) session.played?.(spoken - spokenAtStart);
@@ -1094,9 +1117,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("toolCall", (toolCall) => {
       // Ferramenta em curso, aprovação em espera inclusive: a guarda não age até ela acabar.
       silenceGuard.toolStarted();
+      idle.toolStarted();
       const running: Promise<void> = handleToolCall(self, toolCall).finally(() => {
         toolsRunning.delete(running);
         silenceGuard.toolFinished();
+        idle.toolFinished();
       });
       toolsRunning.add(running);
     });
@@ -1144,6 +1169,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     agent = row;
     voice = session;
     guard = silenceGuard;
+    idleGuard = idle;
     return self;
   }
 
@@ -1210,6 +1236,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       startLeg(next, opened.engine, opened.voice, enabled, nextAnalyst.analyst);
       const analystProblem = nextAnalyst.problem ? analystProblemEvent(next.id, nextAnalyst.problem) : undefined;
       from.guard.stop();
+      from.idle.stop();
       visited.push(next);
       if (next.max_call_seconds < durationLimitSeconds) {
         durationLimitSeconds = next.max_call_seconds;

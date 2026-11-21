@@ -320,6 +320,11 @@ const timeline: TimelineDictionary = {
       turn_closed: "Quien llamó estuvo {seconds} s sin respuesta, quizás por ruido en la línea. Se pidió al agente que respondiera a lo que escuchó.",
       asked_to_repeat: "El agente seguía callado {seconds} s después de lo último que dijo quien llamó, y le pidió que lo repitiera.",
     },
+    caller_idle: {
+      asked: "Quien llamó estuvo {seconds} s callado después de que hablara el agente, y el agente preguntó si la persona seguía en la línea.",
+      asked_again: "Quien llamó seguía callado {seconds} s después de que hablara el agente, y el agente recordó que basta con hablar.",
+      ended: "Quien llamó estuvo {seconds} s callado, y el agente se despidió y terminó la llamada.",
+    },
     memory_loaded: "El agente recibió la memoria del número: {notes} notas y {followUps} pendientes, {chars} caracteres.",
     drop_follow_up: {
       engine_failed: "La llamada se cortó porque el sistema falló.",
@@ -415,6 +420,7 @@ const timeline: TimelineDictionary = {
     end_call: "El agente terminó la conversación.",
     transferred: "La llamada fue transferida.",
     max_duration: "La llamada alcanzó la duración máxima definida en el agente.",
+    caller_silent: "Quien llamó se quedó en silencio, y el agente terminó la llamada después de preguntar dos veces si la persona seguía en la línea.",
     cost_ceiling: "La llamada alcanzó el tope de costo definido en el agente.",
     engine_failed: "El motor de voz falló.",
     script_finished: "El guion de la simulación terminó.",

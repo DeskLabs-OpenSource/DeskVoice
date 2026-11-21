@@ -39,6 +39,7 @@ import {
   type SessionHarness,
 } from "./testing/db";
 import { waitFor } from "./testing/helpers";
+import { IDLE_ASK, IDLE_ASK_AGAIN, IDLE_END_MS, IDLE_FAREWELL, IDLE_FIRST_MS, IDLE_SECOND_MS } from "./caller-idle";
 import { AFTER_CLOSE_MS, AFTER_WORDS_MS, ASK_TO_REPEAT, WITHOUT_WORDS_MS } from "./silence-guard";
 import { failureTone } from "./transport";
 
@@ -668,6 +669,97 @@ describe("guarda contra o silêncio: ferramenta e despedida", { timeout: 120_000
 
     expect(harness.timers.fire(6000)).toBe(1);
     expect(await session.done).toMatchObject({ status: "completed", endReason: "end_call" });
+  });
+});
+
+describe("ainda está aí? (item 9 da segunda leva Vapi)", { timeout: 120_000 }, () => {
+  it("a ligação calada: pergunta, pergunta de novo, se despede e termina com caller_silent, três caller_idle antes de call_ended", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("caller-idle", { engine: "manual" }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    // A saudação: 20 ms de fala. O relógio conta do fim dela.
+    manual.emit("audio", Buffer.alloc(320));
+    expect(harness.timers.held()).toContain(20 + IDLE_FIRST_MS);
+    harness.clock.advance(20 + IDLE_FIRST_MS);
+    expect(harness.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
+    expect(manual.said).toEqual([IDLE_ASK]);
+
+    harness.clock.advance(IDLE_SECOND_MS);
+    expect(harness.timers.fire(IDLE_SECOND_MS)).toBe(1);
+    expect(manual.said).toEqual([IDLE_ASK, IDLE_ASK_AGAIN]);
+
+    harness.clock.advance(IDLE_END_MS);
+    expect(harness.timers.fire(IDLE_END_MS)).toBe(1);
+    expect(manual.said).toEqual([IDLE_ASK, IDLE_ASK_AGAIN, IDLE_FAREWELL]);
+
+    // A despedida toca, e a ligação cai depois dela.
+    expect(harness.timers.fire(6000)).toBe(1);
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_silent" });
+    expect(transport.hangups).toBe(1);
+    expect(await callOf(app, callId)).toMatchObject({ status: "completed", end_reason: "caller_silent" });
+
+    const events = await eventsOf(app, callId);
+    const kinds = events.map((event) => event.kind);
+    expect(events.filter((event) => event.kind === "caller_idle").map((event) => event.payload)).toEqual([
+      { action: "asked", silentMs: IDLE_FIRST_MS },
+      { action: "asked_again", silentMs: IDLE_FIRST_MS + IDLE_SECOND_MS },
+      { action: "ended", silentMs: IDLE_FIRST_MS + IDLE_SECOND_MS + IDLE_END_MS },
+    ]);
+    expect(kinds.lastIndexOf("caller_idle")).toBeLessThan(kinds.indexOf("call_ended"));
+    expect(events.find((event) => event.kind === "call_ended")?.payload).toMatchObject({ status: "completed", reason: "caller_silent" });
+    expect(harness.timers.held()).toEqual([]);
+  });
+
+  it("quem ligou faz qualquer som entre um lembrete e outro: volta ao zero e a ligação segue", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("caller-idle-reset", { engine: "manual" }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("audio", Buffer.alloc(320));
+    harness.clock.advance(20 + IDLE_FIRST_MS);
+    harness.timers.fire(20 + IDLE_FIRST_MS);
+    expect(manual.said).toEqual([IDLE_ASK]);
+    // Início de fala sem texto: a pessoa está na linha. O segundo lembrete não vem.
+    manual.emit("callerActivity", { words: false });
+    expect(harness.timers.held()).not.toContain(IDLE_SECOND_MS);
+    await waitFor(async () => (await kindsOf(app, callId)).includes("caller_idle"), "the first caller_idle");
+    expect((await kindsOf(app, callId)).filter((kind) => kind === "caller_idle")).toHaveLength(1);
+
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ endReason: "caller_hangup" });
+  });
+
+  it("aprovação em espera e 40 s de silêncio: a guarda não pergunta nem encerra; decidida, volta a contar", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("caller-idle-approval", { engine: "manual", tools: ["request_approval"] }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("audio", Buffer.alloc(320));
+    manual.emit("toolCall", { id: "t1", name: "request_approval", args: { question: "Posso dar 10% de desconto?", context: "Cliente antiga." } });
+    const approval = await waitFor(async () => (await approvalsOf(app, callId)).find((candidate) => candidate.status === "pending"), "the approval to wait for the panel");
+    // O agente avisa que vai consultar (fala durante a ferramenta) e a pessoa espera calada por 40 s.
+    manual.emit("audio", Buffer.alloc(320 * 50));
+    harness.clock.advance(40_000);
+    const toolSaid = [...manual.said];
+    for (const delay of new Set(harness.timers.held())) if (delay <= 40_000) harness.timers.fire(delay);
+    // Só a frase da própria ferramenta ("um instante"), dita antes do silêncio.
+    expect(manual.said).toEqual(toolSaid);
+    expect(manual.said).not.toContain(IDLE_ASK);
+    expect(await kindsOf(app, callId)).not.toContain("caller_idle");
+    expect((await callOf(app, callId)).status).toBe("in_progress");
+
+    await decideApproval(app, approval.id, "approved", harness.clock.now());
+    await waitFor(async () => manual.toolResults.length === 1, "the tool result");
+    // Acabada a ferramenta, o relógio recomeça do zero: sem isto, a guarda morreria pelo resto da chamada.
+    await waitFor(async () => harness.timers.held().includes(IDLE_FIRST_MS), "the guard to count again");
+
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ endReason: "caller_hangup" });
+    expect(await kindsOf(app, callId)).not.toContain("caller_idle");
   });
 });
 
