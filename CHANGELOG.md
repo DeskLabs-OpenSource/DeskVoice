@@ -3,6 +3,21 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.44.0] - 2026-11-21
+
+### Adicionado
+
+- **Cada webhook pode receber o relatório de cada ligação, desligado de fábrica** Em Configurações › Integrações, cada webhook permitido ganha a caixa "Receber o relatório de cada ligação", desmarcada de fábrica: quem já instalou não recebe nada novo sem marcar. Marcada, o webhook recebe, depois que a ligação termina e a leitura (desfecho e análise) roda, um `POST` com o evento `call.report`: a ligação, o agente, a direção, o início, o fim, a duração, o motivo do fim, o desfecho, o resumo e a análise com a nota. O relatório é montado na hora da entrega e nunca leva token, chave nem o telefone cadastrado de quem ligou; o sistema do outro lado liga o relatório à ligação pelo `callId`. Mas o resumo e a análise contam o que foi dito: se quem ligou disse o número ou outro dado em voz alta, ele vai junto. O que sai da instalação não é apagado no destino quando quem ligou pede o apagamento; a tela diz isso antes de a caixa ser marcada. Com o desfecho e a análise desligados, o relatório sai logo depois do resumo. Cada entrega vai com `Idempotency-Key` (a mesma em toda tentativa), sai uma vez por ligação e por webhook, tem três tentativas pela fila e aparece na linha do tempo da ligação como entregue ou não entregue, com o motivo (HTTP, sem resposta a tempo, endereço fora do ar). A falha na entrega não mexe na ligação nem nas outras rotinas. Ligação apagada a pedido de quem ligou não sai. Crédito: @melgarafael.
+
+### Alterado
+
+- **Quando uma integração não responde a tempo, o agente só promete retorno se houver quem confira** Quando uma integração cadastrada não responde dentro do prazo durante a ligação, o agente deixava de repetir o pedido e dizia à pessoa que ia verificar, mas ninguém verificava: nada era aberto e ninguém era avisado. Agora a frase que o agente recebe depende das ferramentas que ele tem na ligação. Com "Abrir uma pendência", ele abre uma pendência para a equipe conferir se a integração registrou o pedido e diz à pessoa que a equipe vai conferir e dar retorno. Sem ela, mas com "Avisar a equipe", ele avisa a equipe e diz que ela vai conferir. Sem nenhuma das duas, ele diz que não foi possível confirmar agora e que a pessoa pode ligar de novo mais tarde, sem prometer retorno. A linha do tempo mostra a frase escolhida no resultado da ferramenta. Nada a configurar: quem quiser o retorno marca uma dessas ferramentas no agente. Crédito: @melgarafael.
+- **Cada webhook permitido ganha o seu prazo de resposta, de 1 a 30 segundos** Em Configurações › Integrações, cada webhook permitido ganha o campo "Prazo de resposta (segundos)": quanto o agente espera o sistema do outro lado responder, de 1 a 30 segundos. O padrão continua 10 segundos, o de antes, e a lista que já estava gravada segue valendo com 10 segundos sem ninguém mexer. O prazo vale para toda chamada a esse webhook, durante a ligação e nas entregas depois dela. Durante a ligação, a pessoa fica na linha esse tempo; sem resposta no prazo, o agente diz que vai verificar, como já fazia. A API recusa prazo fora de 1 a 30 e devolve sempre o prazo que vale. Crédito: @melgarafael.
+
+### Corrigido
+
+- **Um limite padrão gravado acima do teto não impede mais criar uma organização, e "Ela nasce com" fala 1 no singular** Se alguém gravou à mão, em `defaults.limits`, um número acima do teto que a tela aceita (1 milhão de linhas telefônicas ou de agentes, ou 2.147.483.647 centavos de teto do mês), a criação de uma organização falhava com um erro genérico. Agora esse campo volta ao valor de fábrica, "sem limite", como já volta um campo com tipo errado. Os outros campos da chave continuam valendo, e a seção "Padrões para organizações novas" mostra com o que a organização nasce de verdade. A tela e o núcleo passam a conferir o mesmo teto. A frase "Ela nasce com" agora diz "até 1 linha telefônica" e "até 1 agente" (e o mesmo em inglês e espanhol), em vez do plural, e a recusa de criar além do limite também ("já tem 1 linha telefônica", "já tem 1 agente"). Crédito: @melgarafael.
+
 ## [0.43.0] - 2026-11-21
 
 ### Adicionado
