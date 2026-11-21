@@ -6,7 +6,6 @@ import { openTestDbs } from "../../../packages/core/test/helpers";
 import type { AudioSocketCloseReason, AudioSocketConnection } from "./audiosocket";
 import { AsteriskCalls } from "./asterisk-transport";
 import { callOf, createAgent, createCall, createOrganization, createTrunk, eventsOf, fakeAri, fakeClock, testSchedule } from "./testing/db";
-import type { TransferOutcome } from "./transport";
 
 const { app, owner } = openTestDbs();
 
@@ -176,19 +175,41 @@ describe("transferência com volta, do lado do Asterisk", () => {
     expect((await eventsOf(app, callId)).map((event) => event.kind)).not.toContain("transfer_returned");
   });
 
-  it("ANSWER: a pessoa atendeu; não volta, e a espera resolve quando o canal deixa de existir", async () => {
+  it("ANSWER: a pessoa atendeu; não volta, e a espera resolve no atendimento, com o canal ainda vivo", async () => {
     const { callId, channelId, ari, calls, transport, avisos } = await cenario("asterisk-return-answer");
-    let settled: TransferOutcome | undefined;
     const outcome = transport.transfer(DESTINO, { returnIfUnanswered: true });
-    void outcome.then((value) => (settled = value ?? undefined));
     await calls.afterAudio(channelId);
-    calls.transferDialed(channelId, "ANSWER");
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(settled).toBeUndefined();
-    await calls.channelDestroyed(channelId, "Normal Clearing");
+    await calls.transferDialed(channelId, "ANSWER");
     expect(await outcome).toEqual({ returned: false, status: "ANSWER" });
+    const answered = await eventsOf(app, callId);
+    expect(answered.at(-1)).toMatchObject({ kind: "transfer_completed", payload: { status: "ANSWER", answered: true } });
+    // O canal deixa de existir quando a conversa com a pessoa acaba: só se esquece o canal.
+    await calls.channelDestroyed(channelId, "Normal Clearing");
+    expect(await eventsOf(app, callId)).toEqual(answered);
     expect(hangups(ari.log)).toEqual([]);
+    expect(ari.log.filter((line) => line.includes("AUDIOSOCKET_UUID"))).toEqual([]);
     expect(await avisos()).toEqual([]);
+  });
+
+  it("ANSWER com o ChannelDestroyed chegando enquanto o atendimento é gravado: a conversa só termina com o transfer_completed na linha do tempo", async () => {
+    const { callId, channelId, calls, transport } = await cenario("asterisk-return-answer-race");
+    const outcome = transport.transfer(DESTINO, { returnIfUnanswered: true });
+    await calls.afterAudio(channelId);
+    const dialed = calls.transferDialed(channelId, "ANSWER");
+    const destroyed = calls.channelDestroyed(channelId, "Normal Clearing");
+    const seen = await outcome.then(() => eventsOf(app, callId));
+    expect(seen.filter((event) => event.kind === "transfer_completed")).toHaveLength(1);
+    await Promise.all([dialed, destroyed]);
+    expect((await eventsOf(app, callId)).filter((event) => event.kind === "transfer_completed")).toHaveLength(1);
+  });
+
+  it("ANSWER sem pedir a volta (a chave desligada): o transfer_completed sai no ChannelDestroyed, como antes", async () => {
+    const { callId, channelId, calls, transport } = await cenario("asterisk-return-answer-off");
+    expect(await transport.transfer(DESTINO)).toBeUndefined();
+    await calls.afterAudio(channelId);
+    await calls.transferDialed(channelId, "ANSWER");
+    expect((await eventsOf(app, callId)).map((event) => event.kind)).not.toContain("transfer_completed");
+    await calls.channelDestroyed(channelId, "Normal Clearing");
     expect((await eventsOf(app, callId)).at(-1)).toMatchObject({ kind: "transfer_completed", payload: { status: "ANSWER", answered: true } });
   });
 

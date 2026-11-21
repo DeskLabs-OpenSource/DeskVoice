@@ -1006,7 +1006,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * A transferência que pode voltar (Vapi · fatia 5a). Enquanto toca, a ligação fica em
    * `transferring`: o motor fecha (não se paga motor ouvindo a linha chamar), as ferramentas em espera
    * são soltas e as guardas param, sem `call_ended` nem `review_call`. O fim de verdade roda uma vez,
-   * em `finish`: atendida e encerrada, abandonada por quem ligou, ou no fim do trecho de volta.
+   * em `finish`: no atendimento (a ligação passa a ser da pessoa da equipe e sai do limite de ligações
+   * simultâneas, como sem a volta), abandonada por quem ligou, ou no fim do trecho de volta.
    */
   async function transferWithReturn(end: Ending, transferTo: string): Promise<void> {
     if (ending || transferring) return;
@@ -1035,7 +1036,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       });
       return;
     }
-    // Atendida (o canal já deixou de existir) ou abandonada por quem ligou: a telefonia já saiu daqui.
+    // Atendida (o fim é o do atendimento: o canal segue com a pessoa da equipe, fora desta conversa) ou
+    // abandonada por quem ligou: a telefonia já saiu daqui.
     await finish({ ...end, released: true, ...(outcome?.status === CALLER_HANGUP && { callerGone: true }) });
   }
 

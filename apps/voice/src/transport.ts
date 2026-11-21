@@ -37,7 +37,7 @@ export interface CallTransport {
   /**
    * Espera a fala pendente terminar de sair e passa a ligação para `toE164`. Sem `returnIfUnanswered`,
    * resolve assim que a ligação saiu daqui, como sempre foi. Com ele, e só no canal que declara
-   * `canReturnFromTransfer`, resolve quando a transferência terminou: atendida e encerrada, abandonada
+   * `canReturnFromTransfer`, resolve quando a transferência terminou: atendida (no atendimento), abandonada
    * por quem ligou, ou de volta, com o áudio desta ligação já no transporte de novo (`returned`).
    */
   transfer(toE164: string, options?: TransferOptions): Promise<TransferOutcome | void>;

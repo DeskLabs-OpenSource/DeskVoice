@@ -1,11 +1,15 @@
 // A transferência que ninguém atende volta para o agente (Vapi · fatia 5a, DESA-345), do lado da
 // conversa: o estado `transferring`, o trecho de volta e o fim que roda uma vez só em cada caminho.
-import { withSystem } from "@deskvoice/core";
+import { recordingPath, withSystem } from "@deskvoice/core";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
-import { notificationsOf, tasksOf } from "../../../packages/tools/test/helpers";
+import { notificationsOf, putSetting, tasksOf } from "../../../packages/tools/test/helpers";
 import { startCallSession, TRANSFER_RETURN_GREETINGS } from "./call-session";
-import { callOf, createAgent, createCall, createOrganization, kindsOf, ledgerOf, manualEngine, manualTransport, sessionHarness, type AgentOptions, type ManualEngine, type ManualTransport, type SessionHarness } from "./testing/db";
+import { approvalsOf, callOf, createAgent, createCall, createOrganization, eventsOf, kindsOf, ledgerOf, manualEngine, manualTransport, sessionHarness, type AgentOptions, type ManualEngine, type ManualTransport, type SessionHarness } from "./testing/db";
+import { AFTER_CLOSE_MS, AFTER_WORDS_MS, WITHOUT_WORDS_MS } from "./silence-guard";
 import { waitFor } from "./testing/helpers";
 import type { TransferOptions, TransferOutcome } from "./transport";
 
@@ -276,5 +280,106 @@ describe("transferência com volta para o agente", { timeout: 120_000 }, () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(manual.configs).toHaveLength(1);
     expect(count(await kindsOf(app, callId), "call_ended")).toBe(1);
+  });
+
+  it("a guarda de silêncio fica parada durante o Dial: passado o prazo dela, nada sai (V12)", async () => {
+    const { organizationId, callId, transport, session, manual } = await scene("return-guard-still");
+    const h = harness as SessionHarness;
+    await askTransfer(manual, transport);
+    // A sessão que fechou ainda manda sinal de fala (o provedor não parou de uma vez).
+    manual.emitOn(0, "callerActivity", { words: true });
+    manual.emitOn(0, "callerActivity", { words: false });
+    for (const delay of [AFTER_WORDS_MS, WITHOUT_WORDS_MS, AFTER_CLOSE_MS]) {
+      h.clock.advance(delay);
+      expect(h.timers.fire(delay), `${delay}`).toBe(0);
+    }
+    expect(manual.callerTurnsClosed).toBe(0);
+    expect(manual.said).toEqual([]);
+    expect(await kindsOf(app, callId)).not.toContain("caller_unanswered");
+    await asteriskRecordsReturn(organizationId, callId, "NOANSWER");
+    transport.endTransfer({ returned: true, status: "NOANSWER" });
+    await waitFor(() => manual.configs.length === 2, "the return leg to open");
+    transport.callerHangup();
+    await session.done;
+  });
+
+  it("a duração máxima não dispara no meio do Dial (X5)", async () => {
+    const { callId, transport, session, manual } = await scene("return-duration-still", { maxCallSeconds: 60 });
+    const h = harness as SessionHarness;
+    expect(h.timers.held()).toContain(60_000);
+    await askTransfer(manual, transport);
+    h.clock.advance(60_000);
+    expect(h.timers.fire(60_000)).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(manual.said).toEqual([]);
+    expect(await kindsOf(app, callId)).not.toContain("call_ended");
+    transport.endTransfer({ returned: false, status: "ANSWER" });
+    expect(await session.done).toMatchObject({ status: "transferred", endReason: "transferred" });
+  });
+
+  it("a ferramenta em espera de aprovação é solta quando a transferência começa (X10)", async () => {
+    const { callId, transport, session, manual } = await scene("return-release-approval", { tools: ["transfer_to_human", "request_approval"] });
+    manual.emit("toolCall", { id: "t-approval", name: "request_approval", args: { question: "Posso dar 10% de desconto?", context: "Cliente antiga." } });
+    await waitFor(async () => (await approvalsOf(app, callId)).some((each) => each.status === "pending"), "the approval to wait");
+    manual.emit("toolCall", { id: "t-transfer", name: "transfer_to_human", args: PEDIDO });
+    // Sem soltar a espera, a discagem ficaria presa atrás da aprovação, que nunca é decidida aqui.
+    await waitFor(() => transport.transfers.length === 1, "the transfer to be dialed");
+    const results = (await eventsOf(app, callId)).filter((each) => each.kind === "tool_result" && each.payload.name === "request_approval");
+    expect(results).toHaveLength(1);
+    transport.endTransfer({ returned: false, status: "ANSWER" });
+    await session.done;
+  });
+
+  it("nenhuma ferramenta roda durante a discagem (X12)", async () => {
+    const { organizationId, callId, transport, session, manual } = await scene("return-no-tool-while-dialing");
+    await askTransfer(manual, transport);
+    manual.emitOn(0, "toolCall", { id: "t-late", name: "notify_human", args: { message: "Ligar de volta.", urgency: "normal" } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const kinds = await kindsOf(app, callId);
+    expect(kinds).not.toContain("human_notified");
+    expect(count(kinds, "tool_called")).toBe(1);
+    expect(manual.toolResults.some((each) => each.id === "t-late")).toBe(false);
+    await asteriskRecordsReturn(organizationId, callId, "NOANSWER");
+    transport.endTransfer({ returned: true, status: "NOANSWER" });
+    await waitFor(() => manual.configs.length === 2, "the return leg to open");
+    transport.callerHangup();
+    await session.done;
+  });
+
+  it("um recado de antes da transferência não apaga o aviso para retornar: só conta o do trecho de volta (X9)", async () => {
+    const { organizationId, callId, transport, session, manual } = await scene("return-notice-before");
+    manual.emit("toolCall", { id: "t-before", name: "notify_human", args: { message: "Cliente quer falar com o financeiro.", urgency: "normal" } });
+    await waitFor(() => manual.toolResults.some((each) => each.id === "t-before"), "the notice before the transfer");
+    expect(await kindsOf(app, callId)).toContain("human_notified");
+    await askTransfer(manual, transport);
+    await asteriskRecordsReturn(organizationId, callId, "NOANSWER");
+    transport.endTransfer({ returned: true, status: "NOANSWER" });
+    await waitFor(() => manual.configs.length === 2, "the return leg to open");
+    transport.callerHangup();
+    await session.done;
+    expect(await unansweredNotices(organizationId)).toHaveLength(1);
+  });
+
+  it("quem ligou desistiu enquanto tocava: o fim sabe que quem ligou saiu, e a fala que não tocou sai da gravação (X17)", async () => {
+    const organizationId = await createOrganization(app, "return-caller-gone");
+    const agentId = await createAgent(app, organizationId, { engine: "manual", greeting: "Bom dia.", transferTo: DESTINO, tools: ["transfer_to_human"] });
+    await putSetting(app, organizationId, "calls.recording_enabled", true, false);
+    await harness?.approvals.close();
+    const manual = manualEngine({ keyless: true });
+    harness = await sessionHarness(app, [manual.engine]);
+    const callId = await createCall(app, organizationId, agentId, harness.clock.now());
+    const transport = returningTransport();
+    const dir = await mkdtemp(path.join(tmpdir(), "deskvoice-recordings-"));
+    const session = startCallSession({ ...harness.deps, recordingsDir: dir }, { organizationId, callId, agentId, transport });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("recording_notice"), "the notice event");
+    // 20 s de fala de uma vez; tocaram 5 quando a transferência sai.
+    manual.emit("audio", Buffer.alloc(20 * 8000 * 2, 1));
+    harness.clock.advance(5000);
+    await askTransfer(manual, transport);
+    transport.endTransfer({ returned: false, status: "CALLER_HANGUP" });
+    await session.done;
+    const wav = await readFile(recordingPath(dir, organizationId, callId));
+    expect(wav.readUInt32LE(40) / (8000 * 2 * 2)).toBeLessThan(5.5);
+    await rm(dir, { recursive: true, force: true });
   });
 });

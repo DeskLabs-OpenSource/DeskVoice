@@ -14,7 +14,8 @@
  *      com ele passa a ser o áudio do mesmo transporte (`resume`); sem ela, desliga. Se atendem, o canal não volta: o Dial não tem a opção `g`, e mesmo com
  *      ela não voltaria quando é quem ligou que desliga. Quando a conversa com o humano acaba, o
  *      canal só morre (`ChannelDestroyed`). O que diz que houve atendimento é o evento `Dial` da
- *      ARI com `ANSWER`, que chega pela assinatura de todos os canais (`subscribeAll`).
+ *      ARI com `ANSWER`, que chega pela assinatura de todos os canais (`subscribeAll`). Com a volta
+ *      ligada, a ligação termina nesse `ANSWER` (`transferDialed`); sem ela, no `ChannelDestroyed`.
  *
  * Lição do módulo de voz do DeskcommCRM (MIT, mesmo autor; ver CREDITS.md): a mídia nunca passa
  * por bridge + externalMedia. Por isso a transferência é do dialplan, e não uma bridge da ARI.
@@ -62,6 +63,8 @@ interface TrackedCall extends ExpectedCall {
   transferTo?: string;
   transferReported?: boolean;
   transferAnswered?: boolean;
+  /** A ligação terminou no `ANSWER` do `Dial` (`transferDialed`): o `ChannelDestroyed` depois não grava nem entrega nada. */
+  endedAtAnswer?: boolean;
   /** A conversa espera o fim da transferência (`transfer` com `returnIfUnanswered`). */
   transferWaiter?: { resolve(outcome: TransferOutcome): void; signal?: AbortSignal };
   /** O `AUDIOSOCKET_UUID` posto na volta: o AudioSocket que conectar com ele é a mesma ligação. */
@@ -264,10 +267,25 @@ export class AsteriskCalls {
     return true;
   }
 
-  /** A discagem da transferência mudou de estado (evento `Dial` da ARI, com o canal de quem ligou em `caller`). */
-  transferDialed(channelId: string, dialStatus: string): void {
+  /**
+   * A discagem da transferência mudou de estado (evento `Dial` da ARI, com o canal de quem ligou em `caller`).
+   *
+   * Com a conversa esperando a volta (`transferWaiter`), o `ANSWER` encerra a ligação aqui, no
+   * atendimento (Vapi · fatia 5a, ajuste 1): grava `transfer_completed` e entrega o fim à conversa, que
+   * fecha a ligação como `transferred`. Esperar o `ChannelDestroyed` deixaria a ligação `in_progress`
+   * durante toda a conversa com a pessoa da equipe, ocupando vaga no limite de ligações simultâneas e
+   * caindo em `reconcile` num reinício. Diferença aceita: sem a volta, o `ended_at` é o pedido da
+   * transferência; com ela, é o atendimento (inclui o tempo tocando, com o motor fechado e sem custo).
+   * Sem a volta, segue como antes: o `transfer_completed` sai no `ChannelDestroyed`.
+   */
+  async transferDialed(channelId: string, dialStatus: string): Promise<void> {
     const call = this.byChannel.get(channelId);
-    if (call?.transferTo && dialStatus === "ANSWER") call.transferAnswered = true;
+    if (!call?.transferTo || dialStatus !== "ANSWER" || call.transferAnswered) return;
+    call.transferAnswered = true;
+    if (!call.transferWaiter) return;
+    call.endedAtAnswer = true;
+    await this.reportTransfer(call, "ANSWER");
+    this.settle(call, { returned: false, status: "ANSWER" });
   }
 
   /** O canal deixou de existir. */
@@ -288,6 +306,9 @@ export class AsteriskCalls {
           await recordEvent(q, call.callId, "task_queued", { taskId: reviewId, kind: "review_call" }, clock.now());
         }
       });
+    } else if (call.endedAtAnswer) {
+      // A ligação já terminou no atendimento (`transferDialed`): aqui só se esquece o canal.
+      return;
     } else if (call.transferTo) {
       // A transferência atendida termina assim, desligue quem desligar. Sem o atendimento, foi quem
       // ligou que desistiu enquanto tocava: o dialplan não chega a informar o estado da discagem.
