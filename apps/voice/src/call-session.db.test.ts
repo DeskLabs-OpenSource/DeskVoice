@@ -13,6 +13,7 @@ import { createAgendaHorariosLivres } from "../../../packages/tools/src/tools/ag
 import { createAgendaMarcar } from "../../../packages/tools/src/tools/agenda_marcar";
 import { createAgendaRemarcar } from "../../../packages/tools/src/tools/agenda_remarcar";
 import { EngineTimeoutError, type VoiceEngine } from "@deskvoice/voice-engine";
+import geminiLive from "../../../packages/voice-engine/src/engines/gemini-live";
 import openaiRealtime from "../../../packages/voice-engine/src/engines/openai-realtime";
 import { startFakeProvider } from "../../../packages/voice-engine/src/testing/fake-provider";
 import { DEFAULT_RECORDING_NOTICE, startCallSession, type CallSession } from "./call-session";
@@ -687,6 +688,75 @@ describe("guarda contra o silêncio: a janela do áudio e o desligar", { timeout
     expect(harness.timers.held()).toEqual([]);
     expect(manual.callerTurnsClosed).toBe(0);
     expect(manual.said).toEqual([]);
+  });
+});
+
+describe("retomada do motor Gemini no meio da ligação (servidor falso)", { timeout: 120_000 }, () => {
+  let fake: Awaited<ReturnType<typeof startFakeProvider>>;
+  afterEach(() => fake.stop());
+
+  /** O motor Gemini de verdade, falando com o servidor falso. A chave não importa: o servidor é nosso. */
+  async function geminiCall(label: string) {
+    fake = await startFakeProvider();
+    const engine: VoiceEngine = {
+      ...geminiLive,
+      keyless: true,
+      connect: (config) => geminiLive.connect(config, "chave-teste", { baseUrl: fake.url, model: "modelo-x" }),
+    };
+    const organizationId = await createOrganization(app, label);
+    const agentId = await createAgent(app, organizationId, { engine: engine.id });
+    await harness?.approvals.close();
+    harness = await sessionHarness(app, [engine]);
+    const callId = await createCall(app, organizationId, agentId, harness.clock.now(), "inbound");
+    const transport = manualTransport();
+    const session = startCallSession(harness.deps, { organizationId, callId, agentId, transport });
+    await fake.waitFor((message) => "setup" in message);
+    fake.send({ setupComplete: {} });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    return { callId, agentId, transport, session };
+  }
+
+  it("goAway: o motor reconecta com o handle, a ligação segue, engine_resumed na linha do tempo e o consumo das duas conexões somado", async () => {
+    const { callId, agentId, transport, session } = await geminiCall("gemini-resume");
+    fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
+    fake.send({ usageMetadata: { promptTokenCount: 1000, responseTokenCount: 500 } });
+    await waitFor(async () => (await ledgerOf(app, callId)).length === 1, "the first connection usage");
+    fake.send({ goAway: { timeLeft: "5s" } });
+
+    const setup = await fake.waitFor((message) => "setup" in message);
+    expect((setup.setup as Record<string, unknown>).sessionResumption).toEqual({ handle: "h-1" });
+    fake.send({ setupComplete: {} });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("engine_resumed"), "the resumption event");
+    expect((await eventsOf(app, callId)).find((event) => event.kind === "engine_resumed")?.payload).toEqual({ engine: "gemini-live" });
+
+    // A ligação segue pela conexão nova: a fala do agente chega a quem ligou, e o consumo dela conta.
+    fake.send({ serverContent: { modelTurn: { parts: [{ inlineData: { data: Buffer.alloc(960).toString("base64"), mimeType: "audio/pcm;rate=24000" } }] } } });
+    await waitFor(() => transport.sentBytes > 0, "the agent audio over the new connection");
+    fake.send({ usageMetadata: { promptTokenCount: 2000, responseTokenCount: 100 } });
+    await waitFor(async () => (await ledgerOf(app, callId)).length === 2, "the second connection usage");
+    expect((await callOf(app, callId)).status).toBe("in_progress");
+
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+    const kinds = await kindsOf(app, callId);
+    expect(kinds).not.toContain("engine_failed");
+    expect(kinds.filter((kind) => kind === "engine_resumed")).toHaveLength(1);
+    const ledger = await ledgerOf(app, callId);
+    expect(ledger.every((row) => row.engine === "gemini-live" && row.agent_id === agentId)).toBe(true);
+    expect(ledger.reduce((sum, row) => sum + row.input_tokens, 0)).toBe(3000);
+    expect(ledger.reduce((sum, row) => sum + row.output_tokens, 0)).toBe(600);
+  });
+
+  it("retomada recusada: engine_failed como antes, sem engine_resumed", async () => {
+    const { callId, session } = await geminiCall("gemini-resume-refused");
+    fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
+    fake.send({ goAway: {} });
+    await fake.waitFor((message) => "setup" in message);
+    fake.refuse(1008, "session not found");
+    expect(await session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
+    const kinds = await kindsOf(app, callId);
+    expect(kinds).toContain("engine_failed");
+    expect(kinds).not.toContain("engine_resumed");
   });
 });
 

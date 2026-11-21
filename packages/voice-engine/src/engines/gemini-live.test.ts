@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
 import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
 import type { ClassifyOptions, KeyCheckOptions, VoiceSessionConfig } from "../types";
@@ -44,11 +44,13 @@ describe("gemini-live (contrato com servidor falso)", () => {
   });
 
   // A abertura de hoje, gravada como texto: agente sem termos não pode mandar ao provedor nada além disto.
+  // A retomada (fatia 3a) pôs no fim o pedido de handle e a compressão da janela, em toda abertura.
   const SETUP_SEM_VOCABULARIO =
     '{"setup":{"model":"models/modelo-x","generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Sulafat"}}}},' +
     '"systemInstruction":{"parts":[{"text":"Você atende a clínica.\\n\\nSpeak only in pt-BR."}]},' +
     '"tools":[{"functionDeclarations":[{"name":"end_call","description":"Encerra a ligação","parametersJsonSchema":{"type":"object","properties":{}}}]}],' +
-    '"inputAudioTranscription":{"languageCodes":["pt-BR"]},"outputAudioTranscription":{}}}';
+    '"inputAudioTranscription":{"languageCodes":["pt-BR"]},"outputAudioTranscription":{},' +
+    '"sessionResumption":{},"contextWindowCompression":{"slidingWindow":{}}}}';
 
   it.each([["ausente", undefined], ["vazio", []]])("vocabulário %s: a abertura é byte a byte a de antes", async (_, vocabulary) => {
     const { setup } = await openSession({ vocabulary });
@@ -194,6 +196,147 @@ describe("gemini-live (contrato com servidor falso)", () => {
     expect(order[1]).toBe("closed socket_closed");
     await session.close();
     expect(order).toHaveLength(2);
+  });
+
+  describe("retomada da sessão (goAway e queda com handle)", () => {
+    /** Tudo o que a sessão emite de fechamento, erro e retomada, na ordem. */
+    function watch(session: Awaited<ReturnType<typeof openSession>>["session"]) {
+      const order: string[] = [];
+      const usage = { inputTokens: 0, outputTokens: 0 };
+      session.on("error", (error) => order.push(`error ${error.message}`));
+      session.on("closed", (reason) => order.push(`closed ${reason}`));
+      session.on("resumed", () => order.push("resumed"));
+      session.on("usage", (increment) => {
+        usage.inputTokens += increment.inputTokens ?? 0;
+        usage.outputTokens += increment.outputTokens ?? 0;
+      });
+      return { order, usage };
+    }
+    const setupWithHandle = (message: Record<string, unknown>) => "setup" in message && JSON.stringify(message).includes('"sessionResumption":{"handle"');
+
+    it("goAway no meio: reconecta com o último handle retomável, sem closed, e o consumo das duas conexões soma", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      const { order, usage } = watch(session);
+      fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
+      // Não retomável: o handle vem vazio e não substitui o que valia.
+      fake.send({ sessionResumptionUpdate: { newHandle: "", resumable: false } });
+      fake.send({ usageMetadata: { promptTokenCount: 100, responseTokenCount: 40 } });
+      fake.send({ goAway: { timeLeft: "5s" } });
+
+      const setup = await fake.waitFor(setupWithHandle);
+      expect(fake.connections()).toBe(2);
+      // A segunda abertura é a mesma, só com o handle.
+      expect((setup.setup as Record<string, unknown>).sessionResumption).toEqual({ handle: "h-1" });
+      expect(setup.setup).toMatchObject({ model: "models/modelo-x", contextWindowCompression: { slidingWindow: {} } });
+      const resumed = nextEvent(session, "resumed");
+      fake.send({ setupComplete: {} });
+      await resumed;
+      await vi.waitFor(() => expect(fake.isOpen(0)).toBe(false));
+
+      fake.send({ usageMetadata: { promptTokenCount: 30, responseTokenCount: 7 } });
+      await vi.waitFor(() => expect(usage).toEqual({ inputTokens: 130, outputTokens: 47 }));
+      // A ligação segue: o áudio vai pela conexão nova, e nada de fala extra.
+      session.sendAudio(Buffer.alloc(320, 1));
+      const audio = await fake.waitFor((m) => "realtimeInput" in m);
+      expect(audio).toMatchObject({ realtimeInput: { audio: { mimeType: "audio/pcm;rate=16000" } } });
+      expect(JSON.stringify(audio)).not.toContain('"text"');
+      expect(order).toEqual(["resumed"]);
+      await session.close();
+      expect(order).toEqual(["resumed", "closed client"]);
+    });
+
+    it("o que sai durante a troca espera a conexão nova; do áudio fica o mais recente, até 2 s", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
+      fake.send({ goAway: {} });
+      await fake.waitFor(setupWithHandle);
+      // 3 s de quem ligou, em 30 pedaços de 100 ms (1600 bytes a 8 kHz), cada um com o próprio valor.
+      for (let i = 1; i <= 30; i++) {
+        const chunk = Buffer.alloc(1600);
+        for (let at = 0; at < chunk.length; at += 2) chunk.writeInt16LE(i * 100, at);
+        session.sendAudio(chunk);
+      }
+      session.sendToolResult("desconhecida", {}); // não chega a sair: id que o motor não viu
+      session.closeCallerTurn();
+      fake.send({ setupComplete: {} });
+      await nextEvent(session, "resumed");
+      const values: number[] = [];
+      for (let i = 0; i < 20; i++) {
+        const message = (await fake.waitFor((m) => "realtimeInput" in m)) as { realtimeInput: { audio?: { data: string } } };
+        values.push(Buffer.from(message.realtimeInput.audio?.data ?? "", "base64").readInt16LE(0));
+      }
+      expect(values).toEqual(Array.from({ length: 20 }, (_, i) => (i + 11) * 100));
+      expect(await fake.waitFor((m) => "realtimeInput" in m)).toEqual({ realtimeInput: { audioStreamEnd: true } });
+      await session.close();
+    });
+
+    it("queda com um handle guardado: retoma sem error nem closed", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      const { order } = watch(session);
+      fake.send({ sessionResumptionUpdate: { newHandle: "h-9", resumable: true } });
+      // O handle precisa ter chegado antes da queda.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      fake.drop();
+      const setup = await fake.waitFor(setupWithHandle);
+      expect((setup.setup as Record<string, unknown>).sessionResumption).toEqual({ handle: "h-9" });
+      fake.send({ setupComplete: {} });
+      await nextEvent(session, "resumed");
+      expect(order).toEqual(["resumed"]);
+      // Uma tentativa por conexão: a nova também pode ser retomada quando a vez dela chegar.
+      fake.send({ sessionResumptionUpdate: { newHandle: "h-10", resumable: true } });
+      fake.send({ goAway: {} });
+      const third = await fake.waitFor(setupWithHandle);
+      expect((third.setup as Record<string, unknown>).sessionResumption).toEqual({ handle: "h-10" });
+      expect(fake.connections()).toBe(3);
+      await session.close();
+      expect(order).toEqual(["resumed", "closed client"]);
+    });
+
+    it("sem handle guardado, o goAway não reconecta e a queda é a de sempre", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      const { order } = watch(session);
+      fake.send({ sessionResumptionUpdate: { newHandle: "", resumable: false } });
+      fake.send({ goAway: { timeLeft: "1s" } });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const closed = nextEvent(session, "closed");
+      fake.drop();
+      await closed;
+      expect(fake.connections()).toBe(1);
+      expect(order).toHaveLength(2);
+      expect(order[0]).toMatch(/^error Gemini Live: a conexão caiu/);
+      expect(order[1]).toBe("closed socket_closed");
+    });
+
+    it("retomada recusada: uma tentativa só, e a sessão cai com error seguido de closed", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      const { order } = watch(session);
+      fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
+      fake.send({ goAway: {} });
+      await fake.waitFor(setupWithHandle);
+      const closed = nextEvent(session, "closed");
+      fake.refuse(1008, "session not found");
+      await closed;
+      expect(order).toHaveLength(2);
+      expect(order[0]).toMatch(/^error Gemini Live: a conexão ia fechar e a retomada da sessão falhou .*session not found/);
+      expect(order[1]).toBe("closed socket_closed");
+      // A conexão de antes também sai, e ninguém tenta de novo.
+      await vi.waitFor(() => expect(fake.isOpen(0)).toBe(false));
+      expect(fake.connections()).toBe(2);
+      await session.close();
+      expect(order).toHaveLength(2);
+    });
+
+    it("close() no meio da troca fecha as duas conexões, com um closed client só", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      const { order } = watch(session);
+      fake.send({ sessionResumptionUpdate: { newHandle: "h-1", resumable: true } });
+      fake.send({ goAway: {} });
+      await fake.waitFor(setupWithHandle);
+      await session.close();
+      await session.close();
+      await vi.waitFor(() => expect([fake.isOpen(0), fake.isOpen(1)]).toEqual([false, false]));
+      expect(order).toEqual(["closed client"]);
+    });
   });
 
   it("close() é idempotente e não gera erro", async () => {

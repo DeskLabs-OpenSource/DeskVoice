@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, DotsNine, Gauge, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, DotsNine, Gauge, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import en from "../i18n/en/timeline";
@@ -374,6 +374,9 @@ export function Timeline({
             </Card>
           ),
         };
+      case "engine_resumed":
+        // O motor trocou a conexão com o provedor (o Gemini fecha a dele em cerca de 10 min) e a ligação seguiu.
+        return { ...base, tone: "neutral", icon: ArrowsClockwise, body: <Quiet>{e.engine_resumed}</Quiet> };
       case "call_refused":
         return { ...base, tone: "fail", icon: PhoneX, body: <Card tone="fail" title={e.call_refused}><p className="text-muted">{reason(p.reason)}</p></Card> };
       case "voicemail_left": {

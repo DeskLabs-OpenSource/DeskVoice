@@ -20,10 +20,12 @@ export async function startFakeProvider(options: { rejectUpgrade?: number } = {}
   const unread: Message[] = [];
   const waiters: Waiter[] = [];
   let client: WebSocket | undefined;
+  const clients: WebSocket[] = [];
   const request: { url: string; authorization: string; headers: Record<string, string | string[] | undefined> } = { url: "", authorization: "", headers: {} };
 
   server.on("connection", (socket, incoming) => {
     client = socket;
+    clients.push(socket);
     request.url = incoming.url ?? "";
     request.authorization = incoming.headers.authorization ?? "";
     request.headers = incoming.headers;
@@ -38,12 +40,17 @@ export async function startFakeProvider(options: { rejectUpgrade?: number } = {}
   return {
     url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`,
     request,
+    /** Quantas conexões o motor abriu até agora (a retomada abre outra). */
+    connections: (): number => clients.length,
+    /** A conexão de número `index` (a partir de 0) ainda está aberta. */
+    isOpen: (index: number): boolean => clients[index]?.readyState === 1,
     /** Próxima mensagem do motor que satisfaz o predicado (inclusive as já recebidas e não lidas). */
     waitFor(matches: (message: Message) => boolean): Promise<Message> {
       const index = unread.findIndex(matches);
       if (index !== -1) return Promise.resolve(unread.splice(index, 1)[0] as Message);
       return new Promise((resolve) => waiters.push({ matches, resolve }));
     },
+    /** Manda na conexão mais recente. */
     send(message: unknown): void {
       client?.send(typeof message === "string" ? message : JSON.stringify(message));
     },
