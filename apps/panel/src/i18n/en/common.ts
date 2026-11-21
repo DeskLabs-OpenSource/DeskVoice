@@ -44,6 +44,7 @@ const common: CommonDictionary = {
     followUpOpen: "See the follow-up",
     followUpGone: "Follow-up deleted by the retention period.",
     organization: "Organization",
+    myAccount: "My account",
   },
   roles: { owner: "Owner", admin: "Administrator", operator: "Operator" },
   health: {
@@ -169,7 +170,7 @@ const common: CommonDictionary = {
     caller_call_live: "There is a call in progress with this number. Nothing was erased. Wait for the call to end and try again.",
     daily_cap_reached: "The daily call limit of this line was reached.",
     attempts_exhausted: "The attempt limit for this person was reached.",
-    transcription_disabled: "Recording transcription is off. Turn it on in Settings → Artificial intelligence.",
+    transcription_disabled: "Recording transcription is off. Turn it on in Settings → Outcome, analysis and transcription.",
     transcription_call_erased: "This call was erased at the caller's request and gets no new text.",
     transcription_outside_retention: "This call is past the transcript retention period and gets no new text.",
     transcription_has_text: "This call already has a transcript. Refresh the page.",

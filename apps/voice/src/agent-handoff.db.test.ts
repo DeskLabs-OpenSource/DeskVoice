@@ -246,6 +246,27 @@ describe("a passagem com o motor simulado", { timeout: 120_000 }, () => {
     await session.done;
   });
 
+  it("o tocado que vai ao motor na interrupção conta do início da sessão dele, não da ligação", async () => {
+    const first = manualEngine({ id: "first", keyless: true });
+    const second = manualEngine({ id: "second", keyless: true });
+    const { ids, call } = await team("handoff-played", { Recepção: { engine: "first" }, Agendamento: { engine: "second" } }, [first.engine, second.engine]);
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    transport.spoken = 1500;
+    first.emit("interrupted");
+    expect(first.played).toEqual([1500]);
+
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    // A ponte segue contando a ligação inteira; o segundo só tocou 400 ms dele.
+    transport.spoken = 1900;
+    second.emit("interrupted");
+    expect(second.played).toEqual([400]);
+    transport.callerHangup();
+    await session.done;
+  });
+
   it("o segundo abre no idioma dele, e um idioma fora do mapa cai no pt-BR", async () => {
     const { ids, call } = await team("handoff-language", {
       Recepção: { script: [handoffCall("Agenda"), { end: true }] },

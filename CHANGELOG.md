@@ -3,6 +3,18 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.41.6] - 2026-11-21
+
+### Corrigido
+
+- **No OpenAI Realtime, o motor passa a pedir o corte da fala interrompida no histórico** Quando quem ligou fala por cima do agente numa ligação pelo Asterisk com o motor OpenAI Realtime, o motor agora avisa o provedor até onde a fala foi enviada para a linha, para que o provedor corte o resto do histórico da conversa. Antes, o modelo seguia achando que tinha dito a frase inteira e podia dar por combinado algo que a pessoa nunca ouviu. O efeito numa ligação real ainda não foi conferido: se o provedor recusar o pedido, o erro vai para o registro, nada é cortado e a ligação segue como antes. O Gemini Live, a ligação pelo WhatsApp e a chamada de teste no navegador seguem como estavam. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+## [0.41.5] - 2026-11-21
+
+### Alterado
+
+- **As telas de Configurações perdem a barra de abas e ganham "← Configurações"; "Minha conta" vai para o bloco da conta** As telas de Configurações não mostram mais a barra com as 11 abas. Cada uma traz o próprio nome como título e, acima dele, o link "← Configurações", que volta à central de cartões. A central é o caminho para todas elas. "Sua conta", onde se trocam o contato e a senha, saiu da barra e agora fica no bloco da conta, no fim do menu lateral (no celular, no fim da página), com o nome "Minha conta". Os endereços continuam os mesmos, inclusive `/settings/account`, e um favorito antigo abre a mesma tela. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
 ## [0.41.4] - 2026-11-21
 
 ### Alterado

@@ -254,6 +254,8 @@ export function fakeAri(): FakeAri {
 /** O lado de telefonia nas mãos do teste: ele faz o papel de quem ligou. */
 export interface ManualTransport extends CallTransport {
   sentBytes: number;
+  /** O que o teste diz que já tocou para quem ligou, em ms (`playedMs`). */
+  spoken: number;
   cleared: number;
   hangups: number;
   closes: number;
@@ -270,6 +272,7 @@ export function manualTransport(): ManualTransport {
   let hangup: (() => void) | undefined;
   const transport: ManualTransport = {
     sentBytes: 0,
+    spoken: 0,
     cleared: 0,
     hangups: 0,
     closes: 0,
@@ -278,6 +281,7 @@ export function manualTransport(): ManualTransport {
     onAudio: (handler) => void (audio = handler),
     sendAudio: (pcm) => void (transport.sentBytes += pcm.length),
     clearAudio: () => void (transport.cleared += 1),
+    playedMs: () => transport.spoken,
     onHangup: (handler) => void (hangup = handler),
     hangup: async () => void (transport.hangups += 1),
     transfer: async (to) => void (transport.transferredTo = to),
@@ -302,6 +306,8 @@ export interface ManualEngine {
   /** Quantas vezes a conversa pediu o fim do turno de quem ligou (a guarda contra o silêncio). */
   callerTurnsClosed: number;
   toolResults: Array<{ id: string; result: unknown }>;
+  /** Cada `played(ms)` que a conversa mandou. */
+  played: number[];
   audioBytes: number;
   closed: number;
   emit<K extends keyof VoiceSessionEvents>(event: K, ...args: Parameters<VoiceSessionEvents[K]>): void;
@@ -315,6 +321,7 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
     said: [],
     callerTurnsClosed: 0,
     toolResults: [],
+    played: [],
     audioBytes: 0,
     closed: 0,
     emit(event, ...args) {
@@ -341,6 +348,7 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
           sendToolResult: (id, result) => void manual.toolResults.push({ id, result }),
           say: (text) => void manual.said.push(text),
           closeCallerTurn: () => void (manual.callerTurnsClosed += 1),
+          played: (ms) => void manual.played.push(ms),
           close: async () => void (manual.closed += 1),
         };
         return session;

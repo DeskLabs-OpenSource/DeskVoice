@@ -24,6 +24,12 @@ export interface CallTransport {
   sendAudio(pcm16_8k: Buffer): void;
   /** Descarta o que ainda não saiu (quem ligou falou por cima). */
   clearAudio(): void;
+  /**
+   * Quanto da fala do agente já saiu para quem ligou nesta chamada, em ms, acumulado: os quadros
+   * enviados, nunca o que está na fila. Opcional: o canal que não sabe (sem telefonia, o WhatsApp,
+   * o navegador) não declara, e o motor não corta a fala interrompida no histórico.
+   */
+  playedMs?(): number;
   /** Quem ligou desligou, ou a telefonia caiu. Não dispara quando o encerramento partiu daqui. */
   onHangup(handler: () => void): void;
   /** Espera a fala pendente terminar de sair e desliga. */

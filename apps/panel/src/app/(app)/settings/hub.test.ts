@@ -77,7 +77,7 @@ describe("o estado dos cartões da central", () => {
       voice: "/settings/voice",
       speechFilter: "/settings/speech-filter",
       analysts: "/settings/analysts",
-      outcome: "/settings/ai",
+      outcome: "/settings/after-call",
       whatsapp: "/settings/whatsapp",
       webhooks: "/settings/integrations",
       rules: "/settings/calls",
