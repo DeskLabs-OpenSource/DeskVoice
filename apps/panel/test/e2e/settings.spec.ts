@@ -18,6 +18,9 @@ const hubCard = (page: Page, key: string) => page.locator(`[data-card="${key}"]`
 /** O link "← Configurações" de uma subtela: fica no conteúdo, e não no menu. */
 const backLink = (page: Page) => page.getByRole("main").getByRole("link", { name: common.nav.settings, exact: true });
 
+/** Um título de bloco dentro da subtela. O título da tela (h1) fica de fora: em WhatsApp, os dois têm o mesmo nome. */
+const blockHeading = (page: Page, name: string) => page.getByRole("heading", { name, exact: true }).and(page.locator(":not(h1)"));
+
 /** Vai à subtela pelo cartão da central, como quem usa, e confere que ela chegou com o nome e o caminho de volta. */
 async function openSection(page: Page, card: string, path: string, title: string): Promise<void> {
   await page.goto("/settings");
@@ -39,7 +42,7 @@ test("configurar: os blocos de uma instalação nova aparecem, e o limite de lig
   await expect(page.getByText(update.running, { exact: true })).toBeVisible();
   // WhatsApp: o serviço é opcional e não vem instalado.
   await openSection(page, "whatsapp", "/settings/whatsapp", settings.sections.whatsapp);
-  await expect(page.getByRole("heading", { name: whatsapp.title, exact: true })).toBeVisible();
+  await expect(blockHeading(page, whatsapp.title)).toBeVisible();
   await expect(page.getByText(whatsapp.serviceAbsent, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: whatsapp.installService, exact: true })).toBeVisible();
   // Ligação pelo WhatsApp: também opcional, também não vem instalada.
@@ -75,7 +78,7 @@ test("subtelas de Configurações: sem barra de abas, com o nome no título e \"
   const mainNav = page.getByRole("navigation", { name: common.shell.mainNav });
   for (const section of sections) {
     await openSection(page, section.card, section.path, section.title);
-    await expect(page.getByRole("heading", { name: section.heading, exact: true })).toBeVisible();
+    await expect(blockHeading(page, section.heading)).toBeVisible();
     // A barra de abas saiu: nenhuma navegação dentro do conteúdo.
     await expect(page.getByRole("main").getByRole("navigation")).toHaveCount(0);
     await expect(mainNav.getByRole("link", { name: common.nav.settings })).toHaveAttribute("aria-current", "page");
@@ -175,7 +178,7 @@ test("a central em /settings: sem barra de abas, e cada cartão abre a tela que 
     await page.goto("/settings");
     await hubCard(page, card.key).click();
     await expect(page).toHaveURL(new RegExp(`${card.path}$`));
-    if (card.heading) await expect(page.getByRole("heading", { name: card.heading, exact: true })).toBeVisible();
+    if (card.heading) await expect(blockHeading(page, card.heading)).toBeVisible();
   }
 });
 
