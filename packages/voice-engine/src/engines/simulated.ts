@@ -108,6 +108,8 @@ export class SimulatedSession implements VoiceSession {
     this.waiting.remainingMs -= ms;
     if (this.waiting.remainingMs > 0) return;
     const { text } = this.waiting;
+    // A fala esperada acabou: é o fim da vez de quem ligou, como a detecção de fala de um provedor.
+    this.emitter.emit("callerTurnEnded", { source: "vad" });
     this.resume(() => {
       if (text) this.emitter.emit("transcript", { speaker: "user", text });
     });

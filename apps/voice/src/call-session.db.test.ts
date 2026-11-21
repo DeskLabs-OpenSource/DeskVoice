@@ -31,6 +31,7 @@ import {
   ledgerOf,
   manualEngine,
   manualTransport,
+  type ManualTransport,
   pricedSimulatedEngine,
   secretKey,
   sessionHarness,
@@ -719,6 +720,221 @@ describe("guarda contra o silêncio: a janela do áudio e o desligar", { timeout
   });
 });
 
+describe("latência por turno (item 6 da segunda leva Vapi)", { timeout: 120_000 }, () => {
+  /** Uma resposta do agente: dois pedaços de 20 ms. Só o primeiro fecha o turno. */
+  const answer = (manual: ManualEngine): void => {
+    manual.emit("audio", Buffer.alloc(320));
+    manual.emit("audio", Buffer.alloc(320));
+  };
+  /** Um turno: quem ligou termina, o relógio anda `ms`, o agente responde. */
+  const turn = (manual: ManualEngine, clock: SessionHarness["clock"], ms: number): void => {
+    manual.emit("callerTurnEnded", { source: "vad" });
+    clock.advance(ms);
+    answer(manual);
+  };
+  const latencyOf = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "turn_latency").map((event) => event.payload);
+
+  async function answeredScene(label: string, agent: AgentOptions = { engine: "manual" }, direction: "inbound" | "outbound" = "inbound", engine: Parameters<typeof manualEngine>[0] = {}) {
+    const manual = manualEngine({ keyless: true, ...engine });
+    const made = await scene(label, agent, manual, direction);
+    const session = made.start();
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("call_answered"), "the call to be answered");
+    return { ...made, manual, session };
+  }
+
+  it("L1: três turnos de 400, 800 e 1200 ms viram um evento só, antes de call_ended, com p50 800 e máximo 1200", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l1");
+    turn(manual, harness.clock, 400);
+    turn(manual, harness.clock, 1200);
+    turn(manual, harness.clock, 800);
+    // O áudio que continua a mesma resposta, sem marco novo, não abre turno.
+    harness.clock.advance(5000);
+    answer(manual);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 3, p50Ms: 800, p90Ms: 1200, maxMs: 1200, toolTurns: 0, toolP50Ms: null, guardTurns: 0 }]);
+    const kinds = await kindsOf(app, callId);
+    expect(kinds.indexOf("turn_latency")).toBe(kinds.indexOf("call_ended") - 1);
+  });
+
+  it("vale o último marco antes da resposta, e a interrupção apaga o marco de antes", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-last-mark");
+    manual.emit("callerTurnEnded", { source: "vad" });
+    harness.clock.advance(3000);
+    turn(manual, harness.clock, 500);
+    // Quem ligou falou por cima depois de um marco: sem marco novo, a próxima fala não fecha turno.
+    manual.emit("callerTurnEnded", { source: "vad" });
+    manual.emit("interrupted");
+    harness.clock.advance(2000);
+    answer(manual);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 500, p90Ms: 500, maxMs: 500, toolTurns: 0, toolP50Ms: null, guardTurns: 0 }]);
+  });
+
+  it("L2: o turno em que uma ferramenta rodou vai para toolTurns, e não para turns, mesmo com a ferramenta começada antes do fim da fala", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l2", { engine: "manual", tools: ["request_approval"] });
+    turn(manual, harness.clock, 600);
+    // A ferramenta começa entre o fim da fala e a resposta.
+    manual.emit("callerTurnEnded", { source: "vad" });
+    manual.emit("toolCall", { id: "t1", name: "nao_instalada", args: {} });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    harness.clock.advance(2500);
+    answer(manual);
+    // Quem ligou termina de falar e a aprovação começa: a ferramenta pede ao motor a fala de espera
+    // (`ctx.say`). Ela toca, e não é resposta a ninguém: o turno aberto se perde, sem ir para
+    // `toolTurns` (com ele, a fala de espera fecharia um turno de 300 ms) nem para `guardTurns`.
+    manual.emit("callerTurnEnded", { source: "vad" });
+    harness.clock.advance(300);
+    manual.emit("toolCall", { id: "t2", name: "request_approval", args: { question: "Posso dar 10% de desconto?", context: "Cliente antiga." } });
+    await waitFor(async () => (await approvalsOf(app, callId)).some((candidate) => candidate.status === "pending"), "the approval to wait");
+    await waitFor(() => manual.said.length === 1, "the waiting speech");
+    answer(manual);
+    // A ferramenta já está em curso (aprovação em espera) quando quem ligou termina de falar.
+    turn(manual, harness.clock, 900);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 600, p90Ms: 600, maxMs: 600, toolTurns: 2, toolP50Ms: 900, guardTurns: 0 }]);
+  });
+
+  /** A guarda fecha a vez de quem ligou: as palavras dela armam, e o prazo depois delas vence. */
+  const guardCloses = (manual: ManualEngine, clock: SessionHarness["clock"], timers: SessionHarness["timers"]): void => {
+    manual.emit("callerActivity", { words: true });
+    clock.advance(AFTER_WORDS_MS);
+    expect(timers.fire(AFTER_WORDS_MS)).toBe(1);
+  };
+
+  it("L3a: o motor diz que não agiu (o provedor já fechou a vez, só está lento): a resposta de 3000 ms entra na conta", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l3a");
+    manual.closeCallerTurnResult = false;
+    turn(manual, harness.clock, 800);
+    harness.clock.advance(5000);
+    manual.emit("callerTurnEnded", { source: "vad" });
+    guardCloses(manual, harness.clock, harness.timers);
+    expect(manual.callerTurnsClosed).toBe(1);
+    harness.clock.advance(3000 - AFTER_WORDS_MS);
+    answer(manual);
+    // Sem resposta nenhuma, a guarda pede para repetir: aí sim o turno sai, e conta em `guardTurns`.
+    harness.clock.advance(5000);
+    manual.emit("callerTurnEnded", { source: "vad" });
+    guardCloses(manual, harness.clock, harness.timers);
+    harness.clock.advance(AFTER_CLOSE_MS);
+    expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+    expect(manual.said).toEqual([ASK_TO_REPEAT]);
+    answer(manual);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 2, p50Ms: 800, p90Ms: 3000, maxMs: 3000, toolTurns: 0, toolP50Ms: null, guardTurns: 1 }]);
+  });
+
+  it("L3b: o motor agiu (fechou a vez à força): o turno sai da conta e vai para guardTurns, com o marco antes ou depois do fechamento", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l3b");
+    // Marco antes: o provedor viu o fim da fala, mas não respondeu, e a guarda fechou o turno.
+    manual.emit("callerTurnEnded", { source: "vad" });
+    guardCloses(manual, harness.clock, harness.timers);
+    expect(manual.callerTurnsClosed).toBe(1);
+    harness.clock.advance(300);
+    answer(manual);
+    // Marco depois: a transcrição chega depois do fechamento (como no Gemini), antes da resposta forçada.
+    harness.clock.advance(5000);
+    guardCloses(manual, harness.clock, harness.timers);
+    expect(manual.callerTurnsClosed).toBe(2);
+    turn(manual, harness.clock, 300);
+    // Um turno de verdade.
+    harness.clock.advance(5000);
+    turn(manual, harness.clock, 700);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 700, p90Ms: 700, maxMs: 700, toolTurns: 0, toolP50Ms: null, guardTurns: 2 }]);
+  });
+
+  it("L3c: o fechamento que agiu e o pedido para repetir no mesmo turno contam uma vez só", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l3c");
+    manual.emit("callerTurnEnded", { source: "vad" });
+    guardCloses(manual, harness.clock, harness.timers);
+    // O agente segue calado, e a transcrição atrasada de quem ligou chega antes do pedido.
+    manual.emit("callerTurnEnded", { source: "vad" });
+    harness.clock.advance(AFTER_CLOSE_MS);
+    expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+    expect(manual.said).toEqual([ASK_TO_REPEAT]);
+    answer(manual);
+    harness.clock.advance(5000);
+    turn(manual, harness.clock, 700);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 700, p90Ms: 700, maxMs: 700, toolTurns: 0, toolP50Ms: null, guardTurns: 1 }]);
+  });
+
+  it("L6: a ligação só com turnos tirados pela guarda grava o evento com turns 0 e os máximos null, antes de call_ended", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l6");
+    manual.emit("callerTurnEnded", { source: "vad" });
+    guardCloses(manual, harness.clock, harness.timers);
+    harness.clock.advance(4000);
+    answer(manual);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 0, p50Ms: null, p90Ms: null, maxMs: null, toolTurns: 0, toolP50Ms: null, guardTurns: 1 }]);
+    const kinds = await kindsOf(app, callId);
+    expect(kinds.indexOf("turn_latency")).toBe(kinds.indexOf("call_ended") - 1);
+  });
+
+  it("D: um turno medido e a despedida (end_call): a despedida não entra em guardTurns", async () => {
+    // O motor declara o marco: com a despedida em `guardActed`, a vez contaria mesmo sem marco aberto.
+    const { callId, manual, session, harness } = await answeredScene("latency-d-farewell", { engine: "manual", tools: ["end_call"] }, "inbound", { callerTurnSource: "vad" });
+    turn(manual, harness.clock, 800);
+    harness.clock.advance(5000);
+    manual.emit("callerTurnEnded", { source: "vad" });
+    manual.emit("toolCall", { id: "t1", name: "end_call", args: { reason: "A cliente se despediu.", farewell: "Até logo!" } });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    // O modelo fala a despedida.
+    harness.clock.advance(400);
+    answer(manual);
+    expect(harness.timers.fire(6000)).toBe(1);
+    expect(await session.done).toMatchObject({ endReason: "end_call" });
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 800, p90Ms: 800, maxMs: 800, toolTurns: 1, toolP50Ms: 400, guardTurns: 0 }]);
+  });
+
+  it("D: um turno medido e o teto de duração: a despedida do teto não entra em guardTurns", async () => {
+    const { callId, manual, session, harness } = await answeredScene("latency-d-ceiling", { engine: "manual", maxCallSeconds: 45 }, "inbound", { callerTurnSource: "vad" });
+    turn(manual, harness.clock, 800);
+    harness.clock.advance(5000);
+    manual.emit("callerTurnEnded", { source: "vad" });
+    expect(harness.timers.fire(45_000)).toBe(1);
+    expect(manual.said).toEqual([expect.stringContaining("tempo máximo")]);
+    harness.clock.advance(300);
+    answer(manual);
+    expect(harness.timers.fire(6000)).toBe(1);
+    expect(await session.done).toMatchObject({ endReason: "max_duration" });
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 800, p90Ms: 800, maxMs: 800, toolTurns: 0, toolP50Ms: null, guardTurns: 0 }]);
+  });
+
+  it("L4: o say do aviso de gravação (chamada de saída) não fecha turno nenhum", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-l4", { engine: "manual", greeting: "Bom dia." }, "outbound");
+    await waitFor(() => manual.said.length === 1, "the recording notice");
+    // Quem atendeu diz "alô" enquanto o aviso ainda não começou a tocar: o áudio é o do aviso.
+    turn(manual, harness.clock, 200);
+    harness.clock.advance(5000);
+    turn(manual, harness.clock, 700);
+    transport.callerHangup();
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([{ engine: "manual", source: "vad", turns: 1, p50Ms: 700, p90Ms: 700, maxMs: 700, toolTurns: 0, toolP50Ms: null, guardTurns: 0 }]);
+  });
+
+  it("sem turno medido, nenhum evento; o áudio que não chega ao transporte (a ligação já terminando) não fecha turno", async () => {
+    const { callId, transport, manual, session, harness } = await answeredScene("latency-none");
+    manual.emit("callerTurnEnded", { source: "vad" });
+    transport.callerHangup();
+    // O motor ainda manda áudio depois do desligar: ele não sai para a linha, e não é resposta.
+    harness.clock.advance(400);
+    const sent = transport.sentBytes;
+    answer(manual);
+    expect(transport.sentBytes).toBe(sent);
+    await session.done;
+    expect(await latencyOf(callId)).toEqual([]);
+    expect(await kindsOf(app, callId)).toContain("call_ended");
+  });
+});
+
 describe("retomada do motor Gemini no meio da ligação (servidor falso)", { timeout: 120_000 }, () => {
   let fake: Awaited<ReturnType<typeof startFakeProvider>>;
   afterEach(() => fake.stop());
@@ -774,6 +990,17 @@ describe("retomada do motor Gemini no meio da ligação (servidor falso)", { tim
     expect(ledger.every((row) => row.engine === "gemini-live" && row.agent_id === agentId)).toBe(true);
     expect(ledger.reduce((sum, row) => sum + row.input_tokens, 0)).toBe(3000);
     expect(ledger.reduce((sum, row) => sum + row.output_tokens, 0)).toBe(600);
+  });
+
+  it("latência por turno no Gemini: o marco é a transcrição de quem ligou, e o evento diz que a medida é aproximada", async () => {
+    const { callId, transport, session } = await geminiCall("gemini-latency");
+    fake.send({ serverContent: { inputTranscription: { text: "quero remarcar" } } });
+    fake.send({ serverContent: { modelTurn: { parts: [{ inlineData: { data: Buffer.alloc(960).toString("base64"), mimeType: "audio/pcm;rate=24000" } }] } } });
+    await waitFor(() => transport.sentBytes > 0, "the agent audio");
+    transport.callerHangup();
+    await session.done;
+    const latency = (await eventsOf(app, callId)).filter((event) => event.kind === "turn_latency").map((event) => event.payload);
+    expect(latency).toEqual([{ engine: "gemini-live", source: "transcript", turns: 1, p50Ms: 0, p90Ms: 0, maxMs: 0, toolTurns: 0, toolP50Ms: null, guardTurns: 0 }]);
   });
 
   it("goAway e retomada recusada: a ligação segue pela conexão de antes, e quando ela fecha vem engine_failed, sem engine_resumed", async () => {
@@ -904,6 +1131,94 @@ describe("guarda contra o silêncio com o motor OpenAI (servidor falso)", { time
 
     transport.callerHangup();
     await session.done;
+  });
+
+  /** Quem ligou fala e o servidor fecha o item; a transcrição arma a guarda. */
+  const callerSpeaks = async (harness: SessionHarness, item: string): Promise<void> => {
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    fake.send({ type: "input_audio_buffer.speech_stopped" });
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: item });
+    fake.send({ type: "conversation.item.input_audio_transcription.delta", item_id: item, delta: "Quero marcar uma consulta" });
+    await waitFor(() => harness.timers.held().includes(AFTER_WORDS_MS), "the guard to arm on the caller words");
+  };
+  /** O servidor responde: o primeiro áudio chega ao transporte. */
+  const serverAnswers = async (transport: ManualTransport): Promise<void> => {
+    const sent = transport.sentBytes;
+    fake.send({ type: "response.created", response: {} });
+    fake.send({ type: "response.output_audio.delta", delta: Buffer.alloc(160, 0xff).toString("base64") });
+    await waitFor(() => transport.sentBytes > sent, "the agent audio");
+    fake.send({ type: "response.done", response: {} });
+  };
+  /**
+   * Um turno de barulho: o servidor vê o início da fala e nunca o fim (sem `speech_stopped`, sem item
+   * fechado). A guarda fecha a vez aos 8 s, e o motor age: manda o `commit` e pede a resposta.
+   * `stoppedAfter`: o servidor manda o `speech_stopped` depois do `commit` manual.
+   */
+  const noiseClosed = async (harness: SessionHarness, stoppedAfter: boolean): Promise<void> => {
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await waitFor(() => harness.timers.held().includes(WITHOUT_WORDS_MS), "the guard to arm on the noise");
+    harness.clock.advance(WITHOUT_WORDS_MS);
+    expect(harness.timers.fire(WITHOUT_WORDS_MS)).toBe(1);
+    await fake.waitFor((message) => message.type === "input_audio_buffer.commit");
+    if (stoppedAfter) fake.send({ type: "input_audio_buffer.speech_stopped" });
+    harness.clock.advance(1000);
+  };
+  const noiseUnanswered = [{ action: "turn_closed", waitedMs: WITHOUT_WORDS_MS, words: false }];
+
+  it("L3a: o servidor fecha o item e responde em 3000 ms: a guarda fecha a vez sem o motor agir, e o turno lento entra na conta", async () => {
+    const { callId, transport, session, harness } = await openaiCall("latency-openai-slow");
+    await callerSpeaks(harness, "i1");
+    harness.clock.advance(800);
+    await serverAnswers(transport);
+    harness.clock.advance(5000);
+    await callerSpeaks(harness, "i2");
+    // O servidor está lento: a guarda fecha a vez, e o motor não manda nada (o item já está fechado).
+    harness.clock.advance(AFTER_WORDS_MS);
+    expect(harness.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    harness.clock.advance(3000 - AFTER_WORDS_MS);
+    await serverAnswers(transport);
+    transport.callerHangup();
+    await session.done;
+    expect(fake.hasUnread((message) => message.type === "input_audio_buffer.commit")).toBe(false);
+    const events = await eventsOf(app, callId);
+    expect(events.filter((event) => event.kind === "caller_unanswered").map((event) => event.payload)).toEqual([{ action: "turn_closed", waitedMs: AFTER_WORDS_MS, words: true }]);
+    expect(events.filter((event) => event.kind === "turn_latency").map((event) => event.payload)).toEqual([
+      { engine: "openai-realtime", source: "vad", turns: 2, p50Ms: 800, p90Ms: 3000, maxMs: 3000, toolTurns: 0, toolP50Ms: null, guardTurns: 0 },
+    ]);
+  });
+
+  for (const stoppedAfter of [false, true]) {
+    it(`${stoppedAfter ? "A2" : "A1"}: 800 ms e um turno de barulho que a guarda fecha${stoppedAfter ? ", com o speech_stopped depois do commit" : ""}: turns 1 e guardTurns 1`, async () => {
+      const { callId, transport, session, harness } = await openaiCall(`latency-openai-noise-${stoppedAfter ? "a2" : "a1"}`);
+      await callerSpeaks(harness, "i1");
+      harness.clock.advance(800);
+      await serverAnswers(transport);
+      harness.clock.advance(5000);
+      await noiseClosed(harness, stoppedAfter);
+      await serverAnswers(transport);
+      transport.callerHangup();
+      await session.done;
+      const events = await eventsOf(app, callId);
+      expect(events.filter((event) => event.kind === "caller_unanswered").map((event) => event.payload)).toEqual(noiseUnanswered);
+      // O turno de barulho não tem marco antes do `commit`: conta na hora em que o motor agiu, e o
+      // `speech_stopped` que vier depois é o mesmo turno. Com 1 turno medido, os máximos são os dele.
+      expect(events.filter((event) => event.kind === "turn_latency").map((event) => event.payload)).toEqual([
+        { engine: "openai-realtime", source: "vad", turns: 1, p50Ms: 800, p90Ms: 800, maxMs: 800, toolTurns: 0, toolP50Ms: null, guardTurns: 1 },
+      ]);
+    });
+  }
+
+  it("B: a ligação só com barulho grava um turn_latency com turns 0, guardTurns 1 e os máximos null", async () => {
+    const { callId, transport, session, harness } = await openaiCall("latency-openai-noise-only");
+    await noiseClosed(harness, false);
+    await serverAnswers(transport);
+    transport.callerHangup();
+    await session.done;
+    const events = await eventsOf(app, callId);
+    expect(events.filter((event) => event.kind === "caller_unanswered").map((event) => event.payload)).toEqual(noiseUnanswered);
+    expect(events.filter((event) => event.kind === "turn_latency").map((event) => event.payload)).toEqual([
+      { engine: "openai-realtime", source: "vad", turns: 0, p50Ms: null, p90Ms: null, maxMs: null, toolTurns: 0, toolP50Ms: null, guardTurns: 1 },
+    ]);
   });
 
   it("o servidor fecha o item e nunca começa a resposta: closeCallerTurn não age, e a guarda pede para repetir depois de 4 s", async () => {

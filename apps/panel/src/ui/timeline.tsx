@@ -380,6 +380,27 @@ export function Timeline({
       case "engine_resumed":
         // O motor trocou a conexão com o provedor (o Gemini fecha a dele em cerca de 10 min) e a ligação seguiu.
         return { ...base, tone: "neutral", icon: ArrowsClockwise, body: <Quiet>{e.engine_resumed}</Quiet> };
+      case "turn_latency": {
+        // Um evento por ligação (item 6 da segunda leva Vapi): do fim da fala de quem ligou ao primeiro
+        // áudio do agente na linha, sem os turnos com ferramenta. `transcript` é a medida aproximada do Gemini.
+        // Com `guardTurns`, o mais lento é o mais lento medido, e a linha diz quantos turnos ficaram sem
+        // medida; com `turns: 0`, só isso.
+        const seconds = (ms: unknown): string => (Number(ms) / 1000).toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+        const turns = Number(p.turns);
+        const guardTurns = Number(p.guardTurns ?? 0);
+        const guard = guardTurns === 1 ? e.turn_latency.guardOne : fill(e.turn_latency.guardMany, { count: guardTurns.toLocaleString(locale) });
+        const measured =
+          turns > 0
+            ? fill(guardTurns > 0 ? e.turn_latency.lineMeasured : e.turn_latency.line, {
+                engine: Object.hasOwn(e.turn_latency.engines, text(p.engine)) ? (e.turn_latency.engines[text(p.engine)] ?? text(p.engine)) : text(p.engine),
+                p50: seconds(p.p50Ms),
+                max: seconds(p.maxMs),
+                turns: turns === 1 ? e.turn_latency.turnsOne : fill(e.turn_latency.turnsMany, { count: turns.toLocaleString(locale) }),
+              }) + (p.source === "transcript" ? ` ${e.turn_latency.approximate}` : "")
+            : "";
+        const line = [measured, guardTurns > 0 ? guard : ""].filter(Boolean).join(" ");
+        return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{line}</Quiet> };
+      }
       case "call_refused":
         return { ...base, tone: "fail", icon: PhoneX, body: <Card tone="fail" title={e.call_refused}><p className="text-muted">{reason(p.reason)}</p></Card> };
       case "voicemail_left": {

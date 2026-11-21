@@ -1,0 +1,7 @@
+---
+impact: new_capability
+section: added
+title: A tela da ligação mostra quanto o agente demorou para responder
+---
+
+Nos motores OpenAI Realtime e Gemini Live, a linha do tempo de cada ligação ganha uma linha no fim: em quanto tempo o agente respondeu em metade dos turnos, quanto levou a resposta mais lenta e quantos turnos entraram na conta. A espera conta do fim da fala de quem ligou até o primeiro som do agente na linha. Ficam de fora os turnos em que uma ferramenta rodou (a espera ali é do sistema chamado, e não do motor), o turno em que o DeskVoice agiu porque o agente ficou calado (fechou a vez de quem ligou à força ou pediu para repetir) e as falas do próprio sistema, como o aviso de gravação e a despedida. Quando há turno tirado assim, a linha diz "o mais lento medido" e quantos turnos ficaram sem medida; se nenhum turno foi medido, ela mostra só essa contagem, para a ligação toda lenta não sumir. Quando o provedor já tinha visto o fim da fala e só demorou a responder, o turno conta normalmente. No Gemini Live, a linha diz que a medida é aproximada: o Google não avisa quando a fala termina, e o marco é a transcrição, que chega um pouco depois, então a espera real é um pouco maior. É um registro por ligação, guardado no banco da própria instalação, sem nada enviado para fora. Nada muda na conversa, e nada a fazer ao atualizar. Os números foram conferidos com motor de teste e servidor falso, não numa ligação real. Crédito: @melgarafael.

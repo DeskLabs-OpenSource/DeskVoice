@@ -74,6 +74,16 @@
  *   handle alcança uma chamada de ferramenta em curso (a página não diz quando `resumable` é falso);
  *   se o `usageMetadata` da conexão nova recomeça do zero (aqui, como antes, é incremento e soma).
  *
+ * Fim da vez de quem ligou (`callerTurnEnded`, a latência por turno): com a detecção automática de
+ * fala, o servidor não manda aviso de fim de fala (lido no código e na referência acima, não na
+ * documentação de hoje). O marco é cada pedaço de `inputTranscription` que chega antes do primeiro
+ * áudio da resposta, e quem mede fica com o último. `source: "transcript"`: a transcrição vem depois
+ * do fim real da fala, e a medida sai menor que a espera de verdade. Pedaço que chega com o agente já
+ * falando (transcrição atrasada) não é marco. `closeCallerTurn` devolve sempre `true` (agiu): o
+ * `audioStreamEnd` vai sempre, e não há como saber se a resposta veio por causa dele ou se o servidor
+ * já ia responder. Por isso, no Gemini, todo turno em que a guarda fecha a vez sai da conta (e é
+ * contado em `guardTurns`, sem valor).
+ *
  * Cancelamento de ferramenta (`toolCallCancelled`), consultado em 2026-11-21
  * (https://aistudio.google.com/api-reference/live, `BidiGenerateContentToolCallCancellation`): o
  * servidor avisa que as chamadas de ferramenta com estes `ids` "should not have been executed and
@@ -330,6 +340,8 @@ const engine: VoiceEngine = {
   // resposta para quem precisa de região é usar Vertex AI com `europe-west1` e semelhantes.
   // Enquanto não houver declaração, o honesto é dizer que não se sabe.
   processingLocation: { kind: "undeclared" },
+  // O marco de fim da vez que `callerTurnEnded` emite (veja acima).
+  callerTurnSource: "transcript",
   voices: VOICES,
   defaultVoice: DEFAULT_VOICE,
   pricing: {
@@ -347,6 +359,9 @@ const engine: VoiceEngine = {
     let anonymousCalls = 0;
     let userText = "";
     let agentText = "";
+    // O agente já mandou áudio nesta resposta: a transcrição de quem ligou que chega agora é atrasada,
+    // e não marca o fim da vez dele. Volta a falso no fim da resposta ou na interrupção.
+    let agentSpeaking = false;
 
     // A retomada (comentário de topo): o último handle que o provedor disse ser retomável, a conexão
     // atual e a que está abrindo no lugar dela. Só a atual e a que abre dão handle; a que saiu não.
@@ -392,6 +407,8 @@ const engine: VoiceEngine = {
       if (serverContent) {
         // A transcrição chega em fragmentos; o contrato entrega a fala inteira de cada turno.
         if (serverContent.inputTranscription?.text) userText += serverContent.inputTranscription.text;
+        // O marco da latência por turno: o pedaço mais recente antes do áudio da resposta (comentário de topo).
+        if (serverContent.inputTranscription?.text?.trim() && !agentSpeaking) emitter.emit("callerTurnEnded", { source: "transcript" });
         // A interina não entra no texto da fala (a definitiva chega em `inputTranscription`): só avisa
         // que quem ligou está falando.
         if (serverContent.interimInputTranscription?.text?.trim() || serverContent.inputTranscription?.text?.trim()) {
@@ -404,10 +421,12 @@ const engine: VoiceEngine = {
           const rate = Number(/rate=(\d+)/.exec(part.inlineData.mimeType ?? "")?.[1] ?? DEFAULT_OUTPUT_HZ);
           // ponytail: reamostra cada pedaço isolado; a emenda entre pedaços perde uma fração de amostra.
           // Se aparecer estalo na fala, trocar por um reamostrador com estado entre pedaços.
+          agentSpeaking = true;
           emitter.emit("audio", resample(Buffer.from(part.inlineData.data, "base64"), rate, BRIDGE_HZ));
         }
         if (serverContent.interrupted) emitter.emit("interrupted");
         if (serverContent.turnComplete || serverContent.interrupted) {
+          agentSpeaking = false;
           flush("user");
           flush("agent");
         }
@@ -575,6 +594,8 @@ const engine: VoiceEngine = {
       closeCallerTurn() {
         // O áudio seguinte de quem ligou reabre o fluxo, sem mensagem a mais.
         send({ realtimeInput: { audioStreamEnd: true } });
+        // Sempre agiu: não há como saber se o servidor já ia responder (comentário de topo).
+        return true;
       },
       async close() {
         closing = true;
