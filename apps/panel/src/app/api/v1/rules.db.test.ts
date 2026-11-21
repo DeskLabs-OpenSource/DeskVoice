@@ -335,9 +335,9 @@ describe("secrets", () => {
     expect(changed.data).toEqual({
       key: params.key,
       value: [
-        { name: "crm", url: "https://crm.example.test/hook", token: { configured: true } },
-        { name: "erp", url: "https://attacker.example.test/collect", token: { configured: false } },
-        { name: "agenda-renamed", url: "https://agenda.example.test/hook", token: { configured: false } },
+        { name: "crm", url: "https://crm.example.test/hook", token: { configured: true }, timeoutSeconds: 10 },
+        { name: "erp", url: "https://attacker.example.test/collect", token: { configured: false }, timeoutSeconds: 10 },
+        { name: "agenda-renamed", url: "https://agenda.example.test/hook", token: { configured: false }, timeoutSeconds: 10 },
       ],
     });
     expect(await tokens()).toEqual({ crm: "crm-token", erp: undefined, "agenda-renamed": undefined });
@@ -408,7 +408,25 @@ describe("settings", () => {
     expect((await put("network.public_ip", "203.0.113.10")).data).toEqual({ key: "network.public_ip", value: "203.0.113.10" });
     expect((await put("engine.default", "gemini-live")).status).toBe(200);
     const hooks = await put("webhooks.allowed", [{ name: "crm", url: "https://crm.example.test/hook", token: "hook-token" }]);
-    expect(hooks.data).toEqual({ key: "webhooks.allowed", value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: true } }] });
+    expect(hooks.data).toEqual({ key: "webhooks.allowed", value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: true }, timeoutSeconds: 10 }] });
+  });
+
+  it("keeps a webhook timeout as a whole number from 1 to 30 seconds, and reads an old list without it as 10", async () => {
+    const params = { key: "webhooks.allowed" };
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie: owner, params, body: { value } });
+    const hook = (timeoutSeconds: unknown) => [{ name: "crm", url: "https://crm.example.test/hook", timeoutSeconds }];
+    await put([{ name: "crm", url: "https://crm.example.test/hook" }]);
+    const before = await stored<unknown>("select value from settings where key = $1", [params.key]);
+
+    for (const bad of [0, 31, 2.5, -1, "15", null]) expect((await put(hook(bad))).code, JSON.stringify(bad)).toBe("validation_error");
+    expect(await stored<unknown>("select value from settings where key = $1", [params.key])).toEqual(before);
+
+    // A lista antiga, gravada sem o campo: a leitura diz o prazo que vale.
+    await withOrg(panel.app, org, (q) => q.exec("update settings set value = $2 where key = $1", [params.key, JSON.stringify([{ name: "crm", url: "https://crm.example.test/hook" }])]));
+    expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: false }, timeoutSeconds: 10 }] });
+
+    for (const good of [1, 30, 15]) expect((await put(hook(good))).data).toEqual({ key: params.key, value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: false }, timeoutSeconds: good }] });
+    expect((await stored<Array<{ timeoutSeconds?: number }>>("select value from settings where key = $1", [params.key]))?.value?.[0]?.timeoutSeconds).toBe(15);
   });
 
   it("keeps inbound.max_concurrent_calls as a whole number from 1 to 50 that shows the factory value until saved", async () => {
