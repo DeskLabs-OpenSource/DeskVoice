@@ -298,6 +298,24 @@ describe("openai-realtime (contrato com servidor falso)", () => {
       expect(await nextCut(session)).toEqual({ type: "conversation.item.truncate", item_id: "msg_2", content_index: 0, audio_end_ms: 300 });
     });
 
+    it("dois itens emitidos e a interrupção no meio do primeiro: o corte cai no primeiro", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      await emit(session, speech("msg_1", 1000), speech("msg_2", 1000));
+      session.played?.(400);
+      expect(await nextCut(session)).toEqual({ type: "conversation.item.truncate", item_id: "msg_1", content_index: 0, audio_end_ms: 400 });
+    });
+
+    it("item que começa num ms fracionário: audio_end_ms sai inteiro, arredondado para baixo", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      // 101 bytes são 12,625 ms: o segundo item começa no ms 12,625 do emitido.
+      const odd = { ...speech("msg_1", 0), delta: Buffer.alloc(101, 0xff).toString("base64") };
+      await emit(session, odd, speech("msg_2", 1000));
+      session.played?.(500);
+      const cut = await nextCut(session);
+      expect(cut).toEqual({ type: "conversation.item.truncate", item_id: "msg_2", content_index: 0, audio_end_ms: 487 });
+      expect(Number.isInteger((cut as { audio_end_ms: number }).audio_end_ms)).toBe(true);
+    });
+
     it("item que já tocou inteiro não é cortado", async () => {
       const { session } = await openSession({ greeting: undefined });
       await emit(session, speech("msg_1", 1000));
