@@ -1,4 +1,4 @@
-import { organizationLimits, OUTBOUND_NOT_ALLOWED, type OrgQuery } from "@deskvoice/core";
+import { isKnownTimeZone, organizationLimits, OUTBOUND_NOT_ALLOWED, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, handle } from "../../../../server/context";
 
@@ -16,7 +16,7 @@ const fields = z.object({
   windowStart: time,
   windowEnd: time,
   maxAttemptsPerContact: z.number().int().min(1).max(10),
-  timezone: z.string().refine((zone) => Intl.supportedValuesOf("timeZone").includes(zone), "unknown time zone"),
+  timezone: z.string().refine(isKnownTimeZone, "unknown time zone"),
 });
 type Policy = z.output<typeof fields>;
 

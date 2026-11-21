@@ -42,6 +42,7 @@ const common: CommonDictionary = {
     markRead: "Marcar como leído",
     openCall: "Ver la llamada",
     followUpOpen: "Ver el pendiente",
+    openUpdate: "Ver la actualización",
     followUpGone: "Pendiente borrado por el plazo de conservación.",
     organization: "Organización",
     myAccount: "Mi cuenta",

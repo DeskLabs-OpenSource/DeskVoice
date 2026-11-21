@@ -229,6 +229,9 @@ export function Timeline({
           ),
         };
       }
+      case "tool_cancelled":
+        // O provedor cancelou a chamada (o Gemini, quando quem ligou interrompe): o `tool_result` dela, quando vem, diz o que saiu.
+        return { ...base, tone: "neutral", icon: Wrench, body: <Quiet>{fill(e.tool_cancelled, { tool: t.names[text(p.name)] ?? text(p.name) })}</Quiet> };
       case "approval_requested":
         return {
           ...base,
