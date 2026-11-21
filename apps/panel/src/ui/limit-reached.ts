@@ -9,5 +9,7 @@ import type { CommonDictionary } from "../i18n/pt-BR/common";
 export function limitReachedText(code: string, detail: Record<string, string | number> | undefined, t: CommonDictionary["limitReached"]): string | null {
   const { kind, count, limit } = detail ?? {};
   if (code !== "organization_limit_reached" || (kind !== "trunks" && kind !== "agents") || typeof count !== "number" || typeof limit !== "number") return null;
+  // Com 1, a frase no singular ("já tem 1 linha telefônica"); o `{limit}` não tem substantivo e não muda.
+  if (count === 1) return fill(kind === "trunks" ? t.trunksOne : t.agentsOne, { limit });
   return fill(t[kind], { count, limit });
 }

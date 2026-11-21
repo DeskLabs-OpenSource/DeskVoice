@@ -134,12 +134,22 @@ describe("the limits a new organization starts with", () => {
       { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 1.5 },
       { maxTrunks: -1, maxAgents: 1 },
       { maxTrunks: 1.5, maxAgents: 1 },
+      { maxTrunks: 1_000_001, maxAgents: 1 },
+      { maxTrunks: 1, maxAgents: 1_000_001 },
       { maxTrunks: 1, maxAgents: 1, nope: 1 },
       { maxAgents: 1 },
     ]) {
       expect(await s.setDefaults(body)).toMatchObject({ status: 400, code: "validation_error" });
     }
     expect(await storedDefault()).toBe(0);
+  });
+
+  it("the PUT accepts the ceiling itself, the same one the read checks, and stores those numbers", async () => {
+    const s = await scene();
+    const atCeiling = { maxTrunks: 1_000_000, maxAgents: 1_000_000, monthlySpendCapCents: 2_147_483_647, outboundAllowed: false };
+    expect((await s.setDefaults(atCeiling)).status).toBe(200);
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual(atCeiling);
+    expect(await limitsRow(await s.create())).toEqual(atCeiling);
   });
 
   it("a key written by hand with a strange field falls back to the factory value for that field, never to outbound allowed", async () => {
