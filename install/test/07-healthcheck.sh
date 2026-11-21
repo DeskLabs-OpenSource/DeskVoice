@@ -7,8 +7,8 @@ line() { printf '%s\n' "$out" | grep "$1" | head -n 1; }
 
 # Instalação nova: tudo no ar, linha e motor ainda por configurar.
 out="$(bash "$H" 2>&1)"; equal "instalação nova sem linha nem chave: sai com zero" 0 "$?"
-equal "uma linha por peça (18 peças)" 18 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
-for piece in Painel Banco "Painel → banco" "Login do painel" Asterisk "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
+equal "uma linha por peça (19 peças)" 19 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
+for piece in Painel Banco "Painel → banco" "Login do painel" Asterisk "Módulos SIP" "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
 contains "linha não cadastrada é aviso, não falha" "$(line 'Linha telefônica')" "aviso"
 contains "linha não cadastrada traz o detalhe" "$(line 'Linha telefônica')" "nenhuma linha cadastrada ainda"
 contains "motor sem chave é aviso, não falha" "$(line 'Motor de voz')" "aviso"
@@ -150,7 +150,72 @@ bash "$H" --essential >/dev/null 2>&1; equal "voz sem conversar com o Asterisk: 
 printf 'asterisk|ok|PJSIP 20.20.1\n' > "$FAKE_DIR/voice_health"
 out="$(bash "$H" 2>&1)"; equal "voz conversando com o Asterisk: código 0" 0 "$?"
 contains "voz conversando com o Asterisk: diz ok" "$out" "ok     Controle da telefonia"
+# Módulos SIP: o teto de módulos do pjproject estoura na partida e o último módulo PJSIP a registrar
+# fica parado, qualquer que seja; o Asterisk segue respondendo "ok". É essencial: o install.sh e a
+# volta da atualização esperam por ela. "Not Running" contém "Running": o caso precisa reprovar.
+sip() { line 'Módulos SIP'; }
+: > "$FAKE_DIR/calls.log"
+out="$(bash "$H" 2>&1)"; equal "módulos SIP em execução e log limpo: código 0" 0 "$?"
+contains "módulos SIP em execução: ok" "$(sip)" "ok "
+contains "módulos SIP em execução: diz quantos" "$(sip)" "17 módulos PJSIP em execução"
+contains "módulos SIP em execução: diz que o log está limpo" "$(sip)" 'nenhum "Too many modules" desde a partida'
+check "a checagem pergunta ao Asterisk pelos módulos PJSIP, uma vez" test "$(grep -c "exec -T asterisk asterisk -rx module show like pjsip" "$FAKE_DIR/calls.log")" -eq 1
+check "a checagem lê a hora de partida do contêiner do Asterisk" grep -qx "inspect -f {{.State.StartedAt}} cid-asterisk" "$FAKE_DIR/calls.log"
+check "o log é lido desde a partida atual" grep -qx "logs --since 2026-11-21T12:00:00.123456789Z cid-asterisk" "$FAKE_DIR/calls.log"
+printf '2026-11-21T13:14:15.5Z\n' > "$FAKE_DIR/asterisk_started"; : > "$FAKE_DIR/calls.log"; bash "$H" >/dev/null 2>&1
+check "o --since segue a hora de partida que o Docker dá" grep -qx "logs --since 2026-11-21T13:14:15.5Z cid-asterisk" "$FAKE_DIR/calls.log"
+rm "$FAKE_DIR/asterisk_started"
+json="$(bash "$H" --json 2>&1)"
+contains "json: sip_modules ok, essencial" "$json" '{"id":"sip_modules","name":"Módulos SIP","essential":true,"status":"ok",'
+# Só o NAT parado (o que a imagem fixada mostrava numa máquina).
+echo res_pjsip_nat > "$FAKE_DIR/asterisk_pjsip_down"
+out="$(bash "$H" 2>&1)"; equal "só o NAT parado: código 1" 1 "$?"
+contains "só o NAT parado é falha" "$(sip)" "falha "
+contains "só o NAT parado: cita o módulo" "$(sip)" "módulos PJSIP parados: res_pjsip_nat"
+contains "só o NAT parado diz o efeito" "$(sip)" "uma linha atrás de NAT liga e fica muda"
+contains "só o NAT parado diz o que fazer" "$(sip)" 'Rode bash install/install.sh; se continuar, procure "Too many modules" em: docker compose -f deploy/docker-compose.yml logs asterisk'
+contains "só o NAT parado: o Asterisk em si segue ok" "$(line 'Asterisk ')" "ok "
+json="$(bash "$H" --json 2>&1)"; equal "json com o NAT parado: código 1" 1 "$?"
+contains "json: sip_modules falha" "$json" '{"id":"sip_modules","name":"Módulos SIP","essential":true,"status":"falha",'
+contains "json: o código de saída diz 1" "$json" '{"exit_code":1,'
+bash "$H" --essential >/dev/null 2>&1; equal "NAT parado reprova no modo essencial (provoca a volta da atualização)" 1 "$?"
+# Só o refer parado (outra ordem do diretório de módulos, outro perdedor da vaga).
+echo res_pjsip_refer > "$FAKE_DIR/asterisk_pjsip_down"
+out="$(bash "$H" 2>&1)"; equal "só o refer parado: código 1" 1 "$?"
+contains "só o refer parado é falha e cita só ele" "$(sip)" "módulos PJSIP parados: res_pjsip_refer. Rode"
+lacks "só o refer parado: não fala do NAT" "$(sip)" "NAT"
+contains "só o refer parado é falha" "$(sip)" "falha "
+# Só um não essencial parado: o estouro pegou um módulo fora da lista, e reprova igual.
+echo res_pjsip_dlg_options > "$FAKE_DIR/asterisk_pjsip_down"
+out="$(bash "$H" 2>&1)"; equal "só um não essencial parado: código 1" 1 "$?"
+contains "só um não essencial parado é falha e cita ele" "$(sip)" "módulos PJSIP parados: res_pjsip_dlg_options"
+lacks "só um não essencial parado: não o chama de ausente" "$(sip)" "ausentes"
+echo res_pjsip_nat > "$FAKE_DIR/asterisk_pjsip_down"; echo res_pjsip_refer >> "$FAKE_DIR/asterisk_pjsip_down"
+contains "dois parados: cita os dois" "$(bash "$H" 2>&1 | grep 'Módulos SIP')" "módulos PJSIP parados: res_pjsip_nat, res_pjsip_refer."
+rm "$FAKE_DIR/asterisk_pjsip_down"
+# Um essencial que nem aparece (noload por engano, ou uma imagem sem ele).
+echo res_pjsip_outbound_registration > "$FAKE_DIR/asterisk_pjsip_absent"
+out="$(bash "$H" 2>&1)"; equal "essencial ausente: código 1" 1 "$?"
+contains "essencial ausente é falha e cita ele" "$(sip)" "módulos PJSIP essenciais ausentes: res_pjsip_outbound_registration"
+# Um não essencial ausente é o que o noload faz: não reprova.
+echo res_pjsip_dlg_options > "$FAKE_DIR/asterisk_pjsip_absent"
+out="$(bash "$H" 2>&1)"; equal "não essencial ausente (noload): código 0" 0 "$?"
+contains "não essencial ausente: ok, com a contagem" "$(sip)" "16 módulos PJSIP em execução"
+rm "$FAKE_DIR/asterisk_pjsip_absent"
+# Tudo Running, mas o log da partida atual tem o estouro.
+printf '%s\n' '[Nov 21 12:00:01] ERROR[1]: pjproject: <?>: Assert failed: !"Too many modules registered!"' > "$FAKE_DIR/asterisk_logs"
+out="$(bash "$H" 2>&1)"; equal "só o log com o estouro: código 1" 1 "$?"
+contains "só o log com o estouro é falha e diz o porquê" "$(sip)" 'o log da partida atual tem "Too many modules registered"'
+lacks "só o log com o estouro: nenhum módulo citado como parado" "$(sip)" "parados"
+rm "$FAKE_DIR/asterisk_logs"
+# Sem a hora de partida, o log não é lido (uma partida antiga não pode reprovar a de agora).
+printf '' > "$FAKE_DIR/asterisk_started"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$H" 2>&1)"; equal "sem a hora de partida: código 0" 0 "$?"
+contains "sem a hora de partida: diz que não leu o log" "$(sip)" "o log da partida não pôde ser lido"
+lacks "sem a hora de partida: o log não é lido" "$(cat "$FAKE_DIR/calls.log")" "logs --since"
+rm "$FAKE_DIR/asterisk_started"
 printf '%s\n' postgres panel voice routines caddy > "$FAKE_DIR/running"; bash "$H" >/dev/null 2>&1; equal "Asterisk parado: código 1" 1 "$?"
+lacks "Asterisk parado: sem linha de módulos SIP" "$(bash "$H" 2>&1)" "Módulos SIP"
 printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"
 
 # Portas UDP.
@@ -218,7 +283,7 @@ lacks "tudo certo: nenhuma falha" "$out" "falha "
 json="$(bash "$H" --json 2>&1)"
 contains "json: código de saída" "$json" '{"exit_code":0,"checks":['
 contains "json: peça com estado e detalhe" "$json" '{"id":"trunk","name":"Linha telefônica","essential":false,"status":"ok","detail":"registrado"}'
-equal "json: dezoito peças" 18 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
+equal "json: dezenove peças" 19 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
 if command -v python3 >/dev/null 2>&1; then check "json: é JSON válido" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$json"; fi
 printf '%s\n' 'panel|ok|diz "aspas" e \barra' 'trunk|ok|x' 'engine|ok|y' > "$FAKE_DIR/panel_health"
 if command -v python3 >/dev/null 2>&1; then check "json: escapa aspas e barra" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(bash "$H" --json 2>&1)"; fi

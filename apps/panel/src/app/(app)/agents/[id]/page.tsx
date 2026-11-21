@@ -18,6 +18,7 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatPhone } from "../../../../ui/format";
 import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
+import { proposedLanguage } from "../../../../ui/proposed-language";
 import { GUIDED_ENGINES } from "../../settings/analysts/rules";
 import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
 import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
@@ -115,7 +116,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const me = useApi<Me>("/auth/me");
   const save = useAction();
   const remove = useAction();
-  const [draft, setDraft] = useState<Draft | null>(isNew ? BLANK : null);
+  // O agente novo espera `/auth/me`: o idioma que ele propõe é o da organização (R8, fatia 8a).
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [confirming, setConfirming] = useState(false);
   // O que está gravado no servidor. `agent.data` não se atualiza sozinho depois de salvar, então o
   // aviso de rascunho precisa da cópia que o próprio salvar devolve.
@@ -137,11 +139,19 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       setSavedAnalysis(toAnalysisDraft(agent.data.analysisBrain));
     }
   }, [agent.data]);
+  // Agente novo propõe o idioma da organização (`organizations.language`, copiado do padrão da
+  // instalação quando ela foi criada); sem ele, pt-BR, como sempre. Se `/auth/me` falhar, pt-BR também.
+  const meLoaded = me.data !== undefined || me.error !== undefined;
+  const organizationLanguage = me.data?.organizationLanguage;
+  useEffect(() => {
+    if (isNew && meLoaded) setDraft((current) => current ?? { ...BLANK, language: proposedLanguage(organizationLanguage) });
+  }, [isNew, meLoaded, organizationLanguage]);
   // Agente novo já nasce com o motor padrão da instalação; sem padrão, o primeiro da lista.
   const fallbackEngine = defaultEngine.data?.value ?? engines.data?.[0]?.id ?? "";
+  const hasDraft = draft !== null;
   useEffect(() => {
     if (isNew && fallbackEngine) setDraft((current) => (current && current.engine === "" ? { ...current, engine: fallbackEngine } : current));
-  }, [isNew, fallbackEngine]);
+  }, [isNew, fallbackEngine, hasDraft]);
 
   const back = (
     <Link href="/agents" className="inline-flex items-center gap-1.5 justify-self-start text-[0.93rem] font-bold text-muted hover:text-ink">
