@@ -1,4 +1,18 @@
-import { organizationSuspended, recordEvent, SPEND_CAP_REACHED, spendCapReached, spokenLanguageOf, toE164, withOrg, type Clock, type Db } from "@deskvoice/core";
+import { randomUUID } from "node:crypto";
+import {
+  DEFAULT_SPOKEN_LANGUAGE,
+  organizationGone,
+  organizationSuspended,
+  recordCallToDeletedOrganization,
+  recordEvent,
+  SPEND_CAP_REACHED,
+  spendCapReached,
+  spokenLanguageOf,
+  toE164,
+  withOrg,
+  type Clock,
+  type Db,
+} from "@deskvoice/core";
 import type { PeerConfig } from "werift";
 import { startCallSession, type CallSession, type CallSessionDeps } from "./call-session";
 import { inboundLimitReached, limitNoticedLately, SPEND_CAP_NOTICE } from "./inbound";
@@ -282,6 +296,40 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
     }
   }
 
+  /**
+   * A ligação para a sessão de uma organização que não existe mais (fatia 9b2). Nada vai para
+   * `calls` nem `call_events`; a auditoria da instalação registra o fato, sem número nenhum e sem id
+   * do WaCalls. Quem ligou ouve a fala de indisponível no idioma padrão (o agente sumiu junto), e,
+   * depois dela, a sessão é desfeita no WaCalls: ela não tem mais dona.
+   */
+  async function answerDeleted(event: { sessionId: string; id: string }, entry: Live, organizationId: string, session: WacallsSession): Promise<boolean> {
+    await recordCallToDeletedOrganization(db, organizationId, clock.now());
+    // Sem chamada no banco, a referência da ligação (e do dono no WaCalls) é um id novo.
+    const reference = randomUUID();
+    log("info", "WhatsApp call to a deleted organization: playing the unavailable notice", { organizationId, reference });
+    const unpair = async (): Promise<void> => {
+      try {
+        // Nesta ordem: sair com a sessão pareada é o que tira o aparelho do celular.
+        if (isPaired(session)) await wacallsLogoutSession(options, session.id);
+        await wacallsDeleteSession(options, session.id);
+      } catch (error) {
+        log("error", "could not unpair the WhatsApp calls session of a deleted organization", { organizationId, error: messageOf(error) });
+      }
+    };
+    let transport: WhatsAppTransport;
+    try {
+      transport = await answer(event, entry, reference);
+    } catch (error) {
+      log("error", "could not answer a WhatsApp call to a deleted organization to play the unavailable notice", { organizationId, error: messageOf(error) });
+      await unpair();
+      return false;
+    }
+    void playUnavailable(transport, { callId: reference, language: DEFAULT_SPOKEN_LANGUAGE }, log)
+      .finally(unpair)
+      .finally(() => live.delete(event.id));
+    return true;
+  }
+
   /** Resolve `true` quando a conversa começou: dali em diante, quem tira a ligação de `live` é o fim dela. */
   async function take(event: { sessionId: string; id: string; peer: string; peerPhone?: string }, entry: Live): Promise<boolean> {
     const session = (await wacallsListSessions(options)).find((candidate) => candidate.id === event.sessionId);
@@ -296,6 +344,10 @@ function createAnswering(options: WacallsOptions, deps: WhatsAppAnswerDeps, sche
     // como a operadora não confirma o número de quem liga: os dois chegam ao mesmo `from_e164`.
     const callerPhone = phoneOfJid(event.peer) ?? phoneOfJid(event.peerPhone);
     const from = callerPhone ? toE164(callerPhone) : null;
+
+    // A organização já foi apagada, e a sessão dela ainda tocou (o WaCalls voltou depois de a
+    // exclusão seguir sem ele, ou uma corrida). Antes de qualquer `withOrg`: a chave de `calls` cairia.
+    if (session && (await organizationGone(db, organizationId))) return answerDeleted(event, entry, organizationId, session);
 
     const outcome = await withOrg(db, organizationId, async (q) => {
       const chosen = await q.one<{ agent_id: string | null }>("select agent_id from whatsapp_call_sessions");

@@ -56,6 +56,24 @@
  *   Não confirmado contra o servidor real: o efeito desses valores numa ligação com ruído (a bancada
  *   da fatia 5 mede).
  *
+ * Retomada da sessão (`resumed`), consultado em 2026-11-21:
+ *   - https://ai.google.dev/gemini-api/docs/live-api/session-management (redireciona para
+ *     aistudio.google.com/docs/live-api/session-management): "The lifetime of a connection is limited
+ *     as well, to around 10 minutes"; sem compressão, a sessão só de áudio para em 15 minutos; o
+ *     `contextWindowCompression.slidingWindow` tira esse limite; o `goAway` avisa, com `timeLeft`, que a
+ *     conexão vai fechar; o handle de `sessionResumptionUpdate.newHandle` vai em
+ *     `setup.sessionResumption.handle` na conexão nova, e vale por 2 horas;
+ *   - https://aistudio.google.com/api-reference/live: `newHandle` "Empty if `resumable`=false";
+ *     `SlidingWindow.targetTokens` tem padrão (metade de `triggerTokens`), e os dois ficam no padrão.
+ *   Aqui: no `goAway`, ou na queda com um handle guardado, abre-se uma conexão nova com o último handle
+ *   retomável, sem `closed`. A conexão de agora segue tocando a fala do agente até a nova confirmar; o
+ *   que sai para o provedor nesse meio (áudio de quem ligou, resultado de ferramenta) espera a nova, e
+ *   do áudio fica no máximo 2 s, o mais recente. Uma tentativa por conexão: falhou, `error` + `closed`
+ *   como antes. Nenhuma fala extra.
+ *   Não confirmado contra o servidor real: a duração real da conexão; se a troca é audível; se o
+ *   handle alcança uma chamada de ferramenta em curso (a página não diz quando `resumable` é falso);
+ *   se o `usageMetadata` da conexão nova recomeça do zero (aqui, como antes, é incremento e soma).
+ *
  * Orientação ao agente (`VoiceSession.guide`): este motor **não** a recebe na v1, e não declara o
  * método. Consultado em 2026-11-17 (https://aistudio.google.com/api-reference/live):
  *   - `systemInstruction` só vai no `setup`, no começo da sessão;
@@ -67,14 +85,14 @@
  */
 import { z } from "zod";
 import { SessionEmitter } from "../emitter";
-import { awaitSessionReady, openProviderSocket } from "../provider-socket";
+import { awaitSessionReady, openProviderSocket, type ProviderSocket } from "../provider-socket";
 import { resample } from "../resample";
 import { instructionsWithVocabulary } from "../vocabulary";
 import { checkKeyOverHttp } from "../key-check";
 import { ANALYSIS_SCHEMA_GOOGLE, analysisPrompt } from "../analysis";
 import { classifyOptionsFor, classifyOutcomeOverHttp, readClassifyText, transcribeOverHttp } from "../outcome-over-http";
 import { OUTCOME_GUESS_SCHEMA_GOOGLE, outcomePrompt } from "../outcome";
-import type { ClassifyOptions, EnginePricing, RecordingTranscriber, Usage, VoiceEngine, VoiceSession } from "../types";
+import type { ClassifyOptions, EnginePricing, RecordingTranscriber, Usage, VoiceEngine, VoiceSession, VoiceSessionConfig } from "../types";
 
 const DEFAULT_BASE_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
@@ -162,6 +180,11 @@ const VOICES = [
 const BRIDGE_HZ = 8000;
 const INPUT_HZ = 16000;
 const DEFAULT_OUTPUT_HZ = 24000;
+/**
+ * Áudio de quem ligou guardado durante a troca de conexão, no máximo 2 s (PCM16 8 kHz, 16 bytes por
+ * ms), e o mais recente: a troca que demorar mais perde o começo, não o fim, do que a pessoa disse.
+ */
+const HELD_AUDIO_MAX_BYTES = 2000 * 16;
 
 const transcription = z.object({ text: z.string().optional() });
 const serverMessage = z.object({
@@ -188,7 +211,11 @@ const serverMessage = z.object({
   usageMetadata: z
     .object({ promptTokenCount: z.number().optional(), responseTokenCount: z.number().optional() })
     .optional(),
+  sessionResumptionUpdate: z.object({ newHandle: z.string().optional(), resumable: z.boolean().optional() }).optional(),
+  // `timeLeft` não é lido: a troca começa já, com a conexão de agora ainda de pé.
+  goAway: z.object({ timeLeft: z.string().optional() }).optional(),
 });
+type ServerMessage = z.infer<typeof serverMessage>;
 
 // O modelo lido: o recurso devolve o próprio nome. A forma antiga da API recusava a chave com 400 e
 // o motivo `API_KEY_INVALID` nos detalhes.
@@ -230,6 +257,60 @@ const recordingTranscriber: RecordingTranscriber = {
   },
 };
 
+/** Uma conexão com o provedor. A sessão de voz pode passar por várias (a retomada). */
+interface Connection {
+  events: SessionEmitter;
+  socket: ProviderSocket | undefined;
+  /** Saiu da sessão: dela só conta o consumo. */
+  retired: boolean;
+  /** Já houve uma tentativa de retomada a partir desta conexão. */
+  resumeTried: boolean;
+  /** O socket desta conexão já fechou. */
+  closed: boolean;
+  /** O último `error` da conexão, que explica o fechamento que vem em seguida. */
+  error?: Error;
+}
+
+/**
+ * A abertura da sessão. `sessionResumption` sempre vai (vazio na primeira conexão, com o handle na
+ * retomada), e a compressão da janela de contexto também: sem ela, a sessão de áudio para em 15 min.
+ */
+function setupMessage(config: VoiceSessionConfig, model: string | undefined, resumeHandle: string | undefined): object {
+  return {
+    setup: {
+      model: `models/${model ?? DEFAULT_MODEL}`,
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voiceId ?? DEFAULT_VOICE } } },
+      },
+      // Os modelos de áudio nativo não aceitam código de idioma para a fala; a documentação manda
+      // restringir o idioma pela instrução de sistema.
+      systemInstruction: { parts: [{ text: `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.` }] },
+      ...(config.tools.length > 0 && {
+        tools: [
+          {
+            functionDeclarations: config.tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              parametersJsonSchema: tool.parameters,
+            })),
+          },
+        ],
+      }),
+      // Sem termos, o campo nem aparece: o setup fica igual ao de antes.
+      inputAudioTranscription: {
+        languageCodes: [config.language],
+        ...(config.vocabulary && config.vocabulary.length > 0 && { customVocabulary: [...config.vocabulary] }),
+      },
+      outputAudioTranscription: {},
+      // Ambiente `normal` ou ausente: o campo nem aparece, e o setup fica igual ao de antes.
+      ...(config.listeningEnvironment === "noisy" && { realtimeInputConfig: NOISY_REALTIME_INPUT }),
+      sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
+      contextWindowCompression: { slidingWindow: {} },
+    },
+  };
+}
+
 const engine: VoiceEngine = {
   id: "gemini-live",
   label: "Gemini Live (Google)",
@@ -257,12 +338,16 @@ const engine: VoiceEngine = {
     let userText = "";
     let agentText = "";
 
-    let setupDone: () => void = () => undefined;
-    let setupFailed: (error: Error) => void = () => undefined;
-    const ready = new Promise<void>((resolve, reject) => {
-      setupDone = resolve;
-      setupFailed = reject;
-    });
+    // A retomada (comentário de topo): o último handle que o provedor disse ser retomável, a conexão
+    // atual e a que está abrindo no lugar dela. Só a atual e a que abre dão handle; a que saiu não.
+    let handle: string | undefined;
+    let current: Connection | undefined;
+    let opening: Connection | undefined;
+    let swapping = false;
+    let closing = false;
+    let ended = false;
+    // O que sai durante a troca espera a conexão nova. Do áudio de quem ligou, fica o mais recente.
+    let held: { message: object; audioBytes: number }[] = [];
 
     const flush = (speaker: "user" | "agent"): void => {
       const text = (speaker === "user" ? userText : agentText).trim();
@@ -271,11 +356,28 @@ const engine: VoiceEngine = {
       if (text) emitter.emit("transcript", { speaker, text });
     };
 
-    const onMessage = (raw: unknown): void => {
-      const parsed = serverMessage.safeParse(raw);
-      if (!parsed.success) return;
-      const { setupComplete, serverContent, toolCall, usageMetadata } = parsed.data;
-      if (setupComplete) setupDone();
+    const fail = (error: Error): void => {
+      if (ended) return;
+      ended = true;
+      emitter.emit("error", error);
+      emitter.emit("closed", "socket_closed");
+    };
+
+    const onMessage = (conn: Connection, message: ServerMessage): void => {
+      const { serverContent, toolCall, usageMetadata, sessionResumptionUpdate, goAway } = message;
+      // O consumo de qualquer conexão conta, inclusive o da que já saiu: o provedor cobrou.
+      if (usageMetadata) {
+        emitter.emit("usage", {
+          inputTokens: usageMetadata.promptTokenCount ?? 0,
+          outputTokens: usageMetadata.responseTokenCount ?? 0,
+        });
+      }
+      if (conn.retired) return;
+
+      if (sessionResumptionUpdate && (swapping ? conn === opening : conn === current || conn === opening)) {
+        // `newHandle` vem vazio quando `resumable` é falso: fica o último que valia.
+        if (sessionResumptionUpdate.resumable === true && sessionResumptionUpdate.newHandle) handle = sessionResumptionUpdate.newHandle;
+      }
 
       if (serverContent) {
         // A transcrição chega em fragmentos; o contrato entrega a fala inteira de cada turno.
@@ -310,64 +412,139 @@ const engine: VoiceEngine = {
         }
       }
 
-      if (usageMetadata) {
-        emitter.emit("usage", {
-          inputTokens: usageMetadata.promptTokenCount ?? 0,
-          outputTokens: usageMetadata.responseTokenCount ?? 0,
-        });
+      // O provedor avisa que vai fechar esta conexão: a troca começa já, e esta segue até a nova abrir.
+      // Sem handle não há o que retomar, e a conexão cai como antes quando o prazo acabar.
+      if (goAway && conn === current && !swapping && handle && !conn.resumeTried) void resume(conn);
+    };
+
+    /** Fechamento de uma conexão. Só o da atual decide alguma coisa; o das outras já foi tratado. */
+    const onConnectionClosed = (conn: Connection, reason: string): void => {
+      conn.closed = true;
+      if (conn !== current || ended) return;
+      if (reason === "client") {
+        if (closing) {
+          ended = true;
+          emitter.emit("closed", "client");
+        }
+        return;
+      }
+      // Caiu no meio da troca: quem decide é a troca.
+      if (swapping) return;
+      if (!closing && handle && !conn.resumeTried) {
+        void resume(conn);
+        return;
+      }
+      fail(conn.error ?? new Error(`Gemini Live: a conexão caiu (${reason})`));
+    };
+
+    const open = async (resumeHandle: string | undefined): Promise<Connection> => {
+      const events = new SessionEmitter();
+      const conn: Connection = { events, socket: undefined, retired: false, resumeTried: false, closed: false };
+      opening = conn;
+      let setupDone: () => void = () => undefined;
+      let setupFailed: (error: Error) => void = () => undefined;
+      const ready = new Promise<void>((resolve, reject) => {
+        setupDone = resolve;
+        setupFailed = reject;
+      });
+      events.on("error", (error) => {
+        conn.error = error;
+      });
+      events.on("closed", (reason) => onConnectionClosed(conn, reason));
+      const socket = await openProviderSocket({
+        url: `${options.baseUrl ?? DEFAULT_BASE_URL}?key=${encodeURIComponent(apiKey)}`,
+        label: "Gemini Live",
+        emitter: events,
+        onMessage: (raw) => {
+          const parsed = serverMessage.safeParse(raw);
+          if (!parsed.success) return;
+          if (parsed.data.setupComplete) setupDone();
+          onMessage(conn, parsed.data);
+        },
+        onClosed: (detail) => setupFailed(new Error(`Gemini Live: a conexão fechou antes de confirmar a sessão (${detail})`)),
+        timeout: options,
+      });
+      conn.socket = socket;
+      // A sessão fechou enquanto esta conexão abria: ela não chega a pedir nada.
+      if (closing) {
+        conn.retired = true;
+        await socket.close();
+        throw new Error("Gemini Live: a sessão fechou durante a retomada");
+      }
+      socket.send(setupMessage(config, options.model, resumeHandle));
+      await awaitSessionReady(ready, socket, { label: "Gemini Live", emitter: events, timeout: options });
+      return conn;
+    };
+
+    /**
+     * Troca a conexão por uma nova com o handle, sem `closed`: uma tentativa por conexão. Falhou com a
+     * conexão de antes ainda aberta (o `goAway` dá um prazo), a ligação segue por ela até o provedor
+     * fechá-la, e o que estava guardado vai para ela; quando ela fechar, a sessão cai como antes. Falhou
+     * com ela já fechada (a queda), a sessão cai já (`error` + `closed`), e o guardado é descartado.
+     */
+    const resume = async (old: Connection): Promise<void> => {
+      old.resumeTried = true;
+      swapping = true;
+      let next: Connection;
+      try {
+        next = await open(handle);
+      } catch (cause) {
+        swapping = false;
+        opening = undefined;
+        if (closing) {
+          held = [];
+          return;
+        }
+        if (!old.closed && !ended) {
+          for (const { message } of held) old.socket?.send(message);
+          held = [];
+          return;
+        }
+        held = [];
+        fail(new Error(`Gemini Live: a conexão ia fechar e a retomada da sessão falhou (${cause instanceof Error ? cause.message : String(cause)})`));
+        old.retired = true;
+        void old.socket?.close();
+        return;
+      }
+      opening = undefined;
+      if (closing || ended) {
+        next.retired = true;
+        await next.socket?.close();
+        return;
+      }
+      old.retired = true;
+      current = next;
+      swapping = false;
+      void old.socket?.close();
+      for (const { message } of held) next.socket?.send(message);
+      held = [];
+      emitter.emit("resumed");
+    };
+
+    const send = (message: object, audioBytes = 0): void => {
+      if (!swapping) {
+        current?.socket?.send(message);
+        return;
+      }
+      held.push({ message, audioBytes });
+      let total = held.reduce((sum, item) => sum + item.audioBytes, 0);
+      while (total > HELD_AUDIO_MAX_BYTES) {
+        const oldest = held.findIndex((item) => item.audioBytes > 0);
+        total -= held[oldest]?.audioBytes ?? 0;
+        held.splice(oldest, 1);
       }
     };
 
-    const socket = await openProviderSocket({
-      url: `${options.baseUrl ?? DEFAULT_BASE_URL}?key=${encodeURIComponent(apiKey)}`,
-      label: "Gemini Live",
-      emitter,
-      onMessage,
-      onClosed: (detail) => setupFailed(new Error(`Gemini Live: a conexão fechou antes de confirmar a sessão (${detail})`)),
-      timeout: options,
-    });
-
-    socket.send({
-      setup: {
-        model: `models/${options.model ?? DEFAULT_MODEL}`,
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voiceId ?? DEFAULT_VOICE } } },
-        },
-        // Os modelos de áudio nativo não aceitam código de idioma para a fala; a documentação manda
-        // restringir o idioma pela instrução de sistema.
-        systemInstruction: { parts: [{ text: `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.` }] },
-        ...(config.tools.length > 0 && {
-          tools: [
-            {
-              functionDeclarations: config.tools.map((tool) => ({
-                name: tool.name,
-                description: tool.description,
-                parametersJsonSchema: tool.parameters,
-              })),
-            },
-          ],
-        }),
-        // Sem termos, o campo nem aparece: o setup fica igual ao de antes.
-        inputAudioTranscription: {
-          languageCodes: [config.language],
-          ...(config.vocabulary && config.vocabulary.length > 0 && { customVocabulary: [...config.vocabulary] }),
-        },
-        outputAudioTranscription: {},
-        // Ambiente `normal` ou ausente: o campo nem aparece, e o setup fica igual ao de antes.
-        ...(config.listeningEnvironment === "noisy" && { realtimeInputConfig: NOISY_REALTIME_INPUT }),
-      },
-    });
-    await awaitSessionReady(ready, socket, { label: "Gemini Live", emitter, timeout: options });
+    current = await open(undefined);
+    opening = undefined;
 
     const session: VoiceSession = {
       on: (event, handler) => emitter.on(event, handler),
       sendAudio(pcm16_8k) {
-        socket.send({
-          realtimeInput: {
-            audio: { data: resample(pcm16_8k, BRIDGE_HZ, INPUT_HZ).toString("base64"), mimeType: `audio/pcm;rate=${INPUT_HZ}` },
-          },
-        });
+        send(
+          { realtimeInput: { audio: { data: resample(pcm16_8k, BRIDGE_HZ, INPUT_HZ).toString("base64"), mimeType: `audio/pcm;rate=${INPUT_HZ}` } } },
+          pcm16_8k.length,
+        );
       },
       sendToolResult(id, result) {
         const name = toolNames.get(id);
@@ -377,16 +554,21 @@ const engine: VoiceEngine = {
         }
         toolNames.delete(id);
         // A chamada é bloqueante: o modelo retoma a fala sozinho ao receber a resposta.
-        socket.send({ toolResponse: { functionResponses: [{ id, name, response: { result } }] } });
+        send({ toolResponse: { functionResponses: [{ id, name, response: { result } }] } });
       },
       say(text) {
-        socket.send({ realtimeInput: { text: literalSpeech(text, config.language) } });
+        send({ realtimeInput: { text: literalSpeech(text, config.language) } });
       },
       closeCallerTurn() {
         // O áudio seguinte de quem ligou reabre o fluxo, sem mensagem a mais.
-        socket.send({ realtimeInput: { audioStreamEnd: true } });
+        send({ realtimeInput: { audioStreamEnd: true } });
       },
-      close: () => socket.close(),
+      async close() {
+        closing = true;
+        held = [];
+        const pending = opening;
+        await Promise.all([current?.socket?.close(), pending?.socket?.close()]);
+      },
     };
 
     if (config.greeting) session.say(config.greeting);

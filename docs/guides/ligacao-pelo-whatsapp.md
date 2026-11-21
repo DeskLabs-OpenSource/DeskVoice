@@ -30,9 +30,20 @@ automatizado e preveem suspender a conta. Na prática:
 Pode (decisão do dono em 12/11/2026). São dois aparelhos conectados ao mesmo WhatsApp, e a tela avisa
 quando o número é o mesmo: se ele for bloqueado, as mensagens e as ligações param juntas.
 
-O WhatsApp aceita até quatro aparelhos conectados a um número, e as ligações tocam em todos eles.
-Com mais de quatro (contas com Meta Verified, por exemplo), as ligações tocam só no celular, e este
-serviço deixa de recebê-las.
+## Quantos aparelhos conectados
+
+Quem decide em que aparelhos a ligação toca é o WhatsApp, do lado dele. A central de ajuda
+([multiatendimento](https://faq.whatsapp.com/395911122612120/), conferida em 20/11/2026) diz que
+contas com mais de quatro dispositivos conectados recebem ligações só no aparelho principal, e não
+diz se o celular entra na conta. Um relato (#489), numa conta WhatsApp Business com quatro aparelhos
+vinculados contando o DeskVoice, teve as ligações tocando só no celular: nem o WhatsApp Web, que
+tocava antes, tocou mais. A causa ainda não foi confirmada.
+
+Até lá, deixe o DeskVoice com **no máximo dois outros aparelhos vinculados** além dele (WhatsApp Web,
+computador, outro celular), e confira com uma ligação de teste depois de conectar. A tela de Saúde só
+mostra a linha da ligação pelo WhatsApp como ok depois que uma ligação pelo WhatsApp chega desde a
+conexão. Se a ligação tocar só no celular, o WhatsApp não a entregou ao DeskVoice: desconecte, em
+Dispositivos conectados, um aparelho que não seja o DeskVoice e ligue de novo.
 
 ## Instalar o serviço
 

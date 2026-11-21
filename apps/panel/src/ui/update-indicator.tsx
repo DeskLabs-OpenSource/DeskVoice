@@ -20,8 +20,8 @@ const REFRESH_MS = 600_000;
  * Versão em execução e, quando há, a atualização esperando — na lateral, ao lado do estado do
  * sistema.
  *
- * A tela que atualiza sempre existiu (`/settings/system`), mas só era encontrada por quem já sabia
- * onde procurar: o sinal de "há versão nova" morava dentro dela. Aqui ele aparece em qualquer
+ * A tela que atualiza (hoje `/installation/update`; antes, `/settings/system`) só era encontrada por
+ * quem já sabia onde procurar: o sinal de "há versão nova" morava dentro dela. Aqui ele aparece em qualquer
  * página, sem ninguém abrir Configurações.
  *
  * Quem decide se há atualização é o servidor: `publishedReleases` compara a versão publicada com a
@@ -67,8 +67,8 @@ export function UpdateIndicator({ showVersion = true }: { showVersion?: boolean 
       <span className="truncate">{label}</span>
     </>
   );
-  // Depois que a lista de quem administra a instalação fica explícita, a tela de atualizar mora na
-  // área da instalação, e quem não administra só vê a versão, sem link para uma tela que recusaria.
+  // A tela de atualizar mora na área da instalação: quem não a administra só vê a versão, sem link
+  // para uma tela que responderia "não encontrado".
   if (href === null) {
     return (
       <span title={label} className={className}>

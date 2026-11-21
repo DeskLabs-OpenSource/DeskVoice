@@ -24,12 +24,20 @@ export async function loadAllowedWebhooks(q: OrgQuery, secretKey: Buffer): Promi
   return parsed.data.map((hook) => ({ ...hook, token: hook.token === undefined ? undefined : decryptSecret(hook.token, secretKey) }));
 }
 
-export function postToWebhook(hook: RegisteredWebhook, payload: unknown, net: SafeFetchOptions = {}): Promise<SafeResponse> {
+/**
+ * `idempotencyKey`: vai no cabeçalho `Idempotency-Key`. Só evita duplicar se o sistema do outro
+ * lado respeitar o cabeçalho; quem não conhece o ignora.
+ */
+export function postToWebhook(hook: RegisteredWebhook, payload: unknown, net: SafeFetchOptions = {}, idempotencyKey?: string): Promise<SafeResponse> {
   return safeFetch(
     hook.url,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(hook.token !== undefined && { Authorization: `Bearer ${hook.token}` }) },
+      headers: {
+        "Content-Type": "application/json",
+        ...(hook.token !== undefined && { Authorization: `Bearer ${hook.token}` }),
+        ...(idempotencyKey !== undefined && { "Idempotency-Key": idempotencyKey }),
+      },
       body: JSON.stringify(payload),
     },
     net,

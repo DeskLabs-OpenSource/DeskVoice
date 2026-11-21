@@ -124,7 +124,7 @@ export default function TalkPage() {
   const problemText = problem ? (Object.hasOwn(t.errors, problem) ? t.errors[problem as keyof typeof t.errors] : common.errors.fallback) : "";
   const problemFix =
     problem === "engine_not_configured" ? (
-      <FixLink href="/settings">{t.fix.settings}</FixLink>
+      <FixLink href="/settings/ai">{t.fix.settings}</FixLink>
     ) : (problem === "engine_simulated" || problem === "engine_not_installed" || problem === "agent_disabled") && agent ? (
       <FixLink href={`/agents/${agent.id}`}>{t.fix.agent}</FixLink>
     ) : problem === "agent_not_found" ? (
@@ -206,7 +206,7 @@ export default function TalkPage() {
                       </Check>
                       <Check ok={engine?.keyConfigured === true}>
                         <p>{engine?.keyConfigured ? t.ready.keyOk : t.ready.keyMissing}</p>
-                        {engine?.keyConfigured ? null : <FixLink href="/settings">{t.ready.keyLink}</FixLink>}
+                        {engine?.keyConfigured ? null : <FixLink href="/settings/ai">{t.ready.keyLink}</FixLink>}
                       </Check>
                     </>
                   )}

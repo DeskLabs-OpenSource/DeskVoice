@@ -33,6 +33,8 @@ function sentence(event: InstallationEvent, t: InstallationDictionary["audit"]):
     from: text(event.payload.from),
     to: text(event.payload.to),
     target: text(event.payload.target_version),
+    // A organização que já foi apagada não tem nome para mostrar: o começo do id dela.
+    orgId: text(event.payload.organization_id).slice(0, 8),
   });
   const source = text(event.payload.source);
   return Object.hasOwn(t.sources, source) ? `${sentence} (${t.sources[source as keyof typeof t.sources]})` : sentence;

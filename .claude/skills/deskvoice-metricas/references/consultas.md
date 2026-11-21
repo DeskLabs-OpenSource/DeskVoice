@@ -126,7 +126,7 @@ select coalesce(c.outcome, '(sem desfecho)') as desfecho,
 ```
 
 Régua: toda ligação do período. `(sem desfecho)` junta a ligação que não foi atendida (compare
-`ligacoes` com `atendidas`), o desfecho desligado em Configurações → Inteligência artificial e o
+`ligacoes` com `atendidas`), o desfecho desligado em Configurações → Desfecho, análise e transcrição e o
 desfecho que tentou e não classificou: a C9 separa este último. Taxa de desfecho se calcula sobre
 `atendidas`, nunca sobre `ligacoes`.
 

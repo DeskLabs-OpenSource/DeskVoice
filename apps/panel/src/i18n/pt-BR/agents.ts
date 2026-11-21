@@ -48,6 +48,8 @@ const agents = {
   readUnmeasuredNoCeiling: "Este agente está sem teto de custo: com este modelo, as ligações dele não serão lidas.",
   readKeyGone: "O cérebro escolhido ({brain}) está sem chave aceita. As ligações deste agente não são lidas até a chave voltar ou a escolha mudar; elas não passam para a escolha da organização nem para o motor.",
   readModelGone: "O modelo escolhido ({model}) não está mais na lista desse cérebro. As ligações deste agente não são lidas até a escolha mudar.",
+  readKeyGoneAsk: "O cérebro escolhido ({brain}) está sem chave aceita. As ligações deste agente não são lidas até a chave voltar ou a escolha mudar; elas não passam para a escolha da organização nem para o motor. Peça a um dono ou administrador para salvar a chave de novo ou mudar a escolha.",
+  readModelGoneAsk: "O modelo escolhido ({model}) não está mais na lista desse cérebro. As ligações deste agente não são lidas até a escolha mudar. Peça a um dono ou administrador para mudar a escolha.",
   readInvalid: "A escolha gravada neste agente não é válida. As ligações dele não são lidas até você escolher de novo.",
   readInvalidOption: "Escolha inválida",
   liveAnalyst: "Acompanha a ligação ao vivo: o analista {name}",

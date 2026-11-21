@@ -167,6 +167,7 @@ const timeline: TimelineDictionary = {
     },
     engine_failed: "El motor de voz falló",
     engine_failed_body: "Quien estaba en la línea escuchó un tono de aviso y fue transferido o desconectado, sin quedar en silencio. Revisa la clave y el estado del proveedor en Configuración → Inteligencia artificial.",
+    engine_resumed: "La conexión con el proveedor del motor de voz se renovó en medio de la llamada, sin terminar la conversación.",
     call_refused: "Llamada rechazada",
     voicemail_left: "Mensaje grabado",
     voicemail_none: "Buzón atendió, sin mensaje",

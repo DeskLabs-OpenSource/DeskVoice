@@ -126,3 +126,30 @@ export function analysisView({
     },
   };
 }
+
+/** Os avisos de `analysisView`, pelo nome, para quem só lê a escolha (`GET /agents/{id}/analysis-status`). */
+export type AnalysisProblem = "key_gone" | "model_gone" | "unmeasured";
+
+export interface AnalysisStatus {
+  choice: AnalysisDraft["kind"];
+  /** O rótulo do cérebro escolhido (o id quando ele não está na lista); `null` fora da escolha de cérebro. */
+  brainLabel: string | null;
+  model: string | null;
+  problems: AnalysisProblem[];
+}
+
+/**
+ * O que quem só lê vê da escolha gravada: as regras são as de `analysisView`, aqui só com o nome de
+ * cada aviso. No servidor, `brains` e `models` chegam carregados; nunca saem a chave, o teste cru nem
+ * a lista de modelos.
+ */
+export function analysisStatus(input: { analysis: AnalysisDraft; brains: BrainOption[] | undefined; models: BrainModelOption[] | undefined }): AnalysisStatus {
+  const { analysis } = input;
+  if (analysis.kind !== "brain") return { choice: analysis.kind, brainLabel: null, model: null, problems: [] };
+  const view = analysisView(input);
+  const problems: AnalysisProblem[] = [];
+  if (view.keyGone) problems.push("key_gone");
+  if (view.modelGone) problems.push("model_gone");
+  if (view.unmeasured) problems.push("unmeasured");
+  return { choice: "brain", brainLabel: view.labelOf(analysis.brain), model: analysis.model, problems };
+}

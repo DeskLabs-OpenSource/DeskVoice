@@ -3,6 +3,48 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.41.6] - 2026-11-21
+
+### Corrigido
+
+- **No OpenAI Realtime, o motor passa a pedir o corte da fala interrompida no histórico** Quando quem ligou fala por cima do agente numa ligação pelo Asterisk com o motor OpenAI Realtime, o motor agora avisa o provedor até onde a fala foi enviada para a linha, para que o provedor corte o resto do histórico da conversa. Antes, o modelo seguia achando que tinha dito a frase inteira e podia dar por combinado algo que a pessoa nunca ouviu. O efeito numa ligação real ainda não foi conferido: se o provedor recusar o pedido, o erro vai para o registro, nada é cortado e a ligação segue como antes. O Gemini Live, a ligação pelo WhatsApp e a chamada de teste no navegador seguem como estavam. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+## [0.41.5] - 2026-11-21
+
+### Alterado
+
+- **As telas de Configurações perdem a barra de abas e ganham "← Configurações"; "Minha conta" vai para o bloco da conta** As telas de Configurações não mostram mais a barra com as 11 abas. Cada uma traz o próprio nome como título e, acima dele, o link "← Configurações", que volta à central de cartões. A central é o caminho para todas elas. "Sua conta", onde se trocam o contato e a senha, saiu da barra e agora fica no bloco da conta, no fim do menu lateral (no celular, no fim da página), com o nome "Minha conta". Os endereços continuam os mesmos, inclusive `/settings/account`, e um favorito antigo abre a mesma tela. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+## [0.41.4] - 2026-11-21
+
+### Alterado
+
+- **Configurações abre numa central de cartões, com o estado de cada área** Quem abre Configurações agora vê uma central de cartões em vez de cair direto na tela de inteligência artificial. Cada cartão diz em uma frase o que a área faz e abre a tela de sempre: Motores de voz, Cérebros, Voz e Filtro de fala; Analistas e Desfecho, análise e transcrição; WhatsApp e Webhooks; Regras das ligações, Privacidade e dados e Sistema. Alguns cartões mostram o estado da área: Motores de voz diz "Pronto" quando algum motor tem chave; o WhatsApp diz "Pronto" só com o número conectado, "Desligado" sem o serviço e "Falta algo" no resto, e só para quem configura; Webhooks diz "Desligado" sem nenhum endereço. Enquanto falta criar um agente, conectar a linha ou cadastrar a chave de um motor, o cartão "Primeiros passos" aparece no topo, com os mesmos passos da tela de Chamadas, e some quando os três estão feitos. A barra de seções continua no alto, e um favorito antigo para `/settings` abre a central, a um clique da tela de inteligência artificial. Nada a fazer ao atualizar. Crédito: @melgarafael.
+- **Os ajustes técnicos de Configurações ficam num bloco "Avançado", fechado ao abrir a tela** Quatro ajustes técnicos passam para um bloco "Avançado", que começa fechado: o endereço, a chave e o modelo da classificação, na tela de inteligência artificial; o conector externo de WhatsApp e "Confiar no número exibido na ligação", na tela de WhatsApp; e exportar, esquecer e apagar os dados de um número, na tela de Privacidade. Nenhum valor salvo muda, e cada ajuste continua lendo e gravando o mesmo lugar. O aviso da tela do agente que pede para ligar "Confiar no número" agora leva à tela de WhatsApp com o "Avançado" já aberto; o aviso de WhatsApp não conectado continua levando à tela de WhatsApp, onde está a conexão. Crédito: @melgarafael.
+
+## [0.41.3] - 2026-11-20
+
+### Alterado
+
+- **O operador vê o nome do cérebro que lê as ligações do agente e os avisos quando a escolha deixa de funcionar** Na tela do agente, quem tem o papel de operador passa a ver o nome do cérebro escolhido para ler as
+  ligações, no lugar do código dele, e os mesmos avisos de quem configura: o cérebro sem chave aceita,
+  o modelo que saiu da lista e o modelo sem preço conhecido. O aviso diz para pedir a um dono ou
+  administrador que mude a escolha. O operador continua sem poder mudá-la, e nada da chave chega à tela
+  dele. Nada a configurar. Crédito: @melgarafael.
+- **O menu lateral do painel separa os itens em grupos** O menu lateral do painel passa a mostrar os itens em quatro grupos com título: Atendimento (Chamadas, Aprovações, Pendências), Montar (Agentes, Linha telefônica, Ligações de saída), Acompanhar (Custos) e Organização (Equipe, Configurações). Os itens, a ordem e os endereços continuam os mesmos, e os favoritos seguem funcionando. No celular, onde o menu é uma faixa que rola de lado, os grupos ficam separados por uma linha fina. O operador continua sem ver Equipe. Nada a fazer ao atualizar. Crédito: @melgarafael.
+- **A tela de inteligência artificial de Configurações passa a morar em /settings/ai** As chaves dos motores, o desfecho, a análise e a transcrição continuam na mesma tela, com os mesmos valores salvos, mas o endereço dela agora é `/settings/ai`. Quem abre `/settings`, por um favorito ou por um link antigo, chega a ela direto, com a mesma query e o mesmo `#`. Os avisos de Chamadas, de "Falar com o agente" e da tela do agente que mandam cadastrar a chave apontam para o endereço novo. É o primeiro passo para Configurações virar uma central de cartões. Crédito: @melgarafael.
+
+## [0.41.2] - 2026-11-20
+
+### Alterado
+
+- **A exclusão de organização também desfaz a ligação pelo WhatsApp** Por dentro, a exclusão de uma organização passa a desconectar também o número da ligação pelo WhatsApp: o processo de voz tira o aparelho vinculado do celular e apaga a sessão no serviço de ligações, e a rotina só apaga a organização depois disso. Se o serviço de ligações estiver fora do ar e nenhuma organização usar a ligação pelo WhatsApp, a exclusão segue sem ele. Quem ligar pelo WhatsApp para o número de uma organização já excluída ouve o aviso de indisponível, e a auditoria da instalação registra o fato, sem o número de quem ligou. Ainda não há botão nem rota para pedir a exclusão (vem na próxima fatia), então ninguém vê diferença. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A Saúde só diz que a ligação pelo WhatsApp funciona depois que uma ligação chega** Com o número conectado e o agente escolhido, a linha da ligação pelo WhatsApp na Saúde dizia "funcionando" mesmo quando o WhatsApp entregava as ligações só ao celular. Agora ela fica em aviso até chegar uma ligação pelo WhatsApp depois da conexão, e então mostra a hora da última. A tela de conexão e o guia deixam de afirmar que até quatro aparelhos conectados recebem a ligação: num relato com quatro aparelhos, contando o DeskVoice, ela tocou só no celular. A recomendação passa a ser deixar no máximo dois outros aparelhos conectados ao número e fazer uma ligação de teste. Nada a fazer em instalações existentes; quem já tem o número conectado e nenhuma ligação recebida desde então passa a ver o aviso até a primeira ligação. Crédito: @aleflores35, pelo relato.
+- **A chamada pelo navegador recusada pelo teto de gasto do mês aparece em Chamadas, com o motivo na linha do tempo** Quando a organização chega ao teto de gasto do mês, a tentativa de chamar um agente pelo navegador passa a ficar registrada em Chamadas como recusada, com "a organização chegou ao teto de gasto do mês" na linha do tempo, como já acontecia com a ligação pela linha telefônica e pelo WhatsApp. Antes, só quem clicou via a recusa, na própria tela. As outras recusas do navegador (agente desligado, motor sem chave) continuam aparecendo só na tela de quem clicou, e a recusa não ocupa vaga de chamadas ao mesmo tempo. A soma do mês que o teto confere a cada chamada também ficou mais leve: passa a ler só a fatia do período no extrato, e não o extrato inteiro da organização, com o mesmo total na tela de Custos, na visão geral da instalação e no teto. Nada a fazer para quem já instalou. Crédito: @melgarafael.
+
 ## [0.41.1] - 2026-11-19
 
 ### Corrigido
