@@ -68,6 +68,11 @@ export interface ToolResult {
    * efeito pode ter saído: o webhook que respondeu erro já recebeu o POST.
    */
   noEffect?: boolean;
+  /**
+   * `"unknown"` com `ok: false`: não se sabe se o efeito saiu (o destino não respondeu a tempo). Não
+   * é falha: a `message` manda o modelo não repetir sem confirmar. A linha do tempo grava o desfecho.
+   */
+  outcome?: "unknown";
 }
 
 export interface Tool<Input = unknown> {

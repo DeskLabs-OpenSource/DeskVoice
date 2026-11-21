@@ -1,13 +1,34 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { loadAllowedWebhooks, postToWebhook } from "../connectors/webhook";
 import { defineTool } from "../define-tool";
 import { configSecretKey, type ToolDeps } from "../deps";
+import { SafeFetchTimeoutError } from "../net/safe-fetch";
+
+/** JSON com as chaves dos objetos em ordem, em todo nível: a mesma entrada dá o mesmo texto. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item === undefined ? null : item)).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value).filter(([, item]) => item !== undefined);
+    entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * A chave de idempotência: a mesma ligação, a mesma integração e os mesmos dados dão a mesma chave.
+ * Quem repete o pedido depois de um "não sei" manda a mesma chave, e o sistema que a respeita não duplica.
+ */
+export function webhookIdempotencyKey(callId: string, name: string, payload: Record<string, unknown>): string {
+  return createHash("sha256").update(`${callId}\n${name}\n${canonicalJson(payload)}`).digest("hex");
+}
 
 export function createCallWebhook(deps: ToolDeps = {}) {
   return defineTool({
     name: "call_webhook",
     description:
-      "Chama uma integração que o operador cadastrou (por exemplo, consultar um pedido ou abrir um chamado em outro sistema) e devolve a resposta dela. Use só quando as suas instruções mandarem usar uma integração pelo nome. NÃO use por iniciativa própria nem invente nomes: se o nome não existir, a ferramenta devolve a lista dos cadastrados. Você nunca informa endereço, só o nome.",
+      "Chama uma integração que o operador cadastrou (por exemplo, consultar um pedido ou abrir um chamado em outro sistema) e devolve a resposta dela. Use só quando as suas instruções mandarem usar uma integração pelo nome. NÃO use por iniciativa própria nem invente nomes: se o nome não existir, a ferramenta devolve a lista dos cadastrados. Você nunca informa endereço, só o nome. Se a integração não responder a tempo, não chame de novo: diga à pessoa que vai verificar e confirme com ela antes de qualquer nova tentativa.",
     inputSchema: z.object({
       name: z.string().min(1).describe("Nome da integração, exatamente como aparece nas suas instruções."),
       payload: z.record(z.string(), z.unknown()).default({}).describe("Dados enviados à integração, no formato que as suas instruções descrevem."),
@@ -23,7 +44,19 @@ export function createCallWebhook(deps: ToolDeps = {}) {
           message: `Não existe integração chamada "${input.name}", e nada foi chamado. ${names ? `Cadastradas: ${names}.` : "Nenhuma integração está cadastrada nesta central."} Não tente outro nome por conta própria.`,
         };
       }
-      const response = await postToWebhook(hook, { callId: ctx.callId, ...input.payload }, deps);
+      const key = webhookIdempotencyKey(ctx.callId, hook.name, input.payload);
+      let response;
+      try {
+        response = await postToWebhook(hook, { callId: ctx.callId, ...input.payload }, deps, key);
+      } catch (error) {
+        if (!(error instanceof SafeFetchTimeoutError)) throw error;
+        // Sem resposta não é falha: o pedido pode ter sido registrado. O modelo não pode repetir às cegas.
+        return {
+          ok: false,
+          outcome: "unknown",
+          message: `A integração "${hook.name}" não respondeu a tempo. Não sei se o pedido foi registrado. NÃO chame de novo sem antes confirmar com a pessoa; diga que vai verificar.`,
+        };
+      }
       const data = { status: response.status, body: response.body, truncated: response.truncated };
       if (!response.ok) {
         return { ok: false, message: `A integração "${hook.name}" respondeu com erro (HTTP ${response.status}). Diga à pessoa que o sistema não respondeu agora e ofereça outra forma de ajudar.`, data };

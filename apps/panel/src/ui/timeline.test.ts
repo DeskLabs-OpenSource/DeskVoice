@@ -340,4 +340,19 @@ describe("linha do tempo", () => {
       }
     });
   });
+
+  it("a retomada do motor tem frase nos três idiomas, sem o id do motor nem o tipo cru", () => {
+    const html = renderToStaticMarkup(
+      createElement(Timeline, {
+        events: [{ id: "1", kind: "engine_resumed", at: "2026-11-21T12:00:00.000Z", payload: { engine: "gemini-live" } }],
+        live: false,
+        agentName: "Ana",
+      }),
+    );
+    expect(html).toContain(ptBR.events.engine_resumed);
+    expect(html).not.toContain(ptBR.events.unknown);
+    expect(html).not.toContain("gemini-live");
+    for (const dict of [ptBR, enTimeline, esTimeline]) expect(dict.events.engine_resumed).toMatch(/\S/);
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.engine_resumed)).size).toBe(3);
+  });
 });

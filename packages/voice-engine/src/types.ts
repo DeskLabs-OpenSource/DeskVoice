@@ -70,6 +70,12 @@ export interface VoiceSessionEvents {
   usage(usage: Usage): void;
   /** Seguido de `closed` quando é fatal; sozinho, a sessão continua. */
   error(error: Error): void;
+  /**
+   * O motor trocou a conexão com o provedor por uma nova, retomando a mesma conversa, sem fechar a
+   * sessão (o provedor avisou que ia fechar a de antes, ou ela caiu). Só informa: nada muda para quem
+   * chama, e o consumo da conexão nova continua chegando em `usage`.
+   */
+  resumed(): void;
   closed(reason: string): void;
 }
 

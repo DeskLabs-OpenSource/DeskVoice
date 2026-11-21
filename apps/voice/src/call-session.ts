@@ -1089,6 +1089,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     });
     // A última medição de uma sessão substituída também conta, e no trecho dela.
     session.on("usage", (increment) => void meter(self, increment).catch(logFailure("could not record usage")));
+    // O motor trocou a conexão com o provedor sem fechar a sessão: só fica registrado.
+    session.on("resumed", () => {
+      if (!current()) return;
+      event("engine_resumed", { engine: legEngine.id }).catch(logFailure("could not record the engine resumption"));
+    });
     // `error` sozinho não é fatal: fica guardado para explicar um `closed` que venha em seguida.
     session.on("error", (error) => {
       self.lastError = error;

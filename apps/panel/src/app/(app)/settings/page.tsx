@@ -9,7 +9,7 @@ import ptBR from "../../../i18n/pt-BR/settings";
 import { useDict } from "../../../i18n/provider";
 import { useApi } from "../../../ui/api";
 import { engineReady, firstStepsPending } from "../../../ui/first-steps";
-import { useCanConfigure, useMe } from "../../../ui/me";
+import { useCanConfigure } from "../../../ui/me";
 import type { Agent, Engine, Setting, Trunk } from "../../../ui/types";
 import { SettingsHub } from "./hub";
 import { enginesState, webhooksState, whatsappState } from "./hub-state";
@@ -24,7 +24,6 @@ export default function Settings() {
   const t = useDict(ptBR, en, es);
   const calls = useDict(callsPtBR, callsEn, callsEs);
   const canConfigure = useCanConfigure();
-  const explicit = useMe()?.installationExplicit === true;
   const agents = useApi<Agent[]>("/agents");
   const trunks = useApi<Trunk[]>("/trunks");
   const engines = useApi<Engine[]>("/engines");
@@ -40,7 +39,6 @@ export default function Settings() {
         engines: enginesState(engineReady(engines.data)),
         whatsapp: canConfigure ? whatsappState(whatsapp.data) : null,
         webhooks: webhooksState(webhooks.data?.value, webhooks.data !== undefined),
-        system: !explicit,
       }}
     />
   );

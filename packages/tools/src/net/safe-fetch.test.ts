@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeFetch, fakeLookup } from "../../test/helpers";
-import { isPublicAddress, safeFetch, UnsafeDestinationError } from "./safe-fetch";
+import { isPublicAddress, SafeFetchTimeoutError, safeFetch, UnsafeDestinationError } from "./safe-fetch";
 
 const neverFetch: typeof fetch = async () => {
   throw new Error("fetch must not be called for a blocked destination");
@@ -117,7 +117,42 @@ describe("safeFetch", () => {
       new Promise((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
       });
-    await expect(safeFetch("https://slow.example.com/x", {}, { fetch, lookup: fakeLookup(), timeoutMs: 1 })).rejects.toThrow(/timeout|aborted/i);
+    await expect(safeFetch("https://slow.example.com/x", {}, { fetch, lookup: fakeLookup(), timeoutMs: 1 })).rejects.toThrow(SafeFetchTimeoutError);
+  });
+
+  it("prazo que passa durante a leitura do corpo também é tempo esgotado", async () => {
+    const fetch: typeof globalThis.fetch = async (_input, init) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("começo"));
+            init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+          },
+        }),
+      );
+    await expect(safeFetch("https://slow-body.example.com/x", {}, { fetch, lookup: fakeLookup(), timeoutMs: 5 })).rejects.toThrow(SafeFetchTimeoutError);
+  });
+
+  it("falha de rede e destino recusado não viram tempo esgotado", async () => {
+    const down: typeof globalThis.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const error = await safeFetch("https://down.example.com/x", {}, { fetch: down, lookup: fakeLookup() }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TypeError);
+    expect(error).not.toBeInstanceOf(SafeFetchTimeoutError);
+    await expect(safeFetch("http://10.0.0.1/x", {}, { fetch: neverFetch, lookup: fakeLookup(), timeoutMs: 1 })).rejects.toThrow(UnsafeDestinationError);
+  });
+
+  it("destino recusado pela guarda depois de o prazo esgotar segue recusado, e não vira tempo esgotado", async () => {
+    // Como o undici faz quando o `guardedLookup` recusa na conexão: embrulha em "fetch failed".
+    // A recusa chega só depois do prazo, com o sinal já abortado.
+    const lateRefusal: typeof globalThis.fetch = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      throw new TypeError("fetch failed", { cause: new UnsafeDestinationError("late.example.com resolves to non-public address 10.0.0.1") });
+    };
+    const error = await safeFetch("https://late.example.com/x", {}, { fetch: lateRefusal, lookup: fakeLookup(), timeoutMs: 5 }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UnsafeDestinationError);
+    expect(error).not.toBeInstanceOf(SafeFetchTimeoutError);
   });
 });
 
