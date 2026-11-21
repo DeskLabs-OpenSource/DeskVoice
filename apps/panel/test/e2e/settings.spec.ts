@@ -169,18 +169,19 @@ async function expectAnchorShownAfterReads(page: Page): Promise<void> {
   await expect(anchor.getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeInViewport();
 }
 
-test("chegar em /line#ligacao-pelo-whatsapp com as leituras de cima atrasadas e grandes: o bloco fica na tela depois que elas chegam", async ({ page }) => {
+test("pelo \"mudou para…\" até /line#ligacao-pelo-whatsapp, com as leituras de cima atrasadas e grandes: o bloco fica na tela depois que elas chegam", async ({ page }) => {
   await signIn(page);
   await holdAboveReads(page);
-
-  // Pelo link do "mudou para…", que navega dentro do painel.
   await page.goto("/settings/whatsapp");
   await page.getByRole("status").filter({ hasText: settings.movedWhatsAppCalls }).getByRole("link", { name: settings.movedLink, exact: true }).click();
   await expect(page).toHaveURL(/\/line#ligacao-pelo-whatsapp$/);
   await expectAnchorShownAfterReads(page);
+});
 
-  // Direto pelo endereço, como quem abre o link guardado.
-  await page.goto("/settings");
+test("direto em /line#ligacao-pelo-whatsapp, com as leituras de cima atrasadas e grandes: o bloco fica na tela depois que elas chegam", async ({ page }) => {
+  await signIn(page);
+  await holdAboveReads(page);
+  // Como quem abre o link guardado: a página carrega do zero, já com o endereço do bloco.
   await page.goto("/line#ligacao-pelo-whatsapp");
   await expectAnchorShownAfterReads(page);
 });
