@@ -208,8 +208,13 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     // O áudio corre nos dois sentidos, e a interrupção descarta a fala pendente.
     made.transport.callerAudio(60);
     manual.emit("audio", Buffer.alloc(640));
+    // Antes de descartar, o motor fica sabendo quanto da fala tocou, para cortar no histórico.
+    made.transport.spoken = 20;
+    let playedBeforeClear: number[] = [];
+    made.transport.clearAudio = () => void ((made.transport.cleared += 1), (playedBeforeClear = [...manual.played]));
     manual.emit("interrupted");
     expect([manual.audioBytes, made.transport.sentBytes, made.transport.cleared]).toEqual([960, 640, 1]);
+    expect(playedBeforeClear).toEqual([20]);
 
     // Ferramenta que o agente não tem habilitada: o modelo é avisado e fica o rastro.
     manual.emit("toolCall", { id: "t1", name: "transfer_to_human", args: {} });
