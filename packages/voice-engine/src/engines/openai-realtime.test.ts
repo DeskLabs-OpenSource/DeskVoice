@@ -156,6 +156,20 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     expect(await fake.waitFor(ofType("response.create"))).toEqual({ type: "response.create", response: {} });
   });
 
+  it("speech_stopped vira callerTurnEnded com source vad, uma vez; speech_started não", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    const ended: Array<{ source: string }> = [];
+    session.on("callerTurnEnded", (signal) => ended.push(signal));
+    const interrupted = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started", audio_start_ms: 100, item_id: "i1" });
+    await interrupted;
+    expect(ended).toEqual([]);
+    const stopped = nextEvent(session, "callerTurnEnded");
+    fake.send({ type: "input_audio_buffer.speech_stopped", audio_end_ms: 900, item_id: "i1" });
+    expect((await stopped)[0]).toEqual({ source: "vad" });
+    expect(ended).toEqual([{ source: "vad" }]);
+  });
+
   it("say() durante uma resposta em curso espera o response.done", async () => {
     const { session } = await openSession();
     await fake.waitFor(ofType("response.create")); // saudação
@@ -367,7 +381,8 @@ describe("openai-realtime (contrato com servidor falso)", () => {
 
   it("closeCallerTurn fecha o áudio de quem ligou num item e pede a resposta", async () => {
     const { session } = await openSession({ greeting: undefined });
-    session.closeCallerTurn();
+    // Agiu: a sessão tira o turno da latência por turno.
+    expect(session.closeCallerTurn()).toBe(true);
     const commit = await fake.waitFor((message) => message.type === "input_audio_buffer.commit" || message.type === "response.create");
     expect(commit).toEqual({ type: "input_audio_buffer.commit" });
     expect(await fake.waitFor(ofType("response.create"))).toEqual({ type: "response.create", response: {} });
@@ -380,7 +395,8 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     const interrupted = nextEvent(session, "interrupted");
     fake.send({ type: "input_audio_buffer.speech_started" });
     await interrupted; // o motor já processou o response.created
-    session.closeCallerTurn();
+    // Não agiu: a resposta em curso não foi forçada.
+    expect(session.closeCallerTurn()).toBe(false);
     fake.send({ type: "response.done", response: {} });
     const done = nextEvent(session, "interrupted");
     fake.send({ type: "input_audio_buffer.speech_started" });
@@ -397,7 +413,8 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     const interrupted = nextEvent(session, "interrupted");
     fake.send({ type: "input_audio_buffer.speech_started" });
     await interrupted;
-    session.closeCallerTurn();
+    // Não agiu: o servidor só está lento, e a resposta que vier conta na latência por turno.
+    expect(session.closeCallerTurn()).toBe(false);
     session.say("marcador");
     const first = await fake.waitFor((m) => m.type === "input_audio_buffer.commit" || m.type === "response.create");
     expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining("marcador") } });

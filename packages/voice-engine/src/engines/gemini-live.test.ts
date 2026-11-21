@@ -174,9 +174,32 @@ describe("gemini-live (contrato com servidor falso)", () => {
     expect(transcripts).toEqual(["user: quero marcar"]);
   });
 
-  it("closeCallerTurn manda audioStreamEnd", async () => {
+  it("o fim da vez de quem ligou é cada pedaço da transcrição antes do áudio da resposta, com source transcript; o que chega com o agente falando não conta", async () => {
     const { session } = await openSession({ greeting: undefined });
-    session.closeCallerTurn();
+    const marks: string[] = [];
+    session.on("callerTurnEnded", (signal) => marks.push(`marco ${signal.source}`));
+    session.on("audio", () => marks.push("áudio"));
+    const pcm = Buffer.alloc(960).toString("base64");
+    fake.send({ serverContent: { interimInputTranscription: { text: "quero" } } });
+    fake.send({ serverContent: { inputTranscription: { text: "quero " } } });
+    fake.send({ serverContent: { inputTranscription: { text: " " } } });
+    fake.send({ serverContent: { inputTranscription: { text: "remarcar" } } });
+    fake.send({ serverContent: { modelTurn: { parts: [{ inlineData: { data: pcm, mimeType: "audio/pcm;rate=24000" } }] } } });
+    // Transcrição atrasada da mesma fala, com o agente já falando: não é marco.
+    fake.send({ serverContent: { inputTranscription: { text: "amanhã" } } });
+    fake.send({ serverContent: { modelTurn: { parts: [{ inlineData: { data: pcm, mimeType: "audio/pcm;rate=24000" } }] } } });
+    fake.send({ serverContent: { turnComplete: true } });
+    // Terminada a resposta, a fala nova volta a marcar.
+    const next = nextEvent(session, "callerTurnEnded");
+    fake.send({ serverContent: { inputTranscription: { text: "obrigado" } } });
+    await next;
+    // Quem mede fica com o último marco antes do áudio (o de "remarcar"): o de "quero " é substituído.
+    expect(marks).toEqual(["marco transcript", "marco transcript", "áudio", "áudio", "marco transcript"]);
+  });
+
+  it("closeCallerTurn manda audioStreamEnd, e diz sempre que agiu", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    expect(session.closeCallerTurn()).toBe(true);
     expect(await fake.waitFor((message) => "realtimeInput" in message)).toEqual({ realtimeInput: { audioStreamEnd: true } });
   });
 
