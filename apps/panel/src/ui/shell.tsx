@@ -19,7 +19,7 @@ import { api, useApi } from "./api";
 import { APPROVALS_CHANGED, ApprovalCard, isWaiting } from "./approval";
 import { formatDateTime } from "./format";
 import { useLive, useNow } from "./live";
-import { MeContext, useOrganizationChoices, type Membership } from "./me";
+import { MeContext, updatePath, useMe, useOrganizationChoices, type Membership } from "./me";
 import type { Approval, HealthReport, HealthStatus, Me, PanelNotification } from "./types";
 import { UpdateIndicator } from "./update-indicator";
 
@@ -143,6 +143,8 @@ function NotificationBell({ align }: { align: string }) {
   const ref = useDismiss();
   useLive(reload);
   const unread = data.filter((notification) => notification.readAt === null).length;
+  // O aviso de atualização vai para todos, mas só quem administra a instalação abre a tela dele.
+  const update = updatePath(useMe());
 
   return (
     <details ref={ref} className="relative">
@@ -167,6 +169,11 @@ function NotificationBell({ align }: { align: string }) {
               {notification.callId ? (
                 <Link href={`/calls/${notification.callId}`} className="font-bold underline-offset-4 hover:text-ink hover:underline">
                   {t.openCall}
+                </Link>
+              ) : null}
+              {notification.subject === "installation_update" && update !== null ? (
+                <Link href={update} className="font-bold underline-offset-4 hover:text-ink hover:underline">
+                  {t.openUpdate}
                 </Link>
               ) : null}
               {notification.readAt === null ? (
