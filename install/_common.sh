@@ -270,7 +270,7 @@ render_template() {  # render_template <modelo> <destino>; os valores vêm do am
   if [ -f "$dst" ] && { cmp -s "$tmp" "$dst" || cat "$tmp" > "$dst" 2>/dev/null; }; then rm -f "$tmp"
   else mv "$tmp" "$dst"; fi
 }
-render_asterisk_config() {
+render_asterisk_config() {  # render_asterisk_config [--rollback]
   ARI_PASSWORD="$(env_get "$APP_ENV_FILE" ARI_PASSWORD)" PUBLIC_IP="$(env_get "$APP_ENV_FILE" PUBLIC_IP)" \
   RTP_START="$(env_get "$ENV_FILE" RTP_START)" RTP_END="$(env_get "$ENV_FILE" RTP_END)"
   export ARI_PASSWORD PUBLIC_IP RTP_START RTP_END
@@ -288,7 +288,20 @@ render_asterisk_config() {
   render_asterisk_file ari.conf.tmpl ari.conf
   render_asterisk_file rtp.conf.tmpl rtp.conf
   render_asterisk_file pjsip.conf.base pjsip.conf
-  render_asterisk_file modules.conf modules.conf
+  # Na volta (só nela), a versão anterior pode não ter o modules.conf: as publicadas antes dele
+  # deixavam a lista de módulos com a imagem, e o Compose delas não o monta. Sem o modelo, não há o
+  # que gerar, e o que a ida gerou sai: o converge_asterisk desta versão (o que roda na volta)
+  # compararia esse arquivo com o da imagem, que o contêiner lê, e reiniciaria o Asterisk sem motivo.
+  # Fora da volta, faltar o modelo é repositório incompleto, como os outros cinco.
+  if [ "${1:-}" = --rollback ] && [ ! -f "$DEPLOY_DIR/asterisk/modules.conf" ]; then
+    rm -f "$GENERATED_DIR/modules.conf"
+    if [ -f "$ASTERISK_PENDING" ]; then
+      grep -vx modules.conf "$ASTERISK_PENDING" > "$ASTERISK_PENDING.tmp" || true
+      mv "$ASTERISK_PENDING.tmp" "$ASTERISK_PENDING"
+    fi
+  else
+    render_asterisk_file modules.conf modules.conf
+  fi
   unset ARI_PASSWORD
 }
 # O que mudou num arquivo que o Asterisk já tinha fica anotado em ASTERISK_PENDING, para

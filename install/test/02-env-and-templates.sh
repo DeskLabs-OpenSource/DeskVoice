@@ -77,6 +77,20 @@ done
 refuse "o modules.conf não exige o res_pjsip_nat (sem ele o Asterisk não subiria)" grep -Eq '^[[:space:]]*require[^=]*=>?[[:space:]]*res_pjsip_nat' "$G/modules.conf"
 check "o modules.conf mantém o autoload da imagem" grep -qx 'autoload=yes' "$G/modules.conf"
 lacks "o compose não monta mais arquivo direto do repositório" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/extensions.conf"
+# Sem o modelo do modules.conf, só a volta da atualização segue (a versão anterior pode ser de antes
+# dele). Na instalação, e em toda chamada sem --rollback, é repositório incompleto, como os outros.
+mv "$D/asterisk/modules.conf" "$D/asterisk/modules.conf.fora"
+out="$( ( source "$KIT/_common.sh"; render_asterisk_config ) 2>&1 )"; equal "sem o modelo do modules.conf, a instalação falha" 1 "$?"
+contains "... dizendo qual modelo falta" "$out" "Não achei o modelo $D/asterisk/modules.conf"
+check "... e não apaga o modules.conf já gerado" test -s "$G/modules.conf"
+( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1; equal "sem o modelo do modules.conf, a volta segue" 0 "$?"
+refuse "... e o modules.conf gerado sai (o Compose da versão anterior não o monta)" test -e "$G/modules.conf"
+mv "$D/asterisk/modules.conf.fora" "$D/asterisk/modules.conf"
+mv "$D/asterisk/rtp.conf.tmpl" "$D/asterisk/rtp.conf.tmpl.fora"
+( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1; equal "na volta, os outros modelos continuam obrigatórios" 1 "$?"
+mv "$D/asterisk/rtp.conf.tmpl.fora" "$D/asterisk/rtp.conf.tmpl"
+( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1
+check "na volta, com o modelo no disco, o modules.conf é gerado" cmp -s "$REPO/deploy/asterisk/modules.conf" "$G/modules.conf"
 
 # ── Entrada única: só o Caddy do DeskVoice publica porta, nos dois modos ──
 O="$D/docker-compose.override.yml"

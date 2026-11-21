@@ -240,13 +240,32 @@ contains "mesmo modules.conf: a atualização foi feita" "$out" "0.9.5"
 equal "mesmo modules.conf: não reinicia" 0 "$(restarts)"
 equal "mesmo modules.conf: não recarrega" 0 "$(reloads)"
 env_set "$E" DESKVOICE_VERSION 0.8.0
+# A volta para uma versão de antes do modules.conf (toda versão publicada até esta): o checkout dela
+# apaga o modelo, e o atualizador que roda a volta é o novo, que está na memória. A volta não pede o
+# modelo, e a migration que falhou não vira "a volta não terminou bem". O que a ida gerou sai: o
+# contêiner da versão anterior lê o modules.conf da imagem, e compará-lo com o gerado reiniciaria o
+# Asterisk sem motivo.
+rm -f "$FAKE_DIR/git_checkout/main/deploy/asterisk/modules.conf"
+mkdir -p "$FAKE_DIR/git_checkout/v0.9.6"; cp -R "$FAKE_DIR/git_checkout/v0.9.5/." "$FAKE_DIR/git_checkout/v0.9.6/"
+{ echo v0.9.6; cat "$FAKE_DIR/git_tags"; } > "$FAKE_DIR/git_tags.next"; mv "$FAKE_DIR/git_tags.next" "$FAKE_DIR/git_tags"
+mkdir -p "$FAKE_DIR/asterisk_mounted"; cp "$GEN"/*.conf "$FAKE_DIR/asterisk_mounted/"; echo "; o da imagem" > "$FAKE_DIR/asterisk_mounted/modules.conf"
+echo 1 > "$FAKE_DIR/migrate_exit"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.6 --yes 2>&1)"; equal "volta para versão sem modules.conf: sai com erro (a migration falhou)" 1 "$?"
+contains "volta para versão sem modules.conf: foi desfeita" "$out" "foi desfeita: você está de volta na versão 0.8.0"
+lacks "volta para versão sem modules.conf: não diz que a volta não terminou bem" "$out" "não terminou bem"
+equal "volta para versão sem modules.conf: voltou a versão" 0.8.0 "$(env_get "$E" DESKVOICE_VERSION)"
+refuse "volta para versão sem modules.conf: o checkout apagou o modelo (como o git de verdade)" test -e "$MODULES_MODEL"
+refuse "volta para versão sem modules.conf: o modules.conf gerado na ida sai" test -e "$GEN/modules.conf"
+equal "volta para versão sem modules.conf: o Asterisk não é reiniciado" 0 "$(restarts)"
+echo 0 > "$FAKE_DIR/migrate_exit"; rm -rf "$FAKE_DIR/asterisk_mounted"; cp "$REPO/deploy/asterisk/modules.conf" "$MODULES_MODEL"
 # ── Imagens de terceiros: sai a que o Compose da versão de onde se saiu fixava por resumo e o da nova
 #    não fixa mais (issue #163). Só a referência exata; a de outro sistema e a que segue fixada ficam. ──
 pins() { sed -nE 's/^[[:space:]]*image:[[:space:]]*(\$\{[A-Z_]+:-)?([^}[:space:]]+@sha256:[0-9a-f]{64})\}?[[:space:]]*$/\2/p' "$DESKVOICE_DEPLOY_DIR/docker-compose.yml"; }
 OLD_WACALLS="ghcr.io/jotadev66/wacalls@sha256:$(printf 'a%.0s' $(seq 64))"
 OLD_CADDY="caddy:2.10.0-alpine@sha256:$(printf 'b%.0s' $(seq 64))"
 KEPT="$(pins | grep waha)"
-mkdir -p "$FAKE_DIR/git_checkout/main/deploy"
+# O Compose é rastreado em toda versão: a de destino traz o dela (o do kit), e o checkout não o apaga.
+mkdir -p "$FAKE_DIR/git_checkout/main/deploy" "$FAKE_DIR/git_checkout/v0.9.0/deploy"; cp "$DESKVOICE_DEPLOY_DIR/docker-compose.yml" "$FAKE_DIR/git_checkout/v0.9.0/deploy/"
 { echo "services:"; echo "  wacalls:"; echo "    image: $OLD_WACALLS"; echo "  waha:"; echo "    image: \${WAHA_IMAGE:-$KEPT}"; echo "  caddy:"; echo "    image: $OLD_CADDY"; } > "$FAKE_DIR/git_checkout/main/deploy/docker-compose.yml"
 third() { grep '^rmi .*@sha256:' "$FAKE_DIR/calls.log" | sed 's/^rmi //'; }
 { echo "$OLD_WACALLS"; echo "$KEPT"; echo postgres:16; } > "$FAKE_DIR/images"; : > "$FAKE_DIR/calls.log"
@@ -264,7 +283,7 @@ out="$(bash "$KIT/update.sh" --to 0.9.0 --yes 2>&1)"; equal "terceiros em uso: s
 contains "terceiros em uso: avisa, nomeando a imagem" "$out" "Não consegui remover a imagem $OLD_WACALLS"
 equal "terceiros em uso: ela fica" "$(printf '%s\n' "$OLD_WACALLS" "$KEPT")" "$(cat "$FAKE_DIR/images")"
 rm -f "$FAKE_DIR/rmi_busy" "$FAKE_DIR/images"; env_set "$E" DESKVOICE_VERSION 0.8.0
-rm -rf "$FAKE_DIR/git_tags" "$FAKE_DIR/git_checkout" "$FAKE_DIR/asterisk_mounted"; unset FAKE_GIT_WORKTREE
+rm -rf "$FAKE_DIR/git_tags" "$FAKE_DIR/git_checkout" "$FAKE_DIR/git_at" "$FAKE_DIR/asterisk_mounted"; unset FAKE_GIT_WORKTREE
 cp "$ASTERISK_MODEL.original" "$ASTERISK_MODEL"; : > "$FAKE_DIR/calls.log"
 
 # ── Imagens antigas: com tudo respondendo, saem as do DeskVoice que nem a versão nova nem a de onde
