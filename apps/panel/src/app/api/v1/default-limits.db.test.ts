@@ -150,6 +150,28 @@ describe("the limits a new organization starts with", () => {
     expect(await limitsRow(await s.create())).toEqual(factoryForStrange);
   });
 
+  it("a key written by hand above the ceiling falls back to the factory value for that field, and the organization is still created", async () => {
+    const s = await scene();
+    // 2^53 - 1 de propósito: acima disso o JSON.parse do node já perde a precisão.
+    await system("insert into installation_settings (key, value) values ('defaults.limits', $1) returning key", [
+      { maxTrunks: 2_147_483_648, maxAgents: 3, monthlySpendCapCents: Number.MAX_SAFE_INTEGER, outboundAllowed: true },
+    ]);
+    const bornWith = { maxTrunks: null, maxAgents: 3, monthlySpendCapCents: null, outboundAllowed: true };
+    // A criação primeiro: sem o teto na leitura, é ela que cai (o insert estoura o integer).
+    expect(await limitsRow(await s.create())).toEqual(bornWith);
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual(bornWith);
+  });
+
+  it("the ceiling itself is a limit, one above it is not", async () => {
+    const s = await scene();
+    await system("insert into installation_settings (key, value) values ('defaults.limits', $1) returning key", [
+      { maxTrunks: 1_000_000, maxAgents: 1_000_001, monthlySpendCapCents: 2_147_483_647, outboundAllowed: false },
+    ]);
+    const bornWith = { maxTrunks: 1_000_000, maxAgents: null, monthlySpendCapCents: 2_147_483_647, outboundAllowed: false };
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual(bornWith);
+    expect(await limitsRow(await s.create())).toEqual(bornWith);
+  });
+
   it("only who administers the installation reads or changes the default", async () => {
     const s = await scene();
     const other = await createUser(panel.app, s.existing, "owner");
