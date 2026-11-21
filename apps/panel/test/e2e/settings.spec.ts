@@ -75,6 +75,7 @@ test("subtelas de Configurações: sem barra de abas, com o nome no título e \"
     { card: "privacy", path: "/settings/privacy", title: settings.sections.privacy, heading: privacy.retentionTitle },
     { card: "system", path: "/settings/system", title: settings.sections.system, heading: update.title },
     { card: "engines", path: "/settings/ai", title: settings.sections.ai, heading: settings.enginesTitle },
+    { card: "outcome", path: "/settings/after-call", title: settings.hub.cards.outcome.title, heading: settings.outcomeTitle },
   ];
   const mainNav = page.getByRole("navigation", { name: common.shell.mainNav });
   for (const section of sections) {

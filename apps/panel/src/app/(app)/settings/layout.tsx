@@ -32,6 +32,7 @@ import { LimitsNotice } from "./limits-notice";
 // cartão para cada uma, salvo "Sua conta", que mora no bloco da conta do menu como "Minha conta".
 const SECTIONS = [
   { href: "/settings/ai", key: "ai" },
+  { href: "/settings/after-call", key: "afterCall" },
   { href: "/settings/brains", key: "brains" },
   { href: "/settings/voice", key: "voice" },
   { href: "/settings/speech-filter", key: "speechFilter" },
@@ -53,7 +54,8 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
   const speechFilter = useDict(speechFilterPtBR, speechFilterEn, speechFilterEs);
   const analysts = useDict(analystsPtBR, analystsEn, analystsEs);
   const voice = useDict(voicePtBR, voiceEn, voiceEs);
-  const sectionLabel = (key: (typeof SECTIONS)[number]["key"]): string => (key === "brains" ? brains.menu : key === "voice" ? voice.menu : key === "speechFilter" ? speechFilter.menu : key === "analysts" ? analysts.menu : t.sections[key]);
+  // O nome de "Depois da ligação" é o do cartão que leva a ela, sem um segundo texto para o mesmo lugar.
+  const sectionLabel = (key: (typeof SECTIONS)[number]["key"]): string => (key === "brains" ? brains.menu : key === "voice" ? voice.menu : key === "speechFilter" ? speechFilter.menu : key === "analysts" ? analysts.menu : key === "afterCall" ? t.hub.cards.outcome.title : t.sections[key]);
   const common = useDict(commonPtBR, commonEn, commonEs);
   const pathname = usePathname();
   const section = SECTIONS.find(({ href }) => pathname === href || pathname.startsWith(`${href}/`));
