@@ -205,10 +205,11 @@ test("depois da ligação: o opcional ligado antes aparece ligado na tela nova, 
     for (const label of [settings.outcomeSwitch, settings.analysisSwitch, settings.transcriptionSwitch, settings.autoTranscriptionSwitch])
       await expect(page.getByRole("switch", { name: label, exact: true }), label).toHaveAttribute("aria-checked", "true");
 
-    // Desligar na tela nova grava na mesma chave, e a leitura de volta concorda.
+    // Desligar na tela nova grava na mesma chave (`null`, que a leitura devolve como o padrão `false`),
+    // e a leitura de volta concorda.
     await page.getByRole("switch", { name: settings.outcomeSwitch, exact: true }).click();
     await expect(page.getByRole("switch", { name: settings.outcomeSwitch, exact: true })).toHaveAttribute("aria-checked", "false");
-    expect(await readSetting(page, "calls.outcome_enabled")).toBeNull();
+    expect(await readSetting(page, "calls.outcome_enabled")).toBe(false);
     await page.reload();
     await expect(page.getByRole("switch", { name: settings.outcomeSwitch, exact: true })).toHaveAttribute("aria-checked", "false");
     await expect(page.getByRole("switch", { name: settings.analysisSwitch, exact: true })).toHaveAttribute("aria-checked", "true");
