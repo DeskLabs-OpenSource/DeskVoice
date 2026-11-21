@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Buildings, ChartBar, CircleHalf, GearSix, Headset, ListChecks, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UsersThree, Waveform } from "@phosphor-icons/react";
+import { Bell, Buildings, ChartBar, CircleHalf, GearSix, Headset, ListChecks, Moon, PhoneCall, PhoneOutgoing, PlugsConnected, SealQuestion, SignOut, Sun, UserCircle, UsersThree, Waveform } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -19,7 +19,7 @@ import { api, useApi } from "./api";
 import { APPROVALS_CHANGED, ApprovalCard, isWaiting } from "./approval";
 import { formatDateTime } from "./format";
 import { useLive, useNow } from "./live";
-import { MeContext, useOrganizationChoices, type Membership } from "./me";
+import { MeContext, updatePath, useMe, useOrganizationChoices, type Membership } from "./me";
 import type { Approval, HealthReport, HealthStatus, Me, PanelNotification } from "./types";
 import { UpdateIndicator } from "./update-indicator";
 
@@ -61,6 +61,8 @@ const NAV = [
     ],
   },
 ] as const;
+
+const ACCOUNT = "/settings/account";
 
 const DOT: Record<HealthStatus, string> = { ok: "bg-ok", warn: "bg-warn", fail: "bg-fail" };
 
@@ -141,6 +143,8 @@ function NotificationBell({ align }: { align: string }) {
   const ref = useDismiss();
   useLive(reload);
   const unread = data.filter((notification) => notification.readAt === null).length;
+  // O aviso de atualização vai para todos, mas só quem administra a instalação abre a tela dele.
+  const update = updatePath(useMe());
 
   return (
     <details ref={ref} className="relative">
@@ -165,6 +169,11 @@ function NotificationBell({ align }: { align: string }) {
               {notification.callId ? (
                 <Link href={`/calls/${notification.callId}`} className="font-bold underline-offset-4 hover:text-ink hover:underline">
                   {t.openCall}
+                </Link>
+              ) : null}
+              {notification.subject === "installation_update" && update !== null ? (
+                <Link href={update} className="font-bold underline-offset-4 hover:text-ink hover:underline">
+                  {t.openUpdate}
                 </Link>
               ) : null}
               {notification.readAt === null ? (
@@ -283,7 +292,8 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
             {t.navGroups[group.key]}
           </span>
           {group.items.map(({ href, key, icon: Icon }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`);
+            // A própria conta mora no bloco da conta: nela, quem fica marcado é "Minha conta".
+            const active = (pathname === href || pathname.startsWith(`${href}/`)) && pathname !== ACCOUNT;
             return (
               <Link
                 key={href}
@@ -308,6 +318,16 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
         <span className="truncate font-bold">{me.name}</span>
         <span className="text-[0.8rem] text-muted">{t.roles[me.role]}</span>
       </div>
+      {/* A própria conta (contato e senha), que qualquer papel edita: mora aqui desde que Configurações
+          virou uma central sem barra de abas (central de configuração, parte 4). A rota é a de sempre. */}
+      <Link
+        href={ACCOUNT}
+        aria-current={pathname === ACCOUNT ? "page" : undefined}
+        className="flex h-8 basis-full items-center gap-2 rounded-xs px-1 text-[0.87rem] text-muted hover:bg-sunken hover:text-ink aria-[current=page]:font-bold aria-[current=page]:text-ink"
+      >
+        <UserCircle size={18} weight="duotone" aria-hidden />
+        <span className="truncate">{t.shell.myAccount}</span>
+      </Link>
       {/* A área da instalação mora aqui, e não na navegação principal: quem não administra nem vê a porta. */}
       {me.installationAdmin ? (
         <Link

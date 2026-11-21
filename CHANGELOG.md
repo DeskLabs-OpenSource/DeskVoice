@@ -3,6 +3,54 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.43.0] - 2026-11-21
+
+### Adicionado
+
+- **Uma organização nova já nasce no fuso e no idioma que a administração da instalação escolheu** Na área da instalação, em Organizações, a seção "Padrões para organizações novas" ganhou o fuso e o idioma com que cada organização nova nasce. O fuso, em nome IANA como America/Sao_Paulo, é o da janela de ligações e o do mês de custo da organização nova, que pode trocá-lo depois na política de saída; um fuso que não existe é recusado. O idioma (português, inglês ou espanhol) é o que o formulário de agente novo e o de menu novo dessa organização propõem: agentes e menus que já existem não mudam, e a língua da tela continua sendo a de cada navegador. Sem padrão escolhido, a organização nova nasce em America/Sao_Paulo e propõe português, como antes, e as que já existem também seguem assim. A organização nova recebe uma cópia: mudar o padrão depois não mexe no fuso, no mês de custo nem no idioma de nenhuma organização que já existe. A mudança do padrão aparece na Auditoria da instalação. Crédito: @melgarafael.
+
+### Alterado
+
+- **O aviso de atualização no sino diz quem pode seguir, e quem administra a instalação ganha o link "Ver a atualização"** O aviso de atualização continua chegando ao sino de toda organização, porque a atualização derruba o sistema de todas. O texto agora diz quem acompanha o resultado: "Quem administra a instalação … em Administrar a instalação → Atualização". Quem administra a instalação vê no aviso o link "Ver a atualização", que leva a `/installation/update`. Quem não administra lê o aviso sem link, e não cai mais numa tela que não abre. Os avisos já gravados ficam como estavam, sem link. Os avisos do serviço de WhatsApp não mudam. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+### Corrigido
+
+- **No Gemini Live, a ferramenta que o Google cancela não tem mais o resultado entregue ao modelo** Quando quem ligou fala por cima do agente enquanto uma ferramenta roda, o Gemini Live pode avisar que desistiu daquela chamada. Antes, o aviso era ignorado, e o resultado da ferramenta ia ao modelo assim mesmo, quando ele já não o esperava. Agora o resultado da chamada cancelada é descartado, e a linha do tempo da ligação mostra que o motor desistiu da ferramenta. O que a ferramenta já tinha feito continua feito e registrado: um webhook que já recebeu o pedido, por exemplo, não é desfeito. Isso foi conferido contra um servidor falso. Não se sabe com que frequência o aviso vem numa ligação real. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+## [0.42.1] - 2026-11-21
+
+### Corrigido
+
+- **O ajuste de NAT das linhas passa a valer, e a checagem de saúde reprova quando um módulo SIP não carrega** Na imagem do Asterisk que o DeskVoice usa, com todos os módulos SIP dela ligados, o limite de módulos do PJSIP estourava na partida ("Too many modules registered") e o último módulo SIP a carregar ficava parado. Qual depende da máquina: numa delas era o `res_pjsip_nat`, e o `force_rport` e o `rewrite_contact` de toda linha não faziam efeito, e uma linha atrás de NAT ligava e ficava muda. O DeskVoice agora traz o próprio `modules.conf`, igual ao da imagem, mas sem três módulos SIP que ele não usa e que ocupam vaga nesse limite (SIP por WebSocket, mensagem de texto por SIP e o histórico de pacotes), e o `bash install/healthcheck.sh` ganha a linha essencial "Módulos SIP", que reprova se qualquer módulo SIP estiver parado ou se o log da partida tiver o estouro. A atualização reinicia o Asterisk **uma vez**, porque a montagem nova recria o contêiner, e as ligações em andamento nesse momento caem: vale atualizar fora do horário de ligações. Depois dela, uma linha atrás de NAT que "ligava e ficava muda" pode passar a ter áudio, sem nada a fazer. Quem troca a imagem por `ASTERISK_IMAGE`: se a imagem escolhida não carregar algum módulo SIP, a checagem de saúde reprova e a atualização volta para a versão anterior, e a linha "Módulos SIP" diz qual módulo falta. Crédito: @melgarafael.
+
+## [0.42.0] - 2026-11-21
+
+### Adicionado
+
+- **Uma organização nova já nasce com os limites que a administração da instalação escolheu, e com a saída travada** Na área da instalação, em Organizações, a seção "Padrões para organizações novas" guarda os limites com que cada organização nova nasce: quantas linhas telefônicas, quantos agentes, o teto de gasto do mês e se ela pode ligar para fora. Os campos são os mesmos dos limites de uma organização. O formulário de nova organização diz, antes de criar, com o que ela nasce. Sem padrão escolhido, a organização nova nasce sem limite de linhas, de agentes e de gasto, e com as ligações de saída bloqueadas até alguém desbloquear nos limites dela. Antes, ela nascia sem trava nenhuma. A organização nova recebe uma cópia: mudar o padrão depois não mexe em nenhuma organização que já existe. A organização de quem instalou e as que já existem continuam como estão, sem limite. A mudança do padrão aparece na Auditoria da instalação. Crédito: @melgarafael.
+
+### Alterado
+
+- **A tela de atualizar mora só em "Administrar a instalação" › "Atualização", e /settings/system leva até ela** A tela de versão e atualização deixa de morar em Configurações, também na instalação com uma organização só: ela fica em "Administrar a instalação" › "Atualização" (`/installation/update`) para quem administra a instalação, com a lista de quem administra explícita ou não. O cartão "Sistema" sai da central de Configurações. O endereço antigo, `/settings/system`, continua valendo: leva quem administra a instalação à tela nova, e quem não administra de volta a Configurações. Quem não administra a instalação vê a versão na lateral sem link, como já via com a lista explícita. A atualização em si, a rota da API e quem pode pedir não mudam. Nada a fazer ao atualizar. Crédito: @melgarafael.
+- **Desfecho, análise e transcrição saem da tela de inteligência artificial para a tela própria "Desfecho, análise e transcrição"** A tela de inteligência artificial de Configurações fica só com as chaves dos motores de voz e o motor padrão. Os três opcionais com custo, classificar o desfecho, analisar a ligação (com quem lê a ligação) e transcrever a gravação (com a transcrição automática), passam para `/settings/after-call`, que se abre pelo cartão "Desfecho, análise e transcrição" da central. Nenhum valor salvo muda: quem já tinha um opcional ligado o encontra ligado na tela nova, lido e gravado no mesmo lugar. O README e o aviso de transcrição desligada, na tela e na resposta da API, passam a mandar ligar esses opcionais em "Configurações → Desfecho, análise e transcrição"; o que fala da chave continua apontando para a tela de inteligência artificial. Nada a fazer ao atualizar. Crédito: @melgarafael.
+- **A integração que não responde a tempo vira "não sei", e cada chamada leva uma chave de idempotência** Quando uma integração cadastrada não responde dentro do prazo durante a ligação, o agente deixa de tratar isso como erro: ele ouve que não se sabe se o pedido foi registrado, que não deve chamar de novo sem antes confirmar com a pessoa, e diz que vai verificar. A linha do tempo mostra a frase "não respondeu a tempo" no resultado da ferramenta. Erro HTTP e falha de rede seguem como antes. Toda chamada do agente a uma integração passa a levar o cabeçalho `Idempotency-Key`, igual para a mesma ligação, a mesma integração e os mesmos dados: o sistema do outro lado que respeita esse cabeçalho não registra o pedido duas vezes quando o agente repete; quem não o conhece simplesmente o ignora. Nada a configurar. Crédito: @melgarafael.
+
+### Corrigido
+
+- **No Gemini Live, o motor passa a retomar a sessão quando o Google troca a conexão** O Google fecha a conexão da Live API em cerca de 10 minutos, e o tempo máximo padrão de uma ligação é de 10 minutos: uma ligação longa com o motor Gemini Live podia cair perto desse ponto. Agora o motor pede ao Google um identificador para retomar a sessão e liga a compressão do contexto. Quando o Google avisa que vai fechar a conexão, ou quando ela cai depois de o motor ter recebido esse identificador, o motor abre outra conexão com ele, sem encerrar a ligação e sem fala a mais. A troca aparece na linha do tempo da chamada, e o consumo das duas conexões entra no custo. Se a retomada falhar depois do aviso do Google, a ligação segue pela conexão de antes até o Google fechá-la, e aí cai como antes, com o aviso de falha do motor; se falhar depois de uma queda, cai na hora, também como antes. Isso foi conferido contra um servidor falso. Uma ligação real de mais de 10 minutos ainda não foi feita, e não se sabe se quem está na linha percebe a troca. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+## [0.41.6] - 2026-11-21
+
+### Corrigido
+
+- **No OpenAI Realtime, o motor passa a pedir o corte da fala interrompida no histórico** Quando quem ligou fala por cima do agente numa ligação pelo Asterisk com o motor OpenAI Realtime, o motor agora avisa o provedor até onde a fala foi enviada para a linha, para que o provedor corte o resto do histórico da conversa. Antes, o modelo seguia achando que tinha dito a frase inteira e podia dar por combinado algo que a pessoa nunca ouviu. O efeito numa ligação real ainda não foi conferido: se o provedor recusar o pedido, o erro vai para o registro, nada é cortado e a ligação segue como antes. O Gemini Live, a ligação pelo WhatsApp e a chamada de teste no navegador seguem como estavam. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+## [0.41.5] - 2026-11-21
+
+### Alterado
+
+- **As telas de Configurações perdem a barra de abas e ganham "← Configurações"; "Minha conta" vai para o bloco da conta** As telas de Configurações não mostram mais a barra com as 11 abas. Cada uma traz o próprio nome como título e, acima dele, o link "← Configurações", que volta à central de cartões. A central é o caminho para todas elas. "Sua conta", onde se trocam o contato e a senha, saiu da barra e agora fica no bloco da conta, no fim do menu lateral (no celular, no fim da página), com o nome "Minha conta". Os endereços continuam os mesmos, inclusive `/settings/account`, e um favorito antigo abre a mesma tela. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
 ## [0.41.4] - 2026-11-21
 
 ### Alterado

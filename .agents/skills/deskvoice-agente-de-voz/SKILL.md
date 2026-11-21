@@ -63,7 +63,7 @@ Cada sinal aponta uma causa, e nem toda causa é texto:
 
 | Sinal | Causa provável | Onde mexer |
 |---|---|---|
-| "Ligação não analisada", ou análise desligada | a medição não roda | Configurações → Inteligência artificial (análise e chave) ou Configurações → Cérebros; não é instrução |
+| "Ligação não analisada", ou análise desligada | a medição não roda | Configurações → Desfecho, análise e transcrição (análise) ou Configurações → Inteligência artificial (chave) ou Configurações → Cérebros; não é instrução |
 | Precisão em "Não cumpriu" | inventa, ou não usa a ferramenta que existe | instruções (dizer quando não sabe; quando usar cada ferramenta) e ferramentas ligadas |
 | Entendimento em "Não cumpriu" | responde antes de perguntar | instruções |
 | Encerramento em "Não cumpriu" | termina sem próximo passo | instruções (como encerrar), ferramentas `create_task` e `end_call` |

@@ -17,8 +17,6 @@ export interface HubView {
   engines: HubState | null;
   whatsapp: HubState | null;
   webhooks: HubState | null;
-  /** O cartão "Sistema" segue a regra da aba: some quando a atualização mora na área da instalação. */
-  system: boolean;
 }
 
 const STATE_TONE: Record<HubState, Tone> = { ready: "ok", missing: "warn", off: "neutral" };
@@ -85,8 +83,8 @@ export function SettingsHub({ view, t, steps }: { view: HubView; t: Hub; steps: 
       </Group>
       <Group title={t.groups.during}>
         <Card t={t} card="analysts" href="/settings/analysts" />
-        {/* Desfecho, análise e transcrição moram hoje na tela de IA; a parte 5 os separa. */}
-        <Card t={t} card="outcome" href="/settings/ai" />
+        {/* Desfecho, análise e transcrição: os opcionais com custo, fora da tela das chaves (parte 5). */}
+        <Card t={t} card="outcome" href="/settings/after-call" />
       </Group>
       <Group title={t.groups.channels}>
         <Card t={t} card="whatsapp" href="/settings/whatsapp" state={view.whatsapp} />
@@ -95,7 +93,6 @@ export function SettingsHub({ view, t, steps }: { view: HubView; t: Hub; steps: 
       <Group>
         <Card t={t} card="rules" href="/settings/calls" />
         <Card t={t} card="privacy" href="/settings/privacy" />
-        {view.system ? <Card t={t} card="system" href="/settings/system" /> : null}
       </Group>
     </div>
   );

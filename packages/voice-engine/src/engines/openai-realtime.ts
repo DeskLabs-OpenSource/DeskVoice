@@ -55,6 +55,16 @@
  *   Com resposta em curso ou item já fechado, `closeCallerTurn` não faz nada: o `commit` "will produce
  *   an error if the input audio buffer is empty" (referência), e o servidor já vai responder.
  *
+ * Corte da fala interrompida (`played`), consultado em 2026-11-20:
+ *   - https://developers.openai.com/api/reference/resources/realtime/client-events
+ *     (`conversation.item.truncate` com `item_id`, `content_index: 0` e `audio_end_ms` inteiro; "audio_end_ms
+ *     greater than the actual audio duration" dá `error`; o corte apaga do contexto o texto que não foi ouvido)
+ *   - https://developers.openai.com/api/reference/resources/realtime/server-events
+ *     (`response.output_audio.delta` traz `item_id`)
+ *   O motor guarda, por item, em que ms do áudio emitido ele começou; a ponte diz quanto tocou, e o
+ *   corte cai no primeiro item que não tocou inteiro. Não confirmado contra o servidor real: que a
+ *   duração que o servidor conta para o item bata com os bytes de `audio/pcmu` recebidos (8 por ms).
+ *
  * Orientação ao agente (`guide`), consultado em 2026-11-17:
  *   - https://developers.openai.com/api/docs/api-reference/realtime  (`conversation.item.create` com
  *     `{ type: "message", role: "system", content: [{ type: "input_text", text }] }`; o papel `system`
@@ -158,6 +168,8 @@ const VOICES = [
   { id: "verse" },
 ] as const;
 const AUDIO_FORMAT = { type: "audio/pcmu" };
+// G.711 μ-law a 8 kHz: um byte por amostra, 8 bytes por ms.
+const PCMU_BYTES_PER_MS = 8;
 
 const responseDoneUsage = z
   .object({
@@ -178,7 +190,7 @@ const responseDoneUsage = z
 const serverEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.updated") }),
   z.object({ type: z.literal("response.created") }),
-  z.object({ type: z.literal("response.output_audio.delta"), delta: z.string() }),
+  z.object({ type: z.literal("response.output_audio.delta"), item_id: z.string().optional(), delta: z.string() }),
   z.object({ type: z.literal("response.output_audio_transcript.done"), transcript: z.string() }),
   z.object({ type: z.literal("conversation.item.input_audio_transcription.completed"), transcript: z.string() }),
   z.object({ type: z.literal("conversation.item.input_audio_transcription.delta"), item_id: z.string().optional(), delta: z.string() }),
@@ -335,6 +347,10 @@ const engine: VoiceEngine = {
     // pedaço dela pode chegar depois: texto de item já respondido não é quem ligou falando agora.
     const unansweredItems = new Set<string>();
     const answeredItems = new Set<string>();
+    // A fala do agente por item, na ordem: em que ms do áudio emitido nesta sessão o item começou e
+    // quanto dele foi emitido. É o que permite cortar no histórico o que a ponte não chegou a tocar.
+    const spokenItems: { itemId: string; startMs: number; emittedMs: number }[] = [];
+    let emittedMs = 0;
 
     let sessionReady: () => void = () => undefined;
     let sessionFailed: (error: Error) => void = () => undefined;
@@ -381,9 +397,18 @@ const engine: VoiceEngine = {
         case "input_audio_buffer.committed":
           unansweredItems.add(event.item_id);
           break;
-        case "response.output_audio.delta":
-          emitter.emit("audio", ulawToPcm16(Buffer.from(event.delta, "base64")));
+        case "response.output_audio.delta": {
+          const ulaw = Buffer.from(event.delta, "base64");
+          const ms = ulaw.length / PCMU_BYTES_PER_MS;
+          if (event.item_id !== undefined) {
+            const last = spokenItems.at(-1);
+            if (last?.itemId === event.item_id) last.emittedMs += ms;
+            else spokenItems.push({ itemId: event.item_id, startMs: emittedMs, emittedMs: ms });
+          }
+          emittedMs += ms;
+          emitter.emit("audio", ulawToPcm16(ulaw));
           break;
+        }
         case "response.output_audio_transcript.done":
           if (event.transcript) emitter.emit("transcript", { speaker: "agent", text: event.transcript });
           break;
@@ -398,9 +423,8 @@ const engine: VoiceEngine = {
           break;
         case "input_audio_buffer.speech_started":
           // Emitido mesmo sem resposta em curso: o modelo gera mais rápido que o tempo real, então a
-          // ponte pode ainda estar tocando uma fala que, para a API, já terminou.
-          // ponytail: não envia `conversation.item.truncate` (exige saber quantos ms a ponte já tocou);
-          // o modelo fica achando que disse a fala inteira. Acrescentar se isso atrapalhar a conversa.
+          // ponte pode ainda estar tocando uma fala que, para a API, já terminou. Quem toca responde
+          // com `played`, e o corte no histórico sai de lá.
           emitter.emit("interrupted");
           emitter.emit("callerActivity", { words: false });
           break;
@@ -490,6 +514,17 @@ const engine: VoiceEngine = {
         // Fecha o que quem ligou disse num item e pede a resposta: o servidor não viu o fim da fala.
         socket.send({ type: "input_audio_buffer.commit" });
         requestResponse({});
+      },
+      played(ms) {
+        if (closed) return;
+        // O primeiro item que não tocou inteiro é onde a fala foi cortada; o que veio antes já tocou.
+        const cut = spokenItems.find((item) => ms < item.startMs + item.emittedMs);
+        if (!cut) return;
+        const audioEndMs = Math.floor(Math.min(Math.max(ms - cut.startMs, 0), cut.emittedMs));
+        socket.send({ type: "conversation.item.truncate", item_id: cut.itemId, content_index: 0, audio_end_ms: audioEndMs });
+        // O resto foi descartado pela ponte: o emitido passa a ser o tocado, e os itens já contados saem.
+        emittedMs = ms;
+        spokenItems.length = 0;
       },
       guide(text) {
         if (closed) return;
