@@ -169,6 +169,7 @@ const timeline = {
     },
     engine_failed: "O motor de voz falhou",
     engine_failed_body: "Quem estava na linha ouviu um sinal de aviso e foi transferido ou desligado, sem ficar em silêncio. Confira a chave e a situação do provedor em Configurações → Inteligência artificial.",
+    engine_resumed: "A conexão com o provedor do motor de voz foi renovada no meio da ligação, sem encerrar a conversa.",
     call_refused: "Chamada recusada",
     voicemail_left: "Recado gravado",
     voicemail_none: "Caixa postal atendeu, sem recado",
