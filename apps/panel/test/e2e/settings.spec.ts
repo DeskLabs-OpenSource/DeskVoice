@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import agents from "../../src/i18n/pt-BR/agents";
 import calls from "../../src/i18n/pt-BR/calls";
 import common from "../../src/i18n/pt-BR/common";
 import privacy from "../../src/i18n/pt-BR/privacy";
@@ -6,7 +7,7 @@ import settings from "../../src/i18n/pt-BR/settings";
 import update from "../../src/i18n/pt-BR/update";
 import whatsapp from "../../src/i18n/pt-BR/whatsapp";
 import whatsappCalls from "../../src/i18n/pt-BR/whatsapp-calls";
-import { signIn } from "./session";
+import { signIn, unique } from "./session";
 
 const sectionLink = (page: Page, name: string) => page.getByRole("navigation", { name: settings.sectionsNav }).getByRole("link", { name, exact: true });
 
@@ -103,7 +104,7 @@ test("a central em /settings: nenhuma aba marcada, e cada cartão abre a tela qu
     { key: "voice", path: "/settings/voice" },
     { key: "speechFilter", path: "/settings/speech-filter" },
     { key: "analysts", path: "/settings/analysts" },
-    { key: "outcome", path: "/settings/ai", heading: settings.outcomeTitle },
+    { key: "outcome", path: "/settings/after-call", heading: settings.outcomeTitle },
     { key: "whatsapp", path: "/settings/whatsapp", heading: whatsapp.title },
     { key: "webhooks", path: "/settings/integrations", heading: settings.webhooksTitle },
     { key: "rules", path: "/settings/calls", heading: settings.inboundLimitTitle },
@@ -184,4 +185,56 @@ test("testar a chave: o motor simulado não pede chave, e um motor sem chave sal
   await page.goto("/settings/ai");
   await expect(page.getByText(settings.keyMissing, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: settings.keyTest, exact: true })).toHaveCount(0);
+});
+
+// Parte 5 do desenho da central: os opcionais com custo saem de `/settings/ai` para
+// `/settings/after-call`, lidos e gravados nas mesmas chaves de antes.
+const OPTIONALS = ["calls.outcome_enabled", "calls.analysis_enabled", "calls.transcription_enabled", "calls.auto_transcription_enabled"] as const;
+const putSetting = async (page: Page, key: string, value: unknown) => expect((await page.request.put(`/api/v1/settings/${key}`, { data: { value } })).status()).toBe(200);
+const readSetting = async (page: Page, key: string): Promise<unknown> => ((await (await page.request.get(`/api/v1/settings/${key}`)).json()) as { data: { value: unknown } }).data.value;
+
+test("depois da ligação: o opcional ligado antes aparece ligado na tela nova, da mesma chave, e a tela de IA fica só com as chaves", async ({ page }) => {
+  await signIn(page);
+  try {
+    // Antes: o que a tela de IA gravava ao ligar cada opcional (`put(chave, true)`), pela mesma rota.
+    for (const key of OPTIONALS) await putSetting(page, key, true);
+
+    await page.goto("/settings");
+    await hubCard(page, "outcome").click();
+    await expect(page).toHaveURL(/\/settings\/after-call$/);
+    for (const label of [settings.outcomeSwitch, settings.analysisSwitch, settings.transcriptionSwitch, settings.autoTranscriptionSwitch])
+      await expect(page.getByRole("switch", { name: label, exact: true }), label).toHaveAttribute("aria-checked", "true");
+
+    // Desligar na tela nova grava na mesma chave, e a leitura de volta concorda.
+    await page.getByRole("switch", { name: settings.outcomeSwitch, exact: true }).click();
+    await expect(page.getByRole("switch", { name: settings.outcomeSwitch, exact: true })).toHaveAttribute("aria-checked", "false");
+    expect(await readSetting(page, "calls.outcome_enabled")).toBeNull();
+    await page.reload();
+    await expect(page.getByRole("switch", { name: settings.outcomeSwitch, exact: true })).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByRole("switch", { name: settings.analysisSwitch, exact: true })).toHaveAttribute("aria-checked", "true");
+
+    // A tela de IA: as chaves dos motores, e nenhum opcional com custo.
+    await page.goto("/settings/ai");
+    await expect(page.getByRole("heading", { name: settings.enginesTitle, exact: true })).toBeVisible();
+    for (const title of [settings.outcomeTitle, settings.analysisTitle, settings.transcriptionTitle]) await expect(page.getByRole("heading", { name: title, exact: true }), title).toHaveCount(0);
+    await expect(page.getByRole("switch")).toHaveCount(0);
+  } finally {
+    for (const key of OPTIONALS) await putSetting(page, key, null);
+  }
+});
+
+test("o link de cadastrar a chave, na tela do agente sem chave, cai na tela de IA", async ({ page }) => {
+  await signIn(page);
+  const engines = ((await (await page.request.get("/api/v1/engines")).json()) as { data: Array<{ id: string; requiresKey: boolean; keyConfigured: boolean }> }).data;
+  const withoutKey = engines.find((engine) => engine.requiresKey && !engine.keyConfigured);
+  test.skip(!withoutKey, "every engine on this installation already has a key");
+  const created = await page.request.post("/api/v1/agents", { data: { name: `Chave ${unique()}`, engine: withoutKey?.id } });
+  expect(created.status()).toBe(200);
+  const agentId = ((await created.json()) as { data: { id: string } }).data.id;
+
+  await page.goto(`/agents/${agentId}`);
+  await expect(page.getByText(agents.engineNoKey, { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: agents.engineKeyLink, exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/ai$/);
+  await expect(page.getByRole("heading", { name: settings.enginesTitle, exact: true })).toBeVisible();
 });

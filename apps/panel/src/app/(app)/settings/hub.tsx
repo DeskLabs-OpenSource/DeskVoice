@@ -85,8 +85,8 @@ export function SettingsHub({ view, t, steps }: { view: HubView; t: Hub; steps: 
       </Group>
       <Group title={t.groups.during}>
         <Card t={t} card="analysts" href="/settings/analysts" />
-        {/* Desfecho, análise e transcrição moram hoje na tela de IA; a parte 5 os separa. */}
-        <Card t={t} card="outcome" href="/settings/ai" />
+        {/* Desfecho, análise e transcrição: os opcionais com custo, fora da tela das chaves (parte 5). */}
+        <Card t={t} card="outcome" href="/settings/after-call" />
       </Group>
       <Group title={t.groups.channels}>
         <Card t={t} card="whatsapp" href="/settings/whatsapp" state={view.whatsapp} />
