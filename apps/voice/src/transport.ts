@@ -34,8 +34,18 @@ export interface CallTransport {
   onHangup(handler: () => void): void;
   /** Espera a fala pendente terminar de sair e desliga. */
   hangup(): Promise<void>;
-  /** Espera a fala pendente terminar de sair e passa a ligação para `toE164`. */
-  transfer(toE164: string): Promise<void>;
+  /**
+   * Espera a fala pendente terminar de sair e passa a ligação para `toE164`. Sem `returnIfUnanswered`,
+   * resolve assim que a ligação saiu daqui, como sempre foi. Com ele, e só no canal que declara
+   * `canReturnFromTransfer`, resolve quando a transferência terminou: atendida e encerrada, abandonada
+   * por quem ligou, ou de volta, com o áudio desta ligação já no transporte de novo (`returned`).
+   */
+  transfer(toE164: string, options?: TransferOptions): Promise<TransferOutcome | void>;
+  /**
+   * `true`: a transferência que ninguém atende pode voltar para a conversa (`transfer` com
+   * `returnIfUnanswered`). Só o Asterisk declara (Vapi · fatia 5a). Ausente vale `false`.
+   */
+  readonly canReturnFromTransfer?: boolean;
   /**
    * Aperta teclas no menu do outro lado e resolve quando o último tom saiu. Opcional: o canal que
    * não tem como mandar tom (a ligação pelo WhatsApp) não declara, e a ferramenta se recusa.
@@ -53,6 +63,22 @@ export interface CallTransport {
   /** Solta a telefonia na hora, sem esperar fala pendente. */
   close(): Promise<void>;
 }
+
+export interface TransferOptions {
+  /** Ninguém atendeu: a ligação volta para a conversa em vez de desligar. */
+  returnIfUnanswered?: boolean;
+  /** A conversa acabou enquanto a transferência tocava: se ninguém atender, desliga como antes. */
+  signal?: AbortSignal;
+}
+
+/**
+ * Como terminou uma transferência pedida com `returnIfUnanswered`. `status` é o `DIALSTATUS` do
+ * Asterisk, ou `CALLER_HANGUP` quando quem ligou desistiu enquanto tocava.
+ */
+export type TransferOutcome = { returned: true; status: string } | { returned: false; status: string };
+
+/** Os estados do `Dial` em que ninguém atendeu e a ligação pode voltar para a conversa. */
+export const RETURNABLE_DIAL_STATUSES: ReadonlySet<string> = new Set(["NOANSWER", "BUSY", "CONGESTION", "CHANUNAVAIL"]);
 
 /**
  * O transporte com teclado: quem precisa da tecla de quem liga (a URA, `ivr-session.ts`) exige

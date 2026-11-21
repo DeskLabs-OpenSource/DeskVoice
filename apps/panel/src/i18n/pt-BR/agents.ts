@@ -85,6 +85,8 @@ const agents = {
   transfer: "Transferência",
   transferTo: "Número para transferir",
   transferHint: "Para onde a ligação vai quando o agente passa para uma pessoa. Aceita qualquer formato, como (31) 99999-8888.",
+  transferReturns: "Se ninguém atender a transferência, voltar para o agente",
+  transferReturnsHint: "Depois de 45 segundos tocando sem resposta, ou com o número ocupado, a pessoa volta a falar com o agente, que oferece deixar um recado ou registrar um pedido de retorno. Desligada, a ligação cai e o painel avisa para retornar. Só por telefone.",
   limits: "Limites por chamada",
   limitsLead: "Ao atingir um dos limites, o agente avisa quem está na linha e encerra.",
   maxMinutes: "Duração máxima, em minutos",

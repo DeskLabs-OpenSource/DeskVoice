@@ -9,7 +9,9 @@
  *      `after-audio`. Aqui se decide: havendo transferência pedida, o canal vai para
  *      `deskvoice-transfer`; senão, desliga.
  *   3. `deskvoice-transfer` disca. Se ninguém atende, devolve o canal com `transfer-ended` e o
- *      estado da discagem. Se atendem, o canal não volta: o Dial não tem a opção `g`, e mesmo com
+ *      estado da discagem. Com a volta pedida pela conversa (Vapi · fatia 5a), o canal ganha um
+ *      `AUDIOSOCKET_UUID` novo e vai de novo para `deskvoice-audio`, e o AudioSocket que reconecta
+ *      com ele passa a ser o áudio do mesmo transporte (`resume`); sem ela, desliga. Se atendem, o canal não volta: o Dial não tem a opção `g`, e mesmo com
  *      ela não voltaria quando é quem ligou que desliga. Quando a conversa com o humano acaba, o
  *      canal só morre (`ChannelDestroyed`). O que diz que houve atendimento é o evento `Dial` da
  *      ARI com `ANSWER`, que chega pela assinatura de todos os canais (`subscribeAll`).
@@ -17,13 +19,14 @@
  * Lição do módulo de voz do DeskcommCRM (MIT, mesmo autor; ver CREDITS.md): a mídia nunca passa
  * por bridge + externalMedia. Por isso a transferência é do dialplan, e não uma bridge da ARI.
  */
-import { enqueueTask, lockCall, recordEvent, withOrg, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { enqueueTask, recordEvent, withOrg, type Clock, type Db } from "@deskvoice/core";
+import { randomUUID } from "node:crypto";
 import { trunkEndpointName, type AriClient } from "./ari";
 import type { AudioSocketConnection } from "./audiosocket";
 import { messageOf, type Logger } from "./log";
-import { panelNotice } from "./panel-notice";
+import { CALLER_HANGUP, noticeUnansweredTransfer } from "./transfer-notice";
 import type { IvrJob } from "./ivr-session";
-import { dtmfTones, type KeypadTransport } from "./transport";
+import { dtmfTones, realSchedule, RETURNABLE_DIAL_STATUSES, type KeypadTransport, type Schedule, type TransferOutcome } from "./transport";
 import type { UnavailableJob } from "./unavailable";
 import type { VoicemailJob } from "./voicemail";
 
@@ -59,13 +62,35 @@ interface TrackedCall extends ExpectedCall {
   transferTo?: string;
   transferReported?: boolean;
   transferAnswered?: boolean;
+  /** A conversa espera o fim da transferência (`transfer` com `returnIfUnanswered`). */
+  transferWaiter?: { resolve(outcome: TransferOutcome): void; signal?: AbortSignal };
+  /** O `AUDIOSOCKET_UUID` posto na volta: o AudioSocket que conectar com ele é a mesma ligação. */
+  returnId?: string;
+  /** O `DIALSTATUS` da transferência que voltou. */
+  returnStatus?: string;
+  /** Resolve quando `transfer_completed` e `transfer_returned` estão gravados: a conversa só volta depois. */
+  returnRecorded?: Promise<void>;
+  /** Desiste da volta se o AudioSocket não reconectar no prazo. */
+  cancelReturnDeadline?: () => void;
+  /** Põe o áudio do AudioSocket que reconectou na volta no lugar do antigo, no mesmo transporte. */
+  swap?: (connection: AudioSocketConnection) => void;
 }
+
+/**
+ * Quanto a volta espera o AudioSocket reconectar depois do `continue`. Na M5 (DESA-345, Asterisk
+ * 20.20.1 do `deploy`) ele reconectou em 2 a 14 ms; o prazo só existe para ninguém ficar pendurado.
+ */
+const RETURN_CONNECT_MS = 5000;
 
 export interface AsteriskCallsDeps {
   ari: AriClient;
   db: Db;
   clock: Clock;
   log: Logger;
+  /** Injetável: teste não espera tempo real. */
+  schedule?: Schedule;
+  /** O `AUDIOSOCKET_UUID` da volta. Injetável para o teste saber qual conexão esperar. */
+  newAudioId?: () => string;
 }
 
 /** As chamadas que o Asterisk tem em curso, do ponto de vista deste processo. */
@@ -82,37 +107,84 @@ export class AsteriskCalls {
     this.byChannel.set(call.channelId, tracked);
   }
 
+  /**
+   * O AudioSocket que conectou é o da volta de uma transferência que ninguém atendeu: o áudio passa
+   * para o transporte que a conversa já tem, e a espera dela resolve com `returned`. `false`: não é.
+   */
+  resume(connection: AudioSocketConnection): boolean {
+    const call = this.byCall.get(connection.id);
+    if (!call || call.returnId !== connection.id || !call.swap) return false;
+    this.byCall.delete(connection.id);
+    call.returnId = undefined;
+    call.cancelReturnDeadline?.();
+    call.swap(connection);
+    const status = call.returnStatus ?? "UNKNOWN";
+    // A linha do tempo diz que a ligação voltou antes de a conversa do trecho de volta gravar qualquer coisa.
+    void (call.returnRecorded ?? Promise.resolve()).then(() => this.settle(call, { returned: true, status }));
+    return true;
+  }
+
   /** O AudioSocket conectou. Devolve o transporte da chamada, ou `null` se ninguém a esperava. */
   attach(connection: AudioSocketConnection): { call: ExpectedCall; transport: KeypadTransport & { drained(): Promise<void> } } | null {
     const call = this.byCall.get(connection.id);
     if (!call || call.attached) return null;
     call.attached = true;
+    // O AudioSocket da volta é outro, e os handlers da conversa passam para ele (`swap`). O que tocou
+    // antes da transferência continua somado em `playedMs`.
+    let current = connection;
+    let playedBefore = 0;
+    let audioHandler: ((pcm: Buffer) => void) | undefined;
+    let dtmfHandler: ((digit: string) => void) | undefined;
+    const hangupHandlers: Array<() => void> = [];
+    const watchClose = (on: AudioSocketConnection, handler: () => void): void =>
+      on.onClose((reason) => {
+        if (reason !== "local") handler();
+      });
+    call.swap = (next) => {
+      playedBefore += current.spokenMs();
+      current = next;
+      if (audioHandler) next.onAudio(audioHandler);
+      if (dtmfHandler) next.onDtmf(dtmfHandler);
+      for (const handler of hangupHandlers) watchClose(next, handler);
+    };
     const transport: KeypadTransport & { drained(): Promise<void> } = {
-      onAudio: (handler) => connection.onAudio(handler),
+      // `true` mesmo com a chave do agente desligada: quem decide pedir a volta é a conversa.
+      canReturnFromTransfer: true,
+      onAudio: (handler) => {
+        audioHandler = handler;
+        current.onAudio(handler);
+      },
       // A tecla chega em banda, pelo mesmo AudioSocket do áudio (a ARI não a entrega a canal fora da Stasis).
-      onDtmf: (handler) => connection.onDtmf(handler),
-      sendAudio: (pcm) => connection.sendAudio(pcm),
-      clearAudio: () => connection.clearAudio(),
-      playedMs: () => connection.spokenMs(),
-      drained: () => connection.drained(),
-      onHangup: (handler) =>
-        connection.onClose((reason) => {
-          if (reason !== "local") handler();
-        }),
+      onDtmf: (handler) => {
+        dtmfHandler = handler;
+        current.onDtmf(handler);
+      },
+      sendAudio: (pcm) => current.sendAudio(pcm),
+      clearAudio: () => current.clearAudio(),
+      playedMs: () => playedBefore + current.spokenMs(),
+      drained: () => current.drained(),
+      onHangup: (handler) => {
+        hangupHandlers.push(handler);
+        watchClose(current, handler);
+      },
       // Fechar o AudioSocket devolve o canal à Stasis (`after-audio`), que desliga ou transfere.
       async hangup() {
-        await connection.drained();
-        connection.close();
+        await current.drained();
+        current.close();
       },
-      async transfer(toE164) {
+      async transfer(toE164, options) {
         call.transferTo = toE164;
-        await connection.drained();
-        connection.close();
+        call.transferReported = false;
+        call.transferAnswered = false;
+        const outcome = options?.returnIfUnanswered ? new Promise<TransferOutcome>((resolve) => (call.transferWaiter = { resolve, signal: options.signal })) : undefined;
+        await current.drained();
+        current.close();
+        return outcome;
       },
       // Tom em banda, pelo próprio AudioSocket: a ARI recusa DTMF a canal fora da Stasis (ver `dtmfTones`).
-      sendDtmf: (digits) => connection.sendTone(dtmfTones(digits)),
+      sendDtmf: (digits) => current.sendTone(dtmfTones(digits)),
       async close() {
-        connection.close();
+        current.close();
       },
     };
     return { call, transport };
@@ -132,8 +204,9 @@ export class AsteriskCalls {
       await this.deps.ari.continueDialplan(channelId, "deskvoice-transfer", "s");
     } catch (error) {
       this.deps.log("error", "could not start the transfer", { callId: call.callId, error: messageOf(error) });
-      await this.reportTransfer(call, "FAILED", messageOf(error));
+      await this.reportTransfer(call, "FAILED", { error: messageOf(error) });
       this.forget(call);
+      this.settle(call, { returned: false, status: "FAILED" });
       await this.deps.ari.hangup(channelId);
     }
   }
@@ -141,9 +214,54 @@ export class AsteriskCalls {
   /** A discagem da transferência terminou; `dialStatus` é o `DIALSTATUS` do Asterisk (`ANSWER`, `BUSY`, `NOANSWER`...). */
   async transferEnded(channelId: string, dialStatus: string): Promise<void> {
     const call = this.byChannel.get(channelId);
-    if (call) await this.reportTransfer(call, dialStatus || "UNKNOWN");
+    const status = dialStatus || "UNKNOWN";
+    if (call && (await this.returnToAgent(call, status))) return;
+    if (call) await this.reportTransfer(call, status);
     this.forget(call);
+    if (call) this.settle(call, { returned: false, status });
     await this.deps.ari.hangup(channelId);
+  }
+
+  /**
+   * Ninguém atendeu e a conversa pediu a volta (Vapi · fatia 5a): o canal ganha um `AUDIOSOCKET_UUID`
+   * novo e volta para `deskvoice-audio`, que atende de novo (o `Answer()` num canal já atendido não
+   * faz nada, medido na M5) e reabre o AudioSocket. O dialplan é o mesmo de antes. `false`: não volta,
+   * e o canal segue o caminho de sempre.
+   */
+  private async returnToAgent(call: TrackedCall, status: string): Promise<boolean> {
+    const waiter = call.transferWaiter;
+    if (!waiter || waiter.signal?.aborted || !RETURNABLE_DIAL_STATUSES.has(status)) return false;
+    const audioId = (this.deps.newAudioId ?? randomUUID)();
+    call.returnId = audioId;
+    call.returnStatus = status;
+    let recorded: () => void = () => undefined;
+    call.returnRecorded = new Promise<void>((resolve) => (recorded = resolve));
+    this.byCall.set(audioId, call);
+    try {
+      await this.deps.ari.setVariable(call.channelId, "AUDIOSOCKET_UUID", audioId);
+      await this.deps.ari.continueDialplan(call.channelId, "deskvoice-audio", "s");
+    } catch (error) {
+      this.deps.log("error", "could not send the channel back to the agent; hanging up as before", { callId: call.callId, error: messageOf(error) });
+      this.byCall.delete(audioId);
+      call.returnId = undefined;
+      recorded();
+      return false;
+    }
+    await this.reportTransfer(call, status, { returned: true });
+    recorded();
+    // Daqui em diante o canal é da conversa de novo: o próximo `after-audio` desliga, e não transfere.
+    call.transferTo = undefined;
+    // `resume` pode ter chegado durante a gravação acima; aí não há mais prazo a contar.
+    if (call.returnId === audioId) {
+      call.cancelReturnDeadline = (this.deps.schedule ?? realSchedule)(() => {
+        if (call.returnId !== audioId) return;
+        this.deps.log("error", "the audio did not reconnect after the transfer came back; hanging up", { callId: call.callId });
+        this.forget(call);
+        this.settle(call, { returned: false, status });
+        void this.deps.ari.hangup(call.channelId).catch(() => undefined);
+      }, RETURN_CONNECT_MS);
+    }
+    return true;
   }
 
   /** A discagem da transferência mudou de estado (evento `Dial` da ARI, com o canal de quem ligou em `caller`). */
@@ -173,19 +291,39 @@ export class AsteriskCalls {
     } else if (call.transferTo) {
       // A transferência atendida termina assim, desligue quem desligar. Sem o atendimento, foi quem
       // ligou que desistiu enquanto tocava: o dialplan não chega a informar o estado da discagem.
-      await this.reportTransfer(call, call.transferAnswered ? "ANSWER" : "CALLER_HANGUP");
+      const status = call.transferAnswered ? "ANSWER" : CALLER_HANGUP;
+      await this.reportTransfer(call, status);
+      this.settle(call, { returned: false, status });
+    } else if (call.returnStatus !== undefined) {
+      // Quem ligou desligou entre a volta e a reconexão do áudio.
+      this.settle(call, { returned: false, status: CALLER_HANGUP });
     }
   }
 
-  private async reportTransfer(call: TrackedCall, dialStatus: string, error?: string): Promise<void> {
+  /** Entrega à conversa o fim da transferência que ela espera, uma vez só. */
+  private settle(call: TrackedCall, outcome: TransferOutcome): void {
+    const waiter = call.transferWaiter;
+    if (!waiter) return;
+    call.transferWaiter = undefined;
+    waiter.resolve(outcome);
+  }
+
+  /**
+   * `transfer_completed`, uma vez por transferência. Com `returned`, a ligação voltou para o agente: vem
+   * `transfer_returned` em seguida, e o aviso "retorne a ligação" fica para o fim do trecho de volta, que
+   * só o manda se ninguém ficou com o próximo passo (`call-session.ts`).
+   */
+  private async reportTransfer(call: TrackedCall, dialStatus: string, options: { error?: string; returned?: boolean } = {}): Promise<void> {
     if (call.transferReported) return;
     call.transferReported = true;
     const { db, clock, log } = this.deps;
     const answered = dialStatus === "ANSWER";
+    const { error, returned } = options;
     try {
       await withOrg(db, call.organizationId, async (q) => {
         await recordEvent(q, call.callId, "transfer_completed", { to: call.transferTo, status: dialStatus, answered, ...(error !== undefined && { error }) }, clock.now());
-        if (!answered) await noticeUnansweredTransfer(q, call, dialStatus, clock);
+        if (returned) await recordEvent(q, call.callId, "transfer_returned", { status: dialStatus }, clock.now());
+        else if (!answered) await noticeUnansweredTransfer(q, call, dialStatus, clock);
       });
     } catch (cause) {
       log("error", "could not record transfer_completed", { callId: call.callId, dialStatus, error: messageOf(cause) });
@@ -196,42 +334,8 @@ export class AsteriskCalls {
     if (!call) return;
     this.byCall.delete(call.callId);
     this.byChannel.delete(call.channelId);
+    if (call.returnId !== undefined) this.byCall.delete(call.returnId);
+    call.returnId = undefined;
+    call.cancelReturnDeadline?.();
   }
-}
-
-/** `DIALSTATUS` de quem ligou desistindo no meio: não foi a equipe que deixou de atender. */
-const CALLER_HANGUP = "CALLER_HANGUP";
-
-/**
- * A transferência não completou e a ligação acaba ali: quem ligou ficou sem ninguém. Sem este aviso,
- * o painel mostraria mais uma chamada "transferida" — e o relatório mentiria para melhor, porque a
- * pessoa não falou com humano nenhum. O briefing vem do `transfer_started` que a ferramenta gravou.
- */
-async function noticeUnansweredTransfer(q: OrgQuery, call: TrackedCall, dialStatus: string, clock: Clock): Promise<void> {
-  // A chamada já tem `ended_at`: o titular pode ter pedido o apagamento. Com a linha travada, o
-  // briefing abaixo já lê o que sobrou do apagamento (sem telefone, motivo nem resumo), ou o
-  // apagamento espera este aviso e o alcança.
-  await lockCall(q, call.callId);
-  // Quem ligou desistiu por conta própria: o motivo do desligamento dele fica como está.
-  if (dialStatus !== CALLER_HANGUP) await q.exec("update calls set end_reason = 'transfer_unanswered' where id = $1", [call.callId]);
-
-  const briefing = await q.one<{ from_e164: string | null; reason: string | null; summary: string | null }>(
-    `select c.from_e164, e.payload->>'reason' as reason, e.payload->>'summary' as summary
-       from calls c
-       left join lateral (
-         select payload from call_events where call_id = c.id and kind = 'transfer_started' order by id desc limit 1
-       ) e on true
-      where c.id = $1`,
-    [call.callId],
-  );
-  const lines = [
-    dialStatus === CALLER_HANGUP
-      ? `Quem ligou desligou antes de a transferência para ${call.transferTo} completar.`
-      : `Ninguém atendeu a transferência para ${call.transferTo} (${dialStatus}).`,
-  ];
-  if (briefing?.from_e164) lines.push(`Quem ligou: ${briefing.from_e164}.`);
-  if (briefing?.reason) lines.push(`Motivo: ${briefing.reason}`);
-  if (briefing?.summary) lines.push(`O que já foi combinado: ${briefing.summary}`);
-  lines.push("A pessoa ficou sem resposta: retorne a ligação.");
-  await panelNotice(q, clock, call.callId, lines.join("\n"));
 }

@@ -127,7 +127,8 @@ const ended = (callId: string) => waitFor(async () => (await kindsOf(app, callId
 
 describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
   it("atende, espera a aprovação decidida no painel, transfere e deixa o resumo na fila", async () => {
-    const { ari, clock, organizationId, trunkId, callId, channelId, asterisk } = await incomingCall("e2e", { script: SCRIPT, transferTo: "+5531988887777" }, { "recording_notice.text": NOTICE });
+    // A volta da transferência não atendida desligada: a ligação termina antes de discar, como antes da fatia 5a.
+    const { ari, clock, organizationId, trunkId, callId, channelId, asterisk } = await incomingCall("e2e", { script: SCRIPT, transferTo: "+5531988887777", transferReturnsToAgent: false }, { "recording_notice.text": NOTICE });
     // Quem ligou fala depois de ouvir a saudação e o aviso (o motor simulado só conta o áudio que
     // chega quando o roteiro está esperando por ele).
     const openingFrames = simulatedSpeechMs(`${NOTICE} ${GREETING}`) / 20;
@@ -215,7 +216,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
 
   it("transferência que ninguém atende fica registrada como não atendida", async () => {
     const script: SimulatedScript = [{ toolCall: { name: "transfer_to_human", args: { reason: "Pediu um humano.", summary: "Quer falar com a recepção." } } }];
-    const { ari, callId, channelId, asterisk } = await incomingCall("e2e-noanswer", { script, transferTo: "+5531988887777" });
+    const { ari, callId, channelId, asterisk } = await incomingCall("e2e-noanswer", { script, transferTo: "+5531988887777", transferReturnsToAgent: false });
     await ended(callId);
     await waitFor(() => asterisk.closed, "the AudioSocket to close");
     ari.emit({ type: "StasisStart", args: ["after-audio"], channel: { id: channelId } });
@@ -230,7 +231,7 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
   // Atendida, o canal não volta à Stasis com `transfer-ended`: só morre quando a conversa acaba.
   const transferringCall = async (label: string) => {
     const script: SimulatedScript = [{ toolCall: { name: "transfer_to_human", args: { reason: "Pediu um humano.", summary: "Quer falar com a recepção." } } }];
-    const scene = await incomingCall(label, { script, transferTo: "+5531988887777" });
+    const scene = await incomingCall(label, { script, transferTo: "+5531988887777", transferReturnsToAgent: false });
     await ended(scene.callId);
     await waitFor(() => scene.asterisk.closed, "the AudioSocket to close");
     scene.ari.emit({ type: "StasisStart", args: ["after-audio"], channel: { id: scene.channelId } });
@@ -262,6 +263,45 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
     expect((await transferCompleted(callId)).payload).toEqual({ to: "+5531988887777", status: "CALLER_HANGUP", answered: false });
     expect(await callOf(app, callId)).toMatchObject({ status: "transferred", end_reason: "transferred" });
     expect(await returnCallNotices(organizationId)).toHaveLength(1);
+  });
+
+  it("com a volta ligada (o padrão): ninguém atende, o canal volta com outro AudioSocket, o agente fala de novo e a ligação termina uma vez", async () => {
+    const script: SimulatedScript = [{ toolCall: { name: "transfer_to_human", args: { reason: "Pediu um humano.", summary: "Quer falar com a recepção." } } }];
+    const { ari, organizationId, callId, channelId, asterisk } = await incomingCall("e2e-return", { script, transferTo: "+5531988887777" });
+    await waitFor(() => asterisk.closed, "the AudioSocket to close");
+    // Enquanto a linha toca, a ligação não terminou.
+    expect(await kindsOf(app, callId)).not.toContain("call_ended");
+    ari.emit({ type: "StasisStart", args: ["after-audio"], channel: { id: channelId } });
+    await waitFor(() => ari.log.includes(`continue ${channelId} deskvoice-transfer,s`), "the transfer to start");
+    ari.emit({ type: "StasisStart", args: ["transfer-ended", "NOANSWER"], channel: { id: channelId } });
+
+    // O canal ganha outro AUDIOSOCKET_UUID e volta para o mesmo contexto de áudio, sem desligar.
+    const set = await waitFor(() => ari.log.filter((line) => line.startsWith(`set ${channelId} AUDIOSOCKET_UUID=`))[1], "the new AUDIOSOCKET_UUID");
+    const audioId = set.split("=")[1] ?? "";
+    expect(audioId).not.toBe(callId);
+    await waitFor(() => ari.log.filter((line) => line === `continue ${channelId} deskvoice-audio,s`).length === 2, "the channel to go back to the audio context");
+    expect(ari.log.some((line) => line.startsWith("hangup"))).toBe(false);
+
+    const back = await fakeAsterisk((server as VoiceServer).audioSocketPort);
+    back.sendUuid(audioId);
+    // O agente fala de novo (a saudação fixa da volta), e a ferramenta de transferir não está mais lá.
+    await waitFor(() => back.frames.filter((frame) => frame.type === 0x10).length > 20, "the agent to speak again");
+    await waitFor(async () => (await eventsOf(app, callId)).filter((event) => event.kind === "tool_result").length === 2, "the second transfer to be refused");
+    // Quem ligou desliga no trecho de volta: o canal deixa de existir, e não há outra discagem.
+    back.hangup();
+    ari.emit({ type: "ChannelDestroyed", channel: { id: channelId }, cause_txt: "Normal Clearing" });
+    expect(ari.log.filter((line) => line.includes("deskvoice-transfer"))).toHaveLength(1);
+
+    await ended(callId);
+    const kinds = await kindsOf(app, callId);
+    expect(kinds.filter((kind) => kind === "call_ended")).toHaveLength(1);
+    expect(kinds.indexOf("transfer_returned")).toBe(kinds.indexOf("transfer_completed") + 1);
+    expect(kinds.indexOf("transfer_returned")).toBeLessThan(kinds.indexOf("call_ended"));
+    const events = await eventsOf(app, callId);
+    expect(events.filter((event) => event.kind === "tool_result").map((event) => event.payload.ok)).toEqual([true, false]);
+    expect((await tasksOf(app, organizationId)).filter((task) => task.kind === "summarize_call")).toHaveLength(1);
+    // Sem recado nem pendência no trecho de volta, o aviso para retornar sai uma vez.
+    expect((await notificationsOf(app, organizationId)).filter((notice) => notice.body.includes("retorne a ligação"))).toHaveLength(1);
   });
 
   it("aprovação negada: o agente é informado e a chamada segue até o agente encerrar", async () => {
