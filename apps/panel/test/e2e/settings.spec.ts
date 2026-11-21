@@ -129,7 +129,7 @@ const SUBSCREENS = readdirSync(SETTINGS_DIR, { withFileTypes: true })
   .map((entry) => `/settings/${entry.name}`);
 
 test("nenhuma tela de Configurações fica órfã: cada subtela tem um cartão na central, e a conta tem o bloco da conta", async ({ page }) => {
-  expect(SUBSCREENS).toHaveLength(11);
+  expect(SUBSCREENS).toHaveLength(12);
   await signIn(page);
   await page.goto("/settings");
   await expect(hubCard(page, "engines")).toBeVisible();
