@@ -13,9 +13,11 @@ const OUTCOMES = ["booked", "callback_requested", "message_taken", "not_interest
 
 /**
  * O corpo que o webhook recebe. Estrito: campo novo entra aqui antes de sair, e nunca leva token,
- * chave ou segredo. Sem o telefone de quem ligou: o sistema do outro lado liga o relatório à
- * ligação pelo `callId`, e o número que sai da instalação não volta com o apagamento a pedido do
- * titular (decisão registrada no PR da fatia 4).
+ * chave ou segredo. Sem o telefone cadastrado de quem ligou (`from_e164`): o sistema do outro lado
+ * liga o relatório à ligação pelo `callId`. Mas o `summary` e as `evidence` da análise são trechos
+ * da fala: se quem ligou disse o número, ele sai. Não mascaramos o texto; a tela e o fragmento dizem
+ * isso, e dizem que o que sai da instalação não é apagado no destino com o apagamento a pedido do
+ * titular (decisão do Arquiteto, DESA-298).
  */
 export const callReportSchema = z.strictObject({
   event: z.literal(CALL_REPORT),

@@ -139,7 +139,7 @@ const settings = {
   ownerNoticeLead: "Ao fim de cada ligação, o dono recebe no WhatsApp uma mensagem curta dizendo que o resumo está no painel. Sem número do dono no perfil, a mensagem vai para o primeiro administrador que tiver um. Ela não leva o que foi dito nem o número de quem ligou, porque o WhatsApp é um canal fora da instalação. Cada ligação gera uma mensagem, enviada pelo conector desta página.",
   ownerNoticeSwitch: "Avisar pelo WhatsApp ao fim de cada ligação",
   webhooksTitle: "Webhooks permitidos",
-  webhooksLead: "Os únicos endereços que um agente pode chamar durante uma ligação. Endereço fora desta lista é recusado. Cada webhook também pode receber o relatório de cada ligação, depois que ela termina: o desfecho, o resumo e a análise, sem o telefone de quem ligou.",
+  webhooksLead: "Os únicos endereços que um agente pode chamar durante uma ligação. Endereço fora desta lista é recusado. Cada webhook também pode receber o relatório de cada ligação, depois que ela termina: o desfecho, o resumo e a análise. O relatório não leva o telefone de quem ligou, mas o resumo e a análise contam o que foi dito. O que sai daqui não é apagado lá quando alguém pede o apagamento.",
   hookName: "Nome",
   hookUrl: "Endereço",
   hookToken: "Token (opcional)",

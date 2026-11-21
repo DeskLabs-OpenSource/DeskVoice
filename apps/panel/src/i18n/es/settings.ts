@@ -137,7 +137,7 @@ const settings: SettingsDictionary = {
   ownerNoticeLead: "Al terminar cada llamada, el dueño recibe por WhatsApp un mensaje corto que dice que el resumen está en el panel. Si el dueño no tiene número en su perfil, el mensaje va al primer administrador que tenga uno. No lleva lo que se dijo ni el número de quien llamó, porque WhatsApp es un canal fuera de la instalación. Cada llamada genera un mensaje, enviado por el conector de esta página.",
   ownerNoticeSwitch: "Avisar por WhatsApp al terminar cada llamada",
   webhooksTitle: "Webhooks permitidos",
-  webhooksLead: "Las únicas direcciones que un agente puede llamar durante una llamada. Una dirección fuera de esta lista se rechaza. Cada webhook también puede recibir el informe de cada llamada, después de que termina: el resultado, el resumen y el análisis, sin el teléfono de quien llamó.",
+  webhooksLead: "Las únicas direcciones que un agente puede llamar durante una llamada. Una dirección fuera de esta lista se rechaza. Cada webhook también puede recibir el informe de cada llamada, después de que termina: el resultado, el resumen y el análisis. El informe no lleva el teléfono de quien llamó, pero el resumen y el análisis cuentan lo que se dijo. Lo que sale de aquí no se borra allá cuando alguien pide el borrado.",
   hookName: "Nombre",
   hookUrl: "Dirección",
   hookToken: "Token (opcional)",

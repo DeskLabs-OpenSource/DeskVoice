@@ -137,7 +137,7 @@ const settings: SettingsDictionary = {
   ownerNoticeLead: "When each call ends, the owner gets a short WhatsApp message saying the summary is in the panel. If the owner has no number in their profile, the message goes to the first administrator who has one. It does not carry what was said or the caller's number, because WhatsApp is a channel outside the installation. Each call produces one message, sent through the connector on this page.",
   ownerNoticeSwitch: "Notify on WhatsApp when each call ends",
   webhooksTitle: "Allowed webhooks",
-  webhooksLead: "The only addresses an agent may call during a call. An address outside this list is refused. Each webhook can also receive the report of every call, after it ends: the outcome, the summary and the analysis, without the caller's phone number.",
+  webhooksLead: "The only addresses an agent may call during a call. An address outside this list is refused. Each webhook can also receive the report of every call, after it ends: the outcome, the summary and the analysis. The report does not carry the caller's phone number, but the summary and the analysis tell what was said. What leaves this installation is not erased there when someone asks for erasure.",
   hookName: "Name",
   hookUrl: "Address",
   hookToken: "Token (optional)",

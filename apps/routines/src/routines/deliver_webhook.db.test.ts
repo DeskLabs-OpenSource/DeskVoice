@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { encryptSecret, recordEvent, withOrg, withSystem } from "@deskvoice/core";
 import { ANALYSIS_SETTING, OUTCOME_SETTING } from "@deskvoice/voice-engine";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -105,6 +105,10 @@ describe("deliver_webhook: o relatório de cada ligação", () => {
     });
     const corpo = pedido?.body as Record<string, unknown>;
     expect(callReportSchema.safeParse(corpo).success).toBe(true);
+    // O contrato fechado: campo novo no corpo derruba este teste antes de sair da instalação.
+    expect(Object.keys(corpo).sort()).toEqual(
+      ["agentId", "analysis", "callId", "direction", "durationSeconds", "endReason", "endedAt", "event", "outcome", "startedAt", "summary"].sort(),
+    );
     expect(corpo).toMatchObject({
       event: "call.report",
       callId,
@@ -229,6 +233,43 @@ describe("deliver_webhook: o relatório de cada ligação", () => {
     await deliverWebhook.run(comTentativa(org, callId, "crm", 1), depsFor(app, { fetch: net.fetch, lookup: fakeLookup() }));
     expect(net.requests).toEqual([]);
     expect(await eventos(callId, "webhook_failed")).toEqual([{ name: "crm", event: "call.report", reason: "erased", status: null, attempt: 1, retrying: false }]);
+  });
+
+  it("a linha do banco fora do contrato não sai: a rotina se recusa a mandar o corpo, e nada chega ao servidor", async () => {
+    const { org, callId } = await ligacao("relatorio fora do schema");
+    await cadastra(org, [{ name: "crm", events: ["call.report"] }]);
+    // O Postgres aceita um uuid com a versão 0; o contrato (`z.uuid()`, versão e variante da RFC 9562) não.
+    const foraDoContrato = `${randomUUID().slice(0, 14)}0${randomUUID().slice(15)}`;
+    expect(callReportSchema.shape.agentId.safeParse(foraDoContrato).success).toBe(false);
+    await withSystem(app, async (q) => {
+      await q.exec("insert into agents (id, organization_id, name, engine) values ($1, $2, 'Fora', 'openai-realtime')", [foraDoContrato, org]);
+      await q.exec("update calls set agent_id = $2 where id = $1", [callId, foraDoContrato]);
+    });
+    const net = fakeFetch();
+    await expect(deliverWebhook.run(comTentativa(org, callId, "crm", 1), depsFor(app, { fetch: net.fetch, lookup: fakeLookup() }))).rejects.toThrow();
+    expect(net.requests).toEqual([]);
+    expect(await eventos(callId, "webhook_delivered")).toEqual([]);
+  });
+
+  it("duas organizações: a tarefa da A com a ligação da B não manda nada para a A, e a falha não leva dado da B", async () => {
+    const a = await ligacao("relatorio org A");
+    const b = await ligacao("relatorio org B");
+    await cadastra(a.org, [{ name: "crm", events: ["call.report"] }]);
+    const RESUMO_DA_B = "Resumo sigiloso da organização B.";
+    await withSystem(app, (q) => q.exec("update calls set summary = $2, outcome = 'booked' where id = $1", [b.callId, RESUMO_DA_B]));
+
+    const net = fakeFetch();
+    // Tarefa forjada: a organização é a A, a ligação é da B.
+    const erro = await deliverWebhook.run(comTentativa(a.org, b.callId, "crm", 1), depsFor(app, { fetch: net.fetch, lookup: fakeLookup() })).then(
+      () => null,
+      (cause: unknown) => cause as Error,
+    );
+    expect(erro).toBeInstanceOf(Error);
+    expect(net.requests).toEqual([]);
+    for (const proibido of [RESUMO_DA_B, b.agentId, "booked", "caller_hangup"]) expect(erro?.message).not.toContain(proibido);
+    // Nem na linha do tempo da B, nem em lugar nenhum da A, fica rastro desta entrega.
+    expect((await eventsOf(app, b.callId)).filter((event) => event.kind.startsWith("webhook_"))).toEqual([]);
+    expect((await eventsOf(app, a.callId)).filter((event) => event.kind.startsWith("webhook_"))).toEqual([]);
   });
 
   it("recusa a tarefa sem chamada, com evento desconhecido ou no formato antigo", async () => {
