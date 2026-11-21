@@ -57,9 +57,14 @@
  *   caso devolve `false` (não agiu), e a resposta lenta que vier conta na latência por turno.
  *
  * Fim da vez de quem ligou (`callerTurnEnded`, a latência por turno): `input_audio_buffer.speech_stopped`,
- * o par de `speech_started` na detecção de fala do servidor (`server_vad`). Não reli a página para
- * este evento: o nome vem da mesma referência acima, e os campos dele (`audio_end_ms`, `item_id`)
- * não são lidos. O instante que conta é o da chegada, no relógio de quem mede.
+ * o par de `speech_started` na detecção de fala do servidor (`server_vad`). Consultado em 2026-11-21:
+ *   - https://developers.openai.com/api/reference/resources/realtime/server-events
+ *     (`audio_end_ms`: "Milliseconds since the session started when speech stopped. This will
+ *     correspond to the end of audio sent to the model, and thus includes the
+ *     `min_silence_duration_ms` configured in the Session.")
+ *   O marco chega depois do silêncio que o provedor espera para decidir que a fala acabou, e esse
+ *   silêncio fica fora da conta. O `audio_end_ms` já inclui esse silêncio, então não é lido. O
+ *   instante que conta é o da chegada, no relógio de quem mede.
  *
  * Corte da fala interrompida (`played`), consultado em 2026-11-20:
  *   - https://developers.openai.com/api/reference/resources/realtime/client-events
