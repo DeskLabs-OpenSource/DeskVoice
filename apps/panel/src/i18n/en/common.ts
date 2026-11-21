@@ -80,6 +80,8 @@ const common: CommonDictionary = {
   limitReached: {
     trunks: "This organization already has {count} phone lines; the limit set by the installation administration is {limit}.",
     agents: "This organization already has {count} agents; the limit set by the installation administration is {limit}.",
+    trunksOne: "This organization already has 1 phone line; the limit set by the installation administration is {limit}.",
+    agentsOne: "This organization already has 1 agent; the limit set by the installation administration is {limit}.",
   },
   errors: {
     fallback: "We could not complete this action. Try again in a moment.",

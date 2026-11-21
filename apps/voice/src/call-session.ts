@@ -872,7 +872,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   };
 
   /** O contexto das ferramentas de um trecho: `agentId` é o agente do trecho (o número de transferência, a lista de destinos). */
-  const contextFor = (legAgentId: string, legLanguage: string, session: VoiceSession): ToolContext => ({
+  const contextFor = (legAgentId: string, legLanguage: string, session: VoiceSession, enabled: ReadonlyMap<string, Tool>): ToolContext => ({
     organizationId,
     callId,
     agentId: legAgentId,
@@ -895,6 +895,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         callEnded.signal,
       ),
     handoff: (target, input) => handOff(session, target, input),
+    // O que o motor deste trecho recebeu: a frase de uma ferramenta só manda usar outra que ele tem.
+    offeredTools: new Set(enabled.keys()),
   });
 
   async function handleToolCall(owner: Leg, call: { id: string; name: string; args: unknown }): Promise<void> {
@@ -1055,7 +1057,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       voice: session,
       enabled,
       guard: silenceGuard,
-      context: contextFor(row.id, row.language, session),
+      context: contextFor(row.id, row.language, session, enabled),
       usage: { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 },
       costCents: 0,
       ...(analyst && { analyst }),

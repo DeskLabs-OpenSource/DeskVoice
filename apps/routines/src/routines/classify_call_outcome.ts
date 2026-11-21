@@ -34,6 +34,7 @@ import {
 import { safeFetch, UnsafeDestinationError } from "@deskvoice/tools";
 import { z } from "zod";
 import type { Routine, RoutineDeps } from "../types";
+import { enqueueCallReports } from "./deliver_webhook";
 
 /** Mesmo nome que o painel usa: a chave do motor, cifrada. */
 const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
@@ -213,7 +214,7 @@ function brainCost(result: { ok: boolean; status?: number | null; usage: Usage }
  * Roda depois de `summarize_call`, que é quem enfileira. A chamada ao provedor acontece fora da
  * transação (leva até trinta segundos) e não lança: falha não devolve a tarefa à fila para pagar de novo.
  */
-const routine: Routine = {
+const classify: Routine = {
   kind: "classify_call_outcome",
   async run(task, deps) {
     if (!task.callId) throw new Error("classify_call_outcome needs a task with callId");
@@ -495,6 +496,19 @@ const routine: Routine = {
         now,
       );
     });
+  },
+};
+
+/**
+ * O relatório da ligação sai depois da leitura, qualquer que tenha sido o fim dela (lida, não lida,
+ * recusada pelo teto): é o fim do trabalho sobre a ligação. Sem webhook que peça, nada entra na fila.
+ */
+const routine: Routine = {
+  kind: classify.kind,
+  async run(task, deps) {
+    await classify.run(task, deps);
+    const callId = task.callId as string;
+    await withOrg(deps.db, task.organizationId, (q) => enqueueCallReports(q, callId, deps.clock.now()));
   },
 };
 

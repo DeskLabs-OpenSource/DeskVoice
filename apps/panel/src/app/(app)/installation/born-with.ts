@@ -10,11 +10,11 @@ export interface DefaultLimits {
   outboundAllowed: boolean;
 }
 
-/** A frase curta do formulário de nova organização: "Ela nasce com: ..., saída travada." */
+/** A frase curta do formulário de nova organização: "Ela nasce com: ..., saída travada." 1 tem a forma no singular. */
 export function bornWithText(limits: DefaultLimits, t: InstallationDictionary["organizations"], money: (cents: number) => string): string {
   const parts = [
-    limits.maxTrunks === null ? t.bornTrunksNone : fill(t.bornTrunks, { n: limits.maxTrunks }),
-    limits.maxAgents === null ? t.bornAgentsNone : fill(t.bornAgents, { n: limits.maxAgents }),
+    limits.maxTrunks === null ? t.bornTrunksNone : limits.maxTrunks === 1 ? t.bornTrunksOne : fill(t.bornTrunks, { n: limits.maxTrunks }),
+    limits.maxAgents === null ? t.bornAgentsNone : limits.maxAgents === 1 ? t.bornAgentsOne : fill(t.bornAgents, { n: limits.maxAgents }),
     limits.monthlySpendCapCents === null ? t.bornSpendCapNone : fill(t.bornSpendCap, { cap: money(limits.monthlySpendCapCents) }),
     limits.outboundAllowed ? t.bornOutboundDecide : t.bornOutboundBlocked,
   ];
