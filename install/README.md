@@ -292,9 +292,10 @@ recusá-la é o Caddy (404 sem corpo). Se o 404 vem do painel, a linha "Agente d
 vira `aviso`: o Caddy está rodando a configuração de antes da atualização (o arquivo só é
 relido ao reiniciar). Resolve com `docker restart deskvoice-caddy-1`; rodar `bash
 install/update.sh` também reinicia o Caddy quando o arquivo que ele tem montado não é o do disco.
-A atualização (na ida e na volta) e o instalador fazem o mesmo com os cinco arquivos que o
+A atualização (na ida e na volta) e o instalador fazem o mesmo com os seis arquivos que o
 Asterisk monta: reiniciam o Asterisk só quando algum é diferente do disco, porque o reinício
-derruba as ligações em andamento.
+derruba as ligações em andamento. O `modules.conf` (a lista de módulos) é a exceção: só vale na
+partida, e mudado ele sempre reinicia o Asterisk.
 
 A linha "WhatsApp" fala do serviço do WhatsApp por QR Code (o contêiner `waha`), que só existe
 na instalação que o pediu pela tela. "Não instalado" é o estado normal, e é `ok`. Instalado, a

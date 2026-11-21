@@ -125,6 +125,7 @@ const timeline: TimelineDictionary = {
     tool_running: "En ejecución.",
     tool_args: "Datos enviados",
     tool_operator_detail: "Detalle para el operador",
+    tool_cancelled: "El motor de voz desistió de la herramienta {tool} (quien llamó habló encima): su resultado no se entregó al agente. Lo que ya había hecho sigue hecho.",
     approval_requested: "Pidió aprobación a una persona",
     approval_default: { approved: "Sin respuesta, vale aprobar.", denied: "Sin respuesta, vale negar." },
     approval_decided: { approved: "Aprobado", denied: "Negado", expired: "Nadie respondió a tiempo" },

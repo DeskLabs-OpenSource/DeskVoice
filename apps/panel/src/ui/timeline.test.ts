@@ -355,4 +355,20 @@ describe("linha do tempo", () => {
     for (const dict of [ptBR, enTimeline, esTimeline]) expect(dict.events.engine_resumed).toMatch(/\S/);
     expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.engine_resumed)).size).toBe(3);
   });
+
+  it("o cancelamento da ferramenta tem frase nos três idiomas, com o nome da ferramenta para gente, sem o tipo cru", () => {
+    const html = renderToStaticMarkup(
+      createElement(Timeline, {
+        events: [{ id: "1", kind: "tool_cancelled", at: "2026-11-21T12:00:00.000Z", payload: { name: "call_webhook" } }],
+        live: false,
+        agentName: "Ana",
+      }),
+    );
+    expect(html).toContain(ptBR.names.call_webhook);
+    expect(html).not.toContain(ptBR.events.unknown);
+    expect(html).not.toContain("{tool}");
+    expect(html).not.toContain("call_webhook");
+    for (const dict of [ptBR, enTimeline, esTimeline]) expect(dict.events.tool_cancelled).toContain("{tool}");
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.tool_cancelled)).size).toBe(3);
+  });
 });

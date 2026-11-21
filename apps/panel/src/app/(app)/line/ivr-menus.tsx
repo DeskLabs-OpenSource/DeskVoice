@@ -12,12 +12,13 @@ import ptBRCommon from "../../../i18n/pt-BR/common";
 import ptBR, { type IvrDictionary } from "../../../i18n/pt-BR/ivr";
 import { useDict } from "../../../i18n/provider";
 import { convertAnnouncement, uploadAnnouncement } from "../../../ui/announcement-audio";
-import { api } from "../../../ui/api";
+import { api, useApi } from "../../../ui/api";
 import { useAction } from "../../../ui/errors";
 import { formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, Panel, Select, TextInput } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
-import type { Agent, IvrMenu, IvrOption, PhoneNumber } from "../../../ui/types";
+import { proposedLanguage, type OrganizationLanguage } from "../../../ui/proposed-language";
+import type { Agent, IvrMenu, IvrOption, Me, PhoneNumber } from "../../../ui/types";
 
 /**
  * O menu por teclas (URA, #223) na tela Linha telefônica: a lista, o editor, o anúncio e o "Atende"
@@ -48,12 +49,29 @@ const toDraft = (option: IvrOption, key: number): DraftOption => ({
   transferTo: formatPhone(option.transferTo),
 });
 
-function MenuEditor({ menu, agents, t, cancel, onSaved, onCancel }: { menu: IvrMenu | null; agents: Agent[]; t: IvrDictionary; cancel: string; onSaved(): void; onCancel(): void }) {
+function MenuEditor({
+  menu,
+  agents,
+  t,
+  cancel,
+  onSaved,
+  onCancel,
+  newLanguage = "pt-BR",
+}: {
+  menu: IvrMenu | null;
+  agents: Agent[];
+  t: IvrDictionary;
+  cancel: string;
+  onSaved(): void;
+  onCancel(): void;
+  /** O idioma que o menu novo propõe: o da organização (R8, fatia 8a). O menu que já existe fica com o dele. */
+  newLanguage?: OrganizationLanguage;
+}) {
   const canConfigure = useCanConfigure();
   const save = useAction();
   const [draft, setDraft] = useState({
     name: menu?.name ?? "",
-    language: menu?.language ?? "pt-BR",
+    language: menu?.language ?? newLanguage,
     timeout: seconds(menu?.timeoutMs ?? IVR_TIMEOUT_MS.default),
     attempts: String(menu?.maxAttempts ?? IVR_ATTEMPTS.default),
     onNoChoice: menu?.onNoChoice ?? "person",
@@ -339,6 +357,10 @@ export function IvrMenusPanel({ menus, agents, numbers, onChanged }: { menus: Iv
   const cancel = useDict(ptBRCommon, enCommon, esCommon).actions.cancel;
   const canConfigure = useCanConfigure();
   const [adding, setAdding] = useState(false);
+  // O menu novo propõe o idioma da organização (`organizations.language`); sem ele, pt-BR. O editor
+  // espera `/auth/me` (ou a falha dele, e então pt-BR) para não propor um idioma e trocar depois.
+  const me = useApi<Me>("/auth/me");
+  const meLoaded = me.data !== undefined || me.error !== undefined;
 
   return (
     <Panel title={t.title} description={t.lead}>
@@ -351,11 +373,12 @@ export function IvrMenusPanel({ menus, agents, numbers, onChanged }: { menus: Iv
             ))}
           </ul>
         ) : null}
-        {adding ? (
+        {adding && meLoaded ? (
           <>
             <p className="font-bold">{t.newMenu}</p>
             <MenuEditor
               menu={null}
+              newLanguage={proposedLanguage(me.data?.organizationLanguage)}
               agents={agents}
               t={t}
               cancel={cancel}

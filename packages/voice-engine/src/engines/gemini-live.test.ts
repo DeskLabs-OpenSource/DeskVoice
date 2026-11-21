@@ -140,6 +140,16 @@ describe("gemini-live (contrato com servidor falso)", () => {
     });
   });
 
+  it("toolCallCancellation vira toolCallCancelled com os ids, e o motor não manda nada sozinho", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    fake.send({ toolCall: { functionCalls: [{ id: "fc-1", name: "call_webhook", args: {} }, { id: "fc-2", name: "create_task", args: {} }] } });
+    const cancelled = nextEvent(session, "toolCallCancelled");
+    fake.send({ toolCallCancellation: { ids: ["fc-1", "fc-2"] } });
+    expect((await cancelled)[0]).toEqual(["fc-1", "fc-2"]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fake.hasUnread((m) => "toolResponse" in m)).toBe(false);
+  });
+
   it("interrupção do usuário vira interrupted", async () => {
     const { session } = await openSession();
     const interrupted = nextEvent(session, "interrupted");

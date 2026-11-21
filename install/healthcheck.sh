@@ -8,7 +8,7 @@
 #
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
 # Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, painel → banco,
-# login do painel, Asterisk, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
+# login do painel, Asterisk, módulos SIP, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
 # linha, motor de voz, entrada única, WhatsApp, ligação pelo WhatsApp, portas, disco). O agente de atualização nunca é
 # falha: no máximo, aviso.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -23,6 +23,10 @@ for arg in "$@"; do
   esac
 done
 require_install
+
+# Os módulos PJSIP sem os quais uma ligação não passa, ou uma linha não registra, ou o NAT não vale.
+# A linha "Módulos SIP" reprova se um deles falta ou está parado.
+SIP_ESSENTIAL_MODULES="res_pjsip chan_pjsip res_pjsip_session res_pjsip_sdp_rtp res_pjsip_nat res_pjsip_outbound_registration res_pjsip_authenticator_digest res_pjsip_outbound_authenticator_digest res_pjsip_endpoint_identifier_ip res_pjsip_endpoint_identifier_user res_pjsip_endpoint_identifier_anonymous res_pjsip_registrar res_pjsip_refer res_pjsip_pubsub"
 
 RESULTS=""   # linhas `id|nome|essencial|estado|detalhe`
 add() { RESULTS="$RESULTS$1|$2|$3|$4|$(printf '%s' "$5" | tr '\n|' '  ')"$'\n'; }
@@ -70,6 +74,51 @@ if ! running asterisk; then
   add asterisk "Asterisk" 1 falha "o contêiner do Asterisk não está rodando. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 asterisk"
 elif uptime="$(dc exec -T asterisk asterisk -rx 'core show uptime' 2>/dev/null | head -n 1)" && [ -n "$uptime" ]; then
   add asterisk "Asterisk" 1 ok "$uptime"
+  # ── Módulos SIP: o teto de módulos do pjproject estoura na partida ("Too many modules
+  #    registered") e o último módulo PJSIP a registrar fica parado, sem que o Asterisk deixe de
+  #    responder. Qual perde a vaga depende da ordem de leitura do diretório de módulos, que muda de
+  #    máquina para máquina: na imagem fixada, numa máquina era o res_pjsip_nat (force_rport e
+  #    rewrite_contact das linhas sem efeito), noutra pode ser outro. Por isso a linha reprova em
+  #    qualquer ordem: um essencial ausente ou parado, QUALQUER módulo PJSIP "Not Running", ou o
+  #    estouro no log da partida atual (desde o State.StartedAt: uma partida antiga não conta).
+  #    Essencial: o install.sh e a volta da atualização esperam por ela. ──
+  sip_list="$(dc exec -T asterisk asterisk -rx 'module show like pjsip' 2>/dev/null || true)"
+  # `rodando <módulo>` ou `parado <módulo>`, sem o .so. "Not Running" contém "Running": vem antes.
+  sip_state="$(printf '%s\n' "$sip_list" | awk '$1 ~ /\.so$/ { m = $1; sub(/\.so$/, "", m); if (/ Not Running/) print "parado " m; else if (/ Running/) print "rodando " m; else print "outro " m }')"
+  sip_running=0; sip_stopped=""; sip_missing=""
+  while read -r st m; do
+    [ -n "$m" ] || continue
+    case "$st" in rodando) sip_running=$((sip_running + 1)) ;; parado) sip_stopped="$sip_stopped $m" ;; esac
+  done <<<"$sip_state"
+  for m in $SIP_ESSENTIAL_MODULES; do
+    case $'\n'"$sip_state"$'\n' in
+      *$'\n'"rodando $m"$'\n'*) ;;
+      *) case " $sip_stopped " in *" $m "*) ;; *) sip_missing="$sip_missing $m" ;; esac ;;
+    esac
+  done
+  sip_cid="$(dc ps -q asterisk 2>/dev/null | head -n 1 || true)"
+  sip_started="$(docker inspect -f '{{.State.StartedAt}}' "$sip_cid" 2>/dev/null || true)"
+  sip_overflow=0
+  if [ -n "$sip_started" ]; then
+    sip_overflow="$(docker logs --since "$sip_started" "$sip_cid" 2>&1 | grep -c 'Too many modules registered' || true)"
+  fi
+  if [ -z "$sip_stopped$sip_missing" ] && [ "${sip_overflow:-0}" -eq 0 ]; then
+    if [ -n "$sip_started" ]; then
+      add sip_modules "Módulos SIP" 1 ok "$sip_running módulos PJSIP em execução; nenhum \"Too many modules\" desde a partida"
+    else
+      add sip_modules "Módulos SIP" 1 ok "$sip_running módulos PJSIP em execução; o log da partida não pôde ser lido"
+    fi
+  else
+    sip_detail=""
+    if [ -n "$sip_stopped" ]; then sip_detail="módulos PJSIP parados:${sip_stopped// /, }"; fi
+    if [ -n "$sip_missing" ]; then sip_detail="${sip_detail:+$sip_detail; }módulos PJSIP essenciais ausentes:${sip_missing// /, }"; fi
+    sip_detail="${sip_detail//:, /: }"
+    if [ "${sip_overflow:-0}" -gt 0 ]; then sip_detail="${sip_detail:+$sip_detail; }o log da partida atual tem \"Too many modules registered\" (um módulo PJSIP ficou sem vaga)"; fi
+    case " $sip_stopped $sip_missing " in
+      *" res_pjsip_nat "*) sip_detail="$sip_detail. force_rport e rewrite_contact não valem, e uma linha atrás de NAT liga e fica muda" ;;
+    esac
+    add sip_modules "Módulos SIP" 1 falha "$sip_detail. Rode bash install/install.sh; se continuar, procure \"Too many modules\" em: docker compose -f deploy/docker-compose.yml logs asterisk"
+  fi
 else
   add asterisk "Asterisk" 1 falha "o Asterisk está rodando mas não responde a comandos"
 fi

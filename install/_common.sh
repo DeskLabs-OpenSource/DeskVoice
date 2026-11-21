@@ -270,7 +270,7 @@ render_template() {  # render_template <modelo> <destino>; os valores vêm do am
   if [ -f "$dst" ] && { cmp -s "$tmp" "$dst" || cat "$tmp" > "$dst" 2>/dev/null; }; then rm -f "$tmp"
   else mv "$tmp" "$dst"; fi
 }
-render_asterisk_config() {
+render_asterisk_config() {  # render_asterisk_config [--rollback]
   ARI_PASSWORD="$(env_get "$APP_ENV_FILE" ARI_PASSWORD)" PUBLIC_IP="$(env_get "$APP_ENV_FILE" PUBLIC_IP)" \
   RTP_START="$(env_get "$ENV_FILE" RTP_START)" RTP_END="$(env_get "$ENV_FILE" RTP_END)"
   export ARI_PASSWORD PUBLIC_IP RTP_START RTP_END
@@ -288,6 +288,20 @@ render_asterisk_config() {
   render_asterisk_file ari.conf.tmpl ari.conf
   render_asterisk_file rtp.conf.tmpl rtp.conf
   render_asterisk_file pjsip.conf.base pjsip.conf
+  # Na volta (só nela), a versão anterior pode não ter o modules.conf: as publicadas antes dele
+  # deixavam a lista de módulos com a imagem, e o Compose delas não o monta. Sem o modelo, não há o
+  # que gerar, e o que a ida gerou sai: o converge_asterisk desta versão (o que roda na volta)
+  # compararia esse arquivo com o da imagem, que o contêiner lê, e reiniciaria o Asterisk sem motivo.
+  # Fora da volta, faltar o modelo é repositório incompleto, como os outros cinco.
+  if [ "${1:-}" = --rollback ] && [ ! -f "$DEPLOY_DIR/asterisk/modules.conf" ]; then
+    rm -f "$GENERATED_DIR/modules.conf"
+    if [ -f "$ASTERISK_PENDING" ]; then
+      grep -vx modules.conf "$ASTERISK_PENDING" > "$ASTERISK_PENDING.tmp" || true
+      mv "$ASTERISK_PENDING.tmp" "$ASTERISK_PENDING"
+    fi
+  else
+    render_asterisk_file modules.conf modules.conf
+  fi
   unset ARI_PASSWORD
 }
 # O que mudou num arquivo que o Asterisk já tinha fica anotado em ASTERISK_PENDING, para
@@ -877,14 +891,16 @@ converge_caddy() {
   info "Reiniciando o Caddy, para ele ler o Caddyfile desta versão (o painel fica fora por alguns segundos)..."
   dc restart caddy >/dev/null 2>&1 || warn "Não consegui reiniciar o Caddy. Rode: docker restart deskvoice-caddy-1"
 }
-# Os cinco arquivos que render_asterisk_config grava e o Compose monta um a um. Reiniciar o Asterisk
+# Os seis arquivos que render_asterisk_config grava e o Compose monta um a um. Reiniciar o Asterisk
 # derruba as ligações em andamento; recarregar o módulo de cada arquivo, não. Então:
 #   - o contêiner ainda lê um arquivo diferente do disco (ficou preso ao inode de antes de uma
 #     troca por renomeação, como fazia o kit até esta versão): recarregar relê o antigo, e só
 #     reiniciar resolve;
 #   - senão, o que render_asterisk_config anotou como mudado é recarregado, módulo a módulo
 #     (`module reload` diz o resultado de cada um; `core reload` não diz nada). Se algum não
-#     recarregar, reinicia, dizendo por quê.
+#     recarregar, reinicia, dizendo por quê;
+#   - o modules.conf é a exceção: a lista de módulos só vale na partida, e não há módulo que o
+#     recarregue (asterisk_module_of não tem entrada para ele). Mudou, reinicia.
 # Teto conhecido (código do Asterisk 20, res/res_pjsip/config_transport.c): com allow_reload=no, o
 # padrão, recarregar o transporte do PJSIP não aplica protocolo, bind, TLS, TCP, ToS e CoS. O
 # modelo do kit não muda nenhum deles por instalação; uma versão que mudar precisa reiniciar.
@@ -903,12 +919,13 @@ converge_asterisk() {
   local f stale="" modules="" out wanted reloaded
   # Parado, ele lê o que está no disco quando subir.
   if [ -z "$(dc ps -q --status running asterisk 2>/dev/null)" ]; then rm -f "$ASTERISK_PENDING"; return 0; fi
-  for f in extensions http ari rtp pjsip; do
+  for f in extensions http ari rtp pjsip modules; do
     [ -f "$GENERATED_DIR/$f.conf" ] || continue
     if mount_differs asterisk "/etc/asterisk/$f.conf" "$GENERATED_DIR/$f.conf"; then stale="$f.conf"; break; fi
   done
   if [ -n "$stale" ]; then restart_asterisk "o contêiner ainda lê a versão antiga de $stale, e recarregar não alcança o arquivo novo"; return 0; fi
   [ -s "$ASTERISK_PENDING" ] || { rm -f "$ASTERISK_PENDING"; return 0; }
+  if grep -qx modules.conf "$ASTERISK_PENDING"; then restart_asterisk "a lista de módulos do Asterisk só vale na partida"; return 0; fi
   while read -r f; do modules="$modules $(asterisk_module_of "$f")"; done < <(sort -u "$ASTERISK_PENDING")
   out="$(dc exec -T asterisk asterisk -rx "module reload$modules" 2>&1 || true)"
   wanted="$(echo "$modules" | wc -w | tr -d ' ')"
