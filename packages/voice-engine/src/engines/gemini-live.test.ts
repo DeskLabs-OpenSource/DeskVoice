@@ -197,9 +197,9 @@ describe("gemini-live (contrato com servidor falso)", () => {
     expect(marks).toEqual(["marco transcript", "marco transcript", "áudio", "áudio", "marco transcript"]);
   });
 
-  it("closeCallerTurn manda audioStreamEnd", async () => {
+  it("closeCallerTurn manda audioStreamEnd, e diz sempre que agiu", async () => {
     const { session } = await openSession({ greeting: undefined });
-    session.closeCallerTurn();
+    expect(session.closeCallerTurn()).toBe(true);
     expect(await fake.waitFor((message) => "realtimeInput" in message)).toEqual({ realtimeInput: { audioStreamEnd: true } });
   });
 

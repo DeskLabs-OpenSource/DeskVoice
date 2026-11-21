@@ -173,6 +173,9 @@ const timeline = {
     engine_resumed: "A conexão com o provedor do motor de voz foi renovada no meio da ligação, sem encerrar a conversa.",
     turn_latency: {
       line: "Resposta do agente ({engine}): metade dos turnos em até {p50} s, o mais lento em {max} s ({turns}).",
+      lineMeasured: "Resposta do agente ({engine}): metade dos turnos em até {p50} s, o mais lento medido em {max} s ({turns}).",
+      guardOne: "1 turno sem medida: a guarda contra o silêncio agiu.",
+      guardMany: "{count} turnos sem medida: a guarda contra o silêncio agiu.",
       turnsOne: "1 turno",
       turnsMany: "{count} turnos",
       approximate: "Medida aproximada: este motor não avisa o fim da fala, e a espera real é um pouco maior.",

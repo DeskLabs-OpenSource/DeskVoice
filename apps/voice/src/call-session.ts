@@ -1030,14 +1030,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const silenceGuard = createSilenceGuard({
       clock,
       schedule,
-      // A resposta forçada pela guarda e o pedido para repetir não entram na latência por turno.
+      // A resposta forçada pela guarda e o pedido para repetir não entram na latência por turno: o
+      // turno vai para `guardTurns`. Com `false`, o motor não mandou nada (o provedor já tinha fechado
+      // a vez, só está lento), e o turno segue aberto, como um turno comum.
       closeCallerTurn: () => {
-        latency.notAnswer();
-        session.closeCallerTurn();
+        if (session.closeCallerTurn() !== false) latency.guardActed();
       },
       // `wrapUp` e `finish` param a guarda: depois disso ela não chama nada.
       say: (text) => {
-        latency.notAnswer();
+        latency.guardActed();
         session.say(text);
       },
       acted: (report) => {

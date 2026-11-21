@@ -171,6 +171,9 @@ const timeline: TimelineDictionary = {
     engine_resumed: "The connection to the voice engine provider was renewed mid-call, without ending the conversation.",
     turn_latency: {
       line: "Agent response ({engine}): half of the turns within {p50} s, the slowest in {max} s ({turns}).",
+      lineMeasured: "Agent response ({engine}): half of the turns within {p50} s, the slowest measured in {max} s ({turns}).",
+      guardOne: "1 turn without a measure: the silence guard acted.",
+      guardMany: "{count} turns without a measure: the silence guard acted.",
       turnsOne: "1 turn",
       turnsMany: "{count} turns",
       approximate: "Approximate measure: this engine does not report the end of speech, so the real wait is a little longer.",

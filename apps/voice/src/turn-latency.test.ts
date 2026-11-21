@@ -11,7 +11,7 @@ describe("latência por turno: a conta", () => {
       clock.advance(ms);
       meter.agentAudioDelivered();
     }
-    expect(meter.summary()).toEqual({ engine: "openai-realtime", source: "vad", turns: 10, p50Ms: 500, p90Ms: 900, maxMs: 1000, toolTurns: 0, toolP50Ms: null });
+    expect(meter.summary()).toEqual({ engine: "openai-realtime", source: "vad", turns: 10, p50Ms: 500, p90Ms: 900, maxMs: 1000, toolTurns: 0, toolP50Ms: null, guardTurns: 0 });
   });
 
   it("um número de um motor só: depois de uma passagem para outro motor, os turnos dele ficam fora", () => {
@@ -31,6 +31,38 @@ describe("latência por turno: a conta", () => {
     const meter = createTurnLatencyMeter(clock);
     meter.callerTurnEnded("openai-realtime", "vad", true);
     clock.advance(2000);
+    meter.agentAudioDelivered();
+    expect(meter.summary()).toBeNull();
+  });
+
+  it("a guarda agiu: o turno sai sem valor e conta uma vez em guardTurns; só com eles, o evento sai com turns 0 e os máximos null", () => {
+    const clock = fakeClock();
+    const meter = createTurnLatencyMeter(clock);
+    meter.callerTurnEnded("gemini-live", "transcript", false);
+    clock.advance(2500);
+    // Fechamento e pedido para repetir no mesmo turno, com a transcrição atrasada no meio.
+    meter.guardActed();
+    meter.callerTurnEnded("gemini-live", "transcript", false);
+    clock.advance(4000);
+    meter.guardActed();
+    clock.advance(500);
+    meter.agentAudioDelivered();
+    expect(meter.summary()).toEqual({ engine: "gemini-live", source: "transcript", turns: 0, p50Ms: null, p90Ms: null, maxMs: null, toolTurns: 0, toolP50Ms: null, guardTurns: 1 });
+    // Depois da fala do agente, o próximo turno é outro.
+    meter.callerTurnEnded("gemini-live", "transcript", false);
+    meter.guardActed();
+    meter.agentAudioDelivered();
+    meter.callerTurnEnded("gemini-live", "transcript", false);
+    clock.advance(600);
+    meter.agentAudioDelivered();
+    expect(meter.summary()).toMatchObject({ turns: 1, maxMs: 600, guardTurns: 2 });
+  });
+
+  it("a fala do sistema (notAnswer) tira o turno sem contar em guardTurns", () => {
+    const clock = fakeClock();
+    const meter = createTurnLatencyMeter(clock);
+    meter.callerTurnEnded("openai-realtime", "vad", false);
+    meter.notAnswer();
     meter.agentAudioDelivered();
     expect(meter.summary()).toBeNull();
   });

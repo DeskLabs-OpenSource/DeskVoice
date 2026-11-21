@@ -305,6 +305,11 @@ export interface ManualEngine {
   said: string[];
   /** Quantas vezes a conversa pediu o fim do turno de quem ligou (a guarda contra o silêncio). */
   callerTurnsClosed: number;
+  /**
+   * O que `closeCallerTurn` devolve: sem valor (o padrão), o motor agiu; `false`, o provedor já tinha
+   * fechado a vez e o motor não mandou nada.
+   */
+  closeCallerTurnResult: boolean | undefined;
   toolResults: Array<{ id: string; result: unknown }>;
   /** Cada `played(ms)` que a conversa mandou. */
   played: number[];
@@ -320,6 +325,7 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
     keys: [],
     said: [],
     callerTurnsClosed: 0,
+    closeCallerTurnResult: undefined,
     toolResults: [],
     played: [],
     audioBytes: 0,
@@ -347,7 +353,10 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
           sendAudio: (pcm) => void (manual.audioBytes += pcm.length),
           sendToolResult: (id, result) => void manual.toolResults.push({ id, result }),
           say: (text) => void manual.said.push(text),
-          closeCallerTurn: () => void (manual.callerTurnsClosed += 1),
+          closeCallerTurn: () => {
+            manual.callerTurnsClosed += 1;
+            return manual.closeCallerTurnResult;
+          },
           played: (ms) => void manual.played.push(ms),
           close: async () => void (manual.closed += 1),
         };

@@ -79,7 +79,10 @@
  * documentação de hoje). O marco é cada pedaço de `inputTranscription` que chega antes do primeiro
  * áudio da resposta, e quem mede fica com o último. `source: "transcript"`: a transcrição vem depois
  * do fim real da fala, e a medida sai menor que a espera de verdade. Pedaço que chega com o agente já
- * falando (transcrição atrasada) não é marco.
+ * falando (transcrição atrasada) não é marco. `closeCallerTurn` devolve sempre `true` (agiu): o
+ * `audioStreamEnd` vai sempre, e não há como saber se a resposta veio por causa dele ou se o servidor
+ * já ia responder. Por isso, no Gemini, todo turno em que a guarda fecha a vez sai da conta (e é
+ * contado em `guardTurns`, sem valor).
  *
  * Cancelamento de ferramenta (`toolCallCancelled`), consultado em 2026-11-21
  * (https://aistudio.google.com/api-reference/live, `BidiGenerateContentToolCallCancellation`): o
@@ -589,6 +592,8 @@ const engine: VoiceEngine = {
       closeCallerTurn() {
         // O áudio seguinte de quem ligou reabre o fluxo, sem mensagem a mais.
         send({ realtimeInput: { audioStreamEnd: true } });
+        // Sempre agiu: não há como saber se o servidor já ia responder (comentário de topo).
+        return true;
       },
       async close() {
         closing = true;
