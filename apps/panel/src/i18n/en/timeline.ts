@@ -125,6 +125,7 @@ const timeline: TimelineDictionary = {
     tool_running: "Running.",
     tool_args: "Data sent",
     tool_operator_detail: "Detail for the operator",
+    tool_cancelled: "The voice engine dropped the {tool} tool (the caller talked over it): its result was not passed to the agent. Whatever it had already done stays done.",
     approval_requested: "Asked a person for approval",
     approval_default: { approved: "With no answer, it counts as approved.", denied: "With no answer, it counts as denied." },
     approval_decided: { approved: "Approved", denied: "Denied", expired: "Nobody answered in time" },

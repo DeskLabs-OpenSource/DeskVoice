@@ -127,6 +127,7 @@ const timeline = {
     tool_running: "Em execução.",
     tool_args: "Dados enviados",
     tool_operator_detail: "Detalhe para o operador",
+    tool_cancelled: "O motor de voz desistiu da ferramenta {tool} (quem ligou falou por cima): o resultado dela não foi entregue ao agente. O que ela já tinha feito continua feito.",
     approval_requested: "Pediu aprovação a uma pessoa",
     approval_default: { approved: "Sem resposta, vale aprovar.", denied: "Sem resposta, vale negar." },
     approval_decided: { approved: "Aprovado", denied: "Negado", expired: "Ninguém respondeu no prazo" },
