@@ -91,6 +91,12 @@ export interface VoiceSession {
    * Depois de `close`, não manda nada.
    */
   guide?(text: string): void;
+  /**
+   * Quanto da fala desta sessão já tocou para quem ligou, em ms, acumulado desde o início da sessão.
+   * Quem toca o áudio chama na interrupção, antes de descartar o resto, para o motor cortar no
+   * histórico o que não chegou a tocar. Sem o método, o motor não corta e nada muda.
+   */
+  played?(ms: number): void;
   close(): Promise<void>;
 }
 
