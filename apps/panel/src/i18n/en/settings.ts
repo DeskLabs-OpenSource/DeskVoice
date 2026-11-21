@@ -18,7 +18,6 @@ const settings: SettingsDictionary = {
       webhooks: { title: "Webhooks", lead: "The only addresses an agent can call during a call." },
       rules: { title: "Call rules", lead: "Simultaneous calls, voicemail and approval requests with no answer." },
       privacy: { title: "Privacy and data", lead: "Recording, retention and what the organization keeps about callers." },
-      system: { title: "System", lead: "The version this server runs and the update." },
     },
     state: { ready: "Ready", missing: "Something missing", off: "Off" },
   },
