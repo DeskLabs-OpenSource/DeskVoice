@@ -17,8 +17,8 @@ Parâmetros, além de `org` (consulta C0 da `deskvoice-metricas`):
 
 ## 1. A análise está medindo?
 
-A nota e os critérios só existem se a análise estiver ligada: Configurações → Inteligência
-artificial, seção "Análise da ligação", chave "Analisar cada ligação no fim". Ela é paga (uma
+A nota e os critérios só existem se a análise estiver ligada: Configurações → Desfecho, análise
+e transcrição, seção "Análise da ligação", chave "Analisar cada ligação no fim". Ela é paga (uma
 chamada ao provedor por ligação, levando a transcrição) e entra no teto de custo do agente; ligue
 só com o acordo de quem paga a conta.
 
