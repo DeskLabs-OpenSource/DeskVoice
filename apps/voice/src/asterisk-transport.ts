@@ -93,6 +93,7 @@ export class AsteriskCalls {
       onDtmf: (handler) => connection.onDtmf(handler),
       sendAudio: (pcm) => connection.sendAudio(pcm),
       clearAudio: () => connection.clearAudio(),
+      playedMs: () => connection.spokenMs(),
       drained: () => connection.drained(),
       onHangup: (handler) =>
         connection.onClose((reason) => {
