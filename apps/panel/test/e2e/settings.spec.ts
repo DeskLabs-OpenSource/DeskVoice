@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import agents from "../../src/i18n/pt-BR/agents";
 import commonEn from "../../src/i18n/en/common";
 import commonEs from "../../src/i18n/es/common";
@@ -160,14 +160,20 @@ async function holdAboveReads(page: Page): Promise<void> {
   }
 }
 
-/** Espera as leituras chegarem, confere que os blocos de cima empurraram o da ligação para baixo da dobra, e exige o título na tela. */
-async function expectAnchorShownAfterReads(page: Page): Promise<void> {
+/** Espera as leituras chegarem e confere que os blocos de cima empurraram o da ligação para baixo da dobra. */
+async function expectAboveReadsPushedAnchorDown(page: Page): Promise<Locator> {
   await expect(page.getByText(FAKE_MENUS[2]?.name ?? "", { exact: true }).first()).toBeAttached();
   await expect(page.getByRole("heading", { name: FAKE_TRUNKS[2]?.name ?? "", exact: true })).toBeAttached();
   const anchor = page.locator("#ligacao-pelo-whatsapp");
   const fold = page.viewportSize()?.height ?? 0;
   // Sem isto o teste não prova nada: o bloco tem de estar mais abaixo do que cabe numa tela.
   expect(await anchor.evaluate((element) => element.getBoundingClientRect().top + window.scrollY)).toBeGreaterThan(fold * 2);
+  return anchor;
+}
+
+/** Depois das leituras, o título do bloco da ligação pelo WhatsApp está na tela. */
+async function expectAnchorShownAfterReads(page: Page): Promise<void> {
+  const anchor = await expectAboveReadsPushedAnchorDown(page);
   await expect(anchor.getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeInViewport();
 }
 
@@ -186,6 +192,15 @@ test("direto em /line#ligacao-pelo-whatsapp, com as leituras de cima atrasadas e
   // Como quem abre o link guardado: a página carrega do zero, já com o endereço do bloco.
   await page.goto("/line#ligacao-pelo-whatsapp");
   await expectAnchorShownAfterReads(page);
+});
+
+test("em /line sem endereço de bloco, com as mesmas leituras atrasadas e grandes: a página fica no topo, e o bloco da ligação pelo WhatsApp fora da tela", async ({ page }) => {
+  await signIn(page);
+  await holdAboveReads(page);
+  await page.goto("/line");
+  const anchor = await expectAboveReadsPushedAnchorDown(page);
+  await expect(page.getByRole("heading", { name: line.title, exact: true })).toBeInViewport();
+  await expect(anchor).not.toBeInViewport();
 });
 
 test("o aviso de gravação mora em Privacidade e dados, acima da gravação; Regras das ligações aponta para lá, e salvar o texto persiste", async ({ page }) => {
