@@ -146,7 +146,7 @@ describe("the follow-ups screen", () => {
       q.exec("insert into notifications (organization_id, follow_up_id, channel, body, status, created_at) values ($1, $2, 'panel', 'Pendência para agora', 'sent', $3)", [org, id, NOW]),
     );
     const shown = (await call(notifications, { cookie: owner.cookie })).data as Array<Record<string, unknown>>;
-    expect(shown).toMatchObject([{ body: "Pendência para agora", followUpId: id, followUpTitle: "Retornar para Paula sobre o laudo", followUpStatus: "open" }]);
+    expect(shown).toMatchObject([{ body: "Pendência para agora", followUpId: id, followUpTitle: "Retornar para Paula sobre o laudo", followUpStatus: "open", subject: null }]);
   });
 
   it("an operator's close waits for an admin's reassignment and then sees the new owner: it never closes a follow-up that just changed hands", async () => {

@@ -13,6 +13,8 @@ import { createAgendaHorariosLivres } from "../../../packages/tools/src/tools/ag
 import { createAgendaMarcar } from "../../../packages/tools/src/tools/agenda_marcar";
 import { createAgendaRemarcar } from "../../../packages/tools/src/tools/agenda_remarcar";
 import { EngineTimeoutError, type VoiceEngine } from "@deskvoice/voice-engine";
+import type { Tool } from "@deskvoice/tools";
+import { z } from "zod";
 import geminiLive from "../../../packages/voice-engine/src/engines/gemini-live";
 import openaiRealtime from "../../../packages/voice-engine/src/engines/openai-realtime";
 import { startFakeProvider } from "../../../packages/voice-engine/src/testing/fake-provider";
@@ -251,6 +253,32 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     await waitFor(() => wired.toolResults.length === 1, "the tool result");
     expect(wired.toolResults[0]?.result).toMatchObject({ ok: true, data: { timezone: "America/Sao_Paulo" } });
     expect(crm.pedidos.horarios).toHaveLength(1);
+    made.transport.callerHangup();
+    await session.done;
+  });
+
+  it("offeredTools do contexto sai do que o motor recebeu no trecho: a agenda marcada mas sem cliente não entra", async () => {
+    let seen: ReadonlySet<string> | undefined;
+    const probe: Tool = {
+      name: "sonda",
+      description: "Lê o contexto (teste).",
+      parameters: { type: "object", properties: {} },
+      inputSchema: z.object({}),
+      run: async (_input, ctx) => {
+        seen = ctx.offeredTools;
+        return { ok: true, message: "ok" };
+      },
+    };
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("offered-tools", { engine: "manual", tools: ["sonda", "agenda_horarios_livres", "create_task", "notify_human", "nao_existe"] }, manual);
+    made.harness.deps.tools.set(probe.name, probe);
+    const session = made.start();
+    await waitFor(() => manual.configs.length === 1, "the engine to connect");
+    expect(made.harness.deps.tools.get("agenda_horarios_livres")?.available).toBe(false);
+    manual.emit("toolCall", { id: "t1", name: "sonda", args: {} });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    expect([...(seen ?? [])].sort()).toEqual(manual.configs[0]?.tools.map((tool) => tool.name).sort());
+    expect([...(seen ?? [])].sort()).toEqual(["create_task", "notify_human", "sonda"]);
     made.transport.callerHangup();
     await session.done;
   });
@@ -696,7 +724,7 @@ describe("retomada do motor Gemini no meio da ligação (servidor falso)", { tim
   afterEach(() => fake.stop());
 
   /** O motor Gemini de verdade, falando com o servidor falso. A chave não importa: o servidor é nosso. */
-  async function geminiCall(label: string) {
+  async function geminiCall(label: string, tools: Tool[] = []) {
     fake = await startFakeProvider();
     const engine: VoiceEngine = {
       ...geminiLive,
@@ -704,9 +732,10 @@ describe("retomada do motor Gemini no meio da ligação (servidor falso)", { tim
       connect: (config) => geminiLive.connect(config, "chave-teste", { baseUrl: fake.url, model: "modelo-x" }),
     };
     const organizationId = await createOrganization(app, label);
-    const agentId = await createAgent(app, organizationId, { engine: engine.id });
+    const agentId = await createAgent(app, organizationId, { engine: engine.id, tools: tools.map((tool) => tool.name) });
     await harness?.approvals.close();
     harness = await sessionHarness(app, [engine]);
+    for (const tool of tools) harness.deps.tools.set(tool.name, tool);
     const callId = await createCall(app, organizationId, agentId, harness.clock.now(), "inbound");
     const transport = manualTransport();
     const session = startCallSession(harness.deps, { organizationId, callId, agentId, transport });
@@ -768,6 +797,67 @@ describe("retomada do motor Gemini no meio da ligação (servidor falso)", { tim
     expect(kinds).toContain("engine_failed");
     expect(kinds).not.toContain("engine_resumed");
     expect(fake.connections()).toBe(2);
+  });
+
+  /** Uma ferramenta que só termina quando o teste manda, e diz se o `signal` dela foi abortado. */
+  function slowTool() {
+    const finish = new Map<string, () => void>();
+    const aborted = new Map<string, boolean>();
+    const tool: Tool<{ ref: string }> = {
+      name: "consulta_lenta",
+      description: "Consulta demorada (teste).",
+      parameters: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
+      inputSchema: z.object({ ref: z.string() }),
+      run: (input, ctx) =>
+        new Promise((resolve) => {
+          ctx.signal?.addEventListener("abort", () => aborted.set(input.ref, true), { once: true });
+          finish.set(input.ref, () => resolve({ ok: true, message: `Consulta ${input.ref} pronta.` }));
+        }),
+    };
+    return { tool: tool as Tool, finish, aborted };
+  }
+
+  it("toolCallCancellation de uma ferramenta lenta: o resultado não vai ao motor, o signal é abortado e tool_cancelled entra na linha do tempo; a chamada ao lado, não cancelada, recebe o dela", async () => {
+    const slow = slowTool();
+    const { callId, transport, session } = await geminiCall("gemini-tool-cancel", [slow.tool]);
+    fake.send({ toolCall: { functionCalls: [{ id: "fc-1", name: "consulta_lenta", args: { ref: "a" } }, { id: "fc-2", name: "consulta_lenta", args: { ref: "b" } }] } });
+    await waitFor(() => slow.finish.size === 2, "both slow tools to start");
+    fake.send({ toolCallCancellation: { ids: ["fc-2"] } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("tool_cancelled"), "the cancellation event");
+    expect(slow.aborted.get("b")).toBe(true);
+    expect(slow.aborted.get("a")).toBeUndefined();
+
+    // A cancelada termina depois: o efeito dela fica registrado, e o resultado não sai.
+    slow.finish.get("b")?.();
+    await waitFor(async () => (await eventsOf(app, callId)).filter((event) => event.kind === "tool_result").length === 1, "the cancelled tool result to be recorded");
+    slow.finish.get("a")?.();
+    const response = await fake.waitFor((message) => "toolResponse" in message);
+    expect(JSON.stringify(response)).toContain('"id":"fc-1"');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(fake.hasUnread((message) => "toolResponse" in message)).toBe(false);
+
+    const events = await eventsOf(app, callId);
+    expect(events.filter((event) => event.kind === "tool_cancelled").map((event) => event.payload)).toEqual([{ name: "consulta_lenta" }]);
+    expect(events.filter((event) => event.kind === "tool_result").map((event) => event.payload)).toEqual([
+      expect.objectContaining({ name: "consulta_lenta", ok: true, message: "Consulta b pronta." }),
+      expect.objectContaining({ name: "consulta_lenta", ok: true, message: "Consulta a pronta." }),
+    ]);
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+  });
+
+  it("toolCallCancellation de uma chamada que já respondeu não grava nada", async () => {
+    const slow = slowTool();
+    const { callId, transport, session } = await geminiCall("gemini-tool-cancel-late", [slow.tool]);
+    fake.send({ toolCall: { functionCalls: [{ id: "fc-1", name: "consulta_lenta", args: { ref: "a" } }] } });
+    await waitFor(() => slow.finish.size === 1, "the slow tool to start");
+    slow.finish.get("a")?.();
+    await fake.waitFor((message) => "toolResponse" in message);
+    fake.send({ toolCallCancellation: { ids: ["fc-1", "fc-desconhecida"] } });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await kindsOf(app, callId)).not.toContain("tool_cancelled");
+    transport.callerHangup();
+    await session.done;
   });
 });
 

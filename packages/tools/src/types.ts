@@ -35,6 +35,18 @@ export interface ToolContext {
   /** Faz o agente dizer algo enquanto a ferramenta trabalha ("um instante, estou conferindo"). */
   say(text: string): void;
   waitForApproval(approvalId: string, timeoutMs: number): Promise<ApprovalOutcome>;
+  /**
+   * Abortado quando o provedor cancela esta chamada da ferramenta: o resultado já não vai ao modelo.
+   * A ferramenta que o lê pode parar antes do efeito; o que já saiu não é desfeito. Ausente: quem roda
+   * a ferramenta não cancela (um teste, uma rotina).
+   */
+  signal?: AbortSignal;
+  /**
+   * Os nomes das ferramentas que o motor recebeu neste trecho (as que a sessão de fato ofereceu: a
+   * marcada mas tirada por `available === false` não entra). A ferramenta que manda o modelo usar outra
+   * só a cita se ela estiver aqui. Ausente: quem roda a ferramenta não ofereceu nenhuma (um teste, uma rotina).
+   */
+  offeredTools?: ReadonlySet<string>;
 }
 
 /** Um agente para quem a ligação pode passar, como a sessão o leu do banco. */

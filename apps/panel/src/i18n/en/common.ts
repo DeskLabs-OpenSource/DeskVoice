@@ -42,6 +42,7 @@ const common: CommonDictionary = {
     markRead: "Mark as read",
     openCall: "See the call",
     followUpOpen: "See the follow-up",
+    openUpdate: "See the update",
     followUpGone: "Follow-up deleted by the retention period.",
     organization: "Organization",
     myAccount: "My account",

@@ -187,6 +187,11 @@ interface Leg {
   analyst?: LegAnalyst;
   /** As objeções que já orientaram o agente neste trecho: cada uma orienta uma vez só. */
   guided: Set<string>;
+  /**
+   * As ferramentas em curso neste trecho, pelo id da chamada: o cancelamento do provedor aborta o
+   * `signal` delas e marca `cancelled`, e aí o resultado não vai ao motor.
+   */
+  toolsInFlight: Map<string, { name: string; abort: AbortController; cancelled: boolean }>;
 }
 
 /** O analista aberto para um trecho: o modelo de decisão, a chave e o cadastro lido no começo do trecho. */
@@ -858,7 +863,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   };
 
   /** O contexto das ferramentas de um trecho: `agentId` é o agente do trecho (o número de transferência, a lista de destinos). */
-  const contextFor = (legAgentId: string, legLanguage: string, session: VoiceSession): ToolContext => ({
+  const contextFor = (legAgentId: string, legLanguage: string, session: VoiceSession, enabled: ReadonlyMap<string, Tool>): ToolContext => ({
     organizationId,
     callId,
     agentId: legAgentId,
@@ -879,11 +884,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         callEnded.signal,
       ),
     handoff: (target, input) => handOff(session, target, input),
+    // O que o motor deste trecho recebeu: a frase de uma ferramenta só manda usar outra que ele tem.
+    offeredTools: new Set(enabled.keys()),
   });
 
   async function handleToolCall(owner: Leg, call: { id: string; name: string; args: unknown }): Promise<void> {
     let result: ToolResult;
     const tool = owner.enabled.get(call.name);
+    const inFlight = { name: call.name, abort: new AbortController(), cancelled: false };
+    owner.toolsInFlight.set(call.id, inFlight);
     try {
       // `owner !== leg`: a sessão que pediu já foi substituída numa passagem e está fechada.
       if (ending || wrappingUp || owner !== leg) {
@@ -894,15 +903,18 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         await event("tool_called", { name: call.name, args: toolCalledArgs(deps.tools.get(call.name), call.args) });
         await event("tool_result", { name: call.name, ok: false, message: result.message, error: "tool is not enabled for this agent" });
       } else {
-        result = await runTool(tool, call.args, owner.context);
+        result = await runTool(tool, call.args, { ...owner.context, signal: inFlight.abort.signal });
       }
     } catch (error) {
       // `runTool` só lança se nem o evento pôde ser gravado. O modelo ainda recebe uma resposta.
       log("error", "tool call could not be recorded", { tool: call.name, error: messageOf(error) });
       result = { ok: false, message: TOOL_CRASH_MESSAGE };
+    } finally {
+      owner.toolsInFlight.delete(call.id);
     }
-    // Depois de uma passagem, a sessão que pediu já fechou: o resultado não tem a quem ir.
-    if (!ending && owner === leg) owner.voice.sendToolResult(call.id, result);
+    // Depois de uma passagem, a sessão que pediu já fechou: o resultado não tem a quem ir. Cancelada
+    // pelo provedor, o modelo já não espera o resultado; o `tool_result` gravado diz o que saiu.
+    if (!ending && owner === leg && !inFlight.cancelled) owner.voice.sendToolResult(call.id, result);
     // Com despedida, a ligação só cai depois de ela ser falada: sem isso o modelo às vezes encerrava
     // calado, e a pessoa ouvia a ligação cair na cara dela. Quem fala é o próprio modelo, ao receber
     // o resultado do end_call (que traz a despedida); pedir a fala de novo aqui a repetia.
@@ -1024,11 +1036,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       voice: session,
       enabled,
       guard: silenceGuard,
-      context: contextFor(row.id, row.language, session),
+      context: contextFor(row.id, row.language, session, enabled),
       usage: { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 },
       costCents: 0,
       ...(analyst && { analyst }),
       guided: new Set(),
+      toolsInFlight: new Map(),
     };
     // Uma sessão substituída numa passagem já foi fechada; o que ela ainda emitir não vai para a linha.
     const current = (): boolean => leg === self;
@@ -1086,6 +1099,17 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         silenceGuard.toolFinished();
       });
       toolsRunning.add(running);
+    });
+    // O provedor desistiu de chamadas em curso: o resultado delas é descartado, e a ferramenta que lê o
+    // `signal` pode parar. O que ela já fez fica feito, e o `tool_result` dela é gravado como sempre.
+    session.on("toolCallCancelled", (ids) => {
+      for (const id of ids) {
+        const inFlight = self.toolsInFlight.get(id);
+        if (!inFlight || inFlight.cancelled) continue;
+        inFlight.cancelled = true;
+        inFlight.abort.abort();
+        if (current()) event("tool_cancelled", { name: inFlight.name }).catch(logFailure("could not record a tool cancellation"));
+      }
     });
     // A última medição de uma sessão substituída também conta, e no trecho dela.
     session.on("usage", (increment) => void meter(self, increment).catch(logFailure("could not record usage")));

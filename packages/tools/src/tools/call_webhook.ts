@@ -24,11 +24,27 @@ export function webhookIdempotencyKey(callId: string, name: string, payload: Rec
   return createHash("sha256").update(`${callId}\n${name}\n${canonicalJson(payload)}`).digest("hex");
 }
 
+/**
+ * O que o modelo ouve quando a integração não responde a tempo. Só manda prometer que alguém vai
+ * conferir quando há quem confira: a pendência (`create_task`) ou o aviso à equipe (`notify_human`),
+ * e só se o motor recebeu a ferramenta neste trecho. Sem nenhuma das duas, não promete retorno.
+ */
+export function unknownMessage(name: string, offeredTools: ReadonlySet<string> = new Set()): string {
+  const head = `A integração "${name}" não respondeu a tempo. Não sei se o pedido foi registrado. NÃO chame de novo sem confirmar com a pessoa.`;
+  if (offeredTools.has("create_task")) {
+    return `${head} Abra com create_task uma pendência para conferir se a integração "${name}" registrou o pedido, e diga à pessoa que a equipe vai conferir e dar retorno.`;
+  }
+  if (offeredTools.has("notify_human")) {
+    return `${head} Avise a equipe com notify_human que a integração "${name}" não respondeu e é preciso conferir, e diga à pessoa que a equipe vai conferir.`;
+  }
+  return `${head} Diga à pessoa que não foi possível confirmar agora e que ela pode ligar de novo mais tarde para saber. Não diga que alguém vai entrar em contato: ninguém foi avisado.`;
+}
+
 export function createCallWebhook(deps: ToolDeps = {}) {
   return defineTool({
     name: "call_webhook",
     description:
-      "Chama uma integração que o operador cadastrou (por exemplo, consultar um pedido ou abrir um chamado em outro sistema) e devolve a resposta dela. Use só quando as suas instruções mandarem usar uma integração pelo nome. NÃO use por iniciativa própria nem invente nomes: se o nome não existir, a ferramenta devolve a lista dos cadastrados. Você nunca informa endereço, só o nome. Se a integração não responder a tempo, não chame de novo: diga à pessoa que vai verificar e confirme com ela antes de qualquer nova tentativa.",
+      "Chama uma integração que o operador cadastrou (por exemplo, consultar um pedido ou abrir um chamado em outro sistema) e devolve a resposta dela. Use só quando as suas instruções mandarem usar uma integração pelo nome. NÃO use por iniciativa própria nem invente nomes: se o nome não existir, a ferramenta devolve a lista dos cadastrados. Você nunca informa endereço, só o nome. Se a integração não responder a tempo, não chame de novo: siga o que a resposta da ferramenta disser.",
     inputSchema: z.object({
       name: z.string().min(1).describe("Nome da integração, exatamente como aparece nas suas instruções."),
       payload: z.record(z.string(), z.unknown()).default({}).describe("Dados enviados à integração, no formato que as suas instruções descrevem."),
@@ -51,11 +67,7 @@ export function createCallWebhook(deps: ToolDeps = {}) {
       } catch (error) {
         if (!(error instanceof SafeFetchTimeoutError)) throw error;
         // Sem resposta não é falha: o pedido pode ter sido registrado. O modelo não pode repetir às cegas.
-        return {
-          ok: false,
-          outcome: "unknown",
-          message: `A integração "${hook.name}" não respondeu a tempo. Não sei se o pedido foi registrado. NÃO chame de novo sem antes confirmar com a pessoa; diga que vai verificar.`,
-        };
+        return { ok: false, outcome: "unknown", message: unknownMessage(hook.name, ctx.offeredTools) };
       }
       const data = { status: response.status, body: response.body, truncated: response.truncated };
       if (!response.ok) {
