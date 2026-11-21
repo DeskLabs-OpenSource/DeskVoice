@@ -140,6 +140,24 @@ describe("the time zone a new organization starts with", () => {
     expect(await zoneOf(await s.create())).toBe("America/Sao_Paulo");
   });
 
+  it("Z9: a PUT with only the time zone keeps the language, and a PUT with only the language keeps the time zone", async () => {
+    const s = await scene();
+    const languageOf = async (org: string): Promise<string | null> => (await system<{ language: string | null }>("select language from organizations where id = $1", [org]))[0]?.language ?? null;
+    expect(await s.setDefault({ language: "es" })).toMatchObject({ status: 200, data: { timezone: null, language: "es" } });
+    expect(await s.setDefault({ timezone: "Asia/Tokyo" })).toMatchObject({ status: 200, data: { timezone: "Asia/Tokyo", language: "es" } });
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual({ timezone: "Asia/Tokyo", language: "es" });
+    const org = await s.create();
+    expect(await zoneOf(org)).toBe("Asia/Tokyo");
+    expect(await languageOf(org)).toBe("es");
+
+    // O inverso: só o idioma não mexe no fuso.
+    expect(await s.setDefault({ language: "en" })).toMatchObject({ status: 200, data: { timezone: "Asia/Tokyo", language: "en" } });
+    expect((await call(readDefaults, { cookie: s.admin.cookie })).data).toEqual({ timezone: "Asia/Tokyo", language: "en" });
+    const next = await s.create();
+    expect(await zoneOf(next)).toBe("Asia/Tokyo");
+    expect(await languageOf(next)).toBe("en");
+  });
+
   it("only who administers the installation reads or changes the default", async () => {
     const s = await scene();
     const other = await createUser(panel.app, s.existing, "owner");
