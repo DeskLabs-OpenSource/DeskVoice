@@ -28,7 +28,7 @@ export function createCallWebhook(deps: ToolDeps = {}) {
   return defineTool({
     name: "call_webhook",
     description:
-      "Chama uma integração que o operador cadastrou (por exemplo, consultar um pedido ou abrir um chamado em outro sistema) e devolve a resposta dela. Use só quando as suas instruções mandarem usar uma integração pelo nome. NÃO use por iniciativa própria nem invente nomes: se o nome não existir, a ferramenta devolve a lista dos cadastrados. Você nunca informa endereço, só o nome. Repetir a chamada com os mesmos dados nesta ligação manda a mesma chave de idempotência: só não duplica se o sistema do outro lado respeitar essa chave.",
+      "Chama uma integração que o operador cadastrou (por exemplo, consultar um pedido ou abrir um chamado em outro sistema) e devolve a resposta dela. Use só quando as suas instruções mandarem usar uma integração pelo nome. NÃO use por iniciativa própria nem invente nomes: se o nome não existir, a ferramenta devolve a lista dos cadastrados. Você nunca informa endereço, só o nome. Se a integração não responder a tempo, não chame de novo: diga à pessoa que vai verificar e confirme com ela antes de qualquer nova tentativa.",
     inputSchema: z.object({
       name: z.string().min(1).describe("Nome da integração, exatamente como aparece nas suas instruções."),
       payload: z.record(z.string(), z.unknown()).default({}).describe("Dados enviados à integração, no formato que as suas instruções descrevem."),

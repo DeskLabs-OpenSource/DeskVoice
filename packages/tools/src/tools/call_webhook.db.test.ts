@@ -3,6 +3,7 @@ import { encryptSecret } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
 import { createFixture, eventsOf, fakeFetch, fakeLookup, putSetting, secretKey } from "../../test/helpers";
+import { UnsafeDestinationError } from "../net/safe-fetch";
 import { MAX_CALL_WEBHOOK_PER_CALL, runTool } from "../run-tool";
 import { createCallWebhook } from "./call_webhook";
 
@@ -71,6 +72,26 @@ describe("call_webhook", () => {
       expect((await eventsOf(app, ctx.callId)).at(-1)?.payload.error).toMatch(/non-public address/);
     }
     expect(net.requests).toEqual([]);
+  });
+
+  it("destino recusado pela guarda depois de o prazo esgotar segue recusado, sem desfecho desconhecido", async () => {
+    const ctx = await fixture("webhook recusado tarde");
+    let calls = 0;
+    // Como o undici faz quando o `guardedLookup` recusa na conexão: embrulha em "fetch failed".
+    // A recusa chega só depois do prazo, com o sinal já abortado.
+    const lateRefusal: typeof fetch = async () => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      throw new TypeError("fetch failed", { cause: new UnsafeDestinationError("rebind.example.com resolves to non-public address 169.254.169.254") });
+    };
+    const result = await runTool(createCallWebhook({ fetch: lateRefusal, lookup: fakeLookup(), timeoutMs: 5, secretKey: () => secretKey }), { name: "rebind" }, ctx);
+
+    expect(result).toEqual({ ok: false, message: expect.stringMatching(/^Não consegui concluir/) });
+    expect(result).not.toHaveProperty("outcome");
+    const last = (await eventsOf(app, ctx.callId)).at(-1);
+    expect(last?.payload).not.toHaveProperty("outcome");
+    expect(last?.payload.error).toMatch(/non-public address/);
+    expect(calls).toBe(1);
   });
 
   it("erro HTTP da integração volta como ok: false com o status", async () => {
