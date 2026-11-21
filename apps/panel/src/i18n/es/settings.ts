@@ -142,6 +142,8 @@ const settings: SettingsDictionary = {
   hookUrl: "Dirección",
   hookToken: "Token (opcional)",
   hookTokenKept: "Token configurado",
+  hookTimeout: "Plazo de respuesta (segundos)",
+  hookTimeoutHint: "Cuánto espera el agente que cada webhook responda, de 1 a {max} segundos. Durante la llamada, la persona se queda en la línea ese tiempo. Sin respuesta en el plazo, el agente avisa que va a verificar y no repite el pedido sin confirmarlo con la persona.",
   addHook: "Agregar webhook",
   removeHook: "Quitar {name}",
   removeHookConfirm: "¿Quitar el webhook {name}? Cuando guardes la lista, los agentes dejan de poder llamar a esta dirección y su token se borra.",

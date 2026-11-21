@@ -142,6 +142,8 @@ const settings: SettingsDictionary = {
   hookUrl: "Address",
   hookToken: "Token (optional)",
   hookTokenKept: "Token configured",
+  hookTimeout: "Response timeout (seconds)",
+  hookTimeoutHint: "How long the agent waits for each webhook to answer, from 1 to {max} seconds. During a call, the person stays on the line for that time. With no answer in time, the agent says it will check and does not repeat the request without confirming with the person.",
   addHook: "Add webhook",
   removeHook: "Remove {name}",
   removeHookConfirm: "Remove the webhook {name}? Once you save the list, agents can no longer call this address and its token is erased.",

@@ -13,6 +13,7 @@ import {
   voicemailMaxSecondsSchema,
 } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
+import { WEBHOOK_DEFAULT_TIMEOUT_SECONDS, WEBHOOK_MAX_TIMEOUT_SECONDS, WEBHOOK_MIN_TIMEOUT_SECONDS } from "@deskvoice/tools/webhook-timeout";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
 import { ANALYSIS_SETTING, AUTO_TRANSCRIPTION_SETTING, OUTCOME_SETTING, TRANSCRIPTION_SETTING, classifyBaseUrlOf, classifyModelOf, engineClassifyTargetSetting, storedClassifyTargetOf } from "@deskvoice/voice-engine/types";
 import { checkAnalysisBrain } from "./brains";
@@ -68,7 +69,7 @@ export function classifyTargetView(stored: unknown): { baseUrl: string | null; m
 
 const httpUrl = z.url({ protocol: /^https?$/ });
 const storedConnector = z.object({ type: z.string(), url: z.string(), token: z.string() });
-const storedHooks = z.array(z.object({ name: z.string(), url: z.string(), token: z.string().optional() }));
+const storedHooks = z.array(z.object({ name: z.string(), url: z.string(), token: z.string().optional(), timeoutSeconds: z.number().optional() }));
 
 // O destino da classificação: `https` e host público (o processo de rotinas alcança a rede interna),
 // gravado sem a barra final, porque o caminho do provedor é colado depois. O modelo é o nome que o
@@ -148,9 +149,18 @@ const connector: Setting = {
   }),
 };
 
-const webhooks = setting<Array<{ name: string; url: string; token?: string }>>({
+// `timeoutSeconds`: quanto esperar a resposta, de 1 ao teto. Ausente vale o padrão, como nas listas
+// gravadas antes dele; a leitura devolve sempre o prazo que vale.
+const webhooks = setting<Array<{ name: string; url: string; token?: string; timeoutSeconds?: number }>>({
   schema: z
-    .array(z.object({ name: z.string().trim().min(1).max(60), url: httpUrl, token: z.string().trim().min(1).max(500).optional() }))
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(60),
+        url: httpUrl,
+        token: z.string().trim().min(1).max(500).optional(),
+        timeoutSeconds: z.number().int().min(WEBHOOK_MIN_TIMEOUT_SECONDS).max(WEBHOOK_MAX_TIMEOUT_SECONDS).optional(),
+      }),
+    )
     .max(50)
     .refine((hooks) => new Set(hooks.map((hook) => hook.name)).size === hooks.length, "webhook names must be unique"),
   secret: true,
@@ -161,12 +171,17 @@ const webhooks = setting<Array<{ name: string; url: string; token?: string }>>({
     const before = kept.success ? kept.data : [];
     return value.map((hook) => {
       const token = hook.token ? encryptSecret(hook.token, key) : before.find((old) => old.name === hook.name && old.url === hook.url)?.token;
-      return { name: hook.name, url: hook.url, ...(token !== undefined && { token }) };
+      return { name: hook.name, url: hook.url, ...(token !== undefined && { token }), ...(hook.timeoutSeconds !== undefined && { timeoutSeconds: hook.timeoutSeconds }) };
     });
   },
   view(stored) {
     const parsed = storedHooks.safeParse(stored);
-    return (parsed.success ? parsed.data : []).map((hook) => ({ name: hook.name, url: hook.url, token: { configured: hook.token !== undefined } }));
+    return (parsed.success ? parsed.data : []).map((hook) => ({
+      name: hook.name,
+      url: hook.url,
+      token: { configured: hook.token !== undefined },
+      timeoutSeconds: hook.timeoutSeconds ?? WEBHOOK_DEFAULT_TIMEOUT_SECONDS,
+    }));
   },
 });
 

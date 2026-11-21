@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { encryptSecret } from "@deskvoice/core";
+import { encryptSecret, withOrg } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../core/test/helpers";
 import { createFixture, eventsOf, fakeFetch, fakeLookup, putSetting, secretKey } from "../../test/helpers";
+import { loadAllowedWebhooks, webhookTimeoutMs } from "../connectors/webhook";
 import { MAX_CALL_WEBHOOK_PER_CALL, runTool } from "../run-tool";
 import { createCallWebhook } from "./call_webhook";
 
@@ -122,6 +123,50 @@ describe("call_webhook", () => {
     expect(last?.payload).toMatchObject({ name: "call_webhook", ok: false, outcome: "unknown", message: expect.stringContaining("não respondeu a tempo"), spent: true });
     // Não é a falha genérica: nada de "Não consegui concluir" nem detalhe de erro.
     expect(last?.payload.error).toBeUndefined();
+  });
+
+  it("o prazo gravado no webhook vale: servidor que responde em 12 s dá desconhecido com 10 e responde com 15", { timeout: 30_000 }, async () => {
+    const ctx = await createFixture(app, "webhook prazo");
+    await putSetting(app, ctx.organizationId, "webhooks.allowed", [
+      { name: "padrao", url: "https://slow.example.com/a", timeoutSeconds: 10 },
+      { name: "paciente", url: "https://slow.example.com/b", timeoutSeconds: 15 },
+    ]);
+    // Servidor falso que leva 12 s para responder, e desiste se o pedido for abortado antes.
+    const seen: Record<string, "answered" | "aborted"> = {};
+    const slow: typeof fetch = (input, init) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          seen[String(input)] = "answered";
+          resolve(new Response('{"ok":true}'));
+        }, 12_000);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          seen[String(input)] = "aborted";
+          reject(init.signal?.reason);
+        });
+      });
+    const run = (name: string) => runTool(createCallWebhook({ fetch: slow, lookup: fakeLookup(), secretKey: () => secretKey }), { name }, ctx);
+
+    const [short, long] = await Promise.all([run("padrao"), run("paciente")]);
+    expect(short).toMatchObject({ ok: false, outcome: "unknown" });
+    expect(long).toMatchObject({ ok: true, data: { status: 200, body: '{"ok":true}' } });
+    // O de 10 s desistiu antes da resposta; o de 15 s esperou por ela.
+    expect(seen).toEqual({ "https://slow.example.com/a": "aborted", "https://slow.example.com/b": "answered" });
+  });
+
+  it("lista gravada sem prazo continua valendo, com 10 s; prazo fora de 1 a 30 gravado por fora é recusado na leitura", async () => {
+    const ctx = await createFixture(app, "webhook lista antiga");
+    await putSetting(app, ctx.organizationId, "webhooks.allowed", [{ name: "antigo", url: "https://old.example.com/x" }]);
+    const hooks = await withOrg(app, ctx.organizationId, (q) => loadAllowedWebhooks(q, secretKey));
+    expect(hooks).toEqual([{ name: "antigo", url: "https://old.example.com/x", token: undefined }]);
+    expect(webhookTimeoutMs(hooks[0]!)).toBe(10_000);
+    expect((await runTool(tool(fakeFetch()), { name: "antigo" }, ctx)).ok).toBe(true);
+
+    for (const bad of [0, 31]) {
+      const value = JSON.stringify([{ name: "antigo", url: "https://old.example.com/x", timeoutSeconds: bad }]);
+      await withOrg(app, ctx.organizationId, (q) => q.exec("update settings set value = $1 where key = 'webhooks.allowed'", [value]));
+      await expect(withOrg(app, ctx.organizationId, (q) => loadAllowedWebhooks(q, secretKey))).rejects.toThrow(/malformed/);
+    }
   });
 
   it("falha de rede segue como erro genérico, sem desfecho desconhecido", async () => {
