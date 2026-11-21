@@ -12,6 +12,8 @@ export interface Me {
   whatsapp?: string | null;
   /** O nome da organização; a tela do agente o mostra no texto padrão da mensagem para quem ligou. */
   organizationName?: string;
+  /** O idioma da organização (`organizations.language`): o que o agente novo e o menu novo propõem. Nulo: pt-BR. */
+  organizationLanguage?: "pt-BR" | "en" | "es" | null;
   /** Se a conta administra a instalação (`isInstallationAdmin`, seção 3.2 do desenho do R8). */
   installationAdmin?: boolean;
   /** Se a lista de quem administra a instalação já é explícita: a tela de atualizar mora na área da instalação. */

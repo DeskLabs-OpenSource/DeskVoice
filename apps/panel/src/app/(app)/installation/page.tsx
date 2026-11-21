@@ -14,6 +14,7 @@ import { formatDateTime, formatMoney } from "../../../ui/format";
 import { Badge, Button, EmptyState, Field, Notice, Panel, Select, Skeleton, TextArea, TextInput } from "../../../ui/kit";
 import { bornWithText, type DefaultLimits } from "./born-with";
 import { useInstallationAction, useInstallationErrorText } from "./errors";
+import type { OrganizationLanguage } from "../../../ui/proposed-language";
 import { spendCapField, spendCapValue } from "./spend-cap";
 
 interface Organization {
@@ -379,7 +380,18 @@ function LimitsFields({ organization, limits, t, onDone, onCancel }: { organizat
  * Os limites com que uma organização nova nasce (seção 3.5 do desenho do R8, fatia 7d), com os mesmos
  * campos dos limites de uma organização. Valem só para as criadas daqui em diante.
  */
-function DefaultLimitsPanel({ defaults, t, onSaved }: { defaults: DefaultLimits; t: InstallationDictionary["organizations"]; onSaved(message: string): void }) {
+function DefaultLimitsPanel({
+  defaults,
+  organization,
+  t,
+  onSaved,
+}: {
+  defaults: DefaultLimits;
+  /** O resto do padrão (`GET /installation/defaults/organization`, fatia 8a): o fuso e o idioma. */
+  organization: OrganizationDefaults;
+  t: InstallationDictionary["organizations"];
+  onSaved(message: string): void;
+}) {
   const save = useInstallationAction();
   const [draft, setDraft] = useState<LimitsDraft>({
     maxTrunks: limitField(defaults.maxTrunks),
@@ -434,7 +446,62 @@ function DefaultLimitsPanel({ defaults, t, onSaved }: { defaults: DefaultLimits;
         </div>
         <ActionStatus action={save} />
       </form>
+      <DefaultOrganizationForm defaults={organization} t={t} onSaved={onSaved} />
     </Panel>
+  );
+}
+
+/** O padrão das organizações novas além dos limites (`installation/defaults/organization`). */
+interface OrganizationDefaults {
+  /** `null`: sem padrão, a nova nasce em America/Sao_Paulo, como sempre. */
+  timezone: string | null;
+  /** `null`: sem padrão, a nova nasce sem idioma, e o agente novo e o menu novo dela propõem pt-BR. */
+  language: OrganizationLanguage | null;
+}
+
+const ORGANIZATION_LANGUAGES: readonly OrganizationLanguage[] = ["pt-BR", "en", "es"];
+
+/**
+ * O fuso e o idioma com que uma organização nova nasce (seção 3.5 do desenho do R8, fatia 8a): o fuso
+ * é copiado para a política de saída dela na criação, e o idioma para `organizations.language`, que o
+ * agente novo e o menu novo propõem. Vazio tira o padrão. O servidor confere o fuso com o mesmo
+ * validador do fuso da política de saída.
+ */
+function DefaultOrganizationForm({ defaults, t, onSaved }: { defaults: OrganizationDefaults; t: InstallationDictionary["organizations"]; onSaved(message: string): void }) {
+  const save = useInstallationAction();
+  const [timezone, setTimezone] = useState(defaults.timezone ?? "");
+  const [language, setLanguage] = useState<OrganizationLanguage | "">(defaults.language ?? "");
+  return (
+    <form
+      className="mt-4 grid gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save.run(async () => {
+          await api("/installation/defaults/organization", { method: "PUT", body: { timezone: timezone.trim() === "" ? null : timezone.trim(), language: language === "" ? null : language } });
+          onSaved(t.defaultsSaved);
+        });
+      }}
+    >
+      <Field label={t.defaultsTimezone} hint={t.defaultsTimezoneHint}>
+        <TextInput className="max-w-md" mono value={timezone} onChange={(event) => setTimezone(event.target.value)} />
+      </Field>
+      <Field label={t.defaultsLanguage} hint={t.defaultsLanguageHint}>
+        <Select className="max-w-md" value={language} onChange={(event) => setLanguage(event.target.value as OrganizationLanguage | "")}>
+          <option value="">{t.defaultsLanguageNone}</option>
+          {ORGANIZATION_LANGUAGES.map((each) => (
+            <option key={each} value={each}>
+              {t.defaultsLanguages[each]}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <div>
+        <Button type="submit" variant="primary" busy={save.busy}>
+          {t.save}
+        </Button>
+      </div>
+      <ActionStatus action={save} />
+    </form>
   );
 }
 
@@ -546,6 +613,7 @@ export default function InstallationOrganizations() {
   const t = useDict(ptBR, en, es).organizations;
   const { data, reload } = useApi<Overview>("/installation/organizations");
   const defaults = useApi<DefaultLimits>("/installation/defaults/limits");
+  const organizationDefaults = useApi<OrganizationDefaults>("/installation/defaults/organization");
   const [inviting, setInviting] = useState<{ id: string; name: string } | null>(null);
   const [created, setCreated] = useState<(Created & { name: string }) | null>(null);
   // A frase do que acabou de acontecer numa organização: a suspensão, a reativação ou os limites salvos.
@@ -607,13 +675,15 @@ export default function InstallationOrganizations() {
           }}
         />
       ) : null}
-      {defaults.data ? (
+      {defaults.data && organizationDefaults.data ? (
         <DefaultLimitsPanel
           defaults={defaults.data}
+          organization={organizationDefaults.data}
           t={t}
           onSaved={(message) => {
             setNotice(message);
             defaults.reload();
+            organizationDefaults.reload();
           }}
         />
       ) : null}

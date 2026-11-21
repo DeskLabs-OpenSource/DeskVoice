@@ -6,9 +6,11 @@ import { optionalPhone } from "../../../../../server/shapes";
 const COLUMNS = `name, email, role, phone_e164 as phone, whatsapp_e164 as whatsapp`;
 
 // O nome da organização vai junto: a tela do agente o mostra no texto padrão da mensagem para quem ligou.
+// E o idioma dela (`organizations.language`, R8 fatia 8a): o que os formulários de agente novo e de
+// menu novo propõem. Nulo nas organizações sem idioma; os formulários propõem pt-BR.
 async function me(q: OrgQuery, session: Session) {
   const row = await q.one(
-    `select u.name, u.email, u.role, u.phone_e164 as phone, u.whatsapp_e164 as whatsapp, o.name as "organizationName"
+    `select u.name, u.email, u.role, u.phone_e164 as phone, u.whatsapp_e164 as whatsapp, o.name as "organizationName", o.language as "organizationLanguage"
        from users u join organizations o on o.id = u.organization_id
       where u.id = $1`,
     [session.userId],
