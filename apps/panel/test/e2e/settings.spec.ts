@@ -249,3 +249,56 @@ test("testar a chave: o motor simulado não pede chave, e um motor sem chave sal
   await expect(page.getByText(settings.keyMissing, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: settings.keyTest, exact: true })).toHaveCount(0);
 });
+
+// Fatia 2b: o prazo de resposta de cada webhook é gravado e volta ao recarregar. A lista começa e
+// termina vazia, para não mudar o cartão de Integrações dos outros testes.
+test("webhooks: o prazo de resposta nasce em 10 s, é gravado e volta ao recarregar", async ({ page }) => {
+  await signIn(page);
+  const putHooks = async (value: unknown) => expect((await page.request.put("/api/v1/settings/webhooks.allowed", { data: { value } })).status()).toBe(200);
+  await putHooks(null);
+  try {
+    await page.goto("/settings/integrations");
+    await expect(page.getByText(settings.hooksEmpty, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: settings.addHook, exact: true }).click();
+    await page.getByLabel(settings.hookName, { exact: true }).fill("crm-e2e");
+    await page.getByLabel(settings.hookUrl, { exact: true }).fill("https://hooks.example.test/e2e");
+    const timeout = page.getByLabel(settings.hookTimeout, { exact: true });
+    await expect(timeout).toHaveValue("10");
+    await timeout.fill("17");
+    await page.getByRole("button", { name: settings.saveHooks, exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: common.actions.saved })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByLabel(settings.hookTimeout, { exact: true })).toHaveValue("17");
+    const saved = (await (await page.request.get("/api/v1/settings/webhooks.allowed")).json()) as { data: { value: Array<{ name: string; timeoutSeconds: number }> } };
+    expect(saved.data.value).toEqual([expect.objectContaining({ name: "crm-e2e", timeoutSeconds: 17 })]);
+  } finally {
+    await putHooks(null);
+  }
+});
+
+// Fatia 4: o relatório de cada ligação é pedido por webhook, desmarcado de fábrica, e a escolha volta
+// ao recarregar. A lista começa e termina vazia, como no teste do prazo.
+test("webhooks: a caixa do relatório de cada ligação nasce desmarcada, é gravada e volta ao recarregar", async ({ page }) => {
+  await signIn(page);
+  const putHooks = async (value: unknown) => expect((await page.request.put("/api/v1/settings/webhooks.allowed", { data: { value } })).status()).toBe(200);
+  await putHooks(null);
+  try {
+    await page.goto("/settings/integrations");
+    await page.getByRole("button", { name: settings.addHook, exact: true }).click();
+    await page.getByLabel(settings.hookName, { exact: true }).fill("crm-relatorio");
+    await page.getByLabel(settings.hookUrl, { exact: true }).fill("https://hooks.example.test/relatorio");
+    const report = page.getByLabel(settings.hookReport, { exact: true });
+    await expect(report).not.toBeChecked();
+    await report.check();
+    await page.getByRole("button", { name: settings.saveHooks, exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: common.actions.saved })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByLabel(settings.hookReport, { exact: true })).toBeChecked();
+    const saved = (await (await page.request.get("/api/v1/settings/webhooks.allowed")).json()) as { data: { value: Array<{ name: string; events: string[] }> } };
+    expect(saved.data.value).toEqual([expect.objectContaining({ name: "crm-relatorio", events: ["call.report"] })]);
+  } finally {
+    await putHooks(null);
+  }
+});
