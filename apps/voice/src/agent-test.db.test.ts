@@ -1,5 +1,8 @@
 // O executor do teste do agente (item 7, fatia 7a, seção 5.4 de
 // docs/specs/2026-11-21-testes-do-agente.md), contra o banco, com o motor simulado em modo texto.
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { withOrg, withSystem, type AgentTestTurns, type Db } from "@deskvoice/core";
 import { runTool } from "@deskvoice/tools";
 import { createSimulatedEngine, SIMULATED_PREFIX, type SimulatedScript, type VoiceEngine } from "@deskvoice/voice-engine";
@@ -11,7 +14,8 @@ import { loadTools } from "@deskvoice/tools";
 import { AGENT_TEST_RUNS_KEPT, AGENT_TEST_TURN_TIMEOUT_MS, NO_WRITTEN_RESULT, startAgentTest, type AgentTestDeps } from "./agent-test";
 import { LIA_TEST_TURNS, liaTestScript } from "./cli/demo-agent-test";
 import { closeOrphanTestRuns } from "./reconcile";
-import { createAgent, createOrganization, fakeClock, testSchedule } from "./testing/db";
+import { startVoiceServer } from "./server";
+import { createAgent, createOrganization, fakeAri, fakeClock, testSchedule } from "./testing/db";
 import { waitFor } from "./testing/helpers";
 
 const { app, owner } = openTestDbs();
@@ -293,5 +297,42 @@ describe("rodadas órfãs na partida do processo", { timeout: 120_000 }, () => {
     clock.advance(5000);
     expect(await closeOrphanTestRuns(app, clock, () => undefined)).toBe(0);
     expect((await runsOf(first.organizationId, first.testId)).find((row) => row.id === runningA?.id)?.finished_at).not.toEqual(clock.now());
+  });
+
+  // A fiação na partida, e não a função (coberta acima): sem a chamada em `startVoiceServer`,
+  // a rodada órfã continua `running` depois de o processo subir.
+  it("subir o processo de voz fecha a rodada `running` que o processo anterior deixou", async () => {
+    const org = await liaAgent("agent-test-orphan-startup");
+    const clock = fakeClock();
+    const orphan = await withOrg(app, org.organizationId, (q) =>
+      q.one<{ id: string }>("insert into agent_test_runs (organization_id, test_id, status, engine, config_hash, started_at) values ($1, $2, 'running', 'simulated', 'x', $3) returning id", [org.organizationId, org.testId, clock.now()]),
+    );
+    clock.advance(5000);
+    const scratch = await mkdtemp(path.join(tmpdir(), "deskvoice-agent-test-"));
+    const timers = testSchedule();
+    const server = await startVoiceServer({
+      db: app,
+      clock,
+      engines: new Map([["simulated", createSimulatedEngine()]]),
+      tools: await loadTools(),
+      ari: fakeAri(),
+      secretKey,
+      audioSocketPort: 0,
+      internalPort: 0,
+      webPort: 0,
+      internalToken: "token-de-teste",
+      trunksFile: path.join(scratch, "trunks.conf"),
+      publicIp: "203.0.113.10",
+      host: "127.0.0.1",
+      schedule: timers.schedule,
+      resolveName: async () => ["192.0.2.53"],
+      now: timers.now,
+    });
+    try {
+      expect((await runsOf(org.organizationId, org.testId)).find((row) => row.id === orphan?.id)).toMatchObject({ status: "error", error_code: "process_restarted", finished_at: clock.now() });
+    } finally {
+      await server.close();
+      await rm(scratch, { recursive: true, force: true });
+    }
   });
 });
