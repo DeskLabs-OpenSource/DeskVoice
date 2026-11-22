@@ -197,8 +197,7 @@ A descrição e o esquema são dado de terceiro. São conferidos duas vezes.
 | Argumento inválido | o `runTool` já recusa antes de rodar | não gasta |
 
   A linha nunca fica muda. Todo desfecho devolve uma `message` que diz ao modelo o que falar, e o
-  `catch` do `runTool` cobre o que escapar. O corpo inteiro da resposta é limitado pela `safeFetch`
-  (16 KiB).
+  `catch` do `runTool` cobre o que escapar.
 - **O cliente MCP não segue redirecionamento.** Todo pedido do `client.ts` sai pela `safeFetch` com
   uma opção nova, `redirect: "error"` (`SafeFetchOptions`; o padrão segue `"follow"`, e o
   `call_webhook` não muda). Com ela, qualquer resposta 3xx com `Location`, da mesma origem ou de
@@ -207,6 +206,23 @@ A descrição e o esquema são dado de terceiro. São conferidos duas vezes.
   com o `Location` recebido. Na ligação, o erro cai na linha "fora do protocolo" da tabela acima.
   Isso vale para os quatro pedidos (`initialize`, `notifications/initialized`, `tools/list` e
   `tools/call`) e para a rota `discover`, que usa o mesmo `listTools`.
+- **Toda leitura do servidor tem teto de tamanho e de tempo.** Vale para as respostas de
+  `initialize`, `tools/list` e `tools/call`, em JSON ou em SSE, na ligação e na tela:
+  - **Tempo:** o prazo único da sessão MCP (`timeoutSeconds`, no máximo 30 s) cobre a conexão, os
+    cabeçalhos **e a leitura do corpo** de todos os pedidos da sessão. Um servidor que manda a
+    resposta aos poucos, ou só `ping` e comentário de SSE, estoura o mesmo prazo e cai na linha
+    "prazo estourado" da tabela. Na tela, `discover` e `refresh` usam o mesmo prazo.
+  - **Tamanho:** `initialize` e `tools/call` ficam no teto padrão da `safeFetch`, 16 KiB.
+    `tools/list` usa `maxBytes` de 256 KiB e guarda no máximo 100 ferramentas. Da 101ª em diante,
+    nada entra no retrato, e a tela diz quantas ficaram de fora. A paginação (`nextCursor`) é seguida
+    até 5 páginas, dentro do mesmo prazo e somando no mesmo teto. Resposta cortada
+    (`truncated: true`) é erro ("fora do protocolo"). Nunca se lê JSON pela metade.
+  - **SSE:** o cliente não espera o fluxo fechar. A `SafeFetchOptions` ganha uma opção nova,
+    `stopWhen(bodySoFar): boolean`, conferida a cada pedaço lido. O `client.ts` para no primeiro
+    evento completo cujo JSON traz o `id` do pedido e cancela o resto do fluxo. Os eventos antes
+    dele (notificação, `ping`) contam no mesmo teto de bytes e no mesmo prazo. Um evento maior que o
+    teto vira corte e, portanto, erro. Sem a opção, a `safeFetch` segue como hoje.
+  - **O que vai ao modelo:** o `data.text` é cortado em 4 000 caracteres, com `truncated: true`.
 
 ### 5.4 A sessão e o teto (`apps/voice/src/call-session.ts`, `packages/tools/src/run-tool.ts`)
 
@@ -218,8 +234,10 @@ A descrição e o esquema são dado de terceiro. São conferidos duas vezes.
 - **O teto é por servidor, não por ferramenta.** O `Tool` ganha `budget?: { key: string; max:
   number }`, e o `takeSlot` do `runTool` usa `tool.budget?.key ?? tool.name`. As ferramentas MCP com
   `writes: true` de um servidor dividem `mcp:<slug>`, com **5** por ligação, o mesmo número do
-  `MAX_CALL_WEBHOOK_PER_CALL`. As com `writes: false` não têm teto, como a
-  `agenda_horarios_livres`. A contagem do banco no `takeSlot` passa a olhar `payload->>'budget'`
+  `MAX_CALL_WEBHOOK_PER_CALL`. As com `writes: false` dividem outro teto do servidor,
+  `mcp:<slug>:leitura`, com **20** por ligação. Assim, uma consulta em laço não deixa a pessoa em
+  silêncio nem martela o servidor de fora, e o uso normal não chega perto disso. A vaga de leitura
+  segue a mesma tabela da 5.3: só o argumento inválido a devolve. A contagem do banco no `takeSlot` passa a olhar `payload->>'budget'`
   quando houver, e o `tool_result` grava `budget` junto de `spent`.
 - **Custo e log.** Cada chamada já vira `tool_called` e `tool_result` em `call_events` pelo
   `runTool`. O `tool_result` da ferramenta MCP ganha `server: slug` e `durationMs`, para a linha do
@@ -262,6 +280,16 @@ Se o dono preferir aprovação obrigatória para `writes: true`, é a opção 2B
     mudou, sumiu). Ao gravar, a ferramenta que mudou volta `allowed: false`.
   - `DELETE /mcp-servers/:slug` com corpo `{ confirm: "<slug>" }`: **destrutivo**. Sem o `confirm`
     igual ao `slug`, responde 400 e nada muda.
+- **Cerca da sessão de suporte.** As quatro rotas de escrita entram em
+  `fences/support-session-routes.ts` como `forbid`, e cada método passa `support: false` ao
+  `handle`:
+  - `POST mcp-servers/discover`, porque manda um segredo digitado a um destino de fora;
+  - `PUT mcp-servers/[slug]`, porque grava uma credencial que sobrevive à sessão;
+  - `POST mcp-servers/[slug]/refresh`, porque usa o segredo guardado contra o servidor;
+  - `DELETE mcp-servers/[slug]`.
+
+  É a mesma classificação do `PUT settings/[key]`, onde os webhooks moram hoje. O `GET` é leitura e
+  fica fora da tabela, como toda leitura.
 - **Descadastrar nomeia o alvo.** O botão abre um pedido que diz o rótulo e o endereço do servidor,
   quantas ferramentas ele tem marcadas e **quais agentes as usam, pelo nome**. A pessoa digita o
   `slug` para confirmar, no mesmo padrão da remoção de webhook (`integrations/page.tsx:39` e `:98`).
@@ -275,8 +303,8 @@ Se o dono preferir aprovação obrigatória para `writes: true`, é a opção 2B
 
 | Fatia | O que entra | Depende de | Prova |
 |---|---|---|---|
-| **8a** | `mcp/servers.ts`, `mcp/schema.ts`, `mcp/client.ts`, `mcp/tool.ts`; `budget` no `Tool` e no `runTool`; `enabledToolsFor` junta as MCP; cerca do `__`. Sem tela: só alcançável gravando `mcp.servers` por teste. | decisão da seção 9; #537 e #543 mesclados (os dois mexem em `call-session.ts`) | servidor MCP falso em processo (resposta JSON e SSE), cada linha da tabela da 5.3 com sabotagem, o redirecionamento da 5.3 (307 e 302, para a mesma origem e para outra, com o segredo num `headerName` que não é `Authorization`: o pedido falha e o destino do `Location`, um segundo servidor falso, não recebe pedido nenhum; sabotagem: tirar `redirect: "error"` do `client.ts` faz o teste falhar), um teste da `safeFetch` de que o padrão segue igual, isolamento entre duas organizações, esquema fora do subconjunto recusado |
-| **8b** | as rotas e a tela da 5.6, a confirmação por nome, a limpeza de `agents.tools`, as caixas na tela do agente | 8a | `*.db.test.ts` das rotas (segredo só `{ configured }`, trocar URL apaga segredo, `DELETE` sem `confirm` não remove, impressão digital que não bate é recusada); e2e da descoberta com servidor falso |
+| **8a** | `mcp/servers.ts`, `mcp/schema.ts`, `mcp/client.ts`, `mcp/tool.ts`; `budget` no `Tool` e no `runTool`; `enabledToolsFor` junta as MCP; cerca do `__`. Sem tela: só alcançável gravando `mcp.servers` por teste. | decisão da seção 9; #537 e #543 mesclados (os dois mexem em `call-session.ts`) | servidor MCP falso em processo (resposta JSON e SSE), cada linha da tabela da 5.3 com sabotagem, o redirecionamento da 5.3 (307 e 302, para a mesma origem e para outra, com o segredo num `headerName` que não é `Authorization`: o pedido falha e o destino do `Location`, um segundo servidor falso, não recebe pedido nenhum; sabotagem: tirar `redirect: "error"` do `client.ts` faz o teste falhar), os tetos de leitura da 5.3 com servidor falso (corpo acima do teto, `tools/list` com 101 ferramentas e com 6 páginas, SSE que goteja `ping` até o prazo, SSE que manda a resposta e não fecha: a chamada volta antes do prazo; sabotagens: tirar o `stopWhen`, tirar o `maxBytes` do `tools/list` ou ler `truncated` como sucesso faz um teste falhar), o teto de 20 leituras, um teste da `safeFetch` de que o padrão segue igual, isolamento entre duas organizações, esquema fora do subconjunto recusado |
+| **8b** | as rotas e a tela da 5.6, a confirmação por nome, a limpeza de `agents.tools`, as caixas na tela do agente | 8a | `*.db.test.ts` das rotas (segredo só `{ configured }`, trocar URL apaga segredo, `DELETE` sem `confirm` não remove, impressão digital que não bate é recusada); a cerca da sessão de suporte com as quatro linhas `forbid`, e o `support-session.db.test.ts` chamando cada uma (403 para a sessão de suporte, sucesso para `admin`); e2e da descoberta com servidor falso |
 | **8c** | `needsApproval` com `askApproval` (só se a decisão 2 for A ou B) | 8a | teste: negado devolve `noEffect`, padrão vem do operador |
 | **8d** | fragmento `.changes/`, linha nos três README, guia curto em `docs/` de como ligar um servidor | 8b | revisão de texto |
 
@@ -346,6 +374,10 @@ tarefa de construção abre para elas antes. O prazo de 5 dias úteis não vale 
 dono, nada mescla, nem este spec.
 
 ## 10. Não medido
+
+- Se o prazo da `safeFetch` de hoje já interrompe a leitura de um corpo que goteja. O `AbortSignal`
+  vai ao `fetch` do undici, mas não testei a leitura. A 8a prova isso (5.3).
+- Se 256 KiB e 100 ferramentas bastam para os servidores comuns. Os números são escolha, não medida.
 
 - Se o `@modelcontextprotocol/sdk` deixa todo pedido passar pelo `fetch` injetado. Não li o código
   dele. A recomendação por B não depende disso, mas a comparação com A depende.
