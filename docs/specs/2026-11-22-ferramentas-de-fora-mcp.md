@@ -1,7 +1,8 @@
 # Ferramentas de fora pela tela: servidor MCP cadastrado pelo operador (item 8 da pesquisa Vapi)
 
-- **Estado:** desenho. Nenhuma fatia começa antes da decisão do dono (seção 9), porque o item abre
-  uma capacidade nova: o agente passa a chamar ferramentas que o produto não conhece.
+- **Estado:** desenho, com a decisão dada em 22/11 (seção 9). A recomendação ficou nas três
+  perguntas. Como o item abre capacidade nova, o merge de cada fatia espera a palavra do próprio
+  dono.
 - **Data:** 2026-11-22
 - **Quem pediu:** o dono aprovou em 21/11 a terceira leva da pesquisa Vapi (itens 7, 8 e 10), com
   "desenho maior antes". A fonte é o estudo de lacunas do board, de 20/11.
@@ -314,6 +315,23 @@ O pedido vai à pasta do dono pelo maestro, no formato do `GOVERNANCE.md`. Em re
    ligação, como a Vapi, sem retrato.
 
 **Se ninguém responder em 5 dias úteis, vale: 1A, 2A, 3A.**
+
+**Resposta (22/11, pelo orquestrador do roteiro, com a autonomia dada pelo dono em 21/11):** ficou
+a recomendação nas três.
+
+- **Cliente:** A, o cliente mínimo nosso sobre a `safeFetch`. Um SDK que não se sabe se passa pela
+  guarda de destino abriria um caminho que ninguém conferiu.
+- **Aprovação:** A, opcional por ferramenta, com o teto de 5 escritas por servidor por ligação. A
+  aprovação obrigatória empurraria o operador para o `call_webhook`, que confere menos. O padrão
+  "escreve" já é o lado cauteloso.
+- **Lista:** A, lida só na tela, com retrato aprovado. Ferramenta que mudou volta desmarcada.
+
+Duas condições a mais, que entram nas fatias:
+
+- **A 8a chama ao menos um servidor MCP real conhecido** e anota no PR se o cliente mínimo funciona
+  com ele. A 8d continua com os dois servidores reais.
+- **O merge de cada fatia espera a palavra do próprio dono**, pedida pelo maestro, por ser
+  capacidade nova.
 
 ## 10. Não medido
 
