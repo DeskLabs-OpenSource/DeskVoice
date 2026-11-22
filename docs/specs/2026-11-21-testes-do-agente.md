@@ -1,7 +1,7 @@
 # Testes do agente: conversas escritas pelo operador, conferidas antes de pôr no ar (item 7 da pesquisa Vapi)
 
-- **Estado:** desenho, com a decisão dada em 22/11 (seção 9). A recomendação ficou nas três
-  perguntas.
+- **Estado:** desenho, com a recomendação aceita pelo orquestrador do roteiro em 22/11 (seção 9).
+  Só a 7a anda. A 7b, a 7c e a 7d esperam a palavra do dono, e este spec também.
 - **Data:** 2026-11-21
 - **Quem pediu:** o dono aprovou em 21/11 a terceira leva da pesquisa Vapi (itens 7, 8 e 10), com
   "desenho maior antes". A fonte é o estudo de lacunas do board, de 20/11.
@@ -359,6 +359,11 @@ a recomendação nas três.
 - **Disparo:** só por botão. Gastar a chave do operador sem ele pedir surpreende quem já instalou.
   O aviso "não rodado com a configuração atual" cobre o esquecimento.
 - **Custo:** entra no extrato (`source = 'test'`) e no teto do mês.
+
+**O que isso libera (22/11, do orquestrador):** só a fatia 7a, que usa o motor simulado e o
+`pnpm demo` e não gasta nada. A 7b, a 7c e a 7d esperam a palavra do dono, e nenhuma tarefa de
+construção abre para elas antes. O prazo de 5 dias úteis não vale aqui: sem a palavra do dono,
+nada mescla, nem este spec.
 
 ## 10. Não medido
 
