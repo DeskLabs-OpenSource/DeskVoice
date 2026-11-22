@@ -199,6 +199,14 @@ A descrição e o esquema são dado de terceiro. São conferidos duas vezes.
   A linha nunca fica muda. Todo desfecho devolve uma `message` que diz ao modelo o que falar, e o
   `catch` do `runTool` cobre o que escapar. O corpo inteiro da resposta é limitado pela `safeFetch`
   (16 KiB).
+- **O cliente MCP não segue redirecionamento.** Todo pedido do `client.ts` sai pela `safeFetch` com
+  uma opção nova, `redirect: "error"` (`SafeFetchOptions`; o padrão segue `"follow"`, e o
+  `call_webhook` não muda). Com ela, qualquer resposta 3xx com `Location`, da mesma origem ou de
+  outra, encerra o pedido com erro, e nenhum segundo pedido sai. O endereço cadastrado tem de ser o
+  final. Na tela, a descoberta mostra "o servidor pediu outro endereço; cadastre o endereço final"
+  com o `Location` recebido. Na ligação, o erro cai na linha "fora do protocolo" da tabela acima.
+  Isso vale para os quatro pedidos (`initialize`, `notifications/initialized`, `tools/list` e
+  `tools/call`) e para a rota `discover`, que usa o mesmo `listTools`.
 
 ### 5.4 A sessão e o teto (`apps/voice/src/call-session.ts`, `packages/tools/src/run-tool.ts`)
 
@@ -246,7 +254,7 @@ Se o dono preferir aprovação obrigatória para `writes: true`, é a opção 2B
   administra a organização, como os webhooks:
   - `GET /mcp-servers`: a lista, com `secret: { configured }`.
   - `POST /mcp-servers/discover` `{ url, headerName?, secret?, timeoutSeconds? }`: lista as
-    ferramentas pela `safeFetch` **sem gravar**, para a tela mostrar antes de salvar.
+    ferramentas pelo `listTools` do `client.ts` (a mesma `safeFetch`, sem seguir redirecionamento) **sem gravar**, para a tela mostrar antes de salvar.
   - `PUT /mcp-servers/:slug`: grava o servidor com o retrato e as marcas. O retrato que a tela manda
     é conferido de novo (a impressão digital tem de bater com uma busca feita no servidor). O
     cliente não grava descrição inventada.
@@ -267,7 +275,7 @@ Se o dono preferir aprovação obrigatória para `writes: true`, é a opção 2B
 
 | Fatia | O que entra | Depende de | Prova |
 |---|---|---|---|
-| **8a** | `mcp/servers.ts`, `mcp/schema.ts`, `mcp/client.ts`, `mcp/tool.ts`; `budget` no `Tool` e no `runTool`; `enabledToolsFor` junta as MCP; cerca do `__`. Sem tela: só alcançável gravando `mcp.servers` por teste. | decisão da seção 9; #537 e #543 mesclados (os dois mexem em `call-session.ts`) | servidor MCP falso em processo (resposta JSON e SSE), cada linha da tabela da 5.3 com sabotagem, isolamento entre duas organizações, esquema fora do subconjunto recusado |
+| **8a** | `mcp/servers.ts`, `mcp/schema.ts`, `mcp/client.ts`, `mcp/tool.ts`; `budget` no `Tool` e no `runTool`; `enabledToolsFor` junta as MCP; cerca do `__`. Sem tela: só alcançável gravando `mcp.servers` por teste. | decisão da seção 9; #537 e #543 mesclados (os dois mexem em `call-session.ts`) | servidor MCP falso em processo (resposta JSON e SSE), cada linha da tabela da 5.3 com sabotagem, o redirecionamento da 5.3 (307 e 302, para a mesma origem e para outra, com o segredo num `headerName` que não é `Authorization`: o pedido falha e o destino do `Location`, um segundo servidor falso, não recebe pedido nenhum; sabotagem: tirar `redirect: "error"` do `client.ts` faz o teste falhar), um teste da `safeFetch` de que o padrão segue igual, isolamento entre duas organizações, esquema fora do subconjunto recusado |
 | **8b** | as rotas e a tela da 5.6, a confirmação por nome, a limpeza de `agents.tools`, as caixas na tela do agente | 8a | `*.db.test.ts` das rotas (segredo só `{ configured }`, trocar URL apaga segredo, `DELETE` sem `confirm` não remove, impressão digital que não bate é recusada); e2e da descoberta com servidor falso |
 | **8c** | `needsApproval` com `askApproval` (só se a decisão 2 for A ou B) | 8a | teste: negado devolve `noEffect`, padrão vem do operador |
 | **8d** | fragmento `.changes/`, linha nos três README, guia curto em `docs/` de como ligar um servidor | 8b | revisão de texto |
