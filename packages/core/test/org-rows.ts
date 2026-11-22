@@ -62,6 +62,9 @@ export function organizationFactories(nextAccount: () => string): Record<string,
       updated_at: at,
     }),
     agents: (organization_id, p) => ({ organization_id, name: "Agent", engine: "simulated", analyst_id: p.analysts?.id }),
+    // Os testes do agente (item 7, fatia 7a): o teste e uma rodada dele.
+    agent_tests: (organization_id, p) => ({ organization_id, agent_id: p.agents?.id, name: "Teste", turns: JSON.stringify([{ user: "Oi" }]) }),
+    agent_test_runs: (organization_id, p) => ({ organization_id, test_id: p.agent_tests?.id, status: "passed", engine: "simulated", config_hash: "x", started_at: at, finished_at: at }),
     // O menu por teclas (#223). O anúncio vai junto: é o `bytea` que a RLS tem de esconder da outra organização.
     ivr_menus: (organization_id) => ({ organization_id, name: "Menu", prompt_audio: Buffer.alloc(16), prompt_audio_ms: 1, created_at: at, updated_at: at }),
     // O número atende o menu (`mode = 'ivr'`): a chave dele para `ivr_menus` é `on delete restrict`, e a

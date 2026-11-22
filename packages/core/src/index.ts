@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./accounts";
+export * from "./agent-tests";
 export * from "./analysis";
 export * from "./agent-analysis-brain";
 export * from "./analysts";
