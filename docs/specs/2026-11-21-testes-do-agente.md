@@ -1,7 +1,7 @@
 # Testes do agente: conversas escritas pelo operador, conferidas antes de pôr no ar (item 7 da pesquisa Vapi)
 
-- **Estado:** desenho. Nenhuma fatia começa antes da decisão do dono (seção 9). A fatia 7a pode
-  começar com qualquer resposta, porque só usa o motor simulado.
+- **Estado:** desenho, com a decisão dada em 22/11 (seção 9). A recomendação ficou nas três
+  perguntas.
 - **Data:** 2026-11-21
 - **Quem pediu:** o dono aprovou em 21/11 a terceira leva da pesquisa Vapi (itens 7, 8 e 10), com
   "desenho maior antes". A fonte é o estudo de lacunas do board, de 20/11.
@@ -350,6 +350,15 @@ o padrão que vale sem resposta:
 - o custo do teste entra no teto do mês e no extrato.
 
 A 7a não depende da resposta.
+
+**Resposta (22/11, pelo orquestrador do roteiro, com a autonomia dada pelo dono em 21/11):** ficou
+a recomendação nas três.
+
+- **Motor:** C, o motor do próprio agente em modo texto. Um verde precisa dizer algo do modelo que
+  atende o telefone. A tela avisa, como a Vapi e a Retell, que o teste não cobre ouvido nem voz.
+- **Disparo:** só por botão. Gastar a chave do operador sem ele pedir surpreende quem já instalou.
+  O aviso "não rodado com a configuração atual" cobre o esquecimento.
+- **Custo:** entra no extrato (`source = 'test'`) e no teto do mês.
 
 ## 10. Não medido
 
