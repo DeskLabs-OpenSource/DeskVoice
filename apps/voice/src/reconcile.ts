@@ -36,3 +36,26 @@ export async function closeOrphanCalls(db: Db, clock: Clock, log: Logger): Promi
   if (closed > 0) log("info", "calls left open by the previous process were closed", { count: closed });
   return closed;
 }
+
+/**
+ * Roda na partida, logo depois de `closeOrphanCalls`, e com a mesma forma. Toda rodada de teste do
+ * agente ainda `running` ficou órfã: quem a conduzia era o processo anterior. Sem isto, ela ficaria
+ * "rodando" para sempre na tela. Cada uma vira `error`/`process_restarted`. A troca é condicional,
+ * então rodar duas vezes não muda nada, e a rodada que já terminou fica como está.
+ */
+export async function closeOrphanTestRuns(db: Db, clock: Clock, log: Logger): Promise<number> {
+  const orphans = await withSystem(db, (q) => q.many<{ id: string; organization_id: string }>("select id, organization_id from agent_test_runs where status = 'running' order by started_at"));
+  let closed = 0;
+  for (const orphan of orphans) {
+    try {
+      const updated = await withOrg(db, orphan.organization_id, (q) =>
+        q.exec("update agent_test_runs set status = 'error', error_code = 'process_restarted', finished_at = $2 where id = $1 and status = 'running'", [orphan.id, clock.now()]),
+      );
+      if (updated === 1) closed += 1;
+    } catch (error) {
+      log("error", "could not close an orphan agent test run", { runId: orphan.id, error: messageOf(error) });
+    }
+  }
+  if (closed > 0) log("info", "agent test runs left open by the previous process were closed", { count: closed });
+  return closed;
+}

@@ -13,7 +13,7 @@ import { startInternalApi } from "./internal-api";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { startOutboundCall } from "./outbound";
 import { removePartialRecordings } from "./recording";
-import { closeOrphanCalls } from "./reconcile";
+import { closeOrphanCalls, closeOrphanTestRuns } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
 import { realSchedule, type Schedule } from "./transport";
 import { applyTrunks, checkTrunks, REFRESH_ALLOWED_MS, refreshAllowed, resolveSipName, type ResolveName, type TrunksDeps } from "./trunks";
@@ -71,6 +71,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   const log = deps.log ?? silentLogger;
   // Antes de atender qualquer coisa: o que o processo anterior deixou aberto não é de ninguém.
   await closeOrphanCalls(db, clock, log);
+  // A rodada de teste do agente que o processo anterior conduzia também não termina mais.
+  await closeOrphanTestRuns(db, clock, log);
   // A gravação que um processo caído deixou pela metade (`.part`) não fecha mais: sai daqui.
   if (deps.recordingsDir) {
     const removed = await removePartialRecordings(deps.recordingsDir).catch((error: unknown) => {
