@@ -147,6 +147,65 @@ describe("transferência sem atendimento que não volta, com a sessão", { timeo
     expect(calls.resume(conexao(VOLTA))).toBe(false);
   });
 
+  it("quem ligou desliga enquanto a volta grava o transfer_completed: fica não atendida, e o aviso sai uma vez", async () => {
+    // A sonda do parecer 7071769356 (R11): o desligamento chega depois do `continue deskvoice-audio` e
+    // antes de a gravação do `transfer_completed` da volta terminar.
+    const { organizationId, callId, channelId, ari, calls, session } = await cenario("failed-hangup-while-recording");
+    await calls.afterAudio(channelId);
+    const ended = calls.transferEnded(channelId, "NOANSWER");
+    while (!ari.log.includes(`continue ${channelId} deskvoice-audio,s`)) await new Promise((resolve) => setImmediate(resolve));
+    await calls.channelDestroyed(channelId, "Normal Clearing");
+    await ended;
+    await confereNaoAtendida(organizationId, callId, session, "NOANSWER");
+    expect(calls.resume(conexao(VOLTA))).toBe(false);
+  });
+
+  it("quem ligou desliga enquanto o Asterisk ainda não aceitou a volta: o aviso sai uma vez, como se ainda tocasse", async () => {
+    // O canal deixa de existir durante o `continue deskvoice-audio`, e a ARI então recusa a volta. É o
+    // desfecho de quem desiste enquanto toca (`CALLER_HANGUP`), e não o da volta que não reconectou.
+    const { organizationId, callId, channelId, ari, calls, session } = await cenario("failed-hangup-during-continue");
+    await calls.afterAudio(channelId);
+    let refuse: () => void = () => undefined;
+    const continuing = new Promise<void>((_resolve, reject) => (refuse = () => reject(new Error("Channel not found"))));
+    ari.continueDialplan = () => continuing;
+    const ended = calls.transferEnded(channelId, "NOANSWER");
+    while (!ari.log.some((line) => line.includes("AUDIOSOCKET_UUID"))) await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    const destroyed = calls.channelDestroyed(channelId, "Normal Clearing");
+    await new Promise((resolve) => setImmediate(resolve));
+    refuse();
+    await Promise.all([destroyed, ended]);
+    expect(await session.done).toMatchObject({ status: "transferred" });
+    const events = await eventsOf(app, callId);
+    const kinds = events.map((each) => each.kind);
+    expect(kinds).not.toContain("transfer_returned");
+    expect(count(kinds, "transfer_completed")).toBe(1);
+    expect(events.find((each) => each.kind === "transfer_completed")?.payload).toMatchObject({ status: "CALLER_HANGUP", answered: false });
+    const sent = await avisos(callId);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.body).toContain("retorne a ligação");
+    const tasks = await tasksOf(app, organizationId);
+    expect(tasks.filter((task) => task.kind === "review_call")).toHaveLength(1);
+  });
+
+  it("o áudio reconecta enquanto a volta grava o transfer_completed: o transfer_returned sai depois dele", async () => {
+    const { callId, channelId, ari, calls, session } = await cenario("failed-resume-while-recording");
+    await calls.afterAudio(channelId);
+    const ended = calls.transferEnded(channelId, "NOANSWER");
+    while (!ari.log.includes(`continue ${channelId} deskvoice-audio,s`)) await new Promise((resolve) => setImmediate(resolve));
+    expect(calls.resume(conexao(VOLTA))).toBe(true);
+    await ended;
+    await waitFor(async () => (await kindsOf(app, callId)).includes("transfer_returned"), "the return to be recorded");
+    const kinds = await kindsOf(app, callId);
+    expect(count(kinds, "transfer_completed")).toBe(1);
+    expect(count(kinds, "transfer_returned")).toBe(1);
+    expect(kinds.indexOf("transfer_completed")).toBeLessThan(kinds.indexOf("transfer_returned"));
+    expect(await avisos(callId)).toEqual([]);
+    expect((await callOf(app, callId)).ended_at).toBeNull();
+    session.stop("process_shutdown");
+    await session.done;
+  });
+
   it("o áudio reconecta: a linha do tempo diz que voltou só então, e a ligação continua sem aviso", async () => {
     const { callId, channelId, calls, session } = await cenario("failed-control-returns");
     await calls.afterAudio(channelId);

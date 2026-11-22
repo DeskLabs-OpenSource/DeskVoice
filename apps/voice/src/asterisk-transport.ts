@@ -342,15 +342,19 @@ export class AsteriskCalls {
     } else if (call.endedAtAnswer) {
       // A ligação já terminou no atendimento (`transferDialed`): aqui só se esquece o canal.
       return;
+    } else if (pendingReturn && call.transferReported && call.returnStatus !== undefined) {
+      // Quem ligou desligou entre a volta e a reconexão do áudio: ninguém atendeu, e a ligação não voltou.
+      // Vem antes do ramo `transferTo`: enquanto `returnToAgent` grava o `transfer_completed` da volta,
+      // o `transferTo` ainda está lá, e aquele ramo fecharia a ligação como `transferred`, sem aviso.
+      // `transferReported` diz que o Asterisk já aceitou a volta; antes disso (o `setVariable` ou o
+      // `continueDialplan` em curso), quem desligou desistiu como se ainda tocasse, e segue abaixo.
+      await this.returnFailed(call, call.returnStatus);
     } else if (call.transferTo) {
       // A transferência atendida termina assim, desligue quem desligar. Sem o atendimento, foi quem
       // ligou que desistiu enquanto tocava: o dialplan não chega a informar o estado da discagem.
       const status = call.transferAnswered ? "ANSWER" : CALLER_HANGUP;
       await this.reportTransfer(call, status);
       this.settle(call, { returned: false, status });
-    } else if (pendingReturn && call.returnStatus !== undefined) {
-      // Quem ligou desligou entre a volta e a reconexão do áudio: ninguém atendeu, e a ligação não voltou.
-      await this.returnFailed(call, call.returnStatus);
     }
   }
 
