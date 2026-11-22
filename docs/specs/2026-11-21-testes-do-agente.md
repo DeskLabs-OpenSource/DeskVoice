@@ -16,8 +16,9 @@ errada. Para conferir antes, existem duas coisas:
 
 - **A chamada simulada** (`apps/voice/src/simulate.ts`, rota interna `POST /calls/simulate`, e o
   `pnpm demo` em `apps/voice/src/cli/demo.ts`). O motor simulado
-  (`packages/voice-engine/src/engines/simulated.ts`) executa um roteiro e **não lê as
-  instruções**: quem decide a ferramenta é o roteiro (`{ toolCall: … }`). Ela prova que a
+  (`packages/voice-engine/src/engines/simulated.ts`) executa um roteiro e **não interpreta as
+  instruções**: ele lê o roteiro de dentro delas (`SIMULATED_PREFIX`, que `call-session` passa
+  intacto), e quem decide a ferramenta é o roteiro (`{ toolCall: … }`). A 7a mexe nessa entrada. Ela prova que a
   tubulação funciona, mas não prova nada sobre o que o modelo faria.
 - **A conversa pelo navegador** (`apps/voice/src/web-calls.ts`): o motor é real, mas a conferência
   é a orelha do operador, uma vez, sem registro do que se esperava. Ela também chama as
@@ -135,7 +136,7 @@ create table agent_test_runs (
   organization_id uuid not null references organizations (id),
   test_id uuid not null,
   status text not null check (status in ('running', 'passed', 'failed', 'error')),
-  error_code text,                    -- vocabulário fechado (5.5), só com status = 'error'
+  error_code text check (error_code in ('turn_timeout', 'tool_loop', 'cost_ceiling', 'engine_failed', 'process_restarted')),
   engine text not null,
   model text,
   config_hash text not null,          -- o retrato da configuração (5.2)
@@ -144,6 +145,7 @@ create table agent_test_runs (
   started_at timestamptz not null,
   finished_at timestamptz,
   unique (organization_id, id),
+  check ((status = 'error') = (error_code is not null)),  -- código só com erro, e erro sempre com código
   foreign key (organization_id, test_id) references agent_tests (organization_id, id) on delete cascade
 );
 create index agent_test_runs_test_idx on agent_test_runs (organization_id, test_id, started_at desc);
@@ -151,10 +153,19 @@ create index agent_test_runs_test_idx on agent_test_runs (organization_id, test_
 -- O custo vai ao mesmo extrato de toda chamada, com a fonte dele.
 alter table usage_ledger alter column call_id drop not null;
 alter table usage_ledger add column test_run_id uuid;
+-- Só test_run_id vira nulo: organization_id é not null, e um "set null" sem lista de colunas
+-- anularia as duas e faria o apagamento da rodada falhar. A forma com lista é do PG15 em diante
+-- (a imagem é postgres:17.12) e já é usada em agents.analyst_id (20261117T081026_analistas.sql:44).
 alter table usage_ledger add foreign key (organization_id, test_run_id)
-  references agent_test_runs (organization_id, id) on delete set null;
--- source passa a aceitar 'test'; a linha tem ligação ou rodada, nunca as duas
--- (o nome do check atual é conferido na fatia).
+  references agent_test_runs (organization_id, id) on delete set null (test_run_id);
+-- source passa a aceitar 'test' (o check atual é o da coluna, `check (source in ('analyst'))`,
+-- 20261117T081026_analistas.sql:49; o nome gerado é conferido na fatia). A forma da linha:
+--   source = 'test'      → call_id nulo; test_run_id preenchido ou nulo (nulo depois do apagamento);
+--   source <> 'test' ou nulo → call_id preenchido e test_run_id nulo (como hoje).
+alter table usage_ledger add constraint usage_ledger_call_or_test check (
+  (source = 'test' and call_id is null)
+  or (source is distinct from 'test' and call_id is not null and test_run_id is null)
+);
 ```
 
 - Os dois `enable row level security`, as duas políticas por `organization_id` e a entrada das duas
@@ -163,8 +174,11 @@ alter table usage_ledger add foreign key (organization_id, test_run_id)
 - **Retenção:** são guardadas as 20 rodadas mais novas por teste, e a gravação de uma rodada
   nova apaga as mais velhas. Teste apagado leva as rodadas. A linha do extrato fica, porque o
   dinheiro foi gasto.
-- **`on delete set null` no extrato:** o custo do mês não pode encolher porque alguém apagou um
-  teste. A linha fica com `call_id` e `test_run_id` nulos, `source = 'test'`.
+- **`on delete set null (test_run_id)` no extrato:** o custo do mês não pode encolher porque
+  alguém apagou um teste. A linha fica com `call_id` e `test_run_id` nulos, `source = 'test'` e o
+  `organization_id` intacto, e o `check` novo aceita esse estado. Um teste de banco apaga uma
+  rodada com linha no extrato (direto e pela retenção) e confere que o apagamento passa, que a
+  linha fica e que o total do mês não muda.
 
 ### 5.2 O teste e o juiz (**novo** `packages/core/src/agent-tests.ts`, funções puras)
 
@@ -251,6 +265,18 @@ interface VoiceSessionEvents { /* … */ turnDone?(): void } // a resposta acabo
   turno (passou: `error`, `tool_loop`), 12 turnos por teste e 20 testes por agente.
 - **"Rodar todos"** roda os testes do agente em série, nunca em paralelo. Antes de cada teste,
   confere de novo o teto do mês.
+- **Rodada órfã.** Se o processo de voz reinicia no meio de uma rodada, ela ficaria `running`
+  para sempre, e a recusa `test_run_busy` (5.5) travaria os testes da organização. Duas saídas,
+  as duas na conta:
+  - **Na partida:** **novo** `closeOrphanTestRuns` em `apps/voice/src/reconcile.ts`, chamado em
+    `server.ts` logo depois do `closeOrphanCalls` (`server.ts:73`) e com a mesma forma (lista
+    pelo sistema, fecha por organização, um erro não para as outras). Ele põe toda rodada
+    `running` em `status = 'error'`, `error_code = 'process_restarted'`, `finished_at = agora`.
+  - **Na recusa:** `test_run_busy` só conta a rodada `running` com `started_at` mais novo que o
+    teto de tempo de um teste (12 turnos × 30 s, mais 60 s de folga: 7 min). Isso cobre o
+    processo que não reiniciou mas perdeu a rodada (uma exceção fora do `try`, por exemplo).
+    Uma rodada mais velha que isso é fechada como `error`, `process_restarted`, na mesma
+    transação da recusa, antes de a nova começar.
 
 ### 5.5 Custo e teto
 
@@ -263,10 +289,14 @@ interface VoiceSessionEvents { /* … */ turnDone?(): void } // a resposta acabo
 - **Durante a rodada**, cada `usage` do motor (o OpenAI manda um por `response.done`,
   `openai-realtime.ts:452`) vira uma linha em `usage_ledger` com `source = 'test'`,
   `test_run_id`, `agent_id` e o custo estimado por `estimateCostMicrocents` com o preço do motor.
-  Ela entra na mesma soma do mês (`monthCost`, `packages/core/src/costs.ts:40`, que já soma o
+  Ela entra na mesma soma do mês (`costTotal`, `packages/core/src/costs.ts:35`, que já soma o
   extrato sem olhar a ligação).
 - **Teto da rodada:** é o `cost_ceiling_cents` do agente, o mesmo de uma ligação. Passou, a rodada
   para com `error`, `cost_ceiling`.
+- **O vocabulário de `error_code`** é fechado: `turn_timeout`, `tool_loop` (5.4),
+  `cost_ceiling`, `engine_failed` (o motor caiu ou recusou a sessão) e `process_restarted`
+  (rodada órfã, 5.4). As recusas de antes de começar (`spend_cap_reached`, `test_run_busy`,
+  `engine_no_text_mode`, `engine_not_configured`, `agent_not_found`) não criam rodada.
 - **Os leitores do extrato que juntam com `calls`** (`apps/panel/src/app/api/v1/system/costs/route.ts:35`,
   `join calls c on c.id = l.call_id`, e os outros listados na fatia 7b) passam a usar `left join` e
   a mostrar "Testes" como fonte. Sem isso, o total do mês e a soma das linhas da tela de Custos
@@ -303,13 +333,79 @@ Cada uma cabe numa revisão de uma sentada, tem fragmento em `.changes/` e vai n
 
 | Fatia | O que entrega | Entrada e saída (duas conexões) | Começa quando |
 |---|---|---|---|
-| **7a** | 5.1 (só as duas tabelas, sem mexer no extrato), 5.2 inteira, `sendUserText` e `turnDone` no simulado, e o executor (5.4) só com o motor simulado. O `pnpm demo` termina rodando um teste da Lia e imprimindo o veredito. | Entrada: o `pnpm demo` e os testes de banco. Saída: o veredito impresso e a linha em `agent_test_runs`. | Já: não toca `call-session.ts` nem o motor real. |
-| **7b** | OpenAI Realtime em `mode: "text"`, `session-config.ts` tirado de `call-session.ts`, a rota interna, o extrato (`test_run_id`, `source = 'test'`, `left join` nos leitores) e as recusas de 5.5. Também a medida de custo de uma rodada real, no PR. | Entrada: a rota interna. Saída: a rodada gravada e o custo no extrato e no teto do mês. | Decisão do dono (seção 9), e #537 e #543 mesclados (os dois mexem em `call-session.ts`). |
+| **7a** | 5.1 (só as duas tabelas, sem mexer no extrato), 5.2 inteira, `sendUserText` e `turnDone` no simulado, o executor (5.4) só com o motor simulado e o `closeOrphanTestRuns` da partida. O `pnpm demo` termina rodando um teste da Lia e imprimindo o veredito. | Entrada: o `pnpm demo` e os testes de banco. Saída: o veredito impresso e a linha em `agent_test_runs`. | Já: não toca `call-session.ts` nem o motor real. |
+| **7b** | OpenAI Realtime em `mode: "text"`, `session-config.ts` tirado de `call-session.ts`, a rota interna, o extrato (`test_run_id`, `source = 'test'`, `left join` nos leitores), as recusas de 5.5 e a recusa `test_run_busy` que ignora a rodada órfã. Também a medida de custo de uma rodada real, no PR. | Entrada: a rota interna. Saída: a rodada gravada e o custo no extrato e no teto do mês. | Decisão do dono (seção 9), e #537 e #543 mesclados (os dois mexem em `call-session.ts`). |
 | **7c** | A tela (5.6), a rota do painel que chama a interna, os textos nos três idiomas e a linha "Testes" em Custos. | Entrada: o botão. Saída: o resultado e o aviso de configuração mudada na tela. | 7b mesclada. |
 | **7d** | Gemini Live em modo texto, depois da medida M7. | A mesma tela, para agentes no Gemini. | 7c mesclada e M7 medida. |
 
 A 7a sozinha tem entrada e saída reais (o `pnpm demo`), mas não tem tela. Ela é a base, e a 7c
 fecha a volta para quem usa o painel.
+
+### 6.1 O aceite de cada fatia
+
+Cada linha é conferida por um teste no CI, salvo as marcadas **(à mão, no PR)**. "Com sabotagem"
+quer dizer que o PR mostra o teste ficando vermelho quando a proteção é tirada.
+
+**7a: simulado e `pnpm demo`**
+- **Aceite:** o `pnpm demo` imprime o que já imprimia hoje e, depois, "Teste da Lia: passou",
+  com uma linha `passed` em `agent_test_runs` e o `config_hash` preenchido.
+- **Aceite:** trocar no roteiro simulado a ferramenta ou um argumento da Lia faz o mesmo demo
+  imprimir "reprovou" com `tool_unexpected` ou `args_mismatch`, o esperado e o que veio.
+- **Aceite:** `judgeTurn` tem um caso por motivo do vocabulário (os 7 de 5.2) e um caso que passa.
+  `agentTestTurns` recusa 0 e 13 turnos, e fala vazia ou com mais de 1 000 caracteres.
+- **Aceite:** a cerca do import (executor sem `runTool`), com sabotagem. No demo, nenhum webhook
+  sai: o servidor falso de webhook não recebe nada.
+- **Aceite:** a cerca de isolamento acha as duas tabelas, e um teste de banco confere que a
+  organização B não lê nem roda o teste da A.
+- **Aceite:** um teste de banco no molde de `reconcile.db.test.ts`: uma rodada `running` vira
+  `error`/`process_restarted` na partida, e a `passed` fica intacta. A 21ª rodada de um teste
+  apaga a mais velha, e apagar o teste leva as rodadas.
+- **Fracasso mesmo funcionando:** o veredito passa porque a expectativa foi copiada do próprio
+  roteiro e nada a contraria (a sabotagem do segundo aceite existe para isso); ou a chamada
+  simulada de antes muda de comportamento.
+
+**7b: OpenAI em texto e o extrato**
+- **Aceite (à mão, no PR):** uma rodada com a chave real do OpenAI, com o modelo cadastrado
+  aceitando `output_modalities: ["text"]`, e o custo medido dela anotado no PR e na seção 5.5.
+- **Aceite:** um teste de banco grava uma linha `source = 'test'` e confere que `costTotal` é
+  igual à soma das linhas na tela de Custos e na visão da instalação. Depois apaga a rodada
+  (direto e pela retenção), e o apagamento passa, a linha fica com `call_id` e `test_run_id`
+  nulos e o total não muda. Com sabotagem: com `join` no lugar do `left join`, o teste quebra.
+- **Aceite:** cada recusa de 5.5 tem um teste de rota. Nenhuma cria rodada e nenhuma abre conexão
+  com o motor (o servidor falso do OpenAI não recebe nada).
+- **Aceite:** com uma rodada `running` de 8 minutos atrás, a rota aceita a nova e fecha a velha
+  como `process_restarted`. Com uma de 1 minuto atrás, recusa com `test_run_busy`.
+- **Aceite:** o servidor falso manda `usage` acima do `cost_ceiling_cents`, e a rodada termina em
+  `error`/`cost_ceiling` sem mandar o turno seguinte.
+- **Aceite:** a cerca da configuração igual (ligação e teste do mesmo agente só diferem em
+  `mode`), com sabotagem. Os testes de `call-session` que já existem passam sem mudança.
+- **Fracasso mesmo funcionando:** o total do mês e a soma das linhas de Custos deixam de bater
+  num leitor que o teste não cobre, ou a ligação de verdade passa a montar a sessão diferente de
+  antes da extração de `session-config.ts`.
+
+**7c: a tela**
+- **Aceite:** quem edita o agente cria um teste pelo formulário sem escrever JSON, roda e vê
+  "passou" ou "reprovou" com o esperado e o que veio lado a lado. Teste de componente e de rota.
+- **Aceite:** mudar as instruções faz aparecer "não rodado com a configuração atual", e rodar de
+  novo faz sumir.
+- **Aceite:** quem só vê o agente vê os resultados e não tem os botões. A rota responde 403 para
+  criar, editar e rodar.
+- **Aceite:** a frase de custo aparece antes do primeiro clique. Num motor sem `textMode`, o
+  botão vem desligado com o motivo. A cerca de i18n fica verde nos três idiomas.
+- **Aceite:** a consulta da rodada para em `passed`, `failed` e `error`, inclusive
+  `process_restarted`, e a tela não fica girando.
+- **Aceite (à mão, no PR):** uma captura de tela do painel com um teste reprovado.
+- **Fracasso mesmo funcionando:** o operador vê verde e entende que a ligação está garantida. A
+  frase "O teste confere o que o agente decide, e não como ele ouve e fala" tem de estar na tela
+  do resultado, e não só na ajuda.
+
+**7d: Gemini**
+- **Aceite (à mão, no PR):** a medida M7 com o resultado e uma rodada real com o modelo
+  cadastrado, com o custo anotado.
+- **Aceite:** a mesma bateria de servidor falso da 7b, no Gemini. Se a resposta vier em áudio, a
+  linha do extrato tem o custo de áudio, e a tela diz que esse motor testa mais caro.
+- **Fracasso mesmo funcionando:** o teste passa, mas o custo vai ao extrato com o preço de texto
+  quando a resposta veio em áudio, e o teto do mês fica subestimado.
 
 ## 7. O que o CI não vê
 
@@ -380,5 +476,11 @@ nada mescla, nem este spec.
   `calls/[id]/transcription/route.ts`, as rotinas `transcribe_call` e `classify_call_outcome`).
 - O nome do `check` atual de `usage_ledger.source` (`20261117T081026_analistas.sql:49`) não foi
   conferido.
-- Os limites (30 s, 8 ferramentas, 12 turnos, 20 testes, 20 rodadas guardadas) são escolha, e não
-  medida.
+- Os limites (30 s, 8 ferramentas, 12 turnos, 20 testes, 20 rodadas guardadas, 7 min para a
+  rodada órfã) são escolha, e não medida.
+- O SQL de 5.1 não foi rodado. `on delete set null (test_run_id)` e o `check`
+  `usage_ledger_call_or_test` foram conferidos só contra a doc do Postgres e o precedente de
+  `agents.analyst_id`. A 7a e a 7b rodam as migrations no CI.
+- Não conferi se alguma linha de `usage_ledger` de hoje tem `source = 'test'` ou `call_id` nulo
+  (não deveria: o `check` e o `not null` atuais impedem). O `check` novo falharia na migration se
+  tivesse.
