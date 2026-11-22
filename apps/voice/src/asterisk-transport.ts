@@ -71,7 +71,9 @@ interface TrackedCall extends ExpectedCall {
   returnId?: string;
   /** O `DIALSTATUS` da transferência que voltou. */
   returnStatus?: string;
-  /** Resolve quando `transfer_completed` e `transfer_returned` estão gravados: a conversa só volta depois. */
+  /** Para onde foi a transferência que voltou (`transferTo` é apagado na volta): o aviso de `returnFailed` diz. */
+  returnTo?: string;
+  /** Resolve quando o `transfer_completed` da volta está gravado: o `transfer_returned`, e a conversa, só vêm depois. */
   returnRecorded?: Promise<void>;
   /** Desiste da volta se o AudioSocket não reconectar no prazo. */
   cancelReturnDeadline?: () => void;
@@ -122,8 +124,12 @@ export class AsteriskCalls {
     call.cancelReturnDeadline?.();
     call.swap(connection);
     const status = call.returnStatus ?? "UNKNOWN";
-    // A linha do tempo diz que a ligação voltou antes de a conversa do trecho de volta gravar qualquer coisa.
-    void (call.returnRecorded ?? Promise.resolve()).then(() => this.settle(call, { returned: true, status }));
+    // A ligação só voltou quando o áudio reconectou: o `transfer_returned` sai aqui, e não no `continue`
+    // (Vapi · fatia 5a, ajuste 2). A linha do tempo diz que voltou antes de a conversa do trecho de
+    // volta gravar qualquer coisa.
+    void (call.returnRecorded ?? Promise.resolve())
+      .then(() => this.recordReturned(call, status))
+      .then(() => this.settle(call, { returned: true, status }));
     return true;
   }
 
@@ -237,6 +243,7 @@ export class AsteriskCalls {
     const audioId = (this.deps.newAudioId ?? randomUUID)();
     call.returnId = audioId;
     call.returnStatus = status;
+    call.returnTo = call.transferTo;
     let recorded: () => void = () => undefined;
     call.returnRecorded = new Promise<void>((resolve) => (recorded = resolve));
     this.byCall.set(audioId, call);
@@ -260,11 +267,35 @@ export class AsteriskCalls {
         if (call.returnId !== audioId) return;
         this.deps.log("error", "the audio did not reconnect after the transfer came back; hanging up", { callId: call.callId });
         this.forget(call);
-        this.settle(call, { returned: false, status });
-        void this.deps.ari.hangup(call.channelId).catch(() => undefined);
+        void this.returnFailed(call, status).finally(() => void this.deps.ari.hangup(call.channelId).catch(() => undefined));
       }, RETURN_CONNECT_MS);
     }
     return true;
+  }
+
+  /**
+   * A volta foi pedida ao Asterisk, mas o áudio não reconectou (o prazo venceu, ou quem ligou desligou
+   * antes): a ligação não voltou para o agente, e ninguém atendeu. O aviso "retorne a ligação" que
+   * `reportTransfer` deixou para o trecho de volta sai aqui, uma vez, e a conversa recebe o
+   * `DIALSTATUS` da discagem, para fechar a ligação como não atendida (Vapi · fatia 5a, ajuste 2).
+   */
+  private async returnFailed(call: TrackedCall, status: string): Promise<void> {
+    await call.returnRecorded;
+    try {
+      await withOrg(this.deps.db, call.organizationId, (q) => noticeUnansweredTransfer(q, { callId: call.callId, transferTo: call.returnTo }, status, this.deps.clock));
+    } catch (cause) {
+      this.deps.log("error", "could not record the unanswered transfer", { callId: call.callId, dialStatus: status, error: messageOf(cause) });
+    }
+    this.settle(call, { returned: false, status });
+  }
+
+  /** O áudio reconectou na volta: a ligação voltou para o agente. */
+  private async recordReturned(call: TrackedCall, status: string): Promise<void> {
+    try {
+      await withOrg(this.deps.db, call.organizationId, (q) => recordEvent(q, call.callId, "transfer_returned", { status }, this.deps.clock.now()));
+    } catch (cause) {
+      this.deps.log("error", "could not record transfer_returned", { callId: call.callId, error: messageOf(cause) });
+    }
   }
 
   /**
@@ -292,6 +323,8 @@ export class AsteriskCalls {
   async channelDestroyed(channelId: string, cause: string | undefined): Promise<void> {
     const call = this.byChannel.get(channelId);
     if (!call) return;
+    // A volta foi pedida e o áudio ainda não reconectou (`forget` abaixo apaga o sinal).
+    const pendingReturn = call.returnId !== undefined;
     this.forget(call);
     const { db, clock } = this.deps;
     if (!call.attached) {
@@ -315,9 +348,9 @@ export class AsteriskCalls {
       const status = call.transferAnswered ? "ANSWER" : CALLER_HANGUP;
       await this.reportTransfer(call, status);
       this.settle(call, { returned: false, status });
-    } else if (call.returnStatus !== undefined) {
-      // Quem ligou desligou entre a volta e a reconexão do áudio.
-      this.settle(call, { returned: false, status: CALLER_HANGUP });
+    } else if (pendingReturn && call.returnStatus !== undefined) {
+      // Quem ligou desligou entre a volta e a reconexão do áudio: ninguém atendeu, e a ligação não voltou.
+      await this.returnFailed(call, call.returnStatus);
     }
   }
 
@@ -330,9 +363,10 @@ export class AsteriskCalls {
   }
 
   /**
-   * `transfer_completed`, uma vez por transferência. Com `returned`, a ligação voltou para o agente: vem
-   * `transfer_returned` em seguida, e o aviso "retorne a ligação" fica para o fim do trecho de volta, que
-   * só o manda se ninguém ficou com o próximo passo (`call-session.ts`).
+   * `transfer_completed`, uma vez por transferência. Com `returned`, a volta foi pedida ao Asterisk: o
+   * `transfer_returned` sai quando o áudio reconecta (`resume`), e o aviso "retorne a ligação" fica para
+   * o fim do trecho de volta, que só o manda se ninguém ficou com o próximo passo (`call-session.ts`),
+   * ou para `returnFailed`, se o áudio não reconectar.
    */
   private async reportTransfer(call: TrackedCall, dialStatus: string, options: { error?: string; returned?: boolean } = {}): Promise<void> {
     if (call.transferReported) return;
@@ -343,8 +377,7 @@ export class AsteriskCalls {
     try {
       await withOrg(db, call.organizationId, async (q) => {
         await recordEvent(q, call.callId, "transfer_completed", { to: call.transferTo, status: dialStatus, answered, ...(error !== undefined && { error }) }, clock.now());
-        if (returned) await recordEvent(q, call.callId, "transfer_returned", { status: dialStatus }, clock.now());
-        else if (!answered) await noticeUnansweredTransfer(q, call, dialStatus, clock);
+        if (!returned && !answered) await noticeUnansweredTransfer(q, call, dialStatus, clock);
       });
     } catch (cause) {
       log("error", "could not record transfer_completed", { callId: call.callId, dialStatus, error: messageOf(cause) });

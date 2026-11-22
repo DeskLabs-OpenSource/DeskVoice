@@ -1022,11 +1022,14 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     await voice?.close().catch(logFailure("could not close the voice engine before the transfer"));
     if (ending) return;
     let outcome: TransferOutcome | void;
+    // O `DIALSTATUS` que o transporte entregou; a falha ao pedir a transferência não chega a discar.
+    let dialed = true;
     try {
       outcome = await transport.transfer(transferTo, { returnIfUnanswered: true, signal: callEnded.signal });
     } catch (error) {
       log("error", "the transfer could not start", { error: messageOf(error) });
       outcome = { returned: false, status: "FAILED" };
+      dialed = false;
     }
     if (ending) return;
     if (outcome?.returned) {
@@ -1036,9 +1039,14 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       });
       return;
     }
-    // Atendida (o fim é o do atendimento: o canal segue com a pessoa da equipe, fora desta conversa) ou
-    // abandonada por quem ligou: a telefonia já saiu daqui.
-    await finish({ ...end, released: true, ...(outcome?.status === CALLER_HANGUP && { callerGone: true }) });
+    // Atendida (o fim é o do atendimento: o canal segue com a pessoa da equipe, fora desta conversa),
+    // abandonada por quem ligou, ou sem atendimento e sem volta: a telefonia já saiu daqui. Na última,
+    // o transporte já gravou o `transfer_unanswered` e mandou o aviso, e o fim não o troca de volta por
+    // `transferred` (Vapi · fatia 5a, ajuste 2): a ARI que recusa a volta, o estado que não volta, a
+    // discagem que nem começa, o áudio que não reconecta.
+    const status = outcome?.status;
+    const unanswered = dialed && status !== undefined && status !== "ANSWER" && status !== CALLER_HANGUP;
+    await finish({ ...end, released: true, ...(status === CALLER_HANGUP && { callerGone: true }), ...(unanswered && { endReason: "transfer_unanswered" }) });
   }
 
   /**

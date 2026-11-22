@@ -96,11 +96,10 @@ describe("transferência com volta, do lado do Asterisk", () => {
 
     expect(ari.log.slice(-2)).toEqual([`set ${channelId} AUDIOSOCKET_UUID=${VOLTA}`, `continue ${channelId} deskvoice-audio,s`]);
     expect(hangups(ari.log)).toEqual([]);
+    // Pedida a volta, a linha do tempo ainda não diz que voltou: só quando o áudio reconectar (ajuste 2).
     const events = await eventsOf(app, callId);
-    expect(events.slice(-2)).toEqual([
-      expect.objectContaining({ kind: "transfer_completed", payload: expect.objectContaining({ status: "NOANSWER", answered: false }) }),
-      { kind: "transfer_returned", payload: { status: "NOANSWER" } },
-    ]);
+    expect(events.at(-1)).toEqual(expect.objectContaining({ kind: "transfer_completed", payload: expect.objectContaining({ status: "NOANSWER", answered: false }) }));
+    expect(events.map((event) => event.kind)).not.toContain("transfer_returned");
     // O aviso "retorne a ligação" fica para o fim do trecho de volta, e o motivo do fim não muda aqui.
     expect(await avisos()).toEqual([]);
     expect((await callOf(app, callId)).end_reason).not.toBe("transfer_unanswered");
@@ -111,6 +110,7 @@ describe("transferência com volta, do lado do Asterisk", () => {
     expect(calls.resume(second)).toBe(true);
     expect(calls.attach(conexao(VOLTA))).toBeNull();
     expect(await outcome).toEqual({ returned: true, status: "NOANSWER" });
+    expect((await eventsOf(app, callId)).at(-1)).toEqual({ kind: "transfer_returned", payload: { status: "NOANSWER" } });
 
     // O transporte agora fala e ouve pela conexão nova, e o que tocou antes continua somado.
     transport.sendAudio(Buffer.alloc(320));
@@ -236,12 +236,16 @@ describe("transferência com volta, do lado do Asterisk", () => {
   });
 
   it("o AudioSocket não reconecta no prazo: desliga, e a espera resolve sem volta", async () => {
-    const { channelId, ari, calls, transport, timers } = await cenario("asterisk-return-timeout");
+    const { callId, channelId, ari, calls, transport, timers, avisos } = await cenario("asterisk-return-timeout");
     const outcome = transport.transfer(DESTINO, { returnIfUnanswered: true });
     await calls.afterAudio(channelId);
     await calls.transferEnded(channelId, "NOANSWER");
     expect(timers.fire(5000)).toBe(1);
     expect(await outcome).toEqual({ returned: false, status: "NOANSWER" });
+    // Ninguém atendeu, e a ligação não voltou: o aviso sai aqui, uma vez (ajuste 2).
+    expect((await avisos()).filter((aviso) => aviso.body.includes("retorne a ligação"))).toHaveLength(1);
+    expect(await callOf(app, callId)).toMatchObject({ end_reason: "transfer_unanswered" });
+    expect((await eventsOf(app, callId)).map((event) => event.kind)).not.toContain("transfer_returned");
     await new Promise((resolve) => setImmediate(resolve));
     expect(hangups(ari.log)).toEqual([`hangup ${channelId}`]);
     // A conexão que chegar atrasada não é mais da ligação.
