@@ -365,6 +365,9 @@ export function Timeline({
           };
         }
         return { ...base, tone: "ok", icon: ArrowsLeftRight, body: <Quiet>{e.transfer_completed}</Quiet> };
+      case "transfer_returned":
+        // O fim da transferência não atendida vem logo antes, com o estado; aqui é a volta para o agente.
+        return { ...base, tone: "accent", icon: ArrowsLeftRight, body: <Quiet>{fill(e.transfer_returned, { status: text(p.status) || "?" })}</Quiet> };
       case "engine_failed":
         return {
           ...base,

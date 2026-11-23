@@ -73,6 +73,8 @@ export interface AgentOptions {
   vocabulary?: string[];
   listeningEnvironment?: "normal" | "noisy";
   language?: string;
+  /** Ninguém atendeu a transferência: volta para o agente. Ausente vale o padrão do banco (`true`). */
+  transferReturnsToAgent?: boolean;
 }
 
 export async function createAgent(app: Db, organizationId: string, options: AgentOptions = {}): Promise<string> {
@@ -101,6 +103,9 @@ export async function createAgent(app: Db, organizationId: string, options: Agen
       ],
     ),
   );
+  if (options.transferReturnsToAgent !== undefined) {
+    await withSystem(app, (q) => q.exec("update agents set transfer_returns_to_agent = $2 where id = $1", [id, options.transferReturnsToAgent]));
+  }
   return id;
 }
 
@@ -315,11 +320,15 @@ export interface ManualEngine {
   played: number[];
   audioBytes: number;
   closed: number;
+  /** Para todas as sessões abertas por este motor. */
   emit<K extends keyof VoiceSessionEvents>(event: K, ...args: Parameters<VoiceSessionEvents[K]>): void;
+  /** Só para a sessão `index` (0 é a primeira aberta): o trecho de volta abre uma segunda. */
+  emitOn<K extends keyof VoiceSessionEvents>(index: number, event: K, ...args: Parameters<VoiceSessionEvents[K]>): void;
 }
 
 export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean; connectWhen?: Promise<unknown>; callerTurnSource?: CallerTurnSource } = {}): ManualEngine {
   const handlers = new Map<string, Array<(...args: never[]) => void>>();
+  const perSession: Array<Map<string, Array<(...args: never[]) => void>>> = [];
   const manual: ManualEngine = {
     configs: [],
     keys: [],
@@ -332,6 +341,9 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
     closed: 0,
     emit(event, ...args) {
       for (const handler of handlers.get(event) ?? []) (handler as (...values: unknown[]) => void)(...args);
+    },
+    emitOn(index, event, ...args) {
+      for (const handler of perSession[index]?.get(event) ?? []) (handler as (...values: unknown[]) => void)(...args);
     },
     engine: {
       id: options.id ?? "manual",
@@ -349,8 +361,13 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
         if (options.connectHangs) await new Promise(() => undefined);
         // O provedor demora: a sessão só abre quando o teste soltar.
         if (options.connectWhen) await options.connectWhen;
+        const own = new Map<string, Array<(...args: never[]) => void>>();
+        perSession.push(own);
         const session: VoiceSession = {
-          on: (event, handler) => void handlers.set(event, [...(handlers.get(event) ?? []), handler as (...args: never[]) => void]),
+          on: (event, handler) => {
+            handlers.set(event, [...(handlers.get(event) ?? []), handler as (...args: never[]) => void]);
+            own.set(event, [...(own.get(event) ?? []), handler as (...args: never[]) => void]);
+          },
           sendAudio: (pcm) => void (manual.audioBytes += pcm.length),
           sendToolResult: (id, result) => void manual.toolResults.push({ id, result }),
           say: (text) => void manual.said.push(text),

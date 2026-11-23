@@ -142,6 +142,7 @@ const timeline = {
     transfer_to: "Para {to}",
     transfer_completed: "Transferência concluída",
     transfer_unanswered: "Transferência não atendida",
+    transfer_returned: "Ninguém atendeu, e a ligação voltou para o agente ({status})",
     transfer_reason_ivr: "Pelo menu por teclas.",
     ivr_started: "Atendida pelo menu por teclas",
     ivr_option_chosen: "Escolheu a opção {digit}, {label} ({seconds} s)",
