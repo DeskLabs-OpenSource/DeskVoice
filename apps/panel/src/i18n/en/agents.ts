@@ -86,6 +86,8 @@ const agents: AgentsDictionary = {
   transfer: "Transfer",
   transferTo: "Number to transfer to",
   transferHint: "Where the call goes when the agent hands it to a person. Any format works, such as (31) 99999-8888.",
+  transferReturns: "If nobody answers the transfer, go back to the agent",
+  transferReturnsHint: "After 45 seconds ringing with no answer, or with the number busy, the caller talks to the agent again, who offers to take a message or log a callback request. Turned off, the call drops and the panel tells you to call back. Phone calls only.",
   limits: "Limits per call",
   limitsLead: "On reaching one of the limits, the agent tells the caller and ends the call.",
   maxMinutes: "Maximum duration, in minutes",

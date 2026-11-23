@@ -84,7 +84,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
   const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir, decisionModels: deps.decisionModels };
   const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, resolve: deps.resolveName ?? resolveSipName, log };
-  const calls = new AsteriskCalls({ ari, db, clock, log });
+  const calls = new AsteriskCalls({ ari, db, clock, log, schedule: deps.schedule });
   const sessions = new Set<CallSession>();
   // Recados em curso, com o ciclo de vida próprio: não são conversas, e não atendem a pedido de
   // parar gravação (`stopRecordingOfLiveCall`).
@@ -123,6 +123,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     now: deps.now,
     log,
     onConnection(connection) {
+      // A volta de uma transferência que ninguém atendeu: o áudio é da conversa que já existe.
+      if (calls.resume(connection)) return;
       const attached = calls.attach(connection);
       if (!attached) {
         // Ninguém esperava esta chamada (o processo reiniciou no meio, ou não é o Asterisk).
