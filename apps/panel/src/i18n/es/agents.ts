@@ -90,6 +90,8 @@ const agents: AgentsDictionary = {
   transferReturnsHint: "Después de 45 segundos sonando sin respuesta, o con el número ocupado, la persona vuelve a hablar con el agente, que ofrece dejar un recado o registrar un pedido de devolución de llamada. Desactivada, la llamada se corta y el panel avisa para devolverla. Solo por teléfono.",
   limits: "Límites por llamada",
   limitsLead: "Al alcanzar uno de los límites, el agente avisa a quien está en la línea y termina.",
+  callerIdleGuard: "Terminar la llamada cuando quien llamó se queda en silencio",
+  callerIdleGuardHint: "Después de 10 segundos en silencio, el agente pregunta si la persona sigue en la línea y, 10 segundos después, pregunta de nuevo. Tras 8 segundos más sin respuesta, se despide y termina la llamada. Cualquier sonido de la persona reinicia la cuenta. Desactivada, el agente no pregunta, y la llamada en silencio sigue hasta la duración máxima.",
   maxMinutes: "Duración máxima, en minutos",
   costCeiling: "Tope de costo, en dólares",
   enabledLabel: "Agente encendido",

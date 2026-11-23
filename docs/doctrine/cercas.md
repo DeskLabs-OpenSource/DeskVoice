@@ -83,6 +83,7 @@ A regra tem três consequências práticas:
 | `ui-text-lives-in-dictionaries` | Texto de tela só em dicionário |
 | `release-fragments-are-valid` | Fragmento de versão bem formado. Veja [versionamento](versionamento.md) |
 | `released-fragments-do-not-return` | Fragmento que uma versão já publicou e apagou não volta para `.changes/` (o título já está no `CHANGELOG.md`) |
+| `moved-notice-leaves-after-one-version` | O "mudou para…" de um bloco que trocou de tela fica só na versão que publicou a mudança (achada pelo título do fragmento no `CHANGELOG.md`). Veja a [parte 7 da central de configuração](../specs/2026-11-20-central-de-configuracao.md) |
 | `one-file-per-piece` | Nenhum arquivo-índice nas pastas de ferramentas, motores e rotinas. Veja [um arquivo por peça](um-arquivo-por-peca.md) |
 | `workflows-cancel-superseded-runs` | Um run de CI por PR: o novo cancela o anterior |
 | `welcome-does-not-checkout` | O workflow de acolhida, que roda com permissão do repositório, nunca baixa código de fork |
