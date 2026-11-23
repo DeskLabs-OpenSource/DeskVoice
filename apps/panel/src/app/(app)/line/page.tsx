@@ -18,6 +18,7 @@ import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, Text
 import { useCanConfigure } from "../../../ui/me";
 import { allowedView, trunkFailure } from "../../../ui/trunk-status";
 import type { Agent, IvrMenu, PhoneNumber, Setting, Trunk } from "../../../ui/types";
+import { WhatsAppCallsPanel } from "../settings/whatsapp-calls-panel";
 import { IvrMenusPanel, NumberAnswer } from "./ivr-menus";
 
 type StepStatus = "ok" | "warn" | "fail" | "skipped";
@@ -25,6 +26,9 @@ interface CheckResult {
   status: string;
   steps: Array<{ step: "apply" | "asterisk" | "trunk"; status: StepStatus; detail: string }>;
 }
+
+/** O bloco da ligação pelo WhatsApp: o "mudou para…" de Configurações › WhatsApp aponta para este id. */
+const WHATSAPP_CALLS_ANCHOR = "ligacao-pelo-whatsapp";
 
 const STATUS_TONE: Record<string, Tone> = { ok: "ok", warn: "warn", fail: "fail" };
 const STEP_ICON: Record<StepStatus, ReactNode> = {
@@ -415,6 +419,15 @@ export default function LinePage() {
   const saveIp = useAction();
   const addNumber = useAction();
   useEffect(() => setIp(publicIp.data?.value ?? ""), [publicIp.data]);
+  // Quem chega pelo "mudou para…" (`/line#ligacao-pelo-whatsapp`): os blocos de cima crescem quando as
+  // leituras chegam e empurram o da ligação pelo WhatsApp para baixo. Rola até ele depois delas, uma vez.
+  const aboveLoaded = trunks.data != null && numbers.data != null && menus.data != null;
+  const [scrolledToAnchor, setScrolledToAnchor] = useState(false);
+  useEffect(() => {
+    if (!aboveLoaded || scrolledToAnchor || window.location.hash !== `#${WHATSAPP_CALLS_ANCHOR}`) return;
+    setScrolledToAnchor(true);
+    document.getElementById(WHATSAPP_CALLS_ANCHOR)?.scrollIntoView({ block: "start" });
+  }, [aboveLoaded, scrolledToAnchor]);
 
   const list = trunks.data ?? [];
   const trunkId = newNumber.trunkId || list[0]?.id || "";
@@ -526,6 +539,13 @@ export default function LinePage() {
           numbers.reload();
         }}
       />
+
+      {/* A ligação pelo WhatsApp, perto da linha e dos números. Some para quem não configura, como o painel. */}
+      {canConfigure ? (
+        <div id={WHATSAPP_CALLS_ANCHOR} className="scroll-mt-24 lg:scroll-mt-6">
+          <WhatsAppCallsPanel />
+        </div>
+      ) : null}
 
       <Panel title={t.helpTitle} description={t.helpBody}>
         <div className="grid gap-5">

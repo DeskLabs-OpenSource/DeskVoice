@@ -40,6 +40,8 @@ export const CALL_EVENT_KINDS = [
   "dtmf_sent",
   "transfer_started",
   "transfer_completed",
+  // Ninguém atendeu a transferência e a ligação voltou para o agente (Vapi · fatia 5a).
+  "transfer_returned",
   "agent_handoff",
   "engine_failed",
   "engine_resumed",

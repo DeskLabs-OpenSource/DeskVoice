@@ -38,6 +38,8 @@ interface Draft {
   language: string;
   tools: string[];
   transferTo: string;
+  /** Ninguém atendeu a transferência: a ligação volta para o agente. Ligada de fábrica. */
+  transferReturns: boolean;
   maxMinutes: string;
   costCeiling: string;
   enabled: boolean;
@@ -58,7 +60,7 @@ interface Draft {
   analysis: AnalysisDraft;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "", analysis: { kind: "organization" } };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", transferReturns: true, maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "", analysis: { kind: "organization" } };
 
 const VOCABULARY_FIELD_ID = "agent-vocabulary";
 
@@ -78,6 +80,7 @@ const toDraft = (agent: AgentWithBrain): Draft => ({
   language: agent.language,
   tools: agent.tools,
   transferTo: formatPhone(agent.transferTo),
+  transferReturns: agent.transferReturnsToAgent ?? true,
   maxMinutes: String(Math.round(agent.maxCallSeconds / 60)),
   costCeiling: (agent.costCeilingCents / 100).toFixed(2),
   enabled: agent.enabled,
@@ -210,6 +213,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         language: draft.language,
         tools: draft.tools,
         transferTo: draft.transferTo,
+        transferReturnsToAgent: draft.transferReturns,
         maxCallSeconds: Math.round(Number(draft.maxMinutes) * 60),
         costCeilingCents: Math.round(Number(draft.costCeiling.replace(",", ".")) * 100),
         enabled: draft.enabled,
@@ -435,6 +439,10 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             <Field label={t.transferTo} hint={t.transferHint}>
               <TextInput mono type="tel" value={draft.transferTo} onChange={(event) => set("transferTo", event.target.value)} />
             </Field>
+            <div className="mt-4 grid gap-1">
+              <Switch checked={draft.transferReturns} onChange={(next) => set("transferReturns", next)} label={t.transferReturns} />
+              <p className="text-[0.87rem] text-muted">{t.transferReturnsHint}</p>
+            </div>
           </Panel>
           <Panel title={t.limits} description={t.limitsLead}>
             <div className="grid grid-cols-2 gap-4">

@@ -140,6 +140,7 @@ const timeline: TimelineDictionary = {
     transfer_to: "To {to}",
     transfer_completed: "Transfer completed",
     transfer_unanswered: "Transfer not answered",
+    transfer_returned: "Nobody answered, and the call went back to the agent ({status})",
     transfer_reason_ivr: "Through the keypad menu.",
     ivr_started: "Answered by the keypad menu",
     ivr_option_chosen: "Chose option {digit}, {label} ({seconds} s)",

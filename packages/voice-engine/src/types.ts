@@ -34,6 +34,12 @@ export interface VoiceSessionConfig {
    * de partida (docs/specs/2026-11-14-ambiente-barulhento.md); o efeito real não foi medido.
    */
   listeningEnvironment?: ListeningEnvironment;
+  /**
+   * `text`: sessão de teste do agente (docs/specs/2026-11-21-testes-do-agente.md, 5.3). Quem liga
+   * fala por `sendUserText`, o agente responde em `transcript` e avisa o fim da resposta em
+   * `turnDone`; não há áudio. Só para motor com `textMode`. Ausente, vale `audio`, a ligação de sempre.
+   */
+  mode?: "audio" | "text";
 }
 
 /** Como o agente ajusta a detecção de fala do provedor. `normal` é o de sempre. */
@@ -96,6 +102,11 @@ export interface VoiceSessionEvents {
    * chama, e o consumo da conexão nova continua chegando em `usage`.
    */
   resumed(): void;
+  /**
+   * Sessão em `mode: "text"`: a resposta do agente acabou, sem ferramenta pendente. É o fim do turno
+   * de um teste do agente. Opcional: motor sem `textMode` não emite.
+   */
+  turnDone(): void;
   closed(reason: string): void;
 }
 
@@ -127,6 +138,11 @@ export interface VoiceSession {
    * histórico o que não chegou a tocar. Sem o método, o motor não corta e nada muda.
    */
   played?(ms: number): void;
+  /**
+   * Sessão em `mode: "text"`: o que quem liga diz, em texto. Só nos motores com `textMode`; o fim da
+   * resposta vem em `turnDone`.
+   */
+  sendUserText?(text: string): void;
   close(): Promise<void>;
 }
 
@@ -378,6 +394,11 @@ export interface VoiceEngine {
    * Motor sem a declaração: a vez que a guarda fecha sem marco não conta em lugar nenhum.
    */
   callerTurnSource?: CallerTurnSource;
+  /**
+   * O motor aceita sessão de teste em texto (`mode: "text"`, `sendUserText`, `turnDone`). Motor sem
+   * a declaração não roda teste do agente.
+   */
+  textMode?: true;
   connect(config: VoiceSessionConfig, apiKey: string, options?: ConnectOptions): Promise<VoiceSession>;
   /**
    * Lê a conversa e diz o desfecho comercial dela, com a confiança e a fala que o sustenta.
