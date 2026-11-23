@@ -106,7 +106,7 @@ exclamação. Não repita o aviso de gravação: ele já foi dito no começo da 
 ```
 
 A saudação fica em Agentes → Saudação, separada das instruções. O aviso de gravação entra
-sozinho, antes dela: o sistema monta a abertura com o texto de Configurações → Ligações mais a
+sozinho, antes dela: o sistema monta a abertura com o texto de Configurações → Privacidade e dados mais a
 saudação do agente (o padrão diz que a ligação é atendida por uma assistente virtual e que a
 conversa fica registrada). Escrever o aviso de novo na saudação faz o agente dizer duas vezes a
 mesma coisa.
