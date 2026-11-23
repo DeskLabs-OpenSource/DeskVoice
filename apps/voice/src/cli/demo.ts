@@ -4,13 +4,15 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { systemClock, withOrg, type Db } from "@deskvoice/core";
-import { loadTools } from "@deskvoice/tools";
-import { loadEngines } from "@deskvoice/voice-engine";
+import { loadTools, type Tool } from "@deskvoice/tools";
+import { loadEngines, SIMULATED_PREFIX, type VoiceEngine } from "@deskvoice/voice-engine";
 import { createOrganization, openTestDbs } from "../../../../packages/core/test/helpers";
 import startTestDatabase from "../../../../scripts/test-db-setup";
+import { startAgentTest, type AgentTestOutcome } from "../agent-test";
 import { createApprovalWaiter } from "../approvals";
 import { messageOf } from "../log";
 import { startSimulatedCall } from "../simulate";
+import { LIA_TEST_NAME, LIA_TEST_TURNS, liaTestScript } from "./demo-agent-test";
 
 const APPROVAL_DELAY_MS = 2500;
 const TRANSFER_TO = "+5531988887777";
@@ -52,6 +54,48 @@ function describeEvent(kind: string, payload: Record<string, unknown>): string {
     default:
       return kind;
   }
+}
+
+const json = (value: unknown): string => JSON.stringify(value);
+
+function printVerdict(outcome: AgentTestOutcome): void {
+  if (outcome.status === "passed") {
+    print("Teste da Lia: passou");
+    return;
+  }
+  print(outcome.status === "failed" ? "Teste da Lia: reprovou" : `Teste da Lia: não terminou (${outcome.errorCode ?? "erro"})`);
+  for (const [index, turn] of outcome.turns.entries()) {
+    for (const failure of turn.verdict.failures) {
+      print(`  Turno ${index + 1}: ${failure.reason}`);
+      print(`    esperado: ${json(failure.detail.expected)}`);
+      print(`    veio:     ${json(failure.detail.got)}`);
+    }
+  }
+}
+
+/**
+ * O teste do agente (item 7, fatia 7a): uma conversa escrita, com o que se espera da Lia em cada
+ * turno, rodada no motor simulado em modo texto. Nenhuma ferramenta roda: o teste devolve o
+ * resultado escrito nele.
+ */
+async function runLiaTest(db: Db, organizationId: string, agentId: string, engines: Map<string, VoiceEngine>, tools: Map<string, Tool>): Promise<void> {
+  const test = await withOrg(db, organizationId, (q) =>
+    q.one<{ id: string }>("insert into agent_tests (organization_id, agent_id, name, turns) values ($1, $2, $3, $4) returning id", [organizationId, agentId, LIA_TEST_NAME, JSON.stringify(LIA_TEST_TURNS)]),
+  );
+  if (!test) throw new Error("Demo agent test was not created");
+  print();
+  print(`Teste do agente: "${LIA_TEST_NAME}", ${LIA_TEST_TURNS.length} turnos em texto, motor simulado, nenhuma ferramenta roda.`);
+  const started = await startAgentTest({ db, clock: systemClock, engines, tools }, { organizationId, testId: test.id }, { instructions: SIMULATED_PREFIX + JSON.stringify(liaTestScript()) });
+  if (!("runId" in started)) throw new Error(`${started.code}: ${started.message}`);
+  const outcome = await started.done;
+  for (const [index, turn] of outcome.turns.entries()) {
+    print(`  Turno ${index + 1}, quem ligou: ${turn.user}`);
+    print(`           agente:     ${turn.says}`);
+    for (const tool of turn.tools) print(`           pediu ${tool.name}, o teste respondeu ${json(tool.result)}`);
+  }
+  printVerdict(outcome);
+  const run = await withOrg(db, organizationId, (q) => q.one<{ status: string; config_hash: string }>("select status, config_hash from agent_test_runs where id = $1", [started.runId]));
+  print(`Rodada gravada: ${run?.status ?? "?"}, retrato da configuração ${run?.config_hash.slice(0, 12) ?? "?"}…`);
 }
 
 async function run(db: Db): Promise<void> {
@@ -110,6 +154,8 @@ async function run(db: Db): Promise<void> {
     print(`Avisos no painel: ${timeline.notifications.length}`);
     print(`Tarefas na fila: ${timeline.tasks.map((task) => `${task.kind} (${task.status})`).join(", ")}`);
     print("O resumo da chamada (summarize_call) é escrito pelo processo de rotinas, que esta demonstração não sobe.");
+
+    await runLiaTest(db, organizationId, agent.id, engines, tools);
   } finally {
     await approvals.close();
   }
