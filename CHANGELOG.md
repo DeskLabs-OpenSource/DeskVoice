@@ -3,6 +3,17 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.47.0] - 2026-11-23
+
+### Alterado
+
+- **Quando quem ligou fica calado, o agente pergunta se a pessoa ainda está na linha e encerra a ligação em cerca de 30 segundos** Antes, se o agente terminava de falar e quem ligou ficava calado (o telefone esquecido, a ligação aberta no bolso, a secretária eletrônica que terminou), a ligação ficava aberta até a duração máxima do agente, 10 minutos de fábrica, e o motor de voz era pago esse tempo todo. Agora, 10 segundos depois de o agente terminar de falar sem nenhum som de quem ligou, ele pergunta "Você ainda está aí?"; mais 10 segundos depois do lembrete, diz "Se ainda estiver na linha, é só falar."; e mais 8 segundos depois, se despede e encerra a ligação. As frases vão em português ao motor de voz, do mesmo jeito que o pedido para repetir; num agente de outro idioma, ainda não foi conferido se ele as diz no idioma dele. Qualquer som de quem ligou volta a contagem ao zero, e ela não corre enquanto o agente fala, enquanto uma ferramenta está em curso (uma aprovação pedida ao painel inclusive) nem enquanto a ligação está sendo transferida. Vale no telefone, no WhatsApp e no navegador, e não para o menu por teclas nem para o recado. Cada pergunta e o encerramento aparecem na linha do tempo da ligação, e o motivo do fim aparece como "Quem ligou ficou em silêncio". Esse fim não abre pendência de retorno sozinho. Os prazos não são configuráveis nesta versão. **Quem já instalou: a guarda vem ligada para todos os agentes, os novos e os que já existem.** Para manter o comportamento de antes, desligue "Encerrar a ligação quando quem ligou ficar em silêncio" na tela do agente, em Limites por chamada. Desligada, o agente não pergunta nem encerra, e a ligação calada fica aberta até a duração máxima, como antes. Crédito: @melgarafael.
+- **Sai o aviso "mudou para…" de WhatsApp e de Regras das ligações** Na 0.46.0, a ligação pelo WhatsApp passou para "Linha telefônica" e o aviso de gravação para "Privacidade e dados", e os lugares antigos mostraram por uma versão um aviso de que o bloco tinha mudado de tela. Esse aviso saiu. Os dois blocos continuam onde estavam na 0.46.0. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
+### Corrigido
+
+- **Os avisos da ligação pelo WhatsApp apontam para "Linha telefônica"** Os avisos do sino sobre a ligação pelo WhatsApp mandavam a "Configurações → WhatsApp" ou a "Configurações", onde o bloco Ligação pelo WhatsApp não fica mais. Agora eles mandam a "Linha telefônica", onde se conecta o número e se escolhe o agente que atende. Isso vale para o aviso de instalação do serviço, ou de falha ao instalá-lo ou removê-lo; para o de número conectado sem agente escolhido e o de número desconectado; para os dois de QR Code que não terminou a conexão; e para o de ligação pelo WhatsApp que o agente não atendeu porque nenhum agente atende o número ou porque o agente está desligado. Os avisos do WhatsApp de mensagens continuam apontando para "Configurações → WhatsApp". Os avisos que já estavam no sino não mudam. Nada a fazer ao atualizar. Crédito: @melgarafael.
+
 ## [0.46.0] - 2026-11-23
 
 ### Adicionado

@@ -1,0 +1,1 @@
+{ "include": ["packages/*/src", "apps/voice/src"], "exclude": ["node_modules", "apps/panel"] }
