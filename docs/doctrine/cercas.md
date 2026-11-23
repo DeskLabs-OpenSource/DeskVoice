@@ -90,6 +90,7 @@ A regra tem três consequências práticas:
 | `partner-address-has-one-spelling` | Todo endereço do domínio da parceira é o de `install/partner.env`, e ele está no `AGENTS.md` e na skill de instalar |
 | `third-party-images-are-pinned` | Toda imagem de terceiros está fixada por resumo: no Compose de produção (banco, Asterisk, Caddy), na base de cada `Dockerfile` (`FROM`) e nos `services` e `container` dos jobs do CI |
 | `image-name-has-one-source` | O endereço das imagens só está em `deploy/images.env`; o Compose, o kit e a publicação leem dali. A versão de uma instalação é um número, nunca um canal |
+| `every-workspace-is-typechecked` | O `pnpm typecheck` da raiz confere os tipos de todo pacote, testes incluídos: o `tsconfig.json` da raiz inclui o `src` dele, ou o script da raiz chama o `typecheck` dele (o do painel, que a raiz exclui) |
 
 A lista acima é um retrato da fundação. A verdade é a pasta `fences/`.
 

@@ -45,7 +45,10 @@ describe("linha do tempo: o relatório da ligação entregue ou não ao webhook"
     for (const [locale, dict] of [["pt-BR", ptBR], ["en", en], ["es", es]] as const) {
       const html = visible(locale, [failed]);
       expect(html).toContain(fill(dict.events.webhook_failed, { name: "crm" }));
-      expect(html).toContain(fill(dict.events.webhook_failed_reasons.http, { status: "500" }));
+      // O dicionário de motivos é um Record<string, string>: sem a frase de `http`, o teste para aqui.
+      const http = dict.events.webhook_failed_reasons.http;
+      if (http === undefined) throw new Error(`${locale}: falta webhook_failed_reasons.http no dicionário`);
+      expect(html).toContain(fill(http, { status: "500" }));
       expect(html).toContain(fill(dict.events.webhook_failed_gave_up, { attempt: "3" }));
       expect(html).not.toContain(dict.events.unknown);
       expect(html).not.toContain("webhook_failed");
