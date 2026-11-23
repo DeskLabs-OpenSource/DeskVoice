@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import en from "../../../../i18n/en/settings";
 import es from "../../../../i18n/es/settings";
@@ -11,7 +10,6 @@ import { ActionStatus, useAction } from "../../../../ui/errors";
 import { Button, Field, Notice, Panel, Select, Switch, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
 import type { Setting } from "../../../../ui/types";
-import { RECORDING_NOTICE_ANCHOR } from "../recording-notice-panel";
 import { put } from "../setting-api";
 
 export default function CallsSettings() {
@@ -128,16 +126,6 @@ export default function CallsSettings() {
           <ActionStatus action={saveOnTimeout} />
         </div>
       </Panel>
-
-      {/* Por uma versão: o aviso de gravação mudou para Privacidade e dados. Todos o liam aqui, todos veem para onde foi. */}
-      <Notice>
-        <p>
-          {t.movedRecordingNotice}{" "}
-          <Link className="font-bold underline underline-offset-4" href={`/settings/privacy#${RECORDING_NOTICE_ANCHOR}`}>
-            {t.movedLink}
-          </Link>
-        </p>
-      </Notice>
     </>
   );
 }

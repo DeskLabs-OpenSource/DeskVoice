@@ -216,6 +216,9 @@ versão mais nova que a 0.46.0 e as chaves ainda existirem no painel, ela reprov
 vermelha é o PR da versão seguinte, então o PR que tira o aviso entra antes dele. O que a cerca não
 pega: o título trocado à mão no `CHANGELOG.md` (o arquivo diz "não edite à mão"), e o aviso que
 volta com outra chave.
+O aviso saiu antes do corte da 0.47.0 (DESA-394): as duas telas, as três chaves nos três idiomas
+(`movedWhatsAppCalls`, `movedRecordingNotice`, `movedLink`) e os testes de tela. A entrada em
+`MOVED_NOTICES` fica: ela reprova a volta dessas chaves.
 
 ### Parte 8: a atualização só na área da instalação (pequena, espera decisão)
 
