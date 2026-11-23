@@ -268,14 +268,18 @@ describe("ligação pelo WhatsApp: quando o agente não atende, ela segue tocand
     const { refused, events, notices } = await refusedBy(organizationId, ring());
     expect(refused).toMatchObject({ end_reason: "no_agent", from_e164: CALLER, to_e164: NUMBER });
     expect(events).toEqual([{ kind: "call_refused", payload: { reason: "no_agent", from: CALLER, to: NUMBER, channel: "whatsapp" } }]);
-    expect(notices[0]?.body).toMatch(/nenhum agente atende.*continuou tocando no celular.*Configurações/);
+    expect(notices[0]?.body).toBe(
+      `Uma ligação pelo WhatsApp de ${CALLER} para ${NUMBER} não foi atendida pelo agente porque nenhum agente atende esse número. Ela continuou tocando no celular. Escolha o agente em Linha telefônica, no bloco Ligação pelo WhatsApp.`,
+    );
   });
 
   it("agente desligado", async () => {
     const { organizationId, ring } = await connected("wa-agent-off", { agent: "disabled" });
     const { refused, notices } = await refusedBy(organizationId, ring());
     expect(refused).toMatchObject({ end_reason: "agent_disabled" });
-    expect(notices[0]?.body).toMatch(/agente desse número está desligado/);
+    expect(notices[0]?.body).toBe(
+      `Uma ligação pelo WhatsApp de ${CALLER} para ${NUMBER} não foi atendida pelo agente porque o agente desse número está desligado. Ela continuou tocando no celular. Ligue o agente ou escolha outro em Linha telefônica, no bloco Ligação pelo WhatsApp.`,
+    );
   });
 
   it("teto de recebidas: a ligação da operadora em andamento conta, no mesmo teto", async () => {

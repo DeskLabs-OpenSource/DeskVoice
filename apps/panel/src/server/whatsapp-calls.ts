@@ -141,18 +141,18 @@ async function record(q: OrgQuery, now: Date, state: VoiceState): Promise<Row | 
       now,
       before.agentId
         ? `Ligação pelo WhatsApp: número${number} conectado. Ligue de outro número para conferir que o agente escolhido atende: se tocar só no celular, o WhatsApp não entregou a ligação a este aparelho.`
-        : `Ligação pelo WhatsApp: número${number} conectado. Escolha em Configurações o agente que atende; até lá, as ligações continuam tocando no celular.`,
+        : `Ligação pelo WhatsApp: número${number} conectado. Escolha em Linha telefônica o agente que atende; até lá, as ligações continuam tocando no celular.`,
     );
   } else if (next.status === "failed" && before.status === "connected") {
     await notice(
       q,
       now,
-      `O número${number} desconectou da ligação pelo WhatsApp. Conecte de novo em Configurações → WhatsApp. O WhatsApp desconecta os aparelhos vinculados quando o celular principal fica mais de 14 dias sem uso.`,
+      `O número${number} desconectou da ligação pelo WhatsApp. Conecte de novo em Linha telefônica. O WhatsApp desconecta os aparelhos vinculados quando o celular principal fica mais de 14 dias sem uso.`,
     );
   } else if (next.status === "failed" && next.failure === "pairing_failed") {
-    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o WhatsApp encerrou a tentativa antes de mostrar o QR Code. Tente de novo em Configurações → WhatsApp. Se acontecer de novo, atualize o DeskVoice.");
+    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o WhatsApp encerrou a tentativa antes de mostrar o QR Code. Tente de novo em Linha telefônica. Se acontecer de novo, atualize o DeskVoice.");
   } else if (next.status === "failed") {
-    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Configurações → WhatsApp.");
+    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Linha telefônica.");
   }
   return after;
 }

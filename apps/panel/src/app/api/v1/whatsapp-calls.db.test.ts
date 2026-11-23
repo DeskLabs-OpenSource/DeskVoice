@@ -176,7 +176,7 @@ describe("pairing the number by QR code", () => {
     wacalls.scan(sessionOf(org), "5531988887777");
     for (let i = 0; i < 3; i += 1) expect(await state(owner.cookie)).toMatchObject({ status: "connected", phone: "+5531988887777", connectedAt: NOW.toISOString(), qr: null });
     const connectedNotices = (await notices(org)).filter((body) => body.includes("conectado."));
-    expect(connectedNotices).toEqual(["Ligação pelo WhatsApp: número +5531988887777 conectado. Escolha em Configurações o agente que atende; até lá, as ligações continuam tocando no celular."]);
+    expect(connectedNotices).toEqual(["Ligação pelo WhatsApp: número +5531988887777 conectado. Escolha em Linha telefônica o agente que atende; até lá, as ligações continuam tocando no celular."]);
     // Conectado sem agente: ninguém atende, e a saúde diz isso.
     expect(await healthLine(owner.cookie)).toMatchObject({ status: "warn", reason: "whatsapp_calls_no_agent" });
     expect(await withOrg(panel.app, org, (q) => q.one("select wacalls_session_id as id from whatsapp_call_sessions"))).toEqual({ id: sessionOf(org).id });
@@ -233,7 +233,7 @@ describe("pairing the number by QR code", () => {
     const first = sessionOf(org);
     wacalls.expire(first);
     await expect.poll(async () => (await state(owner.cookie)).failure).toBe("qr_expired");
-    expect(await notices(org)).toContain("A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Configurações → WhatsApp.");
+    expect(await notices(org)).toContain("A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Linha telefônica.");
     wacalls.requests.length = 0;
     expect((await start(owner.cookie)).data).toMatchObject({ status: "qr" });
     const paths = wacalls.requests.filter((request) => request.path !== "/api/events").map((request) => `${request.method} ${request.path}`);
@@ -253,7 +253,7 @@ describe("pairing the number by QR code", () => {
       wacalls.state.refusePairing = false;
     }
     const sent = await notices(org);
-    expect(sent).toContain("A conexão da ligação pelo WhatsApp não foi concluída: o WhatsApp encerrou a tentativa antes de mostrar o QR Code. Tente de novo em Configurações → WhatsApp. Se acontecer de novo, atualize o DeskVoice.");
+    expect(sent).toContain("A conexão da ligação pelo WhatsApp não foi concluída: o WhatsApp encerrou a tentativa antes de mostrar o QR Code. Tente de novo em Linha telefônica. Se acontecer de novo, atualize o DeskVoice.");
     expect(sent.some((body) => body.includes("não foi lido a tempo"))).toBe(false);
   });
 
@@ -266,7 +266,9 @@ describe("pairing the number by QR code", () => {
     wacalls.unlink(sessionOf(org));
     expect(await healthLine(owner.cookie)).toMatchObject({ status: "warn", reason: "whatsapp_calls_dropped" });
     expect(await state(owner.cookie)).toMatchObject({ status: "failed", failure: "logged_out", phone: "+553133330000" });
-    expect((await notices(org)).filter((body) => body.includes("mais de 14 dias sem uso"))).toHaveLength(1);
+    expect((await notices(org)).filter((body) => body.includes("mais de 14 dias sem uso"))).toEqual([
+      "O número +553133330000 desconectou da ligação pelo WhatsApp. Conecte de novo em Linha telefônica. O WhatsApp desconecta os aparelhos vinculados quando o celular principal fica mais de 14 dias sem uso.",
+    ]);
   });
 
   it("disconnect logs out and deletes the session, and names who did it", async () => {
