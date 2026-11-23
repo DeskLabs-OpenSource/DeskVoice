@@ -56,7 +56,7 @@ const agents = {
   liveAnalystNone: "Acompanha a ligação ao vivo: nenhum analista",
   engineSimulated: "O motor simulado segue um roteiro fixo, sem custo. Serve para demonstração e teste.",
   voiceId: "Voz",
-  voiceHint: "As vozes do provedor {provider}, pelo motor {engine}. Aperte \"Ouvir\" para a amostra da voz selecionada no idioma do agente.",
+  voiceHint: "As vozes do provedor {provider}, pelo motor {engine}.",
   voiceDefault: "Padrão do motor ({voice})",
   voiceDefaultNone: "Padrão do motor",
   voiceCustom: "{voice} (fora da lista do motor)",
@@ -66,7 +66,7 @@ const agents = {
   voiceNoSample: "Esta voz ainda não tem amostra. Teste numa ligação.",
   voiceSampleInPortuguese: "Amostra em português: esta voz ainda não tem a do idioma do agente.",
   voiceSampleFailed: "A amostra não tocou. Teste a voz numa ligação.",
-  voiceElevenLabs: "As vozes da ElevenLabs ficam escolhíveis aqui quando o motor Pipeline chegar. Ouça as da sua conta em",
+  voiceElevenLabs: "As vozes da ElevenLabs não são faladas pelos motores de hoje. Ouça as da sua conta em",
   voiceElevenLabsLink: "Configurações → Voz",
   /** O nome do provedor pelo `provider` do motor (`/api/v1/engines`). */
   voiceProviders: { google: "Google", openai: "OpenAI", none: "Sem provedor externo" } as Record<string, string>,

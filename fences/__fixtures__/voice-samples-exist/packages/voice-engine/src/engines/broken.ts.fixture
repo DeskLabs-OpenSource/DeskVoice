@@ -8,6 +8,6 @@ export const voices = [
       en: "voice-samples/broken/Ana.en.mp3",
     },
   },
-  { id: "Duda", sample: { "pt-BR": "../secret.mp3", es: samplePath } },
+  { id: "Duda", sample: { "pt-BR": "../secret.mp3", en: "logo.mp3", fr: "voice-samples/../secret.mp3", es: samplePath } },
   { id: "Edu", sample: SAMPLES },
 ];
