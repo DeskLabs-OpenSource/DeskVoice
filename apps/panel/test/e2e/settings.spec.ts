@@ -86,7 +86,7 @@ async function signInAsOperator(page: Page): Promise<void> {
 
 const RECORDING_NOTICE = "/api/v1/settings/recording_notice.text";
 
-test("a ligação pelo WhatsApp mora em Linha telefônica, e Configurações › WhatsApp aponta para lá por uma versão", async ({ page }) => {
+test("a ligação pelo WhatsApp mora em Linha telefônica, e saiu de Configurações › WhatsApp", async ({ page }) => {
   await signIn(page);
   // B1: o bloco está na Linha, e numa tela só.
   await page.goto("/line");
@@ -189,7 +189,7 @@ test("em /line sem endereço de bloco, com as mesmas leituras atrasadas e grande
   await expect(anchor).not.toBeInViewport();
 });
 
-test("o aviso de gravação mora em Privacidade e dados, acima da gravação; Regras das ligações aponta para lá, e salvar o texto persiste", async ({ page }) => {
+test("o aviso de gravação mora em Privacidade e dados, acima da gravação; saiu de Regras das ligações, o endereço do bloco abre direto nele, e salvar o texto persiste", async ({ page }) => {
   await signIn(page);
   const before = ((await (await page.request.get(RECORDING_NOTICE)).json()) as { data: { value: string | null } }).data.value;
   try {
