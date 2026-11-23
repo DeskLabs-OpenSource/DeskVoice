@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import commonEn from "../../../../i18n/en/common";
 import en from "../../../../i18n/en/settings";
@@ -146,18 +145,6 @@ export default function WhatsAppSettings() {
           </div>
         </div>
       </Panel>
-
-      {/* Por uma versão: a ligação pelo WhatsApp mudou para Linha telefônica. Só quem configura via o painel aqui. */}
-      {canConfigure ? (
-        <Notice>
-          <p>
-            {t.movedWhatsAppCalls}{" "}
-            <Link className="font-bold underline underline-offset-4" href="/line#ligacao-pelo-whatsapp">
-              {t.movedLink}
-            </Link>
-          </p>
-        </Notice>
-      ) : null}
     </>
   );
 }

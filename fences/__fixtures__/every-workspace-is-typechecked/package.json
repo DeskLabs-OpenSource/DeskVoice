@@ -1,0 +1,1 @@
+{ "name": "deskvoice", "scripts": { "typecheck": "tsc -p tsconfig.json" } }

@@ -1,0 +1,6 @@
+export const voices = [
+  { id: "Bia", style: "Warm", sample: { "pt-BR": "voice-samples/good/Bia.pt-BR.mp3", es: 'voice-samples/good/Bia.es.mp3' } },
+  {
+    id: "Caio",
+  },
+];

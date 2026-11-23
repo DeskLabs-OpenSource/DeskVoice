@@ -230,6 +230,13 @@ export interface EngineVoice {
   style?: string;
   /** O provedor recomenda esta voz. A tela escreve o rótulo no idioma dela. */
   recommended?: boolean;
+  /**
+   * A amostra que o botão "Ouvir" da tela do agente toca, por idioma falado: o caminho do arquivo
+   * relativo a `apps/panel/public/` (`voice-samples/<motor>/<voz>.<idioma>.mp3`). Sem a do idioma do
+   * agente, a tela toca a de pt-BR e diz que é em português; sem nenhuma, o botão fica desligado e a
+   * tela diz por quê. A cerca `voice-samples-exist` reprova caminho sem arquivo (DESA-397, fatia 1a).
+   */
+  sample?: { "pt-BR"?: string; en?: string; es?: string };
 }
 
 /** De onde veio uma declaração do provedor, como `pricing.checkedOn`: endereço e dia conferido. */

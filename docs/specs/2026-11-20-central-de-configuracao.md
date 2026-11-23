@@ -204,6 +204,22 @@ A proposta tem duas mudanças:
 As duas mudam o lugar de coisas que quem já usa conhece. Por isso, a parte não se constrói antes
 da decisão (seção 6).
 
+**Quando o "mudou para…" sai** (acrescentado em 23/11, depois do merge do #520 em `c9398a3`): o
+aviso nos dois lugares antigos (`movedWhatsAppCalls` em `settings/whatsapp/page.tsx` e
+`movedRecordingNotice` em `settings/calls/page.tsx`) vai **só na 0.46.0** (`b41c3eb`, 23/11), a
+primeira versão cortada com o #520, e sai **antes do corte seguinte à 0.46.0**, seja ele 0.46.1 ou
+0.47.0. O número vem da seção do `CHANGELOG.md` que traz o título do fragmento ("A ligação pelo
+WhatsApp passa para a tela…"). O corpo do #520 dizia "até o corte seguinte à 0.42.0", mas o número
+estava errado: a 0.42.1 e as versões até a 0.45.0 saíram sem ele.
+A cerca `moved-notice-leaves-after-one-version` prende a saída. Quando o `CHANGELOG.md` tiver uma
+versão mais nova que a 0.46.0 e as chaves ainda existirem no painel, ela reprova. Quem a vê
+vermelha é o PR da versão seguinte, então o PR que tira o aviso entra antes dele. O que a cerca não
+pega: o título trocado à mão no `CHANGELOG.md` (o arquivo diz "não edite à mão"), e o aviso que
+volta com outra chave.
+O aviso saiu antes do corte da 0.47.0 (DESA-394): as duas telas, as três chaves nos três idiomas
+(`movedWhatsAppCalls`, `movedRecordingNotice`, `movedLink`) e os testes de tela. A entrada em
+`MOVED_NOTICES` fica: ela reprova a volta dessas chaves.
+
 ### Parte 8: a atualização só na área da instalação (pequena, espera decisão)
 
 A proposta é que `settings/system/page.tsx` sempre redirecione. Quem administra a instalação vai
