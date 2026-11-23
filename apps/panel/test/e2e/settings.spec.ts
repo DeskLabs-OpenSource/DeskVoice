@@ -559,3 +559,23 @@ test("webhooks: a caixa do relatório de cada ligação nasce desmarcada, é gra
     await putHooks(null);
   }
 });
+
+// Parte 6 do desenho da central (A4): o destino da classificação (endpoint, chave e modelo) é item
+// técnico, e fica no "Avançado" do motor, fechado ao abrir a tela de IA.
+test("IA: o endpoint da classificação fica escondido até abrir o Avançado do motor", async ({ page }) => {
+  await signIn(page);
+  const engines = ((await (await page.request.get("/api/v1/engines")).json()) as { data: Array<{ label: string; classifyTarget: boolean }> }).data;
+  const target = engines.find((engine) => engine.classifyTarget);
+  test.skip(!target, "no engine on this installation declares a classification target");
+
+  await page.goto("/settings/ai");
+  const item = page.getByRole("listitem").filter({ has: page.getByText(target?.label ?? "", { exact: true }) });
+  const endpoint = item.getByLabel(settings.classifyBaseUrl);
+  await expect(item.getByText(settings.advanced, { exact: true })).toBeVisible();
+  await expect(endpoint).toBeHidden();
+  await expect(item.getByLabel(settings.classifyModel)).toBeHidden();
+
+  await item.getByText(settings.advanced, { exact: true }).click();
+  await expect(endpoint).toBeVisible();
+  await expect(item.getByLabel(settings.classifyModel)).toBeVisible();
+});
