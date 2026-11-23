@@ -75,6 +75,8 @@ export interface AgentOptions {
   language?: string;
   /** Ninguém atendeu a transferência: volta para o agente. Ausente vale o padrão do banco (`true`). */
   transferReturnsToAgent?: boolean;
+  /** O "ainda está aí?" (decisão B). Ausente vale o padrão do banco (`true`). */
+  callerIdleGuard?: boolean;
 }
 
 export async function createAgent(app: Db, organizationId: string, options: AgentOptions = {}): Promise<string> {
@@ -105,6 +107,9 @@ export async function createAgent(app: Db, organizationId: string, options: Agen
   );
   if (options.transferReturnsToAgent !== undefined) {
     await withSystem(app, (q) => q.exec("update agents set transfer_returns_to_agent = $2 where id = $1", [id, options.transferReturnsToAgent]));
+  }
+  if (options.callerIdleGuard !== undefined) {
+    await withSystem(app, (q) => q.exec("update agents set caller_idle_guard = $2 where id = $1", [id, options.callerIdleGuard]));
   }
   return id;
 }

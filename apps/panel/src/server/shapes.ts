@@ -34,7 +34,7 @@ const optionalText = (max: number) =>
     .transform((value) => (value === "" ? null : value));
 
 export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions, greeting, engine, voice_id as "voiceId", language, tools,
-  enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo", transfer_returns_to_agent as "transferReturnsToAgent",
+  enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo", transfer_returns_to_agent as "transferReturnsToAgent", caller_idle_guard as "callerIdleGuard",
   follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment",
   agent_handoff_targets as "agentHandoffTargets", drop_follow_up as "dropFollowUp",
   drop_follow_up_message as "dropFollowUpMessage", analyst_id as "analystId", analysis_brain as "analysisBrain", created_at as "createdAt", updated_at as "updatedAt"`;
@@ -54,6 +54,8 @@ const agentFields = z.object({
   transferTo: optionalPhone,
   // Ninguém atendeu a transferência: a ligação volta para o agente (Vapi · fatia 5a). Ligada de fábrica.
   transferReturnsToAgent: z.boolean(),
+  // O "ainda está aí?" quando quem ligou fica calado (Vapi · fatia 9, decisão B). Ligada de fábrica.
+  callerIdleGuard: z.boolean(),
   // A pessoa que recebe as pendências que o agente abre; nula é a equipe. A rota confere que ela
   // está ativa (`requireActiveOwner`); a de outra organização nem é vista.
   followUpOwnerUserId: z.uuid().nullable(),
@@ -95,6 +97,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   costCeilingCents: 500,
   transferTo: null,
   transferReturnsToAgent: true,
+  callerIdleGuard: true,
   followUpOwnerUserId: null,
   vocabulary: [],
   listeningEnvironment: "normal",
