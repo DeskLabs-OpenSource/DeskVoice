@@ -1026,6 +1026,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     transferring = true;
     pendingTransfer = end;
     guard?.stop();
+    // O "ainda está aí?" também para (DESA-356): quem ligou está calado porque espera a linha tocar. O
+    // `stop` não volta atrás, então o `toolFinished` do `transfer_to_human` que chega depois não rearma; o
+    // trecho de volta nasce com uma guarda nova (`startLeg`), que conta do zero.
+    idleGuard?.stop();
     cancelDuration();
     toolsRelease.abort(new Error("The call is being transferred"));
     await Promise.allSettled(toolsRunning);
