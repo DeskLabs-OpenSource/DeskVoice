@@ -206,15 +206,16 @@ da decisão (seção 6).
 
 **Quando o "mudou para…" sai** (acrescentado em 23/11, depois do merge do #520 em `c9398a3`): o
 aviso nos dois lugares antigos (`movedWhatsAppCalls` em `settings/whatsapp/page.tsx` e
-`movedRecordingNotice` em `settings/calls/page.tsx`) vai **só na primeira versão cortada com o
-#520**, e sai **antes do corte seguinte**. Com os fragmentos da `main` em 23/11, todos
-`nothing_changes`, essa versão é a **0.45.1**; se entrar um fragmento `new_capability` antes do
-corte, ela vira a 0.46.0. O número certo é o da seção do `CHANGELOG.md` que traz o título do
-fragmento ("A ligação pelo WhatsApp passa para a tela…"). O corpo do #520 dizia "até o corte
-seguinte à 0.42.0", mas o número estava errado: a 0.42.1 e as versões até a 0.45.0 saíram sem ele.
+`movedRecordingNotice` em `settings/calls/page.tsx`) vai **só na 0.46.0** (`b41c3eb`, 23/11), a
+primeira versão cortada com o #520, e sai **antes do corte seguinte à 0.46.0**, seja ele 0.46.1 ou
+0.47.0. O número vem da seção do `CHANGELOG.md` que traz o título do fragmento ("A ligação pelo
+WhatsApp passa para a tela…"). O corpo do #520 dizia "até o corte seguinte à 0.42.0", mas o número
+estava errado: a 0.42.1 e as versões até a 0.45.0 saíram sem ele.
 A cerca `moved-notice-leaves-after-one-version` prende a saída. Quando o `CHANGELOG.md` tiver uma
-versão mais nova que a do aviso e as chaves ainda existirem no painel, ela reprova. Quem a vê
-vermelha é o PR da versão seguinte.
+versão mais nova que a 0.46.0 e as chaves ainda existirem no painel, ela reprova. Quem a vê
+vermelha é o PR da versão seguinte, então o PR que tira o aviso entra antes dele. O que a cerca não
+pega: o título trocado à mão no `CHANGELOG.md` (o arquivo diz "não edite à mão"), e o aviso que
+volta com outra chave.
 
 ### Parte 8: a atualização só na área da instalação (pequena, espera decisão)
 
