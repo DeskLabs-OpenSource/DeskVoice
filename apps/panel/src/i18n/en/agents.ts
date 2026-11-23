@@ -90,6 +90,8 @@ const agents: AgentsDictionary = {
   transferReturnsHint: "After 45 seconds ringing with no answer, or with the number busy, the caller talks to the agent again, who offers to take a message or log a callback request. Turned off, the call drops and the panel tells you to call back. Phone calls only.",
   limits: "Limits per call",
   limitsLead: "On reaching one of the limits, the agent tells the caller and ends the call.",
+  callerIdleGuard: "End the call when the caller goes silent",
+  callerIdleGuardHint: "After 10 seconds of silence, the agent asks whether the caller is still on the line and, 10 seconds later, asks again. After 8 more seconds with no answer, it says goodbye and ends the call. Any sound from the caller resets the count. Turned off, the agent does not ask, and a silent call stays open until the maximum duration.",
   maxMinutes: "Maximum duration, in minutes",
   costCeiling: "Cost ceiling, in dollars",
   enabledLabel: "Agent on",

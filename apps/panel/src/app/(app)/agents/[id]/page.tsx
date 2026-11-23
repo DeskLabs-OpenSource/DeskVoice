@@ -40,6 +40,8 @@ interface Draft {
   transferTo: string;
   /** Ninguém atendeu a transferência: a ligação volta para o agente. Ligada de fábrica. */
   transferReturns: boolean;
+  /** O "ainda está aí?" quando quem ligou fica calado (decisão B). Ligada de fábrica. */
+  callerIdleGuard: boolean;
   maxMinutes: string;
   costCeiling: string;
   enabled: boolean;
@@ -60,7 +62,7 @@ interface Draft {
   analysis: AnalysisDraft;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", transferReturns: true, maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "", analysis: { kind: "organization" } };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", transferReturns: true, callerIdleGuard: true, maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "", analysis: { kind: "organization" } };
 
 const VOCABULARY_FIELD_ID = "agent-vocabulary";
 
@@ -81,6 +83,7 @@ const toDraft = (agent: AgentWithBrain): Draft => ({
   tools: agent.tools,
   transferTo: formatPhone(agent.transferTo),
   transferReturns: agent.transferReturnsToAgent ?? true,
+  callerIdleGuard: agent.callerIdleGuard ?? true,
   maxMinutes: String(Math.round(agent.maxCallSeconds / 60)),
   costCeiling: (agent.costCeilingCents / 100).toFixed(2),
   enabled: agent.enabled,
@@ -214,6 +217,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         tools: draft.tools,
         transferTo: draft.transferTo,
         transferReturnsToAgent: draft.transferReturns,
+        callerIdleGuard: draft.callerIdleGuard,
         maxCallSeconds: Math.round(Number(draft.maxMinutes) * 60),
         costCeilingCents: Math.round(Number(draft.costCeiling.replace(",", ".")) * 100),
         enabled: draft.enabled,
@@ -452,6 +456,10 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               <Field label={t.costCeiling}>
                 <TextInput mono inputMode="decimal" value={draft.costCeiling} onChange={(event) => set("costCeiling", event.target.value)} required />
               </Field>
+            </div>
+            <div className="mt-4 grid gap-1">
+              <Switch checked={draft.callerIdleGuard} onChange={(next) => set("callerIdleGuard", next)} label={t.callerIdleGuard} />
+              <p className="text-[0.87rem] text-muted">{t.callerIdleGuardHint}</p>
             </div>
           </Panel>
         </div>

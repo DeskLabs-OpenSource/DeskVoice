@@ -89,6 +89,8 @@ const agents = {
   transferReturnsHint: "Depois de 45 segundos tocando sem resposta, ou com o número ocupado, a pessoa volta a falar com o agente, que oferece deixar um recado ou registrar um pedido de retorno. Desligada, a ligação cai e o painel avisa para retornar. Só por telefone.",
   limits: "Limites por chamada",
   limitsLead: "Ao atingir um dos limites, o agente avisa quem está na linha e encerra.",
+  callerIdleGuard: "Encerrar a ligação quando quem ligou ficar em silêncio",
+  callerIdleGuardHint: "Depois de 10 segundos em silêncio, o agente pergunta se a pessoa ainda está na linha e, 10 segundos depois, pergunta de novo. Mais 8 segundos sem resposta, ele se despede e encerra. Qualquer som da pessoa volta a contagem ao zero. Desligada, o agente não pergunta, e a ligação calada segue até a duração máxima.",
   maxMinutes: "Duração máxima, em minutos",
   costCeiling: "Teto de custo, em dólares",
   enabledLabel: "Agente ligado",

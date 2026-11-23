@@ -155,6 +155,28 @@ describe("agents", () => {
     expect(createdOff.data).toMatchObject({ transferReturnsToAgent: false });
   });
 
+  it("keeps the \"are you still there?\" switch: on when absent, off when chosen, and untouched by saving another field", async () => {
+    const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Calado", engine: "simulated" } });
+    expect(created.data).toMatchObject({ callerIdleGuard: true });
+    const id = (created.data as { id: string }).id;
+    expect(await stored("select caller_idle_guard from agents where id = $1", [id])).toEqual({ caller_idle_guard: true });
+
+    const off = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { callerIdleGuard: false } });
+    expect([off.status, off.data]).toMatchObject([200, { callerIdleGuard: false }]);
+    expect(await stored("select caller_idle_guard from agents where id = $1", [id])).toEqual({ caller_idle_guard: false });
+    // Mudar outro campo não liga a chave de novo.
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ callerIdleGuard: false });
+    const on = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { callerIdleGuard: true } });
+    expect([on.status, on.data]).toMatchObject([200, { callerIdleGuard: true }]);
+    expect(await stored("select caller_idle_guard from agents where id = $1", [id])).toEqual({ caller_idle_guard: true });
+    for (const callerIdleGuard of ["false", null, 0]) {
+      const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { callerIdleGuard } });
+      expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", expect.stringMatching(/callerIdleGuard/)]);
+    }
+    const createdOff = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Sem lembrete", engine: "simulated", callerIdleGuard: false } });
+    expect(createdOff.data).toMatchObject({ callerIdleGuard: false });
+  });
+
   it("keeps what happens when the call drops: off when absent, task when chosen, and refuses the modes this slice has no path for", async () => {
     const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Queda", engine: "simulated" } });
     expect(created.data).toMatchObject({ dropFollowUp: "off" });
