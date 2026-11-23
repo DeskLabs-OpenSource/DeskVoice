@@ -6,11 +6,11 @@ import { POLL_GIVE_UP_MS, pollRun, type RunStatus } from "./poll";
 const sequence = (...statuses: Array<RunStatus | { status: RunStatus; errorCode: string }>) => {
   let index = 0;
   const reads: number[] = [];
-  const fetchRun = async () => {
+  const fetchRun = async (): Promise<{ status: RunStatus; errorCode: string | null }> => {
     reads.push(index);
-    const next = statuses[Math.min(index, statuses.length - 1)];
+    const next = statuses[Math.min(index, statuses.length - 1)] ?? "running";
     index += 1;
-    return typeof next === "string" ? { status: next, errorCode: null } : { errorCode: null, ...next };
+    return typeof next === "string" ? { status: next, errorCode: null } : next;
   };
   return { fetchRun, reads };
 };

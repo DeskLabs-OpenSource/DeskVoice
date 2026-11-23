@@ -37,7 +37,6 @@ const voice = await startInternalApi({
     web: unused,
     runAgentTest: unused,
     stopRecording: unused,
-    runAgentTest: unused,
     agentTestState: unused,
     // Indireto: um teste troca o canal por um sem token.
     whatsappCalls: { state: (input) => channel.state(input), connect: (input) => channel.connect(input), disconnect: (input) => channel.disconnect(input) },
