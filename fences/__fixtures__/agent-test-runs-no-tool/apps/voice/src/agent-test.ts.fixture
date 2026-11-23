@@ -1,0 +1,5 @@
+// Este comentário fala de runTool e de "@deskvoice/tools/run-tool", e não conta.
+import { runTool } from "@deskvoice/tools";
+import "../../../packages/tools/src/run-tool";
+
+export const run = runTool;
