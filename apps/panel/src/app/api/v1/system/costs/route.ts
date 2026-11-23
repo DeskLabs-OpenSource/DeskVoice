@@ -29,10 +29,12 @@ export const GET = handle({}, async ({ q, url, deps }) => {
   // de A para B, o trecho de B não entra na conta de A. `calls` conta as ligações em que o agente teve
   // linha no extrato, e uma ligação com passagem conta para cada agente: a soma das chamadas da lista
   // pode passar do número de ligações. O total não muda, porque cada linha entra num agente só.
+  // A junção com `calls` é `left join`: a linha do teste do agente (fatia 7b) não tem ligação, e com
+  // `join` ela sumiria daqui e a soma dos agentes deixaria de bater com o total do mês.
   const byAgent = await q.many<{ agentId: string | null; name: string | null; microcents: string; calls: number; unmeasured: number; estimated: number }>(
     `select ${LEDGER_AGENT} as "agentId", a.name, coalesce(sum(l.cost_microcents), 0)::text as microcents, count(distinct l.call_id)::int as calls,
             ${UNMEASURED_COUNT} as unmeasured, ${ESTIMATED_COUNT} as estimated
-       from usage_ledger l join calls c on c.id = l.call_id left join agents a on a.id = ${LEDGER_AGENT}
+       from usage_ledger l left join calls c on c.id = l.call_id left join agents a on a.id = ${LEDGER_AGENT}
        cross join (select coalesce((select timezone from outbound_policy), 'America/Sao_Paulo') as zone) z
       where (l.at at time zone z.zone)::date between $1::date and $2::date group by 1, 2 order by 3 desc`,
     range,
@@ -52,7 +54,8 @@ export const GET = handle({}, async ({ q, url, deps }) => {
   // classificado depois da meia-noite) não aparece inteira nos dois períodos.
   // O analista ao vivo (R6) grava as linhas dele com `source = 'analyst'` e o modelo de decisão em
   // `engine`, o mesmo do filtro da fala: a linha do analista sai separada pelo `source`, e não tem
-  // minutos (o modelo de decisão não atende trecho nenhum).
+  // minutos (o modelo de decisão não atende trecho nenhum). O teste do agente (fatia 7b) grava as
+  // dele com `source = 'test'`, sem ligação: saem numa linha própria, sem minutos, pelo mesmo `source`.
   const byEngine = await q.many<{ engine: string; source: string | null; microcents: string; seconds: number; unmeasured: number; estimated: number }>(
     `with scoped as (select l.engine, l.source, l.call_id, l.cost_microcents, l.cost_measured, l.cost_estimated ${scope}),
           ended as (
@@ -104,8 +107,9 @@ export const GET = handle({}, async ({ q, url, deps }) => {
     byAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents), calls: row.calls, unmeasuredCount: row.unmeasured, estimatedCount: row.estimated })),
     byEngine: byEngine.map((row) => ({
       engine: row.engine,
-      // `analyst` nas linhas do analista ao vivo; nulo no resto (voz, filtro, classificação).
-      source: row.source === "analyst" ? ("analyst" as const) : null,
+      // `analyst` nas linhas do analista ao vivo, `test` nas do teste do agente (fatia 7b); nulo no
+      // resto (voz, filtro, classificação).
+      source: row.source === "analyst" || row.source === "test" ? row.source : null,
       costCents: centsOf(row.microcents),
       callSeconds: row.seconds,
       unmeasuredCount: row.unmeasured,
