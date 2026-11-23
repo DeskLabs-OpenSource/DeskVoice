@@ -136,6 +136,25 @@ describe("agents", () => {
     expect([back.status, back.data]).toMatchObject([200, { listeningEnvironment: "normal" }]);
   });
 
+  it("keeps the return of an unanswered transfer: on when absent, off when chosen, and untouched by saving another field", async () => {
+    const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Volta", engine: "simulated" } });
+    expect(created.data).toMatchObject({ transferReturnsToAgent: true });
+    const id = (created.data as { id: string }).id;
+    expect(await stored("select transfer_returns_to_agent from agents where id = $1", [id])).toEqual({ transfer_returns_to_agent: true });
+
+    const off = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { transferReturnsToAgent: false } });
+    expect([off.status, off.data]).toMatchObject([200, { transferReturnsToAgent: false }]);
+    expect(await stored("select transfer_returns_to_agent from agents where id = $1", [id])).toEqual({ transfer_returns_to_agent: false });
+    // Mudar outro campo não liga a chave de novo.
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ transferReturnsToAgent: false });
+    for (const transferReturnsToAgent of ["true", null, 1]) {
+      const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { transferReturnsToAgent } });
+      expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", expect.stringMatching(/transferReturnsToAgent/)]);
+    }
+    const createdOff = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Sem volta", engine: "simulated", transferReturnsToAgent: false } });
+    expect(createdOff.data).toMatchObject({ transferReturnsToAgent: false });
+  });
+
   it("keeps what happens when the call drops: off when absent, task when chosen, and refuses the modes this slice has no path for", async () => {
     const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Queda", engine: "simulated" } });
     expect(created.data).toMatchObject({ dropFollowUp: "off" });
