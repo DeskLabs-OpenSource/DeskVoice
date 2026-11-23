@@ -149,8 +149,8 @@ const SERVICE_NOTICE: Record<"whatsapp" | "whatsappCalls", Record<(typeof WHATSA
     absent: "O serviço de WhatsApp foi removido deste servidor.",
   },
   whatsappCalls: {
-    running: "O serviço de ligação pelo WhatsApp está instalado neste servidor. Conecte um número em Configurações → WhatsApp.",
-    failed: "O servidor não conseguiu instalar ou remover o serviço de ligação pelo WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações → WhatsApp.",
+    running: "O serviço de ligação pelo WhatsApp está instalado neste servidor. Conecte um número em Linha telefônica.",
+    failed: "O servidor não conseguiu instalar ou remover o serviço de ligação pelo WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Linha telefônica.",
     absent: "O serviço de ligação pelo WhatsApp foi removido deste servidor.",
   },
 };
