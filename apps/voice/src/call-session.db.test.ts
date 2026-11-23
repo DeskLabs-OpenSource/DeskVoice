@@ -713,6 +713,26 @@ describe("ainda está aí? (item 9 da segunda leva Vapi)", { timeout: 120_000 },
     expect(harness.timers.held()).toEqual([]);
   });
 
+  it("com a chave do agente desligada (decisão B): 40 s calado, o agente não pergunta nem encerra, e a ligação segue", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("caller-idle-off", { engine: "manual", callerIdleGuard: false }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("audio", Buffer.alloc(320));
+    expect(harness.timers.held()).not.toContain(20 + IDLE_FIRST_MS);
+    harness.clock.advance(40_000);
+    for (let round = 0; round < 3; round++) for (const delay of new Set(harness.timers.held())) if (delay <= 40_000) harness.timers.fire(delay);
+    expect(manual.said).not.toContain(IDLE_ASK);
+    expect(manual.said).not.toContain(IDLE_FAREWELL);
+    expect(await kindsOf(app, callId)).not.toContain("caller_idle");
+    expect((await callOf(app, callId)).status).toBe("in_progress");
+
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ endReason: "caller_hangup" });
+    expect(await kindsOf(app, callId)).not.toContain("caller_idle");
+  });
+
   it("quem ligou faz qualquer som entre um lembrete e outro: volta ao zero e a ligação segue", async () => {
     const manual = manualEngine({ keyless: true });
     const { callId, transport, start, harness } = await scene("caller-idle-reset", { engine: "manual" }, manual);

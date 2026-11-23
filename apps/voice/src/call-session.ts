@@ -172,10 +172,12 @@ interface AgentRow {
   analyst_id: string | null;
   /** Ninguém atendeu a transferência: a ligação volta para o agente (Vapi · fatia 5a). */
   transfer_returns_to_agent: boolean;
+  /** O "ainda está aí?" (Vapi · fatia 9, decisão B): desligada, o trecho nasce sem a guarda, que não pergunta nem encerra. */
+  caller_idle_guard: boolean;
 }
 
 const AGENT_COLUMNS =
-  "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets, analyst_id, transfer_returns_to_agent";
+  "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets, analyst_id, transfer_returns_to_agent, caller_idle_guard";
 
 /** Um trecho da ligação: o tempo em que ela esteve com um agente, com o motor e o custo dele. */
 interface Leg {
@@ -190,7 +192,8 @@ interface Leg {
   enabled: Map<string, Tool>;
   guard: SilenceGuard;
   /** A guarda do "ainda está aí?" (item 9 da segunda leva Vapi). */
-  idle: CallerIdleGuard;
+  /** Ausente com a chave do agente desligada. */
+  idle: CallerIdleGuard | undefined;
   context: ToolContext;
   usage: Required<Pick<Usage, "seconds" | "inputTokens" | "outputTokens" | "textInputTokens" | "cachedInputTokens" | "textOutputTokens">>;
   /** O custo do trecho, calculado com o preço do motor dele. */
@@ -1244,7 +1247,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         void event("caller_unanswered", report).catch(logFailure("could not record an unanswered caller"));
       },
     });
-    const idle = createCallerIdleGuard({
+    // A chave do agente (decisão B): desligada, não há guarda, e cada `idle?.` abaixo não faz nada.
+    const idle = row.caller_idle_guard === false ? undefined : createCallerIdleGuard({
       clock,
       schedule,
       // `wrapUp` e `finish` param a guarda, e a passagem para a do trecho antigo: depois disso ela não chama nada.
@@ -1279,7 +1283,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       if (signal.words && callerSpokeAfterAsk === false) callerSpokeAfterAsk = true;
       silenceGuard.callerActivity(signal);
       // Com ou sem palavras, e mesmo por cima da fala do agente: quem ligou está na linha.
-      idle.callerActivity();
+      idle?.callerActivity();
     });
     // O marco da latência por turno. Ferramenta em curso agora, de qualquer trecho: o turno mede o webhook.
     session.on("callerTurnEnded", (signal) => {
@@ -1289,7 +1293,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("audio", (pcm) => {
       if (!current()) return;
       silenceGuard.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
-      idle.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
+      idle?.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
       if (ending) return;
       transport.sendAudio(pcm);
       // A latência conta até o áudio entregue ao transporte, e não até o que o motor mandou.
@@ -1299,7 +1303,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("interrupted", () => {
       if (!current()) return;
       silenceGuard.agentInterrupted();
-      idle.agentInterrupted();
+      idle?.agentInterrupted();
       latency.interrupted();
       // Antes de descartar: o motor corta no histórico o que quem ligou não chegou a ouvir.
       const spoken = transport.playedMs?.();
@@ -1331,12 +1335,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("toolCall", (toolCall) => {
       // Ferramenta em curso, aprovação em espera inclusive: a guarda não age até ela acabar.
       silenceGuard.toolStarted();
-      idle.toolStarted();
+      idle?.toolStarted();
       if (current()) latency.toolStarted();
       const running: Promise<void> = handleToolCall(self, toolCall).finally(() => {
         toolsRunning.delete(running);
         silenceGuard.toolFinished();
-        idle.toolFinished();
+        idle?.toolFinished();
       });
       toolsRunning.add(running);
     });
@@ -1452,7 +1456,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       startLeg(next, opened.engine, opened.voice, enabled, next.instructions, nextAnalyst.analyst);
       const analystProblem = nextAnalyst.problem ? analystProblemEvent(next.id, nextAnalyst.problem) : undefined;
       from.guard.stop();
-      from.idle.stop();
+      from.idle?.stop();
       visited.push(next);
       if (next.max_call_seconds < durationLimitSeconds) {
         durationLimitSeconds = next.max_call_seconds;
