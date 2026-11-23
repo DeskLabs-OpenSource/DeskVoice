@@ -69,6 +69,7 @@ const marked = (lookup: McpLookup): McpTool[] =>
     ...tool,
     allowed: tool.supported && tool.allowed === true,
     writes: tool.writes ?? true,
+    needsApproval: tool.needsApproval ?? false,
   }));
 
 /** Servidores de ferramentas (MCP), abaixo dos webhooks. Só quem administra a organização vê. */
@@ -145,6 +146,7 @@ export function McpServers() {
         fingerprint: tool.fingerprint,
         allowed: tool.supported && tool.allowed,
         writes: tool.writes,
+        needsApproval: tool.needsApproval,
       })),
       ...(confirm !== undefined && { confirm }),
     };
@@ -414,6 +416,18 @@ export function McpServers() {
                                 }
                               />
                               {t.writes}
+                            </label>
+                            <label className="flex items-center gap-2 text-[0.93rem]">
+                              <input
+                                type="checkbox"
+                                checked={tool.needsApproval}
+                                onChange={(event) =>
+                                  setTool(tool.name, {
+                                    needsApproval: event.target.checked,
+                                  })
+                                }
+                              />
+                              {t.needsApproval}
                             </label>
                           </div>
                         ) : (

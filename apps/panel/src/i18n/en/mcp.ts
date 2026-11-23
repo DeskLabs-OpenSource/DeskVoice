@@ -24,6 +24,7 @@ const mcp: McpDictionary = {
   toolsNone: "The server offers no tools.",
   allowed: "Allow for agents",
   writes: "Writes (changes something outside DeskVoice)",
+  needsApproval: "Ask a person to approve before each use (the caller waits on the line for up to 2 minutes)",
   readOnlyHint: "The server says this tool only reads. It is only a hint: you decide.",
   unsupported: "DeskVoice does not understand the fields of this tool, and it cannot be allowed.",
   omitted: "The server offers {count} more tools, which did not enter the snapshot.",

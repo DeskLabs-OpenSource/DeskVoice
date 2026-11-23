@@ -28,7 +28,7 @@ interface SavedBody {
   label: string;
   url: string;
   secret?: string;
-  tools: Array<{ name: string; fingerprint: string; allowed: boolean; writes: boolean }>;
+  tools: Array<{ name: string; fingerprint: string; allowed: boolean; writes: boolean; needsApproval: boolean }>;
 }
 
 /** O servidor falso: a descoberta devolve o retrato, e o `PUT` guarda o que a tela mandou. */
@@ -45,7 +45,7 @@ async function fakeServer(page: Page, slug: string) {
     fetchedAt: "2026-11-23T12:00:00.000Z",
     tools: LOOKUP.tools.map((tool) => {
       const mark = body.tools.find((item) => item.name === tool.name);
-      return { ...tool, allowed: mark?.allowed === true, writes: mark?.writes ?? true, needsApproval: false };
+      return { ...tool, allowed: mark?.allowed === true, writes: mark?.writes ?? true, needsApproval: mark?.needsApproval === true };
     }),
     agents: [],
   });
@@ -81,10 +81,13 @@ test("MCP: a dona descobre as ferramentas, marca, salva, e o agente vê as caixa
   await section.getByRole("button", { name: mcp.look, exact: true }).click();
   expect(server.discovered).toEqual([{ url: "https://mcp.example.com/mcp", headerName: "Authorization", secret: "Bearer s3cret", timeoutSeconds: 10, slug }]);
 
-  // Nada vem liberado; "escreve" vem marcado; a dica do servidor só aparece como dica.
+  // Nada vem liberado; "escreve" vem marcado; a aprovação humana vem desligada (8c); a dica do
+  // servidor só aparece como dica.
   const consult = section.getByTestId("mcp-tool-consultar_pedido");
+  const cancel = section.getByTestId("mcp-tool-cancelar_pedido");
   await expect(consult.getByRole("checkbox", { name: mcp.allowed })).not.toBeChecked();
   await expect(consult.getByRole("checkbox", { name: mcp.writes })).toBeChecked();
+  for (const row of [consult, cancel]) await expect(row.getByRole("checkbox", { name: mcp.needsApproval })).not.toBeChecked();
   await expect(consult.getByText(mcp.readOnlyHint)).toBeVisible();
   // A ferramenta fora do subconjunto não tem caixa para marcar.
   const weird = section.getByTestId("mcp-tool-estranha");
@@ -93,13 +96,14 @@ test("MCP: a dona descobre as ferramentas, marca, salva, e o agente vê as caixa
 
   await consult.getByRole("checkbox", { name: mcp.allowed }).check();
   await consult.getByRole("checkbox", { name: mcp.writes }).uncheck();
-  await section.getByTestId("mcp-tool-cancelar_pedido").getByRole("checkbox", { name: mcp.allowed }).check();
+  await cancel.getByRole("checkbox", { name: mcp.allowed }).check();
+  await cancel.getByRole("checkbox", { name: mcp.needsApproval }).check();
   await section.getByRole("button", { name: mcp.save, exact: true }).click();
   await expect(section.getByText(label, { exact: true })).toBeVisible();
   expect(server.saved?.tools).toEqual([
-    { name: "consultar_pedido", fingerprint: fingerprint("a"), allowed: true, writes: false },
-    { name: "cancelar_pedido", fingerprint: fingerprint("b"), allowed: true, writes: true },
-    { name: "estranha", fingerprint: fingerprint("c"), allowed: false, writes: true },
+    { name: "consultar_pedido", fingerprint: fingerprint("a"), allowed: true, writes: false, needsApproval: false },
+    { name: "cancelar_pedido", fingerprint: fingerprint("b"), allowed: true, writes: true, needsApproval: true },
+    { name: "estranha", fingerprint: fingerprint("c"), allowed: false, writes: true, needsApproval: false },
   ]);
 
   // A tela do agente: as duas liberadas, sob o nome do servidor, nenhuma marcada.

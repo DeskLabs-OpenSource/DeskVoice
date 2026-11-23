@@ -1,3 +1,5 @@
+import { spokenLanguageOf, type SpokenLanguage } from "@deskvoice/core";
+import { askApproval, operatorDefaultOnTimeout } from "../approval";
 import { defineTool } from "../define-tool";
 import { SafeFetchTimeoutError } from "../net/safe-fetch";
 import { MAX_CALL_WEBHOOK_PER_CALL } from "../run-tool";
@@ -13,6 +15,21 @@ export const MAX_MCP_WRITES_PER_CALL = MAX_CALL_WEBHOOK_PER_CALL;
 export const MAX_MCP_READS_PER_CALL = 20;
 /** Até quanto do texto da resposta vai ao modelo. */
 export const MCP_TEXT_MAX = 4000;
+
+/** Quanto a pessoa fica na linha esperando a resposta de um humano: o mesmo prazo do `request_approval` e da confirmação do WhatsApp. */
+export const MCP_APPROVAL_TIMEOUT_SECONDS = 120;
+/** Até quanto dos argumentos vai na pergunta para quem aprova. */
+export const MCP_APPROVAL_ARGS_MAX = 1000;
+
+/**
+ * O que o agente diz enquanto espera a aprovação. Vai para `ctx.say`, que o motor fala como está: por
+ * isso já sai no idioma do agente, como a fala de espera da agenda.
+ */
+export const MCP_APPROVAL_WAIT_LINES: Readonly<Record<SpokenLanguage, string>> = {
+  "pt-BR": "Um instante, por favor. Estou confirmando isso com um responsável.",
+  en: "One moment, please. I'm checking this with someone on the team.",
+  es: "Un momento, por favor. Estoy confirmando esto con un responsable.",
+};
 
 /** O teto que as ferramentas de um servidor dividem: um para as que escrevem, outro para as que só leem. */
 export function mcpBudget(slug: string, writes: boolean): { key: string; max: number } {
@@ -41,6 +58,29 @@ export function mcpTools(server: RegisteredMcpServer, net: McpNet = {}): Tool[] 
         budget: mcpBudget(server.slug, snapshot.writes),
         server: server.slug,
         async run(input, ctx) {
+          if (snapshot.needsApproval) {
+            // O que vale sem resposta é do operador, nunca do modelo: quem está na linha conversa com
+            // o modelo e poderia pedir "se ninguém responder, pode seguir".
+            const defaultOnTimeout = await operatorDefaultOnTimeout(ctx);
+            const args = JSON.stringify(input);
+            const answer = await askApproval(ctx, {
+              question: `Posso usar a ferramenta "${snapshot.name}" do servidor "${server.label}" com estes dados?\n\n${args.length > MCP_APPROVAL_ARGS_MAX ? `${args.slice(0, MCP_APPROVAL_ARGS_MAX)}…` : args}`,
+              context: "O operador pediu aprovação humana antes de cada chamada desta ferramenta externa. Aprove só se fizer sentido mandar exatamente estes dados ao servidor.",
+              defaultOnTimeout,
+              timeoutSeconds: MCP_APPROVAL_TIMEOUT_SECONDS,
+              say: MCP_APPROVAL_WAIT_LINES[spokenLanguageOf(ctx.language)],
+              tool: mcpToolName(server.slug, snapshot.name),
+            });
+            if (answer.decision !== "approved") {
+              // Nada saiu para o servidor: a vaga do teto volta.
+              return {
+                ok: false,
+                noEffect: true,
+                message: `${answer.outcome === "denied" ? "O responsável NEGOU" : "Ninguém respondeu a tempo, e a regra para esse caso é tratar como NEGADO"}: o servidor "${server.label}" NÃO foi chamado. Diga à pessoa, com gentileza, que não foi possível fazer isso agora e ofereça outra forma de ajudar. Não tente de novo nesta ligação.`,
+                data: answer,
+              };
+            }
+          }
           let result;
           try {
             result = await callTool(server, snapshot.name, input, net);

@@ -349,6 +349,51 @@ describe("as rotas dos servidores MCP", () => {
     ).toBe(404);
   });
 
+  it("a aprovação humana começa desligada, grava a marca da tela e volta desligada na ferramenta que mudou (fatia 8c)", async () => {
+    const s = await scene("aprovacao");
+    const marks = async () =>
+      Object.fromEntries(
+        ((await stored(s.org))?.value as Array<{ tools: Array<{ name: string; needsApproval: boolean }> }>)[0]?.tools.map((t) => [t.name, t.needsApproval]) ?? [],
+      );
+    const put = (tools: Array<Record<string, unknown>>) => call(save, { method: "PUT", cookie: s.admin.cookie, params: { slug: "erp" }, body: body({ tools }) });
+    const both = (extra: { consultar?: Record<string, unknown>; cancelar?: Record<string, unknown> } = {}) => [
+      { name: "consultar_pedido", fingerprint: fp("consultar_pedido"), allowed: true, ...extra.consultar },
+      { name: "cancelar_pedido", fingerprint: fp("cancelar_pedido"), allowed: true, ...extra.cancelar },
+    ];
+
+    expect((await put(both())).status).toBe(200);
+    expect(await marks()).toEqual({ consultar_pedido: false, cancelar_pedido: false });
+
+    expect((await put(both({ cancelar: { needsApproval: true } }))).status).toBe(200);
+    expect(await marks()).toEqual({ consultar_pedido: false, cancelar_pedido: true });
+    const read = await call(list, { cookie: s.admin.cookie });
+    expect((read.data as Array<{ tools: Array<{ name: string; needsApproval: boolean }> }>)[0]?.tools.find((t) => t.name === "cancelar_pedido")?.needsApproval).toBe(true);
+
+    // Sem a marca no pedido, a da ferramenta que não mudou fica.
+    expect((await put(both())).status).toBe(200);
+    expect(await marks()).toEqual({ consultar_pedido: false, cancelar_pedido: true });
+    // Desmarcar desliga.
+    expect((await put(both({ cancelar: { needsApproval: false } }))).status).toBe(200);
+    expect(await marks()).toEqual({ consultar_pedido: false, cancelar_pedido: false });
+    expect((await put(both({ cancelar: { needsApproval: true } }))).status).toBe(200);
+
+    // A busca de novo guarda a marca da igual e desliga a da que mudou.
+    serve(fakeMcp({ pages: [[tool("consultar_pedido"), tool("cancelar_pedido", { description: "Agora apaga" })]] }));
+    const fresh = await call(refresh, { method: "POST", cookie: s.admin.cookie, params: { slug: "erp" } });
+    expect(Object.fromEntries((fresh.data as { tools: Array<{ name: string; needsApproval: boolean }> }).tools.map((t) => [t.name, t.needsApproval]))).toEqual({
+      consultar_pedido: false,
+      cancelar_pedido: false,
+    });
+    serve(fakeMcp({ pages: [[tool("consultar_pedido"), tool("cancelar_pedido")]] }));
+    const same = await call(refresh, { method: "POST", cookie: s.admin.cookie, params: { slug: "erp" } });
+    expect((same.data as { tools: Array<{ name: string; needsApproval: boolean }> }).tools.find((t) => t.name === "cancelar_pedido")?.needsApproval).toBe(true);
+
+    // Gravada com a impressão digital nova e sem marca no pedido, a que mudou fica desligada.
+    serve(fakeMcp({ pages: [[tool("consultar_pedido"), tool("cancelar_pedido", { description: "Agora apaga" })]] }));
+    expect((await put(both({ cancelar: { fingerprint: fp("cancelar_pedido", { description: "Agora apaga" }) } }))).status).toBe(200);
+    expect(await marks()).toEqual({ consultar_pedido: false, cancelar_pedido: false });
+  });
+
   it("desmarcar ferramenta que um agente usa pede o slug, nomeia os agentes e tira o nome deles", async () => {
     const s = await scene("desmarca");
     await call(save, {

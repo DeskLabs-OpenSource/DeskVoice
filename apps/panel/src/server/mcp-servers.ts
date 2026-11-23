@@ -52,6 +52,8 @@ export const saveBody = z.object({
         fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
         allowed: z.boolean(),
         writes: z.boolean().default(true),
+        // Ausente guarda a marca da ferramenta que não mudou; a ferramenta nova ou que mudou começa sem.
+        needsApproval: z.boolean().optional(),
       }),
     )
     .max(200)
@@ -216,8 +218,7 @@ export async function saveServer(q: OrgQuery, deps: ServerDeps, slug: string, bo
       fingerprint: tool.fingerprint,
       allowed: tool.supported && mark?.allowed === true,
       writes: mark?.writes ?? true,
-      // A 8c decide a aprovação; aqui só não se perde a de uma ferramenta que não mudou.
-      needsApproval: old?.fingerprint === tool.fingerprint ? old.needsApproval : false,
+      needsApproval: mark?.needsApproval ?? (old?.fingerprint === tool.fingerprint ? old.needsApproval : false),
       supported: tool.supported,
     };
   });
@@ -272,6 +273,7 @@ export function refreshView(server: RegisteredMcpServer, list: McpToolList) {
       ...tool,
       allowed: keep && old.allowed && tool.supported,
       writes: keep ? old.writes : true,
+      needsApproval: keep ? old.needsApproval : false,
     };
   });
   const live = new Set(list.tools.map((tool) => tool.name));

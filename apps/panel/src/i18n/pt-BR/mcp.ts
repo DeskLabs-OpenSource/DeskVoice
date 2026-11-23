@@ -24,6 +24,7 @@ const mcp = {
   toolsNone: "O servidor não oferece ferramentas.",
   allowed: "Liberar para os agentes",
   writes: "Escreve (muda algo fora do DeskVoice)",
+  needsApproval: "Pedir aprovação de uma pessoa antes de cada uso (quem liga espera na linha até 2 minutos)",
   readOnlyHint: "O servidor diz que esta ferramenta só lê. É só uma dica: quem decide é você.",
   unsupported: "O DeskVoice não entende os campos desta ferramenta, e ela não pode ser liberada.",
   omitted: "O servidor oferece mais {count} ferramentas, que não entraram no retrato.",
