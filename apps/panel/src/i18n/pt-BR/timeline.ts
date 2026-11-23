@@ -338,6 +338,11 @@ const timeline = {
       turn_closed: "Quem ligou ficou {seconds} s sem resposta, talvez por barulho na linha. O agente foi chamado a responder ao que ouviu.",
       asked_to_repeat: "O agente seguia calado {seconds} s depois da última fala de quem ligou e pediu para a pessoa repetir.",
     },
+    caller_idle: {
+      asked: "Quem ligou ficou {seconds} s calado depois da fala do agente, que perguntou se a pessoa ainda estava na linha.",
+      asked_again: "Quem ligou seguia calado {seconds} s depois da fala do agente, que lembrou de novo que é só falar.",
+      ended: "Quem ligou ficou {seconds} s calado, e o agente se despediu e encerrou a ligação.",
+    },
     memory_loaded: "O agente recebeu a memória do número: {notes} notas e {followUps} pendências, {chars} caracteres.",
     drop_follow_up: {
       engine_failed: "A ligação caiu porque o sistema falhou.",
@@ -434,6 +439,7 @@ const timeline = {
     end_call: "O agente encerrou a conversa.",
     transferred: "A ligação foi transferida.",
     max_duration: "A chamada atingiu a duração máxima definida no agente.",
+    caller_silent: "Quem ligou ficou em silêncio, e o agente encerrou a ligação depois de perguntar duas vezes se a pessoa ainda estava na linha.",
     cost_ceiling: "A chamada atingiu o teto de custo definido no agente.",
     engine_failed: "O motor de voz falhou.",
     script_finished: "O roteiro da simulação terminou.",

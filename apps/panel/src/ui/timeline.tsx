@@ -598,6 +598,12 @@ export function Timeline({
         const seconds = (Number(p.waitedMs) / 1000).toLocaleString(locale, { maximumFractionDigits: 1 });
         return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(said, { seconds })}</Quiet> };
       }
+      case "caller_idle": {
+        // O agente terminou de falar e quem ligou ficou calado: a guarda perguntou, lembrou ou encerrou.
+        const said = p.action === "ended" ? e.caller_idle.ended : p.action === "asked_again" ? e.caller_idle.asked_again : e.caller_idle.asked;
+        const seconds = (Number(p.silentMs) / 1000).toLocaleString(locale, { maximumFractionDigits: 1 });
+        return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(said, { seconds })}</Quiet> };
+      }
       case "memory_loaded":
         // Só os ids e o tamanho: o texto das notas fica na tabela delas, onde o prazo o alcança.
         return {
