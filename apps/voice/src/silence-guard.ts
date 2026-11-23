@@ -71,6 +71,8 @@ export interface SilenceGuard {
    * desarmada não vê mais quem ligou esperando; quem lê precisa ler antes.
    */
   openTurn(): "agent_speaking" | "caller_waiting" | null;
+  /** Quem ligou falou e a guarda espera a resposta do agente (prazo correndo ou turno fechado). Só leitura. */
+  armed(): boolean;
 }
 
 type Phase =
@@ -158,6 +160,9 @@ export function createSilenceGuard(deps: SilenceGuardDeps): SilenceGuard {
       if (now() < agentSpeakingUntil) return "agent_speaking";
       if (phase.kind === "closed") return "caller_waiting";
       return null;
+    },
+    armed() {
+      return phase.kind !== "idle";
     },
   };
 }

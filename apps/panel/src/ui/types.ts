@@ -34,6 +34,8 @@ export interface Agent {
   transferTo: string | null;
   /** Ninguém atendeu a transferência: a ligação volta para o agente. Agente gravado antes do campo existir pode chegar sem ele: vale `true`. */
   transferReturnsToAgent?: boolean;
+  /** O "ainda está aí?" quando quem ligou fica calado. Agente gravado antes do campo existir pode chegar sem ele: vale `true`. */
+  callerIdleGuard?: boolean;
   followUpOwnerUserId: string | null;
   /** Onde quem liga costuma estar. Agente gravado antes do campo existir pode chegar sem ele: vale `normal`. */
   listeningEnvironment?: ListeningEnvironment;
