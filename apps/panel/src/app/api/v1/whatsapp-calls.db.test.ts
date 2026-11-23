@@ -138,8 +138,8 @@ describe("the service exists only on the server of whoever asked for it", () => 
     expect(await healthLine(owner.cookie)).toMatchObject({ status: "warn", reason: "whatsapp_calls_no_number" });
     expect(await notices(org)).toEqual([
       "Test owner pediu a instalação do serviço de ligação pelo WhatsApp neste servidor. O servidor baixa e sobe o serviço em alguns minutos.",
-      "O servidor não conseguiu instalar ou remover o serviço de ligação pelo WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Configurações → WhatsApp.",
-      "O serviço de ligação pelo WhatsApp está instalado neste servidor. Conecte um número em Configurações → WhatsApp.",
+      "O servidor não conseguiu instalar ou remover o serviço de ligação pelo WhatsApp. Ele tenta de novo em alguns minutos; o motivo está em Linha telefônica.",
+      "O serviço de ligação pelo WhatsApp está instalado neste servidor. Conecte um número em Linha telefônica.",
     ]);
   });
 
