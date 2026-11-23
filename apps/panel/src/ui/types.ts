@@ -362,3 +362,39 @@ export interface Setting<T> {
   key: string;
   value: T | null;
 }
+
+/** Uma ferramenta de um servidor MCP: como a busca trouxe, com as marcas do operador. */
+export interface McpTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  fingerprint: string;
+  supported: boolean;
+  allowed: boolean;
+  writes: boolean;
+  /** Só dica do servidor; nunca decide `writes`. */
+  readOnlyHint?: boolean;
+}
+
+/** Um servidor MCP como `GET /mcp-servers` devolve. Do segredo, só se existe. */
+export interface McpServer {
+  slug: string;
+  label: string;
+  url: string;
+  headerName: string;
+  secret: { configured: boolean };
+  timeoutSeconds: number;
+  fetchedAt: string;
+  tools: McpTool[];
+  /** Os agentes que usam ferramenta deste servidor, pelo nome. */
+  agents: Array<{ id: string; name: string; tools: string[] }>;
+}
+
+/** O que a descoberta e a busca de novo devolvem. */
+export interface McpLookup {
+  tools: Array<Omit<McpTool, "allowed" | "writes"> & { allowed?: boolean; writes?: boolean }>;
+  omitted: number;
+  incomplete: boolean;
+  /** Só na busca de novo: o que mudou por ferramenta. */
+  changes?: Array<{ name: string; change: "new" | "changed" | "gone" | "same" }>;
+}

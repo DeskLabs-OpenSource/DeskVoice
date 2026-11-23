@@ -64,6 +64,11 @@ export const SUPPORT_SESSION_ROUTES: SupportSessionRoute[] = [
   forbid("calls/[id]/share", "POST", "o link público da ligação sobrevive à sessão de suporte"),
   allow("calls/[id]/share", "DELETE", "revoga o link público, não cria acesso"),
   forbid("settings/[key]", "PUT", "algumas chaves são destino de saída (conector, ganchos, endpoint de classificação)"),
+  // Os servidores MCP (item 8, fatia 8b): a mesma classificação do `PUT settings/[key]`, onde os webhooks moram.
+  forbid("mcp-servers/discover", "POST", "manda um segredo digitado a um destino de fora"),
+  forbid("mcp-servers/[slug]", "PUT", "grava uma credencial e um destino de saída que sobrevivem à sessão de suporte"),
+  forbid("mcp-servers/[slug]/refresh", "POST", "usa o segredo guardado contra o servidor de fora"),
+  forbid("mcp-servers/[slug]", "DELETE", "descadastra o servidor e tira as ferramentas dele de todo agente da organização"),
   forbid("whatsapp/connect", "POST", "pareia um número por QR Code: canal de saída que sobrevive à sessão"),
   allow("whatsapp/disconnect", "POST", "desliga o canal, não cria acesso"),
   forbid("whatsapp/service", "POST", "dúvida: liga o serviço de WhatsApp da instalação inteira, não só da organização"),

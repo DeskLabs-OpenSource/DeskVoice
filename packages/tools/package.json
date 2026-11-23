@@ -6,6 +6,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./mcp-client": "./src/mcp/client.ts",
+    "./mcp-schema": "./src/mcp/schema.ts",
+    "./mcp-servers": "./src/mcp/servers.ts",
+    "./safe-fetch": "./src/net/safe-fetch.ts",
     "./waha": "./src/connectors/waha.ts",
     "./webhook-events": "./src/connectors/webhook-events.ts",
     "./webhook-timeout": "./src/connectors/webhook-timeout.ts",
