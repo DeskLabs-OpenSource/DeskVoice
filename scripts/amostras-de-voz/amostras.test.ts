@@ -20,7 +20,7 @@ const PRECO: EnginePricing = { centsPerMillionOutputTokens: 5000, centsPerMillio
 const PIOR = custoEmDolares(PRECO, PIOR_CASO_POR_PEDIDO);
 
 /** O que cada voz do motor falso faz quando recebe `say`. */
-type Comportamento = "fala" | "outra coisa" | "vaza a chave" | "sem usage" | "não para";
+type Comportamento = "fala" | "outra coisa" | "vaza a chave" | "fala a chave" | "sem usage" | "não para";
 
 interface Registro {
   conexoes: string[];
@@ -61,7 +61,8 @@ function motorFalso(vozes: Record<string, Comportamento>, registro: Registro): V
             return;
           }
           emitir("audio", Buffer.alloc(16000 * 4));
-          emitir("transcript", { speaker: "agent", text: comportamento === "outra coisa" ? "Claro! Posso ajudar com isso." : texto.toUpperCase() });
+          const falado = comportamento === "outra coisa" ? "Claro! Posso ajudar com isso." : comportamento === "fala a chave" ? `a chave é ${apiKey}` : texto.toUpperCase();
+          emitir("transcript", { speaker: "agent", text: falado });
           // Custo real pequeno: 800 tokens de saída a US$ 50/M = US$ 0,04.
           if (comportamento !== "sem usage") emitir("usage", { outputTokens: 800 });
         },
@@ -82,6 +83,7 @@ async function rodar(
   vozes: Record<string, Comportamento>,
   ambiente: NodeJS.ProcessEnv = { AMOSTRAS_FALSO_API_KEY: CHAVE },
   codificar?: Pecas["codificar"],
+  outrasPecas: Partial<Pecas> = {},
 ) {
   const saida = await mkdtemp(join(tmpdir(), "amostras-teste-"));
   pastas.push(saida);
@@ -103,6 +105,7 @@ async function rodar(
     saida: (linha) => linhas.push(linha),
     ambiente,
     saidaPadrao: saida,
+    ...outrasPecas,
   };
   const codigo = await gerarAmostras(argv, pecas);
   const texto = linhas.join("\n");
@@ -185,6 +188,26 @@ describe("a chave", () => {
     expect(texto).not.toContain(CHAVE);
     expect(trechoDeSample(lido).join("\n")).not.toContain("Ana");
     expect(trechoDeSample(lido).join("\n")).toContain('id: "Bia"');
+  });
+});
+
+describe("a chave no que o motor falou e no que o script imprime", () => {
+  it("o texto falado vai ao manifesto e à tela sem a chave", async () => {
+    const { texto, saida, manifesto } = await rodar(["--teto-usd", "2"], { Ana: "fala a chave" });
+    expect((await manifesto()).amostras.map((a) => [a.situacao, a.falado])).toEqual(["pt-BR", "en", "es"].map(() => ["divergente", "a chave é ***"]));
+    expect(await readFile(join(saida, "manifesto.json"), "utf8")).not.toContain(CHAVE);
+    expect(texto).toContain('falou: "a chave é ***"');
+    expect(texto).not.toContain(CHAVE);
+  });
+
+  it("a linha impressa passa pela máscara mesmo quando o texto não veio do manifesto", async () => {
+    const { codigo, texto, registro } = await rodar(["--teto-usd", "2"], { Ana: "fala" }, undefined, undefined, {
+      conferirCodificador: async () => `libmp3lame ausente (chave ${CHAVE})`,
+    });
+    expect(codigo).toBe(1);
+    expect(registro.conexoes).toEqual([]);
+    expect(texto).toContain("sem codificador de MP3: libmp3lame ausente (chave ***). Nada foi pedido.");
+    expect(texto).not.toContain(CHAVE);
   });
 });
 

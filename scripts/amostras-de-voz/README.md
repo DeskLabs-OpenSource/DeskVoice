@@ -64,7 +64,10 @@ pela linha estreita (8 kHz, a do telefone).
 O README da bancada está escrito para a VPS. No Mac só falta o Piper (a voz sintética que fala as
 frases) e as quatro vozes dele. O faster-whisper e o Laya não entram nesta medida.
 
+O bloco começa na raiz do repositório e termina nela:
+
 ```bash
+RAIZ=$(pwd)
 mkdir -p ~/bancada-env && cd ~/bancada-env
 python3 -m venv venv
 ./venv/bin/pip install piper-tts
@@ -75,7 +78,7 @@ for v in cadu/medium jeff/medium faber/medium edresson/low; do
     curl -sLO "https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/$v/$n.$e"
   done
 done
-cd -    # volte para a raiz do repositório
+cd "$RAIZ"    # volte para a raiz do repositório
 ```
 
 ### Rodar
