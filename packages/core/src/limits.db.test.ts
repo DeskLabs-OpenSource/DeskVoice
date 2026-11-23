@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createOrganization, openTestDbs, waitFor } from "../test/helpers";
 import { createAccount } from "./accounts";
-import { assertBelowLimit, organizationLimits, setOrganizationLimits, type BelowLimitResult } from "./limits";
+import { assertBelowLimit, MAX_COUNT_LIMIT, organizationLimits, setDefaultLimits, setOrganizationLimits, type BelowLimitResult } from "./limits";
 import { withOrg, withSystem } from "./with-org";
 
 // Seção 3.4 do desenho do R8, fatia 7a: o limite de linhas e de agentes por organização.
@@ -127,5 +127,20 @@ describe("setOrganizationLimits", () => {
     for (const value of [null, "false", 0]) {
       await expect(setOrganizationLimits(app, org, { outboundAllowed: value as unknown as boolean }, actor, NOW)).rejects.toThrow(/true or false/);
     }
+  });
+});
+
+describe("the ceiling of the limits, the same in the core as in the route", () => {
+  it("setOrganizationLimits and setDefaultLimits refuse a count above the ceiling and store nothing, not even an audit event", async () => {
+    const org = await createOrganization(app, `limits-${randomUUID()}`);
+    const someone = (await withSystem(app, (q) => createAccount(q, { email: `ceiling-${randomUUID()}@example.test`, passwordHash: "x" }))) ?? "";
+    const stored = () => owner.pool.query("select value from installation_settings where key = 'defaults.limits'").then((result) => result.rows);
+    const before = await stored();
+    expect(MAX_COUNT_LIMIT).toBe(1_000_000);
+    await expect(setOrganizationLimits(app, org, { maxAgents: MAX_COUNT_LIMIT + 1 }, someone, NOW)).rejects.toThrow(/up to 1000000/);
+    await expect(setDefaultLimits(app, { maxAgents: MAX_COUNT_LIMIT + 1 }, someone, NOW)).rejects.toThrow(/up to 1000000/);
+    expect((await owner.pool.query("select 1 from organization_limits where organization_id = $1", [org])).rowCount).toBe(0);
+    expect(await stored()).toEqual(before);
+    expect((await owner.pool.query("select 1 from installation_events where actor_account_id = $1", [someone])).rowCount).toBe(0);
   });
 });

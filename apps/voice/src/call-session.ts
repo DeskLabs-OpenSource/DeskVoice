@@ -69,6 +69,7 @@ import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import { createSilenceGuard, type SilenceGuard } from "./silence-guard";
+import { createTurnLatencyMeter } from "./turn-latency";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
 
@@ -187,6 +188,11 @@ interface Leg {
   analyst?: LegAnalyst;
   /** As objeções que já orientaram o agente neste trecho: cada uma orienta uma vez só. */
   guided: Set<string>;
+  /**
+   * As ferramentas em curso neste trecho, pelo id da chamada: o cancelamento do provedor aborta o
+   * `signal` delas e marca `cancelled`, e aí o resultado não vai ao motor.
+   */
+  toolsInFlight: Map<string, { name: string; abort: AbortController; cancelled: boolean }>;
 }
 
 /** O analista aberto para um trecho: o modelo de decisão, a chave e o cadastro lido no começo do trecho. */
@@ -423,6 +429,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   /** A menor duração máxima entre os agentes por onde a ligação passou, em segundos. */
   let durationLimitSeconds = 0;
   const toolsRunning = new Set<Promise<void>>();
+  /** A latência por turno (item 6 da segunda leva Vapi): cada turno fica aqui, e vira um `turn_latency` só no fim. */
+  const latency = createTurnLatencyMeter(clock);
   /**
    * O "pode repetir?" desta ligação (desenho do follow-up da ligação que caiu, seção 3.1): `undefined`
    * sem pedido; depois dele, se quem ligou deu `callerActivity{words: true}` desde o último pedido.
@@ -468,6 +476,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       for (const [kind, payload] of end.events ?? []) await event(kind, payload);
       if (end.notice) await panelNotice(q, clock, callId, end.notice);
       await q.exec("update calls set status = $2, end_reason = $3, ended_at = $4, cost_cents = $5 where id = $1", [callId, end.status, end.endReason, clock.now(), callCents()]);
+      // Um evento por ligação, antes do fim; sem turno medido, nenhum.
+      const turnLatency = latency.summary();
+      if (turnLatency) await event("turn_latency", turnLatency);
       await event("call_ended", {
         status: end.status,
         reason: end.endReason,
@@ -566,7 +577,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     wrappingUp = true;
     guard?.stop();
     // Sem texto: o modelo já vai falar a despedida (o resultado da ferramenta pediu), e só se espera.
-    if (farewell) voice?.say(farewell);
+    if (farewell) {
+      latency.notAnswer();
+      voice?.say(farewell);
+    }
     cancelTimers.push(schedule(() => void finish(end), FAREWELL_MS));
   }
 
@@ -858,7 +872,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   };
 
   /** O contexto das ferramentas de um trecho: `agentId` é o agente do trecho (o número de transferência, a lista de destinos). */
-  const contextFor = (legAgentId: string, legLanguage: string, session: VoiceSession): ToolContext => ({
+  const contextFor = (legAgentId: string, legLanguage: string, session: VoiceSession, enabled: ReadonlyMap<string, Tool>): ToolContext => ({
     organizationId,
     callId,
     agentId: legAgentId,
@@ -869,7 +883,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // Fala pela sessão do próprio trecho, e só enquanto ela é a atual: a ferramenta de um trecho já
     // substituído numa passagem não fala na voz do agente seguinte.
     say(text) {
-      if (!ending && leg?.voice === session) session.say(text);
+      if (ending || leg?.voice !== session) return;
+      latency.notAnswer();
+      session.say(text);
     },
     waitForApproval: (approvalId, timeoutMs) =>
       deps.approvals.wait(
@@ -879,11 +895,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         callEnded.signal,
       ),
     handoff: (target, input) => handOff(session, target, input),
+    // O que o motor deste trecho recebeu: a frase de uma ferramenta só manda usar outra que ele tem.
+    offeredTools: new Set(enabled.keys()),
   });
 
   async function handleToolCall(owner: Leg, call: { id: string; name: string; args: unknown }): Promise<void> {
     let result: ToolResult;
     const tool = owner.enabled.get(call.name);
+    const inFlight = { name: call.name, abort: new AbortController(), cancelled: false };
+    owner.toolsInFlight.set(call.id, inFlight);
     try {
       // `owner !== leg`: a sessão que pediu já foi substituída numa passagem e está fechada.
       if (ending || wrappingUp || owner !== leg) {
@@ -894,15 +914,18 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         await event("tool_called", { name: call.name, args: toolCalledArgs(deps.tools.get(call.name), call.args) });
         await event("tool_result", { name: call.name, ok: false, message: result.message, error: "tool is not enabled for this agent" });
       } else {
-        result = await runTool(tool, call.args, owner.context);
+        result = await runTool(tool, call.args, { ...owner.context, signal: inFlight.abort.signal });
       }
     } catch (error) {
       // `runTool` só lança se nem o evento pôde ser gravado. O modelo ainda recebe uma resposta.
       log("error", "tool call could not be recorded", { tool: call.name, error: messageOf(error) });
       result = { ok: false, message: TOOL_CRASH_MESSAGE };
+    } finally {
+      owner.toolsInFlight.delete(call.id);
     }
-    // Depois de uma passagem, a sessão que pediu já fechou: o resultado não tem a quem ir.
-    if (!ending && owner === leg) owner.voice.sendToolResult(call.id, result);
+    // Depois de uma passagem, a sessão que pediu já fechou: o resultado não tem a quem ir. Cancelada
+    // pelo provedor, o modelo já não espera o resultado; o `tool_result` gravado diz o que saiu.
+    if (!ending && owner === leg && !inFlight.cancelled) owner.voice.sendToolResult(call.id, result);
     // Com despedida, a ligação só cai depois de ela ser falada: sem isso o modelo às vezes encerrava
     // calado, e a pessoa ouvia a ligação cair na cara dela. Quem fala é o próprio modelo, ao receber
     // o resultado do end_call (que traz a despedida); pedir a fala de novo aqui a repetia.
@@ -1006,12 +1029,22 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * motor só começa a emitir no próximo ciclo, e os handlers precisam estar no lugar antes da primeira fala.
    */
   function startLeg(row: AgentRow, legEngine: VoiceEngine, session: VoiceSession, enabled: Map<string, Tool>, analyst?: LegAnalyst): Leg {
+    // O turno que a guarda tira sem marco aberto conta com o motor desta perna e o marco que ele emite.
+    const guardTurn = { engine: legEngine.id, source: legEngine.callerTurnSource };
     const silenceGuard = createSilenceGuard({
       clock,
       schedule,
-      closeCallerTurn: () => session.closeCallerTurn(),
+      // A resposta forçada pela guarda e o pedido para repetir não entram na latência por turno: o
+      // turno vai para `guardTurns`. Com `false`, o motor não mandou nada (o provedor já tinha fechado
+      // a vez, só está lento), e o turno segue aberto, como um turno comum.
+      closeCallerTurn: () => {
+        if (session.closeCallerTurn() !== false) latency.guardActed(guardTurn);
+      },
       // `wrapUp` e `finish` param a guarda: depois disso ela não chama nada.
-      say: (text) => session.say(text),
+      say: (text) => {
+        latency.guardActed(guardTurn);
+        session.say(text);
+      },
       acted: (report) => {
         // O pedido zera o fato no mesmo instante do `caller_unanswered`: vale só a fala depois do último.
         if (report.action === "asked_to_repeat") callerSpokeAfterAsk = false;
@@ -1024,11 +1057,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       voice: session,
       enabled,
       guard: silenceGuard,
-      context: contextFor(row.id, row.language, session),
+      context: contextFor(row.id, row.language, session, enabled),
       usage: { seconds: 0, inputTokens: 0, outputTokens: 0, textInputTokens: 0, cachedInputTokens: 0, textOutputTokens: 0 },
       costCents: 0,
       ...(analyst && { analyst }),
       guided: new Set(),
+      toolsInFlight: new Map(),
     };
     // Uma sessão substituída numa passagem já foi fechada; o que ela ainda emitir não vai para a linha.
     const current = (): boolean => leg === self;
@@ -1041,16 +1075,24 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       if (signal.words && callerSpokeAfterAsk === false) callerSpokeAfterAsk = true;
       silenceGuard.callerActivity(signal);
     });
+    // O marco da latência por turno. Ferramenta em curso agora, de qualquer trecho: o turno mede o webhook.
+    session.on("callerTurnEnded", (signal) => {
+      if (!current()) return;
+      latency.callerTurnEnded(legEngine.id, signal.source, toolsRunning.size > 0);
+    });
     session.on("audio", (pcm) => {
       if (!current()) return;
       silenceGuard.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
       if (ending) return;
       transport.sendAudio(pcm);
+      // A latência conta até o áudio entregue ao transporte, e não até o que o motor mandou.
+      latency.agentAudioDelivered();
       recorder?.agent(pcm);
     });
     session.on("interrupted", () => {
       if (!current()) return;
       silenceGuard.agentInterrupted();
+      latency.interrupted();
       // Antes de descartar: o motor corta no histórico o que quem ligou não chegou a ouvir.
       const spoken = transport.playedMs?.();
       if (spoken !== undefined) session.played?.(spoken - spokenAtStart);
@@ -1081,14 +1123,31 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("toolCall", (toolCall) => {
       // Ferramenta em curso, aprovação em espera inclusive: a guarda não age até ela acabar.
       silenceGuard.toolStarted();
+      if (current()) latency.toolStarted();
       const running: Promise<void> = handleToolCall(self, toolCall).finally(() => {
         toolsRunning.delete(running);
         silenceGuard.toolFinished();
       });
       toolsRunning.add(running);
     });
+    // O provedor desistiu de chamadas em curso: o resultado delas é descartado, e a ferramenta que lê o
+    // `signal` pode parar. O que ela já fez fica feito, e o `tool_result` dela é gravado como sempre.
+    session.on("toolCallCancelled", (ids) => {
+      for (const id of ids) {
+        const inFlight = self.toolsInFlight.get(id);
+        if (!inFlight || inFlight.cancelled) continue;
+        inFlight.cancelled = true;
+        inFlight.abort.abort();
+        if (current()) event("tool_cancelled", { name: inFlight.name }).catch(logFailure("could not record a tool cancellation"));
+      }
+    });
     // A última medição de uma sessão substituída também conta, e no trecho dela.
     session.on("usage", (increment) => void meter(self, increment).catch(logFailure("could not record usage")));
+    // O motor trocou a conexão com o provedor sem fechar a sessão: só fica registrado.
+    session.on("resumed", () => {
+      if (!current()) return;
+      event("engine_resumed", { engine: legEngine.id }).catch(logFailure("could not record the engine resumption"));
+    });
     // `error` sozinho não é fatal: fica guardado para explicar um `closed` que venha em seguida.
     session.on("error", (error) => {
       self.lastError = error;
@@ -1328,7 +1387,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // O analista foi ligado e não pôde abrir: idem, e o trecho segue sem ele.
       ...(firstAnalyst.problem ? [analystProblemEvent(first.id, firstAnalyst.problem)] : []),
     ];
-    if (call.direction !== "inbound") session.say(recordingNotice);
+    if (call.direction !== "inbound") {
+      latency.notAnswer();
+      session.say(recordingNotice);
+    }
     answeredAt = clock.now();
     durationLimitSeconds = first.max_call_seconds;
     scheduleDuration();

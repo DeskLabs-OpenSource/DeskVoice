@@ -290,6 +290,7 @@ services:
       - ./asterisk/generated/ari.conf:/etc/asterisk/ari.conf:ro
       - ./asterisk/generated/rtp.conf:/etc/asterisk/rtp.conf:ro
       - ./asterisk/generated/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./asterisk/generated/modules.conf:/etc/asterisk/modules.conf:ro
       - asterisk-generated:/etc/asterisk/generated
     healthcheck:
       test: ["CMD", "asterisk", "-rx", "core show uptime"]

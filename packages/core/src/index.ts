@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./accounts";
+export * from "./agent-tests";
 export * from "./analysis";
 export * from "./agent-analysis-brain";
 export * from "./analysts";
@@ -20,6 +21,7 @@ export * from "./installation";
 export * from "./invites";
 export * from "./ivr";
 export * from "./limits";
+export * from "./organization-defaults";
 export * from "./migrate";
 export * from "./organizations";
 export * from "./password";

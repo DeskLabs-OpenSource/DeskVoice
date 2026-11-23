@@ -145,7 +145,7 @@ describe("organization limits", () => {
     }
     expect((await call(readLimits, { cookie: s.admin.cookie, params: { id: randomUUID() } })).status).toBe(404);
     expect((await call(writeLimits, { method: "PUT", cookie: s.admin.cookie, params: { id: randomUUID() }, body: { maxTrunks: 1, maxAgents: 1 } })).status).toBe(404);
-    for (const body of [{ maxTrunks: 1, maxAgents: 1, outboundAllowed: null }, { maxTrunks: 1, maxAgents: 1, outboundAllowed: "false" }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: -1 }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 1.5 }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: "100" }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 2_147_483_648 }, { maxTrunks: 1, maxAgents: 1, nope: 1 }, { maxTrunks: -1, maxAgents: 1 }, { maxTrunks: 1.5, maxAgents: 1 }]) {
+    for (const body of [{ maxTrunks: 1, maxAgents: 1, outboundAllowed: null }, { maxTrunks: 1, maxAgents: 1, outboundAllowed: "false" }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: -1 }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 1.5 }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: "100" }, { maxTrunks: 1, maxAgents: 1, monthlySpendCapCents: 2_147_483_648 }, { maxTrunks: 1_000_001, maxAgents: 1 }, { maxTrunks: 1, maxAgents: 1_000_001 }, { maxTrunks: 1, maxAgents: 1, nope: 1 }, { maxTrunks: -1, maxAgents: 1 }, { maxTrunks: 1.5, maxAgents: 1 }]) {
       expect((await call(writeLimits, { method: "PUT", cookie: s.admin.cookie, params: { id: s.org }, body })).code).toBe("validation_error");
     }
     expect(await withSystem(panel.app, (q) => q.one("select 1 from organization_limits where organization_id = $1", [s.org]))).toBeNull();

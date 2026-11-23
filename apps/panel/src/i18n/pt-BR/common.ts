@@ -40,6 +40,7 @@ const common = {
     markRead: "Marcar como lido",
     openCall: "Ver a ligação",
     followUpOpen: "Ver a pendência",
+    openUpdate: "Ver a atualização",
     followUpGone: "Pendência apagada pelo prazo de guarda.",
     /** O seletor do topo, só para quem tem vínculo ativo em mais de uma organização. */
     organization: "Organização",
@@ -80,6 +81,8 @@ const common = {
   limitReached: {
     trunks: "Esta organização já tem {count} linhas telefônicas; o limite definido pela administração da instalação é {limit}.",
     agents: "Esta organização já tem {count} agentes; o limite definido pela administração da instalação é {limit}.",
+    trunksOne: "Esta organização já tem 1 linha telefônica; o limite definido pela administração da instalação é {limit}.",
+    agentsOne: "Esta organização já tem 1 agente; o limite definido pela administração da instalação é {limit}.",
   },
   errors: {
     fallback: "Não conseguimos concluir essa ação. Tente de novo em instantes.",

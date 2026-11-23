@@ -141,7 +141,7 @@ lacks "atualização: voz deixa de publicar porta" "$(cat "$O")" "8091"
 lacks "atualização: VOICE_WEB_PUBLIC_PORT sai" "$(cat "$A")" "VOICE_WEB_PUBLIC_PORT"
 equal "atualização: 1 salto por túnel" 1 "$(env_get "$A" TRUSTED_PROXY_HOPS)"
 
-# ── O Asterisk monta cinco arquivos um a um: a atualização os regrava, e ele precisa passar a usar
+# ── O Asterisk monta seis arquivos um a um: a atualização os regrava, e ele precisa passar a usar
 #    a configuração nova sem derrubar ligação. Com um clone (git de mentira) cuja versão de destino
 #    traz um modelo do Asterisk diferente. ──
 ASTERISK_MODEL="$DESKVOICE_DEPLOY_DIR/asterisk/extensions.conf"; GEN="$DESKVOICE_DEPLOY_DIR/asterisk/generated"
@@ -207,13 +207,65 @@ echo 0 > "$FAKE_DIR/migrate_exit"
 out="$(bash "$KIT/update.sh" --to 0.8.0 --yes 2>&1)"
 equal "mesma configuração: não recarrega" 0 "$(reloads)"
 equal "mesma configuração: não reinicia" 0 "$(restarts)"
+# A lista de módulos só vale na partida: modules.conf mudado reinicia o Asterisk, e não recarrega
+# (não há módulo que o releia). Sem o contêiner preso ao arquivo antigo: o caminho do pendente.
+rm -rf "$FAKE_DIR/asterisk_mounted"
+MODULES_MODEL="$DESKVOICE_DEPLOY_DIR/asterisk/modules.conf"; cp "$MODULES_MODEL" "$FAKE_DIR/git_checkout/main/deploy/asterisk/modules.conf"
+mkdir -p "$FAKE_DIR/git_checkout/v0.9.5/deploy/asterisk"
+cp "$FAKE_DIR/git_checkout/v0.8.0/deploy/asterisk/extensions.conf" "$FAKE_DIR/git_checkout/v0.9.5/deploy/asterisk/"
+{ cat "$MODULES_MODEL"; echo "; modelo da v0.9.5"; } > "$FAKE_DIR/git_checkout/v0.9.5/deploy/asterisk/modules.conf"
+{ echo v0.9.5; cat "$FAKE_DIR/git_tags"; } > "$FAKE_DIR/git_tags.next"; mv "$FAKE_DIR/git_tags.next" "$FAKE_DIR/git_tags"
+inode_before="$(inode "$GEN/modules.conf")"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.5 --yes 2>&1)"; equal "modules.conf mudou: a atualização termina bem" 0 "$?"
+contains "modules.conf mudou: o disco tem o modelo novo" "$(cat "$GEN/modules.conf")" "; modelo da v0.9.5"
+equal "modules.conf mudou: regravado no lugar" "$inode_before" "$(inode "$GEN/modules.conf")"
+equal "modules.conf mudou: reinicia o Asterisk uma vez" 1 "$(restarts)"
+equal "modules.conf mudou: não recarrega" 0 "$(reloads)"
+contains "modules.conf mudou: diz por que reinicia" "$out" "Reiniciando o Asterisk: a lista de módulos do Asterisk só vale na partida"
+refuse "modules.conf mudou: nada fica pendente" test -e "$GEN/.reload-pending"
+cp "$FAKE_DIR/git_checkout/v0.9.5/deploy/asterisk/modules.conf" "$FAKE_DIR/git_checkout/main/deploy/asterisk/modules.conf"
+# O contêiner preso a um modules.conf antigo (o caminho que já existe): reinicia, sem recarregar.
+# (De volta "na 0.8.0", com o mesmo modelo: a versão de destino igual à instalada não faz nada.)
+mkdir -p "$FAKE_DIR/asterisk_mounted"; cp "$GEN"/*.conf "$FAKE_DIR/asterisk_mounted/"; echo "; de antes" >> "$FAKE_DIR/asterisk_mounted/modules.conf"
+env_set "$E" DESKVOICE_VERSION 0.8.0; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.5 --yes 2>&1)"; equal "modules.conf preso ao arquivo antigo: a atualização termina bem" 0 "$?"
+equal "modules.conf preso ao arquivo antigo: reinicia o Asterisk uma vez" 1 "$(restarts)"
+equal "modules.conf preso ao arquivo antigo: não recarrega" 0 "$(reloads)"
+contains "modules.conf preso ao arquivo antigo: diz por quê" "$out" "o contêiner ainda lê a versão antiga de modules.conf"
+# Uma atualização que não muda o modules.conf: nem recarrega nem reinicia (o modules.conf não
+# reinicia toda atualização).
+env_set "$E" DESKVOICE_VERSION 0.8.0; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.5 --yes 2>&1)"; equal "mesmo modules.conf: a atualização termina bem" 0 "$?"
+contains "mesmo modules.conf: a atualização foi feita" "$out" "0.9.5"
+equal "mesmo modules.conf: não reinicia" 0 "$(restarts)"
+equal "mesmo modules.conf: não recarrega" 0 "$(reloads)"
+env_set "$E" DESKVOICE_VERSION 0.8.0
+# A volta para uma versão de antes do modules.conf (toda versão publicada até esta): o checkout dela
+# apaga o modelo, e o atualizador que roda a volta é o novo, que está na memória. A volta não pede o
+# modelo, e a migration que falhou não vira "a volta não terminou bem". O que a ida gerou sai: o
+# contêiner da versão anterior lê o modules.conf da imagem, e compará-lo com o gerado reiniciaria o
+# Asterisk sem motivo.
+rm -f "$FAKE_DIR/git_checkout/main/deploy/asterisk/modules.conf"
+mkdir -p "$FAKE_DIR/git_checkout/v0.9.6"; cp -R "$FAKE_DIR/git_checkout/v0.9.5/." "$FAKE_DIR/git_checkout/v0.9.6/"
+{ echo v0.9.6; cat "$FAKE_DIR/git_tags"; } > "$FAKE_DIR/git_tags.next"; mv "$FAKE_DIR/git_tags.next" "$FAKE_DIR/git_tags"
+mkdir -p "$FAKE_DIR/asterisk_mounted"; cp "$GEN"/*.conf "$FAKE_DIR/asterisk_mounted/"; echo "; o da imagem" > "$FAKE_DIR/asterisk_mounted/modules.conf"
+echo 1 > "$FAKE_DIR/migrate_exit"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.6 --yes 2>&1)"; equal "volta para versão sem modules.conf: sai com erro (a migration falhou)" 1 "$?"
+contains "volta para versão sem modules.conf: foi desfeita" "$out" "foi desfeita: você está de volta na versão 0.8.0"
+lacks "volta para versão sem modules.conf: não diz que a volta não terminou bem" "$out" "não terminou bem"
+equal "volta para versão sem modules.conf: voltou a versão" 0.8.0 "$(env_get "$E" DESKVOICE_VERSION)"
+refuse "volta para versão sem modules.conf: o checkout apagou o modelo (como o git de verdade)" test -e "$MODULES_MODEL"
+refuse "volta para versão sem modules.conf: o modules.conf gerado na ida sai" test -e "$GEN/modules.conf"
+equal "volta para versão sem modules.conf: o Asterisk não é reiniciado" 0 "$(restarts)"
+echo 0 > "$FAKE_DIR/migrate_exit"; rm -rf "$FAKE_DIR/asterisk_mounted"; cp "$REPO/deploy/asterisk/modules.conf" "$MODULES_MODEL"
 # ── Imagens de terceiros: sai a que o Compose da versão de onde se saiu fixava por resumo e o da nova
 #    não fixa mais (issue #163). Só a referência exata; a de outro sistema e a que segue fixada ficam. ──
 pins() { sed -nE 's/^[[:space:]]*image:[[:space:]]*(\$\{[A-Z_]+:-)?([^}[:space:]]+@sha256:[0-9a-f]{64})\}?[[:space:]]*$/\2/p' "$DESKVOICE_DEPLOY_DIR/docker-compose.yml"; }
 OLD_WACALLS="ghcr.io/jotadev66/wacalls@sha256:$(printf 'a%.0s' $(seq 64))"
 OLD_CADDY="caddy:2.10.0-alpine@sha256:$(printf 'b%.0s' $(seq 64))"
 KEPT="$(pins | grep waha)"
-mkdir -p "$FAKE_DIR/git_checkout/main/deploy"
+# O Compose é rastreado em toda versão: a de destino traz o dela (o do kit), e o checkout não o apaga.
+mkdir -p "$FAKE_DIR/git_checkout/main/deploy" "$FAKE_DIR/git_checkout/v0.9.0/deploy"; cp "$DESKVOICE_DEPLOY_DIR/docker-compose.yml" "$FAKE_DIR/git_checkout/v0.9.0/deploy/"
 { echo "services:"; echo "  wacalls:"; echo "    image: $OLD_WACALLS"; echo "  waha:"; echo "    image: \${WAHA_IMAGE:-$KEPT}"; echo "  caddy:"; echo "    image: $OLD_CADDY"; } > "$FAKE_DIR/git_checkout/main/deploy/docker-compose.yml"
 third() { grep '^rmi .*@sha256:' "$FAKE_DIR/calls.log" | sed 's/^rmi //'; }
 { echo "$OLD_WACALLS"; echo "$KEPT"; echo postgres:16; } > "$FAKE_DIR/images"; : > "$FAKE_DIR/calls.log"
@@ -231,7 +283,7 @@ out="$(bash "$KIT/update.sh" --to 0.9.0 --yes 2>&1)"; equal "terceiros em uso: s
 contains "terceiros em uso: avisa, nomeando a imagem" "$out" "Não consegui remover a imagem $OLD_WACALLS"
 equal "terceiros em uso: ela fica" "$(printf '%s\n' "$OLD_WACALLS" "$KEPT")" "$(cat "$FAKE_DIR/images")"
 rm -f "$FAKE_DIR/rmi_busy" "$FAKE_DIR/images"; env_set "$E" DESKVOICE_VERSION 0.8.0
-rm -rf "$FAKE_DIR/git_tags" "$FAKE_DIR/git_checkout" "$FAKE_DIR/asterisk_mounted"; unset FAKE_GIT_WORKTREE
+rm -rf "$FAKE_DIR/git_tags" "$FAKE_DIR/git_checkout" "$FAKE_DIR/git_at" "$FAKE_DIR/asterisk_mounted"; unset FAKE_GIT_WORKTREE
 cp "$ASTERISK_MODEL.original" "$ASTERISK_MODEL"; : > "$FAKE_DIR/calls.log"
 
 # ── Imagens antigas: com tudo respondendo, saem as do DeskVoice que nem a versão nova nem a de onde

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { encryptSecret, withSystem, type Clock, type Db } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
-import { createSimulatedEngine, SIMULATED_PREFIX, type SimulatedScript, type VoiceEngine, type VoiceSession, type VoiceSessionConfig, type VoiceSessionEvents } from "@deskvoice/voice-engine";
+import { createSimulatedEngine, SIMULATED_PREFIX, type CallerTurnSource, type SimulatedScript, type VoiceEngine, type VoiceSession, type VoiceSessionConfig, type VoiceSessionEvents } from "@deskvoice/voice-engine";
 import { createOrganization } from "../../../../packages/core/test/helpers";
 import { secretKey, t0 } from "../../../../packages/tools/test/helpers";
 import { createApprovalWaiter, type ApprovalWaiter } from "../approvals";
@@ -305,6 +305,11 @@ export interface ManualEngine {
   said: string[];
   /** Quantas vezes a conversa pediu o fim do turno de quem ligou (a guarda contra o silêncio). */
   callerTurnsClosed: number;
+  /**
+   * O que `closeCallerTurn` devolve: sem valor (o padrão), o motor agiu; `false`, o provedor já tinha
+   * fechado a vez e o motor não mandou nada.
+   */
+  closeCallerTurnResult: boolean | undefined;
   toolResults: Array<{ id: string; result: unknown }>;
   /** Cada `played(ms)` que a conversa mandou. */
   played: number[];
@@ -313,13 +318,14 @@ export interface ManualEngine {
   emit<K extends keyof VoiceSessionEvents>(event: K, ...args: Parameters<VoiceSessionEvents[K]>): void;
 }
 
-export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean; connectWhen?: Promise<unknown> } = {}): ManualEngine {
+export function manualEngine(options: { id?: string; centsPerMinute?: number; keyless?: boolean; connectError?: string | Error; connectHangs?: boolean; connectWhen?: Promise<unknown>; callerTurnSource?: CallerTurnSource } = {}): ManualEngine {
   const handlers = new Map<string, Array<(...args: never[]) => void>>();
   const manual: ManualEngine = {
     configs: [],
     keys: [],
     said: [],
     callerTurnsClosed: 0,
+    closeCallerTurnResult: undefined,
     toolResults: [],
     played: [],
     audioBytes: 0,
@@ -334,6 +340,7 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
       processingLocation: { kind: "this-server" },
       keyless: options.keyless ?? false,
       pricing: { centsPerMinute: options.centsPerMinute ?? 100, checkedOn: "2030-05-10", source: "teste" },
+      ...(options.callerTurnSource && { callerTurnSource: options.callerTurnSource }),
       async connect(config, apiKey) {
         manual.configs.push(config);
         manual.keys.push(apiKey);
@@ -347,7 +354,10 @@ export function manualEngine(options: { id?: string; centsPerMinute?: number; ke
           sendAudio: (pcm) => void (manual.audioBytes += pcm.length),
           sendToolResult: (id, result) => void manual.toolResults.push({ id, result }),
           say: (text) => void manual.said.push(text),
-          closeCallerTurn: () => void (manual.callerTurnsClosed += 1),
+          closeCallerTurn: () => {
+            manual.callerTurnsClosed += 1;
+            return manual.closeCallerTurnResult;
+          },
           played: (ms) => void manual.played.push(ms),
           close: async () => void (manual.closed += 1),
         };

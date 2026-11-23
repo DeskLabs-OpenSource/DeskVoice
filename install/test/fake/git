@@ -22,8 +22,20 @@ case " $* " in
   *" show "*) spec="${*: -1}"; cat "$FAKE_DIR/git_checkout/${spec%%:*}/${spec#*:}" 2>/dev/null ;;
   # Trocar o código: se o teste preparou $FAKE_DIR/git_checkout/<ref> e disse onde fica a cópia
   # de trabalho ($FAKE_GIT_WORKTREE), os arquivos de lá vão por cima dela, como numa troca de versão.
+  # Como no git de verdade, sai da cópia de trabalho o arquivo que a versão de onde se sai rastreia
+  # e a de destino não tem. O que cada versão rastreia é o que está em git_checkout/<ref>; a versão
+  # de onde se sai é a do último checkout ($FAKE_DIR/git_at), e de início a main.
   *" checkout "*)
     ref="${*: -1}"; ref="${ref##*/}"
-    if [ -n "${FAKE_GIT_WORKTREE:-}" ] && [ -d "$FAKE_DIR/git_checkout/$ref" ]; then cp -R "$FAKE_DIR/git_checkout/$ref/." "$FAKE_GIT_WORKTREE/"; fi ;;
+    if [ -n "${FAKE_GIT_WORKTREE:-}" ] && [ -d "$FAKE_DIR/git_checkout/$ref" ]; then
+      at="$(cat "$FAKE_DIR/git_at" 2>/dev/null || echo main)"
+      if [ "$at" != "$ref" ] && [ -d "$FAKE_DIR/git_checkout/$at" ]; then
+        ( cd "$FAKE_DIR/git_checkout/$at" && find . -type f ) | while read -r f; do
+          [ -e "$FAKE_DIR/git_checkout/$ref/$f" ] || rm -f "$FAKE_GIT_WORKTREE/$f"
+        done
+      fi
+      cp -R "$FAKE_DIR/git_checkout/$ref/." "$FAKE_GIT_WORKTREE/"
+      echo "$ref" > "$FAKE_DIR/git_at"
+    fi ;;
   *) exit 1 ;;
 esac

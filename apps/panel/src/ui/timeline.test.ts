@@ -340,4 +340,84 @@ describe("linha do tempo", () => {
       }
     });
   });
+
+  it("a latência por turno vira uma linha: metade dos turnos, o mais lento e quantos turnos, com o nome do motor", () => {
+    const render = (payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind: "turn_latency", at: "2026-11-21T12:00:00.000Z", payload }], live: false, agentName: "Ana" }));
+    const openai = render({ engine: "openai-realtime", source: "vad", turns: 3, p50Ms: 800, p90Ms: 1200, maxMs: 1200, toolTurns: 1, toolP50Ms: 2500 });
+    expect(openai).toContain("Resposta do agente (OpenAI Realtime): metade dos turnos em até 0,8 s, o mais lento em 1,2 s (3 turnos).");
+    expect(openai).not.toContain(ptBR.events.turn_latency.approximate);
+    expect(openai).not.toContain("openai-realtime");
+    expect(openai).not.toContain(ptBR.events.unknown);
+    // O Gemini não avisa o fim da fala: a linha diz que a medida é aproximada.
+    const gemini = render({ engine: "gemini-live", source: "transcript", turns: 1, p50Ms: 650, p90Ms: 650, maxMs: 650, toolTurns: 0, toolP50Ms: null });
+    expect(gemini).toContain("Resposta do agente (Gemini Live): metade dos turnos em até 0,7 s, o mais lento em 0,7 s (1 turno).");
+    expect(gemini).toContain(ptBR.events.turn_latency.approximate);
+    for (const dict of [ptBR, enTimeline, esTimeline]) {
+      for (const key of ["line", "turnsOne", "turnsMany", "approximate"] as const) expect(dict.events.turn_latency[key]).toMatch(/\S/);
+    }
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.turn_latency.line)).size).toBe(3);
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.turn_latency.approximate)).size).toBe(3);
+  });
+
+  it("a latência por turno com turnos tirados pela guarda: o mais lento medido e quantos turnos ficaram sem medida; só eles, só a contagem", () => {
+    const render = (payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind: "turn_latency", at: "2026-11-21T12:00:00.000Z", payload }], live: false, agentName: "Ana" }));
+    const some = render({ engine: "openai-realtime", source: "vad", turns: 2, p50Ms: 800, p90Ms: 3000, maxMs: 3000, toolTurns: 0, toolP50Ms: null, guardTurns: 3 });
+    expect(some).toContain("Resposta do agente (OpenAI Realtime): metade dos turnos em até 0,8 s, o mais lento medido em 3,0 s (2 turnos). 3 turnos sem medida: a guarda contra o silêncio agiu.");
+    const one = render({ engine: "gemini-live", source: "transcript", turns: 1, p50Ms: 650, p90Ms: 650, maxMs: 650, toolTurns: 0, toolP50Ms: null, guardTurns: 1 });
+    expect(one).toContain(`o mais lento medido em 0,7 s (1 turno). ${ptBR.events.turn_latency.approximate} 1 turno sem medida: a guarda contra o silêncio agiu.`);
+    // Um turno medido e um turno de barulho que a guarda fechou sem marco (o A1 da sessão): "medido" e a contagem.
+    const noisy = render({ engine: "openai-realtime", source: "vad", turns: 1, p50Ms: 800, p90Ms: 800, maxMs: 800, toolTurns: 0, toolP50Ms: null, guardTurns: 1 });
+    expect(noisy).toContain("o mais lento medido em 0,8 s (1 turno). 1 turno sem medida: a guarda contra o silêncio agiu.");
+    // Sem turno medido: só a contagem, sem número nem a marca de aproximada.
+    const none = render({ engine: "gemini-live", source: "transcript", turns: 0, p50Ms: null, p90Ms: null, maxMs: null, toolTurns: 0, toolP50Ms: null, guardTurns: 2 });
+    expect(none).toContain("2 turnos sem medida: a guarda contra o silêncio agiu.");
+    expect(none).not.toContain("Resposta do agente");
+    expect(none).not.toContain(ptBR.events.turn_latency.approximate);
+    expect(none).not.toContain("NaN");
+    // Sem guarda, a frase de antes, sem "medido".
+    const plain = render({ engine: "openai-realtime", source: "vad", turns: 2, p50Ms: 800, p90Ms: 3000, maxMs: 3000, toolTurns: 0, toolP50Ms: null, guardTurns: 0 });
+    expect(plain).toContain("o mais lento em 3,0 s (2 turnos).");
+    expect(plain).not.toContain("sem medida");
+    for (const dict of [ptBR, enTimeline, esTimeline]) {
+      for (const key of ["lineMeasured", "guardOne", "guardMany"] as const) expect(dict.events.turn_latency[key]).toMatch(/\S/);
+      expect(dict.events.turn_latency.guardMany).toContain("{count}");
+      expect(dict.events.turn_latency.lineMeasured).not.toBe(dict.events.turn_latency.line);
+    }
+    for (const key of ["lineMeasured", "guardOne", "guardMany"] as const) {
+      expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.turn_latency[key])).size).toBe(3);
+    }
+  });
+
+  it("a retomada do motor tem frase nos três idiomas, sem o id do motor nem o tipo cru", () => {
+    const html = renderToStaticMarkup(
+      createElement(Timeline, {
+        events: [{ id: "1", kind: "engine_resumed", at: "2026-11-21T12:00:00.000Z", payload: { engine: "gemini-live" } }],
+        live: false,
+        agentName: "Ana",
+      }),
+    );
+    expect(html).toContain(ptBR.events.engine_resumed);
+    expect(html).not.toContain(ptBR.events.unknown);
+    expect(html).not.toContain("gemini-live");
+    for (const dict of [ptBR, enTimeline, esTimeline]) expect(dict.events.engine_resumed).toMatch(/\S/);
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.engine_resumed)).size).toBe(3);
+  });
+
+  it("o cancelamento da ferramenta tem frase nos três idiomas, com o nome da ferramenta para gente, sem o tipo cru", () => {
+    const html = renderToStaticMarkup(
+      createElement(Timeline, {
+        events: [{ id: "1", kind: "tool_cancelled", at: "2026-11-21T12:00:00.000Z", payload: { name: "call_webhook" } }],
+        live: false,
+        agentName: "Ana",
+      }),
+    );
+    expect(html).toContain(ptBR.names.call_webhook);
+    expect(html).not.toContain(ptBR.events.unknown);
+    expect(html).not.toContain("{tool}");
+    expect(html).not.toContain("call_webhook");
+    for (const dict of [ptBR, enTimeline, esTimeline]) expect(dict.events.tool_cancelled).toContain("{tool}");
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.tool_cancelled)).size).toBe(3);
+  });
 });

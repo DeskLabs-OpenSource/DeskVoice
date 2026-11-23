@@ -205,9 +205,13 @@ describe("runner", () => {
     const suspended = await createOrganization(app, "runner-suspended");
     await withSystem(app, (q) => q.exec("update organizations set suspended_at = $2, suspended_reason = 'teste do runner' where id = $1", [suspended, t0]));
     const parked = await withOrg(app, suspended, (q) => enqueueTask(q, { kind: "later", payload: {}, runAt: new Date(t0.getTime() - 60_000) }));
+    // A elegível entra antes da partida, e não depois: o NOTIFY do `enqueue` feito com o runner no
+    // ar acorda uma segunda volta, que pode estar entre o `claimTask` e o `nextTaskRunAt` quando o
+    // `fire` adianta o relógio. Essa volta arma 0 ms com razão (a elegível já venceu), e a asserção
+    // abaixo cairia sem que o runner tivesse errado. Assim, a partida faz a única volta.
+    const next = await enqueue("later", new Date(t0.getTime() + 60_000));
     let ran = 0;
     await start([{ kind: "later", run: async () => void ran++ }]);
-    const next = await enqueue("later", new Date(t0.getTime() + 60_000));
 
     await until(() => liveTimer()?.delayMs === 60_000, "a timer armed for the next eligible task");
     expect(timers.some((timer) => timer.delayMs === 0)).toBe(false);

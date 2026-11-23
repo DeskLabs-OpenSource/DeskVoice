@@ -53,7 +53,18 @@
  *   do fim do turno (a leitura indica que não; por isso a guarda tem o prazo sem palavras), e se o
  *   `input_audio_buffer.commit` com a detecção de fala do servidor em curso fecha o turno sem erro.
  *   Com resposta em curso ou item já fechado, `closeCallerTurn` não faz nada: o `commit` "will produce
- *   an error if the input audio buffer is empty" (referência), e o servidor já vai responder.
+ *   an error if the input audio buffer is empty" (referência), e o servidor já vai responder. Nesse
+ *   caso devolve `false` (não agiu), e a resposta lenta que vier conta na latência por turno.
+ *
+ * Fim da vez de quem ligou (`callerTurnEnded`, a latência por turno): `input_audio_buffer.speech_stopped`,
+ * o par de `speech_started` na detecção de fala do servidor (`server_vad`). Consultado em 2026-11-21:
+ *   - https://developers.openai.com/api/reference/resources/realtime/server-events
+ *     (`audio_end_ms`: "Milliseconds since the session started when speech stopped. This will
+ *     correspond to the end of audio sent to the model, and thus includes the
+ *     `min_silence_duration_ms` configured in the Session.")
+ *   O marco chega depois do silêncio que o provedor espera para decidir que a fala acabou, e esse
+ *   silêncio fica fora da conta. O `audio_end_ms` já inclui esse silêncio, então não é lido. O
+ *   instante que conta é o da chegada, no relógio de quem mede.
  *
  * Corte da fala interrompida (`played`), consultado em 2026-11-20:
  *   - https://developers.openai.com/api/reference/resources/realtime/client-events
@@ -202,6 +213,7 @@ const serverEvent = z.discriminatedUnion("type", [
     arguments: z.string(),
   }),
   z.object({ type: z.literal("input_audio_buffer.speech_started") }),
+  z.object({ type: z.literal("input_audio_buffer.speech_stopped") }),
   z.object({
     type: z.literal("response.done"),
     response: z.object({
@@ -319,6 +331,8 @@ const engine: VoiceEngine = {
   // projeto regional escolhido pelo operador, o lugar de processamento depende da conta dele.
   // Fonte: developers.openai.com/api/docs/guides/your-data (consultado em 12/11/2026).
   processingLocation: { kind: "undeclared" },
+  // O marco de fim da vez que `callerTurnEnded` emite (veja acima).
+  callerTurnSource: "vad",
   voices: VOICES,
   defaultVoice: DEFAULT_VOICE,
   pricing: {
@@ -428,6 +442,10 @@ const engine: VoiceEngine = {
           emitter.emit("interrupted");
           emitter.emit("callerActivity", { words: false });
           break;
+        case "input_audio_buffer.speech_stopped":
+          // O fim da fala que a detecção do provedor viu: é o marco da latência por turno.
+          emitter.emit("callerTurnEnded", { source: "vad" });
+          break;
         case "response.done": {
           responseActive = false;
           const usage = event.response.usage;
@@ -510,10 +528,12 @@ const engine: VoiceEngine = {
         // Se o servidor já viu o fim da fala (item fechado à espera da resposta, ou resposta em
         // curso), ele só está lento: o `commit` de buffer vazio dá `error`, que soltaria a fila de
         // falas por cima da resposta, e o `response.create` enfileirado faria o agente falar duas vezes.
-        if (responseActive || unansweredItems.size > 0) return;
+        // Não agiu (`false`): a resposta que vier não foi forçada, e conta na latência por turno.
+        if (responseActive || unansweredItems.size > 0) return false;
         // Fecha o que quem ligou disse num item e pede a resposta: o servidor não viu o fim da fala.
         socket.send({ type: "input_audio_buffer.commit" });
         requestResponse({});
+        return true;
       },
       played(ms) {
         if (closed) return;
