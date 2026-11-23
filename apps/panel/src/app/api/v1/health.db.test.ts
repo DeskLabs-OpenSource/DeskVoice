@@ -100,6 +100,33 @@ describe("system health", () => {
     expect(line(await read(owner.cookie), "whatsapp")).toBe("ok whatsapp_absent");
   });
 
+  it("with a session, the line check counts only the organization's own lines; without one, the installation's", async () => {
+    const a = await createOrganization(panel.app, "health lines A");
+    const b = await createOrganization(panel.app, "health lines B");
+    const ownerA = await createUser(panel.app, a, "owner");
+    const ownerB = await createUser(panel.app, b, "owner");
+    const trunk = "insert into trunks (organization_id, name, host, auth_mode) values ($1, 'Operadora', 'sip.example.test', 'ip') returning id";
+    const lineA = await withOrg(panel.app, a, async (q) => (await q.one<{ id: string }>(trunk, [a]))?.id);
+    const lineB = await withOrg(panel.app, b, async (q) => (await q.one<{ id: string }>(trunk, [b]))?.id);
+    // O processo de voz devolve as linhas da instalação inteira: a de A no ar, a de B caída.
+    panel.voice.respond = (url) => {
+      if (url === "http://voice.test/health")
+        return Response.json({
+          asterisk: { status: "ok", detail: "connected" },
+          trunks: [
+            { id: lineA, status: "ok", detail: "The provider answers." },
+            { id: lineB, status: "fail", detail: "The provider does not answer." },
+          ],
+        });
+      throw new Error(`unexpected request to ${url}`);
+    };
+    expect(line(await read(ownerA.cookie), "trunk")).toBe("ok trunk_ok");
+    const ofB = (await read(ownerB.cookie)).checks.find((check) => check.id === "trunk");
+    expect(ofB).toMatchObject({ status: "fail", reason: "trunk_down", params: { down: 1, total: 1 } });
+    // Sem sessão, a rota pública segue somando a instalação.
+    expect((await read()).checks.find((check) => check.id === "trunk")).toMatchObject({ status: "fail", reason: "trunk_down", params: { down: 1, total: 2 } });
+  });
+
   it("with the voice process down: voice fails, and what depends on it says why it could not check", async () => {
     await routinesRunning();
     panel.voice.respond = () => {

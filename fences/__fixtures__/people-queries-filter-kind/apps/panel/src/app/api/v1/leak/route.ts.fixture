@@ -1,0 +1,10 @@
+// Fixture: a rota nova que escolhe pessoas sem o filtro (reprovada) e a que filtra (aceita).
+// select id from users  <- comentário não conta
+export const owners = (q) => q.many("select id from users where disabled_at is null");
+export const ownersOk = (q) => q.many("select id from users where kind = 'member' and disabled_at is null");
+export const aliased = (q) => q.many(`select u.id
+  from users u where u.kind = 'member'`);
+// O `kind` de outra tabela não vale como filtro.
+export const names = (q) => q.many("select name from users where id in (select actor_id from call_events where kind = 'follow_up_created')");
+// O filtro num apelido não cobre o outro.
+export const pair = (q) => q.many("select c.id from users c join users m on m.organization_id = c.organization_id where m.kind = 'member'");

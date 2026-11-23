@@ -20,6 +20,8 @@ GENERATED_DIR="$DEPLOY_DIR/asterisk/generated"
 PROXY_OVERRIDE="$DEPLOY_DIR/docker-compose.override.yml"
 DB_USER="deskvoice"
 DB_NAME="deskvoice"
+# O `laya` fica de fora de propósito: esta lista é o que a atualização e o instalador baixam, e o
+# Laya só é baixado quando alguém o liga (desenho R12, fatia 8a).
 APP_SERVICES="panel voice routines"
 
 # ── Mensagens ────────────────────────────────────────────────────────────────
@@ -268,7 +270,7 @@ render_template() {  # render_template <modelo> <destino>; os valores vêm do am
   if [ -f "$dst" ] && { cmp -s "$tmp" "$dst" || cat "$tmp" > "$dst" 2>/dev/null; }; then rm -f "$tmp"
   else mv "$tmp" "$dst"; fi
 }
-render_asterisk_config() {
+render_asterisk_config() {  # render_asterisk_config [--rollback]
   ARI_PASSWORD="$(env_get "$APP_ENV_FILE" ARI_PASSWORD)" PUBLIC_IP="$(env_get "$APP_ENV_FILE" PUBLIC_IP)" \
   RTP_START="$(env_get "$ENV_FILE" RTP_START)" RTP_END="$(env_get "$ENV_FILE" RTP_END)"
   export ARI_PASSWORD PUBLIC_IP RTP_START RTP_END
@@ -286,6 +288,20 @@ render_asterisk_config() {
   render_asterisk_file ari.conf.tmpl ari.conf
   render_asterisk_file rtp.conf.tmpl rtp.conf
   render_asterisk_file pjsip.conf.base pjsip.conf
+  # Na volta (só nela), a versão anterior pode não ter o modules.conf: as publicadas antes dele
+  # deixavam a lista de módulos com a imagem, e o Compose delas não o monta. Sem o modelo, não há o
+  # que gerar, e o que a ida gerou sai: o converge_asterisk desta versão (o que roda na volta)
+  # compararia esse arquivo com o da imagem, que o contêiner lê, e reiniciaria o Asterisk sem motivo.
+  # Fora da volta, faltar o modelo é repositório incompleto, como os outros cinco.
+  if [ "${1:-}" = --rollback ] && [ ! -f "$DEPLOY_DIR/asterisk/modules.conf" ]; then
+    rm -f "$GENERATED_DIR/modules.conf"
+    if [ -f "$ASTERISK_PENDING" ]; then
+      grep -vx modules.conf "$ASTERISK_PENDING" > "$ASTERISK_PENDING.tmp" || true
+      mv "$ASTERISK_PENDING.tmp" "$ASTERISK_PENDING"
+    fi
+  else
+    render_asterisk_file modules.conf modules.conf
+  fi
   unset ARI_PASSWORD
 }
 # O que mudou num arquivo que o Asterisk já tinha fica anotado em ASTERISK_PENDING, para
@@ -347,6 +363,17 @@ valid_password() {
 valid_port() {
   local re='^[0-9]{1,5}$'
   [[ "$1" =~ $re ]] && [ "$((10#$1))" -ge 1 ] && [ "$((10#$1))" -le 65535 ] || { echo "porta inválida: use um número de 1 a 65535"; return 1; }
+}
+# A forma da porta na cadeia DOCKER-USER, a mesma do ufw: `porta` ou `min:max`, e /tcp ou /udp.
+docker_user_spec_valid() {
+  local re='^[0-9]{1,5}(:[0-9]{1,5})?/(tcp|udp)$'
+  [[ "$1" =~ $re ]] || return 1
+  local ports="${1%/*}" min max=""
+  min="${ports%%:*}"
+  case "$ports" in *:*) max="${ports##*:}" ;; esac
+  valid_port "$min" >/dev/null || return 1
+  [ -z "$max" ] || valid_port "$max" >/dev/null || return 1
+  [ -z "$max" ] || [ "$((10#$min))" -le "$((10#$max))" ] || return 1
 }
 valid_name() {
   local v="$1"
@@ -441,6 +468,14 @@ missing_proxy_network() {
   local network
   network="$(proxy_network)"
   if [ -n "$network" ] && ! docker network inspect "$network" >/dev/null 2>&1; then echo "$network"; fi
+}
+# As redes de proxy de outro sistema que EXISTEM nesta máquina (`*_caddy-sites`), uma por linha.
+# Serve para o aviso da instalação anterior à 0.11.0: há rede de proxy aqui e o arquivo de publicação
+# não a declara, então a ligação foi feita com `docker network connect` e some no próximo recreate.
+redes_de_proxy() {
+  have docker || return 0
+  # shellcheck disable=SC2016  # {{.Name}} é do Docker, não do shell
+  docker network ls --format '{{.Name}}' 2>/dev/null | grep '_caddy-sites$' || true
 }
 # O que o arquivo de publicação diz hoje, para a reinstalação manter a porta que o proxy do
 # operador (ou o túnel) já conhece. Lê o formato atual (Caddy, porta 80 de dentro) e o antigo
@@ -629,10 +664,12 @@ is_version() {  # 0 = número de versão no formato único (X.Y.Z, ou X.Y.Z-rc.1
   [[ "$1" =~ $re ]]
 }
 image_prefix() { env_get "$IMAGES_FILE" DESKVOICE_IMAGE_PREFIX; }
-image_repo() {  # image_repo <panel|voice|routines> → o nome sem a etiqueta
+# O `laya` (deploy/laya/) também é imagem do projeto e usa os dois: image_ref laya <versão>. Ele
+# fica fora de APP_SERVICES, porque está num perfil do Compose que vem desligado.
+image_repo() {  # image_repo <panel|voice|routines|laya> → o nome sem a etiqueta
   printf '%s/deskvoice-%s\n' "$(image_prefix)" "$1"
 }
-image_ref() {  # image_ref <panel|voice|routines> <versão> → o nome completo, igual ao do Compose
+image_ref() {  # image_ref <panel|voice|routines|laya> <versão> → o nome completo, igual ao do Compose
   printf '%s:%s\n' "$(image_repo "$1")" "$2"
 }
 # published_arm64 <versão> → 0: o índice publicado da versão lista arm64; 1: o registro respondeu e
@@ -772,6 +809,11 @@ AGENT_UNIT="deskvoice-agent"
 SYSTEMD_DIR="${DESKVOICE_SYSTEMD_DIR:-/etc/systemd/system}"
 SYSTEMD_RUN_DIR="${DESKVOICE_SYSTEMD_RUN_DIR:-/run/systemd/system}"
 CRON_DIR="${DESKVOICE_CRON_DIR:-/etc/cron.d}"
+DOCKER_USER_UNIT_FILE="$SYSTEMD_DIR/deskvoice-docker-user.service"
+docker_user_unit_specs() {  # as portas gravadas no serviço do DOCKER-USER: é a lista que ele repõe no boot
+  [ -f "$DOCKER_USER_UNIT_FILE" ] || return 0
+  sed -n 's|^ExecStart=.*/docker-user\.sh apply \(.*\)$|\1|p' "$DOCKER_USER_UNIT_FILE"
+}
 agent_scheduler() {  # → systemd | cron | none
   if have systemctl && [ -d "$SYSTEMD_RUN_DIR" ]; then echo systemd
   elif [ -d "$CRON_DIR" ]; then echo cron
@@ -849,14 +891,16 @@ converge_caddy() {
   info "Reiniciando o Caddy, para ele ler o Caddyfile desta versão (o painel fica fora por alguns segundos)..."
   dc restart caddy >/dev/null 2>&1 || warn "Não consegui reiniciar o Caddy. Rode: docker restart deskvoice-caddy-1"
 }
-# Os cinco arquivos que render_asterisk_config grava e o Compose monta um a um. Reiniciar o Asterisk
+# Os seis arquivos que render_asterisk_config grava e o Compose monta um a um. Reiniciar o Asterisk
 # derruba as ligações em andamento; recarregar o módulo de cada arquivo, não. Então:
 #   - o contêiner ainda lê um arquivo diferente do disco (ficou preso ao inode de antes de uma
 #     troca por renomeação, como fazia o kit até esta versão): recarregar relê o antigo, e só
 #     reiniciar resolve;
 #   - senão, o que render_asterisk_config anotou como mudado é recarregado, módulo a módulo
 #     (`module reload` diz o resultado de cada um; `core reload` não diz nada). Se algum não
-#     recarregar, reinicia, dizendo por quê.
+#     recarregar, reinicia, dizendo por quê;
+#   - o modules.conf é a exceção: a lista de módulos só vale na partida, e não há módulo que o
+#     recarregue (asterisk_module_of não tem entrada para ele). Mudou, reinicia.
 # Teto conhecido (código do Asterisk 20, res/res_pjsip/config_transport.c): com allow_reload=no, o
 # padrão, recarregar o transporte do PJSIP não aplica protocolo, bind, TLS, TCP, ToS e CoS. O
 # modelo do kit não muda nenhum deles por instalação; uma versão que mudar precisa reiniciar.
@@ -875,12 +919,13 @@ converge_asterisk() {
   local f stale="" modules="" out wanted reloaded
   # Parado, ele lê o que está no disco quando subir.
   if [ -z "$(dc ps -q --status running asterisk 2>/dev/null)" ]; then rm -f "$ASTERISK_PENDING"; return 0; fi
-  for f in extensions http ari rtp pjsip; do
+  for f in extensions http ari rtp pjsip modules; do
     [ -f "$GENERATED_DIR/$f.conf" ] || continue
     if mount_differs asterisk "/etc/asterisk/$f.conf" "$GENERATED_DIR/$f.conf"; then stale="$f.conf"; break; fi
   done
   if [ -n "$stale" ]; then restart_asterisk "o contêiner ainda lê a versão antiga de $stale, e recarregar não alcança o arquivo novo"; return 0; fi
   [ -s "$ASTERISK_PENDING" ] || { rm -f "$ASTERISK_PENDING"; return 0; }
+  if grep -qx modules.conf "$ASTERISK_PENDING"; then restart_asterisk "a lista de módulos do Asterisk só vale na partida"; return 0; fi
   while read -r f; do modules="$modules $(asterisk_module_of "$f")"; done < <(sort -u "$ASTERISK_PENDING")
   out="$(dc exec -T asterisk asterisk -rx "module reload$modules" 2>&1 || true)"
   wanted="$(echo "$modules" | wc -w | tr -d ' ')"

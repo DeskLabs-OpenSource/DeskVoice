@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createCall, createOrganization, openTestDbs, waitFor } from "../test/helpers";
-import { claimTask, completeTask, enqueueTask, failTask, listenTasks, MAX_TASK_ATTEMPTS, queueHealth } from "./queue";
+import { claimTask, completeTask, enqueueTask, failTask, listenTasks, MAX_TASK_ATTEMPTS, organizationQueue, queueHealth } from "./queue";
 import { withOrg } from "./with-org";
 
 const { app, owner } = openTestDbs();
@@ -169,5 +169,47 @@ describe("queue", () => {
     expect((await queueHealth(app, t0)).oldestDueAt).toEqual(waiting);
     await claimTask(app, t0);
     expect((await queueHealth(app, t0)).oldestDueAt).toEqual(plus(-1000));
+  });
+
+  it("does not claim the task of a suspended organization, and leaves it queued; the other organization's task runs", async () => {
+    // Seção 3.3 do desenho do R8: a fila não roda para a organização suspensa. A tarefa não é
+    // cancelada aqui (quem cancela é a transação da suspensão, na fatia 4b): fica na fila, intacta.
+    const suspended = await createOrganization(app, "queue-suspended");
+    await owner.pool.query("update organizations set suspended_at = $2, suspended_reason = 'teste da fatia 4a' where id = $1", [suspended, t0]);
+    const parked = await withOrg(app, suspended, (q) => enqueueTask(q, { kind: "follow_up_call", payload: {}, runAt: plus(-60_000) }));
+    const runs = await enqueue("summarize_call", t0);
+
+    expect((await claimTask(app, t0))?.id).toBe(runs);
+    expect(await claimTask(app, t0)).toBeNull();
+    expect(await taskRow(parked)).toMatchObject({ status: "queued", attempts: 0, last_error: null, run_at: plus(-60_000) });
+    // A que espera de propósito não acusa a fila de travada na Saúde.
+    expect((await queueHealth(app, t0)).oldestDueAt).toBeNull();
+
+    // Sem a marca, a mesma tarefa volta a ser elegível, sem nada a refazer.
+    await owner.pool.query("update organizations set suspended_at = null, suspended_reason = null where id = $1", [suspended]);
+    expect((await queueHealth(app, t0)).oldestDueAt).toEqual(plus(-60_000));
+    expect(await claimTask(app, t0)).toMatchObject({ id: parked, organizationId: suspended });
+  });
+
+  it("counts, per organization, the late queued tasks and the ones that failed in the last 24 hours (by their last run_at)", async () => {
+    const mine = await createOrganization(app, "queue-overview-mine");
+    const theirs = await createOrganization(app, "queue-overview-theirs");
+    const put = async (organization: string, status: string, runAt: Date): Promise<void> => {
+      const id = await withOrg(app, organization, (q) => enqueueTask(q, { kind: "summarize_call", payload: {}, runAt }));
+      await owner.pool.query("update tasks set status = $2 where id = $1", [id, status]);
+    };
+    const hour = 3_600_000;
+    await put(mine, "queued", plus(-5 * 60_000)); // em atraso
+    await put(mine, "queued", plus(-1)); // em atraso
+    await put(mine, "queued", plus(60_000)); // ainda não venceu
+    await put(mine, "failed", plus(-23 * hour)); // nas últimas 24 horas
+    await put(mine, "failed", plus(-25 * hour)); // antes
+    await put(mine, "done", plus(-hour));
+    await put(theirs, "queued", plus(-hour));
+    await put(theirs, "failed", plus(-hour));
+    await put(theirs, "failed", plus(-2 * hour));
+
+    expect(await withOrg(app, mine, (q) => organizationQueue(q, t0))).toEqual({ late: 2, failedLast24h: 1 });
+    expect(await withOrg(app, theirs, (q) => organizationQueue(q, t0))).toEqual({ late: 1, failedLast24h: 2 });
   });
 });

@@ -37,11 +37,11 @@ const whatsappCalls: WhatsAppCallsDictionary = {
   riskTitle: "Before connecting",
   risk: "WhatsApp calls use an unofficial client (WaCalls), which connects the number as one more device, and not Meta's official API. WhatsApp may restrict or ban the number, without notice. Use a number dedicated to customer service, never your personal one.",
   devices:
-    "WhatsApp accepts up to four devices linked to a number, and calls ring on all of them. This service takes one of those places. With more than four devices (accounts with Meta Verified, for example), calls ring only on the phone, and this service stops receiving them.",
+    "WhatsApp decides which devices a call rings on. With too many linked devices, it rings only on the phone, and this service stops receiving it. This service takes one place: keep at most two other devices linked to the number and make a test call after connecting.",
   messagesNumber:
     "The number {phone} is connected for messages, under WhatsApp. If you connect the same number here, there will be two devices linked to the same WhatsApp: if the number is banned, messages and calls stop together.",
   sameNumber:
-    "This number is also connected for messages. There are two devices linked to the same WhatsApp. If the number is banned, messages and calls stop together. WhatsApp accepts up to four linked devices; with more than that, calls ring only on the phone.",
+    "This number is also connected for messages. There are two devices linked to the same WhatsApp. If the number is banned, messages and calls stop together. With too many linked devices, calls ring only on the phone.",
   connect: "Connect",
   starting: "Preparing the connection. The QR code appears in a few seconds.",
   qrTitle: "Read the code with the number's phone",
@@ -65,8 +65,9 @@ const whatsappCalls: WhatsAppCallsDictionary = {
     logged_out:
       "The number disconnected: the device was removed in Linked devices, on the phone, or WhatsApp ended the connection. WhatsApp disconnects linked devices when the main phone goes unused for more than 14 days.",
     qr_expired: "The QR code was not read in time, and the attempt was ended.",
+    pairing_failed: "WhatsApp ended the attempt before showing the QR code. Try again. If it happens again, update DeskVoice.",
     missing:
-      "The WhatsApp calls service no longer has the data of this connection. This happens after restoring a backup, moving servers or reinstalling the service, because the pairing is not in the backup.",
+      "The WhatsApp calls service no longer has this connection. This happens when it restarts with an attempt that never paired, and also after restoring a backup, moving servers or reinstalling the service, because the pairing is not in the backup.",
   },
   reconnect: "Connect again",
   newCode: "Generate a new code",

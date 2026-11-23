@@ -1,4 +1,4 @@
-import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, callerMessageBlock, createFollowUp, dropFollowUpDefaultMessage, enqueueTask, lockCall, OPEN_TURNS, recordEvent, withOrg, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
+import { CALL_BACK_COLUMNS, CALL_BACK_INTERVAL_MINUTES, CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, callerMessageBlock, createFollowUp, dropFollowUpDefaultMessage, enqueueTask, lockCall, OPEN_TURNS, organizationLimits, recordEvent, scheduleCallBack, settleCallBack, spendCapReached, withOrg, type CallBackRow, type DropFollowUpMode, type OpenTurn, type OrgQuery } from "@deskvoice/core";
 import type { Routine } from "../types";
 
 /**
@@ -20,7 +20,13 @@ import type { Routine } from "../types";
  * (`agents.drop_follow_up`): em `off`, o padrão, o caso 1 abre a pendência como sempre e o caso 5 não
  * faz nada, e a revisão é a de antes; em `task`, os dois abrem; em `whatsapp` (fatia 2, seção 3.5),
  * os dois mandam ao número de quem ligou o texto fixo do agente, pela fila de avisos, e a pendência
- * fica de reserva para quando a mensagem não pode sair.
+ * fica de reserva para quando a mensagem não pode sair; em `call_back` (fatia 3, seção 3.6), os dois
+ * agendam uma religação, conferida de novo pela política de saída na hora de discar, e a pendência fica
+ * de reserva para quando a religação não acontece.
+ *
+ * A revisão de uma religação (`calls.call_back_of` não nulo) **não aplica a seção 2**: religação nunca
+ * gera religação. Ela só grava o resultado na ligação original e decide o que vem depois
+ * (`reviewCallBack`).
  */
 
 export const REVIEW_CASES = ["engine_failed", "transfer_failed", "caller_hung_up_waiting", "whatsapp_not_sent", "call_dropped"] as const;
@@ -185,14 +191,14 @@ export interface DropFollowUpPayload {
   simulated: boolean;
   openTurn: OpenTurn | null;
 }
-export type DropFollowUpAction = "task_opened" | "whatsapp_queued" | "skipped";
+export type DropFollowUpAction = "task_opened" | "whatsapp_queued" | "call_back_scheduled" | "skipped";
 /**
  * Por que o modo não agiu. `do_not_call`: a pessoa pediu para não ser procurada, e não há pendência.
  * `mode_unavailable`, `recent_follow_up` e `org_limit`: cai na pendência de reserva.
  */
 export type DropFollowUpSkip = "do_not_call" | "mode_unavailable" | "recent_follow_up" | "org_limit";
 
-/** O payload de `drop_follow_up_result` desta fatia: só as ações do WhatsApp. As da religação vêm nas fatias 3 e 4. */
+/** O payload de `drop_follow_up_result` do WhatsApp. O da religação é `CallBackResultPayload`, no núcleo. */
 export interface DropFollowUpResultPayload {
   action: "whatsapp_sent" | "whatsapp_failed";
 }
@@ -209,7 +215,7 @@ async function whatsAppAction(q: OrgQuery, caller: string | null, now: Date): Pr
   // Simulada sem número: não há limite por número a conferir. O teto da organização vale para ela também.
   // Duas revisões ao mesmo tempo passariam as duas pelas contagens: a trava por organização, até o fim
   // da transação, faz a segunda ver o aviso da primeira, tanto no limite por número quanto no teto.
-  await q.exec("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`drop_follow_up_whatsapp:${q.organizationId}`]);
+  await lockFollowUpsOfOrganization(q);
   // O aviso `caller` nasce na mesma transação do `drop_follow_up` com `whatsapp_queued`, e só nela (a
   // simulada não cria aviso): contar um é contar o outro, e o índice por data dos avisos limita a busca
   // às últimas 24 horas. Contam todos, os que falharam e os apagados a pedido do titular (o apagamento
@@ -221,8 +227,84 @@ async function whatsAppAction(q: OrgQuery, caller: string | null, now: Date): Pr
     [q.organizationId, new Date(now.getTime() - HOUR_MS), new Date(now.getTime() - CALLER_MESSAGE_EVERY_MS), caller],
   );
   if (caller !== null && counts?.same) return { action: "skipped", reason: "recent_follow_up" };
+  // A religação agendada para o mesmo número também conta: um follow-up por número a cada 24 horas,
+  // seja qual for o modo do agente que atendeu.
+  if (caller !== null && (await q.one("select 1 from call_backs where organization_id = $1 and to_e164 = $2 and created_at > $3", [q.organizationId, caller, new Date(now.getTime() - CALLER_MESSAGE_EVERY_MS)])))
+    return { action: "skipped", reason: "recent_follow_up" };
   if ((counts?.hour ?? 0) >= CALLER_MESSAGE_ORG_PER_HOUR || (counts?.day ?? 0) >= CALLER_MESSAGE_ORG_PER_DAY) return { action: "skipped", reason: "org_limit" };
   return { action: "whatsapp_queued" };
+}
+
+/**
+ * A trava por organização das contagens do follow-up (o limite por número e o teto da organização), até
+ * o fim da transação: duas revisões ao mesmo tempo, de qualquer dos dois modos, contam uma de cada vez.
+ */
+const lockFollowUpsOfOrganization = (q: OrgQuery): Promise<number> => q.exec("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`drop_follow_up_whatsapp:${q.organizationId}`]);
+
+/**
+ * O que o modo `call_back` faz com uma queda, conferido na hora de agendar (seção 3.6, passo 1). A ordem
+ * é a do WhatsApp: número na lista de não ligar não recebe e não vira pendência; sem a política de saída
+ * ligada, com as ligações de saída bloqueadas pela instalação, ou com o teto de gasto do mês atingido, o modo está indisponível; número que já recebeu religação ou mensagem nas últimas 24 horas
+ * não recebe de novo. Só a ligação pelo telefone (`channel = 'phone'`) é religada; a do WhatsApp cai
+ * na reserva, como o modo indisponível. A simulada confere o mesmo e não insere nada.
+ *
+ * Isto **não** é a conferência da política: ela roda de novo, inteira, em `startOutboundCall`, na hora
+ * de discar. O horário, o teto do dia e a lista podem mudar em 30 minutos.
+ */
+async function callBackAction(q: OrgQuery, caller: string | null, channel: string, now: Date): Promise<{ action: DropFollowUpAction; reason?: DropFollowUpSkip }> {
+  if (caller !== null && (await q.one("select 1 from do_not_call where organization_id = $1 and e164 = $2", [q.organizationId, caller]))) return { action: "skipped", reason: "do_not_call" };
+  if (channel !== "phone" && channel !== "simulated") return { action: "skipped", reason: "mode_unavailable" };
+  const policy = await q.one<{ enabled: boolean }>("select enabled from outbound_policy where organization_id = $1", [q.organizationId]);
+  if (!policy?.enabled) return { action: "skipped", reason: "mode_unavailable" };
+  // A trava da instalação (fatia 7b): com as ligações de saída bloqueadas, nem agenda. Isto também não
+  // é a conferência da política: a religação já agendada passa pela porta única, `checkOutboundAllowed`,
+  // que recusa com `outbound_not_allowed`.
+  const limits = await organizationLimits(q);
+  if (!limits.outboundAllowed) return { action: "skipped", reason: "mode_unavailable" };
+  // O teto de gasto do mês (fatia 7c), do mesmo jeito: no teto, nem agenda. Quem confere na hora de discar
+  // é a porta única, que recusa com `spend_cap_reached`. Os limites já lidos vão junto: sem releitura.
+  if ((await spendCapReached(q, now, limits)).reached) return { action: "skipped", reason: "mode_unavailable" };
+  if (caller === null) return { action: "call_back_scheduled" };
+  await lockFollowUpsOfOrganization(q);
+  const since = new Date(now.getTime() - CALLER_MESSAGE_EVERY_MS);
+  const recent = await q.one(
+    `select 1 where exists (select 1 from call_backs where organization_id = $1 and to_e164 = $2 and created_at > $3)
+                 or exists (select 1 from notifications where organization_id = $1 and audience = 'caller' and target = $2 and created_at > $3)`,
+    [q.organizationId, caller, since],
+  );
+  if (recent) return { action: "skipped", reason: "recent_follow_up" };
+  return { action: "call_back_scheduled" };
+}
+
+/**
+ * A revisão de uma religação (seção 3.6, passo 5): não aplica a seção 2, só grava o resultado na
+ * ligação original (`drop_follow_up_result`, com o custo) e decide o que vem depois, por
+ * `settleCallBack`. Atendida (`call_answered`) é o fim, mesmo que caia de novo.
+ *
+ * A linha de `call_backs` é travada antes. O processo de voz a segura `due` enquanto disca: uma
+ * religação que termina antes de ele gravar `placed` espera aqui, e depois a vê com a chamada. A
+ * tentativa que não chegou a sair (recusada, ou que a central não originou) já foi resolvida por ele, e
+ * repetir a revisão não grava de novo.
+ */
+async function reviewCallBack(q: OrgQuery, callId: string, originCallId: string, now: Date): Promise<ReviewResult> {
+  const rows = await q.many<CallBackRow>(
+    `select ${CALL_BACK_COLUMNS} from call_backs where origin_call_id = $1 and (result_call_id = $2 or status = 'due') order by attempt for update`,
+    [originCallId, callId],
+  );
+  const row = rows.find((candidate) => candidate.result_call_id === callId);
+  if (!row || row.status !== "placed") return "skipped";
+  const done = await q.one(
+    "select 1 from call_events where call_id = $1 and kind = 'drop_follow_up_result' and payload->>'callId' = $2 and payload->>'action' in ('call_back_answered', 'call_back_not_answered')",
+    [originCallId, callId],
+  );
+  if (done) return "already_reviewed";
+  const result = await q.one<{ answered: boolean; cost_cents: number | null }>(
+    "select exists (select 1 from call_events where call_id = $1 and kind = 'call_answered') as answered, cost_cents from calls where id = $1",
+    [callId],
+  );
+  const costCents = result?.cost_cents ?? 0;
+  await settleCallBack(q, row, result?.answered ? { action: "call_back_answered", callId, costCents } : { action: "call_back_not_answered", callId, costCents }, now);
+  return "call_back_result";
 }
 
 const openTurnOf = (value: unknown): OpenTurn | null => (OPEN_TURNS as readonly unknown[]).includes(value) ? (value as OpenTurn) : null;
@@ -231,8 +313,10 @@ const openTurnOf = (value: unknown): OpenTurn | null => (OPEN_TURNS as readonly 
  * O que a revisão fez com a chamada; a fila não usa, os testes sim. `simulated`: a simulada gravou o
  * que teria acontecido. `messaged`: a mensagem para quem ligou entrou na fila de avisos.
  * `do_not_call`: o número está na lista de não ligar, e nada saiu nem foi aberto.
+ * `call_back_scheduled`: a religação foi agendada. `call_back_result`: a chamada era uma religação, e o
+ * resultado foi gravado na original.
  */
-export type ReviewResult = "opened" | "no_case" | "skipped" | "already_reviewed" | "simulated" | "messaged" | "do_not_call";
+export type ReviewResult = "opened" | "no_case" | "skipped" | "already_reviewed" | "simulated" | "messaged" | "do_not_call" | "call_back_scheduled" | "call_back_result";
 
 /**
  * Revê uma chamada e abre a pendência, se for o caso, na transação de `q`.
@@ -255,8 +339,10 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
     message: string | null;
     language: string | null;
     organization: string;
+    call_back_of: string | null;
+    ended_at: Date | null;
   }>(
-    `select c.agent_id, c.channel, c.direction, c.erased_at is not null as erased, c.end_reason,
+    `select c.agent_id, c.channel, c.direction, c.erased_at is not null as erased, c.end_reason, c.call_back_of, c.ended_at,
             case when c.direction = 'outbound' then c.to_e164 else c.from_e164 end as caller,
             a.drop_follow_up as mode, a.drop_follow_up_message as message, a.language, o.name as organization
        from calls c join organizations o on o.id = c.organization_id left join agents a on a.id = c.agent_id
@@ -265,7 +351,10 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
   );
   // A chamada pode ter sumido entre o fim e a revisão (outra organização, ou apagada): nada a fazer,
   // e a fila segue. Apagada a pedido do titular, também não: a pendência traria o número de volta.
-  if (!call || call.erased) return "skipped";
+  if (!call) return "skipped";
+  // Religação nunca gera religação: a revisão dela não aplica a seção 2, só grava o resultado na original.
+  if (call.call_back_of !== null) return reviewCallBack(q, callId, call.call_back_of, now);
+  if (call.erased) return "skipped";
   // O modo do agente que atendeu (`calls.agent_id`), e não a soma dos agentes por onde a ligação
   // passou. Agente apagado depois da ligação vale `off`, o de antes.
   const mode: DropFollowUpMode = call.mode ?? "off";
@@ -334,9 +423,15 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
     return recordEvent(q, callId, "drop_follow_up", payload, now);
   };
   // `task` abre a pendência. `whatsapp` confere o pré-requisito, a lista e o limite na hora de agir.
-  // `call_back` ainda não tem caminho (fatias 3 e 4) e a rota não o aceita; gravado direto no banco,
-  // cai na reserva, que é a pendência.
-  const outcome = dropped && mode === "whatsapp" ? await whatsAppAction(q, call.caller, now) : { action: "task_opened" as const };
+  // `call_back` confere a lista, a política ligada e o limite por número, e agenda; a política inteira
+  // é conferida de novo na hora de discar. A rota do painel só aceita `call_back` com a política de
+  // saída ligada (fatia 4); se a política for desligada depois, a revisão grava `mode_unavailable`.
+  const outcome =
+    dropped && mode === "whatsapp"
+      ? await whatsAppAction(q, call.caller, now)
+      : dropped && mode === "call_back"
+        ? await callBackAction(q, call.caller, call.channel, now)
+        : { action: "task_opened" as const };
   if (simulated) {
     if (!dropped) return "skipped";
     await report(outcome);
@@ -357,6 +452,13 @@ export async function reviewCall(q: OrgQuery, callId: string, now: Date): Promis
     await enqueueTask(q, { kind: "deliver_notification", payload: { notificationId: notice.id }, callId, runAt: now });
     await report(outcome);
     return "messaged";
+  }
+  if (outcome.action === "call_back_scheduled") {
+    // Tentativa 1, `fim da ligação + intervalo`. O relógio é a fila: a rotina `call_back` acorda na hora.
+    const endedAt = call.ended_at ?? now;
+    await scheduleCallBack(q, { originCallId: callId, agentId: call.agent_id, toE164: caller, attempt: 1, dueAt: new Date(endedAt.getTime() + CALL_BACK_INTERVAL_MINUTES * 60 * 1000) }, now);
+    await report(outcome);
+    return "call_back_scheduled";
   }
   // A pessoa pediu para não ser procurada: nem mensagem, nem pendência para alguém retornar.
   if (outcome.reason === "do_not_call") {

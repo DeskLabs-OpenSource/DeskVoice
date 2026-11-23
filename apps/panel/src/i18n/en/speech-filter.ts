@@ -32,6 +32,7 @@ const speechFilter: SpeechFilterDictionary = {
     region_unavailable: "the provider does not serve this server's country or region.",
     rate_limited: "the provider asked to wait. Try again in a few minutes.",
     unreachable: "the provider could not be reached. Check that the server reaches the internet.",
+    provider_error: "the provider answered with an error on its side. It usually clears up on its own: try again in a few minutes.",
     unexpected_response: "the provider answered in an unexpected form. Try again later.",
     not_needed: "this model takes no key.",
   },
@@ -42,7 +43,7 @@ const speechFilter: SpeechFilterDictionary = {
     country: "{provider}'s service is hosted {country}.",
   },
   countries: { US: "in the United States" },
-  providers: { typesafe: "TypeSafe" },
+  providers: { typesafe: "TypeSafe", elevenlabs: "ElevenLabs" },
   retention: {
     typesafe: [
       "TypeSafe keeps the personal data it receives, such as this text, for as long as reasonably necessary to provide the service or for its business or commercial purposes, with no period set in the policy.",

@@ -29,6 +29,8 @@ interface BrainView {
   keyCheck: KeyCheck | null;
   modelCount: number | null;
   fetchedAt: string | null;
+  /** Os agentes que escolheram este cérebro para ler as ligações deles (só id e nome). */
+  agents?: Array<{ id: string; name: string }>;
 }
 
 interface Model {
@@ -51,6 +53,7 @@ const CHECK_TONE: Record<CheckResult, "ok" | "warn" | "fail"> = {
   region_unavailable: "fail",
   rate_limited: "warn",
   unreachable: "warn",
+  provider_error: "warn",
   unexpected_response: "warn",
 };
 
@@ -155,6 +158,8 @@ function Models({ brain, t, version }: { brain: BrainView; t: BrainsDictionary; 
 /** Um cérebro: a chave (só se existe; nunca o valor), o último teste e a lista de modelos. */
 function BrainCard({ brain, t, chosenModel, onChanged }: { brain: BrainView; t: BrainsDictionary; chosenModel: string | null; onChanged(): void }) {
   const canConfigure = useCanConfigure();
+  const locale = useLocale();
+  const choosers = brain.agents ?? [];
   const save = useBrainAction(t);
   const refresh = useBrainAction(t);
   const [key, setKey] = useState("");
@@ -240,6 +245,12 @@ function BrainCard({ brain, t, chosenModel, onChanged }: { brain: BrainView; t: 
           <p>{fill(t.removeConfirm, { brain: brain.label })}</p>
           {/* Escolhido para ler as ligações: remover para a análise, e o dono fica sabendo antes. */}
           {chosenModel !== null ? <p className="mt-1 font-bold">{fill(t.removeChosen, { brain: brain.label, model: chosenModel })}</p> : null}
+          {/* Escolhido em agentes: a análise das ligações deles para, e a confirmação diz quais. */}
+          {choosers.length > 0 ? (
+            <p className="mt-1 font-bold">
+              {fill(t.removeAgents, { brain: brain.label, agents: new Intl.ListFormat(locale, { type: "conjunction" }).format(choosers.map((agent) => agent.name)) })}
+            </p>
+          ) : null}
           <div className="mt-1 flex flex-wrap gap-2">
             <Button variant="danger" busy={save.busy} onClick={removeKey}>
               {fill(t.removeYes, { brain: brain.label })}

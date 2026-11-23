@@ -1,5 +1,6 @@
 /**
- * Cérebro Anthropic: os modelos de texto que a chave alcança e um pedido com saída em JSON.
+ * Cérebro Anthropic: os modelos de texto que a chave alcança, um pedido com saída em JSON e a conversa
+ * em streaming, com ferramentas (`chat`, R5 fatia 2b).
  *
  * Documentação oficial consultada em 2026-11-16 (docs.anthropic.com redireciona para platform.claude.com):
  *   - https://platform.claude.com/docs/en/api/models-list  (`GET /v1/models`, cabeçalho `anthropic-version`;
@@ -21,6 +22,19 @@
  *     organização volta como 400 e só o texto diz isso: aqui fica `unexpected_response`, porque o texto
  *     do provedor nunca é lido)
  *   - https://platform.claude.com/docs/en/about-claude/pricing  (preços, tabela "Model pricing")
+ *   - https://platform.claude.com/docs/en/build-with-claude/streaming  (conferida em 2026-11-17, para `chat`:
+ *     `message_start` com a `Message` e o `usage` dela; os blocos com `content_block_start`, `content_block_delta`
+ *     e `content_block_stop`, cada um com o `index` dele; "One or more `message_delta` events"; "A final
+ *     `message_stop` event". "The token counts shown in the `usage` field of the `message_delta` event are
+ *     *cumulative*", e o exemplo com ferramenta do servidor traz `input_tokens` no `message_delta`. Há
+ *     `message_delta` sem `usage` no exemplo com raciocínio. `ping` a qualquer hora. O erro no meio vem como
+ *     `event: error` com `{"type": "error", "error": {"type": "overloaded_error", ...}}`. `tool_use` chega em
+ *     `input_json_delta` com `partial_json`; raciocínio em `thinking_delta` e `signature_delta`; o
+ *     `redacted_thinking` chega inteiro no `content_block_start`. Tipo de evento novo deve ser ignorado)
+ *   - https://platform.claude.com/docs/en/api/messages  (conferida em 2026-11-17: `system` é texto ou lista
+ *     de blocos, fora de `messages`; "Consecutive `user` or `assistant` turns in your request will be combined
+ *     into a single turn"; `tool_use` com `id`, `name` e `input` (objeto); `tool_result` com `tool_use_id`
+ *     e `content`; ferramenta com `name`, `description` e `input_schema`; `max_tokens` sem "optional")
  *   - https://platform.claude.com/docs/en/about-claude/models/overview  (os ids de cada modelo)
  *
  * O desenho deixava escolher entre saída estruturada e ferramenta única com `input_schema`. Ficou a saída
@@ -38,8 +52,8 @@
  *     e o JSON, e uma resposta cortada por ele volta como `unexpected_response`, com o consumo.
  */
 import { z } from "zod";
-import type { Brain, BrainFailure, BrainModel, BrainPrice } from "../brain";
-import { LIST_TIMEOUT_MS, brainFailureByStatus, parseEach, requestJson } from "../brain-http";
+import type { Brain, BrainChatMessage, BrainChatRequest, BrainFailure, BrainModel, BrainPrice } from "../brain";
+import { type ChatFormat, type ChatStep, LIST_TIMEOUT_MS, brainFailureByStatus, chatTransport, parseEach, requestJson, utf8Bytes } from "../brain-http";
 import type { Usage } from "../types";
 
 const API_URL = "https://api.anthropic.com/v1";
@@ -180,6 +194,216 @@ const completionFailureOf = (status: number, body: unknown): BrainFailure =>
 
 const headersOf = (apiKey: string) => ({ "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION });
 
+// ---------------------------------------------------------------------------------------------
+// A conversa em streaming (R5, fatia 2b): `POST /v1/messages` com `stream: true`. O transporte é o comum
+// (`chatTransport`); aqui fica só o formato da API de mensagens.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * O teto de saída de uma volta da conversa. É obrigatório na API. Uma volta de ligação é uma fala curta
+ * ou um pedido de ferramenta, mas o raciocínio também conta aqui: o mesmo teto do `completeJson` dá folga
+ * ao raciocínio sem deixar uma volta presa gerar sem fim. A volta cortada por ele termina como as outras
+ * (`done`), com o consumo declarado, como o `finish_reason: "length"` no `/chat/completions`.
+ */
+const CHAT_MAX_TOKENS = MAX_TOKENS;
+
+type WireBlock = Record<string, unknown>;
+type WireMessage = { role: "user" | "assistant"; content: string | WireBlock[] };
+
+/** O `args` de uma volta anterior, de volta a objeto. Fora de um objeto JSON, é erro de quem chama: `null`. */
+const inputOf = (args: string): Record<string, unknown> | null => {
+  let value: unknown;
+  try {
+    value = JSON.parse(args);
+  } catch {
+    return null;
+  }
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+};
+
+/**
+ * As mensagens na forma da API de mensagens: `system` sai para o topo (juntos, na ordem); `assistant`
+ * com ferramentas vira blocos `tool_use`; cada `tool` vira um `tool_result` numa mensagem `user`, e os
+ * seguidos entram na mesma. `null` se algum `args` não é um objeto JSON.
+ */
+export function anthropicMessages(messages: BrainChatMessage[]): { system: string[]; messages: WireMessage[] } | null {
+  const system: string[] = [];
+  const out: WireMessage[] = [];
+  for (const message of messages) {
+    if (message.role === "system") {
+      system.push(message.content);
+      continue;
+    }
+    if (message.role === "tool") {
+      const block = { type: "tool_result", tool_use_id: message.toolCallId ?? "", content: message.content };
+      const last = out.at(-1);
+      // O `tool` seguido de outro entra na mesma `user`, depois dos resultados que já estão lá.
+      if (last?.role === "user" && Array.isArray(last.content) && last.content.every((item) => item.type === "tool_result")) {
+        last.content.push(block);
+      } else {
+        out.push({ role: "user", content: [block] });
+      }
+      continue;
+    }
+    if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
+      const blocks: WireBlock[] = message.content === "" ? [] : [{ type: "text", text: message.content }];
+      for (const call of message.toolCalls) {
+        const input = inputOf(call.args);
+        if (input === null) return null;
+        blocks.push({ type: "tool_use", id: call.id, name: call.name, input });
+      }
+      out.push({ role: "assistant", content: blocks });
+      continue;
+    }
+    out.push({ role: message.role, content: message.content });
+  }
+  return { system, messages: out };
+}
+
+// Leniente de propósito: campo e evento novos não derrubam a conversa (a página de streaming pede isso).
+const sseEvent = z.object({ type: z.string() });
+const startEvent = z.object({ message: z.object({ usage: z.record(z.string(), z.unknown()).nullish() }) });
+const blockStart = z.object({
+  index: z.number().int().nonnegative(),
+  content_block: z.object({ type: z.string(), id: z.string().nullish(), name: z.string().nullish(), data: z.string().nullish() }),
+});
+const blockDelta = z.object({
+  index: z.number().int().nonnegative(),
+  delta: z.object({ type: z.string(), text: z.string().nullish(), partial_json: z.string().nullish(), thinking: z.string().nullish() }),
+});
+const blockStop = z.object({ index: z.number().int().nonnegative() });
+const deltaEvent = z.object({ usage: z.record(z.string(), z.unknown()).nullish() });
+
+/**
+ * O erro no meio do SSE, pelo tipo; o texto (`error.message`) nunca é lido. Sem status HTTP próprio: o
+ * do evento é o 200 já recebido. `overloaded_error` é `rate_limited` (o desenho da 2b), embora o 529 da
+ * resposta HTTP caia em `provider_error` pela regra geral, como no `completeJson`.
+ */
+export const streamFailureOf = (type: string | null | undefined): BrainFailure => {
+  if (type === "billing_error") return "no_credit";
+  if (type === "overloaded_error" || type === "rate_limit_error") return "rate_limited";
+  if (type === "authentication_error" || type === "permission_error") return "rejected";
+  if (type === "api_error") return "provider_error";
+  if (type === "timeout_error") return "unreachable";
+  return "unexpected_response";
+};
+const streamError = z.object({ error: z.object({ type: z.string().nullish() }).nullish() });
+
+const BAD: ChatStep = { failure: "unexpected_response" };
+
+/** O formato da API de mensagens da Anthropic, para o transporte comum. */
+function messagesFormat(apiKey: string, request: BrainChatRequest): ChatFormat {
+  const wire = anthropicMessages(request.messages);
+  const tools = request.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters }));
+  const system = wire && wire.system.length > 0 ? wire.system.join("\n\n") : null;
+  return {
+    headers: headersOf(apiKey),
+    // Sem `cache_control`: a API não escreve cache, e o consumo fica no preço da tabela.
+    request:
+      wire === null
+        ? null
+        : {
+            body: {
+              model: request.model,
+              max_tokens: CHAT_MAX_TOKENS,
+              ...(system === null ? {} : { system }),
+              messages: wire.messages,
+              ...(tools.length > 0 ? { tools } : {}),
+              stream: true,
+            },
+            // A estimativa da entrada: o que foi enviado em `system`, `messages` e `tools`, um token por byte.
+            inputTokens:
+              utf8Bytes(system ?? "") + utf8Bytes(JSON.stringify(wire.messages)) + (tools.length > 0 ? utf8Bytes(JSON.stringify(tools)) : 0),
+          },
+    failureOf: completionFailureOf,
+    reader() {
+      /** As ferramentas abertas, pelo `index` do bloco: saem inteiras no `content_block_stop`. */
+      const calls = new Map<number, { id: string; name: string; args: string }>();
+      /** O `usage` do `message_start`; o do `message_delta` (cumulativo) vale por cima, campo a campo. */
+      let startUsage: Record<string, unknown> = {};
+
+      return (data, sink) => {
+        let json: unknown;
+        try {
+          json = JSON.parse(data);
+        } catch {
+          return BAD;
+        }
+        const event = sseEvent.safeParse(json);
+        if (!event.success) return BAD;
+        switch (event.data.type) {
+          case "message_start": {
+            const start = startEvent.safeParse(json);
+            if (!start.success) return BAD;
+            startUsage = start.data.message.usage ?? {};
+            return "more";
+          }
+          case "content_block_start": {
+            const start = blockStart.safeParse(json);
+            if (!start.success) return BAD;
+            const block = start.data.content_block;
+            if (block.type === "tool_use") {
+              if (!block.id || !block.name) return BAD;
+              calls.set(start.data.index, { id: block.id, name: block.name, args: "" });
+            }
+            // O raciocínio oculto chega inteiro aqui: não é fala, mas é cobrado como saída.
+            if (block.type === "redacted_thinking") sink.output(utf8Bytes(block.data ?? ""));
+            return "more";
+          }
+          case "content_block_delta": {
+            const piece = blockDelta.safeParse(json);
+            if (!piece.success) return BAD;
+            const { delta } = piece.data;
+            if (delta.type === "text_delta" && delta.text) {
+              sink.output(utf8Bytes(delta.text));
+              sink.text(delta.text);
+            } else if (delta.type === "input_json_delta") {
+              const call = calls.get(piece.data.index);
+              // Pedaço de ferramenta sem o bloco aberto é forma que a API não documenta.
+              if (!call) return BAD;
+              call.args += delta.partial_json ?? "";
+              sink.output(utf8Bytes(delta.partial_json ?? ""));
+            } else if (delta.type === "thinking_delta") {
+              sink.output(utf8Bytes(delta.thinking ?? ""));
+            }
+            return "more";
+          }
+          case "content_block_stop": {
+            const stop = blockStop.safeParse(json);
+            if (!stop.success) return BAD;
+            const call = calls.get(stop.data.index);
+            if (call) {
+              calls.delete(stop.data.index);
+              // Texto, exatamente como chegou; bloco sem `input_json_delta` é uma ferramenta sem argumentos.
+              sink.toolCall({ id: call.id, name: call.name, args: call.args === "" ? "{}" : call.args });
+            }
+            return "more";
+          }
+          case "message_delta": {
+            const delta = deltaEvent.safeParse(json);
+            if (!delta.success) return BAD;
+            const usage = delta.data.usage;
+            if (usage) {
+              const merged = { ...startUsage, ...usage };
+              // Declarado só com a entrada e a saída conhecidas; a saída é o último valor, nunca a soma.
+              if (typeof merged.input_tokens === "number" && typeof merged.output_tokens === "number") sink.declare(usageOf({ usage: merged }));
+            }
+            return "more";
+          }
+          case "message_stop":
+            // Ferramenta aberta no fim é forma que a API não documenta.
+            return calls.size > 0 ? BAD : "end";
+          case "error":
+            return { failure: streamFailureOf(streamError.safeParse(json).data?.error?.type) };
+          default:
+            // `ping` e tipo novo: nada a fazer.
+            return "more";
+        }
+      };
+    },
+  };
+}
+
 const brain: Brain = {
   id: "anthropic",
   label: "Anthropic",
@@ -245,6 +469,10 @@ const brain: Brain = {
       .join("");
     if (!finished || !text) return { ok: false, failure: "unexpected_response", status: response.status, model, usage };
     return { ok: true, text, model, usage };
+  },
+
+  chat(apiKey, request, options) {
+    return chatTransport(`${API_URL}/messages`, request, messagesFormat(apiKey, request), { fetch: options.fetch });
   },
 };
 

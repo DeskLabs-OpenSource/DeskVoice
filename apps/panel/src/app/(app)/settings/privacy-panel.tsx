@@ -19,6 +19,7 @@ import { Button, Field, Notice, Panel, Skeleton, Switch, TextInput } from "../..
 import { useCanConfigure } from "../../../ui/me";
 import { forgetTarget } from "../../../ui/forget-target";
 import { notesRetentionNeedsConfirm, notesRetentionProblem } from "../../../ui/notes-retention";
+import { Advanced } from "./advanced";
 
 type Kind = keyof PrivacyDictionary["history"];
 export interface Entry {
@@ -146,11 +147,21 @@ export function describe(entry: Entry, t: PrivacyDictionary, locale: Locale): st
         who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
         provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
       });
+    case "synthesizer_provider_confirmed":
+      // O recibo da voz do pipeline: fica depois de a chave ser apagada ou de a pessoa sair da equipe.
+      return fill(t.history.synthesizer_provider_confirmed, {
+        who: typeof p.confirmedByName === "string" ? p.confirmedByName : who,
+        provider: typeof p.provider === "string" ? providerLabel(p.provider, locale) : "",
+      });
     // Feitos pela administração da instalação, que não tem vínculo aqui: a frase não tem "quem".
     case "organization_created":
       return fill(t.history.organization_created, { name: typeof p.name === "string" ? p.name : "" });
     case "organization_renamed":
       return fill(t.history.organization_renamed, { from: typeof p.from === "string" ? p.from : "", to: typeof p.to === "string" ? p.to : "" });
+    case "organization_suspended":
+      return fill(t.history.organization_suspended, { reason: typeof p.reason === "string" ? p.reason : "", n: typeof p.canceled_tasks === "number" ? p.canceled_tasks : 0 });
+    case "organization_reactivated":
+      return fill(t.history.organization_reactivated, { n: typeof p.canceled_tasks === "number" ? p.canceled_tasks : 0 });
   }
 }
 
@@ -357,175 +368,178 @@ export function PrivacyPanel() {
         </div>
       </Panel>
 
-      <Panel title={t.exportTitle} description={t.exportLead}>
-        <form
-          className="grid max-w-xl gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setExported(null);
-            void exporter
-              .run(async () => {
-                const result = await api<Exported>("/privacy/export", { body: { phone } });
-                if (hasRecord(result.counts)) download(result, t);
-                setExported(result);
-              })
-              .then(state.reload);
-          }}
-        >
-          <Field label={t.exportPhone} hint={t.exportPhoneHint}>
-            <TextInput mono type="tel" className="max-w-60" value={phone} onChange={(event) => setPhone(event.target.value)} required />
-          </Field>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="submit" busy={exporter.busy}>
-              {t.exportRun}
-            </Button>
-          </div>
-          {exporter.error ? <Notice tone="fail">{exporter.error}</Notice> : null}
-          {exported && !hasRecord(exported.counts) ? <Notice>{fill(t.exportEmpty, { phone: formatPhone(exported.phone) })}</Notice> : null}
-          {exported && hasRecord(exported.counts) ? (
-            <Notice tone="ok">
-              <p>{fill(t.exportDone, { phone: formatPhone(exported.phone), calls: exported.counts.calls, events: exported.counts.events })}</p>
-              {exported.counts.followUps > 0 ? <p>{fill(t.exportDoneFollowUps, { count: exported.counts.followUps })}</p> : null}
-              {exported.counts.notes > 0 ? <p>{fill(t.exportDoneNotes, { count: exported.counts.notes })}</p> : null}
-              {exported.counts.doNotCall ? <p>{t.exportDoneDnc}</p> : null}
-              <p>{t.exportCare}</p>
-            </Notice>
-          ) : null}
-        </form>
-      </Panel>
-
-      <Panel title={t.forgetTitle} description={t.forgetLead}>
-        <form
-          className="grid max-w-xl gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setForgotten(null);
-            // A confirmação nomeia o número como o servidor o vai usar; o inválido não chega a abrir.
-            const target = forgetTarget(forgetPhone);
-            setForgetInvalid(target === null ? fill(t.forgetInvalid, { phone: forgetPhone.trim() }) : null);
-            setForgetConfirming(target);
-          }}
-        >
-          <Field label={t.forgetPhone} hint={t.forgetPhoneHint} error={forgetInvalid ?? undefined}>
-            <TextInput
-              mono
-              type="tel"
-              className="max-w-60"
-              value={forgetPhone}
-              onChange={(event) => {
-                setForgetPhone(event.target.value);
-                setForgetConfirming(null);
-                setForgetInvalid(null);
-              }}
-              required
-            />
-          </Field>
-          {forgetConfirming === null ? (
+      {/* Exportar, esquecer e apagar a pedido do titular: no Avançado, fechado ao abrir a tela. */}
+      <Advanced>
+        <Panel title={t.exportTitle} description={t.exportLead}>
+          <form
+            className="grid max-w-xl gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setExported(null);
+              void exporter
+                .run(async () => {
+                  const result = await api<Exported>("/privacy/export", { body: { phone } });
+                  if (hasRecord(result.counts)) download(result, t);
+                  setExported(result);
+                })
+                .then(state.reload);
+            }}
+          >
+            <Field label={t.exportPhone} hint={t.exportPhoneHint}>
+              <TextInput mono type="tel" className="max-w-60" value={phone} onChange={(event) => setPhone(event.target.value)} required />
+            </Field>
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit">{t.forgetRun}</Button>
+              <Button type="submit" busy={exporter.busy}>
+                {t.exportRun}
+              </Button>
             </div>
-          ) : (
-            <Notice tone="fail">
-              <p className="font-bold">{fill(t.forgetConfirmTitle, { phone: formatPhone(forgetConfirming) })}</p>
-              <p>{fill(t.forgetConfirmBody, { phone: formatPhone(forgetConfirming) })}</p>
-              <p>{t.forgetKeeps}</p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                <Button
-                  variant="danger"
-                  busy={forgetter.busy}
-                  onClick={() =>
-                    void forgetter
-                      .run(async () => {
-                        setForgotten(await api<Forgotten>("/privacy/forget", { body: { phone: forgetConfirming } }));
-                        setForgetConfirming(null);
-                      })
-                      .then(state.reload)
-                  }
-                >
-                  {fill(t.forgetConfirmYes, { phone: formatPhone(forgetConfirming) })}
-                </Button>
-                <Button variant="ghost" onClick={() => setForgetConfirming(null)}>
-                  {common.actions.cancel}
-                </Button>
-              </div>
-              {forgetter.error ? <p>{forgetter.error}</p> : null}
-            </Notice>
-          )}
-          {forgotten ? (
-            <Notice tone="ok">{fill(t.forgetDone, { phone: formatPhone(forgotten.phone), notes: forgotten.notes, followUps: forgotten.followUps })}</Notice>
-          ) : null}
-        </form>
-      </Panel>
+            {exporter.error ? <Notice tone="fail">{exporter.error}</Notice> : null}
+            {exported && !hasRecord(exported.counts) ? <Notice>{fill(t.exportEmpty, { phone: formatPhone(exported.phone) })}</Notice> : null}
+            {exported && hasRecord(exported.counts) ? (
+              <Notice tone="ok">
+                <p>{fill(t.exportDone, { phone: formatPhone(exported.phone), calls: exported.counts.calls, events: exported.counts.events })}</p>
+                {exported.counts.followUps > 0 ? <p>{fill(t.exportDoneFollowUps, { count: exported.counts.followUps })}</p> : null}
+                {exported.counts.notes > 0 ? <p>{fill(t.exportDoneNotes, { count: exported.counts.notes })}</p> : null}
+                {exported.counts.doNotCall ? <p>{t.exportDoneDnc}</p> : null}
+                <p>{t.exportCare}</p>
+              </Notice>
+            ) : null}
+          </form>
+        </Panel>
 
-      <Panel title={t.erasureTitle} description={t.erasureLead}>
-        <form
-          className="grid max-w-xl gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setPreview(null);
-            setErased(null);
-            void previewer.run(async () => setPreview(await api<ErasurePreview>("/privacy/erasure/preview", { body: { phone: erasePhone } })));
-          }}
-        >
-          <Field label={t.erasurePhone} hint={t.erasurePhoneHint}>
-            <TextInput
-              mono
-              type="tel"
-              className="max-w-60"
-              value={erasePhone}
-              onChange={(event) => {
-                setErasePhone(event.target.value);
-                setPreview(null);
-              }}
-              required
-            />
-          </Field>
-          <Notice tone="warn">{t.erasureBackups}</Notice>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="submit" busy={previewer.busy}>
-              {t.erasurePreview}
-            </Button>
-          </div>
-          {previewer.error ? <Notice tone="fail">{previewer.error}</Notice> : null}
-          {preview?.live ? <Notice tone="warn">{fill(t.erasureLive, { phone: formatPhone(preview.phone) })}</Notice> : null}
-          {preview && !preview.live && !hasErasable(preview) ? <Notice>{fill(t.erasureEmpty, { phone: formatPhone(preview.phone) })}</Notice> : null}
-          {preview && !preview.live && hasErasable(preview) ? (
-            <Notice tone="fail">
-              <p className="font-bold">{fill(t.erasureConfirmTitle, { phone: formatPhone(preview.phone) })}</p>
-              <p>{countsLine(preview, t)}</p>
-              <p>{t.erasureConfirmBody}</p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                <Button
-                  variant="danger"
-                  busy={eraser.busy}
-                  onClick={() =>
-                    void eraser
-                      .run(async () => {
-                        const counts = await api<ErasureCounts>("/privacy/erasure", { body: { phone: preview.phone } });
-                        setErased({ phone: preview.phone, counts });
-                        setPreview(null);
-                      })
-                      .then(state.reload)
-                  }
-                >
-                  {fill(t.erasureConfirmYes, { phone: formatPhone(preview.phone) })}
-                </Button>
-                <Button variant="ghost" onClick={() => setPreview(null)}>
-                  {common.actions.cancel}
-                </Button>
+        <Panel title={t.forgetTitle} description={t.forgetLead}>
+          <form
+            className="grid max-w-xl gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setForgotten(null);
+              // A confirmação nomeia o número como o servidor o vai usar; o inválido não chega a abrir.
+              const target = forgetTarget(forgetPhone);
+              setForgetInvalid(target === null ? fill(t.forgetInvalid, { phone: forgetPhone.trim() }) : null);
+              setForgetConfirming(target);
+            }}
+          >
+            <Field label={t.forgetPhone} hint={t.forgetPhoneHint} error={forgetInvalid ?? undefined}>
+              <TextInput
+                mono
+                type="tel"
+                className="max-w-60"
+                value={forgetPhone}
+                onChange={(event) => {
+                  setForgetPhone(event.target.value);
+                  setForgetConfirming(null);
+                  setForgetInvalid(null);
+                }}
+                required
+              />
+            </Field>
+            {forgetConfirming === null ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button type="submit">{t.forgetRun}</Button>
               </div>
-              {eraser.error ? <p>{eraser.error}</p> : null}
-            </Notice>
-          ) : null}
-          {erased ? (
-            <Notice tone="ok">
-              <p>{fill(t.erasureDone, { phone: formatPhone(erased.phone) })}</p>
-              <p>{countsLine(erased.counts, t)}</p>
-              {erased.counts.recordings > 0 ? <p>{t.erasureDoneRecordings}</p> : null}
-            </Notice>
-          ) : null}
-        </form>
-      </Panel>
+            ) : (
+              <Notice tone="fail">
+                <p className="font-bold">{fill(t.forgetConfirmTitle, { phone: formatPhone(forgetConfirming) })}</p>
+                <p>{fill(t.forgetConfirmBody, { phone: formatPhone(forgetConfirming) })}</p>
+                <p>{t.forgetKeeps}</p>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Button
+                    variant="danger"
+                    busy={forgetter.busy}
+                    onClick={() =>
+                      void forgetter
+                        .run(async () => {
+                          setForgotten(await api<Forgotten>("/privacy/forget", { body: { phone: forgetConfirming } }));
+                          setForgetConfirming(null);
+                        })
+                        .then(state.reload)
+                    }
+                  >
+                    {fill(t.forgetConfirmYes, { phone: formatPhone(forgetConfirming) })}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setForgetConfirming(null)}>
+                    {common.actions.cancel}
+                  </Button>
+                </div>
+                {forgetter.error ? <p>{forgetter.error}</p> : null}
+              </Notice>
+            )}
+            {forgotten ? (
+              <Notice tone="ok">{fill(t.forgetDone, { phone: formatPhone(forgotten.phone), notes: forgotten.notes, followUps: forgotten.followUps })}</Notice>
+            ) : null}
+          </form>
+        </Panel>
+
+        <Panel title={t.erasureTitle} description={t.erasureLead}>
+          <form
+            className="grid max-w-xl gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setPreview(null);
+              setErased(null);
+              void previewer.run(async () => setPreview(await api<ErasurePreview>("/privacy/erasure/preview", { body: { phone: erasePhone } })));
+            }}
+          >
+            <Field label={t.erasurePhone} hint={t.erasurePhoneHint}>
+              <TextInput
+                mono
+                type="tel"
+                className="max-w-60"
+                value={erasePhone}
+                onChange={(event) => {
+                  setErasePhone(event.target.value);
+                  setPreview(null);
+                }}
+                required
+              />
+            </Field>
+            <Notice tone="warn">{t.erasureBackups}</Notice>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="submit" busy={previewer.busy}>
+                {t.erasurePreview}
+              </Button>
+            </div>
+            {previewer.error ? <Notice tone="fail">{previewer.error}</Notice> : null}
+            {preview?.live ? <Notice tone="warn">{fill(t.erasureLive, { phone: formatPhone(preview.phone) })}</Notice> : null}
+            {preview && !preview.live && !hasErasable(preview) ? <Notice>{fill(t.erasureEmpty, { phone: formatPhone(preview.phone) })}</Notice> : null}
+            {preview && !preview.live && hasErasable(preview) ? (
+              <Notice tone="fail">
+                <p className="font-bold">{fill(t.erasureConfirmTitle, { phone: formatPhone(preview.phone) })}</p>
+                <p>{countsLine(preview, t)}</p>
+                <p>{t.erasureConfirmBody}</p>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Button
+                    variant="danger"
+                    busy={eraser.busy}
+                    onClick={() =>
+                      void eraser
+                        .run(async () => {
+                          const counts = await api<ErasureCounts>("/privacy/erasure", { body: { phone: preview.phone } });
+                          setErased({ phone: preview.phone, counts });
+                          setPreview(null);
+                        })
+                        .then(state.reload)
+                    }
+                  >
+                    {fill(t.erasureConfirmYes, { phone: formatPhone(preview.phone) })}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setPreview(null)}>
+                    {common.actions.cancel}
+                  </Button>
+                </div>
+                {eraser.error ? <p>{eraser.error}</p> : null}
+              </Notice>
+            ) : null}
+            {erased ? (
+              <Notice tone="ok">
+                <p>{fill(t.erasureDone, { phone: formatPhone(erased.phone) })}</p>
+                <p>{countsLine(erased.counts, t)}</p>
+                {erased.counts.recordings > 0 ? <p>{t.erasureDoneRecordings}</p> : null}
+              </Notice>
+            ) : null}
+          </form>
+        </Panel>
+      </Advanced>
 
       <Panel title={t.historyTitle} description={t.historyLead}>
         {history.length === 0 ? (

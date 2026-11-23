@@ -11,7 +11,7 @@ const body = z.object({ email: z.string().trim().toLowerCase().max(320).pipe(z.e
  * gerou e só vale enquanto ela administra a instalação. O e-mail pode já ter conta, inclusive o de
  * quem convida: a pessoa aceita com a senha que já tem.
  */
-export const POST = handleInstallation({ body }, async ({ body, params, url, accountId, deps }) => {
+export const POST = handleInstallation({ support: false, body }, async ({ body, params, url, accountId, deps }) => {
   const result = await createFirstOwnerInvite(deps.db, accountId, params.id ?? "", body, deps.clock.now());
   if (!result.ok) {
     if (result.reason === "not_found") throw notFound();

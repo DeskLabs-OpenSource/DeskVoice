@@ -11,6 +11,8 @@ export interface SimulatedTransport extends CallTransport {
   readonly ended: boolean;
   /** Quem ligou desliga. */
   callerHangup(): void;
+  /** Quem ligou aperta uma tecla. Depois do fim da chamada não entrega nada. */
+  press(digit: string): void;
 }
 
 /**
@@ -29,6 +31,7 @@ export function createSimulatedTransport(options: { schedule?: Schedule } = {}):
   let ended = false;
   let cancelFeed: (() => void) | undefined;
   let hangupHandler: (() => void) | undefined;
+  let dtmfHandler: ((digit: string) => void) | undefined;
 
   const stop = (): void => {
     ended = true;
@@ -76,6 +79,9 @@ export function createSimulatedTransport(options: { schedule?: Schedule } = {}):
     onHangup(handler) {
       hangupHandler = handler;
     },
+    onDtmf(handler) {
+      dtmfHandler = handler;
+    },
     async hangup() {
       await drained();
       stop();
@@ -96,6 +102,10 @@ export function createSimulatedTransport(options: { schedule?: Schedule } = {}):
       if (ended) return;
       stop();
       hangupHandler?.();
+    },
+    press(digit) {
+      if (ended) return;
+      dtmfHandler?.(digit);
     },
   };
 }

@@ -8,7 +8,7 @@ import { requireOwnerToManage } from "../../../../../server/team";
 const INVITE_DAYS = 7;
 const body = z.object({ email: z.string().trim().toLowerCase().max(320).pipe(z.email()), name: z.string().trim().min(1).max(120), role: roleName });
 
-export const POST = handle({ body, configure: true }, async ({ q, session, body, deps, url }) => {
+export const POST = handle({ support: false, body, configure: true }, async ({ q, session, body, deps, url }) => {
   if (await q.one("select 1 from users where email = $1", [body.email])) throw new ApiError(400, "email_taken", "This e-mail already belongs to someone on the team.");
 
   const now = deps.clock.now();

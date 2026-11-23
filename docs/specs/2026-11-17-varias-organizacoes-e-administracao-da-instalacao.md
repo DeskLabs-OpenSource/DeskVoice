@@ -1,6 +1,7 @@
 # Várias organizações e a administração da instalação
 
-- **Estado:** desenho. Nenhuma fatia começou. A decisão que acompanha este texto é a
+- **Estado (17/11, documento vivo):** na `main`, a fatia 1 (#384), a fatia 2 (#387), a fatia 3
+  (#402) e a fatia 4a (#408). A fatia 4b é a próxima. Os pedidos da seção 7 foram respondidos. A decisão que acompanha este texto é a
   [`0021`](../decisions/0021-varias-organizacoes-na-tela.md); onde as duas discordarem, vale a 0021.
 - **Data:** 2026-11-17. Revisão 2 no mesmo dia, depois do parecer da sessão revisora no PR #373.
 - **Quem pediu:** o dono, em 13/11/2026 (roteiro de novembro, item R8): "um sistema multi-tenant com
@@ -189,8 +190,17 @@ alter table organizations add column deleting_at timestamptz;   -- a lápide (fa
 **O que a suspensão faz**, numa transação só e por `withOrg` da organização suspensa:
 
 - Marca `suspended_at` e o motivo.
-- Cancela as tarefas `queued` daquela organização, com o motivo `organization_suspended`. A religação
-  combinada há duas semanas não pode sair sozinha no dia da reativação.
+- Cancela **todas** as tarefas `queued` daquela organização, salvo as quatro abaixo, com o motivo
+  `organization_suspended`. Hoje isso pega `follow_up` (o aviso de pendência), `deliver_notification`,
+  `deliver_webhook`, `transcribe_call`, `summarize_call`, `review_call` e `classify_call_outcome`. A
+  regra é "tudo, salvo estas quatro", para um `kind` novo já nascer cancelável. Um aviso de
+  pendência marcado há duas semanas não pode sair sozinho no dia da reativação.
+- **Não cancela as rotinas de guarda e de apagamento** (`purge_transcripts`, `purge_caller_notes`,
+  `erase_recordings`) **nem o vencimento de pedidos** (`expire_approval`). Elas não gastam nem falam
+  com ninguém de fora, e cumprem o prazo de guarda e o pedido de apagamento de quem ligou, que não
+  param porque a agência suspendeu o cliente. As de guarda se reagendam sozinhas: cancelar uma delas
+  deixaria a organização sem a corrente até alguém gravar o prazo de novo ou nascer uma nota nova
+  (revisão de 17/11, na abertura da fatia 4b).
 - Grava `organization_suspended` em `organization_events` e em `installation_events`.
 
 **E o que passa a valer enquanto ela está suspensa:**
@@ -201,7 +211,7 @@ alter table organizations add column deleting_at timestamptz;   -- a lápide (fa
 | Ligação pelo WhatsApp | A mesma fala, pelo mesmo transporte | `apps/voice/src/whatsapp-calls.ts` |
 | Chamada pelo navegador e simulada | Recusadas com a mensagem de organização suspensa | rotas `calls/web` e `calls/simulate` |
 | Ligação de saída | `checkOutboundAllowed` recusa com `organization_suspended` | a porta única de saída |
-| Fila | `claimTask` não reivindica tarefa de organização suspensa. A tarefa que entrar depois fica na fila e é cancelada na reativação, com o mesmo motivo | `packages/core/src/queue.ts` |
+| Fila | `claimTask` não reivindica tarefa de organização suspensa, salvo as rotinas de guarda, de apagamento e de vencimento de pedidos, que continuam rodando. A tarefa que entrar depois fica na fila e é cancelada na reativação, com o mesmo motivo. O runner calcula a próxima hora de acordar com a mesma regra, para não acordar sem parar por uma tarefa que não pode pegar | `packages/core/src/queue.ts`, `apps/routines/src/runner.ts` |
 | Linhas | **Continuam registradas.** Tirar a linha do ar faria quem liga ouvir o erro da operadora, e não a fala | `trunks.ts` não muda |
 | Mensagem de WhatsApp | Não responde, e grava evento | sem resposta automática, que seria disparo |
 | Painel | Quem só tem vínculo com ela vê a tela "Esta organização está suspensa", com o motivo, e mais nada. Quem tem outras organizações troca para elas | `requireSession` |
@@ -242,6 +252,12 @@ grant select, insert, update, delete on organization_limits to deskvoice_system;
   produto. `outbound_allowed = true` não liga a saída; só deixa a organização decidir, como hoje.
   `false` desliga a saída e trava o interruptor dela. O teto diário por linha, a janela e a lista de
   não ligar não ganham campo aqui (antipadrão 16).
+- **A trava não vale para a transferência a uma pessoa da equipe.** A transferência (o número do
+  agente, `transfer_to_e164`, ou a opção "pessoa" da URA) é a mesma ligação, que já começou, e não
+  uma ligação nova: disca o número da própria equipe, que a organização configurou, enquanto quem
+  está na linha espera. Não interrompe ninguém que não pediu, não parte de lista e acontece quando o
+  atendimento termina. Por isso não passa por `checkOutboundAllowed`, como já não passava pela política de
+  saída, e a trava da 7b não a desliga. Quem quer cortar a transferência apaga o número no agente ou tira a opção da URA.
 - **O teto mensal** é conferido no começo de cada chamada (recebida, de saída, pelo navegador e pelo
   WhatsApp): a soma de `usage_ledger.cost_microcents` do mês corrente, no fuso da organização,
   chegou ao teto → a chamada é recusada com a mesma fala de "indisponível", `end_reason =
@@ -279,7 +295,7 @@ A lista é curta de propósito. Cada item diz se a organização sobrescreve.
 | `defaults.language` | Idioma do agente e da tela de uma organização nova | Sim, sempre | **Copiado na criação.** Mudar o padrão não mexe em quem já existe |
 | `defaults.timezone` | Fuso de uma organização nova (política de saída e relatórios) | Sim, sempre | Copiado na criação |
 | `defaults.limits` | Os limites com que uma organização nova nasce, inclusive `outbound_allowed` (padrão: `false`) | Não: limite é da administração | Copiado na criação |
-| `engine.<id>.api_key` | Chave de provedor de IA da instalação, cifrada com `encryptSecret` | Sim: a chave própria da organização vem antes | **Valor vivo**, só para as organizações em que a administração ligou "Usar a chave da instalação". Só entra se o pedido 2 for A **e** os termos de uso de cada provedor estiverem conferidos, com fonte e data, no PR da fatia. Sem resposta, vale B, e a chave fica de fora |
+| `engine.<id>.api_key` | Chave de provedor de IA da instalação, cifrada com `encryptSecret` | Sim: a chave própria da organização vem antes | **Valor vivo**, só para as organizações em que a administração ligou "Usar a chave da instalação". Pedido 2 respondido A (17/11). Só entra para o provedor cujos termos de uso estiverem conferidos, com fonte e data, no PR da fatia 8. O provedor cujos termos proibirem fica de fora |
 
 O que **não** entra, com o motivo:
 
@@ -287,7 +303,7 @@ O que **não** entra, com o motivo:
   organização. São escolhas de privacidade do cliente diante de quem liga, e não da agência.
 - O IP público, que já funciona por organização.
 
-**A chave da instalação, se o pedido 2 for A e os termos estiverem conferidos:**
+**A chave da instalação (pedido 2 respondido A), para os provedores com os termos conferidos:**
 
 - O processo de voz procura a chave da organização. Se não achar, e a organização tiver
   `organization_limits.uses_installation_engine_key = true` (coluna que entra junto com esta chave),
@@ -323,7 +339,11 @@ create table support_accesses (
   dono e não muda a própria lista de suporte.
 - A sessão passa para a organização pelo mesmo `switchOrganization`, com `support_access_id`. A
   conferência da sessão (`findSession`) passa a recusar a sessão de suporte depois de `expires_at`
-  ou de `ended_at`, e então volta a sessão para a organização de origem.
+  ou de `ended_at`, e então volta a sessão para onde o login a levaria: `last_organization_id`, se a
+  conta tem ali vínculo `member` ativo, ou o vínculo `member` ativo mais antigo. Sem nenhum, a sessão
+  é apagada.
+- O acesso acaba também quando a conta deixa de administrar a instalação ou perde o último vínculo
+  de equipe ativo.
 - Toda a tela mostra uma faixa fixa: "Você está dando suporte a <organização> até <hora>. Motivo:
   <motivo>." Com o botão "Encerrar".
 - A ação feita durante o suporte fica gravada com o `user_id` do vínculo de suporte. O nome que
@@ -339,6 +359,10 @@ create table support_accesses (
   `team/users/[id]`). A recusa mora em `requireRole`, com um parâmetro `support: false` nas rotas da
   equipe, para a rota nova da equipe nascer recusada. A fatia 5 lista as demais rotas que o papel
   `admin` alcança e marca, uma por uma, as que criam credencial ou acesso que sobrevive à sessão.
+  A mesma régua vale para a leitura: a sessão de suporte vê o estado dos canais, mas nunca recebe
+  material de pareamento nem segredo (hoje, o QR Code de `whatsapp` e `whatsapp-calls` sai como
+  `null`). Confirmação feita durante o suporte (por exemplo, o recibo do provedor do analista) fica
+  em nome do vínculo de suporte, como qualquer outra ação.
 - **O vínculo de suporte não recebe nem é escolhido.** Ele nasce sem telefone e sem WhatsApp (nada é
   copiado da conta), fica com `disabled_at` assim que o acesso acaba ou é encerrado, e toda consulta
   que escolhe pessoa da organização filtra `kind = 'member'`: o resumo por WhatsApp
@@ -529,10 +553,10 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 
 ### Fatia 3: pessoas em várias organizações e a troca
 
-- Convite para um e-mail que já tem conta: a página do convite pede a senha dessa conta, e não uma
-  senha nova. A resposta não diz se a conta existe antes de a pessoa abrir um convite válido.
-- Pendente de decisão do dono: a página do convite. Até a resposta, o comportamento fica como está,
-  e nenhuma fatia muda isso antes dela.
+- Convite para um e-mail que já tem conta: o aceite usa a senha que a conta já tem, e não cria uma
+  senha nova, sem que a página mude antes do envio.
+- Decidido em 18/11: a página do convite não muda conforme o e-mail até a pessoa enviar a senha.
+- Enquanto o convite não é aceito, a recusa da senha é a mesma para todo e-mail.
 - Seletor de organização no topo, só para quem tem mais de um vínculo ativo. `switchOrganization`.
 - Login volta para `last_organization_id`, ou para o vínculo mais antigo.
 - Desativar o vínculo numa organização não mexe nos outros. Trocar a senha encerra as sessões da
@@ -551,6 +575,12 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 - **Aceite:** o item 2 da seção 4, com a recusa vinda da operadora e do WhatsApp, e uma tarefa
   agendada que não roda.
 - **Sensível:** telefonia e fila. Passa pelo dono.
+- **Dividida em duas** (17/11), porque não cabia numa revisão de uma sentada, e porque o botão não
+  pode existir antes de todo caminho obedecer:
+  - **4a (#408, na `main`):** todo caminho obedece a `suspended_at`, sem nada visível.
+  - **4b:** as ações de suspender e reativar na área da instalação, a transação de 3.3 (com o
+    cancelamento das tarefas e as rotinas de guarda que continuam), a confirmação nomeando a
+    organização e a tela "Esta organização está suspensa".
 
 ### Fatia 5: entrar como e o rastro
 
@@ -586,13 +616,17 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
 ### Fatia 8: configurações gerais
 
 - `defaults.language` e `defaults.timezone`, copiados na criação.
-- **Só se o pedido 2 for A e os termos de uso de cada provedor estiverem conferidos**, com fonte e
-  data no PR: a chave de IA da instalação, `uses_installation_engine_key`, a leitura no processo de
-  voz e a frase na tela de motores. Sem isso (o padrão sem resposta é B), a fatia 8 entrega só o
-  idioma e o fuso.
+- **A chave de IA da instalação** (pedido 2 respondido A em 17/11): `uses_installation_engine_key`,
+  a leitura no processo de voz e a frase na tela de motores. **Antes do código da chave**, o PR da
+  fatia confere os termos de uso de cada provedor do catálogo sobre uma chave servir a clientes de
+  terceiros, com fonte e data. O provedor cujos termos proibirem fica fora da chave da instalação. O
+  guia diz também que conferir os termos do próprio contrato continua sendo do operador.
 - **Aceite:** o idioma e o fuso de uma organização nova vêm do padrão, e mudar o padrão não mexe na
   que já existe. Com a chave: uma chamada de uma organização sem chave, com a da instalação ligada,
-  grava custo no `usage_ledger` dela e respeita o teto dela.
+  grava custo no `usage_ledger` dela e respeita o teto dela. A chave própria da organização vem
+  antes da chave da instalação. O PR traz a conferência dos termos por provedor, com fonte e data,
+  e um provedor fora da lista não usa a chave da instalação. O guia tem a frase sobre os termos, e a
+  tela de motores diz qual chave a chamada usa.
 
 ### Fatia 9: excluir organização
 
@@ -612,11 +646,18 @@ fatias 1 e 2 mudam login e sessão, e todas as outras dependem delas.
   outra organização continua com as mesmas contagens.
 - **Sensível:** apaga dado. Passa pelo dono.
 
-### Fatia 10: posse de endereço por IP (depende do pedido 3)
+### Fatia 10: o aviso de faixa sobreposta (pedido 3 respondido A)
 
-Só entra se o pedido 3 for B, e depois do #343 mesclado (3.10). Cobre a posse da faixa inteira de
-cada linha por IP (`host` e `match_extra`), e não só do `host`. Com A, a 0007 continua como está, e só
-a frase de custo da 0007 é atualizada, na decisão 0021.
+O pedido 3 foi respondido A em 17/11: não existe posse de endereço pela administração, e a 0007
+continua como está. A frase de custo da 0007 foi atualizada na 0021. O que resta é o aviso **antes
+de salvar**, com confirmação, quando a linha por IP de uma organização tem uma faixa (`host` e
+`match_extra`) que se sobrepõe à de outra organização da instalação. O #343 já está na `main`.
+
+- **Aceite:** com duas organizações, salvar uma linha por IP cuja faixa cruza a da outra mostra o
+  aviso e pede confirmação. A tela não diz o nome nem o endereço da outra organização: diz só que
+  existe uma linha de outra organização na mesma faixa, e que as duas param.
+- **Fracasso mesmo funcionando:** o aviso vaza dado da outra organização; o aviso aparece depois de
+  salvar.
 
 ## 6. O que fica de fora
 
@@ -631,6 +672,10 @@ a frase de custo da 0007 é atualizada, na decisão 0021.
 - Qualquer limite que aumente o que uma organização pode discar.
 
 ## 7. Pedidos de decisão
+
+**Respondidos em 17/11/2026, às 17:11Z** (DESA-89): "Pode seguir com recomendação". Valem a 0021
+aceita (pedido 0), a cobrança fora (pedido 1, A), a chave da agência servindo aos clientes (pedido 2,
+A) e a 0007 como está (pedido 3, A). O texto dos pedidos fica abaixo como registro.
 
 Os três vão para o lote do Líder, no formato do `GOVERNANCE.md`. Enquanto não houver resposta, as
 fatias 1 a 7 e a 9 andam: nenhuma depende deles.
@@ -721,8 +766,10 @@ largo.
   rota usar `CONFIG_ROLES` onde deveria pedir dono. As rotas da equipe já estão recusadas (3.6); a
   fatia 5 lista as outras que o papel `admin` alcança e confere uma por uma.
 - **A rota pública de saúde** soma as organizações (0006). Com organização suspensa, a soma pode
-  dizer "linha caída" por causa de uma linha que está de pé, mas suspensa. A fatia 4 decide se a
-  organização suspensa entra na soma, e diz na tela.
+  dizer "linha caída" por causa de uma linha que está de pé, mas suspensa. **Decidido na abertura da
+  fatia 4b:** a suspensão não muda a linha da operadora na saúde. A linha da organização suspensa
+  continua registrada (3.3), e a saúde mede o registro. Quem quer saber se a organização atende olha
+  o estado dela na área da instalação.
 - **A cópia de `users.email`** pode divergir de `accounts.email` se alguém escrever fora da função de
   `packages/core`. Hoje não existe troca de e-mail na tela; quando existir, nasce nessa função.
 

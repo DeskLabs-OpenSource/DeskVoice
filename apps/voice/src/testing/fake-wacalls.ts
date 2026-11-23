@@ -81,7 +81,9 @@ export async function startFakeWacalls() {
   const sessions = new Map<string, FakeSession>();
   const requests: Array<{ method: string; path: string; query: string; authorization: string | undefined }> = [];
   const streams = new Set<ServerResponse>();
-  const state = { down: false, nextId: 1, refuseAccept: false };
+  // `refusePairing`: a próxima sessão fica em "connecting" sem QR, como quando o WhatsApp recusa o cliente.
+  // `hangMs`: cada pedido espera isso antes de responder, para o cliente estourar o limite dele.
+  const state = { down: false, nextId: 1, refuseAccept: false, refusePairing: false, hangMs: 0 };
   const calls = new Map<string, FakeCall>();
   let nextCall = 1;
 
@@ -117,6 +119,7 @@ export async function startFakeWacalls() {
       const url = new URL(request.url ?? "/", "http://wacalls");
       const method = request.method ?? "GET";
       requests.push({ method, path: url.pathname, query: url.search, authorization: request.headers.authorization });
+      if (state.hangMs > 0) await new Promise((resolve) => setTimeout(resolve, state.hangMs));
       if (state.down) return json(response, 503, { error: "down" });
       if (url.pathname === "/healthz") return json(response, 200, { ok: true });
       if (request.headers.authorization !== `Bearer ${WACALLS_TOKEN}`) return json(response, 401, { error: "unauthorized" });
@@ -132,9 +135,9 @@ export async function startFakeWacalls() {
       }
       if (method === "GET" && url.pathname === "/api/sessions") return json(response, 200, { sessions: listOf() });
       if (method === "POST" && url.pathname === "/api/sessions") {
-        const session: FakeSession = { id: `s${state.nextId++}`, name: body?.name ?? "", jid: "", state: "qr", paired: false, qrCount: 0 };
+        const session: FakeSession = { id: `s${state.nextId++}`, name: body?.name ?? "", jid: "", state: state.refusePairing ? "connecting" : "qr", paired: false, qrCount: 0 };
         sessions.set(session.id, session);
-        qr(session);
+        if (!state.refusePairing) qr(session);
         // O id só chega depois do primeiro código, como no WaCalls de verdade.
         await new Promise((resolve) => setImmediate(resolve));
         return json(response, 201, { id: session.id, name: session.name });

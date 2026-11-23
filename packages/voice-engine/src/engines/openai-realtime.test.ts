@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pcm16ToUlaw } from "../resample";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
 import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
-import type { ClassifyOptions, KeyCheckOptions, VoiceSessionConfig } from "../types";
+import type { ClassifyOptions, KeyCheckOptions, VoiceSession, VoiceSessionConfig } from "../types";
 import { estimateCostCents } from "../pricing";
 import engine, { usageOf } from "./openai-realtime";
 
@@ -156,6 +156,20 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     expect(await fake.waitFor(ofType("response.create"))).toEqual({ type: "response.create", response: {} });
   });
 
+  it("speech_stopped vira callerTurnEnded com source vad, uma vez; speech_started não", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    const ended: Array<{ source: string }> = [];
+    session.on("callerTurnEnded", (signal) => ended.push(signal));
+    const interrupted = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started", audio_start_ms: 100, item_id: "i1" });
+    await interrupted;
+    expect(ended).toEqual([]);
+    const stopped = nextEvent(session, "callerTurnEnded");
+    fake.send({ type: "input_audio_buffer.speech_stopped", audio_end_ms: 900, item_id: "i1" });
+    expect((await stopped)[0]).toEqual({ source: "vad" });
+    expect(ended).toEqual([{ source: "vad" }]);
+  });
+
   it("say() durante uma resposta em curso espera o response.done", async () => {
     const { session } = await openSession();
     await fake.waitFor(ofType("response.create")); // saudação
@@ -261,6 +275,81 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     await expect(interrupted).resolves.toEqual([]);
   });
 
+  describe("corte da fala interrompida (played)", () => {
+    // `ms` de fala em μ-law (8 bytes por ms), no formato do provedor.
+    const speech = (itemId: string, ms: number) => ({
+      type: "response.output_audio.delta",
+      response_id: "r1",
+      item_id: itemId,
+      output_index: 0,
+      content_index: 0,
+      delta: Buffer.alloc(ms * 8, 0xff).toString("base64"),
+    });
+    // Recebe a fala e espera o último pedaço virar `audio`: o motor já contou tudo.
+    const emit = async (session: VoiceSession, ...deltas: ReturnType<typeof speech>[]) => {
+      let left = deltas.length;
+      const heard = new Promise<void>((resolve) => session.on("audio", () => --left === 0 && resolve()));
+      for (const delta of deltas) fake.send(delta);
+      await heard;
+    };
+    // A primeira mensagem de corte ou de marcador: sem corte, o marcador vem primeiro.
+    const nextCut = async (session: VoiceSession) => {
+      session.say("marcador");
+      return fake.waitFor((m) => m.type === "conversation.item.truncate" || m.type === "response.create");
+    };
+
+    it("2 s emitidos e 700 ms tocados: corta o item em 700 ms", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      await emit(session, speech("msg_1", 500), speech("msg_1", 1000), speech("msg_1", 500));
+      session.played?.(700);
+      expect(await nextCut(session)).toEqual({ type: "conversation.item.truncate", item_id: "msg_1", content_index: 0, audio_end_ms: 700 });
+    });
+
+    it("dois itens seguidos: o corte cai no segundo, contado do início dele", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      await emit(session, speech("msg_1", 1200), speech("msg_2", 800), speech("msg_2", 400));
+      session.played?.(1500);
+      expect(await nextCut(session)).toEqual({ type: "conversation.item.truncate", item_id: "msg_2", content_index: 0, audio_end_ms: 300 });
+    });
+
+    it("dois itens emitidos e a interrupção no meio do primeiro: o corte cai no primeiro", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      await emit(session, speech("msg_1", 1000), speech("msg_2", 1000));
+      session.played?.(400);
+      expect(await nextCut(session)).toEqual({ type: "conversation.item.truncate", item_id: "msg_1", content_index: 0, audio_end_ms: 400 });
+    });
+
+    it("item que começa num ms fracionário: audio_end_ms sai inteiro, arredondado para baixo", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      // 101 bytes são 12,625 ms: o segundo item começa no ms 12,625 do emitido.
+      const odd = { ...speech("msg_1", 0), delta: Buffer.alloc(101, 0xff).toString("base64") };
+      await emit(session, odd, speech("msg_2", 1000));
+      session.played?.(500);
+      const cut = await nextCut(session);
+      expect(cut).toEqual({ type: "conversation.item.truncate", item_id: "msg_2", content_index: 0, audio_end_ms: 487 });
+      expect(Number.isInteger((cut as { audio_end_ms: number }).audio_end_ms)).toBe(true);
+    });
+
+    it("item que já tocou inteiro não é cortado", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      await emit(session, speech("msg_1", 1000));
+      session.played?.(1000);
+      session.played?.(1400);
+      expect(await nextCut(session)).toMatchObject({ type: "response.create" });
+    });
+
+    it("depois de um corte, o emitido volta a ser o tocado: o item seguinte conta dali", async () => {
+      const { session } = await openSession({ greeting: undefined });
+      await emit(session, speech("msg_1", 2000));
+      session.played?.(700);
+      expect(await fake.waitFor(ofType("conversation.item.truncate"))).toMatchObject({ item_id: "msg_1", audio_end_ms: 700 });
+      // A ponte descartou 1300 ms; a próxima fala começa no ms 700 do que tocou.
+      await emit(session, speech("msg_2", 1000));
+      session.played?.(1100);
+      expect(await nextCut(session)).toEqual({ type: "conversation.item.truncate", item_id: "msg_2", content_index: 0, audio_end_ms: 400 });
+    });
+  });
+
   it("sinal de fala de quem ligou: início de fala vira { words: false } e transcrição parcial com texto vira { words: true }", async () => {
     const { session } = await openSession({ greeting: undefined });
     const signals: Array<{ words: boolean }> = [];
@@ -292,7 +381,8 @@ describe("openai-realtime (contrato com servidor falso)", () => {
 
   it("closeCallerTurn fecha o áudio de quem ligou num item e pede a resposta", async () => {
     const { session } = await openSession({ greeting: undefined });
-    session.closeCallerTurn();
+    // Agiu: a sessão tira o turno da latência por turno.
+    expect(session.closeCallerTurn()).toBe(true);
     const commit = await fake.waitFor((message) => message.type === "input_audio_buffer.commit" || message.type === "response.create");
     expect(commit).toEqual({ type: "input_audio_buffer.commit" });
     expect(await fake.waitFor(ofType("response.create"))).toEqual({ type: "response.create", response: {} });
@@ -305,7 +395,8 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     const interrupted = nextEvent(session, "interrupted");
     fake.send({ type: "input_audio_buffer.speech_started" });
     await interrupted; // o motor já processou o response.created
-    session.closeCallerTurn();
+    // Não agiu: a resposta em curso não foi forçada.
+    expect(session.closeCallerTurn()).toBe(false);
     fake.send({ type: "response.done", response: {} });
     const done = nextEvent(session, "interrupted");
     fake.send({ type: "input_audio_buffer.speech_started" });
@@ -322,7 +413,8 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     const interrupted = nextEvent(session, "interrupted");
     fake.send({ type: "input_audio_buffer.speech_started" });
     await interrupted;
-    session.closeCallerTurn();
+    // Não agiu: o servidor só está lento, e a resposta que vier conta na latência por turno.
+    expect(session.closeCallerTurn()).toBe(false);
     session.say("marcador");
     const first = await fake.waitFor((m) => m.type === "input_audio_buffer.commit" || m.type === "response.create");
     expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining("marcador") } });
@@ -403,7 +495,7 @@ describe("openai-realtime: teste da chave (contrato com servidor HTTP falso)", (
     ["429 sem crédito", "no_credit", { status: 429, body: { error: { code: "credit_balance_exhausted", type: "insufficient_quota" } } }],
     ["429 com teto de gasto", "no_credit", { status: 429, body: { error: { code: "project_spend_limit_exceeded" } } }],
     ["429 de cota (só o tipo)", "no_credit", { status: 429, body: { error: { code: null, type: "insufficient_quota" } } }],
-    ["500", "unreachable", { status: 500, body: { error: { code: "server_error" } } }],
+    ["500", "provider_error", { status: 500, body: { error: { code: "server_error" } } }],
     ["400", "unexpected_response", { status: 400, body: { error: { code: "invalid_value" } } }],
     ["200 fora do formato", "unexpected_response", { status: 200, body: { id: "x", object: "list" } }],
   ] as const)("%s vira %s", async (_, result, reply) => {

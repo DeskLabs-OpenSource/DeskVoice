@@ -3,7 +3,7 @@ import { ApiError, notFound } from "../../../../../../server/context";
 import { handleInstallation } from "../../handle";
 
 /** Tira uma conta da lista. A última pessoa nunca sai. */
-export const DELETE = handleInstallation({}, async ({ params, accountId, deps }) => {
+export const DELETE = handleInstallation({ support: false }, async ({ params, accountId, deps }) => {
   const result = await revokeInstallationAdmin(deps.db, accountId, params.id ?? "", deps.clock.now());
   if (result.ok) return null;
   if (result.reason === "not_found") throw notFound();

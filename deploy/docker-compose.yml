@@ -2,8 +2,8 @@
 #
 # Quem publica porta no host: só o Caddy (a entrada única do painel e da voz do navegador) e o
 # Asterisk (SIP e RTP, UDP). Postgres, painel, voz, rotinas, o WAHA (WhatsApp), o WaCalls (ligação
-# pelo WhatsApp) e a ARI do Asterisk ficam na rede interna, e painel e voz NUNCA publicam porta:
-# tudo o que é web entra pelo Caddy.
+# pelo WhatsApp), o Laya (filtro local) e a ARI do Asterisk ficam na rede interna, e painel e voz
+# NUNCA publicam porta: tudo o que é web entra pelo Caddy.
 #
 # As portas do Caddy não estão neste arquivo. O instalador as grava em
 # `docker-compose.override.yml`, porque dependem da máquina: 80/443 quando estão livres, ou
@@ -40,7 +40,7 @@ services:
   # hoje. Trocar a versão de correção do Postgres 17 não pede migração de dados; a versão maior
   # não se troca sem plano.
   postgres:
-    image: postgres:17.11-alpine@sha256:e5d2edd28b1f8d40a0a6c0c9cdc545b19b56a0d5d88f94bc11a97d970d4700d0
+    image: postgres:17.12-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
     restart: unless-stopped
     environment:
       POSTGRES_USER: deskvoice
@@ -205,9 +205,11 @@ services:
   # (DESKVOICE_WHATSAPP_CALLS=on). Memória e disco com o serviço de pé ainda NÃO foram medidos.
   wacalls:
     profiles: ["whatsapp-calls"]
-    # Imagem do fork DeskLabs-OpenSource/WaCalls: d16a076 dos autores mais o conserto do caller_pn
-    # (9507c56, proposto em JotaDev66/WaCalls#69), até eles publicarem o conserto. O resto é igual.
-    image: ghcr.io/desklabs-opensource/wacalls@sha256:74612a1d175bca3eed00cc5a6958fc7c0d593f44b8f8cbe01e59b228ba867508
+    # Imagem do fork DeskLabs-OpenSource/WaCalls, que é onde o WaCalls é mantido para o DeskVoice e o
+    # DeskcommCRM: os autores originais não aceitam mais PRs. a6f66b9 = d16a076 dos autores, o
+    # conserto do caller_pn (9507c56), o whatsmeow de 16/11/2026 (o WhatsApp recusava o de julho com
+    # "Client outdated (405)") e a falha de pareamento visível em vez de "connecting" para sempre.
+    image: ghcr.io/desklabs-opensource/wacalls@sha256:03f9e47fadc1afa909f512bbdda0fa4091d4646310f9a76ce3c752f05eafd1ff
     restart: unless-stopped
     # Teto, e não medição: é o que o DeskcommCRM usa com a mesma imagem. Sem teto, um serviço que
     # cresce leva a máquina inteira; com ele, cai só quem estourou e o `restart` o traz de volta.
@@ -231,6 +233,44 @@ services:
     networks: [internal]
     logging: *logging
 
+  # O Laya (Convai Innovations, pesos abertos, Apache-2.0): o modelo de decisão que roda nesta
+  # máquina, como opção do filtro da fala (desenho R12, decisão 3 e fatia 8a). Imagem do próprio
+  # projeto (deploy/laya/), com os pesos dentro dela, numa revisão fixa conferida por resumo: o
+  # contêiner não baixa nada ao subir.
+  #
+  # Só na rede interna, sem porta publicada: quem fala com ele é o processo de voz, em
+  # http://laya:8000 (packages/voice-engine/src/deciders/laya.ts). Não lê o app.env nem recebe chave.
+  #
+  # Fica num perfil: NÃO sobe nem é baixado por padrão, e fica fora de APP_SERVICES
+  # (install/_common.sh), que é a lista que a atualização baixa. Quem já instalou não é surpreendido.
+  laya:
+    profiles: ["laya"]
+    image: ${DESKVOICE_IMAGE_PREFIX:-localhost}/deskvoice-laya:${DESKVOICE_VERSION:-dev}
+    build: { context: ./laya, target: laya }
+    restart: unless-stopped
+    # Teto, e não reserva. A bancada mediu 2,3 GB de memória máxima do processo com três chamadas
+    # simultâneas (rodada 3, 15/11/2026, fora do contêiner). Estourar derruba só o Laya, e a chamada
+    # segue sem filtro.
+    mem_limit: 3g
+    # O teto de CPU existe para o Laya não tirar processador do áudio das ligações: a rodada 3 mediu
+    # 2,07 núcleos com uma chamada e 2,85 com três, numa VPS de 4. A medida da fatia 8a (18/11/2026)
+    # fixou o padrão em 3: com teto 3 passou em todas as réguas; com 2, só 1% das passadas chegou a
+    # tempo com três chamadas.
+    cpus: "${LAYA_CPUS:-3}"
+    environment:
+      # As linhas de cálculo do torch acompanham o teto (arredondado para baixo): mais linhas que
+      # núcleos só disputariam a mesma fatia de CPU.
+      LAYA_THREADS: "${LAYA_CPUS:-3}"
+    healthcheck:
+      # 200 só depois de o modelo carregar. A imagem traz o Python.
+      test: ["CMD", "python", "-I", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    networks: [internal]
+    logging: *logging
+
   # Asterisk é peça de terceiros: referenciada, nunca republicada. Fixada por digest
   # porque neste registro nem as tags de versão são imutáveis (medido no DeskcommCRM).
   asterisk:
@@ -250,6 +290,7 @@ services:
       - ./asterisk/generated/ari.conf:/etc/asterisk/ari.conf:ro
       - ./asterisk/generated/rtp.conf:/etc/asterisk/rtp.conf:ro
       - ./asterisk/generated/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./asterisk/generated/modules.conf:/etc/asterisk/modules.conf:ro
       - asterisk-generated:/etc/asterisk/generated
     healthcheck:
       test: ["CMD", "asterisk", "-rx", "core show uptime"]
@@ -262,7 +303,7 @@ services:
   # Sobe sempre, em todo modo de instalação. Onde escuta (CADDY_SITE), em quem confia
   # (CADDY_TRUSTED_PROXIES) e as portas publicadas vêm de docker-compose.override.yml.
   caddy:
-    image: caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     restart: unless-stopped
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

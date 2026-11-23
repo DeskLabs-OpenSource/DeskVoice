@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { DEFAULT_RECORDINGS_DIR, createDb, hashToken, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
+import { DEFAULT_RECORDINGS_DIR, ORGANIZATION_SUSPENDED, createDb, endSupportAccess, hashToken, supportAllowedSql, loadConfig, systemClock, verifyPassword, withOrg, withSystem, type Clock, type Db, type OrgQuery } from "@deskvoice/core";
 import { wahaFromEnv, type WahaOptions } from "@deskvoice/tools/waha";
 import type { z, ZodType } from "zod";
 import { trustedProxyHops } from "./client-ip";
@@ -13,6 +13,23 @@ export interface Session {
   role: Role;
   name: string;
   email: string;
+  /** A organização da sessão está suspensa (seção 3.3 do desenho do R8). */
+  suspended: boolean;
+  /**
+   * A sessão é de um vínculo de suporte da instalação (`users.kind = 'support'`, seção 3.6 do
+   * desenho do R8). Ela não convida, não mexe na equipe nem na conta e não cria nada que dure mais
+   * que ela: a rota que poderia diz `support: false` (`requireRole`), e a tabela
+   * `fences/support-session-routes.ts` diz qual rota é qual.
+   */
+  support: boolean;
+  /** O acesso de suporte em que a sessão está (`support_accesses`), ou `null` fora do suporte. */
+  supportAccessId: string | null;
+}
+
+/** Quem está numa organização suspensa vê isto, e mais nada (seção 3.3 do desenho do R8). */
+export interface SuspendedOrganization {
+  name: string;
+  reason: string | null;
 }
 
 export interface ServerDeps {
@@ -80,6 +97,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Os números da recusa, para a tela montar a frase na língua dela (o limite e a contagem). */
+    readonly detail?: Record<string, string | number>,
   ) {
     super(message);
   }
@@ -99,8 +118,9 @@ function success(result: unknown): Response {
 }
 
 export function failure(error: unknown): Response {
-  const send = (status: number, code: string, message: string): Response => Response.json({ ok: false, error: { code, message } }, { status });
-  if (error instanceof ApiError) return send(error.status, error.code, error.message);
+  const send = (status: number, code: string, message: string, detail?: Record<string, string | number>): Response =>
+    Response.json({ ok: false, error: detail ? { code, message, detail } : { code, message } }, { status });
+  if (error instanceof ApiError) return send(error.status, error.code, error.message, error.detail);
   const pgCode = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
   if (pgCode === "23505") return send(409, "already_exists", "A record with these values already exists.");
   // Chave estrangeira composta com a organização: apontar para linha de outra organização cai aqui.
@@ -157,29 +177,84 @@ export async function createSession(q: OrgQuery, user: { id: string; organizatio
 /**
  * A sessão é achada pelo hash do token antes de se saber a organização: por isso `withSystem`.
  * Conferida no banco a cada requisição: sessão de pessoa desativada deixa de valer na hora.
+ *
+ * A sessão de suporte da instalação (seção 3.6 do desenho do R8) só vale com o acesso dela vivo, e
+ * a mesma consulta confere: o vínculo `support` sem acesso, ou com o acesso encerrado, não é
+ * sessão. Com o prazo vencido, encerra o acesso (`endSupportAccess`, `expired`) e devolve `null`:
+ * a sessão volta para a organização da conta, e a próxima requisição já cai lá. Com a conta fora
+ * de `supportAllowedSql` (não administra mais a instalação, ou não tem vínculo `member` ativo),
+ * faz o mesmo, com `revoked`.
  */
 export async function findSession(deps: ServerDeps, token: string | undefined): Promise<Session | null> {
   if (!token) return null;
-  return withSystem(deps.db, (q) =>
-    q.one<Session>(
-      `select s.id, s.user_id as "userId", s.organization_id as "organizationId", u.role, u.name, u.email
+  const now = deps.clock.now();
+  const found = await withSystem(deps.db, (q) =>
+    q.one<Session & { expired: boolean; allowed: boolean }>(
+      `select s.id, s.user_id as "userId", s.organization_id as "organizationId", u.role, u.name, u.email, o.suspended_at is not null as suspended,
+              u.kind = 'support' as support, s.support_access_id as "supportAccessId", coalesce(sa.expires_at <= $2, false) as expired,
+              u.kind = 'member' or ${supportAllowedSql("s.account_id")} as allowed
          from sessions s join users u on u.id = s.user_id and u.organization_id = s.organization_id
-        where s.token_hash = $1 and s.expires_at > $2 and u.disabled_at is null`,
-      [hashToken(token), deps.clock.now()],
+         join organizations o on o.id = s.organization_id
+         left join support_accesses sa on sa.organization_id = s.organization_id and sa.id = s.support_access_id and sa.user_id = s.user_id and sa.ended_at is null
+        where s.token_hash = $1 and s.expires_at > $2 and u.disabled_at is null
+          and ((u.kind = 'member' and s.support_access_id is null) or (u.kind = 'support' and sa.id is not null))`,
+      [hashToken(token), now],
     ),
   );
-}
-
-export async function requireSession(request: Request, deps: ServerDeps = serverDeps()): Promise<Session> {
-  const session = await findSession(deps, readCookie(request, SESSION_COOKIE));
-  if (!session) throw new ApiError(401, "unauthenticated", "Sign in to continue.");
+  if (!found) return null;
+  const { expired, allowed, ...session } = found;
+  if (expired) {
+    await endSupportAccess(deps.db, session.supportAccessId ?? "", now, "expired");
+    return null;
+  }
+  // A conta deixou de administrar a instalação, ou perdeu o último vínculo `member` ativo, por um
+  // caminho que não encerrou o acesso: ele acaba aqui, como `revoked`, sem quem.
+  if (!allowed) {
+    await endSupportAccess(deps.db, session.supportAccessId ?? "", now, "revoked");
+    return null;
+  }
   return session;
 }
 
-export const CONFIG_ROLES: readonly Role[] = ["owner", "admin"];
+/**
+ * A sessão de quem pede, ou 401. Com a organização da sessão suspensa, responde 409
+ * `organization_suspended` (seção 3.3 do desenho do R8), a menos que a rota diga
+ * `allowSuspended`: só as da conta (quem sou, sair, senha, trocar de organização) e as da área da
+ * instalação, para quem administra conseguir reativar estando nela. Rota nova nasce fechada.
+ */
+export async function requireSession(request: Request, deps: ServerDeps = serverDeps(), options: { allowSuspended?: boolean } = {}): Promise<Session> {
+  const session = await findSession(deps, readCookie(request, SESSION_COOKIE));
+  if (!session) throw new ApiError(401, "unauthenticated", "Sign in to continue.");
+  if (session.suspended && !options.allowSuspended) throw new ApiError(409, ORGANIZATION_SUSPENDED, "This organization is suspended.");
+  return session;
+}
 
-/** Único lugar que decide o que cada papel pode. Sem `allowed`, exige quem altera configuração. */
-export function requireRole(session: Session, allowed: readonly Role[] = CONFIG_ROLES): void {
+/** O nome e o motivo da organização suspensa da sessão, para a tela de suspensa; `null` se ela está ativa. */
+export function suspendedOrganization(deps: ServerDeps, session: Session): Promise<SuspendedOrganization | null> {
+  if (!session.suspended) return Promise.resolve(null);
+  return withOrg(deps.db, session.organizationId, (q) =>
+    q.one<SuspendedOrganization>("select name, suspended_reason as reason from organizations where id = $1 and suspended_at is not null", [session.organizationId]),
+  );
+}
+
+export const CONFIG_ROLES: readonly Role[] = ["owner", "admin"];
+export const ALL_ROLES: readonly Role[] = ["owner", "admin", "operator"];
+
+export const SUPPORT_SESSION_FORBIDDEN = "support_session_forbidden";
+
+/** O que a rota diz da sessão de suporte da instalação: `false` = ela não faz isto. */
+export interface SupportOption {
+  support?: false;
+}
+
+/**
+ * Único lugar que decide o que cada papel pode. Sem `allowed`, exige quem altera configuração.
+ * Com `support: false`, a sessão de suporte da instalação recebe 403 `support_session_forbidden`
+ * antes de o papel ser conferido: ela entra como `admin`, mas não convida, não mexe na equipe nem
+ * na conta e não cria acesso que sobreviva a ela (seção 3.6 do desenho do R8).
+ */
+export function requireRole(session: Session, allowed: readonly Role[] = CONFIG_ROLES, options: SupportOption = {}): void {
+  if (options.support === false && session.support) throw new ApiError(403, SUPPORT_SESSION_FORBIDDEN, "A support session cannot do this.");
   if (!allowed.includes(session.role)) throw new ApiError(403, "forbidden", "Your role cannot change this. Ask an owner or admin.");
 }
 
@@ -203,10 +278,12 @@ export interface AfterArgs<B> extends Base<B> {
   org<T>(fn: (q: OrgQuery) => Promise<T>): Promise<T>;
 }
 
-interface HandleOptions<S extends ZodType, R> {
+interface HandleOptions<S extends ZodType, R> extends SupportOption {
   body?: S;
   /** Rota que altera configuração: só `owner` e `admin`. */
   configure?: boolean;
+  /** Rota da conta, que vale mesmo com a organização da sessão suspensa (`requireSession`). */
+  allowSuspended?: boolean;
   /**
    * Roda antes de abrir a transação, já com a sessão, o papel e a entrada conferidos. É onde cabe
    * uma consulta de rede de que a rota depende: destino lento não segura conexão do banco.
@@ -227,8 +304,10 @@ export function handle<S extends ZodType = ZodType<undefined>, R = unknown>(
   return async (request, context) => {
     try {
       const deps = serverDeps();
-      const session = await requireSession(request, deps);
-      if (options.configure) requireRole(session);
+      const session = await requireSession(request, deps, { allowSuspended: options.allowSuspended === true });
+      // A recusa da sessão de suporte vem antes da entrada, do `before` e da transação: nada é
+      // gravado nem chamado lá fora.
+      if (options.configure || options.support === false) requireRole(session, options.configure ? CONFIG_ROLES : ALL_ROLES, { support: options.support });
       const params = (await context.params) ?? {};
       // Id malformado nunca chega ao banco: para quem chama, é só um registro que não existe.
       if (params.id !== undefined && !UUID.test(params.id)) throw new ApiError(404, "not_found", "Not found.");
@@ -243,15 +322,24 @@ export function handle<S extends ZodType = ZodType<undefined>, R = unknown>(
   };
 }
 
-/** Rota pública (login, saúde): mesma validação e mesmo envelope, sem sessão. */
+/**
+ * Rota pública (login, saúde): mesma validação e mesmo envelope, sem sessão. Com `support: false`,
+ * quem chega com uma sessão de suporte da instalação no cookie recebe 403 antes de qualquer coisa;
+ * sem sessão, ou com a de um `member`, a rota segue como antes.
+ */
 export function handlePublic<S extends ZodType = ZodType<undefined>>(
-  options: { body?: S },
+  options: { body?: S } & SupportOption,
   fn: (args: { request: Request; body: z.output<S>; deps: ServerDeps; params: Record<string, string> }) => Promise<unknown>,
 ): (request: Request, context?: RouteContext) => Promise<Response> {
   return async (request, context) => {
     try {
+      const deps = serverDeps();
+      if (options.support === false) {
+        const session = await findSession(deps, readCookie(request, SESSION_COOKIE));
+        if (session) requireRole(session, ALL_ROLES, { support: false });
+      }
       const params = (await context?.params) ?? {};
-      return success(await fn({ request, body: await parseBody(request, options.body), deps: serverDeps(), params }));
+      return success(await fn({ request, body: await parseBody(request, options.body), deps, params }));
     } catch (error) {
       return failure(error);
     }

@@ -179,10 +179,10 @@ describe("invites", () => {
     expect(await stored(org, "select token_hash from invites where id = $1", [created.id])).toEqual({ token_hash: hashToken(created.token) });
 
     const shown = await call(readInvite, { params: { token: created.token } });
-    expect(shown.data).toEqual({ organizationName: "Clínica Convite", email: created.email, name: "Pessoa Convidada", role: "admin", existingAccount: false });
+    expect(shown.data).toEqual({ organizationName: "Clínica Convite", email: created.email, name: "Pessoa Convidada", role: "admin" });
 
     const short = await call(acceptInvite, { method: "POST", params: { token: created.token }, body: { name: "Bia", password: "short" } });
-    expect(short.code).toBe("validation_error");
+    expect([short.status, short.code]).toEqual([401, "invite_password_refused"]);
 
     const accepted = await call(acceptInvite, { method: "POST", params: { token: created.token }, body: { name: "Bia Lima", password: "a-long-enough-password" } });
     expect(accepted.data).toEqual({ name: "Bia Lima", email: created.email, role: "admin" });

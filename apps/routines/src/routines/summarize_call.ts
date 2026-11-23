@@ -11,6 +11,7 @@ import {
   transcriptionEnabledOf,
 } from "@deskvoice/voice-engine";
 import type { Routine } from "../types";
+import { enqueueCallReports } from "./deliver_webhook";
 import { hasSpeech } from "./transcribe_call";
 
 export interface CallDigest {
@@ -56,11 +57,11 @@ export function extractiveSummary(digest: CallDigest): string {
   return parts.join("\n");
 }
 
-/** Quem recebe o resumo: o dono, ou o primeiro admin, com WhatsApp cadastrado. */
+/** Quem recebe o resumo: o dono, ou o primeiro admin, com WhatsApp cadastrado. Nunca o vínculo de suporte. */
 async function ownerToNotify(q: OrgQuery): Promise<string | null> {
   const row = await q.one<{ whatsapp_e164: string }>(
     `select whatsapp_e164 from users
-      where role in ('owner', 'admin') and whatsapp_e164 is not null
+      where kind = 'member' and role in ('owner', 'admin') and whatsapp_e164 is not null
       order by case when role = 'owner' then 0 else 1 end, created_at
       limit 1`,
   );
@@ -146,7 +147,9 @@ const routine: Routine = {
       // pronto. As duas desligadas (de fábrica), nem entra na fila.
       const outcomeOn = outcomeEnabledOf(valueOf(OUTCOME_SETTING));
       const analysisOn = analysisEnabledOf(valueOf(ANALYSIS_SETTING));
+      // O relatório aos webhooks que o pedem sai depois da leitura; sem leitura, sai daqui.
       if (outcomeOn || analysisOn) await enqueueTask(q, { kind: "classify_call_outcome", payload: {}, callId });
+      else await enqueueCallReports(q, callId, deps.clock.now());
     });
   },
 };

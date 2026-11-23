@@ -29,6 +29,7 @@ interface Saved {
 // e `check: null` diz que o limite de testes adiou o teste.
 export const PUT = handle(
   {
+    support: false,
     body: z.object({ value: z.unknown() }),
     configure: true,
     after: async ({ test, ...saved }: Saved, { deps, session, org }) =>

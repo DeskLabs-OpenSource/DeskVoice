@@ -40,13 +40,15 @@ export const GET = handle(
   async ({ q, deps, session }) => {
     await expireStaleUpdates(deps);
     // A saída do atualizador e a falha do agente citam caminhos e peças do servidor: só quem
-    // administra a instalação lê. Os outros veem o estado, sem o detalhe.
-    const full = await administers(deps.db, session.userId);
+    // administra a instalação lê. Os outros veem o estado, sem o detalhe. A sessão de suporte age
+    // como administradora da organização, e não da instalação (seção 3.6): não lê o detalhe nem o
+    // pedido de atualização.
+    const full = !session.support && (await administers(deps.db, session.userId));
     const agent = await q.one<{ lastSeenAt: Date; version: string; targetVersion: string | null; lastFailureAt: Date | null; lastFailureDetail: string | null }>(
       `select last_seen_at as "lastSeenAt", announced_version as version, target_version as "targetVersion", last_failure_at as "lastFailureAt", last_failure_detail as "lastFailureDetail" from update_agent_status`,
     );
     // O pedido é da instalação, e não da organização de quem pediu (seção 3.11).
-    const request = await latestUpdateRequest(deps.db);
+    const request = session.support ? null : await latestUpdateRequest(deps.db);
     return {
       running: { version: deps.appVersion, updatable: isPublishedVersion(deps.appVersion) },
       agent: agent && { ...agent, lastFailureDetail: full ? agent.lastFailureDetail : null, responding: deps.clock.now().getTime() - agent.lastSeenAt.getTime() < AGENT_SILENT_MINUTES * 60_000 },
@@ -69,6 +71,7 @@ const body = z.object({ password: z.string().min(1).max(1000), target: z.string(
 const consulted = new WeakMap<object, Published>();
 export const POST = handle(
   {
+    support: false,
     body,
     before: async ({ body, deps, session }) => {
       if (!(await administers(deps.db, session.userId))) throw new ApiError(403, "forbidden", "Your role cannot change this. Ask an owner or admin.");

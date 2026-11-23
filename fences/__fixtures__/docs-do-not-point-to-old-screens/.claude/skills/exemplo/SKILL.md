@@ -1,0 +1,1 @@
+Administrar a instalação → Atualização.

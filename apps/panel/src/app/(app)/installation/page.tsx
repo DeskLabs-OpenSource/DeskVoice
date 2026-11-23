@@ -10,16 +10,22 @@ import ptBR, { type InstallationDictionary } from "../../../i18n/pt-BR/installat
 import { useDict, useLocale } from "../../../i18n/provider";
 import { api, useApi } from "../../../ui/api";
 import { ActionStatus } from "../../../ui/errors";
-import { formatDateTime } from "../../../ui/format";
-import { Badge, Button, EmptyState, Field, Notice, Panel, Skeleton, TextInput } from "../../../ui/kit";
-import { useInstallationAction } from "./errors";
+import { formatDateTime, formatMoney } from "../../../ui/format";
+import { Badge, Button, EmptyState, Field, Notice, Panel, Select, Skeleton, TextArea, TextInput } from "../../../ui/kit";
+import { bornWithText, type DefaultLimits } from "./born-with";
+import { useInstallationAction, useInstallationErrorText } from "./errors";
+import type { OrganizationLanguage } from "../../../ui/proposed-language";
+import { spendCapField, spendCapValue } from "./spend-cap";
 
 interface Organization {
   id: string;
   name: string;
   createdAt: string;
   suspendedAt: string | null;
+  suspendedReason: string | null;
   founding: boolean;
+  /** A organização em que quem está na tela está agora: ela não pode ser suspensa daqui. */
+  current: boolean;
 }
 interface Person {
   accountId: string;
@@ -59,8 +65,21 @@ function People({ title, people, t, children }: { title: string; people: Person[
 }
 
 /** Criar uma organização. Na segunda, a tela diz antes, com os nomes, quem recebe e quem perde a administração. */
-function NewOrganization({ creation, t, onCreated }: { creation: Overview["creation"]; t: InstallationDictionary["organizations"]; onCreated(name: string, created: Created): void }) {
+function NewOrganization({
+  creation,
+  defaults,
+  t,
+  onCreated,
+}: {
+  creation: Overview["creation"];
+  /** O padrão com que ela nasce, mostrado antes de criar. `undefined` enquanto carrega. */
+  defaults: DefaultLimits | undefined;
+  t: InstallationDictionary["organizations"];
+  onCreated(name: string, created: Created): void;
+}) {
   const save = useInstallationAction();
+  const locale = useLocale();
+  const bornWith = defaults ? <p className="text-muted">{bornWithText(defaults, t, (cents) => formatMoney(cents, locale))}</p> : null;
   const [name, setName] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [keep, setKeep] = useState<string[]>([]);
@@ -91,6 +110,7 @@ function NewOrganization({ creation, t, onCreated }: { creation: Overview["creat
         <Field label={t.nameLabel}>
           <TextInput className="max-w-md" maxLength={120} value={name} onChange={(event) => setName(event.target.value)} disabled={confirming} />
         </Field>
+        {bornWith}
         {confirming ? (
           <div className="grid gap-3 rounded-xs border border-warn p-3">
             <p className="font-bold">{t.creating}</p>
@@ -181,11 +201,339 @@ function OwnerInvite({ organization, t, onClose }: { organization: { id: string;
   );
 }
 
-function Row({ organization, t, onChanged, onInvite }: { organization: Organization; t: InstallationDictionary["organizations"]; onChanged(): void; onInvite(): void }) {
+const tasksLine = (t: InstallationDictionary["organizations"], n: number): string => (n === 0 ? t.suspendTasksNone : n === 1 ? t.suspendTasksOne : fill(t.suspendTasksMany, { n }));
+
+/**
+ * A confirmação de suspender (lei `destrutivo-pede-confirmacao.md`): nomeia a organização, diz
+ * quantas tarefas serão canceladas e que nada volta sozinho, e pede o motivo.
+ */
+function SuspendConfirm({ organization, t, onDone, onCancel }: { organization: Organization; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
+  const preview = useApi<{ cancelableTasks: number }>(`/installation/organizations/${organization.id}/suspension`);
+  const save = useInstallationAction();
+  const [reason, setReason] = useState("");
+  const size = reason.trim().length;
+  return (
+    <form
+      className="grid gap-3 rounded-xs border border-warn p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save.run(async () => {
+          const result = await api<{ canceledTasks: number }>(`/installation/organizations/${organization.id}/suspension`, { body: { reason: reason.trim() } });
+          onDone(fill(t.suspendedDone, { name: organization.name, n: result.canceledTasks }));
+        });
+      }}
+    >
+      <p className="font-bold">{fill(t.suspendTitle, { name: organization.name })}</p>
+      <p>{fill(t.suspendLead, { name: organization.name })}</p>
+      {preview.data ? (
+        <Notice tone="warn">
+          {tasksLine(t, preview.data.cancelableTasks)} {t.suspendNoReturn}
+        </Notice>
+      ) : (
+        <Skeleton />
+      )}
+      <Field label={t.reasonLabel} hint={t.reasonHint}>
+        <TextArea className="max-w-xl" rows={3} maxLength={500} required value={reason} onChange={(event) => setReason(event.target.value)} />
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="danger" busy={save.busy} disabled={!preview.data || size < 10 || size > 500}>
+          {fill(t.suspendYes, { name: organization.name })}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          {t.cancel}
+        </Button>
+      </div>
+      <ActionStatus action={save} />
+    </form>
+  );
+}
+
+/** A confirmação de reativar: nomeia a organização e diz que nada do que foi cancelado volta. */
+function ReactivateConfirm({ organization, t, onDone, onCancel }: { organization: Organization; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
+  const save = useInstallationAction();
+  return (
+    <div className="grid gap-3 rounded-xs border border-warn p-3">
+      <p className="font-bold">{fill(t.reactivateTitle, { name: organization.name })}</p>
+      <p>{t.reactivateLead}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="primary"
+          busy={save.busy}
+          onClick={() =>
+            void save.run(async () => {
+              const result = await api<{ canceledTasks: number }>(`/installation/organizations/${organization.id}/suspension`, { method: "DELETE" });
+              onDone(fill(t.reactivatedDone, { name: organization.name, n: result.canceledTasks }));
+            })
+          }
+        >
+          {fill(t.reactivateYes, { name: organization.name })}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          {t.cancel}
+        </Button>
+      </div>
+      <ActionStatus action={save} />
+    </div>
+  );
+}
+
+interface Limits {
+  maxTrunks: number | null;
+  maxAgents: number | null;
+  /** A trava da saída (7b): `true` deixa a organização decidir, `false` bloqueia. */
+  outboundAllowed: boolean;
+  /** A escolha da organização sobre a saída, lida e nunca escrita daqui. */
+  outboundPolicyEnabled: boolean;
+  /** O teto de gasto do mês (7c), em centavos de dólar, a moeda do extrato. `null`: sem teto. */
+  monthlySpendCapCents: number | null;
+  usage: { trunks: number; agents: number };
+  /** O gasto do mês, a mesma soma da tela de Custos e do teto, já arredondado para centavos. */
+  monthCost: { cents: number };
+}
+type LimitsDraft = { maxTrunks: string; maxAgents: string; outboundAllowed: boolean; monthlySpendCap: string };
+
+// Vazio é sem limite. O resto vai como número, e a API recusa o que não for inteiro de 0 para cima.
+const limitField = (value: number | null): string => (value === null ? "" : String(value));
+const limitValue = (field: string): number | null => (field.trim() === "" ? null : Number(field));
+
+/**
+ * Os limites da organização (seção 3.4 do desenho do R8): linhas telefônicas e agentes, com quanto
+ * ela já usa, a trava da saída (7b), com a escolha da organização ao lado, e o teto de gasto do mês
+ * (7c), com o gasto do mês ao lado.
+ */
+function LimitsForm({ organization, t, onDone, onCancel }: { organization: Organization; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
+  const current = useApi<Limits>(`/installation/organizations/${organization.id}/limits`);
+  const errorText = useInstallationErrorText();
+  if (current.error && !current.data) return <Notice tone="fail">{errorText(current.error)}</Notice>;
+  if (!current.data) return <Skeleton />;
+  return <LimitsFields organization={organization} limits={current.data} t={t} onDone={onDone} onCancel={onCancel} />;
+}
+
+function LimitsFields({ organization, limits, t, onDone, onCancel }: { organization: Organization; limits: Limits; t: InstallationDictionary["organizations"]; onDone(message: string): void; onCancel(): void }) {
+  const save = useInstallationAction();
+  const locale = useLocale();
+  const [draft, setDraft] = useState<LimitsDraft>({
+    maxTrunks: limitField(limits.maxTrunks),
+    maxAgents: limitField(limits.maxAgents),
+    outboundAllowed: limits.outboundAllowed,
+    monthlySpendCap: spendCapField(limits.monthlySpendCapCents),
+  });
+  const [capInvalid, setCapInvalid] = useState(false);
+  // Destravar devolve a escolha da organização: a tela diz qual, antes de salvar.
+  const unblocking = !limits.outboundAllowed && draft.outboundAllowed;
+  const usage = (used: number, limit: string): string => (limit.trim() === "" ? fill(t.limitsUsageUnlimited, { used }) : fill(t.limitsUsage, { used, limit: limit.trim() }));
+  const fields = [
+    { key: "maxTrunks", label: t.limitsTrunks, used: limits.usage.trunks },
+    { key: "maxAgents", label: t.limitsAgents, used: limits.usage.agents },
+  ] as const;
+  return (
+    <form
+      className="grid gap-3 rounded-xs border border-line p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const cap = spendCapValue(draft.monthlySpendCap);
+        setCapInvalid(!cap.ok);
+        if (!cap.ok) return;
+        void save.run(async () => {
+          await api(`/installation/organizations/${organization.id}/limits`, {
+            method: "PUT",
+            body: { maxTrunks: limitValue(draft.maxTrunks), maxAgents: limitValue(draft.maxAgents), outboundAllowed: draft.outboundAllowed, monthlySpendCapCents: cap.cents },
+          });
+          onDone(fill(t.limitsSaved, { name: organization.name }));
+        });
+      }}
+    >
+      <p className="font-bold">{fill(t.limitsTitle, { name: organization.name })}</p>
+      <p>{t.limitsLead}</p>
+      <div className="flex flex-wrap gap-4">
+        {fields.map((field) => (
+          <Field key={field.key} label={field.label} hint={`${usage(field.used, draft[field.key])} ${t.limitsEmptyHint}`}>
+            <TextInput className="w-32" type="number" inputMode="numeric" min={0} step={1} value={draft[field.key]} onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })} />
+          </Field>
+        ))}
+        <Field label={t.limitsOutbound} hint={`${limits.outboundPolicyEnabled ? t.limitsOutboundPolicyOn : t.limitsOutboundPolicyOff} ${t.limitsOutboundHint}`}>
+          <Select value={draft.outboundAllowed ? "decide" : "blocked"} onChange={(event) => setDraft({ ...draft, outboundAllowed: event.target.value === "decide" })}>
+            <option value="decide">{t.limitsOutboundDecide}</option>
+            <option value="blocked">{t.limitsOutboundBlocked}</option>
+          </Select>
+        </Field>
+        <Field label={t.limitsSpendCap} hint={`${fill(t.limitsSpendCapSpent, { spent: formatMoney(limits.monthCost.cents, locale) })} ${t.limitsSpendCapApprox} ${t.limitsEmptyHint}`}>
+          <TextInput className="w-32" mono inputMode="decimal" value={draft.monthlySpendCap} onChange={(event) => setDraft({ ...draft, monthlySpendCap: event.target.value })} />
+        </Field>
+      </div>
+      {capInvalid ? <Notice tone="fail">{t.limitsSpendCapInvalid}</Notice> : null}
+      {unblocking ? <Notice>{limits.outboundPolicyEnabled ? t.limitsOutboundReturnsOn : t.limitsOutboundReturnsOff}</Notice> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="primary" busy={save.busy}>
+          {t.save}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          {t.cancel}
+        </Button>
+      </div>
+      <ActionStatus action={save} />
+    </form>
+  );
+}
+
+/**
+ * Os limites com que uma organização nova nasce (seção 3.5 do desenho do R8, fatia 7d), com os mesmos
+ * campos dos limites de uma organização. Valem só para as criadas daqui em diante.
+ */
+function DefaultLimitsPanel({
+  defaults,
+  organization,
+  t,
+  onSaved,
+}: {
+  defaults: DefaultLimits;
+  /** O resto do padrão (`GET /installation/defaults/organization`, fatia 8a): o fuso e o idioma. */
+  organization: OrganizationDefaults;
+  t: InstallationDictionary["organizations"];
+  onSaved(message: string): void;
+}) {
+  const save = useInstallationAction();
+  const [draft, setDraft] = useState<LimitsDraft>({
+    maxTrunks: limitField(defaults.maxTrunks),
+    maxAgents: limitField(defaults.maxAgents),
+    outboundAllowed: defaults.outboundAllowed,
+    monthlySpendCap: spendCapField(defaults.monthlySpendCapCents),
+  });
+  const [capInvalid, setCapInvalid] = useState(false);
+  const fields = [
+    { key: "maxTrunks", label: t.limitsTrunks },
+    { key: "maxAgents", label: t.limitsAgents },
+  ] as const;
+  return (
+    <Panel title={t.defaultsTitle} description={t.defaultsLead}>
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const cap = spendCapValue(draft.monthlySpendCap);
+          setCapInvalid(!cap.ok);
+          if (!cap.ok) return;
+          void save.run(async () => {
+            await api("/installation/defaults/limits", {
+              method: "PUT",
+              body: { maxTrunks: limitValue(draft.maxTrunks), maxAgents: limitValue(draft.maxAgents), outboundAllowed: draft.outboundAllowed, monthlySpendCapCents: cap.cents },
+            });
+            onSaved(t.defaultsSaved);
+          });
+        }}
+      >
+        <div className="flex flex-wrap gap-4">
+          {fields.map((field) => (
+            <Field key={field.key} label={field.label} hint={t.limitsEmptyHint}>
+              <TextInput className="w-32" type="number" inputMode="numeric" min={0} step={1} value={draft[field.key]} onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })} />
+            </Field>
+          ))}
+          <Field label={t.limitsOutbound} hint={t.defaultsOutboundHint}>
+            <Select value={draft.outboundAllowed ? "decide" : "blocked"} onChange={(event) => setDraft({ ...draft, outboundAllowed: event.target.value === "decide" })}>
+              <option value="decide">{t.limitsOutboundDecide}</option>
+              <option value="blocked">{t.limitsOutboundBlocked}</option>
+            </Select>
+          </Field>
+          <Field label={t.limitsSpendCap} hint={`${t.limitsSpendCapApprox} ${t.limitsEmptyHint}`}>
+            <TextInput className="w-32" mono inputMode="decimal" value={draft.monthlySpendCap} onChange={(event) => setDraft({ ...draft, monthlySpendCap: event.target.value })} />
+          </Field>
+        </div>
+        {capInvalid ? <Notice tone="fail">{t.limitsSpendCapInvalid}</Notice> : null}
+        <div>
+          <Button type="submit" variant="primary" busy={save.busy}>
+            {t.save}
+          </Button>
+        </div>
+        <ActionStatus action={save} />
+      </form>
+      <DefaultOrganizationForm defaults={organization} t={t} onSaved={onSaved} />
+    </Panel>
+  );
+}
+
+/** O padrão das organizações novas além dos limites (`installation/defaults/organization`). */
+interface OrganizationDefaults {
+  /** `null`: sem padrão, a nova nasce em America/Sao_Paulo, como sempre. */
+  timezone: string | null;
+  /** `null`: sem padrão, a nova nasce sem idioma, e o agente novo e o menu novo dela propõem pt-BR. */
+  language: OrganizationLanguage | null;
+}
+
+const ORGANIZATION_LANGUAGES: readonly OrganizationLanguage[] = ["pt-BR", "en", "es"];
+
+/**
+ * O fuso e o idioma com que uma organização nova nasce (seção 3.5 do desenho do R8, fatia 8a): o fuso
+ * é copiado para a política de saída dela na criação, e o idioma para `organizations.language`, que o
+ * agente novo e o menu novo propõem. Vazio tira o padrão. O servidor confere o fuso com o mesmo
+ * validador do fuso da política de saída.
+ */
+function DefaultOrganizationForm({ defaults, t, onSaved }: { defaults: OrganizationDefaults; t: InstallationDictionary["organizations"]; onSaved(message: string): void }) {
+  const save = useInstallationAction();
+  const [timezone, setTimezone] = useState(defaults.timezone ?? "");
+  const [language, setLanguage] = useState<OrganizationLanguage | "">(defaults.language ?? "");
+  return (
+    <form
+      className="mt-4 grid gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save.run(async () => {
+          await api("/installation/defaults/organization", { method: "PUT", body: { timezone: timezone.trim() === "" ? null : timezone.trim(), language: language === "" ? null : language } });
+          onSaved(t.defaultsSaved);
+        });
+      }}
+    >
+      <Field label={t.defaultsTimezone} hint={t.defaultsTimezoneHint}>
+        <TextInput className="max-w-md" mono value={timezone} onChange={(event) => setTimezone(event.target.value)} />
+      </Field>
+      <Field label={t.defaultsLanguage} hint={t.defaultsLanguageHint}>
+        <Select className="max-w-md" value={language} onChange={(event) => setLanguage(event.target.value as OrganizationLanguage | "")}>
+          <option value="">{t.defaultsLanguageNone}</option>
+          {ORGANIZATION_LANGUAGES.map((each) => (
+            <option key={each} value={each}>
+              {t.defaultsLanguages[each]}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <div>
+        <Button type="submit" variant="primary" busy={save.busy}>
+          {t.save}
+        </Button>
+      </div>
+      <ActionStatus action={save} />
+    </form>
+  );
+}
+
+function Row({
+  organization,
+  activeCount,
+  t,
+  onChanged,
+  onInvite,
+  onSuspension,
+  onLimits,
+}: {
+  organization: Organization;
+  /** Quantas organizações ativas a instalação tem: com uma só, ninguém vê "Suspender". */
+  activeCount: number;
+  t: InstallationDictionary["organizations"];
+  onChanged(): void;
+  onInvite(): void;
+  onSuspension(message: string): void;
+  onLimits(message: string): void;
+}) {
   const locale = useLocale();
   const save = useInstallationAction();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(organization.name);
+  const [confirming, setConfirming] = useState<"suspend" | "reactivate" | "limits" | null>(null);
+  // A API recusa as mesmas três; a tela só não oferece o botão que falharia.
+  const canSuspend = !organization.suspendedAt && !organization.current && activeCount > 1;
+  const done = (message: string): void => {
+    setConfirming(null);
+    onSuspension(message);
+  };
   return (
     <li className="grid gap-2 border-b border-line py-3 last:border-b-0">
       {editing ? (
@@ -225,9 +573,37 @@ function Row({ organization, t, onChanged, onInvite }: { organization: Organizat
                 {t.inviteOwner}
               </Button>
             )}
+            <Button variant="ghost" onClick={() => setConfirming("limits")}>
+              {t.limits}
+            </Button>
+            {canSuspend ? (
+              <Button variant="ghost" onClick={() => setConfirming("suspend")}>
+                {t.suspend}
+              </Button>
+            ) : null}
+            {organization.suspendedAt ? (
+              <Button variant="ghost" onClick={() => setConfirming("reactivate")}>
+                {t.reactivate}
+              </Button>
+            ) : null}
           </span>
         </div>
       )}
+      {organization.suspendedAt && organization.suspendedReason ? <p className="text-[0.93rem] text-muted">{fill(t.suspendedReason, { reason: organization.suspendedReason })}</p> : null}
+      {organization.current && !organization.suspendedAt && activeCount > 1 ? <p className="text-[0.87rem] text-muted">{t.currentHint}</p> : null}
+      {confirming === "suspend" ? <SuspendConfirm organization={organization} t={t} onDone={done} onCancel={() => setConfirming(null)} /> : null}
+      {confirming === "limits" ? (
+        <LimitsForm
+          organization={organization}
+          t={t}
+          onDone={(message) => {
+            setConfirming(null);
+            onLimits(message);
+          }}
+          onCancel={() => setConfirming(null)}
+        />
+      ) : null}
+      {confirming === "reactivate" ? <ReactivateConfirm organization={organization} t={t} onDone={done} onCancel={() => setConfirming(null)} /> : null}
       <ActionStatus action={save} />
     </li>
   );
@@ -236,9 +612,14 @@ function Row({ organization, t, onChanged, onInvite }: { organization: Organizat
 export default function InstallationOrganizations() {
   const t = useDict(ptBR, en, es).organizations;
   const { data, reload } = useApi<Overview>("/installation/organizations");
+  const defaults = useApi<DefaultLimits>("/installation/defaults/limits");
+  const organizationDefaults = useApi<OrganizationDefaults>("/installation/defaults/organization");
   const [inviting, setInviting] = useState<{ id: string; name: string } | null>(null);
   const [created, setCreated] = useState<(Created & { name: string }) | null>(null);
+  // A frase do que acabou de acontecer numa organização: a suspensão, a reativação ou os limites salvos.
+  const [notice, setNotice] = useState<string | null>(null);
   const router = useRouter();
+  const activeCount = (data?.organizations ?? []).filter((organization) => !organization.suspendedAt).length;
   return (
     <>
       {created ? (
@@ -250,6 +631,7 @@ export default function InstallationOrganizations() {
           </span>
         </Notice>
       ) : null}
+      {notice ? <Notice tone="ok">{notice}</Notice> : null}
       {inviting ? <OwnerInvite organization={inviting} t={t} onClose={() => setInviting(null)} /> : null}
       <Panel title={t.title} description={t.lead}>
         {!data ? (
@@ -259,7 +641,21 @@ export default function InstallationOrganizations() {
         ) : (
           <ul className="grid">
             {data.organizations.map((organization) => (
-              <Row key={organization.id} organization={organization} t={t} onChanged={reload} onInvite={() => setInviting({ id: organization.id, name: organization.name })} />
+              <Row
+                key={organization.id}
+                organization={organization}
+                activeCount={activeCount}
+                t={t}
+                onChanged={reload}
+                onInvite={() => setInviting({ id: organization.id, name: organization.name })}
+                onLimits={setNotice}
+                onSuspension={(message) => {
+                  setNotice(message);
+                  reload();
+                  // Reativar a organização em que a pessoa está tira a tela de suspensa: o servidor relê a sessão.
+                  router.refresh();
+                }}
+              />
             ))}
           </ul>
         )}
@@ -267,6 +663,7 @@ export default function InstallationOrganizations() {
       {data ? (
         <NewOrganization
           creation={data.creation}
+          defaults={defaults.data}
           t={t}
           onCreated={(name, result) => {
             setCreated({ ...result, name });
@@ -275,6 +672,18 @@ export default function InstallationOrganizations() {
             // A lista de quem administra pode ter ficado explícita: a tela de atualizar muda de lugar, e
             // quem cria pode ter deixado de administrar. O servidor relê a sessão sem perder o convite aberto.
             if (!data.creation.explicit) router.refresh();
+          }}
+        />
+      ) : null}
+      {defaults.data && organizationDefaults.data ? (
+        <DefaultLimitsPanel
+          defaults={defaults.data}
+          organization={organizationDefaults.data}
+          t={t}
+          onSaved={(message) => {
+            setNotice(message);
+            defaults.reload();
+            organizationDefaults.reload();
           }}
         />
       ) : null}

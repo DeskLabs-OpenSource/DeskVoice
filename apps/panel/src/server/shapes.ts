@@ -1,5 +1,6 @@
-import { callerMessageBlock, checkVocabulary, DROP_FOLLOW_UP_MESSAGE_MAX, toE164, type OrgQuery } from "@deskvoice/core";
+import { agentAnalysisBrain, type AgentAnalysisBrain, callerMessageBlock, checkVocabulary, DROP_FOLLOW_UP_MESSAGE_MAX, ORGANIZATION_SUSPENDED, organizationSuspended, toE164, type OrgQuery } from "@deskvoice/core";
 import { z } from "zod";
+import { checkAnalysisBrain } from "./brains";
 import { ApiError } from "./context";
 import { listEngines } from "./pieces";
 import { isTrunkHost } from "./trunk-host";
@@ -33,10 +34,10 @@ const optionalText = (max: number) =>
     .transform((value) => (value === "" ? null : value));
 
 export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions, greeting, engine, voice_id as "voiceId", language, tools,
-  enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo",
+  enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo", transfer_returns_to_agent as "transferReturnsToAgent", caller_idle_guard as "callerIdleGuard",
   follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment",
   agent_handoff_targets as "agentHandoffTargets", drop_follow_up as "dropFollowUp",
-  drop_follow_up_message as "dropFollowUpMessage", analyst_id as "analystId", created_at as "createdAt", updated_at as "updatedAt"`;
+  drop_follow_up_message as "dropFollowUpMessage", analyst_id as "analystId", analysis_brain as "analysisBrain", created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -51,16 +52,19 @@ const agentFields = z.object({
   maxCallSeconds: z.number().int().min(30).max(7200),
   costCeilingCents: z.number().int().min(0).max(100000),
   transferTo: optionalPhone,
+  // Ninguém atendeu a transferência: a ligação volta para o agente (Vapi · fatia 5a). Ligada de fábrica.
+  transferReturnsToAgent: z.boolean(),
+  // O "ainda está aí?" quando quem ligou fica calado (Vapi · fatia 9, decisão B). Ligada de fábrica.
+  callerIdleGuard: z.boolean(),
   // A pessoa que recebe as pendências que o agente abre; nula é a equipe. A rota confere que ela
   // está ativa (`requireActiveOwner`); a de outra organização nem é vista.
   followUpOwnerUserId: z.uuid().nullable(),
   vocabulary,
   // Ambiente de quem liga: `noisy` ajusta a detecção de fala do provedor para ruído de fundo.
   listeningEnvironment: z.enum(["normal", "noisy"]),
-  // O que acontece quando a ligação cai (desenho do follow-up da ligação que caiu, seção 3.2). O banco
-  // aceita os quatro modos, mas `call_back` só tem caminho nas fatias 3 e 4: é recusado aqui. O
-  // `whatsapp` passa por `requireDropFollowUpMode`, que confere o pré-requisito.
-  dropFollowUp: z.enum(["off", "task", "whatsapp"]),
+  // O que acontece quando a ligação cai (desenho do follow-up da ligação que caiu, seção 3.2). O
+  // `whatsapp` e o `call_back` passam por `requireDropFollowUpMode`, que confere o pré-requisito.
+  dropFollowUp: z.enum(["off", "task", "whatsapp", "call_back"]),
   // O texto do WhatsApp para quem ligou: fixo, escrito pelo operador, sem variável. Vazio vale o padrão.
   dropFollowUpMessage: optionalText(DROP_FOLLOW_UP_MESSAGE_MAX),
   // Para quem o agente pode passar a ligação (`transfer_to_agent`). A rota confere que cada um é
@@ -72,9 +76,13 @@ const agentFields = z.object({
   // O analista ao vivo do agente (desenho dos analistas, seção 3.1); nulo é nenhum. A rota confere
   // que ele é desta organização (`requireAnalyst`).
   analystId: z.uuid().nullable(),
+  // Quem lê a ligação deste agente (R4, fatia 5); nulo segue a organização (`calls.analysis_brain`).
+  // A rota confere o cérebro e o modelo (`requireAnalysisBrain`) com a mesma regra da organização.
+  analysisBrain: agentAnalysisBrain.nullable(),
 });
 export type AgentValues = z.output<typeof agentFields>;
-export const agentPatch = agentFields.partial();
+// `acceptUnmeasured` vale só para este pedido, como em `calls.analysis_brain`: não é gravado.
+export const agentPatch = agentFields.partial().extend({ acceptUnmeasured: z.boolean().optional() });
 export const agentCreate = agentPatch.required({ name: true, engine: true });
 
 export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
@@ -88,6 +96,8 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   maxCallSeconds: 600,
   costCeilingCents: 500,
   transferTo: null,
+  transferReturnsToAgent: true,
+  callerIdleGuard: true,
   followUpOwnerUserId: null,
   vocabulary: [],
   listeningEnvironment: "normal",
@@ -95,6 +105,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   dropFollowUp: "off",
   dropFollowUpMessage: null,
   analystId: null,
+  analysisBrain: null,
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",
@@ -118,7 +129,9 @@ const trunkFields = z.object({
   // Nome ou IP do destino das ligações de saída; vazio vale o `host`.
   outboundHost: z.union([z.null(), z.literal("").transform(() => null), trunkHost]).optional(),
 });
-export const trunkPatch = trunkFields.partial();
+// `confirmOverlap`: a pessoa leu o aviso de que a faixa cruza a de outra organização (R8, fatia 10)
+// e salva mesmo assim. Não é coluna: só libera a gravação.
+export const trunkPatch = trunkFields.extend({ confirmOverlap: z.boolean().optional() }).partial();
 export const trunkCreate = trunkPatch.required({ name: true, host: true, authMode: true });
 // Liga ou desliga o filtro de entrada da linha por registro (R14, contrato 11). Fica fora de
 // `trunkPatch`: salvar o formulário da linha não mexe no filtro.
@@ -131,20 +144,29 @@ export const CALL_COLUMNS = `c.id, c.agent_id as "agentId", a.name as "agentName
   c.analysis_score as "analysisScore", c.voicemail`;
 export const CALL_STATUSES = ["ringing", "in_progress", "transferred", "completed", "failed", "refused"] as const;
 
-/** O dono das pendências de um agente é uma pessoa ativa da organização; outra coisa é recusada com motivo. */
+/** O dono das pendências de um agente é uma pessoa ativa da equipe (nunca o vínculo de suporte); outra coisa é recusada com motivo. */
 export async function requireActiveOwner(q: OrgQuery, userId: string | null | undefined): Promise<void> {
   if (userId === null || userId === undefined) return;
-  if (!(await q.one("select 1 from users where id = $1 and disabled_at is null for share", [userId]))) {
+  if (!(await q.one("select 1 from users where id = $1 and kind = 'member' and disabled_at is null for share", [userId]))) {
     throw new ApiError(400, "owner_unavailable", "The follow-up owner must be an active person of this team.");
   }
 }
 
 /**
  * O modo `whatsapp` de "Quando a ligação cai" só pode ser escolhido com conector de WhatsApp e com
- * `whatsapp.trust_caller_id` ligado (seção 3.5 do desenho): sem eles, a mensagem nunca sairia. A
- * revisão confere de novo na hora de agir, porque o ajuste pode ser desligado depois.
+ * `whatsapp.trust_caller_id` ligado (seção 3.5 do desenho): sem eles, a mensagem nunca sairia. O modo
+ * `call_back` só pode ser escolhido com as ligações de saída ligadas (`outbound_policy.enabled`, seção
+ * 3.6): a tela desabilitada não é a única barreira. A revisão confere de novo na hora de agir, porque
+ * o ajuste pode ser desligado depois, e a religação passa pela política inteira na hora de discar.
  */
 export async function requireDropFollowUpMode(q: OrgQuery, mode: string | undefined): Promise<void> {
+  if (mode === "call_back") {
+    // Trava a linha da política até o fim da escrita: desligada no meio, a escolha não passa.
+    const policy = await q.one<{ enabled: boolean }>("select enabled from outbound_policy for share");
+    if (policy?.enabled !== true)
+      throw new ApiError(400, "drop_follow_up_outbound_disabled", "Turn outbound calls on in Outbound calls, stating the purpose and the legal basis, before choosing to call the caller back.");
+    return;
+  }
   if (mode !== "whatsapp") return;
   const block = await callerMessageBlock(q);
   if (block === "whatsapp_not_connected") throw new ApiError(400, "drop_follow_up_whatsapp_not_connected", "Connect WhatsApp in Settings → WhatsApp before choosing to message the caller.");
@@ -179,6 +201,23 @@ export async function requireAnalyst(q: OrgQuery, analystId: string | null | und
   if (!(await q.one("select 1 from analysts where id = $1 for share", [analystId]))) {
     throw new ApiError(400, "analyst_invalid", "The analyst must be one of this organization.");
   }
+}
+
+/**
+ * O cérebro que o agente escolheu para ler a ligação passa pela mesma conferência da escolha da
+ * organização (`checkAnalysisBrain`). Nulo (segue a organização) e o motor do agente não pedem nada.
+ */
+export async function requireAnalysisBrain(q: OrgQuery, choice: AgentAnalysisBrain | null | undefined, acceptUnmeasured: boolean | undefined): Promise<void> {
+  if (choice?.kind !== "brain") return;
+  await checkAnalysisBrain(q, { brain: choice.brain, model: choice.model, acceptUnmeasured });
+}
+
+/**
+ * A organização da sessão não está suspensa: a suspensa não atende nem pelo navegador nem pela
+ * simulada (seção 3.3 do desenho do R8). Quem mostra a tela de organização suspensa é a fatia 4b.
+ */
+export async function requireActiveOrganization(q: OrgQuery): Promise<void> {
+  if (await organizationSuspended(q)) throw new ApiError(409, ORGANIZATION_SUSPENDED, "This organization is suspended: it does not take calls.");
 }
 
 export async function requireAgent(q: OrgQuery, agentId: string): Promise<void> {

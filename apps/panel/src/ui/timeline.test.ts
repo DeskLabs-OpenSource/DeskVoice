@@ -1,11 +1,15 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { CALL_BACK_REFUSAL_CODES } from "@deskvoice/core";
 import { MAX_AGENT_HANDOFFS_PER_CALL } from "@deskvoice/tools";
 import { describe, expect, it } from "vitest";
 import enAgents from "../i18n/en/agents";
 import esAgents from "../i18n/es/agents";
 import ptBRAgents from "../i18n/pt-BR/agents";
+import enTimeline from "../i18n/en/timeline";
+import esTimeline from "../i18n/es/timeline";
 import ptBR from "../i18n/pt-BR/timeline";
+import { formatMoney } from "./format";
 import { Timeline } from "./timeline";
 
 const sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
@@ -211,5 +215,209 @@ describe("linha do tempo", () => {
       expect(html).toContain("Objeção possível: Preço, com confiança 60%");
       expect(html).toContain(ptBR.events.analyst_read.objectionOutside);
     });
+  });
+  describe("de quem é a escolha do cérebro (R4, fatia 5)", () => {
+    const at = "2026-11-18T12:00:00.000Z";
+    const render = (kind: string, payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind, at, payload }], live: false, agentName: "Vendas" }));
+    const brain = { brain: "anthropic", model: "claude-sonnet" };
+
+    it.each([
+      ["call_analyzed", { score: 8, rubricVersion: 1, costCents: 1, droppedObjections: 0, ...brain, costMeasured: true }, "Ligação analisada: nota 8 de 10"],
+      ["outcome_not_classified", { reason: "brain_no_key", ...brain }, ptBR.events.outcome_not_classified],
+      ["analysis_not_done", { reason: "brain_no_key", ...brain }, "Ligação não analisada: o cérebro escolhido não tem chave cadastrada"],
+    ])("%s com a escolha do agente diz \"(escolha do agente)\"; com a da organização ou do motor, nada muda", (kind, payload, frase) => {
+      expect(render(kind, { ...payload, choiceFrom: "agent" })).toContain(`${frase} (escolha do agente)`);
+      for (const other of [{ ...payload, choiceFrom: "organization" }, payload]) {
+        const html = render(kind, other);
+        expect(html).toContain(frase);
+        expect(html).not.toContain("(escolha do agente)");
+        expect(html).not.toContain("escolha da organização");
+      }
+    });
+  });
+
+  describe("a religação da ligação que caiu (R2, fatia 4)", () => {
+    const at = "2026-11-18T12:00:00.000Z";
+    const CALL_BACK = "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b";
+    const r = ptBR.events.drop_follow_up_result;
+    const d = ptBR.events.drop_follow_up;
+    const render = (kind: string, payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind, at, payload }], live: false, agentName: "Ana" }));
+    // O que nenhuma frase da religação pode dizer: a do WhatsApp, a da pendência e o evento desconhecido.
+    // A pendência de reserva é aberta de verdade quando a religação não pode ser agendada, e a frase
+    // dela termina com a mesma oração da pendência: ali, `task_opened` sozinha é que não pode aparecer.
+    const notOtherModes = (html: string, { opensTask = false } = {}) => {
+      const others = [r.whatsapp_sent, r.whatsapp_failed, d.whatsapp_queued, d.mode_unavailable, d.recent_follow_up, d.do_not_call, ptBR.events.unknown];
+      for (const other of opensTask ? others : [...others, d.task_opened]) expect(html).not.toContain(other);
+    };
+    const link = `href="/calls/${CALL_BACK}"`;
+
+    it("o agendamento tem frase própria, também na simulada, e nunca cai na pendência", () => {
+      const scheduled = render("drop_follow_up", { case: "call_dropped", mode: "call_back", action: "call_back_scheduled", simulated: false, openTurn: "caller_waiting" });
+      expect(scheduled).toContain(d.call_back_scheduled);
+      notOtherModes(scheduled);
+      const simulated = render("drop_follow_up", { case: "call_dropped", mode: "call_back", action: "call_back_scheduled", simulated: true, openTurn: "caller_waiting" });
+      expect(simulated).toContain(d.simulated.call_back_scheduled);
+      expect(simulated).not.toContain(d.simulated.task_opened);
+    });
+
+    it("os motivos de não agendar no modo religação falam da religação, não da mensagem", () => {
+      for (const reason of ["do_not_call", "mode_unavailable", "recent_follow_up"] as const) {
+        const html = render("drop_follow_up", { case: "engine_failed", mode: "call_back", action: "skipped", reason, simulated: false });
+        expect(html).toContain(d[`call_back_${reason}`]);
+        notOtherModes(html, { opensTask: reason !== "do_not_call" });
+        const sim = render("drop_follow_up", { case: "engine_failed", mode: "call_back", action: "skipped", reason, simulated: true });
+        expect(sim).toContain(d.simulated[`call_back_${reason}`]);
+        expect(sim).not.toContain(d.simulated[reason]);
+      }
+    });
+
+    it("o modo WhatsApp e o modo pendência continuam com as frases de antes", () => {
+      expect(render("drop_follow_up", { case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "mode_unavailable", simulated: false })).toContain(d.mode_unavailable);
+      expect(render("drop_follow_up", { case: "call_dropped", mode: "whatsapp", action: "skipped", reason: "recent_follow_up", simulated: true })).toContain(d.simulated.recent_follow_up);
+      expect(render("drop_follow_up", { case: "call_dropped", mode: "task", action: "task_opened", simulated: false })).toContain(d.task_opened);
+      expect(render("drop_follow_up_result", { action: "whatsapp_sent" })).toContain(r.whatsapp_sent);
+      expect(render("drop_follow_up_result", { action: "whatsapp_failed" })).toContain(r.whatsapp_failed);
+    });
+
+    it("a tentativa que saiu diz isso, com o link para a religação", () => {
+      const html = render("drop_follow_up_result", { action: "call_back_placed", attempt: 1, callId: CALL_BACK });
+      expect(html).toContain("A religação saiu (tentativa 1).");
+      expect(html).toContain(link);
+      expect(html).toContain(r.link);
+      notOtherModes(html);
+    });
+
+    it("atendida e não atendida dizem o resultado, o custo da religação e o link", () => {
+      const answered = render("drop_follow_up_result", { action: "call_back_answered", attempt: 1, callId: CALL_BACK, costCents: 37 });
+      expect(answered).toContain("A religação foi atendida (tentativa 1).");
+      expect(answered).toContain(`Custo da religação: ${formatMoney(37, "pt-BR")}.`);
+      expect(answered).toContain(link);
+      notOtherModes(answered);
+      const notAnswered = render("drop_follow_up_result", { action: "call_back_not_answered", attempt: 1, callId: CALL_BACK, costCents: 0 });
+      expect(notAnswered).toContain("A religação não foi atendida (tentativa 1).");
+      expect(notAnswered).toContain(`Custo da religação: ${formatMoney(0, "pt-BR")}.`);
+      expect(notAnswered).toContain(link);
+      notOtherModes(notAnswered);
+    });
+
+    it("cada código de recusa tem frase fixa, com o link só quando a chamada chegou a existir", () => {
+      for (const code of CALL_BACK_REFUSAL_CODES) {
+        const html = render("drop_follow_up_result", { action: "call_back_refused", attempt: 1, refusalCode: code });
+        expect(html).toContain(`A religação não saiu (tentativa 1): ${r.refusals[code]}.`);
+        expect(html).not.toContain(code);
+        expect(html).not.toContain("href=");
+        notOtherModes(html);
+      }
+      const withCall = render("drop_follow_up_result", { action: "call_back_refused", attempt: 1, refusalCode: "outside_window", callId: CALL_BACK });
+      expect(withCall).toContain(link);
+      // Um código que esta versão não conhece vira frase fixa, nunca o código cru.
+      const unknown = render("drop_follow_up_result", { action: "call_back_refused", attempt: 1, refusalCode: "novo_codigo" });
+      expect(unknown).toContain(r.refusals.unknown);
+      expect(unknown).not.toContain("novo_codigo");
+    });
+
+    it("a expirada diz que o processo de voz não discou, sem link", () => {
+      const html = render("drop_follow_up_result", { action: "call_back_expired", attempt: 1 });
+      expect(html).toContain("A religação não saiu (tentativa 1): o processo de voz não discou a tempo.");
+      expect(html).not.toContain("href=");
+      notOtherModes(html);
+    });
+
+    it("nenhuma frase da religação mostra texto que não seja dela: campo estranho no payload não aparece", () => {
+      for (const action of ["call_back_placed", "call_back_refused", "call_back_expired", "call_back_answered", "call_back_not_answered"]) {
+        const html = render("drop_follow_up_result", { action, attempt: 1, callId: "<script>Maria</script>", refusalCode: "do_not_call", costCents: 10, text: "Maria Souza", summary: "Maria Souza" });
+        expect(html).not.toContain("Maria");
+        // `callId` que não é um id não vira link.
+        expect(html).not.toContain("href=");
+      }
+    });
+
+    it("os três dicionários têm frase para todo código de recusa", () => {
+      for (const dict of [ptBR, enTimeline, esTimeline]) {
+        for (const code of CALL_BACK_REFUSAL_CODES) expect(dict.events.drop_follow_up_result.refusals[code]).toMatch(/\S/);
+      }
+    });
+  });
+
+  it("a latência por turno vira uma linha: metade dos turnos, o mais lento e quantos turnos, com o nome do motor", () => {
+    const render = (payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind: "turn_latency", at: "2026-11-21T12:00:00.000Z", payload }], live: false, agentName: "Ana" }));
+    const openai = render({ engine: "openai-realtime", source: "vad", turns: 3, p50Ms: 800, p90Ms: 1200, maxMs: 1200, toolTurns: 1, toolP50Ms: 2500 });
+    expect(openai).toContain("Resposta do agente (OpenAI Realtime): metade dos turnos em até 0,8 s, o mais lento em 1,2 s (3 turnos).");
+    expect(openai).not.toContain(ptBR.events.turn_latency.approximate);
+    expect(openai).not.toContain("openai-realtime");
+    expect(openai).not.toContain(ptBR.events.unknown);
+    // O Gemini não avisa o fim da fala: a linha diz que a medida é aproximada.
+    const gemini = render({ engine: "gemini-live", source: "transcript", turns: 1, p50Ms: 650, p90Ms: 650, maxMs: 650, toolTurns: 0, toolP50Ms: null });
+    expect(gemini).toContain("Resposta do agente (Gemini Live): metade dos turnos em até 0,7 s, o mais lento em 0,7 s (1 turno).");
+    expect(gemini).toContain(ptBR.events.turn_latency.approximate);
+    for (const dict of [ptBR, enTimeline, esTimeline]) {
+      for (const key of ["line", "turnsOne", "turnsMany", "approximate"] as const) expect(dict.events.turn_latency[key]).toMatch(/\S/);
+    }
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.turn_latency.line)).size).toBe(3);
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.turn_latency.approximate)).size).toBe(3);
+  });
+
+  it("a latência por turno com turnos tirados pela guarda: o mais lento medido e quantos turnos ficaram sem medida; só eles, só a contagem", () => {
+    const render = (payload: Record<string, unknown>) =>
+      renderToStaticMarkup(createElement(Timeline, { events: [{ id: "1", kind: "turn_latency", at: "2026-11-21T12:00:00.000Z", payload }], live: false, agentName: "Ana" }));
+    const some = render({ engine: "openai-realtime", source: "vad", turns: 2, p50Ms: 800, p90Ms: 3000, maxMs: 3000, toolTurns: 0, toolP50Ms: null, guardTurns: 3 });
+    expect(some).toContain("Resposta do agente (OpenAI Realtime): metade dos turnos em até 0,8 s, o mais lento medido em 3,0 s (2 turnos). 3 turnos sem medida: a guarda contra o silêncio agiu.");
+    const one = render({ engine: "gemini-live", source: "transcript", turns: 1, p50Ms: 650, p90Ms: 650, maxMs: 650, toolTurns: 0, toolP50Ms: null, guardTurns: 1 });
+    expect(one).toContain(`o mais lento medido em 0,7 s (1 turno). ${ptBR.events.turn_latency.approximate} 1 turno sem medida: a guarda contra o silêncio agiu.`);
+    // Um turno medido e um turno de barulho que a guarda fechou sem marco (o A1 da sessão): "medido" e a contagem.
+    const noisy = render({ engine: "openai-realtime", source: "vad", turns: 1, p50Ms: 800, p90Ms: 800, maxMs: 800, toolTurns: 0, toolP50Ms: null, guardTurns: 1 });
+    expect(noisy).toContain("o mais lento medido em 0,8 s (1 turno). 1 turno sem medida: a guarda contra o silêncio agiu.");
+    // Sem turno medido: só a contagem, sem número nem a marca de aproximada.
+    const none = render({ engine: "gemini-live", source: "transcript", turns: 0, p50Ms: null, p90Ms: null, maxMs: null, toolTurns: 0, toolP50Ms: null, guardTurns: 2 });
+    expect(none).toContain("2 turnos sem medida: a guarda contra o silêncio agiu.");
+    expect(none).not.toContain("Resposta do agente");
+    expect(none).not.toContain(ptBR.events.turn_latency.approximate);
+    expect(none).not.toContain("NaN");
+    // Sem guarda, a frase de antes, sem "medido".
+    const plain = render({ engine: "openai-realtime", source: "vad", turns: 2, p50Ms: 800, p90Ms: 3000, maxMs: 3000, toolTurns: 0, toolP50Ms: null, guardTurns: 0 });
+    expect(plain).toContain("o mais lento em 3,0 s (2 turnos).");
+    expect(plain).not.toContain("sem medida");
+    for (const dict of [ptBR, enTimeline, esTimeline]) {
+      for (const key of ["lineMeasured", "guardOne", "guardMany"] as const) expect(dict.events.turn_latency[key]).toMatch(/\S/);
+      expect(dict.events.turn_latency.guardMany).toContain("{count}");
+      expect(dict.events.turn_latency.lineMeasured).not.toBe(dict.events.turn_latency.line);
+    }
+    for (const key of ["lineMeasured", "guardOne", "guardMany"] as const) {
+      expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.turn_latency[key])).size).toBe(3);
+    }
+  });
+
+  it("a retomada do motor tem frase nos três idiomas, sem o id do motor nem o tipo cru", () => {
+    const html = renderToStaticMarkup(
+      createElement(Timeline, {
+        events: [{ id: "1", kind: "engine_resumed", at: "2026-11-21T12:00:00.000Z", payload: { engine: "gemini-live" } }],
+        live: false,
+        agentName: "Ana",
+      }),
+    );
+    expect(html).toContain(ptBR.events.engine_resumed);
+    expect(html).not.toContain(ptBR.events.unknown);
+    expect(html).not.toContain("gemini-live");
+    for (const dict of [ptBR, enTimeline, esTimeline]) expect(dict.events.engine_resumed).toMatch(/\S/);
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.engine_resumed)).size).toBe(3);
+  });
+
+  it("o cancelamento da ferramenta tem frase nos três idiomas, com o nome da ferramenta para gente, sem o tipo cru", () => {
+    const html = renderToStaticMarkup(
+      createElement(Timeline, {
+        events: [{ id: "1", kind: "tool_cancelled", at: "2026-11-21T12:00:00.000Z", payload: { name: "call_webhook" } }],
+        live: false,
+        agentName: "Ana",
+      }),
+    );
+    expect(html).toContain(ptBR.names.call_webhook);
+    expect(html).not.toContain(ptBR.events.unknown);
+    expect(html).not.toContain("{tool}");
+    expect(html).not.toContain("call_webhook");
+    for (const dict of [ptBR, enTimeline, esTimeline]) expect(dict.events.tool_cancelled).toContain("{tool}");
+    expect(new Set([ptBR, enTimeline, esTimeline].map((dict) => dict.events.tool_cancelled)).size).toBe(3);
   });
 });

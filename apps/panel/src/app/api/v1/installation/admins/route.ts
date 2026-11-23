@@ -9,7 +9,7 @@ export const GET = handleInstallation({}, async ({ deps }) => listInstallationAd
 const body = z.object({ email: z.string().trim().toLowerCase().max(320).pipe(z.email()) });
 
 /** Põe uma conta na lista, pelo e-mail. */
-export const POST = handleInstallation({ body }, async ({ body, accountId, deps }) => {
+export const POST = handleInstallation({ support: false, body }, async ({ body, accountId, deps }) => {
   const result = await grantInstallationAdminBy(deps.db, accountId, body.email, deps.clock.now());
   if (result.ok) return result;
   if (result.reason === "email_not_found") throw new ApiError(404, "email_not_found", "No account on this installation uses this e-mail.");

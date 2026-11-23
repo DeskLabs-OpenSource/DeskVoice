@@ -1,80 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createAccount } from "../src/accounts";
 import type { OrgQuery } from "../src/types";
 import { createDb } from "../src/db";
 import { withOrg, withSystem } from "../src/with-org";
 import { createOrganization, openTestDbs } from "./helpers";
-
-type Row = Record<string, unknown>;
-/** Monta uma linha válida da tabela para a organização, apontando para linhas já criadas dela. */
-type Factory = (organizationId: string, parents: Record<string, Row>) => Row;
+import { type Factory, type Row, ident, insert, organizationFactories, spareAccounts } from "./org-rows";
 
 const at = new Date("2026-01-15T12:00:00Z");
 const unique = (prefix: string): string => `${prefix}-${randomUUID()}`;
 
 // A conta não pertence a organização nenhuma e só o papel de sistema a cria: a fábrica de `users`
-// pega uma destas, feitas antes. Cada vínculo precisa de uma conta própria (`users_one_membership_idx`
-// e o e-mail único).
+// pega uma destas, feitas antes (`spareAccounts` em ./org-rows).
 const { app, owner } = openTestDbs();
-const spareAccounts: string[] = [];
-for (let i = 0; i < 6; i++) {
-  const id = await withSystem(app, (q) => createAccount(q, { email: `${unique("account")}@example.com`, passwordHash: "x" }));
-  if (!id) throw new Error("could not create a test account");
-  spareAccounts.push(id);
-}
-const nextAccount = (): string => {
-  const id = spareAccounts.pop();
-  if (!id) throw new Error("isolation.db.test.ts ran out of spare accounts: create more above");
-  return id;
-};
+const nextAccount = await spareAccounts(app, 6, "isolation.db.test.ts");
 
-// Uma fábrica por tabela com `organization_id`, em ordem de dependência. Tabela nova sem fábrica
-// reprova este arquivo: é assim que ela é obrigada a entrar no teste de isolamento.
-const factories: Record<string, Factory> = {
-  users: (organization_id) => ({ organization_id, account_id: nextAccount(), email: `${unique("user")}@example.com`, name: "User", role: "owner" }),
-  sessions: (organization_id, p) => ({ organization_id, user_id: p.users?.id, account_id: p.users?.account_id, token_hash: unique("token"), expires_at: at }),
-  invites: (organization_id, p) => ({ organization_id, email: `${unique("invite")}@example.com`, name: "Invited", role: "operator", token_hash: unique("invite-token"), expires_at: at, created_by: p.users?.id }),
-  settings: (organization_id) => ({ organization_id, key: unique("key"), value: { on: true } }),
-  trunks: (organization_id) => ({ organization_id, name: "Trunk", host: "sip.example.com", auth_mode: "register" }),
-  analysts: (organization_id, p) => ({
-    organization_id,
-    name: unique("analyst").slice(0, 40),
-    decision_model: "jev",
-    provider_confirmed_by: p.users?.id,
-    provider_confirmed_at: at,
-    created_at: at,
-    updated_at: at,
-  }),
-  agents: (organization_id, p) => ({ organization_id, name: "Agent", engine: "simulated", analyst_id: p.analysts?.id }),
-  phone_numbers: (organization_id, p) => ({ organization_id, trunk_id: p.trunks?.id, e164: `+55${Math.floor(1e10 + Math.random() * 9e10)}`, agent_id: p.agents?.id }),
-  calls: (organization_id, p) => ({ organization_id, agent_id: p.agents?.id, direction: "inbound", channel: "phone", status: "ringing", started_at: at }),
-  call_events: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, at, kind: "call_started", payload: {} }),
-  approvals: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, question: "Pode?", default_on_timeout: "denied", expires_at: at }),
-  tasks: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, kind: "isolation_probe", payload: {}, status: "done" }),
-  follow_ups: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, title: "Retornar", owner_user_id: p.users?.id, due_at: at, created_at: at }),
-  notifications: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, follow_up_id: p.follow_ups?.id, channel: "panel", body: "Aviso" }),
-  caller_notes: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, caller_e164: "+5531999990000", text: "Nota", created_at: at }),
-  outbound_policy: (organization_id) => ({ organization_id }),
-  do_not_call: (organization_id) => ({ organization_id, e164: `+55${Math.floor(1e10 + Math.random() * 9e10)}` }),
-  usage_ledger: (organization_id, p) => ({ organization_id, call_id: p.calls?.id, engine: "simulated", at }),
-  // Encerrado de propósito: só cabe um pedido ABERTO na instalação inteira, e aqui há duas organizações.
-  update_requests: (organization_id, p) => ({ organization_id, requested_by: p.users?.id, status: "succeeded", from_version: "0.1.0", target_version: "0.2.0" }),
-  update_agent_status: (organization_id) => ({ organization_id, last_seen_at: at, announced_version: "0.1.0" }),
-  whatsapp_sessions: (organization_id) => ({ organization_id, session_name: unique("session") }),
-  whatsapp_call_sessions: (organization_id) => ({ organization_id, session_name: unique("call-session") }),
-  organization_events: (organization_id, p) => ({ organization_id, at, kind: "isolation_probe", actor_user_id: p.users?.id, payload: {} }),
-  share_links: (organization_id, p) => ({
-    organization_id,
-    call_id: p.calls?.id,
-    token_hash: unique("share-token"),
-    kind: "recording",
-    expires_at: at,
-    max_uses: 10,
-    created_by: p.users?.id,
-    created_at: at,
-  }),
-};
+// Uma fábrica por tabela com `organization_id`, em ordem de dependência (./org-rows). Tabela nova sem
+// fábrica reprova este arquivo: é assim que ela é obrigada a entrar no teste de isolamento.
+const factories: Record<string, Factory> = organizationFactories(nextAccount);
 
 // Tabelas da INSTALAÇÃO (R8, seção 3.9): sem `organization_id`, com RLS forçado e sem policy, e sem
 // nenhum direito para `deskvoice_app`. A senha de todas as contas nunca fica ao alcance de uma rota
@@ -91,6 +33,18 @@ const APPEND_ONLY_TABLES: Record<string, string> = {
   organization_events: "auditoria dos direitos de quem ligou (registro 0014): registro que se reescreve não prova nada",
 };
 const isAppendOnly = (table: string): boolean => Object.hasOwn(APPEND_ONLY_TABLES, table);
+
+// Tabelas que a organização lê e nunca escreve: só o papel de sistema insere, altera e apaga. O papel
+// de aplicação tem só `select`, e a fábrica insere pelo papel de sistema. Para elas, os testes de
+// isolamento conferem a recusa da permissão no lugar da alteração, como nas só de acréscimo; a
+// leitura continua presa à organização pela RLS. Entrada nova precisa de motivo, e o teste de schema
+// reprova lista que não bate com as permissões.
+const SYSTEM_WRITTEN_TABLES: Record<string, string> = {
+  organization_limits: "limite da administração da instalação (3.4 do R8): a organização lê e não escreve",
+};
+const isSystemWritten = (table: string): boolean => Object.hasOwn(SYSTEM_WRITTEN_TABLES, table);
+/** A organização não altera nem apaga as linhas destas, nem as próprias: a permissão recusa. */
+const refusesChange = (table: string): boolean => isAppendOnly(table) || isSystemWritten(table);
 const PERMISSION_DENIED = { code: "42501", message: expect.stringMatching(/permission denied/) };
 
 // A lista de tabelas vem do catálogo do Postgres, nunca de lista escrita à mão.
@@ -110,18 +64,6 @@ const tables = catalog.rows;
 // instalação e sobrevive à exclusão da organização. As tabelas da instalação ficam fora das escopadas.
 const scoped = tables.filter((t) => t.has_org && !INSTALLATION_TABLES.includes(t.name));
 const pkOf = new Map(tables.map((t) => [t.name, t.pk]));
-
-const ident = (name: string): string => `"${name.replaceAll('"', '""')}"`;
-
-async function insert(q: OrgQuery, table: string, row: Row): Promise<Row> {
-  const columns = Object.keys(row);
-  const inserted = await q.one(
-    `insert into ${ident(table)} (${columns.map(ident).join(", ")}) values (${columns.map((_, i) => `$${i + 1}`).join(", ")}) returning *`,
-    Object.values(row),
-  );
-  if (!inserted) throw new Error(`insert into ${table} returned no row`);
-  return inserted;
-}
 
 /** `where` que identifica a linha pela chave primária lida do catálogo. */
 function byPk(table: string, row: Row, firstParam = 1): { where: string; params: unknown[] } {
@@ -155,7 +97,13 @@ beforeAll(async () => {
   for (const [organizationId, rows] of [[orgA, rowsA], [orgB, rowsB]] as const) {
     await withOrg(app, organizationId, async (q) => {
       for (const [table, factory] of Object.entries(factories)) {
-        if (known.has(table)) rows[table] = await insert(q, table, factory(organizationId, rows));
+        if (known.has(table) && !isSystemWritten(table)) rows[table] = await insert(q, table, factory(organizationId, rows));
+      }
+    });
+    // A organização não escreve nestas: a linha entra pelo papel de sistema, que grava com a organização dela.
+    await withSystem(app, async (q) => {
+      for (const [table, factory] of Object.entries(factories)) {
+        if (known.has(table) && isSystemWritten(table)) rows[table] = await insert(q, table, factory(organizationId, rows));
       }
     });
   }
@@ -222,9 +170,13 @@ describe("schema", () => {
     }
   });
 
-  it("grants change and delete on every table with organization_id except the append-only ones, which only read and insert", async () => {
-    expect(Object.keys(APPEND_ONLY_TABLES).filter((name) => !scoped.some((t) => t.name === name))).toEqual([]);
-    for (const [name, reason] of Object.entries(APPEND_ONLY_TABLES)) expect(reason.trim(), name).not.toBe("");
+  it("grants change and delete on every table with organization_id except the append-only ones, which only read and insert, and the system-written ones, which the organization only reads", async () => {
+    for (const list of [APPEND_ONLY_TABLES, SYSTEM_WRITTEN_TABLES]) {
+      expect(Object.keys(list).filter((name) => !scoped.some((t) => t.name === name))).toEqual([]);
+      for (const [name, reason] of Object.entries(list)) expect(reason.trim(), name).not.toBe("");
+    }
+    // Uma tabela tem uma forma só: só de acréscimo ou escrita pelo sistema, nunca as duas.
+    expect(Object.keys(SYSTEM_WRITTEN_TABLES).filter(isAppendOnly)).toEqual([]);
     const privileges = await owner.pool.query<{ name: string; role: string; can_select: boolean; can_insert: boolean; can_update: boolean; can_delete: boolean }>(
       `select t.name, r.role,
               has_table_privilege(r.role, format('public.%I', t.name), 'select') as can_select,
@@ -234,9 +186,15 @@ describe("schema", () => {
          from unnest($1::text[]) as t(name), unnest(array['deskvoice_app', 'deskvoice_system']) as r(role)`,
       [scoped.map((t) => t.name)],
     );
+    expect(privileges.rows).toHaveLength(scoped.length * 2);
     for (const row of privileges.rows) {
-      const changes = !isAppendOnly(row.name);
-      expect([row.can_select, row.can_insert, row.can_update, row.can_delete], `${row.name} as ${row.role}`).toEqual([true, true, changes, changes]);
+      const expected =
+        isSystemWritten(row.name) && row.role === "deskvoice_app"
+          ? [true, false, false, false]
+          : isSystemWritten(row.name)
+            ? [true, true, true, true]
+            : [true, true, !isAppendOnly(row.name), !isAppendOnly(row.name)];
+      expect([row.can_select, row.can_insert, row.can_update, row.can_delete], `${row.name} as ${row.role}`).toEqual(expected);
     }
   });
 
@@ -307,8 +265,16 @@ describe.each(scoped.map((t) => t.name))("isolation of %s", (table) => {
     const { where, params } = byPk(table, rowsA[table] ?? {});
     const change = (q: OrgQuery) => q.exec(`update ${ident(table)} set organization_id = organization_id where ${where}`, params);
     await withOrg(app, orgA, async (q) => expect(await count(q, table, where, params)).toBe(1));
-    if (isAppendOnly(table)) await expect(withOrg(app, orgA, change)).rejects.toMatchObject(PERMISSION_DENIED);
+    if (refusesChange(table)) await expect(withOrg(app, orgA, change)).rejects.toMatchObject(PERMISSION_DENIED);
     else await withOrg(app, orgA, async (q) => expect(await change(q)).toBe(1));
+  });
+
+  it("lets the owning organization insert and delete its own rows, unless the system writes the table", async () => {
+    if (!isSystemWritten(table)) return;
+    const { where, params } = byPk(table, rowsA[table] ?? {});
+    await expect(withOrg(app, orgA, (q) => insert(q, table, factoryFor(table)(orgA, rowsA)))).rejects.toMatchObject(PERMISSION_DENIED);
+    await expect(withOrg(app, orgA, (q) => q.exec(`delete from ${ident(table)} where ${where}`, params))).rejects.toMatchObject(PERMISSION_DENIED);
+    await withOrg(app, orgA, async (q) => expect(await count(q, table, where, params)).toBe(1));
   });
 
   it("hides the row of organization A from organization B", async () => {
@@ -331,7 +297,7 @@ describe.each(scoped.map((t) => t.name))("isolation of %s", (table) => {
     const touch = (q: OrgQuery) => q.exec(`update ${ident(table)} set organization_id = organization_id where ${where}`, params);
     const take = (q: OrgQuery) => q.exec(`update ${ident(table)} set organization_id = $1 where ${steal.where}`, [orgB, ...steal.params]);
     for (const attempt of [touch, take]) {
-      if (isAppendOnly(table)) await expect(withOrg(app, orgB, attempt)).rejects.toMatchObject(PERMISSION_DENIED);
+      if (refusesChange(table)) await expect(withOrg(app, orgB, attempt)).rejects.toMatchObject(PERMISSION_DENIED);
       else await withOrg(app, orgB, async (q) => expect(await attempt(q)).toBe(0));
     }
     await withOrg(app, orgA, async (q) => expect(await count(q, table, where, params)).toBe(1));
@@ -342,7 +308,7 @@ describe.each(scoped.map((t) => t.name))("isolation of %s", (table) => {
     const { where, params } = byPk(table, row, 2);
     await expect(
       withOrg(app, orgB, (q) => q.exec(`update ${ident(table)} set organization_id = $1 where ${where}`, [orgA, ...params])),
-    ).rejects.toMatchObject(isAppendOnly(table) ? PERMISSION_DENIED : { code: RLS_VIOLATION });
+    ).rejects.toMatchObject(refusesChange(table) ? PERMISSION_DENIED : { code: RLS_VIOLATION });
   });
 
   it("does not let organization B delete the row of organization A", async () => {
@@ -351,7 +317,7 @@ describe.each(scoped.map((t) => t.name))("isolation of %s", (table) => {
     const byKey = (q: OrgQuery) => q.exec(`delete from ${ident(table)} where ${where}`, params);
     const byOrg = (q: OrgQuery) => q.exec(`delete from ${ident(table)} where organization_id = $1`, [orgA]);
     for (const attempt of [byKey, byOrg]) {
-      if (isAppendOnly(table)) await expect(withOrg(app, orgB, attempt)).rejects.toMatchObject(PERMISSION_DENIED);
+      if (refusesChange(table)) await expect(withOrg(app, orgB, attempt)).rejects.toMatchObject(PERMISSION_DENIED);
       else await withOrg(app, orgB, async (q) => expect(await attempt(q)).toBe(0));
     }
     await withOrg(app, orgA, async (q) => expect(await count(q, table, where, params)).toBe(1));
@@ -359,7 +325,7 @@ describe.each(scoped.map((t) => t.name))("isolation of %s", (table) => {
 
   it("refuses an insert for organization A made inside organization B", async () => {
     const row = factoryFor(table)(orgA, rowsA);
-    await expect(withOrg(app, orgB, (q) => insert(q, table, row))).rejects.toMatchObject({ code: RLS_VIOLATION });
+    await expect(withOrg(app, orgB, (q) => insert(q, table, row))).rejects.toMatchObject(isSystemWritten(table) ? PERMISSION_DENIED : { code: RLS_VIOLATION });
   });
 });
 
@@ -426,8 +392,8 @@ describe("withOrg and withSystem", () => {
       await q.many("select set_config('app.system', 'on', true)");
       for (const { name } of scoped) {
         expect(await count(q, name, "organization_id = $1", [orgA]), name).toBe(0);
-        // Tabela só de acréscimo recusa qualquer delete pela permissão; a recusa é provada acima.
-        if (!isAppendOnly(name)) expect(await q.exec(`delete from ${ident(name)} where organization_id = $1`, [orgA]), name).toBe(0);
+        // Tabela só de acréscimo ou escrita pelo sistema recusa qualquer delete pela permissão; a recusa é provada acima.
+        if (!refusesChange(name)) expect(await q.exec(`delete from ${ident(name)} where organization_id = $1`, [orgA]), name).toBe(0);
       }
       expect(await count(q, "organizations", "id = $1", [orgA])).toBe(0);
     });

@@ -34,6 +34,12 @@ export interface VoiceSessionConfig {
    * de partida (docs/specs/2026-11-14-ambiente-barulhento.md); o efeito real não foi medido.
    */
   listeningEnvironment?: ListeningEnvironment;
+  /**
+   * `text`: sessão de teste do agente (docs/specs/2026-11-21-testes-do-agente.md, 5.3). Quem liga
+   * fala por `sendUserText`, o agente responde em `transcript` e avisa o fim da resposta em
+   * `turnDone`; não há áudio. Só para motor com `textMode`. Ausente, vale `audio`, a ligação de sempre.
+   */
+  mode?: "audio" | "text";
 }
 
 /** Como o agente ajusta a detecção de fala do provedor. `normal` é o de sempre. */
@@ -50,11 +56,19 @@ export interface Usage {
   textOutputTokens?: number;
 }
 
+/** De onde veio o marco de fim da vez de quem ligou (`callerTurnEnded`). */
+export type CallerTurnSource = "vad" | "transcript";
+
 export interface VoiceSessionEvents {
   /** Fala do agente. Sempre PCM16 mono 8 kHz, em pedaços de qualquer tamanho. */
   audio(pcm16_8k: Buffer): void;
   transcript(turn: { speaker: "user" | "agent"; text: string }): void;
   toolCall(call: { id: string; name: string; args: unknown }): void;
+  /**
+   * O provedor desistiu destas chamadas de ferramenta (o Gemini avisa com `toolCallCancellation`,
+   * em geral porque quem ligou falou por cima): o resultado delas não deve ir em `sendToolResult`.
+   */
+  toolCallCancelled(ids: string[]): void;
   /** O usuário falou por cima: quem toca o áudio deve descartar o que ainda não saiu. */
   interrupted(): void;
   /**
@@ -66,10 +80,33 @@ export interface VoiceSessionEvents {
    * só detecção de início de fala.
    */
   callerActivity(signal: { words: boolean }): void;
+  /**
+   * A vez de quem ligou acabou, pelo que o motor sabe agora. É o marco da latência por turno: quem
+   * mede (a sessão, com o relógio dela) conta daqui até o primeiro áudio do agente que sai para a
+   * linha. Pode vir mais de uma vez antes da resposta: vale o último. Opcional para o motor: sem
+   * ele, não há medida, e nada quebra.
+   *
+   * `source` diz de onde veio o marco. `vad`: o provedor detectou o fim da fala (OpenAI,
+   * `input_audio_buffer.speech_stopped`). `transcript`: o provedor não avisa o fim da fala, e o
+   * marco é o pedaço mais recente da transcrição de quem ligou (Gemini); a transcrição chega depois
+   * do fim real da fala, então a medida sai menor que a espera de verdade.
+   */
+  callerTurnEnded(signal: { source: CallerTurnSource }): void;
   /** Incremento desde o último `usage` (não é acumulado): quem mede custo soma os eventos. */
   usage(usage: Usage): void;
   /** Seguido de `closed` quando é fatal; sozinho, a sessão continua. */
   error(error: Error): void;
+  /**
+   * O motor trocou a conexão com o provedor por uma nova, retomando a mesma conversa, sem fechar a
+   * sessão (o provedor avisou que ia fechar a de antes, ou ela caiu). Só informa: nada muda para quem
+   * chama, e o consumo da conexão nova continua chegando em `usage`.
+   */
+  resumed(): void;
+  /**
+   * Sessão em `mode: "text"`: a resposta do agente acabou, sem ferramenta pendente. É o fim do turno
+   * de um teste do agente. Opcional: motor sem `textMode` não emite.
+   */
+  turnDone(): void;
   closed(reason: string): void;
 }
 
@@ -83,14 +120,29 @@ export interface VoiceSession {
   /**
    * Pede ao provedor que dê por encerrada a fala de quem ligou e responda ao que ouviu. A guarda
    * contra o silêncio chama isto quando o provedor não viu o fim do turno.
+   *
+   * Diz se agiu: `false` quando o motor não mandou nada, porque o provedor já tinha fechado a vez
+   * de quem ligou e só está lento (a resposta que vier não foi forçada). `true`, ou sem retorno,
+   * quando mandou fechar. A sessão só tira o turno da latência por turno quando o motor agiu.
    */
-  closeCallerTurn(): void;
+  closeCallerTurn(): boolean | void;
   /**
    * Contexto para o agente, que não vira fala por si. Entra pelo mecanismo que o provedor documenta,
    * nunca por `say`. Sem o método, o motor não aceita orientação, e quem chama registra isso.
    * Depois de `close`, não manda nada.
    */
   guide?(text: string): void;
+  /**
+   * Quanto da fala desta sessão já tocou para quem ligou, em ms, acumulado desde o início da sessão.
+   * Quem toca o áudio chama na interrupção, antes de descartar o resto, para o motor cortar no
+   * histórico o que não chegou a tocar. Sem o método, o motor não corta e nada muda.
+   */
+  played?(ms: number): void;
+  /**
+   * Sessão em `mode: "text"`: o que quem liga diz, em texto. Só nos motores com `textMode`; o fim da
+   * resposta vem em `turnDone`.
+   */
+  sendUserText?(text: string): void;
   close(): Promise<void>;
 }
 
@@ -143,8 +195,10 @@ export const KEY_CHECK_RESULTS = [
   "region_unavailable",
   /** O provedor pediu para esperar (limite de pedidos). */
   "rate_limited",
-  /** Sem resposta no prazo, sem rede, ou erro do lado do provedor (5xx). */
+  /** Sem resposta: prazo esgotado, DNS, conexão recusada ou derrubada. */
   "unreachable",
+  /** O provedor respondeu, com erro do lado dele (5xx). */
+  "provider_error",
   /** O provedor respondeu algo que não é o que a documentação descreve. */
   "unexpected_response",
   /** O motor não usa chave. */
@@ -176,6 +230,13 @@ export interface EngineVoice {
   style?: string;
   /** O provedor recomenda esta voz. A tela escreve o rótulo no idioma dela. */
   recommended?: boolean;
+  /**
+   * A amostra que o botão "Ouvir" da tela do agente toca, por idioma falado: o caminho do arquivo
+   * relativo a `apps/panel/public/` (`voice-samples/<motor>/<voz>.<idioma>.mp3`). Sem a do idioma do
+   * agente, a tela toca a de pt-BR e diz que é em português; sem nenhuma, o botão fica desligado e a
+   * tela diz por quê. A cerca `voice-samples-exist` reprova caminho sem arquivo (DESA-397, fatia 1a).
+   */
+  sample?: { "pt-BR"?: string; en?: string; es?: string };
 }
 
 /** De onde veio uma declaração do provedor, como `pricing.checkedOn`: endereço e dia conferido. */
@@ -397,6 +458,18 @@ export interface VoiceEngine {
   /** Verdadeiro para motores que não precisam de chave (o simulado). */
   keyless?: boolean;
   pricing: EnginePricing;
+  /**
+   * O marco de fim da vez de quem ligou que este motor emite (`callerTurnEnded`): sempre o mesmo por
+   * motor. A sessão usa isto quando a guarda contra o silêncio fecha uma vez que não teve marco (o
+   * provedor não viu o fim da fala): o turno conta em `guardTurns` com este motor e este `source`.
+   * Motor sem a declaração: a vez que a guarda fecha sem marco não conta em lugar nenhum.
+   */
+  callerTurnSource?: CallerTurnSource;
+  /**
+   * O motor aceita sessão de teste em texto (`mode: "text"`, `sendUserText`, `turnDone`). Motor sem
+   * a declaração não roda teste do agente.
+   */
+  textMode?: true;
   connect(config: VoiceSessionConfig, apiKey: string, options?: ConnectOptions): Promise<VoiceSession>;
   /**
    * Lê a conversa e diz o desfecho comercial dela, com a confiança e a fala que o sustenta.

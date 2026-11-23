@@ -1,9 +1,8 @@
 import { queueHealth, withOrg, withSystem, type OrgQuery } from "@deskvoice/core";
 import { ApiError, SESSION_COOKIE, findSession, handlePublic, readCookie, type Session } from "../../../../../server/context";
-import { keyCheckSetting, readKeyCheck } from "../../../../../server/engine-key";
+import { readEngineKeys } from "../../../../../server/engine-key";
 import { agentLine, anonymousEngineLine, databaseLine, engineLine, healthReport, panelLine, routinesLine, telephonyLine, trunkLine, voiceLine, whatsappCallsLine, whatsappLine, type EngineKeys, type HealthCheck, type HealthId } from "../../../../../server/health";
-import { listEngines } from "../../../../../server/pieces";
-import { voiceHealthSchema, voiceRequest, type VoiceHealth } from "../../../../../server/voice";
+import { organizationTrunks, voiceHealthSchema, voiceRequest, type VoiceHealth } from "../../../../../server/voice";
 import { observe, type WhatsAppView } from "../../../../../server/whatsapp";
 import { observeCalls, type WhatsAppCallsView } from "../../../../../server/whatsapp-calls";
 
@@ -21,21 +20,6 @@ import { observeCalls, type WhatsAppCallsView } from "../../../../../server/what
 export const GET = handlePublic({}, async ({ request, deps }) => {
   const now = deps.clock.now();
   const lines: Partial<Record<HealthId, HealthCheck>> = { panel: panelLine() };
-
-  const labels = new Map((await listEngines()).map((engine) => [keyCheckSetting(engine.id), engine.label]));
-  // Só o código do último teste de cada chave: a chave mesma nunca sai do banco por aqui.
-  const readEngineKeys = async (q: OrgQuery): Promise<EngineKeys> => {
-    const rows = await q.many<{ key: string; value: unknown }>(
-      "select key, case when secret then null else value end as value from settings where key like 'engine.%.api_key' or key like 'engine.%.key_check'",
-    );
-    return {
-      keys: rows.filter((row) => row.key.endsWith(".api_key")).length,
-      checks: rows.flatMap((row) => {
-        const check = readKeyCheck(row.value);
-        return check ? [{ engine: labels.get(row.key) ?? row.key, check }] : [];
-      }),
-    };
-  };
 
   const token = readCookie(request, SESSION_COOKIE);
   let session: Session | null = null;
@@ -65,8 +49,12 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
   lines.telephony = telephonyLine(voice);
   lines.routines = routinesLine(database ? await queueHealth(deps.db, now) : null, now);
 
+  // Sem sessão, a linha de telefonia soma a instalação inteira, como o `healthcheck.sh` espera.
+  let trunks = voice;
   if (session) {
     const org = <T>(run: (q: OrgQuery) => Promise<T>): Promise<T> => withOrg(deps.db, session.organizationId, run);
+    // Com sessão, só as linhas da organização dela: as de outra organização não entram na conta.
+    if (voice) trunks = await org((q) => organizationTrunks(q, voice));
     const agent = await org((q) => q.one<{ lastSeenAt: Date }>(`select last_seen_at as "lastSeenAt" from update_agent_status`));
     lines.agent = agentLine({ lastSeenAt: agent?.lastSeenAt ?? null }, now);
     let whatsapp: WhatsAppView | "down";
@@ -86,7 +74,12 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
       if (!(error instanceof ApiError)) throw error;
       calls = "down";
     }
-    lines.whatsapp_calls = whatsappCallsLine(calls);
+    // A prova de que o WhatsApp entrega a ligação a este aparelho: uma chamada dele desde a conexão.
+    const since = calls !== "down" && calls.status === "connected" ? calls.connectedAt : null;
+    const lastCall = since
+      ? await org((q) => q.one<{ at: Date | null }>(`select max(started_at) as at from calls where channel = 'whatsapp' and started_at >= $1`, [since]))
+      : null;
+    lines.whatsapp_calls = whatsappCallsLine(calls, lastCall?.at ?? null);
   } else if (!database && token) {
     // Sem banco não se confere a sessão: para a tela, as linhas da organização dizem por que faltam.
     lines.agent = agentLine(null, now);
@@ -94,7 +87,7 @@ export const GET = handlePublic({}, async ({ request, deps }) => {
     lines.whatsapp_calls = whatsappCallsLine(null);
   }
 
-  lines.trunk = trunkLine(voice);
+  lines.trunk = trunkLine(trunks);
   const engine = engineLine(engineKeys);
   lines.engine = session ? engine : anonymousEngineLine(engine);
   const report = healthReport(lines);

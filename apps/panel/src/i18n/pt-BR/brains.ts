@@ -15,6 +15,7 @@ const brains = {
   removeConfirm: "Remover a chave de {brain}? A lista de modelos de {brain} também é apagada. A chave removida não pode ser recuperada.",
   removeYes: "Remover a chave de {brain}",
   removeChosen: "{brain} é quem lê as ligações hoje (modelo {model}). Sem a chave, as ligações deixam de ser lidas até a chave voltar ou você escolher outro em \"Quem lê a ligação\", na seção da análise. Elas não passam para o motor do agente.",
+  removeAgents: "A análise das ligações de {agents} vai parar: esses agentes escolheram {brain} para ler as ligações deles. Elas não passam para a escolha da organização nem para o motor do agente.",
   cancel: "Cancelar",
   neverTested: "A chave ainda não foi testada. Use Atualizar lista para testar.",
   /** `{when}` é a data do teste, formatada no idioma da tela; `{result}`, uma frase de `results`. */
@@ -29,6 +30,7 @@ const brains = {
     region_unavailable: "o provedor não atende o país ou a região deste servidor. Trocar a chave não resolve.",
     rate_limited: "o provedor pediu para esperar (limite de pedidos da conta). Tente de novo em alguns minutos.",
     unreachable: "o provedor não respondeu a tempo, ou está fora do ar. Confira se o servidor tem acesso à internet e tente de novo.",
+    provider_error: "o provedor respondeu com erro do lado dele. Costuma passar sozinho: tente de novo em alguns minutos.",
     unexpected_response: "o provedor respondeu algo que o DeskVoice não reconhece. Tente de novo; se continuar, abra uma issue no repositório.",
   },
   errors: {

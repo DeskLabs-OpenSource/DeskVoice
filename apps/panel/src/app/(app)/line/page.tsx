@@ -11,19 +11,24 @@ import { fill } from "../../../i18n/locales";
 import ptBRCommon from "../../../i18n/pt-BR/common";
 import ptBR, { type LineDictionary } from "../../../i18n/pt-BR/line";
 import { useDict, useLocale } from "../../../i18n/provider";
-import { api, useApi } from "../../../ui/api";
+import { api, ApiFailure, useApi } from "../../../ui/api";
 import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../ui/errors";
 import { formatDateTime, formatPhone } from "../../../ui/format";
 import { Badge, Button, Field, Notice, PageHeader, Panel, Select, Skeleton, TextArea, TextInput, type Tone } from "../../../ui/kit";
 import { useCanConfigure } from "../../../ui/me";
 import { allowedView, trunkFailure } from "../../../ui/trunk-status";
-import type { Agent, PhoneNumber, Setting, Trunk } from "../../../ui/types";
+import type { Agent, IvrMenu, PhoneNumber, Setting, Trunk } from "../../../ui/types";
+import { WhatsAppCallsPanel } from "../settings/whatsapp-calls-panel";
+import { IvrMenusPanel, NumberAnswer } from "./ivr-menus";
 
 type StepStatus = "ok" | "warn" | "fail" | "skipped";
 interface CheckResult {
   status: string;
   steps: Array<{ step: "apply" | "asterisk" | "trunk"; status: StepStatus; detail: string }>;
 }
+
+/** O bloco da ligação pelo WhatsApp: o "mudou para…" de Configurações › WhatsApp aponta para este id. */
+const WHATSAPP_CALLS_ANCHOR = "ligacao-pelo-whatsapp";
 
 const STATUS_TONE: Record<string, Tone> = { ok: "ok", warn: "warn", fail: "fail" };
 const STEP_ICON: Record<StepStatus, ReactNode> = {
@@ -85,8 +90,27 @@ function AllowedAddresses({ trunk, t, onSaved }: { trunk: Trunk; t: LineDictiona
 
 const ICON_BUTTON = "grid size-9 cursor-pointer place-items-center rounded-xs text-muted hover:bg-sunken";
 
-/** Um número da linha: troca quem atende, corrige o número digitado errado e remove, com confirmação. */
-function NumberRow({ entry, trunkName, t, cancel, agentOptions, onChanged }: { entry: PhoneNumber; trunkName: string; t: LineDictionary; cancel: string; agentOptions: ReactNode; onChanged(): void }) {
+/**
+ * Um número da linha: troca quem atende (o agente, ou um menu por teclas), corrige o número digitado
+ * errado e remove, com confirmação.
+ */
+function NumberRow({
+  entry,
+  trunkName,
+  t,
+  cancel,
+  agentOptions,
+  menus,
+  onChanged,
+}: {
+  entry: PhoneNumber;
+  trunkName: string;
+  t: LineDictionary;
+  cancel: string;
+  agentOptions: ReactNode;
+  menus: IvrMenu[];
+  onChanged(): void;
+}) {
   const canConfigure = useCanConfigure();
   const action = useAction();
   const [mode, setMode] = useState<"view" | "edit" | "remove">("view");
@@ -103,9 +127,16 @@ function NumberRow({ entry, trunkName, t, cancel, agentOptions, onChanged }: { e
       <div className="grid items-center gap-x-4 gap-y-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
         <span className="data text-[1.07rem]">{pretty}</span>
         <span className="text-muted">{trunkName}</span>
-        <Select aria-label={t.answeredBy} disabled={!canConfigure} value={entry.agentId ?? ""} onChange={(event) => run(() => api(`/phone-numbers/${entry.id}`, { method: "PATCH", body: { agentId: event.target.value || null } }))}>
-          {agentOptions}
-        </Select>
+        <NumberAnswer
+          entry={entry}
+          menus={menus}
+          onChange={(body) => run(() => api(`/phone-numbers/${entry.id}`, { method: "PATCH", body }))}
+          agentSelect={
+            <Select aria-label={t.answeredBy} disabled={!canConfigure} value={entry.agentId ?? ""} onChange={(event) => run(() => api(`/phone-numbers/${entry.id}`, { method: "PATCH", body: { agentId: event.target.value || null } }))}>
+              {agentOptions}
+            </Select>
+          }
+        />
         {canConfigure ? (
           <div className="flex gap-1">
             <button
@@ -180,8 +211,19 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
     outboundHost: trunk?.outboundHost ?? "",
   });
   const [applied, setApplied] = useState(true);
+  // A API recusou com `trunk_overlap_unconfirmed`: nada foi gravado, e a tela pergunta antes.
+  // "back": a pessoa voltou sem salvar, e a tela não diz "Salvo.". "limited": a API recusou com
+  // `too_many_attempts` (limite por minuto da conferência), e nada foi gravado.
+  const [overlap, setOverlap] = useState<"asking" | "back" | "limited" | null>(null);
+  // O corpo que recebeu o 409. "Salvar mesmo assim" reenvia exatamente ele, nunca o formulário do
+  // momento: se o formulário muda com a caixa aberta, a caixa fecha e o corpo guardado sai.
+  const [refused, setRefused] = useState<Record<string, unknown> | null>(null);
   const [result, setResult] = useState<CheckResult | null>(null);
-  const set = (key: keyof typeof draft, value: string): void => setDraft((current) => ({ ...current, [key]: value }));
+  const set = (key: keyof typeof draft, value: string): void => {
+    setRefused(null);
+    setOverlap((current) => (current === "asking" ? null : current));
+    setDraft((current) => ({ ...current, [key]: value }));
+  };
   // Destino mudou: a senha gravada não acompanha (a API recusa), então a tela já pede a nova.
   const moved = trunk !== null && trunk.secret.configured && (draft.host !== trunk.host || draft.username !== (trunk.username ?? ""));
   const status = result?.status ?? trunk?.status ?? "unverified";
@@ -190,23 +232,41 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
+    const { password, matchExtra, outboundHost, ...rest } = draft;
+    // Uma linha por campo; o que ficou em branco não vira endereço. A lista vale nos dois modos;
+    // fora do modo por IP o destino de saída não existe: a API recusa, e a tela não manda lixo.
+    const addresses = matchExtra
+      .split("\n")
+      .map((item) => item.trim())
+      .filter((item) => item !== "");
+    send({
+      ...rest,
+      matchExtra: addresses,
+      outboundHost: rest.authMode === "ip" && outboundHost.trim() !== "" ? outboundHost.trim() : null,
+      ...(password && { password }),
+    });
+  };
+
+  const send = (body: Record<string, unknown>): void => {
+    setOverlap(null);
+    setRefused(null);
     void save.run(async () => {
-      const { password, matchExtra, outboundHost, ...rest } = draft;
-      // Uma linha por campo; o que ficou em branco não vira endereço. A lista vale nos dois modos;
-      // fora do modo por IP o destino de saída não existe: a API recusa, e a tela não manda lixo.
-      const addresses = matchExtra
-        .split("\n")
-        .map((item) => item.trim())
-        .filter((item) => item !== "");
-      const saved = await api<Trunk>(trunk ? `/trunks/${trunk.id}` : "/trunks", {
-        method: trunk ? "PATCH" : "POST",
-        body: {
-          ...rest,
-          matchExtra: addresses,
-          outboundHost: rest.authMode === "ip" && outboundHost.trim() !== "" ? outboundHost.trim() : null,
-          ...(password && { password }),
-        },
-      });
+      let saved: Trunk;
+      try {
+        saved = await api<Trunk>(trunk ? `/trunks/${trunk.id}` : "/trunks", { method: trunk ? "PATCH" : "POST", body });
+      } catch (failure) {
+        // Faixa que cruza a de outra organização: a linha NÃO foi salva. A caixa abaixo pergunta.
+        if (failure instanceof ApiFailure && failure.code === "trunk_overlap_unconfirmed") {
+          setRefused(body);
+          setOverlap("asking");
+          return;
+        }
+        if (failure instanceof ApiFailure && failure.code === "too_many_attempts") {
+          setOverlap("limited");
+          return;
+        }
+        throw failure;
+      }
       setApplied(saved.applied !== false);
       setResult(null);
       set("password", "");
@@ -266,6 +326,19 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
         </fieldset>
 
         {trunk ? <AllowedAddresses trunk={trunk} t={t} onSaved={onSaved} /> : null}
+        {overlap === "asking" && refused ? (
+          <Notice tone="warn">
+            <p role="alert">{t.overlapWarning}</p>
+            <div className="mt-1 flex flex-wrap gap-2">
+              <Button variant="danger" busy={save.busy} onClick={() => send({ ...refused, confirmOverlap: true })}>
+                {t.overlapSave}
+              </Button>
+              <Button variant="ghost" onClick={() => setOverlap("back")}>
+                {t.overlapBack}
+              </Button>
+            </div>
+          </Notice>
+        ) : null}
         {!applied ? <Notice tone="warn">{t.notApplied}</Notice> : null}
         {/* A linha que ficou de fora da configuração mostra o motivo sem pedir um teste. */}
         {failure && !result ? (
@@ -297,7 +370,8 @@ function TrunkForm({ trunk, t, cancel, numbersCount, onSaved }: { trunk: Trunk |
                 {t.test}
               </Button>
             ) : null}
-            <ActionStatus action={save} />
+            {overlap === null ? <ActionStatus action={save} /> : null}
+            {overlap === "limited" ? <Notice tone="fail">{t.overlapTooMany}</Notice> : null}
             {test.error ? <ActionStatus action={test} /> : null}
             {trunk?.lastCheckAt && !result ? <span className="text-[0.87rem] text-muted">{fill(t.lastCheck, { when: formatDateTime(trunk.lastCheckAt, locale) })}</span> : null}
             {trunk && !confirming ? (
@@ -337,6 +411,7 @@ export default function LinePage() {
   const trunks = useApi<Trunk[]>("/trunks");
   const numbers = useApi<PhoneNumber[]>("/phone-numbers");
   const agents = useApi<Agent[]>("/agents");
+  const menus = useApi<IvrMenu[]>("/ivr-menus");
   const publicIp = useApi<Setting<string>>("/settings/network.public_ip");
   const [adding, setAdding] = useState(false);
   const [ip, setIp] = useState("");
@@ -344,6 +419,15 @@ export default function LinePage() {
   const saveIp = useAction();
   const addNumber = useAction();
   useEffect(() => setIp(publicIp.data?.value ?? ""), [publicIp.data]);
+  // Quem chega pelo endereço do bloco (`/line#ligacao-pelo-whatsapp`): os blocos de cima crescem quando as
+  // leituras chegam e empurram o da ligação pelo WhatsApp para baixo. Rola até ele depois delas, uma vez.
+  const aboveLoaded = trunks.data != null && numbers.data != null && menus.data != null;
+  const [scrolledToAnchor, setScrolledToAnchor] = useState(false);
+  useEffect(() => {
+    if (!aboveLoaded || scrolledToAnchor || window.location.hash !== `#${WHATSAPP_CALLS_ANCHOR}`) return;
+    setScrolledToAnchor(true);
+    document.getElementById(WHATSAPP_CALLS_ANCHOR)?.scrollIntoView({ block: "start" });
+  }, [aboveLoaded, scrolledToAnchor]);
 
   const list = trunks.data ?? [];
   const trunkId = newNumber.trunkId || list[0]?.id || "";
@@ -393,7 +477,16 @@ export default function LinePage() {
           {numbers.data?.length ? (
             <ul className="grid">
               {numbers.data.map((entry) => (
-                <NumberRow key={entry.id} entry={entry} trunkName={list.find((trunk) => trunk.id === entry.trunkId)?.name ?? ""} t={t} cancel={cancel} agentOptions={agentOptions} onChanged={numbers.reload} />
+                <NumberRow
+                  key={entry.id}
+                  entry={entry}
+                  trunkName={list.find((trunk) => trunk.id === entry.trunkId)?.name ?? ""}
+                  t={t}
+                  cancel={cancel}
+                  agentOptions={agentOptions}
+                  menus={menus.data ?? []}
+                  onChanged={numbers.reload}
+                />
               ))}
             </ul>
           ) : null}
@@ -436,6 +529,23 @@ export default function LinePage() {
           {addNumber.error ? <Notice tone="fail">{addNumber.error}</Notice> : null}
         </div>
       </Panel>
+
+      <IvrMenusPanel
+        menus={menus.data}
+        agents={agents.data ?? []}
+        numbers={numbers.data ?? []}
+        onChanged={() => {
+          menus.reload();
+          numbers.reload();
+        }}
+      />
+
+      {/* A ligação pelo WhatsApp, perto da linha e dos números. Some para quem não configura, como o painel. */}
+      {canConfigure ? (
+        <div id={WHATSAPP_CALLS_ANCHOR} className="scroll-mt-24 lg:scroll-mt-6">
+          <WhatsAppCallsPanel />
+        </div>
+      ) : null}
 
       <Panel title={t.helpTitle} description={t.helpBody}>
         <div className="grid gap-5">

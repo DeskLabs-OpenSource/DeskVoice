@@ -8,7 +8,7 @@ const privacy: PrivacyDictionary = {
   recordingDisk:
     "Each minute of a call takes about 1.9 MB on the server disk. That is arithmetic from the format (two channels, 8 kHz, 16 bits), not a measurement.",
   recordingKeeps:
-    "Turning it on or off deletes nothing. Recordings already made follow the retention period below: they are removed together with the conversation text, and without a period they are kept forever. Today's backups do not include the recordings. Check that the notice at the start of the call, under Settings → Calls, tells callers the conversation is kept.",
+    "Turning it on or off deletes nothing. Recordings already made follow the retention period below: they are removed together with the conversation text, and without a period they are kept forever. Today's backups do not include the recordings. Check that the recording notice, just above, tells callers the conversation is kept.",
   recordingForever:
     "The retention period is empty: recordings are kept forever, and the server disk grows without limit, about 1.9 MB per minute of call. Set a period below so old recordings are removed.",
   recordingStates: { on: "on", off: "off" },
@@ -107,8 +107,11 @@ const privacy: PrivacyDictionary = {
     caller_memory_changed: "{who} turned the caller memory for the agent {state}.",
     analyst_provider_confirmed: "{who} confirmed that the analyst {analyst} sends the text of what the caller says to {provider}.",
     decision_model_provider_confirmed: "{who} confirmed that the speech filter sends the call's text to {provider}.",
+    synthesizer_provider_confirmed: "{who} confirmed that the {provider} voice receives the text the agent speaks on the call.",
     organization_created: "The installation administration created this organization, named \"{name}\".",
     organization_renamed: "The installation administration renamed this organization from \"{from}\" to \"{to}\".",
+    organization_suspended: "The installation administration suspended this organization. Reason: {reason}. Tasks canceled: {n}.",
+    organization_reactivated: "The installation administration reactivated this organization. Tasks canceled on reactivation: {n}.",
     caller_notes_deleted: "{who} forgot the number ending in {suffix}. Agent notes deleted: {notes}. Closed follow-ups deleted: {followUps}.",
   },
   noteDeleted: "{who} deleted an agent note.",

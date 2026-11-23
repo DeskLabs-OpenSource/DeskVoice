@@ -18,7 +18,7 @@ import { notice, type ConnectionStatus, type Org } from "./whatsapp";
  * compara o que o WaCalls diz com o último estado gravado; é nessa comparação que "conectou" e
  * "caiu" viram aviso.
  */
-export type CallsFailure = "logged_out" | "qr_expired" | "missing";
+export type CallsFailure = "logged_out" | "qr_expired" | "pairing_failed" | "missing";
 
 export interface WhatsAppCallsView extends ServiceView {
   /** `false`: o processo de voz não tem o token do WaCalls (atualizado por um atualizador antigo, ou desenvolvimento). */
@@ -114,8 +114,11 @@ function fromVoice(state: VoiceState, before: Row): Pick<Row, "status" | "failur
   if (session.status === "connected") return { status: "connected", failure: null };
   if (session.status === "qr") return { status: "qr", failure: null };
   if (session.status === "starting") return { status: "starting", failure: null };
-  // `logged_out` antes de conectar é o código que venceu; depois, o aparelho que foi desvinculado.
-  return { status: "failed", failure: before.status === "qr" || before.status === "starting" ? "qr_expired" : "logged_out" };
+  // `logged_out` com o QR na tela é o código que venceu; antes de algum QR, o pareamento que o WhatsApp
+  // encerrou (o cliente recusado, por exemplo); depois de conectar, o aparelho que foi desvinculado.
+  if (before.status === "qr") return { status: "failed", failure: "qr_expired" };
+  if (before.status === "starting") return { status: "failed", failure: "pairing_failed" };
+  return { status: "failed", failure: "logged_out" };
 }
 
 /** Grava o que o WaCalls disse e avisa quando o estado mudou. A linha é travada: duas consultas juntas não geram dois avisos. */
@@ -137,27 +140,31 @@ async function record(q: OrgQuery, now: Date, state: VoiceState): Promise<Row | 
       q,
       now,
       before.agentId
-        ? `Ligação pelo WhatsApp: número${number} conectado. O agente escolhido atende as ligações pelo WhatsApp a partir de agora.`
-        : `Ligação pelo WhatsApp: número${number} conectado. Escolha em Configurações o agente que atende; até lá, as ligações continuam tocando no celular.`,
+        ? `Ligação pelo WhatsApp: número${number} conectado. Ligue de outro número para conferir que o agente escolhido atende: se tocar só no celular, o WhatsApp não entregou a ligação a este aparelho.`
+        : `Ligação pelo WhatsApp: número${number} conectado. Escolha em Linha telefônica o agente que atende; até lá, as ligações continuam tocando no celular.`,
     );
   } else if (next.status === "failed" && before.status === "connected") {
     await notice(
       q,
       now,
-      `O número${number} desconectou da ligação pelo WhatsApp. Conecte de novo em Configurações → WhatsApp. O WhatsApp desconecta os aparelhos vinculados quando o celular principal fica mais de 14 dias sem uso.`,
+      `O número${number} desconectou da ligação pelo WhatsApp. Conecte de novo em Linha telefônica. O WhatsApp desconecta os aparelhos vinculados quando o celular principal fica mais de 14 dias sem uso.`,
     );
+  } else if (next.status === "failed" && next.failure === "pairing_failed") {
+    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o WhatsApp encerrou a tentativa antes de mostrar o QR Code. Tente de novo em Linha telefônica. Se acontecer de novo, atualize o DeskVoice.");
   } else if (next.status === "failed") {
-    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Configurações → WhatsApp.");
+    await notice(q, now, "A conexão da ligação pelo WhatsApp não foi concluída: o QR Code não foi lido a tempo. Tente de novo em Linha telefônica.");
   }
   return after;
 }
 
 /**
  * O estado para a tela. Com uma conexão em curso, pergunta ao processo de voz e grava o que mudou.
- * `withQr: false` é a leitura da saúde, que roda em toda aba aberta a cada minuto: sem a imagem.
+ * `withQr` é obrigatório: toda chamada decide se a resposta leva o QR Code. `false` é a leitura da
+ * saúde, que roda em toda aba aberta a cada minuto, e a da sessão de suporte, que vê o estado do
+ * canal mas nunca recebe material de pareamento (`!session.support`).
  */
-export async function observeCalls(deps: ServerDeps, org: Org, organizationId: string, options: { withQr?: boolean } = {}): Promise<WhatsAppCallsView> {
-  const withQr = options.withQr ?? true;
+export async function observeCalls(deps: ServerDeps, org: Org, organizationId: string, options: { withQr: boolean }): Promise<WhatsAppCallsView> {
+  const { withQr } = options;
   const stored = await org((q) => readCallsStored(q, deps.clock.now()));
   // Sem o serviço de pé não há WaCalls, e sem pedido nenhum não existe sessão nele.
   if (stored.service !== "running" || !stored.row) return view(stored, true);
@@ -191,7 +198,7 @@ export async function connectCalls(deps: ServerDeps, org: Org, session: Session,
       [q.organizationId, sessionName(session.organizationId), state.session?.id ?? null, now],
     ),
   );
-  return observeCalls(deps, org, session.organizationId);
+  return observeCalls(deps, org, session.organizationId, { withQr: !session.support });
 }
 
 /** Desvincula o aparelho (ele some de "Aparelhos conectados") e apaga a sessão no WaCalls. */
@@ -268,5 +275,5 @@ export async function changeCallsService(deps: ServerDeps, org: Org, session: Se
         : `${session.name} pediu a remoção do serviço de ligação pelo WhatsApp deste servidor. A memória e o disco são liberados em instantes.`,
     );
   });
-  return observeCalls(deps, org, session.organizationId);
+  return observeCalls(deps, org, session.organizationId, { withQr: !session.support });
 }

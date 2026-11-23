@@ -24,20 +24,68 @@ export interface CallTransport {
   sendAudio(pcm16_8k: Buffer): void;
   /** Descarta o que ainda não saiu (quem ligou falou por cima). */
   clearAudio(): void;
+  /**
+   * Quanto da fala do agente já saiu para quem ligou nesta chamada, em ms, acumulado: os quadros
+   * enviados, nunca o que está na fila. Opcional: o canal que não sabe (sem telefonia, o WhatsApp,
+   * o navegador) não declara, e o motor não corta a fala interrompida no histórico.
+   */
+  playedMs?(): number;
   /** Quem ligou desligou, ou a telefonia caiu. Não dispara quando o encerramento partiu daqui. */
   onHangup(handler: () => void): void;
   /** Espera a fala pendente terminar de sair e desliga. */
   hangup(): Promise<void>;
-  /** Espera a fala pendente terminar de sair e passa a ligação para `toE164`. */
-  transfer(toE164: string): Promise<void>;
+  /**
+   * Espera a fala pendente terminar de sair e passa a ligação para `toE164`. Sem `returnIfUnanswered`,
+   * resolve assim que a ligação saiu daqui, como sempre foi. Com ele, e só no canal que declara
+   * `canReturnFromTransfer`, resolve quando a transferência terminou: atendida (no atendimento), abandonada
+   * por quem ligou, ou de volta, com o áudio desta ligação já no transporte de novo (`returned`).
+   */
+  transfer(toE164: string, options?: TransferOptions): Promise<TransferOutcome | void>;
+  /**
+   * `true`: a transferência que ninguém atende pode voltar para a conversa (`transfer` com
+   * `returnIfUnanswered`). Só o Asterisk declara (Vapi · fatia 5a). Ausente vale `false`.
+   */
+  readonly canReturnFromTransfer?: boolean;
   /**
    * Aperta teclas no menu do outro lado e resolve quando o último tom saiu. Opcional: o canal que
    * não tem como mandar tom (a ligação pelo WhatsApp) não declara, e a ferramenta se recusa.
    */
   sendDtmf?(digits: string): Promise<void>;
+  /**
+   * Tecla apertada por quem ligou. Opcional pelo mesmo motivo de `sendDtmf`, ao contrário: o canal
+   * que não tem teclado (a ligação pelo WhatsApp) não declara.
+   *
+   * O Asterisk já entrega isto no AudioSocket há tempo (`audiosocket.ts`), mas o contrato da
+   * conversa não expunha — a tecla chegava ao processo e morria ali. É a peça que falta para um
+   * menu por teclas (URA) existir sem mexer no resto do motor de voz.
+   */
+  onDtmf?(handler: (digit: string) => void): void;
   /** Solta a telefonia na hora, sem esperar fala pendente. */
   close(): Promise<void>;
 }
+
+export interface TransferOptions {
+  /** Ninguém atendeu: a ligação volta para a conversa em vez de desligar. */
+  returnIfUnanswered?: boolean;
+  /** A conversa acabou enquanto a transferência tocava: se ninguém atender, desliga como antes. */
+  signal?: AbortSignal;
+}
+
+/**
+ * Como terminou uma transferência pedida com `returnIfUnanswered`. `status` é o `DIALSTATUS` do
+ * Asterisk, ou `CALLER_HANGUP` quando quem ligou desistiu enquanto tocava.
+ */
+export type TransferOutcome = { returned: true; status: string } | { returned: false; status: string };
+
+/** Os estados do `Dial` em que ninguém atendeu e a ligação pode voltar para a conversa. */
+export const RETURNABLE_DIAL_STATUSES: ReadonlySet<string> = new Set(["NOANSWER", "BUSY", "CONGESTION", "CHANUNAVAIL"]);
+
+/**
+ * O transporte com teclado: quem precisa da tecla de quem liga (a URA, `ivr-session.ts`) exige
+ * `onDtmf` no tipo, e o canal que não tem (a ligação pelo WhatsApp) não serve a ela sem o compilador
+ * reclamar.
+ */
+export type KeypadTransport = CallTransport & Required<Pick<CallTransport, "onDtmf">>;
 
 /**
  * Três bipes curtos. É o que quem está na linha ouve quando não há motor de voz para falar

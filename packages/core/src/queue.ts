@@ -19,20 +19,74 @@ export async function enqueueTask(q: OrgQuery, task: { kind: string; payload: ob
 }
 
 /**
- * Reivindica a tarefa elegível mais antiga de qualquer organização, ou devolve `null`.
+ * O que a suspensão de uma organização faz com cada tipo de tarefa (seção 3.3 do desenho do R8).
+ * Uma constante só, lida pela fila (`claimTask`, `nextTaskRunAt`, `queueHealth`) e pela suspensão
+ * (`suspendOrganization`, `reactivateOrganization`). Toda rotina de `apps/routines/src/routines`
+ * precisa estar aqui: um teste lê a pasta e reprova a que não estiver.
+ *
+ * - `keeps_running`: roda durante a suspensão e nunca é cancelada. Não gasta e não fala com ninguém
+ *   de fora, e cumpre o prazo de guarda e o pedido de apagamento de quem ligou, que não esperam a
+ *   agência. As de guarda se reagendam sozinhas: cancelar uma quebraria a corrente para sempre.
+ * - `canceled`: age em nome da organização ou gasta. Fica parada durante a suspensão e é cancelada
+ *   na suspensão e na reativação, com o motivo `organization_suspended`. Nada volta sozinho.
+ *
+ * Tipo que não está aqui conta como `canceled`: na dúvida, a organização suspensa não age.
+ */
+export const TASK_KIND_ON_SUSPENSION = {
+  purge_transcripts: "keeps_running",
+  purge_caller_notes: "keeps_running",
+  erase_recordings: "keeps_running",
+  expire_approval: "keeps_running",
+  // O fim do acesso de suporte vale com a organização suspensa: o suporte serve justamente a ela.
+  end_support_access: "keeps_running",
+  classify_call_outcome: "canceled",
+  call_back: "canceled",
+  deliver_notification: "canceled",
+  deliver_webhook: "canceled",
+  follow_up: "canceled",
+  review_call: "canceled",
+  summarize_call: "canceled",
+  transcribe_call: "canceled",
+} as const satisfies Record<string, "keeps_running" | "canceled">;
+
+/** Os tipos que rodam mesmo com a organização suspensa. */
+export const KEEPS_RUNNING_WHEN_SUSPENDED: readonly string[] = Object.entries(TASK_KIND_ON_SUSPENSION)
+  .filter(([, side]) => side === "keeps_running")
+  .map(([kind]) => kind);
+
+/** O `last_error` da tarefa cancelada pela suspensão. */
+export const TASK_CANCELED_BY_SUSPENSION = "organization_suspended";
+
+// A elegibilidade de uma tarefa `queued`: organização ativa, ou um tipo que roda mesmo suspensa.
+// A tarefa cancelável de organização suspensa fica `queued` sem rodar; quem a cancela é a
+// suspensão e a reativação, na transação delas. `$1` é `KEEPS_RUNNING_WHEN_SUSPENDED`.
+const ELIGIBLE = "(tasks.kind = any($1::text[]) or not exists (select 1 from organizations o where o.id = tasks.organization_id and o.suspended_at is not null))";
+
+/**
+ * Reivindica a tarefa elegível mais antiga de qualquer organização ativa, ou devolve `null`.
  * `skip locked` garante que dois processos nunca recebem a mesma.
  */
 export async function claimTask(db: Db, now: Date): Promise<ClaimedTask | null> {
   const row = await withSystem(db, (q) =>
     q.one<{ id: string; organization_id: string; call_id: string | null; kind: string; payload: Record<string, unknown>; attempts: number }>(
       `update tasks set status = 'running', attempts = attempts + 1
-        where id = (select id from tasks where status = 'queued' and run_at <= $1
+        where id = (select id from tasks where status = 'queued' and run_at <= $2 and ${ELIGIBLE}
                      order by run_at, created_at for update skip locked limit 1)
         returning id, organization_id, call_id, kind, payload, attempts`,
-      [now],
+      [KEEPS_RUNNING_WHEN_SUSPENDED, now],
     ),
   );
   return row && { id: row.id, organizationId: row.organization_id, callId: row.call_id, kind: row.kind, payload: row.payload, attempts: row.attempts };
+}
+
+/**
+ * Quando o consumidor da fila precisa acordar de novo: o `run_at` mais próximo entre as tarefas que
+ * `claimTask` pegaria, ou `null` se nenhuma. Mesma regra de elegibilidade: com uma tarefa vencida
+ * de organização suspensa na fila, uma conta sem o filtro acordaria em 0 ms para sempre.
+ */
+export async function nextTaskRunAt(db: Db): Promise<Date | null> {
+  const row = await withSystem(db, (q) => q.one<{ at: Date | null }>(`select min(run_at) as at from tasks where status = 'queued' and ${ELIGIBLE}`, [KEEPS_RUNNING_WHEN_SUSPENDED]));
+  return row?.at ?? null;
 }
 
 export async function completeTask(db: Db, taskId: string): Promise<void> {
@@ -61,7 +115,33 @@ export async function failTask(db: Db, taskId: string, error: string, now: Date)
   return { status: row.status, runAt: row.run_at };
 }
 
+/**
+ * A fila da organização da transação, para a visão geral da instalação (seção 3.7 do desenho do R8):
+ * `late` são as tarefas `queued` com o `run_at` vencido, e `failedLast24h` as `failed` cujo `run_at`
+ * cai nas últimas 24 horas. `tasks` não guarda quando a tarefa falhou: `failTask` mantém o `run_at`
+ * da última tentativa ao marcá-la `failed`. É a hora em que a última tentativa estava marcada, e não
+ * a hora da falha; com a fila atrasada, a diferença é o atraso.
+ */
+export async function organizationQueue(q: OrgQuery, now: Date): Promise<{ late: number; failedLast24h: number }> {
+  const row = await q.one<{ late: number; failed: number }>(
+    `select count(*) filter (where status = 'queued' and run_at <= $1)::int as late,
+            count(*) filter (where status = 'failed' and run_at >= $1::timestamptz - interval '24 hours')::int as failed
+       from tasks`,
+    [now],
+  );
+  return { late: row?.late ?? 0, failedLast24h: row?.failed ?? 0 };
+}
+
 const TASKS_CHANNEL = "tasks";
+
+/**
+ * Acorda o consumidor da fila quando a transação de `q` confirmar, sem enfileirar tarefa. É o que a
+ * lápide da exclusão de organização usa: a rotina que termina a exclusão roda a cada volta do
+ * runner, e a lápide não é uma tarefa (a tarefa seria da organização e sumiria na cascata).
+ */
+export async function wakeTaskRunner(q: OrgQuery): Promise<void> {
+  await q.exec("select pg_notify($1, '')", [TASKS_CHANNEL]);
+}
 
 /** Acorda `onWake` a cada tarefa enfileirada. Devolve a função que encerra a escuta. */
 export function listenTasks(db: Db, onWake: () => void, onError?: (error: Error) => void): Promise<() => Promise<void>> {
@@ -78,9 +158,14 @@ export function listenTasks(db: Db, onWake: () => void, onError?: (error: Error)
  * vivo, escutando e travado numa rotina. Como ele executa uma tarefa por vez, a próxima vencida
  * fica esperando, e em 10 minutos a saúde falha. Teto conhecido: uma rotina travada sem nenhuma
  * outra tarefa vencida atrás dela não aparece, porque não atrasa ninguém.
+ *
+ * A tarefa cancelável de organização suspensa fica de fora: ela espera de propósito, e contá-la
+ * acusaria a fila de travada. A que roda mesmo suspensa conta, porque precisa rodar.
  */
 export async function queueHealth(db: Db, now: Date): Promise<{ listeners: number; oldestDueAt: Date | null }> {
   const listeners = await countListeners(db, TASKS_CHANNEL);
-  const row = await withSystem(db, (q) => q.one<{ at: Date | null }>("select min(run_at) as at from tasks where status = 'queued' and run_at <= $1", [now]));
+  const row = await withSystem(db, (q) =>
+    q.one<{ at: Date | null }>(`select min(run_at) as at from tasks where status = 'queued' and run_at <= $2 and ${ELIGIBLE}`, [KEEPS_RUNNING_WHEN_SUSPENDED, now]),
+  );
   return { listeners, oldestDueAt: row?.at ?? null };
 }

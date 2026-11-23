@@ -64,6 +64,15 @@ describe("review_call: as regras fixas", () => {
     expect(reviewCaseOf([...answered, ev("approval_requested")], "caller_hangup", inbound("tool_running"))).toBe("caller_hung_up_waiting");
   });
 
+  it("caller_silent (o \"ainda está aí?\" encerrou a ligação calada) não abre caso sozinho, nem com aprovação pendente ou a vez aberta", () => {
+    const silent = [ev("call_answered"), ev("caller_idle"), ev("caller_idle"), ev("caller_idle")];
+    expect(reviewCaseOf(silent, "caller_silent")).toBeNull();
+    for (const openTurn of ["agent_speaking", "caller_waiting", "tool_running", null] as const) {
+      expect(reviewCaseOf(silent, "caller_silent", { direction: "inbound", openTurn, afterAsk: true })).toBeNull();
+    }
+    expect(reviewCaseOf([...silent, ev("approval_requested")], "caller_silent", { direction: "inbound", openTurn: null })).toBeNull();
+  });
+
   it("condição 2(c): o desligar depois do \"pode repetir?\" conta só com a vez nula e no caller_hangup", () => {
     const answered = [ev("call_answered")];
     const after = { direction: "inbound" as const, openTurn: null, afterAsk: true };

@@ -3,6 +3,7 @@ import {
   CALL_RECORDING_SETTING,
   CALLER_MEMORY_AGENT_SETTING,
   callerMemoryAgentOf,
+  callBackInstruction,
   callRecordingOf,
   decryptSecret,
   enqueueTask,
@@ -72,9 +73,12 @@ import {
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
+import { CALLER_SILENT, createCallerIdleGuard, type CallerIdleGuard } from "./caller-idle";
 import { createSilenceGuard, type SilenceGuard } from "./silence-guard";
+import { createTurnLatencyMeter } from "./turn-latency";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
-import { failureTone, realSchedule, type CallTransport, type Schedule } from "./transport";
+import { CALLER_HANGUP, noticeUnansweredTransfer } from "./transfer-notice";
+import { failureTone, realSchedule, type CallTransport, type Schedule, type TransferOutcome } from "./transport";
 
 /** O áudio do motor é PCM16 mono 8 kHz: 16 bytes por milissegundo de fala. */
 const PCM16_8K_BYTES_PER_MS = 16;
@@ -158,6 +162,8 @@ interface Ending {
    * ausente, o campo não é gravado.
    */
   callerSpokeAfterAsk?: boolean;
+  /** A telefonia já saiu daqui (a transferência terminou do lado do Asterisk): `finish` não a toca. */
+  released?: boolean;
 }
 
 interface AgentRow {
@@ -176,18 +182,30 @@ interface AgentRow {
   listening_environment: "normal" | "noisy";
   agent_handoff_targets: string[];
   analyst_id: string | null;
+  /** Ninguém atendeu a transferência: a ligação volta para o agente (Vapi · fatia 5a). */
+  transfer_returns_to_agent: boolean;
+  /** O "ainda está aí?" (Vapi · fatia 9, decisão B): desligada, o trecho nasce sem a guarda, que não pergunta nem encerra. */
+  caller_idle_guard: boolean;
 }
 
 const AGENT_COLUMNS =
-  "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets, analyst_id";
+  "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets, analyst_id, transfer_returns_to_agent, caller_idle_guard";
 
 /** Um trecho da ligação: o tempo em que ela esteve com um agente, com o motor e o custo dele. */
 interface Leg {
   agent: AgentRow;
+  /**
+   * As instruções do agente do trecho antes de `composeInstructions` (as do agente, ou as da religação,
+   * ou o roteiro do simulado): o trecho de volta parte delas e monta de novo, com um bloco lembrado só.
+   */
+  baseInstructions: string;
   engine: VoiceEngine;
   voice: VoiceSession;
   enabled: Map<string, Tool>;
   guard: SilenceGuard;
+  /** A guarda do "ainda está aí?" (item 9 da segunda leva Vapi). */
+  /** Ausente com a chave do agente desligada. */
+  idle: CallerIdleGuard | undefined;
   context: ToolContext;
   usage: LegUsage;
   /** O custo do trecho: o do motor, com o preço dele, mais o da peça de transcrição no trecho. */
@@ -202,6 +220,11 @@ interface Leg {
   analyst?: LegAnalyst;
   /** As objeções que já orientaram o agente neste trecho: cada uma orienta uma vez só. */
   guided: Set<string>;
+  /**
+   * As ferramentas em curso neste trecho, pelo id da chamada: o cancelamento do provedor aborta o
+   * `signal` delas e marca `cancelled`, e aí o resultado não vai ao motor.
+   */
+  toolsInFlight: Map<string, { name: string; abort: AbortController; cancelled: boolean }>;
 }
 
 type LegUsage = Required<Pick<Usage, "seconds" | "inputTokens" | "outputTokens" | "textInputTokens" | "cachedInputTokens" | "textOutputTokens">>;
@@ -289,6 +312,24 @@ export const HANDOFF_GREETINGS: Readonly<Record<SpokenLanguage, string>> = {
 
 export function handoffGreetingFor(language: string): string {
   return HANDOFF_GREETINGS[spokenLanguageOf(language)];
+}
+
+/**
+ * O que o agente diz primeiro no trecho de volta, quando ninguém atendeu a transferência (Vapi · fatia
+ * 5a). Fixa, como a da passagem: quem ligou ouviu a linha chamar e precisa ouvir o agente na hora.
+ */
+export const TRANSFER_RETURN_GREETINGS: Readonly<Record<SpokenLanguage, string>> = {
+  "pt-BR": "Ninguém da equipe conseguiu atender agora. Posso anotar um recado ou pedir para alguém retornar a sua ligação?",
+  en: "Nobody on the team could pick up right now. Can I take a message or ask someone to call you back?",
+  es: "Nadie del equipo pudo atender ahora. ¿Puedo tomar un recado o pedir que alguien le devuelva la llamada?",
+};
+
+/** A orientação do trecho de volta, somada às instruções do agente. `status` é o `DIALSTATUS`. */
+export function transferReturnInstruction(status: string): string {
+  return [
+    `A transferência para uma pessoa da equipe não foi atendida (${oneLine(status)}), e quem ligou voltou a falar com você. Ela acabou de ouvir você dizer que ninguém conseguiu atender e perguntar se pode anotar um recado ou pedir um retorno.`,
+    "Não tente transferir de novo. Ofereça deixar um recado para a equipe ou registrar uma pendência para alguém retornar, com as ferramentas que você tem, e diga à pessoa o que foi feito. O motivo e o resumo da transferência estão no bloco abaixo.",
+  ].join("\n");
 }
 
 /** O que entra nas instruções do agente que recebe a ligação: quem passou, o motivo e o resumo. */
@@ -399,6 +440,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   let voice: VoiceSession | undefined;
   /** A guarda contra o silêncio (antipadrão 15). Existe a partir de quando o motor conecta. */
   let guard: SilenceGuard | undefined;
+  /** A guarda do "ainda está aí?", do trecho atual. Existe a partir de quando o motor conecta. */
+  let idleGuard: CallerIdleGuard | undefined;
   /** O trecho da ligação em curso: um por agente por onde ela passou. */
   let leg: Leg | undefined;
   /** Todos os trechos, o atual inclusive: o custo da ligação é a soma dos custos deles. */
@@ -407,6 +450,16 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   const visited: AgentRow[] = [];
   let handoffs = 0;
   let handingOff = false;
+  /**
+   * A transferência com volta (Vapi · fatia 5a) está tocando: o motor fechou, as ferramentas foram
+   * soltas e as guardas pararam, mas a ligação ainda não terminou. O fim pedido fica em `pendingTransfer`.
+   */
+  let transferring = false;
+  let pendingTransfer: Ending | undefined;
+  /** A ligação já voltou de uma transferência não atendida: não transfere de novo, por nenhum caminho. */
+  let returned: { status: string; transferTo: string } | undefined;
+  /** Solta as ferramentas em espera ao começar a transferência. Um novo a cada trecho de volta. */
+  let toolsRelease = new AbortController();
   /**
    * A memória do número que o agente recebe (fatia 6), carregada uma vez no começo: o agente de
    * destino de uma passagem recebe os mesmos itens. `null` com a chave desligada ou sem item.
@@ -462,6 +515,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   /** A menor duração máxima entre os agentes por onde a ligação passou, em segundos. */
   let durationLimitSeconds = 0;
   const toolsRunning = new Set<Promise<void>>();
+  /** A latência por turno (item 6 da segunda leva Vapi): cada turno fica aqui, e vira um `turn_latency` só no fim. */
+  const latency = createTurnLatencyMeter(clock);
   /**
    * O "pode repetir?" desta ligação (desenho do follow-up da ligação que caiu, seção 3.1): `undefined`
    * sem pedido; depois dele, se quem ligou deu `callerActivity{words: true}` desde o último pedido.
@@ -488,10 +543,17 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   }
 
   /** O único encerramento: por qualquer caminho, roda uma vez. */
-  async function finish(end: Ending): Promise<void> {
+  async function finish(requested: Ending): Promise<void> {
     if (ending) return;
+    // Durante a transferência, a ligação é da discagem: o fim é o da transferência, e a telefonia não
+    // é tocada (quem ligou pode estar falando com a pessoa que atendeu). `callEnded` avisa o
+    // transporte, que desliga como antes se ninguém atender.
+    const end: Ending = transferring && pendingTransfer && !requested.released ? { ...pendingTransfer, released: true } : requested;
     ending = true;
     guard?.stop();
+    // A ligação que encerra (a transferência para a equipe inclusive) não pergunta mais "ainda está
+    // aí?". Um estado de espera da transferência que não encerre a sessão para esta guarda ao entrar nele.
+    idleGuard?.stop();
     resolveRecordingDecided();
     for (const cancel of cancelTimers) cancel();
     cancelDuration();
@@ -508,7 +570,13 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       if (leg?.piece) await closePiece(leg);
       for (const [kind, payload] of end.events ?? []) await event(kind, payload);
       if (end.notice) await panelNotice(q, clock, callId, end.notice);
+      // O trecho de volta terminou sem ninguém ficar com o próximo passo: o aviso "retorne a ligação"
+      // que a transferência não atendida mandaria sai agora, uma vez só.
+      if (returned && !(await followedUpSinceReturn())) await noticeUnansweredTransfer(q, { callId, transferTo: returned.transferTo }, returned.status, clock, true);
       await q.exec("update calls set status = $2, end_reason = $3, ended_at = $4, cost_cents = $5 where id = $1", [callId, end.status, end.endReason, clock.now(), callCents()]);
+      // Um evento por ligação, antes do fim; sem turno medido, nenhum.
+      const turnLatency = latency.summary();
+      if (turnLatency) await event("turn_latency", turnLatency);
       await event("call_ended", {
         status: end.status,
         reason: end.endReason,
@@ -531,13 +599,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // guarda inteira.
     if (end.callerGone) recorder?.clear();
     // A telefonia é solta mesmo se o banco falhou acima: ninguém fica preso na linha.
-    try {
-      if (end.tone && !end.callerGone) transport.sendAudio(failureTone());
-      if (end.callerGone) await transport.close();
-      else if (end.status === "transferred" && end.transferTo) await transport.transfer(end.transferTo);
-      else await transport.hangup();
-    } catch (error) {
-      log("error", "could not release the telephony side", { error: messageOf(error) });
+    if (!end.released) {
+      try {
+        if (end.tone && !end.callerGone) transport.sendAudio(failureTone());
+        if (end.callerGone) await transport.close();
+        else if (end.status === "transferred" && end.transferTo) await transport.transfer(end.transferTo);
+        else await transport.hangup();
+      } catch (error) {
+        log("error", "could not release the telephony side", { error: messageOf(error) });
+      }
     }
     // Fecha o arquivo em qualquer caminho de fim: com áudio vira `.wav`; sem, ou com falha, o `.part` some.
     const savedRecording = await recorder?.finish().catch((error: unknown) => {
@@ -606,8 +676,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (ending || wrappingUp) return;
     wrappingUp = true;
     guard?.stop();
+    idleGuard?.stop();
     // Sem texto: o modelo já vai falar a despedida (o resultado da ferramenta pediu), e só se espera.
-    if (farewell) voice?.say(farewell);
+    if (farewell) {
+      latency.notAnswer();
+      voice?.say(farewell);
+    }
     cancelTimers.push(schedule(() => void finish(end), FAREWELL_MS));
   }
 
@@ -617,8 +691,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     return positive.length === 0 ? 0 : Math.min(...positive);
   }
 
-  /** O número de transferência que vale: o do agente em que a ligação está agora, se o canal transfere. */
-  const currentTransferTo = (): string | null => (canTransfer ? (agent?.transfer_to_e164 ?? null) : null);
+  /**
+   * O número de transferência que vale: o do agente em que a ligação está agora, se o canal transfere.
+   * Depois de uma volta, nenhum: nem o teto de custo nem a queda do motor transferem de novo.
+   */
+  const currentTransferTo = (): string | null => (canTransfer && !returned ? (agent?.transfer_to_e164 ?? null) : null);
 
   /**
    * Confere o teto contra o custo somado da ligação. Alcançado, a despedida começa na hora, sem
@@ -626,8 +703,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    */
   function reachCeiling(total: number): { ceiling: number; transferTo: string | null } | undefined {
     const ceiling = costCeiling();
-    // Teto zero é "sem teto": com `>=`, zero derrubaria toda chamada na primeira medição.
-    if (!(ceiling > 0 && total >= ceiling) || ending || wrappingUp) return undefined;
+    // Teto zero é "sem teto": com `>=`, zero derrubaria toda chamada na primeira medição. Durante a
+    // transferência não há motor para se despedir: se ela voltar, o trecho de volta confere o teto ao abrir.
+    if (!(ceiling > 0 && total >= ceiling) || ending || wrappingUp || transferring) return undefined;
     const transferTo = currentTransferTo();
     wrapUp(
       transferTo ? FAREWELL.costCeilingTransfer : FAREWELL.costCeiling,
@@ -914,7 +992,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   };
 
   /** O contexto das ferramentas de um trecho: `agentId` é o agente do trecho (o número de transferência, a lista de destinos). */
-  const contextFor = (legAgentId: string, legLanguage: string, session: VoiceSession): ToolContext => ({
+  const contextFor = (legAgentId: string, legLanguage: string, session: VoiceSession, enabled: ReadonlyMap<string, Tool>): ToolContext => ({
     organizationId,
     callId,
     agentId: legAgentId,
@@ -925,24 +1003,31 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // Fala pela sessão do próprio trecho, e só enquanto ela é a atual: a ferramenta de um trecho já
     // substituído numa passagem não fala na voz do agente seguinte.
     say(text) {
-      if (!ending && leg?.voice === session) session.say(text);
+      if (ending || leg?.voice !== session) return;
+      latency.notAnswer();
+      session.say(text);
     },
     waitForApproval: (approvalId, timeoutMs) =>
       deps.approvals.wait(
         approvalId,
         timeoutMs,
         async () => (await q.one<{ status: "pending" | "approved" | "denied" | "expired" }>("select status from approvals where id = $1", [approvalId]))?.status ?? null,
-        callEnded.signal,
+        // O fim da ligação e o começo de uma transferência soltam a espera.
+        AbortSignal.any([callEnded.signal, toolsRelease.signal]),
       ),
     handoff: (target, input) => handOff(session, target, input),
+    // O que o motor deste trecho recebeu: a frase de uma ferramenta só manda usar outra que ele tem.
+    offeredTools: new Set(enabled.keys()),
   });
 
   async function handleToolCall(owner: Leg, call: { id: string; name: string; args: unknown }): Promise<void> {
     let result: ToolResult;
     const tool = owner.enabled.get(call.name);
+    const inFlight = { name: call.name, abort: new AbortController(), cancelled: false };
+    owner.toolsInFlight.set(call.id, inFlight);
     try {
       // `owner !== leg`: a sessão que pediu já foi substituída numa passagem e está fechada.
-      if (ending || wrappingUp || owner !== leg) {
+      if (ending || wrappingUp || transferring || owner !== leg) {
         result = { ok: false, message: CLOSING_MESSAGE };
       } else if (!tool) {
         result = { ok: false, message: `A ferramenta ${call.name} não está disponível para este agente. Siga a conversa sem ela.` };
@@ -950,20 +1035,158 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         await event("tool_called", { name: call.name, args: toolCalledArgs(deps.tools.get(call.name), call.args) });
         await event("tool_result", { name: call.name, ok: false, message: result.message, error: "tool is not enabled for this agent" });
       } else {
-        result = await runTool(tool, call.args, owner.context);
+        result = await runTool(tool, call.args, { ...owner.context, signal: inFlight.abort.signal });
       }
     } catch (error) {
       // `runTool` só lança se nem o evento pôde ser gravado. O modelo ainda recebe uma resposta.
       log("error", "tool call could not be recorded", { tool: call.name, error: messageOf(error) });
       result = { ok: false, message: TOOL_CRASH_MESSAGE };
+    } finally {
+      owner.toolsInFlight.delete(call.id);
     }
-    // Depois de uma passagem, a sessão que pediu já fechou: o resultado não tem a quem ir.
-    if (!ending && owner === leg) owner.voice.sendToolResult(call.id, result);
+    // Depois de uma passagem, a sessão que pediu já fechou: o resultado não tem a quem ir. Cancelada
+    // pelo provedor, o modelo já não espera o resultado; o `tool_result` gravado diz o que saiu.
+    if (!ending && !transferring && owner === leg && !inFlight.cancelled) owner.voice.sendToolResult(call.id, result);
     // Com despedida, a ligação só cai depois de ela ser falada: sem isso o modelo às vezes encerrava
     // calado, e a pessoa ouvia a ligação cair na cara dela. Quem fala é o próprio modelo, ao receber
     // o resultado do end_call (que traz a despedida); pedir a fala de novo aqui a repetia.
     if (requestedEnd && requestedFarewell) wrapUp(null, requestedEnd);
-    else if (requestedEnd) void finish(requestedEnd);
+    else if (requestedEnd) void endOrTransfer(requestedEnd);
+  }
+
+  /**
+   * O fim pedido por uma ferramenta. A transferência para uma pessoa, com a volta ligada no agente e
+   * num canal que volta (o Asterisk), não encerra a ligação: ela toca primeiro (`transferWithReturn`).
+   * Só a pedida pelo agente: a do teto de custo voltaria acima do teto, e a da queda do motor já não
+   * tem motor para voltar.
+   */
+  function endOrTransfer(end: Ending): Promise<void> {
+    const returnable =
+      end.status === "transferred" &&
+      end.endReason === "transferred" &&
+      end.transferTo !== undefined &&
+      transport.canReturnFromTransfer === true &&
+      agent?.transfer_returns_to_agent === true &&
+      !returned;
+    return returnable ? transferWithReturn(end, end.transferTo as string) : finish(end);
+  }
+
+  /**
+   * A transferência que pode voltar (Vapi · fatia 5a). Enquanto toca, a ligação fica em
+   * `transferring`: o motor fecha (não se paga motor ouvindo a linha chamar), as ferramentas em espera
+   * são soltas e as guardas param, sem `call_ended` nem `review_call`. O fim de verdade roda uma vez,
+   * em `finish`: no atendimento (a ligação passa a ser da pessoa da equipe e sai do limite de ligações
+   * simultâneas, como sem a volta), abandonada por quem ligou, ou no fim do trecho de volta.
+   */
+  async function transferWithReturn(end: Ending, transferTo: string): Promise<void> {
+    if (ending || transferring) return;
+    transferring = true;
+    pendingTransfer = end;
+    guard?.stop();
+    // O "ainda está aí?" também para (DESA-356): quem ligou está calado porque espera a linha tocar. O
+    // `stop` não volta atrás, então o `toolFinished` do `transfer_to_human` que chega depois não rearma; o
+    // trecho de volta nasce com uma guarda nova (`startLeg`), que conta do zero.
+    idleGuard?.stop();
+    cancelDuration();
+    toolsRelease.abort(new Error("The call is being transferred"));
+    await Promise.allSettled(toolsRunning);
+    await Promise.allSettled(readingsRunning);
+    // Fechar o motor entrega a última medição de uso, que fica no trecho dele.
+    await voice?.close().catch(logFailure("could not close the voice engine before the transfer"));
+    if (ending) return;
+    let outcome: TransferOutcome | void;
+    // O `DIALSTATUS` que o transporte entregou; a falha ao pedir a transferência não chega a discar.
+    let dialed = true;
+    try {
+      outcome = await transport.transfer(transferTo, { returnIfUnanswered: true, signal: callEnded.signal });
+    } catch (error) {
+      log("error", "the transfer could not start", { error: messageOf(error) });
+      outcome = { returned: false, status: "FAILED" };
+      dialed = false;
+    }
+    if (ending) return;
+    if (outcome?.returned) {
+      await startReturnLeg(outcome.status, transferTo).catch((error: unknown) => {
+        log("error", "the call could not go back to the agent", { error: messageOf(error) });
+        return finish({ status: "failed", endReason: "internal_error", tone: true, released: false });
+      });
+      return;
+    }
+    // Atendida (o fim é o do atendimento: o canal segue com a pessoa da equipe, fora desta conversa),
+    // abandonada por quem ligou, ou sem atendimento e sem volta: a telefonia já saiu daqui. Na última,
+    // o transporte já gravou o `transfer_unanswered` e mandou o aviso, e o fim não o troca de volta por
+    // `transferred` (Vapi · fatia 5a, ajuste 2): a ARI que recusa a volta, o estado que não volta, a
+    // discagem que nem começa, o áudio que não reconecta.
+    const status = outcome?.status;
+    const unanswered = dialed && status !== undefined && status !== "ANSWER" && status !== CALLER_HANGUP;
+    await finish({ ...end, released: true, ...(status === CALLER_HANGUP && { callerGone: true }), ...(unanswered && { endReason: "transfer_unanswered" }) });
+  }
+
+  /**
+   * O trecho de volta: mesma ligação, mesmo agente, motor novo. A primeira fala é fixa, e as
+   * instruções dizem que a transferência não foi atendida e mandam oferecer recado ou pendência.
+   * `transfer_to_human` sai das ferramentas, e nenhum caminho transfere de novo (`returned`).
+   */
+  async function startReturnLeg(status: string, transferTo: string): Promise<void> {
+    const from = leg;
+    const row = agent;
+    if (!from || !row) throw new Error("no leg to go back to");
+    returned = { status, transferTo };
+    // O canal é da conversa de novo: um fim daqui em diante solta a telefonia como sempre. Até o motor
+    // novo abrir, nada vai para o antigo, que já fechou.
+    transferring = false;
+    pendingTransfer = undefined;
+    voice = undefined;
+    // O fim que a transferência pediu não vale mais: a ligação continua.
+    requestedEnd = undefined;
+    requestedFarewell = undefined;
+    toolsRelease = new AbortController();
+    const enabled = new Map([...from.enabled].filter(([name]) => name !== "transfer_to_human"));
+    const targets = enabled.has(TRANSFER_TO_AGENT) ? await targetsOf(row) : [];
+    // O motivo e o resumo que o agente escreveu para a pessoa vão no bloco lembrado, como na passagem.
+    const briefing = await q.one<{ reason: string | null; summary: string | null }>(
+      "select payload->>'reason' as reason, payload->>'summary' as summary from call_events where call_id = $1 and kind = 'transfer_started' order by id desc limit 1",
+      [callId],
+    );
+    const lead = handoffItems({ reason: briefing?.reason ?? "", summary: briefing?.summary ?? "" }).filter((item) => item.text.trim() !== "");
+    const fitted = memory && fitCallerMemory(memory.notes, memory.followUps, lead);
+    // O roteiro do motor simulado passa intacto, como em `composeInstructions`.
+    const base = from.baseInstructions.startsWith(SIMULATED_PREFIX) ? from.baseInstructions : `${from.baseInstructions}\n\n${transferReturnInstruction(status)}`;
+    const instructions = composeInstructions(base, targets, undefined, fitted?.items ?? lead);
+    const greeting = TRANSFER_RETURN_GREETINGS[spokenLanguageOf(row.language)];
+    const opened = await connectEngine(overrides?.engineId ?? row.engine, sessionConfig(row, instructions, greeting, enabled));
+    if (ending) {
+      if ("voice" in opened) await opened.voice.close();
+      return;
+    }
+    if (!("voice" in opened)) {
+      return finish({
+        status: "failed",
+        endReason: "engine_failed",
+        tone: true,
+        events: [["engine_failed", { engine: opened.engine?.id ?? row.engine, error: opened.problem }]],
+      });
+    }
+    // Daqui até a troca nada espera: a sessão nova só emite no próximo ciclo.
+    latency.notAnswer();
+    startLeg(row, opened.engine, opened.voice, enabled, base, from.analyst);
+    // A duração é da ligação, e não do trecho: o relógio conta do atendimento, com o tempo da discagem.
+    scheduleDuration();
+    const reached = reachCeiling(callCents());
+    if (reached) await recordCeiling(callCents(), reached);
+  }
+
+  /** O trecho de volta deixou um recado ou uma pendência: então alguém já ficou com o próximo passo. */
+  async function followedUpSinceReturn(): Promise<boolean> {
+    const row = await q.one<{ followed: boolean }>(
+      `select exists (
+         select 1 from call_events
+          where call_id = $1 and kind in ('follow_up_created', 'human_notified')
+            and id > (select max(id) from call_events where call_id = $1 and kind = 'transfer_returned')
+       ) as followed`,
+      [callId],
+    );
+    return row?.followed === true;
   }
 
   /** Para quem o agente pode passar a ligação: só os que existem, da mesma organização (`handoffTargetsOf`). */
@@ -976,7 +1199,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const tool = deps.tools.get(name);
       // Sem transferência no canal (ligação pelo WhatsApp), o motor nem a vê: a descrição manda
       // anunciar a transferência antes de chamar, e quem ligou ouviria "vou transferir" e o recuo.
-      if (name === "transfer_to_human" && !canTransfer) continue;
+      // Depois de uma transferência que voltou, também não: o agente não transfere de novo, em laço.
+      if (name === "transfer_to_human" && (!canTransfer || returned)) continue;
       // Ferramenta sem a peça de que depende (a agenda sem cliente) também some: oferecida, o motor a
       // chamaria em toda ligação de agendamento só para ouvir que ela não está ligada.
       if (tool?.available === false) continue;
@@ -1061,51 +1285,91 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * Põe um agente na linha: liga os eventos da sessão dele e o torna o atual. Nada aqui espera: o
    * motor só começa a emitir no próximo ciclo, e os handlers precisam estar no lugar antes da primeira fala.
    */
-  function startLeg(row: AgentRow, legEngine: VoiceEngine, session: VoiceSession, enabled: Map<string, Tool>, analyst?: LegAnalyst): Leg {
+  function startLeg(row: AgentRow, legEngine: VoiceEngine, session: VoiceSession, enabled: Map<string, Tool>, baseInstructions: string, analyst?: LegAnalyst): Leg {
+    // O turno que a guarda tira sem marco aberto conta com o motor desta perna e o marco que ele emite.
+    const guardTurn = { engine: legEngine.id, source: legEngine.callerTurnSource };
     const silenceGuard = createSilenceGuard({
       clock,
       schedule,
-      closeCallerTurn: () => session.closeCallerTurn(),
+      // A resposta forçada pela guarda e o pedido para repetir não entram na latência por turno: o
+      // turno vai para `guardTurns`. Com `false`, o motor não mandou nada (o provedor já tinha fechado
+      // a vez, só está lento), e o turno segue aberto, como um turno comum.
+      closeCallerTurn: () => {
+        if (session.closeCallerTurn() !== false) latency.guardActed(guardTurn);
+      },
       // `wrapUp` e `finish` param a guarda: depois disso ela não chama nada.
-      say: (text) => session.say(text),
+      say: (text) => {
+        latency.guardActed(guardTurn);
+        session.say(text);
+      },
       acted: (report) => {
         // O pedido zera o fato no mesmo instante do `caller_unanswered`: vale só a fala depois do último.
         if (report.action === "asked_to_repeat") callerSpokeAfterAsk = false;
         void event("caller_unanswered", report).catch(logFailure("could not record an unanswered caller"));
       },
     });
+    // A chave do agente (decisão B): desligada, não há guarda, e cada `idle?.` abaixo não faz nada.
+    const idle = row.caller_idle_guard === false ? undefined : createCallerIdleGuard({
+      clock,
+      schedule,
+      // `wrapUp` e `finish` param a guarda, e a passagem para a do trecho antigo: depois disso ela não chama nada.
+      say: (text) => session.say(text),
+      end: (farewell) => wrapUp(farewell, { status: "completed", endReason: CALLER_SILENT }),
+      acted: (report) => void event("caller_idle", report).catch(logFailure("could not record a silent caller")),
+      silenceArmed: () => silenceGuard.armed(),
+    });
     const self: Leg = {
       agent: row,
+      baseInstructions,
       engine: legEngine,
       voice: session,
       enabled,
       guard: silenceGuard,
-      context: contextFor(row.id, row.language, session),
+      idle,
+      context: contextFor(row.id, row.language, session, enabled),
       usage: emptyUsage(),
       costCents: 0,
       transcriber: { usage: emptyUsage(), costCents: 0 },
       ...(analyst && { analyst }),
       guided: new Set(),
+      toolsInFlight: new Map(),
     };
     // Uma sessão substituída numa passagem já foi fechada; o que ela ainda emitir não vai para a linha.
     const current = (): boolean => leg === self;
+    // Cada sessão conta o que tocou do zero: na passagem de agente, a fala do anterior não é desta.
+    const spokenAtStart = transport.playedMs?.() ?? 0;
     session.on("callerActivity", (signal) => {
       if (!current()) return;
       // Antes do filtro da guarda, que ignora fala durante o áudio do agente: quem diz "tchau" por cima
       // do "pode repetir?" falou do mesmo jeito. Início de fala sem texto (`words: false`) não conta.
       if (signal.words && callerSpokeAfterAsk === false) callerSpokeAfterAsk = true;
       silenceGuard.callerActivity(signal);
+      // Com ou sem palavras, e mesmo por cima da fala do agente: quem ligou está na linha.
+      idle?.callerActivity();
+    });
+    // O marco da latência por turno. Ferramenta em curso agora, de qualquer trecho: o turno mede o webhook.
+    session.on("callerTurnEnded", (signal) => {
+      if (!current()) return;
+      latency.callerTurnEnded(legEngine.id, signal.source, toolsRunning.size > 0);
     });
     session.on("audio", (pcm) => {
       if (!current()) return;
       silenceGuard.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
+      idle?.agentAudio(pcm.length / PCM16_8K_BYTES_PER_MS);
       if (ending) return;
       transport.sendAudio(pcm);
+      // A latência conta até o áudio entregue ao transporte, e não até o que o motor mandou.
+      latency.agentAudioDelivered();
       recorder?.agent(pcm);
     });
     session.on("interrupted", () => {
       if (!current()) return;
       silenceGuard.agentInterrupted();
+      idle?.agentInterrupted();
+      latency.interrupted();
+      // Antes de descartar: o motor corta no histórico o que quem ligou não chegou a ouvir.
+      const spoken = transport.playedMs?.();
+      if (spoken !== undefined) session.played?.(spoken - spokenAtStart);
       transport.clearAudio();
       recorder?.clear();
     });
@@ -1133,21 +1397,41 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     session.on("toolCall", (toolCall) => {
       // Ferramenta em curso, aprovação em espera inclusive: a guarda não age até ela acabar.
       silenceGuard.toolStarted();
+      idle?.toolStarted();
+      if (current()) latency.toolStarted();
       const running: Promise<void> = handleToolCall(self, toolCall).finally(() => {
         toolsRunning.delete(running);
         silenceGuard.toolFinished();
+        idle?.toolFinished();
       });
       toolsRunning.add(running);
     });
+    // O provedor desistiu de chamadas em curso: o resultado delas é descartado, e a ferramenta que lê o
+    // `signal` pode parar. O que ela já fez fica feito, e o `tool_result` dela é gravado como sempre.
+    session.on("toolCallCancelled", (ids) => {
+      for (const id of ids) {
+        const inFlight = self.toolsInFlight.get(id);
+        if (!inFlight || inFlight.cancelled) continue;
+        inFlight.cancelled = true;
+        inFlight.abort.abort();
+        if (current()) event("tool_cancelled", { name: inFlight.name }).catch(logFailure("could not record a tool cancellation"));
+      }
+    });
     // A última medição de uma sessão substituída também conta, e no trecho dela.
     session.on("usage", (increment) => void meter(self, increment).catch(logFailure("could not record usage")));
+    // O motor trocou a conexão com o provedor sem fechar a sessão: só fica registrado.
+    session.on("resumed", () => {
+      if (!current()) return;
+      event("engine_resumed", { engine: legEngine.id }).catch(logFailure("could not record the engine resumption"));
+    });
     // `error` sozinho não é fatal: fica guardado para explicar um `closed` que venha em seguida.
     session.on("error", (error) => {
       self.lastError = error;
       log("error", "voice engine error", { error: error.message, agentId: row.id });
     });
     session.on("closed", (reason) => {
-      if (reason === "client" || !current()) return;
+      // Durante a transferência o motor já foi fechado de propósito: o que ele ainda disser não encerra a ligação.
+      if (reason === "client" || !current() || transferring) return;
       // O roteiro do motor simulado chegou ao fim.
       if (reason === "ended") return void finish({ status: "completed", endReason: "script_finished" });
       // O motor caiu no meio: evento, aviso, sinal para quem está na linha e, havendo para quem, transferência.
@@ -1167,6 +1451,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     agent = row;
     voice = session;
     guard = silenceGuard;
+    idleGuard = idle;
     return self;
   }
 
@@ -1232,12 +1517,13 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
             chars: fitted?.chars ?? rememberedBlock(lead).length,
           })
         : undefined;
-      const nextLeg = startLeg(next, opened.engine, opened.voice, enabled, nextAnalyst.analyst);
+      const nextLeg = startLeg(next, opened.engine, opened.voice, enabled, next.instructions, nextAnalyst.analyst);
       // A peça passa ao trecho novo se for a mesma, com a mesma abertura; senão, a antiga sai da linha
       // e a nova começa a abrir sem que a passagem espere por ela.
       const leaving = seatPiece(nextLeg, from, nextPiece);
       const analystProblem = nextAnalyst.problem ? analystProblemEvent(next.id, nextAnalyst.problem) : undefined;
       from.guard.stop();
+      from.idle?.stop();
       visited.push(next);
       if (next.max_call_seconds < durationLimitSeconds) {
         durationLimitSeconds = next.max_call_seconds;
@@ -1407,7 +1693,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   async function run(): Promise<void> {
     const first = (await q.one<AgentRow>(`select ${AGENT_COLUMNS} from agents where id = $1`, [agentId])) ?? undefined;
     agent = first;
-    const call = await q.one<{ direction: "inbound" | "outbound"; from_e164: string | null; to_e164: string | null }>("select direction, from_e164, to_e164 from calls where id = $1", [callId]);
+    const call = await q.one<{ direction: "inbound" | "outbound"; from_e164: string | null; to_e164: string | null; call_back_of: string | null }>(
+      "select direction, from_e164, to_e164, call_back_of from calls where id = $1",
+      [callId],
+    );
     if (!first || !call) throw new Error(`Agent ${agentId} or call ${callId} not found in organization ${organizationId}`);
     visited.push(first);
 
@@ -1427,7 +1716,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
 
     const targets = await targetsOf(first);
     const enabled = enabledToolsFor(overrides?.tools ?? first.tools, targets);
-    const baseInstructions = overrides?.instructions ?? first.instructions;
+    // A religação da ligação que caiu (desenho 2026-11-16-follow-up-da-ligacao-que-caiu, seção 3.6): uma
+    // linha fixa, na língua do agente, somada às instruções. Nada da conversa anterior entra por aqui.
+    const ownInstructions = overrides?.instructions ?? first.instructions;
+    const baseInstructions =
+      call.call_back_of !== null && !ownInstructions.startsWith(SIMULATED_PREFIX) ? `${ownInstructions}\n\n${callBackInstruction(first.language)}` : ownInstructions;
     // A memória do número no agente (registro 0020, item 4): só com a chave da organização ligada, em
     // qualquer direção. Lida uma vez, antes do motor, como a gravação; desligada, nada é lido, e as
     // instruções são as de antes, byte a byte. O roteiro do motor simulado não recebe bloco (ele
@@ -1488,11 +1781,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // Daqui até o fim do bloco nada espera: o motor só começa a emitir no próximo ciclo, e os
     // handlers e os primeiros eventos precisam estar na fila antes da primeira fala.
     const session = opened.voice;
-    const firstLeg = startLeg(first, opened.engine, session, enabled, firstAnalyst.analyst);
+    const firstLeg = startLeg(first, opened.engine, session, enabled, baseInstructions, firstAnalyst.analyst);
     // O áudio de quem ligou vai para o agente em que a ligação está agora.
     transport.onAudio((pcm) => {
       recorder?.caller(pcm);
-      if (ending || wrappingUp) return;
+      // Durante a transferência o motor está fechado: nada vai para ele, nem para a peça.
+      if (ending || wrappingUp || transferring) return;
       // O motor recebe primeiro, sem esperar a peça; a peça recebe o mesmo pedaço logo depois.
       voice?.sendAudio(pcm);
       // A peça do trecho atual, e só depois que abriu.
@@ -1500,7 +1794,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     });
     void seatPiece(firstLeg, undefined, firstPiece);
     const answered = [
-      q.exec("update calls set status = 'in_progress', answered_at = $2, engine = $3 where id = $1", [callId, clock.now(), engineId]),
+      // A URA já atendeu e gravou `answered_at` (`ivr-session.ts`): a duração conta desde ali, com o menu,
+      // e não do começo da conversa. Sem URA, `answered_at` está vazio e fica com a hora de agora.
+      q.exec("update calls set status = 'in_progress', answered_at = coalesce(answered_at, $2), engine = $3 where id = $1", [callId, clock.now(), engineId]),
       event("call_answered", { engine: engineId }),
       event("recording_notice", { text: recordingNotice }),
       // Os ids e o tamanho, nunca o texto: `call_events` não sai com o prazo da memória.
@@ -1510,7 +1806,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // O analista foi ligado e não pôde abrir: idem, e o trecho segue sem ele.
       ...(firstAnalyst.problem ? [analystProblemEvent(first.id, firstAnalyst.problem)] : []),
     ];
-    if (call.direction !== "inbound") session.say(recordingNotice);
+    if (call.direction !== "inbound") {
+      latency.notAnswer();
+      session.say(recordingNotice);
+    }
     answeredAt = clock.now();
     durationLimitSeconds = first.max_call_seconds;
     scheduleDuration();

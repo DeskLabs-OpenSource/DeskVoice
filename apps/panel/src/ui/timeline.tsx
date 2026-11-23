@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, DotsNine, Gauge, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, ArrowsLeftRight, BellRinging, CheckCircle, ClockCountdown, Coins, DotsNine, Gauge, type Icon, ListChecks, PhoneIncoming, PhoneOutgoing, PhoneX, Record as RecordIcon, SealQuestion, WarningOctagon, Wrench, XCircle } from "@phosphor-icons/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import en from "../i18n/en/timeline";
@@ -9,7 +9,7 @@ import { fill } from "../i18n/locales";
 import ptBR from "../i18n/pt-BR/timeline";
 import { useDict, useLocale } from "../i18n/provider";
 import { classifyReasonCode } from "./classify-reason";
-import { formatClock, formatDateTime, formatPhone } from "./format";
+import { formatClock, formatDateTime, formatMoney, formatPhone } from "./format";
 import type { Analyst, CallEvent, FollowUp, Person } from "./types";
 
 type NodeTone = "neutral" | "accent" | "ok" | "fail" | "speech" | "speech-agent";
@@ -51,6 +51,13 @@ function Card({ title, tone, children }: { title: ReactNode; tone?: "accent" | "
 type TimelineDictionary = typeof ptBR;
 /** O que a linha do tempo diz de um `drop_follow_up`: a ação, ou o motivo de não ter agido. */
 type DropFollowUpShown = keyof TimelineDictionary["events"]["drop_follow_up"]["simulated"];
+/** O motivo de recusa da religação (`refusalCode`), em frase fixa; o código fora da lista vira `unknown`, nunca texto cru. */
+type CallBackRefusalShown = keyof TimelineDictionary["events"]["drop_follow_up_result"]["refusals"];
+/** As ações da religação em `drop_follow_up_result` (seção 3.7 do desenho). */
+const CALL_BACK_RESULTS = ["call_back_placed", "call_back_refused", "call_back_expired", "call_back_answered", "call_back_not_answered"] as const;
+type CallBackResultShown = (typeof CALL_BACK_RESULTS)[number];
+const isCallBackResult = (action: unknown): action is CallBackResultShown => (CALL_BACK_RESULTS as readonly unknown[]).includes(action);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * "Ligação não analisada: <motivo>", do payload de `analysis_not_done`. A mesma frase serve à linha
@@ -80,6 +87,9 @@ function SpeechMarks({ read, e, confidence }: { read: unknown; e: TimelineDictio
     </div>
   );
 }
+
+/** "(escolha do agente)" quando o cérebro que leu (ou não leu) a ligação foi o escolhido no agente. */
+const byAgent = (e: TimelineDictionary["events"], payload: Record<string, unknown>): string => (payload.choiceFrom === "agent" ? ` ${e.choice_agent}` : "");
 
 const Quiet = ({ children }: { children: ReactNode }) => <p className="pt-1 text-muted">{children}</p>;
 /** O lugar do texto que saiu a pedido de quem ligou (`erased` no payload). */
@@ -219,6 +229,9 @@ export function Timeline({
           ),
         };
       }
+      case "tool_cancelled":
+        // O provedor cancelou a chamada (o Gemini, quando quem ligou interrompe): o `tool_result` dela, quando vem, diz o que saiu.
+        return { ...base, tone: "neutral", icon: Wrench, body: <Quiet>{fill(e.tool_cancelled, { tool: t.names[text(p.name)] ?? text(p.name) })}</Quiet> };
       case "approval_requested":
         return {
           ...base,
@@ -266,12 +279,62 @@ export function Timeline({
           body: (
             <Card title={e.transfer_started}>
               {text(p.to) ? <p className="data">{fill(e.transfer_to, { to: formatPhone(text(p.to)) })}</p> : null}
-              {text(p.reason) ? <p className="text-muted">{text(p.reason)}</p> : null}
+              {/* A transferência pelo menu por teclas grava o código `ivr`, que vira frase; o motivo
+                  escrito pelo agente segue como ele escreveu. */}
+              {text(p.reason) ? <p className="text-muted">{p.reason === "ivr" ? e.transfer_reason_ivr : text(p.reason)}</p> : null}
               {text(p.summary) ? <p className="text-[0.87rem] text-muted">{text(p.summary)}</p> : null}
               {p.erased === true ? <Erased>{e.erased}</Erased> : null}
             </Card>
           ),
         };
+      // O menu por teclas (#223). Só a tecla de uma opção que existe chega aqui (`ivr_option_chosen`);
+      // a tecla que não é opção nunca é gravada, e a tela não tem o que mostrar dela.
+      case "ivr_started":
+        return { ...base, tone: "neutral", icon: DotsNine, body: <Quiet>{e.ivr_started}</Quiet> };
+      case "ivr_option_chosen": {
+        const action = p.action === "agent" || p.action === "transfer" || p.action === "hangup" ? p.action : null;
+        const seconds = Math.max(0, Math.round(Number(p.elapsed_ms) / 1000)) || 0;
+        return {
+          ...base,
+          tone: "accent",
+          icon: DotsNine,
+          body: (
+            <Card title={fill(e.ivr_option_chosen, { digit: text(p.digit), label: text(p.label), seconds })}>{action ? <p className="text-muted">{e.ivr_option_action[action]}</p> : null}</Card>
+          ),
+        };
+      }
+      case "ivr_no_choice": {
+        const attempt = typeof p.attempt === "number" ? p.attempt : 0;
+        return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(p.kind === "invalid" ? e.ivr_no_choice.invalid : e.ivr_no_choice.timeout, { attempt })}</Quiet> };
+      }
+      case "ivr_failed": {
+        const code = text(p.reason);
+        const said = Object.hasOwn(e.ivr_failed_reasons, code) ? e.ivr_failed_reasons[code as keyof typeof e.ivr_failed_reasons] : e.ivr_failed_unknown;
+        // As duas falhas que pedem mexer no menu também deixam um aviso no painel (o sino).
+        const noticed = code === "prompt_unreadable" || code === "no_person_exit";
+        return {
+          ...base,
+          tone: "fail",
+          icon: WarningOctagon,
+          body: (
+            <Card tone="fail" title={e.ivr_failed}>
+              <p className="text-muted">{said}</p>
+              {noticed ? <p className="text-[0.87rem] font-bold">{e.ivr_failed_notice}</p> : null}
+            </Card>
+          ),
+        };
+      }
+      case "ivr_ended": {
+        const said =
+          p.reason === "no_choice"
+            ? p.then === "person"
+              ? e.ivr_ended.no_choice_person
+              : e.ivr_ended.no_choice_hangup
+            : p.reason === "option_hangup" || p.reason === "caller_hangup" || p.reason === "stopped"
+              ? e.ivr_ended[p.reason]
+              : null;
+        return { ...base, tone: "neutral", icon: PhoneX, body: <Quiet>{said ?? e.call_ended}</Quiet> };
+      }
       case "agent_handoff":
         // O motivo e o resumo saem com o prazo de guarda e com o apagamento a pedido do titular: o
         // cartão fica só com de quem e para quem.
@@ -302,6 +365,9 @@ export function Timeline({
           };
         }
         return { ...base, tone: "ok", icon: ArrowsLeftRight, body: <Quiet>{e.transfer_completed}</Quiet> };
+      case "transfer_returned":
+        // O fim da transferência não atendida vem logo antes, com o estado; aqui é a volta para o agente.
+        return { ...base, tone: "accent", icon: ArrowsLeftRight, body: <Quiet>{fill(e.transfer_returned, { status: text(p.status) || "?" })}</Quiet> };
       case "engine_failed":
         return {
           ...base,
@@ -314,6 +380,30 @@ export function Timeline({
             </Card>
           ),
         };
+      case "engine_resumed":
+        // O motor trocou a conexão com o provedor (o Gemini fecha a dele em cerca de 10 min) e a ligação seguiu.
+        return { ...base, tone: "neutral", icon: ArrowsClockwise, body: <Quiet>{e.engine_resumed}</Quiet> };
+      case "turn_latency": {
+        // Um evento por ligação (item 6 da segunda leva Vapi): do fim da fala de quem ligou ao primeiro
+        // áudio do agente na linha, sem os turnos com ferramenta. `transcript` é a medida aproximada do Gemini.
+        // Com `guardTurns`, o mais lento é o mais lento medido, e a linha diz quantos turnos ficaram sem
+        // medida; com `turns: 0`, só isso.
+        const seconds = (ms: unknown): string => (Number(ms) / 1000).toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+        const turns = Number(p.turns);
+        const guardTurns = Number(p.guardTurns ?? 0);
+        const guard = guardTurns === 1 ? e.turn_latency.guardOne : fill(e.turn_latency.guardMany, { count: guardTurns.toLocaleString(locale) });
+        const measured =
+          turns > 0
+            ? fill(guardTurns > 0 ? e.turn_latency.lineMeasured : e.turn_latency.line, {
+                engine: Object.hasOwn(e.turn_latency.engines, text(p.engine)) ? (e.turn_latency.engines[text(p.engine)] ?? text(p.engine)) : text(p.engine),
+                p50: seconds(p.p50Ms),
+                max: seconds(p.maxMs),
+                turns: turns === 1 ? e.turn_latency.turnsOne : fill(e.turn_latency.turnsMany, { count: turns.toLocaleString(locale) }),
+              }) + (p.source === "transcript" ? ` ${e.turn_latency.approximate}` : "")
+            : "";
+        const line = [measured, guardTurns > 0 ? guard : ""].filter(Boolean).join(" ");
+        return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{line}</Quiet> };
+      }
       case "call_refused":
         return { ...base, tone: "fail", icon: PhoneX, body: <Card tone="fail" title={e.call_refused}><p className="text-muted">{reason(p.reason)}</p></Card> };
       case "voicemail_left": {
@@ -420,7 +510,7 @@ export function Timeline({
           tone: "fail",
           icon: SealQuestion,
           body: (
-            <Card tone="fail" title={e.outcome_not_classified}>
+            <Card tone="fail" title={`${e.outcome_not_classified}${byAgent(e, p)}`}>
               <p className="text-muted">{body ? fill(body, { model: text(p.model) }) : text(p.reason)}</p>
               {typeof p.status === "number" ? <p className="data text-[0.87rem] text-muted">{fill(e.outcome_not_classified_status, { status: String(p.status) })}</p> : null}
             </Card>
@@ -428,14 +518,14 @@ export function Timeline({
         };
       }
       case "call_analyzed":
-        return { ...base, tone: "ok", icon: Gauge, body: <Quiet><span className="font-bold text-ink">{fill(e.call_analyzed, { score: String(p.score) })}</span></Quiet> };
+        return { ...base, tone: "ok", icon: Gauge, body: <Quiet><span className="font-bold text-ink">{fill(e.call_analyzed, { score: String(p.score) })}{byAgent(e, p)}</span></Quiet> };
       case "analysis_not_done":
         return {
           ...base,
           tone: "fail",
           icon: Gauge,
           body: (
-            <Card tone="fail" title={analysisNotDoneText(e, p)}>
+            <Card tone="fail" title={`${analysisNotDoneText(e, p)}${byAgent(e, p)}`}>
               {typeof p.status === "number" ? <p className="data text-[0.87rem] text-muted">{fill(e.outcome_not_classified_status, { status: String(p.status) })}</p> : null}
             </Card>
           ),
@@ -482,10 +572,36 @@ export function Timeline({
         const failed = p.outcome === "failed" || text(p.error) !== "";
         return { ...base, tone: failed ? "fail" : "ok", icon: failed ? XCircle : CheckCircle, body: <Quiet>{failed ? e.task_failed : e.task_finished}{text(p.kind) ? `: ${t.names[text(p.kind)] ?? text(p.kind)}` : ""}</Quiet> };
       }
+      case "webhook_delivered":
+        return { ...base, tone: "ok", icon: CheckCircle, body: <Quiet>{fill(e.webhook_delivered, { name: text(p.name), status: String(p.status) })}</Quiet> };
+      case "webhook_failed": {
+        // O relatório da ligação (fatia 4 da pesquisa Vapi): o motivo no vocabulário fechado, e se a fila tenta de novo.
+        const code = text(p.reason);
+        const known = Object.hasOwn(e.webhook_failed_reasons, code) ? e.webhook_failed_reasons[code] : undefined;
+        const attempt = { attempt: String(p.attempt) };
+        const next = code === "not_registered" || code === "erased" ? null : p.retrying === true ? fill(e.webhook_failed_retrying, attempt) : fill(e.webhook_failed_gave_up, attempt);
+        return {
+          ...base,
+          tone: "fail",
+          icon: XCircle,
+          body: (
+            <Card tone="fail" title={fill(e.webhook_failed, { name: text(p.name) })}>
+              <p className="text-muted">{known ? fill(known, { status: String(p.status) }) : code}</p>
+              {next ? <p className="text-[0.87rem] text-muted">{next}</p> : null}
+            </Card>
+          ),
+        };
+      }
       case "caller_unanswered": {
         // A guarda contra o silêncio agiu: o ruído escondeu do provedor o fim da fala de quem ligou.
         const said = p.action === "asked_to_repeat" ? e.caller_unanswered.asked_to_repeat : e.caller_unanswered.turn_closed;
         const seconds = (Number(p.waitedMs) / 1000).toLocaleString(locale, { maximumFractionDigits: 1 });
+        return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(said, { seconds })}</Quiet> };
+      }
+      case "caller_idle": {
+        // O agente terminou de falar e quem ligou ficou calado: a guarda perguntou, lembrou ou encerrou.
+        const said = p.action === "ended" ? e.caller_idle.ended : p.action === "asked_again" ? e.caller_idle.asked_again : e.caller_idle.asked;
+        const seconds = (Number(p.silentMs) / 1000).toLocaleString(locale, { maximumFractionDigits: 1 });
         return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{fill(said, { seconds })}</Quiet> };
       }
       case "memory_loaded":
@@ -544,17 +660,54 @@ export function Timeline({
       case "drop_follow_up": {
         // Só campos fixos: o caso e o que foi feito, ou o que teria sido feito na simulada.
         const what = p.case === "engine_failed" ? e.drop_follow_up.engine_failed : e.drop_follow_up.call_dropped;
+        // No modo `call_back`, o agendamento e os motivos de não agendar têm frase própria: a do
+        // WhatsApp falaria de uma mensagem que nunca existiu.
+        const callBack = p.mode === "call_back";
+        const skipped = p.action === "skipped" && (p.reason === "do_not_call" || p.reason === "mode_unavailable" || p.reason === "recent_follow_up" || p.reason === "org_limit") ? p.reason : null;
         const action: DropFollowUpShown =
           p.action === "whatsapp_queued"
             ? "whatsapp_queued"
-            : p.action === "skipped" && (p.reason === "do_not_call" || p.reason === "mode_unavailable" || p.reason === "recent_follow_up" || p.reason === "org_limit")
-              ? p.reason
-              : "task_opened";
+            : p.action === "call_back_scheduled"
+              ? "call_back_scheduled"
+              : callBack && (skipped === "do_not_call" || skipped === "mode_unavailable" || skipped === "recent_follow_up")
+                ? `call_back_${skipped}`
+                : skipped ?? "task_opened";
         const done = p.simulated === true ? e.drop_follow_up.simulated[action] : e.drop_follow_up[action];
         return { ...base, tone: "accent", icon: PhoneX, body: <Quiet><span className="font-bold text-ink">{what}</span> {done}</Quiet> };
       }
       case "drop_follow_up_result": {
-        // A mensagem para quem ligou saiu ou não; as ações da religação chegam nas fatias 3 e 4.
+        if (isCallBackResult(p.action)) {
+          // A religação (seção 3.7): cada ação com frase própria, só de campos fixos (tentativa, código,
+          // custo), com o link para a religação quando ela chegou a existir. Nada da conversa.
+          const r = e.drop_follow_up_result;
+          const attempt = typeof p.attempt === "number" ? p.attempt : 1;
+          const code = text(p.refusalCode);
+          const refusal: CallBackRefusalShown = Object.hasOwn(r.refusals, code) ? (code as CallBackRefusalShown) : "unknown";
+          const said = fill(r[p.action], { attempt, reason: r.refusals[refusal] });
+          const cost = typeof p.costCents === "number" ? fill(r.cost, { cost: formatMoney(p.costCents, locale) }) : null;
+          const callId = text(p.callId);
+          const good = p.action === "call_back_answered" || p.action === "call_back_placed";
+          return {
+            ...base,
+            tone: good ? "ok" : p.action === "call_back_not_answered" ? "neutral" : "fail",
+            icon: p.action === "call_back_placed" ? PhoneOutgoing : good ? CheckCircle : XCircle,
+            body: (
+              <Quiet>
+                {said}
+                {cost ? ` ${cost}` : null}
+                {UUID.test(callId) ? (
+                  <>
+                    {" "}
+                    <Link href={`/calls/${callId}`} className="font-bold text-ink underline-offset-4 hover:underline">
+                      {r.link}
+                    </Link>
+                  </>
+                ) : null}
+              </Quiet>
+            ),
+          };
+        }
+        // A mensagem para quem ligou saiu ou não.
         const sent = p.action === "whatsapp_sent";
         return {
           ...base,

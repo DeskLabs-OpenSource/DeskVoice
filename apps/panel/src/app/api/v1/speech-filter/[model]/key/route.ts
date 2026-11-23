@@ -15,6 +15,7 @@ interface Saved {
  */
 export const PUT = handle(
   {
+    support: false,
     body: z.object({ apiKey: z.string().trim().min(1).max(500) }),
     configure: true,
     after: async ({ model, stored }: Saved, { deps, session, org }) => ({ configured: true, check: await testDecisionModelKey(deps, org, session.organizationId, model, stored) }),

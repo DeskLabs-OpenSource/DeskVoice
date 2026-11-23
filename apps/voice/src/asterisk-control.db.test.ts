@@ -223,7 +223,9 @@ describe("endereços liberados por linha", { timeout: 120_000 }, () => {
     const organizationId = await createOrganization(app, "allowed-formats");
     // Endereços próprios desta rodada: uma linha por IP de rodada anterior no mesmo banco (outra
     // organização) tiraria a deste caso do arquivo pela regra de endereço compartilhado.
-    const net = `100.${randomInt(64, 128)}.${randomInt(0, 256)}`;
+    // Fora de 100.64/16: o rules.db.test.ts do painel grava uma linha 100.64.0.0/16 no mesmo banco, e
+    // a sobreposição tiraria a linha deste caso do arquivo (falhou assim no CI em 18/11, 1 vez em 64).
+    const net = `100.${randomInt(65, 128)}.${randomInt(0, 256)}`;
     const v6 = `2001:db8:${randomInt(1, 0xffff).toString(16)}::140`;
     const ip = { username: null, password: null, authMode: "ip" as const };
     const byIp = await createTrunk(app, organizationId, { ...ip, host: `${net}.140` });
@@ -314,6 +316,39 @@ describe("endereços liberados por linha", { timeout: 120_000 }, () => {
   });
 });
 
+describe("a linha da organização com lápide (R8, fatia 9b)", { timeout: 120_000 }, () => {
+  it("sai do arquivo no relógio de 5 minutos, sem ninguém salvar nada: o conjunto de linhas mudou, e o relógio aplica de novo", async () => {
+    const keeps = await createOrganization(app, "trunks-deleting-keeps");
+    const leaving = await createOrganization(app, "trunks-deleting");
+    const kept = await createTrunk(app, keeps, { host: "sip.fica.example", username: "conta-fica", password: "s3nha" });
+    const gone = await createTrunk(app, leaving, { host: "sip.sai.example", username: "conta-sai", password: "s3nha" });
+    const ari = fakeAri();
+    const deps = trunksDeps(ari, path.join(scratch, "deleting", "pjsip_trunks.conf"));
+    ari.loadsFile = deps.file;
+    await applyTrunks(deps);
+    expect(await readFile(deps.file, "utf8")).toContain(`[trunk-${gone}]`);
+
+    // Nada mudou: o relógio não aplica.
+    ari.log.length = 0;
+    expect(await refreshAllowed(deps)).toBe(false);
+    expect(ari.log).toEqual([]);
+
+    // A lápide: os endereços das linhas que ficam são os mesmos, só o conjunto de linhas mudou.
+    await withSystem(app, (q) => q.exec("update organizations set suspended_at = now(), suspended_reason = 'teste da lápide', deleting_at = now() where id = $1", [leaving]));
+    expect(await refreshAllowed(deps)).toBe(true);
+    expect(ari.log).toEqual(["reload res_pjsip.so"]);
+    const conf = await readFile(deps.file, "utf8");
+    expect(conf).not.toContain(gone);
+    expect(conf).toContain(`[trunk-${kept}]`);
+
+    // Aplicado, o próximo relógio volta a não aplicar.
+    ari.log.length = 0;
+    expect(await refreshAllowed(deps)).toBe(false);
+    expect(ari.log).toEqual([]);
+    await withSystem(app, (q) => q.exec("delete from organizations where id = $1", [leaving]));
+  });
+});
+
 describe("o filtro de entrada por linha (R14, fatia 2)", { timeout: 120_000 }, () => {
   /** As regras `deny`/`permit` da seção `type=endpoint` de uma linha, como o arquivo gerado as tem. */
   const aclOf = (conf: string, id: string): string[] =>
@@ -331,7 +366,8 @@ describe("o filtro de entrada por linha (R14, fatia 2)", { timeout: 120_000 }, (
     const name = `sip.${randomInt(1, 1_000_000)}.compartilhado.example`;
     const first = await createOrganization(app, "filter-iso-a");
     const second = await createOrganization(app, "filter-iso-b");
-    const net = `100.${randomInt(64, 128)}.${randomInt(0, 256)}`;
+    // Fora de 100.64/16, pelo mesmo motivo do caso dos endereços liberados.
+    const net = `100.${randomInt(65, 128)}.${randomInt(0, 256)}`;
     const mine = await createTrunk(app, first, { host: name, username: "conta-a" });
     const mineIp = await createTrunk(app, first, { host: `${net}.10`, username: null, password: null, authMode: "ip" });
     let answer = ["203.0.113.21"];
@@ -536,7 +572,7 @@ describe("o filtro de entrada por linha (R14, fatia 2)", { timeout: 120_000 }, (
 
     // A troca de modo como o painel grava: zera o conjunto e NÃO mexe em `inbound_filter`. Endereço
     // sorteado, para não cair no grupo de outra linha deste banco.
-    const ip = `100.${randomInt(64, 128)}.${randomInt(0, 256)}.${randomInt(1, 255)}`;
+    const ip = `100.${randomInt(65, 128)}.${randomInt(0, 256)}.${randomInt(1, 255)}`;
     await withSystem(app, (q) =>
       q.exec("update trunks set auth_mode = 'ip', host = $2, username = null, secret_enc = null, inbound_allowed = '{}', inbound_from_name = '{}', inbound_resolved_at = null where id = $1", [line, ip]),
     );
@@ -625,7 +661,8 @@ describe("ligação de saída", { timeout: 120_000 }, () => {
     expect(ari.originated).toEqual([]);
     const failed = await callsOf(app, organizationId);
     expect(failed).toMatchObject([{ status: "failed", end_reason: "no_answer" }]);
-    expect(await kindsOf(app, failed[0]?.id ?? "")).toEqual(["call_ended"]);
+    // O fim sem áudio não passa por `finish`: a revisão é enfileirada ali mesmo (a religação depende dela).
+    expect(await kindsOf(app, failed[0]?.id ?? "")).toEqual(["call_ended", "task_queued"]);
   });
 });
 
@@ -659,7 +696,9 @@ describe("chamada simulada pela API interna", { timeout: 120_000 }, () => {
     const kinds = await kindsOf(app, callId);
     expect(kinds.filter((kind) => !kind.startsWith("transcript"))).toEqual([
       "call_started", "call_answered", "recording_notice", "tool_called", "follow_up_created", "tool_result", "tool_called", "human_notified", "tool_result",
-      "tool_called", "approval_requested", "approval_decided", "tool_result", "tool_called", "transfer_started", "tool_result", "call_ended", "task_queued", "task_queued",
+      "tool_called", "approval_requested", "approval_decided", "tool_result", "tool_called", "transfer_started", "tool_result",
+      // A fala de quem ligou no roteiro é respondida pelo agente: um turno medido, gravado antes do fim.
+      "turn_latency", "call_ended", "task_queued", "task_queued",
     ]);
     expect(kinds.filter((kind) => kind === "transcript_user")).toHaveLength(1);
     expect(await callOf(app, callId)).toMatchObject({ status: "transferred", end_reason: "transferred", engine: "simulated" });

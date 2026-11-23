@@ -88,6 +88,10 @@ O argumento "meu caso de uso é legítimo" não muda a resposta. Lembrete de con
 de entrega e retorno de contato pedido cabem dentro dos limites. O que não cabe é volume, e
 volume é exatamente o que os limites existem para impedir.
 
+A religação de uma ligação **recebida** que caiu antes de terminar também cabe. Ela não é discador: não parte de lista, e cada religação nasce de uma ligação que a própria pessoa fez. É no máximo uma por ligação e uma por número a cada 24 horas, sempre pela checagem, dentro da janela do dia, sem ser empurrada para a próxima. Religação nunca gera religação.
+
+A transferência para uma pessoa da equipe não é ligação de saída. É a mesma ligação, já em curso: disca o número da própria equipe, configurado pela organização, enquanto quem está na linha espera. Por isso não passa pela checagem, nem pela política nem pela trava da administração da instalação. Ela não serve de discador porque não escolhe destino: o número é fixo no agente ou na opção da URA, e ela só acontece quando o atendimento termina.
+
 ## O que o projeto não faz por você
 
 - **Não interpreta a lei.** O DeskVoice entrega controles. Qual base legal vale para a sua

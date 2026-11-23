@@ -21,6 +21,12 @@ import type { VoiceEngine, VoiceSession, VoiceSessionConfig, VoiceSessionEvents 
  * Orientação (`guide`): a sessão guarda o texto (`guidance`, para o teste conferir) e nunca o fala.
  * O passo `{ sayGuided: { guided, unguided } }` fala `guided` se chegou orientação desde que o passo
  * anterior começou (um `expectUserAudio` começa quando passa a esperar a fala), e `unguided` se não.
+ *
+ * Modo texto (`mode: "text"`, o teste do agente): não sai áudio, e a fala do roteiro vira só
+ * `transcript`. `sendUserText` encerra a espera de um `expectUserAudio` como se a fala tivesse
+ * acabado, e a transcrição de quem ligou é o texto recebido (o `text` do passo não vale). `turnDone`
+ * sai quando o roteiro para numa espera nova de fala ou termina. A ferramenta continua vindo do
+ * roteiro: no teste, quem decide é ele, e não as instruções. Em `audio`, nada disso muda.
  */
 const stepSchema = z.union([
   z.strictObject({ say: z.string() }),
@@ -85,10 +91,13 @@ export class SimulatedSession implements VoiceSession {
   private audioMs = 0;
   private toolCalls = 0;
   private tonePhase = 0;
+  /** Modo texto: a fala de quem liga que chegou antes de o roteiro esperar por ela. */
+  private pendingText: string | undefined;
 
   constructor(
     private readonly script: SimulatedScript,
     private readonly schedule: Schedule,
+    private readonly textMode = false,
   ) {
     // Agendado, e não imediato, para quem chamou `connect` ter tempo de registrar os handlers.
     schedule(() => this.advance());
@@ -108,9 +117,29 @@ export class SimulatedSession implements VoiceSession {
     this.waiting.remainingMs -= ms;
     if (this.waiting.remainingMs > 0) return;
     const { text } = this.waiting;
+    // A fala esperada acabou: é o fim da vez de quem ligou, como a detecção de fala de um provedor.
+    this.emitter.emit("callerTurnEnded", { source: "vad" });
     this.resume(() => {
       if (text) this.emitter.emit("transcript", { speaker: "user", text });
     });
+  }
+
+  sendUserText(text: string): void {
+    if (this.finished || !this.textMode) return;
+    if (this.waiting?.kind === "audio") {
+      this.resume(() => this.emitter.emit("transcript", { speaker: "user", text }));
+    } else if (this.index <= this.script.length) {
+      // O roteiro ainda não chegou à espera da fala (está falando ou esperando ferramenta): a fala
+      // fica guardada e é ouvida quando ele chegar, sem `turnDone` antes.
+      this.pendingText = text;
+    } else {
+      // O roteiro já acabou: o "modelo" não tem o que dizer, e a resposta vazia acaba na hora.
+      this.schedule(() => {
+        if (this.finished) return;
+        this.emitter.emit("transcript", { speaker: "user", text });
+        this.emitter.emit("turnDone");
+      });
+    }
   }
 
   sendToolResult(id: string, _result: unknown): void {
@@ -155,7 +184,14 @@ export class SimulatedSession implements VoiceSession {
   private advance(): void {
     if (this.finished || this.waiting) return;
     const step = this.script[this.index++];
-    if (!step) return;
+    if (!step) {
+      // O roteiro terminou sem `end`: a sessão fica aberta, e no modo texto a resposta acabou.
+      if (this.textMode && this.index === this.script.length + 1) {
+        this.pendingText = undefined;
+        this.emitter.emit("turnDone");
+      }
+      return;
+    }
     const guided = this.guidedSinceStep;
     this.guidedSinceStep = false;
     if ("say" in step) {
@@ -166,6 +202,13 @@ export class SimulatedSession implements VoiceSession {
       this.schedule(() => this.advance());
     } else if ("expectUserAudio" in step) {
       this.waiting = { kind: "audio", remainingMs: step.expectUserAudio, text: step.text };
+      if (this.textMode && this.pendingText !== undefined) {
+        const text = this.pendingText;
+        this.pendingText = undefined;
+        this.resume(() => this.emitter.emit("transcript", { speaker: "user", text }));
+      } else if (this.textMode) {
+        this.emitter.emit("turnDone");
+      }
     } else if ("toolCall" in step) {
       const id = `sim-${++this.toolCalls}`;
       this.waiting = { kind: "tool", id };
@@ -179,6 +222,7 @@ export class SimulatedSession implements VoiceSession {
 
   private speak(text: string): void {
     this.emitter.emit("transcript", { speaker: "agent", text });
+    if (this.textMode) return;
     const frames = Math.max(1, Math.ceil((text.length * MS_PER_CHARACTER) / 20));
     for (let frame = 0; frame < frames; frame++) {
       const pcm = Buffer.allocUnsafe(FRAME_SAMPLES * 2);
@@ -208,9 +252,11 @@ export function createSimulatedEngine(options: { schedule?: Schedule } = {}): Vo
     // Roda neste processo: não chama provedor, então o áudio não sai da instalação.
     processingLocation: { kind: "this-server" },
     keyless: true,
+    // Roda o teste do agente: a fala de quem liga chega em texto, e o roteiro responde.
+    textMode: true,
     pricing: { centsPerMinute: 0, checkedOn: "2026-11-10", source: "motor simulado: não chama provedor, não tem custo" },
     async connect(config) {
-      return new SimulatedSession(resolveScript(config), schedule);
+      return new SimulatedSession(resolveScript(config), schedule, config.mode === "text");
     },
     async classifyOutcome() {
       // O motor simulado não chama provedor. Classificar aqui seria inventar sobre o cliente: o

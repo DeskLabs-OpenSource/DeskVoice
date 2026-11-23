@@ -7,8 +7,13 @@ import {
   VOICEMAIL_MAX_SECONDS_SETTING,
   callRecordingOf,
   inboundLimitOf,
+  loadIvrMenu,
+  organizationSuspended,
   recordEvent,
+  SPEND_CAP_REACHED,
+  spendCapReached,
   resolveInboundRoute,
+  spokenLanguageOf,
   toE164,
   voicemailEnabledOf,
   voicemailLanguageOf,
@@ -21,7 +26,9 @@ import {
 import type { AriChannel, AriClient } from "./ari";
 import type { AsteriskCalls } from "./asterisk-transport";
 import { messageOf, type Logger } from "./log";
+import type { IvrJob } from "./ivr-session";
 import { panelNotice } from "./panel-notice";
+import type { UnavailableJob } from "./unavailable";
 import { BEFORE_MESSAGE_MS, type VoicemailJob, type VoicemailReason } from "./voicemail";
 
 export interface InboundDeps {
@@ -48,6 +55,13 @@ const acceptsVoicemail = (refusal: Refusal | null): refusal is VoicemailReason =
 const LIMIT_NOTICE_EVERY_MS = 10 * 60 * 1000;
 // Folga sobre o tempo máximo de chamada antes de considerar presa uma linha "em andamento".
 const STUCK_CALL_SLACK_SECONDS = 120;
+
+/**
+ * O aviso do teto de gasto do mês (fatia 7c), igual pela operadora e pelo WhatsApp. O teto e o gasto
+ * são em dólar, a moeda do extrato (`usage_ledger`), como na tela de Custos.
+ */
+export const SPEND_CAP_NOTICE = (dialed: string, capCents: number): string =>
+  `Uma ligação para ${dialed} foi recusada porque esta organização chegou ao teto de gasto do mês, de US$ ${(capCents / 100).toFixed(2)}. O gasto do mês é aproximado: inclui custo estimado e não inclui o que não pôde ser medido. Quem administra a instalação pode mudar o teto. Outras recusas pelo mesmo motivo nos próximos 10 minutos aparecem só em Chamadas.`;
 
 const VOICEMAIL_LIMIT_NOTICE = (dialed: string, limit: number): string =>
   `Uma ligação para ${dialed} recebeu sinal de ocupado porque já havia ${limit} recados sendo gravados ao mesmo tempo, o limite de ligações simultâneas definido em Configurações → Ligações. Outras recusas pelo mesmo motivo nos próximos 10 minutos aparecem só em Chamadas.`;
@@ -94,12 +108,15 @@ export async function inboundLimitReached(q: OrgQuery, clock: Clock, kind: "conv
   return { reached: (active?.count ?? 0) >= limit, limit };
 }
 
-/** Já houve aviso de teto atingido nos últimos 10 minutos: estourar o teto costuma vir em rajada. */
-export async function limitNoticedLately(q: OrgQuery, clock: Clock): Promise<boolean> {
+/**
+ * Já houve aviso de teto atingido nos últimos 10 minutos: estourar o teto costuma vir em rajada. Cada
+ * teto conta pelo `end_reason` dele: o aviso de um não cala o do outro.
+ */
+export async function limitNoticedLately(q: OrgQuery, clock: Clock, reason: "inbound_limit_reached" | typeof SPEND_CAP_REACHED = "inbound_limit_reached"): Promise<boolean> {
   const hit = await q.one(
     `select 1 as hit from notifications n join calls c on c.organization_id = n.organization_id and c.id = n.call_id
-      where n.organization_id = $1 and c.end_reason = 'inbound_limit_reached' and n.created_at > $2 limit 1`,
-    [q.organizationId, new Date(clock.now().getTime() - LIMIT_NOTICE_EVERY_MS)],
+      where n.organization_id = $1 and c.end_reason = $3 and n.created_at > $2 limit 1`,
+    [q.organizationId, new Date(clock.now().getTime() - LIMIT_NOTICE_EVERY_MS), reason],
   );
   return hit !== null;
 }
@@ -113,6 +130,20 @@ export async function limitNoticedLately(q: OrgQuery, clock: Clock): Promise<boo
  *
  * Também recusa, com sinal de ocupado e antes de qualquer gasto com o motor de voz, quando a
  * organização já tem no teto as ligações recebidas pela operadora em andamento.
+ *
+ * Número em `mode = 'ivr'` (o menu por teclas, #223): depois da organização suspensa e antes do
+ * agente e da caixa postal. A chamada nasce `ringing`, sem agente, e conta no teto de ligações
+ * recebidas como conversa; o menu vai lido daqui, com as opções e o áudio, até a URA
+ * (`ivr-session.ts`). O número em `ivr` não precisa de agente, e por isso nunca cai na caixa postal
+ * por falta dele.
+ *
+ * Organização suspensa, antes de tudo isso: a chamada nasce recusada (`organization_suspended`), e o
+ * canal vai para o AudioSocket só para tocar a fala de indisponível e desligar (`unavailable.ts`).
+ * Nenhum motor abre, nenhum recado grava, e o teto não conta, porque a chamada já nasce encerrada.
+ *
+ * Teto de gasto do mês atingido (fatia 7c), logo depois da suspensão: a mesma recusa, com
+ * `spend_cap_reached`, e um aviso no painel por janela de 10 minutos. Sem caixa postal: o recado
+ * também gera custo. Sem teto, nada é somado.
  */
 export async function handleInbound(deps: InboundDeps, channel: AriChannel): Promise<void> {
   const { db, ari, clock, log } = deps;
@@ -131,10 +162,18 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
   }
 
   const outcome = await withOrg(db, route.organizationId, async (q) => {
-    const number = route.phoneNumberId ? await q.one<{ e164: string }>("select e164 from phone_numbers where id = $1", [route.phoneNumberId]) : null;
-    const agent = route.agentId ? await q.one<{ enabled: boolean }>("select enabled from agents where id = $1", [route.agentId]) : null;
+    const number = route.phoneNumberId
+      ? await q.one<{ e164: string; mode: "ai" | "ivr"; ivr_menu_id: string | null }>("select e164, mode, ivr_menu_id from phone_numbers where id = $1", [route.phoneNumberId])
+      : null;
+    if (await organizationSuspended(q)) return refuseUnavailable(q, clock, route, from, number?.e164 ?? dialed, exten, "organization_suspended");
+    const cap = await spendCapReached(q, clock.now());
+    if (cap.reached) return refuseUnavailable(q, clock, route, from, number?.e164 ?? dialed, exten, SPEND_CAP_REACHED, cap.capCents);
+    // O menu por teclas atende no lugar do agente: lido aqui, dentro da organização, de uma vez.
+    const menu = number?.mode === "ivr" && number.ivr_menu_id ? await loadIvrMenu(q, number.ivr_menu_id) : null;
+    const ivr: IvrJob | null = menu ? { menu } : null;
+    const agent = !ivr && route.agentId ? await q.one<{ enabled: boolean }>("select enabled from agents where id = $1", [route.agentId]) : null;
     const to = number?.e164 ?? dialed;
-    let refusal: Refusal | null = !agent ? "no_agent" : !agent.enabled ? "agent_disabled" : null;
+    let refusal: Refusal | null = ivr ? null : !agent ? "no_agent" : !agent.enabled ? "agent_disabled" : null;
     let limit = 0;
     // A caixa postal só entra onde não há quem atenda, e só com ela e a gravação da organização
     // ligadas (escolha 5A). Os recados têm o teto próprio: no teto, ocupado, como a conversa.
@@ -166,7 +205,7 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
     const call = await q.one<{ id: string }>(
       `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at, voicemail)
        values ($1, $2, 'inbound', 'phone', $3, $4, $5, $6, $7, $8, $9) returning id`,
-      [route.organizationId, route.agentId, from, to, answered ? "ringing" : "refused", answered ? null : refusal, clock.now(), answered ? null : clock.now(), voicemail !== null],
+      [route.organizationId, ivr ? null : route.agentId, from, to, answered ? "ringing" : "refused", answered ? null : refusal, clock.now(), answered ? null : clock.now(), voicemail !== null],
     );
     if (!call) throw new Error("Inbound call was not created");
     if (refusal && !voicemail) {
@@ -176,8 +215,21 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
       const dialedLabel = to ?? "um número que este tronco não informou";
       if (!noticedLately) await panelNotice(q, clock, call.id, voicemailOverLimit ? VOICEMAIL_LIMIT_NOTICE(dialedLabel, limit) : NOTICE[refusal](dialedLabel, limit));
     }
-    return { callId: call.id, refusal, voicemail };
+    return { callId: call.id, refusal, voicemail, ivr: refusal ? null : ivr, unavailable: null, unavailableReason: null };
   });
+
+  if (outcome.unavailable) {
+    log("info", "inbound call refused with the unavailable notice", { callId: outcome.callId, reason: outcome.unavailableReason, language: outcome.unavailable.language });
+    deps.calls.expect({ callId: outcome.callId, channelId: channel.id, organizationId: route.organizationId, agentId: null, trunkId: route.trunkId, unavailable: outcome.unavailable });
+    try {
+      await ari.setVariable(channel.id, "AUDIOSOCKET_UUID", outcome.callId);
+      await ari.continueDialplan(channel.id, "deskvoice-audio", "s");
+    } catch (error) {
+      log("error", "could not send the inbound channel to play the unavailable notice", { callId: outcome.callId, error: messageOf(error) });
+      await ari.hangup(channel.id);
+    }
+    return;
+  }
 
   if (outcome.refusal && !outcome.voicemail) {
     log("info", "inbound call refused", { callId: outcome.callId, reason: outcome.refusal });
@@ -186,14 +238,16 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
     return;
   }
   if (outcome.voicemail) log("info", "inbound call goes to voicemail", { callId: outcome.callId, ...outcome.voicemail });
+  if (outcome.ivr) log("info", "inbound call goes to the ivr", { callId: outcome.callId, menuId: outcome.ivr.menu.id });
 
   deps.calls.expect({
     callId: outcome.callId,
     channelId: channel.id,
     organizationId: route.organizationId,
-    agentId: route.agentId,
+    agentId: outcome.ivr ? null : route.agentId,
     trunkId: route.trunkId,
     ...(outcome.voicemail && { voicemail: outcome.voicemail }),
+    ...(outcome.ivr && { ivr: outcome.ivr }),
   });
   try {
     // O dialplan abre o AudioSocket com este UUID: é ele que liga a conexão de áudio à chamada.
@@ -204,4 +258,38 @@ export async function handleInbound(deps: InboundDeps, channel: AriChannel): Pro
     // O canal some sem áudio: `channelDestroyed` fecha a chamada como falha.
     await ari.hangup(channel.id);
   }
+}
+
+type UnavailableReason = "organization_suspended" | typeof SPEND_CAP_REACHED;
+
+/**
+ * A recusa com a fala de indisponível: organização suspensa, ou teto de gasto do mês atingido. A
+ * chamada nasce `refused`, com o evento, e leva o idioma da fala, o do agente do número (ou o padrão).
+ * O agente só é lido pelo idioma: ligado ou não, não atende.
+ *
+ * Suspensa, sem aviso no painel: quem olharia o painel da organização suspensa é quem a suspensão tirou
+ * dele. No teto, um aviso por janela de 10 minutos, com o teto (`capCents`).
+ */
+async function refuseUnavailable(
+  q: OrgQuery,
+  clock: Clock,
+  route: { organizationId: string; agentId: string | null },
+  from: string | null,
+  to: string | null,
+  exten: string,
+  reason: UnavailableReason,
+  capCents?: number,
+): Promise<{ callId: string; refusal: null; voicemail: null; ivr: null; unavailable: UnavailableJob; unavailableReason: UnavailableReason }> {
+  const agent = route.agentId ? await q.one<{ language: string | null }>("select language from agents where id = $1", [route.agentId]) : null;
+  const call = await q.one<{ id: string }>(
+    `insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, end_reason, started_at, ended_at)
+     values ($1, $2, 'inbound', 'phone', $3, $4, 'refused', $6, $5, $5) returning id`,
+    [route.organizationId, route.agentId, from, to, clock.now(), reason],
+  );
+  if (!call) throw new Error("Inbound call was not created");
+  await recordEvent(q, call.id, "call_refused", { reason, from, to, dialed: exten, ...(capCents !== undefined && { capCents }) }, clock.now());
+  if (reason === SPEND_CAP_REACHED && capCents !== undefined && !(await limitNoticedLately(q, clock, SPEND_CAP_REACHED))) {
+    await panelNotice(q, clock, call.id, SPEND_CAP_NOTICE(to ?? "um número que este tronco não informou", capCents));
+  }
+  return { callId: call.id, refusal: null, voicemail: null, ivr: null, unavailable: { language: spokenLanguageOf(agent?.language) }, unavailableReason: reason };
 }

@@ -8,7 +8,7 @@ const privacy: PrivacyDictionary = {
   recordingDisk:
     "Cada minuto de llamada ocupa cerca de 1,9 MB en el disco del servidor. Es la cuenta del formato (dos canales, 8 kHz, 16 bits), y no una medición.",
   recordingKeeps:
-    "Encender o apagar no borra nada. Las grabaciones ya hechas siguen el plazo de conservación de abajo: salen junto con el texto de la conversación, y sin plazo se conservan para siempre. Las copias de seguridad de hoy no incluyen las grabaciones. Verifique que el aviso del inicio de la llamada, en Configuración → Llamadas, diga a quien llama que la conversación queda registrada.",
+    "Encender o apagar no borra nada. Las grabaciones ya hechas siguen el plazo de conservación de abajo: salen junto con el texto de la conversación, y sin plazo se conservan para siempre. Las copias de seguridad de hoy no incluyen las grabaciones. Verifique que el aviso de grabación, justo arriba, diga a quien llama que la conversación queda registrada.",
   recordingForever:
     "El plazo de conservación está vacío: las grabaciones se conservan para siempre, y el disco del servidor crece sin límite, cerca de 1,9 MB por minuto de llamada. Defina un plazo abajo para que las grabaciones antiguas salgan.",
   recordingStates: { on: "encendida", off: "apagada" },
@@ -107,8 +107,11 @@ const privacy: PrivacyDictionary = {
     caller_memory_changed: "{who} dejó la memoria del número en el agente {state}.",
     analyst_provider_confirmed: "{who} confirmó que el analista {analyst} envía el texto de lo que dice quien llama a {provider}.",
     decision_model_provider_confirmed: "{who} confirmó que el filtro de habla envía el texto de la llamada a {provider}.",
+    synthesizer_provider_confirmed: "{who} confirmó que la voz {provider} recibe el texto que el agente dice en la llamada.",
     organization_created: "La administración de la instalación creó esta organización, con el nombre \"{name}\".",
     organization_renamed: "La administración de la instalación renombró esta organización de \"{from}\" a \"{to}\".",
+    organization_suspended: "La administración de la instalación suspendió esta organización. Motivo: {reason}. Tareas canceladas: {n}.",
+    organization_reactivated: "La administración de la instalación reactivó esta organización. Tareas canceladas en la reactivación: {n}.",
     caller_notes_deleted: "{who} olvidó el número terminado en {suffix}. Notas del agente borradas: {notes}. Pendientes cerrados borrados: {followUps}.",
   },
   noteDeleted: "{who} borró una nota del agente.",

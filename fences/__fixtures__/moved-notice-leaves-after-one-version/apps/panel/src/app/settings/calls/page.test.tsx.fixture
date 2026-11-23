@@ -1,0 +1,3 @@
+// Arquivo de teste: a cerca não o lê.
+const key = "movedWhatsAppCalls";
+export default key;

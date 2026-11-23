@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { explicitAdminsTransition, lockInstallationAdmins, markInstallationAdmin, type InstallationPerson } from "./accounts";
 import { ADMINS_EXPLICIT_KEY, FOUNDING_ORGANIZATION_KEY, recordInstallationEvent } from "./installation";
+import { copyDefaultLimits } from "./limits";
+import { defaultLanguage, defaultTimezone } from "./organization-defaults";
 import { hashToken } from "./password";
 import { ORG_EVENT_KINDS, type Db, type OrgEventKind, type OrgQuery } from "./types";
 import { withOrg, withSystem } from "./with-org";
@@ -18,15 +20,17 @@ export interface OrganizationView {
   name: string;
   createdAt: Date;
   suspendedAt: Date | null;
+  /** O motivo da suspensão, enquanto ela estiver suspensa. */
+  suspendedReason: string | null;
   /** A organização de quem instalou (seção 3.2). */
   founding: boolean;
 }
 
-/** Todas as organizações da instalação: só `id`, nome, criação, estado e se é a fundadora. */
+/** Todas as organizações da instalação: só `id`, nome, criação, estado (com o motivo da suspensão) e se é a fundadora. */
 export function listOrganizations(db: Db): Promise<OrganizationView[]> {
   return withSystem(db, (q) =>
     q.many<OrganizationView>(
-      `select o.id, o.name, o.created_at as "createdAt", o.suspended_at as "suspendedAt",
+      `select o.id, o.name, o.created_at as "createdAt", o.suspended_at as "suspendedAt", o.suspended_reason as "suspendedReason",
               coalesce(o.id = (select (value #>> '{}')::uuid from installation_settings where key = $1), false) as founding
          from organizations o
         order by o.created_at, o.id`,
@@ -68,7 +72,13 @@ export type AddOrganizationResult =
 
 /**
  * Cria uma organização, numa transação só:
- * - a organização, com a política de saída desligada, como toda organização;
+ * - a organização, com a política de saída desligada, como toda organização, e com o fuso
+ *   `defaults.timezone` COPIADO para `outbound_policy.timezone` (seção 3.5): sem padrão gravado, o
+ *   padrão da coluna, como antes, e com o idioma `defaults.language` COPIADO para
+ *   `organizations.language` (sem padrão, nulo, e os formulários propõem pt-BR). Mudar o padrão
+ *   depois não mexe nela;
+ * - a linha de limites dela, com o padrão `defaults.limits` COPIADO (seção 3.5): sem padrão gravado,
+ *   nenhum limite e a saída travada. Mudar o padrão depois não mexe nela;
  * - `organization_created` na auditoria da instalação e na da organização;
  * - se a lista de quem administra ainda não é explícita (é a segunda organização): a marca para todo
  *   dono ativo da fundadora que não a tem, para os administradores escolhidos em `keep`, e
@@ -90,10 +100,14 @@ export function addOrganization(db: Db, input: AddOrganizationInput, now: Date):
       return { ok: false, reason: "invalid_keep" };
     }
 
-    const created = await q.one<{ id: string }>("insert into organizations (name, created_at) values ($1, $2) returning id", [name, now]);
+    // O idioma `defaults.language` COPIADO; sem padrão, nulo, que é o que a coluna (sem valor padrão) já daria.
+    const created = await q.one<{ id: string }>("insert into organizations (name, created_at, language) values ($1, $2, $3) returning id", [name, now, await defaultLanguage(q)]);
     if (!created) throw new Error("Insert into organizations returned no row");
     const organizationId = created.id;
-    await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, false)", [organizationId]);
+    const timezone = await defaultTimezone(q);
+    if (timezone === null) await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, false)", [organizationId]);
+    else await q.exec("insert into outbound_policy (organization_id, enabled, timezone) values ($1, false, $2)", [organizationId, timezone]);
+    await copyDefaultLimits(q, organizationId, now);
     await recordInstallationEvent(q, now, "organization_created", { actorAccountId: input.actorAccountId, organizationId, payload: { name } });
     await recordOrgEventFor(q, organizationId, "organization_created", { name }, now);
 

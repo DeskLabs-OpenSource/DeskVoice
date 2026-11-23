@@ -188,8 +188,8 @@ describe("brains/openrouter: lista de modelos", () => {
     [403, "rejected"],
     [408, "unreachable"],
     [429, "rate_limited"],
-    [500, "unreachable"],
-    [502, "unreachable"],
+    [500, "provider_error"],
+    [502, "provider_error"],
     [400, "unexpected_response"],
   ] as const)("/key com status %i é %s", async (status, failure) => {
     const { fetch } = fakeFetch({ key: { status, body: { error: { code: status, message: `algo sobre ${KEY}` } } } });
@@ -198,7 +198,7 @@ describe("brains/openrouter: lista de modelos", () => {
 
   it("/models falhando depois da chave aceita traz o motivo dele", async () => {
     const { fetch } = fakeFetch({ key: KEY_OK, models: { status: 503, body: {} } });
-    expect(await brain.listModels(KEY, { fetch, today: TODAY })).toEqual({ ok: false, failure: "unreachable", status: 503 });
+    expect(await brain.listModels(KEY, { fetch, today: TODAY })).toEqual({ ok: false, failure: "provider_error", status: 503 });
     const forma = fakeFetch({ key: KEY_OK, models: { status: 200, body: { data: "não é lista" } } });
     expect(await brain.listModels(KEY, { fetch: forma.fetch, today: TODAY })).toEqual({ ok: false, failure: "unexpected_response", status: 200 });
   });
@@ -261,8 +261,8 @@ describe("brains/openrouter: pedido em JSON", () => {
     [403, "unexpected_response"],
     [408, "unreachable"],
     [429, "rate_limited"],
-    [502, "unreachable"],
-    [503, "unreachable"],
+    [502, "provider_error"],
+    [503, "provider_error"],
     [400, "unexpected_response"],
   ] as const)("status %i é %s", async (status, failure) => {
     const { fetch } = fakeFetch({ chat: { status, body: { error: { code: status, message: `algo sobre ${KEY}` } } } });
@@ -281,6 +281,95 @@ describe("brains/openrouter: pedido em JSON", () => {
         expect(out).not.toContain(KEY);
         expect(out).not.toContain("Invalid key");
       }
+    }
+  });
+});
+
+// ---- chat (R5, fatia 2): a ligação deste cérebro ao caminho comum, testado em `brain-http.test.ts` ----
+
+const CHAT_KEY = "chave-inventada-do-teste-chat-openrouter";
+const CHAT_REQUEST = {
+  model: "openai/gpt-5-nano",
+  messages: [{ role: "user" as const, content: "Oi" }],
+  tools: [{ name: "agendar", description: "Marca um horário.", parameters: { type: "object" } }],
+  timeoutMs: 5_000,
+};
+
+/** `fetch` falso que responde SSE (ou um erro) e guarda o pedido. */
+function sseFetch(reply: { status: number; body: string }) {
+  const sent: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
+  const fetch = (async (url: string, init: RequestInit) => {
+    sent.push({ url, headers: init.headers as Record<string, string>, body: JSON.parse(init.body as string) as Record<string, unknown> });
+    return new Response(reply.body, { status: reply.status, headers: { "content-type": "text/event-stream" } });
+  }) as unknown as typeof globalThis.fetch;
+  return { fetch, sent };
+}
+
+/** Roda a conversa até `done` ou `error` e devolve os eventos em ordem. */
+async function chatEvents(fetch: typeof globalThis.fetch): Promise<unknown[][]> {
+  const chat = brain.chat?.(CHAT_KEY, CHAT_REQUEST, { fetch });
+  if (!chat) throw new Error("sem chat");
+  const events: unknown[][] = [];
+  await new Promise<void>((resolve) => {
+    chat.on("text", (delta) => events.push(["text", delta]));
+    chat.on("toolCall", (call) => events.push(["toolCall", call]));
+    chat.on("usage", (usage, estimated) => events.push(["usage", usage, estimated]));
+    chat.on("done", () => {
+      events.push(["done"]);
+      resolve();
+    });
+    chat.on("error", (failure, status) => {
+      events.push(["error", failure, status]);
+      resolve();
+    });
+  });
+  return events;
+}
+
+const sseOf = (...chunks: unknown[]): string => chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n";
+
+describe("brains/openrouter: chat em streaming", () => {
+  it("não manda `stream_options` (obsoleto e sem efeito no OpenRouter), em POST https://openrouter.ai/api/v1/chat/completions, e entrega texto, ferramenta e consumo declarado", async () => {
+    const { fetch, sent } = sseFetch({
+      status: 200,
+      body: sseOf(
+        { choices: [{ index: 0, delta: { content: "Bom " } }] },
+        { choices: [{ index: 0, delta: { content: "dia" } }] },
+        { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "agendar", arguments: '{"dia"' } }] } }] },
+        { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: ':"terça"}' } }] }, finish_reason: "tool_calls" }] },
+        { choices: [], usage: { prompt_tokens: 50, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 10 } } },
+      ),
+    });
+    const events = await chatEvents(fetch);
+    expect(sent[0]?.url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(sent[0]?.headers.Authorization).toBe(`Bearer ${CHAT_KEY}`);
+    expect(sent[0]?.body).toMatchObject({ model: "openai/gpt-5-nano", stream: true });
+    expect(sent[0]?.body).not.toHaveProperty("stream_options");
+    expect(events).toEqual([
+      ["text", "Bom "],
+      ["text", "dia"],
+      ["toolCall", { id: "c1", name: "agendar", args: '{"dia":"terça"}' }],
+      ["usage", { inputTokens: 40, cachedInputTokens: 10, outputTokens: 4 }, false],
+      ["done"],
+    ]);
+  });
+
+  it("a recusa cai no vocabulário fechado, como no completeJson, sem custo e sem a chave", async () => {
+    const cases: [number, unknown, string][] = [
+      [402, {}, "no_credit"],
+      [403, {}, "unexpected_response"],
+      [401, {}, "rejected"],
+      [429, {}, "rate_limited"],
+      [502, {}, "provider_error"],
+    ];
+    for (const [status, body, failure] of cases) {
+      const { fetch } = sseFetch({ status, body: JSON.stringify(body) });
+      const events = await chatEvents(fetch);
+      expect(events).toEqual([
+        ["usage", {}, false],
+        ["error", failure, status],
+      ]);
+      expect(JSON.stringify(events)).not.toContain(CHAT_KEY);
     }
   });
 });

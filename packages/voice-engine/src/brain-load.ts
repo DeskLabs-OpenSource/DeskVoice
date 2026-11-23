@@ -13,7 +13,9 @@ function isBrain(value: unknown): value is Brain {
     typeof candidate.label === "string" &&
     typeof candidate.keyUrl === "string" &&
     typeof candidate.listModels === "function" &&
-    typeof candidate.completeJson === "function"
+    typeof candidate.completeJson === "function" &&
+    // `chat` é opcional (R5, fatia 2): ausente vale; presente, tem de ser função.
+    (candidate.chat === undefined || typeof candidate.chat === "function")
   );
 }
 

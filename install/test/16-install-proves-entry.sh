@@ -49,7 +49,10 @@ equal "a criação do dono recebe a senha pela entrada padrão" "$PW" "$(cat "$F
 refuse "a senha nunca vai em argumento de processo" grep -q "$PW" "$FAKE_DIR/calls.log"
 lacks "a senha nunca aparece na tela" "$out" "$PW"
 check "o login é pela entrada única (pelo Caddy), não direto no painel" grep -q "host:'caddy',port:80,path,method" "$FAKE_DIR/calls.log"
-check "a conferência do endereço vem antes do login" test "$(grep -n '^curl .*system/health' "$FAKE_DIR/calls.log" | tail -n 1 | cut -d: -f1)" -lt "$(grep -n 'auth/login' "$FAKE_DIR/calls.log" | head -n 1 | cut -d: -f1)"
+# O login do instalador é o que passa pelo Caddy: é o `const login=await call('POST', …)`. A
+# checagem de saúde também pede o login, mas falando direto com o painel (127.0.0.1:3000), e não é
+# ela que este teste quer ordenar.
+check "a conferência do endereço vem antes do login" test "$(grep -n '^curl .*system/health' "$FAKE_DIR/calls.log" | tail -n 1 | cut -d: -f1)" -lt "$(grep -n 'const login=await call' "$FAKE_DIR/calls.log" | head -n 1 | cut -d: -f1)"
 
 # 2. 80/443 livres, sem domínio, com a opção: o defeito medido (era ignorada, e saía 0.0.0.0:80).
 fresh

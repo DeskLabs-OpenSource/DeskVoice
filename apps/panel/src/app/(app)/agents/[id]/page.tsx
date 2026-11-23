@@ -18,8 +18,16 @@ import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../
 import { formatPhone } from "../../../../ui/format";
 import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
+import { proposedLanguage } from "../../../../ui/proposed-language";
 import { GUIDED_ENGINES } from "../../settings/analysts/rules";
 import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
+import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
+import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
+import { AgentBrains } from "./brains";
+import { VoiceField } from "./voice-field";
+
+/** O agente como a API devolve, com quem lê a ligação dele (R4, fatia 5): nulo segue a organização. */
+type AgentWithBrain = Agent & { analysisBrain?: unknown };
 
 interface Draft {
   name: string;
@@ -31,12 +39,18 @@ interface Draft {
   language: string;
   tools: string[];
   transferTo: string;
+  /** Ninguém atendeu a transferência: a ligação volta para o agente. Ligada de fábrica. */
+  transferReturns: boolean;
+  /** O "ainda está aí?" quando quem ligou fica calado (decisão B). Ligada de fábrica. */
+  callerIdleGuard: boolean;
   maxMinutes: string;
   costCeiling: string;
   enabled: boolean;
   /** Vazio: as pendências do agente são da equipe. */
   followUpOwner: string;
   listeningEnvironment: ListeningEnvironment;
+  /** O texto da caixa, um termo por linha. Vazio grava `[]`. */
+  vocabulary: string;
   /** Para quem o agente pode passar a ligação; vazia de fábrica. */
   handoffTargets: string[];
   /** O que acontece quando a ligação cai. */
@@ -45,17 +59,21 @@ interface Draft {
   dropFollowUpMessage: string;
   /** O analista ao vivo; vazio é "Nenhum", o de fábrica. */
   analystId: string;
+  /** Quem lê a ligação depois que ela termina; de fábrica, igual à organização. */
+  analysis: AnalysisDraft;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "" };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", transferReturns: true, callerIdleGuard: true, maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "", analysis: { kind: "organization" } };
+
+const VOCABULARY_FIELD_ID = "agent-vocabulary";
 
 /** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
-const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp"];
+const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp", "call_back"];
 
 /** Motores em que a sessão em Barulhento foi provada numa instalação real (a sessão abre; o efeito no ruído não foi medido). */
 const NOISY_PROVEN_ENGINES: readonly string[] = ["openai-realtime", "gemini-live"];
 
-const toDraft = (agent: Agent): Draft => ({
+const toDraft = (agent: AgentWithBrain): Draft => ({
   name: agent.name,
   roleLabel: agent.roleLabel ?? "",
   greeting: agent.greeting ?? "",
@@ -65,15 +83,19 @@ const toDraft = (agent: Agent): Draft => ({
   language: agent.language,
   tools: agent.tools,
   transferTo: formatPhone(agent.transferTo),
+  transferReturns: agent.transferReturnsToAgent ?? true,
+  callerIdleGuard: agent.callerIdleGuard ?? true,
   maxMinutes: String(Math.round(agent.maxCallSeconds / 60)),
   costCeiling: (agent.costCeilingCents / 100).toFixed(2),
   enabled: agent.enabled,
   followUpOwner: agent.followUpOwnerUserId ?? "",
   listeningEnvironment: agent.listeningEnvironment ?? "normal",
+  vocabulary: (agent.vocabulary ?? []).join("\n"),
   handoffTargets: agent.agentHandoffTargets ?? [],
   dropFollowUp: agent.dropFollowUp ?? "off",
   dropFollowUpMessage: agent.dropFollowUpMessage ?? "",
   analystId: agent.analystId ?? "",
+  analysis: toAnalysisDraft(agent.analysisBrain),
 });
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -84,7 +106,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const router = useRouter();
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
-  const agent = useApi<Agent>(isNew ? null : `/agents/${id}`);
+  const agent = useApi<AgentWithBrain>(isNew ? null : `/agents/${id}`);
   const engines = useApi<Engine[]>("/engines");
   const tools = useApi<ToolInfo[]>("/tools");
   const owners = useApi<Person[]>("/follow-ups/owners");
@@ -95,11 +117,14 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // O pré-requisito da mensagem no WhatsApp para quem ligou: conector e confiança no número exibido.
   const whatsAppConnector = useApi<Setting<unknown>>("/settings/whatsapp.connector");
   const trustCaller = useApi<Setting<boolean>>("/settings/whatsapp.trust_caller_id");
+  // O pré-requisito da religação: as ligações de saída ligadas (`outbound_policy.enabled`).
+  const outboundPolicy = useApi<{ enabled: boolean }>("/outbound-policy");
   // O nome da organização entra no texto padrão da mensagem para quem ligou.
   const me = useApi<Me>("/auth/me");
   const save = useAction();
   const remove = useAction();
-  const [draft, setDraft] = useState<Draft | null>(isNew ? BLANK : null);
+  // O agente novo espera `/auth/me`: o idioma que ele propõe é o da organização (R8, fatia 8a).
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [confirming, setConfirming] = useState(false);
   // O que está gravado no servidor. `agent.data` não se atualiza sozinho depois de salvar, então o
   // aviso de rascunho precisa da cópia que o próprio salvar devolve.
@@ -107,6 +132,10 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // O modo gravado: o salvar só manda o modo quando ele mudou. Um agente já em `whatsapp` cujo
   // pré-requisito foi desligado depois continua salvando os outros campos, e a rota não o recusa.
   const [savedDropFollowUp, setSavedDropFollowUp] = useState<DropFollowUp>("off");
+  // Quem lê a ligação, como está gravado: o salvar só manda a escolha quando ela mudou.
+  const [savedAnalysis, setSavedAnalysis] = useState<AnalysisDraft>({ kind: "organization" });
+  // O modelo escolhido não tem preço e o aviso dele está na tela: só então o salvar manda `acceptUnmeasured`.
+  const [acceptUnmeasured, setAcceptUnmeasured] = useState(false);
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void => setDraft((current) => (current ? { ...current, [key]: value } : current));
 
   useEffect(() => {
@@ -114,13 +143,22 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       setDraft(toDraft(agent.data));
       setSavedEnvironment(agent.data.listeningEnvironment ?? "normal");
       setSavedDropFollowUp(agent.data.dropFollowUp ?? "off");
+      setSavedAnalysis(toAnalysisDraft(agent.data.analysisBrain));
     }
   }, [agent.data]);
+  // Agente novo propõe o idioma da organização (`organizations.language`, copiado do padrão da
+  // instalação quando ela foi criada); sem ele, pt-BR, como sempre. Se `/auth/me` falhar, pt-BR também.
+  const meLoaded = me.data !== undefined || me.error !== undefined;
+  const organizationLanguage = me.data?.organizationLanguage;
+  useEffect(() => {
+    if (isNew && meLoaded) setDraft((current) => current ?? { ...BLANK, language: proposedLanguage(organizationLanguage) });
+  }, [isNew, meLoaded, organizationLanguage]);
   // Agente novo já nasce com o motor padrão da instalação; sem padrão, o primeiro da lista.
   const fallbackEngine = defaultEngine.data?.value ?? engines.data?.[0]?.id ?? "";
+  const hasDraft = draft !== null;
   useEffect(() => {
     if (isNew && fallbackEngine) setDraft((current) => (current && current.engine === "" ? { ...current, engine: fallbackEngine } : current));
-  }, [isNew, fallbackEngine]);
+  }, [isNew, fallbackEngine, hasDraft]);
 
   const back = (
     <Link href="/agents" className="inline-flex items-center gap-1.5 justify-self-start text-[0.93rem] font-bold text-muted hover:text-ink">
@@ -157,8 +195,18 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         : trustCaller.data.value !== true
           ? "not_trusted"
           : null;
-  const submit = (): Promise<boolean> =>
-    save.run(async () => {
+  // Por que a religação está indisponível, a mesma conferência da rota; `undefined` enquanto carrega.
+  const callBackBlock: "outbound_disabled" | null | undefined = outboundPolicy.data === undefined ? undefined : outboundPolicy.data.enabled ? null : "outbound_disabled";
+  // A regra é a da API (`checkVocabulary`): a tela diz o erro ao lado do campo e não manda nada.
+  const vocabulary = readVocabulary(draft.vocabulary);
+  const vocabularyError = vocabulary.result.ok ? undefined : vocabularyErrorText(vocabulary.result.problem, t);
+  const submit = (): Promise<boolean> => {
+    if (!vocabulary.result.ok) {
+      document.getElementById(VOCABULARY_FIELD_ID)?.focus();
+      return Promise.resolve(false);
+    }
+    const terms = vocabulary.result.terms;
+    return save.run(async () => {
       const body = {
         name: draft.name,
         roleLabel: draft.roleLabel,
@@ -169,24 +217,30 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         language: draft.language,
         tools: draft.tools,
         transferTo: draft.transferTo,
+        transferReturnsToAgent: draft.transferReturns,
+        callerIdleGuard: draft.callerIdleGuard,
         maxCallSeconds: Math.round(Number(draft.maxMinutes) * 60),
         costCeilingCents: Math.round(Number(draft.costCeiling.replace(",", ".")) * 100),
         enabled: draft.enabled,
         followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
         listeningEnvironment: draft.listeningEnvironment,
+        vocabulary: terms,
         agentHandoffTargets: draft.handoffTargets,
         // Um modo que a tela não oferece (gravado fora dela) não volta no salvar: fica como está. O modo
         // que não mudou também não vai: a rota confere o pré-requisito de quem escolhe o `whatsapp`.
         ...(DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) && (isNew || draft.dropFollowUp !== savedDropFollowUp) && { dropFollowUp: draft.dropFollowUp }),
         dropFollowUpMessage: draft.dropFollowUpMessage,
         analystId: draft.analystId === "" ? null : draft.analystId,
+        ...analysisPatch(draft.analysis, savedAnalysis, acceptUnmeasured),
       };
-      const saved = await api<Agent>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
+      const saved = await api<AgentWithBrain>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       setSavedEnvironment(saved.listeningEnvironment ?? "normal");
       setSavedDropFollowUp(saved.dropFollowUp ?? "off");
+      setSavedAnalysis(toAnalysisDraft(saved.analysisBrain));
       if (isNew) router.replace(`/agents/${saved.id}`);
       else setDraft(toDraft(saved));
     });
+  };
 
   return (
     <form
@@ -229,6 +283,21 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           </div>
         </Panel>
 
+        <Panel title={t.vocabulary} description={t.vocabularyLead}>
+          <div className="max-w-xl">
+            <Field label={t.vocabularyField} hint={vocabularyCountText(vocabulary.count, t)} error={vocabularyError}>
+              <TextArea
+                id={VOCABULARY_FIELD_ID}
+                value={draft.vocabulary}
+                onChange={(event) => set("vocabulary", event.target.value)}
+                rows={6}
+                spellCheck={false}
+                aria-invalid={vocabularyError ? true : undefined}
+              />
+            </Field>
+          </div>
+        </Panel>
+
         <Panel title={t.voice}>
           <div className="grid gap-4 md:grid-cols-3">
             <Field label={t.engine}>
@@ -249,17 +318,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 ))}
               </Select>
             </Field>
-            <Field label={t.voiceId} hint={t.voiceHint}>
-              <Select value={draft.voiceId} onChange={(event) => set("voiceId", event.target.value)}>
-                <option value="">{engine?.defaultVoice ? fill(t.voiceDefault, { voice: engine.defaultVoice }) : t.voiceDefaultNone}</option>
-                {engine?.voices.map((voice) => (
-                  <option key={voice.id} value={voice.id}>
-                    {[voice.id, voice.style, voice.recommended ? t.voiceRecommended : null].filter(Boolean).join(" · ")}
-                  </option>
-                ))}
-                {draft.voiceId && !engine?.voices.some((voice) => voice.id === draft.voiceId) ? <option value={draft.voiceId}>{fill(t.voiceCustom, { voice: draft.voiceId })}</option> : null}
-              </Select>
-            </Field>
+            <VoiceField t={t} engine={engine} voiceId={draft.voiceId} language={draft.language} onChange={(next) => set("voiceId", next)} />
             <Field label={t.language}>
               <TextInput mono value={draft.language} onChange={(event) => set("language", event.target.value)} required maxLength={20} />
             </Field>
@@ -300,7 +359,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             <div className="mt-4">
               <Notice tone="warn">
                 <p>{t.engineNoKey}</p>
-                <Link href="/settings" className="font-bold underline underline-offset-4">
+                <Link href="/settings/ai" className="font-bold underline underline-offset-4">
                   {t.engineKeyLink}
                 </Link>
               </Notice>
@@ -308,6 +367,20 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           ) : null}
           {engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
         </Panel>
+
+        <AgentBrains
+          agentId={isNew ? null : id}
+          t={t}
+          engineLabel={engine?.label ?? draft.engine}
+          analysis={draft.analysis}
+          onChange={(next, accept) => {
+            set("analysis", next);
+            setAcceptUnmeasured(accept);
+          }}
+          costCeilingCents={Math.round(Number(draft.costCeiling.replace(",", ".")) * 100)}
+          analyst={analysts.data?.find((candidate) => candidate.id === draft.analystId) ?? null}
+          canConfigure={canConfigure}
+        />
 
         <Panel title={t.analyst} description={t.analystLead}>
           <Field label={t.analyst} hint={t.analystHint}>
@@ -361,6 +434,10 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             <Field label={t.transferTo} hint={t.transferHint}>
               <TextInput mono type="tel" value={draft.transferTo} onChange={(event) => set("transferTo", event.target.value)} />
             </Field>
+            <div className="mt-4 grid gap-1">
+              <Switch checked={draft.transferReturns} onChange={(next) => set("transferReturns", next)} label={t.transferReturns} />
+              <p className="text-[0.87rem] text-muted">{t.transferReturnsHint}</p>
+            </div>
           </Panel>
           <Panel title={t.limits} description={t.limitsLead}>
             <div className="grid grid-cols-2 gap-4">
@@ -370,6 +447,10 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               <Field label={t.costCeiling}>
                 <TextInput mono inputMode="decimal" value={draft.costCeiling} onChange={(event) => set("costCeiling", event.target.value)} required />
               </Field>
+            </div>
+            <div className="mt-4 grid gap-1">
+              <Switch checked={draft.callerIdleGuard} onChange={(next) => set("callerIdleGuard", next)} label={t.callerIdleGuard} />
+              <p className="text-[0.87rem] text-muted">{t.callerIdleGuardHint}</p>
             </div>
           </Panel>
         </div>
@@ -426,6 +507,9 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 <option value="whatsapp" disabled={whatsAppBlock !== null && draft.dropFollowUp !== "whatsapp"}>
                   {whatsAppBlock ? `${t.dropFollowUpWhatsApp} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpWhatsApp}
                 </option>
+                <option value="call_back" disabled={callBackBlock !== null && draft.dropFollowUp !== "call_back"}>
+                  {callBackBlock ? `${t.dropFollowUpCallBack} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpCallBack}
+                </option>
                 {DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) ? null : (
                   <option value={draft.dropFollowUp} disabled>
                     {t.dropFollowUpOther}
@@ -441,7 +525,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               <div className="mt-3 max-w-prose">
                 <Notice tone="fail">
                   <p>{whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}</p>
-                  <Link href="/settings/whatsapp" className="font-bold underline-offset-4 hover:underline">
+                  <Link href={whatsAppBlock === "not_connected" ? "/settings/whatsapp" : "/settings/whatsapp#avancado"} className="font-bold underline-offset-4 hover:underline">
                     {t.dropFollowUpFixLink}
                   </Link>
                 </Notice>
@@ -449,11 +533,38 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             ) : (
               <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
                 {whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}{" "}
-                <Link href="/settings/whatsapp" className="font-bold text-ink underline-offset-4 hover:underline">
+                <Link href={whatsAppBlock === "not_connected" ? "/settings/whatsapp" : "/settings/whatsapp#avancado"} className="font-bold text-ink underline-offset-4 hover:underline">
                   {t.dropFollowUpFixLink}
                 </Link>
               </p>
             )
+          ) : null}
+          {callBackBlock ? (
+            // Como o WhatsApp: o motivo e o caminho; alerta só quando a religação já é o modo escolhido.
+            draft.dropFollowUp === "call_back" ? (
+              <div className="mt-3 max-w-prose">
+                <Notice tone="fail">
+                  <p>{t.dropFollowUpOutboundDisabled}</p>
+                  <Link href="/outbound" className="font-bold underline-offset-4 hover:underline">
+                    {t.dropFollowUpOutboundLink}
+                  </Link>
+                </Notice>
+              </div>
+            ) : (
+              <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
+                {t.dropFollowUpOutboundDisabled}{" "}
+                <Link href="/outbound" className="font-bold text-ink underline-offset-4 hover:underline">
+                  {t.dropFollowUpOutboundLink}
+                </Link>
+              </p>
+            )
+          ) : null}
+          {draft.dropFollowUp === "call_back" ? (
+            // Quantas tentativas e quando (fixos no código, seção 3.6), e a lista de não ligar.
+            <div className="mt-4 grid max-w-prose gap-2">
+              <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackHow}</p>
+              <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackDoNotCall}</p>
+            </div>
           ) : null}
           {draft.dropFollowUp === "whatsapp" ? (
             <div className="mt-4 grid max-w-prose gap-2">

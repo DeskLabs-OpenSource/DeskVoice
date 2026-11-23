@@ -87,8 +87,8 @@ describe("brains/deepseek: lista de modelos", () => {
     [403, "rejected"],
     [402, "no_credit"],
     [429, "rate_limited"],
-    [500, "unreachable"],
-    [503, "unreachable"],
+    [500, "provider_error"],
+    [503, "provider_error"],
     [404, "unexpected_response"],
     [422, "unexpected_response"],
   ] as const)("status %i é %s", async (status, failure) => {
@@ -158,7 +158,7 @@ describe("brains/deepseek: pedido em JSON", () => {
     [404, "unexpected_response"],
     [422, "unexpected_response"],
     [429, "rate_limited"],
-    [503, "unreachable"],
+    [503, "provider_error"],
   ] as const)("status %i é %s", async (status, failure) => {
     const { fetch } = fakeFetch({ status, body: { error: { message: `chave ${KEY} recusada` } } });
     expect(await brain.completeJson(KEY, REQUEST, { fetch })).toEqual({ ok: false, failure, status, model: "deepseek-flash", usage: {} });
@@ -176,6 +176,95 @@ describe("brains/deepseek: pedido em JSON", () => {
         expect(out).not.toContain(KEY);
         expect(out).not.toContain("Authentication Fails");
       }
+    }
+  });
+});
+
+// ---- chat (R5, fatia 2): a ligação deste cérebro ao caminho comum, testado em `brain-http.test.ts` ----
+
+const CHAT_KEY = "chave-inventada-do-teste-chat-deepseek";
+const CHAT_REQUEST = {
+  model: "deepseek-chat",
+  messages: [{ role: "user" as const, content: "Oi" }],
+  tools: [{ name: "agendar", description: "Marca um horário.", parameters: { type: "object" } }],
+  timeoutMs: 5_000,
+};
+
+/** `fetch` falso que responde SSE (ou um erro) e guarda o pedido. */
+function sseFetch(reply: { status: number; body: string }) {
+  const sent: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
+  const fetch = (async (url: string, init: RequestInit) => {
+    sent.push({ url, headers: init.headers as Record<string, string>, body: JSON.parse(init.body as string) as Record<string, unknown> });
+    return new Response(reply.body, { status: reply.status, headers: { "content-type": "text/event-stream" } });
+  }) as unknown as typeof globalThis.fetch;
+  return { fetch, sent };
+}
+
+/** Roda a conversa até `done` ou `error` e devolve os eventos em ordem. */
+async function chatEvents(fetch: typeof globalThis.fetch): Promise<unknown[][]> {
+  const chat = brain.chat?.(CHAT_KEY, CHAT_REQUEST, { fetch });
+  if (!chat) throw new Error("sem chat");
+  const events: unknown[][] = [];
+  await new Promise<void>((resolve) => {
+    chat.on("text", (delta) => events.push(["text", delta]));
+    chat.on("toolCall", (call) => events.push(["toolCall", call]));
+    chat.on("usage", (usage, estimated) => events.push(["usage", usage, estimated]));
+    chat.on("done", () => {
+      events.push(["done"]);
+      resolve();
+    });
+    chat.on("error", (failure, status) => {
+      events.push(["error", failure, status]);
+      resolve();
+    });
+  });
+  return events;
+}
+
+const sseOf = (...chunks: unknown[]): string => chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n";
+
+describe("brains/deepseek: chat em streaming", () => {
+  it("manda `stream_options.include_usage`, documentado pela DeepSeek, em POST https://api.deepseek.com/chat/completions, e entrega texto, ferramenta e consumo declarado", async () => {
+    const { fetch, sent } = sseFetch({
+      status: 200,
+      body: sseOf(
+        { choices: [{ index: 0, delta: { content: "Bom " } }] },
+        { choices: [{ index: 0, delta: { content: "dia" } }] },
+        { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "agendar", arguments: '{"dia"' } }] } }] },
+        { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: ':"terça"}' } }] }, finish_reason: "tool_calls" }] },
+        { choices: [], usage: { prompt_tokens: 50, completion_tokens: 4, prompt_cache_hit_tokens: 30, prompt_cache_miss_tokens: 20 } },
+      ),
+    });
+    const events = await chatEvents(fetch);
+    expect(sent[0]?.url).toBe("https://api.deepseek.com/chat/completions");
+    expect(sent[0]?.headers.Authorization).toBe(`Bearer ${CHAT_KEY}`);
+    expect(sent[0]?.body).toMatchObject({ model: "deepseek-chat", stream: true });
+    expect(sent[0]?.body.stream_options).toEqual({ include_usage: true });
+    expect(events).toEqual([
+      ["text", "Bom "],
+      ["text", "dia"],
+      ["toolCall", { id: "c1", name: "agendar", args: '{"dia":"terça"}' }],
+      ["usage", { inputTokens: 20, cachedInputTokens: 30, outputTokens: 4 }, false],
+      ["done"],
+    ]);
+  });
+
+  it("a recusa cai no vocabulário fechado, como no completeJson, sem custo e sem a chave", async () => {
+    const cases: [number, unknown, string][] = [
+      [402, {}, "no_credit"],
+      [401, {}, "rejected"],
+      [404, {}, "unexpected_response"],
+      [429, {}, "rate_limited"],
+      [503, {}, "provider_error"],
+    ];
+    for (const [status, body, failure] of cases) {
+      const { fetch } = sseFetch({ status, body: JSON.stringify(body) });
+      const events = await chatEvents(fetch);
+      expect(events).toEqual([
+        ["usage", {}, false],
+        ["error", failure, status],
+      ]);
+      expect(JSON.stringify(events)).not.toContain(CHAT_KEY);
     }
   });
 });

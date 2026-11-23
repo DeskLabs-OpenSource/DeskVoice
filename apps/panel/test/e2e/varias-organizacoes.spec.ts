@@ -4,6 +4,7 @@ import installation from "../../src/i18n/pt-BR/installation";
 import invite from "../../src/i18n/pt-BR/invite";
 import { fill } from "../../src/i18n/locales";
 import team from "../../src/i18n/pt-BR/team";
+import update from "../../src/i18n/pt-BR/update";
 import { signIn, unique } from "./session";
 
 const org = installation.organizations;
@@ -75,13 +76,13 @@ test("a mesma pessoa em duas organizações: aceita o segundo convite com a senh
   await listed;
   await expect(page.getByRole("combobox", { name: common.shell.organization })).toHaveCount(0);
 
-  // O segundo convite pede a senha que a conta já tem, sem o campo de repetir.
+  // O segundo convite mostra a mesma página: a pessoa digita duas vezes a senha que a conta já tem.
   await page.goto(pathOf(secondLink));
-  await expect(page.getByText(fill(invite.existingLead, { email, organization: second }), { exact: true })).toBeVisible();
-  await expect(page.getByLabel(invite.repeat, { exact: true })).toHaveCount(0);
-  await page.getByRole("textbox", { name: `${invite.existingPassword} ${invite.existingHint}`, exact: true }).fill(password);
+  await expect(page.getByText(fill(invite.lead, { organization: second }), { exact: true })).toBeVisible();
+  await page.getByRole("textbox", { name: `${invite.password} ${invite.passwordHint}`, exact: true }).fill(password);
+  await page.getByLabel(invite.repeat, { exact: true }).fill(password);
   listed = organizationsListed(page);
-  await page.getByRole("button", { name: invite.existingSubmit, exact: true }).click();
+  await page.getByRole("button", { name: invite.submit, exact: true }).click();
   await expect(page).toHaveURL(/\/calls$/);
   await listed;
 
@@ -109,4 +110,48 @@ test("a mesma pessoa em duas organizações: aceita o segundo convite com a senh
   await selector.selectOption({ label: second });
   await expect(selector.locator("option:checked")).toHaveText(second);
   await expect(page.getByText(onlyInSecond, { exact: true })).toBeVisible();
+});
+
+/** Os endereços que o navegador pediu como página, na ordem: um laço de redirecionamento aparece aqui. */
+function navigations(page: Page): string[] {
+  const paths: string[] = [];
+  page.on("request", (request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) paths.push(new URL(request.url()).pathname);
+  });
+  return paths;
+}
+
+// Central de configuração, parte 8 (R1 do #518): com a lista de quem administra a instalação já
+// explícita (a criação das organizações acima a fixou), o endereço antigo da tela de atualizar decide
+// por administrar a instalação, e não pelo papel. A dona de outra organização volta à central, quem
+// administra vai à área da instalação, e nenhum dos dois cai num laço.
+test("com a lista explícita, a dona de outra organização volta de /settings/system à central, e quem administra vai à atualização, sem laço", async ({ page }) => {
+  const id = unique();
+  const organization = `Cliente C ${id}`;
+  const email = `dona-c-${id}@example.test`;
+  const password = `senha de teste ${id}`;
+
+  await signIn(page);
+  await page.goto("/installation");
+  await createOrganization(page, organization);
+  const link = await firstOwnerLink(page, organization, email);
+
+  // Quem administra a instalação: vai à tela de atualizar na área da instalação, num pulo só.
+  const paths = navigations(page);
+  await page.goto("/settings/system");
+  await expect(page).toHaveURL(/\/installation\/update$/);
+  await expect(page.getByRole("heading", { name: update.title, exact: true })).toBeVisible();
+  expect(paths).toEqual(["/settings/system", "/installation/update"]);
+
+  // A dona da organização nova, que não administra a instalação: volta à central, num pulo só.
+  await page.context().clearCookies();
+  const accepted = await page.request.post(`/api/v1/invites/${pathOf(link).split("/invite/")[1] ?? ""}/accept`, { data: { name: `Dona C ${id}`, password } });
+  expect(accepted.status(), "the new owner could not accept the invite").toBe(200);
+  expect(((await (await page.request.get("/api/v1/auth/me")).json()) as { data: { role: string } }).data.role).toBe("owner");
+  paths.length = 0;
+  await page.goto("/settings/system");
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.locator('[data-card="engines"]')).toBeVisible();
+  expect(paths).toEqual(["/settings/system", "/settings"]);
+  expect((await page.goto("/installation/update"))?.status()).toBe(404);
 });

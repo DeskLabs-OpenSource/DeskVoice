@@ -13,7 +13,9 @@ export const SYSTEM_ACCESS_ALLOWLIST: Record<string, string> = {
   "apps/panel/scripts/seed-demo.ts": "semente da demonstração: cria a organização",
   "apps/routines/src/cli/create-owner.ts": "cria a organização e o primeiro usuário",
   "apps/routines/src/cli/migrate.ts": "define a senha dos papéis do banco com a conexão do dono",
+  "apps/routines/src/organization-deletions.ts": "a exclusão de organização é da instalação: acha as organizações com lápide",
   "apps/routines/src/runner.ts": "a fila atravessa organizações: devolve tarefa presa e acha a próxima agendada",
-  "apps/voice/src/reconcile.ts": "na partida, fecha chamadas órfãs de qualquer organização que ficaram sem processo",
+  "apps/voice/src/reconcile.ts": "na partida, fecha chamadas e rodadas de teste órfãs de qualquer organização que ficaram sem processo",
   "apps/voice/src/trunks.ts": "o arquivo de linhas do Asterisk reúne os troncos de todas as organizações",
+  "apps/voice/src/whatsapp-calls-deletion.ts": "despareia no WaCalls as organizações com lápide: acha as que ainda têm sessão, atravessando organizações",
 };

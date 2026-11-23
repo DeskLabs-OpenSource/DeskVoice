@@ -27,6 +27,23 @@ describe("loadBrains", () => {
     for (const brain of brains.values()) expect(brain.keyUrl).toMatch(/^https:\/\//);
   });
 
+  it("`chat` é opcional: os cinco cérebros da pasta conversam, e um cérebro sem `chat` continua válido", async () => {
+    const brains = await loadBrains();
+    const talking = [...brains.values()].filter((brain) => typeof brain.chat === "function").map((brain) => brain.id);
+    expect(talking.sort()).toEqual(["anthropic", "deepseek", "gemini", "openai", "openrouter"]);
+    dir = await mkdtemp(join(tmpdir(), "deskvoice-brains-"));
+    await writeFile(join(dir, "quiet.ts"), fixtureBrain("quiet"));
+    const quiet = await loadBrains(dir);
+    expect([...quiet.keys()]).toEqual(["quiet"]);
+    expect(quiet.get("quiet")?.chat).toBeUndefined();
+  });
+
+  it("recusa `chat` que não é função", async () => {
+    dir = await mkdtemp(join(tmpdir(), "deskvoice-brains-"));
+    await writeFile(join(dir, "odd.ts"), fixtureBrain("odd").replace("export default {", 'export default { chat: "sim",'));
+    await expect(loadBrains(dir)).rejects.toThrow(/odd\.ts/);
+  });
+
   it("cérebro novo é só um arquivo novo na pasta; arquivo de teste é ignorado", async () => {
     dir = await mkdtemp(join(tmpdir(), "deskvoice-brains-"));
     await writeFile(join(dir, "fixture.ts"), fixtureBrain("fixture"));

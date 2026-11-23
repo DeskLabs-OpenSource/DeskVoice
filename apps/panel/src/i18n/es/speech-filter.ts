@@ -32,6 +32,7 @@ const speechFilter: SpeechFilterDictionary = {
     region_unavailable: "el proveedor no atiende el país o la región de este servidor.",
     rate_limited: "el proveedor pidió esperar. Inténtalo de nuevo en unos minutos.",
     unreachable: "no se pudo alcanzar al proveedor. Revisa que el servidor llegue a internet.",
+    provider_error: "el proveedor respondió con un error de su lado. Suele pasarse solo: inténtalo de nuevo en unos minutos.",
     unexpected_response: "el proveedor respondió de forma inesperada. Inténtalo más tarde.",
     not_needed: "este modelo no pide clave.",
   },
@@ -42,7 +43,7 @@ const speechFilter: SpeechFilterDictionary = {
     country: "El servicio de {provider} está alojado {country}.",
   },
   countries: { US: "en los Estados Unidos" },
-  providers: { typesafe: "TypeSafe" },
+  providers: { typesafe: "TypeSafe", elevenlabs: "ElevenLabs" },
   retention: {
     typesafe: [
       "TypeSafe guarda los datos personales que recibe, como este texto, durante el tiempo que sea razonablemente necesario para prestar el servicio o para sus fines comerciales, sin plazo definido en la política.",

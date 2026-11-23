@@ -4,21 +4,25 @@ import type { DecisionModel, VoiceEngine } from "@deskvoice/voice-engine";
 import { createApprovalWaiter } from "./approvals";
 import type { AriClient, AriEvent } from "./ari";
 import { AsteriskCalls } from "./asterisk-transport";
+import { startCallBacks } from "./call-backs";
 import { startAudioSocketServer } from "./audiosocket";
 import { startCallSession, stopRecordingOfLiveCall, type CallSession, type CallSessionDeps } from "./call-session";
 import { handleInbound } from "./inbound";
+import { startIvrSession, type IvrSession } from "./ivr-session";
 import { startInternalApi } from "./internal-api";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { startOutboundCall } from "./outbound";
 import { removePartialRecordings } from "./recording";
-import { closeOrphanCalls } from "./reconcile";
+import { closeOrphanCalls, closeOrphanTestRuns } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
 import { realSchedule, type Schedule } from "./transport";
 import { applyTrunks, checkTrunks, REFRESH_ALLOWED_MS, refreshAllowed, resolveSipName, type ResolveName, type TrunksDeps } from "./trunks";
 import type { WacallsOptions } from "./wacalls-client";
+import { playUnavailable } from "./unavailable";
 import { startVoicemailSession, type VoicemailSession } from "./voicemail";
 import { startWebCalls } from "./web-calls";
 import { createWhatsAppCalls } from "./whatsapp-calls";
+import { unpairDeletingOrganizations, WHATSAPP_CALLS_UNPAIR_MS } from "./whatsapp-calls-deletion";
 
 export interface VoiceServerDeps {
   db: Db;
@@ -67,6 +71,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   const log = deps.log ?? silentLogger;
   // Antes de atender qualquer coisa: o que o processo anterior deixou aberto não é de ninguém.
   await closeOrphanCalls(db, clock, log);
+  // A rodada de teste do agente que o processo anterior conduzia também não termina mais.
+  await closeOrphanTestRuns(db, clock, log);
   // A gravação que um processo caído deixou pela metade (`.part`) não fecha mais: sai daqui.
   if (deps.recordingsDir) {
     const removed = await removePartialRecordings(deps.recordingsDir).catch((error: unknown) => {
@@ -78,11 +84,13 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
   const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir, decisionModels: deps.decisionModels };
   const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, resolve: deps.resolveName ?? resolveSipName, log };
-  const calls = new AsteriskCalls({ ari, db, clock, log });
+  const calls = new AsteriskCalls({ ari, db, clock, log, schedule: deps.schedule });
   const sessions = new Set<CallSession>();
   // Recados em curso, com o ciclo de vida próprio: não são conversas, e não atendem a pedido de
   // parar gravação (`stopRecordingOfLiveCall`).
   const voicemails = new Set<VoicemailSession>();
+  // Menus por teclas em curso. Depois da passagem à conversa, a chamada é dela (`sessions`).
+  const ivrs = new Set<IvrSession>();
 
   const track = (session: CallSession): void => {
     sessions.add(session);
@@ -100,6 +108,14 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     });
   };
 
+  const trackIvr = (session: IvrSession): void => {
+    ivrs.add(session);
+    void session.done.then((outcome) => {
+      ivrs.delete(session);
+      log("info", "ivr finished", { ...outcome });
+    });
+  };
+
   const audioSocket = await startAudioSocketServer({
     port: deps.audioSocketPort,
     host: deps.host,
@@ -107,6 +123,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     now: deps.now,
     log,
     onConnection(connection) {
+      // A volta de uma transferência que ninguém atendeu: o áudio é da conversa que já existe.
+      if (calls.resume(connection)) return;
       const attached = calls.attach(connection);
       if (!attached) {
         // Ninguém esperava esta chamada (o processo reiniciou no meio, ou não é o Asterisk).
@@ -116,6 +134,28 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
         return;
       }
       const { call, transport } = attached;
+      if (call.unavailable) {
+        void playUnavailable(transport, { callId: call.callId, ...call.unavailable }, log);
+        return;
+      }
+      if (call.ivr) {
+        const { organizationId, callId } = call;
+        trackIvr(
+          startIvrSession(
+            {
+              db,
+              clock,
+              schedule: deps.schedule,
+              now: deps.now,
+              log,
+              // A opção `agent`: a conversa abre no mesmo transporte, e passa a ser acompanhada como toda conversa.
+              startAgent: (agentId, keypad) => track(startCallSession(sessionDeps, { organizationId, callId, agentId, transport: keypad })),
+            },
+            { organizationId, callId, ...call.ivr, transport },
+          ),
+        );
+        return;
+      }
       if (call.voicemail) {
         trackVoicemail(
           startVoicemailSession(
@@ -184,6 +224,18 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   // partida, e não só quando alguém abre a tela. Se o WaCalls ainda está subindo, a escuta tenta de novo.
   if (await whatsappCallsWanted(db)) whatsappCalls.listen();
 
+  // A organização com lápide que ainda tem sessão no WaCalls: este processo é o único com o token,
+  // e a rotina da exclusão espera a linha ficar limpa (fatia 9b2). Na partida e de minuto em minuto,
+  // sem abrir o SSE e sem depender do Asterisk.
+  let stopUnpair = (): void => undefined;
+  const unpairLater = (): void => {
+    if (closed) return;
+    stopUnpair = schedule(() => {
+      void unpairDeletingOrganizations({ db, options: deps.wacalls ?? { token: "" }, log, now: () => clock.now() }).finally(unpairLater);
+    }, WHATSAPP_CALLS_UNPAIR_MS);
+  };
+  void unpairDeletingOrganizations({ db, options: deps.wacalls ?? { token: "" }, log, now: () => clock.now() }).finally(unpairLater);
+
   const webCalls = await startWebCalls({ db, clock, session: sessionDeps, port: deps.webPort, host: deps.host, schedule: deps.schedule, now: deps.now, log, onSession: track });
 
   const api = await startInternalApi({
@@ -211,6 +263,10 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     },
   });
 
+  // A religação da ligação que caiu: escuta o canal `call_backs` e varre o que ficou `due`. Disca só
+  // por `startOutboundCall`, com a política conferida na hora de discar (`call-backs.ts`).
+  const callBacks = await startCallBacks({ db, ari, clock, calls, log, schedule: deps.schedule });
+
   return {
     audioSocketPort: audioSocket.port,
     internalPort: api.port,
@@ -219,13 +275,17 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     async close() {
       closed = true;
       stopRefresh();
+      stopUnpair();
+      await callBacks.close();
       ari.close();
       whatsappCalls.close();
       await api.close();
       for (const session of sessions) session.stop("shutdown");
       for (const session of voicemails) session.stop("shutdown");
+      for (const session of ivrs) session.stop("shutdown");
       await Promise.all([...sessions].map((session) => session.done));
       await Promise.all([...voicemails].map((session) => session.done));
+      await Promise.all([...ivrs].map((session) => session.done));
       await audioSocket.close();
       await webCalls.close();
       await approvals.close();

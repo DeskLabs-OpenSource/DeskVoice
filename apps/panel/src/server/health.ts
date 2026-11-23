@@ -106,6 +106,7 @@ const KEY_CHECK_LINE: Record<KeyCheckView["result"], "fail" | "warn" | "ok"> = {
   region_unavailable: "fail",
   rate_limited: "warn",
   unreachable: "warn",
+  provider_error: "warn",
   unexpected_response: "warn",
   accepted: "ok",
   not_needed: "ok",
@@ -162,15 +163,23 @@ export function whatsappLine(view: WhatsAppView | "down" | null): HealthCheck {
  * A ligação pelo WhatsApp, no mesmo molde: não instalado é o padrão e é `ok`; instalado e sem
  * resposta, sem número, ou com o número desconectado é aviso, porque o resto segue sem ele.
  * `"down"`: o processo de voz ou o WaCalls não responderam; `null`: o banco não respondeu.
+ *
+ * Pareado e com agente não prova que a ligação chega: o WhatsApp decide, do lado dele, em que
+ * aparelhos ela toca, e pode entregá-la só ao celular (#489). Por isso `ok` só depois de uma
+ * ligação pelo WhatsApp registrada desde a conexão (`lastCallAt`); antes disso, aviso.
  */
-export function whatsappCallsLine(view: WhatsAppCallsView | "down" | null): HealthCheck {
+export function whatsappCallsLine(view: WhatsAppCallsView | "down" | null, lastCallAt: Date | null = null): HealthCheck {
   if (!view) return warn("needs_database");
   if (view === "down") return warn("whatsapp_calls_service_down");
   if (view.service === "absent" || view.service === "removing") return ok("whatsapp_calls_absent");
   if (!view.available) return warn("whatsapp_calls_unavailable");
   if (view.service === "preparing") return ok("whatsapp_calls_preparing");
   if (view.service === "failed") return warn("whatsapp_calls_service_failed");
-  if (view.status === "connected") return view.agentId ? ok("whatsapp_calls_connected") : warn("whatsapp_calls_no_agent");
+  if (view.status === "connected") {
+    if (!view.agentId) return warn("whatsapp_calls_no_agent");
+    if (lastCallAt) return ok("whatsapp_calls_connected", { when: lastCallAt.toISOString() });
+    return warn("whatsapp_calls_unconfirmed", { when: view.connectedAt?.toISOString() ?? "" });
+  }
   return view.status === "failed" ? warn("whatsapp_calls_dropped") : warn("whatsapp_calls_no_number");
 }
 

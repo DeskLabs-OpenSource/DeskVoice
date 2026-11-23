@@ -40,12 +40,12 @@ const eventOf = (id: string, row: Snapshot, extra: object = {}): object => ({
 });
 
 /**
- * A pessoa, se está ativa; senão `null`. `for share` segura a linha até o fim da transação: a
+ * A pessoa da equipe (`member`, nunca o vínculo de suporte), se está ativa; senão `null`. `for share` segura a linha até o fim da transação: a
  * desativação, que grava na mesma linha, espera, e depois dela `returnFollowUpsToTeam` devolve a
  * pendência. Se a desativação veio antes, a releitura já vê a pessoa desativada.
  */
 async function activePerson(q: OrgQuery, userId: string): Promise<string | null> {
-  return (await q.one<{ id: string }>("select id from users where id = $1 and disabled_at is null for share", [userId]))?.id ?? null;
+  return (await q.one<{ id: string }>("select id from users where id = $1 and kind = 'member' and disabled_at is null for share", [userId]))?.id ?? null;
 }
 
 /**

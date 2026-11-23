@@ -298,7 +298,7 @@ describe("transcrição da gravação", () => {
       q.many<{ kind: string; at: Date; payload: Record<string, unknown> }>("select kind, at, payload from call_events where call_id = $1 order by id", [callId]),
     );
     expect(events.map((event) => [event.kind, event.payload.reason, event.payload.status, event.payload.engine, event.payload.model])).toEqual([
-      ["transcription_failed", "unreachable", 500, "openai-realtime", "gpt-4o-mini-transcribe"],
+      ["transcription_failed", "provider_error", 500, "openai-realtime", "gpt-4o-mini-transcribe"],
     ]);
     // O horário é o do pedido, quando a falha aconteceu, e não o do fim da chamada.
     expect(events[0]?.at.getTime()).toBe(NOW.getTime());

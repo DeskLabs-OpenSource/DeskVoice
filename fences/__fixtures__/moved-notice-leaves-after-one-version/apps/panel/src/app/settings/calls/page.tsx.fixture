@@ -1,0 +1,3 @@
+export function Moved({ t }: { t: { movedRecordingNotice: string } }) {
+  return <p>{t.movedRecordingNotice}</p>;
+}

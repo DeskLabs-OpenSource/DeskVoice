@@ -1,0 +1,5 @@
+import { handle } from "../../../../server/context";
+
+export async function PUT(): Promise<Response> {
+  return handle({}, async () => null)(new Request("https://panel.test"), { params: Promise.resolve({}) });
+}

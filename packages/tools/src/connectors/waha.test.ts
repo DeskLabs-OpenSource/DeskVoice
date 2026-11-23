@@ -4,6 +4,7 @@ import {
   WahaError,
   sendViaWaha,
   wahaCheckExists,
+  wahaEndSession,
   wahaEnsureSession,
   wahaGetQr,
   wahaGetSession,
@@ -21,7 +22,7 @@ beforeEach(() => {
   waha.contacts.clear();
   waha.sent.length = 0;
   waha.requests.length = 0;
-  for (const route of ["GET /api/sessions/s1", "GET /api/s1/auth/qr", "GET /api/contacts/check-exists", "POST /api/sendText", "POST /api/sessions/s1/start"]) waha.override(route, undefined);
+  for (const route of ["GET /api/sessions/s1", "GET /api/s1/auth/qr", "GET /api/contacts/check-exists", "POST /api/sendText", "POST /api/sessions/s1/start", "POST /api/sessions/s1/logout", "DELETE /api/sessions/s1"]) waha.override(route, undefined);
 });
 
 const code = (promise: Promise<unknown>): Promise<unknown> =>
@@ -114,6 +115,39 @@ describe("waha client", () => {
     expect(await code(wahaCheckExists(waha.options, "s1", "+5531999998888"))).toBe("invalid_response");
     waha.override("POST /api/sendText", { status: 201, body: "sent" });
     expect(await code(wahaSendText(waha.options, "s1", "x@c.us", "Olá"))).toBe("invalid_response");
+  });
+});
+
+describe("wahaEndSession (the deletion of an organization, R8 9b)", () => {
+  it("logs out first, then stops and deletes: the device leaves \"Linked devices\" and the session is gone", async () => {
+    waha.connect("s1", "5531999998888");
+    await wahaEndSession(waha.options, "s1");
+    expect(waha.requests.map((request) => `${request.method} ${request.path}`)).toEqual([
+      "POST /api/sessions/s1/logout",
+      "POST /api/sessions/s1/stop",
+      "DELETE /api/sessions/s1",
+    ]);
+    expect(waha.sessions.has("s1")).toBe(false);
+  });
+
+  it("a session that does not exist counts as done, so a restart can repeat it", async () => {
+    await wahaEndSession(waha.options, "s1");
+    expect(waha.requests.map((request) => `${request.method} ${request.path}`)).toEqual([
+      "POST /api/sessions/s1/logout",
+      "POST /api/sessions/s1/stop",
+      "DELETE /api/sessions/s1",
+    ]);
+    waha.override("POST /api/sessions/s1/logout", { status: 422, body: { message: "Session not found" } });
+    await wahaEndSession(waha.options, "s1");
+  });
+
+  it("fails when WAHA is down or refuses, so the caller tries again without touching the database", async () => {
+    expect(await code(wahaEndSession({ apiKey: WAHA_KEY, baseUrl: "http://127.0.0.1:1" }, "s1"))).toBe("unreachable");
+    expect(await code(wahaEndSession({ ...waha.options, apiKey: "wrong" }, "s1"))).toBe("unauthorized");
+    waha.connect("s1", "5531999998888");
+    waha.override("DELETE /api/sessions/s1", { status: 500, body: { message: "boom" } });
+    expect(await code(wahaEndSession(waha.options, "s1"))).toBe("rejected");
+    waha.override("DELETE /api/sessions/s1", undefined);
   });
 });
 

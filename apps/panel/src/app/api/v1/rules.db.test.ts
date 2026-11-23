@@ -1,5 +1,5 @@
-import { decryptSecret, withOrg } from "@deskvoice/core";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { decryptSecret, withOrg, withSystem } from "@deskvoice/core";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { NOW, SECRET_KEY, call, createCall, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
 import { DELETE as deleteAgent, PATCH as patchAgent } from "./agents/[id]/route";
 import { POST as createAgent } from "./agents/route";
@@ -19,6 +19,7 @@ import { POST as checkTrunk } from "./trunks/[id]/check/route";
 import { PATCH as switchTrunkFilter } from "./trunks/[id]/inbound-filter/route";
 import { DELETE as deleteTrunk, PATCH as patchTrunk } from "./trunks/[id]/route";
 import { GET as listTrunks, POST as createTrunk } from "./trunks/route";
+import { trunkOverlapLimiter } from "./trunks/store";
 
 const panel = startPanel();
 let org: string;
@@ -29,7 +30,15 @@ beforeAll(async () => {
   org = await createOrganization(panel.app, "rules");
   owner = (await createUser(panel.app, org, "owner")).cookie;
   operator = await createUser(panel.app, org, "operator");
+  // O aviso de faixa sobreposta (R8, fatia 10) olha as linhas da instalação inteira. As que outros
+  // arquivos deixaram no banco descartável, de outras organizações, fariam as linhas por IP daqui
+  // pedirem confirmação conforme a ordem dos arquivos. O aviso tem teste próprio.
+  await withSystem(panel.app, (q) => q.exec("delete from trunks where organization_id <> $1", [org]));
 });
+// O limite por minuto da conferência de faixa é do processo, por organização, e o relógio de teste
+// é fixo: este arquivo cria e edita dezenas de linhas na mesma organização no mesmo "minuto". Cada
+// teste começa com o limite zerado. O limite tem teste próprio (`trunk-overlap.db.test.ts`).
+beforeEach(() => trunkOverlapLimiter.clear());
 afterAll(() => panel.close());
 
 const stored = <T>(sql: string, params: unknown[] = []) => withOrg(panel.app, org, (q) => q.one<Record<string, T>>(sql, params));
@@ -127,6 +136,47 @@ describe("agents", () => {
     expect([back.status, back.data]).toMatchObject([200, { listeningEnvironment: "normal" }]);
   });
 
+  it("keeps the return of an unanswered transfer: on when absent, off when chosen, and untouched by saving another field", async () => {
+    const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Volta", engine: "simulated" } });
+    expect(created.data).toMatchObject({ transferReturnsToAgent: true });
+    const id = (created.data as { id: string }).id;
+    expect(await stored("select transfer_returns_to_agent from agents where id = $1", [id])).toEqual({ transfer_returns_to_agent: true });
+
+    const off = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { transferReturnsToAgent: false } });
+    expect([off.status, off.data]).toMatchObject([200, { transferReturnsToAgent: false }]);
+    expect(await stored("select transfer_returns_to_agent from agents where id = $1", [id])).toEqual({ transfer_returns_to_agent: false });
+    // Mudar outro campo não liga a chave de novo.
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ transferReturnsToAgent: false });
+    for (const transferReturnsToAgent of ["true", null, 1]) {
+      const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { transferReturnsToAgent } });
+      expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", expect.stringMatching(/transferReturnsToAgent/)]);
+    }
+    const createdOff = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Sem volta", engine: "simulated", transferReturnsToAgent: false } });
+    expect(createdOff.data).toMatchObject({ transferReturnsToAgent: false });
+  });
+
+  it("keeps the \"are you still there?\" switch: on when absent, off when chosen, and untouched by saving another field", async () => {
+    const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Calado", engine: "simulated" } });
+    expect(created.data).toMatchObject({ callerIdleGuard: true });
+    const id = (created.data as { id: string }).id;
+    expect(await stored("select caller_idle_guard from agents where id = $1", [id])).toEqual({ caller_idle_guard: true });
+
+    const off = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { callerIdleGuard: false } });
+    expect([off.status, off.data]).toMatchObject([200, { callerIdleGuard: false }]);
+    expect(await stored("select caller_idle_guard from agents where id = $1", [id])).toEqual({ caller_idle_guard: false });
+    // Mudar outro campo não liga a chave de novo.
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ callerIdleGuard: false });
+    const on = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { callerIdleGuard: true } });
+    expect([on.status, on.data]).toMatchObject([200, { callerIdleGuard: true }]);
+    expect(await stored("select caller_idle_guard from agents where id = $1", [id])).toEqual({ caller_idle_guard: true });
+    for (const callerIdleGuard of ["false", null, 0]) {
+      const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { callerIdleGuard } });
+      expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", expect.stringMatching(/callerIdleGuard/)]);
+    }
+    const createdOff = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Sem lembrete", engine: "simulated", callerIdleGuard: false } });
+    expect(createdOff.data).toMatchObject({ callerIdleGuard: false });
+  });
+
   it("keeps what happens when the call drops: off when absent, task when chosen, and refuses the modes this slice has no path for", async () => {
     const created = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Queda", engine: "simulated" } });
     expect(created.data).toMatchObject({ dropFollowUp: "off" });
@@ -139,13 +189,12 @@ describe("agents", () => {
     // Mudar outro campo não mexe no modo.
     expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { enabled: false } })).data).toMatchObject({ dropFollowUp: "task" });
 
-    // A religação só tem caminho nas fatias 3 e 4: a rota recusa, mesmo que o banco aceite. O WhatsApp
-    // tem o teste próprio, abaixo.
-    for (const dropFollowUp of ["call_back", "TASK", "", null, 1]) {
+    // O WhatsApp e a religação têm o teste próprio, abaixo.
+    for (const dropFollowUp of ["TASK", "", null, 1]) {
       const refused = await call(patchAgent, { method: "PATCH", cookie: owner, params: { id }, body: { dropFollowUp } });
       expect([refused.status, refused.code, refused.message]).toEqual([400, "validation_error", expect.stringMatching(/dropFollowUp/)]);
     }
-    const refusedOnCreate = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Z", engine: "simulated", dropFollowUp: "call_back" } });
+    const refusedOnCreate = await call(createAgent, { method: "POST", cookie: owner, body: { name: "Z", engine: "simulated", dropFollowUp: "callback" } });
     expect([refusedOnCreate.status, refusedOnCreate.code]).toEqual([400, "validation_error"]);
     expect(await stored("select drop_follow_up from agents where id = $1", [id])).toEqual({ drop_follow_up: "task" });
 
@@ -200,6 +249,46 @@ describe("agents: a mensagem no WhatsApp para quem ligou (R2, fatia 2)", () => {
     expect((await patch(null)).data).toMatchObject({ dropFollowUpMessage: null });
     // O banco confere o mesmo teto, para o texto gravado fora da rota.
     await expect(withOrg(panel.app, org, (q) => q.exec("update agents set drop_follow_up_message = $2 where id = $1", [id, "x".repeat(301)]))).rejects.toThrow(/check/);
+  });
+});
+
+describe("agents: a religação (R2, fatia 4)", () => {
+  it("refuses call_back while outbound calls are off, even called directly, and accepts it once they are on", async () => {
+    const own = await createOrganization(panel.app, "drop call back");
+    const cookie = (await createUser(panel.app, own, "owner")).cookie;
+    const read = (id: string) => withOrg(panel.app, own, (q) => q.one("select drop_follow_up from agents where id = $1", [id]));
+    const created = await call(createAgent, { method: "POST", cookie, body: { name: "Queda religação", engine: "simulated" } });
+    const id = (created.data as { id: string }).id;
+    const choose = (body: object) => call(patchAgent, { method: "PATCH", cookie, params: { id }, body });
+
+    // A organização nasce com a política desligada: a rota recusa com o código próprio, na criação e na edição.
+    const off = await choose({ dropFollowUp: "call_back" });
+    expect([off.status, off.code]).toEqual([400, "drop_follow_up_outbound_disabled"]);
+    const onCreate = await call(createAgent, { method: "POST", cookie, body: { name: "Z", engine: "simulated", dropFollowUp: "call_back" } });
+    expect([onCreate.status, onCreate.code]).toEqual([400, "drop_follow_up_outbound_disabled"]);
+    expect(await read(id)).toEqual({ drop_follow_up: "off" });
+    // Sem linha em `outbound_policy` (instalação antiga), vale a padrão: desligada.
+    await withOrg(panel.app, own, (q) => q.exec("delete from outbound_policy"));
+    expect((await choose({ dropFollowUp: "call_back" })).code).toBe("drop_follow_up_outbound_disabled");
+
+    const on = await call(putPolicy, { method: "PUT", cookie, body: { enabled: true, purpose: "Retornar ligações que caíram", legalBasis: "Legítimo interesse" } });
+    expect(on.status).toBe(200);
+    const chosen = await choose({ dropFollowUp: "call_back" });
+    expect([chosen.status, chosen.data]).toMatchObject([200, { dropFollowUp: "call_back" }]);
+    expect(await read(id)).toEqual({ drop_follow_up: "call_back" });
+    const createdOn = await call(createAgent, { method: "POST", cookie, body: { name: "Queda religação 2", engine: "simulated", dropFollowUp: "call_back" } });
+    expect(createdOn.data).toMatchObject({ dropFollowUp: "call_back" });
+    // A política ligada desta organização não vale para outra, que continua com a dela desligada.
+    const elsewhere = await newAgent("Queda religação de outra");
+    expect((await stored<boolean>("select enabled from outbound_policy"))?.enabled ?? false).toBe(false);
+    expect((await call(patchAgent, { method: "PATCH", cookie: owner, params: { id: elsewhere }, body: { dropFollowUp: "call_back" } })).code).toBe("drop_follow_up_outbound_disabled");
+
+    // A política desligada depois: a rota não deixa escolher de novo, mas os outros campos continuam
+    // salvando (a revisão é que grava mode_unavailable e abre a pendência, fatia 3).
+    await call(putPolicy, { method: "PUT", cookie, body: { enabled: false } });
+    expect((await choose({ dropFollowUp: "call_back" })).code).toBe("drop_follow_up_outbound_disabled");
+    expect((await choose({ enabled: false })).data).toMatchObject({ enabled: false, dropFollowUp: "call_back" });
+    expect((await choose({ dropFollowUp: "task" })).data).toMatchObject({ dropFollowUp: "task" });
   });
 });
 
@@ -287,9 +376,9 @@ describe("secrets", () => {
     expect(changed.data).toEqual({
       key: params.key,
       value: [
-        { name: "crm", url: "https://crm.example.test/hook", token: { configured: true } },
-        { name: "erp", url: "https://attacker.example.test/collect", token: { configured: false } },
-        { name: "agenda-renamed", url: "https://agenda.example.test/hook", token: { configured: false } },
+        { name: "crm", url: "https://crm.example.test/hook", token: { configured: true }, timeoutSeconds: 10, events: [] },
+        { name: "erp", url: "https://attacker.example.test/collect", token: { configured: false }, timeoutSeconds: 10, events: [] },
+        { name: "agenda-renamed", url: "https://agenda.example.test/hook", token: { configured: false }, timeoutSeconds: 10, events: [] },
       ],
     });
     expect(await tokens()).toEqual({ crm: "crm-token", erp: undefined, "agenda-renamed": undefined });
@@ -360,7 +449,44 @@ describe("settings", () => {
     expect((await put("network.public_ip", "203.0.113.10")).data).toEqual({ key: "network.public_ip", value: "203.0.113.10" });
     expect((await put("engine.default", "gemini-live")).status).toBe(200);
     const hooks = await put("webhooks.allowed", [{ name: "crm", url: "https://crm.example.test/hook", token: "hook-token" }]);
-    expect(hooks.data).toEqual({ key: "webhooks.allowed", value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: true } }] });
+    expect(hooks.data).toEqual({ key: "webhooks.allowed", value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: true }, timeoutSeconds: 10, events: [] }] });
+  });
+
+  it("keeps a webhook timeout as a whole number from 1 to 30 seconds, and reads an old list without it as 10", async () => {
+    const params = { key: "webhooks.allowed" };
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie: owner, params, body: { value } });
+    const hook = (timeoutSeconds: unknown) => [{ name: "crm", url: "https://crm.example.test/hook", timeoutSeconds }];
+    await put([{ name: "crm", url: "https://crm.example.test/hook" }]);
+    const before = await stored<unknown>("select value from settings where key = $1", [params.key]);
+
+    for (const bad of [0, 31, 2.5, -1, "15", null]) expect((await put(hook(bad))).code, JSON.stringify(bad)).toBe("validation_error");
+    expect(await stored<unknown>("select value from settings where key = $1", [params.key])).toEqual(before);
+
+    // A lista antiga, gravada sem o campo: a leitura diz o prazo que vale.
+    await withOrg(panel.app, org, (q) => q.exec("update settings set value = $2 where key = $1", [params.key, JSON.stringify([{ name: "crm", url: "https://crm.example.test/hook" }])]));
+    expect((await call(getSetting, { cookie: owner, params })).data).toEqual({ key: params.key, value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: false }, timeoutSeconds: 10, events: [] }] });
+
+    for (const good of [1, 30, 15]) expect((await put(hook(good))).data).toEqual({ key: params.key, value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: false }, timeoutSeconds: good, events: [] }] });
+    expect((await stored<Array<{ timeoutSeconds?: number }>>("select value from settings where key = $1", [params.key]))?.value?.[0]?.timeoutSeconds).toBe(15);
+  });
+
+  it("keeps the events a webhook asks for: only call.report, none by default, and an empty list is not stored", async () => {
+    const params = { key: "webhooks.allowed" };
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie: owner, params, body: { value } });
+    const hook = (events: unknown) => [{ name: "crm", url: "https://crm.example.test/hook", events }];
+    await put([{ name: "crm", url: "https://crm.example.test/hook" }]);
+    const before = await stored<unknown>("select value from settings where key = $1", [params.key]);
+
+    for (const bad of [["call.started"], ["call.report", "call.report"], "call.report", [1], null]) expect((await put(hook(bad))).code, JSON.stringify(bad)).toBe("validation_error");
+    expect(await stored<unknown>("select value from settings where key = $1", [params.key])).toEqual(before);
+
+    const asked = await put(hook(["call.report"]));
+    expect(asked.data).toEqual({ key: params.key, value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: false }, timeoutSeconds: 10, events: ["call.report"] }] });
+    expect((await stored<Array<{ events?: string[] }>>("select value from settings where key = $1", [params.key]))?.value?.[0]?.events).toEqual(["call.report"]);
+
+    // Desmarcar é a lista vazia, e ela não fica gravada: volta a ser o de fábrica.
+    expect((await put(hook([]))).data).toEqual({ key: params.key, value: [{ name: "crm", url: "https://crm.example.test/hook", token: { configured: false }, timeoutSeconds: 10, events: [] }] });
+    expect((await stored<Array<Record<string, unknown>>>("select value from settings where key = $1", [params.key]))?.value?.[0]).not.toHaveProperty("events");
   });
 
   it("keeps inbound.max_concurrent_calls as a whole number from 1 to 50 that shows the factory value until saved", async () => {
@@ -748,7 +874,7 @@ describe("my contact", () => {
     expect(before.data).toMatchObject({ role: "operator", phone: null, whatsapp: null });
 
     const saved = await call(patchMe, { method: "PATCH", cookie: operator.cookie, body: { name: "  Ana Operadora ", phone: "(31) 98888-1111", whatsapp: "031988882222" } });
-    expect(saved.data).toEqual({ name: "Ana Operadora", email: operator.email, role: "operator", phone: "+5531988881111", whatsapp: "+5531988882222", organizationName: "rules" });
+    expect(saved.data).toEqual({ name: "Ana Operadora", email: operator.email, role: "operator", phone: "+5531988881111", whatsapp: "+5531988882222", organizationName: "rules", organizationLanguage: null });
     expect((await call(getMe, { cookie: operator.cookie })).data).toEqual(saved.data);
     expect(await stored("select phone_e164, whatsapp_e164 from users where id = $1", [operator.id])).toEqual({ phone_e164: "+5531988881111", whatsapp_e164: "+5531988882222" });
     // O dono, na mesma organização, não foi tocado.
@@ -783,6 +909,27 @@ describe("voice process", () => {
     panel.voice.respond = () => Response.json({ callId: "11111111-1111-4111-8111-111111111111" });
     const started = await call(simulate, { method: "POST", cookie: operator.cookie, body: { agentId: agent } });
     expect(started.data).toEqual({ callId: "11111111-1111-4111-8111-111111111111" });
+    expect(panel.voice.requests).toEqual([{ url: "http://voice.test/calls/simulate", body: { organizationId: org, agentId: agent } }]);
+  });
+
+  it("a suspended organization takes no browser or simulated call, and the voice process is not even asked; the other organization still calls", async () => {
+    // Seção 3.3 do desenho do R8, fatia 4a: `suspended_at` marcado direto no banco (as ações são da 4b).
+    const suspended = await createOrganization(panel.app, "rules-suspended");
+    const suspendedOwner = (await createUser(panel.app, suspended, "owner")).cookie;
+    const suspendedAgent = ((await call(createAgent, { method: "POST", cookie: suspendedOwner, body: { name: "Suspensa", engine: "simulated" } })).data as { id: string }).id;
+    await withSystem(panel.app, (q) => q.exec("update organizations set suspended_at = now(), suspended_reason = 'teste da fatia 4a' where id = $1", [suspended]));
+    const agent = await newAgent("Demo ativa");
+    panel.voice.requests.length = 0;
+    panel.voice.respond = () => Response.json({ callId: "11111111-1111-4111-8111-111111111111", token: "t", expiresAt: NOW.toISOString() });
+
+    for (const route of [simulate, webCall]) {
+      const refused = await call(route, { method: "POST", cookie: suspendedOwner, body: { agentId: suspendedAgent } });
+      expect([refused.status, refused.code]).toEqual([409, "organization_suspended"]);
+    }
+    expect(panel.voice.requests).toEqual([]);
+
+    const started = await call(simulate, { method: "POST", cookie: owner, body: { agentId: agent } });
+    expect(started.status).toBe(200);
     expect(panel.voice.requests).toEqual([{ url: "http://voice.test/calls/simulate", body: { organizationId: org, agentId: agent } }]);
   });
 

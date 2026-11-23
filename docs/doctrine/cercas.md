@@ -82,12 +82,15 @@ A regra tem três consequências práticas:
 | `fences-have-owner-and-review-date` | Toda cerca tem dono, motivo e data de revisão |
 | `ui-text-lives-in-dictionaries` | Texto de tela só em dicionário |
 | `release-fragments-are-valid` | Fragmento de versão bem formado. Veja [versionamento](versionamento.md) |
+| `released-fragments-do-not-return` | Fragmento que uma versão já publicou e apagou não volta para `.changes/` (o título já está no `CHANGELOG.md`) |
+| `moved-notice-leaves-after-one-version` | O "mudou para…" de um bloco que trocou de tela fica só na versão que publicou a mudança (achada pelo título do fragmento no `CHANGELOG.md`). Veja a [parte 7 da central de configuração](../specs/2026-11-20-central-de-configuracao.md) |
 | `one-file-per-piece` | Nenhum arquivo-índice nas pastas de ferramentas, motores e rotinas. Veja [um arquivo por peça](um-arquivo-por-peca.md) |
 | `workflows-cancel-superseded-runs` | Um run de CI por PR: o novo cancela o anterior |
 | `welcome-does-not-checkout` | O workflow de acolhida, que roda com permissão do repositório, nunca baixa código de fork |
 | `partner-address-has-one-spelling` | Todo endereço do domínio da parceira é o de `install/partner.env`, e ele está no `AGENTS.md` e na skill de instalar |
 | `third-party-images-are-pinned` | Toda imagem de terceiros está fixada por resumo: no Compose de produção (banco, Asterisk, Caddy), na base de cada `Dockerfile` (`FROM`) e nos `services` e `container` dos jobs do CI |
 | `image-name-has-one-source` | O endereço das imagens só está em `deploy/images.env`; o Compose, o kit e a publicação leem dali. A versão de uma instalação é um número, nunca um canal |
+| `every-workspace-is-typechecked` | O `pnpm typecheck` da raiz confere os tipos de todo pacote, testes incluídos: o `tsconfig.json` da raiz inclui o `src` dele, ou o script da raiz chama o `typecheck` dele (o do painel, que a raiz exclui) |
 
 A lista acima é um retrato da fundação. A verdade é a pasta `fences/`.
 

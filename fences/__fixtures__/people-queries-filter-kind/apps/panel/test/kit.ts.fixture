@@ -1,0 +1,2 @@
+// Fixture: o auxiliar de teste na raiz do pacote fica fora da cerca.
+export const everyone = (q) => q.many("select id from users");

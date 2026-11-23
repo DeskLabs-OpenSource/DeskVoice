@@ -1,0 +1,2 @@
+// Fixture: teste fica fora da cerca.
+export const all = (q) => q.many("select id from users");

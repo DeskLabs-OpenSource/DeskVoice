@@ -28,6 +28,29 @@ Não invente tela, campo ou número: confira no painel da pessoa, ou no código
 Ferramentas da fundação: `end_call`, `transfer_to_human`, `notify_human`, `request_approval`,
 `send_whatsapp`, `send_dtmf`, `call_webhook`, `create_task`.
 
+### Perguntar à equipe algo de sim ou não
+
+O `request_approval` também serve para o agente perguntar à equipe algo que só ela sabe, com a
+pessoa na linha e sem transferir: "o doutor atende sábado?", "ainda há vaga hoje à tarde?". A
+pergunta vai para a tela Aprovações (e para quem recebe os avisos), e quem responde clica em
+aprovar ou negar. O agente recebe a resposta e a repassa.
+
+| O que saber | Como é |
+|---|---|
+| Respostas | `approved` (sim), `denied` (não) ou `expired` (ninguém respondeu no prazo). Não há texto livre de volta: escreva a pergunta de modo que "aprovar" signifique "sim" |
+| Prazo | De 30 a 300 segundos, 120 sem valor. A pessoa fica esperando na linha esse tempo |
+| Sem resposta | Vale o que o operador escolheu em Configurações → Ligações → "Pedido de aprovação sem resposta". O padrão é negar. **Se estiver em aprovar, um prazo vencido vira "sim"**: o agente diria que o doutor atende sábado sem ninguém ter confirmado. Para usar a ferramenta assim, deixe em negar |
+| Teto | 3 pedidos por ligação; acima disso a ferramenta não roda |
+| Quando serve | Só se houver alguém olhando o painel naquele instante. Sem isso, a pessoa espera à toa: prefira `create_task` ou `notify_human` e a equipe retorna |
+
+Sugestão de frase para as instruções do agente:
+
+> Se a pessoa perguntar algo sobre agenda ou atendimento que você não sabe (por exemplo, se o
+> doutor atende sábado), use `request_approval` com uma pergunta de sim ou não para a equipe, como
+> "O doutor atende neste sábado?", e no contexto diga quem perguntou e para quê. Se aprovarem, a
+> resposta é sim; se negarem, é não. Se ninguém responder, não afirme nada: diga que a equipe vai
+> confirmar e retornar.
+
 **Teste sempre ligando.** Mudou as instruções? Ligue, faça o caso difícil e leia a linha do tempo.
 
 ## 2. Configurar a linha (tela Linha telefônica)
@@ -82,7 +105,7 @@ aconteceu nessa ligação?".
 | `cost_ceiling_reached` | Bateu o teto de custo e encerrou |
 | `call_ended` | Fim, com o motivo |
 | `task_queued`, `task_finished` | O que ficou rodando depois (resumo, aviso, webhook) |
-| `outcome_not_classified` | O desfecho (ligado em Configurações → Inteligência artificial) não foi classificado: chave recusada, modelo inexistente, sem crédito, provedor fora do ar, resposta fora do formato, ou a ligação já estava no teto de custo |
+| `outcome_not_classified` | O desfecho (ligado em Configurações → Desfecho, análise e transcrição) não foi classificado: chave recusada, modelo inexistente, sem crédito, provedor fora do ar, resposta fora do formato, ou a ligação já estava no teto de custo |
 
 Perguntas comuns, e onde está a resposta:
 
@@ -164,7 +187,7 @@ Guia: [`whatsapp-por-qr-code.md`](../../../docs/guides/whatsapp-por-qr-code.md).
 |---|---|---|
 | Ver a saúde | `bash install/healthcheck.sh` | Uma linha por peça; `aviso` é configuração faltando, `falha` é quebrado |
 | Backup | `bash install/backup.sh` | Só diz "concluído" depois de restaurar o dump num rascunho e contar as linhas. Guarde cópia fora da VPS |
-| Atualizar pela tela | Configurações → Sistema → Versão e atualização | Mostra a versão em execução, a mais recente publicada e as notas entre as duas. Dono ou administrador clica em atualizar e confirma com a senha; o sistema sai do ar por alguns minutos e **as chamadas em andamento caem**. Quem executa é o agente do servidor, que lê do painel só um sim ou não. A versão nomeada na confirmação é a que o servidor anunciou; enquanto as notas dela não estiverem publicadas, a tela não oferece o botão, e se sair outra versão entre a confirmação e a execução o pedido termina sem alterar nada ("saiu uma versão mais nova": é só pedir de novo). A tela diz o resultado: atualizou, não foi aplicada (segue na versão anterior) ou falhou, com o fim da saída do atualizador; a saída inteira das três últimas atualizações fica no servidor em `deploy/agent/last-update.log` (e `.1`, `.2`). Se a tela disser que o agente não está instalado ou não responde, ou que a instalação é `local`, ela mostra o comando; o registro do agente fica em `deploy/agent/agent.log`, e `bash install/healthcheck.sh` tem a linha "Agente de atualização". Um pedido parado vence sozinho (15 minutos sem o agente pegar, 30 sem resultado) e outro pode ser feito. Guia: [`atualizar.md`](../../../docs/guides/atualizar.md) |
+| Atualizar pela tela | Administrar a instalação → Atualização → Versão e atualização | Mostra a versão em execução, a mais recente publicada e as notas entre as duas. Dono ou administrador clica em atualizar e confirma com a senha; o sistema sai do ar por alguns minutos e **as chamadas em andamento caem**. Quem executa é o agente do servidor, que lê do painel só um sim ou não. A versão nomeada na confirmação é a que o servidor anunciou; enquanto as notas dela não estiverem publicadas, a tela não oferece o botão, e se sair outra versão entre a confirmação e a execução o pedido termina sem alterar nada ("saiu uma versão mais nova": é só pedir de novo). A tela diz o resultado: atualizou, não foi aplicada (segue na versão anterior) ou falhou, com o fim da saída do atualizador; a saída inteira das três últimas atualizações fica no servidor em `deploy/agent/last-update.log` (e `.1`, `.2`). Se a tela disser que o agente não está instalado ou não responde, ou que a instalação é `local`, ela mostra o comando; o registro do agente fica em `deploy/agent/agent.log`, e `bash install/healthcheck.sh` tem a linha "Agente de atualização". Um pedido parado vence sozinho (15 minutos sem o agente pegar, 30 sem resultado) e outro pode ser feito. Guia: [`atualizar.md`](../../../docs/guides/atualizar.md) |
 | Atualizar pelo terminal | `bash install/update.sh` | Faz backup, troca a versão, aplica as migrations e confere a saúde; se não ficar saudável, volta sozinho. Vai para a versão publicada mais recente, ou para a de `--to 0.3.0`. Nunca constrói imagem: se a versão não baixa, para antes de mexer em qualquer coisa e diz o comando para testar. Leia antes as notas da versão: se o título diz "requer atenção", há algo a fazer. Quem veio da 0.1.0 roda uma segunda vez depois de atualizar: é ela que instala o agente da atualização pela tela |
 | Agente de atualização | `sudo bash install/agent.sh --install` | Instala ou conserta o agendamento do agente (timer do systemd `deskvoice-agent.timer`; sem systemd, cron). `--dry-run` só diz o que faria. O instalador e o `update.sh` já fazem isso sozinhos |
 | Restaurar | `bash install/restore.sh latest` | **Substitui o banco atual.** Confere as contagens antes de trocar. Mudando de VPS: `--with-config`. O pareamento do WhatsApp não vem no backup: em outra VPS, leia o QR Code de novo |

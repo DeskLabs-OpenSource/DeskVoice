@@ -7,26 +7,25 @@ import es from "../../../i18n/es/installation";
 import ptBR from "../../../i18n/pt-BR/installation";
 import { useDict } from "../../../i18n/provider";
 import { PageHeader } from "../../../ui/kit";
-import { useMe } from "../../../ui/me";
 
 const SECTIONS = [
   { href: "/installation", key: "organizations" },
+  { href: "/installation/overview", key: "overview" },
   { href: "/installation/admins", key: "admins" },
   { href: "/installation/audit", key: "audit" },
   { href: "/installation/update", key: "update" },
 ] as const;
 
-/** O cabeçalho e as seções da área. A atualização só aparece aqui quando a lista ficou explícita (seção 3.11). */
+/** O cabeçalho e as seções da área. A atualização mora só aqui (central de configuração, parte 8). */
 export function InstallationNav() {
   const t = useDict(ptBR, en, es);
   const pathname = usePathname();
-  const explicit = useMe()?.installationExplicit === true;
   return (
     <div className="grid min-w-0 gap-5">
       <PageHeader title={t.title} lead={t.lead} />
       <div className="min-w-0 border-b border-line">
         <nav aria-label={t.sectionsNav} className="flex gap-1 overflow-x-auto">
-          {SECTIONS.filter(({ key }) => key !== "update" || explicit).map(({ href, key }) => (
+          {SECTIONS.map(({ href, key }) => (
             <Link
               key={href}
               href={href}

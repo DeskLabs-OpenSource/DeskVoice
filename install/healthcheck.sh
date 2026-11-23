@@ -8,7 +8,7 @@
 #
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
 # Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, painel → banco,
-# Asterisk, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
+# login do painel, Asterisk, módulos SIP, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
 # linha, motor de voz, entrada única, WhatsApp, ligação pelo WhatsApp, portas, disco). O agente de atualização nunca é
 # falha: no máximo, aviso.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -23,6 +23,10 @@ for arg in "$@"; do
   esac
 done
 require_install
+
+# Os módulos PJSIP sem os quais uma ligação não passa, ou uma linha não registra, ou o NAT não vale.
+# A linha "Módulos SIP" reprova se um deles falta ou está parado.
+SIP_ESSENTIAL_MODULES="res_pjsip chan_pjsip res_pjsip_session res_pjsip_sdp_rtp res_pjsip_nat res_pjsip_outbound_registration res_pjsip_authenticator_digest res_pjsip_outbound_authenticator_digest res_pjsip_endpoint_identifier_ip res_pjsip_endpoint_identifier_user res_pjsip_endpoint_identifier_anonymous res_pjsip_registrar res_pjsip_refer res_pjsip_pubsub"
 
 RESULTS=""   # linhas `id|nome|essencial|estado|detalhe`
 add() { RESULTS="$RESULTS$1|$2|$3|$4|$(printf '%s' "$5" | tr '\n|' '  ')"$'\n'; }
@@ -70,6 +74,51 @@ if ! running asterisk; then
   add asterisk "Asterisk" 1 falha "o contêiner do Asterisk não está rodando. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 asterisk"
 elif uptime="$(dc exec -T asterisk asterisk -rx 'core show uptime' 2>/dev/null | head -n 1)" && [ -n "$uptime" ]; then
   add asterisk "Asterisk" 1 ok "$uptime"
+  # ── Módulos SIP: o teto de módulos do pjproject estoura na partida ("Too many modules
+  #    registered") e o último módulo PJSIP a registrar fica parado, sem que o Asterisk deixe de
+  #    responder. Qual perde a vaga depende da ordem de leitura do diretório de módulos, que muda de
+  #    máquina para máquina: na imagem fixada, numa máquina era o res_pjsip_nat (force_rport e
+  #    rewrite_contact das linhas sem efeito), noutra pode ser outro. Por isso a linha reprova em
+  #    qualquer ordem: um essencial ausente ou parado, QUALQUER módulo PJSIP "Not Running", ou o
+  #    estouro no log da partida atual (desde o State.StartedAt: uma partida antiga não conta).
+  #    Essencial: o install.sh e a volta da atualização esperam por ela. ──
+  sip_list="$(dc exec -T asterisk asterisk -rx 'module show like pjsip' 2>/dev/null || true)"
+  # `rodando <módulo>` ou `parado <módulo>`, sem o .so. "Not Running" contém "Running": vem antes.
+  sip_state="$(printf '%s\n' "$sip_list" | awk '$1 ~ /\.so$/ { m = $1; sub(/\.so$/, "", m); if (/ Not Running/) print "parado " m; else if (/ Running/) print "rodando " m; else print "outro " m }')"
+  sip_running=0; sip_stopped=""; sip_missing=""
+  while read -r st m; do
+    [ -n "$m" ] || continue
+    case "$st" in rodando) sip_running=$((sip_running + 1)) ;; parado) sip_stopped="$sip_stopped $m" ;; esac
+  done <<<"$sip_state"
+  for m in $SIP_ESSENTIAL_MODULES; do
+    case $'\n'"$sip_state"$'\n' in
+      *$'\n'"rodando $m"$'\n'*) ;;
+      *) case " $sip_stopped " in *" $m "*) ;; *) sip_missing="$sip_missing $m" ;; esac ;;
+    esac
+  done
+  sip_cid="$(dc ps -q asterisk 2>/dev/null | head -n 1 || true)"
+  sip_started="$(docker inspect -f '{{.State.StartedAt}}' "$sip_cid" 2>/dev/null || true)"
+  sip_overflow=0
+  if [ -n "$sip_started" ]; then
+    sip_overflow="$(docker logs --since "$sip_started" "$sip_cid" 2>&1 | grep -c 'Too many modules registered' || true)"
+  fi
+  if [ -z "$sip_stopped$sip_missing" ] && [ "${sip_overflow:-0}" -eq 0 ]; then
+    if [ -n "$sip_started" ]; then
+      add sip_modules "Módulos SIP" 1 ok "$sip_running módulos PJSIP em execução; nenhum \"Too many modules\" desde a partida"
+    else
+      add sip_modules "Módulos SIP" 1 ok "$sip_running módulos PJSIP em execução; o log da partida não pôde ser lido"
+    fi
+  else
+    sip_detail=""
+    if [ -n "$sip_stopped" ]; then sip_detail="módulos PJSIP parados:${sip_stopped// /, }"; fi
+    if [ -n "$sip_missing" ]; then sip_detail="${sip_detail:+$sip_detail; }módulos PJSIP essenciais ausentes:${sip_missing// /, }"; fi
+    sip_detail="${sip_detail//:, /: }"
+    if [ "${sip_overflow:-0}" -gt 0 ]; then sip_detail="${sip_detail:+$sip_detail; }o log da partida atual tem \"Too many modules registered\" (um módulo PJSIP ficou sem vaga)"; fi
+    case " $sip_stopped $sip_missing " in
+      *" res_pjsip_nat "*) sip_detail="$sip_detail. force_rport e rewrite_contact não valem, e uma linha atrás de NAT liga e fica muda" ;;
+    esac
+    add sip_modules "Módulos SIP" 1 falha "$sip_detail. Rode bash install/install.sh; se continuar, procure \"Too many modules\" em: docker compose -f deploy/docker-compose.yml logs asterisk"
+  fi
 else
   add asterisk "Asterisk" 1 falha "o Asterisk está rodando mas não responde a comandos"
 fi
@@ -97,6 +146,44 @@ fi
 # O Postgres aceitar conexão (linha "Banco") não prova que o painel entra nele: a senha do papel da
 # aplicação, que as migrations redefinem, ou a rede podem estar erradas. Sem isso não há nem login.
 from_panel panel_database "Painel → banco" 1 database
+
+# ── Login do painel ──
+# A rota de saúde responde "painel ok, banco ok" mesmo quando ninguém consegue entrar: ela lê o
+# banco por outro caminho, e uma volta de versão que trocou a coluna que o login lê passou pela
+# instalação "com todas as peças essenciais respondendo" (issue #392). Esta sonda faz o pedido de
+# login de verdade, de dentro do contêiner, com uma credencial que não existe: o certo é 401, e um
+# 5xx é o defeito. Não cria usuário nem guarda senha, e o e-mail é novo a cada execução para não
+# gastar o limite de tentativas do login (5 por par e-mail+endereço, 50 por e-mail). Uma tentativa
+# só: a checagem não repete.
+login_js() {
+  cat <<JS
+const t=require('crypto').randomUUID();
+const b=JSON.stringify({email:'saude-'+t+'@invalid',password:t});
+fetch('http://127.0.0.1:3000/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:b,signal:AbortSignal.timeout(8000)})
+ .then(r=>console.log('login|'+r.status))
+ .catch(e=>console.log('login|0|'+String(e.message)));
+JS
+}
+if ! running panel || [ -z "$panel_lines" ] || [ -n "$(piece unreachable 1)" ]; then
+  add login "Login do painel" 1 aviso "não deu para conferir porque o painel não respondeu; resolva o painel primeiro"
+else
+  login_line="$(dc exec -T panel node -e "$(login_js)" </dev/null 2>/dev/null || true)"
+  login_code="$(printf '%s\n' "$login_line" | awk -F'|' '$1 == "login" { print $2; exit }')"
+  login_why="$(printf '%s\n' "$login_line" | awk -F'|' '$1 == "login" { print $3; exit }')"
+  case "$login_code" in
+    401) add login "Login do painel" 1 ok "a rota de login responde e recusa credencial que não existe (HTTP $login_code)" ;;
+    # 400 sai da leitura do corpo, antes de qualquer consulta ao banco: não prova o login. Aviso, e
+    # não falha, para uma sonda desatualizada não fazer o update.sh voltar uma atualização boa.
+    400) add login "Login do painel" 1 aviso "a rota de login recusou o formato do pedido da sonda (HTTP 400) antes de consultar o banco: não deu para conferir o login. Rode de novo depois de atualizar o kit" ;;
+    # Limite de tentativas: não é erro de servidor, e também não prova que o login chega ao banco.
+    429) add login "Login do painel" 1 aviso "o login está recusando pelos próprios limites de tentativa (HTTP 429): não deu para conferir se ele chega ao banco. Rode de novo em alguns minutos" ;;
+    2[0-9][0-9]) add login "Login do painel" 1 falha "o login aceitou uma credencial que não existe (HTTP $login_code): a tela está aberta para quem não devia. Rode bash install/diagnose.sh" ;;
+    5[0-9][0-9]) add login "Login do painel" 1 falha "o login do painel responde erro de servidor (HTTP $login_code): ninguém consegue entrar na tela, mesmo com a saúde dizendo que o painel e o banco respondem. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 panel" ;;
+    0) add login "Login do painel" 1 falha "o painel não respondeu à rota de login (${login_why:-sem resposta})" ;;
+    "") add login "Login do painel" 1 falha "a sonda do login não devolveu resposta (${login_line:-sem saída})" ;;
+    *) add login "Login do painel" 1 falha "a rota de login respondeu HTTP $login_code em vez de recusar a credencial: o login não está confiável. Rode bash install/diagnose.sh" ;;
+  esac
+fi
 
 # ── Worker de voz e rotinas ──
 if ! running voice; then
@@ -163,6 +250,29 @@ if [ "$only_essential" = 0 ]; then
         if [ "$entry_scheme" = https ]; then add entry "Entrada única" 0 falha "o Caddy não respondeu em HTTPS para $entry_site (${entry_panel:-sem saída}). Causa mais comum: o certificado ainda não saiu porque o domínio não aponta para esta VPS. Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"
         else add entry "Entrada única" 0 falha "o Caddy do DeskVoice não respondeu (${entry_panel:-sem saída}). Veja: docker compose -f deploy/docker-compose.yml logs --tail 50 caddy"; fi ;;
     esac
+  fi
+
+  # ── Rede do proxy: a ligação declarada sobrevive ao recreate; a manual, não ──
+  # Instalação anterior à 0.11.0 ligava o Caddy à rede do outro sistema com `docker network connect`.
+  # Essa ligação não fica em arquivo nenhum: o contêiner recriado (atualização, volta, restauração ou
+  # reinício da máquina) nasce fora da rede, e o domínio do painel passa a responder 502 sem que nada
+  # aqui dentro pareça errado. Aviso, não falha: o produto funciona; o que se perde é a publicação.
+  # Só a rede existir não prova a ligação à mão: o guia também documenta o proxy do CRM entrando na
+  # deskvoice_internal, e ali a _caddy-sites existe sem precisar ser gravada. Por isso o aviso diz o
+  # que viu e traz a consequência como condição.
+  proxy_declared="$(proxy_network)"
+  proxy_missing="$(missing_proxy_network)"
+  proxy_found="$(redes_de_proxy | tr '\n' ' ' | sed 's/ *$//')"
+  if [ -n "$proxy_missing" ]; then
+    add proxy "Rede do proxy" 0 aviso "a rede gravada $proxy_missing não existe mais nesta máquina: com ela faltando, o próximo início do DeskVoice não sobe serviço nenhum. Suba o outro sistema, que recria a rede, ou deixe de usá-la: DESKVOICE_PROXY_NETWORK=off bash install/install.sh"
+  elif [ -n "$proxy_declared" ]; then
+    add proxy "Rede do proxy" 0 ok "o Caddy entra em $proxy_declared pelo nome deskvoice; a ligação sobrevive a atualização, volta e reinício"
+  elif [ -z "$proxy_found" ]; then
+    add proxy "Rede do proxy" 0 ok "esta instalação não usa o proxy de outro sistema (é o padrão)"
+  elif [ "$(printf '%s\n' "$proxy_found" | wc -w)" -eq 1 ]; then
+    add proxy "Rede do proxy" 0 aviso "existe a rede $proxy_found nesta máquina e ela não está gravada. Se o painel é publicado pelo proxy dessa rede, a ligação foi feita à mão e se perde quando o Caddy for recriado, e o domínio passa a responder 502. Para gravá-la: DESKVOICE_PROXY_NETWORK=$proxy_found bash install/install.sh"
+  else
+    add proxy "Rede do proxy" 0 aviso "existem redes de proxy nesta máquina ($proxy_found) e nenhuma está gravada. Se o painel é publicado pelo proxy de uma delas, grave essa: DESKVOICE_PROXY_NETWORK=<rede> bash install/install.sh"
   fi
 
   # ── WhatsApp por QR Code: o serviço, que só existe na instalação que o pediu pela tela ──

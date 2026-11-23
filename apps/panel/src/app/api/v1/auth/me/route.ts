@@ -6,9 +6,11 @@ import { optionalPhone } from "../../../../../server/shapes";
 const COLUMNS = `name, email, role, phone_e164 as phone, whatsapp_e164 as whatsapp`;
 
 // O nome da organização vai junto: a tela do agente o mostra no texto padrão da mensagem para quem ligou.
+// E o idioma dela (`organizations.language`, R8 fatia 8a): o que os formulários de agente novo e de
+// menu novo propõem. Nulo nas organizações sem idioma; os formulários propõem pt-BR.
 async function me(q: OrgQuery, session: Session) {
   const row = await q.one(
-    `select u.name, u.email, u.role, u.phone_e164 as phone, u.whatsapp_e164 as whatsapp, o.name as "organizationName"
+    `select u.name, u.email, u.role, u.phone_e164 as phone, u.whatsapp_e164 as whatsapp, o.name as "organizationName", o.language as "organizationLanguage"
        from users u join organizations o on o.id = u.organization_id
       where u.id = $1`,
     [session.userId],
@@ -23,7 +25,7 @@ const body = z.object({ name: z.string().trim().min(1).max(120).optional(), phon
 
 // Cada pessoa edita o próprio contato, em qualquer papel: é para onde vão os avisos e os pedidos
 // de aprovação fora do painel. Campo ausente fica como está; vazio apaga.
-export const PATCH = handle({ body }, async ({ q, session, body }) => {
+export const PATCH = handle({ support: false, body }, async ({ q, session, body }) => {
   const current = await q.one<{ name: string; phone: string | null; whatsapp: string | null }>(`select ${COLUMNS} from users where id = $1`, [session.userId]);
   if (!current) throw notFound();
   await q.exec("update users set name = $2, phone_e164 = $3, whatsapp_e164 = $4 where id = $1", [

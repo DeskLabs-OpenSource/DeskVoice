@@ -12,10 +12,10 @@ export interface Me {
   whatsapp?: string | null;
   /** O nome da organização; a tela do agente o mostra no texto padrão da mensagem para quem ligou. */
   organizationName?: string;
+  /** O idioma da organização (`organizations.language`): o que o agente novo e o menu novo propõem. Nulo: pt-BR. */
+  organizationLanguage?: "pt-BR" | "en" | "es" | null;
   /** Se a conta administra a instalação (`isInstallationAdmin`, seção 3.2 do desenho do R8). */
   installationAdmin?: boolean;
-  /** Se a lista de quem administra a instalação já é explícita: a tela de atualizar mora na área da instalação. */
-  installationExplicit?: boolean;
 }
 
 export interface Agent {
@@ -32,9 +32,15 @@ export interface Agent {
   maxCallSeconds: number;
   costCeilingCents: number;
   transferTo: string | null;
+  /** Ninguém atendeu a transferência: a ligação volta para o agente. Agente gravado antes do campo existir pode chegar sem ele: vale `true`. */
+  transferReturnsToAgent?: boolean;
+  /** O "ainda está aí?" quando quem ligou fica calado. Agente gravado antes do campo existir pode chegar sem ele: vale `true`. */
+  callerIdleGuard?: boolean;
   followUpOwnerUserId: string | null;
   /** Onde quem liga costuma estar. Agente gravado antes do campo existir pode chegar sem ele: vale `normal`. */
   listeningEnvironment?: ListeningEnvironment;
+  /** Nomes e termos que o agente deve esperar ouvir. Vazio: nenhum. */
+  vocabulary?: string[];
   /** Para quem o agente pode passar a ligação (`transfer_to_agent`). Vazia de fábrica. */
   agentHandoffTargets?: string[];
   /**
@@ -120,6 +126,10 @@ export interface CallDetail extends Call {
   summaryPurged: boolean;
   /** O conteúdo saiu a pedido do titular (`calls.erased_at`). */
   erased: boolean;
+  /** A ligação que caiu, quando esta é a religação dela (`calls.call_back_of`); nula nas outras. */
+  callBackOf: string | null;
+  /** Quando a ligação original começou; nula se ela não é vista. */
+  callBackOfStartedAt: string | null;
   /** O custo de cada agente da ligação, na ordem em que gastou; `name: null` é agente apagado. A tela mostra com mais de um. */
   costByAgent: Array<{ agentId: string | null; name: string | null; costCents: number; unmeasuredCount: number; estimatedCount: number }>;
   /** Quantas linhas do extrato da ligação não têm custo medido (modelo sem preço, ou consumo que não pôde ser medido): com alguma, o zero não é grátis. */
@@ -211,6 +221,30 @@ export interface PhoneNumber {
   trunkId: string;
   agentId: string | null;
   agentName?: string | null;
+  /** `ai`: atende o agente. `ivr`: atende o menu por teclas `ivrMenuId`. */
+  mode?: "ai" | "ivr";
+  ivrMenuId?: string | null;
+}
+
+export interface IvrOption {
+  digit: string;
+  label: string;
+  action: "agent" | "transfer" | "hangup";
+  agentId: string | null;
+  transferTo: string | null;
+}
+
+/** Um menu por teclas como a API o lê: nunca o áudio, só a duração do anúncio. */
+export interface IvrMenu {
+  id: string;
+  name: string;
+  language: "pt-BR" | "en" | "es";
+  timeoutMs: number;
+  maxAttempts: number;
+  onNoChoice: "person" | "hangup";
+  promptAudioMs: number | null;
+  updatedAt: string;
+  options: IvrOption[];
 }
 
 export type KeyCheck = KeyCheckView;
@@ -263,6 +297,8 @@ export interface PanelNotification {
   followUpId: string | null;
   followUpTitle: string | null;
   followUpStatus: FollowUpStatus | null;
+  /** Só o aviso de atualização tem assunto; o sino dá a ele o link para quem administra a instalação. */
+  subject: "installation_update" | null;
 }
 
 export type FollowUpStatus = "open" | "done" | "canceled";

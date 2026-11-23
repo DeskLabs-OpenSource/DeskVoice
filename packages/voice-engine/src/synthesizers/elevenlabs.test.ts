@@ -166,7 +166,7 @@ describe("elevenlabs (contrato com servidor falso)", () => {
     [403, "rejected"],
     [402, "no_credit"],
     [429, "rate_limited"],
-    [503, "unreachable"],
+    [503, "provider_error"],
   ] as const)("recusa %i na abertura vira SynthesizerOpenError(%s)", async (status, reason) => {
     fake = await startFakeProvider({ rejectUpgrade: status });
     const opening = synthesizer.speak({ voiceId: "v", language: "pt-BR" }, "xi-teste", { baseUrl: fake.url });
@@ -264,7 +264,7 @@ describe("elevenlabs: vozes", () => {
       [401, "rejected"],
       [402, "no_credit"],
       [429, "rate_limited"],
-      [500, "unreachable"],
+      [500, "provider_error"],
       [404, "unexpected_response"],
     ] as const) {
       const { fetchFn } = pagedFetch([{ status: 200, body: page([voice("a")], "t") }, { status, body: { detail: "texto do provedor" } }]);
@@ -297,7 +297,7 @@ describe("elevenlabs: teste da chave", () => {
     [401, "rejected"],
     [402, "no_credit"],
     [429, "rate_limited"],
-    [502, "unreachable"],
+    [502, "provider_error"],
     [404, "unexpected_response"],
   ] as const)("status %i vira %s", async (status, result) => {
     http = await startFakeHttp();

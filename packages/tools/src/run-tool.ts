@@ -137,7 +137,7 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
   }
 
   try {
-    await recordEvent(ctx.q, ctx.callId, "tool_result", { name: tool.name, ok: result.ok, message: result.message, ...(error !== undefined && { error }), ...(release !== undefined && spent && { spent: true }) }, ctx.clock.now());
+    await recordEvent(ctx.q, ctx.callId, "tool_result", { name: tool.name, ok: result.ok, ...(result.outcome !== undefined && { outcome: result.outcome }), message: result.message, ...(error !== undefined && { error }), ...(release !== undefined && spent && { spent: true }) }, ctx.clock.now());
   } finally {
     // A vaga só fecha com o desfecho gravado: a entrada nunca é podada antes de o banco saber dele.
     // Se a gravação falhar, a vaga gasta conta assim mesmo: o efeito pode ter saído, e só a memória sabe.

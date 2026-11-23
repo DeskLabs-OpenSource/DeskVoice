@@ -9,7 +9,9 @@
     "./phone": "./src/phone.ts",
     "./drop-follow-up": "./src/drop-follow-up.ts",
     "./analysts": "./src/analysts.ts",
-    "./inbound-filter": "./src/inbound-filter.ts"
+    "./inbound-filter": "./src/inbound-filter.ts",
+    "./ivr": "./src/ivr.ts",
+    "./vocabulary": "./src/vocabulary.ts"
   },
   "dependencies": {
     "pg": "^8.23.1",

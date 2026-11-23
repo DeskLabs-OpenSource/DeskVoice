@@ -6,7 +6,7 @@ const privacy = {
   recordingDisk:
     "Cada minuto de chamada ocupa cerca de 1,9 MB no disco do servidor. É a conta do formato (dois canais, 8 kHz, 16 bits), e não uma medição.",
   recordingKeeps:
-    "Ligar ou desligar não apaga nada. As gravações já feitas seguem o prazo de guarda abaixo: saem junto com o texto da conversa, e sem prazo ficam para sempre. Os backups de hoje não incluem as gravações. Confira se o aviso do começo da ligação, em Configurações → Ligações, diz a quem liga que a conversa fica registrada.",
+    "Ligar ou desligar não apaga nada. As gravações já feitas seguem o prazo de guarda abaixo: saem junto com o texto da conversa, e sem prazo ficam para sempre. Os backups de hoje não incluem as gravações. Confira se o aviso de gravação, logo acima, diz a quem liga que a conversa fica registrada.",
   recordingForever:
     "O prazo de guarda está vazio: as gravações ficam para sempre, e o disco do servidor cresce sem limite, cerca de 1,9 MB por minuto de chamada. Defina um prazo abaixo para que as gravações antigas saiam.",
   recordingStates: { on: "ligada", off: "desligada" },
@@ -105,8 +105,11 @@ const privacy = {
     caller_memory_changed: "{who} deixou a memória do número no agente {state}.",
     analyst_provider_confirmed: "{who} confirmou que o analista {analyst} manda o texto do que a pessoa fala na ligação para {provider}.",
     decision_model_provider_confirmed: "{who} confirmou que o filtro de fala manda o texto da ligação para {provider}.",
+    synthesizer_provider_confirmed: "{who} confirmou que a voz {provider} recebe o texto que o agente fala na ligação.",
     organization_created: "A administração da instalação criou esta organização, com o nome \"{name}\".",
     organization_renamed: "A administração da instalação renomeou esta organização de \"{from}\" para \"{to}\".",
+    organization_suspended: "A administração da instalação suspendeu esta organização. Motivo: {reason}. Tarefas canceladas: {n}.",
+    organization_reactivated: "A administração da instalação reativou esta organização. Tarefas canceladas na reativação: {n}.",
     caller_notes_deleted: "{who} esqueceu o número terminado em {suffix}. Notas do agente apagadas: {notes}. Pendências fechadas apagadas: {followUps}.",
   },
   noteDeleted: "{who} apagou uma nota do agente.",

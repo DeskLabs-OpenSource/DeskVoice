@@ -15,6 +15,7 @@ const brains: BrainsDictionary = {
   removeConfirm: "¿Eliminar la clave de {brain}? La lista de modelos de {brain} también se borra. La clave eliminada no se puede recuperar.",
   removeYes: "Eliminar la clave de {brain}",
   removeChosen: "{brain} es quien lee las llamadas hoy (modelo {model}). Sin la clave, las llamadas dejan de leerse hasta que la clave vuelva o elijas otro en \"Quién lee la llamada\", en la sección del análisis. No pasan al motor del agente.",
+  removeAgents: "El análisis de las llamadas de {agents} se va a detener: estos agentes eligieron {brain} para leer sus llamadas. No pasan a la elección de la organización ni al motor del agente.",
   cancel: "Cancelar",
   neverTested: "La clave todavía no se probó. Use Actualizar lista para probarla.",
   tested: "Probada el {when}: {result}",
@@ -27,6 +28,7 @@ const brains: BrainsDictionary = {
     region_unavailable: "el proveedor no atiende el país o la región de este servidor. Cambiar la clave no lo resuelve.",
     rate_limited: "el proveedor pidió esperar (límite de pedidos de la cuenta). Intente de nuevo en unos minutos.",
     unreachable: "el proveedor no respondió a tiempo, o está fuera de servicio. Verifique que el servidor tenga acceso a internet e intente de nuevo.",
+    provider_error: "el proveedor respondió con un error de su lado. Suele pasarse solo: intente de nuevo en unos minutos.",
     unexpected_response: "el proveedor respondió algo que DeskVoice no reconoce. Intente de nuevo; si continúa, abra un issue en el repositorio.",
   },
   errors: {

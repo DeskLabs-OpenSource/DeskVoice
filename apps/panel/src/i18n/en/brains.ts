@@ -15,6 +15,7 @@ const brains: BrainsDictionary = {
   removeConfirm: "Remove the {brain} key? The {brain} model list is deleted too. A removed key cannot be recovered.",
   removeYes: "Remove the {brain} key",
   removeChosen: "{brain} is who reads the calls today (model {model}). Without the key, calls stop being read until the key is back or you choose another in \"Who reads the call\", in the analysis section. They do not move to the agent's engine.",
+  removeAgents: "The analysis of the calls of {agents} will stop: these agents chose {brain} to read their calls. They do not move to the organization's choice or to the agent's engine.",
   cancel: "Cancel",
   neverTested: "The key has not been tested yet. Use Refresh list to test it.",
   tested: "Tested on {when}: {result}",
@@ -27,6 +28,7 @@ const brains: BrainsDictionary = {
     region_unavailable: "the provider does not serve this server's country or region. Changing the key does not help.",
     rate_limited: "the provider asked to wait (account request limit). Try again in a few minutes.",
     unreachable: "the provider did not answer in time, or is down. Check that the server can reach the internet and try again.",
+    provider_error: "the provider answered with an error on its side. It usually clears up on its own: try again in a few minutes.",
     unexpected_response: "the provider answered something DeskVoice does not recognize. Try again; if it persists, open an issue in the repository.",
   },
   errors: {
