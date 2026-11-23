@@ -1091,8 +1091,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     toolsRelease.abort(new Error("The call is being transferred"));
     await Promise.allSettled(toolsRunning);
     await Promise.allSettled(readingsRunning);
-    // Fechar o motor entrega a última medição de uso, que fica no trecho dele.
-    await voice?.close().catch(logFailure("could not close the voice engine before the transfer"));
+    // Fechar o motor entrega a última medição de uso, que fica no trecho dele. A peça é do trecho, como
+    // o motor (#198): fecha junto, e o trecho de volta abre a dele.
+    await Promise.all([
+      voice?.close().catch(logFailure("could not close the voice engine before the transfer")),
+      leg ? closePiece(leg).catch(logFailure("could not close the transcriber before the transfer")) : undefined,
+    ]);
     if (ending) return;
     let outcome: TransferOutcome | void;
     // O `DIALSTATUS` que o transporte entregou; a falha ao pedir a transferência não chega a discar.
@@ -1154,6 +1158,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const base = from.baseInstructions.startsWith(SIMULATED_PREFIX) ? from.baseInstructions : `${from.baseInstructions}\n\n${transferReturnInstruction(status)}`;
     const instructions = composeInstructions(base, targets, undefined, fitted?.items ?? lead);
     const greeting = TRANSFER_RETURN_GREETINGS[spokenLanguageOf(row.language)];
+    const piece = await choosePiece(row);
     const opened = await connectEngine(overrides?.engineId ?? row.engine, sessionConfig(row, instructions, greeting, enabled));
     if (ending) {
       if ("voice" in opened) await opened.voice.close();
@@ -1169,7 +1174,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     }
     // Daqui até a troca nada espera: a sessão nova só emite no próximo ciclo.
     latency.notAnswer();
-    startLeg(row, opened.engine, opened.voice, enabled, base, from.analyst);
+    const returnLeg = startLeg(row, opened.engine, opened.voice, enabled, base, from.analyst);
+    void seatPiece(returnLeg, from, piece);
     // A duração é da ligação, e não do trecho: o relógio conta do atendimento, com o tempo da discagem.
     scheduleDuration();
     const reached = reachCeiling(callCents());

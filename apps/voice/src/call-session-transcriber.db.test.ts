@@ -28,6 +28,7 @@ import {
   type SessionHarness,
 } from "./testing/db";
 import { waitFor } from "./testing/helpers";
+import type { TransferOptions, TransferOutcome } from "./transport";
 import { AFTER_WORDS_MS } from "./silence-guard";
 
 const { app, owner } = openTestDbs();
@@ -557,5 +558,73 @@ describe("a peça é do trecho (passagem entre agentes, desenho do #198)", { tim
     expect(only.audioBytes).toBe(heard);
     transport.callerHangup();
     await session.done;
+  });
+});
+
+/** O transporte num canal que volta: a transferência fica pendente até o teste dizer como terminou (como em `transfer-return.db.test.ts`). */
+function returningTransport() {
+  const base = manualTransport();
+  let pending: ((outcome: TransferOutcome) => void) | undefined;
+  const transfers: string[] = [];
+  const transport = Object.assign(base, {
+    canReturnFromTransfer: true,
+    async transfer(to: string, options?: TransferOptions): Promise<TransferOutcome | void> {
+      transport.transferredTo = to;
+      transfers.push(to);
+      if (!options?.returnIfUnanswered) return;
+      return new Promise<TransferOutcome>((resolve) => (pending = resolve));
+    },
+    endTransfer(outcome: TransferOutcome) {
+      pending?.(outcome);
+      pending = undefined;
+    },
+  });
+  return { transport, transfers };
+}
+
+describe("a peça na transferência com volta (Vapi · fatia 5a)", { timeout: 120_000 }, () => {
+  it("a peça fecha com o motor na discagem, não ouve a linha chamar, e o trecho de volta abre a dele", async () => {
+    const piece = handTranscriber({ usageOnClose: 9 });
+    const manual = manualEngine({ keyless: true });
+    const organizationId = await createOrganization(app, "piece-transfer-return");
+    const agentId = await createAgent(app, organizationId, { engine: "manual", greeting: "Bom dia.", transferTo: "+5531988887777", tools: ["transfer_to_human"] });
+    await harness?.approvals.close();
+    const made = await sessionHarness(app, [manual.engine]);
+    harness = made;
+    made.deps.transcribers = new Map([["simulated", piece.transcriber]]);
+    const callId = await createCall(app, organizationId, agentId, made.clock.now());
+    const { transport, transfers } = returningTransport();
+    const session = startCallSession(made.deps, { organizationId, callId, agentId, transport, transcriberId: "simulated" });
+    await answered(callId);
+    await waitFor(() => piece.sessions.length === 1, "the piece to open");
+    await tick();
+    const [first] = piece.sessions;
+    if (!first) throw new Error("no piece");
+    transport.callerAudio(20);
+    const heard = first.audioBytes;
+    expect(heard).toBeGreaterThan(0);
+
+    manual.emit("toolCall", { id: "t-transfer", name: "transfer_to_human", args: { reason: "financeiro", summary: "Segunda via." } });
+    await waitFor(() => transfers.length === 1, "the transfer to be dialed");
+    expect(manual.closed).toBe(1);
+    expect(first.closed).toBe(1);
+    await waitFor(async () => (await ledgerRows(callId, "transcriber:simulated")).length === 1, "the last piece usage");
+    // A linha chamando: nem o motor nem a peça ouvem.
+    transport.callerAudio(100);
+    expect(first.audioBytes).toBe(heard);
+
+    transport.endTransfer({ returned: true, status: "NOANSWER" });
+    await waitFor(() => manual.configs.length === 2, "the return leg to open");
+    await waitFor(() => piece.sessions.length === 2, "the return leg piece to open");
+    await tick();
+    const back = piece.sessions[1];
+    transport.callerAudio(20);
+    expect(back?.audioBytes).toBeGreaterThan(0);
+    expect(first.audioBytes).toBe(heard);
+    transport.callerHangup();
+    await session.done;
+    expect(back?.closed).toBe(1);
+    expect(first.closed).toBe(1);
+    expect(await kindsOf(app, callId)).not.toContain("transcriber_failed");
   });
 });

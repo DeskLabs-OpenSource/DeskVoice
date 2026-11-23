@@ -12,8 +12,8 @@
 > com o Jev) no #349, com os testes do #353 e do #362, fatia 7a (custo do Jev não lido) no #359 e
 > fatia 7b (o filtro na tela e as marcas na linha do tempo) no #395. **Falta:** a medida dos
 > transcritores externos com chave (Deepgram, AssemblyAI e Soniox: chaves não entregues); a fatia 2
-> (o contrato e o transcritor simulado), no #245, que fica parada com o trabalho guardado no ramo,
-> porque só entra junto com as fatias 3 e 4; as fatias 3, 4 e 5, que esperam o vencedor da medida;
+> (o contrato e o transcritor simulado), do #245, entrou sozinho na `main` em 23/11, desligada, num PR
+> que o retoma (DESA-398, DESA-409); as fatias 3, 4 e 5, que esperam o vencedor da medida;
 > as fatias 8 e 9 (o Laya). O pedido de decisão 4 foi respondido em 18/11 (opção A, imagem
 > publicada por este repositório), e a fatia 8 foi dividida em 8a e 8b. O texto abaixo é o desenho,
 > com as correções feitas durante as fatias.
@@ -774,6 +774,13 @@ O fragmento do #245 fica, porque só vale quando a fatia 4 entrar. As fatias 3 e
 `main` por merge, sem reescrita. Na hora do merge, os três PRs entram em sequência: o #245, a fatia
 3 e a fatia 4.
 
+Revisto em 23/11 (DESA-398): o board decidiu que as fatias 3 a 5 do motor em pipeline
+(`docs/specs/2026-11-17-motor-de-voz-em-pipeline.md`) seguem sem esperar o vencedor, e elas precisam
+do contrato na `main`. O #245 entrou sozinho, desligado, num PR que o retoma, com a `main` juntada por
+merge: nenhum motor usa a peça, o processo de voz não chama `loadTranscribers()`, e nada muda na tela
+nem no banco. As fatias 3 e 4 desta frente partem da `main`, e a fatia 4 fica só com a peça do
+vencedor. O fragmento do #245 entra com ele, como `nothing_changes`.
+
 ### A passagem entre agentes: a peça é do trecho (16/11, depois do #304)
 
 O #304 (R13, fatia 4a, `cd3f63e`) fez a ligação trocar de agente. Cada agente por onde ela passa é
@@ -836,7 +843,7 @@ Há três motivos:
 
 **Quando:** a primeira fatia desta frente que retomar (a 3 ou a 4) começa pelo ramo do #245, com
 um merge da `main` (até `cd3f63e` ou mais nova) e sem reescrita. Os ajustes acima vêm num commit à
-parte, por cima, e o #245 é revisto de novo antes de entrar com a fatia 4.
+parte, por cima, e o #245 é revisto de novo antes de entrar (em 23/11, sozinho: veja "Como entra").
 
 ### Fatia 3: a peça do vencedor
 
@@ -864,7 +871,8 @@ faltando).
 Aceite:
 - a pessoa escolhe o transcritor, salva, recarrega e vê a escolha; chave recusada mostra o motivo
   pelo vocabulário fechado;
-- o #245 (fatia 2) e a fatia 3 entram junto com esta fatia, nessa ordem, e não antes (regra 4);
+- a fatia 3 entra junto com esta fatia, antes dela, e não antes (regra 4). O #245 (fatia 2) já
+  entrou sozinho, desligado, em 23/11 (DESA-398);
 - `docs/doctrine/um-arquivo-por-peca.md` cita a pasta `transcribers/`, que a cerca já cobre desde o
   #245. É documento de autoridade: a linha só entra com o sim do Rafael, que vai pelo lote do Líder;
 - o carimbo da migration é a hora real da criação (regra acima): não é posterior ao commit que a
