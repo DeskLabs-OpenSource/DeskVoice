@@ -16,8 +16,6 @@ export interface Me {
   organizationLanguage?: "pt-BR" | "en" | "es" | null;
   /** Se a conta administra a instalação (`isInstallationAdmin`, seção 3.2 do desenho do R8). */
   installationAdmin?: boolean;
-  /** Se a lista de quem administra a instalação já é explícita: a tela de atualizar mora na área da instalação. */
-  installationExplicit?: boolean;
 }
 
 export interface Agent {
