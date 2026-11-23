@@ -16,7 +16,7 @@ import { putSetting, secretKey } from "../../../packages/tools/test/helpers";
 import geminiLive from "../../../packages/voice-engine/src/engines/gemini-live";
 import openaiRealtime from "../../../packages/voice-engine/src/engines/openai-realtime";
 import { startFakeProvider } from "../../../packages/voice-engine/src/testing/fake-provider";
-import { AGENT_TEST_RUNS_KEPT, AGENT_TEST_STALE_MS } from "./agent-test";
+import { AGENT_TEST_MAX_TOOL_CALLS_PER_TURN, AGENT_TEST_RUNS_KEPT, AGENT_TEST_STALE_MS, AGENT_TEST_TURN_TIMEOUT_MS } from "./agent-test";
 import { startVoiceServer } from "./server";
 import { DEFAULT_RECORDING_NOTICE, engineKeySetting } from "./session-config";
 import { createAgent, createOrganization, fakeAri, fakeClock, testSchedule } from "./testing/db";
@@ -55,12 +55,31 @@ afterEach(async () => {
   await fakeGemini.stop();
 });
 
+// Chamado quando a rodada fecha a sessão, antes do quadro de fechamento sair: o que o provedor falso
+// manda aqui chega enquanto a sessão fecha, como o `response.done` de uma resposta já em curso.
+let whenClosing: (() => void) | undefined;
+afterEach(() => {
+  whenClosing = undefined;
+});
+
 async function voiceServer() {
   const clock = fakeClock();
   const timers = testSchedule();
   const scratch = await mkdtemp(path.join(tmpdir(), "deskvoice-agent-test-openai-"));
   // Os motores de verdade, só com o endereço trocado pelo do servidor falso.
-  const openai: VoiceEngine = { ...openaiRealtime, connect: (config, apiKey) => openaiRealtime.connect(config, apiKey, { baseUrl: fake.url, model: "modelo-x" }) };
+  const openai: VoiceEngine = {
+    ...openaiRealtime,
+    connect: async (config, apiKey) => {
+      const session = await openaiRealtime.connect(config, apiKey, { baseUrl: fake.url, model: "modelo-x" });
+      return {
+        ...session,
+        close: () => {
+          whenClosing?.();
+          return session.close();
+        },
+      };
+    },
+  };
   const gemini: VoiceEngine = { ...geminiLive, connect: (config, apiKey) => geminiLive.connect(config, apiKey, { baseUrl: fakeGemini.url, model: "modelo-x" }) };
   const server = await startVoiceServer({
     db: app,
@@ -94,6 +113,7 @@ async function voiceServer() {
   };
   return {
     clock,
+    timers,
     run,
     async close() {
       await server.close();
@@ -262,6 +282,106 @@ describe("teste do agente no OpenAI Realtime em texto, pela rota interna", { tim
     } finally {
       await voice.close();
     }
+  });
+
+  describe("o `response.done` que chega enquanto a sessão fecha entra no extrato e no total do mês", () => {
+    const late = { input: 1000, output: 100 };
+    // 1 000 × US$ 4/M + 100 × US$ 24/M = 0,64 centavo.
+    const LATE_MICROCENTS = "640000";
+    const lateDone = () => fake.send({ type: "response.done", response: { output: [{ type: "message" }], usage: usage(late) } });
+    const monthOf = (organizationId: string, now: Date) => {
+      const day = now.toISOString().slice(0, 10);
+      return withOrg(app, organizationId, (q) => costTotal(q, { from: day, to: day }));
+    };
+    const finishedRun = async (organizationId: string) => {
+      const [row] = await waitFor(async () => {
+        const runs = await runsOf(organizationId);
+        return runs[0]?.status === "running" ? undefined : runs;
+      }, "the run to stop");
+      return row;
+    };
+
+    it("depois do turn_timeout", async () => {
+      const lia = await agentWithTest("agent-test-openai-late-timeout");
+      const voice = await voiceServer();
+      try {
+        const started = await voice.run({ organizationId: lia.organizationId, testId: lia.testId });
+        expect(started.status).toBe(200);
+        await acceptSession();
+        await answerOpening({ input: 100, output: 0 });
+        await fake.waitFor(userText);
+        await fake.waitFor(ofType("response.create"));
+        fake.send({ type: "response.created" });
+        // A resposta demora além do prazo do turno, e o `response.done` dela chega com a sessão fechando.
+        whenClosing = lateDone;
+        await waitFor(async () => (voice.timers.held().includes(AGENT_TEST_TURN_TIMEOUT_MS) ? true : undefined), "the turn timeout");
+        expect(voice.timers.fire(AGENT_TEST_TURN_TIMEOUT_MS)).toBe(1);
+
+        expect(await finishedRun(lia.organizationId)).toMatchObject({ status: "error", error_code: "turn_timeout" });
+        expect(await ledgerOf(lia.organizationId)).toMatchObject([
+          { source: "test", cost_microcents: "40000" },
+          { source: "test", input_tokens: 1000, output_tokens: 100, cost_microcents: LATE_MICROCENTS },
+        ]);
+        expect((await monthOf(lia.organizationId, voice.clock.now())).microcents).toBe(40_000 + Number(LATE_MICROCENTS));
+      } finally {
+        await voice.close();
+      }
+    });
+
+    it("depois do tool_loop", async () => {
+      const lia = await agentWithTest("agent-test-openai-late-loop");
+      const voice = await voiceServer();
+      try {
+        const started = await voice.run({ organizationId: lia.organizationId, testId: lia.testId });
+        expect(started.status).toBe(200);
+        await acceptSession();
+        await answerOpening({ input: 100, output: 0 });
+        await fake.waitFor(userText);
+        await fake.waitFor(ofType("response.create"));
+        fake.send({ type: "response.created" });
+        whenClosing = lateDone;
+        // Uma ferramenta a mais que o limite do turno, sem o `response.done` da resposta.
+        for (let call = 0; call <= AGENT_TEST_MAX_TOOL_CALLS_PER_TURN; call++) {
+          fake.send({ type: "response.function_call_arguments.done", call_id: `c${call}`, name: "create_task", arguments: JSON.stringify({ title: "Marina", details: "de novo" }) });
+        }
+
+        expect(await finishedRun(lia.organizationId)).toMatchObject({ status: "error", error_code: "tool_loop" });
+        expect(await ledgerOf(lia.organizationId)).toMatchObject([
+          { source: "test", cost_microcents: "40000" },
+          { source: "test", cost_microcents: LATE_MICROCENTS },
+        ]);
+        expect((await monthOf(lia.organizationId, voice.clock.now())).microcents).toBe(40_000 + Number(LATE_MICROCENTS));
+      } finally {
+        await voice.close();
+      }
+    });
+
+    it("depois do cost_ceiling", async () => {
+      const lia = await agentWithTest("agent-test-openai-late-ceiling", { costCeilingCents: 1 });
+      const voice = await voiceServer();
+      try {
+        const started = await voice.run({ organizationId: lia.organizationId, testId: lia.testId });
+        expect(started.status).toBe(200);
+        await acceptSession();
+        await answerOpening({ input: 100, output: 0 });
+        await fake.waitFor(userText);
+        await fake.waitFor(ofType("response.create"));
+        fake.send({ type: "response.created" });
+        // A resposta que passa do teto, e a seguinte, já em curso, termina com a sessão fechando.
+        whenClosing = lateDone;
+        fake.send({ type: "response.done", response: { output: [{ type: "message" }], usage: usage({ input: 5000, output: 0 }) } });
+
+        expect(await finishedRun(lia.organizationId)).toMatchObject({ status: "error", error_code: "cost_ceiling" });
+        expect(await ledgerOf(lia.organizationId)).toMatchObject([
+          { source: "test", cost_microcents: "40000" },
+          { source: "test", cost_microcents: LATE_MICROCENTS },
+          { source: "test", cost_microcents: "2000000" },
+        ]);
+        expect((await monthOf(lia.organizationId, voice.clock.now())).microcents).toBe(40_000 + 2_000_000 + Number(LATE_MICROCENTS));
+      } finally {
+        await voice.close();
+      }
+    });
   });
 
   describe("as recusas de antes de começar: nenhuma cria rodada, nenhuma abre o motor", () => {

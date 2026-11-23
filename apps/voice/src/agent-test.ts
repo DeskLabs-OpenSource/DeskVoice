@@ -255,7 +255,8 @@ async function converse(
   let waiter: ((ended: Ended) => void) | undefined;
   let closed = false;
   let failed = false;
-  // A conversa acabou (ou o teto foi alcançado): o que o motor emitir depois não é mais da rodada.
+  // A conversa acabou: o que o motor emitir depois não muda mais o fim da rodada, mas o custo dele
+  // ainda é dela.
   let finished = false;
   let ceiling = false;
   const settle = (ended: Ended): void => {
@@ -281,10 +282,15 @@ async function converse(
   });
   voice.on("turnDone", () => settle("done"));
   // O custo de cada resposta, na hora em que o motor o declara (o OpenAI, em cada `response.done`,
-  // antes do fim do turno). O consumo que o simulado declara ao fechar não é de resposta nenhuma.
+  // antes do fim do turno). Depois do fim (prazo do turno, laço de ferramenta, teto), o
+  // `response.done` que chega enquanto a sessão fecha foi cobrado pelo provedor: entra no extrato
+  // e no teto do mês, só sem mexer mais no fim da rodada. O `usage` sem consumo nenhum (o que o
+  // simulado declara ao fechar, em texto) não vira linha.
   voice.on("usage", (usage) => {
+    if (Object.values(usage).every((amount) => !amount)) return;
+    const reached = meter(usage);
     if (finished) return;
-    if (meter(usage) && !ceiling) {
+    if (reached && !ceiling) {
       ceiling = true;
       settle("cost_ceiling");
     }
