@@ -419,7 +419,7 @@ export default function LinePage() {
   const saveIp = useAction();
   const addNumber = useAction();
   useEffect(() => setIp(publicIp.data?.value ?? ""), [publicIp.data]);
-  // Quem chega pelo "mudou para…" (`/line#ligacao-pelo-whatsapp`): os blocos de cima crescem quando as
+  // Quem chega pelo endereço do bloco (`/line#ligacao-pelo-whatsapp`): os blocos de cima crescem quando as
   // leituras chegam e empurram o da ligação pelo WhatsApp para baixo. Rola até ele depois delas, uma vez.
   const aboveLoaded = trunks.data != null && numbers.data != null && menus.data != null;
   const [scrolledToAnchor, setScrolledToAnchor] = useState(false);
