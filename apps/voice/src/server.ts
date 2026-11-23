@@ -13,7 +13,7 @@ import { startInternalApi } from "./internal-api";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { startOutboundCall } from "./outbound";
 import { removePartialRecordings } from "./recording";
-import { closeOrphanCalls } from "./reconcile";
+import { closeOrphanCalls, closeOrphanTestRuns } from "./reconcile";
 import { startSimulatedCall } from "./simulate";
 import { realSchedule, type Schedule } from "./transport";
 import { applyTrunks, checkTrunks, REFRESH_ALLOWED_MS, refreshAllowed, resolveSipName, type ResolveName, type TrunksDeps } from "./trunks";
@@ -71,6 +71,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   const log = deps.log ?? silentLogger;
   // Antes de atender qualquer coisa: o que o processo anterior deixou aberto não é de ninguém.
   await closeOrphanCalls(db, clock, log);
+  // A rodada de teste do agente que o processo anterior conduzia também não termina mais.
+  await closeOrphanTestRuns(db, clock, log);
   // A gravação que um processo caído deixou pela metade (`.part`) não fecha mais: sai daqui.
   if (deps.recordingsDir) {
     const removed = await removePartialRecordings(deps.recordingsDir).catch((error: unknown) => {
@@ -82,7 +84,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
   const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir, decisionModels: deps.decisionModels };
   const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, resolve: deps.resolveName ?? resolveSipName, log };
-  const calls = new AsteriskCalls({ ari, db, clock, log });
+  const calls = new AsteriskCalls({ ari, db, clock, log, schedule: deps.schedule });
   const sessions = new Set<CallSession>();
   // Recados em curso, com o ciclo de vida próprio: não são conversas, e não atendem a pedido de
   // parar gravação (`stopRecordingOfLiveCall`).
@@ -121,6 +123,8 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     now: deps.now,
     log,
     onConnection(connection) {
+      // A volta de uma transferência que ninguém atendeu: o áudio é da conversa que já existe.
+      if (calls.resume(connection)) return;
       const attached = calls.attach(connection);
       if (!attached) {
         // Ninguém esperava esta chamada (o processo reiniciou no meio, ou não é o Asterisk).
