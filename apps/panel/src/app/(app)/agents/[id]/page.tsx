@@ -5,11 +5,14 @@ import { ArrowLeft, Trash } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
+import enTests from "../../../../i18n/en/agent-tests";
 import en from "../../../../i18n/en/agents";
 import enCommon from "../../../../i18n/en/common";
+import esTests from "../../../../i18n/es/agent-tests";
 import es from "../../../../i18n/es/agents";
 import esCommon from "../../../../i18n/es/common";
 import { fill } from "../../../../i18n/locales";
+import ptBRTests from "../../../../i18n/pt-BR/agent-tests";
 import ptBR from "../../../../i18n/pt-BR/agents";
 import ptBRCommon from "../../../../i18n/pt-BR/common";
 import { useDict } from "../../../../i18n/provider";
@@ -102,6 +105,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const isNew = id === "new";
   const t = useDict(ptBR, en, es);
   const common = useDict(ptBRCommon, enCommon, esCommon);
+  const tests = useDict(ptBRTests, enTests, esTests);
   const router = useRouter();
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
@@ -254,6 +258,13 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         <h1 className="text-[1.75rem] leading-tight font-bold tracking-[-0.01em]">{isNew ? t.newTitle : draft.name || t.newTitle}</h1>
       </header>
       <ReadOnlyNotice />
+      {/* Os testes do agente moram na página deles (fatia 7c): aqui, só o link. */}
+      {isNew ? null : (
+        <Link href={`/agents/${id}/tests`} className="grid justify-self-start gap-0.5 rounded-md border border-line bg-surface px-4 py-3 hover:border-muted">
+          <span className="font-bold">{tests.link}</span>
+          <span className="text-[0.87rem] text-muted">{tests.linkLead}</span>
+        </Link>
+      )}
 
       <fieldset disabled={!canConfigure} className="grid gap-6">
         <Panel title={t.identity}>
