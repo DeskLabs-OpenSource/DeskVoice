@@ -5,9 +5,10 @@ pode redistribuí-las. Escrito para a fatia 1b da DESA-397; os MP3 entram na 1c.
 
 ## Os termos de uso, lidos em 23/11/2026
 
-**Os dois provedores deixam redistribuir. Os dois seguem no script.** Nenhum dos textos abaixo
-proíbe publicar o áudio gerado. A OpenAI passa ao cliente a posse do que sai do modelo; o Google
-diz que não reivindica a posse e deixa o uso por conta de quem gerou.
+**Nenhum dos dois proíbe publicar o áudio gerado. Os dois seguem no script.** A OpenAI passa ao
+cliente a posse do que sai do modelo. O Google diz que não reivindica a posse e que o uso fica por
+conta de quem gerou, mas o texto lido não dá permissão de redistribuir: só não proíbe. E os termos
+do Google remetem aos Google APIs Terms of Service, que não foram lidos (veja "Não medido").
 
 ### OpenAI (API: `openai-realtime`)
 
@@ -39,9 +40,15 @@ O endereço antigo (<https://ai.google.dev/gemini-api/terms>) redireciona para
 - "Use of Generated Content": "Google won't claim ownership over that content." e "You acknowledge
   that Google may generate the same or similar content for others and that we reserve all rights to
   do so."
-- A mesma seção: "you'll comply with applicable law in using generated content" e "You're
-  responsible for your use of generated content, and for the use of that content by anyone you
-  share it with."
+- A mesma seção, a frase inteira: "As required by the API Terms, you'll comply with applicable law
+  in using generated content, which may require the provision of attribution to your users when
+  returned as part of an API call." A obrigação vem dos "API Terms", e a atribuição pode ser exigida
+  quando o conteúdo volta numa chamada da API.
+- Os "API Terms" são os **Google APIs Terms of Service** (<https://developers.google.com/terms>), que
+  a página manda aceitar ("you must accept (1) the Google APIs Terms of Service (the "API Terms")").
+  **Não foram lidos.**
+- A mesma seção: "You're responsible for your use of generated content, and for the use of that
+  content by anyone you share it with."
 - "Disclaimers": "Use discretion before relying on, publishing, or otherwise using content provided
   by the Services." O texto fala em publicar, e não proíbe.
 - O que tem regra mais dura são os resultados da busca do Google ("Grounding with Google Search"),
@@ -80,6 +87,9 @@ O endereço antigo (<https://ai.google.dev/gemini-api/terms>) redireciona para
 ## Não medido
 
 - Os termos foram lidos em inglês, nas páginas públicas, em 23/11/2026. Nenhum advogado leu.
+- Os Google APIs Terms of Service (<https://developers.google.com/terms>), a que os termos do Gemini
+  remetem, não foram lidos: o que eles dizem sobre publicar e sobre atribuição está em aberto.
+- Se a atribuição que o Google diz poder exigir vale para uma amostra tocada no painel.
 - Se a linha "As vozes do provedor…" basta como o aviso de voz sintética que o guia da OpenAI pede.
 - Se a conta da OpenAI ou do Google do Rafael tem algum contrato próprio que mude o que está acima.
 - Nenhum áudio foi gerado ainda: o que está acima diz como ele será gerado, e não o que saiu.

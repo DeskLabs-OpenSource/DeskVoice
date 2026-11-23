@@ -9,7 +9,8 @@
  *
  * - **Teto.** `--teto-usd` é obrigatório e vai de 0 a 2. Antes de cada pedido, o pior caso dele é
  *   reservado (`Orcamento` da bancada); se não cabe, o script para ali, antes de gastar, e diz o que
- *   ficou de fora. A reserva vira o custo do `usage` ao fechar. Se o custo real passar do pior caso,
+ *   ficou de fora. A reserva vira o custo do `usage` ao fechar; se a resposta não terminou, nunca
+ *   menos que o pior caso, porque o `usage` pode ser parcial. Se o custo real passar do pior caso,
  *   o pior caso deixou de valer e nenhum pedido novo sai.
  * - **Chave.** Só `AMOSTRAS_OPENAI_API_KEY` e `AMOSTRAS_GEMINI_API_KEY`. Provedor sem chave sai como
  *   "não gerado: chave não entregue", sem abrir sessão. Toda linha impressa e todo texto gravado no
@@ -25,7 +26,7 @@ import { Orcamento, type Reserva } from "../bancada-de-voz/orcamento";
 import { semAsChaves } from "../bancada-de-voz/rodada";
 import { custoEmDolares } from "../bancada-de-voz/servicos/_motor-de-hoje";
 
-/** O maior teto que o script aceita (decisão da DESA-398). */
+/** O maior teto que o script aceita: a proposta da DESA-398, à espera do sim do Rafael. */
 export const TETO_MAXIMO_USD = 2;
 
 export const IDIOMAS = ["pt-BR", "en", "es"] as const;
@@ -104,7 +105,7 @@ export interface EntradaDoManifesto {
   falado: string;
   situacao: Situacao;
   custoUsd: number;
-  /** O provedor não devolveu `usage` a tempo: o custo é o pior caso reservado. */
+  /** O custo é o pior caso reservado: o provedor não devolveu `usage` a tempo, ou a resposta não terminou. */
   custoEstimado: boolean;
   erro?: string;
 }
@@ -294,8 +295,13 @@ export async function gerarAmostras(argv: readonly string[], pecas: Pecas): Prom
           continue;
         }
         const fala = await falar(motor, m.baseUrl ? { baseUrl: m.baseUrl } : {}, chaveDaApi, voz, idioma, pecas);
-        // Sem `usage`, o custo é o pior caso reservado: nunca menos do que pode ter custado.
-        const custoUsd = fala.comUso ? fala.custoUsd : piorCaso;
+        // Sem `usage`, o custo é o pior caso reservado: nunca menos do que pode ter custado. Quando a
+        // resposta não terminou (cortada, sem fala ou falhou), o `usage` que chegou pode ser parcial (o
+        // Gemini manda `usageMetadata` no meio da fala), e o provedor cobra o que gerou: o custo fechado
+        // nunca fica abaixo do pior caso.
+        const terminou = fala.situacao === "ok" || fala.situacao === "divergente";
+        const custoUsd = fala.comUso ? (terminou ? fala.custoUsd : Math.max(fala.custoUsd, piorCaso)) : piorCaso;
+        const custoEstimado = !fala.comUso || custoUsd !== fala.custoUsd;
         reserva.fechar(custoUsd);
         let arquivo = fala.audio.length > 0 ? nomeDoArquivo(m.id, voz, idioma, fala.situacao) : undefined;
         if (arquivo) {
@@ -321,11 +327,11 @@ export async function gerarAmostras(argv: readonly string[], pecas: Pecas): Prom
           falado: semAsChaves(fala.falado, pecas.ambiente),
           situacao: fala.situacao,
           custoUsd,
-          custoEstimado: !fala.comUso,
+          custoEstimado,
           ...(fala.erro ? { erro: semAsChaves(fala.erro, pecas.ambiente) } : {}),
         };
         manifesto.amostras = [...manifesto.amostras.filter((a) => chave(a) !== chave(entrada)), entrada];
-        print(`${item}: ${fala.situacao}, US$ ${custoUsd.toFixed(4)}${entrada.custoEstimado ? " (estimado: sem usage)" : ""}${fala.situacao === "ok" ? "" : ` — falou: "${entrada.falado}"`}${entrada.erro ? ` — erro: ${entrada.erro}` : ""}`);
+        print(`${item}: ${fala.situacao}, US$ ${custoUsd.toFixed(4)}${entrada.custoEstimado ? (fala.comUso ? " (estimado: resposta não terminou)" : " (estimado: sem usage)") : ""}${fala.situacao === "ok" ? "" : ` — falou: "${entrada.falado}"`}${entrada.erro ? ` — erro: ${entrada.erro}` : ""}`);
       }
     }
   }

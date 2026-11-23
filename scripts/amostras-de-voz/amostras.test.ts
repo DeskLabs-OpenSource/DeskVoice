@@ -20,7 +20,7 @@ const PRECO: EnginePricing = { centsPerMillionOutputTokens: 5000, centsPerMillio
 const PIOR = custoEmDolares(PRECO, PIOR_CASO_POR_PEDIDO);
 
 /** O que cada voz do motor falso faz quando recebe `say`. */
-type Comportamento = "fala" | "outra coisa" | "vaza a chave" | "fala a chave" | "sem usage" | "não para";
+type Comportamento = "fala" | "outra coisa" | "vaza a chave" | "fala a chave" | "sem usage" | "não para" | "uso parcial e não para" | "uso parcial e cala" | "uso parcial e cai";
 
 interface Registro {
   conexoes: string[];
@@ -54,6 +54,14 @@ function motorFalso(vozes: Record<string, Comportamento>, registro: Registro): V
           if (comportamento === "vaza a chave") {
             emitir("error", new Error(`401: chave ${apiKey} recusada`));
             emitir("closed", "socket_closed");
+            return;
+          }
+          if (comportamento.startsWith("uso parcial")) {
+            // Um `usageMetadata` no meio da fala (Gemini), menor que o pior caso, e a resposta não termina.
+            emitir("audio", Buffer.alloc(16000 * 2));
+            emitir("usage", { outputTokens: 100 });
+            if (comportamento === "uso parcial e não para") emitir("audio", Buffer.alloc((MAXIMO_DE_FALA_S + 1) * 16000));
+            if (comportamento === "uso parcial e cai") emitir("closed", "socket_closed");
             return;
           }
           if (comportamento === "não para") {
@@ -154,6 +162,20 @@ describe("o teto", () => {
     const lido = await manifesto();
     expect(lido.amostras.every((a) => a.custoUsd === PIOR && a.custoEstimado)).toBe(true);
     expect(texto).toContain(`Gasto total: US$ ${(3 * PIOR).toFixed(4)}`);
+  });
+
+  it("resposta que não terminou, com `usage` parcial: o custo fechado é o pior caso, não o parcial", async () => {
+    const parcial = custoEmDolares(PRECO, { outputTokens: 100 });
+    expect(parcial).toBeLessThan(PIOR);
+    const { manifesto, texto } = await rodar(["--teto-usd", "2"], { Ana: "uso parcial e não para", Bia: "uso parcial e cala", Caio: "uso parcial e cai" });
+    const lido = await manifesto();
+    expect(lido.amostras.map((a) => `${a.voz}:${a.situacao}`)).toEqual([
+      ...["Ana:cortado", "Ana:cortado", "Ana:cortado"],
+      ...["Bia:sem fala", "Bia:sem fala", "Bia:sem fala"],
+      ...["Caio:falhou", "Caio:falhou", "Caio:falhou"],
+    ]);
+    expect(lido.amostras.every((a) => a.custoUsd === PIOR && a.custoEstimado)).toBe(true);
+    expect(texto).toContain(`Gasto total: US$ ${(9 * PIOR).toFixed(4)}`);
   });
 });
 

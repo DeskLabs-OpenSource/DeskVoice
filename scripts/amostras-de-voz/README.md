@@ -1,8 +1,9 @@
 # O passo do Rafael: as amostras de voz e a medida do transcritor da OpenAI
 
 Dois comandos, no Mac, com a chave da sua conta. Nada aqui pede a chave a ninguém, e ela não vai
-para arquivo, tarefa nem comentário. Decisão do board na DESA-398: D1 = A (amostra estática
-versionada) e D2 = B (o transcritor da OpenAI como peça provisória, só se ficar dentro de 700 ms).
+para arquivo, tarefa nem comentário. O que está aqui segue a **proposta** da DESA-398, que espera o
+seu sim: D1 = A (amostra estática versionada), D2 = B (o transcritor da OpenAI como peça
+provisória, só se ficar dentro de 700 ms) e o teto de US$ 2 das amostras. Nada disso está decidido.
 
 Os dois scripts são manuais, fora do CI e da imagem, e não acrescentam dependência ao
 `package.json`.
@@ -40,7 +41,8 @@ pnpm exec tsx scripts/amostras-de-voz/gerar.ts --teto-usd 2
   (US$ 0,22 no OpenAI e US$ 0,04 no Gemini: até 20 s de fala, com folga de tokens). Se o gasto até
   ali mais essa reserva passar de US$ 2, o pedido não sai, nem os seguintes, e a lista do que ficou
   de fora sai no fim. Somadas, as reservas dos 120 pedidos dariam US$ 10,26, mas a reserva vira o
-  custo real (o `usage` do provedor) assim que o pedido fecha. A conta que espero é de uns US$ 0,60
+  custo real (o `usage` do provedor) assim que o pedido fecha. Se a resposta não terminou
+  (cortada, sem fala ou falhou), fica o pior caso, porque o `usage` pode ter vindo pela metade. A conta que espero é de uns US$ 0,60
   no total, sem medida (veja "Não medido").
 - No fim: o gasto total, o de cada provedor, e o trecho de `sample` de cada motor, pronto para a
   fatia 1c colar.
