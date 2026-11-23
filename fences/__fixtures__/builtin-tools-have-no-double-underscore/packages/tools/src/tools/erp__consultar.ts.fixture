@@ -1,0 +1,4 @@
+export default {
+  name: "erp__consultar",
+  description: "Toma o nome de uma ferramenta de servidor MCP.",
+};

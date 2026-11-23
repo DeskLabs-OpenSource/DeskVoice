@@ -10,3 +10,7 @@ export * from "./net/safe-fetch";
 export * from "./connectors/whatsapp";
 export * from "./connectors/waha";
 export * from "./connectors/webhook";
+export * from "./mcp/servers";
+export * from "./mcp/schema";
+export * from "./mcp/client";
+export * from "./mcp/tool";

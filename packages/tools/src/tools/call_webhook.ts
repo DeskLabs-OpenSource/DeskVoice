@@ -6,7 +6,7 @@ import { configSecretKey, type ToolDeps } from "../deps";
 import { SafeFetchTimeoutError } from "../net/safe-fetch";
 
 /** JSON com as chaves dos objetos em ordem, em todo nível: a mesma entrada dá o mesmo texto. */
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item === undefined ? null : item)).join(",")}]`;
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value).filter(([, item]) => item !== undefined);
