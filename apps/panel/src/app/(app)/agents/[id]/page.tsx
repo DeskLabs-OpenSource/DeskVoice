@@ -24,6 +24,7 @@ import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Pe
 import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
 import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
 import { AgentBrains } from "./brains";
+import { VoiceField } from "./voice-field";
 
 /** O agente como a API devolve, com quem lê a ligação dele (R4, fatia 5): nulo segue a organização. */
 type AgentWithBrain = Agent & { analysisBrain?: unknown };
@@ -317,17 +318,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 ))}
               </Select>
             </Field>
-            <Field label={t.voiceId} hint={t.voiceHint}>
-              <Select value={draft.voiceId} onChange={(event) => set("voiceId", event.target.value)}>
-                <option value="">{engine?.defaultVoice ? fill(t.voiceDefault, { voice: engine.defaultVoice }) : t.voiceDefaultNone}</option>
-                {engine?.voices.map((voice) => (
-                  <option key={voice.id} value={voice.id}>
-                    {[voice.id, voice.style, voice.recommended ? t.voiceRecommended : null].filter(Boolean).join(" · ")}
-                  </option>
-                ))}
-                {draft.voiceId && !engine?.voices.some((voice) => voice.id === draft.voiceId) ? <option value={draft.voiceId}>{fill(t.voiceCustom, { voice: draft.voiceId })}</option> : null}
-              </Select>
-            </Field>
+            <VoiceField t={t} engine={engine} voiceId={draft.voiceId} language={draft.language} onChange={(next) => set("voiceId", next)} />
             <Field label={t.language}>
               <TextInput mono value={draft.language} onChange={(event) => set("language", event.target.value)} required maxLength={20} />
             </Field>
