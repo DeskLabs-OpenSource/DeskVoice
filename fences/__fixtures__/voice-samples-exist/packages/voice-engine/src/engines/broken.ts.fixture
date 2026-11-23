@@ -1,0 +1,13 @@
+const samplePath = "voice-samples/broken/Ana.es.mp3";
+const SAMPLES = {};
+export const voices = [
+  {
+    id: "Ana",
+    sample: {
+      "pt-BR": "voice-samples/broken/Ana.pt-BR.mp3",
+      en: "voice-samples/broken/Ana.en.mp3",
+    },
+  },
+  { id: "Duda", sample: { "pt-BR": "../secret.mp3", es: samplePath } },
+  { id: "Edu", sample: SAMPLES },
+];
