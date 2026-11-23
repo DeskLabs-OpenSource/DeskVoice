@@ -18,7 +18,7 @@ import openaiRealtime from "../../../packages/voice-engine/src/engines/openai-re
 import { startFakeProvider } from "../../../packages/voice-engine/src/testing/fake-provider";
 import { AGENT_TEST_RUNS_KEPT, AGENT_TEST_STALE_MS } from "./agent-test";
 import { startVoiceServer } from "./server";
-import { engineKeySetting } from "./session-config";
+import { DEFAULT_RECORDING_NOTICE, engineKeySetting } from "./session-config";
 import { createAgent, createOrganization, fakeAri, fakeClock, testSchedule } from "./testing/db";
 import { waitFor } from "./testing/helpers";
 
@@ -146,6 +146,18 @@ async function acceptSession(): Promise<Message> {
   return update;
 }
 
+/**
+ * A abertura: como na ligação recebida, o agente fala primeiro o aviso de gravação (aqui o padrão, sem
+ * saudação no agente). O pedido traz o aviso, e a resposta conta no extrato como qualquer outra.
+ */
+async function answerOpening(spent: { input: number; output: number }): Promise<void> {
+  const opening = await fake.waitFor(ofType("response.create"));
+  expect(JSON.stringify(opening)).toContain(DEFAULT_RECORDING_NOTICE);
+  fake.send({ type: "response.created" });
+  fake.send({ type: "response.output_text.done", text: DEFAULT_RECORDING_NOTICE });
+  fake.send({ type: "response.done", response: { output: [{ type: "message" }], usage: usage(spent) } });
+}
+
 const usage = (text: { input: number; cached?: number; output: number }) => ({
   input_tokens: text.input + (text.cached ?? 0),
   output_tokens: text.output,
@@ -168,6 +180,7 @@ describe("teste do agente no OpenAI Realtime em texto, pela rota interna", { tim
       expect(session).toMatchObject({ type: "realtime", output_modalities: ["text"], instructions: expect.stringMatching(/^Você é a Lia/) });
       expect(session).not.toHaveProperty("audio");
       expect((session.tools as { name: string }[]).map((tool) => tool.name)).toEqual(["create_task", "end_call"]);
+      await answerOpening({ input: 200, output: 30 });
 
       // Turno 1: o texto de quem liga, a ferramenta pedida, e a resposta depois do resultado.
       const first = await fake.waitFor(userText);
@@ -200,9 +213,11 @@ describe("teste do agente no OpenAI Realtime em texto, pela rota interna", { tim
         ["Até logo!", [], true],
       ]);
 
-      // Três `response.done`, três linhas: sem ligação, com a rodada e o agente, no preço de texto.
+      // Quatro `response.done` (a abertura e três respostas), quatro linhas: sem ligação, com a rodada e o agente, no preço de texto.
       const lines = await ledgerOf(lia.organizationId);
       expect(lines).toEqual([
+        // A abertura: 200 × US$ 4/M + 30 × US$ 24/M = 0,152 centavo.
+        { source: "test", call_id: null, test_run_id: runId, agent_id: lia.agentId, engine: "openai-realtime", input_tokens: 200, output_tokens: 30, cost_microcents: "152000" },
         // 3 000 × US$ 4/M + 40 × US$ 24/M = 1,296 centavo.
         { source: "test", call_id: null, test_run_id: runId, agent_id: lia.agentId, engine: "openai-realtime", input_tokens: 3000, output_tokens: 40, cost_microcents: "1296000" },
         // 100 × 4 + 3 000 × 0,40 (cache) + 20 × 24, por milhão: 0,208 centavo.
@@ -223,6 +238,8 @@ describe("teste do agente no OpenAI Realtime em texto, pela rota interna", { tim
       const started = await voice.run({ organizationId: lia.organizationId, testId: lia.testId });
       expect(started.status).toBe(200);
       await acceptSession();
+      // A abertura gasta 0,04 centavo, abaixo do teto de 1: a rodada segue para o turno 1.
+      await answerOpening({ input: 100, output: 0 });
       await fake.waitFor(userText);
       await fake.waitFor(ofType("response.create"));
       fake.send({ type: "response.created" });
@@ -238,7 +255,10 @@ describe("teste do agente no OpenAI Realtime em texto, pela rota interna", { tim
       expect(row?.turns.map((turn) => turn.user)).toEqual([TURNS[0]?.user]);
       // A fala do turno 2 nunca chegou ao provedor.
       expect(fake.hasUnread(userText)).toBe(false);
-      expect(await ledgerOf(lia.organizationId)).toMatchObject([{ source: "test", cost_microcents: "2000000" }]);
+      expect(await ledgerOf(lia.organizationId)).toMatchObject([
+        { source: "test", cost_microcents: "40000" },
+        { source: "test", cost_microcents: "2000000" },
+      ]);
     } finally {
       await voice.close();
     }

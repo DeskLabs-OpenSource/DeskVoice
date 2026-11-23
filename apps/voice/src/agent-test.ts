@@ -22,10 +22,10 @@ import {
   type ToolExpectation,
   type TurnVerdict,
 } from "@deskvoice/core";
-import type { Tool } from "@deskvoice/tools";
+import { handoffTargetsOf, type Tool } from "@deskvoice/tools";
 import { estimateCostMicrocents, MICROCENTS_PER_CENT, type Usage, type VoiceEngine, type VoiceSession, type VoiceSessionConfig } from "@deskvoice/voice-engine";
 import { messageOf, silentLogger, type Logger } from "./log";
-import { enabledToolsFor, engineKeySetting, sessionConfig, type SessionAgent } from "./session-config";
+import { composeInstructions, enabledToolsFor, engineKeySetting, inboundOpening, RECORDING_NOTICE_SETTING, recordingNoticeOf, sessionConfig, type SessionAgent } from "./session-config";
 import { realSchedule, type Schedule } from "./transport";
 
 /** Quanto um turno espera a resposta do agente terminar. Estourou: `error`, `turn_timeout`. */
@@ -152,11 +152,15 @@ export async function startAgentTest(
       }
     }
 
-    // A mesma montagem da ligação (`session-config.ts`), em texto. A passagem entre agentes não entra
-    // nesta fatia: o teste não troca de agente, e sem destinos a ferramenta nem aparece.
-    const instructions = overrides.instructions ?? row.instructions;
-    const enabled = enabledToolsFor({ installed: deps.tools, names: row.agent_tools, targets: [], canTransfer: true, returned: false, log });
-    const config = sessionConfig(row, instructions, row.greeting ?? undefined, enabled, "text");
+    // A mesma montagem da ligação recebida (`session-config.ts`), em texto: as mesmas instruções, com
+    // os destinos da passagem; as mesmas ferramentas, `transfer_to_agent` inclusive; e a mesma abertura,
+    // com o aviso de gravação na frente da saudação. A memória do número não entra: teste não tem número.
+    // O teste não troca de agente: o pedido de passagem é respondido pelo `result` escrito, como os outros.
+    const { targets } = await handoffTargetsOf(q, row.agent_id);
+    const instructions = composeInstructions(overrides.instructions ?? row.instructions, targets);
+    const enabled = enabledToolsFor({ installed: deps.tools, names: row.agent_tools, targets, canTransfer: true, returned: false, log });
+    const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);
+    const config = sessionConfig(row, instructions, inboundOpening(recordingNoticeOf(notice?.value), row.greeting), enabled, "text");
     const hash = configHash({ instructions, tools: config.tools, engine: engine.id, model: null, language: row.language });
 
     const run = await q.one<{ id: string }>(

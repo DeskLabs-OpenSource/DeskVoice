@@ -5,12 +5,88 @@
 //
 // Este arquivo não roda ferramenta e não importa quem roda (`runTool`): o executor do teste o
 // importa, e a cerca `fences/agent-test-runs-no-tool.test.ts` confere o executor.
+import { rememberedBlock, type RememberedItem } from "@deskvoice/core";
 import { TRANSFER_TO_AGENT, toSpec, type HandoffTarget, type Tool } from "@deskvoice/tools";
-import type { VoiceSessionConfig } from "@deskvoice/voice-engine";
+import { SIMULATED_PREFIX, type VoiceSessionConfig } from "@deskvoice/voice-engine";
 import type { Logger } from "./log";
 
 /** A chave do motor na tabela `settings` da organização. */
 export const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
+
+/** O aviso de gravação que o operador escreveu, na tabela `settings` da organização. */
+export const RECORDING_NOTICE_SETTING = "recording_notice.text";
+/** O aviso que vale quando o operador não escreveu o dele. Toda chamada começa por um aviso. */
+export const DEFAULT_RECORDING_NOTICE = "Esta ligação é atendida por uma assistente virtual e a conversa fica registrada.";
+
+/** O aviso que vale, a partir do valor gravado: sem texto, ou com texto em branco, vale o padrão. */
+export const recordingNoticeOf = (stored: unknown): string => (typeof stored === "string" && stored.trim() !== "" ? stored.trim() : DEFAULT_RECORDING_NOTICE);
+
+/**
+ * A abertura da ligação recebida: o aviso antes de tudo, e depois a saudação do agente. Os motores
+ * falam a abertura ao conectar. O teste do agente abre do mesmo jeito.
+ */
+export const inboundOpening = (notice: string, greeting: string | null | undefined): string => [notice, greeting?.trim()].filter(Boolean).join(" ");
+
+/** O que entra nas instruções do agente que recebe a ligação: quem passou, o motivo e o resumo. */
+export interface HandoffNote {
+  fromName: string;
+  reason: string;
+  summary: string;
+}
+
+// Nome e papel do agente vêm da configuração, e não de quem ligou; ainda assim ficam numa linha só,
+// para nenhum nome mal digitado abrir um parágrafo nas instruções.
+export const oneLine = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").trim();
+
+/**
+ * O motivo e o resumo da passagem como itens do bloco lembrado. A mesma lista vai para
+ * `composeInstructions` e para o corte da memória na passagem: o que é medido é, byte a byte, o que vai.
+ */
+export function handoffItems(handoff: Pick<HandoffNote, "reason" | "summary">): RememberedItem[] {
+  return [
+    { label: "motivo", text: handoff.reason },
+    { label: "resumo", text: handoff.summary },
+  ];
+}
+
+/**
+ * As instruções que a sessão entrega ao motor. Sem destino e sem passagem, são as do agente, byte a
+ * byte. Com destino, ganham uma linha por agente para quem ele pode passar a ligação, com nome e papel.
+ * Com passagem, ganham quem passou e, no bloco delimitado e escapado (`rememberedBlock`, registro
+ * 0020), o motivo e o resumo: texto do modelo a partir da fala de quem ligou, que é dado e nunca
+ * instrução. Nada do resumo muda a configuração: os destinos e as ferramentas vêm só do banco.
+ *
+ * Com a memória do número (`memory`, fatia 6: as notas e os títulos de pendência que
+ * `loadCallerMemory` montou), os itens entram no mesmo bloco, depois do motivo e do resumo quando há
+ * passagem: as instruções nunca têm mais de um bloco. Sem item, nada muda.
+ *
+ * O roteiro do motor simulado (`simulated:` seguido de JSON) passa intacto: ninguém o lê como
+ * instrução, e qualquer texto colado nele quebraria o `JSON.parse` do motor. O teste lê as instruções
+ * montadas com um motor que as guarda.
+ */
+export function composeInstructions(base: string, targets: readonly HandoffTarget[], handoff?: HandoffNote, memory: readonly RememberedItem[] = []): string {
+  if (base.startsWith(SIMULATED_PREFIX)) return base;
+  const parts = [base];
+  if (targets.length > 0) {
+    parts.push(
+      [
+        "Agentes para quem você pode passar a ligação com transfer_to_agent, pelo nome exato:",
+        ...targets.map((target) => `- ${oneLine(target.name)}${target.roleLabel?.trim() ? ` (${oneLine(target.roleLabel)})` : ""}`),
+      ].join("\n"),
+    );
+  }
+  if (handoff) {
+    parts.push(
+      [
+        `Esta ligação veio do agente ${oneLine(handoff.fromName)}, que já saiu da linha. Quem ligou já ouviu o aviso de gravação e acabou de ouvir você dizer que continua o atendimento. Continue a partir do motivo e do resumo da passagem, sem pedir de novo o que já foi dito.`,
+        rememberedBlock([...handoffItems(handoff), ...memory]),
+      ].join("\n"),
+    );
+  } else if (memory.length > 0) {
+    parts.push(rememberedBlock(memory));
+  }
+  return parts.join("\n\n");
+}
 
 /** O que a configuração da sessão lê do agente. */
 export interface SessionAgent {
