@@ -11,6 +11,24 @@ export interface SafeFetchOptions {
   lookup?: HostLookup;
   timeoutMs?: number;
   maxBytes?: number;
+  /**
+   * `"follow"` (o padrão): segue até três saltos, cada um conferido pela guarda. `"error"`: toda
+   * resposta 3xx com `Location`, da mesma origem ou de outra, encerra com `SafeFetchRedirectError`, e
+   * nenhum segundo pedido sai. O endereço chamado tem de ser o final.
+   */
+  redirect?: "follow" | "error";
+  /**
+   * Conferida a cada pedaço lido, com o corpo lido até ali. `true` encerra a leitura sem esperar o
+   * destino fechar a resposta, e o que foi lido volta como corpo, sem corte. O teto de bytes e o
+   * prazo valem antes dela: o pedaço que passa do teto vira corte, mesmo que ela dissesse `true`.
+   * Ausente: lê até o fim, como sempre.
+   */
+  stopWhen?: (bodySoFar: string) => boolean;
+  /**
+   * Os cabeçalhos da resposta que voltam em `SafeResponse.headers` (nomes em minúsculas). Ausente:
+   * a resposta não traz `headers`, como sempre.
+   */
+  responseHeaders?: readonly string[];
 }
 
 export interface SafeRequest {
@@ -25,6 +43,8 @@ export interface SafeResponse {
   body: string;
   /** A resposta passou do limite e foi cortada. */
   truncated: boolean;
+  /** Só os pedidos em `SafeFetchOptions.responseHeaders`, pelo nome em minúsculas; o ausente não entra. */
+  headers?: Record<string, string>;
 }
 
 /** O destino não é um endereço público da internet. */
@@ -39,6 +59,18 @@ export class UnsafeDestinationError extends Error {
  */
 export class SafeFetchTimeoutError extends Error {
   override name = "SafeFetchTimeoutError";
+}
+
+/** O destino respondeu com redirecionamento a um pedido feito com `redirect: "error"`. */
+export class SafeFetchRedirectError extends Error {
+  override name = "SafeFetchRedirectError";
+  constructor(
+    readonly status: number,
+    /** O `Location` recebido, como veio. */
+    readonly location: string,
+  ) {
+    super(`Destination answered ${status} with a redirect, and redirects are not followed for this request`);
+  }
 }
 
 const TIMEOUT_MS = 10_000;
@@ -64,20 +96,38 @@ async function assertPublicDestination(target: string, lookup: HostLookup): Prom
   if (internal !== undefined) throw new UnsafeDestinationError(`Host ${host} points to a non-public address (${internal})`);
 }
 
-async function readLimited(response: Response, maxBytes: number): Promise<{ body: string; truncated: boolean }> {
+async function readLimited(response: Response, maxBytes: number, stopWhen?: (bodySoFar: string) => boolean): Promise<{ body: string; truncated: boolean }> {
   if (!response.body) return { body: "", truncated: false };
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
+  const decoder = new TextDecoder();
+  let text = "";
   let size = 0;
   while (size <= maxBytes) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);
     size += value.byteLength;
+    if (stopWhen === undefined || size > maxBytes) continue;
+    text += decoder.decode(value, { stream: true });
+    if (stopWhen(text)) {
+      await reader.cancel();
+      return { body: Buffer.concat(chunks).toString("utf8"), truncated: false };
+    }
   }
   const truncated = size > maxBytes;
   if (truncated) await reader.cancel();
   return { body: Buffer.concat(chunks).subarray(0, maxBytes).toString("utf8"), truncated };
+}
+
+function pickHeaders(response: Response, names: readonly string[] | undefined): { headers?: Record<string, string> } {
+  if (names === undefined) return {};
+  const headers: Record<string, string> = {};
+  for (const name of names) {
+    const value = response.headers.get(name);
+    if (value !== null) headers[name.toLowerCase()] = value;
+  }
+  return { headers };
 }
 
 /**
@@ -154,9 +204,10 @@ async function followWithin(target: string, request: SafeRequest, doFetch: Fetch
     const response = await doFetch(url, { method, headers, body, redirect: "manual", signal });
     const location = response.headers.get("location");
     if (response.status < 300 || response.status >= 400 || location === null) {
-      return { status: response.status, ok: response.ok, ...(await readLimited(response, options.maxBytes ?? MAX_BYTES)) };
+      return { status: response.status, ok: response.ok, ...(await readLimited(response, options.maxBytes ?? MAX_BYTES, options.stopWhen)), ...pickHeaders(response, options.responseHeaders) };
     }
     await response.body?.cancel();
+    if (options.redirect === "error") throw new SafeFetchRedirectError(response.status, location);
     if (hop === MAX_REDIRECTS) throw new Error(`Too many redirects (more than ${MAX_REDIRECTS})`);
     const next = new URL(location, url);
     // Credencial não acompanha o redirecionamento para outra origem.
