@@ -802,3 +802,247 @@ describe("motor pipeline (fatia 3b-2): o pior caso antes de cada pedido ao cére
     expect(KEY_CHECK_RESULTS).toHaveLength(10);
   });
 });
+
+// ---- 3c-1: a latência por turno e a nota da abertura, pelo relógio de quem abre ----
+
+/** O relógio falso da sessão (convenção 10): só anda quando o teste manda. */
+function manualClock(start = Date.UTC(2026, 10, 24, 12, 0, 0)) {
+  let now = start;
+  return { clock: { now: () => new Date(now) }, advance: (ms: number) => void (now += ms), at: () => now - start };
+}
+
+/**
+ * As peças com atrasos conhecidos: a voz anda `voiceMs` no relógio antes do primeiro áudio de cada
+ * fala armada, e a transcrição é manual (o teste emite o trecho, com ou sem `endMs`).
+ */
+function timedPieces(clock: ReturnType<typeof manualClock>, options: { voiceMs: number }) {
+  const armed = { voice: false };
+  const voice = countedVoice(
+    createSimulatedSynthesizer((task) =>
+      setImmediate(() => {
+        if (armed.voice) {
+          armed.voice = false;
+          clock.advance(options.voiceMs);
+        }
+        task();
+      }),
+    ),
+  );
+  const sessions: SimulatedTranscription[] = [];
+  const transcriber = createSimulatedTranscriber({ script: [], onSession: (session) => sessions.push(session) });
+  const heard = (piece: { text: string; final: boolean; endMs?: number }): void => {
+    const session = sessions[0];
+    if (!session) throw new Error("a transcrição não abriu");
+    (session as unknown as { emit(event: string, value: unknown): void }).emit("piece", { alternatives: [], ...piece });
+  };
+  return { voice, transcriber, heard, armVoice: () => void (armed.voice = true) };
+}
+
+function latencies(session: VoiceSession) {
+  const seen: Array<Record<string, unknown>> = [];
+  session.on("pipelineTurnLatency", (latency) => seen.push({ ...latency }));
+  return seen;
+}
+
+describe("motor pipeline (fatia 3c-1): a latência por turno, no relógio da sessão", () => {
+  it("os números exatos com atrasos conhecidos: 300 ms até o trecho final, 500 ms do cérebro, 200 ms da voz", async () => {
+    brain = await startFakeBrain();
+    const clock = manualClock();
+    const pieces = timedPieces(clock, { voiceMs: 200 });
+    const thinking = gate();
+    // Dois pedaços de texto, dois pedaços de áudio: só o primeiro fecha o turno.
+    brain.reply([thinking.hold, text("Bom dia, "), text("pois não."), usage(10, 4)]);
+    const { session, log } = await open(piecesOf(pieces.voice.synthesizer, [], { transcriber: { piece: pieces.transcriber, apiKey: "" } }), { clock: clock.clock });
+    const seen = latencies(session);
+    // O zero do fluxo é o primeiro áudio mandado à transcrição.
+    speak(session, 20);
+    // A fala acabou aos 100 ms do fluxo; o trecho final chega 300 ms depois.
+    clock.advance(400);
+    pieces.heard({ text: "Oi, bom dia.", final: true, endMs: 100 });
+    await until(() => brain?.requests.length === 1, "o pedido ao cérebro");
+    clock.advance(500);
+    pieces.armVoice();
+    thinking.release();
+    await until(() => seen.length === 1, "a latência do turno");
+    expect(seen).toEqual([{ endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 1000, endFromArrival: false, tool: false }]);
+    // Sai uma vez por turno: o resto do áudio da mesma resposta não emite de novo.
+    await until(() => log.events.includes("agent: Bom dia, pois não."), "o fim da resposta");
+    await until(() => log.audio.length === 2, "os dois pedaços de áudio da resposta");
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(seen).toHaveLength(1);
+    await session.close();
+  });
+
+  it("sem `endMs`, o fim da fala é a chegada do trecho: endpointMs 0 e endFromArrival; com `endMs`, nunca a marca", async () => {
+    brain = await startFakeBrain();
+    const clock = manualClock();
+    const pieces = timedPieces(clock, { voiceMs: 200 });
+    brain.reply([text("Pois não."), usage(10, 2)], [text("Claro."), usage(10, 2)]);
+    const { session } = await open(piecesOf(pieces.voice.synthesizer, [], { transcriber: { piece: pieces.transcriber, apiKey: "" } }), { clock: clock.clock });
+    const seen = latencies(session);
+    speak(session, 20);
+    clock.advance(400);
+    pieces.armVoice();
+    pieces.heard({ text: "Oi.", final: true });
+    await until(() => seen.length === 1, "a latência do turno 1");
+    expect(seen[0]).toEqual({ endpointMs: 0, brainFirstTextMs: 0, voiceFirstAudioMs: 200, totalMs: 200, endFromArrival: true, tool: false });
+    clock.advance(1000);
+    pieces.armVoice();
+    pieces.heard({ text: "Quero marcar.", final: true, endMs: 1300 });
+    await until(() => seen.length === 2, "a latência do turno 2");
+    // O fluxo começou no zero; o relógio está em 1 600 ms (400 + 200 da voz + 1 000): 1 300 ms do fluxo é 300 ms antes da chegada.
+    expect(seen[1]).toEqual({ endpointMs: 300, brainFirstTextMs: 0, voiceFirstAudioMs: 200, totalMs: 500, endFromArrival: false, tool: false });
+    await session.close();
+  });
+
+  it("o `endMs` que cairia depois da chegada (relógio do serviço adiantado) não dá número negativo: vale a chegada", async () => {
+    brain = await startFakeBrain();
+    const clock = manualClock();
+    const pieces = timedPieces(clock, { voiceMs: 0 });
+    brain.reply([text("Pois não."), usage(10, 2)]);
+    const { session } = await open(piecesOf(pieces.voice.synthesizer, [], { transcriber: { piece: pieces.transcriber, apiKey: "" } }), { clock: clock.clock });
+    const seen = latencies(session);
+    speak(session, 20);
+    clock.advance(100);
+    pieces.heard({ text: "Oi.", final: true, endMs: 900 });
+    await until(() => seen.length === 1, "a latência do turno");
+    expect(seen[0]).toMatchObject({ endpointMs: 0, endFromArrival: true, totalMs: 0 });
+    await session.close();
+  });
+
+  it("o turno com ferramenta sai uma vez, com o tempo até o primeiro áudio da resposta, e `tool: true`", async () => {
+    brain = await startFakeBrain();
+    const clock = manualClock();
+    const pieces = timedPieces(clock, { voiceMs: 200 });
+    const thinking = gate();
+    brain.reply([tool("c1", "agendar", '{"dia":"terça"}'), usage(40, 5)], [thinking.hold, text("Marquei para terça."), usage(60, 7)]);
+    const { session, log } = await open(piecesOf(pieces.voice.synthesizer, [], { transcriber: { piece: pieces.transcriber, apiKey: "" } }), { clock: clock.clock });
+    const seen = latencies(session);
+    speak(session, 20);
+    clock.advance(400);
+    pieces.heard({ text: "Quero marcar para terça.", final: true, endMs: 100 });
+    await until(() => log.toolCalls.length === 1, "a ferramenta");
+    // A ferramenta leva 1 000 ms; o segundo pedido, 500 até o primeiro texto; a voz, 200.
+    clock.advance(1000);
+    session.sendToolResult("c1", { ok: true });
+    await until(() => brain?.requests.length === 2, "o pedido depois da ferramenta");
+    clock.advance(500);
+    pieces.armVoice();
+    thinking.release();
+    await until(() => seen.length === 1, "a latência do turno");
+    expect(seen).toEqual([{ endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 2000, endFromArrival: false, tool: true }]);
+    await until(() => log.events.includes("agent: Marquei para terça."), "o fim da resposta");
+    expect(seen).toHaveLength(1);
+    await session.close();
+  });
+
+  it("o turno que não toca a resposta não emite: o cérebro que falhou (o pedido de repetir não é resposta), o teto, a resposta vazia e a ligação que acabou", async () => {
+    brain = await startFakeBrain();
+    const clock = manualClock();
+    const pieces = timedPieces(clock, { voiceMs: 200 });
+    const never = gate();
+    brain.reply({ status: 500, body: "{}" }, [usage(10, 0)], [never.hold, text("Isto não chega a tocar.")]);
+    const { session, log } = await open(piecesOf(pieces.voice.synthesizer, [], { transcriber: { piece: pieces.transcriber, apiKey: "" } }), { clock: clock.clock });
+    const seen = latencies(session);
+    speak(session, 20);
+    clock.advance(400);
+    pieces.heard({ text: "Oi.", final: true, endMs: 100 });
+    await until(() => log.events.includes(`agent: ${PIPELINE_BRAIN_RETRY_SPEECH}`), "o pedido de repetir");
+    await until(() => log.audioBytes() === toneFor([...PIPELINE_BRAIN_RETRY_SPEECH].length).length, "o áudio do pedido de repetir");
+    // A resposta vazia: o pedido termina sem texto, e nada toca.
+    pieces.heard({ text: "Oi?", final: true, endMs: 200 });
+    await until(() => log.pieceUsage.filter((line) => line.piece === "brain").length === 2, "a resposta vazia");
+    // A ligação que acaba com o cérebro no meio.
+    pieces.heard({ text: "Alô?", final: true, endMs: 300 });
+    await until(() => brain?.requests.length === 3, "o terceiro pedido");
+    await session.close();
+    never.release();
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(seen).toEqual([]);
+  });
+
+  it("o teto que barra o pedido: nenhum número, e a despedida pronta não é resposta", async () => {
+    brain = await startFakeBrain();
+    const clock = manualClock();
+    const pieces = timedPieces(clock, { voiceMs: 200 });
+    const holder: { session?: VoiceSession } = {};
+    const opened = await open(piecesOf(pieces.voice.synthesizer, [], { transcriber: { piece: pieces.transcriber, apiKey: "" } }), {
+      clock: clock.clock,
+      fixedSpeech: ["Tchau."],
+      ceiling: { remainingMicrocents: () => 0, reached: () => holder.session?.say("Tchau.") },
+    });
+    holder.session = opened.session;
+    const seen = latencies(opened.session);
+    speak(opened.session, 20);
+    clock.advance(400);
+    pieces.heard({ text: "Oi.", final: true, endMs: 100 });
+    await until(() => opened.log.audioBytes() === toneFor([..."Tchau."].length).length, "a despedida");
+    expect(brain.requests).toHaveLength(0);
+    expect(seen).toEqual([]);
+    await opened.session.close();
+  });
+
+  it("sem relógio, o motor não mede: nenhum evento de latência e nenhuma nota da abertura", async () => {
+    brain = await startFakeBrain();
+    brain.reply([text("Oi."), usage(10, 2)]);
+    const { session, log } = await open(piecesOf(countedVoice().synthesizer, [{ afterAudioMs: 20, text: "Oi.", final: true }]));
+    const seen = latencies(session);
+    speak(session, 20);
+    await until(() => log.events.includes("agent: Oi."), "a resposta");
+    await until(() => log.audioBytes() > 0, "o áudio");
+    expect(seen).toEqual([]);
+    expect(session.opening).toBeUndefined();
+    await session.close();
+  });
+});
+
+describe("motor pipeline (fatia 3c-1): a nota da abertura", () => {
+  it("sem cache, a síntese prova a chave da voz (sem conferência à parte); com cache, a conferência roda, e o tempo dela aparece", async () => {
+    brain = await startFakeBrain();
+    const clock = manualClock();
+    const armed = { voice: false };
+    const base = createSimulatedSynthesizer((task) =>
+      setImmediate(() => {
+        if (armed.voice) {
+          armed.voice = false;
+          clock.advance(100);
+        }
+        task();
+      }),
+    );
+    const voice = countedVoice({
+      ...base,
+      async checkKey(apiKey, options) {
+        await Promise.resolve();
+        clock.advance(70);
+        return base.checkKey(apiKey, options);
+      },
+    });
+    // A transcrição abre quando o teste solta, depois de o relógio andar.
+    let release = (): void => undefined;
+    const ear = createSimulatedTranscriber({ script: [] });
+    const transcriber = { ...ear, connect: async (...args: Parameters<typeof ear.connect>) => (await new Promise<void>((resolve) => (release = resolve)), ear.connect(...args)) };
+    const cache = new FixedSpeechCache();
+    const engine = createPipelineEngine({ fetch: brain.fetch, fixedSpeechCache: cache });
+    const connect = async (transcriberAfterMs: number) => {
+      const connecting = engine.connect(config, "", { pieces: piecesOf(voice.synthesizer, [], { transcriber: { piece: transcriber, apiKey: "" } }), organizationId: ORG, fixedSpeech: ["Tchau."], clock: clock.clock });
+      // As falas prontas acabam primeiro; a transcrição abre `transcriberAfterMs` depois do começo.
+      for (let turn = 0; turn < 30; turn++) await new Promise((resolve) => setImmediate(resolve));
+      clock.advance(transcriberAfterMs - clock.at());
+      release();
+      const session = await connecting;
+      await session.close();
+      return session.opening;
+    };
+
+    armed.voice = true;
+    const fresh = await connect(150);
+    expect(fresh).toEqual({ transcriberMs: 150, fixedSpeechMs: 100, keyCheckMs: null, fixedSpeech: 2, fromCache: 0, totalMs: 150 });
+    expect(voice.keyChecks()).toBe(0);
+
+    const before = clock.at();
+    const cached = await connect(before + 100);
+    expect(cached).toEqual({ transcriberMs: 100, fixedSpeechMs: 70, keyCheckMs: 70, fixedSpeech: 2, fromCache: 2, totalMs: 100 });
+    expect(voice.keyChecks()).toBe(1);
+  });
+});

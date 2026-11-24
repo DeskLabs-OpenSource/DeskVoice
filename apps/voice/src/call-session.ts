@@ -71,6 +71,7 @@ import {
   type KeyCheckResult,
   type PieceUsageLine,
   type PipelineEngine,
+  type PipelineOpening,
   type PipelinePieceKind,
   type PipelinePieces,
   type SpeechSynthesizer,
@@ -1295,7 +1296,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * (a chave que falta é `rejected`, como na peça de transcrição); ausente, a peça não está instalada.
    */
   type PieceRefusal = { kind: PipelinePieceKind; id: string; detail?: PieceFailure; unpricedModel?: string };
-  type Opened = { engine: VoiceEngine; voice: VoiceSession } | { engine?: VoiceEngine; reason: EngineRefusal; problem: string; piece?: PieceRefusal };
+  /** `opening` é a nota da abertura do pipeline (fatia 3c-1): quanto cada etapa levou. Só no pipeline. */
+  type Opened = { engine: VoiceEngine; voice: VoiceSession; opening?: PipelineOpening } | { engine?: VoiceEngine; reason: EngineRefusal; problem: string; piece?: PieceRefusal };
 
   /** O trecho deste agente abre o pipeline: a coluna preenchida, e a chamada não é a simulada (que troca o motor). */
   const usesPipeline = (row: AgentRow): boolean => overrides?.engineId === undefined && row.pipeline !== null && row.pipeline !== undefined;
@@ -1383,7 +1385,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const endedProblem = "the call ended before the engine connected";
     if (ending) return refuse("engine_not_configured", endedProblem);
     try {
-      return await awaitOpening(engine, engine.connect(config, "", { pieces, organizationId, fixedSpeech: [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer], ceiling: pipelineCeiling }));
+      // O relógio da sessão vai ao motor: a latência por turno e a nota da abertura saem dele (convenção 10).
+      const connecting = engine.connect(config, "", { pieces, organizationId, fixedSpeech: [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer], ceiling: pipelineCeiling, clock });
+      const opened = await awaitOpening(engine, connecting);
+      if (!("voice" in opened)) return opened;
+      const { opening } = await connecting;
+      return { ...opened, ...(opening && { opening }) };
     } catch (error) {
       if (!(error instanceof PipelineOpenError)) throw error;
       // O texto do provedor fica no log; a linha do tempo e o aviso levam só a peça e o código.
@@ -1612,6 +1619,20 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // O custo de cada peça do pipeline, no trecho dela. A linha que chega depois do `closed` (o cérebro
     // cancelado no fim, a sessão substituída numa passagem) também entra no extrato.
     session.on("pieceUsage", (line) => void chargePiece(row.id, line).catch(logFailure("could not record pipeline piece usage")));
+    // A latência de um turno do pipeline (3.5, fatia 3c-1): só os números, um evento por turno respondido.
+    session.on("pipelineTurnLatency", (turn) => {
+      if (!current() || ending) return;
+      const payload = {
+        endpointMs: turn.endpointMs,
+        brainFirstTextMs: turn.brainFirstTextMs,
+        voiceFirstAudioMs: turn.voiceFirstAudioMs,
+        totalMs: turn.totalMs,
+        endFromArrival: turn.endFromArrival,
+        tool: turn.tool,
+        ...(handoffs > 0 && { agentId: row.id }),
+      };
+      void event("pipeline_turn_latency", payload).catch(logFailure("could not record a pipeline turn latency"));
+    });
     session.on("closed", (reason) => {
       // Durante a transferência o motor já foi fechado de propósito: o que ele ainda disser não encerra a ligação.
       if (reason === "client" || !current() || transferring) return;
@@ -1997,7 +2018,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // A URA já atendeu e gravou `answered_at` (`ivr-session.ts`): a duração conta desde ali, com o menu,
       // e não do começo da conversa. Sem URA, `answered_at` está vazio e fica com a hora de agora.
       q.exec("update calls set status = 'in_progress', answered_at = coalesce(answered_at, $2), engine = $3 where id = $1", [callId, clock.now(), answeredEngine]),
-      event("call_answered", { engine: answeredEngine }),
+      // A nota da abertura do pipeline (fatia 3c-1) vai no próprio atendimento, uma vez por ligação.
+      event("call_answered", { engine: answeredEngine, ...("opening" in opened && opened.opening && { opening: opened.opening }) }),
       event("recording_notice", { text: recordingNotice }),
       // Os ids e o tamanho, nunca o texto: `call_events` não sai com o prazo da memória.
       ...(memory ? [event("memory_loaded", { noteIds: memory.noteIds, followUpIds: memory.followUpIds, chars: memory.chars })] : []),

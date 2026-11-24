@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { isPublicAddress } from "@deskvoice/core";
+import { isPublicAddress, type Clock } from "@deskvoice/core";
 import { z } from "zod";
 import type { AnalysisGuess } from "./analysis";
 import type { Brain, BrainFailure, BrainPrice } from "./brain";
@@ -112,7 +112,49 @@ export interface VoiceSessionEvents {
    * custo pelo preço dela. Opcional: motor que não emite continua no caminho de `usage`, sem mudança.
    */
   pieceUsage(line: PieceUsageLine): void;
+  /**
+   * Só o pipeline (R5, fatia 3c-1): o tempo de um turno respondido, um evento por turno, no primeiro
+   * áudio da resposta entregue. Turno que não chega a tocar áudio não emite. Opcional: motor que não
+   * emite não muda nada.
+   */
+  pipelineTurnLatency(latency: PipelineTurnLatency): void;
   closed(reason: string): void;
+}
+
+/**
+ * O tempo de um turno do pipeline (seção 3.5 de `docs/specs/2026-11-17-motor-de-voz-em-pipeline.md`),
+ * em ms, pelo `Clock` de quem abriu a ligação. Só números: nada do provedor vai aqui.
+ */
+export interface PipelineTurnLatency {
+  /** Do fim da fala de quem ligou (o `endMs` do trecho final, no relógio do pipeline) à chegada do trecho final. `0` com `endFromArrival`. */
+  endpointMs: number;
+  /** Do pedido ao cérebro que deu o primeiro texto da resposta até esse texto. */
+  brainFirstTextMs: number;
+  /** Do primeiro `push` da resposta à voz até o primeiro áudio dela entregue a quem abriu. */
+  voiceFirstAudioMs: number;
+  /** Do fim da fala ao primeiro áudio da resposta entregue a quem abriu. Inclui a ferramenta, quando houve. */
+  totalMs: number;
+  /** A peça não deu `endMs` (ou ele caía depois da chegada): o fim da fala é a chegada do trecho final. */
+  endFromArrival: boolean;
+  /** Uma ferramenta rodou entre o fim da fala e o primeiro áudio: fica fora do orçamento "sem ferramenta" da 3.5. */
+  tool: boolean;
+}
+
+/**
+ * Quanto pesou a abertura do pipeline (a nota da chave, fatia 3c-1), em ms, pelo `Clock` de quem
+ * abriu. As duas etapas correm juntas, e `totalMs` é o tempo até as duas acabarem.
+ */
+export interface PipelineOpening {
+  /** A transcrição abrindo: é o que prova a chave dela. */
+  transcriberMs: number;
+  /** As falas prontas: a síntese das que faltavam no cache e, com cache, a conferência da chave da voz. */
+  fixedSpeechMs: number;
+  /** A conferência da chave da voz (`checkKey`). `null` quando não rodou: nada veio do cache, e a síntese provou a chave. */
+  keyCheckMs: number | null;
+  /** Quantas falas prontas a abertura pediu, e quantas delas vieram do cache. */
+  fixedSpeech: number;
+  fromCache: number;
+  totalMs: number;
 }
 
 /** As peças do pipeline, no rótulo do extrato (`<peça>:<id>`, como o `transcriber:<id>` do #245). */
@@ -675,6 +717,11 @@ export interface PipelineConnectOptions extends ConnectOptions {
     remainingMicrocents(): number | undefined;
     reached(worstCaseMicrocents: number | undefined): void;
   };
+  /**
+   * O relógio da sessão (convenção 10), para a latência por turno e a nota da abertura (fatia 3c-1).
+   * Ausente, o motor não mede nada: sem relógio, nenhum número sai.
+   */
+  clock?: Clock;
 }
 
 /**

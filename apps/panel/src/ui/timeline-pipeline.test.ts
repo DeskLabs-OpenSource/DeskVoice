@@ -67,3 +67,53 @@ describe("linha do tempo: a falha por peça do motor pipeline (R5, fatia 3b)", (
     }
   });
 });
+
+describe("linha do tempo: a latência por turno e a nota da abertura do pipeline (fatia 3c-1)", () => {
+  const timed = [
+    {
+      id: "1",
+      kind: "call_answered",
+      at: "2026-11-24T12:00:00.000Z",
+      payload: { engine: "pipeline", opening: { transcriberMs: 150, fixedSpeechMs: 100, keyCheckMs: null, fixedSpeech: 3, fromCache: 0, totalMs: 150 } },
+    },
+    { id: "2", kind: "pipeline_turn_latency", at: "2026-11-24T12:00:05.000Z", payload: { endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 1000, endFromArrival: false, tool: false } },
+    { id: "3", kind: "pipeline_turn_latency", at: "2026-11-24T12:00:09.000Z", payload: { endpointMs: 0, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 2250, endFromArrival: true, tool: true } },
+  ] as CallEvent[];
+  const cachedOpening = [
+    { id: "1", kind: "call_answered", at: "2026-11-24T12:00:00.000Z", payload: { engine: "pipeline", opening: { transcriberMs: 100, fixedSpeechMs: 70, keyCheckMs: 70, fixedSpeech: 3, fromCache: 3, totalMs: 100 } } },
+  ] as CallEvent[];
+  const seconds = (locale: string, ms: number): string => (ms / 1000).toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+
+  it("cada turno diz o total e onde o tempo foi gasto, nos três idiomas; a ferramenta e o fim pela chegada têm frase", () => {
+    for (const [locale, dict] of [["pt-BR", ptBR], ["en", en], ["es", es]] as const) {
+      const html = visible(locale, timed);
+      const p = dict.events.pipeline;
+      const line = (total: number, endpoint: number) =>
+        p.latency.replace("{total}", seconds(locale, total)).replace("{endpoint}", seconds(locale, endpoint)).replace("{brain}", seconds(locale, 500)).replace("{voice}", seconds(locale, 200));
+      expect(html).toContain(line(1000, 300));
+      expect(html).toContain(line(2250, 0));
+      // Só o segundo turno teve ferramenta e fim pela chegada.
+      expect(html.split(p.latencyTool)).toHaveLength(2);
+      expect(html.split(p.latencyArrival)).toHaveLength(2);
+      expect(html).not.toContain("pipeline_turn_latency");
+      expect(html).not.toContain("{");
+      expect(html).not.toContain(dict.events.unknown);
+    }
+  });
+
+  it("o atendimento do pipeline diz quanto a abertura levou, com e sem cache; sem a nota, a frase é a de sempre", () => {
+    for (const [locale, dict] of [["pt-BR", ptBR], ["en", en], ["es", es]] as const) {
+      const p = dict.events.pipeline;
+      const fresh = visible(locale, timed);
+      expect(fresh).toContain(p.opening.replace("{total}", seconds(locale, 150)).replace("{transcriber}", seconds(locale, 150)).replace("{fixed}", seconds(locale, 100)).replace("{cached}", "0").replace("{count}", "3"));
+      expect(fresh).toContain(p.openingNoKey);
+      const cached = visible(locale, cachedOpening);
+      expect(cached).toContain(p.opening.replace("{total}", seconds(locale, 100)).replace("{transcriber}", seconds(locale, 100)).replace("{fixed}", seconds(locale, 70)).replace("{cached}", "3").replace("{count}", "3"));
+      expect(cached).toContain(p.openingKey.replace("{key}", seconds(locale, 70)));
+      const plain = visible(locale, [{ id: "1", kind: "call_answered", at: "2026-11-24T12:00:00.000Z", payload: { engine: "openai-realtime" } }] as CallEvent[]);
+      expect(plain).toContain(dict.events.call_answered);
+      expect(plain).not.toContain(p.openingNoKey);
+      expect(plain).not.toContain(p.openingKey.slice(0, 12));
+    }
+  });
+});

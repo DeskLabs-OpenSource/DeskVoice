@@ -148,6 +148,9 @@ export function Timeline({
     return fill(e.pipeline.line, { piece: (Object.hasOwn(e.pipeline.pieces, kind) ? e.pipeline.pieces[kind] : undefined) ?? kind, id: text(p.pieceId), reason: why });
   };
 
+  /** Milissegundos do pipeline em segundos, com até duas casas: 300 ms é "0,3 s". */
+  const pipelineSeconds = (ms: unknown): string => (Number(ms) / 1000).toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+
   // Depois de uma passagem, a fala do agente leva o id de quem falou (`agentId`); o nome vem da
   // própria passagem, que guarda de quem e para quem ela foi.
   const handoffNames = new Map<string, string>();
@@ -216,8 +219,23 @@ export function Timeline({
         const said = outbound ? e.call_started_outbound : p.channel === "whatsapp" ? e.call_started_whatsapp : p.channel === "web" ? e.call_started_web : p.channel === "simulated" ? e.call_started_simulated : e.call_started;
         return { ...base, tone: "neutral", icon: outbound ? PhoneOutgoing : PhoneIncoming, body: <Quiet>{said}</Quiet> };
       }
-      case "call_answered":
-        return { ...base, tone: "ok", icon: CheckCircle, body: <Quiet>{e.call_answered}</Quiet> };
+      case "call_answered": {
+        // Com o pipeline, a nota da abertura (fatia 3c-1): quanto cada etapa levou, e se a chave da voz foi conferida à parte.
+        const opening = typeof p.opening === "object" && p.opening !== null ? (p.opening as Record<string, unknown>) : undefined;
+        const note = opening
+          ? [
+              fill(e.pipeline.opening, {
+                total: pipelineSeconds(opening.totalMs),
+                transcriber: pipelineSeconds(opening.transcriberMs),
+                fixed: pipelineSeconds(opening.fixedSpeechMs),
+                cached: Number(opening.fromCache).toLocaleString(locale),
+                count: Number(opening.fixedSpeech).toLocaleString(locale),
+              }),
+              typeof opening.keyCheckMs === "number" ? fill(e.pipeline.openingKey, { key: pipelineSeconds(opening.keyCheckMs) }) : e.pipeline.openingNoKey,
+            ].join(" ")
+          : "";
+        return { ...base, tone: "ok", icon: CheckCircle, body: <Quiet>{e.call_answered}{note ? ` · ${note}` : ""}</Quiet> };
+      }
       case "recording_notice":
         return { ...base, tone: "neutral", icon: RecordIcon, body: <Quiet>{e.recording_notice}{text(p.text) ? `: ${text(p.text)}` : ""}</Quiet> };
       case "tool_called":
@@ -438,6 +456,17 @@ export function Timeline({
             </Card>
           ),
         };
+      case "pipeline_turn_latency": {
+        // Um por turno respondido do pipeline (3.5, fatia 3c-1): onde o tempo foi gasto, só números.
+        const line = [
+          fill(e.pipeline.latency, { total: pipelineSeconds(p.totalMs), endpoint: pipelineSeconds(p.endpointMs), brain: pipelineSeconds(p.brainFirstTextMs), voice: pipelineSeconds(p.voiceFirstAudioMs) }),
+          p.tool === true ? e.pipeline.latencyTool : "",
+          p.endFromArrival === true ? e.pipeline.latencyArrival : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{line}</Quiet> };
+      }
       case "pipeline_turn_failed":
         // A peça falhou e a conversa seguiu (o cérebro num pedido, o aviso da transcrição): só os códigos chegam aqui.
         return {

@@ -432,6 +432,12 @@ const timeline: TimelineDictionary = {
       unknown: "the piece failed.",
       turnFailed: "A piece failed without dropping the call",
       turnFailedBody: "The conversation went on. When it is the brain, the caller heard a request to repeat.",
+      latency: "The agent answered {total} s after the caller stopped speaking: {endpoint} s for the transcription to close the speech, {brain} s to the brain's first text and {voice} s to the voice's first audio.",
+      latencyTool: "A tool ran before the answer: the time includes the tool.",
+      latencyArrival: "The transcription did not say when the speech ended: the time counts from when the text arrived, and the real wait is a little longer.",
+      opening: "Pipeline opened in {total} s: {transcriber} s for the transcription to open and {fixed} s for the ready-made phrases ({cached} of {count} from the cache).",
+      openingKey: "The voice key was checked in {key} s, because some phrases came from the cache.",
+      openingNoKey: "No phrase came from the cache: the synthesis itself proved the voice key, with no separate check.",
     },
     transcriber_failed: {
       title: "Live transcription was left out",

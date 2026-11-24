@@ -5,16 +5,17 @@
 import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { encryptSecret, withSystem } from "@deskvoice/core";
+import { encryptSecret, withSystem, type Clock } from "@deskvoice/core";
 import { createPipelineEngine, PIPELINE_FAILURE_SPEECH, type Brain, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
-import { putSetting } from "../../../packages/tools/test/helpers";
+import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
 import openai from "../../../packages/voice-engine/src/brains/openai";
 import { FixedSpeechCache, speechUsageOf } from "../../../packages/voice-engine/src/synthesis";
 import { createSimulatedSynthesizer } from "../../../packages/voice-engine/src/synthesizers/simulated";
 import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "../../../packages/voice-engine/src/transcribers/simulated";
 import { brainKeySetting, brainModelsSetting, startCallSession, type CallSession } from "./call-session";
+import type { TransferOptions, TransferOutcome } from "./transport";
 import { callOf, createAgent, createCall, createOrganization, eventsOf, kindsOf, ledgerOf, manualTransport, pricedSimulatedEngine, secretKey, sessionHarness, type AgentOptions, type ManualTransport, type SessionHarness } from "./testing/db";
 import { waitFor } from "./testing/helpers";
 
@@ -134,7 +135,7 @@ interface Scene {
 async function scene(
   label: string,
   agent: AgentOptions,
-  options: { pipeline?: unknown; transcriber?: StreamingTranscriber; synthesizer?: SpeechSynthesizer; brain?: Brain; brainKey?: boolean; price?: boolean; pieces?: boolean } = {},
+  options: { pipeline?: unknown; transcriber?: StreamingTranscriber; synthesizer?: SpeechSynthesizer; brain?: Brain; brainKey?: boolean; price?: boolean; pieces?: boolean; transport?: ManualTransport } = {},
 ): Promise<Scene> {
   const organizationId = await createOrganization(app, label);
   const agentId = await createAgent(app, organizationId, agent);
@@ -152,7 +153,7 @@ async function scene(
     made.deps.pipelineEngine = createPipelineEngine({ fetch: fakeBrain.fetch, fixedSpeechCache: new FixedSpeechCache() });
   }
   const callId = await createCall(app, organizationId, agentId, made.clock.now());
-  const transport = manualTransport();
+  const transport = options.transport ?? manualTransport();
   return { organizationId, agentId, callId, transport, harness: made, start: () => startCallSession(made.deps, { organizationId, callId, agentId, transport }) };
 }
 
@@ -197,6 +198,8 @@ describe("com agents.pipeline nula, a chamada é a de sempre", { timeout: 120_00
     expect(after.logs).toEqual(before.logs);
     expect(before.ledger.map((row) => row.engine)).toEqual(["simulated"]);
     expect(after.events.find((event) => event.kind === "call_answered")?.payload).toEqual({ engine: "simulated" });
+    // Nenhum evento novo da 3c-1: nem a latência por turno do pipeline, nem a nota da abertura.
+    expect(after.events.some((event) => event.kind === "pipeline_turn_latency")).toBe(false);
   });
 });
 
@@ -235,7 +238,8 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
     expect(kinds).toContain("tool_result");
     expect(kinds).not.toContain("engine_failed");
     const answeredEvent = (await eventsOf(app, made.callId)).find((event) => event.kind === "call_answered");
-    expect(answeredEvent?.payload).toEqual({ engine: "pipeline" });
+    // A nota da abertura (3c-1): o relógio falso não andou na abertura, e nenhuma fala veio do cache.
+    expect(answeredEvent?.payload).toEqual({ engine: "pipeline", opening: { transcriberMs: 0, fixedSpeechMs: 0, keyCheckMs: null, fixedSpeech: 3, fromCache: 0, totalMs: 0 } });
     expect((await callOf(app, made.callId)).engine).toBe("pipeline");
 
     const ledger = await piecesLedger(made.callId);
@@ -384,5 +388,255 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
     expect(ledger.some((row) => row.engine === "brain:openai")).toBe(false);
     // O gasto ficou abaixo do teto: a despedida veio antes, e não depois.
     expect(outcome.costCents).toBeLessThan(12);
+  });
+});
+
+// ---- 3c-1: a latência por turno, a nota da abertura e as ressalvas da 3b ----
+
+/**
+ * As três peças com atrasos conhecidos no relógio falso da sessão: o trecho final chega `endpointMs`
+ * depois do `endMs` dele, o cérebro dá o primeiro texto `brainMs` depois do pedido, e a voz entrega o
+ * primeiro áudio da resposta `voiceMs` depois do primeiro texto. Nada usa o relógio de parede.
+ */
+function timedPieces(clock: Clock & { advance(ms: number): void }, script: SimulatedTranscriptScript, delays: { endpointMs: number; brainMs: number; voiceMs: number }) {
+  const ear = pricedTranscriber(script);
+  let origin: number | undefined;
+  let armed = false;
+  const transcriber: StreamingTranscriber = {
+    ...ear.transcriber,
+    async connect(...args) {
+      const session = await ear.transcriber.connect(...args);
+      return {
+        on: (event, handler) =>
+          event === "piece"
+            ? session.on("piece", (piece) => {
+                // O trecho final chega `endpointMs` depois do fim da fala, no relógio do pipeline.
+                if (piece.final && piece.endMs !== undefined && origin !== undefined) {
+                  clock.advance(origin + piece.endMs + delays.endpointMs - clock.now().getTime());
+                  armed = true;
+                }
+                (handler as (value: typeof piece) => void)(piece);
+              })
+            : session.on(event, handler),
+        sendAudio: (pcm) => {
+          origin ??= clock.now().getTime();
+          session.sendAudio(pcm);
+        },
+        close: () => session.close(),
+      };
+    },
+  };
+  const brain: Brain = {
+    ...openai,
+    chat(apiKey, request, options) {
+      const chat = openai.chat?.(apiKey, request, options);
+      if (!chat) throw new Error("sem chat");
+      let first = true;
+      return {
+        on: (event, handler) =>
+          event === "text"
+            ? chat.on("text", (delta) => {
+                if (first) clock.advance(delays.brainMs);
+                first = false;
+                (handler as (value: string) => void)(delta);
+              })
+            : chat.on(event, handler),
+        cancel: () => chat.cancel(),
+      };
+    },
+  };
+  const voice = pricedVoice();
+  const synthesizer: SpeechSynthesizer = {
+    ...voice.synthesizer,
+    async speak(config, apiKey, connect) {
+      const delayed = armed;
+      armed = false;
+      const speech = await voice.synthesizer.speak(config, apiKey, connect);
+      let first = delayed;
+      return {
+        ...speech,
+        on: (event, handler) =>
+          event === "audio"
+            ? speech.on("audio", (pcm) => {
+                if (first) clock.advance(delays.voiceMs);
+                first = false;
+                (handler as (value: Buffer) => void)(pcm);
+              })
+            : speech.on(event, handler),
+        push: (value, opts) => speech.push(value, opts),
+        end: () => speech.end(),
+        cancel: () => speech.cancel(),
+      };
+    },
+  };
+  return { transcriber, brain, synthesizer, ear };
+}
+
+const latenciesOf = async (callId: string) => (await eventsOf(app, callId)).filter((event) => event.kind === "pipeline_turn_latency").map((event) => event.payload);
+
+/** A transferência que fica pendente até o teste dizer que voltou, como o Asterisk faria. */
+function returningTransport() {
+  const base = manualTransport();
+  let pending: ((outcome: TransferOutcome) => void) | undefined;
+  const transfers: string[] = [];
+  const transport = Object.assign(base, {
+    canReturnFromTransfer: true,
+    async transfer(to: string, options?: TransferOptions): Promise<TransferOutcome | void> {
+      transport.transferredTo = to;
+      transfers.push(to);
+      if (!options?.returnIfUnanswered) return;
+      return new Promise<TransferOutcome>((resolve) => (pending = resolve));
+    },
+    endTransfer(outcome: TransferOutcome) {
+      pending?.(outcome);
+      pending = undefined;
+    },
+  });
+  return { transport, transfers };
+}
+
+describe("o pipeline numa ligação (fatia 3c-1): a latência por turno e a nota da abertura", { timeout: 120_000 }, () => {
+  it("de ponta a ponta, com o relógio falso: 300 ms até o trecho final, 500 do cérebro e 200 da voz viram os números exatos do evento", async () => {
+    const holder: { clock?: Clock & { advance(ms: number): void } } = {};
+    const clockProxy = { now: () => holder.clock?.now() ?? new Date(0), advance: (ms: number) => holder.clock?.advance(ms) };
+    const timed = timedPieces(clockProxy, [{ afterAudioMs: 200, text: "Quero marcar uma consulta.", final: true }], { endpointMs: 300, brainMs: 500, voiceMs: 200 });
+    const made = await scene("pipeline-latency", { engine: "openai-realtime", greeting: "Bom dia." }, { pipeline: PIPELINE, transcriber: timed.transcriber, brain: timed.brain, synthesizer: timed.synthesizer });
+    holder.clock = made.harness.clock;
+    fakeBrain?.reply([text("Claro, para quando?"), usage(20, 5)]);
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => timed.ear.sessions.length === 1, "the transcriber to open");
+    made.transport.callerAudio(200);
+    await waitFor(async () => (await latenciesOf(made.callId)).length === 1, "the turn latency");
+    await waitFor(async () => (await eventsOf(app, made.callId)).some((event) => event.kind === "transcript_agent" && event.payload.text === "Claro, para quando?"), "the answer");
+    made.transport.callerHangup();
+    await session.done;
+    // Um evento só, com os números exatos, e só números: nada do provedor.
+    expect(await latenciesOf(made.callId)).toEqual([{ endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 1000, endFromArrival: false, tool: false }]);
+  });
+
+  it("o turno com ferramenta: um evento, com o tempo até o primeiro áudio da resposta, e `tool: true`", async () => {
+    const holder: { clock?: Clock & { advance(ms: number): void } } = {};
+    const clockProxy = { now: () => holder.clock?.now() ?? new Date(0), advance: (ms: number) => holder.clock?.advance(ms) };
+    const timed = timedPieces(clockProxy, [{ afterAudioMs: 200, text: "Quero deixar um recado para o doutor.", final: true }], { endpointMs: 300, brainMs: 500, voiceMs: 200 });
+    const made = await scene("pipeline-latency-tool", { engine: "openai-realtime", tools: ["create_task"] }, { pipeline: PIPELINE, transcriber: timed.transcriber, brain: timed.brain, synthesizer: timed.synthesizer });
+    holder.clock = made.harness.clock;
+    fakeBrain?.reply([tool("call_1", "create_task", JSON.stringify({ title: "Recado para o doutor", details: "Quem ligou quer falar com o doutor." })), usage(200, 30)], [text("Pronto, ficou anotado."), usage(300, 10)]);
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => timed.ear.sessions.length === 1, "the transcriber to open");
+    made.transport.callerAudio(200);
+    await waitFor(async () => (await latenciesOf(made.callId)).length === 1, "the turn latency");
+    made.transport.callerHangup();
+    await session.done;
+    expect(await kindsOf(app, made.callId)).toContain("tool_result");
+    expect(await latenciesOf(made.callId)).toEqual([{ endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 1000, endFromArrival: false, tool: true }]);
+  });
+
+  it("o turno que não toca a resposta (o cérebro falhou: o pedido de repetir não é resposta) não grava latência", async () => {
+    const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Oi.", final: true }]);
+    const made = await scene("pipeline-latency-none", { engine: "openai-realtime" }, { pipeline: PIPELINE, transcriber: ear.transcriber });
+    fakeBrain?.reply({ status: 500, body: "{}" });
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    made.transport.callerAudio(100);
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("pipeline_turn_failed"), "the failed turn");
+    await waitFor(async () => (await eventsOf(app, made.callId)).some((event) => event.kind === "transcript_agent" && event.payload.text === "Desculpe, não consegui responder agora. Pode repetir, por favor?"), "the retry speech");
+    made.transport.callerHangup();
+    await session.done;
+    expect(await latenciesOf(made.callId)).toEqual([]);
+  });
+
+  it("a nota da abertura, com e sem cache: a segunda ligação da organização tira as falas do cache e confere a chave da voz", async () => {
+    const made = await scene("pipeline-opening", { engine: "openai-realtime" }, { pipeline: PIPELINE });
+    const first = made.start();
+    await answered(made.callId);
+    made.transport.callerHangup();
+    await first.done;
+    // A segunda ligação: a mesma organização, o mesmo agente e o mesmo motor (o mesmo cache).
+    const secondCall = await createCall(app, made.organizationId, made.agentId, made.harness.clock.now());
+    const transport = manualTransport();
+    const second = startCallSession(made.harness.deps, { organizationId: made.organizationId, callId: secondCall, agentId: made.agentId, transport });
+    await answered(secondCall);
+    transport.callerHangup();
+    await second.done;
+    const openingOf = async (callId: string) => (await eventsOf(app, callId)).find((event) => event.kind === "call_answered")?.payload;
+    expect(await openingOf(made.callId)).toEqual({ engine: "pipeline", opening: { transcriberMs: 0, fixedSpeechMs: 0, keyCheckMs: null, fixedSpeech: 3, fromCache: 0, totalMs: 0 } });
+    // Com cache, a conferência da chave rodou (o relógio falso não andou: zero medido, e não ausente).
+    expect(await openingOf(secondCall)).toEqual({ engine: "pipeline", opening: { transcriberMs: 0, fixedSpeechMs: 0, keyCheckMs: 0, fixedSpeech: 3, fromCache: 3, totalMs: 0 } });
+  });
+});
+
+describe("as ressalvas da 3b (L1 da DESA-421 e as duas da DESA-426)", { timeout: 120_000 }, () => {
+  it("L1: o cérebro que falha duas vezes seguidas grava um pipeline_turn_failed só (o da primeira), e um engine_failed", async () => {
+    const ear = pricedTranscriber([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Oi?", final: true },
+    ]);
+    const made = await scene("pipeline-l1", { engine: "openai-realtime" }, { pipeline: PIPELINE, transcriber: ear.transcriber });
+    fakeBrain?.reply({ status: 500, body: "{}" }, { status: 503, body: "{}" });
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    made.transport.callerAudio(100);
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("pipeline_turn_failed"), "the first failure");
+    made.transport.callerAudio(100);
+    expect(await session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
+    const kinds = await kindsOf(app, made.callId);
+    expect(kinds.filter((kind) => kind === "pipeline_turn_failed")).toHaveLength(1);
+    expect(kinds.filter((kind) => kind === "engine_failed")).toHaveLength(1);
+    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "engine_failed")?.payload).toEqual({ engine: "pipeline", piece: "brain", pieceId: "openai", detail: "provider_error" });
+  });
+
+  it("L1: a transcrição que avisa e depois cai grava um pipeline_turn_failed só (o do aviso), e um engine_failed", async () => {
+    const ear = pricedTranscriber([]);
+    const made = await scene("pipeline-l1-ear", { engine: "openai-realtime" }, { pipeline: PIPELINE, transcriber: ear.transcriber });
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    const { TranscriberOpenError } = await import("@deskvoice/voice-engine");
+    const emit = (event: string, value: unknown) => (ear.sessions[0] as unknown as { emit(event: string, value: unknown): void }).emit(event, value);
+    emit("error", new TranscriberOpenError("rate_limited", "deepgram: 429 (texto do provedor)"));
+    emit("closed", "remote");
+    expect(await session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
+    const kinds = await kindsOf(app, made.callId);
+    expect(kinds.filter((kind) => kind === "pipeline_turn_failed")).toHaveLength(1);
+    expect(kinds.filter((kind) => kind === "engine_failed")).toHaveLength(1);
+  });
+
+  it("426, ressalva 1: o texto inteiro do aviso do painel na recusa da peça sem preço, sem o texto de diagnóstico", async () => {
+    const made = await scene("pipeline-unpriced-notice", { name: "Recepção", engine: "openai-realtime" }, { pipeline: PIPELINE, price: false });
+    expect(await made.start().done).toMatchObject({ status: "refused", endReason: "pipeline_piece_unpriced" });
+    const bodies = (await notificationsOf(app, made.organizationId)).map((notice) => notice.body);
+    expect(bodies).toEqual([
+      `Uma ligação do agente Recepção foi recusada porque o preço de ${MODEL}, em o cérebro (openai), não é conhecido. Sem preço, o custo da ligação não pode ser medido, e a ligação não começou. Quem ligou ouviu o sinal de falha. Escolha um modelo com preço e faça uma chamada de teste.`,
+    ]);
+    // O `problem` (o texto de diagnóstico, em inglês) fica no log, e nunca no aviso.
+    expect(bodies.join(" ")).not.toContain("has no known price");
+  });
+
+  it("426, ressalva 2: o trecho de volta da transferência com a peça sem preço grava engine_failed com o motivo e o modelo, pela sessão", async () => {
+    const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Quero falar com o financeiro.", final: true }]);
+    const { transport, transfers } = returningTransport();
+    const made = await scene(
+      "pipeline-return-unpriced",
+      { engine: "openai-realtime", transferTo: "+5531988887777", tools: ["transfer_to_human"], transferReturnsToAgent: true },
+      { pipeline: PIPELINE, transcriber: ear.transcriber, transport },
+    );
+    fakeBrain?.reply([tool("t1", "transfer_to_human", JSON.stringify({ reason: "financeiro", summary: "Segunda via." })), usage(20, 5)]);
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    made.transport.callerAudio(100);
+    await waitFor(() => transfers.length === 1, "the transfer to be dialed");
+    // Enquanto a linha chama, o preço do modelo sai da lista: o trecho de volta não pode abrir.
+    await withSystem(app, (q) =>
+      q.exec("update settings set value = $3 where organization_id = $1 and key = $2", [made.organizationId, brainModelsSetting("openai"), JSON.stringify({ fetchedAt: "2026-11-24", models: [{ id: MODEL, label: MODEL }] })]),
+    );
+    transport.endTransfer({ returned: true, status: "NOANSWER" });
+    expect(await session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
+    const failed = (await eventsOf(app, made.callId)).filter((event) => event.kind === "engine_failed").map((event) => event.payload);
+    expect(failed).toEqual([{ engine: "pipeline", piece: "brain", pieceId: "openai", reason: "pipeline_piece_unpriced", model: MODEL }]);
   });
 });

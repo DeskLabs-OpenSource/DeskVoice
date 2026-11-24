@@ -440,6 +440,12 @@ const timeline = {
       unknown: "a peça falhou.",
       turnFailed: "Uma peça falhou sem derrubar a ligação",
       turnFailedBody: "A conversa seguiu. Quando é o cérebro, quem ligou ouviu um pedido para repetir.",
+      latency: "Resposta do agente em {total} s depois do fim da fala: {endpoint} s até a transcrição fechar a fala, {brain} s até o primeiro texto do cérebro e {voice} s até o primeiro áudio da voz.",
+      latencyTool: "Uma ferramenta rodou antes da resposta: o tempo inclui a ferramenta.",
+      latencyArrival: "A transcrição não disse quando a fala acabou: o tempo conta da chegada do texto, e a espera real é um pouco maior.",
+      opening: "Abertura do pipeline em {total} s: {transcriber} s para a transcrição abrir e {fixed} s para as falas prontas ({cached} de {count} do cache).",
+      openingKey: "A chave da voz foi conferida em {key} s, porque havia falas no cache.",
+      openingNoKey: "Nenhuma fala veio do cache: a própria síntese provou a chave da voz, sem conferência à parte.",
     },
     transcriber_failed: {
       title: "A transcrição ao vivo ficou de fora",

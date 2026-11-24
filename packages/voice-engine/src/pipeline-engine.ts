@@ -1,3 +1,4 @@
+import type { Clock } from "@deskvoice/core";
 import type { BrainChat, BrainChatMessage, BrainFailure, BrainToolCall } from "./brain";
 import { SessionEmitter } from "./emitter";
 import { estimateCostMicrocents } from "./pricing";
@@ -9,6 +10,7 @@ import {
   TranscriberOpenError,
   type KeyCheckResult,
   type PipelineConnectOptions,
+  type PipelineOpening,
   type PipelinePieceKind,
   type PipelinePieces,
   type PieceUsageLine,
@@ -70,6 +72,20 @@ import {
  * quem abriu toca a despedida pronta (`ceiling.reached`). Sem preço conhecido, o pior caso não tem
  * conta: com teto, o pedido também não sai (a sessão já recusa abrir assim; isto é a rede de proteção).
  *
+ * **A latência por turno** (3.5, fatia 3c-1). Com `clock` (o da sessão, convenção 10), cada turno
+ * respondido emite `pipelineTurnLatency`, uma vez, no primeiro áudio da resposta entregue a quem abriu.
+ * O fim da fala é o `endMs` do trecho final, somado à hora do primeiro áudio mandado à transcrição (o
+ * zero do fluxo, para o serviço); sem `endMs`, vale a chegada, com `endFromArrival`. O turno em que
+ * uma ferramenta rodou antes do primeiro áudio sai com `tool: true`, e o `brainFirstTextMs` é o do
+ * pedido que deu o primeiro texto (o que reabriu o cérebro). O turno que não toca a resposta (o
+ * cérebro que falhou, o teto, a ligação que acabou, a resposta vazia) não emite: o "pode repetir?" e
+ * as falas fixas não são resposta. Sem `clock`, nada é medido.
+ *
+ * **A nota da abertura** (a nota da chave, fatia 3c-1). Com `clock`, a sessão aberta traz em `opening`
+ * quanto levou a transcrição abrindo (o que prova a chave dela), as falas prontas e, quando alguma veio
+ * do cache, a conferência da chave da voz (`checkKey`); sem cache, a síntese provou a chave, e a
+ * conferência não roda. A chave do cérebro não é conferida na abertura: ela se prova no primeiro pedido.
+ *
  * **A recusa de abertura** é `PipelineOpenError`: a peça, o motivo e o que a abertura já gastou (as
  * falas fixas sintetizadas antes de a outra peça recusar), para o custo entrar no extrato da tentativa.
  */
@@ -106,9 +122,14 @@ export interface PipelineEngineOptions {
   brainTimeoutMs?: number;
 }
 
+/** A sessão do pipeline: com `clock`, traz a nota da abertura. */
+export interface PipelineVoiceSession extends VoiceSession {
+  readonly opening?: PipelineOpening;
+}
+
 export interface PipelineEngine extends VoiceEngine {
   /** Sem `options.pieces`, recusa abrir: o pipeline não tem peça padrão. */
-  connect(config: VoiceSessionConfig, apiKey: string, options?: PipelineConnectOptions): Promise<VoiceSession>;
+  connect(config: VoiceSessionConfig, apiKey: string, options?: PipelineConnectOptions): Promise<PipelineVoiceSession>;
 }
 
 /** O texto que vai ao cérebro como resultado de uma ferramenta. */
@@ -138,6 +159,8 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
 interface Utterance {
   /** Áudio que chegou antes de esta fala ser a primeira da fila. */
   held: Buffer[];
+  /** A resposta de um turno: o primeiro áudio dela entregue fecha a latência do turno. */
+  turn?: Turn;
   finished: boolean;
   push(text: string, flush: boolean): void;
   end(): void;
@@ -150,6 +173,7 @@ const readyUtterance = (audio: Buffer): Utterance => ({ held: [audio], finished:
 /** Uma fala viva. O texto que chega antes de a voz abrir espera, e vai na ordem quando ela abre. */
 class LiveUtterance implements Utterance {
   held: Buffer[] = [];
+  turn?: Turn;
   finished = false;
   private speech: Speech | undefined;
   private readonly queued: Array<{ text: string; flush: boolean }> = [];
@@ -180,7 +204,23 @@ class LiveUtterance implements Utterance {
   }
 }
 
-class PipelineSession implements VoiceSession {
+/**
+ * As marcas de um turno de quem ligou, em ms do `clock` (3.5). `askedAt` é o pedido em curso ao
+ * cérebro; `firstTextAt`, `textAskedAt` e `firstPushAt` são os da resposta que tocou.
+ */
+interface Turn {
+  endAt: number;
+  arrivedAt: number;
+  endFromArrival: boolean;
+  tool: boolean;
+  askedAt?: number;
+  textAskedAt?: number;
+  firstTextAt?: number;
+  firstPushAt?: number;
+  emitted: boolean;
+}
+
+class PipelineSession implements PipelineVoiceSession {
   private readonly emitter = new SessionEmitter();
   private readonly history: BrainChatMessage[] = [];
   /** O que entra no histórico quando a rodada em curso acabar (o histórico não se intercala com ferramenta). */
@@ -199,6 +239,13 @@ class PipelineSession implements VoiceSession {
   /** O último `error` da transcrição: explica o `closed` que vier depois dele. */
   private transcriptionError: unknown;
   private finished = false;
+  /** O zero do fluxo da transcrição, no `clock`: a hora do primeiro áudio mandado a ela. */
+  private streamStartedAt: number | undefined;
+  /** O endMs do último parcial, para o turno fechado à força por `closeCallerTurn`. */
+  private lastPartialEndMs: number | undefined;
+  /** O fim da fala que ainda não foi ao cérebro (vale o último), e o turno da rodada em curso. */
+  private pendingTurn: Turn | undefined;
+  private roundTurn: Turn | undefined;
 
   constructor(
     private readonly config: VoiceSessionConfig,
@@ -206,8 +253,9 @@ class PipelineSession implements VoiceSession {
     private readonly transcription: StreamingTranscription,
     private readonly fixedAudio: Map<string, Buffer>,
     fixedUsage: { characters: number; costMicrocents?: number },
-    private readonly options: { fetch?: typeof fetch; brainTimeoutMs: number; schedule?: PipelineConnectOptions["schedule"]; ceiling?: PipelineConnectOptions["ceiling"] },
+    private readonly options: { fetch?: typeof fetch; brainTimeoutMs: number; schedule?: PipelineConnectOptions["schedule"]; ceiling?: PipelineConnectOptions["ceiling"]; clock?: Clock },
     defer: Defer,
+    readonly opening?: PipelineOpening,
   ) {
     if (config.instructions !== "") this.history.push({ role: "system", content: config.instructions });
     transcription.on("piece", (piece) => this.heard(piece));
@@ -233,7 +281,9 @@ class PipelineSession implements VoiceSession {
   }
 
   sendAudio(pcm16_8k: Buffer): void {
-    if (!this.finished) this.transcription.sendAudio(pcm16_8k);
+    if (this.finished) return;
+    this.streamStartedAt ??= this.now();
+    this.transcription.sendAudio(pcm16_8k);
   }
 
   sendToolResult(id: string, result: unknown): void {
@@ -276,6 +326,7 @@ class PipelineSession implements VoiceSession {
     if (partial === undefined || partial.trim() === "") return false;
     this.lastPartial = undefined;
     this.forcedPartial = partial;
+    this.turnEnded(this.lastPartialEndMs);
     this.userTurn(partial);
     return true;
   }
@@ -297,6 +348,7 @@ class PipelineSession implements VoiceSession {
     this.lastHeard = text;
     if (!piece.final) {
       this.lastPartial = piece.text;
+      this.lastPartialEndMs = piece.endMs;
       return;
     }
     this.lastPartial = undefined;
@@ -306,7 +358,45 @@ class PipelineSession implements VoiceSession {
     // O `final` do trecho que a guarda já fechou não vira um segundo turno.
     if (text === "" || (forced !== undefined && text.startsWith(forced.trim()))) return;
     this.emitter.emit("callerTurnEnded", { source: "transcript" });
+    this.turnEnded(piece.endMs);
     this.userTurn(piece.text);
+  }
+
+  // ---- 3.5: a latência por turno ----
+
+  /** A hora do `clock`, em ms. Sem `clock`, `undefined`: nada é medido. */
+  private now(): number | undefined {
+    return this.options.clock?.now().getTime();
+  }
+
+  /**
+   * O fim da fala de quem ligou: o `endMs` da peça no relógio do pipeline, ou a chegada. Vale o último
+   * antes do pedido ao cérebro. O `endMs` que cairia depois da chegada (o relógio do serviço adiantado)
+   * não vira número negativo: vale a chegada, com `endFromArrival`.
+   */
+  private turnEnded(endMs: number | undefined): void {
+    const arrivedAt = this.now();
+    if (arrivedAt === undefined) return;
+    const fromStream = endMs === undefined || this.streamStartedAt === undefined ? undefined : this.streamStartedAt + endMs;
+    const endFromArrival = fromStream === undefined || fromStream > arrivedAt;
+    this.pendingTurn = { endAt: endFromArrival ? arrivedAt : fromStream, arrivedAt, endFromArrival, tool: false, emitted: false };
+  }
+
+  /** O primeiro áudio da resposta foi entregue: o turno sai, uma vez. */
+  private delivered(utterance: Utterance): void {
+    const turn = utterance.turn;
+    if (!turn || turn.emitted) return;
+    turn.emitted = true;
+    const at = this.now();
+    if (at === undefined || turn.textAskedAt === undefined || turn.firstTextAt === undefined || turn.firstPushAt === undefined) return;
+    this.emitter.emit("pipelineTurnLatency", {
+      endpointMs: turn.arrivedAt - turn.endAt,
+      brainFirstTextMs: turn.firstTextAt - turn.textAskedAt,
+      voiceFirstAudioMs: at - turn.firstPushAt,
+      totalMs: at - turn.endAt,
+      endFromArrival: turn.endFromArrival,
+      tool: turn.tool,
+    });
   }
 
   private transcriberError(error: unknown): void {
@@ -341,8 +431,15 @@ class PipelineSession implements VoiceSession {
     for (const text of this.guidance.splice(0)) this.history.push({ role: "system", content: text });
     const messages = [...this.history];
     const inputTokens = bytesOf(messages) + (this.config.tools.length > 0 ? bytesOf(this.config.tools) : 0);
+    // O turno novo é o fim de fala que esperava; a volta depois de uma ferramenta continua o mesmo turno.
+    if (!this.busy) {
+      this.roundTurn = this.pendingTurn;
+      this.pendingTurn = undefined;
+    }
     if (this.overCeiling(inputTokens)) return;
     this.busy = true;
+    const turn = this.roundTurn;
+    if (turn) turn.askedAt = this.now();
     const chat = brain.chat(
       apiKey,
       { model, messages, tools: this.config.tools, timeoutMs: this.options.brainTimeoutMs, maxTokens: PIPELINE_BRAIN_MAX_TOKENS },
@@ -371,7 +468,15 @@ class PipelineSession implements VoiceSession {
       if (this.chat !== chat || this.finished || delta === "") return;
       text += delta;
       // A fala abre no primeiro texto, e não antes: não fica aberta esperando (o `inactivity_timeout`).
-      utterance ??= this.openUtterance();
+      if (!utterance) {
+        utterance = this.openUtterance();
+        if (turn && turn.firstTextAt === undefined) {
+          turn.textAskedAt = turn.askedAt;
+          turn.firstTextAt = this.now();
+          turn.firstPushAt = turn.firstTextAt;
+          utterance.turn = turn;
+        }
+      }
       utterance.push(delta, SENTENCE_END.test(delta));
     });
     chat.on("toolCall", (call) => {
@@ -419,6 +524,9 @@ class PipelineSession implements VoiceSession {
     if (text !== "") this.emitter.emit("transcript", { speaker: "agent", text });
     if (text !== "" || calls.length > 0) this.history.push(calls.length > 0 ? { role: "assistant", content: text, toolCalls: calls } : { role: "assistant", content: text });
     if (calls.length > 0) {
+      // A ferramenta roda antes do primeiro áudio da resposta: o turno sai com `tool`.
+      const turn = this.roundTurn;
+      if (turn && !turn.emitted) turn.tool = true;
       this.pendingTools = { calls, results: new Map() };
       for (const call of calls) this.emitter.emit("toolCall", { id: call.id, name: call.name, args: toolArgs(call.args) });
       return;
@@ -477,8 +585,14 @@ class PipelineSession implements VoiceSession {
 
   private play(utterance: Utterance, pcm: Buffer): void {
     if (this.finished) return;
-    if (this.output[0] === utterance) this.emitter.emit("audio", pcm);
+    if (this.output[0] === utterance) this.deliver(utterance, pcm);
     else utterance.held.push(pcm);
+  }
+
+  /** O áudio vai a quem abriu (o transporte). O primeiro de uma resposta fecha a latência do turno. */
+  private deliver(utterance: Utterance, pcm: Buffer): void {
+    this.emitter.emit("audio", pcm);
+    this.delivered(utterance);
   }
 
   private utteranceDone(utterance: Utterance): void {
@@ -491,7 +605,7 @@ class PipelineSession implements VoiceSession {
 
   private drain(): void {
     for (let head = this.output[0]; head && !this.finished; head = this.output[0]) {
-      for (const pcm of head.held.splice(0)) this.emitter.emit("audio", pcm);
+      for (const pcm of head.held.splice(0)) this.deliver(head, pcm);
       if (!head.finished) return;
       this.output.shift();
     }
@@ -581,17 +695,22 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
       if (!pieces.brain.piece.chat) throw new PipelineOpenError("brain", pieces.brain.piece.id, "unexpected_response", [], `pipeline: o cérebro ${pieces.brain.piece.id} não conversa (sem chat)`);
       const { transcriber, synthesizer } = pieces;
       const timing = { schedule: options.schedule, readyTimeoutMs: options.readyTimeoutMs };
+      const { clock } = options;
+      const now = clock ? (): number => clock.now().getTime() : undefined;
+      const startedAt = now?.();
+      // O fim de cada etapa da abertura, no relógio da sessão (a nota da chave).
+      const ended: { transcriber?: number; fixed?: number } = {};
       // As duas aberturas ao mesmo tempo; qualquer recusa é recusa de abertura, e a outra é fechada.
       const [heard, fixed] = await Promise.allSettled([
-        transcriber.piece.connect({ language: config.language, vocabulary: (config.vocabulary ?? []).slice(0, transcriber.piece.maxVocabulary) }, transcriber.apiKey, timing),
+        transcriber.piece.connect({ language: config.language, vocabulary: (config.vocabulary ?? []).slice(0, transcriber.piece.maxVocabulary) }, transcriber.apiKey, timing).finally(() => (ended.transcriber = now?.())),
         prepareFixedSpeech(
           synthesizer.piece,
           options.organizationId,
           { voiceId: synthesizer.voiceId, language: config.language, ...(synthesizer.model === undefined ? {} : { model: synthesizer.model }) },
           [PIPELINE_FAILURE_SPEECH, ...(options.fixedSpeech ?? [])],
           synthesizer.apiKey,
-          { schedule: options.schedule, ...(engineOptions.fixedSpeechCache ? { cache: engineOptions.fixedSpeechCache } : {}) },
-        ),
+          { schedule: options.schedule, ...(engineOptions.fixedSpeechCache ? { cache: engineOptions.fixedSpeechCache } : {}), ...(now ? { now } : {}) },
+        ).finally(() => (ended.fixed = now?.())),
       ]);
       if (heard.status === "rejected" || fixed.status === "rejected") {
         if (heard.status === "fulfilled") await heard.value.close().catch(() => undefined);
@@ -602,14 +721,27 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
         const reason: unknown = (fixed as PromiseRejectedResult).reason;
         throw new PipelineOpenError("synthesizer", synthesizer.piece.id, failureOf(reason), spent, `voz: ${messageOf(reason)}`);
       }
+      const doneAt = now?.();
+      const opening: PipelineOpening | undefined =
+        startedAt === undefined || doneAt === undefined || ended.transcriber === undefined || ended.fixed === undefined
+          ? undefined
+          : {
+              transcriberMs: ended.transcriber - startedAt,
+              fixedSpeechMs: ended.fixed - startedAt,
+              keyCheckMs: fixed.value.keyCheckMs ?? null,
+              fixedSpeech: new Set([PIPELINE_FAILURE_SPEECH, ...(options.fixedSpeech ?? [])]).size,
+              fromCache: fixed.value.cached,
+              totalMs: doneAt - startedAt,
+            };
       return new PipelineSession(
         config,
         pieces,
         heard.value,
         fixed.value.audio,
         fixed.value.usage,
-        { fetch: engineOptions.fetch, brainTimeoutMs: engineOptions.brainTimeoutMs ?? BRAIN_TIMEOUT_MS, schedule: options.schedule, ceiling: options.ceiling },
+        { fetch: engineOptions.fetch, brainTimeoutMs: engineOptions.brainTimeoutMs ?? BRAIN_TIMEOUT_MS, schedule: options.schedule, ceiling: options.ceiling, clock },
         defer,
+        opening,
       );
     },
     async checkKey() {

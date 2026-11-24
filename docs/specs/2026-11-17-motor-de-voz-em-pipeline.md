@@ -250,6 +250,17 @@ cache: chave recusada é recusa de abertura, com ou sem cache. As duas despedida
 `PipelineConnectOptions.fixedSpeech`, e o `reachCeiling` de hoje as toca por `say` com o mesmo texto:
 o motor acha o áudio pronto e não abre fala nova.
 
+**A nota da chave: quanto pesa a abertura (3c-1).** Uma vez por ligação de pipeline, o `call_answered`
+leva `opening`: `{ transcriberMs, fixedSpeechMs, keyCheckMs, fixedSpeech, fromCache, totalMs }`, em ms,
+pelo `Clock` da sessão (`PipelineConnectOptions.clock`). As duas etapas correm juntas: a transcrição
+abrindo (é o que prova a chave dela) e as falas prontas. Sem cache, a própria síntese prova a chave da
+voz, e não há conferência à parte (`keyCheckMs: null`). Com alguma fala no cache, o `checkKey` da voz
+roda junto, e `keyCheckMs` é o tempo dele: é esse o pedido a mais que a nota da revisora no #390
+apontou. A chave do cérebro não é conferida na abertura: ela se prova no primeiro pedido. O trecho de
+volta da transferência e a passagem para outro agente abrem de novo, mas não gravam outra nota. Sem
+`clock`, o motor não mede, e a nota não sai. **Não medido:** o valor real de cada etapa contra um
+provedor, sem chave (seção 6.1). Os testes só provam a conta com o relógio falso.
+
 **O pior caso antes de cada pedido ao cérebro (3b-2).** Todo pedido de `chat` leva
 `BrainChatRequest.maxTokens`, que o motor preenche com `PIPELINE_BRAIN_MAX_TOKENS` = 4 096, e cada
 cérebro o manda no campo do provedor: `max_completion_tokens` na OpenAI, `max_tokens` no DeepSeek, no
@@ -291,7 +302,7 @@ cérebro: o pior caso não tem conta.
 A fala de falha (texto fixo, no padrão de `FAREWELL`) é: "Estou com um problema técnico e não vou
 conseguir continuar. Se puder, ligue de novo em alguns minutos. Obrigado." Quando há
 `transfer_to_e164`, a ligação é transferida depois dela (na 3b-1, a fala de falha toca também nesse
-caso: a de transferência não está entre as falas prontas do motor; fica para a 3c).
+caso: a de transferência não está entre as falas prontas do motor; fica para a 3c-2).
 O `error` da transcrição sozinho não é fatal (o contrato de `StreamingTranscriptionEvents`): só o
 `closed` derruba a sessão. Os eventos levam `piece`, `pieceId` e `detail` (o código). Os eventos usam o vocabulário de
 `KEY_CHECK_RESULTS` e nunca repassam o texto do provedor (o texto vai só ao log). Há frase na linha
@@ -308,6 +319,26 @@ final chegou, e o evento leva a marca `endFromArrival: true`.
 `endpointMs` vai do fim da fala ao trecho final. `brainFirstTextMs` vai do pedido ao primeiro texto.
 `voiceFirstAudioMs` vai do primeiro `push` ao primeiro áudio. O relógio é o `Clock` da sessão
 (convenção 10).
+
+**Como o evento sai (3c-1).** Quem mede é o motor, com o `Clock` que a sessão passa em
+`PipelineConnectOptions.clock`. O motor emite `pipelineTurnLatency`, e a sessão grava o
+`pipeline_turn_latency` em `call_events`, só com os números, mais `tool` e, depois de uma passagem,
+`agentId`. O zero do fluxo da transcrição é a hora do primeiro áudio mandado a ela. O `endMs` que
+cairia depois da chegada (o relógio do serviço adiantado) vale como a chegada, com `endFromArrival`, e
+nunca dá número negativo. No turno fechado à força (`closeCallerTurn`), vale o `endMs` do último
+parcial, e a chegada é a hora do fechamento.
+- **Um por turno respondido**, no primeiro áudio da resposta entregue ao transporte. O resto do áudio
+  da mesma resposta não emite de novo.
+- **Turno com ferramenta:** sai uma vez, com `tool: true`, quando uma ferramenta rodou antes do
+  primeiro áudio da resposta. O `totalMs` inclui a ferramenta, e o `brainFirstTextMs` é o do pedido
+  que deu o primeiro texto (o que reabriu o cérebro). O orçamento abaixo é "sem ferramenta": a fatia 5
+  separa por `tool`.
+- **Turno sem áudio não emite:** o cérebro que falhou (o "pode repetir?" não é resposta), o teto que
+  barrou o pedido, a resposta vazia e a ligação que acabou antes do primeiro áudio. Nenhum número é
+  inventado.
+- O `turn_latency` de hoje (um por ligação, `turn-latency.ts`) continua como está, também no pipeline.
+- A linha do tempo mostra cada turno, com frase nos três idiomas, e o atendimento mostra a nota da
+  abertura (3.3).
 
 **Orçamento (p95 por turno, sem ferramenta):**
 
@@ -438,7 +469,10 @@ A fatia foi cortada em quatro: a **3a** (o motor com as peças injetadas, sem ba
 (a coluna, as peças montadas na sessão, uma linha por peça, as despedidas prontas, a falha por peça
 até o painel e o `error` não fatal da transcrição), a **3b-2** (DESA-425: o pior caso antes de cada
 pedido ao cérebro, com o `maxTokens`, e a recusa da peça sem preço, na 3.3) e a **3c** (`pipeline_turn_latency`,
-a nota da chave e a corrida da transferência com volta). Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
+a nota da chave e a corrida da transferência com volta). A 3c foi cortada em duas: a **3c-1**
+(DESA-427: o `pipeline_turn_latency`, a nota da chave, a L1 da DESA-421 e as duas ressalvas da
+DESA-426) entrou; a **3c-2** (a transferência: a corrida do fim de chamada na volta e a fala de
+transferência pronta quando a peça cai com `transfer_to_e164`, 3.4) falta. Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
 voz simulada: uma ferramenta no meio da conversa, três linhas no extrato e o teto que dispara a
 despedida pré-sintetizada. Quem já instalou não precisa fazer nada: sem `agents.pipeline`, nada muda.
 A fala aberta e parada morre no `inactivity_timeout` da ElevenLabs (20 s) com `error`. Esta fatia
@@ -446,7 +480,9 @@ decide e testa: ou abre a fala só quando o cérebro começa a responder, ou tra
 fim sem falha.
 A 3.3 confere a chave da organização em toda abertura, mesmo com o cache cheio (nota da revisora no
 #390). Isso pode ser um pedido a mais antes do primeiro áudio. Esta fatia diz quanto ele pesa na 3.5,
-ou mostra que a própria abertura da fala já serve de prova da chave e dispensa o pedido.
+ou mostra que a própria abertura da fala já serve de prova da chave e dispensa o pedido. (3c-1: a nota
+da chave está na 3.3. Sem cache, a síntese prova a chave e o pedido não sai; com cache, ele sai, e o
+tempo dele vai no `call_answered`. O valor real é **não medido** sem chave.)
 
 ### Fatia 4: interrupção
 
