@@ -608,11 +608,23 @@ saudação, um turno pelo cérebro, o fim pela ferramenta `end_call` e as linhas
 `engine` gravado é o simulado de roteiro, então a ligação que caísse no motor direto teria a linha dele. O
 workflow não mudou: o job já roda esse arquivo. `ServerDeps.simulatedPieces` só é ligado pelos testes:
 o painel montado pelo ambiente sai sem ele, e nenhum código fora dos testes o escreve
-(`apps/panel/src/server/simulated-pieces.test.ts`). **Não medido:** no processo de voz, a transcrição e a voz
-simuladas vêm da pasta também num servidor instalado; só o painel recusa gravá-las (`pipeline_piece_test_only`).
-Uma coluna escrita à mão no banco com as peças simuladas abriria a ligação com elas. O e2e do bloco Pipeline
+(`apps/panel/src/server/simulated-pieces.test.ts`). No processo de voz, a transcrição e a voz simuladas vêm da
+pasta também num servidor instalado, e até a 5c só o painel recusava gravá-las: a 5c fecha isso na sessão (abaixo).
+O e2e do bloco Pipeline
 (`pipeline-block.spec.ts`) cobre as ressalvas da DESA-437: o Ouvir que falha (a amostra 404 e o `play()`
 recusado pelo navegador) e o PATCH sem `pipeline`.
+
+**5c, commit 1 (as notas da 5b-2, parecer da DESA-443; DESA-444).** A abertura do pipeline em `call-session.ts`
+recusa a transcrição ou a voz simulada (`simulated`) com o mesmo motivo do 422 do painel, `pipeline_piece_test_only`,
+e a peça, antes de qualquer chave ser lida ou peça abrir, a menos que o processo de voz tenha sido montado com
+`simulatedPieces` (`VoiceServerDeps` e `CallSessionDeps`), que só os testes ligam: a coluna escrita à mão no banco
+não abre a ligação com peças simuladas. O motivo fica fora de `KEY_CHECK_RESULTS`, com frase na linha do tempo nos
+três idiomas e linha no `diagnostico.md` das duas cópias da skill. Depois do fim pedido por ferramenta (o
+`end_call` e a transferência), o resultado da ferramenta não volta ao motor pipeline, porque reabriria o cérebro
+com um pedido que o fim cancelaria e cobraria como estimado: a despedida do `end_call` vai direto à voz, pela
+sessão (`wrapUp`), e o extrato tem só o pedido que respondeu. O motor direto não muda: ele ainda recebe o
+resultado e fala a despedida. A chamada pelo navegador ganhou a prova do corte pelo pior caso **antes** do pedido
+(3b-2): com o teto de 1 centavo, o pedido nem sai.
 
 ### Fatia 6: o ouvido real e a medida de ponta a ponta (ESPERA a R12)
 

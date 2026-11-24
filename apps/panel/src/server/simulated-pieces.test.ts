@@ -66,7 +66,7 @@ describe("a peça simulada do pipeline só por configuração de teste", () => {
     expect("simulatedPieces" in deps).toBe(false);
   });
 
-  it("fora dos testes, `simulatedPieces` só aparece na declaração e na leitura de `requirePipeline`", async () => {
+  it("fora dos testes, `simulatedPieces` só aparece na declaração, na leitura de `requirePipeline` e na da abertura da sessão de voz (fatia 5c)", async () => {
     const uses: string[] = [];
     for (const file of await sources()) {
       const lines = (await readFile(file, "utf8")).split("\n");
@@ -80,6 +80,10 @@ describe("a peça simulada do pipeline só por configuração de teste", () => {
       "apps/panel/src/server/context.ts: simulatedPieces?: boolean;",
       'apps/panel/src/server/pipeline.ts: export async function requirePipeline(q: OrgQuery, deps: Pick<ServerDeps, "simulatedPieces">, choice: PipelineChoice | null | undefined): Promise<void> {',
       "apps/panel/src/server/pipeline.ts: if (id === SIMULATED && deps.simulatedPieces !== true)",
+      "apps/voice/src/call-session.ts: if (piece.id === SIMULATED_PIECE && deps.simulatedPieces !== true) {",
+      "apps/voice/src/call-session.ts: simulatedPieces?: boolean;",
+      "apps/voice/src/server.ts: const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir, decisionModels: deps.decisionModels, ...(deps.simulatedPieces === true && { simulatedPieces: true }) };",
+      "apps/voice/src/server.ts: simulatedPieces?: boolean;",
     ]);
   });
 });

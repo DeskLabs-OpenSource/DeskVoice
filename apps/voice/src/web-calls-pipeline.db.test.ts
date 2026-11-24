@@ -61,6 +61,11 @@ interface Pieces {
   price?: boolean;
   /** A chave da ElevenLabs salva (sem ela, a voz de fora recusa pela chave, antes da confirmação). */
   elevenLabsKey?: boolean;
+  /**
+   * O processo de voz com as peças simuladas aceitas, como os testes o montam (padrão). Falso, é o de um
+   * servidor instalado: a coluna escrita à mão com a peça simulada recusa a ligação (fatia 5c).
+   */
+  simulatedPieces?: boolean;
 }
 
 /** A organização, o agente com as peças e as configurações delas, como a tela gravaria. */
@@ -87,6 +92,8 @@ interface Scene {
   brain: FakeBrain;
   timers: ReturnType<typeof testSchedule>;
   post(): Promise<{ status: number; body: Record<string, string> }>;
+  /** O processo de voz aceita as peças simuladas: a ligação pelo telefone da comparação também. */
+  simulatedPieces: boolean;
 }
 
 async function scene(label: string, agent: AgentOptions, pieces: Pieces = {}): Promise<Scene> {
@@ -113,6 +120,7 @@ async function scene(label: string, agent: AgentOptions, pieces: Pieces = {}): P
     schedule: timers.schedule,
     resolveName: async () => ["192.0.2.53"],
     now: timers.now,
+    ...(pieces.simulatedPieces !== false && { simulatedPieces: true }),
   });
   const internalPort = server.internalPort;
   const post: Scene["post"] = async () => {
@@ -123,7 +131,7 @@ async function scene(label: string, agent: AgentOptions, pieces: Pieces = {}): P
     });
     return { status: response.status, body: (await response.json()) as Record<string, string> };
   };
-  return { organizationId, agentId, brain, timers, post };
+  return { organizationId, agentId, brain, timers, post, simulatedPieces: pieces.simulatedPieces !== false };
 }
 
 interface Browser {
@@ -177,6 +185,7 @@ const piecesLedger = (callId: string) =>
 /** A mesma ligação pelo telefone: a sessão com um transporte manual, numa chamada comum da mesma organização. */
 async function phoneRefusal(made: Scene): Promise<unknown> {
   const harness = await sessionHarness(app, [...enginesWith(made.brain).values()]);
+  if (made.simulatedPieces) harness.deps.simulatedPieces = true;
   try {
     const callId = await createCall(app, made.organizationId, made.agentId, harness.clock.now());
     await startCallSession(harness.deps, { organizationId: made.organizationId, callId, agentId: made.agentId, transport: manualTransport() }).done;
@@ -229,6 +238,10 @@ describe("chamada pelo navegador com o pipeline", { timeout: 120_000 }, () => {
         { pipeline: { ...PIPELINE, synthesizer: "elevenlabs", voiceId: "voz-qualquer" }, elevenLabsKey: true },
         { reason: "pipeline_piece_unconfirmed", engine: "pipeline", piece: "synthesizer", pieceId: "elevenlabs" },
       ],
+      // A coluna escrita à mão no banco com as peças simuladas, num processo de voz montado como o de um
+      // servidor instalado: a mesma recusa do 422 do painel (`pipeline_piece_test_only`), pela primeira
+      // delas, antes de qualquer chave ser lida ou peça abrir (fatia 5c).
+      ["a peça simulada fora da configuração de teste", { simulatedPieces: false }, { reason: "pipeline_piece_test_only", engine: "pipeline", piece: "transcriber", pieceId: "simulated" }],
     ];
     for (const [label, pieces, refusal] of cases) {
       const made = await scene(`web-pipeline-refused ${label}`, { engine: "gemini-live", greeting: "Bom dia." }, pieces);
@@ -265,5 +278,26 @@ describe("chamada pelo navegador com o pipeline", { timeout: 120_000 }, () => {
     expect(call_).toMatchObject({ status: "completed", end_reason: "cost_ceiling", engine: "pipeline" });
     expect(Number(call_.cost_cents)).toBeGreaterThanOrEqual(50);
     expect((await piecesLedger(callId)).filter((row) => row.engine === "brain:openai").map((row) => row.input_tokens)).toEqual([1_000_000]);
+  });
+  it("o mesmo teto pelo pior caso: o pedido ao cérebro que passaria do que sobra nem sai, e a despedida pronta toca (3b-2, B2 da DESA-443)", async () => {
+    // O teto é de 1 centavo, e nada foi gasto (as peças simuladas não custam): o pior caso do pedido
+    // (a entrada mais 4 096 tokens de saída a 400 por milhão, 1,6 centavo) passa do que sobra.
+    const made = await scene("web-pipeline-worst-case", { engine: "gemini-live", greeting: "Bom dia.", costCeilingCents: 1 });
+    made.brain.reply([text("Esta resposta não pode sair."), usage(10, 10)]);
+    const { callId, client } = await call(made);
+    await waitFor(() => client.audioBytes > 0, "the greeting");
+    client.speak(1_200);
+    await waitFor(async () => (await kindsOf(app, callId)).includes("cost_ceiling_reached"), "the cost ceiling");
+    const reached = (await eventsOf(app, callId)).find((event) => event.kind === "cost_ceiling_reached")?.payload;
+    expect(reached).toMatchObject({ ceilingCents: 1, brainWorstCase: true });
+    expect(Number((reached as { brainWorstCaseMicrocents?: number }).brainWorstCaseMicrocents)).toBeGreaterThan(4096 * 400);
+    await waitFor(async () => (await eventsOf(app, callId)).some((event) => event.kind === "transcript_agent" && event.payload.text === FAREWELL_COST_CEILING), "the farewell");
+    made.timers.fire(6000);
+    expect(await endedMessage(client)).toEqual({ type: "ended", status: "completed", reason: "cost_ceiling" });
+    // O pedido nem saiu: nenhum `fetch` ao cérebro, e nenhuma linha dele no extrato.
+    expect(made.brain.fetched()).toBe(0);
+    expect(made.brain.requests).toHaveLength(0);
+    expect((await piecesLedger(callId)).filter((row) => row.engine === "brain:openai")).toEqual([]);
+    expect(await callOf(app, callId)).toMatchObject({ status: "completed", end_reason: "cost_ceiling", engine: "pipeline", channel: "web" });
   });
 });

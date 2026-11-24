@@ -430,6 +430,7 @@ const timeline: TimelineDictionary = {
       notInstalled: "the piece is not installed in this version.",
       unpriced: "the price of {model} is not known. Choose a model with a price.",
       unconfirmed: "the text of the call would leave this server, and nobody confirmed it. Confirm the provider in Settings → Voice.",
+      testOnly: "the simulated piece only serves tests. Choose a real piece in the agent's Pipeline block.",
       unknown: "the piece failed.",
       turnFailed: "A piece failed without dropping the call",
       turnFailedBody: "The conversation went on. When it is the brain, the caller heard a request to repeat.",
@@ -496,6 +497,7 @@ const timeline: TimelineDictionary = {
     attempts_exhausted: "The attempt limit for this person had been reached.",
     pipeline_piece_unpriced: "A piece of the agent's pipeline has no known price. Without a price, the cost of the call cannot be measured, so the call did not start.",
     pipeline_piece_unconfirmed: "A piece of the agent's pipeline sends call data outside this server, and nobody confirmed it. Nothing was sent, and the call did not start.",
+    pipeline_piece_test_only: "A piece of the agent's pipeline is the simulated one, which only serves tests, so the call did not start.",
   },
 };
 

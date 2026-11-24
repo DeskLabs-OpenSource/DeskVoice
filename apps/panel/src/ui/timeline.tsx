@@ -133,7 +133,8 @@ export function Timeline({
    * A peça do motor pipeline que falhou (`engine_failed`, `call_refused` e `pipeline_turn_failed`): a
    * frase sai do código, e nunca do texto do fornecedor, que não chega à linha do tempo. A peça sem
    * preço (`pipeline_piece_unpriced`, 3b-2) diz o modelo; a sem confirmação (`pipeline_piece_unconfirmed`,
-   * seção 9.1) diz onde confirmar. Sem `detail`, a peça não está instalada. Sem
+   * seção 9.1) diz onde confirmar; a simulada fora dos testes (`pipeline_piece_test_only`, fatia 5c) diz
+   * que ela só serve aos testes. Sem `detail`, a peça não está instalada. Sem
    * `piece`, o evento não é do pipeline.
    */
   const pipelineLine = (p: Record<string, unknown>): string | null => {
@@ -145,6 +146,8 @@ export function Timeline({
         ? fill(e.pipeline.unpriced, { model: text(p.model) })
         : text(p.reason) === "pipeline_piece_unconfirmed"
           ? e.pipeline.unconfirmed
+          : text(p.reason) === "pipeline_piece_test_only"
+          ? e.pipeline.testOnly
           : code === ""
           ? e.pipeline.notInstalled
           : ((Object.hasOwn(e.pipeline.reasons, code) ? e.pipeline.reasons[code] : undefined) ?? e.pipeline.unknown);

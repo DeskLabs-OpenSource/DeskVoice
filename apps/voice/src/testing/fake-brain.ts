@@ -28,10 +28,17 @@ export async function startFakeBrain() {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const fetch = ((url: string, init: RequestInit) => globalThis.fetch(url.replace("https://api.openai.com", base), init)) as typeof globalThis.fetch;
+  // Os pedidos que o cérebro abriu, contados na saída: o que é cancelado antes de chegar inteiro aqui
+  // não entra em `requests`, mas entra nesta conta.
+  let fetched = 0;
+  const fetch = ((url: string, init: RequestInit) => {
+    fetched += 1;
+    return globalThis.fetch(url.replace("https://api.openai.com", base), init);
+  }) as typeof globalThis.fetch;
   return {
     fetch,
     requests,
+    fetched: () => fetched,
     reply: (...next: Reply[]) => void replies.push(...next),
     async stop() {
       for (const response of open) response.destroy();

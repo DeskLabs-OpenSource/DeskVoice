@@ -88,7 +88,7 @@ interface Scene {
 }
 
 /** Sobe o processo de voz, faz uma ligação chegar pelo tronco e conecta o áudio dela. */
-async function incomingCall(label: string, agent: AgentOptions, settings: Record<string, unknown> = {}, options: { engines?: Map<string, VoiceEngine>; pipeline?: unknown; secrets?: Record<string, unknown> } = {}): Promise<Scene> {
+async function incomingCall(label: string, agent: AgentOptions, settings: Record<string, unknown> = {}, options: { engines?: Map<string, VoiceEngine>; pipeline?: unknown; secrets?: Record<string, unknown>; simulatedPieces?: boolean } = {}): Promise<Scene> {
   const organizationId = await createOrganization(app, label);
   const agentId = await createAgent(app, organizationId, { greeting: GREETING, tools: ["request_approval", "transfer_to_human", "end_call"], ...agent });
   const trunkId = await createTrunk(app, organizationId, { callerId: "+553133334444" });
@@ -116,6 +116,7 @@ async function incomingCall(label: string, agent: AgentOptions, settings: Record
     schedule: timers.schedule,
     resolveName: async () => ["192.0.2.53"],
     now: timers.now,
+    ...(options.simulatedPieces === true && { simulatedPieces: true }),
   });
 
   const channelId = `canal-${organizationId.slice(0, 8)}`;
@@ -443,7 +444,7 @@ describe("chamada de ponta a ponta pelo pipeline simulado", { timeout: 120_000 }
       "e2e-pipeline",
       { engine: "simulated", script: SCRIPT, tools: ["end_call"] },
       { "recording_notice.text": NOTICE, [brainModelsSetting("openai")]: { fetchedAt: "2026-11-24", models: [{ id: MODEL, label: MODEL, price: PRICE }] } },
-      { engines, pipeline, secrets: { [brainKeySetting("openai")]: encryptSecret("chave-inventada-do-cerebro", secretKey) } },
+      { engines, pipeline, secrets: { [brainKeySetting("openai")]: encryptSecret("chave-inventada-do-cerebro", secretKey) }, simulatedPieces: true },
     );
     const { callId } = scene;
 
@@ -462,6 +463,8 @@ describe("chamada de ponta a ponta pelo pipeline simulado", { timeout: 120_000 }
     expect(events.filter((event) => event.kind === "transcript_user").map((event) => event.payload)).toEqual([expect.objectContaining({ text: CALLER_SAYS })]);
     expect(events.find((event) => event.kind === "tool_called")?.payload).toMatchObject({ name: "end_call" });
     expect(fakeBrain.requests).toHaveLength(1);
+    // Um pedido só saiu: o resultado do `end_call` não reabre o cérebro (fatia 5c).
+    expect(fakeBrain.fetched()).toBe(1);
     expect(JSON.stringify(fakeBrain.requests[0]?.messages.filter((message) => message.role === "user").at(-1))).toContain(CALLER_SAYS);
     expect(await callOf(app, callId)).toMatchObject({ status: "completed", end_reason: "end_call", engine: "pipeline" });
 
@@ -475,9 +478,8 @@ describe("chamada de ponta a ponta pelo pipeline simulado", { timeout: 120_000 }
     );
     expect(new Set(ledger.map((row) => row.engine))).toEqual(new Set(["brain:openai", "synthesizer:simulated", "transcriber:simulated"]));
     expect(ledger.filter((row) => row.engine === "transcriber:simulated")).toHaveLength(1);
-    // A resposta do turno, com os tokens que o cérebro contou (o pedido de depois da ferramenta, cancelado
-    // pelo fim, entra estimado, pela regra da 3.2).
-    expect(ledger.find((row) => row.engine === "brain:openai")).toMatchObject({ model: MODEL, input_tokens: 150, output_tokens: 20, cost_estimated: false });
-    expect(ledger.filter((row) => row.engine === "brain:openai").slice(1).every((row) => row.cost_estimated)).toBe(true);
+    // A resposta do turno, com os tokens que o cérebro contou, e só ela: depois do `end_call`, o resultado
+    // não reabre o cérebro (fatia 5c), e não há o pedido cancelado pelo fim, cobrado como estimado.
+    expect(ledger.filter((row) => row.engine === "brain:openai")).toEqual([{ engine: "brain:openai", model: MODEL, input_tokens: 150, output_tokens: 20, cost_estimated: false }]);
   });
 });

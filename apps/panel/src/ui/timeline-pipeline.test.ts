@@ -85,6 +85,23 @@ describe("linha do tempo: a voz sem a confirmação da 9.1 (fatia 5b-1)", () => 
   });
 });
 
+describe("linha do tempo: a peça simulada fora da configuração de teste (fatia 5c)", () => {
+  it("a recusa diz a peça e que ela só serve aos testes, nos três idiomas, e nenhum código cru", () => {
+    const testOnly = [
+      { id: "1", kind: "call_refused", at: "2026-11-24T12:00:01.000Z", payload: { reason: "pipeline_piece_test_only", engine: "pipeline", piece: "transcriber", pieceId: "simulated" } },
+      { id: "2", kind: "call_ended", at: "2026-11-24T12:00:02.000Z", payload: { status: "refused", reason: "pipeline_piece_test_only", costCents: 0, seconds: 0 } },
+    ] as CallEvent[];
+    for (const [locale, dict] of [["pt-BR", ptBR], ["en", en], ["es", es]] as const) {
+      const html = visible(locale, testOnly);
+      const p = dict.events.pipeline;
+      expect(html).toContain(dict.reasons.pipeline_piece_test_only);
+      expect(html).toContain(p.line.replace("{piece}", p.pieces.transcriber ?? "").replace("{id}", "simulated").replace("{reason}", p.testOnly));
+      expect(html).not.toContain("pipeline_piece_test_only");
+      expect(html).not.toContain(p.notInstalled);
+    }
+  });
+});
+
 describe("linha do tempo: a latência por turno e a nota da abertura do pipeline (fatia 3c-1)", () => {
   const timed = [
     {

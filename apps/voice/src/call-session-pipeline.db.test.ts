@@ -104,7 +104,7 @@ interface Scene {
 async function scene(
   label: string,
   agent: AgentOptions,
-  options: { pipeline?: unknown; transcriber?: StreamingTranscriber; synthesizer?: SpeechSynthesizer; brain?: Brain; brainKey?: boolean; price?: boolean; pieces?: boolean; transport?: ManualTransport } = {},
+  options: { pipeline?: unknown; transcriber?: StreamingTranscriber; synthesizer?: SpeechSynthesizer; brain?: Brain; brainKey?: boolean; price?: boolean; pieces?: boolean; transport?: ManualTransport; simulatedPieces?: boolean } = {},
 ): Promise<Scene> {
   const organizationId = await createOrganization(app, label);
   const agentId = await createAgent(app, organizationId, agent);
@@ -116,7 +116,10 @@ async function scene(
   harness = made;
   if (options.pieces !== false) {
     fakeBrain ??= await startFakeBrain();
-    made.deps.transcribers = new Map([["simulated", options.transcriber ?? pricedTranscriber([]).transcriber]]);
+    // As peças daqui se chamam `simulated`: só abrem com a configuração de teste (fatia 5c).
+    if (options.simulatedPieces !== false) made.deps.simulatedPieces = true;
+    const transcriber = options.transcriber ?? pricedTranscriber([]).transcriber;
+    made.deps.transcribers = new Map([[transcriber.id, transcriber]]);
     made.deps.brains = new Map([["openai", options.brain ?? openai]]);
     made.deps.synthesizers = new Map([["simulated", options.synthesizer ?? pricedVoice().synthesizer]]);
     made.deps.pipelineEngine = createPipelineEngine({ fetch: fakeBrain.fetch, fixedSpeechCache: new FixedSpeechCache() });
@@ -1103,5 +1106,90 @@ describe("a coluna fora da forma e a confirmação que sai com a chave (fatia 5a
     expect((await eventsOf(app, made.callId)).find((event) => event.kind === "call_refused")?.payload).toEqual({ reason: "engine_not_configured", engine: "pipeline", piece: "synthesizer", pieceId: "simulated", detail: "rejected" });
     expect(voice.speaks()).toBe(0);
     expect(fakeBrain?.requests).toHaveLength(0);
+  });
+});
+
+// ---- 5c: as notas da 5b-2 (parecer da DESA-443) ----
+
+describe("as notas da 5b-2 (fatia 5c)", { timeout: 120_000 }, () => {
+  it("a voz simulada escrita à mão na coluna, fora da configuração de teste: call_refused com pipeline_piece_test_only, sem chave lida nem peça aberta", async () => {
+    // A transcrição é outra (não a simulada): a recusa sai pela voz, a segunda peça que o painel confere.
+    const voice = pricedVoice();
+    const ear = pricedTranscriber([]);
+    const real = { ...ear.transcriber, id: "fala-de-verdade" };
+    const made = await scene(
+      "pipeline-test-only",
+      { name: "Recepção", engine: "openai-realtime" },
+      { pipeline: { ...PIPELINE, transcriber: "fala-de-verdade" }, transcriber: real, synthesizer: voice.synthesizer, simulatedPieces: false },
+    );
+    expect(await made.start().done).toMatchObject({ status: "refused", endReason: "pipeline_piece_test_only" });
+    const events = await eventsOf(app, made.callId);
+    expect(events.find((event) => event.kind === "call_refused")?.payload).toEqual({ reason: "pipeline_piece_test_only", engine: "pipeline", piece: "synthesizer", pieceId: "simulated" });
+    expect(events.map((event) => event.kind)).not.toContain("call_answered");
+    // Nada abriu: nem a transcrição, nem a voz (nem as falas prontas), nem o cérebro.
+    expect(ear.sessions).toHaveLength(0);
+    expect(voice.speaks()).toBe(0);
+    expect(fakeBrain?.fetched()).toBe(0);
+    expect(await piecesLedger(made.callId)).toEqual([]);
+    expect((await notificationsOf(app, made.organizationId)).map((notice) => notice.body)).toEqual([
+      "Uma ligação do agente Recepção foi recusada porque a voz (simulated) é a peça simulada, que só serve aos testes. A ligação não começou. Quem ligou ouviu o sinal de falha. Escolha uma peça de verdade no bloco Pipeline do agente e faça uma chamada de teste.",
+    ]);
+  });
+
+  it("a transcrição simulada fora da configuração de teste recusa por ela, a primeira peça conferida", async () => {
+    const ear = pricedTranscriber([]);
+    const made = await scene("pipeline-test-only-ear", { engine: "openai-realtime" }, { pipeline: PIPELINE, transcriber: ear.transcriber, simulatedPieces: false });
+    expect(await made.start().done).toMatchObject({ status: "refused", endReason: "pipeline_piece_test_only" });
+    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "call_refused")?.payload).toEqual({ reason: "pipeline_piece_test_only", engine: "pipeline", piece: "transcriber", pieceId: "simulated" });
+    expect(ear.sessions).toHaveLength(0);
+  });
+
+  it("o end_call com despedida: a voz fala a despedida, sem pedido novo ao cérebro, e o extrato tem um pedido só, medido", async () => {
+    const voice = pricedVoice();
+    const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Era só isso, obrigado.", final: true }]);
+    const made = await scene("pipeline-end-call-farewell", { engine: "openai-realtime", greeting: "Bom dia.", tools: ["end_call"] }, { pipeline: PIPELINE, transcriber: ear.transcriber, synthesizer: voice.synthesizer });
+    const FAREWELL = "Foi um prazer! Tenha um ótimo dia.";
+    fakeBrain?.reply([text("Por nada. "), tool("call_1", "end_call", JSON.stringify({ reason: "A pessoa se despediu.", farewell: FAREWELL })), usage(150, 20)]);
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    made.transport.callerAudio(100);
+    await waitFor(async () => (await eventsOf(app, made.callId)).some((event) => event.kind === "transcript_agent" && event.payload.text === FAREWELL), "the farewell");
+    made.harness.timers.fire(6000);
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "end_call" });
+    await settle();
+    expect(fakeBrain?.fetched()).toBe(1);
+    // A despedida foi dita uma vez, pela voz, e não por um pedido ao cérebro.
+    expect(voice.texts.filter((spoken) => spoken === FAREWELL)).toHaveLength(1);
+    const agentLines = (await eventsOf(app, made.callId)).filter((event) => event.kind === "transcript_agent").map((event) => event.payload.text);
+    expect(agentLines.filter((line) => line === FAREWELL)).toHaveLength(1);
+    expect((await piecesLedger(made.callId)).filter((row) => row.engine === "brain:openai").map((row) => [row.input_tokens, row.output_tokens, row.cost_estimated])).toEqual([[150, 20, false]]);
+  });
+
+  it("o end_call sem despedida: nenhum pedido ao cérebro depois do fim pedido por ferramenta", async () => {
+    const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Pode desligar.", final: true }]);
+    const made = await scene("pipeline-end-call", { engine: "openai-realtime", tools: ["end_call"] }, { pipeline: PIPELINE, transcriber: ear.transcriber });
+    fakeBrain?.reply([tool("call_1", "end_call", JSON.stringify({ reason: "A pessoa pediu para desligar." })), usage(150, 20)]);
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    made.transport.callerAudio(100);
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "end_call" });
+    await settle();
+    expect(fakeBrain?.fetched()).toBe(1);
+    expect((await piecesLedger(made.callId)).filter((row) => row.engine === "brain:openai").map((row) => row.cost_estimated)).toEqual([false]);
+  });
+
+  it("a transferência pedida por ferramenta: nenhum pedido ao cérebro depois dela", async () => {
+    const ear2 = pricedTranscriber([{ afterAudioMs: 100, text: "Quero falar com o financeiro.", final: true }]);
+    const transferred = await scene("pipeline-transfer-no-ask", { engine: "openai-realtime", transferTo: "+5531988887777", tools: ["transfer_to_human"] }, { pipeline: PIPELINE, transcriber: ear2.transcriber });
+    fakeBrain?.reply([tool("t1", "transfer_to_human", JSON.stringify({ reason: "financeiro", summary: "Segunda via." })), usage(20, 5)]);
+    const second = transferred.start();
+    await answered(transferred.callId);
+    await waitFor(() => ear2.sessions.length === 1, "the transcriber to open");
+    transferred.transport.callerAudio(100);
+    expect(await second.done).toMatchObject({ status: "transferred" });
+    await settle();
+    expect(fakeBrain?.fetched()).toBe(1);
   });
 });

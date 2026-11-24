@@ -54,6 +54,8 @@ export interface VoiceServerDeps {
   /** Relógio monotônico da cadência de áudio, em ms. */
   now?: () => number;
   log?: Logger;
+  /** A transcrição e a voz simuladas do pipeline abrem (só os testes ligam: `CallSessionDeps.simulatedPieces`). */
+  simulatedPieces?: boolean;
 }
 
 export interface VoiceServer {
@@ -83,7 +85,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
     if (removed > 0) log("info", "removed partial recordings left by a previous process", { removed });
   }
   const approvals = await createApprovalWaiter(db, { schedule: deps.schedule, log });
-  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir, decisionModels: deps.decisionModels };
+  const sessionDeps: CallSessionDeps = { db, clock, engines: deps.engines, tools: deps.tools, secretKey: deps.secretKey, approvals, schedule: deps.schedule, log, recordingsDir: deps.recordingsDir, decisionModels: deps.decisionModels, ...(deps.simulatedPieces === true && { simulatedPieces: true }) };
   const trunksDeps: TrunksDeps = { db, ari, clock, secretKey: deps.secretKey, file: deps.trunksFile, publicIp: deps.publicIp, owner: deps.trunksOwner, schedule: deps.schedule, resolve: deps.resolveName ?? resolveSipName, log };
   const calls = new AsteriskCalls({ ari, db, clock, log, schedule: deps.schedule });
   const sessions = new Set<CallSession>();

@@ -110,6 +110,9 @@ import { failureTone, realSchedule, type CallTransport, type Schedule, type Tran
 /** O áudio do motor é PCM16 mono 8 kHz: 16 bytes por milissegundo de fala. */
 const PCM16_8K_BYTES_PER_MS = 16;
 
+/** O id da transcrição e da voz de teste do pipeline: as duas se chamam `simulated` na pasta. */
+const SIMULATED_PIECE = "simulated";
+
 export interface CallSessionDeps {
   db: Db;
   clock: Clock;
@@ -137,6 +140,12 @@ export interface CallSessionDeps {
   synthesizers?: Map<string, SpeechSynthesizer>;
   /** O motor pipeline (os testes injetam o `fetch` do cérebro e o cache das falas fixas). Padrão: o da pasta, em `engines`. */
   pipelineEngine?: PipelineEngine;
+  /**
+   * A transcrição e a voz simuladas (`simulated`) só abrem por configuração de teste, como no painel
+   * (`ServerDeps.simulatedPieces`, fatia 5b-2): sem isto, a coluna `agents.pipeline` escrita à mão com
+   * elas recusa a ligação com `pipeline_piece_test_only`. Nenhuma variável de ambiente liga isto.
+   */
+  simulatedPieces?: boolean;
 }
 
 export interface CallSessionInput {
@@ -1098,11 +1107,16 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     }
     // Depois de uma passagem, a sessão que pediu já fechou: o resultado não tem a quem ir. Cancelada
     // pelo provedor, o modelo já não espera o resultado; o `tool_result` gravado diz o que saiu.
-    if (!ending && !transferring && owner === leg && !inFlight.cancelled) owner.voice.sendToolResult(call.id, result);
+    // No pipeline, o resultado de uma ferramenta reabre o cérebro com um pedido novo (3.3). Depois do fim
+    // pedido por ferramenta (o `end_call`, a transferência), esse pedido só seria cancelado pelo fim e
+    // cobrado como estimado: o resultado não vai ao motor, e a despedida vai direto à voz (fatia 5c).
+    const endsPipeline = requestedEnd !== undefined && isPipelineEngine(owner.engine);
+    if (!ending && !transferring && owner === leg && !inFlight.cancelled && !endsPipeline) owner.voice.sendToolResult(call.id, result);
     // Com despedida, a ligação só cai depois de ela ser falada: sem isso o modelo às vezes encerrava
-    // calado, e a pessoa ouvia a ligação cair na cara dela. Quem fala é o próprio modelo, ao receber
-    // o resultado do end_call (que traz a despedida); pedir a fala de novo aqui a repetia.
-    if (requestedEnd && requestedFarewell) wrapUp(null, requestedEnd);
+    // calado, e a pessoa ouvia a ligação cair na cara dela. No motor direto, quem fala é o próprio
+    // modelo, ao receber o resultado do end_call (que traz a despedida); pedir a fala de novo aqui a
+    // repetia. No pipeline, o resultado não volta ao cérebro, e a sessão fala a despedida pela voz.
+    if (requestedEnd && requestedFarewell) wrapUp(endsPipeline ? requestedFarewell : null, requestedEnd);
     else if (requestedEnd) void endOrTransfer(requestedEnd);
   }
 
@@ -1262,9 +1276,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * tempo, como o `brain_unmeasured_without_ceiling` da rotina, e **fica fora** de `KEY_CHECK_RESULTS`:
    * uma chave não fica "sem preço". `pipeline_piece_unconfirmed` (seção 9.1, fatia 5b-1): a voz que leva
    * o texto da ligação para fora do servidor sem a confirmação nomeando o fornecedor. Também fica fora:
-   * a chave pode estar aceita, e o que falta é a confirmação.
+   * a chave pode estar aceita, e o que falta é a confirmação. `pipeline_piece_test_only` (fatia 5c): a
+   * transcrição ou a voz simulada fora da configuração de teste, o mesmo motivo do 422 do painel. Fica fora
+   * pelo mesmo motivo: não é a chave.
    */
-  type EngineRefusal = "engine_not_configured" | "engine_not_responding" | "engine_refused" | "pipeline_piece_unpriced" | "pipeline_piece_unconfirmed";
+  type EngineRefusal = "engine_not_configured" | "engine_not_responding" | "engine_refused" | "pipeline_piece_unpriced" | "pipeline_piece_unconfirmed" | "pipeline_piece_test_only";
   type PieceFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
   /**
    * A peça do pipeline que impediu a abertura. `detail` é o motivo no vocabulário de `KEY_CHECK_RESULTS`
@@ -1299,6 +1315,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const which = piece ? `${PIECE_NAMES[piece.kind]} (${piece.id})` : "as peças do pipeline";
     if (piece && refusedFor === "pipeline_piece_unconfirmed") {
       return `Uma ligação do agente ${agentName} foi recusada porque ${which} leva o texto que o agente fala para fora deste servidor, e ninguém confirmou o envio. Nada foi enviado, e a ligação não começou. Quem ligou ouviu o sinal de falha. Confirme o fornecedor em Configurações → Voz e faça uma chamada de teste.`;
+    }
+    if (piece && refusedFor === "pipeline_piece_test_only") {
+      return `Uma ligação do agente ${agentName} foi recusada porque ${which} é a peça simulada, que só serve aos testes. A ligação não começou. Quem ligou ouviu o sinal de falha. Escolha uma peça de verdade no bloco Pipeline do agente e faça uma chamada de teste.`;
     }
     if (piece?.unpricedModel !== undefined) {
       return `Uma ligação do agente ${agentName} foi recusada porque o preço de ${piece.unpricedModel}, em ${which}, não é conhecido. Sem preço, o custo da ligação não pode ser medido, e a ligação não começou. Quem ligou ouviu o sinal de falha. Escolha um modelo com preço e faça uma chamada de teste.`;
@@ -1346,6 +1365,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // O cérebro sem `chat` não conversa: para o pipeline, é como se não estivesse instalado.
     if (!brain?.chat) return refuse("engine_not_configured", `the brain "${choice.brain}" is not installed or does not chat`, { kind: "brain", id: choice.brain });
     if (!synthesizer) return refuse("engine_not_configured", `the synthesizer "${choice.synthesizer}" is not installed`, { kind: "synthesizer", id: choice.synthesizer });
+    // A peça simulada vem da pasta também num servidor instalado, e só o painel recusava gravá-la: a
+    // coluna escrita à mão no banco abriria a ligação com ela. A recusa é a mesma do painel
+    // (`requirePipeline`), antes de qualquer chave ser lida ou peça abrir.
+    for (const piece of [transcriber, synthesizer]) {
+      if (piece.id === SIMULATED_PIECE && deps.simulatedPieces !== true) {
+        const kind = piece === transcriber ? "transcriber" : "synthesizer";
+        return refuse("pipeline_piece_test_only", `the simulated ${kind} only serves tests`, { kind, id: piece.id });
+      }
+    }
     const transcriberKey = transcriber.keyless ? "" : await readKey(transcriberKeySetting(transcriber.id));
     if (transcriberKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the transcriber ${transcriber.id}`, { kind: "transcriber", id: transcriber.id, detail: "rejected" });
     const brainKey = await readKey(brainKeySetting(brain.id));
