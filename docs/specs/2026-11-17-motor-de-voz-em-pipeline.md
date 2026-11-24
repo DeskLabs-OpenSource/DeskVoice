@@ -239,10 +239,16 @@ chave que falta é recusa de abertura (`call_refused` com `piece`). A recusa de 
 peça recusar, e esse custo entra no extrato da tentativa.
 
 **Teto.** O `reachCeiling` de hoje dispara a despedida. No pipeline, a despedida também custa voz.
-Por isso as três falas fixas da ligação (`FAREWELL.costCeiling`, `costCeilingTransfer` e a fala de
-falha da seção 3.4) são **sintetizadas na abertura** e guardadas em memória. Na hora do teto, o
-áudio já está pronto e não há gasto novo. O custo dessa síntese entra no extrato da ligação que a
-fez. Um cache por processo, com a chave `(organização, sintetizador, voz, modelo, texto)`, evita
+Por isso as falas fixas da ligação (`FAREWELL.costCeiling`, a fala de falha da seção 3.4 e, só
+quando o trecho transfere, `costCeilingTransfer`) são **sintetizadas na abertura** e guardadas em
+memória. A despedida que promete transferência segue a mesma regra de `transferOnFailure` (o agente
+com `transfer_to_e164`, o canal que transfere, a ligação que não voltou de uma transferência): sem
+ela, o teto toca a que não promete, e as falas prontas não crescem (fatia 4, ponta da 3c-2). Na hora
+do teto, o áudio já está pronto e não há gasto novo. O custo dessa síntese entra no extrato da
+ligação que a fez, **mesmo quando a sessão nunca entra na linha**: a abertura que termina durante ou
+logo depois do fim da ligação (o trecho de volta da transferência, a passagem) fecha emitindo esse
+custo, e a sessão o grava, depois do `call_ended` se for o caso. O custo que saiu do provedor
+aparece; a linha de zero medido (o ouvido que fechou sem ouvir nada) não entra. Um cache por processo, com a chave `(organização, sintetizador, voz, modelo, texto)`, evita
 pagar de novo na ligação seguinte com a mesma voz. **O cache não atravessa organizações:** cada
 organização paga e usa só o que a chave dela sintetizou, mesmo quando duas usam o mesmo `voiceId`.
 E a abertura confere a chave da organização a cada ligação, mesmo quando todas as falas vêm do
@@ -306,8 +312,9 @@ no lugar dela a **fala de transferência**, também pré-sintetizada: "Estou com
 vou conseguir continuar. Vou transferir você para uma pessoa da equipe. Um instante, por favor." Depois,
 a ligação é transferida. A sessão pede essa fala no `connect` (`transferOnFailure`), e ela fica pronta
 **no lugar** da fala de falha, com o mesmo cache por organização. O custo dela entra no extrato e no
-teto como o das outras falas prontas. Sem `transfer_to_e164`, nada muda: ela não é sintetizada, e o
-custo das falas prontas é o mesmo (fatia 3c-2).
+teto como o das outras falas prontas. Sem `transfer_to_e164` (ou no canal que não transfere, ou no
+trecho de volta), ela não é sintetizada, nem a despedida do teto que promete transferência (fatia 4,
+ponta da 3c-2).
 O `error` da transcrição sozinho não é fatal (o contrato de `StreamingTranscriptionEvents`): só o
 `closed` derruba a sessão. Os eventos levam `piece`, `pieceId` e `detail` (o código). Os eventos usam o vocabulário de
 `KEY_CHECK_RESULTS` e nunca repassam o texto do provedor (o texto vai só ao log). Há frase na linha

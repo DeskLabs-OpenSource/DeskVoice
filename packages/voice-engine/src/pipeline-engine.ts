@@ -254,6 +254,8 @@ class PipelineSession implements PipelineVoiceSession {
   /** O fim da fala que ainda não foi ao cérebro (vale o último), e o turno da rodada em curso. */
   private pendingTurn: Turn | undefined;
   private roundTurn: Turn | undefined;
+  /** O que a abertura sintetizou e ainda não foi ao extrato. */
+  private openingUsage: { characters: number; costMicrocents?: number } | undefined;
 
   constructor(
     private readonly config: VoiceSessionConfig,
@@ -277,13 +279,24 @@ class PipelineSession implements PipelineVoiceSession {
       const detail = last === undefined ? "" : `: ${messageOf(last)}`;
       this.fail("transcriber", pieces.transcriber.piece.id, last === undefined ? "unreachable" : failureOf(last), `transcrição fechou no meio da ligação (${reason})${detail}`);
     });
+    this.openingUsage = fixedUsage.characters > 0 ? fixedUsage : undefined;
     // Agendado: quem chamou `connect` registra os handlers antes do primeiro evento.
     defer(() => {
       if (this.finished) return;
-      // O custo das falas fixas entra no extrato da ligação que as sintetizou (o que veio do cache, zero caractere).
-      if (fixedUsage.characters > 0) this.synthesizerUsage(fixedUsage.characters, fixedUsage.costMicrocents);
+      this.chargeOpening();
       if (config.greeting) this.say(config.greeting);
     });
+  }
+
+  /**
+   * O custo das falas fixas entra no extrato da ligação que as sintetizou (o que veio do cache, zero
+   * caractere), uma vez. A sessão que fecha antes de entrar na linha (o fim da ligação durante ou logo
+   * depois da abertura) também o emite, antes do `closed`: o custo que saiu do provedor aparece (3c-2).
+   */
+  private chargeOpening(): void {
+    const spent = this.openingUsage;
+    this.openingUsage = undefined;
+    if (spent) this.synthesizerUsage(spent.characters, spent.costMicrocents);
   }
 
   on<K extends keyof VoiceSessionEvents>(event: K, handler: VoiceSessionEvents[K]): void {
@@ -345,6 +358,7 @@ class PipelineSession implements PipelineVoiceSession {
     if (this.finished) return;
     this.finished = true;
     this.stopTalking();
+    this.chargeOpening();
     await this.transcription.close().catch(() => undefined);
     this.emitter.emit("closed", "client");
   }
@@ -643,6 +657,7 @@ class PipelineSession implements PipelineVoiceSession {
       this.emitter.emit("transcript", { speaker: "agent", text });
       this.emitter.emit("audio", speech);
     }
+    this.chargeOpening();
     this.emitter.emit("error", new PipelinePieceError(piece, id, reason, true, message));
     // O ouvido fecha antes do `closed`, para o consumo dele ainda entrar na ligação.
     if (piece !== "transcriber") void this.transcription.close().catch(() => undefined);

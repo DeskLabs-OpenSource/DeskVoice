@@ -1349,6 +1349,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * `fixedSpeech`: ficam prontas na abertura e tocam sem síntese nova. A recusa de uma peça traz o
    * que a abertura já gastou, e esse custo entra no extrato desta tentativa, no agente do trecho.
    */
+  /** As sessões que entraram na linha (`startLeg`): o custo delas vai pelo trecho. */
+  const seatedSessions = new WeakSet<VoiceSession>();
+
   async function connectPipeline(row: AgentRow, config: VoiceSessionConfig): Promise<Opened> {
     const engine = deps.pipelineEngine ?? (defaultPipelineEngine ??= createPipelineEngine());
     const refuse = (reason: EngineRefusal, problem: string, piece?: PieceRefusal): Opened => ({ engine, reason, problem, ...(piece && { piece }) });
@@ -1393,11 +1396,25 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const connecting = engine.connect(config, "", {
         pieces,
         organizationId,
-        fixedSpeech: [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer],
+        // A despedida que promete transferência só fica pronta quando o trecho transfere (a mesma regra):
+        // sem número, o teto toca a outra, e as falas prontas não crescem (fatia 4, ponta da 3c-2).
+        fixedSpeech: transferOnFailure ? [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer] : [FAREWELL.costCeiling],
         ceiling: pipelineCeiling,
         clock,
         ...(transferOnFailure && { transferOnFailure }),
       });
+      // A sessão que abre e nunca entra na linha (o fim durante ou logo depois da abertura) fecha
+      // emitindo o que a abertura sintetizou: o custo que saiu do provedor aparece no extrato, mesmo
+      // depois do fim. A linha de zero medido (o ouvido que fechou sem ouvir nada) não entra. A que
+      // entra na linha é cobrada pelo trecho (`startLeg`), e esta escuta se cala.
+      connecting.then(
+        (session) =>
+          session.on("pieceUsage", (line) => {
+            if (seatedSessions.has(session) || line.costMicrocents === 0) return;
+            void chargePiece(row.id, line).catch(logFailure("could not record pipeline piece usage"));
+          }),
+        () => undefined,
+      );
       const opened = await awaitOpening(engine, connecting);
       if (!("voice" in opened)) return opened;
       const { opening } = await connecting;
@@ -1478,6 +1495,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * motor só começa a emitir no próximo ciclo, e os handlers precisam estar no lugar antes da primeira fala.
    */
   function startLeg(row: AgentRow, legEngine: VoiceEngine, session: VoiceSession, enabled: Map<string, Tool>, baseInstructions: string, analyst?: LegAnalyst): Leg {
+    seatedSessions.add(session);
     // O turno que a guarda tira sem marco aberto conta com o motor desta perna e o marco que ele emite.
     const guardTurn = { engine: legEngine.id, source: legEngine.callerTurnSource };
     const silenceGuard = createSilenceGuard({

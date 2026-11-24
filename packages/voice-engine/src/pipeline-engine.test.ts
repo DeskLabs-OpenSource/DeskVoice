@@ -1165,3 +1165,26 @@ describe("motor pipeline (fatia 3c-2): a fala de transferência pronta", () => {
     expect(voice.opens()).toBe(3);
   });
 });
+
+describe("motor pipeline (fatia 4, ponta 2 da 3c-2): a abertura que ninguém usou também é cobrada", () => {
+  it("a sessão fechada antes do primeiro ciclo emite o custo das falas prontas antes do `closed`, uma vez; a que segue na linha o emite no primeiro ciclo, uma vez", async () => {
+    brain = await startFakeBrain();
+    const engine = createPipelineEngine({ fetch: brain.fetch, fixedSpeechCache: new FixedSpeechCache() });
+    const paid = [...PIPELINE_FAILURE_SPEECH].length;
+    // Fechada no mesmo ciclo da abertura (o fim da ligação durante ou logo depois dela): o custo sai no `close`.
+    const unused = await engine.connect(config, "", { pieces: piecesOf(countedVoice().synthesizer, []), organizationId: "org-a" });
+    const seen: string[] = [];
+    unused.on("pieceUsage", (line) => seen.push(`${line.piece} ${line.characters ?? 0}`));
+    unused.on("closed", () => seen.push("closed"));
+    await unused.close();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(seen.filter((entry) => entry.startsWith("synthesizer"))).toEqual([`synthesizer ${paid}`]);
+    expect(seen.at(-1)).toBe("closed");
+    // Usada: sai no primeiro ciclo, e o `close` depois não cobra de novo.
+    const used = await engine.connect(config, "", { pieces: piecesOf(countedVoice().synthesizer, []), organizationId: "org-b" });
+    const log = record(used);
+    await new Promise((resolve) => setImmediate(resolve));
+    await used.close();
+    expect(log.pieceUsage.filter((line) => line.piece === "synthesizer").map((line) => line.characters)).toEqual([paid]);
+  });
+});
