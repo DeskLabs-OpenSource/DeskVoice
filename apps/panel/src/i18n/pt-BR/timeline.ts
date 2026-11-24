@@ -436,6 +436,7 @@ const timeline = {
         unexpected_response: "o fornecedor respondeu algo fora do formato esperado.",
       } as Record<string, string>,
       notInstalled: "a peça não está instalada nesta versão.",
+      unpriced: "o preço de {model} não é conhecido. Escolha um modelo com preço.",
       unknown: "a peça falhou.",
       turnFailed: "Uma peça falhou sem derrubar a ligação",
       turnFailedBody: "A conversa seguiu. Quando é o cérebro, quem ligou ouviu um pedido para repetir.",
@@ -494,6 +495,7 @@ const timeline = {
     do_not_call: "O número está na lista de não ligar.",
     daily_cap_reached: "O teto diário de ligações desta linha tinha sido atingido.",
     attempts_exhausted: "O limite de tentativas para esta pessoa tinha sido atingido.",
+    pipeline_piece_unpriced: "Uma peça do pipeline do agente não tem preço conhecido. Sem preço, o custo da ligação não pode ser medido, e a ligação não começou.",
   },
 };
 

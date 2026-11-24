@@ -248,14 +248,33 @@ organização paga e usa só o que a chave dela sintetizou, mesmo quando duas us
 E a abertura confere a chave da organização a cada ligação, mesmo quando todas as falas vêm do
 cache: chave recusada é recusa de abertura, com ou sem cache. As duas despedidas chegam ao motor por
 `PipelineConnectOptions.fixedSpeech`, e o `reachCeiling` de hoje as toca por `say` com o mesmo texto:
-o motor acha o áudio pronto e não abre fala nova. Antes de cada pedido ao cérebro, o pipeline também confere se o
-pior caso do pedido (entrada enviada + `max_tokens` × preço) passa do que sobra do teto. Se passar,
-o pedido não sai, e a despedida do teto toca. Isso resolve, no pipeline, a pendência da R12 "reserva
-em voo que passa do pior caso". **Pendente da 3b-2 (DESA-425):** essa conferência, com o
-`BrainChatRequest.maxTokens` (`PIPELINE_BRAIN_MAX_TOKENS` = 4 096) enviado por cada cérebro, e a
-recusa de abrir o pipeline com uma peça sem preço (`pipeline_piece_unpriced`). Até ela, a linha da
-peça sem preço sai com `cost_measured = false`. A 3b-1 pode mesclar sem isso porque ninguém escreve
-em `agents.pipeline` antes da fatia 5.
+o motor acha o áudio pronto e não abre fala nova.
+
+**O pior caso antes de cada pedido ao cérebro (3b-2).** Todo pedido de `chat` leva
+`BrainChatRequest.maxTokens`, que o motor preenche com `PIPELINE_BRAIN_MAX_TOKENS` = 4 096, e cada
+cérebro o manda no campo do provedor: `max_completion_tokens` na OpenAI, `max_tokens` no DeepSeek, no
+OpenRouter e na Anthropic (no lugar dos 16 000 fixos, só no `chat`), e `generationConfig.maxOutputTokens`
+no Gemini. O `completeJson` (a análise e o desfecho) não muda de corpo. Antes de cada pedido, inclusive
+o que reabre o cérebro depois de uma ferramenta, o motor soma a entrada estimada (um token por byte do
+que vai em `messages` e `tools`, a regra do Jev) e `maxTokens`, pelo preço do modelo, e confere contra
+o que sobra do teto, que a sessão entrega por `PipelineConnectOptions.ceiling` (o teto menos o custo
+somado da ligação, em micro-centavos, sem arredondar). Se passar, o pedido não sai, e a sessão toca a
+despedida do teto pronta, como o `reachCeiling` de hoje (`cost_ceiling_reached` com
+`brainWorstCase: true` e o `brainWorstCaseMicrocents`). Isso resolve, no pipeline, a pendência da R12
+"reserva em voo que passa do pior caso". Sem teto, nada é conferido. **Não medido:** os nomes dos
+campos num provedor real, e se 4 096 tokens cortam alguma resposta de ligação.
+
+**A peça sem preço (3b-2).** A sessão recusa abrir o pipeline quando uma peça não tem preço conhecido,
+com ou sem teto: o modelo do cérebro fora da lista `brain.<id>.models` com preço, ou a voz sem
+`pricingOf` para o modelo dela (a escolha não traz modelo da voz: vale o `defaultModel`). Sem teto, a
+linha do extrato sairia sem custo; com teto, a promessa dele não se cumpriria. A transcrição tem
+`pricing` obrigatório no contrato. A recusa é `call_refused` com `piece`, `pieceId`, `model` e o motivo
+`pipeline_piece_unpriced` (o fim da chamada também), com frase na linha do tempo nos três idiomas e
+uma linha no `diagnostico.md` das duas cópias da skill. O motivo **fica fora** de `KEY_CHECK_RESULTS`,
+como o `brain_unmeasured_without_ceiling` da rotina: uma chave não fica "sem preço". Para quem já
+instalou, nada muda (a coluna está nula). Na fatia 5, a tela só oferece modelo e voz com preço, e a
+recusa fica como rede de proteção. O motor, por sua vez, não faz pedido com teto e sem preço do
+cérebro: o pior caso não tem conta.
 
 ### 3.4 A falha (antipadrão 15)
 
@@ -418,7 +437,7 @@ para quem não usa. O carimbo é a hora real (`date -u +%Y%m%dT%H%M%S`), nunca f
 A fatia foi cortada em quatro: a **3a** (o motor com as peças injetadas, sem banco, #567), a **3b-1**
 (a coluna, as peças montadas na sessão, uma linha por peça, as despedidas prontas, a falha por peça
 até o painel e o `error` não fatal da transcrição), a **3b-2** (DESA-425: o pior caso antes de cada
-pedido ao cérebro, com o `maxTokens`, e a recusa da peça sem preço) e a **3c** (`pipeline_turn_latency`,
+pedido ao cérebro, com o `maxTokens`, e a recusa da peça sem preço, na 3.3) e a **3c** (`pipeline_turn_latency`,
 a nota da chave e a corrida da transferência com volta). Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
 voz simulada: uma ferramenta no meio da conversa, três linhas no extrato e o teto que dispara a
 despedida pré-sintetizada. Quem já instalou não precisa fazer nada: sem `agents.pipeline`, nada muda.

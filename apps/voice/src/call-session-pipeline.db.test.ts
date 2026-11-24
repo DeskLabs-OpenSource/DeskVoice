@@ -322,18 +322,67 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
     expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
   });
 
-  it("modelo sem preço: a linha do cérebro sai como não medida (cost_measured falso), nunca como zero medido", async () => {
+  it("modelo do cérebro sem preço, com ou sem teto: call_refused com a peça e pipeline_piece_unpriced, e nada abre nem é pedido", async () => {
+    for (const [label, ceiling] of [["pipeline-unpriced-no-ceiling", 0], ["pipeline-unpriced-ceiling", 50]] as const) {
+      const voice = pricedVoice();
+      const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Oi.", final: true }]);
+      const made = await scene(label, { engine: "openai-realtime", costCeilingCents: ceiling }, { pipeline: PIPELINE, transcriber: ear.transcriber, synthesizer: voice.synthesizer, price: false });
+      expect(await made.start().done, label).toMatchObject({ status: "refused", endReason: "pipeline_piece_unpriced" });
+      const events = await eventsOf(app, made.callId);
+      expect(events.find((event) => event.kind === "call_refused")?.payload, label).toEqual({ reason: "pipeline_piece_unpriced", engine: "pipeline", piece: "brain", pieceId: "openai", model: MODEL });
+      expect(voice.speaks(), label).toBe(0);
+      expect(ear.sessions, label).toHaveLength(0);
+      expect(fakeBrain?.requests, label).toHaveLength(0);
+      expect(await piecesLedger(made.callId), label).toEqual([]);
+    }
+  });
+
+  it("a voz sem preço para o modelo dela: call_refused com a peça synthesizer e o modelo", async () => {
+    const base = pricedVoice();
+    const unpriced: SpeechSynthesizer = { ...base.synthesizer, pricingOf: () => undefined };
+    const made = await scene("pipeline-voice-unpriced", { engine: "openai-realtime", costCeilingCents: 50 }, { pipeline: PIPELINE, synthesizer: unpriced });
+    expect(await made.start().done).toMatchObject({ status: "refused", endReason: "pipeline_piece_unpriced" });
+    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "call_refused")?.payload).toEqual({
+      reason: "pipeline_piece_unpriced",
+      engine: "pipeline",
+      piece: "synthesizer",
+      pieceId: "simulated",
+      model: unpriced.defaultModel,
+    });
+    expect(base.speaks()).toBe(0);
+    expect(await piecesLedger(made.callId)).toEqual([]);
+  });
+
+  it("o pior caso do pedido ao cérebro passa do que sobra do teto: o pedido não sai, e a despedida toca pronta, sem síntese nova", async () => {
+    const voice = pricedVoice();
     const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Oi.", final: true }]);
-    const made = await scene("pipeline-unpriced", { engine: "openai-realtime" }, { pipeline: PIPELINE, transcriber: ear.transcriber, price: false });
-    fakeBrain?.reply([text("Olá."), usage(10, 2)]);
+    // As três falas fixas (296 caracteres) e o aviso de gravação (80) custam 11,28 centavos, a 30 por mil
+    // caracteres. Com teto de 12, sobra menos de 0,72; o pior caso do pedido passa disso só pela saída:
+    // 4 096 tokens a 400 por milhão são 1,64 centavo.
+    const made = await scene("pipeline-worst-case", { engine: "openai-realtime", costCeilingCents: 12 }, { pipeline: PIPELINE, transcriber: ear.transcriber, synthesizer: voice.synthesizer });
+    fakeBrain?.reply([text("Isto não pode sair."), usage(10, 2)]);
     const session = made.start();
     await answered(made.callId);
     await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    // As três falas fixas e o aviso de gravação, já no extrato, sem bater no teto.
+    await waitFor(async () => (await piecesLedger(made.callId)).filter((row) => row.engine === "synthesizer:simulated").length === 2, "the opening speech lines");
+    const speaksAtOpening = voice.speaks();
+    expect(speaksAtOpening).toBe(4);
+    expect(await kindsOf(app, made.callId)).not.toContain("cost_ceiling_reached");
     made.transport.callerAudio(100);
-    await waitFor(async () => (await piecesLedger(made.callId)).some((row) => row.engine === "brain:openai"), "the brain line");
-    made.transport.callerHangup();
-    await session.done;
-    const line = (await piecesLedger(made.callId)).find((row) => row.engine === "brain:openai");
-    expect(line).toMatchObject({ model: MODEL, cost_measured: false, input_tokens: 10, output_tokens: 2 });
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("cost_ceiling_reached"), "the cost ceiling");
+    await waitFor(async () => (await eventsOf(app, made.callId)).some((event) => event.kind === "transcript_agent" && event.payload.text === "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado."), "the farewell");
+    made.harness.timers.fire(6000);
+    const outcome = await session.done;
+    expect(outcome).toMatchObject({ status: "completed", endReason: "cost_ceiling" });
+    expect(fakeBrain?.requests).toHaveLength(0);
+    expect(voice.speaks()).toBe(speaksAtOpening);
+    const reached = (await eventsOf(app, made.callId)).find((event) => event.kind === "cost_ceiling_reached")?.payload;
+    expect(reached).toMatchObject({ ceilingCents: 12, brainWorstCase: true });
+    expect(Number((reached as { brainWorstCaseMicrocents?: number }).brainWorstCaseMicrocents)).toBeGreaterThan(4096 * 400);
+    const ledger = await piecesLedger(made.callId);
+    expect(ledger.some((row) => row.engine === "brain:openai")).toBe(false);
+    // O gasto ficou abaixo do teto: a despedida veio antes, e não depois.
+    expect(outcome.costCents).toBeLessThan(12);
   });
 });

@@ -3,12 +3,13 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import openai from "./brains/openai";
-import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH } from "./pipeline-engine";
+import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_MAX_TOKENS, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH } from "./pipeline-engine";
 import { FixedSpeechCache } from "./synthesis";
 import { createSimulatedSynthesizer, toneFor } from "./synthesizers/simulated";
 import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "./transcribers/simulated";
 import type { Brain, BrainChatEvents } from "./brain";
 import {
+  KEY_CHECK_RESULTS,
   PipelineOpenError,
   PipelinePieceError,
   SynthesizerOpenError,
@@ -30,14 +31,14 @@ type Reply = { status: number; body: string } | Step[];
 /** Servidor HTTP falso, porta 0, que responde SSE em pedaços. `hold` segura o resto até o teste soltar. */
 async function startFakeBrain() {
   const replies: Reply[] = [];
-  const requests: Array<{ messages: Array<Record<string, unknown>>; tools: unknown[] }> = [];
+  const requests: Array<{ messages: Array<Record<string, unknown>>; tools: unknown[]; maxCompletionTokens: unknown }> = [];
   const open = new Set<ServerResponse>();
   const server = createServer((request, response) => {
     let raw = "";
     request.on("data", (chunk: Buffer) => (raw += chunk.toString("utf8")));
     request.on("end", () => {
-      const body = JSON.parse(raw) as { messages: Array<Record<string, unknown>>; tools?: unknown[] };
-      requests.push({ messages: body.messages, tools: body.tools ?? [] });
+      const body = JSON.parse(raw) as { messages: Array<Record<string, unknown>>; tools?: unknown[]; max_completion_tokens?: unknown };
+      requests.push({ messages: body.messages, tools: body.tools ?? [], maxCompletionTokens: body.max_completion_tokens });
       const reply = replies.shift() ?? [{ data: { choices: [{ index: 0, delta: { content: "(sem roteiro)" } }] } }];
       if (!Array.isArray(reply)) {
         response.writeHead(reply.status, { "content-type": "application/json" }).end(reply.body);
@@ -681,5 +682,123 @@ describe("motor pipeline: a abertura", () => {
     expect(log.events).toEqual(["agent: Clínica Boa Vista, bom dia."]);
     expect(brain.requests).toHaveLength(0);
     await session.close();
+  });
+});
+
+describe("motor pipeline (fatia 3b-2): o pior caso antes de cada pedido ao cérebro", () => {
+  const FAREWELL = "Preciso encerrar esta ligação agora.";
+  /** O pior caso do primeiro pedido: a entrada (instruções e a fala, mais as ferramentas, um token por byte) e os 4 096 de saída, a 5 e 40 ¢/M. */
+  const firstWorst = (heard: string): number => {
+    const input =
+      Buffer.byteLength(JSON.stringify([{ role: "system", content: config.instructions }, { role: "user", content: heard }]), "utf8") +
+      Buffer.byteLength(JSON.stringify(config.tools), "utf8");
+    return input * 5 + PIPELINE_BRAIN_MAX_TOKENS * 40;
+  };
+  /** Um teto que quem abre controla: o que sobra, e quem pediu a despedida (que toca por `say`, como o `reachCeiling`). */
+  const ceilingOf = (remaining: () => number | undefined, onReached: (worst: number | undefined) => void) => ({ remainingMicrocents: remaining, reached: onReached });
+
+  it("o pedido leva o teto de saída do motor (`max_completion_tokens` = 4 096 na OpenAI)", async () => {
+    brain = await startFakeBrain();
+    brain.reply([text("Oi."), usage(10, 2)]);
+    const { session, log } = await open(piecesOf(countedVoice().synthesizer, [{ afterAudioMs: 20, text: "Oi.", final: true }]));
+    speak(session, 20);
+    await until(() => log.pieceUsage.some((line) => line.piece === "brain"), "o consumo");
+    expect(brain.requests[0]?.maxCompletionTokens).toBe(PIPELINE_BRAIN_MAX_TOKENS);
+    await session.close();
+  });
+
+  it("pior caso acima do que sobra do teto: o pedido não sai, e a despedida toca pronta, sem síntese nova", async () => {
+    brain = await startFakeBrain();
+    const voice = countedVoice();
+    const worst = firstWorst("Oi.");
+    const reached: Array<number | undefined> = [];
+    // A despedida toca pela própria sessão, como o `reachCeiling` da sessão de ligação faz.
+    const holder: { session?: VoiceSession } = {};
+    const opened = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, text: "Oi.", final: true }]), {
+      fixedSpeech: [FAREWELL],
+      ceiling: ceilingOf(
+        () => worst - 1,
+        (value) => {
+          reached.push(value);
+          holder.session?.say(FAREWELL);
+        },
+      ),
+    });
+    const session = opened.session;
+    holder.session = session;
+    const opensAfterOpening = voice.opens();
+    speak(session, 20);
+    await until(() => reached.length === 1, "a despedida pedida");
+    await until(() => opened.log.audioBytes() === toneFor([...FAREWELL].length).length, "o áudio da despedida");
+    expect(reached).toEqual([worst]);
+    expect(brain.requests).toHaveLength(0);
+    expect(voice.opens()).toBe(opensAfterOpening);
+    expect(opened.log.pieceUsage.filter((line) => line.piece === "brain")).toEqual([]);
+    expect(opened.log.events).toEqual(["activity", "turn ended (transcript)", "user: Oi.", `agent: ${FAREWELL}`]);
+    await session.close();
+  });
+
+  it("pior caso igual ao que sobra: o pedido sai", async () => {
+    brain = await startFakeBrain();
+    brain.reply([text("Oi."), usage(10, 2)]);
+    const worst = firstWorst("Oi.");
+    const reached: Array<number | undefined> = [];
+    const { session, log } = await open(piecesOf(countedVoice().synthesizer, [{ afterAudioMs: 20, text: "Oi.", final: true }]), {
+      ceiling: ceilingOf(() => worst, (value) => reached.push(value)),
+    });
+    speak(session, 20);
+    await until(() => log.pieceUsage.some((line) => line.piece === "brain"), "o consumo");
+    expect(brain.requests).toHaveLength(1);
+    expect(reached).toEqual([]);
+    await session.close();
+  });
+
+  it("a volta da ferramenta também confere: o teto que acabou no meio não deixa o segundo pedido sair", async () => {
+    brain = await startFakeBrain();
+    brain.reply([tool("c1", "agendar", '{"dia":"terça"}'), usage(10, 2)]);
+    let remaining = Number.MAX_SAFE_INTEGER;
+    const reached: Array<number | undefined> = [];
+    const { session, log } = await open(piecesOf(countedVoice().synthesizer, [{ afterAudioMs: 20, text: "Quero terça.", final: true }]), {
+      ceiling: ceilingOf(() => remaining, (value) => reached.push(value)),
+    });
+    speak(session, 20);
+    await until(() => log.toolCalls.length === 1, "a ferramenta");
+    remaining = 0;
+    session.sendToolResult("c1", { ok: true });
+    await until(() => reached.length === 1, "a recusa do segundo pedido");
+    expect(brain.requests).toHaveLength(1);
+    expect(reached[0]).toBeGreaterThan(0);
+    await session.close();
+  });
+
+  it("com teto e sem preço do cérebro, o pior caso não tem conta: o pedido não sai", async () => {
+    brain = await startFakeBrain();
+    const reached: Array<number | undefined> = [];
+    const pieces = piecesOf(countedVoice().synthesizer, [{ afterAudioMs: 20, text: "Oi.", final: true }]);
+    const { session } = await open({ ...pieces, brain: { ...pieces.brain, price: undefined } }, { ceiling: ceilingOf(() => Number.MAX_SAFE_INTEGER, (value) => reached.push(value)) });
+    speak(session, 20);
+    await until(() => reached.length === 1, "a recusa");
+    expect(reached).toEqual([undefined]);
+    expect(brain.requests).toHaveLength(0);
+    await session.close();
+  });
+
+  it("sem teto (`remainingMicrocents` indefinido), nada é conferido, e o pedido sai", async () => {
+    brain = await startFakeBrain();
+    brain.reply([text("Oi."), usage(10, 2)]);
+    const reached: Array<number | undefined> = [];
+    const { session, log } = await open(piecesOf(countedVoice().synthesizer, [{ afterAudioMs: 20, text: "Oi.", final: true }]), {
+      ceiling: ceilingOf(() => undefined, (value) => reached.push(value)),
+    });
+    speak(session, 20);
+    await until(() => log.pieceUsage.some((line) => line.piece === "brain"), "o consumo");
+    expect(brain.requests).toHaveLength(1);
+    expect(reached).toEqual([]);
+    await session.close();
+  });
+
+  it("o motivo da peça sem preço (`pipeline_piece_unpriced`) fica fora do vocabulário da chave", () => {
+    expect(KEY_CHECK_RESULTS).not.toContain("pipeline_piece_unpriced");
+    expect(KEY_CHECK_RESULTS).toHaveLength(10);
   });
 });

@@ -718,13 +718,14 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
 
   /**
    * Confere o teto contra o custo somado da ligação. Alcançado, a despedida começa na hora, sem
-   * esperar o banco, e volta o que registrar na linha do tempo.
+   * esperar o banco, e volta o que registrar na linha do tempo. `beforeSpending`: o pior caso do
+   * próximo pedido ao cérebro do pipeline já passaria do teto (3b-2), e a despedida vem antes do gasto.
    */
-  function reachCeiling(total: number): { ceiling: number; transferTo: string | null } | undefined {
+  function reachCeiling(total: number, beforeSpending = false): { ceiling: number; transferTo: string | null } | undefined {
     const ceiling = costCeiling();
     // Teto zero é "sem teto": com `>=`, zero derrubaria toda chamada na primeira medição. Durante a
     // transferência não há motor para se despedir: se ela voltar, o trecho de volta confere o teto ao abrir.
-    if (!(ceiling > 0 && total >= ceiling) || ending || wrappingUp || transferring) return undefined;
+    if (!(ceiling > 0 && (beforeSpending || total >= ceiling)) || ending || wrappingUp || transferring) return undefined;
     const transferTo = currentTransferTo();
     wrapUp(
       transferTo ? FAREWELL.costCeilingTransfer : FAREWELL.costCeiling,
@@ -733,8 +734,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     return { ceiling, transferTo };
   }
 
-  async function recordCeiling(total: number, reached: { ceiling: number; transferTo: string | null }): Promise<void> {
-    await event("cost_ceiling_reached", { costCents: total, ceilingCents: reached.ceiling });
+  async function recordCeiling(total: number, reached: { ceiling: number; transferTo: string | null }, brainWorstCase?: { microcents: number | undefined }): Promise<void> {
+    // Pelo pior caso, o custo ainda não chegou ao teto: o evento diz qual pedido não saiu (sem preço, sem número).
+    const worst = brainWorstCase && { brainWorstCase: true, ...(brainWorstCase.microcents !== undefined && { brainWorstCaseMicrocents: brainWorstCase.microcents }) };
+    await event("cost_ceiling_reached", { costCents: total, ceilingCents: reached.ceiling, ...worst });
     if (reached.transferTo) await event("transfer_started", { to: reached.transferTo, reason: "cost_ceiling" });
   }
 
@@ -869,8 +872,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * `engine` = `<peça>:<id>`, o modelo e o custo em micro-centavos, no agente do trecho. Entra no total
    * da ligação e no teto, como o filtro. A linha que chega depois do `closed` (o cérebro cancelado no
    * fim) também entra. Sem `costMicrocents`, o custo **não foi medido**: a linha sai com
-   * `cost_measured = false`, como a da rotina de desfecho, e nunca como zero medido. Quem impede abrir
-   * com peça sem preço é a 3b-2 (DESA-425).
+   * `cost_measured = false`, como a da rotina de desfecho, e nunca como zero medido. Com a recusa da
+   * peça sem preço na abertura (`pipeline_piece_unpriced`, 3b-2), isso não deveria acontecer: fica como rede.
    */
   async function chargePiece(agentId: string, line: PieceUsageLine): Promise<void> {
     const measured = line.costMicrocents !== undefined;
@@ -900,6 +903,25 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     await q.exec("update calls set cost_cents = $2 where id = $1", [callId, callCents()]);
     if (reached) await recordCeiling(callCents(), reached);
   }
+
+  /**
+   * O teto conferido pelo motor pipeline antes de cada pedido ao cérebro (desenho do pipeline, seção
+   * 3.3, fatia 3b-2): o que sobra, em micro-centavos, do teto menos o custo somado da ligação (sem
+   * arredondar), e a despedida quando o pior caso do pedido passaria disso. O motor não faz o pedido,
+   * e a despedida toca pronta (`fixedSpeech`), sem síntese nova.
+   */
+  const pipelineCeiling = {
+    remainingMicrocents(): number | undefined {
+      const ceiling = costCeiling();
+      if (!(ceiling > 0)) return undefined;
+      return ceiling * MICROCENTS_PER_CENT - (costCents * MICROCENTS_PER_CENT + decisionMicrocents + pipelineMicrocents);
+    },
+    reached(worstCaseMicrocents: number | undefined): void {
+      log("info", "the worst case of the next brain request would pass the cost ceiling; the request was not sent", { worstCaseMicrocents: worstCaseMicrocents ?? null });
+      const reached = reachCeiling(callCents(), true);
+      if (reached) void recordCeiling(callCents(), reached, { microcents: worstCaseMicrocents }).catch(logFailure("could not record the cost ceiling"));
+    },
+  };
 
   /** Guarda uma fala para o `state` do analista: só as últimas, de qualquer trecho. */
   function rememberTurn(turn: AnalystTurn): void {
@@ -1261,13 +1283,18 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   const toolsFor = (names: readonly string[], targets: readonly HandoffTarget[]): Map<string, Tool> =>
     enabledToolsFor({ installed: deps.tools, names, targets, canTransfer, returned: returned !== undefined, log });
 
-  type EngineRefusal = "engine_not_configured" | "engine_not_responding" | "engine_refused";
+  /**
+   * `pipeline_piece_unpriced` (3b-2): uma peça do pipeline sem preço conhecido. É motivo da linha do
+   * tempo, como o `brain_unmeasured_without_ceiling` da rotina, e **fica fora** de `KEY_CHECK_RESULTS`:
+   * uma chave não fica "sem preço".
+   */
+  type EngineRefusal = "engine_not_configured" | "engine_not_responding" | "engine_refused" | "pipeline_piece_unpriced";
   type PieceFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
   /**
    * A peça do pipeline que impediu a abertura. `detail` é o motivo no vocabulário de `KEY_CHECK_RESULTS`
    * (a chave que falta é `rejected`, como na peça de transcrição); ausente, a peça não está instalada.
    */
-  type PieceRefusal = { kind: PipelinePieceKind; id: string; detail?: PieceFailure };
+  type PieceRefusal = { kind: PipelinePieceKind; id: string; detail?: PieceFailure; unpricedModel?: string };
   type Opened = { engine: VoiceEngine; voice: VoiceSession } | { engine?: VoiceEngine; reason: EngineRefusal; problem: string; piece?: PieceRefusal };
 
   /** O trecho deste agente abre o pipeline: a coluna preenchida, e a chamada não é a simulada (que troca o motor). */
@@ -1276,17 +1303,26 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   /** O que a linha do tempo grava de uma recusa: com peça do pipeline, só os códigos; o texto fica no log. */
   const refusalPayload = (opened: { engine?: VoiceEngine; reason: EngineRefusal; problem: string; piece?: PieceRefusal }, engineId: string): object =>
     opened.piece
-      ? { reason: opened.reason, engine: "pipeline", piece: opened.piece.kind, pieceId: opened.piece.id, ...(opened.piece.detail && { detail: opened.piece.detail }) }
+      ? { reason: opened.reason, engine: "pipeline", piece: opened.piece.kind, pieceId: opened.piece.id, ...(opened.piece.detail && { detail: opened.piece.detail }), ...(opened.piece.unpricedModel !== undefined && { model: opened.piece.unpricedModel }) }
       : { reason: opened.reason, engine: engineId, detail: opened.problem };
 
   /** A peça do pipeline que caiu ou não abriu, para `engine_failed`: só os códigos, nunca o texto do provedor. */
-  const pieceFailurePayload = (piece: PieceRefusal): object => ({ engine: "pipeline", piece: piece.kind, pieceId: piece.id, ...(piece.detail && { detail: piece.detail }) });
+  const pieceFailurePayload = (piece: PieceRefusal): object => ({
+    engine: "pipeline",
+    piece: piece.kind,
+    pieceId: piece.id,
+    ...(piece.detail && { detail: piece.detail }),
+    ...(piece.unpricedModel !== undefined && { reason: "pipeline_piece_unpriced", model: piece.unpricedModel }),
+  });
 
   const PIECE_NAMES: Record<PipelinePieceKind, string> = { transcriber: "a transcrição", brain: "o cérebro", synthesizer: "a voz" };
 
   /** O aviso do painel quando o pipeline não abriu: a peça e o código, e o que conferir. O texto do provedor fica no log. */
   function pipelineRefusalNotice(agentName: string, piece: PieceRefusal | undefined): string {
     const which = piece ? `${PIECE_NAMES[piece.kind]} (${piece.id})` : "as peças do pipeline";
+    if (piece?.unpricedModel !== undefined) {
+      return `Uma ligação do agente ${agentName} foi recusada porque o preço de ${piece.unpricedModel}, em ${which}, não é conhecido. Sem preço, o custo da ligação não pode ser medido, e a ligação não começou. Quem ligou ouviu o sinal de falha. Escolha um modelo com preço e faça uma chamada de teste.`;
+    }
     const why = !piece ? "a escolha das peças gravada no agente está fora da forma" : piece.detail === undefined ? "a peça não está instalada nesta versão" : `o motivo foi ${piece.detail}`;
     return `Uma ligação do agente ${agentName} foi recusada porque ${which} não abriu: ${why}. Quem ligou ouviu o sinal de falha. Confira a chave e a conta do fornecedor dessa peça em Configurações → Inteligência artificial e faça uma chamada de teste.`;
   }
@@ -1330,18 +1366,24 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (brainKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the brain ${brain.id}`, { kind: "brain", id: brain.id, detail: "rejected" });
     const synthesizerKey = synthesizer.keyless ? "" : await readKey(synthesizerKeySetting(synthesizer.id));
     if (synthesizerKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the synthesizer ${synthesizer.id}`, { kind: "synthesizer", id: synthesizer.id, detail: "rejected" });
-    // O preço vem só da lista que a tela gravou. Ausente, o custo do cérebro não é medido (a recusa é da 3b-2).
+    // O preço vem só da lista que a tela gravou. Peça sem preço conhecido não abre, com ou sem teto
+    // (3b-2): sem teto, a linha do extrato sairia sem custo; com teto, a promessa dele não se cumpriria.
     const models = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, brainModelsSetting(brain.id)]);
     const price: BrainPrice | undefined = storedBrainPrices.safeParse(models?.value).data?.models.find((model) => model.id === choice.model)?.price;
+    if (price === undefined) return refuse("pipeline_piece_unpriced", `the model ${choice.model} of the brain ${brain.id} has no known price`, { kind: "brain", id: brain.id, unpricedModel: choice.model });
+    // A voz cobra pelo modelo dela, e a escolha não traz modelo: vale o padrão da peça. A transcrição tem `pricing` obrigatório.
+    if (synthesizer.pricingOf(synthesizer.defaultModel) === undefined) {
+      return refuse("pipeline_piece_unpriced", `the model ${synthesizer.defaultModel} of the synthesizer ${synthesizer.id} has no known price`, { kind: "synthesizer", id: synthesizer.id, unpricedModel: synthesizer.defaultModel });
+    }
     const pieces: PipelinePieces = {
       transcriber: { piece: transcriber, apiKey: transcriberKey },
-      brain: { piece: brain, apiKey: brainKey, model: choice.model, ...(price && { price }) },
+      brain: { piece: brain, apiKey: brainKey, model: choice.model, price },
       synthesizer: { piece: synthesizer, apiKey: synthesizerKey, voiceId: choice.voiceId },
     };
     const endedProblem = "the call ended before the engine connected";
     if (ending) return refuse("engine_not_configured", endedProblem);
     try {
-      return await awaitOpening(engine, engine.connect(config, "", { pieces, organizationId, fixedSpeech: [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer] }));
+      return await awaitOpening(engine, engine.connect(config, "", { pieces, organizationId, fixedSpeech: [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer], ceiling: pipelineCeiling }));
     } catch (error) {
       if (!(error instanceof PipelineOpenError)) throw error;
       // O texto do provedor fica no log; a linha do tempo e o aviso levam só a peça e o código.

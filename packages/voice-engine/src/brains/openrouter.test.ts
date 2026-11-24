@@ -293,6 +293,7 @@ const CHAT_REQUEST = {
   messages: [{ role: "user" as const, content: "Oi" }],
   tools: [{ name: "agendar", description: "Marca um horário.", parameters: { type: "object" } }],
   timeoutMs: 5_000,
+  maxTokens: 321,
 };
 
 /** `fetch` falso que responde SSE (ou um erro) e guarda o pedido. */

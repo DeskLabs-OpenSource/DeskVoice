@@ -428,6 +428,7 @@ const timeline: TimelineDictionary = {
         unexpected_response: "el proveedor respondió algo fuera del formato esperado.",
       } as Record<string, string>,
       notInstalled: "la pieza no está instalada en esta versión.",
+      unpriced: "el precio de {model} no se conoce. Elige un modelo con precio.",
       unknown: "la pieza falló.",
       turnFailed: "Una pieza falló sin cortar la llamada",
       turnFailedBody: "La conversación siguió. Cuando es el cerebro, quien llamó escuchó un pedido para repetir.",
@@ -486,6 +487,7 @@ const timeline: TimelineDictionary = {
     do_not_call: "El número está en la lista de no llamar.",
     daily_cap_reached: "Se había alcanzado el tope diario de llamadas de esta línea.",
     attempts_exhausted: "Se había alcanzado el límite de intentos para esta persona.",
+    pipeline_piece_unpriced: "Una pieza del pipeline del agente no tiene precio conocido. Sin precio, el costo de la llamada no se puede medir, y la llamada no comenzó.",
   },
 };
 

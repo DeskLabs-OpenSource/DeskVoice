@@ -144,6 +144,7 @@ const brain: Brain = {
       failureOf: completionFailureOf,
       includeUsage: true,
       usageOf,
+      maxTokensField: "max_tokens",
     });
   },
 };

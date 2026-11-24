@@ -663,6 +663,18 @@ export interface PipelineConnectOptions extends ConnectOptions {
    * com o mesmo texto.
    */
   fixedSpeech?: readonly string[];
+  /**
+   * O teto de custo da ligação, conferido antes de cada pedido ao cérebro (desenho do pipeline, seção
+   * 3.3). `remainingMicrocents` é o que sobra do teto agora, em micro-centavos, ou `undefined` sem
+   * teto. Quando o pior caso do pedido (entrada estimada + `maxTokens` × preço) passa disso, o pedido
+   * não sai, e o motor chama `reached(worstCaseMicrocents)`: quem abriu a ligação toca a despedida do
+   * teto por `say`, com o áudio já pronto em `fixedSpeech`. Com teto e sem preço do modelo, o pior caso
+   * não tem conta, o pedido também não sai, e `reached` recebe `undefined`. Ausente, o motor não confere.
+   */
+  ceiling?: {
+    remainingMicrocents(): number | undefined;
+    reached(worstCaseMicrocents: number | undefined): void;
+  };
 }
 
 /**

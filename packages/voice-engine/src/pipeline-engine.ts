@@ -64,6 +64,12 @@ import {
  * vem "seguido de `closed` quando é fatal"). Vira `error` não fatal, e a conversa segue. Só o `closed`
  * derruba a sessão, com o motivo do último `error` quando ele veio tipado (`TranscriberOpenError`).
  *
+ * **O pior caso antes de cada pedido ao cérebro** (3.3, fatia 3b-2). Com `ceiling`, o motor soma a
+ * entrada estimada (um token por byte do que vai em `messages` e `tools`) e o teto de saída
+ * (`PIPELINE_BRAIN_MAX_TOKENS`), pelo preço do modelo. Passou do que sobra do teto, o pedido não sai, e
+ * quem abriu toca a despedida pronta (`ceiling.reached`). Sem preço conhecido, o pior caso não tem
+ * conta: com teto, o pedido também não sai (a sessão já recusa abrir assim; isto é a rede de proteção).
+ *
  * **A recusa de abertura** é `PipelineOpenError`: a peça, o motivo e o que a abertura já gastou (as
  * falas fixas sintetizadas antes de a outra peça recusar), para o custo entrar no extrato da tentativa.
  */
@@ -74,6 +80,12 @@ export const PIPELINE_FAILURE_SPEECH = "Estou com um problema técnico e não vo
 export const PIPELINE_BRAIN_RETRY_SPEECH = "Desculpe, não consegui responder agora. Pode repetir, por favor?";
 /** Prazo de um pedido ao cérebro. Menor que o `inactivity_timeout` de 20 s da ElevenLabs, de propósito. */
 export const BRAIN_TIMEOUT_MS = 15_000;
+/**
+ * O teto de saída de cada pedido ao cérebro (`BrainChatRequest.maxTokens`, decisão (a) da DESA-420).
+ * Uma fala de ligação cabe com folga, e o pior caso do pedido fica pequeno o bastante para não
+ * recusar à toa um pedido perto do teto de custo. **Não medido:** se corta alguma resposta real.
+ */
+export const PIPELINE_BRAIN_MAX_TOKENS = 4096;
 /** Falhas seguidas do cérebro que encerram a ligação (seção 3.4). */
 const BRAIN_FAILURES_TO_GIVE_UP = 2;
 
@@ -194,7 +206,7 @@ class PipelineSession implements VoiceSession {
     private readonly transcription: StreamingTranscription,
     private readonly fixedAudio: Map<string, Buffer>,
     fixedUsage: { characters: number; costMicrocents?: number },
-    private readonly options: { fetch?: typeof fetch; brainTimeoutMs: number; schedule?: PipelineConnectOptions["schedule"] },
+    private readonly options: { fetch?: typeof fetch; brainTimeoutMs: number; schedule?: PipelineConnectOptions["schedule"]; ceiling?: PipelineConnectOptions["ceiling"] },
     defer: Defer,
   ) {
     if (config.instructions !== "") this.history.push({ role: "system", content: config.instructions });
@@ -327,9 +339,15 @@ class PipelineSession implements VoiceSession {
     const { piece: brain, apiKey, model } = this.pieces.brain;
     if (!brain.chat) return this.fail("brain", brain.id, "unexpected_response", "o cérebro não conversa (sem `chat`)");
     for (const text of this.guidance.splice(0)) this.history.push({ role: "system", content: text });
-    this.busy = true;
     const messages = [...this.history];
-    const chat = brain.chat(apiKey, { model, messages, tools: this.config.tools, timeoutMs: this.options.brainTimeoutMs }, { fetch: this.options.fetch });
+    const inputTokens = bytesOf(messages) + (this.config.tools.length > 0 ? bytesOf(this.config.tools) : 0);
+    if (this.overCeiling(inputTokens)) return;
+    this.busy = true;
+    const chat = brain.chat(
+      apiKey,
+      { model, messages, tools: this.config.tools, timeoutMs: this.options.brainTimeoutMs, maxTokens: PIPELINE_BRAIN_MAX_TOKENS },
+      { fetch: this.options.fetch },
+    );
     this.chat = chat;
     let text = "";
     const calls: BrainToolCall[] = [];
@@ -338,7 +356,7 @@ class PipelineSession implements VoiceSession {
     let end: { ok: true } | { ok: false; status: number | null } | { cancelled: true } | undefined;
     // O que saiu e o que voltou, para estimar o pedido que terminou sem consumo declarado.
     const sent = (): Usage => ({
-      inputTokens: bytesOf(messages) + (this.config.tools.length > 0 ? bytesOf(this.config.tools) : 0),
+      inputTokens,
       outputTokens: bytesOf(text) + calls.reduce((sum, call) => sum + bytesOf(call.args), 0),
     });
     const charge = (): void => {
@@ -375,6 +393,24 @@ class PipelineSession implements VoiceSession {
       utterance?.end();
       this.brainFailed(text, failure, status);
     });
+  }
+
+  /**
+   * O pior caso do pedido contra o que sobra do teto (3.3): entrada estimada + `maxTokens` × preço.
+   * Passou, o pedido não sai, e quem abriu toca a despedida pronta. Sem preço, não há conta: com teto,
+   * o pedido também não sai. Sem `ceiling` ou sem teto, nada é conferido.
+   */
+  private overCeiling(inputTokens: number): boolean {
+    const remaining = this.options.ceiling?.remainingMicrocents();
+    if (remaining === undefined) return false;
+    const { price } = this.pieces.brain;
+    const worst = price === undefined ? undefined : estimateCostMicrocents(price, { inputTokens, outputTokens: PIPELINE_BRAIN_MAX_TOKENS });
+    if (worst !== undefined && worst <= remaining) return false;
+    // A rodada acaba aqui, sem pedido: o que esperava entra no histórico, e a despedida vem depois dele.
+    this.busy = false;
+    this.history.push(...this.waiting.splice(0));
+    this.options.ceiling?.reached(worst);
+    return true;
   }
 
   private answered(text: string, calls: BrainToolCall[]): void {
@@ -501,8 +537,8 @@ class PipelineSession implements VoiceSession {
    * O custo de um pedido ao cérebro, pela regra da seção 3.2: a recusa HTTP (fora de 2xx) com `{}` é
    * zero medido. Em qualquer outro fim, `{}` é consumo não declarado (a escrita em cache da Anthropic,
    * por exemplo): com o preço conhecido, a linha sai **estimada** pelo que foi e voltou, um token por
-   * byte (a regra do Jev), nunca zero. Sem preço, o custo fica ausente (não medido); a regra que impede
-   * abrir com peça sem preço é da 3b-2.
+   * byte (a regra do Jev), nunca zero. Sem preço, o custo fica ausente (não medido); a sessão recusa
+   * abrir com peça sem preço (`pipeline_piece_unpriced`), então isso só sobra para quem abre sem ela.
    */
   private brainUsage(usage: Usage, estimated: boolean, end: { ok: true } | { ok: false; status: number | null } | { cancelled: true }, sent: () => Usage): void {
     const { piece, model, price } = this.pieces.brain;
@@ -572,7 +608,7 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
         heard.value,
         fixed.value.audio,
         fixed.value.usage,
-        { fetch: engineOptions.fetch, brainTimeoutMs: engineOptions.brainTimeoutMs ?? BRAIN_TIMEOUT_MS, schedule: options.schedule },
+        { fetch: engineOptions.fetch, brainTimeoutMs: engineOptions.brainTimeoutMs ?? BRAIN_TIMEOUT_MS, schedule: options.schedule, ceiling: options.ceiling },
         defer,
       );
     },

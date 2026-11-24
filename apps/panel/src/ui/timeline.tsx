@@ -131,14 +131,20 @@ export function Timeline({
   };
   /**
    * A peça do motor pipeline que falhou (`engine_failed`, `call_refused` e `pipeline_turn_failed`): a
-   * frase sai do código, e nunca do texto do fornecedor, que não chega à linha do tempo. Sem `detail`,
-   * a peça não está instalada. Sem `piece`, o evento não é do pipeline.
+   * frase sai do código, e nunca do texto do fornecedor, que não chega à linha do tempo. A peça sem
+   * preço (`pipeline_piece_unpriced`, 3b-2) diz o modelo. Sem `detail`, a peça não está instalada. Sem
+   * `piece`, o evento não é do pipeline.
    */
   const pipelineLine = (p: Record<string, unknown>): string | null => {
     const kind = text(p.piece);
     if (kind === "") return null;
     const code = text(p.detail);
-    const why = code === "" ? e.pipeline.notInstalled : (Object.hasOwn(e.pipeline.reasons, code) ? e.pipeline.reasons[code] : undefined) ?? e.pipeline.unknown;
+    const why =
+      text(p.reason) === "pipeline_piece_unpriced"
+        ? fill(e.pipeline.unpriced, { model: text(p.model) })
+        : code === ""
+          ? e.pipeline.notInstalled
+          : ((Object.hasOwn(e.pipeline.reasons, code) ? e.pipeline.reasons[code] : undefined) ?? e.pipeline.unknown);
     return fill(e.pipeline.line, { piece: (Object.hasOwn(e.pipeline.pieces, kind) ? e.pipeline.pieces[kind] : undefined) ?? kind, id: text(p.pieceId), reason: why });
   };
 
