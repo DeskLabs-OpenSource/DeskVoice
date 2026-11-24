@@ -1187,6 +1187,24 @@ describe("motor pipeline (fatia 4, ponta 2 da 3c-2): a abertura que ninguém uso
     await used.close();
     expect(log.pieceUsage.filter((line) => line.piece === "synthesizer").map((line) => line.characters)).toEqual([paid]);
   });
+
+  it("a peça que cai antes do primeiro ciclo: o custo das falas prontas sai na falha, antes do `closed`, uma vez (lacuna da DESA-433)", async () => {
+    brain = await startFakeBrain();
+    const engine = createPipelineEngine({ fetch: brain.fetch, fixedSpeechCache: new FixedSpeechCache() });
+    const paid = [...PIPELINE_FAILURE_SPEECH].length;
+    let heard: SimulatedTranscription | undefined;
+    const transcriber = createSimulatedTranscriber({ script: [], onSession: (opened) => (heard = opened) });
+    const session = await engine.connect(config, "", { pieces: piecesOf(countedVoice().synthesizer, [], { transcriber: { piece: transcriber, apiKey: "" } }), organizationId: "org-a" });
+    const seen: string[] = [];
+    session.on("pieceUsage", (line) => seen.push(`${line.piece} ${line.characters ?? 0}`));
+    session.on("closed", (reason) => seen.push(`closed ${reason}`));
+    // A transcrição cai no mesmo ciclo da abertura: o primeiro ciclo (que cobraria a abertura) nunca roda.
+    emitOn(heard, "closed", "failed");
+    await new Promise((resolve) => setImmediate(resolve));
+    await session.close();
+    expect(seen.filter((entry) => entry.startsWith("synthesizer"))).toEqual([`synthesizer ${paid}`]);
+    expect(seen.indexOf(`synthesizer ${paid}`)).toBeLessThan(seen.indexOf("closed failed"));
+  });
 });
 
 // ---- fatia 4: a interrupção ----

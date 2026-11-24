@@ -1,4 +1,5 @@
 import { agentAnalysisBrain, type AgentAnalysisBrain, callerMessageBlock, checkVocabulary, DROP_FOLLOW_UP_MESSAGE_MAX, ORGANIZATION_SUSPENDED, organizationSuspended, toE164, type OrgQuery } from "@deskvoice/core";
+import { pipelineChoice } from "@deskvoice/voice-engine/pipeline-choice";
 import { z } from "zod";
 import { checkAnalysisBrain } from "./brains";
 import { ApiError } from "./context";
@@ -37,7 +38,7 @@ export const AGENT_COLUMNS = `id, name, role_label as "roleLabel", instructions,
   enabled, max_call_seconds as "maxCallSeconds", cost_ceiling_cents as "costCeilingCents", transfer_to_e164 as "transferTo", transfer_returns_to_agent as "transferReturnsToAgent", caller_idle_guard as "callerIdleGuard",
   follow_up_owner_user_id as "followUpOwnerUserId", vocabulary, listening_environment as "listeningEnvironment",
   agent_handoff_targets as "agentHandoffTargets", drop_follow_up as "dropFollowUp",
-  drop_follow_up_message as "dropFollowUpMessage", analyst_id as "analystId", analysis_brain as "analysisBrain", created_at as "createdAt", updated_at as "updatedAt"`;
+  drop_follow_up_message as "dropFollowUpMessage", analyst_id as "analystId", analysis_brain as "analysisBrain", pipeline, created_at as "createdAt", updated_at as "updatedAt"`;
 
 const agentFields = z.object({
   name: z.string().trim().min(1).max(80),
@@ -79,6 +80,9 @@ const agentFields = z.object({
   // Quem lê a ligação deste agente (R4, fatia 5); nulo segue a organização (`calls.analysis_brain`).
   // A rota confere o cérebro e o modelo (`requireAnalysisBrain`) com a mesma regra da organização.
   analysisBrain: agentAnalysisBrain.nullable(),
+  // As peças do motor pipeline (R5, fatia 5a): a mesma forma que a sessão lê na abertura. Nula, o
+  // agente abre o motor de `engine`, como sempre. A rota confere cada peça (`requirePipeline`).
+  pipeline: pipelineChoice.nullable(),
 });
 export type AgentValues = z.output<typeof agentFields>;
 // `acceptUnmeasured` vale só para este pedido, como em `calls.analysis_brain`: não é gravado.
@@ -106,6 +110,7 @@ export const AGENT_DEFAULTS: Omit<AgentValues, "name" | "engine"> = {
   dropFollowUpMessage: null,
   analystId: null,
   analysisBrain: null,
+  pipeline: null,
 };
 
 export const TRUNK_COLUMNS = `id, name, host, username, auth_mode as "authMode", caller_id_e164 as "callerId",

@@ -57,6 +57,8 @@ import {
   estimateCostCents,
   leaks,
   leakShingles,
+  pipelineChoice,
+  pricePipeline,
   readAnalystDecision,
   readSpeechDecision,
   speechFilterQuestions,
@@ -64,13 +66,13 @@ import {
   type AnalystConfig,
   type AnalystTurn,
   type Brain,
-  type BrainPrice,
   type DecideResult,
   type DecisionModel,
   type EnginePricing,
   type KeyCheckResult,
   type PieceUsageLine,
   type PipelineEngine,
+  type PipelineChoice,
   type PipelineOpening,
   type PipelinePieceKind,
   type PipelinePieces,
@@ -82,7 +84,6 @@ import {
   type VoiceSession,
   type VoiceSessionConfig,
 } from "@deskvoice/voice-engine";
-import { z } from "zod";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
@@ -228,35 +229,6 @@ interface AgentRow {
 
 const AGENT_COLUMNS =
   "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets, analyst_id, transfer_returns_to_agent, caller_idle_guard, pipeline";
-
-/** A escolha gravada em `agents.pipeline`. Fora da forma (gravada à mão), o pipeline não abre. */
-const pipelineChoice = z.object({
-  transcriber: z.string().min(1),
-  brain: z.string().min(1),
-  model: z.string().min(1),
-  synthesizer: z.string().min(1),
-  voiceId: z.string().min(1),
-});
-type PipelineChoice = z.infer<typeof pipelineChoice>;
-
-/** O preço do modelo, como a tela grava a lista em `brain.<id>.models` (a mesma forma de `apps/panel/src/server/brains.ts`). */
-const cents = z.number().finite().nonnegative();
-const storedBrainPrices = z.object({
-  models: z.array(
-    z.object({
-      id: z.string(),
-      price: z
-        .object({
-          centsPerMillionInputTokens: cents,
-          centsPerMillionOutputTokens: cents,
-          centsPerMillionCachedInputTokens: cents.optional(),
-          source: z.string(),
-          checkedOn: z.string(),
-        })
-        .optional(),
-    }),
-  ),
-});
 
 export const brainKeySetting = (brainId: string): string => `brain.${brainId}.api_key`;
 export const brainModelsSetting = (brainId: string): string => `brain.${brainId}.models`;
@@ -1326,7 +1298,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       return `Uma ligação do agente ${agentName} foi recusada porque o preço de ${piece.unpricedModel}, em ${which}, não é conhecido. Sem preço, o custo da ligação não pode ser medido, e a ligação não começou. Quem ligou ouviu o sinal de falha. Escolha um modelo com preço e faça uma chamada de teste.`;
     }
     const why = !piece ? "a escolha das peças gravada no agente está fora da forma" : piece.detail === undefined ? "a peça não está instalada nesta versão" : `o motivo foi ${piece.detail}`;
-    return `Uma ligação do agente ${agentName} foi recusada porque ${which} não abriu: ${why}. Quem ligou ouviu o sinal de falha. Confira a chave e a conta do fornecedor dessa peça em Configurações → Inteligência artificial e faça uma chamada de teste.`;
+    return `Uma ligação do agente ${agentName} foi recusada porque ${which} ${piece ? "não abriu" : "não abriram"}: ${why}. Quem ligou ouviu o sinal de falha. Confira a chave e a conta do fornecedor dessa peça em Configurações → Inteligência artificial e faça uma chamada de teste.`;
   }
 
   /** Lê e decifra uma chave da organização. `undefined` quando não há chave que sirva. */
@@ -1373,13 +1345,14 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (synthesizerKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the synthesizer ${synthesizer.id}`, { kind: "synthesizer", id: synthesizer.id, detail: "rejected" });
     // O preço vem só da lista que a tela gravou. Peça sem preço conhecido não abre, com ou sem teto
     // (3b-2): sem teto, a linha do extrato sairia sem custo; com teto, a promessa dele não se cumpriria.
+    // A regra é a mesma da gravação do agente (`pricePipeline`, fatia 5a).
     const models = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, brainModelsSetting(brain.id)]);
-    const price: BrainPrice | undefined = storedBrainPrices.safeParse(models?.value).data?.models.find((model) => model.id === choice.model)?.price;
-    if (price === undefined) return refuse("pipeline_piece_unpriced", `the model ${choice.model} of the brain ${brain.id} has no known price`, { kind: "brain", id: brain.id, unpricedModel: choice.model });
-    // A voz cobra pelo modelo dela, e a escolha não traz modelo: vale o padrão da peça. A transcrição tem `pricing` obrigatório.
-    if (synthesizer.pricingOf(synthesizer.defaultModel) === undefined) {
-      return refuse("pipeline_piece_unpriced", `the model ${synthesizer.defaultModel} of the synthesizer ${synthesizer.id} has no known price`, { kind: "synthesizer", id: synthesizer.id, unpricedModel: synthesizer.defaultModel });
+    const priced = pricePipeline(choice, models?.value, synthesizer);
+    if ("unpriced" in priced) {
+      const { kind, id, model } = priced.unpriced;
+      return refuse("pipeline_piece_unpriced", `the model ${model} of the ${kind} ${id} has no known price`, { kind, id, unpricedModel: model });
     }
+    const price = priced.brainPrice;
     const pieces: PipelinePieces = {
       transcriber: { piece: transcriber, apiKey: transcriberKey },
       brain: { piece: brain, apiKey: brainKey, model: choice.model, price },

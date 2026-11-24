@@ -556,6 +556,20 @@ seção 9.1 e diz se já foi confirmado, por quem e quando. O servidor recusa sa
 peça cujo `processingLocation` não é `this-server` e que não tem confirmação gravada (422, com o motivo
 na tela). O teste prova a recusa pela API, sem a tela.
 
+**5a (o servidor, sem tela; DESA-434).** A rota do agente (`POST` e `PATCH /api/v1/agents`) aceita
+`pipeline`, na mesma forma que a sessão lê (`pipelineChoice`, em
+`packages/voice-engine/src/pipeline-choice.ts`, uma só para as duas), ou `null`. A conferência fica em
+`apps/panel/src/server/pipeline.ts` (`requirePipeline`), e cada recusa é 422 com a peça no `detail`:
+`pipeline_piece_unknown` (a peça fora da pasta), `pipeline_piece_test_only` (a peça simulada, que só os
+testes aceitam, por `ServerDeps.simulatedPieces`), `pipeline_brain_cannot_chat`, `pipeline_piece_unpriced`
+(a mesma regra da abertura, `pricePipeline`) e `pipeline_piece_unconfirmed` (seção 9.1: a voz sem
+`synthesizer.<id>.consent`; a transcrição de fora sempre, até a R12 trazer a confirmação dela). Salvar
+outro campo não regrava a escolha. Gravar `pipeline` não troca o `engine`: com a coluna preenchida, a
+sessão abre o pipeline e o `engine` fica sem uso (a chamada simulada segue no motor do roteiro); com a
+coluna nula, vale o `engine`, como sempre. A coluna gravada à mão fora da forma recusa a ligação com o
+motivo, e não cai no motor direto. Ficam para a 5b e a 5c o motor em `engines/pipeline.ts`, a lista, a
+tela, a prévia, o custo por peça no detalhe e em Custos, e a latência ao lado da escolha.
+
 ### Fatia 6: o ouvido real e a medida de ponta a ponta (ESPERA a R12)
 
 O transcritor real escolhido pela R12 (fatia 3 da R12) entra no pipeline sem mudança de código no

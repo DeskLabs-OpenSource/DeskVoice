@@ -1051,3 +1051,31 @@ describe("a interrupção numa ligação (fatia 4)", { timeout: 120_000 }, () =>
     expect(kinds.slice(kinds.indexOf("call_ended") + 1).every((kind) => kind === "task_queued")).toBe(true);
   });
 });
+
+describe("a coluna fora da forma e a confirmação que sai com a chave (fatia 5a, L2 da DESA-421)", { timeout: 120_000 }, () => {
+  // O agente abre o motor simulado, que atenderia: cair calado no motor direto seria uma ligação atendida.
+  const script: SimulatedScript = [{ say: "Bom dia." }, { end: true }];
+
+  it("L2: agents.pipeline gravada à mão fora da forma recusa a ligação com o motivo, e o motor direto nunca abre", async () => {
+    for (const [n, wrong] of [{ transcriber: "simulated", brain: "openai" }, { ...PIPELINE, voiceId: 7 }, { ...PIPELINE, model: "" }, "simulated", [PIPELINE], 42].entries()) {
+      const made = await scene(`pipeline-shape-${n}`, { name: "Recepção", script }, { pipeline: wrong });
+      expect(await made.start().done).toMatchObject({ status: "refused", endReason: "engine_not_configured" });
+      const events = await eventsOf(app, made.callId);
+      expect(events.map((event) => event.kind)).not.toContain("call_answered");
+      expect(events.find((event) => event.kind === "call_refused")?.payload).toEqual({ reason: "engine_not_configured", engine: "simulated", detail: "agents.pipeline is not in the expected shape" });
+      expect(await ledgerOf(app, made.callId)).toEqual([]);
+      expect((await notificationsOf(app, made.organizationId)).map((notice) => notice.body)).toEqual([
+        "Uma ligação do agente Recepção foi recusada porque as peças do pipeline não abriram: a escolha das peças gravada no agente está fora da forma. Quem ligou ouviu o sinal de falha. Confira a chave e a conta do fornecedor dessa peça em Configurações → Inteligência artificial e faça uma chamada de teste.",
+      ]);
+    }
+  });
+
+  it("a voz de fora gravada no agente e a chave (com a confirmação) apagada depois: a abertura recusa pela chave, sem abrir nada", async () => {
+    const voice = pricedVoice();
+    const made = await scene("pipeline-voice-key-gone", { engine: "openai-realtime" }, { pipeline: PIPELINE, synthesizer: { ...voice.synthesizer, keyless: false } });
+    expect(await made.start().done).toMatchObject({ status: "refused", endReason: "engine_not_configured" });
+    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "call_refused")?.payload).toEqual({ reason: "engine_not_configured", engine: "pipeline", piece: "synthesizer", pieceId: "simulated", detail: "rejected" });
+    expect(voice.speaks()).toBe(0);
+    expect(fakeBrain?.requests).toHaveLength(0);
+  });
+});
