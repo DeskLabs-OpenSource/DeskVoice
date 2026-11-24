@@ -187,7 +187,7 @@ DeepSeek e Anthropic não emitem e ignoram o campo. A tradução:
   chamada mal formada, assinatura ausente) e o `promptFeedback.blockReason` terminam em
   `error("unexpected_response", 200)`.
 
-### 3.3 O motor: `packages/voice-engine/src/pipeline-engine.ts` (vai para `engines/pipeline.ts` na fatia 5)
+### 3.3 O motor: `packages/voice-engine/src/engines/pipeline.ts` (desde a fatia 5b-1; antes, `src/pipeline-engine.ts`)
 
 Implementa `VoiceEngine` com `id: "pipeline"`. **Mora fora de `engines/` até a fatia 5** (decisão B da
 DESA-418): `loadEngines()` e o painel oferecem como motor tudo o que está naquela pasta, e o pipeline
@@ -569,6 +569,26 @@ sessão abre o pipeline e o `engine` fica sem uso (a chamada simulada segue no m
 coluna nula, vale o `engine`, como sempre. A coluna gravada à mão fora da forma recusa a ligação com o
 motivo, e não cai no motor direto. Ficam para a 5b e a 5c o motor em `engines/pipeline.ts`, a lista, a
 tela, a prévia, o custo por peça no detalhe e em Custos, e a latência ao lado da escolha.
+
+**5b-1 (a tela do agente, com o Pipeline desligado; DESA-436).** O motor mora em `engines/pipeline.ts`,
+com `default` e a marca `assembled`, e o contrato (`PipelineEngine`, `isPipelineEngine`) fica em
+`types.ts`: a sessão o acha em `loadEngines()`, como os outros motores, sem importar o arquivo, e o índice
+do pacote não o reexporta (a cerca `one-file-per-piece` reprova o índice que importa duas peças pelo nome).
+`/api/v1/engines` o devolve com `assembled: true` e `unavailable: { reason: "no_live_transcriber" }`
+enquanto a pasta não tiver transcrição fora a simulada; os outros motores saem sem campo novo. Ninguém
+grava o pipeline como `engine`: a rota do agente e `engine.default` recusam, e a sessão recusa o `engine =
+'pipeline'` gravado à mão sem abrir nada. A abertura confere, além da chave, a confirmação da 9.1 da voz
+de fora do servidor (`synthesizer.<id>.consent`), a cada ligação: sem ela, `call_refused` com
+`pipeline_piece_unconfirmed` e a peça, antes de qualquer peça abrir (o motivo fica fora de
+`KEY_CHECK_RESULTS`, como o da peça sem preço). Na tela do agente, o campo Motor mostra "Pipeline"
+desligado, com a linha do motivo, e o agente novo nunca nasce nele. O bloco "Pipeline" mostra as três
+escolhas só para ver e ouvir, e nada dele entra no salvar: a transcrição que falta; o cérebro com `chat` e
+a chave aceita, e o modelo com preço (`pricedBrainModels`, a mesma regra de `pricePipeline`); e as vozes da
+conta da ElevenLabs, pela rota da 1b, com o rótulo do fornecedor e o Ouvir da 1a tocando o `previewUrl`
+(`preload="none"`; o `play()` recusado diz o erro). Ao lado da voz e da transcrição, o aviso da 9.1, com
+quem confirmou e quando. A linha da ElevenLabs no campo Voz aponta para o bloco. Ficam para a 5b-2 a
+chamada pelo navegador com o pipeline e a prova de primeira impressão pelo caminho simulado; para a 5c, o
+custo por peça e a latência ao lado da escolha.
 
 ### Fatia 6: o ouvido real e a medida de ponta a ponta (ESPERA a R12)
 

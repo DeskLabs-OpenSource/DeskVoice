@@ -35,6 +35,17 @@ const storedBrainPrices = z.object({
   ),
 });
 
+/**
+ * O preço de um modelo na lista do cérebro (`brain.<id>.models`, como a tela grava e a rota de modelos
+ * devolve), ou `undefined`. É a regra do cérebro em `pricePipeline`, e a que a tela do agente usa para
+ * oferecer só modelo com preço (fatia 5b-1).
+ */
+export const brainPriceOf = (brainModels: unknown, modelId: string): BrainPrice | undefined => storedBrainPrices.safeParse(brainModels).data?.models.find((model) => model.id === modelId)?.price;
+
+/** Os modelos da lista que têm preço conhecido, na ordem dela. */
+export const pricedBrainModels = (brainModels: unknown): string[] =>
+  (storedBrainPrices.safeParse(brainModels).data?.models ?? []).filter((model) => model.price !== undefined).map((model) => model.id);
+
 /** A peça sem preço conhecido, e o modelo dela. */
 export type UnpricedPiece = { kind: "brain" | "synthesizer"; id: string; model: string };
 
@@ -50,7 +61,7 @@ export function pricePipeline(
   brainModels: unknown,
   synthesizer: Pick<SpeechSynthesizer, "id" | "defaultModel" | "pricingOf">,
 ): { brainPrice: BrainPrice } | { unpriced: UnpricedPiece } {
-  const brainPrice: BrainPrice | undefined = storedBrainPrices.safeParse(brainModels).data?.models.find((model) => model.id === choice.model)?.price;
+  const brainPrice = brainPriceOf(brainModels, choice.model);
   if (brainPrice === undefined) return { unpriced: { kind: "brain", id: choice.brain, model: choice.model } };
   if (synthesizer.pricingOf(synthesizer.defaultModel) === undefined) return { unpriced: { kind: "synthesizer", id: synthesizer.id, model: synthesizer.defaultModel } };
   return { brainPrice };

@@ -1,4 +1,4 @@
-// O campo "Voz" desenhado no servidor (DESA-397, fatia 1a): o grupo com o provedor vem de
+// O campo "Voz" desenhado no servidor (DESA-397, fatia 1a; a linha da ElevenLabs, fatia 5b-1): o grupo com o provedor vem de
 // `provider`, a voz sem amostra desliga o "Ouvir" e diz por quê nos três idiomas, a amostra que
 // falta no idioma cai na de pt-BR com aviso, nada é baixado antes do clique e a voz salva fora da
 // lista continua aparecendo.
@@ -85,11 +85,13 @@ describe("VoiceField", () => {
     expect(html).not.toContain("<audio");
   });
 
-  it("a linha da ElevenLabs aponta para Configurações → Voz e nenhuma voz da ElevenLabs entra na lista", () => {
+  it("a linha da ElevenLabs aponta para o bloco Pipeline, diz que só falam quando ele ligar, e nenhuma voz da ElevenLabs entra na lista (5b-1)", () => {
     for (const t of [ptBR, en, es]) {
       const html = render(t, engineWith({}));
       expect(html).toContain(escaped(t.voiceElevenLabs));
-      expect(html).toContain(`href="/settings/voice"`);
+      expect(t.voiceElevenLabs).toMatch(/Pipeline/);
+      expect(html).toContain(`href="#pipeline"`);
+      expect(html).toContain(escaped(t.voiceElevenLabsLink));
       expect(html.match(/<option /g)).toHaveLength(3);
     }
   });

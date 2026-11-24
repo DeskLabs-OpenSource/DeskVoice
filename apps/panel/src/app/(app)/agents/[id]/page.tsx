@@ -25,6 +25,7 @@ import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../
 import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
 import { AgentBrains } from "./brains";
 import { EngineField, newAgentEngine } from "./engine-field";
+import { PipelineBlock } from "./pipeline-block";
 import { VoiceField } from "./voice-field";
 
 /** O agente como a API devolve, com quem lê a ligação dele (R4, fatia 5): nulo segue a organização. */
@@ -182,6 +183,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // Os agentes que podem passar a ligação para este: apagá-lo o tira da lista deles.
   const handingOffHere = others.filter((other) => other.agentHandoffTargets?.includes(id));
   const engine = engines.data?.find((candidate) => candidate.id === draft.engine);
+  const pipelineEngine = engines.data?.find((candidate) => candidate.assembled === true);
   // Barulhento foi provado no OpenAI Realtime e no Gemini Live. Em outro motor, a opção some; um agente que já
   // está em Barulhento continua vendo o campo, com um aviso, para não guardar a escolha escondida.
   const noisyProven = NOISY_PROVEN_ENGINES.includes(draft.engine);
@@ -361,6 +363,9 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           ) : null}
           {engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
         </Panel>
+
+        {/* O Pipeline (fatia 5b-1): só para ver e ouvir; nada daqui entra no salvar. */}
+        {pipelineEngine ? <PipelineBlock t={t} pipeline={pipelineEngine} canConfigure={canConfigure} /> : null}
 
         <AgentBrains
           agentId={isNew ? null : id}
