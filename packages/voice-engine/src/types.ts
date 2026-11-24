@@ -706,6 +706,12 @@ export interface PipelineConnectOptions extends ConnectOptions {
    */
   fixedSpeech?: readonly string[];
   /**
+   * Quem abriu vai transferir a ligação quando uma peça cair (o agente com `transfer_to_e164`, fatia
+   * 3c-2). Com `true`, a fala de transferência (`PIPELINE_TRANSFER_SPEECH`) fica pronta no `connect`
+   * no lugar da fala de falha, e é ela que toca na queda. Ausente, nada muda.
+   */
+  transferOnFailure?: boolean;
+  /**
    * O teto de custo da ligação, conferido antes de cada pedido ao cérebro (desenho do pipeline, seção
    * 3.3). `remainingMicrocents` é o que sobra do teto agora, em micro-centavos, ou `undefined` sem
    * teto. Quando o pior caso do pedido (entrada estimada + `maxTokens` × preço) passa disso, o pedido

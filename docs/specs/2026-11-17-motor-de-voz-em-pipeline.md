@@ -301,8 +301,13 @@ cérebro: o pior caso não tem conta.
 
 A fala de falha (texto fixo, no padrão de `FAREWELL`) é: "Estou com um problema técnico e não vou
 conseguir continuar. Se puder, ligue de novo em alguns minutos. Obrigado." Quando há
-`transfer_to_e164`, a ligação é transferida depois dela (na 3b-1, a fala de falha toca também nesse
-caso: a de transferência não está entre as falas prontas do motor; fica para a 3c-2).
+`transfer_to_e164` (e o canal transfere, e a ligação não voltou de uma transferência), quem ligou ouve
+no lugar dela a **fala de transferência**, também pré-sintetizada: "Estou com um problema técnico e não
+vou conseguir continuar. Vou transferir você para uma pessoa da equipe. Um instante, por favor." Depois,
+a ligação é transferida. A sessão pede essa fala no `connect` (`transferOnFailure`), e ela fica pronta
+**no lugar** da fala de falha, com o mesmo cache por organização. O custo dela entra no extrato e no
+teto como o das outras falas prontas. Sem `transfer_to_e164`, nada muda: ela não é sintetizada, e o
+custo das falas prontas é o mesmo (fatia 3c-2).
 O `error` da transcrição sozinho não é fatal (o contrato de `StreamingTranscriptionEvents`): só o
 `closed` derruba a sessão. Os eventos levam `piece`, `pieceId` e `detail` (o código). Os eventos usam o vocabulário de
 `KEY_CHECK_RESULTS` e nunca repassam o texto do provedor (o texto vai só ao log). Há frase na linha
@@ -329,10 +334,12 @@ nunca dá número negativo. No turno fechado à força (`closeCallerTurn`), vale
 parcial, e a chegada é a hora do fechamento.
 - **Um por turno respondido**, no primeiro áudio da resposta entregue ao transporte. O resto do áudio
   da mesma resposta não emite de novo.
-- **Turno com ferramenta:** sai uma vez, com `tool: true`, quando uma ferramenta rodou antes do
-  primeiro áudio da resposta. O `totalMs` inclui a ferramenta, e o `brainFirstTextMs` é o do pedido
-  que deu o primeiro texto (o que reabriu o cérebro). O orçamento abaixo é "sem ferramenta": a fatia 5
-  separa por `tool`.
+- **Turno com ferramenta:** sai uma vez. A marca sai da **origem do texto que deu o primeiro áudio**
+  (fatia 3c-2), e não da ordem entre o áudio e o fim da rodada. `tool: true` quando esse texto foi
+  pedido ao cérebro **depois** de uma ferramenta (o pedido que reabriu o cérebro): o `totalMs` inclui a
+  ferramenta, e o `brainFirstTextMs` é o desse pedido. Se o cérebro falou antes de pedir a ferramenta,
+  o primeiro áudio é dessa fala: `tool: false`, e o `totalMs` vai até ela. O orçamento abaixo é "sem
+  ferramenta": a fatia 5 separa por `tool`.
 - **Turno sem áudio não emite:** o cérebro que falhou (o "pode repetir?" não é resposta), o teto que
   barrou o pedido, a resposta vazia e a ligação que acabou antes do primeiro áudio. Nenhum número é
   inventado.
@@ -471,8 +478,12 @@ até o painel e o `error` não fatal da transcrição), a **3b-2** (DESA-425: o 
 pedido ao cérebro, com o `maxTokens`, e a recusa da peça sem preço, na 3.3) e a **3c** (`pipeline_turn_latency`,
 a nota da chave e a corrida da transferência com volta). A 3c foi cortada em duas: a **3c-1**
 (DESA-427: o `pipeline_turn_latency`, a nota da chave, a L1 da DESA-421 e as duas ressalvas da
-DESA-426) entrou; a **3c-2** (a transferência: a corrida do fim de chamada na volta e a fala de
-transferência pronta quando a peça cai com `transfer_to_e164`, 3.4) falta. Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
+DESA-426) entrou; a **3c-2** (DESA-430: a corrida do fim de chamada na volta, a fala de transferência
+pronta quando a peça cai com `transfer_to_e164`, 3.4, a regra da marca `tool`, 3.5, e as ressalvas da
+DESA-428) entrou. **A fatia 3 terminou.** A corrida do fim de chamada na volta: se a ligação acaba
+durante a transferência, enquanto as peças do trecho de volta abrem ou logo depois, as peças abertas
+fecham, nenhuma fica viva depois do `call_ended`, nada é gravado depois do fim e nenhuma síntese nova é
+pedida (testado com o banco, nas quatro ordens). Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
 voz simulada: uma ferramenta no meio da conversa, três linhas no extrato e o teto que dispara a
 despedida pré-sintetizada. Quem já instalou não precisa fazer nada: sem `agents.pipeline`, nada muda.
 A fala aberta e parada morre no `inactivity_timeout` da ElevenLabs (20 s) com `error`. Esta fatia

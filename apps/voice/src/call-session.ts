@@ -1386,7 +1386,18 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (ending) return refuse("engine_not_configured", endedProblem);
     try {
       // O relógio da sessão vai ao motor: a latência por turno e a nota da abertura saem dele (convenção 10).
-      const connecting = engine.connect(config, "", { pieces, organizationId, fixedSpeech: [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer], ceiling: pipelineCeiling, clock });
+      // A queda de uma peça transfere quando o agente do trecho tem para onde (a mesma regra de
+      // `currentTransferTo`, com o agente que abre): a fala de transferência fica pronta já na abertura
+      // (fatia 3c-2), e sem número nada muda (nenhuma fala nova é sintetizada).
+      const transferOnFailure = canTransfer && !returned && row.transfer_to_e164 !== null;
+      const connecting = engine.connect(config, "", {
+        pieces,
+        organizationId,
+        fixedSpeech: [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer],
+        ceiling: pipelineCeiling,
+        clock,
+        ...(transferOnFailure && { transferOnFailure }),
+      });
       const opened = await awaitOpening(engine, connecting);
       if (!("voice" in opened)) return opened;
       const { opening } = await connecting;
@@ -1643,7 +1654,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const transferTo = currentTransferTo();
       const fallen = self.lastError instanceof PipelinePieceError && self.lastError.fatal ? self.lastError : undefined;
       if (fallen) {
-        // A peça do pipeline: a fala de falha já tocou (pronta na abertura), e a linha do tempo leva só os códigos.
+        // A peça do pipeline: a fala de falha, ou a de transferência quando há para onde transferir, já
+        // tocou (pronta na abertura), e a linha do tempo leva só os códigos.
         const piece: PieceRefusal = { kind: fallen.piece, id: fallen.pieceId, detail: fallen.reason };
         return void finish({
           status: transferTo ? "transferred" : "failed",
@@ -1651,7 +1663,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
           transferTo: transferTo ?? undefined,
           tone: true,
           events: [["engine_failed", pieceFailurePayload(piece)], ...(transferTo ? [["transfer_started", { to: transferTo, reason: "engine_failed" }] satisfies [CallEventKind, object]] : [])],
-          notice: `${PIECE_NAMES[fallen.piece].replace(/^./, (letter) => letter.toUpperCase())} (${fallen.pieceId}) caiu no meio de uma ligação do agente ${row.name}, pelo motivo ${fallen.reason}. Quem ligou ouviu o aviso de falha. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : canTransfer ? "A ligação foi encerrada, porque o agente não tem número de transferência." : "A ligação foi encerrada, porque este canal não tem como transferir."} Confira a chave e a conta do fornecedor dessa peça em Configurações → Inteligência artificial.`,
+          notice: `${PIECE_NAMES[fallen.piece].replace(/^./, (letter) => letter.toUpperCase())} (${fallen.pieceId}) caiu no meio de uma ligação do agente ${row.name}, pelo motivo ${fallen.reason}. ${transferTo ? "Quem ligou ouviu o aviso de que seria transferido." : "Quem ligou ouviu o aviso de falha."} ${transferTo ? `A ligação foi transferida para ${transferTo}.` : canTransfer ? "A ligação foi encerrada, porque o agente não tem número de transferência." : "A ligação foi encerrada, porque este canal não tem como transferir."} Confira a chave e a conta do fornecedor dessa peça em Configurações → Inteligência artificial.`,
         });
       }
       void finish({

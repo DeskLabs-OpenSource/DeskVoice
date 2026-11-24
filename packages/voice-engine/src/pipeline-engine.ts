@@ -75,9 +75,12 @@ import {
  * **A latência por turno** (3.5, fatia 3c-1). Com `clock` (o da sessão, convenção 10), cada turno
  * respondido emite `pipelineTurnLatency`, uma vez, no primeiro áudio da resposta entregue a quem abriu.
  * O fim da fala é o `endMs` do trecho final, somado à hora do primeiro áudio mandado à transcrição (o
- * zero do fluxo, para o serviço); sem `endMs`, vale a chegada, com `endFromArrival`. O turno em que
- * uma ferramenta rodou antes do primeiro áudio sai com `tool: true`, e o `brainFirstTextMs` é o do
- * pedido que deu o primeiro texto (o que reabriu o cérebro). O turno que não toca a resposta (o
+ * zero do fluxo, para o serviço); sem `endMs`, vale a chegada, com `endFromArrival`. A marca `tool`
+ * sai da origem do texto que deu o primeiro áudio (fatia 3c-2): `true` quando ele veio de um pedido
+ * feito **depois** de uma ferramenta (o que reabriu o cérebro), e aí o `totalMs` inclui a ferramenta e
+ * o `brainFirstTextMs` é o desse pedido. O cérebro que falou antes de pedir a ferramenta deu o primeiro
+ * áudio com essa fala: `tool: false`, qualquer que seja a ordem entre o áudio e o fim da rodada. O
+ * turno que não toca a resposta (o
  * cérebro que falhou, o teto, a ligação que acabou, a resposta vazia) não emite: o "pode repetir?" e
  * as falas fixas não são resposta. Sem `clock`, nada é medido.
  *
@@ -92,6 +95,11 @@ import {
 
 /** A fala de falha da seção 3.4, no padrão de `FAREWELL`. */
 export const PIPELINE_FAILURE_SPEECH = "Estou com um problema técnico e não vou conseguir continuar. Se puder, ligue de novo em alguns minutos. Obrigado.";
+/**
+ * A fala de transferência da seção 3.4 (fatia 3c-2): toca no lugar da fala de falha quando quem abriu
+ * a ligação vai transferir depois da queda (`transferOnFailure`, o agente com `transfer_to_e164`).
+ */
+export const PIPELINE_TRANSFER_SPEECH = "Estou com um problema técnico e não vou conseguir continuar. Vou transferir você para uma pessoa da equipe. Um instante, por favor.";
 /** O que quem ligou ouve quando um pedido ao cérebro falha, e a conversa segue (seção 3.4). */
 export const PIPELINE_BRAIN_RETRY_SPEECH = "Desculpe, não consegui responder agora. Pode repetir, por favor?";
 /** Prazo de um pedido ao cérebro. Menor que o `inactivity_timeout` de 20 s da ElevenLabs, de propósito. */
@@ -252,6 +260,8 @@ class PipelineSession implements PipelineVoiceSession {
     private readonly pieces: PipelinePieces,
     private readonly transcription: StreamingTranscription,
     private readonly fixedAudio: Map<string, Buffer>,
+    /** O que toca quando uma peça cai: a fala de falha, ou a de transferência (`transferOnFailure`). */
+    private readonly failureSpeech: string,
     fixedUsage: { characters: number; costMicrocents?: number },
     private readonly options: { fetch?: typeof fetch; brainTimeoutMs: number; schedule?: PipelineConnectOptions["schedule"]; ceiling?: PipelineConnectOptions["ceiling"]; clock?: Clock },
     defer: Defer,
@@ -432,6 +442,8 @@ class PipelineSession implements PipelineVoiceSession {
     const messages = [...this.history];
     const inputTokens = bytesOf(messages) + (this.config.tools.length > 0 ? bytesOf(this.config.tools) : 0);
     // O turno novo é o fim de fala que esperava; a volta depois de uma ferramenta continua o mesmo turno.
+    // Com a rodada em curso, este pedido é o que reabre o cérebro depois de uma ferramenta.
+    const afterTool = this.busy;
     if (!this.busy) {
       this.roundTurn = this.pendingTurn;
       this.pendingTurn = undefined;
@@ -471,6 +483,9 @@ class PipelineSession implements PipelineVoiceSession {
       if (!utterance) {
         utterance = this.openUtterance();
         if (turn && turn.firstTextAt === undefined) {
+          // A marca sai da origem do texto que dá o primeiro áudio (3.5, fatia 3c-2), e não da ordem
+          // entre o áudio e o fim da rodada: a fala antes da ferramenta é `tool: false`.
+          turn.tool = afterTool;
           turn.textAskedAt = turn.askedAt;
           turn.firstTextAt = this.now();
           turn.firstPushAt = turn.firstTextAt;
@@ -524,9 +539,6 @@ class PipelineSession implements PipelineVoiceSession {
     if (text !== "") this.emitter.emit("transcript", { speaker: "agent", text });
     if (text !== "" || calls.length > 0) this.history.push(calls.length > 0 ? { role: "assistant", content: text, toolCalls: calls } : { role: "assistant", content: text });
     if (calls.length > 0) {
-      // A ferramenta roda antes do primeiro áudio da resposta: o turno sai com `tool`.
-      const turn = this.roundTurn;
-      if (turn && !turn.emitted) turn.tool = true;
       this.pendingTools = { calls, results: new Map() };
       for (const call of calls) this.emitter.emit("toolCall", { id: call.id, name: call.name, args: toolArgs(call.args) });
       return;
@@ -624,10 +636,11 @@ class PipelineSession implements PipelineVoiceSession {
     if (this.finished) return;
     this.finished = true;
     this.stopTalking();
-    // A fala de falha já estava pronta: não depende da voz estar viva.
-    const speech = this.fixedAudio.get(PIPELINE_FAILURE_SPEECH);
+    // A fala de falha (ou a de transferência) já estava pronta: não depende da voz estar viva.
+    const text = this.failureSpeech;
+    const speech = this.fixedAudio.get(text);
     if (speech) {
-      this.emitter.emit("transcript", { speaker: "agent", text: PIPELINE_FAILURE_SPEECH });
+      this.emitter.emit("transcript", { speaker: "agent", text });
       this.emitter.emit("audio", speech);
     }
     this.emitter.emit("error", new PipelinePieceError(piece, id, reason, true, message));
@@ -696,6 +709,8 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
       const { transcriber, synthesizer } = pieces;
       const timing = { schedule: options.schedule, readyTimeoutMs: options.readyTimeoutMs };
       const { clock } = options;
+      // Com a transferência depois da queda, a fala de transferência fica pronta no lugar da de falha.
+      const failureSpeech = options.transferOnFailure === true ? PIPELINE_TRANSFER_SPEECH : PIPELINE_FAILURE_SPEECH;
       const now = clock ? (): number => clock.now().getTime() : undefined;
       const startedAt = now?.();
       // O fim de cada etapa da abertura, no relógio da sessão (a nota da chave).
@@ -707,7 +722,7 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
           synthesizer.piece,
           options.organizationId,
           { voiceId: synthesizer.voiceId, language: config.language, ...(synthesizer.model === undefined ? {} : { model: synthesizer.model }) },
-          [PIPELINE_FAILURE_SPEECH, ...(options.fixedSpeech ?? [])],
+          [failureSpeech, ...(options.fixedSpeech ?? [])],
           synthesizer.apiKey,
           { schedule: options.schedule, ...(engineOptions.fixedSpeechCache ? { cache: engineOptions.fixedSpeechCache } : {}), ...(now ? { now } : {}) },
         ).finally(() => (ended.fixed = now?.())),
@@ -729,7 +744,7 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
               transcriberMs: ended.transcriber - startedAt,
               fixedSpeechMs: ended.fixed - startedAt,
               keyCheckMs: fixed.value.keyCheckMs ?? null,
-              fixedSpeech: new Set([PIPELINE_FAILURE_SPEECH, ...(options.fixedSpeech ?? [])]).size,
+              fixedSpeech: new Set([failureSpeech, ...(options.fixedSpeech ?? [])]).size,
               fromCache: fixed.value.cached,
               totalMs: doneAt - startedAt,
             };
@@ -738,6 +753,7 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
         pieces,
         heard.value,
         fixed.value.audio,
+        failureSpeech,
         fixed.value.usage,
         { fetch: engineOptions.fetch, brainTimeoutMs: engineOptions.brainTimeoutMs ?? BRAIN_TIMEOUT_MS, schedule: options.schedule, ceiling: options.ceiling, clock },
         defer,

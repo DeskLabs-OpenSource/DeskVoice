@@ -6,7 +6,7 @@ import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { encryptSecret, withSystem, type Clock } from "@deskvoice/core";
-import { createPipelineEngine, PIPELINE_FAILURE_SPEECH, type Brain, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
+import { createPipelineEngine, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH, type Brain, type PipelineTurnLatency, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
@@ -90,6 +90,9 @@ const PIPELINE = { transcriber: "simulated", brain: "openai", model: MODEL, synt
 function pricedVoice(options: { failAfter?: number } = {}) {
   const base = createSimulatedSynthesizer();
   let speaks = 0;
+  /** O texto mandado a cada fala, e as falas abertas que não terminaram nem foram canceladas. */
+  const texts: string[] = [];
+  const live = new Set<number>();
   const synthesizer: SpeechSynthesizer = {
     ...base,
     pricing: VOICE_PRICE,
@@ -101,19 +104,28 @@ function pricedVoice(options: { failAfter?: number } = {}) {
         throw new SynthesizerOpenError("no_credit", "elevenlabs: quota_exceeded (texto do provedor)");
       }
       const speech = await base.speak(config, apiKey, connect);
+      const n = speaks;
+      live.add(n);
+      speech.on("done", () => live.delete(n));
       return {
         ...speech,
         on: (event, handler) =>
           event === "usage"
             ? speech.on("usage", (spent) => (handler as (value: typeof spent) => void)(speechUsageOf(VOICE_PRICE, spent.characters)))
             : speech.on(event, handler),
-        push: (value, opts) => speech.push(value, opts),
+        push: (value, opts) => {
+          texts.push(value);
+          speech.push(value, opts);
+        },
         end: () => speech.end(),
-        cancel: () => speech.cancel(),
+        cancel: () => {
+          live.delete(n);
+          speech.cancel();
+        },
       };
     },
   };
-  return { synthesizer, speaks: () => speaks };
+  return { synthesizer, speaks: () => speaks, texts, live: () => live.size };
 }
 
 function pricedTranscriber(script: SimulatedTranscriptScript, options: { refuse?: "no_credit" } = {}) {
@@ -398,7 +410,7 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
  * depois do `endMs` dele, o cérebro dá o primeiro texto `brainMs` depois do pedido, e a voz entrega o
  * primeiro áudio da resposta `voiceMs` depois do primeiro texto. Nada usa o relógio de parede.
  */
-function timedPieces(clock: Clock & { advance(ms: number): void }, script: SimulatedTranscriptScript, delays: { endpointMs: number; brainMs: number; voiceMs: number }) {
+function timedPieces(clock: Clock & { advance(ms: number): void }, script: SimulatedTranscriptScript, delays: { endpointMs: number; brainMs: number; voiceMs: number; toolMs?: number }) {
   const ear = pricedTranscriber(script);
   let origin: number | undefined;
   let armed = false;
@@ -440,7 +452,13 @@ function timedPieces(clock: Clock & { advance(ms: number): void }, script: Simul
                 first = false;
                 (handler as (value: string) => void)(delta);
               })
-            : chat.on(event, handler),
+            : event === "toolCall"
+              ? chat.on("toolCall", (call) => {
+                  // O relógio anda entre os dois pedidos: a ferramenta leva `toolMs`.
+                  clock.advance(delays.toolMs ?? 0);
+                  (handler as (value: typeof call) => void)(call);
+                })
+              : chat.on(event, handler),
         cancel: () => chat.cancel(),
       };
     },
@@ -515,10 +533,12 @@ describe("o pipeline numa ligação (fatia 3c-1): a latência por turno e a nota
     expect(await latenciesOf(made.callId)).toEqual([{ endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 1000, endFromArrival: false, tool: false }]);
   });
 
-  it("o turno com ferramenta: um evento, com o tempo até o primeiro áudio da resposta, e `tool: true`", async () => {
+  it("o turno com ferramenta: um evento, com o tempo até o primeiro áudio da resposta, e `tool: true`; o `brainFirstTextMs` é o do pedido reaberto", async () => {
     const holder: { clock?: Clock & { advance(ms: number): void } } = {};
     const clockProxy = { now: () => holder.clock?.now() ?? new Date(0), advance: (ms: number) => holder.clock?.advance(ms) };
-    const timed = timedPieces(clockProxy, [{ afterAudioMs: 200, text: "Quero deixar um recado para o doutor.", final: true }], { endpointMs: 300, brainMs: 500, voiceMs: 200 });
+    // O relógio anda 700 ms entre os dois pedidos (ressalva da DESA-428): o `brainFirstTextMs` do pedido
+    // reaberto é 500, e não 1 200 (o que sairia contando do primeiro pedido).
+    const timed = timedPieces(clockProxy, [{ afterAudioMs: 200, text: "Quero deixar um recado para o doutor.", final: true }], { endpointMs: 300, brainMs: 500, voiceMs: 200, toolMs: 700 });
     const made = await scene("pipeline-latency-tool", { engine: "openai-realtime", tools: ["create_task"] }, { pipeline: PIPELINE, transcriber: timed.transcriber, brain: timed.brain, synthesizer: timed.synthesizer });
     holder.clock = made.harness.clock;
     fakeBrain?.reply([tool("call_1", "create_task", JSON.stringify({ title: "Recado para o doutor", details: "Quem ligou quer falar com o doutor." })), usage(200, 30)], [text("Pronto, ficou anotado."), usage(300, 10)]);
@@ -530,7 +550,7 @@ describe("o pipeline numa ligação (fatia 3c-1): a latência por turno e a nota
     made.transport.callerHangup();
     await session.done;
     expect(await kindsOf(app, made.callId)).toContain("tool_result");
-    expect(await latenciesOf(made.callId)).toEqual([{ endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 1000, endFromArrival: false, tool: true }]);
+    expect(await latenciesOf(made.callId)).toEqual([{ endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 1700, endFromArrival: false, tool: true }]);
   });
 
   it("o turno que não toca a resposta (o cérebro falhou: o pedido de repetir não é resposta) não grava latência", async () => {
@@ -638,5 +658,240 @@ describe("as ressalvas da 3b (L1 da DESA-421 e as duas da DESA-426)", { timeout:
     expect(await session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
     const failed = (await eventsOf(app, made.callId)).filter((event) => event.kind === "engine_failed").map((event) => event.payload);
     expect(failed).toEqual([{ engine: "pipeline", piece: "brain", pieceId: "openai", reason: "pipeline_piece_unpriced", model: MODEL }]);
+  });
+});
+
+// ---- 3c-2: a fala de transferência pronta, a corrida do fim de chamada na volta e as ressalvas da DESA-428 ----
+
+/** Deixa correr o que ficou agendado (aberturas atrasadas, consumos no fechamento), sem relógio. */
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 50; turn++) await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  for (let turn = 0; turn < 50; turn++) await new Promise((resolve) => setImmediate(resolve));
+}
+
+describe("a fala de transferência pronta (fatia 3c-2)", { timeout: 120_000 }, () => {
+  it("a voz que cai num agente com transfer_to_e164: quem ligou ouve a fala de transferência pronta, e não a de falha, e é transferido; o custo dela vai ao extrato, e a segunda ligação a tira do cache", async () => {
+    const TO = "+5531988887777";
+    // Com transferência, as falas prontas são a de transferência e as duas despedidas; depois, a saudação. A próxima fala cai.
+    const voice = pricedVoice({ failAfter: 4 });
+    const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Oi.", final: true }]);
+    const made = await scene("pipeline-transfer-speech", { name: "Recepção", engine: "openai-realtime", greeting: "Bom dia.", transferTo: TO }, { pipeline: PIPELINE, transcriber: ear.transcriber, synthesizer: voice.synthesizer });
+    fakeBrain?.reply([text("Pois não."), usage(20, 5)]);
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    // A fala de transferência foi sintetizada na abertura, antes de qualquer falha.
+    expect(voice.texts.slice(0, 3)).toEqual([PIPELINE_TRANSFER_SPEECH, "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado.", "Vou passar você para uma pessoa da equipe continuar o atendimento. Um instante, por favor."]);
+    made.transport.callerAudio(100);
+    const outcome = await session.done;
+    expect(outcome).toMatchObject({ status: "transferred", endReason: "engine_failed" });
+    expect(made.transport.transferredTo).toBe(TO);
+    // A queda não pediu a fala à voz: ela já estava pronta.
+    expect(voice.texts.filter((said) => said === PIPELINE_TRANSFER_SPEECH)).toHaveLength(1);
+    expect(voice.texts).not.toContain(PIPELINE_FAILURE_SPEECH);
+    const events = await eventsOf(app, made.callId);
+    const agentSaid = events.filter((event) => event.kind === "transcript_agent").map((event) => event.payload.text);
+    expect(agentSaid).toContain(PIPELINE_TRANSFER_SPEECH);
+    expect(agentSaid).not.toContain(PIPELINE_FAILURE_SPEECH);
+    expect(events.find((event) => event.kind === "engine_failed")?.payload).toEqual({ engine: "pipeline", piece: "synthesizer", pieceId: "simulated", detail: "no_credit" });
+    expect(events.find((event) => event.kind === "transfer_started")?.payload).toEqual({ to: TO, reason: "engine_failed" });
+    const notice = (await notificationsOf(app, made.organizationId)).map((entry) => entry.body).join(" ");
+    expect(notice).toContain("Quem ligou ouviu o aviso de que seria transferido.");
+    expect(notice).toContain(`A ligação foi transferida para ${TO}.`);
+    // O custo das falas prontas, a de transferência inclusive, entra no extrato da ligação, pelo preço da voz.
+    const fixedCharacters = [PIPELINE_TRANSFER_SPEECH, "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado.", "Vou passar você para uma pessoa da equipe continuar o atendimento. Um instante, por favor."].reduce((sum, said) => sum + [...said].length, 0);
+    const voiceLines = (await piecesLedger(made.callId)).filter((row) => row.engine === "synthesizer:simulated");
+    expect(voiceLines.map((row) => Number(row.cost_microcents))).toContain(Math.round((fixedCharacters * VOICE_PRICE.centsPerThousandCharacters * 1_000_000) / 1000));
+
+    // A segunda ligação da mesma organização: as três falas prontas vêm do cache, sem síntese nova.
+    const speaksBefore = voice.speaks();
+    const secondCall = await createCall(app, made.organizationId, made.agentId, made.harness.clock.now());
+    const transport = manualTransport();
+    const second = startCallSession(made.harness.deps, { organizationId: made.organizationId, callId: secondCall, agentId: made.agentId, transport });
+    await answered(secondCall);
+    expect((await eventsOf(app, secondCall)).find((event) => event.kind === "call_answered")?.payload).toMatchObject({ opening: { fixedSpeech: 3, fromCache: 3 } });
+    transport.callerHangup();
+    await second.done;
+    expect(voice.texts.slice(speaksBefore).filter((said) => said === PIPELINE_TRANSFER_SPEECH)).toHaveLength(0);
+  });
+
+  it("sem transfer_to_e164, nada muda: a fala de transferência não é sintetizada, e o custo das falas prontas é o de antes", async () => {
+    const voice = pricedVoice();
+    const made = await scene("pipeline-no-transfer-speech", { engine: "openai-realtime" }, { pipeline: PIPELINE, synthesizer: voice.synthesizer });
+    const session = made.start();
+    await answered(made.callId);
+    made.transport.callerHangup();
+    await session.done;
+    // As três falas prontas de antes, e depois só o aviso de gravação e a saudação.
+    expect(voice.texts.slice(0, 3)).toEqual([PIPELINE_FAILURE_SPEECH, "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado.", "Vou passar você para uma pessoa da equipe continuar o atendimento. Um instante, por favor."]);
+    expect(voice.texts).not.toContain(PIPELINE_TRANSFER_SPEECH);
+    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "call_answered")?.payload).toMatchObject({ opening: { fixedSpeech: 3 } });
+    const fixedCharacters = voice.texts.slice(0, 3).reduce((sum, said) => sum + [...said].length, 0);
+    const voiceLines = (await piecesLedger(made.callId)).filter((row) => row.engine === "synthesizer:simulated");
+    expect(voiceLines.map((row) => Number(row.cost_microcents))).toContain(Math.round((fixedCharacters * VOICE_PRICE.centsPerThousandCharacters * 1_000_000) / 1000));
+  });
+});
+
+/**
+ * A ligação de pipeline com transferência que volta, com cada peça contada: a transcrição (abertas e
+ * fechadas, e a abertura do trecho de volta presa quando o teste pede), a voz (as falas vivas) e o
+ * motor (as aberturas). O cérebro pede a transferência no primeiro turno.
+ */
+async function returnScene(label: string, options: { holdReturnOpening?: boolean; hangUpWhenReturnOpens?: boolean } = {}) {
+  const { transport, transfers } = returningTransport();
+  const voice = pricedVoice();
+  const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Quero falar com o financeiro.", final: true }]);
+  const opened = { count: 0, closed: 0 };
+  let releaseOpening: () => void = () => undefined;
+  const openingHeld = new Promise<void>((resolve) => (releaseOpening = resolve));
+  const transcriber: StreamingTranscriber = {
+    ...ear.transcriber,
+    async connect(...args) {
+      const n = ++opened.count;
+      const session = await ear.transcriber.connect(...args);
+      session.on("closed", () => void (opened.closed += 1));
+      // A abertura da transcrição do trecho de volta fica presa até o teste soltar.
+      if (n === 2 && options.holdReturnOpening) await openingHeld;
+      return session;
+    },
+  };
+  const made = await scene(
+    label,
+    { engine: "openai-realtime", transferTo: "+5531988887777", tools: ["transfer_to_human"], transferReturnsToAgent: true },
+    { pipeline: PIPELINE, transcriber, synthesizer: voice.synthesizer, transport },
+  );
+  const engine = made.harness.deps.pipelineEngine;
+  if (!engine) throw new Error("sem motor pipeline");
+  const connects: Array<Promise<unknown>> = [];
+  /** O handler de `pipelineTurnLatency` que a ligação pôs em cada sessão, na ordem das aberturas. */
+  const latencyHandlers: Array<((turn: PipelineTurnLatency) => void) | undefined> = [];
+  made.harness.deps.pipelineEngine = {
+    ...engine,
+    connect: (...args) => {
+      const index = connects.length;
+      latencyHandlers.push(undefined);
+      const connecting = engine.connect(...args).then(
+        (opened) =>
+          new Proxy(opened, {
+            get(target, key) {
+              if (key === "on")
+                return (event: string, handler: unknown) => {
+                  if (event === "pipelineTurnLatency") latencyHandlers[index] = handler as (turn: PipelineTurnLatency) => void;
+                  (target.on as (event: string, handler: unknown) => void)(event, handler);
+                };
+              const value: unknown = Reflect.get(target, key, target);
+              return typeof value === "function" ? (value as (...values: unknown[]) => unknown).bind(target) : value;
+            },
+          }),
+      );
+      connects.push(connecting);
+      // Quem ligou desliga na volta do laço em que a abertura do trecho de volta termina: depois de quem
+      // abriu ver a sessão aberta, e antes de ele continuar (a reação fica atrás da de quem abriu).
+      if (index === 1 && options.hangUpWhenReturnOpens) queueMicrotask(() => void connecting.then(() => transport.callerHangup()));
+      return connecting;
+    },
+  };
+  fakeBrain?.reply([tool("t1", "transfer_to_human", JSON.stringify({ reason: "financeiro", summary: "Segunda via." })), usage(20, 5)]);
+  const session = made.start();
+  await answered(made.callId);
+  await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+  made.transport.callerAudio(100);
+  await waitFor(() => transfers.length === 1, "the transfer to be dialed");
+  return { made, session, transport, voice, opened, connects, releaseOpening, latencyHandlers };
+}
+
+/** Depois do fim: nada vivo, e nada gravado depois do `call_ended` (só as tarefas que o próprio fim enfileira). */
+async function expectNothingAfterEnd(scene: Awaited<ReturnType<typeof returnScene>>) {
+  const { made, voice, opened } = scene;
+  const eventsAtEnd = await eventsOf(app, made.callId);
+  const ledgerAtEnd = await ledgerOf(app, made.callId);
+  const speaksAtEnd = voice.speaks();
+  const requestsAtEnd = fakeBrain?.requests.length;
+  scene.releaseOpening();
+  await settle();
+  // Nenhuma peça viva: toda transcrição que abriu fechou, e nenhuma fala ficou aberta.
+  expect(opened.closed).toBe(opened.count);
+  expect(voice.live()).toBe(0);
+  // Nenhuma síntese nova e nenhum pedido ao cérebro depois do fim.
+  expect(voice.speaks()).toBe(speaksAtEnd);
+  expect(fakeBrain?.requests.length).toBe(requestsAtEnd);
+  // Nada gravado depois do fim: nem evento, nem linha de extrato.
+  const events = await eventsOf(app, made.callId);
+  expect(events).toEqual(eventsAtEnd);
+  expect(await ledgerOf(app, made.callId)).toEqual(ledgerAtEnd);
+  const kinds = events.map((event) => event.kind);
+  expect(kinds.filter((kind) => kind === "call_ended")).toHaveLength(1);
+  expect(kinds.slice(kinds.indexOf("call_ended") + 1).every((kind) => kind === "task_queued")).toBe(true);
+  // O custo do fim é o do extrato inteiro: nenhuma linha chegou depois da conta.
+  const ended = events.find((event) => event.kind === "call_ended")?.payload as { costCents: number };
+  expect((await callOf(app, made.callId)).cost_cents).toBe(ended.costCents);
+  return kinds;
+}
+
+describe("a corrida do fim de chamada na transferência com volta (fatia 3c-2)", { timeout: 120_000 }, () => {
+  it("quem desliga com a linha da equipe chamando: o trecho de volta nunca abre, e nada é gravado depois do fim", async () => {
+    const run = await returnScene("pipeline-race-transferring");
+    run.transport.callerHangup();
+    await run.session.done;
+    const connectsAtEnd = run.connects.length;
+    // A volta que chega depois do fim não abre nada.
+    run.transport.endTransfer({ returned: true, status: "NOANSWER" });
+    await expectNothingAfterEnd(run);
+    expect(run.connects.length).toBe(connectsAtEnd);
+    expect(run.opened.count).toBe(1);
+  });
+
+  it("o fim antes de a abertura do trecho de volta terminar: a peça que abre tarde fecha, e nada é gravado depois do fim", async () => {
+    const run = await returnScene("pipeline-race-opening", { holdReturnOpening: true });
+    run.transport.endTransfer({ returned: true, status: "NOANSWER" });
+    await waitFor(() => run.opened.count === 2, "the return leg to start opening");
+    run.transport.callerHangup();
+    expect(await run.session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+    const kinds = await expectNothingAfterEnd(run);
+    // O trecho de volta não chegou a atender: nenhuma fala dele e nenhuma latência.
+    expect(kinds).not.toContain("pipeline_turn_latency");
+    expect(run.opened.count).toBe(2);
+  });
+
+  it("o fim logo depois de a abertura do trecho de volta terminar, antes de o trecho entrar na linha: a sessão nova fecha, e nada é gravado depois do fim", async () => {
+    const run = await returnScene("pipeline-race-opened", { hangUpWhenReturnOpens: true });
+    run.transport.endTransfer({ returned: true, status: "NOANSWER" });
+    await run.session.done;
+    expect(run.connects).toHaveLength(2);
+    await expectNothingAfterEnd(run);
+    expect(run.opened.count).toBe(2);
+  });
+
+  it("o fim com o trecho de volta já na linha, a saudação tocando: as peças fecham, a fala aberta é cancelada, e nada é gravado depois do fim", async () => {
+    const run = await returnScene("pipeline-race-greeting");
+    run.transport.endTransfer({ returned: true, status: "NOANSWER" });
+    await waitFor(async () => (await eventsOf(app, run.made.callId)).some((event) => event.kind === "transcript_agent" && String(event.payload.text).startsWith("Ninguém da equipe")), "the return greeting");
+    run.transport.callerHangup();
+    await run.session.done;
+    await expectNothingAfterEnd(run);
+    expect(run.opened.count).toBe(2);
+  });
+});
+
+describe("a guarda do evento de latência na sessão (ressalva da DESA-428)", { timeout: 120_000 }, () => {
+  it("a sessão substituída na volta e a ligação encerrando não gravam pipeline_turn_latency; a sessão atual grava", async () => {
+    const run = await returnScene("pipeline-latency-guard");
+    run.transport.endTransfer({ returned: true, status: "NOANSWER" });
+    await waitFor(async () => (await eventsOf(app, run.made.callId)).some((event) => event.kind === "transcript_agent" && String(event.payload.text).startsWith("Ninguém da equipe")), "the return greeting");
+    const [replaced, current] = run.latencyHandlers;
+    if (!replaced || !current) throw new Error("a ligação não pôs o handler da latência nas duas sessões");
+    const turn = (totalMs: number): PipelineTurnLatency => ({ endpointMs: 1, brainFirstTextMs: 2, voiceFirstAudioMs: 3, totalMs, endFromArrival: false, tool: false });
+    // A sessão do primeiro trecho já foi substituída: o que ela ainda emitir não vai para a linha do tempo.
+    replaced(turn(111));
+    // A sessão atual grava: o controle de que o handler é o da ligação.
+    current(turn(222));
+    await waitFor(async () => (await latenciesOf(run.made.callId)).length === 1, "the current session's latency");
+    // A ligação encerrando: o fim já começou, e nada mais entra.
+    run.transport.callerHangup();
+    current(turn(333));
+    await run.session.done;
+    await settle();
+    expect((await latenciesOf(run.made.callId)).map((payload) => payload.totalMs)).toEqual([222]);
   });
 });

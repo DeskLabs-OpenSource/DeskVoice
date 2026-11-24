@@ -3,7 +3,7 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import openai from "./brains/openai";
-import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_MAX_TOKENS, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH } from "./pipeline-engine";
+import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_MAX_TOKENS, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH } from "./pipeline-engine";
 import { FixedSpeechCache } from "./synthesis";
 import { createSimulatedSynthesizer, toneFor } from "./synthesizers/simulated";
 import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "./transcribers/simulated";
@@ -1044,5 +1044,124 @@ describe("motor pipeline (fatia 3c-1): a nota da abertura", () => {
     const cached = await connect(before + 100);
     expect(cached).toEqual({ transcriberMs: 100, fixedSpeechMs: 70, keyCheckMs: 70, fixedSpeech: 2, fromCache: 2, totalMs: 100 });
     expect(voice.keyChecks()).toBe(1);
+  });
+});
+
+// ---- 3c-2: a marca `tool` pela origem do texto, e a fala de transferência pronta ----
+
+describe("motor pipeline (fatia 3c-2): a marca `tool` sai da origem do texto que deu o primeiro áudio", () => {
+  it("nas duas ordens, com o relógio falso: a fala antes da ferramenta é `tool: false` mesmo com o áudio depois da rodada; a ferramenta antes da fala é `tool: true`, com a ferramenta no total", async () => {
+    brain = await startFakeBrain();
+    const clock = manualClock();
+
+    // 1. O cérebro fala e depois pede a ferramenta. O áudio dessa fala fica preso até a ferramenta ter
+    // sido pedida (a rodada acabou): a ordem que, antes, virava `tool: true`.
+    const held: Array<() => void> = [];
+    const gateVoice = { closed: false };
+    const voice = countedVoice(createSimulatedSynthesizer((task) => (gateVoice.closed ? held.push(task) : setImmediate(task))));
+    const sessions: SimulatedTranscription[] = [];
+    const transcriber = createSimulatedTranscriber({ script: [], onSession: (session) => sessions.push(session) });
+    const thinking = gate();
+    brain.reply([thinking.hold, text("Vou ver a agenda. "), tool("c1", "agendar", '{"dia":"terça"}'), usage(40, 5)], [text("Marquei para terça."), usage(60, 7)]);
+    const first = await open(piecesOf(voice.synthesizer, [], { transcriber: { piece: transcriber, apiKey: "" } }), { clock: clock.clock });
+    const seenFirst = latencies(first.session);
+    speak(first.session, 20);
+    clock.advance(400);
+    (sessions[0] as unknown as { emit(event: string, value: unknown): void }).emit("piece", { text: "Quero marcar para terça.", final: true, endMs: 100, alternatives: [] });
+    await until(() => brain?.requests.length === 1, "o pedido ao cérebro");
+    gateVoice.closed = true;
+    clock.advance(500);
+    thinking.release();
+    await until(() => first.log.toolCalls.length === 1, "a ferramenta pedida");
+    expect(seenFirst).toEqual([]);
+    // O áudio da fala de antes da ferramenta chega 200 ms depois do primeiro texto, e já com a rodada acabada.
+    clock.advance(200);
+    gateVoice.closed = false;
+    for (const task of held.splice(0)) setImmediate(task);
+    await until(() => seenFirst.length === 1, "a latência do turno com a fala antes da ferramenta");
+    expect(seenFirst).toEqual([{ endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 1000, endFromArrival: false, tool: false }]);
+    // A resposta depois da ferramenta é o mesmo turno: não emite de novo.
+    clock.advance(1000);
+    first.session.sendToolResult("c1", { ok: true });
+    await until(() => first.log.events.includes("agent: Marquei para terça."), "a resposta depois da ferramenta");
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(seenFirst).toHaveLength(1);
+    await first.session.close();
+
+    // 2. A ferramenta antes de qualquer fala: o primeiro áudio vem do pedido que reabriu o cérebro.
+    const pieces = timedPieces(clock, { voiceMs: 200 });
+    const answering = gate();
+    brain.reply([tool("c2", "agendar", '{"dia":"quarta"}'), usage(40, 5)], [answering.hold, text("Marquei para quarta."), usage(60, 7)]);
+    const second = await open(piecesOf(pieces.voice.synthesizer, [], { transcriber: { piece: pieces.transcriber, apiKey: "" } }), { clock: clock.clock });
+    const seenSecond = latencies(second.session);
+    speak(second.session, 20);
+    clock.advance(400);
+    pieces.heard({ text: "E quarta?", final: true, endMs: 100 });
+    await until(() => second.log.toolCalls.length === 1, "a ferramenta");
+    clock.advance(1000);
+    second.session.sendToolResult("c2", { ok: true });
+    await until(() => brain?.requests.length === 4, "o pedido depois da ferramenta");
+    clock.advance(500);
+    pieces.armVoice();
+    answering.release();
+    await until(() => seenSecond.length === 1, "a latência do turno com a ferramenta antes da fala");
+    // O total vai do fim da fala ao primeiro áudio: 300 + 1 000 da ferramenta + 500 + 200.
+    expect(seenSecond).toEqual([{ endpointMs: 300, brainFirstTextMs: 500, voiceFirstAudioMs: 200, totalMs: 2000, endFromArrival: false, tool: true }]);
+    await second.session.close();
+  });
+});
+
+describe("motor pipeline (fatia 3c-2): a fala de transferência pronta", () => {
+  it("com `transferOnFailure`, a fala de transferência fica pronta no lugar da de falha e toca na queda; sem, nada muda e ela nunca é sintetizada", async () => {
+    brain = await startFakeBrain();
+    const run = async (transferOnFailure: boolean | undefined) => {
+      const voice = countedVoice();
+      const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, fail: "o serviço caiu" }]), transferOnFailure === undefined ? {} : { transferOnFailure });
+      await new Promise((resolve) => setImmediate(resolve));
+      const pushedAtOpen = voice.log.filter((line) => line.startsWith("push"));
+      const opensAtOpen = voice.opens();
+      speak(session, 20);
+      await until(() => log.events.includes("closed failed"), "o fim");
+      // A queda não pede nada à voz: a fala já estava pronta.
+      expect(voice.opens()).toBe(opensAtOpen);
+      const charged = log.pieceUsage.filter((line) => line.piece === "synthesizer").reduce((sum, line) => sum + (line.characters ?? 0), 0);
+      return { events: log.events, audioBytes: log.audioBytes(), pushedAtOpen, opensAtOpen, charged };
+    };
+    const transfers = await run(true);
+    expect(transfers.events).toEqual(["error transcriber unreachable segue", `agent: ${PIPELINE_TRANSFER_SPEECH}`, "error transcriber unreachable fatal", "closed failed"]);
+    expect(transfers.audioBytes).toBe(toneFor([...PIPELINE_TRANSFER_SPEECH].length).length);
+    expect(transfers.pushedAtOpen).toEqual([`push 1 ${JSON.stringify(PIPELINE_TRANSFER_SPEECH)} flush`]);
+    // O custo dela entra no consumo da voz, como o das outras falas prontas.
+    expect(transfers.charged).toBe([...PIPELINE_TRANSFER_SPEECH].length);
+    for (const without of [await run(false), await run(undefined)]) {
+      expect(without.events).toEqual(["error transcriber unreachable segue", `agent: ${PIPELINE_FAILURE_SPEECH}`, "error transcriber unreachable fatal", "closed failed"]);
+      expect(without.pushedAtOpen).toEqual([`push 1 ${JSON.stringify(PIPELINE_FAILURE_SPEECH)} flush`]);
+      expect(without.opensAtOpen).toBe(1);
+      expect(without.charged).toBe([...PIPELINE_FAILURE_SPEECH].length);
+    }
+  });
+
+  it("o cache da fala de transferência é por organização: a segunda ligação da mesma organização não paga, a de outra paga", async () => {
+    brain = await startFakeBrain();
+    const voice = countedVoice();
+    const engine = createPipelineEngine({ fetch: brain.fetch, fixedSpeechCache: new FixedSpeechCache() });
+    const connect = async (organizationId: string) => {
+      const session = await engine.connect(config, "", { pieces: piecesOf(voice.synthesizer, []), organizationId, transferOnFailure: true });
+      const log = record(session);
+      await new Promise((resolve) => setImmediate(resolve));
+      await session.close();
+      return log.pieceUsage.filter((line) => line.piece === "synthesizer").reduce((sum, line) => sum + (line.characters ?? 0), 0);
+    };
+    const paid = [...PIPELINE_TRANSFER_SPEECH].length;
+    expect(await connect("org-a")).toBe(paid);
+    expect(voice.opens()).toBe(1);
+    expect(await connect("org-a")).toBe(0);
+    expect(voice.opens()).toBe(1);
+    expect(await connect("org-b")).toBe(paid);
+    expect(voice.opens()).toBe(2);
+    // A fala de falha da mesma organização não vem do cache da de transferência: são textos diferentes.
+    const plain = await engine.connect(config, "", { pieces: piecesOf(voice.synthesizer, []), organizationId: "org-a" });
+    await plain.close();
+    expect(voice.opens()).toBe(3);
   });
 });
