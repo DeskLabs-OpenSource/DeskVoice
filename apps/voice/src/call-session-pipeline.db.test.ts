@@ -2,9 +2,6 @@
 // com `agents.pipeline` nula, a chamada é a de sempre; preenchida, a sessão monta as três peças pela
 // pasta (aqui, injetadas), cada peça vira uma linha no extrato com o preço dela, o teto toca a
 // despedida pronta sem síntese nova, e a falha de uma peça chega ao painel só com os códigos.
-import { once } from "node:events";
-import { createServer, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import { encryptSecret, withSystem, type Clock } from "@deskvoice/core";
 import { synthesizerConsentSetting, type PipelineEngine, type Brain, type PipelineTurnLatency, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -18,6 +15,7 @@ import { createSimulatedTranscriber, type SimulatedTranscription, type Simulated
 import { brainKeySetting, brainModelsSetting, startCallSession, synthesizerKeySetting, type CallSession } from "./call-session";
 import type { TransferOptions, TransferOutcome } from "./transport";
 import { callOf, createAgent, createCall, createOrganization, eventsOf, kindsOf, ledgerOf, manualTransport, pricedSimulatedEngine, secretKey, sessionHarness, type AgentOptions, type ManualTransport, type SessionHarness } from "./testing/db";
+import { startFakeBrain, text, tool, usage } from "./testing/fake-brain";
 import { waitFor } from "./testing/helpers";
 
 const { app, owner } = openTestDbs();
@@ -33,50 +31,6 @@ afterEach(async () => {
 afterAll(async () => {
   await app.close();
   await owner.close();
-});
-
-// ---- o cérebro num servidor falso: a OpenAI de verdade (`brains/openai`), com o `fetch` apontado para cá ----
-
-type Reply = { status: number; body: string } | Array<{ data: unknown }>;
-
-async function startFakeBrain() {
-  const replies: Reply[] = [];
-  const requests: Array<{ messages: Array<Record<string, unknown>> }> = [];
-  const open = new Set<ServerResponse>();
-  const server = createServer((request, response) => {
-    let raw = "";
-    request.on("data", (chunk: Buffer) => (raw += chunk.toString("utf8")));
-    request.on("end", () => {
-      requests.push(JSON.parse(raw) as { messages: Array<Record<string, unknown>> });
-      const reply = replies.shift() ?? [{ data: { choices: [{ index: 0, delta: { content: "(sem roteiro)" } }] } }];
-      if (!Array.isArray(reply)) return void response.writeHead(reply.status, { "content-type": "application/json" }).end(reply.body);
-      open.add(response);
-      response.writeHead(200, { "content-type": "text/event-stream" });
-      for (const step of reply) response.write(`data: ${JSON.stringify(step.data)}\n\n`);
-      response.end("data: [DONE]\n\n");
-      open.delete(response);
-    });
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const fetch = ((url: string, init: RequestInit) => globalThis.fetch(url.replace("https://api.openai.com", base), init)) as typeof globalThis.fetch;
-  return {
-    fetch,
-    requests,
-    reply: (...next: Reply[]) => void replies.push(...next),
-    async stop() {
-      for (const response of open) response.destroy();
-      server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
-    },
-  };
-}
-
-const text = (content: string) => ({ data: { choices: [{ index: 0, delta: { content } }] } });
-const usage = (prompt: number, completion: number) => ({ data: { choices: [], usage: { prompt_tokens: prompt, completion_tokens: completion } } });
-const tool = (id: string, name: string, args: string) => ({
-  data: { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: args } }] }, finish_reason: "tool_calls" }] },
 });
 
 // ---- as peças: simuladas, com preço ----
