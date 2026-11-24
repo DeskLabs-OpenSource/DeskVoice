@@ -87,8 +87,8 @@ const VOICE_PRICE = { centsPerThousandCharacters: 30, checkedOn: "2026-11-24", s
 const PIPELINE = { transcriber: "simulated", brain: "openai", model: MODEL, synthesizer: "simulated", voiceId: "simulated" };
 
 /** A voz simulada com preço e com cada `speak` contado: a despedida pronta não pode abrir fala nova. */
-function pricedVoice(options: { failAfter?: number } = {}) {
-  const base = createSimulatedSynthesizer();
+function pricedVoice(options: { failAfter?: number; schedule?: (task: () => void) => void } = {}) {
+  const base = createSimulatedSynthesizer(options.schedule);
   let speaks = 0;
   /** Ligado por `breakNow`: daqui em diante, toda fala nova cai ao abrir. */
   let broken = false;
@@ -975,5 +975,79 @@ describe("a guarda do evento de latência na sessão (ressalva da DESA-428)", { 
     await run.session.done;
     await settle();
     expect((await latenciesOf(run.made.callId)).map((payload) => payload.totalMs)).toEqual([222]);
+  });
+});
+
+// ---- fatia 4: a interrupção numa ligação ----
+
+/** A voz com preço e com o agendador nas mãos do teste: presa (`hold`), cada pedaço de áudio espera `step`. */
+function gatedPricedVoice() {
+  const tasks: Array<() => void> = [];
+  let flowing = true;
+  const voice = pricedVoice({
+    schedule: (task) => {
+      if (flowing) setImmediate(task);
+      else tasks.push(task);
+    },
+  });
+  return { ...voice, hold: () => void (flowing = false), step: () => tasks.shift()?.(), pending: () => tasks.length };
+}
+
+describe("a interrupção numa ligação (fatia 4)", { timeout: 120_000 }, () => {
+  const GREETING = "Esta ligação é atendida por uma assistente virtual e a conversa fica registrada. Bom dia.";
+  it("o aceite: quem ligou fala por cima, o agente para, o painel mostra a fala só até onde saiu, a próxima resposta segue do que a pessoa disse, e o extrato cobra o enviado", async () => {
+    const FIRST = "Claro, posso ajudar. ";
+    const SECOND = "Qual é o seu nome completo?";
+    const voice = gatedPricedVoice();
+    const ear = pricedTranscriber([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Espera" },
+      { afterAudioMs: 300, text: "Espera, quero remarcar.", final: true },
+    ]);
+    const made = await scene("pipeline-interruption", { engine: "openai-realtime", greeting: "Bom dia.", costCeilingCents: 500 }, { pipeline: PIPELINE, transcriber: ear.transcriber, synthesizer: voice.synthesizer });
+    fakeBrain?.reply([text(FIRST), text(SECOND), usage(30, 12)], [text("Claro, para quando?"), usage(40, 5)]);
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    await waitFor(async () => (await eventsOf(app, made.callId)).some((event) => event.kind === "transcript_agent" && String(event.payload.text).endsWith("Bom dia.")), "the greeting");
+    await waitFor(() => voice.live() === 0, "the greeting to finish");
+    voice.hold();
+    made.transport.callerAudio(100);
+    await waitFor(() => voice.pending() >= 2, "the answer to be generated");
+    // Só a primeira frase sai para a linha; quem ligou fala por cima.
+    voice.step();
+    const clearedBefore = made.transport.cleared;
+    made.transport.callerAudio(100);
+    await waitFor(() => made.transport.cleared > clearedBefore, "the interruption to clear the line");
+    made.transport.callerAudio(100);
+    await waitFor(() => fakeBrain?.requests.length === 2, "the next brain request");
+    // O cérebro recebe a fala cortada, e não a inteira.
+    const next = fakeBrain?.requests[1]?.messages.map((message) => ({ role: message.role, content: message.content })) ?? [];
+    expect(next.slice(-3)).toEqual([
+      { role: "user", content: "Oi." },
+      { role: "assistant", content: "Claro, posso ajudar." },
+      { role: "user", content: "Espera, quero remarcar." },
+    ]);
+    while (voice.pending() > 0) voice.step();
+    await waitFor(async () => (await eventsOf(app, made.callId)).some((event) => event.kind === "transcript_agent" && event.payload.text === "Claro, para quando?"), "the next answer");
+    made.transport.callerHangup();
+    await session.done;
+    await settle();
+    // O painel: a fala do agente só até onde saiu, antes da fala nova de quem ligou.
+    const events = await eventsOf(app, made.callId);
+    const lines = events.filter((event) => event.kind === "transcript_agent" || event.kind === "transcript_user").map((event) => `${event.kind === "transcript_user" ? "user" : "agent"}: ${String(event.payload.text)}`);
+    expect(lines).toEqual([`agent: ${GREETING}`, "user: Oi.", "agent: Claro, posso ajudar.", "user: Espera, quero remarcar.", "agent: Claro, para quando?"]);
+    // A voz cobrou o que foi enviado a ela (as duas frases da resposta cortada inclusive), nem mais nem menos.
+    expect(voice.texts).toContain(SECOND);
+    await expectVoiceLedgerMatchesSynthesis(made.callId, voice);
+    const ledger = await piecesLedger(made.callId);
+    // O pedido cortado e o seguinte, os dois no extrato, e o total da ligação (o que o teto confere) é o do extrato.
+    expect(ledger.filter((row) => row.engine === "brain:openai")).toHaveLength(2);
+    const total = ledger.reduce((sum, row) => sum + Number(row.cost_microcents), 0);
+    expect((await callOf(app, made.callId)).cost_cents).toBe(Math.round(total / 1_000_000));
+    // Nada aberto: nenhuma fala viva, e nenhum evento depois do fim.
+    expect(voice.live()).toBe(0);
+    const kinds = events.map((event) => event.kind);
+    expect(kinds.slice(kinds.indexOf("call_ended") + 1).every((kind) => kind === "task_queued")).toBe(true);
   });
 });

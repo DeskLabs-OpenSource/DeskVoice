@@ -89,6 +89,12 @@ import {
  * do cache, a conferência da chave da voz (`checkKey`); sem cache, a síntese provou a chave, e a
  * conferência não roda. A chave do cérebro não é conferida na abertura: ela se prova no primeiro pedido.
  *
+ * **A interrupção** (fatia 4). Texto novo de quem ligou com a resposta do cérebro saindo (a primeira da
+ * fila) emite `interrupted`, cancela a voz e o pedido aberto, e corta a resposta no `spoken` do áudio já
+ * entregue, na transcrição e no histórico: o próximo pedido leva o que quem ligou ouviu. Só texto
+ * interrompe (a transcrição não tem sinal de início de fala; vale também com `noisy`). O `say` e as falas
+ * prontas não se interrompem. A fala do agente vai à transcrição quando acaba de sair, ou cortada.
+ *
  * **A recusa de abertura** é `PipelineOpenError`: a peça, o motivo e o que a abertura já gastou (as
  * falas fixas sintetizadas antes de a outra peça recusar), para o custo entrar no extrato da tentativa.
  */
@@ -163,34 +169,69 @@ const bytesOf = (value: unknown): number => Buffer.byteLength(typeof value === "
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+/**
+ * Uma resposta do cérebro que vai à voz: o texto de uma rodada, a mensagem dela no histórico (quando a
+ * rodada terminou) e se ela já foi à transcrição. É o que a interrupção corta (fatia 4).
+ */
+interface Reply {
+  text: string;
+  message?: BrainChatMessage;
+  settled: boolean;
+}
+
 /** Uma fala na fila de saída: a viva, aberta na voz, ou a fixa, já pronta. */
 interface Utterance {
   /** Áudio que chegou antes de esta fala ser a primeira da fila. */
   held: Buffer[];
   /** A resposta de um turno: o primeiro áudio dela entregue fecha a latência do turno. */
   turn?: Turn;
+  /** A resposta do cérebro que esta fala diz. Só ela se interrompe; `say` e as falas prontas, não. */
+  reply?: Reply;
+  /** Caracteres (pontos de código) cujo áudio já foi entregue a quem abriu: o `spoken` do que saiu. */
+  heard: number;
+  /** O `spoken` do áudio que ainda espera na fila: vira `heard` quando esse áudio sai. */
+  heldSpoken?: number;
   finished: boolean;
+  readonly cancelled: boolean;
   push(text: string, flush: boolean): void;
   end(): void;
   cancel(): void;
 }
 
 /** A fala fixa: o áudio já está pronto, e não há nada a mandar à voz. */
-const readyUtterance = (audio: Buffer): Utterance => ({ held: [audio], finished: true, push: () => undefined, end: () => undefined, cancel: () => undefined });
+const readyUtterance = (audio: Buffer): Utterance => ({
+  held: [audio],
+  heard: 0,
+  finished: true,
+  cancelled: false,
+  push: () => undefined,
+  end: () => undefined,
+  cancel: () => undefined,
+});
+
+/** Os primeiros `chars` pontos de código de `text`, como a voz conta (`countCharacters`). */
+const firstCharacters = (text: string, chars: number): string => [...text].slice(0, Math.max(0, chars)).join("");
 
 /** Uma fala viva. O texto que chega antes de a voz abrir espera, e vai na ordem quando ela abre. */
 class LiveUtterance implements Utterance {
   held: Buffer[] = [];
   turn?: Turn;
+  reply?: Reply;
+  heard = 0;
+  heldSpoken?: number;
   finished = false;
   private speech: Speech | undefined;
   private readonly queued: Array<{ text: string; flush: boolean }> = [];
   private ended = false;
-  private cancelled = false;
+  private wasCancelled = false;
+
+  get cancelled(): boolean {
+    return this.wasCancelled;
+  }
 
   /** A voz abriu: manda o que esperava. Depois do `cancel`, a fala que abriu tarde é cancelada. */
   opened(speech: Speech): void {
-    if (this.cancelled) return speech.cancel();
+    if (this.wasCancelled) return speech.cancel();
     this.speech = speech;
     for (const { text, flush } of this.queued.splice(0)) speech.push(text, { flush });
     if (this.ended) speech.end();
@@ -206,8 +247,10 @@ class LiveUtterance implements Utterance {
     this.speech?.end();
   }
 
+  /** O texto que esperava a voz abrir nunca vai ao provedor: não é cobrado. */
   cancel(): void {
-    this.cancelled = true;
+    this.wasCancelled = true;
+    this.queued.length = 0;
     this.speech?.cancel();
   }
 }
@@ -254,6 +297,8 @@ class PipelineSession implements PipelineVoiceSession {
   /** O fim da fala que ainda não foi ao cérebro (vale o último), e o turno da rodada em curso. */
   private pendingTurn: Turn | undefined;
   private roundTurn: Turn | undefined;
+  /** Quem ligou interrompeu com uma ferramenta em curso: a volta dela espera a fala nova (fatia 4). */
+  private toolsInterrupted = false;
   /** O que a abertura sintetizou e ainda não foi ao extrato. */
   private openingUsage: { characters: number; costMicrocents?: number } | undefined;
 
@@ -321,6 +366,13 @@ class PipelineSession implements PipelineVoiceSession {
     this.pendingTools = undefined;
     // Na ordem das chamadas e depois de todas elas: o Gemini recusa intercalar (seção 3.2).
     for (const call of pending.calls) this.history.push({ role: "tool", toolCallId: call.id, content: pending.results.get(call.id) ?? "" });
+    if (this.toolsInterrupted) {
+      // Quem ligou falou por cima durante a ferramenta: a rodada acaba aqui, e o próximo pedido é o da
+      // fala nova, com o resultado e com a fala cortada no histórico. Sem fala nova ainda, espera por ela.
+      this.toolsInterrupted = false;
+      this.roundOver();
+      return;
+    }
     this.ask();
   }
 
@@ -368,7 +420,13 @@ class PipelineSession implements PipelineVoiceSession {
   private heard(piece: TranscriptPiece): void {
     if (this.finished) return;
     const text = piece.text.trim();
-    if (text !== "" && text !== this.lastHeard) this.emitter.emit("callerActivity", { words: true });
+    if (text !== "" && text !== this.lastHeard) {
+      this.emitter.emit("callerActivity", { words: true });
+      // Texto novo de quem ligou por cima da resposta do agente: interrompe (fatia 4). Só texto
+      // interrompe, nos dois ambientes: a transcrição não tem sinal de início de fala, e o trecho sem
+      // palavra (o ruído, com `listeningEnvironment: "noisy"` ou não) não corta o agente (lição da R11).
+      if (this.output[0]?.reply) this.interrupt();
+    }
     this.lastHeard = text;
     if (!piece.final) {
       this.lastPartial = piece.text;
@@ -433,7 +491,7 @@ class PipelineSession implements PipelineVoiceSession {
   private userTurn(text: string): void {
     this.emitter.emit("transcript", { speaker: "user", text });
     if (this.busy) {
-      // Interromper a resposta é da fatia 4: aqui, a fala espera a rodada acabar.
+      // A rodada em curso não foi interrompida (a ferramenta, ou a resposta atrás de um `say`): a fala espera ela acabar.
       this.waiting.push({ role: "user", content: text });
       return;
     }
@@ -472,7 +530,7 @@ class PipelineSession implements PipelineVoiceSession {
       { fetch: this.options.fetch },
     );
     this.chat = chat;
-    let text = "";
+    const reply: Reply = { text: "", settled: false };
     const calls: BrainToolCall[] = [];
     let utterance: Utterance | undefined;
     let usage: { usage: Usage; estimated: boolean } | undefined;
@@ -480,7 +538,7 @@ class PipelineSession implements PipelineVoiceSession {
     // O que saiu e o que voltou, para estimar o pedido que terminou sem consumo declarado.
     const sent = (): Usage => ({
       inputTokens,
-      outputTokens: bytesOf(text) + calls.reduce((sum, call) => sum + bytesOf(call.args), 0),
+      outputTokens: bytesOf(reply.text) + calls.reduce((sum, call) => sum + bytesOf(call.args), 0),
     });
     const charge = (): void => {
       if (usage && end) this.brainUsage(usage.usage, usage.estimated, end, sent);
@@ -492,10 +550,10 @@ class PipelineSession implements PipelineVoiceSession {
     });
     chat.on("text", (delta) => {
       if (this.chat !== chat || this.finished || delta === "") return;
-      text += delta;
+      reply.text += delta;
       // A fala abre no primeiro texto, e não antes: não fica aberta esperando (o `inactivity_timeout`).
       if (!utterance) {
-        utterance = this.openUtterance();
+        utterance = this.openUtterance(reply);
         if (turn && turn.firstTextAt === undefined) {
           // A marca sai da origem do texto que dá o primeiro áudio (3.5, fatia 3c-2), e não da ordem
           // entre o áudio e o fim da rodada: a fala antes da ferramenta é `tool: false`.
@@ -517,7 +575,7 @@ class PipelineSession implements PipelineVoiceSession {
       charge();
       this.chat = undefined;
       utterance?.end();
-      this.answered(text, calls);
+      this.answered(reply, calls);
     });
     chat.on("error", (failure, status) => {
       if (this.chat !== chat) return;
@@ -525,7 +583,7 @@ class PipelineSession implements PipelineVoiceSession {
       charge();
       this.chat = undefined;
       utterance?.end();
-      this.brainFailed(text, failure, status);
+      this.brainFailed(reply, failure, status);
     });
   }
 
@@ -547,11 +605,16 @@ class PipelineSession implements PipelineVoiceSession {
     return true;
   }
 
-  private answered(text: string, calls: BrainToolCall[]): void {
+  private answered(reply: Reply, calls: BrainToolCall[]): void {
     if (this.finished) return;
     this.brainFailures = 0;
-    if (text !== "") this.emitter.emit("transcript", { speaker: "agent", text });
-    if (text !== "" || calls.length > 0) this.history.push(calls.length > 0 ? { role: "assistant", content: text, toolCalls: calls } : { role: "assistant", content: text });
+    const { text } = reply;
+    // A fala vai à transcrição quando acaba de sair, ou cortada na interrupção (`settle`); sem texto, nada.
+    if (text === "") reply.settled = true;
+    if (text !== "" || calls.length > 0) {
+      reply.message = calls.length > 0 ? { role: "assistant", content: text, toolCalls: calls } : { role: "assistant", content: text };
+      this.history.push(reply.message);
+    }
     if (calls.length > 0) {
       this.pendingTools = { calls, results: new Map() };
       for (const call of calls) this.emitter.emit("toolCall", { id: call.id, name: call.name, args: toolArgs(call.args) });
@@ -560,15 +623,16 @@ class PipelineSession implements PipelineVoiceSession {
     this.roundOver();
   }
 
-  private brainFailed(text: string, failure: BrainFailure, status: number | null): void {
+  private brainFailed(reply: Reply, failure: BrainFailure, status: number | null): void {
     if (this.finished) return;
     const { id } = this.pieces.brain.piece;
     this.brainFailures += 1;
     if (this.brainFailures >= BRAIN_FAILURES_TO_GIVE_UP) return this.fail("brain", id, failure, `o cérebro falhou ${this.brainFailures} vezes seguidas (${failure}, ${status ?? "sem resposta"})`);
-    // O que já foi falado fica no histórico; a ferramenta de uma volta que falhou não é executada.
-    if (text !== "") {
-      this.emitter.emit("transcript", { speaker: "agent", text });
-      this.history.push({ role: "assistant", content: text });
+    // O que já foi falado fica no histórico (e vai à transcrição quando sai); a ferramenta de uma volta que falhou não é executada.
+    if (reply.text === "") reply.settled = true;
+    else {
+      reply.message = { role: "assistant", content: reply.text };
+      this.history.push(reply.message);
     }
     this.emitter.emit("error", new PipelinePieceError("brain", id, failure, false, `o pedido ao cérebro falhou (${failure}, ${status ?? "sem resposta"})`));
     this.roundOver();
@@ -584,18 +648,24 @@ class PipelineSession implements PipelineVoiceSession {
 
   // ---- 4 e 6: a voz ----
 
-  private openUtterance(): Utterance {
+  private openUtterance(reply?: Reply): Utterance {
     const { piece: synthesizer, apiKey, voiceId, model } = this.pieces.synthesizer;
     const utterance = new LiveUtterance();
+    if (reply) utterance.reply = reply;
     this.enqueue(utterance);
     synthesizer.speak({ voiceId, language: this.config.language, ...(model === undefined ? {} : { model }) }, apiKey, { schedule: this.options.schedule }).then(
       (speech) => {
         if (this.finished) return speech.cancel();
         // Os handlers antes do texto que esperava: o consumo sai no envio, e nenhum fica sem dono.
         speech.on("audio", (pcm) => this.play(utterance, pcm));
+        speech.on("spoken", (chars) => this.spoken(utterance, chars));
+        // O consumo sai no envio, e o que já foi enviado é cobrado mesmo depois do `cancel` da interrupção.
         speech.on("usage", (usage) => this.synthesizerUsage(usage.characters, usage.costMicrocents));
         speech.on("done", () => this.utteranceDone(utterance));
-        speech.on("error", (error) => this.fail("synthesizer", synthesizer.id, failureOf(error), `voz: ${messageOf(error)}`));
+        speech.on("error", (error) => {
+          // A fala cortada pela interrupção já não é de ninguém: o erro dela não derruba a ligação.
+          if (!utterance.cancelled) this.fail("synthesizer", synthesizer.id, failureOf(error), `voz: ${messageOf(error)}`);
+        });
         utterance.opened(speech);
       },
       (error: unknown) => this.fail("synthesizer", synthesizer.id, failureOf(error), `a voz não abriu no meio da ligação: ${messageOf(error)}`),
@@ -610,9 +680,17 @@ class PipelineSession implements PipelineVoiceSession {
   }
 
   private play(utterance: Utterance, pcm: Buffer): void {
-    if (this.finished) return;
+    // A fala cortada já saiu da fila: o áudio atrasado dela não sairia, e nem fica guardado.
+    if (this.finished || utterance.cancelled) return;
     if (this.output[0] === utterance) this.deliver(utterance, pcm);
     else utterance.held.push(pcm);
+  }
+
+  /** O `spoken` vem depois do áudio dele: se esse áudio já saiu, é o que quem ligou já ouviu. */
+  private spoken(utterance: Utterance, chars: number): void {
+    if (this.finished || utterance.cancelled) return;
+    if (this.output[0] === utterance) utterance.heard = chars;
+    else utterance.heldSpoken = chars;
   }
 
   /** O áudio vai a quem abriu (o transporte). O primeiro de uma resposta fecha a latência do turno. */
@@ -622,9 +700,11 @@ class PipelineSession implements PipelineVoiceSession {
   }
 
   private utteranceDone(utterance: Utterance): void {
+    if (utterance.cancelled) return;
     utterance.finished = true;
     if (this.output[0] === utterance) {
       this.output.shift();
+      this.left(utterance);
       this.drain();
     }
   }
@@ -632,16 +712,91 @@ class PipelineSession implements PipelineVoiceSession {
   private drain(): void {
     for (let head = this.output[0]; head && !this.finished; head = this.output[0]) {
       for (const pcm of head.held.splice(0)) this.deliver(head, pcm);
+      if (head.heldSpoken !== undefined) {
+        head.heard = head.heldSpoken;
+        head.heldSpoken = undefined;
+      }
       if (!head.finished) return;
       this.output.shift();
+      this.left(head);
     }
+  }
+
+  /** A fala saiu inteira: a resposta vai à transcrição como o cérebro a disse. */
+  private left(utterance: Utterance): void {
+    if (utterance.reply) this.settle(utterance.reply);
+  }
+
+  /**
+   * A resposta vai à transcrição, uma vez: inteira quando a fala saiu inteira, ou cortada no que já saiu
+   * (`heard`, o `spoken` do áudio entregue) na interrupção e no fim. Cortada, a mensagem dela no
+   * histórico passa a ser a fala cortada: o próximo pedido ao cérebro leva o que quem ligou ouviu.
+   */
+  private settle(reply: Reply, heard?: number): void {
+    if (reply.settled) return;
+    reply.settled = true;
+    const said = heard === undefined ? reply.text : firstCharacters(reply.text, heard).trimEnd();
+    if (said.trim() !== "") this.emitter.emit("transcript", { speaker: "agent", text: said });
+    if (heard === undefined) return;
+    const message = reply.message;
+    const index = message ? this.history.indexOf(message) : -1;
+    const toolCalls = message?.role === "assistant" ? message.toolCalls : undefined;
+    const cut: BrainChatMessage | undefined = toolCalls ? { role: "assistant", content: said, toolCalls } : said === "" ? undefined : { role: "assistant", content: said };
+    if (index >= 0) {
+      // Sem ferramenta e sem nada ouvido, a mensagem sai: um `assistant` vazio é recusado por alguns provedores.
+      if (cut) this.history[index] = cut;
+      else this.history.splice(index, 1);
+    } else if (cut) {
+      // A rodada cortada no meio do pedido ainda não estava no histórico.
+      this.history.push(cut);
+    }
+    reply.message = cut;
+  }
+
+  /**
+   * Quem ligou falou por cima da resposta (fatia 4): a voz e o pedido ao cérebro param, a fala do
+   * agente fica no histórico e na transcrição só até onde saiu, e o próximo pedido segue do que quem
+   * ligou disser. O que já foi enviado à voz e ao cérebro é cobrado (o consumo sai no envio, e o
+   * cérebro cancelado emite o dele); o texto que esperava a voz abrir não foi enviado, e não é. As
+   * falas de `say` e as prontas não se interrompem: a despedida e a guarda sempre saem inteiras.
+   */
+  private interrupt(): void {
+    this.emitter.emit("interrupted");
+    // O pedido aberto para: o texto dele que já saiu está na fala da fila (o texto abre a fala), e o resto não sai.
+    const chat = this.chat;
+    if (chat) {
+      this.chat = undefined;
+      chat.cancel();
+    }
+    const kept: Utterance[] = [];
+    for (const utterance of this.output.splice(0)) {
+      if (!utterance.reply) {
+        kept.push(utterance);
+        continue;
+      }
+      utterance.cancel();
+      this.settle(utterance.reply, utterance.heard);
+    }
+    this.output.push(...kept);
+    if (this.pendingTools) this.toolsInterrupted = true;
+    else if (this.busy) {
+      // A rodada acabou na interrupção: o que esperava entra no histórico, e o próximo pedido é o da
+      // fala nova de quem ligou (o trecho final dela, ou a guarda que fecha o turno pelo parcial).
+      this.busy = false;
+      this.history.push(...this.waiting.splice(0));
+    }
+    this.drain();
   }
 
   private stopTalking(): void {
     const chat = this.chat;
     this.chat = undefined;
     chat?.cancel();
-    for (const utterance of this.output.splice(0)) utterance.cancel();
+    // O que já saiu vai à transcrição, cortado, antes do `closed`.
+    for (const utterance of this.output.splice(0)) {
+      utterance.cancel();
+      if (utterance.reply) this.settle(utterance.reply, utterance.heard);
+    }
   }
 
   // ---- 3.4: a falha ----

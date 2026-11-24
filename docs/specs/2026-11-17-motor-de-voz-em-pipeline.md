@@ -510,6 +510,37 @@ histórico e na transcrição é cortada no que já saiu (`spoken`). Com ruído 
 "noisy"`), só texto interrompe; o início de fala sozinho não interrompe (lição da R11). Os testes
 provam o corte, o custo do que já foi enviado e que o próximo pedido ao cérebro leva a fala cortada.
 
+**Como ficou (DESA-432).**
+
+- **Só a resposta do cérebro se interrompe, e só quando é ela que está saindo** (a primeira da fila de
+  saída, ainda gerando ou entregando áudio). O `say` (a saudação, a guarda, o "pode repetir?", as
+  despedidas) e as falas prontas saem inteiras: a despedida do teto ou da falha nunca é cortada, e a
+  fala pronta atrás da resposta cortada toca do mesmo jeito. Com a fala pronta tocando sozinha, quem
+  ligou não interrompe nada.
+- **O gatilho é texto novo da transcrição**, o mesmo `callerActivity({ words: true })`, parcial ou final.
+  A transcrição não tem sinal de início de fala, então a regra do modo Barulhento ("só texto
+  interrompe") vale nos dois ambientes: o trecho sem palavra nunca corta o agente.
+- **O corte é o `spoken` do áudio já entregue** a quem abriu (o `spoken` do áudio que ainda espera na
+  fila não conta), em pontos de código, sem o espaço do fim. A mensagem da resposta no histórico passa a
+  ser a fala cortada (com as ferramentas, se pediu; sem nada ouvido e sem ferramenta, ela sai do
+  histórico). O pedido aberto é cancelado, e o que ele já tinha dito entra cortado do mesmo jeito.
+- **A fala do agente vai à transcrição quando acaba de sair**, inteira, ou cortada na interrupção e no
+  fim da sessão (antes do `closed`). Antes desta fatia, ela ia no fim do pedido ao cérebro, com o áudio
+  ainda saindo. Por isso, no painel, a fala de antes de uma ferramenta pode aparecer depois do
+  `tool_called`, e a fala que o cérebro disse antes de falhar, depois do "pode repetir?".
+- **O custo:** a voz cobra no envio (`push`), então o que foi enviado antes do `cancel` está no extrato e
+  no teto; o texto que esperava a voz abrir não foi enviado, e não é cobrado. O pedido cancelado emite o
+  consumo dele (estimado, a regra da 3.2), que entra no extrato e no teto.
+- **Durante a ferramenta:** a fala de antes dela é cortada, a ferramenta segue, e o resultado entra no
+  histórico. Ele não reabre o cérebro sozinho: o próximo pedido é o da fala nova de quem ligou (o trecho
+  final, ou a guarda que fecha o turno pelo parcial), com o resultado e a fala cortada antes dela.
+- **Não medido:** a janela da interrupção é a da geração e entrega do áudio pelo motor, e não a da
+  reprodução na linha. Com a voz real mais rápida que o tempo real, a resposta já entregue inteira ao
+  transporte, que ainda toca, não se interrompe, e o corte conta como ouvido o que o transporte ainda
+  não tocou. O `played(ms)` do transporte (o Asterisk já mede) é o caminho para a fatia 6, com a medida.
+  Também não medido: o eco da própria voz do agente transcrito como fala de quem ligou, e a conta do
+  `spoken` da ElevenLabs (o `alignment`) contra o texto enviado.
+
 ### Fatia 5: a tela do agente
 
 Na tela do agente, "Pipeline" aparece como motor. Ao escolhê-lo, surgem três escolhas: a transcrição,

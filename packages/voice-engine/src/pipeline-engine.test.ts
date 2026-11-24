@@ -1188,3 +1188,339 @@ describe("motor pipeline (fatia 4, ponta 2 da 3c-2): a abertura que ninguém uso
     expect(log.pieceUsage.filter((line) => line.piece === "synthesizer").map((line) => line.characters)).toEqual([paid]);
   });
 });
+
+// ---- fatia 4: a interrupção ----
+
+/**
+ * A voz simulada com o agendador nas mãos do teste: aberta, o áudio sai pelo `setImmediate`; presa
+ * (`hold`), cada pedaço de áudio (com o `spoken` dele) e o `done` esperam `step`. `holdOpening` segura a
+ * abertura da próxima fala até `releaseOpening`.
+ */
+function gatedVoice() {
+  const tasks: Array<() => void> = [];
+  let flowing = true;
+  const schedule = (task: () => void): void => {
+    if (flowing) setImmediate(task);
+    else tasks.push(task);
+  };
+  const counted = countedVoice(createSimulatedSynthesizer(schedule));
+  let openingHeld: Promise<void> | undefined;
+  let releaseOpening = (): void => undefined;
+  const synthesizer: SpeechSynthesizer = {
+    ...counted.synthesizer,
+    async speak(...args) {
+      if (openingHeld) await openingHeld;
+      return counted.synthesizer.speak(...args);
+    },
+  };
+  return {
+    ...counted,
+    synthesizer,
+    hold: () => void (flowing = false),
+    step: () => tasks.shift()?.(),
+    /** Roda o pedaço `index` da fila, fora da ordem (o áudio de uma fala de trás antes do `done` da da frente). */
+    stepAt: (index: number) => tasks.splice(index, 1)[0]?.(),
+    pending: () => tasks.length,
+    holdOpening: () => void (openingHeld = new Promise<void>((resolve) => (releaseOpening = resolve))),
+    releaseOpening: () => releaseOpening(),
+  };
+}
+
+/** Os eventos da sessão com a interrupção junto, e o consumo da voz somado em caracteres. */
+function recordWithInterruption(session: VoiceSession) {
+  const log = record(session);
+  session.on("interrupted", () => log.events.push("interrupted"));
+  const voiceCharacters = () => log.pieceUsage.filter((line) => line.piece === "synthesizer").reduce((sum, line) => sum + (line.characters ?? 0), 0);
+  return { ...log, voiceCharacters };
+}
+
+async function openRecorded(pieces: PipelinePieces, extra: Partial<PipelineConnectOptions> = {}, sessionConfig: VoiceSessionConfig = config) {
+  if (!brain) throw new Error("sem cérebro");
+  const engine = createPipelineEngine({ fetch: brain.fetch, fixedSpeechCache: new FixedSpeechCache() });
+  const session = await engine.connect(sessionConfig, "", { pieces, organizationId: ORG, ...extra });
+  const log = recordWithInterruption(session);
+  // O custo da abertura sai no primeiro ciclo: a conta da voz abaixo começa depois dele.
+  await new Promise((resolve) => setImmediate(resolve));
+  return { session, log, openingCharacters: log.voiceCharacters() };
+}
+
+/** As mensagens do pedido `n` ao cérebro, só papel e texto (e as ferramentas do assistente). */
+const messagesOf = (n: number) =>
+  (brain?.requests[n]?.messages ?? []).map((message) => ({
+    role: message.role,
+    content: message.content,
+    ...(message.tool_calls ? { tools: (message.tool_calls as Array<{ id: string }>).map((call) => call.id) } : {}),
+  }));
+
+const FIRST = "Claro, posso ajudar. ";
+const SECOND = "Qual é o seu nome completo?";
+
+describe("motor pipeline (fatia 4): a interrupção", () => {
+  it("o aceite: quem ligou fala por cima, a voz e o cérebro param, a fala fica cortada no que saiu (transcrição e histórico), e o próximo pedido segue do que a pessoa disse", async () => {
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    const script: SimulatedTranscriptScript = [
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Espera" },
+      { afterAudioMs: 300, text: "Espera, quero remarcar.", final: true },
+    ];
+    // O cérebro manda a primeira frase e segura o resto: o pedido está aberto quando quem ligou interrompe.
+    const rest = gate();
+    brain.reply([text(FIRST), rest.hold, text(SECOND), usage(30, 12)], [text("Claro, para quando?"), usage(40, 5)]);
+    const { session, log, openingCharacters } = await openRecorded(piecesOf(voice.synthesizer, script));
+    voice.hold();
+    speak(session, 100);
+    // A primeira frase foi à voz (enviada e cobrada) e só o áudio dela saiu.
+    await until(() => voice.pending() === 1, "a primeira frase gerar");
+    voice.step();
+    expect(log.audioBytes()).toBe(toneFor([...FIRST].length).length);
+    speak(session, 100);
+    await until(() => log.events.includes("interrupted"), "a interrupção");
+    // A fala do agente vai à transcrição cortada no que saiu, antes da fala nova de quem ligou.
+    expect(log.events).toEqual(["activity", "turn ended (transcript)", "user: Oi.", "activity", "interrupted", "agent: Claro, posso ajudar."]);
+    expect(voice.log.filter((line) => line.startsWith("cancel"))).toEqual(["cancel 2"]);
+    // O resto do cérebro chega depois da interrupção: não vai à voz, não é cobrado da voz, não vira fala.
+    rest.release();
+    const audioAtInterruption = log.audioBytes();
+    while (voice.pending() > 0) voice.step();
+    speak(session, 100);
+    await until(() => brain?.requests.length === 2, "o próximo pedido");
+    expect(log.audioBytes()).toBe(audioAtInterruption);
+    expect(voice.log.some((line) => line.includes(SECOND))).toBe(false);
+    // O próximo pedido leva a fala cortada, e não a inteira, e depois o que quem ligou disse.
+    expect(messagesOf(1).slice(-3)).toEqual([
+      { role: "user", content: "Oi." },
+      { role: "assistant", content: "Claro, posso ajudar." },
+      { role: "user", content: "Espera, quero remarcar." },
+    ]);
+    // A voz cobrou o que foi enviado a ela (a primeira frase), e o cérebro cancelado emitiu o consumo dele.
+    expect(log.voiceCharacters() - openingCharacters).toBe([...FIRST].length);
+    await until(() => log.pieceUsage.filter((line) => line.piece === "brain").length >= 1, "o consumo do pedido cancelado");
+    expect(log.pieceUsage.find((line) => line.piece === "brain")?.estimated).toBe(true);
+    await session.close();
+  });
+
+  it("o texto que esperava a voz abrir não foi enviado: não é cobrado, e a fala que abre tarde é cancelada sem receber nada", async () => {
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    brain.reply([text(FIRST), text(SECOND), usage(30, 12)]);
+    const { session, log, openingCharacters } = await openRecorded(piecesOf(voice.synthesizer, [
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Espera" },
+      { afterAudioMs: 300, text: "Espera, é outra coisa.", final: true },
+    ]));
+    voice.holdOpening();
+    speak(session, 100);
+    await until(() => log.events.includes("user: Oi."), "o turno");
+    await until(() => brain?.requests.length === 1, "o pedido");
+    // A resposta inteira chegou, e a voz ainda não abriu.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    speak(session, 100);
+    await until(() => log.events.includes("interrupted"), "a interrupção");
+    voice.releaseOpening();
+    await until(() => voice.log.includes("cancel 2"), "a fala que abriu tarde ser cancelada");
+    expect(voice.log.filter((line) => line.startsWith("push 2"))).toEqual([]);
+    expect(log.voiceCharacters()).toBe(openingCharacters);
+    // Nada saiu: nenhuma fala do agente na transcrição, e nenhuma mensagem do assistente (nem vazia) no histórico.
+    expect(log.events.filter((event) => event.startsWith("agent:"))).toEqual([]);
+    brain.reply([text("Pois não."), usage(20, 2)]);
+    speak(session, 100);
+    await until(() => brain?.requests.length === 2, "o próximo pedido");
+    expect(messagesOf(1).slice(-2)).toEqual([
+      { role: "user", content: "Oi." },
+      { role: "user", content: "Espera, é outra coisa." },
+    ]);
+    await session.close();
+  });
+
+  it("com `listeningEnvironment: \"noisy\"`, o trecho sem palavra não interrompe; o trecho com texto interrompe", async () => {
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    brain.reply([text(FIRST), text(SECOND), usage(30, 12)]);
+    const { session, log } = await openRecorded(
+      piecesOf(voice.synthesizer, [
+        { afterAudioMs: 100, text: "Oi.", final: true },
+        { afterAudioMs: 200, text: "" },
+        { afterAudioMs: 300, text: "   " },
+        { afterAudioMs: 400, text: "Espera" },
+      ]),
+      {},
+      { ...config, listeningEnvironment: "noisy" },
+    );
+    voice.hold();
+    speak(session, 100);
+    await until(() => voice.pending() >= 1, "a resposta gerar");
+    voice.step();
+    // O ruído (trecho sem palavra) não corta o agente.
+    speak(session, 200);
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(log.events).not.toContain("interrupted");
+    expect(voice.log.some((line) => line.startsWith("cancel"))).toBe(false);
+    speak(session, 100);
+    await until(() => log.events.includes("interrupted"), "a interrupção pelo texto");
+    expect(voice.log.filter((line) => line.startsWith("cancel"))).toEqual(["cancel 2"]);
+    await session.close();
+  });
+
+  it("durante a ferramenta: a fala de antes dela é cortada, o resultado entra no histórico, e o próximo pedido é o da fala nova, com a fala cortada", async () => {
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    brain.reply([text("Vou verificar a agenda. "), tool("c1", "agendar", JSON.stringify({ dia: "terça" })), usage(30, 12)], [text("Quarta às dez está livre."), usage(50, 6)]);
+    const { session, log } = await openRecorded(
+      piecesOf(voice.synthesizer, [
+        { afterAudioMs: 100, text: "Quero marcar para terça.", final: true },
+        { afterAudioMs: 200, text: "Não, espera" },
+        { afterAudioMs: 300, text: "Não, espera, é quarta.", final: true },
+      ]),
+    );
+    voice.hold();
+    speak(session, 100);
+    await until(() => log.toolCalls.length === 1, "a ferramenta");
+    // Nada da fala de antes da ferramenta saiu ainda: quem ligou interrompe e depois termina de falar.
+    speak(session, 200);
+    await until(() => log.events.includes("user: Não, espera, é quarta."), "a fala nova");
+    expect(log.events).toContain("interrupted");
+    expect(log.events.filter((event) => event.startsWith("agent:"))).toEqual([]);
+    // Com a ferramenta em curso, a fala nova espera o resultado; o resultado não reabre o cérebro sozinho.
+    expect(brain.requests).toHaveLength(1);
+    session.sendToolResult("c1", { ok: true });
+    await until(() => brain?.requests.length === 2, "o pedido com a fala nova");
+    expect(messagesOf(1).slice(-4)).toEqual([
+      { role: "user", content: "Quero marcar para terça." },
+      { role: "assistant", content: null, tools: ["c1"] },
+      { role: "tool", content: JSON.stringify({ ok: true }) },
+      { role: "user", content: "Não, espera, é quarta." },
+    ]);
+    await session.close();
+  });
+
+  it("a fala pronta e o `say` não se interrompem: a despedida pronta na fila atrás da resposta cortada sai inteira, sem fala nova", async () => {
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    const farewell = "Preciso encerrar agora. Obrigado.";
+    brain.reply([text(FIRST), text(SECOND), usage(30, 12)]);
+    const { session, log } = await openRecorded(
+      piecesOf(voice.synthesizer, [
+        { afterAudioMs: 100, text: "Oi.", final: true },
+        { afterAudioMs: 200, text: "Espera" },
+        { afterAudioMs: 300, text: "Alô?" },
+      ]),
+      { fixedSpeech: [farewell] },
+    );
+    voice.hold();
+    speak(session, 100);
+    await until(() => voice.pending() >= 1, "a resposta gerar");
+    // A despedida pronta entra na fila atrás da resposta que ainda fala.
+    session.say(farewell);
+    const opens = voice.opens();
+    speak(session, 100);
+    await until(() => log.events.includes("interrupted"), "a interrupção");
+    // A resposta foi cortada (nada dela saiu), e a despedida saiu inteira, pronta, sem abrir a voz.
+    expect(log.audioBytes()).toBe(toneFor([...farewell].length).length);
+    expect(voice.opens()).toBe(opens);
+    expect(log.events.filter((event) => event.startsWith("agent:"))).toEqual([`agent: ${farewell}`]);
+    // Com só a fala pronta tocando, quem ligou não interrompe nada.
+    speak(session, 100);
+    await until(() => log.events.filter((event) => event === "activity").length === 3, "a fala por cima da despedida");
+    expect(log.events.filter((event) => event === "interrupted")).toHaveLength(1);
+    await session.close();
+  });
+
+  it("a resposta que sai inteira vai à transcrição inteira quando acaba de sair, e o histórico fica como o cérebro a disse", async () => {
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    brain.reply([text(FIRST), text(SECOND), usage(30, 12)], [text("Anotado."), usage(40, 2)]);
+    const { session, log } = await openRecorded(
+      piecesOf(voice.synthesizer, [
+        { afterAudioMs: 100, text: "Oi.", final: true },
+        { afterAudioMs: 200, text: "Maria Souza.", final: true },
+      ]),
+    );
+    voice.hold();
+    speak(session, 100);
+    await until(() => voice.pending() >= 2, "a resposta gerar");
+    // Gerada, mas ainda não saiu inteira: nada na transcrição.
+    expect(log.events.filter((event) => event.startsWith("agent:"))).toEqual([]);
+    while (voice.pending() > 0) voice.step();
+    await until(() => log.events.includes(`agent: ${FIRST}${SECOND}`), "a fala inteira na transcrição");
+    speak(session, 100);
+    await until(() => brain?.requests.length === 2, "o próximo pedido");
+    expect(messagesOf(1).slice(-2)).toEqual([
+      { role: "assistant", content: `${FIRST}${SECOND}` },
+      { role: "user", content: "Maria Souza." },
+    ]);
+    expect(log.events).not.toContain("interrupted");
+    await session.close();
+  });
+
+  it("o áudio da resposta que espera atrás de um `say` não foi ouvido: no fim, nada dela vai à transcrição", async () => {
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    brain.reply([text(FIRST), usage(30, 6)]);
+    const { session, log } = await openRecorded(piecesOf(voice.synthesizer, [{ afterAudioMs: 100, text: "Oi.", final: true }]));
+    voice.hold();
+    session.say("Um momento, por favor.");
+    await until(() => voice.pending() === 2, "o say gerar");
+    speak(session, 100);
+    await until(() => voice.pending() >= 3, "a resposta gerar");
+    // O áudio da resposta (e o `spoken` dele) chega com o `say` ainda na frente: ele espera, e não saiu.
+    voice.stepAt(2);
+    expect(log.audioBytes()).toBe(0);
+    await session.close();
+    expect(log.events.filter((event) => event.startsWith("agent:"))).toEqual(["agent: Um momento, por favor."]);
+  });
+
+  it("a fala cortada que avisa erro depois do `cancel` não derruba a ligação", async () => {
+    brain = await startFakeBrain();
+    const gated = gatedVoice();
+    // A voz que, ao ser cancelada, ainda avisa um erro (o provedor que fecha o socket da fala cortada).
+    const synthesizer: SpeechSynthesizer = {
+      ...gated.synthesizer,
+      async speak(...args) {
+        const speech = await gated.synthesizer.speak(...args);
+        let onError: ((error: Error) => void) | undefined;
+        return {
+          ...speech,
+          on: (event, handler) => {
+            if (event === "error") onError = handler as (error: Error) => void;
+            speech.on(event, handler);
+          },
+          cancel: () => {
+            speech.cancel();
+            onError?.(new SynthesizerOpenError("unreachable", "o socket da fala cortada fechou"));
+          },
+        };
+      },
+    };
+    brain.reply([text(FIRST), text(SECOND), usage(30, 12)]);
+    const { session, log } = await openRecorded(piecesOf(synthesizer, [
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Espera" },
+    ]));
+    gated.hold();
+    speak(session, 100);
+    await until(() => gated.pending() >= 1, "a resposta gerar");
+    speak(session, 100);
+    await until(() => log.events.includes("interrupted"), "a interrupção");
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(log.events.filter((event) => event.startsWith("error") || event.startsWith("closed"))).toEqual([]);
+    await session.close();
+  });
+
+  it("o fim no meio da resposta: a fala vai à transcrição cortada no que saiu antes do `closed`, e nada sai depois dele", async () => {
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    brain.reply([text(FIRST), text(SECOND), usage(30, 12)]);
+    const { session, log } = await openRecorded(piecesOf(voice.synthesizer, [{ afterAudioMs: 100, text: "Oi.", final: true }]));
+    voice.hold();
+    speak(session, 100);
+    await until(() => voice.pending() >= 2, "a resposta gerar");
+    voice.step();
+    await session.close();
+    const atClose = [...log.events];
+    expect(atClose.slice(-2)).toEqual(["agent: Claro, posso ajudar.", "closed client"]);
+    while (voice.pending() > 0) voice.step();
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(log.events).toEqual(atClose);
+  });
+});
