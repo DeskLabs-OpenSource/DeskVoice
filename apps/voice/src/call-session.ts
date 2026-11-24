@@ -21,7 +21,6 @@ import {
   type Db,
   type OpenTurn,
   type OrgQuery,
-  type RememberedItem,
   type SpokenLanguage,
 } from "@deskvoice/core";
 import {
@@ -29,7 +28,6 @@ import {
   handoffTargetsOf,
   MAX_AGENT_HANDOFFS_PER_CALL,
   runTool,
-  toSpec,
   toolCalledArgs,
   TRANSFER_TO_AGENT,
   type HandoffOutcome,
@@ -89,6 +87,17 @@ import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
 import { CALLER_SILENT, createCallerIdleGuard, type CallerIdleGuard } from "./caller-idle";
 import { createSilenceGuard, type SilenceGuard } from "./silence-guard";
+import {
+  composeInstructions,
+  enabledToolsFor,
+  engineKeySetting,
+  handoffItems,
+  inboundOpening,
+  oneLine,
+  RECORDING_NOTICE_SETTING,
+  recordingNoticeOf,
+  sessionConfig,
+} from "./session-config";
 import { createTurnLatencyMeter } from "./turn-latency";
 import { MIN_FREE_BYTES_TO_RECORD, freeBytes, startRecording, type Recording } from "./recording";
 import { CALLER_HANGUP, noticeUnansweredTransfer } from "./transfer-notice";
@@ -341,12 +350,10 @@ export function wrapGuidance(guidance: string): string {
   ].join("\n");
 }
 
-export const engineKeySetting = (engineId: string): string => `engine.${engineId}.api_key`;
+// A montagem da sessão mora em `session-config.ts`, com o teste do agente; os nomes seguem daqui.
+export { DEFAULT_RECORDING_NOTICE, engineKeySetting, RECORDING_NOTICE_SETTING } from "./session-config";
 /** A chave da peça de transcrição, cifrada como a do motor. */
 export const transcriberKeySetting = (transcriberId: string): string => `transcriber.${transcriberId}.api_key`;
-export const RECORDING_NOTICE_SETTING = "recording_notice.text";
-/** O aviso que vale quando o operador não escreveu o dele. Toda chamada começa por um aviso. */
-export const DEFAULT_RECORDING_NOTICE = "Esta ligação é atendida por uma assistente virtual e a conversa fica registrada.";
 // Além do prazo do próprio motor: nenhum `connect` segura quem ligou em silêncio por mais que isto.
 const CONNECT_TIMEOUT_MS = 15_000;
 
@@ -399,66 +406,9 @@ export function transferReturnInstruction(status: string): string {
   ].join("\n");
 }
 
-/** O que entra nas instruções do agente que recebe a ligação: quem passou, o motivo e o resumo. */
-export interface HandoffNote {
-  fromName: string;
-  reason: string;
-  summary: string;
-}
-
-// Nome e papel do agente vêm da configuração, e não de quem ligou; ainda assim ficam numa linha só,
-// para nenhum nome mal digitado abrir um parágrafo nas instruções.
-const oneLine = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").trim();
-
-/**
- * O motivo e o resumo da passagem como itens do bloco lembrado. A mesma lista vai para
- * `composeInstructions` e para o corte da memória na passagem: o que é medido é, byte a byte, o que vai.
- */
-export function handoffItems(handoff: Pick<HandoffNote, "reason" | "summary">): RememberedItem[] {
-  return [
-    { label: "motivo", text: handoff.reason },
-    { label: "resumo", text: handoff.summary },
-  ];
-}
-
-/**
- * As instruções que a sessão entrega ao motor. Sem destino e sem passagem, são as do agente, byte a
- * byte. Com destino, ganham uma linha por agente para quem ele pode passar a ligação, com nome e papel.
- * Com passagem, ganham quem passou e, no bloco delimitado e escapado (`rememberedBlock`, registro
- * 0020), o motivo e o resumo: texto do modelo a partir da fala de quem ligou, que é dado e nunca
- * instrução. Nada do resumo muda a configuração: os destinos e as ferramentas vêm só do banco.
- *
- * Com a memória do número (`memory`, fatia 6: as notas e os títulos de pendência que
- * `loadCallerMemory` montou), os itens entram no mesmo bloco, depois do motivo e do resumo quando há
- * passagem: as instruções nunca têm mais de um bloco. Sem item, nada muda.
- *
- * O roteiro do motor simulado (`simulated:` seguido de JSON) passa intacto: ninguém o lê como
- * instrução, e qualquer texto colado nele quebraria o `JSON.parse` do motor. O teste lê as instruções
- * montadas com um motor que as guarda.
- */
-export function composeInstructions(base: string, targets: readonly HandoffTarget[], handoff?: HandoffNote, memory: readonly RememberedItem[] = []): string {
-  if (base.startsWith(SIMULATED_PREFIX)) return base;
-  const parts = [base];
-  if (targets.length > 0) {
-    parts.push(
-      [
-        "Agentes para quem você pode passar a ligação com transfer_to_agent, pelo nome exato:",
-        ...targets.map((target) => `- ${oneLine(target.name)}${target.roleLabel?.trim() ? ` (${oneLine(target.roleLabel)})` : ""}`),
-      ].join("\n"),
-    );
-  }
-  if (handoff) {
-    parts.push(
-      [
-        `Esta ligação veio do agente ${oneLine(handoff.fromName)}, que já saiu da linha. Quem ligou já ouviu o aviso de gravação e acabou de ouvir você dizer que continua o atendimento. Continue a partir do motivo e do resumo da passagem, sem pedir de novo o que já foi dito.`,
-        rememberedBlock([...handoffItems(handoff), ...memory]),
-      ].join("\n"),
-    );
-  } else if (memory.length > 0) {
-    parts.push(rememberedBlock(memory));
-  }
-  return parts.join("\n\n");
-}
+// `HandoffNote`, `handoffItems` e `composeInstructions` moram em `session-config.ts`, com o teste do
+// agente; os nomes seguem daqui.
+export { composeInstructions, handoffItems, type HandoffNote } from "./session-config";
 
 /**
  * `OrgQuery` que executa uma consulta de cada vez, na ordem em que foram pedidas. A linha do tempo
@@ -1304,40 +1254,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   /** Para quem o agente pode passar a ligação: só os que existem, da mesma organização (`handoffTargetsOf`). */
   const targetsOf = async (row: AgentRow): Promise<HandoffTarget[]> => (row.agent_handoff_targets.length === 0 ? [] : (await handoffTargetsOf(q, row.id)).targets);
 
-  /** As ferramentas que o motor recebe para o agente. */
-  function enabledToolsFor(names: readonly string[], targets: readonly HandoffTarget[]): Map<string, Tool> {
-    const enabled = new Map<string, Tool>();
-    for (const name of names) {
-      const tool = deps.tools.get(name);
-      // Sem transferência no canal (ligação pelo WhatsApp), o motor nem a vê: a descrição manda
-      // anunciar a transferência antes de chamar, e quem ligou ouviria "vou transferir" e o recuo.
-      // Depois de uma transferência que voltou, também não: o agente não transfere de novo, em laço.
-      if (name === "transfer_to_human" && (!canTransfer || returned)) continue;
-      // Ferramenta sem a peça de que depende (a agenda sem cliente) também some: oferecida, o motor a
-      // chamaria em toda ligação de agendamento só para ouvir que ela não está ligada.
-      if (tool?.available === false) continue;
-      // A passagem não se marca: o que a liga é a lista de destinos, abaixo.
-      if (tool?.offeredBySession === true) continue;
-      if (tool) enabled.set(name, tool);
-      else log("error", "agent enables a tool that is not installed; ignoring it", { tool: name });
-    }
-    // Sem destino que exista, a ferramenta não aparece, e o motor recebe o mesmo de antes.
-    const handoffTool = deps.tools.get(TRANSFER_TO_AGENT);
-    if (targets.length > 0 && handoffTool) enabled.set(TRANSFER_TO_AGENT, handoffTool);
-    return enabled;
-  }
-
-  const sessionConfig = (row: AgentRow, instructions: string, greeting: string | undefined, enabled: Map<string, Tool>): VoiceSessionConfig => ({
-    instructions,
-    greeting,
-    voiceId: row.voice_id ?? undefined,
-    language: row.language,
-    tools: [...enabled.values()].map(toSpec),
-    // Dica de reconhecimento; vazia, o motor envia ao provedor o mesmo de antes.
-    vocabulary: row.vocabulary,
-    // `normal` envia ao provedor o mesmo de antes; `noisy` ajusta a detecção de fala.
-    listeningEnvironment: row.listening_environment,
-  });
+  /**
+   * As ferramentas que o motor recebe para o agente (`session-config.ts`, a mesma escolha do teste do
+   * agente). O canal e a volta da transferência são os desta ligação, lidos na hora.
+   */
+  const toolsFor = (names: readonly string[], targets: readonly HandoffTarget[]): Map<string, Tool> =>
+    enabledToolsFor({ installed: deps.tools, names, targets, canTransfer, returned: returned !== undefined, log });
 
   type EngineRefusal = "engine_not_configured" | "engine_not_responding" | "engine_refused";
   type PieceFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
@@ -1706,7 +1628,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const next = await q.one<AgentRow>(`select ${AGENT_COLUMNS} from agents where id = $1`, [target.id]);
       if (!next) return { ok: false, problem: "unavailable", detail: "the target agent was not found in this organization" };
       const targets = await targetsOf(next);
-      const enabled = enabledToolsFor(next.tools, targets);
+      const enabled = toolsFor(next.tools, targets);
       // O teto de 1 500 vale para o bloco inteiro, com o motivo e o resumo: o corte é refeito a partir
       // da memória lida no começo da ligação, e nunca em cima do corte de uma passagem anterior.
       const handoff = { fromName: from.agent.name, reason: input.reason, summary: input.summary };
@@ -1938,7 +1860,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const engineId = overrides?.engineId ?? first.engine;
     const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);
     // Sem texto do operador, ou com texto em branco, vale o padrão: o aviso nunca falta.
-    const recordingNotice = typeof notice?.value === "string" && notice.value.trim() !== "" ? notice.value.trim() : DEFAULT_RECORDING_NOTICE;
+    const recordingNotice = recordingNoticeOf(notice?.value);
     // Gravação desligada de fábrica (registro 0016): só grava a organização que ligou. Lida uma vez,
     // no começo: ligar ou desligar no meio não muda a chamada em curso.
     const recording = deps.recordingsDir ? await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, CALL_RECORDING_SETTING]) : null;
@@ -1947,7 +1869,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     resolveRecordingDecided();
 
     const targets = await targetsOf(first);
-    const enabled = enabledToolsFor(overrides?.tools ?? first.tools, targets);
+    const enabled = toolsFor(overrides?.tools ?? first.tools, targets);
     // A religação da ligação que caiu (desenho 2026-11-16-follow-up-da-ligacao-que-caiu, seção 3.6): uma
     // linha fixa, na língua do agente, somada às instruções. Nada da conversa anterior entra por aqui.
     const ownInstructions = overrides?.instructions ?? first.instructions;
@@ -1982,7 +1904,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         // na frente da saudação. Lição do DeskcommCRM: na ligação recebida quem atende fala
         // primeiro; na que nós fazemos, quem atende diz "alô" e o agente responde a isso, então
         // não há saudação, e o aviso sai por `say` assim que a pessoa atende.
-        call.direction === "inbound" ? [recordingNotice, first.greeting?.trim()].filter(Boolean).join(" ") : undefined,
+        call.direction === "inbound" ? inboundOpening(recordingNotice, first.greeting) : undefined,
         enabled,
       ),
       first,

@@ -21,6 +21,11 @@ export interface InternalApiHandlers {
   applyTrunks(input: { organizationId: string }): Promise<object>;
   outbound(input: { organizationId: string; agentId: string; toE164: string }): Promise<{ callId: string } | Refusal>;
   simulate(input: { organizationId: string; agentId: string; fromE164?: string | null }): Promise<{ callId: string } | Refusal>;
+  /**
+   * Teste do agente (fatia 7b): grava a rodada e devolve o id na hora; a conversa segue em segundo
+   * plano. As recusas (seção 5.5 do desenho) não criam rodada.
+   */
+  runAgentTest(input: { organizationId: string; testId: string; requestedBy: string | null }): Promise<{ runId: string } | Refusal>;
   /** Chamada pelo navegador: cria a chamada e o token de uso único que abre o WebSocket dela. */
   web(input: { organizationId: string; agentId: string; userId: string }): Promise<{ callId: string; token: string; expiresInSeconds: number } | Refusal>;
   /** Para a gravação de uma chamada em curso, a pedido de quem está no painel. */
@@ -43,6 +48,7 @@ const organization = z.strictObject({ organizationId: z.uuid() });
 const outbound = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), toE164: z.string().min(1).max(40) });
 const simulate = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), fromE164: z.string().regex(/^\+[1-9]\d{7,14}$/).nullable().optional() });
 const web = z.strictObject({ organizationId: z.uuid(), agentId: z.uuid(), userId: z.uuid() });
+const agentTestRun = z.strictObject({ organizationId: z.uuid(), testId: z.uuid(), requestedBy: z.uuid().nullable() });
 const stopRecording = z.strictObject({ organizationId: z.uuid(), callId: z.uuid(), userId: z.uuid(), reason: z.string().max(300).nullable() });
 
 class HttpError extends Error {
@@ -111,6 +117,10 @@ export function startInternalApi(options: InternalApiOptions): Promise<{ port: n
     if (key === "POST /calls/recording/stop") {
       const result = await handlers.stopRecording(await readJson(request, stopRecording));
       return { status: "recording" in result ? 200 : 409, body: result };
+    }
+    if (key === "POST /agent-tests/run") {
+      const result = await handlers.runAgentTest(await readJson(request, agentTestRun));
+      return { status: "runId" in result ? 200 : 409, body: result };
     }
     if (key === "POST /calls/web") {
       const result = await handlers.web(await readJson(request, web));

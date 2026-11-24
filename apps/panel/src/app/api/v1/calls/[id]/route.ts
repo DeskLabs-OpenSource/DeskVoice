@@ -26,7 +26,7 @@ export const GET = handle({}, async ({ q, params }) => {
   const byAgent = await q.many<{ agentId: string | null; name: string | null; microcents: string; unmeasured: number; estimated: number }>(
     `select ${LEDGER_AGENT} as "agentId", a.name, coalesce(sum(l.cost_microcents), 0)::text as microcents,
             ${UNMEASURED_COUNT} as unmeasured, ${ESTIMATED_COUNT} as estimated
-       from usage_ledger l join calls c on c.id = l.call_id left join agents a on a.id = ${LEDGER_AGENT}
+       from usage_ledger l left join calls c on c.id = l.call_id left join agents a on a.id = ${LEDGER_AGENT}
       where l.call_id = $1 group by 1, 2 order by min(l.at), 1`,
     [params.id],
   );

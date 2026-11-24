@@ -203,6 +203,8 @@ const serverEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("response.created") }),
   z.object({ type: z.literal("response.output_audio.delta"), item_id: z.string().optional(), delta: z.string() }),
   z.object({ type: z.literal("response.output_audio_transcript.done"), transcript: z.string() }),
+  // Sessão em `mode: "text"` (teste do agente, fatia 7b): a fala do agente chega como texto.
+  z.object({ type: z.literal("response.output_text.done"), text: z.string() }),
   z.object({ type: z.literal("conversation.item.input_audio_transcription.completed"), transcript: z.string() }),
   z.object({ type: z.literal("conversation.item.input_audio_transcription.delta"), item_id: z.string().optional(), delta: z.string() }),
   z.object({ type: z.literal("input_audio_buffer.committed"), item_id: z.string() }),
@@ -218,6 +220,9 @@ const serverEvent = z.discriminatedUnion("type", [
     type: z.literal("response.done"),
     response: z.object({
       usage: responseDoneUsage,
+      // Os itens que a resposta produziu: com `function_call`, a resposta pede ferramenta e o turno
+      // de um teste do agente não acabou.
+      output: z.array(z.object({ type: z.string() })).nullish(),
     }),
   }),
   z.object({ type: z.literal("error"), error: z.object({ message: z.string() }) }),
@@ -335,6 +340,10 @@ const engine: VoiceEngine = {
   callerTurnSource: "vad",
   voices: VOICES,
   defaultVoice: DEFAULT_VOICE,
+  // O teste do agente (fatia 7b, seção 5.3 de docs/specs/2026-11-21-testes-do-agente.md): a mesma
+  // sessão, com texto de entrada (`conversation.item.create` com `input_text`) e saída só em texto
+  // (`output_modalities: ["text"]`), cobrada no preço de texto.
+  textMode: true,
   pricing: {
     // gpt-realtime-2.1, por milhão de tokens: áudio US$ 32 (entrada) e US$ 64 (saída); texto US$ 4
     // e US$ 24; entrada em cache US$ 0,40. Cada resposta reconta a conversa inteira como entrada, e
@@ -350,6 +359,7 @@ const engine: VoiceEngine = {
 
   async connect(config, apiKey, options = {}) {
     const emitter = new SessionEmitter();
+    const textMode = config.mode === "text";
     let configured = false;
     let responseActive = false;
     const queuedResponses: object[] = [];
@@ -426,6 +436,9 @@ const engine: VoiceEngine = {
         case "response.output_audio_transcript.done":
           if (event.transcript) emitter.emit("transcript", { speaker: "agent", text: event.transcript });
           break;
+        case "response.output_text.done":
+          if (event.text) emitter.emit("transcript", { speaker: "agent", text: event.text });
+          break;
         case "conversation.item.input_audio_transcription.completed":
           if (event.transcript.trim()) emitter.emit("transcript", { speaker: "user", text: event.transcript.trim() });
           break;
@@ -454,6 +467,9 @@ const engine: VoiceEngine = {
           sendGuidance();
           const next = queuedResponses.shift();
           if (next) requestResponse(next);
+          // Em texto, o fim do turno: a resposta acabou sem pedir ferramenta, e nenhuma outra espera
+          // a vez (duas ferramentas na mesma resposta pedem duas respostas, e o turno é das duas).
+          else if (textMode && !(event.response.output ?? []).some((item) => item.type === "function_call")) emitter.emit("turnDone");
           break;
         }
         case "error": {
@@ -479,31 +495,37 @@ const engine: VoiceEngine = {
       timeout: options,
     });
 
+    // O idioma só existe como parâmetro na transcrição; a fala segue a instrução.
+    const instructions = `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.`;
+    const tools = config.tools.map((tool) => ({ type: "function", ...tool }));
     socket.send({
       type: "session.update",
-      session: {
-        type: "realtime",
-        // O idioma só existe como parâmetro na transcrição; a fala segue a instrução.
-        instructions: `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.`,
-        output_modalities: ["audio"],
-        audio: {
-          input: {
-            format: AUDIO_FORMAT,
-            // Sem termos, o `prompt` nem aparece: a sessão fica igual à de antes.
-            transcription: {
-              model: TRANSCRIBE_MODEL,
-              language: config.language.split("-")[0],
-              ...(config.vocabulary && config.vocabulary.length > 0 && { prompt: transcriptionPrompt(config.vocabulary) }),
+      // Em texto, nada de áudio: sem formato, voz, transcrição nem detecção de fala. As instruções e
+      // as ferramentas são as mesmas da ligação.
+      session: textMode
+        ? { type: "realtime", instructions, output_modalities: ["text"], tools }
+        : {
+            type: "realtime",
+            instructions,
+            output_modalities: ["audio"],
+            audio: {
+              input: {
+                format: AUDIO_FORMAT,
+                // Sem termos, o `prompt` nem aparece: a sessão fica igual à de antes.
+                transcription: {
+                  model: TRANSCRIBE_MODEL,
+                  language: config.language.split("-")[0],
+                  ...(config.vocabulary && config.vocabulary.length > 0 && { prompt: transcriptionPrompt(config.vocabulary) }),
+                },
+                // Ambiente `normal` ou ausente: a sessão fica igual à de antes.
+                ...(config.listeningEnvironment === "noisy"
+                  ? NOISY_INPUT
+                  : { turn_detection: { type: "server_vad", create_response: true, interrupt_response: true } }),
+              },
+              output: { format: AUDIO_FORMAT, voice: config.voiceId ?? DEFAULT_VOICE },
             },
-            // Ambiente `normal` ou ausente: a sessão fica igual à de antes.
-            ...(config.listeningEnvironment === "noisy"
-              ? NOISY_INPUT
-              : { turn_detection: { type: "server_vad", create_response: true, interrupt_response: true } }),
+            tools,
           },
-          output: { format: AUDIO_FORMAT, voice: config.voiceId ?? DEFAULT_VOICE },
-        },
-        tools: config.tools.map((tool) => ({ type: "function", ...tool })),
-      },
     });
     await awaitSessionReady(ready, socket, { label: "OpenAI Realtime", emitter, timeout: options });
 
@@ -517,6 +539,11 @@ const engine: VoiceEngine = {
           type: "conversation.item.create",
           item: { type: "function_call_output", call_id: id, output: JSON.stringify(result ?? null) },
         });
+        requestResponse({});
+      },
+      sendUserText(text) {
+        if (closed) return;
+        socket.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
         requestResponse({});
       },
       say(text) {
