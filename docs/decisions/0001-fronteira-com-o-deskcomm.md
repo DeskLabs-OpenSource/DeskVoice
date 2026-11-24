@@ -3,6 +3,8 @@
 - **Estado:** aceita
 - **Data:** 2026-11-10
 - **Quem decidiu:** dono do projeto
+- **Atualizada por:** [`0022`](0022-conector-com-o-deskcomm-pelo-mcp.md), que fixa por onde o
+  conector com o DeskcommCRM fala
 
 ## Contexto
 
@@ -48,6 +50,7 @@ Nenhum dos dois projetos depende do outro para funcionar.
 - Quem usa os dois, por enquanto, não tem a ligação e o CRM integrados. O caminho disponível
   hoje é a ferramenta de WhatsApp por conector e o webhook.
 - O conector com o DeskcommCRM é trabalho futuro, sem data. Está no [`ROADMAP.md`](../../ROADMAP.md).
+  A porta e a fronteira dele estão na [`0022`](0022-conector-com-o-deskcomm-pelo-mcp.md).
 
 **O que foi trazido de lá:** a ponte AudioSocket e as lições de NAT e RTP, com crédito em
 [`CREDITS.md`](../../CREDITS.md).
