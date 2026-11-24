@@ -46,6 +46,12 @@ import {
   DECISION_MODEL_SETTING,
   EngineTimeoutError,
   MICROCENTS_PER_CENT,
+  PipelineOpenError,
+  PipelinePieceError,
+  createPipelineEngine,
+  loadBrains,
+  loadSynthesizers,
+  loadTranscribers,
   SIMULATED_PREFIX,
   TranscriberOpenError,
   decisionModelKeySetting,
@@ -59,10 +65,17 @@ import {
   speechFilterState,
   type AnalystConfig,
   type AnalystTurn,
+  type Brain,
+  type BrainPrice,
   type DecideResult,
   type DecisionModel,
   type EnginePricing,
   type KeyCheckResult,
+  type PieceUsageLine,
+  type PipelineEngine,
+  type PipelinePieceKind,
+  type PipelinePieces,
+  type SpeechSynthesizer,
   type StreamingTranscriber,
   type StreamingTranscription,
   type Usage,
@@ -70,6 +83,7 @@ import {
   type VoiceSession,
   type VoiceSessionConfig,
 } from "@deskvoice/voice-engine";
+import { z } from "zod";
 import type { ApprovalWaiter } from "./approvals";
 import { messageOf, silentLogger, type Logger } from "./log";
 import { panelNotice } from "./panel-notice";
@@ -101,6 +115,15 @@ export interface CallSessionDeps {
   decisionModels?: Map<string, DecisionModel>;
   /** As peças de transcrição em streaming instaladas (`loadTranscribers`). Sem elas, nenhuma chamada usa peça. */
   transcribers?: Map<string, StreamingTranscriber>;
+  /**
+   * O pipeline (R5, fatia 3b): as peças que um agente com `agents.pipeline` pode escolher. Ausentes, a
+   * sessão lê a pasta (`loadBrains`, `loadSynthesizers` e `loadTranscribers`) na primeira ligação que
+   * pedir o pipeline. Com a coluna nula, nada aqui é lido.
+   */
+  brains?: Map<string, Brain>;
+  synthesizers?: Map<string, SpeechSynthesizer>;
+  /** O motor pipeline (os testes injetam o `fetch` do cérebro e o cache das falas fixas). Padrão: `createPipelineEngine()`. */
+  pipelineEngine?: PipelineEngine;
 }
 
 export interface CallSessionInput {
@@ -186,10 +209,54 @@ interface AgentRow {
   transfer_returns_to_agent: boolean;
   /** O "ainda está aí?" (Vapi · fatia 9, decisão B): desligada, o trecho nasce sem a guarda, que não pergunta nem encerra. */
   caller_idle_guard: boolean;
+  /**
+   * As peças do motor pipeline (R5, fatia 3b), `{ transcriber, brain, model, synthesizer, voiceId }`.
+   * Nula (o de fábrica), o trecho abre o motor de `engine`, como sempre. Ninguém escreve nela antes da fatia 5.
+   */
+  pipeline: unknown;
 }
 
 const AGENT_COLUMNS =
-  "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets, analyst_id, transfer_returns_to_agent, caller_idle_guard";
+  "id, name, instructions, greeting, engine, voice_id, language, tools, max_call_seconds, cost_ceiling_cents, transfer_to_e164, vocabulary, listening_environment, agent_handoff_targets, analyst_id, transfer_returns_to_agent, caller_idle_guard, pipeline";
+
+/** A escolha gravada em `agents.pipeline`. Fora da forma (gravada à mão), o pipeline não abre. */
+const pipelineChoice = z.object({
+  transcriber: z.string().min(1),
+  brain: z.string().min(1),
+  model: z.string().min(1),
+  synthesizer: z.string().min(1),
+  voiceId: z.string().min(1),
+});
+type PipelineChoice = z.infer<typeof pipelineChoice>;
+
+/** O preço do modelo, como a tela grava a lista em `brain.<id>.models` (a mesma forma de `apps/panel/src/server/brains.ts`). */
+const cents = z.number().finite().nonnegative();
+const storedBrainPrices = z.object({
+  models: z.array(
+    z.object({
+      id: z.string(),
+      price: z
+        .object({
+          centsPerMillionInputTokens: cents,
+          centsPerMillionOutputTokens: cents,
+          centsPerMillionCachedInputTokens: cents.optional(),
+          source: z.string(),
+          checkedOn: z.string(),
+        })
+        .optional(),
+    }),
+  ),
+});
+
+export const brainKeySetting = (brainId: string): string => `brain.${brainId}.api_key`;
+export const brainModelsSetting = (brainId: string): string => `brain.${brainId}.models`;
+export const synthesizerKeySetting = (synthesizerId: string): string => `synthesizer.${synthesizerId}.api_key`;
+
+/** As peças da pasta, lidas uma vez por processo, só quando a primeira ligação pede o pipeline. */
+let piecesOnDisk: Promise<{ transcribers: Map<string, StreamingTranscriber>; brains: Map<string, Brain>; synthesizers: Map<string, SpeechSynthesizer> }> | undefined;
+const readPiecesOnDisk = () =>
+  (piecesOnDisk ??= Promise.all([loadTranscribers(), loadBrains(), loadSynthesizers()]).then(([transcribers, brains, synthesizers]) => ({ transcribers, brains, synthesizers })));
+let defaultPipelineEngine: PipelineEngine | undefined;
 
 /** Um trecho da ligação: o tempo em que ela esteve com um agente, com o motor e o custo dele. */
 interface Leg {
@@ -476,6 +543,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   const readingsRunning = new Set<Promise<void>>();
   /** O custo do filtro e do analista, em micro-centavos: um pedido custa milésimos de centavo. */
   let decisionMicrocents = 0;
+  /** O custo das peças do pipeline (R5, fatia 3b), em micro-centavos, somado de todos os trechos. Sem pipeline, zero. */
+  let pipelineMicrocents = 0;
   /** As últimas falas da ligação, de quem ligou e do agente, de qualquer trecho: o `state` do analista. */
   const recentTurns: AnalystTurn[] = [];
   /** Quantas falas de quem ligou a ligação já teve: a resposta de um pedido feito antes da última vira `stale`. */
@@ -504,7 +573,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
    * O custo da ligação: o da voz, em centavos, mais o do filtro, arredondado uma vez só, no total
    * (a mesma conta de `calls.cost_cents` na classificação). Sem filtro, é o custo da voz, como antes.
    */
-  const callCents = (): number => costCents + Math.round(decisionMicrocents / MICROCENTS_PER_CENT);
+  const callCents = (): number => costCents + Math.round((decisionMicrocents + pipelineMicrocents) / MICROCENTS_PER_CENT);
   /** Os segundos da ligação inteira, somados de todos os trechos (vão em `call_ended`). */
   const usage = { seconds: 0 };
   const cancelTimers: Array<() => void> = [];
@@ -845,6 +914,43 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (reached) await recordCeiling(callCents(), reached);
   }
 
+  /**
+   * O custo de uma peça do pipeline (desenho do pipeline, seção 3.3): uma linha por `pieceUsage`, com
+   * `engine` = `<peça>:<id>`, o modelo e o custo em micro-centavos, no agente do trecho. Entra no total
+   * da ligação e no teto, como o filtro. A linha que chega depois do `closed` (o cérebro cancelado no
+   * fim) também entra. Sem `costMicrocents`, o custo **não foi medido**: a linha sai com
+   * `cost_measured = false`, como a da rotina de desfecho, e nunca como zero medido. Quem impede abrir
+   * com peça sem preço é a 3b-2 (DESA-425).
+   */
+  async function chargePiece(agentId: string, line: PieceUsageLine): Promise<void> {
+    const measured = line.costMicrocents !== undefined;
+    const microcents = line.costMicrocents ?? 0;
+    pipelineMicrocents += microcents;
+    // Os segundos da ligação (em `call_ended`) vêm do ouvido, que recebe o áudio inteiro de quem ligou.
+    if (line.piece === "transcriber") usage.seconds += line.usage.seconds ?? 0;
+    const reached = reachCeiling(callCents());
+    await q.exec(
+      "insert into usage_ledger (organization_id, call_id, engine, model, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, cost_estimated, cost_measured, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+      [
+        organizationId,
+        callId,
+        `${line.piece}:${line.id}`,
+        line.model ?? null,
+        agentId,
+        Math.round(line.usage.seconds ?? 0),
+        (line.usage.inputTokens ?? 0) + (line.usage.textInputTokens ?? 0) + (line.usage.cachedInputTokens ?? 0),
+        (line.usage.outputTokens ?? 0) + (line.usage.textOutputTokens ?? 0),
+        Math.round(microcents / MICROCENTS_PER_CENT),
+        microcents,
+        line.estimated,
+        measured,
+        clock.now(),
+      ],
+    );
+    await q.exec("update calls set cost_cents = $2 where id = $1", [callId, callCents()]);
+    if (reached) await recordCeiling(callCents(), reached);
+  }
+
   /** Guarda uma fala para o `state` do analista: só as últimas, de qualquer trecho. */
   function rememberTurn(turn: AnalystTurn): void {
     recentTurns.push(turn);
@@ -1159,7 +1265,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const instructions = composeInstructions(base, targets, undefined, fitted?.items ?? lead);
     const greeting = TRANSFER_RETURN_GREETINGS[spokenLanguageOf(row.language)];
     const piece = await choosePiece(row);
-    const opened = await connectEngine(overrides?.engineId ?? row.engine, sessionConfig(row, instructions, greeting, enabled));
+    const opened = await connectEngine(overrides?.engineId ?? row.engine, sessionConfig(row, instructions, greeting, enabled), row);
     if (ending) {
       if ("voice" in opened) await opened.voice.close();
       return;
@@ -1169,7 +1275,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         status: "failed",
         endReason: "engine_failed",
         tone: true,
-        events: [["engine_failed", { engine: opened.engine?.id ?? row.engine, error: opened.problem }]],
+        events: [["engine_failed", opened.piece ? pieceFailurePayload(opened.piece) : { engine: opened.engine?.id ?? row.engine, error: opened.problem }]],
       });
     }
     // Daqui até a troca nada espera: a sessão nova só emite no próximo ciclo.
@@ -1234,14 +1340,103 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   });
 
   type EngineRefusal = "engine_not_configured" | "engine_not_responding" | "engine_refused";
-  type Opened = { engine: VoiceEngine; voice: VoiceSession } | { engine?: VoiceEngine; reason: EngineRefusal; problem: string };
+  type PieceFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
+  /**
+   * A peça do pipeline que impediu a abertura. `detail` é o motivo no vocabulário de `KEY_CHECK_RESULTS`
+   * (a chave que falta é `rejected`, como na peça de transcrição); ausente, a peça não está instalada.
+   */
+  type PieceRefusal = { kind: PipelinePieceKind; id: string; detail?: PieceFailure };
+  type Opened = { engine: VoiceEngine; voice: VoiceSession } | { engine?: VoiceEngine; reason: EngineRefusal; problem: string; piece?: PieceRefusal };
+
+  /** O trecho deste agente abre o pipeline: a coluna preenchida, e a chamada não é a simulada (que troca o motor). */
+  const usesPipeline = (row: AgentRow): boolean => overrides?.engineId === undefined && row.pipeline !== null && row.pipeline !== undefined;
+
+  /** O que a linha do tempo grava de uma recusa: com peça do pipeline, só os códigos; o texto fica no log. */
+  const refusalPayload = (opened: { engine?: VoiceEngine; reason: EngineRefusal; problem: string; piece?: PieceRefusal }, engineId: string): object =>
+    opened.piece
+      ? { reason: opened.reason, engine: "pipeline", piece: opened.piece.kind, pieceId: opened.piece.id, ...(opened.piece.detail && { detail: opened.piece.detail }) }
+      : { reason: opened.reason, engine: engineId, detail: opened.problem };
+
+  /** A peça do pipeline que caiu ou não abriu, para `engine_failed`: só os códigos, nunca o texto do provedor. */
+  const pieceFailurePayload = (piece: PieceRefusal): object => ({ engine: "pipeline", piece: piece.kind, pieceId: piece.id, ...(piece.detail && { detail: piece.detail }) });
+
+  const PIECE_NAMES: Record<PipelinePieceKind, string> = { transcriber: "a transcrição", brain: "o cérebro", synthesizer: "a voz" };
+
+  /** O aviso do painel quando o pipeline não abriu: a peça e o código, e o que conferir. O texto do provedor fica no log. */
+  function pipelineRefusalNotice(agentName: string, piece: PieceRefusal | undefined): string {
+    const which = piece ? `${PIECE_NAMES[piece.kind]} (${piece.id})` : "as peças do pipeline";
+    const why = !piece ? "a escolha das peças gravada no agente está fora da forma" : piece.detail === undefined ? "a peça não está instalada nesta versão" : `o motivo foi ${piece.detail}`;
+    return `Uma ligação do agente ${agentName} foi recusada porque ${which} não abriu: ${why}. Quem ligou ouviu o sinal de falha. Confira a chave e a conta do fornecedor dessa peça em Configurações → Inteligência artificial e faça uma chamada de teste.`;
+  }
+
+  /** Lê e decifra uma chave da organização. `undefined` quando não há chave que sirva. */
+  async function readKey(setting: string): Promise<string | undefined> {
+    const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, setting]);
+    if (typeof stored?.value !== "string") return undefined;
+    try {
+      return decryptSecret(stored.value, deps.secretKey);
+    } catch (error) {
+      log("error", "a saved key cannot be read", { setting, error: messageOf(error) });
+      return undefined;
+    }
+  }
+
+  /**
+   * Abre o motor pipeline com as peças que o agente escolheu (desenho do pipeline, seção 3.3, fatia 3).
+   * Quem escolhe a peça é esta sessão, pela pasta, e nunca o motor; cada chave vem da organização, do
+   * mesmo lugar onde a tela a grava (`transcriber.`, `brain.` e `synthesizer.<id>.api_key`), e o
+   * preço do modelo do cérebro, da lista `brain.<id>.models`. As despedidas do teto vão em
+   * `fixedSpeech`: ficam prontas na abertura e tocam sem síntese nova. A recusa de uma peça traz o
+   * que a abertura já gastou, e esse custo entra no extrato desta tentativa, no agente do trecho.
+   */
+  async function connectPipeline(row: AgentRow, config: VoiceSessionConfig): Promise<Opened> {
+    const engine = deps.pipelineEngine ?? (defaultPipelineEngine ??= createPipelineEngine());
+    const refuse = (reason: EngineRefusal, problem: string, piece?: PieceRefusal): Opened => ({ engine, reason, problem, ...(piece && { piece }) });
+    const choice: PipelineChoice | undefined = pipelineChoice.safeParse(row.pipeline).data;
+    if (!choice) return refuse("engine_not_configured", "agents.pipeline is not in the expected shape");
+    const disk = deps.transcribers && deps.brains && deps.synthesizers ? undefined : await readPiecesOnDisk();
+    const transcriber = (deps.transcribers ?? disk?.transcribers)?.get(choice.transcriber);
+    const brain = (deps.brains ?? disk?.brains)?.get(choice.brain);
+    const synthesizer = (deps.synthesizers ?? disk?.synthesizers)?.get(choice.synthesizer);
+    if (!transcriber) return refuse("engine_not_configured", `the transcriber "${choice.transcriber}" is not installed`, { kind: "transcriber", id: choice.transcriber });
+    // O cérebro sem `chat` não conversa: para o pipeline, é como se não estivesse instalado.
+    if (!brain?.chat) return refuse("engine_not_configured", `the brain "${choice.brain}" is not installed or does not chat`, { kind: "brain", id: choice.brain });
+    if (!synthesizer) return refuse("engine_not_configured", `the synthesizer "${choice.synthesizer}" is not installed`, { kind: "synthesizer", id: choice.synthesizer });
+    const transcriberKey = transcriber.keyless ? "" : await readKey(transcriberKeySetting(transcriber.id));
+    if (transcriberKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the transcriber ${transcriber.id}`, { kind: "transcriber", id: transcriber.id, detail: "rejected" });
+    const brainKey = await readKey(brainKeySetting(brain.id));
+    if (brainKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the brain ${brain.id}`, { kind: "brain", id: brain.id, detail: "rejected" });
+    const synthesizerKey = synthesizer.keyless ? "" : await readKey(synthesizerKeySetting(synthesizer.id));
+    if (synthesizerKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the synthesizer ${synthesizer.id}`, { kind: "synthesizer", id: synthesizer.id, detail: "rejected" });
+    // O preço vem só da lista que a tela gravou. Ausente, o custo do cérebro não é medido (a recusa é da 3b-2).
+    const models = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, brainModelsSetting(brain.id)]);
+    const price: BrainPrice | undefined = storedBrainPrices.safeParse(models?.value).data?.models.find((model) => model.id === choice.model)?.price;
+    const pieces: PipelinePieces = {
+      transcriber: { piece: transcriber, apiKey: transcriberKey },
+      brain: { piece: brain, apiKey: brainKey, model: choice.model, ...(price && { price }) },
+      synthesizer: { piece: synthesizer, apiKey: synthesizerKey, voiceId: choice.voiceId },
+    };
+    const endedProblem = "the call ended before the engine connected";
+    if (ending) return refuse("engine_not_configured", endedProblem);
+    try {
+      return await awaitOpening(engine, engine.connect(config, "", { pieces, organizationId, fixedSpeech: [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer] }));
+    } catch (error) {
+      if (!(error instanceof PipelineOpenError)) throw error;
+      // O texto do provedor fica no log; a linha do tempo e o aviso levam só a peça e o código.
+      log("error", "a pipeline piece refused to open", { piece: error.piece, pieceId: error.pieceId, reason: error.reason, error: error.message, agentId: row.id });
+      for (const line of error.spent) await chargePiece(row.id, line);
+      return refuse("engine_refused", `the ${error.piece} ${error.pieceId} refused to open (${error.reason})`, { kind: error.piece, id: error.pieceId, detail: error.reason });
+    }
+  }
 
   /**
    * Abre a sessão de um motor com a chave da organização, ou diz por que não abriu. Nenhum `connect`
    * segura a ligação por mais de `CONNECT_TIMEOUT_MS`: no atendimento, a ligação é recusada com sinal;
-   * numa passagem, o agente atual continua na linha.
+   * numa passagem, o agente atual continua na linha. Com `row` e `agents.pipeline` preenchida, abre o
+   * pipeline; com a coluna nula, o caminho é o de sempre.
    */
-  async function connectEngine(engineId: string, config: VoiceSessionConfig): Promise<Opened> {
+  async function connectEngine(engineId: string, config: VoiceSessionConfig, row?: AgentRow): Promise<Opened> {
+    if (row && usesPipeline(row)) return connectPipeline(row, config);
     const found = deps.engines.get(engineId);
     if (!found) return { reason: "engine_not_configured", problem: `the voice engine "${engineId}" is not installed` };
     let apiKey = "";
@@ -1256,7 +1451,15 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     }
     const endedProblem = "the call ended before the engine connected";
     if (ending) return { engine: found, reason: "engine_not_configured", problem: endedProblem };
-    const connecting = found.connect(config, apiKey);
+    return awaitOpening(found, found.connect(config, apiKey));
+  }
+
+  /**
+   * A abertura de um motor contra o prazo e contra o fim da ligação. A recusa do pipeline
+   * (`PipelineOpenError`) sobe para quem abriu o pipeline, que põe no extrato o que ela já gastou.
+   */
+  async function awaitOpening(found: VoiceEngine, connecting: Promise<VoiceSession>): Promise<Opened> {
+    const endedProblem = "the call ended before the engine connected";
     let cancelDeadline: () => void = () => undefined;
     const deadline = new Promise<never>((_, reject) => {
       cancelDeadline = schedule(() => reject(new EngineTimeoutError(`the provider did not answer in ${CONNECT_TIMEOUT_MS / 1000} s`)), CONNECT_TIMEOUT_MS);
@@ -1278,6 +1481,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         if (error instanceof CallEndedError) return { engine: found, reason: "engine_not_configured", problem: endedProblem };
         return { engine: found, reason: "engine_not_responding", problem: `the voice provider did not answer (${messageOf(error)})` };
       }
+      if (error instanceof PipelineOpenError) throw error;
       // A chave existe: o provedor recusou a sessão (chave recusada, crédito esgotado, limite da conta)
       // ou não foi alcançado pela rede (DNS, firewall de saída). O motivo vem no `problem`.
       return { engine: found, reason: "engine_refused", problem: `the voice provider refused the session or could not be reached (${messageOf(error)})` };
@@ -1433,8 +1637,17 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // `error` sozinho não é fatal: fica guardado para explicar um `closed` que venha em seguida.
     session.on("error", (error) => {
       self.lastError = error;
-      log("error", "voice engine error", { error: error.message, agentId: row.id });
+      if (!(error instanceof PipelinePieceError)) return void log("error", "voice engine error", { error: error.message, agentId: row.id });
+      // A peça do pipeline: o texto do provedor só no log. A falha que não encerra (o cérebro que não
+      // respondeu um pedido, o aviso da transcrição) vai ao painel só com os códigos, e a conversa segue.
+      log("error", "pipeline piece error", { piece: error.piece, pieceId: error.pieceId, reason: error.reason, fatal: error.fatal, error: error.message, agentId: row.id });
+      if (error.fatal || !current() || ending) return;
+      const payload = { piece: error.piece, pieceId: error.pieceId, detail: error.reason, ...(handoffs > 0 && { agentId: row.id }) };
+      void event("pipeline_turn_failed", payload).catch(logFailure("could not record a pipeline turn failure"));
     });
+    // O custo de cada peça do pipeline, no trecho dela. A linha que chega depois do `closed` (o cérebro
+    // cancelado no fim, a sessão substituída numa passagem) também entra no extrato.
+    session.on("pieceUsage", (line) => void chargePiece(row.id, line).catch(logFailure("could not record pipeline piece usage")));
     session.on("closed", (reason) => {
       // Durante a transferência o motor já foi fechado de propósito: o que ele ainda disser não encerra a ligação.
       if (reason === "client" || !current() || transferring) return;
@@ -1443,6 +1656,19 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       // O motor caiu no meio: evento, aviso, sinal para quem está na linha e, havendo para quem, transferência.
       const error = self.lastError?.message ?? `the voice engine closed the session (${reason})`;
       const transferTo = currentTransferTo();
+      const fallen = self.lastError instanceof PipelinePieceError && self.lastError.fatal ? self.lastError : undefined;
+      if (fallen) {
+        // A peça do pipeline: a fala de falha já tocou (pronta na abertura), e a linha do tempo leva só os códigos.
+        const piece: PieceRefusal = { kind: fallen.piece, id: fallen.pieceId, detail: fallen.reason };
+        return void finish({
+          status: transferTo ? "transferred" : "failed",
+          endReason: "engine_failed",
+          transferTo: transferTo ?? undefined,
+          tone: true,
+          events: [["engine_failed", pieceFailurePayload(piece)], ...(transferTo ? [["transfer_started", { to: transferTo, reason: "engine_failed" }] satisfies [CallEventKind, object]] : [])],
+          notice: `${PIECE_NAMES[fallen.piece].replace(/^./, (letter) => letter.toUpperCase())} (${fallen.pieceId}) caiu no meio de uma ligação do agente ${row.name}, pelo motivo ${fallen.reason}. Quem ligou ouviu o aviso de falha. ${transferTo ? `A ligação foi transferida para ${transferTo}.` : canTransfer ? "A ligação foi encerrada, porque o agente não tem número de transferência." : "A ligação foi encerrada, porque este canal não tem como transferir."} Confira a chave e a conta do fornecedor dessa peça em Configurações → Inteligência artificial.`,
+        });
+      }
       void finish({
         status: transferTo ? "transferred" : "failed",
         endReason: "engine_failed",
@@ -1493,7 +1719,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       const nextPiece = await choosePiece(next);
       // A chamada simulada abre o motor simulado na ligação inteira, o trecho do destino inclusive:
       // ela nunca gasta com o provedor nem usa a chave da organização.
-      const opened = await connectEngine(overrides?.engineId ?? next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled));
+      const opened = await connectEngine(overrides?.engineId ?? next.engine, sessionConfig(next, instructions, handoffGreetingFor(next.language), enabled), next);
       if (!("voice" in opened) && ending) return { ok: false, problem: "closing" };
       if (!("voice" in opened)) {
         log("error", "the next agent's session did not open; the current agent stays on the line", { to: next.id, reason: opened.reason, error: opened.problem });
@@ -1759,6 +1985,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         call.direction === "inbound" ? [recordingNotice, first.greeting?.trim()].filter(Boolean).join(" ") : undefined,
         enabled,
       ),
+      first,
     );
     if (ending) {
       if ("voice" in opened) await opened.voice.close();
@@ -1771,9 +1998,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         status: "refused",
         endReason: reason,
         tone: true,
-        events: [["call_refused", { reason, engine: engineId, detail: problem }]],
-        notice:
-          reason === "engine_not_responding"
+        events: [["call_refused", refusalPayload(opened, engineId)]],
+        notice: usesPipeline(first)
+          ? pipelineRefusalNotice(first.name, opened.piece)
+          : reason === "engine_not_responding"
             ? `Uma ligação do agente ${first.name} foi recusada porque o provedor do motor de voz ${label} não respondeu: ${problem}. Quem ligou ouviu o sinal de falha. Confira a situação do provedor e faça uma chamada de teste.`
             : reason === "engine_refused"
               ? `Uma ligação do agente ${first.name} foi recusada porque o provedor do motor de voz ${label} recusou a sessão ou não foi alcançado: ${problem}. Quem ligou ouviu o sinal de falha. Confira o crédito e os limites na conta do provedor, a chave em Configurações → Inteligência artificial e, se o motivo for de rede, se a VPS alcança o provedor pela internet; depois faça uma chamada de teste.`
@@ -1787,6 +2015,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // Daqui até o fim do bloco nada espera: o motor só começa a emitir no próximo ciclo, e os
     // handlers e os primeiros eventos precisam estar na fila antes da primeira fala.
     const session = opened.voice;
+    // O motor que atendeu: com o pipeline, `pipeline`; sem ele, o do agente, como sempre.
+    const answeredEngine = usesPipeline(first) ? opened.engine.id : engineId;
     const firstLeg = startLeg(first, opened.engine, session, enabled, baseInstructions, firstAnalyst.analyst);
     // O áudio de quem ligou vai para o agente em que a ligação está agora.
     transport.onAudio((pcm) => {
@@ -1802,8 +2032,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const answered = [
       // A URA já atendeu e gravou `answered_at` (`ivr-session.ts`): a duração conta desde ali, com o menu,
       // e não do começo da conversa. Sem URA, `answered_at` está vazio e fica com a hora de agora.
-      q.exec("update calls set status = 'in_progress', answered_at = coalesce(answered_at, $2), engine = $3 where id = $1", [callId, clock.now(), engineId]),
-      event("call_answered", { engine: engineId }),
+      q.exec("update calls set status = 'in_progress', answered_at = coalesce(answered_at, $2), engine = $3 where id = $1", [callId, clock.now(), answeredEngine]),
+      event("call_answered", { engine: answeredEngine }),
       event("recording_notice", { text: recordingNotice }),
       // Os ids e o tamanho, nunca o texto: `call_events` não sai com o prazo da memória.
       ...(memory ? [event("memory_loaded", { noteIds: memory.noteIds, followUpIds: memory.followUpIds, chars: memory.chars })] : []),

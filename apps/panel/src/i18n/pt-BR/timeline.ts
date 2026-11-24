@@ -421,6 +421,25 @@ const timeline = {
         unexpected_response: "o fornecedor respondeu fora do esperado",
       },
     },
+    /** O motor pipeline (R5): a peça que falhou, só pelos códigos. O texto do fornecedor fica no log do processo de voz. */
+    pipeline: {
+      line: "{piece} ({id}): {reason}",
+      pieces: { transcriber: "Transcrição", brain: "Cérebro", synthesizer: "Voz" } as Record<string, string>,
+      reasons: {
+        rejected: "a chave foi recusada, ou não está cadastrada.",
+        model_unavailable: "a chave não dá acesso ao modelo escolhido.",
+        no_credit: "o fornecedor diz que falta crédito ou que o teto de gasto da conta foi atingido.",
+        region_unavailable: "o fornecedor não atende o país ou a região deste servidor.",
+        rate_limited: "o fornecedor pediu para esperar (limite de pedidos da conta).",
+        unreachable: "o fornecedor não respondeu a tempo, ou está fora do ar.",
+        provider_error: "o fornecedor respondeu com erro do lado dele.",
+        unexpected_response: "o fornecedor respondeu algo fora do formato esperado.",
+      } as Record<string, string>,
+      notInstalled: "a peça não está instalada nesta versão.",
+      unknown: "a peça falhou.",
+      turnFailed: "Uma peça falhou sem derrubar a ligação",
+      turnFailedBody: "A conversa seguiu. Quando é o cérebro, quem ligou ouviu um pedido para repetir.",
+    },
     transcriber_failed: {
       title: "A transcrição ao vivo ficou de fora",
       reason: {

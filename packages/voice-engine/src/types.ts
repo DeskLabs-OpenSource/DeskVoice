@@ -682,6 +682,23 @@ export class PipelinePieceError extends Error {
   }
 }
 
+/**
+ * O pipeline não abriu porque uma peça recusou (seção 3.4). `reason` no vocabulário fechado; o texto
+ * do provedor só em `message`, para o log. `spent` é o que a abertura já gastou antes da recusa (as
+ * falas fixas sintetizadas): quem abre põe no extrato da tentativa, e o custo não se perde.
+ */
+export class PipelineOpenError extends Error {
+  constructor(
+    readonly piece: PipelinePieceKind,
+    readonly pieceId: string,
+    readonly reason: Exclude<KeyCheckResult, "accepted" | "not_needed">,
+    readonly spent: readonly PieceUsageLine[],
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 // Mora aqui, e não em outcome.ts, porque o painel importa valor só por `@deskvoice/voice-engine/types`:
 // o índice puxa load.ts, cujo `new URL("./engines", import.meta.url)` o Turbopack não resolve.
 /**

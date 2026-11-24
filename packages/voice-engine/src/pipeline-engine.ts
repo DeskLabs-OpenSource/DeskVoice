@@ -3,6 +3,7 @@ import { SessionEmitter } from "./emitter";
 import { estimateCostMicrocents } from "./pricing";
 import { prepareFixedSpeech, type FixedSpeechCache } from "./synthesis";
 import {
+  PipelineOpenError,
   PipelinePieceError,
   SynthesizerOpenError,
   TranscriberOpenError,
@@ -10,6 +11,7 @@ import {
   type PipelineConnectOptions,
   type PipelinePieceKind,
   type PipelinePieces,
+  type PieceUsageLine,
   type Speech,
   type StreamingTranscription,
   type TranscriptPiece,
@@ -57,6 +59,13 @@ import {
  * ligação tocam a fala de falha já pronta e viram `error` (`PipelinePieceError`, fatal) e `closed`.
  * O cérebro que falha um pedido pede para repetir e vira `error` não fatal; duas vezes seguidas, é
  * fatal. O motivo vai no vocabulário fechado, e o texto do provedor só na mensagem, para o log.
+ *
+ * **O `error` da transcrição sozinho não é fatal** (o contrato de `StreamingTranscriptionEvents`: ele
+ * vem "seguido de `closed` quando é fatal"). Vira `error` não fatal, e a conversa segue. Só o `closed`
+ * derruba a sessão, com o motivo do último `error` quando ele veio tipado (`TranscriberOpenError`).
+ *
+ * **A recusa de abertura** é `PipelineOpenError`: a peça, o motivo e o que a abertura já gastou (as
+ * falas fixas sintetizadas antes de a outra peça recusar), para o custo entrar no extrato da tentativa.
  */
 
 /** A fala de falha da seção 3.4, no padrão de `FAREWELL`. */
@@ -107,6 +116,9 @@ const failureOf = (error: unknown): Failure => {
   if (error instanceof TranscriberOpenError) return error.result;
   return "unreachable";
 };
+
+/** Um token por byte UTF-8: a regra do Jev, a mesma de `brain-http.ts`, para o pedido sem consumo declarado. */
+const bytesOf = (value: unknown): number => Buffer.byteLength(typeof value === "string" ? value : (JSON.stringify(value) ?? ""), "utf8");
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -172,6 +184,8 @@ class PipelineSession implements VoiceSession {
   /** O parcial que `closeCallerTurn` já usou: o `final` dele, se vier depois, não vira outro turno. */
   private forcedPartial: string | undefined;
   private lastHeard = "";
+  /** O último `error` da transcrição: explica o `closed` que vier depois dele. */
+  private transcriptionError: unknown;
   private finished = false;
 
   constructor(
@@ -186,8 +200,13 @@ class PipelineSession implements VoiceSession {
     if (config.instructions !== "") this.history.push({ role: "system", content: config.instructions });
     transcription.on("piece", (piece) => this.heard(piece));
     transcription.on("usage", (usage) => this.transcriberUsage(usage));
-    transcription.on("error", (error) => this.fail("transcriber", pieces.transcriber.piece.id, failureOf(error), `transcrição: ${messageOf(error)}`));
-    transcription.on("closed", (reason) => this.fail("transcriber", pieces.transcriber.piece.id, "unreachable", `transcrição fechou no meio da ligação (${reason})`));
+    // O `error` sozinho não é fatal: vai a quem abriu (log e painel), e a conversa segue. Ele explica o `closed`, se vier.
+    transcription.on("error", (error) => this.transcriberError(error));
+    transcription.on("closed", (reason) => {
+      const last = this.transcriptionError;
+      const detail = last === undefined ? "" : `: ${messageOf(last)}`;
+      this.fail("transcriber", pieces.transcriber.piece.id, last === undefined ? "unreachable" : failureOf(last), `transcrição fechou no meio da ligação (${reason})${detail}`);
+    });
     // Agendado: quem chamou `connect` registra os handlers antes do primeiro evento.
     defer(() => {
       if (this.finished) return;
@@ -278,6 +297,13 @@ class PipelineSession implements VoiceSession {
     this.userTurn(piece.text);
   }
 
+  private transcriberError(error: unknown): void {
+    if (this.finished) return;
+    this.transcriptionError = error;
+    const { id } = this.pieces.transcriber.piece;
+    this.emitter.emit("error", new PipelinePieceError("transcriber", id, failureOf(error), false, `transcrição: ${messageOf(error)}`));
+  }
+
   private userTurn(text: string): void {
     this.emitter.emit("transcript", { speaker: "user", text });
     if (this.busy) {
@@ -302,15 +328,21 @@ class PipelineSession implements VoiceSession {
     if (!brain.chat) return this.fail("brain", brain.id, "unexpected_response", "o cérebro não conversa (sem `chat`)");
     for (const text of this.guidance.splice(0)) this.history.push({ role: "system", content: text });
     this.busy = true;
-    const chat = brain.chat(apiKey, { model, messages: [...this.history], tools: this.config.tools, timeoutMs: this.options.brainTimeoutMs }, { fetch: this.options.fetch });
+    const messages = [...this.history];
+    const chat = brain.chat(apiKey, { model, messages, tools: this.config.tools, timeoutMs: this.options.brainTimeoutMs }, { fetch: this.options.fetch });
     this.chat = chat;
     let text = "";
     const calls: BrainToolCall[] = [];
     let utterance: Utterance | undefined;
     let usage: { usage: Usage; estimated: boolean } | undefined;
     let end: { ok: true } | { ok: false; status: number | null } | { cancelled: true } | undefined;
+    // O que saiu e o que voltou, para estimar o pedido que terminou sem consumo declarado.
+    const sent = (): Usage => ({
+      inputTokens: bytesOf(messages) + (this.config.tools.length > 0 ? bytesOf(this.config.tools) : 0),
+      outputTokens: bytesOf(text) + calls.reduce((sum, call) => sum + bytesOf(call.args), 0),
+    });
     const charge = (): void => {
-      if (usage && end) this.brainUsage(usage.usage, usage.estimated, end);
+      if (usage && end) this.brainUsage(usage.usage, usage.estimated, end, sent);
     };
     chat.on("usage", (value, estimated) => {
       usage = { usage: value, estimated };
@@ -462,29 +494,38 @@ class PipelineSession implements VoiceSession {
   }
 
   private synthesizerUsage(characters: number, costMicrocents: number | undefined): void {
-    const { piece, model } = this.pieces.synthesizer;
-    this.emitter.emit("pieceUsage", {
-      piece: "synthesizer",
-      id: piece.id,
-      model: model ?? piece.defaultModel,
-      usage: {},
-      characters,
-      ...(costMicrocents === undefined ? {} : { costMicrocents }),
-      estimated: true,
-    });
+    this.emitter.emit("pieceUsage", synthesizerLine(this.pieces.synthesizer, characters, costMicrocents));
   }
 
   /**
    * O custo de um pedido ao cérebro, pela regra da seção 3.2: a recusa HTTP (fora de 2xx) com `{}` é
-   * zero medido; em qualquer outro fim, `{}` ou cérebro sem preço é custo não medido, nunca zero.
+   * zero medido. Em qualquer outro fim, `{}` é consumo não declarado (a escrita em cache da Anthropic,
+   * por exemplo): com o preço conhecido, a linha sai **estimada** pelo que foi e voltou, um token por
+   * byte (a regra do Jev), nunca zero. Sem preço, o custo fica ausente (não medido); a regra que impede
+   * abrir com peça sem preço é da 3b-2.
    */
-  private brainUsage(usage: Usage, estimated: boolean, end: { ok: true } | { ok: false; status: number | null } | { cancelled: true }): void {
+  private brainUsage(usage: Usage, estimated: boolean, end: { ok: true } | { ok: false; status: number | null } | { cancelled: true }, sent: () => Usage): void {
     const { piece, model, price } = this.pieces.brain;
     const refused = "ok" in end && !end.ok && end.status !== null && (end.status < 200 || end.status >= 300);
     const declared = typeof usage.inputTokens === "number";
-    const cost = refused && !declared ? 0 : price !== undefined && declared ? estimateCostMicrocents(price, usage) : undefined;
-    this.emitter.emit("pieceUsage", { piece: "brain", id: piece.id, model, usage, ...(cost === undefined ? {} : { costMicrocents: cost }), estimated });
+    if (refused && !declared) return this.emitter.emit("pieceUsage", { piece: "brain", id: piece.id, model, usage, costMicrocents: 0, estimated });
+    const counted = declared ? usage : sent();
+    const cost = price === undefined ? undefined : estimateCostMicrocents(price, counted);
+    this.emitter.emit("pieceUsage", { piece: "brain", id: piece.id, model, usage: counted, ...(cost === undefined ? {} : { costMicrocents: cost }), estimated: estimated || !declared });
   }
+}
+
+/** A linha de custo da voz: caracteres enviados, com o preço do modelo, ou sem custo (não medido). */
+function synthesizerLine(synthesizer: PipelinePieces["synthesizer"], characters: number, costMicrocents: number | undefined): PieceUsageLine {
+  return {
+    piece: "synthesizer",
+    id: synthesizer.piece.id,
+    model: synthesizer.model ?? synthesizer.piece.defaultModel,
+    usage: {},
+    characters,
+    ...(costMicrocents === undefined ? {} : { costMicrocents }),
+    estimated: true,
+  };
 }
 
 export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}): PipelineEngine {
@@ -501,7 +542,7 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
     async connect(config, _apiKey, options) {
       const pieces = options?.pieces;
       if (!pieces || !options.organizationId) throw new Error("pipeline: o connect precisa das peças e da organização (PipelineConnectOptions)");
-      if (!pieces.brain.piece.chat) throw new Error(`pipeline: o cérebro ${pieces.brain.piece.id} não conversa (sem chat)`);
+      if (!pieces.brain.piece.chat) throw new PipelineOpenError("brain", pieces.brain.piece.id, "unexpected_response", [], `pipeline: o cérebro ${pieces.brain.piece.id} não conversa (sem chat)`);
       const { transcriber, synthesizer } = pieces;
       const timing = { schedule: options.schedule, readyTimeoutMs: options.readyTimeoutMs };
       // As duas aberturas ao mesmo tempo; qualquer recusa é recusa de abertura, e a outra é fechada.
@@ -518,7 +559,12 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
       ]);
       if (heard.status === "rejected" || fixed.status === "rejected") {
         if (heard.status === "fulfilled") await heard.value.close().catch(() => undefined);
-        throw heard.status === "rejected" ? heard.reason : (fixed as PromiseRejectedResult).reason;
+        // As falas fixas que ficaram prontas antes de a outra peça recusar já foram pagas: o custo vai junto da recusa.
+        const spent: PieceUsageLine[] = [];
+        if (fixed.status === "fulfilled" && fixed.value.usage.characters > 0) spent.push(synthesizerLine(synthesizer, fixed.value.usage.characters, fixed.value.usage.costMicrocents));
+        if (heard.status === "rejected") throw new PipelineOpenError("transcriber", transcriber.piece.id, failureOf(heard.reason), spent, `transcrição: ${messageOf(heard.reason)}`);
+        const reason: unknown = (fixed as PromiseRejectedResult).reason;
+        throw new PipelineOpenError("synthesizer", synthesizer.piece.id, failureOf(reason), spent, `voz: ${messageOf(reason)}`);
       }
       return new PipelineSession(
         config,

@@ -80,6 +80,8 @@ export const CALL_EVENT_KINDS = [
   "webhook_delivered",
   "webhook_failed",
   "transcriber_failed",
+  // Uma peça do motor pipeline (R5) falhou sem encerrar a ligação: o cérebro num pedido, ou o aviso da transcrição.
+  "pipeline_turn_failed",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];

@@ -129,6 +129,18 @@ export function Timeline({
     const key = text(code);
     return Object.hasOwn(t.reasons, key) ? t.reasons[key as keyof typeof t.reasons] : key;
   };
+  /**
+   * A peça do motor pipeline que falhou (`engine_failed`, `call_refused` e `pipeline_turn_failed`): a
+   * frase sai do código, e nunca do texto do fornecedor, que não chega à linha do tempo. Sem `detail`,
+   * a peça não está instalada. Sem `piece`, o evento não é do pipeline.
+   */
+  const pipelineLine = (p: Record<string, unknown>): string | null => {
+    const kind = text(p.piece);
+    if (kind === "") return null;
+    const code = text(p.detail);
+    const why = code === "" ? e.pipeline.notInstalled : (Object.hasOwn(e.pipeline.reasons, code) ? e.pipeline.reasons[code] : undefined) ?? e.pipeline.unknown;
+    return fill(e.pipeline.line, { piece: (Object.hasOwn(e.pipeline.pieces, kind) ? e.pipeline.pieces[kind] : undefined) ?? kind, id: text(p.pieceId), reason: why });
+  };
 
   // Depois de uma passagem, a fala do agente leva o id de quem falou (`agentId`); o nome vem da
   // própria passagem, que guarda de quem e para quem ela foi.
@@ -376,7 +388,11 @@ export function Timeline({
           body: (
             <Card tone="fail" title={e.engine_failed}>
               <p className="text-muted">{e.engine_failed_body}</p>
-              {text(p.reason) || text(p.error) ? <p className="data text-[0.87rem] text-muted">{text(p.reason) || text(p.error)}</p> : null}
+              {pipelineLine(p) !== null ? (
+                <p className="text-muted">{pipelineLine(p)}</p>
+              ) : text(p.reason) || text(p.error) ? (
+                <p className="data text-[0.87rem] text-muted">{text(p.reason) || text(p.error)}</p>
+              ) : null}
             </Card>
           ),
         };
@@ -405,7 +421,30 @@ export function Timeline({
         return { ...base, tone: "neutral", icon: ClockCountdown, body: <Quiet>{line}</Quiet> };
       }
       case "call_refused":
-        return { ...base, tone: "fail", icon: PhoneX, body: <Card tone="fail" title={e.call_refused}><p className="text-muted">{reason(p.reason)}</p></Card> };
+        return {
+          ...base,
+          tone: "fail",
+          icon: PhoneX,
+          body: (
+            <Card tone="fail" title={e.call_refused}>
+              <p className="text-muted">{reason(p.reason)}</p>
+              {pipelineLine(p) !== null ? <p className="text-muted">{pipelineLine(p)}</p> : null}
+            </Card>
+          ),
+        };
+      case "pipeline_turn_failed":
+        // A peça falhou e a conversa seguiu (o cérebro num pedido, o aviso da transcrição): só os códigos chegam aqui.
+        return {
+          ...base,
+          tone: "fail",
+          icon: WarningOctagon,
+          body: (
+            <Card tone="fail" title={e.pipeline.turnFailed}>
+              <p className="text-muted">{pipelineLine(p) ?? e.pipeline.unknown}</p>
+              <p className="text-muted">{e.pipeline.turnFailedBody}</p>
+            </Card>
+          ),
+        };
       case "voicemail_left": {
         const seconds = typeof p.recordedSeconds === "number" ? Math.max(0, Math.round(p.recordedSeconds)) : 0;
         const left = p.left === true;

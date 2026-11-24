@@ -414,6 +414,24 @@ const timeline: TimelineDictionary = {
         unexpected_response: "the provider answered in an unexpected form",
       },
     },
+    pipeline: {
+      line: "{piece} ({id}): {reason}",
+      pieces: { transcriber: "Transcription", brain: "Brain", synthesizer: "Voice" } as Record<string, string>,
+      reasons: {
+        rejected: "the key was refused, or it is not saved.",
+        model_unavailable: "the key does not give access to the chosen model.",
+        no_credit: "the provider says the account is out of credit or reached its spending limit.",
+        region_unavailable: "the provider does not serve the country or region of this server.",
+        rate_limited: "the provider asked to wait (the account's request limit).",
+        unreachable: "the provider did not answer in time, or it is down.",
+        provider_error: "the provider answered with an error on its side.",
+        unexpected_response: "the provider answered something outside the expected format.",
+      } as Record<string, string>,
+      notInstalled: "the piece is not installed in this version.",
+      unknown: "the piece failed.",
+      turnFailed: "A piece failed without dropping the call",
+      turnFailedBody: "The conversation went on. When it is the brain, the caller heard a request to repeat.",
+    },
     transcriber_failed: {
       title: "Live transcription was left out",
       reason: {

@@ -1,3 +1,6 @@
 import type { Brain } from "./brain";
 import deepseek from "./brains/deepseek";
 export const brain: Brain = deepseek;
+import { loadTranscribers } from "./load";
+export { createSimulatedEngine } from ".";
+export const pick = loadTranscribers;

@@ -414,6 +414,24 @@ const timeline: TimelineDictionary = {
         unexpected_response: "el proveedor respondió de forma inesperada",
       },
     },
+    pipeline: {
+      line: "{piece} ({id}): {reason}",
+      pieces: { transcriber: "Transcripción", brain: "Cerebro", synthesizer: "Voz" } as Record<string, string>,
+      reasons: {
+        rejected: "la clave fue rechazada, o no está registrada.",
+        model_unavailable: "la clave no da acceso al modelo elegido.",
+        no_credit: "el proveedor dice que falta crédito o que se alcanzó el tope de gasto de la cuenta.",
+        region_unavailable: "el proveedor no atiende el país o la región de este servidor.",
+        rate_limited: "el proveedor pidió esperar (límite de pedidos de la cuenta).",
+        unreachable: "el proveedor no respondió a tiempo, o está fuera de servicio.",
+        provider_error: "el proveedor respondió con un error de su lado.",
+        unexpected_response: "el proveedor respondió algo fuera del formato esperado.",
+      } as Record<string, string>,
+      notInstalled: "la pieza no está instalada en esta versión.",
+      unknown: "la pieza falló.",
+      turnFailed: "Una pieza falló sin cortar la llamada",
+      turnFailedBody: "La conversación siguió. Cuando es el cerebro, quien llamó escuchó un pedido para repetir.",
+    },
     transcriber_failed: {
       title: "La transcripción en vivo quedó fuera",
       reason: {

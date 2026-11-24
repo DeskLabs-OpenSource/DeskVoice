@@ -6,8 +6,10 @@ import openai from "./brains/openai";
 import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH } from "./pipeline-engine";
 import { FixedSpeechCache } from "./synthesis";
 import { createSimulatedSynthesizer, toneFor } from "./synthesizers/simulated";
-import { createSimulatedTranscriber, type SimulatedTranscriptScript } from "./transcribers/simulated";
+import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "./transcribers/simulated";
+import type { Brain, BrainChatEvents } from "./brain";
 import {
+  PipelineOpenError,
   PipelinePieceError,
   SynthesizerOpenError,
   TranscriberOpenError,
@@ -161,6 +163,12 @@ function record(session: VoiceSession) {
   });
   session.on("closed", (reason) => events.push(`closed ${reason}`));
   return { events, pieceUsage, errors, toolCalls, audio, audioBytes: () => audioBytes };
+}
+
+/** Faz a transcrição simulada emitir um evento fora do roteiro (o `error` sozinho, o `closed` sozinho). */
+function emitOn(session: SimulatedTranscription | undefined, event: "error" | "closed", value: unknown): void {
+  if (!session) throw new Error("a transcrição não abriu");
+  (session as unknown as { emit(event: string, value: unknown): void }).emit(event, value);
 }
 
 /** Manda `ms` de áudio de quem ligou, em quadros de 20 ms. */
@@ -449,15 +457,57 @@ describe("motor pipeline: o cache das falas fixas não atravessa organizações"
 });
 
 describe("motor pipeline: a falha (3.4) nunca deixa a sessão muda", () => {
-  it("a transcrição que cai no meio toca a fala de falha pronta e vira error com a peça", async () => {
+  it("a transcrição que cai no meio (error e closed) toca a fala de falha pronta e vira error com a peça", async () => {
     brain = await startFakeBrain();
     const voice = countedVoice();
     const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, fail: "o serviço caiu" }]));
     speak(session, 20);
     await until(() => log.events.includes("closed failed"), "o fim");
-    expect(log.events).toEqual([`agent: ${PIPELINE_FAILURE_SPEECH}`, "error transcriber unreachable fatal", "closed failed"]);
+    // O `error` sozinho é aviso; o `closed` logo depois é que derruba, com o motivo dele.
+    expect(log.events).toEqual(["error transcriber unreachable segue", `agent: ${PIPELINE_FAILURE_SPEECH}`, "error transcriber unreachable fatal", "closed failed"]);
     expect(log.audioBytes()).toBe(toneFor([...PIPELINE_FAILURE_SPEECH].length).length);
-    expect(log.errors[0]).toMatchObject({ piece: "transcriber", pieceId: "simulated" });
+    expect(log.errors[1]).toMatchObject({ piece: "transcriber", pieceId: "simulated", fatal: true });
+  });
+
+  it("o error da transcrição sem closed não derruba a ligação: vira aviso, e a conversa segue", async () => {
+    brain = await startFakeBrain();
+    brain.reply([text("Pois não."), usage(10, 2)]);
+    const voice = countedVoice();
+    let heard: SimulatedTranscription | undefined;
+    const transcriber = createSimulatedTranscriber({ script: [{ afterAudioMs: 40, text: "Quero marcar.", final: true }], onSession: (opened) => (heard = opened) });
+    const { session, log } = await open(piecesOf(voice.synthesizer, [], { transcriber: { piece: transcriber, apiKey: "" } }));
+    emitOn(heard, "error", new TranscriberOpenError("rate_limited", "deepgram: 429 Too Many Requests"));
+    speak(session, 40);
+    await until(() => log.events.includes("agent: Pois não."), "a resposta depois do aviso");
+    expect(log.events.filter((event) => event !== "activity")).toEqual(["error transcriber rate_limited segue", "turn ended (transcript)", "user: Quero marcar.", "agent: Pois não."]);
+    expect(log.events).not.toContain("closed failed");
+    expect(log.errors[0]).toMatchObject({ piece: "transcriber", reason: "rate_limited", fatal: false });
+    await session.close();
+  });
+
+  it("o motivo tipado do error (TranscriberOpenError) no meio da ligação é o motivo do closed que vem depois", async () => {
+    brain = await startFakeBrain();
+    const voice = countedVoice();
+    let heard: SimulatedTranscription | undefined;
+    const transcriber = createSimulatedTranscriber({ script: [], onSession: (opened) => (heard = opened) });
+    const { log } = await open(piecesOf(voice.synthesizer, [], { transcriber: { piece: transcriber, apiKey: "" } }));
+    emitOn(heard, "error", new TranscriberOpenError("no_credit", "deepgram: quota exceeded for this project"));
+    emitOn(heard, "closed", "failed");
+    await until(() => log.events.includes("closed failed"), "o fim");
+    expect(log.events).toEqual(["error transcriber no_credit segue", `agent: ${PIPELINE_FAILURE_SPEECH}`, "error transcriber no_credit fatal", "closed failed"]);
+    // O texto do provedor fica só na mensagem, para o log.
+    expect(log.errors[1]?.message).toContain("quota exceeded");
+  });
+
+  it("o closed sem error antes é fatal, com o motivo unreachable", async () => {
+    brain = await startFakeBrain();
+    const voice = countedVoice();
+    let heard: SimulatedTranscription | undefined;
+    const transcriber = createSimulatedTranscriber({ script: [], onSession: (opened) => (heard = opened) });
+    const { log } = await open(piecesOf(voice.synthesizer, [], { transcriber: { piece: transcriber, apiKey: "" } }));
+    emitOn(heard, "closed", "failed");
+    await until(() => log.events.includes("closed failed"), "o fim");
+    expect(log.events).toEqual([`agent: ${PIPELINE_FAILURE_SPEECH}`, "error transcriber unreachable fatal", "closed failed"]);
   });
 
   it("a voz que cai no meio da fala toca a fala de falha pronta, que não depende dela", async () => {
@@ -558,6 +608,34 @@ describe("motor pipeline: a falha (3.4) nunca deixa a sessão muda", () => {
     expect(line && "costMicrocents" in line).toBe(false);
     await session.close();
   });
+
+  it("consumo não declarado ({}) num pedido que terminou, com preço conhecido: a linha sai estimada pelos bytes, nunca zero", async () => {
+    brain = await startFakeBrain();
+    const voice = countedVoice();
+    // Um cérebro que termina sem declarar consumo, como a Anthropic com escrita em cache.
+    const silent: Brain = {
+      ...openai,
+      chat() {
+        const handlers: Partial<{ [K in keyof BrainChatEvents]: BrainChatEvents[K] }> = {};
+        setImmediate(() => {
+          handlers.text?.("Olá!");
+          handlers.usage?.({}, false);
+          handlers.done?.();
+        });
+        return { on: (event, handler) => void Object.assign(handlers, { [event]: handler }), cancel: () => undefined };
+      },
+    };
+    const pieces = piecesOf(voice.synthesizer, [{ afterAudioMs: 20, text: "Oi.", final: true }]);
+    const { session, log } = await open({ ...pieces, brain: { ...pieces.brain, piece: silent } });
+    speak(session, 20);
+    await until(() => log.pieceUsage.some((line) => line.piece === "brain"), "o consumo");
+    const line = log.pieceUsage.find((each) => each.piece === "brain");
+    expect(line?.estimated).toBe(true);
+    expect(line?.usage.inputTokens).toBeGreaterThan(0);
+    expect(line?.usage.outputTokens).toBe(Buffer.byteLength("Olá!", "utf8"));
+    expect(line?.costMicrocents).toBeGreaterThan(0);
+    await session.close();
+  });
 });
 
 describe("motor pipeline: a abertura", () => {
@@ -575,15 +653,22 @@ describe("motor pipeline: a abertura", () => {
     const closed: string[] = [];
     const transcriber = createSimulatedTranscriber({ script: [], onSession: (s) => s.on("closed", (reason) => closed.push(reason)) });
     const pieces = piecesOf(refusing, [], { transcriber: { piece: transcriber, apiKey: "" } });
-    await expect(open(pieces)).rejects.toBeInstanceOf(SynthesizerOpenError);
+    const refused = open(pieces);
+    await expect(refused).rejects.toBeInstanceOf(PipelineOpenError);
+    await expect(refused).rejects.toMatchObject({ piece: "synthesizer", pieceId: "simulated", reason: "rejected", spent: [] });
     expect(closed).toEqual(["client"]);
   });
 
-  it("a transcrição que recusa abrir é recusa de abertura", async () => {
+  it("a transcrição que recusa abrir é recusa de abertura, e o custo das falas fixas já sintetizadas vai junto", async () => {
     brain = await startFakeBrain();
     const voice = countedVoice();
     const pieces = piecesOf(voice.synthesizer, [], { transcriber: { piece: createSimulatedTranscriber({ refuse: "no_credit" }), apiKey: "" } });
-    await expect(open(pieces)).rejects.toBeInstanceOf(TranscriberOpenError);
+    const refused = open(pieces, { fixedSpeech: ["Tchau."] });
+    await expect(refused).rejects.toMatchObject({ piece: "transcriber", reason: "no_credit" });
+    const error = (await refused.catch((caught: unknown) => caught)) as PipelineOpenError;
+    const characters = [...PIPELINE_FAILURE_SPEECH].length + [..."Tchau."].length;
+    expect(error.spent).toEqual([{ piece: "synthesizer", id: "simulated", model: voice.synthesizer.defaultModel, usage: {}, characters, costMicrocents: expect.any(Number), estimated: true }]);
+    expect(error.message).not.toContain("chave");
   });
 
   it("a saudação sai pela voz, sem pedir ao cérebro", async () => {

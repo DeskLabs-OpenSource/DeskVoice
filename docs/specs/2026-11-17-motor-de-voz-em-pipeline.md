@@ -187,9 +187,12 @@ DeepSeek e Anthropic não emitem e ignoram o campo. A tradução:
   chamada mal formada, assinatura ausente) e o `promptFeedback.blockReason` terminam em
   `error("unexpected_response", 200)`.
 
-### 3.3 O motor: `packages/voice-engine/src/engines/pipeline.ts`
+### 3.3 O motor: `packages/voice-engine/src/pipeline-engine.ts` (vai para `engines/pipeline.ts` na fatia 5)
 
-Implementa `VoiceEngine` com `id: "pipeline"`. O `connect` recebe, além do `VoiceSessionConfig`, a
+Implementa `VoiceEngine` com `id: "pipeline"`. **Mora fora de `engines/` até a fatia 5** (decisão B da
+DESA-418): `loadEngines()` e o painel oferecem como motor tudo o que está naquela pasta, e o pipeline
+não pode aparecer antes da tela que o escolhe. Quem o abre é `call-session.ts`, por
+`createPipelineEngine()`, só para o agente com `agents.pipeline` preenchida. O `connect` recebe, além do `VoiceSessionConfig`, a
 escolha do agente: `{ transcriber, brain, model, synthesizer, voiceId }` e uma chave por peça. As
 chaves são as que já existem: `brain.<id>.api_key` (R4), a do transcritor (R12, fatia 4) e
 `synthesizer.<id>.api_key` (fatia 1b), todas cifradas (convenção 12). A forma exata de passar as
@@ -213,13 +216,27 @@ O laço de um turno:
 
 ```ts
 /** Só motores com peças separadas. Incremento de uma peça, já com o custo calculado pelo preço dela. */
-pieceUsage(line: { piece: "transcriber" | "brain" | "synthesizer"; id: string; model?: string; usage: Usage; characters?: number; costMicrocents: number; estimated: boolean }): void;
+pieceUsage(line: { piece: "transcriber" | "brain" | "synthesizer"; id: string; model?: string; usage: Usage; characters?: number; costMicrocents?: number; estimated: boolean }): void;
 ```
 
-O `meter` do `call-session.ts` grava uma linha de `usage_ledger` por evento: `engine` =
-`<peça>:<id>` (o mesmo rótulo `transcriber:<id>` do #245), `model`, `cost_microcents` e
-`cost_estimated`. Cada linha conta para o teto como hoje. Motor que não emite `pieceUsage` continua
-no caminho de `usage`, sem mudança.
+**`costMicrocents` é opcional:** ausente é custo **não medido** (a peça sem preço conhecido), nunca
+zero. O cérebro que termina sem declarar consumo (o `{}` fora da recusa HTTP, como a escrita em cache
+da Anthropic) sai, com o preço conhecido, **estimado** pelo que foi e voltou, um token por byte (a
+regra do Jev), com `estimated: true`. O `{}` da recusa HTTP é zero medido.
+
+O `call-session.ts` grava uma linha de `usage_ledger` por evento (`chargePiece`): `engine` =
+`<peça>:<id>` (o mesmo rótulo `transcriber:<id>` do #245), `model`, `cost_microcents`,
+`cost_estimated` e `cost_measured` (falso quando `costMicrocents` veio ausente). Cada linha conta para
+o teto, como o filtro e o analista. A linha que chega depois do `closed` (o cérebro cancelado no fim)
+também entra. Motor que não emite `pieceUsage` continua no caminho de `usage`, sem mudança.
+
+**A escolha das peças** fica em `agents.pipeline` (fatia 3). A sessão as monta pela pasta
+(`loadTranscribers`, `loadBrains`, `loadSynthesizers`, lidas na primeira ligação que pede o pipeline),
+com a chave de cada uma na organização (`transcriber.`, `brain.` e `synthesizer.<id>.api_key`) e o
+preço do modelo do cérebro na lista `brain.<id>.models`. Peça não instalada, cérebro sem `chat` ou
+chave que falta é recusa de abertura (`call_refused` com `piece`). A recusa de uma peça ao abrir
+(`PipelineOpenError`) traz o que a abertura já gastou, as falas fixas sintetizadas antes de a outra
+peça recusar, e esse custo entra no extrato da tentativa.
 
 **Teto.** O `reachCeiling` de hoje dispara a despedida. No pipeline, a despedida também custa voz.
 Por isso as três falas fixas da ligação (`FAREWELL.costCeiling`, `costCeilingTransfer` e a fala de
@@ -229,10 +246,16 @@ fez. Um cache por processo, com a chave `(organização, sintetizador, voz, mode
 pagar de novo na ligação seguinte com a mesma voz. **O cache não atravessa organizações:** cada
 organização paga e usa só o que a chave dela sintetizou, mesmo quando duas usam o mesmo `voiceId`.
 E a abertura confere a chave da organização a cada ligação, mesmo quando todas as falas vêm do
-cache: chave recusada é recusa de abertura, com ou sem cache. Antes de cada pedido ao cérebro, o pipeline também confere se o
+cache: chave recusada é recusa de abertura, com ou sem cache. As duas despedidas chegam ao motor por
+`PipelineConnectOptions.fixedSpeech`, e o `reachCeiling` de hoje as toca por `say` com o mesmo texto:
+o motor acha o áudio pronto e não abre fala nova. Antes de cada pedido ao cérebro, o pipeline também confere se o
 pior caso do pedido (entrada enviada + `max_tokens` × preço) passa do que sobra do teto. Se passar,
 o pedido não sai, e a despedida do teto toca. Isso resolve, no pipeline, a pendência da R12 "reserva
-em voo que passa do pior caso".
+em voo que passa do pior caso". **Pendente da 3b-2 (DESA-425):** essa conferência, com o
+`BrainChatRequest.maxTokens` (`PIPELINE_BRAIN_MAX_TOKENS` = 4 096) enviado por cada cérebro, e a
+recusa de abrir o pipeline com uma peça sem preço (`pipeline_piece_unpriced`). Até ela, a linha da
+peça sem preço sai com `cost_measured = false`. A 3b-1 pode mesclar sem isso porque ninguém escreve
+em `agents.pipeline` antes da fatia 5.
 
 ### 3.4 A falha (antipadrão 15)
 
@@ -240,13 +263,18 @@ em voo que passa do pior caso".
 |---|---|---|
 | Voz, ao abrir | O tom de falha (o caminho de hoje: `call_refused`/`engine_refused`) | `call_refused`, com `detail` dizendo que foi a voz |
 | Voz, no meio | A fala de falha **pré-sintetizada** e depois o tom. A fala não depende da voz estar viva | `engine_failed` com `piece: "synthesizer"` e o motivo no vocabulário fechado |
-| Ouvido, no meio | A fala de falha, pela voz viva | `engine_failed` com `piece: "transcriber"` |
+| Ouvido, ao abrir | O tom de falha | `call_refused` com `piece: "transcriber"` e o motivo |
+| Ouvido, no meio (`closed`) | A fala de falha **pré-sintetizada**, como na voz: não depende de nenhuma fala aberta | `engine_failed` com `piece: "transcriber"` e o motivo do último `error`, se ele veio tipado |
+| Ouvido, `error` sem `closed` | Nada: a conversa segue | `pipeline_turn_failed` com `piece: "transcriber"` e o motivo |
 | Cérebro, um pedido (prazo, 5xx, 429) | "Desculpe, não consegui responder agora. Pode repetir, por favor?" e a conversa segue | `pipeline_turn_failed` com `piece: "brain"` e o motivo |
 | Cérebro, duas vezes seguidas | A fala de falha | `engine_failed` com `piece: "brain"` |
 
 A fala de falha (texto fixo, no padrão de `FAREWELL`) é: "Estou com um problema técnico e não vou
 conseguir continuar. Se puder, ligue de novo em alguns minutos. Obrigado." Quando há
-`transfer_to_e164`, vale a fala de transferência que já existe. Os eventos usam o vocabulário de
+`transfer_to_e164`, a ligação é transferida depois dela (na 3b-1, a fala de falha toca também nesse
+caso: a de transferência não está entre as falas prontas do motor; fica para a 3c).
+O `error` da transcrição sozinho não é fatal (o contrato de `StreamingTranscriptionEvents`): só o
+`closed` derruba a sessão. Os eventos levam `piece`, `pieceId` e `detail` (o código). Os eventos usam o vocabulário de
 `KEY_CHECK_RESULTS` e nunca repassam o texto do provedor (o texto vai só ao log). Há frase na linha
 do tempo nos três idiomas: o CI reprova motivo sem frase.
 
@@ -385,7 +413,13 @@ declarou consumo (precisa ser estimado pela entrada, `cost_estimated`, como na R
 migration: `agents.pipeline jsonb` com `{ transcriber, brain, model, synthesizer, voiceId }`, nula
 para quem não usa. O carimbo é a hora real (`date -u +%Y%m%dT%H%M%S`), nunca futura. Em
 `call-session.ts`, entram o `pieceUsage` no `meter`, a falha por peça (3.4) e o
-`pipeline_turn_latency`. Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
+`pipeline_turn_latency`. O motor mora em `src/pipeline-engine.ts` até a fatia 5 (3.3).
+
+A fatia foi cortada em quatro: a **3a** (o motor com as peças injetadas, sem banco, #567), a **3b-1**
+(a coluna, as peças montadas na sessão, uma linha por peça, as despedidas prontas, a falha por peça
+até o painel e o `error` não fatal da transcrição), a **3b-2** (DESA-425: o pior caso antes de cada
+pedido ao cérebro, com o `maxTokens`, e a recusa da peça sem preço) e a **3c** (`pipeline_turn_latency`,
+a nota da chave e a corrida da transferência com volta). Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
 voz simulada: uma ferramenta no meio da conversa, três linhas no extrato e o teto que dispara a
 despedida pré-sintetizada. Quem já instalou não precisa fazer nada: sem `agents.pipeline`, nada muda.
 A fala aberta e parada morre no `inactivity_timeout` da ElevenLabs (20 s) com `error`. Esta fatia
@@ -409,7 +443,9 @@ Na tela do agente, "Pipeline" aparece como motor. Ao escolhê-lo, surgem três e
 o cérebro e o modelo (da lista da R4, só cérebros com `chat`) e a voz (da lista da 1b, com amostra).
 O custo por peça aparece no detalhe da chamada e em Custos. A latência medida (p50 das últimas
 ligações, pelo `pipeline_turn_latency`) aparece ao lado da escolha, com o aviso quando passa do
-orçamento. Chamada pelo navegador (decisão 0008) com o pipeline. Ela entra na prova de primeira
+orçamento. Chamada pelo navegador (decisão 0008) com o pipeline. O motor sai de
+`src/pipeline-engine.ts` para `engines/pipeline.ts`, com `default`, só aqui, junto com a escrita em
+`agents.pipeline`. Ela entra na prova de primeira
 impressão do CI pelo caminho simulado.
 Ao lado de cada escolha que não roda neste servidor (transcrição e voz), a tela repete o aviso da
 seção 9.1 e diz se já foi confirmado, por quem e quando. O servidor recusa salvar um agente com uma
