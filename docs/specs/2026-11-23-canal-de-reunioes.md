@@ -1,7 +1,9 @@
 # Canal de reuniões: o agente entra no Google Meet, no Teams ou no Zoom (R15)
 
-- **Estado:** desenho. Nenhuma fatia anda antes da palavra do dono sobre este documento e sobre os
-  pedidos de decisão da seção 9.
+- **Estado:** desenho aprovado pelo dono em 24/11/2026, às 09h21 (DESA-62): ele seguiu a
+  recomendação dos pedidos 1 e 2 da seção 9 (**1A e 2A**: o Meet primeiro, só com a peça própria e
+  sem serviço de terceiros). A sonda (fatia 1) espera o pedido 3 da seção 9, sobre os termos do
+  Meet (seção 2.4).
 - **Data:** 2026-11-23
 - **Quem pediu:** o dono, em 16/11/2026 (DESA-62): os agentes atuam como consultor, suporte ou
   vendedor dentro de uma reunião do Meet, do Teams ou do Zoom, com o mesmo motor das ligações.
@@ -76,9 +78,9 @@ Google Meet in Chrome"* [L].
 | MeetingBot | LGPL-3.0 [L] | O README só fala em gravar [L] |
 | `Meeting-BaaS/speaking-meeting-bot` | MIT [L] | Sim, mas depende da API hospedada (paga) da MeetingBaaS [L] |
 
-**Não lemos os termos de uso do Google, da Microsoft nem do Zoom** sobre a automação do cliente
-web. A única regra oficial lida contra bots é a do Meeting SDK do Zoom, e ela trata do SDK, não do
-cliente web.
+**Os termos do Meet foram lidos em 24/11/2026 (seção 2.4). Os da Microsoft e do Zoom não foram
+lidos.** A única regra oficial do Zoom lida contra bots é a do Meeting SDK, e ela trata do SDK, não
+do cliente web.
 
 ### 2.3 Serviços de terceiros
 
@@ -89,7 +91,36 @@ cliente web.
 | Attendee hospedado | US$ 0,50/h depois de 5 h grátis, até US$ 0,35/h com volume [L] | Sim [L] | Sim (o projeto da 2.2). O suporte pago é à parte [L] |
 | Skribby | US$ 0,35/h mais transcrição [L] | a página não diz | a página não diz |
 
-### 2.4 O que exige conta, aprovação ou pagamento
+### 2.4 Os termos do Meet sobre bots (lidos em 24/11/2026)
+
+O dono pediu esta leitura antes da sonda (DESA-62, 24/11). Ela foi feita na DESA-440.
+
+1. **Termos de Serviço do Google:** https://policies.google.com/terms, em vigor desde 30/07/2026.
+   Proíbem *"using automated means to access content from any of our services in violation of the
+   machine-readable instructions on our web pages (for example, robots.txt files that disallow
+   crawling, training, or other activities)"* e *"bypassing our systems or protective measures"*
+   [L].
+2. **`robots.txt` do Meet:** https://meet.google.com/robots.txt, lido em 24/11/2026: `User-agent: *`
+   e `Disallow: /`. Ficam liberados só `/`, `/about`, `/landing`, `/_meet` e `/sitemap.xml`. **O
+   endereço de uma reunião (`/abc-defg-hij`) fica bloqueado** [L].
+3. **Política de Uso Aceitável do Meet:** https://support.google.com/meet/answer/9847091,
+   atualizada em 11/09/2025. Não fala de bot nem de gravação. Tem *"Do not impersonate a person or
+   organization or misrepresent yourself"* [L], e o aviso fixo da seção 6 atende a isso.
+4. **Bots on Demand API:** https://developers.google.com/bots-on-demand: *"Only allowlisted vendors
+   may access the Bots on Demand API"*. A API serve para teste de carga, e não é um caminho para nós
+   [L].
+5. **Contexto (não é um termo):** há relato de que o Google nega sozinho o pedido de entrada de
+   *"automated bots"* e de identidade não verificada, salvo se o anfitrião aceitar (uctoday.com,
+   docs.recall.ai/docs/google-meet-faq) [B].
+
+**Leitura nossa, que não é parecer jurídico [I]:** nenhum texto proíbe com todas as letras um
+participante automatizado que se identifica como IA. Mas os itens 1 e 2, juntos, dão ao Google base
+para dizer que um Chromium automatizado no endereço da reunião viola os Termos ("or other
+activities"). O risco recai sobre a conta ou o IP de quem instala. Os serviços pagos da seção 2.3
+correm o mesmo risco. Por isso a sonda espera o pedido 3 da seção 9. Se ela andar, a tela da peça
+diz isso a quem a liga, antes de ligar.
+
+### 2.5 O que exige conta, aprovação ou pagamento
 
 | | Caminho oficial | Navegador automatizado na VPS |
 |---|---|---|
@@ -118,8 +149,9 @@ O que este caminho **não** promete, escrito com honestidade:
 - **Depende da página web de cada plataforma.** Quando o Google, a Microsoft ou o Zoom mudam a
   tela, a entrada quebra até o conserto. Por isso a peça tem uma sonda que roda na tela de
   Configurações e diz "a entrada no Meet funciona hoje" ou "parou de funcionar".
-- **A plataforma pode proibir.** Os termos não foram lidos (seção 10). Se algum deles proibir, a
-  plataforma sai do canal, sem exceção.
+- **A plataforma pode proibir.** Os do Meet foram lidos (seção 2.4), e o `robots.txt` bloqueia o
+  endereço da reunião. Os do Teams e do Zoom não foram lidos. Se algum termo proibir com todas as
+  letras, a plataforma sai do canal, sem exceção.
 - **O anfitrião sempre pode negar.** O convidado espera no lobby, e isso é desejável: admitir
   "Nome (IA)" é o primeiro consentimento.
 - **Organizações fechadas não entram.** Workspace ou tenant que bloqueiam convidado de fora ficam
@@ -287,11 +319,20 @@ porque é o único caminho que roda na VPS de quem instala sem conta, sem pagame
 plataformas; o custo real dos terceiros com áudio de saída (a página da Recall fala em bot maior,
 mas não lemos a fatura); se o Attendee aberto fala de fato (lemos só o roadmap).
 
+### Pedido 3. Decisão: a sonda do Meet roda, mesmo com o `robots.txt` bloqueando a reunião?
+
+Está na pasta do dono como DESA-441, aberto em 24/11/2026.
+- **A (recomendada):** a sonda roda uma vez, numa reunião nossa, com o dono como anfitrião. A
+  fatia 2a só sai depois de ele ver o resultado. O risco aparece na tela da peça.
+- **B:** a R15 para até haver uma leitura jurídica.
+- **C:** trocar o Meet pelo Teams (o ACS, que é pago).
+- **Se ninguém responder em 3 dias, vale B.**
+
 ## 10. Não medido
 
-- **Os termos de uso** do Google Meet, do Microsoft Teams e do Zoom sobre a automação do cliente
-  web. Não foram lidos. A fatia 5 (Zoom) não anda sem eles, e as fatias 2 e 4 leem os da
-  plataforma antes do PR.
+- **Os termos de uso do Teams e do Zoom** sobre a automação do cliente web não foram lidos. A
+  fatia 5 (Zoom) não anda sem eles, e a fatia 4 lê os do Teams antes do PR. Os do Meet foram lidos
+  (seção 2.4), mas sem leitura jurídica.
 - **Nada da seção 4 foi rodado.** A entrada do convidado, o lobby, a troca do microfone e a mistura
   das faixas são o que a fatia 1 vai provar, ou não.
 - **CPU e memória de um Chromium por reunião** não foram medidos. O limite de uma por organização é
