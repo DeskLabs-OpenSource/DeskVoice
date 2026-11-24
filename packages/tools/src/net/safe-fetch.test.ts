@@ -2,7 +2,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeFetch, fakeLookup } from "../../test/helpers";
-import { isPublicAddress, SafeFetchTimeoutError, safeFetch, UnsafeDestinationError } from "./safe-fetch";
+import { fetch as undiciFetch } from "undici";
+import { isPublicAddress, SafeFetchRedirectError, SafeFetchTimeoutError, safeFetch, UnsafeDestinationError } from "./safe-fetch";
 
 const neverFetch: typeof fetch = async () => {
   throw new Error("fetch must not be called for a blocked destination");
@@ -156,6 +157,61 @@ describe("safeFetch", () => {
   });
 });
 
+describe("safeFetch: as opções do cliente MCP", () => {
+  it("sem as opções novas, tudo segue como antes: segue o redirecionamento e a resposta não traz cabeçalhos", async () => {
+    const { fetch, requests } = fakeFetch((request) =>
+      request.url === "https://a.example.com/start" ? new Response(null, { status: 307, headers: { location: "/end" } }) : new Response("fim", { headers: { "x-extra": "1" } }),
+    );
+    const response = await safeFetch("https://a.example.com/start", { method: "POST", headers: { Authorization: "Bearer s3cret" }, body: "{}" }, { fetch, lookup: fakeLookup() });
+    expect(response).toEqual({ status: 200, ok: true, body: "fim", truncated: false });
+    expect(requests.map((request) => request.url)).toEqual(["https://a.example.com/start", "https://a.example.com/end"]);
+  });
+
+  it.each([301, 302, 303, 307, 308])("redirect: error recusa %i, para a mesma origem e para outra, sem segundo pedido", async (status) => {
+    for (const location of ["/outro", "https://b.example.com/x"]) {
+      const { fetch, requests } = fakeFetch(() => new Response(null, { status, headers: { location } }));
+      const error = await safeFetch("https://a.example.com/mcp", { method: "POST", body: "{}" }, { fetch, lookup: fakeLookup(), redirect: "error" }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(SafeFetchRedirectError);
+      expect(error).toMatchObject({ status, location });
+      expect(requests).toHaveLength(1);
+    }
+  });
+
+  it("redirect: error deixa passar 3xx sem Location, como antes", async () => {
+    const { fetch } = fakeFetch(() => new Response(null, { status: 304 }));
+    expect((await safeFetch("https://a.example.com/x", {}, { fetch, lookup: fakeLookup(), redirect: "error" })).status).toBe(304);
+  });
+
+  it("stopWhen encerra a leitura sem esperar o fluxo fechar, e o teto vale antes dela", async () => {
+    let cancelled = false;
+    const open = (chunks: string[]): typeof globalThis.fetch => async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+      );
+    const seen: string[] = [];
+    const response = await safeFetch("https://a.example.com/x", {}, { fetch: open(["pri", "meiro|", "resto"]), lookup: fakeLookup(), stopWhen: (body) => (seen.push(body), body.includes("|")) });
+    expect(response).toEqual({ status: 200, ok: true, body: "primeiro|", truncated: false });
+    expect(seen).toEqual(["pri", "primeiro|"]);
+    expect(cancelled).toBe(true);
+    // O pedaço que passa do teto é corte, mesmo que a condição dissesse para parar.
+    const big = await safeFetch("https://a.example.com/x", {}, { fetch: open(["x".repeat(20_000) + "|"]), lookup: fakeLookup(), stopWhen: (body) => body.includes("|") });
+    expect(big.truncated).toBe(true);
+  });
+
+  it("responseHeaders devolve só os cabeçalhos pedidos", async () => {
+    const { fetch } = fakeFetch(() => new Response("{}", { headers: { "content-type": "application/json", "Mcp-Session-Id": "abc", "set-cookie": "x=1" } }));
+    const response = await safeFetch("https://a.example.com/x", {}, { fetch, lookup: fakeLookup(), responseHeaders: ["content-type", "Mcp-Session-Id", "x-ausente"] });
+    expect(response.headers).toEqual({ "content-type": "application/json", "mcp-session-id": "abc" });
+  });
+});
+
 describe("isPublicAddress", () => {
   it("separa público de interno", () => {
     expect(["8.8.8.8", "93.184.216.34", "172.32.0.1", "2001:4860:4860::8888"].map(isPublicAddress)).toEqual([true, true, true, true]);
@@ -174,7 +230,14 @@ describe("safeFetch pelo undici (conexão presa ao endereço conferido)", () => 
   let hits = 0;
 
   beforeAll(async () => {
-    server = createServer((_request, response) => {
+    server = createServer((request, response) => {
+      if (request.url === "/drip") {
+        // Manda os cabeçalhos e depois só um byte a cada 20 ms, sem nunca terminar.
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        const timer = setInterval(() => response.write(":"), 20);
+        response.on("close", () => clearInterval(timer));
+        return;
+      }
       hits += 1;
       response.end("segredo interno");
     });
@@ -182,6 +245,7 @@ describe("safeFetch pelo undici (conexão presa ao endereço conferido)", () => 
     port = (server.address() as AddressInfo).port;
   });
   afterAll(async () => {
+    server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   });
 
@@ -189,6 +253,14 @@ describe("safeFetch pelo undici (conexão presa ao endereço conferido)", () => 
     const before = hits;
     expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).toBe("segredo interno");
     expect(hits).toBe(before + 1);
+  });
+
+  it("o prazo interrompe, pelo undici de verdade, a leitura de um corpo que goteja", async () => {
+    // O `fetch` injetado é o do undici sem guarda, para alcançar o servidor local: o que se mede é
+    // o sinal do prazo parando a leitura do corpo, já com os cabeçalhos recebidos.
+    const viaLocal: typeof globalThis.fetch = (input, init) =>
+      undiciFetch(String(input).replace("drip.example.com", `127.0.0.1:${port}`), init as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+    await expect(safeFetch("http://drip.example.com/drip", {}, { fetch: viaLocal, lookup: fakeLookup(), timeoutMs: 150 })).rejects.toThrow(SafeFetchTimeoutError);
   });
 
   it("recusa host que resolve para 127.0.0.1 antes de qualquer conexão chegar ao servidor", async () => {
