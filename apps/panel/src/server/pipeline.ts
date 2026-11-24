@@ -10,6 +10,19 @@ import { listTranscribers } from "./transcribers";
 /** A peça simulada (sem chave, sem fornecedor) serve aos testes e à prova de primeira impressão, nunca a um agente de verdade. */
 const SIMULATED = "simulated";
 
+/** Por que o pipeline está desligado neste servidor. */
+export type PipelineUnavailable = { reason: "no_live_transcriber" };
+
+/**
+ * O pipeline fica desligado enquanto a pasta não tiver transcrição real, fora a simulada, que só serve
+ * aos testes (fatia 5b-1). Ela chega com a medida da R12 (fatia 6). Mesmo ligado, nesta fatia ninguém
+ * o escolhe como motor: a recusa de `engine` e a de `pipeline_piece_test_only` continuam valendo.
+ */
+export async function pipelineUnavailable(): Promise<PipelineUnavailable | null> {
+  const live = (await listTranscribers()).some((piece) => piece.id !== SIMULATED);
+  return live ? null : { reason: "no_live_transcriber" };
+}
+
 const PIECE_NAMES: Record<PipelinePieceKind, string> = { transcriber: "transcriber", brain: "brain", synthesizer: "voice" };
 
 const refuse = (code: string, piece: PipelinePieceKind, id: string, message: string, extra: Record<string, string> = {}): ApiError =>

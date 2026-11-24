@@ -7,7 +7,7 @@ import deepseek, { promptWithSchema } from "./brains/deepseek";
 import gemini from "./brains/gemini";
 import openai from "./brains/openai";
 import openrouter from "./brains/openrouter";
-import { PIPELINE_BRAIN_MAX_TOKENS } from "./pipeline-engine";
+import { PIPELINE_BRAIN_MAX_TOKENS } from "./engines/pipeline";
 
 /**
  * O teto de saída do pedido ao cérebro (desenho do pipeline, seção 3.3, fatia 3b-2): cada cérebro manda

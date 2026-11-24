@@ -45,7 +45,11 @@ const agentFields = z.object({
   roleLabel: optionalText(80),
   instructions: z.string().max(20000),
   greeting: optionalText(1000),
-  engine: z.string().refine(async (id) => (await listEngines()).some((engine) => engine.id === id), "unknown voice engine"),
+  engine: z
+    .string()
+    .refine(async (id) => (await listEngines()).some((engine) => engine.id === id), "unknown voice engine")
+    // O pipeline monta as peças de `agents.pipeline` e nunca é o motor de um agente (fatia 5b-1).
+    .refine(async (id) => !(await listEngines()).some((engine) => engine.id === id && engine.assembled === true), "the pipeline is not chosen as the agent's engine"),
   voiceId: optionalText(80),
   language: z.string().min(2).max(20),
   tools: z.array(z.string().min(1)).max(50),

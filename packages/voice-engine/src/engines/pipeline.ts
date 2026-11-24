@@ -1,8 +1,8 @@
 import type { Clock } from "@deskvoice/core";
-import type { BrainChat, BrainChatMessage, BrainFailure, BrainToolCall } from "./brain";
-import { SessionEmitter } from "./emitter";
-import { estimateCostMicrocents } from "./pricing";
-import { prepareFixedSpeech, type FixedSpeechCache } from "./synthesis";
+import type { BrainChat, BrainChatMessage, BrainFailure, BrainToolCall } from "../brain";
+import { SessionEmitter } from "../emitter";
+import { estimateCostMicrocents } from "../pricing";
+import { prepareFixedSpeech, type FixedSpeechCache } from "../synthesis";
 import {
   PipelineOpenError,
   PipelinePieceError,
@@ -12,17 +12,17 @@ import {
   type PipelineConnectOptions,
   type PipelineOpening,
   type PipelinePieceKind,
+  type PipelineEngine,
   type PipelinePieces,
   type PieceUsageLine,
+  type PipelineVoiceSession,
   type Speech,
   type StreamingTranscription,
   type TranscriptPiece,
   type Usage,
-  type VoiceEngine,
-  type VoiceSession,
   type VoiceSessionConfig,
   type VoiceSessionEvents,
-} from "./types";
+} from "../types";
 
 /**
  * O motor de voz em pipeline (R5, fatia 3a): transcrição, cérebro e voz em série, cada um uma peça
@@ -33,9 +33,9 @@ import {
  * `fences/engines-do-not-import-pieces.test.ts` reprova a importação de `transcribers/`,
  * `synthesizers/` ou `brains/` daqui e de `engines/`.
  *
- * **Fora da pasta `engines/` de propósito, até a fatia 5.** `loadEngines()` e o painel importam tudo
- * o que está lá e o oferecem como motor; aqui, nada carrega o pipeline, e quem já instalou não vê
- * nada novo. Ele vai para `engines/pipeline.ts`, com `default`, quando a tela do agente o oferecer.
+ * **Na pasta `engines/` desde a fatia 5b-1**, com `default`, e marcado `assembled`: `loadEngines()` e o
+ * painel o listam, mas ele nunca é o `engine` de um agente. A sessão o abre só pela coluna
+ * `agents.pipeline`, e o painel o mostra desligado enquanto a pasta não tiver transcrição real.
  *
  * O laço de um turno (3.3):
  *   1. o áudio de quem ligou vai à transcrição; texto novo é `callerActivity({ words: true })`;
@@ -134,16 +134,6 @@ export interface PipelineEngineOptions {
   fetch?: typeof fetch;
   /** Prazo de um pedido ao cérebro. Padrão: `BRAIN_TIMEOUT_MS`. */
   brainTimeoutMs?: number;
-}
-
-/** A sessão do pipeline: com `clock`, traz a nota da abertura. */
-export interface PipelineVoiceSession extends VoiceSession {
-  readonly opening?: PipelineOpening;
-}
-
-export interface PipelineEngine extends VoiceEngine {
-  /** Sem `options.pieces`, recusa abrir: o pipeline não tem peça padrão. */
-  connect(config: VoiceSessionConfig, apiKey: string, options?: PipelineConnectOptions): Promise<PipelineVoiceSession>;
 }
 
 /** O texto que vai ao cérebro como resultado de uma ferramenta. */
@@ -871,6 +861,8 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
     processingLocation: { kind: "undeclared" },
     // Sem chave própria: cada peça traz a dela em `PipelineConnectOptions`.
     keyless: true,
+    // Monta as peças de `agents.pipeline`: nunca é o `engine` de um agente.
+    assembled: true as const,
     pricing: { centsPerMinute: 0, checkedOn: "2026-11-23", source: "pipeline: o custo é de cada peça, pelo evento pieceUsage" },
     async connect(config, _apiKey, options) {
       const pieces = options?.pieces;
@@ -936,3 +928,6 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
     },
   };
 }
+
+/** O motor da pasta (`loadEngines()`), sem opções: a sessão de cada ligação usa o dela (`createPipelineEngine`). */
+export default createPipelineEngine();

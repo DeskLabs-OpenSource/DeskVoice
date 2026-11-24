@@ -275,7 +275,17 @@ export interface Engine {
   keyCheck: KeyCheck | null;
   priceCheckedOn: string;
   priceSource: string;
+  /**
+   * Só o pipeline (fatia 5b-1): o motor que monta as peças de `agents.pipeline`. Nunca é o motor de um
+   * agente: a tela o mostra desligado, e a API recusa gravá-lo em `engine`.
+   */
+  assembled?: true;
+  /** Só no pipeline: por que ele está desligado neste servidor, ou `null` quando a pasta já tem o que falta. */
+  unavailable?: { reason: "no_live_transcriber" } | null;
 }
+
+/** Os motores que um agente pode ter em `engine`: todos menos o pipeline, que monta as peças (fatia 5b-1). */
+export const agentEngines = (engines: readonly Engine[] | undefined): Engine[] => (engines ?? []).filter((engine) => engine.assembled !== true);
 
 export interface ToolInfo {
   name: string;

@@ -9,8 +9,8 @@ export { createSimulatedEngine, setSimulatedScript, SIMULATED_PREFIX } from "./e
 export type { SimulatedScript, SimulatedStep } from "./engines/simulated";
 export * from "./brain";
 export { loadBrains } from "./brain-load";
-// O motor pipeline fica fora de `engines/` até a fatia 5 (nada o descobre): quem o abre é a sessão da ligação, com as peças.
-export { createPipelineEngine, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_BRAIN_MAX_TOKENS, type PipelineEngine, type PipelineEngineOptions } from "./pipeline-engine";
+// O motor pipeline mora em `engines/pipeline.ts` (fatia 5b-1) e é descoberto pela pasta, como os outros:
+// quem abre a ligação o acha em `loadEngines()` por `isPipelineEngine`, e o contrato fica em `types.ts`.
 export { pipelineChoice, pricePipeline, readConsent, synthesizerConsentSetting, type PieceConsent, type PipelineChoice, type UnpricedPiece } from "./pipeline-choice";
 export * from "./speech-filter";
 export * from "./analyst";

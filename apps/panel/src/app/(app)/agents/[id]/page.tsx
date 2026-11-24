@@ -24,6 +24,7 @@ import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Pe
 import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
 import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
 import { AgentBrains } from "./brains";
+import { EngineField, newAgentEngine } from "./engine-field";
 import { VoiceField } from "./voice-field";
 
 /** O agente como a API devolve, com quem lê a ligação dele (R4, fatia 5): nulo segue a organização. */
@@ -153,8 +154,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   useEffect(() => {
     if (isNew && meLoaded) setDraft((current) => current ?? { ...BLANK, language: proposedLanguage(organizationLanguage) });
   }, [isNew, meLoaded, organizationLanguage]);
-  // Agente novo já nasce com o motor padrão da instalação; sem padrão, o primeiro da lista.
-  const fallbackEngine = defaultEngine.data?.value ?? engines.data?.[0]?.id ?? "";
+  // Agente novo já nasce com o motor padrão da instalação; sem padrão, o primeiro da lista, nunca o pipeline.
+  const fallbackEngine = newAgentEngine(defaultEngine.data?.value, engines.data);
   const hasDraft = draft !== null;
   useEffect(() => {
     if (isNew && fallbackEngine) setDraft((current) => (current && current.engine === "" ? { ...current, engine: fallbackEngine } : current));
@@ -300,24 +301,17 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
 
         <Panel title={t.voice}>
           <div className="grid gap-4 md:grid-cols-3">
-            <Field label={t.engine}>
-              <Select
-                value={draft.engine}
-                onChange={(event) => {
-                  const next = engines.data?.find((candidate) => candidate.id === event.target.value);
-                  set("engine", event.target.value);
-                  // A voz de um motor não existe no outro: trocar de motor volta para a voz padrão.
-                  if (!next?.voices.some((voice) => voice.id === draft.voiceId)) set("voiceId", "");
-                }}
-                required
-              >
-                {engines.data?.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            <EngineField
+              t={t}
+              engines={engines.data}
+              value={draft.engine}
+              onChange={(nextId) => {
+                const next = engines.data?.find((candidate) => candidate.id === nextId);
+                set("engine", nextId);
+                // A voz de um motor não existe no outro: trocar de motor volta para a voz padrão.
+                if (!next?.voices.some((voice) => voice.id === draft.voiceId)) set("voiceId", "");
+              }}
+            />
             <VoiceField t={t} engine={engine} voiceId={draft.voiceId} language={draft.language} onChange={(next) => set("voiceId", next)} />
             <Field label={t.language}>
               <TextInput mono value={draft.language} onChange={(event) => set("language", event.target.value)} required maxLength={20} />

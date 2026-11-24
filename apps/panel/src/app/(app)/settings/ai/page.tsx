@@ -14,7 +14,7 @@ import { ActionStatus, useAction, useErrorText } from "../../../../ui/errors";
 import { formatDateTime, formatDay } from "../../../../ui/format";
 import { Badge, Button, Field, Notice, Panel, Select, Skeleton, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
-import type { Engine, KeyCheck, KeyCheckResult, Setting } from "../../../../ui/types";
+import { agentEngines, type Engine, type KeyCheck, type KeyCheckResult, type Setting } from "../../../../ui/types";
 import { Advanced } from "../advanced";
 import { URL_PREFIX, put } from "../setting-api";
 
@@ -193,7 +193,8 @@ export default function AiSettings() {
     <>
       <Panel title={t.enginesTitle} description={t.enginesLead}>
         <ul className="grid">
-          {engines.data.map((engine) => (
+          {/* O pipeline não tem chave própria nem é motor de agente (fatia 5b-1): cada peça tem a dela. */}
+          {agentEngines(engines.data).map((engine) => (
             <EngineKey key={engine.id} engine={engine} t={t} cancel={common.actions.cancel} onChanged={engines.reload} />
           ))}
         </ul>
@@ -205,7 +206,7 @@ export default function AiSettings() {
               onChange={(event) => void saveDefault.run(() => put("engine.default", event.target.value || null)).then(defaultEngine.reload)}
             >
               <option value="" />
-              {engines.data.map((engine) => (
+              {agentEngines(engines.data).map((engine) => (
                 <option key={engine.id} value={engine.id}>
                   {engine.label}
                 </option>

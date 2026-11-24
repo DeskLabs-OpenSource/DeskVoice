@@ -13,9 +13,8 @@ import { describe, it, expect } from "vitest";
 import { REPO_ROOT, expectClean, fixture, isSource, isTest, listFiles, read } from "./_lib";
 
 const SRC = "packages/voice-engine/src";
-/** Os motores: a pasta descoberta e o pipeline, que mora fora dela até a fatia 5. */
+/** Os motores: a pasta descoberta, com o pipeline dentro desde a fatia 5b-1 (`engines/pipeline.ts`). */
 const ENGINE_DIR = `${SRC}/engines`;
-const ENGINE_FILES = [`${SRC}/pipeline-engine.ts`];
 const PIECE_DIRS = ["transcribers", "synthesizers", "brains"];
 /** A descoberta por pasta e o índice que a reexporta: por eles, o motor escolheria a peça sem importá-la. */
 const DISCOVERY = new Set([`${SRC}/load`, `${SRC}/brain-load`, `${SRC}/index`, SRC]);
@@ -49,7 +48,7 @@ function pieceOf(file: string, specifier: string): string | undefined {
 }
 
 function check(root: string): string[] {
-  const files = [...listFiles(root, ENGINE_DIR, isSource), ...ENGINE_FILES.filter((file) => listFiles(root, path.posix.dirname(file)).includes(file))];
+  const files = listFiles(root, ENGINE_DIR, isSource);
   const violations: string[] = [];
   for (const file of files.filter((f) => !isTest(f))) {
     const pieces = new Set<string>();
@@ -78,10 +77,10 @@ describe("engines-do-not-import-pieces", () => {
       "packages/voice-engine/src/engines/hop.ts: importa a descoberta brain-load",
       "packages/voice-engine/src/engines/hop.ts: importa a descoberta index",
       "packages/voice-engine/src/engines/hop.ts: importa a descoberta load",
+      "packages/voice-engine/src/engines/pipeline.ts: importa a peça brains/deepseek",
+      "packages/voice-engine/src/engines/pipeline.ts: importa a descoberta index",
+      "packages/voice-engine/src/engines/pipeline.ts: importa a descoberta load",
       "packages/voice-engine/src/engines/sneaky.ts: importa a peça synthesizers/simulated",
-      "packages/voice-engine/src/pipeline-engine.ts: importa a peça brains/deepseek",
-      "packages/voice-engine/src/pipeline-engine.ts: importa a descoberta index",
-      "packages/voice-engine/src/pipeline-engine.ts: importa a descoberta load",
     ]);
   });
 });

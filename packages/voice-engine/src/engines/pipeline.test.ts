@@ -2,12 +2,12 @@ import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import openai from "./brains/openai";
-import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_MAX_TOKENS, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH } from "./pipeline-engine";
-import { FixedSpeechCache } from "./synthesis";
-import { createSimulatedSynthesizer, toneFor } from "./synthesizers/simulated";
-import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "./transcribers/simulated";
-import type { Brain, BrainChatEvents } from "./brain";
+import openai from "../brains/openai";
+import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_MAX_TOKENS, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH } from "./pipeline";
+import { FixedSpeechCache } from "../synthesis";
+import { createSimulatedSynthesizer, toneFor } from "../synthesizers/simulated";
+import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "../transcribers/simulated";
+import type { Brain, BrainChatEvents } from "../brain";
 import {
   KEY_CHECK_RESULTS,
   PipelineOpenError,
@@ -21,7 +21,7 @@ import {
   type SpeechSynthesizer,
   type VoiceSession,
   type VoiceSessionConfig,
-} from "./types";
+} from "../types";
 
 // ---- o cérebro num servidor falso: a OpenAI de verdade (`brains/openai`), com o `fetch` apontado para cá ----
 

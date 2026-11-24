@@ -26,7 +26,7 @@ import deepseek from "../../packages/voice-engine/src/brains/deepseek";
 import gemini from "../../packages/voice-engine/src/brains/gemini";
 import openai from "../../packages/voice-engine/src/brains/openai";
 import openrouter from "../../packages/voice-engine/src/brains/openrouter";
-import { PIPELINE_BRAIN_MAX_TOKENS } from "../../packages/voice-engine/src/pipeline-engine";
+import { PIPELINE_BRAIN_MAX_TOKENS } from "../../packages/voice-engine/src/engines/pipeline";
 import type { Usage } from "../../packages/voice-engine/src/types";
 import { percentil } from "./metricas";
 

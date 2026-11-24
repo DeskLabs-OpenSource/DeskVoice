@@ -524,6 +524,13 @@ export interface VoiceEngine {
   defaultVoice?: string;
   /** Verdadeiro para motores que não precisam de chave (o simulado). */
   keyless?: boolean;
+  /**
+   * Verdadeiro para o motor que monta as peças escolhidas em `agents.pipeline` (o pipeline, R5). Ele
+   * nunca é o `engine` de um agente: a sessão o abre pela coluna, com as peças e as chaves de cada uma
+   * em `PipelineConnectOptions`. O painel o mostra na lista de motores, desligado enquanto a pasta não
+   * tiver transcrição real (fatia 5b-1), e nenhuma tela nem rota o grava como motor.
+   */
+  assembled?: boolean;
   pricing: EnginePricing;
   /**
    * O marco de fim da vez de quem ligou que este motor emite (`callerTurnEnded`): sempre o mesmo por
@@ -903,3 +910,21 @@ export const classifyDestinationOf = (
   if (apiKey === undefined) return { ok: false, reason: "endpoint_key_missing" };
   return { ok: true, target: { baseUrl, ...withModel }, endpointKey: apiKey };
 };
+
+/** A sessão do pipeline: com `clock`, traz a nota da abertura. */
+export interface PipelineVoiceSession extends VoiceSession {
+  readonly opening?: PipelineOpening;
+}
+
+/**
+ * O motor que monta as peças de `agents.pipeline` (`engines/pipeline.ts`, `assembled`). O contrato mora
+ * aqui, e não no motor: quem abre a ligação o acha na pasta (`loadEngines()`) sem importar o arquivo.
+ */
+export interface PipelineEngine extends VoiceEngine {
+  readonly assembled: true;
+  /** Sem `options.pieces`, recusa abrir: o pipeline não tem peça padrão. */
+  connect(config: VoiceSessionConfig, apiKey: string, options?: PipelineConnectOptions): Promise<PipelineVoiceSession>;
+}
+
+/** O motor da pasta que monta as peças de `agents.pipeline`. */
+export const isPipelineEngine = (engine: VoiceEngine | undefined): engine is PipelineEngine => engine?.assembled === true;

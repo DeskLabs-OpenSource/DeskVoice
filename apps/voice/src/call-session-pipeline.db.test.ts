@@ -6,11 +6,12 @@ import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { encryptSecret, withSystem, type Clock } from "@deskvoice/core";
-import { createPipelineEngine, synthesizerConsentSetting, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH, type Brain, type PipelineTurnLatency, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
+import { synthesizerConsentSetting, type PipelineEngine, type Brain, type PipelineTurnLatency, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
 import openai from "../../../packages/voice-engine/src/brains/openai";
+import { createPipelineEngine, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH } from "../../../packages/voice-engine/src/engines/pipeline";
 import { FixedSpeechCache, speechUsageOf } from "../../../packages/voice-engine/src/synthesis";
 import { createSimulatedSynthesizer } from "../../../packages/voice-engine/src/synthesizers/simulated";
 import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "../../../packages/voice-engine/src/transcribers/simulated";
@@ -400,6 +401,46 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
     expect(confirmedVoice.speaks()).toBeGreaterThan(0);
     confirmed.transport.callerHangup();
     expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+  });
+
+  it("o motor vem da pasta (`engines/pipeline.ts`), e o pipeline gravado à mão como `engine` recusa sem abrir (5b-1)", async () => {
+    // Sem o motor injetado: a sessão acha o da pasta em `deps.engines`, como os outros motores.
+    const voice = pricedVoice();
+    const made = await scene("pipeline-from-folder", { engine: "openai-realtime", greeting: "Bom dia." }, { pipeline: PIPELINE, synthesizer: voice.synthesizer });
+    const folder = made.harness.deps.pipelineEngine;
+    expect(folder).toBeDefined();
+    made.harness.deps.pipelineEngine = undefined;
+    if (folder) made.harness.deps.engines.set("pipeline", folder);
+    const session = made.start();
+    await answered(made.callId);
+    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "call_answered")?.payload).toMatchObject({ engine: "pipeline" });
+    made.transport.callerHangup();
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+
+    // Sem ele na pasta e sem o injetado, recusa com o motivo, e nenhuma peça abre.
+    const lost = pricedVoice();
+    const missing = await scene("pipeline-not-in-folder", { engine: "openai-realtime" }, { pipeline: PIPELINE, synthesizer: lost.synthesizer });
+    missing.harness.deps.pipelineEngine = undefined;
+    expect(await missing.start().done).toMatchObject({ status: "refused", endReason: "engine_not_configured" });
+    expect(lost.speaks()).toBe(0);
+
+    // `engine = 'pipeline'` com a coluna nula (só à mão: a API recusa): o motor não abre sem peças.
+    const hand = pricedVoice();
+    const manual = await scene("pipeline-as-engine", { engine: "pipeline" }, { synthesizer: hand.synthesizer });
+    const engine = manual.harness.deps.pipelineEngine;
+    let opens = 0;
+    if (engine) {
+      const counted: PipelineEngine = { ...engine, connect: (config, apiKey, options) => (opens++, engine.connect(config, apiKey, options)) };
+      manual.harness.deps.engines.set("pipeline", counted);
+    }
+    expect(await manual.start().done).toMatchObject({ status: "refused", endReason: "engine_not_configured" });
+    expect((await eventsOf(app, manual.callId)).find((event) => event.kind === "call_refused")?.payload).toEqual({
+      reason: "engine_not_configured",
+      engine: "pipeline",
+      detail: "the pipeline engine opens only from the pieces chosen in agents.pipeline",
+    });
+    expect(opens).toBe(0);
+    expect(hand.speaks()).toBe(0);
   });
 
   it("o pior caso do pedido ao cérebro passa do que sobra do teto: o pedido não sai, e a despedida toca pronta, sem síntese nova", async () => {

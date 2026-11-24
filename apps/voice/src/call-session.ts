@@ -46,7 +46,6 @@ import {
   MICROCENTS_PER_CENT,
   PipelineOpenError,
   PipelinePieceError,
-  createPipelineEngine,
   loadBrains,
   loadSynthesizers,
   loadTranscribers,
@@ -55,6 +54,7 @@ import {
   decisionModelKeySetting,
   decisionModelOf,
   estimateCostCents,
+  isPipelineEngine,
   leaks,
   leakShingles,
   pipelineChoice,
@@ -135,7 +135,7 @@ export interface CallSessionDeps {
    */
   brains?: Map<string, Brain>;
   synthesizers?: Map<string, SpeechSynthesizer>;
-  /** O motor pipeline (os testes injetam o `fetch` do cérebro e o cache das falas fixas). Padrão: `createPipelineEngine()`. */
+  /** O motor pipeline (os testes injetam o `fetch` do cérebro e o cache das falas fixas). Padrão: o da pasta, em `engines`. */
   pipelineEngine?: PipelineEngine;
 }
 
@@ -240,7 +240,6 @@ export const synthesizerKeySetting = (synthesizerId: string): string => `synthes
 let piecesOnDisk: Promise<{ transcribers: Map<string, StreamingTranscriber>; brains: Map<string, Brain>; synthesizers: Map<string, SpeechSynthesizer> }> | undefined;
 const readPiecesOnDisk = () =>
   (piecesOnDisk ??= Promise.all([loadTranscribers(), loadBrains(), loadSynthesizers()]).then(([transcribers, brains, synthesizers]) => ({ transcribers, brains, synthesizers })));
-let defaultPipelineEngine: PipelineEngine | undefined;
 
 /** Um trecho da ligação: o tempo em que ela esteve com um agente, com o motor e o custo dele. */
 interface Leg {
@@ -1332,7 +1331,10 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   const seatedSessions = new WeakSet<VoiceSession>();
 
   async function connectPipeline(row: AgentRow, config: VoiceSessionConfig): Promise<Opened> {
-    const engine = deps.pipelineEngine ?? (defaultPipelineEngine ??= createPipelineEngine());
+    // O motor vem da pasta, como os outros (`engines/pipeline.ts`, fatia 5b-1); os testes injetam o deles.
+    const found = deps.engines.get("pipeline");
+    const engine = deps.pipelineEngine ?? (isPipelineEngine(found) ? found : undefined);
+    if (!engine) return { reason: "engine_not_configured", problem: "the pipeline engine is not installed" };
     const refuse = (reason: EngineRefusal, problem: string, piece?: PieceRefusal): Opened => ({ engine, reason, problem, ...(piece && { piece }) });
     const choice: PipelineChoice | undefined = pipelineChoice.safeParse(row.pipeline).data;
     if (!choice) return refuse("engine_not_configured", "agents.pipeline is not in the expected shape");
@@ -1426,6 +1428,9 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (row && usesPipeline(row)) return connectPipeline(row, config);
     const found = deps.engines.get(engineId);
     if (!found) return { reason: "engine_not_configured", problem: `the voice engine "${engineId}" is not installed` };
+    // O pipeline nunca é o `engine` de um agente (fatia 5b-1): ele abre só pela coluna `agents.pipeline`,
+    // com as peças. Gravado à mão como motor, recusa, e não abre sem peças.
+    if (isPipelineEngine(found)) return { reason: "engine_not_configured", problem: "the pipeline engine opens only from the pieces chosen in agents.pipeline" };
     let apiKey = "";
     if (!found.keyless) {
       const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, engineKeySetting(engineId)]);

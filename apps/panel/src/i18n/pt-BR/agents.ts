@@ -55,6 +55,10 @@ const agents = {
   liveAnalyst: "Acompanha a ligação ao vivo: o analista {name}",
   liveAnalystNone: "Acompanha a ligação ao vivo: nenhum analista",
   engineSimulated: "O motor simulado segue um roteiro fixo, sem custo. Serve para demonstração e teste.",
+  /** O pipeline no campo do motor (fatia 5b-1): listado, desligado, com o motivo. */
+  enginePipeline: "Pipeline (desligado)",
+  enginePipelineOff: { no_live_transcriber: "Falta uma transcrição em tempo real neste servidor. Ela chega com a medida da R12." } as Record<string, string>,
+  enginePipelineOffUnknown: "Ainda desligado nesta versão.",
   voiceId: "Voz",
   voiceHint: "As vozes do provedor {provider}, pelo motor {engine}.",
   voiceDefault: "Padrão do motor ({voice})",

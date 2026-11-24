@@ -13,6 +13,8 @@ import { NOW, SECRET_KEY, call, createOrganization, createUser, startPanel } fro
 import { listTranscribers } from "../../../../server/transcribers";
 import { DELETE as removeVoiceKey } from "../synthesizers/[synthesizer]/key/route";
 import { GET as readAgent, PATCH as patchAgent } from "./[id]/route";
+import { GET as listEngines } from "../engines/route";
+import { PUT as putSetting } from "../settings/[key]/route";
 import { GET as listAgents, POST as createAgent } from "./route";
 
 // As peças reais têm todas `chat` e preço, e nenhuma transcrição é de fora: as recusas 2, 3 e a da
@@ -290,5 +292,75 @@ describe("o agente sem pipeline fica como era", () => {
       ].sort(),
     );
     expect(after).toMatchObject({ name: "Vendas", engine: "simulated", maxCallSeconds: 300, instructions: "Atenda bem.", pipeline: null });
+  });
+});
+
+describe("o motor pipeline na pasta: listado desligado, e nunca o motor de um agente (fatia 5b-1)", () => {
+  /** Os campos de cada motor antes da 5b-1: os outros motores saem exatamente com eles. */
+  const ENGINE_FIELDS = [
+    "id",
+    "label",
+    "provider",
+    "processingLocation",
+    "requiresKey",
+    "classifyTarget",
+    "baseUrl",
+    "classifyModel",
+    "classifyModelUnmeasured",
+    "classifyKeyConfigured",
+    "voices",
+    "defaultVoice",
+    "keyConfigured",
+    "keyCheck",
+    "priceCheckedOn",
+    "priceSource",
+  ].sort();
+  type EngineView = Record<string, unknown> & { id: string };
+
+  it("`/api/v1/engines` devolve o pipeline com a marca de indisponível e o motivo, e os outros motores sem campo novo", async () => {
+    const { cookie } = await setup("pipeline na lista");
+    const engines = (await call(listEngines, { cookie })).data as EngineView[];
+    expect(engines.map((engine) => engine.id).sort()).toEqual(["gemini-live", "openai-realtime", "pipeline", "simulated"]);
+    const pipeline = engines.find((engine) => engine.id === "pipeline");
+    expect(pipeline).toMatchObject({ assembled: true, unavailable: { reason: "no_live_transcriber" }, requiresKey: false, keyConfigured: false });
+    expect(Object.keys(pipeline ?? {}).sort()).toEqual([...ENGINE_FIELDS, "assembled", "unavailable"].sort());
+    for (const engine of engines.filter((each) => each.id !== "pipeline")) expect(Object.keys(engine).sort(), engine.id).toEqual(ENGINE_FIELDS);
+  });
+
+  it("com uma transcrição real na pasta, a marca sai (a regra é a da pasta, e não um texto fixo)", async () => {
+    fakes.on = true;
+    const { cookie } = await setup("pipeline com transcricao real");
+    const pipeline = ((await call(listEngines, { cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline");
+    expect(pipeline?.unavailable).toBeNull();
+  });
+
+  it("ninguém grava o pipeline como motor: nem no POST, nem no PATCH, nem como o motor padrão; e nada muda", async () => {
+    const { org, cookie } = await setup("pipeline como motor");
+    const refused = await create(cookie, { engine: "pipeline" });
+    expect([refused.status, refused.code]).toEqual([400, "validation_error"]);
+    expect(refused.text).toContain("the pipeline is not chosen as the agent's engine");
+    expect(await withOrg(panel.app, org, (q) => q.many("select id from agents"))).toEqual([]);
+
+    const agent = (await create(cookie, { engine: "gemini-live", voiceId: "Kore" })).data as Agent;
+    const patched = await patch(cookie, agent.id, { engine: "pipeline" });
+    expect([patched.status, patched.code]).toEqual([400, "validation_error"]);
+    expect(await read(cookie, agent.id)).toMatchObject({ engine: "gemini-live", voiceId: "Kore", pipeline: null });
+
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie, params: { key: "engine.default" }, body: { value } });
+    expect((await put("pipeline")).code).toBe("validation_error");
+    expect(await withOrg(panel.app, org, (q) => q.one("select value from settings where key = 'engine.default'"))).toBeNull();
+    expect((await put("openai-realtime")).status).toBe(200);
+  });
+
+  it("antes e depois: um agente com Gemini ou com OpenAI salva exatamente igual, com a voz dele", async () => {
+    const { org, cookie } = await setup("pipeline antes e depois");
+    for (const [engine, voiceId] of [["gemini-live", "Kore"], ["openai-realtime", "marin"]] as const) {
+      const agent = (await create(cookie, { engine, voiceId, instructions: "Atenda bem." })).data as Agent;
+      const before = await withOrg(panel.app, org, (q) => q.one("select * from agents where id = $1", [agent.id]));
+      expect((await patch(cookie, agent.id, { name: "Recepção", engine, voiceId })).status).toBe(200);
+      const after = await withOrg(panel.app, org, (q) => q.one<Record<string, unknown>>("select * from agents where id = $1", [agent.id]));
+      expect({ ...after, updated_at: undefined }).toEqual({ ...(before as Record<string, unknown>), updated_at: undefined });
+      expect(after).toMatchObject({ engine, voice_id: voiceId, pipeline: null });
+    }
   });
 });
