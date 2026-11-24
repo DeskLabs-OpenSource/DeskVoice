@@ -365,7 +365,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         </Panel>
 
         {/* O Pipeline (fatia 5b-1): só para ver e ouvir; nada daqui entra no salvar. */}
-        {pipelineEngine ? <PipelineBlock t={t} pipeline={pipelineEngine} canConfigure={canConfigure} /> : null}
+        {pipelineEngine ? <PipelineBlock t={t} pipeline={pipelineEngine} canConfigure={canConfigure} agentId={isNew ? null : id} /> : null}
 
         <AgentBrains
           agentId={isNew ? null : id}

@@ -83,6 +83,15 @@ const agents = {
   pipelineVoiceListen: "Ouvir a amostra de {voice}",
   pipelineVoiceSampleFailed: "A amostra não tocou: o navegador recusou ou o fornecedor não respondeu.",
   /** `{who}` é quem confirmou; `{when}`, a data e a hora. */
+  /** A latência medida do pipeline neste agente (fatia 5c): a mediana do `pipeline_turn_latency`. */
+  pipelineLatency: "Tempo de resposta",
+  pipelineLatencyHint: "Do fim da fala de quem ligou ao primeiro áudio do agente, medido em cada turno.",
+  pipelineLatencyValue: "Responde em {value} s: a mediana de {turns} turnos sem ferramenta, nas últimas {calls} ligações deste agente pelo Pipeline.",
+  pipelineLatencyValueOne: "Responde em {value} s: a mediana de {turns} turnos sem ferramenta, na última ligação deste agente pelo Pipeline.",
+  pipelineLatencyNone: "Sem medida ainda: nenhuma ligação deste agente respondeu pelo Pipeline.",
+  pipelineLatencyNoneWithoutTool: "Sem medida ainda dos turnos sem ferramenta.",
+  pipelineLatencyTool: "À parte, os turnos com ferramenta: {value} s de mediana em {turns} turnos. O tempo da ferramenta entra nesse número.",
+  pipelineLatencySlow: "Acima da meta de {goal} s para a mediana: a conversa pode soar lenta.",
   pipelineConfirmedBy: "Envio confirmado por {who} em {when}.",
   pipelineUnconfirmed: "Envio ainda não confirmado. A confirmação é pedida ao salvar a chave, em Configurações → Voz.",
   pipelineRemovedPerson: "uma pessoa que saiu da equipe",

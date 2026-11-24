@@ -382,3 +382,22 @@ export interface Setting<T> {
   key: string;
   value: T | null;
 }
+
+/** Um grupo de turnos do pipeline medidos num agente (fatia 5c). */
+export interface PipelineLatencyGroup {
+  turns: number;
+  calls: number;
+  /** A mediana do `totalMs` (do fim da fala de quem ligou ao primeiro áudio do agente), em ms. */
+  p50Ms: number;
+}
+
+/** `GET /agents/{id}/pipeline-latency`: quanto o pipeline leva para responder neste agente, nas últimas ligações. */
+export interface PipelineLatency {
+  recentCalls: number;
+  /** A meta da mediana por turno sem ferramenta (seção 3.5 do desenho do pipeline). */
+  goalP50Ms: number;
+  /** Os turnos sem ferramenta: é a eles que a meta vale. Nulo sem turno medido. */
+  withoutTool: PipelineLatencyGroup | null;
+  /** Os turnos em que a resposta veio depois de uma ferramenta, à parte: o tempo dela entra no total. */
+  withTool: PipelineLatencyGroup | null;
+}

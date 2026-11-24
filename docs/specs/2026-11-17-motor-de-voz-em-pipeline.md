@@ -626,6 +626,28 @@ sessão (`wrapUp`), e o extrato tem só o pedido que respondeu. O motor direto n
 resultado e fala a despedida. A chamada pelo navegador ganhou a prova do corte pelo pior caso **antes** do pedido
 (3b-2): com o teto de 1 centavo, o pedido nem sai.
 
+**5c, o custo por peça e a latência ao lado da escolha (DESA-444).** O detalhe da chamada (`GET /calls/{id}`)
+leva `costByPiece`: a transcrição, o cérebro e a voz, nessa ordem, cada uma com o id, o nome da pasta, o modelo
+quando ela usou um só, e o valor e as contagens de não medido e estimado do extrato, como o resto da tela. Sai só
+na ligação que passou pelo pipeline (`calls.engine = 'pipeline'`, ou uma passagem com `engine: 'pipeline'`); na
+do motor direto, a lista vem vazia, e o detalhe não muda. A peça sem nenhuma linha vem com `lines: 0`, e a tela a
+mostra como "não medido": sem linha, o custo não é conhecido, e nunca aparece como zero. A linha da peça é a que a
+sessão grava com o agente do trecho (`agent_id`): a classificação do desfecho pelo cérebro (R4) grava `brain:<id>`
+também, mas depois da ligação e sem agente, em qualquer chamada, e fica de fora das peças, com a aparência de
+antes. Custos (`GET /system/costs`) marca cada linha de peça (`piece`), com o nome dela e, no lugar dos minutos,
+a nota de que ela cobra pelo próprio consumo; a data e a fonte do preço não saem na linha da peça (o preço do
+cérebro vem da lista de modelos da organização, e o da voz depende do modelo). A transcrição da R12 num motor
+direto (o mesmo rótulo `transcriber:<id>`, só nos testes por enquanto) ganha o mesmo nome em Custos.
+
+A latência sai de `GET /agents/{id}/pipeline-latency`: a mediana (`percentile_cont(0.5)`) do `totalMs` do
+`pipeline_turn_latency` nas últimas 20 ligações do agente com turno medido, com o turno do agente que respondeu
+(o `agentId` do evento depois de uma passagem, senão o agente da ligação). **O turno com ferramenta fica à
+parte**, com a mediana dele e uma linha própria que diz que o tempo da ferramenta entra no número; a meta vale
+para a mediana sem ferramenta (1 200 ms, a "Meta p50" da 3.5), e acima dela o bloco mostra o aviso. Sem turno
+medido, o bloco diz "sem medida ainda". O Pipeline continua desligado no campo Motor. **Não medido:** a mediana
+é do agente, e não da combinação de peças: com a escolha trocada, as ligações das duas entram juntas (a escolha
+ainda não é gravável pela tela). O p95 do orçamento não é mostrado.
+
 ### Fatia 6: o ouvido real e a medida de ponta a ponta (ESPERA a R12)
 
 O transcritor real escolhido pela R12 (fatia 3 da R12) entra no pipeline sem mudança de código no

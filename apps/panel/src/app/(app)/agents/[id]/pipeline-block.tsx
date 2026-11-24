@@ -14,7 +14,7 @@ import { ApiFailure, useApi } from "../../../../ui/api";
 import { useErrorText } from "../../../../ui/errors";
 import { formatDateTime } from "../../../../ui/format";
 import { Badge, Field, Notice, Panel, Select, Skeleton } from "../../../../ui/kit";
-import type { Engine } from "../../../../ui/types";
+import type { Engine, PipelineLatency } from "../../../../ui/types";
 import { providerName } from "../../settings/voice/notice";
 import { Listen, PIPELINE_BLOCK_ID } from "./voice-field";
 
@@ -72,6 +72,11 @@ export interface PipelinePanelProps {
   voicesOf?: Record<string, VoicesState>;
   /** A leitura que falhou (as vozes, os cérebros ou os modelos), já em frase: o bloco diz, e não fica carregando. */
   loadError?: string;
+  /**
+   * Quanto o pipeline leva para responder neste agente (fatia 5c), ou `undefined` enquanto carrega. `null`
+   * é o agente novo, que ainda não tem ligação: sem medida.
+   */
+  latency?: PipelineLatency | null;
 }
 
 /**
@@ -87,6 +92,7 @@ export function PipelinePanel(props: PipelinePanelProps) {
         {canConfigure ? (
           <div className="grid gap-6">
             {props.loadError ? <Notice tone="fail">{props.loadError}</Notice> : null}
+            <LatencyPart t={t} locale={props.locale} latency={props.latency} />
             <TranscriberPart t={t} pipeline={pipeline} />
             <BrainPart {...props} />
             <VoicePart {...props} />
@@ -115,6 +121,33 @@ function Consent({ lead, status }: { lead: string; status: string }) {
       <p>{lead}</p>
       <p className="font-bold">{status}</p>
     </div>
+  );
+}
+
+/** Milissegundos em segundos, com uma casa: 1 240 ms é "1,2 s". */
+const seconds = (ms: number, locale: Locale): string => (ms / 1000).toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/**
+ * A latência medida, ao lado da escolha (fatia 5c): a mediana dos turnos sem ferramenta, com o aviso quando
+ * passa da meta, e a dos turnos com ferramenta à parte. Sem turno medido, "sem medida ainda", nunca um zero.
+ */
+export function LatencyPart({ t, locale, latency }: { t: AgentsDictionary; locale: Locale; latency: PipelineLatency | null | undefined }) {
+  if (latency === undefined) return <Skeleton lines={1} />;
+  const plain = latency?.withoutTool ?? null;
+  const tool = latency?.withTool ?? null;
+  return (
+    <Part title={t.pipelineLatency}>
+      <div className="grid gap-2" data-testid="pipeline-latency">
+        <p className="text-[0.87rem] text-muted">{t.pipelineLatencyHint}</p>
+        {plain ? (
+          <p>{fill(plain.calls === 1 ? t.pipelineLatencyValueOne : t.pipelineLatencyValue, { value: seconds(plain.p50Ms, locale), turns: plain.turns, calls: plain.calls })}</p>
+        ) : (
+          <p>{tool ? t.pipelineLatencyNoneWithoutTool : t.pipelineLatencyNone}</p>
+        )}
+        {plain && latency && plain.p50Ms > latency.goalP50Ms ? <Notice tone="warn">{fill(t.pipelineLatencySlow, { goal: seconds(latency.goalP50Ms, locale) })}</Notice> : null}
+        {tool ? <p className="text-[0.87rem] text-muted">{fill(t.pipelineLatencyTool, { value: seconds(tool.p50Ms, locale), turns: tool.turns })}</p> : null}
+      </div>
+    </Part>
   );
 }
 
@@ -273,7 +306,7 @@ function LoadVoices({ t, voiceT, provider, synthesizerId }: { t: AgentsDictionar
  * O bloco com as leituras: as vozes e os cérebros são de quem configura (as rotas pedem), e quem só lê
  * vê uma linha. A escolha de cérebro e modelo fica só nesta tela: nada é gravado.
  */
-export function PipelineBlock({ t, pipeline, canConfigure }: { t: AgentsDictionary; pipeline: Engine; canConfigure: boolean }) {
+export function PipelineBlock({ t, pipeline, canConfigure, agentId }: { t: AgentsDictionary; pipeline: Engine; canConfigure: boolean; agentId: string | null }) {
   const voiceT = useDict(ptBRVoice, enVoice, esVoice);
   const locale = useLocale();
   const synthesizers = useApi<PipelineSynthesizer[]>(canConfigure ? "/synthesizers" : null);
@@ -282,8 +315,10 @@ export function PipelineBlock({ t, pipeline, canConfigure }: { t: AgentsDictiona
   const [model, setModel] = useState("");
   const chosen = conversationalBrains(brains.data).find((option) => option.id === brain) ?? conversationalBrains(brains.data)[0];
   const models = useApi<unknown>(canConfigure && chosen ? `/brains/${encodeURIComponent(chosen.id)}/models` : null);
+  // A latência medida do agente (fatia 5c). O agente novo não tem ligação: sem medida, sem leitura.
+  const latency = useApi<PipelineLatency>(canConfigure && agentId ? `/agents/${encodeURIComponent(agentId)}/pipeline-latency` : null);
   const errorText = useErrorText();
-  const failed = synthesizers.error ?? brains.error ?? models.error;
+  const failed = synthesizers.error ?? brains.error ?? models.error ?? latency.error;
   return (
     <PipelinePanel
       t={t}
@@ -301,6 +336,7 @@ export function PipelineBlock({ t, pipeline, canConfigure }: { t: AgentsDictiona
       brainModels={models.data}
       model={model}
       onModel={setModel}
+      latency={agentId ? latency.data : null}
       {...(failed && { loadError: errorText(failed) })}
     />
   );
