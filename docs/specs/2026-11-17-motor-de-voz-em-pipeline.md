@@ -590,6 +590,30 @@ quem confirmou e quando. A linha da ElevenLabs no campo Voz aponta para o bloco.
 chamada pelo navegador com o pipeline e a prova de primeira impressão pelo caminho simulado; para a 5c, o
 custo por peça e a latência ao lado da escolha.
 
+**5b-2 (a chamada pelo navegador e a prova de primeira impressão, pelo caminho simulado; DESA-442).** A
+chamada pelo navegador (decisão 0008) não confere nada do pipeline: com `agents.pipeline` preenchida, o
+pedido do convite (`POST /calls/web`, em `apps/voice/src/web-calls.ts`) pula a conferência do `engine` (o
+simulado, o motor instalado e a chave dele), grava a linha com `engine = 'pipeline'` e deixa a abertura para
+`startCallSession`, a mesma do telefone: a mesma recusa (`call_refused` com a peça e o código, sem chave, sem
+preço ou sem a confirmação da 9.1, antes de qualquer peça abrir), o mesmo teto e o mesmo extrato por peça. Um
+caminho próprio do navegador seria uma segunda regra, que pode pular a da sessão. Com a coluna nula, vale o
+`engine`, como sempre: o agente no motor simulado continua recusado antes de abrir o microfone. A condição é a
+mesma da sessão (`usesPipeline`). A tela de falar com o agente não muda: ela decide pelo `engine` do agente, e
+o Pipeline continua desligado. Os testes (`web-calls-pipeline.db.test.ts`) abrem a ligação por um WebSocket de
+verdade, com a transcrição e a voz simuladas da pasta e o cérebro da OpenAI num servidor falso (o motor
+pipeline entra no mapa de motores do servidor, como o da pasta, com o `fetch` do teste), e comparam a recusa
+com a da mesma agente pelo telefone. A prova de primeira impressão do CI é o job `simulated-call`
+(`apps/voice/src/simulated-call.db.test.ts`): uma ligação pelo tronco com o agente de peças simuladas, com a
+saudação, um turno pelo cérebro, o fim pela ferramenta `end_call` e as linhas das três peças no extrato; o
+`engine` gravado é o simulado de roteiro, então a ligação que caísse no motor direto teria a linha dele. O
+workflow não mudou: o job já roda esse arquivo. `ServerDeps.simulatedPieces` só é ligado pelos testes:
+o painel montado pelo ambiente sai sem ele, e nenhum código fora dos testes o escreve
+(`apps/panel/src/server/simulated-pieces.test.ts`). **Não medido:** no processo de voz, a transcrição e a voz
+simuladas vêm da pasta também num servidor instalado; só o painel recusa gravá-las (`pipeline_piece_test_only`).
+Uma coluna escrita à mão no banco com as peças simuladas abriria a ligação com elas. O e2e do bloco Pipeline
+(`pipeline-block.spec.ts`) cobre as ressalvas da DESA-437: o Ouvir que falha (a amostra 404 e o `play()`
+recusado pelo navegador) e o PATCH sem `pipeline`.
+
 ### Fatia 6: o ouvido real e a medida de ponta a ponta (ESPERA a R12)
 
 O transcritor real escolhido pela R12 (fatia 3 da R12) entra no pipeline sem mudança de código no
