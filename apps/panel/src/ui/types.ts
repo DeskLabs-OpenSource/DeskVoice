@@ -132,6 +132,12 @@ export interface CallDetail extends Call {
   callBackOfStartedAt: string | null;
   /** O custo de cada agente da ligação, na ordem em que gastou; `name: null` é agente apagado. A tela mostra com mais de um. */
   costByAgent: Array<{ agentId: string | null; name: string | null; costCents: number; unmeasuredCount: number; estimatedCount: number }>;
+  /**
+   * O custo de cada peça do pipeline (fatia 5c), na ordem transcrição, cérebro e voz; vazia na ligação do
+   * motor direto. `lines: 0` é a peça sem linha no extrato: a tela a mostra como não medida, nunca zero.
+   * `label` é o nome da peça instalada; `model`, o único modelo que ela usou na ligação.
+   */
+  costByPiece: Array<{ piece: string; id: string | null; label: string | null; model: string | null; costCents: number; lines: number; unmeasuredCount: number; estimatedCount: number }>;
   /** Quantas linhas do extrato da ligação não têm custo medido (modelo sem preço, ou consumo que não pôde ser medido): com alguma, o zero não é grátis. */
   unmeasuredCount: number;
   /** Quantas linhas do extrato da ligação têm custo estimado: com alguma, o valor inclui uma estimativa. */
@@ -366,9 +372,10 @@ export interface Costs {
   byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number; unmeasuredCount: number; estimatedCount: number }>;
   /**
    * `source` é `analyst` na linha do analista ao vivo (R6), separada do mesmo modelo usado pelo filtro
-   * da fala, e `test` na do teste do agente (fatia 7b), separada do mesmo motor nas ligações.
+   * da fala, e `test` na do teste do agente (fatia 7b), separada do mesmo motor nas ligações. `piece` é
+   * a peça do pipeline da linha (fatia 5c), com `label` o nome dela; nula nas outras.
    */
-  byEngine: Array<{ engine: string; source: "analyst" | "test" | null; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
+  byEngine: Array<{ engine: string; source: "analyst" | "test" | null; piece: "transcriber" | "brain" | "synthesizer" | null; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
 }
 
 export interface Setting<T> {

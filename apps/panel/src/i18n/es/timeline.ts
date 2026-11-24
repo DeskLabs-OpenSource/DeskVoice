@@ -6,7 +6,7 @@ const timeline: TimelineDictionary = {
   liveHint: "La línea de tiempo se actualiza sola mientras ocurre la llamada.",
   temperatureBadge: "Temperatura {score} de 5",
   temperatureBadgeHint: "La última temperatura que el analista leyó en esta llamada, de 1 (fría: quiere terminar o no tiene interés) a 5 (caliente: quiere seguir adelante).",
-  facts: { agent: "Agente", engine: "Motor de voz", duration: "Duración", cost: "Costo estimado", ceiling: "tope de {value}", byAgent: "Por agente:", deletedAgent: "Agente borrado", started: "Inicio", direction: "Sentido" },
+  facts: { agent: "Agente", engine: "Motor de voz", duration: "Duración", cost: "Costo estimado", ceiling: "tope de {value}", byAgent: "Por agente:", deletedAgent: "Agente borrado", byPiece: "Por pieza:", started: "Inicio", direction: "Sentido" },
   direction: { inbound: "Recibida", outbound: "Hecha por el agente" },
   callBackOf: "Devolución de la llamada del {time}",
   callBackOfUnknown: "Devolución de una llamada que se cortó",

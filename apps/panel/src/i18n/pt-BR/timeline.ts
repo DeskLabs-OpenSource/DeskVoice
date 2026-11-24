@@ -5,7 +5,7 @@ const timeline = {
   /** O selo do detalhe da chamada: a última temperatura lida a tempo pelo analista. */
   temperatureBadge: "Temperatura {score} de 5",
   temperatureBadgeHint: "A última temperatura que o analista leu nesta ligação, de 1 (fria: quer encerrar ou não tem interesse) a 5 (quente: quer seguir adiante).",
-  facts: { agent: "Agente", engine: "Motor de voz", duration: "Duração", cost: "Custo estimado", ceiling: "teto de {value}", byAgent: "Por agente:", deletedAgent: "Agente apagado", started: "Início", direction: "Sentido" },
+  facts: { agent: "Agente", engine: "Motor de voz", duration: "Duração", cost: "Custo estimado", ceiling: "teto de {value}", byAgent: "Por agente:", deletedAgent: "Agente apagado", byPiece: "Por peça:", started: "Início", direction: "Sentido" },
   direction: { inbound: "Recebida", outbound: "Feita pelo agente" },
   callBackOf: "Retorno da ligação de {time}",
   callBackOfUnknown: "Retorno de uma ligação que caiu",

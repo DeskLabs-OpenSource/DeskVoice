@@ -110,14 +110,17 @@ export default function CostsPage() {
                       <li key={`${row.engine}:${row.source ?? ""}`} className="grid gap-1.5">
                         <span className="flex items-baseline justify-between gap-3">
                           {/* A linha do analista ao vivo sai separada do mesmo modelo usado pelo filtro da fala. */}
-                          <span className="truncate font-bold">{row.source === "analyst" ? fill(t.analystLine, { model: row.label }) : row.label}</span>
+                          <span className="truncate font-bold">
+                            {row.source === "analyst" ? fill(t.analystLine, { model: row.label }) : row.piece ? fill(t.pieceLine, { piece: t.pieces[row.piece], label: row.label }) : row.label}
+                          </span>
                           <span className="data">
                             <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
                           </span>
                         </span>
                         <Bar share={row.costCents / max(data.byEngine.map((entry) => entry.costCents))} />
                         <span className="text-[0.87rem] text-muted">
-                          {row.source === "analyst" ? t.analystNote : fill(t.minutes, { n: Math.round(row.callSeconds / 60) })}
+                          {/* A peça do pipeline não atende trecho: no lugar dos minutos, o que ela é. */}
+                          {row.source === "analyst" ? t.analystNote : row.piece ? t.pieceNote : fill(t.minutes, { n: Math.round(row.callSeconds / 60) })}
                           {row.priceCheckedOn ? ` · ${fill(t.priceChecked, { date: formatDay(row.priceCheckedOn, locale) })}` : ""}
                         </span>
                         {row.priceSource?.startsWith("http") ? (
