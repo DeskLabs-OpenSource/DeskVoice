@@ -182,7 +182,8 @@ describe("PipelinePanel", () => {
     expect(audios.length).toBeGreaterThan(0);
     for (const audio of audios) {
       expect(audio).toContain('preload="none"');
-      expect(audio).not.toContain("autoplay");
+      // O React escreve `autoPlay=""`: a conferência não olha maiúsculas, para pegar as duas grafias.
+      expect(audio).not.toMatch(/autoplay/i);
     }
   });
 });
