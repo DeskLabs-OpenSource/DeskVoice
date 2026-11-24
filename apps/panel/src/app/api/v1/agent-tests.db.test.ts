@@ -25,9 +25,10 @@ const unused = async (): Promise<never> => {
   throw new Error("not part of this test");
 };
 const timers = testSchedule();
+const clock = fakeClock();
 const deps: AgentTestDeps = {
   db: panel.app,
-  clock: fakeClock(),
+  clock,
   // O simulado roda teste; o motor manual, não (não tem `textMode`).
   engines: new Map([
     ["simulated", createSimulatedEngine()],
@@ -184,6 +185,9 @@ describe("a tela dos testes do agente, pelas rotas", { timeout: 180_000 }, () =>
     // Quem só vê o agente vê o mesmo aviso.
     expect((await list(org.operator.cookie, org.agentId)).tests[0]?.stale).toBe(true);
 
+    // A segunda rodada começa depois da primeira, como na vida: com o relógio parado, as duas teriam o
+    // mesmo `started_at` e a "última" sairia do desempate pelo id, ao acaso.
+    clock.advance(60_000);
     const again = await runAndFollow(org.admin.cookie, org.agentId, testId);
     expect(again.configHash).toBe(changed.configHash);
     expect((await list(org.admin.cookie, org.agentId)).tests[0]).toMatchObject({ lastRun: { id: again.id }, stale: false });
