@@ -437,6 +437,7 @@ const timeline = {
       } as Record<string, string>,
       notInstalled: "a peça não está instalada nesta versão.",
       unpriced: "o preço de {model} não é conhecido. Escolha um modelo com preço.",
+      unconfirmed: "o texto da ligação iria para fora deste servidor, e ninguém confirmou o envio. Confirme o fornecedor em Configurações → Voz.",
       unknown: "a peça falhou.",
       turnFailed: "Uma peça falhou sem derrubar a ligação",
       turnFailedBody: "A conversa seguiu. Quando é o cérebro, quem ligou ouviu um pedido para repetir.",
@@ -502,6 +503,7 @@ const timeline = {
     daily_cap_reached: "O teto diário de ligações desta linha tinha sido atingido.",
     attempts_exhausted: "O limite de tentativas para esta pessoa tinha sido atingido.",
     pipeline_piece_unpriced: "Uma peça do pipeline do agente não tem preço conhecido. Sem preço, o custo da ligação não pode ser medido, e a ligação não começou.",
+    pipeline_piece_unconfirmed: "Uma peça do pipeline do agente leva o dado da ligação para fora deste servidor, e ninguém confirmou o envio. Nada foi enviado, e a ligação não começou.",
   },
 };
 

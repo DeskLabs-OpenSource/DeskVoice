@@ -83,6 +83,7 @@ que procurar, para a pergunta "a IA está respondendo mal":
 | `caller_unanswered` | quem ligou falou e ficou sem resposta; a guarda pediu para repetir. Barulho, não texto |
 | `engine_failed` | o motor caiu; não é instrução |
 | `call_refused` com `pipeline_piece_unpriced` | o motor pipeline não abriu porque uma peça (`piece`, com o `model`) não tem preço conhecido: sem preço, o custo não seria medido. Escolha um modelo com preço; não é instrução |
+| `call_refused` com `pipeline_piece_unconfirmed` | o motor pipeline não abriu porque a voz (`piece`, `pieceId`) leva o texto da ligação para fora do servidor e ninguém confirmou o envio (a confirmação sai junto com a chave). Confirme o fornecedor em Configurações → Voz; não é instrução |
 | `cost_ceiling_reached`, `call_ended` com `max_duration` | ligação longa |
 | `analysis_not_done` | a análise não rodou (seção 1) |
 

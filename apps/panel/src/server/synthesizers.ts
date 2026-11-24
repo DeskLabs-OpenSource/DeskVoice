@@ -5,6 +5,7 @@ import { z } from "zod";
 import { ApiError, type ServerDeps, type Session } from "./context";
 import { readKeyCheck, storedKeyCheck, type KeyCheckView } from "./engine-key";
 import { createRateLimiter } from "./rate-limit";
+import { readConsent, synthesizerConsentSetting, type PieceConsent } from "@deskvoice/voice-engine/pipeline-choice";
 
 /**
  * A voz do pipeline na tela (desenho R5, fatia 1b): a chave da voz, cifrada, a confirmação nomeando o
@@ -48,11 +49,8 @@ export const synthesizerKeyCheckSetting = (id: string): string => `synthesizer.$
  * A confirmação nomeando o fornecedor da chave em vigor (seção 9.1 do desenho): quem e quando. Sai
  * junto com a chave; o recibo `synthesizer_provider_confirmed` fica no Registro da privacidade.
  */
-export const synthesizerConsentSetting = (id: string): string => `synthesizer.${id}.consent`;
-
-const storedConsent = z.object({ userId: z.string(), confirmedAt: z.string() });
-export type Consent = z.infer<typeof storedConsent>;
-export const readConsent = (value: unknown): Consent | null => storedConsent.safeParse(value).data ?? null;
+export { readConsent, synthesizerConsentSetting };
+export type Consent = PieceConsent;
 
 export interface SynthesizerView {
   id: string;

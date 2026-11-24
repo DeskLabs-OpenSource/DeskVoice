@@ -11,7 +11,7 @@ export * from "./brain";
 export { loadBrains } from "./brain-load";
 // O motor pipeline fica fora de `engines/` até a fatia 5 (nada o descobre): quem o abre é a sessão da ligação, com as peças.
 export { createPipelineEngine, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_BRAIN_MAX_TOKENS, type PipelineEngine, type PipelineEngineOptions } from "./pipeline-engine";
-export { pipelineChoice, pricePipeline, type PipelineChoice, type UnpricedPiece } from "./pipeline-choice";
+export { pipelineChoice, pricePipeline, readConsent, synthesizerConsentSetting, type PieceConsent, type PipelineChoice, type UnpricedPiece } from "./pipeline-choice";
 export * from "./speech-filter";
 export * from "./analyst";
 export { createSimulatedDecider, neutralAnswers } from "./deciders/simulated";

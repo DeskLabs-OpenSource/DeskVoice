@@ -47,7 +47,9 @@ vi.mock("../../../../server/transcribers", async (importOriginal) => {
     listTranscribers: async () => {
       const all = await original.listTranscribers();
       const simulated = all.find((piece) => piece.id === "simulated");
-      return fakes.on && simulated ? [...all, { ...simulated, id: "de-fora", label: "Transcrição de fora", processingLocation: { kind: "undeclared" as const } }] : all;
+      return fakes.on && simulated
+        ? [...all, { ...simulated, id: "de-fora", label: "Transcrição de fora", processingLocation: { kind: "undeclared" as const } }, { ...simulated, id: "local", label: "Transcrição local" }]
+        : all;
     },
   };
 });
@@ -197,6 +199,37 @@ describe("agents.pipeline: as recusas, 422 com a peça, e nada gravado", () => {
 
   it("5: o transcritor simulado fora do ambiente de teste (a instalação nunca o liga)", async () => {
     await refused("pipeline simulado", CHOICE_SIMULATED, { code: "pipeline_piece_test_only", piece: "transcriber", pieceId: "simulated", says: ["simulated transcriber", "tests"] });
+  });
+
+  it("5b: a voz simulada fora do ambiente de teste, com uma transcrição que não é a simulada (S3b da DESA-435)", async () => {
+    fakes.on = true;
+    const { org, cookie } = await setup("pipeline voz simulada");
+    const choice = { ...CHOICE, transcriber: "local", synthesizer: "simulated", voiceId: "simulated" };
+    const before = await withOrg(panel.app, org, (q) => q.many("select id from agents"));
+    for (const result of [await create(cookie, { pipeline: choice }), await create(cookie, { name: "Outro", pipeline: choice })]) {
+      expect([result.status, result.code, detail(result)]).toEqual([422, "pipeline_piece_test_only", { piece: "synthesizer", pieceId: "simulated" }]);
+      expect(result.message).toContain("simulated voice");
+    }
+    expect(await withOrg(panel.app, org, (q) => q.many("select id from agents"))).toEqual(before);
+    // Nos testes, a mesma escolha passa: a recusa é da voz simulada, e não da transcrição local.
+    panel.deps.simulatedPieces = true;
+    expect((await create(cookie, { pipeline: choice })).status).toBe(200);
+  });
+
+  it("o preço vem da lista do cérebro escolhido, e não da de outro (S14 da DESA-435)", async () => {
+    panel.deps.simulatedPieces = true;
+    const { org, cookie } = await setup("pipeline segundo cerebro");
+    // O modelo só tem preço na lista da Anthropic; a da OpenAI não o tem.
+    await withOrg(panel.app, org, (q) => put(q, org, "brain.anthropic.models", { fetchedAt: "2026-03-01T15:00:00.000Z", models: [{ id: "so-na-anthropic", label: "Só na Anthropic", price: PRICE }] }));
+    const anthropic = { ...CHOICE, brain: "anthropic", model: "so-na-anthropic" };
+    const created = await create(cookie, { pipeline: anthropic });
+    expect(created.status).toBe(200);
+    expect((await stored(org, (created.data as Agent).id))?.pipeline).toEqual(anthropic);
+    // E ao contrário: o modelo com preço na lista da OpenAI não tem preço na Anthropic.
+    const crossed = await create(cookie, { pipeline: { ...CHOICE, brain: "anthropic", model: "com-preco" } });
+    expect([crossed.status, crossed.code, detail(crossed)]).toEqual([422, "pipeline_piece_unpriced", { piece: "brain", pieceId: "anthropic", model: "com-preco" }]);
+    const wrongWay = await create(cookie, { pipeline: { ...CHOICE, model: "so-na-anthropic" } });
+    expect([wrongWay.status, wrongWay.code, detail(wrongWay)]).toEqual([422, "pipeline_piece_unpriced", { piece: "brain", pieceId: "openai", model: "so-na-anthropic" }]);
   });
 
   it("a confirmação apagada depois de gravar: a próxima gravação recusa, e o agente gravado fica como está", async () => {

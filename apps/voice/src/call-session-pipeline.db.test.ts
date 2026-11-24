@@ -6,7 +6,7 @@ import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { encryptSecret, withSystem, type Clock } from "@deskvoice/core";
-import { createPipelineEngine, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH, type Brain, type PipelineTurnLatency, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
+import { createPipelineEngine, synthesizerConsentSetting, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH, type Brain, type PipelineTurnLatency, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
@@ -14,7 +14,7 @@ import openai from "../../../packages/voice-engine/src/brains/openai";
 import { FixedSpeechCache, speechUsageOf } from "../../../packages/voice-engine/src/synthesis";
 import { createSimulatedSynthesizer } from "../../../packages/voice-engine/src/synthesizers/simulated";
 import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "../../../packages/voice-engine/src/transcribers/simulated";
-import { brainKeySetting, brainModelsSetting, startCallSession, type CallSession } from "./call-session";
+import { brainKeySetting, brainModelsSetting, startCallSession, synthesizerKeySetting, type CallSession } from "./call-session";
 import type { TransferOptions, TransferOutcome } from "./transport";
 import { callOf, createAgent, createCall, createOrganization, eventsOf, kindsOf, ledgerOf, manualTransport, pricedSimulatedEngine, secretKey, sessionHarness, type AgentOptions, type ManualTransport, type SessionHarness } from "./testing/db";
 import { waitFor } from "./testing/helpers";
@@ -369,6 +369,37 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
     });
     expect(base.speaks()).toBe(0);
     expect(await piecesLedger(made.callId)).toEqual([]);
+  });
+
+  it("a voz de fora com a chave e sem a confirmação da 9.1: call_refused com pipeline_piece_unconfirmed, e nada abre nem sai (5b-1)", async () => {
+    const outside = (voice: ReturnType<typeof pricedVoice>): SpeechSynthesizer => ({ ...voice.synthesizer, keyless: false, processingLocation: { kind: "undeclared" } });
+    const voice = pricedVoice();
+    const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Oi.", final: true }]);
+    const made = await scene("pipeline-voice-unconfirmed", { engine: "openai-realtime", costCeilingCents: 50 }, { pipeline: PIPELINE, transcriber: ear.transcriber, synthesizer: outside(voice) });
+    // A chave está lá: o que falta é só a confirmação. Fora da forma, também não vale.
+    await putSetting(app, made.organizationId, synthesizerKeySetting("simulated"), encryptSecret("chave-inventada-da-voz", secretKey));
+    await putSetting(app, made.organizationId, synthesizerConsentSetting("simulated"), { userId: "alguém" }, false);
+    expect(await made.start().done).toMatchObject({ status: "refused", endReason: "pipeline_piece_unconfirmed" });
+    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "call_refused")?.payload).toEqual({ reason: "pipeline_piece_unconfirmed", engine: "pipeline", piece: "synthesizer", pieceId: "simulated" });
+    expect(voice.speaks()).toBe(0);
+    expect(ear.sessions).toHaveLength(0);
+    expect(fakeBrain?.requests).toHaveLength(0);
+    expect(await piecesLedger(made.callId)).toEqual([]);
+    const notice = (await notificationsOf(app, made.organizationId)).map((entry) => entry.body).join(" ");
+    expect(notice).toContain("a voz (simulated)");
+    expect(notice).toContain("ninguém confirmou");
+    expect(notice).toContain("Configurações → Voz");
+
+    // Com a confirmação gravada, a mesma escolha abre.
+    const confirmedVoice = pricedVoice();
+    const confirmed = await scene("pipeline-voice-confirmed", { engine: "openai-realtime", costCeilingCents: 50 }, { pipeline: PIPELINE, synthesizer: outside(confirmedVoice) });
+    await putSetting(app, confirmed.organizationId, synthesizerKeySetting("simulated"), encryptSecret("chave-inventada-da-voz", secretKey));
+    await putSetting(app, confirmed.organizationId, synthesizerConsentSetting("simulated"), { userId: "alguém", confirmedAt: "2026-11-24T12:00:00.000Z" }, false);
+    const session = confirmed.start();
+    await answered(confirmed.callId);
+    expect(confirmedVoice.speaks()).toBeGreaterThan(0);
+    confirmed.transport.callerHangup();
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
   });
 
   it("o pior caso do pedido ao cérebro passa do que sobra do teto: o pedido não sai, e a despedida toca pronta, sem síntese nova", async () => {

@@ -55,3 +55,14 @@ export function pricePipeline(
   if (synthesizer.pricingOf(synthesizer.defaultModel) === undefined) return { unpriced: { kind: "synthesizer", id: synthesizer.id, model: synthesizer.defaultModel } };
   return { brainPrice };
 }
+
+/**
+ * A confirmação nomeando o fornecedor (seção 9.1, fatia 1b), como a tela grava em
+ * `synthesizer.<id>.consent`: quem confirmou e quando. Uma forma só, para a tela, para a gravação do
+ * agente (fatia 5a) e para a abertura da ligação (fatia 5b-1). Fora da forma, não há confirmação.
+ */
+const storedConsent = z.object({ userId: z.string(), confirmedAt: z.string() });
+export type PieceConsent = z.infer<typeof storedConsent>;
+export const readConsent = (value: unknown): PieceConsent | null => storedConsent.safeParse(value).data ?? null;
+/** Onde a tela grava a confirmação da voz. Sai junto com a chave. */
+export const synthesizerConsentSetting = (id: string): string => `synthesizer.${id}.consent`;

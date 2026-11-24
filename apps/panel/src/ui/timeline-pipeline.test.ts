@@ -68,6 +68,23 @@ describe("linha do tempo: a falha por peça do motor pipeline (R5, fatia 3b)", (
   });
 });
 
+describe("linha do tempo: a voz sem a confirmação da 9.1 (fatia 5b-1)", () => {
+  it("a recusa diz a peça e onde confirmar, nos três idiomas, e nenhum código cru", () => {
+    const unconfirmed = [
+      { id: "1", kind: "call_refused", at: "2026-11-24T12:00:01.000Z", payload: { reason: "pipeline_piece_unconfirmed", engine: "pipeline", piece: "synthesizer", pieceId: "elevenlabs" } },
+      { id: "2", kind: "call_ended", at: "2026-11-24T12:00:02.000Z", payload: { status: "refused", reason: "pipeline_piece_unconfirmed", costCents: 0, seconds: 0 } },
+    ] as CallEvent[];
+    for (const [locale, dict] of [["pt-BR", ptBR], ["en", en], ["es", es]] as const) {
+      const html = visible(locale, unconfirmed);
+      const p = dict.events.pipeline;
+      expect(html).toContain(dict.reasons.pipeline_piece_unconfirmed);
+      expect(html).toContain(p.line.replace("{piece}", p.pieces.synthesizer ?? "").replace("{id}", "elevenlabs").replace("{reason}", p.unconfirmed));
+      expect(html).not.toContain("pipeline_piece_unconfirmed");
+      expect(html).not.toContain(p.notInstalled);
+    }
+  });
+});
+
 describe("linha do tempo: a latência por turno e a nota da abertura do pipeline (fatia 3c-1)", () => {
   const timed = [
     {

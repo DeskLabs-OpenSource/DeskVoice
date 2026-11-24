@@ -60,9 +60,11 @@ import {
   pipelineChoice,
   pricePipeline,
   readAnalystDecision,
+  readConsent,
   readSpeechDecision,
   speechFilterQuestions,
   speechFilterState,
+  synthesizerConsentSetting,
   type AnalystConfig,
   type AnalystTurn,
   type Brain,
@@ -1259,9 +1261,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   /**
    * `pipeline_piece_unpriced` (3b-2): uma peça do pipeline sem preço conhecido. É motivo da linha do
    * tempo, como o `brain_unmeasured_without_ceiling` da rotina, e **fica fora** de `KEY_CHECK_RESULTS`:
-   * uma chave não fica "sem preço".
+   * uma chave não fica "sem preço". `pipeline_piece_unconfirmed` (seção 9.1, fatia 5b-1): a voz que leva
+   * o texto da ligação para fora do servidor sem a confirmação nomeando o fornecedor. Também fica fora:
+   * a chave pode estar aceita, e o que falta é a confirmação.
    */
-  type EngineRefusal = "engine_not_configured" | "engine_not_responding" | "engine_refused" | "pipeline_piece_unpriced";
+  type EngineRefusal = "engine_not_configured" | "engine_not_responding" | "engine_refused" | "pipeline_piece_unpriced" | "pipeline_piece_unconfirmed";
   type PieceFailure = Exclude<KeyCheckResult, "accepted" | "not_needed">;
   /**
    * A peça do pipeline que impediu a abertura. `detail` é o motivo no vocabulário de `KEY_CHECK_RESULTS`
@@ -1292,8 +1296,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   const PIECE_NAMES: Record<PipelinePieceKind, string> = { transcriber: "a transcrição", brain: "o cérebro", synthesizer: "a voz" };
 
   /** O aviso do painel quando o pipeline não abriu: a peça e o código, e o que conferir. O texto do provedor fica no log. */
-  function pipelineRefusalNotice(agentName: string, piece: PieceRefusal | undefined): string {
+  function pipelineRefusalNotice(agentName: string, piece: PieceRefusal | undefined, refusedFor?: EngineRefusal): string {
     const which = piece ? `${PIECE_NAMES[piece.kind]} (${piece.id})` : "as peças do pipeline";
+    if (piece && refusedFor === "pipeline_piece_unconfirmed") {
+      return `Uma ligação do agente ${agentName} foi recusada porque ${which} leva o texto que o agente fala para fora deste servidor, e ninguém confirmou o envio. Nada foi enviado, e a ligação não começou. Quem ligou ouviu o sinal de falha. Confirme o fornecedor em Configurações → Voz e faça uma chamada de teste.`;
+    }
     if (piece?.unpricedModel !== undefined) {
       return `Uma ligação do agente ${agentName} foi recusada porque o preço de ${piece.unpricedModel}, em ${which}, não é conhecido. Sem preço, o custo da ligação não pode ser medido, e a ligação não começou. Quem ligou ouviu o sinal de falha. Escolha um modelo com preço e faça uma chamada de teste.`;
     }
@@ -1343,6 +1350,14 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (brainKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the brain ${brain.id}`, { kind: "brain", id: brain.id, detail: "rejected" });
     const synthesizerKey = synthesizer.keyless ? "" : await readKey(synthesizerKeySetting(synthesizer.id));
     if (synthesizerKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the synthesizer ${synthesizer.id}`, { kind: "synthesizer", id: synthesizer.id, detail: "rejected" });
+    // A voz que leva o texto da ligação para fora do servidor só abre com a confirmação nomeando o
+    // fornecedor (seção 9.1), além da chave: a mesma regra da gravação do agente (fatia 5a). A
+    // confirmação é lida a cada ligação: apagada depois de o agente salvar, a ligação não abre, e nada
+    // sai para o fornecedor (a recusa vem antes de qualquer peça abrir).
+    if (synthesizer.processingLocation.kind !== "this-server") {
+      const consent = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, synthesizerConsentSetting(synthesizer.id)]);
+      if (readConsent(consent?.value) === null) return refuse("pipeline_piece_unconfirmed", `nobody confirmed that the text of the call goes to ${synthesizer.label}`, { kind: "synthesizer", id: synthesizer.id });
+    }
     // O preço vem só da lista que a tela gravou. Peça sem preço conhecido não abre, com ou sem teto
     // (3b-2): sem teto, a linha do extrato sairia sem custo; com teto, a promessa dele não se cumpriria.
     // A regra é a mesma da gravação do agente (`pricePipeline`, fatia 5a).
@@ -1988,7 +2003,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         tone: true,
         events: [["call_refused", refusalPayload(opened, engineId)]],
         notice: usesPipeline(first)
-          ? pipelineRefusalNotice(first.name, opened.piece)
+          ? pipelineRefusalNotice(first.name, opened.piece, reason)
           : reason === "engine_not_responding"
             ? `Uma ligação do agente ${first.name} foi recusada porque o provedor do motor de voz ${label} não respondeu: ${problem}. Quem ligou ouviu o sinal de falha. Confira a situação do provedor e faça uma chamada de teste.`
             : reason === "engine_refused"

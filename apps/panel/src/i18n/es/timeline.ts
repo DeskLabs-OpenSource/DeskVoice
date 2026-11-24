@@ -429,6 +429,7 @@ const timeline: TimelineDictionary = {
       } as Record<string, string>,
       notInstalled: "la pieza no está instalada en esta versión.",
       unpriced: "el precio de {model} no se conoce. Elige un modelo con precio.",
+      unconfirmed: "el texto de la llamada saldría de este servidor, y nadie confirmó el envío. Confirma el proveedor en Configuración → Voz.",
       unknown: "la pieza falló.",
       turnFailed: "Una pieza falló sin cortar la llamada",
       turnFailedBody: "La conversación siguió. Cuando es el cerebro, quien llamó escuchó un pedido para repetir.",
@@ -494,6 +495,7 @@ const timeline: TimelineDictionary = {
     daily_cap_reached: "Se había alcanzado el tope diario de llamadas de esta línea.",
     attempts_exhausted: "Se había alcanzado el límite de intentos para esta persona.",
     pipeline_piece_unpriced: "Una pieza del pipeline del agente no tiene precio conocido. Sin precio, el costo de la llamada no se puede medir, y la llamada no comenzó.",
+    pipeline_piece_unconfirmed: "Una pieza del pipeline del agente envía datos de la llamada fuera de este servidor, y nadie confirmó el envío. No se envió nada, y la llamada no comenzó.",
   },
 };
 
