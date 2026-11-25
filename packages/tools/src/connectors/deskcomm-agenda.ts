@@ -38,7 +38,10 @@ export interface DeskcommAgendaConfig {
   token: string;
   /** O canal por onde o CRM cria a conversa de um contato novo. Ausente: a regra do CRM escolhe. */
   channelSessionId?: string;
-  /** O prazo de cada pedido ao CRM. Ausente: `DESKCOMM_AGENDA_TIMEOUT_SECONDS`. */
+  /**
+   * O prazo de cada operação (`freeSlots`, `book`, `reschedule`), somados todos os pedidos dela ao CRM.
+   * Ausente: `DESKCOMM_AGENDA_OPERATION_TIMEOUT_SECONDS`.
+   */
   timeoutSeconds?: number;
 }
 
@@ -50,10 +53,12 @@ export interface DeskcommAgendaDeps {
 }
 
 /**
- * O prazo de cada pedido ao CRM. Curto de propósito: quem ligou está esperando na linha, e a fala de
- * espera só cobre alguns segundos. Proposta a confirmar com a latência medida do `/api/mcp`.
+ * O prazo de uma operação inteira, e não de cada pedido. Uma marcação faz de três a seis pedidos em
+ * série (tipos, até três páginas de busca, às vezes a criação do contato, e a marcação), e quem ligou
+ * está esperando na linha depois da fala de espera. Um relógio só por operação: cada pedido herda o
+ * que sobra dele. Proposta a confirmar com a latência medida do `/api/mcp`.
  */
-export const DESKCOMM_AGENDA_TIMEOUT_SECONDS = 8;
+export const DESKCOMM_AGENDA_OPERATION_TIMEOUT_SECONDS = 10;
 
 /** Quantos dias o CRM olha, no máximo, numa consulta (`MAXIMO_DE_DIAS` do CRM). */
 const MAX_DAYS_AHEAD = 62;
@@ -128,13 +133,12 @@ const fold = (text: string): string =>
 
 export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: DeskcommAgendaDeps): AgendaClient {
   const base = new URL(config.baseUrl);
-  const timeoutSeconds = config.timeoutSeconds ?? DESKCOMM_AGENDA_TIMEOUT_SECONDS;
-  const endpoint: McpEndpoint = {
+  const operationMs = (config.timeoutSeconds ?? DESKCOMM_AGENDA_OPERATION_TIMEOUT_SECONDS) * 1000;
+  const endpoint: Omit<McpEndpoint, "timeoutSeconds"> = {
     slug: "deskcomm",
     url: new URL("/api/mcp", base).toString(),
     headerName: "Authorization",
     secret: `Bearer ${config.token}`,
-    timeoutSeconds,
   };
   const net = deps.net ?? {};
   const newKey = deps.newIdempotencyKey ?? randomUUID;
@@ -143,6 +147,18 @@ export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: D
    * "a equipe confirma". Guardado pela ligação, com teto, porque o cliente é da organização.
    */
   const provisionalByCall = new Map<string, boolean>();
+  /** O relógio de uma operação: o instante em que ela acaba, pelo `Clock`. */
+  const startOperation = (): number => deps.clock.now().getTime() + operationMs;
+  /**
+   * O que sobra do prazo da operação, em milissegundos: é o prazo do pedido seguinte. Acabou: o pedido
+   * não sai, e a operação é `unavailable` (nada foi enviado por ele).
+   */
+  const remainingMs = (deadline: number, name: string): number => {
+    const remaining = deadline - deps.clock.now().getTime();
+    if (remaining <= 0) throw new AgendaError("unavailable", `operation deadline passed before ${name}`);
+    return remaining;
+  };
+
   const rememberProvisional = (callId: string, provisional: boolean): void => {
     provisionalByCall.delete(callId);
     provisionalByCall.set(callId, provisional);
@@ -153,8 +169,9 @@ export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: D
    * Chama uma ferramenta e devolve o JSON da resposta. `isError` do MCP e resposta que não é JSON são
    * `unavailable` numa leitura e `uncertain` numa escrita: o CRM pode ter gravado antes de falhar.
    */
-  async function call(name: string, args: Record<string, unknown>, writing = false, headers: Record<string, string> = {}): Promise<unknown> {
-    const result = await callTool(endpoint, name, args, net, headers);
+  async function call(deadline: number, name: string, args: Record<string, unknown>, writing = false, headers: Record<string, string> = {}): Promise<unknown> {
+    const timeoutSeconds = remainingMs(deadline, name) / 1000;
+    const result = await callTool({ ...endpoint, timeoutSeconds }, name, args, net, headers);
     const failed = writing ? "uncertain" : "unavailable";
     if (result.isError) throw new AgendaError(failed, `${name} answered isError`);
     try {
@@ -176,8 +193,8 @@ export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: D
   }
 
   /** O tipo de atendimento pelo nome que o operador escreveu, ou pelo slug. */
-  async function serviceOf(serviceType: string): Promise<{ slug: string; needsConfirmation: boolean }> {
-    const payload = await call("crm_list_event_types", {});
+  async function serviceOf(deadline: number, serviceType: string): Promise<{ slug: string; needsConfirmation: boolean }> {
+    const payload = await call(deadline, "crm_list_event_types", {});
     const parsed = eventTypesShape.safeParse(payload);
     if (!parsed.success) throw new AgendaError("unavailable", "crm_list_event_types answered out of shape");
     const wanted = fold(serviceType);
@@ -190,11 +207,11 @@ export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: D
    * O contato de quem ligou. A busca do CRM casa por trecho, então só vale o telefone igual depois de
    * normalizado. Um contato: esse. Nenhum: cria pelo `open-with-contact`. Mais de um: recusa.
    */
-  async function contactOf(callerE164: string): Promise<string> {
+  async function contactOf(deadline: number, callerE164: string): Promise<string> {
     const matches = new Set<string>();
     let cursor: string | undefined;
     for (let page = 1; ; page += 1) {
-      const payload = await call("crm_search_contacts", { query: callerE164, limit: MAX_SLOTS, ...(cursor !== undefined && { cursor }) });
+      const payload = await call(deadline, "crm_search_contacts", { query: callerE164, limit: MAX_SLOTS, ...(cursor !== undefined && { cursor }) });
       const parsed = contactsShape.safeParse(payload);
       if (!parsed.success) throw new AgendaError("unavailable", "crm_search_contacts answered out of shape");
       for (const contact of parsed.data.contacts) {
@@ -209,10 +226,11 @@ export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: D
     }
     const [only] = matches;
     if (only !== undefined) return only;
-    return createContact(callerE164);
+    return createContact(deadline, callerE164);
   }
 
-  async function createContact(callerE164: string): Promise<string> {
+  async function createContact(deadline: number, callerE164: string): Promise<string> {
+    const timeoutMs = remainingMs(deadline, "open-with-contact");
     const response = await safeFetch(
       new URL("/api/v1/conversations/open-with-contact", base).toString(),
       {
@@ -220,7 +238,7 @@ export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: D
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.token}` },
         body: JSON.stringify({ phone_number: callerE164, ...(config.channelSessionId !== undefined && { channel_session_id: config.channelSessionId }) }),
       },
-      { ...net, timeoutMs: timeoutSeconds * 1000, redirect: "error" },
+      { ...net, timeoutMs, redirect: "error" },
     );
     if (!response.ok) throw new AgendaError("unavailable", `open-with-contact answered HTTP ${response.status}`);
     let payload: unknown;
@@ -236,14 +254,15 @@ export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: D
 
   return {
     async freeSlots(request: FreeSlotsRequest): Promise<AgendaFreeSlots> {
+      const deadline = startOperation();
       return guard(false, async () => {
-        const { slug } = await serviceOf(request.serviceType);
+        const { slug } = await serviceOf(deadline, request.serviceType);
         const from = new Date(request.from).getTime();
         const to = new Date(request.to).getTime();
         // O CRM conta os dias a partir de agora, no fuso da agenda. O cliente nunca monta `dia` a
         // partir de um instante em UTC: pede os dias que cobrem a janela e filtra pelo instante.
         const days = Math.min(MAX_DAYS_AHEAD, Math.max(1, Math.ceil((to - deps.clock.now().getTime()) / DAY_MS)));
-        const payload = await call("crm_find_free_slots", {
+        const payload = await call(deadline, "crm_find_free_slots", {
           event_type_slug: slug,
           dias_a_frente: days,
           limite: MAX_SLOTS,
@@ -266,11 +285,14 @@ export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: D
     },
 
     async book(request: BookRequest): Promise<AgendaAppointment> {
-      const service = await guard(false, () => serviceOf(request.serviceType));
-      const contactId = await guard(false, () => contactOf(request.callerE164));
+      // Um relógio só para a marcação inteira: cada pedido herda o que sobra dele.
+      const deadline = startOperation();
+      const service = await guard(false, () => serviceOf(deadline, request.serviceType));
+      const contactId = await guard(false, () => contactOf(deadline, request.callerE164));
       // Daqui em diante o pedido de escrita sai: falha que não é recusa é resultado incerto.
       return guard(true, async () => {
         const payload = await call(
+          deadline,
           "crm_book_appointment",
           { event_type_slug: service.slug, starts_at: request.startsAt, contact_id: contactId },
           true,
@@ -289,8 +311,9 @@ export function createDeskcommAgendaClient(config: DeskcommAgendaConfig, deps: D
 
     async reschedule(request: RescheduleRequest): Promise<AgendaAppointment> {
       // O CRM não repassa a chave de idempotência na remarcação: ela não é repetida em caso nenhum.
+      const deadline = startOperation();
       return guard(true, async () => {
-        const payload = await call("crm_reschedule_appointment", { appointment_id: request.appointmentId, new_starts_at: request.startsAt }, true);
+        const payload = await call(deadline, "crm_reschedule_appointment", { appointment_id: request.appointmentId, new_starts_at: request.startsAt }, true);
         const parsed = rescheduledShape.safeParse(payload);
         if (!parsed.success) throw refusalOf("crm_reschedule_appointment", payload, true);
         const appointment = parsed.data.compromisso;

@@ -1,3 +1,4 @@
+import type { Clock } from "@deskvoice/core";
 import { describe, expect, it } from "vitest";
 import { fakeLookup } from "../../test/helpers";
 import { drippingPings, fakeMcp, type McpRpc, type Reply } from "../../test/mcp-server";
@@ -87,11 +88,24 @@ function crmFalso(options: CrmFalsoOptions = {}) {
   return { fetch, mcp, aberturas, chamadas };
 }
 
-function cliente(crm: ReturnType<typeof crmFalso>, config: Partial<DeskcommAgendaConfig> = {}) {
+function cliente(crm: ReturnType<typeof crmFalso>, config: Partial<DeskcommAgendaConfig> = {}, clock: Clock = { now: () => AGORA }) {
   return createDeskcommAgendaClient(
     { baseUrl: CRM, token: "dsk_teste", ...config },
-    { clock: { now: () => AGORA }, net: { fetch: crm.fetch, lookup: fakeLookup() }, newIdempotencyKey: () => CHAVE },
+    { clock, net: { fetch: crm.fetch, lookup: fakeLookup() }, newIdempotencyKey: () => CHAVE },
   );
+}
+
+/** Um relógio que só anda quando o teste manda: cada resposta do CRM falso "demora" o que ela quiser. */
+function relogio() {
+  let passed = 0;
+  return {
+    clock: { now: () => new Date(AGORA.getTime() + passed) } satisfies Clock,
+    /** A resposta `answer`, depois de o relógio andar `ms`. */
+    after: (ms: number, answer: unknown) => () => {
+      passed += ms;
+      return answer;
+    },
+  };
 }
 
 const JANELA = { serviceType: "consulta", from: "2026-11-19T00:00:00-03:00", to: "2026-11-20T00:00:00-03:00", callId: "call-1" };
@@ -284,6 +298,83 @@ describe("cliente da agenda do DeskcommCRM", () => {
 
       await rejeita(cliente(crm, { timeoutSeconds: 0.2 }).book(MARCAR), "unavailable");
       expect(crm.chamadas().map(({ tool }) => tool)).not.toContain("crm_book_appointment");
+    });
+  });
+
+  // O prazo é da operação, e não de cada pedido: quem ligou espera a marcação inteira, de três a seis
+  // pedidos em série. Com um prazo por pedido, nenhum destes casos cairia.
+  describe("um relógio por operação", () => {
+    it("a marcação gasta o prazo nos pedidos antes da escrita: a marcação não sai, e é indisponível", async () => {
+      const { clock, after } = relogio();
+      const crm = crmFalso({
+        tools: {
+          crm_list_event_types: after(5000, TIPOS),
+          crm_search_contacts: after(5000, { contacts: [contato(CONTATO, QUEM_LIGOU)], cursor: null, has_more: false }),
+        },
+      });
+
+      await rejeita(cliente(crm, { timeoutSeconds: 10 }, clock).book(MARCAR), "unavailable");
+      expect(crm.chamadas().map(({ tool }) => tool)).toEqual(["crm_list_event_types", "crm_search_contacts"]);
+    });
+
+    it("a busca de contato em várias páginas conta no mesmo relógio", async () => {
+      const { clock, after } = relogio();
+      const pagina = (cursor: string | null) => ({ contacts: [contato(OUTRO_CONTATO, "+14155550999")], cursor, has_more: cursor !== null });
+      let paginas = 0;
+      const crm = crmFalso({
+        tools: {
+          crm_list_event_types: after(3000, TIPOS),
+          crm_search_contacts: () => {
+            paginas += 1;
+            return after(3000, pagina(paginas < 3 ? `c${paginas}` : null))();
+          },
+        },
+      });
+
+      // Tipos (3 s) e duas páginas (6 s): a terceira página ainda sai, com 1 s; depois dela, nada.
+      await rejeita(cliente(crm, { timeoutSeconds: 10 }, clock).book(MARCAR), "unavailable");
+      expect(crm.chamadas().map(({ tool }) => tool)).toEqual(["crm_list_event_types", "crm_search_contacts", "crm_search_contacts", "crm_search_contacts"]);
+      expect(crm.aberturas).toEqual([]);
+    });
+
+    it("a consulta gasta o prazo nos tipos: a consulta dos horários não sai", async () => {
+      const { clock, after } = relogio();
+      const crm = crmFalso({ tools: { crm_list_event_types: after(10_000, TIPOS) } });
+
+      await rejeita(cliente(crm, { timeoutSeconds: 10 }, clock).freeSlots(JANELA), "unavailable");
+      expect(crm.chamadas().map(({ tool }) => tool)).toEqual(["crm_list_event_types"]);
+    });
+
+    it("o pedido de escrita herda só o que sobra: corta no resto, e o resultado é incerto", async () => {
+      // As respostas "demoram" 9,8 s no relógio falso: sobram 200 ms para a marcação, e quem corta
+      // nela é o prazo do próprio pedido.
+      const { clock, after } = relogio();
+      const crm = crmFalso({
+        tools: {
+          crm_list_event_types: after(4900, TIPOS),
+          crm_search_contacts: after(4900, { contacts: [contato(CONTATO, QUEM_LIGOU)], cursor: null, has_more: false }),
+        },
+        // Ping devagar: o teto de bytes da resposta não corta antes do prazo.
+        quebra: (tool, signal) => (tool === "crm_book_appointment" ? drippingPings(signal, 100) : undefined),
+      });
+
+      const started = performance.now();
+      await rejeita(cliente(crm, { timeoutSeconds: 10 }, clock).book(MARCAR), "uncertain");
+      // Com o prazo inteiro por pedido, a marcação esperaria 10 s.
+      expect(performance.now() - started).toBeLessThan(3000);
+      expect(crm.chamadas().filter(({ tool }) => tool === "crm_book_appointment")).toHaveLength(1);
+    });
+
+    it("dentro do prazo, a marcação sai normalmente", async () => {
+      const { clock, after } = relogio();
+      const crm = crmFalso({
+        tools: {
+          crm_list_event_types: after(3000, TIPOS),
+          crm_search_contacts: after(3000, { contacts: [contato(CONTATO, QUEM_LIGOU)], cursor: null, has_more: false }),
+        },
+      });
+
+      expect(await cliente(crm, { timeoutSeconds: 10 }, clock).book(MARCAR)).toMatchObject({ id: COMPROMISSO });
     });
   });
 
