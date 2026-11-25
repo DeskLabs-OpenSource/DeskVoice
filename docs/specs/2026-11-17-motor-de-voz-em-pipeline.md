@@ -435,7 +435,7 @@ bancada.**
     interrompe. Lista inicial:
     - pt-BR: "aham", "uhum", "hum", "hã", "sim", "é", "tá", "certo", "ok", "isso", "entendi", "sei";
     - en: "uh-huh", "mhm", "hmm", "yeah", "yes", "ok", "okay", "right", "sure", "got it", "i see";
-    - es: "ajá", "mhm", "sí", "vale", "claro", "ok", "vale vale", "entiendo", "ya".
+    - es: "ajá", "mhm", "sí", "vale", "claro", "ok", "entiendo", "ya".
     "Não", "no", "espera" e "wait" nunca entram na lista. Quando a parcial cresce ("sim, mas…"), o
     corte acontece na primeira palavra fora da lista.
   - **R-lista + mínimo:** a R-lista e, além dela, o corte só acontece com pelo menos 2 palavras fora
