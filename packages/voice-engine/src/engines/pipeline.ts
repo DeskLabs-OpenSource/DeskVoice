@@ -208,13 +208,18 @@ const readyUtterance = (audio: Buffer): Utterance => ({
  * é `\p{L}`, com o acento à parte (`\p{M}`) e o número; o hífen e o apóstrofo entre letras
  * ("guarda-chuva", "d'água") são da palavra. Espaço e pontuação na fronteira já a separam, e a
  * pontuação que fecha a frase de antes (vírgula, ponto, travessão) não abre o resto; a que abre
- * (aspas, "¿", "¡") fica.
+ * (aspas, "¿", "¡") fica. Se o final só completa a palavra cortada, com ou sem pontuação depois
+ * ("Quero marca" e "Quero marcar."), o resto é vazio: não sai turno novo.
  */
 export const restAfterPartial = (said: string, text: string): string => {
   const after = text.slice(said.length);
   const cut = WORD_END.test(said) && WORD_START.test(after);
   const from = cut ? said.length - (WORD_TAIL.exec(said)?.[0].replace(LEADING_JOINERS, "").length ?? 0) : said.length;
-  return text.slice(from).replace(BOUNDARY_PUNCTUATION, "").trim();
+  const rest = text.slice(from);
+  // O final que só completa a palavra cortada ("Quero marca" e "Quero marcar.") não diz nada novo: o
+  // cérebro já respondeu ao parcial, e a palavra sozinha não vira turno.
+  if (cut && ONLY_PUNCTUATION.test(rest.slice(WORD_HEAD.exec(rest)?.[0].length ?? 0))) return "";
+  return rest.replace(BOUNDARY_PUNCTUATION, "").trim();
 };
 /** A palavra que termina em `said`: letra, acento ou número, ou um hífen ou apóstrofo logo depois de um deles. */
 const WORD_END = /[\p{L}\p{M}\p{N}]['’-]?$/u;
@@ -222,6 +227,10 @@ const WORD_END = /[\p{L}\p{M}\p{N}]['’-]?$/u;
 const WORD_START = /^['’-]?[\p{L}\p{M}\p{N}]/u;
 const WORD_TAIL = /[\p{L}\p{M}\p{N}'’-]+$/u;
 const LEADING_JOINERS = /^['’-]+/u;
+/** A palavra no começo do resto, com o hífen e o apóstrofo entre letras. */
+const WORD_HEAD = /^[\p{L}\p{M}\p{N}'’-]+/u;
+/** Nada além de espaço e pontuação. */
+const ONLY_PUNCTUATION = /^[\s\p{P}]*$/u;
 const BOUNDARY_PUNCTUATION = /^[\s,;:.!?…\-–—]+/u;
 
 /** Os primeiros `chars` pontos de código de `text`, como a voz conta (`countCharacters`). */

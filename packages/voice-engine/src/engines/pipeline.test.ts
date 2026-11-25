@@ -432,12 +432,12 @@ describe("motor pipeline: say, guide e o fim do turno pela guarda", () => {
   it("`restAfterPartial`: o resto começa numa fronteira de palavra, com acento, número, hífen e apóstrofo", () => {
     // Cortado no meio da palavra: volta ao começo dela.
     expect(restAfterPartial("Quero falar co", "Quero falar com a Ana.")).toBe("com a Ana.");
-    expect(restAfterPartial("Quero falar com a Jo", "Quero falar com a Joana.")).toBe("Joana.");
+    expect(restAfterPartial("Quero falar com a Jo", "Quero falar com a Joana, por favor.")).toBe("Joana, por favor.");
     expect(restAfterPartial("É sobre a ligaç", "É sobre a ligação de ontem.")).toBe("ligação de ontem.");
     expect(restAfterPartial("O pedido 12", "O pedido 1234 atrasou.")).toBe("1234 atrasou.");
-    expect(restAfterPartial("Esqueci o guarda", "Esqueci o guarda-chuva.")).toBe("guarda-chuva.");
-    expect(restAfterPartial("Esqueci o guarda-", "Esqueci o guarda-chuva.")).toBe("guarda-chuva.");
-    expect(restAfterPartial("Um copo d", "Um copo d'água.")).toBe("d'água.");
+    expect(restAfterPartial("Esqueci o guarda", "Esqueci o guarda-chuva aqui.")).toBe("guarda-chuva aqui.");
+    expect(restAfterPartial("Esqueci o guarda-", "Esqueci o guarda-chuva aqui.")).toBe("guarda-chuva aqui.");
+    expect(restAfterPartial("Um copo d", "Um copo d'água gelada.")).toBe("d'água gelada.");
     // O acento que vem à parte (NFD) é da letra de antes.
     expect(restAfterPartial("Falar com o Jose", "Falar com o Jose\u0301 agora.")).toBe("Jose\u0301 agora.");
     // Cortado numa fronteira: espaço ou pontuação dos dois lados.
@@ -447,6 +447,35 @@ describe("motor pipeline: say, guide e o fim do turno pela guarda", () => {
     expect(restAfterPartial("Sim.", "Sim. Pode ser.")).toBe("Pode ser.");
     expect(restAfterPartial("Sim -", "Sim - claro.")).toBe("claro.");
     expect(restAfterPartial("Quero falar com", "Quero falar com")).toBe("");
+  });
+
+  it("`restAfterPartial`: o final que só completa a palavra cortada não vira turno, com ou sem pontuação", () => {
+    expect(restAfterPartial("Quero marca", "Quero marcar.")).toBe("");
+    expect(restAfterPartial("Quero com", "Quero comprar.")).toBe("");
+    expect(restAfterPartial("Quero marca", "Quero marcar")).toBe("");
+    expect(restAfterPartial("Quero marca", "Quero marcar?!")).toBe("");
+    expect(restAfterPartial("Quero falar com a Jo", "Quero falar com a Joana.")).toBe("");
+    expect(restAfterPartial("Esqueci o guarda", "Esqueci o guarda-chuva.")).toBe("");
+    expect(restAfterPartial("Um copo d", "Um copo d'água…")).toBe("");
+    expect(restAfterPartial("Falar com o Jose", "Falar com o Jose\u0301.")).toBe("");
+    // Mais uma palavra depois da completada já é fala nova.
+    expect(restAfterPartial("Quero marca", "Quero marcar hoje.")).toBe("marcar hoje.");
+  });
+
+  it("o final que só completa a palavra que `closeCallerTurn` cortou não vira um segundo turno", async () => {
+    brain = await startFakeBrain();
+    const voice = countedVoice();
+    brain.reply([text("Pois não."), usage(10, 2)]);
+    const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, text: "Quero marca" }, { afterAudioMs: 40, text: "Quero marcar.", final: true }]));
+    speak(session, 20);
+    await until(() => log.events.includes("activity"), "o parcial");
+    expect(session.closeCallerTurn()).toBe(true);
+    await until(() => log.events.includes("agent: Pois não."), "a resposta ao parcial");
+    speak(session, 20);
+    for (let turn = 0; turn < 50; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(brain.requests).toHaveLength(1);
+    expect(log.events.filter((event) => event.startsWith("user:"))).toEqual(["user: Quero marca"]);
+    await session.close();
   });
 });
 
