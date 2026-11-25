@@ -3,7 +3,7 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import openai from "../brains/openai";
-import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_MAX_TOKENS, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH } from "./pipeline";
+import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_MAX_TOKENS, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH, TRANSCRIBER_CLOSE_MS } from "./pipeline";
 import { FixedSpeechCache } from "../synthesis";
 import { createSimulatedSynthesizer, toneFor } from "../synthesizers/simulated";
 import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "../transcribers/simulated";
@@ -381,11 +381,11 @@ describe("motor pipeline: say, guide e o fim do turno pela guarda", () => {
     await session.close();
   });
 
-  it("`closeCallerTurn` usa o último parcial quando a peça não manda o final, e o final atrasado não vira outro turno", async () => {
+  it("`closeCallerTurn` usa o último parcial quando a peça não manda o final, e o final atrasado igual a ele não vira outro turno", async () => {
     brain = await startFakeBrain();
     const voice = countedVoice();
     brain.reply([text("Pois não."), usage(10, 2)]);
-    const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, text: "Quero falar com" }, { afterAudioMs: 40, text: "Quero falar com a Ana.", final: true }]));
+    const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, text: "Quero falar com" }, { afterAudioMs: 40, text: "Quero falar com", final: true }]));
     expect(session.closeCallerTurn()).toBe(false);
     speak(session, 20);
     await until(() => log.events.includes("activity"), "o parcial");
@@ -395,6 +395,22 @@ describe("motor pipeline: say, guide e o fim do turno pela guarda", () => {
     for (let turn = 0; turn < 50; turn++) await new Promise((resolve) => setImmediate(resolve));
     expect(brain.requests).toHaveLength(1);
     expect(log.events.filter((event) => event.startsWith("user:"))).toEqual(["user: Quero falar com"]);
+    await session.close();
+  });
+
+  it("o final atrasado que estende o parcial que `closeCallerTurn` usou: só o resto vira turno, e nada se perde", async () => {
+    brain = await startFakeBrain();
+    const voice = countedVoice();
+    brain.reply([text("Pois não."), usage(10, 2)], [text("Vou chamar a Ana."), usage(12, 3)]);
+    const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, text: "Quero falar com" }, { afterAudioMs: 40, text: "Quero falar com a Ana.", final: true }]));
+    speak(session, 20);
+    await until(() => log.events.includes("activity"), "o parcial");
+    expect(session.closeCallerTurn()).toBe(true);
+    speak(session, 20);
+    await until(() => log.events.includes("agent: Vou chamar a Ana."), "a resposta ao resto");
+    expect(log.events.filter((event) => event.startsWith("user:"))).toEqual(["user: Quero falar com", "user: a Ana."]);
+    expect(brain.requests).toHaveLength(2);
+    expect(brain.requests[1]?.messages.filter((message) => message.role === "user").map((message) => message.content)).toEqual(["Quero falar com", "a Ana."]);
     await session.close();
   });
 });
@@ -539,6 +555,67 @@ describe("motor pipeline: a falha (3.4) nunca deixa a sessão muda", () => {
     expect(log.events.filter((event) => event !== "activity")).toEqual(["turn ended (transcript)", "user: Oi.", `agent: ${PIPELINE_FAILURE_SPEECH}`, "error synthesizer no_credit fatal", "closed failed"]);
     expect(log.audioBytes()).toBe(toneFor([...PIPELINE_FAILURE_SPEECH].length).length);
     expect(log.errors[0]?.message).not.toContain("chave");
+  });
+
+  it("a voz que cai: o consumo da transcrição sai antes do `closed`, mesmo quando o close() da peça só entrega depois", async () => {
+    brain = await startFakeBrain();
+    brain.reply([text("Oi!"), usage(10, 1)]);
+    const base = createSimulatedSynthesizer();
+    let opened = 0;
+    const breaking: SpeechSynthesizer = {
+      ...base,
+      async speak(c, k, o) {
+        opened += 1;
+        if (opened === 1) return base.speak(c, k, o); // a fala de falha, preparada no connect
+        throw new SynthesizerOpenError("no_credit", "elevenlabs: quota_exceeded");
+      },
+    };
+    // A peça de verdade fecha pela rede: o último consumo chega depois de o close() ser chamado.
+    const transcriber = createSimulatedTranscriber({
+      script: [{ afterAudioMs: 20, text: "Oi.", final: true }],
+      onSession: (session) => {
+        const close = session.close.bind(session);
+        session.close = async () => {
+          await new Promise((resolve) => setImmediate(resolve));
+          await close();
+        };
+      },
+    });
+    const { session, log } = await open(piecesOf(breaking, [], { transcriber: { piece: transcriber, apiKey: "" } }));
+    const order: string[] = [];
+    session.on("pieceUsage", (line) => order.push(`usage ${line.piece}`));
+    session.on("closed", (reason) => order.push(`closed ${reason}`));
+    speak(session, 20);
+    await until(() => log.events.includes("closed failed"), "o fim");
+    expect(order.filter((step) => step === "usage transcriber" || step.startsWith("closed"))).toEqual(["usage transcriber", "closed failed"]);
+    expect(log.pieceUsage.find((line) => line.piece === "transcriber")?.usage.seconds).toBeCloseTo(0.02);
+  });
+
+  it("a voz que cai e a transcrição que não fecha: o `closed` sai no prazo, e a sessão não fica presa", async () => {
+    brain = await startFakeBrain();
+    brain.reply([text("Oi!"), usage(10, 1)]);
+    const base = createSimulatedSynthesizer();
+    let opened = 0;
+    const breaking: SpeechSynthesizer = {
+      ...base,
+      async speak(c, k, o) {
+        opened += 1;
+        if (opened === 1) return base.speak(c, k, o);
+        throw new SynthesizerOpenError("no_credit", "elevenlabs: quota_exceeded");
+      },
+    };
+    const transcriber = createSimulatedTranscriber({
+      script: [{ afterAudioMs: 20, text: "Oi.", final: true }],
+      onSession: (session) => void (session.close = () => new Promise<void>(() => undefined)),
+    });
+    const { session, log } = await open(piecesOf(breaking, [], { transcriber: { piece: transcriber, apiKey: "" } }));
+    speak(session, 20);
+    await until(() => log.events.includes("error synthesizer no_credit fatal"), "a falha");
+    // O `closed` espera a transcrição fechar, e ela não fecha: só o prazo solta.
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(log.events).not.toContain("closed failed");
+    await new Promise((resolve) => setTimeout(resolve, TRANSCRIBER_CLOSE_MS + 200));
+    expect(log.events).toContain("closed failed");
   });
 
   it("a voz que não abre no meio da ligação também toca a fala de falha", async () => {
