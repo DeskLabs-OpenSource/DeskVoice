@@ -74,6 +74,8 @@ export const PIPELINE_FAILURE_SPEECH = "Estou com um problema técnico e não vo
 export const PIPELINE_BRAIN_RETRY_SPEECH = "Desculpe, não consegui responder agora. Pode repetir, por favor?";
 /** Prazo de um pedido ao cérebro. Menor que o `inactivity_timeout` de 20 s da ElevenLabs, de propósito. */
 export const BRAIN_TIMEOUT_MS = 15_000;
+/** Prazo para a transcrição fechar (e entregar o último consumo) quando outra peça derrubou a sessão. */
+export const TRANSCRIBER_CLOSE_MS = 2_000;
 /** Falhas seguidas do cérebro que encerram a ligação (seção 3.4). */
 const BRAIN_FAILURES_TO_GIVE_UP = 2;
 
@@ -291,8 +293,17 @@ class PipelineSession implements VoiceSession {
     this.lastHeard = "";
     const forced = this.forcedPartial;
     this.forcedPartial = undefined;
-    // O `final` do trecho que a guarda já fechou não vira um segundo turno.
-    if (text === "" || (forced !== undefined && text.startsWith(forced.trim()))) return;
+    if (text === "") return;
+    // O `final` do trecho que a guarda já fechou não vira um segundo turno. Se ele estende o parcial
+    // usado, só o resto vira turno: o que quem ligou disse depois do parcial não se perde.
+    const said = forced?.trim();
+    if (said !== undefined && text.startsWith(said)) {
+      const rest = text.slice(said.length).trim();
+      if (rest === "") return;
+      this.emitter.emit("callerTurnEnded", { source: "transcript" });
+      this.userTurn(rest);
+      return;
+    }
     this.emitter.emit("callerTurnEnded", { source: "transcript" });
     this.userTurn(piece.text);
   }
@@ -481,9 +492,21 @@ class PipelineSession implements VoiceSession {
       this.emitter.emit("audio", speech);
     }
     this.emitter.emit("error", new PipelinePieceError(piece, id, reason, true, message));
-    // O ouvido fecha antes do `closed`, para o consumo dele ainda entrar na ligação.
-    if (piece !== "transcriber") void this.transcription.close().catch(() => undefined);
-    this.emitter.emit("closed", "failed");
+    if (piece === "transcriber") return void this.emitter.emit("closed", "failed");
+    // O ouvido fecha antes do `closed`, para o consumo dele ainda entrar na ligação, mesmo quando o
+    // `close()` da peça só entrega o consumo depois. Com prazo: a peça que não fecha não segura o fim.
+    let cancel: () => void = () => undefined;
+    const deadline = new Promise<void>((resolve) => {
+      const schedule = this.options.schedule ?? ((fn: () => void, ms: number) => {
+        const timer = setTimeout(fn, ms);
+        return () => clearTimeout(timer);
+      });
+      cancel = schedule(resolve, TRANSCRIBER_CLOSE_MS);
+    });
+    void Promise.race([this.transcription.close().catch(() => undefined), deadline]).then(() => {
+      cancel();
+      this.emitter.emit("closed", "failed");
+    });
   }
 
   // ---- 3.3: o custo por peça ----
