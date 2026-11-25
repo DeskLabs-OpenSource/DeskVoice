@@ -422,6 +422,45 @@ O transcritor real escolhido pela R12 (fatia 3 da R12) entra no pipeline sem mud
 motor: é uma peça da pasta. A medida da seção 3.5 na chamada real (30 turnos, uma ferramenta) fica
 registrada no PR e nesta seção. É o aceite da frente.
 
+**Pendência antes da ligação real: a concordância não pode cortar o agente** (nota da revisora no
+#573, comentário 7171910478, 25/11; registrada pelo board na DESA-397). Hoje, pela fatia 4, qualquer
+texto novo de quem ligou corta a resposta do cérebro, inclusive "aham", "sim" e "tá", ditos só para
+mostrar que está ouvindo. O modo Barulhento não ajuda: lá só texto interrompe (lição da R11), e a
+concordância chega como texto. **A fatia 6 não fica pronta sem uma regra para isso, medida na
+bancada.**
+
+- **As regras candidatas** (não decididas; a medida escolhe):
+  - **R-lista:** enquanto a resposta do cérebro sai, um trecho (parcial ou final) cujo texto,
+    em minúsculas e sem pontuação, só tem palavras de concordância do idioma do agente não
+    interrompe. Lista inicial:
+    - pt-BR: "aham", "uhum", "hum", "hã", "sim", "é", "tá", "certo", "ok", "isso", "entendi", "sei";
+    - en: "uh-huh", "mhm", "hmm", "yeah", "yes", "ok", "okay", "right", "sure", "got it", "i see";
+    - es: "ajá", "mhm", "sí", "vale", "claro", "ok", "vale vale", "entiendo", "ya".
+    "Não", "no", "espera" e "wait" nunca entram na lista. Quando a parcial cresce ("sim, mas…"), o
+    corte acontece na primeira palavra fora da lista.
+  - **R-lista + mínimo:** a R-lista e, além dela, o corte só acontece com pelo menos 2 palavras fora
+    da lista, ou com 1 palavra fora da lista e 600 ms de fala desde o início do trecho.
+  - A concordância que não corta entra na transcrição e vai ao cérebro no próximo pedido, mas não
+    abre pedido sozinha.
+- **A medida que decide**, na bancada da R12, pela linha estreita (8 kHz) e pelo transcritor da
+  fatia 6:
+  - **Corpus, por idioma (pt-BR, en, es):** 40 turnos com concordância falada no meio de uma resposta
+    do agente de pelo menos 4 s (as palavras da lista, sozinhas e repetidas), e 40 turnos com
+    interrupção de verdade ("não, espera", "mas eu queria outra coisa", uma pergunta nova, um
+    número). A mesma gravação roda sem regra (o de hoje) e com cada regra.
+  - **Números, por idioma e por regra:**
+    - falsos cortes: concordâncias que cortaram, sobre 40;
+    - cortes perdidos: interrupções de verdade que não cortaram, sobre 40;
+    - atraso acrescentado: p50 e p95 de (tempo até o `interrupted` com a regra) menos (tempo sem
+      regra), no mesmo áudio.
+  - **Régua proposta:** falsos cortes ≤ 2 em 40, nenhum corte perdido, e atraso acrescentado no p95
+    ≤ 300 ms, nos três idiomas. Vence a regra mais simples que passa. Se nenhuma passa, a fatia 6
+    para e volta ao Arquiteto com a tabela.
+  - **Os testes da regra escolhida**, sem bancada: a lista nos três idiomas; "não" corta; "sim, mas"
+    corta na palavra "mas"; a concordância vai à transcrição e não abre pedido; a fala pronta e o
+    `say` continuam sem corte.
+  - A tabela vai ao PR da fatia 6 e a esta seção, com o comando e a data.
+
 ## 5. O que espera a R12
 
 - **O contrato `StreamingTranscriber` na `main`: não espera.** A DESA-398 decidiu que as fatias 3 a 5
@@ -579,6 +618,9 @@ A bancada (fatia 1a) usa só texto sintético, sem dado de ninguém.
 - Se o `/chat/completions` com `stream: true` + `tools` do OpenRouter e do DeepSeek se comporta como o
   da OpenAI. A documentação da R4 foi lida para o `completeJson`, não para streaming.
 - O custo por minuto de conversa no pipeline. A fatia 6 calcula a partir do extrato real.
+- Quantas concordâncias cortam o agente hoje e quanto atraso a regra da fatia 6 acrescenta: a
+  régua de 2 em 40 e de 300 ms é proposta minha, sem medida. A bancada fala com áudio sintético; se
+  a concordância sintética se transcreve como a falada, não foi medido.
 - O país do processamento da ElevenLabs: a política diz só onde guarda (EUA). Os Termos de Serviço,
   o DPA e a página de segurança não foram lidos; algum deles pode dar prazo ou país.
 - Se as gerações do WebSocket `stream-input` aparecem no histórico da conta (seria a base da opção
