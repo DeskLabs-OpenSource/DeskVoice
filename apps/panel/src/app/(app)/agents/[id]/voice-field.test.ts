@@ -10,7 +10,7 @@ import en from "../../../../i18n/en/agents";
 import es from "../../../../i18n/es/agents";
 import ptBR, { type AgentsDictionary } from "../../../../i18n/pt-BR/agents";
 import type { Engine } from "../../../../ui/types";
-import { VoiceField } from "./voice-field";
+import { VoiceField, engineNameBeside } from "./voice-field";
 import { sampleFor, selectedVoice } from "./voice-sample";
 
 const engineWith = (over: Partial<Engine>): Engine => ({
@@ -54,11 +54,17 @@ describe("VoiceField", () => {
   });
 
   it("o grupo das vozes leva o nome do provedor tirado de `provider`, e o motor", () => {
-    expect(render(ptBR, engineWith({}))).toContain('<optgroup label="Google · Gemini Live (Google)">');
+    // O provedor não se repete: "Google · Gemini Live", e não "Google · Gemini Live (Google)".
+    expect(render(ptBR, engineWith({}))).toContain('<optgroup label="Google · Gemini Live">');
+    expect(render(ptBR, engineWith({}))).not.toContain("(Google)");
     expect(render(ptBR, engineWith({ id: "openai-realtime", label: "OpenAI Realtime", provider: "openai" }))).toContain('<optgroup label="OpenAI · OpenAI Realtime">');
     // Provedor que o dicionário não conhece sai como veio: nunca some.
     expect(render(en, engineWith({ provider: "acme", label: "Acme Voice" }))).toContain('<optgroup label="acme · Acme Voice">');
-    expect(render(es, engineWith({}))).toContain(escaped("Las voces del proveedor Google, por el motor Gemini Live (Google)."));
+    expect(render(es, engineWith({}))).toContain(escaped("Las voces del proveedor Google, por el motor Gemini Live."));
+    // Só o provedor repetido no fim sai: o parêntese que não é o provedor fica.
+    expect(engineNameBeside("Gemini Live (Google)", "Google")).toBe("Gemini Live");
+    expect(engineNameBeside("Gemini Live (beta)", "Google")).toBe("Gemini Live (beta)");
+    expect(engineNameBeside("OpenAI Realtime", "OpenAI")).toBe("OpenAI Realtime");
   });
 
   it("com amostra: o botão liga e o áudio não baixa nada antes do clique", () => {

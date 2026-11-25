@@ -186,6 +186,9 @@ describe("com o transcritor simulado", { timeout: 120_000 }, () => {
     const { callId, transport, start } = await scene("transcriber-hangs", { engine: "manual" }, { manual, transcribers: [hanging] });
     const session = start("simulated");
     await answered(callId);
+    // O aviso de gravação é gravado logo depois do atendimento, sem ordem garantida com a leitura:
+    // espera-se por ele, e só então a lista inteira é conferida.
+    await waitFor(async () => (await kindsOf(app, callId)).includes("recording_notice"), "the recording notice");
     expect(await kindsOf(app, callId)).toEqual(["call_started", "call_answered", "recording_notice"]);
     transport.callerAudio(100);
     expect(manual.audioBytes).toBe(5 * 320);
