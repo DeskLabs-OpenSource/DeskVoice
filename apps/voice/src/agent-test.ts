@@ -19,6 +19,7 @@ import {
   type Clock,
   type Db,
   type HappenedTurn,
+  type OrgQuery,
   type ToolExpectation,
   type TurnVerdict,
 } from "@deskvoice/core";
@@ -94,6 +95,60 @@ interface TestRow extends SessionAgent {
 
 type Refusal = { code: AgentTestRefusalCode; message: string };
 
+/** O que a montagem da sessão do teste lê do agente. */
+interface AssembledAgent extends SessionAgent {
+  instructions: string;
+  greeting: string | null;
+  agent_tools: string[];
+}
+
+/**
+ * A sessão do teste e o retrato dela (`configHash`). A rodada e o estado que a tela lê
+ * (`agentTestState`) montam por aqui, e então o retrato de agora é o mesmo que a próxima rodada grava.
+ *
+ * É a mesma montagem da ligação recebida (`session-config.ts`), em texto: as mesmas instruções, com
+ * os destinos da passagem; as mesmas ferramentas, `transfer_to_agent` inclusive; e a mesma abertura,
+ * com o aviso de gravação na frente da saudação. A memória do número não entra: teste não tem número.
+ * O teste não troca de agente: o pedido de passagem é respondido pelo `result` escrito, como os outros.
+ */
+async function assemble(
+  q: OrgQuery,
+  deps: Pick<AgentTestDeps, "tools" | "log">,
+  organizationId: string,
+  agentId: string,
+  agent: AssembledAgent,
+  engine: VoiceEngine,
+  instructionsOverride: string | undefined,
+): Promise<{ config: VoiceSessionConfig; hash: string }> {
+  const { targets } = await handoffTargetsOf(q, agentId);
+  const instructions = composeInstructions(instructionsOverride ?? agent.instructions, targets);
+  const enabled = enabledToolsFor({ installed: deps.tools, names: agent.agent_tools, targets, canTransfer: true, returned: false, log: deps.log ?? silentLogger });
+  const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);
+  const config = sessionConfig(agent, instructions, inboundOpening(recordingNoticeOf(notice?.value), agent.greeting), enabled, "text");
+  return { config, hash: configHash({ instructions, tools: config.tools, engine: engine.id, model: null, language: agent.language }) };
+}
+
+/** O que a tela dos testes lê do processo de voz (fatia 7c). */
+export type AgentTestState = { textMode: boolean; configHash: string | null } | { code: "agent_not_found"; message: string };
+
+/**
+ * Se o motor do agente roda teste e o retrato da configuração de agora. Só lê: não grava rodada,
+ * não abre o motor e não lê a chave. Motor sem `textMode` não tem retrato (`configHash: null`).
+ */
+export async function agentTestState(deps: Pick<AgentTestDeps, "db" | "engines" | "tools" | "log">, input: { organizationId: string; agentId: string }): Promise<AgentTestState> {
+  return withOrg(deps.db, input.organizationId, async (q) => {
+    const agent = await q.one<AssembledAgent & { engine: string }>(
+      `select instructions, greeting, engine, language, tools as agent_tools, voice_id, vocabulary, listening_environment from agents where id = $1`,
+      [input.agentId],
+    );
+    if (!agent) return { code: "agent_not_found", message: "This agent does not exist in this organization." };
+    const engine = deps.engines.get(agent.engine);
+    if (!engine?.textMode) return { textMode: false, configHash: null };
+    const { hash } = await assemble(q, deps, input.organizationId, input.agentId, agent, engine, undefined);
+    return { textMode: true, configHash: hash };
+  });
+}
+
 /**
  * Começa uma rodada do teste e devolve assim que ela está gravada como `running`; a conversa segue
  * em segundo plano (`done`). As recusas de antes de começar não criam rodada.
@@ -152,16 +207,7 @@ export async function startAgentTest(
       }
     }
 
-    // A mesma montagem da ligação recebida (`session-config.ts`), em texto: as mesmas instruções, com
-    // os destinos da passagem; as mesmas ferramentas, `transfer_to_agent` inclusive; e a mesma abertura,
-    // com o aviso de gravação na frente da saudação. A memória do número não entra: teste não tem número.
-    // O teste não troca de agente: o pedido de passagem é respondido pelo `result` escrito, como os outros.
-    const { targets } = await handoffTargetsOf(q, row.agent_id);
-    const instructions = composeInstructions(overrides.instructions ?? row.instructions, targets);
-    const enabled = enabledToolsFor({ installed: deps.tools, names: row.agent_tools, targets, canTransfer: true, returned: false, log });
-    const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);
-    const config = sessionConfig(row, instructions, inboundOpening(recordingNoticeOf(notice?.value), row.greeting), enabled, "text");
-    const hash = configHash({ instructions, tools: config.tools, engine: engine.id, model: null, language: row.language });
+    const { config, hash } = await assemble(q, deps, organizationId, row.agent_id, row, engine, overrides.instructions);
 
     const run = await q.one<{ id: string }>(
       "insert into agent_test_runs (organization_id, test_id, status, engine, model, config_hash, requested_by, started_at) values ($1, $2, 'running', $3, null, $4, $5, $6) returning id",
