@@ -725,6 +725,22 @@ export function Timeline({
         const said = p.onTime === true ? fill(e.caller_speech_read.finished, { confidence: confidence(finished) }) : code === "late" ? e.caller_speech_read.late : fill(e.caller_speech_read.failed, { reason: known });
         return { ...base, tone: "neutral", icon: SealQuestion, body: <Quiet>{said}</Quiet> };
       }
+      case "transcriber_failed": {
+        // A peça de transcrição ficou de fora e a chamada seguiu com o motor. Só o código do motivo
+        // chega aqui: o texto do provedor fica no log do processo de voz.
+        const said = e.transcriber_failed.reason[text(p.reason)] ?? e.transcriber_failed.unknown;
+        return {
+          ...base,
+          tone: "fail",
+          icon: WarningOctagon,
+          body: (
+            <Card tone="fail" title={e.transcriber_failed.title}>
+              <p className="text-muted">{said} {e.transcriber_failed.continued}</p>
+              {text(p.transcriber) ? <p className="data text-[0.87rem] text-muted">{text(p.transcriber)}</p> : null}
+            </Card>
+          ),
+        };
+      }
       default:
         return { ...base, tone: "neutral", body: <Quiet>{e.unknown} <span className="data">{event.kind}</span></Quiet> };
     }

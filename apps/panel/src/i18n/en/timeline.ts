@@ -414,6 +414,21 @@ const timeline: TimelineDictionary = {
         unexpected_response: "the provider answered in an unexpected form",
       },
     },
+    transcriber_failed: {
+      title: "Live transcription was left out",
+      reason: {
+        rejected: "The transcription piece key was refused, or is not saved.",
+        model_unavailable: "The transcription piece key has no access to the model it uses.",
+        no_credit: "The transcription service says the account is out of credit or reached its spending limit.",
+        region_unavailable: "The transcription service does not serve the country or region of this server.",
+        rate_limited: "The transcription service asked to wait (account request limit).",
+        unreachable: "The transcription service did not answer in time, or is down.",
+        unexpected_response: "The transcription service answered something outside the expected format.",
+        closed: "The transcription service dropped in the middle of the call.",
+      } as Record<string, string>,
+      unknown: "The transcription piece did not open on this call.",
+      continued: "The call went on with the voice engine only, as before.",
+    },
     unknown: "Event",
   },
   reasons: {

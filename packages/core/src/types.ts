@@ -79,6 +79,7 @@ export const CALL_EVENT_KINDS = [
   "ivr_ended",
   "webhook_delivered",
   "webhook_failed",
+  "transcriber_failed",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];
