@@ -201,6 +201,29 @@ const readyUtterance = (audio: Buffer): Utterance => ({
   cancel: () => undefined,
 });
 
+/**
+ * O que o `final` diz além do parcial `said` (o começo dele), a partir de uma fronteira de palavra.
+ * O parcial cortado no meio de uma palavra ("Quero falar co", com o final "Quero falar com a Ana.")
+ * não manda meia palavra ao cérebro: o resto volta ao começo da palavra cortada ("com a Ana."). Letra
+ * é `\p{L}`, com o acento à parte (`\p{M}`) e o número; o hífen e o apóstrofo entre letras
+ * ("guarda-chuva", "d'água") são da palavra. Espaço e pontuação na fronteira já a separam, e a
+ * pontuação que fecha a frase de antes (vírgula, ponto, travessão) não abre o resto; a que abre
+ * (aspas, "¿", "¡") fica.
+ */
+export const restAfterPartial = (said: string, text: string): string => {
+  const after = text.slice(said.length);
+  const cut = WORD_END.test(said) && WORD_START.test(after);
+  const from = cut ? said.length - (WORD_TAIL.exec(said)?.[0].replace(LEADING_JOINERS, "").length ?? 0) : said.length;
+  return text.slice(from).replace(BOUNDARY_PUNCTUATION, "").trim();
+};
+/** A palavra que termina em `said`: letra, acento ou número, ou um hífen ou apóstrofo logo depois de um deles. */
+const WORD_END = /[\p{L}\p{M}\p{N}]['’-]?$/u;
+/** A palavra que continua no resto: letra, acento ou número, ou um hífen ou apóstrofo antes de um deles. */
+const WORD_START = /^['’-]?[\p{L}\p{M}\p{N}]/u;
+const WORD_TAIL = /[\p{L}\p{M}\p{N}'’-]+$/u;
+const LEADING_JOINERS = /^['’-]+/u;
+const BOUNDARY_PUNCTUATION = /^[\s,;:.!?…\-–—]+/u;
+
 /** Os primeiros `chars` pontos de código de `text`, como a voz conta (`countCharacters`). */
 const firstCharacters = (text: string, chars: number): string => [...text].slice(0, Math.max(0, chars)).join("");
 
@@ -434,7 +457,7 @@ class PipelineSession implements PipelineVoiceSession {
     // usado, só o resto vira turno: o que quem ligou disse depois do parcial não se perde.
     const said = forced?.trim();
     if (said !== undefined && text.startsWith(said)) {
-      const rest = text.slice(said.length).trim();
+      const rest = restAfterPartial(said, text);
       if (rest === "") return;
       this.emitter.emit("callerTurnEnded", { source: "transcript" });
       this.userTurn(rest);

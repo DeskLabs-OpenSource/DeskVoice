@@ -3,7 +3,7 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import openai from "../brains/openai";
-import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_MAX_TOKENS, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH, TRANSCRIBER_CLOSE_MS } from "./pipeline";
+import { BRAIN_TIMEOUT_MS, createPipelineEngine, PIPELINE_BRAIN_MAX_TOKENS, PIPELINE_BRAIN_RETRY_SPEECH, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH, restAfterPartial, TRANSCRIBER_CLOSE_MS } from "./pipeline";
 import { FixedSpeechCache } from "../synthesis";
 import { createSimulatedSynthesizer, toneFor } from "../synthesizers/simulated";
 import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "../transcribers/simulated";
@@ -412,6 +412,41 @@ describe("motor pipeline: say, guide e o fim do turno pela guarda", () => {
     expect(brain.requests).toHaveLength(2);
     expect(brain.requests[1]?.messages.filter((message) => message.role === "user").map((message) => message.content)).toEqual(["Quero falar com", "a Ana."]);
     await session.close();
+  });
+
+  it("o parcial que `closeCallerTurn` usou cortou uma palavra: o resto vai da palavra inteira, nunca meia palavra ao cérebro", async () => {
+    brain = await startFakeBrain();
+    const voice = countedVoice();
+    brain.reply([text("Pois não."), usage(10, 2)], [text("Vou chamar a Ana."), usage(12, 3)]);
+    const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, text: "Quero falar co" }, { afterAudioMs: 40, text: "Quero falar com a Ana.", final: true }]));
+    speak(session, 20);
+    await until(() => log.events.includes("activity"), "o parcial");
+    expect(session.closeCallerTurn()).toBe(true);
+    speak(session, 20);
+    await until(() => log.events.includes("agent: Vou chamar a Ana."), "a resposta ao resto");
+    expect(log.events.filter((event) => event.startsWith("user:"))).toEqual(["user: Quero falar co", "user: com a Ana."]);
+    expect(brain.requests[1]?.messages.filter((message) => message.role === "user").map((message) => message.content)).toEqual(["Quero falar co", "com a Ana."]);
+    await session.close();
+  });
+
+  it("`restAfterPartial`: o resto começa numa fronteira de palavra, com acento, número, hífen e apóstrofo", () => {
+    // Cortado no meio da palavra: volta ao começo dela.
+    expect(restAfterPartial("Quero falar co", "Quero falar com a Ana.")).toBe("com a Ana.");
+    expect(restAfterPartial("Quero falar com a Jo", "Quero falar com a Joana.")).toBe("Joana.");
+    expect(restAfterPartial("É sobre a ligaç", "É sobre a ligação de ontem.")).toBe("ligação de ontem.");
+    expect(restAfterPartial("O pedido 12", "O pedido 1234 atrasou.")).toBe("1234 atrasou.");
+    expect(restAfterPartial("Esqueci o guarda", "Esqueci o guarda-chuva.")).toBe("guarda-chuva.");
+    expect(restAfterPartial("Esqueci o guarda-", "Esqueci o guarda-chuva.")).toBe("guarda-chuva.");
+    expect(restAfterPartial("Um copo d", "Um copo d'água.")).toBe("d'água.");
+    // O acento que vem à parte (NFD) é da letra de antes.
+    expect(restAfterPartial("Falar com o Jose", "Falar com o Jose\u0301 agora.")).toBe("Jose\u0301 agora.");
+    // Cortado numa fronteira: espaço ou pontuação dos dois lados.
+    expect(restAfterPartial("Quero falar com", "Quero falar com a Ana.")).toBe("a Ana.");
+    expect(restAfterPartial("Quero falar com", "Quero falar com, por favor, a Ana.")).toBe("por favor, a Ana.");
+    expect(restAfterPartial("Sim", "Sim. ¿Y usted?")).toBe("¿Y usted?");
+    expect(restAfterPartial("Sim.", "Sim. Pode ser.")).toBe("Pode ser.");
+    expect(restAfterPartial("Sim -", "Sim - claro.")).toBe("claro.");
+    expect(restAfterPartial("Quero falar com", "Quero falar com")).toBe("");
   });
 });
 
