@@ -1,7 +1,0 @@
----
-impact: new_capability
-section: added
-title: A tela dos testes do agente, para conferir pelo painel o que o agente decide antes de pôr no ar
----
-
-A página de cada agente ganha o link "Testes do agente". Lá, quem pode editar o agente escreve uma conversa num formulário, sem JSON: o que quem liga diz em cada turno, as ferramentas que o agente tem de chamar, os campos conferidos de cada uma, a resposta que ela devolve no teste e os trechos que a fala do agente precisa ter ou não pode ter. O botão "Rodar" roda um teste, e "Rodar todos" roda os testes do agente um por vez. A tela mostra "passou" ou "reprovou" e a conversa turno a turno, com as ferramentas pedidas e, em cada reprovação, o esperado ao lado do que veio. O resultado sempre lembra que o teste confere o que o agente decide, e não como ele ouve e fala. Antes do primeiro clique, a tela avisa que cada rodada usa o motor do agente com a chave da organização e entra no custo do mês, e que nenhuma ferramenta roda de verdade. Quando as instruções, as ferramentas, o motor ou o idioma do agente mudam depois da última rodada, o teste aparece como "não rodado com a configuração atual". Nada roda sozinho. Quem só vê o agente vê os testes e os resultados, mas não cria, não edita e não roda. Num motor que ainda não roda testes (o Gemini Live, por enquanto), o botão vem desligado, com o motivo. A tela de Custos mostra o gasto dos testes numa linha própria, "Testes", separada das ligações. Quem já instalou não vê mudança até criar um teste. Crédito: @melgarafael.
