@@ -27,7 +27,7 @@ fica lenta sem ninguém perceber.
 
 | Peça | Onde está | O que falta para o pipeline |
 |---|---|---|
-| Ouvido em streaming | Contrato `StreamingTranscriber` + transcritor simulado do **#245** (R12, fatia 2), **na `main`** desde 23/11: entrou sozinho e desligado, num PR que o retoma (DESA-398). A fatia 4 da R12 fica só com a peça do vencedor | Um transcritor real, escolhido pela medida da R12 |
+| Ouvido em streaming | Contrato `StreamingTranscriber` + transcritor simulado do **#245** (R12, fatia 2), entra na `main` antes desta frente, sozinho e desligado, pelo #566, que o retoma (exceção à regra 4 aberta pelo Rafael em 25/11, no documento "2026-11-24 — motor em pipeline entra desligado antes da tela" (opção A); a DESA-398 decidiu que as fatias 3 a 5 não esperam o vencedor da R12). A fatia 4 da R12 fica só com a peça do vencedor | Um transcritor real, escolhido pela medida da R12 |
 | Vocabulário | `VoiceSessionConfig.vocabulary` (R3, na `main`); `StreamingTranscriber.maxVocabulary` (#245) | Nada: o pipeline repassa o campo à peça de transcrição |
 | Cérebro | `Brain` em `packages/voice-engine/src/brains/` (R4, na `main`): `listModels` e `completeJson` | **Conversa em streaming com ferramentas.** Hoje o cérebro só faz um pedido JSON fechado, sem ferramentas e sem streaming |
 | Voz | Não existe. A fala é do motor direto | **Contrato de voz** + a ElevenLabs |
@@ -457,7 +457,7 @@ pedidos curtos) com as chaves que a R4 já usa. Sem chave, "não medido".
 Fracasso mesmo funcionando: argumento de ferramenta aceito sem zod; custo zero quando o provedor não
 declarou consumo (precisa ser estimado pela entrada, `cost_estimated`, como na R12).
 
-### Fatia 3: o motor pipeline, pelo caminho simulado (o #245 já está na `main`)
+### Fatia 3: o motor pipeline, pelo caminho simulado (sobre o #245, que entra antes)
 
 `engines/pipeline.ts` costura transcritor, cérebro e voz (3.3). Na escolha do agente entra uma
 migration: `agents.pipeline jsonb` com `{ transcriber, brain, model, synthesizer, voiceId }`, nula
@@ -515,9 +515,11 @@ registrada no PR e nesta seção. É o aceite da frente.
 
 ## 5. O que espera a R12
 
-- **O contrato `StreamingTranscriber` na `main`: resolvido em 23/11.** O board decidiu na DESA-398
-  que as fatias 3 a 5 seguem sem esperar o vencedor da R12, e o #245 entrou sozinho, desligado, num PR
-  que o retoma (DESA-409): nenhum motor o usa, e nada muda na tela nem no banco. A fatia 3 deste
+- **O contrato `StreamingTranscriber` na `main`: não espera.** A DESA-398 decidiu que as fatias 3 a 5
+  não esperam o vencedor da R12. O #245 entra sozinho, desligado, pelo #566, que o retoma (DESA-409),
+  na exceção à regra 4 aberta pelo Rafael em 25/11, no documento
+  "2026-11-24 — motor em pipeline entra desligado antes da tela" (opção A): nenhum motor o usa, e nada muda na
+  tela nem no banco. A fatia 3 deste
   desenho parte da `main`. A fatia 4 da R12 fica só com a peça do vencedor.
 - **O transcritor real.** A fatia 6 espera o vencedor medido da R12 (régua de 700 ms no p95 do trecho
   final). Hoje a R12 espera a DESA-75 e o crédito do Gemini. Sem vencedor, o pipeline existe e é

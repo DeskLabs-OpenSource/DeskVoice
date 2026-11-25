@@ -12,12 +12,13 @@ import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
 import openai from "../../../packages/voice-engine/src/brains/openai";
 import { FixedSpeechCache, speechUsageOf } from "../../../packages/voice-engine/src/synthesis";
-import { createSimulatedSynthesizer } from "../../../packages/voice-engine/src/synthesizers/simulated";
+import { createSimulatedSynthesizer, toneFor } from "../../../packages/voice-engine/src/synthesizers/simulated";
 import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "../../../packages/voice-engine/src/transcribers/simulated";
 import { brainKeySetting, brainModelsSetting, startCallSession, type CallSession } from "./call-session";
 import type { TransferOptions, TransferOutcome } from "./transport";
 import { callOf, createAgent, createCall, createOrganization, eventsOf, kindsOf, ledgerOf, manualTransport, pricedSimulatedEngine, secretKey, sessionHarness, type AgentOptions, type ManualTransport, type SessionHarness } from "./testing/db";
 import { waitFor } from "./testing/helpers";
+import { failureTone } from "./transport";
 
 const { app, owner } = openTestDbs();
 let harness: SessionHarness | undefined;
@@ -309,6 +310,38 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
     // A recusa HTTP do cérebro é zero medido; a linha existe, e nenhuma linha sai sem medida.
     const ledger = await piecesLedger(made.callId);
     expect(ledger.filter((row) => row.engine === "brain:openai").map((row) => [Number(row.cost_microcents), row.cost_measured])[0]).toEqual([0, true]);
+  });
+
+  it("a peça que cai: a fala de falha chega inteira ao transporte antes do sinal e do desligar, e o consumo da transcrição entra no fim", async () => {
+    const voice = pricedVoice({ failAfter: 4 });
+    const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Oi.", final: true }]);
+    const made = await scene("pipeline-fails-plays", { engine: "openai-realtime", greeting: "Bom dia." }, { pipeline: PIPELINE, transcriber: ear.transcriber, synthesizer: voice.synthesizer });
+    fakeBrain?.reply({ status: 500, body: "{}" });
+    // A ordem do que o transporte recebe: cada pedaço de áudio e o desligar, que espera a fila tocar.
+    const sent: Array<number | "hangup"> = [];
+    const { sendAudio, hangup } = made.transport;
+    made.transport.sendAudio = (pcm) => {
+      sent.push(pcm.length);
+      sendAudio(pcm);
+    };
+    made.transport.hangup = async () => {
+      sent.push("hangup");
+      await hangup();
+    };
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    made.transport.callerAudio(100);
+    expect(await session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
+    const failure = toneFor([...PIPELINE_FAILURE_SPEECH].length).length;
+    const at = sent.indexOf(failure);
+    expect(at).toBeGreaterThanOrEqual(0);
+    // Depois da fala de falha, só o sinal de falha e o desligar: nada a corta, e ela sai antes de a ligação cair.
+    expect(sent.slice(at + 1)).toEqual([failureTone().length, "hangup"]);
+    expect(made.transport.cleared).toBe(0);
+    // O consumo da transcrição, que a peça entrega ao fechar, está no extrato, com o preço dela.
+    const heard = (await piecesLedger(made.callId)).filter((row) => row.engine === "transcriber:simulated");
+    expect(heard.map((row) => Number(row.cost_microcents) > 0)).toEqual([true]);
   });
 
   it("o error da transcrição sem closed vai ao painel como pipeline_turn_failed, e a ligação segue", async () => {
