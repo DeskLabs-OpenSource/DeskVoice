@@ -12,8 +12,10 @@
 > com o Jev) no #349, com os testes do #353 e do #362, fatia 7a (custo do Jev não lido) no #359 e
 > fatia 7b (o filtro na tela e as marcas na linha do tempo) no #395. **Falta:** a medida dos
 > transcritores externos com chave (Deepgram, AssemblyAI e Soniox: chaves não entregues); a fatia 2
-> (o contrato e o transcritor simulado), do #245, entrou sozinho na `main` em 23/11, desligada, num PR
-> que o retoma (DESA-398, DESA-409); as fatias 3, 4 e 5, que esperam o vencedor da medida;
+> (o contrato e o transcritor simulado), do #245, entra na `main` sozinha e desligada, pelo #566, que
+> o retoma: é a exceção à regra 4 aberta pelo Rafael em 25/11, no documento
+> "2026-11-24 — motor em pipeline entra desligado antes da tela" (opção A); as fatias 3, 4 e 5, que esperam o vencedor
+> da medida;
 > as fatias 8 e 9 (o Laya). O pedido de decisão 4 foi respondido em 18/11 (opção A, imagem
 > publicada por este repositório), e a fatia 8 foi dividida em 8a e 8b. O texto abaixo é o desenho,
 > com as correções feitas durante as fatias.
@@ -774,10 +776,12 @@ O fragmento do #245 fica, porque só vale quando a fatia 4 entrar. As fatias 3 e
 `main` por merge, sem reescrita. Na hora do merge, os três PRs entram em sequência: o #245, a fatia
 3 e a fatia 4.
 
-Revisto em 23/11 (DESA-398): o board decidiu que as fatias 3 a 5 do motor em pipeline
-(`docs/specs/2026-11-17-motor-de-voz-em-pipeline.md`) seguem sem esperar o vencedor, e elas precisam
-do contrato na `main`. O #245 entrou sozinho, desligado, num PR que o retoma, com a `main` juntada por
-merge: nenhum motor usa a peça, o processo de voz não chama `loadTranscribers()`, e nada muda na tela
+Revisto depois: a DESA-398 decidiu que as fatias 3 a 5 do motor em pipeline
+(`docs/specs/2026-11-17-motor-de-voz-em-pipeline.md`) não esperam o vencedor da R12, e elas precisam
+do contrato na `main`. Por isso o #245 entra sozinho, desligado, pelo #566, que o retoma com a `main`
+juntada por merge. Entrar antes da tela é a exceção à regra 4 aberta pelo Rafael em 25/11, no
+documento "2026-11-24 — motor em pipeline entra desligado antes da tela" (opção A). Nenhum motor usa a peça, o
+processo de voz não chama `loadTranscribers()`, e nada muda na tela
 nem no banco. As fatias 3 e 4 desta frente partem da `main`, e a fatia 4 fica só com a peça do
 vencedor. O fragmento do #245 entra com ele, como `nothing_changes`.
 
@@ -841,9 +845,10 @@ Há três motivos:
   recebe áudio quando abre. Se ela abrir depois do fim, fecha na hora;
 - teste: depois da passagem, o texto novo da peça arma a guarda do agente novo.
 
-**Quando:** a primeira fatia desta frente que retomar (a 3 ou a 4) começa pelo ramo do #245, com
-um merge da `main` (até `cd3f63e` ou mais nova) e sem reescrita. Os ajustes acima vêm num commit à
-parte, por cima, e o #245 é revisto de novo antes de entrar (em 23/11, sozinho: veja "Como entra").
+**Quando:** no próprio ramo do #245 (`feat/transcricao-contrato-simulado`), depois de um merge da
+`main` (até `cd3f63e` ou mais nova) e sem reescrita, num commit à parte, por cima. O PR que retoma o
+#245 (o #566) é revisto de novo antes de entrar, sozinho: veja "Como entra". As fatias 3 e 4 desta
+frente partem da `main`.
 
 ### Fatia 3: a peça do vencedor
 
@@ -871,8 +876,9 @@ faltando).
 Aceite:
 - a pessoa escolhe o transcritor, salva, recarrega e vê a escolha; chave recusada mostra o motivo
   pelo vocabulário fechado;
-- a fatia 3 entra junto com esta fatia, antes dela, e não antes (regra 4). O #245 (fatia 2) já
-  entrou sozinho, desligado, em 23/11 (DESA-398);
+- a fatia 3 entra junto com esta fatia, antes dela, e não antes (regra 4). O #245 (fatia 2) entra
+  antes, sozinho e desligado, pelo #566. É a exceção à regra 4 aberta pelo Rafael em 25/11, no
+  documento "2026-11-24 — motor em pipeline entra desligado antes da tela" (opção A);
 - `docs/doctrine/um-arquivo-por-peca.md` cita a pasta `transcribers/`, que a cerca já cobre desde o
   #245. É documento de autoridade: a linha só entra com o sim do Rafael, que vai pelo lote do Líder;
 - o carimbo da migration é a hora real da criação (regra acima): não é posterior ao commit que a
