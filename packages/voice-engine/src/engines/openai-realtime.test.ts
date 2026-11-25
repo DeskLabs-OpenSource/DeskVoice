@@ -574,3 +574,89 @@ describe("openai-realtime: desfecho da ligação (o destino vem de quem chama)",
     expect(engine.classifyPricing?.("deepseek-chat")).toBeUndefined();
   });
 });
+
+// O teste do agente (fatia 7b, seção 5.3 de docs/specs/2026-11-21-testes-do-agente.md): a mesma
+// sessão em texto. O servidor falso aceita qualquer coisa: se o modelo cadastrado aceita
+// `output_modalities: ["text"]`, só a rodada com a chave real diz.
+describe("openai-realtime em modo texto (teste do agente)", () => {
+  it("o motor diz que roda teste em texto", () => {
+    expect(engine.textMode).toBe(true);
+  });
+
+  it("a sessão em texto: as mesmas instruções e ferramentas, saída só em texto, nada de áudio", async () => {
+    const { update } = await openSession({ mode: "text", voiceId: "cedar", vocabulary: ["Melgaço"], listeningEnvironment: "noisy" });
+    const audio = await (async () => {
+      const opened = engine.connect({ ...config, voiceId: "cedar", vocabulary: ["Melgaço"], listeningEnvironment: "noisy" }, "sk-teste", { baseUrl: fake.url, model: "modelo-x" });
+      const sent = await fake.waitFor(ofType("session.update"));
+      fake.send({ type: "session.updated", session: {} });
+      await (await opened).close();
+      return sent.session as Record<string, unknown>;
+    })();
+    expect(update.session).toEqual({ type: "realtime", instructions: audio.instructions, output_modalities: ["text"], tools: audio.tools });
+  });
+
+  it("sendUserText manda a fala como `input_text` e pede a resposta; o texto do agente vira `transcript`, e o fim vem em `turnDone`", async () => {
+    const { session } = await openSession({ mode: "text", greeting: undefined });
+    const transcripts: unknown[] = [];
+    let turns = 0;
+    session.on("transcript", (turn) => transcripts.push(turn));
+    session.on("turnDone", () => (turns += 1));
+    session.sendUserText?.("Quero remarcar.");
+    expect(await fake.waitFor(ofType("conversation.item.create"))).toEqual({
+      type: "conversation.item.create",
+      item: { type: "message", role: "user", content: [{ type: "input_text", text: "Quero remarcar." }] },
+    });
+    expect(await fake.waitFor(ofType("response.create"))).toEqual({ type: "response.create", response: {} });
+
+    // A resposta que pede ferramenta não acaba o turno.
+    fake.send({ type: "response.created" });
+    fake.send({ type: "response.function_call_arguments.done", call_id: "c1", name: "end_call", arguments: "{}" });
+    const usage = nextEvent(session, "usage");
+    fake.send({ type: "response.done", response: { output: [{ type: "function_call" }], usage: { input_tokens: 10, output_tokens: 2, input_token_details: { text_tokens: 10, audio_tokens: 0 }, output_token_details: { text_tokens: 2, audio_tokens: 0 } } } });
+    expect(await usage).toEqual([{ inputTokens: 0, textInputTokens: 10, cachedInputTokens: 0, outputTokens: 0, textOutputTokens: 2 }]);
+    expect(turns).toBe(0);
+
+    session.sendToolResult("c1", { ok: true });
+    await fake.waitFor(ofType("response.create"));
+    fake.send({ type: "response.created" });
+    fake.send({ type: "response.output_text.done", text: "Até logo!" });
+    const done = nextEvent(session, "turnDone");
+    fake.send({ type: "response.done", response: { output: [{ type: "message" }], usage: null } });
+    await done;
+    expect(turns).toBe(1);
+    expect(transcripts).toEqual([{ speaker: "agent", text: "Até logo!" }]);
+  });
+
+  it("duas ferramentas na mesma resposta: o turno acaba só depois da última resposta da fila", async () => {
+    const { session } = await openSession({ mode: "text", greeting: undefined });
+    let turns = 0;
+    session.on("turnDone", () => (turns += 1));
+    session.sendUserText?.("Oi");
+    await fake.waitFor(ofType("response.create"));
+    fake.send({ type: "response.created" });
+    fake.send({ type: "response.done", response: { output: [{ type: "function_call" }, { type: "function_call" }] } });
+    // Os dois resultados pedem duas respostas: a segunda espera a vez.
+    session.sendToolResult("a", {});
+    await fake.waitFor(ofType("response.create"));
+    session.sendToolResult("b", {});
+    fake.send({ type: "response.created" });
+    fake.send({ type: "response.done", response: { output: [{ type: "message" }] } });
+    await fake.waitFor(ofType("response.create"));
+    expect(turns).toBe(0);
+    fake.send({ type: "response.created" });
+    const done = nextEvent(session, "turnDone");
+    fake.send({ type: "response.done", response: { output: [{ type: "message" }] } });
+    await done;
+    expect(turns).toBe(1);
+  });
+
+  it("na ligação (áudio), `response.done` nunca emite `turnDone`", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    let turns = 0;
+    session.on("turnDone", () => (turns += 1));
+    const usage = nextEvent(session, "usage");
+    fake.send({ type: "response.done", response: { output: [{ type: "message" }], usage: { input_tokens: 1, output_tokens: 1 } } });
+    await usage;
+    expect(turns).toBe(0);
+  });
+});
