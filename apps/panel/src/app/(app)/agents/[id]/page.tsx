@@ -202,6 +202,14 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         : trustCaller.data.value !== true
           ? "not_trusted"
           : null;
+  // Com o conector `deskcomm` no contrato do CRM (#330, fatia 2), a mensagem sai pelo canal do CRM, e
+  // o texto da opção diz qual: o nome gravado do canal, ou "o que o CRM escolher". `null`: outro conector.
+  const crmChannel = ((): { label: string | null } | null => {
+    const value = whatsAppConnector.data?.value as { type?: unknown; crmUrl?: unknown; channelLabel?: unknown } | null | undefined;
+    if (value?.type !== "deskcomm" || typeof value.crmUrl !== "string") return null;
+    return { label: typeof value.channelLabel === "string" ? value.channelLabel : null };
+  })();
+  const messageOption = crmChannel === null ? t.dropFollowUpWhatsApp : crmChannel.label === null ? t.dropFollowUpCrmRule : fill(t.dropFollowUpCrm, { channel: crmChannel.label });
   // Por que a religação está indisponível, a mesma conferência da rota; `undefined` enquanto carrega.
   const callBackBlock: "outbound_disabled" | null | undefined = outboundPolicy.data === undefined ? undefined : outboundPolicy.data.enabled ? null : "outbound_disabled";
   // A regra é a da API (`checkVocabulary`): a tela diz o erro ao lado do campo e não manda nada.
@@ -515,7 +523,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 <option value="task">{t.dropFollowUpTask}</option>
                 {/* Indisponível: desabilitada, e o motivo e o caminho aparecem logo abaixo. Já escolhida, continua visível. */}
                 <option value="whatsapp" disabled={whatsAppBlock !== null && draft.dropFollowUp !== "whatsapp"}>
-                  {whatsAppBlock ? `${t.dropFollowUpWhatsApp} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpWhatsApp}
+                  {whatsAppBlock ? `${messageOption} (${t.dropFollowUpWhatsAppUnavailable})` : messageOption}
                 </option>
                 <option value="call_back" disabled={callBackBlock !== null && draft.dropFollowUp !== "call_back"}>
                   {callBackBlock ? `${t.dropFollowUpCallBack} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpCallBack}
@@ -578,7 +586,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           ) : null}
           {draft.dropFollowUp === "whatsapp" ? (
             <div className="mt-4 grid max-w-prose gap-2">
-              <p className="text-[0.87rem] text-muted">{t.dropFollowUpBlockRisk}</p>
+              <p className="text-[0.87rem] text-muted">{crmChannel === null ? t.dropFollowUpBlockRisk : t.dropFollowUpCrmRisk}</p>
               <Field label={t.dropFollowUpMessage} hint={t.dropFollowUpMessageWarning}>
                 <TextArea
                   value={draft.dropFollowUpMessage}
