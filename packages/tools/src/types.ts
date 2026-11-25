@@ -114,5 +114,16 @@ export interface Tool<Input = unknown> {
    * `tools` do agente. A tela não a lista como caixa de marcar.
    */
   offeredBySession?: boolean;
+  /**
+   * O teto por ligação que a ferramenta divide com outras: `key` nomeia a conta e `max` diz quantas
+   * vagas ela tem. As ferramentas de um servidor MCP dividem o teto do servidor. Ausente: o teto é o
+   * da própria ferramenta, pelo nome, em `MAX_SUCCESSFUL_CALLS_PER_CALL` (ou nenhum).
+   */
+  budget?: { key: string; max: number };
+  /**
+   * Quem responde por ela do lado de fora (o `slug` do servidor MCP). Com ele, o `tool_result` grava
+   * `server` e `durationMs`, para a linha do tempo mostrar quem respondeu e quanto demorou.
+   */
+  server?: string;
   run(input: Input, ctx: ToolContext): Promise<ToolResult>;
 }

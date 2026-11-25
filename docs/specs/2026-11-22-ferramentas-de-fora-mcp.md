@@ -1,7 +1,7 @@
 # Ferramentas de fora pela tela: servidor MCP cadastrado pelo operador (item 8 da pesquisa Vapi)
 
-- **Estado:** desenho, com a recomendação aceita pelo orquestrador do roteiro em 22/11 (seção 9).
-  Envolve segurança: nenhuma fatia anda, e este spec não mescla, antes da palavra do dono.
+- **Estado:** aprovado pelo dono em 23/11 (1A, 2A e 3A, seção 9). A fatia 8a está em construção.
+  O merge de cada fatia continua esperando a palavra do próprio dono.
 - **Data:** 2026-11-22
 - **Quem pediu:** o dono aprovou em 21/11 a terceira leva da pesquisa Vapi (itens 7, 8 e 10), com
   "desenho maior antes". A fonte é o estudo de lacunas do board, de 20/11.
@@ -368,10 +368,12 @@ Duas condições a mais, que entram nas fatias:
 - **O merge de cada fatia espera a palavra do próprio dono**, pedida pelo maestro, por ser
   capacidade nova.
 
-**O que isso libera (22/11, do orquestrador):** nada ainda. O desenho foi à pasta do dono como
-decisão antes, por envolver segurança. A 8a, a 8b, a 8c e a 8d esperam a palavra dele, e nenhuma
-tarefa de construção abre para elas antes. O prazo de 5 dias úteis não vale aqui: sem a palavra do
-dono, nada mescla, nem este spec.
+**O que isso liberou (22/11, do orquestrador):** nada ainda. O desenho foi à pasta do dono como
+decisão antes, por envolver segurança. O prazo de 5 dias úteis não valia aqui.
+
+**A palavra do dono (23/11):** 1A, 2A e 3A, as três recomendações. Isso libera a construção das
+fatias na ordem da seção 6, começando pela 8a. As duas condições acima continuam valendo: a 8a chama
+um servidor MCP real, e o merge de cada fatia espera a palavra do próprio dono.
 
 ## 10. Não medido
 

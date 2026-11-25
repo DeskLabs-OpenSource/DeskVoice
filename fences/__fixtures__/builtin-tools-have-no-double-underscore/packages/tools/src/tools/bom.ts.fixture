@@ -1,0 +1,8 @@
+import { z } from "zod";
+export default {
+  name: "consultar_pedido",
+  description: "Um `_` só.",
+  inputSchema: z.object({
+    name: z.string(),
+  }),
+};
