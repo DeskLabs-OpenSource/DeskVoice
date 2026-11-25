@@ -2,12 +2,14 @@ import { withOrg, withSystem } from "@deskvoice/core";
 import { wahaSessionName } from "@deskvoice/tools/waha";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { QR_PNG, WAHA_KEY, startFakeWaha } from "../../../../../../packages/tools/test/fake-waha";
+import { fakeMcp } from "../../../../../../packages/tools/test/mcp-server";
 import { AGENT_TOKEN, NOW, call, createOrganization, createUser, startPanel } from "../../../../test/kit";
 import type { WhatsAppView } from "../../../server/whatsapp";
 import { GET as readSetting, PUT as writeSetting } from "./settings/[key]/route";
 import { POST as agent } from "./system/agent/route";
 import { GET as health } from "./system/health/route";
 import { POST as connect } from "./whatsapp/connect/route";
+import { POST as crmCheck } from "./whatsapp/crm-check/route";
 import { POST as disconnect } from "./whatsapp/disconnect/route";
 import { GET as read } from "./whatsapp/route";
 import { POST as service } from "./whatsapp/service/route";
@@ -525,3 +527,54 @@ describe("the WhatsApp service exists only on the server of whoever asked for it
   });
 });
 
+
+describe("checking the connector CRM (issue 330, slice 2b)", () => {
+  const CRM = "https://crm.example.test";
+  const CHANNEL = { id: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c77", provider: "waha", display_name: "Número da loja", phone_number: "+19146200000" };
+  const saveConnector = (cookie: string, value: unknown) => call(writeSetting, { method: "PUT", cookie, params: { key: "whatsapp.connector" }, body: { value } });
+
+  it("checks both CRM ports with the saved token and lists the channels, without the token in the answer", async () => {
+    const { owner } = await bareOrg("wa crm check");
+    await saveConnector(owner.cookie, { type: "deskcomm", url: CRM, crmUrl: CRM, token: "dsk_token-guardado" });
+
+    const mcp = fakeMcp();
+    const rest: Array<{ url: string; authorization: string | null }> = [];
+    const before = panel.deps.fetch;
+    panel.deps.fetch = async (input, init) => {
+      if (String(input).endsWith("/api/mcp")) return mcp.fetch(input, init);
+      rest.push({ url: String(input), authorization: new Headers(init?.headers).get("authorization") });
+      return Response.json({ data: [CHANNEL] });
+    };
+    try {
+      const result = await call(crmCheck, { method: "POST", cookie: owner.cookie, body: {} });
+      expect(result.data).toEqual({ mcp: "ok", rest: "ok", channels: [{ id: CHANNEL.id, provider: "waha", name: "Número da loja", phone: "+19146200000" }] });
+      expect(result.text).not.toContain("dsk_token-guardado");
+    } finally {
+      panel.deps.fetch = before;
+    }
+    expect(rest).toEqual([{ url: `${CRM}/api/v1/channel-sessions`, authorization: "Bearer dsk_token-guardado" }]);
+    expect(mcp.requests.find((request) => request.rpc.method === "tools/call")?.headers.authorization).toBe("Bearer dsk_token-guardado");
+    // A conferência só lê: nenhuma mensagem saiu por nenhum dos dois caminhos.
+    expect(waha.sent).toEqual([]);
+  });
+
+  it("refuses when there is no CRM to check: no connector, a webhook, or the old deskcomm format", async () => {
+    const { owner } = await bareOrg("wa crm check refused");
+    const calls: string[] = [];
+    const before = panel.deps.fetch;
+    panel.deps.fetch = async (input) => {
+      calls.push(String(input));
+      return new Response("{}");
+    };
+    try {
+      expect(refusal(await call(crmCheck, { method: "POST", cookie: owner.cookie, body: {} }))).toEqual([409, "deskcomm_crm_not_configured"]);
+      for (const value of [{ type: "webhook", url: "https://hooks.example.test/wa", token: "t" }, { type: "deskcomm", url: "https://crm.example.test/send", token: "t" }]) {
+        await saveConnector(owner.cookie, value);
+        expect(refusal(await call(crmCheck, { method: "POST", cookie: owner.cookie, body: {} }))).toEqual([409, "deskcomm_crm_not_configured"]);
+      }
+    } finally {
+      panel.deps.fetch = before;
+    }
+    expect(calls).toEqual([]);
+  });
+});
