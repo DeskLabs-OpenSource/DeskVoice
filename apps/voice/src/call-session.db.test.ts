@@ -753,6 +753,41 @@ describe("ainda está aí? (item 9 da segunda leva Vapi)", { timeout: 120_000 },
     expect(await session.done).toMatchObject({ endReason: "caller_hangup" });
   });
 
+  it("quem ligou interrompe o lembrete: a guarda volta ao zero, e o lembrete interrompido não conta como dito", async () => {
+    const manual = manualEngine({ keyless: true });
+    const { callId, transport, start, harness } = await scene("caller-idle-interrupted", { engine: "manual" }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("audio", Buffer.alloc(320));
+    harness.clock.advance(20 + IDLE_FIRST_MS);
+    expect(harness.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
+    expect(manual.said).toEqual([IDLE_ASK]);
+    // O lembrete começa a tocar (1 s), e quem ligou fala por cima: só o `interrupted`, sem `callerActivity`.
+    manual.emit("audio", Buffer.alloc(320 * 50));
+    expect(harness.timers.held()).toContain(1000 + IDLE_SECOND_MS);
+    manual.emit("interrupted");
+    // Nada armado: a guarda espera a próxima fala do agente.
+    expect(harness.timers.held()).not.toContain(1000 + IDLE_SECOND_MS);
+    expect(harness.timers.held()).not.toContain(IDLE_SECOND_MS);
+
+    // O agente responde (20 ms) e quem ligou fica calado: a guarda recomeça do primeiro lembrete.
+    manual.emit("audio", Buffer.alloc(320));
+    harness.clock.advance(20 + IDLE_FIRST_MS);
+    expect(harness.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
+    expect(manual.said).toEqual([IDLE_ASK, IDLE_ASK]);
+    expect(manual.said).not.toContain(IDLE_ASK_AGAIN);
+    await waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "caller_idle").length === 2, "the second caller_idle");
+    const events = await eventsOf(app, callId);
+    expect(events.filter((event) => event.kind === "caller_idle").map((event) => event.payload)).toEqual([
+      { action: "asked", silentMs: IDLE_FIRST_MS },
+      { action: "asked", silentMs: IDLE_FIRST_MS },
+    ]);
+
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ endReason: "caller_hangup" });
+  });
+
   it("aprovação em espera e 40 s de silêncio: a guarda não pergunta nem encerra; decidida, volta a contar", async () => {
     const manual = manualEngine({ keyless: true });
     const { callId, transport, start, harness } = await scene("caller-idle-approval", { engine: "manual", tools: ["request_approval"] }, manual);
