@@ -274,7 +274,7 @@ services:
   # Asterisk é peça de terceiros: referenciada, nunca republicada. Fixada por digest
   # porque neste registro nem as tags de versão são imutáveis (medido no DeskcommCRM).
   asterisk:
-    image: ${ASTERISK_IMAGE:-andrius/asterisk@sha256:927d4c98777149c3380c4f8d0e82b1b1ba9e7b38528f86c1e1593d5a25032f27}
+    image: ${ASTERISK_IMAGE:-andrius/asterisk@sha256:9dd770172add68dd06eaf62396d74890b0df427906619c1cf0813afe0c5e4421}
     restart: unless-stopped
     mem_limit: 256m
     ports:
