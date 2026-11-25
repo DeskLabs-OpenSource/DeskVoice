@@ -354,8 +354,11 @@ export interface Costs {
   estimatedCount: number;
   byDay: Array<{ day: string; costCents: number; billedSeconds: number; unmeasuredCount: number; estimatedCount: number }>;
   byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number; unmeasuredCount: number; estimatedCount: number }>;
-  /** `source` é `analyst` na linha do analista ao vivo (R6), separada do mesmo modelo usado pelo filtro da fala. */
-  byEngine: Array<{ engine: string; source: "analyst" | null; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
+  /**
+   * `source` é `analyst` na linha do analista ao vivo (R6), separada do mesmo modelo usado pelo filtro
+   * da fala, e `test` na do teste do agente (fatia 7b), separada do mesmo motor nas ligações.
+   */
+  byEngine: Array<{ engine: string; source: "analyst" | "test" | null; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
 }
 
 export interface Setting<T> {
