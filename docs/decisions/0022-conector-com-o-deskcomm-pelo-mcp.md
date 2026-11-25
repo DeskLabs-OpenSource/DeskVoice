@@ -30,7 +30,11 @@ Havia três portas possíveis do lado do CRM:
 1. **O DeskVoice fala com o CRM pelo MCP do CRM.** A agenda passa por `crm_list_event_types`,
    `crm_find_free_slots`, `crm_book_appointment` e `crm_reschedule_appointment`, e o contato por
    `crm_search_contacts`. O cliente usa o cliente MCP que já existe em
-   `packages/tools/src/mcp/client.ts`, e nenhum segundo cliente JSON-RPC é escrito.
+   `packages/tools/src/mcp/client.ts`, e nenhum segundo cliente JSON-RPC é escrito. Duas coisas
+   vão pela REST do CRM, com o mesmo token: a fatia 1a cria o contato de um número novo por
+   `POST /api/v1/conversations/open-with-contact`, e a fatia 2 manda a mensagem por
+   `POST /api/v1/messages`. Por isso o token não pode ser só-MCP: um token `aud:mcp` é recusado
+   fora do `/api/mcp`.
 2. **O conector é opcional.** Sem endereço do CRM e token configurados, nada muda: as ferramentas de
    agenda continuam escondidas, e o conector `deskcomm` de mensagem segue como hoje.
 3. **O DeskVoice funciona sem o CRM.** Nenhuma parte da ligação, da instalação ou do painel passa a
