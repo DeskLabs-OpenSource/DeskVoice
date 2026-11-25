@@ -13,6 +13,16 @@ import { sampleFor, selectedVoice, type VoiceSample } from "./voice-sample";
 export const voiceProviderName = (t: AgentsDictionary, provider: string): string => t.voiceProviders[provider] ?? provider;
 
 /**
+ * O nome do motor ao lado do provedor, sem o provedor repetido: "Gemini Live (Google)" vira
+ * "Gemini Live" quando o provedor já vem escrito antes. Só nesta tela: o `label` do motor continua o
+ * mesmo nas outras (Configurações › IA, a ligação, a lista de agentes), onde ele aparece sozinho.
+ */
+export const engineNameBeside = (label: string, provider: string): string => {
+  const suffix = ` (${provider})`;
+  return label.endsWith(suffix) ? label.slice(0, -suffix.length) : label;
+};
+
+/**
  * O campo "Voz" da tela do agente (DESA-397, fatia 1a): as vozes num grupo com o provedor e o motor,
  * o botão "Ouvir" com a amostra da voz selecionada no idioma do agente, e a linha que diz onde ficam
  * as vozes da ElevenLabs. Nenhuma voz da ElevenLabs entra na lista: o motor do agente não as fala.
@@ -21,6 +31,7 @@ export function VoiceField({ t, engine, voiceId, language, onChange }: { t: Agen
   const voices = engine?.voices ?? [];
   const defaultVoice = engine?.defaultVoice ?? null;
   const provider = engine ? voiceProviderName(t, engine.provider) : null;
+  const engineName = engine && provider ? engineNameBeside(engine.label, provider) : null;
   const custom = voiceId !== "" && !voices.some((voice) => voice.id === voiceId);
   const options = (
     <>
@@ -37,9 +48,9 @@ export function VoiceField({ t, engine, voiceId, language, onChange }: { t: Agen
   const offersVoice = voices.length > 0 || defaultVoice !== null;
   return (
     <div className="grid content-start gap-2">
-      <Field label={t.voiceId} hint={engine && provider && offersVoice ? fill(t.voiceHint, { provider, engine: engine.label }) : undefined}>
+      <Field label={t.voiceId} hint={engine && provider && offersVoice ? fill(t.voiceHint, { provider, engine: engineName ?? engine.label }) : undefined}>
         <Select value={voiceId} onChange={(event) => onChange(event.target.value)}>
-          {engine && provider ? <optgroup label={`${provider} · ${engine.label}`}>{options}</optgroup> : options}
+          {engine && provider ? <optgroup label={`${provider} · ${engineName ?? engine.label}`}>{options}</optgroup> : options}
           {custom ? <option value={voiceId}>{fill(t.voiceCustom, { voice: voiceId })}</option> : null}
         </Select>
       </Field>

@@ -13,6 +13,9 @@ const costs = {
   /** A linha do analista ao vivo. `{model}` é o nome do modelo de decisão. */
   analystLine: "Analista · {model}",
   analystNote: "Pedidos do analista ao vivo, a cada fala de quem ligou",
+  /** A linha dos testes do agente (fatia 7c). `{engine}` é o nome do motor. */
+  testLine: "Testes · {engine}",
+  testNote: "Rodadas dos testes do agente, em texto",
   minutes: "{n} min",
   priceChecked: "Preço conferido em {date}",
   priceSource: "Fonte do preço",
