@@ -17,6 +17,9 @@ const costs = {
   pieceLine: "{piece} · {label}",
   pieces: { transcriber: "Transcrição", brain: "Cérebro", synthesizer: "Voz" },
   pieceNote: "Peça separada do motor (como as do pipeline): o custo vem do consumo dela (minutos ouvidos, tokens ou caracteres).",
+  /** A linha dos testes do agente (fatia 7c). `{engine}` é o nome do motor. */
+  testLine: "Testes · {engine}",
+  testNote: "Rodadas dos testes do agente, em texto",
   minutes: "{n} min",
   priceChecked: "Preço conferido em {date}",
   priceSource: "Fonte do preço",

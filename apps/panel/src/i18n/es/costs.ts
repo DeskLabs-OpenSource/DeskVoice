@@ -18,6 +18,8 @@ const costs: CostsDictionary = {
   pieceLine: "{piece} · {label}",
   pieces: { transcriber: "Transcripción", brain: "Cerebro", synthesizer: "Voz" },
   pieceNote: "Pieza aparte del motor (como las del pipeline): el costo viene de su propio consumo (minutos escuchados, tokens o caracteres).",
+  testLine: "Pruebas · {engine}",
+  testNote: "Rondas de las pruebas del agente, en texto",
   minutes: "{n} min",
   priceChecked: "Precio revisado el {date}",
   priceSource: "Fuente del precio",

@@ -12,6 +12,7 @@ import { formatDay } from "../../../ui/format";
 import { Notice, PageHeader, Panel, Skeleton } from "../../../ui/kit";
 import type { Costs } from "../../../ui/types";
 import { Amount } from "./amount-view";
+import { engineRowLabel, engineRowNote } from "./engine-row";
 
 const PERIODS = [7, 30, 90];
 const isoDay = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -109,18 +110,15 @@ export default function CostsPage() {
                     {data.byEngine.map((row) => (
                       <li key={`${row.engine}:${row.source ?? ""}`} className="grid gap-1.5">
                         <span className="flex items-baseline justify-between gap-3">
-                          {/* A linha do analista ao vivo sai separada do mesmo modelo usado pelo filtro da fala. */}
-                          <span className="truncate font-bold">
-                            {row.source === "analyst" ? fill(t.analystLine, { model: row.label }) : row.piece ? fill(t.pieceLine, { piece: t.pieces[row.piece], label: row.label }) : row.label}
-                          </span>
+                          {/* A linha do analista ao vivo sai separada do mesmo modelo usado pelo filtro da fala, e a dos testes do agente, do mesmo motor nas ligações. */}
+                          <span className="truncate font-bold">{engineRowLabel(row, t)}</span>
                           <span className="data">
                             <Amount cents={row.costCents} unmeasuredCount={row.unmeasuredCount} estimatedCount={row.estimatedCount} />
                           </span>
                         </span>
                         <Bar share={row.costCents / max(data.byEngine.map((entry) => entry.costCents))} />
                         <span className="text-[0.87rem] text-muted">
-                          {/* A peça do pipeline não atende trecho: no lugar dos minutos, o que ela é. */}
-                          {row.source === "analyst" ? t.analystNote : row.piece ? t.pieceNote : fill(t.minutes, { n: Math.round(row.callSeconds / 60) })}
+                          {engineRowNote(row, t)}
                           {row.priceCheckedOn ? ` · ${fill(t.priceChecked, { date: formatDay(row.priceCheckedOn, locale) })}` : ""}
                         </span>
                         {row.priceSource?.startsWith("http") ? (

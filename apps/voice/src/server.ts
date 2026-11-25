@@ -1,7 +1,7 @@
 import { whatsappCallsWanted, type Clock, type Db } from "@deskvoice/core";
 import type { Tool } from "@deskvoice/tools";
 import type { DecisionModel, VoiceEngine } from "@deskvoice/voice-engine";
-import { startAgentTest } from "./agent-test";
+import { agentTestState, startAgentTest } from "./agent-test";
 import { createApprovalWaiter } from "./approvals";
 import type { AriClient, AriEvent } from "./ari";
 import { AsteriskCalls } from "./asterisk-transport";
@@ -264,6 +264,7 @@ export async function startVoiceServer(deps: VoiceServerDeps): Promise<VoiceServ
         started.done.catch((error: unknown) => log("error", "could not finish an agent test run", { runId: started.runId, error: messageOf(error) }));
         return { runId: started.runId };
       },
+      agentTestState: (input) => agentTestState({ db, engines: deps.engines, tools: deps.tools, log }, input),
       async simulate(input) {
         const started = await startSimulatedCall(sessionDeps, input);
         if (!("callId" in started)) return started;
