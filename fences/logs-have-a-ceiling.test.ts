@@ -1,8 +1,7 @@
 // dono: @DeskLabs-OpenSource/maintainers
 // motivo: o Asterisk gravava /var/log/asterisk/messages.log (o padrão da imagem) sem teto nem
-//   rotação: uma linha NOTICE por pedido SIP recusado. Numa instalação de teste o arquivo chegou a
-//   20 GB em duas semanas e o disco a 97%; noutra, 9,7 GB. O log só tem teto quando sai pela saída do
-//   contêiner, que o Docker limita pelo `logging` do Compose.
+//   rotação. Numa instalação de teste o arquivo chegou a 20 GB em duas semanas e o disco a 97%;
+//   noutra, 9,7 GB. O log só tem teto quando sai pela saída do contêiner, que o Docker limita pelo `logging` do Compose.
 // revisar em: 2027-05-26
 import { describe, it, expect } from "vitest";
 import { parse } from "yaml";
