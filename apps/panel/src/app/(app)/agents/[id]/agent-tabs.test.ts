@@ -71,11 +71,11 @@ describe("a lista e o painel das abas", () => {
   });
 
   it("o painel fechado continua montado, escondido e sem a grade que o mostraria", () => {
-    const closed = renderToStaticMarkup(createElement(TabPanel, { base: "agent", id: "depois", active: false }, createElement("input", { name: "x" })));
+    const closed = renderToStaticMarkup(createElement(TabPanel, { base: "agent", id: "depois", active: false, children: createElement("input", { name: "x" }) }));
     expect(closed).toContain('role="tabpanel" id="agent-panel-depois" aria-labelledby="agent-tab-depois" data-tab="depois" tabindex="0" hidden=""');
     expect(closed).toContain('name="x"');
     expect(closed).not.toContain("grid");
-    const open = renderToStaticMarkup(createElement(TabPanel, { base: "agent", id: "depois", active: true }, "x"));
+    const open = renderToStaticMarkup(createElement(TabPanel, { base: "agent", id: "depois", active: true, children: "x" }));
     expect(open).not.toContain("hidden");
     expect(open).toContain('class="grid gap-6"');
   });
