@@ -1,10 +1,12 @@
 # 0022: O conector com o DeskcommCRM fala pelo MCP do CRM
 
-- **Estado:** proposta. Fica aceita com a palavra do dono do projeto, registrada no PR.
+- **Estado:** aceita em 2026-11-26.
 - **Data:** 2026-11-24
 - **Quem decidiu:** o desenho foi proposto na issue
   [#330](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/330), e a resposta de desenho de
-  24/11/2026 escolheu a porta. A aceitação é do dono do projeto.
+  24/11/2026 escolheu a porta. O dono do projeto aceitou em 26/11/2026, junto com o conector
+  das fatias 1a e 2a ([#587](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/587) e
+  [#580](https://github.com/DeskLabs-OpenSource/DeskVoice/pull/580)).
 - **Atualiza:** [`0001`](0001-fronteira-com-o-deskcomm.md)
 
 ## Contexto
