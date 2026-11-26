@@ -1,7 +1,6 @@
 "use client";
 
 import { SpeakerHigh } from "@phosphor-icons/react";
-import Link from "next/link";
 import { useRef, useState } from "react";
 import type { AgentsDictionary } from "../../../../i18n/pt-BR/agents";
 import { fill } from "../../../../i18n/locales";
@@ -9,18 +8,33 @@ import { Button, Field, Select } from "../../../../ui/kit";
 import type { Engine } from "../../../../ui/types";
 import { sampleFor, selectedVoice, type VoiceSample } from "./voice-sample";
 
+/** A âncora do bloco "Pipeline" na tela do agente: a linha da ElevenLabs aponta para ele. */
+export const PIPELINE_BLOCK_ID = "pipeline";
+
 /** O nome do provedor pelo `provider` do motor; o provedor que o dicionário não conhece sai como veio. */
 export const voiceProviderName = (t: AgentsDictionary, provider: string): string => t.voiceProviders[provider] ?? provider;
 
 /**
+ * O nome do motor ao lado do provedor, sem o provedor repetido: "Gemini Live (Google)" vira
+ * "Gemini Live" quando o provedor já vem escrito antes. Só nesta tela: o `label` do motor continua o
+ * mesmo nas outras (Configurações › IA, a ligação, a lista de agentes), onde ele aparece sozinho.
+ */
+export const engineNameBeside = (label: string, provider: string): string => {
+  const suffix = ` (${provider})`;
+  return label.endsWith(suffix) ? label.slice(0, -suffix.length) : label;
+};
+
+/**
  * O campo "Voz" da tela do agente (DESA-397, fatia 1a): as vozes num grupo com o provedor e o motor,
  * o botão "Ouvir" com a amostra da voz selecionada no idioma do agente, e a linha que diz onde ficam
- * as vozes da ElevenLabs. Nenhuma voz da ElevenLabs entra na lista: o motor do agente não as fala.
+ * as vozes da ElevenLabs (o bloco "Pipeline", fatia 5b-1). Nenhuma voz da ElevenLabs entra na lista: o
+ * motor do agente não as fala.
  */
 export function VoiceField({ t, engine, voiceId, language, onChange }: { t: AgentsDictionary; engine: Engine | undefined; voiceId: string; language: string; onChange(next: string): void }) {
   const voices = engine?.voices ?? [];
   const defaultVoice = engine?.defaultVoice ?? null;
   const provider = engine ? voiceProviderName(t, engine.provider) : null;
+  const engineName = engine && provider ? engineNameBeside(engine.label, provider) : null;
   const custom = voiceId !== "" && !voices.some((voice) => voice.id === voiceId);
   const options = (
     <>
@@ -37,9 +51,9 @@ export function VoiceField({ t, engine, voiceId, language, onChange }: { t: Agen
   const offersVoice = voices.length > 0 || defaultVoice !== null;
   return (
     <div className="grid content-start gap-2">
-      <Field label={t.voiceId} hint={engine && provider && offersVoice ? fill(t.voiceHint, { provider, engine: engine.label }) : undefined}>
+      <Field label={t.voiceId} hint={engine && provider && offersVoice ? fill(t.voiceHint, { provider, engine: engineName ?? engine.label }) : undefined}>
         <Select value={voiceId} onChange={(event) => onChange(event.target.value)}>
-          {engine && provider ? <optgroup label={`${provider} · ${engine.label}`}>{options}</optgroup> : options}
+          {engine && provider ? <optgroup label={`${provider} · ${engineName ?? engine.label}`}>{options}</optgroup> : options}
           {custom ? <option value={voiceId}>{fill(t.voiceCustom, { voice: voiceId })}</option> : null}
         </Select>
       </Field>
@@ -49,28 +63,43 @@ export function VoiceField({ t, engine, voiceId, language, onChange }: { t: Agen
       ) : null}
       <p className="text-[0.87rem] text-muted">
         {t.voiceElevenLabs}{" "}
-        <Link href="/settings/voice" className="font-bold underline underline-offset-4">
+        {/* As vozes da ElevenLabs ficam no bloco "Pipeline" desta tela (fatia 5b-1), com o Ouvir. */}
+        <a href={`#${PIPELINE_BLOCK_ID}`} className="font-bold underline underline-offset-4">
           {t.voiceElevenLabsLink}
-        </Link>
+        </a>
       </p>
     </div>
   );
 }
 
-/** "Ouvir": nada é baixado antes do clique (`preload="none"`), e o clique sempre diz alguma coisa. */
-function Listen({ t, voice, sample }: { t: AgentsDictionary; voice: string; sample: VoiceSample | null }) {
+/**
+ * Toca a amostra do começo. O `play()` recusado (o navegador que bloqueia, o endereço que não responde)
+ * chama `onFailed`: o Ouvir nunca fica mudo sem dizer nada. Sem elemento, também é falha.
+ */
+export async function playSample(element: Pick<HTMLAudioElement, "play" | "currentTime"> | null, onFailed: () => void): Promise<void> {
+  if (!element) return onFailed();
+  element.currentTime = 0;
+  try {
+    await element.play();
+  } catch {
+    onFailed();
+  }
+}
+
+/**
+ * "Ouvir": nada é baixado antes do clique (`preload="none"`), e o clique sempre diz alguma coisa. Serve
+ * ao campo de voz do motor e às vozes da ElevenLabs no bloco "Pipeline" (`failedText` e `label` delas).
+ */
+export function Listen({ t, voice, sample, label, failedText }: { t: AgentsDictionary; voice: string; sample: VoiceSample | null; label?: string; failedText?: string }) {
   const audio = useRef<HTMLAudioElement>(null);
   const [failed, setFailed] = useState(false);
   const play = () => {
-    const element = audio.current;
-    if (!element) return;
     setFailed(false);
-    element.currentTime = 0;
-    element.play().catch(() => setFailed(true));
+    void playSample(audio.current, () => setFailed(true));
   };
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button type="button" icon={<SpeakerHigh size={18} aria-hidden />} disabled={sample === null} onClick={play} aria-label={fill(t.voiceListenLabel, { voice })}>
+      <Button type="button" icon={<SpeakerHigh size={18} aria-hidden />} disabled={sample === null} onClick={play} aria-label={label ?? fill(t.voiceListenLabel, { voice })}>
         {t.voiceListen}
       </Button>
       {sample ? <audio ref={audio} preload="none" src={sample.src} onError={() => setFailed(true)} /> : null}
@@ -78,7 +107,7 @@ function Listen({ t, voice, sample }: { t: AgentsDictionary; voice: string; samp
       {sample?.inPortuguese ? <span className="text-[0.87rem] text-muted">{t.voiceSampleInPortuguese}</span> : null}
       {failed ? (
         <span role="alert" className="text-[0.87rem] text-fail">
-          {t.voiceSampleFailed}
+          {failedText ?? t.voiceSampleFailed}
         </span>
       ) : null}
     </div>

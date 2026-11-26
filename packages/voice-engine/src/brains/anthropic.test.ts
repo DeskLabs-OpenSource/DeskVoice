@@ -306,6 +306,7 @@ const chatRequest = (overrides: Partial<BrainChatRequest> = {}): BrainChatReques
   messages: CHAT_MESSAGES,
   tools: CHAT_TOOLS,
   timeoutMs: 5_000,
+  maxTokens: 321,
   ...overrides,
 });
 

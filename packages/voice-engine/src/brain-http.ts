@@ -250,6 +250,11 @@ export interface ChatStreamOptions {
   includeUsage: boolean;
   /** O consumo do pedaço que traz `usage`, na leitura do próprio cérebro. */
   usageOf: (chunk: unknown) => Usage;
+  /**
+   * O nome do campo do teto de saída (`BrainChatRequest.maxTokens`) no provedor: `max_completion_tokens`
+   * na OpenAI (onde `max_tokens` está obsoleto), `max_tokens` no DeepSeek e no OpenRouter.
+   */
+  maxTokensField: "max_completion_tokens" | "max_tokens";
 }
 
 const BAD: ChatStep = { failure: "unexpected_response" };
@@ -263,6 +268,8 @@ function completionsFormat(apiKey: string, request: BrainChatRequest, options: C
     messages,
     // Lista vazia de ferramentas é recusada por alguns provedores: sem ferramenta, o campo não vai.
     ...(tools.length > 0 ? { tools } : {}),
+    // O teto de saída: sem ele, o pior caso do pedido não tem limite (desenho do pipeline, seção 3.3).
+    [options.maxTokensField]: request.maxTokens,
     stream: true,
     ...(options.includeUsage ? { stream_options: { include_usage: true } } : {}),
   };

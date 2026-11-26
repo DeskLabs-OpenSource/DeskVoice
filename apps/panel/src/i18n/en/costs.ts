@@ -14,6 +14,12 @@ const costs: CostsDictionary = {
   calls: "Calls: {n}",
   analystLine: "Analyst · {model}",
   analystNote: "Live analyst requests, on each caller turn",
+  /** A linha de uma peça separada do motor, como as do pipeline (fatia 5c). `{piece}` é qual peça; `{label}`, o nome dela. */
+  pieceLine: "{piece} · {label}",
+  pieces: { transcriber: "Transcription", brain: "Brain", synthesizer: "Voice" },
+  pieceNote: "A piece apart from the engine (like those of the pipeline): the cost comes from its own usage (minutes heard, tokens or characters).",
+  testLine: "Tests · {engine}",
+  testNote: "Agent test runs, in text",
   minutes: "{n} min",
   priceChecked: "Price checked on {date}",
   priceSource: "Price source",

@@ -79,6 +79,11 @@ export const CALL_EVENT_KINDS = [
   "ivr_ended",
   "webhook_delivered",
   "webhook_failed",
+  "transcriber_failed",
+  // Uma peça do motor pipeline (R5) falhou sem encerrar a ligação: o cérebro num pedido, ou o aviso da transcrição.
+  "pipeline_turn_failed",
+  // O tempo de um turno respondido pelo motor pipeline (R5, fatia 3c-1): um por turno, só números.
+  "pipeline_turn_latency",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];
