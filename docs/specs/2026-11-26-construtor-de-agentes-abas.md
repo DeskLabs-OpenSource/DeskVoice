@@ -1,6 +1,7 @@
 # A tela do agente em abas, com os cartões Ouvido, Cérebro e Voz e um painel lateral por peça
 
-- **Estado:** desenho. Nenhum código antes do de acordo da revisora neste PR.
+- **Estado:** desenho. Nenhum código antes do de acordo da revisora neste PR e da resposta do dono
+  às escolhas de cada fatia (seção 8).
 - **Data:** 2026-11-26
 - **Quem pediu:** o dono, em 26/11, na sessão do orquestrador. Ele pediu que a tela do agente, que
   hoje é uma página só com tudo junto, passe a ter abas organizadas por função, e que a transcrição,
@@ -12,6 +13,28 @@
   só na máquina de testes. Elas não entram no repositório. O que serviu delas está descrito em
   palavras na seção 2. Daqui só se aproveita a **organização**. A aparência, os nomes, os ícones e
   os textos seguem a [direção do painel](../design/direcao-do-painel.md).
+
+## 0. Duas partes, dois caminhos
+
+Este desenho separa duas coisas, porque elas seguem caminhos diferentes (combinado com o maestro
+em 26/11):
+
+- **O que já existe e só muda de lugar.** Segue com a revisora, neste PR. É o inventário (seção
+  1), a mecânica das abas (4.2 a 4.4), a regra de só mostrar número medido (5.2, que vem do
+  `AGENTS.md` e não é escolha), o componente do painel lateral e a acessibilidade dele (5.3), a
+  confirmação da 9.1 só mostrada (5.3, que vem da R5), as fatias (6) e os testes (6.2).
+- **As escolhas de tela que o dono não fez.** Cada uma é um pedido de decisão na seção 8, no
+  formato do `GOVERNANCE.md`, com a recomendação e o padrão sem resposta. O maestro leva os
+  pedidos para a pasta do dono. São quatro:
+  - **D1.** Quais abas, e em qual aba fica cada campo (a tabela 4.1).
+  - **D2.** O que cada cartão mostra, nos motores diretos e no pipeline (5.1 e 5.2).
+  - **D3.** O que sai da tela de hoje (o bloco Pipeline, "Cérebros deste agente", a página e o
+    link dos testes, a âncora `#pipeline`).
+  - **D4.** Se o painel lateral tem um Salvar próprio (5.3).
+
+Nas seções 4 e 5, o que depende de uma escolha está marcado com o número dela, e o texto descreve
+a **recomendação**. **Nenhuma fatia de código começa antes da resposta da escolha de que ela
+depende** (tabela da seção 6).
 
 ## 1. Problema
 
@@ -96,11 +119,14 @@ proíbe número que não foi medido.
 | Disparo em massa | Não facilita. A aba Ligações só lista as ligações, sem ação em lote e sem discar |
 | SSH para ligar recurso | Não pede |
 | Recurso pago, telemetria | Nenhum |
-| Quem já instalou não é surpreendido | Nenhum dado muda, nenhuma configuração nova, e todo endereço antigo continua abrindo (seção 4.4). **Mas os campos mudam de lugar.** O fragmento traz a tabela "onde estava → onde está", e o pedido de decisão da seção 8 confirma a casa de cada campo |
+| Quem já instalou não é surpreendido | Nenhum dado muda, nenhuma configuração nova, e todo endereço antigo continua abrindo (seção 4.4). **Mas os campos mudam de lugar.** O fragmento traz a tabela "onde estava → onde está", e os pedidos D1 e D3 da seção 8 decidem a casa de cada campo e o que sai |
 
 ## 4. As abas
 
-### 4.1 A proposta
+### 4.1 A proposta (escolha D1)
+
+Esta tabela é a recomendação do pedido D1. A mecânica das seções 4.2 a 4.4 vale para qualquer
+lista de abas que o dono escolher.
 
 Seis abas, cada uma com uma função. A sugestão da tarefa tinha cinco. Separei **Depois da ligação**
 de Ferramentas porque o painel já usa esse nome: Configurações tem a área "Depois da ligação"
@@ -174,7 +200,7 @@ O padrão de abas da ARIA (Authoring Practices, "Tabs with automatic activation"
 
 ## 5. Os cartões Ouvido, Cérebro e Voz (aba Agente)
 
-### 5.1 A forma
+### 5.1 A forma (escolha D2)
 
 Logo abaixo da Identidade vem a linha do **motor** (o `EngineField` de hoje, sem mudança), e embaixo
 dela, três cartões de mesmo peso, lado a lado em tela larga e empilhados no celular:
@@ -208,8 +234,8 @@ preço feita na tela.
 | Nota própria da peça (erro da transcrição, inteligência, naturalidade) | não existe | Não aparece | — |
 | Custo por minuto | não existe por agente. Daria para calcular a partir das durações, mas é conta nova, sem desenho | Não aparece. Vai para "O que fica de fora" | — |
 
-**Nos motores diretos** (Gemini Live, OpenAI Realtime e o simulado), uma sessão só faz as três
-coisas. O desenho mantém os três cartões, porque cada um tem o que configurar de verdade: o Ouvido
+**Nos motores diretos** (escolha D2) (Gemini Live, OpenAI Realtime e o simulado), uma sessão só
+faz as três coisas. A recomendação mantém os três cartões, porque cada um tem o que configurar de verdade: o Ouvido
 tem o vocabulário e o ambiente de escuta, a Voz tem a voz e o Ouvir, e o Cérebro tem as instruções.
 O que muda:
 
@@ -247,7 +273,8 @@ medido" até haver ligação gravada com o pipeline.
 - o `<dialog>` é renderizado **dentro** do `<fieldset disabled={!canConfigure}>` e do `<form>`. Os
   campos dele continuam no formulário e no rascunho, e quem só lê vê os campos desligados, como hoje.
 
-**Editar e salvar:** o painel edita o mesmo rascunho. Ele não tem Salvar próprio, porque não pode
+**Editar e salvar (escolha D4):** na recomendação, o painel edita o mesmo rascunho. Ele não tem
+Salvar próprio, porque não pode
 existir um segundo jeito de gravar. "Fechar" fecha, a mudança fica no rascunho, e o cartão mostra
 "não salvo". O Salvar do rodapé grava tudo, como hoje. Os botões do painel são `type="button"`, para
 não enviar o formulário.
@@ -267,7 +294,8 @@ leva para lá. Quando a fatia 6 ligar o salvar do pipeline, a recusa 422 do serv
 (`pipeline_piece_unconfirmed`, com a peça no `detail`) aparece no painel da peça, além do status do
 rodapé. Esta tela não ganha um caminho novo de confirmar.
 
-**O que sai dos painéis de hoje:** o painel "Pipeline" deixa de existir como bloco, e o conteúdo
+**O que sai dos painéis de hoje (escolha D3):** na recomendação, o painel "Pipeline" deixa de
+existir como bloco, e o conteúdo
 dele vai para os três painéis. A faixa de latência sobe para a faixa de resumo. "Cérebros deste
 agente" se divide: quem conversa vai para o Cérebro, quem lê a ligação vai para Depois da ligação,
 e a linha do analista ao vivo vai para Ferramentas, ao lado do campo do analista.
@@ -278,13 +306,16 @@ Cada fatia tem até ~400 linhas (fora testes e textos dos dicionários) e sai da
 a anterior entrar, sem empilhar (regra do maestro de 26/11). Os números de linhas são estimativas
 deste desenho, e não medidas.
 
-| Ordem | Fatia | O que entrega | Linhas (estim.) |
-|---|---|---|---|
-| 1 | **As abas, com o conteúdo de hoje redistribuído** | componente `Tabs` no kit; `page.tsx` agrupa os painéis de hoje **inteiros** nas abas Agente, Ferramentas, Depois da ligação, Testes e Avançado (a tabela 4.1, menos os cartões e menos Ligações); o idioma passa para a Identidade; `?aba=`; o `onInvalidCapture`; os testes viram aba (o corpo de `tests/page.tsx` vira componente, e a rota antiga redireciona); os três links da organização em Avançado; fragmento com a tabela "onde estava → onde está". Nesta fatia, "Cérebros deste agente" e o bloco Pipeline ficam inteiros na aba Agente | ~350 |
-| 2 | **Os cartões e o painel lateral, motores diretos** | `SidePanel` no kit e o token `--dv-scrim`; os três cartões; o painel do Ouvido (vocabulário e ambiente saem do formulário solto e vão para ele) e o da Voz (o `VoiceField`); o Cérebro com a linha do motor; "Cérebros deste agente" se divide (quem lê vai para Depois da ligação, e o analista, para Ferramentas). Os cartões ainda sem número de custo: a faixa mostra só a latência que já existe | ~400 |
-| 3 | **O pipeline nos cartões** | o conteúdo do bloco Pipeline vai para os três painéis (transcrição e 9.1 no Ouvido, cérebro e modelo no Cérebro, vozes da ElevenLabs, Ouvir e 9.1 na Voz); o bloco e a âncora `#pipeline` saem; a linha da ElevenLabs no campo Voz vira o botão que abre o painel. Continua só ver e ouvir | ~250 |
-| 4 | **O custo medido nos cartões e na faixa** | **novo** `GET /agents/[id]/costs?days=30` (total e por peça, a mesma leitura do extrato de Custos, isolada por organização) e os números da seção 5.2, com "não medido" e "estimado" | ~250 |
-| 5 | **A aba Ligações** | filtro `agentId` em `GET /calls` (validado como uuid, dentro da organização da sessão); a lista da tela de Ligações vira componente reaproveitado; a aba, com o filtro de status | ~300 |
+| Ordem | Fatia | O que entrega | Linhas (estim.) | Espera a resposta de |
+|---|---|---|---|---|
+| 1 | **As abas, com o conteúdo de hoje redistribuído** | componente `Tabs` no kit; `page.tsx` agrupa os painéis de hoje **inteiros** nas abas Agente, Ferramentas, Depois da ligação, Testes e Avançado (a tabela 4.1, menos os cartões e menos Ligações); o idioma passa para a Identidade; `?aba=`; o `onInvalidCapture`; os testes viram aba (o corpo de `tests/page.tsx` vira componente, e a rota antiga redireciona); os três links da organização em Avançado; fragmento com a tabela "onde estava → onde está". Nesta fatia, "Cérebros deste agente" e o bloco Pipeline ficam inteiros na aba Agente | ~350 | D1, D3 (os testes viram aba) |
+| 2 | **Os cartões e o painel lateral, motores diretos** | `SidePanel` no kit e o token `--dv-scrim`; os três cartões; o painel do Ouvido (vocabulário e ambiente saem do formulário solto e vão para ele) e o da Voz (o `VoiceField`); o Cérebro com a linha do motor; "Cérebros deste agente" se divide (quem lê vai para Depois da ligação, e o analista, para Ferramentas). Os cartões ainda sem número de custo: a faixa mostra só a latência que já existe | ~400 | D2, D3, D4 |
+| 3 | **O pipeline nos cartões** | o conteúdo do bloco Pipeline vai para os três painéis (transcrição e 9.1 no Ouvido, cérebro e modelo no Cérebro, vozes da ElevenLabs, Ouvir e 9.1 na Voz); o bloco e a âncora `#pipeline` saem; a linha da ElevenLabs no campo Voz vira o botão que abre o painel. Continua só ver e ouvir | ~250 | D3 |
+| 4 | **O custo medido nos cartões e na faixa** | **novo** `GET /agents/[id]/costs?days=30` (total e por peça, a mesma leitura do extrato de Custos, isolada por organização) e os números da seção 5.2, com "não medido" e "estimado" | ~250 | D2 |
+| 5 | **A aba Ligações** | filtro `agentId` em `GET /calls` (validado como uuid, dentro da organização da sessão); a lista da tela de Ligações vira componente reaproveitado; a aba, com o filtro de status | ~300 | D1 |
+
+A coluna da direita manda: a fatia só começa depois da resposta do dono às escolhas dela. Se a
+resposta mudar a escolha, a fatia segue a resposta, e o desenho ganha um commit antes do código.
 
 A ordem segue o pedido: a fatia 1 vale sozinha, e os cartões com o painel vêm logo depois.
 Ligações vai por último porque é a única que mexe numa rota que outra tela usa.
@@ -361,36 +392,131 @@ próprio:
 - editor de instruções com variáveis e formatação;
 - gravar o pipeline pela tela: continua na fatia 6 da R5, com a medida dela.
 
-## 8. Pedido de decisão
+## 8. Pedidos de decisão
+
+Quatro pedidos, um por escolha. Os quatro são reversíveis: mudam a tela, sem tocar em dado, rota
+gravada ou configuração de quem já instalou. O pedido único que eu tinha aberto antes (a casa de
+cada campo) virou o D1.
+
+---
 
 Dono do pedido: Arquiteto.
 
-## Decisão: a nova casa de cada campo da tela do agente (tabela 4.1) vale como está?
+## Decisão: D1. Quais abas a tela do agente tem, e em qual aba fica cada campo?
 
 **Quem decide:** dono do projeto
-**O que está parado esperando:** nada. A fatia 1 anda com a opção padrão. A resposta só pode mover
-campos de uma aba para outra.
+**O que está parado esperando:** as fatias 1 (as abas) e 5 (a aba Ligações).
 
 ### Opções
-- **A.** Vale a tabela 4.1: seis abas, com "Depois da ligação" separada de Ferramentas, o idioma na
-  Identidade e os limites em Avançado. Custo: quem já instalou procura os campos em outro lugar uma
-  vez. O fragmento da versão traz a tabela "onde estava → onde está".
-- **B.** Cinco abas, como na sugestão: "Depois da ligação" dentro de Ferramentas. Custo: a aba
-  Ferramentas mistura o que o agente faz durante a ligação com o que acontece depois, e fica com o
-  nome diferente da área de Configurações que trata do mesmo assunto.
-- **C.** Não reorganizar: a página única continua. Custo: o pedido de 26/11 não é atendido, e a
-  tela segue crescendo a cada recurso.
+- **A.** Seis abas, a tabela 4.1: Agente, Ligações, Ferramentas, Depois da ligação, Testes e
+  Avançado. "Depois da ligação" fica separada de Ferramentas, o idioma vai para a Identidade, e os
+  limites vão para Avançado. Custo: quem já instalou procura os campos em outro lugar uma vez (o
+  fragmento traz a tabela "onde estava → onde está"), e a aba Ligações pede um filtro novo na rota
+  das ligações.
+- **B.** Cinco abas, como na sugestão da tarefa: "Depois da ligação" dentro de Ferramentas. Custo: a
+  aba Ferramentas mistura o que o agente faz durante a ligação com o que acontece depois, e fica com
+  um nome diferente da área de Configurações que trata do mesmo assunto.
+- **C.** Não fazer: a página única continua. Custo: o pedido de 26/11 não é atendido, e a tela segue
+  crescendo a cada recurso.
 
 ### Recomendação
 A, porque quem configura acha o que acontece depois da ligação pelo mesmo nome que já vê em
 Configurações, e a aba Ferramentas fica só com o que o agente faz enquanto fala.
 
 ### Se ninguém responder em 3 dias, vale: A
-A opção é reversível: mudar um campo de aba é mudar a tela, sem tocar em dado nem em rota.
 
 ### Não medido
 Ninguém que opera o painel viu as abas. Não sei quantos campos cada operador costuma mexer, nem em
 que ordem, e isso poderia mudar quais campos ficam na aba Agente.
+
+---
+
+Dono do pedido: Arquiteto.
+
+## Decisão: D2. O que os cartões Ouvido, Cérebro e Voz mostram?
+
+**Quem decide:** dono do projeto
+**O que está parado esperando:** as fatias 2 (cartões nos motores diretos) e 4 (custo nos cartões).
+
+### Opções
+- **A.** Três cartões em todo motor. Cada um mostra a escolha da peça e o custo medido deste agente
+  nos últimos 30 dias, ou "não medido". Nos motores diretos, que não separam as peças, os três
+  cartões dizem "no custo do motor", e o total vai na faixa de cima, com a latência p50 que já
+  existe (só no pipeline). Nenhum número sem medida. Custo: uma rota nova de custo por agente
+  (fatia 4), e três cartões que, no motor direto, apontam para uma sessão só.
+- **B.** Três cartões só no pipeline. Nos motores diretos, um cartão só, "Motor", com a voz, o
+  ambiente de escuta e o vocabulário dentro. Custo: a tela muda de forma quando se troca de motor, e
+  quem compara dois agentes vê telas diferentes.
+- **C.** Cartões sem número: só a escolha de cada peça. O custo continua no detalhe da ligação e em
+  Custos. Custo: o cartão não ajuda a comparar o que cada peça custa, e a fatia 4 sai do plano.
+- **D.** Não fazer cartões: os campos ficam soltos na aba Agente. Custo: a divisão em três peças que
+  o pedido de 26/11 chamou de "perfeita" não aparece.
+
+### Recomendação
+A, porque quem configura vê as mesmas três peças em qualquer motor, e cada número que aparece veio
+de uma ligação de verdade.
+
+### Se ninguém responder em 3 dias, vale: A
+
+### Não medido
+Não medi a consulta da rota de custo por agente, nem quanto tempo ela leva com muitas ligações. Não
+sei se o operador lê "no custo do motor" como "de graça".
+
+---
+
+Dono do pedido: Arquiteto.
+
+## Decisão: D3. O que sai da tela do agente de hoje?
+
+**Quem decide:** dono do projeto
+**O que está parado esperando:** as fatias 1 (só a parte dos testes virarem aba), 2 e 3.
+
+### Opções
+- **A.** Saem como bloco: o painel "Pipeline" (o conteúdo vai para os três painéis laterais),
+  "Cérebros deste agente" (quem conversa vai para o Cérebro, quem lê a ligação vai para Depois da
+  ligação, e a linha do analista vai para Ferramentas), a página separada dos testes (vira a aba
+  Testes, e o endereço antigo redireciona), o link "Testes do agente" do topo e a âncora
+  `#pipeline` (vira um botão que abre o painel da Voz). Nenhum campo some: todos mudam de lugar.
+  Custo: quem já instalou não acha mais os blocos pelo nome antigo.
+- **B.** Os cartões entram, mas o bloco Pipeline e "Cérebros deste agente" ficam inteiros na aba
+  Agente, embaixo dos cartões. Custo: a mesma escolha aparece em dois lugares (no cartão e no bloco),
+  e a tela volta a ficar comprida.
+- **C.** Não tirar nada: as abas só agrupam os painéis de hoje, e os testes continuam na página
+  deles. Custo: os cartões não têm o que abrir, e o pedido do painel lateral não é atendido.
+
+### Recomendação
+A, porque cada coisa fica num lugar só, e todo endereço antigo continua abrindo.
+
+### Se ninguém responder em 3 dias, vale: A
+
+### Não medido
+Não sei quantos operadores usam o link do topo dos testes nem a âncora `#pipeline`.
+
+---
+
+Dono do pedido: Arquiteto.
+
+## Decisão: D4. O painel lateral de cada peça tem um botão Salvar próprio?
+
+**Quem decide:** dono do projeto
+**O que está parado esperando:** a fatia 2.
+
+### Opções
+- **A.** Não. O painel edita o rascunho da tela, "Fechar" guarda a mudança no rascunho, o cartão
+  mostra "não salvo", e o Salvar do rodapé grava tudo, como hoje. Custo: quem fecha o painel e sai
+  da tela sem salvar perde a mudança, como já acontece hoje com qualquer campo.
+- **B.** Sim. O painel tem um Salvar que grava só aquela peça. Custo: dois jeitos de gravar o mesmo
+  agente, e o rodapé pode gravar uma mudança de outra aba que a pessoa não pretendia gravar ainda.
+- **C.** Não fazer painel: o cartão abre os campos no lugar, embaixo dele. Custo: o painel lateral
+  do pedido de 26/11 não é atendido.
+
+### Recomendação
+A, porque existe um jeito só de gravar o agente, e o "não salvo" no cartão diz o que falta.
+
+### Se ninguém responder em 3 dias, vale: A
+
+### Não medido
+Não testei com operador se o "não salvo" no cartão basta para lembrar de salvar.
 
 ## 9. Não medido
 
