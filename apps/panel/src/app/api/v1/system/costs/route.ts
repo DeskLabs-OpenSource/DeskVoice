@@ -1,6 +1,7 @@
 import { costTotal } from "@deskvoice/core";
 import { ApiError, handle } from "../../../../../server/context";
 import { centsOf, ESTIMATED_COUNT, LEDGER_AGENT, UNMEASURED_COUNT } from "../../../../../server/costs";
+import { PIECE_LINE, pieceLabels, pieceOfLedger } from "../../../../../server/piece-costs";
 import { listDecisionModels, listEngines } from "../../../../../server/pieces";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -56,8 +57,8 @@ export const GET = handle({}, async ({ q, url, deps }) => {
   // `engine`, o mesmo do filtro da fala: a linha do analista sai separada pelo `source`, e não tem
   // minutos (o modelo de decisão não atende trecho nenhum). O teste do agente (fatia 7b) grava as
   // dele com `source = 'test'`, sem ligação: saem numa linha própria, sem minutos, pelo mesmo `source`.
-  const byEngine = await q.many<{ engine: string; source: string | null; microcents: string; seconds: number; unmeasured: number; estimated: number }>(
-    `with scoped as (select l.engine, l.source, l.call_id, l.cost_microcents, l.cost_measured, l.cost_estimated ${scope}),
+  const byEngine = await q.many<{ engine: string; source: string | null; pieceLine: boolean; microcents: string; seconds: number; unmeasured: number; estimated: number }>(
+    `with scoped as (select l.engine, l.source, ${PIECE_LINE} as piece_line, l.call_id, l.cost_microcents, l.cost_measured, l.cost_estimated ${scope}),
           ended as (
             select c.id, c.engine, c.ended_at,
                    case when exists (select 1 from call_events i where i.call_id = c.id and i.kind = 'ivr_started')
@@ -78,10 +79,10 @@ export const GET = handle({}, async ({ q, url, deps }) => {
             select engine, starts_at, coalesce(lead(starts_at) over (partition by call_id order by seq), ended_at) as ends_at from legs),
           answered as (
             select engine, coalesce(sum(extract(epoch from (ends_at - starts_at))), 0)::int as seconds from timed group by 1)
-     select s.engine, s.source, coalesce(sum(s.cost_microcents), 0)::text as microcents, coalesce(a.seconds, 0)::int as seconds,
+     select s.engine, s.source, s.piece_line as "pieceLine", coalesce(sum(s.cost_microcents), 0)::text as microcents, coalesce(a.seconds, 0)::int as seconds,
             count(*) filter (where not s.cost_measured)::int as unmeasured, count(*) filter (where s.cost_estimated)::int as estimated
        from scoped s left join answered a on a.engine = s.engine and s.source is null
-      group by s.engine, s.source, a.seconds order by coalesce(sum(s.cost_microcents), 0) desc`,
+      group by s.engine, s.source, s.piece_line, a.seconds order by coalesce(sum(s.cost_microcents), 0) desc`,
     range,
   );
   // O total vem da soma de `packages/core`, a mesma da visão geral da instalação e do teto do mês.
@@ -90,6 +91,11 @@ export const GET = handle({}, async ({ q, url, deps }) => {
   // O filtro da fala e o analista gravam o modelo de decisão em `engine`: o nome e o preço vêm dele.
   const deciders = new Map((await listDecisionModels()).map((model) => [model.id, model]));
   const pieceOf = (id: string) => engines.get(id) ?? deciders.get(id);
+  // As peças gravam `<peça>:<id>` em `engine`, com o agente do trecho (`PIECE_LINE`, fatia 5c): o nome vem
+  // da pasta da peça, e a linha diz qual peça é. A classificação pelo cérebro (sem agente) sai à parte,
+  // como sempre. O preço do cérebro vem da lista de modelos da organização, e o da voz depende do
+  // modelo: a data e a fonte do preço não saem aqui. Elas não atendem trecho, e não têm minutos.
+  const labelOfPiece = await pieceLabels();
   return {
     from,
     to,
@@ -105,7 +111,9 @@ export const GET = handle({}, async ({ q, url, deps }) => {
     // cobrar (o OpenAI Realtime declara token, não segundo), e `callSeconds` é a duração das ligações.
     byDay: byDay.map((row) => ({ day: row.day, costCents: centsOf(row.microcents), billedSeconds: row.seconds, unmeasuredCount: row.unmeasured, estimatedCount: row.estimated })),
     byAgent: byAgent.map((row) => ({ agentId: row.agentId, name: row.name, costCents: centsOf(row.microcents), calls: row.calls, unmeasuredCount: row.unmeasured, estimatedCount: row.estimated })),
-    byEngine: byEngine.map((row) => ({
+    byEngine: byEngine.map((row) => {
+      const piece = row.pieceLine ? pieceOfLedger(row.engine) : null;
+      return {
       engine: row.engine,
       // `analyst` nas linhas do analista ao vivo, `test` nas do teste do agente (fatia 7b); nulo no
       // resto (voz, filtro, classificação).
@@ -114,9 +122,12 @@ export const GET = handle({}, async ({ q, url, deps }) => {
       callSeconds: row.seconds,
       unmeasuredCount: row.unmeasured,
       estimatedCount: row.estimated,
-      label: pieceOf(row.engine)?.label ?? row.engine,
-      priceCheckedOn: pieceOf(row.engine)?.pricing.checkedOn ?? null,
-      priceSource: pieceOf(row.engine)?.pricing.source ?? null,
-    })),
+      // A peça do pipeline da linha (`transcriber`, `brain` ou `synthesizer`); nula nas outras, que não mudam.
+      piece: piece?.kind ?? null,
+      label: piece ? (labelOfPiece(piece.kind, piece.id) ?? piece.id) : (pieceOf(row.engine)?.label ?? row.engine),
+      priceCheckedOn: piece ? null : (pieceOf(row.engine)?.pricing.checkedOn ?? null),
+      priceSource: piece ? null : (pieceOf(row.engine)?.pricing.source ?? null),
+      };
+    }),
   };
 });

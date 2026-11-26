@@ -290,22 +290,30 @@ export async function startWebCalls(deps: WebCallsDeps): Promise<WebCalls> {
           await recordEvent(q, refused.id, "call_refused", { reason: SPEND_CAP_REACHED, channel: "web", userId: input.userId, capCents: cap.capCents }, now);
           return { code: SPEND_CAP_REACHED, message: "This organization reached its monthly spending cap. The installation administration can change the cap." };
         }
-        const agent = await q.one<{ enabled: boolean; engine: string }>("select enabled, engine from agents where id = $1", [input.agentId]);
+        const agent = await q.one<{ enabled: boolean; engine: string; pipeline: unknown }>("select enabled, engine, pipeline from agents where id = $1", [input.agentId]);
         if (!agent) return { code: "agent_not_found", message: "This agent does not exist in this organization." };
         if (!agent.enabled) return { code: "agent_disabled", message: "This agent is turned off." };
-        // Recusar aqui evita abrir o microfone de alguém para uma chamada que não vai conversar.
-        if (agent.engine === "simulated") {
-          return { code: "engine_simulated", message: "This agent uses the simulated engine, which follows a script and does not talk. Change the agent's voice engine to a real one to call it from the browser." };
-        }
-        const engine = engines.get(agent.engine);
-        if (!engine) return { code: "engine_not_installed", message: `The voice engine "${agent.engine}" of this agent is not available in this installation. Choose another voice engine on the agent's screen.` };
-        if (!engine.keyless) {
-          const key = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [input.organizationId, engineKeySetting(agent.engine)]);
-          if (typeof key?.value !== "string") return { code: "engine_not_configured", message: `No API key is saved for the voice engine ${engine.label}. Save it in the settings before calling.` };
+        // Com `agents.pipeline` preenchida (desenho do pipeline, fatia 5b-2), a sessão abre o pipeline e o
+        // `engine` fica sem uso, como no telefone: a mesma abertura, o mesmo teto, o mesmo extrato por peça
+        // e a mesma recusa (sem chave, sem preço, sem a confirmação da 9.1), todos em `startCallSession`.
+        // Nada do pipeline é conferido aqui: um caminho próprio do navegador seria uma segunda regra, que
+        // pode pular a da sessão. A mesma condição da sessão (`usesPipeline`): a coluna nula vale o `engine`.
+        const pipeline = agent.pipeline !== null && agent.pipeline !== undefined;
+        if (!pipeline) {
+          // Recusar aqui evita abrir o microfone de alguém para uma chamada que não vai conversar.
+          if (agent.engine === "simulated") {
+            return { code: "engine_simulated", message: "This agent uses the simulated engine, which follows a script and does not talk. Change the agent's voice engine to a real one to call it from the browser." };
+          }
+          const engine = engines.get(agent.engine);
+          if (!engine) return { code: "engine_not_installed", message: `The voice engine "${agent.engine}" of this agent is not available in this installation. Choose another voice engine on the agent's screen.` };
+          if (!engine.keyless) {
+            const key = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [input.organizationId, engineKeySetting(agent.engine)]);
+            if (typeof key?.value !== "string") return { code: "engine_not_configured", message: `No API key is saved for the voice engine ${engine.label}. Save it in the settings before calling.` };
+          }
         }
         const call = await q.one<{ id: string }>(
           "insert into calls (organization_id, agent_id, direction, channel, status, engine, started_at) values ($1, $2, 'inbound', 'web', 'ringing', $3, $4) returning id",
-          [input.organizationId, input.agentId, agent.engine, clock.now()],
+          [input.organizationId, input.agentId, pipeline ? "pipeline" : agent.engine, clock.now()],
         );
         if (!call) throw new Error("Web call was not created");
         return { callId: call.id };

@@ -199,13 +199,10 @@ const headersOf = (apiKey: string) => ({ "x-api-key": apiKey, "anthropic-version
 // (`chatTransport`); aqui fica só o formato da API de mensagens.
 // ---------------------------------------------------------------------------------------------
 
-/**
- * O teto de saída de uma volta da conversa. É obrigatório na API. Uma volta de ligação é uma fala curta
- * ou um pedido de ferramenta, mas o raciocínio também conta aqui: o mesmo teto do `completeJson` dá folga
- * ao raciocínio sem deixar uma volta presa gerar sem fim. A volta cortada por ele termina como as outras
- * (`done`), com o consumo declarado, como o `finish_reason: "length"` no `/chat/completions`.
- */
-const CHAT_MAX_TOKENS = MAX_TOKENS;
+// O teto de saída de uma volta da conversa é o `maxTokens` do pedido (obrigatório na API, e o
+// `max_tokens` dela): o motor pipeline manda `PIPELINE_BRAIN_MAX_TOKENS`, e não os 16 000 do
+// `completeJson`. A volta cortada por ele termina como as outras (`done`), com o consumo declarado,
+// como o `finish_reason: "length"` no `/chat/completions`.
 
 type WireBlock = Record<string, unknown>;
 type WireMessage = { role: "user" | "assistant"; content: string | WireBlock[] };
@@ -305,7 +302,7 @@ function messagesFormat(apiKey: string, request: BrainChatRequest): ChatFormat {
         : {
             body: {
               model: request.model,
-              max_tokens: CHAT_MAX_TOKENS,
+              max_tokens: request.maxTokens,
               ...(system === null ? {} : { system }),
               messages: wire.messages,
               ...(tools.length > 0 ? { tools } : {}),

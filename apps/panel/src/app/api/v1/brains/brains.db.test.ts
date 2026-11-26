@@ -126,6 +126,7 @@ describe("brain keys and model lists", () => {
       id: "openrouter",
       label: "OpenRouter",
       keyUrl: "https://openrouter.ai/settings/keys",
+      chat: true,
       configured: true,
       keyCheck: { result: "accepted", status: 200, checkedAt: NOW.toISOString() },
       modelCount: 2,

@@ -3,13 +3,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { withSystem } from "@deskvoice/core";
+import { encryptSecret, withSystem } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
-import type { SimulatedScript } from "@deskvoice/voice-engine";
+import type { SimulatedScript, VoiceEngine } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting, tasksOf } from "../../../packages/tools/test/helpers";
-import { DEFAULT_RECORDING_NOTICE } from "./call-session";
+import { createPipelineEngine } from "../../../packages/voice-engine/src/engines/pipeline";
+import { FixedSpeechCache } from "../../../packages/voice-engine/src/synthesis";
+import { brainKeySetting, brainModelsSetting, DEFAULT_RECORDING_NOTICE } from "./call-session";
 import { startVoiceServer, type VoiceServer } from "./server";
 import {
   approvalsOf,
@@ -31,6 +33,7 @@ import {
   type AgentOptions,
   type FakeAri,
 } from "./testing/db";
+import { startFakeBrain, text, tool, usage, type FakeBrain } from "./testing/fake-brain";
 import { fakeAsterisk, waitFor, type FakeAsterisk } from "./testing/helpers";
 
 const { app, owner } = openTestDbs();
@@ -41,10 +44,14 @@ let asterisk: FakeAsterisk | undefined;
 beforeAll(async () => {
   scratch = await mkdtemp(path.join(tmpdir(), "deskvoice-e2e-"));
 });
+let fakeBrain: FakeBrain | undefined;
+
 afterEach(async () => {
   asterisk?.socket.destroy();
   await server?.close();
   server = undefined;
+  await fakeBrain?.stop();
+  fakeBrain = undefined;
 });
 afterAll(async () => {
   await rm(scratch, { recursive: true, force: true });
@@ -81,12 +88,14 @@ interface Scene {
 }
 
 /** Sobe o processo de voz, faz uma ligação chegar pelo tronco e conecta o áudio dela. */
-async function incomingCall(label: string, agent: AgentOptions, settings: Record<string, unknown> = {}): Promise<Scene> {
+async function incomingCall(label: string, agent: AgentOptions, settings: Record<string, unknown> = {}, options: { engines?: Map<string, VoiceEngine>; pipeline?: unknown; secrets?: Record<string, unknown>; simulatedPieces?: boolean } = {}): Promise<Scene> {
   const organizationId = await createOrganization(app, label);
   const agentId = await createAgent(app, organizationId, { greeting: GREETING, tools: ["request_approval", "transfer_to_human", "end_call"], ...agent });
   const trunkId = await createTrunk(app, organizationId, { callerId: "+553133334444" });
   await createPhoneNumber(app, organizationId, trunkId, "+553133334444", agentId);
   for (const [key, value] of Object.entries(settings)) await putSetting(app, organizationId, key, value, false);
+  for (const [key, value] of Object.entries(options.secrets ?? {})) await putSetting(app, organizationId, key, value);
+  if (options.pipeline !== undefined) await withSystem(app, (q) => q.exec("update agents set pipeline = $2 where id = $1", [agentId, JSON.stringify(options.pipeline)]));
 
   const ari = fakeAri();
   const clock = fakeClock();
@@ -94,7 +103,7 @@ async function incomingCall(label: string, agent: AgentOptions, settings: Record
   server = await startVoiceServer({
     db: app,
     clock,
-    engines: new Map([["simulated", pricedSimulatedEngine(60)]]),
+    engines: options.engines ?? new Map([["simulated", pricedSimulatedEngine(60)]]),
     tools: await loadTools(),
     ari,
     secretKey,
@@ -107,6 +116,7 @@ async function incomingCall(label: string, agent: AgentOptions, settings: Record
     schedule: timers.schedule,
     resolveName: async () => ["192.0.2.53"],
     now: timers.now,
+    ...(options.simulatedPieces === true && { simulatedPieces: true }),
   });
 
   const channelId = `canal-${organizationId.slice(0, 8)}`;
@@ -406,5 +416,70 @@ describe("chamada de ponta a ponta", { timeout: 120_000 }, () => {
       { kind: "call_ended", payload: { status: "failed", reason: "no_answer", cause: "User busy" } },
       { kind: "task_queued", payload: { kind: "review_call", taskId: expect.any(String) } },
     ]);
+  });
+});
+
+// A prova de primeira impressão pelo caminho simulado do pipeline (fatia 5b-2): a mesma ligação pelo
+// tronco, com o agente que escolheu as peças. A transcrição e a voz são as simuladas da pasta (as que o
+// painel só aceita por configuração de teste); o cérebro é a OpenAI de verdade, com o `fetch` num
+// servidor falso. O `engine` gravado é o simulado de roteiro: se a ligação caísse no motor direto, o
+// extrato teria a linha dele, e não as três das peças.
+describe("chamada de ponta a ponta pelo pipeline simulado", { timeout: 120_000 }, () => {
+  const MODEL = "gpt-5-nano";
+  const PRICE = { centsPerMillionInputTokens: 100, centsPerMillionOutputTokens: 400, source: "teste", checkedOn: "2026-11-24" };
+  /** O roteiro de demonstração do transcritor simulado da pasta: o trecho final sai com 1 s de áudio. */
+  const CALLER_SAYS = "(fala de quem ligou)";
+  const REPLY = "Claro, já deixei anotado. Até logo.";
+
+  it("a saudação, um turno pelo cérebro, o fim pela ferramenta, e uma linha por peça no extrato", async () => {
+    fakeBrain = await startFakeBrain();
+    fakeBrain.reply([text(REPLY), tool("call_1", "end_call", JSON.stringify({ reason: "A pessoa se despediu." })), usage(150, 20)]);
+    const engines = new Map<string, VoiceEngine>([
+      ["pipeline", createPipelineEngine({ fetch: fakeBrain.fetch, fixedSpeechCache: new FixedSpeechCache() })],
+      ["simulated", pricedSimulatedEngine(60)],
+    ]);
+    const pipeline = { transcriber: "simulated", brain: "openai", model: MODEL, synthesizer: "simulated", voiceId: "simulated" };
+    // A chave do cérebro e a lista de modelos com preço, como a tela grava: sem elas, a ligação é recusada.
+    const scene = await incomingCall(
+      "e2e-pipeline",
+      { engine: "simulated", script: SCRIPT, tools: ["end_call"] },
+      { "recording_notice.text": NOTICE, [brainModelsSetting("openai")]: { fetchedAt: "2026-11-24", models: [{ id: MODEL, label: MODEL, price: PRICE }] } },
+      { engines, pipeline, secrets: { [brainKeySetting("openai")]: encryptSecret("chave-inventada-do-cerebro", secretKey) }, simulatedPieces: true },
+    );
+    const { callId } = scene;
+
+    await waitFor(() => scene.asterisk.frames.filter((frame) => frame.type === 0x10).length > 0, "the greeting to be heard");
+    scene.asterisk.sendAudio(1200);
+    await ended(callId);
+
+    const events = await eventsOf(app, callId);
+    const kinds = events.map((event) => event.kind);
+    expect(kinds).toContain("pipeline_turn_latency");
+    expect(kinds).not.toContain("call_refused");
+    expect(kinds).not.toContain("engine_failed");
+    // Quem atendeu e falou foi o pipeline: a saudação, a fala transcrita, a resposta do cérebro.
+    expect(events.find((event) => event.kind === "call_answered")?.payload).toMatchObject({ engine: "pipeline" });
+    expect(events.filter((event) => event.kind === "transcript_agent").map((event) => event.payload)).toEqual([{ text: `${NOTICE} ${GREETING}` }, { text: REPLY }]);
+    expect(events.filter((event) => event.kind === "transcript_user").map((event) => event.payload)).toEqual([expect.objectContaining({ text: CALLER_SAYS })]);
+    expect(events.find((event) => event.kind === "tool_called")?.payload).toMatchObject({ name: "end_call" });
+    expect(fakeBrain.requests).toHaveLength(1);
+    // Um pedido só saiu: o resultado do `end_call` não reabre o cérebro (fatia 5c).
+    expect(fakeBrain.fetched()).toBe(1);
+    expect(JSON.stringify(fakeBrain.requests[0]?.messages.filter((message) => message.role === "user").at(-1))).toContain(CALLER_SAYS);
+    expect(await callOf(app, callId)).toMatchObject({ status: "completed", end_reason: "end_call", engine: "pipeline" });
+
+    // O extrato: as linhas das três peças (a voz tem uma por fala; o cérebro, uma por pedido), e nenhuma
+    // do motor do roteiro.
+    const ledger = await withSystem(app, (q) =>
+      q.many<{ engine: string; model: string | null; input_tokens: number; output_tokens: number; cost_estimated: boolean }>(
+        "select engine, model, input_tokens, output_tokens, cost_estimated from usage_ledger where call_id = $1 order by engine, input_tokens",
+        [callId],
+      ),
+    );
+    expect(new Set(ledger.map((row) => row.engine))).toEqual(new Set(["brain:openai", "synthesizer:simulated", "transcriber:simulated"]));
+    expect(ledger.filter((row) => row.engine === "transcriber:simulated")).toHaveLength(1);
+    // A resposta do turno, com os tokens que o cérebro contou, e só ela: depois do `end_call`, o resultado
+    // não reabre o cérebro (fatia 5c), e não há o pedido cancelado pelo fim, cobrado como estimado.
+    expect(ledger.filter((row) => row.engine === "brain:openai")).toEqual([{ engine: "brain:openai", model: MODEL, input_tokens: 150, output_tokens: 20, cost_estimated: false }]);
   });
 });
