@@ -1,0 +1,5 @@
+// Um salto: a descoberta escolhe a peça, e o motor não importa nenhuma diretamente (DESA-419, S1c).
+import { loadSynthesizers } from "../load.ts";
+import { loadBrains } from "../brain-load";
+import { createSimulatedEngine } from "@deskvoice/voice-engine";
+export const pick = async (): Promise<unknown> => [(await loadBrains()).get("openai"), (await loadSynthesizers()).get("elevenlabs"), createSimulatedEngine];

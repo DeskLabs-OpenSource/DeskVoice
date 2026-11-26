@@ -171,6 +171,7 @@ const brain: Brain = {
       failureOf: completionFailureOf,
       includeUsage: false,
       usageOf: chatUsageOf,
+      maxTokensField: "max_tokens",
     });
   },
 };
