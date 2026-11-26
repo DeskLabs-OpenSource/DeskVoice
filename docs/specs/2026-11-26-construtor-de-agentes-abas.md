@@ -33,8 +33,8 @@ em 26/11):
   - **D4.** Se o painel lateral tem um Salvar próprio (5.3).
 
 Nas seções 4 e 5, o que depende de uma escolha está marcado com o número dela, e o texto descreve
-a **recomendação**. **Nenhuma fatia de código começa antes da resposta escrita do dono à escolha de que ela
-depende** (tabela da seção 6). Prazo vencido não libera fatia: silêncio não aprova.
+a **recomendação**. As quatro foram decididas: **A, pelo Rafael em 26/11/2026, 14h30** (seção 8),
+e as fatias começam saindo da `main` depois que este desenho entrar (seção 6).
 
 ## 1. Problema
 
@@ -333,9 +333,9 @@ deste desenho, e não medidas.
 | 4 | **O custo medido nos cartões e na faixa** | **novo** `GET /agents/[id]/costs?days=30` (total e por peça, a mesma leitura do extrato de Custos, isolada por organização) e os números da seção 5.2, com "não medido" e "estimado" | ~250 | D2 |
 | 5 | **A aba Ligações** | filtro `agentId` em `GET /calls` (validado como uuid, dentro da organização da sessão); a lista da tela de Ligações vira componente reaproveitado; a aba, com o filtro de status | ~300 | D1 |
 
-A coluna da direita manda: a fatia só começa com a **resposta escrita do dono** às escolhas dela.
-Não há padrão por prazo: silêncio não aprova, e nenhuma data libera fatia. Sem resposta, nada
-anda, e a tela de hoje continua como está. Se a resposta mudar a escolha, a fatia segue a resposta, e o desenho ganha um commit antes do código.
+As quatro escolhas da coluna da direita foram decididas: A, pelo Rafael em 26/11/2026, 14h30
+(seção 8). Depois que este desenho entrar, as fatias começam saindo da `main`, uma depois da
+outra, na ordem da tabela, cada uma com até ~400 linhas, sem empilhar.
 
 A ordem segue o pedido: a fatia 1 vale sozinha, e os cartões com o painel vêm logo depois.
 Ligações vai por último porque é a única que mexe numa rota que outra tela usa.
@@ -418,9 +418,9 @@ Quatro pedidos, um por escolha. Os quatro são reversíveis: mudam a tela, sem t
 gravada ou configuração de quem já instalou. O pedido único que eu tinha aberto antes (a casa de
 cada campo) virou o D1.
 
-Nenhum dos quatro tem padrão por prazo: sem a resposta escrita do dono, nada anda, e a tela de hoje
-continua como está (combinado com o maestro em 26/11). A recomendação de cada um é só a
-recomendação.
+Os quatro foram decididos: A, pelo Rafael em 26/11/2026, 14h30, no chat do maestro ("pode seguir
+com sua recomendação nos docs que me esperam"). Nenhum caiu numa combinação que não fecha (abaixo):
+a D3 = A vem com a D2 = A e a D4 = A.
 
 **As combinações que não fecham.** A D3 = A tira o bloco Pipeline e "Cérebros deste agente" e põe
 o conteúdo nos cartões e nos painéis laterais. Por isso ela pede a D2 diferente de D (tem de haver
@@ -453,7 +453,7 @@ Dono do pedido: Arquiteto.
 A, porque quem configura acha o que acontece depois da ligação pelo mesmo nome que já vê em
 Configurações, e a aba Ferramentas fica só com o que o agente faz enquanto fala.
 
-### Sem resposta, nada anda; a tela de hoje continua como está.
+### Decidido: A, pelo Rafael em 26/11/2026, 14h30, no chat do maestro ('pode seguir com sua recomendação nos docs que me esperam').
 
 ### Não medido
 Ninguém que opera o painel viu as abas. Não sei quantos campos cada operador costuma mexer, nem em
@@ -486,7 +486,7 @@ Dono do pedido: Arquiteto.
 A, porque quem configura vê as mesmas três peças em qualquer motor, e cada número que aparece veio
 de uma ligação de verdade.
 
-### Sem resposta, nada anda; a tela de hoje continua como está.
+### Decidido: A, pelo Rafael em 26/11/2026, 14h30, no chat do maestro ('pode seguir com sua recomendação nos docs que me esperam').
 
 ### Não medido
 Não medi a consulta da rota de custo por agente, nem quanto tempo ela leva com muitas ligações. Não
@@ -517,7 +517,7 @@ Dono do pedido: Arquiteto.
 ### Recomendação
 A, porque cada coisa fica num lugar só, e todo endereço antigo continua abrindo.
 
-### Sem resposta, nada anda; a tela de hoje continua como está.
+### Decidido: A, pelo Rafael em 26/11/2026, 14h30, no chat do maestro ('pode seguir com sua recomendação nos docs que me esperam').
 
 ### Não medido
 Não sei quantos operadores usam o link do topo dos testes nem a âncora `#pipeline`.
@@ -543,7 +543,7 @@ Dono do pedido: Arquiteto.
 ### Recomendação
 A, porque existe um jeito só de gravar o agente, e o "não salvo" no cartão diz o que falta.
 
-### Sem resposta, nada anda; a tela de hoje continua como está.
+### Decidido: A, pelo Rafael em 26/11/2026, 14h30, no chat do maestro ('pode seguir com sua recomendação nos docs que me esperam').
 
 ### Não medido
 Não testei com operador se o "não salvo" no cartão basta para lembrar de salvar.
