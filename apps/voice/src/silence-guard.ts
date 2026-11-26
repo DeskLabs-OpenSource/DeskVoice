@@ -114,10 +114,16 @@ export function createSilenceGuard(deps: SilenceGuardDeps): SilenceGuard {
       phase = { kind: "closed" };
       deps.closeCallerTurn();
       deps.acted(report("turn_closed"));
+      let waitedForAnswer = false;
       const ask = (): void => {
         // A resposta já vem (o áudio chega uns 700 ms depois do fim da fala): o pedido entraria na
-        // fila atrás dela e soaria logo depois. Espera de novo; o áudio que chegar desarma.
-        if (deps.answering()) return arm(AFTER_CLOSE_MS, ask);
+        // fila atrás dela e soaria logo depois. Espera mais um prazo, uma vez só; o áudio que chegar
+        // desarma. Sem áudio até lá, pede mesmo assim: o motor pode ficar dizendo que responde sem
+        // responder (um `response.create` recusado), e quem ligou não pode ficar no silêncio.
+        if (!waitedForAnswer && deps.answering()) {
+          waitedForAnswer = true;
+          return arm(AFTER_CLOSE_MS, ask);
+        }
         // Depois de pedir para repetir, não insiste: só um sinal novo de quem ligou arma de novo.
         disarm();
         deps.say(ASK_TO_REPEAT);

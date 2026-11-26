@@ -196,8 +196,8 @@ export interface VoiceSession {
   /**
    * O provedor já fechou a vez de quem ligou e prepara a resposta, que ainda não chegou em áudio. A
    * guarda contra o silêncio lê isto antes de pedir para repetir: com a resposta a caminho, o pedido
-   * entraria na fila atrás dela e soaria logo depois (ligação real pelo WhatsApp, 26/11/2026). Sem o
-   * método, a guarda pede como antes.
+   * entraria na fila atrás dela e soaria logo depois (ligação real pelo WhatsApp, 26/11/2026). A guarda
+   * espera um prazo a mais, uma vez, e pede mesmo assim se o áudio não vier. Sem o método, pede como antes.
    */
   answering?(): boolean;
   /**
