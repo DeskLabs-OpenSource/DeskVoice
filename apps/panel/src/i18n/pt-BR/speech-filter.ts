@@ -49,7 +49,7 @@ const speechFilter = {
   },
   countries: { US: "nos Estados Unidos" } as Record<string, string>,
   /** O nome do fornecedor como a tela o escreve, pelo `provider` do modelo. */
-  providers: { typesafe: "TypeSafe", elevenlabs: "ElevenLabs" } as Record<string, string>,
+  providers: { typesafe: "TypeSafe", elevenlabs: "ElevenLabs", openai: "OpenAI" } as Record<string, string>,
   /**
    * A retenção, pelo `provider` do modelo, com a página e a data da leitura. Só o que a página diz:
    * https://typesafe.ai/legal/privacy-policy, seção *Retention* ("Last updated Nov 19, 2025", lida em

@@ -80,6 +80,8 @@ export const SUPPORT_SESSION_ROUTES: SupportSessionRoute[] = [
   forbid("synthesizers/[synthesizer]/key", "PUT", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
   allow("synthesizers/[synthesizer]/key", "POST", "confere a chave do provedor"),
   allow("synthesizers/[synthesizer]/key", "DELETE", "apaga a chave do provedor, não cria acesso"),
+  forbid("transcribers/[transcriber]/consent", "PUT", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
+  allow("transcribers/[transcriber]/consent", "DELETE", "apaga a confirmação do envio, não cria acesso"),
   forbid("speech-filter/[model]/key", "PUT", "aponta o dado ou a ligação da organização para um destino que sobrevive à sessão"),
   allow("speech-filter/[model]/key", "DELETE", "apaga a chave do provedor, não cria acesso"),
   allow("speech-filter", "PUT", "configuração do filtro de fala da organização"),

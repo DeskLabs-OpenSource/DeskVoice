@@ -65,6 +65,8 @@ import {
   speechFilterQuestions,
   speechFilterState,
   synthesizerConsentSetting,
+  transcriberConsentSetting,
+  transcriberKeySettingOf,
   type AnalystConfig,
   type AnalystTurn,
   type Brain,
@@ -1314,6 +1316,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   function pipelineRefusalNotice(agentName: string, piece: PieceRefusal | undefined, refusedFor?: EngineRefusal): string {
     const which = piece ? `${PIECE_NAMES[piece.kind]} (${piece.id})` : "as peças do pipeline";
     if (piece && refusedFor === "pipeline_piece_unconfirmed") {
+      if (piece.kind === "transcriber")
+        return `Uma ligação do agente ${agentName} foi recusada porque ${which} leva o áudio de quem ligou para fora deste servidor, e ninguém confirmou o envio. Nada foi enviado, e a ligação não começou. Quem ligou ouviu o sinal de falha. Confirme o fornecedor no bloco Pipeline do agente e faça uma chamada de teste.`;
       return `Uma ligação do agente ${agentName} foi recusada porque ${which} leva o texto que o agente fala para fora deste servidor, e ninguém confirmou o envio. Nada foi enviado, e a ligação não começou. Quem ligou ouviu o sinal de falha. Confirme o fornecedor em Configurações → Voz e faça uma chamada de teste.`;
     }
     if (piece && refusedFor === "pipeline_piece_test_only") {
@@ -1374,7 +1378,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         return refuse("pipeline_piece_test_only", `the simulated ${kind} only serves tests`, { kind, id: piece.id });
       }
     }
-    const transcriberKey = transcriber.keyless ? "" : await readKey(transcriberKeySetting(transcriber.id));
+    // A transcrição da OpenAI usa a chave do motor OpenAI Realtime (`keySetting`, fatia 6): não há chave nova.
+    const transcriberKey = transcriber.keyless ? "" : await readKey(transcriberKeySettingOf(transcriber));
     if (transcriberKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the transcriber ${transcriber.id}`, { kind: "transcriber", id: transcriber.id, detail: "rejected" });
     const brainKey = await readKey(brainKeySetting(brain.id));
     if (brainKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the brain ${brain.id}`, { kind: "brain", id: brain.id, detail: "rejected" });
@@ -1384,6 +1389,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // fornecedor (seção 9.1), além da chave: a mesma regra da gravação do agente (fatia 5a). A
     // confirmação é lida a cada ligação: apagada depois de o agente salvar, a ligação não abre, e nada
     // sai para o fornecedor (a recusa vem antes de qualquer peça abrir).
+    // A transcrição de fora do servidor, pela mesma regra, com a confirmação dela (fatia 6): o áudio de quem ligou vai ao fornecedor.
+    if (transcriber.processingLocation.kind !== "this-server") {
+      const consent = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberConsentSetting(transcriber.id)]);
+      if (readConsent(consent?.value) === null) return refuse("pipeline_piece_unconfirmed", `nobody confirmed that the caller's audio goes to ${transcriber.label}`, { kind: "transcriber", id: transcriber.id });
+    }
     if (synthesizer.processingLocation.kind !== "this-server") {
       const consent = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, synthesizerConsentSetting(synthesizer.id)]);
       if (readConsent(consent?.value) === null) return refuse("pipeline_piece_unconfirmed", `nobody confirmed that the text of the call goes to ${synthesizer.label}`, { kind: "synthesizer", id: synthesizer.id });
@@ -1859,7 +1869,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     }
     const config = { language: row.language, vocabulary: row.vocabulary.slice(0, transcriber.maxVocabulary) };
     if (transcriber.keyless) return { transcriber, apiKey: "", config };
-    const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberKeySetting(transcriber.id)]);
+    const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberKeySettingOf(transcriber)]);
     try {
       if (typeof stored?.value !== "string") throw new Error("no API key is saved for this transcriber");
       return { transcriber, apiKey: decryptSecret(stored.value, deps.secretKey), config };

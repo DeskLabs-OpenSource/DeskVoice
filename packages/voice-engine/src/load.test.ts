@@ -117,10 +117,11 @@ export default {
 `;
 
 describe("loadTranscribers", () => {
-  it("descobre o transcritor simulado da pasta, sem chave", async () => {
+  it("descobre os transcritores da pasta: o simulado, sem chave, e o da OpenAI, com a chave do motor", async () => {
     const transcribers = await loadTranscribers();
-    expect([...transcribers.keys()]).toEqual(["simulated"]);
+    expect([...transcribers.keys()].sort()).toEqual(["openai", "simulated"]);
     expect(transcribers.get("simulated")?.keyless).toBe(true);
+    expect(transcribers.get("openai")?.keySetting).toBe("engine.openai-realtime.api_key");
     for (const transcriber of transcribers.values()) expect(transcriber.pricing.checkedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 

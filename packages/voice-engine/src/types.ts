@@ -493,6 +493,12 @@ export interface StreamingTranscriber {
   pricing: EnginePricing;
   /** Verdadeiro quando não usa chave (o simulado, ou um local). */
   keyless?: boolean;
+  /**
+   * A chave da organização que a peça usa, quando ela é a de outra peça já gravada (a transcrição da
+   * OpenAI usa a do motor OpenAI Realtime, `engine.openai-realtime.api_key`): não há chave nova. Ausente,
+   * a chave é `transcriber.<id>.api_key`.
+   */
+  keySetting?: string;
   /** Quantos termos de vocabulário o serviço aceita. Acima disso, os primeiros N. */
   maxVocabulary: number;
   connect(config: { language: string; vocabulary: readonly string[] }, apiKey: string, options?: ConnectOptions): Promise<StreamingTranscription>;

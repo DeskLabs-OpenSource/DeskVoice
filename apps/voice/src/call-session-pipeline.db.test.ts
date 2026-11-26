@@ -3,7 +3,7 @@
 // pasta (aqui, injetadas), cada peça vira uma linha no extrato com o preço dela, o teto toca a
 // despedida pronta sem síntese nova, e a falha de uma peça chega ao painel só com os códigos.
 import { encryptSecret, withSystem, type Clock } from "@deskvoice/core";
-import { synthesizerConsentSetting, type PipelineEngine, type Brain, type PipelineTurnLatency, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
+import { synthesizerConsentSetting, transcriberConsentSetting, type PipelineEngine, type Brain, type PipelineTurnLatency, type SimulatedScript, type SpeechSynthesizer, type StreamingTranscriber } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { notificationsOf, putSetting } from "../../../packages/tools/test/helpers";
@@ -390,6 +390,55 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
     const session = confirmed.start();
     await answered(confirmed.callId);
     expect(confirmedVoice.speaks()).toBeGreaterThan(0);
+    confirmed.transport.callerHangup();
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+  });
+
+  it("a transcrição de fora (a da OpenAI, fatia 6): usa a chave do motor que ela declara e só abre com a confirmação da 9.1", async () => {
+    // Como a peça da OpenAI: fora do servidor, com a chave do motor OpenAI Realtime (`keySetting`).
+    const outsideEar = () => {
+      const ear = pricedTranscriber([{ afterAudioMs: 100, text: "Oi.", final: true }]);
+      const keys: string[] = [];
+      const transcriber: StreamingTranscriber = {
+        ...ear.transcriber,
+        keyless: false,
+        keySetting: "engine.openai-realtime.api_key",
+        processingLocation: { kind: "undeclared" },
+        connect: (config, apiKey, options) => {
+          keys.push(apiKey);
+          return ear.transcriber.connect(config, apiKey, options);
+        },
+      };
+      return { ...ear, transcriber, keys };
+    };
+    const ear = outsideEar();
+    const made = await scene("pipeline-ear-unconfirmed", { engine: "openai-realtime", costCeilingCents: 50 }, { pipeline: PIPELINE, transcriber: ear.transcriber });
+    await putSetting(app, made.organizationId, "engine.openai-realtime.api_key", encryptSecret("chave-inventada-do-motor", secretKey));
+    expect(await made.start().done).toMatchObject({ status: "refused", endReason: "pipeline_piece_unconfirmed" });
+    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "call_refused")?.payload).toEqual({ reason: "pipeline_piece_unconfirmed", engine: "pipeline", piece: "transcriber", pieceId: "simulated" });
+    expect(ear.keys).toEqual([]);
+    expect(fakeBrain?.requests).toHaveLength(0);
+    const notice = (await notificationsOf(app, made.organizationId)).map((entry) => entry.body).join(" ");
+    expect(notice).toContain("a transcrição (simulated)");
+    expect(notice).toContain("áudio de quem ligou");
+    expect(notice).toContain("bloco Pipeline");
+
+    // Confirmada, mas sem a chave do motor: a chave de nome `transcriber.<id>.api_key` não vale para esta peça.
+    const noKey = outsideEar();
+    const withoutKey = await scene("pipeline-ear-no-key", { engine: "openai-realtime", costCeilingCents: 50 }, { pipeline: PIPELINE, transcriber: noKey.transcriber });
+    await putSetting(app, withoutKey.organizationId, transcriberConsentSetting("simulated"), { userId: "alguém", confirmedAt: "2026-11-26T12:00:00.000Z" }, false);
+    await putSetting(app, withoutKey.organizationId, "transcriber.simulated.api_key", encryptSecret("chave-de-outro-nome", secretKey));
+    expect(await withoutKey.start().done).toMatchObject({ status: "refused", endReason: "engine_not_configured" });
+    expect(noKey.keys).toEqual([]);
+
+    // Com a chave do motor e a confirmação, abre, e a peça recebe a chave do motor.
+    const good = outsideEar();
+    const confirmed = await scene("pipeline-ear-confirmed", { engine: "openai-realtime", costCeilingCents: 50 }, { pipeline: PIPELINE, transcriber: good.transcriber });
+    await putSetting(app, confirmed.organizationId, "engine.openai-realtime.api_key", encryptSecret("chave-inventada-do-motor", secretKey));
+    await putSetting(app, confirmed.organizationId, transcriberConsentSetting("simulated"), { userId: "alguém", confirmedAt: "2026-11-26T12:00:00.000Z" }, false);
+    const session = confirmed.start();
+    await answered(confirmed.callId);
+    expect(good.keys).toEqual(["chave-inventada-do-motor"]);
     confirmed.transport.callerHangup();
     expect(await session.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
   });

@@ -55,6 +55,20 @@ describe("EngineField", () => {
     expect(before).not.toContain(escaped(ptBR.enginePipelineOff.no_live_transcriber ?? ""));
   });
 
+  it.each([
+    ["pt-BR", ptBR],
+    ["en", en],
+    ["es", es],
+  ])("em %s (fatia 6): sem a chave da transcrição, a linha diz onde fica; com tudo na organização, não diz desligado", (_, t) => {
+    const noKey = render(t, [GEMINI, engineWith({ ...PIPELINE, unavailable: { reason: "no_transcriber_key" } })]);
+    expect(noKey).toContain(`<option value="pipeline" disabled="">${t.enginePipeline}</option>`);
+    expect(noKey).toContain(escaped(t.enginePipelineOff.no_transcriber_key ?? "missing"));
+    const ready = render(t, [GEMINI, engineWith({ ...PIPELINE, unavailable: null })]);
+    expect(ready).toContain(`<option value="pipeline" disabled="">${t.enginePipelineOn}</option>`);
+    expect(ready).not.toContain(t.enginePipeline);
+    expect(ready).toContain(escaped(t.enginePipelineReady));
+  });
+
   it("o motivo que o dicionário não conhece cai na frase geral, e nunca no código", () => {
     const html = render(ptBR, [GEMINI, engineWith({ ...PIPELINE, unavailable: { reason: "outro" as "no_live_transcriber" } })]);
     expect(html).toContain(ptBR.enginePipelineOffUnknown);
