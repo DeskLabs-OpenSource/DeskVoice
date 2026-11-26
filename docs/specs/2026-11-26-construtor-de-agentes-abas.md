@@ -148,6 +148,21 @@ responde e a amostra da voz). Se ficasse dentro de um painel de peça, ficaria e
 Ligações e Testes aparecem depois de salvar, porque não existem sem id. Hoje o link dos testes
 também só aparece com o agente salvo.
 
+**A aba Agente na fatia 1, antes dos cartões.** Os painéis de hoje entram inteiros, nesta ordem:
+Identidade (com o idioma, que sai do painel Voz), Conversa, **Vocabulário** inteiro, **Voz**
+inteira menos o idioma (motor, voz com o Ouvir, ambiente de escuta, aviso de motor sem chave e
+linha do motor simulado), o bloco Pipeline e "Cérebros deste agente". Nenhum campo desses muda de
+painel na fatia 1: só o idioma muda.
+
+**O que fica fora das abas, em toda aba:**
+
+- **O cabeçalho** (voltar, nome do agente e o `ReadOnlyNotice` de quem só lê) fica acima da lista
+  de abas, igual em todas. O link "Testes do agente" sai do cabeçalho na fatia 1, se a D3 tirar a
+  página dos testes, e o lugar dele passa a ser a aba Testes.
+- **O rodapé** (Salvar fixo e Apagar, com a confirmação de hoje que nomeia quem perde o destino)
+  fica embaixo das quatro abas do formulário, como hoje. Nas abas Ligações e Testes ele some
+  inteiro, Apagar junto, pela regra do Salvar da seção 4.2. No agente novo, o rodapé é o de hoje.
+
 ### 4.2 A mecânica: abas dentro da página, sem rota nova
 
 - **Uma página, um formulário, um Salvar.** As abas Agente, Ferramentas, Depois da ligação e
@@ -217,6 +232,10 @@ próximo que a biblioteca tiver). Não há lápis: o cartão inteiro é o botão
 "Configurar". Quando o rascunho mudou alguma coisa da peça, aparece um selo neutro "não salvo".
 
 Embaixo dos cartões vem **Conversa** (saudação e instruções), sem mudança.
+
+**O aviso de motor sem chave e a linha do motor simulado** ficam na linha do motor, acima dos
+cartões, e não entram em nenhum painel lateral. Os dois falam do motor inteiro, e não de uma peça.
+O aviso continua com o link de hoje para a chave.
 
 ### 5.2 Os números: só os medidos
 
@@ -308,8 +327,8 @@ deste desenho, e não medidas.
 
 | Ordem | Fatia | O que entrega | Linhas (estim.) | Espera a resposta de |
 |---|---|---|---|---|
-| 1 | **As abas, com o conteúdo de hoje redistribuído** | componente `Tabs` no kit; `page.tsx` agrupa os painéis de hoje **inteiros** nas abas Agente, Ferramentas, Depois da ligação, Testes e Avançado (a tabela 4.1, menos os cartões e menos Ligações); o idioma passa para a Identidade; `?aba=`; o `onInvalidCapture`; os testes viram aba (o corpo de `tests/page.tsx` vira componente, e a rota antiga redireciona); os três links da organização em Avançado; fragmento com a tabela "onde estava → onde está". Nesta fatia, "Cérebros deste agente" e o bloco Pipeline ficam inteiros na aba Agente | ~350 | D1, D3 (os testes viram aba) |
-| 2 | **Os cartões e o painel lateral, motores diretos** | `SidePanel` no kit e o token `--dv-scrim`; os três cartões; o painel do Ouvido (vocabulário e ambiente saem do formulário solto e vão para ele) e o da Voz (o `VoiceField`); o Cérebro com a linha do motor; "Cérebros deste agente" se divide (quem lê vai para Depois da ligação, e o analista, para Ferramentas). Os cartões ainda sem número de custo: a faixa mostra só a latência que já existe | ~400 | D2, D3, D4 |
+| 1 | **As abas, com o conteúdo de hoje redistribuído** | componente `Tabs` no kit; `page.tsx` agrupa os painéis de hoje **inteiros** nas abas Agente, Ferramentas, Depois da ligação, Testes e Avançado (a tabela 4.1, menos os cartões e menos Ligações); o idioma passa para a Identidade; `?aba=`; o `onInvalidCapture`; os testes viram aba (o corpo de `tests/page.tsx` vira componente, e a rota antiga redireciona); os três links da organização em Avançado; fragmento com a tabela "onde estava → onde está". Nesta fatia, Vocabulário, Voz (menos o idioma), o bloco Pipeline e "Cérebros deste agente" ficam inteiros na aba Agente; o cabeçalho e o rodapé ficam fora das abas (seção 4.1) | ~350 | D1, D3 (os testes viram aba) |
+| 2 | **Os cartões e o painel lateral, motores diretos** | `SidePanel` no kit e o token `--dv-scrim`; os três cartões; o painel do Ouvido (vocabulário e ambiente saem do formulário solto e vão para ele) e o da Voz (o `VoiceField`); o Cérebro com a linha do motor; o aviso sem chave e a linha do simulado ficam na linha do motor (seção 5.1); "Cérebros deste agente" se divide (quem lê vai para Depois da ligação, e o analista, para Ferramentas). Os cartões ainda sem número de custo: a faixa mostra só a latência que já existe | ~400 | D2, D3, D4 |
 | 3 | **O pipeline nos cartões** | o conteúdo do bloco Pipeline vai para os três painéis (transcrição e 9.1 no Ouvido, cérebro e modelo no Cérebro, vozes da ElevenLabs, Ouvir e 9.1 na Voz); o bloco e a âncora `#pipeline` saem; a linha da ElevenLabs no campo Voz vira o botão que abre o painel. Continua só ver e ouvir | ~250 | D3 |
 | 4 | **O custo medido nos cartões e na faixa** | **novo** `GET /agents/[id]/costs?days=30` (total e por peça, a mesma leitura do extrato de Custos, isolada por organização) e os números da seção 5.2, com "não medido" e "estimado" | ~250 | D2 |
 | 5 | **A aba Ligações** | filtro `agentId` em `GET /calls` (validado como uuid, dentro da organização da sessão); a lista da tela de Ligações vira componente reaproveitado; a aba, com o filtro de status | ~300 | D1 |
@@ -345,7 +364,7 @@ Ligações vai por último porque é a única que mexe numa rota que outra tela 
 
 ### 6.2 Os testes de tela (e2e, `apps/panel/test/e2e`) que cada fatia atualiza
 
-Hoje, dez specs abrem `/agents/<id>` e procuram campos na página única.
+Hoje, onze specs abrem `/agents/<id>` e procuram campos na página única.
 
 | Spec | Campo que usa | Fatia que o atualiza |
 |---|---|---|
@@ -402,6 +421,12 @@ cada campo) virou o D1.
 Nenhum dos quatro tem padrão por prazo: sem a resposta escrita do dono, nada anda, e a tela de hoje
 continua como está (combinado com o maestro em 26/11). A recomendação de cada um é só a
 recomendação.
+
+**As combinações que não fecham.** A D3 = A tira o bloco Pipeline e "Cérebros deste agente" e põe
+o conteúdo nos cartões e nos painéis laterais. Por isso ela pede a D2 diferente de D (tem de haver
+cartões) e a D4 diferente de C (tem de haver painel). A D3 = C com a D2 = A deixa três cartões sem
+nada para abrir, porque todo campo continua no painel de hoje. Se a resposta cair numa dessas, eu
+devolvo a pergunta antes de qualquer fatia.
 
 ---
 
