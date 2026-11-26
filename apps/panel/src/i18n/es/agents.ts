@@ -58,7 +58,7 @@ const agents: AgentsDictionary = {
   engineSimulated: "El motor simulado sigue un guion fijo, sin costo. Sirve para demostración y prueba.",
   enginePipeline: "Pipeline (apagado)",
   enginePipelineOn: "Pipeline",
-  enginePipelineReady: "Listo en esta organización: la transcripción y su clave están aquí. Elegir las piezas en esta pantalla llega en la próxima versión; hasta entonces, se guarda por la API del agente (campo pipeline).",
+  enginePipelineReady: "Listo en esta organización: la transcripción y su clave están aquí. Elegir las piezas en esta pantalla llega en una versión posterior; hasta entonces, se guarda por la API del agente (campo pipeline).",
   enginePipelineOff: { no_live_transcriber: "Falta una transcripción en tiempo real en este servidor. Llega con la medición de la R12.", no_transcriber_key: "Falta la clave que usa la transcripción en esta organización: la de OpenAI usa la clave del motor OpenAI Realtime, en Configuración → Inteligencia artificial." } as Record<string, string>,
   enginePipelineOffUnknown: "Todavía apagado en esta versión.",
   pipeline: "Pipeline",

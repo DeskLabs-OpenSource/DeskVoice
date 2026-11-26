@@ -58,7 +58,7 @@ const agents: AgentsDictionary = {
   engineSimulated: "The simulated engine follows a fixed script, at no cost. It is for demos and tests.",
   enginePipeline: "Pipeline (off)",
   enginePipelineOn: "Pipeline",
-  enginePipelineReady: "Ready in this organization: the transcription and its key are here. Choosing the pieces on this screen comes in the next version; until then, it is saved through the agent API (pipeline field).",
+  enginePipelineReady: "Ready in this organization: the transcription and its key are here. Choosing the pieces on this screen comes in a later version; until then, it is saved through the agent API (pipeline field).",
   enginePipelineOff: { no_live_transcriber: "This server lacks a real-time transcription. It comes with the R12 measurement.", no_transcriber_key: "This organization lacks the key the transcription uses: OpenAI's uses the OpenAI Realtime engine key, in Settings → Artificial intelligence." } as Record<string, string>,
   enginePipelineOffUnknown: "Still off in this version.",
   pipeline: "Pipeline",
