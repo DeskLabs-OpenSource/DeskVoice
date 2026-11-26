@@ -1,9 +1,11 @@
 # Canal de reuniões: o agente entra no Google Meet, no Teams ou no Zoom (R15)
 
-- **Estado:** desenho aprovado pelo dono em 24/11/2026, às 09h21 (DESA-62): ele seguiu a
-  recomendação dos pedidos 1 e 2 da seção 9 (**1A e 2A**: o Meet primeiro, só com a peça própria e
-  sem serviço de terceiros). A sonda (fatia 1) espera o pedido 3 da seção 9, sobre os termos do
-  Meet (seção 2.4).
+- **Estado:** o dono decidiu os pedidos 1 e 2 da seção 9 em 24/11/2026, às 09h21 (DESA-62), com a
+  recomendação deles (**1A e 2A**: o Meet primeiro, só com a peça própria e sem serviço de
+  terceiros). Decidiu o pedido 3 em 26/11/2026, às 14h30 (DESA-441), também com a recomendação
+  (**3A**: a sonda roda uma vez, numa reunião nossa, com ele como anfitrião). Essas três respostas
+  não aprovam o resto do desenho (fatias, limite de uma reunião por organização, aviso fixo), que
+  segue com a revisão.
 - **Data:** 2026-11-23
 - **Quem pediu:** o dono, em 16/11/2026 (DESA-62): os agentes atuam como consultor, suporte ou
   vendedor dentro de uma reunião do Meet, do Teams ou do Zoom, com o mesmo motor das ligações.
@@ -101,7 +103,8 @@ O dono pediu esta leitura antes da sonda (DESA-62, 24/11). Ela foi feita na DESA
    crawling, training, or other activities)"* e *"bypassing our systems or protective measures"*
    [L].
 2. **`robots.txt` do Meet:** https://meet.google.com/robots.txt, lido em 24/11/2026: `User-agent: *`
-   e `Disallow: /`. Ficam liberados só `/`, `/about`, `/landing`, `/_meet` e `/sitemap.xml`. **O
+   e `Disallow: /`. Ficam liberados só `/`, `/about`, `/intl/*/about`, `/landing`, `/_meet`, `/_meet/` e
+   `/sitemap.xml`. **O
    endereço de uma reunião (`/abc-defg-hij`) fica bloqueado** [L].
 3. **Política de Uso Aceitável do Meet:** https://support.google.com/meet/answer/9847091,
    atualizada em 11/09/2025. Não fala de bot nem de gravação. Tem *"Do not impersonate a person or
@@ -117,8 +120,9 @@ O dono pediu esta leitura antes da sonda (DESA-62, 24/11). Ela foi feita na DESA
 participante automatizado que se identifica como IA. Mas os itens 1 e 2, juntos, dão ao Google base
 para dizer que um Chromium automatizado no endereço da reunião viola os Termos ("or other
 activities"). O risco recai sobre a conta ou o IP de quem instala. Os serviços pagos da seção 2.3
-correm o mesmo risco. Por isso a sonda espera o pedido 3 da seção 9. Se ela andar, a tela da peça
-diz isso a quem a liga, antes de ligar.
+correm o mesmo risco. Por isso a sonda esperou o pedido 3 da seção 9, decidido A em 26/11/2026:
+roda uma vez, numa reunião nossa, com o dono como anfitrião. Se o canal for oferecido a quem
+instala, a tela da peça diz isso a quem a liga, antes de ligar.
 
 ### 2.5 O que exige conta, aprovação ou pagamento
 
@@ -139,7 +143,10 @@ Por que este caminho, e não os outros:
 - **O oficial não cabe.** O Teams exige .NET em Windows no Azure, o Meet não deixa falar e o Zoom
   se contradiz sobre bots e exige revisão do app. Nenhum dos três roda numa VPS Linux genérica
   sem conta e aprovação de quem instala.
-- **Um terceiro como obrigação fere a regra 5** ("nenhuma capacidade depende de serviço"). Ele pode
+- **Um terceiro como obrigação fere a regra "Sem recurso pago, sem telemetria"** do
+  `GOVERNANCE.md`, que diz "Nenhuma capacidade depende de licença, chave do projeto ou serviço do
+  projeto". Um terceiro com a chave do operador não é serviço do projeto, mas obriga quem instala a
+  pagar por hora para ter o canal, e é o recurso pago que pesa contra ele. Ele pode
   existir depois como peça opcional, com a chave do operador e o custo à vista (pedido 2, seção 9).
 - **O Attendee resolveria mais rápido, mas a licença dele não é aberta** (ELv2), e licença é
   decisão do dono (`GOVERNANCE.md`). Fica como opção do pedido 2. Não copiamos código dele.
@@ -247,7 +254,7 @@ Cada fatia cabe numa revisão de uma sentada. A ordem vai da mais barata de prov
 
 | # | O que entrega | O que uma pessoa consegue fazer | Fracasso mesmo funcionando |
 |---|---|---|---|
-| 1 | **Sonda** `scripts/sonda-reuniao/` (nova; sem produto, sem tela, no molde de `scripts/sonda-sip/`). Playwright entra num Meet pelo link como convidado, toca 10 s de fala gravada, grava 30 s do que ouve, sai. Mede a admissão, CPU, memória e a qualidade do áudio | O mantenedor roda a sonda contra uma reunião de teste e vê que o convidado entra, é ouvido e ouve | A sonda "passa" sem que um humano tenha ouvido o áudio dos dois lados |
+| 1 | **Sonda** `scripts/sonda-reuniao/` (nova; sem produto, sem tela, no molde de `scripts/sonda-sip/`). Playwright entra num Meet pelo link como convidado, toca 10 s de fala gravada, grava 30 s do que ouve, sai. Mede a admissão, CPU, memória e a qualidade do áudio. **Pedido 3 decidido A (26/11/2026):** roda uma vez, numa reunião nossa, com o dono como anfitrião; o dia e a hora o orquestrador combina com ele. A fatia 2a só sai depois de ele ver o resultado | O mantenedor roda a sonda contra uma reunião de teste e vê que o convidado entra, é ouvido e ouve | A sonda "passa" sem que um humano tenha ouvido o áudio dos dois lados |
 | 2a | Lado da voz: migration `channel = 'meeting'`, `meeting-transport.ts`, a API interna "entre neste link", o aviso fixo (seção 6), `leave_meeting`, o limite de uma por organização. Contêiner `meeting-bot` no perfil `meetings`, só com o Meet | — (entra junto com a 2b; regra 4) | Uma reunião sem `spendCapReached` conferido antes de entrar, ou com o aviso desligável |
 | 2b | Tela: ligar a peça em Configurações (pelo agente do kit, como o WaCalls), página Reuniões com "colar link e entrar", estado ao vivo ("no lobby", "na reunião", "saiu: motivo"), linha do tempo da reunião | O operador cola um link do Meet, o agente pede para entrar, é admitido, se apresenta como IA e conversa com uma pessoa | Agente que fica falando sozinho numa sala vazia (a reunião acaba quando o agente fica só) |
 | 3 | Conversa em grupo (4.1), medida em sala simulada, e a repetição do aviso para quem chega depois | Numa reunião com três pessoas, o agente só fala quando chamado | Agente que interrompe a conversa entre as pessoas |
@@ -287,7 +294,7 @@ opção B) seria uma fatia à parte, depois da 3.
 **Recomendação:** A, porque é a que o operador de pequena empresa mais deve usar e a mais barata
 de provar sem conta nenhuma.
 
-**Se ninguém responder em 3 dias, vale:** A. É reversível: só a sonda anda, e ela é descartável.
+**Decidido: A, pelo Rafael em 24/11/2026, 09h21 (DESA-62).**
 
 **Não medido:** a fatia de mercado de cada plataforma entre quem instala o DeskVoice; os termos de
 uso das três plataformas; se o Meet admite convidado sem conta Google em reunião de conta pessoal.
@@ -313,7 +320,7 @@ uso das três plataformas; se o Meet admite convidado sem conta Google em reuni�
 porque é o único caminho que roda na VPS de quem instala sem conta, sem pagamento e sem mandar o
 áudio da reunião para fora.
 
-**Se ninguém responder em 5 dias, vale:** A. É reversível: nenhum gasto, nenhuma conta.
+**Decidido: A, pelo Rafael em 24/11/2026, 09h21 (DESA-62).**
 
 **Não medido:** quanto tempo a entrada própria resiste entre uma mudança e outra da página das
 plataformas; o custo real dos terceiros com áudio de saída (a página da Recall fala em bot maior,
@@ -321,12 +328,15 @@ mas não lemos a fatura); se o Attendee aberto fala de fato (lemos só o roadmap
 
 ### Pedido 3. Decisão: a sonda do Meet roda, mesmo com o `robots.txt` bloqueando a reunião?
 
-Está na pasta do dono como DESA-441, aberto em 24/11/2026.
+Aberto em 24/11/2026 no Paperclip (DESA-441) e posto na pasta do dono pelo maestro em 26/11/2026
+("2026-11-26 — a sonda do Meet com o robots.txt bloqueando").
 - **A (recomendada):** a sonda roda uma vez, numa reunião nossa, com o dono como anfitrião. A
   fatia 2a só sai depois de ele ver o resultado. O risco aparece na tela da peça.
 - **B:** a R15 para até haver uma leitura jurídica.
 - **C:** trocar o Meet pelo Teams (o ACS, que é pago).
-- **Se ninguém responder em 3 dias, vale B.**
+- **Decidido: A, pelo Rafael em 26/11/2026, 14h30, no chat do maestro ("pode seguir com sua
+  recomendação nos docs que me esperam").** É só a sonda, uma vez. Oferecer o canal a quem instala
+  volta à pasta do dono, com o resultado da sonda.
 
 ## 10. Não medido
 
