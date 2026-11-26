@@ -181,6 +181,15 @@ const agents: AgentsDictionary = {
   dropFollowUpMessageWarning: "The text goes to the number that called, and that number may not belong to the caller: someone can use another person's number, or call from a landline answered by someone else. Do not write anything from the conversation: no name, no subject, no time. The text goes out as it is, with nothing replaced: say the company name in it. If empty, the default text shown in the field is used, and it already carries the organization name.",
   dropFollowUpMessageLimits: "At most one message per number every 24 hours, and the do-not-call list applies to it. A cap on messages per organization protects the number: at most {perHour} per hour and {perDay} every 24 hours. If the message cannot go out, a follow-up is opened for someone to call back.",
   dropFollowUpDefinition: "A call counts as dropped when the system fails, when the caller goes a few seconds without an answer and hangs up, when the caller hears the agent ask them to repeat and hangs up without speaking again, or when the line goes down during an agent action. Hanging up after saying goodbye, or while the agent is speaking, does not count.",
+  tabsLabel: "Settings of {name}",
+  tabs: { agente: "Agent", ferramentas: "Tools", depois: "After the call", testes: "Tests", avancado: "Advanced" },
+  unsavedChanges: "There are unsaved changes.",
+  unsavedGoTo: "Back to {tab}",
+  organizationSettings: "What applies to the organization",
+  organizationSettingsLead: "These settings also change what this agent does, but they apply to every agent. They live in Settings.",
+  organizationPrivacy: "Privacy and data",
+  organizationRecording: "Recording notice",
+  organizationWebhooks: "Webhooks",
 };
 
 export default agents;

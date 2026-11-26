@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import agents from "../../src/i18n/pt-BR/agents";
 import common from "../../src/i18n/pt-BR/common";
 import { fill } from "../../src/i18n/locales";
 import privacy from "../../src/i18n/pt-BR/privacy";
@@ -27,6 +28,8 @@ async function agentWithNotes(page: Page, from: string): Promise<{ simulate: () 
   const agentId = ((await created.json()) as { data: { id: string } }).data.id;
   // A ferramenta vem desligada e se liga na tela do agente.
   await page.goto(`/agents/${agentId}`);
+  // As ferramentas ficam na aba Ferramentas (desenho 2026-11-26, fatia 1).
+  await page.getByRole("tab", { name: agents.tabs.ferramentas }).click();
   await page.getByRole("checkbox", { name: /remember_caller_note/ }).check();
   await page.getByRole("button", { name: common.actions.save, exact: true }).click();
   await expect(page.getByRole("status")).toHaveText(common.actions.saved);

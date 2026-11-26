@@ -1,10 +1,7 @@
 import type { AgentTestsDictionary } from "../pt-BR/agent-tests";
 
 const agentTests: AgentTestsDictionary = {
-  back: "Back to the agent",
-  link: "Agent tests",
-  linkLead: "Write conversations and check what the agent decides, before going live.",
-  title: "Tests of {agent}",
+  tabTitle: "Agent tests",
   lead: "Each test is a written conversation: what the caller says and what the agent has to do. A test runs only when you click.",
   costNotice: "Each run uses this agent's engine with your key and counts toward this month's cost. No tool actually runs.",
   scope: "The test checks what the agent decides, not how it hears and speaks.",

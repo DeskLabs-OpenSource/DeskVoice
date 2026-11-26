@@ -181,6 +181,15 @@ const agents: AgentsDictionary = {
   dropFollowUpMessageWarning: "El texto va al número que llamó, y ese número puede no ser de quien llamó: alguien puede usar el número de otra persona, o llamar desde un fijo que atiende otra. No escribas nada de la conversación: ni nombre, ni asunto, ni horario. El texto sale tal cual, sin reemplazar nada: di en él el nombre de la empresa. Vacío, vale el texto predeterminado, que aparece en el campo y ya lleva el nombre de la organización.",
   dropFollowUpMessageLimits: "Como máximo un mensaje por número cada 24 horas, y la lista de no llamar vale para él. Un tope de mensajes por organización protege el número: como máximo {perHour} por hora y {perDay} cada 24 horas. Si el mensaje no puede salir, se abre un pendiente para que alguien devuelva la llamada.",
   dropFollowUpDefinition: "Cuenta como corte cuando el sistema falla, cuando quien llamó pasa algunos segundos sin respuesta y cuelga, cuando oye al agente pedir que repita y cuelga sin volver a hablar, o cuando la línea se cae durante una acción del agente. Quien cuelga después de despedirse, o mientras el agente habla, no cuenta.",
+  tabsLabel: "Configuración de {name}",
+  tabs: { agente: "Agente", ferramentas: "Herramientas", depois: "Después de la llamada", testes: "Pruebas", avancado: "Avanzado" },
+  unsavedChanges: "Hay cambios sin guardar.",
+  unsavedGoTo: "Volver a {tab}",
+  organizationSettings: "Lo que vale para la organización",
+  organizationSettingsLead: "Estas configuraciones también cambian lo que hace este agente, pero valen para todos los agentes. Están en Configuración.",
+  organizationPrivacy: "Privacidad y datos",
+  organizationRecording: "Aviso de grabación",
+  organizationWebhooks: "Webhooks",
 };
 
 export default agents;
