@@ -24,7 +24,7 @@ em 26/11):
   `AGENTS.md` e não é escolha), o componente do painel lateral e a acessibilidade dele (5.3), a
   confirmação da 9.1 só mostrada (5.3, que vem da R5), as fatias (6) e os testes (6.2).
 - **As escolhas de tela que o dono não fez.** Cada uma é um pedido de decisão na seção 8, no
-  formato do `GOVERNANCE.md`, com a recomendação e o padrão sem resposta. O maestro leva os
+  formato do `GOVERNANCE.md`, com a recomendação e o que acontece sem resposta. O maestro leva os
   pedidos para a pasta do dono. São quatro:
   - **D1.** Quais abas, e em qual aba fica cada campo (a tabela 4.1).
   - **D2.** O que cada cartão mostra, nos motores diretos e no pipeline (5.1 e 5.2).
@@ -33,8 +33,8 @@ em 26/11):
   - **D4.** Se o painel lateral tem um Salvar próprio (5.3).
 
 Nas seções 4 e 5, o que depende de uma escolha está marcado com o número dela, e o texto descreve
-a **recomendação**. **Nenhuma fatia de código começa antes da resposta da escolha de que ela
-depende** (tabela da seção 6).
+a **recomendação**. **Nenhuma fatia de código começa antes da resposta escrita do dono à escolha de que ela
+depende** (tabela da seção 6). Prazo vencido não libera fatia: silêncio não aprova.
 
 ## 1. Problema
 
@@ -314,8 +314,9 @@ deste desenho, e não medidas.
 | 4 | **O custo medido nos cartões e na faixa** | **novo** `GET /agents/[id]/costs?days=30` (total e por peça, a mesma leitura do extrato de Custos, isolada por organização) e os números da seção 5.2, com "não medido" e "estimado" | ~250 | D2 |
 | 5 | **A aba Ligações** | filtro `agentId` em `GET /calls` (validado como uuid, dentro da organização da sessão); a lista da tela de Ligações vira componente reaproveitado; a aba, com o filtro de status | ~300 | D1 |
 
-A coluna da direita manda: a fatia só começa depois da resposta do dono às escolhas dela. Se a
-resposta mudar a escolha, a fatia segue a resposta, e o desenho ganha um commit antes do código.
+A coluna da direita manda: a fatia só começa com a **resposta escrita do dono** às escolhas dela.
+Não há padrão por prazo: silêncio não aprova, e nenhuma data libera fatia. Sem resposta, nada
+anda, e a tela de hoje continua como está. Se a resposta mudar a escolha, a fatia segue a resposta, e o desenho ganha um commit antes do código.
 
 A ordem segue o pedido: a fatia 1 vale sozinha, e os cartões com o painel vêm logo depois.
 Ligações vai por último porque é a única que mexe numa rota que outra tela usa.
@@ -398,6 +399,10 @@ Quatro pedidos, um por escolha. Os quatro são reversíveis: mudam a tela, sem t
 gravada ou configuração de quem já instalou. O pedido único que eu tinha aberto antes (a casa de
 cada campo) virou o D1.
 
+Nenhum dos quatro tem padrão por prazo: sem a resposta escrita do dono, nada anda, e a tela de hoje
+continua como está (combinado com o maestro em 26/11). A recomendação de cada um é só a
+recomendação.
+
 ---
 
 Dono do pedido: Arquiteto.
@@ -423,7 +428,7 @@ Dono do pedido: Arquiteto.
 A, porque quem configura acha o que acontece depois da ligação pelo mesmo nome que já vê em
 Configurações, e a aba Ferramentas fica só com o que o agente faz enquanto fala.
 
-### Se ninguém responder em 3 dias, vale: A
+### Sem resposta, nada anda; a tela de hoje continua como está.
 
 ### Não medido
 Ninguém que opera o painel viu as abas. Não sei quantos campos cada operador costuma mexer, nem em
@@ -456,7 +461,7 @@ Dono do pedido: Arquiteto.
 A, porque quem configura vê as mesmas três peças em qualquer motor, e cada número que aparece veio
 de uma ligação de verdade.
 
-### Se ninguém responder em 3 dias, vale: A
+### Sem resposta, nada anda; a tela de hoje continua como está.
 
 ### Não medido
 Não medi a consulta da rota de custo por agente, nem quanto tempo ela leva com muitas ligações. Não
@@ -487,7 +492,7 @@ Dono do pedido: Arquiteto.
 ### Recomendação
 A, porque cada coisa fica num lugar só, e todo endereço antigo continua abrindo.
 
-### Se ninguém responder em 3 dias, vale: A
+### Sem resposta, nada anda; a tela de hoje continua como está.
 
 ### Não medido
 Não sei quantos operadores usam o link do topo dos testes nem a âncora `#pipeline`.
@@ -513,7 +518,7 @@ Dono do pedido: Arquiteto.
 ### Recomendação
 A, porque existe um jeito só de gravar o agente, e o "não salvo" no cartão diz o que falta.
 
-### Se ninguém responder em 3 dias, vale: A
+### Sem resposta, nada anda; a tela de hoje continua como está.
 
 ### Não medido
 Não testei com operador se o "não salvo" no cartão basta para lembrar de salvar.
