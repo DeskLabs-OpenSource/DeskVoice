@@ -3,6 +3,16 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.50.0] - 2026-11-26
+
+### Adicionado
+
+- **O pipeline ganha a transcrição em tempo real da OpenAI, com a chave da OpenAI que você já tem e a confirmação do envio do áudio** O pipeline ganhou a primeira transcrição em tempo real de verdade: a da OpenAI, com o mesmo modelo (`gpt-4o-mini-transcribe`) que o motor OpenAI Realtime já usa para transcrever quem ligou. É uma peça provisória, até a medida da transcrição escolher a definitiva. Ela usa a chave do motor OpenAI Realtime que a organização já salvou em Configurações → Inteligência artificial, sem chave nova, e cobra pelo consumo que a OpenAI informa: tokens, ou, sem eles, o preço por minuto. Cada trecho entra no extrato e no teto de custo da ligação. O áudio de quem ligou vai para a OpenAI, e por isso a peça só funciona depois da confirmação nomeando o fornecedor. A confirmação fica no bloco Pipeline da tela do agente, com quem confirmou e quando, e gera um recibo no Registro da privacidade. Sem ela, o agente não salva com essa transcrição, e a ligação é recusada antes de qualquer envio. Na tela do agente, o Pipeline deixa de dizer "desligado" na organização que tem essa chave. Sem a chave, a linha diz onde salvá-la. A escolha das peças pela tela ainda não existe: ela é gravada pela API do agente, no campo `pipeline`. Quem já instalou não precisa fazer nada: nenhum agente passa a usar o pipeline sozinho. Crédito: @melgarafael.
+
+### Corrigido
+
+- **O agente do OpenAI Realtime deixa de pedir para repetir logo depois de ter respondido** Quando a guarda contra o silêncio fechava a vez de quem ligou à força e a pessoa seguia falando, o pedido "Desculpe, a linha está com bastante barulho. Pode repetir, por favor?" podia sair logo depois da resposta certa do agente. O provedor já preparava a resposta quando o prazo da guarda vencia, e o áudio dela ainda não tinha chegado. Numa ligação real pelo WhatsApp, a Helena respondeu ao pedido de marcar e, em seguida, pediu para a pessoa repetir. Agora, com o motor OpenAI Realtime, a guarda pergunta ao motor se a resposta já está a caminho e, se estiver, espera mais 4 segundos em vez de pedir. Se a resposta não tocar nesse tempo, o pedido sai como antes. No Gemini Live e no pipeline nada muda. Quem já instalou não precisa fazer nada. Crédito: @melgarafael.
+
 ## [0.49.0] - 2026-11-26
 
 ### Adicionado
