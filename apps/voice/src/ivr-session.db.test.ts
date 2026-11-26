@@ -312,10 +312,14 @@ describe("URA: a tecla de quem liga não fica guardada (T5)", { timeout: 60_000 
         options: [{ digit: variant.option, label: LABEL, action: "transfer", transferE164: PERSON }],
       }));
       await promptPlayed(h, 1);
+      let ended = false;
+      void h.session.done.then(() => (ended = true));
       for (const digit of TYPED) {
+        const played = h.transport.sent.length;
         h.transport.press(digit);
-        // Cada tecla inválida grava a tentativa e toca o anúncio de novo; a próxima tecla chega nele.
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        // Cada tecla inválida grava a tentativa e só então toca o anúncio de novo; a tecla que chega
+        // antes disso a URA não lê. A próxima tecla espera o anúncio novo, ou o fim da URA.
+        await waitFor(() => ended || h.transport.sent.length > played, `the prompt after ${digit === variant.option ? "the option" : "a key"}`);
       }
       await h.session.done;
 
