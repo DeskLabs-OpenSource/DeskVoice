@@ -5,11 +5,14 @@ import { ArrowLeft, Trash } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
+import enTests from "../../../../i18n/en/agent-tests";
 import en from "../../../../i18n/en/agents";
 import enCommon from "../../../../i18n/en/common";
+import esTests from "../../../../i18n/es/agent-tests";
 import es from "../../../../i18n/es/agents";
 import esCommon from "../../../../i18n/es/common";
 import { fill } from "../../../../i18n/locales";
+import ptBRTests from "../../../../i18n/pt-BR/agent-tests";
 import ptBR from "../../../../i18n/pt-BR/agents";
 import ptBRCommon from "../../../../i18n/pt-BR/common";
 import { useDict } from "../../../../i18n/provider";
@@ -24,6 +27,8 @@ import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Pe
 import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
 import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
 import { AgentBrains } from "./brains";
+import { EngineField, newAgentEngine } from "./engine-field";
+import { PipelineBlock } from "./pipeline-block";
 import { VoiceField } from "./voice-field";
 
 /** O agente como a API devolve, com quem lê a ligação dele (R4, fatia 5): nulo segue a organização. */
@@ -103,6 +108,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const isNew = id === "new";
   const t = useDict(ptBR, en, es);
   const common = useDict(ptBRCommon, enCommon, esCommon);
+  const tests = useDict(ptBRTests, enTests, esTests);
   const router = useRouter();
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
@@ -153,8 +159,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   useEffect(() => {
     if (isNew && meLoaded) setDraft((current) => current ?? { ...BLANK, language: proposedLanguage(organizationLanguage) });
   }, [isNew, meLoaded, organizationLanguage]);
-  // Agente novo já nasce com o motor padrão da instalação; sem padrão, o primeiro da lista.
-  const fallbackEngine = defaultEngine.data?.value ?? engines.data?.[0]?.id ?? "";
+  // Agente novo já nasce com o motor padrão da instalação; sem padrão, o primeiro da lista, nunca o pipeline.
+  const fallbackEngine = newAgentEngine(defaultEngine.data?.value, engines.data);
   const hasDraft = draft !== null;
   useEffect(() => {
     if (isNew && fallbackEngine) setDraft((current) => (current && current.engine === "" ? { ...current, engine: fallbackEngine } : current));
@@ -181,6 +187,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // Os agentes que podem passar a ligação para este: apagá-lo o tira da lista deles.
   const handingOffHere = others.filter((other) => other.agentHandoffTargets?.includes(id));
   const engine = engines.data?.find((candidate) => candidate.id === draft.engine);
+  const pipelineEngine = engines.data?.find((candidate) => candidate.assembled === true);
   // Barulhento foi provado no OpenAI Realtime e no Gemini Live. Em outro motor, a opção some; um agente que já
   // está em Barulhento continua vendo o campo, com um aviso, para não guardar a escolha escondida.
   const noisyProven = NOISY_PROVEN_ENGINES.includes(draft.engine);
@@ -255,6 +262,13 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         <h1 className="text-[1.75rem] leading-tight font-bold tracking-[-0.01em]">{isNew ? t.newTitle : draft.name || t.newTitle}</h1>
       </header>
       <ReadOnlyNotice />
+      {/* Os testes do agente moram na página deles (fatia 7c): aqui, só o link. */}
+      {isNew ? null : (
+        <Link href={`/agents/${id}/tests`} className="grid justify-self-start gap-0.5 rounded-md border border-line bg-surface px-4 py-3 hover:border-muted">
+          <span className="font-bold">{tests.link}</span>
+          <span className="text-[0.87rem] text-muted">{tests.linkLead}</span>
+        </Link>
+      )}
 
       <fieldset disabled={!canConfigure} className="grid gap-6">
         <Panel title={t.identity}>
@@ -300,24 +314,17 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
 
         <Panel title={t.voice}>
           <div className="grid gap-4 md:grid-cols-3">
-            <Field label={t.engine}>
-              <Select
-                value={draft.engine}
-                onChange={(event) => {
-                  const next = engines.data?.find((candidate) => candidate.id === event.target.value);
-                  set("engine", event.target.value);
-                  // A voz de um motor não existe no outro: trocar de motor volta para a voz padrão.
-                  if (!next?.voices.some((voice) => voice.id === draft.voiceId)) set("voiceId", "");
-                }}
-                required
-              >
-                {engines.data?.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            <EngineField
+              t={t}
+              engines={engines.data}
+              value={draft.engine}
+              onChange={(nextId) => {
+                const next = engines.data?.find((candidate) => candidate.id === nextId);
+                set("engine", nextId);
+                // A voz de um motor não existe no outro: trocar de motor volta para a voz padrão.
+                if (!next?.voices.some((voice) => voice.id === draft.voiceId)) set("voiceId", "");
+              }}
+            />
             <VoiceField t={t} engine={engine} voiceId={draft.voiceId} language={draft.language} onChange={(next) => set("voiceId", next)} />
             <Field label={t.language}>
               <TextInput mono value={draft.language} onChange={(event) => set("language", event.target.value)} required maxLength={20} />
@@ -367,6 +374,9 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           ) : null}
           {engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
         </Panel>
+
+        {/* O Pipeline (fatia 5b-1): só para ver e ouvir; nada daqui entra no salvar. */}
+        {pipelineEngine ? <PipelineBlock t={t} pipeline={pipelineEngine} canConfigure={canConfigure} agentId={isNew ? null : id} /> : null}
 
         <AgentBrains
           agentId={isNew ? null : id}

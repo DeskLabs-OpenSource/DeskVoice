@@ -1,0 +1,7 @@
+---
+impact: new_capability
+section: added
+title: A tela do agente mostra o Pipeline desligado e as vozes da ElevenLabs da sua conta, com o Ouvir e o aviso de envio
+---
+
+Na tela do agente, o campo Motor de voz agora lista o Pipeline, desligado, com uma linha que diz o que falta: uma transcrição em tempo real neste servidor, que chega com a medida da R12. Logo abaixo, um bloco novo, "Pipeline", mostra as três peças só para ver e ouvir: a transcrição que ainda falta, o cérebro e o modelo (só os que conversam e têm preço conhecido) e as vozes da sua conta da ElevenLabs, marcadas como ElevenLabs, cada uma com o botão Ouvir, que toca a amostra da própria ElevenLabs sem gastar crédito e só depois do clique. Sem chave salva, a linha diz isso e leva a Configurações → Voz. Ao lado da voz e da transcrição fica o aviso de que o dado da ligação sai do servidor, com quem confirmou o envio e quando. O bloco também mostra quanto o agente leva para responder pelo pipeline (a mediana das últimas ligações, com os turnos que usaram ferramenta à parte e um aviso quando passa da meta), e, enquanto não há ligação medida, diz que ainda não há medida. Nada nesse bloco é salvo no agente. Pelo pipeline, a ligação de um agente com a voz da ElevenLabs escolhida e sem a confirmação do envio é recusada antes de qualquer envio, com o motivo na linha do tempo; nenhum motor direto usa voz da ElevenLabs. Quem já instalou não precisa fazer nada: o motor e a voz de cada agente ficam como estavam, e o Pipeline não pode ser escolhido como motor. Crédito: @melgarafael.

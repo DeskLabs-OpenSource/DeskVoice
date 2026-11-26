@@ -89,6 +89,10 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
   let left = false;
   let remoteGone = false;
   let released: Promise<void> | undefined;
+  // O encerramento partiu daqui. Marcado antes de `peer.close()`: o werift 0.28 passa a conexão a
+  // `closed` no trecho síncrono do `close()`, antes de `released` receber a promessa, e sem a marca
+  // `callerLeft` avisaria a conversa de que quem ligou desligou (o contrato de `onHangup` diz que não).
+  let closing = false;
   let lastHeard = 0;
   let cancelFill: (() => void) | undefined;
   let mediaWaiters: (() => void)[] = [];
@@ -126,7 +130,7 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
 
   /** Quem ligou saiu, ou a perna caiu: avisa a conversa uma vez. Quem solta a perna é `close`. */
   const callerLeft = (): void => {
-    if (left || released) return;
+    if (left || closing) return;
     left = true;
     held = [];
     pacer.stop();
@@ -138,6 +142,7 @@ export async function openWhatsAppTransport(leg: WhatsAppLeg, options: WhatsAppT
   /** Solta a perna: para a cadência, fecha a conexão e, se a ligação ainda existe, desliga no WaCalls. */
   const release = (): Promise<void> =>
     (released ??= (async () => {
+      closing = true;
       pacer.stop();
       cancelFill?.();
       wakeMediaWaiters();

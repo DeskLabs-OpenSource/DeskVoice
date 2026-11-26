@@ -397,6 +397,7 @@ const chatRequest = (overrides: Partial<BrainChatRequest> = {}): BrainChatReques
   messages: SIMPLE,
   tools: CHAT_TOOLS,
   timeoutMs: 5_000,
+  maxTokens: 321,
   ...overrides,
 });
 const openChat = (fake: { fetch: typeof fetch }, overrides: Partial<BrainChatRequest> = {}, target: Brain = brain): BrainChat => {

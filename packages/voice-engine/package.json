@@ -9,7 +9,8 @@
     "./types": "./src/types.ts",
     "./pricing": "./src/pricing.ts",
     "./transcription": "./src/transcription.ts",
-    "./brain": "./src/brain.ts"
+    "./brain": "./src/brain.ts",
+    "./pipeline-choice": "./src/pipeline-choice.ts"
   },
   "dependencies": {
     "@deskvoice/core": "workspace:^",

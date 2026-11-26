@@ -53,6 +53,11 @@ export interface ServerDeps {
   verifyPassword: typeof verifyPassword;
   /** Pasta das gravações (`RECORDINGS_DIR`), montada só para leitura: a tela toca e a exportação diz se há. */
   recordingsDir: string;
+  /**
+   * Aceita a peça simulada do pipeline (transcrição e voz) na escolha do agente (`requirePipeline`).
+   * Só os testes ligam; a instalação nunca: ela serve aos testes e à prova de primeira impressão.
+   */
+  simulatedPieces?: boolean;
 }
 
 export const SESSION_COOKIE = "dv_session";

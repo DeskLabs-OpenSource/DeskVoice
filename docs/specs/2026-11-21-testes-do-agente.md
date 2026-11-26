@@ -260,6 +260,10 @@ interface VoiceSessionEvents { /* … */ turnDone?(): void } // a resposta acabo
   reprova com `tool_unexpected`. Isso vale também para `end_call`, `transfer_to_human`,
   `request_approval`, `notify_human` e a passagem a outro agente: o teste registra o pedido, e
   nada sai.
+- **O teste abre como a ligação recebida** (decisão do Arquiteto na DESA-369, 23/11): primeiro o
+  aviso de gravação, quando o agente o tem, e depois a saudação, pela mesma montagem de
+  `session-config.ts`. Quando o agente tem destino de passagem, o teste oferece
+  `transfer_to_agent` ao modelo, como a ligação, e a chamada só é registrada (regra acima).
 - **A fala do agente** soma os `transcript` do agente entre o texto do usuário e o `turnDone`.
 - **Limites:** 30 s por turno (estourou: `error`, `turn_timeout`), 8 chamadas de ferramenta por
   turno (passou: `error`, `tool_loop`), 12 turnos por teste e 20 testes por agente.

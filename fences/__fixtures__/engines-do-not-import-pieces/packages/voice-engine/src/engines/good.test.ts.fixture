@@ -1,0 +1,4 @@
+// O teste costura peças concretas: é ele quem escolhe.
+import openai from "../brains/openai";
+import simulated from "../transcribers/simulated";
+export const pieces = [openai, simulated];
