@@ -452,6 +452,7 @@ const timeline: TimelineDictionary = {
         unreachable: "The transcription service did not answer in time, or is down.",
         unexpected_response: "The transcription service answered something outside the expected format.",
         closed: "The transcription service dropped in the middle of the call.",
+        unconfirmed: "Nobody confirmed that the caller's audio goes to the transcription provider. The confirmation is in the agent's Pipeline block.",
       } as Record<string, string>,
       unknown: "The transcription piece did not open on this call.",
       continued: "The call went on with the voice engine only, as before.",

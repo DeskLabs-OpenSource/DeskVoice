@@ -308,7 +308,7 @@ interface LegPiece {
 }
 
 /** A peça que o agente de um trecho pede, já com a chave lida, ou a chave que não serve. */
-type PieceChoice = { transcriber: StreamingTranscriber; apiKey: string; config: LegPiece["config"] } | { rejected: string; detail: string };
+type PieceChoice = { transcriber: StreamingTranscriber; apiKey: string; config: LegPiece["config"] } | { rejected: string; reason: "rejected" | "unconfirmed"; detail: string };
 
 /** O analista aberto para um trecho: o modelo de decisão, a chave e o cadastro lido no começo do trecho. */
 interface LegAnalyst {
@@ -1844,7 +1844,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   }
 
   /** Por que a peça de transcrição ficou fora da chamada: o vocabulário do teste da chave, ou `closed`. */
-  type TranscriberFailure = Exclude<KeyCheckResult, "accepted" | "not_needed"> | "closed";
+  type TranscriberFailure = Exclude<KeyCheckResult, "accepted" | "not_needed"> | "closed" | "unconfirmed";
 
   /** A peça de um trecho ficou de fora; a ligação segue. Depois de uma passagem, o evento leva o agente do trecho, como `transcript_agent`. */
   function transcriberFailed(owner: Leg, transcriberId: string, reason: TranscriberFailure, detail: string): void {
@@ -1868,6 +1868,12 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       return undefined;
     }
     const config = { language: row.language, vocabulary: row.vocabulary.slice(0, transcriber.maxVocabulary) };
+    // A peça de fora do servidor leva o áudio de quem ligou ao fornecedor: só abre com a confirmação
+    // da seção 9.1, a mesma regra de `connectPipeline`. Sem ela, a peça fica de fora e a ligação segue.
+    if (transcriber.processingLocation.kind !== "this-server") {
+      const consent = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberConsentSetting(transcriber.id)]);
+      if (readConsent(consent?.value) === null) return { rejected: transcriber.id, reason: "unconfirmed", detail: `nobody confirmed that the caller's audio goes to ${transcriber.label}` };
+    }
     if (transcriber.keyless) return { transcriber, apiKey: "", config };
     const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberKeySettingOf(transcriber)]);
     try {
@@ -1875,7 +1881,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       return { transcriber, apiKey: decryptSecret(stored.value, deps.secretKey), config };
     } catch (error) {
       // Sem chave que sirva, a peça não abre: para quem lê a linha do tempo, é a chave recusada.
-      return { rejected: transcriber.id, detail: messageOf(error) };
+      return { rejected: transcriber.id, reason: "rejected", detail: messageOf(error) };
     }
   }
 
@@ -1909,7 +1915,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       return Promise.resolve();
     }
     const leaving = from ? closePiece(from) : Promise.resolve();
-    if (choice && "rejected" in choice) transcriberFailed(next, choice.rejected, "rejected", choice.detail);
+    if (choice && "rejected" in choice) transcriberFailed(next, choice.rejected, choice.reason, choice.detail);
     else if (choice) {
       const piece: LegPiece = { transcriber: choice.transcriber, config: choice.config, owner: next, gone: false };
       next.piece = piece;
