@@ -1737,6 +1737,40 @@ describe("motor pipeline (fatia 6): a concordância (\"aham\", \"sim\") não cor
     await session.close();
   });
 
+  it("o trecho começado antes da resposta e fechado com ela saindo (o `final` igual ao parcial) também é concordância", async () => {
+    // O parcial chega com o cérebro ainda calado; o `final`, idêntico, já com a resposta saindo. Sem texto
+    // novo no `final`, só a resposta saindo diz que ele é concordância.
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    const first = gate();
+    const rest = gate();
+    brain.reply([first.hold, text(FIRST), rest.hold, text(SECOND), usage(30, 12)]);
+    const { session, log } = await openRecorded(
+      piecesOf(voice.synthesizer, [
+        { afterAudioMs: 100, text: "Oi.", final: true },
+        { afterAudioMs: 200, text: "Aham" },
+        { afterAudioMs: 300, text: "Aham", final: true },
+      ]),
+    );
+    voice.hold();
+    speak(session, 200);
+    await until(() => log.events.filter((event) => event === "activity").length === 2, "o parcial, antes da resposta");
+    first.release();
+    await until(() => voice.pending() === 1, "a primeira frase gerar");
+    voice.step();
+    speak(session, 100);
+    await until(() => log.events.includes("user: Aham"), "a concordância na transcrição");
+    rest.release();
+    while (voice.pending() > 0 || !log.events.some((event) => event.startsWith("agent:"))) {
+      voice.step();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await settle();
+    expect(log.events).not.toContain("interrupted");
+    expect(brain?.requests.length).toBe(1);
+    await session.close();
+  });
+
   it("\"sim, mas\": a parcial que cresce corta na primeira palavra fora da lista", async () => {
     const { session, log, voice } = await speaking([
       { afterAudioMs: 100, text: "Oi.", final: true },
