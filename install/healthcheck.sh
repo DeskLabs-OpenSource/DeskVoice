@@ -361,9 +361,10 @@ if [ "$only_essential" = 0 ]; then
   else add disk "Disco" 0 ok "$((free_mb / 1024)) GB livres"; fi
 
   # ── Log do Asterisk: as versões sem deploy/asterisk/logger.conf gravavam
-  #    /var/log/asterisk/messages.log sem teto (20 GB numa instalação). A partir dele o log vai só para a saída do contêiner, que o Docker limita, mas o
-  #    arquivo antigo fica no volume do contêiner: a atualização não apaga dado. Mede de dentro do
-  #    contêiner, porque o volume é anônimo e, no disco da VPS, só o root o lê. ──
+  #    /var/log/asterisk/messages.log sem teto (20 GB numa instalação). A partir dele o log vai só
+  #    para a saída do contêiner, que o Docker limita, mas o arquivo antigo fica no volume do
+  #    contêiner: a atualização não apaga dado. Mede de dentro do contêiner, porque o volume é
+  #    anônimo e, no disco da VPS, só o root o lê. ──
   if ! running asterisk; then
     add asterisk_log "Log do Asterisk" 0 aviso "não deu para medir porque o Asterisk não está rodando; resolva o Asterisk primeiro"
   else
