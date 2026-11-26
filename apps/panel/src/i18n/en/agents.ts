@@ -62,7 +62,7 @@ const agents: AgentsDictionary = {
   enginePipelineOff: { no_live_transcriber: "This server lacks a real-time transcription. It comes with the R12 measurement.", no_transcriber_key: "This organization lacks the key the transcription uses: OpenAI's uses the OpenAI Realtime engine key, in Settings → Artificial intelligence." } as Record<string, string>,
   enginePipelineOffUnknown: "Still off in this version.",
   pipeline: "Pipeline",
-  pipelineLead: "Transcription, brain and voice chosen separately. For now, only to see and listen: the Pipeline is off, and nothing here is saved to the agent.",
+  pipelineLead: "Transcription, brain and voice chosen separately. The choices in this block are not saved to the agent yet: only the confirmation of where the audio goes is recorded here.",
   pipelineReadOnly: "Only people who configure the organization see the Pipeline pieces.",
   pipelineTranscriber: "Transcription",
   pipelineTranscriberNone: "No real-time transcription on this server.",

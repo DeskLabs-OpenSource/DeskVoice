@@ -63,7 +63,7 @@ const agents = {
   enginePipelineOffUnknown: "Ainda desligado nesta versão.",
   /** O bloco "Pipeline" (fatia 5b-1): as três peças, só para ver e ouvir; nada é salvo daqui. */
   pipeline: "Pipeline",
-  pipelineLead: "Transcrição, cérebro e voz escolhidos à parte. Por enquanto, só para ver e ouvir: o Pipeline está desligado, e nada daqui é salvo no agente.",
+  pipelineLead: "Transcrição, cérebro e voz escolhidos à parte. As escolhas deste bloco ainda não são salvas no agente: só a confirmação do envio do áudio é gravada daqui.",
   pipelineReadOnly: "Só quem configura a organização vê as peças do Pipeline.",
   pipelineTranscriber: "Transcrição",
   pipelineTranscriberNone: "Nenhuma transcrição em tempo real neste servidor.",
