@@ -70,9 +70,20 @@ export async function loadEngines(dir: string = DEFAULT_DIR): Promise<Map<string
  * Descobre as peças de transcrição em streaming pela pasta `transcribers/`, como os motores: cada
  * arquivo exporta um `StreamingTranscriber` como `default`, e não existe lista central.
  */
-export function loadTranscribers(dir: string = DEFAULT_TRANSCRIBERS_DIR): Promise<Map<string, StreamingTranscriber>> {
-  return loadPieces(dir, isStreamingTranscriber, "StreamingTranscriber", "transcritor");
+export async function loadTranscribers(dir: string = DEFAULT_TRANSCRIBERS_DIR): Promise<Map<string, StreamingTranscriber>> {
+  const transcribers = await loadPieces(dir, isStreamingTranscriber, "StreamingTranscriber", "transcritor");
+  // `keySetting` só pode apontar para a chave de um motor (`engine.<id>.api_key`): uma peça que
+  // lesse qualquer nome de settings levaria para o fornecedor um valor que não foi gravado como chave dele.
+  for (const transcriber of transcribers.values()) {
+    if (transcriber.keySetting !== undefined && !ENGINE_KEY_SETTING.test(transcriber.keySetting)) {
+      throw new Error(`transcritor ${transcriber.id}: keySetting fora das chaves de motor (engine.<id>.api_key): ${transcriber.keySetting}`);
+    }
+  }
+  return transcribers;
 }
+
+/** O único formato que `StreamingTranscriber.keySetting` aceita: a chave de um motor. */
+const ENGINE_KEY_SETTING = /^engine\.[a-z0-9-]+\.api_key$/;
 
 function isDecisionModel(value: unknown): value is DecisionModel {
   if (typeof value !== "object" || value === null) return false;

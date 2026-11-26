@@ -693,6 +693,36 @@ bancada.**
     `say` continuam sem corte.
   - A tabela vai ao PR da fatia 6 e a esta seção, com o comando e a data.
 
+**6a, parte 1: a transcrição da OpenAI como peça provisória (DESA-469, opção B da DESA-398, decisão 2).**
+O pedido do Rafael de 26/11 (a ligação real com a ElevenLabs) não espera o vencedor da R12. A peça é
+`transcribers/openai.ts`, no contrato `StreamingTranscriber`. É o `gpt-4o-mini-transcribe`, o mesmo do
+OpenAI Realtime, numa sessão só de transcrição (`?intent=transcription`), em μ-law a 8 kHz, com a
+detecção de fala do servidor (`server_vad`). Os itens saem na ordem em que o servidor os fecha. O
+`endMs` é o `audio_end_ms` menos o silêncio que o servidor esperou. O custo vem de cada `completed`:
+em tokens, em segundos, ou, sem `usage`, pela duração do item, ao preço por minuto.
+- **A chave é a do motor OpenAI Realtime** (`engine.openai-realtime.api_key`), sem chave nova. O
+  contrato ganhou o campo opcional `keySetting`. A sessão (`call-session.ts`) e o painel leem a chave
+  por `transcriberKeySettingOf`. Sem o campo, a chave segue em `transcriber.<id>.api_key`.
+- **A confirmação da 9.1** fica em `transcriber.<id>.consent`, com o recibo
+  `transcriber_provider_confirmed`, na forma da 1b. O texto é "O áudio da pessoa na ligação vai para a
+  OpenAI". Como não há chave para gravar, a confirmação tem rota própria:
+  `PUT|DELETE /api/v1/transcribers/{id}/consent`, com o botão no bloco Pipeline. `GET /api/v1/transcribers`
+  diz se a chave existe e quem confirmou. A gravação do agente (`requirePipeline`) e a abertura da ligação
+  conferem a confirmação, com o mesmo `pipeline_piece_unconfirmed`, agora também para a transcrição.
+- **O pipeline deixa de aparecer desligado** na organização que tem uma transcrição de verdade na
+  pasta e a chave dela. `unavailable` passa a ser por organização: `no_live_transcriber` (a pasta sem
+  transcrição de verdade) ou `no_transcriber_key` (sem a chave). Com as duas, `null`, e o campo Motor
+  diz "Pipeline", com a linha de que ele está pronto.
+- **Fica de fora desta parte:** a escolha das peças pela tela (o bloco ainda não grava
+  `agents.pipeline`; a API do agente grava), pergunta ao Arquiteto na DESA-469. Também fica de fora a
+  regra da concordância, num PR depois deste (ordem do board de 26/11, fatias de até ~400 linhas).
+- **Não medido:** a peça contra a OpenAI de verdade (nenhuma chamada com chave). Não foi medido se a
+  sessão de transcrição aceita `audio/pcmu` (o guia só mostra `audio/pcm` a 24 kHz; a referência aceita
+  os três), se manda `delta` antes do `completed` neste modelo, nem quanto o final chega depois do fim da
+  fala (a régua de 700 ms do p95 da R12). Também não foi medido o custo por minuto real no extrato. A
+  confirmação não sai com a chave do motor, como a da voz sai com a dela: apagar a chave do motor desliga
+  o pipeline (`no_transcriber_key`), mas a confirmação continua gravada.
+
 ## 5. O que espera a R12
 
 - **O contrato `StreamingTranscriber` na `main`: não espera.** A DESA-398 decidiu que as fatias 3 a 5

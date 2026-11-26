@@ -14,7 +14,7 @@ import ptBR, { type AgentsDictionary } from "../../../../i18n/pt-BR/agents";
 import ptBRVoice, { type VoiceDictionary } from "../../../../i18n/pt-BR/voice";
 import { formatDateTime } from "../../../../ui/format";
 import type { Engine } from "../../../../ui/types";
-import { conversationalBrains, PipelinePanel, type PipelineBrainOption, type PipelinePanelProps, type PipelineSynthesizer, type VoicesState } from "./pipeline-block";
+import { conversationalBrains, PipelinePanel, type PipelineBrainOption, type PipelinePanelProps, type PipelineSynthesizer, type PipelineTranscriber, type VoicesState } from "./pipeline-block";
 import { playSample } from "./voice-field";
 
 const PIPELINE: Engine = {
@@ -89,7 +89,8 @@ describe("PipelinePanel", () => {
     const html = render({}, [locale, t, voiceT]);
     expect(html).toContain('id="pipeline"');
     expect(html).toContain(escaped(t.pipelineTranscriberNone));
-    expect(html).toContain(escaped(t.pipelineTranscriberNotice));
+    // Sem transcrição de verdade, não há o que confirmar ao lado dela.
+    expect(html).not.toContain(escaped(fill(t.pipelineTranscriberNotice, { provider: "OpenAI" })));
     expect(html).toContain(escaped(t.pipelineVoicesNote));
     // Cada voz leva o rótulo do fornecedor; a com amostra tem o Ouvir, a sem diz "sem amostra".
     expect(html.match(/>ElevenLabs</g)?.length).toBeGreaterThanOrEqual(3);
@@ -121,10 +122,10 @@ describe("PipelinePanel", () => {
 
   it.each(DICTS)("em %s: o aviso da 9.1 não confirmado, e o de quem saiu da equipe", (locale, t, voiceT) => {
     const unconfirmed = render({ synthesizers: [{ ...ELEVENLABS, consent: null }] }, [locale, t, voiceT]);
-    // Duas vezes: a da transcrição (que nunca tem confirmação nesta versão) e a da voz.
+    // Uma vez, a da voz: sem transcrição de verdade, a dela não aparece.
     const times = (html: string): number => html.split(escaped(t.pipelineUnconfirmed)).length - 1;
-    expect(times(unconfirmed)).toBe(2);
-    expect(times(render({}, [locale, t, voiceT]))).toBe(1);
+    expect(times(unconfirmed)).toBe(1);
+    expect(times(render({}, [locale, t, voiceT]))).toBe(0);
     expect(unconfirmed).not.toContain("{who}");
     expect(unconfirmed).not.toContain(escaped(fill(t.pipelineConfirmedBy, { who: "Ana Souza", when: formatDateTime(CONFIRMED_AT, locale) })));
     const gone = render({ synthesizers: [{ ...ELEVENLABS, consent: { name: null, at: CONFIRMED_AT } }] }, [locale, t, voiceT]);
@@ -134,8 +135,34 @@ describe("PipelinePanel", () => {
   it("a voz que roda neste servidor não leva aviso: o texto não sai daqui", () => {
     const html = render({ synthesizers: [{ ...ELEVENLABS, processingLocation: { kind: "this-server" }, consent: null }] });
     expect(html).not.toContain(escaped(fill(ptBRVoice.confirm, { provider: "ElevenLabs" })));
-    // A transcrição continua com o dela.
-    expect(html.match(/data-testid="pipeline-consent"/g)).toHaveLength(1);
+    expect(html.match(/data-testid="pipeline-consent"/g)).toBeNull();
+  });
+
+  const OPENAI_EAR: PipelineTranscriber = { id: "openai", label: "OpenAI (gpt-4o-mini-transcribe)", provider: "openai", processingLocation: { kind: "undeclared" }, keyConfigured: true, consent: null };
+  const LIVE: Engine = { ...PIPELINE, unavailable: null };
+
+  it.each(DICTS)("em %s (fatia 6): a transcrição da OpenAI com o aviso da 9.1 e o botão que confirma, sem enviar formulário", (locale, t, voiceT) => {
+    const html = render({ pipeline: LIVE, transcribers: [OPENAI_EAR] }, [locale, t, voiceT]);
+    expect(html).not.toContain(escaped(t.pipelineTranscriberNone));
+    expect(html).toContain("OpenAI (gpt-4o-mini-transcribe)");
+    expect(html).toContain(escaped(fill(t.pipelineTranscriberNotice, { provider: "OpenAI" })));
+    expect(html).toContain(escaped(t.pipelineTranscriberUnconfirmed));
+    expect(html).toContain(escaped(fill(t.pipelineTranscriberConfirm, { provider: "OpenAI" })));
+    expect(html).not.toContain(escaped(t.pipelineTranscriberNoKey));
+    expect(html).not.toContain('type="submit"');
+  });
+
+  it.each(DICTS)("em %s (fatia 6): a confirmada diz por quem e quando, e oferece apagar; a sem a chave diz onde fica a chave", (locale, t, voiceT) => {
+    const confirmed = render({ pipeline: LIVE, transcribers: [{ ...OPENAI_EAR, consent: { name: "Ana Souza", at: CONFIRMED_AT } }] }, [locale, t, voiceT]);
+    expect(confirmed).toContain(escaped(fill(t.pipelineConfirmedBy, { who: "Ana Souza", when: formatDateTime(CONFIRMED_AT, locale) })));
+    expect(confirmed).toContain(escaped(t.pipelineTranscriberRemove));
+    expect(confirmed).not.toContain(escaped(fill(t.pipelineTranscriberConfirm, { provider: "OpenAI" })));
+    const noKey = render({ pipeline: { ...PIPELINE, unavailable: { reason: "no_transcriber_key" } }, transcribers: [{ ...OPENAI_EAR, keyConfigured: false }] }, [locale, t, voiceT]);
+    expect(noKey).toContain(escaped(t.pipelineTranscriberNoKey));
+  });
+
+  it("com a transcrição de verdade ainda carregando, o bloco espera, e não diz que falta", () => {
+    expect(render({ pipeline: LIVE, transcribers: undefined })).not.toContain(escaped(ptBR.pipelineTranscriberNone));
   });
 
   it("a falha da lista diz a frase, e nunca fica em silêncio", () => {

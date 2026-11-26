@@ -43,7 +43,7 @@ const speechFilter: SpeechFilterDictionary = {
     country: "{provider}'s service is hosted {country}.",
   },
   countries: { US: "in the United States" },
-  providers: { typesafe: "TypeSafe", elevenlabs: "ElevenLabs" },
+  providers: { typesafe: "TypeSafe", elevenlabs: "ElevenLabs", openai: "OpenAI" },
   retention: {
     typesafe: [
       "TypeSafe keeps the personal data it receives, such as this text, for as long as reasonably necessary to provide the service or for its business or commercial purposes, with no period set in the policy.",
