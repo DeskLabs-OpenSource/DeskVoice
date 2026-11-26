@@ -143,4 +143,17 @@ describe("loadTranscribers", () => {
     await writeFile(join(dir, "second.ts"), fixtureTranscriber("same"));
     await expect(loadTranscribers(dir)).rejects.toThrow(/second\.ts: id de transcritor repetido: same/);
   });
+
+  it("recusa keySetting que não é a chave de um motor; aceita engine.<id>.api_key", async () => {
+    dir = await mkdtemp(join(tmpdir(), "deskvoice-transcribers-"));
+    const withKey = (keySetting: string): string => fixtureTranscriber("fixture").replace("maxVocabulary: 10,", `maxVocabulary: 10, keySetting: ${JSON.stringify(keySetting)},`);
+    // Um arquivo por caso: o import guarda o módulo pelo caminho.
+    for (const [index, bad] of ["voice.elevenlabs.api_key", "engine.openai-realtime.consent", "engine..api_key", "smtp.password"].entries()) {
+      await writeFile(join(dir, `bad${index}.ts`), withKey(bad));
+      await expect(loadTranscribers(dir), bad).rejects.toThrow(/keySetting fora das chaves de motor/);
+      await rm(join(dir, `bad${index}.ts`));
+    }
+    await writeFile(join(dir, "fixture.ts"), withKey("engine.openai-realtime.api_key"));
+    expect((await loadTranscribers(dir)).get("fixture")?.keySetting).toBe("engine.openai-realtime.api_key");
+  });
 });
