@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agendaNotWired, agendaUnavailable, agendaWaitLine, speakSlot } from "../agenda-speech";
+import { agendaFailure, agendaNotWired, agendaWaitLine, speakSlot } from "../agenda-speech";
 import { defineTool } from "../define-tool";
 import type { ToolDeps } from "../deps";
 
@@ -60,14 +60,20 @@ export function createAgendaHorariosLivres(deps: ToolDeps = {}) {
           callId: ctx.callId,
         });
 
+        // Horário provisório: a agenda não pôde ser conferida por inteiro, e a equipe confirma.
+        const provisional = agenda.provisional
+          ? " Estes horários não puderam ser conferidos por inteiro: ofereça pedindo confirmação, e diga que a equipe confirma o horário depois de marcado."
+          : "";
+        const data = { slots: agenda.slots, timezone: agenda.timezone, hasMore: agenda.hasMore, provisional: agenda.provisional };
+
         if (agenda.slots.length === 0) {
-          return {
-            ok: true,
-            message:
-              `Não há horário livre para ${input.service_type} nesse período. Ofereça outro período, ` +
-              "ou anote o pedido para a equipe retornar (create_task). Não invente horário.",
-            data: { slots: [], timezone: agenda.timezone },
-          };
+          // Lista cortada não é agenda cheia: o que sobrou pode estar no período pedido.
+          const message = agenda.hasMore
+            ? `A consulta não trouxe horário para ${input.service_type} nesse período, mas a agenda tem mais horários do que vieram. ` +
+              "NÃO diga que está lotado: pergunte um dia específico e consulte de novo com uma janela menor, ou anote o pedido (create_task)."
+            : `Não há horário livre para ${input.service_type} nesse período. Ofereça outro período, ` +
+              "ou anote o pedido para a equipe retornar (create_task). Não invente horário.";
+          return { ok: true, message, data };
         }
 
         const spoken = agenda.slots
@@ -80,11 +86,12 @@ export function createAgendaHorariosLivres(deps: ToolDeps = {}) {
             `Há ${agenda.slots.length} horário(s) livre(s) para ${input.service_type} (fuso ${agenda.timezone}). ` +
             `Leia em voz alta, uma por vez, e peça que a pessoa escolha: ${spoken}. ` +
             "Depois que ela confirmar o dia e a hora em voz alta, chame agenda_marcar com esse horário e confirmed=true. " +
-            "Não ofereça horário fora da lista.",
-          data: { slots: agenda.slots, timezone: agenda.timezone },
+            "Não ofereça horário fora da lista." +
+            provisional,
+          data,
         };
-      } catch {
-        return { ok: false, message: agendaUnavailable("os horários não foram consultados") };
+      } catch (error) {
+        return agendaFailure(error, "os horários não foram consultados", "a consulta");
       }
     },
   });

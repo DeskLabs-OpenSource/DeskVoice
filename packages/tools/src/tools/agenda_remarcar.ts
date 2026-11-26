@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agendaNotWired, agendaUnavailable, agendaWaitLine } from "../agenda-speech";
+import { agendaNotWired, agendaFailure, agendaWaitLine } from "../agenda-speech";
 import { defineTool } from "../define-tool";
 import type { ToolDeps } from "../deps";
 
@@ -53,12 +53,14 @@ export function createAgendaRemarcar(deps: ToolDeps = {}) {
         });
         return {
           ok: true,
-          message:
-            "Horário remarcado. Confirme com a pessoa o novo dia e a nova hora e diga que o compromisso anterior foi trocado.",
-          data: { appointmentId: appointment.id, startsAt: appointment.startsAt },
+          message: appointment.awaitingConfirmation
+            ? "O horário novo ficou separado, mas a equipe ainda confirma. Diga à pessoa que separou o novo dia e a nova hora " +
+              "e que a equipe confirma. NÃO diga que está confirmado nem garantido."
+            : "Horário remarcado. Confirme com a pessoa o novo dia e a nova hora e diga que o compromisso anterior foi trocado.",
+          data: { appointmentId: appointment.id, startsAt: appointment.startsAt, awaitingConfirmation: appointment.awaitingConfirmation },
         };
-      } catch {
-        return { ok: false, message: agendaUnavailable("o horário não foi remarcado") };
+      } catch (error) {
+        return agendaFailure(error, "o horário não foi remarcado", "a remarcação");
       }
     },
   });

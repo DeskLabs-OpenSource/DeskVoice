@@ -96,4 +96,24 @@ describe("agenda_horarios_livres", () => {
     expect(ctx.said).toEqual(["Um instante, estou conferindo a agenda."]);
     expect(result.message).toContain("quarta-feira, 18/11, 09:00");
   });
+
+  it("lista vazia com mais horários na agenda não vira \"está lotado\"", async () => {
+    const crm = crmSimulado({ slots: [], hasMore: true });
+
+    const result = await createAgendaHorariosLivres({ agenda: crm }).run({ service_type: "Consulta" }, contextoDaAgenda());
+
+    expect(result).toMatchObject({ ok: true, data: { slots: [], hasMore: true } });
+    expect(result.message).toContain("NÃO diga que está lotado");
+    expect(result.message).not.toContain("Não há horário livre");
+  });
+
+  it("horário provisório é oferecido pedindo confirmação", async () => {
+    const crm = crmSimulado({ provisional: true });
+
+    const result = await createAgendaHorariosLivres({ agenda: crm }).run({ service_type: "Consulta" }, contextoDaAgenda());
+
+    expect(result).toMatchObject({ ok: true, data: { provisional: true } });
+    expect(result.message).toContain("a equipe confirma");
+  });
 });
+
