@@ -6,6 +6,8 @@ import { agentEngines, type Engine } from "../../../../ui/types";
 
 /** A linha que diz por que o pipeline está desligado; o motivo que o dicionário não conhece cai na frase geral. */
 export const pipelineOffLine = (t: AgentsDictionary, engine: Engine): string => (engine.unavailable ? t.enginePipelineOff[engine.unavailable.reason] : undefined) ?? t.enginePipelineOffUnknown;
+/** A linha do pipeline: o que falta, ou, sem nada faltando (`unavailable: null`, fatia 6), que ele está pronto. */
+export const pipelineLine = (t: AgentsDictionary, engine: Engine): string => (engine.unavailable === null ? t.enginePipelineReady : pipelineOffLine(t, engine));
 
 /**
  * O motor com que o agente novo nasce: o padrão da instalação; sem padrão, o primeiro da lista. O
@@ -15,8 +17,9 @@ export const newAgentEngine = (defaultId: string | null | undefined, engines: re
 
 /**
  * O campo "Motor de voz" (fatia 5b-1). Os motores de sempre ficam como estão. O pipeline aparece na
- * lista, desligado, com uma linha que diz o que falta: nesta fatia ninguém o escolhe como motor (a API
- * também recusa), e a escolha das peças fica no bloco "Pipeline", só para ver e ouvir.
+ * lista com uma linha: o que falta, ou, com a transcrição e a chave na organização (fatia 6), que ele
+ * está pronto. Ninguém o escolhe como motor (a API também recusa): a escolha das peças é a coluna
+ * `agents.pipeline`, e o bloco "Pipeline" ainda não a grava.
  */
 export function EngineField({ t, engines, value, onChange }: { t: AgentsDictionary; engines: readonly Engine[] | undefined; value: string; onChange(next: string): void }) {
   const assembled = engines?.filter((engine) => engine.assembled === true) ?? [];
@@ -27,7 +30,7 @@ export function EngineField({ t, engines, value, onChange }: { t: AgentsDictiona
           {engines?.map((option) =>
             option.assembled === true ? (
               <option key={option.id} value={option.id} disabled>
-                {t.enginePipeline}
+                {option.unavailable === null ? t.enginePipelineOn : t.enginePipeline}
               </option>
             ) : (
               <option key={option.id} value={option.id}>
@@ -39,7 +42,7 @@ export function EngineField({ t, engines, value, onChange }: { t: AgentsDictiona
       </Field>
       {assembled.map((engine) => (
         <p key={engine.id} className="text-[0.87rem] text-muted">
-          {pipelineOffLine(t, engine)}
+          {pipelineLine(t, engine)}
         </p>
       ))}
     </div>

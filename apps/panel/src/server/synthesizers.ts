@@ -65,6 +65,14 @@ export interface SynthesizerView {
   consent: { name: string | null; at: string } | null;
 }
 
+/** A confirmação gravada, com o nome de hoje de quem confirmou (nulo: saiu da equipe), ou `null`. */
+export async function consentView(q: OrgQuery, value: unknown): Promise<{ name: string | null; at: string } | null> {
+  const consent = readConsent(value);
+  if (!consent) return null;
+  const name = (await q.one<{ name: string }>("select u.name from users u where u.id::text = $1", [consent.userId]))?.name ?? null;
+  return { name, at: consent.confirmedAt };
+}
+
 export async function readSynthesizers(q: OrgQuery): Promise<SynthesizerView[]> {
   // O valor de segredo nunca sai do banco por aqui: só o nome da chave.
   const rows = await q.many<{ key: string; value: unknown }>("select key, case when secret then null else value end as value from settings where key like 'synthesizer.%'");
@@ -72,8 +80,7 @@ export async function readSynthesizers(q: OrgQuery): Promise<SynthesizerView[]> 
   const views: SynthesizerView[] = [];
   for (const synthesizer of await listOfferedSynthesizers()) {
     const configured = byKey.has(synthesizerKeySetting(synthesizer.id));
-    const consent = configured ? readConsent(byKey.get(synthesizerConsentSetting(synthesizer.id))) : null;
-    const name = consent ? ((await q.one<{ name: string }>("select u.name from users u where u.id::text = $1", [consent.userId]))?.name ?? null) : null;
+    const consent = configured ? await consentView(q, byKey.get(synthesizerConsentSetting(synthesizer.id))) : null;
     views.push({
       id: synthesizer.id,
       label: synthesizer.label,
@@ -82,7 +89,7 @@ export async function readSynthesizers(q: OrgQuery): Promise<SynthesizerView[]> 
       keyUrl: synthesizer.keyUrl ?? null,
       configured,
       keyCheck: configured ? readKeyCheck(byKey.get(synthesizerKeyCheckSetting(synthesizer.id))) : null,
-      consent: consent ? { name, at: consent.confirmedAt } : null,
+      consent,
     });
   }
   return views;

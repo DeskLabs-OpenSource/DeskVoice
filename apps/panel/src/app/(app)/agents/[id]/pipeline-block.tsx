@@ -10,10 +10,10 @@ import { fill, type Locale } from "../../../../i18n/locales";
 import type { AgentsDictionary } from "../../../../i18n/pt-BR/agents";
 import ptBRVoice, { type VoiceDictionary } from "../../../../i18n/pt-BR/voice";
 import { useDict, useLocale } from "../../../../i18n/provider";
-import { ApiFailure, useApi } from "../../../../ui/api";
+import { api, ApiFailure, useApi } from "../../../../ui/api";
 import { useErrorText } from "../../../../ui/errors";
 import { formatDateTime } from "../../../../ui/format";
-import { Badge, Field, Notice, Panel, Select, Skeleton } from "../../../../ui/kit";
+import { Badge, Button, Field, Notice, Panel, Select, Skeleton } from "../../../../ui/kit";
 import type { Engine, PipelineLatency } from "../../../../ui/types";
 import { providerName } from "../../settings/voice/notice";
 import { Listen, PIPELINE_BLOCK_ID } from "./voice-field";
@@ -26,6 +26,16 @@ export interface PipelineSynthesizer {
   processingLocation: ProcessingLocation;
   configured: boolean;
   /** Quem confirmou o envio e quando. `name` nulo: a pessoa saiu da equipe. */
+  consent: { name: string | null; at: string } | null;
+}
+
+/** A transcrição como `/api/v1/transcribers` a devolve: a chave que ela usa e a confirmação da 9.1 (fatia 6). */
+export interface PipelineTranscriber {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  keyConfigured: boolean;
   consent: { name: string | null; at: string } | null;
 }
 
@@ -61,6 +71,10 @@ export interface PipelinePanelProps {
   pipeline: Engine;
   canConfigure: boolean;
   synthesizers: readonly PipelineSynthesizer[] | undefined;
+  /** As transcrições de verdade, ou `undefined` enquanto carrega. */
+  transcribers?: readonly PipelineTranscriber[] | undefined;
+  /** Depois de confirmar ou apagar a confirmação de uma transcrição: relê a lista. */
+  onTranscribersChanged?(): void;
   brains: readonly PipelineBrainOption[] | undefined;
   brain: string;
   onBrain(next: string): void;
@@ -82,10 +96,11 @@ export interface PipelinePanelProps {
 /**
  * O bloco "Pipeline" da tela do agente (fatia 5b-1): as três escolhas, só para ver e ouvir. Nada daqui
  * vai no salvar do agente: os seletores não têm `name`, e o corpo do PATCH sai do rascunho, que não os
- * conhece. Ao lado da voz e da transcrição fica o aviso da seção 9.1, com quem confirmou e quando.
+ * conhece. Ao lado da voz e da transcrição fica o aviso da seção 9.1, com quem confirmou e quando. A
+ * confirmação da transcrição é gravada daqui (fatia 6), porque ela não tem chave própria para gravar.
  */
 export function PipelinePanel(props: PipelinePanelProps) {
-  const { t, pipeline, canConfigure } = props;
+  const { t, canConfigure } = props;
   return (
     <div id={PIPELINE_BLOCK_ID}>
       <Panel title={t.pipeline} description={t.pipelineLead}>
@@ -93,7 +108,7 @@ export function PipelinePanel(props: PipelinePanelProps) {
           <div className="grid gap-6">
             {props.loadError ? <Notice tone="fail">{props.loadError}</Notice> : null}
             <LatencyPart t={t} locale={props.locale} latency={props.latency} />
-            <TranscriberPart t={t} pipeline={pipeline} />
+            <TranscriberPart {...props} />
             <BrainPart {...props} />
             <VoicePart {...props} />
           </div>
@@ -151,12 +166,79 @@ export function LatencyPart({ t, locale, latency }: { t: AgentsDictionary; local
   );
 }
 
-function TranscriberPart({ t, pipeline }: { t: AgentsDictionary; pipeline: Engine }) {
+function TranscriberPart({ t, voiceT, locale, pipeline, transcribers, onTranscribersChanged }: PipelinePanelProps) {
+  if (pipeline.unavailable?.reason === "no_live_transcriber")
+    return (
+      <Part title={t.pipelineTranscriber}>
+        <p className="text-muted">{t.pipelineTranscriberNone}</p>
+      </Part>
+    );
+  if (transcribers === undefined) return <Skeleton lines={2} />;
   return (
     <Part title={t.pipelineTranscriber}>
-      {pipeline.unavailable?.reason === "no_live_transcriber" ? <p className="text-muted">{t.pipelineTranscriberNone}</p> : null}
-      <Consent lead={t.pipelineTranscriberNotice} status={t.pipelineUnconfirmed} />
+      {transcribers.map((transcriber) => (
+        <TranscriberRow key={transcriber.id} t={t} voiceT={voiceT} locale={locale} transcriber={transcriber} onChanged={onTranscribersChanged} />
+      ))}
     </Part>
+  );
+}
+
+/**
+ * Uma transcrição: o fornecedor, a chave que ela usa e a confirmação da 9.1 (fatia 6), com o botão que
+ * confirma o envio e o que apaga a confirmação, em dois passos.
+ */
+function TranscriberRow({ t, voiceT, locale, transcriber, onChanged }: { t: AgentsDictionary; voiceT: VoiceDictionary; locale: Locale; transcriber: PipelineTranscriber; onChanged: (() => void) | undefined }) {
+  const errorText = useErrorText();
+  const [state, setState] = useState<{ busy: boolean; error: string; removing: boolean }>({ busy: false, error: "", removing: false });
+  const provider = providerName(voiceT, transcriber.provider);
+  const run = (method: "PUT" | "DELETE"): void => {
+    setState((previous) => ({ ...previous, busy: true, error: "" }));
+    api(`/transcribers/${encodeURIComponent(transcriber.id)}/consent`, { method, ...(method === "PUT" && { body: { confirmedProvider: transcriber.provider } }) }).then(
+      () => {
+        setState({ busy: false, error: "", removing: false });
+        onChanged?.();
+      },
+      (failure: unknown) => setState({ busy: false, error: errorText(failure), removing: false }),
+    );
+  };
+  const status = transcriber.consent
+    ? fill(t.pipelineConfirmedBy, { who: transcriber.consent.name ?? t.pipelineRemovedPerson, when: formatDateTime(transcriber.consent.at, locale) })
+    : t.pipelineTranscriberUnconfirmed;
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-bold">{transcriber.label}</span>
+        <Badge>{provider}</Badge>
+      </div>
+      {transcriber.keyConfigured ? null : <p className="text-[0.87rem]">{t.pipelineTranscriberNoKey}</p>}
+      {transcriber.processingLocation.kind === "this-server" ? null : (
+        <>
+          <Consent lead={fill(t.pipelineTranscriberNotice, { provider })} status={status} />
+          <div className="flex flex-wrap gap-2">
+            {transcriber.consent === null ? (
+              <Button busy={state.busy} onClick={() => run("PUT")}>
+                {fill(t.pipelineTranscriberConfirm, { provider })}
+              </Button>
+            ) : state.removing ? (
+              <>
+                <span className="self-center text-[0.87rem]">{fill(t.pipelineTranscriberRemoveAsk, { provider })}</span>
+                <Button variant="danger" busy={state.busy} onClick={() => run("DELETE")}>
+                  {t.pipelineTranscriberRemove}
+                </Button>
+                <Button variant="secondary" onClick={() => setState((previous) => ({ ...previous, removing: false }))}>
+                  {t.pipelineTranscriberKeep}
+                </Button>
+              </>
+            ) : (
+              <Button variant="secondary" onClick={() => setState((previous) => ({ ...previous, removing: true }))}>
+                {t.pipelineTranscriberRemove}
+              </Button>
+            )}
+          </div>
+          {state.error ? <Notice tone="fail">{state.error}</Notice> : null}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -311,6 +393,7 @@ export function PipelineBlock({ t, pipeline, canConfigure, agentId }: { t: Agent
   const locale = useLocale();
   const synthesizers = useApi<PipelineSynthesizer[]>(canConfigure ? "/synthesizers" : null);
   const brains = useApi<PipelineBrainOption[]>(canConfigure ? "/brains" : null);
+  const transcribers = useApi<PipelineTranscriber[]>(canConfigure ? "/transcribers" : null);
   const [brain, setBrain] = useState("");
   const [model, setModel] = useState("");
   const chosen = conversationalBrains(brains.data).find((option) => option.id === brain) ?? conversationalBrains(brains.data)[0];
@@ -318,7 +401,7 @@ export function PipelineBlock({ t, pipeline, canConfigure, agentId }: { t: Agent
   // A latência medida do agente (fatia 5c). O agente novo não tem ligação: sem medida, sem leitura.
   const latency = useApi<PipelineLatency>(canConfigure && agentId ? `/agents/${encodeURIComponent(agentId)}/pipeline-latency` : null);
   const errorText = useErrorText();
-  const failed = synthesizers.error ?? brains.error ?? models.error ?? latency.error;
+  const failed = synthesizers.error ?? transcribers.error ?? brains.error ?? models.error ?? latency.error;
   return (
     <PipelinePanel
       t={t}
@@ -327,6 +410,8 @@ export function PipelineBlock({ t, pipeline, canConfigure, agentId }: { t: Agent
       pipeline={pipeline}
       canConfigure={canConfigure}
       synthesizers={synthesizers.data}
+      transcribers={transcribers.data}
+      onTranscribersChanged={transcribers.reload}
       brains={brains.data}
       brain={brain}
       onBrain={(next) => {

@@ -2,7 +2,7 @@
 // desligada, a chamada é a de sempre; ligada, o áudio vai aos dois, os trechos alimentam a guarda
 // contra o silêncio, o consumo entra no custo e a falha da peça não derruba a chamada.
 import { encryptSecret } from "@deskvoice/core";
-import type { SimulatedScript, StreamingTranscriber, StreamingTranscription } from "@deskvoice/voice-engine";
+import { transcriberConsentSetting, type SimulatedScript, type StreamingTranscriber, type StreamingTranscription } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import { putSetting } from "../../../packages/tools/test/helpers";
@@ -322,6 +322,28 @@ describe("falha da peça de transcrição", { timeout: 120_000 }, () => {
     expect(connects[0]?.apiKey).toBe("chave-da-peca-inventada");
     second.transport.callerHangup();
     await withKey.done;
+    expect(await kindsOf(app, second.callId)).not.toContain("transcriber_failed");
+  });
+
+  it("peça de fora do servidor sem a confirmação da 9.1: não abre, grava `unconfirmed`, nada vai ao fornecedor e a chamada segue; confirmada, abre", async () => {
+    const { transcriber: base, connects } = watchedTranscriber({ script: [], id: "outside" });
+    const transcriber: StreamingTranscriber = { ...base, processingLocation: { kind: "undeclared" } };
+    const first = await scene("transcriber-unconfirmed", { engine: "manual" }, { manual: manualEngine({ keyless: true }), transcribers: [transcriber] });
+    const without = first.start("outside");
+    await waitFor(async () => (await kindsOf(app, first.callId)).includes("transcriber_failed"), "the failure to be recorded");
+    expect((await eventsOf(app, first.callId)).find((event) => event.kind === "transcriber_failed")?.payload).toEqual({ transcriber: "outside", reason: "unconfirmed" });
+    expect(connects).toEqual([]);
+    await waitFor(async () => (await callOf(app, first.callId)).status === "in_progress", "the call to go on with the engine");
+    first.transport.callerHangup();
+    expect(await without.done).toMatchObject({ status: "completed", endReason: "caller_hangup" });
+    expect(connects).toEqual([]);
+
+    const second = await scene("transcriber-confirmed", { engine: "manual" }, { manual: manualEngine({ keyless: true }), transcribers: [transcriber] });
+    await putSetting(app, second.organizationId, transcriberConsentSetting("outside"), { userId: "alguém", confirmedAt: "2026-11-26T12:00:00.000Z" }, false);
+    const withConsent = second.start("outside");
+    await waitFor(() => connects.length === 1, "the transcriber to open");
+    second.transport.callerHangup();
+    await withConsent.done;
     expect(await kindsOf(app, second.callId)).not.toContain("transcriber_failed");
   });
 

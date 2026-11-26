@@ -1,4 +1,5 @@
 import { type SpokenLanguage, spokenLanguageOf } from "@deskvoice/core";
+import { AgendaError, type AgendaRefusal } from "./connectors/agenda";
 
 /**
  * As falas da agenda. As três ferramentas dizem a mesma coisa quando a agenda não está ligada ou
@@ -28,6 +29,70 @@ export function agendaUnavailable(outcome: string): string {
     "concluir neste momento e ofereça anotar o pedido para a equipe retornar (create_task) ou transferir " +
     "para uma pessoa (transfer_to_human). NÃO diga que está marcado."
   );
+}
+
+/**
+ * A agenda respondeu e recusou: nada foi gravado. Cada motivo diz ao modelo o que fazer em seguida; o
+ * texto do outro sistema nunca chega aqui.
+ */
+export function agendaRefused(refusal: AgendaRefusal, outcome: string): string {
+  switch (refusal) {
+    case "unknown_service":
+      return (
+        `Esse tipo de atendimento não está na agenda, e ${outcome}. Pergunte à pessoa qual atendimento ela quer, ` +
+        "usando o nome que o operador cadastrou, ou anote o pedido para a equipe retornar (create_task)."
+      );
+    case "not_published":
+      return (
+        `A agenda ainda não tem horários publicados para esse atendimento, e ${outcome}. NÃO diga que está lotado ` +
+        "e não invente horário: diga que a equipe confirma o horário e anote o pedido (create_task)."
+      );
+    case "slot_unavailable":
+      return (
+        `Esse horário não está mais livre, e ${outcome}. Consulte de novo agenda_horarios_livres e ofereça um dos ` +
+        "horários que voltarem. Não insista no horário anterior."
+      );
+    case "appointment_not_found":
+      return (
+        `Esse agendamento não foi encontrado na agenda, ou é cuidado em outro sistema, e ${outcome}. Não tente de novo: ` +
+        "anote o pedido para a equipe retornar (create_task)."
+      );
+    case "ambiguous_contact":
+      return (
+        `Há mais de um cadastro com o número de quem ligou, e ${outcome}. Diga à pessoa que a equipe confirma o horário ` +
+        "e anote o pedido (create_task) com o dia e a hora que ela escolheu. Não chame de novo."
+      );
+    case "other":
+      return agendaUnavailable(outcome);
+  }
+}
+
+/**
+ * O pedido de escrita saiu e não se sabe se foi gravado (a agenda não respondeu a tempo). A fala não
+ * afirma nem nega: a equipe confere. `what` é o que pode ter sido gravado: "o horário", "a remarcação".
+ */
+export function agendaUncertain(what: string): string {
+  return (
+    `Não foi possível confirmar agora se ${what} ficou gravado na agenda. Diga à pessoa que você não conseguiu ` +
+    "confirmar neste momento e que a equipe confere e retorna. NÃO diga que está marcado, NÃO diga que não foi marcado " +
+    "e NÃO chame a ferramenta de novo."
+  );
+}
+
+/** A ligação não tem um número que o cliente possa usar (oculto, ou ligação sem número). */
+export function agendaNoCallerNumber(): string {
+  return (
+    "O número de quem ligou não está disponível (número oculto ou ligação sem número), e o horário não foi marcado. " +
+    "Diga à pessoa que a equipe confirma o horário e anote o pedido (create_task) com o dia e a hora que ela escolheu " +
+    "e um telefone de contato, se ela quiser dar."
+  );
+}
+
+/** A tradução de qualquer falha da agenda para a fala e para o resultado da ferramenta. */
+export function agendaFailure(error: unknown, outcome: string, what: string): { ok: false; message: string; outcome?: "unknown" } {
+  if (error instanceof AgendaError && error.kind === "uncertain") return { ok: false, message: agendaUncertain(what), outcome: "unknown" };
+  if (error instanceof AgendaError && error.kind === "refused") return { ok: false, message: agendaRefused(error.refusal, outcome) };
+  return { ok: false, message: agendaUnavailable(outcome) };
 }
 
 /**
