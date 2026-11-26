@@ -31,14 +31,16 @@ function scene() {
   const time = fakeTime();
   const log: string[] = [];
   const reports: CallerUnanswered[] = [];
+  const provider = { answering: false };
   const guard = createSilenceGuard({
     clock: time.clock,
     schedule: time.schedule,
     closeCallerTurn: () => log.push("close"),
     say: (text) => log.push(`say:${text}`),
+    answering: () => provider.answering,
     acted: (report) => reports.push(report),
   });
-  return { time, log, reports, guard };
+  return { time, log, reports, guard, provider };
 }
 
 describe("guarda contra o silêncio", () => {
@@ -205,6 +207,35 @@ describe("guarda contra o silêncio", () => {
     guard.callerActivity({ words: false });
     time.advance(AFTER_CLOSE_MS);
     expect(log).toEqual(["close", `say:${ASK_TO_REPEAT}`]);
+  });
+
+  it("o provedor já responde quando vence o prazo depois do fechamento: não pede para repetir (ligação real de 26/11)", () => {
+    // Pelo WhatsApp: "e aí, tudo bem?", o turno fechado à força, e quem ligou seguiu falando. O
+    // servidor viu o fim da segunda fala e já preparava a resposta quando o prazo venceu, e o pedido
+    // para repetir tocou logo depois da resposta certa.
+    const { time, log, guard, provider } = scene();
+    guard.callerActivity({ words: true });
+    time.advance(AFTER_WORDS_MS);
+    provider.answering = true;
+    time.advance(AFTER_CLOSE_MS);
+    expect(log).toEqual(["close"]);
+    guard.agentAudio(4000);
+    time.advance(60_000);
+    expect(log).toEqual(["close"]);
+    expect(time.pending()).toBe(0);
+  });
+
+  it("a resposta que o provedor preparava não toca: pede para repetir quando ele deixa de responder", () => {
+    const { time, log, reports, guard, provider } = scene();
+    guard.callerActivity({ words: true });
+    time.advance(AFTER_WORDS_MS);
+    provider.answering = true;
+    time.advance(AFTER_CLOSE_MS * 2);
+    expect(log).toEqual(["close"]);
+    provider.answering = false;
+    time.advance(AFTER_CLOSE_MS);
+    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT}`]);
+    expect(reports.at(-1)).toEqual({ action: "asked_to_repeat", waitedMs: AFTER_WORDS_MS + AFTER_CLOSE_MS * 3, words: true });
   });
 
   it("texto novo depois do fechamento: quem ligou seguiu falando, e a guarda não fala por cima", () => {
