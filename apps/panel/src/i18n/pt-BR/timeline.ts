@@ -421,6 +421,21 @@ const timeline = {
         unexpected_response: "o fornecedor respondeu fora do esperado",
       },
     },
+    transcriber_failed: {
+      title: "A transcrição ao vivo ficou de fora",
+      reason: {
+        rejected: "A chave da peça de transcrição foi recusada, ou não está cadastrada.",
+        model_unavailable: "A chave da peça de transcrição não dá acesso ao modelo que ela usa.",
+        no_credit: "O serviço de transcrição diz que falta crédito ou que o teto de gasto da conta foi atingido.",
+        region_unavailable: "O serviço de transcrição não atende o país ou a região deste servidor.",
+        rate_limited: "O serviço de transcrição pediu para esperar (limite de pedidos da conta).",
+        unreachable: "O serviço de transcrição não respondeu a tempo, ou está fora do ar.",
+        unexpected_response: "O serviço de transcrição respondeu algo fora do formato esperado.",
+        closed: "O serviço de transcrição caiu no meio da chamada.",
+      } as Record<string, string>,
+      unknown: "A peça de transcrição não abriu nesta chamada.",
+      continued: "A chamada seguiu só com o motor de voz, como antes.",
+    },
     unknown: "Evento",
   },
   reasons: {

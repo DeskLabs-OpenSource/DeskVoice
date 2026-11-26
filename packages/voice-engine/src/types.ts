@@ -2,7 +2,7 @@ import { isIP } from "node:net";
 import { isPublicAddress } from "@deskvoice/core";
 import { z } from "zod";
 import type { AnalysisGuess } from "./analysis";
-import type { BrainFailure } from "./brain";
+import type { Brain, BrainFailure, BrainPrice } from "./brain";
 import type { OutcomeGuess } from "./outcome";
 
 /** Definição de ferramenta no formato que os motores entendem (JSON Schema em `parameters`). */
@@ -107,7 +107,32 @@ export interface VoiceSessionEvents {
    * de um teste do agente. Opcional: motor sem `textMode` não emite.
    */
   turnDone(): void;
+  /**
+   * Só motores com peças separadas (o pipeline, R5). Incremento de consumo de uma peça, já com o
+   * custo pelo preço dela. Opcional: motor que não emite continua no caminho de `usage`, sem mudança.
+   */
+  pieceUsage(line: PieceUsageLine): void;
   closed(reason: string): void;
+}
+
+/** As peças do pipeline, no rótulo do extrato (`<peça>:<id>`, como o `transcriber:<id>` do #245). */
+export type PipelinePieceKind = "transcriber" | "brain" | "synthesizer";
+
+/**
+ * Uma linha de custo de uma peça (`VoiceSessionEvents.pieceUsage`, seção 3.3 de
+ * `docs/specs/2026-11-17-motor-de-voz-em-pipeline.md`). `costMicrocents` ausente é **custo não
+ * medido** (peça sem preço conhecido, ou consumo não declarado), nunca zero: é a regra da R4 e do
+ * `SpeechUsage`. `estimated` diz se o consumo foi contado aqui em vez de declarado pelo provedor.
+ */
+export interface PieceUsageLine {
+  piece: PipelinePieceKind;
+  id: string;
+  model?: string;
+  usage: Usage;
+  /** Só na voz: caracteres enviados ao provedor. */
+  characters?: number;
+  costMicrocents?: number;
+  estimated: boolean;
 }
 
 export interface VoiceSession {
@@ -381,6 +406,70 @@ export interface DecisionModel {
   checkKey?(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
 }
 
+/** Um trecho de texto da fala de quem ligou, enquanto ela acontece. */
+export interface TranscriptPiece {
+  /** O texto do trecho. No parcial, pode mudar no próximo evento. */
+  text: string;
+  /** Verdadeiro quando o serviço não vai mais mudar este trecho. */
+  final: boolean;
+  /**
+   * Outras leituras do mesmo trecho, quando o serviço as devolve, da mais para a menos provável.
+   * É o que o filtro de leitura (R12, Parte 3) escolhe. Vazio quando o serviço não devolve.
+   */
+  alternatives: readonly string[];
+  /** Milissegundos desde o início do fluxo, segundo o serviço. Ausente se ele não diz. */
+  startMs?: number;
+  endMs?: number;
+}
+
+export interface StreamingTranscriptionEvents {
+  piece(piece: TranscriptPiece): void;
+  /** Incremento de consumo, como em `VoiceSessionEvents.usage`. */
+  usage(usage: Usage): void;
+  /** Seguido de `closed` quando é fatal. */
+  error(error: Error): void;
+  closed(reason: string): void;
+}
+
+export interface StreamingTranscription {
+  on<K extends keyof StreamingTranscriptionEvents>(event: K, handler: StreamingTranscriptionEvents[K]): void;
+  /** Áudio de quem ligou, PCM16 mono 8 kHz, o mesmo que o motor recebe. */
+  sendAudio(pcm16_8k: Buffer): void;
+  close(): Promise<void>;
+}
+
+/**
+ * Transcrição da fala de quem ligou em streaming, ao lado do motor (docs/specs/2026-11-14-transcricao-pura.md).
+ * Uma peça por arquivo em `transcribers/`, descoberta pela pasta (`loadTranscribers`). Nasce
+ * desligada: sem um agente que peça a peça, a chamada é a de sempre.
+ */
+export interface StreamingTranscriber {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  pricing: EnginePricing;
+  /** Verdadeiro quando não usa chave (o simulado, ou um local). */
+  keyless?: boolean;
+  /** Quantos termos de vocabulário o serviço aceita. Acima disso, os primeiros N. */
+  maxVocabulary: number;
+  connect(config: { language: string; vocabulary: readonly string[] }, apiKey: string, options?: ConnectOptions): Promise<StreamingTranscription>;
+  checkKey?(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+}
+
+/**
+ * A peça de transcrição recusou abrir, com o motivo no vocabulário fechado do teste da chave. Quem
+ * chama `connect` grava o motivo na linha do tempo; o texto do provedor fica só no log.
+ */
+export class TranscriberOpenError extends Error {
+  constructor(
+    readonly result: Exclude<KeyCheckResult, "accepted" | "not_needed">,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;
@@ -550,6 +639,47 @@ export interface SpeechSynthesizer {
   checkKey(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
   /** Abre uma fala. Lança `SynthesizerOpenError` com o motivo no vocabulário fechado. */
   speak(config: SpeakConfig, apiKey: string, options?: ConnectOptions): Promise<Speech>;
+}
+
+/**
+ * O que só o motor pipeline lê no `connect` (seção 3.3 de `docs/specs/2026-11-17-motor-de-voz-em-pipeline.md`):
+ * as três peças já escolhidas e as chaves delas, cada uma decifrada por quem abre a ligação. O
+ * `connect` dos outros motores não muda: este tipo estende `ConnectOptions` só no pipeline.
+ */
+export interface PipelinePieces {
+  transcriber: { piece: StreamingTranscriber; apiKey: string };
+  /** Só cérebro com `chat`. `price` ausente é "preço não conhecido": a linha sai sem custo, nunca zero. */
+  brain: { piece: Brain; apiKey: string; model: string; price?: BrainPrice };
+  synthesizer: { piece: SpeechSynthesizer; apiKey: string; voiceId: string; model?: string };
+}
+
+export interface PipelineConnectOptions extends ConnectOptions {
+  pieces: PipelinePieces;
+  /** A organização da ligação: o cache das falas fixas nunca atravessa organizações. */
+  organizationId: string;
+  /**
+   * Falas fixas que quem abre a ligação precisa ter prontas sem gasto novo na hora (as despedidas do
+   * teto). São sintetizadas no `connect`, junto com a fala de falha do motor, e tocam por `say(text)`
+   * com o mesmo texto.
+   */
+  fixedSpeech?: readonly string[];
+}
+
+/**
+ * Uma peça do pipeline caiu (seção 3.4). O `reason` está no vocabulário fechado do teste da chave;
+ * o texto do provedor fica só em `message`, para o log. `fatal` diz se a sessão fecha em seguida
+ * (com `closed`): o cérebro que falha uma vez não é fatal, a conversa segue.
+ */
+export class PipelinePieceError extends Error {
+  constructor(
+    readonly piece: PipelinePieceKind,
+    readonly pieceId: string,
+    readonly reason: Exclude<KeyCheckResult, "accepted" | "not_needed">,
+    readonly fatal: boolean,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 // Mora aqui, e não em outcome.ts, porque o painel importa valor só por `@deskvoice/voice-engine/types`:

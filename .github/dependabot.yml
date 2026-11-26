@@ -45,8 +45,11 @@ updates:
   # Caddy estão escritos por extenso; Asterisk e WAHA vêm dentro de ${VAR:-imagem@sha256:…}, e não
   # se sabe se o Dependabot enxerga imagem dentro de interpolação. Conferir na primeira execução
   # (Insights → Dependency graph → Dependabot); a que ele não enxergar continua subindo à mão.
-  # O Asterisk está fixado só por resumo, sem etiqueta: sem etiqueta não há "versão mais nova", e
-  # ele sobe à mão mesmo que o Dependabot o enxergue.
+  # O Asterisk está fixado só por resumo, sem etiqueta. O Dependabot enxerga a imagem dentro da
+  # interpolação e propõe o resumo mais novo do registro, que pode ser outra versão maior: o #434
+  # (18/11/2026) e o #581 (25/11/2026) levavam da 20.20.1 para a 23, e os dois foram fechados. A
+  # regra de semver-major abaixo não pega troca só de resumo, por isso o Asterisk é ignorado por
+  # inteiro e sobe à mão, num PR próprio com ensaio (CONTRIBUTING, "Versão maior de dependência").
   - package-ecosystem: docker-compose
     directory: /deploy
     schedule:
@@ -59,3 +62,4 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "andrius/asterisk"
