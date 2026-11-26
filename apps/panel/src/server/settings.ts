@@ -217,7 +217,8 @@ const analysisBrain: Setting = {
 export async function settingDefinition(key: string): Promise<Setting | undefined> {
   const engines = await listEngines();
   const definitions: Record<string, Setting> = {
-    "engine.default": plain(z.string().refine((id) => engines.some((engine) => engine.id === id), "unknown voice engine")),
+    // O pipeline nunca é o motor de um agente (fatia 5b-1), nem o padrão dos agentes novos.
+    "engine.default": plain(z.string().refine((id) => engines.some((engine) => engine.id === id && engine.assembled !== true), "unknown voice engine")),
     "whatsapp.connector": connector,
     // Ausente vale `false`: o envio para quem ligou pede confirmação humana (o número exibido é forjável).
     "whatsapp.trust_caller_id": plain(z.boolean()),

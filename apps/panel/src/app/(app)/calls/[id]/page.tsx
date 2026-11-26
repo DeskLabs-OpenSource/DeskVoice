@@ -21,6 +21,7 @@ import { lastTemperature } from "../../../../ui/temperature";
 import { Timeline } from "../../../../ui/timeline";
 import { transcribeAlsoClassifies } from "../../../../ui/transcription";
 import { Amount } from "../../costs/amount-view";
+import { PieceCosts } from "./piece-costs";
 import { AnalysisSection } from "./analysis-section";
 import { CallerHistorySection } from "./caller-history-section";
 import { ShareSection } from "./share-section";
@@ -137,6 +138,8 @@ export default function CallPage({ params }: { params: Promise<{ id: string }> }
                     ))}
                   </ul>
                 ) : null}
+                {/* Na ligação do pipeline, quanto cada peça gastou; a do motor direto não muda. */}
+                {label === t.facts.cost && data.costByPiece.length > 0 ? <PieceCosts rows={data.costByPiece} /> : null}
               </dd>
             </div>
           ))}

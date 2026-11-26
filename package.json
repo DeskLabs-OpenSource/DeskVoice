@@ -12,7 +12,7 @@
   "scripts": {
     "verify": "pnpm lint && pnpm typecheck && pnpm fences && pnpm test",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && pnpm --filter ./apps/panel typecheck",
     "fences": "vitest run --project fences",
     "test": "vitest run --project unit",
     "test:db": "vitest run --project db",
@@ -30,8 +30,8 @@
     "eslint": "^10.15.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.2",
-    "vitest": "^5.1.0",
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.1",
     "yaml": "^2.9.1"
   }
 }

@@ -8,7 +8,8 @@ import { MICROCENTS_PER_CENT } from "@deskvoice/voice-engine/pricing";
 export const centsOf = (microcents: string | number): number => Math.round(Number(microcents) / MICROCENTS_PER_CENT);
 
 /**
- * O agente de uma linha do extrato (`usage_ledger l`, com `calls c` da ligação dela). Desde a
+ * O agente de uma linha do extrato (`usage_ledger l`, com `calls c` da ligação dela, sempre por
+ * `left join`: a linha do teste do agente não tem ligação, e fica com o `agent_id` dela). Desde a
  * passagem entre agentes (fatia 4a), cada medição leva o agente do trecho em que a ligação estava.
  * Ficam com o agente que atendeu as linhas sem trecho: as de antes da 4a (`agent_id` nulo) e as de
  * depois da ligação (transcrição da gravação, classificação), que não pertencem a trecho nenhum.

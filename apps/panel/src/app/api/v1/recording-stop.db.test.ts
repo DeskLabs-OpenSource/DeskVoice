@@ -32,9 +32,11 @@ const voice = await startInternalApi({
     outbound: unused,
     simulate: unused,
     web: unused,
+    runAgentTest: unused,
     whatsappCalls: { state: unused, connect: unused, disconnect: unused },
     // A mesma ligação do `server.ts`.
     stopRecording: (input) => stopRecordingOfLiveCall(sessions, input),
+    agentTestState: unused,
   },
 });
 const harnesses: SessionHarness[] = [];

@@ -1,27 +1,18 @@
 /**
  * A agenda vista pela ligação.
  *
- * O conector com o CRM da casa ainda não existe neste repositório: a decisão
- * [`0001`](../../../../docs/decisions/0001-fronteira-com-o-deskcomm.md) deixa o conector para depois, e o
- * [`ROADMAP.md`](../../../../ROADMAP.md) o lista como trabalho futuro, sem data. Para as ferramentas de agenda
- * não ficarem presas nisso, elas falam com esta interface e recebem um cliente de fora
- * (`ToolDeps.agenda`): em produção, quem liga a central injeta o cliente do CRM; no teste, um CRM simulado.
+ * As ferramentas de agenda falam com esta interface e recebem um cliente de fora (`ToolDeps.agenda`):
+ * no teste, um CRM simulado; com o DeskcommCRM, o cliente de [`deskcomm-agenda.ts`](deskcomm-agenda.ts),
+ * que fala pelo MCP do CRM, como fixa a decisão
+ * [`0022`](../../../../docs/decisions/0022-conector-com-o-deskcomm-pelo-mcp.md). A interface é genérica:
+ * outra agenda entra pelo mesmo lugar.
  *
- * O que foi medido no DeskcommCRM (`main`, 14/11/2026) e que o cliente de verdade precisa falar:
+ * As regras da agenda moram em quem a guarda. O cliente traz para cá o que a ligação precisa saber
+ * delas (horário provisório, reserva que a equipe ainda confirma, lista cortada) e nunca o texto que o
+ * outro sistema escreveu: o que chega ao modelo são as falas do DeskVoice.
  *
- * - `GET /api/v1/agenda/horarios-livres?event_type_id=&de=&ate=[&duracao_minutos=]`
- *   devolve `{ data: { slots: [{ inicio, fim }], fuso_da_regra, ... } }`.
- * - `POST /api/v1/agenda/agendamentos` recebe `{ event_type_id, starts_at, ... }` e devolve `201`.
- * - `PATCH /api/v1/agenda/agendamentos` recebe `{ id, starts_at, ... }` e devolve `200`.
- *
- * As três rotas usam `Authorization: Bearer dsk_…`. Duas ressalvas medidas, e que ficam declaradas
- * no PR: a leitura usa `requireRole("viewer")`, que hoje só aceita sessão de navegador (token de
- * servidor cai em 401), e o tipo de atendimento é um UUID do CRM — quem administra a central informa
- * esse id nas instruções do agente, porque o CRM não publica uma rota de tipos de atendimento para
- * integração.
- *
- * Nada disso é chamado daqui. Sem a tela de configuração do conector, um cliente HTTP seria código
- * morto; esta fatia entrega o contrato e as ferramentas, e a fatia do conector vem depois.
+ * Todo fracasso é um `AgendaError`. Um cliente nunca resolve a promessa numa recusa, num erro HTTP
+ * (4xx incluído) ou numa resposta fora da forma: a ferramenta leria isso como horário marcado.
  */
 
 /** Um horário que a agenda oferece. Instantes em ISO 8601, com fuso. */
@@ -34,12 +25,25 @@ export interface AgendaSlot {
 export interface AgendaAppointment {
   id: string;
   startsAt: string;
+  /**
+   * `true`: o horário ficou reservado, mas alguém da equipe ainda aprova, ou a agenda não pôde ser
+   * conferida por inteiro (fuso suposto, agenda externa nunca lida). A fala é "separei o horário, a
+   * equipe confirma", nunca "está reservado".
+   */
+  awaitingConfirmation: boolean;
 }
 
 /** O que a consulta devolve: os horários e o fuso em que a regra da agenda vale. */
 export interface AgendaFreeSlots {
   timezone: string;
   slots: AgendaSlot[];
+  /** `true`: a agenda tem mais horários do que vieram. Lista curta ou vazia não é agenda cheia. */
+  hasMore: boolean;
+  /**
+   * `true`: a agenda não pôde ser conferida por inteiro (o fuso veio do padrão, ou a agenda externa
+   * nunca foi lida). O horário é oferecido pedindo confirmação, e não afirmado.
+   */
+  provisional: boolean;
 }
 
 export interface FreeSlotsRequest {
@@ -55,6 +59,8 @@ export interface FreeSlotsRequest {
 export interface BookRequest {
   serviceType: string;
   startsAt: string;
+  /** Quem será atendido: o número do registro da ligação, já em E.164. Nunca um argumento do modelo. */
+  callerE164: string;
   callId: string;
 }
 
@@ -62,6 +68,42 @@ export interface RescheduleRequest {
   appointmentId: string;
   startsAt: string;
   callId: string;
+}
+
+/**
+ * Por que a agenda recusou. O cliente traduz o código do outro sistema para um destes; o que ele não
+ * conhece vira `other`, e a fala é a genérica.
+ */
+export type AgendaRefusal =
+  /** O tipo de atendimento não existe ou não está sendo marcado. */
+  | "unknown_service"
+  /** Quem atende ainda não publicou horários: não é agenda cheia. */
+  | "not_published"
+  /** O horário deixou de estar livre, ou está fora do expediente. */
+  | "slot_unavailable"
+  /** O compromisso não existe nesta agenda, ou é gerido em outro sistema. */
+  | "appointment_not_found"
+  /** Mais de um contato com o número de quem ligou: o cliente não escolhe, não cria e não marca. */
+  | "ambiguous_contact"
+  | "other";
+
+/**
+ * `refused`: a agenda respondeu e não fez (nada foi gravado). `unavailable`: a agenda não respondeu
+ * ou respondeu fora da forma, antes de qualquer escrita. `uncertain`: o pedido de escrita saiu e não
+ * se sabe se foi gravado; a fala não diz "não foi marcado" e o cliente não repete.
+ */
+export type AgendaErrorKind = "refused" | "unavailable" | "uncertain";
+
+export class AgendaError extends Error {
+  override name = "AgendaError";
+  constructor(
+    readonly kind: AgendaErrorKind,
+    /** Só para o log e a linha do tempo: sem dado pessoal, e nunca vai ao modelo. */
+    detail: string,
+    readonly refusal: AgendaRefusal = "other",
+  ) {
+    super(detail);
+  }
 }
 
 /**

@@ -1,7 +1,23 @@
+import { toE164 } from "@deskvoice/core";
 import { z } from "zod";
-import { agendaNotWired, agendaUnavailable, agendaWaitLine } from "../agenda-speech";
+import { agendaFailure, agendaNoCallerNumber, agendaNotWired, agendaWaitLine } from "../agenda-speech";
 import { defineTool } from "../define-tool";
 import type { ToolDeps } from "../deps";
+import type { ToolContext } from "../types";
+
+/**
+ * Quem será atendido: o número do registro da ligação (quem ligou, na recebida; quem foi chamado, na
+ * feita), em E.164. Nunca um argumento do modelo. O que não se normaliza (número oculto, o `@lid` da
+ * ligação pelo WhatsApp) volta `null`.
+ */
+async function callerOf(ctx: ToolContext): Promise<string | null> {
+  const call = await ctx.q.one<{ direction: "inbound" | "outbound"; from_e164: string | null; to_e164: string | null }>(
+    "select direction, from_e164, to_e164 from calls where id = $1",
+    [ctx.callId],
+  );
+  const raw = call === null ? null : call.direction === "inbound" ? call.from_e164 : call.to_e164;
+  return raw === null ? null : toE164(raw);
+}
 
 export function createAgendaMarcar(deps: ToolDeps = {}) {
   return defineTool({
@@ -41,22 +57,29 @@ export function createAgendaMarcar(deps: ToolDeps = {}) {
         };
       }
 
+      const callerE164 = await callerOf(ctx);
+      if (callerE164 === null) return { ok: false, noEffect: true, message: agendaNoCallerNumber() };
+
       ctx.say(agendaWaitLine("booking", ctx.language));
       try {
         const appointment = await client.book({
           serviceType: input.service_type,
           startsAt: input.starts_at,
+          callerE164,
           callId: ctx.callId,
         });
         return {
           ok: true,
-          message:
-            "Horário marcado. Confirme com a pessoa o dia e a hora que ela confirmou e diga que o horário está reservado. " +
-            "Guarde o identificador do agendamento para uma remarcação.",
-          data: { appointmentId: appointment.id, startsAt: appointment.startsAt },
+          message: appointment.awaitingConfirmation
+            ? "O horário ficou separado, mas a equipe ainda confirma. Diga à pessoa que separou o dia e a hora que ela escolheu " +
+              "e que a equipe confirma. NÃO diga que está confirmado, reservado nem garantido. " +
+              "Guarde o identificador do agendamento para uma remarcação."
+            : "Horário marcado. Confirme com a pessoa o dia e a hora que ela confirmou e diga que o horário está reservado. " +
+              "Guarde o identificador do agendamento para uma remarcação.",
+          data: { appointmentId: appointment.id, startsAt: appointment.startsAt, awaitingConfirmation: appointment.awaitingConfirmation },
         };
-      } catch {
-        return { ok: false, message: agendaUnavailable("o horário não foi marcado") };
+      } catch (error) {
+        return agendaFailure(error, "o horário não foi marcado", "o horário");
       }
     },
   });

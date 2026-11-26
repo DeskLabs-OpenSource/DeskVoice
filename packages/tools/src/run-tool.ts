@@ -67,6 +67,7 @@ const FORGET_AFTER_MS = 60_000;
  * duas chamadas paralelas nunca veem a mesma vaga livre.
  */
 async function takeSlot(ctx: ToolContext, name: string, budget: number): Promise<((spent: boolean) => void) | null> {
+  // `name` é a conta do teto: o nome da ferramenta, ou o `budget.key` que ela divide com outras.
   const now = ctx.clock.now().getTime();
   for (const [key, entry] of slots) {
     if (entry.running === 0 && now - entry.at >= FORGET_AFTER_MS) slots.delete(key);
@@ -75,7 +76,7 @@ async function takeSlot(ctx: ToolContext, name: string, budget: number): Promise
   let entry = slots.get(key);
   if (entry === undefined) {
     const recorded = await ctx.q.one<{ count: string }>(
-      "select count(*) as count from call_events where call_id = $1 and kind = 'tool_result' and payload->>'name' = $2 and payload->>'spent' = 'true'",
+      "select count(*) as count from call_events where call_id = $1 and kind = 'tool_result' and coalesce(payload->>'budget', payload->>'name') = $2 and payload->>'spent' = 'true'",
       [ctx.callId, name],
     );
     // Outra chamada paralela pode ter criado a entrada durante a leitura: vale a dela.
@@ -110,14 +111,15 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
   let release: ((spent: boolean) => void) | undefined;
   // Na dúvida, a vaga fica gasta: só a recusa marcada com `noEffect` a devolve.
   let spent = false;
+  let startedAt: number | undefined;
   const parsed = tool.inputSchema.safeParse(rawArgs);
   if (!parsed.success) {
     const problems = parsed.error.issues.map((issue) => `${issue.path.join(".") || "argumentos"}: ${issue.message}`).join("; ");
     result = { ok: false, message: `Argumentos inválidos para ${tool.name} (${problems}). Corrija os argumentos e chame a ferramenta de novo.` };
   } else {
-    const budget = MAX_SUCCESSFUL_CALLS_PER_CALL[tool.name];
+    const budget = tool.budget?.max ?? MAX_SUCCESSFUL_CALLS_PER_CALL[tool.name];
     try {
-      const slot = budget === undefined ? undefined : await takeSlot(ctx, tool.name, budget);
+      const slot = budget === undefined ? undefined : await takeSlot(ctx, tool.budget?.key ?? tool.name, budget);
       if (slot === null) {
         result = {
           ok: false,
@@ -126,6 +128,7 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
       } else {
         release = slot;
         spent = true;
+        startedAt = performance.now();
         result = await tool.run(parsed.data, ctx);
         spent = result.ok || result.noEffect !== true;
       }
@@ -136,8 +139,25 @@ export async function runTool(tool: Tool, rawArgs: unknown, ctx: ToolContext): P
     }
   }
 
+  // Quem respondeu de fora e quanto demorou: só da ferramenta que declara `server`, e só se ela rodou.
+  const remote = tool.server === undefined ? {} : { server: tool.server, ...(startedAt !== undefined && { durationMs: Math.round(performance.now() - startedAt) }) };
   try {
-    await recordEvent(ctx.q, ctx.callId, "tool_result", { name: tool.name, ok: result.ok, ...(result.outcome !== undefined && { outcome: result.outcome }), message: result.message, ...(error !== undefined && { error }), ...(release !== undefined && spent && { spent: true }) }, ctx.clock.now());
+    await recordEvent(
+      ctx.q,
+      ctx.callId,
+      "tool_result",
+      {
+        name: tool.name,
+        ok: result.ok,
+        ...(result.outcome !== undefined && { outcome: result.outcome }),
+        message: result.message,
+        ...(error !== undefined && { error }),
+        ...(release !== undefined && spent && { spent: true }),
+        ...(tool.budget !== undefined && { budget: tool.budget.key }),
+        ...remote,
+      },
+      ctx.clock.now(),
+    );
   } finally {
     // A vaga só fecha com o desfecho gravado: a entrada nunca é podada antes de o banco saber dele.
     // Se a gravação falhar, a vaga gasta conta assim mesmo: o efeito pode ter saído, e só a memória sabe.

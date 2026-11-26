@@ -19,6 +19,8 @@ async function api(token: string | undefined, overrides: Partial<InternalApiHand
     simulate: async (input) => (calls.push(["simulate", input]), { callId: "call-2" }),
     web: async (input) => (calls.push(["web", input]), { callId: "call-3", token: "tok", expiresInSeconds: 60 }),
     stopRecording: async (input) => (calls.push(["stopRecording", input]), { recording: "stopped" }),
+    runAgentTest: async (input) => (calls.push(["runAgentTest", input]), { runId: "run-1" }),
+    agentTestState: async (input) => (calls.push(["agentTestState", input]), { textMode: true, configHash: "abc" }),
     whatsappCalls: {
       state: async (input) => (calls.push(["whatsappCalls.state", input]), { session: null }),
       connect: async (input) => (calls.push(["whatsappCalls.connect", input]), { code: "wacalls_unreachable", message: "down" }),
@@ -159,5 +161,38 @@ describe("API interna", { timeout: 60_000 }, () => {
 
     const ended = await api("segredo-interno", { stopRecording: async () => ({ code: "call_not_live", message: "This call is not in progress in the voice process." }) });
     expect(await ended.request("POST", "/calls/recording/stop", { token: "segredo-interno", body })).toEqual({ status: 409, body: { code: "call_not_live", message: expect.any(String) } });
+  });
+
+  it("POST /agent-tests/run: com token, passa o pedido e devolve a rodada; recusa vira 409; corpo fora da forma, 400", async () => {
+    const TEST = "0c000000-0000-4000-8000-000000000003";
+    const { request, calls } = await api("segredo-interno");
+    const body = { organizationId: ORG, testId: TEST, requestedBy: null };
+    expect((await request("POST", "/agent-tests/run", { body })).status).toBe(401);
+    expect(await request("POST", "/agent-tests/run", { token: "segredo-interno", body })).toEqual({ status: 200, body: { runId: "run-1" } });
+    expect(calls).toEqual([["runAgentTest", body]]);
+    for (const wrong of [{ organizationId: ORG, testId: TEST }, { ...body, testId: "nao-e-uuid" }, { ...body, extra: 1 }]) {
+      expect((await request("POST", "/agent-tests/run", { token: "segredo-interno", body: wrong })).status).toBe(400);
+    }
+    expect(calls).toHaveLength(1);
+    await close?.();
+
+    const busy = await api("segredo-interno", { runAgentTest: async () => ({ code: "test_run_busy", message: "busy" }) });
+    expect(await busy.request("POST", "/agent-tests/run", { token: "segredo-interno", body })).toEqual({ status: 409, body: { code: "test_run_busy", message: "busy" } });
+  });
+
+  it("POST /agent-tests/state: com token, devolve o estado do agente; recusa vira 409; corpo fora da forma, 400", async () => {
+    const { request, calls } = await api("segredo-interno");
+    const body = { organizationId: ORG, agentId: AGENT };
+    expect((await request("POST", "/agent-tests/state", { body })).status).toBe(401);
+    expect(await request("POST", "/agent-tests/state", { token: "segredo-interno", body })).toEqual({ status: 200, body: { textMode: true, configHash: "abc" } });
+    expect(calls).toEqual([["agentTestState", body]]);
+    for (const wrong of [{ organizationId: ORG }, { ...body, agentId: "nao-e-uuid" }, { ...body, extra: 1 }]) {
+      expect((await request("POST", "/agent-tests/state", { token: "segredo-interno", body: wrong })).status).toBe(400);
+    }
+    expect(calls).toHaveLength(1);
+    await close?.();
+
+    const missing = await api("segredo-interno", { agentTestState: async () => ({ code: "agent_not_found", message: "gone" }) });
+    expect(await missing.request("POST", "/agent-tests/state", { token: "segredo-interno", body })).toEqual({ status: 409, body: { code: "agent_not_found", message: "gone" } });
   });
 });

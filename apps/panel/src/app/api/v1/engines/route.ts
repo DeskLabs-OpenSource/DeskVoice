@@ -2,6 +2,7 @@ import { engineClassifyTargetSetting } from "@deskvoice/voice-engine/types";
 import { handle } from "../../../../server/context";
 import { keyCheckSetting, readKeyCheck } from "../../../../server/engine-key";
 import { engineKeySetting, listEngines } from "../../../../server/pieces";
+import { pipelineUnavailable } from "../../../../server/pipeline";
 import { classifyTargetView } from "../../../../server/settings";
 
 export const GET = handle({}, async ({ q }) => {
@@ -19,6 +20,7 @@ export const GET = handle({}, async ({ q }) => {
     const { baseUrl, model } = targetOf(engine.id);
     return baseUrl === null && model !== null && engine.classifyPricing?.(model) === undefined;
   };
+  const unavailable = await pipelineUnavailable(q);
   return (await listEngines()).map((engine) => ({
     id: engine.id,
     label: engine.label,
@@ -38,5 +40,8 @@ export const GET = handle({}, async ({ q }) => {
     keyCheck: readKeyCheck(byKey.get(keyCheckSetting(engine.id))),
     priceCheckedOn: engine.pricing.checkedOn,
     priceSource: engine.pricing.source,
+    // O pipeline (fatia 5b-1): aparece na lista, desligado e com o motivo, e nunca é o motor de um
+    // agente. Os outros motores saem como sempre, sem campo novo.
+    ...(engine.assembled === true && { assembled: true, unavailable }),
   }));
 });

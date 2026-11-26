@@ -108,6 +108,7 @@ const privacy: PrivacyDictionary = {
     analyst_provider_confirmed: "{who} confirmed that the analyst {analyst} sends the text of what the caller says to {provider}.",
     decision_model_provider_confirmed: "{who} confirmed that the speech filter sends the call's text to {provider}.",
     synthesizer_provider_confirmed: "{who} confirmed that the {provider} voice receives the text the agent speaks on the call.",
+    transcriber_provider_confirmed: "{who} confirmed that the {provider} transcription receives the caller's audio on the call.",
     organization_created: "The installation administration created this organization, named \"{name}\".",
     organization_renamed: "The installation administration renamed this organization from \"{from}\" to \"{to}\".",
     organization_suspended: "The installation administration suspended this organization. Reason: {reason}. Tasks canceled: {n}.",

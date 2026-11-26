@@ -1,8 +1,8 @@
 import { isIP } from "node:net";
-import { isPublicAddress } from "@deskvoice/core";
+import { isPublicAddress, type Clock } from "@deskvoice/core";
 import { z } from "zod";
 import type { AnalysisGuess } from "./analysis";
-import type { BrainFailure } from "./brain";
+import type { Brain, BrainFailure, BrainPrice } from "./brain";
 import type { OutcomeGuess } from "./outcome";
 
 /** Definição de ferramenta no formato que os motores entendem (JSON Schema em `parameters`). */
@@ -107,7 +107,74 @@ export interface VoiceSessionEvents {
    * de um teste do agente. Opcional: motor sem `textMode` não emite.
    */
   turnDone(): void;
+  /**
+   * Só motores com peças separadas (o pipeline, R5). Incremento de consumo de uma peça, já com o
+   * custo pelo preço dela. Opcional: motor que não emite continua no caminho de `usage`, sem mudança.
+   */
+  pieceUsage(line: PieceUsageLine): void;
+  /**
+   * Só o pipeline (R5, fatia 3c-1): o tempo de um turno respondido, um evento por turno, no primeiro
+   * áudio da resposta entregue. Turno que não chega a tocar áudio não emite. Opcional: motor que não
+   * emite não muda nada.
+   */
+  pipelineTurnLatency(latency: PipelineTurnLatency): void;
   closed(reason: string): void;
+}
+
+/**
+ * O tempo de um turno do pipeline (seção 3.5 de `docs/specs/2026-11-17-motor-de-voz-em-pipeline.md`),
+ * em ms, pelo `Clock` de quem abriu a ligação. Só números: nada do provedor vai aqui.
+ */
+export interface PipelineTurnLatency {
+  /** Do fim da fala de quem ligou (o `endMs` do trecho final, no relógio do pipeline) à chegada do trecho final. `0` com `endFromArrival`. */
+  endpointMs: number;
+  /** Do pedido ao cérebro que deu o primeiro texto da resposta até esse texto. */
+  brainFirstTextMs: number;
+  /** Do primeiro `push` da resposta à voz até o primeiro áudio dela entregue a quem abriu. */
+  voiceFirstAudioMs: number;
+  /** Do fim da fala ao primeiro áudio da resposta entregue a quem abriu. Inclui a ferramenta, quando houve. */
+  totalMs: number;
+  /** A peça não deu `endMs` (ou ele caía depois da chegada): o fim da fala é a chegada do trecho final. */
+  endFromArrival: boolean;
+  /** Uma ferramenta rodou entre o fim da fala e o primeiro áudio: fica fora do orçamento "sem ferramenta" da 3.5. */
+  tool: boolean;
+}
+
+/**
+ * Quanto pesou a abertura do pipeline (a nota da chave, fatia 3c-1), em ms, pelo `Clock` de quem
+ * abriu. As duas etapas correm juntas, e `totalMs` é o tempo até as duas acabarem.
+ */
+export interface PipelineOpening {
+  /** A transcrição abrindo: é o que prova a chave dela. */
+  transcriberMs: number;
+  /** As falas prontas: a síntese das que faltavam no cache e, com cache, a conferência da chave da voz. */
+  fixedSpeechMs: number;
+  /** A conferência da chave da voz (`checkKey`). `null` quando não rodou: nada veio do cache, e a síntese provou a chave. */
+  keyCheckMs: number | null;
+  /** Quantas falas prontas a abertura pediu, e quantas delas vieram do cache. */
+  fixedSpeech: number;
+  fromCache: number;
+  totalMs: number;
+}
+
+/** As peças do pipeline, no rótulo do extrato (`<peça>:<id>`, como o `transcriber:<id>` do #245). */
+export type PipelinePieceKind = "transcriber" | "brain" | "synthesizer";
+
+/**
+ * Uma linha de custo de uma peça (`VoiceSessionEvents.pieceUsage`, seção 3.3 de
+ * `docs/specs/2026-11-17-motor-de-voz-em-pipeline.md`). `costMicrocents` ausente é **custo não
+ * medido** (peça sem preço conhecido, ou consumo não declarado), nunca zero: é a regra da R4 e do
+ * `SpeechUsage`. `estimated` diz se o consumo foi contado aqui em vez de declarado pelo provedor.
+ */
+export interface PieceUsageLine {
+  piece: PipelinePieceKind;
+  id: string;
+  model?: string;
+  usage: Usage;
+  /** Só na voz: caracteres enviados ao provedor. */
+  characters?: number;
+  costMicrocents?: number;
+  estimated: boolean;
 }
 
 export interface VoiceSession {
@@ -230,6 +297,13 @@ export interface EngineVoice {
   style?: string;
   /** O provedor recomenda esta voz. A tela escreve o rótulo no idioma dela. */
   recommended?: boolean;
+  /**
+   * A amostra que o botão "Ouvir" da tela do agente toca, por idioma falado: o caminho do arquivo
+   * relativo a `apps/panel/public/` (`voice-samples/<motor>/<voz>.<idioma>.mp3`). Sem a do idioma do
+   * agente, a tela toca a de pt-BR e diz que é em português; sem nenhuma, o botão fica desligado e a
+   * tela diz por quê. A cerca `voice-samples-exist` reprova caminho sem arquivo (DESA-397, fatia 1a).
+   */
+  sample?: { "pt-BR"?: string; en?: string; es?: string };
 }
 
 /** De onde veio uma declaração do provedor, como `pricing.checkedOn`: endereço e dia conferido. */
@@ -374,6 +448,76 @@ export interface DecisionModel {
   checkKey?(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
 }
 
+/** Um trecho de texto da fala de quem ligou, enquanto ela acontece. */
+export interface TranscriptPiece {
+  /** O texto do trecho. No parcial, pode mudar no próximo evento. */
+  text: string;
+  /** Verdadeiro quando o serviço não vai mais mudar este trecho. */
+  final: boolean;
+  /**
+   * Outras leituras do mesmo trecho, quando o serviço as devolve, da mais para a menos provável.
+   * É o que o filtro de leitura (R12, Parte 3) escolhe. Vazio quando o serviço não devolve.
+   */
+  alternatives: readonly string[];
+  /** Milissegundos desde o início do fluxo, segundo o serviço. Ausente se ele não diz. */
+  startMs?: number;
+  endMs?: number;
+}
+
+export interface StreamingTranscriptionEvents {
+  piece(piece: TranscriptPiece): void;
+  /** Incremento de consumo, como em `VoiceSessionEvents.usage`. */
+  usage(usage: Usage): void;
+  /** Seguido de `closed` quando é fatal. */
+  error(error: Error): void;
+  closed(reason: string): void;
+}
+
+export interface StreamingTranscription {
+  on<K extends keyof StreamingTranscriptionEvents>(event: K, handler: StreamingTranscriptionEvents[K]): void;
+  /** Áudio de quem ligou, PCM16 mono 8 kHz, o mesmo que o motor recebe. */
+  sendAudio(pcm16_8k: Buffer): void;
+  close(): Promise<void>;
+}
+
+/**
+ * Transcrição da fala de quem ligou em streaming, ao lado do motor (docs/specs/2026-11-14-transcricao-pura.md).
+ * Uma peça por arquivo em `transcribers/`, descoberta pela pasta (`loadTranscribers`). Nasce
+ * desligada: sem um agente que peça a peça, a chamada é a de sempre.
+ */
+export interface StreamingTranscriber {
+  id: string;
+  label: string;
+  provider: string;
+  processingLocation: ProcessingLocation;
+  pricing: EnginePricing;
+  /** Verdadeiro quando não usa chave (o simulado, ou um local). */
+  keyless?: boolean;
+  /**
+   * A chave da organização que a peça usa, quando ela é a de outra peça já gravada (a transcrição da
+   * OpenAI usa a do motor OpenAI Realtime, `engine.openai-realtime.api_key`): não há chave nova. Ausente,
+   * a chave é `transcriber.<id>.api_key`.
+   */
+  keySetting?: string;
+  /** Quantos termos de vocabulário o serviço aceita. Acima disso, os primeiros N. */
+  maxVocabulary: number;
+  connect(config: { language: string; vocabulary: readonly string[] }, apiKey: string, options?: ConnectOptions): Promise<StreamingTranscription>;
+  checkKey?(apiKey: string, options?: KeyCheckOptions): Promise<KeyCheck>;
+}
+
+/**
+ * A peça de transcrição recusou abrir, com o motivo no vocabulário fechado do teste da chave. Quem
+ * chama `connect` grava o motivo na linha do tempo; o texto do provedor fica só no log.
+ */
+export class TranscriberOpenError extends Error {
+  constructor(
+    readonly result: Exclude<KeyCheckResult, "accepted" | "not_needed">,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export interface VoiceEngine {
   id: string;
   label: string;
@@ -386,6 +530,13 @@ export interface VoiceEngine {
   defaultVoice?: string;
   /** Verdadeiro para motores que não precisam de chave (o simulado). */
   keyless?: boolean;
+  /**
+   * Verdadeiro para o motor que monta as peças escolhidas em `agents.pipeline` (o pipeline, R5). Ele
+   * nunca é o `engine` de um agente: a sessão o abre pela coluna, com as peças e as chaves de cada uma
+   * em `PipelineConnectOptions`. O painel o mostra na lista de motores, desligado enquanto a pasta não
+   * tiver transcrição real (fatia 5b-1), e nenhuma tela nem rota o grava como motor.
+   */
+  assembled?: boolean;
   pricing: EnginePricing;
   /**
    * O marco de fim da vez de quem ligou que este motor emite (`callerTurnEnded`): sempre o mesmo por
@@ -545,6 +696,87 @@ export interface SpeechSynthesizer {
   speak(config: SpeakConfig, apiKey: string, options?: ConnectOptions): Promise<Speech>;
 }
 
+/**
+ * O que só o motor pipeline lê no `connect` (seção 3.3 de `docs/specs/2026-11-17-motor-de-voz-em-pipeline.md`):
+ * as três peças já escolhidas e as chaves delas, cada uma decifrada por quem abre a ligação. O
+ * `connect` dos outros motores não muda: este tipo estende `ConnectOptions` só no pipeline.
+ */
+export interface PipelinePieces {
+  transcriber: { piece: StreamingTranscriber; apiKey: string };
+  /** Só cérebro com `chat`. `price` ausente é "preço não conhecido": a linha sai sem custo, nunca zero. */
+  brain: { piece: Brain; apiKey: string; model: string; price?: BrainPrice };
+  synthesizer: { piece: SpeechSynthesizer; apiKey: string; voiceId: string; model?: string };
+}
+
+export interface PipelineConnectOptions extends ConnectOptions {
+  pieces: PipelinePieces;
+  /** A organização da ligação: o cache das falas fixas nunca atravessa organizações. */
+  organizationId: string;
+  /**
+   * Falas fixas que quem abre a ligação precisa ter prontas sem gasto novo na hora (as despedidas do
+   * teto). São sintetizadas no `connect`, junto com a fala de falha do motor, e tocam por `say(text)`
+   * com o mesmo texto.
+   */
+  fixedSpeech?: readonly string[];
+  /**
+   * Quem abriu vai transferir a ligação quando uma peça cair (o agente com `transfer_to_e164`, fatia
+   * 3c-2). Com `true`, a fala de transferência (`PIPELINE_TRANSFER_SPEECH`) fica pronta no `connect`
+   * no lugar da fala de falha, e é ela que toca na queda. Ausente, nada muda.
+   */
+  transferOnFailure?: boolean;
+  /**
+   * O teto de custo da ligação, conferido antes de cada pedido ao cérebro (desenho do pipeline, seção
+   * 3.3). `remainingMicrocents` é o que sobra do teto agora, em micro-centavos, ou `undefined` sem
+   * teto. Quando o pior caso do pedido (entrada estimada + `maxTokens` × preço) passa disso, o pedido
+   * não sai, e o motor chama `reached(worstCaseMicrocents)`: quem abriu a ligação toca a despedida do
+   * teto por `say`, com o áudio já pronto em `fixedSpeech`. Com teto e sem preço do modelo, o pior caso
+   * não tem conta, o pedido também não sai, e `reached` recebe `undefined`. Ausente, o motor não confere.
+   */
+  ceiling?: {
+    remainingMicrocents(): number | undefined;
+    reached(worstCaseMicrocents: number | undefined): void;
+  };
+  /**
+   * O relógio da sessão (convenção 10), para a latência por turno e a nota da abertura (fatia 3c-1).
+   * Ausente, o motor não mede nada: sem relógio, nenhum número sai.
+   */
+  clock?: Clock;
+}
+
+/**
+ * Uma peça do pipeline caiu (seção 3.4). O `reason` está no vocabulário fechado do teste da chave;
+ * o texto do provedor fica só em `message`, para o log. `fatal` diz se a sessão fecha em seguida
+ * (com `closed`): o cérebro que falha uma vez não é fatal, a conversa segue.
+ */
+export class PipelinePieceError extends Error {
+  constructor(
+    readonly piece: PipelinePieceKind,
+    readonly pieceId: string,
+    readonly reason: Exclude<KeyCheckResult, "accepted" | "not_needed">,
+    readonly fatal: boolean,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * O pipeline não abriu porque uma peça recusou (seção 3.4). `reason` no vocabulário fechado; o texto
+ * do provedor só em `message`, para o log. `spent` é o que a abertura já gastou antes da recusa (as
+ * falas fixas sintetizadas): quem abre põe no extrato da tentativa, e o custo não se perde.
+ */
+export class PipelineOpenError extends Error {
+  constructor(
+    readonly piece: PipelinePieceKind,
+    readonly pieceId: string,
+    readonly reason: Exclude<KeyCheckResult, "accepted" | "not_needed">,
+    readonly spent: readonly PieceUsageLine[],
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 // Mora aqui, e não em outcome.ts, porque o painel importa valor só por `@deskvoice/voice-engine/types`:
 // o índice puxa load.ts, cujo `new URL("./engines", import.meta.url)` o Turbopack não resolve.
 /**
@@ -684,3 +916,21 @@ export const classifyDestinationOf = (
   if (apiKey === undefined) return { ok: false, reason: "endpoint_key_missing" };
   return { ok: true, target: { baseUrl, ...withModel }, endpointKey: apiKey };
 };
+
+/** A sessão do pipeline: com `clock`, traz a nota da abertura. */
+export interface PipelineVoiceSession extends VoiceSession {
+  readonly opening?: PipelineOpening;
+}
+
+/**
+ * O motor que monta as peças de `agents.pipeline` (`engines/pipeline.ts`, `assembled`). O contrato mora
+ * aqui, e não no motor: quem abre a ligação o acha na pasta (`loadEngines()`) sem importar o arquivo.
+ */
+export interface PipelineEngine extends VoiceEngine {
+  readonly assembled: true;
+  /** Sem `options.pieces`, recusa abrir: o pipeline não tem peça padrão. */
+  connect(config: VoiceSessionConfig, apiKey: string, options?: PipelineConnectOptions): Promise<PipelineVoiceSession>;
+}
+
+/** O motor da pasta que monta as peças de `agents.pipeline`. */
+export const isPipelineEngine = (engine: VoiceEngine | undefined): engine is PipelineEngine => engine?.assembled === true;

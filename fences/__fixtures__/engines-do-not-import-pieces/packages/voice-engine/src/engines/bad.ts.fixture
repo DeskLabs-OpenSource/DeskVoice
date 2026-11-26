@@ -1,0 +1,8 @@
+import openai from "../brains/openai";
+import type { Speech } from "../types";
+export { default as voice } from "../synthesizers/elevenlabs.ts";
+
+export async function load(): Promise<unknown> {
+  return [openai, await import("../transcribers/simulated")];
+}
+export type { Speech };

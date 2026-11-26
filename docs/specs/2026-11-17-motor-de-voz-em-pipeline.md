@@ -27,7 +27,7 @@ fica lenta sem ninguém perceber.
 
 | Peça | Onde está | O que falta para o pipeline |
 |---|---|---|
-| Ouvido em streaming | Contrato `StreamingTranscriber` + transcritor simulado no **#245** (R12, fatia 2). Ainda **fora da `main`**: entra junto com a fatia 4 da R12 (a peça do vencedor) | Um transcritor real, escolhido pela medida da R12 |
+| Ouvido em streaming | Contrato `StreamingTranscriber` + transcritor simulado do **#245** (R12, fatia 2), entra na `main` antes desta frente, sozinho e desligado, pelo #566, que o retoma (exceção à regra 4 aberta pelo Rafael em 25/11, no documento "2026-11-24 — motor em pipeline entra desligado antes da tela" (opção A); a DESA-398 decidiu que as fatias 3 a 5 não esperam o vencedor da R12). A fatia 4 da R12 fica só com a peça do vencedor | Um transcritor real, escolhido pela medida da R12 |
 | Vocabulário | `VoiceSessionConfig.vocabulary` (R3, na `main`); `StreamingTranscriber.maxVocabulary` (#245) | Nada: o pipeline repassa o campo à peça de transcrição |
 | Cérebro | `Brain` em `packages/voice-engine/src/brains/` (R4, na `main`): `listModels` e `completeJson` | **Conversa em streaming com ferramentas.** Hoje o cérebro só faz um pedido JSON fechado, sem ferramentas e sem streaming |
 | Voz | Não existe. A fala é do motor direto | **Contrato de voz** + a ElevenLabs |
@@ -187,9 +187,12 @@ DeepSeek e Anthropic não emitem e ignoram o campo. A tradução:
   chamada mal formada, assinatura ausente) e o `promptFeedback.blockReason` terminam em
   `error("unexpected_response", 200)`.
 
-### 3.3 O motor: `packages/voice-engine/src/engines/pipeline.ts`
+### 3.3 O motor: `packages/voice-engine/src/engines/pipeline.ts` (desde a fatia 5b-1; antes, `src/pipeline-engine.ts`)
 
-Implementa `VoiceEngine` com `id: "pipeline"`. O `connect` recebe, além do `VoiceSessionConfig`, a
+Implementa `VoiceEngine` com `id: "pipeline"`. **Mora fora de `engines/` até a fatia 5** (decisão B da
+DESA-418): `loadEngines()` e o painel oferecem como motor tudo o que está naquela pasta, e o pipeline
+não pode aparecer antes da tela que o escolhe. Quem o abre é `call-session.ts`, por
+`createPipelineEngine()`, só para o agente com `agents.pipeline` preenchida. O `connect` recebe, além do `VoiceSessionConfig`, a
 escolha do agente: `{ transcriber, brain, model, synthesizer, voiceId }` e uma chave por peça. As
 chaves são as que já existem: `brain.<id>.api_key` (R4), a do transcritor (R12, fatia 4) e
 `synthesizer.<id>.api_key` (fatia 1b), todas cifradas (convenção 12). A forma exata de passar as
@@ -213,26 +216,82 @@ O laço de um turno:
 
 ```ts
 /** Só motores com peças separadas. Incremento de uma peça, já com o custo calculado pelo preço dela. */
-pieceUsage(line: { piece: "transcriber" | "brain" | "synthesizer"; id: string; model?: string; usage: Usage; characters?: number; costMicrocents: number; estimated: boolean }): void;
+pieceUsage(line: { piece: "transcriber" | "brain" | "synthesizer"; id: string; model?: string; usage: Usage; characters?: number; costMicrocents?: number; estimated: boolean }): void;
 ```
 
-O `meter` do `call-session.ts` grava uma linha de `usage_ledger` por evento: `engine` =
-`<peça>:<id>` (o mesmo rótulo `transcriber:<id>` do #245), `model`, `cost_microcents` e
-`cost_estimated`. Cada linha conta para o teto como hoje. Motor que não emite `pieceUsage` continua
-no caminho de `usage`, sem mudança.
+**`costMicrocents` é opcional:** ausente é custo **não medido** (a peça sem preço conhecido), nunca
+zero. O cérebro que termina sem declarar consumo (o `{}` fora da recusa HTTP, como a escrita em cache
+da Anthropic) sai, com o preço conhecido, **estimado** pelo que foi e voltou, um token por byte (a
+regra do Jev), com `estimated: true`. O `{}` da recusa HTTP é zero medido.
+
+O `call-session.ts` grava uma linha de `usage_ledger` por evento (`chargePiece`): `engine` =
+`<peça>:<id>` (o mesmo rótulo `transcriber:<id>` do #245), `model`, `cost_microcents`,
+`cost_estimated` e `cost_measured` (falso quando `costMicrocents` veio ausente). Cada linha conta para
+o teto, como o filtro e o analista. A linha que chega depois do `closed` (o cérebro cancelado no fim)
+também entra. Motor que não emite `pieceUsage` continua no caminho de `usage`, sem mudança.
+
+**A escolha das peças** fica em `agents.pipeline` (fatia 3). A sessão as monta pela pasta
+(`loadTranscribers`, `loadBrains`, `loadSynthesizers`, lidas na primeira ligação que pede o pipeline),
+com a chave de cada uma na organização (`transcriber.`, `brain.` e `synthesizer.<id>.api_key`) e o
+preço do modelo do cérebro na lista `brain.<id>.models`. Peça não instalada, cérebro sem `chat` ou
+chave que falta é recusa de abertura (`call_refused` com `piece`). A recusa de uma peça ao abrir
+(`PipelineOpenError`) traz o que a abertura já gastou, as falas fixas sintetizadas antes de a outra
+peça recusar, e esse custo entra no extrato da tentativa.
 
 **Teto.** O `reachCeiling` de hoje dispara a despedida. No pipeline, a despedida também custa voz.
-Por isso as três falas fixas da ligação (`FAREWELL.costCeiling`, `costCeilingTransfer` e a fala de
-falha da seção 3.4) são **sintetizadas na abertura** e guardadas em memória. Na hora do teto, o
-áudio já está pronto e não há gasto novo. O custo dessa síntese entra no extrato da ligação que a
-fez. Um cache por processo, com a chave `(organização, sintetizador, voz, modelo, texto)`, evita
+Por isso as falas fixas da ligação (`FAREWELL.costCeiling`, a fala de falha da seção 3.4 e, só
+quando o trecho transfere, `costCeilingTransfer`) são **sintetizadas na abertura** e guardadas em
+memória. A despedida que promete transferência segue a mesma regra de `transferOnFailure` (o agente
+com `transfer_to_e164`, o canal que transfere, a ligação que não voltou de uma transferência): sem
+ela, o teto toca a que não promete, e as falas prontas não crescem (fatia 4, ponta da 3c-2). Na hora
+do teto, o áudio já está pronto e não há gasto novo. O custo dessa síntese entra no extrato da
+ligação que a fez, **mesmo quando a sessão nunca entra na linha**: a abertura que termina durante ou
+logo depois do fim da ligação (o trecho de volta da transferência, a passagem) fecha emitindo esse
+custo, e a sessão o grava, depois do `call_ended` se for o caso. O custo que saiu do provedor
+aparece; a linha de zero medido (o ouvido que fechou sem ouvir nada) não entra. Um cache por processo, com a chave `(organização, sintetizador, voz, modelo, texto)`, evita
 pagar de novo na ligação seguinte com a mesma voz. **O cache não atravessa organizações:** cada
 organização paga e usa só o que a chave dela sintetizou, mesmo quando duas usam o mesmo `voiceId`.
 E a abertura confere a chave da organização a cada ligação, mesmo quando todas as falas vêm do
-cache: chave recusada é recusa de abertura, com ou sem cache. Antes de cada pedido ao cérebro, o pipeline também confere se o
-pior caso do pedido (entrada enviada + `max_tokens` × preço) passa do que sobra do teto. Se passar,
-o pedido não sai, e a despedida do teto toca. Isso resolve, no pipeline, a pendência da R12 "reserva
-em voo que passa do pior caso".
+cache: chave recusada é recusa de abertura, com ou sem cache. As duas despedidas chegam ao motor por
+`PipelineConnectOptions.fixedSpeech`, e o `reachCeiling` de hoje as toca por `say` com o mesmo texto:
+o motor acha o áudio pronto e não abre fala nova.
+
+**A nota da chave: quanto pesa a abertura (3c-1).** Uma vez por ligação de pipeline, o `call_answered`
+leva `opening`: `{ transcriberMs, fixedSpeechMs, keyCheckMs, fixedSpeech, fromCache, totalMs }`, em ms,
+pelo `Clock` da sessão (`PipelineConnectOptions.clock`). As duas etapas correm juntas: a transcrição
+abrindo (é o que prova a chave dela) e as falas prontas. Sem cache, a própria síntese prova a chave da
+voz, e não há conferência à parte (`keyCheckMs: null`). Com alguma fala no cache, o `checkKey` da voz
+roda junto, e `keyCheckMs` é o tempo dele: é esse o pedido a mais que a nota da revisora no #390
+apontou. A chave do cérebro não é conferida na abertura: ela se prova no primeiro pedido. O trecho de
+volta da transferência e a passagem para outro agente abrem de novo, mas não gravam outra nota. Sem
+`clock`, o motor não mede, e a nota não sai. **Não medido:** o valor real de cada etapa contra um
+provedor, sem chave (seção 6.1). Os testes só provam a conta com o relógio falso.
+
+**O pior caso antes de cada pedido ao cérebro (3b-2).** Todo pedido de `chat` leva
+`BrainChatRequest.maxTokens`, que o motor preenche com `PIPELINE_BRAIN_MAX_TOKENS` = 4 096, e cada
+cérebro o manda no campo do provedor: `max_completion_tokens` na OpenAI, `max_tokens` no DeepSeek, no
+OpenRouter e na Anthropic (no lugar dos 16 000 fixos, só no `chat`), e `generationConfig.maxOutputTokens`
+no Gemini. O `completeJson` (a análise e o desfecho) não muda de corpo. Antes de cada pedido, inclusive
+o que reabre o cérebro depois de uma ferramenta, o motor soma a entrada estimada (um token por byte do
+que vai em `messages` e `tools`, a regra do Jev) e `maxTokens`, pelo preço do modelo, e confere contra
+o que sobra do teto, que a sessão entrega por `PipelineConnectOptions.ceiling` (o teto menos o custo
+somado da ligação, em micro-centavos, sem arredondar). Se passar, o pedido não sai, e a sessão toca a
+despedida do teto pronta, como o `reachCeiling` de hoje (`cost_ceiling_reached` com
+`brainWorstCase: true` e o `brainWorstCaseMicrocents`). Isso resolve, no pipeline, a pendência da R12
+"reserva em voo que passa do pior caso". Sem teto, nada é conferido. **Não medido:** os nomes dos
+campos num provedor real, e se 4 096 tokens cortam alguma resposta de ligação.
+
+**A peça sem preço (3b-2).** A sessão recusa abrir o pipeline quando uma peça não tem preço conhecido,
+com ou sem teto: o modelo do cérebro fora da lista `brain.<id>.models` com preço, ou a voz sem
+`pricingOf` para o modelo dela (a escolha não traz modelo da voz: vale o `defaultModel`). Sem teto, a
+linha do extrato sairia sem custo; com teto, a promessa dele não se cumpriria. A transcrição tem
+`pricing` obrigatório no contrato. A recusa é `call_refused` com `piece`, `pieceId`, `model` e o motivo
+`pipeline_piece_unpriced` (o fim da chamada também), com frase na linha do tempo nos três idiomas e
+uma linha no `diagnostico.md` das duas cópias da skill. O motivo **fica fora** de `KEY_CHECK_RESULTS`,
+como o `brain_unmeasured_without_ceiling` da rotina: uma chave não fica "sem preço". Para quem já
+instalou, nada muda (a coluna está nula). Na fatia 5, a tela só oferece modelo e voz com preço, e a
+recusa fica como rede de proteção. O motor, por sua vez, não faz pedido com teto e sem preço do
+cérebro: o pior caso não tem conta.
 
 ### 3.4 A falha (antipadrão 15)
 
@@ -240,13 +299,24 @@ em voo que passa do pior caso".
 |---|---|---|
 | Voz, ao abrir | O tom de falha (o caminho de hoje: `call_refused`/`engine_refused`) | `call_refused`, com `detail` dizendo que foi a voz |
 | Voz, no meio | A fala de falha **pré-sintetizada** e depois o tom. A fala não depende da voz estar viva | `engine_failed` com `piece: "synthesizer"` e o motivo no vocabulário fechado |
-| Ouvido, no meio | A fala de falha, pela voz viva | `engine_failed` com `piece: "transcriber"` |
+| Ouvido, ao abrir | O tom de falha | `call_refused` com `piece: "transcriber"` e o motivo |
+| Ouvido, no meio (`closed`) | A fala de falha **pré-sintetizada**, como na voz: não depende de nenhuma fala aberta | `engine_failed` com `piece: "transcriber"` e o motivo do último `error`, se ele veio tipado |
+| Ouvido, `error` sem `closed` | Nada: a conversa segue | `pipeline_turn_failed` com `piece: "transcriber"` e o motivo |
 | Cérebro, um pedido (prazo, 5xx, 429) | "Desculpe, não consegui responder agora. Pode repetir, por favor?" e a conversa segue | `pipeline_turn_failed` com `piece: "brain"` e o motivo |
 | Cérebro, duas vezes seguidas | A fala de falha | `engine_failed` com `piece: "brain"` |
 
 A fala de falha (texto fixo, no padrão de `FAREWELL`) é: "Estou com um problema técnico e não vou
 conseguir continuar. Se puder, ligue de novo em alguns minutos. Obrigado." Quando há
-`transfer_to_e164`, vale a fala de transferência que já existe. Os eventos usam o vocabulário de
+`transfer_to_e164` (e o canal transfere, e a ligação não voltou de uma transferência), quem ligou ouve
+no lugar dela a **fala de transferência**, também pré-sintetizada: "Estou com um problema técnico e não
+vou conseguir continuar. Vou transferir você para uma pessoa da equipe. Um instante, por favor." Depois,
+a ligação é transferida. A sessão pede essa fala no `connect` (`transferOnFailure`), e ela fica pronta
+**no lugar** da fala de falha, com o mesmo cache por organização. O custo dela entra no extrato e no
+teto como o das outras falas prontas. Sem `transfer_to_e164` (ou no canal que não transfere, ou no
+trecho de volta), ela não é sintetizada, nem a despedida do teto que promete transferência (fatia 4,
+ponta da 3c-2).
+O `error` da transcrição sozinho não é fatal (o contrato de `StreamingTranscriptionEvents`): só o
+`closed` derruba a sessão. Os eventos levam `piece`, `pieceId` e `detail` (o código). Os eventos usam o vocabulário de
 `KEY_CHECK_RESULTS` e nunca repassam o texto do provedor (o texto vai só ao log). Há frase na linha
 do tempo nos três idiomas: o CI reprova motivo sem frase.
 
@@ -261,6 +331,28 @@ final chegou, e o evento leva a marca `endFromArrival: true`.
 `endpointMs` vai do fim da fala ao trecho final. `brainFirstTextMs` vai do pedido ao primeiro texto.
 `voiceFirstAudioMs` vai do primeiro `push` ao primeiro áudio. O relógio é o `Clock` da sessão
 (convenção 10).
+
+**Como o evento sai (3c-1).** Quem mede é o motor, com o `Clock` que a sessão passa em
+`PipelineConnectOptions.clock`. O motor emite `pipelineTurnLatency`, e a sessão grava o
+`pipeline_turn_latency` em `call_events`, só com os números, mais `tool` e, depois de uma passagem,
+`agentId`. O zero do fluxo da transcrição é a hora do primeiro áudio mandado a ela. O `endMs` que
+cairia depois da chegada (o relógio do serviço adiantado) vale como a chegada, com `endFromArrival`, e
+nunca dá número negativo. No turno fechado à força (`closeCallerTurn`), vale o `endMs` do último
+parcial, e a chegada é a hora do fechamento.
+- **Um por turno respondido**, no primeiro áudio da resposta entregue ao transporte. O resto do áudio
+  da mesma resposta não emite de novo.
+- **Turno com ferramenta:** sai uma vez. A marca sai da **origem do texto que deu o primeiro áudio**
+  (fatia 3c-2), e não da ordem entre o áudio e o fim da rodada. `tool: true` quando esse texto foi
+  pedido ao cérebro **depois** de uma ferramenta (o pedido que reabriu o cérebro): o `totalMs` inclui a
+  ferramenta, e o `brainFirstTextMs` é o desse pedido. Se o cérebro falou antes de pedir a ferramenta,
+  o primeiro áudio é dessa fala: `tool: false`, e o `totalMs` vai até ela. O orçamento abaixo é "sem
+  ferramenta": a fatia 5 separa por `tool`.
+- **Turno sem áudio não emite:** o cérebro que falhou (o "pode repetir?" não é resposta), o teto que
+  barrou o pedido, a resposta vazia e a ligação que acabou antes do primeiro áudio. Nenhum número é
+  inventado.
+- O `turn_latency` de hoje (um por ligação, `turn-latency.ts`) continua como está, também no pipeline.
+- A linha do tempo mostra cada turno, com frase nos três idiomas, e o atendimento mostra a nota da
+  abertura (3.3).
 
 **Orçamento (p95 por turno, sem ferramenta):**
 
@@ -379,13 +471,26 @@ pedidos curtos) com as chaves que a R4 já usa. Sem chave, "não medido".
 Fracasso mesmo funcionando: argumento de ferramenta aceito sem zod; custo zero quando o provedor não
 declarou consumo (precisa ser estimado pela entrada, `cost_estimated`, como na R12).
 
-### Fatia 3: o motor pipeline, pelo caminho simulado (ESPERA o #245 na `main`)
+### Fatia 3: o motor pipeline, pelo caminho simulado (sobre o #245, que entra antes)
 
 `engines/pipeline.ts` costura transcritor, cérebro e voz (3.3). Na escolha do agente entra uma
 migration: `agents.pipeline jsonb` com `{ transcriber, brain, model, synthesizer, voiceId }`, nula
 para quem não usa. O carimbo é a hora real (`date -u +%Y%m%dT%H%M%S`), nunca futura. Em
 `call-session.ts`, entram o `pieceUsage` no `meter`, a falha por peça (3.4) e o
-`pipeline_turn_latency`. Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
+`pipeline_turn_latency`. O motor mora em `src/pipeline-engine.ts` até a fatia 5 (3.3).
+
+A fatia foi cortada em quatro: a **3a** (o motor com as peças injetadas, sem banco, #567), a **3b-1**
+(a coluna, as peças montadas na sessão, uma linha por peça, as despedidas prontas, a falha por peça
+até o painel e o `error` não fatal da transcrição), a **3b-2** (DESA-425: o pior caso antes de cada
+pedido ao cérebro, com o `maxTokens`, e a recusa da peça sem preço, na 3.3) e a **3c** (`pipeline_turn_latency`,
+a nota da chave e a corrida da transferência com volta). A 3c foi cortada em duas: a **3c-1**
+(DESA-427: o `pipeline_turn_latency`, a nota da chave, a L1 da DESA-421 e as duas ressalvas da
+DESA-426) entrou; a **3c-2** (DESA-430: a corrida do fim de chamada na volta, a fala de transferência
+pronta quando a peça cai com `transfer_to_e164`, 3.4, a regra da marca `tool`, 3.5, e as ressalvas da
+DESA-428) entrou. **A fatia 3 terminou.** A corrida do fim de chamada na volta: se a ligação acaba
+durante a transferência, enquanto as peças do trecho de volta abrem ou logo depois, as peças abertas
+fecham, nenhuma fica viva depois do `call_ended`, nada é gravado depois do fim e nenhuma síntese nova é
+pedida (testado com o banco, nas quatro ordens). Prova de ponta a ponta com transcritor simulado, cérebro em servidor falso e
 voz simulada: uma ferramenta no meio da conversa, três linhas no extrato e o teto que dispara a
 despedida pré-sintetizada. Quem já instalou não precisa fazer nada: sem `agents.pipeline`, nada muda.
 A fala aberta e parada morre no `inactivity_timeout` da ElevenLabs (20 s) com `error`. Esta fatia
@@ -393,7 +498,9 @@ decide e testa: ou abre a fala só quando o cérebro começa a responder, ou tra
 fim sem falha.
 A 3.3 confere a chave da organização em toda abertura, mesmo com o cache cheio (nota da revisora no
 #390). Isso pode ser um pedido a mais antes do primeiro áudio. Esta fatia diz quanto ele pesa na 3.5,
-ou mostra que a própria abertura da fala já serve de prova da chave e dispensa o pedido.
+ou mostra que a própria abertura da fala já serve de prova da chave e dispensa o pedido. (3c-1: a nota
+da chave está na 3.3. Sem cache, a síntese prova a chave e o pedido não sai; com cache, ele sai, e o
+tempo dele vai no `call_answered`. O valor real é **não medido** sem chave.)
 
 ### Fatia 4: interrupção
 
@@ -403,18 +510,143 @@ histórico e na transcrição é cortada no que já saiu (`spoken`). Com ruído 
 "noisy"`), só texto interrompe; o início de fala sozinho não interrompe (lição da R11). Os testes
 provam o corte, o custo do que já foi enviado e que o próximo pedido ao cérebro leva a fala cortada.
 
+**Como ficou (DESA-432).**
+
+- **Só a resposta do cérebro se interrompe, e só quando é ela que está saindo** (a primeira da fila de
+  saída, ainda gerando ou entregando áudio). O `say` (a saudação, a guarda, o "pode repetir?", as
+  despedidas) e as falas prontas saem inteiras: a despedida do teto ou da falha nunca é cortada, e a
+  fala pronta atrás da resposta cortada toca do mesmo jeito. Com a fala pronta tocando sozinha, quem
+  ligou não interrompe nada.
+- **O gatilho é texto novo da transcrição**, o mesmo `callerActivity({ words: true })`, parcial ou final.
+  A transcrição não tem sinal de início de fala, então a regra do modo Barulhento ("só texto
+  interrompe") vale nos dois ambientes: o trecho sem palavra nunca corta o agente.
+- **O corte é o `spoken` do áudio já entregue** a quem abriu (o `spoken` do áudio que ainda espera na
+  fila não conta), em pontos de código, sem o espaço do fim. A mensagem da resposta no histórico passa a
+  ser a fala cortada (com as ferramentas, se pediu; sem nada ouvido e sem ferramenta, ela sai do
+  histórico). O pedido aberto é cancelado, e o que ele já tinha dito entra cortado do mesmo jeito.
+- **A fala do agente vai à transcrição quando acaba de sair**, inteira, ou cortada na interrupção e no
+  fim da sessão (antes do `closed`). Antes desta fatia, ela ia no fim do pedido ao cérebro, com o áudio
+  ainda saindo. Por isso, no painel, a fala de antes de uma ferramenta pode aparecer depois do
+  `tool_called`, e a fala que o cérebro disse antes de falhar, depois do "pode repetir?".
+- **O custo:** a voz cobra no envio (`push`), então o que foi enviado antes do `cancel` está no extrato e
+  no teto; o texto que esperava a voz abrir não foi enviado, e não é cobrado. O pedido cancelado emite o
+  consumo dele (estimado, a regra da 3.2), que entra no extrato e no teto.
+- **Durante a ferramenta:** a fala de antes dela é cortada, a ferramenta segue, e o resultado entra no
+  histórico. Ele não reabre o cérebro sozinho: o próximo pedido é o da fala nova de quem ligou (o trecho
+  final, ou a guarda que fecha o turno pelo parcial), com o resultado e a fala cortada antes dela.
+- **Não medido:** a janela da interrupção é a da geração e entrega do áudio pelo motor, e não a da
+  reprodução na linha. Com a voz real mais rápida que o tempo real, a resposta já entregue inteira ao
+  transporte, que ainda toca, não se interrompe, e o corte conta como ouvido o que o transporte ainda
+  não tocou. O `played(ms)` do transporte (o Asterisk já mede) é o caminho para a fatia 6, com a medida.
+  Também não medido: o eco da própria voz do agente transcrito como fala de quem ligou, e a conta do
+  `spoken` da ElevenLabs (o `alignment`) contra o texto enviado.
+
 ### Fatia 5: a tela do agente
 
 Na tela do agente, "Pipeline" aparece como motor. Ao escolhê-lo, surgem três escolhas: a transcrição,
 o cérebro e o modelo (da lista da R4, só cérebros com `chat`) e a voz (da lista da 1b, com amostra).
 O custo por peça aparece no detalhe da chamada e em Custos. A latência medida (p50 das últimas
 ligações, pelo `pipeline_turn_latency`) aparece ao lado da escolha, com o aviso quando passa do
-orçamento. Chamada pelo navegador (decisão 0008) com o pipeline. Ela entra na prova de primeira
+orçamento. Chamada pelo navegador (decisão 0008) com o pipeline. O motor sai de
+`src/pipeline-engine.ts` para `engines/pipeline.ts`, com `default`, só aqui, junto com a escrita em
+`agents.pipeline`. Ela entra na prova de primeira
 impressão do CI pelo caminho simulado.
 Ao lado de cada escolha que não roda neste servidor (transcrição e voz), a tela repete o aviso da
 seção 9.1 e diz se já foi confirmado, por quem e quando. O servidor recusa salvar um agente com uma
 peça cujo `processingLocation` não é `this-server` e que não tem confirmação gravada (422, com o motivo
 na tela). O teste prova a recusa pela API, sem a tela.
+
+**5a (o servidor, sem tela; DESA-434).** A rota do agente (`POST` e `PATCH /api/v1/agents`) aceita
+`pipeline`, na mesma forma que a sessão lê (`pipelineChoice`, em
+`packages/voice-engine/src/pipeline-choice.ts`, uma só para as duas), ou `null`. A conferência fica em
+`apps/panel/src/server/pipeline.ts` (`requirePipeline`), e cada recusa é 422 com a peça no `detail`:
+`pipeline_piece_unknown` (a peça fora da pasta), `pipeline_piece_test_only` (a peça simulada, que só os
+testes aceitam, por `ServerDeps.simulatedPieces`), `pipeline_brain_cannot_chat`, `pipeline_piece_unpriced`
+(a mesma regra da abertura, `pricePipeline`) e `pipeline_piece_unconfirmed` (seção 9.1: a voz sem
+`synthesizer.<id>.consent`; a transcrição de fora sempre, até a R12 trazer a confirmação dela). Salvar
+outro campo não regrava a escolha. Gravar `pipeline` não troca o `engine`: com a coluna preenchida, a
+sessão abre o pipeline e o `engine` fica sem uso (a chamada simulada segue no motor do roteiro); com a
+coluna nula, vale o `engine`, como sempre. A coluna gravada à mão fora da forma recusa a ligação com o
+motivo, e não cai no motor direto. Ficam para a 5b e a 5c o motor em `engines/pipeline.ts`, a lista, a
+tela, a prévia, o custo por peça no detalhe e em Custos, e a latência ao lado da escolha.
+
+**5b-1 (a tela do agente, com o Pipeline desligado; DESA-436).** O motor mora em `engines/pipeline.ts`,
+com `default` e a marca `assembled`, e o contrato (`PipelineEngine`, `isPipelineEngine`) fica em
+`types.ts`: a sessão o acha em `loadEngines()`, como os outros motores, sem importar o arquivo, e o índice
+do pacote não o reexporta (a cerca `one-file-per-piece` reprova o índice que importa duas peças pelo nome).
+`/api/v1/engines` o devolve com `assembled: true` e `unavailable: { reason: "no_live_transcriber" }`
+enquanto a pasta não tiver transcrição fora a simulada; os outros motores saem sem campo novo. Ninguém
+grava o pipeline como `engine`: a rota do agente e `engine.default` recusam, e a sessão recusa o `engine =
+'pipeline'` gravado à mão sem abrir nada. A abertura confere, além da chave, a confirmação da 9.1 da voz
+de fora do servidor (`synthesizer.<id>.consent`), a cada ligação: sem ela, `call_refused` com
+`pipeline_piece_unconfirmed` e a peça, antes de qualquer peça abrir (o motivo fica fora de
+`KEY_CHECK_RESULTS`, como o da peça sem preço). Na tela do agente, o campo Motor mostra "Pipeline"
+desligado, com a linha do motivo, e o agente novo nunca nasce nele. O bloco "Pipeline" mostra as três
+escolhas só para ver e ouvir, e nada dele entra no salvar: a transcrição que falta; o cérebro com `chat` e
+a chave aceita, e o modelo com preço (`pricedBrainModels`, a mesma regra de `pricePipeline`); e as vozes da
+conta da ElevenLabs, pela rota da 1b, com o rótulo do fornecedor e o Ouvir da 1a tocando o `previewUrl`
+(`preload="none"`; o `play()` recusado diz o erro). Ao lado da voz e da transcrição, o aviso da 9.1, com
+quem confirmou e quando. A linha da ElevenLabs no campo Voz aponta para o bloco. Ficam para a 5b-2 a
+chamada pelo navegador com o pipeline e a prova de primeira impressão pelo caminho simulado; para a 5c, o
+custo por peça e a latência ao lado da escolha.
+
+**5b-2 (a chamada pelo navegador e a prova de primeira impressão, pelo caminho simulado; DESA-442).** A
+chamada pelo navegador (decisão 0008) não confere nada do pipeline: com `agents.pipeline` preenchida, o
+pedido do convite (`POST /calls/web`, em `apps/voice/src/web-calls.ts`) pula a conferência do `engine` (o
+simulado, o motor instalado e a chave dele), grava a linha com `engine = 'pipeline'` e deixa a abertura para
+`startCallSession`, a mesma do telefone: a mesma recusa (`call_refused` com a peça e o código, sem chave, sem
+preço ou sem a confirmação da 9.1, antes de qualquer peça abrir), o mesmo teto e o mesmo extrato por peça. Um
+caminho próprio do navegador seria uma segunda regra, que pode pular a da sessão. Com a coluna nula, vale o
+`engine`, como sempre: o agente no motor simulado continua recusado antes de abrir o microfone. A condição é a
+mesma da sessão (`usesPipeline`). A tela de falar com o agente não muda: ela decide pelo `engine` do agente, e
+o Pipeline continua desligado. Os testes (`web-calls-pipeline.db.test.ts`) abrem a ligação por um WebSocket de
+verdade, com a transcrição e a voz simuladas da pasta e o cérebro da OpenAI num servidor falso (o motor
+pipeline entra no mapa de motores do servidor, como o da pasta, com o `fetch` do teste), e comparam a recusa
+com a da mesma agente pelo telefone. A prova de primeira impressão do CI é o job `simulated-call`
+(`apps/voice/src/simulated-call.db.test.ts`): uma ligação pelo tronco com o agente de peças simuladas, com a
+saudação, um turno pelo cérebro, o fim pela ferramenta `end_call` e as linhas das três peças no extrato; o
+`engine` gravado é o simulado de roteiro, então a ligação que caísse no motor direto teria a linha dele. O
+workflow não mudou: o job já roda esse arquivo. `ServerDeps.simulatedPieces` só é ligado pelos testes:
+o painel montado pelo ambiente sai sem ele, e nenhum código fora dos testes o escreve
+(`apps/panel/src/server/simulated-pieces.test.ts`). No processo de voz, a transcrição e a voz simuladas vêm da
+pasta também num servidor instalado, e até a 5c só o painel recusava gravá-las: a 5c fecha isso na sessão (abaixo).
+O e2e do bloco Pipeline
+(`pipeline-block.spec.ts`) cobre as ressalvas da DESA-437: o Ouvir que falha (a amostra 404 e o `play()`
+recusado pelo navegador) e o PATCH sem `pipeline`.
+
+**5c, commit 1 (as notas da 5b-2, parecer da DESA-443; DESA-444).** A abertura do pipeline em `call-session.ts`
+recusa a transcrição ou a voz simulada (`simulated`) com o mesmo motivo do 422 do painel, `pipeline_piece_test_only`,
+e a peça, antes de qualquer chave ser lida ou peça abrir, a menos que o processo de voz tenha sido montado com
+`simulatedPieces` (`VoiceServerDeps` e `CallSessionDeps`), que só os testes ligam: a coluna escrita à mão no banco
+não abre a ligação com peças simuladas. O motivo fica fora de `KEY_CHECK_RESULTS`, com frase na linha do tempo nos
+três idiomas e linha no `diagnostico.md` das duas cópias da skill. Depois do fim pedido por ferramenta (o
+`end_call` e a transferência), o resultado da ferramenta não volta ao motor pipeline, porque reabriria o cérebro
+com um pedido que o fim cancelaria e cobraria como estimado: a despedida do `end_call` vai direto à voz, pela
+sessão (`wrapUp`), e o extrato tem só o pedido que respondeu. O motor direto não muda: ele ainda recebe o
+resultado e fala a despedida. A chamada pelo navegador ganhou a prova do corte pelo pior caso **antes** do pedido
+(3b-2): com o teto de 1 centavo, o pedido nem sai.
+
+**5c, o custo por peça e a latência ao lado da escolha (DESA-444).** O detalhe da chamada (`GET /calls/{id}`)
+leva `costByPiece`: a transcrição, o cérebro e a voz, nessa ordem, cada uma com o id, o nome da pasta, o modelo
+quando ela usou um só, e o valor e as contagens de não medido e estimado do extrato, como o resto da tela. Sai só
+na ligação que passou pelo pipeline (`calls.engine = 'pipeline'`, ou uma passagem com `engine: 'pipeline'`); na
+do motor direto, a lista vem vazia, e o detalhe não muda. A peça sem nenhuma linha vem com `lines: 0`, e a tela a
+mostra como "não medido": sem linha, o custo não é conhecido, e nunca aparece como zero. A linha da peça é a que a
+sessão grava com o agente do trecho (`agent_id`): a classificação do desfecho pelo cérebro (R4) grava `brain:<id>`
+também, mas depois da ligação e sem agente, em qualquer chamada, e fica de fora das peças, com a aparência de
+antes. Custos (`GET /system/costs`) marca cada linha de peça (`piece`), com o nome dela e, no lugar dos minutos,
+a nota de que ela cobra pelo próprio consumo; a data e a fonte do preço não saem na linha da peça (o preço do
+cérebro vem da lista de modelos da organização, e o da voz depende do modelo). A transcrição da R12 num motor
+direto (o mesmo rótulo `transcriber:<id>`, só nos testes por enquanto) ganha o mesmo nome em Custos.
+
+A latência sai de `GET /agents/{id}/pipeline-latency`: a mediana (`percentile_cont(0.5)`) do `totalMs` do
+`pipeline_turn_latency` nas últimas 20 ligações do agente com turno medido, com o turno do agente que respondeu
+(o `agentId` do evento depois de uma passagem, senão o agente da ligação). **O turno com ferramenta fica à
+parte**, com a mediana dele e uma linha própria que diz que o tempo da ferramenta entra no número; a meta vale
+para a mediana sem ferramenta (1 200 ms, a "Meta p50" da 3.5), e acima dela o bloco mostra o aviso. Sem turno
+medido, o bloco diz "sem medida ainda". O Pipeline continua desligado no campo Motor. **Não medido:** a mediana
+é do agente, e não da combinação de peças: com a escolha trocada, as ligações das duas entram juntas (a escolha
+ainda não é gravável pela tela). O p95 do orçamento não é mostrado.
 
 ### Fatia 6: o ouvido real e a medida de ponta a ponta (ESPERA a R12)
 
@@ -422,11 +654,83 @@ O transcritor real escolhido pela R12 (fatia 3 da R12) entra no pipeline sem mud
 motor: é uma peça da pasta. A medida da seção 3.5 na chamada real (30 turnos, uma ferramenta) fica
 registrada no PR e nesta seção. É o aceite da frente.
 
+**Pendência antes da ligação real: a concordância não pode cortar o agente** (nota da revisora no
+#573, comentário 7171910478, 25/11; registrada pelo board na DESA-397). Hoje, pela fatia 4, qualquer
+texto novo de quem ligou corta a resposta do cérebro, inclusive "aham", "sim" e "tá", ditos só para
+mostrar que está ouvindo. O modo Barulhento não ajuda: lá só texto interrompe (lição da R11), e a
+concordância chega como texto. **A fatia 6 não fica pronta sem uma regra para isso, medida na
+bancada.**
+
+- **As regras candidatas** (não decididas; a medida escolhe):
+  - **R-lista:** enquanto a resposta do cérebro sai, um trecho (parcial ou final) cujo texto,
+    em minúsculas e sem pontuação, só tem palavras de concordância do idioma do agente não
+    interrompe. Lista inicial:
+    - pt-BR: "aham", "uhum", "hum", "hã", "sim", "é", "tá", "certo", "ok", "isso", "entendi", "sei";
+    - en: "uh-huh", "mhm", "hmm", "yeah", "yes", "ok", "okay", "right", "sure", "got it", "i see";
+    - es: "ajá", "mhm", "sí", "vale", "claro", "ok", "entiendo", "ya".
+    "Não", "no", "espera" e "wait" nunca entram na lista. Quando a parcial cresce ("sim, mas…"), o
+    corte acontece na primeira palavra fora da lista.
+  - **R-lista + mínimo:** a R-lista e, além dela, o corte só acontece com pelo menos 2 palavras fora
+    da lista, ou com 1 palavra fora da lista e 600 ms de fala desde o início do trecho.
+  - A concordância que não corta entra na transcrição e vai ao cérebro no próximo pedido, mas não
+    abre pedido sozinha.
+- **A medida que decide**, na bancada da R12, pela linha estreita (8 kHz) e pelo transcritor da
+  fatia 6:
+  - **Corpus, por idioma (pt-BR, en, es):** 40 turnos com concordância falada no meio de uma resposta
+    do agente de pelo menos 4 s (as palavras da lista, sozinhas e repetidas), e 40 turnos com
+    interrupção de verdade ("não, espera", "mas eu queria outra coisa", uma pergunta nova, um
+    número). A mesma gravação roda sem regra (o de hoje) e com cada regra.
+  - **Números, por idioma e por regra:**
+    - falsos cortes: concordâncias que cortaram, sobre 40;
+    - cortes perdidos: interrupções de verdade que não cortaram, sobre 40;
+    - atraso acrescentado: p50 e p95 de (tempo até o `interrupted` com a regra) menos (tempo sem
+      regra), no mesmo áudio.
+  - **Régua proposta:** falsos cortes ≤ 2 em 40, nenhum corte perdido, e atraso acrescentado no p95
+    ≤ 300 ms, nos três idiomas. Vence a regra mais simples que passa. Se nenhuma passa, a fatia 6
+    para e volta ao Arquiteto com a tabela.
+  - **Os testes da regra escolhida**, sem bancada: a lista nos três idiomas; "não" corta; "sim, mas"
+    corta na palavra "mas"; a concordância vai à transcrição e não abre pedido; a fala pronta e o
+    `say` continuam sem corte.
+  - A tabela vai ao PR da fatia 6 e a esta seção, com o comando e a data.
+
+**6a, parte 1: a transcrição da OpenAI como peça provisória (DESA-469, opção B da DESA-398, decisão 2).**
+O pedido do Rafael de 26/11 (a ligação real com a ElevenLabs) não espera o vencedor da R12. A peça é
+`transcribers/openai.ts`, no contrato `StreamingTranscriber`. É o `gpt-4o-mini-transcribe`, o mesmo do
+OpenAI Realtime, numa sessão só de transcrição (`?intent=transcription`), em μ-law a 8 kHz, com a
+detecção de fala do servidor (`server_vad`). Os itens saem na ordem em que o servidor os fecha. O
+`endMs` é o `audio_end_ms` menos o silêncio que o servidor esperou. O custo vem de cada `completed`:
+em tokens, em segundos, ou, sem `usage`, pela duração do item, ao preço por minuto.
+- **A chave é a do motor OpenAI Realtime** (`engine.openai-realtime.api_key`), sem chave nova. O
+  contrato ganhou o campo opcional `keySetting`. A sessão (`call-session.ts`) e o painel leem a chave
+  por `transcriberKeySettingOf`. Sem o campo, a chave segue em `transcriber.<id>.api_key`.
+- **A confirmação da 9.1** fica em `transcriber.<id>.consent`, com o recibo
+  `transcriber_provider_confirmed`, na forma da 1b. O texto é "O áudio da pessoa na ligação vai para a
+  OpenAI". Como não há chave para gravar, a confirmação tem rota própria:
+  `PUT|DELETE /api/v1/transcribers/{id}/consent`, com o botão no bloco Pipeline. `GET /api/v1/transcribers`
+  diz se a chave existe e quem confirmou. A gravação do agente (`requirePipeline`) e a abertura da ligação
+  conferem a confirmação, com o mesmo `pipeline_piece_unconfirmed`, agora também para a transcrição.
+- **O pipeline deixa de aparecer desligado** na organização que tem uma transcrição de verdade na
+  pasta e a chave dela. `unavailable` passa a ser por organização: `no_live_transcriber` (a pasta sem
+  transcrição de verdade) ou `no_transcriber_key` (sem a chave). Com as duas, `null`, e o campo Motor
+  diz "Pipeline", com a linha de que ele está pronto.
+- **Fica de fora desta parte:** a escolha das peças pela tela (o bloco ainda não grava
+  `agents.pipeline`; a API do agente grava), pergunta ao Arquiteto na DESA-469. Também fica de fora a
+  regra da concordância, num PR depois deste (ordem do board de 26/11, fatias de até ~400 linhas).
+- **Não medido:** a peça contra a OpenAI de verdade (nenhuma chamada com chave). Não foi medido se a
+  sessão de transcrição aceita `audio/pcmu` (o guia só mostra `audio/pcm` a 24 kHz; a referência aceita
+  os três), se manda `delta` antes do `completed` neste modelo, nem quanto o final chega depois do fim da
+  fala (a régua de 700 ms do p95 da R12). Também não foi medido o custo por minuto real no extrato. A
+  confirmação não sai com a chave do motor, como a da voz sai com a dela: apagar a chave do motor desliga
+  o pipeline (`no_transcriber_key`), mas a confirmação continua gravada.
+
 ## 5. O que espera a R12
 
-- **O contrato `StreamingTranscriber` na `main`.** Ele está no #245, que entra junto com a fatia 4 da
-  R12. A fatia 3 deste desenho só começa com ele na `main`. Se a R12 demorar, a alternativa é o #245
-  entrar sozinho antes. Isso é pedido ao maestro, não decisão do Rafael.
+- **O contrato `StreamingTranscriber` na `main`: não espera.** A DESA-398 decidiu que as fatias 3 a 5
+  não esperam o vencedor da R12. O #245 entra sozinho, desligado, pelo #566, que o retoma (DESA-409),
+  na exceção à regra 4 aberta pelo Rafael em 25/11, no documento
+  "2026-11-24 — motor em pipeline entra desligado antes da tela" (opção A): nenhum motor o usa, e nada muda na
+  tela nem no banco. A fatia 3 deste
+  desenho parte da `main`. A fatia 4 da R12 fica só com a peça do vencedor.
 - **O transcritor real.** A fatia 6 espera o vencedor medido da R12 (régua de 700 ms no p95 do trecho
   final). Hoje a R12 espera a DESA-75 e o crédito do Gemini. Sem vencedor, o pipeline existe e é
   testado pelo simulado, mas não atende chamada real.
@@ -576,6 +880,9 @@ A bancada (fatia 1a) usa só texto sintético, sem dado de ninguém.
 - Se o `/chat/completions` com `stream: true` + `tools` do OpenRouter e do DeepSeek se comporta como o
   da OpenAI. A documentação da R4 foi lida para o `completeJson`, não para streaming.
 - O custo por minuto de conversa no pipeline. A fatia 6 calcula a partir do extrato real.
+- Quantas concordâncias cortam o agente hoje e quanto atraso a regra da fatia 6 acrescenta: a
+  régua de 2 em 40 e de 300 ms é proposta minha, sem medida. A bancada fala com áudio sintético; se
+  a concordância sintética se transcreve como a falada, não foi medido.
 - O país do processamento da ElevenLabs: a política diz só onde guarda (EUA). Os Termos de Serviço,
   o DPA e a página de segurança não foram lidos; algum deles pode dar prazo ou país.
 - Se as gerações do WebSocket `stream-input` aparecem no histórico da conta (seria a base da opção

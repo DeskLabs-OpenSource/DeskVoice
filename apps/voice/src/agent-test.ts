@@ -1,6 +1,7 @@
-// O executor do teste do agente (item 7 da pesquisa Vapi, seção 5.4 de
-// docs/specs/2026-11-21-testes-do-agente.md), fatia 7a: só motor com `textMode` e sem chave (o
-// simulado). A rota interna, os motores reais e o custo no extrato são da 7b.
+// O executor do teste do agente (item 7 da pesquisa Vapi, seções 5.4 e 5.5 de
+// docs/specs/2026-11-21-testes-do-agente.md). A 7a trouxe o motor simulado; a 7b, o motor com chave
+// (OpenAI Realtime em texto), a rota interna (`POST /agent-tests/run`), as recusas de antes de
+// começar, o custo no extrato (`usage_ledger`, `source = 'test'`) e o teto da rodada.
 //
 // Nenhuma ferramenta roda num teste. Este arquivo não importa `runTool` (a cerca
 // `fences/agent-test-runs-no-tool.test.ts` confere): no pedido de ferramenta, ele grava a chamada no
@@ -9,18 +10,23 @@
 import {
   agentTestTurns,
   configHash,
+  decryptSecret,
   judgeTurn,
+  SPEND_CAP_REACHED,
+  spendCapReached,
   withOrg,
   type AgentTestTurn,
   type Clock,
   type Db,
   type HappenedTurn,
+  type OrgQuery,
   type ToolExpectation,
   type TurnVerdict,
 } from "@deskvoice/core";
-import { toSpec, type Tool } from "@deskvoice/tools";
-import type { VoiceEngine, VoiceSession, VoiceSessionConfig } from "@deskvoice/voice-engine";
+import { handoffTargetsOf, type Tool } from "@deskvoice/tools";
+import { estimateCostMicrocents, MICROCENTS_PER_CENT, type Usage, type VoiceEngine, type VoiceSession, type VoiceSessionConfig } from "@deskvoice/voice-engine";
 import { messageOf, silentLogger, type Logger } from "./log";
+import { composeInstructions, enabledToolsFor, engineKeySetting, inboundOpening, RECORDING_NOTICE_SETTING, recordingNoticeOf, sessionConfig, type SessionAgent } from "./session-config";
 import { realSchedule, type Schedule } from "./transport";
 
 /** Quanto um turno espera a resposta do agente terminar. Estourou: `error`, `turn_timeout`. */
@@ -29,11 +35,19 @@ export const AGENT_TEST_TURN_TIMEOUT_MS = 30_000;
 export const AGENT_TEST_MAX_TOOL_CALLS_PER_TURN = 8;
 /** Quantas rodadas cada teste guarda. A gravação de uma rodada nova apaga as mais velhas. */
 export const AGENT_TEST_RUNS_KEPT = 20;
+/** Quantos turnos cabem num teste (o mesmo teto de `agentTestTurns`). */
+const AGENT_TEST_MAX_TURNS = 12;
+/**
+ * O teto de tempo de uma rodada: 12 turnos de 30 s, mais 60 s de folga (7 min). A rodada `running`
+ * mais velha que isto foi perdida (o processo reiniciou, ou uma exceção escapou): ela não conta para
+ * `test_run_busy` e é fechada como `process_restarted` antes de a nova começar.
+ */
+export const AGENT_TEST_STALE_MS = AGENT_TEST_MAX_TURNS * AGENT_TEST_TURN_TIMEOUT_MS + 60_000;
 
 /** O que o modelo recebe quando pede uma ferramenta sem resposta escrita no teste. */
 export const NO_WRITTEN_RESULT = { ok: false, message: "Em teste: esta ferramenta não tem resposta escrita no teste." } as const;
 
-export type AgentTestErrorCode = "turn_timeout" | "tool_loop" | "engine_failed";
+export type AgentTestErrorCode = "turn_timeout" | "tool_loop" | "cost_ceiling" | "engine_failed";
 export type AgentTestStatus = "passed" | "failed" | "error";
 
 export interface AgentTestDeps {
@@ -41,6 +55,8 @@ export interface AgentTestDeps {
   clock: Clock;
   engines: Map<string, VoiceEngine>;
   tools: Map<string, Tool>;
+  /** A chave que abre os segredos da organização (a chave do motor). Sem ela, só motor sem chave roda. */
+  secretKey?: Buffer;
   schedule?: Schedule;
   log?: Logger;
 }
@@ -59,27 +75,77 @@ export interface AgentTestOutcome {
   turns: AgentTestRunTurn[];
 }
 
-export type StartedAgentTest = { runId: string; configHash: string; done: Promise<AgentTestOutcome> } | { code: "test_not_found" | "engine_no_text_mode" | "engine_not_configured" | "invalid_test"; message: string };
+/**
+ * Por que a rodada não começou. Nenhuma recusa cria rodada nem abre o motor. `test_not_found` cobre
+ * também o agente que não existe: o teste é apagado junto com o agente (`on delete cascade`).
+ */
+export type AgentTestRefusalCode = "test_not_found" | "invalid_test" | typeof SPEND_CAP_REACHED | "test_run_busy" | "engine_no_text_mode" | "engine_not_configured";
 
-interface TestRow {
+export type StartedAgentTest = { runId: string; configHash: string; done: Promise<AgentTestOutcome> } | { code: AgentTestRefusalCode; message: string };
+
+interface TestRow extends SessionAgent {
   agent_id: string;
   turns: unknown;
   instructions: string;
   greeting: string | null;
   engine: string;
-  language: string;
+  agent_tools: string[];
+  cost_ceiling_cents: number;
+}
+
+type Refusal = { code: AgentTestRefusalCode; message: string };
+
+/** O que a montagem da sessão do teste lê do agente. */
+interface AssembledAgent extends SessionAgent {
+  instructions: string;
+  greeting: string | null;
   agent_tools: string[];
 }
 
 /**
- * As ferramentas que o motor recebe no teste: as marcadas no agente, sem as que não estão
- * instaladas ou não têm a peça de que dependem. A passagem entre agentes não entra: o teste não
- * troca de agente. A 7b passa a montar isto pelo mesmo arquivo da ligação (`session-config.ts`).
+ * A sessão do teste e o retrato dela (`configHash`). A rodada e o estado que a tela lê
+ * (`agentTestState`) montam por aqui, e então o retrato de agora é o mesmo que a próxima rodada grava.
+ *
+ * É a mesma montagem da ligação recebida (`session-config.ts`), em texto: as mesmas instruções, com
+ * os destinos da passagem; as mesmas ferramentas, `transfer_to_agent` inclusive; e a mesma abertura,
+ * com o aviso de gravação na frente da saudação. A memória do número não entra: teste não tem número.
+ * O teste não troca de agente: o pedido de passagem é respondido pelo `result` escrito, como os outros.
  */
-function offeredTools(names: readonly string[], installed: Map<string, Tool>): Tool[] {
-  return names.flatMap((name) => {
-    const tool = installed.get(name);
-    return tool && tool.available !== false && tool.offeredBySession !== true ? [tool] : [];
+async function assemble(
+  q: OrgQuery,
+  deps: Pick<AgentTestDeps, "tools" | "log">,
+  organizationId: string,
+  agentId: string,
+  agent: AssembledAgent,
+  engine: VoiceEngine,
+  instructionsOverride: string | undefined,
+): Promise<{ config: VoiceSessionConfig; hash: string }> {
+  const { targets } = await handoffTargetsOf(q, agentId);
+  const instructions = composeInstructions(instructionsOverride ?? agent.instructions, targets);
+  const enabled = enabledToolsFor({ installed: deps.tools, names: agent.agent_tools, targets, canTransfer: true, returned: false, log: deps.log ?? silentLogger });
+  const notice = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, RECORDING_NOTICE_SETTING]);
+  const config = sessionConfig(agent, instructions, inboundOpening(recordingNoticeOf(notice?.value), agent.greeting), enabled, "text");
+  return { config, hash: configHash({ instructions, tools: config.tools, engine: engine.id, model: null, language: agent.language }) };
+}
+
+/** O que a tela dos testes lê do processo de voz (fatia 7c). */
+export type AgentTestState = { textMode: boolean; configHash: string | null } | { code: "agent_not_found"; message: string };
+
+/**
+ * Se o motor do agente roda teste e o retrato da configuração de agora. Só lê: não grava rodada,
+ * não abre o motor e não lê a chave. Motor sem `textMode` não tem retrato (`configHash: null`).
+ */
+export async function agentTestState(deps: Pick<AgentTestDeps, "db" | "engines" | "tools" | "log">, input: { organizationId: string; agentId: string }): Promise<AgentTestState> {
+  return withOrg(deps.db, input.organizationId, async (q) => {
+    const agent = await q.one<AssembledAgent & { engine: string }>(
+      `select instructions, greeting, engine, language, tools as agent_tools, voice_id, vocabulary, listening_environment from agents where id = $1`,
+      [input.agentId],
+    );
+    if (!agent) return { code: "agent_not_found", message: "This agent does not exist in this organization." };
+    const engine = deps.engines.get(agent.engine);
+    if (!engine?.textMode) return { textMode: false, configHash: null };
+    const { hash } = await assemble(q, deps, input.organizationId, input.agentId, agent, engine, undefined);
+    return { textMode: true, configHash: hash };
   });
 }
 
@@ -100,48 +166,104 @@ export async function startAgentTest(
   const log = deps.log ?? silentLogger;
   const schedule = deps.schedule ?? realSchedule;
 
-  const row = await withOrg(db, organizationId, (q) =>
-    q.one<TestRow>(
-      `select t.agent_id, t.turns, a.instructions, a.greeting, a.engine, a.language, a.tools as agent_tools
+  // As recusas e a gravação da rodada numa transação só, presa por organização: dois pedidos ao
+  // mesmo tempo não começam duas rodadas, e a recusa vê o que a outra acabou de gravar.
+  const prepared = await withOrg(db, organizationId, async (q): Promise<Refusal | { runId: string; row: TestRow; turns: AgentTestTurn[]; engine: VoiceEngine; apiKey: string; config: VoiceSessionConfig; hash: string }> => {
+    await q.exec("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`agent_test_runs:${organizationId}`]);
+    const row = await q.one<TestRow>(
+      `select t.agent_id, t.turns, a.instructions, a.greeting, a.engine, a.language, a.tools as agent_tools, a.voice_id, a.vocabulary,
+              a.listening_environment, a.cost_ceiling_cents
          from agent_tests t join agents a on a.organization_id = t.organization_id and a.id = t.agent_id
         where t.id = $1`,
       [input.testId],
-    ),
-  );
-  if (!row) return { code: "test_not_found", message: "This test does not exist in this organization." };
-  const parsed = agentTestTurns.safeParse(row.turns);
-  if (!parsed.success) return { code: "invalid_test", message: `The saved test is not valid: ${parsed.error.issues[0]?.message ?? "unknown problem"}` };
-  const engine = deps.engines.get(row.engine);
-  if (!engine?.textMode) return { code: "engine_no_text_mode", message: `The voice engine "${row.engine}" does not run tests yet.` };
-  // Fatia 7a: só motor sem chave. Ler a chave da organização e medir o custo é da 7b.
-  if (!engine.keyless) return { code: "engine_not_configured", message: `The voice engine "${row.engine}" needs a key, and tests with a key are not available yet.` };
+    );
+    if (!row) return { code: "test_not_found", message: "This test does not exist in this organization." };
+    const parsed = agentTestTurns.safeParse(row.turns);
+    if (!parsed.success) return { code: "invalid_test", message: `The saved test is not valid: ${parsed.error.issues[0]?.message ?? "unknown problem"}` };
+    // O teto do mês: o custo do teste entra nele como o de toda ligação.
+    if ((await spendCapReached(q, clock.now())).reached) {
+      return { code: SPEND_CAP_REACHED, message: "This organization reached its monthly spending cap. The installation administration can change the cap." };
+    }
+    // Uma rodada de cada vez na organização. A que passou do teto de tempo foi perdida: ela fecha
+    // aqui, como na partida do processo (`closeOrphanTestRuns`), e não trava os testes.
+    const now = clock.now();
+    await q.exec(
+      "update agent_test_runs set status = 'error', error_code = 'process_restarted', finished_at = $1 where status = 'running' and started_at <= $2",
+      [now, new Date(now.getTime() - AGENT_TEST_STALE_MS)],
+    );
+    if (await q.one("select 1 from agent_test_runs where status = 'running' limit 1")) {
+      return { code: "test_run_busy", message: "Another test of this organization is running. Wait for it to finish, and run again." };
+    }
+    const engine = deps.engines.get(row.engine);
+    if (!engine?.textMode) return { code: "engine_no_text_mode", message: `The voice engine "${row.engine}" does not run tests yet.` };
+    let apiKey = "";
+    if (!engine.keyless) {
+      const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, engineKeySetting(engine.id)]);
+      if (typeof stored?.value !== "string" || !deps.secretKey) return { code: "engine_not_configured", message: `No API key is saved for the voice engine "${engine.label}".` };
+      try {
+        apiKey = decryptSecret(stored.value, deps.secretKey);
+      } catch (error) {
+        return { code: "engine_not_configured", message: `The saved API key of the voice engine "${engine.label}" cannot be read (${messageOf(error)}).` };
+      }
+    }
 
-  const instructions = overrides.instructions ?? row.instructions;
-  const tools = offeredTools(row.agent_tools, deps.tools).map(toSpec);
-  const config: VoiceSessionConfig = { instructions, greeting: row.greeting ?? undefined, language: row.language, tools, mode: "text" };
-  const hash = configHash({ instructions, tools, engine: engine.id, model: null, language: row.language });
+    const { config, hash } = await assemble(q, deps, organizationId, row.agent_id, row, engine, overrides.instructions);
 
-  const runId = await withOrg(db, organizationId, async (q) => {
     const run = await q.one<{ id: string }>(
       "insert into agent_test_runs (organization_id, test_id, status, engine, model, config_hash, requested_by, started_at) values ($1, $2, 'running', $3, null, $4, $5, $6) returning id",
-      [organizationId, input.testId, engine.id, hash, input.requestedBy ?? null, clock.now()],
+      [organizationId, input.testId, engine.id, hash, input.requestedBy ?? null, now],
     );
     if (!run) throw new Error("Agent test run was not created");
-    // A retenção: ficam as rodadas mais novas do teste, a de agora entre elas.
+    // A retenção: ficam as rodadas mais novas do teste, a de agora entre elas. A linha do extrato
+    // da rodada apagada fica, sem a rodada (`on delete set null (test_run_id)`).
     await q.exec(
       `delete from agent_test_runs where test_id = $1 and id not in (
          select id from agent_test_runs where test_id = $1 order by started_at desc, id desc limit $2)`,
       [input.testId, AGENT_TEST_RUNS_KEPT],
     );
-    return run.id;
+    return { runId: run.id, row, turns: parsed.data, engine, apiKey, config, hash };
   });
+  if ("code" in prepared) return prepared;
+  const { runId, row, engine, apiKey, config, hash } = prepared;
 
-  const done = converse(engine, config, parsed.data, schedule)
+  // Cada `usage` do motor vira uma linha do extrato, com o custo pelo preço dele, na ordem em que
+  // chegou. O teto da rodada é o da ligação do agente (`cost_ceiling_cents`, zero é "sem teto").
+  let spentMicrocents = 0;
+  let ledger: Promise<unknown> = Promise.resolve();
+  const meter = (usage: Usage): boolean => {
+    const microcents = estimateCostMicrocents(engine.pricing, usage);
+    spentMicrocents += microcents;
+    const at = clock.now();
+    ledger = ledger.then(() =>
+      withOrg(db, organizationId, (q) =>
+        q.exec(
+          `insert into usage_ledger (organization_id, test_run_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, source, at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'test', $10)`,
+          [
+            organizationId,
+            runId,
+            engine.id,
+            row.agent_id,
+            Math.round(usage.seconds ?? 0),
+            (usage.inputTokens ?? 0) + (usage.textInputTokens ?? 0) + (usage.cachedInputTokens ?? 0),
+            (usage.outputTokens ?? 0) + (usage.textOutputTokens ?? 0),
+            Math.round(microcents / MICROCENTS_PER_CENT),
+            microcents,
+            at,
+          ],
+        ),
+      ).catch((error: unknown) => log("error", "could not record the cost of an agent test", { runId, error: messageOf(error) })),
+    );
+    return row.cost_ceiling_cents > 0 && spentMicrocents >= row.cost_ceiling_cents * MICROCENTS_PER_CENT;
+  };
+
+  const done = converse(engine, apiKey, config, prepared.turns, schedule, meter)
     .catch((error: unknown): AgentTestOutcome => {
       log("error", "agent test run failed", { runId, error: messageOf(error) });
       return { status: "error", errorCode: "engine_failed", turns: [] };
     })
     .then(async (outcome) => {
+      await ledger;
       await withOrg(db, organizationId, (q) =>
         q.exec("update agent_test_runs set status = $2, error_code = $3, turns = $4, finished_at = $5 where id = $1 and status = 'running'", [
           runId,
@@ -156,19 +278,34 @@ export async function startAgentTest(
   return { runId, configHash: hash, done };
 }
 
-/** A conversa do teste, turno a turno, contra a sessão em modo texto. Nunca roda ferramenta. */
-async function converse(engine: VoiceEngine, config: VoiceSessionConfig, turns: AgentTestTurn[], schedule: Schedule): Promise<AgentTestOutcome> {
-  const voice: VoiceSession = await engine.connect(config, "");
+/**
+ * A conversa do teste, turno a turno, contra a sessão em modo texto. Nunca roda ferramenta. `meter`
+ * grava cada `usage` e diz se o teto da rodada foi alcançado: alcançado, o turno seguinte não sai.
+ */
+async function converse(
+  engine: VoiceEngine,
+  apiKey: string,
+  config: VoiceSessionConfig,
+  turns: AgentTestTurn[],
+  schedule: Schedule,
+  meter: (usage: Usage) => boolean,
+): Promise<AgentTestOutcome> {
+  const voice: VoiceSession = await engine.connect(config, apiKey);
   const recorded: AgentTestRunTurn[] = [];
   // O que o agente faz entre o texto de quem liga e o `turnDone`. Antes do primeiro texto, vale a
   // abertura: a fala dela não é julgada, mas a ferramenta pedida nela conta no primeiro turno.
   let bucket: { says: string[]; tools: AgentTestRunTurn["tools"] } = { says: [], tools: [] };
   let expectations: ToolExpectation[] = [];
   let used = new Set<ToolExpectation>();
-  let waiter: ((ended: "done" | "closed" | "tool_loop") => void) | undefined;
+  type Ended = "done" | "closed" | "tool_loop" | "cost_ceiling";
+  let waiter: ((ended: Ended) => void) | undefined;
   let closed = false;
   let failed = false;
-  const settle = (ended: "done" | "closed" | "tool_loop"): void => {
+  // A conversa acabou: o que o motor emitir depois não muda mais o fim da rodada, mas o custo dele
+  // ainda é dela.
+  let finished = false;
+  let ceiling = false;
+  const settle = (ended: Ended): void => {
     const resolve = waiter;
     waiter = undefined;
     resolve?.(ended);
@@ -190,6 +327,20 @@ async function converse(engine: VoiceEngine, config: VoiceSessionConfig, turns: 
     voice.sendToolResult(call.id, result);
   });
   voice.on("turnDone", () => settle("done"));
+  // O custo de cada resposta, na hora em que o motor o declara (o OpenAI, em cada `response.done`,
+  // antes do fim do turno). Depois do fim (prazo do turno, laço de ferramenta, teto), o
+  // `response.done` que chega enquanto a sessão fecha foi cobrado pelo provedor: entra no extrato
+  // e no teto do mês, só sem mexer mais no fim da rodada. O `usage` sem consumo nenhum (o que o
+  // simulado declara ao fechar, em texto) não vira linha.
+  voice.on("usage", (usage) => {
+    if (Object.values(usage).every((amount) => !amount)) return;
+    const reached = meter(usage);
+    if (finished) return;
+    if (reached && !ceiling) {
+      ceiling = true;
+      settle("cost_ceiling");
+    }
+  });
   voice.on("error", () => {
     failed = true;
   });
@@ -198,8 +349,9 @@ async function converse(engine: VoiceEngine, config: VoiceSessionConfig, turns: 
     settle("closed");
   });
 
-  const wait = (): Promise<"done" | "closed" | "tool_loop" | "timeout"> =>
+  const wait = (): Promise<Ended | "timeout"> =>
     new Promise((resolve) => {
+      if (ceiling) return resolve("cost_ceiling");
       if (closed) return resolve("closed");
       const cancel = schedule(() => {
         waiter = undefined;
@@ -212,6 +364,7 @@ async function converse(engine: VoiceEngine, config: VoiceSessionConfig, turns: 
     });
 
   const finish = async (outcome: AgentTestOutcome): Promise<AgentTestOutcome> => {
+    finished = true;
     await voice.close();
     return outcome;
   };
@@ -223,6 +376,7 @@ async function converse(engine: VoiceEngine, config: VoiceSessionConfig, turns: 
       const opened = await wait();
       if (opened === "timeout") return await finish({ status: "error", errorCode: "turn_timeout", turns: recorded });
       if (opened === "tool_loop") return await finish({ status: "error", errorCode: "tool_loop", turns: recorded });
+      if (opened === "cost_ceiling") return await finish({ status: "error", errorCode: "cost_ceiling", turns: recorded });
       if (opened === "closed") return await finish({ status: "error", errorCode: "engine_failed", turns: recorded });
     }
     for (const [index, turn] of turns.entries()) {
@@ -237,12 +391,15 @@ async function converse(engine: VoiceEngine, config: VoiceSessionConfig, turns: 
       const record: AgentTestRunTurn = { user: turn.user, says: happened.says, tools: bucket.tools, verdict: judgeTurn(turn.expect, happened) };
       if (how === "timeout") return await finish({ status: "error", errorCode: "turn_timeout", turns: [...recorded, record] });
       if (how === "tool_loop") return await finish({ status: "error", errorCode: "tool_loop", turns: [...recorded, record] });
+      // O teto da rodada: o turno que o alcançou fica gravado, e o seguinte não sai.
+      if (how === "cost_ceiling") return await finish({ status: "error", errorCode: "cost_ceiling", turns: [...recorded, record] });
       recorded.push(record);
       // A sessão caiu: com erro do motor, ou antes do último turno, a rodada não terminou.
       if (how === "closed" && (failed || index < turns.length - 1)) return await finish({ status: "error", errorCode: "engine_failed", turns: recorded });
     }
     return await finish({ status: verdicts(), errorCode: null, turns: recorded });
   } catch (error) {
+    finished = true;
     await voice.close().catch(() => undefined);
     throw error;
   }

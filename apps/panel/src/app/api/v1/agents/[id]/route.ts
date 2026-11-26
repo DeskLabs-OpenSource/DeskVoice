@@ -1,6 +1,7 @@
 import type { OrgQuery } from "@deskvoice/core";
 import { ApiError, handle, notFound } from "../../../../../server/context";
 import { AGENT_COLUMNS, agentPatch, requireActiveOwner, requireDropFollowUpMode, requireAnalysisBrain, requireAnalyst, requireHandoffTargets, type AgentValues } from "../../../../../server/shapes";
+import { requirePipeline } from "../../../../../server/pipeline";
 import { updateAgent } from "../store";
 
 export const GET = handle({}, async ({ q, params }) => {
@@ -18,7 +19,8 @@ export const PATCH = handle({ support: false, body: agentPatch, configure: true 
   await requireAnalyst(q, body.analystId);
   const { acceptUnmeasured, ...fields } = body;
   await requireAnalysisBrain(q, fields.analysisBrain, acceptUnmeasured);
-  return updateAgent(q, params.id ?? "", { ...current, ...fields }, deps.clock.now(), fields.analysisBrain !== undefined);
+  await requirePipeline(q, deps, fields.pipeline);
+  return updateAgent(q, params.id ?? "", { ...current, ...fields }, deps.clock.now(), { analysisBrain: fields.analysisBrain !== undefined, pipeline: fields.pipeline !== undefined });
 });
 
 // O agente que é a ação de uma tecla do menu por teclas não sai (a chave é `on delete restrict`): o

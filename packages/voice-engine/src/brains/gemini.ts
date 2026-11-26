@@ -332,6 +332,8 @@ function generateFormat(apiKey: string, request: BrainChatRequest): ChatFormat {
               contents: wire.contents,
               ...(systemInstruction === null ? {} : { systemInstruction }),
               ...(tools === null ? {} : { tools }),
+              // O teto de saída do pedido (desenho do pipeline, seção 3.3): o pensamento também conta nele.
+              generationConfig: { maxOutputTokens: request.maxTokens },
             },
             // A estimativa da entrada: o que foi enviado em `systemInstruction`, `contents` e `tools`, um token por byte.
             inputTokens:
