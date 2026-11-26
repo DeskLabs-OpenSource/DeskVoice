@@ -58,12 +58,12 @@ const agents = {
   /** O pipeline no campo do motor (fatia 5b-1): listado, desligado, com o motivo. */
   enginePipeline: "Pipeline (desligado)",
   enginePipelineOn: "Pipeline",
-  enginePipelineReady: "Pronto nesta organização: a transcrição e a chave dela estão aqui. A escolha das peças pela tela chega na próxima versão; até lá, ela é gravada pela API do agente (campo pipeline).",
+  enginePipelineReady: "Pronto nesta organização: a transcrição e a chave dela estão aqui. A escolha das peças pela tela chega numa versão seguinte; até lá, ela é gravada pela API do agente (campo pipeline).",
   enginePipelineOff: { no_live_transcriber: "Falta uma transcrição em tempo real neste servidor. Ela chega com a medida da R12.", no_transcriber_key: "Falta a chave que a transcrição usa nesta organização: a da OpenAI usa a chave do motor OpenAI Realtime, em Configurações → Inteligência artificial." } as Record<string, string>,
   enginePipelineOffUnknown: "Ainda desligado nesta versão.",
   /** O bloco "Pipeline" (fatia 5b-1): as três peças, só para ver e ouvir; nada é salvo daqui. */
   pipeline: "Pipeline",
-  pipelineLead: "Transcrição, cérebro e voz escolhidos à parte. Por enquanto, só para ver e ouvir: o Pipeline está desligado, e nada daqui é salvo no agente.",
+  pipelineLead: "Transcrição, cérebro e voz escolhidos à parte. As escolhas deste bloco ainda não são salvas no agente: só a confirmação do envio do áudio é gravada daqui.",
   pipelineReadOnly: "Só quem configura a organização vê as peças do Pipeline.",
   pipelineTranscriber: "Transcrição",
   pipelineTranscriberNone: "Nenhuma transcrição em tempo real neste servidor.",
