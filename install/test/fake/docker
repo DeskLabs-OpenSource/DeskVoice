@@ -61,6 +61,8 @@ case "$args" in
   *" exec -T panel node "*"auth/login"*) cat > "$FAKE_DIR/login_stdin"; if [ -f "$FAKE_DIR/login_probe" ]; then cat "$FAKE_DIR/login_probe"; else echo 'ok|200'; fi; exit 0 ;;
   # O Caddyfile que o contêiner do Caddy tem montado: por padrão, igual ao do disco.
   *" exec -T caddy cat "*) if [ -f "$FAKE_DIR/caddy_mounted" ]; then cat "$FAKE_DIR/caddy_mounted"; else cat "$DESKVOICE_DEPLOY_DIR/Caddyfile" 2>/dev/null; fi; exit 0 ;;
+  # O tamanho da pasta de log do Asterisk, em MB, como o `du -sm` dá: $FAKE_DIR/asterisk_log_mb, ou 3.
+  *" exec -T asterisk du -sm "*) printf '%s\t%s\n' "$(cat "$FAKE_DIR/asterisk_log_mb" 2>/dev/null || echo 3)" "$last"; exit 0 ;;
   # Os arquivos que o contêiner do Asterisk tem montados: os de $FAKE_DIR/asterisk_mounted/; sem
   # eles, os do disco. Reiniciar o Asterisk monta de novo o que está no disco.
   *" exec -T asterisk cat "*) f="$(basename "$last")"; if [ -f "$FAKE_DIR/asterisk_mounted/$f" ]; then cat "$FAKE_DIR/asterisk_mounted/$f"; else cat "$DESKVOICE_DEPLOY_DIR/asterisk/generated/$f" 2>/dev/null; fi; exit 0 ;;

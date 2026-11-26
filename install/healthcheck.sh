@@ -9,8 +9,8 @@
 # Estados: ok | aviso (falta configurar, não é defeito) | falha (quebrado).
 # Código de saída: 0 = nenhuma falha; 1 = falhou peça essencial (painel, banco, painel → banco,
 # login do painel, Asterisk, módulos SIP, worker de voz, controle da telefonia, rotinas); 2 = falhou outra peça (rotinas → fila,
-# linha, motor de voz, entrada única, WhatsApp, ligação pelo WhatsApp, portas, disco). O agente de atualização nunca é
-# falha: no máximo, aviso.
+# linha, motor de voz, entrada única, WhatsApp, ligação pelo WhatsApp, portas, disco). O agente de atualização e o
+# log do Asterisk nunca são falha: no máximo, aviso.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 as_json=0; only_essential=0
@@ -27,6 +27,9 @@ require_install
 # Os módulos PJSIP sem os quais uma ligação não passa, ou uma linha não registra, ou o NAT não vale.
 # A linha "Módulos SIP" reprova se um deles falta ou está parado.
 SIP_ESSENTIAL_MODULES="res_pjsip chan_pjsip res_pjsip_session res_pjsip_sdp_rtp res_pjsip_nat res_pjsip_outbound_registration res_pjsip_authenticator_digest res_pjsip_outbound_authenticator_digest res_pjsip_endpoint_identifier_ip res_pjsip_endpoint_identifier_user res_pjsip_endpoint_identifier_anonymous res_pjsip_registrar res_pjsip_refer res_pjsip_pubsub"
+
+# A partir deste tamanho a pasta de log do Asterisk vira aviso (ver a linha "Log do Asterisk").
+ASTERISK_LOG_WARN_MB=1024
 
 RESULTS=""   # linhas `id|nome|essencial|estado|detalhe`
 add() { RESULTS="$RESULTS$1|$2|$3|$4|$(printf '%s' "$5" | tr '\n|' '  ')"$'\n'; }
@@ -356,6 +359,23 @@ if [ "$only_essential" = 0 ]; then
   if [ "$free_mb" -lt 1024 ]; then add disk "Disco" 0 falha "só ${free_mb} MB livres: o banco pode parar de gravar. Apague backups antigos em backups/ ou aumente o disco"
   elif [ "$free_mb" -lt 5120 ]; then add disk "Disco" 0 aviso "${free_mb} MB livres: pouco espaço para backups e atualização"
   else add disk "Disco" 0 ok "$((free_mb / 1024)) GB livres"; fi
+
+  # ── Log do Asterisk: as versões sem deploy/asterisk/logger.conf gravavam
+  #    /var/log/asterisk/messages.log sem teto (uma linha por pedido SIP recusado; 20 GB numa
+  #    instalação). A partir dele o log vai só para a saída do contêiner, que o Docker limita, mas o
+  #    arquivo antigo fica no volume do contêiner: a atualização não apaga dado. Mede de dentro do
+  #    contêiner, porque o volume é anônimo e, no disco da VPS, só o root o lê. ──
+  if ! running asterisk; then
+    add asterisk_log "Log do Asterisk" 0 aviso "não deu para medir porque o Asterisk não está rodando; resolva o Asterisk primeiro"
+  else
+    log_mb="$(dc exec -T asterisk du -sm /var/log/asterisk 2>/dev/null | awk 'NR == 1 { print $1 }')"
+    case "$log_mb" in
+      ""|*[!0-9]*) add asterisk_log "Log do Asterisk" 0 aviso "não deu para medir a pasta /var/log/asterisk do contêiner" ;;
+      *) if [ "$log_mb" -ge "$ASTERISK_LOG_WARN_MB" ]; then
+           add asterisk_log "Log do Asterisk" 0 aviso "a pasta de log do Asterisk ocupa ${log_mb} MB. É o messages.log das versões sem limite de log; o Asterisk desta versão não o grava mais, e o que ele diz fica em: docker compose -f deploy/docker-compose.yml logs asterisk. Para liberar o espaço (apaga esse histórico): docker compose -f deploy/docker-compose.yml exec asterisk truncate -s 0 /var/log/asterisk/messages.log"
+         else add asterisk_log "Log do Asterisk" 0 ok "${log_mb} MB em /var/log/asterisk; o log corrente vai para a saída do contêiner, com teto"; fi ;;
+    esac
+  fi
 fi
 
 # ── Saída ──
