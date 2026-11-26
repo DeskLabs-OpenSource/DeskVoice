@@ -506,7 +506,7 @@ class PipelineSession implements PipelineVoiceSession {
    * (ou começado enquanto ela saía).
    */
   private isAgreement(text: string): boolean {
-    return (this.agreementSegment || this.output[0]?.reply === true) && isAgreementOnly(text, this.config.language);
+    return (this.agreementSegment || this.output[0]?.reply !== undefined) && isAgreementOnly(text, this.config.language);
   }
 
   /**
