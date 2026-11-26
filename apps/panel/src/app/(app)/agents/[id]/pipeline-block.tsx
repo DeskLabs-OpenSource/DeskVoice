@@ -16,6 +16,7 @@ import { formatDateTime } from "../../../../ui/format";
 import { Badge, Button, Field, Notice, Panel, Select, Skeleton } from "../../../../ui/kit";
 import type { Engine, PipelineLatency } from "../../../../ui/types";
 import { providerName } from "../../settings/voice/notice";
+import { conversationalBrains, usableTranscribers, type PipelineData, type PipelinePieces } from "./pipeline-pieces";
 import { Listen, PIPELINE_BLOCK_ID } from "./voice-field";
 
 /** A voz como `/api/v1/synthesizers` a devolve: o estado da chave e da confirmação da 9.1. */
@@ -59,9 +60,7 @@ export interface PipelineBrainOption {
   keyCheck: { result: string } | null;
 }
 
-/** Os cérebros que o pipeline pode usar: os que conversam (`chat`), com a chave aceita. */
-export const conversationalBrains = (brains: readonly PipelineBrainOption[] | undefined): PipelineBrainOption[] =>
-  (brains ?? []).filter((brain) => brain.chat && brain.configured && brain.keyCheck?.result === "accepted");
+export { conversationalBrains };
 
 export interface PipelinePanelProps {
   t: AgentsDictionary;
@@ -76,12 +75,12 @@ export interface PipelinePanelProps {
   /** Depois de confirmar ou apagar a confirmação de uma transcrição: relê a lista. */
   onTranscribersChanged?(): void;
   brains: readonly PipelineBrainOption[] | undefined;
-  brain: string;
-  onBrain(next: string): void;
+  /** As peças mostradas escolhidas (`shownPieces`): o que vai no salvar quando o Motor é o Pipeline (fatia 6b). */
+  pieces: PipelinePieces;
+  /** Troca uma ou mais peças no rascunho do agente. */
+  onPieces(next: Partial<PipelinePieces>): void;
   /** O valor da lista de modelos do cérebro escolhido (`/api/v1/brains/[brain]/models`), ou `undefined` enquanto carrega. */
   brainModels: unknown;
-  model: string;
-  onModel(next: string): void;
   /** As vozes de cada voz, pelo id. Ausente, cada voz lê a dela (a tela); os testes passam a lista pronta. */
   voicesOf?: Record<string, VoicesState>;
   /** A leitura que falhou (as vozes, os cérebros ou os modelos), já em frase: o bloco diz, e não fica carregando. */
@@ -94,9 +93,9 @@ export interface PipelinePanelProps {
 }
 
 /**
- * O bloco "Pipeline" da tela do agente (fatia 5b-1): as três escolhas, só para ver e ouvir. Nada daqui
- * vai no salvar do agente: os seletores não têm `name`, e o corpo do PATCH sai do rascunho, que não os
- * conhece. Ao lado da voz e da transcrição fica o aviso da seção 9.1, com quem confirmou e quando. A
+ * O bloco "Pipeline" da tela do agente: a transcrição, o cérebro e o modelo, e a voz. As escolhas ficam no
+ * rascunho do agente e vão no salvar quando o campo Motor está no Pipeline (fatia 6b); com outro motor, elas
+ * ficam só na tela. Ao lado da voz e da transcrição fica o aviso da seção 9.1, com quem confirmou e quando. A
  * confirmação da transcrição é gravada daqui (fatia 6), porque ela não tem chave própria para gravar.
  */
 export function PipelinePanel(props: PipelinePanelProps) {
@@ -166,7 +165,7 @@ export function LatencyPart({ t, locale, latency }: { t: AgentsDictionary; local
   );
 }
 
-function TranscriberPart({ t, voiceT, locale, pipeline, transcribers, onTranscribersChanged }: PipelinePanelProps) {
+function TranscriberPart({ t, voiceT, locale, pipeline, transcribers, onTranscribersChanged, pieces, onPieces }: PipelinePanelProps) {
   if (pipeline.unavailable?.reason === "no_live_transcriber")
     return (
       <Part title={t.pipelineTranscriber}>
@@ -174,8 +173,22 @@ function TranscriberPart({ t, voiceT, locale, pipeline, transcribers, onTranscri
       </Part>
     );
   if (transcribers === undefined) return <Skeleton lines={2} />;
+  const usable = usableTranscribers(transcribers);
   return (
     <Part title={t.pipelineTranscriber}>
+      {usable.length > 0 ? (
+        <Field label={t.pipelineTranscriberChoice}>
+          <Select value={usable.some((transcriber) => transcriber.id === pieces.transcriber) ? pieces.transcriber : usable[0]?.id} onChange={(event) => onPieces({ transcriber: event.target.value })} className="max-w-sm">
+            {usable.map((transcriber) => (
+              <option key={transcriber.id} value={transcriber.id}>
+                {transcriber.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      ) : null}
+      {/* A transcrição de hoje é a peça provisória da OpenAI (decisão B da DESA-398): a tela diz isso. */}
+      {transcribers.length > 0 ? <p className="text-[0.87rem] text-muted">{t.pipelineTranscriberProvisional}</p> : null}
       {transcribers.map((transcriber) => (
         <TranscriberRow key={transcriber.id} t={t} voiceT={voiceT} locale={locale} transcriber={transcriber} onChanged={onTranscribersChanged} />
       ))}
@@ -242,10 +255,10 @@ function TranscriberRow({ t, voiceT, locale, transcriber, onChanged }: { t: Agen
   );
 }
 
-function BrainPart({ t, brains, brain, onBrain, brainModels, model, onModel }: PipelinePanelProps) {
+function BrainPart({ t, brains, pieces, onPieces, brainModels }: PipelinePanelProps) {
   if (brains === undefined) return <Skeleton lines={2} />;
   const options = conversationalBrains(brains);
-  const chosen = options.find((option) => option.id === brain) ?? options[0];
+  const chosen = options.find((option) => option.id === pieces.brain) ?? options[0];
   // A mesma regra do preço da gravação e da abertura (`pricePipeline`): só o modelo com preço na lista.
   const priced = brainModels === undefined ? undefined : pricedBrainModels(brainModels);
   return (
@@ -253,7 +266,7 @@ function BrainPart({ t, brains, brain, onBrain, brainModels, model, onModel }: P
       {chosen ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.pipelineBrain} hint={t.pipelineBrainHint}>
-            <Select value={chosen.id} onChange={(event) => onBrain(event.target.value)}>
+            <Select value={chosen.id} onChange={(event) => onPieces({ brain: event.target.value, model: "" })}>
               {options.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label}
@@ -267,7 +280,7 @@ function BrainPart({ t, brains, brain, onBrain, brainModels, model, onModel }: P
             <p className="text-[0.87rem] text-muted">{t.pipelineModelNone}</p>
           ) : (
             <Field label={t.pipelineModel} hint={t.pipelineModelHint}>
-              <Select value={priced.includes(model) ? model : priced[0]} onChange={(event) => onModel(event.target.value)}>
+              <Select value={priced.includes(pieces.model) ? pieces.model : priced[0]} onChange={(event) => onPieces({ model: event.target.value })}>
                 {priced.map((id) => (
                   <option key={id} value={id}>
                     {id}
@@ -289,13 +302,18 @@ function BrainPart({ t, brains, brain, onBrain, brainModels, model, onModel }: P
   );
 }
 
-function VoicePart({ t, voiceT, locale, synthesizers, voicesOf }: PipelinePanelProps) {
+function VoicePart({ t, voiceT, locale, synthesizers, voicesOf, pieces, onPieces }: PipelinePanelProps) {
   if (synthesizers === undefined) return <Skeleton lines={3} />;
   return (
     <Part title={t.pipelineVoice}>
       <p className="text-[0.87rem] text-muted">{t.pipelineVoicesNote}</p>
       {synthesizers.map((synthesizer) => {
         const provider = providerName(voiceT, synthesizer.provider);
+        const confirmed = synthesizer.processingLocation.kind === "this-server" || synthesizer.consent !== null;
+        // Só a voz com o envio confirmado é escolhível: sem a confirmação, o servidor recusa salvar (9.1).
+        const choice = confirmed
+          ? { chosen: pieces.synthesizer === synthesizer.id ? pieces.voiceId : "", onChoose: (voiceId: string) => onPieces({ synthesizer: synthesizer.id, voiceId }) }
+          : undefined;
         const status = synthesizer.consent
           ? fill(t.pipelineConfirmedBy, { who: synthesizer.consent.name ?? t.pipelineRemovedPerson, when: formatDateTime(synthesizer.consent.at, locale) })
           : t.pipelineUnconfirmed;
@@ -307,9 +325,9 @@ function VoicePart({ t, voiceT, locale, synthesizers, voicesOf }: PipelinePanelP
             </div>
             {synthesizer.configured ? (
               voicesOf ? (
-                <VoiceRows t={t} provider={provider} state={voicesOf[synthesizer.id] ?? { state: "loading" }} />
+                <VoiceRows t={t} provider={provider} state={voicesOf[synthesizer.id] ?? { state: "loading" }} choice={choice} />
               ) : (
-                <LoadVoices t={t} voiceT={voiceT} provider={provider} synthesizerId={synthesizer.id} />
+                <LoadVoices t={t} voiceT={voiceT} provider={provider} synthesizerId={synthesizer.id} choice={choice} />
               )
             ) : (
               <p className="text-[0.87rem]">
@@ -327,8 +345,17 @@ function VoicePart({ t, voiceT, locale, synthesizers, voicesOf }: PipelinePanelP
   );
 }
 
-/** Cada voz da conta com o rótulo do fornecedor e o Ouvir da amostra dele; sem amostra, diz isso. */
-export function VoiceRows({ t, provider, state }: { t: AgentsDictionary; provider: string; state: VoicesState }) {
+/** A escolha da voz do Pipeline numa conta: a voz marcada (vazia, nenhuma) e o que fazer ao marcar outra. */
+export interface VoiceChoice {
+  chosen: string;
+  onChoose(voiceId: string): void;
+}
+
+/**
+ * Cada voz da conta com o rótulo do fornecedor e o Ouvir da amostra dele; sem amostra, diz isso. Com
+ * `choice` (a conta com o envio confirmado), cada voz tem o "Usar esta voz" do Pipeline (fatia 6b).
+ */
+export function VoiceRows({ t, provider, state, choice }: { t: AgentsDictionary; provider: string; state: VoicesState; choice?: VoiceChoice | undefined }) {
   if (state.state === "loading") return <Skeleton lines={3} />;
   if (state.state === "failed") return <Notice tone="fail">{state.text}</Notice>;
   if (state.failure) return <Notice tone="warn">{state.failure}</Notice>;
@@ -337,7 +364,14 @@ export function VoiceRows({ t, provider, state }: { t: AgentsDictionary; provide
       {state.voices.map((voice) => (
         <li key={voice.id} className="grid gap-1 border-b border-line py-2 last:border-b-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-bold">{voice.name}</span>
+            {choice ? (
+              <label className="flex items-center gap-2 font-bold">
+                <input type="radio" name="pipeline-voice" checked={choice.chosen === voice.id} onChange={() => choice.onChoose(voice.id)} aria-label={fill(t.pipelineVoiceUse, { voice: voice.name })} />
+                {voice.name}
+              </label>
+            ) : (
+              <span className="font-bold">{voice.name}</span>
+            )}
             <Badge>{provider}</Badge>
             {voice.languages.map((language) => (
               <Badge key={language}>{language}</Badge>
@@ -368,7 +402,7 @@ interface VoiceList {
 }
 
 /** Lê as vozes da conta pela rota da fatia 1b. A falha vem no vocabulário fechado, nunca o texto do fornecedor. */
-function LoadVoices({ t, voiceT, provider, synthesizerId }: { t: AgentsDictionary; voiceT: VoiceDictionary; provider: string; synthesizerId: string }) {
+function LoadVoices({ t, voiceT, provider, synthesizerId, choice }: { t: AgentsDictionary; voiceT: VoiceDictionary; provider: string; synthesizerId: string; choice: VoiceChoice | undefined }) {
   const errorText = useErrorText();
   const list = useApi<VoiceList>(`/synthesizers/${encodeURIComponent(synthesizerId)}/voices`);
   let state: VoicesState;
@@ -381,27 +415,35 @@ function LoadVoices({ t, voiceT, provider, synthesizerId }: { t: AgentsDictionar
     const status = failure && failure.status !== null ? ` ${fill(voiceT.status, { status: failure.status })}` : "";
     state = { state: "ready", voices: list.data.voices, failure: failure ? fill(voiceT.voicesFailed, { result: `${voiceT.results[failure.result]}${status}` }) : null };
   }
-  return <VoiceRows t={t} provider={provider} state={state} />;
+  return <VoiceRows t={t} provider={provider} state={state} choice={choice} />;
 }
 
-/**
- * O bloco com as leituras: as vozes e os cérebros são de quem configura (as rotas pedem), e quem só lê
- * vê uma linha. A escolha de cérebro e modelo fica só nesta tela: nada é gravado.
- */
-export function PipelineBlock({ t, pipeline, canConfigure, agentId }: { t: AgentsDictionary; pipeline: Engine; canConfigure: boolean; agentId: string | null }) {
-  const voiceT = useDict(ptBRVoice, enVoice, esVoice);
-  const locale = useLocale();
+/** As leituras do bloco, de quem configura (as rotas pedem): a página as usa também no campo Motor (fatia 6b). */
+export function usePipelineData(canConfigure: boolean, brain: string): PipelineData & { brainModels: unknown; reloadTranscribers(): void; error: unknown } {
   const synthesizers = useApi<PipelineSynthesizer[]>(canConfigure ? "/synthesizers" : null);
   const brains = useApi<PipelineBrainOption[]>(canConfigure ? "/brains" : null);
   const transcribers = useApi<PipelineTranscriber[]>(canConfigure ? "/transcribers" : null);
-  const [brain, setBrain] = useState("");
-  const [model, setModel] = useState("");
-  const chosen = conversationalBrains(brains.data).find((option) => option.id === brain) ?? conversationalBrains(brains.data)[0];
+  const options = conversationalBrains(brains.data);
+  const chosen = options.find((option) => option.id === brain) ?? options[0];
   const models = useApi<unknown>(canConfigure && chosen ? `/brains/${encodeURIComponent(chosen.id)}/models` : null);
+  return {
+    synthesizers: synthesizers.data,
+    brains: brains.data,
+    transcribers: transcribers.data,
+    brainModels: models.data,
+    reloadTranscribers: transcribers.reload,
+    error: synthesizers.error ?? transcribers.error ?? brains.error ?? models.error,
+  };
+}
+
+/** O bloco com as leituras da página e a latência do agente, que só ele mostra. */
+export function PipelineBlock({ t, pipeline, canConfigure, agentId, data, pieces, onPieces }: { t: AgentsDictionary; pipeline: Engine; canConfigure: boolean; agentId: string | null; data: ReturnType<typeof usePipelineData>; pieces: PipelinePieces; onPieces(next: Partial<PipelinePieces>): void }) {
+  const voiceT = useDict(ptBRVoice, enVoice, esVoice);
+  const locale = useLocale();
   // A latência medida do agente (fatia 5c). O agente novo não tem ligação: sem medida, sem leitura.
   const latency = useApi<PipelineLatency>(canConfigure && agentId ? `/agents/${encodeURIComponent(agentId)}/pipeline-latency` : null);
   const errorText = useErrorText();
-  const failed = synthesizers.error ?? transcribers.error ?? brains.error ?? models.error ?? latency.error;
+  const failed = data.error ?? latency.error;
   return (
     <PipelinePanel
       t={t}
@@ -409,18 +451,13 @@ export function PipelineBlock({ t, pipeline, canConfigure, agentId }: { t: Agent
       locale={locale}
       pipeline={pipeline}
       canConfigure={canConfigure}
-      synthesizers={synthesizers.data}
-      transcribers={transcribers.data}
-      onTranscribersChanged={transcribers.reload}
-      brains={brains.data}
-      brain={brain}
-      onBrain={(next) => {
-        setBrain(next);
-        setModel("");
-      }}
-      brainModels={models.data}
-      model={model}
-      onModel={setModel}
+      synthesizers={data.synthesizers}
+      transcribers={data.transcribers}
+      onTranscribersChanged={data.reloadTranscribers}
+      brains={data.brains}
+      pieces={pieces}
+      onPieces={onPieces}
+      brainModels={data.brainModels}
       latency={agentId ? latency.data : null}
       {...(failed && { loadError: errorText(failed) })}
     />
