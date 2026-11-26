@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadDecisionModels, loadEngines, loadSynthesizers, loadTranscribers } from "./load";
+import { isPipelineEngine } from "./types";
 
 let dir: string | undefined;
 afterEach(async () => {
@@ -21,10 +22,11 @@ export default {
 `;
 
 describe("loadEngines", () => {
-  it("descobre os três motores da fundação", async () => {
+  it("descobre os três motores da fundação e o pipeline, que só ele monta as peças (fatia 5b-1)", async () => {
     const engines = await loadEngines();
-    expect([...engines.keys()].sort()).toEqual(["gemini-live", "openai-realtime", "simulated"]);
+    expect([...engines.keys()].sort()).toEqual(["gemini-live", "openai-realtime", "pipeline", "simulated"]);
     expect(engines.get("simulated")?.keyless).toBe(true);
+    expect([...engines.values()].filter(isPipelineEngine).map((engine) => engine.id)).toEqual(["pipeline"]);
     for (const engine of engines.values()) expect(engine.pricing.checkedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 

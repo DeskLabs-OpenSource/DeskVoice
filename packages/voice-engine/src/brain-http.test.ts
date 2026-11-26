@@ -23,6 +23,7 @@ const request = (overrides: Partial<BrainChatRequest> = {}): BrainChatRequest =>
   messages: MESSAGES,
   tools: TOOLS,
   timeoutMs: 5_000,
+  maxTokens: 321,
   ...overrides,
 });
 
@@ -142,7 +143,7 @@ function collect(chat: BrainChat): Collected {
 }
 
 const open = (url: string, overrides: Partial<BrainChatRequest> = {}, includeUsage = true): BrainChat =>
-  chatStream(url, KEY, request(overrides), { failureOf: (status) => brainFailureByStatus(status), includeUsage, usageOf: chatUsageOf });
+  chatStream(url, KEY, request(overrides), { failureOf: (status) => brainFailureByStatus(status), includeUsage, usageOf: chatUsageOf, maxTokensField: "max_completion_tokens" });
 
 const bytes = (value: unknown): number => Buffer.byteLength(typeof value === "string" ? value : JSON.stringify(value), "utf8");
 
@@ -364,6 +365,7 @@ describe("chatStream: a resposta", () => {
       },
       includeUsage: true,
       usageOf: chatUsageOf,
+      maxTokensField: "max_completion_tokens",
     });
     const got = collect(chat);
     await got.ended;
@@ -414,7 +416,7 @@ describe("chatStream: a resposta", () => {
     const exploding = (() => {
       throw new Error("explodiu");
     }) as unknown as typeof fetch;
-    const broken = chatStream("http://nao.usado.invalid", KEY, request(), { fetch: exploding, failureOf: () => "rejected", includeUsage: false, usageOf: chatUsageOf });
+    const broken = chatStream("http://nao.usado.invalid", KEY, request(), { fetch: exploding, failureOf: () => "rejected", includeUsage: false, usageOf: chatUsageOf, maxTokensField: "max_completion_tokens" });
     const got = collect(broken);
     await got.ended;
     expect(got.events).toEqual([

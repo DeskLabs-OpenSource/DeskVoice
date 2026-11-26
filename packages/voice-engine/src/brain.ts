@@ -75,6 +75,14 @@ export interface BrainChatRequest {
   tools: ToolSpec[];
   /** Prazo do pedido inteiro, do envio ao fim do texto. Estourado, é `error("unreachable", null)`. */
   timeoutMs: number;
+  /**
+   * O teto de saída do pedido, em tokens, que todo cérebro manda ao provedor no campo dele
+   * (`max_completion_tokens` na OpenAI, `max_tokens` no DeepSeek, no OpenRouter e na Anthropic,
+   * `generationConfig.maxOutputTokens` no Gemini). É o que torna o pior caso do pedido uma conta, e
+   * não um palpite: entrada + `maxTokens` × preço (desenho do pipeline, seção 3.3). O motor pipeline
+   * o preenche com `PIPELINE_BRAIN_MAX_TOKENS`. A resposta cortada por ele termina em `done`.
+   */
+  maxTokens: number;
 }
 
 export interface BrainChatEvents {

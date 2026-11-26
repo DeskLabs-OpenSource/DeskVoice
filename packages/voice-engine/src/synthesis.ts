@@ -37,6 +37,13 @@ export interface FixedSpeech {
   audio: Map<string, Buffer>;
   /** O que esta chamada enviou ao provedor (o que veio do cache não conta). */
   usage: SpeechUsage;
+  /** Quantos dos textos (sem repetição) vieram do cache, sem síntese nesta chamada. */
+  cached: number;
+  /**
+   * Quanto levou a conferência da chave (`checkKey`), em ms, pelo relógio de `options.now`. Ausente
+   * quando ela não rodou (nada veio do cache: a própria síntese provou a chave) ou sem `now`.
+   */
+  keyCheckMs?: number;
 }
 
 /**
@@ -92,6 +99,11 @@ export interface FixedSpeechOptions extends ConnectOptions {
   cache?: FixedSpeechCache;
   /** Opções da conferência da chave feita quando alguma fala vem do cache (a URL é a HTTP do provedor). */
   keyCheck?: KeyCheckOptions;
+  /**
+   * O relógio de quem abre a ligação, em ms (a nota da abertura do pipeline, fatia 3c-1). Só mede a
+   * conferência da chave; sem ele, `keyCheckMs` fica ausente. Nunca o relógio de parede por conta própria.
+   */
+  now?: () => number;
 }
 
 const timer = (options: Pick<ConnectOptions, "schedule">, fn: () => void, delayMs: number): (() => void) => {
@@ -199,7 +211,15 @@ export async function prepareFixedSpeech(
     return { text, ...entry };
   });
   // O que veio do cache não passou pela chave desta abertura: ela é conferida agora, junto.
-  const keyConfirmed = pending.some((entry) => !entry.fresh) ? confirmKey(synthesizer, apiKey, model, options) : Promise.resolve();
+  const cached = pending.filter((entry) => !entry.fresh).length;
+  const checkStartedAt = options.now?.();
+  let keyCheckMs: number | undefined;
+  const keyConfirmed =
+    cached > 0
+      ? confirmKey(synthesizer, apiKey, model, options).finally(() => {
+          if (checkStartedAt !== undefined && options.now) keyCheckMs = options.now() - checkStartedAt;
+        })
+      : Promise.resolve();
   // Espera todas, mesmo quando uma falha: nenhum pedido fica solto, sem dono, depois da recusa.
   const keyRefusal = keyConfirmed.then(
     () => undefined,
@@ -225,5 +245,6 @@ export async function prepareFixedSpeech(
     characters += result.value.usage.characters;
     costMicrocents = costMicrocents === undefined || result.value.usage.costMicrocents === undefined ? undefined : costMicrocents + result.value.usage.costMicrocents;
   });
-  return { audio, usage: costMicrocents === undefined ? { characters, estimated: true } : { characters, costMicrocents, estimated: true } };
+  const usage: SpeechUsage = costMicrocents === undefined ? { characters, estimated: true } : { characters, costMicrocents, estimated: true };
+  return { audio, usage, cached, ...(keyCheckMs === undefined ? {} : { keyCheckMs }) };
 }

@@ -7,9 +7,11 @@ import ptBR from "../../../i18n/pt-BR/costs";
 import type { Costs } from "../../../ui/types";
 import { engineRowLabel, engineRowNote } from "./engine-row";
 
-const row = (source: Costs["byEngine"][number]["source"]): Costs["byEngine"][number] => ({
+type Row = Costs["byEngine"][number];
+const row = (source: Row["source"], piece: Row["piece"] = null): Row => ({
   engine: "openai-realtime",
   source,
+  piece,
   label: "OpenAI Realtime",
   costCents: 12,
   callSeconds: 180,
@@ -29,5 +31,12 @@ describe("a linha do motor na tela de Custos", () => {
   it("a ligação e o analista ficam como estavam", () => {
     expect([engineRowLabel(row(null), ptBR), engineRowNote(row(null), ptBR)]).toEqual(["OpenAI Realtime", "3 min"]);
     expect([engineRowLabel(row("analyst"), ptBR), engineRowNote(row("analyst"), ptBR)]).toEqual(["Analista · OpenAI Realtime", ptBR.analystNote]);
+  });
+
+  it("a peça separada do motor (pipeline, fatia 5c) diz qual peça é, sem minutos de ligação, nos três idiomas", () => {
+    const piece = { ...row(null, "transcriber"), label: "Deepgram" };
+    expect([engineRowLabel(piece, ptBR), engineRowNote(piece, ptBR)]).toEqual(["Transcrição · Deepgram", ptBR.pieceNote]);
+    expect(engineRowLabel(piece, en)).toBe("Transcription · Deepgram");
+    expect(engineRowLabel({ ...piece, piece: "brain" }, es)).toBe("Cerebro · Deepgram");
   });
 });
