@@ -371,6 +371,8 @@ const engine: VoiceEngine = {
     // pedaço dela pode chegar depois: texto de item já respondido não é quem ligou falando agora.
     const unansweredItems = new Set<string>();
     const answeredItems = new Set<string>();
+    // O servidor já viu o fim da fala: item fechado à espera da resposta, ou resposta em curso.
+    const answering = (): boolean => responseActive || unansweredItems.size > 0;
     // A fala do agente por item, na ordem: em que ms do áudio emitido nesta sessão o item começou e
     // quanto dele foi emitido. É o que permite cortar no histórico o que a ponte não chegou a tocar.
     const spokenItems: { itemId: string; startMs: number; emittedMs: number }[] = [];
@@ -556,12 +558,13 @@ const engine: VoiceEngine = {
         // curso), ele só está lento: o `commit` de buffer vazio dá `error`, que soltaria a fila de
         // falas por cima da resposta, e o `response.create` enfileirado faria o agente falar duas vezes.
         // Não agiu (`false`): a resposta que vier não foi forçada, e conta na latência por turno.
-        if (responseActive || unansweredItems.size > 0) return false;
+        if (answering()) return false;
         // Fecha o que quem ligou disse num item e pede a resposta: o servidor não viu o fim da fala.
         socket.send({ type: "input_audio_buffer.commit" });
         requestResponse({});
         return true;
       },
+      answering,
       played(ms) {
         if (closed) return;
         // O primeiro item que não tocou inteiro é onde a fala foi cortada; o que veio antes já tocou.
