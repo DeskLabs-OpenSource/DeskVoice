@@ -15,6 +15,7 @@ import ptBRVoice, { type VoiceDictionary } from "../../../../i18n/pt-BR/voice";
 import { formatDateTime } from "../../../../ui/format";
 import type { Engine } from "../../../../ui/types";
 import { conversationalBrains, PipelinePanel, type PipelineBrainOption, type PipelinePanelProps, type PipelineSynthesizer, type PipelineTranscriber, type VoicesState } from "./pipeline-block";
+import { NO_PIECES } from "./pipeline-pieces";
 import { playSample } from "./voice-field";
 
 const PIPELINE: Engine = {
@@ -72,11 +73,9 @@ const render = (over: Partial<PipelinePanelProps> = {}, [locale, t, voiceT]: [Lo
       canConfigure: true,
       synthesizers: [ELEVENLABS],
       brains: BRAINS,
-      brain: "",
-      onBrain: () => undefined,
+      pieces: NO_PIECES,
+      onPieces: () => undefined,
       brainModels: MODELS,
-      model: "",
-      onModel: () => undefined,
       voicesOf: { elevenlabs: VOICES },
       ...over,
     }),
@@ -161,6 +160,37 @@ describe("PipelinePanel", () => {
     expect(noKey).toContain(escaped(t.pipelineTranscriberNoKey));
   });
 
+  it.each([
+    ["pt-BR", ptBR, ptBRVoice, "Transcrição provisória: a definitiva vem com a medida da transcrição."],
+    ["en", en, enVoice, "Provisional transcription: the final one comes with the transcription measurement."],
+    ["es", es, esVoice, "Transcripción provisional: la definitiva llega con la medición de la transcripción."],
+  ] as const)("em %s (fatia 6b): a escolha da transcrição diz que ela é provisória; a não confirmada não entra na escolha", (locale, t, voiceT, line) => {
+    const confirmed = { ...OPENAI_EAR, consent: { name: "Ana Souza", at: CONFIRMED_AT } };
+    const html = render({ pipeline: LIVE, transcribers: [confirmed], pieces: { ...NO_PIECES, transcriber: "openai" } }, [locale, t, voiceT]);
+    expect(html).toContain(escaped(line));
+    expect(html).toContain(`>${t.pipelineTranscriberChoice}<`);
+    expect(html).toContain('<option value="openai" selected="">OpenAI (gpt-4o-mini-transcribe)</option>');
+    // Sem confirmação, a linha provisória fica, e a escolha não aparece: só o botão de confirmar.
+    const unconfirmed = render({ pipeline: LIVE, transcribers: [OPENAI_EAR] }, [locale, t, voiceT]);
+    expect(unconfirmed).toContain(escaped(line));
+    expect(unconfirmed).not.toContain(`>${t.pipelineTranscriberChoice}<`);
+    // Sem transcrição de verdade, nada de provisória.
+    expect(render({}, [locale, t, voiceT])).not.toContain(escaped(line));
+  });
+
+  it.each(DICTS)("em %s (fatia 6b): cada voz da conta confirmada tem o \"Usar\", com a escolhida marcada; a conta sem confirmação, não", (locale, t, voiceT) => {
+    const html = render({ pieces: { ...NO_PIECES, synthesizer: "elevenlabs", voiceId: "v-ze" } }, [locale, t, voiceT]);
+    expect(html).toContain(`aria-label="${escaped(fill(t.pipelineVoiceUse, { voice: "Bia" }))}"`);
+    const radios = html.match(/<input type="radio"[^>]*>/g) ?? [];
+    expect(radios).toEqual([
+      `<input type="radio" aria-label="${escaped(fill(t.pipelineVoiceUse, { voice: "Bia" }))}" name="pipeline-voice"/>`,
+      `<input type="radio" aria-label="${escaped(fill(t.pipelineVoiceUse, { voice: "Zé" }))}" name="pipeline-voice" checked=""/>`,
+    ]);
+    const unconfirmed = render({ synthesizers: [{ ...ELEVENLABS, consent: null }] }, [locale, t, voiceT]);
+    expect(unconfirmed).not.toContain('type="radio"');
+    expect(unconfirmed).toContain(`aria-label="${escaped(fill(t.pipelineVoiceListen, { voice: "Bia" }))}"`);
+  });
+
   it("com a transcrição de verdade ainda carregando, o bloco espera, e não diz que falta", () => {
     expect(render({ pipeline: LIVE, transcribers: undefined })).not.toContain(escaped(ptBR.pipelineTranscriberNone));
   });
@@ -186,6 +216,23 @@ describe("PipelinePanel", () => {
     expect(none).toContain('href="/settings/brains"');
   });
 
+  it.each(DICTS)("em %s: a peça gravada fora da lista fica a gravada, marcada, e nenhuma outra aparece como a do agente", (locale, t, voiceT) => {
+    const brainGone = render({ pieces: { ...NO_PIECES, brain: "anthropic", model: "modelo-velho" } }, [locale, t, voiceT]);
+    expect(brainGone).toContain(`<option value="anthropic" disabled="" selected="">${escaped(fill(t.pipelineStoredGone, { piece: "anthropic" }))}</option>`);
+    expect(brainGone).toContain('<option value="openai">OpenAI</option>');
+    expect(brainGone).not.toContain('value="openai" selected');
+    expect(brainGone).not.toContain('value="com-preco"');
+    expect(brainGone).toContain(escaped(t.pipelineStoredGoneHint));
+    const modelGone = render({ pieces: { ...NO_PIECES, brain: "openai", model: "sem-preco" } }, [locale, t, voiceT]);
+    expect(modelGone).toContain('<option value="sem-preco" disabled="" selected="">');
+    expect(modelGone).not.toContain('value="com-preco" selected');
+    expect(modelGone).toContain(escaped(t.pipelineStoredGoneHint));
+    const earGone = render({ pipeline: { ...PIPELINE, unavailable: null }, transcribers: [{ id: "openai", label: "OpenAI", provider: "openai", processingLocation: { kind: "undeclared" }, keyConfigured: true, consent: { name: "Ana", at: CONFIRMED_AT } }], pieces: { ...NO_PIECES, transcriber: "velha" } }, [locale, t, voiceT]);
+    expect(earGone).toContain(`<option value="velha" disabled="" selected="">${escaped(fill(t.pipelineStoredGone, { piece: "velha" }))}</option><option value="openai">OpenAI</option></select>`);
+    // Sem peça gravada, nada é marcado como fora da lista.
+    expect(render({}, [locale, t, voiceT])).not.toContain(escaped(t.pipelineStoredGoneHint));
+  });
+
   it("quem só lê vê uma linha, e nenhuma lista nem áudio", () => {
     const html = render({ canConfigure: false });
     expect(html).toContain(escaped(ptBR.pipelineReadOnly));
@@ -193,9 +240,9 @@ describe("PipelinePanel", () => {
     expect(html).not.toContain("<select");
   });
 
-  it("não salva: nenhum campo com nome, nenhum botão de enviar, e o único botão é o Ouvir", () => {
+  it("não envia formulário sozinho: nenhum botão de enviar, o único botão é o Ouvir, e o único campo com nome é a escolha da voz", () => {
     const html = render();
-    expect(html).not.toMatch(/\sname="/);
+    expect([...html.matchAll(/\sname="([^"]*)"/g)].map((match) => match[1])).toEqual(["pipeline-voice", "pipeline-voice"]);
     expect(html).not.toContain('type="submit"');
     const buttons = html.match(/<button[^>]*>/g) ?? [];
     expect(buttons).toHaveLength(1);
