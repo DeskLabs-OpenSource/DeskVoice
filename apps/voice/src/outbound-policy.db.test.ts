@@ -32,11 +32,12 @@ async function organization(label: string, policy: Record<string, unknown> | nul
 const check = (organizationId: string, to: string, now: { now(): Date }, line?: string | null): Promise<OutboundDecision> =>
   withOrg(app, organizationId, (q) => checkOutboundAllowed(q, to, now, line));
 
-const call = (organizationId: string, startedAt: string, options: { to?: string; from?: string | null; direction?: string; status?: string } = {}): Promise<number> =>
+const call = (organizationId: string, startedAt: string, options: { to?: string; from?: string | null; trunk?: string | null; direction?: string; status?: string } = {}): Promise<number> =>
   withSystem(app, (q) =>
-    q.exec("insert into calls (organization_id, direction, channel, from_e164, to_e164, status, started_at) values ($1, $2, 'phone', $3, $4, $5, $6)", [
+    q.exec("insert into calls (organization_id, direction, channel, trunk_id, from_e164, to_e164, status, started_at) values ($1, $2, 'phone', $3, $4, $5, $6, $7)", [
       organizationId,
       options.direction ?? "outbound",
+      options.trunk ?? null,
       options.from === undefined ? "+553133334444" : options.from,
       options.to ?? "+5531911110000",
       options.status ?? "completed",
@@ -94,25 +95,66 @@ describe("checkOutboundAllowed", { timeout: 120_000 }, () => {
 
   it("daily_cap_reached: conta as ligações de saída do dia no fuso da política, por linha", async () => {
     const org = await organization("policy-cap", { daily_cap_per_line: 2 });
-    const line = "+553133334444";
+    const line = await createTrunk(app, org, { callerId: "+553133334444" });
+    const other = await createTrunk(app, org, { callerId: "+553144445555" });
     // Ontem em São Paulo (02:30 UTC do dia 10 ainda é 23:30 do dia 9): não conta.
-    await call(org, "2030-05-10T02:30:00Z");
+    await call(org, "2030-05-10T02:30:00Z", { trunk: line });
     // Hoje em São Paulo, a partir da meia-noite local (03:00 UTC).
-    await call(org, "2030-05-10T03:00:00Z");
+    await call(org, "2030-05-10T03:00:00Z", { trunk: line });
     // Não contam: recebida, recusada pela política e feita por outra linha.
-    await call(org, "2030-05-10T13:00:00Z", { direction: "inbound" });
-    await call(org, "2030-05-10T13:00:00Z", { status: "refused" });
-    await call(org, "2030-05-10T13:00:00Z", { from: "+553144445555" });
+    await call(org, "2030-05-10T13:00:00Z", { trunk: line, direction: "inbound" });
+    await call(org, "2030-05-10T13:00:00Z", { trunk: line, status: "refused" });
+    await call(org, "2030-05-10T13:00:00Z", { trunk: other, from: "+553144445555" });
     expect(await check(org, TO, at(NOON_SP.toISOString()), line)).toEqual({ allowed: true });
 
-    await call(org, "2030-05-10T14:00:00Z");
+    await call(org, "2030-05-10T14:00:00Z", { trunk: line });
     expect(await check(org, TO, at(NOON_SP.toISOString()), line)).toMatchObject({ allowed: false, code: "daily_cap_reached" });
     // A outra linha tem o teto dela.
-    expect(await check(org, TO, at(NOON_SP.toISOString()), "+553144445555")).toEqual({ allowed: true });
+    expect(await check(org, TO, at(NOON_SP.toISOString()), other)).toEqual({ allowed: true });
     // Sem dizer a linha, a conta é da organização inteira: 3 ligações hoje.
     expect(await check(org, TO, at(NOON_SP.toISOString()))).toMatchObject({ allowed: false, code: "daily_cap_reached" });
     // No dia seguinte o teto recomeça.
     expect(await check(org, TO, at("2030-05-11T15:00:00Z"), line)).toEqual({ allowed: true });
+  });
+
+  it("daily_cap_reached: a conta segue a linha, e não o número; trocar o número não devolve ligações ao teto", async () => {
+    const org = await organization("policy-cap-renumber", { daily_cap_per_line: 2 });
+    const line = await createTrunk(app, org, { callerId: "+553133334444" });
+    // Duas ligações hoje, com o número antigo.
+    await call(org, "2030-05-10T13:00:00Z", { trunk: line, from: "+553133334444" });
+    await call(org, "2030-05-10T14:00:00Z", { trunk: line, from: "+553133334444" });
+    expect(await check(org, TO, at(NOON_SP.toISOString()), line)).toMatchObject({ code: "daily_cap_reached" });
+    // A linha ganha outro número: o teto do dia segue cheio.
+    await withSystem(app, (q) => q.exec("update trunks set caller_id_e164 = '+553155556666' where id = $1", [line]));
+    expect(await check(org, TO, at(NOON_SP.toISOString()), line)).toMatchObject({ code: "daily_cap_reached" });
+    // Outra linha que herda o número antigo não herda a conta da primeira.
+    const reused = await createTrunk(app, org, { callerId: "+553133334444" });
+    expect(await check(org, TO, at(NOON_SP.toISOString()), reused)).toEqual({ allowed: true });
+  });
+
+  it("daily_cap_reached pela porta única: a ligação grava a linha, e trocar o número no meio do dia não abre o teto", async () => {
+    const org = await createOrganization(app, "cap-renumber-door");
+    const agentId = await createAgent(app, org);
+    const trunkId = await createTrunk(app, org, { callerId: "+553177770001" });
+    await createPhoneNumber(app, org, trunkId, "+553177770001", agentId);
+    await withSystem(app, (q) =>
+      q.exec("insert into outbound_policy (organization_id, enabled, daily_cap_per_line, window_start, window_end, timezone) values ($1, true, 2, '00:00', '23:59', 'UTC')", [org]),
+    );
+    const ari = fakeAri();
+    const clock = fakeClock();
+    const deps = { db: app, ari, clock, calls: new AsteriskCalls({ ari, db: app, clock, log: () => undefined }), log: () => undefined };
+    const dial = (to: string) => startOutboundCall(deps, { organizationId: org, agentId, toE164: to });
+
+    expect(await dial("+5531911110001")).toMatchObject({ callId: expect.any(String) });
+    // O número da linha muda (a tela da linha deixa): a contagem do dia fica com a linha.
+    await withSystem(app, (q) => q.exec("update trunks set caller_id_e164 = '+553177770002' where id = $1", [trunkId]));
+    expect(await dial("+5531911110002")).toMatchObject({ callId: expect.any(String) });
+    await withSystem(app, (q) => q.exec("update trunks set caller_id_e164 = '+553177770003' where id = $1", [trunkId]));
+    expect(await dial("+5531911110003")).toMatchObject({ code: "daily_cap_reached" });
+    expect(ari.originated).toHaveLength(2);
+    const lines = await withSystem(app, (q) => q.many<{ trunk_id: string | null; from_e164: string | null; status: string }>("select trunk_id, from_e164, status from calls where organization_id = $1 order by started_at, id", [org]));
+    expect(lines.map((row) => row.trunk_id)).toEqual([trunkId, trunkId, trunkId]);
+    expect(lines.map((row) => row.status).sort()).toEqual(["refused", "ringing", "ringing"]);
   });
 
   it("attempts_exhausted: conta as ligações de saída para aquele número, em qualquer dia", async () => {
