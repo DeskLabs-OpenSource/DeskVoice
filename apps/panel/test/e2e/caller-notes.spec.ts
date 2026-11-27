@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import agents from "../../src/i18n/pt-BR/agents";
 import common from "../../src/i18n/pt-BR/common";
 import timeline from "../../src/i18n/pt-BR/timeline";
 import { signIn, unique } from "./session";
@@ -16,6 +17,8 @@ test("o agente com a nota marcada anota numa simulada, e a ligação seguinte do
 
   // 1. A ferramenta vem desligada e se liga na tela do agente.
   await page.goto(`/agents/${agentId}`);
+  // As ferramentas ficam na aba Ferramentas (desenho 2026-11-26, fatia 1).
+  await page.getByRole("tab", { name: agents.tabs.ferramentas }).click();
   const tool = page.getByRole("checkbox", { name: /remember_caller_note/ });
   await expect(tool).not.toBeChecked();
   await tool.check();

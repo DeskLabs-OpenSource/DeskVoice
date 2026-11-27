@@ -194,6 +194,16 @@ const agents = {
   dropFollowUpMessageWarning: "O texto vai para o número que ligou, e esse número pode não ser de quem ligou: alguém pode usar o número de outra pessoa, ou ligar de um fixo atendido por outra. Não escreva nada da conversa: nem nome, nem assunto, nem horário. O texto sai como está, sem trocar nada: diga nele o nome da empresa. Vazio, vale o texto padrão, que aparece no campo e já leva o nome da organização.",
   dropFollowUpMessageLimits: "No máximo uma mensagem por número a cada 24 horas, e a lista de não ligar vale para ela. Um teto de mensagens por organização protege o número: no máximo {perHour} por hora e {perDay} a cada 24 horas. Se a mensagem não puder sair, abre uma pendência para alguém retornar.",
   dropFollowUpDefinition: "Conta como queda quando o sistema falha, quando quem ligou fica alguns segundos sem resposta e desliga, quando ouve o agente pedir para repetir e desliga sem voltar a falar, ou quando a linha cai durante uma ação do agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta.",
+  /** As abas da tela do agente (desenho 2026-11-26, fatia 1). */
+  tabsLabel: "Configuração de {name}",
+  tabs: { agente: "Agente", ferramentas: "Ferramentas", depois: "Depois da ligação", testes: "Testes", avancado: "Avançado" },
+  unsavedChanges: "Há mudanças não salvas.",
+  unsavedGoTo: "Voltar para {tab}",
+  organizationSettings: "O que vale para a organização",
+  organizationSettingsLead: "Estas configurações também mudam o que este agente faz, mas valem para todos os agentes. Elas ficam em Configurações.",
+  organizationPrivacy: "Privacidade e dados",
+  organizationRecording: "Aviso de gravação",
+  organizationWebhooks: "Webhooks",
 };
 
 export default agents;
