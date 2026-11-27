@@ -285,10 +285,25 @@ describe("auditoria e limite da conferência de faixa", () => {
     expect(shown).toHaveLength(2);
   });
 
-  it("T12: a confirmação que não tira linha nenhuma do ar não grava evento (a tela manda a confirmação só depois do aviso, mas a rota não confia nisso)", async () => {
+  it("T13: a confirmação que não tira linha nenhuma do ar não grava evento (a tela manda a confirmação só depois do aviso, mas a rota não confia nisso)", async () => {
     const s = await scene();
     expect((await s.create({ host: "198.51.100.7", authMode: "ip", confirmOverlap: true })).status).toBe(200);
     expect((await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: false })).status).toBe(409);
     expect(await confirmedEvents(s.a)).toEqual([]);
+  });
+
+  it("T14: a edição confirmada que outra regra recusa não grava evento: a linha por registro que muda de endereço sem a senha nova recebe 400", async () => {
+    const s = await scene();
+    const mine = await s.create({ host: "198.51.100.9", authMode: "register", username: "conta100", password: "segredo" });
+    expect(mine.status).toBe(200);
+    const id = (mine.data as { id: string }).id;
+    const refused = await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.5", confirmOverlap: true } });
+    expect(refused).toMatchObject({ status: 400, code: "password_required" });
+    expect((await withSystem(panel.app, (q) => q.one<{ host: string }>("select host from trunks where id = $1", [id])))?.host).toBe("198.51.100.9");
+    expect(await confirmedEvents(s.a)).toEqual([]);
+    // Com a senha nova, salva e grava o evento.
+    const saved = await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.5", password: "nova", confirmOverlap: true } });
+    expect(saved.status).toBe(200);
+    expect(await confirmedEvents(s.a)).toHaveLength(1);
   });
 });

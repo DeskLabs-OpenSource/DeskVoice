@@ -54,7 +54,8 @@ export const trunkOverlapLimiter = createRateLimiter(TRUNK_OVERLAP_CHECKS_PER_MI
  * Cada conferência, com ou sem confirmação, gasta uma tentativa do limite da organização; acima
  * dele, 429 sem conferir e sem salvar. Na auditoria da instalação, fora da transação da linha:
  *   - a recusa grava `trunk_overlap_refused`, e o evento fica mesmo com a resposta 409;
- *   - a confirmação que tira linha do ar grava `trunk_overlap_confirmed`, antes de salvar.
+ *   - a confirmação que tira linha do ar grava `trunk_overlap_confirmed`, antes de salvar. Por isso
+ *     quem chama confere por último, depois de toda outra recusa: o evento diz que a gravação seguiu.
  */
 export async function requireOverlapConfirmed(
   deps: ServerDeps,
