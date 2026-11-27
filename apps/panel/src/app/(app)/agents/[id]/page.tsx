@@ -110,7 +110,10 @@ const toDraft = (agent: AgentWithBrain): Draft => ({
   pieces: piecesOf(agent.pipeline),
 });
 
-/** A escolha gravada, para o salvar só mandar `pipeline` quando ela muda. Fora da forma conta como outra. */
+/**
+ * A escolha gravada, para o salvar só mandar `pipeline` quando ela muda. Uma gravada fora da forma
+ * vira as peças vazias, iguais às do rascunho: o salvar não a regrava até o operador escolher.
+ */
 const storedChoice = (agent: AgentWithBrain): PipelinePieces | null => (agent.pipeline === null || agent.pipeline === undefined ? null : piecesOf(agent.pipeline));
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
