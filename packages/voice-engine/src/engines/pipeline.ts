@@ -1,5 +1,6 @@
 import type { Clock } from "@deskvoice/core";
 import type { BrainChat, BrainChatMessage, BrainFailure, BrainToolCall } from "../brain";
+import { isAgreementOnly } from "../agreement";
 import { SessionEmitter } from "../emitter";
 import { estimateCostMicrocents } from "../pricing";
 import { prepareFixedSpeech, type FixedSpeechCache } from "../synthesis";
@@ -94,6 +95,11 @@ import {
  * entregue, na transcrição e no histórico: o próximo pedido leva o que quem ligou ouviu. Só texto
  * interrompe (a transcrição não tem sinal de início de fala; vale também com `noisy`). O `say` e as falas
  * prontas não se interrompem. A fala do agente vai à transcrição quando acaba de sair, ou cortada.
+ *
+ * **A concordância não corta** (fatia 6, R-lista, `agreement.ts`). Com a resposta saindo, o trecho que só
+ * tem palavras de concordância do idioma do agente ("aham", "sim", "tá") não interrompe; a primeira
+ * palavra de fora da lista, sim. O `final` dele (ou o parcial que a guarda fecha) entra na transcrição e
+ * no histórico, mas não abre pedido ao cérebro. Fora da resposta, "sim" é resposta, e vira turno.
  *
  * **A recusa de abertura** é `PipelineOpenError`: a peça, o motivo e o que a abertura já gastou (as
  * falas fixas sintetizadas antes de a outra peça recusar), para o custo entrar no extrato da tentativa.
@@ -311,6 +317,10 @@ class PipelineSession implements PipelineVoiceSession {
   /** O parcial que `closeCallerTurn` já usou: o `final` dele, se vier depois, não vira outro turno. */
   private forcedPartial: string | undefined;
   private lastHeard = "";
+  /** O trecho em curso começou como concordância com a resposta saindo (fatia 6): o `final` dele também é. */
+  private agreementSegment = false;
+  /** As concordâncias no histórico: a que esperava a rodada acabar não reabre o cérebro sozinha. */
+  private readonly agreements = new WeakSet<BrainChatMessage>();
   /** O último `error` da transcrição: explica o `closed` que vier depois dele. */
   private transcriptionError: unknown;
   private finished = false;
@@ -425,6 +435,11 @@ class PipelineSession implements PipelineVoiceSession {
     if (partial === undefined || partial.trim() === "") return false;
     this.lastPartial = undefined;
     this.forcedPartial = partial;
+    // A guarda que fecha uma concordância não abre pedido: ela vai ao histórico, como o `final` dela iria.
+    if (this.isAgreement(partial.trim())) {
+      this.agreed(partial);
+      return true;
+    }
     this.turnEnded(this.lastPartialEndMs);
     this.userTurn(partial);
     return true;
@@ -449,7 +464,12 @@ class PipelineSession implements PipelineVoiceSession {
       // Texto novo de quem ligou por cima da resposta do agente: interrompe (fatia 4). Só texto
       // interrompe, nos dois ambientes: a transcrição não tem sinal de início de fala, e o trecho sem
       // palavra (o ruído, com `listeningEnvironment: "noisy"` ou não) não corta o agente (lição da R11).
-      if (this.output[0]?.reply) this.interrupt();
+      // A concordância curta ("aham", "sim") não corta (fatia 6, R-lista): o trecho passa a ser dela, e
+      // corta na primeira palavra de fora da lista, se ela vier com a resposta ainda saindo.
+      if (this.output[0]?.reply) {
+        if (isAgreementOnly(text, this.config.language)) this.agreementSegment = true;
+        else this.interrupt();
+      }
     }
     this.lastHeard = text;
     if (!piece.final) {
@@ -461,6 +481,8 @@ class PipelineSession implements PipelineVoiceSession {
     this.lastHeard = "";
     const forced = this.forcedPartial;
     this.forcedPartial = undefined;
+    const agreement = this.isAgreement(text);
+    this.agreementSegment = false;
     if (text === "") return;
     // O `final` do trecho que a guarda já fechou não vira um segundo turno. Se ele estende o parcial
     // usado, só o resto vira turno: o que quem ligou disse depois do parcial não se perde.
@@ -468,13 +490,34 @@ class PipelineSession implements PipelineVoiceSession {
     if (said !== undefined && text.startsWith(said)) {
       const rest = restAfterPartial(said, text);
       if (rest === "") return;
+      if (agreement) return this.agreed(rest);
       this.emitter.emit("callerTurnEnded", { source: "transcript" });
       this.userTurn(rest);
       return;
     }
+    if (agreement) return this.agreed(piece.text);
     this.emitter.emit("callerTurnEnded", { source: "transcript" });
     this.turnEnded(piece.endMs);
     this.userTurn(piece.text);
+  }
+
+  /**
+   * O trecho é concordância que não cortou: só palavras da lista, dito com a resposta do agente saindo
+   * (ou começado enquanto ela saía).
+   */
+  private isAgreement(text: string): boolean {
+    return (this.agreementSegment || this.output[0]?.reply !== undefined) && isAgreementOnly(text, this.config.language);
+  }
+
+  /**
+   * A concordância que não cortou (fatia 6, R-lista) entra na transcrição e no histórico, e vai ao cérebro
+   * no próximo pedido, mas não abre pedido sozinha, e não é fim de vez de quem ligou.
+   */
+  private agreed(text: string): void {
+    this.emitter.emit("transcript", { speaker: "user", text });
+    const message: BrainChatMessage = { role: "user", content: text };
+    this.agreements.add(message);
+    this.remember(message);
   }
 
   // ---- 3.5: a latência por turno ----
@@ -676,7 +719,7 @@ class PipelineSession implements PipelineVoiceSession {
     this.busy = false;
     const waiting = this.waiting.splice(0);
     this.history.push(...waiting);
-    if (waiting.some((message) => message.role === "user")) this.ask();
+    if (waiting.some((message) => message.role === "user" && !this.agreements.has(message))) this.ask();
   }
 
   // ---- 4 e 6: a voz ----

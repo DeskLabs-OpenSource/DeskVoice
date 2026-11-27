@@ -460,6 +460,7 @@ const timeline = {
         unreachable: "O serviço de transcrição não respondeu a tempo, ou está fora do ar.",
         unexpected_response: "O serviço de transcrição respondeu algo fora do formato esperado.",
         closed: "O serviço de transcrição caiu no meio da chamada.",
+        unconfirmed: "Ninguém confirmou que o áudio de quem liga vai para o fornecedor da transcrição. A confirmação fica no bloco Pipeline do agente.",
       } as Record<string, string>,
       unknown: "A peça de transcrição não abriu nesta chamada.",
       continued: "A chamada seguiu só com o motor de voz, como antes.",

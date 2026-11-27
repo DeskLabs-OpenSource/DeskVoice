@@ -194,6 +194,13 @@ export interface VoiceSession {
    */
   closeCallerTurn(): boolean | void;
   /**
+   * O provedor já fechou a vez de quem ligou e prepara a resposta, que ainda não chegou em áudio. A
+   * guarda contra o silêncio lê isto antes de pedir para repetir: com a resposta a caminho, o pedido
+   * entraria na fila atrás dela e soaria logo depois (ligação real pelo WhatsApp, 26/11/2026). A guarda
+   * espera um prazo a mais, uma vez, e pede mesmo assim se o áudio não vier. Sem o método, pede como antes.
+   */
+  answering?(): boolean;
+  /**
    * Contexto para o agente, que não vira fala por si. Entra pelo mecanismo que o provedor documenta,
    * nunca por `say`. Sem o método, o motor não aceita orientação, e quem chama registra isso.
    * Depois de `close`, não manda nada.
@@ -493,6 +500,12 @@ export interface StreamingTranscriber {
   pricing: EnginePricing;
   /** Verdadeiro quando não usa chave (o simulado, ou um local). */
   keyless?: boolean;
+  /**
+   * A chave da organização que a peça usa, quando ela é a de outra peça já gravada (a transcrição da
+   * OpenAI usa a do motor OpenAI Realtime, `engine.openai-realtime.api_key`): não há chave nova. Ausente,
+   * a chave é `transcriber.<id>.api_key`.
+   */
+  keySetting?: string;
   /** Quantos termos de vocabulário o serviço aceita. Acima disso, os primeiros N. */
   maxVocabulary: number;
   connect(config: { language: string; vocabulary: readonly string[] }, apiKey: string, options?: ConnectOptions): Promise<StreamingTranscription>;

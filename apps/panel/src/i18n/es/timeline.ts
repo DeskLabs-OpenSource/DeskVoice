@@ -452,6 +452,7 @@ const timeline: TimelineDictionary = {
         unreachable: "El servicio de transcripción no respondió a tiempo, o está caído.",
         unexpected_response: "El servicio de transcripción respondió algo fuera del formato esperado.",
         closed: "El servicio de transcripción se cayó en medio de la llamada.",
+        unconfirmed: "Nadie confirmó que el audio de quien llama va al proveedor de la transcripción. La confirmación está en el bloque Pipeline del agente.",
       } as Record<string, string>,
       unknown: "La pieza de transcripción no se abrió en esta llamada.",
       continued: "La llamada siguió solo con el motor de voz, como antes.",
