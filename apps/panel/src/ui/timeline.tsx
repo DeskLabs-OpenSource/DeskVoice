@@ -94,6 +94,11 @@ const byAgent = (e: TimelineDictionary["events"], payload: Record<string, unknow
 const Quiet = ({ children }: { children: ReactNode }) => <p className="pt-1 text-muted">{children}</p>;
 /** O lugar do texto que saiu a pedido de quem ligou (`erased` no payload). */
 const Erased = ({ children }: { children: ReactNode }) => <p className="text-[0.87rem] text-muted italic">{children}</p>;
+/** O que a chamada simulada segurou (`withheld` no payload): o canal que teria recebido o aviso e não recebeu. */
+const Withheld = ({ channels, label }: { channels: unknown; label: string }) =>
+  Array.isArray(channels) && channels.length > 0 ? (
+    <p className="text-[0.87rem] text-muted">{fill(label, { channels: channels.map((channel) => (channel === "whatsapp" ? "WhatsApp" : String(channel))).join(", ") })}</p>
+  ) : null;
 
 /**
  * A linha do tempo de uma chamada: cada evento de `call_events` vira um item legível preso ao fio.
@@ -284,6 +289,7 @@ export function Timeline({
               <p className="text-[1.07rem] leading-snug">{text(p.question)}</p>
               {text(p.context) ? <p className="whitespace-pre-line text-muted">{text(p.context)}</p> : null}
               {p.defaultOnTimeout === "approved" || p.defaultOnTimeout === "denied" ? <p className="text-[0.87rem] text-muted">{e.approval_default[p.defaultOnTimeout]}</p> : null}
+              <Withheld channels={p.withheld} label={e.withheld} />
               {p.erased === true ? <Erased>{e.erased}</Erased> : null}
             </Card>
           ),
@@ -307,6 +313,7 @@ export function Timeline({
             <Card title={e.human_notified}>
               <p className="whitespace-pre-line text-muted">{text(p.message) || text(p.body)}</p>
               {Array.isArray(p.channels) && p.channels.length > 0 ? <p className="text-[0.87rem] text-muted">{fill(e.human_notified_channels, { channels: p.channels.join(", ") })}</p> : null}
+              <Withheld channels={p.withheld} label={e.withheld} />
               {p.erased === true ? <Erased>{e.erased}</Erased> : null}
             </Card>
           ),

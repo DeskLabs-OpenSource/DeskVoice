@@ -1,6 +1,7 @@
 import { recordEvent } from "@deskvoice/core";
 import { z } from "zod";
 import { defineTool } from "../define-tool";
+import { TEXT_MAX, tooLong } from "../text-limits";
 import { notifyHumans, withCallerContext } from "../notify";
 
 export default defineTool({
@@ -8,7 +9,7 @@ export default defineTool({
   description:
     "Transfere a ligação para um atendente humano, que recebe o seu resumo e continua de onde você parou. Use quando a pessoa pedir para falar com alguém, quando o assunto fugir do que você pode resolver, ou quando ela estiver irritada ou em situação delicada. NÃO use para tirar uma dúvida sua com a equipe (para isso existe request_approval) nem para deixar um recado (notify_human). Avise a pessoa de que vai transferir ANTES de chamar.",
   inputSchema: z.object({
-    reason: z.string().min(1).describe("Por que a transferência é necessária, em uma frase."),
+    reason: z.string().min(1).max(TEXT_MAX.transferReason, tooLong(TEXT_MAX.transferReason)).describe(`Por que a transferência é necessária, em uma frase, com até ${TEXT_MAX.transferReason} caracteres.`),
     summary: z
       .string()
       .min(1)

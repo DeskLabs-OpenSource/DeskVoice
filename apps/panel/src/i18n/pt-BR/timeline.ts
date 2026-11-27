@@ -134,6 +134,7 @@ const timeline = {
     approval_applied: { approved: "O agente seguiu como aprovado.", denied: "O agente seguiu como negado." },
     human_notified: "Avisou uma pessoa",
     human_notified_channels: "Enviado por: {channels}",
+    withheld: "Ligação simulada: não saiu por {channels}, que teria recebido o aviso.",
     dtmf_sent: "Apertou teclas no menu",
     agent_handoff: "Passou para {to}",
     agent_handoff_from: "De {from}",
