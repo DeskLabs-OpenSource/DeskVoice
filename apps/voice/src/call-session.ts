@@ -1543,6 +1543,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         latency.guardActed(guardTurn);
         session.say(text);
       },
+      answering: () => session.answering?.() === true,
       acted: (report) => {
         // O pedido zera o fato no mesmo instante do `caller_unanswered`: vale só a fala depois do último.
         if (report.action === "asked_to_repeat") callerSpokeAfterAsk = false;
