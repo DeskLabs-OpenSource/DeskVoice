@@ -137,7 +137,8 @@ export default function WhatsAppSettings() {
               ) : null}
             </form>
           )}
-          {savedCrm && !connectedByQr ? <DeskcommCrm saved={savedCrm} canConfigure={canConfigure} onSaved={connector.reload} /> : null}
+          {/* A `key` pelo CRM gravado: outro CRM recomeça o bloco, sem a conferência e o canal do anterior. */}
+          {savedCrm && !connectedByQr ? <DeskcommCrm key={savedCrm.crmUrl.replace(/\/+$/, "")} saved={savedCrm} canConfigure={canConfigure} onSaved={connector.reload} /> : null}
           <div className="grid gap-3 border-t border-line pt-5">
             <h3 className="font-bold">{t.trustCallerTitle}</h3>
             <p className="max-w-prose text-muted">{t.trustCallerLead}</p>
