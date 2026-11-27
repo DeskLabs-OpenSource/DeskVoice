@@ -16,7 +16,7 @@ import { formatDateTime } from "../../../../ui/format";
 import { Badge, Button, Field, Notice, Panel, Select, Skeleton } from "../../../../ui/kit";
 import type { Engine, PipelineLatency } from "../../../../ui/types";
 import { providerName } from "../../settings/voice/notice";
-import { conversationalBrains, usableTranscribers, type PipelineData, type PipelinePieces } from "./pipeline-pieces";
+import { conversationalBrains, inList, usableTranscribers, type PipelineData, type PipelinePieces } from "./pipeline-pieces";
 import { Listen, PIPELINE_BLOCK_ID } from "./voice-field";
 
 /** A voz como `/api/v1/synthesizers` a devolve: o estado da chave e da confirmação da 9.1. */
@@ -174,11 +174,13 @@ function TranscriberPart({ t, voiceT, locale, pipeline, transcribers, onTranscri
     );
   if (transcribers === undefined) return <Skeleton lines={2} />;
   const usable = usableTranscribers(transcribers);
+  const chosen = pieces.transcriber === "" ? (usable[0]?.id ?? "") : pieces.transcriber;
   return (
     <Part title={t.pipelineTranscriber}>
       {usable.length > 0 ? (
         <Field label={t.pipelineTranscriberChoice}>
-          <Select value={usable.some((transcriber) => transcriber.id === pieces.transcriber) ? pieces.transcriber : usable[0]?.id} onChange={(event) => onPieces({ transcriber: event.target.value })} className="max-w-sm">
+          <Select value={chosen} onChange={(event) => onPieces({ transcriber: event.target.value })} className="max-w-sm">
+            <StoredGone t={t} options={usable} id={chosen} />
             {usable.map((transcriber) => (
               <option key={transcriber.id} value={transcriber.id}>
                 {transcriber.label}
@@ -187,6 +189,7 @@ function TranscriberPart({ t, voiceT, locale, pipeline, transcribers, onTranscri
           </Select>
         </Field>
       ) : null}
+      {usable.length > 0 && !inList(usable, chosen) ? <Notice tone="warn">{t.pipelineStoredGoneHint}</Notice> : null}
       {/* A transcrição de hoje é a peça provisória da OpenAI (decisão B da DESA-398): a tela diz isso. */}
       {transcribers.length > 0 ? <p className="text-[0.87rem] text-muted">{t.pipelineTranscriberProvisional}</p> : null}
       {transcribers.map((transcriber) => (
@@ -258,15 +261,20 @@ function TranscriberRow({ t, voiceT, locale, transcriber, onChanged }: { t: Agen
 function BrainPart({ t, brains, pieces, onPieces, brainModels }: PipelinePanelProps) {
   if (brains === undefined) return <Skeleton lines={2} />;
   const options = conversationalBrains(brains);
-  const chosen = options.find((option) => option.id === pieces.brain) ?? options[0];
+  // A gravada fora da lista fica a gravada (`shownPieces`): a tela não mostra outra como a do agente.
+  const brain = pieces.brain === "" ? (options[0]?.id ?? "") : pieces.brain;
+  const brainGone = !inList(options, brain);
   // A mesma regra do preço da gravação e da abertura (`pricePipeline`): só o modelo com preço na lista.
-  const priced = brainModels === undefined ? undefined : pricedBrainModels(brainModels);
+  const priced = brainModels === undefined || brainGone ? undefined : pricedBrainModels(brainModels);
+  const model = pieces.model === "" ? (priced?.[0] ?? "") : pieces.model;
+  const modelGone = priced !== undefined && priced.length > 0 && !priced.includes(model);
   return (
     <Part title={t.pipelineBrain}>
-      {chosen ? (
+      {options.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.pipelineBrain} hint={t.pipelineBrainHint}>
-            <Select value={chosen.id} onChange={(event) => onPieces({ brain: event.target.value, model: "" })}>
+            <Select value={brain} onChange={(event) => onPieces({ brain: event.target.value, model: "" })}>
+              <StoredGone t={t} options={options} id={brain} />
               {options.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label}
@@ -274,13 +282,14 @@ function BrainPart({ t, brains, pieces, onPieces, brainModels }: PipelinePanelPr
               ))}
             </Select>
           </Field>
-          {priced === undefined ? (
+          {brainGone ? null : priced === undefined ? (
             <Skeleton lines={1} />
           ) : priced.length === 0 ? (
             <p className="text-[0.87rem] text-muted">{t.pipelineModelNone}</p>
           ) : (
             <Field label={t.pipelineModel} hint={t.pipelineModelHint}>
-              <Select value={priced.includes(pieces.model) ? pieces.model : priced[0]} onChange={(event) => onPieces({ model: event.target.value })}>
+              <Select value={model} onChange={(event) => onPieces({ model: event.target.value })}>
+                <StoredGone t={t} options={priced.map((id) => ({ id }))} id={model} />
                 {priced.map((id) => (
                   <option key={id} value={id}>
                     {id}
@@ -289,6 +298,11 @@ function BrainPart({ t, brains, pieces, onPieces, brainModels }: PipelinePanelPr
               </Select>
             </Field>
           )}
+          {brainGone || modelGone ? (
+            <div className="md:col-span-2">
+              <Notice tone="warn">{t.pipelineStoredGoneHint}</Notice>
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="text-[0.87rem] text-muted">
@@ -299,6 +313,19 @@ function BrainPart({ t, brains, pieces, onPieces, brainModels }: PipelinePanelPr
         </p>
       )}
     </Part>
+  );
+}
+
+/**
+ * A peça gravada que saiu da lista, marcada e sem poder ser escolhida de novo: o operador vê qual o agente
+ * tem, e qualquer peça da lista, inclusive a primeira, muda o rascunho e vai no salvar.
+ */
+function StoredGone({ t, options, id }: { t: AgentsDictionary; options: readonly { id: string }[]; id: string }) {
+  if (id === "" || inList(options, id)) return null;
+  return (
+    <option value={id} disabled>
+      {fill(t.pipelineStoredGone, { piece: id })}
+    </option>
   );
 }
 
@@ -424,7 +451,8 @@ export function usePipelineData(canConfigure: boolean, brain: string): PipelineD
   const brains = useApi<PipelineBrainOption[]>(canConfigure ? "/brains" : null);
   const transcribers = useApi<PipelineTranscriber[]>(canConfigure ? "/transcribers" : null);
   const options = conversationalBrains(brains.data);
-  const chosen = options.find((option) => option.id === brain) ?? options[0];
+  // Os modelos do cérebro mostrado (`shownPieces`): o vazio é o primeiro; o gravado fora da lista, nenhum.
+  const chosen = brain === "" ? options[0] : options.find((option) => option.id === brain);
   const models = useApi<unknown>(canConfigure && chosen ? `/brains/${encodeURIComponent(chosen.id)}/models` : null);
   return {
     synthesizers: synthesizers.data,

@@ -4,7 +4,7 @@ import type { PipelineBrainOption, PipelineSynthesizer, PipelineTranscriber } fr
 
 /**
  * As peças do Pipeline no rascunho do agente (fatia 6b). Vazio é "a primeira da lista" (a transcrição, o
- * cérebro, o modelo com preço); a voz não tem padrão: quem configura a escolhe, ouvindo a amostra.
+ * cérebro, o modelo com preço); a peça gravada que saiu da lista não é trocada por outra; a voz não tem padrão: quem configura a escolhe, ouvindo a amostra.
  */
 export type PipelinePieces = Record<keyof PipelineChoice, string>;
 export const NO_PIECES: PipelinePieces = { transcriber: "", brain: "", model: "", synthesizer: "", voiceId: "" };
@@ -50,29 +50,38 @@ export function pipelineMissing(pipeline: Engine, data: PipelineData): PipelineM
   return null;
 }
 
-/** A peça escolhida, ou a primeira da lista quando a escolha não está nela. */
-const pick = <T extends { id: string }>(options: readonly T[], id: string): T | undefined => options.find((option) => option.id === id) ?? options[0];
+/**
+ * A peça mostrada: o vazio é a primeira da lista; a gravada fica a gravada, mesmo fora da lista (a
+ * confirmação apagada, a chave que deixou de estar aceita, o modelo sem preço). A tela nunca mostra como
+ * do agente uma peça que ele não usa: o bloco diz que a gravada saiu da lista, e o salvar a recusa.
+ */
+const shown = (options: readonly string[], id: string): string => (id === "" ? (options[0] ?? "") : id);
 
-/** As peças que o bloco mostra escolhidas: o rascunho, com o vazio e o que saiu da lista trocados pela primeira. */
+/** As peças que o bloco mostra escolhidas: o rascunho, com o vazio trocado pela primeira da lista. */
 export function shownPieces(pieces: PipelinePieces, data: PipelineData, brainModels: unknown): PipelinePieces {
-  const priced = brainModels === undefined ? [] : pricedBrainModels(brainModels);
+  const brain = shown(ids(conversationalBrains(data.brains)), pieces.brain);
   return {
-    transcriber: pick(usableTranscribers(data.transcribers), pieces.transcriber)?.id ?? "",
-    brain: pick(conversationalBrains(data.brains), pieces.brain)?.id ?? "",
-    model: priced.includes(pieces.model) ? pieces.model : (priced[0] ?? ""),
+    transcriber: shown(ids(usableTranscribers(data.transcribers)), pieces.transcriber),
+    brain,
+    // Os modelos são os do cérebro mostrado; com o cérebro fora da lista, nenhum (`usePipelineData` não os lê).
+    model: shown(brainModels === undefined || !inList(conversationalBrains(data.brains), brain) ? [] : pricedBrainModels(brainModels), pieces.model),
     synthesizer: pieces.synthesizer,
     voiceId: pieces.voiceId,
   };
 }
 
-/** A escolha que vai no salvar, ou a peça que ainda falta escolher. */
+const ids = (options: readonly { id: string }[]): string[] => options.map((option) => option.id);
+/** A peça está na lista que o bloco oferece. */
+export const inList = (options: readonly { id: string }[], id: string): boolean => options.some((option) => option.id === id);
+
+/** A escolha que vai no salvar, ou a peça que ainda falta escolher (vazia ou fora da lista). */
 export function choiceToSave(pieces: PipelinePieces, data: PipelineData, brainModels: unknown): { choice: PipelineChoice } | { missing: "transcriber" | "brain" | "model" | "voice" } {
-  const shown = shownPieces(pieces, data, brainModels);
-  if (shown.transcriber === "") return { missing: "transcriber" };
-  if (shown.brain === "") return { missing: "brain" };
-  if (shown.model === "") return { missing: "model" };
-  if (shown.voiceId === "" || !usableSynthesizers(data.synthesizers).some((synthesizer) => synthesizer.id === shown.synthesizer)) return { missing: "voice" };
-  return { choice: shown };
+  const choice = shownPieces(pieces, data, brainModels);
+  if (!inList(usableTranscribers(data.transcribers), choice.transcriber)) return { missing: "transcriber" };
+  if (!inList(conversationalBrains(data.brains), choice.brain)) return { missing: "brain" };
+  if (brainModels === undefined || !pricedBrainModels(brainModels).includes(choice.model)) return { missing: "model" };
+  if (choice.voiceId === "" || !inList(usableSynthesizers(data.synthesizers), choice.synthesizer)) return { missing: "voice" };
+  return { choice };
 }
 
 /** Iguais as duas escolhas (a gravada e a do rascunho): o salvar não regrava a mesma. */

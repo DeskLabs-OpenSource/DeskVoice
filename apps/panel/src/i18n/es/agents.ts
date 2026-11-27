@@ -77,6 +77,8 @@ const agents: AgentsDictionary = {
   pipelineTranscriberRemoveAsk: "¿Borrar la confirmación del envío a {provider}? El pipeline con esta transcripción deja de abrirse.",
   pipelineTranscriberKeep: "Mantener",
   pipelineBrain: "Cerebro",
+  pipelineStoredGone: "{piece} (guardada en el agente, fuera de la lista)",
+  pipelineStoredGoneHint: "La pieza guardada en el agente salió de la lista (confirmación borrada, clave que dejó de ser aceptada o modelo sin precio). Las llamadas por el Pipeline se rechazan hasta que elijas otra y guardes.",
   pipelineBrainHint: "Solo los cerebros que conversan, con la clave aceptada.",
   pipelineBrainNone: "Ningún cerebro que conversa tiene la clave aceptada. Registra uno en Configuración → Cerebros.",
   pipelineBrainsLink: "Configuración → Cerebros",

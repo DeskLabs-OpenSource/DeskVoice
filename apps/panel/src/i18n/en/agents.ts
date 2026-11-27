@@ -77,6 +77,8 @@ const agents: AgentsDictionary = {
   pipelineTranscriberRemoveAsk: "Delete the confirmation of sending to {provider}? The pipeline with this transcription stops opening.",
   pipelineTranscriberKeep: "Keep",
   pipelineBrain: "Brain",
+  pipelineStoredGone: "{piece} (saved on the agent, no longer listed)",
+  pipelineStoredGoneHint: "The piece saved on the agent is no longer listed (consent removed, key no longer accepted or model without a price). Pipeline calls are refused until you choose another and save.",
   pipelineBrainHint: "Only brains that hold a conversation, with an accepted key.",
   pipelineBrainNone: "No conversational brain has an accepted key. Add one in Settings → Brains.",
   pipelineBrainsLink: "Settings → Brains",

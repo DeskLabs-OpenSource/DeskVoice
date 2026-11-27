@@ -59,8 +59,8 @@ describe("choiceToSave: o que vai no salvar", () => {
     expect(choiceToSave({ ...CHOICE, voiceId: "" }, READY, MODELS)).toEqual({ missing: "voice" });
   });
 
-  it("o que saiu da lista não vai: o modelo sem preço cai no primeiro com preço, a voz de conta sem confirmação falta", () => {
-    expect(choiceToSave({ ...CHOICE, model: "sem-preco" }, READY, MODELS)).toEqual({ choice: { ...CHOICE, model: "modelo-a" } });
+  it("o que saiu da lista não vai, nem é trocado pela primeira: falta escolher a peça", () => {
+    expect(choiceToSave({ ...CHOICE, model: "sem-preco" }, READY, MODELS)).toEqual({ missing: "model" });
     expect(choiceToSave(CHOICE, { ...READY, synthesizers: [{ ...VOICE, consent: null }] }, MODELS)).toEqual({ missing: "voice" });
     expect(choiceToSave(CHOICE, { ...READY, transcribers: [{ ...EAR, consent: null }] }, MODELS)).toEqual({ missing: "transcriber" });
     expect(choiceToSave(CHOICE, { ...READY, brains: [] }, MODELS)).toEqual({ missing: "brain" });
@@ -70,6 +70,17 @@ describe("choiceToSave: o que vai no salvar", () => {
 
   it("o bloco mostra as mesmas peças que o salvar leva", () => {
     expect(shownPieces({ ...NO_PIECES, synthesizer: "elevenlabs", voiceId: "v-bia" }, READY, MODELS)).toEqual({ ...CHOICE, model: "modelo-a" });
+  });
+
+  it("a peça gravada fora da lista fica a gravada: o bloco não mostra outra como a do agente", () => {
+    const twoBrains = { ...READY, brains: [{ ...BRAIN, id: "outro" }, { ...BRAIN, keyCheck: { result: "rejected" } }] };
+    expect(shownPieces(CHOICE, twoBrains, MODELS)).toEqual(CHOICE);
+    expect(shownPieces(CHOICE, { ...READY, transcribers: [{ ...EAR, id: "outra" }, { ...EAR, consent: null }] }, MODELS)).toEqual(CHOICE);
+    expect(shownPieces({ ...CHOICE, model: "sem-preco" }, READY, MODELS)).toEqual({ ...CHOICE, model: "sem-preco" });
+    // Escolher a primeira da lista muda o rascunho, e vai no salvar.
+    expect(pipelineToSave(true, { ...CHOICE, brain: "outro", model: "" }, CHOICE, twoBrains, MODELS)).toEqual({ choice: { ...CHOICE, brain: "outro", model: "modelo-a" } });
+    // Trocar outra peça com a gravada fora da lista: o salvar diz qual falta, e não grava a substituta.
+    expect(pipelineToSave(true, { ...CHOICE, voiceId: "v-ze" }, CHOICE, twoBrains, MODELS)).toEqual({ missing: "brain" });
   });
 
   it("a escolha gravada: a forma de `pipelineChoice`, ou nenhuma peça; e o salvar só regrava a escolha que mudou", () => {

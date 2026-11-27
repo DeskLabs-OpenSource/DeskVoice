@@ -216,6 +216,23 @@ describe("PipelinePanel", () => {
     expect(none).toContain('href="/settings/brains"');
   });
 
+  it.each(DICTS)("em %s: a peça gravada fora da lista fica a gravada, marcada, e nenhuma outra aparece como a do agente", (locale, t, voiceT) => {
+    const brainGone = render({ pieces: { ...NO_PIECES, brain: "anthropic", model: "modelo-velho" } }, [locale, t, voiceT]);
+    expect(brainGone).toContain(`<option value="anthropic" disabled="" selected="">${escaped(fill(t.pipelineStoredGone, { piece: "anthropic" }))}</option>`);
+    expect(brainGone).toContain('<option value="openai">OpenAI</option>');
+    expect(brainGone).not.toContain('value="openai" selected');
+    expect(brainGone).not.toContain('value="com-preco"');
+    expect(brainGone).toContain(escaped(t.pipelineStoredGoneHint));
+    const modelGone = render({ pieces: { ...NO_PIECES, brain: "openai", model: "sem-preco" } }, [locale, t, voiceT]);
+    expect(modelGone).toContain('<option value="sem-preco" disabled="" selected="">');
+    expect(modelGone).not.toContain('value="com-preco" selected');
+    expect(modelGone).toContain(escaped(t.pipelineStoredGoneHint));
+    const earGone = render({ pipeline: { ...PIPELINE, unavailable: null }, transcribers: [{ id: "openai", label: "OpenAI", provider: "openai", processingLocation: { kind: "undeclared" }, keyConfigured: true, consent: { name: "Ana", at: CONFIRMED_AT } }], pieces: { ...NO_PIECES, transcriber: "velha" } }, [locale, t, voiceT]);
+    expect(earGone).toContain(`<option value="velha" disabled="" selected="">${escaped(fill(t.pipelineStoredGone, { piece: "velha" }))}</option><option value="openai">OpenAI</option></select>`);
+    // Sem peça gravada, nada é marcado como fora da lista.
+    expect(render({}, [locale, t, voiceT])).not.toContain(escaped(t.pipelineStoredGoneHint));
+  });
+
   it("quem só lê vê uma linha, e nenhuma lista nem áudio", () => {
     const html = render({ canConfigure: false });
     expect(html).toContain(escaped(ptBR.pipelineReadOnly));

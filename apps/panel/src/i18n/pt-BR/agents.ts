@@ -61,7 +61,7 @@ const agents = {
   enginePipelineReady: "Pronto nesta organização: a transcrição, o cérebro e a voz estão aqui. Escolha o Pipeline e as peças no bloco Pipeline, e salve.",
   enginePipelineOff: { no_live_transcriber: "Falta uma transcrição em tempo real neste servidor. Ela chega com a medida da R12.", no_transcriber_key: "Falta a chave que a transcrição usa nesta organização: a da OpenAI usa a chave do motor OpenAI Realtime, em Configurações → Inteligência artificial.", transcriber_unconfirmed: "Falta confirmar o envio do áudio para a transcrição, no bloco Pipeline abaixo.", no_brain: "Falta um cérebro que conversa, com a chave aceita, em Configurações → Cérebros.", no_voice: "Falta uma voz com a chave salva e o envio confirmado, em Configurações → Voz." } as Record<string, string>,
   enginePipelineOffUnknown: "Ainda desligado nesta versão.",
-  /** O bloco "Pipeline" (fatia 5b-1): as três peças, só para ver e ouvir; nada é salvo daqui. */
+  /** O bloco "Pipeline" (fatias 5b-1 e 6b): as três peças; com o Pipeline no campo Motor, a escolha vai no salvar do agente. */
   pipeline: "Pipeline",
   pipelineLead: "Transcrição, cérebro e voz escolhidos à parte. Com o Pipeline no campo Motor, estas escolhas são salvas no agente; com outro motor, ficam só na tela.",
   pipelineReadOnly: "Só quem configura a organização vê as peças do Pipeline.",
@@ -78,6 +78,8 @@ const agents = {
   pipelineTranscriberRemoveAsk: "Apagar a confirmação do envio para a {provider}? O pipeline com esta transcrição deixa de abrir.",
   pipelineTranscriberKeep: "Manter",
   pipelineBrain: "Cérebro",
+  pipelineStoredGone: "{piece} (gravada no agente, fora da lista)",
+  pipelineStoredGoneHint: "A peça gravada no agente saiu da lista (confirmação apagada, chave que deixou de estar aceita ou modelo sem preço). As ligações pelo Pipeline são recusadas até você escolher outra e salvar.",
   pipelineBrainHint: "Só os cérebros que conversam, com a chave aceita.",
   pipelineBrainNone: "Nenhum cérebro que conversa tem chave aceita. Cadastre um em Configurações → Cérebros.",
   pipelineBrainsLink: "Configurações → Cérebros",
