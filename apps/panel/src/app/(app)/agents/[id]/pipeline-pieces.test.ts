@@ -8,7 +8,7 @@ import { ApiFailure } from "../../../../ui/api";
 import { withPiece } from "../../../../ui/errors";
 import type { Engine } from "../../../../ui/types";
 import type { PipelineBrainOption, PipelineSynthesizer, PipelineTranscriber } from "./pipeline-block";
-import { choiceToSave, NO_PIECES, pipelineMissing, piecesOf, sameChoice, shownPieces, type PipelineData } from "./pipeline-pieces";
+import { choiceToSave, NO_PIECES, pipelineMissing, piecesOf, pipelineToSave, sameChoice, shownPieces, type PipelineData } from "./pipeline-pieces";
 
 const PIPELINE = { id: "pipeline", assembled: true, unavailable: null } as Engine;
 const AT = "2026-11-26T12:00:00.000Z";
@@ -81,6 +81,34 @@ describe("choiceToSave: o que vai no salvar", () => {
     expect(sameChoice(CHOICE, null)).toBe(false);
     expect(sameChoice(null, CHOICE)).toBe(false);
     for (const key of Object.keys(CHOICE) as (keyof typeof CHOICE)[]) expect(sameChoice(CHOICE, { ...CHOICE, [key]: "outra" })).toBe(false);
+  });
+});
+
+describe("pipelineToSave: a escolha só vai no salvar quando muda", () => {
+  const TWO_EARS = { ...READY, transcribers: [{ ...EAR, id: "outra" }, { ...EAR, consent: null }] };
+
+  it("salvar outro campo com a escolha gravada não manda `pipeline`, nem esbarra numa peça que saiu da lista", () => {
+    expect(pipelineToSave(true, CHOICE, CHOICE, READY, MODELS)).toEqual({ unchanged: true });
+    expect(pipelineToSave(true, CHOICE, CHOICE, { ...READY, transcribers: [{ ...EAR, consent: null }] }, MODELS)).toEqual({ unchanged: true });
+    expect(pipelineToSave(true, CHOICE, CHOICE, { ...READY, synthesizers: [{ ...VOICE, consent: null }] }, MODELS)).toEqual({ unchanged: true });
+    expect(pipelineToSave(true, CHOICE, CHOICE, { ...READY, brains: [{ ...BRAIN, keyCheck: { result: "rejected" } }] }, MODELS)).toEqual({ unchanged: true });
+    expect(pipelineToSave(true, CHOICE, CHOICE, READY, undefined)).toEqual({ unchanged: true });
+  });
+
+  it("com outra peça na lista, salvar outro campo não regrava a escolha trocada pela primeira", () => {
+    expect(pipelineToSave(true, CHOICE, CHOICE, TWO_EARS, MODELS)).toEqual({ unchanged: true });
+  });
+
+  it("a escolha que mudou vai, conferida; a peça que falta segura o salvar", () => {
+    expect(pipelineToSave(true, { ...CHOICE, model: "modelo-a" }, CHOICE, READY, MODELS)).toEqual({ choice: { ...CHOICE, model: "modelo-a" } });
+    expect(pipelineToSave(true, { ...CHOICE, voiceId: "" }, CHOICE, READY, MODELS)).toEqual({ missing: "voice" });
+    expect(pipelineToSave(true, CHOICE, null, READY, MODELS)).toEqual({ choice: CHOICE });
+    expect(pipelineToSave(true, CHOICE, null, { ...READY, transcribers: [{ ...EAR, consent: null }] }, MODELS)).toEqual({ missing: "transcriber" });
+  });
+
+  it("sair do Pipeline leva `null` só quando o agente estava nele", () => {
+    expect(pipelineToSave(false, CHOICE, CHOICE, READY, MODELS)).toEqual({ choice: null });
+    expect(pipelineToSave(false, NO_PIECES, null, READY, MODELS)).toEqual({ unchanged: true });
   });
 });
 

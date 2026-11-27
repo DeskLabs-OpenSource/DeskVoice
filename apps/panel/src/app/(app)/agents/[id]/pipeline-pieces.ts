@@ -36,8 +36,9 @@ export type PipelineMissing = "no_live_transcriber" | "no_transcriber_key" | "tr
 
 /**
  * O Pipeline está montado (fatia 6b) quando o servidor não diz o que falta e a organização tem uma
- * transcrição com chave e confirmação, um cérebro que conversa e uma voz com chave e confirmação. É a
- * mesma régua de `requirePipeline`, lida antes: quem salva assim mesmo recebe o 422 com o motivo.
+ * transcrição com chave e confirmação, um cérebro que conversa com a chave aceita e uma voz com chave e
+ * confirmação. Parte da régua de `requirePipeline`, lida antes, e é mais dura na chave de cada peça; o preço
+ * da voz fica com o 422 do servidor, com o motivo.
  */
 export function pipelineMissing(pipeline: Engine, data: PipelineData): PipelineMissing | null {
   if (pipeline.unavailable === undefined) return "unknown";
@@ -77,3 +78,22 @@ export function choiceToSave(pieces: PipelinePieces, data: PipelineData, brainMo
 /** Iguais as duas escolhas (a gravada e a do rascunho): o salvar não regrava a mesma. */
 export const sameChoice = (a: PipelineChoice | null, b: PipelineChoice | null): boolean =>
   a === b || (a !== null && b !== null && (Object.keys(a) as (keyof PipelineChoice)[]).every((key) => a[key] === b[key]));
+
+/**
+ * O que o salvar leva em `pipeline` (fatia 6b): nada quando a escolha não mudou, `null` ao sair do
+ * Pipeline, ou a escolha nova (ou a peça que falta). A comparação é com o rascunho cru, antes de
+ * `shownPieces`: salvar outro campo não regrava a escolha, nem esbarra numa peça que saiu da lista
+ * (confirmação apagada, chave que deixou de estar aceita).
+ */
+export function pipelineToSave(
+  pipelineOn: boolean,
+  pieces: PipelinePieces,
+  saved: PipelineChoice | null,
+  data: PipelineData,
+  brainModels: unknown,
+): { unchanged: true } | { choice: PipelineChoice | null } | { missing: "transcriber" | "brain" | "model" | "voice" } {
+  if (!pipelineOn) return saved === null ? { unchanged: true } : { choice: null };
+  if (saved !== null && sameChoice(pieces, saved)) return { unchanged: true };
+  const toSave = choiceToSave(pieces, data, brainModels);
+  return "choice" in toSave && sameChoice(toSave.choice, saved) ? { unchanged: true } : toSave;
+}

@@ -29,7 +29,7 @@ import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-c
 import { AgentBrains } from "./brains";
 import { EngineField, newAgentEngine } from "./engine-field";
 import { PipelineBlock, usePipelineData } from "./pipeline-block";
-import { choiceToSave, NO_PIECES, pipelineMissing, piecesOf, sameChoice, shownPieces, type PipelinePieces } from "./pipeline-pieces";
+import { NO_PIECES, pipelineMissing, piecesOf, pipelineToSave, shownPieces, type PipelinePieces } from "./pipeline-pieces";
 import { PIPELINE_BLOCK_ID, VoiceField } from "./voice-field";
 
 /** O agente como a API devolve, com quem lê a ligação dele (R4, fatia 5): nulo segue a organização. */
@@ -235,8 +235,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       return Promise.resolve(false);
     }
     const terms = vocabulary.result.terms;
-    // O Pipeline escolhido leva as peças; outro motor leva `null` só quando o agente estava no Pipeline.
-    const toSave = draft.pipelineOn ? choiceToSave(draft.pieces, pipelineData, pipelineData.brainModels) : { choice: null };
+    // O Pipeline escolhido leva as peças só quando mudaram; outro motor leva `null` só quando o agente estava no Pipeline.
+    const toSave = pipelineToSave(draft.pipelineOn, draft.pieces, savedPipeline, pipelineData, pipelineData.brainModels);
     if ("missing" in toSave) {
       setPieceMissing(t.pipelineMissingPiece[toSave.missing]);
       document.getElementById(PIPELINE_BLOCK_ID)?.scrollIntoView({ block: "start" });
@@ -269,7 +269,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         dropFollowUpMessage: draft.dropFollowUpMessage,
         analystId: draft.analystId === "" ? null : draft.analystId,
         ...analysisPatch(draft.analysis, savedAnalysis, acceptUnmeasured),
-        ...(!sameChoice(toSave.choice, savedPipeline) && { pipeline: toSave.choice }),
+        ...("choice" in toSave && { pipeline: toSave.choice }),
       };
       const saved = await api<AgentWithBrain>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       setSavedEnvironment(saved.listeningEnvironment ?? "normal");

@@ -726,7 +726,8 @@ em tokens, em segundos, ou, sem `usage`, pela duração do item, ao preço por m
 **6b: a escolha do Pipeline e da voz pela tela (DESA-474, depois do #597).** O campo Motor libera o
 Pipeline quando ele está montado (`pipelineMissing`, em `agents/[id]/pipeline-pieces.ts`): o servidor sem
 motivo em `unavailable`, uma transcrição com a chave e a confirmação da 9.1, um cérebro que conversa com a
-chave aceita, e uma voz com a chave e a confirmação. É a régua de `requirePipeline`, lida antes. Sem isso,
+chave aceita, e uma voz com a chave e a confirmação. A régua parte da de `requirePipeline`, lida antes, e é
+mais dura na chave de cada peça; o preço da voz fica com o 422 do servidor. Sem isso,
 o Pipeline fica desligado, com a linha da peça que falta (`transcriber_unconfirmed`, `no_brain`,
 `no_voice`, além dos dois motivos do servidor). As peças do bloco ficam no rascunho do agente: a
 transcrição, o cérebro e o modelo com preço, e a voz, marcada em cada voz da conta confirmada ("Usar … no
