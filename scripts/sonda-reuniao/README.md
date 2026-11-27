@@ -44,16 +44,16 @@ pnpm exec tsx scripts/sonda-reuniao/sonda.ts https://meet.google.com/abc-defg-hi
 ```
 
 Opções: `--nome Lia` (o "(IA)" vem sempre), `--fala a.wav --fala b.wav` (PCM16; completa ou corta
-em 10 s), `--espera-lobby 300` (de 10 a 1800 s), `--saida <pasta>` e `--com-tela` (navegador com
-janela, para ver a página).
+em 10 s), `--espera-lobby 300` (de 10 a 1800 s), `--saida <pasta nova>` e `--com-tela` (navegador
+com janela, para ver a página).
 
 Rode no Linux para ter CPU e memória (é o que decide quantas reuniões uma VPS aguenta). No macOS a
 sonda mede o resto e diz "não medido" para os dois.
 
 ## O que ela mede
 
-O relatório sai na tela e em `relatorio.json`, na pasta de saída (por padrão,
-`$TMPDIR/sonda-reuniao-*`):
+O relatório sai na tela e em `relatorio.json`, na pasta de saída. O caminho dela sai na tela e no
+campo `outDir`.
 
 | Campo | O que é |
 |---|---|
@@ -66,51 +66,49 @@ O relatório sai na tela e em `relatorio.json`, na pasta de saída (por padrão,
 
 **A sonda não diz "passou".** Os números dizem que havia som, mas não dizem se a fala se entende.
 O resultado só vale com as duas respostas humanas que ela imprime no fim: o anfitrião ouviu os
-10 s? Quem rodou reconhece a fala do anfitrião em `escuta-8k.wav`? Esse é o fracasso nomeado no
+10 s? O anfitrião reconhece a própria fala em `escuta-8k.wav`? Esse é o fracasso nomeado no
 desenho: a sonda "passa" sem que um humano tenha ouvido o áudio dos dois lados.
 
-## O que nunca entra no repositório
+## A pasta de saída
 
-O áudio gravado e as capturas de tela. Eles têm a voz e a imagem de quem estava na reunião, e
-ficam só na pasta de saída. Depois de ouvir, apague a pasta. O que volta para a pasta do dono é o
-`relatorio.json` (o código da reunião vai mascarado: `abc-****-hij`) e as duas respostas humanas.
+A pasta tem a voz e a imagem de quem estava na reunião. Por isso a sonda cuida dela assim:
 
-## A gravação da voz do Rafael: quem ouve, por onde passa, quem apaga
+- **Ela é sempre nova.** Sem `--saida`, a sonda cria uma pasta de nome aleatório em
+  `$TMPDIR/sonda-reuniao-*`. Com `--saida`, ela cria exatamente o caminho pedido, e para antes de
+  abrir o navegador se ele já existe (mesmo vazio, mesmo um link). Uma pasta que outra conta
+  preparou antes nunca é usada.
+- **Ela é só de quem roda:** a pasta fica com 0700 e cada arquivo com 0600, qualquer que seja a
+  máscara do processo. Um arquivo que já esteja lá não é sobrescrito.
+- Se o `TMPDIR` de quem roda é apagado no fim da sessão, passe `--saida` com um caminho novo fora
+  dele, para a pasta durar até ser copiada.
 
-Vale para a rodada única do pedido 3 (anfitrião: Rafael, sonda na vps-teste).
+O que fica nela: `enviada.wav`, `escuta-original.wav`, `escuta-8k.wav`, `relatorio.json` e, se a
+entrada falhou, `falha.png`.
 
-1. **Quem ouve o `escuta-8k.wav`: o Rafael.** A voz gravada é a dele, e só ele responde à segunda
-   pergunta humana (se reconhece a própria fala). Os agentes não ouvem áudio.
-2. **Por onde o arquivo passa: só por `scp`, da vps-teste para o Mac dele.** Na vps-teste o
-   agente roda a sonda como o usuário `paperclip`, cujo `TMPDIR` é uma pasta da execução, que pode
-   ser apagada. Por isso a rodada usa uma pasta fixa:
+## A gravação: quem ouve, por onde passa, quem apaga
 
-   ```sh
-   pnpm exec tsx scripts/sonda-reuniao/sonda.ts https://meet.google.com/abc-defg-hij \
-     --anfitriao-presente --saida /tmp/sonda-reuniao-rafael
-   ```
-
-   A sessão do orquestrador, que roda no Mac do Rafael, puxa o arquivo como root na VPS (caminho
-   conferido pelo orquestrador em 27/11/2026, com um arquivo de teste de ida e volta):
-
-   ```sh
-   scp vps-teste:/tmp/sonda-reuniao-rafael/escuta-8k.wav ~/Downloads/
-   ```
-
-   O arquivo não passa por e-mail, chat, tarefa nem repositório.
+1. **Quem ouve as duas gravações (`escuta-8k.wav` e `escuta-original.wav`): o anfitrião.** A voz
+   gravada é a dele, e só ele responde à segunda pergunta humana (se reconhece a própria fala). Os
+   agentes não ouvem áudio.
+2. **Por onde passa: a pasta inteira vai de uma vez, da máquina onde a sonda rodou para a máquina
+   do anfitrião,** levada pela sessão que entrega o arquivo ao dono, por um caminho direto entre as
+   duas máquinas (cópia por ssh). Nada passa por e-mail, chat, tarefa nem repositório.
 3. **Quem apaga, e quando:**
-   - quem rodou a sonda apaga a pasta na VPS (`rm -rf /tmp/sonda-reuniao-rafael`) logo depois de
-     a cópia chegar ao Mac. Antes disso, o `relatorio.json` vai para a pasta do Rafael;
-   - o orquestrador apaga a cópia do Mac (`~/Downloads/escuta-8k.wav`) assim que o Rafael
+   - antes da cópia, quem roda a sonda leva o `relatorio.json` para a pasta do dono. Depois de a
+     cópia chegar, apaga **a pasta inteira** na máquina onde rodou;
+   - a sessão que entregou a cópia apaga **a pasta inteira** na máquina do anfitrião assim que ele
      responder às duas perguntas.
 
-   Fora essas duas, não fica nenhuma cópia com a voz dele.
+   Fora essas duas, não fica nenhuma cópia com a voz dele. O áudio e as capturas nunca entram no
+   repositório. O que volta para a pasta do dono é o `relatorio.json` (o código da reunião vai
+   mascarado: `abc-****-hij`) e as duas respostas humanas.
 
 ## Peças
 
 | Arquivo | O que faz |
 |---|---|
 | `sonda.ts` | as opções, a recusa antes do navegador e a rodada inteira |
+| `pasta.ts` | a pasta de saída nova e só de quem roda (0700), e os arquivos com 0600 |
 | `meet.ts` | o link aceito, o nome com "(IA)" e os passos na página do Meet (português e inglês) |
 | `pagina.ts` | o que entra na página antes de ela carregar: o microfone trocado por uma faixa WebAudio, a mistura das faixas recebidas e os números do WebRTC |
 | `audio.ts` | WAV, a descida para 8 kHz e os níveis |

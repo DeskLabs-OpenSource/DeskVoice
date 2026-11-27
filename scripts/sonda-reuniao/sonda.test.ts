@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { audioStats, concat, downsample, fitTo, readWav, writeWav } from "./audio";
 import { displayName, maskCode, meetingCode } from "./meet";
+import { createOutDir, writePrivate } from "./pasta";
 import { descendants, parseStat, summarize } from "./processos";
 import { parseOptions, refusal } from "./sonda";
 
@@ -118,5 +122,62 @@ describe("CPU e memória", () => {
     ]);
     expect(usage).toEqual({ samples: 3, cpuMeanPercent: 100, cpuMaxPercent: 150, rssMaxMb: 300, rssMeanMb: 200 });
     expect(summarize([{ atMs: 0, ticks: 0, rssBytes: 0 }])).toBeNull();
+  });
+});
+
+describe("a pasta da gravação é só de quem roda", () => {
+  // Máscara 0: sem o modo explícito, a pasta sairia 0777 e os arquivos 0666.
+  let base: string;
+  let umask: number;
+  beforeEach(() => {
+    base = mkdtempSync(path.join(tmpdir(), "sonda-pasta-teste-"));
+    umask = process.umask(0);
+  });
+  afterEach(() => {
+    process.umask(umask);
+    rmSync(base, { recursive: true, force: true });
+  });
+  const mode = (p: string): number => lstatSync(p).mode & 0o777;
+
+  it("sem --saida, cria uma pasta nova com 0700", () => {
+    const dir = createOutDir();
+    try {
+      expect(path.basename(dir)).toMatch(/^sonda-reuniao-/);
+      expect(mode(dir)).toBe(0o700);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("com --saida, cria o caminho pedido com 0700", () => {
+    const dir = createOutDir(path.join(base, "rodada"));
+    expect(mode(dir)).toBe(0o700);
+  });
+
+  it("recusa uma pasta que já existia, mesmo vazia, e não mexe nela", () => {
+    const ready = path.join(base, "preparada");
+    mkdirSync(ready, { mode: 0o777 });
+    expect(() => createOutDir(ready)).toThrow(/já existe/);
+    expect(mode(ready)).toBe(0o777);
+  });
+
+  it("recusa um link no lugar da pasta", () => {
+    const target = path.join(base, "alvo");
+    mkdirSync(target);
+    symlinkSync(target, path.join(base, "atalho"));
+    expect(() => createOutDir(path.join(base, "atalho"))).toThrow(/já existe/);
+  });
+
+  it("grava os arquivos com 0600 e não reaproveita um que já exista", () => {
+    const dir = createOutDir(path.join(base, "rodada"));
+    const file = path.join(dir, "escuta-8k.wav");
+    writePrivate(file, "voz");
+    expect(mode(file)).toBe(0o600);
+    expect(() => writePrivate(file, "outra")).toThrow();
+    expect(readFileSync(file, "utf8")).toBe("voz");
+    const planted = path.join(dir, "falha.png");
+    writeFileSync(planted, "x", { mode: 0o666 });
+    expect(() => writePrivate(planted, "imagem")).toThrow();
+    expect(existsSync(planted)).toBe(true);
   });
 });

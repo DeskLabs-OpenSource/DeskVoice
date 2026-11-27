@@ -11,12 +11,11 @@
 // Uso (Linux, para medir CPU e memória; no macOS mede o resto):
 //   pnpm --filter ./apps/panel exec playwright install chromium   # uma vez
 //   pnpm exec tsx scripts/sonda-reuniao/sonda.ts https://meet.google.com/abc-defg-hij --anfitriao-presente \
-//     [--nome Sonda] [--fala a.wav --fala b.wav] [--espera-lobby 300] [--saida /tmp/x] [--com-tela]
+//     [--nome Sonda] [--fala a.wav --fala b.wav] [--espera-lobby 300] [--saida /tmp/pasta-nova] [--com-tela]
 //
 // A sonda não diz "passou". Ela diz o que mediu, e o resultado só vale com o ouvido humano dos
 // dois lados (o fracasso nomeado no desenho é a sonda "passar" sem ninguém ter ouvido).
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -24,6 +23,7 @@ import { audioStats, concat, downsample, fitTo, readWav, writeWav, type AudioSta
 import { loadPlaywright } from "./dependencias";
 import { displayName, join, leave, maskCode, meetingCode, type Admission, type Step } from "./meet";
 import { pageScript, type RtcNumbers } from "./pagina";
+import { createOutDir, writePrivate } from "./pasta";
 import { canMeasure, CLOCK_TICKS, PAGE_BYTES, sampleChildren, summarize, type Sample, type Usage } from "./processos";
 
 const ROOT = new URL("../../", import.meta.url);
@@ -39,7 +39,8 @@ export interface ProbeOptions {
   hostPresent: boolean;
   speech: string[];
   lobbyWaitSeconds: number;
-  outDir: string;
+  /** O caminho pedido em --saida (precisa não existir). Sem ele, uma pasta nova no TMPDIR. */
+  outDir?: string;
   headed: boolean;
 }
 
@@ -64,7 +65,7 @@ export function parseOptions(argv: string[]): ProbeOptions {
     hostPresent: values["anfitriao-presente"],
     speech: values.fala?.length ? values.fala : DEFAULT_SPEECH.map((file) => new URL(file, ROOT).pathname),
     lobbyWaitSeconds: lobby,
-    outDir: values.saida ?? mkdtempSync(path.join(tmpdir(), "sonda-reuniao-")),
+    outDir: values.saida,
     headed: values["com-tela"],
   };
 }
@@ -78,6 +79,7 @@ export function refusal(options: ProbeOptions): string | null {
 
 export interface ProbeReport {
   platform: "meet";
+  outDir: string;
   meeting: string;
   displayName: string;
   browser: { version: string; headless: boolean };
@@ -94,10 +96,10 @@ export interface ProbeReport {
 export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   const started = performance.now();
   const now = (): number => Math.round(performance.now() - started);
-  mkdirSync(options.outDir, { recursive: true });
-  const out = (file: string): string => path.join(options.outDir, file);
+  const outDir = createOutDir(options.outDir);
+  const out = (file: string): string => path.join(outDir, file);
   const speech: Pcm = fitTo(concat(options.speech.map((file) => readWav(readFileSync(file)))), SPEAK_SECONDS);
-  writeFileSync(out("enviada.wav"), writeWav(speech));
+  writePrivate(out("enviada.wav"), writeWav(speech));
 
   const steps: Step[] = [];
   const samples: Array<Sample & { phase: "waiting" | "meeting" }> = [];
@@ -117,6 +119,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     });
   const report: ProbeReport = {
     platform: "meet",
+    outDir,
     meeting: maskCode(meetingCode(options.link)!),
     displayName: options.name,
     browser: { version: browser.version(), headless: !options.headed },
@@ -125,7 +128,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     resources: { whileWaiting: null, inMeeting: null, note: "" },
     humanCheck: [
       `O anfitrião ouviu na reunião os ${SPEAK_SECONDS} s de fala (os dois avisos gravados em pt-BR, ou o --fala)? Sim ou não, e se cortou.`,
-      `Quem rodou ouviu ${out("escuta-8k.wav")} e reconhece a fala do anfitrião? E em ${out("escuta-original.wav")} (a taxa do navegador), a diferença pesa?`,
+      `O anfitrião ouviu ${out("escuta-8k.wav")} (a cópia da pasta) e reconhece a própria fala? E em ${out("escuta-original.wav")} (a taxa do navegador), a diferença pesa?`,
     ],
     notMeasured: [],
   };
@@ -139,7 +142,8 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     if (asked) report.admission.askedAtMs = asked.atMs;
     if (asked && answered) Object.assign(report.admission, { answeredAtMs: answered.atMs, waitMs: answered.atMs - asked.atMs });
     if (report.admission.result !== "admitted") {
-      await page.screenshot({ path: out("falha.png") }).catch(() => undefined);
+      const shot = await page.screenshot().catch(() => undefined);
+      if (shot) writePrivate(out("falha.png"), shot);
       return report;
     }
     phase = "meeting";
@@ -153,8 +157,8 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     const raw = Buffer.from(capture.base64, "base64");
     const heard: Pcm = { sampleRate: capture.sampleRate, samples: new Int16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2) };
     const heard8k = downsample(heard, VOICE_RATE);
-    writeFileSync(out("escuta-original.wav"), writeWav(heard));
-    writeFileSync(out("escuta-8k.wav"), writeWav(heard8k));
+    writePrivate(out("escuta-original.wav"), writeWav(heard));
+    writePrivate(out("escuta-8k.wav"), writeWav(heard8k));
     report.sent = { file: out("enviada.wav"), stats: audioStats(speech) };
     report.heard = { fileNative: out("escuta-original.wav"), file8k: out("escuta-8k.wav"), stats: audioStats(heard), stats8k: audioStats(heard8k) };
     steps.push({ name: "gravou_a_escuta", atMs: now(), ok: heard.samples.length > 0, detail: `${capture.sampleRate} Hz` });
@@ -176,7 +180,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       "reunião com mais de uma pessoa além da sonda, e entrada sem a página em pt-BR",
       ...(measuring ? [] : ["CPU e memória"]),
     ];
-    writeFileSync(out("relatorio.json"), `${JSON.stringify(report, null, 2)}\n`);
+    writePrivate(out("relatorio.json"), `${JSON.stringify(report, null, 2)}\n`);
   }
   return report;
 }
@@ -196,7 +200,7 @@ async function main(): Promise<number> {
   }
   const report = await runProbe(options);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  process.stderr.write(`\nArquivos em ${options.outDir}. Falta o ouvido humano:\n- ${report.humanCheck.join("\n- ")}\n`);
+  process.stderr.write(`\nArquivos em ${report.outDir} (só de quem rodou; copie e apague a pasta inteira). Falta o ouvido humano:\n- ${report.humanCheck.join("\n- ")}\n`);
   return report.admission.result === "admitted" && report.heard ? 0 : 1;
 }
 
