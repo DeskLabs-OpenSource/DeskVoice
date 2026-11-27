@@ -1853,4 +1853,81 @@ describe("motor pipeline (fatia 6): a concordância (\"aham\", \"sim\") não cor
     expect(brain?.requests.length).toBe(1);
     await session.close();
   });
+
+  /** Deixa a resposta em curso sair inteira: a síntese acaba, e ela vai à transcrição. */
+  async function finishReply(voice: ReturnType<typeof gatedVoice>, rest: ReturnType<typeof gate>, log: { events: string[] }) {
+    rest.release();
+    while (voice.pending() > 0 || !log.events.some((event) => event.startsWith("agent:"))) {
+      voice.step();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await settle();
+  }
+
+  it("o \"aham\" começado com a resposta saindo e com o `final` depois de ela acabar: não vira turno, nem abre pedido", async () => {
+    // O caso mais comum: a janela da resposta é a síntese, que acaba antes do áudio; o `final` do "aham"
+    // chega com ela já fora. Só a marca do trecho (`agreementSegment`) diz que ele é concordância.
+    const { session, log, voice, rest } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Aham" },
+      { afterAudioMs: 300, text: "Aham.", final: true },
+    ]);
+    speak(session, 100);
+    await until(() => log.events.filter((event) => event === "activity").length === 2, "o parcial, com a resposta saindo");
+    await finishReply(voice, rest, log);
+    expect(log.events).toContain(`agent: ${(FIRST + SECOND).trim()}`);
+    speak(session, 100);
+    await until(() => log.events.includes("user: Aham."), "o `final` da concordância na transcrição");
+    await settle();
+    expect(log.events).not.toContain("interrupted");
+    expect(log.events.filter((event) => event.startsWith("turn ended"))).toEqual(["turn ended (transcript)"]);
+    expect(brain?.requests.length).toBe(1);
+    await session.close();
+  });
+
+  it("depois desse `final`, o \"sim\" dito fora da resposta é resposta: vira turno e abre pedido", async () => {
+    // A marca zera no `final`: sem isso, todo "sim" dali em diante seria engolido como concordância.
+    const { session, log, voice, rest } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Aham" },
+      { afterAudioMs: 300, text: "Aham.", final: true },
+      { afterAudioMs: 400, text: "Sim.", final: true },
+    ]);
+    speak(session, 100);
+    await until(() => log.events.filter((event) => event === "activity").length === 2, "o parcial, com a resposta saindo");
+    await finishReply(voice, rest, log);
+    speak(session, 100);
+    await until(() => log.events.includes("user: Aham."), "o `final` da concordância na transcrição");
+    await settle();
+    brain?.reply([text("Confirmado."), usage(40, 2)]);
+    speak(session, 100);
+    await until(() => log.events.includes("user: Sim."), "o \"sim\" na transcrição");
+    await settle();
+    expect(log.events.filter((event) => event.startsWith("turn ended"))).toEqual(["turn ended (transcript)", "turn ended (transcript)"]);
+    expect(brain?.requests.length).toBe(2);
+    expect(messagesOf(1).slice(-2)).toEqual([
+      { role: "user", content: "Aham." },
+      { role: "user", content: "Sim." },
+    ]);
+    await session.close();
+  });
+
+  it("a guarda fecha a concordância pelo parcial, e o `final` estende ela: o resto também é concordância, e não abre pedido", async () => {
+    const { session, log, voice, rest } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Uhum" },
+      { afterAudioMs: 300, text: "Uhum, uhum.", final: true },
+    ]);
+    speak(session, 100);
+    await until(() => log.events.filter((event) => event === "activity").length === 2, "o parcial");
+    expect(session.closeCallerTurn?.()).toBe(true);
+    speak(session, 100);
+    await until(() => log.events.includes("user: uhum."), "o resto da concordância na transcrição");
+    await finishReply(voice, rest, log);
+    expect(log.events).not.toContain("interrupted");
+    expect(log.events.filter((event) => event.startsWith("user:"))).toEqual(["user: Oi.", "user: Uhum", "user: uhum."]);
+    expect(log.events.filter((event) => event.startsWith("turn ended"))).toEqual(["turn ended (transcript)"]);
+    expect(brain?.requests.length).toBe(1);
+    await session.close();
+  });
 });
