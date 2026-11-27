@@ -1333,7 +1333,7 @@ describe("guarda contra o silêncio com o motor OpenAI (servidor falso)", { time
     ]);
   });
 
-  it("o servidor fecha o item e nunca começa a resposta: closeCallerTurn não age, e a guarda pede para repetir depois de 4 s", async () => {
+  it("o servidor fecha o item e nunca começa a resposta: closeCallerTurn não age, e a guarda pede para repetir depois de 8 s", async () => {
     const { callId, transport, session, harness } = await openaiCall("silence-guard-openai-stuck");
 
     fake.send({ type: "input_audio_buffer.speech_started" });
@@ -1347,6 +1347,10 @@ describe("guarda contra o silêncio com o motor OpenAI (servidor falso)", { time
     expect(harness.timers.fire(AFTER_WORDS_MS)).toBe(1);
     harness.clock.advance(AFTER_CLOSE_MS);
     expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+    // O motor segue dizendo que responde (o item fechado sem resposta): a guarda espera um prazo a
+    // mais, e só um. Depois dele, pede mesmo assim.
+    harness.clock.advance(AFTER_CLOSE_MS);
+    expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
     // O agente não fica calado: a primeira mensagem de commit ou de resposta é o pedido para repetir.
     const first = await fake.waitFor((message) => message.type === "input_audio_buffer.commit" || message.type === "response.create");
     expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining(ASK_TO_REPEAT) } });
@@ -1354,7 +1358,7 @@ describe("guarda contra o silêncio com o motor OpenAI (servidor falso)", { time
     const guardEvents = (await eventsOf(app, callId)).filter((event) => event.kind === "caller_unanswered");
     expect(guardEvents.map((event) => event.payload)).toEqual([
       { action: "turn_closed", waitedMs: AFTER_WORDS_MS, words: true },
-      { action: "asked_to_repeat", waitedMs: AFTER_WORDS_MS + AFTER_CLOSE_MS, words: true },
+      { action: "asked_to_repeat", waitedMs: AFTER_WORDS_MS + 2 * AFTER_CLOSE_MS, words: true },
     ]);
 
     transport.callerHangup();

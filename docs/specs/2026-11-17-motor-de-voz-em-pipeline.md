@@ -723,6 +723,24 @@ em tokens, em segundos, ou, sem `usage`, pela duração do item, ao preço por m
   confirmação não sai com a chave do motor, como a da voz sai com a dela: apagar a chave do motor desliga
   o pipeline (`no_transcriber_key`), mas a confirmação continua gravada.
 
+**6b: a escolha do Pipeline e da voz pela tela (DESA-474, depois do #597).** O campo Motor libera o
+Pipeline quando ele está montado (`pipelineMissing`, em `agents/[id]/pipeline-pieces.ts`): o servidor sem
+motivo em `unavailable`, uma transcrição com a chave e a confirmação da 9.1, um cérebro que conversa com a
+chave aceita, e uma voz com a chave e a confirmação. A régua parte da de `requirePipeline`, lida antes, e é
+mais dura na chave de cada peça; o preço da voz fica com o 422 do servidor. Sem isso,
+o Pipeline fica desligado, com a linha da peça que falta (`transcriber_unconfirmed`, `no_brain`,
+`no_voice`, além dos dois motivos do servidor). As peças do bloco ficam no rascunho do agente: a
+transcrição, o cérebro e o modelo com preço, e a voz, marcada em cada voz da conta confirmada ("Usar … no
+Pipeline", ao lado do Ouvir). Com o Pipeline no campo Motor, o salvar leva `pipeline` pela mesma rota e
+pela mesma validação da 5a, sem caminho novo de escrita. O `engine` de antes fica guardado, porque a API
+recusa o pipeline como `engine`. Voltar a outro motor leva `pipeline: null`. A escolha só vai no PATCH
+quando muda: salvar outro campo não regrava a escolha, nem esbarra numa confirmação apagada. Sem voz
+marcada, o salvar diz o que falta e não manda nada. As recusas do servidor (`pipeline_*`) ganharam frase
+nos três idiomas, com a peça do `detail`. A transcrição de hoje é a peça provisória (opção B da
+DESA-398): a tela diz "Transcrição provisória: a definitiva vem com a medida da transcrição." junto da
+escolha da transcrição e no campo Motor, com o Pipeline escolhido. A tela em abas (DESA-470) ainda vai
+mover o bloco: a 6b fica na tela de hoje.
+
 ## 5. O que espera a R12
 
 - **O contrato `StreamingTranscriber` na `main`: não espera.** A DESA-398 decidiu que as fatias 3 a 5

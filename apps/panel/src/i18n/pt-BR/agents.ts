@@ -58,14 +58,17 @@ const agents = {
   /** O pipeline no campo do motor (fatia 5b-1): listado, desligado, com o motivo. */
   enginePipeline: "Pipeline (desligado)",
   enginePipelineOn: "Pipeline",
-  enginePipelineReady: "Pronto nesta organização: a transcrição e a chave dela estão aqui. A escolha das peças pela tela chega na próxima versão; até lá, ela é gravada pela API do agente (campo pipeline).",
-  enginePipelineOff: { no_live_transcriber: "Falta uma transcrição em tempo real neste servidor. Ela chega com a medida da R12.", no_transcriber_key: "Falta a chave que a transcrição usa nesta organização: a da OpenAI usa a chave do motor OpenAI Realtime, em Configurações → Inteligência artificial." } as Record<string, string>,
+  enginePipelineReady: "Pronto nesta organização: a transcrição, o cérebro e a voz estão aqui. Escolha o Pipeline e as peças no bloco Pipeline, e salve.",
+  enginePipelineOff: { no_live_transcriber: "Falta uma transcrição em tempo real neste servidor. Ela chega com a medida da R12.", no_transcriber_key: "Falta a chave que a transcrição usa nesta organização: a da OpenAI usa a chave do motor OpenAI Realtime, em Configurações → Inteligência artificial.", transcriber_unconfirmed: "Falta confirmar o envio do áudio para a transcrição, no bloco Pipeline abaixo.", no_brain: "Falta um cérebro que conversa, com a chave aceita, em Configurações → Cérebros.", no_voice: "Falta uma voz com a chave salva e o envio confirmado, em Configurações → Voz." } as Record<string, string>,
   enginePipelineOffUnknown: "Ainda desligado nesta versão.",
-  /** O bloco "Pipeline" (fatia 5b-1): as três peças, só para ver e ouvir; nada é salvo daqui. */
+  /** O bloco "Pipeline" (fatias 5b-1 e 6b): as três peças; com o Pipeline no campo Motor, a escolha vai no salvar do agente. */
   pipeline: "Pipeline",
-  pipelineLead: "Transcrição, cérebro e voz escolhidos à parte. Por enquanto, só para ver e ouvir: o Pipeline está desligado, e nada daqui é salvo no agente.",
+  pipelineLead: "Transcrição, cérebro e voz escolhidos à parte. Com o Pipeline no campo Motor, estas escolhas são salvas no agente; com outro motor, ficam só na tela.",
   pipelineReadOnly: "Só quem configura a organização vê as peças do Pipeline.",
   pipelineTranscriber: "Transcrição",
+  pipelineTranscriberChoice: "Transcrição usada",
+  /** A transcrição de hoje é provisória (decisão B da DESA-398): junto da escolha e no campo Motor. */
+  pipelineTranscriberProvisional: "Transcrição provisória: a definitiva vem com a medida da transcrição.",
   pipelineTranscriberNone: "Nenhuma transcrição em tempo real neste servidor.",
   pipelineTranscriberNotice: "O áudio da pessoa na ligação vai para a {provider}.",
   pipelineTranscriberUnconfirmed: "Envio ainda não confirmado: o pipeline com esta transcrição não abre sem a confirmação.",
@@ -75,6 +78,8 @@ const agents = {
   pipelineTranscriberRemoveAsk: "Apagar a confirmação do envio para a {provider}? O pipeline com esta transcrição deixa de abrir.",
   pipelineTranscriberKeep: "Manter",
   pipelineBrain: "Cérebro",
+  pipelineStoredGone: "{piece} (gravada no agente, fora da lista)",
+  pipelineStoredGoneHint: "A peça gravada no agente saiu da lista (confirmação apagada, chave que deixou de estar aceita ou modelo sem preço). As ligações pelo Pipeline são recusadas até você escolher outra e salvar.",
   pipelineBrainHint: "Só os cérebros que conversam, com a chave aceita.",
   pipelineBrainNone: "Nenhum cérebro que conversa tem chave aceita. Cadastre um em Configurações → Cérebros.",
   pipelineBrainsLink: "Configurações → Cérebros",
@@ -85,10 +90,13 @@ const agents = {
   /** `{provider}` é o nome do fornecedor da voz. */
   pipelineVoiceNoKey: "Sem chave da {provider} salva. Cadastre a chave em",
   pipelineVoiceLink: "Configurações → Voz",
-  pipelineVoicesNote: "As vozes da sua conta aparecem aqui, mas só falam numa ligação quando o Pipeline ligar.",
+  pipelineVoicesNote: "As vozes da sua conta aparecem aqui. Marque a que o agente usa no Pipeline e ouça a amostra antes.",
   pipelineVoiceNoSample: "sem amostra",
   /** `{voice}` é o nome da voz. */
   pipelineVoiceListen: "Ouvir a amostra de {voice}",
+  pipelineVoiceUse: "Usar {voice} no Pipeline",
+  /** A peça que falta escolher, dita ao salvar com o Motor no Pipeline (fatia 6b). */
+  pipelineMissingPiece: { transcriber: "Escolha a transcrição do Pipeline antes de salvar.", brain: "Escolha o cérebro do Pipeline antes de salvar.", model: "Escolha um modelo com preço para o cérebro do Pipeline antes de salvar.", voice: "Marque a voz do Pipeline antes de salvar." },
   pipelineVoiceSampleFailed: "A amostra não tocou: o navegador recusou ou o fornecedor não respondeu.",
   /** `{who}` é quem confirmou; `{when}`, a data e a hora. */
   /** A latência medida do pipeline neste agente (fatia 5c): a mediana do `pipeline_turn_latency`. */

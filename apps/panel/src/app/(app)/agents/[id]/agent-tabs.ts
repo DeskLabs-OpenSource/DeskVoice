@@ -28,6 +28,9 @@ export const DRAFT_TAB = {
   engine: "agente",
   voiceId: "agente",
   listeningEnvironment: "agente",
+  // O Pipeline (fatia 6b) fica com o Motor, na aba Agente, até a fatia 2 separar Ouvido, Cérebro e Voz.
+  pipelineOn: "agente",
+  pieces: "agente",
   // "Cérebros deste agente" fica inteiro na aba Agente na fatia 1; quem lê a ligação muda de aba na fatia 2.
   analysis: "agente",
   tools: "ferramentas",

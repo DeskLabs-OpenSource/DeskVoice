@@ -26,12 +26,13 @@ import { agentTabs, changedTabs, DRAFT_TAB, FORM_TABS, hiddenTabOf, parseAgentTa
 import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
 import { AgentBrains } from "./brains";
 import { EngineField, newAgentEngine } from "./engine-field";
-import { PipelineBlock } from "./pipeline-block";
+import { PipelineBlock, usePipelineData } from "./pipeline-block";
+import { NO_PIECES, pipelineMissing, piecesOf, pipelineToSave, shownPieces, type PipelinePieces } from "./pipeline-pieces";
 import { AgentTestsTab } from "./tests/tests-tab";
-import { VoiceField } from "./voice-field";
+import { PIPELINE_BLOCK_ID, VoiceField } from "./voice-field";
 
 /** O agente como a API devolve, com quem lê a ligação dele (R4, fatia 5): nulo segue a organização. */
-type AgentWithBrain = Agent & { analysisBrain?: unknown };
+type AgentWithBrain = Agent & { analysisBrain?: unknown; pipeline?: unknown };
 
 interface Draft {
   name: string;
@@ -65,9 +66,13 @@ interface Draft {
   analystId: string;
   /** Quem lê a ligação depois que ela termina; de fábrica, igual à organização. */
   analysis: AnalysisDraft;
+  /** O campo Motor está no Pipeline (fatia 6b): o salvar grava `pieces` em `agents.pipeline`, e `engine` fica guardado. */
+  pipelineOn: boolean;
+  /** As peças do bloco Pipeline; com outro motor, ficam só na tela. */
+  pieces: PipelinePieces;
 }
 
-const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", transferReturns: true, callerIdleGuard: true, maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "", analysis: { kind: "organization" } };
+const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", transferReturns: true, callerIdleGuard: true, maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "", analysis: { kind: "organization" }, pipelineOn: false, pieces: NO_PIECES };
 
 // Todo campo do rascunho tem a aba dele: um campo novo sem aba não compila.
 const DRAFT_TABS: Record<keyof Draft, AgentTab> = DRAFT_TAB;
@@ -104,7 +109,15 @@ const toDraft = (agent: AgentWithBrain): Draft => ({
   dropFollowUpMessage: agent.dropFollowUpMessage ?? "",
   analystId: agent.analystId ?? "",
   analysis: toAnalysisDraft(agent.analysisBrain),
+  pipelineOn: agent.pipeline !== null && agent.pipeline !== undefined,
+  pieces: piecesOf(agent.pipeline),
 });
+
+/**
+ * A escolha gravada, para o salvar só mandar `pipeline` quando ela muda. Uma gravada fora da forma
+ * vira as peças vazias, iguais às do rascunho: o salvar não a regrava até o operador escolher.
+ */
+const storedChoice = (agent: AgentWithBrain): PipelinePieces | null => (agent.pipeline === null || agent.pipeline === undefined ? null : piecesOf(agent.pipeline));
 
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -140,7 +153,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   // Testes lê dados que as outras abas não usam: só monta na primeira vez que a aba abre.
   const [testsOpened, setTestsOpened] = useState(false);
   // O campo que precisa do foco depois que a aba dele abrir (o obrigatório vazio, o vocabulário com erro).
-  const pendingField = useRef<{ field: HTMLElement; report: boolean } | null>(null);
+  const pendingField = useRef<{ field: HTMLElement; report: boolean; scroll: boolean } | null>(null);
   const invalidSeen = useRef(false);
   const [confirming, setConfirming] = useState(false);
   // O que está gravado no servidor. `agent.data` não se atualiza sozinho depois de salvar, então o
@@ -153,6 +166,11 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const [savedAnalysis, setSavedAnalysis] = useState<AnalysisDraft>({ kind: "organization" });
   // O modelo escolhido não tem preço e o aviso dele está na tela: só então o salvar manda `acceptUnmeasured`.
   const [acceptUnmeasured, setAcceptUnmeasured] = useState(false);
+  // As peças do Pipeline como estão gravadas: o salvar só manda `pipeline` quando a escolha mudou (fatia 6b).
+  const [savedPipeline, setSavedPipeline] = useState<PipelinePieces | null>(null);
+  // A peça que falta escolher, dita ao salvar com o Motor no Pipeline.
+  const [pieceMissing, setPieceMissing] = useState<string>("");
+  const pipelineData = usePipelineData(canConfigure, draft?.pieces.brain ?? "");
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void => setDraft((current) => (current ? { ...current, [key]: value } : current));
 
   useEffect(() => {
@@ -162,6 +180,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       setSavedEnvironment(agent.data.listeningEnvironment ?? "normal");
       setSavedDropFollowUp(agent.data.dropFollowUp ?? "off");
       setSavedAnalysis(toAnalysisDraft(agent.data.analysisBrain));
+      setSavedPipeline(storedChoice(agent.data));
     }
   }, [agent.data]);
   // Agente novo propõe o idioma da organização (`organizations.language`, copiado do padrão da
@@ -182,19 +201,21 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
     const pending = pendingField.current;
     if (!pending) return;
     pendingField.current = null;
-    pending.field.focus();
+    if (pending.scroll) pending.field.scrollIntoView({ block: "start" });
+    else pending.field.focus();
     if (pending.report && pending.field instanceof HTMLInputElement) pending.field.reportValidity();
   }, [tab]);
   const selectTab = (next: AgentTab): void => router.replace(`/agents/${id}?aba=${next}`, { scroll: false });
-  /** Põe o foco num campo, abrindo antes a aba dele quando ela está fechada. */
-  const reveal = (field: HTMLElement | null, report: boolean): void => {
+  /** Põe o foco num campo (ou rola até um bloco, com `scroll`), abrindo antes a aba dele quando ela está fechada. */
+  const reveal = (field: HTMLElement | null, report: boolean, scroll = false): void => {
     if (!field) return;
     const hidden = hiddenTabOf(field);
     if (hidden === null) {
-      field.focus();
+      if (scroll) field.scrollIntoView({ block: "start" });
+      else field.focus();
       return;
     }
-    pendingField.current = { field, report };
+    pendingField.current = { field, report, scroll };
     selectTab(hidden);
   };
 
@@ -220,6 +241,12 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const handingOffHere = others.filter((other) => other.agentHandoffTargets?.includes(id));
   const engine = engines.data?.find((candidate) => candidate.id === draft.engine);
   const pipelineEngine = engines.data?.find((candidate) => candidate.assembled === true);
+  const missing = pipelineEngine ? pipelineMissing(pipelineEngine, pipelineData) : "unknown";
+  const pieces = shownPieces(draft.pieces, pipelineData, pipelineData.brainModels);
+  const setPieces = (next: Partial<PipelinePieces>): void => {
+    setPieceMissing("");
+    setDraft((current) => (current ? { ...current, pieces: { ...current.pieces, ...next } } : current));
+  };
   // Barulhento foi provado no OpenAI Realtime e no Gemini Live. Em outro motor, a opção some; um agente que já
   // está em Barulhento continua vendo o campo, com um aviso, para não guardar a escolha escondida.
   const noisyProven = NOISY_PROVEN_ENGINES.includes(draft.engine);
@@ -245,6 +272,14 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       return Promise.resolve(false);
     }
     const terms = vocabulary.result.terms;
+    // O Pipeline escolhido leva as peças só quando mudaram; outro motor leva `null` só quando o agente estava no Pipeline.
+    const toSave = pipelineToSave(draft.pipelineOn, draft.pieces, savedPipeline, pipelineData, pipelineData.brainModels);
+    if ("missing" in toSave) {
+      setPieceMissing(t.pipelineMissingPiece[toSave.missing]);
+      reveal(document.getElementById(PIPELINE_BLOCK_ID), false, true);
+      return Promise.resolve(false);
+    }
+    setPieceMissing("");
     return save.run(async () => {
       const body = {
         name: draft.name,
@@ -271,11 +306,13 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         dropFollowUpMessage: draft.dropFollowUpMessage,
         analystId: draft.analystId === "" ? null : draft.analystId,
         ...analysisPatch(draft.analysis, savedAnalysis, acceptUnmeasured),
+        ...("choice" in toSave && { pipeline: toSave.choice }),
       };
       const saved = await api<AgentWithBrain>(isNew ? "/agents" : `/agents/${id}`, { method: isNew ? "POST" : "PATCH", body });
       setSavedEnvironment(saved.listeningEnvironment ?? "normal");
       setSavedDropFollowUp(saved.dropFollowUp ?? "off");
       setSavedAnalysis(toAnalysisDraft(saved.analysisBrain));
+      setSavedPipeline(storedChoice(saved));
       if (isNew) router.replace(`/agents/${saved.id}${tab === "agente" ? "" : `?aba=${tab}`}`);
       else {
         setDraft(toDraft(saved));
@@ -367,14 +404,21 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                   t={t}
                   engines={engines.data}
                   value={draft.engine}
+                  pipelineOn={draft.pipelineOn}
+                  missing={missing}
                   onChange={(nextId) => {
                     const next = engines.data?.find((candidate) => candidate.id === nextId);
+                    setPieceMissing("");
+                    // O Pipeline nunca vai em `engine` (a API recusa): o motor de antes fica guardado.
+                    set("pipelineOn", next?.assembled === true);
+                    if (next?.assembled === true) return;
                     set("engine", nextId);
                     // A voz de um motor não existe no outro: trocar de motor volta para a voz padrão.
                     if (!next?.voices.some((voice) => voice.id === draft.voiceId)) set("voiceId", "");
                   }}
                 />
-                <VoiceField t={t} engine={engine} voiceId={draft.voiceId} language={draft.language} onChange={(next) => set("voiceId", next)} />
+                {/* No Pipeline, a voz é a do bloco: a do motor não fala. */}
+                {draft.pipelineOn ? null : <VoiceField t={t} engine={engine} voiceId={draft.voiceId} language={draft.language} onChange={(next) => set("voiceId", next)} />}
               </div>
               {noisyProven || draft.listeningEnvironment === "noisy" ? (
                 <div className="mt-4 max-w-md">
@@ -408,7 +452,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                   </Notice>
                 </div>
               ) : null}
-              {engine && engine.requiresKey && !engine.keyConfigured ? (
+              {!draft.pipelineOn && engine && engine.requiresKey && !engine.keyConfigured ? (
                 <div className="mt-4">
                   <Notice tone="warn">
                     <p>{t.engineNoKey}</p>
@@ -418,11 +462,11 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                   </Notice>
                 </div>
               ) : null}
-              {engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
+              {!draft.pipelineOn && engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
             </Panel>
 
-            {/* O Pipeline (fatia 5b-1): só para ver e ouvir; nada daqui entra no salvar. */}
-            {pipelineEngine ? <PipelineBlock t={t} pipeline={pipelineEngine} canConfigure={canConfigure} agentId={isNew ? null : id} /> : null}
+            {/* O Pipeline: as peças vão no salvar quando o campo Motor está nele (fatia 6b). */}
+            {pipelineEngine ? <PipelineBlock t={t} pipeline={pipelineEngine} canConfigure={canConfigure} agentId={isNew ? null : id} data={pipelineData} pieces={pieces} onPieces={setPieces} /> : null}
 
             <AgentBrains
               agentId={isNew ? null : id}
@@ -672,6 +716,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                   {common.actions.save}
                 </Button>
                 <ActionStatus action={save} />
+                {pieceMissing ? <Notice tone="fail">{pieceMissing}</Notice> : null}
                 {!isNew && !confirming ? (
                   <Button variant="ghost" className="ml-auto" icon={<Trash size={18} weight="duotone" aria-hidden />} onClick={() => setConfirming(true)}>
                     {t.delete}

@@ -407,6 +407,22 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining("marcador") } });
   });
 
+  it("answering: do item fechado pelo servidor até o fim da resposta", async () => {
+    const { session } = await openSession({ greeting: undefined });
+    expect(session.answering?.()).toBe(false);
+    fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: "i1" });
+    const committed = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await committed; // o motor já processou o committed
+    expect(session.answering?.()).toBe(true);
+    fake.send({ type: "response.created", response: {} });
+    fake.send({ type: "response.done", response: {} });
+    const done = nextEvent(session, "interrupted");
+    fake.send({ type: "input_audio_buffer.speech_started" });
+    await done; // o motor já processou o response.done
+    expect(session.answering?.()).toBe(false);
+  });
+
   it("closeCallerTurn com o item já fechado pelo servidor, antes do response.created, não faz nada", async () => {
     const { session } = await openSession({ greeting: undefined });
     fake.send({ type: "input_audio_buffer.committed", previous_item_id: null, item_id: "i1" });
