@@ -21,6 +21,21 @@ function sipHost(): string {
   throw new Error("no non-loopback IPv4 address on this machine; set DESKVOICE_E2E_SIP_HOST");
 }
 
+/**
+ * O endereço desta máquina na rede do Docker da central (o gateway da rede do contêiner do
+ * Asterisk): um segundo endereço de origem, diferente do de `sipHost`, que a central alcança.
+ * `DESKVOICE_E2E_BRIDGE_HOST` troca.
+ */
+function bridgeAddress(): string {
+  const given = process.env.DESKVOICE_E2E_BRIDGE_HOST;
+  if (given) return given;
+  const id = execFileSync("docker", ["ps", "-q", "--filter", "label=com.docker.compose.service=asterisk"], { encoding: "utf8" }).trim().split("\n")[0];
+  if (!id) throw new Error("no asterisk container found; set DESKVOICE_E2E_BRIDGE_HOST");
+  const gateway = execFileSync("docker", ["inspect", "--format", "{{range .NetworkSettings.Networks}}{{.Gateway}} {{end}}", id], { encoding: "utf8" }).trim().split(/\s+/)[0];
+  if (!gateway) throw new Error("the asterisk container has no network gateway; set DESKVOICE_E2E_BRIDGE_HOST");
+  return gateway;
+}
+
 /** Anota a medida no relatório e no log do CI: o PR relata o código de resposta visto. */
 function measured(label: string, answer: ProbeAnswer): void {
   const text = answer.answered ? `${answer.status} ${answer.reason} (a central viu a origem ${answer.received ?? "?"}:${answer.rport ?? "?"})` : "sem resposta";
@@ -122,7 +137,7 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
     process.stdout.write(`[sonda] M2: linha Funcionando; OPTIONS da central vindos de ${qualify.map((request) => `${request.from.address}:${request.from.port}`).join(", ")}\n`);
 
     // A linha passa para outro endereço: a mesma origem agora é recusada, também quando se
-    // apresenta como a linha (M1, origem que casa com uma linha mas está fora do permit).
+    // apresenta com o nome da linha (M1: o nome no From não reconhece a linha).
     const elsewhere = "198.51.100.77";
     await panel.getByLabel(label(line.host)).fill(elsewhere);
     await panel.getByRole("button", { name: line.saveLine }).click();
@@ -136,10 +151,9 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
     expect(refused.status).not.toBe(200);
     const seen = [noLine, allowed, asLine, refusedAsLine, refused];
 
-    // O controle: a central reconhece a linha pelo nome que a sonda apresenta? Uma linha por registro
-    // com um nome que nunca resolve fica sem filtro (contrato 8) e a tela diz isso; ali, a sonda que
-    // se apresenta como a linha passa. Então a recusa acima é do filtro, e não da falta de linha (o
-    // log do Asterisk diz "Not match Endpoint ACL").
+    // Uma linha por registro com um nome que nunca resolve fica sem filtro (contrato 8), e a tela diz
+    // isso. Sem filtro, ainda assim ninguém entra por ela só se apresentando com o nome da linha no
+    // From: a central reconhece a linha por registro pelo `line`, e não pelo nome.
     const created = await page.request.post("/api/v1/trunks", {
       data: { name: `${name} registro`, host: "sip.invalid", username: "sonda", password: `sonda-${unique()}${unique()}`, authMode: "register" },
     });
@@ -147,14 +161,12 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
     registerId = ((await created.json()) as { data: { id: string } }).data.id;
     await page.reload();
     await expect(section(page, `${name} registro`)).toContainText(line.allowedEmpty);
-    const unfiltered = await until(probe, host, `trunk-${registerId}`, (answer) => answer.status === 200);
-    measured("controle: linha sem filtro (nome que não resolve), apresentando-se como a linha", unfiltered);
-    expect(unfiltered.status, "the telephony server does not recognize a line by the name the probe presents, so the refusals above say nothing about the filter").toBe(200);
     // Com um extra noutro endereço, a linha continua sem filtro: os extras sozinhos não ligam o filtro
     // de um nome que nunca resolveu, para não recusar a entrega pelo servidor do registro.
     const patched = await page.request.patch(`/api/v1/trunks/${registerId}`, { data: { matchExtra: ["198.51.100.78"] } });
     expect(patched.status()).toBe(200);
     // A gravação volta a linha a "não verificada"; a aplicação com o extra a devolve a "warn" (conjunto vazio), ou "fail" se a conferência já passou.
+    // Esperar a aplicação garante que a recusa abaixo não é da linha ainda não escrita.
     await expect
       .poll(async () => ((await (await page.request.get("/api/v1/trunks")).json()) as { data: Array<{ id: string; status: string; matchExtra: string[] }> }).data.find((entry) => entry.id === registerId), {
         timeout: 60_000,
@@ -162,50 +174,66 @@ test("porta da telefonia: sem linha, recusa; a linha libera só o endereço dela
       .toMatchObject({ status: expect.stringMatching(/^(warn|fail)$/), matchExtra: ["198.51.100.78"] });
     await page.reload();
     await expect(section(page, `${name} registro`)).toContainText(line.allowedEmpty);
-    const stillOpen = await until(probe, host, `trunk-${registerId}`, (answer) => answer.status === 200);
-    measured("linha por registro com nome que não resolve e um extra (198.51.100.78): continua sem filtro, apresentando-se como a linha", stillOpen);
-    expect(stillOpen.status).toBe(200);
+    const byNameOnly = await probe.options(host, { user: `trunk-${registerId}` });
+    measured("linha por registro sem filtro (nome que não resolve, um extra), apresentando-se só pelo nome da linha", byNameOnly);
+    expect(byNameOnly.answered).toBe(true);
+    expect(byNameOnly.status).toBe(401);
 
-    // O filtro da linha por registro (contrato 11), numa linha cujo nome resolve: `postgres` é o
-    // nome do serviço do banco na rede interna da instalação, que o DNS do Docker responde ao
-    // processo de voz. O registro vai para lá e não tem resposta (nada escuta SIP no banco), e o
-    // `permit` fica com o endereço interno do banco, que não é o da sonda. A linha nova nasce com o
-    // filtro ligado; desligado pela tela, a sonda que se apresenta como a linha passa; religado, é
-    // recusada pelo filtro.
-    const switchName = `${name} filtro`;
-    const withName = await page.request.post("/api/v1/trunks", {
-      data: { name: switchName, host: "postgres", username: "sonda", password: `sonda-${unique()}${unique()}`, authMode: "register" },
-    });
-    expect(withName.status()).toBe(200);
-    const born = ((await withName.json()) as { data: { id: string; inboundFilter: boolean } }).data;
-    switchId = born.id;
-    expect(born.inboundFilter).toBe(true);
-    await expect
-      .poll(async () => ((await (await page.request.get("/api/v1/trunks")).json()) as { data: Array<{ id: string; inboundAllowed: string[] }> }).data.find((entry) => entry.id === switchId)?.inboundAllowed.length ?? 0, {
-        timeout: 60_000,
-      })
-      .toBeGreaterThan(0);
-    await page.reload();
-    const switchPanel = section(page, switchName);
-    await expect(switchPanel).toContainText(line.allowedOthers);
-    const bornOn = await until(probe, host, `trunk-${switchId}`, (answer) => answer.answered && answer.status !== 200);
-    measured("contrato 11: linha por registro nova (nome que resolve), filtro ligado, apresentando-se como a linha", bornOn);
-    expect(bornOn.status).toBe(401);
+    // O filtro da linha por registro (contrato 11). O registro vai para uma segunda sonda, no
+    // endereço da ponte do Docker da instalação: é dela o `permit`, e não da primeira sonda. A
+    // segunda sonda guarda o `line` que a central põe no Contact do registro, e a primeira o usa
+    // como a operadora o usaria. A linha nova nasce com o filtro ligado: a primeira sonda é
+    // recusada pelo filtro. Desligado pela tela, ela passa pelo `line` (o controle: a central
+    // reconhece a linha, e a recusa de antes é do filtro), mas não pelo nome. Religado, é recusada.
+    const registrar = await SipProbe.open(bridgeAddress());
+    try {
+      const switchName = `${name} filtro`;
+      const withName = await page.request.post("/api/v1/trunks", {
+        data: { name: switchName, host: `${registrar.local.address}:${registrar.local.port}`, username: "sonda", password: `sonda-${unique()}${unique()}`, authMode: "register" },
+      });
+      expect(withName.status()).toBe(200);
+      const born = ((await withName.json()) as { data: { id: string; inboundFilter: boolean } }).data;
+      switchId = born.id;
+      expect(born.inboundFilter).toBe(true);
+      // O `line` mais novo: a central pode refazer o registro numa recarga, com outro `line`.
+      const lineToken = (): string | undefined => registrar.seen.filter((request) => request.method === "REGISTER" && request.line !== undefined).at(-1)?.line;
+      await expect.poll(lineToken, { timeout: 60_000 }).toBeDefined();
+      test.info().annotations.push({ type: "registro", description: `REGISTER da central chegou à segunda sonda (${registrar.local.address}) com line` });
+      await page.reload();
+      const switchPanel = section(page, switchName);
+      await expect(switchPanel).toContainText(line.allowedOthers);
+      const byLine = async (accept: (answer: ProbeAnswer) => boolean): Promise<ProbeAnswer> => {
+        let answer = await probe.options(host, { user: stranger, line: lineToken() });
+        for (let attempt = 1; attempt < 20 && !accept(answer); attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          answer = await probe.options(host, { user: stranger, line: lineToken() });
+        }
+        return answer;
+      };
+      const bornOn = await byLine((answer) => answer.answered && answer.status !== 200);
+      measured("contrato 11: linha por registro nova, filtro ligado, com o line do registro", bornOn);
+      expect(bornOn.status).toBe(401);
 
-    await switchPanel.getByRole("button", { name: line.filterOff, exact: true }).click();
-    await expect(switchPanel).toContainText(line.filterSwitchedOff);
-    await expect(switchPanel).not.toContainText(line.allowedOthers);
-    const switchedOff = await until(probe, host, `trunk-${switchId}`, (answer) => answer.status === 200);
-    measured("contrato 11: mesma linha com o filtro desligado pela tela, apresentando-se como a linha", switchedOff);
-    expect(switchedOff.status).toBe(200);
+      await switchPanel.getByRole("button", { name: line.filterOff, exact: true }).click();
+      await expect(switchPanel).toContainText(line.filterSwitchedOff);
+      await expect(switchPanel).not.toContainText(line.allowedOthers);
+      const switchedOff = await byLine((answer) => answer.status === 200);
+      measured("contrato 11: mesma linha com o filtro desligado pela tela, com o line do registro", switchedOff);
+      expect(switchedOff.status).toBe(200);
+      const offByName = await probe.options(host, { user: `trunk-${switchId}` });
+      measured("mesma linha com o filtro desligado, apresentando-se só pelo nome da linha", offByName);
+      expect(offByName.status).toBe(401);
 
-    await switchPanel.getByRole("button", { name: line.filterOn, exact: true }).click();
-    await expect(switchPanel).not.toContainText(line.filterSwitchedOff);
-    await expect(switchPanel.getByRole("button", { name: line.filterOff, exact: true })).toBeVisible();
-    const switchedOn = await until(probe, host, `trunk-${switchId}`, (answer) => answer.answered && answer.status !== 200);
-    measured("contrato 11: mesma linha com o filtro religado pela tela, apresentando-se como a linha", switchedOn);
-    expect(switchedOn.status).toBe(401);
-    asteriskSaid([...seen, unfiltered, stillOpen, bornOn, switchedOff, switchedOn]);
+      await switchPanel.getByRole("button", { name: line.filterOn, exact: true }).click();
+      await expect(switchPanel).not.toContainText(line.filterSwitchedOff);
+      await expect(switchPanel.getByRole("button", { name: line.filterOff, exact: true })).toBeVisible();
+      const switchedOn = await byLine((answer) => answer.answered && answer.status !== 200);
+      measured("contrato 11: mesma linha com o filtro religado pela tela, com o line do registro", switchedOn);
+      expect(switchedOn.status).toBe(401);
+      asteriskSaid([...seen, byNameOnly, bornOn, switchedOff, offByName, switchedOn]);
+    } finally {
+      await registrar.close();
+    }
   } finally {
     await probe.close();
     if (trunkId) await page.request.delete(`/api/v1/trunks/${trunkId}`);
