@@ -31,7 +31,8 @@ novo sem outra decisão do dono.
    clica em **Admitir**. A sonda espera até 5 minutos (`--espera-lobby`).
 3. Logo depois de entrar, a sonda fala por 10 s: são dois avisos gravados em pt-BR do próprio
    DeskVoice ("indisponível" e "não recebi a sua escolha"). O anfitrião anota se ouviu, e se cortou.
-4. Durante esses 30 s, o anfitrião fala alguma coisa (contar de 1 a 20 basta). A sonda grava.
+4. Quando a sonda parar de falar, o anfitrião fala por cerca de 20 s (contar de 1 a 20 basta). A
+   gravação dura 30 s a partir do começo da fala da sonda, então sobram uns 20 s para ele.
 5. A sonda sai sozinha. O anfitrião diz a quem rodou se ouviu os 10 s.
 
 ## Como rodar
@@ -73,6 +74,37 @@ desenho: a sonda "passa" sem que um humano tenha ouvido o áudio dos dois lados.
 O áudio gravado e as capturas de tela. Eles têm a voz e a imagem de quem estava na reunião, e
 ficam só na pasta de saída. Depois de ouvir, apague a pasta. O que volta para a pasta do dono é o
 `relatorio.json` (o código da reunião vai mascarado: `abc-****-hij`) e as duas respostas humanas.
+
+## A gravação da voz do Rafael: quem ouve, por onde passa, quem apaga
+
+Vale para a rodada única do pedido 3 (anfitrião: Rafael, sonda na vps-teste).
+
+1. **Quem ouve o `escuta-8k.wav`: o Rafael.** A voz gravada é a dele, e só ele responde à segunda
+   pergunta humana (se reconhece a própria fala). Os agentes não ouvem áudio.
+2. **Por onde o arquivo passa: só por `scp`, da vps-teste para o Mac dele.** Na vps-teste o
+   agente roda a sonda como o usuário `paperclip`, cujo `TMPDIR` é uma pasta da execução, que pode
+   ser apagada. Por isso a rodada usa uma pasta fixa:
+
+   ```sh
+   pnpm exec tsx scripts/sonda-reuniao/sonda.ts https://meet.google.com/abc-defg-hij \
+     --anfitriao-presente --saida /tmp/sonda-reuniao-rafael
+   ```
+
+   A sessão do orquestrador, que roda no Mac do Rafael, puxa o arquivo como root na VPS (caminho
+   conferido pelo orquestrador em 27/11/2026, com um arquivo de teste de ida e volta):
+
+   ```sh
+   scp vps-teste:/tmp/sonda-reuniao-rafael/escuta-8k.wav ~/Downloads/
+   ```
+
+   O arquivo não passa por e-mail, chat, tarefa nem repositório.
+3. **Quem apaga, e quando:**
+   - quem rodou a sonda apaga a pasta na VPS (`rm -rf /tmp/sonda-reuniao-rafael`) logo depois de
+     a cópia chegar ao Mac. Antes disso, o `relatorio.json` vai para a pasta do Rafael;
+   - o orquestrador apaga a cópia do Mac (`~/Downloads/escuta-8k.wav`) assim que o Rafael
+     responder às duas perguntas.
+
+   Fora essas duas, não fica nenhuma cópia com a voz dele.
 
 ## Peças
 
