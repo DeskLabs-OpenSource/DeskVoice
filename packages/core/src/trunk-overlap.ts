@@ -163,17 +163,24 @@ export async function trunkOverlapWarning(
 }
 
 /**
- * Grava na auditoria da instalação que a organização recebeu a pergunta da faixa sobreposta
- * (`trunk_overlap_refused`). Roda numa transação própria (`withSystem`), fora da transação da
+ * Grava na auditoria da instalação a conferência de faixa que achou linha a tirar do ar: a recusa
+ * (`trunk_overlap_refused`, a tela pediu confirmação) ou a confirmação (`trunk_overlap_confirmed`,
+ * a gravação seguiu mesmo assim). Roda numa transação própria (`withSystem`), fora da transação da
  * linha: o evento fica gravado mesmo com a resposta 409 e nada salvo. Leva só a organização e a
  * conta de quem tentou; o `payload` é vazio.
  */
-export async function recordTrunkOverlapRefused(db: Db, at: Date, organizationId: string, userId: string): Promise<void> {
+export async function recordTrunkOverlap(
+  db: Db,
+  at: Date,
+  kind: "trunk_overlap_refused" | "trunk_overlap_confirmed",
+  organizationId: string,
+  userId: string,
+): Promise<void> {
   await withSystem(db, async (q) => {
     const person = await q.one<{ accountId: string }>(`select account_id as "accountId" from users where id = $1 and organization_id = $2 and kind = 'member'`, [
       userId,
       organizationId,
     ]);
-    await recordInstallationEvent(q, at, "trunk_overlap_refused", { actorAccountId: person?.accountId ?? null, organizationId, payload: {} });
+    await recordInstallationEvent(q, at, kind, { actorAccountId: person?.accountId ?? null, organizationId, payload: {} });
   });
 }

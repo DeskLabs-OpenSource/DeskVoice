@@ -30,6 +30,8 @@ test("passagem: a dona marca Vendas na Recepção, grava, e apagar Vendas deixa 
   const vendasId = await createAgent(page, { name: vendas, roleLabel: `Comercial ${suffix}` });
 
   await page.goto(`/agents/${recepcaoId}`);
+  // "Pode passar a ligação para" fica na aba Ferramentas (desenho 2026-11-26, fatia 1).
+  await page.getByRole("tab", { name: agents.tabs.ferramentas }).click();
   const list = page.getByRole("list", { name: agents.handoff });
   const target = list.getByRole("checkbox", { name: new RegExp(vendas) });
   // Vazia de fábrica, com nome e papel; o próprio agente não aparece.
@@ -55,8 +57,10 @@ test("passagem: a dona marca Vendas na Recepção, grava, e apagar Vendas deixa 
   await expect(page).toHaveURL(/\/agents$/);
 
   // A Recepção fica sem destino, e editar o nome continua funcionando.
-  await page.goto(`/agents/${recepcaoId}`);
+  await page.goto(`/agents/${recepcaoId}?aba=ferramentas`);
   await expect(page.getByRole("list", { name: agents.handoff }).getByRole("checkbox", { name: new RegExp(vendas) })).toHaveCount(0);
+  // O nome é da aba Agente: trocar de aba não perde nada, e o salvar leva o que mudou nas duas.
+  await page.getByRole("tab", { name: agents.tabs.agente }).click();
   await page.getByRole("textbox", { name: agents.name, exact: true }).fill(`${recepcao} editada`);
   expect((await save(page)).agentHandoffTargets).toEqual([]);
   expect(await targetsOf(page, recepcaoId)).toEqual([]);
