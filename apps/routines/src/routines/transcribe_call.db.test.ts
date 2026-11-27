@@ -221,6 +221,27 @@ describe("a transcrição automática do fim da chamada", () => {
     expect(motivo?.payload.reason).toBe("no_key");
   });
 
+  it("no teto de gasto do mês da organização: não lê a gravação, não fala com o provedor, diz por quê e o resumo segue", async () => {
+    const { org, callId } = await comAgente("Teto do mês");
+    await ligar(org);
+    const dir = await gravar(org, callId);
+    // Teto de 1 centavo, já gasto por outra ligação do mês: o mesmo `spendCapReached` das portas.
+    const outra = await createCall(app, org, t0);
+    await withSystem(app, async (q) => {
+      await q.exec("insert into organization_limits (organization_id, monthly_spend_cap_cents) values ($1, 1) on conflict (organization_id) do update set monthly_spend_cap_cents = 1", [org]);
+      await q.exec("insert into usage_ledger (organization_id, call_id, engine, cost_cents, cost_microcents, at) values ($1, $2, $3, 1, 1000000, $4)", [org, outra, MOTOR, t0]);
+    });
+
+    await rodar(org, callId, dir);
+
+    expect(PROVEDOR.transcribe).not.toHaveBeenCalled();
+    expect(leuAGravacao(callId)).toBe(false);
+    const motivo = (await eventsOf(app, callId)).find((event) => event.kind === "transcription_failed");
+    expect(motivo?.payload).toEqual({ reason: "spend_cap_reached", engine: MOTOR, capCents: 1 });
+    expect(await falas(callId)).toHaveLength(0);
+    expect(await resumos(org, callId)).toBe(1);
+  });
+
   it("já transcrita: não paga de novo", async () => {
     const { org, callId } = await comAgente("Repetida");
     await ligar(org);

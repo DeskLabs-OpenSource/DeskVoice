@@ -186,6 +186,7 @@ const common: CommonDictionary = {
     transcription_has_text: "This call already has a transcript. Refresh the page.",
     transcription_engine_unsupported: "The voice engine of this call does not transcribe recordings. Only the OpenAI and Google engines do.",
     transcription_cost_ceiling: "This call already reached the agent's cost ceiling. The transcription was not made and nothing was charged.",
+    spend_cap_reached: "This organization reached its monthly spending cap. The transcription was not made and nothing was charged. The installation administration can change the cap.",
     transcription_no_recording: "This call has no recording to transcribe.",
     transcription_unreadable: "The recording of this call is not in the format the recorder writes, with one channel per side. Nothing was sent to the provider.",
     transcription_too_long: "The recording is longer than the provider accepts in one request. Nothing was sent or charged.",

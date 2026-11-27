@@ -187,6 +187,7 @@ const common = {
     transcription_has_text: "Esta chamada já tem transcrição. Atualize a página.",
     transcription_engine_unsupported: "O motor de voz desta chamada não transcreve gravações. Só os motores da OpenAI e do Google transcrevem.",
     transcription_cost_ceiling: "Esta chamada já atingiu o teto de custo do agente. A transcrição não foi feita e nada foi cobrado.",
+    spend_cap_reached: "Esta organização chegou ao teto de gasto do mês. A transcrição não foi feita e nada foi cobrado. Quem administra a instalação pode mudar o teto.",
     transcription_no_recording: "Esta chamada não tem gravação para transcrever.",
     transcription_unreadable: "A gravação desta chamada não está no formato que o gravador escreve, com um canal para cada lado. Nada foi enviado ao provedor.",
     transcription_too_long: "A gravação é mais longa do que o provedor aceita num pedido. Nada foi enviado nem cobrado.",
