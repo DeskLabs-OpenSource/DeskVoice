@@ -7,6 +7,8 @@ import {
   lockCall,
   recordEvent,
   recordingPath,
+  SPEND_CAP_REACHED,
+  spendCapReached,
   transcriptRetentionOf,
   withOrg,
   type ClaimedTask,
@@ -137,6 +139,12 @@ async function transcribe(task: ClaimedTask, deps: RoutineDeps): Promise<void> {
     // O teto continua sendo o mesmo número do resto do produto: não gastar além do que o dono autorizou.
     if (agent.cost_ceiling_cents > 0 && call.cost_cents >= agent.cost_ceiling_cents) {
       await recordEvent(q, callId, "transcription_failed", { reason: "cost_ceiling", engine: agent.engine }, now);
+      return null;
+    }
+    // O teto do mês da organização, pelo mesmo caminho das portas da ligação: no teto, nada vai ao provedor.
+    const cap = await spendCapReached(q, now);
+    if (cap.reached) {
+      await recordEvent(q, callId, "transcription_failed", { reason: SPEND_CAP_REACHED, engine: agent.engine, capCents: cap.capCents }, now);
       return null;
     }
 

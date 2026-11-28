@@ -7,6 +7,7 @@ import { sendViaDeskcomm } from "./deskcomm";
 import { sendViaWaha, wahaFromEnv, wahaSessionName, type WahaOptions } from "./waha";
 
 export { TRUST_CALLER_ID_KEY, WHATSAPP_CONNECTOR_KEY };
+export { checkDeskcomm, DESKCOMM_CHECK_MAX_CHANNELS, DESKCOMM_CHECK_TIMEOUT_SECONDS, type DeskcommChannel, type DeskcommCheck, type DeskcommPortResult } from "./deskcomm";
 
 // Como fica em `settings`: `token` cifrado com `encryptSecret`, o resto em claro. O tipo `waha` (o
 // número conectado por QR Code) não tem `url` nem `token`: o endereço e a chave são da instalação,

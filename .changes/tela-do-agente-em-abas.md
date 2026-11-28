@@ -1,7 +1,0 @@
----
-impact: new_capability
-section: changed
-title: A tela do agente passa a ter abas por função, e os testes do agente viram uma das abas
----
-
-A tela do agente, que era uma página só com tudo junto, agora tem cinco abas: Agente, Ferramentas, Depois da ligação, Testes e Avançado. Nenhum campo some e nenhum dado muda: os campos só mudam de lugar, e continua havendo um formulário só, com um Salvar só no rodapé. Onde estava e onde está: Identidade, Conversa, Vocabulário, Voz, Pipeline e "Cérebros deste agente" ficam na aba Agente, na mesma ordem, e o idioma sai do painel Voz e vai para a Identidade; Ferramentas, Transferência, "Passar a ligação" e o Analista ao vivo vão para a aba Ferramentas; Pendências (o dono, "Quando a ligação cai" e a mensagem do WhatsApp) vai para Depois da ligação; Limites (minutos, teto de custo e "ainda está aí?") vai para Avançado, ao lado de links para Privacidade, Aviso de gravação e Webhooks, que valem para a organização inteira; e o link "Testes do agente" do topo dá lugar à aba Testes. Trocar de aba não salva nada e não perde nada. A aba fica no endereço (`?aba=depois`, por exemplo), então dá para copiar o link de uma aba. Se um campo obrigatório de outra aba estiver vazio, o Salvar abre a aba dele e mostra o campo. O endereço antigo dos testes (`/agents/<id>/tests`) continua abrindo, já na aba Testes. Ali o Salvar do agente some, porque os testes têm os botões deles, e uma linha avisa quando há mudança no agente ainda não salva. Quem já instalou não precisa fazer nada. Crédito: @melgarafael.

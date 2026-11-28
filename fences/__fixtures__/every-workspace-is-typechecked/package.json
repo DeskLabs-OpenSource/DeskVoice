@@ -1,1 +1,1 @@
-{ "name": "deskvoice", "scripts": { "typecheck": "tsc -p tsconfig.json" } }
+{ "name": "deskvoice", "scripts": { "typecheck": "tsc -p tsconfig.json && pnpm --filter ./apps/panel typecheck" } }

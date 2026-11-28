@@ -127,25 +127,57 @@ const classifyTargetOf = (engine: VoiceEngine): Setting =>
 // O tipo `waha` (número conectado por QR Code) não se grava nem se apaga por aqui: ele entra ao
 // conectar e sai ao desconectar, em Configurações > WhatsApp. Trocar o conector por baixo deixaria
 // um número pareado e sem uso, e a tela dizendo "conectado" enquanto o envio sai por outro lugar.
+//
+// O `deskcomm` pode ter o endereço do CRM (`crmUrl`), que liga o contrato do CRM (#330, fatia 2), e
+// o canal por onde a mensagem sai (`channelSessionId`, com o nome que a tela mostra em
+// `channelLabel`). O canal só existe com o endereço do CRM. O destino do token é o tipo, a `url` e
+// o `crmUrl` juntos: trocar o canal mantém o token, porque o CRM é o mesmo. Com `crmUrl`, a `url`
+// gravada é o mesmo endereço, que a leitura do envio não usa. Sem `crmUrl`, nada muda.
 const isWaha = (stored: unknown): boolean => z.object({ type: z.literal("waha") }).safeParse(stored).success;
+const crmUrlSchema = httpUrl.transform((value) => value.replace(/\/+$/, ""));
+const connectorInput = z
+  .object({
+    type: z.enum(["deskcomm", "webhook"]),
+    url: httpUrl,
+    token: z.string().trim().min(1).max(500).optional(),
+    crmUrl: crmUrlSchema.optional(),
+    channelSessionId: z.uuid().optional(),
+    channelLabel: z.string().trim().min(1).max(120).optional(),
+  })
+  .refine((value) => value.type === "deskcomm" || value.crmUrl === undefined, { message: "only the deskcomm connector takes a CRM address", path: ["crmUrl"] })
+  .refine((value) => value.channelSessionId === undefined || value.crmUrl !== undefined, { message: "a CRM channel needs the CRM address", path: ["channelSessionId"] })
+  .refine((value) => value.channelLabel === undefined || value.channelSessionId !== undefined, { message: "a channel name needs the channel", path: ["channelLabel"] });
+type ConnectorInput = z.infer<typeof connectorInput>;
+const storedConnectorView = z.object({ type: z.string(), url: z.string(), crmUrl: z.string().optional(), channelSessionId: z.string().optional(), channelLabel: z.string().optional() });
 const connector: Setting = {
   guard(previous) {
     if (isWaha(previous)) throw new ApiError(409, "whatsapp_connected", "A WhatsApp number is connected by QR code: disconnect it before saving another connector.");
   },
-  ...setting<{ type: "deskcomm" | "webhook"; url: string; token?: string }>({
-  schema: z.object({ type: z.enum(["deskcomm", "webhook"]), url: httpUrl, token: z.string().trim().min(1).max(500).optional() }),
+  ...setting<ConnectorInput>({
+  schema: connectorInput,
   secret: true,
   store(value, key, previous) {
     const kept = storedConnector.safeParse(previous);
-    const sameDestination = kept.success && kept.data.type === value.type && kept.data.url === value.url;
+    const keptCrm = storedConnectorView.safeParse(previous).data?.crmUrl;
+    const url = value.crmUrl ?? value.url;
+    const sameDestination = kept.success && kept.data.type === value.type && kept.data.url === url && keptCrm === value.crmUrl;
     const token = value.token ? encryptSecret(value.token, key) : sameDestination ? kept.data.token : undefined;
     if (token === undefined) throw new ApiError(400, "token_required", "When the connector address or type changes, enter the token again.");
-    return { type: value.type, url: value.url, token };
+    return {
+      type: value.type,
+      url,
+      token,
+      ...(value.crmUrl !== undefined && { crmUrl: value.crmUrl }),
+      ...(value.channelSessionId !== undefined && { channelSessionId: value.channelSessionId }),
+      ...(value.channelLabel !== undefined && { channelLabel: value.channelLabel }),
+    };
   },
   view(stored) {
     if (isWaha(stored)) return { type: "waha" };
-    const parsed = z.object({ type: z.string(), url: z.string() }).safeParse(stored);
-    return parsed.success ? { type: parsed.data.type, url: parsed.data.url, token: CONFIGURED } : null;
+    const parsed = storedConnectorView.safeParse(stored);
+    if (!parsed.success) return null;
+    const { type, url, crmUrl, channelSessionId, channelLabel } = parsed.data;
+    return { type, url, token: CONFIGURED, ...(crmUrl !== undefined && { crmUrl }), ...(channelSessionId !== undefined && { channelSessionId }), ...(channelLabel !== undefined && { channelLabel }) };
   },
   }),
 };

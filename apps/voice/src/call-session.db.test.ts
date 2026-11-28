@@ -1475,6 +1475,61 @@ describe("tetos da chamada", { timeout: 120_000 }, () => {
   });
 });
 
+describe("o modelo que o motor pede à parte (sideUsage, item 3.4 da revisão fria da 0.50.0)", { timeout: 120_000 }, () => {
+  const sideLines = (callId: string) =>
+    withSystem(app, (q) =>
+      q.many<{ engine: string; model: string | null; agent_id: string | null; seconds: number; input_tokens: number; output_tokens: number; cost_cents: number; cost_estimated: boolean; cost_measured: boolean }>(
+        "select engine, model, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_estimated, cost_measured from usage_ledger where call_id = $1 order by at, cost_cents",
+        [callId],
+      ),
+    );
+  // A transcrição de quem ligou: 60 centavos por minuto, para a conta ficar redonda.
+  const transcription = { model: "gpt-4o-mini-transcribe", pricing: { centsPerMinute: 60, checkedOn: "2030-05-10", source: "teste" } };
+
+  it("entra no extrato com o modelo dele, soma ao custo da chamada e conta para o teto", async () => {
+    const manual = manualEngine({ keyless: true, centsPerMinute: 100 });
+    const { callId, agentId, start, harness } = await scene("side-usage-ceiling", { engine: "manual", costCeilingCents: 150 }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+
+    manual.emit("usage", { seconds: 60 });
+    await waitFor(async () => (await callOf(app, callId)).cost_cents === 100, "the engine cost");
+    expect(manual.said).toEqual([]);
+    // Sem o consumo do provedor: o motor estimou 60 s de áudio, a 60 centavos por minuto. Soma ao motor e passa o teto.
+    manual.emit("sideUsage", { ...transcription, usage: { seconds: 60 }, estimated: true });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("cost_ceiling_reached"), "the ceiling event");
+    expect(manual.said).toEqual([expect.stringContaining("encerrar esta ligação")]);
+
+    expect(harness.timers.fire(6000)).toBe(1);
+    expect(await session.done).toEqual({ status: "completed", endReason: "cost_ceiling", costCents: 160 });
+    const events = await eventsOf(app, callId);
+    expect(events.find((event) => event.kind === "cost_ceiling_reached")?.payload).toEqual({ costCents: 160, ceilingCents: 150 });
+    // A duração da chamada é a do motor: o áudio que a transcrição ouviu é o mesmo, e não soma tempo.
+    expect(events.find((event) => event.kind === "call_ended")?.payload).toMatchObject({ costCents: 160, seconds: 60 });
+    expect(await sideLines(callId)).toEqual([
+      { engine: "manual", model: "gpt-4o-mini-transcribe", agent_id: agentId, seconds: 60, input_tokens: 0, output_tokens: 0, cost_cents: 60, cost_estimated: true, cost_measured: true },
+      { engine: "manual", model: null, agent_id: agentId, seconds: 60, input_tokens: 0, output_tokens: 0, cost_cents: 100, cost_estimated: false, cost_measured: true },
+    ]);
+  });
+
+  it("com o consumo em tokens: a linha não é estimada, e os incrementos somam no preço dele", async () => {
+    const manual = manualEngine({ keyless: true, centsPerMinute: 100 });
+    const { callId, transport, start } = await scene("side-usage-tokens", { engine: "manual", costCeilingCents: 0 }, manual);
+    const session = start();
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    // 1 milhão de tokens de entrada a 125 centavos, em duas medições: a primeira leva 63 centavos (arredondado para cima), a segunda, a diferença.
+    const pricing = { centsPerMillionInputTokens: 125, centsPerMillionOutputTokens: 500, checkedOn: "2030-05-10", source: "teste" };
+    manual.emit("sideUsage", { model: "gpt-4o-mini-transcribe", pricing, usage: { inputTokens: 500_000, outputTokens: 0 }, estimated: false });
+    manual.emit("sideUsage", { model: "gpt-4o-mini-transcribe", pricing, usage: { inputTokens: 500_000, outputTokens: 0 }, estimated: false });
+    await waitFor(async () => (await sideLines(callId)).length === 2, "the two lines");
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ costCents: 125 });
+    const lines = await sideLines(callId);
+    expect(lines.every((line) => line.model === "gpt-4o-mini-transcribe" && !line.cost_estimated && line.input_tokens === 500_000)).toBe(true);
+    expect(lines.reduce((sum, line) => sum + line.cost_cents, 0)).toBe(125);
+  });
+});
+
 describe("gravação a pedido de quem ligou", { timeout: 120_000 }, () => {
   const PEDIDO = "Por favor, não quero que essa conversa fique gravada.";
   const USER = "0c000000-0000-4000-8000-000000000003";

@@ -1683,3 +1683,251 @@ describe("motor pipeline (fatia 4): a interrupção", () => {
     expect(log.events).toEqual(atClose);
   });
 });
+
+describe("motor pipeline (fatia 6): a concordância (\"aham\", \"sim\") não corta o agente", () => {
+  /** Abre com a voz segura, faz a primeira frase da resposta sair, e devolve com a resposta ainda saindo. */
+  async function speaking(script: SimulatedTranscriptScript, sessionConfig: VoiceSessionConfig = config) {
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    const rest = gate();
+    brain.reply([text(FIRST), rest.hold, text(SECOND), usage(30, 12)]);
+    const opened = await openRecorded(piecesOf(voice.synthesizer, script), {}, sessionConfig);
+    voice.hold();
+    speak(opened.session, 100);
+    await until(() => voice.pending() === 1, "a primeira frase gerar");
+    voice.step();
+    return { ...opened, voice, rest };
+  }
+  const settle = async () => {
+    for (let turn = 0; turn < 30; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  it("o aceite: \"aham\" com a resposta saindo não corta, entra na transcrição e no próximo pedido, e não abre pedido sozinho", async () => {
+    const { session, log, voice, rest } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Aham" },
+      { afterAudioMs: 300, text: "Aham.", final: true },
+      { afterAudioMs: 400, text: "Quero remarcar.", final: true },
+    ]);
+    speak(session, 200);
+    await until(() => log.events.includes("user: Aham."), "a concordância na transcrição");
+    await settle();
+    expect(log.events).not.toContain("interrupted");
+    expect(voice.log.some((line) => line.startsWith("cancel"))).toBe(false);
+    // A resposta sai inteira, e a concordância não abriu pedido.
+    rest.release();
+    while (voice.pending() > 0 || !log.events.some((event) => event.startsWith("agent:"))) {
+      voice.step();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await settle();
+    expect(brain?.requests.length).toBe(1);
+    expect(log.events.filter((event) => event.startsWith("turn ended"))).toEqual(["turn ended (transcript)"]);
+    expect(log.events).toContain(`agent: ${(FIRST + SECOND).trim()}`);
+    // O próximo pedido, o da fala nova, leva a concordância no lugar onde ela foi dita.
+    brain?.reply([text("Claro, para quando?"), usage(40, 5)]);
+    speak(session, 100);
+    await until(() => brain?.requests.length === 2, "o próximo pedido");
+    expect(messagesOf(1).slice(-4)).toEqual([
+      { role: "user", content: "Oi." },
+      { role: "assistant", content: (FIRST + SECOND).trim() },
+      { role: "user", content: "Aham." },
+      { role: "user", content: "Quero remarcar." },
+    ]);
+    await session.close();
+  });
+
+  it("o trecho começado antes da resposta e fechado com ela saindo (o `final` igual ao parcial) também é concordância", async () => {
+    // O parcial chega com o cérebro ainda calado; o `final`, idêntico, já com a resposta saindo. Sem texto
+    // novo no `final`, só a resposta saindo diz que ele é concordância.
+    brain = await startFakeBrain();
+    const voice = gatedVoice();
+    const first = gate();
+    const rest = gate();
+    brain.reply([first.hold, text(FIRST), rest.hold, text(SECOND), usage(30, 12)]);
+    const { session, log } = await openRecorded(
+      piecesOf(voice.synthesizer, [
+        { afterAudioMs: 100, text: "Oi.", final: true },
+        { afterAudioMs: 200, text: "Aham" },
+        { afterAudioMs: 300, text: "Aham", final: true },
+      ]),
+    );
+    voice.hold();
+    speak(session, 200);
+    await until(() => log.events.filter((event) => event === "activity").length === 2, "o parcial, antes da resposta");
+    first.release();
+    await until(() => voice.pending() === 1, "a primeira frase gerar");
+    voice.step();
+    speak(session, 100);
+    await until(() => log.events.includes("user: Aham"), "a concordância na transcrição");
+    rest.release();
+    while (voice.pending() > 0 || !log.events.some((event) => event.startsWith("agent:"))) {
+      voice.step();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await settle();
+    expect(log.events).not.toContain("interrupted");
+    expect(brain?.requests.length).toBe(1);
+    await session.close();
+  });
+
+  it("\"sim, mas\": a parcial que cresce corta na primeira palavra fora da lista", async () => {
+    const { session, log, voice } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Sim," },
+      { afterAudioMs: 300, text: "Sim, mas" },
+    ]);
+    speak(session, 100);
+    await settle();
+    expect(log.events).not.toContain("interrupted");
+    speak(session, 100);
+    await until(() => log.events.includes("interrupted"), "a interrupção em \"mas\"");
+    expect(voice.log.filter((line) => line.startsWith("cancel"))).toEqual(["cancel 2"]);
+    await session.close();
+  });
+
+  it("\"não\" corta, como antes", async () => {
+    const { session, log } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Não" },
+    ]);
+    speak(session, 100);
+    await until(() => log.events.includes("interrupted"), "a interrupção");
+    await session.close();
+  });
+
+  it("a lista é a do idioma do agente: \"uh-huh\" não corta em inglês; \"aham\" em inglês corta", async () => {
+    const english = { ...config, language: "en-US" };
+    const first = await speaking([
+      { afterAudioMs: 100, text: "Hi.", final: true },
+      { afterAudioMs: 200, text: "Uh-huh." },
+    ], english);
+    speak(first.session, 100);
+    await settle();
+    expect(first.log.events).not.toContain("interrupted");
+    await first.session.close();
+    await brain?.stop();
+
+    const second = await speaking([
+      { afterAudioMs: 100, text: "Hi.", final: true },
+      { afterAudioMs: 200, text: "Aham" },
+    ], english);
+    speak(second.session, 100);
+    await until(() => second.log.events.includes("interrupted"), "a interrupção");
+    await second.session.close();
+  });
+
+  it("fora da resposta, \"sim\" é resposta: vira turno e abre pedido", async () => {
+    brain = await startFakeBrain();
+    brain.reply([text("Posso confirmar?"), usage(20, 3)], [text("Confirmado."), usage(30, 2)]);
+    const { session, log } = await openRecorded(piecesOf(createSimulatedSynthesizer(), [
+      { afterAudioMs: 100, text: "Quero marcar terça.", final: true },
+      { afterAudioMs: 200, text: "Sim.", final: true },
+    ]));
+    speak(session, 100);
+    await until(() => log.events.some((event) => event.startsWith("agent:")), "a primeira resposta sair inteira");
+    speak(session, 100);
+    await until(() => brain?.requests.length === 2, "o pedido do \"sim\"");
+    expect(messagesOf(1).at(-1)).toEqual({ role: "user", content: "Sim." });
+    await session.close();
+  });
+
+  it("a guarda que fecha a concordância pelo parcial não abre pedido, e o `final` dela não vira turno", async () => {
+    const { session, log, voice, rest } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Uhum" },
+      { afterAudioMs: 300, text: "Uhum.", final: true },
+    ]);
+    speak(session, 100);
+    await until(() => log.events.filter((event) => event === "activity").length === 2, "o parcial");
+    expect(session.closeCallerTurn?.()).toBe(true);
+    speak(session, 100);
+    rest.release();
+    while (voice.pending() > 0 || !log.events.some((event) => event.startsWith("agent:"))) {
+      voice.step();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await settle();
+    expect(log.events).not.toContain("interrupted");
+    expect(log.events.filter((event) => event.startsWith("user:"))).toEqual(["user: Oi.", "user: Uhum"]);
+    expect(brain?.requests.length).toBe(1);
+    await session.close();
+  });
+
+  /** Deixa a resposta em curso sair inteira: a síntese acaba, e ela vai à transcrição. */
+  async function finishReply(voice: ReturnType<typeof gatedVoice>, rest: ReturnType<typeof gate>, log: { events: string[] }) {
+    rest.release();
+    while (voice.pending() > 0 || !log.events.some((event) => event.startsWith("agent:"))) {
+      voice.step();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await settle();
+  }
+
+  it("o \"aham\" começado com a resposta saindo e com o `final` depois de ela acabar: não vira turno, nem abre pedido", async () => {
+    // O caso mais comum: a janela da resposta é a síntese, que acaba antes do áudio; o `final` do "aham"
+    // chega com ela já fora. Só a marca do trecho (`agreementSegment`) diz que ele é concordância.
+    const { session, log, voice, rest } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Aham" },
+      { afterAudioMs: 300, text: "Aham.", final: true },
+    ]);
+    speak(session, 100);
+    await until(() => log.events.filter((event) => event === "activity").length === 2, "o parcial, com a resposta saindo");
+    await finishReply(voice, rest, log);
+    expect(log.events).toContain(`agent: ${(FIRST + SECOND).trim()}`);
+    speak(session, 100);
+    await until(() => log.events.includes("user: Aham."), "o `final` da concordância na transcrição");
+    await settle();
+    expect(log.events).not.toContain("interrupted");
+    expect(log.events.filter((event) => event.startsWith("turn ended"))).toEqual(["turn ended (transcript)"]);
+    expect(brain?.requests.length).toBe(1);
+    await session.close();
+  });
+
+  it("depois desse `final`, o \"sim\" dito fora da resposta é resposta: vira turno e abre pedido", async () => {
+    // A marca zera no `final`: sem isso, todo "sim" dali em diante seria engolido como concordância.
+    const { session, log, voice, rest } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Aham" },
+      { afterAudioMs: 300, text: "Aham.", final: true },
+      { afterAudioMs: 400, text: "Sim.", final: true },
+    ]);
+    speak(session, 100);
+    await until(() => log.events.filter((event) => event === "activity").length === 2, "o parcial, com a resposta saindo");
+    await finishReply(voice, rest, log);
+    speak(session, 100);
+    await until(() => log.events.includes("user: Aham."), "o `final` da concordância na transcrição");
+    await settle();
+    brain?.reply([text("Confirmado."), usage(40, 2)]);
+    speak(session, 100);
+    await until(() => log.events.includes("user: Sim."), "o \"sim\" na transcrição");
+    await settle();
+    expect(log.events.filter((event) => event.startsWith("turn ended"))).toEqual(["turn ended (transcript)", "turn ended (transcript)"]);
+    expect(brain?.requests.length).toBe(2);
+    expect(messagesOf(1).slice(-2)).toEqual([
+      { role: "user", content: "Aham." },
+      { role: "user", content: "Sim." },
+    ]);
+    await session.close();
+  });
+
+  it("a guarda fecha a concordância pelo parcial, e o `final` estende ela: o resto também é concordância, e não abre pedido", async () => {
+    const { session, log, voice, rest } = await speaking([
+      { afterAudioMs: 100, text: "Oi.", final: true },
+      { afterAudioMs: 200, text: "Uhum" },
+      { afterAudioMs: 300, text: "Uhum, uhum.", final: true },
+    ]);
+    speak(session, 100);
+    await until(() => log.events.filter((event) => event === "activity").length === 2, "o parcial");
+    expect(session.closeCallerTurn?.()).toBe(true);
+    speak(session, 100);
+    await until(() => log.events.includes("user: uhum."), "o resto da concordância na transcrição");
+    await finishReply(voice, rest, log);
+    expect(log.events).not.toContain("interrupted");
+    expect(log.events.filter((event) => event.startsWith("user:"))).toEqual(["user: Oi.", "user: Uhum", "user: uhum."]);
+    expect(log.events.filter((event) => event.startsWith("turn ended"))).toEqual(["turn ended (transcript)"]);
+    expect(brain?.requests.length).toBe(1);
+    await session.close();
+  });
+});

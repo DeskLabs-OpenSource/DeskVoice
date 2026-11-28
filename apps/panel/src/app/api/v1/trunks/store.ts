@@ -1,4 +1,4 @@
-import { recordTrunkOverlapRefused, trunkOverlapWarning } from "@deskvoice/core";
+import { recordTrunkOverlap, trunkOverlapWarning, type TrunkCandidate } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, type ServerDeps, type Session } from "../../../../server/context";
 import { createRateLimiter } from "../../../../server/rate-limit";
@@ -48,27 +48,33 @@ export const trunkOverlapLimiter = createRateLimiter(TRUNK_OVERLAP_CHECKS_PER_MI
  * Antes de gravar, o aviso de faixa sobreposta (R8, fatia 10): se a linha tiraria do ar uma linha
  * por IP (desta ou de outra organização) que hoje está no ar, a gravação para e a tela pergunta.
  * A resposta não diz qual linha, de quem nem em que endereço: só que existe uma. Com a confirmação,
- * salva como sempre, sem conferir. Quem chama só confere quando o endereço, os extras ou o modo
- * mudam.
+ * salva, mas confere do mesmo jeito: a confirmação é só um campo do pedido, e a rota não confia que
+ * ela veio depois do aviso. A criação sempre confere; a edição, quando a linha passa a entrar no
+ * agrupamento ou, já dentro dele, muda o endereço, os extras ou o modo (`trunkEntersGroups`).
  *
- * Cada conferência gasta uma tentativa do limite da organização; acima dele, 429 sem conferir.
- * Cada recusa grava `trunk_overlap_refused` na auditoria da instalação, fora da transação da linha
- * (`recordTrunkOverlapRefused`): o evento fica mesmo com a resposta 409 e nada salvo.
+ * Cada conferência, com ou sem confirmação, gasta uma tentativa do limite da organização; acima
+ * dele, 429 sem conferir e sem salvar. Na auditoria da instalação, fora da transação da linha:
+ *   - a recusa grava `trunk_overlap_refused`, e o evento fica mesmo com a resposta 409;
+ *   - a confirmação que tira linha do ar grava `trunk_overlap_confirmed`, antes de salvar. Por isso
+ *     quem chama confere por último, depois de toda outra recusa: o evento diz que a gravação seguiu.
  */
 export async function requireOverlapConfirmed(
   deps: ServerDeps,
   organizationId: string,
   session: Session,
-  candidate: { id?: string; host: string; authMode: "register" | "ip"; matchExtra?: readonly string[] | null },
+  candidate: TrunkCandidate,
   confirmed: boolean | undefined,
 ): Promise<void> {
-  if (confirmed === true) return;
   const now = deps.clock.now();
   if (!trunkOverlapLimiter.take(organizationId, now)) {
     throw new ApiError(429, "too_many_attempts", "Too many attempts. Wait a minute and try again.");
   }
-  if (!(await trunkOverlapWarning(deps.db, organizationId, candidate)).stops) return;
-  await recordTrunkOverlapRefused(deps.db, now, organizationId, session.userId);
+  if (!(await trunkOverlapWarning(deps.db, deps.secretKey, organizationId, candidate)).stops) return;
+  if (confirmed === true) {
+    await recordTrunkOverlap(deps.db, now, "trunk_overlap_confirmed", organizationId, session.userId);
+    return;
+  }
+  await recordTrunkOverlap(deps.db, now, "trunk_overlap_refused", organizationId, session.userId);
   throw new ApiError(
     409,
     "trunk_overlap_unconfirmed",
