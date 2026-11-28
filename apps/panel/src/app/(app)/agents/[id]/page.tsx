@@ -12,6 +12,9 @@ import esCommon from "../../../../i18n/es/common";
 import { fill } from "../../../../i18n/locales";
 import ptBR from "../../../../i18n/pt-BR/agents";
 import ptBRCommon from "../../../../i18n/pt-BR/common";
+import enMcp from "../../../../i18n/en/mcp";
+import esMcp from "../../../../i18n/es/mcp";
+import ptBRMcp from "../../../../i18n/pt-BR/mcp";
 import { useDict } from "../../../../i18n/provider";
 import { api, useApi } from "../../../../ui/api";
 import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../../ui/errors";
@@ -20,7 +23,7 @@ import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TabPanel, Tabs,
 import { useCanConfigure } from "../../../../ui/me";
 import { proposedLanguage } from "../../../../ui/proposed-language";
 import { GUIDED_ENGINES } from "../../settings/analysts/rules";
-import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
+import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, McpServer, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
 import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
 import { agentTabs, changedTabs, DRAFT_TAB, FORM_TABS, hiddenTabOf, parseAgentTab, type AgentTab } from "./agent-tabs";
 import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
@@ -125,6 +128,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const isNew = id === "new";
   const t = useDict(ptBR, en, es);
   const common = useDict(ptBRCommon, enCommon, esCommon);
+  const mcpText = useDict(ptBRMcp, enMcp, esMcp);
   const router = useRouter();
   // A aba vive no endereço (`?aba=`): o link pode ser copiado, e sem ela abre Agente (seção 4.2).
   const tab = parseAgentTab(useSearchParams().get("aba"), isNew);
@@ -133,6 +137,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const agent = useApi<AgentWithBrain>(isNew ? null : `/agents/${id}`);
   const engines = useApi<Engine[]>("/engines");
   const tools = useApi<ToolInfo[]>("/tools");
+  // As ferramentas dos servidores MCP liberadas em Integrações. A lista é só de quem administra.
+  const mcpServers = useApi<McpServer[]>(canConfigure ? "/mcp-servers" : null);
   const owners = useApi<Person[]>("/follow-ups/owners");
   // Os outros agentes da organização, para "Pode passar a ligação para". A lista vem da sessão (`withOrg`).
   const team = useApi<Agent[]>("/agents");
@@ -514,6 +520,35 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                   );
                 })}
               </ul>
+            {/* Agrupadas pelo servidor; nenhuma vem marcada: cada agente escolhe as suas. */}
+            {mcpServers.data?.map((server) => {
+              const offered = server.tools.filter((tool) => tool.allowed && tool.supported);
+              if (offered.length === 0) return null;
+              return (
+                <fieldset key={server.slug} className="mt-4 grid gap-1" data-testid={`agent-mcp-${server.slug}`}>
+                  <legend className="mb-1 px-3 text-[0.87rem] font-bold text-muted">{fill(mcpText.agentGroup, { label: server.label })}</legend>
+                  {offered.map((tool) => {
+                    const name = `${server.slug}__${tool.name}`;
+                    const checked = draft.tools.includes(name);
+                    return (
+                      <label
+                        key={name}
+                        className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-x-3 rounded-sm px-3 py-2.5 transition-colors duration-[120ms] hover:bg-sunken has-checked:bg-sunken"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-1 size-4 accent-(--dv-accent)"
+                          checked={checked}
+                          onChange={() => set("tools", checked ? draft.tools.filter((item) => item !== name) : [...draft.tools, name])}
+                        />
+                        <span className="data font-medium">{tool.name}</span>
+                        <span className="col-start-2 text-[0.87rem] text-muted">{tool.description}</span>
+                      </label>
+                    );
+                  })}
+                </fieldset>
+              );
+            })}
             </Panel>
 
             <Panel title={t.transfer}>

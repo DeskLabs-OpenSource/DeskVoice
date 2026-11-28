@@ -1,9 +1,8 @@
-// O idioma do "ainda está aí?" (Vapi · fatia 9, acompanhamento DESA-392). Os textos da guarda são
-// fixos em pt-BR (`caller-idle.ts`), e o comentário de lá diz que o motor fala no idioma do agente. Este
-// teste olha o que de fato sai para o provedor, com os motores de verdade contra o servidor falso: o
-// texto em pt-BR vai embrulhado no pedido de dizê-lo no idioma do agente, e não como fala literal.
-// Se o modelo de fato traduz é coisa do provedor, e não cabe aqui.
-import { encryptSecret } from "@deskvoice/core";
+// O idioma do "ainda está aí?" (Vapi · fatia 9, acompanhamento DESA-392; DESA-517). A guarda escolhe a
+// frase no idioma do agente (`IDLE_ASK[spokenLanguageOf(language)]`, em `caller-idle.ts`). Este teste olha
+// o que de fato sai para o provedor, com os motores de verdade contra o servidor falso: a frase já no
+// idioma do agente vai embrulhada no pedido de fala literal, e a frase em pt-BR não sai.
+import { encryptSecret, spokenLanguageOf } from "@deskvoice/core";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
@@ -83,8 +82,9 @@ describe("o \"ainda está aí?\" com o agente em outro idioma", { timeout: 120_0
     ["openai-realtime", "es"],
     ["gemini-live", "en"],
     ["gemini-live", "es"],
-  ] as const)("%s, agente em %s: o texto em pt-BR vai ao provedor embrulhado no pedido de dizê-lo no idioma do agente", async (engineId, language) => {
+  ] as const)("%s, agente em %s: a frase no idioma do agente vai ao provedor embrulhada no pedido de fala literal, e a de pt-BR não sai", async (engineId, language) => {
     const provider = providers[engineId]();
+    const spoken = spokenLanguageOf(language);
     const organizationId = await createOrganization(app, `caller-idle-${engineId}-${language}`);
     const agentId = await createAgent(app, organizationId, { engine: engineId, language, greeting: language === "en" ? "Good morning." : "Buenos días." });
     await putSetting(app, organizationId, engineKeySetting(engineId), encryptSecret("sk-teste", secretKey));
@@ -101,7 +101,7 @@ describe("o \"ainda está aí?\" com o agente em outro idioma", { timeout: 120_0
     const ask = fake.waitFor((message) => {
       const text = provider.spoken(message);
       if (text !== undefined) asked.push(text);
-      return text?.includes(IDLE_ASK) ?? false;
+      return text?.includes(IDLE_ASK[spoken]) ?? false;
     });
     // O agente fala 20 ms, e quem ligou fica calado.
     provider.speak();
@@ -111,9 +111,11 @@ describe("o \"ainda está aí?\" com o agente em outro idioma", { timeout: 120_0
     await ask;
     await waitFor(async () => (await kindsOf(app, callId)).includes("caller_idle"), "the caller_idle event");
 
-    // O que vai ao provedor: o pedido de dizer a frase no idioma do agente, e nunca a frase sozinha.
-    expect(asked.filter((text) => text.includes(IDLE_ASK))).toEqual([literal(language, IDLE_ASK)]);
-    expect(asked).not.toContain(IDLE_ASK);
+    // O que vai ao provedor: a frase no idioma do agente, no pedido de fala literal, e nunca a frase sozinha.
+    expect(asked.filter((text) => text.includes(IDLE_ASK[spoken]))).toEqual([literal(language, IDLE_ASK[spoken])]);
+    expect(asked).not.toContain(IDLE_ASK[spoken]);
+    // A frase em pt-BR não sai, nem embrulhada.
+    expect(asked.some((text) => text.includes(IDLE_ASK["pt-BR"]))).toBe(false);
 
     transport.callerHangup();
     expect(await session.done).toMatchObject({ endReason: "caller_hangup" });

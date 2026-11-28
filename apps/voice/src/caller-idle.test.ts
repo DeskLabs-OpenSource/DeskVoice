@@ -27,7 +27,7 @@ function fakeTime() {
   };
 }
 
-function scene() {
+function scene(language = "pt-BR") {
   const time = fakeTime();
   const log: string[] = [];
   const reports: CallerIdle[] = [];
@@ -35,6 +35,7 @@ function scene() {
   const guard = createCallerIdleGuard({
     clock: time.clock,
     schedule: time.schedule,
+    language,
     say: (text) => log.push(`say:${text}`),
     end: (farewell) => log.push(`end:${farewell}`),
     acted: (report) => reports.push(report),
@@ -54,7 +55,7 @@ describe("guarda do \"ainda está aí?\"", () => {
     time.advance(2000 + IDLE_FIRST_MS - 1);
     expect(log).toEqual([]);
     time.advance(1);
-    expect(log).toEqual([`say:${IDLE_ASK}`]);
+    expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`]);
     expect(reports).toEqual([{ action: "asked", silentMs: IDLE_FIRST_MS }]);
 
     // O lembrete toca 1,5 s: o segundo prazo conta do fim dele.
@@ -62,13 +63,13 @@ describe("guarda do \"ainda está aí?\"", () => {
     time.advance(1500 + IDLE_SECOND_MS - 1);
     expect(log).toHaveLength(1);
     time.advance(1);
-    expect(log).toEqual([`say:${IDLE_ASK}`, `say:${IDLE_ASK_AGAIN}`]);
+    expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`, `say:${IDLE_ASK_AGAIN["pt-BR"]}`]);
 
     guard.agentAudio(1000);
     time.advance(1000 + IDLE_END_MS - 1);
     expect(log).toHaveLength(2);
     time.advance(1);
-    expect(log).toEqual([`say:${IDLE_ASK}`, `say:${IDLE_ASK_AGAIN}`, `end:${IDLE_FAREWELL}`]);
+    expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`, `say:${IDLE_ASK_AGAIN["pt-BR"]}`, `end:${IDLE_FAREWELL["pt-BR"]}`]);
     expect(reports).toEqual([
       { action: "asked", silentMs: IDLE_FIRST_MS },
       { action: "asked_again", silentMs: IDLE_FIRST_MS + 1500 + IDLE_SECOND_MS },
@@ -85,7 +86,7 @@ describe("guarda do \"ainda está aí?\"", () => {
     const { time, log, guard } = scene();
     guard.agentAudio(100);
     time.advance(100 + IDLE_FIRST_MS + IDLE_SECOND_MS + IDLE_END_MS);
-    expect(log).toEqual([`say:${IDLE_ASK}`, `say:${IDLE_ASK_AGAIN}`, `end:${IDLE_FAREWELL}`]);
+    expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`, `say:${IDLE_ASK_AGAIN["pt-BR"]}`, `end:${IDLE_FAREWELL["pt-BR"]}`]);
   });
 
   it("I2: um sinal de quem ligou entre o primeiro e o segundo lembrete volta tudo ao zero, com ou sem palavras", () => {
@@ -93,18 +94,18 @@ describe("guarda do \"ainda está aí?\"", () => {
       const { time, log, reports, guard } = scene();
       guard.agentAudio(1000);
       time.advance(1000 + IDLE_FIRST_MS);
-      expect(log).toEqual([`say:${IDLE_ASK}`]);
+      expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`]);
       guard.agentAudio(1000);
       time.advance(500);
       guard[via]();
       // Calado de novo, sem o agente falar: nada conta (pode ser a pessoa pensando no que dizer).
       time.advance(60_000);
-      expect(log, via).toEqual([`say:${IDLE_ASK}`]);
+      expect(log, via).toEqual([`say:${IDLE_ASK["pt-BR"]}`]);
       expect(time.pending(), via).toBe(0);
       // O agente responde: o relógio recomeça do primeiro passo, e não do segundo.
       guard.agentAudio(1000);
       time.advance(1000 + IDLE_FIRST_MS);
-      expect(log, via).toEqual([`say:${IDLE_ASK}`, `say:${IDLE_ASK}`]);
+      expect(log, via).toEqual([`say:${IDLE_ASK["pt-BR"]}`, `say:${IDLE_ASK["pt-BR"]}`]);
       expect(reports.map((report) => report.action), via).toEqual(["asked", "asked"]);
       expect(reports[1]?.silentMs, via).toBe(IDLE_FIRST_MS);
     }
@@ -124,7 +125,7 @@ describe("guarda do \"ainda está aí?\"", () => {
     time.advance(IDLE_FIRST_MS - 1);
     expect(log).toEqual([]);
     time.advance(1);
-    expect(log).toEqual([`say:${IDLE_ASK}`]);
+    expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`]);
   });
 
   it("I3: duas ferramentas em curso, uma acaba: ainda não arma", () => {
@@ -137,7 +138,7 @@ describe("guarda do \"ainda está aí?\"", () => {
     expect(log).toEqual([]);
     guard.toolFinished();
     time.advance(IDLE_FIRST_MS);
-    expect(log).toEqual([`say:${IDLE_ASK}`]);
+    expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`]);
   });
 
   it("I4: com áudio ainda tocando não arma: o pedaço de 3 s que chegou em 100 ms conta do fim dele", () => {
@@ -150,7 +151,7 @@ describe("guarda do \"ainda está aí?\"", () => {
     time.advance(2900 + IDLE_FIRST_MS - 1);
     expect(log).toEqual([]);
     time.advance(1);
-    expect(log).toEqual([`say:${IDLE_ASK}`]);
+    expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`]);
   });
 
   it("não arma antes de o agente falar (a saudação ainda não tocou)", () => {
@@ -171,7 +172,7 @@ describe("guarda do \"ainda está aí?\"", () => {
     guard.toolStarted();
     guard.toolFinished();
     time.advance(120_000);
-    expect(log).toEqual([`say:${IDLE_ASK}`]);
+    expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`]);
     expect(reports).toHaveLength(1);
     expect(time.pending()).toBe(0);
   });
@@ -186,6 +187,26 @@ describe("guarda do \"ainda está aí?\"", () => {
     setSilenceArmed(false);
     guard.agentAudio(1000);
     time.advance(1000 + IDLE_FIRST_MS);
-    expect(log).toEqual([`say:${IDLE_ASK}`]);
+    expect(log).toEqual([`say:${IDLE_ASK["pt-BR"]}`]);
+  });
+});
+
+describe("as falas do \"ainda está aí?\" no idioma do agente (DESA-517)", () => {
+  const silentToTheEnd = (language: string): string[] => {
+    const { time, log, guard } = scene(language);
+    guard.agentAudio(0);
+    time.advance(IDLE_FIRST_MS);
+    time.advance(IDLE_SECOND_MS);
+    time.advance(IDLE_END_MS);
+    return log;
+  };
+
+  it("en-US e es-MX falam as três no idioma; pt-BR e um idioma que as falas não têm (fr) falam o texto de sempre", () => {
+    expect(silentToTheEnd("en-US")).toEqual(["say:Are you still there?", "say:If you're still on the line, just say something.", "end:Since I can't hear you, I'm going to end the call. Feel free to call back anytime."]);
+    expect(silentToTheEnd("es-MX")).toEqual([`say:${IDLE_ASK.es}`, `say:${IDLE_ASK_AGAIN.es}`, `end:${IDLE_FAREWELL.es}`]);
+    const today = ["say:Você ainda está aí?", "say:Se ainda estiver na linha, é só falar.", "end:Como não estou ouvindo você, vou encerrar. Pode ligar de novo quando quiser."];
+    expect(silentToTheEnd("pt-BR")).toEqual(today);
+    expect(silentToTheEnd("fr")).toEqual(today);
+    expect(silentToTheEnd("")).toEqual(today);
   });
 });

@@ -1,4 +1,4 @@
-import type { Clock } from "@deskvoice/core";
+import { spokenLanguageOf, type Clock, type SpokenLanguage } from "@deskvoice/core";
 import type { BrainChat, BrainChatMessage, BrainFailure, BrainToolCall } from "../brain";
 import { isAgreementOnly } from "../agreement";
 import { SessionEmitter } from "../emitter";
@@ -105,15 +105,32 @@ import {
  * falas fixas sintetizadas antes de a outra peça recusar), para o custo entrar no extrato da tentativa.
  */
 
+/*
+ * As três falas do motor vão no idioma do agente (`config.language`, escolhido por `spokenLanguageOf`,
+ * como `HANDOFF_GREETINGS` da sessão): aqui o texto vai à voz como veio, sem cérebro no meio que
+ * traduza (DESA-517).
+ */
 /** A fala de falha da seção 3.4, no padrão de `FAREWELL`. */
-export const PIPELINE_FAILURE_SPEECH = "Estou com um problema técnico e não vou conseguir continuar. Se puder, ligue de novo em alguns minutos. Obrigado.";
+export const PIPELINE_FAILURE_SPEECH: Readonly<Record<SpokenLanguage, string>> = {
+  "pt-BR": "Estou com um problema técnico e não vou conseguir continuar. Se puder, ligue de novo em alguns minutos. Obrigado.",
+  en: "I'm having a technical problem and won't be able to continue. If you can, please call again in a few minutes. Thank you.",
+  es: "Tengo un problema técnico y no voy a poder continuar. Si puede, vuelva a llamar en unos minutos. Gracias.",
+};
 /**
  * A fala de transferência da seção 3.4 (fatia 3c-2): toca no lugar da fala de falha quando quem abriu
  * a ligação vai transferir depois da queda (`transferOnFailure`, o agente com `transfer_to_e164`).
  */
-export const PIPELINE_TRANSFER_SPEECH = "Estou com um problema técnico e não vou conseguir continuar. Vou transferir você para uma pessoa da equipe. Um instante, por favor.";
+export const PIPELINE_TRANSFER_SPEECH: Readonly<Record<SpokenLanguage, string>> = {
+  "pt-BR": "Estou com um problema técnico e não vou conseguir continuar. Vou transferir você para uma pessoa da equipe. Um instante, por favor.",
+  en: "I'm having a technical problem and won't be able to continue. I'm going to transfer you to someone on the team. One moment, please.",
+  es: "Tengo un problema técnico y no voy a poder continuar. Voy a transferirlo con una persona del equipo. Un momento, por favor.",
+};
 /** O que quem ligou ouve quando um pedido ao cérebro falha, e a conversa segue (seção 3.4). */
-export const PIPELINE_BRAIN_RETRY_SPEECH = "Desculpe, não consegui responder agora. Pode repetir, por favor?";
+export const PIPELINE_BRAIN_RETRY_SPEECH: Readonly<Record<SpokenLanguage, string>> = {
+  "pt-BR": "Desculpe, não consegui responder agora. Pode repetir, por favor?",
+  en: "Sorry, I couldn't answer just now. Could you repeat that, please?",
+  es: "Disculpe, no pude responder ahora. ¿Puede repetir, por favor?",
+};
 /** Prazo de um pedido ao cérebro. Menor que o `inactivity_timeout` de 20 s da ElevenLabs, de propósito. */
 export const BRAIN_TIMEOUT_MS = 15_000;
 /**
@@ -712,7 +729,7 @@ class PipelineSession implements PipelineVoiceSession {
     }
     this.emitter.emit("error", new PipelinePieceError("brain", id, failure, false, `o pedido ao cérebro falhou (${failure}, ${status ?? "sem resposta"})`));
     this.roundOver();
-    this.say(PIPELINE_BRAIN_RETRY_SPEECH);
+    this.say(PIPELINE_BRAIN_RETRY_SPEECH[spokenLanguageOf(this.config.language)]);
   }
 
   private roundOver(): void {
@@ -970,7 +987,7 @@ export function createPipelineEngine(engineOptions: PipelineEngineOptions = {}):
       const timing = { schedule: options.schedule, readyTimeoutMs: options.readyTimeoutMs };
       const { clock } = options;
       // Com a transferência depois da queda, a fala de transferência fica pronta no lugar da de falha.
-      const failureSpeech = options.transferOnFailure === true ? PIPELINE_TRANSFER_SPEECH : PIPELINE_FAILURE_SPEECH;
+      const failureSpeech = (options.transferOnFailure === true ? PIPELINE_TRANSFER_SPEECH : PIPELINE_FAILURE_SPEECH)[spokenLanguageOf(config.language)];
       const now = clock ? (): number => clock.now().getTime() : undefined;
       const startedAt = now?.();
       // O fim de cada etapa da abertura, no relógio da sessão (a nota da chave).
