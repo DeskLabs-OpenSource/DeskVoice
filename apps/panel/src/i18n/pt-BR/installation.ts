@@ -168,6 +168,7 @@ const installation = {
       support_access_ended: "O acesso de suporte de {who} em {org} acabou.",
       update_requested: "{who} pediu a atualização para a versão {target}, a partir de {org}.",
       trunk_overlap_refused: "{who} tentou salvar em {org} uma linha cuja faixa cruza a de outra organização. A tela pediu confirmação.",
+      trunk_overlap_confirmed: "{who} salvou em {org}, depois do aviso, uma linha cuja faixa cruza a de outra organização. As linhas por IP das duas param de receber chamadas.",
     },
     sources: {
       command: "pelo comando de dentro do servidor",

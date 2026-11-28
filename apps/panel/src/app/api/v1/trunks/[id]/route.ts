@@ -30,12 +30,6 @@ export const PATCH = handle(
     const merged = { ...current, ...rest };
     requireIpModeForAddresses(merged.authMode, merged.outboundHost ?? null);
     requireNumericInbound(merged.authMode, merged.host, merged.matchExtra ?? []);
-    // Só confere quem mexe no que agrupa as linhas: o endereço, os extras ou o modo. Trocar o nome
-    // de uma linha que já está num grupo misto não pergunta nada.
-    const sameExtras = (merged.matchExtra ?? []).join("\n") === (current.matchExtra ?? []).join("\n");
-    if (merged.host !== current.host || merged.authMode !== current.authMode || !sameExtras) {
-      await requireOverlapConfirmed(deps, q.organizationId, session, { id: params.id, host: merged.host, authMode: merged.authMode, matchExtra: merged.matchExtra }, confirmOverlap);
-    }
     // A senha gravada só vale para o destino para o qual foi digitada. Sem isso, quem pode editar a
     // linha apontava o host para um servidor seu e recebia, no registro, a senha do provedor.
     const sameDestination = merged.host === current.host && merged.username === current.username && merged.authMode === current.authMode;
@@ -44,6 +38,14 @@ export const PATCH = handle(
       // Autenticação por IP não usa senha: em vez de pedir uma, a antiga é apagada.
       if (merged.authMode !== "ip") throw new ApiError(400, "password_required", "When the provider address or the user changes, enter the password again.");
       secretEnc = null;
+    }
+    // Por último, depois de toda recusa que não depende da faixa: a confirmação grava o evento de
+    // que a gravação seguiu, e nada depois dela pode recusar a gravação.
+    // Só confere quem mexe no que agrupa as linhas: o endereço, os extras ou o modo. Trocar o nome
+    // de uma linha que já está num grupo misto não pergunta nada.
+    const sameExtras = (merged.matchExtra ?? []).join("\n") === (current.matchExtra ?? []).join("\n");
+    if (merged.host !== current.host || merged.authMode !== current.authMode || !sameExtras) {
+      await requireOverlapConfirmed(deps, q.organizationId, session, { id: params.id, host: merged.host, authMode: merged.authMode, matchExtra: merged.matchExtra }, confirmOverlap);
     }
     const next = { ...merged, secretEnc };
     // Linha alterada volta a "não verificada": o teste anterior valia para a configuração antiga.

@@ -168,6 +168,7 @@ const installation: InstallationDictionary = {
       support_access_ended: "El acceso de soporte de {who} en {org} terminó.",
       update_requested: "{who} pidió la actualización a la versión {target}, desde {org}.",
       trunk_overlap_refused: "{who} intentó guardar en {org} una línea cuyo rango se cruza con el de otra organización. La pantalla pidió confirmación.",
+      trunk_overlap_confirmed: "{who} guardó en {org}, después del aviso, una línea cuyo rango se cruza con el de otra organización. Las líneas por IP de las dos dejan de recibir llamadas.",
     },
     sources: {
       command: "por el comando dentro del servidor",

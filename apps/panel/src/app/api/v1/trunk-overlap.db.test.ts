@@ -167,6 +167,14 @@ const refusedEvents = (organizationId: string) =>
     ]),
   );
 
+/** As linhas inteiras dos eventos `trunk_overlap_confirmed` da organização, como estão no banco. */
+const confirmedEvents = (organizationId: string) =>
+  withSystem(panel.app, (q) =>
+    q.many<{ row: Record<string, unknown> }>("select to_jsonb(e) as row from installation_events e where kind = 'trunk_overlap_confirmed' and organization_id = $1 order by id", [
+      organizationId,
+    ]),
+  );
+
 describe("auditoria e limite da conferência de faixa", () => {
   it("T7: um 409 grava exatamente 1 evento, com a organização e a conta de quem tentou, e nada da outra organização", async () => {
     const s = await scene();
@@ -221,27 +229,81 @@ describe("auditoria e limite da conferência de faixa", () => {
 
   it("T10: a A no teto não afeta a B, que confere normalmente no mesmo minuto", async () => {
     const s = await scene();
-    for (let index = 0; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE; index += 1) expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(409);
-    expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(429);
-    // A A tem uma linha por IP salva com confirmação; a B, na faixa dela, recebe a pergunta.
+    // A A tem uma linha por IP (a confirmação também gasta tentativa), e chega ao teto.
     expect((await s.create({ host: "198.51.100.7", authMode: "ip", confirmOverlap: true })).status).toBe(200);
+    for (let index = 1; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE; index += 1) expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(409);
+    expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(429);
+    // A B, na faixa da linha da A, recebe a pergunta.
     const fromB = await call(createTrunk, { method: "POST", cookie: s.personB.cookie, body: { name: "Outra da B", host: "198.51.100.7", authMode: "ip" } });
     expect(fromB).toMatchObject({ status: 409, code: "trunk_overlap_unconfirmed" });
     expect(await refusedEvents(s.b)).toHaveLength(1);
   });
 
-  it("T11: com a A no teto, a confirmação salva sem conferir e sem evento, e trocar só o nome também passa", async () => {
+  it("T11: a confirmação também gasta tentativa: com a A no teto, até a confirmação recebe 429, sem salvar e sem evento; trocar só o nome passa", async () => {
     const s = await scene();
-    for (let index = 0; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE; index += 1) expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(409);
+    const mine = await s.create({ host: "198.51.100.9", authMode: "ip" });
+    expect(mine.status).toBe(200);
+    const id = (mine.data as { id: string }).id;
+    for (let index = 1; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE; index += 1) expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(409);
     expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(429);
-    const events = (await refusedEvents(s.a)).length;
+    const refused = (await refusedEvents(s.a)).length;
 
-    const saved = await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: true });
-    expect(saved.status).toBe(200);
+    const limited = await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: true });
+    expect(limited).toMatchObject({ status: 429, code: "too_many_attempts" });
     expect(await s.count(s.a)).toBe(1);
-    const id = (saved.data as { id: string }).id;
+    expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.2", confirmOverlap: true } })).status).toBe(429);
     expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { name: "Novo nome" } })).status).toBe(200);
-    expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.2", confirmOverlap: true } })).status).toBe(200);
-    expect(await refusedEvents(s.a)).toHaveLength(events);
+    expect(await refusedEvents(s.a)).toHaveLength(refused);
+    expect(await confirmedEvents(s.a)).toEqual([]);
+
+    panel.clock.at = new Date(NOW.getTime() + 60 * 1000);
+    expect((await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: true })).status).toBe(200);
+  });
+
+  it("T12: a confirmação que tira do ar a linha de outra organização grava 1 evento, com a organização e a conta de quem salvou, e nada da outra", async () => {
+    const s = await scene();
+    const tried = "203.0.113.5";
+    const saved = await s.create({ host: tried, authMode: "ip", confirmOverlap: true });
+    expect(saved.status).toBe(200);
+    const events = await confirmedEvents(s.a);
+    expect(events).toHaveLength(1);
+    const row = events[0]?.row ?? {};
+    expect(row).toMatchObject({ kind: "trunk_overlap_confirmed", organization_id: s.a, actor_account_id: await accountOf(s.personA.id), payload: {} });
+    const text = JSON.stringify(row);
+    for (const secret of [s.bTrunk, s.b, B_NAME, B_LINE, B_RANGE, "203.0.113", tried, "Organização B", await accountOf(s.personB.id)]) expect(text).not.toContain(secret);
+    expect(await confirmedEvents(s.b)).toEqual([]);
+    // A edição confirmada que leva outra linha para a faixa também grava.
+    const other = await s.create({ host: "198.51.100.9", authMode: "ip" });
+    const id = (other.data as { id: string }).id;
+    expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.6", confirmOverlap: true } })).status).toBe(200);
+    expect(await confirmedEvents(s.a)).toHaveLength(2);
+    // Quem administra a instalação vê o evento.
+    const admin = await createUser(panel.app, await createOrganization(panel.app, `Instalação ${randomUUID().slice(0, 8)}`), "owner");
+    await withSystem(panel.app, async (q) => q.exec("update accounts set installation_admin_at = $2 where id = $1", [await accountOf(admin.id), NOW]));
+    const listed = await call(installationEvents, { cookie: admin.cookie });
+    const shown = (listed.data as Array<{ kind: string; organizationId: string | null }>).filter((event) => event.kind === "trunk_overlap_confirmed" && event.organizationId === s.a);
+    expect(shown).toHaveLength(2);
+  });
+
+  it("T13: a confirmação que não tira linha nenhuma do ar não grava evento (a tela manda a confirmação só depois do aviso, mas a rota não confia nisso)", async () => {
+    const s = await scene();
+    expect((await s.create({ host: "198.51.100.7", authMode: "ip", confirmOverlap: true })).status).toBe(200);
+    expect((await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: false })).status).toBe(409);
+    expect(await confirmedEvents(s.a)).toEqual([]);
+  });
+
+  it("T14: a edição confirmada que outra regra recusa não grava evento: a linha por registro que muda de endereço sem a senha nova recebe 400", async () => {
+    const s = await scene();
+    const mine = await s.create({ host: "198.51.100.9", authMode: "register", username: "conta100", password: "segredo" });
+    expect(mine.status).toBe(200);
+    const id = (mine.data as { id: string }).id;
+    const refused = await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.5", confirmOverlap: true } });
+    expect(refused).toMatchObject({ status: 400, code: "password_required" });
+    expect((await withSystem(panel.app, (q) => q.one<{ host: string }>("select host from trunks where id = $1", [id])))?.host).toBe("198.51.100.9");
+    expect(await confirmedEvents(s.a)).toEqual([]);
+    // Com a senha nova, salva e grava o evento.
+    const saved = await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.5", password: "nova", confirmOverlap: true } });
+    expect(saved.status).toBe(200);
+    expect(await confirmedEvents(s.a)).toHaveLength(1);
   });
 });
