@@ -73,7 +73,7 @@ A regra tem três consequências práticas:
 |---|---|
 | `every-table-has-organization-id` | Toda tabela pertence a uma organização. Veja [isolamento](isolamento.md) |
 | `migrations-are-timestamped-and-unique` | Nome de migration é carimbo de tempo, sem repetição. Veja [um caminho de schema](um-caminho-de-schema.md) |
-| `migrations-come-after-the-last-release` | Migration que ainda não saiu numa versão tem carimbo maior que o maior da última tag `vX.Y.Z`. Sem tag (clone raso, fork) ela pula e diz por quê |
+| `migrations-come-after-the-last-release` | Migration que ainda não saiu numa versão tem carimbo maior que o maior da última tag `vX.Y.Z`. Sem tag (clone raso, fork) ela pula e diz por quê; no CI (`GITHUB_ACTIONS` definido) a falta de tag reprova |
 | `env-vars-have-defaults` | Nenhuma variável de ambiente sem padrão ou sem ser gerada pelo instalador |
 | `no-raw-sql-outside-core` | SQL só dentro de `packages/core` |
 | `no-conflict-markers` | Nenhum marcador de conflito esquecido |

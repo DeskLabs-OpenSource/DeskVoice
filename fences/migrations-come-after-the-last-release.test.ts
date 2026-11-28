@@ -11,9 +11,11 @@
 // conferência: migration publicada nunca é renomeada nem editada, então a 120059, publicada desde a
 // 0.48.0, passa como está. Tag com sufixo (`v1.0.0-rc.1`) não conta como versão publicada.
 //
-// Sem tag não há o que comparar: clone raso (o job `verify` do CI faz o checkout sem `fetch-depth`,
-// e por isso sem tags), fork sem tags ou cópia sem `.git`. Aí a cerca não diz "ok": ela pula o
-// teste e diz por quê, e o pulo aparece no resumo do vitest.
+// Sem tag não há o que comparar: clone raso, fork sem tags ou cópia sem `.git`. Fora do CI a cerca
+// não diz "ok": ela pula o teste e diz por quê, e o pulo aparece no resumo do vitest. No CI
+// (`GITHUB_ACTIONS` definido) a falta de tag reprova: o job `verify` busca as tags num passo próprio
+// do `ci.yml`, e se alguém tirar esse passo o pulo passaria despercebido (ninguém lê skip) e a cerca
+// deixaria de proteger em silêncio.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -24,7 +26,7 @@ import { REPO_ROOT, expectClean, listFiles } from "./_lib";
 const STAMP = /^db\/migrations\/(\d{8}T\d{6})_[^/]*\.sql$/;
 const RELEASE_TAG = /^v(\d+)\.(\d+)\.(\d+)$/;
 
-type Result = { skipped: string } | { tag: string; maxStamp: string | null; violations: string[] };
+type Result = { skipped: string } | { failed: string } | { tag: string; maxStamp: string | null; violations: string[] };
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -55,21 +57,32 @@ function stampOf(file: string): string | null {
   return STAMP.exec(file)?.[1] ?? null;
 }
 
-function check(root: string): Result {
+/** No CI a falta de tag reprova; fora dele, pula com o motivo. */
+function noTag(reason: string, env: NodeJS.ProcessEnv): Result {
+  if (env.GITHUB_ACTIONS) {
+    return {
+      failed: `no CI (GITHUB_ACTIONS definido) a cerca precisa das tags \`vX.Y.Z\` e não achou nenhuma: ${reason}. Traga as tags no checkout do job (o passo "Buscar as tags" do \`ci.yml\`, \`git fetch origin '+refs/tags/v*:refs/tags/v*'\`, ou \`fetch-depth: 0\`); sem elas a cerca deixaria de proteger em silêncio`,
+    };
+  }
+  return { skipped: reason };
+}
+
+function check(root: string, env: NodeJS.ProcessEnv): Result {
   let tags: string[];
   try {
     tags = git(root, ["tag", "--list", "v*"]).split("\n").filter(Boolean);
   } catch {
-    return { skipped: "não é um repositório git (cópia sem `.git`), então não há tag para comparar" };
+    return noTag("não é um repositório git (cópia sem `.git`), então não há tag para comparar", env);
   }
   const tag = latestReleaseTag(tags);
   if (!tag) {
     const shallow = git(root, ["rev-parse", "--is-shallow-repository"]).trim() === "true";
-    return {
-      skipped: shallow
-        ? "clone raso sem tags `vX.Y.Z` (no CI, checkout sem `fetch-depth: 0`); rode `git fetch --tags --unshallow` para conferir"
+    return noTag(
+      shallow
+        ? "clone raso sem tags `vX.Y.Z`; rode `git fetch --tags --unshallow` para conferir"
         : "nenhuma tag `vX.Y.Z` neste repositório (fork sem tags?); rode `git fetch --tags` do repositório oficial para conferir",
-    };
+      env,
+    );
   }
   const published = new Set(git(root, ["ls-tree", "-r", "--name-only", tag, "--", "db/migrations/"]).split("\n").filter(Boolean));
   let maxStamp: string | null = null;
@@ -113,7 +126,8 @@ function tempRepo(steps: { add: string[]; tag?: string }[], uncommitted: string[
 
 describe("migrations-come-after-the-last-release", () => {
   it("toda migration nova tem carimbo maior que o maior da última versão publicada", (ctx) => {
-    const result = check(REPO_ROOT);
+    const result = check(REPO_ROOT, process.env);
+    if ("failed" in result) expect.fail(result.failed);
     if ("skipped" in result) {
       process.stderr.write(`migrations-come-after-the-last-release NÃO conferiu: ${result.skipped}\n`);
       ctx.skip(`não conferiu: ${result.skipped}`);
@@ -136,7 +150,7 @@ describe("migrations-come-after-the-last-release", () => {
       ],
       ["20260201T000000_abaixo.sql", "20260301T000000_igual.sql", "20260401T000000_acima.sql"],
     );
-    expect(check(root)).toEqual({
+    expect(check(root, {})).toEqual({
       tag: "v0.10.0",
       maxStamp: "20260301T000000",
       violations: [
@@ -151,16 +165,32 @@ describe("migrations-come-after-the-last-release", () => {
       { add: ["20261123T120517_ainda_esta_ai_chave_por_agente.sql"], tag: "v0.47.0" },
       { add: ["20261123T120059_testes_do_agente_extrato.sql"], tag: "v0.48.0" },
     ]);
-    expect(check(root)).toEqual({ tag: "v0.48.0", maxStamp: "20261123T120517", violations: [] });
+    expect(check(root, {})).toEqual({ tag: "v0.48.0", maxStamp: "20261123T120517", violations: [] });
   });
 
-  it("sem tag, diz por que não conferiu em vez de passar como ok", () => {
+  it("sem tag e fora do CI, diz por que não conferiu em vez de passar como ok", () => {
     const root = tempRepo([{ add: ["20260101T000000_primeira.sql"] }], ["20250101T000000_antiga.sql"]);
-    expect(check(root)).toEqual({ skipped: expect.stringContaining("nenhuma tag `vX.Y.Z`") });
+    expect(check(root, {})).toEqual({ skipped: expect.stringContaining("nenhuma tag `vX.Y.Z`") });
 
     const notGit = fs.mkdtempSync(path.join(os.tmpdir(), "deskvoice-fence-migrations-after-release-nogit-"));
     onTestFinished(() => fs.rmSync(notGit, { recursive: true, force: true }));
-    expect(check(notGit)).toEqual({ skipped: expect.stringContaining("não é um repositório git") });
+    expect(check(notGit, {})).toEqual({ skipped: expect.stringContaining("não é um repositório git") });
+  });
+
+  it("sem tag no CI (GITHUB_ACTIONS definido), reprova e diz para trazer as tags no checkout", () => {
+    const ci = { GITHUB_ACTIONS: "true" };
+    const root = tempRepo([{ add: ["20260101T000000_primeira.sql"] }]);
+    const noTags = check(root, ci);
+    expect(noTags).toEqual({ failed: expect.stringContaining("nenhuma tag `vX.Y.Z`") });
+    expect(noTags).toEqual({ failed: expect.stringContaining("Traga as tags no checkout") });
+
+    const notGit = fs.mkdtempSync(path.join(os.tmpdir(), "deskvoice-fence-migrations-after-release-nogit-"));
+    onTestFinished(() => fs.rmSync(notGit, { recursive: true, force: true }));
+    expect(check(notGit, ci)).toEqual({ failed: expect.stringContaining("Traga as tags no checkout") });
+
+    // Com tag, o CI confere normalmente: a variável só muda o que acontece quando falta tag.
+    const tagged = tempRepo([{ add: ["20260101T000000_primeira.sql"], tag: "v0.1.0" }], ["20260201T000000_nova.sql"]);
+    expect(check(tagged, ci)).toEqual({ tag: "v0.1.0", maxStamp: "20260101T000000", violations: [] });
   });
 
   it("escolhe a maior tag por semver", () => {
