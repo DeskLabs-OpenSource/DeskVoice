@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { DESKCOMM_CHANNEL_LABEL_MAX } from "@deskvoice/tools/deskcomm-channel";
 import en from "../../../i18n/en/settings";
 import es from "../../../i18n/es/settings";
 import { fill } from "../../../i18n/locales";
@@ -32,8 +33,21 @@ export interface SavedCrm {
   channelLabel?: string;
 }
 
-/** O nome do canal como a tela mostra e grava: o nome do CRM, ou o provedor, e o número. */
-export const channelLabelOf = (channel: Channel): string => [channel.name ?? channel.provider, channel.phone ? formatPhone(channel.phone) : null].filter(Boolean).join(" · ");
+/**
+ * O nome do canal como a tela mostra e grava: o nome do CRM, ou o provedor, e o número. O nome vem
+ * do CRM, sem campo para o operador encurtar: acima do teto da API, a tela corta e termina em "…",
+ * em vez de mandar um nome que a gravação recusa. O corte não parte um emoji no meio.
+ */
+export const channelLabelOf = (channel: Channel): string => {
+  const label = [channel.name ?? channel.provider, channel.phone ? formatPhone(channel.phone) : null].filter(Boolean).join(" · ");
+  if (label.length <= DESKCOMM_CHANNEL_LABEL_MAX) return label;
+  let cut = "";
+  for (const char of label) {
+    if (cut.length + char.length > DESKCOMM_CHANNEL_LABEL_MAX - 1) break;
+    cut += char;
+  }
+  return `${cut.trimEnd()}…`;
+};
 
 /**
  * O CRM do conector `deskcomm` (#330, fatia 2b): confere as duas portas com o token gravado e
