@@ -313,6 +313,27 @@ limite: numa
 instalação, o arquivo passou de 20 GB. A atualização não apaga esse arquivo (é dado seu); passando
 de 1 GB, a linha vira `aviso` e traz o comando que o esvazia.
 
+Uma ligação recusada antes do dialplan não aparece nesse log. A operadora mandou a ligação, o
+Asterisk respondeu com recusa, e ela nem chegou ao agente. São dois casos: "No matching endpoint
+found", quando a ligação chega de um endereço que nenhuma linha reconhece (por exemplo, a operadora
+mudou o IP), e "extension not found", quando a linha é reconhecida mas o número chamado não está
+no dialplan. O Asterisk escreve as duas recusas como NOTICE, e os NOTICE ficam fora desse log
+porque eram quase todo o volume (em grande parte, tentativas de fora contra a porta SIP). Para ver
+o motivo, ligue um registro temporário, repita a ligação e desligue o registro. É preciso ter
+acesso ao servidor:
+
+```bash
+docker compose -f deploy/docker-compose.yml exec asterisk asterisk -rx "logger add channel /tmp/recusas.log notice"
+# repita a ligação que não chegou
+docker compose -f deploy/docker-compose.yml exec asterisk grep -E "No matching endpoint|extension not found" /tmp/recusas.log
+docker compose -f deploy/docker-compose.yml exec asterisk asterisk -rx "logger remove channel /tmp/recusas.log"
+docker compose -f deploy/docker-compose.yml exec asterisk rm -f /tmp/recusas.log
+```
+
+Enquanto o registro está ligado, o arquivo não tem teto e recebe também as tentativas de fora, que
+são muitas. Use-o por poucos minutos e apague o arquivo depois. Se o Asterisk reiniciar antes, o
+registro some sozinho, e o arquivo fica até ser apagado.
+
 A linha "WhatsApp" fala do serviço do WhatsApp por QR Code (o contêiner `waha`), que só existe
 na instalação que o pediu pela tela. "Não instalado" é o estado normal, e é `ok`. Instalado, a
 linha diz se ele está de pé e responde ao painel; parado é `falha`, mas nunca de peça essencial:
