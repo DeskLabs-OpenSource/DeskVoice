@@ -25,6 +25,7 @@ import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../
 import { agentTabs, changedTabs, DRAFT_TAB, FORM_TABS, hiddenTabOf, parseAgentTab, type AgentTab } from "./agent-tabs";
 import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
 import { AgentBrains } from "./brains";
+import { costCeilingCents, CostCeilingHint } from "./cost-ceiling";
 import { EngineField, newAgentEngine } from "./engine-field";
 import { PipelineBlock, usePipelineData } from "./pipeline-block";
 import { NO_PIECES, pipelineMissing, piecesOf, pipelineToSave, shownPieces, type PipelinePieces } from "./pipeline-pieces";
@@ -261,6 +262,14 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         : trustCaller.data.value !== true
           ? "not_trusted"
           : null;
+  // Com o conector `deskcomm` no contrato do CRM (#330, fatia 2), a mensagem sai pelo canal do CRM, e
+  // o texto da opção diz qual: o nome gravado do canal, ou "o que o CRM escolher". `null`: outro conector.
+  const crmChannel = ((): { label: string | null } | null => {
+    const value = whatsAppConnector.data?.value as { type?: unknown; crmUrl?: unknown; channelLabel?: unknown } | null | undefined;
+    if (value?.type !== "deskcomm" || typeof value.crmUrl !== "string") return null;
+    return { label: typeof value.channelLabel === "string" ? value.channelLabel : null };
+  })();
+  const messageOption = crmChannel === null ? t.dropFollowUpWhatsApp : crmChannel.label === null ? t.dropFollowUpCrmRule : fill(t.dropFollowUpCrm, { channel: crmChannel.label });
   // Por que a religação está indisponível, a mesma conferência da rota; `undefined` enquanto carrega.
   const callBackBlock: "outbound_disabled" | null | undefined = outboundPolicy.data === undefined ? undefined : outboundPolicy.data.enabled ? null : "outbound_disabled";
   // A regra é a da API (`checkVocabulary`): a tela diz o erro ao lado do campo e não manda nada.
@@ -294,7 +303,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         transferReturnsToAgent: draft.transferReturns,
         callerIdleGuard: draft.callerIdleGuard,
         maxCallSeconds: Math.round(Number(draft.maxMinutes) * 60),
-        costCeilingCents: Math.round(Number(draft.costCeiling.replace(",", ".")) * 100),
+        costCeilingCents: costCeilingCents(draft.costCeiling),
         enabled: draft.enabled,
         followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
         listeningEnvironment: draft.listeningEnvironment,
@@ -477,7 +486,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 set("analysis", next);
                 setAcceptUnmeasured(accept);
               }}
-              costCeilingCents={Math.round(Number(draft.costCeiling.replace(",", ".")) * 100)}
+              costCeilingCents={costCeilingCents(draft.costCeiling)}
               analyst={analysts.data?.find((candidate) => candidate.id === draft.analystId) ?? null}
               canConfigure={canConfigure}
             />
@@ -592,7 +601,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                     <option value="task">{t.dropFollowUpTask}</option>
                     {/* Indisponível: desabilitada, e o motivo e o caminho aparecem logo abaixo. Já escolhida, continua visível. */}
                     <option value="whatsapp" disabled={whatsAppBlock !== null && draft.dropFollowUp !== "whatsapp"}>
-                      {whatsAppBlock ? `${t.dropFollowUpWhatsApp} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpWhatsApp}
+                      {whatsAppBlock ? `${messageOption} (${t.dropFollowUpWhatsAppUnavailable})` : messageOption}
                     </option>
                     <option value="call_back" disabled={callBackBlock !== null && draft.dropFollowUp !== "call_back"}>
                       {callBackBlock ? `${t.dropFollowUpCallBack} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpCallBack}
@@ -655,7 +664,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               ) : null}
               {draft.dropFollowUp === "whatsapp" ? (
                 <div className="mt-4 grid max-w-prose gap-2">
-                  <p className="text-[0.87rem] text-muted">{t.dropFollowUpBlockRisk}</p>
+                  <p className="text-[0.87rem] text-muted">{crmChannel === null ? t.dropFollowUpBlockRisk : t.dropFollowUpCrmRisk}</p>
                   <Field label={t.dropFollowUpMessage} hint={t.dropFollowUpMessageWarning}>
                     <TextArea
                       value={draft.dropFollowUpMessage}
@@ -677,7 +686,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 <Field label={t.maxMinutes}>
                   <TextInput mono type="number" min={1} max={120} value={draft.maxMinutes} onChange={(event) => set("maxMinutes", event.target.value)} required />
                 </Field>
-                <Field label={t.costCeiling}>
+                <Field label={t.costCeiling} hint={<CostCeilingHint t={t} value={draft.costCeiling} />}>
                   <TextInput mono inputMode="decimal" value={draft.costCeiling} onChange={(event) => set("costCeiling", event.target.value)} required />
                 </Field>
               </div>

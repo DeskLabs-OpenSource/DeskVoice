@@ -198,9 +198,12 @@ export type DropFollowUpAction = "task_opened" | "whatsapp_queued" | "call_back_
  */
 export type DropFollowUpSkip = "do_not_call" | "mode_unavailable" | "recent_follow_up" | "org_limit";
 
-/** O payload de `drop_follow_up_result` do WhatsApp. O da religação é `CallBackResultPayload`, no núcleo. */
+/**
+ * O payload de `drop_follow_up_result` do WhatsApp. O da religação é `CallBackResultPayload`, no núcleo.
+ * `whatsapp_do_not_call`: a mensagem não saiu porque o número entrou na lista de não ligar antes do envio.
+ */
 export interface DropFollowUpResultPayload {
-  action: "whatsapp_sent" | "whatsapp_failed";
+  action: "whatsapp_sent" | "whatsapp_failed" | "whatsapp_do_not_call";
 }
 
 /**

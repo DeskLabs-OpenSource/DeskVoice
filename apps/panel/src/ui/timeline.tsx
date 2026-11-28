@@ -787,13 +787,15 @@ export function Timeline({
             ),
           };
         }
-        // A mensagem para quem ligou saiu ou não.
+        // A mensagem para quem ligou saiu, não saiu, ou foi barrada na hora do envio pela lista de não ligar.
         const sent = p.action === "whatsapp_sent";
+        const doNotCall = p.action === "whatsapp_do_not_call";
+        const r = e.drop_follow_up_result;
         return {
           ...base,
-          tone: sent ? "ok" : "fail",
-          icon: sent ? CheckCircle : XCircle,
-          body: <Quiet>{sent ? e.drop_follow_up_result.whatsapp_sent : e.drop_follow_up_result.whatsapp_failed}</Quiet>,
+          tone: sent ? "ok" : doNotCall ? "neutral" : "fail",
+          icon: sent ? CheckCircle : doNotCall ? PhoneX : XCircle,
+          body: <Quiet>{sent ? r.whatsapp_sent : doNotCall ? r.whatsapp_do_not_call : r.whatsapp_failed}</Quiet>,
         };
       }
       case "caller_speech_read": {

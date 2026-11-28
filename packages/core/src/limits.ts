@@ -267,8 +267,9 @@ export async function setDefaultLimits(db: Db, patch: OrganizationLimitsPatch, a
 
 /**
  * Grava a linha de limites da organização que acabou de nascer, com o padrão COPIADO (seção 3.5). Só
- * `addOrganization` chama, na transação dela: a fundadora, as que já existem, `create-owner` e a
- * demonstração não passam por aqui e continuam sem linha. `q` tem de ser de `withSystem`.
+ * `insertNewOrganization` chama, na transação de quem cria: a tela (`addOrganization`) e o instalador
+ * (`create-owner`). As que já existiam antes disso e a demonstração não passam por aqui e continuam
+ * sem linha, sem limite nenhum. `q` tem de ser de `withSystem`.
  */
 export async function copyDefaultLimits(q: OrgQuery, organizationId: string, now: Date): Promise<OrganizationLimits> {
   const limits = await defaultLimits(q);

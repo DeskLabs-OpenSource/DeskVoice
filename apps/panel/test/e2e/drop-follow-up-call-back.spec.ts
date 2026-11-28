@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import agents from "../../src/i18n/pt-BR/agents";
 import common from "../../src/i18n/pt-BR/common";
-import { signIn, unique } from "./session";
+import { signIn, unique, unlockOutbound } from "./session";
 
 // "Quando a ligação cai", a opção "Ligar de volta" (desenho 2026-11-16-follow-up-da-ligacao-que-caiu,
 // seções 3.6 e 3.8, fatia 4): com as ligações de saída desligadas, ela aparece desabilitada e diz por quê,
@@ -22,6 +22,7 @@ test("Ligar de volta: desabilitada com o motivo e o link sem as ligações de sa
   await signIn(page);
   const before = await readPolicy(page);
   await putPolicy(page, { enabled: false });
+  let relock = async (): Promise<void> => {};
   try {
     const created = await page.request.post("/api/v1/agents", { data: { name: `Religação ${unique()}`, engine: "simulated" } });
     const agentId = ((await created.json()) as { data: { id: string } }).data.id;
@@ -40,6 +41,8 @@ test("Ligar de volta: desabilitada com o motivo e o link sem as ligações de sa
     expect((await save(page)).dropFollowUp).toBeUndefined();
 
     // Com as ligações de saída ligadas, a opção vale e diz quantas tentativas, quando, e a lista de não ligar.
+    // A organização do instalador nasce com a trava da saída: quem instalou a tira antes de ligar.
+    relock = await unlockOutbound(page);
     await putPolicy(page, { enabled: true, purpose: before.purpose ?? "Retornar ligações que caíram (e2e)", legalBasis: before.legalBasis ?? "Legítimo interesse (e2e)" });
     await page.reload();
     await expect(page.getByText(agents.dropFollowUpOutboundDisabled)).toHaveCount(0);
@@ -60,5 +63,6 @@ test("Ligar de volta: desabilitada com o motivo e o link sem as ligações de sa
     await expect(page.getByRole("alert").filter({ hasText: agents.dropFollowUpOutboundDisabled })).toBeVisible();
   } finally {
     await putPolicy(page, { enabled: before.enabled, purpose: before.purpose, legalBasis: before.legalBasis });
+    await relock();
   }
 });

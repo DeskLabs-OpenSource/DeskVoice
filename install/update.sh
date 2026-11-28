@@ -148,7 +148,7 @@ roll_back() {  # roll_back "<o que falhou>"
   apply_version "$current" "$previous_commit" || problems="$problems não consegui voltar o código para $previous_commit;"
   # A configuração do Asterisk volta a ser a dos modelos da versão anterior (em subshell: uma falha
   # aqui entra na lista de problemas, sem interromper a volta). Com --rollback: a versão anterior
-  # pode não ter o modelo do modules.conf (ver render_asterisk_config). A checagem que a volta usa
+  # pode não ter o modelo do modules.conf ou do logger.conf (ver render_asterisk_config). A checagem que a volta usa
   # (wait_healthy) já é a da versão anterior: roda num bash novo, que lê o arquivo do disco.
   ( render_asterisk_config --rollback ) >/dev/null 2>&1 || problems="$problems não consegui regerar a configuração do Asterisk da versão $current;"
   for service in $APP_SERVICES; do
