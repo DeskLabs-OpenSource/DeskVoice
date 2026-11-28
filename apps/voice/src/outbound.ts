@@ -45,7 +45,7 @@ export async function startOutboundCall(deps: OutboundDeps, input: { organizatio
     const trunk = trunks.length === 1 ? trunks[0] : undefined;
     if (!trunk) return { code: "no_line", message: "There is no single phone line for this agent to call from. Give the agent a number in the phone line settings." };
 
-    const decision = await checkOutboundAllowed(q, to, clock, trunk.id);
+    const decision = await checkOutboundAllowed(q, to, clock, { id: trunk.id, e164: trunk.caller_id_e164 });
     const call = await q.one<{ id: string }>(
       `insert into calls (organization_id, agent_id, direction, channel, trunk_id, from_e164, to_e164, status, end_reason, started_at, ended_at, call_back_of)
        values ($1, $2, 'outbound', 'phone', $3, $4, $5, $6, $7, $8, $9, $10) returning id`,

@@ -1,6 +1,8 @@
 import { ORGANIZATION_SUSPENDED, organizationLimits, organizationSuspended, OUTBOUND_NOT_ALLOWED, SPEND_CAP_REACHED, spendCapReached, toE164, type Clock, type OrgQuery } from "@deskvoice/core";
 
 export type OutboundRefusalCode = "organization_suspended" | "outbound_not_allowed" | "spend_cap_reached" | "outbound_disabled" | "outside_window" | "do_not_call" | "daily_cap_reached" | "attempts_exhausted";
+/** A linha de saída: o id dela e o número que ela usa agora (`trunks.caller_id_e164`). */
+export type OutboundLine = { id: string; e164: string | null };
 export type OutboundDecision = { allowed: true } | { allowed: false; code: OutboundRefusalCode; message: string };
 
 interface PolicyRow {
@@ -34,10 +36,12 @@ function localMinutes(at: Date, timeZone: string): number {
  * tranca a linha dela (`for update`) até a transação confirmar, então duas ligações da mesma
  * organização conferem e gravam uma de cada vez, e o teto não é furado por corrida.
  *
- * `lineId` é a linha (o tronco) por onde a ligação vai sair, gravada em `calls.trunk_id`. O teto
- * diário conta pela linha, e nunca pelo número dela: o número é editável, e trocá-lo não devolve
- * ligações ao teto (revisão fria da 0.50.0). Sem linha, o teto conta todas as ligações de saída
- * da organização.
+ * `line` é a linha (o tronco) por onde a ligação vai sair: o id, gravado em `calls.trunk_id`, e o
+ * número que ela usa agora. O teto diário conta, numa contagem só e sem repetir ligação, o que saiu
+ * pela linha OU pelo número atual dela. Assim nenhuma edição de linha devolve ligações ao teto no
+ * mesmo dia (revisão fria da 0.50.0): trocar o número (conta pelo id), passar o número para outra
+ * linha ou apagar a linha e criar outra com ele (conta pelo número). Sem linha, o teto conta todas
+ * as ligações de saída da organização.
  *
  * A organização suspensa não liga, com a política ligada ou não (seção 3.3 do desenho do R8).
  * Depois da suspensão, a trava da administração da instalação (`organization_limits.outbound_allowed`,
@@ -45,7 +49,7 @@ function localMinutes(at: Date, timeZone: string): number {
  * Sem linha de limites, a trava não existe e vale a política, como antes. Depois da trava, o teto de
  * gasto do mês (fatia 7c, `spendCapReached`), com os limites já lidos: sem teto, nada é somado nem relido.
  */
-export async function checkOutboundAllowed(q: OrgQuery, toE164Input: string, clock: Clock, lineId?: string | null): Promise<OutboundDecision> {
+export async function checkOutboundAllowed(q: OrgQuery, toE164Input: string, clock: Clock, line?: OutboundLine | null): Promise<OutboundDecision> {
   if (await organizationSuspended(q)) return refuse(ORGANIZATION_SUSPENDED, "This organization is suspended: it does not make calls.");
   const limits = await organizationLimits(q);
   if (!limits.outboundAllowed) return refuse(OUTBOUND_NOT_ALLOWED, "Outbound calls were turned off for this organization by the installation administration.");
@@ -75,8 +79,8 @@ export async function checkOutboundAllowed(q: OrgQuery, toE164Input: string, clo
     `select count(*)::int as count from calls
       where organization_id = $1 and direction = 'outbound' and status <> 'refused'
         and started_at >= date_trunc('day', $2::timestamptz at time zone $3) at time zone $3
-        and ($4::uuid is null or trunk_id = $4)`,
-    [q.organizationId, now, policy.timezone, lineId ?? null],
+        and ($4::uuid is null or trunk_id = $4 or from_e164 = $5)`,
+    [q.organizationId, now, policy.timezone, line?.id ?? null, line?.e164 ?? null],
   );
   if ((today?.count ?? 0) >= policy.daily_cap_per_line) {
     return refuse("daily_cap_reached", `This line already made ${today?.count} outbound calls today; the daily cap is ${policy.daily_cap_per_line}.`);
