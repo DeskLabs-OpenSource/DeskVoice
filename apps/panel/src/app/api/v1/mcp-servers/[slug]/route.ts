@@ -1,5 +1,5 @@
 import { ApiError, handle, notFound } from "../../../../../server/context";
-import { MCP_SLUG, deleteBody, lookTools, removeServer, saveBody, saveServer, storedServer, type Looked } from "../../../../../server/mcp-servers";
+import { MCP_SLUG, deleteBody, lookTools, refuseTaken, removeServer, saveBody, saveServer, storedServer, type Looked } from "../../../../../server/mcp-servers";
 
 const slugOf = (params: Record<string, string>): string => {
   const slug = params.slug ?? "";
@@ -10,7 +10,8 @@ const slugOf = (params: Record<string, string>): string => {
 /**
  * Grava o servidor com o retrato e as marcas. A busca no servidor vem antes, fora da transação, e a
  * impressão digital de cada ferramenta da tela tem de bater com ela. Endereço novo sem segredo novo
- * fica sem segredo: o antigo nunca vai a outro destino. A sessão de suporte não grava: é uma
+ * fica sem segredo: o antigo nunca vai a outro destino. O pedido de criação (`create`) com um `slug`
+ * que já existe é recusado com 409 antes da busca, e nada muda. A sessão de suporte não grava: é uma
  * credencial que sobrevive a ela.
  */
 const looked = new WeakMap<object, Looked>();
@@ -22,6 +23,7 @@ export const PUT = handle(
     before: async ({ body, deps, session, params }) => {
       const slug = slugOf(params);
       const previous = await storedServer(deps, session, slug);
+      refuseTaken(body.create, previous);
       const secret = body.secret ?? (previous?.url === body.url ? previous.secret : undefined);
       const list = await lookTools(deps, {
         slug,

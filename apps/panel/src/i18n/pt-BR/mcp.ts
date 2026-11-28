@@ -7,6 +7,7 @@ const mcp = {
   add: "Cadastrar servidor",
   slug: "Identificador",
   slugHint: "De 1 a 16 letras minúsculas ou números. Vai no nome de cada ferramenta e não muda depois.",
+  slugTaken: "Já existe um servidor com este identificador. Escolha outro, ou edite o servidor cadastrado.",
   label: "Nome",
   url: "Endereço",
   headerName: "Cabeçalho do segredo",

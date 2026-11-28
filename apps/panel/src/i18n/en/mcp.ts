@@ -7,6 +7,7 @@ const mcp: McpDictionary = {
   add: "Register server",
   slug: "Identifier",
   slugHint: "1 to 16 lowercase letters or digits. It goes into the name of each tool and does not change later.",
+  slugTaken: "A server with this identifier already exists. Choose another one, or edit the registered server.",
   label: "Name",
   url: "Address",
   headerName: "Secret header",

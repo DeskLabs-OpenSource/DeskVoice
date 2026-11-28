@@ -144,7 +144,7 @@ const brain: Brain = {
   },
 
   chat(apiKey, request, options) {
-    return chatStream(`${API_URL}/chat/completions`, apiKey, request, { fetch: options.fetch, failureOf, includeUsage: true, usageOf: chatUsageOf });
+    return chatStream(`${API_URL}/chat/completions`, apiKey, request, { fetch: options.fetch, failureOf, includeUsage: true, usageOf: chatUsageOf, maxTokensField: "max_completion_tokens" });
   },
 };
 

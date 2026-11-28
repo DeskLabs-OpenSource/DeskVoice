@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import type * as FsPromises from "node:fs/promises";
 import path from "node:path";
-import { encryptSecret, recordingPath, withOrg } from "@deskvoice/core";
+import { encryptSecret, recordingPath, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOW, call, createOrganization, createUser, insert, startPanel } from "../../../../test/kit";
 import { POST } from "./calls/[id]/transcription/route";
@@ -238,6 +238,27 @@ describe("transcrição da gravação", () => {
     expect(await transcripts(org, callId)).toEqual([]);
     const ledger = await withOrg(panel.app, org, (q) => q.many<{ cost_cents: number }>("select cost_cents from usage_ledger where call_id = $1", [callId]));
     expect(ledger).toEqual([{ cost_cents: 23 }]);
+  });
+
+  it("organização no teto de gasto do mês: recusa com o motivo, sem chamar o provedor e sem cobrar; com folga, transcreve", async () => {
+    const teto = (org: string, centavos: number) =>
+      withSystem(panel.app, (q) =>
+        q.exec("insert into organization_limits (organization_id, monthly_spend_cap_cents) values ($1, $2) on conflict (organization_id) do update set monthly_spend_cap_cents = excluded.monthly_spend_cap_cents", [org, centavos]),
+      );
+    const cheio = await owner("transcribe spend cap");
+    const callId = await seed(cheio.org);
+    await teto(cheio.org, 0);
+    const result = await post(cheio.cookie, callId);
+    expect([result.status, result.code]).toEqual([409, "spend_cap_reached"]);
+    expect(panel.voice.requests).toHaveLength(0);
+    expect(await transcripts(cheio.org, callId)).toEqual([]);
+    expect(await withOrg(panel.app, cheio.org, (q) => q.many("select 1 from usage_ledger where call_id = $1", [callId]))).toEqual([]);
+
+    const folga = await owner("transcribe spend cap room");
+    const outraId = await seed(folga.org, { audio: stereoWav({ agent: false }) });
+    await teto(folga.org, 1000);
+    panel.voice.respond = async () => Response.json({ text: CALLER });
+    expect((await post(folga.cookie, outraId)).status).toBe(200);
   });
 
   it("chamada que já atingiu o teto de custo do agente recusa sem chamar o provedor", async () => {

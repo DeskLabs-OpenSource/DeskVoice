@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import agents from "../../src/i18n/pt-BR/agents";
+import approvals from "../../src/i18n/pt-BR/approvals";
 import commonEn from "../../src/i18n/en/common";
 import commonEs from "../../src/i18n/es/common";
 import { LOCALE_COOKIE } from "../../src/i18n/locales";
@@ -86,7 +87,7 @@ async function signInAsOperator(page: Page): Promise<void> {
 
 const RECORDING_NOTICE = "/api/v1/settings/recording_notice.text";
 
-test("a ligação pelo WhatsApp mora em Linha telefônica, e Configurações › WhatsApp aponta para lá por uma versão", async ({ page }) => {
+test("a ligação pelo WhatsApp mora em Linha telefônica, e saiu de Configurações › WhatsApp", async ({ page }) => {
   await signIn(page);
   // B1: o bloco está na Linha, e numa tela só.
   await page.goto("/line");
@@ -180,6 +181,57 @@ test("direto em /line#ligacao-pelo-whatsapp, com as leituras de cima atrasadas e
   await expectAnchorShownAfterReads(page);
 });
 
+/**
+ * Uma aprovação pendente, que mostra a faixa "esperando esta resposta" acima da página inteira (fora
+ * do `main`), com prazo de um minuto depois da hora fixa do relógio da página. Só a tela vê: a faixa
+ * some quando o relógio passa do prazo.
+ */
+const BANNER_NOW = new Date("2030-05-10T12:00:00Z");
+const BANNER_EXPIRES_AT = "2030-05-10T12:01:00.000Z";
+
+async function showApprovalBanner(page: Page): Promise<void> {
+  await page.route("**/api/v1/approvals?status=pending", async (route) => {
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: [
+          {
+            id: fakeId(300),
+            callId: fakeId(301),
+            question: "Posso dar 10% de desconto no pacote?",
+            context: {},
+            status: "pending",
+            defaultOnTimeout: "denied",
+            expiresAt: BANNER_EXPIRES_AT,
+            decidedAt: null,
+            decidedByName: null,
+            from: "+5531999990000",
+            agentName: "Recepção",
+          },
+        ],
+      },
+    });
+  });
+}
+
+// A queda de 25/11 no CI (#574): a aprovação deixada por outro teste venceu logo depois da rolagem,
+// a faixa de cima sumiu, a página subiu 100 px e o título do bloco saiu da tela.
+test("direto em /line#ligacao-pelo-whatsapp, a faixa de aprovação some depois da rolagem: o bloco continua na tela", async ({ page }) => {
+  await page.clock.install({ time: BANNER_NOW });
+  await signIn(page);
+  await holdAboveReads(page);
+  await showApprovalBanner(page);
+  await page.goto("/line#ligacao-pelo-whatsapp");
+  const banner = page.getByText(approvals.bannerWaiting, { exact: true });
+  await expectAnchorShownAfterReads(page);
+  await expect(banner).toBeVisible();
+
+  // O prazo passa: a faixa sai do alto da página, e o que a pessoa está lendo não pode pular.
+  await page.clock.fastForward("02:00");
+  await expect(banner).toHaveCount(0);
+  await expect(page.locator("#ligacao-pelo-whatsapp").getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeInViewport();
+});
+
 test("em /line sem endereço de bloco, com as mesmas leituras atrasadas e grandes: a página fica no topo, e o bloco da ligação pelo WhatsApp fora da tela", async ({ page }) => {
   await signIn(page);
   await holdAboveReads(page);
@@ -189,7 +241,7 @@ test("em /line sem endereço de bloco, com as mesmas leituras atrasadas e grande
   await expect(anchor).not.toBeInViewport();
 });
 
-test("o aviso de gravação mora em Privacidade e dados, acima da gravação; Regras das ligações aponta para lá, e salvar o texto persiste", async ({ page }) => {
+test("o aviso de gravação mora em Privacidade e dados, acima da gravação; saiu de Regras das ligações, o endereço do bloco abre direto nele, e salvar o texto persiste", async ({ page }) => {
   await signIn(page);
   const before = ((await (await page.request.get(RECORDING_NOTICE)).json()) as { data: { value: string | null } }).data.value;
   try {
@@ -201,8 +253,10 @@ test("o aviso de gravação mora em Privacidade e dados, acima da gravação; Re
     const block = page.locator("#aviso-de-gravacao");
     await expect(block.getByRole("heading", { name: settings.recordingTitle, exact: true })).toBeInViewport();
 
-    // B3: logo acima da gravação das chamadas, o primeiro bloco do painel de privacidade.
-    const headings = page.getByRole("main").getByRole("heading", { level: 2 });
+    // B3: logo acima da gravação das chamadas, o primeiro bloco do painel de privacidade. O aviso de
+    // Limites é do layout de Configurações, e não da página: aparece quando a organização tem trava, como
+    // a do instalador, que nasce com a saída travada (convenção 14).
+    const headings = page.getByRole("main").getByRole("heading", { level: 2 }).filter({ hasNotText: new RegExp(`^${settings.limits.title}$`) });
     await expect(headings.nth(0)).toHaveText(settings.recordingTitle);
     await expect(headings.nth(1)).toHaveText(privacy.recordingTitle);
 

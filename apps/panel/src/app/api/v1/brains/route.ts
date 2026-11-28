@@ -18,6 +18,8 @@ export const GET = handle({ configure: true }, async ({ q }) => {
       id: brain.id,
       label: brain.label,
       keyUrl: brain.keyUrl,
+      // Só o cérebro com `chat` conversa numa ligação do pipeline (fatia 5b-1).
+      chat: brain.chat !== undefined,
       configured: byKey.has(brainKeySetting(brain.id)),
       keyCheck: readBrainKeyCheck(byKey.get(brainKeyCheckSetting(brain.id))),
       modelCount: models?.models.length ?? null,

@@ -1,7 +1,7 @@
 import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { accountExists, createDb, createMember, hashPassword, loadConfig, recordFoundingOrganization, withSystem, type Db } from "@deskvoice/core";
+import { accountExists, createDb, createMember, hashPassword, insertNewOrganization, loadConfig, recordFoundingOrganization, withSystem, type Db } from "@deskvoice/core";
 import { loadTools } from "@deskvoice/tools";
 import { z } from "zod";
 import { cliArgs } from "./args";
@@ -31,11 +31,13 @@ const EXAMPLE_AGENT = {
 };
 
 /**
- * Cria a organização, o dono, a política de ligações de saída (desligada) e um agente de exemplo.
- * Se for a primeira organização da instalação, grava-a como a fundadora. E-mail que já tem conta
- * não cria nada. Entrada inválida (senha curta, e-mail ruim) lança erro.
+ * Cria a organização, o dono e um agente de exemplo. A organização nasce pelo mesmo caminho da tela
+ * (`insertNewOrganization`): política de saída desligada e os padrões da instalação copiados, e sem
+ * padrão gravado a saída travada pela administração (convenção 14). Se for a primeira organização da
+ * instalação, grava-a como a fundadora. E-mail que já tem conta não cria nada. Entrada inválida
+ * (senha curta, e-mail ruim) lança erro.
  */
-export async function createOwner(db: Db, input: OwnerInput): Promise<CreateOwnerResult> {
+export async function createOwner(db: Db, input: OwnerInput, now: Date = new Date()): Promise<CreateOwnerResult> {
   const parsed = inputSchema.safeParse(input);
   if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
   const { email, name, organization, password } = parsed.data;
@@ -55,7 +57,7 @@ export async function createOwner(db: Db, input: OwnerInput): Promise<CreateOwne
       if (!row) throw new Error("Insert returned no row");
       return row.id;
     };
-    const organizationId = await insert("insert into organizations (name) values ($1) returning id", [organization]);
+    const organizationId = await insertNewOrganization(q, organization, now);
     // A conta e o vínculo de dono, pela função que grava os dois juntos.
     const member = await createMember(q, { organizationId, email, name, passwordHash, role: "owner" });
     // Entre a conferência acima e aqui outra execução criou a conta: lançar desfaz a organização.
@@ -65,7 +67,6 @@ export async function createOwner(db: Db, input: OwnerInput): Promise<CreateOwne
     // o dono dela administra a instalação (seção 3.2 do desenho do R8). Se a fundadora já existe,
     // nada muda: uma organização nova não dá papel na instalação a ninguém.
     await recordFoundingOrganization(q, organizationId);
-    await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, false)", [organizationId]);
     const agentId = await insert(
       "insert into agents (organization_id, name, role_label, instructions, greeting, engine, language, tools) values ($1, $2, $3, $4, $5, 'simulated', 'pt-BR', $6) returning id",
       [organizationId, EXAMPLE_AGENT.name, EXAMPLE_AGENT.roleLabel, EXAMPLE_AGENT.instructions, EXAMPLE_AGENT.greeting, tools],

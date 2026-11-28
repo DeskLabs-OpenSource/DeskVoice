@@ -1,6 +1,6 @@
 # Ferramentas de fora pela tela: servidor MCP cadastrado pelo operador (item 8 da pesquisa Vapi)
 
-- **Estado:** aprovado pelo dono em 23/11 (1A, 2A e 3A, seção 9). As fatias 8a, 8b e 8c estão em construção.
+- **Estado:** aprovado pelo dono em 23/11 (1A, 2A e 3A, seção 9). As fatias 8a e 8b entraram; a 8c está em construção.
   O merge de cada fatia continua esperando a palavra do próprio dono.
 - **Data:** 2026-11-22
 - **Quem pediu:** o dono aprovou em 21/11 a terceira leva da pesquisa Vapi (itens 7, 8 e 10), com

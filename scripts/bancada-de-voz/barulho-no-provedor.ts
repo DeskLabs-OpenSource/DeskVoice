@@ -165,8 +165,10 @@ export function escutar(sessao: VoiceSession, motor: VoiceEngine, relogio: Relog
     ? createSilenceGuard({
         clock: relogioDaGuarda,
         schedule: relogio.agendar,
+        language: "pt-BR",
         closeCallerTurn: () => sessao.closeCallerTurn(),
         say: (texto) => sessao.say(texto),
+        answering: () => sessao.answering?.() === true,
         acted: (relato) => escuta.acoes.push({ acao: relato.action, emMs: relogio.agora() }),
       })
     : null;

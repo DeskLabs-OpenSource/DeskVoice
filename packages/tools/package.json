@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./deskcomm-channel": "./src/connectors/deskcomm-channel.ts",
     "./mcp-client": "./src/mcp/client.ts",
     "./mcp-schema": "./src/mcp/schema.ts",
     "./mcp-servers": "./src/mcp/servers.ts",

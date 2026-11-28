@@ -1,0 +1,9 @@
+// Só contratos: os tipos, o cérebro como interface e a síntese das falas fixas.
+import type { Brain } from "../brain";
+import { prepareFixedSpeech } from "../synthesis";
+import type { BrainExtra } from "../brains/types";
+import { SynthesizerOpenError, type SpeechSynthesizer } from "../types";
+// Um texto que cita "../brains/openai" num comentário não é importação: from é palavra, não string.
+
+export type Pieces = { brain: Brain; synthesizer: SpeechSynthesizer; extra?: BrainExtra };
+export { prepareFixedSpeech, SynthesizerOpenError };

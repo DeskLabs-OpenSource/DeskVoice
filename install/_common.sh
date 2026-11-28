@@ -288,20 +288,23 @@ render_asterisk_config() {  # render_asterisk_config [--rollback]
   render_asterisk_file ari.conf.tmpl ari.conf
   render_asterisk_file rtp.conf.tmpl rtp.conf
   render_asterisk_file pjsip.conf.base pjsip.conf
-  # Na volta (só nela), a versão anterior pode não ter o modules.conf: as publicadas antes dele
-  # deixavam a lista de módulos com a imagem, e o Compose delas não o monta. Sem o modelo, não há o
-  # que gerar, e o que a ida gerou sai: o converge_asterisk desta versão (o que roda na volta)
-  # compararia esse arquivo com o da imagem, que o contêiner lê, e reiniciaria o Asterisk sem motivo.
-  # Fora da volta, faltar o modelo é repositório incompleto, como os outros cinco.
-  if [ "${1:-}" = --rollback ] && [ ! -f "$DEPLOY_DIR/asterisk/modules.conf" ]; then
-    rm -f "$GENERATED_DIR/modules.conf"
-    if [ -f "$ASTERISK_PENDING" ]; then
-      grep -vx modules.conf "$ASTERISK_PENDING" > "$ASTERISK_PENDING.tmp" || true
-      mv "$ASTERISK_PENDING.tmp" "$ASTERISK_PENDING"
+  # Na volta (só nela), a versão anterior pode não ter o modules.conf nem o logger.conf: as
+  # publicadas antes de cada um deixavam o arquivo com a imagem, e o Compose delas não o monta. Sem o
+  # modelo, não há o que gerar, e o que a ida gerou sai: o converge_asterisk desta versão (o que roda
+  # na volta) compararia esse arquivo com o da imagem, que o contêiner lê, e reiniciaria o Asterisk
+  # sem motivo. Fora da volta, faltar o modelo é repositório incompleto, como os outros cinco.
+  local f
+  for f in modules.conf logger.conf; do
+    if [ "${1:-}" = --rollback ] && [ ! -f "$DEPLOY_DIR/asterisk/$f" ]; then
+      rm -f "$GENERATED_DIR/$f"
+      if [ -f "$ASTERISK_PENDING" ]; then
+        grep -vx "$f" "$ASTERISK_PENDING" > "$ASTERISK_PENDING.tmp" || true
+        mv "$ASTERISK_PENDING.tmp" "$ASTERISK_PENDING"
+      fi
+    else
+      render_asterisk_file "$f" "$f"
     fi
-  else
-    render_asterisk_file modules.conf modules.conf
-  fi
+  done
   unset ARI_PASSWORD
 }
 # O que mudou num arquivo que o Asterisk já tinha fica anotado em ASTERISK_PENDING, para
@@ -891,7 +894,7 @@ converge_caddy() {
   info "Reiniciando o Caddy, para ele ler o Caddyfile desta versão (o painel fica fora por alguns segundos)..."
   dc restart caddy >/dev/null 2>&1 || warn "Não consegui reiniciar o Caddy. Rode: docker restart deskvoice-caddy-1"
 }
-# Os seis arquivos que render_asterisk_config grava e o Compose monta um a um. Reiniciar o Asterisk
+# Os sete arquivos que render_asterisk_config grava e o Compose monta um a um. Reiniciar o Asterisk
 # derruba as ligações em andamento; recarregar o módulo de cada arquivo, não. Então:
 #   - o contêiner ainda lê um arquivo diferente do disco (ficou preso ao inode de antes de uma
 #     troca por renomeação, como fazia o kit até esta versão): recarregar relê o antigo, e só
@@ -907,7 +910,7 @@ converge_caddy() {
 asterisk_module_of() {
   case "$1" in
     extensions.conf) echo pbx_config ;; http.conf) echo http ;; ari.conf) echo res_ari ;;
-    rtp.conf) echo res_rtp_asterisk ;; pjsip.conf) echo res_pjsip ;;
+    rtp.conf) echo res_rtp_asterisk ;; pjsip.conf) echo res_pjsip ;; logger.conf) echo logger ;;
   esac
 }
 restart_asterisk() {  # restart_asterisk "<por quê>"
@@ -919,7 +922,7 @@ converge_asterisk() {
   local f stale="" modules="" out wanted reloaded
   # Parado, ele lê o que está no disco quando subir.
   if [ -z "$(dc ps -q --status running asterisk 2>/dev/null)" ]; then rm -f "$ASTERISK_PENDING"; return 0; fi
-  for f in extensions http ari rtp pjsip modules; do
+  for f in extensions http ari rtp pjsip modules logger; do
     [ -f "$GENERATED_DIR/$f.conf" ] || continue
     if mount_differs asterisk "/etc/asterisk/$f.conf" "$GENERATED_DIR/$f.conf"; then stale="$f.conf"; break; fi
   done

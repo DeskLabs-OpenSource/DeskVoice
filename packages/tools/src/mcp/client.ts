@@ -139,13 +139,16 @@ class Session {
   constructor(
     private readonly server: McpEndpoint,
     private readonly net: McpNet,
+    private readonly extraHeaders: Readonly<Record<string, string>> = {},
   ) {
     this.timeoutMs = webhookTimeoutMs(server, net);
     this.deadline = performance.now() + this.timeoutMs;
   }
 
   private headers(): Record<string, string> {
+    // Os cabeçalhos de quem chama vêm antes: nenhum deles troca o segredo, a sessão ou o protocolo.
     return {
+      ...this.extraHeaders,
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       ...(this.server.secret !== undefined && { [this.server.headerName ?? MCP_DEFAULT_HEADER]: this.server.secret }),
@@ -267,9 +270,18 @@ export async function listTools(server: McpEndpoint, net: McpNet = {}): Promise<
   }
 }
 
-/** Chama uma ferramenta do servidor numa sessão nova. */
-export async function callTool(server: McpEndpoint, name: string, args: Record<string, unknown>, net: McpNet = {}): Promise<McpCallResult> {
-  const session = new Session(server, net);
+/**
+ * Chama uma ferramenta do servidor numa sessão nova. `headers` vão em todos os pedidos da sessão (a
+ * `Idempotency-Key` de uma marcação) e não trocam os que o cliente põe.
+ */
+export async function callTool(
+  server: McpEndpoint,
+  name: string,
+  args: Record<string, unknown>,
+  net: McpNet = {},
+  headers: Readonly<Record<string, string>> = {},
+): Promise<McpCallResult> {
+  const session = new Session(server, net, headers);
   await session.open();
   const { result } = await session.request("tools/call", { name, arguments: args });
   const call = toolsCallResultSchema.safeParse(result);

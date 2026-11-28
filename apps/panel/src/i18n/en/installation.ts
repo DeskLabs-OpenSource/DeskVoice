@@ -66,7 +66,7 @@ const installation: InstallationDictionary = {
     limitsOutboundReturnsOff: "Outbound calls for this organization come back as it left them: off.",
     limitsSpendCap: "Monthly spending cap, in dollars",
     limitsSpendCapSpent: "Spent this month: {spent}.",
-    limitsSpendCapApprox: "Approximate: it includes estimated cost and leaves out what could not be measured. At the cap, every new call is refused (a call in progress goes on).",
+    limitsSpendCapApprox: "Approximate: it includes estimated cost and leaves out what could not be measured. At the cap, every new call is refused (a call in progress goes on), and the outcome, the analysis and the recording transcription are no longer requested from the provider.",
     limitsSpendCapInvalid: "The monthly spending cap must be an amount in dollars, like 50 or 49.90, or be left empty.",
     defaultsTitle: "Defaults for new organizations",
     defaultsLead: "The limits, the time zone and the language each new organization starts with. Applies only to organizations created from now on: existing ones stay as they are.",
@@ -168,6 +168,8 @@ const installation: InstallationDictionary = {
       support_access_ended: "The support access of {who} in {org} ended.",
       update_requested: "{who} requested the update to version {target}, from {org}.",
       trunk_overlap_refused: "{who} tried to save in {org} a line whose range overlaps that of another organization. The screen asked for confirmation.",
+      trunk_overlap_confirmed: "{who} saved in {org}, after the warning, a line whose range overlaps that of another organization. The lines recognized by IP of both stop receiving calls.",
+      trunk_overlap_many_checks: "{who} checked line ranges in {org} more than 20 times today.",
     },
     sources: {
       command: "through the command on the server",

@@ -160,6 +160,35 @@ describe("as rotas dos servidores MCP", () => {
     expect(((await stored(s.org))?.value as Array<Record<string, unknown>>)[0]).not.toHaveProperty("secret");
   });
 
+  it("o pedido de criação com um slug que já existe é recusado com 409, sem buscar, e o servidor gravado não muda", async () => {
+    const s = await scene("criar");
+    const created = await call(save, {
+      method: "PUT",
+      cookie: s.admin.cookie,
+      params: { slug: "erp" },
+      body: body({ create: true }),
+    });
+    expect(created.status).toBe(200);
+    const before = (await stored(s.org))?.value;
+
+    serve(fakeMcp({ pages: [[tool("consultar_pedido"), tool("cancelar_pedido")]] }));
+    const again = await call(save, {
+      method: "PUT",
+      cookie: s.admin.cookie,
+      params: { slug: "erp" },
+      body: body({ create: true, label: "Outro", url: URL_B, secret: "Bearer outro" }),
+    });
+    expect(again.status).toBe(409);
+    expect(again.text).toContain("mcp_server_exists");
+    // Recusado antes da busca: o endereço digitado não recebe nada.
+    expect(mcp.requests).toHaveLength(0);
+    const after = (await stored(s.org))?.value as Array<Record<string, unknown>>;
+    expect(after).toEqual(before);
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ slug: "erp", label: "ERP", url: URL_A });
+    expect(decryptSecret(after[0]?.secret as string, panel.deps.secretKey)).toBe(SECRET);
+  });
+
   it("recusa a impressão digital que não bate com a busca, e nada muda", async () => {
     const s = await scene("retrato");
     await call(save, {
@@ -347,6 +376,32 @@ describe("as rotas dos servidores MCP", () => {
         })
       ).status,
     ).toBe(404);
+  });
+
+  it("gravar a busca de novo como ela veio grava a que mudou com allowed: false e a digital nova, e a tira do agente", async () => {
+    const s = await scene("refresh-grava");
+    await call(save, { method: "PUT", cookie: s.admin.cookie, params: { slug: "erp" }, body: body() });
+    const agent = await insert(panel.app, s.org, "insert into agents (organization_id, name, engine, tools) values ($1, 'Recepção', 'simulated', $2) returning id", [
+      s.org,
+      ["erp__cancelar_pedido", "erp__consultar_pedido"],
+    ]);
+    serve(fakeMcp({ pages: [[tool("consultar_pedido"), tool("cancelar_pedido", { description: "Agora apaga" })]] }));
+    const fresh = await call(refresh, { method: "POST", cookie: s.admin.cookie, params: { slug: "erp" } });
+    // Como a tela grava: as marcas e as digitais que a busca devolveu, sem mexer.
+    const looked = (fresh.data as { tools: Array<{ name: string; fingerprint: string; allowed: boolean; writes: boolean }> }).tools;
+    const again = body({ secret: undefined, tools: looked.map(({ name, fingerprint, allowed, writes }) => ({ name, fingerprint, allowed, writes })) });
+    const asked = await call(save, { method: "PUT", cookie: s.admin.cookie, params: { slug: "erp" }, body: again });
+    expect([asked.status, asked.code]).toEqual([409, "mcp_tools_in_use"]);
+    const done = await call(save, { method: "PUT", cookie: s.admin.cookie, params: { slug: "erp" }, body: { ...again, confirm: "erp" } });
+    expect(done.status).toBe(200);
+
+    const [server] = (await stored(s.org))?.value as Array<{ tools: Array<{ name: string; fingerprint: string; allowed: boolean }> }>;
+    const byName = Object.fromEntries((server?.tools ?? []).map((t) => [t.name, { fingerprint: t.fingerprint, allowed: t.allowed }]));
+    expect(byName).toEqual({
+      consultar_pedido: { fingerprint: fp("consultar_pedido"), allowed: true },
+      cancelar_pedido: { fingerprint: fp("cancelar_pedido", { description: "Agora apaga" }), allowed: false },
+    });
+    expect(await agentTools(s.org, agent)).toEqual(["erp__consultar_pedido"]);
   });
 
   it("a aprovação humana começa desligada, grava a marca da tela e volta desligada na ferramenta que mudou (fatia 8c)", async () => {

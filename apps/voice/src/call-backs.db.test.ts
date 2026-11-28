@@ -187,7 +187,13 @@ describe("a discagem da religação", { timeout: 120_000 }, () => {
       async (s) => {
         await s.policy("daily_cap_per_line = 1");
         await withSystem(app, (q) =>
-          q.exec("insert into calls (organization_id, agent_id, direction, channel, from_e164, to_e164, status, started_at) values ($1, $2, 'outbound', 'phone', $3, '+5531900000001', 'completed', $4)", [s.organizationId, s.agentId, LINE, s.clock.now()]),
+          q.exec("insert into calls (organization_id, agent_id, direction, channel, trunk_id, from_e164, to_e164, status, started_at) values ($1, $2, 'outbound', 'phone', $3, $4, '+5531900000001', 'completed', $5)", [
+            s.organizationId,
+            s.agentId,
+            s.trunkId,
+            LINE,
+            s.clock.now(),
+          ]),
         );
       },
     ],

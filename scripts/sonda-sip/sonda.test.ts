@@ -77,6 +77,39 @@ describe("sonda SIP", () => {
     expect(probe.seen).toEqual([{ method: "OPTIONS", from: { address: "127.0.0.1", port: asker.port } }]);
   });
 
+  it("com line, o pedido leva o parâmetro na URI e no To, como a operadora devolve o Contact do registro", async () => {
+    const server = await fakeServer(reply("200 OK"));
+    open.push({ close: () => new Promise<void>((resolve) => server.socket.close(() => resolve())) });
+    const probe = await SipProbe.open("127.0.0.1", { targetPort: server.port });
+    open.push(probe);
+    await probe.options("127.0.0.1", { port: server.port, line: "abcdefg" });
+    const sent = parseSipMessage(server.requests[0] ?? "");
+    expect(sent.startLine).toBe(`OPTIONS sip:127.0.0.1:${server.port};line=abcdefg SIP/2.0`);
+    expect(sent.headers.get("to")).toEqual([`<sip:127.0.0.1:${server.port};line=abcdefg>`]);
+  });
+
+  it("guarda o line do Contact de um REGISTER que chega, e não responde a ele", async () => {
+    const probe = await SipProbe.open("127.0.0.1");
+    open.push(probe);
+    const asker = await fakeServer(null);
+    open.push({ close: () => new Promise<void>((resolve) => asker.socket.close(() => resolve())) });
+    const request = [
+      `REGISTER sip:${probe.local.address}:${probe.local.port} SIP/2.0`,
+      `Via: SIP/2.0/UDP 127.0.0.1:${asker.port};branch=z9hG4bKreg;rport`,
+      "From: <sip:sonda@127.0.0.1>;tag=r1",
+      "To: <sip:sonda@127.0.0.1>",
+      "Call-ID: register-1",
+      "CSeq: 1 REGISTER",
+      `Contact: <sip:sonda@172.18.0.3:5060;line=qwertyu>`,
+      "Content-Length: 0",
+      "",
+      "",
+    ].join("\r\n");
+    asker.socket.send(request, probe.local.port, probe.local.address);
+    await expect.poll(() => probe.seen).toEqual([{ method: "REGISTER", from: { address: "127.0.0.1", port: asker.port }, line: "qwertyu" }]);
+    expect(asker.requests).toEqual([]);
+  });
+
   it("lê received e rport do Via, também com IPv6 entre colchetes", () => {
     expect(viaSeen("SIP/2.0/UDP 10.1.0.5:5099;branch=z9hG4bKx;received=10.1.0.5;rport=5099")).toEqual({ received: "10.1.0.5", rport: 5099 });
     expect(viaSeen("SIP/2.0/UDP [2001:db8::1]:5099;rport=5099;received=[2001:db8::1]")).toEqual({ received: "2001:db8::1", rport: 5099 });

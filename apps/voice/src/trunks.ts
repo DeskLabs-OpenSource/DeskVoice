@@ -6,8 +6,9 @@
 // modo `ip` ficam de fora (com erro no painel) e as em modo `register` seguem, reconhecidas pelo
 // `line` do registro. Na ambiguidade, recusar a ligação é melhor do que entregá-la à organização
 // errada. O custo: uma organização pode tirar do ar a linha em modo `ip` de outra cadastrando o
-// mesmo endereço. Ele é aceito porque criar uma segunda organização na instalação exige acesso à
-// VPS (comando `create-owner`): quem pode provocar o conflito é quem administra o servidor.
+// mesmo endereço. Desde a 0021 quem cria organização é a tela, então quem provoca pode ser o dono
+// de uma organização cliente: o custo segue aceito (pedido 3 do R8, A), com o aviso antes de salvar
+// e a auditoria da instalação gravando a recusa e a confirmação (`requireOverlapConfirmed`).
 // Não existe precedência por antiguidade nem estado guardado ao lado do arquivo.
 import { randomUUID } from "node:crypto";
 import { promises as dns } from "node:dns";
@@ -117,6 +118,10 @@ function renderTrunk(trunk: TrunkConfig, inbound: Inbound, identify: boolean, pe
     "type=endpoint",
     "transport=transport-udp",
     "context=from-trunk",
+    // Quem chega é reconhecido pelo `line` do registro ou pelo `identify` do endereço. O padrão do
+    // Asterisk (`username,ip`) também reconheceria pelo usuário do From, que não é segredo.
+    // O identificador `line` não lê esta opção: ele continua valendo.
+    "identify_by=ip",
     "disallow=all",
     "allow=ulaw",
     "allow=alaw",

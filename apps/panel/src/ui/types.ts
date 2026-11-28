@@ -132,6 +132,12 @@ export interface CallDetail extends Call {
   callBackOfStartedAt: string | null;
   /** O custo de cada agente da ligação, na ordem em que gastou; `name: null` é agente apagado. A tela mostra com mais de um. */
   costByAgent: Array<{ agentId: string | null; name: string | null; costCents: number; unmeasuredCount: number; estimatedCount: number }>;
+  /**
+   * O custo de cada peça do pipeline (fatia 5c), na ordem transcrição, cérebro e voz; vazia na ligação do
+   * motor direto. `lines: 0` é a peça sem linha no extrato: a tela a mostra como não medida, nunca zero.
+   * `label` é o nome da peça instalada; `model`, o único modelo que ela usou na ligação.
+   */
+  costByPiece: Array<{ piece: string; id: string | null; label: string | null; model: string | null; costCents: number; lines: number; unmeasuredCount: number; estimatedCount: number }>;
   /** Quantas linhas do extrato da ligação não têm custo medido (modelo sem preço, ou consumo que não pôde ser medido): com alguma, o zero não é grátis. */
   unmeasuredCount: number;
   /** Quantas linhas do extrato da ligação têm custo estimado: com alguma, o valor inclui uma estimativa. */
@@ -275,7 +281,17 @@ export interface Engine {
   keyCheck: KeyCheck | null;
   priceCheckedOn: string;
   priceSource: string;
+  /**
+   * Só o pipeline (fatia 5b-1): o motor que monta as peças de `agents.pipeline`. Nunca é o motor de um
+   * agente: a tela o mostra desligado, e a API recusa gravá-lo em `engine`.
+   */
+  assembled?: true;
+  /** Só no pipeline: por que ele está desligado neste servidor, ou `null` quando a pasta já tem o que falta. */
+  unavailable?: { reason: "no_live_transcriber" | "no_transcriber_key" } | null;
 }
+
+/** Os motores que um agente pode ter em `engine`: todos menos o pipeline, que monta as peças (fatia 5b-1). */
+export const agentEngines = (engines: readonly Engine[] | undefined): Engine[] => (engines ?? []).filter((engine) => engine.assembled !== true);
 
 export interface ToolInfo {
   name: string;
@@ -354,13 +370,36 @@ export interface Costs {
   estimatedCount: number;
   byDay: Array<{ day: string; costCents: number; billedSeconds: number; unmeasuredCount: number; estimatedCount: number }>;
   byAgent: Array<{ agentId: string | null; name: string | null; costCents: number; calls: number; unmeasuredCount: number; estimatedCount: number }>;
-  /** `source` é `analyst` na linha do analista ao vivo (R6), separada do mesmo modelo usado pelo filtro da fala. */
-  byEngine: Array<{ engine: string; source: "analyst" | null; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
+  /**
+   * `source` é `analyst` na linha do analista ao vivo (R6), separada do mesmo modelo usado pelo filtro
+   * da fala, e `test` na do teste do agente (fatia 7b), separada do mesmo motor nas ligações. `piece` é
+   * a peça do pipeline da linha (fatia 5c), com `label` o nome dela; nula nas outras.
+   */
+  byEngine: Array<{ engine: string; source: "analyst" | "test" | null; piece: "transcriber" | "brain" | "synthesizer" | null; label: string; costCents: number; callSeconds: number; priceCheckedOn: string | null; priceSource: string | null; unmeasuredCount: number; estimatedCount: number }>;
 }
 
 export interface Setting<T> {
   key: string;
   value: T | null;
+}
+
+/** Um grupo de turnos do pipeline medidos num agente (fatia 5c). */
+export interface PipelineLatencyGroup {
+  turns: number;
+  calls: number;
+  /** A mediana do `totalMs` (do fim da fala de quem ligou ao primeiro áudio do agente), em ms. */
+  p50Ms: number;
+}
+
+/** `GET /agents/{id}/pipeline-latency`: quanto o pipeline leva para responder neste agente, nas últimas ligações. */
+export interface PipelineLatency {
+  recentCalls: number;
+  /** A meta da mediana por turno sem ferramenta (seção 3.5 do desenho do pipeline). */
+  goalP50Ms: number;
+  /** Os turnos sem ferramenta: é a eles que a meta vale. Nulo sem turno medido. */
+  withoutTool: PipelineLatencyGroup | null;
+  /** Os turnos em que a resposta veio depois de uma ferramenta, à parte: o tempo dela entra no total. */
+  withTool: PipelineLatencyGroup | null;
 }
 
 /** Uma ferramenta de um servidor MCP: como a busca trouxe, com as marcas do operador. */

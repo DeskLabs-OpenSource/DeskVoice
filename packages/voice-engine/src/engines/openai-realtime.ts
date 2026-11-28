@@ -97,7 +97,7 @@ import { checkKeyOverHttp } from "../key-check";
 import { ANALYSIS_SCHEMA, analysisPrompt } from "../analysis";
 import { classifyOptionsFor, classifyOutcomeOverHttp, readClassifyText, transcribeOverHttp } from "../outcome-over-http";
 import { OUTCOME_GUESS_SCHEMA, outcomePrompt } from "../outcome";
-import type { ClassifyOptions, EnginePricing, KeyCheckResult, RecordingTranscriber, Usage, VoiceEngine, VoiceSession } from "../types";
+import type { ClassifyOptions, EnginePricing, KeyCheckResult, RecordingTranscriber, SideUsageLine, Usage, VoiceEngine, VoiceSession } from "../types";
 
 const DEFAULT_BASE_URL = "wss://api.openai.com/v1/realtime";
 const DEFAULT_API_URL = "https://api.openai.com/v1";
@@ -181,6 +181,8 @@ const VOICES = [
 const AUDIO_FORMAT = { type: "audio/pcmu" };
 // G.711 μ-law a 8 kHz: um byte por amostra, 8 bytes por ms.
 const PCMU_BYTES_PER_MS = 8;
+// O que chega em `sendAudio`: PCM16 mono a 8 kHz, dois bytes por amostra, 16 bytes por ms.
+const PCM16_BYTES_PER_MS = 16;
 
 const responseDoneUsage = z
   .object({
@@ -198,12 +200,30 @@ const responseDoneUsage = z
   })
   .nullish();
 
+// Fora da forma, o `usage` vale como ausente: o texto ainda chega, e o consumo sai estimado.
+const transcriptionEventUsage = z
+  .discriminatedUnion("type", [
+    z.object({ type: z.literal("tokens"), input_tokens: z.number(), output_tokens: z.number() }),
+    z.object({ type: z.literal("duration"), seconds: z.number() }),
+  ])
+  .nullish()
+  .catch(undefined);
+
 const serverEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.updated") }),
   z.object({ type: z.literal("response.created") }),
   z.object({ type: z.literal("response.output_audio.delta"), item_id: z.string().optional(), delta: z.string() }),
   z.object({ type: z.literal("response.output_audio_transcript.done"), transcript: z.string() }),
-  z.object({ type: z.literal("conversation.item.input_audio_transcription.completed"), transcript: z.string() }),
+  // Sessão em `mode: "text"` (teste do agente, fatia 7b): a fala do agente chega como texto.
+  z.object({ type: z.literal("response.output_text.done"), text: z.string() }),
+  // O `usage` é o da transcrição, cobrado pelo preço do modelo de transcrição, e não pelo do Realtime
+  // (referência dos eventos do servidor, conferida em 2026-11-27): em tokens ou em segundos.
+  z.object({
+    type: z.literal("conversation.item.input_audio_transcription.completed"),
+    item_id: z.string().optional(),
+    transcript: z.string(),
+    usage: transcriptionEventUsage,
+  }),
   z.object({ type: z.literal("conversation.item.input_audio_transcription.delta"), item_id: z.string().optional(), delta: z.string() }),
   z.object({ type: z.literal("input_audio_buffer.committed"), item_id: z.string() }),
   z.object({
@@ -218,6 +238,9 @@ const serverEvent = z.discriminatedUnion("type", [
     type: z.literal("response.done"),
     response: z.object({
       usage: responseDoneUsage,
+      // Os itens que a resposta produziu: com `function_call`, a resposta pede ferramenta e o turno
+      // de um teste do agente não acabou.
+      output: z.array(z.object({ type: z.string() })).nullish(),
     }),
   }),
   z.object({ type: z.literal("error"), error: z.object({ message: z.string() }) }),
@@ -335,6 +358,10 @@ const engine: VoiceEngine = {
   callerTurnSource: "vad",
   voices: VOICES,
   defaultVoice: DEFAULT_VOICE,
+  // O teste do agente (fatia 7b, seção 5.3 de docs/specs/2026-11-21-testes-do-agente.md): a mesma
+  // sessão, com texto de entrada (`conversation.item.create` com `input_text`) e saída só em texto
+  // (`output_modalities: ["text"]`), cobrada no preço de texto.
+  textMode: true,
   pricing: {
     // gpt-realtime-2.1, por milhão de tokens: áudio US$ 32 (entrada) e US$ 64 (saída); texto US$ 4
     // e US$ 24; entrada em cache US$ 0,40. Cada resposta reconta a conversa inteira como entrada, e
@@ -350,6 +377,7 @@ const engine: VoiceEngine = {
 
   async connect(config, apiKey, options = {}) {
     const emitter = new SessionEmitter();
+    const textMode = config.mode === "text";
     let configured = false;
     let responseActive = false;
     const queuedResponses: object[] = [];
@@ -361,10 +389,18 @@ const engine: VoiceEngine = {
     // pedaço dela pode chegar depois: texto de item já respondido não é quem ligou falando agora.
     const unansweredItems = new Set<string>();
     const answeredItems = new Set<string>();
+    // O servidor já viu o fim da fala: item fechado à espera da resposta, ou resposta em curso.
+    const answering = (): boolean => responseActive || unansweredItems.size > 0;
     // A fala do agente por item, na ordem: em que ms do áudio emitido nesta sessão o item começou e
     // quanto dele foi emitido. É o que permite cortar no histórico o que a ponte não chegou a tocar.
     const spokenItems: { itemId: string; startMs: number; emittedMs: number }[] = [];
     let emittedMs = 0;
+    // O áudio de quem ligou mandado ao provedor, e quanto dele cada item fechado leva: sem `usage` na
+    // transcrição, o consumo é estimado por isto. O item leva tudo desde o item anterior, silêncio
+    // inclusive, e a estimativa pende para mais.
+    let sentMs = 0;
+    let committedMs = 0;
+    const committedItems = new Map<string, number>();
 
     let sessionReady: () => void = () => undefined;
     let sessionFailed: (error: Error) => void = () => undefined;
@@ -374,6 +410,28 @@ const engine: VoiceEngine = {
     });
 
     // A API recusa um `response.create` enquanto outra resposta está em curso; o pedido espera a vez.
+    /**
+     * O consumo da transcrição de um item, que o provedor cobra à parte (item 3.4 da revisão fria da
+     * 0.50.0). Sem `usage`, a conta sai dos segundos de áudio que o item levou, no preço por minuto, e
+     * a linha vai marcada como estimada. Sem o item (evento fora da forma), o áudio ainda sem
+     * transcrição conta inteiro.
+     */
+    const transcriptionLine = (usage: z.infer<typeof transcriptionEventUsage>, itemId: string | undefined): SideUsageLine => {
+      const known = itemId === undefined ? undefined : committedItems.get(itemId);
+      let ms = known ?? 0;
+      if (known !== undefined && itemId !== undefined) committedItems.delete(itemId);
+      else {
+        for (const each of committedItems.values()) ms += each;
+        ms += sentMs - committedMs;
+        committedItems.clear();
+        committedMs = sentMs;
+      }
+      const line = { model: TRANSCRIBE_MODEL, pricing: TRANSCRIBE_PRICING };
+      if (usage?.type === "tokens") return { ...line, usage: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens }, estimated: false };
+      if (usage?.type === "duration") return { ...line, usage: { seconds: usage.seconds }, estimated: false };
+      return { ...line, usage: { seconds: ms / 1000 }, estimated: true };
+    };
+
     const requestResponse = (response: object): void => {
       if (responseActive) {
         queuedResponses.push(response);
@@ -410,6 +468,8 @@ const engine: VoiceEngine = {
           break;
         case "input_audio_buffer.committed":
           unansweredItems.add(event.item_id);
+          committedItems.set(event.item_id, sentMs - committedMs);
+          committedMs = sentMs;
           break;
         case "response.output_audio.delta": {
           const ulaw = Buffer.from(event.delta, "base64");
@@ -426,8 +486,12 @@ const engine: VoiceEngine = {
         case "response.output_audio_transcript.done":
           if (event.transcript) emitter.emit("transcript", { speaker: "agent", text: event.transcript });
           break;
+        case "response.output_text.done":
+          if (event.text) emitter.emit("transcript", { speaker: "agent", text: event.text });
+          break;
         case "conversation.item.input_audio_transcription.completed":
           if (event.transcript.trim()) emitter.emit("transcript", { speaker: "user", text: event.transcript.trim() });
+          emitter.emit("sideUsage", transcriptionLine(event.usage, event.item_id));
           break;
         case "conversation.item.input_audio_transcription.delta":
           if (event.delta.trim() && !(event.item_id && answeredItems.has(event.item_id))) emitter.emit("callerActivity", { words: true });
@@ -454,6 +518,9 @@ const engine: VoiceEngine = {
           sendGuidance();
           const next = queuedResponses.shift();
           if (next) requestResponse(next);
+          // Em texto, o fim do turno: a resposta acabou sem pedir ferramenta, e nenhuma outra espera
+          // a vez (duas ferramentas na mesma resposta pedem duas respostas, e o turno é das duas).
+          else if (textMode && !(event.response.output ?? []).some((item) => item.type === "function_call")) emitter.emit("turnDone");
           break;
         }
         case "error": {
@@ -479,37 +546,44 @@ const engine: VoiceEngine = {
       timeout: options,
     });
 
+    // O idioma só existe como parâmetro na transcrição; a fala segue a instrução.
+    const instructions = `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.`;
+    const tools = config.tools.map((tool) => ({ type: "function", ...tool }));
     socket.send({
       type: "session.update",
-      session: {
-        type: "realtime",
-        // O idioma só existe como parâmetro na transcrição; a fala segue a instrução.
-        instructions: `${instructionsWithVocabulary(config.instructions, config.vocabulary)}\n\nSpeak only in ${config.language}.`,
-        output_modalities: ["audio"],
-        audio: {
-          input: {
-            format: AUDIO_FORMAT,
-            // Sem termos, o `prompt` nem aparece: a sessão fica igual à de antes.
-            transcription: {
-              model: TRANSCRIBE_MODEL,
-              language: config.language.split("-")[0],
-              ...(config.vocabulary && config.vocabulary.length > 0 && { prompt: transcriptionPrompt(config.vocabulary) }),
+      // Em texto, nada de áudio: sem formato, voz, transcrição nem detecção de fala. As instruções e
+      // as ferramentas são as mesmas da ligação.
+      session: textMode
+        ? { type: "realtime", instructions, output_modalities: ["text"], tools }
+        : {
+            type: "realtime",
+            instructions,
+            output_modalities: ["audio"],
+            audio: {
+              input: {
+                format: AUDIO_FORMAT,
+                // Sem termos, o `prompt` nem aparece: a sessão fica igual à de antes.
+                transcription: {
+                  model: TRANSCRIBE_MODEL,
+                  language: config.language.split("-")[0],
+                  ...(config.vocabulary && config.vocabulary.length > 0 && { prompt: transcriptionPrompt(config.vocabulary) }),
+                },
+                // Ambiente `normal` ou ausente: a sessão fica igual à de antes.
+                ...(config.listeningEnvironment === "noisy"
+                  ? NOISY_INPUT
+                  : { turn_detection: { type: "server_vad", create_response: true, interrupt_response: true } }),
+              },
+              output: { format: AUDIO_FORMAT, voice: config.voiceId ?? DEFAULT_VOICE },
             },
-            // Ambiente `normal` ou ausente: a sessão fica igual à de antes.
-            ...(config.listeningEnvironment === "noisy"
-              ? NOISY_INPUT
-              : { turn_detection: { type: "server_vad", create_response: true, interrupt_response: true } }),
+            tools,
           },
-          output: { format: AUDIO_FORMAT, voice: config.voiceId ?? DEFAULT_VOICE },
-        },
-        tools: config.tools.map((tool) => ({ type: "function", ...tool })),
-      },
     });
     await awaitSessionReady(ready, socket, { label: "OpenAI Realtime", emitter, timeout: options });
 
     const session: VoiceSession = {
       on: (event, handler) => emitter.on(event, handler),
       sendAudio(pcm16_8k) {
+        sentMs += pcm16_8k.length / PCM16_BYTES_PER_MS;
         socket.send({ type: "input_audio_buffer.append", audio: pcm16ToUlaw(pcm16_8k).toString("base64") });
       },
       sendToolResult(id, result) {
@@ -517,6 +591,11 @@ const engine: VoiceEngine = {
           type: "conversation.item.create",
           item: { type: "function_call_output", call_id: id, output: JSON.stringify(result ?? null) },
         });
+        requestResponse({});
+      },
+      sendUserText(text) {
+        if (closed) return;
+        socket.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
         requestResponse({});
       },
       say(text) {
@@ -529,12 +608,13 @@ const engine: VoiceEngine = {
         // curso), ele só está lento: o `commit` de buffer vazio dá `error`, que soltaria a fila de
         // falas por cima da resposta, e o `response.create` enfileirado faria o agente falar duas vezes.
         // Não agiu (`false`): a resposta que vier não foi forçada, e conta na latência por turno.
-        if (responseActive || unansweredItems.size > 0) return false;
+        if (answering()) return false;
         // Fecha o que quem ligou disse num item e pede a resposta: o servidor não viu o fim da fala.
         socket.send({ type: "input_audio_buffer.commit" });
         requestResponse({});
         return true;
       },
+      answering,
       played(ms) {
         if (closed) return;
         // O primeiro item que não tocou inteiro é onde a fala foi cortada; o que veio antes já tocou.

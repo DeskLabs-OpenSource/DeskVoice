@@ -27,18 +27,21 @@ function fakeTime() {
   };
 }
 
-function scene() {
+function scene(language = "pt-BR") {
   const time = fakeTime();
   const log: string[] = [];
   const reports: CallerUnanswered[] = [];
+  const provider = { answering: false };
   const guard = createSilenceGuard({
     clock: time.clock,
     schedule: time.schedule,
+    language,
     closeCallerTurn: () => log.push("close"),
     say: (text) => log.push(`say:${text}`),
+    answering: () => provider.answering,
     acted: (report) => reports.push(report),
   });
-  return { time, log, reports, guard };
+  return { time, log, reports, guard, provider };
 }
 
 describe("guarda contra o silêncio", () => {
@@ -96,7 +99,7 @@ describe("guarda contra o silêncio", () => {
     time.advance(AFTER_CLOSE_MS - 1);
     expect(log).toEqual(["close"]);
     time.advance(1);
-    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT}`]);
+    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT["pt-BR"]}`]);
     expect(reports[1]).toEqual({ action: "asked_to_repeat", waitedMs: AFTER_WORDS_MS + AFTER_CLOSE_MS, words: true });
     expect(time.pending()).toBe(0);
   });
@@ -186,7 +189,7 @@ describe("guarda contra o silêncio", () => {
     const { time, log, guard } = scene();
     guard.callerActivity({ words: true });
     time.advance(AFTER_WORDS_MS + AFTER_CLOSE_MS);
-    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT}`]);
+    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT["pt-BR"]}`]);
     // Nada de quem ligou: a guarda não insiste, por mais que o silêncio dure.
     time.advance(10 * 60_000);
     expect(log).toHaveLength(2);
@@ -195,7 +198,7 @@ describe("guarda contra o silêncio", () => {
     // Só um sinal novo de quem ligou arma de novo.
     guard.callerActivity({ words: false });
     time.advance(WITHOUT_WORDS_MS + AFTER_CLOSE_MS);
-    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT}`, "close", `say:${ASK_TO_REPEAT}`]);
+    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT["pt-BR"]}`, "close", `say:${ASK_TO_REPEAT["pt-BR"]}`]);
   });
 
   it("início de fala sem texto depois do fechamento não impede o pedido para repetir", () => {
@@ -204,7 +207,51 @@ describe("guarda contra o silêncio", () => {
     time.advance(AFTER_WORDS_MS);
     guard.callerActivity({ words: false });
     time.advance(AFTER_CLOSE_MS);
-    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT}`]);
+    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT["pt-BR"]}`]);
+  });
+
+  it("o provedor já responde quando vence o prazo depois do fechamento: não pede para repetir (ligação real de 26/11)", () => {
+    // Pelo WhatsApp: "e aí, tudo bem?", o turno fechado à força, e quem ligou seguiu falando. O
+    // servidor viu o fim da segunda fala e já preparava a resposta quando o prazo venceu, e o pedido
+    // para repetir tocou logo depois da resposta certa.
+    const { time, log, guard, provider } = scene();
+    guard.callerActivity({ words: true });
+    time.advance(AFTER_WORDS_MS);
+    provider.answering = true;
+    time.advance(AFTER_CLOSE_MS);
+    expect(log).toEqual(["close"]);
+    guard.agentAudio(4000);
+    time.advance(60_000);
+    expect(log).toEqual(["close"]);
+    expect(time.pending()).toBe(0);
+  });
+
+  it("o provedor diz que responde e o áudio não chega: pede para repetir depois de um prazo a mais, e não espera para sempre", () => {
+    // Um `response.create` recusado com um item fechado deixa o motor dizendo que responde.
+    const { time, log, reports, guard, provider } = scene();
+    provider.answering = true;
+    guard.callerActivity({ words: true });
+    time.advance(AFTER_WORDS_MS + AFTER_CLOSE_MS);
+    expect(log).toEqual(["close"]);
+    time.advance(AFTER_CLOSE_MS);
+    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT["pt-BR"]}`]);
+    expect(reports.at(-1)).toEqual({ action: "asked_to_repeat", waitedMs: AFTER_WORDS_MS + AFTER_CLOSE_MS * 2, words: true });
+    time.advance(10 * 60_000);
+    expect(log).toHaveLength(2);
+    expect(time.pending()).toBe(0);
+  });
+
+  it("o prazo a mais vale uma vez por fechamento: o turno seguinte espera de novo", () => {
+    const { time, log, guard, provider } = scene();
+    provider.answering = true;
+    guard.callerActivity({ words: true });
+    time.advance(AFTER_WORDS_MS + AFTER_CLOSE_MS * 2);
+    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT["pt-BR"]}`]);
+    guard.callerActivity({ words: true });
+    time.advance(AFTER_WORDS_MS + AFTER_CLOSE_MS);
+    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT["pt-BR"]}`, "close"]);
+    time.advance(AFTER_CLOSE_MS);
+    expect(log).toEqual(["close", `say:${ASK_TO_REPEAT["pt-BR"]}`, "close", `say:${ASK_TO_REPEAT["pt-BR"]}`]);
   });
 
   it("texto novo depois do fechamento: quem ligou seguiu falando, e a guarda não fala por cima", () => {
@@ -246,5 +293,23 @@ describe("guarda contra o silêncio", () => {
     guard.agentAudio(1000);
     guard.agentInterrupted();
     expect(guard.openTurn()).toBeNull();
+  });
+});
+
+describe("o pedido para repetir no idioma do agente (DESA-517)", () => {
+  const askedIn = (language: string): string[] => {
+    const { time, log, guard } = scene(language);
+    guard.callerActivity({ words: true });
+    time.advance(AFTER_WORDS_MS);
+    time.advance(AFTER_CLOSE_MS);
+    return log;
+  };
+
+  it("en-US e es-MX pedem no idioma; pt-BR e um idioma que as falas não têm (fr) pedem o texto de sempre", () => {
+    expect(askedIn("en-US")).toEqual(["close", "say:Sorry, there's a lot of noise on the line. Could you repeat that, please?"]);
+    expect(askedIn("es-MX")).toEqual(["close", `say:${ASK_TO_REPEAT.es}`]);
+    const today = ["close", "say:Desculpe, a linha está com bastante barulho. Pode repetir, por favor?"];
+    expect(askedIn("pt-BR")).toEqual(today);
+    expect(askedIn("fr")).toEqual(today);
   });
 });
