@@ -2,7 +2,7 @@ import type { McpDictionary } from "../pt-BR/mcp";
 
 const mcp: McpDictionary = {
   title: "Servidores de herramientas (MCP)",
-  lead: "Un servidor MCP ofrece herramientas que los agentes pueden usar durante la llamada. DeskVoice guarda una foto de lo que el servidor ofrece, y solo vale lo que marques aquí. Una herramienta que cambia en el servidor vuelve desmarcada.",
+  lead: "Un servidor MCP ofrece herramientas para los agentes. Por ahora, la llamada todavía no se las ofrece al agente: lo que marques aquí y en la pantalla del agente queda guardado para cuando lo haga. DeskVoice guarda una foto de lo que el servidor ofrece, y solo vale lo que marques aquí. Una herramienta que cambia en el servidor vuelve desmarcada.",
   empty: "Ningún servidor registrado.",
   add: "Registrar servidor",
   slug: "Identificador",
