@@ -109,6 +109,19 @@ export async function startFakeWacalls() {
     for await (const chunk of incoming) raw += String(chunk);
     return raw === "" ? undefined : JSON.parse(raw);
   };
+  /** Espera `ms`, ou menos, se a conexão fechar antes: o cliente desistiu (ou o falso parou). */
+  const hang = (response: ServerResponse, ms: number): Promise<"waited" | "client gave up"> =>
+    new Promise((resolve) => {
+      const gaveUp = (): void => {
+        clearTimeout(timer);
+        resolve("client gave up");
+      };
+      const timer = setTimeout(() => {
+        response.off("close", gaveUp);
+        resolve("waited");
+      }, ms);
+      response.once("close", gaveUp);
+    });
   const json = (response: ServerResponse, status: number, body: unknown): void => {
     response.writeHead(status, { "content-type": "application/json" });
     response.end(JSON.stringify(body));
@@ -119,7 +132,9 @@ export async function startFakeWacalls() {
       const url = new URL(request.url ?? "/", "http://wacalls");
       const method = request.method ?? "GET";
       requests.push({ method, path: url.pathname, query: url.search, authorization: request.headers.authorization });
-      if (state.hangMs > 0) await new Promise((resolve) => setTimeout(resolve, state.hangMs));
+      // O cliente que estoura o limite dele fecha a conexão no meio da espera. Aí não há a quem
+      // responder, e ler o corpo de uma requisição abortada rejeita com `aborted` (ECONNRESET).
+      if (state.hangMs > 0 && (await hang(response, state.hangMs)) === "client gave up") return;
       if (state.down) return json(response, 503, { error: "down" });
       if (url.pathname === "/healthz") return json(response, 200, { ok: true });
       if (request.headers.authorization !== `Bearer ${WACALLS_TOKEN}`) return json(response, 401, { error: "unauthorized" });
