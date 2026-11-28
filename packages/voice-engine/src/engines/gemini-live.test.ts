@@ -190,9 +190,12 @@ describe("gemini-live (contrato com servidor falso)", () => {
     fake.send({ serverContent: { modelTurn: { parts: [{ inlineData: { data: pcm, mimeType: "audio/pcm;rate=24000" } }] } } });
     fake.send({ serverContent: { turnComplete: true } });
     // Terminada a resposta, a fala nova volta a marcar.
-    const next = nextEvent(session, "callerTurnEnded");
     fake.send({ serverContent: { inputTranscription: { text: "obrigado" } } });
-    await next;
+    // Espera a última mensagem do socket, e não o próximo marco: as de cima podem chegar em pedaços
+    // separados (sob carga), e o próximo marco seria o de "quero ", com a lista ainda pela metade.
+    const last = nextEvent(session, "interrupted");
+    fake.send({ serverContent: { interrupted: true } });
+    await last;
     // Quem mede fica com o último marco antes do áudio (o de "remarcar"): o de "quero " é substituído.
     expect(marks).toEqual(["marco transcript", "marco transcript", "áudio", "áudio", "marco transcript"]);
   });

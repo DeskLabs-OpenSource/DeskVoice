@@ -58,14 +58,17 @@ const agents = {
   /** O pipeline no campo do motor (fatia 5b-1): listado, desligado, com o motivo. */
   enginePipeline: "Pipeline (desligado)",
   enginePipelineOn: "Pipeline",
-  enginePipelineReady: "Pronto nesta organização: a transcrição e a chave dela estão aqui. A escolha das peças pela tela chega numa versão seguinte; até lá, ela é gravada pela API do agente (campo pipeline).",
-  enginePipelineOff: { no_live_transcriber: "Falta uma transcrição em tempo real neste servidor. Ela chega com a medida da R12.", no_transcriber_key: "Falta a chave que a transcrição usa nesta organização: a da OpenAI usa a chave do motor OpenAI Realtime, em Configurações → Inteligência artificial." } as Record<string, string>,
+  enginePipelineReady: "Pronto nesta organização: a transcrição, o cérebro e a voz estão aqui. Escolha o Pipeline e as peças no bloco Pipeline, e salve.",
+  enginePipelineOff: { no_live_transcriber: "Falta uma transcrição em tempo real neste servidor. Ela chega com a medida da R12.", no_transcriber_key: "Falta a chave que a transcrição usa nesta organização: a da OpenAI usa a chave do motor OpenAI Realtime, em Configurações → Inteligência artificial.", transcriber_unconfirmed: "Falta confirmar o envio do áudio para a transcrição, no bloco Pipeline abaixo.", no_brain: "Falta um cérebro que conversa, com a chave aceita, em Configurações → Cérebros.", no_voice: "Falta uma voz com a chave salva e o envio confirmado, em Configurações → Voz." } as Record<string, string>,
   enginePipelineOffUnknown: "Ainda desligado nesta versão.",
-  /** O bloco "Pipeline" (fatia 5b-1): as três peças, só para ver e ouvir; nada é salvo daqui. */
+  /** O bloco "Pipeline" (fatias 5b-1 e 6b): as três peças; com o Pipeline no campo Motor, a escolha vai no salvar do agente. */
   pipeline: "Pipeline",
-  pipelineLead: "Transcrição, cérebro e voz escolhidos à parte. As escolhas deste bloco ainda não são salvas no agente: só a confirmação do envio do áudio é gravada daqui.",
+  pipelineLead: "Transcrição, cérebro e voz escolhidos à parte. Com o Pipeline no campo Motor, estas escolhas são salvas no agente; com outro motor, ficam só na tela.",
   pipelineReadOnly: "Só quem configura a organização vê as peças do Pipeline.",
   pipelineTranscriber: "Transcrição",
+  pipelineTranscriberChoice: "Transcrição usada",
+  /** A transcrição de hoje é provisória (decisão B da DESA-398): junto da escolha e no campo Motor. */
+  pipelineTranscriberProvisional: "Transcrição provisória: a definitiva vem com a medida da transcrição.",
   pipelineTranscriberNone: "Nenhuma transcrição em tempo real neste servidor.",
   pipelineTranscriberNotice: "O áudio da pessoa na ligação vai para a {provider}.",
   pipelineTranscriberUnconfirmed: "Envio ainda não confirmado: o pipeline com esta transcrição não abre sem a confirmação.",
@@ -75,6 +78,8 @@ const agents = {
   pipelineTranscriberRemoveAsk: "Apagar a confirmação do envio para a {provider}? O pipeline com esta transcrição deixa de abrir.",
   pipelineTranscriberKeep: "Manter",
   pipelineBrain: "Cérebro",
+  pipelineStoredGone: "{piece} (gravada no agente, fora da lista)",
+  pipelineStoredGoneHint: "A peça gravada no agente saiu da lista (confirmação apagada, chave que deixou de estar aceita ou modelo sem preço). As ligações pelo Pipeline são recusadas até você escolher outra e salvar.",
   pipelineBrainHint: "Só os cérebros que conversam, com a chave aceita.",
   pipelineBrainNone: "Nenhum cérebro que conversa tem chave aceita. Cadastre um em Configurações → Cérebros.",
   pipelineBrainsLink: "Configurações → Cérebros",
@@ -85,10 +90,13 @@ const agents = {
   /** `{provider}` é o nome do fornecedor da voz. */
   pipelineVoiceNoKey: "Sem chave da {provider} salva. Cadastre a chave em",
   pipelineVoiceLink: "Configurações → Voz",
-  pipelineVoicesNote: "As vozes da sua conta aparecem aqui, mas só falam numa ligação quando o Pipeline ligar.",
+  pipelineVoicesNote: "As vozes da sua conta aparecem aqui. Marque a que o agente usa no Pipeline e ouça a amostra antes.",
   pipelineVoiceNoSample: "sem amostra",
   /** `{voice}` é o nome da voz. */
   pipelineVoiceListen: "Ouvir a amostra de {voice}",
+  pipelineVoiceUse: "Usar {voice} no Pipeline",
+  /** A peça que falta escolher, dita ao salvar com o Motor no Pipeline (fatia 6b). */
+  pipelineMissingPiece: { transcriber: "Escolha a transcrição do Pipeline antes de salvar.", brain: "Escolha o cérebro do Pipeline antes de salvar.", model: "Escolha um modelo com preço para o cérebro do Pipeline antes de salvar.", voice: "Marque a voz do Pipeline antes de salvar." },
   pipelineVoiceSampleFailed: "A amostra não tocou: o navegador recusou ou o fornecedor não respondeu.",
   /** `{who}` é quem confirmou; `{when}`, a data e a hora. */
   /** A latência medida do pipeline neste agente (fatia 5c): a mediana do `pipeline_turn_latency`. */
@@ -150,6 +158,8 @@ const agents = {
   callerIdleGuardHint: "Depois de 10 segundos em silêncio, o agente pergunta se a pessoa ainda está na linha e, 10 segundos depois, pergunta de novo. Mais 8 segundos sem resposta, ele se despede e encerra. Qualquer som da pessoa volta a contagem ao zero. Desligada, o agente não pergunta, e a ligação calada segue até a duração máxima.",
   maxMinutes: "Duração máxima, em minutos",
   costCeiling: "Teto de custo, em dólares",
+  costCeilingHint: "Zero é \"sem teto\": este agente não põe teto de custo por ligação. Um teto de outro agente por onde a ligação passou continua valendo. Um valor que arredonda para US$ 0,00, como 0,004, também é zero.",
+  costCeilingNone: "Com este valor, o agente fica sem teto de custo por ligação.",
   enabledLabel: "Agente ligado",
   enabledHint: "Desligado, o agente não atende, e as chamadas para os números dele são recusadas com aviso.",
   delete: "Apagar agente",
@@ -172,6 +182,9 @@ const agents = {
   dropFollowUpTask: "Abrir uma pendência para alguém retornar",
   dropFollowUpOther: "Outro modo, gravado fora desta tela",
   dropFollowUpWhatsApp: "Mandar uma mensagem no WhatsApp para quem ligou",
+  dropFollowUpCrm: "Mandar uma mensagem para quem ligou, pelo canal {channel} do CRM",
+  dropFollowUpCrmRule: "Mandar uma mensagem para quem ligou, pelo canal que o CRM escolher",
+  dropFollowUpCrmRisk: "A mensagem sai pelo canal do CRM e escreve primeiro para um número que pode nunca ter falado com esse canal. Se o canal é um número de WhatsApp, isso pode levar a restrição ou bloqueio do número.",
   dropFollowUpWhatsAppUnavailable: "indisponível",
   dropFollowUpCallBack: "Ligar de volta",
   dropFollowUpCallBackHow: "1 tentativa, 30 minutos depois, dentro do horário das ligações de saída.",
@@ -186,6 +199,16 @@ const agents = {
   dropFollowUpMessageWarning: "O texto vai para o número que ligou, e esse número pode não ser de quem ligou: alguém pode usar o número de outra pessoa, ou ligar de um fixo atendido por outra. Não escreva nada da conversa: nem nome, nem assunto, nem horário. O texto sai como está, sem trocar nada: diga nele o nome da empresa. Vazio, vale o texto padrão, que aparece no campo e já leva o nome da organização.",
   dropFollowUpMessageLimits: "No máximo uma mensagem por número a cada 24 horas, e a lista de não ligar vale para ela. Um teto de mensagens por organização protege o número: no máximo {perHour} por hora e {perDay} a cada 24 horas. Se a mensagem não puder sair, abre uma pendência para alguém retornar.",
   dropFollowUpDefinition: "Conta como queda quando o sistema falha, quando quem ligou fica alguns segundos sem resposta e desliga, quando ouve o agente pedir para repetir e desliga sem voltar a falar, ou quando a linha cai durante uma ação do agente. Quem desliga depois de se despedir, ou enquanto o agente fala, não conta.",
+  /** As abas da tela do agente (desenho 2026-11-26, fatia 1). */
+  tabsLabel: "Configuração de {name}",
+  tabs: { agente: "Agente", ferramentas: "Ferramentas", depois: "Depois da ligação", testes: "Testes", avancado: "Avançado" },
+  unsavedChanges: "Há mudanças não salvas.",
+  unsavedGoTo: "Voltar para {tab}",
+  organizationSettings: "O que vale para a organização",
+  organizationSettingsLead: "Estas configurações também mudam o que este agente faz, mas valem para todos os agentes. Elas ficam em Configurações.",
+  organizationPrivacy: "Privacidade e dados",
+  organizationRecording: "Aviso de gravação",
+  organizationWebhooks: "Webhooks",
 };
 
 export default agents;

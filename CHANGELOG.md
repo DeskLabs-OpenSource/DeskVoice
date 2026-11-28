@@ -3,6 +3,29 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.52.0] - 2026-11-27
+
+### Adicionado
+
+- **No pipeline, o "aham" e o "sim" de quem ligou não cortam mais a resposta do agente** Quem ligou costuma dizer "aham", "sim" ou "tá" enquanto o agente do pipeline fala, só para mostrar que está ouvindo. Antes, qualquer texto novo cortava a resposta no meio. Agora, enquanto a voz ainda gera a resposta do agente, o trecho que só tem palavras de concordância do idioma do agente (português, inglês ou espanhol) não corta: ele entra na transcrição e vai ao cérebro no próximo pedido. Basta uma palavra de fora, como "não", "mas" ou "espera", para o agente parar como antes. Idioma sem lista segue cortando em tudo. O fim da fala fica de fora: depois que a voz termina de gerar a resposta, o áudio ainda toca para quem ligou, e um "aham" dito ali vira turno, como antes, e o agente responde a ele. A lista é uma primeira versão: quantas concordâncias ainda cortam, quantas interrupções ela engole e quanto dura o fim da fala não foram medidos, e as listas de inglês e espanhol não foram revistas por falante nativo. Só vale para o motor Pipeline: os outros motores seguem como eram, e quem já instalou não precisa fazer nada. Crédito: @melgarafael.
+
+### Alterado
+
+- **A tela do agente passa a ter abas por função, e os testes do agente viram uma das abas** A tela do agente, que era uma página só com tudo junto, agora tem cinco abas: Agente, Ferramentas, Depois da ligação, Testes e Avançado. Nenhum campo some e nenhum dado muda: os campos só mudam de lugar, e continua havendo um formulário só, com um Salvar só no rodapé. Onde estava e onde está: Identidade, Conversa, Vocabulário, Voz, Pipeline e "Cérebros deste agente" ficam na aba Agente, na mesma ordem, e o idioma sai do painel Voz e vai para a Identidade; Ferramentas, Transferência, "Passar a ligação" e o Analista ao vivo vão para a aba Ferramentas; Pendências (o dono, "Quando a ligação cai" e a mensagem do WhatsApp) vai para Depois da ligação; Limites (minutos, teto de custo e "ainda está aí?") vai para Avançado, ao lado de links para Privacidade, Aviso de gravação e Webhooks, que valem para a organização inteira; e o link "Testes do agente" do topo dá lugar à aba Testes. Trocar de aba não salva nada e não perde nada. A aba fica no endereço (`?aba=depois`, por exemplo), então dá para copiar o link de uma aba. Se um campo obrigatório de outra aba estiver vazio, o Salvar abre a aba dele e mostra o campo. O endereço antigo dos testes (`/agents/<id>/tests`) continua abrindo, já na aba Testes. Ali o Salvar do agente some, porque os testes têm os botões deles, e uma linha avisa quando há mudança no agente ainda não salva. Quem já instalou não precisa fazer nada. Crédito: @melgarafael.
+
+### Corrigido
+
+- **A confirmação do aviso de faixa sobreposta passa pela auditoria** Quando alguém salva, depois do aviso, uma linha cuja faixa cruza a de outra organização, a auditoria
+  da instalação passa a registrar quem salvou e em qual organização, como já registrava a pergunta. A
+  confirmação também conta no limite de conferências por minuto da organização. Nada a configurar.
+  Crédito: @melgarafael.
+
+## [0.51.0] - 2026-11-27
+
+### Adicionado
+
+- **O Pipeline e a voz da ElevenLabs passam a ser escolhidos e salvos pela tela do agente** Na tela do agente, o campo Motor passa a oferecer o Pipeline quando a organização tem as três peças prontas: a transcrição com a chave e o envio do áudio confirmado, um cérebro que conversa com a chave aceita, e uma voz com a chave e o envio confirmado. Se falta uma delas, o Pipeline aparece desligado, com a linha que diz qual peça falta e onde resolver. No bloco Pipeline, você escolhe a transcrição, o cérebro e o modelo, e marca a voz da sua conta da ElevenLabs, depois de ouvir a amostra. Ao salvar, a escolha fica gravada no agente. Ao voltar para outro motor, o agente volta a usar o motor de antes. Se o servidor recusar a escolha (um modelo sem preço conhecido, um envio não confirmado), a tela diz qual peça e o que fazer. Se uma peça gravada no agente sai da lista (a confirmação apagada, a chave que deixou de ser aceita, o modelo que perdeu o preço), o bloco mostra a gravada marcada como fora da lista, e não outra no lugar dela, até você escolher outra e salvar. A tela também avisa que a transcrição da OpenAI é provisória: a definitiva vem com a medida da transcrição. Quem já instalou não precisa fazer nada, e nenhum agente muda sozinho: só passa a usar o Pipeline o agente em que alguém o escolher e salvar. Crédito: @melgarafael.
+
 ## [0.50.0] - 2026-11-26
 
 ### Adicionado

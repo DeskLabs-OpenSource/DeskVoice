@@ -27,6 +27,8 @@ test("Ligar de volta: desabilitada com o motivo e o link sem as ligações de sa
     const agentId = ((await created.json()) as { data: { id: string } }).data.id;
 
     await page.goto(`/agents/${agentId}`);
+    // "Quando a ligação cai" fica na aba Depois da ligação (desenho 2026-11-26, fatia 1).
+    await page.getByRole("tab", { name: agents.tabs.depois }).click();
     const field = page.getByRole("combobox", { name: agents.dropFollowUp });
     await expect(field).toHaveValue("off");
     const option = field.locator('option[value="call_back"]');
