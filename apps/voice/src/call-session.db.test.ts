@@ -234,6 +234,27 @@ describe("motor sem chave ao atender (Review Focus 2)", { timeout: 120_000 }, ()
     expect(manual.closed).toBe(1);
   });
 
+  it("ferramenta instalada mas não ligada para o agente, com texto gigante: o tool_called grava a marca com o tamanho, nenhum pedaço do texto", async () => {
+    const manual = manualEngine({ keyless: true });
+    const made = await scene("tool-called-too-long", { engine: "manual", tools: ["end_call"] }, manual);
+    const session = made.start();
+    await waitFor(() => manual.configs.length === 1, "the engine to connect");
+    const message = "a".repeat(200_000);
+    manual.emit("toolCall", { id: "t1", name: "notify_human", args: { message } });
+    await waitFor(() => manual.toolResults.length === 1, "the tool result");
+    expect(manual.toolResults[0]).toMatchObject({ id: "t1", result: { ok: false } });
+    expect((await eventsOf(app, made.callId)).find((event) => event.kind === "tool_called")?.payload).toEqual({
+      name: "notify_human",
+      args: { omitted: "too_long", chars: JSON.stringify({ message }).length },
+    });
+    const leaked = await withSystem(app, (q) =>
+      q.one<{ n: number }>("select count(*)::int as n from call_events where call_id = $1 and position(repeat('a', 4001) in payload::text) > 0", [made.callId]),
+    );
+    expect(leaked?.n).toBe(0);
+    made.transport.callerHangup();
+    await session.done;
+  });
+
   it("ferramentas de agenda sem cliente não chegam ao motor, mesmo marcadas; com o cliente, chegam e respondem", async () => {
     const agenda = ["agenda_horarios_livres", "agenda_marcar", "agenda_remarcar"];
     const unwired = manualEngine({ keyless: true });
