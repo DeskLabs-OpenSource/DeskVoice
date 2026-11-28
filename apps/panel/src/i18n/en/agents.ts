@@ -153,7 +153,7 @@ const agents: AgentsDictionary = {
   callerIdleGuardHint: "After 10 seconds of silence, the agent asks whether the caller is still on the line and, 10 seconds later, asks again. After 8 more seconds with no answer, it says goodbye and ends the call. Any sound from the caller resets the count. Turned off, the agent does not ask, and a silent call stays open until the maximum duration.",
   maxMinutes: "Maximum duration, in minutes",
   costCeiling: "Cost ceiling, in dollars",
-  costCeilingHint: "Zero means \"no ceiling\": the call only ends at the maximum duration. A value that rounds to US$ 0.00, such as 0.004, is also zero.",
+  costCeilingHint: "Zero means \"no ceiling\": this agent sets no cost ceiling per call. A ceiling from another agent the call went through still applies. A value that rounds to US$ 0.00, such as 0.004, is also zero.",
   costCeilingNone: "With this value, the agent has no cost ceiling per call.",
   enabledLabel: "Agent on",
   enabledHint: "When off, the agent does not answer, and calls to its numbers are refused with a notice.",
