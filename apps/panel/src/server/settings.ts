@@ -13,6 +13,7 @@ import {
   voicemailMaxSecondsSchema,
 } from "@deskvoice/core";
 import { z, type ZodType } from "zod";
+import { DESKCOMM_CHANNEL_LABEL_MAX } from "@deskvoice/tools/deskcomm-channel";
 import { WEBHOOK_EVENTS } from "@deskvoice/tools/webhook-events";
 import { WEBHOOK_DEFAULT_TIMEOUT_SECONDS, WEBHOOK_MAX_TIMEOUT_SECONDS, WEBHOOK_MIN_TIMEOUT_SECONDS } from "@deskvoice/tools/webhook-timeout";
 import type { VoiceEngine } from "@deskvoice/voice-engine";
@@ -142,7 +143,7 @@ const connectorInput = z
     token: z.string().trim().min(1).max(500).optional(),
     crmUrl: crmUrlSchema.optional(),
     channelSessionId: z.uuid().optional(),
-    channelLabel: z.string().trim().min(1).max(120).optional(),
+    channelLabel: z.string().trim().min(1).max(DESKCOMM_CHANNEL_LABEL_MAX).optional(),
   })
   .refine((value) => value.type === "deskcomm" || value.crmUrl === undefined, { message: "only the deskcomm connector takes a CRM address", path: ["crmUrl"] })
   .refine((value) => value.channelSessionId === undefined || value.crmUrl !== undefined, { message: "a CRM channel needs the CRM address", path: ["channelSessionId"] })
