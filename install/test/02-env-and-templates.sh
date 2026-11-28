@@ -95,8 +95,12 @@ mv "$D/asterisk/modules.conf.fora" "$D/asterisk/modules.conf"
 # O mesmo vale para o logger.conf: a versão anterior pode ser de antes dele.
 mv "$D/asterisk/logger.conf" "$D/asterisk/logger.conf.fora"
 ( source "$KIT/_common.sh"; render_asterisk_config ) >/dev/null 2>&1; equal "sem o modelo do logger.conf, a instalação falha" 1 "$?"
+# A ida já tinha anotado o logger.conf para recarregar: na volta ele sai da lista, e o resto fica.
+printf '%s\n' logger.conf rtp.conf > "$G/.reload-pending"
 ( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1; equal "sem o modelo do logger.conf, a volta segue" 0 "$?"
 refuse "... e o logger.conf gerado sai (o Compose da versão anterior não o monta)" test -e "$G/logger.conf"
+equal "... e sai da lista do que recarregar; o que mais estava nela fica" rtp.conf "$(cat "$G/.reload-pending")"
+rm -f "$G/.reload-pending"
 check "... e o modules.conf, que tem modelo, continua gerado" test -s "$G/modules.conf"
 mv "$D/asterisk/logger.conf.fora" "$D/asterisk/logger.conf"
 mv "$D/asterisk/rtp.conf.tmpl" "$D/asterisk/rtp.conf.tmpl.fora"
