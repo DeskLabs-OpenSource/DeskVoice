@@ -9,11 +9,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
-import { recordingPath, startSupportAccess, withOrg, withSystem } from "@deskvoice/core";
+import { encryptSecret, recordingPath, startSupportAccess, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { SUPPORT_SESSION_ROUTES, type SupportSessionRoute } from "../../../../../../fences/support-session-routes";
 import { SUPPORT_SESSION_FORBIDDEN, type RouteContext } from "../../../server/context";
 import { QR_PNG, startFakeWaha } from "../../../../../../packages/tools/test/fake-waha";
+import { fakeMcp, tool as mcpTool } from "../../../../../../packages/tools/test/mcp-server";
+import { MCP_SERVERS_KEY, mcpToolFingerprint } from "@deskvoice/tools";
 import { AGENT_TOKEN, NOW, PASSWORD, call, createCall, createOrganization, createUser, insert, startPanel, type Result } from "../../../../test/kit";
 import type { WhatsAppView } from "../../../server/whatsapp";
 import type { WhatsAppCallsView } from "../../../server/whatsapp-calls";
@@ -37,6 +39,16 @@ afterAll(async () => {
 });
 
 type Handler = (request: Request, context: RouteContext) => Promise<Response>;
+
+// O servidor MCP falso das linhas `mcp-servers/**`: o `admin` da equipe descobre, grava, busca de novo
+// e descadastra de verdade. Qualquer outro destino segue recusando a conexão, como antes.
+const MCP_URL = "https://mcp.example.test/mcp";
+const MCP_TOOL = mcpTool("consultar_pedido");
+const MCP_FINGERPRINT = mcpToolFingerprint({ name: MCP_TOOL.name, description: MCP_TOOL.description, inputSchema: MCP_TOOL.inputSchema });
+panel.voice.respond = (url, init) => {
+  if (url === MCP_URL) return fakeMcp({ pages: [[MCP_TOOL]] }).fetch(url, init);
+  throw new Error("connect ECONNREFUSED");
+};
 
 async function handlerOf(row: SupportSessionRoute): Promise<Handler> {
   // O caminho vem da tabela: o import com variável precisa do caminho inteiro.
@@ -83,6 +95,16 @@ async function scene(label: string) {
   const other = await createOrganization(panel.app, `Outra ${label}`);
   const trunk = await insert(panel.app, org, "insert into trunks (organization_id, name, host, auth_mode) values ($1, 'Operadora', '203.0.113.62', 'ip') returning id", [org]);
   const agent = await insert(panel.app, org, "insert into agents (organization_id, name, engine) values ($1, 'Recepção', 'simulated') returning id", [org]);
+  // Um servidor MCP gravado, para o `admin` gravar por cima, buscar de novo e descadastrar.
+  const mcpServer = {
+    slug: "erp",
+    label: "ERP",
+    url: MCP_URL,
+    secret: encryptSecret("Bearer s3cret", panel.deps.secretKey),
+    fetchedAt: NOW.toISOString(),
+    tools: [{ ...MCP_TOOL, fingerprint: MCP_FINGERPRINT, allowed: true, writes: true, needsApproval: false, supported: true }],
+  };
+  await withSystem(panel.app, (q) => q.exec("insert into settings (organization_id, key, value, secret) values ($1, $2, $3, true)", [org, MCP_SERVERS_KEY, JSON.stringify([mcpServer])]));
   return {
     org,
     other,
@@ -129,6 +151,10 @@ const REQUESTS: Record<string, (s: Scene) => Prepared> = {
   "POST agents": () => ({ params: {}, body: { name: "Vendas", engine: "simulated" }, works: true }),
   "PATCH agents/[id]": (s) => ({ params: { id: s.agent }, body: { name: "Recepção renomeada" }, works: true }),
   "PUT outbound-policy": () => ({ params: {}, body: { enabled: true, purpose: "Retorno a quem pediu", legalBasis: "Consentimento", dailyCapPerLine: 2000 }, works: true }),
+  "POST mcp-servers/discover": () => ({ params: {}, body: { url: MCP_URL, secret: "Bearer digitado" }, works: true }),
+  "PUT mcp-servers/[slug]": () => ({ params: { slug: "erp" }, body: { label: "ERP", url: MCP_URL, tools: [{ name: MCP_TOOL.name, fingerprint: MCP_FINGERPRINT, allowed: true }] }, works: true }),
+  "POST mcp-servers/[slug]/refresh": () => ({ params: { slug: "erp" }, works: true }),
+  "DELETE mcp-servers/[slug]": () => ({ params: { slug: "erp" }, body: { confirm: "erp" }, works: true }),
   "PUT settings/[key]": () => ({ params: { key: "whatsapp.connector" }, body: { value: { type: "webhook", url: "https://hooks.example.test/in", token: "hook-token" } }, works: true }),
 };
 
