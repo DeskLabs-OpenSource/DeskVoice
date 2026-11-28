@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import agents from "../../src/i18n/pt-BR/agents";
+import approvals from "../../src/i18n/pt-BR/approvals";
 import commonEn from "../../src/i18n/en/common";
 import commonEs from "../../src/i18n/es/common";
 import { LOCALE_COOKIE } from "../../src/i18n/locales";
@@ -178,6 +179,57 @@ test("direto em /line#ligacao-pelo-whatsapp, com as leituras de cima atrasadas e
   // Como quem abre o link guardado: a página carrega do zero, já com o endereço do bloco.
   await page.goto("/line#ligacao-pelo-whatsapp");
   await expectAnchorShownAfterReads(page);
+});
+
+/**
+ * Uma aprovação pendente, que mostra a faixa "esperando esta resposta" acima da página inteira (fora
+ * do `main`), com prazo de um minuto depois da hora fixa do relógio da página. Só a tela vê: a faixa
+ * some quando o relógio passa do prazo.
+ */
+const BANNER_NOW = new Date("2030-05-10T12:00:00Z");
+const BANNER_EXPIRES_AT = "2030-05-10T12:01:00.000Z";
+
+async function showApprovalBanner(page: Page): Promise<void> {
+  await page.route("**/api/v1/approvals?status=pending", async (route) => {
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: [
+          {
+            id: fakeId(300),
+            callId: fakeId(301),
+            question: "Posso dar 10% de desconto no pacote?",
+            context: {},
+            status: "pending",
+            defaultOnTimeout: "denied",
+            expiresAt: BANNER_EXPIRES_AT,
+            decidedAt: null,
+            decidedByName: null,
+            from: "+5531999990000",
+            agentName: "Recepção",
+          },
+        ],
+      },
+    });
+  });
+}
+
+// A queda de 25/11 no CI (#574): a aprovação deixada por outro teste venceu logo depois da rolagem,
+// a faixa de cima sumiu, a página subiu 100 px e o título do bloco saiu da tela.
+test("direto em /line#ligacao-pelo-whatsapp, a faixa de aprovação some depois da rolagem: o bloco continua na tela", async ({ page }) => {
+  await page.clock.install({ time: BANNER_NOW });
+  await signIn(page);
+  await holdAboveReads(page);
+  await showApprovalBanner(page);
+  await page.goto("/line#ligacao-pelo-whatsapp");
+  const banner = page.getByText(approvals.bannerWaiting, { exact: true });
+  await expectAnchorShownAfterReads(page);
+  await expect(banner).toBeVisible();
+
+  // O prazo passa: a faixa sai do alto da página, e o que a pessoa está lendo não pode pular.
+  await page.clock.fastForward("02:00");
+  await expect(banner).toHaveCount(0);
+  await expect(page.locator("#ligacao-pelo-whatsapp").getByRole("heading", { name: whatsappCalls.title, exact: true })).toBeInViewport();
 });
 
 test("em /line sem endereço de bloco, com as mesmas leituras atrasadas e grandes: a página fica no topo, e o bloco da ligação pelo WhatsApp fora da tela", async ({ page }) => {
