@@ -188,7 +188,7 @@ describe("o desligar depois do \"pode repetir?\" (condição 2(c))", { timeout: 
     s.manual.emit("transcript", { speaker: "user", text: "Queria saber do meu pedido." });
     expect(harness?.timers.fire(AFTER_WORDS_MS)).toBe(1);
     expect(harness?.timers.fire(AFTER_CLOSE_MS)).toBe(1);
-    expect(s.manual.said).toContain(ASK_TO_REPEAT);
+    expect(s.manual.said).toContain(ASK_TO_REPEAT["pt-BR"]);
     await waitFor(async () => (await eventsOf(app, s.callId)).some((event) => event.kind === "caller_unanswered" && event.payload.action === "asked_to_repeat"), "the request to repeat");
     return s;
   };
@@ -207,7 +207,7 @@ describe("o desligar depois do \"pode repetir?\" (condição 2(c))", { timeout: 
     for (const waitMs of [0, 20_000]) {
       const s = await ask(`after-ask task ${waitMs}`, "task");
       // A transcrição do próprio pedido, se o motor gravar uma: a regra aceita no máximo uma.
-      s.manual.emit("transcript", { speaker: "agent", text: ASK_TO_REPEAT });
+      s.manual.emit("transcript", { speaker: "agent", text: ASK_TO_REPEAT["pt-BR"] });
       harness?.clock.advance(waitMs);
       const r = await hangUpAndReview(s);
       expect(r.ended).toMatchObject({ reason: "caller_hangup" });
@@ -232,7 +232,7 @@ describe("o desligar depois do \"pode repetir?\" (condição 2(c))", { timeout: 
 
   it("dois transcript_agent depois do pedido (o agente respondeu de fato): não abre nada", async () => {
     const s = await ask("after-ask answered", "task");
-    s.manual.emit("transcript", { speaker: "agent", text: ASK_TO_REPEAT });
+    s.manual.emit("transcript", { speaker: "agent", text: ASK_TO_REPEAT["pt-BR"] });
     s.manual.emit("transcript", { speaker: "agent", text: "Encontrei o seu pedido." });
     const r = await hangUpAndReview(s);
     expect(r.result).toBe("no_case");

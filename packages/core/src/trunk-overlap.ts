@@ -199,14 +199,15 @@ export async function trunkOverlapWarning(db: Db, secretKey: Buffer, organizatio
 /**
  * Grava na auditoria da instalação a conferência de faixa que achou linha a tirar do ar: a recusa
  * (`trunk_overlap_refused`, a tela pediu confirmação) ou a confirmação (`trunk_overlap_confirmed`,
- * a gravação seguiu mesmo assim). Roda numa transação própria (`withSystem`), fora da transação da
- * linha: o evento fica gravado mesmo com a resposta 409 e nada salvo. Leva só a organização e a
- * conta de quem tentou; o `payload` é vazio.
+ * a gravação seguiu mesmo assim). Grava também a organização que passou do número de conferências
+ * do dia (`trunk_overlap_many_checks`), uma vez por dia, com qualquer resposta. Roda numa
+ * transação própria (`withSystem`), fora da transação da linha: o evento fica gravado mesmo com a
+ * resposta 409 e nada salvo. Leva só a organização e a conta de quem tentou; o `payload` é vazio.
  */
 export async function recordTrunkOverlap(
   db: Db,
   at: Date,
-  kind: "trunk_overlap_refused" | "trunk_overlap_confirmed",
+  kind: "trunk_overlap_refused" | "trunk_overlap_confirmed" | "trunk_overlap_many_checks",
   organizationId: string,
   userId: string,
 ): Promise<void> {

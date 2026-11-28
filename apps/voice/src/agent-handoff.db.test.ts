@@ -722,9 +722,9 @@ describe("as corridas da troca de sessão (fatia 4d)", { timeout: 120_000 }, () 
       expect(h.timers.fire(delay)).toBe(0);
     }
     expect(first.callerTurnsClosed).toBe(0);
-    expect(first.said).not.toContain(ASK_TO_REPEAT);
+    expect(first.said).not.toContain(ASK_TO_REPEAT["pt-BR"]);
     expect(second.callerTurnsClosed).toBe(0);
-    expect(second.said).not.toContain(ASK_TO_REPEAT);
+    expect(second.said).not.toContain(ASK_TO_REPEAT["pt-BR"]);
     expect(await kindsOf(app, callId)).not.toContain("caller_unanswered");
 
     // A guarda do trecho novo funciona, e age na sessão nova.
@@ -734,7 +734,7 @@ describe("as corridas da troca de sessão (fatia 4d)", { timeout: 120_000 }, () 
     expect(second.callerTurnsClosed).toBe(1);
     h.clock.advance(AFTER_CLOSE_MS);
     expect(h.timers.fire(AFTER_CLOSE_MS)).toBe(1);
-    expect(second.said).toEqual([ASK_TO_REPEAT]);
+    expect(second.said).toEqual([ASK_TO_REPEAT["pt-BR"]]);
     expect(first.callerTurnsClosed).toBe(0);
     expect(first.said).toEqual([]);
     await waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "caller_unanswered").length === 2, "the new guard's events");
@@ -840,6 +840,37 @@ describe("as corridas da troca de sessão (fatia 4d)", { timeout: 120_000 }, () 
   });
 });
 
+describe("as falas da guarda depois da passagem saem no idioma de quem recebe (DESA-517)", { timeout: 120_000 }, () => {
+  it("pt-BR → en-US: o \"ainda está aí?\" e o pedido para repetir do trecho novo saem em inglês", async () => {
+    const first = manualEngine({ id: "first", keyless: true });
+    const second = manualEngine({ id: "second", keyless: true });
+    const { ids, call, harness: h } = await team("handoff-guard-language", { Recepção: { engine: "first" }, Agendamento: { engine: "second", language: "en-US" } }, [first.engine, second.engine]);
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    await waitFor(async () => (await toolResults(callId)).length === 1, "the handoff tool to finish");
+
+    // O pedido para repetir da guarda contra o silêncio do trecho novo.
+    second.emit("callerActivity", { words: true });
+    h.clock.advance(AFTER_WORDS_MS);
+    expect(h.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    h.clock.advance(AFTER_CLOSE_MS);
+    expect(h.timers.fire(AFTER_CLOSE_MS)).toBe(1);
+    expect(second.said).toEqual([ASK_TO_REPEAT.en]);
+
+    // O "ainda está aí?" do trecho novo: o agente fala 20 ms, e quem ligou fica calado.
+    second.emit("audio", Buffer.alloc(320));
+    h.clock.advance(20 + IDLE_FIRST_MS);
+    expect(h.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
+    expect(second.said).toEqual([ASK_TO_REPEAT.en, "Are you still there?"]);
+    expect(first.said).toEqual([]);
+    transport.callerHangup();
+    await session.done;
+  });
+});
+
 // A chave do "ainda está aí?" é de cada agente (Vapi · fatia 9, decisão B; acompanhamento DESA-392): na
 // passagem, vale a do agente que está falando, e a guarda do anterior para.
 describe("o \"ainda está aí?\" na passagem, com as chaves diferentes", { timeout: 120_000 }, () => {
@@ -879,8 +910,8 @@ describe("o \"ainda está aí?\" na passagem, com as chaves diferentes", { timeo
     expect(h.timers.held()).not.toContain(20 + IDLE_FIRST_MS);
     quarentaSegundos(h);
     await new Promise((resolve) => setImmediate(resolve));
-    expect(first.said).not.toContain(IDLE_ASK);
-    expect(second.said).not.toContain(IDLE_ASK);
+    expect(first.said).not.toContain(IDLE_ASK["pt-BR"]);
+    expect(second.said).not.toContain(IDLE_ASK["pt-BR"]);
     expect(await kindsOf(app, callId)).not.toContain("caller_idle");
     expect((await callOf(app, callId)).status).toBe("in_progress");
     transport.callerHangup();
@@ -894,7 +925,7 @@ describe("o \"ainda está aí?\" na passagem, com as chaves diferentes", { timeo
     h.clock.advance(20 + IDLE_FIRST_MS);
     expect(h.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
     // A pergunta sai pela sessão do segundo, e só por ela.
-    expect(second.said.filter((text) => text === IDLE_ASK)).toHaveLength(1);
+    expect(second.said.filter((text) => text === IDLE_ASK["pt-BR"])).toHaveLength(1);
     await waitFor(async () => (await kindsOf(app, callId)).includes("caller_idle"), "the caller_idle event");
     expect(await payloadsOf(callId, "caller_idle")).toEqual([{ action: "asked", silentMs: IDLE_FIRST_MS }]);
     expect(first.closed).toBe(1);
