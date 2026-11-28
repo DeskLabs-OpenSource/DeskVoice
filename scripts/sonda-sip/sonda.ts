@@ -33,10 +33,12 @@ export interface ProbeAnswer {
   callId?: string;
 }
 
-/** Um OPTIONS que a central mandou para cá (a qualificação), e a quem respondemos 200. */
+/** Um pedido que a central mandou para cá: a qualificação (OPTIONS, respondida com 200) ou um REGISTER. */
 export interface SeenRequest {
   method: string;
   from: { address: string; port: number };
+  /** O parâmetro `line` do Contact, quando há: o que a central usa para reconhecer a linha por registro. */
+  line?: string;
 }
 
 const CRLF = "\r\n";
@@ -110,20 +112,24 @@ export class SipProbe {
     return new Promise((resolve) => this.socket.close(() => resolve()));
   }
 
-  /** Manda um OPTIONS a `target:port`, apresentando-se como `user`, e espera a resposta final. */
-  async options(target: string, options: { port?: number; user?: string; timeoutMs?: number } = {}): Promise<ProbeAnswer> {
+  /**
+   * Manda um OPTIONS a `target:port`, apresentando-se como `user`, e espera a resposta final. Com
+   * `line`, o pedido leva o parâmetro `line` do registro de uma linha, como a operadora o devolve.
+   */
+  async options(target: string, options: { port?: number; user?: string; line?: string; timeoutMs?: number } = {}): Promise<ProbeAnswer> {
     const port = options.port ?? 5060;
     const user = options.user ?? "sonda";
+    const lineParam = options.line === undefined ? "" : `;line=${options.line}`;
     const callId = `${token()}@deskvoice-sonda`;
     const local = hostPart(this.local.address);
     // `rport` no Via: a central devolve `received` e `rport` com o que viu (RFC 3581), mesmo quando
     // o endereço é o mesmo que escrevemos aqui.
     const request = [
-      `OPTIONS sip:${hostPart(target)}:${port} SIP/2.0`,
+      `OPTIONS sip:${hostPart(target)}:${port}${lineParam} SIP/2.0`,
       `Via: SIP/2.0/UDP ${local}:${this.local.port};branch=z9hG4bK${token()};rport`,
       "Max-Forwards: 70",
       `From: <sip:${user}@${local}>;tag=${token()}`,
-      `To: <sip:${hostPart(target)}:${port}>`,
+      `To: <sip:${hostPart(target)}:${port}${lineParam}>`,
       `Call-ID: ${callId}`,
       "CSeq: 1 OPTIONS",
       `Contact: <sip:${user}@${local}:${this.local.port}>`,
@@ -167,7 +173,8 @@ export class SipProbe {
       return;
     }
     const method = startLine.split(" ")[0] ?? "";
-    this.seen.push({ method, from: { address: remote.address, port: remote.port } });
+    const line = /;line=([^;>\s]+)/.exec(headers.get("contact")?.[0] ?? "")?.[1];
+    this.seen.push({ method, from: { address: remote.address, port: remote.port }, ...(line === undefined ? {} : { line }) });
     if (method !== "OPTIONS") return;
     // Responde 200 com os cabeçalhos que identificam a transação, como o RFC 3261 pede.
     const copy = (name: string, label: string): string[] => (headers.get(name) ?? []).map((value) => `${label}: ${value}`);
