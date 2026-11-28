@@ -2,7 +2,7 @@
 // agente (item 8, fatia 8b).
 const mcp = {
   title: "Servidores de ferramentas (MCP)",
-  lead: "Um servidor MCP oferece ferramentas que os agentes podem usar durante a ligação. O DeskVoice guarda um retrato do que o servidor oferece, e só vale o que você marcar aqui. Ferramenta que muda no servidor volta desmarcada.",
+  lead: "Um servidor MCP oferece ferramentas para os agentes. Por enquanto, a ligação ainda não as oferece ao agente: o que você marca aqui e na tela do agente fica gravado para quando ela oferecer. O DeskVoice guarda um retrato do que o servidor oferece, e só vale o que você marcar aqui. Ferramenta que muda no servidor volta desmarcada.",
   empty: "Nenhum servidor cadastrado.",
   add: "Cadastrar servidor",
   slug: "Identificador",

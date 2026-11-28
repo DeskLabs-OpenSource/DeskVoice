@@ -2,7 +2,7 @@ import type { McpDictionary } from "../pt-BR/mcp";
 
 const mcp: McpDictionary = {
   title: "Tool servers (MCP)",
-  lead: "An MCP server offers tools that agents can use during a call. DeskVoice keeps a snapshot of what the server offers, and only what you tick here counts. A tool that changes on the server comes back unticked.",
+  lead: "An MCP server offers tools for the agents. For now, calls do not offer them to the agent yet: what you tick here and on the agent screen is saved for when they do. DeskVoice keeps a snapshot of what the server offers, and only what you tick here counts. A tool that changes on the server comes back unticked.",
   empty: "No server registered.",
   add: "Register server",
   slug: "Identifier",
