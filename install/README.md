@@ -299,7 +299,15 @@ partida, e mudado ele sempre reinicia o Asterisk.
 
 A linha "Log do Asterisk" mede a pasta de log dentro do contêiner do Asterisk. O Asterisk do
 DeskVoice escreve o log só na saída do contêiner, que o Docker limita (10 MB por arquivo, cinco
-arquivos), e que se lê com `docker compose -f deploy/docker-compose.yml logs asterisk`. As
+arquivos), e que se lê com `docker compose -f deploy/docker-compose.yml logs asterisk`. Esse log
+guarda a partida do Asterisk, o caminho de cada ligação, os avisos (WARNING) e os erros (ERROR);
+os NOTICE ficam de fora. Ele guarda cerca de sete semanas (medido sem ligações); cada ligação
+soma, e com muito movimento cabe menos. No `ok`, a linha diz desde quando o log da sua instalação
+guarda. Para guardar mais tempo, copie o log para um arquivo antes que ele saia
+(`docker compose -f deploy/docker-compose.yml logs -t asterisk > asterisk-$(date +%F).log`), ou
+dê ao serviço `asterisk` de `deploy/docker-compose.yml` um `logging` próprio, com `max-size` e
+`max-file` maiores (hoje ele usa o teto comum aos serviços), sabendo que a atualização sobrescreve
+esse arquivo e volta ao teto padrão. As
 versões sem o `deploy/asterisk/logger.conf` também gravavam `/var/log/asterisk/messages.log`, sem
 limite: numa
 instalação, o arquivo passou de 20 GB. A atualização não apaga esse arquivo (é dado seu); passando

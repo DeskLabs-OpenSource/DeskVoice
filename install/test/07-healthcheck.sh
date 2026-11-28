@@ -19,6 +19,20 @@ lacks "não resume tudo num ok" "$out" "tudo ok"
 # comando que a esvazia, e nunca derruba a checagem; medida de dentro do contêiner.
 contains "log do Asterisk pequeno é ok" "$(line 'Log do Asterisk')" "ok "
 contains "... e diz o tamanho" "$(line 'Log do Asterisk')" "3 MB em /var/log/asterisk"
+# Desde quando o log guarda: o carimbo da primeira linha do `docker logs -t` do contêiner. Sem ele
+# (nada lido, ou uma linha sem carimbo), o ok fica como estava: nunca vira aviso nem falha.
+lacks "sem o log com carimbo, o ok não diz desde quando" "$(line 'Log do Asterisk')" "guarda desde"
+contains "... e segue ok, com teto" "$(line 'Log do Asterisk')" "ok "
+printf '%s\n' '2026-11-21T12:00:00.123456789Z   == Parsing /etc/asterisk/asterisk.conf' '2026-11-22T08:30:00.000000000Z     -- Executing [s@entrada:1]' > "$FAKE_DIR/asterisk_logs_t"
+: > "$FAKE_DIR/calls.log"; out="$(bash "$H" 2>&1)"
+contains "com o log, o ok diz desde quando guarda (a primeira linha)" "$(line 'Log do Asterisk')" "com teto, e guarda desde 2026-11-21 12:00 UTC"
+contains "... lido do contêiner do Asterisk" "$(cat "$FAKE_DIR/calls.log")" "logs -t cid-asterisk"
+contains "... e segue ok" "$(line 'Log do Asterisk')" "ok "
+printf '%s\n' 'Error response from daemon: configured logging driver does not support reading' > "$FAKE_DIR/asterisk_logs_t"
+out="$(bash "$H" 2>&1)"
+lacks "linha sem carimbo: o ok não diz desde quando" "$(line 'Log do Asterisk')" "guarda desde"
+contains "... e segue ok" "$(line 'Log do Asterisk')" "ok "
+rm -f "$FAKE_DIR/asterisk_logs_t"; out="$(bash "$H" 2>&1)"
 check "o log é medido de dentro do contêiner do Asterisk" grep -q "exec -T asterisk du -sm /var/log/asterisk" "$FAKE_DIR/calls.log"
 echo 1023 > "$FAKE_DIR/asterisk_log_mb"
 contains "log do Asterisk logo abaixo de 1 GB ainda é ok" "$(bash "$H" 2>&1 | grep 'Log do Asterisk')" "ok "
@@ -234,6 +248,11 @@ printf '%s\n' '[Nov 21 12:00:01] ERROR[1]: pjproject: <?>: Assert failed: !"Too 
 out="$(bash "$H" 2>&1)"; equal "só o log com o estouro: código 1" 1 "$?"
 contains "só o log com o estouro é falha e diz o porquê" "$(sip)" 'o log da partida atual tem "Too many modules registered"'
 lacks "só o log com o estouro: nenhum módulo citado como parado" "$(sip)" "parados"
+# A linha só acha o estouro se o nível em que ele sai ainda vai para o console (o logger.conf corta
+# níveis da saída do contêiner): o nível da linha acima tem de estar no console do repositório.
+overflow_level="$(sed -n 's/^\[[^]]*\] \([A-Z]*\)\[.*/\1/p' "$FAKE_DIR/asterisk_logs" | tr 'A-Z' 'a-z')"
+equal "o estouro sai em ERROR" error "$overflow_level"
+contains "o nível do estouro continua no console do logger.conf" ",$(sed -n 's/^console => //p' "$REPO/deploy/asterisk/logger.conf")," ",$overflow_level,"
 rm "$FAKE_DIR/asterisk_logs"
 # Sem a hora de partida, o log não é lido (uma partida antiga não pode reprovar a de agora).
 printf '' > "$FAKE_DIR/asterisk_started"; : > "$FAKE_DIR/calls.log"
