@@ -1,5 +1,5 @@
 ---
-impact: nothing_changes
+impact: new_capability
 section: added
 title: Configurações → Integrações ganha a seção dos servidores de ferramentas (MCP), ainda sem uso na ligação
 ---
