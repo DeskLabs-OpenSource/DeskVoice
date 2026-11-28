@@ -140,10 +140,15 @@ Eles existem para o caso ruim: uma ligação que fica aberta, alguém que resolv
 hora com o agente, um defeito. Ajuste os dois para o tamanho normal do seu atendimento, com
 folga.
 
+Teto de custo **zero** quer dizer "sem teto": a chamada só termina pela duração máxima. Um
+valor que arredonda para US$ 0,00, como 0,004, também vira zero. A tela do agente diz isso embaixo
+do campo, e avisa em destaque quando o valor digitado deixa o agente sem teto.
+
 Esses dois limites valem por chamada. Para o gasto somado, a organização tem um limite de
 **ligações recebidas ao mesmo tempo**, em Configurações → Ligações: de 1 a 50, e 5 de fábrica. Acima dele,
 quem liga recebe sinal de ocupado antes de qualquer gasto com IA, e a recusa aparece em Chamadas
 com o motivo. O pior caso de gasto simultâneo passa a ser o teto por chamada vezes esse limite.
+Essa conta não vale para agente com teto zero, que não tem teto por chamada.
 Chamadas pelo navegador têm um limite próprio, de 3 por organização, e as ligações feitas pelo
 agente têm o teto diário de Ligações de saída.
 
